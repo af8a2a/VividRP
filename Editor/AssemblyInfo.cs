@@ -6,3 +6,4 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("Unity.Testing.SRP.Universal-Upgrade.Editor")]
 [assembly: InternalsVisibleTo("Unity.GraphicTests.Performance.Universal.Editor")]
 [assembly: InternalsVisibleTo("Unity.VisualEffectGraph.EditorTests")]
+[assembly: InternalsVisibleTo("URP_Extension")]

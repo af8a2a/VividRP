@@ -357,6 +357,14 @@ namespace UnityEngine.Rendering.Universal
 
         [SerializeField] internal TemporalAA.Settings m_TaaSettings = TemporalAA.Settings.Create();
 
+        #region Extension
+
+        /// <summary>Copy from HDCamera, Enable to retain history buffers even if the camera is disabled.</summary>
+        public bool hasPersistentHistory = false;
+
+        #endregion
+
+
         /// <summary>
         /// The serialized version of the class. Used for upgrading.
         /// </summary>

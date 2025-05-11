@@ -533,7 +533,7 @@ namespace UnityEngine.Rendering.Universal
             cmd.SetGlobalMatrix(ShaderPropertyId.cameraToWorldMatrix, cameraToWorldMatrix);
         }
 
-        private static RenderTextureDescriptor GetTemporaryShadowTextureDescriptor(int width, int height, int bits)
+        internal static RenderTextureDescriptor GetTemporaryShadowTextureDescriptor(int width, int height, int bits)
         {
             var format = Experimental.Rendering.GraphicsFormatUtility.GetDepthStencilFormat(bits, 0);
             RenderTextureDescriptor rtd = new RenderTextureDescriptor(width, height, Experimental.Rendering.GraphicsFormat.None, format);

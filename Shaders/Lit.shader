@@ -435,7 +435,6 @@ Shader "Universal Render Pipeline/Lit"
             // Includes
             #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Shaders/LitMetaPass.hlsl"
-
             ENDHLSL
         }
 
@@ -478,7 +477,10 @@ Shader "Universal Render Pipeline/Lit"
         Pass
         {
             Name "MotionVectors"
-            Tags { "LightMode" = "MotionVectors" }
+            Tags
+            {
+                "LightMode" = "MotionVectors"
+            }
             ColorMask RG
 
             HLSLPROGRAM
@@ -494,7 +496,10 @@ Shader "Universal Render Pipeline/Lit"
         Pass
         {
             Name "XRMotionVectors"
-            Tags { "LightMode" = "XRMotionVectors" }
+            Tags
+            {
+                "LightMode" = "XRMotionVectors"
+            }
             ColorMask RGBA
 
             // Stencil write for obj motion pixels
@@ -516,6 +521,70 @@ Shader "Universal Render Pipeline/Lit"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/ObjectMotionVectors.hlsl"
             ENDHLSL
         }
+
+
+        Pass
+        {
+            Name "CharacterMask"
+            Tags
+            {
+                "LightMode" = "CharacterMask"
+            }
+
+            // -------------------------------------
+            // Render State Commands
+            ZWrite On
+            ColorMask R
+            Cull[_Cull]
+
+            HLSLPROGRAM
+            #pragma target 2.0
+
+            half _Enable;
+            
+            // -------------------------------------
+            // Shader Stages
+            #pragma vertex DepthOnlyVertex
+            #pragma fragment CharacterMaskFragment
+
+            // -------------------------------------
+            // Material Keywords
+            #pragma shader_feature_local _ALPHATEST_ON
+            #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+
+            // -------------------------------------
+            // Unity defined keywords
+            #pragma multi_compile _ LOD_FADE_CROSSFADE
+            
+            
+            //--------------------------------------
+            // GPU Instancing
+            #pragma multi_compile_instancing
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
+
+            // -------------------------------------
+            // Includes
+            #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Shaders/DepthOnlyPass.hlsl"
+
+            half CharacterMaskFragment(Varyings input) : SV_TARGET
+            {
+                UNITY_SETUP_INSTANCE_ID(input);
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+
+                #if defined(_ALPHATEST_ON)
+        Alpha(SampleAlbedoAlpha(input.uv, TEXTURE2D_ARGS(_BaseMap, sampler_BaseMap)).a, _BaseColor, _Cutoff);
+                #endif
+
+                #if defined(LOD_FADE_CROSSFADE)
+        LODFadeCrossFade(input.positionCS);
+                #endif
+
+                return _Enable;
+            }
+            ENDHLSL
+        }
+
     }
 
     FallBack "Hidden/Universal Render Pipeline/FallbackError"

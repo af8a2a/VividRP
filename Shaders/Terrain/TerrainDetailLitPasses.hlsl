@@ -1,7 +1,7 @@
 
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/UnityGBuffer.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/GBufferOutput.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/DebugMipmapStreamingMacros.hlsl"
 
 struct Attributes
@@ -159,7 +159,8 @@ Varyings TerrainLitVertex(Attributes input)
         diffuseColor += LightingLambert(attenuatedLightColor, mainLight.direction, NormalWS);
     }
 
-    #if defined(_ADDITIONAL_LIGHTS) || defined(_ADDITIONAL_LIGHTS_VERTEX)
+    // Adding !defined(USE_CLUSTER_LIGHT_LOOP): in Forward+ we can't possibly get the light list in a vertex shader.
+    #if (defined(_ADDITIONAL_LIGHTS) || defined(_ADDITIONAL_LIGHTS_VERTEX)) && !defined(USE_CLUSTER_LIGHT_LOOP)
     if (IsLightingFeatureEnabled(DEBUGLIGHTINGFEATUREFLAGS_ADDITIONAL_LIGHTS))
     {
         int pixelLightCount = GetAdditionalLightsCount();
@@ -197,7 +198,7 @@ half4 TerrainLitForwardFragment(Varyings input) : SV_Target
     return color;
 }
 
-FragmentOutput TerrainLitGBufferFragment(Varyings input)
+GBufferFragOutput TerrainLitGBufferFragment(Varyings input)
 {
     UNITY_SETUP_INSTANCE_ID(input);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
@@ -210,5 +211,5 @@ FragmentOutput TerrainLitGBufferFragment(Varyings input)
     InitializeSurfaceData(tex.rgb, tex.a, surfaceData);
     half4 color = UniversalTerrainLit(inputData, tex.rgb, tex.a);
 
-    return SurfaceDataToGbuffer(surfaceData, inputData, color.rgb, kLightingInvalid);
+    return PackGBuffersSurfaceData(surfaceData, inputData, color.rgb);
 }

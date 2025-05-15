@@ -159,11 +159,17 @@ namespace UnityEditor.Rendering.Universal
 
         private static bool HasCorrectLightingModes(UniversalRenderPipelineAsset asset)
         {
+            // Only the URP rendering paths using the cluster light loop (F+ lights & probes) can be used with GRD,
+            // since BiRP-style per-object lights and reflection probes are incompatible with DOTS instancing.
             foreach (var rendererData in asset.m_RendererDataList)
             {
-                if (rendererData is not UniversalRendererData { renderingMode: RenderingMode.ForwardPlus })
+                if (rendererData is not UniversalRendererData universalRendererData)
+                    return false;
+
+                if (!universalRendererData.usesClusterLightLoop)
                     return false;
             }
+
             return true;
         }
 
@@ -210,9 +216,19 @@ namespace UnityEditor.Rendering.Universal
                     EditorGUILayout.HelpBox(Styles.stpMobilePlatformWarning, MessageType.Warning, true);
                 }
             }
+
             EditorGUILayout.PropertyField(serialized.enableLODCrossFadeProp, Styles.enableLODCrossFadeText);
             EditorGUI.BeginDisabledGroup(!serialized.enableLODCrossFadeProp.boolValue);
             EditorGUILayout.PropertyField(serialized.lodCrossFadeDitheringTypeProp, Styles.lodCrossFadeDitheringTypeText);
+            if (serialized.asset.enableLODCrossFade && serialized.asset.lodCrossFadeDitheringType == LODCrossFadeDitheringType.Stencil)
+            {
+                var rendererData = serialized.asset.m_RendererDataList[serialized.asset.m_DefaultRendererIndex];
+                if (rendererData is UniversalRendererData && ((UniversalRendererData)rendererData).defaultStencilState.overrideStencilState)
+                {
+                    EditorGUILayout.HelpBox(Styles.stencilLodCrossFadeWarningMessage.text, MessageType.Warning, true);
+                }
+            }
+
             EditorGUI.EndDisabledGroup();
         }
 
@@ -335,7 +351,20 @@ namespace UnityEditor.Rendering.Universal
             EditorGUILayout.LabelField(Styles.reflectionProbesSettingsText);
             EditorGUI.indentLevel++;
             EditorGUILayout.PropertyField(serialized.reflectionProbeBlendingProp, Styles.reflectionProbeBlendingText);
+            EditorGUI.indentLevel++;
+            EditorGUI.BeginDisabledGroup(!serialized.reflectionProbeBlendingProp.boolValue);
+            EditorGUILayout.PropertyField(serialized.reflectionProbeAtlasProp, Styles.reflectionProbeAtlasText);
+            EditorGUI.EndDisabledGroup();
+            // Disable probeAtlas when probeBlending is off.
+            if (!serialized.reflectionProbeBlendingProp.boolValue)
+                serialized.reflectionProbeAtlasProp.boolValue = false;
+            else if ((GPUResidentDrawerMode)serialized.gpuResidentDrawerMode.intValue != GPUResidentDrawerMode.Disabled && !serialized.reflectionProbeAtlasProp.boolValue)
+                EditorGUILayout.HelpBox(Styles.reflectionProbeAtlasGpuResidentDrawerWarningText.text, MessageType.Warning, true);
+
+            EditorGUI.indentLevel--;
+
             EditorGUILayout.PropertyField(serialized.reflectionProbeBoxProjectionProp, Styles.reflectionProbeBoxProjectionText);
+
             EditorGUI.indentLevel--;
         }
 

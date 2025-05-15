@@ -16,13 +16,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [17.0.3] - 2025-02-13
 
-This version is compatible with Unity 6000.0.39f1.
+This version is compatible with Unity 6000.2.0a1.
 
 ### Added
+- `SetViewAndProjectionMatrices()` helper function is available within a RasterRenderPass in RenderGraph.
 - RenderPipelineManager callbacks are raised from UniversalRenderPipeline.SingleCameraRequest.
 - SetViewAndProjectionMatrices() helper function is available within a RasterRenderPass in RenderGraph.
 
 ### Changed
+- Added the ability to turn Reflection Probe Atlas on or off for Universal Render Pipeline (URP) Forward+ renderers, regardless of blending.
+- Improved Depth usage performance for some platforms.
 - Updated the RenderGraph samples to use the new helper functions to reduce boilerplate code.
 - Changed the URP render pass names for consistency in the RenderGraph viewer, the Profiler, and the frame debugger.
 - Sprite Default Material - Moved to Graphics Settings, Sprite Settings from Renderer2DData.
@@ -32,6 +35,42 @@ This version is compatible with Unity 6000.0.39f1.
 - In the Render Graph Viewer, you can now open the tool when the compatibility mode is enabled.
 
 ### Fixed
+- Fixed a warning, "Missing types referenced from component UniversalRenderPipelineGlobalSettings..." which was caused by the URP Template project on platforms where ENABLE_VR is not defined.
+- Fixed invalid viewport for post-process when using camera stacking with render scale.
+- Fixed invalid alpha output for scaling setup shader when using camera stacking with render scale on URP compatibility path.
+- Fixed incorrectly bright pixels by clamping alpha after additive blending to 0-1 range in post-processing when using camera stacking with render scale.
+- Fixed black pixels (NaN) in Lens Distort post-processing effect.
+- Fixed post-process FSR upscaling and _ScreenParams for stacked Overlay cameras.
+- Remove "AssertionException The RenderTextureDescriptor used to create a TextureDesc contains both graphicsFormat and depthStencilFormat".
+- Optimized finalblit pass load operation bandwidth cost for XR.
+- Fixed a redundant empty line in a tooltip for Cast Shadows toggle in the URP Asset for Additional lights.
+- Fixed an issue where WorldToCamera matrix wasn't set before rendering shadows.
+- Fixed spamming errors and broken visual when resizing GameView with Free Aspect in DepthBlit sample.
+- Fixed an issue where Forward Plus lighting in URP was causing rendering artifacts.
+- Fixed an issue where Game View would flip upside down when using HDR Debug Mode.
+- Removed 'implicit truncation of vector type' warnings at URP ScreenSpaceAmbientOcclusion.shader.
+- Fixed a depth texture format used for URP 2D RenderPass with Android devices issue.
+- Fixed the CameraDepthAttachment turning black for DX11.
+- Fixed an issue where Transparent Receive Shadows setting didn't work for custom shaders.
+- Modified final depth copy logic to read from depth attachment instead of depth texture to avoid errors when depth texture isn't available
+- Fixed an issue where SS Shadow coord transform was missing from TransformWorldToShadowCoord.
+- Fixed sorting the Reflection Probe by resolution.
+- Fixed issue with URP lights where the Culling Mask property was ignored for shadow casters when using the GPU Resident Drawer.
+- Fixed an issue with the viewport of stacked cameras in post-processing.
+- Fixed an issue where creating a light and then undoing the action displayed a warning in the console.
+- Fixed an issue where the Shadowmask mode didn't take Shadows > Shadow Type > Realtime Shadows > Strength setting into account.
+- Fixed an issue where SoftShadowsHigh global shader keyword is not initialized properly.
+- Fixed an issue where disabling *Strip Unused Variants* and *Strip Unused Post Processing Variants* still stripped out various keywords in builds.
+- Fixed an issue with aliased shadows when using the medium or high soft shadow settings.
+- Fixed an issue where variants were being stripped out in Scriptable Stripping when *Strip Unused Variants* was disabled.
+- Fixed a URP RenderGraph case with multisample anti-aliasing (MSAA) and camera stacking on the Windows Player.
+- Fixed an issue where undoing the creation of a GameObject didn't remove the GameObject when it had focus in the Editor.
+- Fixed an issue where the preview for URP overlay cameras didn't render the correct view. An explicit message now explains that previewing is not possible for these cameras.
+- Fixed an unclear error message that appeared when updating the volume stack before the Universal Render Pipeline was created.
+- Fixed an issue where pressing the Ctrl key in the Scene view while using URP caused a depth texture format exception.
+- Fixed light cookie texture memory leak when entering Playmode.
+- Fix continuous error printing in URP Samples when assigned pipeline asset is not correct
+- Fixed an issue where blending DBuffer decal normals could causes NaNs.
 - Fixed the Preview Camera drawing grid that appears on top of preview mesh with URP Render Graph when depth priming is active.
 - Fixed a broken setting related to the Shadow rendering layer that wasn't changing shadow when using `shadowRenderingLayers` in the script.
 - Fixed Native Render Pass to render `RenderTextureDescriptor` with the correct dimensions when the render scale is not equal to one.

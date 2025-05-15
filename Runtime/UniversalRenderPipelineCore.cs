@@ -219,6 +219,11 @@ namespace UnityEngine.Rendering.Universal
         public ref bool reflectionProbeBlending => ref frameData.Get<UniversalLightData>().reflectionProbeBlending;
 
         /// <summary>
+        /// True if reflection probes are combined into a single atlas texture.
+        /// </summary>
+        public ref bool reflectionProbeAtlas => ref frameData.Get<UniversalLightData>().reflectionProbeAtlas;
+
+        /// <summary>
         /// True if light layers are enabled.
         /// </summary>
         public ref bool supportsLightLayers => ref frameData.Get<UniversalLightData>().supportsLightLayers;
@@ -943,10 +948,11 @@ namespace UnityEngine.Rendering.Universal
         public static GlobalKeyword CastingPunctualLightShadow;
         public static GlobalKeyword AdditionalLightsVertex;
         public static GlobalKeyword AdditionalLightsPixel;
-        public static GlobalKeyword ForwardPlus;
+        public static GlobalKeyword ClusterLightLoop;
         public static GlobalKeyword AdditionalLightShadows;
         public static GlobalKeyword ReflectionProbeBoxProjection;
         public static GlobalKeyword ReflectionProbeBlending;
+        public static GlobalKeyword ReflectionProbeAtlas;
         public static GlobalKeyword SoftShadows;
         public static GlobalKeyword SoftShadowsLow;
         public static GlobalKeyword SoftShadowsMedium;
@@ -1011,9 +1017,11 @@ namespace UnityEngine.Rendering.Universal
         public static GlobalKeyword EVALUATE_SH_VERTEX;
         public static GlobalKeyword ProbeVolumeL1;
         public static GlobalKeyword ProbeVolumeL2;
+        public static GlobalKeyword LIGHTMAP_BICUBIC_SAMPLING;
         public static GlobalKeyword _OUTPUT_DEPTH;
         public static GlobalKeyword LinearToSRGBConversion;
         public static GlobalKeyword _ENABLE_ALPHA_OUTPUT;
+        public static GlobalKeyword ForwardPlus; // Backward compatibility. Deprecated in 6.1.
 
         // TODO: Move following keywords to Local keywords?
         // https://docs.unity3d.com/ScriptReference/Rendering.LocalKeyword.html
@@ -1052,10 +1060,11 @@ namespace UnityEngine.Rendering.Universal
             ShaderGlobalKeywords.CastingPunctualLightShadow = GlobalKeyword.Create(ShaderKeywordStrings.CastingPunctualLightShadow);
             ShaderGlobalKeywords.AdditionalLightsVertex = GlobalKeyword.Create(ShaderKeywordStrings.AdditionalLightsVertex);
             ShaderGlobalKeywords.AdditionalLightsPixel = GlobalKeyword.Create(ShaderKeywordStrings.AdditionalLightsPixel);
-            ShaderGlobalKeywords.ForwardPlus = GlobalKeyword.Create(ShaderKeywordStrings.ForwardPlus);
+            ShaderGlobalKeywords.ClusterLightLoop = GlobalKeyword.Create(ShaderKeywordStrings.ClusterLightLoop);
             ShaderGlobalKeywords.AdditionalLightShadows = GlobalKeyword.Create(ShaderKeywordStrings.AdditionalLightShadows);
             ShaderGlobalKeywords.ReflectionProbeBoxProjection = GlobalKeyword.Create(ShaderKeywordStrings.ReflectionProbeBoxProjection);
             ShaderGlobalKeywords.ReflectionProbeBlending = GlobalKeyword.Create(ShaderKeywordStrings.ReflectionProbeBlending);
+            ShaderGlobalKeywords.ReflectionProbeAtlas = GlobalKeyword.Create(ShaderKeywordStrings.ReflectionProbeAtlas);
             ShaderGlobalKeywords.SoftShadows = GlobalKeyword.Create(ShaderKeywordStrings.SoftShadows);
             ShaderGlobalKeywords.SoftShadowsLow = GlobalKeyword.Create(ShaderKeywordStrings.SoftShadowsLow);
             ShaderGlobalKeywords.SoftShadowsMedium = GlobalKeyword.Create(ShaderKeywordStrings.SoftShadowsMedium);
@@ -1120,9 +1129,11 @@ namespace UnityEngine.Rendering.Universal
             ShaderGlobalKeywords.EVALUATE_SH_VERTEX = GlobalKeyword.Create(ShaderKeywordStrings.EVALUATE_SH_VERTEX);
             ShaderGlobalKeywords.ProbeVolumeL1 = GlobalKeyword.Create(ShaderKeywordStrings.ProbeVolumeL1);
             ShaderGlobalKeywords.ProbeVolumeL2 = GlobalKeyword.Create(ShaderKeywordStrings.ProbeVolumeL2);
+            ShaderGlobalKeywords.LIGHTMAP_BICUBIC_SAMPLING = GlobalKeyword.Create(ShaderKeywordStrings.LIGHTMAP_BICUBIC_SAMPLING);
             ShaderGlobalKeywords._OUTPUT_DEPTH = GlobalKeyword.Create(ShaderKeywordStrings._OUTPUT_DEPTH);
             ShaderGlobalKeywords.LinearToSRGBConversion = GlobalKeyword.Create(ShaderKeywordStrings.LinearToSRGBConversion);
             ShaderGlobalKeywords._ENABLE_ALPHA_OUTPUT = GlobalKeyword.Create(ShaderKeywordStrings._ENABLE_ALPHA_OUTPUT);
+            ShaderGlobalKeywords.ForwardPlus = GlobalKeyword.Create(ShaderKeywordStrings.ForwardPlus); // Backward compatibility. Deprecated in 6.1.
         }
     }
 
@@ -1149,8 +1160,8 @@ namespace UnityEngine.Rendering.Universal
         /// <summary> Keyword used for per pixel additional lights. </summary>
         public const string AdditionalLightsPixel = "_ADDITIONAL_LIGHTS";
 
-        /// <summary> Keyword used for Forward+. </summary>
-        internal const string ForwardPlus = "_FORWARD_PLUS";
+        /// <summary> Keyword used for Forward+ & Deferred+. </summary>
+        internal const string ClusterLightLoop = "_CLUSTER_LIGHT_LOOP";
 
         /// <summary> Keyword used for shadows on additional lights. </summary>
         public const string AdditionalLightShadows = "_ADDITIONAL_LIGHT_SHADOWS";
@@ -1160,6 +1171,9 @@ namespace UnityEngine.Rendering.Universal
 
         /// <summary> Keyword used for Reflection probe blending. </summary>
         public const string ReflectionProbeBlending = "_REFLECTION_PROBE_BLENDING";
+
+        /// <summary> Keyword used for Reflection probe atlas. </summary>
+        public const string ReflectionProbeAtlas = "_REFLECTION_PROBE_ATLAS";
 
         /// <summary> Keyword used for soft shadows. </summary>
         public const string SoftShadows = "_SHADOWS_SOFT";
@@ -1431,6 +1445,9 @@ namespace UnityEngine.Rendering.Universal
         /// <summary> Keyword used for APV with SH L2 </summary>
         public const string ProbeVolumeL2 = "PROBE_VOLUMES_L2";
 
+        /// <summary> Keyword used for bicubic sampling of lightmaps. </summary>
+        public const string LIGHTMAP_BICUBIC_SAMPLING = "LIGHTMAP_BICUBIC_SAMPLING";
+
         /// <summary> Keyword used for opting out of lightmap texture arrays, when using BatchRendererGroup. </summary>
         public const string USE_LEGACY_LIGHTMAPS = "USE_LEGACY_LIGHTMAPS";
 
@@ -1439,6 +1456,9 @@ namespace UnityEngine.Rendering.Universal
 
         /// <summary> Keyword used for enable alpha output. Used in post processing. </summary>
         public const string _ENABLE_ALPHA_OUTPUT = "_ENABLE_ALPHA_OUTPUT";
+
+        /// <summary> Deprecated keyword. Use ClusterLightLoop instead. </summary>
+        internal const string ForwardPlus = "_FORWARD_PLUS"; // Backward compatibility. Deprecated in 6.1.
     }
 
     public sealed partial class UniversalRenderPipeline
@@ -1496,6 +1516,21 @@ namespace UnityEngine.Rendering.Universal
 
 #endif
 
+        /// <summary>
+        /// Returns the index of the last base camera to draw ScreenSpace Overlay UI at the last base camera.
+        /// </summary>
+        private int GetLastBaseCameraIndex(List<Camera> cameras)
+        {
+            int lastBaseCameraIndex = 0;
+            for (int i = 0; i < cameras.Count; i++)
+            {
+                cameras[i].TryGetComponent<UniversalAdditionalCameraData>(out var baseCameraAdditionalData);
+                if (baseCameraAdditionalData?.renderType == CameraRenderType.Base)
+                    lastBaseCameraIndex = i;
+            }
+            return lastBaseCameraIndex;
+        }
+
         internal static GraphicsFormat MakeRenderTextureGraphicsFormat(bool isHdrEnabled, HDRColorBufferPrecision requestHDRColorBufferPrecision, bool needsAlpha)
         {
             if (isHdrEnabled)
@@ -1535,14 +1570,22 @@ namespace UnityEngine.Rendering.Universal
             {
                 desc = new RenderTextureDescriptor(cameraData.scaledWidth, cameraData.scaledHeight);
                 desc.graphicsFormat = MakeRenderTextureGraphicsFormat(isHdrEnabled, requestHDRColorBufferPrecision, needsAlpha);
+                desc.depthBufferBits = (int)CoreUtils.GetDefaultDepthBufferBits();
                 desc.depthStencilFormat = SystemInfo.GetGraphicsFormat(DefaultFormat.DepthStencil);
                 desc.msaaSamples = msaaSamples;
                 desc.sRGB = (QualitySettings.activeColorSpace == ColorSpace.Linear);
             }
             else
             {
+                // Note: External texture replaces internal (intermediate) color buffer here, ignoring the configured internal rendering color buffer format.
+                // This is incorrect. We should use the internal rendering format throughout and blit the result to the external texture at the end (blit could be skipped if the formats match).
+                // However, this would lead to breaking changes in the URP asset as we would need to move the internal rendering format to the renderer asset.
+                // This way it could be selected separately for each target.
+                // Current workflow/workaround is to simply pick a suitable format for the external texture.
                 desc = camera.targetTexture.descriptor;
                 desc.msaaSamples = msaaSamples;
+                // Note: This does not scale the underlying target size.
+                // Instead, it is the scaled viewport rect size which means the viewport offset into the target is always (0,0).
                 desc.width = cameraData.scaledWidth;
                 desc.height = cameraData.scaledHeight;
 

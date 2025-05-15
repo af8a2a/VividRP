@@ -379,7 +379,11 @@ namespace UnityEngine.Rendering.Universal
         BayerMatrix,
 
         /// <summary>Unity uses the precomputed blue noise texture to compute the LOD cross-fade dithering.</summary>
-        BlueNoise
+        BlueNoise,
+
+        /// <summary>Unity uses stencil test to make 2x2 pixel dithering pattern by using 2 stencil bits (4 and 8). This option significantly decreases the number of the shader variants, while GPU performance cost becomes slightly higher.</summary>
+        [InspectorName("2x2 Stencil"), Tooltip("2x2 pixel dithering pattern by stencil test with 2 stencil bits (4 and 8). This option decreases the number of the shader variants.")]
+        Stencil
     }
 
     /// <summary>
@@ -480,6 +484,7 @@ namespace UnityEngine.Rendering.Universal
         [ShaderKeywordFilter.RemoveIf(false, keywordNames: ShaderKeywordStrings.LOD_FADE_CROSSFADE)]
 #endif
         [SerializeField] bool m_EnableLODCrossFade = true;
+
         [SerializeField] LODCrossFadeDitheringType m_LODCrossFadeDitheringType = LODCrossFadeDitheringType.BlueNoise;
 
         // ShEvalMode.Auto is handled in shader preprocessor.
@@ -532,6 +537,10 @@ namespace UnityEngine.Rendering.Universal
         [ShaderKeywordFilter.SelectOrRemove(true, keywordNames: ShaderKeywordStrings.ReflectionProbeBoxProjection)]
 #endif
         [SerializeField] bool m_ReflectionProbeBoxProjection = false;
+#if UNITY_EDITOR // multi_compile_fragment _ _REFLECTION_PROBE_ATLAS
+        [ShaderKeywordFilter.RemoveIf(false, keywordNames: ShaderKeywordStrings.ReflectionProbeAtlas)]
+#endif
+        [SerializeField] bool m_ReflectionProbeAtlas = true;
 
         // Shadows Settings
         [SerializeField] float m_ShadowDistance = 50.0f;
@@ -1361,6 +1370,15 @@ namespace UnityEngine.Rendering.Universal
         }
 
         /// <summary>
+        /// Specifies if this <c>UniversalRenderPipelineAsset</c> should use the reflection probe atlas for Forward Plus.
+        /// </summary>
+        public bool reflectionProbeAtlas
+        {
+            get => m_ReflectionProbeAtlas;
+            internal set => m_ReflectionProbeAtlas = value;
+        }
+
+        /// <summary>
         /// Controls the maximum distance at which shadows are visible.
         /// </summary>
         public float shadowDistance
@@ -1666,7 +1684,7 @@ namespace UnityEngine.Rendering.Universal
         static class Strings
         {
             public static readonly string notURPRenderer = $"{nameof(GPUResidentDrawer)} Disabled due to some configured Universal Renderers not being {nameof(UniversalRendererData)}.";
-            public static readonly string forwardPlusMissing = $"{nameof(GPUResidentDrawer)} Disabled due to some configured Universal Renderers not supporting Forward+.";
+            public static readonly string renderingModeIncompatible = $"{nameof(GPUResidentDrawer)} Disabled due to some configured Universal Renderers not using the Forward+ or Deferred+ rendering paths.";
         }
 
         /// <inheritdoc/>
@@ -1675,7 +1693,8 @@ namespace UnityEngine.Rendering.Universal
             message = string.Empty;
             severty = LogType.Warning;
 
-            // if any of the renderers are not set to Forward+ return false
+            // Only the URP rendering paths using the cluster light loop (F+ lights & probes) can be used with GRD,
+            // since BiRP-style per-object lights and reflection probes are incompatible with DOTS instancing.
             foreach (var rendererData in m_RendererDataList)
             {
                 if (rendererData is not UniversalRendererData universalRendererData)
@@ -1684,11 +1703,11 @@ namespace UnityEngine.Rendering.Universal
                     return false;
                 }
 
-                if (universalRendererData.renderingMode == RenderingMode.ForwardPlus)
-                    continue;
-
-                message = Strings.forwardPlusMissing;
-                return false;
+                if (!universalRendererData.usesClusterLightLoop)
+                {
+                    message = Strings.renderingModeIncompatible;
+                    return false;
+                }
             }
 
             return true;

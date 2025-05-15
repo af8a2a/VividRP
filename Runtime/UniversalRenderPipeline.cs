@@ -1,6 +1,7 @@
 using System;
 using Unity.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 #if UNITY_EDITOR
 using UnityEditor;
 using UnityEditor.Rendering.Universal;
@@ -151,6 +152,19 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
+#if UNITY_EDITOR
+        internal static bool UseDynamicBranchFogKeyword()
+        {
+            const string kMemberName = "k_UseDynamicBranchFogKeyword";
+            Type type = typeof(ShaderOptions);
+            MemberInfo[] memberInfo = type.GetMember(kMemberName);
+            if (memberInfo.Length == 0)
+                return false;
+            int value = (int)((FieldInfo)memberInfo[0]).GetValue(null);
+            return value == 1;
+        }
+#endif
+
         // Match with values in Input.hlsl
         internal static int lightsPerTile => ((maxVisibleAdditionalLights + 31) / 32) * 32;
         internal static int maxZBinWords => 1024 * 4;
@@ -196,9 +210,6 @@ namespace UnityEngine.Rendering.Universal
         // asset.
         private readonly UniversalRenderPipelineAsset pipelineAsset;
 
-        // Use to detect frame changes (for accurate frame count in editor, consider using hdCamera.GetCameraFrameCount)
-        int m_FrameCount;
-        
         /// <inheritdoc/>
         public override string ToString() => pipelineAsset?.ToString();
 
@@ -291,11 +302,16 @@ namespace UnityEngine.Rendering.Universal
 #pragma warning restore 618
                 });
             }
+
+            // Initializes only if VRS is supported.
+            Vrs.InitializeResources();
         }
 
         /// <inheritdoc/>
         protected override void Dispose(bool disposing)
         {
+            Vrs.DisposeResources();
+
             if (apvIsEnabled)
             {
                 ProbeReferenceVolume.instance.Cleanup();
@@ -405,33 +421,15 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
-#if UNITY_2021_1_OR_NEWER
-        /// <inheritdoc/>
-        protected override void Render(ScriptableRenderContext renderContext, Camera[] cameras)
-        {
-            Render(renderContext, new List<Camera>(cameras));
-        }
-
-#endif
-
-#if UNITY_2021_1_OR_NEWER
         /// <inheritdoc/>
         protected override void Render(ScriptableRenderContext renderContext, List<Camera> cameras)
-#else
-        /// <inheritdoc/>
-        protected override void Render(ScriptableRenderContext renderContext, Camera[] cameras)
-#endif
         {
             SetHDRState(cameras);
 
-#if UNITY_2021_1_OR_NEWER
             int cameraCount = cameras.Count;
-#else
-            int cameraCount = cameras.Length;
-#endif
             // For XR, HDR and no camera cases, UI Overlay ownership must be enforced
             AdjustUIOverlayOwnership(cameraCount);
-            
+
             // Bandwidth optimization with Render Graph in some circumstances
             SetupScreenMSAASamplesState(cameraCount);
 
@@ -463,16 +461,14 @@ namespace UnityEngine.Rendering.Universal
                 RTHandles.SetHardwareDynamicResolutionState(true);
 
                 SortCameras(cameras);
-#if UNITY_2021_1_OR_NEWER
-                for (int i = 0; i < cameras.Count; ++i)
-#else
-                for (int i = 0; i < cameras.Length; ++i)
-#endif
+                int lastBaseCameraIndex = GetLastBaseCameraIndex(cameras);
+                for (int i = 0; i < cameraCount; ++i)
                 {
                     var camera = cameras[i];
+                    bool isLastBaseCamera = i == lastBaseCameraIndex;
                     if (IsGameCamera(camera))
                     {
-                        RenderCameraStack(renderContext, camera);
+                        RenderCameraStack(renderContext, camera, isLastBaseCamera);
                     }
                     else
                     {
@@ -485,7 +481,7 @@ namespace UnityEngine.Rendering.Universal
 #endif
                             UpdateVolumeFramework(camera, null);
 
-                            RenderSingleCameraInternal(renderContext, camera);
+                            RenderSingleCameraInternal(renderContext, camera, isLastBaseCamera);
                         }
                     }
                 }
@@ -572,7 +568,7 @@ namespace UnityEngine.Rendering.Universal
 
                 if (standardRequest != null)
                 {
-                    Render(context, new Camera[] { camera });
+                    Render(context, new List<Camera>{ camera });
                 }
                 else
                 {
@@ -662,16 +658,16 @@ namespace UnityEngine.Rendering.Universal
             RenderSingleCameraInternal(context, camera);
         }
 
-        internal static void RenderSingleCameraInternal(ScriptableRenderContext context, Camera camera)
+        internal static void RenderSingleCameraInternal(ScriptableRenderContext context, Camera camera, bool isLastBaseCamera = true)
         {
             UniversalAdditionalCameraData additionalCameraData = null;
             if (IsGameCamera(camera))
                 camera.gameObject.TryGetComponent(out additionalCameraData);
 
-            RenderSingleCameraInternal(context, camera, ref additionalCameraData);
+            RenderSingleCameraInternal(context, camera, ref additionalCameraData, isLastBaseCamera);
         }
 
-        internal static void RenderSingleCameraInternal(ScriptableRenderContext context, Camera camera, ref UniversalAdditionalCameraData additionalCameraData)
+        internal static void RenderSingleCameraInternal(ScriptableRenderContext context, Camera camera, ref UniversalAdditionalCameraData additionalCameraData, bool isLastBaseCamera = true)
         {
             if (additionalCameraData != null && additionalCameraData.renderType != CameraRenderType.Base)
             {
@@ -687,7 +683,7 @@ namespace UnityEngine.Rendering.Universal
 
             var frameData = GetRenderer(camera, additionalCameraData).frameData;
             var cameraData = CreateCameraData(frameData, camera, additionalCameraData, true);
-            InitializeAdditionalCameraData(camera, additionalCameraData, true, cameraData);
+            InitializeAdditionalCameraData(camera, additionalCameraData, true, isLastBaseCamera, cameraData);
 #if ADAPTIVE_PERFORMANCE_2_0_0_OR_NEWER
             if (asset.useAdaptivePerformance)
                 ApplyAdaptivePerformance(cameraData);
@@ -842,17 +838,21 @@ namespace UnityEngine.Rendering.Universal
                 GPUResidentDrawer.PostCullBeginCameraRendering(new RenderRequestBatcherContext { commandBuffer = cmd });
 
                 var isForwardPlus = cameraData.renderer is UniversalRenderer { renderingModeActual: RenderingMode.ForwardPlus };
+                var isDeferredPlus = cameraData.renderer is UniversalRenderer { renderingModeActual: RenderingMode.DeferredPlus };
 
                 // Initialize all the data types required for rendering.
                 UniversalLightData lightData;
                 UniversalShadowData shadowData;
+                CullContextData cullData;
+
                 using (new ProfilingScope(Profiling.Pipeline.initializeRenderingData))
                 {
                     CreateUniversalResourceData(frameData);
-                    lightData = CreateLightData(frameData, asset, data.cullResults.visibleLights);
+                    lightData = CreateLightData(frameData, asset, data.cullResults.visibleLights, isDeferredPlus);
                     shadowData = CreateShadowData(frameData, asset, isForwardPlus);
                     CreatePostProcessingData(frameData, asset);
                     CreateRenderingData(frameData, asset, cmd, isForwardPlus, cameraData.renderer);
+                    cullData = CreateCullContextData(frameData, context);
                 }
 
                 RenderingData legacyRenderingData = new RenderingData(frameData);
@@ -923,8 +923,9 @@ namespace UnityEngine.Rendering.Universal
         /// The last camera resolves the final target to screen.
         /// </summary>
         /// <param name="context">Render context used to record commands during execution.</param>
-        /// <param name="camera">Camera to render.</param>
-        static void RenderCameraStack(ScriptableRenderContext context, Camera baseCamera)
+        /// <param name="baseCamera">Camera to render.</param>
+        /// <param name="isLastBaseCamera">True if this is the last base camera.</param>
+        static void RenderCameraStack(ScriptableRenderContext context, Camera baseCamera, bool isLastBaseCamera)
         {
             using var profScope = new ProfilingScope(ProfilingSampler.Get(URPProfileId.RenderCameraStack));
 
@@ -1024,8 +1025,14 @@ namespace UnityEngine.Rendering.Universal
                     UpdateCameraStereoMatrices(baseCamera, xrPass);
 
                     // Apply XR display's viewport scale to URP's dynamic resolution solution
-                    float xrViewportScale = XRSystem.GetRenderViewportScale();
-                    ScalableBufferManager.ResizeBuffers(xrViewportScale, xrViewportScale);
+                    float scaleToApply = XRSystem.GetRenderViewportScale();
+                    if (XRSystem.GetDynamicResolutionScale() < 1.0f)
+                    {
+                        // If XR dynamic resolution is enabled use the XRSystem dynamic resolution scale
+                        // Smaller than 1.0 renderViewport scale are not supported to have the best performance gain
+                        scaleToApply = XRSystem.GetDynamicResolutionScale();
+                    }
+                    ScalableBufferManager.ResizeBuffers(scaleToApply, scaleToApply);
                 }
 
                 bool finalOutputHDR = false;
@@ -1057,8 +1064,7 @@ namespace UnityEngine.Rendering.Universal
 #endif
                     // InitializeAdditionalCameraData needs to be initialized after the cameraTargetDescriptor is set because it needs to know the
                     // msaa level of cameraTargetDescriptor and XR modifications.
-                    InitializeAdditionalCameraData(baseCamera, baseCameraAdditionalData, !isStackedRendering,
-                        baseCameraData);
+                    InitializeAdditionalCameraData(baseCamera, baseCameraAdditionalData, !isStackedRendering, isLastBaseCamera, baseCameraData);
 
 #if VISUAL_EFFECT_GRAPH_0_0_1_OR_NEWER
                     //It should be called before culling to prepare material. When there isn't any VisualEffect component, this method has no effect.
@@ -1123,7 +1129,7 @@ namespace UnityEngine.Rendering.Universal
                             }
 #endif
 
-                            InitializeAdditionalCameraData(overlayCamera, overlayAdditionalCameraData, false, overlayCameraData);
+                            InitializeAdditionalCameraData(overlayCamera, overlayAdditionalCameraData, false, isLastBaseCamera, overlayCameraData);
                             overlayCameraData.camera = overlayCamera;
                             overlayCameraData.baseCamera = baseCamera;
 
@@ -1137,8 +1143,8 @@ namespace UnityEngine.Rendering.Universal
 #endif
                                 UpdateVolumeFramework(overlayCamera, overlayAdditionalCameraData);
 
-                                bool lastCamera = i == lastActiveOverlayCameraIndex;
-                                InitializeAdditionalCameraData(overlayCamera, overlayAdditionalCameraData, lastCamera, overlayCameraData);
+                                bool isLastOverlayCamera = i == lastActiveOverlayCameraIndex;
+                                InitializeAdditionalCameraData(overlayCamera, overlayAdditionalCameraData, isLastOverlayCamera, isLastBaseCamera, overlayCameraData);
 
                                 overlayCameraData.stackAnyPostProcessingEnabled = anyPostProcessingEnabled;
                                 overlayCameraData.stackLastCameraOutputToHDR = finalOutputHDR;
@@ -1478,8 +1484,9 @@ namespace UnityEngine.Rendering.Universal
         /// <param name="camera">Camera to initialize settings from.</param>
         /// <param name="additionalCameraData">Additional camera data component to initialize settings from.</param>
         /// <param name="resolveFinalTarget">True if this is the last camera in the stack and rendering should resolve to camera target.</param>
+        /// <param name="isLastBaseCamera">True if the base camera is the last base camera.</param>
         /// <param name="cameraData">Settings to be initilized.</param>
-        static void InitializeAdditionalCameraData(Camera camera, UniversalAdditionalCameraData additionalCameraData, bool resolveFinalTarget, UniversalCameraData cameraData)
+        static void InitializeAdditionalCameraData(Camera camera, UniversalAdditionalCameraData additionalCameraData, bool resolveFinalTarget, bool isLastBaseCamera, UniversalCameraData cameraData)
         {
             using var profScope = new ProfilingScope(Profiling.Pipeline.initializeAdditionalCameraData);
 
@@ -1529,6 +1536,7 @@ namespace UnityEngine.Rendering.Universal
             cameraData.renderer = renderer;
             cameraData.postProcessingRequiresDepthTexture = CheckPostProcessForDepth(cameraData);
             cameraData.resolveFinalTarget = resolveFinalTarget;
+            cameraData.isLastBaseCamera = isLastBaseCamera;
 
             // enable GPU occlusion culling in game and scene views only
             cameraData.useGPUOcclusionCulling = GPUResidentDrawer.IsInstanceOcclusionCullingEnabled()
@@ -1600,7 +1608,7 @@ namespace UnityEngine.Rendering.Universal
 
             UniversalRenderingData data = frameData.Get<UniversalRenderingData>();
             data.supportsDynamicBatching = settings.supportsDynamicBatching;
-            data.perObjectData = GetPerObjectLightFlags(universalLightData.additionalLightsCount, isForwardPlus, settings.reflectionProbeBlending);
+            data.perObjectData = GetPerObjectLightFlags(universalLightData, settings, isForwardPlus);
 
             // Render graph does not support RenderingData.commandBuffer as its execution timeline might break.
             // RenderingData.commandBuffer is available only for the old non-RG execute code path.
@@ -1616,6 +1624,8 @@ namespace UnityEngine.Rendering.Universal
                 data.opaqueLayerMask = universalRenderer.opaqueLayerMask;
                 data.transparentLayerMask = universalRenderer.transparentLayerMask;
             }
+
+            data.stencilLodCrossFadeEnabled = settings.enableLODCrossFade && settings.lodCrossFadeDitheringType == LODCrossFadeDitheringType.Stencil;
 
             return data;
         }
@@ -1759,6 +1769,13 @@ namespace UnityEngine.Rendering.Universal
             return shadowData;
         }
 
+        static CullContextData CreateCullContextData(ContextContainer frameData, ScriptableRenderContext context)
+        {
+            var cullData = frameData.Create<CullContextData>();
+            cullData.SetRenderContext(context);
+            return cullData;
+        }
+
         private static Vector3 GetMainLightCascadeSplit(int mainLightShadowCascadesCount, UniversalRenderPipelineAsset urpAsset)
         {
             switch (mainLightShadowCascadesCount)
@@ -1804,7 +1821,7 @@ namespace UnityEngine.Rendering.Universal
             return frameData.Create<UniversalResourceData>();
         }
 
-        static UniversalLightData CreateLightData(ContextContainer frameData, UniversalRenderPipelineAsset settings, NativeArray<VisibleLight> visibleLights)
+        static UniversalLightData CreateLightData(ContextContainer frameData, UniversalRenderPipelineAsset settings, NativeArray<VisibleLight> visibleLights, bool isDeferredPlus)
         {
             using var profScope = new ProfilingScope(Profiling.Pipeline.initializeLightData);
 
@@ -1827,8 +1844,9 @@ namespace UnityEngine.Rendering.Universal
             lightData.shadeAdditionalLightsPerVertex = settings.additionalLightsRenderingMode == LightRenderingMode.PerVertex;
             lightData.visibleLights = visibleLights;
             lightData.supportsMixedLighting = settings.supportsMixedLighting;
-            lightData.reflectionProbeBlending = settings.reflectionProbeBlending;
             lightData.reflectionProbeBoxProjection = settings.reflectionProbeBoxProjection;
+            lightData.reflectionProbeBlending = settings.reflectionProbeBlending;
+            lightData.reflectionProbeAtlas = settings.reflectionProbeBlending && (isDeferredPlus || settings.reflectionProbeAtlas || settings.gpuResidentDrawerMode != GPUResidentDrawerMode.Disabled);
             lightData.supportsLightLayers = RenderingUtils.SupportsLightLayers(SystemInfo.graphicsDeviceType) && settings.useRenderingLayers;
 
             return lightData;
@@ -1935,7 +1953,7 @@ namespace UnityEngine.Rendering.Universal
 #endif
         }
 
-        static PerObjectData GetPerObjectLightFlags(int additionalLightsCount, bool isForwardPlus, bool reflectionProbeBlending)
+        static PerObjectData GetPerObjectLightFlags(UniversalLightData universalLightData, UniversalRenderPipelineAsset settings, bool isForwardPlus)
         {
             using var profScope = new ProfilingScope(Profiling.Pipeline.getPerObjectLightFlags);
 
@@ -1945,12 +1963,12 @@ namespace UnityEngine.Rendering.Universal
             {
                 configuration |= PerObjectData.ReflectionProbes | PerObjectData.LightData;
             }
-            else if (!reflectionProbeBlending)
+            else if (!settings.reflectionProbeBlending)
             {
                 configuration |= PerObjectData.ReflectionProbes;
             }
 
-            if (additionalLightsCount > 0 && !isForwardPlus)
+            if (universalLightData.additionalLightsCount > 0 && !isForwardPlus)
             {
                 // In this case we also need per-object indices (unity_LightIndices)
                 if (!RenderingUtils.useStructuredBuffer)
@@ -2018,6 +2036,9 @@ namespace UnityEngine.Rendering.Universal
                     break;
                 case LODCrossFadeDitheringType.BlueNoise:
                     ditheringTexture = runtimeTextures.blueNoise64LTex;
+                    break;
+                case LODCrossFadeDitheringType.Stencil:
+                    ditheringTexture = runtimeTextures.stencilDitherTex; // For the pass that has no stencil such as shadow and motion vector
                     break;
                 default:
                     Debug.LogWarning($"This Lod Cross Fade Dithering Type is not supported: {asset.lodCrossFadeDitheringType}");
@@ -2419,5 +2440,19 @@ namespace UnityEngine.Rendering.Universal
             // Save ScreenMSAASamples value at beginning of the frame, useful for iOS/macOS
             startFrameScreenMSAASamples = Screen.msaaSamples;
         }
+
+#if UNITY_EDITOR
+        protected override bool IsPreviewSupported(Camera camera, out string reason)
+        {
+            if (camera != null
+                && camera.TryGetComponent<UniversalAdditionalCameraData>(out var additionalData)
+                && additionalData.renderType == CameraRenderType.Overlay)
+            {
+                reason = "Overlay camera cannot be previewed directly.\nYou need to use a base camera instead.";
+                return false;
+            }
+            return base.IsPreviewSupported(camera, out reason);
+        }
+#endif
     }
 }

@@ -85,7 +85,7 @@ float3 shadergraph_LWBakedGI(float3 positionWS, float3 normalWS, uint2 positionS
 float3 shadergraph_LWReflectionProbe(float3 viewDir, float3 normalOS, float lod)
 {
     float3 reflectVec = reflect(-viewDir, normalOS);
-#if USE_FORWARD_PLUS
+#if USE_CLUSTER_LIGHT_LOOP
     return SAMPLE_TEXTURECUBE_LOD(_GlossyEnvironmentCubeMap, sampler_GlossyEnvironmentCubeMap, reflectVec, lod).rgb;
 #else
     return DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(unity_SpecCube0, samplerunity_SpecCube0, reflectVec, lod), unity_SpecCube0_HDR);
@@ -95,14 +95,16 @@ float3 shadergraph_LWReflectionProbe(float3 viewDir, float3 normalOS, float lod)
 void shadergraph_LWFog(float3 positionOS, out float4 color, out float density)
 {
     color = unity_FogColor;
-    #if defined(FOG_LINEAR) || defined(FOG_EXP) || defined(FOG_EXP2)
-    float viewZ = -TransformWorldToView(TransformObjectToWorld(positionOS)).z;
-    float nearZ0ToFarZ = max(viewZ - _ProjectionParams.y, 0);
-    // ComputeFogFactorZ0ToFar returns the fog "occlusion" (0 for full fog and 1 for no fog) so this has to be inverted for density.
-    density = 1.0f - ComputeFogIntensity(ComputeFogFactorZ0ToFar(nearZ0ToFarZ));
-    #else
     density = 0.0f;
-    #endif
+    #if defined(FOG_LINEAR_KEYWORD_DECLARED)
+    if (FOG_LINEAR || FOG_EXP || FOG_EXP2)
+    {
+        float viewZ = -TransformWorldToView(TransformObjectToWorld(positionOS)).z;
+        float nearZ0ToFarZ = max(viewZ - _ProjectionParams.y, 0);
+        // ComputeFogFactorZ0ToFar returns the fog "occlusion" (0 for full fog and 1 for no fog) so this has to be inverted for density.
+        density = 1.0f - ComputeFogIntensity(ComputeFogFactorZ0ToFar(nearZ0ToFarZ));
+    }
+    #endif // defined(FOG_LINEAR_KEYWORD_DECLARED)
 }
 
 // This function assumes the bitangent flip is encoded in tangentWS.w

@@ -6,12 +6,6 @@ namespace UnityEngine.Rendering.Universal
 {
     internal sealed partial class Renderer2D : ScriptableRenderer
     {
-        #if UNITY_SWITCH || UNITY_EMBEDDED_LINUX || UNITY_QNX || UNITY_ANDROID
-        const GraphicsFormat k_DepthStencilFormat = GraphicsFormat.D24_UNorm_S8_UInt;
-        #else
-        const GraphicsFormat k_DepthStencilFormat = GraphicsFormat.D32_SFloat_S8_UInt;
-        #endif
-
         const int k_FinalBlitPassQueueOffset = 1;
         const int k_AfterFinalBlitPassQueueOffset = k_FinalBlitPassQueueOffset + 1;
 
@@ -183,11 +177,10 @@ namespace UnityEngine.Rendering.Universal
                     || !cameraData.isDefaultViewport
                     || cameraData.requireSrgbConversion
                     || !cameraData.resolveFinalTarget
+                    || cameraData.cameraTargetDescriptor.msaaSamples > 1 && UniversalRenderer.PlatformRequiresExplicitMsaaResolve()
                     || m_Renderer2DData.useCameraSortingLayerTexture
                     || !Mathf.Approximately(cameraData.renderScale, 1.0f)
                     || (DebugHandler != null && DebugHandler.WriteToDebugScreenTexture(cameraData.resolveFinalTarget));
-
-            inputSummary.requiresDepthTexture |= (!cameraData.resolveFinalTarget && m_UseDepthStencilBuffer);
 
             return inputSummary;
         }
@@ -233,7 +226,7 @@ namespace UnityEngine.Rendering.Universal
                 {
                     var depthDescriptor = cameraTargetDescriptor;
                     depthDescriptor.colorFormat = RenderTextureFormat.Depth;
-                    depthDescriptor.depthStencilFormat = k_DepthStencilFormat; 
+                    depthDescriptor.depthStencilFormat = CoreUtils.GetDefaultDepthStencilFormat();
                     if (!cameraData.resolveFinalTarget && m_UseDepthStencilBuffer)
                         depthDescriptor.bindMS = depthDescriptor.msaaSamples > 1 && !SystemInfo.supportsMultisampleAutoResolve && (SystemInfo.supportsMultisampledTextures != 0);
                     RenderingUtils.ReAllocateHandleIfNeeded(ref m_DepthTextureHandle, depthDescriptor, FilterMode.Point, wrapMode: TextureWrapMode.Clamp, name: "_CameraDepthAttachment");
@@ -304,7 +297,7 @@ namespace UnityEngine.Rendering.Universal
                         RenderingUtils.ReAllocateHandleIfNeeded(ref DebugHandler.DebugScreenColorHandle, descriptor, name: "_DebugScreenColor");
 
                         RenderTextureDescriptor depthDesc = cameraData.cameraTargetDescriptor;
-                        DebugHandler.ConfigureDepthDescriptorForDebugScreen(ref depthDesc, k_DepthStencilFormat, cameraData.pixelWidth, cameraData.pixelHeight);
+                        DebugHandler.ConfigureDepthDescriptorForDebugScreen(ref depthDesc, CoreUtils.GetDefaultDepthStencilFormat(), cameraData.pixelWidth, cameraData.pixelHeight);
                         RenderingUtils.ReAllocateHandleIfNeeded(ref DebugHandler.DebugScreenDepthHandle, depthDesc, name: "_DebugScreenDepth");
                     }
 
@@ -392,7 +385,7 @@ namespace UnityEngine.Rendering.Universal
             bool outputToHDR = cameraData.isHDROutputActive;
             if (shouldRenderUI && outputToHDR)
             {
-                m_DrawOffscreenUIPass.Setup(cameraData, k_DepthStencilFormat);
+                m_DrawOffscreenUIPass.Setup(cameraData, CoreUtils.GetDefaultDepthStencilFormat());
                 EnqueuePass(m_DrawOffscreenUIPass);
             }
 
@@ -411,7 +404,7 @@ namespace UnityEngine.Rendering.Universal
             // Don't resolve during post processing if there are passes after or pixel perfect camera is used
             bool pixelPerfectCameraEnabled = ppc != null && ppc.enabled;
             bool hasCaptureActions = cameraData.captureActions != null && lastCameraInStack;
-            bool resolvePostProcessingToCameraTarget = !hasCaptureActions && !hasPassesAfterPostProcessing && !requireFinalPostProcessPass && !pixelPerfectCameraEnabled;
+            bool resolvePostProcessingToCameraTarget = lastCameraInStack && !hasCaptureActions && !hasPassesAfterPostProcessing && !requireFinalPostProcessPass && !pixelPerfectCameraEnabled;
 
             if (hasPostProcess)
             {
@@ -472,7 +465,7 @@ namespace UnityEngine.Rendering.Universal
 
             // We can explicitely render the overlay UI from URP when HDR output is not enabled.
             // SupportedRenderingFeatures.active.rendersUIOverlay should also be set to true.
-            if (shouldRenderUI && !outputToHDR)
+            if (shouldRenderUI && cameraData.isLastBaseCamera && !outputToHDR)
             {
                 EnqueuePass(m_DrawOverlayUIPass);
             }
@@ -535,9 +528,14 @@ namespace UnityEngine.Rendering.Universal
             m_ColorBufferSystem.EnableMSAA(enable);
         }
 
+        internal static bool IsGLESDevice()
+        {
+            return SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3;
+        }
+
         internal static bool IsGLDevice()
         {
-            return SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3 || SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLCore;
+            return IsGLESDevice() || SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLCore;
         }
 
         internal static bool supportsMRT

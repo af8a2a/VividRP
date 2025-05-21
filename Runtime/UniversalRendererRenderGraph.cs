@@ -880,14 +880,14 @@ namespace UnityEngine.Rendering.Universal
 
             RecordCustomRenderGraphPasses(renderGraph, RenderPassEvent.BeforeRenderingShadows);
 
-            bool renderShadows = false;
-
+            bool renderShadows = true;
+#if false
             if (m_MainLightShadowCasterPass.Setup(renderingData, cameraData, lightData, shadowData))
             {
                 renderShadows = true;
                 resourceData.mainShadowsTexture = m_MainLightShadowCasterPass.Render(renderGraph, frameData);
             }
-
+#endif
             if (m_AdditionalLightsShadowCasterPass.Setup(renderingData, cameraData, lightData, shadowData))
             {
                 renderShadows = true;

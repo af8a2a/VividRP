@@ -59,6 +59,8 @@
 #endif
 
 TEXTURE2D_X(_ScreenSpaceShadowmapTexture);
+TEXTURE2D(_DirShadowRampTexture);
+TEXTURE2D(_ShadowScatterTexture);
 
 TEXTURE2D_SHADOW(_MainLightShadowmapTexture);
 TEXTURE2D_SHADOW(_AdditionalLightsShadowmapTexture);
@@ -111,6 +113,8 @@ CBUFFER_END
     #endif
 #endif
 
+
+bool GetShadowScatterEnable();
 // x: depth bias,
 // y: normal bias,
 // z: light type (Spot = 0, Directional = 1, Point = 2, Area/Rectangle = 3, Disc = 4, Pyramid = 5, Box = 6, Tube = 7)
@@ -331,7 +335,8 @@ real SampleShadowmap(TEXTURE2D_SHADOW_PARAM(ShadowMap, sampler_ShadowMap), float
     #else
         attenuation = real(SAMPLE_TEXTURE2D_SHADOW(ShadowMap, sampler_ShadowMap, shadowCoord.xyz));
     #endif
-
+    
+    if (!GetShadowScatterEnable())
     attenuation = LerpWhiteTo(attenuation, shadowStrength);
 
     // Shadow coords that fall out of the light frustum volume must always return attenuation 1.0
@@ -625,5 +630,90 @@ half BakedShadow(half4 shadowMask, half4 occlusionProbeChannels)
 
     return BakedShadow(shadowMask, occlusionProbeChannels, half4(1,0,0,0));
 }
+
+
+
+
+//Add
+#define SHADOWSCATTERMODE_NONE (0)
+#define SHADOWSCATTERMODE_RAMPTEXTURE (1)
+#define SHADOWSCATTERMODE_SUBSURFACE (2)
+
+
+// CBUFFER_START(PCSSData)
+    float4 _PerCascadePCSSData[MAX_SHADOW_CASCADES];
+    float4 _DirLightShadowUVMinMax; // xy: shadow uv min, max: shadow uv max
+    float4 _DirLightShadowPenumbraParams; // x: soft shadow width, y: scatter occlusion width.
+    float4 _DirLightShadowScatterParams; // xyz: shadow subsurface scatter channel, w:shadow scatter mode.
+// CBUFFER_END
+
+
+half        _ShadowScatterEnable;
+bool        _DirLightShadowScatterPenumbraOnly;
+
+float GetShadowScatterMode()
+{
+    return _DirLightShadowScatterParams.w;
+}
+bool GetShadowScatterEnable()
+{
+    float shadowScatterMode = GetShadowScatterMode();
+    if (shadowScatterMode != SHADOWSCATTERMODE_NONE)
+    {
+        return true;
+    }
+    return false;
+}
+
+
+float3 EvaluateShadowScatterColor(float r, float3 S)
+{
+    float3 exp_13 = exp2(((LOG2_E * (-1.0/3.0)) * r) * S); // Exp[-S * r / 3]
+    float3 expSum = exp_13 * (1 + exp_13 * exp_13);        // Exp[-S * r / 3] + Exp[-S * r]
+
+    return (S * rcp(8 * PI)) * expSum; // S / (8 * Pi) * (Exp[-S * r / 3] + Exp[-S * r])
+}
+
+float3 ShadowAcesFilm(float3 x)
+{
+    float a = 1.36f;
+    float b = 0.047f;
+    float c = 0.93f;
+    float d = 0.56f;
+    float e = 0.14f;
+    return saturate((x*(a*x+b))/(x*(c*x+d)+e));
+}
+
+//Add
+/// Shadow Scatter
+half3 MainLightShadowScatter(float shadowAttenuation)
+{
+    if (GetShadowScatterEnable())
+    {
+        float3 shadowColor;
+        if (GetShadowScatterMode() == SHADOWSCATTERMODE_RAMPTEXTURE)
+        {
+            shadowColor = SAMPLE_TEXTURE2D_LOD(_DirShadowRampTexture, sampler_LinearClamp, float2(shadowAttenuation, 0.5), 0).rgb;
+        }
+        else
+        {
+            float shadow = shadowAttenuation;
+            float3 shadowTint = _DirLightShadowScatterParams.rgb;
+                
+            float3 invTint = 1.0 - shadowTint;
+            float shadow3 = shadow * shadow * shadow;
+
+            shadowColor = lerp(1.0 - (1.0 - shadow) * invTint,
+                                shadow3 * invTint + shadow * shadowTint,
+                                _DirLightShadowScatterPenumbraOnly);   
+        }
+        
+        shadowColor = LerpWhiteTo(shadowColor, GetMainLightShadowParams().x);
+        return shadowColor;
+    }
+    return shadowAttenuation;
+}
+
+
 
 #endif

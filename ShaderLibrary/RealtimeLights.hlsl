@@ -13,6 +13,8 @@ struct Light
 {
     half3   direction;
     half3   color;
+    //Add
+    half3   shadowScatter;
     float   distanceAttenuation; // full-float precision required on some platforms
     half    shadowAttenuation;
     uint    layerMask;
@@ -95,7 +97,7 @@ Light GetMainLight()
     light.color = _MainLightColor.rgb;
 
     light.layerMask = _MainLightLayerMask;
-
+    light.shadowScatter = 1;
     return light;
 }
 
@@ -110,7 +112,9 @@ Light GetMainLight(float4 shadowCoord, float3 positionWS, half4 shadowMask)
 {
     Light light = GetMainLight();
     light.shadowAttenuation = MainLightShadow(shadowCoord, positionWS, shadowMask, _MainLightOcclusionProbes);
-
+    //Add
+    light.shadowScatter = MainLightShadowScatter(light.shadowAttenuation * light.distanceAttenuation);
+    
     #if defined(_LIGHT_COOKIES)
         real3 cookieColor = SampleMainLightCookie(positionWS);
         light.color *= cookieColor;
@@ -166,6 +170,7 @@ Light GetAdditionalPerObjectLight(int perObjectLightIndex, float3 positionWS)
     light.shadowAttenuation = 1.0; // This value can later be overridden in GetAdditionalLight(uint i, float3 positionWS, half4 shadowMask)
     light.color = color;
     light.layerMask = lightLayerMask;
+    light.shadowScatter = 1;
 
     return light;
 }

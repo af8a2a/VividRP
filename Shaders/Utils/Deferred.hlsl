@@ -48,6 +48,8 @@ Light UnityLightFromPunctualLightDataAndWorldSpacePosition(PunctualLightData pun
     }
 
     light.layerMask = punctualLightData.layerMask;
+    //Add
+    light.shadowScatter = light.distanceAttenuation * light.shadowAttenuation;
 
     return light;
 }

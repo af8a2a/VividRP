@@ -1394,6 +1394,10 @@ namespace UnityEngine.Rendering.Universal
 
             RecordCustomRenderGraphPasses(renderGraph, RenderPassEvent.BeforeRenderingSkybox);
 
+            
+            //now SkySystem will override URP Skybox
+            //not ready to disable URP Skybox...
+            // #if false
             if (cameraData.camera.clearFlags == CameraClearFlags.Skybox && cameraData.renderType != CameraRenderType.Overlay)
             {
                 cameraData.camera.TryGetComponent(out Skybox cameraSkybox);
@@ -1401,7 +1405,7 @@ namespace UnityEngine.Rendering.Universal
                 if (skyboxMaterial != null)
                     m_DrawSkyboxPass.Render(renderGraph, frameData, context, resourceData.activeColorTexture, resourceData.activeDepthTexture, skyboxMaterial);
             }
-
+            // #endif
             if (copySchedules.depth == DepthCopySchedule.AfterSkybox)
                 ExecuteScheduledDepthCopyWithMotion(renderGraph, resourceData, renderPassInputs.requiresMotionVectors);
 

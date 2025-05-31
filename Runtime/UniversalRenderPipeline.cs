@@ -210,6 +210,9 @@ namespace UnityEngine.Rendering.Universal
         // asset.
         private readonly UniversalRenderPipelineAsset pipelineAsset;
 
+        // Use to detect frame changes (for accurate frame count in editor, consider using hdCamera.GetCameraFrameCount)
+        int m_FrameCount;
+        
         /// <inheritdoc/>
         public override string ToString() => pipelineAsset?.ToString();
 
@@ -350,6 +353,8 @@ namespace UnityEngine.Rendering.Universal
 
             DisposeAdditionalCameraData();
             AdditionalLightsShadowAtlasLayout.ClearStaticCaches();
+
+            ExternalSystemManager.ExecuteDispose();
         }
 
         // If the URP gets destroyed, we must clean up all the added URP specific camera data and
@@ -426,7 +431,11 @@ namespace UnityEngine.Rendering.Universal
         {
             SetHDRState(cameras);
 
+#if UNITY_2021_1_OR_NEWER
             int cameraCount = cameras.Count;
+#else
+            int cameraCount = cameras.Length;
+#endif
             // For XR, HDR and no camera cases, UI Overlay ownership must be enforced
             AdjustUIOverlayOwnership(cameraCount);
 
@@ -445,7 +454,27 @@ namespace UnityEngine.Rendering.Universal
                 GraphicsSettings.lightsUseColorTemperature = true;
                 SetupPerFrameShaderConstants();
                 XRSystem.SetDisplayMSAASamples((MSAASamples)asset.msaaSampleCount);
+                
+#if UNITY_EDITOR
+                int newCount = m_FrameCount;
+                foreach (var c in cameras)
+                {
+                    if (c.cameraType != CameraType.Preview)
+                    {
+                        newCount++;
+                        break;
+                    }
+                }
+#else
+            int newCount = Time.frameCount;
+#endif
+                if (newCount != m_FrameCount)
+                {
+                    m_FrameCount = newCount;
 
+                    HistoryFrameRTSystem.CleanUnused();
+                }
+                
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
                 if (DebugManager.instance.isAnyDebugUIActive)
                     UniversalRenderPipelineDebugDisplaySettings.Instance.UpdateDisplayStats();
@@ -768,6 +797,9 @@ namespace UnityEngine.Rendering.Universal
                 context.ExecuteCommandBuffer(cmd); // Send all the commands enqueued so far in the CommandBuffer cmd, to the ScriptableRenderContext context
                 cmd.Clear();
 
+                //Add
+                ExternalSystemManager.ExecuteUpdate();
+                
                 SetupPerCameraShaderConstants(cmd);
 
                 ProbeVolumesOptions apvOptions = null;

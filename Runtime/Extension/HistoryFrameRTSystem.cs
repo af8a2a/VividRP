@@ -70,6 +70,13 @@ namespace UnityEngine.Rendering.Universal
 
         ///// <summary>Snapdragon Super Resolution frame history.</summary>
         GSR2,
+        
+        ScreenSpaceGlobalIlluminationAccumulation,
+        ScreenSpaceGlobalIlluminationSample,
+
+        ScreenSpaceGlobalIlluminationHistoryDepth,
+        ScreenSpaceGlobalIlluminationHistoryColor,
+
     }
 
     /// <summary>
@@ -279,6 +286,12 @@ namespace UnityEngine.Rendering.Universal
         public RTHandle AllocHistoryFrameRT(int id, Func<GraphicsFormat, string, int, RTHandleSystem, RTHandle> allocator,GraphicsFormat graphicsFormat, int bufferCount)
         {
             m_BufferedRTHandleSystem.AllocBuffer(id, (rts, i) => allocator(graphicsFormat,camera.name, i, rts), bufferCount);
+            return m_BufferedRTHandleSystem.GetFrameRT(id, 0);
+        }
+
+        public RTHandle AllocHistoryFrameRT(int id, Func<string, int, RTHandleSystem, RTHandle> allocator, int bufferCount)
+        {
+            m_BufferedRTHandleSystem.AllocBuffer(id, (rts, i) => allocator(camera.name, i, rts), bufferCount);
             return m_BufferedRTHandleSystem.GetFrameRT(id, 0);
         }
 

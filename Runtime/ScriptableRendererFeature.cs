@@ -43,7 +43,7 @@ namespace UnityEngine.Rendering.Universal
         /// <param name="renderingData">Rendering state. Use this to setup render passes.</param>
         public virtual void SetupRenderPasses(ScriptableRenderer renderer, in RenderingData renderingData) { }
 
-        void OnEnable()
+       public virtual void OnEnable()
         {
             // UUM-44048: If the pipeline is not created, don't call Create() as it may allocate RTHandles or do other
             // things that require the pipeline to be constructed. This is safe because once the pipeline is constructed,

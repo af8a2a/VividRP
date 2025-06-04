@@ -1,0 +1,154 @@
+﻿// This file is part of the FidelityFX SDK.
+//
+// Copyright (C) 2024 Advanced Micro Devices, Inc.
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files(the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and /or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions :
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+// LPM pass 1
+// SRV  0 : LPM_InputColor  : r_input_color
+// UAV  0 : LPM_OutputColor : rw_output_color
+// CB   0 : cbLPM
+#pragma kernel LPM_CS
+#define LPM_BIND_SRV_INPUT_COLOR               0
+#define LPM_BIND_UAV_OUTPUT_COLOR              0
+
+#define LPM_BIND_CB_LPM                        0
+#pragma multi_compile _ FFX_HALF
+#pragma multi_compile FfxLpmDisplaymodeLDR FfxLpmDisplaymodeHDR102084  FfxLpmDisplaymodeHDR10Scrgb //FfxLpmDisplaymodeFshdr2084  FfxLpmDisplaymodeFshdrScrgb
+
+
+#pragma multi_compile FFX_LPM_ColorSpace_REC709 FFX_LPM_ColorSpace_P3  FFX_LPM_ColorSpace_REC2020
+
+#pragma use_dxc
+#define FFX_HLSL 1
+#define FFX_GPU 1
+
+#include "ffx_lpm_callbacks_hlsl.hlsl"
+#include "ffx_lpm_filter.hlsl"
+
+#ifndef FFX_LPM_THREAD_GROUP_WIDTH
+#define FFX_LPM_THREAD_GROUP_WIDTH 64
+#endif // #ifndef FFX_LPM_THREAD_GROUP_WIDTH
+#ifndef FFX_LPM_THREAD_GROUP_HEIGHT
+#define FFX_LPM_THREAD_GROUP_HEIGHT 1
+#endif // FFX_LPM_THREAD_GROUP_HEIGHT
+#ifndef FFX_LPM_THREAD_GROUP_DEPTH
+#define FFX_LPM_THREAD_GROUP_DEPTH 1
+#endif // #ifndef FFX_LPM_THREAD_GROUP_DEPTH
+#ifndef FFX_LPM_NUM_THREADS
+#define FFX_LPM_NUM_THREADS [numthreads(FFX_LPM_THREAD_GROUP_WIDTH, FFX_LPM_THREAD_GROUP_HEIGHT, FFX_LPM_THREAD_GROUP_DEPTH)]
+#endif // #ifndef FFX_LPM_NUM_THREADS
+
+
+FFX_PREFER_WAVE64
+FFX_LPM_NUM_THREADS
+FFX_LPM_EMBED_ROOTSIG_CONTENT
+void LPM_CS(uint3 LocalThreadId : SV_GroupThreadID, uint3 WorkGroupId : SV_GroupID, uint3 Dtid : SV_DispatchThreadID)
+{
+    #if defined(FfxLpmDisplaymodeHDR102084)
+    FfxFloat32 hdr10S = LpmHdr10RawScalar(displayMinMaxLuminance.y);
+    #elif defined(FfxLpmDisplaymodeHDR10Scrgb)
+    FfxFloat32 hdr10S = LpmHdr10ScrgbScalar(displayMinMaxLuminance.y);
+
+    #endif
+    LPMControlBlock control_block;
+
+
+    FfxCalculateLpmConsts(
+        GetShoulder(),
+        #if defined(FfxLpmDisplaymodeLDR)
+        #if defined(FFX_LPM_ColorSpace_REC709)
+        LPM_CONFIG_709_709,
+        LPM_COLORS_709_709,
+        #elif defined(FFX_LPM_ColorSpace_P3)
+        LPM_CONFIG_709_P3,
+        LPM_COLORS_709_P3,
+        #else
+        LPM_CONFIG_709_2020,
+        LPM_COLORS_709_2020,
+        #endif
+        //end LDR
+        #elif defined(FfxLpmDisplaymodeHDR102084)
+        #if defined(FFX_LPM_ColorSpace_REC709)
+        LPM_CONFIG_HDR10RAW_709,
+        LPM_COLORS_HDR10RAW_709,
+        #elif defined(FFX_LPM_ColorSpace_P3)
+        LPM_CONFIG_HDR10RAW_P3,
+        LPM_COLORS_HDR10RAW_P3,
+        #else
+        LPM_CONFIG_HDR10RAW_2020,
+        LPM_COLORS_HDR10RAW_2020,
+        #endif
+        //end HDR102084
+
+        #elif defined(FfxLpmDisplaymodeHDR10Scrgb)
+        #if defined(FFX_LPM_ColorSpace_REC709)
+        LPM_CONFIG_HDR10SCRGB_709,
+        LPM_COLORS_HDR10SCRGB_709,
+        #elif defined(FFX_LPM_ColorSpace_P3)
+        LPM_CONFIG_HDR10SCRGB_P3,
+        LPM_COLORS_HDR10SCRGB_P3,
+        #else
+        LPM_CONFIG_HDR10SCRGB_2020,
+        LPM_COLORS_HDR10SCRGB_2020,
+        #endif
+        #endif
+        //end HDR10Scrgb
+        
+        softGap,
+        hdrMax,
+        lpmExposure,
+        contrast,
+        shoulderContrast,
+        saturation,
+        crosstalk,
+        control_block.map0,
+        control_block.map1,
+        control_block.map2,
+        control_block.map3,
+        control_block.map4,
+        control_block.map5,
+        control_block.map6,
+        control_block.map7,
+        control_block.map8,
+        control_block.map9,
+        control_block.mapA,
+        control_block.mapB,
+        control_block.mapC,
+        control_block.mapD,
+        control_block.mapE,
+        control_block.mapF,
+        control_block.mapG,
+        control_block.mapH,
+        control_block.mapI,
+        control_block.mapJ,
+        control_block.mapK,
+        control_block.mapL,
+        control_block.mapM,
+        control_block.mapN,
+        control_block.con, // Use first RGB conversion matrix, if 'soft' then 'con' must be true also.
+        control_block.soft, // Use soft gamut mapping.
+        control_block.con2, // Use last RGB conversion matrix.
+        control_block.clip, // Use clipping in last conversion matrix.
+        control_block.scaleOnly // Scale only for last conversion matrix (used for 709 HDR to scRGB).
+    );
+    LPMFilter(LocalThreadId, WorkGroupId, Dtid,
+              control_block
+    );
+}

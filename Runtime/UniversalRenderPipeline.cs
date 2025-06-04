@@ -308,6 +308,14 @@ namespace UnityEngine.Rendering.Universal
 
             // Initializes only if VRS is supported.
             Vrs.InitializeResources();
+
+            #region Extension
+            
+            SkySystem.instance.Build(asset);
+            IBLFilterGGX.instance.Initialize();
+            Hammersley.Initialize();
+
+            #endregion
         }
 
         /// <inheritdoc/>
@@ -340,7 +348,16 @@ namespace UnityEngine.Rendering.Universal
             s_RTHandlePool.Cleanup();
             s_RTHandlePool = null;
             
+            #region Extension
+
+            IBLFilterGGX.Clean();
+            SkySystem.ClearAll();
+            BlueNoiseSystem.ClearAll();
+            RayTracingSystem.ClearAll();
             HistoryFrameRTSystem.ClearAll();
+            GraphicsBufferSystem.ClearAll();
+
+            #endregion
 
 #if UNITY_EDITOR
             SceneViewDrawMode.ResetDrawMode();
@@ -354,7 +371,6 @@ namespace UnityEngine.Rendering.Universal
             DisposeAdditionalCameraData();
             AdditionalLightsShadowAtlasLayout.ClearStaticCaches();
 
-            ExternalSystemManager.ExecuteDispose();
         }
 
         // If the URP gets destroyed, we must clean up all the added URP specific camera data and
@@ -473,6 +489,7 @@ namespace UnityEngine.Rendering.Universal
                     m_FrameCount = newCount;
 
                     HistoryFrameRTSystem.CleanUnused();
+                    RayTracingSystem.CleanUnused();
                 }
                 
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -798,8 +815,11 @@ namespace UnityEngine.Rendering.Universal
                 cmd.Clear();
 
                 //Add
-                ExternalSystemManager.ExecuteUpdate();
-                
+
+                #region Extension
+
+                SkySystem.instance.UpdateCurrentSky();
+                #endregion
                 SetupPerCameraShaderConstants(cmd);
 
                 ProbeVolumesOptions apvOptions = null;

@@ -1,0 +1,44 @@
+﻿#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GlobalSamplers.hlsl"
+
+#pragma kernel KMain
+
+Texture2D<float4> NormalInput;
+RWTexture2DArray<float4> DeinterleaveNormalOutput;
+
+
+float4 Prepare_Load(int2 coord)
+{
+    float4 normalWS = NormalInput.Load(int3(coord, 0));
+    return float4(mul((float3x3)unity_WorldToCamera, normalWS.xyz),1);
+}
+
+void Prepare_Store(int2 coord, int index, float4 color)
+{
+    DeinterleaveNormalOutput[int3(coord, index)] = color;
+}
+
+[numthreads(8,8,1)]
+void KMain(uint3 tid : SV_DispatchThreadID)
+{
+    int2 baseCoord = tid;
+    Prepare_Store(tid, 0, Prepare_Load(baseCoord * 2 + int2(0, 0)));
+    Prepare_Store(tid, 1, Prepare_Load(baseCoord * 2 + int2(1, 0)));
+    Prepare_Store(tid, 2, Prepare_Load(baseCoord * 2 + int2(0, 1)));
+    Prepare_Store(tid, 3, Prepare_Load(baseCoord * 2 + int2(1, 1)));
+ 
+    // Prepare_Store(tid, 4, Prepare_Load(baseCoord * 2 + int2(2, 0)));
+    // Prepare_Store(tid, 5, Prepare_Load(baseCoord * 2 + int2(2, 1)));
+    // Prepare_Store(tid, 6, Prepare_Load(baseCoord * 2 + int2(3, 0)));
+    // Prepare_Store(tid, 7, Prepare_Load(baseCoord * 2 + int2(3, 1)));
+    //
+    // Prepare_Store(tid, 8, Prepare_Load(baseCoord * 2 + int2(0, 2)));
+    // Prepare_Store(tid, 9, Prepare_Load(baseCoord * 2 + int2(1, 2)));
+    // Prepare_Store(tid, 10, Prepare_Load(baseCoord *2 + int2(0, 3)));
+    // Prepare_Store(tid, 11, Prepare_Load(baseCoord *2 + int2(1, 3)));
+    //
+    // Prepare_Store(tid, 12, Prepare_Load(baseCoord *2 + int2(2, 2)));
+    // Prepare_Store(tid, 13, Prepare_Load(baseCoord *2 + int2(2, 3)));
+    // Prepare_Store(tid, 14, Prepare_Load(baseCoord *2 + int2(3, 2)));
+    // Prepare_Store(tid, 15, Prepare_Load(baseCoord *2 + int2(3, 3)));
+}

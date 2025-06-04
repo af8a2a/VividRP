@@ -1,0 +1,205 @@
+﻿#pragma kernel NonMobilePathClear
+#pragma kernel NonMobilePathRenderHashRT
+#pragma kernel NonMobilePathResolveColorRT
+//#pragma kernel MobilePathSinglePassColorRTDirectResolve
+#pragma kernel FillHoles
+
+#define NUMTHREAD_X 8
+#define NUMTHREAD_Y 8
+
+#define MAX_UINT 4294967295u
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
+
+SamplerState PointClampSampler;
+SamplerState LinearClampSampler;
+
+CBUFFER_START(SSPR)
+	float3 _CameraDirection;
+	float  _ScreenLRStretchIntensity;
+
+	float3 _CameraUpDirection;
+	float  _ScreenLRStretchThreshold;
+
+	float4 _FinalTintColor;
+	float4 _PlaneHeights[4];
+
+	float2 _RTSize;
+	float  _PlaneCount;
+CBUFFER_END
+
+RWTexture2D<half4> ColorRT;
+Texture2D<half4> _CameraOpaqueTexture;
+Texture2D<half4> _SSPRPlaneIdRT;
+//Texture2D<float> _CameraDepthTexture;
+
+//Non-Mobile path will use this RT: single 32bits RInt RT, split first 16bits for GetReflectionColorFromID's y, last 16bits for GetReflectionColorFromID's x
+//y put in first 16 bits because we want to sort by InterlockedMin(), allowing only "closer to reflection plane candidate" to write to HashRT
+RWTexture2D<uint> HashRT; 
+RWTexture2D<float> PosWSyRT;
+
+inline float SampleDepth(float2 uv)
+{
+	return SAMPLE_TEXTURE2D_LOD(_CameraDepthTexture, sampler_CameraDepthTexture, UnityStereoTransformScreenSpaceTex(uv), 0).r;
+}
+
+float3 ConvertScreenIDToPosWS(float depth ,float2 screenUV)
+{
+	float4 posCS = float4(screenUV * 2.0 - 1.0, depth, 1.0);
+	
+#if UNITY_UV_STARTS_AT_TOP
+	posCS.y = -posCS.y;
+#endif
+	
+	float4 posHWS = mul(UNITY_MATRIX_I_VP, posCS); //posCS -> posHWS
+	float3 posWS = posHWS.xyz / posHWS.w; //posHWS -> posWS
+
+	return posWS;
+}
+
+float3 MirrorPosWS(float3 inputPosWS ,float planeHeight)
+{
+	float3 reflectedPosWS = inputPosWS;
+    reflectedPosWS.y -= planeHeight;
+    reflectedPosWS.y *= -1;
+    reflectedPosWS.y += planeHeight;
+
+	return reflectedPosWS;
+}
+
+float2 ConvertReflectedPosWSToScreenUV(float3 reflectedPosWS, float planeHeight)
+{
+    float4 reflectedPosCS = mul(UNITY_MATRIX_VP, float4(reflectedPosWS, 1)); //posWS -> posCS
+	float2 reflectedPosNDCxy = reflectedPosCS.xy / reflectedPosCS.w;//posCS -> posNDC
+
+	float2 reflectedScreenUV = reflectedPosNDCxy * 0.5 + 0.5; //posNDC -> screen [0,1] uv, don't saturate() to allow  out of bound access early exit
+	float Threshold = _ScreenLRStretchThreshold;
+	float Intensity = _ScreenLRStretchIntensity;
+
+    float HeightStretch = (abs(reflectedPosWS.y - planeHeight));
+	float AngleStretch = (-_CameraDirection.y);
+	float ScreenStretch = saturate(abs(reflectedScreenUV.x * 2 - 1) - Threshold);
+
+	reflectedScreenUV.x = reflectedScreenUV.x * 2 - 1;
+	reflectedScreenUV.x *= 1 + HeightStretch * AngleStretch * ScreenStretch * Intensity;
+	reflectedScreenUV.x = saturate(reflectedScreenUV.x * 0.5 + 0.5);
+	
+#if UNITY_UV_STARTS_AT_TOP
+	reflectedScreenUV.y = 1.0 - reflectedScreenUV.y;
+#endif
+
+	return reflectedScreenUV;
+}
+
+[numthreads(NUMTHREAD_X, NUMTHREAD_Y, 1)]
+void NonMobilePathClear(uint3 id : SV_DispatchThreadID)
+{
+	HashRT[id.xy] = MAX_UINT;
+	ColorRT[uint2(id.xy)] = half4(0, 0, 0, 0);
+}
+
+[numthreads(NUMTHREAD_X,NUMTHREAD_Y,1)]
+void NonMobilePathRenderHashRT(uint3 id : SV_DispatchThreadID)
+{ 
+	float2 screenUV = float2(id.x / (_RTSize.x), id.y / (_RTSize.y)); //[0,RTSize-1] -> screen [0,1] uv
+	float inputPixelRawDepth = SampleDepth(screenUV);
+
+	//Fake plane for reflect Effect
+	//float3 reflViewDir = -UNITY_MATRIX_I_V[2].xyz;
+	//float4 posNDC = float4(screenUV.x * 2.0 - 1.0 , screenUV.y * 2.0 -1.0 , 1.0, 1.0);
+	//float4 posCastPlane = mul(UNITY_MATRIX_I_VP, posNDC);
+	//posCastPlane /= posCastPlane.w;
+	//float3 viewDir = normalize(posCastPlane.xyz - _WorldSpaceCameraPos.xyz);
+    float3 posWS = ConvertScreenIDToPosWS(inputPixelRawDepth, screenUV);
+
+    //for (uint i = _PlaneCount - 1; i >= 0; i--)
+    for (uint i = _PlaneCount; i > 0; i--)
+    {
+        int x = i / 4;
+        int y = i % 4;
+        if (y == 0)
+        {
+			x--;
+            y = 4;
+        }
+		
+        float planeHeight = _PlaneHeights[x][y - 1];
+        //half dist = abs(_WorldSpaceCameraPos.y - planeHeight);
+		//if (inputPixelRawDepth < 0.005f && dist < _FadeMaxDistance)
+		//{
+		//inputPixelRawDepth = lerp(max(inputPixelRawDepth, 0.0025f * (1 - dot(viewDir, -_CameraDirection))),
+		//								inputPixelRawDepth,
+		//								smoothstep(_FadeMinDistance, _FadeMaxDistance, dist));
+		//}
+	
+			
+        //float planeID = _SSPRPlaneIdRT.SampleLevel(LinearClampSampler, screenUV, 0).x;
+        //if (planeID != i)
+        //    continue;
+	
+        if(posWS.y <= planeHeight) continue;
+	
+        float3 reflectedPosWS = MirrorPosWS(posWS, planeHeight);
+        float2 reflectedScreenUV = ConvertReflectedPosWSToScreenUV(reflectedPosWS, planeHeight);
+        float planeID = _SSPRPlaneIdRT.SampleLevel(LinearClampSampler, reflectedScreenUV, 0).x;
+	
+        if (planeID != i) continue;
+
+        float2 earlyExitTest = abs(reflectedScreenUV - 0.5);
+        if (earlyExitTest.x >= 0.5 || earlyExitTest.y >= 0.5) return;
+		
+        uint2 reflectedScreenID = reflectedScreenUV * _RTSize; //from screen uv[0,1] to [0,RTSize-1]
+        uint hash = (id.y << 16) | (id.x & 0xFFFF); //pack 3 uint into 1
+#if SHADER_API_METAL
+		//do nothing because metal will never use this kernel (NonMobile kernel)
+#else
+        InterlockedMin(HashRT[reflectedScreenID], hash); //correct sorting method, sort by id.y
+#endif
+        break;
+    }
+}
+
+[numthreads(NUMTHREAD_X, NUMTHREAD_Y, 1)]
+void NonMobilePathResolveColorRT(uint3 id : SV_DispatchThreadID)
+{
+	uint packedData = HashRT[id.xy];	
+	if (packedData == MAX_UINT) //MAX_UINT == max uint
+	{
+		ColorRT[id.xy] = 0;
+		return;
+	}	
+
+    uint2 sampleID = uint2((packedData) & 0xFFFF, packedData >> 16); //decode from single 32bit uint, to 3 separated uint (12bit y & 12bit x & 8bit alpha)
+	float2 sampleUV = sampleID.xy / _RTSize;
+	half3 sampledColor = _CameraOpaqueTexture.SampleLevel(LinearClampSampler, sampleUV, 0).xyz;
+    half4 finalColor = half4(sampledColor, 1) * _FinalTintColor;
+
+	ColorRT[id.xy] = finalColor;
+}
+
+
+[numthreads(NUMTHREAD_X, NUMTHREAD_Y, 1)]
+void FillHoles(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+	//fill holes inside each 2*2
+    uint2 id = dispatchThreadID.xy * 2;
+
+	//cache read
+    uint center = HashRT[id.xy + uint2(0, 0)];
+    uint right = HashRT[id.xy + uint2(0, 1)];
+    uint bottom = HashRT[id.xy + uint2(1, 0)];
+    uint bottomRight = HashRT[id.xy + uint2(1, 1)];
+
+	//find best inside 2*2
+    uint best = center;
+    best = right < best ? right : best;
+    best = bottom < best ? bottom : best;
+    best = bottomRight < best ? bottomRight : best;
+
+	//write better rgba
+    HashRT[id.xy + uint2(0, 0)] = best < center ? best : center;
+    HashRT[id.xy + uint2(0, 1)] = best < right ? best : right;
+    HashRT[id.xy + uint2(1, 0)] = best < bottom ? best : bottom;
+    HashRT[id.xy + uint2(1, 1)] = best < bottomRight ? best : bottomRight;
+}

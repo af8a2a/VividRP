@@ -1,0 +1,11 @@
+﻿#pragma kernel KMain
+
+Texture2D _Input;
+RWTexture2D<float4> _Output;
+
+[numthreads(8, 8, 1)]
+void KMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 positionSS = dispatchThreadId.xy;
+    _Output[positionSS] = _Input[positionSS];
+}

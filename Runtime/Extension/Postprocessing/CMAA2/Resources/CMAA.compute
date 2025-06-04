@@ -1,0 +1,11 @@
+﻿#pragma kernel ComputeDispatchArgsCS
+#pragma kernel EdgesColor2x2CS
+#pragma kernel ProcessCandidatesCS
+#pragma kernel DeferredColorApply2x2CS
+#define CMAA2_UAV_STORE_TYPED               1   // use typed UAV store
+#define CMAA2_UAV_STORE_CONVERT_TO_SRGB     0   // no need to convert to SRGB - R11G11B10_FLOAT does not use SRGB encoding
+#define CMAA2_UAV_STORE_TYPED_UNORM_FLOAT   0   // not required for non-float semantics correctness (RWTexture2D<float4>)
+#define CMAA2_SUPPORT_HDR_COLOR_RANGE 1
+//todo HDR VARIANT
+#define CMAA2_EDGE_DETECTION_LUMA_PATH 1
+#include "CMAA2.hlsl"

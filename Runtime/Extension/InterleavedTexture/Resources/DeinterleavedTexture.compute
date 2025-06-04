@@ -1,0 +1,20 @@
+﻿// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+#pragma kernel DeinterleavedTextureSample
+Texture2DArray<float4> InterleavedTexture;
+RWTexture2D<float4> Result;
+//from FFX_CACAO
+
+
+// edge-ignorant blur & apply (for the lowest quality level 0)
+[numthreads(8, 8, 1)]
+void DeinterleavedTextureSample(uint2 tid : SV_DispatchThreadID)
+{
+    uint2 inUV = tid / 2;
+    float4 a = InterleavedTexture.Load(uint4(inUV.xy, 0, 0.0f));
+    float4 b = InterleavedTexture.Load(uint4(inUV.xy, 1, 0.0f));
+    float4 c = InterleavedTexture.Load(uint4(inUV.xy, 2, 0.0f));
+    float4 d = InterleavedTexture.Load(uint4(inUV.xy, 3, 0.0f));
+    float4 avg = (a + b + c + d) * 0.25f;
+    Result[tid] = avg;
+}

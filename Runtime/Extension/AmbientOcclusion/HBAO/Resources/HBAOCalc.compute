@@ -1,0 +1,130 @@
+﻿#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GlobalSamplers.hlsl"
+
+#pragma kernel KMain
+
+Texture2DArray<float> LinearDepthInput;
+Texture2DArray<float4> NormalViewInput;
+RWTexture2DArray<float4> AOOutput;
+
+#define AO_RANDOMTEX_SIZE 4
+#define NUM_STEPS  4
+#define NUM_DIRECTIONS  8
+float4 _SSAO_UVToView;
+float RadiusToScreen; // radius
+float R2; // 1/radius
+float NegInvR2; // radius * radius
+float NDotVBias;
+float2 InvFullResolution;
+float2 InvHalfResolution;
+float AOMultiplier;
+float PowExponent;
+float4 jitters[AO_RANDOMTEX_SIZE * AO_RANDOMTEX_SIZE];
+
+
+float Falloff(float DistanceSquare)
+{
+    // 1 scalar mad instruction
+    return DistanceSquare * NegInvR2 + 1.0;
+}
+
+float ComputeAO(float3 P, float3 N, float3 S)
+{
+    float3 V = S - P;
+    float VdotV = dot(V, V);
+    float NdotV = dot(N, V) * 1.0 / sqrt(VdotV);
+
+    // Use saturate(x) instead of max(x,0.f) because that is faster on Kepler
+    return clamp(NdotV - NDotVBias, 0, 1) * clamp(Falloff(VdotV), 0, 1);
+}
+
+float2 RotateDirection(float2 Dir, float2 CosSin)
+{
+    return float2(Dir.x * CosSin.x - Dir.y * CosSin.y,
+                  Dir.x * CosSin.y + Dir.y * CosSin.x);
+}
+
+float4 GetJitter(int slice)
+{
+    // Get the current jitter vector from the per-pass constant buffer
+    return jitters[slice];
+}
+
+float3 UVToView(float2 uv, float ViewDepth)
+{
+    return float3((uv * _SSAO_UVToView.xy + _SSAO_UVToView.zw) * ViewDepth, ViewDepth);
+}
+
+float3 FetchViewPos(float2 UV, int slice)
+{
+    float ViewDepth = LinearDepthInput.SampleLevel(sampler_LinearClamp, float3(UV, slice), 0);
+    return UVToView(UV, ViewDepth);
+}
+
+float3 FetchHalfResViewPos(float2 UV, int slice)
+{
+    float ViewDepth = LinearDepthInput.SampleLevel(sampler_LinearClamp, float3(UV, slice), 0).x;
+    return UVToView(UV, ViewDepth);
+}
+
+
+float ComputeCoarseAO(float2 FullResUV, float RadiusPixels, float4 Rand, float3 ViewPosition, float3 ViewNormal, int slice)
+{
+    RadiusPixels /= 2.0;
+    // Divide by NUM_STEPS+1 so that the farthest samples are not fully attenuated
+    float StepSizePixels = RadiusPixels / (NUM_STEPS + 1);
+
+    const float Alpha = 2.0 * PI / NUM_DIRECTIONS;
+    float AO = 0;
+
+
+    for (int DirectionIndex = 0; DirectionIndex < NUM_DIRECTIONS; ++DirectionIndex)
+    {
+        float Angle = Alpha * DirectionIndex;
+
+        // Compute normalized 2D direction
+        float2 Direction = RotateDirection(float2(cos(Angle), sin(Angle)), Rand.xy);
+
+        // Jitter starting sample within the first step
+        float RayPixels = (Rand.z * StepSizePixels + 1.0);
+
+        for (int StepIndex = 0; StepIndex < NUM_STEPS; ++StepIndex)
+        {
+            float2 SnappedUV = round(RayPixels * Direction) * InvHalfResolution + FullResUV;
+            float3 S = FetchHalfResViewPos(SnappedUV, slice);
+
+            RayPixels += StepSizePixels;
+
+            AO += ComputeAO(ViewPosition, ViewNormal, S);
+        }
+    }
+
+
+    AO *= AOMultiplier / (NUM_DIRECTIONS * NUM_STEPS);
+    return clamp(1.0 - AO * 2.0, 0, 1);
+}
+
+
+//----------------------------------------------------------------------------------
+[numthreads(8,8,1)]
+void KMain(uint3 id : SV_DispatchThreadID)
+{
+    int slice = id.z;
+    int2 AOCoord = id.xy;
+
+    float2 uv = (float2(AOCoord) + 0.5f) * InvHalfResolution;
+
+    float3 ViewPosition = FetchHalfResViewPos(uv, slice);
+    float4 NormalAndAO = NormalViewInput[int3(AOCoord, slice)];
+    float3 ViewNormal = NormalAndAO.xyz;
+
+    // Compute projection of disk of radius control.R into screen space
+    float RadiusPixels = RadiusToScreen / ViewPosition.z;
+
+    // Get jitter vector for the current full-res pixel
+    float4 Rand = GetJitter(slice);
+
+
+    float AO = ComputeCoarseAO(uv, RadiusPixels, Rand, ViewPosition, ViewNormal, slice);
+    AOOutput[int3(AOCoord, slice)] = float4(pow(AO, PowExponent), ViewPosition.z, 0, 0);
+}

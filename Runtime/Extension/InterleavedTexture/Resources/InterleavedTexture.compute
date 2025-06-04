@@ -1,0 +1,29 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel PrepareInterleavedTexture
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+Texture2D<float4> Input;
+RWTexture2DArray<float4> Result;
+
+
+float4 Prepare_Load(int2 coord)
+{
+    float4 color = Input.Load(int3(coord, 0));
+    return color;
+}
+void Prepare_Store(int2 coord, int index, float4 color)
+{
+    Result[int3(coord, index)] = color;
+}
+
+//4 of half resolution in Texture2DArray
+[numthreads(8, 8, 1)]
+void PrepareInterleavedTexture (uint3 tid : SV_DispatchThreadID)
+{
+	int2 baseCoord = 2 * tid;
+    Prepare_Store(tid, 0, Prepare_Load(baseCoord + int2(0, 0)));
+    Prepare_Store(tid, 1, Prepare_Load(baseCoord + int2(1, 0)));
+    Prepare_Store(tid, 2, Prepare_Load(baseCoord + int2(0, 1)));
+    Prepare_Store(tid, 3, Prepare_Load(baseCoord + int2(1, 1)));
+}

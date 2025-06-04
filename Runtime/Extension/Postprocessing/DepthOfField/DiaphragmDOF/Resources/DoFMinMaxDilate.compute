@@ -1,0 +1,48 @@
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "PostProcessDefines.hlsl"
+#include "DepthOfFieldCommon.hlsl"
+
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+#pragma kernel KMain
+
+TEXTURE2D_X(_InputTexture);
+RWTexture2D<float4> _OutputTexture;
+
+// min-max tile size
+#define TILE_RES  8u
+
+#define GROUP_RES  8u
+#define GROUP_SIZE (GROUP_RES * GROUP_RES)
+
+void DilateTile(inout CoCTileData tileInfo, CoCTileData tile)
+{
+    // far field
+    tileInfo.minFarCoC = min(tileInfo.minFarCoC, tile.minFarCoC);
+    tileInfo.maxFarCoC = max(tileInfo.maxFarCoC, tile.maxFarCoC);
+
+    // near field
+    tileInfo.minNearCoC = max(tileInfo.minNearCoC, tile.minNearCoC);
+    tileInfo.maxNearCoC = min(tileInfo.maxNearCoC, tile.maxNearCoC);
+}
+
+[numthreads(GROUP_RES, GROUP_RES, 1)]
+void KMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    // UNITY_XR_ASSIGN_VIEW_INDEX(dispatchThreadId.z);
+
+    CoCTileData tileInfo = LoadCoCTileData(_InputTexture, dispatchThreadId.xy);
+
+    int2 startIndex = max((int2)dispatchThreadId.xy - int2(1, 1), int2(0, 0));
+    int2 endIndex = min((int2)dispatchThreadId.xy + int2(1, 1), _ScreenSize.xy / TILE_RES - int2(1, 1));
+
+    for (int i = startIndex.x; i <= endIndex.x; i++)
+    {
+        for (int j = startIndex.y; j <= endIndex.y; j++)
+        {
+            CoCTileData tile = LoadCoCTileData(_InputTexture, int2(i, j));
+            DilateTile(tileInfo, tile);
+        }
+    }
+
+    _OutputTexture[dispatchThreadId.xy] = PackCoCTileData(tileInfo);
+}

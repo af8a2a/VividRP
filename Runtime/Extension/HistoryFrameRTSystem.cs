@@ -76,6 +76,8 @@ namespace UnityEngine.Rendering.Universal
 
         ScreenSpaceGlobalIlluminationHistoryDepth,
         ScreenSpaceGlobalIlluminationHistoryColor,
+        
+        Exposure
 
     }
 

@@ -1,5 +1,4 @@
 using Features.Shadow.ShadowCommon;
-using Features.Shadow.ShadowFilter;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;

@@ -220,7 +220,6 @@ namespace UnityEngine.Rendering.Universal
         public static void ClearAll()
         {
             instance?.Dispose();
-            m_Instance = null;
         }
     }
 }

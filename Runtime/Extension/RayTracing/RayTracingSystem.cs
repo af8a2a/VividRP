@@ -421,11 +421,12 @@ namespace UnityEngine.Rendering.Universal
             RayTracedEffectsParameters parameters = new RayTracedEffectsParameters();
 
             // Aggregate the shadow requirements
-            // Shadows shadowSettings = volumeStack.GetComponent<Shadows>();
-            // bool opaqueShadows = shadowSettings.rayTracing.value;
-            // //bool transparentReflections = shadowSettings.enabledTransparent.value;
-            // parameters.shadows = opaqueShadows;
-            // parameters.characterShadowLayerMask = shadowSettings.characterLayerMask.value;
+            Shadows shadowSettings = volumeStack.GetComponent<Shadows>();
+            bool opaqueShadows = shadowSettings.rayTracing.value;
+            // bool transparentReflections = shadowSettings.enabledTransparent.value;
+            parameters.shadows = opaqueShadows;
+            parameters.characterShadowLayerMask = shadowSettings.characterLayerMask.value;
+            
             //
             // // Aggregate the ambient occlusion parameters
             //
@@ -442,7 +443,6 @@ namespace UnityEngine.Rendering.Universal
             // We need to check if at least one effect will require the acceleration structure
             parameters.rayTracingRequired = parameters.ambientOcclusion || parameters.reflections
                 || parameters.globalIllumination || parameters.shadows;
-            parameters.rayTracingRequired = true;
             // Return the result
             return parameters;
         }

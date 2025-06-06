@@ -1,9 +1,10 @@
 ﻿using Features.Shadow;
-using Features.Shadow.ShadowCommon;
 using UnityEditor;
 using UnityEditor.Rendering;
 using UnityEditorInternal;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 namespace UnityEditor.Rendering.Universal
 {
@@ -12,6 +13,13 @@ namespace UnityEditor.Rendering.Universal
     public class ShadowEditor : VolumeComponentEditor
     {
         private SerializedDataParameter m_Enable;
+
+
+        SerializedDataParameter m_RayTracing;
+        SerializedDataParameter m_DirShadowsRayLength;
+        SerializedDataParameter m_CharacterLayerMask;
+
+
         SerializedDataParameter m_ShadowsAlgo;
         SerializedDataParameter m_ShadowsIntensity;
 
@@ -52,6 +60,12 @@ namespace UnityEditor.Rendering.Universal
             var o = new PropertyFetcher<Shadows>(serializedObject);
 
             m_Enable = Unpack(o.Find(x => x.enable));
+
+
+            m_RayTracing = Unpack(o.Find(x => x.rayTracing));
+            m_DirShadowsRayLength = Unpack(o.Find(x => x.dirShadowsRayLength));
+            m_CharacterLayerMask = Unpack(o.Find(x => x.characterLayerMask));
+
             m_ShadowsAlgo = Unpack(o.Find(x => x.shadowAlgo));
             m_ShadowsIntensity = Unpack(o.Find(x => x.intensity));
             m_MaxShadowDistance = Unpack(o.Find(x => x.maxShadowDistance));
@@ -89,13 +103,49 @@ namespace UnityEditor.Rendering.Universal
         public override void OnInspectorGUI()
         {
             PropertyField(m_Enable, EditorGUIUtility.TrTextContent("Shadow Enable"));
+            PropertyField(m_RayTracing,EditorGUIUtility.TrTextContent("Raytracing Shadow"));
 
+            bool rayTracingSettingsDisplayed = m_RayTracing.overrideState.boolValue
+                                               && m_RayTracing.value.boolValue;
+
+
+            // The rest of the ray tracing UI is only displayed if the asset supports ray tracing and the checkbox is checked.
+            if (rayTracingSettingsDisplayed)
+            {
+                RayTracedShadowsGUI();
+            }
+            else
+            {
+                RasterShadowsGUI();
+            }
+
+        }
+
+
+        void RayTracedShadowsGUI()
+        {
+            if (!SystemInfo.supportsRayTracing)
+            {
+                EditorGUILayout.HelpBox("Platform not support Raytracing", MessageType.Error, true);
+            }
+            else
+            {
+                PropertyField(m_DirShadowsRayLength);
+                PropertyField(m_CharacterLayerMask);
+
+                EditorGUILayout.Space(10);
+
+                PropertyField(m_ShadowsIntensity);
+            }
+        }
+
+        void RasterShadowsGUI()
+        {
             PropertyField(m_ShadowsAlgo, EditorGUIUtility.TrTextContent("Shadow Algo"));
             PropertyField(m_ShadowsIntensity, EditorGUIUtility.TrTextContent("Shadow Intensity"));
 
-            
-#if false
 
+#if false
             PropertyField(m_MaxShadowDistance, EditorGUIUtility.TrTextContent("Max Distance"));
 
             Unit unit;
@@ -196,7 +246,8 @@ namespace UnityEditor.Rendering.Universal
 
 
         #region Cascade Editor Extension
-    //preserved for cascade extend...
+
+        //preserved for cascade extend...
 
         private void DrawShadowCascades(int cascadeCount, bool useMetric, float baseMetric)
         {

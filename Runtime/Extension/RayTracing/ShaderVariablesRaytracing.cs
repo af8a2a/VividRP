@@ -1,6 +1,6 @@
 namespace UnityEngine.Rendering.Universal
 {
-    [GenerateHLSL(needAccessors = false, generateCBuffer = true)]
+    [GenerateHLSL(needAccessors = false, generateCBuffer = true, constantRegister = (int)ConstantRegister.RayTracing)]
     unsafe struct ShaderVariablesRaytracing
     {
         public float _RayTracingPadding0;

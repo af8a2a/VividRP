@@ -5,7 +5,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
-namespace Features.Shadow.ShadowFilter
+namespace UnityEngine.Rendering.Universal
 {
     public static class PCSSFilterUtil
     {

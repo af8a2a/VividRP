@@ -7,27 +7,12 @@ namespace UnityEngine.Rendering.Universal
     {
         private class PassData
         {
-            // Compute shader
-            internal ComputeShader cs;
-            internal int classifyTilesKernel;
-            internal int shadowmapKernel;
-            internal int bilateralHKernel;
-            internal int bilateralVKernel;
-
-            internal int numTilesX;
-            internal int numTilesY;
-
-            // Compute Buffers
-            internal BufferHandle dispatchIndirectBuffer;
-            internal BufferHandle tileListBuffer;
-
             // Texture
             internal TextureHandle dirShadowmapTex;
             internal TextureHandle screenSpaceShadowmapTex;
             internal Vector2Int screenSpaceShadowmapSize;
             internal TextureHandle normalGBuffer;
 
-            internal int camHistoryFrameCount;
 
             // Ray Tracing
             internal bool requireRayTracing;
@@ -36,26 +21,23 @@ namespace UnityEngine.Rendering.Universal
             internal uint dispatchRaySizeX;
             internal uint dispatchRaySizeY;
             internal ShaderVariablesRaytracing rayTracingCB;
-            internal TextureHandle stencilHandle;
+            internal BlueNoiseSystem.DitheredTextureHandleSet ditheredTextureHandleSet;
+
+            internal float radius;
+            internal int sampleCount;
+            internal int frameIndex;
         }
 
         static class ShaderConstants
         {
-            public static readonly int g_DispatchIndirectBuffer = Shader.PropertyToID("g_DispatchIndirectBuffer");
-            public static readonly int g_TileList = Shader.PropertyToID("g_TileList");
-
-            public static readonly int _DirShadowmapTexture = Shader.PropertyToID("_DirShadowmapTexture");
-            public static readonly int _SSDirShadowmapTexture = Shader.PropertyToID("_SSDirShadowmapTexture");
-            public static readonly int _ScreenSpaceShadowmapTexture = Shader.PropertyToID("_ScreenSpaceShadowmapTexture");
-            public static readonly int _PCSSTexture = Shader.PropertyToID("_PCSSTexture");
-            public static readonly int _BilateralTexture = Shader.PropertyToID("_BilateralTexture");
-            public static readonly int _CamHistoryFrameCount = Shader.PropertyToID("_CamHistoryFrameCount");
-
             public static readonly int _RayTracingShadowsTextureRW = Shader.PropertyToID("_RayTracingShadowsTextureRW");
-            public static readonly int _StencilTexture = Shader.PropertyToID("_StencilTexture");
-            
+
+
             public static readonly int _RaytracingShadow = Shader.PropertyToID("_RaytracingShadow");
 
+            public static readonly int radius = Shader.PropertyToID("radius");
+            public static readonly int sampleCount = Shader.PropertyToID("sampleCount");
+            public static readonly int frameIndex = Shader.PropertyToID("frameIndex");
         }
 
 
@@ -67,11 +49,13 @@ namespace UnityEngine.Rendering.Universal
         {
             var stack = VolumeManager.instance.stack;
             var volumeSettings = stack.GetComponent<Shadows>();
-            if (volumeSettings == null)
+            if (!volumeSettings)
             {
                 passData.requireRayTracing = false;
                 return;
             }
+
+            var historyRT = HistoryFrameRTSystem.GetOrCreate(cameraData.camera);
 
 
             passData.requireRayTracing &= volumeSettings.rayTracing.value;
@@ -87,11 +71,11 @@ namespace UnityEngine.Rendering.Universal
                 passData.dispatchRaySizeX = (uint)width;
                 passData.dispatchRaySizeY = (uint)height;
 
-                passData.stencilHandle = resourceData.activeDepthTexture;
                 passData.screenSpaceShadowmapTex = renderGraph.CreateTexture(new TextureDesc(cameraData.scaledWidth, cameraData.scaledHeight)
                 {
                     enableRandomWrite = true,
                     format = GraphicsFormat.R16_SFloat,
+                    name = "Raytracing ShadowTexture"
                 });
                 // RayTracing constant buffer
                 {
@@ -110,6 +94,11 @@ namespace UnityEngine.Rendering.Universal
                     passData.rayTracingCB._RayTracingLastBounceFallbackHierarchy = 0;
                     passData.rayTracingCB._RayTracingAmbientProbeDimmer = 1.0f;
                 }
+                passData.ditheredTextureHandleSet = BlueNoiseSystem.instance.DitheredTextureSet8SPP().RenderGraphImport(renderGraph);
+
+                passData.frameIndex = historyRT.historyFrameCount;
+                passData.sampleCount = volumeSettings.sampleCount.value;
+                passData.radius = volumeSettings.radius.value;
             }
         }
 
@@ -130,14 +119,25 @@ namespace UnityEngine.Rendering.Universal
                     // SetConstantBuffer
                     ConstantBuffer.PushGlobal(cmd, data.rayTracingCB, RayTracingSystem._ShaderVariablesRaytracing);
 
+                    BlueNoiseSystem.BindDitheredTextureSet(cmd,data.ditheredTextureHandleSet);
                     // SetTextures
                     cmd.SetRayTracingTextureParam(data.rtrtShader, ShaderConstants._RayTracingShadowsTextureRW, data.screenSpaceShadowmapTex);
 
+                    cmd.SetRayTracingFloatParam(data.rtrtShader, ShaderConstants.sampleCount, data.sampleCount);
+                    cmd.SetRayTracingFloatParam(data.rtrtShader, ShaderConstants.radius, data.radius);
+                    cmd.SetRayTracingIntParam(data.rtrtShader, ShaderConstants.frameIndex, data.frameIndex);
+
                     cmd.DispatchRays(data.rtrtShader, "SingleRayGen", data.dispatchRaySizeX, data.dispatchRaySizeY, 1, null);
+                    CoreUtils.SetKeyword(cmd,"RAYTRACING_SHADOW",true);
+
                 }
             }
         }
 
+        public override void FrameCleanup(CommandBuffer cmd)
+        {
+            CoreUtils.SetKeyword(cmd,"RAYTRACING_SHADOW",false);
+        }
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
@@ -147,21 +147,24 @@ namespace UnityEngine.Rendering.Universal
                 UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
                 RaytracingData raytracingData = frameData.Get<RaytracingData>();
 
+
                 passData.requireRayTracing = raytracingData.rayTracingSystem.GetRayTracingState();
-                InitRayTracingPassData(renderGraph,passData,raytracingData, cameraData, resourceData);
-                builder.UseTexture(passData.screenSpaceShadowmapTex);
-                
-                
+                if (!passData.requireRayTracing)
+                {
+                    return;
+                }
+
+                InitRayTracingPassData(renderGraph, passData, raytracingData, cameraData, resourceData);
+                passData.ditheredTextureHandleSet.Use(builder);
+                builder.UseTexture(passData.screenSpaceShadowmapTex, AccessFlags.ReadWrite);
+
+
                 builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(passData.requireRayTracing);
-                
-                builder.SetRenderFunc((PassData data, ComputeGraphContext context) =>
-                {
-                    ExecutePass(data, context);
-                });
+
+                builder.SetRenderFunc((PassData data, ComputeGraphContext context) => { ExecutePass(data, context); });
                 raytracingData.rayTracingShadowTexture = passData.screenSpaceShadowmapTex;
                 builder.SetGlobalTextureAfterPass(raytracingData.rayTracingShadowTexture, ShaderConstants._RaytracingShadow);
-
             }
         }
     }

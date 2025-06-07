@@ -20,6 +20,7 @@ Shader "Hidden/CustomScreenSpaceShadows"
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
 
         TEXTURE2D_SHADOW(_PerObjectScreenSpaceShadowmapTexture);
+        TEXTURE2D_SHADOW(_RaytracingShadow);
 
 
         half SamplePerObjectShadowmap(float2 PositionSS)
@@ -30,6 +31,12 @@ Shader "Hidden/CustomScreenSpaceShadows"
         }
 
 
+        half SampleRaytracingshadowmap(float2 PositionSS)
+        {
+            half attenuation = half(SAMPLE_TEXTURE2D(_RaytracingShadow, sampler_PointClamp, PositionSS.xy).x);
+
+            return attenuation;
+        }
 
         half4 Fragment(Varyings input) : SV_Target
         {
@@ -47,14 +54,19 @@ Shader "Hidden/CustomScreenSpaceShadows"
             float4 coords = TransformWorldToShadowCoord(wpos);
 
             // Screenspace shadowmap is only used for directional lights which use orthogonal projection.
-        #if  defined(PCSS)
+
+            #if defined(RAYTRACING_SHADOW)
+
+            half realtimeShadow = SampleRaytracingshadowmap(input.texcoord.xy);
+            #else
+            #if  defined(PCSS)
 
             half realtimeShadow = MainLightRealtimeShadow_PCSS(wpos,coords,input.texcoord.xy);
             #else
-            
+
             half realtimeShadow = MainLightRealtimeShadow(coords);
             #endif
-
+            #endif
             #if defined(_PEROBJECT_SCREEN_SPACE_SHADOW)
             realtimeShadow=min(realtimeShadow,SamplePerObjectShadowmap(input.texcoord.xy));
             #endif
@@ -75,7 +87,9 @@ Shader "Hidden/CustomScreenSpaceShadows"
             #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
             #pragma multi_compile_fragment _ _PEROBJECT_SCREEN_SPACE_SHADOW
             #pragma multi_compile_fragment _ PCSS
+            #pragma multi_compile_fragment _ RAYTRACING_SHADOW
 
+            
             #pragma vertex   Vert
             #pragma fragment Fragment
             ENDHLSL

@@ -118,6 +118,17 @@ namespace UnityEngine.Rendering.Universal
                 rankingTile?.Release();
                 scramblingTex?.Release();
             }
+
+            public DitheredTextureHandleSet RenderGraphImport(RenderGraph renderGraph)
+            {
+                return new DitheredTextureHandleSet
+                {
+                    owenScrambled256Tex = renderGraph.ImportTexture(owenScrambled256Tex),
+                    scramblingTile = renderGraph.ImportTexture(scramblingTile),
+                    rankingTile = renderGraph.ImportTexture(rankingTile),
+                    scramblingTex = renderGraph.ImportTexture(scramblingTex),
+                };
+            }
         }
 
         internal DitheredTextureSet DitheredTextureSet1SPP() => m_DitheredTextureSet1SPP;
@@ -196,6 +207,14 @@ namespace UnityEngine.Rendering.Universal
             public TextureHandle scramblingTile;
             public TextureHandle rankingTile;
             public TextureHandle scramblingTex;
+
+            public void Use(IBaseRenderGraphBuilder builder)
+            {
+                builder.UseTexture(owenScrambled256Tex);
+                builder.UseTexture(scramblingTile);
+                builder.UseTexture(rankingTile);
+                builder.UseTexture(scramblingTex);
+            }
         }
 
 

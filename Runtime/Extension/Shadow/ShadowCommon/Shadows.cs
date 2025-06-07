@@ -85,7 +85,7 @@ namespace UnityEngine.Rendering.Universal
 
     [Serializable, VolumeComponentMenu("Lighting/Shadows")]
     [SupportedOnRenderPipeline(typeof(UniversalRenderPipelineAsset))]
-    public sealed class Shadows : VolumeComponent, IPostProcessComponent
+    public sealed partial class Shadows : VolumeComponent, IPostProcessComponent
     {
         public BoolParameter enable = new BoolParameter(false, BoolParameter.DisplayType.EnumPopup);
 
@@ -97,18 +97,7 @@ namespace UnityEngine.Rendering.Universal
         [Tooltip("Shadow intensity.")] public ClampedFloatParameter intensity = new ClampedFloatParameter(0.5f, 0.0f, 1.0f);
 
 
-        #region Raytracing Shadow
 
-        [Tooltip("Use RayTracing for opaques.")]
-        public BoolParameter rayTracing = new BoolParameter(false, BoolParameter.DisplayType.EnumPopup);
-
-        [Tooltip("Controls the ray length for ray traced directional shadows.")]
-        public MinFloatParameter dirShadowsRayLength = new MinFloatParameter(1000.0f, 0.01f);
-
-        [Tooltip("Controls character self shadows layer.")]
-        public LayerMaskParameter characterLayerMask = new LayerMaskParameter(0);
-
-        #endregion
         
         
         

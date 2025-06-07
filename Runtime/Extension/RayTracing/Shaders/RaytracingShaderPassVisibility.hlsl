@@ -31,7 +31,7 @@ void ClosestHitMain(inout RayIntersectionVisibility rayIntersection : SV_RayPayl
 [shader("anyhit")]
 void AnyHitMain(inout RayIntersectionVisibility rayIntersection : SV_RayPayload, AttributeData attributeData : SV_IntersectionAttributes)
 {
-    rayIntersection.color.x = 0.5;
+    rayIntersection.color.x = 0;
     IgnoreHit();
 }
 

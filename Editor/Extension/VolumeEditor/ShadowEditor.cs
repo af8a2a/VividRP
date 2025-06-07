@@ -17,6 +17,8 @@ namespace UnityEditor.Rendering.Universal
 
         SerializedDataParameter m_RayTracing;
         SerializedDataParameter m_DirShadowsRayLength;
+        SerializedDataParameter m_sampleCount;
+        SerializedDataParameter m_radius;
         SerializedDataParameter m_CharacterLayerMask;
 
 
@@ -64,6 +66,8 @@ namespace UnityEditor.Rendering.Universal
 
             m_RayTracing = Unpack(o.Find(x => x.rayTracing));
             m_DirShadowsRayLength = Unpack(o.Find(x => x.dirShadowsRayLength));
+            m_sampleCount= Unpack(o.Find(x => x.sampleCount));
+            m_radius = Unpack(o.Find(x => x.radius));
             m_CharacterLayerMask = Unpack(o.Find(x => x.characterLayerMask));
 
             m_ShadowsAlgo = Unpack(o.Find(x => x.shadowAlgo));
@@ -133,6 +137,8 @@ namespace UnityEditor.Rendering.Universal
                 PropertyField(m_DirShadowsRayLength);
                 PropertyField(m_CharacterLayerMask);
 
+                PropertyField(m_sampleCount);
+                PropertyField(m_radius);
                 EditorGUILayout.Space(10);
 
                 PropertyField(m_ShadowsIntensity);

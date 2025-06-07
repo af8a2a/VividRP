@@ -6,7 +6,6 @@
 #define SHADERVARIABLESRAYTRACING_CS_HLSL
 // Generated from UnityEngine.Rendering.Universal.ShaderVariablesRaytracing
 // PackingRules = Exact
-
 GLOBAL_CBUFFER_START(ShaderVariablesRaytracing, b3)
     float _RayTracingPadding0;
     float _RaytracingRayMaxLength;
@@ -25,21 +24,15 @@ GLOBAL_CBUFFER_START(ShaderVariablesRaytracing, b3)
     float _DirectionalShadowFallbackIntensity;
     float _RayTracingLodBias;
     int _RayTracingRayMissFallbackHierarchy;
+    int _RayTracingRayMissUseAmbientProbeAsSky;
     int _RayTracingLastBounceFallbackHierarchy;
     int _RayTracingClampingFlag;
     float _RayTracingAmbientProbeDimmer;
     int _RayTracingAPVRayMiss;
     float _RayTracingRayBias;
     float _RayTracingDistantRayBias;
-    int _RayTracingFrameIndex;
     int _RayTracingReflectionFrameIndex;
-    uint _XRViewCount;
-    int _IndirectDiffuseMode;
-    int _RayTracingCheckerIndex;
-    int _EnableRayTracedReflections;
-    float _RayTracingReflectionProbeDimmer;
-    int _Padding0;
-    int _Padding1;
 CBUFFER_END
+
 
 #endif

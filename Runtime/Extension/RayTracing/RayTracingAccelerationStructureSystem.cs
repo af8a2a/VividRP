@@ -89,7 +89,7 @@ namespace UnityEngine.Rendering.Universal
         //RayTracingInstanceCullingTest RR_CT = new RayTracingInstanceCullingTest();
         //RayTracingInstanceCullingTest SSS_CT = new RayTracingInstanceCullingTest();
         //RayTracingInstanceCullingTest PT_CT = new RayTracingInstanceCullingTest();
-        RayTracingInstanceCullingTest ShChar_CT = new RayTracingInstanceCullingTest();
+        // RayTracingInstanceCullingTest ShChar_CT = new RayTracingInstanceCullingTest();
 
         // Path tracing dirtiness parameters
         public bool transformsDirty;
@@ -134,8 +134,8 @@ namespace UnityEngine.Rendering.Universal
 
             // Flags that define which shaders to include (HDRP shaders only)
             cullingConfig.materialTest.requiredShaderTags = new RayTracingInstanceCullingShaderTagConfig[1];
-            cullingConfig.materialTest.requiredShaderTags[0].tagId = new ShaderTagId("RayTracingRenderPipeline");
-            cullingConfig.materialTest.requiredShaderTags[0].tagValueId = new ShaderTagId("DanbaidongRP");
+            cullingConfig.materialTest.requiredShaderTags[0].tagId = new ShaderTagId("RenderPipeline");
+            cullingConfig.materialTest.requiredShaderTags[0].tagValueId = new ShaderTagId("UniversalPipeline");
             //cullingConfig.materialTest.deniedShaderPasses = DecalSystem.s_MaterialDecalPassNames;
             cullingConfig.instanceTests = new RayTracingInstanceCullingTest[9];
 
@@ -212,12 +212,12 @@ namespace UnityEngine.Rendering.Universal
             //PT_CT.instanceMask = (uint)RayTracingRendererFlag.PathTracing;
 
             // Setup the culling data for character shadows
-            ShChar_CT.allowOpaqueMaterials = true;
-            ShChar_CT.allowAlphaTestedMaterials = true;
-            ShChar_CT.allowTransparentMaterials = false;
-            ShChar_CT.layerMask = 0;
-            ShChar_CT.shadowCastingModeMask = (1 << (int)ShadowCastingMode.On) | (1 << (int)ShadowCastingMode.TwoSided) | (1 << (int)ShadowCastingMode.ShadowsOnly);
-            ShChar_CT.instanceMask = (uint)RayTracingRendererFlag.CastShadowCharacter;
+            // ShChar_CT.allowOpaqueMaterials = true;
+            // ShChar_CT.allowAlphaTestedMaterials = true;
+            // ShChar_CT.allowTransparentMaterials = false;
+            // ShChar_CT.layerMask = 0;
+            // ShChar_CT.shadowCastingModeMask = (1 << (int)ShadowCastingMode.On) | (1 << (int)ShadowCastingMode.TwoSided) | (1 << (int)ShadowCastingMode.ShadowsOnly);
+            // ShChar_CT.instanceMask = (uint)RayTracingRendererFlag.CastShadowCharacter;
         }
 
         void SetupCullingData(bool pathTracingEnabled)
@@ -324,10 +324,10 @@ namespace UnityEngine.Rendering.Universal
                 // We exclude character layer for self raytracing shadows.
                 ShO_CT.layerMask = ~parameters.characterShadowLayerMask;
                 ShT_CT.layerMask = ~parameters.characterShadowLayerMask;
-                ShChar_CT.layerMask = parameters.characterShadowLayerMask;
+                // ShChar_CT.layerMask = parameters.characterShadowLayerMask;
                 instanceTestArray.Add(ShO_CT);
                 instanceTestArray.Add(ShT_CT);
-                instanceTestArray.Add(ShChar_CT);
+                // instanceTestArray.Add(ShChar_CT);
             }
 
             if (parameters.ambientOcclusion)

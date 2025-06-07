@@ -105,7 +105,7 @@ namespace UnityEngine.Rendering.Universal
                 return false;
 
             // For the time being, we only consider non-decal HDRP materials as valid
-            return currentMaterial.GetTag("RayTracingRenderPipeline", false) == "DanbaidongRP";
+            return currentMaterial.GetTag("RenderPipeline", false) == "UniversalPipeline";
         }
 
         // TODO: ensure this queue.

@@ -4,7 +4,7 @@
 
 #ifndef XEGTAO_H_CS_HLSL
 #define XEGTAO_H_CS_HLSL
-// Generated from Features.AmbientOcclusion.XeGTAO.XeGTAO+GTAOConstantsCS
+// Generated from UnityEngine.Rendering.Universal.XeGTAO+GTAOConstantsCS
 // PackingRules = Exact
 CBUFFER_START(GTAOConstantsCS)
     int2 ViewportSize;

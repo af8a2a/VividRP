@@ -12,15 +12,18 @@ namespace UnityEngine.Rendering.Universal
 
         static class Profiling
         {
-            public static ProfilingSampler RaytracingBuildAccelerationStructure = new ProfilingSampler(nameof(RaytracingBuildAccelerationStructure));
+            public static readonly ProfilingSampler RaytracingBuildAccelerationStructure = new ProfilingSampler(nameof(RaytracingBuildAccelerationStructure));
         }
 
         class RaytracingCorePassData
         {
-            
         }
 
-        
+        public void Setup()
+        {
+            ConfigureInput(ScriptableRenderPassInput.Normal | ScriptableRenderPassInput.Motion);
+        }
+
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
             UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();

@@ -29,7 +29,8 @@ namespace Features.Shadow.UberScreenSpaceShadow
 
         private CascadeShadowCaster m_cascadeShadowCaster = null;
 
-
+        private RaytracingShadowPass m_RaytracingShadowPass = null;
+        
         /// <inheritdoc/>
         public override void Create()
         {
@@ -43,6 +44,13 @@ namespace Features.Shadow.UberScreenSpaceShadow
 
             m_SSShadowsPass.renderPassEvent = RenderPassEvent.AfterRenderingGbuffer;
             m_SSShadowsPostPass.renderPassEvent = RenderPassEvent.BeforeRenderingTransparents;
+            
+            m_RaytracingShadowPass=new RaytracingShadowPass()
+            {
+                renderPassEvent = RenderPassEvent.AfterRenderingPrePasses,
+            };
+            
+            
         }
 
 
@@ -63,12 +71,20 @@ namespace Features.Shadow.UberScreenSpaceShadow
 
             bool shouldEnqueue = allowMainLightShadows && m_SSShadowsPass.Setup(m_Settings);
 
+            if (shadowSettings.rayTracing.value)
+            {
+                renderer.EnqueuePass(m_RaytracingShadowPass);
+            }
+            
             if (shouldEnqueue)
             {
                 m_SSShadowsPass.renderPassEvent = usesDeferredLighting
                     ? RenderPassEvent.AfterRenderingGbuffer
                     : RenderPassEvent.AfterRenderingPrePasses +
                       1; // We add 1 to ensure this happens after depth priming depth copy pass that might be scheduled
+
+                
+                renderer.EnqueuePass(m_RaytracingShadowPass);
 
                 if (m_cascadeShadowCaster.Setup(ref renderingData))
                 {

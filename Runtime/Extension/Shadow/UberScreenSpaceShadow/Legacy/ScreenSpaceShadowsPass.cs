@@ -114,7 +114,7 @@ namespace Features.Shadow.UberScreenSpaceShadow
                 builder.SetRenderFunc((PassData data, RasterGraphContext rgContext) => { ExecutePass(rgContext.cmd, data, data.target); });
             }
         }
-
+        
         private static void ExecutePass(RasterCommandBuffer cmd, PassData data, RTHandle target)
         {
             Blitter.BlitTexture(cmd, target, Vector2.one, data.material, 0);

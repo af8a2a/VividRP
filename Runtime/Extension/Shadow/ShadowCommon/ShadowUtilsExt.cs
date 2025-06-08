@@ -1,10 +1,9 @@
-﻿using Features.Shadow.ShadowCommon;
-using Unity.Mathematics;
+﻿using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
-namespace Features.Shadow
+namespace UnityEngine.Rendering.Universal
 {
     public static class ShadowUtilsExt
     {

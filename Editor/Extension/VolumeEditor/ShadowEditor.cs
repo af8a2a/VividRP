@@ -13,7 +13,7 @@ namespace UnityEditor.Rendering.Universal
     public class ShadowEditor : VolumeComponentEditor
     {
         private SerializedDataParameter m_Enable;
-
+        private SerializedDataParameter m_CascadeMode;
 
         SerializedDataParameter m_RayTracing;
         SerializedDataParameter m_DirShadowsRayLength;
@@ -32,7 +32,7 @@ namespace UnityEditor.Rendering.Universal
 
 
         SerializedDataParameter m_Penumbra;
-
+         SerializedDataParameter m_OcclusionPenumbra;
         SerializedDataParameter m_ShadowScatterMode;
         SerializedDataParameter m_ShadowRampTex;
         SerializedDataParameter m_ScatterR;
@@ -62,7 +62,7 @@ namespace UnityEditor.Rendering.Universal
             var o = new PropertyFetcher<Shadows>(serializedObject);
 
             m_Enable = Unpack(o.Find(x => x.enable));
-
+            m_CascadeMode = Unpack(o.Find(x => x.cascadeMode));
 
             m_RayTracing = Unpack(o.Find(x => x.rayTracing));
             m_DirShadowsRayLength = Unpack(o.Find(x => x.dirShadowsRayLength));
@@ -90,7 +90,7 @@ namespace UnityEditor.Rendering.Universal
             m_ScatterG = Unpack(o.Find(x => x.scatterG));
             m_ScatterB = Unpack(o.Find(x => x.scatterB));
             // m_ShadowACES = Unpack(o.Find(x => x.ACES));
-            // m_OcclusionPenumbra = Unpack(o.Find(x => x.occlusionPenumbra));
+            m_OcclusionPenumbra = Unpack(o.Find(x => x.occlusionPenumbra));
 
             layers = new int[InternalEditorUtility.layers.Length];
             displayedOptions = new GUIContent[InternalEditorUtility.layers.Length];
@@ -148,6 +148,8 @@ namespace UnityEditor.Rendering.Universal
         void RasterShadowsGUI()
         {
             PropertyField(m_ShadowsAlgo, EditorGUIUtility.TrTextContent("Shadow Algo"));
+            PropertyField(m_CascadeMode, EditorGUIUtility.TrTextContent("Cascade Mode"));
+
             PropertyField(m_ShadowsIntensity, EditorGUIUtility.TrTextContent("Shadow Intensity"));
 
 
@@ -244,7 +246,7 @@ namespace UnityEditor.Rendering.Universal
             GUILayout.Label("Shadow Scatter");
             PropertyField(m_ShadowScatterMode, EditorGUIUtility.TrTextContent("ShadowScatterMode"));
             PropertyField(m_ShadowRampTex, EditorGUIUtility.TrTextContent("ShadowRampTex"));
-            // PropertyField(m_OcclusionPenumbra, EditorGUIUtility.TrTextContent("OcclusionPenumbra"));
+            PropertyField(m_OcclusionPenumbra, EditorGUIUtility.TrTextContent("OcclusionPenumbra"));
             PropertyField(m_ScatterR, EditorGUIUtility.TrTextContent("ScatterR"));
             PropertyField(m_ScatterG, EditorGUIUtility.TrTextContent("ScatterG"));
             PropertyField(m_ScatterB, EditorGUIUtility.TrTextContent("ScatterB"));

@@ -10,6 +10,8 @@ Shader "Hidden/CustomScreenSpaceShadows"
         HLSLINCLUDE
         //Keep compiler quiet about Shadows.hlsl.
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+        TEXTURE2D_SHADOW(_PerObjectScreenSpaceShadowmapTexture);
+        TEXTURE2D_SHADOW(_RaytracingShadow);
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/Shadow/ShadowsPCSS.hlsl"
@@ -19,10 +21,9 @@ Shader "Hidden/CustomScreenSpaceShadows"
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
 
-        TEXTURE2D_SHADOW(_PerObjectScreenSpaceShadowmapTexture);
-        TEXTURE2D_SHADOW(_RaytracingShadow);
 
 
+        
         half SamplePerObjectShadowmap(float2 PositionSS)
         {
             half attenuation = half(SAMPLE_TEXTURE2D(_PerObjectScreenSpaceShadowmapTexture, sampler_PointClamp, PositionSS.xy).x);
@@ -38,6 +39,20 @@ Shader "Hidden/CustomScreenSpaceShadows"
             return attenuation;
         }
 
+
+
+        half SampleCascadeshadowmapExtend(float3 positionWS)
+        {
+            float cascadeIndex = ComputeCascadeIndex(positionWS);
+            float4 shadowCoord = mul(_MainLightWorldToShadow[cascadeIndex], float4(positionWS, 1.0));
+
+            half attenuation = half(SAMPLE_TEXTURE2D_ARRAY(_DirectionalLightsShadowmapTexture, sampler_PointClamp, shadowCoord.xy, cascadeIndex).x);
+
+            return attenuation;
+        }
+
+
+        
         half4 Fragment(Varyings input) : SV_Target
         {
             UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
@@ -64,7 +79,13 @@ Shader "Hidden/CustomScreenSpaceShadows"
             half realtimeShadow = MainLightRealtimeShadow_PCSS(wpos,coords,input.texcoord.xy);
             #else
 
+
+            #if defined(_CUSTOM_SHADOWS_CASCADE)
+            half realtimeShadow = SampleCascadeshadowmapExtend(wpos);
+            #else
             half realtimeShadow = MainLightRealtimeShadow(coords);
+            #endif
+            
             #endif
             #endif
             #if defined(_PEROBJECT_SCREEN_SPACE_SHADOW)
@@ -83,7 +104,7 @@ Shader "Hidden/CustomScreenSpaceShadows"
             Cull Off
 
             HLSLPROGRAM
-            #pragma multi_compile _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE
+            #pragma multi_compile _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _CUSTOM_SHADOWS_CASCADE
             #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
             #pragma multi_compile_fragment _ _PEROBJECT_SCREEN_SPACE_SHADOW
             #pragma multi_compile_fragment _ PCSS

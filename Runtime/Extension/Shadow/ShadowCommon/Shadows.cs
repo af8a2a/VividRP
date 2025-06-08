@@ -6,9 +6,18 @@ using UnityEngine.Rendering.Universal;
 
 namespace UnityEngine.Rendering.Universal
 {
+    
+    public enum CascadeMode
+    {
+        URP = 0, //default URP CSM
+        Custom = 1,//Texture2DArray
+    }
+
+    
+    
     public enum ShadowFilter
     {
-        PCF = 0, //default URP CSM
+        PCF = 0, 
         PCSS,
     }
 
@@ -20,6 +29,18 @@ namespace UnityEngine.Rendering.Universal
         SubSurface = 2,
     }
 
+    
+    [Serializable]
+    public sealed class CascadeModeParameter : VolumeParameter<CascadeMode>
+    {
+        public CascadeModeParameter(CascadeMode value, bool overrideState = false) : base(value, overrideState)
+        {
+        }
+    }
+
+
+    
+    
     [Serializable]
     public sealed class ShadowScatterModeParameter : VolumeParameter<ShadowScatterMode>
     {
@@ -89,7 +110,7 @@ namespace UnityEngine.Rendering.Universal
     {
         public BoolParameter enable = new BoolParameter(false, BoolParameter.DisplayType.EnumPopup);
 
-        
+        public CascadeModeParameter cascadeMode = new CascadeModeParameter(CascadeMode.URP, true);
 
         
         public ShadowAlgoParameter shadowAlgo = new ShadowAlgoParameter(ShadowFilter.PCF, true);

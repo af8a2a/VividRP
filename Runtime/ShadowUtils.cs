@@ -130,7 +130,7 @@ namespace UnityEngine.Rendering.Universal
         /// <param name="cascadeSplitDistance">The culling sphere for the cascade.</param>
         /// <param name="shadowSliceData">The struct container for shadow slice data.</param>
         /// <returns>True if the matrix was successfully extracted.</returns>
-        public static bool ExtractDirectionalLightMatrix(ref CullingResults cullResults, UniversalShadowData shadowData, int shadowLightIndex, int cascadeIndex, int shadowmapWidth, int shadowmapHeight, int shadowResolution, float shadowNearPlane, out Vector4 cascadeSplitDistance, out ShadowSliceData shadowSliceData)
+        public static bool ExtractDirectionalLightMatrix(ref CullingResults cullResults, UniversalShadowData shadowData, int shadowLightIndex, int cascadeIndex, int shadowmapWidth, int shadowmapHeight, int shadowResolution, float shadowNearPlane, out Vector4 cascadeSplitDistance, out ShadowSliceData shadowSliceData,bool useAtlas = false)
         {
             bool success = cullResults.ComputeDirectionalShadowMatricesAndCullingPrimitives(shadowLightIndex,
                 cascadeIndex, shadowData.mainLightShadowCascadesCount, shadowData.mainLightShadowCascadesSplit, shadowResolution, shadowNearPlane, out shadowSliceData.viewMatrix, out shadowSliceData.projectionMatrix,
@@ -148,7 +148,7 @@ namespace UnityEngine.Rendering.Universal
 
             // If we have shadow cascades baked into the atlas we bake cascade transform
             // in each shadow matrix to save shader ALU and L/S
-            if (shadowData.mainLightShadowCascadesCount > 1)
+            if (useAtlas && shadowData.mainLightShadowCascadesCount > 1)
                 ApplySliceTransform(ref shadowSliceData, shadowmapWidth, shadowmapHeight);
 
             return success;

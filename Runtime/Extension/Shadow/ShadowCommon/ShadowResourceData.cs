@@ -1,6 +1,16 @@
 ﻿using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Rendering.Universal;
 
-namespace Features.Shadow.ShadowCommon
+namespace UnityEngine.Rendering.Universal
 {
+    class ShadowResourceData : ContextItem
+    {
+        public TextureHandle directionalShadowsTexture;
+
+
+        public override void Reset()
+        {
+            directionalShadowsTexture = TextureHandle.nullHandle;
+        }
+    }
 }

@@ -1,6 +1,5 @@
 ﻿using System;
 using Features.Shadow.CascadeShadow;
-using Features.Shadow.ShadowCommon;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
@@ -30,6 +29,8 @@ namespace Features.Shadow.UberScreenSpaceShadow
         private CascadeShadowCaster m_cascadeShadowCaster = null;
 
         private RaytracingShadowPass m_RaytracingShadowPass = null;
+        private DirectionalLightsShadowCasterPass m_DirectionalLightsShadowCasterPass = null;
+        
         
         /// <inheritdoc/>
         public override void Create()
@@ -49,7 +50,8 @@ namespace Features.Shadow.UberScreenSpaceShadow
             {
                 renderPassEvent = RenderPassEvent.AfterRenderingPrePasses,
             };
-            
+
+            m_DirectionalLightsShadowCasterPass = new DirectionalLightsShadowCasterPass(RenderPassEvent.BeforeRenderingShadows);
             
         }
 
@@ -83,13 +85,22 @@ namespace Features.Shadow.UberScreenSpaceShadow
                     : RenderPassEvent.AfterRenderingPrePasses +
                       1; // We add 1 to ensure this happens after depth priming depth copy pass that might be scheduled
 
-                
-                renderer.EnqueuePass(m_RaytracingShadowPass);
-
-                if (m_cascadeShadowCaster.Setup(ref renderingData))
+                if (shadowSettings.cascadeMode.value is CascadeMode.Custom)
                 {
-                    renderer.EnqueuePass(m_cascadeShadowCaster);
+
+
+                    renderer.EnqueuePass(m_DirectionalLightsShadowCasterPass);
+
                 }
+                else
+                {
+                    if (m_cascadeShadowCaster.Setup(ref renderingData))
+                    {
+                        renderer.EnqueuePass(m_cascadeShadowCaster);
+                    }
+                    
+                }
+                
 
 
                 renderer.EnqueuePass(m_SSShadowsPass);

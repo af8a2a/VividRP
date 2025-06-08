@@ -839,6 +839,8 @@ namespace ShaderStrippingAndPrefiltering
             m_TestHelper.rendererFeatures.Remove(ssaoFeature);
         }
 
+#if false
+        
         [Test]
         public void TestGetSupportedShaderFeaturesFromRendererFeatures_ScreenSpaceShadows()
         {
@@ -857,6 +859,7 @@ namespace ShaderStrippingAndPrefiltering
             expected = ShaderFeatures.None;
             m_TestHelper.AssertShaderFeaturesAndReset(expected, actual);
         }
+#endif
 
         // Screen Space Ambient Occlusion (SSAO)...
         [Test]

@@ -799,12 +799,14 @@ namespace UnityEditor.Rendering.Universal
                 }
 
                 // Screen Space Shadows...
+#if false
                 ScreenSpaceShadows sssFeature = rendererFeature as ScreenSpaceShadows;
                 if (sssFeature != null)
+#endif
                 {
                     // The feature is active (Tested a few lines above)
                     shaderFeatures |= ShaderFeatures.ScreenSpaceShadows;
-                    continue;
+                    // continue;
                 }
 
                 // Screen Space Ambient Occlusion (SSAO)...

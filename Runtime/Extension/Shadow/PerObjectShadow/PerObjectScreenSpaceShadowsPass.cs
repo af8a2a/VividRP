@@ -1,4 +1,3 @@
-using Features.Shadow.ShadowCommon;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;

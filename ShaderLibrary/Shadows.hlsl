@@ -58,6 +58,7 @@
 #define CALCULATE_BAKED_SHADOWS
 #endif
 
+TEXTURE2D_ARRAY_SHADOW(_DirectionalLightsShadowmapTexture);
 TEXTURE2D_X(_ScreenSpaceShadowmapTexture);
 TEXTURE2D(_DirShadowRampTexture);
 TEXTURE2D(_ShadowScatterTexture);
@@ -85,6 +86,11 @@ float4      _MainLightShadowOffset0; // xy: offset0, zw: offset1
 float4      _MainLightShadowOffset1; // xy: offset2, zw: offset3
 float4      _MainLightShadowParams;   // (x: shadowStrength, y: >= 1.0 if soft shadows, 0.0 otherwise, z: main light fade scale, w: main light fade bias)
 float4      _MainLightShadowmapSize;  // (xy: 1/width and 1/height, zw: width and height)
+
+float4 _PerCascadePCSSData[MAX_SHADOW_CASCADES];
+float4 _DirLightShadowUVMinMax; // xy: shadow uv min, max: shadow uv max
+float4 _DirLightShadowPenumbraParams; // x: soft shadow width, y: scatter occlusion width.
+float4 _DirLightShadowScatterParams; // xyz: shadow subsurface scatter channel, w:shadow scatter mode.
 
 float4      _AdditionalShadowOffset0; // xy: offset0, zw: offset1
 float4      _AdditionalShadowOffset1; // xy: offset2, zw: offset3
@@ -641,10 +647,6 @@ half BakedShadow(half4 shadowMask, half4 occlusionProbeChannels)
 
 
 // CBUFFER_START(PCSSData)
-    float4 _PerCascadePCSSData[MAX_SHADOW_CASCADES];
-    float4 _DirLightShadowUVMinMax; // xy: shadow uv min, max: shadow uv max
-    float4 _DirLightShadowPenumbraParams; // x: soft shadow width, y: scatter occlusion width.
-    float4 _DirLightShadowScatterParams; // xyz: shadow subsurface scatter channel, w:shadow scatter mode.
 // CBUFFER_END
 
 

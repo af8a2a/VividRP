@@ -96,6 +96,7 @@ namespace UnityEngine.Rendering.Universal
                 }
                 passData.ditheredTextureHandleSet = BlueNoiseSystem.instance.DitheredTextureSet8SPP().RenderGraphImport(renderGraph);
 
+                
                 passData.frameIndex = historyRT.historyFrameCount;
                 passData.sampleCount = volumeSettings.sampleCount.value;
                 passData.radius = volumeSettings.radius.value;

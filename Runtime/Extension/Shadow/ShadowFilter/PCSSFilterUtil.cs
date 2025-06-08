@@ -1,9 +1,4 @@
 ﻿using System;
-using Features.Shadow.ShadowCommon;
-using Unity.Mathematics;
-using UnityEngine;
-using UnityEngine.Rendering;
-using UnityEngine.Rendering.Universal;
 
 namespace UnityEngine.Rendering.Universal
 {

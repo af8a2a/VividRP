@@ -1,5 +1,4 @@
 using System;
-using Features.Shadow.ShadowCommon;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;

@@ -1,5 +1,4 @@
-﻿using Features.Shadow.ShadowCommon;
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Rendering.Universal;
@@ -13,6 +12,7 @@ namespace Features.Shadow.UberScreenSpaceShadow
             profilingSampler = new ProfilingSampler("Set Screen Space Shadow Keywords");
             shadows = VolumeManager.instance.stack.GetComponent<Shadows>();
         }
+
 
         private bool ShadowScatterEnable = true;
         private Shadows shadows;

@@ -51,9 +51,15 @@ float PreFilterSearch(float sampleCount, float filterSize, float3 shadowCoord, f
         float zoffset = radialOffset / farToNear * blockerInvTangent;
 
         float depthLS = shadowCoord.z + (Z_OFFSET_DIRECTION) * zoffset;
+        
+        float shadowMapDepth = SAMPLE_TEXTURE2D_ARRAY_LOD(_DirectionalLightsShadowmapTexture, sampler_PointClamp, sampleCoord, cascadeIndex, 0).x;
 
-        float shadowMapDepth = SAMPLE_TEXTURE2D_LOD(_MainLightShadowmapTexture, sampler_PointClamp, sampleCoord, 0).x;
-
+        // #if defined(_CUSTOM_SHADOWS_CASCADE)
+        // float shadowMapDepth = SAMPLE_TEXTURE2D_ARRAY_LOD(_DirectionalLightsShadowmapTexture, sampler_PointClamp, sampleCoord.xy, cascadeIndex, 0).x;
+        // #else
+        // float shadowMapDepth = SAMPLE_TEXTURE2D_LOD(_MainLightShadowmapTexture, sampler_PointClamp, sampleCoord.xy, 0).x;
+        // #endif
+        
         bool isOutOfCoord = any(sampleCoord < minCoord) || any(sampleCoord > maxCoord);
         if (!isOutOfCoord && COMPARE_DEVICE_DEPTH_CLOSER(shadowMapDepth, depthLS))
         {
@@ -73,8 +79,13 @@ float PreFilterSearch(float sampleCount, float filterSize, float3 shadowCoord, f
     }
 
     // We must cover zero offset.
+    float shadowMapDepth = SAMPLE_TEXTURE2D_ARRAY_LOD(_DirectionalLightsShadowmapTexture, sampler_PointClamp, shadowCoord.xy, cascadeIndex, 0).x;
 
-    float shadowMapDepth = SAMPLE_TEXTURE2D_LOD(_MainLightShadowmapTexture, sampler_PointClamp, shadowCoord.xy, 0).x;
+    // #if defined(_CUSTOM_SHADOWS_CASCADE)
+    // float shadowMapDepth = SAMPLE_TEXTURE2D_ARRAY_LOD(_DirectionalLightsShadowmapTexture, sampler_PointClamp, shadowCoord.xy, cascadeIndex, 0).x;
+    // #else
+    // float shadowMapDepth = SAMPLE_TEXTURE2D_LOD(_MainLightShadowmapTexture, sampler_PointClamp, shadowCoord.xy, 0).x;
+    // #endif
     if (!(any(shadowCoord.xy < minCoord) || any(shadowCoord.xy > maxCoord)) &&
         COMPARE_DEVICE_DEPTH_CLOSER(shadowMapDepth, shadowCoord.z))
     {
@@ -127,7 +138,13 @@ float2 BlockerSearch(float sampleCount, float filterSize, float3 shadowCoord, fl
 
         float depthLS = shadowCoord.z + (Z_OFFSET_DIRECTION) * zoffset;
 
-        float shadowMapDepth = SAMPLE_TEXTURE2D_LOD(_MainLightShadowmapTexture, sampler_PointClamp, sampleCoord, 0).x;
+        // #if defined(_CUSTOM_SHADOWS_CASCADE)
+        // float shadowMapDepth = SAMPLE_TEXTURE2D_ARRAY_LOD(_DirectionalLightsShadowmapTexture, sampler_PointClamp, sampleCoord, cascadeIndex, 0).x;
+        // #else
+        // float shadowMapDepth = SAMPLE_TEXTURE2D_LOD(_MainLightShadowmapTexture, sampler_PointClamp, sampleCoord, 0).x;
+        // #endif
+        float shadowMapDepth = SAMPLE_TEXTURE2D_ARRAY_LOD(_DirectionalLightsShadowmapTexture, sampler_PointClamp, sampleCoord, cascadeIndex, 0).x;
+
         if (!(any(sampleCoord < minCoord) || any(sampleCoord > maxCoord)) &&
             COMPARE_DEVICE_DEPTH_CLOSER(shadowMapDepth, depthLS))
         {
@@ -179,7 +196,14 @@ float PCSSFilter(float sampleCount, float filterSize, float3 shadowCoord, float2
 
         if (!(any(sampleCoord < minCoord) || any(sampleCoord > maxCoord)))
         {
-            float shadowSample = SAMPLE_TEXTURE2D_SHADOW(_MainLightShadowmapTexture, sampler_LinearClampCompare, float3(sampleCoord, depthLS)).x;
+            float shadowSample = SAMPLE_TEXTURE2D_ARRAY_SHADOW(_DirectionalLightsShadowmapTexture, sampler_LinearClampCompare, float3(sampleCoord, depthLS), cascadeIndex).x;
+
+            // #if defined(_CUSTOM_SHADOWS_CASCADE)
+            // float shadowSample = SAMPLE_TEXTURE2D_ARRAY_LOD(_DirectionalLightsShadowmapTexture, sampler_PointClamp, shadowCoord.xy, cascadeIndex, 0).x;
+            //
+            // #else
+            // float shadowSample = SAMPLE_TEXTURE2D_SHADOW(_MainLightShadowmapTexture, sampler_LinearClampCompare, float3(sampleCoord, depthLS)).x;
+            // #endif
             numBlockers += shadowSample;
             totalSamples++;
         }

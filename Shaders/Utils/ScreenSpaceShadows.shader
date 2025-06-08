@@ -63,6 +63,8 @@ Shader "Hidden/Universal Render Pipeline/ScreenSpaceShadows"
             Cull Off
 
             HLSLPROGRAM
+            #pragma target 4.5
+            
             #pragma multi_compile _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE
             #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
             #pragma multi_compile_fragment _ _PEROBJECT_SCREEN_SPACE_SHADOW

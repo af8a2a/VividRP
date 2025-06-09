@@ -782,24 +782,24 @@ half3 MainLightShadowScatter(float shadowAttenuation)
 {
     if (GetShadowScatterEnable())
     {
-        float3 shadowColor;
+        float3 shadowTint ;
+
         if (GetShadowScatterMode() == SHADOWSCATTERMODE_RAMPTEXTURE)
         {
-            shadowColor = SAMPLE_TEXTURE2D_LOD(_DirShadowRampTexture, sampler_LinearClamp, float2(shadowAttenuation, 0.5), 0).rgb;
+            shadowTint = SAMPLE_TEXTURE2D_LOD(_DirShadowRampTexture, sampler_LinearClamp, float2(shadowAttenuation, 0.5), 0).rgb;
         }
         else
         {
-            float shadow = shadowAttenuation;
-            float3 shadowTint = _DirLightShadowScatterParams.rgb;
-                
-            float3 invTint = 1.0 - shadowTint;
-            float shadow3 = shadow * shadow * shadow;
-
-            shadowColor = lerp(1.0 - (1.0 - shadow) * invTint,
-                                shadow3 * invTint + shadow * shadowTint,
-                                _DirLightShadowScatterPenumbraOnly);   
+             shadowTint = _DirLightShadowScatterParams.rgb;
+            
         }
-        
+        float3 invTint = 1.0 - shadowTint;
+        float shadow = shadowAttenuation;
+        float shadow3 = shadow * shadow * shadow;
+        float3 shadowColor = lerp(1.0 - (1.0 - shadow) * invTint,
+                                  shadow3 * invTint + shadow * shadowTint,
+                                  _DirLightShadowScatterPenumbraOnly);   
+
         shadowColor = LerpWhiteTo(shadowColor, GetMainLightShadowParams().x);
         return shadowColor;
     }

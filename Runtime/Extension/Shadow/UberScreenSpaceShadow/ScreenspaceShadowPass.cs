@@ -45,6 +45,7 @@ namespace UnityEngine.Rendering.Universal
             // Compute shader
             internal ComputeShader classifyShader;
             internal ComputeShader resolveShader;
+            internal ComputeShader bilateralShader;
 
             internal int classifyTilesKernel;
             internal int shadowmapKernel;
@@ -94,11 +95,12 @@ namespace UnityEngine.Rendering.Universal
 
             passData.classifyShader = runtimeShaders.shadowClassifyShader;
             passData.classifyTilesKernel = passData.classifyShader.FindKernel("ShadowClassifyTiles");
-            passData.resolveShader = runtimeShaders.shadowmapShader;
-
+            passData.resolveShader = runtimeShaders.shadowmapResolveShader;
             passData.shadowmapKernel = passData.resolveShader.FindKernel("ShadowResolve");;
-            // passData.bilateralHKernel = m_BilateralHKernel;
-            // passData.bilateralVKernel = m_BilateralVKernel;
+
+            passData.bilateralShader = runtimeShaders.shadowmapFilterShader;
+            passData.bilateralHKernel =passData.bilateralShader.FindKernel("BilateralFilterH");
+            passData.bilateralVKernel =passData.bilateralShader.FindKernel("BilateralFilterV");
 
             passData.camHistoryFrameCount = historyFramCount;
 
@@ -123,7 +125,7 @@ namespace UnityEngine.Rendering.Universal
             passData.screenSpaceShadowmapTex = UniversalRenderer.CreateRenderGraphTexture(renderGraph, desc, "_ScreenSpaceShadowmapTexture", true, Color.white);
             passData.screenSpaceShadowmapSize = new Vector2Int(desc.width, desc.height);
 
-            passData.normalGBuffer = resourceData.gBuffer[2]; // Normal GBuffer
+            // passData.normalGBuffer = resourceData.cameraNormalsTexture; 
         }
 
 
@@ -155,6 +157,23 @@ namespace UnityEngine.Rendering.Universal
                 cmd.DispatchCompute(data.resolveShader, data.shadowmapKernel, data.dispatchIndirectBuffer, argsOffset: 0);
             }
             
+            {
+                cmd.SetComputeTextureParam(data.bilateralShader, data.bilateralHKernel, ShaderConstants._DirShadowmapTexture, data.dirShadowmapTex);
+                cmd.SetComputeTextureParam(data.bilateralShader, data.bilateralHKernel, ShaderConstants._BilateralTexture, data.screenSpaceShadowmapTex);
+
+                // Indirect buffer & dispatch
+                cmd.SetComputeBufferParam(data.bilateralShader, data.bilateralHKernel, ShaderConstants.g_TileList, data.tileListBuffer);
+                cmd.DispatchCompute(data.bilateralShader, data.bilateralHKernel, data.dispatchIndirectBuffer, argsOffset: 0);
+                
+                
+                cmd.SetComputeTextureParam(data.bilateralShader, data.bilateralVKernel, ShaderConstants._DirShadowmapTexture, data.dirShadowmapTex);
+                cmd.SetComputeTextureParam(data.bilateralShader, data.bilateralVKernel, ShaderConstants._BilateralTexture, data.screenSpaceShadowmapTex);
+
+                // Indirect buffer & dispatch
+                cmd.SetComputeBufferParam(data.bilateralShader, data.bilateralVKernel, ShaderConstants.g_TileList, data.tileListBuffer);
+                cmd.DispatchCompute(data.bilateralShader, data.bilateralVKernel, data.dispatchIndirectBuffer, argsOffset: 0);
+
+            }
 
 
             cmd.SetKeyword(ShaderGlobalKeywords.MainLightShadows, false);
@@ -188,12 +207,11 @@ namespace UnityEngine.Rendering.Universal
                 builder.UseBuffer(passData.tileListBuffer, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.dirShadowmapTex, AccessFlags.Read);
                 builder.UseTexture(passData.screenSpaceShadowmapTex, AccessFlags.ReadWrite);
-                // builder.UseTexture(passData.normalGBuffer, AccessFlags.Read);
 
                 builder.AllowPassCulling(true);
                 builder.AllowGlobalStateModification(true);
 
-                //builder.EnableAsyncCompute(true);
+                builder.EnableAsyncCompute(true);
 
                 builder.SetRenderFunc((PassData data, ComputeGraphContext context) => { ExecutePass(data, context); });
                 builder.SetGlobalTextureAfterPass(passData.screenSpaceShadowmapTex, ShaderConstants._ScreenSpaceShadowmapTexture);
@@ -219,6 +237,7 @@ namespace UnityEngine.Rendering.Universal
             public static readonly int _Shadowmap = Shader.PropertyToID("_Shadowmap");
             public static readonly int _BilateralTexture = Shader.PropertyToID("_BilateralTexture");
             public static readonly int _CamHistoryFrameCount = Shader.PropertyToID("_CamHistoryFrameCount");
+            public static readonly int _GBuffer2 = Shader.PropertyToID("_GBuffer2");
 
             public static readonly int _RayTracingShadowsTextureRW = Shader.PropertyToID("_RayTracingShadowsTextureRW");
             public static readonly int _StencilTexture = Shader.PropertyToID("_StencilTexture");

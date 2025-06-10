@@ -165,7 +165,14 @@ namespace UnityEngine.Rendering.Universal
         public ClampedFloatParameter perObjectShadowPenumbra = new ClampedFloatParameter(1.0f, 0.001f, 3.0f);
 
         #endregion
-       
+
+
+        #region Denoise
+
+        public BoolParameter shadowDenoise = new BoolParameter(false);
+
+
+        #endregion
 
 
         /// <inheritdoc/>

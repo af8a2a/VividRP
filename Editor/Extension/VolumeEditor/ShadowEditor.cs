@@ -32,12 +32,15 @@ namespace UnityEditor.Rendering.Universal
 
 
         SerializedDataParameter m_Penumbra;
-         SerializedDataParameter m_OcclusionPenumbra;
+        SerializedDataParameter m_OcclusionPenumbra;
+        
         SerializedDataParameter m_ShadowScatterMode;
         SerializedDataParameter m_ShadowRampTex;
         SerializedDataParameter m_ScatterR;
         SerializedDataParameter m_ScatterG;
         SerializedDataParameter m_ScatterB;
+
+        SerializedDataParameter m_ShadowDenoise;
 
 
         private enum Unit
@@ -91,7 +94,7 @@ namespace UnityEditor.Rendering.Universal
             m_ScatterB = Unpack(o.Find(x => x.scatterB));
             // m_ShadowACES = Unpack(o.Find(x => x.ACES));
             m_OcclusionPenumbra = Unpack(o.Find(x => x.occlusionPenumbra));
-
+            m_ShadowDenoise = Unpack(o.Find(x => x.shadowDenoise));
             layers = new int[InternalEditorUtility.layers.Length];
             displayedOptions = new GUIContent[InternalEditorUtility.layers.Length];
             for (int i = 0; i < InternalEditorUtility.layers.Length; i++)
@@ -246,10 +249,15 @@ namespace UnityEditor.Rendering.Universal
             GUILayout.Label("Shadow Scatter");
             PropertyField(m_ShadowScatterMode, EditorGUIUtility.TrTextContent("ShadowScatterMode"));
             PropertyField(m_ShadowRampTex, EditorGUIUtility.TrTextContent("ShadowRampTex"));
-            PropertyField(m_OcclusionPenumbra, EditorGUIUtility.TrTextContent("OcclusionPenumbra"));
+            // PropertyField(m_OcclusionPenumbra, EditorGUIUtility.TrTextContent("OcclusionPenumbra"));
             PropertyField(m_ScatterR, EditorGUIUtility.TrTextContent("ScatterR"));
             PropertyField(m_ScatterG, EditorGUIUtility.TrTextContent("ScatterG"));
             PropertyField(m_ScatterB, EditorGUIUtility.TrTextContent("ScatterB"));
+            
+            
+            GUILayout.Label("Shadow Denoise");
+            PropertyField(m_ShadowDenoise, EditorGUIUtility.TrTextContent("Shadow Denoise"));
+
         }
 
 

@@ -88,6 +88,7 @@ namespace Features.Shadow.PerObjectShadow
             internal Vector2 rtSize;
             internal Vector4 perObjectShadowParams;
             internal int historyFramCount;
+            internal TextureHandle perObjectShadowTexture;
         }
 
         private void InitRendererLists(ContextContainer frameData, ref PassData passData, RenderGraph renderGraph)
@@ -134,6 +135,7 @@ namespace Features.Shadow.PerObjectShadow
                 UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
                 UniversalShadowData shadowData = frameData.Get<UniversalShadowData>();
                 UniversalLightData lightData = frameData.Get<UniversalLightData>();
+                var shadowResource = frameData.Get<ShadowResourceData>();
 
                 int shadowLightIndex = lightData.mainLightIndex;
                 if (shadowLightIndex == -1)
@@ -170,6 +172,7 @@ namespace Features.Shadow.PerObjectShadow
                 if (screenSpaceShadowMapTexture.IsValid())
                     builder.SetGlobalTextureAfterPass(screenSpaceShadowMapTexture, PerObjectShadowProjectorConstant._PerObjectScreenSpaceShadowmapTexture);
 
+                passData.perObjectShadowTexture = screenSpaceShadowMapTexture;
                 builder.SetRenderFunc((PassData data, RasterGraphContext context) =>
                 {
                     // Draw System
@@ -181,6 +184,7 @@ namespace Features.Shadow.PerObjectShadow
                     CoreUtils.SetKeyword(context.cmd, "_PEROBJECT_SCREEN_SPACE_SHADOW", true);
                     context.cmd.DrawRendererList(data.rendererListHandle);
                 });
+                shadowResource.perObjectShadowTexture = screenSpaceShadowMapTexture;
             }
 
         }

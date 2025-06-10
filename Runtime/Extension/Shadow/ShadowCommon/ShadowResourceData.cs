@@ -6,11 +6,13 @@ namespace UnityEngine.Rendering.Universal
     class ShadowResourceData : ContextItem
     {
         public TextureHandle directionalShadowsTexture;
+        public TextureHandle perObjectShadowTexture;
 
 
         public override void Reset()
         {
             directionalShadowsTexture = TextureHandle.nullHandle;
+            perObjectShadowTexture = TextureHandle.nullHandle;
         }
     }
 }

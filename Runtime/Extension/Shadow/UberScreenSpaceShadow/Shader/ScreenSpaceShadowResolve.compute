@@ -7,6 +7,7 @@
 
 #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
 #pragma multi_compile _ _CUSTOM_SHADOWS_CASCADE
+#pragma multi_compile _ _PEROBJECT_SCREEN_SPACE_SHADOW
 
 //--------------------------------------------------------------------------------------------------
 // Included headers
@@ -27,6 +28,7 @@
 RWStructuredBuffer<uint> g_TileList;
 
 TEXTURE2D_ARRAY(_DirShadowmapTexture);
+TEXTURE2D(_PerObjectScreenSpaceShadowmapTexture);
 
 RW_TEXTURE2D(float, _SSDirShadowmapTexture);
 
@@ -43,7 +45,15 @@ RW_TEXTURE2D(float, _Shadowmap);
 
 
 int _CamHistoryFrameCount;
+#if defined(_PEROBJECT_SCREEN_SPACE_SHADOW)
 
+half SamplePerObjectShadowmap(float2 PositionSS)
+{
+    half attenuation =_PerObjectScreenSpaceShadowmapTexture[PositionSS.xy].x;
+
+    return attenuation;
+}
+#endif
 void InitializeDispatchThreadIdFromTileList(uint groupId, uint2 gThreadId, out uint2 tileCoord, out uint2 dThreadId)
 {
     uint encodedTileIndex = g_TileList[groupId / 4];
@@ -113,7 +123,10 @@ void ShadowResolve(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 groupThre
 
     // PCSS Filter
     float pcssResult = PCSSFilter(PCSS_SAMPLE_COUNT, pcssFilterSize, shadowCoord.xyz, noiseJitter, cascadeIndex, maxPCSSoffset);
-    
+    #if defined(_PEROBJECT_SCREEN_SPACE_SHADOW)
+    pcssResult=min(pcssResult,SamplePerObjectShadowmap(coordSS));
+    #endif
+
 
     _Shadowmap[coordSS] = pcssResult;
 }

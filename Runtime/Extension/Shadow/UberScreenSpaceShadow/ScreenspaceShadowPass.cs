@@ -56,20 +56,21 @@ namespace UnityEngine.Rendering.Universal
             internal int numTilesY;
 
             internal bool denoise;
-            
+
             // Compute Buffers
             internal BufferHandle dispatchIndirectBuffer;
             internal BufferHandle tileListBuffer;
 
             // Texture
             internal TextureHandle dirShadowmapTex;
+            internal TextureHandle perObjectShadowTexture;
+
             internal TextureHandle screenSpaceShadowmapTex;
             internal Vector2Int screenSpaceShadowmapSize;
             internal TextureHandle normalGBuffer;
 
             internal int camHistoryFrameCount;
             internal UniversalShadowData shadowData;
-
         }
 
         /// <summary>
@@ -80,13 +81,14 @@ namespace UnityEngine.Rendering.Universal
             PassData passData,
             UniversalCameraData cameraData,
             UniversalResourceData resourceData,
+            ShadowResourceData shadowResourceData,
             int historyFramCount)
         {
             var runtimeShaders = GraphicsSettings.GetRenderPipelineSettings<ShadowRuntimeResource>();
 
             var settings = VolumeManager.instance.stack.GetComponent<Shadows>();
 
-            
+
             RenderTextureDescriptor desc = cameraData.cameraTargetDescriptor;
             desc.graphicsFormat = GraphicsFormat.R32_SFloat;
             desc.depthBufferBits = 0;
@@ -100,11 +102,12 @@ namespace UnityEngine.Rendering.Universal
             passData.classifyShader = runtimeShaders.shadowClassifyShader;
             passData.classifyTilesKernel = passData.classifyShader.FindKernel("ShadowClassifyTiles");
             passData.resolveShader = runtimeShaders.shadowmapResolveShader;
-            passData.shadowmapKernel = passData.resolveShader.FindKernel("ShadowResolve");;
+            passData.shadowmapKernel = passData.resolveShader.FindKernel("ShadowResolve");
+            ;
 
             passData.bilateralShader = runtimeShaders.shadowmapFilterShader;
-            passData.bilateralHKernel =passData.bilateralShader.FindKernel("BilateralFilterH");
-            passData.bilateralVKernel =passData.bilateralShader.FindKernel("BilateralFilterV");
+            passData.bilateralHKernel = passData.bilateralShader.FindKernel("BilateralFilterH");
+            passData.bilateralVKernel = passData.bilateralShader.FindKernel("BilateralFilterV");
 
             passData.camHistoryFrameCount = historyFramCount;
 
@@ -113,7 +116,7 @@ namespace UnityEngine.Rendering.Universal
             passData.numTilesX = RenderingUtilsExt.DivRoundUp(width, c_screenSpaceShadowsTileSize);
             passData.numTilesY = RenderingUtilsExt.DivRoundUp(height, c_screenSpaceShadowsTileSize);
 
-            
+
             var bufferSystem = GraphicsBufferSystem.instance;
             var dispatchIndirectBuffer = bufferSystem.GetGraphicsBuffer<uint>(GraphicsBufferSystemBufferID.ScreenSpaceShadowIndirect, 3,
                 "dispatchIndirectBuffer", GraphicsBuffer.Target.IndirectArguments);
@@ -128,7 +131,7 @@ namespace UnityEngine.Rendering.Universal
             passData.dirShadowmapTex = resourceData.mainShadowsTexture;
             passData.screenSpaceShadowmapTex = UniversalRenderer.CreateRenderGraphTexture(renderGraph, desc, "_ScreenSpaceShadowmapTexture", true, Color.white);
             passData.screenSpaceShadowmapSize = new Vector2Int(desc.width, desc.height);
-
+            passData.perObjectShadowTexture = shadowResourceData.perObjectShadowTexture;
             passData.denoise = settings.shadowDenoise.value;
             // passData.normalGBuffer = resourceData.cameraNormalsTexture; 
         }
@@ -156,7 +159,12 @@ namespace UnityEngine.Rendering.Universal
             {
                 cmd.SetComputeTextureParam(data.resolveShader, data.shadowmapKernel, ShaderConstants._DirShadowmapTexture, data.dirShadowmapTex);
                 cmd.SetComputeTextureParam(data.resolveShader, data.shadowmapKernel, ShaderConstants._Shadowmap, data.screenSpaceShadowmapTex);
-            
+                if (data.perObjectShadowTexture.IsValid())
+                {
+                    cmd.SetComputeTextureParam(data.resolveShader, data.shadowmapKernel, ShaderConstants._PerObjectScreenSpaceShadowmapTexture,
+                        data.perObjectShadowTexture);
+                }
+
                 // Indirect buffer & dispatch
                 cmd.SetComputeBufferParam(data.resolveShader, data.shadowmapKernel, ShaderConstants.g_TileList, data.tileListBuffer);
                 cmd.DispatchCompute(data.resolveShader, data.shadowmapKernel, data.dispatchIndirectBuffer, argsOffset: 0);
@@ -183,8 +191,6 @@ namespace UnityEngine.Rendering.Universal
             cmd.SetKeyword(ShaderGlobalKeywords.MainLightShadows, false);
             cmd.SetKeyword(ShaderGlobalKeywords.MainLightShadowCascades, false);
             cmd.SetKeyword(ShaderGlobalKeywords.MainLightShadowScreen, true);
-
-            
         }
 
         internal TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData)
@@ -202,15 +208,20 @@ namespace UnityEngine.Rendering.Universal
                 UniversalLightData lightData = frameData.Get<UniversalLightData>();
                 UniversalShadowData shadowData = frameData.Get<UniversalShadowData>();
 
+                var shadowResource = frameData.Get<ShadowResourceData>();
 
                 // Setup passData
-                InitPassData(renderGraph, passData, cameraData, resourceData, historyFramCount);
+                InitPassData(renderGraph, passData, cameraData, resourceData, shadowResource, historyFramCount);
                 passData.shadowData = shadowData;
                 // Setup builder state
                 builder.UseBuffer(passData.dispatchIndirectBuffer, AccessFlags.ReadWrite);
                 builder.UseBuffer(passData.tileListBuffer, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.dirShadowmapTex, AccessFlags.Read);
                 builder.UseTexture(passData.screenSpaceShadowmapTex, AccessFlags.ReadWrite);
+                if (passData.perObjectShadowTexture.IsValid())
+                {
+                    builder.UseTexture(passData.perObjectShadowTexture, AccessFlags.Read);
+                }
 
                 builder.AllowPassCulling(true);
                 builder.AllowGlobalStateModification(true);
@@ -238,6 +249,8 @@ namespace UnityEngine.Rendering.Universal
             public static readonly int _DirShadowmapTexture = Shader.PropertyToID("_DirShadowmapTexture");
             public static readonly int _SSDirShadowmapTexture = Shader.PropertyToID("_SSDirShadowmapTexture");
             public static readonly int _ScreenSpaceShadowmapTexture = Shader.PropertyToID("_ScreenSpaceShadowmapTexture");
+            public static readonly int _PerObjectScreenSpaceShadowmapTexture = Shader.PropertyToID("_PerObjectScreenSpaceShadowmapTexture");
+
             public static readonly int _Shadowmap = Shader.PropertyToID("_Shadowmap");
             public static readonly int _BilateralTexture = Shader.PropertyToID("_BilateralTexture");
             public static readonly int _CamHistoryFrameCount = Shader.PropertyToID("_CamHistoryFrameCount");

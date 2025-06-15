@@ -332,7 +332,7 @@ namespace UnityEngine.Rendering.Universal
 
             if (parameters.ambientOcclusion)
             {
-                AO_CT.layerMask = parameters.aoLayerMask;
+                AO_CT.layerMask = ~parameters.characterShadowLayerMask;
                 AO_CT.allowVisualEffects = parameters.includeVFX;
                 instanceTestArray.Add(AO_CT);
             }

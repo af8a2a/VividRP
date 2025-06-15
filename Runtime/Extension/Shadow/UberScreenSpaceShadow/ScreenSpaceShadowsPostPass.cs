@@ -10,7 +10,6 @@ namespace Features.Shadow.UberScreenSpaceShadow
         internal ScreenSpaceShadowsPostPass()
         {
             profilingSampler = new ProfilingSampler("Set Screen Space Shadow Keywords");
-            shadows = VolumeManager.instance.stack.GetComponent<Shadows>();
         }
 
 
@@ -61,6 +60,7 @@ namespace Features.Shadow.UberScreenSpaceShadow
             using (var builder = renderGraph.AddRasterRenderPass<PassData>(passName, out var passData, profilingSampler))
             {
                 UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
+                shadows = VolumeManager.instance.stack.GetComponent<Shadows>();
 
                 TextureHandle color = resourceData.activeColorTexture;
                 builder.SetRenderAttachment(color, 0, AccessFlags.Write);

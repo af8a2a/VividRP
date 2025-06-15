@@ -311,6 +311,7 @@ namespace UnityEngine.Rendering.Universal
 
             #region Extension
             
+            BlueNoiseSystem.instance.Init();
             SkySystem.instance.Build(asset);
             IBLFilterGGX.instance.Initialize();
             Hammersley.Initialize();

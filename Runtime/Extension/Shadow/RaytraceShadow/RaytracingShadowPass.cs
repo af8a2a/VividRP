@@ -96,7 +96,6 @@ namespace UnityEngine.Rendering.Universal
                 }
                 passData.ditheredTextureHandleSet = BlueNoiseSystem.instance.DitheredTextureSet8SPP().RenderGraphImport(renderGraph);
 
-                
                 passData.frameIndex = historyRT.historyFrameCount;
                 passData.sampleCount = volumeSettings.sampleCount.value;
                 passData.radius = volumeSettings.radius.value;
@@ -120,7 +119,7 @@ namespace UnityEngine.Rendering.Universal
                     // SetConstantBuffer
                     ConstantBuffer.PushGlobal(cmd, data.rayTracingCB, RayTracingSystem._ShaderVariablesRaytracing);
 
-                    BlueNoiseSystem.BindDitheredTextureSet(cmd,data.ditheredTextureHandleSet);
+                    BlueNoiseSystem.BindDitheredTextureSet(cmd, data.ditheredTextureHandleSet);
                     // SetTextures
                     cmd.SetRayTracingTextureParam(data.rtrtShader, ShaderConstants._RayTracingShadowsTextureRW, data.screenSpaceShadowmapTex);
 
@@ -129,15 +128,14 @@ namespace UnityEngine.Rendering.Universal
                     cmd.SetRayTracingIntParam(data.rtrtShader, ShaderConstants.frameIndex, data.frameIndex);
 
                     cmd.DispatchRays(data.rtrtShader, "SingleRayGen", data.dispatchRaySizeX, data.dispatchRaySizeY, 1, null);
-                    CoreUtils.SetKeyword(cmd,"RAYTRACING_SHADOW",true);
-
+                    CoreUtils.SetKeyword(cmd, "RAYTRACING_SHADOW", true);
                 }
             }
         }
 
         public override void FrameCleanup(CommandBuffer cmd)
         {
-            CoreUtils.SetKeyword(cmd,"RAYTRACING_SHADOW",false);
+            CoreUtils.SetKeyword(cmd, "RAYTRACING_SHADOW", false);
         }
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
@@ -146,16 +144,23 @@ namespace UnityEngine.Rendering.Universal
             {
                 UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
                 UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
+
+
+                if (!frameData.Contains<RaytracingData>())
+                {
+                    return;
+                }
                 RaytracingData raytracingData = frameData.Get<RaytracingData>();
 
-
                 passData.requireRayTracing = raytracingData.rayTracingSystem.GetRayTracingState();
+
+                InitRayTracingPassData(renderGraph, passData, raytracingData, cameraData, resourceData);
+
                 if (!passData.requireRayTracing)
                 {
                     return;
                 }
 
-                InitRayTracingPassData(renderGraph, passData, raytracingData, cameraData, resourceData);
                 passData.ditheredTextureHandleSet.Use(builder);
                 builder.UseTexture(passData.screenSpaceShadowmapTex, AccessFlags.ReadWrite);
 

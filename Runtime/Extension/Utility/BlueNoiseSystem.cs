@@ -59,8 +59,7 @@ namespace UnityEngine.Rendering.Universal
         DitheredTextureSet m_DitheredTextureSet8SPP;
         DitheredTextureSet m_DitheredTextureSet256SPP;
 
-
-        public BlueNoiseSystem()
+        public void Init()
         {
             var textures = GraphicsSettings.GetRenderPipelineSettings<RuntimeTexture>();
             InitTextures(128, TextureFormat.R16, textures.blueNoise128RTex, out m_TextureArray128R, out m_TextureHandle128R);
@@ -90,6 +89,11 @@ namespace UnityEngine.Rendering.Universal
                 scramblingTex = RTHandles.Alloc(textures.scramblingTex)
             };
 
+
+        }
+
+        public BlueNoiseSystem()
+        {
 
         }
 

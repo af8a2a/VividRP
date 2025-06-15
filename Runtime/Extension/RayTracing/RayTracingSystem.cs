@@ -439,10 +439,15 @@ namespace UnityEngine.Rendering.Universal
 
             // Aggregate the global illumination parameters
 
+            
+            var aoSetting = volumeStack.GetComponent<RaytracingAmbientOcclusion>();
 
+            parameters.ambientOcclusion = aoSetting.IsActive();
+            
+            
             // We need to check if at least one effect will require the acceleration structure
             parameters.rayTracingRequired = parameters.ambientOcclusion || parameters.reflections
-                || parameters.globalIllumination || parameters.shadows;
+                                                                        || parameters.globalIllumination || parameters.shadows;
             // Return the result
             return parameters;
         }

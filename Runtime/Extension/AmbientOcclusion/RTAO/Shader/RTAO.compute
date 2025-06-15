@@ -15,7 +15,7 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Sampling.hlsl"
 
 Texture2D<float> SceneDepth;
-Texture2D<float> SceneNormal;
+Texture2D<float4> SceneNormal;
 
 
 float radius;
@@ -84,9 +84,9 @@ void RTAO(const uint2 coordSS : SV_DispatchThreadID)
         float3 rayDirWS = mul(sampleDir, GetTangentBasis(normalWS));
 
         
-        aoRay.Origin = posInput.positionWS + normalWS * 0.15;
+        aoRay.Origin = posInput.positionWS + normalWS * rayBias*2;
         aoRay.Direction = rayDirWS;
-        aoRay.TMin = 0.001;
+        aoRay.TMin = 0;
         aoRay.TMax = radius;
         
         shadowQuery.TraceRayInline(_AccelerationStructure, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xff, aoRay);

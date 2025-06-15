@@ -17,7 +17,7 @@ namespace UnityEngine.Rendering.Universal
 
         
         
-        [SerializeField, ResourcePath("Runtime/Features/Filter/IBLFilter/Shader/GGXConvolve.shader")]
+        [SerializeField, ResourcePath("Runtime/Extension/Filter/IBLFilter/Shader/GGXConvolve.shader")]
         private Shader m_GGXConvolvePS;
 
         public Shader GGXConvolvePS
@@ -29,7 +29,7 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// GGX Convolution
         /// </summary>
-        [SerializeField, ResourcePath("Runtime/Features/Filter/IBLFilter/Shader/BuildProbabilityTables.compute")]
+        [SerializeField, ResourcePath("Runtime/Extension/Filter/IBLFilter/Shader/BuildProbabilityTables.compute")]
         private ComputeShader m_BuildProbabilityTablesCS;
 
         public ComputeShader buildProbabilityTablesCS
@@ -38,7 +38,7 @@ namespace UnityEngine.Rendering.Universal
             set => this.SetValueAndNotify(ref m_BuildProbabilityTablesCS, value);
         }
 
-        [SerializeField, ResourcePath("Runtime/Features/Filter/IBLFilter/Shader/ComputeGgxIblSampleData.compute")]
+        [SerializeField, ResourcePath("Runtime/Extension/Filter/IBLFilter/Shader/ComputeGgxIblSampleData.compute")]
         private ComputeShader m_ComputeGgxIblSampleDataCS;
 
         public ComputeShader computeGgxIblSampleDataCS

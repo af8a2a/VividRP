@@ -24,6 +24,7 @@ namespace UnityEngine.Rendering.Universal
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
+            
             renderer.EnqueuePass(m_DirectionalLightsShadowCasterPass);
             renderer.EnqueuePass(m_ScreenSpaceShadowPass);
             renderer.EnqueuePass(m_ScreenSpaceShadowsPostPass);

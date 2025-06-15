@@ -173,21 +173,21 @@ namespace UnityEngine.Rendering.Universal
             {
                 cmd.SetComputeTextureParam(data.bilateralShader, data.bilateralHKernel, ShaderConstants._DirShadowmapTexture, data.dirShadowmapTex);
                 cmd.SetComputeTextureParam(data.bilateralShader, data.bilateralHKernel, ShaderConstants._BilateralTexture, data.screenSpaceShadowmapTex);
-
+            
                 // Indirect buffer & dispatch
                 cmd.SetComputeBufferParam(data.bilateralShader, data.bilateralHKernel, ShaderConstants.g_TileList, data.tileListBuffer);
                 cmd.DispatchCompute(data.bilateralShader, data.bilateralHKernel, data.dispatchIndirectBuffer, argsOffset: 0);
-
-
+            
+            
                 cmd.SetComputeTextureParam(data.bilateralShader, data.bilateralVKernel, ShaderConstants._DirShadowmapTexture, data.dirShadowmapTex);
                 cmd.SetComputeTextureParam(data.bilateralShader, data.bilateralVKernel, ShaderConstants._BilateralTexture, data.screenSpaceShadowmapTex);
-
+            
                 // Indirect buffer & dispatch
                 cmd.SetComputeBufferParam(data.bilateralShader, data.bilateralVKernel, ShaderConstants.g_TileList, data.tileListBuffer);
                 cmd.DispatchCompute(data.bilateralShader, data.bilateralVKernel, data.dispatchIndirectBuffer, argsOffset: 0);
             }
-
-
+            
+            
             cmd.SetKeyword(ShaderGlobalKeywords.MainLightShadows, false);
             cmd.SetKeyword(ShaderGlobalKeywords.MainLightShadowCascades, false);
             cmd.SetKeyword(ShaderGlobalKeywords.MainLightShadowScreen, true);
@@ -226,7 +226,7 @@ namespace UnityEngine.Rendering.Universal
                 builder.AllowPassCulling(true);
                 builder.AllowGlobalStateModification(true);
 
-                builder.EnableAsyncCompute(true);
+                // builder.EnableAsyncCompute(true);
 
                 builder.SetRenderFunc((PassData data, ComputeGraphContext context) => { ExecutePass(data, context); });
                 builder.SetGlobalTextureAfterPass(passData.screenSpaceShadowmapTex, ShaderConstants._ScreenSpaceShadowmapTexture);

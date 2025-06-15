@@ -362,6 +362,7 @@ namespace UnityEngine.Rendering.Universal
                     new Vector4(invHalfShadowAtlasWidth, invHalfShadowAtlasHeight,
                         1.0f - invHalfShadowAtlasWidth, 1.0f - invHalfShadowAtlasHeight));
 
+
                 cmd.SetGlobalVector(DirectionalLightsShadowConstantBuffer._DirLightShadowPenumbraParams,
                     new Vector4(m_volumeSettings.penumbra.value, m_volumeSettings.occlusionPenumbra.value,
                         0, 0));

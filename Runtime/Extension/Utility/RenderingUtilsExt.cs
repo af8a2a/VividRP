@@ -170,5 +170,16 @@ namespace UnityEngine.Rendering.Universal
             => -matrix.m11 / matrix.m00;
 
 
+        public static float GetPixelSpreadTangent(float fov, int width, int height)
+        {
+            return Mathf.Tan(fov * Mathf.Deg2Rad * 0.5f) * 2.0f / Mathf.Min(width, height);
+        }
+
+        public static float GetPixelSpreadAngle(float fov, int width, int height)
+        {
+            return Mathf.Atan(GetPixelSpreadTangent(fov, width, height));
+        }
+
+
     }
 }

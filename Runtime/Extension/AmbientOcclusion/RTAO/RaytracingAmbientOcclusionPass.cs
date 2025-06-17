@@ -152,6 +152,7 @@ namespace UnityEngine.Rendering.Universal
                 var ty = RenderingUtilsExt.DivRoundUp((int)data.dispatchRaySizeY,8);
 
                 cmd.DispatchCompute(data.rtaoShader, data.RTAOKernelID, tx, ty, 1);
+
             }
             
             cmd.SetGlobalVector("_AmbientOcclusionParam",
@@ -164,10 +165,16 @@ namespace UnityEngine.Rendering.Universal
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
+            UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
+            UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
+            var output = renderGraph.CreateTexture(new TextureDesc(cameraData.scaledWidth, cameraData.scaledHeight)
+            {
+                enableRandomWrite = true,
+                format = GraphicsFormat.R16_SFloat,
+            });
+
             using (var builder = renderGraph.AddComputePass<PassData>("Raytracing AmbientOcclusion", out var passData))
             {
-                UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
-                UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
 
                 if (!frameData.Contains<RaytracingData>())
                 {
@@ -191,12 +198,26 @@ namespace UnityEngine.Rendering.Universal
                 builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);
                 builder.SetRenderFunc<PassData>(ExecutePass);
+                builder.UseTexture(output);
                 
-                
-                builder.SetGlobalTextureAfterPass(passData.AOTexture, Shader.PropertyToID("_ScreenSpaceOcclusionTexture"));
                 resourceData.ssaoTexture = passData.AOTexture;
+                builder.SetGlobalTextureAfterPass(output, Shader.PropertyToID("_ScreenSpaceOcclusionTexture"));
 
             }
+
+            SpatialDenoiser.DiffuseDenoiserParameters ddParams;
+            ddParams.singleChannel = true;
+            ddParams.kernelSize = 4f;
+            ddParams.halfResolutionFilter = false;
+            ddParams.jitterFilter = false;
+            ddParams.resolutionMultiplier = 1.0f;
+
+            var spatialDenoiser = DenoiseSystem.instance.spatialDenoiser;
+            spatialDenoiser.Denoise(renderGraph, cameraData, ddParams, resourceData.ssaoTexture, resourceData.cameraDepthTexture,
+                resourceData.cameraNormalsTexture, output);
+            resourceData.ssaoTexture = output;
+
+
         }
         public override void OnCameraCleanup(CommandBuffer cmd)
         {

@@ -565,15 +565,6 @@ namespace UnityEngine.Rendering.Universal
             return null;
         }
 
-        static internal float GetPixelSpreadTangent(float fov, int width, int height)
-        {
-            return Mathf.Tan(fov * Mathf.Deg2Rad * 0.5f) * 2.0f / Mathf.Min(width, height);
-        }
-
-        static internal float GetPixelSpreadAngle(float fov, int width, int height)
-        {
-            return Mathf.Atan(GetPixelSpreadTangent(fov, width, height));
-        }
 
         internal ShaderVariablesRaytracing GetShaderVariablesRaytracingCB(Vector2Int pixelSize, RayTracingSettings rayTracingSettings)
         {
@@ -581,7 +572,7 @@ namespace UnityEngine.Rendering.Universal
             m_ShaderVariablesRayTracingCB._RayTracingDistantRayBias = rayTracingSettings.distantRayBias.value;
             m_ShaderVariablesRayTracingCB._RayCountEnabled = 0;
             m_ShaderVariablesRayTracingCB._RaytracingCameraNearPlane = camera.nearClipPlane;
-            m_ShaderVariablesRayTracingCB._RaytracingPixelSpreadAngle = GetPixelSpreadAngle(camera.fieldOfView, pixelSize.x, pixelSize.y);
+            m_ShaderVariablesRayTracingCB._RaytracingPixelSpreadAngle = RenderingUtilsExt.GetPixelSpreadAngle(camera.fieldOfView, pixelSize.x, pixelSize.y);
             m_ShaderVariablesRayTracingCB._DirectionalShadowFallbackIntensity = rayTracingSettings.directionalShadowFallbackIntensity.value;
             m_ShaderVariablesRayTracingCB._RayTracingLodBias = 0;
 

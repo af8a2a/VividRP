@@ -208,7 +208,6 @@ Light GetStencilLight(float3 posWS, float2 screen_uv, half4 shadowMask, uint mat
             unityLight.shadowAttenuation = 1.0;
             unityLight.color = _LightColor.rgb;
             unityLight.layerMask = lightLayerMask;
-            unityLight.shadowScatter = 1.0;
 
             if (!materialReceiveShadowsOff)
             {
@@ -247,6 +246,8 @@ Light GetStencilLight(float3 posWS, float2 screen_uv, half4 shadowMask, uint mat
             }
         #endif
     #endif
+    unityLight.shadowScatter = MainLightShadowScatter(unityLight.shadowAttenuation * unityLight.distanceAttenuation);
+
     return unityLight;
 }
 

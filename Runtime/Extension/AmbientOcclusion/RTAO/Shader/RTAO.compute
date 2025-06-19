@@ -59,7 +59,7 @@ void RTAO(const uint2 coordSS : SV_DispatchThreadID)
 
     PositionInputs posInput = GetPositionInput(coordSS, _ScreenSize.zw, rawDepth, UNITY_MATRIX_I_VP, UNITY_MATRIX_V, 0);
 
-    float3 normalWS = SceneNormal[coordSS];
+    float3 normalWS =UnpackNormal(SceneNormal[coordSS]) ;
 
     // Evaluate the ray bias
     float rayBias = EvaluateRayTracingBias(posInput.positionWS);

@@ -14,7 +14,7 @@
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/Shaders/RaytracingSampling.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Sampling.hlsl"
 
-Texture2D<float> SceneDepth;
+Texture2D<float>  SceneDepth;
 Texture2D<float4> SceneNormal;
 
 
@@ -27,24 +27,24 @@ RWTexture2D<float> AmbientOcclusionTexture;
 RaytracingAccelerationStructure _AccelerationStructure;
 
 
-
-float3 cosineSampleHemisphere(float2 u) {
+float3 cosineSampleHemisphere(float2 u)
+{
     float phi = 2 * PI * u.x;
     float cosTheta = sqrt(u.y);
     float sinTheta = sqrt(1 - cosTheta * cosTheta);
     return float3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
 }
 
-float3x3 GetTangentBasis( float3 TangentZ )
+float3x3 GetTangentBasis(float3 TangentZ)
 {
     const float Sign = TangentZ.z >= 0 ? 1 : -1;
-    const float a = -rcp( Sign + TangentZ.z );
+    const float a = -rcp(Sign + TangentZ.z);
     const float b = TangentZ.x * TangentZ.y * a;
 
     float3 TangentX = {1 + Sign * a * pow(TangentZ.x, 2), Sign * b, -Sign * TangentZ.x};
     float3 TangentY = {b, Sign + a * pow(TangentZ.y, 2), -TangentZ.y};
 
-    return float3x3( TangentX, TangentY, TangentZ );
+    return float3x3(TangentX, TangentY, TangentZ);
 }
 
 [numthreads(8, 8, 1)]
@@ -59,7 +59,7 @@ void RTAO(const uint2 coordSS : SV_DispatchThreadID)
 
     PositionInputs posInput = GetPositionInput(coordSS, _ScreenSize.zw, rawDepth, UNITY_MATRIX_I_VP, UNITY_MATRIX_V, 0);
 
-    float3 normalWS =UnpackNormal(SceneNormal[coordSS]) ;
+    float3 normalWS = UnpackNormal(SceneNormal[coordSS]);
 
     // Evaluate the ray bias
     float rayBias = EvaluateRayTracingBias(posInput.positionWS);
@@ -83,15 +83,15 @@ void RTAO(const uint2 coordSS : SV_DispatchThreadID)
 
         float3 rayDirWS = mul(sampleDir, GetTangentBasis(normalWS));
 
-        
-        aoRay.Origin = posInput.positionWS + normalWS * rayBias*2;
+
+        aoRay.Origin = posInput.positionWS + normalWS * rayBias * 2;
         aoRay.Direction = rayDirWS;
         aoRay.TMin = 0;
         aoRay.TMax = radius;
-        
+
         shadowQuery.TraceRayInline(_AccelerationStructure, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xff, aoRay);
         shadowQuery.Proceed();
-        
+
         block += shadowQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
     }
     block /= (float)sampleCount;

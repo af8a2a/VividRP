@@ -16,8 +16,8 @@ struct RayIntersectionVisibility
 {
     // Distance of the intersection
     float t;
-    // Velocity for the intersection point
-    // float velocity;
+    // Velocity for the  m< point
+    float velocity;
     // Cone representation of the ray
     // RayCone cone;
     // Pixel coordinate from which the initial ray was launched

@@ -22,7 +22,9 @@ namespace UnityEngine.Rendering.Universal
 
         public MipGenerator()
         {
-            m_ColorPyramidCS = Resources.Load<ComputeShader>("ColorPyramid");
+            var runtimeShaders = GraphicsSettings.GetRenderPipelineSettings<MipGeneratorRuntimeShader>();
+
+            m_ColorPyramidCS = runtimeShaders.colorPyramid;
             m_ColorDownsampleKernel = m_ColorPyramidCS.FindKernel("KColorDownsample");
             m_ColorGaussianKernel = m_ColorPyramidCS.FindKernel("KColorGaussian");
             m_HizDownsampleKernel = m_ColorPyramidCS.FindKernel("KHizDownsample");
@@ -33,7 +35,7 @@ namespace UnityEngine.Rendering.Universal
 
             #region GPUCopy
 
-            GPUCopyColor = Resources.Load<ComputeShader>("CopyColor");
+            GPUCopyColor =runtimeShaders.GPUCopyColor;
             GPUCopyColorKernelID = GPUCopyColor.FindKernel("KMain");
 
             #endregion
@@ -41,8 +43,8 @@ namespace UnityEngine.Rendering.Universal
 
             #region SPD
 
-            spdCompatibleCS = Resources.Load<ComputeShader>("SPDCompatible");
-            spdCS = Resources.Load<ComputeShader>("SPDIntegration");
+            spdCompatibleCS = runtimeShaders.spdCompatible;
+            spdCS = runtimeShaders.spdIntegration;
             spdKernelID = spdCompatibleCS.FindKernel("KMain"); //default 0
 
             #endregion

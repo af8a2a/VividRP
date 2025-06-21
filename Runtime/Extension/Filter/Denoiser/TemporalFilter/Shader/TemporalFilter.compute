@@ -1,0 +1,17 @@
+﻿
+#pragma use_dxc
+#pragma kernel TemporalDenoise
+
+RWTexture2D<float4> ColorBuffer;
+// Texture2D VelocityBuffer;
+Texture2D HistoryBuffer;
+
+
+[numthreads(16, 16, 1)]
+void TemporalDenoise(uint3 id : SV_DispatchThreadID)
+{
+    float4 current = ColorBuffer.Load(id);
+    float4 previous = HistoryBuffer.Load(id);
+    float4 result=lerp(current, previous, 0.5);
+    ColorBuffer[id.xy] = result;
+}

@@ -2,9 +2,10 @@
 
 namespace UnityEngine.Rendering.Universal
 {
+
     [Serializable]
     [SupportedOnRenderPipeline(typeof(UniversalRenderPipelineAsset))]
-    public partial class DenoiserRuntimeShader : IRenderPipelineResources
+    public  class DenoiserRuntimeShader : IRenderPipelineResources
     {
         [SerializeField] [HideInInspector] private int _version;
         public int version => _version;
@@ -21,13 +22,13 @@ namespace UnityEngine.Rendering.Universal
         
 
         
-        // [SerializeField, ResourcePath("Runtime/Extension/Filter/Denoiser/TemporalFilter/Shaders/TemporalFilter.compute")]
-        // private ComputeShader m_TemporalFilterCS;
-        // public ComputeShader temporalFilterCS
-        // {
-        //     get => m_TemporalFilterCS;
-        //     set => this.SetValueAndNotify(ref m_TemporalFilterCS, value);
-        // }
-        //
+        [SerializeField, ResourcePath("Runtime/Extension/Filter/Denoiser/TemporalDenoiser/Shader/TemporalFilter.compute")]
+        private ComputeShader m_TemporalFilterCS;
+        public ComputeShader temporalFilterCS
+        {
+            get => m_TemporalFilterCS;
+            set => this.SetValueAndNotify(ref m_TemporalFilterCS, value);
+        }
+        
     }
 }

@@ -3,7 +3,7 @@
     [VolumeRequiresRendererFeatures(typeof(RaytracingCoreFeature), typeof(RaytracingAmbientOcclusionFeature))]
     public class RaytracingAmbientOcclusion : VolumeComponent
     {
-        public FloatParameter radius = new ClampedFloatParameter(0f, 0, 0.25f);
+        public FloatParameter radius = new ClampedFloatParameter(0f, 0, 1f);
         public IntParameter samplesPerPixel = new ClampedIntParameter(1, 1, 16);
 
         public FloatParameter intensity = new ClampedFloatParameter(0f, 0, 1);

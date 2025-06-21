@@ -2,6 +2,12 @@
 #ifndef RAYTRACING_SHADERPASS_VISIBILITY_INCLUDED
 #define RAYTRACING_SHADERPASS_VISIBILITY_INCLUDED
 
+float3 TransformPreviousObjectToWorld(float3 positionOS)
+{
+    return mul(UNITY_PREV_MATRIX_M,  float4(positionOS, 1.0)).xyz;
+}
+
+
 // Generic function that handles the reflection code
 [shader("closesthit")]
 void ClosestHitMain(inout RayIntersectionVisibility rayIntersection : SV_RayPayload, AttributeData attributeData : SV_IntersectionAttributes)
@@ -15,15 +21,11 @@ void ClosestHitMain(inout RayIntersectionVisibility rayIntersection : SV_RayPayl
     GetCurrentVertexAndBuildFragInputs(attributeData, currentVertex, fragInput);
     PositionInputs posInput = GetPositionInput(rayIntersection.pixelCoord, _ScreenSize.zw, fragInput.positionRWS);
 
+    float3 positionOS = ObjectRayOrigin() + ObjectRayDirection() * rayIntersection.t;
 
+    float3 previousPositionWS = TransformPreviousObjectToWorld(positionOS);
 
-
-    // float2 uv = fragInput.texCoord0.xy;
-    // uv = TRANSFORM_TEX(uv, _BaseMap);
-    // float4 albedoAlpha = SAMPLE_TEXTURE2D_LOD(_BaseMap, sampler_BaseMap, uv, 0);
-    // float alpha = Alpha(albedoAlpha.a, _BaseColor, _Cutoff);
-    // float3 albedo = albedoAlpha.rgb * _BaseColor.rgb;
-
+    rayIntersection.velocity = saturate(length(previousPositionWS - fragInput.positionRWS));
     rayIntersection.color.x = 0;
 }
 

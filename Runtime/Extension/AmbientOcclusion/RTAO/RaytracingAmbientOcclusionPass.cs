@@ -3,7 +3,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal
 {
-    public class RaytracingAmbientOcclusionPass : ScriptableRenderPass
+    public partial class RaytracingAmbientOcclusionPass : ScriptableRenderPass
     {
         public RaytracingAmbientOcclusionPass()
         {
@@ -19,16 +19,19 @@ namespace UnityEngine.Rendering.Universal
             internal TextureHandle AOTexture;
 
 
-            // Ray Tracing
-            internal ComputeShader rtaoShader;
+            // RayQuery
+            internal ComputeShader rtaoRayQueryShader;
             internal int RTAOKernelID;
+
+            //Raytracing DXR
+            internal RayTracingShader rtaoShader;
+            internal TextureHandle velocityTexture;
 
             internal RayTracingAccelerationStructure rtas;
             internal uint dispatchRaySizeX;
             internal uint dispatchRaySizeY;
             internal ShaderVariablesRaytracing rayTracingCB;
             internal BlueNoiseSystem.DitheredTextureHandleSet ditheredTextureHandleSet;
-
             internal float intensity;
             internal float radius;
             internal float directLightingStrength;
@@ -57,8 +60,10 @@ namespace UnityEngine.Rendering.Universal
 
             passData.NormalTexture = resourceData.cameraNormalsTexture;
             passData.DepthTexture = resourceData.cameraDepthTexture;
-            passData.rtaoShader = runtimeShaders.raytracingAmbientOcclusionShader;
-            passData.RTAOKernelID = passData.rtaoShader.FindKernel("RTAO");
+            passData.rtaoRayQueryShader = runtimeShaders.inlineRaytracingAmbientOcclusionShader;
+            passData.RTAOKernelID = passData.rtaoRayQueryShader.FindKernel("RTAO");
+
+            passData.rtaoShader = runtimeShaders.raytracingAmbientOcclusionRTShader;
 
             passData.rtas = raytracingData.rayTracingSystem.RequestAccelerationStructure();
 
@@ -96,14 +101,12 @@ namespace UnityEngine.Rendering.Universal
             passData.sampleCount = volumeSettings.samplesPerPixel.value;
             passData.radius = volumeSettings.radius.value;
             passData.intensity = volumeSettings.intensity.value;
-            passData.directLightingStrength= volumeSettings.directLightingStrength.value;
+            passData.directLightingStrength = volumeSettings.directLightingStrength.value;
         }
 
 
         static class ShaderConstants
         {
-
-
             public static readonly int AmbientOcclusionTexture = Shader.PropertyToID("AmbientOcclusionTexture");
             public static readonly int SceneDepth = Shader.PropertyToID("SceneDepth");
             public static readonly int SceneNormal = Shader.PropertyToID("SceneNormal");
@@ -113,57 +116,77 @@ namespace UnityEngine.Rendering.Universal
             public static readonly int intensity = Shader.PropertyToID("intensity");
             public static readonly int frameIndex = Shader.PropertyToID("frameIndex");
             public static readonly int _AccelerationStructure = Shader.PropertyToID("_AccelerationStructure");
+            public static readonly int _RaytracingAccelerationStructure = Shader.PropertyToID("_RaytracingAccelerationStructure");
+            public static readonly int _VelocityBuffer = Shader.PropertyToID("_VelocityBuffer");
 
         }
 
+        
         public void Setup()
         {
             ConfigureInput(ScriptableRenderPassInput.Normal);
         }
 
 
-        private static void ExecutePass(PassData data, ComputeGraphContext context)
+        static RTHandle HistoryAOBufferAllocatorFunction(GraphicsFormat graphicsFormat, string viewName, int frameIndex, RTHandleSystem rtHandleSystem)
+        {
+            frameIndex &= 1;
+
+            return rtHandleSystem.Alloc(Vector2.one, colorFormat: graphicsFormat,
+                enableRandomWrite: true, useDynamicScale: true,
+                name: string.Format("{0}_CameraHistoryAOBuffer{1}", viewName, frameIndex));
+        }
+
+        internal RTHandle ReAllocatedHistoryAOBufferIfNeeded(HistoryFrameRTSystem historyRTSystem)
+        {
+            return historyRTSystem.GetCurrentFrameRT(HistoryFrameType.RaytracingAmbientOcclusionHistory)
+                   ?? historyRTSystem.AllocHistoryFrameRT((int)HistoryFrameType.RaytracingAmbientOcclusionHistory,
+                       HistoryAOBufferAllocatorFunction, GraphicsFormat.R32_SFloat, 1);
+        }
+
+
+        private static void ExecuteTrace(PassData data, ComputeGraphContext context)
         {
             var cmd = context.cmd;
 
-            using (new ProfilingScope(cmd, new ProfilingSampler("RayTracingShadows")))
+            using (new ProfilingScope(cmd, new ProfilingSampler("RayTracing AmbientOcclusion")))
             {
                 // Define the shader pass to use for the reflection pass
 
                 // Set the acceleration structure for the pass
-                cmd.SetRayTracingAccelerationStructure(data.rtaoShader, data.RTAOKernelID,ShaderConstants._AccelerationStructure, data.rtas);
 
                 // SetConstantBuffer
                 ConstantBuffer.PushGlobal(cmd, data.rayTracingCB, RayTracingSystem._ShaderVariablesRaytracing);
 
                 BlueNoiseSystem.BindDitheredTextureSet(cmd, data.ditheredTextureHandleSet);
+
+                cmd.SetRayTracingShaderPass(data.rtaoShader, "VisibilityDXR");
+                cmd.SetRayTracingAccelerationStructure(data.rtaoShader, ShaderConstants._RaytracingAccelerationStructure, data.rtas);
+
                 // SetTextures
-                cmd.SetComputeTextureParam(data.rtaoShader,data.RTAOKernelID, ShaderConstants.SceneDepth, data.DepthTexture);
-                cmd.SetComputeTextureParam(data.rtaoShader,data.RTAOKernelID, ShaderConstants.SceneNormal, data.NormalTexture);
-                cmd.SetComputeTextureParam(data.rtaoShader,data.RTAOKernelID, ShaderConstants.AmbientOcclusionTexture, data.AOTexture);
+                cmd.SetRayTracingTextureParam(data.rtaoShader, ShaderConstants.SceneDepth, data.DepthTexture);
+                cmd.SetRayTracingTextureParam(data.rtaoShader, ShaderConstants.SceneNormal, data.NormalTexture);
+                cmd.SetRayTracingTextureParam(data.rtaoShader, ShaderConstants.AmbientOcclusionTexture, data.AOTexture);
+                cmd.SetRayTracingTextureParam(data.rtaoShader, ShaderConstants._VelocityBuffer, data.velocityTexture);
 
-                cmd.SetComputeIntParam(data.rtaoShader, ShaderConstants.sampleCount, data.sampleCount);
-                cmd.SetComputeIntParam(data.rtaoShader, ShaderConstants.frameIndex, data.frameIndex);
-                
-                cmd.SetComputeFloatParam(data.rtaoShader, ShaderConstants.radius, data.radius);
-                cmd.SetComputeFloatParam(data.rtaoShader, ShaderConstants.intensity, data.intensity);
+                cmd.SetRayTracingIntParam(data.rtaoShader, ShaderConstants.sampleCount, data.sampleCount);
+                cmd.SetRayTracingIntParam(data.rtaoShader, ShaderConstants.frameIndex, data.frameIndex);
+                cmd.SetRayTracingFloatParam(data.rtaoShader, ShaderConstants.radius, data.radius);
+                cmd.SetRayTracingFloatParam(data.rtaoShader, ShaderConstants.intensity, data.intensity);
 
-                var tx = RenderingUtilsExt.DivRoundUp((int)data.dispatchRaySizeX,8);
-                var ty = RenderingUtilsExt.DivRoundUp((int)data.dispatchRaySizeY,8);
+                var tx = (uint)RenderingUtilsExt.DivRoundUp((int)data.dispatchRaySizeX, 8);
+                var ty = (uint)RenderingUtilsExt.DivRoundUp((int)data.dispatchRaySizeY, 8);
 
-                cmd.DispatchCompute(data.rtaoShader, data.RTAOKernelID, tx, ty, 1);
-
+                cmd.DispatchRays(data.rtaoShader, "RayGenAmbientOcclusion", data.dispatchRaySizeX, data.dispatchRaySizeY, 1, null);
             }
-            
+
             cmd.SetGlobalVector("_AmbientOcclusionParam",
                 new Vector4(1f, 0f, 0f, data.directLightingStrength));
             CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.ScreenSpaceOcclusion, true);
-
         }
-        
-        
 
-        public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
+
+        TextureHandle RTAORayPipeline(RenderGraph renderGraph, ContextContainer frameData)
         {
             UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
             UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
@@ -173,36 +196,48 @@ namespace UnityEngine.Rendering.Universal
                 format = GraphicsFormat.R16_SFloat,
             });
 
+            var velocity = renderGraph.CreateTexture(new TextureDesc(cameraData.scaledWidth, cameraData.scaledHeight)
+            {
+                enableRandomWrite = true,
+                format = GraphicsFormat.R16_SFloat,
+            });
+
+            var histroyRT = HistoryFrameRTSystem.GetOrCreate(cameraData.camera);
+            var prevFrameRT = ReAllocatedHistoryAOBufferIfNeeded(histroyRT);
+            var AOHistory = renderGraph.ImportTexture(prevFrameRT);
+            TextureHandle aoTexture;
             using (var builder = renderGraph.AddComputePass<PassData>("Raytracing AmbientOcclusion", out var passData))
             {
-
                 if (!frameData.Contains<RaytracingData>())
                 {
-                    return;
+                    return TextureHandle.nullHandle;
                 }
+
                 RaytracingData raytracingData = frameData.Get<RaytracingData>();
 
                 var requireRayTracingVaild = raytracingData.rayTracingSystem.GetRayTracingState();
                 if (!requireRayTracingVaild || !RayTracingSystem.SupportedCamera(cameraData.camera))
                 {
-                    return;
+                    return TextureHandle.nullHandle;
                 }
 
                 InitRayTracingPassData(renderGraph, passData, raytracingData, cameraData, resourceData);
                 passData.ditheredTextureHandleSet.Use(builder);
-                
+                passData.velocityTexture = velocity;
+
+                builder.UseTexture(passData.velocityTexture);
                 builder.UseTexture(passData.DepthTexture);
                 builder.UseTexture(passData.NormalTexture);
-                builder.UseTexture(passData.AOTexture,AccessFlags.ReadWrite);
+                builder.UseTexture(passData.AOTexture, AccessFlags.ReadWrite);
 
                 builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);
-                builder.SetRenderFunc<PassData>(ExecutePass);
+                builder.SetRenderFunc<PassData>(ExecuteTrace);
                 builder.UseTexture(output);
-                
-                resourceData.ssaoTexture = passData.AOTexture;
-                builder.SetGlobalTextureAfterPass(output, Shader.PropertyToID("_ScreenSpaceOcclusionTexture"));
 
+                aoTexture = passData.AOTexture;
+
+                builder.SetGlobalTextureAfterPass(output, Shader.PropertyToID("_ScreenSpaceOcclusionTexture"));
             }
 
             SpatialDenoiser.DiffuseDenoiserParameters ddParams;
@@ -213,16 +248,28 @@ namespace UnityEngine.Rendering.Universal
             ddParams.resolutionMultiplier = 1.0f;
 
             var spatialDenoiser = DenoiseSystem.instance.spatialDenoiser;
-            spatialDenoiser.Denoise(renderGraph, cameraData, ddParams, resourceData.ssaoTexture, resourceData.cameraDepthTexture,
+
+            var temporalDenoiser = DenoiseSystem.instance.temporalDenoiser;
+
+            temporalDenoiser.Denoise(renderGraph, cameraData, aoTexture, AOHistory);
+
+            MipGenerator.Instance.CopyColor(renderGraph, frameData, aoTexture, AOHistory);
+            spatialDenoiser.Denoise(renderGraph, cameraData, ddParams, aoTexture, resourceData.cameraDepthTexture,
                 resourceData.cameraNormalsTexture, output);
-            resourceData.ssaoTexture = output;
 
-
+            return output;
         }
+
+
+        public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
+        {
+            UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
+            resourceData.ssaoTexture = RTAORayPipeline(renderGraph, frameData);
+        }
+
         public override void OnCameraCleanup(CommandBuffer cmd)
         {
             CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.ScreenSpaceOcclusion, false);
         }
-
     }
 }

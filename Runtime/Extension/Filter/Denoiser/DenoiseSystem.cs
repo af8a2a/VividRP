@@ -9,16 +9,19 @@ namespace UnityEngine.Rendering.Universal
         public static DenoiseSystem instance => _instance.Value;
 
         public SpatialDenoiser spatialDenoiser;
-
+    
+        public TemporalFilter temporalDenoiser;
         public DenoiseSystem()
         {
             spatialDenoiser = new SpatialDenoiser();
+            temporalDenoiser=new TemporalFilter();
         }
 
 
         public void Initialize()
         {
             spatialDenoiser?.Init();
+            temporalDenoiser?.Init();
         }
 
         
@@ -30,6 +33,7 @@ namespace UnityEngine.Rendering.Universal
         public void Dispose()
         {
             spatialDenoiser?.Release();
+            temporalDenoiser?.Release();
         }
     }
 }

@@ -11,6 +11,16 @@
         public FloatParameter directLightingStrength = new ClampedFloatParameter(0f, 0, 1);
 
         public BoolParameter enabled = new BoolParameter(false);
+        
+        
+        [Header("Denoise")]
+        public FloatParameter denoiseRadius = new ClampedFloatParameter(0f, 0, 1f);
+
+        
+        
+        [Header("Experiment")]
+        public BoolParameter rayQuery = new BoolParameter(false);
+
         public bool IsActive() => enabled.value;
     }
 }

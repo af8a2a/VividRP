@@ -46,6 +46,8 @@ namespace UnityEngine.Rendering.Universal
         {
             UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
             UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
+            var camHistoryRTSystem = HistoryFrameRTSystem.GetOrCreate(cameraData.camera);
+
             var output = renderGraph.CreateTexture(new TextureDesc(cameraData.scaledWidth, cameraData.scaledHeight)
             {
                 enableRandomWrite = true,
@@ -88,9 +90,11 @@ namespace UnityEngine.Rendering.Universal
 
             }
 
+            var volumeSettings = VolumeManager.instance.stack.GetComponent<RaytracingAmbientOcclusion>();
+
             SpatialDenoiser.DiffuseDenoiserParameters ddParams;
             ddParams.singleChannel = true;
-            ddParams.kernelSize = 4f;
+            ddParams.kernelSize = volumeSettings.denoiseRadius.value;
             ddParams.halfResolutionFilter = false;
             ddParams.jitterFilter = false;
             ddParams.resolutionMultiplier = 1.0f;
@@ -99,9 +103,14 @@ namespace UnityEngine.Rendering.Universal
 
             var temporalDenoiser = DenoiseSystem.instance.temporalDenoiser;
 
-            temporalDenoiser.Denoise(renderGraph, cameraData, aoTexture, AOHistory);
 
-            MipGenerator.Instance.CopyColor(renderGraph, frameData, aoTexture, AOHistory);
+            var prevDepth = renderGraph.ImportTexture(camHistoryRTSystem.GetPreviousFrameRT(HistoryFrameType.ScreenSpaceGlobalIlluminationHistoryDepth));
+
+            temporalDenoiser.Denoise(renderGraph, cameraData, aoTexture, AOHistory, prevDepth, resourceData.motionVectorColor,
+                resourceData.cameraDepthTexture);
+
+
+            // MipGenerator.Instance.CopyColor(renderGraph, frameData, aoTexture, AOHistory);
             spatialDenoiser.Denoise(renderGraph, cameraData, ddParams, aoTexture, resourceData.cameraDepthTexture,
                 resourceData.cameraNormalsTexture, output);
 

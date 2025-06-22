@@ -1,7 +1,7 @@
 ﻿using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
-namespace Features.Core
+namespace UnityEngine.Rendering.Universal
 {
     public class HistoryCaptureData : ContextItem
     {

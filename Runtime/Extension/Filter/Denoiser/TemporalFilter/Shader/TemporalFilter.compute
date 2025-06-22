@@ -1,17 +1,50 @@
-﻿
-#pragma use_dxc
-#pragma kernel TemporalDenoise
-
+﻿#pragma kernel TemporalDenoise
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 RWTexture2D<float4> ColorBuffer;
 // Texture2D VelocityBuffer;
-Texture2D HistoryBuffer;
+RWTexture2D<float4> HistoryBuffer;
+RWTexture2D<float4> HistoryDepth;
+
+Texture2D MotionBuffer;
+Texture2D DepthBuffer;
+
+
 
 
 [numthreads(16, 16, 1)]
 void TemporalDenoise(uint3 id : SV_DispatchThreadID)
 {
-    float4 current = ColorBuffer.Load(id);
-    float4 previous = HistoryBuffer.Load(id);
-    float4 result=lerp(current, previous, 0.5);
-    ColorBuffer[id.xy] = result;
+    float3 current = float4(RGBToYCoCg(ColorBuffer.Load(id.xy)), 1);
+
+    float2 dim;
+    ColorBuffer.GetDimensions(dim.x, dim.y);
+    PositionInputs input = GetPositionInput(id, rcp(dim), 0);
+    float2 screenUV = input.positionNDC;
+    // Specify explicit tile coordinates so that we can easily make it lane invariant for compute evaluation.
+    
+    float4 previous = HistoryBuffer.Load(id.xy);
+    float sampleCount = previous.w;
+
+
+    half2 velocity = SAMPLE_TEXTURE2D_X_LOD(MotionBuffer, sampler_LinearClamp, screenUV, 0).xy;
+
+    float2 prevUV = screenUV - velocity;
+    int2 prevPositionSS = prevUV * dim;
+
+
+    float currDepth = DepthBuffer[input.positionSS];
+    float prevDepth = HistoryDepth[prevPositionSS];
+    bool canReproject = abs(prevDepth - currDepth) < 1e-3;
+
+    float accumulationFactor = sampleCount >= 8.0 ? 0.93 : (sampleCount / (sampleCount + 1.0));
+
+    float3 result = lerp(current, previous.rgb, accumulationFactor);
+
+
+    sampleCount = canReproject ? 0 : min(sampleCount + 1.0, 8.0);
+
+    HistoryBuffer[id.xy] = float4(result, sampleCount);
+
+    ColorBuffer[id.xy] = float4(YCoCgToRGB(result), 1);
 }

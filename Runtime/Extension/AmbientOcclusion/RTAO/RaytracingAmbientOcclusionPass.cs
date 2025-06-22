@@ -1,4 +1,5 @@
-﻿using UnityEngine.Experimental.Rendering;
+﻿using Features.Core;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal
@@ -118,13 +119,12 @@ namespace UnityEngine.Rendering.Universal
             public static readonly int _AccelerationStructure = Shader.PropertyToID("_AccelerationStructure");
             public static readonly int _RaytracingAccelerationStructure = Shader.PropertyToID("_RaytracingAccelerationStructure");
             public static readonly int _VelocityBuffer = Shader.PropertyToID("_VelocityBuffer");
-
         }
 
-        
+
         public void Setup()
         {
-            ConfigureInput(ScriptableRenderPassInput.Normal);
+            ConfigureInput(ScriptableRenderPassInput.Normal | ScriptableRenderPassInput.Motion);
         }
 
 
@@ -141,7 +141,7 @@ namespace UnityEngine.Rendering.Universal
         {
             return historyRTSystem.GetCurrentFrameRT(HistoryFrameType.RaytracingAmbientOcclusionHistory)
                    ?? historyRTSystem.AllocHistoryFrameRT((int)HistoryFrameType.RaytracingAmbientOcclusionHistory,
-                       HistoryAOBufferAllocatorFunction, GraphicsFormat.R32_SFloat, 1);
+                       HistoryAOBufferAllocatorFunction, GraphicsFormat.R16_SFloat, 1);
         }
 
 
@@ -190,6 +190,8 @@ namespace UnityEngine.Rendering.Universal
         {
             UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
             UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
+            var camHistoryRTSystem = HistoryFrameRTSystem.GetOrCreate(cameraData.camera);
+
             var output = renderGraph.CreateTexture(new TextureDesc(cameraData.scaledWidth, cameraData.scaledHeight)
             {
                 enableRandomWrite = true,
@@ -202,8 +204,7 @@ namespace UnityEngine.Rendering.Universal
                 format = GraphicsFormat.R16_SFloat,
             });
 
-            var histroyRT = HistoryFrameRTSystem.GetOrCreate(cameraData.camera);
-            var prevFrameRT = ReAllocatedHistoryAOBufferIfNeeded(histroyRT);
+            var prevFrameRT = ReAllocatedHistoryAOBufferIfNeeded(camHistoryRTSystem);
             var AOHistory = renderGraph.ImportTexture(prevFrameRT);
             TextureHandle aoTexture;
             using (var builder = renderGraph.AddComputePass<PassData>("Raytracing AmbientOcclusion", out var passData))
@@ -240,9 +241,11 @@ namespace UnityEngine.Rendering.Universal
                 builder.SetGlobalTextureAfterPass(output, Shader.PropertyToID("_ScreenSpaceOcclusionTexture"));
             }
 
+            var volumeSettings = VolumeManager.instance.stack.GetComponent<RaytracingAmbientOcclusion>();
+
             SpatialDenoiser.DiffuseDenoiserParameters ddParams;
             ddParams.singleChannel = true;
-            ddParams.kernelSize = 4f;
+            ddParams.kernelSize = volumeSettings.denoiseRadius.value;
             ddParams.halfResolutionFilter = false;
             ddParams.jitterFilter = false;
             ddParams.resolutionMultiplier = 1.0f;
@@ -251,7 +254,13 @@ namespace UnityEngine.Rendering.Universal
 
             var temporalDenoiser = DenoiseSystem.instance.temporalDenoiser;
 
-            temporalDenoiser.Denoise(renderGraph, cameraData, aoTexture, AOHistory);
+
+            var prevDepth = renderGraph.ImportTexture(camHistoryRTSystem.GetPreviousFrameRT(HistoryFrameType.ScreenSpaceGlobalIlluminationHistoryDepth));
+
+            temporalDenoiser.Denoise(renderGraph, cameraData, aoTexture, AOHistory, prevDepth, resourceData.motionVectorColor,
+                resourceData.cameraDepthTexture);
+            
+
 
             MipGenerator.Instance.CopyColor(renderGraph, frameData, aoTexture, AOHistory);
             spatialDenoiser.Denoise(renderGraph, cameraData, ddParams, aoTexture, resourceData.cameraDepthTexture,
@@ -264,7 +273,23 @@ namespace UnityEngine.Rendering.Universal
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
             UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
-            resourceData.ssaoTexture = RTAORayPipeline(renderGraph, frameData);
+            
+            var volumeSettings = VolumeManager.instance.stack.GetComponent<RaytracingAmbientOcclusion>();
+            if (!volumeSettings.enabled.value)
+            {
+                return;
+            }
+
+            if (volumeSettings.rayQuery.value)
+            {
+                resourceData.ssaoTexture = RTAORayQuery(renderGraph, frameData);
+
+            }
+            else
+            {
+                resourceData.ssaoTexture = RTAORayPipeline(renderGraph, frameData);
+            }
+            
         }
 
         public override void OnCameraCleanup(CommandBuffer cmd)

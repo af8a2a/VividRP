@@ -69,7 +69,7 @@ void RTAO(const uint2 coordSS : SV_DispatchThreadID)
     float block = 0;
 
 
-    UnityRayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> shadowQuery;
+    UnityRayQuery<RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> shadowQuery;
     RayDesc aoRay;
 
     // Ray
@@ -81,25 +81,18 @@ void RTAO(const uint2 coordSS : SV_DispatchThreadID)
         float3 sampleDir = SampleHemisphereCosine(noiseValue.x, noiseValue.y, normalWS);
 
 
-        float3 rayDirWS = mul(sampleDir, GetTangentBasis(normalWS));
 
-
-        aoRay.Origin = posInput.positionWS + normalWS * rayBias * 2;
-        aoRay.Direction = rayDirWS;
-        aoRay.TMin = 0;
+        aoRay.Origin = posInput.positionWS + normalWS * rayBias;
+        aoRay.Direction = sampleDir;
+        aoRay.TMin =  0.0001;
         aoRay.TMax = radius;
 
-        shadowQuery.TraceRayInline(_AccelerationStructure, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xff, aoRay);
+        shadowQuery.TraceRayInline(_AccelerationStructure, RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xff, aoRay);
         shadowQuery.Proceed();
 
         block += shadowQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
     }
     block /= (float)sampleCount;
-
-    // float2 noiseValue;
-    // noiseValue.x = GetBNDSequenceSample(coordSS, frameIndex, 0);
-    // noiseValue.y = GetBNDSequenceSample(coordSS, frameIndex, 1);
-    // float3 sampleDir = SampleHemisphereCosine(noiseValue.x, noiseValue.y, normalWS);
 
 
     AmbientOcclusionTexture[coordSS] = 1.0 - PositivePow(block, intensity);

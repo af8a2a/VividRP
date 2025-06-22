@@ -138,6 +138,6 @@ void RayGenAmbientOcclusion()
     finalColor /= (float)numSamples;
 
     // Alright we are done
-    AmbientOcclusionTexture[(currentPixelCoord)] = finalColor;
+    AmbientOcclusionTexture[(currentPixelCoord)] = finalColor ;
     _VelocityBuffer[(currentPixelCoord)] = velocity;
 }

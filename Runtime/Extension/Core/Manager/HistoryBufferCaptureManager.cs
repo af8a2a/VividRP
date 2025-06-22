@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Features.Core.Manager
+namespace UnityEngine.Rendering.Universal
 {
     public class HistoryBufferCaptureManager
     {

@@ -264,12 +264,14 @@ namespace UnityEngine.Rendering.Universal
             if (xr.enabled && xr.singlePassEnabled)
             {
                 cmd.SetGlobalMatrixArray(ShaderPropertyId.previousViewProjectionNoJitterStereo, previousViewProjectionStereo);
+                // cmd.SetGlobalMatrixArray(ShaderPropertyId.previousInverseViewProjectionStereo, previousViewProjectionStereo);
                 cmd.SetGlobalMatrixArray(ShaderPropertyId.viewProjectionNoJitterStereo, viewProjectionStereo);
             }
             else
 #endif
             {
                 cmd.SetGlobalMatrix(ShaderPropertyId.previousViewProjectionNoJitter, previousViewProjectionStereo[passID]);
+                cmd.SetGlobalMatrix(ShaderPropertyId.previousInverseViewProjectionNoJitter, previousViewProjectionStereo[passID].inverse);
                 cmd.SetGlobalMatrix(ShaderPropertyId.viewProjectionNoJitter, viewProjectionStereo[passID]);
             }
         }

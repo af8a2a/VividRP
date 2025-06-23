@@ -1,8 +1,11 @@
-﻿namespace UnityEngine.Rendering.Universal
+﻿using System;
+
+namespace UnityEngine.Rendering.Universal
 {
-    public class RaytracingAmbientOcclusionFeature:ScriptableRendererFeature
+    public class RaytracingAmbientOcclusionFeature : ScriptableRendererFeature
     {
         RaytracingAmbientOcclusionPass pass;
+
         public override void Create()
         {
             pass = new RaytracingAmbientOcclusionPass();
@@ -12,6 +15,17 @@
         {
             pass.Setup();
             renderer.EnqueuePass(pass);
+        }
+
+
+        public override void OnEnable()
+        {
+            HistoryBufferCaptureManager.instance.AcquireHistoryPasses();
+        }
+
+        private void OnDisable()
+        {
+            HistoryBufferCaptureManager.instance.ReleaseHistoryPasses();
         }
     }
 }

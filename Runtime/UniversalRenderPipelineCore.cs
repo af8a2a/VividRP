@@ -870,9 +870,11 @@ namespace UnityEngine.Rendering.Universal
         public static readonly int billboardCameraParams = Shader.PropertyToID("unity_BillboardCameraParams");
 
         public static readonly int previousViewProjectionNoJitter = Shader.PropertyToID("_PrevViewProjMatrix");
+        public static readonly int previousInverseViewProjectionNoJitter = Shader.PropertyToID("_PrevInvViewProjMatrix");
         public static readonly int viewProjectionNoJitter = Shader.PropertyToID("_NonJitteredViewProjMatrix");
 #if ENABLE_VR && ENABLE_XR_MODULE
         public static readonly int previousViewProjectionNoJitterStereo = Shader.PropertyToID("_PrevViewProjMatrixStereo");
+        // public static readonly int previousInverseViewProjectionStereo = Shader.PropertyToID("_PrevInvViewProjMatrixStereo");
         public static readonly int viewProjectionNoJitterStereo = Shader.PropertyToID("_NonJitteredViewProjMatrixStereo");
 #endif
 

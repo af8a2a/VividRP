@@ -385,6 +385,7 @@ Shader "Universal Render Pipeline/Lit"
             #pragma shader_feature_local _ _DETAIL_MULX2 _DETAIL_SCALED
             #pragma shader_feature_local _ALPHATEST_ON
             #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+            #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
 
             // -------------------------------------
             // Unity defined keywords

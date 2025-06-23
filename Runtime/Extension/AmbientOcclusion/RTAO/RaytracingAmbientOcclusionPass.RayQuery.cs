@@ -106,8 +106,8 @@ namespace UnityEngine.Rendering.Universal
 
             var prevDepth = renderGraph.ImportTexture(camHistoryRTSystem.GetPreviousFrameRT(HistoryFrameType.ScreenSpaceGlobalIlluminationHistoryDepth));
 
-            temporalDenoiser.Denoise(renderGraph, cameraData, aoTexture, AOHistory, prevDepth, resourceData.motionVectorColor,
-                resourceData.cameraDepthTexture);
+            // temporalDenoiser.Denoise(renderGraph, cameraData, aoTexture, AOHistory, prevDepth, resourceData.motionVectorColor,
+            //     resourceData.cameraDepthTexture);
 
 
             // MipGenerator.Instance.CopyColor(renderGraph, frameData, aoTexture, AOHistory);

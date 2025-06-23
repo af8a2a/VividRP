@@ -115,7 +115,7 @@ namespace UnityEngine.Rendering.Universal
         
         public ShadowAlgoParameter shadowAlgo = new ShadowAlgoParameter(ShadowFilter.PCF, true);
 
-        [Tooltip("Shadow intensity.")] public ClampedFloatParameter intensity = new ClampedFloatParameter(0.5f, 0.0f, 1.0f);
+        [Tooltip("Shadow intensity.")] public ClampedFloatParameter intensity = new ClampedFloatParameter(1f, 0.0f, 1.0f);
 
 
 

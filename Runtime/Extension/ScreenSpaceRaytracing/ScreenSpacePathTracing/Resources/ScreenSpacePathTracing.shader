@@ -206,7 +206,7 @@ Shader "Hidden/Universal Render Pipeline/Screen Space Path Tracing"
 
             half _FrameIndex;
 
-            float4x4 _PrevInvViewProjMatrix;
+            // float4x4 _PrevInvViewProjMatrix;
             float3 _PrevCameraPositionWS;
             half _PixelSpreadAngleTangent;
 

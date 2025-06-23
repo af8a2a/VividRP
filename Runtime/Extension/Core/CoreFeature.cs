@@ -23,7 +23,7 @@ namespace Features.Core
 
             historyCapturePass = new HistoryCapturePass()
             {
-                renderPassEvent = RenderPassEvent.AfterRenderingTransparents
+                renderPassEvent = RenderPassEvent.AfterRenderingPostProcessing
             };
         }
         

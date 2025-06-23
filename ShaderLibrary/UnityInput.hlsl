@@ -279,6 +279,7 @@ float4x4 _ViewProjMatrixStereo[2];
 #define  _ViewProjMatrix      _ViewProjMatrixStereo[unity_StereoEyeIndex]
 #else
 float4x4 _PrevViewProjMatrix;         // non-jittered. Motion vectors.
+float4x4 _PrevInvViewProjMatrix;
 float4x4 _NonJitteredViewProjMatrix;  // non-jittered.
 float4x4 _ViewProjMatrix; // TODO: URP currently uses unity_MatrixVP, see Input.hlsl
 #endif

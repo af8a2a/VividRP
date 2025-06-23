@@ -220,6 +220,8 @@ CBUFFER_END
 #define UNITY_MATRIX_MVP   mul(UNITY_MATRIX_VP, UNITY_MATRIX_M)
 #define UNITY_PREV_MATRIX_M   unity_MatrixPreviousM
 #define UNITY_PREV_MATRIX_I_M unity_MatrixPreviousMI
+#define UNITY_MATRIX_PREV_VP _PrevViewProjMatrix
+#define UNITY_MATRIX_PREV_I_VP _PrevInvViewProjMatrix
 
 // Note: #include order is important here.
 // UnityInput.hlsl must be included before UnityInstancing.hlsl, so constant buffer

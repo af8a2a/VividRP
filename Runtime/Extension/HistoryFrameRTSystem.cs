@@ -78,7 +78,11 @@ namespace UnityEngine.Rendering.Universal
         ScreenSpaceGlobalIlluminationHistoryColor,
         
         RaytracingAmbientOcclusionHistory,
-        Exposure
+        Exposure,
+        
+        Depth,
+        Normal,
+        Color,
 
     }
 

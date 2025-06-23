@@ -257,9 +257,29 @@ namespace UnityEngine.Rendering.Universal
 
             var prevDepth = renderGraph.ImportTexture(camHistoryRTSystem.GetPreviousFrameRT(HistoryFrameType.ScreenSpaceGlobalIlluminationHistoryDepth));
 
-            temporalDenoiser.Denoise(renderGraph, cameraData, aoTexture, AOHistory, prevDepth, resourceData.motionVectorColor,
+
+            var historyValidationBuffer = temporalDenoiser.HistoryValidity(renderGraph, cameraData, resourceData.cameraNormalsTexture,
+                resourceData.motionVectorColor,
                 resourceData.cameraDepthTexture);
-            
+
+
+            TemporalFilter.TemporalFilterParameters filterParams;
+            filterParams.singleChannel = true;
+            filterParams.historyValidity = 1;
+            filterParams.occluderMotionRejection = true;
+            filterParams.receiverMotionRejection = true;
+            filterParams.exposureControl = false;
+            filterParams.resolutionMultiplier = 1.0f;
+            filterParams.historyResolutionMultiplier = 1.0f;
+
+            temporalDenoiser.Denoise(renderGraph, cameraData, filterParams,
+                aoTexture,
+                velocity,
+                AOHistory,
+                resourceData.cameraDepthTexture,
+                resourceData.cameraNormalsTexture,
+                resourceData.motionVectorColor,
+                historyValidationBuffer);
 
 
             MipGenerator.Instance.CopyColor(renderGraph, frameData, aoTexture, AOHistory);
@@ -273,7 +293,7 @@ namespace UnityEngine.Rendering.Universal
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
             UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
-            
+
             var volumeSettings = VolumeManager.instance.stack.GetComponent<RaytracingAmbientOcclusion>();
             if (!volumeSettings.enabled.value)
             {
@@ -283,13 +303,11 @@ namespace UnityEngine.Rendering.Universal
             if (volumeSettings.rayQuery.value)
             {
                 resourceData.ssaoTexture = RTAORayQuery(renderGraph, frameData);
-
             }
             else
             {
                 resourceData.ssaoTexture = RTAORayPipeline(renderGraph, frameData);
             }
-            
         }
 
         public override void OnCameraCleanup(CommandBuffer cmd)

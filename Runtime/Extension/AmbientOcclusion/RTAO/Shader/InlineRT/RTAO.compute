@@ -13,7 +13,7 @@
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/RayTracingFallbackHierarchy.cs.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/Shaders/RaytracingSampling.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Sampling.hlsl"
-
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/GBufferCommon.hlsl"
 Texture2D<float>  SceneDepth;
 Texture2D<float4> SceneNormal;
 
@@ -59,7 +59,7 @@ void RTAO(const uint2 coordSS : SV_DispatchThreadID)
 
     PositionInputs posInput = GetPositionInput(coordSS, _ScreenSize.zw, rawDepth, UNITY_MATRIX_I_VP, UNITY_MATRIX_V, 0);
 
-    float3 normalWS = UnpackNormal(SceneNormal[coordSS]);
+    float3 normalWS =UnpackGBufferNormal (SceneNormal[coordSS]);
 
     // Evaluate the ray bias
     float rayBias = EvaluateRayTracingBias(posInput.positionWS);

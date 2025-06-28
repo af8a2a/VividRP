@@ -91,6 +91,10 @@ namespace UnityEngine.Rendering.Universal
             public TextureHandle validationBuffer;
             public TextureHandle historyBuffer;
             public TextureHandle outputBuffer;
+
+
+            public VarianceEstimater VarianceEstimater;
+            public VarianceEstimater.VarianceEstimaterParameter VarianceEstimaterParameter;
         }
 
         class HistoryValidityPassData
@@ -279,6 +283,25 @@ namespace UnityEngine.Rendering.Universal
                     { format = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Temporal Filter Output" }));
 
 
+                var meanBuffer =
+                    builder.CreateTransientBuffer(new BufferDesc(passData.texWidth * passData.texHeight, sizeof(float), GraphicsBuffer.Target.Structured));
+                var squareBuffer =
+                    builder.CreateTransientBuffer(new BufferDesc(passData.texWidth * passData.texHeight, sizeof(float), GraphicsBuffer.Target.Structured));
+                var resultBuffer = builder.CreateTransientBuffer(new BufferDesc(1, sizeof(float), GraphicsBuffer.Target.Structured));
+
+
+                passData.VarianceEstimater = VarianceEstimater.instance;
+                passData.VarianceEstimaterParameter = new VarianceEstimater.VarianceEstimaterParameter()
+                {
+                    width = passData.texWidth,
+                    height = passData.texHeight,
+                    colorBuffer = noisyBuffer,
+                    meanBuffer = meanBuffer,
+                    squareBuffer = squareBuffer,
+                    resultBuffer = resultBuffer,
+                };
+
+
                 builder.UseTexture(passData.depthStencilBuffer);
                 builder.UseTexture(passData.normalBuffer);
                 builder.UseTexture(passData.motionVectorBuffer);
@@ -292,6 +315,9 @@ namespace UnityEngine.Rendering.Universal
 
                 builder.SetRenderFunc((TemporalDenoiserPassData data, ComputeGraphContext ctx) =>
                 {
+                     // data.VarianceEstimater.Estimate(ctx.cmd,passData.VarianceEstimaterParameter);
+                    
+                    
                     // Evaluate the dispatch parameters
                     int numTilesX = RenderingUtilsExt.DivRoundUp(data.texWidth, 8);
                     int numTilesY = RenderingUtilsExt.DivRoundUp(data.texHeight, 8);

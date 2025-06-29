@@ -16,19 +16,16 @@ namespace UnityEngine.Rendering.Universal
 
         private Material material;
 
-        private Material ToneMappingMaterial
+        public void Setup()
         {
-            get
+            if (!material)
             {
-                if (material == null)
-                {
-                    material = new Material(Shader.Find("PostProcessing/CustomToneMapping"));
-                }
+                var runtimeShader = GraphicsSettings.GetRenderPipelineSettings<TonemappingRuntimeShader>();
 
-                return material;
+
+                material = CoreUtils.CreateEngineMaterial(runtimeShader.granTurismo);
             }
         }
-
 
         class PassData
         {
@@ -51,7 +48,7 @@ namespace UnityEngine.Rendering.Universal
                     return;
                 }
 
-                data.material = ToneMappingMaterial;
+                data.material = material;
                 data.gtToneMapParams0 = new Vector4(toneMapping.maxBrightness.value, toneMapping.contrast.value,
                     toneMapping.linearSectionStart.value, toneMapping.linearSectionLength.value);
                 data.gtToneMapParams1 = new Vector4(toneMapping.blackPow.value, toneMapping.blackMin.value, 0.0f,
@@ -60,9 +57,9 @@ namespace UnityEngine.Rendering.Universal
 
                 var desc = renderGraph.GetTextureDesc(resourceData.activeColorTexture);
                 var targetTexture = renderGraph.CreateTexture(desc);
-                
+
                 data.cameraTexture = resourceData.activeColorTexture;
-                
+
                 builder.SetRenderAttachment(targetTexture, 0);
                 builder.UseTexture(data.cameraTexture);
 

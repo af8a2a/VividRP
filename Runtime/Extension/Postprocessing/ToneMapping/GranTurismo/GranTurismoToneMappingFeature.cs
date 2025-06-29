@@ -19,6 +19,7 @@ namespace UnityEngine.Rendering.Universal
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
+            _pass.Setup();
             renderer.EnqueuePass(_pass);
         }
     }

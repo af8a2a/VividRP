@@ -121,9 +121,9 @@ namespace UnityEngine.Rendering.Universal
             var dispatchIndirectBuffer = bufferSystem.GetGraphicsBuffer<uint>(GraphicsBufferSystemBufferID.ScreenSpaceShadowIndirect, 3,
                 "dispatchIndirectBuffer", GraphicsBuffer.Target.IndirectArguments);
             passData.dispatchIndirectBuffer = renderGraph.ImportBuffer(dispatchIndirectBuffer);
-            var tileListBufferDesc = new BufferDesc(passData.numTilesX * passData.numTilesY, sizeof(uint), "tileListBuffer")
+            var tileListBufferDesc = new BufferDesc(passData.numTilesX * passData.numTilesY, sizeof(uint), GraphicsBuffer.Target.Structured)
             {
-                target = GraphicsBuffer.Target.Structured
+                name = "tileListBuffer"
             };
             passData.tileListBuffer = renderGraph.CreateBuffer(tileListBufferDesc);
 

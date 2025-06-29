@@ -23,12 +23,6 @@
     #define _MIXED_LIGHTING_SUBTRACTIVE
 #endif
 
-#if defined(_SURFACE_TYPE_TRANSPARENT)
-#if defined(_SSPR)
-Texture2D _SSPRTexture;
-#endif
-#endif
-
 // SH Vertex Evaluation. Depending on target SH sampling might be
 // done completely per vertex or mixed with L2 term per vertex and L0, L1
 // per pixel. See SampleSHPixel
@@ -434,14 +428,6 @@ half3 GlobalIllumination(BRDFData brdfData, BRDFData brdfDataClearCoat, float cl
     half3 indirectDiffuse = bakedGI;
     half3 indirectSpecular = GlossyEnvironmentReflection(reflectVector, positionWS, brdfData.perceptualRoughness, 1.0h, normalizedScreenSpaceUV);
 
-    
-    #if defined(_SURFACE_TYPE_TRANSPARENT)
-    
-    #if defined(_SSPR)
-    half4 SSPRResult = SAMPLE_TEXTURE2D(_SSPRTexture, sampler_LinearClamp, normalizedScreenSpaceUV);
-    indirectSpecular = lerp(indirectSpecular.xyz  ,SSPRResult.xyz , fresnelTerm);
-    #endif
-    #endif
     half3 color = EnvironmentBRDF(brdfData, indirectDiffuse, indirectSpecular, fresnelTerm);
 
     if (IsOnlyAOLightingFeatureEnabled())

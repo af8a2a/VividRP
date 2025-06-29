@@ -310,7 +310,7 @@ namespace UnityEngine.Rendering.Universal
             Vrs.InitializeResources();
 
             #region Extension
-            
+            PreIntegratedFGD.instance.Build(PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse);
             BlueNoiseSystem.instance.Init();
             SkySystem.instance.Build(asset);
             IBLFilterGGX.instance.Initialize();
@@ -350,6 +350,7 @@ namespace UnityEngine.Rendering.Universal
             s_RTHandlePool = null;
             
             #region Extension
+            PreIntegratedFGD.instance.Cleanup(PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse);
 
             IBLFilterGGX.Clean();
             SkySystem.ClearAll();
@@ -818,7 +819,7 @@ namespace UnityEngine.Rendering.Universal
                 //Add
 
                 #region Extension
-
+                PreIntegratedFGD.instance.RenderInit(PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse, cmd);
                 SkySystem.instance.UpdateCurrentSky();
                 #endregion
                 SetupPerCameraShaderConstants(cmd);

@@ -1,8 +1,4 @@
-﻿using System;
-using Features.Core;
-using Features.Core.Manager;
-
-namespace UnityEngine.Rendering.Universal
+﻿namespace UnityEngine.Rendering.Universal
 {
     [DisallowMultipleRendererFeature]
     public class ScreenSpaceReflectionFeature : ScriptableRendererFeature

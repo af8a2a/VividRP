@@ -5,7 +5,7 @@ using UnityEngine.Rendering.RendererUtils;
 using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Rendering.Universal;
 
-namespace Features.Core
+namespace UnityEngine.Rendering.Universal
 {
     public enum AccurateThickness
     {

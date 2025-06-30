@@ -1,8 +1,4 @@
 ﻿using System.Reflection;
-using Features.Core;
-using UnityEngine;
-using UnityEngine.Rendering;
-using UnityEngine.Rendering.Universal;
 
 namespace UnityEngine.Rendering.Universal
 {

@@ -4,7 +4,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Rendering.Universal;
 
-namespace Features.Core
+namespace UnityEngine.Rendering.Universal
 {
     public class HistoryCapturePass : ScriptableRenderPass
     {

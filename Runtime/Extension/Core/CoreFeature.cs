@@ -1,9 +1,8 @@
-﻿using Features.Core.Manager;
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
-namespace Features.Core
+namespace UnityEngine.Rendering.Universal
 {
     [DisallowMultipleRendererFeature]
     public class CoreFeature : ScriptableRendererFeature

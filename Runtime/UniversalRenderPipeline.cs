@@ -358,6 +358,7 @@ namespace UnityEngine.Rendering.Universal
             RayTracingSystem.ClearAll();
             HistoryFrameRTSystem.ClearAll();
             GraphicsBufferSystem.ClearAll();
+            MipGenerator.ClearAll();
             DenoiseSystem.ClearAll();
             #endregion
 

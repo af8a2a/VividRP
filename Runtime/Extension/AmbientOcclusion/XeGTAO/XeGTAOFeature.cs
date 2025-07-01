@@ -3,6 +3,7 @@
 namespace UnityEngine.Rendering.Universal
 {
     
+    [DisallowMultipleRendererFeature("XeGTAO")]
     public class XeGTAOFeature : ScriptableRendererFeature
     {
         XeGTAOPass pass;

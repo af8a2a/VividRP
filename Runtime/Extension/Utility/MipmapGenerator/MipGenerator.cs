@@ -6,7 +6,7 @@ using UnityEngine.Rendering.Universal;
 namespace UnityEngine.Rendering.Universal
 {
     //copy and modifed from HDRP
-    public partial class MipGenerator
+    public partial class MipGenerator : IDisposable
     {
         MaterialPropertyBlock m_PropertyBlock;
 
@@ -20,6 +20,26 @@ namespace UnityEngine.Rendering.Universal
         RenderTextureDescriptor m_ColorPyramidDescriptor;
         RenderTextureDescriptor m_DepthPyramidDescriptor;
 
+
+        #region HDRP
+
+        ComputeShader m_DepthPyramidCS;
+        int m_DepthDownsampleKernel;
+        internal PackedMipChainInfo m_DepthBufferMipChainInfo = new PackedMipChainInfo();
+        ComputeBuffer m_DepthPyramidMipLevelOffsetsBuffer = null;
+
+        #endregion
+
+        #region GPUCopy
+
+        ComputeShader m_HDRPGPUCopyShader;
+        int k_SampleKernel_xyzw2x_8;
+        int k_SampleKernel_xyzw2x_1;
+
+
+        #endregion
+        
+        
         public MipGenerator()
         {
             var runtimeShaders = GraphicsSettings.GetRenderPipelineSettings<MipGeneratorRuntimeShader>();
@@ -35,7 +55,7 @@ namespace UnityEngine.Rendering.Universal
 
             #region GPUCopy
 
-            GPUCopyColor =runtimeShaders.GPUCopyColor;
+            GPUCopyColor = runtimeShaders.GPUCopyColor;
             GPUCopyColorKernelID = GPUCopyColor.FindKernel("KMain");
 
             #endregion
@@ -48,11 +68,45 @@ namespace UnityEngine.Rendering.Universal
             spdKernelID = spdCompatibleCS.FindKernel("KMain"); //default 0
 
             #endregion
+
+
+            #region HDRP
+            m_DepthPyramidCS = runtimeShaders.depthPyramidCS;
+            m_DepthDownsampleKernel = m_DepthPyramidCS.FindKernel("KDepthDownsample8DualUav");
+            m_DepthBufferMipChainInfo.Allocate();
+            m_DepthPyramidMipLevelOffsetsBuffer = new ComputeBuffer(15, sizeof(int) * 2, ComputeBufferType.Structured);
+
+            #endregion
+
+
+            #region GPUCopy
+
+            m_HDRPGPUCopyShader = runtimeShaders.copyChannelCS;
+            k_SampleKernel_xyzw2x_8 = m_HDRPGPUCopyShader.FindKernel("KSampleCopy4_1_x_8");
+            k_SampleKernel_xyzw2x_1 = m_HDRPGPUCopyShader.FindKernel("KSampleCopy4_1_x_1");
+
+
+            #endregion
         }
+
 
         private static Lazy<MipGenerator> s_Instance = new Lazy<MipGenerator>(() => new MipGenerator());
 
         public static MipGenerator Instance => s_Instance.Value;
 
+        
+        public static void ClearAll()
+        {
+            if (s_Instance != null)
+                Instance.Dispose();
+
+            s_Instance = null;
+        }
+
+
+        public void Dispose()
+        {
+            CoreUtils.SafeRelease(m_DepthPyramidMipLevelOffsetsBuffer);
+        }
     }
 }

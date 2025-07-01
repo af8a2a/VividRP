@@ -46,6 +46,27 @@ namespace UnityEngine.Rendering.Universal
             get => m_SinglePassDownsampleIntegration;
             set => this.SetValueAndNotify(ref m_SinglePassDownsampleIntegration, value);
         }
+        
+        
+        [SerializeField, ResourcePath("Runtime/Extension/Utility/MipmapGenerator/Shader/DepthPyramid.compute")]
+        private ComputeShader m_DepthPyramidCS;
+
+        public ComputeShader depthPyramidCS
+        {
+            get => m_DepthPyramidCS;
+            set => this.SetValueAndNotify(ref m_DepthPyramidCS, value);
+        }
+
+        
+        [SerializeField, ResourcePath("Runtime/Extension/Utility/MipmapGenerator/Shader/GPUCopy.compute")]
+        private ComputeShader m_CopyChannelCS;
+
+        public ComputeShader copyChannelCS
+        {
+            get => m_CopyChannelCS;
+            set => this.SetValueAndNotify(ref m_CopyChannelCS, value);
+        }
+
 
     }
 }

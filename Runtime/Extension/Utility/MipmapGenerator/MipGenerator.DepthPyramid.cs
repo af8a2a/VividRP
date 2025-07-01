@@ -19,6 +19,8 @@ namespace UnityEngine.Rendering.Universal
             public TextureHandle depthTexture;
             public TextureHandle depthPyramidTexture;
 
+            public PackedMipChainInfo depthBufferMipChainInfo;
+
             public int width;
             public int height;
         }

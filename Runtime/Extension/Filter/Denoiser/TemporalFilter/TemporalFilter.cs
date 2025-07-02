@@ -39,6 +39,12 @@ namespace UnityEngine.Rendering.Universal
         private static int _AccumulationOutputTextureRW = Shader.PropertyToID("_AccumulationOutputTextureRW");
         private static int _DenoiseOutputTextureRW = Shader.PropertyToID("_DenoiseOutputTextureRW");
         private static int _DenoiserResolutionMultiplierVals = Shader.PropertyToID("_DenoiserResolutionMultiplierVals");
+        private static int _ReceiverMotionRejection = Shader.PropertyToID("_ReceiverMotionRejection");
+        private static int _OccluderMotionRejection = Shader.PropertyToID("_OccluderMotionRejection");
+        public static  int _HistorySizeAndScale = Shader.PropertyToID("_HistorySizeAndScale");
+        public static  int _HistoryValidity = Shader.PropertyToID("_HistoryValidity");
+
+        
         public void Init()
         {
             var runtimeShaders = GraphicsSettings.GetRenderPipelineSettings<DenoiserRuntimeShader>();
@@ -103,6 +109,7 @@ namespace UnityEngine.Rendering.Universal
             // Camera parameters
             public int texWidth;
             public int texHeight;
+            public Vector4 historySizeAndScale;
 
             // Denoising parameters
             public float pixelSpreadTangent;
@@ -168,6 +175,9 @@ namespace UnityEngine.Rendering.Universal
                 passData.historyDepthTexture = renderGraph.ImportTexture(historyDepth);
                 passData.historyNormalTexture = renderGraph.ImportTexture(historyNormal);
 
+                passData.historySizeAndScale = (historyDepth != null && historyNormal != null)
+                    ? RenderingUtilsExt.EvaluateRayTracingHistorySizeAndScale(historyDepth)
+                    : Vector4.one;
 
                 // Output buffers
                 
@@ -214,6 +224,9 @@ namespace UnityEngine.Rendering.Universal
 
                     // Bind the constants
                     ctx.cmd.SetComputeFloatParam(data.temporalFilterCS, _PixelSpreadAngleTangent, data.pixelSpreadTangent);
+                    ctx.cmd.SetComputeVectorParam(data.temporalFilterCS, _HistorySizeAndScale, data.historySizeAndScale);
+                    ctx.cmd.SetComputeFloatParam(data.temporalFilterCS, _HistoryValidity, 1);
+                    ctx.cmd.SetComputeVectorParam(data.temporalFilterCS, _HistorySizeAndScale, data.historySizeAndScale);
 
                     // Bind the output buffer
                     ctx.cmd.SetComputeTextureParam(data.temporalFilterCS, data.validateHistoryKernel, _ValidationBufferRW, data.validationBuffer);
@@ -344,10 +357,16 @@ namespace UnityEngine.Rendering.Universal
                     ctx.cmd.SetComputeTextureParam(data.temporalDenoiserCS, data.temporalAccKernel, _ValidationBuffer, data.validationBuffer);
                     ctx.cmd.SetComputeTextureParam(data.temporalDenoiserCS, data.temporalAccKernel, _VelocityBuffer, data.velocityBuffer);
                     ctx.cmd.SetComputeTextureParam(data.temporalDenoiserCS, data.temporalAccKernel, _CameraMotionVectorsTexture, data.motionVectorBuffer);
-                    ctx.cmd.SetComputeTextureParam(data.temporalDenoiserCS, data.temporalAccKernel, _AccumulationOutputTextureRW, data.outputBuffer);
+                    ctx.cmd.SetComputeFloatParam(data.temporalDenoiserCS, data.temporalAccKernel, data.historyValidity);
+                    ctx.cmd.SetComputeIntParam(data.temporalDenoiserCS, _ReceiverMotionRejection, data.receiverMotionRejection ? 1 : 0);
+                    ctx.cmd.SetComputeIntParam(data.temporalDenoiserCS, _OccluderMotionRejection, data.occluderMotionRejection ? 1 : 0);
+
                     ctx.cmd.SetComputeVectorParam(data.temporalDenoiserCS, _DenoiserResolutionMultiplierVals,
                         new Vector4(data.resolutionMultiplier, 1.0f / data.resolutionMultiplier, data.historyResolutionMultiplier,
                             1.0f / data.historyResolutionMultiplier));
+
+                    
+                    ctx.cmd.SetComputeTextureParam(data.temporalDenoiserCS, data.temporalAccKernel, _AccumulationOutputTextureRW, data.outputBuffer);
 
                     ctx.cmd.DispatchCompute(data.temporalDenoiserCS, data.temporalAccKernel, numTilesX, numTilesY, 1);
                     
@@ -357,7 +376,7 @@ namespace UnityEngine.Rendering.Universal
                     ctx.cmd.DispatchCompute(data.temporalDenoiserCS, data.copyHistoryKernel, numTilesX, numTilesY, 1);
 
                 });
-                return passData.noisyBuffer;
+                return passData.outputBuffer;
             }
         }
     }

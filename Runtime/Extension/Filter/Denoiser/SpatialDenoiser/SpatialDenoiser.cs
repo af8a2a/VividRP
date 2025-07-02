@@ -38,7 +38,7 @@ namespace UnityEngine.Rendering.Universal
 
             // Data required for the online initialization
             m_DenoiserInitialized = false;
-            m_OwnenScrambledTexture = blueNoise.owenScrambled256Tex;
+            m_OwnenScrambledTexture = blueNoise.owenScrambledRGBATex;
             m_PointDistribution = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 16 * 4, 2 * sizeof(float));
         }
 

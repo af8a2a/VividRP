@@ -1,7 +1,6 @@
 
 // Depth buffer of the current frame
 Texture2D<float> _DepthTexture;
-Texture2D<float4> _NormalBufferTexture;
 
 TEXTURE2D(_ClearCoatMaskTexture);
 
@@ -54,8 +53,11 @@ BilateralData TapBilateralData(uint2 coordSS)
 
     if ((NORMAL_WEIGHT > 0.0) || (PLANE_WEIGHT > 0.0))
     {
+        NormalData normalData;
         const float4 normalBuffer = LOAD_TEXTURE2D_X(_NormalBufferTexture, coordSS);
-        key.normal = normalBuffer.xyz;
+        DecodeFromNormalBuffer(normalBuffer, normalData);
+        
+        key.normal = normalData.normalWS;
 
 
     }

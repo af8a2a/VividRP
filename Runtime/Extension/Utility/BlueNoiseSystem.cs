@@ -55,14 +55,15 @@ namespace UnityEngine.Rendering.Universal
         }
 
 
-      public RTHandle owenScrambled256Tex;
-      public RTHandle scramblingTile1SPP;
-      public RTHandle scramblingTile8SPP;
-      public RTHandle scramblingTile256SPP;
-      public RTHandle rankingTile1SPP;
-      public RTHandle rankingTile8SPP;
-      public RTHandle rankingTile256SPP;
-      public RTHandle scramblingTex;
+        public RTHandle owenScrambledRGBATex;
+        public RTHandle owenScrambled256Tex;
+        public RTHandle scramblingTile1SPP;
+        public RTHandle scramblingTile8SPP;
+        public RTHandle scramblingTile256SPP;
+        public RTHandle rankingTile1SPP;
+        public RTHandle rankingTile8SPP;
+        public RTHandle rankingTile256SPP;
+        public RTHandle scramblingTex;
 
 
         DitheredTextureSet m_DitheredTextureSet1SPP;
@@ -76,7 +77,7 @@ namespace UnityEngine.Rendering.Universal
             InitTextures(128, TextureFormat.RG32, textures.blueNoise128RGTex, out m_TextureArray128RG, out m_TextureHandle128RG);
 
             owenScrambled256Tex = RTHandles.Alloc(textures.owenScrambled256Tex);
-
+            owenScrambledRGBATex = RTHandles.Alloc(textures.owenScrambledRGBATex);
             scramblingTile1SPP = RTHandles.Alloc(textures.scramblingTile1SPP);
             scramblingTile8SPP = RTHandles.Alloc(textures.scramblingTile8SPP);
             scramblingTile256SPP = RTHandles.Alloc(textures.scramblingTile256SPP);

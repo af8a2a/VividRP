@@ -158,7 +158,7 @@ namespace UnityEngine.Rendering.Universal
             ContextContainer frameData
         )
         {
-            var instance = Instance;
+            var instance = MipGenerator.instance;
             return instance.RenderMinDepthPyramid(renderGraph, frameData);
         }
 

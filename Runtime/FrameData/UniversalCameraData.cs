@@ -644,6 +644,11 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         internal bool isLastBaseCamera;
 
+
+        public HistoryFrameRTSystem historyFrameRTSystem => HistoryFrameRTSystem.GetOrCreate(camera);
+        
+        public RayTracingSystem rayTracingSystem => RayTracingSystem.GetOrCreate(camera);
+
         ///<inheritdoc/>
         public override void Reset()
         {

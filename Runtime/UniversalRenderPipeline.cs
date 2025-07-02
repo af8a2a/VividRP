@@ -310,6 +310,7 @@ namespace UnityEngine.Rendering.Universal
             Vrs.InitializeResources();
 
             #region Extension
+            MipGenerator.instance.Init();
             PreIntegratedFGD.instance.Build(PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse);
             BlueNoiseSystem.instance.Init();
             SkySystem.instance.Build(asset);
@@ -882,8 +883,6 @@ namespace UnityEngine.Rendering.Universal
                  */
                 var historyFrameRTSystem = HistoryFrameRTSystem.GetOrCreate(camera);
                 historyFrameRTSystem.SetReferenceSize(cameraData.cameraTargetDescriptor.width, cameraData.cameraTargetDescriptor.height);
-                
-                
                 // Do NOT use cameraData after 'InitializeRenderingData'. CameraData state may diverge otherwise.
                 // RenderingData takes a copy of the CameraData.
                 // UniversalRenderingData needs to be created here to avoid copying cullResults.

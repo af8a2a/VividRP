@@ -37,7 +37,8 @@ namespace UnityEngine.Rendering.Universal
         private static int _ValidationBuffer = Shader.PropertyToID("_ValidationBuffer");
         private static int _VelocityBuffer = Shader.PropertyToID("_VelocityBuffer");
         private static int _AccumulationOutputTextureRW = Shader.PropertyToID("_AccumulationOutputTextureRW");
-
+        private static int _DenoiseOutputTextureRW = Shader.PropertyToID("_DenoiseOutputTextureRW");
+        private static int _DenoiserResolutionMultiplierVals = Shader.PropertyToID("_DenoiserResolutionMultiplierVals");
         public void Init()
         {
             var runtimeShaders = GraphicsSettings.GetRenderPipelineSettings<DenoiserRuntimeShader>();
@@ -120,7 +121,17 @@ namespace UnityEngine.Rendering.Universal
             public TextureHandle validationBuffer;
         }
 
+        
+        static RTHandle HistoryValidityBufferAllocatorFunction(GraphicsFormat graphicsFormat, string viewName, int frameIndex, RTHandleSystem rtHandleSystem)
+        {
+            frameIndex &= 1;
 
+            return rtHandleSystem.Alloc(Vector2.one, colorFormat: graphicsFormat,
+                enableRandomWrite: true, useDynamicScale: true,
+                name: string.Format("{0}_ValidationTexture{1}", viewName, frameIndex));
+        }
+
+        
         // Function that evaluates the history validation Buffer
         public TextureHandle HistoryValidity(RenderGraph renderGraph, UniversalCameraData cameraData,
             TextureHandle normalBuffer,
@@ -159,12 +170,17 @@ namespace UnityEngine.Rendering.Universal
 
 
                 // Output buffers
-                passData.validationBuffer = renderGraph.CreateTexture(new TextureDesc(cameraData.scaledWidth, cameraData.scaledHeight)
+                
+
+                if (camHistoryRTSystem.GetCurrentFrameRT(HistoryFrameType.HistoryValidity) == null)
                 {
-                    format = GraphicsFormat.R8_UInt,
-                    enableRandomWrite = true,
-                    name = "ValidationTexture"
-                });
+                    camHistoryRTSystem.ReleaseHistoryFrameRT(HistoryFrameType.HistoryValidity);
+                    camHistoryRTSystem.AllocHistoryFrameRT((int)HistoryFrameType.HistoryValidity, HistoryValidityBufferAllocatorFunction,
+                        GraphicsFormat.R8_UInt, 1);
+                }
+
+                var historyValidityRT = camHistoryRTSystem.GetCurrentFrameRT(HistoryFrameType.HistoryValidity);
+                passData.validationBuffer = renderGraph.ImportTexture(historyValidityRT);
 
 
                 builder.UseTexture(passData.depthStencilBuffer);
@@ -182,8 +198,8 @@ namespace UnityEngine.Rendering.Universal
 
                     // Evaluate the dispatch parameters
                     int areaTileSize = 8;
-                    int numTilesX = (data.texWidth + (areaTileSize - 1)) / areaTileSize;
-                    int numTilesY = (data.texHeight + (areaTileSize - 1)) / areaTileSize;
+                    int numTilesX =RenderingUtilsExt.DivRoundUp(data.texWidth,areaTileSize) ;
+                    int numTilesY =RenderingUtilsExt.DivRoundUp(data.texHeight,areaTileSize);
 
                     // First of all we need to validate the history to know where we can or cannot use the history signal
                     // Bind the input buffers
@@ -329,8 +345,17 @@ namespace UnityEngine.Rendering.Universal
                     ctx.cmd.SetComputeTextureParam(data.temporalDenoiserCS, data.temporalAccKernel, _VelocityBuffer, data.velocityBuffer);
                     ctx.cmd.SetComputeTextureParam(data.temporalDenoiserCS, data.temporalAccKernel, _CameraMotionVectorsTexture, data.motionVectorBuffer);
                     ctx.cmd.SetComputeTextureParam(data.temporalDenoiserCS, data.temporalAccKernel, _AccumulationOutputTextureRW, data.outputBuffer);
+                    ctx.cmd.SetComputeVectorParam(data.temporalDenoiserCS, _DenoiserResolutionMultiplierVals,
+                        new Vector4(data.resolutionMultiplier, 1.0f / data.resolutionMultiplier, data.historyResolutionMultiplier,
+                            1.0f / data.historyResolutionMultiplier));
 
                     ctx.cmd.DispatchCompute(data.temporalDenoiserCS, data.temporalAccKernel, numTilesX, numTilesY, 1);
+                    
+                    // Make sure to copy the new-accumulated signal in our history buffer
+                    ctx.cmd.SetComputeTextureParam(data.temporalDenoiserCS, data.copyHistoryKernel, _DenoiseInputTexture, data.outputBuffer);
+                    ctx.cmd.SetComputeTextureParam(data.temporalDenoiserCS, data.copyHistoryKernel, _DenoiseOutputTextureRW, data.historyBuffer);
+                    ctx.cmd.DispatchCompute(data.temporalDenoiserCS, data.copyHistoryKernel, numTilesX, numTilesY, 1);
+
                 });
                 return passData.noisyBuffer;
             }

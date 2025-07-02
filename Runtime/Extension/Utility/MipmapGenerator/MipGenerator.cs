@@ -36,11 +36,10 @@ namespace UnityEngine.Rendering.Universal
         int k_SampleKernel_xyzw2x_8;
         int k_SampleKernel_xyzw2x_1;
 
-
         #endregion
-        
-        
-        public MipGenerator()
+
+
+        public void Init()
         {
             var runtimeShaders = GraphicsSettings.GetRenderPipelineSettings<MipGeneratorRuntimeShader>();
 
@@ -71,6 +70,7 @@ namespace UnityEngine.Rendering.Universal
 
 
             #region HDRP
+
             m_DepthPyramidCS = runtimeShaders.depthPyramidCS;
             m_DepthDownsampleKernel = m_DepthPyramidCS.FindKernel("KDepthDownsample8DualUav");
             m_DepthBufferMipChainInfo.Allocate();
@@ -85,20 +85,31 @@ namespace UnityEngine.Rendering.Universal
             k_SampleKernel_xyzw2x_8 = m_HDRPGPUCopyShader.FindKernel("KSampleCopy4_1_x_8");
             k_SampleKernel_xyzw2x_1 = m_HDRPGPUCopyShader.FindKernel("KSampleCopy4_1_x_1");
 
-
             #endregion
         }
 
 
-        private static Lazy<MipGenerator> s_Instance = new Lazy<MipGenerator>(() => new MipGenerator());
-
-        public static MipGenerator Instance => s_Instance.Value;
+        private static MipGenerator s_Instance = new MipGenerator();
 
         
+        public static MipGenerator instance
+        {
+            get
+            {
+                if (s_Instance == null)
+                    s_Instance = new MipGenerator();
+
+                return s_Instance;
+            }
+        }
+
+
+
+
         public static void ClearAll()
         {
             if (s_Instance != null)
-                Instance.Dispose();
+                s_Instance.Dispose();
 
             s_Instance = null;
         }

@@ -42,7 +42,7 @@ namespace UnityEngine.Rendering.Universal
     /// Different from HDRP.
     /// RayTracing System will only handles tracing part, no denoiser, different denoiser system will add in the future.
     /// </summary>
-    internal class RayTracingSystem : CameraRelatedSystem<RayTracingSystem>
+    public class RayTracingSystem : CameraRelatedSystem<RayTracingSystem>
     {
         private RayTracingAccelerationStructure m_UserFedAccelerationStructure;
         private RayTracingAccelerationStructureSystem m_AccelerationStructureSystem;

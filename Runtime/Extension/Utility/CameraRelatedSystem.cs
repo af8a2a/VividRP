@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace UnityEngine.Rendering.Universal
 {
-    internal abstract class CameraRelatedSystem<T> where T : CameraRelatedSystem<T>, new()
+    public abstract class CameraRelatedSystem<T> where T : CameraRelatedSystem<T>, new()
     {
         protected static Dictionary<(Camera, int), T> s_Cameras = new Dictionary<(Camera, int), T>();
         protected static List<(Camera, int)> s_Cleanup = new List<(Camera, int)>(); // Recycled to reduce GC pressure

@@ -71,9 +71,11 @@ namespace UnityEngine.Rendering.Universal
         ///// <summary>Snapdragon Super Resolution frame history.</summary>
         GSR2,
         
-        ScreenSpaceGlobalIlluminationAccumulation,
-        ScreenSpaceGlobalIlluminationSample,
 
+        RaytracedIndirectDiffuseHF,
+        RaytracedIndirectDiffuseLF,
+        
+        
         ScreenSpaceGlobalIlluminationHistoryDepth,
         ScreenSpaceGlobalIlluminationHistoryColor,
         
@@ -84,6 +86,7 @@ namespace UnityEngine.Rendering.Universal
         Normal,
         Color,
 
+        HistoryValidity,
     }
 
     /// <summary>

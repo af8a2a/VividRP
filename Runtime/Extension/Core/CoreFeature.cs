@@ -1,6 +1,7 @@
 ﻿using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
+using UnityEngine.Rendering.Universal.Internal;
 
 namespace UnityEngine.Rendering.Universal
 {
@@ -12,17 +13,20 @@ namespace UnityEngine.Rendering.Universal
         ColorPyramidPass colorPyramid;
         ForwardGBufferPass forwardGBufferPass;
         HistoryCapturePass historyCapturePass;
+        HistoryValidityPass historyValidityPass;
         public override void Create()
         {
-            colorPyramid = new ColorPyramidPass()
-            {
-                renderPassEvent = RenderPassEvent.AfterRenderingTransparents
-            };
+            colorPyramid = new ColorPyramidPass(RenderPassEvent.AfterRenderingSkybox);
             forwardGBufferPass = new ForwardGBufferPass(m_GBufferPassNames);
 
             historyCapturePass = new HistoryCapturePass()
             {
                 renderPassEvent = RenderPassEvent.AfterRenderingPostProcessing
+            };
+
+            historyValidityPass = new HistoryValidityPass()
+            {
+                renderPassEvent = RenderPassEvent.AfterRenderingPrePasses,
             };
         }
         
@@ -41,9 +45,14 @@ namespace UnityEngine.Rendering.Universal
             {
                 renderer.EnqueuePass(forwardGBufferPass);
             }
+            colorPyramid.Setup();
 
             // renderer.EnqueuePass(pass);
-            // renderer.EnqueuePass(colorPyramid);
+            renderer.EnqueuePass(colorPyramid);
+            
+            historyValidityPass.Setup(deferred);
+            renderer.EnqueuePass(historyValidityPass);
+
         }
     }
 }

@@ -44,9 +44,10 @@ RW_TEXTURE2D(float4, _Destination);
 
 SamplerState sampler_LinearClamp;
 
-// CBUFFER_START(cb)
-    float4 _Size; // x: src width, y: src height, zw: unused
-// CBUFFER_END
+
+CBUFFER_START(cb)
+    float4 _Size;       // x: src width, y: src height, zw: unused
+CBUFFER_END
 
 // 16x16 pixels with an 8x8 center that we will be blurring writing out. Each uint is two color
 // channels packed together.

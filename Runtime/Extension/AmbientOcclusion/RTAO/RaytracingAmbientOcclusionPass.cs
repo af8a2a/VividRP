@@ -281,7 +281,7 @@ namespace UnityEngine.Rendering.Universal
                 historyValidationBuffer);
 
 
-            MipGenerator.Instance.CopyColor(renderGraph, frameData, aoTexture, AOHistory);
+            MipGenerator.instance.CopyColor(renderGraph, frameData, aoTexture, AOHistory);
             spatialDenoiser.Denoise(renderGraph, cameraData, ddParams, aoTexture, resourceData.cameraDepthTexture,
                 resourceData.cameraNormalsTexture, output);
 

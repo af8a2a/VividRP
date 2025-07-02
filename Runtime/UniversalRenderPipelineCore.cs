@@ -899,6 +899,11 @@ namespace UnityEngine.Rendering.Universal
         public static readonly int overlayUITexture = Shader.PropertyToID("_OverlayUITexture");
         public static readonly int hdrOutputLuminanceParams = Shader.PropertyToID("_HDROutputLuminanceParams");
         public static readonly int hdrOutputGradingParams = Shader.PropertyToID("_HDROutputGradingParams");
+        
+        
+        public static readonly int colorPyramidUvScaleAndLimitCurrentFrame = Shader.PropertyToID("_ColorPyramidUvScaleAndLimitCurrentFrame");
+        public static readonly int colorPyramidUvScaleAndLimitPrevFrame = Shader.PropertyToID("_ColorPyramidUvScaleAndLimitPrevFrame");
+        
     }
 
     /// <summary>

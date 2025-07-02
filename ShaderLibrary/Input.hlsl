@@ -136,6 +136,9 @@ float4 _ScreenSizeOverride;
 
 uint _EnableProbeVolumes;
 
+float4 _ColorPyramidUvScaleAndLimitCurrentFrame;
+float4 _ColorPyramidUvScaleAndLimitPrevFrame;
+
 #if USE_CLUSTER_LIGHT_LOOP
 float4 _FPParams0;
 float4 _FPParams1;

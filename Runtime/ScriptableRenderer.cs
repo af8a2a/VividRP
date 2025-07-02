@@ -340,6 +340,15 @@ namespace UnityEngine.Rendering.Universal
             cmd.SetGlobalVector(ShaderPropertyId.screenSizeOverride, cameraData.screenSizeOverride);
             cmd.SetGlobalVector(ShaderPropertyId.screenCoordScaleBias, cameraData.screenCoordScaleBias);
 
+            cmd.SetGlobalVector(ShaderPropertyId.colorPyramidUvScaleAndLimitCurrentFrame,
+                RenderingUtilsExt.ComputeViewportScaleAndLimit(
+                    RTHandles.rtHandleProperties.currentViewportSize,
+                    RTHandles.rtHandleProperties.currentRenderTargetSize));
+
+            cmd.SetGlobalVector(ShaderPropertyId.colorPyramidUvScaleAndLimitPrevFrame,
+                RenderingUtilsExt.ComputeViewportScaleAndLimit(
+                    RTHandles.rtHandleProperties.previousViewportSize,
+                    RTHandles.rtHandleProperties.previousRenderTargetSize));
             // { w / RTHandle.maxWidth, h / RTHandle.maxHeight } : xy = currFrame, zw = prevFrame
             // TODO(@sandy-carter) set to RTHandles.rtHandleProperties.rtHandleScale once dynamic scaling is set up
             cmd.SetGlobalVector(ShaderPropertyId.rtHandleScale, Vector4.one);

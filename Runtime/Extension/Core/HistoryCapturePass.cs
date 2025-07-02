@@ -98,9 +98,9 @@ namespace UnityEngine.Rendering.Universal
             historyCaptureData.HisotryNormalTexture = renderGraph.ImportTexture(historyNormal);
 
 
-            MipGenerator.Instance.CopyColor(renderGraph, frameData, resourceData.activeColorTexture, historyCaptureData.HistoryColorTexture);
-            MipGenerator.Instance.CopyColor(renderGraph, frameData, resourceData.activeDepthTexture, historyCaptureData.HistoryDepthTexture);
-            MipGenerator.Instance.CopyColor(renderGraph, frameData, deferred ? resourceData.gBuffer[2] : resourceData.cameraNormalsTexture,
+            MipGenerator.instance.CopyColor(renderGraph, frameData, resourceData.activeColorTexture, historyCaptureData.HistoryColorTexture);
+            MipGenerator.instance.CopyColor(renderGraph, frameData, resourceData.activeDepthTexture, historyCaptureData.HistoryDepthTexture);
+            MipGenerator.instance.CopyColor(renderGraph, frameData, deferred ? resourceData.gBuffer[2] : resourceData.cameraNormalsTexture,
                 historyCaptureData.HisotryNormalTexture);
 
         }

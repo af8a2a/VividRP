@@ -248,11 +248,18 @@ namespace UnityEditor.Rendering.Universal
 
             GUILayout.Label("Shadow Scatter");
             PropertyField(m_ShadowScatterMode, EditorGUIUtility.TrTextContent("ShadowScatterMode"));
-            PropertyField(m_ShadowRampTex, EditorGUIUtility.TrTextContent("ShadowRampTex"));
-            // PropertyField(m_OcclusionPenumbra, EditorGUIUtility.TrTextContent("OcclusionPenumbra"));
-            PropertyField(m_ScatterR, EditorGUIUtility.TrTextContent("ScatterR"));
-            PropertyField(m_ScatterG, EditorGUIUtility.TrTextContent("ScatterG"));
-            PropertyField(m_ScatterB, EditorGUIUtility.TrTextContent("ScatterB"));
+            var mode = (ShadowScatterMode)m_ShadowScatterMode.value.enumValueIndex;
+            if (mode is ShadowScatterMode.RampTexture)
+            {
+                PropertyField(m_ShadowRampTex, EditorGUIUtility.TrTextContent("ShadowRampTex"));
+            }
+            if (mode is ShadowScatterMode.SubSurface)
+            {
+                // PropertyField(m_OcclusionPenumbra, EditorGUIUtility.TrTextContent("OcclusionPenumbra"));
+                PropertyField(m_ScatterR, EditorGUIUtility.TrTextContent("ScatterR"));
+                PropertyField(m_ScatterG, EditorGUIUtility.TrTextContent("ScatterG"));
+                PropertyField(m_ScatterB, EditorGUIUtility.TrTextContent("ScatterB"));
+            }
             
             PropertyField(m_PerObjectShadowPenumbra, EditorGUIUtility.TrTextContent("PerObjectShadow Penumbra"));
 

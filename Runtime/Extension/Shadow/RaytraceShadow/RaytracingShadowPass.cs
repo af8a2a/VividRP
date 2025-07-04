@@ -33,7 +33,7 @@ namespace UnityEngine.Rendering.Universal
             public static readonly int _RayTracingShadowsTextureRW = Shader.PropertyToID("_RayTracingShadowsTextureRW");
 
 
-            public static readonly int _RaytracingShadow = Shader.PropertyToID("_RaytracingShadow");
+            public static readonly int _RaytracingShadowTexture = Shader.PropertyToID("_RaytracingShadowTexture");
 
             public static readonly int radius = Shader.PropertyToID("radius");
             public static readonly int sampleCount = Shader.PropertyToID("sampleCount");
@@ -128,14 +128,14 @@ namespace UnityEngine.Rendering.Universal
                     cmd.SetRayTracingIntParam(data.rtrtShader, ShaderConstants.frameIndex, data.frameIndex);
 
                     cmd.DispatchRays(data.rtrtShader, "SingleRayGen", data.dispatchRaySizeX, data.dispatchRaySizeY, 1, null);
-                    CoreUtils.SetKeyword(cmd, "RAYTRACING_SHADOW", true);
+                    CoreUtils.SetKeyword(cmd, "_RAYTRACING_SHADOW", true);
                 }
             }
         }
 
         public override void FrameCleanup(CommandBuffer cmd)
         {
-            CoreUtils.SetKeyword(cmd, "RAYTRACING_SHADOW", false);
+            CoreUtils.SetKeyword(cmd, "_RAYTRACING_SHADOW", false);
         }
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
@@ -170,7 +170,7 @@ namespace UnityEngine.Rendering.Universal
 
                 builder.SetRenderFunc((PassData data, ComputeGraphContext context) => { ExecutePass(data, context); });
                 raytracingData.rayTracingShadowTexture = passData.screenSpaceShadowmapTex;
-                builder.SetGlobalTextureAfterPass(raytracingData.rayTracingShadowTexture, ShaderConstants._RaytracingShadow);
+                builder.SetGlobalTextureAfterPass(raytracingData.rayTracingShadowTexture, ShaderConstants._RaytracingShadowTexture);
             }
         }
     }

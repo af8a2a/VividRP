@@ -8,6 +8,7 @@
 #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
 #pragma multi_compile _ _CUSTOM_SHADOWS_CASCADE
 #pragma multi_compile _ _PEROBJECT_SCREEN_SPACE_SHADOW
+#pragma multi_compile _ _RAYTRACING_SHADOW
 
 //--------------------------------------------------------------------------------------------------
 // Included headers
@@ -34,6 +35,18 @@ RW_TEXTURE2D(float, _SSDirShadowmapTexture);
 
 RW_TEXTURE2D(float, _Shadowmap);
 
+#if defined(_RAYTRACING_SHADOW)
+
+TEXTURE2D(_RaytracingShadowTexture);
+
+half SampleRaytracingShadowmap(float2 PositionSS)
+{
+    half attenuation = _RaytracingShadowTexture[PositionSS.xy].x;
+
+    return attenuation;
+}
+
+#endif
 
 //--------------------------------------------------------------------------------------------------
 // Helpers
@@ -125,6 +138,10 @@ void ShadowResolve(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 groupThre
     float pcssResult = PCSSFilter(PCSS_SAMPLE_COUNT, pcssFilterSize, shadowCoord.xyz, noiseJitter, cascadeIndex, maxPCSSoffset);
     #if defined(_PEROBJECT_SCREEN_SPACE_SHADOW)
     pcssResult=min(pcssResult,SamplePerObjectShadowmap(coordSS));
+    #endif
+
+    #if defined(_RAYTRACING_SHADOW)
+    pcssResult = min(pcssResult, SampleRaytracingShadowmap(coordSS));
     #endif
 
 

@@ -18,7 +18,6 @@
 //--------------------------------------------------------------------------------------------------
 // Inputs & outputs
 //--------------------------------------------------------------------------------------------------
-
 // Input
 TEXTURE2D_X(_GBuffer2);
 
@@ -93,8 +92,8 @@ void SingleRayGen()
         // float3 dir= SampleConeStrata(i,rcp(sampleCount),radius);
 
         float2 noiseValue;
-        noiseValue.x = ScramblingValueFloat(coordSS);
-        noiseValue.y = ScramblingValueFloat(coordSS);
+        noiseValue.x = GetBNDSequenceSample(coordSS, frameIndex, 0);
+        noiseValue.y = GetBNDSequenceSample(coordSS, frameIndex, 1);
 
         // Create the local ortho basis
         float3x3 localToWorld = GetLocalFrame(dirLight.direction);

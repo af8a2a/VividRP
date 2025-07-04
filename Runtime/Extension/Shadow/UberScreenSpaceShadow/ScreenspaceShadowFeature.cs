@@ -31,8 +31,8 @@ namespace UnityEngine.Rendering.Universal
         {
 
             renderer.EnqueuePass(m_DirectionalLightsShadowCasterPass);
-            renderer.EnqueuePass(m_ScreenSpaceShadowPass);
             renderer.EnqueuePass(raytracingShadowPass);
+            renderer.EnqueuePass(m_ScreenSpaceShadowPass);
             renderer.EnqueuePass(m_ScreenSpaceShadowsPostPass);
         }
     }

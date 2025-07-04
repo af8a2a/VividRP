@@ -499,7 +499,7 @@ namespace UnityEngine.Rendering.Universal.Internal
             Debug.Assert(resourceData.cameraColor.IsValid(), "Deferred Renderer assumes that the intermediate (color) texture is available.");
 
             for (int i = 0; i < gbufferSliceCount; ++i)
-                      {
+            {
                 GbufferFormats[i] = GetGBufferFormat(i);
 
                 if (i == GBufferNormalSmoothnessIndex && HasNormalPrepass)

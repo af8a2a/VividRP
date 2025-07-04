@@ -6,6 +6,7 @@ using System.IO;
 using ShaderKeywordFilter = UnityEditor.ShaderKeywordFilter;
 #endif
 using System.ComponentModel;
+using Sirenix.Serialization;
 using UnityEngine.Serialization;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -1004,6 +1005,26 @@ namespace UnityEngine.Rendering.Universal
                 }
 
                 return result;
+            }
+        }
+
+        internal GraphicsFormat colorFormat
+        {
+            get
+            {
+                if (!supportsHDR)
+                {
+                    return GraphicsFormat.R8G8B8A8_SRGB;
+                }
+
+                if (hdrColorBufferPrecision is HDRColorBufferPrecision._32Bits)
+                {
+                    return GraphicsFormat.B10G11R11_UFloatPack32;
+                }
+                else
+                {
+                    return GraphicsFormat.R16G16B16A16_SFloat;
+                }
             }
         }
 

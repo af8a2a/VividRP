@@ -1,0 +1,74 @@
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Sampling.hlsl"
+#include "Packages/com.unity.render-pipelines.universal//ShaderLibrary/UnityInput.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+
+// #pragma enable_d3d11_debug_symbols
+
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+
+#pragma kernel CombineGI
+#pragma multi_compile _ _GBUFFER_NORMALS_OCT
+// The dispatch tile resolution
+#define INDIRECT_DIFFUSE_TILE_SIZE 8
+
+// Defines the mip offset for the color buffer
+#define SSGI_MIP_OFFSET 1
+
+#define SSGI_CLAMP_VALUE 7.0f
+
+// Input depth pyramid texture
+TEXTURE2D_X(_DepthTexture);
+
+TEXTURE2D_X(_SceneColor);
+TEXTURE2D_X(_GBuffer0);
+TEXTURE2D_X(_GBuffer1);
+TEXTURE2D_X(_IndirectDiffuseTexture);
+
+RW_TEXTURE2D(float3,_OuputSceneColor);
+
+[numthreads(INDIRECT_DIFFUSE_TILE_SIZE, INDIRECT_DIFFUSE_TILE_SIZE, 1)]
+void CombineGI(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId : SV_GroupThreadID, uint2 groupId : SV_GroupID)
+{
+    // Compute the pixel position to process
+    uint2 currentCoord = dispatchThreadId.xy;
+
+
+    // Read the depth and compute the position
+    float deviceDepth = LOAD_TEXTURE2D_X(_DepthTexture, currentCoord).x;
+    // uint2 tileIndex = uint2(inputCoord) / GetTileSize();
+    PositionInputs posInput = GetPositionInput(currentCoord, _ScreenSize.zw, deviceDepth, UNITY_MATRIX_I_VP, GetWorldToViewMatrix());
+
+
+    float depth = LOAD_TEXTURE2D_X(_DepthTexture, currentCoord).r;
+
+    #if !UNITY_REVERSED_Z
+                depth = lerp(UNITY_NEAR_CLIP_VALUE, 1, depth);
+    #endif
+
+    // If the current pixel is sky
+    // bool isBackground = depth == UNITY_RAW_FAR_CLIP_VALUE;
+    //
+    // if (isBackground)
+    //     return;;
+
+
+    half4 gbuffer0 = LOAD_TEXTURE2D_X(_GBuffer0,currentCoord);
+    half4 gbuffer1 = LOAD_TEXTURE2D_X(_GBuffer1,currentCoord);
+
+    half3 albedo = gbuffer0.rgb;
+    half metallic = gbuffer1.r;
+
+    half3 indirectLighting = LOAD_TEXTURE2D_X(_IndirectDiffuseTexture,currentCoord).rgb;
+
+    half4 directLighting = LOAD_TEXTURE2D_X(_SceneColor, currentCoord).rgba;
+
+    indirectLighting *= albedo * (1.0 - metallic);
+
+    _OuputSceneColor[currentCoord] = directLighting.rgb + indirectLighting;
+}

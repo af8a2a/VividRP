@@ -76,7 +76,14 @@ half3 DeferredLightContribution(Light light, InputData inputData, GBufferData gB
         #endif
 
         BRDFData brdfData = GBufferDataToBRDFData(gBufferData);
-        return half3(LightingPhysicallyBased(brdfData, light, inputData.normalWS, inputData.viewDirectionWS, materialSpecularHighlightsOff));
+
+        half3 color=0;
+        #if defined(_SSGI)
+
+        color += SAMPLE_TEXTURE2D(_IndirectDiffuseTextureSS, sampler_LinearClamp, inputData.positionCS);
+        #endif
+        color += half3(LightingPhysicallyBased(brdfData, light, inputData.normalWS, inputData.viewDirectionWS, materialSpecularHighlightsOff));
+        return color;
     }
     #endif
 

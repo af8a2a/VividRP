@@ -1,4 +1,5 @@
-﻿using UnityEngine.Experimental.Rendering;
+﻿using System.Linq;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal
@@ -28,7 +29,11 @@ namespace UnityEngine.Rendering.Universal
             internal TextureHandle velocityTexture;
             internal bool AccurateGbufferNormals;
 
+            #region SER
 
+            internal bool SER;
+
+            #endregion
             internal RayTracingAccelerationStructure rtas;
             internal uint dispatchRaySizeX;
             internal uint dispatchRaySizeY;
@@ -80,7 +85,10 @@ namespace UnityEngine.Rendering.Universal
             passData.rtaoShader = runtimeShaders.raytracingAmbientOcclusionRTShader;
 
             passData.rtas = raytracingData.rayTracingSystem.RequestAccelerationStructure();
+            passData.SER = volumeSettings.shaderExecutionReordering.value && ExtensionSystem.SupportedExtension.Contains(HardwareExtension.ShaderExecutionReordering);
 
+            
+            
             var width = cameraData.cameraTargetDescriptor.width;
             var height = cameraData.cameraTargetDescriptor.height;
             passData.dispatchRaySizeX = (uint)width;
@@ -133,6 +141,7 @@ namespace UnityEngine.Rendering.Universal
             public static readonly int _RaytracingAccelerationStructure = Shader.PropertyToID("_RaytracingAccelerationStructure");
             public static readonly int _VelocityBuffer = Shader.PropertyToID("_VelocityBuffer");
             public static readonly int _AmbientOcclusionTextureRW = Shader.PropertyToID("_AmbientOcclusionTextureRW");
+            public static readonly int _UseNVSER = Shader.PropertyToID("_UseNVSER");
         }
 
 
@@ -187,14 +196,13 @@ namespace UnityEngine.Rendering.Universal
                 cmd.SetRayTracingIntParam(data.rtaoShader, ShaderConstants.frameIndex, data.frameIndex);
                 cmd.SetRayTracingFloatParam(data.rtaoShader, ShaderConstants.radius, data.radius);
                 cmd.SetRayTracingFloatParam(data.rtaoShader, ShaderConstants.intensity, data.intensity);
-
+                cmd.SetRayTracingFloatParam(data.rtaoShader, ShaderConstants._UseNVSER, data.SER ? 1 : 0);
                 cmd.DispatchRays(data.rtaoShader, "RayGenAmbientOcclusion", data.dispatchRaySizeX, data.dispatchRaySizeY, 1, null);
             }
 
             cmd.SetKeyword(ShaderGlobalKeywords.ScreenSpaceOcclusion, true);
 
-            cmd.SetGlobalVector("_AmbientOcclusionParam",
-                new Vector4(1f, 0f, 0f, data.directLightingStrength));
+            cmd.SetGlobalVector("_AmbientOcclusionParam", new Vector4(1f, 0f, 0f, data.directLightingStrength));
         }
 
 
@@ -278,9 +286,6 @@ namespace UnityEngine.Rendering.Universal
                 resourceData.cameraNormalsTexture,
                 resourceData.motionVectorColor,
                 DenoiseSystem.instance.historyValidity);
-
-
-            MipGenerator.instance.CopyColor(renderGraph, frameData, denoisedRTAO, AOHistory);
             
             
             SpatialDenoiser.DiffuseDenoiserParameters ddParams;

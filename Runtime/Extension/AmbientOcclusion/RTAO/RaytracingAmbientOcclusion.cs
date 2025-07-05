@@ -48,6 +48,9 @@
         
         [Header("Experiment")]
         public BoolParameter rayQuery = new BoolParameter(false);
+        
+        public BoolParameter shaderExecutionReordering = new BoolParameter(false);
+
 
         public bool IsActive() => enabled.value;
     }

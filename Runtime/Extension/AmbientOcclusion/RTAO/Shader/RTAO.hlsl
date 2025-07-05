@@ -1,7 +1,7 @@
 // We need only need 1 bounce for AO
 #pragma max_recursion_depth 1
 // HDRP include
-#define SHADER_TARGET 50
+#pragma use_dxc
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
@@ -22,6 +22,11 @@ TEXTURE2D_X(SceneNormal);
 RW_TEXTURE2D(float, AmbientOcclusionTexture);
 RW_TEXTURE2D(float, _VelocityBuffer);
 
+
+#define NV_HITOBJECT_USE_MACRO_API
+#define NV_SHADER_EXTN_SLOT u1
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Plugin/NVAPI_SER/nvHLSLExtns.h"
+float _UseNVSER;
 
 float radius;
 float intensity;
@@ -77,6 +82,7 @@ void RayGenAmbientOcclusion()
     float3 normalWS = half3(UnpackNormalOctQuadEncode(octNormalWS)); // values between [-1, +1]
 
 
+
     // the number of samples based on the roughness
     int numSamples = sampleCount;
 
@@ -126,8 +132,31 @@ void RayGenAmbientOcclusion()
         rayIntersection.pixelCoord = posInput.positionSS;
         rayIntersection.velocity = 0.0;
 
-        // Evaluate the ray intersection
-        TraceRay(_RaytracingAccelerationStructure, RAY_FLAG_CULL_BACK_FACING_TRIANGLES| RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,RAYTRACINGRENDERERFLAG_AMBIENT_OCCLUSION, 0, 1, 0, rayDescriptor, rayIntersection);
+
+        UNITY_BRANCH
+        if (_UseNVSER)
+        {
+            //note SER is good choice in RTGI or else shade
+            //but no use when only get visibility
+            //this just for SER test....
+            NvHitObject hitObject;
+
+            NvTraceRayHitObject(_RaytracingAccelerationStructure,
+                                RAY_FLAG_CULL_BACK_FACING_TRIANGLES| RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
+                                RAYTRACINGRENDERERFLAG_AMBIENT_OCCLUSION, 0, 1, 0, rayDescriptor, rayIntersection, hitObject);
+
+            NvReorderThread(hitObject);
+
+            NvInvokeHitObject(_RaytracingAccelerationStructure, hitObject, rayIntersection);
+        }
+        else
+        {
+            // Evaluate the ray intersection
+            TraceRay(_RaytracingAccelerationStructure, RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
+                     RAYTRACINGRENDERERFLAG_AMBIENT_OCCLUSION, 0, 1, 0, rayDescriptor, rayIntersection);
+        }
+
+        
 
         // Accumulate this value
         velocity = max(velocity, rayIntersection.velocity);

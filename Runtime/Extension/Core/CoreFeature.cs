@@ -40,7 +40,6 @@ namespace UnityEngine.Rendering.Universal
             if (HistoryBufferCaptureManager.instance.EnableHistoryPasses())
             {
                 renderer.EnqueuePass(historyCapturePass);
-
             }
             
             if (ForwardGBufferManager.instance.EnableGBufferPasses() && !deferred)
@@ -55,7 +54,7 @@ namespace UnityEngine.Rendering.Universal
             historyValidityPass.Setup(deferred);
             renderer.EnqueuePass(historyValidityPass);
             
-            renderer.EnqueuePass(sceneViewMotionVectorPass);
+            // renderer.EnqueuePass(sceneViewMotionVectorPass);
         }
     }
 }

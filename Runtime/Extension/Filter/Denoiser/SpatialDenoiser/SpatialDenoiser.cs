@@ -26,6 +26,7 @@ namespace UnityEngine.Rendering.Universal
 
         #region ShaderID
         private static readonly int _PointDistribution = Shader.PropertyToID("_PointDistribution");
+        private static readonly int _PointDistributionRW = Shader.PropertyToID("_PointDistributionRW");
         private static readonly int _OwenScrambledRGTexture = Shader.PropertyToID("_OwenScrambledRGTexture");
         private static readonly int _DenoiserFilterRadius = Shader.PropertyToID("_DenoiserFilterRadius");
         private static readonly int _DenoiseInputTexture = Shader.PropertyToID("_DenoiseInputTexture");
@@ -177,7 +178,7 @@ namespace UnityEngine.Rendering.Universal
                         int m_GeneratePointDistributionKernel = data.diffuseDenoiserCS.FindKernel("GeneratePointDistribution");
                         ctx.cmd.SetComputeTextureParam(data.diffuseDenoiserCS, m_GeneratePointDistributionKernel, _OwenScrambledRGTexture,
                             data.owenScrambledTexture);
-                        ctx.cmd.SetComputeBufferParam(data.diffuseDenoiserCS, m_GeneratePointDistributionKernel, _PointDistribution,
+                        ctx.cmd.SetComputeBufferParam(data.diffuseDenoiserCS, m_GeneratePointDistributionKernel, _PointDistributionRW,
                             data.pointDistribution);
                         ctx.cmd.DispatchCompute(data.diffuseDenoiserCS, m_GeneratePointDistributionKernel, 1, 1, 1);
                     }

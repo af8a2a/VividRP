@@ -310,6 +310,7 @@ namespace UnityEngine.Rendering.Universal
             Vrs.InitializeResources();
 
             #region Extension
+            ExtensionSystem.Init();
             MipGenerator.instance.Init();
             PreIntegratedFGD.instance.Build(PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse);
             BlueNoiseSystem.instance.Init();
@@ -352,7 +353,6 @@ namespace UnityEngine.Rendering.Universal
             
             #region Extension
             PreIntegratedFGD.instance.Cleanup(PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse);
-
             IBLFilterGGX.Clean();
             SkySystem.ClearAll();
             BlueNoiseSystem.ClearAll();
@@ -361,6 +361,7 @@ namespace UnityEngine.Rendering.Universal
             GraphicsBufferSystem.ClearAll();
             MipGenerator.ClearAll();
             DenoiseSystem.ClearAll();
+            ExtensionSystem.Clean();
             #endregion
 
 #if UNITY_EDITOR

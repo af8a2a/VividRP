@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine.VFX;
 
 namespace UnityEngine.Rendering.Universal
@@ -13,6 +14,7 @@ namespace UnityEngine.Rendering.Universal
         AmbientOcclusion = 0x08,
         Reflection = 0x10,
         GlobalIllumination = 0x20,
+
         //RecursiveRendering = 0x40,
         CastShadowCharacter = 0x40,
         PathTracing = 0x80,
@@ -26,14 +28,19 @@ namespace UnityEngine.Rendering.Universal
     {
         /// <summary>Initial flag state.</summary>
         Clear = 0x0,
+
         /// <summary>Flag that indicates that the renderer was successfully added to the ray tracing acceleration structure.</summary>
         Added = 0x1,
+
         /// <summary>Flag that indicates that the renderer was excluded from the ray tracing acceleration structure.</summary>
         Excluded = 0x02,
+
         /// <summary>Flag that indicates that the renderer was added to the ray tracing acceleration structure, but it had transparent and opaque sub-meshes.</summary>
         TransparencyIssue = 0x04,
+
         /// <summary>Flag that indicates that the renderer was not included into the ray tracing acceleration structure because of a missing material</summary>
         NullMaterial = 0x08,
+
         /// <summary>Flag that indicates that the renderer was not included into the ray tracing acceleration structure because of a missing mesh</summary>
         MissingMesh = 0x10
     }
@@ -63,6 +70,18 @@ namespace UnityEngine.Rendering.Universal
         static Dictionary<int, int> m_MaterialCRCs = new Dictionary<int, int>();
 
 
+        #region NVAPI_SER
+
+        public bool SupportSER = false;
+        public bool SERSetup = false;
+
+        private bool SetNvShaderExtnSlot;
+        private ShaderExecutionReordering _shaderExecutionReordering;
+        private GraphicsBuffer nvidiaExt;
+
+        public GraphicsBuffer NVAPI_Buffer => nvidiaExt;
+        #endregion
+
         public static bool SupportedCamera(Camera camera)
         {
             return camera.cameraType == CameraType.SceneView || camera.cameraType == CameraType.Game;
@@ -75,7 +94,14 @@ namespace UnityEngine.Rendering.Universal
                 Debug.LogError("Camera type " + camera.cameraType + " not supported RayTracing");
                 return;
             }
-            
+
+
+            if (ExtensionSystem.RegisteredExtensions.TryGetValue(HardwareExtension.ShaderExecutionReordering,out var ser ))
+            {
+                SupportSER = true;
+                _shaderExecutionReordering = ser as ShaderExecutionReordering;
+                nvidiaExt = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, 4);
+            }
             // Ray count system
 
             // light cluster system
@@ -97,6 +123,8 @@ namespace UnityEngine.Rendering.Universal
                 m_AccelerationStructureSystem.Dispose();
                 m_AccelerationStructureSystem = null;
             }
+
+            NVAPI_Buffer?.Release();
         }
 
         static bool IsValidRayTracedMaterial(Material currentMaterial)
@@ -143,7 +171,8 @@ namespace UnityEngine.Rendering.Universal
         /// <param name="transformDirty">Flag that indicates if the renderer's transform has changed.</param>
         /// <param name="materialsDirty">Flag that indicates if any of the renderer's materials have changed.</param>
         /// <returns></returns>
-        public static AccelerationStructureStatus AddInstanceToRAS(RayTracingAccelerationStructure targetRTAS, Renderer currentRenderer, RayTracedEffectsParameters effectsParameters, ref bool transformDirty, ref bool materialsDirty)
+        public static AccelerationStructureStatus AddInstanceToRAS(RayTracingAccelerationStructure targetRTAS, Renderer currentRenderer,
+            RayTracedEffectsParameters effectsParameters, ref bool transformDirty, ref bool materialsDirty)
         {
             if (currentRenderer is VFXRenderer vfxRenderer)
                 return AddVFXInstanceToRAS(targetRTAS, vfxRenderer, effectsParameters, ref transformDirty, ref materialsDirty);
@@ -230,7 +259,7 @@ namespace UnityEngine.Rendering.Universal
             if (instanceFlag == 0) return AccelerationStructureStatus.Added;
 
             targetRTAS.AddInstance(currentRenderer, subMeshFlags: subMeshFlagArray, enableTriangleCulling: !doubleSided,
-                    mask: instanceFlag);
+                mask: instanceFlag);
 
             // Indicates that a transform has changed in our scene (mesh or light)
             transformDirty |= currentRenderer.transform.hasChanged;
@@ -242,9 +271,9 @@ namespace UnityEngine.Rendering.Universal
                 : AccelerationStructureStatus.Added;
         }
 
-        private static AccelerationStructureStatus AddVFXInstanceToRAS(RayTracingAccelerationStructure targetRTAS, VFXRenderer currentRenderer, RayTracedEffectsParameters effectsParameters, ref bool transformDirty, ref bool materialsDirty)
+        private static AccelerationStructureStatus AddVFXInstanceToRAS(RayTracingAccelerationStructure targetRTAS, VFXRenderer currentRenderer,
+            RayTracedEffectsParameters effectsParameters, ref bool transformDirty, ref bool materialsDirty)
         {
-
             // If we should exclude Visual effects, skip right now
             if (!effectsParameters.includeVFX)
                 return AccelerationStructureStatus.Excluded;
@@ -280,7 +309,8 @@ namespace UnityEngine.Rendering.Universal
                         hasTransparentSubMaterial |= transparentMaterial;
 
                         ShadowCastingMode shadowCastingMode = currentMaterial.FindPass("ShadowCaster") != -1 ? ShadowCastingMode.On : ShadowCastingMode.Off;
-                        uint instanceFlag = ComputeInstanceFlag(currentRenderer, shadowCastingMode, effectsParameters, transparentMaterial, transparentMaterial);
+                        uint instanceFlag = ComputeInstanceFlag(currentRenderer, shadowCastingMode, effectsParameters, transparentMaterial,
+                            transparentMaterial);
                         hasAnyValidInstance |= (instanceFlag != 0);
                         vfxSystemMasks[compactedSubGeomIndex] = instanceFlag;
                         compactedSubGeomIndex++;
@@ -292,7 +322,6 @@ namespace UnityEngine.Rendering.Universal
                         }
                     }
                 }
-
             }
 
             // If the object was not referenced
@@ -306,26 +335,28 @@ namespace UnityEngine.Rendering.Universal
             currentRenderer.transform.hasChanged = false;
 
             // return the status
-            return (!materialIsOnlyTransparent && hasTransparentSubMaterial) ? AccelerationStructureStatus.TransparencyIssue : AccelerationStructureStatus.Added;
+            return (!materialIsOnlyTransparent && hasTransparentSubMaterial)
+                ? AccelerationStructureStatus.TransparencyIssue
+                : AccelerationStructureStatus.Added;
         }
 
         private static void ComputeSubMeshFlag(int meshIdx, bool transparentMaterial, bool alphaTested,
             Material currentMaterial,
             ref bool doubleSided)
-                {
-                    // Mark the thing as valid
-                    subMeshFlagArray[meshIdx] = RayTracingSubMeshFlags.Enabled;
+        {
+            // Mark the thing as valid
+            subMeshFlagArray[meshIdx] = RayTracingSubMeshFlags.Enabled;
 
-                    // Append the additional flags depending on what kind of sub mesh this is
-                    if (!transparentMaterial && !alphaTested)
-                        subMeshFlagArray[meshIdx] |= RayTracingSubMeshFlags.ClosestHitOnly;
-                    else if (transparentMaterial)
-                        subMeshFlagArray[meshIdx] |= RayTracingSubMeshFlags.UniqueAnyHitCalls;
+            // Append the additional flags depending on what kind of sub mesh this is
+            if (!transparentMaterial && !alphaTested)
+                subMeshFlagArray[meshIdx] |= RayTracingSubMeshFlags.ClosestHitOnly;
+            else if (transparentMaterial)
+                subMeshFlagArray[meshIdx] |= RayTracingSubMeshFlags.UniqueAnyHitCalls;
 
-                    // Check if we want to enable double-sidedness for the mesh
-                    // (note that a mix of single and double-sided materials will result in a double-sided mesh in the AS)
-                    doubleSided |= currentMaterial.doubleSidedGI || currentMaterial.IsKeywordEnabled("_DOUBLESIDED_ON");
-                }
+            // Check if we want to enable double-sidedness for the mesh
+            // (note that a mix of single and double-sided materials will result in a double-sided mesh in the AS)
+            doubleSided |= currentMaterial.doubleSidedGI || currentMaterial.IsKeywordEnabled("_DOUBLESIDED_ON");
+        }
 
         private static uint ComputeInstanceFlag(Renderer currentRenderer, ShadowCastingMode shadowCastingMode, RayTracedEffectsParameters effectsParameters,
             bool hasTransparentSubMaterial, bool materialIsOnlyTransparent)
@@ -366,8 +397,8 @@ namespace UnityEngine.Rendering.Universal
                 }
 
                 instanceFlag |= ((effectsParameters.characterShadowLayerMask & objectLayerValue) != 0)
-                        ? (uint)(RayTracingRendererFlag.CastShadowCharacter)
-                        : 0x00;
+                    ? (uint)(RayTracingRendererFlag.CastShadowCharacter)
+                    : 0x00;
             }
 
             // We consider a mesh visible by reflection, gi, etc if it is not in the shadow only mode.
@@ -415,7 +446,6 @@ namespace UnityEngine.Rendering.Universal
         }
 
 
-
         public static RayTracedEffectsParameters EvaluateEffectsParameters(VolumeStack volumeStack, bool rayTracedShadows, bool rayTracedContactShadows)
         {
             RayTracedEffectsParameters parameters = new RayTracedEffectsParameters();
@@ -426,7 +456,7 @@ namespace UnityEngine.Rendering.Universal
             // bool transparentReflections = shadowSettings.enabledTransparent.value;
             parameters.shadows = opaqueShadows;
             parameters.characterShadowLayerMask = shadowSettings.characterLayerMask.value;
-            
+
             //
             // // Aggregate the ambient occlusion parameters
             //
@@ -439,12 +469,12 @@ namespace UnityEngine.Rendering.Universal
 
             // Aggregate the global illumination parameters
 
-            
+
             var aoSetting = volumeStack.GetComponent<RaytracingAmbientOcclusion>();
 
             parameters.ambientOcclusion = aoSetting.IsActive();
-            
-            
+
+
             // We need to check if at least one effect will require the acceleration structure
             parameters.rayTracingRequired = parameters.ambientOcclusion || parameters.reflections
                                                                         || parameters.globalIllumination || parameters.shadows;
@@ -487,7 +517,7 @@ namespace UnityEngine.Rendering.Universal
 #endif
             {
                 // Cull the scene for the RTAS
-                RayTracingInstanceCullingResults cullingResults = m_AccelerationStructureSystem.Cull( effectParameters);
+                RayTracingInstanceCullingResults cullingResults = m_AccelerationStructureSystem.Cull(effectParameters);
 
                 // Update the material dirtiness for the PT
                 if (effectParameters.pathTracing)
@@ -512,8 +542,6 @@ namespace UnityEngine.Rendering.Universal
                 if (m_UserFedAccelerationStructure != null)
                     m_ValidRayTracingState = true;
             }
-
-
         }
 
         // TODO:
@@ -562,6 +590,7 @@ namespace UnityEngine.Rendering.Universal
                 else
                     return m_UserFedAccelerationStructure;
             }
+
             return null;
         }
 

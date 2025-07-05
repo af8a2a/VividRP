@@ -4,6 +4,7 @@ namespace UnityEngine.Rendering.Universal
 {
     public class RaytracingCorePass : ScriptableRenderPass
     {
+        private static int g_NvidiaExt = Shader.PropertyToID("g_NvidiaExt");
         public RaytracingCorePass()
         {
             renderPassEvent = RenderPassEvent.BeforeRendering;
@@ -17,6 +18,7 @@ namespace UnityEngine.Rendering.Universal
 
         class RaytracingCorePassData
         {
+            public BufferHandle nvidiaExt;
         }
 
         public void Setup()
@@ -43,6 +45,26 @@ namespace UnityEngine.Rendering.Universal
                     raytracingData.rayTracingSystem.BuildRayTracingAccelerationStructure();
                 }
 
+                if (raytracingData.rayTracingSystem.SupportSER&&!raytracingData.rayTracingSystem.SERSetup)
+                {
+                    raytracingData.rayTracingSystem.SERSetup = false;
+                    using (var builder = renderGraph.AddUnsafePass<RaytracingCorePassData>("Raytracing Core", out var data))
+                    {
+                        data.nvidiaExt = renderGraph.ImportBuffer(raytracingData.rayTracingSystem.NVAPI_Buffer);
+                        builder.AllowGlobalStateModification(true);
+                        builder.AllowPassCulling(false);
+                        builder.SetRenderFunc<RaytracingCorePassData>((passData, ctx) =>
+                        {
+                            var cmd = ctx.cmd;
+
+                            cmd.SetGlobalBuffer(g_NvidiaExt, passData.nvidiaExt);
+                            
+                            if (!ShaderExecutionReordering.NvAPI_SetNvShaderExtnSlot(1))
+                                Debug.Log("NvAPI_SetNvShaderExtnSlot failed!");
+
+                        });
+                    }
+                }
                 // TODO: builds the ray tracing light cluster
                 //RayTracingClusterCull();
             }

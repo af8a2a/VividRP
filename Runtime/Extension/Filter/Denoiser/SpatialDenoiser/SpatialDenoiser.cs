@@ -22,6 +22,28 @@ namespace UnityEngine.Rendering.Universal
         int m_GatherSingleKernel;
         int m_GatherColorKernel;
 
+
+
+        #region ShaderID
+        private static readonly int _PointDistribution = Shader.PropertyToID("_PointDistribution");
+        private static readonly int _OwenScrambledRGTexture = Shader.PropertyToID("_OwenScrambledRGTexture");
+        private static readonly int _DenoiserFilterRadius = Shader.PropertyToID("_DenoiserFilterRadius");
+        private static readonly int _DenoiseInputTexture = Shader.PropertyToID("_DenoiseInputTexture");
+        private static readonly int _DepthTexture = Shader.PropertyToID("_DepthTexture");
+        private static readonly int _NormalBufferTexture = Shader.PropertyToID("_NormalBufferTexture");
+        private static readonly int _DenoiseOutputTextureRW = Shader.PropertyToID("_DenoiseOutputTextureRW");
+        private static readonly int _HalfResolutionFilter = Shader.PropertyToID("_HalfResolutionFilter");
+        private static readonly int _PixelSpreadAngleTangent = Shader.PropertyToID("_PixelSpreadAngleTangent");
+        private static readonly int _DenoiserResolutionMultiplierVals = Shader.PropertyToID("_DenoiserResolutionMultiplierVals");
+        private static readonly int _JitterFramePeriod = Shader.PropertyToID("_JitterFramePeriod");
+
+
+        
+
+        #endregion
+        
+        
+        
         public void Init()
         {
             var runtimeShaders = GraphicsSettings.GetRenderPipelineSettings<DenoiserRuntimeShader>();
@@ -41,6 +63,11 @@ namespace UnityEngine.Rendering.Universal
             m_OwnenScrambledTexture = blueNoise.owenScrambledRGBATex;
             m_PointDistribution = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 16 * 4, 2 * sizeof(float));
         }
+        
+        
+        
+        
+        
 
         public void Release()
         {
@@ -148,9 +175,9 @@ namespace UnityEngine.Rendering.Universal
                     if (data.needInit)
                     {
                         int m_GeneratePointDistributionKernel = data.diffuseDenoiserCS.FindKernel("GeneratePointDistribution");
-                        ctx.cmd.SetComputeTextureParam(data.diffuseDenoiserCS, m_GeneratePointDistributionKernel, "_OwenScrambledRGTexture",
+                        ctx.cmd.SetComputeTextureParam(data.diffuseDenoiserCS, m_GeneratePointDistributionKernel, _OwenScrambledRGTexture,
                             data.owenScrambledTexture);
-                        ctx.cmd.SetComputeBufferParam(data.diffuseDenoiserCS, m_GeneratePointDistributionKernel, "_PointDistributionRW",
+                        ctx.cmd.SetComputeBufferParam(data.diffuseDenoiserCS, m_GeneratePointDistributionKernel, _PointDistribution,
                             data.pointDistribution);
                         ctx.cmd.DispatchCompute(data.diffuseDenoiserCS, m_GeneratePointDistributionKernel, 1, 1, 1);
                     }
@@ -161,30 +188,30 @@ namespace UnityEngine.Rendering.Universal
                     int numTilesY = (data.texHeight + (areaTileSize - 1)) / areaTileSize;
                     
                     // Request the intermediate buffers that we need
-                    ctx.cmd.SetComputeFloatParam(data.diffuseDenoiserCS, "_DenoiserFilterRadius", data.kernelSize);
-                    ctx.cmd.SetComputeBufferParam(data.diffuseDenoiserCS, data.bilateralFilterKernel, "_PointDistribution", data.pointDistribution);
-                    ctx.cmd.SetComputeTextureParam(data.diffuseDenoiserCS, data.bilateralFilterKernel, "_DenoiseInputTexture", data.noisyBuffer);
-                    ctx.cmd.SetComputeTextureParam(data.diffuseDenoiserCS, data.bilateralFilterKernel, "_DepthTexture", data.depthStencilBuffer);
+                    ctx.cmd.SetComputeFloatParam(data.diffuseDenoiserCS, _DenoiserFilterRadius, data.kernelSize);
+                    ctx.cmd.SetComputeBufferParam(data.diffuseDenoiserCS, data.bilateralFilterKernel, _PointDistribution, data.pointDistribution);
+                    ctx.cmd.SetComputeTextureParam(data.diffuseDenoiserCS, data.bilateralFilterKernel, _DenoiseInputTexture, data.noisyBuffer);
+                    ctx.cmd.SetComputeTextureParam(data.diffuseDenoiserCS, data.bilateralFilterKernel, _DepthTexture, data.depthStencilBuffer);
 
-                    ctx.cmd.SetComputeTextureParam(data.diffuseDenoiserCS, data.bilateralFilterKernel, "_NormalBufferTexture", data.normalBuffer);
-                    ctx.cmd.SetComputeTextureParam(data.diffuseDenoiserCS, data.bilateralFilterKernel, "_DenoiseOutputTextureRW",
+                    ctx.cmd.SetComputeTextureParam(data.diffuseDenoiserCS, data.bilateralFilterKernel, _NormalBufferTexture, data.normalBuffer);
+                    ctx.cmd.SetComputeTextureParam(data.diffuseDenoiserCS, data.bilateralFilterKernel, _DenoiseOutputTextureRW,
                         data.halfResolutionFilter ? data.intermediateBuffer : data.outputBuffer);
-                    ctx.cmd.SetComputeIntParam(data.diffuseDenoiserCS, "_HalfResolutionFilter", data.halfResolutionFilter ? 1 : 0);
-                    ctx.cmd.SetComputeFloatParam(data.diffuseDenoiserCS, "_PixelSpreadAngleTangent", data.pixelSpreadTangent);
-                    ctx.cmd.SetComputeVectorParam(data.diffuseDenoiserCS, "_DenoiserResolutionMultiplierVals",
+                    ctx.cmd.SetComputeIntParam(data.diffuseDenoiserCS, _HalfResolutionFilter, data.halfResolutionFilter ? 1 : 0);
+                    ctx.cmd.SetComputeFloatParam(data.diffuseDenoiserCS, _PixelSpreadAngleTangent, data.pixelSpreadTangent);
+                    ctx.cmd.SetComputeVectorParam(data.diffuseDenoiserCS, _DenoiserResolutionMultiplierVals,
                         new Vector4(data.resolutionMultiplier, 1.0f / data.resolutionMultiplier, 0.0f, 0.0f));
                     if (data.jitterFilter)
-                        ctx.cmd.SetComputeIntParam(data.diffuseDenoiserCS, "_JitterFramePeriod", (data.frameIndex % 4));
+                        ctx.cmd.SetComputeIntParam(data.diffuseDenoiserCS, _JitterFramePeriod, (data.frameIndex % 4));
                     else
-                        ctx.cmd.SetComputeIntParam(data.diffuseDenoiserCS, "_JitterFramePeriod", -1);
+                        ctx.cmd.SetComputeIntParam(data.diffuseDenoiserCS, _JitterFramePeriod, -1);
                     
                     ctx.cmd.DispatchCompute(data.diffuseDenoiserCS, data.bilateralFilterKernel, numTilesX, numTilesY, data.viewCount);
                     
                     if (data.halfResolutionFilter)
                     {
-                        ctx.cmd.SetComputeTextureParam(data.diffuseDenoiserCS, data.gatherKernel, "_DenoiseInputTexture", data.intermediateBuffer);
-                        ctx.cmd.SetComputeTextureParam(data.diffuseDenoiserCS, data.gatherKernel, "_DepthTexture", data.depthStencilBuffer);
-                        ctx.cmd.SetComputeTextureParam(data.diffuseDenoiserCS, data.gatherKernel, "_DenoiseOutputTextureRW", data.outputBuffer);
+                        ctx.cmd.SetComputeTextureParam(data.diffuseDenoiserCS, data.gatherKernel, _DenoiseInputTexture, data.intermediateBuffer);
+                        ctx.cmd.SetComputeTextureParam(data.diffuseDenoiserCS, data.gatherKernel, _DepthTexture, data.depthStencilBuffer);
+                        ctx.cmd.SetComputeTextureParam(data.diffuseDenoiserCS, data.gatherKernel, _DenoiseOutputTextureRW, data.outputBuffer);
                         ctx.cmd.DispatchCompute(data.diffuseDenoiserCS, data.gatherKernel, numTilesX, numTilesY, data.viewCount);
                     }
                 });

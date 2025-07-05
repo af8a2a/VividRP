@@ -152,6 +152,8 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         internal static ScriptableRenderer current = null;
 
+        internal static UniversalRenderer urpRenderer = null;
+
         /// <summary>
         /// Set camera matrices. This method will set <c>UNITY_MATRIX_V</c>, <c>UNITY_MATRIX_P</c>, <c>UNITY_MATRIX_VP</c> to camera matrices.
         /// Additionally this will also set <c>unity_CameraProjection</c> and <c>unity_CameraProjection</c>.

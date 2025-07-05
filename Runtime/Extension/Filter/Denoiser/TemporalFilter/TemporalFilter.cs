@@ -41,8 +41,8 @@ namespace UnityEngine.Rendering.Universal
         private static int _DenoiserResolutionMultiplierVals = Shader.PropertyToID("_DenoiserResolutionMultiplierVals");
         private static int _ReceiverMotionRejection = Shader.PropertyToID("_ReceiverMotionRejection");
         private static int _OccluderMotionRejection = Shader.PropertyToID("_OccluderMotionRejection");
-        public static  int _HistorySizeAndScale = Shader.PropertyToID("_HistorySizeAndScale");
-        public static  int _HistoryValidity = Shader.PropertyToID("_HistoryValidity");
+        private static  int _HistorySizeAndScale = Shader.PropertyToID("_HistorySizeAndScale");
+        private static  int _HistoryValidity = Shader.PropertyToID("_HistoryValidity");
 
         
         public void Init()
@@ -309,7 +309,10 @@ namespace UnityEngine.Rendering.Universal
 
                 // Output buffers
                 passData.outputBuffer = (renderGraph.CreateTexture(new TextureDesc(cameraData.scaledWidth, cameraData.scaledHeight)
-                    { format = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Temporal Filter Output" }));
+                {
+                    format =  GraphicsFormat.R16G16B16A16_SFloat ,
+                    enableRandomWrite = true, name = "Temporal Filter Output"
+                }));
 
 
                 var meanBuffer =
@@ -365,7 +368,6 @@ namespace UnityEngine.Rendering.Universal
                         new Vector4(data.resolutionMultiplier, 1.0f / data.resolutionMultiplier, data.historyResolutionMultiplier,
                             1.0f / data.historyResolutionMultiplier));
 
-                    
                     ctx.cmd.SetComputeTextureParam(data.temporalDenoiserCS, data.temporalAccKernel, _AccumulationOutputTextureRW, data.outputBuffer);
 
                     ctx.cmd.DispatchCompute(data.temporalDenoiserCS, data.temporalAccKernel, numTilesX, numTilesY, 1);

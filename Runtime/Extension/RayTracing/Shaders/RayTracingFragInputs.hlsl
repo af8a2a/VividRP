@@ -95,14 +95,14 @@ uint GetCurrentVertexAndBuildFragInputs(AttributeData attributeData, out Interse
 {
     uint currentFrameIndex = 0; //Used for VFX
 
-    #ifdef HAVE_VFX_MODIFICATION
-    ZERO_INITIALIZE(IntersectionVertex, currentVertex);
-    BuildFragInputsFromVFXIntersection(attributeData, outFragInputs, currentFrameIndex);
-    #else
+    // #ifdef HAVE_VFX_MODIFICATION
+    // ZERO_INITIALIZE(IntersectionVertex, currentVertex);
+    // BuildFragInputsFromVFXIntersection(attributeData, outFragInputs, currentFrameIndex);
+    // #else
     GetCurrentIntersectionVertex(attributeData, currentVertex);
     // Build the Frag inputs from the intersection vertice
     BuildFragInputsFromIntersection(currentVertex, outFragInputs);
-    #endif
+    // #endif
 
     return currentFrameIndex;
 }

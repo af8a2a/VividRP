@@ -1,6 +1,5 @@
 // We need only need 1 bounce for AO
 #pragma max_recursion_depth 1
-
 // HDRP include
 #define SHADER_TARGET 50
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl"
@@ -16,8 +15,8 @@
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/RayTracingFallbackHierarchy.cs.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/Shaders/RaytracingSampling.hlsl"
 // The target acceleration structure that we will evaluate the reflexion in
-TEXTURE2D(SceneDepth);
-TEXTURE2D(SceneNormal);
+TEXTURE2D_X(SceneDepth);
+TEXTURE2D_X(SceneNormal);
 
 // Output structure of the reflection raytrace shader
 RW_TEXTURE2D(float, AmbientOcclusionTexture);
@@ -72,7 +71,10 @@ void RayGenAmbientOcclusion()
 
     // Decode the world space normal
 
-    float3 normalWS = UnpackGBufferNormal(SceneNormal[currentPixelCoord]);
+    // float3 normalWS = UnpackGBufferNormal(SceneNormal[currentPixelCoord]);
+    half2 remappedOctNormalWS = half2(Unpack888ToFloat2(SceneNormal[currentPixelCoord])); // values between [ 0, +1]
+    half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0); // values between [-1, +1]
+    float3 normalWS = half3(UnpackNormalOctQuadEncode(octNormalWS)); // values between [-1, +1]
 
 
     // the number of samples based on the roughness
@@ -114,7 +116,7 @@ void RayGenAmbientOcclusion()
         // Create the ray descriptor for this pixel
         rayDescriptor.Origin = posInput.positionWS + normalWS * rayBias;
         rayDescriptor.Direction = sampleDir;
-        rayDescriptor.TMin = 0.0001;
+        rayDescriptor.TMin = 0;
         rayDescriptor.TMax = radius;
 
 
@@ -125,9 +127,7 @@ void RayGenAmbientOcclusion()
         rayIntersection.velocity = 0.0;
 
         // Evaluate the ray intersection
-        TraceRay(_RaytracingAccelerationStructure, RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
-                 RAYTRACINGRENDERERFLAG_AMBIENT_OCCLUSION, 0, 1, 0, rayDescriptor,
-                 rayIntersection);
+        TraceRay(_RaytracingAccelerationStructure, RAY_FLAG_CULL_BACK_FACING_TRIANGLES| RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,RAYTRACINGRENDERERFLAG_AMBIENT_OCCLUSION, 0, 1, 0, rayDescriptor, rayIntersection);
 
         // Accumulate this value
         velocity = max(velocity, rayIntersection.velocity);
@@ -136,8 +136,7 @@ void RayGenAmbientOcclusion()
 
     // Normalize the radiance
     finalColor /= (float)numSamples;
-
     // Alright we are done
-    AmbientOcclusionTexture[(currentPixelCoord)] = finalColor ;
+    AmbientOcclusionTexture[(currentPixelCoord)] = finalColor;
     _VelocityBuffer[(currentPixelCoord)] = velocity;
 }

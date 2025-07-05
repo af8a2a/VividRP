@@ -12,9 +12,6 @@ namespace UnityEngine.Rendering.Universal
         [SerializeField] [ResourcePath("Runtime/Extension/AmbientOcclusion/RTAO/Shader/InlineRT/RTAO.compute")]
         private ComputeShader m_RaytracingAmbientOcclusionCS;
         
-        /// <summary>
-        /// Default directional shadowramp texture.
-        /// </summary>
         public ComputeShader inlineRaytracingAmbientOcclusionShader
         {
             get => m_RaytracingAmbientOcclusionCS;
@@ -32,6 +29,17 @@ namespace UnityEngine.Rendering.Universal
         {
             get => m_RaytracingAmbientOcclusionRTShader;
             set => this.SetValueAndNotify(ref m_RaytracingAmbientOcclusionRTShader, value, nameof(m_RaytracingAmbientOcclusionRTShader));
+        }
+        
+        
+        
+        [SerializeField] [ResourcePath("Runtime/Extension/AmbientOcclusion/RTAO/Shader/RTAOResolve.compute")]
+        private ComputeShader m_RaytracingAmbientOcclusionResolveCS;
+        
+        public ComputeShader raytracingAmbientOcclusionResolveShader
+        {
+            get => m_RaytracingAmbientOcclusionResolveCS;
+            set => this.SetValueAndNotify(ref m_RaytracingAmbientOcclusionResolveCS, value, nameof(m_RaytracingAmbientOcclusionResolveCS));
         }
 
     }

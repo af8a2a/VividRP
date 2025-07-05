@@ -14,6 +14,7 @@ namespace UnityEngine.Rendering.Universal
         ForwardGBufferPass forwardGBufferPass;
         HistoryCapturePass historyCapturePass;
         HistoryValidityPass historyValidityPass;
+        SceneViewMotionVectorPass sceneViewMotionVectorPass;
         public override void Create()
         {
             colorPyramid = new ColorPyramidPass(RenderPassEvent.AfterRenderingSkybox);
@@ -28,6 +29,7 @@ namespace UnityEngine.Rendering.Universal
             {
                 renderPassEvent = RenderPassEvent.AfterRenderingPrePasses,
             };
+            sceneViewMotionVectorPass = new SceneViewMotionVectorPass();
         }
         
 
@@ -52,7 +54,8 @@ namespace UnityEngine.Rendering.Universal
             
             historyValidityPass.Setup(deferred);
             renderer.EnqueuePass(historyValidityPass);
-
+            
+            renderer.EnqueuePass(sceneViewMotionVectorPass);
         }
     }
 }

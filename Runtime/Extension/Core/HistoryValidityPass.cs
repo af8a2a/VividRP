@@ -25,20 +25,8 @@ namespace UnityEngine.Rendering.Universal
 
             var temporalFilter = DenoiseSystem.GetTemporalFilter();
 
-            if (deferred)
-            {
-                temporalFilter.HistoryValidity(renderGraph, cameraData,
-                    resourceData.gBuffer[2],
-                    resourceData.motionVectorColor,
-                    resourceData.cameraDepthTexture);
-            }
-            else
-            {
-                temporalFilter.HistoryValidity(renderGraph, cameraData,
-                    resourceData.cameraNormalsTexture,
-                    resourceData.motionVectorColor,
-                    resourceData.cameraDepthTexture);
-            }
+            DenoiseSystem.instance.historyValidity = temporalFilter.HistoryValidity(renderGraph, cameraData,
+                deferred ? resourceData.gBuffer[2] : resourceData.cameraNormalsTexture, resourceData.motionVectorColor, resourceData.cameraDepthTexture);
         }
     }
 }

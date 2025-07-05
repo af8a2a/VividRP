@@ -5,6 +5,7 @@
 #pragma require inlineraytracing
 
 #pragma only_renderers d3d11 xboxseries ps5
+#pragma multi_compile  _  _GBUFFER_NORMALS_OCT
 
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/Shaders/ShaderVariablesRaytracing.hlsl"
@@ -14,7 +15,7 @@
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/Shaders/RaytracingSampling.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Sampling.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/GBufferCommon.hlsl"
-Texture2D<float>  SceneDepth;
+Texture2D<float> SceneDepth;
 Texture2D<float4> SceneNormal;
 
 
@@ -57,9 +58,10 @@ void RTAO(const uint2 coordSS : SV_DispatchThreadID)
         return;
 
 
-    PositionInputs posInput = GetPositionInput(coordSS, _ScreenSize.zw, rawDepth, UNITY_MATRIX_I_VP, UNITY_MATRIX_V, 0);
+    PositionInputs posInput = GetPositionInput(coordSS, _ScreenSize.zw, rawDepth, UNITY_MATRIX_I_VP, UNITY_MATRIX_V);
 
-    float3 normalWS =UnpackGBufferNormal (SceneNormal[coordSS]);
+
+    float3 normalWS = UnpackGBufferNormal(SceneNormal[coordSS]);
 
     // Evaluate the ray bias
     float rayBias = EvaluateRayTracingBias(posInput.positionWS);
@@ -81,13 +83,13 @@ void RTAO(const uint2 coordSS : SV_DispatchThreadID)
         float3 sampleDir = SampleHemisphereCosine(noiseValue.x, noiseValue.y, normalWS);
 
 
-
         aoRay.Origin = posInput.positionWS + normalWS * rayBias;
         aoRay.Direction = sampleDir;
-        aoRay.TMin =  0.0001;
+        aoRay.TMin = 0.0001;
         aoRay.TMax = radius;
 
-        shadowQuery.TraceRayInline(_AccelerationStructure, RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xff, aoRay);
+        shadowQuery.TraceRayInline(_AccelerationStructure, RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
+                                   RAYTRACINGRENDERERFLAG_AMBIENT_OCCLUSION, aoRay);
         shadowQuery.Proceed();
 
         block += shadowQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT;

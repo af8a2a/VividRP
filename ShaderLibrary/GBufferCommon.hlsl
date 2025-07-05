@@ -115,7 +115,7 @@ uint UnpackGBufferMaterialFlags(float packedMaterialFlags)
     return uint((packedMaterialFlags * half(255.0)) + half(0.5));
 }
 
-#if defined(_GBUFFER_NORMALS_OCT)
+// #if defined(_GBUFFER_NORMALS_OCT)
 
 half3 PackGBufferNormal(half3 normalWS)
 {
@@ -131,14 +131,14 @@ half3 UnpackGBufferNormal(half3 packedNormalWS)
     return half3(UnpackNormalOctQuadEncode(octNormalWS));                // values between [-1, +1]
 }
 
-#else
-
-half3 PackGBufferNormal(half3 normalWS)
-{ return normalWS; }                                                      // values between [-1, +1]
-
-half3 UnpackGBufferNormal(half3 packedNormalWS)
-{ return packedNormalWS; }                                                // values between [-1, +1]
-
-#endif
+// #else
+//
+// half3 PackGBufferNormal(half3 normalWS)
+// { return normalWS; }                                                      // values between [-1, +1]
+//
+// half3 UnpackGBufferNormal(half3 packedNormalWS)
+// { return packedNormalWS; }                                                // values between [-1, +1]
+//
+// #endif
 
 #endif

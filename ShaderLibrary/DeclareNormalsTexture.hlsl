@@ -14,11 +14,11 @@ float3 SampleSceneNormals(float2 uv, SAMPLER(samplerParam))
     uv = ClampAndScaleUVForBilinear(UnityStereoTransformScreenSpaceTex(uv), _CameraNormalsTexture_TexelSize.xy);
     float3 normal = SAMPLE_TEXTURE2D_X(_CameraNormalsTexture, samplerParam, uv).xyz;
 
-    #if defined(_GBUFFER_NORMALS_OCT)
+    // #if defined(_GBUFFER_NORMALS_OCT)
     float2 remappedOctNormalWS = Unpack888ToFloat2(normal); // values between [ 0,  1]
     float2 octNormalWS = remappedOctNormalWS.xy * 2.0 - 1.0;    // values between [-1, +1]
     normal = UnpackNormalOctQuadEncode(octNormalWS);
-    #endif
+    // #endif
 
     return normal;
 }
@@ -32,11 +32,11 @@ float3 LoadSceneNormals(uint2 pixelCoords)
 {
     float3 normal = LOAD_TEXTURE2D_X(_CameraNormalsTexture, pixelCoords).xyz;
 
-    #if defined(_GBUFFER_NORMALS_OCT)
+    // #if defined(_GBUFFER_NORMALS_OCT)
     float2 remappedOctNormalWS = Unpack888ToFloat2(normal); // values between [ 0,  1]
     float2 octNormalWS = remappedOctNormalWS.xy * 2.0 - 1.0;    // values between [-1, +1]
     normal = UnpackNormalOctQuadEncode(octNormalWS);
-    #endif
+    // #endif
 
     return normal;
 }

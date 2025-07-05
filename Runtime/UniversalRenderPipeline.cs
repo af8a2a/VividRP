@@ -782,6 +782,12 @@ namespace UnityEngine.Rendering.Universal
                 return;
 
             ScriptableRenderer.current = renderer;
+
+            #region Extension
+
+            ScriptableRenderer.urpRenderer = (UniversalRenderer)renderer; //assert true...
+
+            #endregion
 #if RENDER_GRAPH_OLD_COMPILER
             s_RenderGraph.nativeRenderPassesEnabled = false;
             Debug.LogWarning("The native render pass compiler is disabled. Use this for debugging only. Mobile performance may be sub-optimal.");

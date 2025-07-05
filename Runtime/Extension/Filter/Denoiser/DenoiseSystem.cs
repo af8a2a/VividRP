@@ -1,4 +1,5 @@
 ﻿using System;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal
 {
@@ -12,6 +13,8 @@ namespace UnityEngine.Rendering.Universal
 
         public TemporalFilter temporalDenoiser;
 
+        
+        public TextureHandle historyValidity;
         
         public static SpatialDenoiser GetSpatialDenoiser()
         {

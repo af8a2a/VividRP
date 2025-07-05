@@ -14,27 +14,29 @@ void ClosestHitMain(inout RayIntersectionVisibility rayIntersection : SV_RayPayl
 {
     // Make sure to add the additional travel distance
     rayIntersection.t = RayTCurrent();
-
     // Hit point data.
     IntersectionVertex currentVertex;
     FragInputs fragInput;
+
     GetCurrentVertexAndBuildFragInputs(attributeData, currentVertex, fragInput);
-    PositionInputs posInput = GetPositionInput(rayIntersection.pixelCoord, _ScreenSize.zw, fragInput.positionRWS);
 
     float3 positionOS = ObjectRayOrigin() + ObjectRayDirection() * rayIntersection.t;
 
     float3 previousPositionWS = TransformPreviousObjectToWorld(positionOS);
 
     rayIntersection.velocity = saturate(length(previousPositionWS - fragInput.positionRWS));
-    rayIntersection.color.x = 0;
+    // rayIntersection.color.x = 0;
 }
 
 // Generic function that handles the reflection code
 [shader("anyhit")]
 void AnyHitMain(inout RayIntersectionVisibility rayIntersection : SV_RayPayload, AttributeData attributeData : SV_IntersectionAttributes)
 {
-    rayIntersection.color.x = 0;
-    IgnoreHit();
+    rayIntersection.t = RayTCurrent();
+    rayIntersection.color = float3(0.0, 0.0, 0.0);
+    AcceptHitAndEndSearch();
 }
+
+
 
 #endif /* RAYTRACING_SHADERPASS_VISIBILITY_INCLUDED */

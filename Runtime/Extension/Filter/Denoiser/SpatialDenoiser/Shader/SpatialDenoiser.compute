@@ -110,7 +110,8 @@ void BILATERAL_FILTER(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 groupT
     #endif
 
     // Compute the radius of the filter. This is evaluated as the max between a fixed radius value and an approximation of the footprint of the pixel
-    const float denoisingRadius = ComputeMaxReprojectionWorldRadius(center.position, center.normal, _PixelSpreadAngleTangent, ComputeMaxDenoisingRadius(center.position), PIXEL_RADIUS_TOLERANCE_THRESHOLD);
+    const float denoisingRadius = ComputeMaxReprojectionWorldRadius(center.position , center.normal, _PixelSpreadAngleTangent, ComputeMaxDenoisingRadius(
+                                                                        center.position - GetCurrentViewPosition()), PIXEL_RADIUS_TOLERANCE_THRESHOLD);
 
     // Compute the sigma value
     const float sigma = 0.9 * denoisingRadius;
@@ -129,7 +130,7 @@ void BILATERAL_FILTER(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 groupT
     for (uint sampleIndex = 0; sampleIndex < (uint)numSamples; ++sampleIndex)
     {
         // Fetch the noise value for the current sample
-        float2 newSample = _PointDistribution[sampleIndex + sampleOffset] * denoisingRadius;
+        float2 newSample = _PointDistribution[sampleIndex + sampleOffset] * denoisingRadius*0.2;
 
         // Convert the point to hemogenous clip space
         float3 wsPos = center.position + localToWorld[0] * newSample.x + localToWorld[1] * newSample.y;

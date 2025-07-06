@@ -18,7 +18,7 @@ struct NormalData
 TEXTURE2D_X(_NormalBufferTexture);
 
 
-void DecodeFromNormalBuffer(float4 normalBuffer, out NormalData normalData)
+void DecodeFromUnpackedNormal(float4 normalBuffer, out NormalData normalData)
 {
     float3 packNormalWS = normalBuffer.rgb;
     normalData.normalWS = UnpackGBufferNormal(packNormalWS);
@@ -28,7 +28,7 @@ void DecodeFromNormalBuffer(float4 normalBuffer, out NormalData normalData)
 void DecodeFromNormalBuffer(uint2 positionSS, out NormalData normalData)
 {
     float4 normalBuffer = LOAD_TEXTURE2D_X(_NormalBufferTexture, positionSS);
-    DecodeFromNormalBuffer(normalBuffer, normalData);
+    DecodeFromUnpackedNormal(normalBuffer, normalData);
 }
 
 

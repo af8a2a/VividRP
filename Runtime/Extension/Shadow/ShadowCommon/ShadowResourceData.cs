@@ -7,12 +7,14 @@ namespace UnityEngine.Rendering.Universal
     {
         public TextureHandle directionalShadowsTexture;
         public TextureHandle perObjectShadowTexture;
+        public TextureHandle screenSpaceShadowmapTex;
 
 
         public override void Reset()
         {
             directionalShadowsTexture = TextureHandle.nullHandle;
             perObjectShadowTexture = TextureHandle.nullHandle;
+            screenSpaceShadowmapTex = TextureHandle.nullHandle;
         }
     }
 }

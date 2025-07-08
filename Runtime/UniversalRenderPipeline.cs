@@ -353,6 +353,7 @@ namespace UnityEngine.Rendering.Universal
             
             #region Extension
             PreIntegratedFGD.instance.Cleanup(PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse);
+
             IBLFilterGGX.Clean();
             SkySystem.ClearAll();
             BlueNoiseSystem.ClearAll();

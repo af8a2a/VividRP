@@ -75,8 +75,8 @@
 
 		[Title(MinMaxSlider Samples)]
 		[MinMaxSlider(_rangeStart, _rangeEnd)] _minMaxSlider ("Min Max Slider (0 - 1)", Range(0.0, 1.0)) = 1.0
-		_rangeStart ("Range Start", Range(0.0, 0.5)) = 0.0
-		[PowerSlider(10)] _rangeEnd ("Range End PowerSlider", Range(0.5, 1.0)) = 1.0
+		_rangeStart ("Range Start", Range(0.0, 1)) = 0.0
+		[PowerSlider(10)] _rangeEnd ("Range End PowerSlider", Range(0.0, 1.0)) = 1.0
 		
 		[Title(Button Samples)]
 		[Button(_)] _button0 ("URL Button@URL:https://github.com/JasonMa0012/LWGUI@C# Button@C#:LWGUI.ButtonDrawer.TestMethod(1234, abcd)", Float) = 0

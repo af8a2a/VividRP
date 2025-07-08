@@ -168,6 +168,30 @@ namespace UnityEngine.Rendering.Universal
                     break;
             }
         }
+        /// <summary>
+        /// Bind material textures, global parameters is not recommended. But we have to do this.
+        /// </summary>
+        /// <param name="cmd"></param>
+        /// <param name="index"></param>
+        public void Bind(RasterCommandBuffer cmd, FGDIndex index, TextureHandle texture)
+        {
+            switch (index)
+            {
+                case FGDIndex.FGD_GGXAndDisneyDiffuse:
+                    cmd.SetGlobalTexture(ShaderConstants._PreIntegratedFGD_GGXDisneyDiffuse, texture);
+                    break;
+
+                case FGDIndex.FGD_CharlieAndFabricLambert:
+                    cmd.SetGlobalTexture(ShaderConstants._PreIntegratedFGD_CharlieAndFabric, texture);
+                    break;
+
+                case FGDIndex.FGD_Marschner:
+                    cmd.SetGlobalTexture(ShaderConstants._PreIntegratedFGD_CharlieAndFabric, texture);
+                    break;
+                default:
+                    break;
+            }
+        }
 
         /// <summary>
         /// Bind material textures.

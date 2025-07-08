@@ -105,6 +105,8 @@ Light GetMainLight(float4 shadowCoord)
 {
     Light light = GetMainLight();
     light.shadowAttenuation = MainLightRealtimeShadow(shadowCoord);
+    light.shadowScatter = MainLightShadowScatter(light.shadowAttenuation * light.distanceAttenuation);
+
     return light;
 }
 

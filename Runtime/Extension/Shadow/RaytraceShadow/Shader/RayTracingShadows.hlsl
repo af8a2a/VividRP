@@ -105,7 +105,7 @@ void SingleRayGen()
         // Create the ray descriptor for this pixel
         RayDesc rayDescriptor;
         rayDescriptor.Origin = posInput.positionWS + normalWS * rayBias * 1.5;
-        rayDescriptor.Direction =wsDir; dirLight.direction;
+        rayDescriptor.Direction =wsDir; ;
         rayDescriptor.TMin = 0.0;
         rayDescriptor.TMax = _RaytracingRayMaxLength;
 

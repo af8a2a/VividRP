@@ -122,8 +122,8 @@ Material:
     - _preset1: 0
     - _preset_toggle: 0
     - _range: 0.42
-    - _rangeEnd: 0.70471865
-    - _rangeStart: 0.20471871
+    - _rangeEnd: 1
+    - _rangeStart: 0.96
     - _textureFloat1: 1
     - _toggle: 0
     - _toggle1: 1
@@ -140,3 +140,4 @@ Material:
     - _textureChannelMask1: {r: 0, g: 0, b: 0, a: 1}
     - _vector1: {r: 1.32, g: 1, b: 1, a: 1}
   m_BuildTextureStacks: []
+  m_AllowLocking: 1

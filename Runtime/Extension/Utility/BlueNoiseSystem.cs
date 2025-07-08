@@ -111,7 +111,6 @@ namespace UnityEngine.Rendering.Universal
             };
         }
 
-
         public BlueNoiseSystem()
         {
         }

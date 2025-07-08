@@ -749,12 +749,7 @@ float GetShadowScatterMode()
 }
 bool GetShadowScatterEnable()
 {
-    float shadowScatterMode = GetShadowScatterMode();
-    if (shadowScatterMode != SHADOWSCATTERMODE_NONE)
-    {
-        return true;
-    }
-    return false;
+   return  GetShadowScatterMode() != SHADOWSCATTERMODE_NONE;
 }
 
 
@@ -783,16 +778,16 @@ half3 MainLightShadowScatter(float shadowAttenuation)
     if (GetShadowScatterEnable())
     {
         float3 shadowTint ;
-
-        if (GetShadowScatterMode() == SHADOWSCATTERMODE_RAMPTEXTURE)
-        {
-            shadowTint = SAMPLE_TEXTURE2D_LOD(_DirShadowRampTexture, sampler_LinearClamp, float2(shadowAttenuation, 0.5), 0).rgb;
-        }
-        else
-        {
-             shadowTint = _DirLightShadowScatterParams.rgb;
+        // UNITY_BRANCH
+        // if (GetShadowScatterMode() == SHADOWSCATTERMODE_RAMPTEXTURE)
+        // {
+        //     shadowTint = SAMPLE_TEXTURE2D_LOD(_DirShadowRampTexture, sampler_LinearClamp, float2(shadowAttenuation, 0.5), 0).rgb;
+        // }
+        // else
+        // {
+        shadowTint = _DirLightShadowScatterParams.rgb;
             
-        }
+        // }
         float3 invTint = 1.0 - shadowTint;
         float shadow = shadowAttenuation;
         float shadow3 = shadow * shadow * shadow;

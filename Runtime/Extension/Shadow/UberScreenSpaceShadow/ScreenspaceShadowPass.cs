@@ -230,7 +230,7 @@ namespace UnityEngine.Rendering.Universal
 
                 builder.SetRenderFunc((PassData data, ComputeGraphContext context) => { ExecutePass(data, context); });
                 builder.SetGlobalTextureAfterPass(passData.screenSpaceShadowmapTex, ShaderConstants._ScreenSpaceShadowmapTexture);
-
+                shadowResource.screenSpaceShadowmapTex = passData.screenSpaceShadowmapTex;
                 return passData.screenSpaceShadowmapTex;
             }
         }

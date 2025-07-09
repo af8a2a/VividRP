@@ -1,4 +1,3 @@
-
 // Depth buffer of the current frame
 Texture2D<float> _DepthTexture;
 
@@ -13,6 +12,7 @@ float sqr(float value)
 {
     return value * value;
 }
+
 float gaussian(float radius, float sigma)
 {
     return exp(-sqr(radius / sigma));
@@ -27,9 +27,12 @@ float gaussian(float radius, float sigma)
 struct BilateralData
 {
     float3 position;
-    float  z01;
-    float  zNF;
+    float z01;
+    float zNF;
     float3 normal;
+    #if defined(BILATERAL_ROUGHNESS)
+    float roughness;
+    #endif
 };
 
 BilateralData TapBilateralData(uint2 coordSS)
@@ -44,7 +47,7 @@ BilateralData TapBilateralData(uint2 coordSS)
         key.zNF = LinearEyeDepth(posInput.deviceDepth, _ZBufferParams);
     }
 
-    
+
     if (PLANE_WEIGHT > 0.0)
     {
         posInput = GetPositionInput(coordSS, _ScreenSize.zw, posInput.deviceDepth, UNITY_MATRIX_I_VP, UNITY_MATRIX_V);
@@ -54,11 +57,12 @@ BilateralData TapBilateralData(uint2 coordSS)
     if ((NORMAL_WEIGHT > 0.0) || (PLANE_WEIGHT > 0.0))
     {
         NormalData normalData;
-        const float4 normalBuffer = LOAD_TEXTURE2D_X(_NormalBufferTexture, coordSS);
-        DecodeFromNormalBuffer(normalBuffer, normalData);
-        
-        key.normal = normalData.normalWS;
+        DecodeFromNormalBuffer(coordSS, normalData);
 
+        key.normal = normalData.normalWS;
+        #ifdef BILATERAL_ROUGHNESS
+        key.roughness =  normalData.perceptualRoughness;
+        #endif
 
     }
 
@@ -78,7 +82,6 @@ BilateralData TapBilateralData(uint2 coordSS, float depthValue)
     }
 
 
-
     if (PLANE_WEIGHT > 0.0)
     {
         posInput = GetPositionInput(coordSS, _ScreenSize.zw, posInput.deviceDepth, UNITY_MATRIX_I_VP, UNITY_MATRIX_V);
@@ -88,8 +91,12 @@ BilateralData TapBilateralData(uint2 coordSS, float depthValue)
     if ((NORMAL_WEIGHT > 0.0) || (PLANE_WEIGHT > 0.0))
     {
         const float4 normalBuffer = LOAD_TEXTURE2D_X(_NormalBufferTexture, coordSS);
-        
-        key.normal = normalBuffer.xyz;
+        NormalData normalData = (NormalData)0;
+        normalData.DecodeFromUnpackedNormal(normalBuffer);
+        key.normal = normalData.normalWS;
+        #ifdef BILATERAL_ROUGHNESS
+        key.roughness =  normalData.perceptualRoughness;
+        #endif
     }
 
 
@@ -98,10 +105,10 @@ BilateralData TapBilateralData(uint2 coordSS, float depthValue)
 
 float ComputeBilateralWeight(BilateralData center, BilateralData tap)
 {
-    float depthWeight    = 1.0;
-    float normalWeight   = 1.0;
-    float planeWeight    = 1.0;
-    float roughnessWeight    = 1.0;
+    float depthWeight = 1.0;
+    float normalWeight = 1.0;
+    float planeWeight = 1.0;
+    float roughnessWeight = 1.0;
 
     if (DEPTH_WEIGHT > 0.0)
     {
@@ -127,8 +134,7 @@ float ComputeBilateralWeight(BilateralData center, BilateralData tap)
         // How far off the expected plane (on the perpendicular) is this point? Max value is unbounded.
         const float planeError = max(abs(dot(dq, tap.normal)), abs(dot(dq, center.normal)));
 
-        planeWeight = (distance2 < 0.0001) ? 1.0 :
-            pow(max(0.0, 1.0 - 2.0 * PLANE_WEIGHT * planeError / sqrt(distance2)), 2.0);
+        planeWeight = (distance2 < 0.0001) ? 1.0 : pow(max(0.0, 1.0 - 2.0 * PLANE_WEIGHT * planeError / sqrt(distance2)), 2.0);
     }
 
     return depthWeight * normalWeight * planeWeight * roughnessWeight;

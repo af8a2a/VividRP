@@ -872,6 +872,8 @@ namespace UnityEngine.Rendering.Universal
         public static readonly int previousViewProjectionNoJitter = Shader.PropertyToID("_PrevViewProjMatrix");
         public static readonly int previousInverseViewProjectionNoJitter = Shader.PropertyToID("_PrevInvViewProjMatrix");
         public static readonly int viewProjectionNoJitter = Shader.PropertyToID("_NonJitteredViewProjMatrix");
+        public static readonly int prevCamPosWS = Shader.PropertyToID("_PrevCamPosWS");
+
 #if ENABLE_VR && ENABLE_XR_MODULE
         public static readonly int previousViewProjectionNoJitterStereo = Shader.PropertyToID("_PrevViewProjMatrixStereo");
         // public static readonly int previousInverseViewProjectionStereo = Shader.PropertyToID("_PrevInvViewProjMatrixStereo");

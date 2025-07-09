@@ -50,7 +50,6 @@
 // Input depth pyramid texture
 TEXTURE2D_X(_DepthTexture);
 TEXTURE2D_X(_ColorPyramidTexture);
-TEXTURE2D_X(_CameraMotionVectorsTexture);
 
 // Input texture that holds the offset for every level of the depth pyramid
 StructuredBuffer<int2>  _DepthPyramidMipLevelOffsets;

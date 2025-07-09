@@ -181,6 +181,16 @@ namespace UnityEngine.Rendering.Universal
         public int scaledHeight => Mathf.Max(1, (int)(camera.pixelHeight * renderScale));
 
 
+        #region Extension
+        //for integrate HDRP Feature ..
+        public int actualWidth => scaledWidth;
+
+        public int actualHeight => scaledHeight;
+
+        #endregion
+
+
+
         // NOTE: This is internal instead of private to allow ref return in the old CameraData compatibility property.
         // We can make this private when it is removed.
         //

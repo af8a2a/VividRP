@@ -273,6 +273,8 @@ namespace UnityEngine.Rendering.Universal
                 cmd.SetGlobalMatrix(ShaderPropertyId.previousViewProjectionNoJitter, previousViewProjectionStereo[passID]);
                 cmd.SetGlobalMatrix(ShaderPropertyId.previousInverseViewProjectionNoJitter, previousViewProjectionStereo[passID].inverse);
                 cmd.SetGlobalMatrix(ShaderPropertyId.viewProjectionNoJitter, viewProjectionStereo[passID]);
+                cmd.SetGlobalVector(ShaderPropertyId.prevCamPosWS, m_previousPreviousWorldSpaceCameraPos);
+
             }
         }
     }

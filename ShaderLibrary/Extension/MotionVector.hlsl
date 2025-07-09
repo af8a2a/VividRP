@@ -1,5 +1,6 @@
 // EncodeMotionVector / DecodeMotionVector code for now, i.e it must do nothing like it is doing currently.
 // Design note: We assume that motion vector/distortion fit into a single buffer (i.e not spread on several buffer)
+TEXTURE2D_X(_CameraMotionVectorsTexture);
 void EncodeMotionVector(float2 motionVector, out float4 outBuffer)
 {
     // RT - 16:16 float

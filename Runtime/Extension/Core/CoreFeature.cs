@@ -54,7 +54,7 @@ namespace UnityEngine.Rendering.Universal
             historyValidityPass.Setup(deferred);
             renderer.EnqueuePass(historyValidityPass);
             
-            // renderer.EnqueuePass(sceneViewMotionVectorPass);
+            renderer.EnqueuePass(sceneViewMotionVectorPass);
         }
     }
 }

@@ -77,7 +77,7 @@ namespace UnityEngine.Rendering.Universal
         }
 
         [SerializeField] [Tooltip("Controls the number of steps used for ray marching.")]
-        private MinIntParameter m_MaxRaySteps = new MinIntParameter(32, 0);
+        private ClampedIntParameter m_MaxRaySteps = new ClampedIntParameter(32, 0,128);
 
         // Filtering
         /// <summary>

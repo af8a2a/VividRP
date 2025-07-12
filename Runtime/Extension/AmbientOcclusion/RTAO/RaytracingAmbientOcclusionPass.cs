@@ -260,9 +260,9 @@ namespace UnityEngine.Rendering.Universal
 
             var volumeSettings = VolumeManager.instance.stack.GetComponent<RaytracingAmbientOcclusion>();
             
-            var spatialDenoiser = DenoiseSystem.instance.spatialDenoiser;
+            var spatialDenoiser = cameraData.denoiseSystem.spatialDenoiser;
 
-            var temporalDenoiser = DenoiseSystem.instance.temporalDenoiser;
+            var temporalDenoiser = cameraData.denoiseSystem.temporalDenoiser;
 
 
 
@@ -285,7 +285,7 @@ namespace UnityEngine.Rendering.Universal
                 resourceData.cameraDepthTexture,
                 resourceData.cameraNormalsTexture,
                 resourceData.motionVectorColor,
-                DenoiseSystem.instance.historyValidity);
+                cameraData.denoiseSystem.historyValidity);
             
             
             SpatialDenoiser.DiffuseDenoiserParameters ddParams;

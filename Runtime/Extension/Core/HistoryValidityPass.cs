@@ -23,9 +23,9 @@ namespace UnityEngine.Rendering.Universal
             var deferred = renderingData.renderingMode is RenderingMode.Deferred;
 
 
-            var temporalFilter = DenoiseSystem.GetTemporalFilter();
+            var temporalFilter = cameraData.denoiseSystem.temporalDenoiser;
 
-            DenoiseSystem.instance.historyValidity = temporalFilter.HistoryValidity(renderGraph, cameraData,
+            cameraData.denoiseSystem.historyValidity = temporalFilter.HistoryValidity(renderGraph, cameraData,
                 deferred ? resourceData.gBuffer[2] : resourceData.cameraNormalsTexture, resourceData.motionVectorColor, resourceData.cameraDepthTexture);
         }
     }

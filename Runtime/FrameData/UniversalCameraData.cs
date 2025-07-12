@@ -659,6 +659,9 @@ namespace UnityEngine.Rendering.Universal
         
         public RayTracingSystem rayTracingSystem => RayTracingSystem.GetOrCreate(camera);
 
+        
+        internal DenoiseSystem denoiseSystem => DenoiseSystem.GetOrCreate(camera);
+
         ///<inheritdoc/>
         public override void Reset()
         {

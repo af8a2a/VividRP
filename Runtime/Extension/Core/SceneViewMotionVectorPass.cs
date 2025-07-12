@@ -23,7 +23,9 @@ namespace UnityEngine.Rendering.Universal
 
         public SceneViewMotionVectorPass()
         {
+            renderPassEvent = RenderPassEvent.AfterRenderingPrePasses;
         }
+            
 
 
         // This class stores the data needed by the pass, passed as parameter to the delegate function that executes the pass
@@ -39,7 +41,10 @@ namespace UnityEngine.Rendering.Universal
             CommandBuffer cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
 
             // Fix scene view motion vectors
-            cmd.SetGlobalMatrix(_PrevViewProjMatrix, data.prevCamVPMatrix);
+            cmd.SetGlobalMatrix(ShaderPropertyId.previousViewProjectionNoJitter, data.prevCamVPMatrix);
+            cmd.SetGlobalMatrix(ShaderPropertyId.previousInverseViewProjectionNoJitter, data.prevCamVPMatrix.inverse);
+            cmd.SetGlobalMatrix(ShaderPropertyId.previousViewProjectionNoJitter, data.prevCamVPMatrix);
+
             cmd.SetGlobalMatrix(_NonJitteredViewProjMatrix, data.camVPMatrix);
         }
 
@@ -54,8 +59,10 @@ namespace UnityEngine.Rendering.Universal
                 // UniversalResourceData contains all the texture handles used by the renderer, including the active color and depth textures
                 // The active color and depth textures are the main color and depth buffers that the camera renders into
                 UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
+                
 
                 var camera = cameraData.camera;
+                
                 if (!cameraData.isSceneViewCamera)
                 {
                     return;

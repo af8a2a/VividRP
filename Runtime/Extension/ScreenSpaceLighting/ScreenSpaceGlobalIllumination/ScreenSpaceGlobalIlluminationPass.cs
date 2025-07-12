@@ -200,11 +200,11 @@ namespace UnityEngine.Rendering.Universal
 
 
                 // Temporary textures
-                passData.hitPointBuffer = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true)
+                passData.hitPointBuffer = builder.CreateTransientTexture(new TextureDesc(cameraData.scaledWidth,cameraData.scaledHeight)
                     { format = GraphicsFormat.R16G16_SFloat, enableRandomWrite = true, name = "SSGI Hit Point" });
 
                 // Output textures
-                passData.outputBuffer = (renderGraph.CreateTexture(new TextureDesc(Vector2.one, true)
+                passData.outputBuffer = (renderGraph.CreateTexture(new TextureDesc(cameraData.scaledWidth,cameraData.scaledHeight)
                     { format = GraphicsFormat.B10G11R11_UFloatPack32, enableRandomWrite = true, name = "SSGI Color" }));
                 builder.UseTexture(passData.outputBuffer, AccessFlags.Write);
 
@@ -311,9 +311,9 @@ namespace UnityEngine.Rendering.Universal
             {
                 // Evaluate the history's validity
                 Vector2 resolutionPercentages = fullResolution ? Vector2.one : new Vector2(0.5f, 0.5f);
-
-                var temporalFilter = DenoiseSystem.GetTemporalFilter();
-                var diffuseDenoiser = DenoiseSystem.GetSpatialDenoiser();
+                var denoiseSystem = DenoiseSystem.GetOrCreate(cameraData.camera);
+                var temporalFilter = denoiseSystem.temporalDenoiser;
+                var diffuseDenoiser = denoiseSystem.spatialDenoiser;
 
                 // Run the temporal denoiser
                 TextureHandle historyBufferHF = renderGraph.ImportTexture(RequestIndirectDiffuseHistoryTextureHF(cameraData));

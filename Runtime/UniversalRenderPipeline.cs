@@ -317,7 +317,6 @@ namespace UnityEngine.Rendering.Universal
             SkySystem.instance.Build(asset);
             IBLFilterGGX.instance.Initialize();
             Hammersley.Initialize();
-            DenoiseSystem.instance.Initialize();
             #endregion
         }
 
@@ -496,6 +495,7 @@ namespace UnityEngine.Rendering.Universal
 
                     HistoryFrameRTSystem.CleanUnused();
                     RayTracingSystem.CleanUnused();
+                    DenoiseSystem.CleanUnused();
                 }
                 
 #if DEVELOPMENT_BUILD || UNITY_EDITOR

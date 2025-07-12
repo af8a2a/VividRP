@@ -3,51 +3,27 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal
 {
-    internal partial class DenoiseSystem : IDisposable
+    internal partial class DenoiseSystem : CameraRelatedSystem<DenoiseSystem>
     {
-        private static Lazy<DenoiseSystem> _instance = new Lazy<DenoiseSystem>(() => new DenoiseSystem());
 
-        public static DenoiseSystem instance => _instance.Value;
+        public SpatialDenoiser spatialDenoiser = new();
 
-        public SpatialDenoiser spatialDenoiser;
-
-        public TemporalFilter temporalDenoiser;
+        public TemporalFilter temporalDenoiser = new();
 
         
         public TextureHandle historyValidity;
         
-        public static SpatialDenoiser GetSpatialDenoiser()
-        {
-            return instance.spatialDenoiser;
-        }
 
 
-        public static TemporalFilter GetTemporalFilter()
-        {
-            return instance.temporalDenoiser;
-        }
-
-
-        public DenoiseSystem()
-        {
-            spatialDenoiser = new SpatialDenoiser();
-            temporalDenoiser = new TemporalFilter();
-        }
-
-
-        public void Initialize()
+        protected override void Initialize(Camera camera)
         {
             spatialDenoiser?.Init();
             temporalDenoiser?.Init();
+            
         }
 
 
-        public static void ClearAll()
-        {
-            instance?.Dispose();
-        }
-
-        public void Dispose()
+        public override void Dispose()
         {
             spatialDenoiser?.Release();
             temporalDenoiser?.Release();

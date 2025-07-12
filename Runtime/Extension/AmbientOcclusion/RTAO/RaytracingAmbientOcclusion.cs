@@ -42,7 +42,7 @@
 
         
         
-        public FloatParameter denoiseRadius = new ClampedFloatParameter(0f, 0, 1f);
+        public FloatParameter denoiseRadius = new ClampedFloatParameter(0f, 0.01f, 1f);
 
         
         

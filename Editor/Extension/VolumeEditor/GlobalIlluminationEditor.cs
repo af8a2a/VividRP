@@ -177,6 +177,8 @@ namespace UnityEditor.Rendering.Universal
 
         void RayMarchModeGUI()
         {
+            PropertyField(m_RaySteps, k_MaxMixedRaySteps);
+
             DenoiserGUI();
         }
 

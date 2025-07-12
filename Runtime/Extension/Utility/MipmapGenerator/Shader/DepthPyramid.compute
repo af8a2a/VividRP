@@ -4,6 +4,7 @@
 #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
 
 #pragma multi_compile_local _ ENABLE_CHECKERBOARD
+#pragma enable_d3d11_debug_symbols
 
 #pragma kernel KDepthDownsample8DualUav KERNEL_NAME=KDepthDownsample8DualUav
 

@@ -97,9 +97,9 @@ namespace UnityEngine.Rendering.Universal
             var volumeSettings = VolumeManager.instance.stack.GetComponent<RaytracingAmbientOcclusion>();
 
 
-            var spatialDenoiser = DenoiseSystem.instance.spatialDenoiser;
+            var spatialDenoiser = cameraData.denoiseSystem.spatialDenoiser;
 
-            var temporalDenoiser = DenoiseSystem.instance.temporalDenoiser;
+            var temporalDenoiser = cameraData.denoiseSystem.temporalDenoiser;
 
 
 
@@ -117,23 +117,11 @@ namespace UnityEngine.Rendering.Universal
                 renderGraph.defaultResources.blackTexture,
                 AOHistory,
                 resourceData.cameraDepthTexture,
-                resourceData.cameraNormalsTexture,
-                resourceData.motionVectorColor,
-                DenoiseSystem.instance.historyValidity);
-
-
-
-
-            aoTexture = temporalDenoiser.Denoise(renderGraph, cameraData,
-                filterParams,
-                aoTexture,
-                resourceData.motionVectorColor,
-                AOHistory,
-                resourceData.cameraDepthTexture,
                 urpRenderer.usesDeferredLighting ? resourceData.cameraNormalsTexture : resourceData.gBuffer[2],
                 resourceData.motionVectorColor,
-                DenoiseSystem.instance.historyValidity);
+                cameraData.denoiseSystem.historyValidity);
 
+            
 
             MipGenerator.instance.CopyColor(renderGraph, frameData, denoisedRTAO, AOHistory);
             

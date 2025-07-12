@@ -190,6 +190,23 @@ namespace UnityEngine.Rendering.Universal
         }
 
 
+        
+        static private UniversalAdditionalCameraData s_DefaultUniversalAdditionalCameraData { get { return ComponentSingleton<UniversalAdditionalCameraData>.instance; } }
+
+        internal static UniversalAdditionalCameraData TryGetAdditionalCameraDataOrDefault(Camera camera)
+        {
+            if (camera == null || camera.Equals(null))
+                return s_DefaultUniversalAdditionalCameraData;
+
+            if (camera.TryGetComponent<UniversalAdditionalCameraData>(out var cameraData))
+            {
+                
+                return cameraData;
+            }
+
+            return camera.gameObject.AddComponent<UniversalAdditionalCameraData>();
+
+        }
 
     }
 }

@@ -126,6 +126,7 @@ namespace UnityEngine.Rendering.Universal
             public TextureHandle historyDepthTexture;
             public TextureHandle historyNormalTexture;
             public TextureHandle validationBuffer;
+            public TextureHandle debugTexture;
         }
 
         
@@ -167,7 +168,11 @@ namespace UnityEngine.Rendering.Universal
                 passData.depthStencilBuffer = depthBuffer;
                 passData.normalBuffer = normalBuffer;
                 passData.motionVectorBuffer = motionVectorBuffer;
-
+                passData.debugTexture = builder.CreateTransientTexture(new TextureDesc(cameraData.scaledWidth, cameraData.scaledHeight)
+                {
+                    enableRandomWrite = true,
+                    format = GraphicsFormat.R32G32B32A32_SFloat
+                });
 
                 // Grab and import the history buffers
                 var historyDepth = camHistoryRTSystem.GetCurrentFrameRT(HistoryFrameType.Depth);
@@ -221,6 +226,8 @@ namespace UnityEngine.Rendering.Universal
                         data.historyNormalTexture);
                     ctx.cmd.SetComputeTextureParam(data.temporalFilterCS, data.validateHistoryKernel, _CameraMotionVectorsTexture,
                         data.motionVectorBuffer);
+                    ctx.cmd.SetComputeTextureParam(data.temporalFilterCS, data.validateHistoryKernel,"_DebugTexture",
+                        data.debugTexture);
 
                     // Bind the constants
                     ctx.cmd.SetComputeFloatParam(data.temporalFilterCS, _PixelSpreadAngleTangent, data.pixelSpreadTangent);

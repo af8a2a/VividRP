@@ -130,7 +130,7 @@ void BILATERAL_FILTER(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 groupT
     for (uint sampleIndex = 0; sampleIndex < (uint)numSamples; ++sampleIndex)
     {
         // Fetch the noise value for the current sample
-        float2 newSample = _PointDistribution[sampleIndex + sampleOffset] * denoisingRadius*0.2;
+        float2 newSample = _PointDistribution[sampleIndex + sampleOffset] * denoisingRadius;
 
         // Convert the point to hemogenous clip space
         float3 wsPos = center.position + localToWorld[0] * newSample.x + localToWorld[1] * newSample.y;

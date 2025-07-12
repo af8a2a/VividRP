@@ -518,6 +518,12 @@ namespace UnityEngine.Rendering.Universal
                 {
                     var camera = cameras[i];
                     bool isLastBaseCamera = i == lastBaseCameraIndex;
+                    // inspector scene view camera will break temporal filter
+                    if (camera.cameraType is CameraType.Preview && isLastBaseCamera)
+                    {
+                        continue;
+                    }
+
                     if (IsGameCamera(camera))
                     {
                         RenderCameraStack(renderContext, camera, isLastBaseCamera);

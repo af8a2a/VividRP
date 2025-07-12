@@ -23,7 +23,7 @@ namespace UnityEngine.Rendering.Universal
 
         public SceneViewMotionVectorPass()
         {
-            renderPassEvent = RenderPassEvent.AfterRenderingPrePasses;
+            renderPassEvent = RenderPassEvent.BeforeRenderingPrePasses;
         }
             
 

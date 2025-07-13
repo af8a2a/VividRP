@@ -8,7 +8,7 @@
 #pragma multi_compile_local _ DEFERRED
 
 #include "XeGTAOCommon.hlsl"
-// #include "Packages/com.deltation.aaaa-rp/ShaderLibrary/GBuffer.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/NormalBuffer.hlsl"
 
 Texture2D g_CameraNormalTexture;
 
@@ -28,7 +28,8 @@ lpfloat3 LoadNormal(int2 pos, GTAOConstants gtaoConstants)
     #if defined(DEFERRED)
     float3 normalWS = UnpackGBufferNormal(SAMPLE_TEXTURE2D_LOD(_GBuffer_Normals, sampler_LinearClamp, (pos + 0.5) * gtaoConstants.ViewportPixelSize, 0).xy);
     #else
-    float3 normalWS = SAMPLE_TEXTURE2D_LOD(g_CameraNormalTexture, sampler_LinearClamp, (pos + 0.5) * gtaoConstants.ViewportPixelSize, 0).xyz;
+    float3 normalWS = UnpackGBufferNormal(
+        SAMPLE_TEXTURE2D_LOD(g_CameraNormalTexture, sampler_LinearClamp, (pos + 0.5) * gtaoConstants.ViewportPixelSize, 0).xyz);
     #endif
     // ReSharper disable once CppRedundantCastExpression
     float3 normalVS = (lpfloat3)TransformWorldToViewNormal(normalWS, true);

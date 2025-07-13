@@ -1031,6 +1031,7 @@ namespace UnityEngine.Rendering.Universal
         public static GlobalKeyword LinearToSRGBConversion;
         public static GlobalKeyword _ENABLE_ALPHA_OUTPUT;
         public static GlobalKeyword ForwardPlus; // Backward compatibility. Deprecated in 6.1.
+        public static GlobalKeyword ScreenSpaceReflection;
 
         // TODO: Move following keywords to Local keywords?
         // https://docs.unity3d.com/ScriptReference/Rendering.LocalKeyword.html
@@ -1143,6 +1144,8 @@ namespace UnityEngine.Rendering.Universal
             ShaderGlobalKeywords.LinearToSRGBConversion = GlobalKeyword.Create(ShaderKeywordStrings.LinearToSRGBConversion);
             ShaderGlobalKeywords._ENABLE_ALPHA_OUTPUT = GlobalKeyword.Create(ShaderKeywordStrings._ENABLE_ALPHA_OUTPUT);
             ShaderGlobalKeywords.ForwardPlus = GlobalKeyword.Create(ShaderKeywordStrings.ForwardPlus); // Backward compatibility. Deprecated in 6.1.
+            ShaderGlobalKeywords.ScreenSpaceReflection = GlobalKeyword.Create(ShaderKeywordStrings.ScreenSpaceReflection);
+
         }
     }
 
@@ -1468,6 +1471,9 @@ namespace UnityEngine.Rendering.Universal
 
         /// <summary> Deprecated keyword. Use ClusterLightLoop instead. </summary>
         internal const string ForwardPlus = "_FORWARD_PLUS"; // Backward compatibility. Deprecated in 6.1.
+        
+        /// <summary> Keyword used for ScreenSpaceReflection.</summary>
+        public const string ScreenSpaceReflection = "_SCREEN_SPACE_REFLECTION";
     }
 
     public sealed partial class UniversalRenderPipeline

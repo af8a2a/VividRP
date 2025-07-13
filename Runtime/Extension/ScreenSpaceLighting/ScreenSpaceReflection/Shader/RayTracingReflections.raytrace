@@ -1,0 +1,3 @@
+#pragma max_recursion_depth 1
+
+#include "RayTracingReflections.hlsl"

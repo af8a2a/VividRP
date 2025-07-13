@@ -454,6 +454,7 @@ namespace UnityEngine.Rendering.Universal
     /// </code>
     /// </example>
     [DisallowMultipleComponent]
+    [ImageEffectAllowedInSceneView]
     [RequireComponent(typeof(Camera))]
     [ExecuteAlways] // NOTE: This is required to get calls to OnDestroy() always. Graphics resources are released in OnDestroy().
     [URPHelpURL("universal-additional-camera-data")]

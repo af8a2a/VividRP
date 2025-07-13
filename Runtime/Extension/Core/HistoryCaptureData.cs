@@ -7,7 +7,7 @@ namespace UnityEngine.Rendering.Universal
     {
         public TextureHandle HistoryColorTexture = TextureHandle.nullHandle;
         public TextureHandle HistoryDepthTexture = TextureHandle.nullHandle;
-        public TextureHandle HisotryNormalTexture = TextureHandle.nullHandle;
+        public TextureHandle HistoryNormalTexture = TextureHandle.nullHandle;
 
         public override void Reset()
         {

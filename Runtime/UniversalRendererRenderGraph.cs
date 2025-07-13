@@ -563,6 +563,7 @@ namespace UnityEngine.Rendering.Universal
                 cameraTargetDescriptor.useMipMap = false;
                 cameraTargetDescriptor.autoGenerateMips = false;
                 cameraTargetDescriptor.depthStencilFormat = GraphicsFormat.None;
+                cameraTargetDescriptor.enableRandomWrite = true;
 
                 RenderingUtils.ReAllocateHandleIfNeeded(ref m_RenderGraphCameraColorHandles[0], cameraTargetDescriptor, FilterMode.Bilinear, TextureWrapMode.Clamp, name: _CameraTargetAttachmentAName);
                 RenderingUtils.ReAllocateHandleIfNeeded(ref m_RenderGraphCameraColorHandles[1], cameraTargetDescriptor, FilterMode.Bilinear, TextureWrapMode.Clamp, name: _CameraTargetAttachmentBName);

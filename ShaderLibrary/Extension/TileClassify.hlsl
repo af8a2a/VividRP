@@ -15,7 +15,7 @@ uint2 DecodeTileIndex(uint encoded)
 
 uint EncodeTileIndex(uint2 tileID)
 {
-    return (unity_StereoEyeIndex << TILE_INDEX_SHIFT_EYE) | (tileID.y << TILE_INDEX_SHIFT_Y) | (tileID.x << TILE_INDEX_SHIFT_X);
+    return  (tileID.y << TILE_INDEX_SHIFT_Y) | (tileID.x << TILE_INDEX_SHIFT_X);
 }
 
 

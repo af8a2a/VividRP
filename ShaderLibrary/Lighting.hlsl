@@ -12,6 +12,10 @@
 TEXTURE2D(_IndirectDiffuseTextureSS);
 #endif
 
+#if defined(_SCREEN_SPACE_REFLECTION)
+TEXTURE2D(_SSRLightingTexture);
+#endif
+
 #if defined(LIGHTMAP_ON)
     #define DECLARE_LIGHTMAP_OR_SH(lmName, shName, index) float2 lmName : TEXCOORD##index
     #define OUTPUT_LIGHTMAP_UV(lightmapUV, lightmapScaleOffset, OUT) OUT.xy = lightmapUV.xy * lightmapScaleOffset.xy + lightmapScaleOffset.zw;

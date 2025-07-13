@@ -83,9 +83,3 @@ void InitializeCharacterBRDFData(SurfaceData surfaceData, out BRDFData brdfData)
 
 
 
-void UpdateLightingHierarchyWeights(inout float hierarchyWeight, inout float weight)
-{
-    float accumulatedWeight = hierarchyWeight + weight;
-    hierarchyWeight = saturate(accumulatedWeight);
-    weight -= saturate(accumulatedWeight - hierarchyWeight);
-}

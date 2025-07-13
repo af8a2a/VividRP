@@ -95,13 +95,13 @@ namespace UnityEngine.Rendering.Universal
             vaild &= ReAllocatedHistoryNormalTextureIfNeeded(camHistoryRTSystem, out var historyNormal);
             historyCaptureData.HistoryColorTexture = renderGraph.ImportTexture(historyColor);
             historyCaptureData.HistoryDepthTexture = renderGraph.ImportTexture(historyDepth);
-            historyCaptureData.HisotryNormalTexture = renderGraph.ImportTexture(historyNormal);
+            historyCaptureData.HistoryNormalTexture = renderGraph.ImportTexture(historyNormal);
 
 
             MipGenerator.instance.CopyColor(renderGraph, frameData, resourceData.activeColorTexture, historyCaptureData.HistoryColorTexture);
             MipGenerator.instance.CopyColor(renderGraph, frameData, resourceData.activeDepthTexture, historyCaptureData.HistoryDepthTexture);
             MipGenerator.instance.CopyColor(renderGraph, frameData, deferred ? resourceData.gBuffer[2] : resourceData.cameraNormalsTexture,
-                historyCaptureData.HisotryNormalTexture);
+                historyCaptureData.HistoryNormalTexture);
 
         }
     }

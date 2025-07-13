@@ -187,7 +187,11 @@ namespace UnityEngine.Rendering.Universal
         {
             UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
             TextureHandle activeColor = resourceData.activeColorTexture;
-            Render(renderGraph, frameData, in activeColor, out _, out _);
+            TextureHandle cameraColorPyramidTexture;
+
+            Render(renderGraph, frameData, in activeColor, out cameraColorPyramidTexture, out _);
+            resourceData.cameraColorPyramidTexture = cameraColorPyramidTexture;
+
         }
 
         // BufferedRTHandleSystem API expects an allocator function. We define it here.

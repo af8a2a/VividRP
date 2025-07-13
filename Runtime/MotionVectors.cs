@@ -203,7 +203,12 @@ namespace UnityEngine.Rendering.Universal
 
             // A camera could be rendered multiple times per frame, only update the view projections if needed
             bool aspectChanged = m_PrevAspectRatio[eyeIndex] != cameraData.aspectRatio;
+            
+#if UNITY_EDITOR
+            if (m_LastFrameIndex[eyeIndex] != frameIndex || aspectChanged || cameraData.cameraType == CameraType.SceneView)
+#else
             if (m_LastFrameIndex[eyeIndex] != frameIndex || aspectChanged)
+#endif
             {
                 bool isPreviousFrameDataInvalid = (m_LastFrameIndex[eyeIndex] == -1) || aspectChanged;
 

@@ -5,7 +5,7 @@ using UnityEngine.Rendering.Universal;
 
 namespace UnityEngine.Rendering.Universal
 {
-    public class ScreenSpaceReflectionPass : ScriptableRenderPass
+    public class ScreenSpaceReflectionMobilePass : ScriptableRenderPass
     {
         const string m_ProfilerTag = "Screen Space Reflection";
 
@@ -26,19 +26,12 @@ namespace UnityEngine.Rendering.Universal
 
         private Material SSRMaterial => material ??= new Material(Shader.Find("ScreenSpaceReflection"));
 
-        public ScreenSpaceReflectionPass()
+        public ScreenSpaceReflectionMobilePass()
         {
-            var setting = VolumeManager.instance.stack.GetComponent<ScreenSpaceReflection>();
-            if (setting == null || !setting.IsActive())
-            {
-                return;
-            }
 
-            renderPassEvent = setting.algorithm == ScreenSpaceReflection.Algorithm.PBRAccumulation
-                ? (setting.accumFactor.value == 0.0f
-                    ? RenderPassEvent.BeforeRenderingPostProcessing
-                    : RenderPassEvent.AfterRenderingPostProcessing)
-                : RenderPassEvent.BeforeRenderingTransparents;
+            renderPassEvent = RenderPassEvent.AfterRenderingPostProcessing;
+
+
         }
 
         class PassData
@@ -53,21 +46,21 @@ namespace UnityEngine.Rendering.Universal
         }
 
 
-        void Setup(ScreenSpaceReflection setting)
+        void Setup(ScreenSpaceReflectionMobile setting)
         {
-            if (setting.quality.value == ScreenSpaceReflection.Quality.Low)
+            if (setting.quality.value == ScreenSpaceReflectionMobile.Quality.Low)
             {
                 SSRMaterial.SetFloat(stepSize, 0.4f);
                 SSRMaterial.SetFloat(stepSizeMultiplier, 1.33f);
                 SSRMaterial.SetFloat(maxStep, 16);
             }
-            else if (setting.quality.value == ScreenSpaceReflection.Quality.Medium)
+            else if (setting.quality.value == ScreenSpaceReflectionMobile.Quality.Medium)
             {
                 SSRMaterial.SetFloat(stepSize, 0.3f);
                 SSRMaterial.SetFloat(stepSizeMultiplier, 1.33f);
                 SSRMaterial.SetFloat(maxStep, 32);
             }
-            else if (setting.quality.value == ScreenSpaceReflection.Quality.High)
+            else if (setting.quality.value == ScreenSpaceReflectionMobile.Quality.High)
             {
                 SSRMaterial.SetFloat(stepSize, 0.2f);
                 SSRMaterial.SetFloat(stepSizeMultiplier, 1.33f);
@@ -83,7 +76,7 @@ namespace UnityEngine.Rendering.Universal
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
-            var setting = VolumeManager.instance.stack.GetComponent<ScreenSpaceReflection>();
+            var setting = VolumeManager.instance.stack.GetComponent<ScreenSpaceReflectionMobile>();
             if (setting == null || !setting.IsActive())
             {
                 return;
@@ -98,7 +91,7 @@ namespace UnityEngine.Rendering.Universal
             desc.useMipMap = false;
 
 
-            if (setting.algorithm == ScreenSpaceReflection.Algorithm.PBRAccumulation)
+            if (setting.algorithm == ScreenSpaceReflectionMobile.Algorithm.PBRAccumulation)
             {
                 RenderTextureDescriptor descHit = desc;
                 descHit.width = (int)setting.resolution.value * (int)(desc.width * 0.25f);
@@ -123,8 +116,8 @@ namespace UnityEngine.Rendering.Universal
 
                 desc.width = (int)setting.resolution.value * (int)(desc.width * 0.25f);
                 desc.height = (int)setting.resolution.value * (int)(desc.height * 0.25f);
-                desc.useMipMap = (setting.mipmapsMode == ScreenSpaceReflection.MipmapsMode.Trilinear);
-                FilterMode filterMode = (setting.mipmapsMode == ScreenSpaceReflection.MipmapsMode.Trilinear)
+                desc.useMipMap = (setting.mipmapsMode == ScreenSpaceReflectionMobile.MipmapsMode.Trilinear);
+                FilterMode filterMode = (setting.mipmapsMode == ScreenSpaceReflectionMobile.MipmapsMode.Trilinear)
                     ? FilterMode.Trilinear
                     : FilterMode.Point;
                 reflectHandle = UniversalRenderer.CreateRenderGraphTexture(renderGraph, desc,
@@ -134,13 +127,13 @@ namespace UnityEngine.Rendering.Universal
                 ConfigureInput(ScriptableRenderPassInput.Depth);
             }
 
-            bool isPbrAccumulation = setting.algorithm == ScreenSpaceReflection.Algorithm.PBRAccumulation;
+            bool isPbrAccumulation = setting.algorithm == ScreenSpaceReflectionMobile.Algorithm.PBRAccumulation;
             if (isPbrAccumulation)
             {
                 SSRMaterial.SetFloat(accumFactor, setting.accumFactor.value);
             }
 
-            if (setting.mipmapsMode == ScreenSpaceReflection.MipmapsMode.Trilinear)
+            if (setting.mipmapsMode == ScreenSpaceReflectionMobile.MipmapsMode.Trilinear)
                 SSRMaterial.EnableKeyword("_SSR_APPROX_COLOR_MIPMAPS");
             else
                 SSRMaterial.DisableKeyword("_SSR_APPROX_COLOR_MIPMAPS");

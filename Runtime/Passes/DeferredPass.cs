@@ -66,6 +66,7 @@ namespace UnityEngine.Rendering.Universal.Internal
             internal UniversalLightData lightData;
             internal UniversalShadowData shadowData;
 
+            internal TextureHandle ssrLightingTexture;
             internal TextureHandle color;
             internal TextureHandle depth;
             internal TextureHandle[] gbuffer;

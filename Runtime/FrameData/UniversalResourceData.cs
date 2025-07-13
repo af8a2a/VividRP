@@ -6,7 +6,7 @@ namespace UnityEngine.Rendering.Universal
     /// <summary>
     /// Class that holds settings related to texture resources.
     /// </summary>
-    public class UniversalResourceData : UniversalResourceDataBase
+    public partial class UniversalResourceData : UniversalResourceDataBase
     {
         /// <summary>
         /// The active color target ID.
@@ -349,6 +349,10 @@ namespace UnityEngine.Rendering.Universal
             _ssaoTexture = TextureHandle.nullHandle;
             _stpDebugView = TextureHandle.nullHandle;
 
+            _cameraColorPyramidTexture = TextureHandle.nullHandle;
+            _cameraDepthPyramidTexture = TextureHandle.nullHandle;
+
+            
             for (int i = 0; i < _gBuffer.Length; i++)
                 _gBuffer[i] = TextureHandle.nullHandle;
 

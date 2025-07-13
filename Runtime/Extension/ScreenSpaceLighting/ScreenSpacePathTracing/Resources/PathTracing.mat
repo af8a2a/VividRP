@@ -13,9 +13,7 @@ Material:
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords:
   - _BACKFACE_TEXTURES
-  - _FP_REFL_PROBE_ATLAS
   - _METHOD_HASHED_RANDOM
-  - _TEMPORAL_ACCUMULATION
   m_InvalidKeywords:
   - _DITHERING_ON
   m_LightmapFlags: 4
@@ -47,13 +45,13 @@ Material:
     - _IGNORE_FORWARD_OBJECTS: 0
     - _MaxBounce: 4
     - _MaxBrightness: 10
-    - _MaxSample: 178
-    - _MaxSteps: 34
+    - _MaxSample: 256
+    - _MaxSteps: 24
     - _RayCount: 1
-    - _Sample: 14
+    - _Sample: 50
     - _Seed: 0
-    - _StepSize: 0.346
-    - _TemporalIntensity: 0.93294
+    - _StepSize: 0.4
+    - _TemporalIntensity: 0.936
     m_Colors: []
   m_BuildTextureStacks: []
   m_AllowLocking: 1

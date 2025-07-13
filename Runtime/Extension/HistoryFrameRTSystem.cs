@@ -304,27 +304,5 @@ namespace UnityEngine.Rendering.Universal
             m_BufferedRTHandleSystem.AllocBuffer(id, (rts, i) => allocator(camera.name, i, rts), bufferCount);
             return m_BufferedRTHandleSystem.GetFrameRT(id, 0);
         }
-
-
-        // Workaround for the Allocator callback so it doesn't allocate memory because of the capture of scaleFactor.
-        internal struct CustomHistoryAllocator
-        {
-            Vector2 scaleFactor;
-            GraphicsFormat format;
-            string name;
-
-            public CustomHistoryAllocator(Vector2 scaleFactor, GraphicsFormat format, string name)
-            {
-                this.scaleFactor = scaleFactor;
-                this.format = format;
-                this.name = name;
-            }
-
-            public RTHandle Allocator(string id, int frameIndex, RTHandleSystem rtHandleSystem)
-            {
-                return rtHandleSystem.Alloc(Vector2.one * scaleFactor, filterMode: FilterMode.Point, colorFormat: format,
-                    useDynamicScale: true, enableRandomWrite: true, name: string.Format("{0}_{1}_{2}", id, name, frameIndex));
-            }
-        }
     }
 }

@@ -457,15 +457,15 @@ namespace UnityEngine.Rendering.Universal
             parameters.shadows = opaqueShadows;
             parameters.characterShadowLayerMask = shadowSettings.characterLayerMask.value;
 
-            //
-            // // Aggregate the ambient occlusion parameters
-            //
-            // // Aggregate the reflections parameters
-            // ScreenSpaceReflection reflSettings = volumeStack.GetComponent<ScreenSpaceReflection>();
-            // bool opaqueReflections = reflSettings.enabled.value;
-            // bool transparentReflections = reflSettings.enabledTransparent.value;
-            // parameters.reflections = ScreenSpaceReflection.RayTracingActive(reflSettings) && (opaqueReflections || transparentReflections);
-            // parameters.reflLayerMask = reflSettings.layerMask.value;
+            
+            // Aggregate the ambient occlusion parameters
+            
+            // Aggregate the reflections parameters
+            ScreenSpaceReflection reflSettings = volumeStack.GetComponent<ScreenSpaceReflection>();
+            bool opaqueReflections = reflSettings.enabled.value;
+            bool transparentReflections = reflSettings.enabledTransparent.value;
+            parameters.reflections = ScreenSpaceReflection.RayTracingActive(reflSettings) && (opaqueReflections || transparentReflections);
+            parameters.reflLayerMask = reflSettings.layerMask.value;
 
             // Aggregate the global illumination parameters
 

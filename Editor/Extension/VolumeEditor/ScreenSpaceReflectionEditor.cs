@@ -41,6 +41,7 @@ namespace UnityEditor.Rendering.Universal
         SerializedDataParameter m_DenoiserRadius;
         SerializedDataParameter m_AffectsSmoothSurfaces;
         SerializedDataParameter m_Mode;
+        SerializedDataParameter m_useNVSER;
 
         // Mixed
         SerializedDataParameter m_RayMaxIterationsRT;
@@ -90,7 +91,7 @@ namespace UnityEditor.Rendering.Universal
             m_DenoiserRadius = Unpack(o.Find(x => x.denoiserRadius));
             m_AffectsSmoothSurfaces = Unpack(o.Find(x => x.affectSmoothSurfaces));
             m_Mode = Unpack(o.Find(x => x.mode));
-
+            m_useNVSER = Unpack(o.Find(x => x.useNVSER));
             // Mixed
             m_RayMaxIterationsRT = Unpack(o.Find(x => x.rayMaxIterationsRT));
 
@@ -201,6 +202,7 @@ namespace UnityEditor.Rendering.Universal
 
                 PropertyField(m_AccumulationFactor, k_AccumulationFactorText);
                 PropertyField(m_BiasFactor, k_BiasFactorText);
+                PropertyField(m_useNVSER);
             }
 
 

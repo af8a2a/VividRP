@@ -55,6 +55,8 @@ namespace UnityEngine.Rendering.Universal
         public float _RayTracingDistantRayBias;
         // Ray Frame Index for reflection signals
         public int _RayTracingReflectionFrameIndex;
+
+        public int _nvSER;
     }
 }
 

@@ -160,6 +160,7 @@ namespace UnityEngine.Rendering.Universal
             // RayTracing
             internal BufferHandle dispatchRayIndirectBuffer;
             internal bool requireRayTracing;
+            internal bool nvSER;
             internal RayTracingShader rtrtShader;
 
             internal RayTracingAccelerationStructure rtas;
@@ -348,6 +349,7 @@ namespace UnityEngine.Rendering.Universal
                 passData.rayTracingCB._RayTracingRayMissUseAmbientProbeAsSky = 0;
                 passData.rayTracingCB._RayTracingLastBounceFallbackHierarchy = 0;
                 passData.rayTracingCB._RayTracingAmbientProbeDimmer = m_volumeSettings.ambientProbeDimmer.value;
+                passData.rayTracingCB._nvSER = m_volumeSettings.useNVSER.value ? 1 : 0;
             }
         }
 

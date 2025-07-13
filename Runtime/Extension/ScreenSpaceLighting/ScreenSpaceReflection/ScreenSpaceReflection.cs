@@ -190,6 +190,16 @@ namespace UnityEngine.Rendering.Universal
         #endregion
 
         #region Ray Tracing
+        
+        /// <summary>
+        /// Controls use NVSER extension.
+        /// </summary>
+        [AdditionalProperty]
+        public BoolParameter useNVSER = new BoolParameter(false);
+
+        
+        
+        
         /// <summary>
         /// Controls which sources are used to fallback on when the traced ray misses.
         /// </summary>

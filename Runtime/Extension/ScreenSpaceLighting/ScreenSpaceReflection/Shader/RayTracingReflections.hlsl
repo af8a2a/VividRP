@@ -44,6 +44,12 @@ RWStructuredBuffer<uint> _DispatchRayCoordBuffer;
 RW_TEXTURE2D(float4, _RayTracingLightingTextureRW);
 RW_TEXTURE2D(float3, _SSRRayInfoTexture);
 
+#define NV_HITOBJECT_USE_MACRO_API
+#define NV_SHADER_EXTN_SLOT u1
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Plugin/NVAPI_SER/nvHLSLExtns.h"
+
+
+
 //--------------------------------------------------------------------------------------------------
 // Helpers
 //--------------------------------------------------------------------------------------------------
@@ -159,38 +165,59 @@ void SingleRayGen()
     float  ConeAngle = rayDirInfo.w;
 
     // Ray
+
+
+
+    RayDesc rayDescriptor;
+    rayDescriptor.Origin = posInput.positionWS + N * rayBias;
+    rayDescriptor.Direction = R;
+    rayDescriptor.TMin = 0.0;
+    rayDescriptor.TMax = _RaytracingRayMaxLength;
+
+    // Create and init the RayIntersection structure for this
+    RayIntersection rayIntersection;
+    rayIntersection.color = float3(0.0, 0.0, 0.0);
+    rayIntersection.t = -1.0;
+    rayIntersection.remainingDepth = 1;
+    rayIntersection.sampleIndex = 0;
+    rayIntersection.pixelCoord = coordSS;
+
+    // In order to achieve filtering for the textures, we need to compute the spread angle of the pixel
+    rayIntersection.cone.spreadAngle = _RaytracingPixelSpreadAngle + roughnessToSpreadAngle(roughness);
+    rayIntersection.cone.width = distanceToCamera * _RaytracingPixelSpreadAngle;
+
+
+    UNITY_BRANCH
+    if (_nvSER)
     {
-        // Create the ray descriptor for this pixel
-        RayDesc rayDescriptor;
-        rayDescriptor.Origin = posInput.positionWS + N * rayBias;
-        rayDescriptor.Direction = R;
-        rayDescriptor.TMin = 0.0;
-        rayDescriptor.TMax = _RaytracingRayMaxLength;
-
-        // Create and init the RayIntersection structure for this
-        RayIntersection rayIntersection;
-        rayIntersection.color = float3(0.0, 0.0, 0.0);
-        rayIntersection.t = -1.0;
-        rayIntersection.remainingDepth = 1;
-        rayIntersection.sampleIndex = 0;
-        rayIntersection.pixelCoord = coordSS;
-
-        // In order to achieve filtering for the textures, we need to compute the spread angle of the pixel
-        rayIntersection.cone.spreadAngle = _RaytracingPixelSpreadAngle + roughnessToSpreadAngle(roughness);
-        rayIntersection.cone.width = distanceToCamera * _RaytracingPixelSpreadAngle;
+        //NVSER useful in Path tracing,but seem no use in only 1 hit ray
+        NvHitObject hitObject;
 
 
-        TraceRay(_RaytracingAccelerationStructure, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, RAYTRACINGRENDERERFLAG_REFLECTION, 0, 1, 0, rayDescriptor, rayIntersection);
+        NvTraceRayHitObject(_RaytracingAccelerationStructure, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, RAYTRACINGRENDERERFLAG_REFLECTION, 0, 1, 0, rayDescriptor,
+                            rayIntersection, hitObject);
 
+        NvReorderThread(hitObject);
 
-        // TODO: Clamp result?
-        // if (rayIntersection.t == _RaytracingRayMaxLength) // sky and rest different?
-        float3 sampleColor = rayIntersection.color;
-
-        // Contribute to the pixel
-        finalColor += sampleColor;
-        rayDepth = rayIntersection.t;
+        NvInvokeHitObject(_RaytracingAccelerationStructure, hitObject, rayIntersection);
     }
+    else
+    {
+        // Evaluate the ray intersection
+        TraceRay(_RaytracingAccelerationStructure, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, RAYTRACINGRENDERERFLAG_REFLECTION, 0, 1, 0, rayDescriptor,
+                 rayIntersection);
+    }
+
+
+    // Create the ray descriptor for this pixel
+    // TODO: Clamp result?
+    // if (rayIntersection.t == _RaytracingRayMaxLength) // sky and rest different?
+    float3 sampleColor = rayIntersection.color;
+
+    // Contribute to the pixel
+    finalColor += sampleColor;
+    rayDepth = rayIntersection.t;
+    
 
 
 

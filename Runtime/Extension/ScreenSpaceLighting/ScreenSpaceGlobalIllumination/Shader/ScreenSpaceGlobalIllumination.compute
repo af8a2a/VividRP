@@ -217,7 +217,7 @@ TEXTURE2D_X(_IndirectDiffuseHitPointTexture);
 // Depth buffer of the previous frame (full resolution)
 TEXTURE2D_X(_HistoryDepthTexture);
 RW_TEXTURE2D(float3, _IndirectDiffuseTextureRW);
-
+float4 _ColorPyramidUvScaleAndLimitPrevFrame;
 // The maximal difference in depth that is considered acceptable to read from the color pyramid
 #define DEPTH_DIFFERENCE_THRESHOLD 0.1
 

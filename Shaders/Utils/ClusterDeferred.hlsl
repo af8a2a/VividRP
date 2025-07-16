@@ -161,7 +161,7 @@ half4 DeferredShadingClustered(Varyings input) : SV_Target
     #if defined(_SCREEN_SPACE_OCCLUSION)
         mainLight.shadowAttenuation *= aoFactor.directAmbientOcclusion;
     #endif
-    mainLight.shadowScatter = MainLightShadowScatter(mainLight.shadowAttenuation * mainLight.distanceAttenuation);
+    mainLight.shadowScatter = EvaluateShadowScatter(mainLight.shadowAttenuation * mainLight.distanceAttenuation);
 
     color += DeferredLightContribution(mainLight, inputData, gBufferData);
 

@@ -7,7 +7,6 @@
 #define TILE_INDEX_SHIFT_EYE (30)
 
 
-
 uint2 DecodeTileIndex(uint encoded)
 {
     return uint2((encoded >> TILE_INDEX_SHIFT_X) & TILE_INDEX_MASK, (encoded >> TILE_INDEX_SHIFT_Y) & TILE_INDEX_MASK);
@@ -15,11 +14,8 @@ uint2 DecodeTileIndex(uint encoded)
 
 uint EncodeTileIndex(uint2 tileID)
 {
-    return  (tileID.y << TILE_INDEX_SHIFT_Y) | (tileID.x << TILE_INDEX_SHIFT_X);
+    return (tileID.y << TILE_INDEX_SHIFT_Y) | (tileID.x << TILE_INDEX_SHIFT_X);
 }
-
-
-
 
 
 uint PackTileCoord(uint2 coord)

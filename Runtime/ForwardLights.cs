@@ -134,10 +134,10 @@ namespace UnityEngine.Rendering.Universal.Internal
                 m_AdditionalLightsLayerMasks = new float[maxLights];
             }
 
+            m_ReflectionProbeManager = ReflectionProbeManager.Create();
             if (m_UseForwardPlus)
             {
                 CreateForwardPlusBuffers();
-                m_ReflectionProbeManager = ReflectionProbeManager.Create();
             }
 
             m_LightCookieManager = initParams.lightCookieManager;
@@ -411,11 +411,12 @@ namespace UnityEngine.Rendering.Universal.Internal
             bool additionalLightsPerVertex = lightData.shadeAdditionalLightsPerVertex;
             using (new ProfilingScope(m_ProfilingSampler))
             {
+#if false
                 if (m_UseForwardPlus)
                 {
                     if (lightData.reflectionProbeAtlas)
                     {
-                        m_ReflectionProbeManager.UpdateGpuData(CommandBufferHelpers.GetNativeCommandBuffer(cmd), ref renderingData.cullResults);
+                        // m_ReflectionProbeManager.UpdateGpuData(CommandBufferHelpers.GetNativeCommandBuffer(cmd), ref renderingData.cullResults);
                     }
 
                     using (new ProfilingScope(m_ProfilingSamplerFPComplete))
@@ -435,6 +436,7 @@ namespace UnityEngine.Rendering.Universal.Internal
                     cmd.SetGlobalVector("_FPParams1", math.float4(cameraData.pixelRect.size / m_ActualTileWidth, m_TileResolution.x, m_WordsPerTile));
                     cmd.SetGlobalVector("_FPParams2", math.float4(m_BinCount, m_TileResolution.x * m_TileResolution.y, 0, 0));
                 }
+#endif
 
                 SetupShaderLightConstants(cmd, ref renderingData.cullResults, lightData);
 

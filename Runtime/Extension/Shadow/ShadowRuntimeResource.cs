@@ -4,7 +4,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.Serialization;
 
-namespace Features.Shadow.ScreenSpaceShadow.PCSSShadow
+namespace UnityEngine.Rendering.Universal
 {
     [Serializable]
     [SupportedOnRenderPipeline(typeof(UniversalRenderPipelineAsset))]

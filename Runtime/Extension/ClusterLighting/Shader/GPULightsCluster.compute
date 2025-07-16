@@ -1,0 +1,602 @@
+
+// Definitions
+//--------------------------------------------------------------------------------------------------
+
+// TODO: delete
+// #pragma enable_d3d11_debug_symbols
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal
+// Note that DanbaidongRP don't care with switch platform(which need to handle with PLATFORM_LANE_COUNT).
+
+#pragma kernel ClusterCullingLights      GPULIGHTS_CLUSTERCULLING
+
+//--------------------------------------------------------------------------------------------------
+// Included headers
+//--------------------------------------------------------------------------------------------------
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/UnityInput.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/GPUCulledLights.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/ClusterLighting/GPULights.cs.hlsl"
+#include "GPULightsCullingUtils.hlsl"
+#include "SortingComputeUtils.hlsl"
+
+
+//--------------------------------------------------------------------------------------------------
+// Inputs & outputs
+//--------------------------------------------------------------------------------------------------
+
+StructuredBuffer<float4> g_vBoundsBuffer                : register(t1);
+StructuredBuffer<LightVolumeData> g_LightVolumeData     : register(t2);
+StructuredBuffer<SFiniteLightBound> g_LightBounds       : register(t3);
+StructuredBuffer<uint> g_CoarseLightList                : register(t4);
+
+
+
+
+RWStructuredBuffer<uint> g_vLayeredLightList            : register(u0);
+RWStructuredBuffer<uint> g_LayeredOffset                : register(u1);
+RWStructuredBuffer<uint> g_LayeredSingleIdxBuffer       : register(u2);
+RWStructuredBuffer<float> g_logBaseBuffer               : register(u3);
+
+//--------------------------------------------------------------------------------------------------
+// Helpers
+//--------------------------------------------------------------------------------------------------
+
+//#define EXACT_EDGE_TESTS
+#define PERFORM_SPHERICAL_INTERSECTION_TESTS
+#define CONV_HULL_TEST_ENABLED
+
+#define NR_THREADS              64
+#define MAX_NR_COARSE_ENTRIES   128
+
+//--------------------------------------------------------------------------------------------------
+// Implementation
+//--------------------------------------------------------------------------------------------------
+
+
+groupshared unsigned int gs_coarseList[MAX_NR_COARSE_ENTRIES];
+groupshared unsigned int gs_clusterIdxs[MAX_NR_COARSE_ENTRIES/2];
+groupshared float4 gs_lightPlanes[4*6]; // Each plane is defined by a float4. 6 planes per light, 4 lights (24 planes)
+
+groupshared uint gs_lightOffs;
+
+groupshared int gs_categoryListCountScratch[NR_THREADS * LIGHTCATEGORY_COUNT];
+groupshared int gs_shiftIndexScratch[NR_THREADS * LIGHTCATEGORY_COUNT];
+
+groupshared uint gs_MaxDepth;
+
+#ifdef EXACT_EDGE_TESTS
+groupshared uint gs_ldsIsLightInvisible;
+groupshared uint gs_lightOffs2;
+#endif
+
+#ifdef PERFORM_SPHERICAL_INTERSECTION_TESTS
+groupshared uint gs_lightOffsSph;
+#endif
+
+uint PackClusterLayeredOffset(uint offset, uint count)
+{
+    return (offset & LIGHT_CLUSTER_PACKING_OFFSET_MASK) | (min(count, LIGHT_CLUSTER_PACKING_COUNT_MASK) << LIGHT_CLUSTER_PACKING_OFFSET_BITS);
+}
+
+void ZeroCategoryListCountAndShiftIndex(uint threadIdx)
+{
+    for (int i = 0; i < LIGHTCATEGORY_COUNT; ++i)
+    {
+        gs_categoryListCountScratch[threadIdx * LIGHTCATEGORY_COUNT + i] = 0;
+        gs_shiftIndexScratch[threadIdx * LIGHTCATEGORY_COUNT + i] = 0;
+    }
+}
+
+void WriteShiftIndex(uint threadIdx, uint index, int value)
+{
+    gs_shiftIndexScratch[threadIdx * LIGHTCATEGORY_COUNT + index] = value;
+}
+
+int ReadShiftIndex(uint threadIdx, uint index)
+{
+    return gs_shiftIndexScratch[threadIdx * LIGHTCATEGORY_COUNT + index];
+}
+
+void IncrementCategoryListCount(uint threadIdx, uint index)
+{
+    gs_categoryListCountScratch[threadIdx * LIGHTCATEGORY_COUNT + index]++;
+}
+
+int ReadCategoryListCount(uint threadIdx, uint index)
+{
+    return gs_categoryListCountScratch[threadIdx * LIGHTCATEGORY_COUNT + index];
+}
+
+
+float GetLinearDepth(float2 pixXY, float zDptBufSpace)    // 0 is near 1 is far
+{
+    float4x4 g_mInvScrProjection = g_mInvScrProjectionArr;
+
+#ifdef USE_OBLIQUE_MODE
+    float2 res2 = mul(g_mInvScrProjection, float4(pixXY, zDptBufSpace, 1.0)).zw;
+    return res2.x / res2.y;
+#else
+    // for perspective projection m22 is zero and m23 is +1/-1 (depends on left/right hand proj)
+    // however this function must also work for orthographic projection so we keep it like this.
+    float m22 = g_mInvScrProjection[2].z, m23 = g_mInvScrProjection[2].w;
+    float m32 = g_mInvScrProjection[3].z, m33 = g_mInvScrProjection[3].w;
+
+    return (m22*zDptBufSpace+m23) / (m32*zDptBufSpace+m33);
+#endif
+}
+
+float3 GetViewPosFromLinDepth(float2 v2ScrPos, float fLinDepth)
+{
+    float4x4 g_mScrProjection = g_mScrProjectionArr;
+
+    bool isOrthographic = g_isOrthographic!=0;
+    float fSx = g_mScrProjection[0].x;
+    float fSy = g_mScrProjection[1].y;
+    float fCx = isOrthographic ? g_mScrProjection[0].w : g_mScrProjection[0].z;
+    float fCy = isOrthographic ? g_mScrProjection[1].w : g_mScrProjection[1].z;
+
+#if USE_LEFT_HAND_CAMERA_SPACE
+    bool useLeftHandVersion = true;
+#else
+    bool useLeftHandVersion = isOrthographic;
+#endif
+
+    float s = useLeftHandVersion ? 1 : (-1);
+    float2 p = float2( (s*v2ScrPos.x-fCx)/fSx, (s*v2ScrPos.y-fCy)/fSy);
+
+    return float3(isOrthographic ? p.xy : (fLinDepth*p.xy), fLinDepth);
+}
+
+
+float GetOnePixDiagWorldDistAtDepthOne()
+{
+    float4x4 g_mScrProjection = g_mScrProjectionArr;
+    float fSx = g_mScrProjection[0].x;
+    float fSy = g_mScrProjection[1].y;
+
+    return length( float2(1.0/fSx,1.0/fSy) );
+}
+
+// SphericalIntersectionTests and CullByExactEdgeTests are close to the versions
+// in lightlistbuild-bigtile.compute.  But would need more re-factoring than needed
+// right now.
+#ifdef PERFORM_SPHERICAL_INTERSECTION_TESTS
+int SphericalIntersectionTests(uint threadID, int iNrCoarseLights, float2 screenCoordinate, uint eyeIndex)
+{
+#if USE_LEFT_HAND_CAMERA_SPACE
+    float3 V = GetViewPosFromLinDepth( screenCoordinate, 1.0);
+#else
+    float3 V = GetViewPosFromLinDepth( screenCoordinate, -1.0);
+#endif
+
+    float onePixDiagDist = GetOnePixDiagWorldDistAtDepthOne();
+    float halfTileSizeAtZDistOne = (TILE_SIZE_CLUSTERED/2)*onePixDiagDist;      // scale by half a tile
+
+    for(int l=threadID; l<iNrCoarseLights; l+=NR_THREADS)
+    {
+        const int lightBoundIndex = GenerateLightCullDataIndex(gs_coarseList[l], g_iNrVisibLights, eyeIndex);
+        SFiniteLightBound lgtDat = g_LightBounds[lightBoundIndex];
+
+        if( !DoesSphereOverlapTile(V, halfTileSizeAtZDistOne, lgtDat.center.xyz, lgtDat.radius, g_isOrthographic!=0) )
+            gs_coarseList[l]=UINT_MAX;
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+
+    // to greedy to double buffer gs_coarseList lds on this so serializing removal of gaps.
+    if(threadID==0)
+    {
+        int offs = 0;
+        for(int l=0; l<iNrCoarseLights; l++)
+        {
+            if(gs_coarseList[l]!=UINT_MAX)
+                gs_coarseList[offs++] = gs_coarseList[l];
+        }
+        gs_lightOffsSph = offs;
+    }
+
+
+    GroupMemoryBarrierWithGroupSync();
+
+
+    return gs_lightOffsSph;
+}
+#endif
+
+
+
+
+
+
+
+#ifdef EXACT_EDGE_TESTS
+
+float3 GetTileVertex(uint2 coordBoundLL, uint2 coordBoundUR, int i, float fTileFarPlane)
+{
+    float x = (i&1)==0 ? coordBoundLL.x : coordBoundUR.x;
+    float y = (i&2)==0 ? coordBoundLL.y : coordBoundUR.y;
+    float z = (i&4)==0 ? g_fNearPlane : fTileFarPlane;
+#if !USE_LEFT_HAND_CAMERA_SPACE
+    z = -z;
+#endif
+    return GetViewPosFromLinDepth( float2(x, y), z);
+}
+
+void GetFrustEdge(out float3 vP0, out float3 vE0, const int e0, uint2 coordBoundLL, uint2 coordBoundUR, float fTileFarPlane)
+{
+    int iSection = e0>>2;       // section 0 is side edges, section 1 is near edges and section 2 is far edges
+    int iSwizzle = e0&0x3;
+
+    int i=iSwizzle + (2*(iSection&0x2));    // offset by 4 at section 2
+    vP0 = GetTileVertex(uint2(coordBoundLL.x, coordBoundUR.y), uint2(coordBoundUR.x, coordBoundLL.y), i, fTileFarPlane);
+
+#if USE_LEFT_HAND_CAMERA_SPACE
+    float3 edgeSectionZero = g_isOrthographic==0 ? vP0 : float3(0.0,0.0,1.0);
+#else
+    float3 edgeSectionZero = g_isOrthographic==0 ? vP0 : float3(0.0,0.0,-1.0);
+#endif
+
+    vE0 = iSection == 0 ? edgeSectionZero : (((iSwizzle & 0x2) == 0 ? 1.0f : (-1.0f)) * ((int)(iSwizzle & 0x1) == (iSwizzle >> 1) ? float3(1, 0, 0) : float3(0, 1, 0)));
+}
+
+int CullByExactEdgeTests(uint threadID, int iNrCoarseLights, uint2 coordBoundLL, uint2 coordBoundUR, float fTileFarPlane, uint eyeIndex)
+{
+    if(threadID==0) gs_lightOffs2 = 0;
+
+    const bool bOnlyNeedFrustumSideEdges = true;
+    const int nrFrustEdges = bOnlyNeedFrustumSideEdges ? 4 : 8; // max 8 since we never need to test 4 far edges of frustum since they are identical vectors to near edges and plane is placed at vP0 on light hull.
+
+    const int totNrEdgePairs = 12*nrFrustEdges;
+    for(int l=0; l<iNrCoarseLights; l++)
+    {
+        if(threadID==0) gs_ldsIsLightInvisible=0;
+
+        GroupMemoryBarrierWithGroupSync();
+
+        const int lightCullIndex = GenerateLightCullDataIndex(gs_coarseList[l], g_iNrVisibLights, eyeIndex);
+        UNITY_BRANCH if (g_LightVolumeData[lightCullIndex].lightVolume != LIGHTVOLUMETYPE_SPHERE)        // don't bother doing edge tests for sphere lights since these have camera aligned bboxes.
+        {
+            SFiniteLightBound lgtDat = g_LightBounds[lightCullIndex];
+
+            const float3 boxX = lgtDat.boxAxisX.xyz;
+            const float3 boxY = lgtDat.boxAxisY.xyz;
+            const float3 boxZ = -lgtDat.boxAxisZ.xyz;           // flip axis (so it points away from the light direction for a spot-light)
+            const float3 center = lgtDat.center.xyz;
+            const float2 scaleXY = lgtDat.scaleXY;
+
+            for(int i=threadID; i<totNrEdgePairs; i+=NR_THREADS)
+            {
+                int e0 = (int) (((uint)i)/((uint) nrFrustEdges)); // should become a shift right
+                int e1 = i - e0*nrFrustEdges;
+
+                int idx_cur=0, idx_twin=0;
+                float3 vP0, vE0;
+                GetHullEdge(idx_cur, idx_twin, vP0, vE0, e0, boxX, boxY, boxZ, center, scaleXY);
+
+
+                float3 vP1, vE1;
+                GetFrustEdge(vP1, vE1, e1, coordBoundLL, coordBoundUR, fTileFarPlane);
+
+                // potential separation plane
+                float3 vN = cross(vE0, vE1);
+
+                int positive=0, negative=0;
+                for(int k=1; k<8; k++)      // only need to test 7 verts (technically just 6).
+                {
+                    int j = (idx_cur+k)&0x7;
+                    float3 vPh = GetHullVertex(boxX, boxY, boxZ, center, scaleXY, j);
+                    float fSignDist = idx_twin==j ? 0.0 : dot(vN, vPh-vP0);
+                    if(fSignDist>0) ++positive; else if(fSignDist<0) ++negative;
+                }
+                int resh = (positive>0 && negative>0) ? 0 : (positive>0 ? 1 : (negative>0 ? (-1) : 0));
+
+                positive=0; negative=0;
+                for(int j=0; j<8; j++)
+                {
+                    float3 vPf = GetTileVertex(coordBoundLL, coordBoundUR, j, fTileFarPlane);
+                    float fSignDist = dot(vN, vPf-vP0);
+                    if(fSignDist>0) ++positive; else if(fSignDist<0) ++negative;
+                }
+                int resf = (positive>0 && negative>0) ? 0 : (positive>0 ? 1 : (negative>0 ? (-1) : 0));
+
+                bool bFoundSepPlane = (resh*resf)<0;
+
+                if(bFoundSepPlane) InterlockedOr(gs_ldsIsLightInvisible, 1);
+            }
+        }
+
+        GroupMemoryBarrierWithGroupSync();
+
+        if(threadID==0 && gs_ldsIsLightInvisible==0)
+        {
+            gs_coarseList[gs_lightOffs2++] = gs_coarseList[l];
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    return gs_lightOffs2;
+}
+#endif
+
+
+float4 FetchPlane(int l, int p, uint eyeIndex)
+{
+    const int lightBoundIndex = GenerateLightCullDataIndex(gs_coarseList[l], g_iNrVisibLights, eyeIndex);
+    SFiniteLightBound lgtDat = g_LightBounds[lightBoundIndex];
+
+    const float3 boxX = lgtDat.boxAxisX.xyz;
+    const float3 boxY = lgtDat.boxAxisY.xyz;
+    const float3 boxZ = -lgtDat.boxAxisZ.xyz;           // flip axis (so it points away from the light direction for a spot-light)
+    const float3 center = lgtDat.center.xyz;
+    const float radius = lgtDat.radius;
+    const float2 scaleXY = lgtDat.scaleXY;
+
+    return GetHullPlaneEq(boxX, boxY, boxZ, center, scaleXY, p);
+}
+
+
+// returns 1 for intersection and 0 for none
+bool CheckIntersection(int l, int k, uint2 coordBoundLL, uint2 coordBoundUR, float suggestedBase)
+{
+    // If this light's screen space depth bounds intersect this cluster...simple cluster test
+    unsigned int val = (gs_clusterIdxs[l>>1]>>(16*(l&1)))&0xffff;
+    bool bIsHit = ((val>>0)&0xff)<=((uint) k) && ((uint) k)<=((val>>8)&0xff);
+    if(bIsHit)
+    {
+#ifdef CONV_HULL_TEST_ENABLED
+        float depthAtNearZ = ClusterIdxToZ(k, suggestedBase);
+        float depthAtFarZ = ClusterIdxToZ(k+1, suggestedBase);
+
+        for(int p=0; p<6; p++)
+        {
+            float4 plane = gs_lightPlanes[6*(l&3)+p];
+
+            bool bAllInvisib = true;
+
+            for(int i=0; i<8; i++)
+            {
+                float x = (i&1)==0 ? coordBoundLL.x : coordBoundUR.x;
+                float y = (i&2)==0 ? coordBoundLL.y : coordBoundUR.y;
+                float z = (i&4)==0 ? depthAtNearZ : depthAtFarZ;
+                float3 vP = GetViewPosFromLinDepth( float2(x, y), z);
+
+                // Test each corner of the cluster against the light bounding box planes
+                bAllInvisib = bAllInvisib && dot(plane, float4(vP,1.0))>0;
+            }
+
+            if(bAllInvisib) bIsHit = false;
+        }
+#endif
+    }
+
+    return bIsHit;
+}
+
+// l is the coarse light index, k is the cluster index
+bool CheckIntersectionBasic(int l, int k)
+{
+    unsigned int val = (gs_clusterIdxs[l>>1]>>(16*(l&1)))&0xffff;
+    return ((val>>0)&0xff)<=((uint) k) && ((uint) k)<=((val>>8)&0xff);
+}
+
+
+TEXTURE2D_X_FLOAT(_CameraDepthTexture);
+SAMPLER(sampler_CameraDepthTexture);
+
+
+[numthreads(NR_THREADS, 1, 1)]
+void ClusterCullingLights(uint3 dispatchThreadId : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex, uint3 groupID : SV_GroupID)
+{
+    // (0) Initialize.
+    uint  eyeIndex = groupID.z;
+    uint2 tileID = groupID.xy;
+    uint  groupThreadIndex = groupIndex;
+
+    // Per tile clusters num
+    int nrClusters = (1<<g_iLog2NumClusters);
+
+    // Per dispatch
+    if (dispatchThreadId.x == 0 && dispatchThreadId.y == 0)
+    {
+        g_LayeredSingleIdxBuffer[0] = 0;
+    }
+
+    // Per group
+    if(groupThreadIndex == 0)
+    {
+        gs_lightOffs = 0;
+        gs_MaxDepth = 0;
+    }
+
+    // For bit operations
+    const uint log2TileSize = firstbithigh(TILE_SIZE_CLUSTERED);
+
+    // Screen space coordinates of clustered tile
+    uint2 coordBoundLL = TILE_SIZE_CLUSTERED * tileID;
+    uint2 coordBoundUR = min(coordBoundLL + uint2(TILE_SIZE_CLUSTERED, TILE_SIZE_CLUSTERED), uint2(g_screenSize.x, g_screenSize.y) );       // not width and height minus 1 since coordBoundUR represents the end of the tile corner.
+
+
+    GroupMemoryBarrierWithGroupSync();
+
+
+    // (1) Get tile max depth.
+    float linMaxDepth = 0.0;
+    for(int idx = groupThreadIndex; idx < (TILE_SIZE_CLUSTERED * TILE_SIZE_CLUSTERED); idx += NR_THREADS)
+    {
+        uint2 depthCoord = min(uint2(coordBoundLL.x + (idx & (TILE_SIZE_CLUSTERED - 1)), coordBoundLL.y + (idx >> log2TileSize)), uint2(g_screenSize.x-1, g_screenSize.y-1));
+
+        float rawDepth = LOAD_TEXTURE2D_X(_CameraDepthTexture, depthCoord).x;
+        #if UNITY_REVERSED_Z
+            rawDepth = 1.0 - rawDepth;
+        #endif
+
+        if(rawDepth < VIEWPORT_SCALE_Z)
+        {
+            // Coord center is the current pixel depth.
+            float linDepth = GetLinearDepth(depthCoord + float2(0.5,0.5), rawDepth);
+#if USE_LEFT_HAND_CAMERA_SPACE
+            // linDepth = linDepth;
+#else
+            linDepth = -linDepth;
+#endif
+
+            linMaxDepth = max(linDepth, linMaxDepth);
+        }
+    }
+
+    linMaxDepth = max(linMaxDepth, 0.0);
+    InterlockedMax(gs_MaxDepth, asuint(linMaxDepth));
+
+    GroupMemoryBarrierWithGroupSync();
+    
+    float currTileFarPlane = asfloat(gs_MaxDepth);
+    currTileFarPlane = currTileFarPlane > 0.0 ? currTileFarPlane : g_fFarPlane; // sky pixel
+    float suggestedBase = SuggestLogBase50(currTileFarPlane);
+
+
+
+    // (2) Get Coarse Culling result and build cluster screenSpace list using AABBs.
+    float2 uvBoundLL = float2(coordBoundLL.x / g_screenSize.x, coordBoundLL.y / g_screenSize.y);
+    float2 uvBoundUR = float2(coordBoundUR.x / g_screenSize.x, coordBoundUR.y / g_screenSize.y);
+
+    // build coarse list using AABB
+    const uint log2BigTileToClustTileRatio = firstbithigh(TILE_SIZE_BIG_TILE) - log2TileSize;
+    int NrBigTilesX = (_NumTileClusteredX + ((1 << log2BigTileToClustTileRatio) - 1)) >> log2BigTileToClustTileRatio;
+    int NrBigTilesY = (_NumTileClusteredY + ((1 << log2BigTileToClustTileRatio) - 1)) >> log2BigTileToClustTileRatio;
+    const int bigTileBase = eyeIndex * NrBigTilesX * NrBigTilesY;
+    const int bigTileIdx = bigTileBase + ((tileID.y >> log2BigTileToClustTileRatio) * NrBigTilesX) + (tileID.x >> log2BigTileToClustTileRatio);
+    
+    int nrBigTileLights = g_CoarseLightList[MAX_NR_BIG_TILE_LIGHTS_PLUS_ONE * bigTileIdx + 0];
+    for (int l0 = (int)groupThreadIndex; l0 < (int)nrBigTileLights; l0 += NR_THREADS)
+    {
+        int l = g_CoarseLightList[MAX_NR_BIG_TILE_LIGHTS_PLUS_ONE * bigTileIdx + l0 + 1];
+        const ScreenSpaceBoundsIndices boundsIndices = GenerateScreenSpaceBoundsIndices(l, g_iNrVisibLights, eyeIndex);
+        const float2 vMi = g_vBoundsBuffer[boundsIndices.min].xy;
+        const float2 vMa = g_vBoundsBuffer[boundsIndices.max].xy;
+    
+        if (all(vMa > uvBoundLL) && all(vMi < uvBoundUR))
+        {
+            unsigned int uInc = 1;
+            unsigned int uIndex;
+            InterlockedAdd(gs_lightOffs, uInc, uIndex);
+            if (uIndex < MAX_NR_COARSE_ENTRIES)
+                gs_coarseList[uIndex] = l; // add to light list
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    int iNrCoarseLights = min(gs_lightOffs,MAX_NR_COARSE_ENTRIES);
+
+
+    // (3) Sphere Intersection Test.
+#ifdef PERFORM_SPHERICAL_INTERSECTION_TESTS
+    iNrCoarseLights = SphericalIntersectionTests( groupThreadIndex, iNrCoarseLights, float2(min(coordBoundLL.xy+uint2(TILE_SIZE_CLUSTERED/2,TILE_SIZE_CLUSTERED/2), uint2(g_screenSize.x-1, g_screenSize.y-1))), eyeIndex );
+#endif
+
+    // Not executed currently
+#ifdef EXACT_EDGE_TESTS
+    iNrCoarseLights = CullByExactEdgeTests(groupThreadIndex, iNrCoarseLights, coordBoundLL.xy, coordBoundUR.xy, currTileFarPlane, eyeIndex);
+#endif
+
+
+    // (4) Sort lights
+    SORTLIST(gs_coarseList, iNrCoarseLights, MAX_NR_COARSE_ENTRIES, groupThreadIndex, NR_THREADS);
+
+    // Transform Bounds to clusterID's min max
+    //////////// cell specific code
+    {
+        for (int l = (int)groupThreadIndex; l < ((iNrCoarseLights + 1) >> 1); l += NR_THREADS)
+        {
+            const int l0 = gs_coarseList[2 * l + 0], l1 = gs_coarseList[min(2 * l + 1, iNrCoarseLights - 1)];
+            const ScreenSpaceBoundsIndices l0Bounds = GenerateScreenSpaceBoundsIndices(l0, g_iNrVisibLights, eyeIndex);
+            const ScreenSpaceBoundsIndices l1Bounds = GenerateScreenSpaceBoundsIndices(l1, g_iNrVisibLights, eyeIndex);
+
+            const unsigned int clustIdxMi0 = (const unsigned int)min(255, SnapToClusterIdx(g_vBoundsBuffer[l0Bounds.min].w, suggestedBase));
+            const unsigned int clustIdxMa0 = (const unsigned int)min(255, SnapToClusterIdx(g_vBoundsBuffer[l0Bounds.max].w, suggestedBase));
+            const unsigned int clustIdxMi1 = (const unsigned int)min(255, SnapToClusterIdx(g_vBoundsBuffer[l1Bounds.min].w, suggestedBase));
+            const unsigned int clustIdxMa1 = (const unsigned int)min(255, SnapToClusterIdx(g_vBoundsBuffer[l1Bounds.max].w, suggestedBase));
+            gs_clusterIdxs[l] = (clustIdxMa1 << 24) | (clustIdxMi1 << 16) | (clustIdxMa0 << 8) | (clustIdxMi0 << 0);
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    //////////////////////////////////////////////////////////
+    uint start = 0;
+    int i = (int)groupThreadIndex;
+    int iSpaceAvail = 0;
+    int iSum = 0;
+
+    if (i < nrClusters)
+    {
+        // Each thread checks its respective cluster against all coarse lights for intersection.
+        // At the end, 'iSum' represents the number of lights that intersect this cluster!
+        for (int l = 0; l < iNrCoarseLights; l++)
+        {
+            iSum += (CheckIntersectionBasic(l, i) ? 1 : 0);
+        }
+
+        // We have a limit to the number of lights we will track in a cluster (128). This is how much memory we
+        // want to allocate out of g_LayeredSingleIdxBuffer.
+        iSpaceAvail = min(iSum, MAX_NR_COARSE_ENTRIES); // combined storage for both direct lights and reflection
+        InterlockedAdd(g_LayeredSingleIdxBuffer[0], (uint)iSpaceAvail, start); // alloc list memory
+    }
+
+    // All our cull data are in the same list, but at render time envLights are separated so we need to shift the index
+    // to make it work correctly
+    ZeroCategoryListCountAndShiftIndex(groupThreadIndex);
+
+    WriteShiftIndex(groupThreadIndex, LIGHTCATEGORY_ENV, _EnvLightIndexShift);
+    WriteShiftIndex(groupThreadIndex, LIGHTCATEGORY_DECAL, _DecalIndexShift);
+
+    uint offs = start;
+
+    for (int ll = 0; ll < iNrCoarseLights; ll += 4)
+    {
+        int p = i >> 2;
+        int m = i & 3;
+
+        if (i < 24)
+            gs_lightPlanes[6 * m + p] = FetchPlane(min(iNrCoarseLights - 1, ll + m), p, eyeIndex);
+
+        GroupMemoryBarrierWithGroupSync();
+
+        for (int l = ll; l < min(iNrCoarseLights, (ll + 4)); l++)
+        {
+            if (offs < (start + iSpaceAvail) && i < nrClusters && CheckIntersection(l, i, coordBoundLL.xy, coordBoundUR.xy, suggestedBase))
+            {
+                const int lightVolIndex = GenerateLightCullDataIndex(gs_coarseList[l], g_iNrVisibLights, eyeIndex);
+                uint lightCategory = g_LightVolumeData[lightVolIndex].lightCategory;
+                IncrementCategoryListCount(groupThreadIndex, lightCategory);
+                g_vLayeredLightList[offs++] = gs_coarseList[l] - ReadShiftIndex(groupThreadIndex, lightCategory);
+            }
+        }
+
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+
+    uint localOffs = 0;
+
+    offs = GenerateLayeredOffsetBufferIndex(0, tileID, i, _NumTileClusteredX, _NumTileClusteredY, nrClusters, eyeIndex);
+    for (int category = 0; category < LIGHTCATEGORY_COUNT; category++)
+    {
+        int numLights = ReadCategoryListCount(groupThreadIndex, category);
+        if (i < nrClusters)
+        {
+            g_LayeredOffset[offs] = PackClusterLayeredOffset((start + localOffs), (uint)numLights);
+            offs += (nrClusters * _NumTileClusteredX * _NumTileClusteredY);
+            localOffs += numLights; // use unclamped count for localOffs
+        }
+    }
+
+    const uint logBaseIndex = GenerateLogBaseBufferIndex(tileID, _NumTileClusteredX, _NumTileClusteredY, eyeIndex);
+    if (groupIndex == 0)
+        g_logBaseBuffer[logBaseIndex] = suggestedBase;
+
+}

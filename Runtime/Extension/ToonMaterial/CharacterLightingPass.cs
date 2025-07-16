@@ -128,16 +128,14 @@ namespace UnityEngine.Rendering.Universal
                 UniversalRenderingData renderingData = frameData.Get<UniversalRenderingData>();
                 UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
                 UniversalLightData lightData = frameData.Get<UniversalLightData>();
-                var skyResourceData = frameData.Get<SkyResourceData>();
-                var shadowResourceData = frameData.Get<ShadowResourceData>();
                 passData.cameraData = cameraData;
                 passData.batchLayerMask = uint.MaxValue;
 
-                passData.SSShadowsTexture = shadowResourceData.screenSpaceShadowmapTex;
+                passData.SSShadowsTexture = resourceData.screenSpaceShadowsTexture;
 
                 // Sky Environment
-                passData.ambientProbe = skyResourceData.skyAmbientProbe;
-                passData.reflectProbe = skyResourceData.skyReflectionProbe;
+                passData.ambientProbe = resourceData.skyAmbientProbe;
+                passData.reflectProbe = resourceData.skyReflectionProbe;
                 passData.FGD_GGXAndDisneyDiffuse =
                     PreIntegratedFGD.instance.ImportToRenderGraph(renderGraph, PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse);
 
@@ -146,7 +144,7 @@ namespace UnityEngine.Rendering.Universal
                 TextureHandle depthTarget = resourceData.activeDepthTexture;
                 InitRendererLists(renderGraph, renderingData, cameraData, lightData, ref passData);
 
-                TextureHandle mainShadowsTexture = shadowResourceData.directionalShadowsTexture;
+                TextureHandle mainShadowsTexture = resourceData.directionalShadowsTexture;
                 TextureHandle additionalShadowsTexture = resourceData.additionalShadowsTexture;
 
 

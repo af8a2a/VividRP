@@ -1,9 +1,8 @@
-﻿using UnityEngine;
-using UnityEngine.Rendering;
+﻿
 using UnityEngine.Rendering.RenderGraphModule;
-using UnityEngine.Rendering.Universal;
 
-namespace Features.Shadow.UberScreenSpaceShadow
+
+namespace UnityEngine.Rendering.Universal
 {
     internal class ScreenSpaceShadowsPostPass : ScriptableRenderPass
     {
@@ -42,7 +41,7 @@ namespace Features.Shadow.UberScreenSpaceShadow
             cmd.SetKeyword(ShaderGlobalKeywords.MainLightShadows, receiveShadowsNoCascade);
             cmd.SetKeyword(ShaderGlobalKeywords.MainLightShadowCascades, receiveShadowsCascades);
 
-            cmd.SetGlobalFloat(ShaderIDs._ShadowScatterEnable, passData.pass.ShadowScatterEnable ? 1 : 0);
+            cmd.SetGlobalFloat(ShaderIDs._ShadowScatterEnable, passData.pass.ShadowScatterEnable ? 1f : 0f);
             cmd.SetGlobalFloat(ShaderIDs._DirLightShadowScatterPenumbraOnly, 1);
             Shader.SetGlobalTexture(ShaderIDs._DirShadowRampTexture, passData.pass.shadows.shadowRampTex.value);   
             

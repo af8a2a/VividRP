@@ -4,45 +4,8 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.Serialization;
 
-namespace Features.Shadow.PerObjectShadow
+namespace UnityEngine.Rendering.Universal
 {
-    /// <summary>
-    /// This controls the size of the shadow map texture.
-    /// </summary>
-    public enum ShadowResolution
-    {
-        /// <summary>
-        /// Use this for 256x256 shadow resolution.
-        /// </summary>
-        _256 = 256,
-
-        /// <summary>
-        /// Use this for 512x512 shadow resolution.
-        /// </summary>
-        _512 = 512,
-
-        /// <summary>
-        /// Use this for 1024x1024 shadow resolution.
-        /// </summary>
-        _1024 = 1024,
-
-        /// <summary>
-        /// Use this for 2048x2048 shadow resolution.
-        /// </summary>
-        _2048 = 2048,
-
-        /// <summary>
-        /// Use this for 4096x4096 shadow resolution.
-        /// </summary>
-        _4096 = 4096,
-
-        /// <summary>
-        /// Use this for 8192x8192 shadow resolution.
-        /// </summary>
-        _8192 = 8192,
-    }
-
-
     [Serializable]
     public class PerObjectShadowSettings
     {

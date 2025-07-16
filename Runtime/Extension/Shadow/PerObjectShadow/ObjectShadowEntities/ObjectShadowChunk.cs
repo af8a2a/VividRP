@@ -1,5 +1,4 @@
 using System;
-using Features.Shadow.PerObjectShadow;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine.Jobs;

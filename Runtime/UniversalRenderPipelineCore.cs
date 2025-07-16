@@ -949,7 +949,7 @@ namespace UnityEngine.Rendering.Universal
         public ref bool supportDataDrivenLensFlare => ref frameData.Get<UniversalPostProcessingData>().supportDataDrivenLensFlare;
     }
 
-    internal static class ShaderGlobalKeywords
+    internal static partial class ShaderGlobalKeywords
     {
         public static GlobalKeyword MainLightShadows;
         public static GlobalKeyword MainLightShadowCascades;
@@ -1152,7 +1152,7 @@ namespace UnityEngine.Rendering.Universal
     /// <summary>
     /// Container class for keywords used in URP shaders.
     /// </summary>
-    public static class ShaderKeywordStrings
+    public static partial class ShaderKeywordStrings
     {
         /// <summary> Keyword used for shadows without cascades. </summary>
         public const string MainLightShadows = "_MAIN_LIGHT_SHADOWS";

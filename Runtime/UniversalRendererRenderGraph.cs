@@ -687,6 +687,7 @@ namespace UnityEngine.Rendering.Universal
                 m_DeferredLights.UseFramebufferFetch = renderGraph.nativeRenderPassesEnabled;
                 m_DeferredLights.SetupRenderGraphLights(renderGraph, cameraData, lightData);
             }
+            m_GPULights.SetupRenderGraphLights(renderGraph, renderingData, cameraData, lightData);
         }
 
         // "Raw render" color/depth history.
@@ -797,6 +798,7 @@ namespace UnityEngine.Rendering.Universal
                 OnOffscreenDepthTextureRendering(renderGraph, context, resourceData, cameraData);
                 return;
             }
+            
 
             OnBeforeRendering(renderGraph);
 
@@ -877,7 +879,9 @@ namespace UnityEngine.Rendering.Universal
             UniversalLightData lightData = frameData.Get<UniversalLightData>();
             UniversalShadowData shadowData = frameData.Get<UniversalShadowData>();
 
+#if false
             m_ForwardLights.PreSetup(renderingData, cameraData, lightData);
+#endif
 
             RecordCustomRenderGraphPasses(renderGraph, RenderPassEvent.BeforeRenderingShadows);
 
@@ -896,6 +900,16 @@ namespace UnityEngine.Rendering.Universal
             }
 
             #region Extension
+            {
+                var punctualLightCount = lightData.additionalLightsCount;
+                var reflectionProbes = renderingData.cullResults.visibleReflectionProbes;
+                var reflectionProbeCount = Mathf.Min(reflectionProbes.Length, UniversalRenderPipeline.maxVisibleReflectionProbes);
+                m_GPULightsDataBuildSystem.NewFrame(punctualLightCount + reflectionProbeCount, m_AdditionalLightsShadowCasterPass, m_LightCookieManager);
+                m_GPULightsDataBuildSystem.BuildGPULightList(lightData, cameraData);
+                m_GPULightsDataBuildSystem.BuildEnvLightList(ref reflectionProbes, reflectionProbeCount, cameraData);
+
+                m_GPULights.PreSetup(lightData, cameraData, m_GPULightsDataBuildSystem);
+            }
 
             SkySystem.instance.UpdateEnvironment(renderGraph, frameData, lightData, false, false, false, SkyAmbientMode.Dynamic);
 
@@ -1337,7 +1351,13 @@ namespace UnityEngine.Rendering.Universal
 
                 RecordCustomRenderGraphPasses(renderGraph, RenderPassEvent.AfterRenderingGbuffer, RenderPassEvent.BeforeRenderingDeferredLights);
 
-                m_DeferredPass.Render(renderGraph, frameData, resourceData.activeColorTexture, resourceData.activeDepthTexture, resourceData.gBuffer);
+                // GPULightList
+                m_GPULights.Render(renderGraph, frameData);
+                m_GPULights.RenderSetGlobalSync(renderGraph, frameData);
+
+                m_ClusterDeferredLights.Render(renderGraph, frameData, resourceData.activeColorTexture, resourceData.activeDepthTexture, resourceData.gBuffer);
+
+                // m_DeferredPass.Render(renderGraph, frameData, resourceData.activeColorTexture, resourceData.activeDepthTexture, resourceData.gBuffer);
 
                 RecordCustomRenderGraphPasses(renderGraph, RenderPassEvent.AfterRenderingDeferredLights, RenderPassEvent.BeforeRenderingOpaques);
 
@@ -1696,7 +1716,7 @@ namespace UnityEngine.Rendering.Universal
                 TextureHandle overlayUITexture = resourceData.overlayUITexture;
                 TextureHandle debugScreenTexture = resourceData.debugScreenColor;
 
-                debugHandler.Render(renderGraph, cameraData, debugScreenTexture, overlayUITexture, debugHandlerColorTarget);
+                debugHandler.Render(renderGraph, frameData, cameraData, debugScreenTexture, overlayUITexture, debugHandlerColorTarget);
             }
 
             if (cameraData.resolveFinalTarget)

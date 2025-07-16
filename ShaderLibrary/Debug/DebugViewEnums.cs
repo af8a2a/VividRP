@@ -322,4 +322,39 @@ namespace UnityEngine.Rendering.Universal
         AmbientOcclusion = 0x20,
     }
     #endregion
+
+    #region Cluster Lighting
+
+    
+    /// <summary>
+    /// Tile and Cluster Debug Mode.
+    /// </summary>
+    [GenerateHLSL]
+    public enum DebugTileClusterMode
+    {
+        /// <summary>No Tile and Cluster debug.</summary>
+        None,
+        /// <summary>Display lighting CoarseCulling debug.</summary>
+        CoarseCulling,
+        /// <summary>Display lighting clusters debug. Use depth texture for opaque.</summary>
+        ClusterForOpaque,
+        /// <summary>Display lighting clusters debug. Use specified ID</summary>
+        ClusterForTile,
+        ///// <summary>Display material feautre variants.</summary>
+        //MaterialFeatureVariants
+    }
+
+    /// <summary>
+    /// Cluster debug category
+    /// </summary>
+    [GenerateHLSL]
+    public enum DebugClusterCategory
+    {
+        PunctualLights,
+        ReflectionProbes,
+    }
+
+
+
+    #endregion
 }

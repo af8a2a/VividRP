@@ -1,6 +1,4 @@
-﻿using Features.Shadow.ScreenSpaceShadow.PCSSShadow;
-using Features.Shadow.UberScreenSpaceShadow;
-using UnityEngine.Experimental.Rendering;
+﻿using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal
@@ -81,7 +79,6 @@ namespace UnityEngine.Rendering.Universal
             PassData passData,
             UniversalCameraData cameraData,
             UniversalResourceData resourceData,
-            ShadowResourceData shadowResourceData,
             int historyFramCount)
         {
             var runtimeShaders = GraphicsSettings.GetRenderPipelineSettings<ShadowRuntimeResource>();
@@ -131,7 +128,7 @@ namespace UnityEngine.Rendering.Universal
             passData.dirShadowmapTex = resourceData.mainShadowsTexture;
             passData.screenSpaceShadowmapTex = UniversalRenderer.CreateRenderGraphTexture(renderGraph, desc, "_ScreenSpaceShadowmapTexture", true, Color.white);
             passData.screenSpaceShadowmapSize = new Vector2Int(desc.width, desc.height);
-            passData.perObjectShadowTexture = shadowResourceData.perObjectShadowTexture;
+            passData.perObjectShadowTexture = resourceData.perObjectShadowTexture;
             passData.denoise = settings.shadowDenoise.value;
             // passData.normalGBuffer = resourceData.cameraNormalsTexture; 
         }
@@ -208,10 +205,9 @@ namespace UnityEngine.Rendering.Universal
                 UniversalLightData lightData = frameData.Get<UniversalLightData>();
                 UniversalShadowData shadowData = frameData.Get<UniversalShadowData>();
 
-                var shadowResource = frameData.Get<ShadowResourceData>();
 
                 // Setup passData
-                InitPassData(renderGraph, passData, cameraData, resourceData, shadowResource, historyFramCount);
+                InitPassData(renderGraph, passData, cameraData, resourceData,  historyFramCount);
                 passData.shadowData = shadowData;
                 // Setup builder state
                 builder.UseBuffer(passData.dispatchIndirectBuffer, AccessFlags.ReadWrite);
@@ -230,7 +226,7 @@ namespace UnityEngine.Rendering.Universal
 
                 builder.SetRenderFunc((PassData data, ComputeGraphContext context) => { ExecutePass(data, context); });
                 builder.SetGlobalTextureAfterPass(passData.screenSpaceShadowmapTex, ShaderConstants._ScreenSpaceShadowmapTexture);
-                shadowResource.screenSpaceShadowmapTex = passData.screenSpaceShadowmapTex;
+                resourceData.screenSpaceShadowsTexture = passData.screenSpaceShadowmapTex;
                 return passData.screenSpaceShadowmapTex;
             }
         }

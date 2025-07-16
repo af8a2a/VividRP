@@ -106,6 +106,10 @@ GBufferFragOutput PackGBuffersBRDFData(BRDFData brdfData, InputData inputData, h
     materialFlags |= kMaterialFlagSubtractiveMixedLighting;
     #endif
 
+    #if defined(LIGHTMAP_ON)
+    materialFlags |= kMaterialFlagUseBakedGI;
+    #endif
+
     GBufferFragOutput output;
     output.gBuffer0 = half4(brdfData.albedo.rgb, PackGBufferMaterialFlags(materialFlags));  // diffuse           diffuse         diffuse         materialFlags   (sRGB rendertarget)
     output.gBuffer1 = half4(packedSpecular, occlusion);                                     // metallic/specular specular        specular        occlusion

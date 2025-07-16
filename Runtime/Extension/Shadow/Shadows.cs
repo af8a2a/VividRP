@@ -1,8 +1,4 @@
 ﻿using System;
-using Features.Shadow.ScreenSpaceShadow.PCSSShadow;
-using UnityEngine;
-using UnityEngine.Rendering;
-using UnityEngine.Rendering.Universal;
 
 namespace UnityEngine.Rendering.Universal
 {

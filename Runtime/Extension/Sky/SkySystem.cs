@@ -628,7 +628,7 @@ namespace UnityEngine.Rendering.Universal
             UpdateEnvironment_Internal(renderGraph, frameData, lightData, updateRequired, updateAmbientProbe, staticSky, ambientMode);
 
             // Always inject to renderGraph
-            var resourceData = frameData.GetOrCreate<SkyResourceData>();
+            var resourceData = frameData.Get<UniversalResourceData>();
             resourceData.skyAmbientProbe = renderGraph.ImportBuffer(GetDiffuseAmbientProbeBuffer());
             resourceData.skyReflectionProbe = renderGraph.ImportTexture(GetReflectionTexture());
         }

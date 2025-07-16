@@ -1,11 +1,8 @@
 using System;
 using System.Collections.Generic;
-using UnityEngine;
-using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
-using UnityEngine.Rendering.Universal;
 
-namespace Features.Shadow.PerObjectShadow
+namespace UnityEngine.Rendering.Universal
 {
     internal class PerObjectShadowCasterPass : ScriptableRenderPass
     {

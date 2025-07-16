@@ -246,7 +246,7 @@ Light GetStencilLight(float3 posWS, float2 screen_uv, half4 shadowMask, uint mat
             }
         #endif
     #endif
-    unityLight.shadowScatter = MainLightShadowScatter(unityLight.shadowAttenuation * unityLight.distanceAttenuation);
+    unityLight.shadowScatter = EvaluateShadowScatter(unityLight.shadowAttenuation * unityLight.distanceAttenuation);
 
     return unityLight;
 }

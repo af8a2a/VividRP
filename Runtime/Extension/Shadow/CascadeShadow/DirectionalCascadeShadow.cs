@@ -1,6 +1,4 @@
 ﻿using System;
-using Features.Shadow.ScreenSpaceShadow;
-using Features.Shadow.ScreenSpaceShadow.PCSSShadow;
 using UnityEngine.Rendering.RenderGraphModule;
 
 
@@ -510,7 +508,6 @@ namespace UnityEngine.Rendering.Universal
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
             var resourcesData = frameData.Get<UniversalResourceData>();
-            var shadowResource = frameData.GetOrCreate<ShadowResourceData>();
 
             Setup(frameData.Get<UniversalRenderingData>(),
                 frameData.Get<UniversalCameraData>(),
@@ -518,7 +515,7 @@ namespace UnityEngine.Rendering.Universal
                 frameData.Get<UniversalShadowData>());
 
             resourcesData.mainShadowsTexture = Render(renderGraph, frameData);
-            shadowResource.directionalShadowsTexture = resourcesData.mainShadowsTexture;
+            resourcesData.directionalShadowsTexture = resourcesData.mainShadowsTexture;
         }
 
         public override void OnCameraCleanup(CommandBuffer cmd)

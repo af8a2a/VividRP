@@ -241,6 +241,15 @@ half SampleScreenSpaceShadowmap(float4 shadowCoord)
     return attenuation;
 }
 
+
+float LoadScreenSpaceShadowmap(uint2 coordSS)
+{
+    float attenuation = LOAD_TEXTURE2D(_ScreenSpaceShadowmapTexture, coordSS).x;
+
+    return attenuation;
+}
+
+
 real SampleShadowmapFilteredLowQuality(TEXTURE2D_SHADOW_PARAM(ShadowMap, sampler_ShadowMap), float4 shadowCoord, ShadowSamplingData samplingData)
 {
     // 4-tap hardware comparison
@@ -740,8 +749,8 @@ half BakedShadow(half4 shadowMask, half4 occlusionProbeChannels)
 // CBUFFER_END
 
 
-half        _ShadowScatterEnable;
-bool        _DirLightShadowScatterPenumbraOnly;
+// half        _ShadowScatterEnable;
+half        _DirLightShadowScatterPenumbraOnly;
 
 float GetShadowScatterMode()
 {
@@ -773,27 +782,18 @@ float3 ShadowAcesFilm(float3 x)
 
 //Add
 /// Shadow Scatter
-half3 MainLightShadowScatter(float shadowAttenuation)
+half3 EvaluateShadowScatter(float shadowAttenuation)
 {
     if (GetShadowScatterEnable())
     {
-        float3 shadowTint ;
-        // UNITY_BRANCH
-        // if (GetShadowScatterMode() == SHADOWSCATTERMODE_RAMPTEXTURE)
-        // {
-        //     shadowTint = SAMPLE_TEXTURE2D_LOD(_DirShadowRampTexture, sampler_LinearClamp, float2(shadowAttenuation, 0.5), 0).rgb;
-        // }
-        // else
-        // {
-        shadowTint = _DirLightShadowScatterParams.rgb;
-            
-        // }
+        float3 shadowTint  = _DirLightShadowScatterParams.rgb;
+
         float3 invTint = 1.0 - shadowTint;
         float shadow = shadowAttenuation;
         float shadow3 = shadow * shadow * shadow;
         float3 shadowColor = lerp(1.0 - (1.0 - shadow) * invTint,
                                   shadow3 * invTint + shadow * shadowTint,
-                                  _DirLightShadowScatterPenumbraOnly);   
+                                  _DirLightShadowScatterPenumbraOnly);
 
         shadowColor = LerpWhiteTo(shadowColor, GetMainLightShadowParams().x);
         return shadowColor;

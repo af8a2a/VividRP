@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using Features.Shadow.PerObjectShadow;
 using Unity.Collections;
 using UnityEngine.Assertions;
 using UnityEngine.Jobs;

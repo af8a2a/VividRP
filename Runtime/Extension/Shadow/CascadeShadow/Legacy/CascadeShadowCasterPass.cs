@@ -3,7 +3,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Rendering.Universal;
 
-namespace Features.Shadow.CascadeShadow
+namespace UnityEngine.Rendering.Universal
 {
     /// <summary>
     /// Renders a shadow map for the main Light.

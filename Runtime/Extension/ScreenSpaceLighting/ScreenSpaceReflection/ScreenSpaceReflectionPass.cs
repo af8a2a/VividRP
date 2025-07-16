@@ -498,7 +498,6 @@ namespace UnityEngine.Rendering.Universal
                 // Access resources.
                 UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
                 UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
-                var skydata = frameData.Get<SkyResourceData>();
 
                 // Ray Tracing
                 passData.requireRayTracing = cameraData.rayTracingSystem.GetRayTracingState();
@@ -543,8 +542,8 @@ namespace UnityEngine.Rendering.Universal
                 }
                 // Sky Environment
                 {
-                    passData.ambientProbe = skydata.skyAmbientProbe;
-                    passData.reflectProbe = skydata.skyReflectionProbe;
+                    passData.ambientProbe = resourceData.skyAmbientProbe;
+                    passData.reflectProbe = resourceData.skyReflectionProbe;
 
                     builder.UseBuffer(passData.ambientProbe);
                     builder.UseTexture(passData.reflectProbe);

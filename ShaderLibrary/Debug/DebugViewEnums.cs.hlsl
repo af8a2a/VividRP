@@ -5,6 +5,12 @@
 #ifndef DEBUGVIEWENUMS_CS_HLSL
 #define DEBUGVIEWENUMS_CS_HLSL
 //
+// UnityEngine.Rendering.Universal.DebugClusterCategory:  static fields
+//
+#define DEBUGCLUSTERCATEGORY_PUNCTUAL_LIGHTS (0)
+#define DEBUGCLUSTERCATEGORY_REFLECTION_PROBES (1)
+
+//
 // UnityEngine.Rendering.Universal.DebugFullScreenMode:  static fields
 //
 #define DEBUGFULLSCREENMODE_NONE (0)
@@ -103,6 +109,14 @@
 #define DEBUGSCENEOVERRIDEMODE_WIREFRAME (2)
 #define DEBUGSCENEOVERRIDEMODE_SOLID_WIREFRAME (3)
 #define DEBUGSCENEOVERRIDEMODE_SHADED_WIREFRAME (4)
+
+//
+// UnityEngine.Rendering.Universal.DebugTileClusterMode:  static fields
+//
+#define DEBUGTILECLUSTERMODE_NONE (0)
+#define DEBUGTILECLUSTERMODE_COARSE_CULLING (1)
+#define DEBUGTILECLUSTERMODE_CLUSTER_FOR_OPAQUE (2)
+#define DEBUGTILECLUSTERMODE_CLUSTER_FOR_TILE (3)
 
 //
 // UnityEngine.Rendering.Universal.DebugValidationMode:  static fields

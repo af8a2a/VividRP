@@ -178,7 +178,7 @@ CBUFFER_END
 #endif
 #endif
 
-#if USE_CLUSTER_LIGHT_LOOP
+#if defined( USE_CLUSTER_LIGHT_LOOP)||defined(_GPU_LIGHTS_CLUSTER)
 
 CBUFFER_START(urp_ZBinBuffer)
         float4 urp_ZBins[MAX_ZBIN_VEC4S];

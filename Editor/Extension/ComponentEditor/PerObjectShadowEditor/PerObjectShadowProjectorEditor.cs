@@ -1,6 +1,3 @@
-using Features.Shadow.PerObjectShadow;
-using UnityEditor;
-using UnityEditor.Rendering;
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
 

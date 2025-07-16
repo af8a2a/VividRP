@@ -1,9 +1,5 @@
-﻿using Features.Shadow;
-using UnityEditor;
-using UnityEditor.Rendering;
-using UnityEditorInternal;
+﻿using UnityEditorInternal;
 using UnityEngine;
-using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
 namespace UnityEditor.Rendering.Universal

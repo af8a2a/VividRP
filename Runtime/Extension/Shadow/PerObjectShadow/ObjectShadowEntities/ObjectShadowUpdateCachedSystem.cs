@@ -1,4 +1,3 @@
-using Features.Shadow.PerObjectShadow;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;

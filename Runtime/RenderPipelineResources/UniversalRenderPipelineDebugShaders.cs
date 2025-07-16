@@ -88,5 +88,21 @@ namespace UnityEngine.Rendering.Universal
             get => m_ProbeVolumeSamplingDebugComputeShader;
             set => this.SetValueAndNotify(ref m_ProbeVolumeSamplingDebugComputeShader, value, nameof(m_ProbeVolumeSamplingDebugComputeShader));
         }
+        
+        
+        [SerializeField]
+        [ResourcePath("Shaders/Debug/DebugViewTiles.shader")]
+        Shader m_TileClusterDebugPS;
+
+        /// <summary>
+        /// Debug shader used to show tile and cluster.
+        /// </summary>
+        public Shader tileClusterDebugPS
+        {
+            get => m_TileClusterDebugPS;
+            set => this.SetValueAndNotify(ref m_TileClusterDebugPS, value, nameof(m_HdrDebugViewPS));
+        }
+
+
     }
 }

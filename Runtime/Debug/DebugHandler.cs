@@ -75,8 +75,12 @@ namespace UnityEngine.Rendering.Universal
 
         readonly Material m_ReplacementMaterial;
         readonly Material m_HDRDebugViewMaterial;
+        readonly Material m_TileClusterDebugMaterial;
 
         HDRDebugViewPass m_HDRDebugViewPass;
+        TileClusterDebugPass m_TileClusterDebugPass;
+
+        
         RTHandle m_DebugScreenColorHandle;
         RTHandle m_DebugScreenDepthHandle;
 
@@ -133,6 +137,8 @@ namespace UnityEngine.Rendering.Universal
         internal ref RTHandle DebugScreenDepthHandle => ref m_DebugScreenDepthHandle;
         internal HDRDebugViewPass hdrDebugViewPass => m_HDRDebugViewPass;
 
+        internal TileClusterDebugPass tileClusterDebugPass => m_TileClusterDebugPass;
+
         internal bool HDRDebugViewIsActive(bool resolveFinalTarget)
         {
             // HDR debug views should only apply to the last camera in the stack
@@ -172,9 +178,12 @@ namespace UnityEngine.Rendering.Universal
             {
                 m_ReplacementMaterial = (shaders.debugReplacementPS != null) ? CoreUtils.CreateEngineMaterial(shaders.debugReplacementPS) : null;
                 m_HDRDebugViewMaterial = (shaders.hdrDebugViewPS != null) ? CoreUtils.CreateEngineMaterial(shaders.hdrDebugViewPS) : null;
+                m_TileClusterDebugMaterial = (shaders.tileClusterDebugPS != null) ? CoreUtils.CreateEngineMaterial(shaders.tileClusterDebugPS) : null;
             }
 
             m_HDRDebugViewPass = new HDRDebugViewPass(m_HDRDebugViewMaterial);
+            m_TileClusterDebugPass = new TileClusterDebugPass(m_TileClusterDebugMaterial);
+
 
             m_RuntimeTextures = GraphicsSettings.GetRenderPipelineSettings<UniversalRenderPipelineRuntimeTextures>();
             if (m_RuntimeTextures != null)
@@ -194,6 +203,8 @@ namespace UnityEngine.Rendering.Universal
             m_debugDisplayConstant.Dispose();
             CoreUtils.Destroy(m_HDRDebugViewMaterial);
             CoreUtils.Destroy(m_ReplacementMaterial);
+            CoreUtils.Destroy(m_TileClusterDebugMaterial);
+
         }
 
         internal bool IsActiveForCamera(bool isPreviewCamera)
@@ -545,6 +556,27 @@ namespace UnityEngine.Rendering.Universal
                 {
                     Setup(context.cmd, data);
                 });
+            }
+        }
+        
+        internal bool TileClusterDebugIsActive(bool resolveFinalTarget)
+        {
+            // TileC luster debug views should only apply to the last camera in the stack
+            return DebugDisplaySettings.lightingSettings.tileClusterDebugMode != DebugTileClusterMode.None && resolveFinalTarget;
+        }
+
+
+        [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
+        internal void Render(RenderGraph renderGraph, ContextContainer frameData, UniversalCameraData cameraData, TextureHandle srcColor, TextureHandle overlayTexture, TextureHandle dstColor)
+        {
+            if (IsActiveForCamera(cameraData.isPreviewCamera) && HDRDebugViewIsActive(cameraData.resolveFinalTarget))
+            {
+                m_HDRDebugViewPass.RenderHDRDebug(renderGraph, cameraData, srcColor, overlayTexture, dstColor, LightingSettings.hdrDebugMode);
+            }
+
+            if (IsActiveForCamera(cameraData.isPreviewCamera) && TileClusterDebugIsActive(cameraData.resolveFinalTarget))
+            {
+                m_TileClusterDebugPass.RenderTileClusterDebug(renderGraph, frameData, cameraData, LightingSettings.tileClusterDebugMode, LightingSettings.clusterDebugID, LightingSettings.clusterCategoryDebugMode);
             }
         }
 

@@ -5,7 +5,7 @@
 #ifndef RAYMARCHINGFALLBACKHIERARCHY_CS_HLSL
 #define RAYMARCHINGFALLBACKHIERARCHY_CS_HLSL
 //
-// UnityEngine.Rendering.HighDefinition.RayMarchingFallbackHierarchy:  static fields
+// UnityEngine.Rendering.Universal.RayMarchingFallbackHierarchy:  static fields
 //
 #define RAYMARCHINGFALLBACKHIERARCHY_REFLECTION_PROBES_AND_SKY (3)
 #define RAYMARCHINGFALLBACKHIERARCHY_REFLECTION_PROBES (2)

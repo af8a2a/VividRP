@@ -65,6 +65,11 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         public bool supportsAdditionalLights;
 
+        /// <summary>
+        /// The number of directional lights visible by the camera.
+        /// </summary>
+        public int directionalLightsCount;
+
         /// <inheritdoc/>
         public override void Reset()
         {
@@ -78,6 +83,8 @@ namespace UnityEngine.Rendering.Universal
             reflectionProbeBlending = false;
             supportsLightLayers = false;
             supportsAdditionalLights = false;
+
+            directionalLightsCount = 0;
         }
     }
 }

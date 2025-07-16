@@ -12,6 +12,7 @@
 #define kMaterialFlagSpecularHighlightsOff    2 // Does not receive specular
 #define kMaterialFlagSubtractiveMixedLighting 4 // The geometry uses subtractive mixed lighting
 #define kMaterialFlagSpecularSetup            8 // Lit material use specular setup instead of metallic setup
+#define kMaterialFlagUseBakedGI               16 // The geometry uses baked GlobalIllumination, so we don't need to add env ambient to result in DefferredLighting.
 
 // GBuffer feature macros. Deduced from active keywords:
 

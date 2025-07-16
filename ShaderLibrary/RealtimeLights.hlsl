@@ -105,7 +105,7 @@ Light GetMainLight(float4 shadowCoord)
 {
     Light light = GetMainLight();
     light.shadowAttenuation = MainLightRealtimeShadow(shadowCoord);
-    light.shadowScatter = MainLightShadowScatter(light.shadowAttenuation * light.distanceAttenuation);
+    light.shadowScatter = EvaluateShadowScatter(light.shadowAttenuation * light.distanceAttenuation);
 
     return light;
 }
@@ -115,7 +115,7 @@ Light GetMainLight(float4 shadowCoord, float3 positionWS, half4 shadowMask)
     Light light = GetMainLight();
     light.shadowAttenuation = MainLightShadow(shadowCoord, positionWS, shadowMask, _MainLightOcclusionProbes);
     //Add
-    light.shadowScatter = MainLightShadowScatter(light.shadowAttenuation * light.distanceAttenuation);
+    light.shadowScatter = EvaluateShadowScatter(light.shadowAttenuation * light.distanceAttenuation);
     
     #if defined(_LIGHT_COOKIES)
         real3 cookieColor = SampleMainLightCookie(positionWS);

@@ -1,5 +1,4 @@
-﻿using Features.Shadow.UberScreenSpaceShadow;
-
+﻿
 namespace UnityEngine.Rendering.Universal
 {
     [DisallowMultipleRendererFeature("Screen Space Shadow")]

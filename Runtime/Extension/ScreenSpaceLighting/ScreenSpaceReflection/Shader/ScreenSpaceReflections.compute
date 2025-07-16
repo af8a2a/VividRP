@@ -56,7 +56,7 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/GlobalIllumination.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/Sampling.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/Material.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/Environment/Sky.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/Environment/Environment.hlsl"
 
 #endif
 

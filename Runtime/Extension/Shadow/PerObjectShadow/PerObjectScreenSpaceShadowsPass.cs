@@ -1,10 +1,7 @@
-using UnityEngine;
 using UnityEngine.Experimental.Rendering;
-using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
-using UnityEngine.Rendering.Universal;
 
-namespace Features.Shadow.PerObjectShadow
+namespace UnityEngine.Rendering.Universal
 {
     internal class PerObjectScreenSpaceShadowsPass : ScriptableRenderPass
     {
@@ -135,7 +132,6 @@ namespace Features.Shadow.PerObjectShadow
                 UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
                 UniversalShadowData shadowData = frameData.Get<UniversalShadowData>();
                 UniversalLightData lightData = frameData.Get<UniversalLightData>();
-                var shadowResource = frameData.Get<ShadowResourceData>();
 
                 int shadowLightIndex = lightData.mainLightIndex;
                 if (shadowLightIndex == -1)
@@ -184,7 +180,7 @@ namespace Features.Shadow.PerObjectShadow
                     CoreUtils.SetKeyword(context.cmd, "_PEROBJECT_SCREEN_SPACE_SHADOW", true);
                     context.cmd.DrawRendererList(data.rendererListHandle);
                 });
-                shadowResource.perObjectShadowTexture = screenSpaceShadowMapTexture;
+                resourceData.perObjectShadowTexture = screenSpaceShadowMapTexture;
             }
 
         }

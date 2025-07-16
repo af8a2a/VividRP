@@ -3,7 +3,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
 
-namespace Features.Shadow.PerObjectShadow
+namespace UnityEngine.Rendering.Universal
 {
     /// <summary>
     /// PerObjectShadow Projector component.

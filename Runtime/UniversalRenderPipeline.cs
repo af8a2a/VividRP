@@ -1,6 +1,7 @@
 using System;
 using Unity.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -11,6 +12,7 @@ using Lightmapping = UnityEngine.Experimental.GlobalIllumination.Lightmapping;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Profiling;
+using UnityEngine.Rendering.Universal.Internal;
 using static UnityEngine.Camera;
 
 namespace UnityEngine.Rendering.Universal
@@ -352,7 +354,6 @@ namespace UnityEngine.Rendering.Universal
             
             #region Extension
             PreIntegratedFGD.instance.Cleanup(PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse);
-
             IBLFilterGGX.Clean();
             SkySystem.ClearAll();
             BlueNoiseSystem.ClearAll();
@@ -1896,6 +1897,7 @@ namespace UnityEngine.Rendering.Universal
             UniversalLightData lightData = frameData.Create<UniversalLightData>();
 
             lightData.mainLightIndex = GetMainLightIndex(settings, visibleLights);
+            lightData.directionalLightsCount  = visibleLights.Count(light => light.lightType is LightType.Directional);
 
             if (settings.additionalLightsRenderingMode != LightRenderingMode.Disabled)
             {

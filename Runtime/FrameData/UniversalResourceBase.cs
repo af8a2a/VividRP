@@ -98,5 +98,36 @@ namespace UnityEngine.Rendering.Universal
 
             return isAccessible;
         }
+        
+        
+        
+        
+        /// <summary>
+        /// Updates the buffer handle if the buffer is accessible.
+        /// </summary>
+        /// <param name="handle"></param>
+        /// <param name="newHandle"></param>
+        protected void CheckAndSetBufferHandle(ref BufferHandle handle, BufferHandle newHandle)
+        {
+            if (!CheckAndWarnAboutAccessibility())
+                return;
+
+            handle = newHandle;
+        }
+
+        /// <summary>
+        /// Fetches the buffer handle if the buffer is accessible.
+        /// </summary>
+        /// <param name="handle"></param>
+        /// <param name="newHandle"></param>
+        protected BufferHandle CheckAndGetBufferHandle(ref BufferHandle handle)
+        {
+            if (!CheckAndWarnAboutAccessibility())
+                return BufferHandle.nullHandle;
+
+            return handle;
+        }
+
+
     }
 }

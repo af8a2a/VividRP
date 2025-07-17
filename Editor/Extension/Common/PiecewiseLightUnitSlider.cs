@@ -7,7 +7,7 @@ namespace UnityEditor.Rendering.Universal
     /// <summary>
     /// Formats the provided descriptor into a piece-wise linear slider with contextual slider markers, tooltips, and icons.
     /// </summary>
-    class HDPiecewiseLightUnitSlider : LightUnitSlider
+    class PiecewiseLightUnitSlider : LightUnitSlider
     {
         struct Piece
         {
@@ -37,7 +37,7 @@ namespace UnityEditor.Rendering.Universal
 
         // Ideally we want a continuous, monotonically increasing function, but this is useful as we can easily fit a
         // distribution to a set of (huge) value ranges onto a slider.
-        public HDPiecewiseLightUnitSlider(LightUnitSliderUIDescriptor descriptor) : base(descriptor)
+        public PiecewiseLightUnitSlider(LightUnitSliderUIDescriptor descriptor) : base(descriptor)
         {
             // Sort the ranges into ascending order
             var sortedRanges = m_Descriptor.valueRanges.OrderBy(x => x.value.x).ToArray();

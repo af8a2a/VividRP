@@ -2,7 +2,7 @@ using UnityEngine.Rendering.Universal;
 
 namespace UnityEditor.Rendering.Universal
 {
-    internal class UniversalRenderPipelineSerializedLight : ISerializedLight
+    internal partial class UniversalRenderPipelineSerializedLight : ISerializedLight
     {
         /// <summary>The base settings of the light</summary>
         public LightEditor.Settings settings { get; }
@@ -71,6 +71,13 @@ namespace UnityEditor.Rendering.Universal
             customShadowLayers = serializedAdditionalDataObject.FindProperty("m_CustomShadowLayers");
             shadowRenderingLayers = serializedAdditionalDataObject.FindProperty("m_ShadowRenderingLayers");
 
+            #region Cluster lighting
+            angularDiameter = serializedAdditionalDataObject.FindProperty("m_AngularDiameter");
+            shapeRadius = serializedAdditionalDataObject.FindProperty("m_ShapeRadius");
+            baseContributionProp = serializedAdditionalDataObject.FindProperty("m_BaseContribution");
+            #endregion
+            
+            
             settings.ApplyModifiedProperties();
         }
     }

@@ -283,7 +283,7 @@ namespace UnityEngine.Rendering.Universal
 
 
             float blockerAngularDiameter = 12.0f;
-            if (light.TryGetComponent(out UniversalExtensionAdditionalLightData additionalLightData))
+            if (light.TryGetComponent(out UniversalAdditionalLightData additionalLightData))
             {
                 blockerAngularDiameter = Mathf.Max(blockerAngularDiameter, additionalLightData.angularDiameter);
             }

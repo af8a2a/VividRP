@@ -49,18 +49,7 @@ namespace UnityEngine.Rendering.Universal
 
             return lightData;
         }
-
-        public static UniversalExtensionAdditionalLightData GetUniversalExtensionAdditionalLightData(this Light light)
-        {
-            var gameObject = light.gameObject;
-            bool componentExists = gameObject.TryGetComponent<UniversalExtensionAdditionalLightData>(out var lightData);
-            if (!componentExists)
-                lightData = gameObject.AddComponent<UniversalExtensionAdditionalLightData>();
-
-            return lightData;
-        }
-
-
+        
     }
 
     /// <summary>
@@ -69,7 +58,7 @@ namespace UnityEngine.Rendering.Universal
     [DisallowMultipleComponent]
     [RequireComponent(typeof(Light))]
     [URPHelpURL("universal-additional-light-data")]
-    public class UniversalAdditionalLightData : MonoBehaviour, ISerializationCallbackReceiver, IAdditionalData
+    public partial class UniversalAdditionalLightData : MonoBehaviour, ISerializationCallbackReceiver, IAdditionalData
     {
         // Version 0 means serialized data before the version field.
         [SerializeField] int m_Version = 3;

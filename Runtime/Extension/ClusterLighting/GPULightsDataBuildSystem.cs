@@ -117,7 +117,6 @@ namespace UnityEngine.Rendering.Universal.Internal
                 if (visibleLights[visLightIndex].lightType == LightType.Directional)
                 {
                     var additionalLightData = light.GetUniversalAdditionalLightData();
-                    var additionalLightDataExt = light.GetUniversalExtensionAdditionalLightData();
 
                     var directionalLightData = new DirectionalLightData();
 
@@ -141,7 +140,7 @@ namespace UnityEngine.Rendering.Universal.Internal
                     directionalLightData.lightLayerMask = lightLayerMask;
 
                     //Value of max smoothness is derived from AngularDiameter. Formula results from eyeballing. Angular diameter of 0 results in 1 and angular diameter of 80 results in 0.
-                    float maxSmoothness = Mathf.Clamp01(1.35f / (1.0f + Mathf.Pow(1.15f * (0.0315f * additionalLightDataExt.angularDiameter + 0.4f), 2f)) - 0.11f);
+                    float maxSmoothness = Mathf.Clamp01(1.35f / (1.0f + Mathf.Pow(1.15f * (0.0315f * additionalLightData.angularDiameter + 0.4f), 2f)) - 0.11f);
                     // Value of max smoothness is from artists point of view, need to convert from perceptual smoothness to roughness
                     directionalLightData.minRoughness = (1.0f - maxSmoothness) * (1.0f - maxSmoothness);
                     directionalLightData.lightDimmer = 1;
@@ -154,7 +153,6 @@ namespace UnityEngine.Rendering.Universal.Internal
                 else
                 {
                     var additionalLightData = light.GetUniversalAdditionalLightData();
-                    var additionalLightDataExt = light.GetUniversalExtensionAdditionalLightData();
 
                     var gpuLightsData = new GPULightData();
 
@@ -183,7 +181,7 @@ namespace UnityEngine.Rendering.Universal.Internal
                     gpuLightsData.shadowType = (int)light.shadows;
                     gpuLightsData.lightLayerMask = lightLayerMask;
                     // Value of max smoothness is from artists point of view, need to convert from perceptual smoothness to roughness
-                    gpuLightsData.baseContribution = additionalLightDataExt.baseContribution;
+                    gpuLightsData.baseContribution = additionalLightData.baseContribution;
 
                     m_GPULightsData[visLightIndex - dirlightCount] = gpuLightsData;
                 }

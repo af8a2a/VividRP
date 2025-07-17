@@ -5,14 +5,14 @@ using UnityEngine;
 
 namespace UnityEditor.Rendering.Universal
 {
-    public class HDLightUnitSliderUIDrawer
+    public class LightUnitSliderUIDrawer
     {
-        static HDPiecewiseLightUnitSlider k_ExposureSlider;
+        static PiecewiseLightUnitSlider k_ExposureSlider;
 
-        static HDLightUnitSliderUIDrawer()
+        static LightUnitSliderUIDrawer()
         {
             // Exposure is in EV100, but we load a separate due to the different icon set.
-            k_ExposureSlider = new HDPiecewiseLightUnitSlider(LightUnitSliderDescriptors.ExposureDescriptor);
+            k_ExposureSlider = new PiecewiseLightUnitSlider(LightUnitSliderDescriptors.ExposureDescriptor);
         }
 
         // Need to cache the serialized object on the slider, to add support for the preset selection context menu (need to apply changes to serialized)

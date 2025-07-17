@@ -12,7 +12,7 @@ namespace UnityEditor.Rendering.Universal
     [CustomEditor(typeof(UniversalRendererData), true)]
     public class UniversalRendererDataEditor : ScriptableRendererDataEditor
     {
-        private static class Styles
+        private static partial class Styles
         {
             public static readonly GUIContent RendererTitle = EditorGUIUtility.TrTextContent("Universal Renderer", "Custom Universal Renderer for Universal RP.");
             public static readonly GUIContent PostProcessIncluded = EditorGUIUtility.TrTextContent("Enabled", "Enables the use of post processing effects within the scene. If disabled, Unity excludes post processing renderer Passes, shaders and textures from the build.");

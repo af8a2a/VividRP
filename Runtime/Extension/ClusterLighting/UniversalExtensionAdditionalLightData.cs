@@ -15,9 +15,7 @@
         Box
     }
 
-    [DisallowMultipleComponent]
-    [RequireComponent(typeof(Light))]
-    public class UniversalExtensionAdditionalLightData : MonoBehaviour, ISerializationCallbackReceiver, IAdditionalData
+    public partial class UniversalAdditionalLightData 
     {
         
         /// <summary>
@@ -32,6 +30,17 @@
             set { m_AngularDiameter = value; }
         }
 
+        
+        /// <summary>
+        /// Only for Punctual/Sphere/Disc. Default shape radius is not 0 so that specular highlight is visible by default, it matches the previous default of 0.99 for MaxSmoothness.
+        /// </summary>
+        [SerializeField] float m_ShapeRadius = 0.025f;
+        public float shapeRadius
+        {
+            get => m_ShapeRadius;
+            set { m_ShapeRadius = value; }
+        }
+
         // Light contributions
         /// <summary>
         /// Base Light contribution.
@@ -44,23 +53,7 @@
             set { m_BaseContribution = value; }
         }
 
+        
 
-        // Version 0 means serialized data before the version field.
-        [SerializeField] int m_Version = 3;
-
-        internal int version
-        {
-            get => m_Version;
-        }
-
-
-        public void OnBeforeSerialize()
-        {
-        }
-
-        /// <inheritdoc/>
-        public void OnAfterDeserialize()
-        {
-        }
     }
 }

@@ -453,6 +453,11 @@ namespace UnityEngine.Rendering.Universal.Internal
                         lightVolumeType = LightVolumeType.Cone;
                         break;
 
+                    case LightType.Rectangle:
+                        lightCategory = LightCategory.Area;
+                        gpuLightType = GPULightType.Rectangle;
+                        lightVolumeType = LightVolumeType.Box;
+                        break;
                     default:
                         Debug.Assert(false, "Encountered an unknown LightType.");
                         break;

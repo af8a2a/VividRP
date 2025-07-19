@@ -1,4 +1,4 @@
-#if false
+
 using System;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -6,9 +6,9 @@ using UnityEngine.Rendering.Universal;
 
 namespace UnityEditor.Rendering.Universal
 {
-    using CED = CoreEditorDrawer<UniversalRenderPipelineSerializedLight>;
+    using CED = CoreEditorDrawer<VividSerializedLight>;
 
-    partial class UniversalRenderPipelineLightUI
+    partial class VividLightUI
     {
         static readonly ExpandedState<Expandable, Light> k_ExpandedStatePreset = new(0, "URP-preset");
 
@@ -29,4 +29,3 @@ namespace UnityEditor.Rendering.Universal
         );
     }
 }
-#endif

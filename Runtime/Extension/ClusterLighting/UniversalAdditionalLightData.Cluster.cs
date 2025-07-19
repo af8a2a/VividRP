@@ -15,7 +15,7 @@
         Box
     }
 
-    public partial class UniversalAdditionalLightData 
+     partial class UniversalAdditionalLightData 
     {
         
         /// <summary>

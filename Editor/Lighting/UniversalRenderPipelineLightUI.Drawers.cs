@@ -1,3 +1,4 @@
+#if false
 using System;
 using System.Linq;
 using System.Linq.Expressions;
@@ -82,12 +83,7 @@ namespace UnityEditor.Rendering.Universal
                     LightUI.DrawColor,
                     DrawEmissionContent)),
 
-            #region Extension
-            CED.Conditional(
-                (serializedLight, editor) => serializedLight.settings.light.type != LightType.Directional,
-                CED.FoldoutGroup(LightUI.Styles.contributionsHeader, Expandable.Contribution, k_ExpandedState, DrawContributionsContent)),
 
-            #endregion
             CED.FoldoutGroup(LightUI.Styles.renderingHeader,
                 Expandable.Rendering,
                 k_ExpandedState,
@@ -540,3 +536,4 @@ namespace UnityEditor.Rendering.Universal
         }
     }
 }
+#endif

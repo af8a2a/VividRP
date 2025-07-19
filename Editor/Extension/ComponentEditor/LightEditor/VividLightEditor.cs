@@ -1,5 +1,4 @@
-#if false
-using System;
+﻿using System;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
@@ -9,13 +8,13 @@ namespace UnityEditor.Rendering.Universal
     [CustomEditor(typeof(Light))]
     [SupportedOnRenderPipeline(typeof(UniversalRenderPipelineAsset))]
     [CanEditMultipleObjects]
-    class UniversalRenderPipelineLightEditor : LightEditor
+    class VividLightEditor : LightEditor
     {
-        UniversalRenderPipelineSerializedLight serializedLight { get; set; }
+        VividSerializedLight serializedLight { get; set; }
 
         protected override void OnEnable()
         {
-            serializedLight = new UniversalRenderPipelineSerializedLight(serializedObject, settings);
+            serializedLight = new VividSerializedLight(serializedObject, settings);
             Undo.undoRedoPerformed += ReconstructReferenceToAdditionalDataSO;
         }
 
@@ -43,11 +42,11 @@ namespace UnityEditor.Rendering.Universal
 
             if (IsPresetEditor(this))
             {
-                UniversalRenderPipelineLightUI.PresetInspector.Draw(serializedLight, this);
+                VividLightUI.PresetInspector.Draw(serializedLight, this);
             }
             else
             {
-                UniversalRenderPipelineLightUI.Inspector.Draw(serializedLight, this);
+                VividLightUI.Inspector.Draw(serializedLight, this);
             }
 
             serializedLight.Apply();
@@ -105,4 +104,3 @@ namespace UnityEditor.Rendering.Universal
         }
     }
 }
-#endif

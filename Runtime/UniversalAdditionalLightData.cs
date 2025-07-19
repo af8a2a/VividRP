@@ -51,6 +51,58 @@ namespace UnityEngine.Rendering.Universal
         }
         
     }
+    
+    /// <summary>
+    /// Extension class for the HDLightTypeAndShape type.
+    /// </summary>
+    public static class LightTypeExtension
+    {
+        /// <summary>
+        /// Returns true if the light type is a spot light
+        /// </summary>
+        /// <param name="type"></param>
+        /// <returns></returns>
+        public static bool IsSpot(this LightType type)
+            => type == LightType.Box
+               || type == LightType.Pyramid
+               || type == LightType.Spot;
+
+        /// <summary>
+        /// Returns true if the light type is an area light
+        /// </summary>
+        /// <param name="type"></param>
+        /// <returns></returns>
+        public static bool IsArea(this LightType type)
+            => type == LightType.Tube
+               || type == LightType.Rectangle
+               || type == LightType.Disc;
+
+        /// <summary>
+        /// Returns true if the light type can be used for runtime lighting
+        /// </summary>
+        /// <param name="type"></param>
+        /// <returns></returns>
+        public static bool SupportsRuntimeOnly(this LightType type)
+            => type != LightType.Disc;
+
+        /// <summary>
+        /// Returns true if the light type can be used for baking
+        /// </summary>
+        /// <param name="type"></param>
+        /// <returns></returns>
+        public static bool SupportsBakedOnly(this LightType type)
+            => type != LightType.Tube;
+
+        /// <summary>
+        /// Returns true if the light type can be used in mixed mode
+        /// </summary>
+        /// <param name="type"></param>
+        /// <returns></returns>
+        public static bool SupportsMixed(this LightType type)
+            => type != LightType.Tube
+               && type != LightType.Disc;
+    }
+
 
     /// <summary>
     /// Class containing various additional light data used by URP.

@@ -99,12 +99,26 @@ namespace UnityEngine.Rendering.Universal
         ProjectorBox,
 
         // AreaLight
-        //Tube, // Keep Line lights before Rectangle. This is needed because of a compiler bug (see LightLoop.hlsl)
-        //Rectangle,
+        Tube, // Keep Line lights before Rectangle. This is needed because of a compiler bug (see LightLoop.hlsl)
+        Rectangle,
         // Currently not supported in real time (just use for reference)
         //Disc,
         // Sphere,
     };
+
+    static class GPULightTypeExtension
+    {
+        public static bool IsAreaLight(this GPULightType lightType)
+        {
+            return lightType == GPULightType.Rectangle || lightType == GPULightType.Tube;
+        }
+
+        public static bool IsSpot(this GPULightType lightType)
+        {
+            return lightType == GPULightType.Spot || lightType == GPULightType.ProjectorBox || lightType == GPULightType.ProjectorPyramid;
+        }
+    }
+
 
     //Do not change these numbers!!
     //Its not a full power of 2 because the last light slot is reserved.

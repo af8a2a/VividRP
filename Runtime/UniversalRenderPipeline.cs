@@ -319,6 +319,7 @@ namespace UnityEngine.Rendering.Universal
             SkySystem.instance.Build(asset);
             IBLFilterGGX.instance.Initialize();
             Hammersley.Initialize();
+            AreaLightSystem.instance.Build();
             #endregion
         }
 
@@ -363,6 +364,7 @@ namespace UnityEngine.Rendering.Universal
             MipGenerator.ClearAll();
             DenoiseSystem.ClearAll();
             ExtensionSystem.Clean();
+            AreaLightSystem.instance.Cleanup();
             #endregion
 
 #if UNITY_EDITOR
@@ -838,6 +840,7 @@ namespace UnityEngine.Rendering.Universal
                 #region Extension
                 PreIntegratedFGD.instance.RenderInit(PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse, cmd);
                 SkySystem.instance.UpdateCurrentSky();
+                AreaLightSystem.instance.Bind(cmd);
                 #endregion
                 SetupPerCameraShaderConstants(cmd);
 

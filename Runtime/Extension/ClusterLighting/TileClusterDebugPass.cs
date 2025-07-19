@@ -95,6 +95,10 @@ namespace UnityEngine.Rendering.Universal
                     case DebugClusterCategory.ReflectionProbes:
                         _DebugCategory = LightCategory.Env;
                         break;
+                    case DebugClusterCategory.Rectangle:
+                        _DebugCategory = LightCategory.Area;
+                        break;
+
                 }
 
                 m_Material.SetFloat("_DebugTileClusterMode", (float)debugMode);

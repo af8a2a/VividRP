@@ -9,6 +9,7 @@
 //
 #define DEBUGCLUSTERCATEGORY_PUNCTUAL_LIGHTS (0)
 #define DEBUGCLUSTERCATEGORY_REFLECTION_PROBES (1)
+#define DEBUGCLUSTERCATEGORY_RECTANGLE (2)
 
 //
 // UnityEngine.Rendering.Universal.DebugFullScreenMode:  static fields

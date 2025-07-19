@@ -3,6 +3,72 @@ using UnityEngine.Rendering;
 
 namespace UnityEngine.Rendering.Universal
 {
+    
+    //Data of the lights inside the database.
+    //TODO: as a next round of optimizations, this should be reorganized to be cache friendly, and possibly split into SoAs for that matter.
+    internal struct HDLightRenderData
+    {
+        public uint renderingLayerMask;
+        public float fadeDistance;
+        public float distance;
+        public float angularDiameter;
+        public float volumetricFadeDistance;
+        public bool includeForRayTracing;
+        public bool includeForPathTracing;
+        public bool useScreenSpaceShadows;
+        public bool useRayTracedShadows;
+        public bool colorShadow;
+        public float lightDimmer;
+        public float volumetricDimmer;
+        public float shadowDimmer;
+        public float shadowFadeDistance;
+        public float volumetricShadowDimmer;
+        public float shapeWidth;
+        public float shapeHeight;
+        public float aspectRatio;
+        public float innerSpotPercent;
+        public float spotIESCutoffPercent;
+        public float shapeRadius;
+        public float barnDoorLength;
+        public float barnDoorAngle;
+        public bool affectVolumetric;
+        public bool affectDiffuse;
+        public bool affectSpecular;
+        public bool applyRangeAttenuation;
+        public bool penumbraTint;
+        public bool interactsWithSky;
+        public Color shadowTint;
+    }
+
+    /// <summary>
+    /// Debug Light Filtering.
+    /// </summary>
+    [GenerateHLSL]
+    [Flags]
+    public enum DebugLightFilterMode
+    {
+        /// <summary>No light filtering.</summary>
+        None = 0,
+        /// <summary>Display directional lights.</summary>
+        DirectDirectional = 1 << 0,
+        /// <summary>Display punctual lights.</summary>
+        DirectPunctual = 1 << 1,
+        /// <summary>Display rectangle lights.</summary>
+        DirectRectangle = 1 << 2,
+        /// <summary>Display tube lights.</summary>
+        DirectTube = 1 << 3,
+        /// <summary>Display Spot lights.</summary>
+        DirectSpotCone = 1 << 4,
+        /// <summary>Display Pyramid lights.</summary>
+        DirectSpotPyramid = 1 << 5,
+        /// <summary>Display Box lights.</summary>
+        DirectSpotBox = 1 << 6,
+        /// <summary>Display Reflection Probes.</summary>
+        IndirectReflectionProbe = 1 << 7,
+        /// <summary>Display Planar Probes.</summary>
+        IndirectPlanarProbe = 1 << 8,
+    }
+
     /// <summary>
     /// Light Utils contains function to convert light intensities between units
     /// </summary>
@@ -175,7 +241,7 @@ namespace UnityEngine.Rendering.Universal
         /// <param name="ev"></param>
         /// <returns></returns>
         public static float ConvertEvToCandela(float ev)
-        // From punctual point of view candela and luminance is the same
+            // From punctual point of view candela and luminance is the same
             => ConvertEvToLuminance(ev);
 
         /// <summary>
@@ -185,7 +251,7 @@ namespace UnityEngine.Rendering.Universal
         /// <param name="distance"></param>
         /// <returns></returns>
         public static float ConvertEvToLux(float ev, float distance)
-        // From punctual point of view candela and luminance is the same
+            // From punctual point of view candela and luminance is the same
             => ConvertCandelaToLux(ConvertEvToLuminance(ev), distance);
 
         /// <summary>
@@ -204,7 +270,7 @@ namespace UnityEngine.Rendering.Universal
         /// <param name="candela"></param>
         /// <returns></returns>
         public static float ConvertCandelaToEv(float candela)
-        // From punctual point of view candela and luminance is the same
+            // From punctual point of view candela and luminance is the same
             => ConvertLuminanceToEv(candela);
 
         /// <summary>
@@ -214,7 +280,7 @@ namespace UnityEngine.Rendering.Universal
         /// <param name="distance"></param>
         /// <returns></returns>
         public static float ConvertLuxToEv(float lux, float distance)
-        // From punctual point of view candela and luminance is the same
+            // From punctual point of view candela and luminance is the same
             => ConvertLuminanceToEv(ConvertLuxToCandela(lux, distance));
 
         // Helper for punctual and area light unit conversion
@@ -233,6 +299,7 @@ namespace UnityEngine.Rendering.Universal
                 // We have already calculate the correct value, just assign it
                 return initialIntensity;
             }
+
             return ConvertPointLightLumenToCandela(lumen);
         }
 
@@ -261,13 +328,14 @@ namespace UnityEngine.Rendering.Universal
         /// <param name="spotAngle"></param>
         /// <param name="aspectRatio"></param>
         /// <returns></returns>
-        public static float ConvertPunctualLightCandelaToLumen(LightType lightType, SpotLightShape spotLightShape, float candela, bool enableSpotReflector, float spotAngle, float aspectRatio)
+        public static float ConvertPunctualLightCandelaToLumen(LightType lightType, SpotLightShape spotLightShape, float candela, bool enableSpotReflector,
+            float spotAngle, float aspectRatio)
         {
             if (lightType == LightType.Spot && enableSpotReflector)
             {
                 // We just need to multiply candela by solid angle in this case
                 //if (spotLightShape == SpotLightShape.Cone)
-                    return ConvertSpotLightCandelaToLumen(candela, spotAngle * Mathf.Deg2Rad, true);
+                return ConvertSpotLightCandelaToLumen(candela, spotAngle * Mathf.Deg2Rad, true);
                 //else if (spotLightShape == SpotLightShape.Pyramid)
                 //{
                 //    float angleA, angleB;
@@ -278,6 +346,7 @@ namespace UnityEngine.Rendering.Universal
                 //else // Box
                 //    return ConvertPointLightCandelaToLumen(candela);
             }
+
             return ConvertPointLightCandelaToLumen(candela);
         }
 
@@ -292,7 +361,8 @@ namespace UnityEngine.Rendering.Universal
         /// <param name="aspectRatio"></param>
         /// <param name="distance"></param>
         /// <returns></returns>
-        public static float ConvertPunctualLightLuxToLumen(LightType lightType, SpotLightShape spotLightShape, float lux, bool enableSpotReflector, float spotAngle, float aspectRatio, float distance)
+        public static float ConvertPunctualLightLuxToLumen(LightType lightType, SpotLightShape spotLightShape, float lux, bool enableSpotReflector,
+            float spotAngle, float aspectRatio, float distance)
         {
             float candela = ConvertLuxToCandela(lux, distance);
             return ConvertPunctualLightCandelaToLumen(lightType, spotLightShape, candela, enableSpotReflector, spotAngle, aspectRatio);
@@ -532,5 +602,101 @@ namespace UnityEngine.Rendering.Universal
         //        finalColor *= Mathf.CorrelatedColorTemperatureToRGB(light.colorTemperature);
         //    return finalColor;
         //}
+
+        /// <summary>
+        /// Extract scale and bias from a fade distance to achieve a linear fading starting at 90% of the fade distance.
+        /// </summary>
+        /// <param name="fadeDistance">Distance at which object should be totally fade</param>
+        /// <param name="scale">[OUT] Slope of the fading on the fading part</param>
+        /// <param name="bias">[OUT] Ordinate of the fading part at abscissa 0</param>
+        internal static void GetScaleAndBiasForLinearDistanceFade(float fadeDistance, out float scale, out float bias)
+        {
+            // Fade with distance calculation is just a linear fade from 90% of fade distance to fade distance. 90% arbitrarily chosen but should work well enough.
+            float distanceFadeNear = 0.9f * fadeDistance;
+            scale = 1.0f / (fadeDistance - distanceFadeNear);
+            bias = -distanceFadeNear / (fadeDistance - distanceFadeNear);
+        }
+
+        /// <summary>
+        /// Compute the linear fade distance
+        /// </summary>
+        /// <param name="distanceToCamera">Distance from the object to fade from the camera</param>
+        /// <param name="fadeDistance">Distance at witch the object is totally faded</param>
+        /// <returns>Computed fade factor</returns>
+        internal static float ComputeLinearDistanceFade(float distanceToCamera, float fadeDistance)
+        {
+            float scale;
+            float bias;
+            GetScaleAndBiasForLinearDistanceFade(fadeDistance, out scale, out bias);
+
+            return 1.0f - Mathf.Clamp01(distanceToCamera * scale + bias);
+        }
+
+        internal static void EvaluateGPULightType(LightType lightType, ref LightCategory lightCategory,
+            ref GPULightType gpuLightType, ref LightVolumeType lightVolumeType)
+        {
+            lightCategory = LightCategory.Count;
+            gpuLightType = GPULightType.Point;
+            lightVolumeType = LightVolumeType.Count;
+
+            switch (lightType)
+            {
+                case LightType.Spot:
+                    lightCategory = LightCategory.Punctual;
+                    gpuLightType = GPULightType.Spot;
+                    lightVolumeType = LightVolumeType.Cone;
+                    break;
+
+                case LightType.Pyramid:
+                    lightCategory = LightCategory.Punctual;
+                    gpuLightType = GPULightType.ProjectorPyramid;
+                    lightVolumeType = LightVolumeType.Cone;
+                    break;
+
+                case LightType.Box:
+                    lightCategory = LightCategory.Punctual;
+                    gpuLightType = GPULightType.ProjectorBox;
+                    lightVolumeType = LightVolumeType.Box;
+                    break;
+
+                case LightType.Directional:
+                    lightCategory = LightCategory.Punctual;
+                    gpuLightType = GPULightType.Directional;
+                    // No need to add volume, always visible
+                    lightVolumeType = LightVolumeType.Count; // Count is none
+                    break;
+
+                case LightType.Point:
+                    lightCategory = LightCategory.Punctual;
+                    gpuLightType = GPULightType.Point;
+                    lightVolumeType = LightVolumeType.Sphere;
+                    break;
+
+                case LightType.Rectangle:
+                    lightCategory = LightCategory.Area;
+                    gpuLightType = GPULightType.Rectangle;
+                    lightVolumeType = LightVolumeType.Box;
+                    break;
+
+                case LightType.Tube:
+                    lightCategory = LightCategory.Area;
+                    gpuLightType = GPULightType.Tube;
+                    lightVolumeType = LightVolumeType.Box;
+                    break;
+
+                case LightType.Disc:
+                    lightCategory = LightCategory.Area;
+                    //not used in real-time at the moment anyway, except for path tracing
+                    gpuLightType = GPULightType.Disc;
+                    lightVolumeType = LightVolumeType.Sphere;
+                    break;
+
+                default:
+                    Debug.Assert(false, "Encountered an unknown LightType.");
+                    break;
+            }
+            
+        }
+        
     }
 }

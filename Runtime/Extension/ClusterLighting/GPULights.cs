@@ -102,7 +102,7 @@ namespace UnityEngine.Rendering.Universal
         Tube, // Keep Line lights before Rectangle. This is needed because of a compiler bug (see LightLoop.hlsl)
         Rectangle,
         // Currently not supported in real time (just use for reference)
-        //Disc,
+        Disc,
         // Sphere,
     };
 
@@ -288,10 +288,15 @@ namespace UnityEngine.Rendering.Universal
         public float baseContribution;
         public float minRoughness;
 
-        // public float baseContribution;
-        // public float rimContribution;
-        // public float outlineContribution;
-        // public float __unused2__;
+        public Vector4 size; // Used by area (X = length or width, Y = height, Z = CosBarnDoorAngle, W = BarnDoorLength) and punctual lights (X = radius)
+
+        public Vector3 forward;
+        public float rangeAttenuationScale;
+        public Vector3 up;
+        public float rangeAttenuationBias;
+        public Vector3 right;
+        public float __unused2__;
+
     };
 
     [GenerateHLSL(PackingRules.Exact, false)]

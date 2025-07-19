@@ -335,7 +335,7 @@ void REPROJECT_GLOBAL_ILLUMINATION(uint3 dispatchThreadId : SV_DispatchThreadID,
         color = 0.0f;
 
     // Convert to HSV space
-    color = RgbToHsv(color * GetCurrentExposureMultiplier());
+    color = RgbToHsv(color);// * GetCurrentExposureMultiplier());
     // Expose and clamp the final color
     color.z = clamp(color.z, 0.0, SSGI_CLAMP_VALUE);
     // Convert back to HSV space

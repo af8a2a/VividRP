@@ -1,0 +1,22 @@
+//
+// This file was automatically generated. Please don't edit by hand. Execute Editor command [ Edit > Rendering > Generate Shader Includes ] instead
+//
+
+#ifndef LIGHTUTILS_CS_HLSL
+#define LIGHTUTILS_CS_HLSL
+//
+// UnityEngine.Rendering.Universal.DebugLightFilterMode:  static fields
+//
+#define DEBUGLIGHTFILTERMODE_NONE (0)
+#define DEBUGLIGHTFILTERMODE_DIRECT_DIRECTIONAL (1)
+#define DEBUGLIGHTFILTERMODE_DIRECT_PUNCTUAL (2)
+#define DEBUGLIGHTFILTERMODE_DIRECT_RECTANGLE (4)
+#define DEBUGLIGHTFILTERMODE_DIRECT_TUBE (8)
+#define DEBUGLIGHTFILTERMODE_DIRECT_SPOT_CONE (16)
+#define DEBUGLIGHTFILTERMODE_DIRECT_SPOT_PYRAMID (32)
+#define DEBUGLIGHTFILTERMODE_DIRECT_SPOT_BOX (64)
+#define DEBUGLIGHTFILTERMODE_INDIRECT_REFLECTION_PROBE (128)
+#define DEBUGLIGHTFILTERMODE_INDIRECT_PLANAR_PROBE (256)
+
+
+#endif

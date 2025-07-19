@@ -39,6 +39,10 @@ struct ShadingData
     float3 diffuseColor;
     float3 fresnel0;
 
+
+    float3 specularFGD; // Store preintegrated BSDF for both specular and diffuse
+    float diffuseFGD;
+
     #ifdef _LIGHT_LAYERS
     uint meshRenderingLayers;
     #endif

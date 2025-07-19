@@ -12,6 +12,9 @@
 #define GPULIGHTTYPE_SPOT (2)
 #define GPULIGHTTYPE_PROJECTOR_PYRAMID (3)
 #define GPULIGHTTYPE_PROJECTOR_BOX (4)
+#define GPULIGHTTYPE_TUBE (5)
+#define GPULIGHTTYPE_RECTANGLE (6)
+#define GPULIGHTTYPE_DISC (7)
 
 //
 // UnityEngine.Rendering.Universal.LightCategory:  static fields
@@ -108,6 +111,13 @@ struct GPULightData
     int shadowType;
     float baseContribution;
     float minRoughness;
+    float4 size;
+    float3 forward;
+    float rangeAttenuationScale;
+    float3 up;
+    float rangeAttenuationBias;
+    float3 right;
+    float __unused2__;
 };
 
 // Generated from UnityEngine.Rendering.Universal.LightVolumeData

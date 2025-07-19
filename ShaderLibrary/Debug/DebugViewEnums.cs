@@ -352,6 +352,7 @@ namespace UnityEngine.Rendering.Universal
     {
         PunctualLights,
         ReflectionProbes,
+        Rectangle,
     }
 
 

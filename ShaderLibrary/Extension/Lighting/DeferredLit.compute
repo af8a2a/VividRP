@@ -48,7 +48,7 @@
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/ClusterLighting/ShadingModels.cs.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/TileClassify.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/Environment/Environment.hlsl"
-
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/AutoExposure.hlsl"
 
 //--------------------------------------------------------------------------------------------------
 // Inputs & outputs
@@ -82,7 +82,7 @@ int _ShadingModelIndex;
 int _ShadingModelStencil;
 int2 _TilesNum;
 
-#include "LitghtingCommon.hlsl"
+#include "LightingCommon.hlsl"
 #include "PBRDeferredLit.hlsl"
 
 //--------------------------------------------------------------------------------------------------
@@ -210,7 +210,7 @@ void DeferredClassifyTiles(uint3 dispatchThreadId : SV_DispatchThreadID, uint gr
     }
 }
 
-
+#define SHADEROPTIONS_PRE_EXPOSITION 1
 [numthreads(DEFERRED_LIGHTING_GROUP_SIZE, DEFERRED_LIGHTING_GROUP_SIZE, 1)]
 void DeferredLighting(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId : SV_GroupThreadID, uint groupId : SV_GroupID)
 {
@@ -233,6 +233,8 @@ void DeferredLighting(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 groupT
 
     float3 diffuseLighting = lightOutput.diffuseLighting;
     float3 specularLighting = lightOutput.specularLighting;
+    // diffuseLighting *= GetCurrentExposureMultiplier();
+    // specularLighting *= GetCurrentExposureMultiplier();
 
     float3 emission = _LightingTexture[coordSS].rgb;
     _LightingTexture[coordSS] = float4(diffuseLighting + specularLighting + emission, 1.0);;

@@ -1,3 +1,5 @@
+#include "AreaLight.hlsl"
+
 DeferredLightingOutput DeferredLit(PositionInputs posInput, ShadingData shadingData)
 {
     DeferredLightingOutput lightOutput;
@@ -14,7 +16,8 @@ DeferredLightingOutput DeferredLit(PositionInputs posInput, ShadingData shadingD
     float diffuseFGD;
     float reflectivity;
     GetPreIntegratedFGDGGXAndDisneyDiffuse(clampedNdotV, shadingData.perceptualRoughness, shadingData.fresnel0, specularFGD, diffuseFGD, reflectivity);
-
+    shadingData.diffuseFGD = diffuseFGD;
+    shadingData.specularFGD = specularFGD;
     // Ref: Practical multiple scattering compensation for microfacet models.
     // We only apply the formulation for metals.
     // For dielectrics, the change of reflectance is negligible.
@@ -148,7 +151,11 @@ DeferredLightingOutput DeferredLit(PositionInputs posInput, ShadingData shadingD
         }
     }
 
-
+    AreaLighting areaLighting = EvaluateAreaHDRP(posInput, shadingData, viewDirWS);
+    directDiffuse += areaLighting.diffuse;
+    directSpecular += areaLighting.specular;
+    //     
+    //
     // Accumulate Indirect (Reflection probe, ScreenSpace Reflection/Refraction)
     // Reflection / Refraction hierarchy is
     //  1. Screen Space Refraction / Reflection

@@ -69,7 +69,7 @@ namespace UnityEngine.Rendering.Universal
         readonly int[] m_ExposureVariants = new int[4];
 
         Texture2D m_ExposureCurveTexture;
-        
+
         RTHandle m_ExposureCurveTextureRT;
         RTHandle m_EmptyExposureTexture; // RGHalf
         RTHandle m_DebugExposureData;
@@ -230,7 +230,9 @@ namespace UnityEngine.Rendering.Universal
             passData.exposureVariants[3] = 0;
 
             bool useTextureMask = m_Exposure.meteringMode.value == MeteringMode.MaskWeighted && m_Exposure.weightTextureMask.value != null;
-            passData.textureMeteringMask = useTextureMask ? renderGraph.ImportTexture(RTHandles.Alloc(m_Exposure.weightTextureMask.value)) : renderGraph.defaultResources.whiteTexture;
+            passData.textureMeteringMask = useTextureMask
+                ? renderGraph.ImportTexture(RTHandles.Alloc(m_Exposure.weightTextureMask.value))
+                : renderGraph.defaultResources.whiteTexture;
 
             ComputeProceduralMeteringParams(cameraData, out passData.proceduralMaskParams, out passData.proceduralMaskParams2);
 
@@ -298,7 +300,7 @@ namespace UnityEngine.Rendering.Universal
             passData.prevExposure = renderGraph.ImportTexture(prevExposure);
             passData.nextExposure = renderGraph.ImportTexture(nextExposure);
             passData.blackTexture = renderGraph.defaultResources.blackTexture;
-            
+
             builder.UseTexture(passData.blackTexture);
             builder.UseTexture(passData.exposureCurve);
             builder.UseTexture(passData.source);
@@ -407,9 +409,8 @@ namespace UnityEngine.Rendering.Universal
             cmd.DispatchCompute(cs, kernel, 1, 1, 1);
         }
 
-        
-        
-        TextureHandle DynamicExposurePass(RenderGraph renderGraph, ContextContainer frameData) //, HDCamera hdCamera, TextureHandle source)
+
+        void DynamicExposurePass(RenderGraph renderGraph, ContextContainer frameData) //, HDCamera hdCamera, TextureHandle source)
         {
             // Dynamic exposure - will be applied in the next frame
             // Not considered as a post-process so it's not affected by its enabled state
@@ -444,7 +445,6 @@ namespace UnityEngine.Rendering.Universal
                         builder.SetRenderFunc<DynamicExposureData>((data, ctx) => { DoDynamicExposure(data, ctx.cmd); });
                         exposureForImmediateApplication = passData.nextExposure;
                     }
-
                 }
 
                 // if (hdCamera.resetPostProcessingHistory)
@@ -452,22 +452,21 @@ namespace UnityEngine.Rendering.Universal
                     using (var builder = renderGraph.AddComputePass<ApplyExposureData>("Apply Exposure", out var passData,
                                Profiling.ApplyExposure))
                     {
-                
                         var runtimeShaders = GraphicsSettings.GetRenderPipelineSettings<ExposureRuntimeShader>();
                         var cameraData = frameData.Get<UniversalCameraData>();
-                
+
                         passData.applyExposureCS = runtimeShaders.applyExposureCS;
                         passData.applyExposureCS.shaderKeywords = null;
                         passData.applyExposureKernel = passData.applyExposureCS.FindKernel("KMain");
-                
+
                         // if (PostProcessEnableAlpha(hdCamera))
                         //     passData.applyExposureCS.EnableKeyword("ENABLE_ALPHA");
-                
+
                         passData.width = cameraData.scaledWidth;
                         passData.height = cameraData.scaledHeight;
                         passData.viewCount = 1;
                         passData.source = source;
-                
+
                         passData.prevExposure = exposureForImmediateApplication;
                         builder.AllowPassCulling(false);
 
@@ -478,28 +477,25 @@ namespace UnityEngine.Rendering.Universal
                             enableRandomWrite = true
                         });
                         passData.destination = dest;
-                
-                        
+
+
                         builder.UseTexture(passData.source);
                         builder.UseTexture(passData.prevExposure);
-                        builder.UseTexture(passData.destination,AccessFlags.Write);
-                
-                        builder.SetRenderFunc<ApplyExposureData>((data, ctx) => 
-                            {
-                                ctx.cmd.SetComputeTextureParam(data.applyExposureCS, data.applyExposureKernel, ShaderIDs._ExposureTexture, data.prevExposure);
-                                ctx.cmd.SetComputeTextureParam(data.applyExposureCS, data.applyExposureKernel, ShaderIDs._InputTexture, data.source);
-                                ctx.cmd.SetComputeTextureParam(data.applyExposureCS, data.applyExposureKernel, ShaderIDs._OutputTexture, data.destination);
-                                ctx.cmd.DispatchCompute(data.applyExposureCS, data.applyExposureKernel, (data.width + 7) / 8, (data.height + 7) / 8,
-                                    data.viewCount);
-                            });
-                
-                        source= passData.destination;
-                
+                        builder.UseTexture(passData.destination, AccessFlags.Write);
+
+                        builder.SetRenderFunc<ApplyExposureData>((data, ctx) =>
+                        {
+                            ctx.cmd.SetComputeTextureParam(data.applyExposureCS, data.applyExposureKernel, ShaderIDs._ExposureTexture, data.prevExposure);
+                            ctx.cmd.SetComputeTextureParam(data.applyExposureCS, data.applyExposureKernel, ShaderIDs._InputTexture, data.source);
+                            ctx.cmd.SetComputeTextureParam(data.applyExposureCS, data.applyExposureKernel, ShaderIDs._OutputTexture, data.destination);
+                            ctx.cmd.DispatchCompute(data.applyExposureCS, data.applyExposureKernel, (data.width + 7) / 8, (data.height + 7) / 8,
+                                data.viewCount);
+                        });
+
+                        resourceData.cameraColor = passData.destination;
                     }
                 }
-
             }
-            return source;
         }
     }
 }

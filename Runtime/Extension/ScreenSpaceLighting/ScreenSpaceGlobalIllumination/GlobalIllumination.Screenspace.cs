@@ -7,7 +7,7 @@ namespace UnityEngine.Rendering.Universal
     /// A volume component that holds settings for the global illumination (screen space and ray traced).
     /// </summary>
     [Serializable, VolumeComponentMenu("Lighting/Screen Space Global Illumination")]
-    public sealed class GlobalIllumination : VolumeComponent
+    public  sealed partial class GlobalIllumination : VolumeComponent
     {
         bool UsesQualityMode()
         {

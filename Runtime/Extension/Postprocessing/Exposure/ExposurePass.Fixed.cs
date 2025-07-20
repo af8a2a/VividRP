@@ -83,20 +83,20 @@ namespace UnityEngine.Rendering.Universal
 
             var cameraData = frameData.Get<UniversalCameraData>();
             if (setting.mode.value == ExposureMode.Fixed
-#if UNITY_EDITOR
-                || HDAdditionalSceneViewSettings.sceneExposureOverriden && cameraData.camera.cameraType == CameraType.SceneView
-#endif
+// #if UNITY_EDITOR
+//                 || HDAdditionalSceneViewSettings.sceneExposureOverriden && cameraData.camera.cameraType == CameraType.SceneView
+// #endif
                )
             {
                 kernel = cs.FindKernel("KFixedExposure");
                 exposureParams = new Vector4(setting.compensation.value, setting.fixedExposure.value, 0f, 0f);
 
-#if UNITY_EDITOR
-                if (cameraData.camera.cameraType == CameraType.SceneView)
-                {
-                    exposureParams = new Vector4(0.0f, HDAdditionalSceneViewSettings.sceneExposure, 0f, 0f);
-                }
-#endif
+// #if UNITY_EDITOR
+//                 if (cameraData.camera.cameraType == CameraType.SceneView)
+//                 {
+//                     exposureParams = new Vector4(0.0f, HDAdditionalSceneViewSettings.sceneExposure, 0f, 0f);
+//                 }
+// #endif
             }
             else // ExposureMode.UsePhysicalCamera
             {
@@ -106,7 +106,7 @@ namespace UnityEngine.Rendering.Universal
 
             using (var builder = renderGraph.AddComputePass<FixedExposurePassData>("Fixed Exposure", out var data))
             {
-                var exposureResoureData = frameData.GetOrCreate<ExposureResourceData>();
+                var exposureResoureData = frameData.Get<UniversalResourceData>();
 
                 var historyRTSystem = HistoryFrameRTSystem.GetOrCreate(cameraData.camera);
                 ReAllocatedExposureTexturesIfNeeded(historyRTSystem, out var prev, out var curr);
@@ -136,8 +136,8 @@ namespace UnityEngine.Rendering.Universal
                     cmd.SetGlobalTexture(ShaderIDs._PrevExposureTexture, passData.PreviousExposureTexture);
                 });
 
-                exposureResoureData.current = data.CurrentExposureTextures;
-                exposureResoureData.previous = data.PreviousExposureTexture;
+                exposureResoureData.currentExposure = data.CurrentExposureTextures;
+                exposureResoureData.previousExposure = data.PreviousExposureTexture;
             }
         }
     }

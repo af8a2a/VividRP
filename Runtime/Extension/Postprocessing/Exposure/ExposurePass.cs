@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Runtime.CompilerServices;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -6,7 +7,7 @@ using UnityEngine.Rendering.Universal;
 
 namespace UnityEngine.Rendering.Universal
 {
-    public partial class ExposurePass : ScriptableRenderPass,IDisposable
+    public partial class ExposurePass : ScriptableRenderPass, IDisposable
     {
         public class ShaderIDs
         {
@@ -47,14 +48,22 @@ namespace UnityEngine.Rendering.Universal
             public static readonly int _OutputResolution = Shader.PropertyToID("_OutputResolution");
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        bool IsExposureFixed() => m_Exposure.mode.value == ExposureMode.Fixed;
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
             m_Exposure = VolumeManager.instance.stack.GetComponent<ExposureSetting>();
 
-            var resourceData = frameData.Get<UniversalResourceData>();
-
-            DynamicExposurePass(renderGraph, frameData);
+            if (IsExposureFixed())
+            {
+                DoFixedExposure(renderGraph,frameData);
+            }
+            else
+            {
+                
+                DynamicExposurePass(renderGraph, frameData);
+            }
         }
 
         public void Dispose()

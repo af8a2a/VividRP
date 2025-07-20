@@ -352,6 +352,16 @@ namespace UnityEngine.Rendering.Universal
             _cameraColorPyramidTexture = TextureHandle.nullHandle;
             _cameraDepthPyramidTexture = TextureHandle.nullHandle;
 
+
+            #region Exposure
+
+            _currentExposure = TextureHandle.nullHandle;
+            _previousExposure = TextureHandle.nullHandle;
+            useFetchedExposure = false;
+            fetchedGpuExposure = 1.0f;
+
+            #endregion
+            
             
             for (int i = 0; i < _gBuffer.Length; i++)
                 _gBuffer[i] = TextureHandle.nullHandle;

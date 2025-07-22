@@ -1,5 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
 
 namespace UnityEngine.Rendering.Universal
@@ -8,6 +11,7 @@ namespace UnityEngine.Rendering.Universal
     {
         PlaceHolder,
         ShaderExecutionReordering,
+        Bindless
     }
 
 
@@ -19,19 +23,22 @@ namespace UnityEngine.Rendering.Universal
 
         public static void Init()
         {
-            var shaderExecutionReordering = new ShaderExecutionReordering();
-
-            extensions.Add(HardwareExtension.ShaderExecutionReordering, shaderExecutionReordering);
+            var extensionPlugins = ExtensionFinder.GetAllExtensionInstances();
 
 
-            foreach (var (_, extension) in extensions)
+
+
+            foreach (var extension in extensionPlugins)
             {
+                extensions.Add(extension.GetExtension(), extension);
+
                 extension.Init();
                 if (extension.Support())
                 {
                     supportedExtension.Add(extension.GetExtension());
                 }
             }
+            
         }
 
         public static IReadOnlyDictionary<HardwareExtension, IExtension> RegisteredExtensions => extensions;

@@ -6,6 +6,7 @@
 
         public bool Support()
         {
+            Debug.LogError(this.GetType().Name + ": Extension support not implemented.");
             return false;
         }
 

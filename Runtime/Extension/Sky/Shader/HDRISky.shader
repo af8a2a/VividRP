@@ -13,6 +13,7 @@ Shader "Hidden/DanbaidongRP/Sky/HDRISky"
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/UnityInstancing.hlsl"
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
+    #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/AutoExposure.hlsl"
     #include "SkyUtils.hlsl"
 
     TEXTURECUBE(_Cubemap);
@@ -74,7 +75,7 @@ Shader "Hidden/DanbaidongRP/Sky/HDRISky"
 
     float4 FragBaking(Varyings input) : SV_Target
     {
-        return RenderSky(input, 1.0);
+        return RenderSky(input,  1.0);
     }
 
     float4 FragRender(Varyings input) : SV_Target
@@ -82,7 +83,7 @@ Shader "Hidden/DanbaidongRP/Sky/HDRISky"
         UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
         // alpha used to be exposureMultiplier
-        return RenderSky(input, 1.0);
+        return RenderSky(input,  GetCurrentExposureMultiplier());
     }
 
 

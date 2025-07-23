@@ -31,6 +31,10 @@ Shader "Universal Render Pipeline/PBR Toon"
 
 
     }
+    HLSLINCLUDE
+    #include "HLSL/PBRToonInput.hlsl"
+    ENDHLSL
+
 
     SubShader
     {
@@ -42,9 +46,6 @@ Shader "Universal Render Pipeline/PBR Toon"
         //  Forward pass. Shades all light in a single pass. GI + emission + Fog
         Pass
         {
-            HLSLINCLUDE
-            #include "PBRToonInput.hlsl"
-            ENDHLSL
             Tags
             {
                 "RenderType" = "Opaque"
@@ -60,20 +61,19 @@ Shader "Universal Render Pipeline/PBR Toon"
             #pragma target 4.5
             // -------------------------------------
             // Shader Stages
-            #pragma vertex LitPassVertex
-            #pragma fragment LitPassFragment
+            #pragma vertex ToonLitPassVertex
+            #pragma fragment ToonLitPassFragment
 
             // -------------------------------------
             // Material Keywords
             #pragma shader_feature_local _NORMALMAP
 
 
-
             #pragma multi_compile_fragment _ _REFLECTION_PROBE_BLENDING
             #pragma multi_compile_fragment _ _REFLECTION_PROBE_BOX_PROJECTION
             #pragma multi_compile_fragment _ _REFLECTION_PROBE_ATLAS
 
-            
+
             // -------------------------------------
             // Universal Pipeline keywords
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
@@ -87,22 +87,199 @@ Shader "Universal Render Pipeline/PBR Toon"
             #pragma instancing_options renderinglayer
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
-            #include "PBRLighting.hlsl"
+            #include "HLSL/PBRLighting.hlsl"
             ENDHLSL
 
         }
 
-        UsePass "Universal Render Pipeline/Lit/SHADOWCASTER"
-        UsePass "Universal Render Pipeline/Lit/DEPTHONLY"
-        UsePass "Universal Render Pipeline/Lit/DEPTHNORMALS"
-        UsePass "Universal Render Pipeline/Lit/MOTIONVECTORS"
-        UsePass "Universal Render Pipeline/Lit/XRMOTIONVECTORS"
-        UsePass "Universal Render Pipeline/Lit/VISIBILITYDXR"
+
+        Pass
+        {
+            Name "ShadowCaster"
+            Tags
+            {
+                "LightMode" = "ShadowCaster"
+            }
+
+            // -------------------------------------
+            // Render State Commands
+            ZWrite On
+            ZTest LEqual
+            ColorMask 0
+
+            HLSLPROGRAM
+            #pragma target 4.5
+
+            // -------------------------------------
+            // Shader Stages
+            #pragma vertex ShadowPassVertex
+            #pragma fragment ShadowPassFragment
+
+            // -------------------------------------
+            // Material Keywords
+            #pragma shader_feature_local _ALPHATEST_ON
+
+            //--------------------------------------
+            // GPU Instancing
+            #pragma multi_compile_instancing
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
+
+            // -------------------------------------
+            // Universal Pipeline keywords
+
+            // -------------------------------------
+            // Unity defined keywords
+            #pragma multi_compile _ LOD_FADE_CROSSFADE
+
+            // This is used during shadow map generation to differentiate between directional and punctual light shadows, as they use different formulas to apply Normal Bias
+            #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
+
+            // -------------------------------------
+            // Includes
+            #include "HLSL/PBRLightingShadowCaster.hlsl"
+            ENDHLSL
+        }
 
 
+        Pass
+        {
+            Name "DepthOnly"
+            Tags
+            {
+                "LightMode" = "DepthOnly"
+            }
+
+            // -------------------------------------
+            // Render State Commands
+            ZWrite On
+            ColorMask R
+
+            HLSLPROGRAM
+            #pragma target 4.5
+
+            // -------------------------------------
+            // Shader Stages
+            #pragma vertex DepthOnlyVertex
+            #pragma fragment DepthOnlyFragment
+
+            // -------------------------------------
+            // Material Keywords
+            #pragma shader_feature_local _ALPHATEST_ON
+
+            // -------------------------------------
+            // Unity defined keywords
+            #pragma multi_compile _ LOD_FADE_CROSSFADE
+
+            //--------------------------------------
+            // GPU Instancing
+            #pragma multi_compile_instancing
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
+
+            // -------------------------------------
+            // Includes
+            #include "HLSL/PBRLightingDepthOnly.hlsl"
+            ENDHLSL
+        }
 
 
+        // This pass is used when drawing to a _CameraNormalsTexture texture
+        Pass
+        {
+            Name "DepthNormals"
+            Tags
+            {
+                "LightMode" = "DepthNormals"
+            }
 
+            // -------------------------------------
+            // Render State Commands
+            ZWrite On
+
+
+            HLSLPROGRAM
+            #pragma target 4.5
+
+
+            // -------------------------------------
+            // Shader Stages
+            #pragma vertex DepthNormalsVertex
+            #pragma fragment DepthNormalsFragment
+
+            // -------------------------------------
+            // Material Keywords
+            #pragma shader_feature_local _NORMALMAP
+            #pragma shader_feature_local _ALPHATEST_ON
+
+            // -------------------------------------
+            // Unity defined keywords
+            #pragma multi_compile _ LOD_FADE_CROSSFADE
+
+            // -------------------------------------
+            // Universal Pipeline keywords
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RenderingLayers.hlsl"
+
+            //--------------------------------------
+            // GPU Instancing
+            #pragma multi_compile_instancing
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
+
+            // -------------------------------------
+            // Includes
+            #include "HLSL/PBRLightingDepthNormal.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "MotionVectors"
+            Tags
+            {
+                "LightMode" = "MotionVectors"
+            }
+            ColorMask RG
+
+            HLSLPROGRAM
+            #pragma shader_feature_local _ALPHATEST_ON
+            #pragma multi_compile _ LOD_FADE_CROSSFADE
+            #pragma shader_feature_local_vertex _ADD_PRECOMPUTED_VELOCITY
+
+            #include_with_pragmas "HLSL/PBRLightingMotionVector.hlsl"
+            ENDHLSL
+        }
+    }
+
+
+    SubShader
+    {
+
+        Pass
+        {
+            Name "VisibilityDXR"
+            Tags
+            {
+                "LightMode" = "VisibilityDXR"
+            }
+
+            HLSLPROGRAM
+            // -------------------------------------
+            // Shader Stages
+            #pragma only_renderers d3d11 xboxseries ps5
+            #pragma raytracing surface_shader
+
+
+            #pragma shader_feature_local_fragment _ALPHATEST_ON
+            #pragma multi_compile  _  _GBUFFER_NORMALS_OCT
+
+
+            
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/ShaderVariablesRaytracing.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RaytracingIntersection.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RaytracingFragInputs.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RayTracingCommon.hlsl"
+
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RayTracingShaderPassVisibility.hlsl"
+            ENDHLSL
+        }
     }
 
 

@@ -10,6 +10,26 @@
 
 // keep this file in sync with LitGBufferPass.hlsl
 
+struct Attributes
+{
+    float4 positionOS : POSITION;
+    float3 normalOS : NORMAL;
+    float4 tangentOS : TANGENT;
+    float2 texcoord : TEXCOORD0;
+    UNITY_VERTEX_INPUT_INSTANCE_ID
+};
+
+struct Varyings
+{
+    float2 uv : TEXCOORD0;
+    float3 positionWS : TEXCOORD1;
+    float3 normalWS : TEXCOORD2;
+    half4 tangentWS : TEXCOORD3; // xyz: tangent, w: sign
+    
+    float4 positionCS : SV_POSITION;
+    UNITY_VERTEX_INPUT_INSTANCE_ID
+    UNITY_VERTEX_OUTPUT_STEREO
+};
 
 void InitializeCharacterInputData(Varyings input, half3 normalTS, out InputData inputData)
 {

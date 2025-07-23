@@ -5,12 +5,13 @@
 #include "PBRLightingUtil.hlsl"
 
 
+
 ///////////////////////////////////////////////////////////////////////////////
 //                  Vertex and Fragment functions                            //
 ///////////////////////////////////////////////////////////////////////////////
 
 // Used in Standard (Physically Based) shader
-Varyings LitPassVertex(Attributes input)
+Varyings ToonLitPassVertex(Attributes input)
 {
     Varyings output = (Varyings)0;
 
@@ -127,7 +128,7 @@ half4 CharacterRendering(InputData inputData, SurfaceData surfaceData)
 
 
 // Used in Standard (Physically Based) shader
-half4 LitPassFragment(Varyings input): SV_Target0
+half4 ToonLitPassFragment(Varyings input): SV_Target0
 {
     UNITY_SETUP_INSTANCE_ID(input);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);

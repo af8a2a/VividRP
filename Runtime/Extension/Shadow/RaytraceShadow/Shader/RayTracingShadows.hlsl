@@ -19,7 +19,7 @@
 // Inputs & outputs
 //--------------------------------------------------------------------------------------------------
 // Input
-TEXTURE2D_X(_GBuffer2);
+TEXTURE2D_X(_NormalTexture);//
 
 float radius;
 int   sampleCount;
@@ -32,14 +32,6 @@ RW_TEXTURE2D(float2, _RayTracingShadowsTextureRW);
 //--------------------------------------------------------------------------------------------------
 
 
-void GetNormalAndPerceptualRoughness(uint2 coordSS, out float3 normalWS, out float perceptualRoughness)
-{
-    // Load normal and perceptualRoughness.
-    float4 normalGBuffer = LOAD_TEXTURE2D_X(_GBuffer2, coordSS);
-    
-    normalWS = normalize(UnpackNormal(normalGBuffer.xyz)); // normalize() is required because terrain shaders use additive blending for normals (not unit-length anymore)
-    perceptualRoughness = PerceptualSmoothnessToPerceptualRoughness(normalGBuffer.a);
-}
 
 //--------------------------------------------------------------------------------------------------
 // Implementation

@@ -44,7 +44,7 @@ DeferredLightingOutput DeferredLit(PositionInputs posInput, ShadingData shadingD
         //     if (IsMatchingLightLayer(dirLight.lightLayerMask, shadingData.meshRenderingLayers))
         // #endif
         {
-            float3 lightDirWS = dirLight.lightDirection;
+            float3 lightDirWS = dirLight.dir;
             float NdotL = dot(normalWS, lightDirWS);
 
             float clampedNdotL = saturate(NdotL);
@@ -62,8 +62,8 @@ DeferredLightingOutput DeferredLit(PositionInputs posInput, ShadingData shadingD
             diffTerm *= clampedNdotL;
             specTerm *= clampedNdotL;
 
-            directDiffuse += shadingData.diffuseColor * diffTerm * dirLight.lightColor;
-            directSpecular += specTerm * dirLight.lightColor;
+            directDiffuse += shadingData.diffuseColor * diffTerm * dirLight.color;
+            directSpecular += specTerm * dirLight.color;
         }
     }
     float shadowAttenuation = LoadScreenSpaceShadowmap(posInput.positionSS).x;
@@ -107,18 +107,18 @@ DeferredLightingOutput DeferredLit(PositionInputs posInput, ShadingData shadingD
                             cookieColor = half4(IsAdditionalLightsCookieAtlasTextureRGBFormat() ? cookieColor.rgb
                             : IsAdditionalLightsCookieAtlasTextureAlphaFormat() ? cookieColor.aaa
                             : cookieColor.rrr, 1);
-                        gpuLight.lightColor *= cookieColor.rgb;
+                        gpuLight.color *= cookieColor.rgb;
                     }
                 #endif
 
-                float3 lightVector = gpuLight.lightPosWS - positionWS.xyz;
+                float3 lightVector = gpuLight.positionWS - positionWS.xyz;
                 float distanceSqr = max(dot(lightVector, lightVector), FLT_MIN);
                 float3 lightDirection = float3(lightVector * rsqrt(distanceSqr));
                 float shadowMask = 1;
 
 
                 float distanceAtten = DistanceAttenuation(distanceSqr, gpuLight.lightAttenuation.xy) * AngleAttenuation(
-                    gpuLight.lightDirection.xyz, lightDirection, gpuLight.lightAttenuation.zw);
+                    gpuLight.dir.xyz, lightDirection, gpuLight.lightAttenuation.zw);
                 float shadowAtten = gpuLight.shadowType == 0
                                         ? 1
                                         : AdditionalLightShadow(gpuLight.shadowLightIndex, positionWS, lightDirection, shadowMask,
@@ -143,8 +143,8 @@ DeferredLightingOutput DeferredLit(PositionInputs posInput, ShadingData shadingD
                 diffTerm *= clampedNdotL;
                 specTerm *= clampedNdotL;
 
-                directDiffuse += shadingData.diffuseColor * diffTerm * gpuLight.lightColor * attenuation;
-                directSpecular += specTerm * gpuLight.lightColor * attenuation;
+                directDiffuse += shadingData.diffuseColor * diffTerm * gpuLight.color * attenuation;
+                directSpecular += specTerm * gpuLight.color * attenuation;
             }
 
             v_lightListOffset++;

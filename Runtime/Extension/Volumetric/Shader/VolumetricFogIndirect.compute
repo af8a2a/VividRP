@@ -1,0 +1,139 @@
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+
+#pragma kernel ComputeVolumetricFogRenderingParameters
+
+#define PREFER_HALF 0
+
+#include "VolumetricCompute.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Utility/GeometryUtils.cs.hlsl"
+
+
+// Readonly buffers
+StructuredBuffer<OrientedBBox> _VolumeBounds;
+ByteAddressBuffer _GlobalIndices;
+
+RWBuffer<uint> _IndirectArgs : register( u0 );   // Indirect arguments have to be in a _buffer_, not a structured buffer
+RWByteAddressBuffer _Indirections : register( u1 );
+RWStructuredBuffer<VolumetricFogRenderingData> _VolumetricFogRenderingData;
+
+// vertexMask contains the vertices of the cube in this order
+//    6 .+------+ 7
+//    .' |    .'|
+// 2 +---+--+'3 |
+//   |   |  |   |
+//   | 4.+--+---+ 5
+//   |.'    | .'
+// 0 +------+' 1
+static const float3 vertexMask[8] = {
+    float3(0, 0, 0),
+    float3(1, 0, 0),
+    float3(0, 1, 0),
+    float3(1, 1, 0),
+    float3(0, 0, 1),
+    float3(1, 0, 1),
+    float3(0, 1, 1),
+    float3(1, 1, 1),
+};
+
+int DistanceToSlice(float distance) {
+    float de = _VBufferRcpSliceCount; // Log-encoded distance between slices
+
+    float e1 = EncodeLogarithmicDepthGeneralized(distance, _VBufferDistanceEncodingParams);
+    e1 -= de;
+    e1 /= de;
+
+    return int(e1 - 0.5);
+}
+
+// https://iquilezles.org/www/articles/distfunctions/distfunctions.htm
+float DistanceToAABB(float3 p, float3 b) {
+    float3 q = abs(p) - b;
+    return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+}
+
+// Optimized version of https://www.sciencedirect.com/topics/computer-science/oriented-bounding-box
+float DistanceDistanceToOBB(float3 p, OrientedBBox obb) {
+    float3 offset = p - obb.center;
+    float3 boxForward = normalize(cross(obb.right, obb.up));
+    float3 axisAlignedPoint = float3(dot(offset, normalize(obb.right)), dot(offset, normalize(obb.up)), dot(offset, boxForward));
+
+    return DistanceToAABB(axisAlignedPoint, float3(obb.extentX, obb.extentY, obb.extentZ));
+}
+
+float3 ComputeCubeVertexPositionRWS(OrientedBBox obb, float3 vertexMask) {
+    float3x3 obbFrame   = float3x3(obb.right, obb.up, cross(obb.right, obb.up));
+    float3   obbExtents = float3(obb.extentX, obb.extentY, obb.extentZ);
+    return mul((vertexMask * 2 - 1) * obbExtents, (obbFrame)) + obb.center;
+}
+
+// Generate the compute buffer to dispatch the indirect draw
+[numthreads(32, 1, 1)]
+void ComputeVolumetricFogRenderingParameters(uint3 dispatchThreadId : SV_DispatchThreadID) {
+    if (dispatchThreadId.x >= _VisibleCount) return;
+
+    uint renderIndex = dispatchThreadId.x; // renderIndex
+    uint globalIndex = _GlobalIndices.Load(renderIndex << 2); // 4 byte per index
+    
+    OrientedBBox obb = _VolumeBounds[renderIndex];
+    float3 obbExtents = float3(obb.extentX, obb.extentY, obb.extentZ);
+    
+    float2 minPositionVS = 1;
+    float2 maxPositionVS = -1;
+
+    float3 cameraPositionWS = GetCameraPositionWS();
+    float cameraDistanceToOBB = DistanceDistanceToOBB(cameraPositionWS, obb);
+
+    if (cameraDistanceToOBB <= 0) {
+        minPositionVS = -1;
+        maxPositionVS = 1;
+    }
+    
+    // Find the min and max distance value from vertices
+    float3 minPositionRWS = obb.center - obbExtents;
+    float maxVertexDepth = 0;
+    int i;
+    for (i = 0; i < 8; i++) {
+        float3 position = ComputeCubeVertexPositionRWS(obb, vertexMask[i]);
+        float3 positionVS = TransformWorldToView(position);
+        float distance = length(positionVS);
+        maxVertexDepth = max(maxVertexDepth, distance);
+
+        if (cameraDistanceToOBB > 0) {
+            // position.z = -position.z;
+            float4 positionCS = TransformWViewToHClip(positionVS);
+
+            // clamp positionCS inside the view in case the point is behind the camera
+            if (positionCS.w < 0) {
+                minPositionVS = -1;
+                maxPositionVS = 1;
+            }
+            else {
+                positionCS.xy /= positionCS.w;
+                minPositionVS = min(positionCS.xy, minPositionVS);
+                maxPositionVS = max(positionCS.xy, maxPositionVS);
+            }
+        }
+    }
+
+    minPositionVS = clamp(minPositionVS, -1, 1);
+    maxPositionVS = clamp(maxPositionVS, -1, 1);
+
+    float vBufferNearPlane = DecodeLogarithmicDepthGeneralized(0, _VBufferDistanceDecodingParams);
+    float minBoxDistance = max(vBufferNearPlane, cameraDistanceToOBB);
+    int startSliceIndex = clamp(DistanceToSlice(minBoxDistance), 0, int(_VBufferSliceCount));
+    int stopSliceIndex = DistanceToSlice(maxVertexDepth);
+    uint sliceCount = clamp(stopSliceIndex - startSliceIndex, 0, int(_VBufferSliceCount) - startSliceIndex);
+
+    _IndirectArgs[globalIndex * 5 + 0] = 6; // IndexCountPerInstance
+    _IndirectArgs[globalIndex * 5 + 1] = sliceCount; // InstanceCount
+    _IndirectArgs[globalIndex * 5 + 2] = 0; // StartIndexLocation
+    _IndirectArgs[globalIndex * 5 + 3] = 0; // BaseVertexLocation
+    _IndirectArgs[globalIndex * 5 + 4] = 0; // StartInstanceLocation
+    
+    // Provide smaller buffer index in the global indirection buffer to sample those buffers in the vertex during the voxelization.
+    _Indirections.Store(globalIndex << 2, renderIndex);
+
+    _VolumetricFogRenderingData[renderIndex].sliceCount = sliceCount;
+    _VolumetricFogRenderingData[renderIndex].startSliceIndex = startSliceIndex;
+    _VolumetricFogRenderingData[renderIndex].viewSpaceBounds = float4(minPositionVS, maxPositionVS - minPositionVS);
+}

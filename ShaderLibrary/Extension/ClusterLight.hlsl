@@ -2,7 +2,8 @@
 #define GPU_CULLED_LIGHTS_INCLUDED
 
 #include "Packages/com.unity.render-pipelines.universal//Runtime/Extension/ClusterLighting/GPULights.cs.hlsl"
-#pragma enable_d3d11_debug_symbols
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/LightingData.hlsl"
+// #pragma enable_d3d11_debug_symbols
 
 #ifdef _GPU_LIGHTS_CLUSTER
 #define USE_GPULIGHTS_CLUSTER
@@ -215,11 +216,6 @@ uint FetchIndex(uint lightStart, uint lightOffset)
 
 #endif /* USE_GPULIGHTS_CLUSTER */
 
-//--------------------------------------------------------------------------------------------------
-// Global fetch data
-//--------------------------------------------------------------------------------------------------
-
-StructuredBuffer<GPULightData> g_GPULightDatas;
 
 
 GPULightData FetchLight(uint lightStart, uint lightOffset)
@@ -227,17 +223,6 @@ GPULightData FetchLight(uint lightStart, uint lightOffset)
     int index = FetchIndex(lightStart, lightOffset);
     return g_GPULightDatas[index];
 }
-
-GPULightData FetchLight(uint index)
-{
-    return g_GPULightDatas[index];
-}
-
-//--------------------------------------------------------------------------------------------------
-// Directional light data
-//--------------------------------------------------------------------------------------------------
-StructuredBuffer<DirectionalLightData> g_DirectionalLightDatas;
-
 
 
 #endif /* GPU_CULLED_LIGHTS_INCLUDED */

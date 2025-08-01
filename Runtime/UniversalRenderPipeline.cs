@@ -1427,6 +1427,13 @@ namespace UnityEngine.Rendering.Universal
             if (cameraData.camera.cameraType == CameraType.SceneView && CoreUtils.IsSceneFilteringEnabled())
                 cameraData.isAlphaOutputEnabled = true;
 
+            
+            cameraData.frustum = new Frustum();
+            cameraData.frustum.corners = new Vector3[8];
+            //var projView = GL.GetGPUProjectionMatrix(camera.projectionMatrix, true) * camera.worldToCameraMatrix;
+            cameraData.frustum.planes = GeometryUtility.CalculateFrustumPlanes(camera);
+
+            
             return cameraData;
         }
 

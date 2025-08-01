@@ -11,6 +11,8 @@ namespace UnityEngine.Rendering.Universal
         [SerializeField] [HideInInspector] private int _version;
         public int version => _version;
 
+        #region Cluster
+
         /// <summary>
         /// GPU lights list compute shader.
         /// </summary>
@@ -41,7 +43,32 @@ namespace UnityEngine.Rendering.Universal
             get => m_GpuLightsCluster;
             set => this.SetValueAndNotify(ref m_GpuLightsCluster, value);
         }
-        
+
+        #endregion
+
+
+        #region FPTL
+
+        [SerializeField, ResourcePath("Runtime/Extension/ClusterLighting/Shader/GPULightsBigTile.compute")]
+        private ComputeShader m_GPULightsBigTile;
+
+        public ComputeShader gpuLightsBigTile
+        {
+            get => m_GPULightsBigTile;
+            set => this.SetValueAndNotify(ref m_GPULightsBigTile, value);
+        }
+
+        [SerializeField, ResourcePath("Runtime/Extension/ClusterLighting/Shader/GPULightListBuild.compute")]
+        private ComputeShader m_GPULightListBuild;
+
+        public ComputeShader gpuLightListBuild
+        {
+            get => m_GPULightListBuild;
+            set => this.SetValueAndNotify(ref m_GPULightListBuild, value);
+        }
+
+        #endregion
+
         
         /// <summary>
         /// Deferred lighting compute shader.

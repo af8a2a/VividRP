@@ -82,29 +82,30 @@
 // PackingRules = Exact
 struct DirectionalLightData
 {
-    float3 lightPosWS;
+    float3 positionWS;
     uint lightLayerMask;
-    float3 lightColor;
+    float3 color;
     int lightFlags;
     float4 lightAttenuation;
-    float3 lightDirection;
+    float3 dir;
     int shadowlightIndex;
     float minRoughness;
     float lightDimmer;
     float diffuseDimmer;
     float specularDimmer;
+    float volumetricLightDimmer;
 };
 
 // Generated from UnityEngine.Rendering.Universal.GPULightData
 // PackingRules = Exact
 struct GPULightData
 {
-    float3 lightPosWS;
+    float3 positionWS;
     uint lightLayerMask;
-    float3 lightColor;
+    float3 color;
     int lightFlags;
     float4 lightAttenuation;
-    float3 lightDirection;
+    float3 dir;
     int shadowLightIndex;
     float4 lightOcclusionProbInfo;
     int cookieLightIndex;
@@ -117,7 +118,7 @@ struct GPULightData
     float3 up;
     float rangeAttenuationBias;
     float3 right;
-    float __unused2__;
+    float volumetricLightDimmer;
 };
 
 // Generated from UnityEngine.Rendering.Universal.LightVolumeData
@@ -135,7 +136,7 @@ struct LightVolumeData
     float3 boxInnerDist;
     uint featureFlags;
     float3 boxInvRange;
-    float unused2;
+    float affectVolumetric;
 };
 
 // Generated from UnityEngine.Rendering.Universal.SFiniteLightBound
@@ -226,9 +227,9 @@ float3 GetBoxInvRange(LightVolumeData value)
 {
     return value.boxInvRange;
 }
-float GetUnused2(LightVolumeData value)
+float GetAffectVolumetric(LightVolumeData value)
 {
-    return value.unused2;
+    return value.affectVolumetric;
 }
 //
 // Accessors for UnityEngine.Rendering.Universal.SFiniteLightBound

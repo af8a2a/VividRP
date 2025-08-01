@@ -133,7 +133,7 @@ AreaLighting EvaluateAreaHDRP(PositionInputs posInput, ShadingData shadingData, 
                 GPULightData lightData = FetchLight(v_lightIdx);
 
 
-                float3 unL = lightData.lightPosWS - posInput.positionWS;
+                float3 unL = lightData.positionWS - posInput.positionWS;
 
                 float halfLength = lightData.size.x * 0.5;
                 float halfHeight = lightData.size.y * 0.5; // = 0 for a line light
@@ -187,8 +187,8 @@ AreaLighting EvaluateAreaHDRP(PositionInputs posInput, ShadingData shadingData, 
                                                 );
                     ltcValue.a *= intensity ;
                     lighting.specular += ltcValue.rgb * ltcValue.a;
-                    lighting.diffuse  *= lightData.lightColor * shadingData.diffuseFGD;
-                    lighting.specular *= lightData.lightColor * shadingData.specularFGD;
+                    lighting.diffuse  *= lightData.color * shadingData.diffuseFGD;
+                    lighting.specular *= lightData.color * shadingData.specularFGD;
 
                     // Add the foam and surface diffuse
                     lighting.diffuse *= shadingData.diffuseColor;// + bsdfData.foamColor;
@@ -235,7 +235,7 @@ AreaLighting EvaluateArea(PositionInputs posInput, ShadingData shadingData, floa
                 float3x3 orthoBasisViewNormal = GetOrthoBasisViewNormal(V, shadingData.normalWS, nov);
 
                 float2 areaExtent = lightData.size.xy;
-                float3 center =GetCameraRelativePositionWS(lightData.lightPosWS)  - positionWS;
+                float3 center =GetCameraRelativePositionWS(lightData.positionWS)  - positionWS;
 
                 center = mul(orthoBasisViewNormal, center);
                 float3 right = mul(orthoBasisViewNormal, lightData.right) * areaExtent.x;
@@ -261,7 +261,7 @@ AreaLighting EvaluateArea(PositionInputs posInput, ShadingData shadingData, floa
                 float3 formFactor = RectFormFactor(verts);
 
 
-                float3 lightVector = lightData.lightPosWS - positionWS.xyz;
+                float3 lightVector = lightData.positionWS - positionWS.xyz;
                 float distanceSqr = max(dot(lightVector, lightVector), FLT_MIN);
                 float3 lightDirection = float3(lightVector * rsqrt(distanceSqr));
                 float shadowMask = 1;
@@ -269,7 +269,7 @@ AreaLighting EvaluateArea(PositionInputs posInput, ShadingData shadingData, floa
                 float scale = 0.25 / (areaExtent.x * areaExtent.y) * TWO_PI;
 
                 float distanceAtten = DistanceAttenuation(distanceSqr, lightData.lightAttenuation.xy) * AngleAttenuation(
-                    lightData.lightDirection.xyz, lightDirection, lightData.lightAttenuation.zw);
+                    lightData.dir.xyz, lightDirection, lightData.lightAttenuation.zw);
                 float shadowAtten = lightData.shadowType == 0
                                         ? 1
                                         : AdditionalLightShadow(lightData.shadowLightIndex, positionWS, lightDirection, shadowMask,
@@ -277,8 +277,8 @@ AreaLighting EvaluateArea(PositionInputs posInput, ShadingData shadingData, floa
                 float attenuation = distanceAtten * shadowAtten * lightData.baseContribution;
 
 
-                lighting.diffuse = lightData.lightColor * PolygonIrradianceFromVectorFormFactor(formFactor) * scale * attenuation;
-                lighting.specular = lightData.lightColor * PolygonIrradianceFromVectorFormFactor(formFactor) * scale * attenuation;
+                lighting.diffuse = lightData.color * PolygonIrradianceFromVectorFormFactor(formFactor) * scale * attenuation;
+                lighting.specular = lightData.color * PolygonIrradianceFromVectorFormFactor(formFactor) * scale * attenuation;
             }
 
             v_lightListOffset++;

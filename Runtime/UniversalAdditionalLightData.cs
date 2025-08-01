@@ -119,6 +119,21 @@ namespace UnityEngine.Rendering.Universal
             get => m_Version;
         }
 
+        #region Extension
+
+        private void OnEnable()
+        {
+            LightManager.OnLightEnable(light);
+        }
+
+        private void OnDisable()
+        {
+            LightManager.OnLightDisable(light);
+        }
+
+        #endregion
+        
+
         [Tooltip("Controls if light Shadow Bias parameters use pipeline settings.")]
         [SerializeField] bool m_UsePipelineSettings = true;
 

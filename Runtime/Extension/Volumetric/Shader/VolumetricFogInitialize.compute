@@ -1,0 +1,44 @@
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+
+#pragma kernel VolumetricFogInitialize
+
+#define PREFER_HALF 0
+
+#define GROUP_SIZE_1D 8
+
+#include "VolumetricCompute.hlsl"
+
+// struct ViewRay {
+//     float3 originWS;
+//     float3 centerDirWS;
+// };
+RW_TEXTURE3D(float4, _VBufferDensity); // RGB = sqrt(scattering), A = sqrt(extinction)
+
+
+void FillVolumetricDensityBuffer(uint2 voxelCoord2D) {
+    // float t0 = DecodeLogarithmicDepthGeneralized(0, _VBufferDistanceDecodingParams);
+    // float de = _VBufferRcpSliceCount;
+
+    float4 density = _GlobalFogDensity;
+    density.a = max(density.a, FLT_MIN);
+    // float3 scattering = density.rgb;
+    // float extinction = max(density.a, FLT_MIN);
+
+    for (uint slice = 0; slice < _VBufferSliceCount; ++slice) {
+        uint3 voxelCoord = uint3(voxelCoord2D, slice);
+
+        // float e1 = slice * de + de; // (slice + 1) / sliceCount
+        // float t1 = DecodeLogarithmicDepthGeneralized(e1, _VBufferDistanceDecodingParams);
+        // float dt = t1 - t0;
+        // float t  = t0 + 0.5 * dt;
+
+        // float3 voxelCenterWS = ray.originWS + t * ray.centerDirWS;
+        _VBufferDensity[voxelCoord] = density;
+    }
+}
+
+
+[numthreads(GROUP_SIZE_1D, GROUP_SIZE_1D, 1)]
+void VolumetricFogInitialize(uint3 dispatchThreadId : SV_DispatchThreadID) {
+    FillVolumetricDensityBuffer(dispatchThreadId.xy);
+}

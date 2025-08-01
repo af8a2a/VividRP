@@ -133,9 +133,9 @@ namespace UnityEngine.Rendering.Universal.Internal
                         lightFlags |= (int)LightFlag.SubtractiveMixedLighting;
 
                     // As we said before.
-                    directionalLightData.lightPosWS = visibleLights[visLightIndex].GetPosition();
-                    directionalLightData.lightDirection = lightPos;
-                    directionalLightData.lightColor = lightColor;
+                    directionalLightData.positionWS = visibleLights[visLightIndex].GetPosition();
+                    directionalLightData.dir = lightPos;
+                    directionalLightData.color = lightColor;
                     directionalLightData.lightAttenuation = lightAttenuation;
                     // directionalLightData.lightOcclusionProbInfo = lightOcclusionChannel;
                     directionalLightData.lightFlags = lightFlags;
@@ -149,6 +149,7 @@ namespace UnityEngine.Rendering.Universal.Internal
                     directionalLightData.lightDimmer = 1;
                     directionalLightData.diffuseDimmer = 1;
                     directionalLightData.specularDimmer = 1;
+                    directionalLightData.volumetricLightDimmer = additionalLightData.volumetricDimmer;
 
 
                     m_DirectionalLightsData[visLightIndex] = directionalLightData;
@@ -177,10 +178,10 @@ namespace UnityEngine.Rendering.Universal.Internal
                         gpuLightsData.cookieLightIndex = cookieLightIndex;
                     }
 
-                    gpuLightsData.lightPosWS = lightPos;
-                    gpuLightsData.lightColor = lightColor;
+                    gpuLightsData.positionWS = lightPos;
+                    gpuLightsData.color = lightColor;
                     gpuLightsData.lightAttenuation = lightAttenuation;
-                    gpuLightsData.lightDirection = lightSpotDir;
+                    gpuLightsData.dir = lightSpotDir;
                     gpuLightsData.lightOcclusionProbInfo = lightOcclusionChannel;
                     gpuLightsData.lightFlags = lightFlags;
                     gpuLightsData.shadowLightIndex = shadowLightIndex;
@@ -209,7 +210,7 @@ namespace UnityEngine.Rendering.Universal.Internal
                     gpuLightsData.forward = visibleLightAxisAndPosition.Forward;
                     gpuLightsData.up = visibleLightAxisAndPosition.Up;
                     gpuLightsData.right = visibleLightAxisAndPosition.Right;
-
+                    gpuLightsData.volumetricLightDimmer = additionalLightData.volumetricDimmer;
                     {
                         const float hugeValue = 16777216.0f;
                         const float sqrtHuge = 4096.0f;
@@ -268,7 +269,7 @@ namespace UnityEngine.Rendering.Universal.Internal
 
                 lightBounds = m_LightBounds,
                 lightVolumes = m_LightVolumes,
-                //gpuLightsData = m_LightsData
+                gpuLightsData = m_GPULightsData,
             };
             m_CreateGpuLightDataJobHandle = createJob.Schedule(lightCount, 32);
             // CompeleteJob
@@ -533,6 +534,8 @@ namespace UnityEngine.Rendering.Universal.Internal
 
                 lightVolumeData.lightCategory = (uint)lightCategory;
                 lightVolumeData.lightVolume = (uint)lightVolumeType;
+
+                lightVolumeData.affectVolumetric = gpuLightsData[lightIndex].volumetricLightDimmer > 0.0f ? 1 : 0;
 
 
                 if (gpuLightType == GPULightType.Point)

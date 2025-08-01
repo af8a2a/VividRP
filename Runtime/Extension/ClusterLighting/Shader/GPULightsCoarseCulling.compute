@@ -4,7 +4,6 @@
 // TODO: delete
 // #pragma enable_d3d11_debug_symbols
 #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal
-// Note that DanbaidongRP don't care with switch platform(which need to handle with PLATFORM_LANE_COUNT).
 
 #pragma kernel ScreenSpaceAABB          GPULIGHTS_SCREENAABB
 #pragma kernel CoarseCullingLights      GPULIGHTS_COARSECULLING

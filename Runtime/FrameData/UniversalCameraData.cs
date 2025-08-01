@@ -662,6 +662,9 @@ namespace UnityEngine.Rendering.Universal
         
         internal DenoiseSystem denoiseSystem => DenoiseSystem.GetOrCreate(camera);
 
+        
+        public Frustum frustum;
+
         ///<inheritdoc/>
         public override void Reset()
         {

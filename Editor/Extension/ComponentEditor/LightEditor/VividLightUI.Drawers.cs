@@ -24,7 +24,9 @@ namespace UnityEditor.Rendering.Universal
             Rendering = 1 << 3,
             Shadows = 1 << 4,
             LightCookie = 1 << 5,
-            Contribution = 1 << 6
+            Contribution = 1 << 6,
+            Volumetric = 1 << 7,
+
         }
 
         static readonly ExpandedState<Expandable, Light> k_ExpandedState = new(~-1, "URP");
@@ -88,7 +90,13 @@ namespace UnityEditor.Rendering.Universal
             CED.FoldoutGroup(LightUI.Styles.shadowHeader,
                 Expandable.Shadows,
                 k_ExpandedState,
-                DrawShadowsContent)
+                DrawShadowsContent),
+            CED.FoldoutGroup(LightUI.Styles.volumetricHeader,
+                Expandable.Volumetric,
+                k_ExpandedState,
+                CED.Group(
+                    DrawVolumetric))
+
         );
 
         static Func<int> s_SetGizmosDirty = SetGizmosDirty();

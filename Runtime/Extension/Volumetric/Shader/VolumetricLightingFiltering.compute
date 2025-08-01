@@ -1,0 +1,95 @@
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+
+#pragma kernel FilterVolumetricLighting
+
+#pragma multi_compile _ NEED_SEPARATE_OUTPUT
+
+#define PREFER_HALF 0
+
+#include "VolumetricCompute.hlsl"
+
+RW_TEXTURE3D(float4, RW_VBufferLighting);
+#define R_VBufferLighting RW_VBufferLighting
+#define W_VBufferLighting RW_VBufferLighting
+
+#define GAUSSIAN_SIGMA 1.0
+
+#define GROUP_SIZE_1D_XY 8
+#define GROUP_SIZE_1D_Z 1
+
+#define FILTER_SIZE_1D (GROUP_SIZE_1D_XY + 2)
+#define LDS_SIZE FILTER_SIZE_1D * FILTER_SIZE_1D
+
+// TODO: May use 1 uint for 2 pixels
+groupshared float gs_cacheR[LDS_SIZE];
+groupshared float gs_cacheG[LDS_SIZE];
+groupshared float gs_cacheB[LDS_SIZE];
+groupshared float gs_cacheA[LDS_SIZE];
+
+float4 GetSample(int index) {
+    float4 outVal;
+    outVal.r = gs_cacheR[index];
+    outVal.g = gs_cacheG[index];
+    outVal.b = gs_cacheB[index];
+    outVal.a = gs_cacheA[index];
+    return outVal;
+}
+
+void PrefetchData(uint groupIndex, uint2 groupOrigin, uint sliceIndex) {
+    int2 originXY = groupOrigin - int2(1, 1);
+    for (int i = 0; i < 2; ++i) {
+        uint sampleId = i + groupIndex * 2;
+        int2 offsetXY;
+        offsetXY.x = sampleId % FILTER_SIZE_1D;
+        offsetXY.y = sampleId / FILTER_SIZE_1D;
+        int3 sampleCoord = int3(clamp(originXY + offsetXY, 0, _VBufferViewportSize.xy), sliceIndex);
+
+        float4 sampleVal = R_VBufferLighting[sampleCoord];
+
+        int LDSIndex = offsetXY.x + offsetXY.y * FILTER_SIZE_1D;
+        gs_cacheR[LDSIndex] = sampleVal.r;
+        gs_cacheG[LDSIndex] = sampleVal.g;
+        gs_cacheB[LDSIndex] = sampleVal.b;
+        gs_cacheA[LDSIndex] = sampleVal.a;
+    }
+}
+
+float Gaussian(float radius, float sigma) {
+    float v = radius / sigma;
+    return exp(-(v*v));
+}
+
+[numthreads(GROUP_SIZE_1D_XY, GROUP_SIZE_1D_XY, 1)]
+void FilterVolumetricLighting(uint3 dispatchThreadId : SV_DispatchThreadID,
+                                int   groupIndex       : SV_GroupIndex,
+                                uint2 groupId          : SV_GroupID,
+                                uint2 groupThreadId    : SV_GroupThreadID){
+    // Compute the coordinate that this thread needs to process
+    uint3 voxelCoord = dispatchThreadId;
+    
+    // Load 2 values per thread. LDS_SIZE
+    if (groupIndex < LDS_SIZE / 2) {
+        PrefetchData(groupIndex, groupId * GROUP_SIZE_1D_XY, voxelCoord.z);
+    }
+    // Make sure all values are loaded in LDS by now.
+    GroupMemoryBarrierWithGroupSync();
+
+    float sumW = 0.0;
+    float4 value = float4(0.0, 0.0, 0.0, 0.0);
+    const int radius = 1;
+    for (int i = -radius; i <= radius; ++i) {
+        for (int j = -radius; j <= radius; ++j) {
+            const int3 tapCoord = voxelCoord + int3(i, j, 0);
+            int2 tapOffset = int2(i, j);
+            uint2 tapLdsId = (groupThreadId + 1) + tapOffset;
+            uint tapLdsIdx = tapLdsId.x % FILTER_SIZE_1D + tapLdsId.y * FILTER_SIZE_1D;
+            float4 tapValue = GetSample(tapLdsIdx);
+
+            float weight = Gaussian(length(tapOffset), GAUSSIAN_SIGMA);
+            value += weight * tapValue;
+            sumW += weight;
+        }
+    }
+
+    W_VBufferLighting[voxelCoord] = value / sumW;
+}

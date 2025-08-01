@@ -1,6 +1,11 @@
 #ifndef GPU_LIGHTS_CULLING_UTILS_INCLUDE
 #define GPU_LIGHTS_CULLING_UTILS_INCLUDE
 
+
+#define SHADEROPTIONS_FPTLMAX_LIGHT_COUNT (63)
+#define SHADEROPTIONS_LIGHT_CLUSTER_MAX_CELL_ELEMENT_COUNT (24)
+#define SHADEROPTIONS_PATH_TRACING_MAX_LIGHT_COUNT (16)
+
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/ClusterLighting/GPULights.cs.hlsl"
 
 // Used to index into our SFiniteLightBound (g_LightBounds) and

@@ -1,0 +1,284 @@
+#pragma enable_d3d11_debug_symbols
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel VolumetricLighting
+
+#pragma multi_compile _ LIGHT_COOKIE
+
+#define PREFER_HALF 0
+#define _GPU_LIGHTS_CLUSTER
+
+#define GROUP_SIZE_1D           8
+
+#define MAIN_LIGHT_CALCULATE_SHADOWS
+#include "VolumetricCompute.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/ClusterLight.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/AutoExposure.hlsl"
+TEXTURE3D(_VBufferDensity); // RGB = scattering, A = extinction
+RW_TEXTURE3D(float4, _VBufferLightingRW);
+
+TEXTURE2D(_MaxZMaskTexture);
+
+int _MainLightIndex;
+//int _MainLightShadow;
+
+struct ViewRay
+{
+    float3 originWS;
+    float3 centerDirWS;
+    float geomDist;
+
+    float maxDist;
+};
+
+struct VoxelLighting
+{
+    float3 radianceNoPhase;
+    float3 radianceComplete;
+};
+
+bool IsInRange(float x, float2 range)
+{
+    return clamp(x, range.x, range.y) == x;
+}
+
+VoxelLighting EvaluateVoxelLightingLocal(PositionInputs posInput, ViewRay ray, float t0, float t1, float rndVal, float extinction, float anisotropy)
+{
+    VoxelLighting lighting;
+    ZERO_INITIALIZE(VoxelLighting, lighting);
+
+    float t = (t0 + t1) * 0.5;
+    posInput.positionWS = ray.originWS + t * ray.centerDirWS;
+    
+
+        // Punctual Lights
+    uint lightCategory = LIGHTCATEGORY_PUNCTUAL;
+    uint lightStart;
+    uint lightCount;
+    GetCountAndStart(posInput, lightCategory, lightStart, lightCount);
+    uint v_lightListOffset = 0;
+    uint v_lightIdx = lightStart;
+
+    if (lightCount > 0) // avoid 0 iteration warning.
+    {
+        while (v_lightListOffset < lightCount)
+        {
+            v_lightIdx = FetchIndex(lightStart, v_lightListOffset);
+            if (v_lightIdx == -1)
+                break;
+            {
+                GPULightData gpuLight = FetchLight(v_lightIdx);
+                if (gpuLight.volumetricLightDimmer <= 0)
+                {
+                    continue;
+                }
+
+                float3 lightPositionWS = gpuLight.positionWS;
+                
+                float tEntr = t0;
+                float tExit = t1;
+                // TODO: recalculate tEntr and tExit when light type is not point
+                
+                float t, distSq, rcpPdf;
+                ImportanceSamplePunctualLight(rndVal, lightPositionWS, 1,
+                                              ray.originWS, ray.centerDirWS,
+                                              tEntr, tExit,
+                                              t, distSq, rcpPdf);
+                posInput.positionWS = ray.originWS + t * ray.centerDirWS;
+                
+                float cosTheta = dot(gpuLight.dir, ray.centerDirWS);
+                float phase = CornetteShanksPhasePartVarying(anisotropy, cosTheta);
+                
+                float weight = TransmittanceHomogeneousMedium(extinction, t - t0) * rcpPdf;
+                
+                float3 d = length(posInput.positionWS - gpuLight.positionWS);
+                lighting.radianceNoPhase += weight * gpuLight.color * gpuLight.volumetricLightDimmer;
+                lighting.radianceComplete += (weight * gpuLight.color) * phase * gpuLight.volumetricLightDimmer;
+
+            }
+
+            v_lightListOffset++;
+        }
+    }
+
+    
+    return lighting;
+}
+
+VoxelLighting EvaluateVoxelLightingMain(PositionInputs posInput, ViewRay ray, float t0, float dt, float rndVal, float extinction, float anisotropy)
+{
+    VoxelLighting lighting;
+    ZERO_INITIALIZE(VoxelLighting, lighting);
+
+
+    if (_DirectionalLightCount <= 0) return lighting;
+    DirectionalLightData dirLight = g_DirectionalLightDatas[0];
+
+    float dimmer = dirLight.volumetricLightDimmer;
+    if (dimmer <= 0) return lighting;
+
+    
+    float tOffset, weight;
+    ImportanceSampleHomogeneousMedium(rndVal, extinction, dt, tOffset, weight);
+
+    float t = t0 + tOffset;
+    posInput.positionWS = ray.originWS + t * ray.centerDirWS;
+
+
+    float cosTheta = dot(dirLight.dir, ray.centerDirWS);
+    float phase = CornetteShanksPhasePartVarying(anisotropy, cosTheta);
+
+    float shadowAtten = 1;
+    //if (_MainLightShadow > 0) 
+    shadowAtten = MainLightRealtimeShadow(TransformWorldToShadowCoord(posInput.positionWS));
+    lighting.radianceNoPhase += weight * dirLight.color * dimmer * shadowAtten;
+    lighting.radianceComplete += (weight * dirLight.color) * phase * dimmer * shadowAtten;
+
+    return lighting;
+}
+
+void FillVolumetricLightingBuffer(PositionInputs posInput, ViewRay ray, float tStart)
+{
+    float t0 = max(tStart, DecodeLogarithmicDepthGeneralized(0, _VBufferDistanceDecodingParams));
+    float de = _VBufferRcpSliceCount; // Log-encoded distance between slices
+
+    float3 totalRadiance = 0;
+    float opticalDepth = 0;
+    uint slice = 0;
+    float4 currValue = 0;
+    for (; slice < _VBufferSliceCount; ++slice)
+    {
+        uint3 voxelCoord = uint3(posInput.positionSS, slice);
+        _VBufferLightingRW[voxelCoord] = float4(1, 0, 0, 1);
+
+        float e1 = slice * de + de; // (slice + 1) / sliceCount
+        float t1 = max(tStart, DecodeLogarithmicDepthGeneralized(e1, _VBufferDistanceDecodingParams));
+        float tNext = t1;
+
+        // float3 pws = ray.originWS + t1 * ray.centerDirWS;
+        // pws = (pws)/20;
+        // _VBufferLightingRW[voxelCoord] = (float4(abs(pws), 1));
+        // continue;
+
+        bool containsOpaqueGeometry = IsInRange(ray.geomDist, float2(t0, t1));
+        if (containsOpaqueGeometry) {
+            // Only integrate up to the opaque surface (make the voxel shorter, but not completely flat).
+            // Note that we can NOT completely stop integrating when the ray reaches geometry, since
+            // otherwise we get flickering at geometric discontinuities if reprojection is enabled.
+            // In this case, a temporally stable light leak is better than flickering.
+            t1 = max(t0 * 1.0001, ray.geomDist);
+        }
+
+        float dt = t1 - t0;
+        if (dt <= 0.0)
+        {
+            _VBufferLightingRW[voxelCoord] = 0;
+            t0 = t1;
+            continue;
+        }
+
+        float t = DecodeLogarithmicDepthGeneralized(e1 - 0.5 * de, _VBufferDistanceDecodingParams);
+        // float3 centerWS = ray.originWS + t * ray.centerDirWS;
+
+        float4 density = LOAD_TEXTURE3D(_VBufferDensity, voxelCoord);
+        float3 scattering = density.rgb;
+        float extinction = max(density.a, FLT_MIN);
+        float anisotropy = 0; // TODO: configure
+
+        // Perform per-pixel randomization by adding an offset and then sampling uniformly
+        // (in the log space) in a vein similar to Stochastic Universal Sampling:
+        // https://en.wikipedia.org/wiki/Stochastic_universal_sampling
+        float perPixelRandomOffset = GenerateHashedRandomFloat(posInput.positionSS);
+        float rndVal = frac(perPixelRandomOffset + 0.5);
+
+        VoxelLighting aggregateLighting;
+        ZERO_INITIALIZE(VoxelLighting, aggregateLighting);
+
+        VoxelLighting lighting = EvaluateVoxelLightingMain(posInput, ray,
+                                                           t0, dt, rndVal, extinction, anisotropy);
+        aggregateLighting.radianceComplete += lighting.radianceComplete;
+        aggregateLighting.radianceNoPhase += lighting.radianceNoPhase;
+
+        lighting = EvaluateVoxelLightingLocal(posInput, ray,
+                                              t0, t1, rndVal, extinction, anisotropy);
+        aggregateLighting.radianceComplete += lighting.radianceComplete;
+        aggregateLighting.radianceNoPhase += lighting.radianceNoPhase;
+
+        float phase = IsotropicPhaseFunction();
+
+        float4 blendValue = float4(aggregateLighting.radianceNoPhase, extinction * dt);
+        float transmittance = TransmittanceFromOpticalDepth(opticalDepth);
+
+        // TODO: use 1 as inscatter (environment light)
+        float inscatterRadiance =0 * TransmittanceIntegralHomogeneousMedium(extinction, dt);
+
+        totalRadiance += transmittance * scattering * (phase * blendValue.rgb + inscatterRadiance) ;
+        opticalDepth += blendValue.a * 0.5;
+
+        currValue = LinearizeRGBD(float4(totalRadiance, opticalDepth));
+        _VBufferLightingRW[voxelCoord] = currValue; //LinearizeRGBD(float4(totalRadiance, opticalDepth));
+        // _VBufferLightingRW[voxelCoord] = float4(opticalDepth.xxx, 1);
+
+        opticalDepth += blendValue.a * 0.5;
+
+        if (t0 * 0.99 > ray.maxDist)
+        {
+            break;
+        }
+
+        t0 = tNext;
+    }
+
+    for (; slice < _VBufferSliceCount; ++slice)
+    {
+        uint3 voxelCoord = uint3(posInput.positionSS, slice);
+        // _VBufferLightingRW[voxelCoord] = float4(0, 1, 0, 1);
+        _VBufferLightingRW[voxelCoord] = currValue;
+    }
+}
+
+
+[numthreads(GROUP_SIZE_1D, GROUP_SIZE_1D, 1)]
+void VolumetricLighting(uint3 dispatchThreadId : SV_DispatchThreadID,
+                        uint2 groupId : SV_GroupID,
+                        uint2 groupThreadId : SV_GroupThreadID,
+                        int groupIndex : SV_GroupIndex)
+{
+    //uint2 groupOffset = groupId * GROUP_SIZE_1D;
+    uint2 voxelCoord = dispatchThreadId.xy;
+
+    float3 F = GetViewForwardDir();
+    // float3 U = GetViewUpDir();
+    // float3 R = cross(F, U);
+
+    float2 centerCoord = voxelCoord + float2(0.5, 0.5);
+
+    // Compute a ray direction s.t. ViewSpace(rayDirWS).z = 1.
+    float3 rayDirWS = mul(_VBufferCoordToViewDirWS, float4(centerCoord, 1, 1)).xyz;
+    float rcpLenRayDir = rsqrt(dot(rayDirWS, rayDirWS));
+
+    ViewRay ray;
+    ray.originWS = GetCurrentViewPosition();
+    ray.centerDirWS = rayDirWS * rcpLenRayDir; // Normalize
+    ray.geomDist = FLT_INF;
+    ray.maxDist = FLT_INF;
+
+    PositionInputs posInput = GetPositionInput(voxelCoord, _VBufferViewportSize.zw, groupId);
+
+    // TODO: 
+    uint2 pixelCoord = (uint2)(centerCoord * _VBufferVoxelSize);
+    float deviceDepth = LoadSceneDepth(pixelCoord);
+    if (deviceDepth > 0) {
+        float linearDepth = LinearEyeDepth(deviceDepth, _ZBufferParams);
+        float distDivDepth = rcp(dot(ray.centerDirWS, F));
+        ray.geomDist = linearDepth * distDivDepth;
+        float2 uv = posInput.positionNDC;
+        float4 d = GATHER_RED_TEXTURE2D_X(_MaxZMaskTexture, sampler_PointClamp, uv);
+        ray.maxDist = max(Max3(d.x, d.y, d.z), d.w) * distDivDepth;
+    }
+
+
+    float tStart = 0; // TODO: use camera near instead
+    FillVolumetricLightingBuffer(posInput, ray, tStart);
+}

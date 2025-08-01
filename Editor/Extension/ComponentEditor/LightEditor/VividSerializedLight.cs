@@ -48,11 +48,18 @@ namespace UnityEditor.Rendering.Universal
 
         #endregion
 
-
         #region AreaLight
 
         public SerializedProperty shapeWidth;
         public SerializedProperty shapeHeight;
+
+
+        #endregion
+
+        #region Volumetric
+        public SerializedProperty affectsVolumetric;
+        public SerializedProperty volumetricDimmer;
+        public SerializedProperty volumetricFadeDistance;
 
 
         #endregion
@@ -124,6 +131,13 @@ namespace UnityEditor.Rendering.Universal
                 shapeRadius = o.Find(x => x.shapeRadius);
                 baseContributionProp = o.Find(x => x.baseContribution);
 
+                #endregion
+
+                #region Volumetric
+
+                volumetricDimmer = o.Find(x => x.volumetricDimmer);
+                affectsVolumetric = o.Find(x => x.affectsVolumetric);
+                volumetricFadeDistance = o.Find(x => x.volumetricFadeDistance);
                 #endregion
             }
 

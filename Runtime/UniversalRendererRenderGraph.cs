@@ -904,11 +904,8 @@ namespace UnityEngine.Rendering.Universal
                 var punctualLightCount = lightData.additionalLightsCount;
                 var reflectionProbes = renderingData.cullResults.visibleReflectionProbes;
                 var reflectionProbeCount = Mathf.Min(reflectionProbes.Length, UniversalRenderPipeline.maxVisibleReflectionProbes);
-                m_GPULightsDataBuildSystem.NewFrame(punctualLightCount + reflectionProbeCount, m_AdditionalLightsShadowCasterPass, m_LightCookieManager);
-                m_GPULightsDataBuildSystem.BuildGPULightList(lightData, cameraData);
-                m_GPULightsDataBuildSystem.BuildEnvLightList(ref reflectionProbes, reflectionProbeCount, cameraData);
-
-                m_GPULights.PreSetup(lightData, cameraData, m_GPULightsDataBuildSystem);
+                m_GPULights.NewFrame(punctualLightCount + reflectionProbeCount, m_AdditionalLightsShadowCasterPass, m_LightCookieManager);
+                m_GPULights.PreSetup(lightData, cameraData);
             }
 
             SkySystem.instance.UpdateEnvironment(renderGraph, frameData, lightData, false, false, false, SkyAmbientMode.Dynamic);

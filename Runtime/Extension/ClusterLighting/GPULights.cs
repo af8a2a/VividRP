@@ -101,6 +101,7 @@ namespace UnityEngine.Rendering.Universal
         // AreaLight
         Tube, // Keep Line lights before Rectangle. This is needed because of a compiler bug (see LightLoop.hlsl)
         Rectangle,
+
         // Currently not supported in real time (just use for reference)
         Disc,
         // Sphere,
@@ -218,7 +219,7 @@ namespace UnityEngine.Rendering.Universal
         public uint featureFlags;
 
         public Vector3 boxInvRange; // Box: 1 / (OuterBoxExtents - InnerBoxExtents)
-        public float unused2;
+        public float affectVolumetric;
     };
 
     /// <summary>
@@ -266,19 +267,19 @@ namespace UnityEngine.Rendering.Universal
 
 
     [GenerateHLSL(PackingRules.Exact, false)]
-    struct GPULightData
+    internal struct GPULightData
     {
         // Packing order depends on chronological access to avoid cache misses
         // Make sure to respect the 16-byte alignment
-        public Vector3 lightPosWS;
+        public Vector3 positionWS;
         public uint lightLayerMask;
 
-        public Vector3 lightColor;
+        public Vector3 color;
         public int lightFlags;
 
         public Vector4 lightAttenuation;
 
-        public Vector3 lightDirection;
+        public Vector3 dir;
         public int shadowLightIndex;
 
         public Vector4 lightOcclusionProbInfo;
@@ -295,8 +296,7 @@ namespace UnityEngine.Rendering.Universal
         public Vector3 up;
         public float rangeAttenuationBias;
         public Vector3 right;
-        public float __unused2__;
-
+        public float volumetricLightDimmer;
     };
 
     [GenerateHLSL(PackingRules.Exact, false)]
@@ -304,21 +304,23 @@ namespace UnityEngine.Rendering.Universal
     {
         // Packing order depends on chronological access to avoid cache misses
         // Make sure to respect the 16-byte alignment
-        public Vector3 lightPosWS;
+        public Vector3 positionWS;
         public uint lightLayerMask;
 
-        public Vector3 lightColor;
+        public Vector3 color;
         public int lightFlags;
 
         public Vector4 lightAttenuation;
 
-        public Vector3 lightDirection;
+        public Vector3 dir;
         public int shadowlightIndex;
 
         public float minRoughness;
         public float lightDimmer; //TODO: make it used
         public float diffuseDimmer; //TODO: make it used
         public float specularDimmer; //TODO: make it used
+
+        public float volumetricLightDimmer;
     };
 
     [GenerateHLSL(PackingRules.Exact, false)]
@@ -334,17 +336,22 @@ namespace UnityEngine.Rendering.Universal
     /// <summary>
     /// Main Class
     /// </summary>
-    public class GPULights : ScriptableRenderPass
+    internal class GPULights : ScriptableRenderPass
     {
+        private static LocalKeyword s_BigTileVolumetricLightListKeyword;
+
         // Profiling tag
         private static string m_ScreenSpaceAABBTag = "ScreenSpaceAABB";
         private static string m_CoarseCullingTag = "CoarseCulling";
         private static string m_ClusterCullingTag = "ClusterCulling";
         private static string m_ClearLightListsTag = "ClearLightLists";
+        private static string m_BigTileTag = "BigTile";
+
         private static ProfilingSampler m_ScreenSpaceAABBSampler = new ProfilingSampler(m_ScreenSpaceAABBTag);
         private static ProfilingSampler m_CoarseCullingSampler = new ProfilingSampler(m_CoarseCullingTag);
         private static ProfilingSampler m_ClusterCullingSampler = new ProfilingSampler(m_ClusterCullingTag);
         private static ProfilingSampler m_ClearLightListsSampler = new ProfilingSampler(m_ClearLightListsTag);
+        private static ProfilingSampler m_BigTileSampler = new ProfilingSampler(m_BigTileTag);
 
         // Public Variables
         internal ShaderVariablesLightList lightCBuffer;
@@ -355,6 +362,11 @@ namespace UnityEngine.Rendering.Universal
 
         // TODO: change to m_MaxDirectionalLightsOnScreen + m_MaxPunctualLightsOnScreen(512) + m_MaxAreaLightsOnScreen + m_MaxEnvLightsOnScreen
         private int m_MaxLightOnScreen = 16 + 512;
+
+        // Big Tile
+        private ComputeShader bigTilePrepassShader;
+        private int bigTilePrepassKernel;
+        // private int numBigTilesX, numBigTilesY;
 
         // Private Variables
         private ComputeShader m_gpulightsCS_ClearLists;
@@ -380,7 +392,7 @@ namespace UnityEngine.Rendering.Universal
         public GPULights(RenderPassEvent passEvent)
         {
             var shaderResources = GraphicsSettings.GetRenderPipelineSettings<ClusterLightingRuntimeShader>();
-            
+
             m_gpulightsCS_ClearLists = shaderResources.gpuLightsClearLists;
             m_gpuLightsCS_CoarseCulling = shaderResources.gpuLightsCoarseCullingCS;
             m_gpuLightsCS_Cluster = shaderResources.gpuLightsCluster;
@@ -390,12 +402,20 @@ namespace UnityEngine.Rendering.Universal
             m_CoarseCullingLightsKernel = m_gpuLightsCS_CoarseCulling.FindKernel("CoarseCullingLights");
             m_ClusterCullingLightsKernel = m_gpuLightsCS_Cluster.FindKernel("ClusterCullingLights");
 
+            // Big tile prepass
+            bigTilePrepassShader = shaderResources.gpuLightsBigTile;
+            bigTilePrepassKernel = bigTilePrepassShader.FindKernel("BigTileLightListGen");
+
             m_ReflectionProbeManager = ReflectionProbeManager.Create();
             renderPassEvent = passEvent;
             lightCBuffer = new ShaderVariablesLightList();
+
+            m_GPULightsDataBuildSystem = new GPULightsDataBuildSystem();
+
+            s_BigTileVolumetricLightListKeyword = new LocalKeyword(bigTilePrepassShader, "GENERATE_VOLUMETRIC_BIGTILE");
         }
-        
-        
+
+
         private class SetupLightPassData
         {
             internal UniversalRenderingData renderingData;
@@ -403,18 +423,18 @@ namespace UnityEngine.Rendering.Universal
             internal UniversalLightData lightData;
             internal GPULights gpuLights;
         };
+
         static ProfilingSampler s_SetupClusterDeferredLights = new ProfilingSampler("Setup ClusterDeferred Lights");
 
 
         internal void SetupLights(UnsafeCommandBuffer cmd, UniversalRenderingData renderingData, UniversalCameraData cameraData, UniversalLightData lightData)
         {
             m_ReflectionProbeManager.UpdateGpuData(CommandBufferHelpers.GetNativeCommandBuffer(cmd), ref renderingData.cullResults);
-
         }
 
-        
-        
-        internal void SetupRenderGraphLights(RenderGraph renderGraph, UniversalRenderingData renderingData, UniversalCameraData cameraData, UniversalLightData lightData)
+
+        internal void SetupRenderGraphLights(RenderGraph renderGraph, UniversalRenderingData renderingData, UniversalCameraData cameraData,
+            UniversalLightData lightData)
         {
             using (var builder = renderGraph.AddUnsafePass<SetupLightPassData>(s_SetupClusterDeferredLights.name, out var passData,
                        s_SetupClusterDeferredLights))
@@ -433,10 +453,13 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
-        internal void PreSetup(UniversalLightData lightData, UniversalCameraData cameraData, GPULightsDataBuildSystem gpuLightsDataBuildSystem)
+        public void NewFrame(int maxBoundsCount, AdditionalLightsShadowCasterPass addShadowCaster, LightCookieManager cookieManager)
         {
-            m_GPULightsDataBuildSystem = gpuLightsDataBuildSystem;
+            m_GPULightsDataBuildSystem.NewFrame(maxBoundsCount, addShadowCaster, cookieManager);
+        }
 
+        internal void PreSetup(UniversalLightData lightData, UniversalCameraData cameraData)
+        {
             var desc = cameraData.cameraTargetDescriptor;
             int width = desc.width;
             int height = desc.height;
@@ -476,7 +499,7 @@ namespace UnityEngine.Rendering.Universal
                 scaledCameraHeight *= ScalableBufferManager.heightScaleFactor;
             }
 
-            int envLightsCount = gpuLightsDataBuildSystem.envLightsCount;
+            int envLightsCount = m_GPULightsDataBuildSystem.envLightsCount;
             int additionalLightsCount = lightData.additionalLightsCount;
             lightCBuffer.g_iNrVisibLights = additionalLightsCount + envLightsCount;
             lightCBuffer._DirectionalLightCount = (uint)lightData.directionalLightsCount;
@@ -497,7 +520,7 @@ namespace UnityEngine.Rendering.Universal
             lightCBuffer._NumTileFtplX = (uint)RenderingUtilsExt.DivRoundUp(width, LightDefinitions.s_TileSizeFptl);
             lightCBuffer._NumTileFtplY = (uint)RenderingUtilsExt.DivRoundUp(height, LightDefinitions.s_TileSizeFptl);
             lightCBuffer.g_fClustScale = (float)(geomSeries / (cameraData.camera.farClipPlane - cameraData.camera.nearClipPlane));
-            ;
+
             lightCBuffer.g_fClustBase = k_ClustLogBase;
             lightCBuffer.g_fNearPlane = cameraData.camera.nearClipPlane;
             lightCBuffer.g_fFarPlane = cameraData.camera.farClipPlane;
@@ -527,9 +550,17 @@ namespace UnityEngine.Rendering.Universal
             internal int nrClustersX;
             internal int nrClustersY;
 
+            // Big Tile
+            public ComputeShader bigTilePrepassShader;
+            public int bigTilePrepassKernel;
+            public BufferHandle bigTileLightList;
+            public BufferHandle bigTileVolumetricLightList;
+
+
             // LightsData
             internal ShaderVariablesLightList lightListCB;
-            internal BufferHandle lightBoundsBuffer;
+            internal BufferHandle lightBoundsBuffer; //aka.HDRP convexBoundsBuffer;
+
             internal BufferHandle lightVolumeDataBuffer;
 
             // AABB, CoarseCull Buffer
@@ -551,6 +582,12 @@ namespace UnityEngine.Rendering.Universal
             internal BufferHandle GPULightsData;
             internal BufferHandle directionalLightsData;
             //internal BufferHandle envLightsData;
+
+
+            // Big Tile
+            public BufferHandle bigTileLightList;
+            public BufferHandle bigTileVolumetricLightList;
+
 
             // CoarseBuffer
             internal BufferHandle coarseLightList;
@@ -596,6 +633,10 @@ namespace UnityEngine.Rendering.Universal
             passData.nrBigTilesY = RenderingUtilsExt.DivRoundUp(height, 64);
 
 
+            passData.bigTilePrepassShader = bigTilePrepassShader;
+            passData.bigTilePrepassKernel = bigTilePrepassKernel;
+
+
             var bufferSystem = GraphicsBufferSystem.instance;
             int allLightsBufferSize = m_MaxLightOnScreen;
 
@@ -613,6 +654,14 @@ namespace UnityEngine.Rendering.Universal
             passData.coarseLightList =
                 renderGraph.CreateBuffer(new BufferDesc(LightDefinitions.s_MaxNrBigTileLightsPlusOne * passData.nrBigTilesX * passData.nrBigTilesY,
                     sizeof(uint), "coarseLightList"));
+
+
+            passData.bigTileLightList =
+                renderGraph.CreateBuffer(new BufferDesc(LightDefinitions.s_MaxNrBigTileLightsPlusOne * passData.nrBigTilesX * passData.nrBigTilesY / 2,
+                    sizeof(uint), "BigTiles"));
+            passData.bigTileVolumetricLightList =
+                renderGraph.CreateBuffer(new BufferDesc(LightDefinitions.s_MaxNrBigTileLightsPlusOne * passData.nrBigTilesX * passData.nrBigTilesY / 2,
+                    sizeof(uint), "BigTiles For Volumetric"));
 
 
             // Cluster buffers
@@ -688,27 +737,12 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
-
-        static void ExecutePass(GPULightsPassData data, ComputeGraphContext context)
+        static void GenerateLightsScreenSpaceAABBs(ComputeCommandBuffer cmd, GPULightsPassData data)
         {
-            // TODO: We should add envLights(probe) and decals as HDRP.
-            int totalLightCount = data.lightListCB.g_iNrVisibLights;
-            if (totalLightCount == 0)
-            {
-                ClearAllLightLists(context.cmd, data);
-                return;
-            }
-
-            var cmd = context.cmd;
-            // Set lightsData here.
-            cmd.SetBufferData(data.lightBoundsBuffer, data.gpuLightsDataBuildSystem.lightBounds, 0, 0, data.gpuLightsDataBuildSystem.boundsCount);
-            cmd.SetBufferData(data.lightVolumeDataBuffer, data.gpuLightsDataBuildSystem.lightVolumes, 0, 0, data.gpuLightsDataBuildSystem.boundsCount);
-            // Push Constant buffer
-            ConstantBuffer.Push(cmd, data.lightListCB, data.gpuLightsCoarseCullingCS, ShaderConstants.ShaderVariablesLightList);
-
             // GenerateLightsScreenSpaceAABBs
             using (new ProfilingScope(cmd, m_ScreenSpaceAABBSampler))
             {
+                int totalLightCount = data.lightListCB.g_iNrVisibLights;
                 cmd.SetComputeBufferParam(data.gpuLightsCoarseCullingCS, data.screenSpaceAABBKernel, ShaderConstants.g_LightBounds,
                     data.lightBoundsBuffer); // in
                 cmd.SetComputeBufferParam(data.gpuLightsCoarseCullingCS, data.screenSpaceAABBKernel, ShaderConstants.g_vBoundsBuffer,
@@ -720,8 +754,11 @@ namespace UnityEngine.Rendering.Universal
                 int groupCount = RenderingUtilsExt.DivRoundUp(totalLightCount * threadsPerLight, threadsPerGroup);
                 cmd.DispatchCompute(data.gpuLightsCoarseCullingCS, data.screenSpaceAABBKernel, groupCount, 1, 1);
             }
+        }
 
-            // CoarseCullingLights
+
+        static void CoarseCullingLights(ComputeCommandBuffer cmd, GPULightsPassData data)
+        {
             using (new ProfilingScope(cmd, m_CoarseCullingSampler))
             {
                 cmd.SetComputeBufferParam(data.gpuLightsCoarseCullingCS, data.coarseCullingLightsKernel, ShaderConstants.g_LightVolumeData,
@@ -735,13 +772,30 @@ namespace UnityEngine.Rendering.Universal
 
                 cmd.DispatchCompute(data.gpuLightsCoarseCullingCS, data.coarseCullingLightsKernel, data.nrBigTilesX, data.nrBigTilesY, 1);
             }
+        }
 
-            // FPTLLights
+
+        static void BigTilePrepass(ComputeCommandBuffer cmd, GPULightsPassData data)
+        {
+            using (new ProfilingScope(cmd, m_BigTileSampler))
             {
-                // no implementation
-            }
+                cmd.SetComputeBufferParam(data.bigTilePrepassShader, data.bigTilePrepassKernel, ShaderConstants.g_vLightList, data.bigTileLightList);
+                cmd.SetKeyword(data.bigTilePrepassShader, s_BigTileVolumetricLightListKeyword, true);
+                cmd.SetComputeBufferParam(data.bigTilePrepassShader, data.bigTilePrepassKernel, ShaderConstants.g_vVolumetricLightList,
+                    data.bigTileVolumetricLightList);
+                cmd.SetComputeBufferParam(data.bigTilePrepassShader, data.bigTilePrepassKernel, ShaderConstants.g_vBoundsBuffer, data.AABBBoundsBuffer);
+                cmd.SetComputeBufferParam(data.bigTilePrepassShader, data.bigTilePrepassKernel, ShaderConstants.g_LightVolumeData, data.lightVolumeDataBuffer);
+                cmd.SetComputeBufferParam(data.bigTilePrepassShader, data.bigTilePrepassKernel, ShaderConstants.g_LightBounds, data.lightBoundsBuffer);
 
-            // ClusterLights
+                ConstantBuffer.Push(cmd, data.lightListCB, data.bigTilePrepassShader, ShaderConstants.ShaderVariablesLightList);
+
+                cmd.DispatchCompute(data.bigTilePrepassShader, data.bigTilePrepassKernel, data.nrBigTilesX, data.nrBigTilesY, 1);
+            }
+        }
+
+
+        static void ClusterCullingLights(ComputeCommandBuffer cmd, GPULightsPassData data)
+        {
             using (new ProfilingScope(cmd, m_ClusterCullingSampler))
             {
                 cmd.SetComputeBufferParam(data.gpuLightsCluster, data.clusterCullingLightsKernel, ShaderConstants.g_LightVolumeData,
@@ -763,6 +817,40 @@ namespace UnityEngine.Rendering.Universal
 
                 cmd.DispatchCompute(data.gpuLightsCluster, data.clusterCullingLightsKernel, data.nrClustersX, data.nrClustersY, 1);
             }
+        }
+
+
+        static void ExecutePass(GPULightsPassData data, ComputeGraphContext context)
+        {
+            // TODO: We should add envLights(probe) and decals as HDRP.
+            int totalLightCount = data.lightListCB.g_iNrVisibLights;
+            if (totalLightCount == 0)
+            {
+                ClearAllLightLists(context.cmd, data);
+                return;
+            }
+
+            var cmd = context.cmd;
+            // Set lightsData here.
+            cmd.SetBufferData(data.lightBoundsBuffer, data.gpuLightsDataBuildSystem.lightBounds, 0, 0, data.gpuLightsDataBuildSystem.boundsCount);
+            cmd.SetBufferData(data.lightVolumeDataBuffer, data.gpuLightsDataBuildSystem.lightVolumes, 0, 0, data.gpuLightsDataBuildSystem.boundsCount);
+            // Push Constant buffer
+            ConstantBuffer.Push(cmd, data.lightListCB, data.gpuLightsCoarseCullingCS, ShaderConstants.ShaderVariablesLightList);
+
+            GenerateLightsScreenSpaceAABBs(context.cmd, data);
+
+            // FPTLLights
+            {
+                BigTilePrepass(context.cmd, data);
+            }
+
+
+            // CoarseCullingLights
+            CoarseCullingLights(context.cmd, data);
+
+
+            // ClusterLights
+            ClusterCullingLights(context.cmd, data);
 
             // Use RenderSetGlobalAsync to set global
             // Resolve
@@ -782,6 +870,13 @@ namespace UnityEngine.Rendering.Universal
                 UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
                 UniversalLightData lightData = frameData.Get<UniversalLightData>();
                 UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
+                UniversalRenderingData renderingData = frameData.Get<UniversalRenderingData>();
+
+                var reflectionProbes = renderingData.cullResults.visibleReflectionProbes;
+                var reflectionProbeCount = Mathf.Min(reflectionProbes.Length, UniversalRenderPipeline.maxVisibleReflectionProbes);
+
+                m_GPULightsDataBuildSystem.BuildGPULightList(lightData, cameraData);
+                m_GPULightsDataBuildSystem.BuildEnvLightList(ref reflectionProbes, reflectionProbeCount, cameraData);
 
                 // Set passData
                 GPULightsOutPassData outPassData = frameData.GetOrCreate<GPULightsOutPassData>();
@@ -800,11 +895,15 @@ namespace UnityEngine.Rendering.Universal
                 builder.UseBuffer(passData.perTileLogBaseTweak, AccessFlags.Write);
                 builder.UseTexture(resourceData.cameraDepthTexture, AccessFlags.Read);
 
+                builder.UseBuffer(passData.bigTileLightList, AccessFlags.Write);
+                builder.UseBuffer(passData.bigTileVolumetricLightList, AccessFlags.Write);
+
                 // Setup builder state
 #if DANBAIDONGRP_ASYNC_COMPUTE
                 builder.EnableAsyncCompute(true);
 #endif
                 builder.AllowPassCulling(false);
+                builder.AllowGlobalStateModification(true);
 
                 builder.SetRenderFunc((GPULightsPassData data, ComputeGraphContext context) => { ExecutePass(data, context); });
             }
@@ -901,6 +1000,7 @@ namespace UnityEngine.Rendering.Universal
             public static readonly int g_logBaseBuffer = Shader.PropertyToID("g_logBaseBuffer");
             public static readonly int g_GPULightDatas = Shader.PropertyToID("g_GPULightDatas");
             public static readonly int g_DirectionalLightDatas = Shader.PropertyToID("g_DirectionalLightDatas");
+            public static readonly int g_vVolumetricLightList = Shader.PropertyToID("g_vVolumetricLightList");
         }
 
         static class Profiling

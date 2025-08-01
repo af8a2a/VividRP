@@ -154,7 +154,6 @@ namespace UnityEngine.Rendering.Universal
         FinalBlitPass m_FinalBlitPass;
         CapturePass m_CapturePass;
         
-        internal GPULightsDataBuildSystem m_GPULightsDataBuildSystem;
         GPULights m_GPULights;
         ClusterDeferredLighting m_ClusterDeferredLights;
 #if ENABLE_VR && ENABLE_XR_MODULE
@@ -331,7 +330,6 @@ namespace UnityEngine.Rendering.Universal
                 m_PrimedDepthCopyPass = new CopyDepthPass(RenderPassEvent.AfterRenderingPrePasses, copyDephPS, true, true);
             }
             m_GBufferPass = new GBufferPass(RenderPassEvent.BeforeRenderingGbuffer, RenderQueueRange.opaque, data.opaqueLayerMask, m_DefaultStencilState, stencilData.stencilReference, m_DeferredLights);
-            m_GPULightsDataBuildSystem = new GPULightsDataBuildSystem();
             m_GPULights = new GPULights(RenderPassEvent.AfterRenderingGbuffer);
             if (renderingModeRequested == RenderingMode.Deferred || renderingModeRequested == RenderingMode.DeferredPlus)
             {

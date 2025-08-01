@@ -85,6 +85,12 @@ float3 GetCurrentViewPosition()
     //#endif
 }
 
+float3 GetViewUpDir()
+{
+    float4x4 viewMat = GetWorldToViewMatrix();
+    return viewMat[1].xyz;
+}
+
 // Returns the forward (central) direction of the current view in the world space.
 float3 GetViewForwardDir()
 {

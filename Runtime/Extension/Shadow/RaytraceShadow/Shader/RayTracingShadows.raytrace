@@ -1,6 +1,7 @@
 // Definitions
 //--------------------------------------------------------------------------------------------------
 
+
 // Uncomment this pragma for debugging the HLSL code in PIX. GPU performance will be impacted.
 //#pragma enable_ray_tracing_shader_debug_symbols
 
@@ -11,7 +12,5 @@
 #pragma max_recursion_depth 2
 #pragma multi_compile _ _GBUFFER_NORMALS_OCT
 
-// Always use this in DX12 RayTrace
-#define SHADER_TARGET 50
 
 #include "RayTracingShadows.hlsl"

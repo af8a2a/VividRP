@@ -1,7 +1,8 @@
 ﻿//--------------------------------------------------------------------------------------------------
 // Included headers
 //--------------------------------------------------------------------------------------------------
-
+#pragma enable_ray_tracing_shader_debug_symbols
+#pragma use_dxc
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
@@ -14,13 +15,12 @@
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/Shaders/RaytracingIntersection.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/RayTracingFallbackHierarchy.cs.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/Shaders/RaytracingSampling.hlsl"
-
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/ClusterLight.hlsl"
 //--------------------------------------------------------------------------------------------------
 // Inputs & outputs
 //--------------------------------------------------------------------------------------------------
 // Input
 TEXTURE2D_X(_NormalTexture);//
-
 float radius;
 int   sampleCount;
 int   frameIndex;
@@ -60,6 +60,7 @@ void SingleRayGen()
     if (rawDepth == UNITY_RAW_FAR_CLIP_VALUE)
         return;
 
+
     // TODO: check stencil?
     // uint stencilVal = GetStencilValue(LOAD_TEXTURE2D_X(_StencilTexture, coordSS));
 
@@ -71,8 +72,10 @@ void SingleRayGen()
     // Evaluate the ray bias
     float rayBias = EvaluateRayTracingBias(posInput.positionWS);
 
+    DirectionalLightData dirLight = g_DirectionalLightDatas[0];
+
     // TODO: Check this to different directional light.
-    Light dirLight = GetMainLight();
+    // Light dirLight = GetMainLight();
 
     // r: scene shadow, g: character selfshadow
     float visibility = 0;
@@ -88,7 +91,7 @@ void SingleRayGen()
         noiseValue.y = GetBNDSequenceSample(coordSS, frameIndex, 1);
 
         // Create the local ortho basis
-        float3x3 localToWorld = GetLocalFrame(dirLight.direction);
+        float3x3 localToWorld = GetLocalFrame(dirLight.dir);
 
         // We need to convert the diameter to a radius for our sampling
         float3 localDir = SampleConeUniform(noiseValue.x, noiseValue.y, cos(radius * 0.5));

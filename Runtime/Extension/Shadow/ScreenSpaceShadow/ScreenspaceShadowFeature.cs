@@ -14,7 +14,7 @@ namespace UnityEngine.Rendering.Universal
             m_DirectionalLightsShadowCasterPass = new DirectionalLightsShadowCasterPass(RenderPassEvent.BeforeRenderingShadows);
             m_ScreenSpaceShadowPass = new ScreenspaceShadowPass()
             {
-                renderPassEvent = RenderPassEvent.AfterRenderingPrePasses
+                renderPassEvent = RenderPassEvent.BeforeRenderingDeferredLights
             };
             m_ScreenSpaceShadowsPostPass = new ScreenSpaceShadowsPostPass()
             {
@@ -22,7 +22,7 @@ namespace UnityEngine.Rendering.Universal
             };
             raytracingShadowPass = new RaytracingShadowPass()
             {
-                renderPassEvent = RenderPassEvent.AfterRenderingPrePasses,
+                renderPassEvent = RenderPassEvent.BeforeRenderingDeferredLights,
             };
         }
 

@@ -330,7 +330,7 @@ namespace UnityEngine.Rendering.Universal
                 m_PrimedDepthCopyPass = new CopyDepthPass(RenderPassEvent.AfterRenderingPrePasses, copyDephPS, true, true);
             }
             m_GBufferPass = new GBufferPass(RenderPassEvent.BeforeRenderingGbuffer, RenderQueueRange.opaque, data.opaqueLayerMask, m_DefaultStencilState, stencilData.stencilReference, m_DeferredLights);
-            m_GPULights = new GPULights(RenderPassEvent.AfterRenderingGbuffer);
+            m_GPULights = new GPULights(RenderPassEvent.AfterRenderingShadows);
             if (renderingModeRequested == RenderingMode.Deferred || renderingModeRequested == RenderingMode.DeferredPlus)
             {
                 var deferredInitParams = new DeferredLights.InitParams();

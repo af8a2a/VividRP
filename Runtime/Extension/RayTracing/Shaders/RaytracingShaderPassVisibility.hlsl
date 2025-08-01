@@ -25,7 +25,7 @@ void ClosestHitMain(inout RayIntersectionVisibility rayIntersection : SV_RayPayl
     float3 previousPositionWS = TransformPreviousObjectToWorld(positionOS);
 
     rayIntersection.velocity = saturate(length(previousPositionWS - fragInput.positionRWS));
-    // rayIntersection.color.x = 0;
+    rayIntersection.color.x = 0;
 }
 
 // Generic function that handles the reflection code

@@ -688,6 +688,7 @@ namespace UnityEngine.Rendering.Universal
                 m_DeferredLights.SetupRenderGraphLights(renderGraph, cameraData, lightData);
             }
             m_GPULights.SetupRenderGraphLights(renderGraph, renderingData, cameraData, lightData);
+            
         }
 
         // "Raw render" color/depth history.
@@ -906,6 +907,9 @@ namespace UnityEngine.Rendering.Universal
                 var reflectionProbeCount = Mathf.Min(reflectionProbes.Length, UniversalRenderPipeline.maxVisibleReflectionProbes);
                 m_GPULights.NewFrame(punctualLightCount + reflectionProbeCount, m_AdditionalLightsShadowCasterPass, m_LightCookieManager);
                 m_GPULights.PreSetup(lightData, cameraData);
+                // GPULightList
+                m_GPULights.Render(renderGraph, frameData);
+                m_GPULights.RenderSetGlobalSync(renderGraph, frameData);
             }
 
             SkySystem.instance.UpdateEnvironment(renderGraph, frameData, lightData, false, false, false, SkyAmbientMode.Dynamic);
@@ -1348,9 +1352,6 @@ namespace UnityEngine.Rendering.Universal
 
                 RecordCustomRenderGraphPasses(renderGraph, RenderPassEvent.AfterRenderingGbuffer, RenderPassEvent.BeforeRenderingDeferredLights);
 
-                // GPULightList
-                m_GPULights.Render(renderGraph, frameData);
-                m_GPULights.RenderSetGlobalSync(renderGraph, frameData);
 
                 m_ClusterDeferredLights.Render(renderGraph, frameData, resourceData.activeColorTexture, resourceData.activeDepthTexture, resourceData.gBuffer);
 

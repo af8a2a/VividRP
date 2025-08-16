@@ -53,10 +53,10 @@ namespace UnityEngine.Rendering.Universal
             int maxLength = Mathf.Max(textureSize.x, textureSize.y);
             return (int)Mathf.Log(maxLength, 2);
         }
-        
-        
-        
-                internal static Matrix4x4 ComputePixelCoordToWorldSpaceViewDirectionMatrix(float verticalFoV, Vector2 lensShift, Vector4 screenSize, Matrix4x4 worldToViewMatrix, bool renderToCubemap, float aspectRatio = -1, bool isOrthographic = false)
+
+
+        internal static Matrix4x4 ComputePixelCoordToWorldSpaceViewDirectionMatrix(float verticalFoV, Vector2 lensShift, Vector4 screenSize,
+            Matrix4x4 worldToViewMatrix, bool renderToCubemap, float aspectRatio = -1, bool isOrthographic = false)
         {
             Matrix4x4 viewSpaceRasterTransform;
 

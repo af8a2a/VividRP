@@ -82,6 +82,22 @@ struct IntersectionVertex
 #endif
 };
 
+
+// Structure that defines the current state of the visibility
+struct RayIntersectionDebug
+{
+    // Distance of the intersection
+    float t;
+    // Barycentrics of the intersection
+    float2 barycentrics;
+    // Index of the primitive
+    uint primitiveIndex;
+    // Index of the instance
+    uint instanceIndex;
+};
+
+
+
 // Fetch the intersetion vertex data for the target vertex
 void FetchIntersectionVertex(uint vertexIndex, out IntersectionVertex outVertex)
 {

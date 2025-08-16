@@ -324,6 +324,15 @@ namespace UnityEngine.Rendering.Universal
             set => CheckAndSetTextureHandle(ref _stpDebugView, value);
         }
         private TextureHandle _stpDebugView;
+        
+        
+        internal TextureHandle rtasDebugView
+        {
+            get => CheckAndGetTextureHandle(ref _rtasDebugView);
+            set => CheckAndSetTextureHandle(ref _rtasDebugView, value);
+        }
+        private TextureHandle _rtasDebugView;
+
 
         /// <inheritdoc />
         public override void Reset()
@@ -361,7 +370,13 @@ namespace UnityEngine.Rendering.Universal
             fetchedGpuExposure = 1.0f;
 
             #endregion
-            
+
+
+            #region RTAS
+
+            _rtasDebugView = TextureHandle.nullHandle;
+
+            #endregion
             
             for (int i = 0; i < _gBuffer.Length; i++)
                 _gBuffer[i] = TextureHandle.nullHandle;

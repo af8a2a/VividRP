@@ -14,11 +14,12 @@ namespace UnityEngine.Rendering.Universal
         AmbientOcclusion = 0x08,
         Reflection = 0x10,
         GlobalIllumination = 0x20,
-
-        //RecursiveRendering = 0x40,
-        CastShadowCharacter = 0x40,
+        
+        RecursiveRendering = 0x40,
         PathTracing = 0x80,
-        All = Opaque | CastShadow | AmbientOcclusion | Reflection | GlobalIllumination | CastShadowCharacter | PathTracing,
+        CastShadowCharacter = 0x100,
+
+        All = Opaque | CastShadow | AmbientOcclusion | Reflection | GlobalIllumination | RecursiveRendering | PathTracing | CastShadowCharacter,
     }
 
     /// <summary>

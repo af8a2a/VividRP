@@ -603,39 +603,6 @@ Shader "Universal Render Pipeline/Lit"
             // -------------------------------------
             // Universal Pipeline keywords
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE
-            // #pragma multi_compile _ _ADDITIONAL_LIGHTS_VERTEX _ADDITIONAL_LIGHTS
-            // #pragma multi_compile _ EVALUATE_SH_MIXED EVALUATE_SH_VERTEX
-            // #pragma multi_compile_fragment _ _ADDITIONAL_LIGHT_SHADOWS
-            // #pragma multi_compile_fragment _ _REFLECTION_PROBE_BLENDING
-            // #pragma multi_compile_fragment _ _REFLECTION_PROBE_BOX_PROJECTION
-            // #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
-            // #pragma multi_compile_fragment _ _SCREEN_SPACE_OCCLUSION
-            // #pragma multi_compile_fragment _ _DBUFFER_MRT1 _DBUFFER_MRT2 _DBUFFER_MRT3
-            // #pragma multi_compile_fragment _ _LIGHT_COOKIES
-            // #pragma multi_compile _ _LIGHT_LAYERS
-            // #pragma multi_compile _ _FORWARD_PLUS
-            // #include_with_pragmas "Packages/com.unity.render-pipelines.core/ShaderLibrary/FoveatedRenderingKeywords.hlsl"
-            // #include_with_pragmas "Packages/com.unity.render-pipelines.danbaidong/ShaderLibrary/RenderingLayers.hlsl"
-
-
-            // -------------------------------------
-            // Unity defined keywords
-            // #pragma multi_compile _ LIGHTMAP_SHADOW_MIXING
-            // #pragma multi_compile _ SHADOWS_SHADOWMASK
-            // #pragma multi_compile _ DIRLIGHTMAP_COMBINED
-            // #pragma multi_compile _ LIGHTMAP_ON
-            // #pragma multi_compile _ DYNAMICLIGHTMAP_ON
-            // #pragma multi_compile _ USE_LEGACY_LIGHTMAPS
-            // #pragma multi_compile _ LOD_FADE_CROSSFADE
-            // #pragma multi_compile_fog
-            // #pragma multi_compile_fragment _ DEBUG_DISPLAY
-            // #include_with_pragmas "Packages/com.unity.render-pipelines.danbaidong/ShaderLibrary/ProbeVolumeVariants.hlsl"
-
-            //--------------------------------------
-            // GPU Instancing
-            // #pragma multi_compile_instancing
-            // #pragma instancing_options renderinglayer
-            // #include_with_pragmas "Packages/com.unity.render-pipelines.danbaidong/ShaderLibrary/DOTS.hlsl"
 
 
             // List all the attributes needed in raytracing shader
@@ -659,6 +626,49 @@ Shader "Universal Render Pipeline/Lit"
             #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RayTracingShaderPassIndirect.hlsl"
             ENDHLSL
         }
+
+        Pass
+        {
+            Name "DebugDXR"
+            Tags{ "LightMode" = "DebugDXR" }
+
+            HLSLPROGRAM
+
+            #pragma only_renderers d3d11 xboxseries ps5
+            #pragma raytracing surface_shader
+
+            #pragma shader_feature_local_raytracing _DISABLE_DECALS
+            #pragma shader_feature_local_raytracing _NORMALMAP
+            #pragma shader_feature_local_raytracing _ALPHATEST_ON
+            #pragma shader_feature_local_raytracing _DISABLE_SSR_TRANSPARENT
+            #pragma shader_feature_raytracing _SURFACE_TYPE_TRANSPARENT
+            #pragma multi_compile  _  _GBUFFER_NORMALS_OCT
+
+            #define SHADERPASS SHADERPASS_RAYTRACING_DEBUG
+
+            // -------------------------------------
+            // Shader Stages
+            #pragma only_renderers d3d11 xboxseries ps5
+            #pragma raytracing surface_shader
+
+
+
+
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal//ShaderLibrary/Core.hlsl"
+
+
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/ShaderVariablesRaytracing.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RaytracingIntersection.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RaytracingFragInputs.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RayTracingCommon.hlsl"
+
+            #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RaytracingShaderPassDebug.hlsl"
+
+            ENDHLSL
+        }
+
 
     }
 

@@ -36,7 +36,7 @@ namespace UnityEngine.Rendering.Universal
     [Serializable]
     [SupportedOnRenderPipeline(typeof(UniversalRenderPipelineAsset))]
     [Categorization.CategoryInfo(Name = "R: Debug Shaders", Order = 1000), HideInInspector]
-    public class UniversalRenderPipelineDebugShaders : IRenderPipelineResources
+    public partial class UniversalRenderPipelineDebugShaders : IRenderPipelineResources
     {
         /// <summary>
         /// Current version of this resource container. Used only for upgrading a project.

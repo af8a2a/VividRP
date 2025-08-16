@@ -662,6 +662,7 @@ namespace UnityEngine.Rendering.Universal
         
         internal DenoiseSystem denoiseSystem => DenoiseSystem.GetOrCreate(camera);
 
+        internal Vector4 resolution => new Vector4(actualWidth, actualHeight, 1.0f / actualWidth, 1.0f / actualHeight);
         
         public Frustum frustum;
 

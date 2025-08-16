@@ -78,8 +78,12 @@ namespace UnityEngine.Rendering.Universal
         readonly Material m_TileClusterDebugMaterial;
 
         HDRDebugViewPass m_HDRDebugViewPass;
-        TileClusterDebugPass m_TileClusterDebugPass;
 
+        #region Extension
+
+        TileClusterDebugPass m_TileClusterDebugPass;
+        RaytracingRTASDebugPass m_RaytracingRTASDebugPass;
+        #endregion
         
         RTHandle m_DebugScreenColorHandle;
         RTHandle m_DebugScreenDepthHandle;
@@ -137,7 +141,13 @@ namespace UnityEngine.Rendering.Universal
         internal ref RTHandle DebugScreenDepthHandle => ref m_DebugScreenDepthHandle;
         internal HDRDebugViewPass hdrDebugViewPass => m_HDRDebugViewPass;
 
+        #region Extension
+
         internal TileClusterDebugPass tileClusterDebugPass => m_TileClusterDebugPass;
+
+        internal RaytracingRTASDebugPass raytracingRTASDebugPass => m_RaytracingRTASDebugPass;
+        
+        #endregion
 
         internal bool HDRDebugViewIsActive(bool resolveFinalTarget)
         {
@@ -147,7 +157,7 @@ namespace UnityEngine.Rendering.Universal
 
         internal bool WriteToDebugScreenTexture(bool resolveFinalTarget)
         {
-            return HDRDebugViewIsActive(resolveFinalTarget);
+            return HDRDebugViewIsActive(resolveFinalTarget)&&RTASDebugIsActive(resolveFinalTarget);
         }
 
         internal bool IsScreenClearNeeded
@@ -183,7 +193,7 @@ namespace UnityEngine.Rendering.Universal
 
             m_HDRDebugViewPass = new HDRDebugViewPass(m_HDRDebugViewMaterial);
             m_TileClusterDebugPass = new TileClusterDebugPass(m_TileClusterDebugMaterial);
-
+            m_RaytracingRTASDebugPass = new RaytracingRTASDebugPass();
 
             m_RuntimeTextures = GraphicsSettings.GetRenderPipelineSettings<UniversalRenderPipelineRuntimeTextures>();
             if (m_RuntimeTextures != null)
@@ -559,11 +569,26 @@ namespace UnityEngine.Rendering.Universal
             }
         }
         
+        
+        #region ClusterLighting
+
         internal bool TileClusterDebugIsActive(bool resolveFinalTarget)
         {
             // TileC luster debug views should only apply to the last camera in the stack
             return DebugDisplaySettings.lightingSettings.tileClusterDebugMode != DebugTileClusterMode.None && resolveFinalTarget;
         }
+
+        #endregion
+
+        #region Raytracing
+
+        internal bool RTASDebugIsActive(bool resolveFinalTarget)
+        {
+            // TileC luster debug views should only apply to the last camera in the stack
+            return DebugDisplaySettings.lightingSettings.rtasDebugView != RTASDebugView.None && resolveFinalTarget;
+        }
+
+        #endregion
 
 
         [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
@@ -578,6 +603,16 @@ namespace UnityEngine.Rendering.Universal
             {
                 m_TileClusterDebugPass.RenderTileClusterDebug(renderGraph, frameData, cameraData, LightingSettings.tileClusterDebugMode, LightingSettings.clusterDebugID, LightingSettings.clusterCategoryDebugMode);
             }
+            //
+            // if (IsActiveForCamera(cameraData.isPreviewCamera) && RTASDebugIsActive(cameraData.resolveFinalTarget))
+            // {
+            //
+            //     m_RaytracingRTASDebugPass.RenderRTASDebug(renderGraph,
+            //         ref srcColor,
+            //         cameraData,
+            //       LightingSettings.rtasDebugView, LightingSettings.rtasDebugMode);
+            // }
+            //
         }
 
         [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]

@@ -113,6 +113,10 @@ namespace UnityEngine.Rendering.Universal
         /// Displays the active STP debug view.
         /// </summary>
         STP,
+        /// <summary>
+        /// Displays the Raytracing RTAS.
+        /// </summary>
+        RTAS
     }
 
     /// <summary>
@@ -356,6 +360,63 @@ namespace UnityEngine.Rendering.Universal
     }
 
 
+
+    #endregion
+
+    #region Raytracing
+
+    /// <summary>
+    /// List of RTAS Full Screen Debug views.
+    /// </summary>
+    public enum RTASDebugView
+    {
+        None,
+        /// <summary>
+        /// Debug view of the RTAS for shadows.
+        /// </summary>
+        Shadows,
+
+        /// <summary>
+        /// Debug view of the RTAS for ambient occlusion.
+        /// </summary>
+        AmbientOcclusion,
+
+        /// <summary>
+        /// Debug view of the RTAS for global illumination.
+        /// </summary>
+        GlobalIllumination,
+
+        /// <summary>
+        /// Debug view of the RTAS for reflections.
+        /// </summary>
+        Reflections,
+
+        /// <summary>
+        /// Debug view of the RTAS for recursive ray tracing.
+        /// </summary>
+        RecursiveRayTracing,
+
+        /// <summary>
+        /// Debug view of the RTAS for path tracing.
+        /// </summary>
+        PathTracing
+    }
+
+    /// <summary>
+    /// List of RTAS Full Screen Debug modes.
+    /// </summary>
+    public enum RTASDebugMode
+    {
+        /// <summary>
+        /// Displacing the instanceID as the RTAS Debug view.
+        /// </summary>
+        InstanceID,
+
+        /// <summary>
+        /// Displacing the primitiveID as the RTAS Debug view.
+        /// </summary>
+        PrimitiveID,
+    }
 
     #endregion
 }

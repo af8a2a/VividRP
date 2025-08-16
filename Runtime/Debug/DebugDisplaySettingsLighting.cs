@@ -34,6 +34,10 @@ namespace UnityEngine.Rendering.Universal
 
         public int clusterDebugID = 0;
 
+        
+        internal RTASDebugView rtasDebugView = RTASDebugView.None;
+        internal RTASDebugMode rtasDebugMode = RTASDebugMode.InstanceID;
+
 
         static internal class Strings
         {
@@ -43,6 +47,19 @@ namespace UnityEngine.Rendering.Universal
             public static readonly NameAndTooltip TileClusterDebug = new() { name = "Tile/Cluster Debug", tooltip = "Use the drop-down to select the Light type that you want to show the Tile/Cluster debug information for." };
             public static readonly NameAndTooltip ClusterDebugID = new() { name = "Cluster Debug ID", tooltip = "Select cluster ID to display." };
             public static readonly NameAndTooltip ClusterCategoryDebug = new() { name = "Cluster Category", tooltip = "Change cluster debug category." };
+            
+            public static readonly DebugUI.Widget.NameAndTooltip RTASDebugView = new()
+            {
+                name = "Ray Tracing Acceleration Structure View",
+                tooltip = "Use the drop-down to select a rendering view to display the ray tracing acceleration structure."
+            };
+
+            public static readonly DebugUI.Widget.NameAndTooltip RTASDebugMode = new()
+            {
+                name = "Ray Tracing Acceleration Structure Mode",
+                tooltip = "Use the drop-down to select a rendering mode to display the ray tracing acceleration structure."
+            };
+
 
         }
 
@@ -122,6 +139,35 @@ namespace UnityEngine.Rendering.Universal
                     }
                 }
             };
+            
+            internal static DebugUI.Widget CreateRTASDebugView(SettingsPanel panel) => new DebugUI.EnumField
+            {
+                nameAndTooltip = Strings.RTASDebugView,
+                getter = () => (int)panel.data.rtasDebugView,
+                setter = value => panel.data.rtasDebugView = (RTASDebugView)value,
+                autoEnum = typeof(RTASDebugView),
+                getIndex = () => (int)panel.data.rtasDebugView,
+                setIndex = (value) => panel.data.rtasDebugView = (RTASDebugView)value,
+            };
+
+            internal static DebugUI.Widget CreateRTASDebugDebugMode(SettingsPanel panel) => new DebugUI.Container
+            {
+                isHiddenCallback = () => panel.data.rtasDebugView == RTASDebugView.None,
+                children =
+                {
+                    new DebugUI.EnumField
+                    {
+                        isHiddenCallback = () => panel.data.rtasDebugView == RTASDebugView.None,
+                        nameAndTooltip = Strings.RTASDebugMode,
+                        getter = () => (int)panel.data.rtasDebugMode,
+                        setter = value => panel.data.rtasDebugMode = (RTASDebugMode)value,
+                        autoEnum = typeof(RTASDebugMode),
+                        getIndex = () => (int)panel.data.rtasDebugMode,
+                        setIndex = value => { panel.data.rtasDebugMode = (RTASDebugMode)value; }
+                    }
+                }
+            };
+
         }
 
         [DisplayInfo(name = "Lighting", order = 3)]
@@ -147,6 +193,8 @@ namespace UnityEngine.Rendering.Universal
                         WidgetFactory.CreateTileClusterDebugMode(this),
                         WidgetFactory.CreateClusterIDSelect(this),
                         WidgetFactory.CreateClusterCategoryDebugMode(this),
+                        WidgetFactory.CreateRTASDebugView(this),
+                        WidgetFactory.CreateRTASDebugDebugMode(this),
                     }
                 });
             }
@@ -155,7 +203,11 @@ namespace UnityEngine.Rendering.Universal
         #region IDebugDisplaySettingsData
 
         /// <inheritdoc/>
-        public bool AreAnySettingsActive => (lightingDebugMode != DebugLightingMode.None) || (lightingFeatureFlags != DebugLightingFeatureFlags.None) || (hdrDebugMode != HDRDebugMode.None) || (tileClusterDebugMode != DebugTileClusterMode.None);
+        public bool AreAnySettingsActive => (lightingDebugMode != DebugLightingMode.None) 
+                                            || (lightingFeatureFlags != DebugLightingFeatureFlags.None) 
+                                            || (hdrDebugMode != HDRDebugMode.None) 
+                                            || (tileClusterDebugMode != DebugTileClusterMode.None)
+                                            || rtasDebugView != RTASDebugView.None;
 
         /// <inheritdoc/>
         public bool IsPostProcessingAllowed => (lightingDebugMode != DebugLightingMode.Reflections && lightingDebugMode != DebugLightingMode.ReflectionsWithSmoothness);

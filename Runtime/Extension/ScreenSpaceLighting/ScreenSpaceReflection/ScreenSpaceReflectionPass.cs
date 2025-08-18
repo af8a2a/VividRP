@@ -273,6 +273,7 @@ namespace UnityEngine.Rendering.Universal
             passData.prevNumFramesAccumTexture = renderGraph.ImportTexture(prevNumFramesAccumTexture);
             passData.gbuffer2 = resourceData.gBuffer[2];
             passData.usedAlgo = passData.requireRayTracing ? ScreenSpaceReflectionAlgorithm.PBRAccumulation : m_volumeSettings.usedAlgorithm.value;
+            
         }
 
         void UpdateSSRConstantBuffer(SSRPassData passData,
@@ -329,6 +330,7 @@ namespace UnityEngine.Rendering.Universal
 
                 passData.constantBuffer._SsrPBRBias = m_volumeSettings.biasFactor.value;
                 passData.constantBuffer._SsrMixWithRayTracing = passData.requireRayTracing ? 1 : 0;
+                passData.constantBuffer._MinTraversalOccupancy = m_volumeSettings.minTraversalOccupancy;
             }
 
 

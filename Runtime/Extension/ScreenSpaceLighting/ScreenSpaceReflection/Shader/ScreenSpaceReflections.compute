@@ -2,6 +2,7 @@
 //--------------------------------------------------------------------------------------------------
 
 // TODO: delete
+#pragma use_dxc
  #pragma enable_d3d11_debug_symbols
 #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
 
@@ -498,10 +499,12 @@ void ScreenSpaceReflectionsTracing(uint3 dispatchThreadId : SV_DispatchThreadID,
     bool miss      = false;
     bool belowMip0 = false; // This value is set prior to entering the cell
 
+    bool exit_due_to_low_occupancy = false;
 
-    while (!(hit || miss) && (t <= tMax) && (iterCount < _SsrIterLimit))
+    while (!(hit || miss) && (t <= tMax) && (iterCount < _SsrIterLimit)&&!exit_due_to_low_occupancy)
     {
         rayPos = rayOrigin + t * rayDir;
+        exit_due_to_low_occupancy= WaveActiveCountBits(true) <= _MinTraversalOccupancy;
 
         // Ray position often ends up on the edge. To determine (and look up) the right cell,
         // we need to bias the position by a small epsilon in the direction of the ray.

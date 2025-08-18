@@ -350,6 +350,22 @@ namespace UnityEngine.Rendering.Universal
         private MinIntParameter m_RayMaxIterationsRT = new MinIntParameter(48, 0);
         #endregion
 
+
+        #region Stochastic Screen Space Reflection
+
+
+        public int minTraversalOccupancy
+        {
+            get
+            {
+                return m_MinTraversalOccupancy.value;
+            }
+            set { m_MinTraversalOccupancy.value = value; }
+        }
+        [SerializeField] 
+        private ClampedIntParameter m_MinTraversalOccupancy = new ClampedIntParameter(4, 0, 32);
+        
+        #endregion
         internal static bool RayTracingActive(ScreenSpaceReflection volume)
         {
             return volume.tracing.value != RayCastingMode.RayMarching;

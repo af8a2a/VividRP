@@ -16,6 +16,7 @@ namespace UnityEngine.Rendering.Universal
         public float _SsrRoughnessFadeRcpLength;
         public float _SsrRoughnessFadeEndTimesRcpLength;
         public float _SsrEdgeFadeRcpLength;
+        
         public Vector4 _ColorPyramidUvScaleAndLimitPrevFrame;
 
         public int _SsrDepthPyramidMaxMip;
@@ -27,5 +28,7 @@ namespace UnityEngine.Rendering.Universal
 
         public float _SsrPBRBias;
         public int _SsrMixWithRayTracing;
+        public int _MinTraversalOccupancy;
+
     }
 }

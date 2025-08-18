@@ -25,6 +25,7 @@ CBUFFER_START(ShaderVariablesScreenSpaceReflection)
     float4 _HistoryFrameRTSize;
     float _SsrPBRBias;
     int _SsrMixWithRayTracing;
+    int _MinTraversalOccupancy;
 CBUFFER_END
 
 

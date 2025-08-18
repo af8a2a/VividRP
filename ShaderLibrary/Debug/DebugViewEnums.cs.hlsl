@@ -22,6 +22,7 @@
 #define DEBUGFULLSCREENMODE_ADDITIONAL_LIGHTS_COOKIE_ATLAS (5)
 #define DEBUGFULLSCREENMODE_REFLECTION_PROBE_ATLAS (6)
 #define DEBUGFULLSCREENMODE_STP (7)
+#define DEBUGFULLSCREENMODE_RTAS (8)
 
 //
 // UnityEngine.Rendering.Universal.DebugLightingFeatureFlags:  static fields

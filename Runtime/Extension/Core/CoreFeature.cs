@@ -18,7 +18,7 @@ namespace UnityEngine.Rendering.Universal
         SceneViewMotionVectorPass sceneViewMotionVectorPass;
         public override void Create()
         {
-            colorPyramid = new ColorPyramidPass(RenderPassEvent.AfterRenderingSkybox);
+            colorPyramid = new ColorPyramidPass(RenderPassEvent.BeforeRenderingPostProcessing);
             forwardGBufferPass = new ForwardGBufferPass(m_GBufferPassNames);
 
             historyCapturePass = new HistoryCapturePass()

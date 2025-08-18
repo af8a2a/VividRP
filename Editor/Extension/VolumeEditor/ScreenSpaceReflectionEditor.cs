@@ -42,6 +42,8 @@ namespace UnityEditor.Rendering.Universal
         SerializedDataParameter m_AffectsSmoothSurfaces;
         SerializedDataParameter m_Mode;
         SerializedDataParameter m_useNVSER;
+        SerializedDataParameter m_MinTraversalOccupancy;
+
 
         // Mixed
         SerializedDataParameter m_RayMaxIterationsRT;
@@ -72,6 +74,7 @@ namespace UnityEditor.Rendering.Universal
             m_ScreenFadeDistance = Unpack(o.Find(x => x.screenFadeDistance));
             m_AccumulationFactor = Unpack(o.Find(x => x.accumulationFactor));
             m_BiasFactor = Unpack(o.Find(x => x.biasFactor));
+            m_MinTraversalOccupancy = Unpack(o.Find(x => x.minTraversalOccupancy));
             //m_SpeedRejectionFactor = Unpack(o.Find(x => x.speedRejectionParam));
             //m_EnableWorldSpeedRejection = Unpack(o.Find(x => x.enableWorldSpeedRejection));
             //m_SpeedRejectionScalerFactor = Unpack(o.Find(x => x.speedRejectionScalerFactor));
@@ -138,6 +141,7 @@ namespace UnityEditor.Rendering.Universal
         static public readonly GUIContent k_AffectsSmoothSurfacesText = EditorGUIUtility.TrTextContent("Affects Smooth Surfaces", "When enabled, the denoiser also affects perfectly smooth surfaces. When you use Quality mode with multiple bounces, the denoiser always affects smooth surfaces by default.");
         static public readonly GUIContent k_MaxMixedRaySteps = EditorGUIUtility.TrTextContent("Max Ray Steps", "Sets the maximum number of steps HDRP uses for mixed tracing.");
 
+        static public readonly GUIContent k_MinTraversalOccupancy = EditorGUIUtility.TrTextContent("Min Traversal Occupancy", "Ray will early exit when tile with low occupancy.");
         void RayTracingQualityModeGUI()
         {
             //using (new QualityScope(this))
@@ -279,6 +283,12 @@ namespace UnityEditor.Rendering.Universal
             bool rayTracingSettingsDisplayed = m_Tracing.overrideState.boolValue
                 //&& HDRenderPipeline.assetSupportsRayTracing
                 && tracingMode != RayCastingMode.RayMarching;
+
+            #region Common
+
+            PropertyField(m_MinTraversalOccupancy, k_MinTraversalOccupancy);
+
+            #endregion
 
             // The rest of the ray tracing UI is only displayed if the asset supports ray tracing and the checkbox is checked.
             if (rayTracingSettingsDisplayed)

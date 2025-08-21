@@ -580,8 +580,6 @@
             ENDHLSL
         }
 
-        //todo
-        //integrate in uberPost?
         //7 apply bloom 
         Pass
         {
@@ -604,29 +602,18 @@
                 float2 uv = SCREEN_COORD_APPLY_SCALEBIAS(UnityStereoTransformScreenSpaceTex(input.texcoord));
 
                 float2 uvBloom = uv;
-                half3 color = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, SCREEN_COORD_REMOVE_SCALEBIAS(uvBloom)).xyz;
 
                 half4 bloom = SAMPLE_TEXTURE2D_X(_Bloom_Texture, sampler_LinearClamp,
-                                     SCREEN_COORD_REMOVE_SCALEBIAS(uvBloom));
+                                                 SCREEN_COORD_REMOVE_SCALEBIAS(uvBloom));
 
 
                 #if defined(_USE_RGBM)
                      bloom.xyz = DecodeRGBM(bloom);
                 #endif
 
-                half3 bloomedCol = bloom.xyz * _Bloom_Custom_Params.w + color.xyz;
+                half3 bloomedCol = bloom.xyz * _Bloom_Custom_Params.w;
 
-                // Expossure (Tonemapping)
-                // half3 expossuredCol = bloomedCol;
-                // half3 temp1 = expossuredCol * (expossuredCol * 1.36 + 0.047);
-                // half3 temp2 = expossuredCol * (expossuredCol * 0.93 + 0.56) + 0.14;
-                // half3 tonemappedCol = temp1 / temp2;
-                // tonemappedCol = clamp(tonemappedCol, 0.0, 1.0);
-
-                color = bloomedCol;
-
-
-                return half4(color, 1);
+                return half4(bloomedCol, 1);
             }
             ENDHLSL
         }

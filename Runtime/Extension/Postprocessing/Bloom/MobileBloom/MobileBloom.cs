@@ -1,9 +1,27 @@
-﻿using UnityEngine;
+﻿using System;
+using UnityEngine;
 using UnityEngine.Rendering;
 
 namespace UnityEngine.Rendering.Universal
 {
-    public class MobileBloom : VolumeComponent, IPostProcessComponent
+    
+    public enum BloomMode
+    {
+        None,
+        URP,
+        Moblie,
+    }
+
+    
+    [Serializable]
+    public sealed class BloomModeParameter : VolumeParameter<BloomMode>
+    {
+        public BloomModeParameter(BloomMode value, bool overrideState = false) : base(value, overrideState)
+        {
+        }
+    }
+
+    public partial class MobileBloom : VolumeComponent
     {
         /// <summary>
         /// Set the level of brightness to filter out pixels under this level.
@@ -37,6 +55,8 @@ namespace UnityEngine.Rendering.Universal
 
         public BoolParameter enable = new BoolParameter(false);
 
-        public bool IsActive() => enable.value;
+        [Tooltip("Select a Bloom Mode.")]
+        public BloomModeParameter mode = new BloomModeParameter(BloomMode.None);
+
     }
 }

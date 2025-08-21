@@ -5,7 +5,7 @@ using UnityEngine.Rendering.Universal;
 
 namespace UnityEngine.Rendering.Universal
 {
-    public class MobileBloomPass : ScriptableRenderPass
+    public class MobileBloomPass 
     {
         Material _material;
 
@@ -93,20 +93,16 @@ namespace UnityEngine.Rendering.Universal
             Blitter.BlitCameraTexture(cmd, data.preFilterTexture, data.preFilterBlurTexture, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store,
                 data.material, 6);
 
-
-            //todo
-            //integrate in UberPost
-            data.material.SetTexture(ShaderID._Bloom_Texture, data.preFilterBlurTexture);
-            Blitter.BlitCameraTexture(cmd, data.sourceTexture, data.OutputTexture, data.material, 7);
+        
         }
 
 
-        public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
+        public  TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle source)
         {
             var setting = VolumeManager.instance.stack.GetComponent<MobileBloom>();
-            if (setting == null || !setting.IsActive())
+            if (!setting.enable.value)
             {
-                return;
+                return source;
             }
 
             using (var builder = renderGraph.AddUnsafePass<PassData>("Mobile Bloom", out var data))
@@ -209,10 +205,9 @@ namespace UnityEngine.Rendering.Universal
                 builder.AllowPassCulling(false);
                 builder.UseTexture(data.sourceTexture);
                 builder.UseTexture(data.preFilterBlurTexture, AccessFlags.ReadWrite);
-                builder.UseTexture(data.OutputTexture, AccessFlags.ReadWrite);
-
                 builder.SetRenderFunc((PassData passData, UnsafeGraphContext context) => ExecuteBloomPass(passData, context));
-                resourceData.cameraColor = data.OutputTexture;
+                resourceData.bloomTexture = data.preFilterBlurTexture;
+                return source;
             }
         }
     }

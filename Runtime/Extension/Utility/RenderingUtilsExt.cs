@@ -1,5 +1,6 @@
 ﻿using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 
 namespace UnityEngine.Rendering.Universal
 {
@@ -211,5 +212,31 @@ namespace UnityEngine.Rendering.Universal
         public static float3 ExtractDirection(Matrix4x4 localToWorldMatrix) =>
             -((float4) localToWorldMatrix.GetColumn(2)).xyz;
 
+
+        public static Material Load(Shader shader)
+        {
+            if (shader == null)
+            {
+                Debug.LogErrorFormat($"Missing shader. PostProcessing render passes will not execute. Check for missing reference in the renderer resources.");
+                return null;
+            }
+            else if (!shader.isSupported)
+            {
+                return null;
+            }
+
+            return CoreUtils.CreateEngineMaterial(shader);
+        }
+
+        public static GraphicsFormat PickPostProcessingFormat()
+        {
+            var requestColorFormat = GraphicsFormat.B10G11R11_UFloatPack32;
+            var asset = UniversalRenderPipeline.asset;
+            if (asset)
+                requestColorFormat = UniversalRenderPipeline.MakeRenderTextureGraphicsFormat(asset.supportsHDR, asset.hdrColorBufferPrecision, false);
+
+            return requestColorFormat;
+        }
+        
     }
 }

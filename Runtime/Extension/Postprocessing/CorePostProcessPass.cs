@@ -5,6 +5,12 @@ namespace UnityEngine.Rendering.Universal
 {
     public class CorePostProcessPass : ScriptableRenderPass
     {
+        #region StopNaN
+
+        StopNaNPass _stopNaNPass = new StopNaNPass();
+
+        #endregion
+
         #region Bloom
 
         URPBloomPass _urpBloomPass = new URPBloomPass();
@@ -98,6 +104,13 @@ namespace UnityEngine.Rendering.Universal
 
             TextureHandle currentRT = resourceData.activeColorTexture;
 
+            #region StopNaN
+
+            currentRT = _stopNaNPass.Render(renderGraph, frameData, currentRT);
+
+            #endregion
+
+
             #region CMAA2
 
             currentRT = _cmaa2Pass.Render(renderGraph, frameData, currentRT);
@@ -116,7 +129,7 @@ namespace UnityEngine.Rendering.Universal
             currentRT = _temporalAAPass.Render(renderGraph, frameData, currentRT);
 
             #endregion
-            
+
             #region Bloom
 
             {

@@ -2,6 +2,7 @@
 
 namespace UnityEngine.Rendering.Universal
 {
+    #if false
     [DisallowMultipleRendererFeature]
     public class DiffusionFeature : ScriptableRendererFeature
     {
@@ -19,4 +20,5 @@ namespace UnityEngine.Rendering.Universal
             renderer.EnqueuePass(_diffusionPass);
         }
     }
+    #endif
 }

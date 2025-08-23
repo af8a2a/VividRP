@@ -5,9 +5,8 @@ using UnityEngine.Rendering.Universal;
 namespace UnityEngine.Rendering.Universal
 {
     [VolumeComponentMenu("Diffusion")]
-    [VolumeRequiresRendererFeatures(typeof(DiffusionFeature))]
     [SupportedOnRenderPipeline(typeof(UniversalRenderPipelineAsset))]
-    public sealed class Diffusion : VolumeComponent, IPostProcessComponent
+    public sealed class Diffusion : VolumeComponent
     {
         public Diffusion()
         {

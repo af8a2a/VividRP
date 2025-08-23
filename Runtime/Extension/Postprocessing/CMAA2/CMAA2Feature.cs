@@ -3,6 +3,7 @@ using UnityEngine.Rendering.Universal;
 
 namespace UnityEngine.Rendering.Universal
 {
+#if false
     [DisallowMultipleRendererFeature]
     public sealed class CMAA2Feature : ScriptableRendererFeature
     {
@@ -27,4 +28,5 @@ namespace UnityEngine.Rendering.Universal
             renderer.EnqueuePass(_pass);
         }
     }
+#endif
 }

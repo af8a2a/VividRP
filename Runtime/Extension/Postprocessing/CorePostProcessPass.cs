@@ -73,6 +73,13 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
 
+
+        #region Diffusion
+
+        DiffusionPass _diffusionPass = new DiffusionPass();
+
+        #endregion
+
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
             var resourceData = frameData.Get<UniversalResourceData>();
@@ -103,6 +110,12 @@ namespace UnityEngine.Rendering.Universal
             #region ToneMapping
 
             currentRT = _toneMappingPass.Render(renderGraph, frameData, currentRT);
+
+            #endregion
+
+            #region Diffusion
+
+            currentRT = _diffusionPass.Render(renderGraph, frameData, currentRT);
 
             #endregion
 

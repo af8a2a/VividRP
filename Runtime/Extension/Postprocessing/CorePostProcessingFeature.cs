@@ -4,7 +4,7 @@ namespace UnityEngine.Rendering.Universal
 {
     public class CorePostProcessingFeature : ScriptableRendererFeature
     {
-        
+        CorePostProcessPass _corePostProcessPass = new CorePostProcessPass();
 
         public override void Create()
         {
@@ -12,6 +12,8 @@ namespace UnityEngine.Rendering.Universal
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
+            
+            renderer.EnqueuePass(_corePostProcessPass);
         }
     }
 }

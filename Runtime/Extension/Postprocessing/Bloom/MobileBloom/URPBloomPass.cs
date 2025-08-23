@@ -7,8 +7,8 @@ namespace UnityEngine.Rendering.Universal
     {
         #region Private Field
 
-        readonly Material m_BloomMaterial;
-        public readonly Material[] bloomUpsample;
+        Material m_BloomMaterial;
+        public Material[] bloomUpsample;
 
         BloomMaterialParams m_BloomParamsPrev = new BloomMaterialParams();
         const int k_MaxPyramidSize = 16;
@@ -46,12 +46,6 @@ namespace UnityEngine.Rendering.Universal
 
         public URPBloomPass()
         {
-            var runtimeShader = GraphicsSettings.GetRenderPipelineSettings<BloomRuntimeShader>();
-            m_BloomMaterial = CoreUtils.CreateEngineMaterial(runtimeShader.URPBloomShader);
-
-            bloomUpsample = new Material[k_MaxPyramidSize];
-            for (uint i = 0; i < k_MaxPyramidSize; ++i)
-                bloomUpsample[i] = RenderingUtilsExt.Load(runtimeShader.URPBloomShader);
         }
 
 
@@ -67,6 +61,16 @@ namespace UnityEngine.Rendering.Universal
 
         public TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle source)
         {
+            var runtimeShader = GraphicsSettings.GetRenderPipelineSettings<BloomRuntimeShader>();
+            if (!m_BloomMaterial)
+            {
+                m_BloomMaterial = CoreUtils.CreateEngineMaterial(runtimeShader.URPBloomShader);
+
+                bloomUpsample = new Material[k_MaxPyramidSize];
+                for (uint i = 0; i < k_MaxPyramidSize; ++i)
+                    bloomUpsample[i] = RenderingUtilsExt.Load(runtimeShader.URPBloomShader);
+            }
+
             // Start at half-res
             var bloom = VolumeManager.instance.stack.GetComponent<MobileBloom>();
 

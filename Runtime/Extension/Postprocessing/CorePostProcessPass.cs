@@ -5,6 +5,7 @@ namespace UnityEngine.Rendering.Universal
 {
     public class CorePostProcessPass : ScriptableRenderPass
     {
+        
         #region Bloom
 
         URPBloomPass _urpBloomPass = new URPBloomPass();
@@ -13,16 +14,16 @@ namespace UnityEngine.Rendering.Universal
 
         BloomApplyPass _bloomApplyPass = new BloomApplyPass();
 
+        public CorePostProcessPass()
+        {
+            renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing;
+        }
 
+        
         public TextureHandle RenderBloom(RenderGraph renderGraph, ContextContainer frameData, in TextureHandle source)
         {
             var bloom = VolumeManager.instance.stack.GetComponent<MobileBloom>();
             var result = TextureHandle.nullHandle;
-            if (!bloom.enable.value)
-            {
-                return result;
-            }
-
             switch (bloom.mode.value)
             {
                 case BloomMode.None:
@@ -43,16 +44,13 @@ namespace UnityEngine.Rendering.Universal
         public TextureHandle ApplyBloom(RenderGraph renderGraph, ContextContainer frameData, in TextureHandle source)
         {
             var bloom = VolumeManager.instance.stack.GetComponent<MobileBloom>();
-            var result = TextureHandle.nullHandle;
-            if (!bloom.enable.value)
-            {
-                return result;
-            }
+            var result = source;
 
+            
             switch (bloom.mode.value)
             {
                 case BloomMode.None:
-                    return result;
+                    return source;
                     break;
                 default:
                     result = _bloomApplyPass.Render(renderGraph, frameData, source);
@@ -81,9 +79,9 @@ namespace UnityEngine.Rendering.Universal
 
 
             #region ApplyBloom
-
+            
             currentRT = ApplyBloom(renderGraph, frameData, currentRT);
-
+            
             #endregion
 
             resourceData.cameraColor = currentRT;

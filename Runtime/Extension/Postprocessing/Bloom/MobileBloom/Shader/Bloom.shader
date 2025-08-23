@@ -603,15 +603,16 @@
 
                 float2 uvBloom = uv;
 
-                half4 bloom = SAMPLE_TEXTURE2D_X(_Bloom_Texture, sampler_LinearClamp,
-                                                 SCREEN_COORD_REMOVE_SCALEBIAS(uvBloom));
+                half4 bloom =  SAMPLE_TEXTURE2D_X(_Bloom_Texture, sampler_LinearClamp,
+                                                               SCREEN_COORD_REMOVE_SCALEBIAS(uvBloom));
+                half4 frameBuffer = SAMPLE_TEXTURE2D_X(_BlitTexture, sampler_LinearClamp, SCREEN_COORD_REMOVE_SCALEBIAS(uvBloom));
 
-
+                frameBuffer += bloom;
                 #if defined(_USE_RGBM)
-                     bloom.xyz = DecodeRGBM(bloom);
+                     frameBuffer.xyz = DecodeRGBM(frameBuffer);
                 #endif
 
-                half3 bloomedCol = bloom.xyz * _Bloom_Custom_Params.w;
+                half3 bloomedCol = frameBuffer.xyz * _Bloom_Custom_Params.w;
 
                 return half4(bloomedCol, 1);
             }

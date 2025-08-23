@@ -7,7 +7,7 @@ namespace UnityEngine.Rendering.Universal
     [VolumeComponentMenu("Post-processing Custom/CMAA2")]
     [VolumeRequiresRendererFeatures(typeof(CMAA2Feature))]
     [SupportedOnRenderPipeline(typeof(UniversalRenderPipelineAsset))]
-    public sealed class CMAA2Volume : VolumeComponent, IPostProcessComponent
+    public sealed class CMAA2Volume : VolumeComponent
     {
         public CMAA2Volume()
         {
@@ -15,7 +15,5 @@ namespace UnityEngine.Rendering.Universal
         }
 
         public BoolParameter enabled = new BoolParameter(false);
-
-        public bool IsActive() => enabled.value;
     }
 }

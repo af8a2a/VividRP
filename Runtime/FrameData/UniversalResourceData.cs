@@ -377,6 +377,8 @@ namespace UnityEngine.Rendering.Universal
             _rtasDebugView = TextureHandle.nullHandle;
 
             #endregion
+
+            _bloomTexture = TextureHandle.nullHandle;
             
             for (int i = 0; i < _gBuffer.Length; i++)
                 _gBuffer[i] = TextureHandle.nullHandle;

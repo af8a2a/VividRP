@@ -7,12 +7,8 @@ namespace UnityEngine.Rendering.Universal
 {
     public class MobileBloomPass 
     {
-        Material _material;
 
-        Material bloomMaterial
-        {
-            get { return _material ??= new Material(Shader.Find("PostProcessing/MobileBloom")); }
-        }
+        private Material bloomMaterial;
 
         class PassData
         {
@@ -100,9 +96,11 @@ namespace UnityEngine.Rendering.Universal
         public  TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle source)
         {
             var setting = VolumeManager.instance.stack.GetComponent<MobileBloom>();
-            if (!setting.enable.value)
+
+            if (!bloomMaterial)
             {
-                return source;
+                var runtimeShader = GraphicsSettings.GetRenderPipelineSettings<BloomRuntimeShader>();
+                bloomMaterial = CoreUtils.CreateEngineMaterial(runtimeShader.bloomShader);
             }
 
             using (var builder = renderGraph.AddUnsafePass<PassData>("Mobile Bloom", out var data))

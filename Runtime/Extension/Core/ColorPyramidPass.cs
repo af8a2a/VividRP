@@ -5,6 +5,18 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal
 {
+    public static partial class ShaderConstants
+    {
+        public static readonly int _Source = Shader.PropertyToID("_Source");
+        public static readonly int _SrcScaleBias = Shader.PropertyToID("_SrcScaleBias");
+        public static readonly int _SrcUvLimits = Shader.PropertyToID("_SrcUvLimits");
+        public static readonly int _SourceMip = Shader.PropertyToID("_SourceMip");
+
+        public static readonly int _Mip0 = Shader.PropertyToID("_Mip0");
+        public static readonly int _Size = Shader.PropertyToID("_Size");
+        public static readonly int _Destination = Shader.PropertyToID("_Destination");
+    }
+
     /// <summary>
     /// Generates the gaussian pyramid of source into destination.
     /// We can't do it in place as the color pyramid has to be read while writing to the color buffer in some cases (e.g. refraction, distortion)
@@ -208,16 +220,5 @@ namespace UnityEngine.Rendering.Universal
                 name: string.Format("{0}_CameraColorBufferMipChain{1}", viewName, frameIndex));
         }
 
-        public static class ShaderConstants
-        {
-            public static readonly int _Source = Shader.PropertyToID("_Source");
-            public static readonly int _SrcScaleBias = Shader.PropertyToID("_SrcScaleBias");
-            public static readonly int _SrcUvLimits = Shader.PropertyToID("_SrcUvLimits");
-            public static readonly int _SourceMip = Shader.PropertyToID("_SourceMip");
-
-            public static readonly int _Mip0 = Shader.PropertyToID("_Mip0");
-            public static readonly int _Size = Shader.PropertyToID("_Size");
-            public static readonly int _Destination = Shader.PropertyToID("_Destination");
-        }
     }
 }

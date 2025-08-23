@@ -5,7 +5,6 @@ namespace UnityEngine.Rendering.Universal
 {
     public class CorePostProcessPass : ScriptableRenderPass
     {
-        
         #region Bloom
 
         URPBloomPass _urpBloomPass = new URPBloomPass();
@@ -19,7 +18,7 @@ namespace UnityEngine.Rendering.Universal
             renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing;
         }
 
-        
+
         public TextureHandle RenderBloom(RenderGraph renderGraph, ContextContainer frameData, in TextureHandle source)
         {
             var bloom = VolumeManager.instance.stack.GetComponent<MobileBloom>();
@@ -46,7 +45,7 @@ namespace UnityEngine.Rendering.Universal
             var bloom = VolumeManager.instance.stack.GetComponent<MobileBloom>();
             var result = source;
 
-            
+
             switch (bloom.mode.value)
             {
                 case BloomMode.None:
@@ -68,6 +67,12 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
 
+        #region ToneMapping
+
+        ToneMappingPass _toneMappingPass = new ToneMappingPass();
+
+        #endregion
+
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
             var resourceData = frameData.Get<UniversalResourceData>();
@@ -79,7 +84,7 @@ namespace UnityEngine.Rendering.Universal
             currentRT = _cmaa2Pass.Render(renderGraph, frameData, currentRT);
 
             #endregion
-            
+
             #region Bloom
 
             {
@@ -90,9 +95,15 @@ namespace UnityEngine.Rendering.Universal
 
 
             #region ApplyBloom
-            
+
             currentRT = ApplyBloom(renderGraph, frameData, currentRT);
-            
+
+            #endregion
+
+            #region ToneMapping
+
+            currentRT = _toneMappingPass.Render(renderGraph, frameData, currentRT);
+
             #endregion
 
             resourceData.cameraColor = currentRT;

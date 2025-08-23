@@ -3,7 +3,7 @@ using UnityEngine.Rendering;
 
 namespace UnityEngine.Rendering.Universal
 {
-    public class GranTurismo : VolumeComponent, IPostProcessComponent
+    partial class VividToneMapping
     {
         /// <summary>
         /// The maximum brightness of the screen.
@@ -20,7 +20,7 @@ namespace UnityEngine.Rendering.Universal
         /// Linear section start. This controls linear start point in 0.0-1.0.
         /// </summary>
         [Tooltip("Linear section start. This controls linear start point in 0.0-1.0.")]
-        public ClampedFloatParameter linearSectionStart = new ClampedFloatParameter(0.2f, 0.0f, 1.0f);
+        public ClampedFloatParameter linearSectionStart = new ClampedFloatParameter(0.2f, 0.01f, 1.0f);
 
         /// <summary>
         /// Linear section Length. This controls linear length.
@@ -42,10 +42,5 @@ namespace UnityEngine.Rendering.Universal
 
 
         public BoolParameter enable = new BoolParameter(false);
-
-        public bool IsActive()
-        {
-            return enable.value;
-        }
     }
 }

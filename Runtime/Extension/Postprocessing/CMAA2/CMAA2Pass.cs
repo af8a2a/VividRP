@@ -16,8 +16,6 @@ namespace UnityEngine.Rendering.Universal
         private int DeferredColorApply2x2CSKernelID;
 
 
-        private ComputeShader GPUCopyColor;
-        private int GPUCopyColorKernelID;
 
         bool firstRun = true;
 
@@ -31,8 +29,6 @@ namespace UnityEngine.Rendering.Universal
             internal int ProcessCandidatesCSKernelID;
             internal int DeferredColorApply2x2CSKernelID;
 
-            internal ComputeShader GPUCopyColor;
-            internal int GPUCopyColorKernelID;
 
 
             internal TextureHandle InputTexture;
@@ -183,8 +179,6 @@ namespace UnityEngine.Rendering.Universal
                     ProcessCandidatesCSKernelID = cmaa2Shader.FindKernel("ProcessCandidatesCS");
                     DeferredColorApply2x2CSKernelID = cmaa2Shader.FindKernel("DeferredColorApply2x2CS");
 
-                    GPUCopyColor = GraphicsSettings.GetRenderPipelineSettings<MipGeneratorRuntimeShader>().GPUCopyColor;
-                    GPUCopyColorKernelID = GPUCopyColor.FindKernel("KMain");
                     passData.firstRun = true;
                 }
                 else
@@ -209,11 +203,7 @@ namespace UnityEngine.Rendering.Universal
                 passData.ProcessCandidatesCSKernelID = ProcessCandidatesCSKernelID;
                 passData.DeferredColorApply2x2CSKernelID = DeferredColorApply2x2CSKernelID;
 
-
-                passData.GPUCopyColor = GPUCopyColor;
-                passData.GPUCopyColorKernelID = GPUCopyColorKernelID;
-
-
+                
                 passData.WorkingShapeCandidatesBuffer =
                     builder.CreateTransientBuffer(new BufferDesc(requiredCandidatePixels, sizeof(int), GraphicsBuffer.Target.Structured));
                 passData.WorkingDeferredBlendItemListBuffer =
@@ -287,9 +277,6 @@ namespace UnityEngine.Rendering.Universal
                 passData.ProcessCandidatesCSKernelID = ProcessCandidatesCSKernelID;
                 passData.DeferredColorApply2x2CSKernelID = DeferredColorApply2x2CSKernelID;
 
-
-                passData.GPUCopyColor = GPUCopyColor;
-                passData.GPUCopyColorKernelID = GPUCopyColorKernelID;
 
 
                 passData.WorkingShapeCandidatesBuffer =

@@ -1,0 +1,311 @@
+﻿using System;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
+
+namespace UnityEngine.Rendering.Universal
+{
+    public static partial class ShaderKeywordStrings
+    {
+        /// <summary> Keyword used for ACES Tonemapping. </summary>
+        public const string TonemapGranTurismo = "_TONEMAP_GT";
+
+        public const string TonemapAgx = "_TONEMAP_AGX";
+        public const string TonemapAgxApprox = "_TONEMAP_AGX_APPROX";
+    }
+
+    // Precomputed shader ids to same some CPU cycles (mostly affects mobile)
+    public static partial class ShaderConstants
+    {
+        public static readonly int _TempTarget = Shader.PropertyToID("_TempTarget");
+        public static readonly int _TempTarget2 = Shader.PropertyToID("_TempTarget2");
+
+        public static readonly int _StencilRef = Shader.PropertyToID("_StencilRef");
+        public static readonly int _StencilMask = Shader.PropertyToID("_StencilMask");
+
+        public static readonly int _FullCoCTexture = Shader.PropertyToID("_FullCoCTexture");
+        public static readonly int _HalfCoCTexture = Shader.PropertyToID("_HalfCoCTexture");
+        public static readonly int _DofTexture = Shader.PropertyToID("_DofTexture");
+        public static readonly int _CoCParams = Shader.PropertyToID("_CoCParams");
+        public static readonly int _BokehKernel = Shader.PropertyToID("_BokehKernel");
+        public static readonly int _BokehConstants = Shader.PropertyToID("_BokehConstants");
+        public static readonly int _PongTexture = Shader.PropertyToID("_PongTexture");
+        public static readonly int _PingTexture = Shader.PropertyToID("_PingTexture");
+
+        public static readonly int _Metrics = Shader.PropertyToID("_Metrics");
+        public static readonly int _AreaTexture = Shader.PropertyToID("_AreaTexture");
+        public static readonly int _SearchTexture = Shader.PropertyToID("_SearchTexture");
+        public static readonly int _EdgeTexture = Shader.PropertyToID("_EdgeTexture");
+        public static readonly int _BlendTexture = Shader.PropertyToID("_BlendTexture");
+
+        public static readonly int _ColorTexture = Shader.PropertyToID("_ColorTexture");
+        public static readonly int _Params = Shader.PropertyToID("_Params");
+        public static readonly int _SourceTexLowMip = Shader.PropertyToID("_SourceTexLowMip");
+        public static readonly int _Bloom_Params = Shader.PropertyToID("_Bloom_Params");
+        public static readonly int _Bloom_Texture = Shader.PropertyToID("_Bloom_Texture");
+        public static readonly int _LensDirt_Texture = Shader.PropertyToID("_LensDirt_Texture");
+        public static readonly int _LensDirt_Params = Shader.PropertyToID("_LensDirt_Params");
+        public static readonly int _LensDirt_Intensity = Shader.PropertyToID("_LensDirt_Intensity");
+        public static readonly int _Distortion_Params1 = Shader.PropertyToID("_Distortion_Params1");
+        public static readonly int _Distortion_Params2 = Shader.PropertyToID("_Distortion_Params2");
+        public static readonly int _Chroma_Params = Shader.PropertyToID("_Chroma_Params");
+        public static readonly int _Vignette_Params1 = Shader.PropertyToID("_Vignette_Params1");
+        public static readonly int _Vignette_Params2 = Shader.PropertyToID("_Vignette_Params2");
+        public static readonly int _Vignette_ParamsXR = Shader.PropertyToID("_Vignette_ParamsXR");
+
+
+        public static readonly int _Lut_Params = Shader.PropertyToID("_Lut_Params");
+        public static readonly int _UserLut_Params = Shader.PropertyToID("_UserLut_Params");
+        public static readonly int _InternalLut = Shader.PropertyToID("_InternalLut");
+        public static readonly int _UserLut = Shader.PropertyToID("_UserLut");
+        public static readonly int _GTToneMap_Params0 = Shader.PropertyToID("_GTToneMap_Params0");
+        public static readonly int _GTToneMap_Params1 = Shader.PropertyToID("_GTToneMap_Params1");
+
+
+        public static readonly int _DownSampleScaleFactor = Shader.PropertyToID("_DownSampleScaleFactor");
+
+        public static readonly int _FlareOcclusionRemapTex = Shader.PropertyToID("_FlareOcclusionRemapTex");
+        public static readonly int _FlareOcclusionTex = Shader.PropertyToID("_FlareOcclusionTex");
+        public static readonly int _FlareOcclusionIndex = Shader.PropertyToID("_FlareOcclusionIndex");
+        public static readonly int _FlareTex = Shader.PropertyToID("_FlareTex");
+        public static readonly int _FlareColorValue = Shader.PropertyToID("_FlareColorValue");
+        public static readonly int _FlareData0 = Shader.PropertyToID("_FlareData0");
+        public static readonly int _FlareData1 = Shader.PropertyToID("_FlareData1");
+        public static readonly int _FlareData2 = Shader.PropertyToID("_FlareData2");
+        public static readonly int _FlareData3 = Shader.PropertyToID("_FlareData3");
+        public static readonly int _FlareData4 = Shader.PropertyToID("_FlareData4");
+        public static readonly int _FlareData5 = Shader.PropertyToID("_FlareData5");
+
+        public static readonly int _FullscreenProjMat = Shader.PropertyToID("_FullscreenProjMat");
+
+        public static int[] _BloomMipUp;
+        public static int[] _BloomMipDown;
+    }
+
+
+    public class ToneMappingPass : IDisposable
+    {
+        RTHandle m_UserLut;
+        Material m_Material;
+
+        #region Util
+
+        TextureHandle TryGetCachedUserLutTextureHandle(RenderGraph renderGraph)
+        {
+            var colorLookup = VolumeManager.instance.stack.GetComponent<ColorLookup>();
+
+            if (colorLookup.texture.value == null)
+            {
+                if (m_UserLut != null)
+                {
+                    m_UserLut.Release();
+                    m_UserLut = null;
+                }
+            }
+            else
+            {
+                if (m_UserLut == null || m_UserLut.externalTexture != colorLookup.texture.value)
+                {
+                    m_UserLut?.Release();
+                    m_UserLut = RTHandles.Alloc(colorLookup.texture.value);
+                }
+            }
+
+            return m_UserLut != null ? renderGraph.ImportTexture(m_UserLut) : TextureHandle.nullHandle;
+        }
+
+
+        internal static void GetHDROutputLuminanceParameters(HDROutputUtils.HDRDisplayInformation hdrDisplayInformation, ColorGamut hdrDisplayColorGamut,
+            VividToneMapping tonemapping, out Vector4 hdrOutputParameters)
+        {
+            float minNits = hdrDisplayInformation.minToneMapLuminance;
+            float maxNits = hdrDisplayInformation.maxToneMapLuminance;
+            float paperWhite = hdrDisplayInformation.paperWhiteNits;
+
+            if (!tonemapping.detectPaperWhite.value)
+            {
+                paperWhite = tonemapping.paperWhite.value;
+            }
+
+            if (!tonemapping.detectBrightnessLimits.value)
+            {
+                minNits = tonemapping.minNits.value;
+                maxNits = tonemapping.maxNits.value;
+            }
+
+            hdrOutputParameters = new Vector4(minNits, maxNits, paperWhite, 1f / paperWhite);
+        }
+
+        #endregion
+
+
+        static ProfilingSampler _profilingSampler = new ProfilingSampler("Vivid Tonemapping");
+
+        private class ColorGradingPassData
+        {
+            internal TextureHandle destinationTexture;
+            internal TextureHandle sourceTexture;
+            internal TextureHandle lutTexture;
+            internal TextureHandle userLutTexture;
+
+
+            internal Vector4 lutParams;
+            internal Vector4 userLutParams;
+            internal Vector4 hdrOutputLuminanceParams;
+
+            internal Vector4 gtToneMapParams0;
+            internal Vector4 gtToneMapParams1;
+
+
+            internal Material material;
+            internal VividTonemappingMode toneMappingMode;
+            internal bool isHdrGrading;
+        }
+
+
+        public TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, in TextureHandle sourceTexture)
+        {
+            if (!m_Material)
+            {
+                var runtimeShader = GraphicsSettings.GetRenderPipelineSettings<TonemappingRuntimeShader>();
+                m_Material = CoreUtils.CreateEngineMaterial(runtimeShader.tonemapping);
+            }
+
+            m_Material.enabledKeywords = null;
+            using (var builder = renderGraph.AddRasterRenderPass<ColorGradingPassData>("Vivid ToneMapping", out var passData,
+                       _profilingSampler))
+            {
+                var postProcessingData = frameData.Get<UniversalPostProcessingData>();
+                var resourceData = frameData.Get<UniversalResourceData>();
+                var cameraData = frameData.Get<UniversalCameraData>();
+                var colorLookup = VolumeManager.instance.stack.GetComponent<ColorLookup>();
+                var colorAdjustments = VolumeManager.instance.stack.GetComponent<ColorAdjustments>();
+                var tonemapping = VolumeManager.instance.stack.GetComponent<VividToneMapping>();
+
+
+                TextureHandle internalColorLut = resourceData.internalColorLut;
+
+
+                bool hdrGrading = postProcessingData.gradingMode == ColorGradingMode.HighDynamicRange;
+                int lutHeight = postProcessingData.lutSize;
+                int lutWidth = lutHeight * lutHeight;
+
+                // Source material setup
+                float postExposureLinear = Mathf.Pow(2f, colorAdjustments.postExposure.value);
+                Vector4 lutParams = new Vector4(1f / lutWidth, 1f / lutHeight, lutHeight - 1f, postExposureLinear);
+
+                TextureHandle userLutTexture = TryGetCachedUserLutTextureHandle(renderGraph);
+
+                // var Tonemapping = VolumeManager.instance.stack.GetComponent<Tonemapping>();
+
+                Vector4 userLutParams = !colorLookup.IsActive()
+                    ? Vector4.zero
+                    : new Vector4(1f / colorLookup.texture.value.width,
+                        1f / colorLookup.texture.value.height,
+                        colorLookup.texture.value.height - 1f,
+                        colorLookup.contribution.value);
+
+
+#if ENABLE_VR && ENABLE_XR_MODULE
+                if (cameraData.xr.enabled)
+                {
+                    bool passSupportsFoveation = cameraData.xrUniversal.canFoveateIntermediatePasses || resourceData.isActiveTargetBackBuffer;
+                    // This is a screen-space pass, make sure foveated rendering is disabled for non-uniform renders
+                    passSupportsFoveation &= !XRSystem.foveatedRenderingCaps.HasFlag(FoveatedRenderingCaps.NonUniformRaster);
+                    builder.EnableFoveatedRasterization(cameraData.xr.supportsFoveatedRendering && passSupportsFoveation);
+                }
+#endif
+
+
+
+                if (cameraData.isHDROutputActive)
+                {
+                    GetHDROutputLuminanceParameters(cameraData.hdrDisplayInformation, cameraData.hdrDisplayColorGamut, tonemapping,
+                        out passData.hdrOutputLuminanceParams);
+                    
+                }
+
+
+                builder.AllowGlobalStateModification(true);
+
+
+                if (tonemapping.mode.value is VividTonemappingMode.GranTurismo)
+                {
+                    passData.gtToneMapParams0 = new Vector4(tonemapping.maxBrightness.value, tonemapping.contrast.value,
+                        tonemapping.linearSectionStart.value, tonemapping.linearSectionLength.value);
+                    passData.gtToneMapParams1 = new Vector4(tonemapping.blackPow.value, tonemapping.blackMin.value, 0.0f,
+                        0.0f);
+                }
+
+
+                passData.destinationTexture = renderGraph.CreateTexture(new TextureDesc(cameraData.scaledWidth, cameraData.scaledHeight)
+                {
+                    format = cameraData.cameraTargetDescriptor.graphicsFormat,
+                    dimension = TextureDimension.Tex2D,
+                    enableRandomWrite = true,
+                    name = "ToneMappingApply"
+                });
+                builder.SetRenderAttachment(passData.destinationTexture, 0, AccessFlags.Write);
+                passData.sourceTexture = sourceTexture;
+                builder.UseTexture(sourceTexture, AccessFlags.Read);
+                passData.lutTexture = internalColorLut;
+                builder.UseTexture(passData.lutTexture, AccessFlags.Read);
+                passData.lutParams = lutParams;
+                if (userLutTexture.IsValid())
+                {
+                    passData.userLutTexture = userLutTexture;
+                    builder.UseTexture(userLutTexture, AccessFlags.Read);
+                }
+
+
+                passData.userLutParams = userLutParams;
+                passData.material = m_Material;
+                passData.toneMappingMode = tonemapping.mode.value;
+                passData.isHdrGrading = hdrGrading;
+
+                builder.SetRenderFunc<ColorGradingPassData>((data, context) =>
+                {
+                    var cmd = context.cmd;
+                    var material = data.material;
+                    RTHandle sourceTextureHdl = data.sourceTexture;
+
+                    material.SetTexture(ShaderConstants._InternalLut, data.lutTexture);
+                    material.SetVector(ShaderConstants._Lut_Params, data.lutParams);
+                    material.SetTexture(ShaderConstants._UserLut, data.userLutTexture);
+                    material.SetVector(ShaderConstants._UserLut_Params, data.userLutParams);
+                    material.SetVector(ShaderConstants._UserLut_Params, data.userLutParams);
+                    material.SetVector(ShaderConstants._GTToneMap_Params0, data.gtToneMapParams0);
+                    material.SetVector(ShaderConstants._GTToneMap_Params1, data.gtToneMapParams1);
+
+
+                    if (data.isHdrGrading)
+                    {
+                        material.EnableKeyword(ShaderKeywordStrings.HDRGrading);
+                    }
+                    else
+                    {
+                        switch (data.toneMappingMode)
+                        {
+                            case VividTonemappingMode.Neutral: material.EnableKeyword(ShaderKeywordStrings.TonemapNeutral); break;
+                            case VividTonemappingMode.ACES: material.EnableKeyword(ShaderKeywordStrings.TonemapACES); break;
+                            case VividTonemappingMode.GranTurismo: material.EnableKeyword(ShaderKeywordStrings.TonemapGranTurismo); break;
+                            case VividTonemappingMode.AgX: material.EnableKeyword(ShaderKeywordStrings.TonemapAgx); break;
+                            case VividTonemappingMode.AgxApprox: material.EnableKeyword(ShaderKeywordStrings.TonemapAgxApprox); break;
+                            default: break; // None
+                        }
+                    }
+
+                    Blitter.BlitTexture(cmd, sourceTextureHdl, Vector2.one, data.material, 0);
+                });
+
+                return passData.destinationTexture;
+            }
+        }
+
+
+        public void Dispose()
+        {
+            m_UserLut?.Release();
+            CoreUtils.Destroy(m_Material);
+        }
+    }
+}

@@ -180,16 +180,20 @@ namespace UnityEngine.Rendering.Universal
         {
             return Mathf.Atan(GetPixelSpreadTangent(fov, width, height));
         }
-        
-        
-        internal static Vector4 EvaluateRayTracingHistorySizeAndScale( RTHandle buffer)
+
+
+        internal static Vector4 EvaluateRayTracingHistorySizeAndScale(RTHandle buffer)
+        {
+            return EvaluateHistorySizeAndScale(buffer);
+        }
+
+        internal static Vector4 EvaluateHistorySizeAndScale(RTHandle buffer)
         {
             return new Vector4(RTHandles.rtHandleProperties.previousViewportSize.x,
                 RTHandles.rtHandleProperties.previousViewportSize.y,
                 (float)RTHandles.rtHandleProperties.previousViewportSize.x / buffer.rt.width,
                 (float)RTHandles.rtHandleProperties.previousViewportSize.y / buffer.rt.height);
         }
-
 
         
         static private UniversalAdditionalCameraData s_DefaultUniversalAdditionalCameraData { get { return ComponentSingleton<UniversalAdditionalCameraData>.instance; } }

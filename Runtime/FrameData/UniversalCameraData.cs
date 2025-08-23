@@ -666,6 +666,9 @@ namespace UnityEngine.Rendering.Universal
         
         public Frustum frustum;
 
+
+        public Vector4 jitter;
+
         ///<inheritdoc/>
         public override void Reset()
         {
@@ -726,6 +729,8 @@ namespace UnityEngine.Rendering.Universal
             isLastBaseCamera = false;
             stackAnyPostProcessingEnabled = false;
             stackLastCameraOutputToHDR = false;
+
+            jitter = default;
         }
     }
 }

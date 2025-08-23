@@ -3,6 +3,7 @@ using UnityEngine.Rendering.Universal;
 
 namespace UnityEngine.Rendering.Universal
 {
+#if false
     [DisallowMultipleRendererFeature]
     public class DepthOfFieldFeature : ScriptableRendererFeature
     {
@@ -17,15 +18,10 @@ namespace UnityEngine.Rendering.Universal
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
-            var setting = VolumeManager.instance.stack.GetComponent<PhysicallyDepthOfField>();
-            if (setting == null || !setting.IsActive())
-            {
-                return;
-            }
 
-            diaphragmDoFPass.Setup(setting);
 
             renderer.EnqueuePass(diaphragmDoFPass);
         }
     }
+#endif
 }

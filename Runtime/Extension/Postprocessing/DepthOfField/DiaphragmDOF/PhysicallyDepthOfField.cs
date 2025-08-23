@@ -150,6 +150,18 @@ namespace UnityEngine.Rendering.Universal
             set { m_AdaptiveSamplingWeight.value = value; }
         }
 
+        
+        
+        /// <summary>
+        /// Enables the Circle of Confusion Reprojection used when anti-aliasing or an upsampling technique requiring jittering (TAA, DLSS, STP, etc.) is enabled. Disabling this option can get rid of ghosting artifacts in the depth of field."
+        /// </summary>
+        [AdditionalProperty]
+        [Tooltip("Enables the CoC Reprojection used when anti-aliasing or an upsampling technique requiring jittering (TAA, DLSS, STP, etc.) is enabled. Disabling this option can get rid of ghosting artifacts in the depth of field.")]
+        [SerializeField]
+        [InspectorName("CoC Stabilization")]
+        public BoolParameter coCStabilization = new BoolParameter(true);
+
+        
 
         public BoolParameter enabled = new BoolParameter(false);
 

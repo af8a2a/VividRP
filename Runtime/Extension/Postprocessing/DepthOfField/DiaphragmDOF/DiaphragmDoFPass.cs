@@ -11,8 +11,12 @@ namespace UnityEngine.Rendering.Universal
         private PhysicallyDepthOfField physicallyDepthOfField;
 
 
-        public ComputeShader dofCoCCS;
-        public int dofCoCKernel;
+        ComputeShader dofCoCCS;
+        int dofCoCKernel;
+
+        ComputeShader dofCoCReprojectCS;
+        int dofCoCReprojectKernel;
+
 
         ComputeShader pbDoFCoCMinMaxCS;
         int pbDoFMinMaxKernel;
@@ -69,6 +73,9 @@ namespace UnityEngine.Rendering.Universal
             public UniversalCameraData cameraData;
             public TextureHandle depthBuffer;
             public TextureHandle fullresCoC;
+            public TextureHandle prevCoC;
+            public TextureHandle nextCoC;
+            public TextureHandle motionVecTexture;
 
 
             public ComputeShader pbDoFCoCMinMaxCS;
@@ -108,6 +115,13 @@ namespace UnityEngine.Rendering.Universal
 
             public ComputeShader pbDoFCombineCS;
             public int pbDoFCombineKernel;
+
+
+            public bool taaEnabled;
+            public Vector4 cameraJiiter;
+            public bool resetPostProcessingHistory;
+            public ComputeShader dofCoCReprojectCS;
+            public int dofCoCReprojectKernel;
         }
 
 
@@ -122,7 +136,13 @@ namespace UnityEngine.Rendering.Universal
             DepthOfFieldCombine
         }
 
-
+        static int _Params = Shader.PropertyToID("_Params");
+        static int _InputCoCTexture = Shader.PropertyToID("_InputCoCTexture");
+        static int _OutputCoCTexture = Shader.PropertyToID("_OutputCoCTexture");
+        static int _InputHistoryCoCTexture = Shader.PropertyToID("_InputHistoryCoCTexture");
+        static int _CameraMotionVectorsTexture = Shader.PropertyToID("_CameraMotionVectorsTexture");
+        
+        
         void InitResource(ref PassData passData, RenderGraph renderGraph, UniversalCameraData cameraData,
             UniversalResourceData resourceData)
         {
@@ -185,6 +205,12 @@ namespace UnityEngine.Rendering.Universal
 
             passData.nearSampleCount = physicallyDepthOfField.nearSampleCount;
             passData.farSampleCount = physicallyDepthOfField.farSampleCount;
+
+            passData.taaEnabled = physicallyDepthOfField.coCStabilization.value;
+            passData.cameraJiiter = cameraData.jitter;
+
+            passData.dofCoCReprojectCS = dofCoCReprojectCS;
+            passData.dofCoCReprojectKernel = dofCoCReprojectKernel;
         }
 
 
@@ -192,35 +218,71 @@ namespace UnityEngine.Rendering.Universal
         {
             physicallyDepthOfField = depthOfField;
 
-            dofCoCCS = Resources.Load<ComputeShader>("DoFCircleOfConfusion");
-            dofCoCKernel = dofCoCCS.FindKernel("KMainCoCPhysical");
+            if (!dofCoCCS)
+            {
+                var runtimeShader = GraphicsSettings.GetRenderPipelineSettings<DepthOfFieldRuntimeShader>();
+                dofCoCCS = runtimeShader.doFCircleOfConfusionCS;
+                dofCoCKernel = dofCoCCS.FindKernel("KMainCoCPhysical");
 
-            pbDoFCoCMinMaxCS = Resources.Load<ComputeShader>("DoFCoCMinMax");
-            pbDoFMinMaxKernel = pbDoFCoCMinMaxCS.FindKernel("KMainCoCMinMax");
+                dofCoCReprojectCS = runtimeShader.depthOfFieldCoCReprojectCS;
+                dofCoCReprojectKernel = dofCoCReprojectCS.FindKernel("KMain");
 
-            pbDoFDilateCS = Resources.Load<ComputeShader>("DoFMinMaxDilate");
-            pbDoFDilateKernel = pbDoFDilateCS.FindKernel("KMain");
+                pbDoFCoCMinMaxCS = runtimeShader.doFCoCMinMaxCS;
+                pbDoFMinMaxKernel = pbDoFCoCMinMaxCS.FindKernel("KMainCoCMinMax");
 
-            dofComputeApertureShapeCS = Resources.Load<ComputeShader>("DoFApertureShape");
-            dofComputeApertureShapeKernel = dofComputeApertureShapeCS.FindKernel("ComputeShapeBuffer");
+                pbDoFDilateCS = runtimeShader.doFMinMaxDilateCS;
+                pbDoFDilateKernel = pbDoFDilateCS.FindKernel("KMain");
 
-            dofComputeSlowTilesCS = Resources.Load<ComputeShader>("DoFComputeSlowTiles");
-            dofComputeSlowTilesKernel = dofComputeSlowTilesCS.FindKernel("ComputeSlowTiles");
+                dofComputeApertureShapeCS = runtimeShader.doFApertureShapeCS;
+                dofComputeApertureShapeKernel = dofComputeApertureShapeCS.FindKernel("ComputeShapeBuffer");
 
-
-            dofMipCS = Resources.Load<ComputeShader>("DepthOfFieldMip");
-            dofMipColorKernel = dofMipCS.FindKernel("KMainColor");
-            dofMipCoCKernel = dofMipCS.FindKernel("KMainCoC");
-            dofMipSafeCS = Resources.Load<ComputeShader>("DepthOfFieldMipSafe");
-            dofMipSafeKernel = dofMipSafeCS.FindKernel("KMain");
-
-
-            pbDoFGatherCS = Resources.Load<ComputeShader>("DoFGather");
-            pbDoFGatherKernel = pbDoFGatherCS.FindKernel("KMain");
+                dofComputeSlowTilesCS = runtimeShader.doFComputeSlowTilesCS;
+                dofComputeSlowTilesKernel = dofComputeSlowTilesCS.FindKernel("ComputeSlowTiles");
 
 
-            pbDoFCombineCS = Resources.Load<ComputeShader>("DoFCombine");
-            pbDoFCombineKernel = pbDoFCombineCS.FindKernel("UpsampleFastTiles");
+                dofMipCS = runtimeShader.depthOfFieldMipCS;
+                dofMipColorKernel = dofMipCS.FindKernel("KMainColor");
+                dofMipCoCKernel = dofMipCS.FindKernel("KMainCoC");
+                dofMipSafeCS = runtimeShader.depthOfFieldMipSafeCS;
+                dofMipSafeKernel = dofMipSafeCS.FindKernel("KMain");
+
+
+                pbDoFGatherCS = runtimeShader.doFGatherCS;
+                pbDoFGatherKernel = pbDoFGatherCS.FindKernel("KMain");
+
+
+                pbDoFCombineCS = runtimeShader.doFCombineCS;
+                pbDoFCombineKernel = pbDoFCombineCS.FindKernel("UpsampleFastTiles");
+            }
+        }
+
+        static RTHandle DepthOfFieldCoCAllocatorFunction(GraphicsFormat graphicsFormat, string viewName, int frameIndex, RTHandleSystem rtHandleSystem)
+        {
+            frameIndex &= 1;
+
+            return rtHandleSystem.Alloc(Vector2.one, colorFormat: graphicsFormat,
+                enableRandomWrite: true, useDynamicScale: true,
+                name: string.Format("{0}_DepthOfFieldCoC{1}", viewName, frameIndex));
+        }
+
+        internal bool ReAllocatedDepthOfFieldCoCTextureIfNeeded(HistoryFrameRTSystem historyRTSystem, out RTHandle prevFrameRT, out RTHandle currFrameRT)
+        {
+            var curTexture = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.DepthOfFieldCoC);
+            bool vaild = true;
+
+            if (curTexture == null)
+            {
+                vaild = false;
+
+                historyRTSystem.ReleaseHistoryFrameRT(HistoryFrameType.DepthOfFieldCoC);
+
+                historyRTSystem.AllocHistoryFrameRT((int)HistoryFrameType.DepthOfFieldCoC,
+                    DepthOfFieldCoCAllocatorFunction, GraphicsFormat.R16_SFloat, 2);
+            }
+
+            prevFrameRT = historyRTSystem.GetPreviousFrameRT(HistoryFrameType.DepthOfFieldCoC);
+            currFrameRT = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.DepthOfFieldCoC);
+            return vaild;
         }
 
 
@@ -270,6 +332,21 @@ namespace UnityEngine.Rendering.Universal
                 cmd.DispatchCompute(passData.dofCircleOfConfusionCS, passData.dofCircleOfConfusionKernel,
                     (passData.viewportSize.x + 7) / 8, (passData.viewportSize.y + 7) / 8,
                     1);
+
+                if (passData.taaEnabled)
+                {
+                    var cs = passData.dofCoCReprojectCS;
+                    var kernel = passData.dofCoCReprojectKernel;
+                    // This is a fixed empirical value. Was initially 0.91 but was creating a lot of ghosting trails in DoF.
+                    // Looks like we can push it down to 0.86 and still get nice stable results.
+                    float cocHysteresis = 0.86f;
+                    cmd.SetComputeVectorParam(cs, _Params, new Vector4(passData.resetPostProcessingHistory ? 0f : cocHysteresis, 1, 1, 0f));
+                    cmd.SetComputeTextureParam(cs, kernel, _InputCoCTexture, passData.fullresCoC);
+                    cmd.SetComputeTextureParam(cs, kernel, _InputHistoryCoCTexture, passData.prevCoC);
+                    cmd.SetComputeTextureParam(cs, kernel, _OutputCoCTexture, passData.nextCoC);
+                    cmd.SetComputeTextureParam(cs, kernel, _CameraMotionVectorsTexture, passData.motionVecTexture);
+                    cmd.DispatchCompute(cs, kernel, (passData.viewportSize.x + 7) / 8, (passData.viewportSize.y + 7) / 8, 1);
+                }
             }
 
             using (new ProfilingScope(cmd, ProfilingSampler.Get(ProfileID.DepthOfFieldDilate)))
@@ -455,8 +532,113 @@ namespace UnityEngine.Rendering.Universal
         }
 
 
+        public TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle source)
+        {
+            var setting = VolumeManager.instance.stack.GetComponent<PhysicallyDepthOfField>();
+
+            Setup(setting);
+
+            using (var builder = renderGraph.AddComputePass<PassData>("DiaphragmDoF", out var data))
+            {
+                var resourcesData = frameData.Get<UniversalResourceData>();
+                var cameraData = frameData.Get<UniversalCameraData>();
+                if (!cameraData.isGameCamera)
+                {
+                    return source;
+                }
+
+                InitResource(ref data, renderGraph, cameraData, resourcesData);
+                GetDoFResolutionScale(data, out float scale, out float resolutionScale);
+                var screenScale = new Vector2(scale, scale);
+
+
+                data.fullresCoC = builder.CreateTransientTexture(new TextureDesc(Vector2.one)
+                {
+                    name = "Full res CoC",
+                    format = GraphicsFormat.R16G16B16A16_SFloat,
+                    useMipMap = false,
+                    enableRandomWrite = true
+                });
+
+                ScaleFunc scaler = size => new Vector2Int((size.x + 7) / 8, (size.y + 7) / 8);
+
+                data.scaledDof = builder.CreateTransientTexture(new TextureDesc(screenScale)
+                {
+                    format = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "Scaled DoF"
+                });
+
+
+                // if (data.resolution != DepthOfFieldResolution.Full)
+                data.sourcePyramid = builder.CreateTransientTexture(
+                    renderGraph.CreateTexture(new TextureDesc(Vector2.one)
+                    {
+                        name = "DoF Source Pyramid",
+                        format = GraphicsFormat.R16G16B16A16_SFloat,
+                        useMipMap = true,
+                        enableRandomWrite = true
+                    }));
+
+                data.minMaxCoCPing = builder.CreateTransientTexture(new TextureDesc(scaler)
+                {
+                    format = GraphicsFormat.R16G16B16A16_SFloat, useMipMap = false, enableRandomWrite = true,
+                    name = "CoC Min Max Tiles"
+                });
+
+                data.minMaxCoCPong = builder.CreateTransientTexture(new TextureDesc(scaler)
+                {
+                    format = GraphicsFormat.R16G16B16A16_SFloat, useMipMap = false, enableRandomWrite = true,
+                    name = "CoC Min Max Tiles"
+                });
+
+
+                data.depthBuffer = resourcesData.cameraDepth;
+
+                data.shapeTable = builder.CreateTransientBuffer(new BufferDesc(k_DepthOfFieldApertureShapeBufferSize,
+                    sizeof(float) * 2));
+                data.source = resourcesData.activeColorTexture;
+                data.destination = renderGraph.CreateTexture(new TextureDesc(Vector2.one)
+                {
+                    name = "DoF Destination",
+                    format = GraphicsFormat.R16G16B16A16_SFloat,
+                    useMipMap = false,
+                    enableRandomWrite = true
+                });
+
+
+                data.resetPostProcessingHistory =
+                    ReAllocatedDepthOfFieldCoCTextureIfNeeded(cameraData.historyFrameRTSystem, out RTHandle prevFrameRT, out RTHandle nextFrameRT);
+
+                data.prevCoC = renderGraph.ImportTexture(prevFrameRT);
+                data.nextCoC = renderGraph.ImportTexture(nextFrameRT);
+                data.motionVecTexture = resourcesData.motionVectorColor;
+                builder.UseTexture(data.depthBuffer);
+                builder.UseTexture(data.source);
+
+                builder.UseTexture(data.fullresCoC, AccessFlags.ReadWrite);
+                builder.UseTexture(data.minMaxCoCPing, AccessFlags.ReadWrite);
+                builder.UseTexture(data.minMaxCoCPong, AccessFlags.ReadWrite);
+                builder.UseTexture(data.sourcePyramid, AccessFlags.ReadWrite);
+                builder.UseTexture(data.scaledDof, AccessFlags.ReadWrite);
+                builder.UseBuffer(data.shapeTable, AccessFlags.ReadWrite);
+                builder.UseTexture(data.destination, AccessFlags.ReadWrite);
+                builder.UseTexture(data.prevCoC, AccessFlags.ReadWrite);
+                builder.UseTexture(data.nextCoC, AccessFlags.ReadWrite);
+                builder.UseTexture(data.motionVecTexture);
+
+                builder.AllowPassCulling(false);
+                builder.AllowGlobalStateModification(true);
+                builder.SetRenderFunc((PassData passData, ComputeGraphContext computeGraphContext) => { ExecutePass(passData, computeGraphContext); });
+                return data.destination;
+            }
+        }
+
+#if false
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
+            var setting = VolumeManager.instance.stack.GetComponent<PhysicallyDepthOfField>();
+
+            Setup(setting);
+
             using (var builder = renderGraph.AddComputePass<PassData>("DiaphragmDoF", out var data))
             {
                 var resourcesData = frameData.Get<UniversalResourceData>();
@@ -536,12 +718,10 @@ namespace UnityEngine.Rendering.Universal
 
                 builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);
-                builder.SetRenderFunc((PassData passData, ComputeGraphContext computeGraphContext) =>
-                {
-                    ExecutePass(passData, computeGraphContext);
-                });
+                builder.SetRenderFunc((PassData passData, ComputeGraphContext computeGraphContext) => { ExecutePass(passData, computeGraphContext); });
                 resourcesData.cameraColor = data.destination;
             }
         }
+#endif
     }
 }

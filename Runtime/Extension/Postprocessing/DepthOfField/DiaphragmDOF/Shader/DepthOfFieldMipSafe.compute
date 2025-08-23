@@ -1,0 +1,30 @@
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "PostProcessDefines.hlsl"
+#include "DepthOfFieldCommon.hlsl"
+
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+
+#pragma kernel KMain
+
+#pragma multi_compile _ ENABLE_ALPHA
+
+#include "PostProcessDefines.hlsl"
+
+TEXTURE2D_X(_InputTexture);
+
+RWTexture2D<CTYPE> _OutputTexture;
+
+
+CBUFFER_START(cb0)
+    float4 _TexelSize;       // xy: size, zw: texel size
+CBUFFER_END
+
+#define GROUP_SIZE 8
+
+[numthreads(GROUP_SIZE, GROUP_SIZE, 1)]
+void KMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    PositionInputs posInputs = GetPositionInput(float2(dispatchThreadId.xy), _TexelSize.zw, uint2(GROUP_SIZE, GROUP_SIZE));
+    float2 uv = ClampAndScaleUVForBilinearPostProcessTexture(posInputs.positionNDC);
+    _OutputTexture[(posInputs.positionSS)] = SAMPLE_TEXTURE2D_X_LOD(_InputTexture, sampler_LinearClamp, uv, 0.0).CTYPE_SWIZZLE;
+}

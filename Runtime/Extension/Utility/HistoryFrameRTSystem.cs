@@ -87,6 +87,9 @@ namespace UnityEngine.Rendering.Universal
         Color,
 
         HistoryValidity,
+        
+        
+        DepthOfFieldCoC,
     }
 
     /// <summary>

@@ -67,6 +67,13 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
 
+        #region PhysicallyDepthOfField
+
+        DiaphragmDoFPass _diaphragmDoFPass = new DiaphragmDoFPass();
+
+        #endregion
+        
+        
         #region ToneMapping
 
         ToneMappingPass _toneMappingPass = new ToneMappingPass();
@@ -92,6 +99,13 @@ namespace UnityEngine.Rendering.Universal
 
             #endregion
 
+
+            #region PhysicallyDepthOfField
+
+            currentRT = _diaphragmDoFPass.Render(renderGraph, frameData, currentRT);
+
+            #endregion 
+            
             #region Bloom
 
             {

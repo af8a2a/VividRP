@@ -217,6 +217,9 @@ namespace UnityEngine.Rendering.Universal
                 if (allowScaling)
                     jitter *= jitterScale;
 
+                cameraData.jitter = new Vector4(jitter.x, jitter.y, jitter.x / actualWidth, jitter.y / actualHeight);
+
+                
                 float offsetX = jitter.x * (2.0f / actualWidth);
                 float offsetY = jitter.y * (2.0f / actualHeight);
 

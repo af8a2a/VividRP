@@ -62,6 +62,11 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
 
+        #region CMAA2
+
+        CMAA2Pass _cmaa2Pass = new CMAA2Pass();
+
+        #endregion
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
@@ -69,6 +74,12 @@ namespace UnityEngine.Rendering.Universal
 
             TextureHandle currentRT = resourceData.activeColorTexture;
 
+            #region CMAA2
+
+            currentRT = _cmaa2Pass.Render(renderGraph, frameData, currentRT);
+
+            #endregion
+            
             #region Bloom
 
             {

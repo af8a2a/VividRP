@@ -21,17 +21,6 @@ namespace UnityEngine.Rendering.Universal
 
         bool firstRun = true;
 
-        public CMAA2Pass()
-        {
-            cmaa2Shader = Resources.Load<ComputeShader>("CMAA");
-            EdgesColorKernelID = cmaa2Shader.FindKernel("EdgesColor2x2CS");
-            ComputeDispatchArgsCSKernelID = cmaa2Shader.FindKernel("ComputeDispatchArgsCS");
-            ProcessCandidatesCSKernelID = cmaa2Shader.FindKernel("ProcessCandidatesCS");
-            DeferredColorApply2x2CSKernelID = cmaa2Shader.FindKernel("DeferredColorApply2x2CS");
-
-            GPUCopyColor = Resources.Load<ComputeShader>("CopyColor");
-            GPUCopyColorKernelID = GPUCopyColor.FindKernel("KMain");
-        }
 
 
         internal class PassData
@@ -59,6 +48,7 @@ namespace UnityEngine.Rendering.Universal
             internal BufferHandle WorkingExecuteIndirectBuffer;
 
             internal bool firstRun;
+
             internal int2 resolution;
             // internal int2 textureResolution;
         }
@@ -67,17 +57,7 @@ namespace UnityEngine.Rendering.Universal
         static void ExecutePass(PassData data, ComputeGraphContext ctx)
         {
             var cmd = ctx.cmd;
-
-
-            {
-                cmd.SetComputeTextureParam(data.GPUCopyColor, data.GPUCopyColorKernelID, "_Input", data.InputTexture);
-                cmd.SetComputeTextureParam(data.GPUCopyColor, data.GPUCopyColorKernelID, "_Output", data.OutputTexture);
-                var dispatchX = RenderingUtilsExt.DivRoundUp(data.resolution.x, 8);
-                var dispatchY = RenderingUtilsExt.DivRoundUp(data.resolution.y, 8);
-
-                cmd.DispatchCompute(data.GPUCopyColor, data.GPUCopyColorKernelID, dispatchX, dispatchY, 1);
-            }
-
+            
 
             if (data.firstRun)
             {
@@ -170,6 +150,107 @@ namespace UnityEngine.Rendering.Universal
                 cmd.SetComputeTextureParam(data.cmaa2Shader, data.DeferredColorApply2x2CSKernelID, "g_inoutColorWriteonly", data.OutputTexture);
 
                 cmd.DispatchCompute(data.cmaa2Shader, data.DeferredColorApply2x2CSKernelID, data.WorkingExecuteIndirectBuffer, 0);
+            }
+        }
+
+        //in VividRP, ColorAttachment default set enableRandomWrite
+        public TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, in TextureHandle source)
+        {
+            var cameraData = frameData.Get<UniversalCameraData>();
+
+            var setting = VolumeManager.instance.stack.GetComponent<CMAA2>();
+            if (!setting.enabled.value)
+            {
+                return source;
+            }
+
+            using (var builder = renderGraph.AddComputePass<PassData>("CMAA2", out var passData))
+            {
+                passData.InputTexture = source;
+
+                var desc = renderGraph.GetTextureDesc(passData.InputTexture);
+
+                var textureSampleCount = (int)desc.msaaSamples;
+
+                passData.resolution = new int2(cameraData.scaledWidth, cameraData.scaledHeight);
+
+                if (!cmaa2Shader)
+                {
+                    var runtimeShader = GraphicsSettings.GetRenderPipelineSettings<CMAA2RuntimeShader>();
+                    cmaa2Shader = runtimeShader.cmaa2Shader;
+                    EdgesColorKernelID = cmaa2Shader.FindKernel("EdgesColor2x2CS");
+                    ComputeDispatchArgsCSKernelID = cmaa2Shader.FindKernel("ComputeDispatchArgsCS");
+                    ProcessCandidatesCSKernelID = cmaa2Shader.FindKernel("ProcessCandidatesCS");
+                    DeferredColorApply2x2CSKernelID = cmaa2Shader.FindKernel("DeferredColorApply2x2CS");
+
+                    GPUCopyColor = GraphicsSettings.GetRenderPipelineSettings<MipGeneratorRuntimeShader>().GPUCopyColor;
+                    GPUCopyColorKernelID = GPUCopyColor.FindKernel("KMain");
+                    passData.firstRun = true;
+                }
+                else
+                {
+                    passData.firstRun = false;
+                }
+
+
+                if (firstRun)
+                {
+                    firstRun = false;
+                }
+
+
+                var requiredCandidatePixels = cameraData.pixelWidth * cameraData.pixelHeight / 4 * textureSampleCount;
+                int requiredDeferredColorApplyBuffer = cameraData.pixelWidth * cameraData.pixelHeight / 2 * textureSampleCount;
+                int requiredListHeadsPixels = (cameraData.pixelWidth * cameraData.pixelHeight + 3) / 6;
+
+                passData.cmaa2Shader = cmaa2Shader;
+                passData.EdgesColorKernelID = EdgesColorKernelID;
+                passData.ComputeDispatchArgsCSKernelID = ComputeDispatchArgsCSKernelID;
+                passData.ProcessCandidatesCSKernelID = ProcessCandidatesCSKernelID;
+                passData.DeferredColorApply2x2CSKernelID = DeferredColorApply2x2CSKernelID;
+
+
+                passData.GPUCopyColor = GPUCopyColor;
+                passData.GPUCopyColorKernelID = GPUCopyColorKernelID;
+
+
+                passData.WorkingShapeCandidatesBuffer =
+                    builder.CreateTransientBuffer(new BufferDesc(requiredCandidatePixels, sizeof(int), GraphicsBuffer.Target.Structured));
+                passData.WorkingDeferredBlendItemListBuffer =
+                    builder.CreateTransientBuffer(new BufferDesc(requiredDeferredColorApplyBuffer, sizeof(int) * 2, GraphicsBuffer.Target.Structured));
+                passData.WorkingDeferredBlendLocationListBuffer = builder.CreateTransientBuffer(new BufferDesc(requiredListHeadsPixels, sizeof(int)
+                    , GraphicsBuffer.Target.Structured));
+                passData.WorkingControlBuffer = builder.CreateTransientBuffer(new BufferDesc(16, sizeof(int), GraphicsBuffer.Target.Raw));
+                passData.WorkingExecuteIndirectBuffer = builder.CreateTransientBuffer(new BufferDesc(4, sizeof(int), GraphicsBuffer.Target.IndirectArguments));
+
+                passData.WorkingEdges = builder.CreateTransientTexture(new TextureDesc(new Vector2(0.5f, 1))
+                {
+                    enableRandomWrite = true,
+                    format = GraphicsFormat.R8_UInt,
+                });
+                passData.WorkingDeferredBlendItemListHeads = builder.CreateTransientTexture(new TextureDesc(Vector2.one * 0.5f)
+                {
+                    enableRandomWrite = true,
+                    format = GraphicsFormat.R32_UInt,
+                });
+                desc.enableRandomWrite = true;
+                passData.OutputTexture = source;
+
+
+                builder.UseTexture(passData.InputTexture);
+                builder.UseTexture(passData.WorkingEdges, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.WorkingDeferredBlendItemListHeads, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.OutputTexture, AccessFlags.ReadWrite);
+
+                builder.UseBuffer(passData.WorkingShapeCandidatesBuffer, AccessFlags.ReadWrite);
+                builder.UseBuffer(passData.WorkingDeferredBlendItemListBuffer, AccessFlags.ReadWrite);
+                builder.UseBuffer(passData.WorkingDeferredBlendLocationListBuffer, AccessFlags.ReadWrite);
+                builder.UseBuffer(passData.WorkingControlBuffer, AccessFlags.ReadWrite);
+                builder.UseBuffer(passData.WorkingExecuteIndirectBuffer, AccessFlags.ReadWrite);
+
+                builder.AllowPassCulling(false);
+                builder.SetRenderFunc((PassData data, ComputeGraphContext ctx) => ExecutePass(data, ctx));
+                return passData.OutputTexture;
             }
         }
 

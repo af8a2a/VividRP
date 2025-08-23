@@ -5,11 +5,10 @@ using UnityEngine.Rendering.Universal;
 namespace UnityEngine.Rendering.Universal
 {
     [VolumeComponentMenu("Post-processing Custom/CMAA2")]
-    [VolumeRequiresRendererFeatures(typeof(CMAA2Feature))]
     [SupportedOnRenderPipeline(typeof(UniversalRenderPipelineAsset))]
-    public sealed class CMAA2Volume : VolumeComponent
+    public sealed class CMAA2 : VolumeComponent
     {
-        public CMAA2Volume()
+        public CMAA2()
         {
             displayName = "CMAA2";
         }

@@ -18,7 +18,7 @@ namespace UnityEngine.Rendering.Universal
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
-            var cmaa2 = VolumeManager.instance.stack.GetComponent<CMAA2Volume>();
+            var cmaa2 = VolumeManager.instance.stack.GetComponent<CMAA2>();
             if (!cmaa2.enabled.value)
             {
                 return;

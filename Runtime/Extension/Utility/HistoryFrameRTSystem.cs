@@ -90,6 +90,9 @@ namespace UnityEngine.Rendering.Universal
         
         
         DepthOfFieldCoC,
+        
+        
+        URPTemporalAA
     }
 
     /// <summary>

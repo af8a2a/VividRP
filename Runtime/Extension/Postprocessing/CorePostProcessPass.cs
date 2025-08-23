@@ -72,14 +72,19 @@ namespace UnityEngine.Rendering.Universal
         DiaphragmDoFPass _diaphragmDoFPass = new DiaphragmDoFPass();
 
         #endregion
-        
-        
+
+
         #region ToneMapping
 
         ToneMappingPass _toneMappingPass = new ToneMappingPass();
 
         #endregion
 
+        #region TemporalAA
+
+        private TemporalAAPass _temporalAAPass = new TemporalAAPass();
+
+        #endregion
 
         #region Diffusion
 
@@ -104,7 +109,13 @@ namespace UnityEngine.Rendering.Universal
 
             currentRT = _diaphragmDoFPass.Render(renderGraph, frameData, currentRT);
 
-            #endregion 
+            #endregion
+
+            #region TemporalAA
+
+            currentRT = _temporalAAPass.Render(renderGraph, frameData, currentRT);
+
+            #endregion
             
             #region Bloom
 

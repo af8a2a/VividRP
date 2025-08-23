@@ -86,6 +86,11 @@ namespace UnityEngine.Rendering.Universal
             var cameraData = frameData.Get<UniversalCameraData>();
             var resourceData = frameData.Get<UniversalResourceData>();
 
+            if (cameraData.antialiasing is not AntialiasingMode.TemporalAntiAliasing)
+            {
+                return source;
+            }
+
 
             TextureHandle cameraDepth = resourceData.cameraDepth;
             TextureHandle motionVectors = resourceData.motionVectorColor;

@@ -73,6 +73,12 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
 
+        #region SMAA
+
+        SMAAPass _smaaPass = new SMAAPass();
+
+        #endregion
+
         #region PhysicallyDepthOfField
 
         DiaphragmDoFPass _diaphragmDoFPass = new DiaphragmDoFPass();
@@ -117,6 +123,11 @@ namespace UnityEngine.Rendering.Universal
 
             #endregion
 
+            #region SMAA
+
+            currentRT = _smaaPass.Render(renderGraph, frameData, currentRT);
+
+            #endregion
 
             #region PhysicallyDepthOfField
 

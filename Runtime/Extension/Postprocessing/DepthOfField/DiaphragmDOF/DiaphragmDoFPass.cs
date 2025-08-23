@@ -595,7 +595,7 @@ namespace UnityEngine.Rendering.Universal
 
                 data.shapeTable = builder.CreateTransientBuffer(new BufferDesc(k_DepthOfFieldApertureShapeBufferSize,
                     sizeof(float) * 2));
-                data.source = resourcesData.activeColorTexture;
+                data.source = source;
                 data.destination = renderGraph.CreateTexture(new TextureDesc(Vector2.one)
                 {
                     name = "DoF Destination",

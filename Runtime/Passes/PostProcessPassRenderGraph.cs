@@ -2051,12 +2051,14 @@ namespace UnityEngine.Rendering.Universal
             // Temporal Anti Aliasing
             if (useTemporalAA)
             {
+                #if false
                 if (useSTP)
                 {
                     RenderSTP(renderGraph, resourceData, cameraData, ref currentSource, out var StpTarget);
                     currentSource = StpTarget;
                 }
                 else
+#endif 
                 {
                     RenderTemporalAA(renderGraph, resourceData, cameraData, ref currentSource, out var TemporalAATarget);
                     currentSource = TemporalAATarget;

@@ -6,10 +6,15 @@ namespace UnityEngine.Rendering.Universal
     {
         ColorGrading = 0,
         StopNaN,
+        
+        
+        SuperResolution,
+        TAA,
+        
+        
         SMAA,
         CMAA2,
         DepthofField,
-        TAA,
         MotionBlur,
         PaniniProjection,
         Bloom,

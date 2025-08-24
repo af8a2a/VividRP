@@ -130,7 +130,8 @@ namespace UnityEngine.Rendering.Universal
         /// It is different from the aspect ratio of <paramref name="resolution"/> for anamorphic projections.
         /// </param>
         /// <returns></returns>
-        internal static Matrix4x4 ComputePixelCoordToWorldSpaceViewDirectionMatrix(Camera camera, Matrix4x4 viewMatrix, Matrix4x4 gpuProjMatrix, Vector4 resolution, float aspect = -1)
+        internal static Matrix4x4 ComputePixelCoordToWorldSpaceViewDirectionMatrix(Camera camera, Matrix4x4 viewMatrix, Matrix4x4 gpuProjMatrix,
+            Vector4 resolution, float aspect = -1)
         {
             //// In XR mode, or if explicitely required, use a more generic matrix to account for asymmetry in the projection
             //var useGenericMatrix = xr.enabled || frameSettings.IsEnabled(FrameSettingsField.AsymmetricProjection);
@@ -158,12 +159,13 @@ namespace UnityEngine.Rendering.Universal
             {
                 verticalFoV = Mathf.Atan(-1.0f / gpuProjMatrix[1, 1]) * 2;
             }
+
             Vector2 lensShift = camera.GetGateFittedLensShift();
 
             return ComputePixelCoordToWorldSpaceViewDirectionMatrix(verticalFoV, lensShift, resolution, viewMatrix, false, aspect, camera.orthographic);
         }
-        
-        
+
+
         /// <summary>Get the aspect ratio of a projection matrix.</summary>
         /// <param name="matrix"></param>
         /// <returns></returns>
@@ -195,8 +197,11 @@ namespace UnityEngine.Rendering.Universal
                 (float)RTHandles.rtHandleProperties.previousViewportSize.y / buffer.rt.height);
         }
 
-        
-        static private UniversalAdditionalCameraData s_DefaultUniversalAdditionalCameraData { get { return ComponentSingleton<UniversalAdditionalCameraData>.instance; } }
+
+        static private UniversalAdditionalCameraData s_DefaultUniversalAdditionalCameraData
+        {
+            get { return ComponentSingleton<UniversalAdditionalCameraData>.instance; }
+        }
 
         internal static UniversalAdditionalCameraData TryGetAdditionalCameraDataOrDefault(Camera camera)
         {
@@ -205,16 +210,14 @@ namespace UnityEngine.Rendering.Universal
 
             if (camera.TryGetComponent<UniversalAdditionalCameraData>(out var cameraData))
             {
-                
                 return cameraData;
             }
 
             return camera.gameObject.AddComponent<UniversalAdditionalCameraData>();
-
         }
-        
+
         public static float3 ExtractDirection(Matrix4x4 localToWorldMatrix) =>
-            -((float4) localToWorldMatrix.GetColumn(2)).xyz;
+            -((float4)localToWorldMatrix.GetColumn(2)).xyz;
 
 
         public static Material Load(Shader shader)
@@ -232,15 +235,86 @@ namespace UnityEngine.Rendering.Universal
             return CoreUtils.CreateEngineMaterial(shader);
         }
 
+        private static GraphicsFormat s_DefaultColorFormat = GraphicsFormat.None;
+        private static bool m_DefaultColorFormatIsAlpha;
+
         public static GraphicsFormat PickPostProcessingFormat()
         {
+            if (s_DefaultColorFormat != GraphicsFormat.None)
+            {
+                return s_DefaultColorFormat;
+            }
+
             var requestColorFormat = GraphicsFormat.B10G11R11_UFloatPack32;
             var asset = UniversalRenderPipeline.asset;
             if (asset)
                 requestColorFormat = UniversalRenderPipeline.MakeRenderTextureGraphicsFormat(asset.supportsHDR, asset.hdrColorBufferPrecision, false);
 
+
+            
+            bool IsHDRFormat(GraphicsFormat format)
+            {
+                return format == GraphicsFormat.B10G11R11_UFloatPack32 ||
+                       GraphicsFormatUtility.IsHalfFormat(format) ||
+                       GraphicsFormatUtility.IsFloatFormat(format);
+            }
+
+            bool IsAlphaFormat(GraphicsFormat format)
+            {
+                return GraphicsFormatUtility.HasAlphaChannel(format);
+            }
+
+            // NOTE: Request color format is the back-buffer color format. It can be HDR or SDR (when HDR disabled).
+            // Request color might have alpha or might not have alpha.
+            // The actual post-process target can be different. A RenderTexture with a custom format. Not necessarily a back-buffer.
+            // A RenderTexture with a custom format can have an alpha channel, regardless of the back-buffer setting,
+            // so the post-processing should just use the current target format/alpha to toggle alpha output.
+            //
+            // However, we want to filter out the alpha shader variants when not used (common case).
+            // The rule is that URP post-processing format follows the back-buffer format setting.
+
+            bool requestHDR = IsHDRFormat(requestColorFormat);
+            bool requestAlpha = IsAlphaFormat(requestColorFormat);
+
+            // Texture format pre-lookup
+            // UUM-41070: We require `Linear | Render` but with the deprecated FormatUsage this was checking `Blend`
+            // For now, we keep checking for `Blend` until the performance hit of doing the correct checks is evaluated
+            if (requestHDR)
+            {
+                m_DefaultColorFormatIsAlpha = requestAlpha;
+
+                const GraphicsFormatUsage usage = GraphicsFormatUsage.Blend;
+                if (SystemInfo.IsFormatSupported(requestColorFormat, usage)) // Typically, RGBA16Float.
+                {
+                    s_DefaultColorFormat = requestColorFormat;
+                }
+                else if (SystemInfo.IsFormatSupported(GraphicsFormat.B10G11R11_UFloatPack32, usage)) // HDR fallback
+                {
+                    // NOTE: Technically request format can be with alpha, however if it's not supported and we fall back here
+                    // , we assume no alpha. Post-process default format follows the back buffer format.
+                    // If support failed, it must have failed for back buffer too.
+                    s_DefaultColorFormat = GraphicsFormat.B10G11R11_UFloatPack32;
+                    m_DefaultColorFormatIsAlpha = false;
+                }
+                else
+                {
+                    s_DefaultColorFormat = QualitySettings.activeColorSpace == ColorSpace.Linear
+                        ? GraphicsFormat.R8G8B8A8_SRGB
+                        : GraphicsFormat.R8G8B8A8_UNorm;
+                }
+            }
+            else // SDR
+            {
+                s_DefaultColorFormat = QualitySettings.activeColorSpace == ColorSpace.Linear
+                    ? GraphicsFormat.R8G8B8A8_SRGB
+                    : GraphicsFormat.R8G8B8A8_UNorm;
+
+                m_DefaultColorFormatIsAlpha = true;
+            }
+
+
+            s_DefaultColorFormat = requestColorFormat;
             return requestColorFormat;
         }
-        
     }
 }

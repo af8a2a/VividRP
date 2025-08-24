@@ -145,13 +145,13 @@ namespace UnityEngine.Rendering.Universal
                 data.bloomMipUpTexture = new TextureHandle[4];
                 // Create bloom mip pyramid textures
                 {
-                    data.bloomMipDownTexture[0] = builder.CreateTransientTexture(new TextureDesc(scaledWidth, scaleHeight)
+                    data.bloomMipDownTexture[0] = renderGraph.CreateTexture(new TextureDesc(scaledWidth, scaleHeight)
                     {
                         format = desc.format,
                         filterMode = FilterMode.Bilinear,
                         name = "_BloomMipDown0"
                     });
-                    data.bloomMipUpTexture[0] = builder.CreateTransientTexture(new TextureDesc(scaledWidth, scaleHeight)
+                    data.bloomMipUpTexture[0] = renderGraph.CreateTexture(new TextureDesc(scaledWidth, scaleHeight)
                     {
                         width = (int)(desc.width * scale),
                         height = (int)(desc.height * scale),
@@ -160,6 +160,10 @@ namespace UnityEngine.Rendering.Universal
                         filterMode = FilterMode.Bilinear,
                         name = "_BloomMipUp0"
                     });
+
+                    builder.UseTexture(data.bloomMipDownTexture[0], AccessFlags.ReadWrite);
+                    builder.UseTexture(data.bloomMipUpTexture[0], AccessFlags.ReadWrite);
+
                     ShaderID._BloomMipUp[0] = Shader.PropertyToID("_BloomMipUp0");
                     ShaderID._BloomMipDown[0] = Shader.PropertyToID("_BloomMipDown0");
 
@@ -174,14 +178,14 @@ namespace UnityEngine.Rendering.Universal
 
 
                         // NOTE: Reuse RTHandle names for TextureHandles
-                        mipDown = builder.CreateTransientTexture(new TextureDesc(scaledWidth, scaleHeight)
+                        mipDown = renderGraph.CreateTexture(new TextureDesc(scaledWidth, scaleHeight)
                         {
                             format = desc.format,
                             filterMode = FilterMode.Bilinear,
                             name = $"_BloomMipDown{i}"
                         });
 
-                        mipUp = builder.CreateTransientTexture(new TextureDesc(scaledWidth, scaleHeight)
+                        mipUp = renderGraph.CreateTexture(new TextureDesc(scaledWidth, scaleHeight)
                         {
                             width = (int)(desc.width * scale),
                             height = (int)(desc.height * scale),
@@ -191,6 +195,9 @@ namespace UnityEngine.Rendering.Universal
                         });
                         ShaderID._BloomMipUp[i] = Shader.PropertyToID("_BloomMipUp" + i);
                         ShaderID._BloomMipDown[i] = Shader.PropertyToID("_BloomMipDown" + i);
+                        builder.UseTexture(mipDown, AccessFlags.ReadWrite);
+                        builder.UseTexture(mipUp, AccessFlags.ReadWrite);
+
                     }
                 }
 
@@ -204,6 +211,8 @@ namespace UnityEngine.Rendering.Universal
                 builder.UseTexture(data.preFilterBlurTexture, AccessFlags.ReadWrite);
                 builder.SetRenderFunc((PassData passData, UnsafeGraphContext context) => ExecuteBloomPass(passData, context));
                 resourceData.bloomTexture = data.preFilterBlurTexture;
+                resourceData.bloomMipUpTexture = data.bloomMipUpTexture;
+                resourceData.bloomMipDownTexture = data.bloomMipDownTexture;
                 return source;
             }
         }

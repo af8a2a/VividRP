@@ -12,5 +12,23 @@ namespace UnityEngine.Rendering.Universal
         }
         private TextureHandle _bloomTexture;
 
+        
+        
+        TextureHandle[] _BloomMipUp;
+        TextureHandle[] _BloomMipDown;
+
+        
+        public TextureHandle[] bloomMipUpTexture
+        {
+            get => CheckAndGetTextureHandle(ref _BloomMipUp);
+            internal set => CheckAndSetTextureHandle(ref _BloomMipUp, value);
+        }
+
+        public TextureHandle[] bloomMipDownTexture
+        {
+            get => CheckAndGetTextureHandle(ref _BloomMipDown);
+            internal set => CheckAndSetTextureHandle(ref _BloomMipDown, value);
+        }
+
     }
 }

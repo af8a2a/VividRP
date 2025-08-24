@@ -1,4 +1,6 @@
-﻿namespace UnityEngine.Rendering.Universal
+﻿using System;
+
+namespace UnityEngine.Rendering.Universal
 {
     public partial class MobileBloom
     {
@@ -46,5 +48,18 @@
         /// Controls the strength of the lens dirt.
         /// </summary>
         [Tooltip("Amount of dirtiness.")] public MinFloatParameter dirtIntensity = new MinFloatParameter(0f, 0f);
+
+
+        public int maxBloomMip
+        {
+            get
+            {
+                if (mode.value == BloomMode.None)
+                    return 0;
+                if (mode.value == BloomMode.URP)
+                    return maxIterations.value / 2;
+                return 3;
+            }
+        }
     }
 }

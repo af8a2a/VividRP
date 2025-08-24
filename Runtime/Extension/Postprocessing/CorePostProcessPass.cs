@@ -70,6 +70,13 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
         
+        #region LensFlareScreenSpace
+
+        LensFlareScreenSpacePass _lensFlareScreenSpacePass = new LensFlareScreenSpacePass();
+
+        #endregion
+
+        
         #region ToneMapping
 
         ToneMappingPass _toneMappingPass = new ToneMappingPass();
@@ -145,6 +152,11 @@ namespace UnityEngine.Rendering.Universal
 
             #endregion
 
+            #region LensFlareScreenSpace
+
+            resourceData.bloomTexture = _lensFlareScreenSpacePass.Render(renderGraph, frameData, currentRT);
+
+            #endregion
 
             #region ApplyBloom
 

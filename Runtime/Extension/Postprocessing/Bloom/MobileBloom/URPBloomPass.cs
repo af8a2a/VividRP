@@ -144,8 +144,8 @@ namespace UnityEngine.Rendering.Universal
                         m_BloomParamsPrev = bloomParams;
                     }
 
-                    passData.bloomMipDown = new TextureHandle[4];
-                    passData.bloomMipUp = new TextureHandle[4];
+                    passData.bloomMipDown = new TextureHandle[k_MaxPyramidSize];
+                    passData.bloomMipUp = new TextureHandle[k_MaxPyramidSize];
 
 
                     // Create bloom mip pyramid textures
@@ -262,8 +262,12 @@ namespace UnityEngine.Rendering.Universal
                             Blitter.BlitCameraTexture(cmd, highMip, dst, loadAction, storeAction, upMaterial, 3);
                         }
                     }
+                    
                 });
+                var resourceData = frameData.Get<UniversalResourceData>();
 
+                resourceData.bloomMipUpTexture = passData.bloomMipUp;
+                resourceData.bloomMipDownTexture = passData.bloomMipDown;
                 return passData.bloomMipUp[0];
 
             }

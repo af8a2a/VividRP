@@ -13,14 +13,17 @@ Shader "Hidden/Universal Render Pipeline/Bloom"
         TEXTURE2D_X(_SourceTexLowMip);
         float4 _SourceTexLowMip_TexelSize;
 
-        float4 _Params; // x: scatter, y: clamp, z: threshold (linear), w: threshold knee
+        float4 _Params0; // x: scatter, y: clamp, z: threshold (linear), w: threshold knee
+        float4 _Params1; // xz: threshold (linear), w: threshold knee
 
-        #define Scatter             _Params.x
-        #define ClampMax            _Params.y
-        #define Threshold           _Params.z
-        #define ThresholdKnee       _Params.w
+        #define Scatter             _Params0.x
+        #define ClampMax            _Params0.y
+        #define Threshold           _Params0.z
+        #define ThresholdKnee       _Params0.w
+        #define BloomIntensity      _Params1.x
+        #define BloomTint           _Params1.yzw
 
-        half4 EncodeHDR(half3 color)
+    half4 EncodeHDR(half3 color)
         {
         #if UNITY_COLORSPACE_GAMMA
             color = sqrt(color); // linear to γ

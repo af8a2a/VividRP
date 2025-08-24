@@ -14,13 +14,20 @@ namespace UnityEngine.Rendering.Universal
         PaniniProjection,
         Bloom,
         LensFlareDataDriven,
+        
+        //Uber
         ApplyBloom,
         ApplyVignette,
         ApplyColorGrading,
+        
+        
+        /// <summary>
+        /// Final Blit
+        /// </summary>
         FXAA,
-        ApplyGrain,
+        FilmGrain,
         ColorSpace,
-        ApplyDithering,
+        Dithering,
         OETF,
         HDRUIComposition,
         AlphaOutput,

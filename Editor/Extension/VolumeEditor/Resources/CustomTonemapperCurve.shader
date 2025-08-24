@@ -1,17 +1,20 @@
 Shader "Hidden/HD PostProcessing/Editor/Custom Tonemapper Curve"
 {
     HLSLINCLUDE
+    float4 _GTToneMap_Params0;
+    float4 _GTToneMap_Params1;
+    #define GT_PARAM0               _GTToneMap_Params0
+    #define GT_PARAM1               _GTToneMap_Params1
+
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
     #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
-    #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Postprocessing/ColorGrading/Shader/ToneMapping.hlsl"
+    #include "Packages/Custom_URP/Runtime/Extension/Postprocessing/UberPass/Shader/ToneMapping.hlsl"
 
     #pragma editor_sync_compilation
     #pragma target 3.5
 
     #pragma multi_compile_local_fragment _ _TONEMAP_GT _TONEMAP_ACES _TONEMAP_NEUTRAL _TONEMAP_AGX
-    float4 _GTToneMap_Params0;
-    float4 _GTToneMap_Params1;
 
     struct Attributes
     {

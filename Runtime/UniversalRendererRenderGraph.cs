@@ -191,7 +191,7 @@ namespace UnityEngine.Rendering.Universal
         }
 
         // get the next m_RenderGraphCameraColorHandles and make it the new current for future accesses
-        private RTHandle nextRenderGraphCameraColorHandle
+        internal RTHandle nextRenderGraphCameraColorHandle
         {
             get
             {
@@ -1564,7 +1564,7 @@ namespace UnityEngine.Rendering.Universal
             // If the debugHandler displays HDR debug views, it needs to redirect (final) post-process output to an intermediate color target (debugScreenTexture)
             // and it will write into the post-process intended output.
             TextureHandle debugHandlerColorTarget = resourceData.afterPostProcessColor;
-
+#if false
             if (applyPostProcessing)
             {
                 TextureHandle activeColor = resourceData.activeColorTexture;
@@ -1616,9 +1616,9 @@ namespace UnityEngine.Rendering.Universal
                     resourceData.activeDepthID = UniversalResourceData.ActiveID.BackBuffer;
                 }
             }
-
+#endif
             RecordCustomRenderGraphPasses(renderGraph, RenderPassEvent.AfterRenderingPostProcessing);
-
+#if false
             if (applyFinalPostProcessing)
             {
                 TextureHandle backbuffer = resourceData.backBufferColor;
@@ -1640,7 +1640,7 @@ namespace UnityEngine.Rendering.Universal
                 resourceData.activeColorID = UniversalResourceData.ActiveID.BackBuffer;
                 resourceData.activeDepthID = UniversalResourceData.ActiveID.BackBuffer;
             }
-
+#endif
             if (cameraData.captureActions != null)
             {
                 m_CapturePass.RecordRenderGraph(renderGraph, frameData);

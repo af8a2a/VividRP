@@ -6,6 +6,11 @@ namespace UnityEngine.Rendering.Universal
     {
         CorePostProcessPass _corePostProcessPass = new CorePostProcessPass();
 
+        #region FinalBlit
+
+        UberFinalPass _uberFinalPass = new UberFinalPass();
+        #endregion
+
         public override void Create()
         {
         }
@@ -14,6 +19,8 @@ namespace UnityEngine.Rendering.Universal
         {
             
             renderer.EnqueuePass(_corePostProcessPass);
+            renderer.EnqueuePass(_uberFinalPass);
+
         }
     }
 }

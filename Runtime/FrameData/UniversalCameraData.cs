@@ -608,6 +608,13 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         public ScriptableRenderer renderer;
 
+        
+        /// <summary>
+        /// Returns the current renderer used by this camera.
+        /// <see cref="ScriptableRenderer"/>
+        /// </summary>
+        public UniversalRenderer urpRenderer => renderer as UniversalRenderer;
+
         /// <summary>
         /// True if this camera is resolving rendering to the final camera render target.
         /// When rendering a stack of cameras only the last camera in the stack will resolve to camera target.

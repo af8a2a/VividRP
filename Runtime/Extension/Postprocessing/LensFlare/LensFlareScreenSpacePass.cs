@@ -68,7 +68,7 @@ namespace UnityEngine.Rendering.Universal
 
 
             var bloom = VolumeManager.instance.stack.GetComponent<MobileBloom>();
-            if (bloom.mode.value is BloomMode.None)
+            if (bloom.mode.value is BloomMode.None||!lensFlareScreenSpace.IsActive())
             {
                 return source;
             }

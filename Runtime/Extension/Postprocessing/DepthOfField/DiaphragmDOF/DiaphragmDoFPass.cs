@@ -149,7 +149,7 @@ namespace UnityEngine.Rendering.Universal
             passData.dofCircleOfConfusionCS = dofCoCCS;
             passData.dofCircleOfConfusionKernel = dofCoCKernel;
             passData.FocalLength = (36 / 2.0f) / Mathf.Tan(cameraData.camera.fieldOfView * 0.5f * Mathf.Deg2Rad);
-            passData.viewportSize = new Vector2Int(cameraData.camera.pixelWidth, cameraData.camera.pixelHeight);
+            passData.viewportSize = new Vector2Int(cameraData.scaledWidth, cameraData.scaledHeight);
             passData.focusDistance = physicallyDepthOfField.FocusDistance;
             passData.physicalCameraAperture = physicallyDepthOfField.Aperture;
             passData.farMaxBlur = physicallyDepthOfField.farMaxBlur;
@@ -596,7 +596,7 @@ namespace UnityEngine.Rendering.Universal
                 data.shapeTable = builder.CreateTransientBuffer(new BufferDesc(k_DepthOfFieldApertureShapeBufferSize,
                     sizeof(float) * 2));
                 data.source = source;
-                data.destination = renderGraph.CreateTexture(new TextureDesc(Vector2.one)
+                data.destination = renderGraph.CreateTexture(new TextureDesc(cameraData.scaledWidth,cameraData.scaledHeight)
                 {
                     name = "DoF Destination",
                     format = GraphicsFormat.R16G16B16A16_SFloat,

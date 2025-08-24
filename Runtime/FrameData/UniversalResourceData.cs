@@ -383,6 +383,7 @@ namespace UnityEngine.Rendering.Universal
             for (int i = 0; i < _BloomMipUp.Length; i++)
                 _BloomMipUp[i] = TextureHandle.nullHandle;
 
+            
             for (int i = 0; i < _BloomMipDown.Length; i++)
                 _BloomMipDown[i] = TextureHandle.nullHandle;
 

@@ -51,6 +51,10 @@ namespace UnityEditor.Rendering.Universal
                 PropertyField(m_PreFilterScale);
                 PropertyField(m_BlurCompositeWeight);
                 PropertyField(m_Intensity);
+                PropertyField(m_HighQualityFiltering);
+
+                PropertyField(m_DirtTexture);
+                PropertyField(m_DirtIntensity);
             }
             else if (m_Mode.value.intValue == (int)BloomMode.URP)
             {

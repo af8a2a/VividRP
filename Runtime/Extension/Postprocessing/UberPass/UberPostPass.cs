@@ -1,5 +1,4 @@
-﻿using System;
-using UnityEngine.Experimental.Rendering;
+﻿using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal
@@ -82,12 +81,31 @@ namespace UnityEngine.Rendering.Universal
     }
 
 
-    public class ToneMappingPass : IDisposable
+    public class UberPostPass
     {
+        Material material;
         RTHandle m_UserLut;
-        Material m_Material;
 
-        #region Util
+        #region ColorGrading
+
+        private class ColorGradingPassData
+        {
+            internal TextureHandle lutTexture;
+            internal TextureHandle userLutTexture;
+
+
+            internal Vector4 lutParams;
+            internal Vector4 userLutParams;
+            internal Vector4 hdrOutputLuminanceParams;
+
+            internal Vector4 gtToneMapParams0;
+            internal Vector4 gtToneMapParams1;
+
+
+            internal Material material;
+            internal VividTonemappingMode toneMappingMode;
+            internal bool isHdrGrading;
+        }
 
         TextureHandle TryGetCachedUserLutTextureHandle(RenderGraph renderGraph)
         {
@@ -114,7 +132,7 @@ namespace UnityEngine.Rendering.Universal
         }
 
 
-        internal static void GetHDROutputLuminanceParameters(HDROutputUtils.HDRDisplayInformation hdrDisplayInformation, ColorGamut hdrDisplayColorGamut,
+        static void GetHDROutputLuminanceParameters(HDROutputUtils.HDRDisplayInformation hdrDisplayInformation, ColorGamut hdrDisplayColorGamut,
             VividToneMapping tonemapping, out Vector4 hdrOutputParameters)
         {
             float minNits = hdrDisplayInformation.minToneMapLuminance;
@@ -135,44 +153,9 @@ namespace UnityEngine.Rendering.Universal
             hdrOutputParameters = new Vector4(minNits, maxNits, paperWhite, 1f / paperWhite);
         }
 
-        #endregion
-
-
-        static ProfilingSampler _profilingSampler = new ProfilingSampler("Vivid Tonemapping");
-
-        private class ColorGradingPassData
+        void SetupColorGrading(RenderGraph renderGraph, ContextContainer frameData)
         {
-            internal TextureHandle destinationTexture;
-            internal TextureHandle sourceTexture;
-            internal TextureHandle lutTexture;
-            internal TextureHandle userLutTexture;
-
-
-            internal Vector4 lutParams;
-            internal Vector4 userLutParams;
-            internal Vector4 hdrOutputLuminanceParams;
-
-            internal Vector4 gtToneMapParams0;
-            internal Vector4 gtToneMapParams1;
-
-
-            internal Material material;
-            internal VividTonemappingMode toneMappingMode;
-            internal bool isHdrGrading;
-        }
-
-
-        public TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, in TextureHandle sourceTexture)
-        {
-            if (!m_Material)
-            {
-                var runtimeShader = GraphicsSettings.GetRenderPipelineSettings<TonemappingRuntimeShader>();
-                m_Material = CoreUtils.CreateEngineMaterial(runtimeShader.tonemapping);
-            }
-
-            m_Material.enabledKeywords = null;
-            using (var builder = renderGraph.AddRasterRenderPass<ColorGradingPassData>("Vivid ToneMapping", out var passData,
-                       _profilingSampler))
+            using (var builder = renderGraph.AddRasterRenderPass<ColorGradingPassData>("Setup ColorGrading", out var passData))
             {
                 var postProcessingData = frameData.Get<UniversalPostProcessingData>();
                 var resourceData = frameData.Get<UniversalResourceData>();
@@ -216,16 +199,11 @@ namespace UnityEngine.Rendering.Universal
 #endif
 
 
-
                 if (cameraData.isHDROutputActive)
                 {
                     GetHDROutputLuminanceParameters(cameraData.hdrDisplayInformation, cameraData.hdrDisplayColorGamut, tonemapping,
                         out passData.hdrOutputLuminanceParams);
-                    
                 }
-
-
-                builder.AllowGlobalStateModification(true);
 
 
                 if (tonemapping.mode.value is VividTonemappingMode.GranTurismo)
@@ -236,17 +214,6 @@ namespace UnityEngine.Rendering.Universal
                         0.0f);
                 }
 
-
-                passData.destinationTexture = renderGraph.CreateTexture(new TextureDesc(cameraData.scaledWidth, cameraData.scaledHeight)
-                {
-                    format = cameraData.cameraTargetDescriptor.graphicsFormat,
-                    dimension = TextureDimension.Tex2D,
-                    enableRandomWrite = true,
-                    name = "ToneMappingApply"
-                });
-                builder.SetRenderAttachment(passData.destinationTexture, 0, AccessFlags.Write);
-                passData.sourceTexture = sourceTexture;
-                builder.UseTexture(sourceTexture, AccessFlags.Read);
                 passData.lutTexture = internalColorLut;
                 builder.UseTexture(passData.lutTexture, AccessFlags.Read);
                 passData.lutParams = lutParams;
@@ -258,15 +225,15 @@ namespace UnityEngine.Rendering.Universal
 
 
                 passData.userLutParams = userLutParams;
-                passData.material = m_Material;
+                passData.material = material;
                 passData.toneMappingMode = tonemapping.mode.value;
                 passData.isHdrGrading = hdrGrading;
 
+                builder.AllowGlobalStateModification(true);
+                builder.AllowPassCulling(false);
                 builder.SetRenderFunc<ColorGradingPassData>((data, context) =>
                 {
-                    var cmd = context.cmd;
                     var material = data.material;
-                    RTHandle sourceTextureHdl = data.sourceTexture;
 
                     material.SetTexture(ShaderConstants._InternalLut, data.lutTexture);
                     material.SetVector(ShaderConstants._Lut_Params, data.lutParams);
@@ -293,19 +260,229 @@ namespace UnityEngine.Rendering.Universal
                             default: break; // None
                         }
                     }
-
-                    Blitter.BlitTexture(cmd, sourceTextureHdl, Vector2.one, data.material, 0);
                 });
-
-                return passData.destinationTexture;
             }
         }
 
+        #endregion
 
-        public void Dispose()
+
+        #region BloomApply
+
+        private class UberSetupBloomPassData
         {
-            m_UserLut?.Release();
-            CoreUtils.Destroy(m_Material);
+            internal Vector4 bloomParams;
+            internal Vector4 dirtScaleOffset;
+            internal float dirtIntensity;
+            internal Texture dirtTexture;
+            internal bool highQualityFilteringValue;
+            internal TextureHandle bloomTexture;
+
+            internal Material uberMaterial;
+        }
+
+        public void UberPostSetupBloomPass(RenderGraph renderGraph, ContextContainer frameData)
+        {
+            var bloom = VolumeManager.instance.stack.GetComponent<MobileBloom>();
+
+            using (var builder = renderGraph.AddRasterRenderPass<UberSetupBloomPassData>("Setup Bloom Post Processing", out var passData,
+                       ProfilingSampler.Get(URPProfileId.RG_UberPostSetupBloomPass)))
+            {
+                var cameraData = frameData.Get<UniversalCameraData>();
+                var resourceData = frameData.Get<UniversalResourceData>();
+                // Setup bloom on uber
+                var tint = bloom.tint.value.linear;
+                var luma = ColorUtils.Luminance(tint);
+                tint = luma > 0f ? tint * (1f / luma) : Color.white;
+                var bloomParams = new Vector4(bloom.intensity.value, tint.r, tint.g, tint.b);
+
+                // Setup lens dirtiness on uber
+                // Keep the aspect ratio correct & center the dirt texture, we don't want it to be
+                // stretched or squashed
+                var dirtTexture = bloom.dirtTexture.value == null ? Texture2D.blackTexture : bloom.dirtTexture.value;
+                float dirtRatio = dirtTexture.width / (float)dirtTexture.height;
+                float screenRatio = cameraData.aspectRatio;
+                var dirtScaleOffset = new Vector4(1f, 1f, 0f, 0f);
+                float dirtIntensity = bloom.dirtIntensity.value;
+
+                if (dirtRatio > screenRatio)
+                {
+                    dirtScaleOffset.x = screenRatio / dirtRatio;
+                    dirtScaleOffset.z = (1f - dirtScaleOffset.x) * 0.5f;
+                }
+                else if (screenRatio > dirtRatio)
+                {
+                    dirtScaleOffset.y = dirtRatio / screenRatio;
+                    dirtScaleOffset.w = (1f - dirtScaleOffset.y) * 0.5f;
+                }
+
+                passData.bloomParams = bloomParams;
+                passData.dirtScaleOffset = dirtScaleOffset;
+                passData.dirtIntensity = dirtIntensity;
+                passData.dirtTexture = dirtTexture;
+                passData.highQualityFilteringValue = bloom.highQualityFiltering.value;
+
+                passData.bloomTexture = resourceData.bloomTexture;
+                builder.UseTexture(passData.bloomTexture, AccessFlags.Read);
+                passData.uberMaterial = material;
+
+                // TODO RENDERGRAPH: properly setup dependencies between passes
+                builder.AllowPassCulling(false);
+
+                builder.SetRenderFunc(static (UberSetupBloomPassData data, RasterGraphContext context) =>
+                {
+                    var uberMaterial = data.uberMaterial;
+                    uberMaterial.SetVector(ShaderConstants._Bloom_Params, data.bloomParams);
+                    uberMaterial.SetVector(ShaderConstants._LensDirt_Params, data.dirtScaleOffset);
+                    uberMaterial.SetFloat(ShaderConstants._LensDirt_Intensity, data.dirtIntensity);
+                    uberMaterial.SetTexture(ShaderConstants._LensDirt_Texture, data.dirtTexture);
+
+                    // Keyword setup - a bit convoluted as we're trying to save some variants in Uber...
+                    if (data.highQualityFilteringValue)
+                        uberMaterial.EnableKeyword(data.dirtIntensity > 0f ? ShaderKeywordStrings.BloomHQDirt : ShaderKeywordStrings.BloomHQ);
+                    else
+                        uberMaterial.EnableKeyword(data.dirtIntensity > 0f ? ShaderKeywordStrings.BloomLQDirt : ShaderKeywordStrings.BloomLQ);
+
+                    uberMaterial.SetTexture(ShaderConstants._Bloom_Texture, data.bloomTexture);
+                });
+            }
+        }
+
+        #endregion
+
+
+        #region LensDistortion
+
+        void SetupLensDistortion(Material material, bool isSceneView)
+        {
+            LensDistortion lensDistortion = VolumeManager.instance.stack.GetComponent<LensDistortion>();
+
+            float amount = 1.6f * Mathf.Max(Mathf.Abs(lensDistortion.intensity.value * 100f), 1f);
+            float theta = Mathf.Deg2Rad * Mathf.Min(160f, amount);
+            float sigma = 2f * Mathf.Tan(theta * 0.5f);
+            var center = lensDistortion.center.value * 2f - Vector2.one;
+            var p1 = new Vector4(
+                center.x,
+                center.y,
+                Mathf.Max(lensDistortion.xMultiplier.value, 1e-4f),
+                Mathf.Max(lensDistortion.yMultiplier.value, 1e-4f)
+            );
+            var p2 = new Vector4(
+                lensDistortion.intensity.value >= 0f ? theta : 1f / theta,
+                sigma,
+                1f / lensDistortion.scale.value,
+                lensDistortion.intensity.value * 100f
+            );
+
+            material.SetVector(ShaderConstants._Distortion_Params1, p1);
+            material.SetVector(ShaderConstants._Distortion_Params2, p2);
+
+            if (lensDistortion.IsActive() && !isSceneView)
+                material.EnableKeyword(ShaderKeywordStrings.Distortion);
+        }
+
+        #endregion
+
+        #region ChromaticAberration
+
+        void SetupChromaticAberration(Material material)
+        {
+            var chromaticAberration = VolumeManager.instance.stack.GetComponent<ChromaticAberration>();
+            material.SetFloat(ShaderConstants._Chroma_Params, chromaticAberration.intensity.value * 0.05f);
+
+            if (chromaticAberration.IsActive())
+                material.EnableKeyword(ShaderKeywordStrings.ChromaticAberration);
+        }
+
+        #endregion
+
+        #region Vignette
+
+        void SetupVignette(Material material, UniversalCameraData cameraData, XRPass xrPass = null)
+        {
+            var m_Vignette = VolumeManager.instance.stack.GetComponent<Vignette>();
+            var color = m_Vignette.color.value;
+            var center = m_Vignette.center.value;
+            var aspectRatio = cameraData.aspectRatio;
+
+
+#if ENABLE_VR && ENABLE_XR_MODULE
+            if (xrPass != null && xrPass.enabled)
+            {
+                if (xrPass.singlePassEnabled)
+                    material.SetVector(ShaderConstants._Vignette_ParamsXR, xrPass.ApplyXRViewCenterOffset(center));
+                else
+                    // In multi-pass mode we need to modify the eye center with the values from .xy of the corrected
+                    // center since the version of the shader that is not single-pass will use the value in _Vignette_Params2
+                    center = xrPass.ApplyXRViewCenterOffset(center);
+            }
+#endif
+
+            var v1 = new Vector4(
+                color.r, color.g, color.b,
+                m_Vignette.rounded.value ? aspectRatio : 1f
+            );
+            var v2 = new Vector4(
+                center.x, center.y,
+                m_Vignette.intensity.value * 3f,
+                m_Vignette.smoothness.value * 5f
+            );
+
+            material.SetVector(ShaderConstants._Vignette_Params1, v1);
+            material.SetVector(ShaderConstants._Vignette_Params2, v2);
+        }
+
+        #endregion
+
+
+        private class UberPostPassData
+        {
+            internal TextureHandle destTexture;
+            internal TextureHandle sourceTexture;
+            internal TextureHandle userLutTexture;
+            internal Vector4 userLutParams;
+
+            internal Material material;
+        }
+
+
+        public TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle source)
+        {
+            if (!material)
+            {
+                var runtimeShader = GraphicsSettings.GetRenderPipelineSettings<PostProcessingRuntimeShader>();
+                material = CoreUtils.CreateEngineMaterial(runtimeShader.uberPost);
+            }
+            var cameraData = frameData.Get<UniversalCameraData>();
+
+            material.enabledKeywords = null;
+
+
+            UberPostSetupBloomPass(renderGraph, frameData);
+            SetupColorGrading(renderGraph, frameData);
+            SetupLensDistortion(material, cameraData.isSceneViewCamera);
+            SetupVignette(material, cameraData);
+            SetupChromaticAberration(material);
+
+            var destTexture = renderGraph.ImportTexture(cameraData.urpRenderer.nextRenderGraphCameraColorHandle);
+            using (var builder = renderGraph.AddRasterRenderPass<UberPostPassData>("Vivid UberPost", out var passData))
+            {
+                passData.destTexture = destTexture;
+                builder.SetRenderAttachment(destTexture, 0);
+                passData.sourceTexture = source;
+                builder.UseTexture(passData.sourceTexture, AccessFlags.Read);
+                passData.material = material;
+                builder.AllowPassCulling(false);
+                builder.SetRenderFunc(static (UberPostPassData data, RasterGraphContext context) =>
+                {
+                    var cmd = context.cmd;
+
+                    Blitter.BlitTexture(cmd, data.sourceTexture, Vector2.one, data.material, 0);
+                });
+            }
+
+
+            return destTexture;
         }
     }
 }

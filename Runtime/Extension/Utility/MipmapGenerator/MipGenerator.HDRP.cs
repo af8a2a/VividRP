@@ -181,7 +181,7 @@ namespace UnityEngine.Rendering.Universal
                 passData.height = cameraData.scaledHeight;
 
 
-                depthBufferMipChainInfo.ComputePackedMipChainInfo(RTHandles.rtHandleProperties.currentRenderTargetSize, 0 /*not support yet*/);
+                depthBufferMipChainInfo.ComputePackedMipChainInfo(new Vector2Int(cameraData.actualWidth,cameraData.actualHeight), 0 /*not support yet*/);
 
                 passData.depthBufferMipChainInfo = depthBufferMipChainInfo;
                 passData.depthPyramidTexture = renderGraph.CreateTexture(

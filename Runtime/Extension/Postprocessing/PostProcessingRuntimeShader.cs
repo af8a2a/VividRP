@@ -91,6 +91,26 @@ namespace UnityEngine.Rendering.Universal
             get => m_LensFlareScreenSpaceShader;
             set => this.SetValueAndNotify(ref m_LensFlareScreenSpaceShader, value);
         }
+        
+        
+        [SerializeField, ResourcePath("Runtime/Extension/Postprocessing/UberPost/Shader/UberPost.shader")]
+        private Shader m_UberPostShader;
+
+        public Shader uberPost
+        {
+            get => m_UberPostShader;
+            set => this.SetValueAndNotify(ref m_UberPostShader, value);
+        }
+
+        
+        [SerializeField, ResourcePath("Runtime/Extension/Postprocessing/UberPass/Shader/FinalPost.shader")]
+        private Shader m_FinalPostShader;
+
+        public Shader finalPost
+        {
+            get => m_FinalPostShader;
+            set => this.SetValueAndNotify(ref m_FinalPostShader, value);
+        }
 
     }
 }

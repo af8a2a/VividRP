@@ -60,9 +60,10 @@ namespace UnityEngine.Rendering.Universal
 
         MobileBloomPass _mobileBloomPass = new MobileBloomPass();
 
-        BloomApplyPass _bloomApplyPass = new BloomApplyPass();
         
         #endregion
+        
+        
         
         #region LensFlareDataDriven
 
@@ -77,11 +78,11 @@ namespace UnityEngine.Rendering.Universal
         #endregion
 
         
-        #region ToneMapping
-
-        ToneMappingPass _toneMappingPass = new ToneMappingPass();
-
-        #endregion
+        // #region ToneMapping
+        //
+        // ToneMappingPass _toneMappingPass = new ToneMappingPass();
+        //
+        // #endregion
 
         #region Diffusion
 
@@ -89,6 +90,19 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
 
+        
+        #region UberPost
+
+        UberPostPass _uberPostPass = new UberPostPass();
+        #endregion
+
+        // #region FinalBlit
+        //
+        // UberFinalPass _uberFinalPass = new UberFinalPass();
+        // #endregion
+
+        
+        
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
             var resourceData = frameData.Get<UniversalResourceData>();
@@ -158,17 +172,14 @@ namespace UnityEngine.Rendering.Universal
 
             #endregion
 
-            #region ApplyBloom
 
-            currentRT = _bloomApplyPass.Render(renderGraph, frameData, currentRT);
+            
 
-            #endregion
-
-            #region ToneMapping
-
-            currentRT = _toneMappingPass.Render(renderGraph, frameData, currentRT);
-
-            #endregion
+            // #region ToneMapping
+            //
+            // currentRT = _toneMappingPass.Render(renderGraph, frameData, currentRT);
+            //
+            // #endregion
 
             #region Diffusion
 
@@ -176,7 +187,16 @@ namespace UnityEngine.Rendering.Universal
 
             #endregion
 
+            #region UberPost
+            currentRT = _uberPostPass.Render(renderGraph, frameData, currentRT);
+            
+            #endregion
+            
+            
             resourceData.cameraColor = currentRT;
+            
+            
+            // _uberFinalPass.Render(renderGraph, frameData, currentRT);
         }
     }
 }

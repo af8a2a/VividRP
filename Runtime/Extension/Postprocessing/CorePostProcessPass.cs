@@ -104,6 +104,12 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
 
+        #region PaniniProjection
+
+        PaniniProjectionPass _paniniProjectionPass = new PaniniProjectionPass();
+
+        #endregion
+
         #region Diffusion
 
         DiffusionPass _diffusionPass = new DiffusionPass();
@@ -152,6 +158,13 @@ namespace UnityEngine.Rendering.Universal
             currentRT = _motionBlurPass.Render(renderGraph, frameData, currentRT);
 
             #endregion
+
+            #region PaniniProjection
+
+            currentRT = _paniniProjectionPass.Render(renderGraph, frameData, currentRT);
+
+            #endregion
+
 
             #region Bloom
 

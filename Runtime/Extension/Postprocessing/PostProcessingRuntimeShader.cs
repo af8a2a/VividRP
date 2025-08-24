@@ -61,5 +61,17 @@ namespace UnityEngine.Rendering.Universal
             get => m_CameraMotionBlurShader;
             set => this.SetValueAndNotify(ref m_CameraMotionBlurShader, value);
         }
+        
+        
+        
+        [SerializeField, ResourcePath("Shaders/PostProcessing/PaniniProjection.shader")]
+        private Shader m_paniniProjectionShader;
+
+        public Shader paniniProjection
+        {
+            get => m_paniniProjectionShader;
+            set => this.SetValueAndNotify(ref m_paniniProjectionShader, value);
+        }
+
     }
 }

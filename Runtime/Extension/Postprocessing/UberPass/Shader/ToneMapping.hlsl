@@ -158,7 +158,7 @@ float3 AgxApproximate(float3 x)
 }
 
 
-half3 VividTonemap(half3 input)
+float3 VividTonemap(float3 input)
 {
     #if _TONEMAP_ACES
     float3 aces = unity_to_ACES(input);
@@ -166,9 +166,9 @@ half3 VividTonemap(half3 input)
     #elif _TONEMAP_NEUTRAL
     input = NeutralTonemap(input);
     #elif  _TONEMAP_GT
-    input.r = GranTurismoTonemap(input.r, GT_PARAM0.x, GT_PARAM0.y, GT_PARAM0.z, GT_PARAM0.w, GT_PARAM1.x, GT_PARAM0.y);
-    input.g = GranTurismoTonemap(input.g, GT_PARAM0.x, GT_PARAM0.y, GT_PARAM0.z, GT_PARAM0.w, GT_PARAM1.x, GT_PARAM0.y);
-    input.b = GranTurismoTonemap(input.b, GT_PARAM0.x, GT_PARAM0.y, GT_PARAM0.z, GT_PARAM0.w, GT_PARAM1.x, GT_PARAM0.y);
+    input.r = GranTurismoTonemap(input.r, GT_PARAM0.x, GT_PARAM0.y, GT_PARAM0.z, GT_PARAM0.w, GT_PARAM1.x, GT_PARAM1.y);
+    input.g = GranTurismoTonemap(input.g, GT_PARAM0.x, GT_PARAM0.y, GT_PARAM0.z, GT_PARAM0.w, GT_PARAM1.x, GT_PARAM1.y);
+    input.b = GranTurismoTonemap(input.b, GT_PARAM0.x, GT_PARAM0.y, GT_PARAM0.z, GT_PARAM0.w, GT_PARAM1.x, GT_PARAM1.y);
     #elif  _TONEMAP_AGX
     input = AgX(input);
     #elif  _TONEMAP_AGX_APPROX

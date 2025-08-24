@@ -53,7 +53,7 @@ namespace UnityEngine.Rendering.Universal
 
         static class ShaderConstants
         {
-            public static int _Params = Shader.PropertyToID("_Params");
+            public static int _Params0 = Shader.PropertyToID("_Params0");
             public static readonly int _SourceTexLowMip = Shader.PropertyToID("_SourceTexLowMip");
         }
 
@@ -109,6 +109,8 @@ namespace UnityEngine.Rendering.Universal
                 // Setup
                 using (new ProfilingScope(ProfilingSampler.Get(URPProfileId.RG_BloomSetup)))
                 {
+                    m_BloomMaterial.enabledKeywords = null;
+
                     // Pre-filtering parameters
                     float clamp = bloom.clamp.value;
                     float threshold = Mathf.GammaToLinearSpace(bloom.threshold.value);
@@ -126,10 +128,10 @@ namespace UnityEngine.Rendering.Universal
                     // Previous params are cached to avoid setting the same keywords every frame.
                     var material = m_BloomMaterial;
                     bool bloomParamsDirty = !m_BloomParamsPrev.Equals(ref bloomParams);
-                    bool isParamsPropertySet = material.HasProperty(ShaderConstants._Params);
+                    bool isParamsPropertySet = material.HasProperty(ShaderConstants._Params0);
                     if (bloomParamsDirty || !isParamsPropertySet)
                     {
-                        material.SetVector(ShaderConstants._Params, bloomParams.parameters);
+                        material.SetVector(ShaderConstants._Params0, bloomParams.parameters);
                         CoreUtils.SetKeyword(material, ShaderKeywordStrings.BloomHQ, bloomParams.highQualityFiltering);
                         CoreUtils.SetKeyword(material, ShaderKeywordStrings._ENABLE_ALPHA_OUTPUT, bloomParams.enableAlphaOutput);
 
@@ -137,7 +139,7 @@ namespace UnityEngine.Rendering.Universal
                         for (uint i = 0; i < k_MaxPyramidSize; ++i)
                         {
                             var materialPyramid = bloomUpsample[i];
-                            materialPyramid.SetVector(ShaderConstants._Params, bloomParams.parameters);
+                            materialPyramid.SetVector(ShaderConstants._Params0, bloomParams.parameters);
                             CoreUtils.SetKeyword(materialPyramid, ShaderKeywordStrings.BloomHQ, bloomParams.highQualityFiltering);
                             CoreUtils.SetKeyword(materialPyramid, ShaderKeywordStrings._ENABLE_ALPHA_OUTPUT, bloomParams.enableAlphaOutput);
                         }

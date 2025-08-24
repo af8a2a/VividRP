@@ -8,7 +8,6 @@ Shader "Hidden/Universal Render Pipeline/LutBuilderHdr"
         #include "Packages/com.unity.render-pipelines.universal/Shaders/PostProcessing/Common.hlsl"
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ACES.hlsl"
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
-        #include "Packages/Custom_URP/Runtime/Extension/Postprocessing/UberPass/Shader/ToneMapping.hlsl"
     #if defined(HDR_COLORSPACE_CONVERSION)
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/HDROutput.hlsl"
 #endif
@@ -34,8 +33,9 @@ Shader "Hidden/Universal Render Pipeline/LutBuilderHdr"
         float4 _GTToneMap_Params0;
         float4 _GTToneMap_Params1;
 
-        #define GT_PARAM0               _GTToneMap_Params0
-        #define GT_PARAM1               _GTToneMap_Params1
+        #define GT_PARAM0  _GTToneMap_Params0
+        #define GT_PARAM1  _GTToneMap_Params1
+        #include "Packages/Custom_URP/Runtime/Extension/Postprocessing/UberPass/Shader/ToneMapping.hlsl"
 
         TEXTURE2D(_CurveMaster);
         TEXTURE2D(_CurveRed);

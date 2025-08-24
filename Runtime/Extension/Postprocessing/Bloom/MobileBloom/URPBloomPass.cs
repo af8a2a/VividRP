@@ -61,6 +61,12 @@ namespace UnityEngine.Rendering.Universal
 
         public TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle source)
         {
+            // Start at half-res
+            var bloom = VolumeManager.instance.stack.GetComponent<MobileBloom>();
+            if (bloom.mode.value is not BloomMode.URP)
+            {
+                return renderGraph.defaultResources.blackTexture;
+            }
             var runtimeShader = GraphicsSettings.GetRenderPipelineSettings<BloomRuntimeShader>();
             if (!m_BloomMaterial)
             {
@@ -71,8 +77,6 @@ namespace UnityEngine.Rendering.Universal
                     bloomUpsample[i] = RenderingUtilsExt.Load(runtimeShader.URPBloomShader);
             }
 
-            // Start at half-res
-            var bloom = VolumeManager.instance.stack.GetComponent<MobileBloom>();
 
             using (var builder = renderGraph.AddUnsafePass<BloomPassData>("Blit Bloom Mipmaps", out var passData, ProfilingSampler.Get(URPProfileId.Bloom)))
             {

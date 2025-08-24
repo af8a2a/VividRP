@@ -5,65 +5,15 @@ namespace UnityEngine.Rendering.Universal
 {
     public class CorePostProcessPass : ScriptableRenderPass
     {
-        #region StopNaN
-
-        StopNaNPass _stopNaNPass = new StopNaNPass();
-
-        #endregion
-
-        #region Bloom
-
-        URPBloomPass _urpBloomPass = new URPBloomPass();
-
-        MobileBloomPass _mobileBloomPass = new MobileBloomPass();
-
-        BloomApplyPass _bloomApplyPass = new BloomApplyPass();
-
         public CorePostProcessPass()
         {
             renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing;
         }
 
+        
+        #region StopNaN
 
-        public TextureHandle RenderBloom(RenderGraph renderGraph, ContextContainer frameData, in TextureHandle source)
-        {
-            var bloom = VolumeManager.instance.stack.GetComponent<MobileBloom>();
-            var result = TextureHandle.nullHandle;
-            switch (bloom.mode.value)
-            {
-                case BloomMode.None:
-                    return result;
-                    break;
-                case BloomMode.URP:
-                    result = _urpBloomPass.Render(renderGraph, frameData, source);
-                    break;
-                case BloomMode.Moblie:
-                    result = _mobileBloomPass.Render(renderGraph, frameData, source);
-                    break;
-            }
-
-            return result;
-        }
-
-
-        public TextureHandle ApplyBloom(RenderGraph renderGraph, ContextContainer frameData, in TextureHandle source)
-        {
-            var bloom = VolumeManager.instance.stack.GetComponent<MobileBloom>();
-            var result = source;
-
-
-            switch (bloom.mode.value)
-            {
-                case BloomMode.None:
-                    return source;
-                    break;
-                default:
-                    result = _bloomApplyPass.Render(renderGraph, frameData, source);
-                    break;
-            }
-
-            return result;
-        }
+        StopNaNPass _stopNaNPass = new StopNaNPass();
 
         #endregion
 
@@ -79,34 +29,50 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
 
+
         #region PhysicallyDepthOfField
 
         DiaphragmDoFPass _diaphragmDoFPass = new DiaphragmDoFPass();
 
         #endregion
-
-
-        #region ToneMapping
-
-        ToneMappingPass _toneMappingPass = new ToneMappingPass();
-
-        #endregion
-
+        
         #region TemporalAA
 
         private TemporalAAPass _temporalAAPass = new TemporalAAPass();
 
         #endregion
-
+        
         #region MotionBlur
 
         MotionBlurPass _motionBlurPass = new MotionBlurPass();
 
         #endregion
-
+        
         #region PaniniProjection
 
         PaniniProjectionPass _paniniProjectionPass = new PaniniProjectionPass();
+
+        #endregion
+
+        #region Bloom
+
+        URPBloomPass _urpBloomPass = new URPBloomPass();
+
+        MobileBloomPass _mobileBloomPass = new MobileBloomPass();
+
+        BloomApplyPass _bloomApplyPass = new BloomApplyPass();
+        
+        #endregion
+        
+        #region LensFlareDataDriven
+
+        LensFlareDataDrivenPass _lensFlareDataDrivenPass = new LensFlareDataDrivenPass();
+
+        #endregion
+        
+        #region ToneMapping
+
+        ToneMappingPass _toneMappingPass = new ToneMappingPass();
 
         #endregion
 
@@ -168,16 +134,21 @@ namespace UnityEngine.Rendering.Universal
 
             #region Bloom
 
-            {
-                resourceData.bloomTexture = RenderBloom(renderGraph, frameData, currentRT);
-            }
+            resourceData.bloomTexture = _urpBloomPass.Render(renderGraph, frameData, currentRT);
+            resourceData.bloomTexture = _mobileBloomPass.Render(renderGraph, frameData, currentRT);
+
+            #endregion
+
+            #region LensFlareDataDriven
+
+            currentRT = _lensFlareDataDrivenPass.Render(renderGraph, frameData, currentRT);
 
             #endregion
 
 
             #region ApplyBloom
 
-            currentRT = ApplyBloom(renderGraph, frameData, currentRT);
+            currentRT = _bloomApplyPass.Render(renderGraph, frameData, currentRT);
 
             #endregion
 

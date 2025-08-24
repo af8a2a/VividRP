@@ -22,6 +22,12 @@ namespace UnityEngine.Rendering.Universal
 
         public TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle source)
         {
+            var bloom = VolumeManager.instance.stack.GetComponent<MobileBloom>();
+            if (bloom.mode.value is BloomMode.None)
+            {
+                return source;
+            }
+
             if (!material)
             {
                 var runtimeShader = GraphicsSettings.GetRenderPipelineSettings<BloomRuntimeShader>();

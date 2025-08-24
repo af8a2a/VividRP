@@ -73,5 +73,24 @@ namespace UnityEngine.Rendering.Universal
             set => this.SetValueAndNotify(ref m_paniniProjectionShader, value);
         }
 
+        
+        [SerializeField, ResourcePath("Shaders/PostProcessing/LensFlareDataDriven.shader")]
+        private Shader m_LensFlareDataDrivenShader;
+
+        public Shader lensFlareDataDriven
+        {
+            get => m_LensFlareDataDrivenShader;
+            set => this.SetValueAndNotify(ref m_LensFlareDataDrivenShader, value);
+        }
+
+        [SerializeField, ResourcePath("Shaders/PostProcessing/LensFlareScreenSpace.shader")]
+        private Shader m_LensFlareScreenSpaceShader;
+
+        public Shader lensFlareScreenSpace
+        {
+            get => m_LensFlareScreenSpaceShader;
+            set => this.SetValueAndNotify(ref m_LensFlareScreenSpaceShader, value);
+        }
+
     }
 }

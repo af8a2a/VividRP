@@ -5,9 +5,8 @@ using UnityEngine.Rendering.Universal;
 
 namespace UnityEngine.Rendering.Universal
 {
-    public class MobileBloomPass 
+    public class MobileBloomPass
     {
-
         private Material bloomMaterial;
 
         class PassData
@@ -26,8 +25,6 @@ namespace UnityEngine.Rendering.Universal
             internal TextureHandle[] bloomMipUpTexture;
             internal TextureHandle[] bloomMipDownTexture;
         }
-
-
 
 
         class ShaderID
@@ -88,14 +85,16 @@ namespace UnityEngine.Rendering.Universal
 
             Blitter.BlitCameraTexture(cmd, data.preFilterTexture, data.preFilterBlurTexture, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store,
                 data.material, 6);
-
-        
         }
 
 
-        public  TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle source)
+        public TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle source)
         {
             var setting = VolumeManager.instance.stack.GetComponent<MobileBloom>();
+            if (setting.mode.value is not BloomMode.Moblie)
+            {
+                return renderGraph.defaultResources.blackTexture;
+            }
 
             if (!bloomMaterial)
             {
@@ -181,7 +180,7 @@ namespace UnityEngine.Rendering.Universal
                             filterMode = FilterMode.Bilinear,
                             name = $"_BloomMipDown{i}"
                         });
-                        
+
                         mipUp = builder.CreateTransientTexture(new TextureDesc(scaledWidth, scaleHeight)
                         {
                             width = (int)(desc.width * scale),

@@ -535,7 +535,11 @@ namespace UnityEngine.Rendering.Universal
         public TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle source)
         {
             var setting = VolumeManager.instance.stack.GetComponent<PhysicallyDepthOfField>();
-
+            if (!setting.IsActive())
+            {
+                return source;
+            }
+            
             Setup(setting);
 
             using (var builder = renderGraph.AddComputePass<PassData>("DiaphragmDoF", out var data))

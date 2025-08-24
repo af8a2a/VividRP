@@ -14,21 +14,13 @@ Shader "Hidden/Universal Render Pipeline/UberPost"
         #include_with_pragmas "Packages/com.unity.render-pipelines.core/ShaderLibrary/FoveatedRenderingKeywords.hlsl"
         #pragma multi_compile_fragment _ DEBUG_DISPLAY
         #pragma multi_compile_fragment _ SCREEN_COORD_OVERRIDE
-        #pragma multi_compile_local_fragment _ HDR_INPUT HDR_ENCODING
 
         #pragma dynamic_branch_local_fragment _ _HDR_OVERLAY
 
-        #ifdef HDR_ENCODING
-        #define HDR_INPUT 1 // this should be defined when HDR_ENCODING is defined
-        #endif
 
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Filtering.hlsl"
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ScreenCoordOverride.hlsl"
-#if defined(HDR_ENCODING)
-        #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
-        #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/HDROutput.hlsl"
-#endif
 
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
         #include "Packages/com.unity.render-pipelines.universal/Shaders/PostProcessing/Common.hlsl"
@@ -303,7 +295,7 @@ Shader "Hidden/Universal Render Pipeline/UberPost"
 
             // Color grading is always enabled when post-processing/uber is active
             {
-                color = ApplyColorGrading(color, PostExposure, TEXTURE2D_ARGS(_InternalLut, sampler_LinearClamp), LutParams, TEXTURE2D_ARGS(_UserLut, sampler_LinearClamp), UserLutParams, UserLutContribution);
+                color = VividColorGrading(color, PostExposure, TEXTURE2D_ARGS(_InternalLut, sampler_LinearClamp), LutParams, TEXTURE2D_ARGS(_UserLut, sampler_LinearClamp), UserLutParams, UserLutContribution);
             }
 
             #if _FILM_GRAIN
@@ -335,16 +327,6 @@ Shader "Hidden/Universal Render Pipeline/UberPost"
             }
             #endif
 
-            #ifdef HDR_ENCODING
-            {
-                // HDR UI composition
-                UNITY_BRANCH if(_HDR_OVERLAY)
-                {
-                    float4 uiSample = SAMPLE_TEXTURE2D_X(_OverlayUITexture, sampler_PointClamp, input.texcoord);
-                    color.rgb = SceneUIComposition(uiSample, color.rgb, PaperWhite, MaxNits);
-                }
-            }
-            #endif
 
             // Alpha mask
             #if _ENABLE_ALPHA_OUTPUT
@@ -355,12 +337,6 @@ Shader "Hidden/Universal Render Pipeline/UberPost"
                 // Saturate is necessary to avoid issues when additive blending pushes the alpha over 1.
                 // NOTE: in UNITY_COLORSPACE_GAMMA we alpha blend in gamma here, linear otherwise.
                 color.xyz = lerp(inputColor.xyz, color.xyz, saturate(alpha));
-            }
-            #endif
-
-            #ifdef HDR_ENCODING
-            {
-                color.rgb = OETF(color.rgb, MaxNits);
             }
             #endif
 

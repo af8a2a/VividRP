@@ -65,18 +65,19 @@ namespace UnityEngine.Rendering.Universal
 
 
             var lensFlareScreenSpace = VolumeManager.instance.stack.GetComponent<ScreenSpaceLensFlare>();
-
-
+            
+                
             var bloom = VolumeManager.instance.stack.GetComponent<MobileBloom>();
-            if (bloom.mode.value is BloomMode.None||!lensFlareScreenSpace.IsActive())
+            var cameraData = frameData.Get<UniversalCameraData>();
+            var resourceData = frameData.Get<UniversalResourceData>();
+
+            if (bloom.mode.value is BloomMode.None || !lensFlareScreenSpace.IsActive())
             {
-                return source;
+                return resourceData.bloomTexture;
             }
 
             var downsample = (int)lensFlareScreenSpace.resolution.value;
 
-            var cameraData = frameData.Get<UniversalCameraData>();
-            var resourceData = frameData.Get<UniversalResourceData>();
 
             int width = Math.Max(cameraData.scaledWidth / downsample, 1);
             int height = Math.Max(cameraData.scaledHeight / downsample, 1);

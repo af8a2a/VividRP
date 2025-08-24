@@ -14,7 +14,7 @@ Shader "Hidden/HD PostProcessing/Editor/Custom Tonemapper Curve"
     #pragma editor_sync_compilation
     #pragma target 3.5
 
-    #pragma multi_compile_local_fragment _ _TONEMAP_GT _TONEMAP_ACES _TONEMAP_NEUTRAL _TONEMAP_AGX
+    #pragma multi_compile_local_fragment _ _TONEMAP_GT _TONEMAP_ACES _TONEMAP_NEUTRAL _TONEMAP_AGX _TONEMAP_AGX_APPROX
 
     struct Attributes
     {
@@ -43,6 +43,7 @@ Shader "Hidden/HD PostProcessing/Editor/Custom Tonemapper Curve"
 
     float4 DrawCurve(Varyings i, float3 background, float3 curveColor)
     {
+        
         #ifdef _TONEMAP_GT
         float y = GranTurismoTonemap(i.uv.x, _GTToneMap_Params0.x, _GTToneMap_Params0.y, _GTToneMap_Params0.z,
                                      _GTToneMap_Params0.w,
@@ -54,6 +55,8 @@ Shader "Hidden/HD PostProcessing/Editor/Custom Tonemapper Curve"
         float y = NeutralTonemap(i.uv.xxx);
         #elif _TONEMAP_AGX
         float y = TonemapAgx(i.uv.xxx);
+        #elif _TONEMAP_AGX_APPROX
+        float y = AgxApproximate(i.uv.xxx);
         #else
         float y = i.uv.x;
         #endif

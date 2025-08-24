@@ -923,6 +923,7 @@ namespace UnityEngine.Rendering.Universal
 
             RecordCustomRenderGraphPasses(renderGraph, RenderPassEvent.AfterRenderingShadows);
 
+            #if false
             bool requiredColorGradingLutPass = cameraData.postProcessEnabled && m_PostProcessPasses.isCreated;
             if (requiredColorGradingLutPass)
             {
@@ -930,6 +931,7 @@ namespace UnityEngine.Rendering.Universal
                 m_PostProcessPasses.colorGradingLutPass.Render(renderGraph, frameData, out internalColorLut);
                 resourceData.internalColorLut = internalColorLut;
             }
+            #endif
         }
 
         private enum OccluderPass
@@ -1708,7 +1710,7 @@ namespace UnityEngine.Rendering.Universal
                 }
             }
 #endif
-
+#if false
             if (debugHandler != null)
             {
                 TextureHandle overlayUITexture = resourceData.overlayUITexture;
@@ -1716,7 +1718,7 @@ namespace UnityEngine.Rendering.Universal
 
                 debugHandler.Render(renderGraph, frameData, cameraData, debugScreenTexture, overlayUITexture, debugHandlerColorTarget);
             }
-
+#endif
             if (cameraData.resolveFinalTarget)
             {
 #if UNITY_EDITOR

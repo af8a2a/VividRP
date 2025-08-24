@@ -77,6 +77,7 @@ namespace UnityEngine.Rendering.Universal
         public TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle source)
         {
 
+
             if (!taaMaterial)
             {
                 var runtimeShader = GraphicsSettings.GetRenderPipelineSettings<PostProcessingRuntimeShader>();
@@ -86,7 +87,7 @@ namespace UnityEngine.Rendering.Universal
             var cameraData = frameData.Get<UniversalCameraData>();
             var resourceData = frameData.Get<UniversalResourceData>();
 
-            if (cameraData.antialiasing is not AntialiasingMode.TemporalAntiAliasing)
+            if (cameraData.antialiasing != AntialiasingMode.TemporalAntiAliasing)
             {
                 return source;
             }

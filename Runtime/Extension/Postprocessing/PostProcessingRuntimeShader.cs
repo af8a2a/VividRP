@@ -111,6 +111,34 @@ namespace UnityEngine.Rendering.Universal
             get => m_FinalPostShader;
             set => this.SetValueAndNotify(ref m_FinalPostShader, value);
         }
+        
+        
+        
+        /// <summary>
+        /// The LUT Builder LDR Post Processing shader.
+        /// </summary>
+        [ResourcePath("Runtime/Extension/Postprocessing/ColorGrading/Shader/LutBuilderLdr.shader")]
+        private Shader m_LUTBuilderLdrPS;
+
+        public Shader lutBuilderLdrPS
+        {
+            get => m_LUTBuilderLdrPS;
+            set => this.SetValueAndNotify(ref m_LUTBuilderLdrPS, value);
+        }
+
+        
+        
+        /// <summary>
+        /// The LUT Builder HDR Post Processing shader.
+        /// </summary>
+        [ResourcePath("Runtime/Extension/Postprocessing/ColorGrading/Shader/LutBuilderHdr.shader")]
+        private Shader m_LUTBuilderHdrPS;
+
+        public Shader lutBuilderHdrPS
+        {
+            get => m_LUTBuilderHdrPS;
+            set => this.SetValueAndNotify(ref m_LUTBuilderHdrPS, value);
+        }
 
     }
 }

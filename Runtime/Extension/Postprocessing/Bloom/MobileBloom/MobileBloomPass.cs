@@ -91,9 +91,10 @@ namespace UnityEngine.Rendering.Universal
         public TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle source)
         {
             var setting = VolumeManager.instance.stack.GetComponent<MobileBloom>();
+            var resourceData = frameData.Get<UniversalResourceData>();
             if (setting.mode.value is not BloomMode.Moblie)
             {
-                return renderGraph.defaultResources.blackTexture;
+                return resourceData.bloomTexture;
             }
 
             if (!bloomMaterial)
@@ -111,7 +112,6 @@ namespace UnityEngine.Rendering.Universal
                 bloomMaterial.SetColor(ShaderID._Bloom_Custom_ColorTint, setting.tint.value);
 
                 var cameraData = frameData.Get<UniversalCameraData>();
-                var resourceData = frameData.Get<UniversalResourceData>();
 
                 var desc = renderGraph.GetTextureDesc(resourceData.activeColorTexture);
                 var scale = 0.25f;
@@ -213,7 +213,7 @@ namespace UnityEngine.Rendering.Universal
                 resourceData.bloomTexture = data.preFilterBlurTexture;
                 resourceData.bloomMipUpTexture = data.bloomMipUpTexture;
                 resourceData.bloomMipDownTexture = data.bloomMipDownTexture;
-                return source;
+                return data.preFilterBlurTexture;
             }
         }
     }

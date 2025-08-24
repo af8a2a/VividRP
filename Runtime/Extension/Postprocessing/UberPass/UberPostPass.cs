@@ -284,6 +284,10 @@ namespace UnityEngine.Rendering.Universal
         public void UberPostSetupBloomPass(RenderGraph renderGraph, ContextContainer frameData)
         {
             var bloom = VolumeManager.instance.stack.GetComponent<MobileBloom>();
+            if (bloom.mode.value is BloomMode.None)
+            {
+                return;
+            }
 
             using (var builder = renderGraph.AddRasterRenderPass<UberSetupBloomPassData>("Setup Bloom Post Processing", out var passData,
                        ProfilingSampler.Get(URPProfileId.RG_UberPostSetupBloomPass)))
@@ -400,9 +404,9 @@ namespace UnityEngine.Rendering.Universal
 
         void SetupVignette(Material material, UniversalCameraData cameraData, XRPass xrPass = null)
         {
-            var m_Vignette = VolumeManager.instance.stack.GetComponent<Vignette>();
-            var color = m_Vignette.color.value;
-            var center = m_Vignette.center.value;
+            var vignette = VolumeManager.instance.stack.GetComponent<Vignette>();
+            var color = vignette.color.value;
+            var center = vignette.center.value;
             var aspectRatio = cameraData.aspectRatio;
 
 
@@ -420,12 +424,12 @@ namespace UnityEngine.Rendering.Universal
 
             var v1 = new Vector4(
                 color.r, color.g, color.b,
-                m_Vignette.rounded.value ? aspectRatio : 1f
+                vignette.rounded.value ? aspectRatio : 1f
             );
             var v2 = new Vector4(
                 center.x, center.y,
-                m_Vignette.intensity.value * 3f,
-                m_Vignette.smoothness.value * 5f
+                vignette.intensity.value * 3f,
+                vignette.smoothness.value * 5f
             );
 
             material.SetVector(ShaderConstants._Vignette_Params1, v1);
@@ -464,7 +468,14 @@ namespace UnityEngine.Rendering.Universal
             SetupVignette(material, cameraData);
             SetupChromaticAberration(material);
 
-            var destTexture = renderGraph.ImportTexture(cameraData.urpRenderer.nextRenderGraphCameraColorHandle);
+            var destTexture = renderGraph.CreateTexture(new TextureDesc(cameraData.scaledWidth, cameraData.scaledHeight)
+            {
+                format = renderGraph.GetTextureDesc(source).format,
+                enableRandomWrite = true,
+                name = "UberPost Texture",
+                clearBuffer = true,
+            });
+            
             using (var builder = renderGraph.AddRasterRenderPass<UberPostPassData>("Vivid UberPost", out var passData))
             {
                 passData.destTexture = destTexture;

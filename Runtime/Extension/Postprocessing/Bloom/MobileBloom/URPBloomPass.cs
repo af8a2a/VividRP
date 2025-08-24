@@ -63,9 +63,10 @@ namespace UnityEngine.Rendering.Universal
         {
             // Start at half-res
             var bloom = VolumeManager.instance.stack.GetComponent<MobileBloom>();
+            var resourceData = frameData.Get<UniversalResourceData>();
             if (bloom.mode.value is not BloomMode.URP)
             {
-                return renderGraph.defaultResources.blackTexture;
+                return resourceData.bloomTexture;
             }
             var runtimeShader = GraphicsSettings.GetRenderPipelineSettings<BloomRuntimeShader>();
             if (!m_BloomMaterial)
@@ -264,7 +265,6 @@ namespace UnityEngine.Rendering.Universal
                     }
                     
                 });
-                var resourceData = frameData.Get<UniversalResourceData>();
 
                 resourceData.bloomMipUpTexture = passData.bloomMipUp;
                 resourceData.bloomMipDownTexture = passData.bloomMipDown;

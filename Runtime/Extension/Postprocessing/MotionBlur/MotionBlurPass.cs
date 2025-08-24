@@ -67,7 +67,10 @@ namespace UnityEngine.Rendering.Universal
             }
 
             MotionBlur motionBlur = VolumeManager.instance.stack.GetComponent<MotionBlur>();
-
+            if (!motionBlur.IsActive())
+            {
+                return source;
+            }
             var cameraData = frameData.Get<UniversalCameraData>();
             var resourceData = frameData.Get<UniversalResourceData>();
             

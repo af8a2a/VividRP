@@ -76,42 +76,46 @@ namespace UnityEngine.Rendering.Universal
 
         int SetupDithering(UniversalCameraData cameraData, Material material)
         {
-            material.EnableKeyword(ShaderKeywordStrings.Dithering);
-
-            var runtimeTexture = GraphicsSettings.GetRenderPipelineSettings<PostProcessData.TextureResources>();
-
-            var blueNoise = runtimeTexture.blueNoise16LTex;
-
-            if (blueNoise == null || blueNoise.Length == 0)
-                return 0; // Safe guard
-
             var index = m_DitheringTextureIndex;
+
+            if (cameraData.isDitheringEnabled)
+            {
+                material.EnableKeyword(ShaderKeywordStrings.Dithering);
+
+                var runtimeTexture = GraphicsSettings.GetRenderPipelineSettings<PostProcessData.TextureResources>();
+
+                var blueNoise = runtimeTexture.blueNoise16LTex;
+
+                if (blueNoise == null || blueNoise.Length == 0)
+                    return 0; // Safe guard
+
 #if LWRP_DEBUG_STATIC_POSTFX // Used by QA for automated testing
             index = 0;
             float rndOffsetX = 0f;
             float rndOffsetY = 0f;
 #else
-            if (++index >= blueNoise.Length)
-                index = 0;
+                if (++index >= blueNoise.Length)
+                    index = 0;
 
-            var oldState = Random.state;
-            Random.InitState(Time.frameCount);
-            float rndOffsetX = Random.value;
-            float rndOffsetY = Random.value;
-            Random.state = oldState;
+                var oldState = Random.state;
+                Random.InitState(Time.frameCount);
+                float rndOffsetX = Random.value;
+                float rndOffsetY = Random.value;
+                Random.state = oldState;
 #endif
 
-            // Ideally we would be sending a texture array once and an index to the slice to use
-            // on every frame but these aren't supported on all Universal targets
-            var noiseTex = blueNoise[index];
+                // Ideally we would be sending a texture array once and an index to the slice to use
+                // on every frame but these aren't supported on all Universal targets
+                var noiseTex = blueNoise[index];
 
-            material.SetTexture(ShaderConstants._BlueNoise_Texture, noiseTex);
-            material.SetVector(ShaderConstants._Dithering_Params, new Vector4(
-                cameraData.pixelWidth / (float)noiseTex.width,
-                cameraData.pixelHeight / (float)noiseTex.height,
-                rndOffsetX,
-                rndOffsetY
-            ));
+                material.SetTexture(ShaderConstants._BlueNoise_Texture, noiseTex);
+                material.SetVector(ShaderConstants._Dithering_Params, new Vector4(
+                    cameraData.pixelWidth / (float)noiseTex.width,
+                    cameraData.pixelHeight / (float)noiseTex.height,
+                    rndOffsetX,
+                    rndOffsetY
+                ));
+            }
 
             return index;
         }
@@ -310,7 +314,7 @@ namespace UnityEngine.Rendering.Universal
                 material = CoreUtils.CreateEngineMaterial(runtimeShader.finalPost);
             }
 
-
+            material.enabledKeywords = null;
             var resourceData = frameData.Get<UniversalResourceData>();
             var cameraData = frameData.Get<UniversalCameraData>();
 
@@ -370,8 +374,9 @@ namespace UnityEngine.Rendering.Universal
                 builder.UseTexture(source, AccessFlags.Read);
                 passData.cameraData = cameraData;
                 passData.material = material;
+                passData.settings = settings;
 
-                if (RequireHDROutput(cameraData) && cameraData.rendersOverlayUI)
+                if (RequireHDROutput(cameraData) && m_EnableColorEncodingIfNeeded && cameraData.rendersOverlayUI)
                 {
                     builder.UseTexture(overlayUITexture, AccessFlags.Read);
                 }

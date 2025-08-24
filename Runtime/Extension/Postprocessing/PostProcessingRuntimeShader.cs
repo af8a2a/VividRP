@@ -52,5 +52,14 @@ namespace UnityEngine.Rendering.Universal
         [ResourcePath("Textures/SMAA/SearchTex.tga")]
         public Texture2D smaaSearchTex;
 
+
+        [SerializeField, ResourcePath("Shaders/PostProcessing/CameraMotionBlur.shader")]
+        private Shader m_CameraMotionBlurShader;
+
+        public Shader cameraMotionBlur
+        {
+            get => m_CameraMotionBlurShader;
+            set => this.SetValueAndNotify(ref m_CameraMotionBlurShader, value);
+        }
     }
 }

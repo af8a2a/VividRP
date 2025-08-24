@@ -98,6 +98,12 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
 
+        #region MotionBlur
+
+        MotionBlurPass _motionBlurPass = new MotionBlurPass();
+
+        #endregion
+
         #region Diffusion
 
         DiffusionPass _diffusionPass = new DiffusionPass();
@@ -138,6 +144,12 @@ namespace UnityEngine.Rendering.Universal
             #region TemporalAA
 
             currentRT = _temporalAAPass.Render(renderGraph, frameData, currentRT);
+
+            #endregion
+
+            #region MotionBlur
+
+            currentRT = _motionBlurPass.Render(renderGraph, frameData, currentRT);
 
             #endregion
 

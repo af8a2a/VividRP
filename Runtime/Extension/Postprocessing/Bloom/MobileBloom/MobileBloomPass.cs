@@ -113,7 +113,7 @@ namespace UnityEngine.Rendering.Universal
 
                 var cameraData = frameData.Get<UniversalCameraData>();
 
-                var desc = renderGraph.GetTextureDesc(resourceData.activeColorTexture);
+                var desc = renderGraph.GetTextureDesc(source);
                 var scale = 0.25f;
 
                 var scaledWidth = (int)(cameraData.pixelWidth * scale);
@@ -204,7 +204,7 @@ namespace UnityEngine.Rendering.Universal
 
                 data.iterations = iterations;
                 data.material = bloomMaterial;
-                data.sourceTexture = resourceData.activeColorTexture;
+                data.sourceTexture = source;
 
                 builder.AllowPassCulling(false);
                 builder.UseTexture(data.sourceTexture);

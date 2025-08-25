@@ -1,12 +1,25 @@
-﻿using UnityEngine.Rendering.RenderGraphModule;
+﻿using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
 
-namespace UnityEngine.Rendering.Universal.SuperResolution.STP
+namespace UnityEngine.Rendering.Universal
 {
     public class STPUpscaler
     {
         private const string _UpscaledColorTargetName = "_UpscaledColorTarget";
 
-        TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle source)
+        
+        internal static RenderTextureDescriptor GetCompatibleDescriptor(RenderTextureDescriptor desc, int width, int height, GraphicsFormat format, GraphicsFormat depthStencilFormat = GraphicsFormat.None)
+        {
+            desc.depthStencilFormat = depthStencilFormat;
+            desc.msaaSamples = 1;
+            desc.width = width;
+            desc.height = height;
+            desc.graphicsFormat = format;
+            return desc;
+        }
+
+        
+       public TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle source)
         {
             var cameraData = frameData.Get<UniversalCameraData>();
             var resourceData = frameData.Get<UniversalResourceData>();
@@ -17,8 +30,10 @@ namespace UnityEngine.Rendering.Universal.SuperResolution.STP
 
             Debug.Assert(motionVectors.IsValid(), "MotionVectors are invalid. STP requires a motion vector texture.");
 
-
-            var destination = renderGraph.CreateTexture(new TextureDesc(cameraData.pixelWidth, cameraData.pixelWidth)
+            
+            
+            
+            var destination = renderGraph.CreateTexture(new TextureDesc(cameraData.pixelWidth, cameraData.pixelHeight)
             {
                 format = cameraData.cameraTargetDescriptor.graphicsFormat,
                 enableRandomWrite = true,

@@ -87,7 +87,7 @@ namespace UnityEngine.Rendering.Universal
             var cameraData = frameData.Get<UniversalCameraData>();
             var resourceData = frameData.Get<UniversalResourceData>();
 
-            if (cameraData.antialiasing != AntialiasingMode.TemporalAntiAliasing)
+            if (cameraData.antialiasing != AntialiasingMode.TemporalAntiAliasing || cameraData.IsSTPRequested())
             {
                 return source;
             }

@@ -36,8 +36,9 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
         
-        #region TemporalAA
-
+        #region Upscaler
+        private SuperResolutionPass _superResolutionPass = new SuperResolutionPass();
+        
         private TemporalAAPass _temporalAAPass = new TemporalAAPass();
 
         #endregion
@@ -134,6 +135,13 @@ namespace UnityEngine.Rendering.Universal
 
             #endregion
 
+            
+            #region Upscaler
+
+            currentRT = _superResolutionPass.Render(renderGraph, frameData, currentRT);
+
+            #endregion
+
             #region TemporalAA
 
             currentRT = _temporalAAPass.Render(renderGraph, frameData, currentRT);
@@ -171,7 +179,6 @@ namespace UnityEngine.Rendering.Universal
             resourceData.bloomTexture = _lensFlareScreenSpacePass.Render(renderGraph, frameData, currentRT);
 
             #endregion
-
 
             
 

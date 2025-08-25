@@ -1,6 +1,6 @@
 ﻿using UnityEngine.Rendering.RenderGraphModule;
 
-namespace UnityEngine.Rendering.Universal.SuperResolution
+namespace UnityEngine.Rendering.Universal
 {
     public class SuperResolutionUtil
     {
@@ -14,8 +14,7 @@ namespace UnityEngine.Rendering.Universal.SuperResolution
         public static void UpdateCameraResolution(RenderGraph renderGraph, UniversalCameraData cameraData, Vector2Int newCameraTargetSize)
         {
             //todo:should do it?
-
-            // cameraData.renderScale = 1;
+            cameraData.renderScale = 1;
 
             cameraData.cameraTargetDescriptor.width = newCameraTargetSize.x;
             cameraData.cameraTargetDescriptor.height = newCameraTargetSize.y;

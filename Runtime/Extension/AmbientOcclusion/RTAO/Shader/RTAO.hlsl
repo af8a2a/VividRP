@@ -9,11 +9,11 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/GBufferCommon.hlsl"
 
-#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/Shaders/ShaderVariablesRaytracing.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/Shaders/RayTracingCommon.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/Shaders/RaytracingIntersection.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/RayTracingFallbackHierarchy.cs.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/Shaders/RaytracingSampling.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/ShaderVariablesRaytracing.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RayTracingCommon.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingIntersection.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/RayTracingFallbackHierarchy.cs.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingSampling.hlsl"
 // The target acceleration structure that we will evaluate the reflexion in
 TEXTURE2D_X(SceneDepth);
 TEXTURE2D_X(SceneNormal);

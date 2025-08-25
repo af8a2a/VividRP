@@ -10,11 +10,11 @@
 
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/UnityGBuffer.hlsl"
 
-#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/Shaders/ShaderVariablesRaytracing.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/Shaders/RayTracingCommon.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/Shaders/RaytracingIntersection.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/RayTracingFallbackHierarchy.cs.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/Shaders/RaytracingSampling.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/ShaderVariablesRaytracing.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RayTracingCommon.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingIntersection.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/RayTracingFallbackHierarchy.cs.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingSampling.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/ClusterLight.hlsl"
 //--------------------------------------------------------------------------------------------------
 // Inputs & outputs

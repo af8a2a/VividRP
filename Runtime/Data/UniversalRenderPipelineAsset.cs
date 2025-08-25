@@ -368,7 +368,15 @@ namespace UnityEngine.Rendering.Universal
         /// Unity uses the Spatial-Temporal Post-Processing technique to perform upscaling.
         /// </summary>
         [InspectorName("Spatial-Temporal Post-Processing"), Tooltip("If the target device does not support compute shaders or is running GLES, Unity falls back to the Automatic option.")]
-        STP
+        STP,
+        
+        
+        /// <summary>
+        /// Unity uses the Spatial-Temporal Post-Processing technique to perform upscaling.
+        /// </summary>
+        [InspectorName("Snapdragon™ Game Super Resolution 2"), Tooltip("If the target device does not support compute shaders or is running GLES, Unity falls back to the Automatic option.")]
+        SGSR2
+
     }
 
     /// <summary>

@@ -14,8 +14,8 @@ namespace UnityEngine.Rendering.Universal
 
         
         
-        TextureHandle[] _BloomMipUp;
-        TextureHandle[] _BloomMipDown;
+        TextureHandle[] _BloomMipUp=new TextureHandle[1];
+        TextureHandle[] _BloomMipDown=new TextureHandle[1];
 
         
         public TextureHandle[] bloomMipUpTexture

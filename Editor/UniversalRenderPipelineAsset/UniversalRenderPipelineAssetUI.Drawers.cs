@@ -216,6 +216,16 @@ namespace UnityEditor.Rendering.Universal
                     EditorGUILayout.HelpBox(Styles.stpMobilePlatformWarning, MessageType.Warning, true);
                 }
             }
+            
+            else if (serialized.asset.upscalingFilter == UpscalingFilterSelection.SGSR2)
+            {
+                // Warn users about performance expectations if they attempt to enable STP on a mobile platform
+                if (PlatformAutoDetect.isShaderAPIMobileDefined)
+                {
+                    EditorGUILayout.HelpBox(Styles.stpMobilePlatformWarning, MessageType.Warning, true);
+                }
+            }
+
 
             EditorGUILayout.PropertyField(serialized.enableLODCrossFadeProp, Styles.enableLODCrossFadeText);
             EditorGUI.BeginDisabledGroup(!serialized.enableLODCrossFadeProp.boolValue);

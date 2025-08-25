@@ -11,8 +11,8 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/DynamicScalingClamping.hlsl"
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/Shaders/ShaderVariablesRaytracing.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Raytracing/Shaders/RaytracingSampling.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/ShaderVariablesRaytracing.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingSampling.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/ScreenSpaceLighting/ScreenSpaceGlobalIllumination/RayMarchingFallbackHierarchy.cs.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/ScreenSpaceLighting/ScreenSpaceGlobalIllumination/BilateralUpsampleDef.cs.hlsl"
 #include "BilateralUpsample.hlsl"

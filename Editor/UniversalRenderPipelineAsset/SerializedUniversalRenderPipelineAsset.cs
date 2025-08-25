@@ -23,6 +23,8 @@ namespace UnityEditor.Rendering.Universal
         public SerializedProperty upscalingFilter { get; }
         public SerializedProperty fsrOverrideSharpness { get; }
         public SerializedProperty fsrSharpness { get; }
+        
+        public SerializedProperty sgsr2MinLerpContribution { get; }
 
         public SerializedProperty mainLightRenderingModeProp { get; }
         public SerializedProperty mainLightShadowsSupportedProp { get; }

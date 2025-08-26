@@ -1,11 +1,10 @@
-#if false
 namespace UnityEditor.Rendering.Universal
 {
     using UnityEngine;
     using UnityEngine.Rendering.Universal;
-    using CED = CoreEditorDrawer<UniversalRenderPipelineSerializedCamera>;
+    using CED = CoreEditorDrawer<VividSerializedCamera>;
 
-    static partial class UniversalRenderPipelineCameraUI
+    static partial class VividCameraUI
     {
         public partial class Environment
         {
@@ -60,7 +59,7 @@ namespace UnityEditor.Rendering.Universal
                 }
             }
 
-            static void Drawer_Environment_ClearFlags(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void Drawer_Environment_ClearFlags(VividSerializedCamera p, Editor owner)
             {
                 EditorGUI.showMixedValue = p.baseCameraSettings.clearFlags.hasMultipleDifferentValues;
 
@@ -106,7 +105,7 @@ namespace UnityEditor.Rendering.Universal
                 EditorGUI.showMixedValue = false;
             }
 
-            static void Drawer_Environment_VolumeUpdate(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void Drawer_Environment_VolumeUpdate(VividSerializedCamera p, Editor owner)
             {
                 Rect volumeUpdateRect = EditorGUILayout.GetControlRect();
                 EditorGUI.BeginChangeCheck();
@@ -123,7 +122,7 @@ namespace UnityEditor.Rendering.Universal
                 }
             }
 
-            static void Drawer_Environment_VolumeTrigger(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void Drawer_Environment_VolumeTrigger(VividSerializedCamera p, Editor owner)
             {
                 var controlRect = EditorGUILayout.GetControlRect(true);
                 EditorGUI.BeginProperty(controlRect, Styles.volumeTrigger, p.volumeTrigger);
@@ -138,4 +137,3 @@ namespace UnityEditor.Rendering.Universal
         }
     }
 }
-#endif

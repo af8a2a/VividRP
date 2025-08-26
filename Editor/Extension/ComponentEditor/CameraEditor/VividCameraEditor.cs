@@ -1,4 +1,3 @@
-#if false
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,12 +11,12 @@ using UnityEngine.Rendering.Universal;
 
 namespace UnityEditor.Rendering.Universal
 {
-    using Styles = UniversalRenderPipelineCameraUI.Styles;
+    using Styles = VividCameraUI.Styles;
 
     [CustomEditor(typeof(Camera))]
     [SupportedOnRenderPipeline(typeof(UniversalRenderPipelineAsset))]
     [CanEditMultipleObjects]
-    class UniversalRenderPipelineCameraEditor : Editor
+    class VividCameraEditor : Editor
     {
         ReorderableList m_LayerList;
         
@@ -31,15 +30,15 @@ namespace UnityEditor.Rendering.Universal
         List<Camera> m_TypeErrorCameras = new List<Camera>();
         List<Camera> m_NotSupportedOverlayCameras = new List<Camera>();
         List<Camera> m_IncompatibleCameras = new List<Camera>();
-        List<(Camera, UniversalRenderPipelineSerializedCamera)> m_OutputWarningCameras = new();
+        List<(Camera, VividSerializedCamera)> m_OutputWarningCameras = new();
 
-        UniversalRenderPipelineSerializedCamera m_SerializedCamera;
+        VividSerializedCamera m_SerializedCamera;
 
         public void OnEnable()
         {
             settings.OnEnable();
             selectedCameraInStack = null;
-            m_SerializedCamera = new UniversalRenderPipelineSerializedCamera(serializedObject, settings);
+            m_SerializedCamera = new VividSerializedCamera(serializedObject, settings);
 
             validCameras.Clear();
             m_TypeErrorCameras.Clear();
@@ -112,7 +111,7 @@ namespace UnityEditor.Rendering.Universal
             rect.height = EditorGUIUtility.singleLineHeight;
             rect.y += 1;
 
-            (Camera camera, UniversalRenderPipelineSerializedCamera serializedCamera) overlayCamera = m_SerializedCamera[index];
+            (Camera camera,VividSerializedCamera serializedCamera) overlayCamera = m_SerializedCamera[index];
             Camera cam = overlayCamera.camera;
 
             if (cam != null)
@@ -321,7 +320,7 @@ namespace UnityEditor.Rendering.Universal
 
             m_SerializedCamera.Refresh();
 
-            (Camera camera, UniversalRenderPipelineSerializedCamera serializedCamera) overlayCamera = m_SerializedCamera[m_SerializedCamera.numCameras - 1];
+            (Camera camera, VividSerializedCamera serializedCamera) overlayCamera = m_SerializedCamera[m_SerializedCamera.numCameras - 1];
             UpdateStackCameraOutput(overlayCamera.camera, overlayCamera.serializedCamera);
         }
 
@@ -350,11 +349,11 @@ namespace UnityEditor.Rendering.Universal
 
             if (IsPresetEditor(this))
             {
-                UniversalRenderPipelineCameraUI.PresetInspector.Draw(m_SerializedCamera, this);
+                VividCameraUI.PresetInspector.Draw(m_SerializedCamera, this);
             }
             else
             {
-                UniversalRenderPipelineCameraUI.Inspector.Draw(m_SerializedCamera, this);
+                VividCameraUI.Inspector.Draw(m_SerializedCamera, this);
             }
 
             m_SerializedCamera.Apply();
@@ -374,7 +373,7 @@ namespace UnityEditor.Rendering.Universal
             }
         }
 
-        private void UpdateStackCameraOutput(Camera cam, UniversalRenderPipelineSerializedCamera serializedCamera)
+        private void UpdateStackCameraOutput(Camera cam, VividSerializedCamera serializedCamera)
         {
             if ((CameraRenderType)serializedCamera.cameraType.intValue == CameraRenderType.Base)
                 return;
@@ -450,7 +449,7 @@ namespace UnityEditor.Rendering.Universal
             }
         }
 
-        private bool IsStackCameraOutputDirty(Camera cam, UniversalRenderPipelineSerializedCamera serializedCamera)
+        private bool IsStackCameraOutputDirty(Camera cam, VividSerializedCamera serializedCamera)
         {
             serializedCamera.Update();
 
@@ -579,4 +578,3 @@ namespace UnityEditor.Rendering.Universal
         }
     }
 }
-#endif

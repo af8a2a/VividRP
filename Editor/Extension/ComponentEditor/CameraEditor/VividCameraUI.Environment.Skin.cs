@@ -1,9 +1,8 @@
-#if false
 using UnityEngine;
 
 namespace UnityEditor.Rendering.Universal
 {
-    static partial class UniversalRenderPipelineCameraUI
+    static partial class VividCameraUI
     {
         public partial class Environment
         {
@@ -17,4 +16,3 @@ namespace UnityEditor.Rendering.Universal
         }
     }
 }
-#endif

@@ -1,11 +1,10 @@
-#if false
 using UnityEngine;
 
 namespace UnityEditor.Rendering.Universal
 {
-    using CED = CoreEditorDrawer<UniversalRenderPipelineSerializedCamera>;
+    using CED = CoreEditorDrawer<VividSerializedCamera>;
 
-    static partial class UniversalRenderPipelineCameraUI
+    static partial class VividCameraUI
     {
         static readonly ExpandedState<Expandable, Camera> k_ExpandedStatePreset = new(0, "URP-preset");
 
@@ -25,4 +24,3 @@ namespace UnityEditor.Rendering.Universal
         );
     }
 }
-#endif

@@ -1,9 +1,8 @@
-#if false
 namespace UnityEditor.Rendering.Universal
 {
-    using CED = CoreEditorDrawer<UniversalRenderPipelineSerializedCamera>;
+    using CED = CoreEditorDrawer<VividSerializedCamera>;
 
-    static partial class UniversalRenderPipelineCameraUI
+    static partial class VividCameraUI
     {
         public partial class PhysicalCamera
         {
@@ -48,4 +47,3 @@ namespace UnityEditor.Rendering.Universal
         }
     }
 }
-#endif

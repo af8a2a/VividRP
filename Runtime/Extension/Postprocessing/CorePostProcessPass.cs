@@ -79,12 +79,6 @@ namespace UnityEngine.Rendering.Universal
         #endregion
 
         
-        // #region ToneMapping
-        //
-        // ToneMappingPass _toneMappingPass = new ToneMappingPass();
-        //
-        // #endregion
-
         #region Diffusion
 
         DiffusionPass _diffusionPass = new DiffusionPass();

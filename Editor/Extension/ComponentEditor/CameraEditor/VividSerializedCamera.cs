@@ -1,11 +1,10 @@
-#if false
 using System;
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
 
 namespace UnityEditor.Rendering.Universal
 {
-    class UniversalRenderPipelineSerializedCamera : ISerializedCamera
+    class VividSerializedCamera : ISerializedCamera
     {
         public SerializedObject serializedObject { get; }
         public SerializedObject serializedAdditionalDataObject { get; }
@@ -44,7 +43,16 @@ namespace UnityEditor.Rendering.Universal
         public SerializedProperty taaContrastAdaptiveSharpening { get; }
         public SerializedProperty allowHDROutput { get; }
 
-        public (Camera camera, UniversalRenderPipelineSerializedCamera serializedCamera) this[int index]
+        #region RenderScale
+
+        public SerializedProperty renderScale { get; }
+
+        public SerializedProperty upscalerTechnique { get; }
+
+        #endregion
+
+
+        public (Camera camera, VividSerializedCamera serializedCamera) this[int index]
         {
             get
             {
@@ -58,11 +66,11 @@ namespace UnityEditor.Rendering.Universal
 
         public int numCameras => cameras?.arraySize ?? 0;
 
-        UniversalRenderPipelineSerializedCamera[] cameraSerializedObjects { get; set; }
+        VividSerializedCamera[] cameraSerializedObjects { get; set; }
 
         public UniversalAdditionalCameraData[] camerasAdditionalData { get; }
 
-        public UniversalRenderPipelineSerializedCamera(SerializedObject serializedObject, CameraEditor.Settings settings = null)
+        public VividSerializedCamera(SerializedObject serializedObject, CameraEditor.Settings settings = null)
         {
             this.serializedObject = serializedObject;
             projectionMatrixMode = serializedObject.FindProperty("m_projectionMatrixMode");
@@ -115,6 +123,17 @@ namespace UnityEditor.Rendering.Universal
             taaContrastAdaptiveSharpening = taaSettings.FindPropertyRelative(nameof(TemporalAA.Settings.m_ContrastAdaptiveSharpening));
 
             allowHDROutput = serializedAdditionalDataObject.FindProperty("m_AllowHDROutput");
+
+
+            #region Upscale
+
+            using (var o = new PropertyFetcher<UniversalAdditionalCameraData>(serializedAdditionalDataObject))
+            {
+                renderScale = o.Find(x => x.renderScale);
+                upscalerTechnique = o.Find(x => x.upscalerTechnique);
+            }
+
+            #endregion
         }
 
         /// <summary>
@@ -167,14 +186,13 @@ namespace UnityEditor.Rendering.Universal
             var o = new PropertyFetcher<UniversalAdditionalCameraData>(serializedAdditionalDataObject);
             cameras = o.Find("m_Cameras");
 
-            cameraSerializedObjects = new UniversalRenderPipelineSerializedCamera[numCameras];
+            cameraSerializedObjects = new VividSerializedCamera[numCameras];
             for (int i = 0; i < numCameras; ++i)
             {
                 Camera cam = cameras.GetArrayElementAtIndex(i).objectReferenceValue as Camera;
                 if (cam != null)
-                    cameraSerializedObjects[i] = new UniversalRenderPipelineSerializedCamera(new SerializedObject(cam));
+                    cameraSerializedObjects[i] = new VividSerializedCamera(new SerializedObject(cam));
             }
         }
     }
 }
-#endif

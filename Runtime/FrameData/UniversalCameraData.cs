@@ -233,11 +233,13 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         public float renderScale;
         internal ImageScalingMode imageScalingMode;
+        [Obsolete("VividRP use upscalingTechnique")]
         internal ImageUpscalingFilter upscalingFilter;
         internal bool fsrOverrideSharpness;
         internal float fsrSharpness;
         internal HDRColorBufferPrecision hdrColorBufferPrecision;
 
+        internal UpscalingTechnique  upscalingTechnique;
         /// <summary>
         /// True if this camera should clear depth buffer. This setting only applies to cameras of type <c>CameraRenderType.Overlay</c>
         /// <seealso cref="CameraRenderType"/>
@@ -510,7 +512,11 @@ namespace UnityEngine.Rendering.Universal
         /// <returns>True if STP is requested</returns>
         internal bool IsSTPRequested()
         {
+#if false
             return (imageScalingMode == ImageScalingMode.Upscaling) && (upscalingFilter == ImageUpscalingFilter.STP);
+#endif
+            return (imageScalingMode == ImageScalingMode.Upscaling) && (upscalingTechnique == UpscalingTechnique.STP);
+
         }
 
         /// <summary>

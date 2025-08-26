@@ -1,13 +1,12 @@
-#if false
 using System;
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
 
 namespace UnityEditor.Rendering.Universal
 {
-    using CED = CoreEditorDrawer<UniversalRenderPipelineSerializedCamera>;
+    using CED = CoreEditorDrawer<VividSerializedCamera>;
 
-    static partial class UniversalRenderPipelineCameraUI
+    static partial class VividCameraUI
     {
         public partial class Output
         {
@@ -53,7 +52,7 @@ namespace UnityEditor.Rendering.Universal
                 );
             }
 
-            static void DrawerOutputMultiDisplay(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void DrawerOutputMultiDisplay(VividSerializedCamera p, Editor owner)
             {
                 using (var checkScope = new EditorGUI.ChangeCheckScope())
                 {
@@ -85,7 +84,7 @@ namespace UnityEditor.Rendering.Universal
                 }
             }
 
-            static void DrawerOutputAllowDynamicResolution(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void DrawerOutputAllowDynamicResolution(VividSerializedCamera p, Editor owner)
             {
                 using (var checkScope = new EditorGUI.ChangeCheckScope())
                 {
@@ -108,7 +107,7 @@ namespace UnityEditor.Rendering.Universal
                 }
             }
 
-            static void DrawerOutputNormalizedViewPort(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void DrawerOutputNormalizedViewPort(VividSerializedCamera p, Editor owner)
             {
                 using (var checkScope = new EditorGUI.ChangeCheckScope())
                 {
@@ -130,7 +129,7 @@ namespace UnityEditor.Rendering.Universal
                 }
             }
 
-            static void UpdateStackCamerasOutput(UniversalRenderPipelineSerializedCamera p, Func<Camera, bool> updateOutputProperty)
+            static void UpdateStackCamerasOutput(VividSerializedCamera p, Func<Camera, bool> updateOutputProperty)
             {
                 int cameraCount = p.cameras.arraySize;
                 for (int i = 0; i < cameraCount; ++i)
@@ -146,7 +145,7 @@ namespace UnityEditor.Rendering.Universal
                 }
             }
 
-            static void DrawerOutputTargetTexture(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void DrawerOutputTargetTexture(VividSerializedCamera p, Editor owner)
             {
                 var rpAsset = UniversalRenderPipeline.asset;
                 using (var checkScope = new EditorGUI.ChangeCheckScope())
@@ -180,7 +179,7 @@ namespace UnityEditor.Rendering.Universal
             }
 
 #if ENABLE_VR && ENABLE_XR_MODULE
-            static void DrawerOutputXRRendering(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void DrawerOutputXRRendering(VividSerializedCamera p, Editor owner)
             {
                 Rect controlRect = EditorGUILayout.GetControlRect(true);
                 EditorGUI.BeginProperty(controlRect, Styles.xrTargetEye, p.allowXRRendering);
@@ -198,7 +197,7 @@ namespace UnityEditor.Rendering.Universal
 
 #endif
 
-            static void DrawerOutputHDR(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void DrawerOutputHDR(VividSerializedCamera p, Editor owner)
             {
                 Rect controlRect = EditorGUILayout.GetControlRect(true);
                 EditorGUI.BeginProperty(controlRect, Styles.allowHDR, p.baseCameraSettings.HDR);
@@ -224,7 +223,7 @@ namespace UnityEditor.Rendering.Universal
                 EditorGUI.EndProperty();
             }
             
-            static void DrawerOutputHDROutput(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void DrawerOutputHDROutput(VividSerializedCamera p, Editor owner)
             {
                 Rect controlRect = EditorGUILayout.GetControlRect(true);
                 EditorGUI.BeginProperty(controlRect, Styles.allowHDROutput, p.allowHDROutput);
@@ -249,7 +248,7 @@ namespace UnityEditor.Rendering.Universal
                 EditorGUI.EndProperty();
             }
 
-            static void DrawerOutputMSAA(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void DrawerOutputMSAA(VividSerializedCamera p, Editor owner)
             {
                 Rect controlRect = EditorGUILayout.GetControlRect(true);
                 EditorGUI.BeginProperty(controlRect, Styles.allowMSAA, p.baseCameraSettings.allowMSAA);
@@ -278,4 +277,3 @@ namespace UnityEditor.Rendering.Universal
         }
     }
 }
-#endif

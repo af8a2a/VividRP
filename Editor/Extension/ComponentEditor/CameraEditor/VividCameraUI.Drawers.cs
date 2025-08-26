@@ -1,12 +1,11 @@
-#if false
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
 
 namespace UnityEditor.Rendering.Universal
 {
-    using CED = CoreEditorDrawer<UniversalRenderPipelineSerializedCamera>;
+    using CED = CoreEditorDrawer<VividSerializedCamera>;
 
-    static partial class UniversalRenderPipelineCameraUI
+    static partial class VividCameraUI
     {
         [URPHelpURL("camera-component-reference")]
         public enum Expandable
@@ -27,6 +26,10 @@ namespace UnityEditor.Rendering.Universal
             Environment = 1 << 6,
             /// <summary> Stack</summary>
             Stack = 1 << 7,
+            /// <summary>
+            /// Upscaler
+            /// </summary>
+            Upscaler = 1 << 8,
         }
 
         public enum ExpandableAdditional
@@ -59,14 +62,15 @@ namespace UnityEditor.Rendering.Universal
             CED.Group(
                 DrawerCameraType
                 ),
+            Upscaler.Drawer,
             SectionProjectionSettings,
             Rendering.Drawer,
             SectionStackSettings,
             Environment.Drawer,
-            Output.Drawer
+            Output.Drawer,
         };
 
-        static void DrawerProjection(UniversalRenderPipelineSerializedCamera p, Editor owner)
+        static void DrawerProjection(VividSerializedCamera p, Editor owner)
         {
             var camera = p.serializedObject.targetObject as Camera;
             bool pixelPerfectEnabled = camera.TryGetComponent<PixelPerfectCamera>(out var pixelPerfectCamera) && pixelPerfectCamera.enabled;
@@ -77,7 +81,7 @@ namespace UnityEditor.Rendering.Universal
                 CameraUI.Drawer_Projection(p, owner);
         }
 
-        static void DrawerCameraType(UniversalRenderPipelineSerializedCamera p, Editor owner)
+        static void DrawerCameraType(VividSerializedCamera p, Editor owner)
         {
             int selectedRenderer = p.renderer.intValue;
             ScriptableRenderer scriptableRenderer = UniversalRenderPipeline.asset.GetRenderer(selectedRenderer);
@@ -107,13 +111,12 @@ namespace UnityEditor.Rendering.Universal
             EditorGUILayout.Space();
         }
 
-        static void DrawerStackCameras(UniversalRenderPipelineSerializedCamera p, Editor owner)
+        static void DrawerStackCameras(VividSerializedCamera p, Editor owner)
         {
-            if (owner is UniversalRenderPipelineCameraEditor cameraEditor)
+            if (owner is VividCameraEditor cameraEditor)
             {
                 cameraEditor.DrawStackSettings();
             }
         }
     }
 }
-#endif

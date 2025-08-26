@@ -1510,8 +1510,8 @@ namespace UnityEngine.Rendering.Universal
             // Discard variations lesser than kRenderScaleThreshold.
             // Scale is only enabled for gameview.
             const float kRenderScaleThreshold = 0.05f;
-            bool disableRenderScale = ((Mathf.Abs(1.0f - settings.renderScale) < kRenderScaleThreshold) || isScenePreviewOrReflectionCamera);
-            cameraData.renderScale = disableRenderScale ? 1.0f : settings.renderScale;
+            bool disableRenderScale = ((Mathf.Abs(1.0f - baseAdditionalCameraData.renderScale) < kRenderScaleThreshold) || isScenePreviewOrReflectionCamera); //((Mathf.Abs(1.0f - settings.renderScale) < kRenderScaleThreshold) || isScenePreviewOrReflectionCamera);
+            cameraData.renderScale = disableRenderScale ? 1.0f : baseAdditionalCameraData.renderScale;//  settings.renderScale;
 
             bool enableRenderGraph =
                 GraphicsSettings.TryGetRenderPipelineSettings<RenderGraphSettings>(out var renderGraphSettings) &&
@@ -1520,6 +1520,9 @@ namespace UnityEngine.Rendering.Universal
             // Convert the upscaling filter selection from the pipeline asset into an image upscaling filter
             cameraData.upscalingFilter = ResolveUpscalingFilterSelection(new Vector2(cameraData.pixelWidth, cameraData.pixelHeight), cameraData.renderScale, settings.upscalingFilter, enableRenderGraph);
 
+            cameraData.upscalingTechnique = baseAdditionalCameraData.upscalerTechnique;
+
+            
             if (cameraData.renderScale > 1.0f)
             {
                 cameraData.imageScalingMode = ImageScalingMode.Downscaling;
@@ -1532,7 +1535,10 @@ namespace UnityEngine.Rendering.Universal
                 cameraData.imageScalingMode = ImageScalingMode.Upscaling;
 
                 // When STP is requested, we force temporal anti-aliasing on since it's a prerequisite.
+                #if false
                 if (cameraData.upscalingFilter == ImageUpscalingFilter.STP)
+#endif
+                if (cameraData.upscalingTechnique == UpscalingTechnique.STP)
                 {
                     cameraData.antialiasing = AntialiasingMode.TemporalAntiAliasing;
                 }

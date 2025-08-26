@@ -1,4 +1,3 @@
-#if false
 using System.Linq;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -6,9 +5,9 @@ using UnityEngine.Rendering.Universal;
 
 namespace UnityEditor.Rendering.Universal
 {
-    using CED = CoreEditorDrawer<UniversalRenderPipelineSerializedCamera>;
+    using CED = CoreEditorDrawer<VividSerializedCamera>;
 
-    static partial class UniversalRenderPipelineCameraUI
+    static partial class VividCameraUI
     {
         public partial class Rendering
         {
@@ -155,7 +154,7 @@ namespace UnityEditor.Rendering.Universal
                 );
             }
 
-            static void DrawerRenderingRenderer(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void DrawerRenderingRenderer(VividSerializedCamera p, Editor owner)
             {
                 var rpAsset = UniversalRenderPipeline.asset;
 
@@ -187,7 +186,7 @@ namespace UnityEditor.Rendering.Universal
                     p.renderer.intValue = selectedRenderer;
             }
 
-            static bool IsAnyRendererHasPostProcessingEnabled(UniversalRenderPipelineSerializedCamera p, UniversalRenderPipelineAsset rpAsset)
+            static bool IsAnyRendererHasPostProcessingEnabled(VividSerializedCamera p, UniversalRenderPipelineAsset rpAsset)
             {
                 int selectedRendererOption = p.renderer.intValue;
 
@@ -204,7 +203,7 @@ namespace UnityEditor.Rendering.Universal
                 return renderer2DData != null && renderer2DData.postProcessData == null;
             }
 
-            static void DrawerRenderingAntialiasing(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void DrawerRenderingAntialiasing(VividSerializedCamera p, Editor owner)
             {
                 Rect antiAliasingRect = EditorGUILayout.GetControlRect();
                 EditorGUI.BeginProperty(antiAliasingRect, Styles.antialiasing, p.antialiasing);
@@ -217,22 +216,22 @@ namespace UnityEditor.Rendering.Universal
                 EditorGUI.EndProperty();
             }
 
-            static void DrawerRenderingClearDepth(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void DrawerRenderingClearDepth(VividSerializedCamera p, Editor owner)
             {
                 EditorGUILayout.PropertyField(p.clearDepth, Styles.clearDepth);
             }
 
-            static void DrawerRenderingRenderShadows(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void DrawerRenderingRenderShadows(VividSerializedCamera p, Editor owner)
             {
                 EditorGUILayout.PropertyField(p.renderShadows, Styles.renderingShadows);
             }
 
-            static void DrawerRenderingSMAAQuality(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void DrawerRenderingSMAAQuality(VividSerializedCamera p, Editor owner)
             {
                 EditorGUILayout.PropertyField(p.antialiasingQuality, Styles.antialiasingQuality);
             }
 
-            static void DrawerRenderingTAAQuality(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void DrawerRenderingTAAQuality(VividSerializedCamera p, Editor owner)
             {
                 EditorGUILayout.PropertyField(p.taaQuality, Styles.antialiasingQuality);
 
@@ -258,7 +257,7 @@ namespace UnityEditor.Rendering.Universal
                     bool isEditorInDeveloperMode = EditorPrefs.GetBool("DeveloperMode");
                     if (isEditorInDeveloperMode)
                     {
-                        UniversalRenderPipelineCameraEditor urpCamEditor = owner as UniversalRenderPipelineCameraEditor;
+                        VividCameraEditor urpCamEditor = owner as VividCameraEditor;
                         if (urpCamEditor != null && urpCamEditor.camera != null &&
                             urpCamEditor.camera.TryGetComponent<UniversalAdditionalCameraData>(out var urpAddCamData))
                         {
@@ -274,26 +273,25 @@ namespace UnityEditor.Rendering.Universal
                 }
             }
 
-            static void DrawerRenderingRenderPostProcessing(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void DrawerRenderingRenderPostProcessing(VividSerializedCamera p, Editor owner)
             {
                 EditorGUILayout.PropertyField(p.renderPostProcessing, Styles.renderPostProcessing);
             }
 
-            static void DrawerRenderingPriority(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void DrawerRenderingPriority(VividSerializedCamera p, Editor owner)
             {
                 EditorGUILayout.PropertyField(p.baseCameraSettings.depth, Styles.priority);
             }
 
-            static void DrawerRenderingDepthTexture(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void DrawerRenderingDepthTexture(VividSerializedCamera p, Editor owner)
             {
                 EditorGUILayout.PropertyField(p.renderDepth, Styles.requireDepthTexture);
             }
 
-            static void DrawerRenderingOpaqueTexture(UniversalRenderPipelineSerializedCamera p, Editor owner)
+            static void DrawerRenderingOpaqueTexture(VividSerializedCamera p, Editor owner)
             {
                 EditorGUILayout.PropertyField(p.renderOpaque, Styles.requireOpaqueTexture);
             }
         }
     }
 }
-#endif

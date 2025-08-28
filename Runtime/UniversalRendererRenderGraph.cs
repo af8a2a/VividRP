@@ -176,7 +176,7 @@ namespace UnityEngine.Rendering.Universal
         };
         private static RTHandle m_RenderGraphCameraDepthHandle;
         private static int m_CurrentColorHandle = 0;
-        private static bool m_UseUpscaledColorHandle = false;
+        internal static bool m_UseUpscaledColorHandle = false;
 
         private static RTHandle m_RenderGraphDebugTextureHandle;
 
@@ -585,7 +585,7 @@ namespace UnityEngine.Rendering.Universal
 
                 // If STP is enabled, we'll be upscaling the rendered frame during the post processing logic.
                 // Once upscaling occurs, we must use different set of color handles that reflect the upscaled size.
-                if (cameraData.IsSTPEnabled())
+                if (cameraData.imageScalingMode is ImageScalingMode.Upscaling)
                 {
                     var upscaledTargetDesc = cameraTargetDescriptor;
                     upscaledTargetDesc.width = cameraData.pixelWidth;
@@ -901,16 +901,6 @@ namespace UnityEngine.Rendering.Universal
             }
 
             #region Extension
-            {
-                var punctualLightCount = lightData.additionalLightsCount;
-                var reflectionProbes = renderingData.cullResults.visibleReflectionProbes;
-                var reflectionProbeCount = Mathf.Min(reflectionProbes.Length, UniversalRenderPipeline.maxVisibleReflectionProbes);
-                m_GPULights.NewFrame(punctualLightCount + reflectionProbeCount, m_AdditionalLightsShadowCasterPass, m_LightCookieManager);
-                m_GPULights.PreSetup(lightData, cameraData);
-                // GPULightList
-                m_GPULights.Render(renderGraph, frameData);
-                m_GPULights.RenderSetGlobalSync(renderGraph, frameData);
-            }
 
             SkySystem.instance.UpdateEnvironment(renderGraph, frameData, lightData, false, false, false, SkyAmbientMode.Dynamic);
 
@@ -1296,6 +1286,17 @@ namespace UnityEngine.Rendering.Universal
             if (cameraData.xr.hasValidOcclusionMesh)
                 m_XROcclusionMeshPass.Render(renderGraph, frameData, resourceData.activeColorTexture, resourceData.activeDepthTexture);
 #endif
+            
+            {
+                var punctualLightCount = lightData.additionalLightsCount;
+                var reflectionProbes = renderingData.cullResults.visibleReflectionProbes;
+                var reflectionProbeCount = Mathf.Min(reflectionProbes.Length, UniversalRenderPipeline.maxVisibleReflectionProbes);
+                m_GPULights.NewFrame(punctualLightCount + reflectionProbeCount, m_AdditionalLightsShadowCasterPass, m_LightCookieManager);
+                m_GPULights.PreSetup(lightData, cameraData);
+                // GPULightList
+                m_GPULights.Render(renderGraph, frameData);
+                m_GPULights.RenderSetGlobalSync(renderGraph, frameData);
+            }
 
             if (usesDeferredLighting)
             {

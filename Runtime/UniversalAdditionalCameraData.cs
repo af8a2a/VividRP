@@ -82,6 +82,7 @@ namespace UnityEngine.Rendering.Universal
         /// Use this to have a temporal anti-aliasing pass rendered when resolving camera to screen.
         /// </summary>
         [InspectorName("Temporal Anti-aliasing (TAA)")]
+        [Obsolete("Use Upscale setting TemporalAntialiasing")]
         TemporalAntiAliasing,
     }
 

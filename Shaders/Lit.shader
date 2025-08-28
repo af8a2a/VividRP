@@ -559,13 +559,13 @@ Shader "Universal Render Pipeline/Lit"
             #include "Packages/com.unity.render-pipelines.universal//ShaderLibrary/Core.hlsl"
 
 
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/ShaderVariablesRaytracing.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RaytracingIntersection.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RaytracingFragInputs.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RayTracingCommon.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/ShaderVariablesRaytracing.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingIntersection.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingFragInputs.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RayTracingCommon.hlsl"
 
             #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RayTracingShaderPassVisibility.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RayTracingShaderPassVisibility.hlsl"
             ENDHLSL
         }
         Pass
@@ -614,16 +614,15 @@ Shader "Universal Render Pipeline/Lit"
             #include "Packages/com.unity.render-pipelines.universal//ShaderLibrary/Core.hlsl"
 
 
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/ShaderVariablesRaytracing.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RaytracingIntersection.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RaytracingFragInputs.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RayTracingCommon.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/ShaderVariablesRaytracing.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingIntersection.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingFragInputs.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RayTracingCommon.hlsl"
 
             #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
 
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RayTracingLighting.hlsl"
-
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RayTracingShaderPassIndirect.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RayTracingLighting.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RayTracingShaderPassIndirect.hlsl"
             ENDHLSL
         }
 
@@ -658,13 +657,13 @@ Shader "Universal Render Pipeline/Lit"
             #include "Packages/com.unity.render-pipelines.universal//ShaderLibrary/Core.hlsl"
 
 
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/ShaderVariablesRaytracing.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RaytracingIntersection.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RaytracingFragInputs.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RayTracingCommon.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem//Shaders/ShaderVariablesRaytracing.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem//Shaders/RaytracingIntersection.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem//Shaders/RaytracingFragInputs.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem//Shaders/RayTracingCommon.hlsl"
 
             #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RaytracingShaderPassDebug.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingShaderPassDebug.hlsl"
 
             ENDHLSL
         }

@@ -272,12 +272,12 @@ Shader "Universal Render Pipeline/PBR Toon"
 
 
             
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/ShaderVariablesRaytracing.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RaytracingIntersection.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RaytracingFragInputs.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RayTracingCommon.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/ShaderVariablesRaytracing.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingIntersection.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingFragInputs.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RayTracingCommon.hlsl"
 
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/RayTracing/Shaders/RayTracingShaderPassVisibility.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RayTracingShaderPassVisibility.hlsl"
             ENDHLSL
         }
     }

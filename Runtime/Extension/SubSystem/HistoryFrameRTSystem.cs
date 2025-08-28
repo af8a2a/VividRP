@@ -14,10 +14,10 @@ namespace UnityEngine.Rendering.Universal
 
         ///// <summary>Exposure buffer.</summary>
         //Exposure,
-        ///// <summary>Temporal antialiasing history.</summary>
-        //TemporalAntialiasing,
-        ///// <summary>Velocity magnitude history used for TAA velocity weighting.</summary>
-        //TAAMotionVectorMagnitude,
+        /// <summary>Temporal antialiasing history.</summary>
+        TemporalAntialiasing,
+        /// <summary>Velocity magnitude history used for TAA velocity weighting.</summary>
+        TAAMotionVectorMagnitude,
         ///// <summary>Depth of field CoC.</summary>
         //DepthOfFieldCoC,
         ///// <summary>Normal buffer.</summary>
@@ -310,5 +310,61 @@ namespace UnityEngine.Rendering.Universal
             m_BufferedRTHandleSystem.AllocBuffer(id, (rts, i) => allocator(camera.name, i, rts), bufferCount);
             return m_BufferedRTHandleSystem.GetFrameRT(id, 0);
         }
+        
+        public RTHandle AllocHistoryFrameRT(int id, Func<Vector2Int,GraphicsFormat,string, int, RTHandleSystem, RTHandle> allocator,Vector2Int viewport,GraphicsFormat graphicsFormat, int bufferCount)
+        {
+            m_BufferedRTHandleSystem.AllocBuffer(id, (rts, i) => allocator(viewport,graphicsFormat,camera.name, i, rts), bufferCount);
+            return m_BufferedRTHandleSystem.GetFrameRT(id, 0);
+        }
+
+        
+        public bool ReAllocatedAccumulateTextureIfNeeded(
+            Func<GraphicsFormat, string, int, RTHandleSystem, RTHandle> allocator,
+            GraphicsFormat graphicsFormat,
+            HistoryFrameType historyFrameType,
+            out RTHandle currFrameRT,
+            out RTHandle prevFrameRT)
+        {
+            var curTexture = GetCurrentFrameRT(historyFrameType);
+            bool vaild = true;
+
+
+            if (curTexture == null)
+            {
+                vaild = false;
+                ReleaseHistoryFrameRT(historyFrameType);
+
+                AllocHistoryFrameRT((int)historyFrameType, allocator, graphicsFormat, 2);
+            }
+
+            currFrameRT = GetCurrentFrameRT(historyFrameType);
+            prevFrameRT = GetPreviousFrameRT(historyFrameType);
+            return vaild;
+        }
+        public bool ReAllocatedAccumulateTextureIfNeeded(
+            Func<Vector2Int,GraphicsFormat, string, int, RTHandleSystem, RTHandle> allocator,
+            Vector2Int viewport,
+            GraphicsFormat graphicsFormat,
+            HistoryFrameType historyFrameType,
+            out RTHandle currFrameRT,
+            out RTHandle prevFrameRT)
+        {
+            var curTexture = GetCurrentFrameRT(historyFrameType);
+            bool vaild = true;
+
+
+            if (curTexture == null)
+            {
+                vaild = false;
+                ReleaseHistoryFrameRT(historyFrameType);
+
+                AllocHistoryFrameRT((int)historyFrameType, allocator,viewport, graphicsFormat, 2);
+            }
+
+            currFrameRT = GetCurrentFrameRT(historyFrameType);
+            prevFrameRT = GetPreviousFrameRT(historyFrameType);
+            return vaild;
+        }
+
     }
 }

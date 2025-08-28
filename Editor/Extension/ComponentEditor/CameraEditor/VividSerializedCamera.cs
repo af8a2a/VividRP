@@ -35,12 +35,6 @@ namespace UnityEditor.Rendering.Universal
 #if ENABLE_VR && ENABLE_XR_MODULE
         public SerializedProperty allowXRRendering { get; }
 #endif
-        public SerializedProperty taaQuality { get; }
-        public SerializedProperty taaFrameInfluence { get; }
-        public SerializedProperty taaJitterScale { get; }
-        public SerializedProperty taaMipBias { get; }
-        public SerializedProperty taaVarianceClampScale { get; }
-        public SerializedProperty taaContrastAdaptiveSharpening { get; }
         public SerializedProperty allowHDROutput { get; }
 
         #region RenderScale
@@ -48,6 +42,35 @@ namespace UnityEditor.Rendering.Universal
         public SerializedProperty renderScale { get; }
 
         public SerializedProperty upscalerTechnique { get; }
+
+        #region TAA
+
+        public SerializedProperty taaQuality { get; }
+        public SerializedProperty taaFrameInfluence { get; }
+        public SerializedProperty taaJitterScale { get; }
+        public SerializedProperty taaMipBias { get; }
+        public SerializedProperty taaVarianceClampScale { get; }
+        public SerializedProperty taaContrastAdaptiveSharpening { get; }
+
+        #endregion
+        
+        
+
+        #region TAAU
+
+        public SerializedProperty taaSharpenMode;
+        public SerializedProperty taaSharpenStrength;
+        public SerializedProperty taaRingingReduction;
+        public SerializedProperty taaHistorySharpening;
+        public SerializedProperty taaAntiFlicker;
+        public SerializedProperty taaMotionVectorRejection;
+        public SerializedProperty taaAntiRinging;
+        public SerializedProperty taaBaseBlendFactor;
+        public SerializedProperty taaQualityLevel;
+
+
+        #endregion
+        
 
         #endregion
 
@@ -131,6 +154,22 @@ namespace UnityEditor.Rendering.Universal
             {
                 renderScale = o.Find(x => x.renderScale);
                 upscalerTechnique = o.Find(x => x.upscalerTechnique);
+                
+                
+                
+                taaSharpenMode = serializedAdditionalDataObject.Find((UniversalAdditionalCameraData d) => d.taaSharpenMode);
+                taaSharpenStrength = serializedAdditionalDataObject.Find((UniversalAdditionalCameraData d) => d.taaSharpenStrength);
+                taaRingingReduction = serializedAdditionalDataObject.Find((UniversalAdditionalCameraData d) => d.taaRingingReduction);
+                taaQualityLevel = serializedAdditionalDataObject.Find((UniversalAdditionalCameraData d) => d.TAAQuality);
+                taaHistorySharpening = serializedAdditionalDataObject.Find((UniversalAdditionalCameraData d) => d.taaHistorySharpening);
+                taaAntiFlicker = serializedAdditionalDataObject.Find((UniversalAdditionalCameraData d) => d.taaAntiFlicker);
+                taaMotionVectorRejection = serializedAdditionalDataObject.Find((UniversalAdditionalCameraData d) => d.taaMotionVectorRejection);
+                taaAntiRinging = serializedAdditionalDataObject.Find((UniversalAdditionalCameraData d) => d.taaAntiHistoryRinging);
+                taaQualityLevel = serializedAdditionalDataObject.Find((UniversalAdditionalCameraData d) => d.TAAQuality);
+                taaBaseBlendFactor = serializedAdditionalDataObject.Find((UniversalAdditionalCameraData d) => d.taaBaseBlendFactor);
+                taaJitterScale = serializedAdditionalDataObject.Find((UniversalAdditionalCameraData d) => d.taaJitterScale);
+
+                
             }
 
             #endregion

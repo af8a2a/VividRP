@@ -76,12 +76,14 @@ namespace UnityEditor.Rendering.Universal
                                 CED.Group(
                                     DrawerRenderingSMAAQuality
                                 )),
+                            #if false
                             CED.Conditional(
                                 (serialized, owner) => (AntialiasingMode)serialized.antialiasing.intValue ==
                                 AntialiasingMode.TemporalAntiAliasing,
                                 CED.Group(
                                     DrawerRenderingTAAQuality
                                 ))
+                            #endif 
                         }
                     )
                     ),

@@ -1510,7 +1510,7 @@ namespace UnityEngine.Rendering.Universal
             // Discard variations lesser than kRenderScaleThreshold.
             // Scale is only enabled for gameview.
             const float kRenderScaleThreshold = 0.05f;
-            bool disableRenderScale = ((Mathf.Abs(1.0f - baseAdditionalCameraData.renderScale) < kRenderScaleThreshold) || isScenePreviewOrReflectionCamera); //((Mathf.Abs(1.0f - settings.renderScale) < kRenderScaleThreshold) || isScenePreviewOrReflectionCamera);
+            bool disableRenderScale =  isScenePreviewOrReflectionCamera ||((Mathf.Abs(1.0f - baseAdditionalCameraData.renderScale) < kRenderScaleThreshold)); //((Mathf.Abs(1.0f - settings.renderScale) < kRenderScaleThreshold) || isScenePreviewOrReflectionCamera);
             cameraData.renderScale = disableRenderScale ? 1.0f : baseAdditionalCameraData.renderScale;//  settings.renderScale;
 
             bool enableRenderGraph =
@@ -1520,7 +1520,8 @@ namespace UnityEngine.Rendering.Universal
             // Convert the upscaling filter selection from the pipeline asset into an image upscaling filter
             cameraData.upscalingFilter = ResolveUpscalingFilterSelection(new Vector2(cameraData.pixelWidth, cameraData.pixelHeight), cameraData.renderScale, settings.upscalingFilter, enableRenderGraph);
 
-            cameraData.upscalingTechnique = baseAdditionalCameraData.upscalerTechnique;
+            if (!isScenePreviewOrReflectionCamera)
+                cameraData.upscalingTechnique = baseAdditionalCameraData.upscalerTechnique;
 
             
             if (cameraData.renderScale > 1.0f)

@@ -13,8 +13,19 @@ namespace UnityEngine.Rendering.Universal.Internal
         MaterialMask = 0b_0110_0000,
         MaterialUnlit = 0b_0000_0000,
         MaterialLit = 0b_0010_0000,
-        MaterialSimpleLit = 0b_0100_0000
+        MaterialSimpleLit = 0b_0100_0000,
 
         // Bit [7] is reserved.
+
+        //todo  cleared after opaque rendering has finished ---?
+
+
+        #region PostProcessing
+
+        ExcludeFromTUAndAA = (1 << 0), // Disable Temporal Upscaling and Antialiasing for certain objects
+
+        
+
+        #endregion
     }
 }

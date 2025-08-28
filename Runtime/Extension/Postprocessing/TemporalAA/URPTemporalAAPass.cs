@@ -3,7 +3,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal
 {
-    public class TemporalAAPass
+    public class URPTemporalAAPass
     {
         private Material taaMaterial;
 

@@ -36,6 +36,10 @@ namespace UnityEditor.Rendering.Universal
         {
             /// <summary> Rendering</summary>
             Rendering = 1 << 0,
+            /// <summary>
+            /// Upscaler
+            /// </summary>
+            Upscaler = 1 << 1,
         }
 
         static readonly ExpandedState<Expandable, Camera> k_ExpandedState = new(Expandable.Projection, "URP");

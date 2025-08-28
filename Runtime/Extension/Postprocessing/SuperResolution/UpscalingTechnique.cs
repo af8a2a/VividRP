@@ -11,6 +11,10 @@
         ///  Spatial-Temporal Post-Processing
         /// </summary>
         STP,
+        /// <summary>
+        /// HDRP TAAU
+        /// </summary>
+        TAAU,
         
     }
 }

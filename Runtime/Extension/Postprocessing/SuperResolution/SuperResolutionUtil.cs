@@ -18,6 +18,8 @@ namespace UnityEngine.Rendering.Universal
 
             cameraData.cameraTargetDescriptor.width = newCameraTargetSize.x;
             cameraData.cameraTargetDescriptor.height = newCameraTargetSize.y;
+            //
+            UniversalRenderer.m_UseUpscaledColorHandle = true;
 
             // Update the shader constants to reflect the new camera resolution
             using (var builder = renderGraph.AddUnsafePass<UpdateCameraResolutionPassData>("Update Camera Resolution", out var passData))
@@ -30,15 +32,15 @@ namespace UnityEngine.Rendering.Universal
 
                 builder.SetRenderFunc(static (UpdateCameraResolutionPassData data, UnsafeGraphContext ctx) =>
                 {
-                    ctx.cmd.SetGlobalVector(
-                        ShaderPropertyId.screenSize,
-                        new Vector4(
-                            data.newCameraTargetSize.x,
-                            data.newCameraTargetSize.y,
-                            1.0f / data.newCameraTargetSize.x,
-                            1.0f / data.newCameraTargetSize.y
-                        )
-                    );
+                    // ctx.cmd.SetGlobalVector(
+                    //     ShaderPropertyId.screenSize,
+                    //     new Vector4(
+                    //         data.newCameraTargetSize.x,
+                    //         data.newCameraTargetSize.y,
+                    //         1.0f / data.newCameraTargetSize.x,
+                    //         1.0f / data.newCameraTargetSize.y
+                    //     )
+                    // );
                 });
             }
         }

@@ -467,6 +467,10 @@ namespace UnityEngine.Rendering.Universal
             SetupLensDistortion(material, cameraData.isSceneViewCamera);
             SetupVignette(material, cameraData);
             SetupChromaticAberration(material);
+            ImportResourceParams importColorParams = new ImportResourceParams();
+            importColorParams.clearOnFirstUse = true;
+            importColorParams.clearColor = Color.black;
+            importColorParams.discardOnLastUse = cameraData.resolveFinalTarget;  // check if last camera in the stack
 
             var destTexture = renderGraph.ImportTexture(cameraData.urpRenderer.nextRenderGraphCameraColorHandle);
             //     renderGraph.CreateTexture(new TextureDesc(cameraData.scaledWidth, cameraData.scaledHeight)

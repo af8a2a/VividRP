@@ -9,7 +9,9 @@ namespace UnityEngine.Rendering.Universal
         [SerializeField] [HideInInspector] private int _version;
         public int version => _version;
 
+        #region Upscaler
 
+        
         [SerializeField, ResourcePath("Shaders/PostProcessing/TemporalAA.shader")]
         private Shader m_TemporalAAShader;
 
@@ -18,6 +20,20 @@ namespace UnityEngine.Rendering.Universal
             get => m_TemporalAAShader;
             set => this.SetValueAndNotify(ref m_TemporalAAShader, value);
         }
+        
+        
+        [SerializeField, ResourcePath("Runtime/Extension/Postprocessing/SuperResolution/TAAU/Shader/TemporalAntiAliasing.shader")]
+        private Shader m_TAAUShader;
+
+        public Shader taauShader
+        {
+            get => m_TAAUShader;
+            set => this.SetValueAndNotify(ref m_TAAUShader, value);
+        }
+
+
+        #endregion
+
 
 
         [SerializeField, ResourcePath("Shaders/PostProcessing/StopNaN.shader")]

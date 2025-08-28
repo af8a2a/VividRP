@@ -39,7 +39,7 @@ namespace UnityEngine.Rendering.Universal
 #if ENABLE_VR && ENABLE_XR_MODULE
             // Multipass always needs update to prevent wrong view projection matrix set by other passes
             bool needsUpdate = !m_InitBuiltinXRConstants || m_CachedRenderIntoTextureXR != renderIntoTexture || !xr.singlePassEnabled;
-            if (needsUpdate && xr.enabled )
+            if (needsUpdate && xr.enabled)
             {
                 var projection0 = GetProjectionMatrix();
                 var view0 = GetViewMatrix();
@@ -62,7 +62,10 @@ namespace UnityEngine.Rendering.Universal
                     //Multipass uses the same value as a normal render, and doesn't use the value set for stereo,
                     //which is why you need to set a value like unity_MatrixInvV.
                     //The values below should be the same as set in the SetCameraMatrices function in ScriptableRenderer.cs.
-                    Matrix4x4 gpuProjectionMatrix = GetGPUProjectionMatrix(renderIntoTexture); // TODO: invProjection might NOT match the actual projection (invP*P==I) as the target flip logic has diverging paths.
+                    Matrix4x4
+                        gpuProjectionMatrix =
+                            GetGPUProjectionMatrix(
+                                renderIntoTexture); // TODO: invProjection might NOT match the actual projection (invP*P==I) as the target flip logic has diverging paths.
                     Matrix4x4 inverseViewMatrix = Matrix4x4.Inverse(view0);
                     Matrix4x4 inverseProjectionMatrix = Matrix4x4.Inverse(gpuProjectionMatrix);
                     Matrix4x4 inverseViewProjection = inverseViewMatrix * inverseProjectionMatrix;
@@ -79,6 +82,7 @@ namespace UnityEngine.Rendering.Universal
                     cmd.SetGlobalMatrix(ShaderPropertyId.inverseProjectionMatrix, inverseProjectionMatrix);
                     cmd.SetGlobalMatrix(ShaderPropertyId.inverseViewAndProjectionMatrix, inverseViewProjection);
                 }
+
                 m_CachedRenderIntoTextureXR = renderIntoTexture;
                 m_InitBuiltinXRConstants = true;
             }
@@ -133,10 +137,10 @@ namespace UnityEngine.Rendering.Universal
         public Matrix4x4 GetGPUProjectionMatrix(int viewIndex = 0)
         {
             // Disable obsolete warning for internal usage
-            #pragma warning disable CS0618
+#pragma warning disable CS0618
             // GetGPUProjectionMatrix takes a projection matrix and returns a GfxAPI adjusted version, does not set or get any state.
             return m_JitterMatrix * GL.GetGPUProjectionMatrix(GetProjectionMatrixNoJitter(viewIndex), IsCameraProjectionMatrixFlipped());
-            #pragma warning restore CS0618
+#pragma warning restore CS0618
         }
 
         /// <summary>
@@ -150,10 +154,10 @@ namespace UnityEngine.Rendering.Universal
         public Matrix4x4 GetGPUProjectionMatrixNoJitter(int viewIndex = 0)
         {
             // Disable obsolete warning for internal usage
-            #pragma warning disable CS0618
+#pragma warning disable CS0618
             // GetGPUProjectionMatrix takes a projection matrix and returns a GfxAPI adjusted version, does not set or get any state.
             return GL.GetGPUProjectionMatrix(GetProjectionMatrixNoJitter(viewIndex), IsCameraProjectionMatrixFlipped());
-            #pragma warning restore CS0618
+#pragma warning restore CS0618
         }
 
         internal Matrix4x4 GetGPUProjectionMatrix(bool renderIntoTexture, int viewIndex = 0)
@@ -182,13 +186,13 @@ namespace UnityEngine.Rendering.Universal
 
 
         #region Extension
+
         //for integrate HDRP Feature ..
         public int actualWidth => scaledWidth;
 
         public int actualHeight => scaledHeight;
 
         #endregion
-
 
 
         // NOTE: This is internal instead of private to allow ref return in the old CameraData compatibility property.
@@ -203,7 +207,11 @@ namespace UnityEngine.Rendering.Universal
         /// The camera history texture manager. Used to access camera history from a ScriptableRenderPass.
         /// </summary>
         /// <seealso cref="ScriptableRenderPass"/>
-        public UniversalCameraHistory historyManager { get => m_HistoryManager; set => m_HistoryManager = value; }
+        public UniversalCameraHistory historyManager
+        {
+            get => m_HistoryManager;
+            set => m_HistoryManager = value;
+        }
 
         /// <summary>
         /// The camera render type used for camera stacking.
@@ -220,6 +228,7 @@ namespace UnityEngine.Rendering.Universal
         /// Render texture settings used to create intermediate camera textures for rendering.
         /// </summary>
         public RenderTextureDescriptor cameraTargetDescriptor;
+
         internal Rect pixelRect;
         internal bool useScreenCoordOverride;
         internal Vector4 screenSizeOverride;
@@ -232,14 +241,20 @@ namespace UnityEngine.Rendering.Universal
         /// Render scale to apply when creating camera textures. Scaled extents are rounded down to integers.
         /// </summary>
         public float renderScale;
+
         internal ImageScalingMode imageScalingMode;
+
         [Obsolete("VividRP use upscalingTechnique")]
         internal ImageUpscalingFilter upscalingFilter;
+
         internal bool fsrOverrideSharpness;
         internal float fsrSharpness;
         internal HDRColorBufferPrecision hdrColorBufferPrecision;
 
-        internal UpscalingTechnique  upscalingTechnique;
+
+
+        internal UpscalingTechnique upscalingTechnique;
+
         /// <summary>
         /// True if this camera should clear depth buffer. This setting only applies to cameras of type <c>CameraRenderType.Overlay</c>
         /// <seealso cref="CameraRenderType"/>
@@ -302,7 +317,9 @@ namespace UnityEngine.Rendering.Universal
 #if ENABLE_VR && ENABLE_XR_MODULE
                 // For some XR platforms we need to encode in SRGB but can't use a _SRGB format texture, only required for 8bit per channel 32 bit formats.
                 if (xr.enabled)
-                    return !xr.renderTargetDesc.sRGB && (xr.renderTargetDesc.graphicsFormat == GraphicsFormat.R8G8B8A8_UNorm || xr.renderTargetDesc.graphicsFormat == GraphicsFormat.B8G8R8A8_UNorm) && (QualitySettings.activeColorSpace == ColorSpace.Linear);
+                    return !xr.renderTargetDesc.sRGB &&
+                           (xr.renderTargetDesc.graphicsFormat == GraphicsFormat.R8G8B8A8_UNorm ||
+                            xr.renderTargetDesc.graphicsFormat == GraphicsFormat.B8G8R8A8_UNorm) && (QualitySettings.activeColorSpace == ColorSpace.Linear);
 #endif
 
                 return targetTexture == null && Display.main.requiresSrgbBlitToBackbuffer;
@@ -450,10 +467,10 @@ namespace UnityEngine.Rendering.Universal
             Debug.Assert(renderer != null, "IsCameraProjectionMatrixFlipped is being called outside camera rendering scope.");
 
             // Disable obsolete warning for internal usage
-            #pragma warning disable CS0618
+#pragma warning disable CS0618
             if (renderer != null)
                 return IsHandleYFlipped(renderer.cameraColorTargetHandle) || targetTexture != null;
-            #pragma warning restore CS0618
+#pragma warning restore CS0618
 
             return true;
         }
@@ -496,13 +513,13 @@ namespace UnityEngine.Rendering.Universal
             UniversalAdditionalCameraData additionalCameraData;
             camera.TryGetComponent(out additionalCameraData);
 
-            return IsTemporalAARequested()                                                                                            // Requested
-                   && postProcessEnabled                                                                                              // Postprocessing Enabled
-                   && (taaHistory != null)                                                                                            // Initialized
-                   && (cameraTargetDescriptor.msaaSamples == 1)                                                                       // No MSAA
-                   && !(additionalCameraData?.renderType == CameraRenderType.Overlay || additionalCameraData?.cameraStack.Count > 0)  // No Camera stack
-                   && !camera.allowDynamicResolution                                                                                  // No Dynamic Resolution
-                   && renderer.SupportsMotionVectors();                                                                               // Motion Vectors implemented
+            return IsTemporalAARequested() // Requested
+                   && postProcessEnabled // Postprocessing Enabled
+                   && (taaHistory != null) // Initialized
+                   && (cameraTargetDescriptor.msaaSamples == 1) // No MSAA
+                   && !(additionalCameraData?.renderType == CameraRenderType.Overlay || additionalCameraData?.cameraStack.Count > 0) // No Camera stack
+                   && !camera.allowDynamicResolution // No Dynamic Resolution
+                   && renderer.SupportsMotionVectors(); // Motion Vectors implemented
         }
 
         /// <summary>
@@ -516,8 +533,19 @@ namespace UnityEngine.Rendering.Universal
             return (imageScalingMode == ImageScalingMode.Upscaling) && (upscalingFilter == ImageUpscalingFilter.STP);
 #endif
             return (imageScalingMode == ImageScalingMode.Upscaling) && (upscalingTechnique == UpscalingTechnique.STP);
-
         }
+
+
+        /// <summary>
+        /// Returns true if the TAAU upscaler has been requested
+        /// Use IsTAAUEnabled() to ensure that TAAU upscaler is active at runtime, it necessitates TAA pre-processing
+        /// </summary>
+        /// <returns>True if TAAU is requested</returns>
+        internal bool IsTAAUEnabled()
+        {
+            return (imageScalingMode == ImageScalingMode.Upscaling) && (upscalingTechnique == UpscalingTechnique.TAAU);
+        }
+
 
         /// <summary>
         /// Returns true if the pipeline and the given camera are configured to render with the STP upscaler
@@ -649,11 +677,10 @@ namespace UnityEngine.Rendering.Universal
 
         // TAA settings.
         internal TemporalAA.Settings taaSettings;
-
-        // Post-process history reset has been triggered for this camera.
+        
         internal bool resetHistory
         {
-            get => taaSettings.resetHistoryFrames != 0;
+            get => taaSettings.resetHistoryFrames != 0 || historyFrameRTSystem.historyFrameCount <= 1 ;
         }
 
         /// <summary>
@@ -669,14 +696,14 @@ namespace UnityEngine.Rendering.Universal
 
 
         public HistoryFrameRTSystem historyFrameRTSystem => HistoryFrameRTSystem.GetOrCreate(camera);
-        
+
         public RayTracingSystem rayTracingSystem => RayTracingSystem.GetOrCreate(camera);
 
-        
+
         internal DenoiseSystem denoiseSystem => DenoiseSystem.GetOrCreate(camera);
 
         internal Vector4 resolution => new Vector4(actualWidth, actualHeight, 1.0f / actualWidth, 1.0f / actualHeight);
-        
+
         public Frustum frustum;
 
 
@@ -706,6 +733,7 @@ namespace UnityEngine.Rendering.Universal
             renderScale = 1.0f;
             imageScalingMode = ImageScalingMode.None;
             upscalingFilter = ImageUpscalingFilter.Point;
+            upscalingTechnique = UpscalingTechnique.Linear;
             fsrOverrideSharpness = false;
             fsrSharpness = 0.0f;
             hdrColorBufferPrecision = HDRColorBufferPrecision._32Bits;

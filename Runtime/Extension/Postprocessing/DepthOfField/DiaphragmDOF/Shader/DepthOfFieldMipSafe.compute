@@ -1,5 +1,5 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
-#include "PostProcessDefines.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/PostProcess/PostProcessDefines.hlsl"
 #include "DepthOfFieldCommon.hlsl"
 
 #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
@@ -8,7 +8,6 @@
 
 #pragma multi_compile _ ENABLE_ALPHA
 
-#include "PostProcessDefines.hlsl"
 
 TEXTURE2D_X(_InputTexture);
 

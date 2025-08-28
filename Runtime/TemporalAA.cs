@@ -202,13 +202,16 @@ namespace UnityEngine.Rendering.Universal
             Matrix4x4 jitterMat = Matrix4x4.identity;
 
             bool isJitter = cameraData.IsTemporalAAEnabled();
+            UniversalAdditionalCameraData additionalCameraData;
+            cameraData.camera.TryGetComponent(out additionalCameraData);
+
             if (isJitter)
             {
                 int taaFrameIndex = CalculateTaaFrameIndex(ref cameraData.taaSettings);
 
                 float actualWidth = cameraData.cameraTargetDescriptor.width;
                 float actualHeight = cameraData.cameraTargetDescriptor.height;
-                float jitterScale = cameraData.taaSettings.jitterScale;
+                float jitterScale = additionalCameraData.taaJitterScale;// cameraData.taaSettings.jitterScale;
 
                 Vector2 jitter;
                 bool allowScaling;

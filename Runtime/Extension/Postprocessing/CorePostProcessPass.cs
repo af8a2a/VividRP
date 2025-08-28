@@ -28,6 +28,12 @@ namespace UnityEngine.Rendering.Universal
         SMAAPass _smaaPass = new SMAAPass();
 
         #endregion
+        
+        #region Upscaler
+        private SuperResolutionPass _superResolutionPass = new SuperResolutionPass();
+        
+
+        #endregion
 
 
         #region PhysicallyDepthOfField
@@ -36,12 +42,6 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
         
-        #region Upscaler
-        private SuperResolutionPass _superResolutionPass = new SuperResolutionPass();
-        
-        private TemporalAAPass _temporalAAPass = new TemporalAAPass();
-
-        #endregion
         
         #region MotionBlur
 
@@ -122,6 +122,14 @@ namespace UnityEngine.Rendering.Universal
             currentRT = _smaaPass.Render(renderGraph, frameData, currentRT);
 
             #endregion
+            
+            #region Upscaler
+
+            currentRT = _superResolutionPass.Render(renderGraph, frameData, currentRT);
+
+            #endregion
+
+
 
             #region PhysicallyDepthOfField
 
@@ -130,17 +138,6 @@ namespace UnityEngine.Rendering.Universal
             #endregion
 
             
-            #region Upscaler
-
-            currentRT = _superResolutionPass.Render(renderGraph, frameData, currentRT);
-
-            #endregion
-
-            #region TemporalAA
-
-            currentRT = _temporalAAPass.Render(renderGraph, frameData, currentRT);
-
-            #endregion
 
             #region MotionBlur
 

@@ -28,11 +28,11 @@ namespace UnityEngine.Rendering.Universal
 
             bool useTemporalAA = cameraData.IsTemporalAAEnabled();
 
-            if (cameraData.imageScalingMode is not ImageScalingMode.Upscaling)
-            {
-                return source;
-            }
-
+            // if (cameraData.imageScalingMode is not ImageScalingMode.Upscaling)
+            // {
+            //     return source;
+            // }
+            //
             // STP is only enabled when TAA is enabled and all of its runtime requirements are met.
             // Using IsSTPRequested() vs IsSTPEnabled() for perf reason here, as we already know TAA status
             TextureHandle dest;

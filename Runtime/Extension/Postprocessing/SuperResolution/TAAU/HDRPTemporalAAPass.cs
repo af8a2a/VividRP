@@ -332,7 +332,6 @@ namespace UnityEngine.Rendering.Universal
             Vector4 scales = new Vector4(historyRenderingViewport.x / prevHistory.rt.width, historyRenderingViewport.y / prevHistory.rt.height, mainRTScales.x,
                 mainRTScales.y);
 
-            Debug.Log(scales);
             passData.taaScales = scales;
 
             var resScale = DynamicResolutionHandler.instance.GetCurrentScale();
@@ -384,19 +383,20 @@ namespace UnityEngine.Rendering.Universal
                         // var historyMpb = ctx.renderGraphPool.GetTempMaterialPropertyBlock();
                         // historyMpb.SetTexture(_InputTexture, source);
                         // historyMpb.SetVector(_TaaScales, data.taaScales);
-                       material.SetTexture(_BlitTexture, source);
                        material.SetVector(_TaaScales, data.taaScales);
 
-                        Rect r = data.finalViewport;
+                        // Rect r = data.finalViewport;
                         
                         // Blitter.BlitCameraTexture(cmd, source, data.prevHistory, material, copyHistoryPass);
                         // Blitter.BlitCameraTexture(cmd, source, data.nextHistory, material, copyHistoryPass);
 
                         // Blitter.DrawFullScreen(cmd, r, material, data.prevHistory, historyMpb, copyHistoryPass);
                         // Blitter.DrawFullScreen(cmd, r, material, data.nextHistory, historyMpb, copyHistoryPass);
+                        Blitter.BlitTexture(cmd, source, data.prevHistory, material, copyHistoryPass);
+                        Blitter.BlitTexture(cmd, source, data.nextHistory, material, copyHistoryPass);
 
-                        Blitter.DrawFullScreen(cmd, r, material, data.prevHistory, null, copyHistoryPass);
-                        Blitter.DrawFullScreen(cmd, r, material, data.nextHistory, null, copyHistoryPass);
+                        // Blitter.DrawFullScreen(cmd, r, material, data.prevHistory, null, copyHistoryPass);
+                        // Blitter.DrawFullScreen(cmd, r, material, data.nextHistory, null, copyHistoryPass);
 
                     }
 
@@ -446,7 +446,7 @@ namespace UnityEngine.Rendering.Universal
                     rect.y = 0;
                     if (data.runsTAAU )
                     {
-                        material.SetTexture(_StencilTexture, data.stencilBuffer, RenderTextureSubElement.Stencil);
+                        // material.SetTexture(_StencilTexture, data.stencilBuffer, RenderTextureSubElement.Stencil);
                         Blitter.BlitTexture(cmd, source, data.destination, material, taauPass);
                     }
                     else

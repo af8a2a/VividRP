@@ -171,7 +171,7 @@ namespace LWGUI
 		protected virtual float GetVisibleHeight(MaterialProperty prop)
 		{
 			var height = MaterialEditor.GetDefaultPropertyHeight(prop);
-			return prop.type == MaterialProperty.PropType.Vector ? EditorGUIUtility.singleLineHeight : height;
+			return prop.propertyType == ShaderPropertyType.Vector ? EditorGUIUtility.singleLineHeight : height;
 		}
 
 		public virtual void BuildStaticMetaData(Shader inShader, MaterialProperty inProp, MaterialProperty[] inProps, PropertyStaticData inoutPropertyStaticData)
@@ -194,7 +194,7 @@ namespace LWGUI
 			}
 			else
 			{
-				Debug.LogWarning("LWGUI: Property:'" + prop.name + "' Type:'" + prop.type + "' mismatch!");
+				Debug.LogWarning("LWGUI: Property:'" + prop.name + "' Type:'" + prop.propertyType + "' mismatch!");
 				editor.DefaultShaderProperty(position, prop, label.text);
 			}
 		}
@@ -207,7 +207,7 @@ namespace LWGUI
 		// Draws a custom style property
 		public virtual void DrawProp(Rect position, MaterialProperty prop, GUIContent label, MaterialEditor editor)
 		{
-			RevertableHelper.FixGUIWidthMismatch(prop.type, editor);
+			RevertableHelper.FixGUIWidthMismatch(prop.propertyType, editor);
 			editor.DefaultShaderPropertyInternal(position, prop, label);
 		}
 	}
@@ -244,7 +244,7 @@ namespace LWGUI
 
 		protected override bool IsMatchPropType(MaterialProperty property)
 		{
-			return property.type is MaterialProperty.PropType.Float;
+			return property.propertyType is ShaderPropertyType.Float;
 		}
 
 		public override void BuildStaticMetaData(Shader inShader, MaterialProperty inProp, MaterialProperty[] inProps, PropertyStaticData inoutPropertyStaticData)
@@ -307,11 +307,11 @@ namespace LWGUI
 			this._power = Mathf.Clamp(power, 0, float.MaxValue);
 		}
 
-		protected override bool IsMatchPropType(MaterialProperty property) { return property.type == MaterialProperty.PropType.Range; }
+		protected override bool IsMatchPropType(MaterialProperty property) { return property.propertyType == ShaderPropertyType.Range; }
 
 		public override void DrawProp(Rect position, MaterialProperty prop, GUIContent label, MaterialEditor editor)
 		{
-			RevertableHelper.FixGUIWidthMismatch(prop.type, editor);
+			RevertableHelper.FixGUIWidthMismatch(prop.propertyType, editor);
 			EditorGUI.showMixedValue = prop.hasMixedValue;
 			var rect = position;
 			ReflectionHelper.DoPowerRangeProperty(rect, prop, label, _power);
@@ -332,13 +332,13 @@ namespace LWGUI
 			this.group = group;
 		}
 
-		protected override bool IsMatchPropType(MaterialProperty property) { return property.type == MaterialProperty.PropType.Range; }
+		protected override bool IsMatchPropType(MaterialProperty property) { return property.propertyType == ShaderPropertyType.Range; }
 
 		public override void DrawProp(Rect position, MaterialProperty prop, GUIContent label, MaterialEditor editor)
 		{
-			RevertableHelper.FixGUIWidthMismatch(prop.type, editor);
+			RevertableHelper.FixGUIWidthMismatch(prop.propertyType, editor);
 
-			if (prop.type != MaterialProperty.PropType.Range)
+			if (prop.propertyType != ShaderPropertyType.Range)
 			{
 				EditorGUI.LabelField(position, "IntRange used on a non-range property: " + prop.name, EditorStyles.helpBox);
 			}
@@ -382,7 +382,7 @@ namespace LWGUI
 			this._maxPropName = maxPropName;
 		}
 
-		protected override bool IsMatchPropType(MaterialProperty property) { return property.type == MaterialProperty.PropType.Range; }
+		protected override bool IsMatchPropType(MaterialProperty property) { return property.propertyType == ShaderPropertyType.Range; }
 
 		public override void BuildStaticMetaData(Shader inShader, MaterialProperty inProp, MaterialProperty[] inProps, PropertyStaticData inoutPropertyStaticData)
 		{
@@ -553,7 +553,7 @@ namespace LWGUI
 			this._values = values;
 		}
 
-		protected override bool IsMatchPropType(MaterialProperty property) { return property.type is MaterialProperty.PropType.Float; }
+		protected override bool IsMatchPropType(MaterialProperty property) { return property.propertyType is ShaderPropertyType.Float; }
 
 		protected virtual string GetKeywordName(string propName, string name) { return (name).Replace(' ', '_').ToUpperInvariant(); }
 
@@ -732,7 +732,7 @@ namespace LWGUI
 			}
 		}
 
-		protected override bool IsMatchPropType(MaterialProperty property) { return property.type == MaterialProperty.PropType.Float; }
+		protected override bool IsMatchPropType(MaterialProperty property) { return property.propertyType == ShaderPropertyType.Float; }
 
 		public override void BuildStaticMetaData(Shader inShader, MaterialProperty inProp, MaterialProperty[] inProps, PropertyStaticData inoutPropertyStaticData)
 		{
@@ -878,7 +878,7 @@ namespace LWGUI
 			totalButtonWidth = buttonWidths.Sum();
 		}
 		
-		protected override bool IsMatchPropType(MaterialProperty property) { return property.type == MaterialProperty.PropType.Int; }
+		protected override bool IsMatchPropType(MaterialProperty property) { return property.propertyType == ShaderPropertyType.Int; }
 
 		protected override float GetVisibleHeight(MaterialProperty prop) { return maxHeight; }
 
@@ -949,7 +949,7 @@ namespace LWGUI
 				if (!_rampAtlasSO)
 				{
 					var rampAtlasProp = metaDatas.GetProperty(rampAtlasPropName);
-					if (rampAtlasProp != null && rampAtlasProp.type == MaterialProperty.PropType.Texture)
+					if (rampAtlasProp != null && rampAtlasProp.propertyType == ShaderPropertyType.Texture)
 					{
 						_rampAtlasSO = LwguiRampAtlas.LoadRampAtlasSO(rampAtlasProp.textureValue);
 					}
@@ -995,7 +995,7 @@ namespace LWGUI
 			}
 		}
 
-		protected override bool IsMatchPropType(MaterialProperty property) => property.type is MaterialProperty.PropType.Float or MaterialProperty.PropType.Int;
+		protected override bool IsMatchPropType(MaterialProperty property) => property.propertyType is ShaderPropertyType.Float or ShaderPropertyType.Int;
 
 		protected override void OnRampPropUpdate(Rect position, MaterialProperty prop, GUIContent label, MaterialEditor editor)
 		{
@@ -1118,7 +1118,7 @@ namespace LWGUI
 		public override void DrawProp(Rect position, MaterialProperty prop, GUIContent label, MaterialEditor editor)
 		{
 			var rampAtlasProp = metaDatas.GetProperty(rampAtlasPropName);
-			if (rampAtlasProp == null || rampAtlasProp.type != MaterialProperty.PropType.Texture)
+			if (rampAtlasProp == null || rampAtlasProp.propertyType != ShaderPropertyType.Texture)
 			{
 				Helper.DrawShaderPropertyWithErrorLabel(position, prop, label, editor, "Invalid rampAtlasPropName");
 				Debug.LogError($"LWGUI: Property { prop.name } has invalid rampAtlasPropName: { rampAtlasPropName }");
@@ -1182,7 +1182,7 @@ namespace LWGUI
 
 		protected override float GetVisibleHeight(MaterialProperty prop) { return EditorGUIUtility.singleLineHeight; }
 
-		protected override bool IsMatchPropType(MaterialProperty property) { return property.type == MaterialProperty.PropType.Texture; }
+		protected override bool IsMatchPropType(MaterialProperty property) { return property.propertyType == ShaderPropertyType.Texture; }
 
 		public override void BuildStaticMetaData(Shader inShader, MaterialProperty inProp, MaterialProperty[] inProps, PropertyStaticData inoutPropertyStaticData)
 		{
@@ -1196,7 +1196,7 @@ namespace LWGUI
 			if (defaultExtraProp != null)
 			{
 				var text = string.Empty;
-				if (defaultExtraProp.type == MaterialProperty.PropType.Vector)
+				if (defaultExtraProp.propertyType == ShaderPropertyType.Vector)
 					text = ChannelDrawer.GetChannelName(defaultExtraProp);
 				else
 					text = RevertableHelper.GetPropertyDefaultValueText(defaultExtraProp);
@@ -1225,7 +1225,7 @@ namespace LWGUI
 				var extraRect = MaterialEditor.GetRightAlignedFieldRect(rect);
 				extraRect.height = rect.height;
 
-				if (extraProp.type == MaterialProperty.PropType.Vector)
+				if (extraProp.propertyType == ShaderPropertyType.Vector)
 					_channelDrawer.OnGUI(extraRect, extraProp, GUIContent.none, editor);
 				else
 					editor.ShaderProperty(extraRect, extraProp, GUIContent.none);
@@ -1321,7 +1321,7 @@ namespace LWGUI
 			}
 		}
 
-		protected override bool IsMatchPropType(MaterialProperty property) { return property.type == MaterialProperty.PropType.Texture; }
+		protected override bool IsMatchPropType(MaterialProperty property) { return property.propertyType == ShaderPropertyType.Texture; }
 
 		protected virtual void OnRampPropUpdate(Rect position, MaterialProperty prop, GUIContent label, MaterialEditor editor) { }
 
@@ -1580,7 +1580,7 @@ namespace LWGUI
 			this.defaultAtlasHeight = (int)Mathf.Max(2, defaultHeight);
 		}
 
-		protected override bool IsMatchPropType(MaterialProperty property) => property.type == MaterialProperty.PropType.Texture;
+		protected override bool IsMatchPropType(MaterialProperty property) => property.propertyType == ShaderPropertyType.Texture;
 
 		protected override float GetVisibleHeight(MaterialProperty prop) => 
 			EditorGUIUtility.singleLineHeight + 2.0f + 
@@ -1742,7 +1742,7 @@ namespace LWGUI
 			this._colorStrings[2] = color4;
 		}
 
-		protected override bool IsMatchPropType(MaterialProperty property) { return property.type == MaterialProperty.PropType.Color; }
+		protected override bool IsMatchPropType(MaterialProperty property) { return property.propertyType == ShaderPropertyType.Color; }
 
 		public override void BuildStaticMetaData(Shader inShader, MaterialProperty inProp, MaterialProperty[] inProps, PropertyStaticData inoutPropertyStaticData)
 		{
@@ -1786,7 +1786,7 @@ namespace LWGUI
 				r.xMax -= w * i - interval;
 
 				var src = cProp.colorValue;
-				var isHdr = (colorArray[i].flags & MaterialProperty.PropFlags.HDR) != MaterialProperty.PropFlags.None;
+				var isHdr = (colorArray[i].propertyFlags & ShaderPropertyFlags.HDR) != ShaderPropertyFlags.None;
 				var dst = EditorGUI.ColorField(r, GUIContent.none, src, true, true, isHdr);
 				if (Helper.EndChangeCheck(metaDatas, cProp))
 				{
@@ -1842,7 +1842,7 @@ namespace LWGUI
 			this.group = group;
 		}
 
-		protected override bool IsMatchPropType(MaterialProperty property) { return property.type == MaterialProperty.PropType.Vector; }
+		protected override bool IsMatchPropType(MaterialProperty property) { return property.propertyType == ShaderPropertyType.Vector; }
 
 		private static int GetChannelIndex(MaterialProperty prop)
 		{
@@ -2241,8 +2241,8 @@ namespace LWGUI
 
 		protected override bool IsMatchPropType(MaterialProperty property)
 		{
-			return property.type == MaterialProperty.PropType.Float
-				|| property.type == MaterialProperty.PropType.Int;
+			return property.propertyType == ShaderPropertyType.Float
+				|| property.propertyType == ShaderPropertyType.Int;
 		}
 
 		public override void BuildStaticMetaData(Shader inShader, MaterialProperty inProp, MaterialProperty[] inProps, PropertyStaticData inoutPropertyStaticData) { }

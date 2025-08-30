@@ -23,7 +23,7 @@ namespace LWGUI
 
 		public static bool IsPropertyHideInInspector(MaterialProperty prop)
 		{
-			return (prop.flags & MaterialProperty.PropFlags.HideInInspector) != 0;
+			return (prop.propertyFlags & UnityEngine.Rendering.ShaderPropertyFlags.HideInInspector) != 0;
 		}
 
 		public static string GetKeywordName(string keyword, string propName)

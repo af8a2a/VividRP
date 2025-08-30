@@ -10,13 +10,24 @@ uid: urp-changelog
 Version Updated
 The version number for this package has increased due to a version update of a related graphics package.
 
+## [17.2.0] - 2025-05-14
+
+This version is compatible with Unity 6000.2.0b2.
+
+### Fixed
+- Fixed HDR debug mode not working when Compatibility Mode is enabled.
+- Avoid crash when a RendererFeature tries to render into a released RenderTexture.
+- Fixed light rendering incorrectly from certain angles when using Forward+ in URP.
+- Fixed an issue where the emission property of the Lit shader did not animate correctly when `_EmissionColor` was initially set to `(0, 0, 0)`.
+- Added Prepass Layer Mask to determine which GameObjects write depth.
+
 The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
 
 ## [17.0.3] - 2025-02-13
 
-This version is compatible with Unity 6000.2.0a1.
+This version is compatible with Unity 6000.2.0a5.
 
 ### Added
 - `SetViewAndProjectionMatrices()` helper function is available within a RasterRenderPass in RenderGraph.
@@ -24,6 +35,8 @@ This version is compatible with Unity 6000.2.0a1.
 - SetViewAndProjectionMatrices() helper function is available within a RasterRenderPass in RenderGraph.
 
 ### Changed
+- Implemented minor CPU optimizations for the Post-Processing Bloom effect.
+Enhanced code quality by consistently using TextureDesc in place of RenderTextureDescriptor.
 - Added the ability to turn Reflection Probe Atlas on or off for Universal Render Pipeline (URP) Forward+ renderers, regardless of blending.
 - Improved Depth usage performance for some platforms.
 - Updated the RenderGraph samples to use the new helper functions to reduce boilerplate code.
@@ -35,6 +48,15 @@ This version is compatible with Unity 6000.2.0a1.
 - In the Render Graph Viewer, you can now open the tool when the compatibility mode is enabled.
 
 ### Fixed
+- Fixed an issue where undoing GameObject creation didn't work when the GameObject was focused.
+- Fixed unclear error message while updating volume stack before Universal Render Pipeline is created.
+- Fixed preview for URP overlay camera not rendering correct view. Now an explicit message explain it is not possible for theses cameras.
+- Fixed incorrect depth texture format exception when pressing the Ctrl key in the scene view with URP.
+- Fixed an issue where blending DBuffer decal normals could causes NaNs.
+- Fixed light cookie texture memory leak when entering Playmode.
+- Fix continuous error printing in URP Samples when assigned pipeline asset is not correct
+- Fix RenderTexture.Create failure on certain Android Vulkan devices
+- Fixed exception spam when trying to use full screen render passes on visionOS
 - Fixed a warning, "Missing types referenced from component UniversalRenderPipelineGlobalSettings..." which was caused by the URP Template project on platforms where ENABLE_VR is not defined.
 - Fixed invalid viewport for post-process when using camera stacking with render scale.
 - Fixed invalid alpha output for scaling setup shader when using camera stacking with render scale on URP compatibility path.

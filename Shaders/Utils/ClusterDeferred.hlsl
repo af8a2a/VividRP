@@ -7,6 +7,7 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/DynamicScaling.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RealtimeLights.hlsl"
+
 struct Attributes
 {
     float4 positionOS : POSITION;
@@ -75,14 +76,7 @@ half3 DeferredLightContribution(Light light, InputData inputData, GBufferData gB
         #endif
 
         BRDFData brdfData = GBufferDataToBRDFData(gBufferData);
-
-        half3 color=0;
-        #if defined(_SSGI)
-
-        color += SAMPLE_TEXTURE2D(_IndirectDiffuseTextureSS, sampler_LinearClamp, inputData.positionCS);
-        #endif
-        color += half3(LightingPhysicallyBased(brdfData, light, inputData.normalWS, inputData.viewDirectionWS, materialSpecularHighlightsOff));
-        return color;
+        return half3(LightingPhysicallyBased(brdfData, light, inputData.normalWS, inputData.viewDirectionWS, materialSpecularHighlightsOff));
     }
     #endif
 

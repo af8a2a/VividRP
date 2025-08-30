@@ -171,7 +171,7 @@ namespace LWGUI
 			Helper.BeginProperty(rect, prop, metaDatas);
 			Helper.DoPropertyContextMenus(rect, prop, metaDatas);
 			
-			RevertableHelper.FixGUIWidthMismatch(prop.type, materialEditor);
+			RevertableHelper.FixGUIWidthMismatch(prop.propertyType, materialEditor);
 			if (propStaticData.isAdvancedHeaderProperty)
 				propStaticData.isExpanding = EditorGUI.Foldout(rect, propStaticData.isExpanding, string.Empty);
 			

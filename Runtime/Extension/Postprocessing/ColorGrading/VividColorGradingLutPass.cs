@@ -34,7 +34,6 @@ namespace UnityEngine.Rendering.Universal
         {
             profilingSampler = new ProfilingSampler("Vivid ColorGrading Lut");
             renderPassEvent = RenderPassEvent.BeforeRenderingGbuffer;
-            overrideCameraTarget = true;
 
 
             m_PassData = new PassData();
@@ -314,7 +313,6 @@ namespace UnityEngine.Rendering.Universal
                     m_HdrLutFormat = GraphicsFormat.R8G8B8A8_UNorm;
 
                 m_LdrLutFormat = GraphicsFormat.R8G8B8A8_UNorm;
-                base.useNativeRenderPass = false;
 
                 if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3 && Graphics.minOpenGLESVersion <= OpenGLESVersion.OpenGLES30 &&
                     SystemInfo.graphicsDeviceName.StartsWith("Adreno (TM) 3"))

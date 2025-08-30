@@ -57,11 +57,11 @@ namespace LWGUI
 
 		public static float GetNumericValue(this MaterialProperty prop)
 		{
-			switch (prop.type)
+			switch (prop.propertyType)
 			{
-				case MaterialProperty.PropType.Float or MaterialProperty.PropType.Range:
+				case UnityEngine.Rendering.ShaderPropertyType.Float or UnityEngine.Rendering.ShaderPropertyType.Range:
 					return prop.floatValue;
-				case MaterialProperty.PropType.Int:
+				case UnityEngine.Rendering.ShaderPropertyType.Int:
 					return prop.intValue;
 				default:
 					Debug.LogError($"LWGUI: Material Property { prop.name } is NOT numeric type.");
@@ -71,12 +71,12 @@ namespace LWGUI
 
 		public static void SetNumericValue(this MaterialProperty prop, float value)
 		{
-			switch (prop.type)
+			switch (prop.propertyType)
 			{
-				case MaterialProperty.PropType.Float or MaterialProperty.PropType.Range:
+				case UnityEngine.Rendering.ShaderPropertyType.Float or UnityEngine.Rendering.ShaderPropertyType.Range:
 					prop.floatValue = value;
 					break;
-				case MaterialProperty.PropType.Int:
+				case UnityEngine.Rendering.ShaderPropertyType.Int:
 					prop.intValue = (int)value;
 					break;
 				default:

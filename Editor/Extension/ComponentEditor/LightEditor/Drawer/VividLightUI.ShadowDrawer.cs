@@ -110,7 +110,7 @@ namespace UnityEditor.Rendering.Universal
                             using (new EditorGUI.IndentLevelScope())
                             {
                                 EditorGUI.BeginChangeCheck();
-                                EditorUtils.DrawRenderingLayerMask(serializedLight.shadowRenderingLayers, Styles.ShadowLayer);
+                                EditorGUILayout.PropertyField(serializedLight.shadowRenderingLayers, Styles.ShadowLayer);
                                 if (EditorGUI.EndChangeCheck())
                                 {
                                     serializedLight.settings.light.renderingLayerMask = serializedLight.shadowRenderingLayers.intValue;

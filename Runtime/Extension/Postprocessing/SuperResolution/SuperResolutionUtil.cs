@@ -19,7 +19,7 @@ namespace UnityEngine.Rendering.Universal
             cameraData.cameraTargetDescriptor.width = newCameraTargetSize.x;
             cameraData.cameraTargetDescriptor.height = newCameraTargetSize.y;
             //
-            UniversalRenderer.m_UseUpscaledColorHandle = true;
+            // UniversalRenderer.m_UseUpscaledColorHandle = true;
 
             // Update the shader constants to reflect the new camera resolution
             using (var builder = renderGraph.AddUnsafePass<UpdateCameraResolutionPassData>("Update Camera Resolution", out var passData))

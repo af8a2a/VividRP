@@ -18,7 +18,7 @@
 #if defined(SHADER_API_MOBILE) && defined(SHADER_API_GLES30)
     #define MAX_VISIBLE_LIGHTS MAX_VISIBLE_LIGHT_COUNT_LOW_END_MOBILE
 // WebGPU's minimal limits are based on mobile rather than desktop, so it will need to assume mobile.
-#elif defined(SHADER_API_MOBILE) || (defined(SHADER_API_GLCORE) && !defined(SHADER_API_SWITCH)) || defined(SHADER_API_GLES3) || defined(SHADER_API_WEBGPU) // Workaround because SHADER_API_GLCORE is also defined when SHADER_API_SWITCH is
+#elif defined(SHADER_API_MOBILE) || (defined(SHADER_API_GLCORE) && !defined(SHADER_API_SWITCH) && !defined(SHADER_API_SWITCH2)) || defined(SHADER_API_GLES3) || defined(SHADER_API_WEBGPU) // Workaround because SHADER_API_GLCORE is also defined when SHADER_API_SWITCH is
     #define MAX_VISIBLE_LIGHTS MAX_VISIBLE_LIGHT_COUNT_MOBILE
 #else
     #define MAX_VISIBLE_LIGHTS MAX_VISIBLE_LIGHT_COUNT_DESKTOP
@@ -178,7 +178,7 @@ CBUFFER_END
 #endif
 #endif
 
-#if defined( USE_CLUSTER_LIGHT_LOOP)||defined(_GPU_LIGHTS_CLUSTER)
+#if USE_CLUSTER_LIGHT_LOOP||defined(_GPU_LIGHTS_CLUSTER)
 
 CBUFFER_START(urp_ZBinBuffer)
         float4 urp_ZBins[MAX_ZBIN_VEC4S];
@@ -200,6 +200,7 @@ float4 urp_ReflProbes_BoxMax[MAX_REFLECTION_PROBES];          // w contains the 
 float4 urp_ReflProbes_BoxMin[MAX_REFLECTION_PROBES];          // w contains the importance
 float4 urp_ReflProbes_ProbePosition[MAX_REFLECTION_PROBES];   // w is positive for box projection, |w| is max mip level
 float4 urp_ReflProbes_MipScaleOffset[MAX_REFLECTION_PROBES * 7];
+float4 urp_ReflProbes_Rotation[MAX_REFLECTION_PROBES];
 #ifndef LIGHT_SHADOWS_NO_CBUFFER
 CBUFFER_END
 #endif

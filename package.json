@@ -1,12 +1,12 @@
 {
   "name": "com.unity.render-pipelines.universal",
   "description": "The Universal Render Pipeline (URP) is a prebuilt Scriptable Render Pipeline, made by Unity. URP provides artist-friendly workflows that let you quickly and easily create optimized graphics across a range of platforms, from mobile to high-end consoles and PCs.",
-  "version": "17.1.0",
-  "unity": "6000.1",
+  "version": "17.3.0",
+  "unity": "6000.3",
   "displayName": "Vivid RP",
   "dependencies": {
-    "com.unity.render-pipelines.core": "17.1.0",
-    "com.unity.shadergraph": "17.1.0",
+    "com.unity.render-pipelines.core": "17.3.0",
+    "com.unity.shadergraph": "17.3.0",
     "com.unity.render-pipelines.universal-config": "17.0.3"
   },
   "keywords": [
@@ -20,7 +20,7 @@
   "samples": [
     {
       "displayName": "URP Package Samples",
-      "description": "Collection of scenes showcasing different features of the Universal Render Pipeline.",
+      "description": "Collection of scenes showcasing different features of the Universal Render Pipeline.\n \nTo setup the project to use the samples, the URP Package Samples/SharedAssets/Settings/PackageSamplesURPAsset.asset has to be assigned in the Project Settings/Graphics/Set Default Render Pipeline Asset/Default Render pipeline and/or in the Project Settings/Quality/Rendering/Render Pipeline Asset.",
       "path": "Samples~/URPPackageSamples"
     },
     {
@@ -29,5 +29,5 @@
       "path": "Samples~/URPRenderGraphSamples"
     }
   ],
-  "_fingerprint": "821b8547a8a51a98545ccd08b604792e09f99215"
+  "_fingerprint": "d30b08d5d0c4e664f1988fc67dbf44e8b363dd33"
 }

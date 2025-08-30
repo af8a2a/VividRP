@@ -1,9 +1,5 @@
 using System;
-using UnityEngine.Experimental.GlobalIllumination;
-using UnityEngine.Profiling;
-using Unity.Collections;
 using UnityEngine.Rendering.RenderGraphModule;
-using UnityEngine.Experimental.Rendering;
 
 // cleanup code
 // listMinDepth and maxDepth should be stored in a different uniform block?
@@ -26,39 +22,6 @@ namespace UnityEngine.Rendering.Universal.Internal
             m_DeferredLights = deferredLights;
         }
 
-        // ScriptableRenderPass
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
-        public override void Configure(CommandBuffer cmd, RenderTextureDescriptor cameraTextureDescripor)
-        {
-            var lightingAttachment = m_DeferredLights.GbufferAttachments[m_DeferredLights.GBufferLightingIndex];
-            var depthAttachment = m_DeferredLights.DepthAttachmentHandle;
-
-            if (m_DeferredLights.UseFramebufferFetch)
-            {
-                // Disable obsolete warning for internal usage
-                #pragma warning disable CS0618
-                ConfigureInputAttachments(m_DeferredLights.DeferredInputAttachments, m_DeferredLights.DeferredInputIsTransient);
-                #pragma warning restore CS0618
-            }
-
-            // Disable obsolete warning for internal usage
-            #pragma warning disable CS0618
-            // TODO: Cannot currently bind depth texture as read-only!
-            ConfigureTarget(lightingAttachment, depthAttachment);
-            #pragma warning restore CS0618
-        }
-
-        // ScriptableRenderPass
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
-        public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
-        {
-            ContextContainer frameData = renderingData.frameData;
-            UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
-            UniversalLightData lightData = frameData.Get<UniversalLightData>();
-            UniversalShadowData shadowData = frameData.Get<UniversalShadowData>();
-
-            m_DeferredLights.ExecuteDeferredPass(CommandBufferHelpers.GetRasterCommandBuffer(renderingData.commandBuffer), cameraData, lightData, shadowData);
-        }
 
         private class PassData
         {
@@ -66,16 +29,12 @@ namespace UnityEngine.Rendering.Universal.Internal
             internal UniversalLightData lightData;
             internal UniversalShadowData shadowData;
 
-            internal TextureHandle ssrLightingTexture;
-            internal TextureHandle color;
-            internal TextureHandle depth;
             internal TextureHandle[] gbuffer;
             internal DeferredLights deferredLights;
         }
 
         internal void Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle color, TextureHandle depth, TextureHandle[] gbuffer)
         {
-            UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
             UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
             UniversalLightData lightData = frameData.Get<UniversalLightData>();
             UniversalShadowData shadowData = frameData.Get<UniversalShadowData>();
@@ -86,9 +45,7 @@ namespace UnityEngine.Rendering.Universal.Internal
                 passData.lightData = lightData;
                 passData.shadowData = shadowData;
 
-                passData.color = color;
                 builder.SetRenderAttachment(color, 0, AccessFlags.Write);
-                passData.depth = depth;
                 builder.SetRenderAttachmentDepth(depth, AccessFlags.Write);
                 passData.deferredLights = m_DeferredLights;
 
@@ -113,7 +70,6 @@ namespace UnityEngine.Rendering.Universal.Internal
                     }
                 }
 
-                builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);
 
                 builder.SetRenderFunc((PassData data, RasterGraphContext context) =>

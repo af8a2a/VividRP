@@ -30,7 +30,7 @@ namespace UnityEngine.Rendering.Universal
 
                 cmd.SetComputeFloatParam(data.rtaoRayQueryShader, ShaderConstants.radius, data.radius);
                 cmd.SetComputeFloatParam(data.rtaoRayQueryShader, ShaderConstants.intensity, data.intensity);
-                CoreUtils.SetKeyword(cmd,"_GBUFFER_NORMALS_OCT", data.AccurateGbufferNormals);
+                CoreUtils.SetKeyword(cmd,"_GBUFFER_NORMALS_OCT", true);
 
                 var tx = RenderingUtilsExt.DivRoundUp((int)data.dispatchRaySizeX, 8);
                 var ty = RenderingUtilsExt.DivRoundUp((int)data.dispatchRaySizeY, 8);
@@ -58,7 +58,7 @@ namespace UnityEngine.Rendering.Universal
             var prevFrameRT = ReAllocatedHistoryAOBufferIfNeeded(histroyRT);
             var AOHistory = renderGraph.ImportTexture(prevFrameRT);
             TextureHandle aoTexture;
-            var urpRenderer = UniversalRenderer.urpRenderer;
+            var urpRenderer = (UniversalRenderer)UniversalRenderer.current;
 
             using (var builder = renderGraph.AddComputePass<PassData>("Raytracing AmbientOcclusion", out var passData))
             {
@@ -81,7 +81,6 @@ namespace UnityEngine.Rendering.Universal
                 builder.UseTexture(passData.DepthTexture);
                 builder.UseTexture(passData.NormalTexture);
                 builder.UseTexture(passData.AOTexture, AccessFlags.ReadWrite);
-                passData.AccurateGbufferNormals = urpRenderer.accurateGbufferNormals;
 
                 builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);

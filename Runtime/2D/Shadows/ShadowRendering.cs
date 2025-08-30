@@ -45,6 +45,7 @@ namespace UnityEngine.Rendering.Universal
         private static readonly Color k_ShadowColorLookup = new Color(0, 0, 1, 0);
         private static readonly Color k_UnshadowColorLookup = new Color(0, 1, 0, 0);
 
+#if URP_COMPATIBILITY_MODE
         private static RTHandle[] m_RenderTargets = null;
         private static int[] m_RenderTargetIds = null;
         private static RenderTargetIdentifier[] m_LightInputTextures = null;
@@ -72,6 +73,7 @@ namespace UnityEngine.Rendering.Universal
                 m_LightInputTextures = new RenderTargetIdentifier[maxTextureCount];
             }
         }
+#endif
 
         private static Material CreateMaterial(Shader shader, int offset, int pass)
         {
@@ -221,18 +223,14 @@ namespace UnityEngine.Rendering.Universal
             Vector3 maxCorner = new Vector3(float.MinValue, float.MinValue, float.MinValue);
             for (int i = 0; i < k_Corners; i++)
             {
-                maxCorner = Vector3.Max(maxCorner, nearCorners[i]);
-                maxCorner = Vector3.Max(maxCorner, farCorners[i]);
-                minCorner = Vector3.Min(minCorner, nearCorners[i]);
-                minCorner = Vector3.Min(minCorner, farCorners[i]);
+                maxCorner = Vector3.Max(maxCorner, camera.transform.TransformPoint(nearCorners[i]));
+                maxCorner = Vector3.Max(maxCorner, camera.transform.TransformPoint(farCorners[i]));
+                minCorner = Vector3.Min(minCorner, camera.transform.TransformPoint(nearCorners[i]));
+                minCorner = Vector3.Min(minCorner, camera.transform.TransformPoint(farCorners[i]));
             }
 
             nearCorners.Dispose();
             farCorners.Dispose();
-
-            // Transform the point from camera space to world space
-            maxCorner = camera.transform.TransformPoint(maxCorner);
-            minCorner = camera.transform.TransformPoint(minCorner);
 
             // TODO: Iterate through the lights
             for (int i = 0; i < cullResult.visibleLights.Count; i++)
@@ -275,14 +273,15 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
-        private static void CreateShadowRenderTexture(IRenderPass2D pass, RenderingData renderingData, CommandBuffer cmdBuffer, int shadowIndex)
-        {
-            CreateShadowRenderTexture(pass, m_RenderTargetIds[shadowIndex], renderingData, cmdBuffer);
-        }
-
         internal static void PrerenderShadows(UnsafeCommandBuffer cmdBuffer, Renderer2DData rendererData, ref LayerBatch layer, Light2D light, int shadowIndex, float shadowIntensity)
         {
             RenderShadows(cmdBuffer, rendererData, ref layer, light);
+        }
+
+#if URP_COMPATIBILITY_MODE
+        private static void CreateShadowRenderTexture(IRenderPass2D pass, RenderingData renderingData, CommandBuffer cmdBuffer, int shadowIndex)
+        {
+            CreateShadowRenderTexture(pass, m_RenderTargetIds[shadowIndex], renderingData, cmdBuffer);
         }
 
         internal static bool PrerenderShadows(this IRenderPass2D pass, RenderingData renderingData, CommandBuffer cmdBuffer, ref LayerBatch layer, Light2D light, int shadowIndex, float shadowIntensity)
@@ -324,6 +323,7 @@ namespace UnityEngine.Rendering.Universal
         {
             cmdBuffer.ReleaseTemporaryRT(m_RenderTargetIds[shadowIndex]);
         }
+#endif
 
         private static void SetShadowProjectionGlobals(UnsafeCommandBuffer cmdBuffer, ShadowCaster2D shadowCaster, Light2D light)
         {
@@ -338,6 +338,7 @@ namespace UnityEngine.Rendering.Universal
                 cmdBuffer.SetGlobalFloat(k_ShadowContractionDistanceID, 0f);
         }
 
+#if URP_COMPATIBILITY_MODE
         internal static void SetGlobalShadowTexture(CommandBuffer cmdBuffer, Light2D light, int shadowIndex)
         {
             var textureIndex = shadowIndex;
@@ -346,6 +347,7 @@ namespace UnityEngine.Rendering.Universal
             cmdBuffer.SetGlobalColor(k_ShadowShadowColorID, k_ShadowColorLookup);
             cmdBuffer.SetGlobalColor(k_ShadowUnshadowColorID, k_UnshadowColorLookup);
         }
+#endif
 
         internal static void SetGlobalShadowProp(IRasterCommandBuffer cmdBuffer)
         {

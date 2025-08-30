@@ -7,28 +7,26 @@ namespace UnityEditor.Rendering.Universal
     {
         static void DrawRenderingContent(VividSerializedLight serializedLight, Editor owner)
         {
-            if (serializedLight.settings.light.type != LightType.Rectangle &&
-                !serializedLight.settings.isCompletelyBaked)
+            if (!serializedLight.settings.isCompletelyBaked)
             {
                 EditorGUI.BeginChangeCheck();
+
                 GUI.enabled = UniversalRenderPipeline.asset.useRenderingLayers;
-                EditorUtils.DrawRenderingLayerMask(
-                    serializedLight.renderingLayers,
-                    UniversalRenderPipeline.asset.useRenderingLayers ? Styles.RenderingLayers : Styles.RenderingLayersDisabled
-                );
-                GUI.enabled = true;
-                if (EditorGUI.EndChangeCheck())
-                {
-                    if (!serializedLight.customShadowLayers.boolValue)
-                        SyncLightAndShadowLayers(serializedLight, serializedLight.renderingLayers);
-                }
+                EditorGUILayout.PropertyField(serializedLight.renderingLayers,
+                    Styles.RenderingLayers);
+                // GUI.enabled = true;
+                // if (EditorGUI.EndChangeCheck())
+                // {
+                //     if (!serializedLight.customShadowLayers.boolValue)
+                //         SyncLightAndShadowLayers(serializedLight, serializedLight.renderingLayers);
+                // }
             }
 
-            EditorGUILayout.PropertyField(serializedLight.settings.cullingMask, Styles.CullingMask);
-            if (serializedLight.settings.cullingMask.intValue != -1)
-            {
-                EditorGUILayout.HelpBox(Styles.CullingMaskWarning.text, MessageType.Info);
-            }
+            // EditorGUILayout.PropertyField(serializedLight.settings.cullingMask, Styles.CullingMask);
+            // if (serializedLight.settings.cullingMask.intValue != -1)
+            // {
+            //     EditorGUILayout.HelpBox(Styles.CullingMaskWarning.text, MessageType.Info);
+            // }
         }
     }
 }

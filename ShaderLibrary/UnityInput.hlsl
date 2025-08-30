@@ -9,7 +9,7 @@
 #define UNITY_STEREO_INSTANCING_ENABLED
 #endif
 
-#if defined(STEREO_MULTIVIEW_ON) && (defined(SHADER_API_GLES3) || defined(SHADER_API_GLCORE) || defined(SHADER_API_VULKAN)) && !(defined(SHADER_API_SWITCH))
+#if defined(STEREO_MULTIVIEW_ON) && (defined(SHADER_API_GLES3) || defined(SHADER_API_GLCORE) || defined(SHADER_API_VULKAN)) && !(defined(SHADER_API_SWITCH))  && !(defined(SHADER_API_SWITCH2))
     #define UNITY_STEREO_MULTIVIEW_ENABLED
 #endif
 
@@ -134,9 +134,11 @@ real4 unity_SpecCube1_HDR;
 float4 unity_SpecCube0_BoxMax;          // w contains the blend distance
 float4 unity_SpecCube0_BoxMin;          // w contains the lerp value
 float4 unity_SpecCube0_ProbePosition;   // w is set to 1 for box projection
+float4 unity_SpecCube0_Rotation;
 float4 unity_SpecCube1_BoxMax;          // w contains the blend distance
 float4 unity_SpecCube1_BoxMin;          // w contains the sign of (SpecCube0.importance - SpecCube1.importance)
 float4 unity_SpecCube1_ProbePosition;   // w is set to 1 for box projection
+float4 unity_SpecCube1_Rotation;
 
 // Lightmap block feature
 float4 unity_LightmapST;
@@ -173,7 +175,12 @@ float4 unity_SpriteColor;
 float4 unity_SpriteProps;
 CBUFFER_END
 
+static const uint unity_RendererUserValue = asuint(unity_RenderingLayer.y);
+
 #endif // UNITY_DOTS_INSTANCING_ENABLED
+
+// The renderer user values are packed in unity_RenderingLayer. So we need a dummy property to be able to use Shader.PropertyToID.
+uint unity_RendererUserValuesPropertyEntry;
 
 #if defined(USING_STEREO_MATRICES)
 CBUFFER_START(UnityStereoViewBuffer)

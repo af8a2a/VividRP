@@ -316,6 +316,17 @@ namespace UnityEngine.Rendering.Universal
         private TextureHandle _ssaoTexture;
 
         /// <summary>
+        /// Screen Space irradiance texture.
+        /// </summary>
+        internal TextureHandle irradianceTexture
+        {
+            get => CheckAndGetTextureHandle(ref _irradianceTexture);
+            set => CheckAndSetTextureHandle(ref _irradianceTexture, value);
+        }
+        private TextureHandle _irradianceTexture;
+
+        
+        /// <summary>
         /// STP debug visualization written to by the STP upscaler.
         /// </summary>
         internal TextureHandle stpDebugView
@@ -324,14 +335,18 @@ namespace UnityEngine.Rendering.Universal
             set => CheckAndSetTextureHandle(ref _stpDebugView, value);
         }
         private TextureHandle _stpDebugView;
-        
-        
+
+        #region Vivid
+
         internal TextureHandle rtasDebugView
         {
             get => CheckAndGetTextureHandle(ref _rtasDebugView);
             set => CheckAndSetTextureHandle(ref _rtasDebugView, value);
         }
+
         private TextureHandle _rtasDebugView;
+
+        #endregion
 
 
         /// <inheritdoc />
@@ -356,6 +371,7 @@ namespace UnityEngine.Rendering.Universal
             _renderingLayersTexture = TextureHandle.nullHandle;
             _dBufferDepth = TextureHandle.nullHandle;
             _ssaoTexture = TextureHandle.nullHandle;
+            _irradianceTexture = TextureHandle.nullHandle;
             _stpDebugView = TextureHandle.nullHandle;
 
             _cameraColorPyramidTexture = TextureHandle.nullHandle;

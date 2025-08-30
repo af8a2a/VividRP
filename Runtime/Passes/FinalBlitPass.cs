@@ -11,12 +11,14 @@ namespace UnityEngine.Rendering.Universal.Internal
     /// the camera target. The pass takes the screen viewport into
     /// consideration.
     /// </summary>
-    public class FinalBlitPass : ScriptableRenderPass
+    public partial class FinalBlitPass : ScriptableRenderPass
     {
+        static readonly int s_CameraDepthTextureID = Shader.PropertyToID("_CameraDepthTexture");
+
+#if URP_COMPATIBILITY_MODE
         RTHandle m_Source;
         private PassData m_PassData;
-
-        static readonly int s_CameraDepthTextureID = Shader.PropertyToID("_CameraDepthTexture");
+#endif
 
         // Use specialed URP fragment shader pass for debug draw support and color space conversion/encoding support.
         // See CoreBlit.shader and BlitHDROverlay.shader
@@ -52,8 +54,10 @@ namespace UnityEngine.Rendering.Universal.Internal
         public FinalBlitPass(RenderPassEvent evt, Material blitMaterial, Material blitHDRMaterial)
         {
             profilingSampler = ProfilingSampler.Get(URPProfileId.BlitFinalToBackBuffer);
+#if URP_COMPATIBILITY_MODE
             base.useNativeRenderPass = false;
             m_PassData = new PassData();
+#endif
             renderPassEvent = evt;
 
             // Find sampler passes by name
@@ -72,7 +76,6 @@ namespace UnityEngine.Rendering.Universal.Internal
         /// </summary>
         public void Dispose()
         {
-
         }
 
         /// <summary>
@@ -80,7 +83,7 @@ namespace UnityEngine.Rendering.Universal.Internal
         /// </summary>
         /// <param name="baseDescriptor"></param>
         /// <param name="colorHandle"></param>
-        [Obsolete("Use RTHandles for colorHandle", true)]
+        [Obsolete("Use RTHandles for colorHandle. #from(2022.1) #breakingFrom(2023.1)", true)]
         public void Setup(RenderTextureDescriptor baseDescriptor, RenderTargetHandle colorHandle)
         {
             throw new NotSupportedException("Setup with RenderTargetHandle has been deprecated. Use it with RTHandles instead.");
@@ -93,7 +96,9 @@ namespace UnityEngine.Rendering.Universal.Internal
         /// <param name="colorHandle"></param>
         public void Setup(RenderTextureDescriptor baseDescriptor, RTHandle colorHandle)
         {
+#if URP_COMPATIBILITY_MODE
             m_Source = colorHandle;
+#endif
         }
 
         static void SetupHDROutput(ColorGamut hdrDisplayColorGamut, Material material, HDROutputUtils.Operation hdrOperation, Vector4 hdrOutputParameters, bool rendersOverlayUI)
@@ -103,8 +108,9 @@ namespace UnityEngine.Rendering.Universal.Internal
             CoreUtils.SetKeyword(material, ShaderKeywordStrings.HDROverlay, rendersOverlayUI);
         }
 
+#if URP_COMPATIBILITY_MODE
         /// <inheritdoc/>
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
         public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
         {
             UniversalCameraData cameraData = renderingData.frameData.Get<UniversalCameraData>();
@@ -121,7 +127,7 @@ namespace UnityEngine.Rendering.Universal.Internal
         }
 
         /// <inheritdoc/>
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             ContextContainer frameData = renderingData.frameData;
@@ -218,6 +224,7 @@ namespace UnityEngine.Rendering.Universal.Internal
                 }
             }
         }
+#endif
 
         private static void ExecutePass(RasterCommandBuffer cmd, PassData data, RTHandle source, RTHandle destination, UniversalCameraData cameraData)
         {
@@ -292,9 +299,12 @@ namespace UnityEngine.Rendering.Universal.Internal
                 // This is a screen-space pass, make sure foveated rendering is disabled for non-uniform renders
                 bool passSupportsFoveation = !XRSystem.foveatedRenderingCaps.HasFlag(FoveatedRenderingCaps.NonUniformRaster);
                 builder.EnableFoveatedRasterization(cameraData.xr.supportsFoveatedRendering && passSupportsFoveation);
+                builder.SetExtendedFeatureFlags(ExtendedFeatureFlags.MultiviewRenderRegionsCompatible);
 
-                // Optimization: In XR, we don't have split screen use case. The access flag can be set to WriteAll here, so engine will set loadOperation to DontCare down to the pipe.
-                if (cameraData.xr.enabled)
+                // Optimization: In XR, we don't have split screen use case.
+                // The access flag can be set to WriteAll if there is a full screen blit and no alpha blending,
+                // so engine will set loadOperation to DontCare down to the pipe.
+                if (cameraData.xr.enabled && cameraData.isDefaultViewport && !outputsAlpha)
                     targetAccessFlag =  AccessFlags.WriteAll;
 #endif
                 builder.SetRenderAttachment(dest, 0, targetAccessFlag);

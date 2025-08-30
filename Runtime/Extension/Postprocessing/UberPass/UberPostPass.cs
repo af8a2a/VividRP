@@ -472,15 +472,14 @@ namespace UnityEngine.Rendering.Universal
             importColorParams.clearColor = Color.black;
             importColorParams.discardOnLastUse = cameraData.resolveFinalTarget;  // check if last camera in the stack
 
-            var destTexture = renderGraph.ImportTexture(cameraData.urpRenderer.nextRenderGraphCameraColorHandle);
-            //     renderGraph.CreateTexture(new TextureDesc(cameraData.scaledWidth, cameraData.scaledHeight)
-            // {
-            //     format = renderGraph.GetTextureDesc(source).format,
-            //     enableRandomWrite = true,
-            //     name = "UberPost Texture",
-            //     clearBuffer = true,
-            // });
-            //
+            var destTexture = renderGraph.CreateTexture(new TextureDesc(cameraData.scaledWidth, cameraData.scaledHeight)
+            {
+                format = renderGraph.GetTextureDesc(source).format,
+                enableRandomWrite = true,
+                name = "UberPost Texture",
+                clearBuffer = true,
+            });
+            
             using (var builder = renderGraph.AddRasterRenderPass<UberPostPassData>("Vivid UberPost", out var passData))
             {
                 passData.destTexture = destTexture;

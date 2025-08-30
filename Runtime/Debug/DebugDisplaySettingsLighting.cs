@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
 using NameAndTooltip = UnityEngine.Rendering.DebugUI.Widget.NameAndTooltip;
 
@@ -7,6 +8,7 @@ namespace UnityEngine.Rendering.Universal
     /// <summary>
     /// Lighting-related Rendering Debugger settings.
     /// </summary>
+    [URPHelpURL("features/rendering-debugger-reference", "lighting")]
     public class DebugDisplaySettingsLighting : IDebugDisplaySettingsData
     {
         /// <summary>
@@ -171,7 +173,6 @@ namespace UnityEngine.Rendering.Universal
         }
 
         [DisplayInfo(name = "Lighting", order = 3)]
-        [URPHelpURL("features/rendering-debugger-reference", "lighting")]
         internal class SettingsPanel : DebugDisplaySettingsPanel<DebugDisplaySettingsLighting>
         {
             public SettingsPanel(DebugDisplaySettingsLighting data)
@@ -183,7 +184,6 @@ namespace UnityEngine.Rendering.Universal
                 {
                     displayName = "Lighting Debug Modes",
                     flags = DebugUI.Flags.FrequentlyUsed,
-                    isHeader = true,
                     opened = true,
                     children =
                     {

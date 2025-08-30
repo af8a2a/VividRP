@@ -24,9 +24,7 @@ namespace UnityEditor.Rendering.Universal
             Emission = 1 << 2,
             Rendering = 1 << 3,
             Shadows = 1 << 4,
-            LightCookie = 1 << 5,
-            Contribution = 1 << 6
-
+            LightCookie = 1 << 5
         }
 
         static readonly ExpandedState<Expandable, Light> k_ExpandedState = new(~-1, "URP");
@@ -50,20 +48,6 @@ namespace UnityEditor.Rendering.Universal
                 Expandable.General,
                 k_ExpandedState,
                 DrawGeneralContent),
-
-            #region Extension
-
-            CED.Conditional(
-                (serializedLight, editor) => !serializedLight.settings.lightType.hasMultipleDifferentValues &&
-                                             serializedLight.settings.light.type == LightType.Directional,
-                CED.FoldoutGroup(LightUI.Styles.shapeHeader, Expandable.Shape, k_ExpandedState, DrawDirectionalShapeContent)),
-            CED.Conditional(
-                (serializedLight, editor) =>
-                    !serializedLight.settings.lightType.hasMultipleDifferentValues && serializedLight.settings.light.type == LightType.Point,
-                CED.FoldoutGroup(LightUI.Styles.shapeHeader, Expandable.Shape, k_ExpandedState, DrawPointShapeContent)),
-
-            #endregion
-
             CED.Conditional(
                 (serializedLight, editor) => !serializedLight.settings.lightType.hasMultipleDifferentValues && serializedLight.settings.light.type == LightType.Spot,
                 CED.FoldoutGroup(LightUI.Styles.shapeHeader, Expandable.Shape, k_ExpandedState, DrawSpotShapeContent)),
@@ -82,8 +66,6 @@ namespace UnityEditor.Rendering.Universal
                 CED.Group(
                     LightUI.DrawColor,
                     DrawEmissionContent)),
-
-
             CED.FoldoutGroup(LightUI.Styles.renderingHeader,
                 Expandable.Rendering,
                 k_ExpandedState,
@@ -265,11 +247,7 @@ namespace UnityEditor.Rendering.Universal
 
         static void DrawEmissionContent(UniversalRenderPipelineSerializedLight serializedLight, Editor owner)
         {
-             DrawLightIntensity(serializedLight, owner);
-             
-#if false
             serializedLight.settings.DrawIntensity();
-#endif
             serializedLight.settings.DrawBounceIntensity();
 
             if (!serializedLight.settings.lightType.hasMultipleDifferentValues)
@@ -399,6 +377,11 @@ namespace UnityEditor.Rendering.Universal
                     {
                         EditorGUI.BeginChangeCheck();
                         EditorGUILayout.PropertyField(serializedLight.customShadowLayers, Styles.customShadowLayers);
+                        if (serializedLight.customShadowLayers.boolValue)
+                        {
+                            using (new EditorGUI.IndentLevelScope()) 
+                                EditorGUILayout.PropertyField(serializedLight.shadowRenderingLayers, Styles.ShadowLayer);
+                        }
                         // Undo the changes in the light component because the SyncLightAndShadowLayers will change the value automatically when link is ticked
                         if (EditorGUI.EndChangeCheck())
                         {
@@ -410,20 +393,6 @@ namespace UnityEditor.Rendering.Universal
                             {
                                 serializedLight.serializedAdditionalDataObject.ApplyModifiedProperties(); // we need to push above modification the modification on object as it is used to sync
                                 SyncLightAndShadowLayers(serializedLight, serializedLight.renderingLayers);
-                            }
-                        }
-
-                        if (serializedLight.customShadowLayers.boolValue)
-                        {
-                            using (new EditorGUI.IndentLevelScope())
-                            {
-                                EditorGUI.BeginChangeCheck();
-                                EditorUtils.DrawRenderingLayerMask(serializedLight.shadowRenderingLayers, Styles.ShadowLayer);
-                                if (EditorGUI.EndChangeCheck())
-                                {
-                                    serializedLight.settings.light.renderingLayerMask = serializedLight.shadowRenderingLayers.intValue;
-                                    serializedLight.Apply();
-                                }
                             }
                         }
                     }

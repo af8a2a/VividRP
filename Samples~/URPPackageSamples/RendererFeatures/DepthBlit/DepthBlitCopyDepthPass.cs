@@ -49,6 +49,7 @@ public class DepthBlitCopyDepthPass : ScriptableRenderPass
         m_Keyword_OutputDepth = GlobalKeyword.Create(ShaderKeywordStrings._OUTPUT_DEPTH);
     }
 
+#if URP_COMPATIBILITY_MODE // Compatibility Mode is being removed
 #pragma warning disable 618, 672 // Type or member is obsolete, Member overrides obsolete member
 
     // Set the RTHandle as the output target in the Compatibility mode.
@@ -92,6 +93,7 @@ public class DepthBlitCopyDepthPass : ScriptableRenderPass
     }
 
 #pragma warning restore 618, 672
+#endif
 
     // Unity calls the RecordRenderGraph method to add and configure one or more render passes in the render graph system.
     public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
@@ -128,7 +130,6 @@ public class DepthBlitCopyDepthPass : ScriptableRenderPass
             builder.UseTexture(src, AccessFlags.Read);
             builder.SetRenderAttachment(dest, 0, AccessFlags.Write);
             builder.AllowGlobalStateModification(true);
-            builder.AllowPassCulling(false);
 
             builder.SetRenderFunc((PassData data, RasterGraphContext context) =>
             {

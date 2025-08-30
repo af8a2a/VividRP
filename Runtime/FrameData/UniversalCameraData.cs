@@ -7,7 +7,7 @@ namespace UnityEngine.Rendering.Universal
     /// <summary>
     /// Class that holds settings related to camera.
     /// </summary>
-    public class UniversalCameraData : ContextItem
+    public partial class UniversalCameraData : ContextItem
     {
         // Internal camera data as we are not yet sure how to expose View in stereo context.
         // We might change this API soon.
@@ -39,7 +39,7 @@ namespace UnityEngine.Rendering.Universal
 #if ENABLE_VR && ENABLE_XR_MODULE
             // Multipass always needs update to prevent wrong view projection matrix set by other passes
             bool needsUpdate = !m_InitBuiltinXRConstants || m_CachedRenderIntoTextureXR != renderIntoTexture || !xr.singlePassEnabled;
-            if (needsUpdate && xr.enabled)
+            if (needsUpdate && xr.enabled )
             {
                 var projection0 = GetProjectionMatrix();
                 var view0 = GetViewMatrix();
@@ -62,10 +62,7 @@ namespace UnityEngine.Rendering.Universal
                     //Multipass uses the same value as a normal render, and doesn't use the value set for stereo,
                     //which is why you need to set a value like unity_MatrixInvV.
                     //The values below should be the same as set in the SetCameraMatrices function in ScriptableRenderer.cs.
-                    Matrix4x4
-                        gpuProjectionMatrix =
-                            GetGPUProjectionMatrix(
-                                renderIntoTexture); // TODO: invProjection might NOT match the actual projection (invP*P==I) as the target flip logic has diverging paths.
+                    Matrix4x4 gpuProjectionMatrix = GetGPUProjectionMatrix(renderIntoTexture); // TODO: invProjection might NOT match the actual projection (invP*P==I) as the target flip logic has diverging paths.
                     Matrix4x4 inverseViewMatrix = Matrix4x4.Inverse(view0);
                     Matrix4x4 inverseProjectionMatrix = Matrix4x4.Inverse(gpuProjectionMatrix);
                     Matrix4x4 inverseViewProjection = inverseViewMatrix * inverseProjectionMatrix;
@@ -125,44 +122,10 @@ namespace UnityEngine.Rendering.Universal
 #endif
             return m_ProjectionMatrix;
         }
-
-        /// <summary>
-        /// Returns the camera GPU projection matrix. This contains platform specific changes to handle y-flip and reverse z. Includes camera jitter if required by active features.
-        /// Similar to <c>GL.GetGPUProjectionMatrix</c> but queries URP internal state to know if the pipeline is rendering to render texture.
-        /// For more info on platform differences regarding camera projection check: https://docs.unity3d.com/Manual/SL-PlatformDifferences.html
-        /// </summary>
-        /// <param name="viewIndex"> View index in case of stereo rendering. By default <c>viewIndex</c> is set to 0. </param>
-        /// <seealso cref="GL.GetGPUProjectionMatrix(Matrix4x4, bool)"/>
-        /// <returns></returns>
-        public Matrix4x4 GetGPUProjectionMatrix(int viewIndex = 0)
-        {
-            // Disable obsolete warning for internal usage
-#pragma warning disable CS0618
-            // GetGPUProjectionMatrix takes a projection matrix and returns a GfxAPI adjusted version, does not set or get any state.
-            return m_JitterMatrix * GL.GetGPUProjectionMatrix(GetProjectionMatrixNoJitter(viewIndex), IsCameraProjectionMatrixFlipped());
-#pragma warning restore CS0618
-        }
-
-        /// <summary>
-        /// Returns the camera GPU projection matrix. This contains platform specific changes to handle y-flip and reverse z. Does not include any camera jitter.
-        /// Similar to <c>GL.GetGPUProjectionMatrix</c> but queries URP internal state to know if the pipeline is rendering to render texture.
-        /// For more info on platform differences regarding camera projection check: https://docs.unity3d.com/Manual/SL-PlatformDifferences.html
-        /// </summary>
-        /// <param name="viewIndex"> View index in case of stereo rendering. By default <c>viewIndex</c> is set to 0. </param>
-        /// <seealso cref="GL.GetGPUProjectionMatrix(Matrix4x4, bool)"/>
-        /// <returns></returns>
-        public Matrix4x4 GetGPUProjectionMatrixNoJitter(int viewIndex = 0)
-        {
-            // Disable obsolete warning for internal usage
-#pragma warning disable CS0618
-            // GetGPUProjectionMatrix takes a projection matrix and returns a GfxAPI adjusted version, does not set or get any state.
-            return GL.GetGPUProjectionMatrix(GetProjectionMatrixNoJitter(viewIndex), IsCameraProjectionMatrixFlipped());
-#pragma warning restore CS0618
-        }
-
+        
         internal Matrix4x4 GetGPUProjectionMatrix(bool renderIntoTexture, int viewIndex = 0)
         {
-            return m_JitterMatrix * GL.GetGPUProjectionMatrix(GetProjectionMatrix(viewIndex), renderIntoTexture);
+            return GL.GetGPUProjectionMatrix(GetProjectionMatrix(viewIndex), renderIntoTexture);
         }
 
         /// <summary>
@@ -175,14 +138,14 @@ namespace UnityEngine.Rendering.Universal
         /// By obtaining the pixelWidth of the camera and taking into account the render scale
         /// The min dimension is 1.
         /// </summary>
-        public int scaledWidth => Mathf.Max(1, (int)(camera.pixelWidth * renderScale));
+        public int scaledWidth;
 
         /// <summary>
         /// Returns the scaled height of the Camera
         /// By obtaining the pixelHeight of the camera and taking into account the render scale
         /// The min dimension is 1.
         /// </summary>
-        public int scaledHeight => Mathf.Max(1, (int)(camera.pixelHeight * renderScale));
+        public int scaledHeight;
 
 
         #region Extension
@@ -207,11 +170,7 @@ namespace UnityEngine.Rendering.Universal
         /// The camera history texture manager. Used to access camera history from a ScriptableRenderPass.
         /// </summary>
         /// <seealso cref="ScriptableRenderPass"/>
-        public UniversalCameraHistory historyManager
-        {
-            get => m_HistoryManager;
-            set => m_HistoryManager = value;
-        }
+        public UniversalCameraHistory historyManager { get => m_HistoryManager; set => m_HistoryManager = value; }
 
         /// <summary>
         /// The camera render type used for camera stacking.
@@ -317,9 +276,7 @@ namespace UnityEngine.Rendering.Universal
 #if ENABLE_VR && ENABLE_XR_MODULE
                 // For some XR platforms we need to encode in SRGB but can't use a _SRGB format texture, only required for 8bit per channel 32 bit formats.
                 if (xr.enabled)
-                    return !xr.renderTargetDesc.sRGB &&
-                           (xr.renderTargetDesc.graphicsFormat == GraphicsFormat.R8G8B8A8_UNorm ||
-                            xr.renderTargetDesc.graphicsFormat == GraphicsFormat.B8G8R8A8_UNorm) && (QualitySettings.activeColorSpace == ColorSpace.Linear);
+                    return !xr.renderTargetDesc.sRGB && (xr.renderTargetDesc.graphicsFormat == GraphicsFormat.R8G8B8A8_UNorm || xr.renderTargetDesc.graphicsFormat == GraphicsFormat.B8G8R8A8_UNorm) && (QualitySettings.activeColorSpace == ColorSpace.Linear);
 #endif
 
                 return targetTexture == null && Display.main.requiresSrgbBlitToBackbuffer;
@@ -449,31 +406,7 @@ namespace UnityEngine.Rendering.Universal
 #endif
             return !isBackbuffer;
         }
-
-        /// <summary>
-        /// True if the camera device projection matrix is flipped. This happens when the pipeline is rendering
-        /// to a render texture in non OpenGL platforms. If you are doing a custom Blit pass to copy camera textures
-        /// (_CameraColorTexture, _CameraDepthAttachment) you need to check this flag to know if you should flip the
-        /// matrix when rendering with for cmd.Draw* and reading from camera textures.
-        /// </summary>
-        /// <returns> True if the camera device projection matrix is flipped. </returns>
-        public bool IsCameraProjectionMatrixFlipped()
-        {
-            if (!SystemInfo.graphicsUVStartsAtTop)
-                return false;
-
-            // Users only have access to CameraData on URP rendering scope. The current renderer should never be null.
-            var renderer = ScriptableRenderer.current;
-            Debug.Assert(renderer != null, "IsCameraProjectionMatrixFlipped is being called outside camera rendering scope.");
-
-            // Disable obsolete warning for internal usage
-#pragma warning disable CS0618
-            if (renderer != null)
-                return IsHandleYFlipped(renderer.cameraColorTargetHandle) || targetTexture != null;
-#pragma warning restore CS0618
-
-            return true;
-        }
+        
 
         /// <summary>
         /// True if the render target's projection matrix is flipped. This happens when the pipeline is rendering
@@ -513,13 +446,13 @@ namespace UnityEngine.Rendering.Universal
             UniversalAdditionalCameraData additionalCameraData;
             camera.TryGetComponent(out additionalCameraData);
 
-            return IsTemporalAARequested() // Requested
-                   && postProcessEnabled // Postprocessing Enabled
-                   && (taaHistory != null) // Initialized
-                   && (cameraTargetDescriptor.msaaSamples == 1) // No MSAA
-                   && !(additionalCameraData?.renderType == CameraRenderType.Overlay || additionalCameraData?.cameraStack.Count > 0) // No Camera stack
-                   && !camera.allowDynamicResolution // No Dynamic Resolution
-                   && renderer.SupportsMotionVectors(); // Motion Vectors implemented
+            return IsTemporalAARequested()                                                                                            // Requested
+                   && postProcessEnabled                                                                                              // Postprocessing Enabled
+                   && (taaHistory != null)                                                                                            // Initialized
+                   && (cameraTargetDescriptor.msaaSamples == 1)                                                                       // No MSAA
+                   && !(additionalCameraData?.renderType == CameraRenderType.Overlay || additionalCameraData?.cameraStack.Count > 0)  // No Camera stack
+                   && !camera.allowDynamicResolution                                                                                  // No Dynamic Resolution
+                   && renderer.SupportsMotionVectors();                                                                               // Motion Vectors implemented
         }
 
         /// <summary>
@@ -677,7 +610,8 @@ namespace UnityEngine.Rendering.Universal
 
         // TAA settings.
         internal TemporalAA.Settings taaSettings;
-        
+
+        // Post-process history reset has been triggered for this camera.
         internal bool resetHistory
         {
             get => taaSettings.resetHistoryFrames != 0 || historyFrameRTSystem.historyFrameCount <= 1 ;

@@ -6,4 +6,4 @@ uid: urp-api-index
 
 This is the documentation for the scripting APIs of the Universal Render Pipeline (URP) package.
 
-**Note**:  URP is built on the Scriptable Render Pipeline (SRP) Core package, and uses some class types that you can only find in the [SRP Core scripting API](https://docs.unity3d.com/Packages/com.unity.render-pipelines.core@17.1/api/index.html).
+**Note**:  URP is built on the Scriptable Render Pipeline (SRP) Core package, and uses some class types that you can only find in the [SRP Core scripting API](https://docs.unity3d.com/Packages/com.unity.render-pipelines.core@17.3/api/index.html).

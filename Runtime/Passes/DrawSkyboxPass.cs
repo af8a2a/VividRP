@@ -10,7 +10,7 @@ namespace UnityEngine.Rendering.Universal
     ///
     /// This pass renders the standard Unity skybox.
     /// </summary>
-    public class DrawSkyboxPass : ScriptableRenderPass
+    public partial class DrawSkyboxPass : ScriptableRenderPass
     {
         /// <summary>
         /// Creates a new <c>DrawSkyboxPass</c> instance.
@@ -23,8 +23,9 @@ namespace UnityEngine.Rendering.Universal
             renderPassEvent = evt;
         }
 
+#if URP_COMPATIBILITY_MODE
         /// <inheritdoc/>
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             UniversalCameraData cameraData = renderingData.frameData.Get<UniversalCameraData>();
@@ -43,7 +44,6 @@ namespace UnityEngine.Rendering.Universal
             ExecutePass(CommandBufferHelpers.GetRasterCommandBuffer(renderingData.commandBuffer), cameraData.xr, skyRendererList);
         }
 
-        // For non-RG path
         private RendererList CreateSkyboxRendererList(ScriptableRenderContext context, UniversalCameraData cameraData)
         {
             var skyRendererList = new RendererList();
@@ -71,8 +71,8 @@ namespace UnityEngine.Rendering.Universal
 
             return skyRendererList;
         }
+#endif
 
-        // For RG path
         private RendererListHandle CreateSkyBoxRendererList(RenderGraph renderGraph, UniversalCameraData cameraData)
         {
             var skyRendererListHandle = new RendererListHandle();
@@ -115,7 +115,6 @@ namespace UnityEngine.Rendering.Universal
 #endif
         }
 
-        // All the rest below is Render Graph specific
         private class PassData
         {
             internal XRPass xr;
@@ -159,6 +158,7 @@ namespace UnityEngine.Rendering.Universal
                 {
                     bool passSupportsFoveation = cameraData.xrUniversal.canFoveateIntermediatePasses || resourceData.isActiveTargetBackBuffer;
                     builder.EnableFoveatedRasterization(cameraData.xr.supportsFoveatedRendering && passSupportsFoveation);
+                    builder.SetExtendedFeatureFlags(ExtendedFeatureFlags.MultiviewRenderRegionsCompatible);
                 }
 
                 builder.SetRenderFunc((PassData data, RasterGraphContext context) =>

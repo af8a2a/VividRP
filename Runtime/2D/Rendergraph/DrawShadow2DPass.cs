@@ -14,11 +14,13 @@ namespace UnityEngine.Rendering.Universal
         private static readonly ProfilingSampler m_ProfilingSampler = new ProfilingSampler(k_ShadowPass);
         private static readonly ProfilingSampler m_ProfilingSamplerVolume = new ProfilingSampler(k_ShadowVolumetricPass);
 
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
+#if URP_COMPATIBILITY_MODE
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             throw new NotImplementedException();
         }
+#endif
 
         private static void ExecuteShadowPass(UnsafeCommandBuffer cmd, PassData passData, Light2D light, int batchIndex)
         {
@@ -62,7 +64,6 @@ namespace UnityEngine.Rendering.Universal
 
                 builder.UseTexture(passData.shadowDepth, AccessFlags.Write);
 
-                builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);
 
                 builder.SetRenderFunc((PassData data, UnsafeGraphContext context) =>

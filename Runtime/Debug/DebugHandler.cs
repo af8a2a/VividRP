@@ -75,16 +75,8 @@ namespace UnityEngine.Rendering.Universal
 
         readonly Material m_ReplacementMaterial;
         readonly Material m_HDRDebugViewMaterial;
-        readonly Material m_TileClusterDebugMaterial;
 
         HDRDebugViewPass m_HDRDebugViewPass;
-
-        #region Extension
-
-        TileClusterDebugPass m_TileClusterDebugPass;
-        RaytracingRTASDebugPass m_RaytracingRTASDebugPass;
-        #endregion
-        
         RTHandle m_DebugScreenColorHandle;
         RTHandle m_DebugScreenDepthHandle;
 
@@ -141,14 +133,6 @@ namespace UnityEngine.Rendering.Universal
         internal ref RTHandle DebugScreenDepthHandle => ref m_DebugScreenDepthHandle;
         internal HDRDebugViewPass hdrDebugViewPass => m_HDRDebugViewPass;
 
-        #region Extension
-
-        internal TileClusterDebugPass tileClusterDebugPass => m_TileClusterDebugPass;
-
-        internal RaytracingRTASDebugPass raytracingRTASDebugPass => m_RaytracingRTASDebugPass;
-        
-        #endregion
-
         internal bool HDRDebugViewIsActive(bool resolveFinalTarget)
         {
             // HDR debug views should only apply to the last camera in the stack
@@ -157,7 +141,7 @@ namespace UnityEngine.Rendering.Universal
 
         internal bool WriteToDebugScreenTexture(bool resolveFinalTarget)
         {
-            return HDRDebugViewIsActive(resolveFinalTarget)&&RTASDebugIsActive(resolveFinalTarget);
+            return HDRDebugViewIsActive(resolveFinalTarget);
         }
 
         internal bool IsScreenClearNeeded
@@ -178,6 +162,8 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
+        internal bool IsDepthPrimingCompatible => RenderingSettings.sceneOverrideMode != DebugSceneOverrideMode.Wireframe;
+
         internal int stpDebugViewIndex { get { return RenderingSettings.stpDebugViewIndex; } }
 
         internal DebugHandler()
@@ -188,12 +174,9 @@ namespace UnityEngine.Rendering.Universal
             {
                 m_ReplacementMaterial = (shaders.debugReplacementPS != null) ? CoreUtils.CreateEngineMaterial(shaders.debugReplacementPS) : null;
                 m_HDRDebugViewMaterial = (shaders.hdrDebugViewPS != null) ? CoreUtils.CreateEngineMaterial(shaders.hdrDebugViewPS) : null;
-                m_TileClusterDebugMaterial = (shaders.tileClusterDebugPS != null) ? CoreUtils.CreateEngineMaterial(shaders.tileClusterDebugPS) : null;
             }
 
             m_HDRDebugViewPass = new HDRDebugViewPass(m_HDRDebugViewMaterial);
-            m_TileClusterDebugPass = new TileClusterDebugPass(m_TileClusterDebugMaterial);
-            m_RaytracingRTASDebugPass = new RaytracingRTASDebugPass();
 
             m_RuntimeTextures = GraphicsSettings.GetRenderPipelineSettings<UniversalRenderPipelineRuntimeTextures>();
             if (m_RuntimeTextures != null)
@@ -213,8 +196,6 @@ namespace UnityEngine.Rendering.Universal
             m_debugDisplayConstant.Dispose();
             CoreUtils.Destroy(m_HDRDebugViewMaterial);
             CoreUtils.Destroy(m_ReplacementMaterial);
-            CoreUtils.Destroy(m_TileClusterDebugMaterial);
-
         }
 
         internal bool IsActiveForCamera(bool isPreviewCamera)
@@ -460,7 +441,6 @@ namespace UnityEngine.Rendering.Universal
                 if (m_DebugFontTexture != null)
                     passData.debugFontTextureHandle = renderGraph.ImportTexture(m_DebugFontTexture);
 
-                builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);
 
                 if (passData.debugRenderTargetHandle.IsValid())
@@ -560,59 +540,12 @@ namespace UnityEngine.Rendering.Universal
             using (var builder = renderGraph.AddRasterRenderPass<DebugSetupPassData>(s_DebugSetupSampler.name, out var passData, s_DebugSetupSampler))
             {
                 InitDebugSetupPassData(passData, isPreviewCamera);
-                builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);
                 builder.SetRenderFunc(static (DebugSetupPassData data, RasterGraphContext context) =>
                 {
                     Setup(context.cmd, data);
                 });
             }
-        }
-        
-        
-        #region ClusterLighting
-
-        internal bool TileClusterDebugIsActive(bool resolveFinalTarget)
-        {
-            // TileC luster debug views should only apply to the last camera in the stack
-            return DebugDisplaySettings.lightingSettings.tileClusterDebugMode != DebugTileClusterMode.None && resolveFinalTarget;
-        }
-
-        #endregion
-
-        #region Raytracing
-
-        internal bool RTASDebugIsActive(bool resolveFinalTarget)
-        {
-            // TileC luster debug views should only apply to the last camera in the stack
-            return DebugDisplaySettings.lightingSettings.rtasDebugView != RTASDebugView.None && resolveFinalTarget;
-        }
-
-        #endregion
-
-
-        [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
-        internal void Render(RenderGraph renderGraph, ContextContainer frameData, UniversalCameraData cameraData, TextureHandle srcColor, TextureHandle overlayTexture, TextureHandle dstColor)
-        {
-            if (IsActiveForCamera(cameraData.isPreviewCamera) && HDRDebugViewIsActive(cameraData.resolveFinalTarget))
-            {
-                m_HDRDebugViewPass.RenderHDRDebug(renderGraph, cameraData, srcColor, overlayTexture, dstColor, LightingSettings.hdrDebugMode);
-            }
-
-            if (IsActiveForCamera(cameraData.isPreviewCamera) && TileClusterDebugIsActive(cameraData.resolveFinalTarget))
-            {
-                m_TileClusterDebugPass.RenderTileClusterDebug(renderGraph, frameData, cameraData, LightingSettings.tileClusterDebugMode, LightingSettings.clusterDebugID, LightingSettings.clusterCategoryDebugMode);
-            }
-            //
-            // if (IsActiveForCamera(cameraData.isPreviewCamera) && RTASDebugIsActive(cameraData.resolveFinalTarget))
-            // {
-            //
-            //     m_RaytracingRTASDebugPass.RenderRTASDebug(renderGraph,
-            //         ref srcColor,
-            //         cameraData,
-            //       LightingSettings.rtasDebugView, LightingSettings.rtasDebugMode);
-            // }
-            //
         }
 
         [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]

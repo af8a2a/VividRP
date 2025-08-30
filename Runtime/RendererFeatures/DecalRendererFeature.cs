@@ -1,7 +1,10 @@
 using System.Diagnostics;
 using UnityEngine.Assertions;
 using UnityEngine.Rendering.Universal.Internal;
+using System;
+
 #if UNITY_EDITOR
+using UnityEditor.Rendering;
 using ShaderKeywordFilter = UnityEditor.ShaderKeywordFilter;
 #endif
 
@@ -98,6 +101,9 @@ namespace UnityEngine.Rendering.Universal
                 DecalProjector.onDecalPropertyChange += OnDecalPropertyChange;
                 DecalProjector.onDecalMaterialChange += OnDecalMaterialChange;
                 DecalProjector.onAllDecalPropertyChange += OnAllDecalPropertyChange;
+#if UNITY_EDITOR
+                RenderPipelineEditorUtility.onRenderingLayerCountChanged += OnAllDecalPropertyChange;
+#endif
             }
 
             m_ReferenceCounter++;
@@ -129,6 +135,9 @@ namespace UnityEngine.Rendering.Universal
             DecalProjector.onDecalPropertyChange -= OnDecalPropertyChange;
             DecalProjector.onDecalMaterialChange -= OnDecalMaterialChange;
             DecalProjector.onAllDecalPropertyChange -= OnAllDecalPropertyChange;
+#if UNITY_EDITOR
+            RenderPipelineEditorUtility.onRenderingLayerCountChanged -= OnAllDecalPropertyChange;
+#endif
         }
 
         private void OnDecalAdd(DecalProjector decalProjector)
@@ -168,7 +177,7 @@ namespace UnityEngine.Rendering.Universal
     [DisallowMultipleRendererFeature("Decal")]
     [Tooltip("With this Renderer Feature, Unity can project specific Materials (decals) onto other objects in the Scene.")]
     [URPHelpURL("renderer-feature-decal")]
-    public class DecalRendererFeature : ScriptableRendererFeature
+    public partial class DecalRendererFeature : ScriptableRendererFeature
     {
         private static SharedDecalEntityManager sharedDecalEntityManager { get; } = new SharedDecalEntityManager();
 
@@ -206,6 +215,7 @@ namespace UnityEngine.Rendering.Universal
         // GBuffer
         private DecalGBufferRenderPass m_GBufferRenderPass;
         private DecalDrawGBufferSystem m_DrawGBufferSystem;
+
         private DeferredLights m_DeferredLights;
 
         // Internal / Constants
@@ -292,7 +302,9 @@ namespace UnityEngine.Rendering.Universal
             switch (m_Settings.technique)
             {
                 case DecalTechniqueOption.Automatic:
-                    if (IsAutomaticDBuffer() || isDeferred && needsGBufferAccurateNormals)
+                    if (isGLDevice)
+                        technique = isDeferred ? DecalTechnique.GBuffer : DecalTechnique.ScreenSpace;
+                    else if (IsAutomaticDBuffer() || isDeferred && needsGBufferAccurateNormals)
                         technique = DecalTechnique.DBuffer;
                     else if (isDeferred)
                         technique = DecalTechnique.GBuffer;
@@ -407,9 +419,7 @@ namespace UnityEngine.Rendering.Universal
                     break;
 
                 case DecalTechnique.GBuffer:
-
                     m_DeferredLights = universalRenderer.deferredLights;
-
                     m_DrawGBufferSystem = new DecalDrawGBufferSystem(m_DecalEntityManager);
                     m_GBufferRenderPass = new DecalGBufferRenderPass(m_ScreenSpaceSettings,
                         intermediateRendering ? m_DrawGBufferSystem : null, m_Settings.decalLayers);
@@ -506,7 +516,7 @@ namespace UnityEngine.Rendering.Universal
                 else
                 {
                     m_CopyDepthPass.CopyToDepth = true;
-                    m_CopyDepthPass.MssaSamples = 1;
+                    m_CopyDepthPass.MsaaSamples = 1;
                 }
             }
 
@@ -527,17 +537,18 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
+#if URP_COMPATIBILITY_MODE
         internal override bool SupportsNativeRenderPass()
         {
             return m_Technique == DecalTechnique.GBuffer || m_Technique == DecalTechnique.ScreenSpace;
         }
 
         /// <inheritdoc />
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete + " #from(6000.2)")]
         public override void SetupRenderPasses(ScriptableRenderer renderer, in RenderingData renderingData)
         {
             // Disable obsolete warning for internal usage
             #pragma warning disable CS0618
-
             if (renderer.cameraColorTargetHandle == null)
                 return;
 
@@ -564,7 +575,7 @@ namespace UnityEngine.Rendering.Universal
                         m_DBufferRenderPass.dBufferDepth
                     );
                     m_CopyDepthPass.CopyToDepth = true;
-                    m_CopyDepthPass.MssaSamples = 1;
+                    m_CopyDepthPass.MsaaSamples = 1;
                 }
             }
             else if (m_Technique == DecalTechnique.GBuffer && m_DeferredLights.UseFramebufferFetch)
@@ -572,13 +583,16 @@ namespace UnityEngine.Rendering.Universal
                 // Need to call Configure for both of these passes to setup input attachments as first frame otherwise will raise errors
                 m_GBufferRenderPass.Configure(null, renderingData.cameraData.cameraTargetDescriptor);
             }
-            #pragma warning restore CS0618
+        #pragma warning restore CS0618
         }
+#endif
 
         /// <inheritdoc />
         protected override void Dispose(bool disposing)
         {
+#if URP_COMPATIBILITY_MODE
             m_DBufferRenderPass?.Dispose();
+#endif
             m_CopyDepthPass?.Dispose();
 
             CoreUtils.Destroy(m_DBufferClearMaterial);
@@ -590,11 +604,11 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
-        [Conditional("ADAPTIVE_PERFORMANCE_4_0_0_OR_NEWER")]
+        [Conditional("ENABLE_ADAPTIVE_PERFORMANCE")]
         private void ChangeAdaptivePerformanceDrawDistances()
         {
-#if ADAPTIVE_PERFORMANCE_4_0_0_OR_NEWER
-            if (UniversalRenderPipeline.asset.useAdaptivePerformance)
+#if ENABLE_ADAPTIVE_PERFORMANCE
+            if (UniversalRenderPipeline.asset?.useAdaptivePerformance == true)
             {
                 if (m_DecalCreateDrawCallSystem != null)
                 {

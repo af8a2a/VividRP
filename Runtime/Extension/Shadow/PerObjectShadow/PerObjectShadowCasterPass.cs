@@ -179,29 +179,8 @@ namespace UnityEngine.Rendering.Universal
 
             return validObjectNum;
         }
-
-        /// <inheritdoc />
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
-        public override void Configure(CommandBuffer cmd, RenderTextureDescriptor cameraTextureDescriptor)
-        {
-            // We use RenderGraph
-
-            //ConfigureTarget(m_PerObjectShadowMapTexture);
-            //ConfigureClear(ClearFlag.All, Color.black);
-        }
-
-        /// <inheritdoc/>
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
-        public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
-        {
-            // We use RenderGraph
-
-            //ContextContainer frameData = renderingData.frameData;
-            //UniversalRenderingData universalRenderingData = frameData.Get<UniversalRenderingData>();
-            //RenderPerObjectTileShadowmap(ref context, ref renderingData);
-            //universalRenderingData.commandBuffer.SetGlobalTexture(m_PerObjectShadowmapID, m_PerObjectShadowMapTexture.nameID);
-        }
-
+        
+        
         void Clear()
         {
             for (int i = 0; i < m_SliceData.Length; ++i)

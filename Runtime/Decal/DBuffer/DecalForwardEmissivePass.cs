@@ -16,7 +16,10 @@ namespace UnityEngine.Rendering.Universal
         private FilteringSettings m_FilteringSettings;
         private List<ShaderTagId> m_ShaderTagIdList;
         private DecalDrawFowardEmissiveSystem m_DrawSystem;
+
+#if URP_COMPATIBILITY_MODE
         private PassData m_PassData;
+#endif
 
         public DecalForwardEmissivePass(DecalDrawFowardEmissiveSystem drawSystem)
         {
@@ -31,10 +34,13 @@ namespace UnityEngine.Rendering.Universal
             m_ShaderTagIdList.Add(new ShaderTagId(DecalShaderPassNames.DecalMeshForwardEmissive));
             m_ShaderTagIdList.Add(new ShaderTagId(DecalShaderPassNames.DecalProjectorForwardEmissive));
 
+#if URP_COMPATIBILITY_MODE
             m_PassData = new PassData();
+#endif
         }
 
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
+#if URP_COMPATIBILITY_MODE
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             InitPassData(ref m_PassData);
@@ -51,6 +57,7 @@ namespace UnityEngine.Rendering.Universal
                 ExecutePass(CommandBufferHelpers.GetRasterCommandBuffer(universalRenderingData.commandBuffer), m_PassData, rendererList);
             }
         }
+#endif
 
         private class PassData
         {

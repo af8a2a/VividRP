@@ -139,8 +139,6 @@ Light UnityLightFromPunctualLightDataAndWorldSpacePosition(PunctualLightData pun
     }
 
     light.layerMask = punctualLightData.layerMask;
-    //Add
-    light.shadowScatter = light.distanceAttenuation * light.shadowAttenuation;
 
     return light;
 }
@@ -171,9 +169,7 @@ half4 SampleAdditionalLightCookieDeferred(int perObjectLightIndex, float3 sample
 Light GetStencilLight(float3 posWS, float2 screen_uv, half4 shadowMask, uint materialFlags)
 {
     Light unityLight;
-    //Add
-    //Pre init
-    unityLight.shadowScatter = 1;
+
     bool materialReceiveShadowsOff = (materialFlags & kMaterialFlagReceiveShadowsOff) != 0;
 
     uint lightLayerMask =_LightLayerMask;
@@ -194,8 +190,6 @@ Light GetStencilLight(float3 posWS, float2 screen_uv, half4 shadowMask, uint mat
                     float4 shadowCoord = float4(0, 0, 0, 0);
                 #endif
                 unityLight.shadowAttenuation = MainLightShadow(shadowCoord, posWS.xyz, shadowMask, _MainLightOcclusionProbes);
-                //Add
-                unityLight.shadowScatter = MainLightShadowScatter(unityLight.shadowAttenuation * unityLight.distanceAttenuation);
             }
 
             #if defined(_LIGHT_COOKIES)
@@ -246,8 +240,6 @@ Light GetStencilLight(float3 posWS, float2 screen_uv, half4 shadowMask, uint mat
             }
         #endif
     #endif
-    unityLight.shadowScatter = EvaluateShadowScatter(unityLight.shadowAttenuation * unityLight.distanceAttenuation);
-
     return unityLight;
 }
 
@@ -318,7 +310,7 @@ half4 DeferredShading(Varyings input) : SV_Target
     inputData.viewDirectionWS = GetWorldSpaceNormalizeViewDir(posWS.xyz);
 
     #if defined(_LIT)
-        #if SHADER_API_MOBILE || SHADER_API_SWITCH
+        #if SHADER_API_MOBILE || SHADER_API_SWITCH || SHADER_API_SWITCH2
         // Specular highlights are still silenced by setting specular to 0.0 during gbuffer pass and GPU timing is still reduced.
         bool materialSpecularHighlightsOff = false;
         #else

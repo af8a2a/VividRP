@@ -174,7 +174,6 @@ namespace UnityEngine.Rendering.Universal
             m_MaxShadowDistanceSq = cameraData.maxShadowDistance * cameraData.maxShadowDistance;
             m_CascadeBorder = shadowData.mainLightShadowCascadeBorder;
             m_CreateEmptyShadowmap = false;
-            useNativeRenderPass = true;
 
             return true;
         }
@@ -185,7 +184,6 @@ namespace UnityEngine.Rendering.Universal
                 return false;
 
             m_CreateEmptyShadowmap = true;
-            useNativeRenderPass = false;
 
             // Required for scene view camera(URP renderer not initialized)
             //if (ShadowUtils.ShadowRTReAllocateIfNeeded(ref m_EmptyLightShadowmapTexture, k_EmptyShadowMapDimensions, k_EmptyShadowMapDimensions, k_ShadowmapBufferBits, name: k_EmptyShadowMapName))

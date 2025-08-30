@@ -51,7 +51,7 @@ namespace UnityEditor.Rendering.Universal
 
         protected override bool IsMatchPropType(MaterialProperty property)
         {
-            return property.type == MaterialProperty.PropType.Vector;
+            return property.propertyType == UnityEngine.Rendering.ShaderPropertyType.Vector;
         }
 
         public void ApplyProperty(MaterialProperty prop)
@@ -116,8 +116,8 @@ namespace UnityEditor.Rendering.Universal
             if (!string.IsNullOrEmpty(_extraPropName))
             {
                 var extraProp = metaDatas.perMaterialData.GetPropDynamicData(_extraPropName).property;
-                if (extraProp != null && (extraProp.type == MaterialProperty.PropType.Float ||
-                                          extraProp.type == MaterialProperty.PropType.Range))
+                if (extraProp != null && (extraProp.propertyType == UnityEngine.Rendering.ShaderPropertyType.Float ||
+                                          extraProp.propertyType == UnityEngine.Rendering.ShaderPropertyType.Range))
                 {
                     materialProperty.vectorValue = new Vector4(minf, maxf, z * extraProp.floatValue, w * (_useLimit == "true" ? 1 : extraProp.floatValue));
                     return;

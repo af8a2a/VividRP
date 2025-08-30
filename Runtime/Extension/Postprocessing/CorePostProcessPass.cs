@@ -110,81 +110,81 @@ namespace UnityEngine.Rendering.Universal
 
             #endregion
 
-
+            
             #region CMAA2
-
+            
             currentRT = _cmaa2Pass.Render(renderGraph, frameData, currentRT);
-
+            
             #endregion
-
+            
             #region SMAA
-
+            
             currentRT = _smaaPass.Render(renderGraph, frameData, currentRT);
-
+            
             #endregion
             
             #region Upscaler
-
-            currentRT = _superResolutionPass.Render(renderGraph, frameData, currentRT);
-
-            #endregion
-
-
-
-            #region PhysicallyDepthOfField
-
-            currentRT = _diaphragmDoFPass.Render(renderGraph, frameData, currentRT);
-
-            #endregion
-
             
-
+            currentRT = _superResolutionPass.Render(renderGraph, frameData, currentRT);
+            
+            #endregion
+            
+            
+            
+            #region PhysicallyDepthOfField
+            
+            currentRT = _diaphragmDoFPass.Render(renderGraph, frameData, currentRT);
+            
+            #endregion
+            
+            
+            
             #region MotionBlur
-
+            
             currentRT = _motionBlurPass.Render(renderGraph, frameData, currentRT);
-
+            
             #endregion
-
+            
             #region PaniniProjection
-
+            
             currentRT = _paniniProjectionPass.Render(renderGraph, frameData, currentRT);
-
+            
             #endregion
-
-
+            
+            
             #region Bloom
-
+            
             resourceData.bloomTexture = _urpBloomPass.Render(renderGraph, frameData, currentRT);
             resourceData.bloomTexture = _mobileBloomPass.Render(renderGraph, frameData, currentRT);
-
-            #endregion
-
-            #region LensFlareDataDriven
-
-            currentRT = _lensFlareDataDrivenPass.Render(renderGraph, frameData, currentRT);
-
-            #endregion
-
-            #region LensFlareScreenSpace
-
-            resourceData.bloomTexture = _lensFlareScreenSpacePass.Render(renderGraph, frameData, currentRT);
-
-            #endregion
-
             
-
+            #endregion
+            
+            #region LensFlareDataDriven
+            
+            currentRT = _lensFlareDataDrivenPass.Render(renderGraph, frameData, currentRT);
+            
+            #endregion
+            
+            #region LensFlareScreenSpace
+            
+            resourceData.bloomTexture = _lensFlareScreenSpacePass.Render(renderGraph, frameData, currentRT);
+            
+            #endregion
+            
+            
+            
             // #region ToneMapping
             //
             // currentRT = _toneMappingPass.Render(renderGraph, frameData, currentRT);
             //
             // #endregion
-
+            
             #region Diffusion
-
+            
             currentRT = _diffusionPass.Render(renderGraph, frameData, currentRT);
-
+            
             #endregion
-
+            
             #region UberPost
             currentRT = _uberPostPass.Render(renderGraph, frameData, currentRT);
             
@@ -194,7 +194,6 @@ namespace UnityEngine.Rendering.Universal
             resourceData.cameraColor = currentRT;
             
             
-            // _uberFinalPass.Render(renderGraph, frameData, currentRT);
         }
     }
 }

@@ -97,14 +97,18 @@ namespace UnityEngine.Rendering.Universal
                 ReloadAllNullProperties();
             }
 #endif
-
+            UnityEngine.RenderAs2DUtil.InitializeCanRenderAs2D();
             return new Renderer2D(this);
         }
 
         internal void Dispose()
         {
+            UnityEngine.RenderAs2DUtil.DisposeCanRenderAs2D();
+
+#if URP_COMPATIBILITY_MODE
             for (var i = 0; i < m_LightBlendStyles.Length; ++i)
                 m_LightBlendStyles[i].renderTargetHandle?.Release();
+#endif
 
             foreach(var mat in lightMaterials)
                 CoreUtils.Destroy(mat.Value);
@@ -126,11 +130,13 @@ namespace UnityEngine.Rendering.Universal
         {
             base.OnEnable();
 
+#if URP_COMPATIBILITY_MODE
             for (var i = 0; i < m_LightBlendStyles.Length; ++i)
             {
                 m_LightBlendStyles[i].renderTargetHandleId = Shader.PropertyToID($"_ShapeLightTexture{i}");
                 m_LightBlendStyles[i].renderTargetHandle = RTHandles.Alloc(m_LightBlendStyles[i].renderTargetHandleId, $"_ShapeLightTexture{i}");
             }
+#endif
 
             geometrySelfShadowMaterial = null;
             geometryUnshadowMaterial = null;

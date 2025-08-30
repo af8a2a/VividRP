@@ -10,12 +10,11 @@ namespace UnityEngine.Rendering.Universal
     /// The scriptable render pass used with the render objects renderer feature.
     /// </summary>
     [MovedFrom(true, "UnityEngine.Experimental.Rendering.Universal")]
-    public class RenderObjectsPass : ScriptableRenderPass
+    public partial class RenderObjectsPass : ScriptableRenderPass
     {
         RenderQueueType renderQueueType;
         FilteringSettings m_FilteringSettings;
         RenderObjects.CustomCameraSettings m_CameraSettings;
-
 
         /// <summary>
         /// The override material to use.
@@ -45,7 +44,7 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         /// <param name="writeEnabled">Sets whether it should write to depth or not.</param>
         /// <param name="function">The depth comparison function to use.</param>
-        [Obsolete("Use SetDepthState instead", true)]
+        [Obsolete("Use SetDepthState instead. #from(2023.1) #breakingFrom(2023.1)", true)]
         public void SetDetphState(bool writeEnabled, CompareFunction function = CompareFunction.Less)
         {
             SetDepthState(writeEnabled, function);
@@ -138,8 +137,9 @@ namespace UnityEngine.Rendering.Universal
             m_CameraSettings = cameraSettings;
         }
 
+#if URP_COMPATIBILITY_MODE
         /// <inheritdoc/>
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             UniversalRenderingData universalRenderingData = renderingData.frameData.Get<UniversalRenderingData>();
@@ -156,6 +156,7 @@ namespace UnityEngine.Rendering.Universal
                 ExecutePass(m_PassData, cmd , m_PassData.rendererList, renderingData.cameraData.IsCameraProjectionMatrixFlipped());
             }
         }
+#endif
 
         private static void ExecutePass(PassData passData, RasterCommandBuffer cmd, RendererList rendererList, bool isYFlipped)
         {
@@ -313,10 +314,12 @@ namespace UnityEngine.Rendering.Universal
                     builder.UseRendererList(passData.rendererListHdl);
                 }
 
-                builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);
                 if (cameraData.xr.enabled)
+                {
                     builder.EnableFoveatedRasterization(cameraData.xr.supportsFoveatedRendering && cameraData.xrUniversal.canFoveateIntermediatePasses);
+                    builder.SetExtendedFeatureFlags(ExtendedFeatureFlags.MultiviewRenderRegionsCompatible);
+                }
 
                 builder.SetRenderFunc((PassData data, RasterGraphContext rgContext) =>
                 {

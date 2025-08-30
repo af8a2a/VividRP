@@ -203,12 +203,7 @@ namespace UnityEngine.Rendering.Universal
 
             // A camera could be rendered multiple times per frame, only update the view projections if needed
             bool aspectChanged = m_PrevAspectRatio[eyeIndex] != cameraData.aspectRatio;
-            
-#if UNITY_EDITOR
-            if (m_LastFrameIndex[eyeIndex] != frameIndex || aspectChanged || cameraData.cameraType == CameraType.SceneView)
-#else
             if (m_LastFrameIndex[eyeIndex] != frameIndex || aspectChanged)
-#endif
             {
                 bool isPreviousFrameDataInvalid = (m_LastFrameIndex[eyeIndex] == -1) || aspectChanged;
 
@@ -269,17 +264,13 @@ namespace UnityEngine.Rendering.Universal
             if (xr.enabled && xr.singlePassEnabled)
             {
                 cmd.SetGlobalMatrixArray(ShaderPropertyId.previousViewProjectionNoJitterStereo, previousViewProjectionStereo);
-                // cmd.SetGlobalMatrixArray(ShaderPropertyId.previousInverseViewProjectionStereo, previousViewProjectionStereo);
                 cmd.SetGlobalMatrixArray(ShaderPropertyId.viewProjectionNoJitterStereo, viewProjectionStereo);
             }
             else
 #endif
             {
                 cmd.SetGlobalMatrix(ShaderPropertyId.previousViewProjectionNoJitter, previousViewProjectionStereo[passID]);
-                cmd.SetGlobalMatrix(ShaderPropertyId.previousInverseViewProjectionNoJitter, previousViewProjectionStereo[passID].inverse);
                 cmd.SetGlobalMatrix(ShaderPropertyId.viewProjectionNoJitter, viewProjectionStereo[passID]);
-                cmd.SetGlobalVector(ShaderPropertyId.prevCamPosWS, m_previousWorldSpaceCameraPos);
-
             }
         }
     }

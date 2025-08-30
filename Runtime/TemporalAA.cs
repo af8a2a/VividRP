@@ -202,16 +202,13 @@ namespace UnityEngine.Rendering.Universal
             Matrix4x4 jitterMat = Matrix4x4.identity;
 
             bool isJitter = cameraData.IsTemporalAAEnabled();
-            UniversalAdditionalCameraData additionalCameraData;
-            cameraData.camera.TryGetComponent(out additionalCameraData);
-
             if (isJitter)
             {
                 int taaFrameIndex = CalculateTaaFrameIndex(ref cameraData.taaSettings);
 
                 float actualWidth = cameraData.cameraTargetDescriptor.width;
                 float actualHeight = cameraData.cameraTargetDescriptor.height;
-                float jitterScale = additionalCameraData.taaJitterScale;// cameraData.taaSettings.jitterScale;
+                float jitterScale = cameraData.taaSettings.jitterScale;
 
                 Vector2 jitter;
                 bool allowScaling;
@@ -220,9 +217,6 @@ namespace UnityEngine.Rendering.Universal
                 if (allowScaling)
                     jitter *= jitterScale;
 
-                cameraData.jitter = new Vector4(jitter.x, jitter.y, jitter.x / actualWidth, jitter.y / actualHeight);
-
-                
                 float offsetX = jitter.x * (2.0f / actualWidth);
                 float offsetY = jitter.y * (2.0f / actualHeight);
 
@@ -500,6 +494,11 @@ namespace UnityEngine.Rendering.Universal
                 passData.srcTaaAccumTex = srcAccumulation;
                 builder.UseTexture(srcAccumulation, AccessFlags.Read);
 
+                if (cameraData.xr.enabled)
+                {
+                    builder.SetExtendedFeatureFlags(ExtendedFeatureFlags.MultiviewRenderRegionsCompatible);
+                }
+
                 passData.material = taaMaterial;
                 passData.passIndex = (int)taa.quality;
 
@@ -552,6 +551,11 @@ namespace UnityEngine.Rendering.Universal
                     builder.SetRenderAttachment(srcAccumulation, 0, AccessFlags.Write);
                     passData.srcColorTex = dstColor;
                     builder.UseTexture(dstColor, AccessFlags.Read);   // Resolved color is the new history
+
+                    if (cameraData.xr.enabled)
+                    {
+                        builder.SetExtendedFeatureFlags(ExtendedFeatureFlags.MultiviewRenderRegionsCompatible);
+                    }
 
                     passData.material = taaMaterial;
                     passData.passIndex = kHistoryCopyPass;

@@ -1,10 +1,56 @@
 #ifndef INPUT_CORE_2D_INCLUDED
 #define INPUT_CORE_2D_INCLUDED
 
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/DebugMipmapStreamingMacros.hlsl"
+
+#include "Packages/com.unity.render-pipelines.universal/Shaders/2D/Include/InputData2D.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Shaders/2D/Include/SurfaceData2D.hlsl"
+#if defined(DEBUG_DISPLAY)
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Debug/Debugging2D.hlsl"
+#endif
+
+// Lit
+#define COMMON_2D_LIT_OUTPUTS           \
+        COMMON_2D_OUTPUTS               \
+        half2 lightingUV  : TEXCOORD1;
+
+// Unlit
+#define COMMON_2D_INPUTS                 \
+        float3 positionOS   : POSITION;  \
+        float2 uv           : TEXCOORD0; \
+        UNITY_VERTEX_INPUT_INSTANCE_ID
+
+#define COMMON_2D_OUTPUTS_SHARED              \
+        float4 positionCS      : SV_POSITION; \
+        float2 uv              : TEXCOORD0;   \
+        UNITY_VERTEX_OUTPUT_STEREO
+
+#if defined(DEBUG_DISPLAY)
+    #define COMMON_2D_OUTPUTS                \
+            COMMON_2D_OUTPUTS_SHARED         \
+            float3 positionWS  : TEXCOORD2;    
+#else
+    #define COMMON_2D_OUTPUTS                \
+            COMMON_2D_OUTPUTS_SHARED             
+#endif
+
+// Normals
+#define COMMON_2D_NORMALS_INPUTS       \
+        COMMON_2D_INPUTS               \
+        float3 normal       : NORMAL;  \
+        float4 tangent      : TANGENT; \
+
+#define COMMON_2D_NORMALS_OUTPUTS          \
+        COMMON_2D_OUTPUTS_SHARED           \
+        half3 normalWS        : TEXCOORD1; \
+        half3 tangentWS       : TEXCOORD2; \
+        half3 bitangentWS     : TEXCOORD3;
+
 #if defined(SKINNED_SPRITE)
 
-    #define UNITY_SKINNED_VERTEX_INPUTS         float4 blendWeights : BLENDWEIGHTS; uint4  blendIndices : BLENDINDICES;
-    #define UNITY_SKINNED_VERTEX_COMPUTE(x)     x.positionOS = UnitySkinSprite(x.positionOS, x.blendIndices, x.blendWeights, unity_SpriteProps.z);
+    #define UNITY_SKINNED_VERTEX_INPUTS         float4 weights : BLENDWEIGHTS; uint4 indices : BLENDINDICES;
+    #define UNITY_SKINNED_VERTEX_COMPUTE(x)     x.positionOS = UnitySkinSprite(x.positionOS, x.indices, x.weights, unity_SpriteProps.z, 1.0f);
 
 #else
 
@@ -20,23 +66,23 @@ float3 UnityFlipSprite( in float3 pos, in float2 flip )
     return float3(pos.xy * flip, pos.z);
 }
 
-float3 UnitySkinSprite( in float3 positionOS, in uint4 blendIndices, in float4 blendWeights, in float offset )
+float3 UnitySkinSprite( in float3 inputData, in uint4 blendIndices, in float4 blendWeights, in float offset, in float w )
 {
-    float4 vertex = float4(positionOS, 1.0);
+    float4 outputData = float4(inputData, w);
 
-#if defined(SKINNED_SPRITE)
+#if defined(SKINNED_SPRITE) && !defined(SHADERGRAPH_PREVIEW)
     UNITY_BRANCH
     if (offset >= 0)
     {
-        vertex =
-            mul(_SpriteBoneTransforms[uint(offset) + blendIndices.x], vertex) * blendWeights.x +
-            mul(_SpriteBoneTransforms[uint(offset) + blendIndices.y], vertex) * blendWeights.y +
-            mul(_SpriteBoneTransforms[uint(offset) + blendIndices.z], vertex) * blendWeights.z +
-            mul(_SpriteBoneTransforms[uint(offset) + blendIndices.w], vertex) * blendWeights.w;
+        outputData =
+            mul(_SpriteBoneTransforms[uint(offset) + blendIndices.x], outputData) * blendWeights.x +
+            mul(_SpriteBoneTransforms[uint(offset) + blendIndices.y], outputData) * blendWeights.y +
+            mul(_SpriteBoneTransforms[uint(offset) + blendIndices.z], outputData) * blendWeights.z +
+            mul(_SpriteBoneTransforms[uint(offset) + blendIndices.w], outputData) * blendWeights.w;
     }
 #endif // SKINNED_SPRITE
 
-    return vertex.xyz;
+    return outputData.xyz;
 }
 
 #ifdef UNITY_INSTANCING_ENABLED

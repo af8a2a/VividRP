@@ -161,7 +161,7 @@ DeferredLightingOutput DeferredLit(PositionInputs posInput, ShadingData shadingD
     //  1. Screen Space Refraction / Reflection
     //  2. Environment Reflection / Refraction
     //  3. Sky Reflection / Refraction
-    bool materialUseBakedGI = (shadingData.materialFlags & kMaterialFlagUseBakedGI) != 0;
+    bool materialUseBakedGI = (shadingData.materialFlags & kMaterialFlagSubtractiveMixedLighting) != 0;
 
     float3 SHColor = SampleSH9(_AmbientProbeData, normalWS);
     indirectDiffuse += diffuseFGD * SHColor * shadingData.diffuseColor;

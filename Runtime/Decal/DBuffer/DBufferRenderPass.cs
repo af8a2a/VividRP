@@ -16,28 +16,28 @@ namespace UnityEngine.Rendering.Universal
     {
         internal static string[] s_DBufferNames = { "_DBufferTexture0", "_DBufferTexture1", "_DBufferTexture2", "_DBufferTexture3" };
         internal static string s_DBufferDepthName = "DBufferDepth";
-
         static readonly int s_SSAOTextureID = Shader.PropertyToID("_ScreenSpaceOcclusionTexture");
 
         private DecalDrawDBufferSystem m_DrawSystem;
         private DBufferSettings m_Settings;
-        private Material m_DBufferClear;
 
         private FilteringSettings m_FilteringSettings;
         private List<ShaderTagId> m_ShaderTagIdList;
-        private ProfilingSampler m_DBufferClearSampler;
 
         private bool m_DecalLayers;
 
-        private RTHandle m_DBufferDepth;
+        private TextureHandle[] dbufferHandles;
 
+#if URP_COMPATIBILITY_MODE
+        private RTHandle m_DBufferDepth;
+        private Material m_DBufferClear;
+        private ProfilingSampler m_DBufferClearSampler;
         private PassData m_PassData;
 
         internal RTHandle[] dBufferColorHandles { get; private set; }
         internal RTHandle depthHandle { get; private set; }
         internal RTHandle dBufferDepth { get => m_DBufferDepth; }
-
-        private TextureHandle[] dbufferHandles;
+#endif
 
         public DBufferRenderPass(Material dBufferClear, DBufferSettings settings, DecalDrawDBufferSystem drawSystem, bool decalLayers)
         {
@@ -46,11 +46,12 @@ namespace UnityEngine.Rendering.Universal
             var scriptableRenderPassInput = ScriptableRenderPassInput.Depth | ScriptableRenderPassInput.Normal;
             ConfigureInput(scriptableRenderPassInput);
 
+            // DBuffer requires color texture created as it does not handle y flip correctly
+            requiresIntermediateTexture = true;
+
             m_DrawSystem = drawSystem;
             m_Settings = settings;
-            m_DBufferClear = dBufferClear;
             profilingSampler = new ProfilingSampler("Draw DBuffer");
-            m_DBufferClearSampler = new ProfilingSampler("Clear");
             m_FilteringSettings = new FilteringSettings(RenderQueueRange.opaque, -1);
             m_DecalLayers = decalLayers;
 
@@ -58,19 +59,23 @@ namespace UnityEngine.Rendering.Universal
             m_ShaderTagIdList.Add(new ShaderTagId(DecalShaderPassNames.DBufferMesh));
             m_ShaderTagIdList.Add(new ShaderTagId(DecalShaderPassNames.DBufferProjectorVFX));
 
+#if URP_COMPATIBILITY_MODE
             int dBufferCount = (int)settings.surfaceData + 1;
             dBufferColorHandles = new RTHandle[dBufferCount];
 
+            m_DBufferClear = dBufferClear;
+            m_DBufferClearSampler = new ProfilingSampler("Clear");
             m_PassData = new PassData();
+#endif
         }
 
+#if URP_COMPATIBILITY_MODE
         public void Dispose()
         {
             m_DBufferDepth?.Release();
             foreach (var handle in dBufferColorHandles)
                 handle?.Release();
         }
-
         public void Setup(in CameraData cameraData)
         {
             var depthDesc = cameraData.cameraTargetDescriptor;
@@ -119,7 +124,7 @@ namespace UnityEngine.Rendering.Universal
             depthHandle = depthTextureHandle;
         }
 
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
         public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
         {
             // Disable obsolete warning for internal usage
@@ -128,7 +133,7 @@ namespace UnityEngine.Rendering.Universal
             #pragma warning restore CS0618
         }
 
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             InitPassData(ref m_PassData);
@@ -141,7 +146,15 @@ namespace UnityEngine.Rendering.Universal
 
                 SetGlobalTextures(renderingData.commandBuffer, m_PassData);
                 SetKeywords(CommandBufferHelpers.GetRasterCommandBuffer(renderingData.commandBuffer), m_PassData);
-                Clear(renderingData.commandBuffer, m_PassData);
+
+                // TODO: This should be replace with mrt clear once we support it
+                // Clear render targets
+                using (new ProfilingScope(cmd, m_DBufferClearSampler))
+                {
+                    // for alpha compositing, color is cleared to 0, alpha to 1
+                    // https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch23.html
+                    Blitter.BlitTexture(cmd, passData.dBufferColorHandles[0], new Vector4(1, 1, 0, 0), m_DBufferClear, 0);
+                }
 
                 UniversalRenderingData universalRenderingData = renderingData.frameData.Get<UniversalRenderingData>();
                 UniversalCameraData cameraData = renderingData.frameData.Get<UniversalCameraData>();
@@ -152,6 +165,7 @@ namespace UnityEngine.Rendering.Universal
                 ExecutePass(CommandBufferHelpers.GetRasterCommandBuffer(renderingData.commandBuffer), m_PassData, rendererList, false);
             }
         }
+#endif
 
         private static void ExecutePass(RasterCommandBuffer cmd, PassData passData, RendererList rendererList, bool renderGraph)
         {
@@ -159,6 +173,7 @@ namespace UnityEngine.Rendering.Universal
             cmd.DrawRendererList(rendererList);
         }
 
+#if URP_COMPATIBILITY_MODE
         private static void SetGlobalTextures(CommandBuffer cmd, PassData passData)
         {
             var dBufferColorHandles = passData.dBufferColorHandles;
@@ -168,6 +183,7 @@ namespace UnityEngine.Rendering.Universal
             if (passData.settings.surfaceData == DecalSurfaceData.AlbedoNormalMAOS)
                 cmd.SetGlobalTexture(dBufferColorHandles[2].name, dBufferColorHandles[2].nameID);
         }
+#endif
 
         private static void SetKeywords(RasterCommandBuffer cmd, PassData passData)
         {
@@ -178,26 +194,10 @@ namespace UnityEngine.Rendering.Universal
             cmd.SetKeyword(ShaderGlobalKeywords.DecalLayers, passData.decalLayers);
         }
 
-        private static void Clear(CommandBuffer cmd, PassData passData)
-        {
-            // TODO: This should be replace with mrt clear once we support it
-            // Clear render targets
-            using (new ProfilingScope(cmd, passData.dBufferClearSampler))
-            {
-                // for alpha compositing, color is cleared to 0, alpha to 1
-                // https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch23.html
-                Blitter.BlitTexture(cmd, passData.dBufferColorHandles[0], new Vector4(1, 1, 0, 0), passData.dBufferClear, 0);
-            }
-        }
-
         private class PassData
         {
             internal DecalDrawDBufferSystem drawSystem;
             internal DBufferSettings settings;
-            internal Material dBufferClear;
-
-            internal ProfilingSampler dBufferClearSampler;
-
             internal bool decalLayers;
             internal RTHandle dBufferDepth;
             internal RTHandle[] dBufferColorHandles;
@@ -209,11 +209,11 @@ namespace UnityEngine.Rendering.Universal
         {
             passData.drawSystem = m_DrawSystem;
             passData.settings = m_Settings;
-            passData.dBufferClear = m_DBufferClear;
-            passData.dBufferClearSampler = m_DBufferClearSampler;
             passData.decalLayers = m_DecalLayers;
+#if URP_COMPATIBILITY_MODE
             passData.dBufferDepth = m_DBufferDepth;
             passData.dBufferColorHandles = dBufferColorHandles;
+#endif
         }
 
         private RendererListParams InitRendererListParams(UniversalRenderingData renderingData, UniversalCameraData cameraData, UniversalLightData lightData)
@@ -294,7 +294,6 @@ namespace UnityEngine.Rendering.Universal
                         builder.SetGlobalTextureAfterPass(dbufferHandles[i], Shader.PropertyToID(s_DBufferNames[i]));
                 }
 
-                builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);
 
                 builder.SetRenderFunc((PassData data, RasterGraphContext rgContext) =>

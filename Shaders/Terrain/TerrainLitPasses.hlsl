@@ -110,7 +110,7 @@ void InitializeInputData(Varyings IN, half3 normalTS, out InputData inputData)
     inputData.vertexSH = SH;
     #endif
     #if defined(USE_APV_PROBE_OCCLUSION)
-    inputData.probeOcclusion = input.probeOcclusion;
+    inputData.probeOcclusion = IN.probeOcclusion;
     #endif
     #endif
 }
@@ -123,7 +123,9 @@ void InitializeBakedGIData(Varyings IN, inout InputData inputData)
     half3 SH = IN.vertexSH;
     #endif
 
-#if defined(DYNAMICLIGHTMAP_ON)
+#if defined(_SCREEN_SPACE_IRRADIANCE)
+    inputData.bakedGI = SAMPLE_GI(_ScreenSpaceIrradiance, inputData.positionCS.xy);
+#elif defined(DYNAMICLIGHTMAP_ON)
     inputData.bakedGI = SAMPLE_GI(IN.uvMainAndLM.zw, IN.dynamicLightmapUV, SH, inputData.normalWS);
     inputData.shadowMask = SAMPLE_SHADOWMASK(IN.uvMainAndLM.zw);
 #elif !defined(LIGHTMAP_ON) && (defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2))
@@ -387,7 +389,7 @@ void SplatmapFragment(
     Varyings IN
     , out half4 outColor : SV_Target0
 #ifdef _WRITE_RENDERING_LAYERS
-    , out float4 outRenderingLayers : SV_Target1
+    , out uint outRenderingLayers : SV_Target1
 #endif
     )
 #endif
@@ -494,8 +496,7 @@ void SplatmapFragment(
     outColor = half4(color.rgb, 1.0h);
 
 #ifdef _WRITE_RENDERING_LAYERS
-    uint renderingLayers = GetMeshRenderingLayer();
-    outRenderingLayers = float4(EncodeMeshRenderingLayer(renderingLayers), 0, 0, 0);
+    outRenderingLayers = EncodeMeshRenderingLayer();
 #endif
 #endif
 }

@@ -20,7 +20,6 @@
 // Inputs & outputs
 //--------------------------------------------------------------------------------------------------
 // Input
-TEXTURE2D_X(_NormalTexture);//
 float radius;
 int   sampleCount;
 int   frameIndex;

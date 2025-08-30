@@ -97,7 +97,7 @@ Light GetMainLight()
     light.color = _MainLightColor.rgb;
 
     light.layerMask = _MainLightLayerMask;
-    light.shadowScatter = 1;
+
     return light;
 }
 

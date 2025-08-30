@@ -19,9 +19,12 @@ namespace UnityEngine.Rendering.Universal
         private DecalDrawGBufferSystem m_DrawSystem;
         private DecalScreenSpaceSettings m_Settings;
         private DeferredLights m_DeferredLights;
-        private RTHandle[] m_GbufferAttachments;
         private bool m_DecalLayers;
+
+#if URP_COMPATIBILITY_MODE
+        private RTHandle[] m_GbufferAttachments;
         private PassData m_PassData;
+#endif
 
         public DecalGBufferRenderPass(DecalScreenSpaceSettings settings, DecalDrawGBufferSystem drawSystem, bool decalLayers)
         {
@@ -39,10 +42,10 @@ namespace UnityEngine.Rendering.Universal
             else
                 m_ShaderTagIdList.Add(new ShaderTagId(DecalShaderPassNames.DecalGBufferMesh));
 
+#if URP_COMPATIBILITY_MODE
             m_PassData = new PassData();
             m_GbufferAttachments = new RTHandle[4];
-
-            breakGBufferAndDeferredRenderPass = false;
+#endif
         }
 
         internal void Setup(DeferredLights deferredLights)
@@ -50,7 +53,8 @@ namespace UnityEngine.Rendering.Universal
             m_DeferredLights = deferredLights;
         }
 
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
+#if URP_COMPATIBILITY_MODE
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
         public override void Configure(CommandBuffer cmd, RenderTextureDescriptor cameraTextureDescriptor)
         {
             if (m_DeferredLights.UseFramebufferFetch)
@@ -110,7 +114,7 @@ namespace UnityEngine.Rendering.Universal
             #pragma warning restore CS0618
         }
 
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             UniversalCameraData cameraData = renderingData.frameData.Get<UniversalCameraData>();
@@ -126,6 +130,7 @@ namespace UnityEngine.Rendering.Universal
                 ExecutePass(CommandBufferHelpers.GetRasterCommandBuffer(renderingData.commandBuffer), m_PassData, rendererList);
             }
         }
+#endif
 
         private class PassData
         {

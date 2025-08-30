@@ -28,7 +28,7 @@ namespace UnityEngine.Rendering.Universal
 
         internal bool IsAtLastVersion() => k_LastVersion == m_AssetVersion;
 
-        internal const int k_LastVersion = 8;
+        internal const int k_LastVersion = 9;
 
 #pragma warning disable CS0414
         [SerializeField][FormerlySerializedAs("k_AssetVersion")]
@@ -36,9 +36,9 @@ namespace UnityEngine.Rendering.Universal
 #pragma warning restore CS0414
 
 #if UNITY_EDITOR
-        public static void UpgradeAsset(int assetInstanceID)
+        public static void UpgradeAsset(EntityId assetInstanceID)
         {
-            if (EditorUtility.InstanceIDToObject(assetInstanceID) is not UniversalRenderPipelineGlobalSettings asset)
+            if (EditorUtility.EntityIdToObject(assetInstanceID) is not UniversalRenderPipelineGlobalSettings asset)
                 return;
 
             int assetVersionBeforeUpgrade = asset.m_AssetVersion;
@@ -111,7 +111,7 @@ namespace UnityEngine.Rendering.Universal
             if (asset.m_AssetVersion < 7)
             {
 #pragma warning disable 618 // Type or member is obsolete
-                if (asset.m_RenderingLayerNames != null)
+                if (asset.m_RenderingLayerNames is { Length: > 0 })
                 {
                     for (int i = 1; i < asset.m_RenderingLayerNames.Length; i++)
                     {
@@ -130,7 +130,6 @@ namespace UnityEngine.Rendering.Universal
                         RenderPipelineEditorUtility.TrySetRenderingLayerName(i, currentLayerName);
                     }
                 }
-
 #pragma warning restore 618 // Type or member is obsolete
                 asset.m_AssetVersion = 7;
             }
@@ -152,6 +151,21 @@ namespace UnityEngine.Rendering.Universal
                 }
 
                 asset.m_AssetVersion = 8;
+            }
+
+            // URPReflectionProbeSetings is introduced set the values for older projects.
+            if (asset.m_AssetVersion < 9)
+            {
+                if (GraphicsSettings.TryGetRenderPipelineSettings<URPReflectionProbeSettings>(out var reflectionProbeSettings))
+                {
+                    reflectionProbeSettings.UseReflectionProbeRotation = false;
+                }
+                else
+                {
+                    Debug.LogError("Failed to upgrade global settings for URPReflectionProbeSettings since it doesn't exists.");
+                }
+
+                asset.m_AssetVersion = 9;
             }
 
             // If the asset version has changed, means that a migration step has been executed
@@ -201,7 +215,7 @@ namespace UnityEngine.Rendering.Universal
             var rgSettings = GetOrCreateGraphicsSettings<RenderGraphSettings>(data);
 
 #pragma warning disable 618 // Type or member is obsolete
-            rgSettings.enableRenderCompatibilityMode = !data.m_EnableRenderGraph;
+            rgSettings.SetCompatibilityModeFromUpgrade(!data.m_EnableRenderGraph);
 #pragma warning restore 618
         }
 
@@ -245,7 +259,7 @@ namespace UnityEngine.Rendering.Universal
             {
                 if (currentInstance != null && !currentInstance.IsAtLastVersion())
                 {
-                    UpgradeAsset(currentInstance.GetInstanceID());
+                    UpgradeAsset(currentInstance.GetEntityId());
                     AssetDatabase.SaveAssetIfDirty(currentInstance);
                 }
 
@@ -313,41 +327,41 @@ namespace UnityEngine.Rendering.Universal
         /// Names used for display of light layers with Layer's index as prefix.
         /// For example: "0: Light Layer Default"
         /// </summary>
-        [Obsolete("This is obsolete, please use prefixedRenderingLayerMaskNames instead.", true)]
+        [Obsolete("This property is obsolete. Use RenderingLayerMask API and Tags & Layers project settings instead. #from(2022.2) #breackingFrom(2023.1)", true)]
         public string[] prefixedLightLayerNames => new string[0];
 
 
         #region Light Layer Names [3D]
 
         /// <summary>Name for light layer 0.</summary>
-        [Obsolete("This is obsolete, please use renderingLayerMaskNames instead.", false)]
+        [Obsolete("This is obsolete, please use renderingLayerMaskNames instead. #from(2022.2)")]
         public string lightLayerName0;
         /// <summary>Name for light layer 1.</summary>
-        [Obsolete("This is obsolete, please use renderingLayerMaskNames instead.", false)]
+        [Obsolete("This is obsolete, please use renderingLayerMaskNames instead. #from(2022.2)")]
         public string lightLayerName1;
         /// <summary>Name for light layer 2.</summary>
-        [Obsolete("This is obsolete, please use renderingLayerMaskNames instead.", false)]
+        [Obsolete("This is obsolete, please use renderingLayerMaskNames instead. #from(2022.2)")]
         public string lightLayerName2;
         /// <summary>Name for light layer 3.</summary>
-        [Obsolete("This is obsolete, please use renderingLayerMaskNames instead.", false)]
+        [Obsolete("This is obsolete, please use renderingLayerMaskNames instead. #from(2022.2)")]
         public string lightLayerName3;
         /// <summary>Name for light layer 4.</summary>
-        [Obsolete("This is obsolete, please use renderingLayerMaskNames instead.", false)]
+        [Obsolete("This is obsolete, please use renderingLayerMaskNames instead. #from(2022.2)")]
         public string lightLayerName4;
         /// <summary>Name for light layer 5.</summary>
-        [Obsolete("This is obsolete, please use renderingLayerMaskNames instead.", false)]
+        [Obsolete("This is obsolete, please use renderingLayerMaskNames instead. #from(2022.2)")]
         public string lightLayerName5;
         /// <summary>Name for light layer 6.</summary>
-        [Obsolete("This is obsolete, please use renderingLayerMaskNames instead.", false)]
+        [Obsolete("This is obsolete, please use renderingLayerMaskNames instead. #from(2022.2)")]
         public string lightLayerName6;
         /// <summary>Name for light layer 7.</summary>
-        [Obsolete("This is obsolete, please use renderingLayerNames instead.", false)]
+        [Obsolete("This is obsolete, please use renderingLayerNames instead. #from(2022.2)")]
         public string lightLayerName7;
 
         /// <summary>
         /// Names used for display of light layers.
         /// </summary>
-        [Obsolete("This is obsolete, please use renderingLayerMaskNames instead.", false)]
+        [Obsolete("This is obsolete, please use renderingLayerMaskNames instead. #from(2022.2)")]
         public string[] lightLayerNames => new string[0];
 
         internal void ResetRenderingLayerNames()

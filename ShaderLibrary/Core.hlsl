@@ -29,7 +29,7 @@
 
 #if UNITY_REVERSED_Z
     // TODO: workaround. There's a bug where SHADER_API_GL_CORE gets erroneously defined on switch.
-    #if (defined(SHADER_API_GLCORE) && !defined(SHADER_API_SWITCH)) || defined(SHADER_API_GLES3)
+    #if (defined(SHADER_API_GLCORE) && !defined(SHADER_API_SWITCH) && !defined(SHADER_API_SWITCH2)) || defined(SHADER_API_GLES3)
         //GL with reversed z => z clip range is [near, -far] -> remapping to [0, far]
         #define UNITY_Z_0_FAR_FROM_CLIPSPACE(coord) max((coord - _ProjectionParams.y)/(-_ProjectionParams.z-_ProjectionParams.y)*_ProjectionParams.z, 0)
     #else
@@ -91,8 +91,8 @@
     #elif !defined(PLATFORM_SUPPORTS_NATIVE_RENDERPASS)
         #define FRAMEBUFFER_INPUT_X_HALF(idx)                               TEXTURE2D_X_HALF(_UnityFBInput##idx); float4 _UnityFBInput##idx##_TexelSize
         #define FRAMEBUFFER_INPUT_X_FLOAT(idx)                              TEXTURE2D_X_FLOAT(_UnityFBInput##idx); float4 _UnityFBInput##idx##_TexelSize
-        #define FRAMEBUFFER_INPUT_X_INT(idx)                                TEXTURE2D_X_INT(_UnityFBInput##idx); float4 _UnityFBInput##idx##_TexelSize
-        #define FRAMEBUFFER_INPUT_X_UINT(idx)                               TEXTURE2D_X_UINT(_UnityFBInput##idx); float4 _UnityFBInput##idx##_TexelSize
+        #define FRAMEBUFFER_INPUT_X_INT(idx)                                TYPED_TEXTURE2D_X(int4, _UnityFBInput##idx); float4 _UnityFBInput##idx##_TexelSize
+        #define FRAMEBUFFER_INPUT_X_UINT(idx)                               TYPED_TEXTURE2D_X(uint4, _UnityFBInput##idx); float4 _UnityFBInput##idx##_TexelSize
         #define LOAD_FRAMEBUFFER_X_INPUT(idx, v2fname)                      _UnityFBInput##idx.Load(uint4(v2fname.xy, SLICE_ARRAY_INDEX, 0))
     #else
         #define FRAMEBUFFER_INPUT_X_HALF(idx)                               FRAMEBUFFER_INPUT_HALF(idx)

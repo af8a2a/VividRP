@@ -76,7 +76,11 @@ namespace UnityEngine.Rendering.Universal
         FSR,
 
         /// Spatial-Temporal Post-Processing
-        STP
+        STP,
+
+#if ENABLE_UPSCALER_FRAMEWORK
+        IUpscaler
+#endif
     }
 
     /// <summary>
@@ -99,18 +103,6 @@ namespace UnityEngine.Rendering.Universal
 
         internal UniversalRenderingData universalRenderingData => frameData.Get<UniversalRenderingData>();
 
-        // Non-rendergraph path only. Do NOT use with rendergraph!
-        internal ref CommandBuffer commandBuffer
-        {
-            get
-            {
-                ref var cmd = ref frameData.Get<UniversalRenderingData>().m_CommandBuffer;
-                if (cmd == null)
-                    Debug.LogError("RenderingData.commandBuffer is null. RenderGraph does not support this property. Please use the command buffer provided by the RenderGraphContext.");
-
-                return ref cmd;
-            }
-        }
 
         /// <summary>
         /// Returns culling results that exposes handles to visible objects, lights and probes.
@@ -238,7 +230,7 @@ namespace UnityEngine.Rendering.Universal
     /// <summary>
     /// Struct that holds settings related to camera.
     /// </summary>
-    public struct CameraData
+    public partial struct CameraData
     {
         ContextContainer frameData;
 
@@ -289,31 +281,6 @@ namespace UnityEngine.Rendering.Universal
             return frameData.Get<UniversalCameraData>().GetProjectionMatrixNoJitter(viewIndex);
         }
 
-        /// <summary>
-        /// Returns the camera GPU projection matrix. This contains platform specific changes to handle y-flip and reverse z. Includes camera jitter if required by active features.
-        /// Similar to <c>GL.GetGPUProjectionMatrix</c> but queries URP internal state to know if the pipeline is rendering to render texture.
-        /// For more info on platform differences regarding camera projection check: https://docs.unity3d.com/Manual/SL-PlatformDifferences.html
-        /// </summary>
-        /// <param name="viewIndex"> View index in case of stereo rendering. By default <c>viewIndex</c> is set to 0. </param>
-        /// <seealso cref="GL.GetGPUProjectionMatrix(Matrix4x4, bool)"/>
-        /// <returns></returns>
-        public Matrix4x4 GetGPUProjectionMatrix(int viewIndex = 0)
-        {
-            return frameData.Get<UniversalCameraData>().GetGPUProjectionMatrix(viewIndex);
-        }
-
-        /// <summary>
-        /// Returns the camera GPU projection matrix. This contains platform specific changes to handle y-flip and reverse z. Does not include any camera jitter.
-        /// Similar to <c>GL.GetGPUProjectionMatrix</c> but queries URP internal state to know if the pipeline is rendering to render texture.
-        /// For more info on platform differences regarding camera projection check: https://docs.unity3d.com/Manual/SL-PlatformDifferences.html
-        /// </summary>
-        /// <param name="viewIndex"> View index in case of stereo rendering. By default <c>viewIndex</c> is set to 0. </param>
-        /// <seealso cref="GL.GetGPUProjectionMatrix(Matrix4x4, bool)"/>
-        /// <returns></returns>
-        public Matrix4x4 GetGPUProjectionMatrixNoJitter(int viewIndex = 0)
-        {
-            return frameData.Get<UniversalCameraData>().GetGPUProjectionMatrixNoJitter(viewIndex);
-        }
 
         internal Matrix4x4 GetGPUProjectionMatrix(bool renderIntoTexture, int viewIndex = 0)
         {
@@ -360,9 +327,6 @@ namespace UnityEngine.Rendering.Universal
         public ref float renderScale => ref frameData.Get<UniversalCameraData>().renderScale;
         internal ref ImageScalingMode imageScalingMode => ref frameData.Get<UniversalCameraData>().imageScalingMode;
         internal ref ImageUpscalingFilter upscalingFilter => ref frameData.Get<UniversalCameraData>().upscalingFilter;
-        
-        internal ref UpscalingTechnique upscalingTechnique => ref frameData.Get<UniversalCameraData>().upscalingTechnique;
-
         internal ref bool fsrOverrideSharpness => ref frameData.Get<UniversalCameraData>().fsrOverrideSharpness;
         internal ref float fsrSharpness => ref frameData.Get<UniversalCameraData>().fsrSharpness;
         internal ref HDRColorBufferPrecision hdrColorBufferPrecision => ref frameData.Get<UniversalCameraData>().hdrColorBufferPrecision;
@@ -471,6 +435,7 @@ namespace UnityEngine.Rendering.Universal
             return frameData.Get<UniversalCameraData>().IsHandleYFlipped(handle);
         }
 
+#if URP_COMPATIBILITY_MODE
         /// <summary>
         /// True if the camera device projection matrix is flipped. This happens when the pipeline is rendering
         /// to a render texture in non OpenGL platforms. If you are doing a custom Blit pass to copy camera textures
@@ -478,11 +443,12 @@ namespace UnityEngine.Rendering.Universal
         /// matrix when rendering with for cmd.Draw* and reading from camera textures.
         /// </summary>
         /// <returns> True if the camera device projection matrix is flipped. </returns>
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
         public bool IsCameraProjectionMatrixFlipped()
         {
             return frameData.Get<UniversalCameraData>().IsCameraProjectionMatrixFlipped();
         }
+#endif
 
         /// <summary>
         /// True if the render target's projection matrix is flipped. This happens when the pipeline is rendering
@@ -899,16 +865,12 @@ namespace UnityEngine.Rendering.Universal
         public static readonly int ditheringTextureInvSize = Shader.PropertyToID("_DitheringTextureInvSize");
 
         public static readonly int renderingLayerMaxInt = Shader.PropertyToID("_RenderingLayerMaxInt");
-        public static readonly int renderingLayerRcpMaxInt = Shader.PropertyToID("_RenderingLayerRcpMaxInt");
 
         public static readonly int overlayUITexture = Shader.PropertyToID("_OverlayUITexture");
         public static readonly int hdrOutputLuminanceParams = Shader.PropertyToID("_HDROutputLuminanceParams");
         public static readonly int hdrOutputGradingParams = Shader.PropertyToID("_HDROutputGradingParams");
-        
-        
-        public static readonly int colorPyramidUvScaleAndLimitCurrentFrame = Shader.PropertyToID("_ColorPyramidUvScaleAndLimitCurrentFrame");
-        public static readonly int colorPyramidUvScaleAndLimitPrevFrame = Shader.PropertyToID("_ColorPyramidUvScaleAndLimitPrevFrame");
-        
+
+        public static readonly int screenSpaceIrradiance = Shader.PropertyToID("_ScreenSpaceIrradiance");
     }
 
     /// <summary>
@@ -965,6 +927,7 @@ namespace UnityEngine.Rendering.Universal
         public static GlobalKeyword ReflectionProbeBoxProjection;
         public static GlobalKeyword ReflectionProbeBlending;
         public static GlobalKeyword ReflectionProbeAtlas;
+        public static GlobalKeyword ReflectionProbeRotation;
         public static GlobalKeyword SoftShadows;
         public static GlobalKeyword SoftShadowsLow;
         public static GlobalKeyword SoftShadowsMedium;
@@ -989,6 +952,7 @@ namespace UnityEngine.Rendering.Universal
         public static GlobalKeyword DecalLayers;
         public static GlobalKeyword WriteRenderingLayers;
         public static GlobalKeyword ScreenSpaceOcclusion;
+        public static GlobalKeyword ScreenSpaceIrradiance;
         public static GlobalKeyword _SPOT;
         public static GlobalKeyword _DIRECTIONAL;
         public static GlobalKeyword _POINT;
@@ -1078,6 +1042,7 @@ namespace UnityEngine.Rendering.Universal
             ShaderGlobalKeywords.ReflectionProbeBoxProjection = GlobalKeyword.Create(ShaderKeywordStrings.ReflectionProbeBoxProjection);
             ShaderGlobalKeywords.ReflectionProbeBlending = GlobalKeyword.Create(ShaderKeywordStrings.ReflectionProbeBlending);
             ShaderGlobalKeywords.ReflectionProbeAtlas = GlobalKeyword.Create(ShaderKeywordStrings.ReflectionProbeAtlas);
+            ShaderGlobalKeywords.ReflectionProbeRotation = GlobalKeyword.Create(ShaderKeywordStrings.ReflectionProbeRotation);
             ShaderGlobalKeywords.SoftShadows = GlobalKeyword.Create(ShaderKeywordStrings.SoftShadows);
             ShaderGlobalKeywords.SoftShadowsLow = GlobalKeyword.Create(ShaderKeywordStrings.SoftShadowsLow);
             ShaderGlobalKeywords.SoftShadowsMedium = GlobalKeyword.Create(ShaderKeywordStrings.SoftShadowsMedium);
@@ -1102,6 +1067,7 @@ namespace UnityEngine.Rendering.Universal
             ShaderGlobalKeywords.DecalLayers = GlobalKeyword.Create(ShaderKeywordStrings.DecalLayers);
             ShaderGlobalKeywords.WriteRenderingLayers = GlobalKeyword.Create(ShaderKeywordStrings.WriteRenderingLayers);
             ShaderGlobalKeywords.ScreenSpaceOcclusion = GlobalKeyword.Create(ShaderKeywordStrings.ScreenSpaceOcclusion);
+            ShaderGlobalKeywords.ScreenSpaceIrradiance = GlobalKeyword.Create(ShaderKeywordStrings.ScreenSpaceIrradiance);
             ShaderGlobalKeywords._SPOT = GlobalKeyword.Create(ShaderKeywordStrings._SPOT);
             ShaderGlobalKeywords._DIRECTIONAL = GlobalKeyword.Create(ShaderKeywordStrings._DIRECTIONAL);
             ShaderGlobalKeywords._POINT = GlobalKeyword.Create(ShaderKeywordStrings._POINT);
@@ -1189,6 +1155,9 @@ namespace UnityEngine.Rendering.Universal
 
         /// <summary> Keyword used for Reflection probe atlas. </summary>
         public const string ReflectionProbeAtlas = "_REFLECTION_PROBE_ATLAS";
+
+        /// <summary> Keyword used for ReflectionProbe rotation. </summary>
+        public const string ReflectionProbeRotation = "REFLECTION_PROBE_ROTATION";
 
         /// <summary> Keyword used for soft shadows. </summary>
         public const string SoftShadows = "_SHADOWS_SOFT";
@@ -1321,6 +1290,9 @@ namespace UnityEngine.Rendering.Universal
 
         /// <summary> Keyword used for Screen Space Occlusion, such as Screen Space Ambient Occlusion (SSAO). </summary>
         public const string ScreenSpaceOcclusion = "_SCREEN_SPACE_OCCLUSION";
+
+        /// <summary> Keyword used for Screen Space Global Illumination. </summary>
+        public const string ScreenSpaceIrradiance = "_SCREEN_SPACE_IRRADIANCE";
 
         /// <summary> Keyword used for Point sampling when doing upsampling. </summary>
         public const string PointSampling = "_POINT_SAMPLING";
@@ -1695,7 +1667,7 @@ namespace UnityEngine.Rendering.Universal
                         lightData.Init(ref discLight);
                         break;
                     default:
-                        lightData.InitNoBake(light.GetInstanceID());
+                        lightData.InitNoBake(light.GetEntityId());
                         break;
                 }
 
@@ -1709,7 +1681,7 @@ namespace UnityEngine.Rendering.Universal
                 for (int i = 0; i < requests.Length; i++)
                 {
                     Light light = requests[i];
-                    lightData.InitNoBake(light.GetInstanceID());
+                    lightData.InitNoBake(light.GetEntityId());
                     lightsOutput[i] = lightData;
                 }
             }
@@ -1739,14 +1711,14 @@ namespace UnityEngine.Rendering.Universal
                             break;
                         case LightType.Rectangle:
                             // Rect area light is baked only in URP.
-                            lightData.InitNoBake(light.GetInstanceID());
+                            lightData.InitNoBake(light.GetEntityId());
                             break;
                         case LightType.Disc:
                             // Disc light is baked only.
-                            lightData.InitNoBake(light.GetInstanceID());
+                            lightData.InitNoBake(light.GetEntityId());
                             break;
                         default:
-                            lightData.InitNoBake(light.GetInstanceID());
+                            lightData.InitNoBake(light.GetEntityId());
                             break;
                     }
                     lightData.falloff = FalloffType.InverseSquared;
@@ -1812,6 +1784,14 @@ namespace UnityEngine.Rendering.Universal
             float spotAngle, float? innerSpotAngle,
             ref Vector4 lightAttenuation)
         {
+            // UUM-104997: AngleAttenuation() function isn't precise enough for small spot angles on platforms using float16 registers
+            if (spotAngle < 2.6)
+            {
+                spotAngle = 2.6f;
+                if (innerSpotAngle.HasValue)
+                    innerSpotAngle = Mathf.Min(innerSpotAngle.Value, 2.6f);
+            }
+
             // Spot Attenuation with a linear falloff can be defined as
             // (SdotL - cosOuterAngle) / (cosInnerAngle - cosOuterAngle)
             // This can be rewritten as
@@ -2006,6 +1986,7 @@ namespace UnityEngine.Rendering.Universal
             isXRMobile = isRunningMobile;
             isShaderAPIMobileDefined = GraphicsSettings.HasShaderDefine(BuiltinShaderDefine.SHADER_API_MOBILE);
             isSwitch = Application.platform == RuntimePlatform.Switch;
+            isSwitch2 = Application.platform == RuntimePlatform.Switch2;
         }
 
 #if ENABLE_VR && ENABLE_VR_MODULE
@@ -2046,6 +2027,8 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         internal static bool isSwitch { get; private set; } = false;
 
+        internal static bool isSwitch2 { get; private set; } = false;
+
         /// <summary>
         /// Gives the SH evaluation mode when set to automatically detect.
         /// </summary>
@@ -2055,7 +2038,7 @@ namespace UnityEngine.Rendering.Universal
         {
             if (mode == ShEvalMode.Auto)
             {
-                if (isXRMobile || isShaderAPIMobileDefined || isSwitch)
+                if (isXRMobile || isShaderAPIMobileDefined || isSwitch || isSwitch2)
                     return ShEvalMode.PerVertex;
                 else
                     return ShEvalMode.PerPixel;
@@ -2065,5 +2048,11 @@ namespace UnityEngine.Rendering.Universal
         }
 
         internal static bool isRunningOnPowerVRGPU = SystemInfo.graphicsDeviceName.Contains("PowerVR");
+
+        // Mali Valhall architecture GPUs (G76, G77, G78, etc.) have issues with separate depth textures when SSAO is enabled
+        // This affects depth texture sampling patterns in SSAO passes
+        internal static bool isRunningOnMaliValhallGPU = SystemInfo.graphicsDeviceName.StartsWith("Mali-G5") ||
+                                                         SystemInfo.graphicsDeviceName.StartsWith("Mali-G6") ||
+                                                         SystemInfo.graphicsDeviceName.StartsWith("Mali-G7");
     }
 }

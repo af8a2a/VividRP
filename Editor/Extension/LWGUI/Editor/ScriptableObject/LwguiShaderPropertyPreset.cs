@@ -115,29 +115,29 @@ namespace LWGUI
 			public void CopyFromMaterialProperty(MaterialProperty prop)
 			{
 				propertyName = prop.name;
-				switch (prop.type)
+				switch (prop.propertyType)
 				{
-					case MaterialProperty.PropType.Color:
+					case UnityEngine.Rendering.ShaderPropertyType.Color:
 						propertyType = PropertyType.Color;
 						colorValue = prop.colorValue;
 						break;
-					case MaterialProperty.PropType.Vector:
+					case UnityEngine.Rendering.ShaderPropertyType.Vector:
 						propertyType = PropertyType.Vector;
 						vectorValue = prop.vectorValue;
 						break;
-					case MaterialProperty.PropType.Float:
+					case UnityEngine.Rendering.ShaderPropertyType.Float:
 						propertyType = PropertyType.Float;
 						floatValue = prop.floatValue;
 						break;
-					case MaterialProperty.PropType.Int:
+					case UnityEngine.Rendering.ShaderPropertyType.Int:
 						propertyType = PropertyType.Integer;
 						intValue = prop.intValue;
 						break;
-					case MaterialProperty.PropType.Range:   
+					case UnityEngine.Rendering.ShaderPropertyType.Range:   
 						propertyType = PropertyType.Range;
 						floatValue = prop.floatValue;
 						break;
-					case MaterialProperty.PropType.Texture: 
+					case UnityEngine.Rendering.ShaderPropertyType.Texture: 
 						propertyType = PropertyType.Texture;
 						textureValue = prop.textureValue;
 						break;

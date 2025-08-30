@@ -27,7 +27,6 @@ namespace UnityEngine.Rendering.Universal
             //Raytracing DXR
             internal RayTracingShader rtaoShader;
             internal TextureHandle velocityTexture;
-            internal bool AccurateGbufferNormals;
 
             #region SER
 

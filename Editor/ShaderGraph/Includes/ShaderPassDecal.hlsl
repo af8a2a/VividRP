@@ -87,7 +87,9 @@ void InitializeInputData(Varyings input, float3 positionWS, half3 normalWS, half
     inputData.vertexLighting = input.fogFactorAndVertexLight.yzw;
 #endif
 
-#if defined(VARYINGS_NEED_DYNAMIC_LIGHTMAP_UV) && defined(DYNAMICLIGHTMAP_ON)
+#if defined(_SCREEN_SPACE_IRRADIANCE)
+    inputData.bakedGI = SAMPLE_GI(_ScreenSpaceIrradiance, input.positionCS.xy);
+#elif defined(VARYINGS_NEED_DYNAMIC_LIGHTMAP_UV) && defined(DYNAMICLIGHTMAP_ON)
     inputData.bakedGI = SAMPLE_GI(input.staticLightmapUV, input.dynamicLightmapUV.xy, half3(input.sh), normalWS);
     #if defined(VARYINGS_NEED_STATIC_LIGHTMAP_UV)
     inputData.shadowMask = SAMPLE_SHADOWMASK(input.staticLightmapUV);
@@ -211,11 +213,11 @@ void Frag(PackedVaryings packedInput,
 
 #ifdef _DECAL_LAYERS
 #ifdef _RENDER_PASS_ENABLED
-    uint surfaceRenderingLayer = DecodeMeshRenderingLayer(LOAD_FRAMEBUFFER_X_INPUT(GBUFFER4, positionCS.xy).r);
+    uint surfaceRenderingLayer = LOAD_FRAMEBUFFER_X_INPUT(GBUFFER4, positionCS.xy).r;
 #else
     uint surfaceRenderingLayer = LoadSceneRenderingLayer(positionCS.xy);
 #endif
-    uint projectorRenderingLayer = uint(UNITY_ACCESS_INSTANCED_PROP(Decal, _DecalLayerMaskFromDecal));
+    uint projectorRenderingLayer = asuint(UNITY_ACCESS_INSTANCED_PROP(Decal, _DecalLayerMaskFromDecal));
     // This is simple trick to clip if there is no matching layers
     // Part (surfaceRenderingLayer & projectorRenderingLayer) will produce 0, 1, 2 ...
     // Finally we subtract with small value to remmap only zero to negative value
@@ -280,6 +282,18 @@ void Frag(PackedVaryings packedInput,
 #endif
 #ifdef VARYINGS_NEED_TEXCOORD3
     input.texCoord3.xy = texCoord;
+#endif
+#ifdef VARYINGS_NEED_TEXCOORD4
+    input.texCoord4.xy = texCoord;
+#endif
+#ifdef VARYINGS_NEED_TEXCOORD5
+    input.texCoord5.xy = texCoord;
+#endif
+#ifdef VARYINGS_NEED_TEXCOORD6
+    input.texCoord6.xy = texCoord;
+#endif
+#ifdef VARYINGS_NEED_TEXCOORD7
+    input.texCoord7.xy = texCoord;
 #endif
 
 #ifdef DECAL_ANGLE_FADE

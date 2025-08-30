@@ -12,7 +12,7 @@ namespace UnityEngine.Rendering.Universal.Internal
     /// You can use this pass to render objects that have a material and/or shader
     /// with the pass names UniversalForward or SRPDefaultUnlit.
     /// </summary>
-    public class DrawObjectsPass : ScriptableRenderPass
+    public partial class DrawObjectsPass : ScriptableRenderPass
     {
         FilteringSettings m_FilteringSettings;
         RenderStateBlock m_RenderStateBlock;
@@ -20,19 +20,24 @@ namespace UnityEngine.Rendering.Universal.Internal
 
         bool m_IsOpaque;
 
+#if URP_COMPATIBILITY_MODE
         /// <summary>
         /// Used to indicate if the active target of the pass is the back buffer
         /// </summary>
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete + " #from(6000.3)")]
         public bool m_IsActiveTargetBackBuffer; // TODO: Remove this when we remove non-RG path
+#endif
 
         /// <summary>
         /// Used to indicate whether transparent objects should receive shadows or not.
         /// </summary>
         public bool m_ShouldTransparentsReceiveShadows;
 
-        PassData m_PassData;
-
         static readonly int s_DrawObjectPassDataPropID = Shader.PropertyToID("_DrawObjectPassData");
+
+#if URP_COMPATIBILITY_MODE
+        PassData m_PassData;
+#endif
 
         /// <summary>
         /// Creates a new <c>DrawObjectsPass</c> instance.
@@ -87,7 +92,6 @@ namespace UnityEngine.Rendering.Universal.Internal
             if (shaderTagIds == null)
                 shaderTagIds = new ShaderTagId[] { new ShaderTagId("SRPDefaultUnlit"), new ShaderTagId("UniversalForward"), new ShaderTagId("UniversalForwardOnly") };
 
-            m_PassData = new PassData();
             foreach (ShaderTagId sid in shaderTagIds)
                 m_ShaderTagIdList.Add(sid);
             renderPassEvent = evt;
@@ -95,7 +99,6 @@ namespace UnityEngine.Rendering.Universal.Internal
             m_RenderStateBlock = new RenderStateBlock(RenderStateMask.Nothing);
             m_IsOpaque = opaque;
             m_ShouldTransparentsReceiveShadows = false;
-            m_IsActiveTargetBackBuffer = false;
 
             if (stencilState.enabled)
             {
@@ -103,10 +106,18 @@ namespace UnityEngine.Rendering.Universal.Internal
                 m_RenderStateBlock.mask = RenderStateMask.Stencil;
                 m_RenderStateBlock.stencilState = stencilState;
             }
+
+#if URP_COMPATIBILITY_MODE
+#pragma warning disable CS0618
+            m_IsActiveTargetBackBuffer = false;
+#pragma warning restore CS0618
+            m_PassData = new PassData();
+#endif
         }
 
+#if URP_COMPATIBILITY_MODE
         /// <inheritdoc/>
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             ContextContainer frameData = renderingData.frameData;
@@ -122,6 +133,7 @@ namespace UnityEngine.Rendering.Universal.Internal
                 ExecutePass(CommandBufferHelpers.GetRasterCommandBuffer(renderingData.commandBuffer), m_PassData, m_PassData.rendererList, m_PassData.objectsWithErrorRendererList, m_PassData.cameraData.IsCameraProjectionMatrixFlipped());
             }
         }
+#endif
 
         internal static void ExecutePass(RasterCommandBuffer cmd, PassData data, RendererList rendererList, RendererList objectsWithErrorRendererList, bool yFlip)
         {
@@ -134,6 +146,13 @@ namespace UnityEngine.Rendering.Universal.Internal
             if (data.cameraData.xr.enabled && data.isActiveTargetBackBuffer)
             {
                 cmd.SetViewport(data.cameraData.xr.GetViewport());
+            }
+
+            bool useScreenSpaceIrradiance = data.screenSpaceIrradianceHdl.IsValid();
+            cmd.SetKeyword(ShaderGlobalKeywords.ScreenSpaceIrradiance, useScreenSpaceIrradiance);
+            if (useScreenSpaceIrradiance)
+            {
+                cmd.SetGlobalTexture(ShaderPropertyId.screenSpaceIrradiance, data.screenSpaceIrradianceHdl);
             }
 
             // scaleBias.x = flipSign
@@ -171,6 +190,7 @@ namespace UnityEngine.Rendering.Universal.Internal
         {
             internal TextureHandle albedoHdl;
             internal TextureHandle depthHdl;
+            internal TextureHandle screenSpaceIrradianceHdl;
 
             internal UniversalCameraData cameraData;
             internal bool isOpaque;
@@ -254,7 +274,7 @@ namespace UnityEngine.Rendering.Universal.Internal
             }
         }
 
-        internal void Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle colorTarget, TextureHandle depthTarget, TextureHandle mainShadowsTexture, TextureHandle additionalShadowsTexture, uint batchLayerMask = uint.MaxValue)
+        internal void Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle colorTarget, TextureHandle depthTarget, TextureHandle mainShadowsTexture, TextureHandle additionalShadowsTexture, uint batchLayerMask = uint.MaxValue, bool isMainOpaquePass = false)
         {
             UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
             UniversalRenderingData renderingData = frameData.Get<UniversalRenderingData>();
@@ -287,6 +307,14 @@ namespace UnityEngine.Rendering.Universal.Internal
                 TextureHandle ssaoTexture = resourceData.ssaoTexture;
                 if (ssaoTexture.IsValid())
                     builder.UseTexture(ssaoTexture, AccessFlags.Read);
+
+                TextureHandle irradianceTexture = resourceData.irradianceTexture;
+                if (irradianceTexture.IsValid())
+                {
+                    passData.screenSpaceIrradianceHdl = irradianceTexture;
+                    builder.UseTexture(irradianceTexture, AccessFlags.Read);
+                }
+
                 RenderGraphUtils.UseDBufferIfValid(builder, resourceData);
 
                 InitRendererLists(renderingData, cameraData, lightData, ref passData, default(ScriptableRenderContext), renderGraph, true);
@@ -301,13 +329,18 @@ namespace UnityEngine.Rendering.Universal.Internal
                     builder.UseRendererList(passData.objectsWithErrorRendererListHdl);
                 }
 
-                builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);
-
                 if (cameraData.xr.enabled)
                 {
                     bool passSupportsFoveation = cameraData.xrUniversal.canFoveateIntermediatePasses || resourceData.isActiveTargetBackBuffer;
                     builder.EnableFoveatedRasterization(cameraData.xr.supportsFoveatedRendering && passSupportsFoveation);
+                    builder.SetExtendedFeatureFlags(ExtendedFeatureFlags.MultiviewRenderRegionsCompatible);
+#if ENABLE_VR && ENABLE_XR_MODULE && PLATFORM_ANDROID
+                    if (isMainOpaquePass)
+                    {
+                        builder.SetExtendedFeatureFlags(ExtendedFeatureFlags.TileProperties);
+                    }
+#endif
                 }
 
                 builder.SetRenderFunc((PassData data, RasterGraphContext context) =>
@@ -318,6 +351,13 @@ namespace UnityEngine.Rendering.Universal.Internal
                         TransparentSettingsPass.ExecutePass(context.cmd);
 
                     bool yFlip = data.cameraData.IsRenderTargetProjectionMatrixFlipped(data.albedoHdl, data.depthHdl);
+
+                    bool useScreenSpaceIrradiance = data.screenSpaceIrradianceHdl.IsValid();
+                    context.cmd.SetKeyword(ShaderGlobalKeywords.ScreenSpaceIrradiance, useScreenSpaceIrradiance);
+                    if (useScreenSpaceIrradiance)
+                    {
+                        context.cmd.SetGlobalTexture(ShaderPropertyId.screenSpaceIrradiance, data.screenSpaceIrradianceHdl);
+                    }
 
                     ExecutePass(context.cmd, data, data.rendererListHdl, data.objectsWithErrorRendererListHdl, yFlip);
                 });
@@ -330,8 +370,10 @@ namespace UnityEngine.Rendering.Universal.Internal
     /// </summary>
     internal class DrawObjectsWithRenderingLayersPass : DrawObjectsPass
     {
+#if URP_COMPATIBILITY_MODE
         RTHandle[] m_ColorTargetIndentifiers;
         RTHandle m_DepthTargetIndentifiers;
+#endif
 
         /// <summary>
         /// Creates a new <c>DrawObjectsWithRenderingLayersPass</c> instance.
@@ -346,9 +388,12 @@ namespace UnityEngine.Rendering.Universal.Internal
         public DrawObjectsWithRenderingLayersPass(URPProfileId profilerTag, bool opaque, RenderPassEvent evt, RenderQueueRange renderQueueRange, LayerMask layerMask, StencilState stencilState, int stencilReference) :
             base(profilerTag, opaque, evt, renderQueueRange, layerMask, stencilState, stencilReference)
         {
+#if URP_COMPATIBILITY_MODE
             m_ColorTargetIndentifiers = new RTHandle[2];
+#endif
         }
 
+#if URP_COMPATIBILITY_MODE
         /// <summary>
         /// Sets up the pass.
         /// </summary>
@@ -371,7 +416,7 @@ namespace UnityEngine.Rendering.Universal.Internal
         }
 
         /// <inheritdoc/>
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
         public override void Configure(CommandBuffer cmd, RenderTextureDescriptor cameraTextureDescriptor)
         {
             // Disable obsolete warning for internal usage
@@ -381,7 +426,7 @@ namespace UnityEngine.Rendering.Universal.Internal
         }
 
         /// <inheritdoc/>
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             CommandBuffer cmd = renderingData.commandBuffer;
@@ -395,6 +440,7 @@ namespace UnityEngine.Rendering.Universal.Internal
             // Clean up
             cmd.SetKeyword(ShaderGlobalKeywords.WriteRenderingLayers, false);
         }
+#endif
 
         private class RenderingLayersPassData
         {
@@ -452,7 +498,6 @@ namespace UnityEngine.Rendering.Universal.Internal
                     builder.UseRendererList(passData.basePassData.objectsWithErrorRendererListHdl);
                 }
 
-                builder.AllowPassCulling(false);
                 // Required here because of RenderingLayerUtils.SetupProperties
                 builder.AllowGlobalStateModification(true);
 
@@ -460,6 +505,7 @@ namespace UnityEngine.Rendering.Universal.Internal
                 {
                     bool passSupportsFoveation = cameraData.xrUniversal.canFoveateIntermediatePasses || resourceData.isActiveTargetBackBuffer;
                     builder.EnableFoveatedRasterization(cameraData.xr.supportsFoveatedRendering && passSupportsFoveation);
+                    builder.SetExtendedFeatureFlags(ExtendedFeatureFlags.MultiviewRenderRegionsCompatible);
                 }
 
                 builder.SetRenderFunc((RenderingLayersPassData data, RasterGraphContext context) =>

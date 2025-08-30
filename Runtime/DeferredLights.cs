@@ -209,8 +209,6 @@ namespace UnityEngine.Rendering.Universal.Internal
         internal RTHandle[] GbufferAttachments { get; set; }
         private RTHandle[] GbufferRTHandles;
         internal TextureHandle[] GbufferTextureHandles { get; set; }
-        internal TextureHandle SSRLightingTexture { get; set; }
-
         internal RTHandle[] DeferredInputAttachments { get; set; }
         internal bool[] DeferredInputIsTransient { get; set; }
         // Input depth texture, also bound as read-only RT
@@ -387,7 +385,6 @@ namespace UnityEngine.Rendering.Universal.Internal
                     // This should be moved to a more global scope when framebuffer fetch is introduced to more passes
                     cmd.SetKeyword(ShaderGlobalKeywords.RenderPassEnabled, this.UseFramebufferFetch && (cameraData.cameraType == CameraType.Game || camera.cameraType == CameraType.SceneView || isRenderGraph));
                     cmd.SetKeyword(ShaderGlobalKeywords.LightLayers, UseLightLayers && !CoreUtils.IsSceneLightingDisabled(camera));
-                    cmd.SetKeyword(ShaderGlobalKeywords.ScreenSpaceOcclusion, true);
 
                     RenderingLayerUtils.SetupProperties(cmd, RenderingLayerMaskSize);
                 }
@@ -697,7 +694,6 @@ namespace UnityEngine.Rendering.Universal.Internal
                     if (i != GBufferLightingIndex)
                         deferredMaterial.SetTexture(k_GBufferShaderPropertyIDs[i], GbufferRTHandles[i]);
                 }
-                deferredMaterial.SetTexture("_SSRLightingTexture",SSRLightingTexture);
             }
 
             using (new ProfilingScope(cmd, m_ProfilingDeferredPass))

@@ -12,7 +12,7 @@ namespace UnityEngine.Rendering.Universal
         static readonly string k_LightVolumetricPass = "Light2D Volumetric Pass";
 
         private static readonly ProfilingSampler m_ProfilingSampler = new ProfilingSampler(k_LightPass);
-        internal static readonly ProfilingSampler m_ProfilingSamplerLowLevel = new ProfilingSampler(k_LightLowLevelPass);
+        private static readonly ProfilingSampler m_ProfilingSamplerLowLevel = new ProfilingSampler(k_LightLowLevelPass);
         private static readonly ProfilingSampler m_ProfilingSamplerVolume = new ProfilingSampler(k_LightVolumetricPass);
         internal static readonly int k_InverseHDREmulationScaleID = Shader.PropertyToID("_InverseHDREmulationScale");
         internal static readonly string k_NormalMapID = "_NormalMap";
@@ -47,11 +47,13 @@ namespace UnityEngine.Rendering.Universal
             return false;
         }
 
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
+#if URP_COMPATIBILITY_MODE
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             throw new NotImplementedException();
         }
+#endif
 
         private static void Execute(RasterCommandBuffer cmd, PassData passData, ref LayerBatch layerBatch)
         {
@@ -191,12 +193,12 @@ namespace UnityEngine.Rendering.Universal
                     if (light.normalMapQuality != Light2D.NormalMapQuality.Disabled || light.lightType == Light2D.LightType.Point)
                         RendererLighting.SetPerPointLightShaderGlobals(cmd, light, slotIndex, LightBatch.isBatchingSupported);
 
-                    if (LightBatch.isBatchingSupported)
-                    {
-                        //RendererLighting.lightBatch.AddBatch(light, lightMaterial, light.GetMatrix(), lightMesh, 0, lightHash, index);
-                        //RendererLighting.lightBatch.Flush(cmd);
-                    }
-                    else
+                    //if (LightBatch.isBatchingSupported)
+                    //{
+                    //    RendererLighting.lightBatch.AddBatch(light, lightMaterial, light.GetMatrix(), lightMesh, 0, lightHash, index);
+                    //    RendererLighting.lightBatch.Flush(cmd);
+                    //}
+                    //else
                     {
                         cmd.DrawMesh(lightMesh, light.GetMatrix(), lightMaterial, 0, 0, s_PropertyBlock);
                     }
@@ -230,10 +232,10 @@ namespace UnityEngine.Rendering.Universal
                 isVolumetric && !layerBatch.lightStats.useVolumetricLights)
                 return;
 
-            // OpenGL has a bug with MRTs - support single RTs by using low level pass
-            if (!isVolumetric && Renderer2D.IsGLDevice())
+            // Render single RTs by using low level pass for apis that don't support MRTs
+            if (!isVolumetric && !Renderer2D.supportsMRT)
             {
-                using (var builder = graph.AddUnsafePass<PassData>( k_LightLowLevelPass, out var passData, m_ProfilingSamplerLowLevel))
+                using (var builder = graph.AddUnsafePass<PassData>(k_LightLowLevelPass, out var passData, m_ProfilingSamplerLowLevel))
                 {
                     intermediateTexture[0] = commonResourceData.activeColorTexture;
                     passData.lightTextures = universal2DResourceData.lightTextures[batchIndex];
@@ -265,7 +267,6 @@ namespace UnityEngine.Rendering.Universal
                     passData.isVolumetric = isVolumetric;
                     passData.normalMap = layerBatch.lightStats.useNormalMap ? universal2DResourceData.normalsTexture[batchIndex] : TextureHandle.nullHandle;
 
-                    builder.AllowPassCulling(false);
                     builder.AllowGlobalStateModification(true);
 
                     builder.SetRenderFunc((PassData data, UnsafeGraphContext context) =>
@@ -274,9 +275,9 @@ namespace UnityEngine.Rendering.Universal
                     });
                 }
             }
-            // Default Raster Pass with MRTs
             else
             {
+                // Default Raster Pass with MRTs
                 using (var builder = graph.AddRasterRenderPass<PassData>(!isVolumetric ? k_LightPass : k_LightVolumetricPass, out var passData, !isVolumetric ? m_ProfilingSampler : m_ProfilingSamplerVolume))
                 {
                     intermediateTexture[0] = commonResourceData.activeColorTexture;
@@ -309,7 +310,6 @@ namespace UnityEngine.Rendering.Universal
                     passData.isVolumetric = isVolumetric;
                     passData.normalMap = layerBatch.lightStats.useNormalMap ? universal2DResourceData.normalsTexture[batchIndex] : TextureHandle.nullHandle;
 
-                    builder.AllowPassCulling(false);
                     builder.AllowGlobalStateModification(true);
 
                     builder.SetRenderFunc((PassData data, RasterGraphContext context) =>

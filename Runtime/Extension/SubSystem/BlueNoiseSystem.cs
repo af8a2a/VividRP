@@ -263,6 +263,13 @@ namespace UnityEngine.Rendering.Universal
             cmd.SetGlobalTexture(_ScramblingTexture, (ditheredTextureSet.scramblingTex));
         }
 
+        internal static void BindRaytraceDitheredTextureSet(ComputeCommandBuffer cmd,RayTracingShader rayTracingShader, DitheredTextureHandleSet ditheredTextureSet)
+        {
+            cmd.SetRayTracingTextureParam(rayTracingShader,_OwenScrambledTexture, (ditheredTextureSet.owenScrambled256Tex));
+            cmd.SetRayTracingTextureParam(rayTracingShader,_ScramblingTileXSPP, (ditheredTextureSet.scramblingTile));
+            cmd.SetRayTracingTextureParam(rayTracingShader,_RankingTileXSPP, (ditheredTextureSet.rankingTile));
+            cmd.SetRayTracingTextureParam(rayTracingShader,_ScramblingTexture, (ditheredTextureSet.scramblingTex));
+        }
 
         public static void ClearAll()
         {

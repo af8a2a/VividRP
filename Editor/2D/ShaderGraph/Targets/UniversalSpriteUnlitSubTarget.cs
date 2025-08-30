@@ -70,6 +70,12 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
             return true;
         }
 
+        public override void CollectShaderProperties(PropertyCollector collector, GenerationMode generationMode)
+        {
+            base.CollectShaderProperties(collector, generationMode);
+            SpriteSubTargetUtility.AddSRPIncompatibility(collector);
+        }
+
         #region SubShader
         static class SubShaders
         {
@@ -125,11 +131,11 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                     fieldDependencies = CoreFieldDependencies.Default,
 
                     // Conditional State
-                    renderStates = SpriteSubTargetUtility.GetDefaultRenderState(target),
+                    renderStates = target.sort3Das2DCompatible ? Universal2DSubTargetDescriptors.RenderStateCollections.Sort3Das2DCompatible : SpriteSubTargetUtility.GetDefaultRenderState(target),
                     pragmas = CorePragmas._2DDefault,
                     defines = new DefineCollection(),
                     keywords = SpriteUnlitKeywords.Unlit,
-                    includes = SpriteUnlitIncludes.Unlit,
+                    includes = target.sort3Das2DCompatible ? MeshUnlitIncludes.Unlit : SpriteUnlitIncludes.Unlit,
 
                     // Custom Interpolator Support
                     customInterpolators = CoreCustomInterpDescriptors.Common
@@ -218,6 +224,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
             public static KeywordCollection Unlit = new KeywordCollection
             {
                 { CoreKeywordDescriptors.DebugDisplay },
+                { CoreKeywordDescriptors.UseSkinnedSprite },
             };
         }
         #endregion
@@ -225,6 +232,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
         #region Includes
         static class SpriteUnlitIncludes
         {
+            const string kSpriteCore2D = "Packages/com.unity.render-pipelines.universal/Shaders/2D/Include/Core2D.hlsl";
             const string kSpriteUnlitPass = "Packages/com.unity.render-pipelines.universal/Editor/2D/ShaderGraph/Includes/SpriteUnlitPass.hlsl";
 
             public static IncludeCollection Unlit = new IncludeCollection
@@ -233,6 +241,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 { CoreIncludes.FogPregraph },
                 { CoreIncludes.CorePregraph },
                 { CoreIncludes.ShaderGraphPregraph },
+                { kSpriteCore2D, IncludeLocation.Pregraph },
 
                 // Post-graph
                 { CoreIncludes.CorePostgraph },

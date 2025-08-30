@@ -8,21 +8,29 @@ namespace UnityEngine.Rendering.Universal
     /// <summary>
     /// Draw the XR occlusion mesh into the current depth buffer when XR is enabled.
     /// </summary>
-    public class XROcclusionMeshPass : ScriptableRenderPass
+    public partial class XROcclusionMeshPass : ScriptableRenderPass
     {
-        PassData m_PassData;
-
+#if URP_COMPATIBILITY_MODE
         /// <summary>
         /// Used to indicate if the active target of the pass is the back buffer
         /// </summary>
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete + " #from(6000.3)")]
         public bool m_IsActiveTargetBackBuffer; // TODO: Remove this when we remove non-RG path
+
+        PassData m_PassData;
+#endif
 
         public XROcclusionMeshPass(RenderPassEvent evt)
         {
             profilingSampler = new ProfilingSampler("Draw XR Occlusion Mesh");
             renderPassEvent = evt;
-            m_PassData = new PassData();
+            
+#if URP_COMPATIBILITY_MODE
+#pragma warning disable CS0618
             m_IsActiveTargetBackBuffer = false;
+#pragma warning restore CS0618
+            m_PassData = new PassData();
+#endif
         }
 
         private static void ExecutePass(RasterCommandBuffer cmd, PassData data)
@@ -36,20 +44,20 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
+#if URP_COMPATIBILITY_MODE
         /// <inheritdoc/>
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsolete, false)]
+        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
         public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
         {
             m_PassData.xr = renderingData.cameraData.xr;
             m_PassData.isActiveTargetBackBuffer = m_IsActiveTargetBackBuffer;
             ExecutePass(CommandBufferHelpers.GetRasterCommandBuffer(renderingData.commandBuffer), m_PassData);
         }
+#endif
 
         private class PassData
         {
             internal XRPass xr;
-            internal TextureHandle cameraColorAttachment;
-            internal TextureHandle cameraDepthAttachment;
             internal bool isActiveTargetBackBuffer;
         }
 
@@ -61,20 +69,17 @@ namespace UnityEngine.Rendering.Universal
             using (var builder = renderGraph.AddRasterRenderPass<PassData>(passName, out var passData, profilingSampler))
             {
                 passData.xr = cameraData.xr;
-				passData.cameraColorAttachment = cameraColorAttachment;
                 builder.SetRenderAttachment(cameraColorAttachment, 0);
-                passData.cameraDepthAttachment = cameraDepthAttachment;
                 builder.SetRenderAttachmentDepth(cameraDepthAttachment, AccessFlags.Write);
 
                 passData.isActiveTargetBackBuffer = resourceData.isActiveTargetBackBuffer;
 
-                //  TODO RENDERGRAPH: culling? force culling off for testing
-                builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);
                 if (cameraData.xr.enabled)
                 {
                     bool passSupportsFoveation = cameraData.xrUniversal.canFoveateIntermediatePasses || resourceData.isActiveTargetBackBuffer;
                     builder.EnableFoveatedRasterization(cameraData.xr.supportsFoveatedRendering && passSupportsFoveation);
+                    builder.SetExtendedFeatureFlags(ExtendedFeatureFlags.MultiviewRenderRegionsCompatible);
                 }
 
                 builder.SetRenderFunc((PassData data, RasterGraphContext context) =>

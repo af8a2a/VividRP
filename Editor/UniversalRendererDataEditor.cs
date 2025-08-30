@@ -12,12 +12,13 @@ namespace UnityEditor.Rendering.Universal
     [CustomEditor(typeof(UniversalRendererData), true)]
     public class UniversalRendererDataEditor : ScriptableRendererDataEditor
     {
-        private static partial class Styles
+        private static class Styles
         {
             public static readonly GUIContent RendererTitle = EditorGUIUtility.TrTextContent("Universal Renderer", "Custom Universal Renderer for Universal RP.");
             public static readonly GUIContent PostProcessIncluded = EditorGUIUtility.TrTextContent("Enabled", "Enables the use of post processing effects within the scene. If disabled, Unity excludes post processing renderer Passes, shaders and textures from the build.");
             public static readonly GUIContent PostProcessLabel = EditorGUIUtility.TrTextContent("Data", "The asset containing references to shaders and Textures that the Renderer uses for post-processing.");
             public static readonly GUIContent FilteringSectionLabel = EditorGUIUtility.TrTextContent("Filtering", "Settings that controls and define which layers the renderer draws.");
+            public static readonly GUIContent PrepassMask = EditorGUIUtility.TrTextContent("Prepass Layer Mask", "Controls which prepass layers this renderer draws. It applies to any prepass.");
             public static readonly GUIContent OpaqueMask = EditorGUIUtility.TrTextContent("Opaque Layer Mask", "Controls which opaque layers this renderer draws.");
             public static readonly GUIContent TransparentMask = EditorGUIUtility.TrTextContent("Transparent Layer Mask", "Controls which transparent layers this renderer draws.");
 
@@ -45,6 +46,7 @@ namespace UnityEditor.Rendering.Universal
             public static readonly GUIContent deferredPlusIncompatibleWarning = EditorGUIUtility.TrTextContent("Deferred+ is only available with Render Graph. In compatibility mode, Deferred+ falls back to Forward+.");
         }
 
+        SerializedProperty m_PrepassLayerMask;
         SerializedProperty m_OpaqueLayerMask;
         SerializedProperty m_TransparentLayerMask;
         SerializedProperty m_RenderingMode;
@@ -64,6 +66,7 @@ namespace UnityEditor.Rendering.Universal
 
         private void OnEnable()
         {
+            m_PrepassLayerMask = serializedObject.FindProperty("m_PrepassLayerMask");
             m_OpaqueLayerMask = serializedObject.FindProperty("m_OpaqueLayerMask");
             m_TransparentLayerMask = serializedObject.FindProperty("m_TransparentLayerMask");
             m_RenderingMode = serializedObject.FindProperty("m_RenderingMode");
@@ -160,6 +163,11 @@ namespace UnityEditor.Rendering.Universal
 
             EditorGUILayout.LabelField(Styles.FilteringSectionLabel, EditorStyles.boldLabel);
             EditorGUI.indentLevel++;
+#if URP_COMPATIBILITY_MODE
+            if (GraphicsSettings.TryGetRenderPipelineSettings<RenderGraphSettings>(out var renderGraphSettings)
+                && !renderGraphSettings.enableRenderCompatibilityMode)
+#endif
+                EditorGUILayout.PropertyField(m_PrepassLayerMask, Styles.PrepassMask);
             EditorGUILayout.PropertyField(m_OpaqueLayerMask, Styles.OpaqueMask);
             EditorGUILayout.PropertyField(m_TransparentLayerMask, Styles.TransparentMask);
             EditorGUI.indentLevel--;
@@ -179,12 +187,14 @@ namespace UnityEditor.Rendering.Universal
                 depthFormatIndex = GetDepthFormatIndex((DepthFormat)m_DepthAttachmentFormat.intValue, m_RenderingMode.intValue);
             }
 
+#if URP_COMPATIBILITY_MODE
             if (m_RenderingMode.intValue == (int)RenderingMode.DeferredPlus && GraphicsSettings.GetRenderPipelineSettings<RenderGraphSettings>().enableRenderCompatibilityMode)
             {
                 EditorGUI.indentLevel++;
                 EditorGUILayout.HelpBox(Styles.deferredPlusIncompatibleWarning.text, MessageType.Warning);
                 EditorGUI.indentLevel--;
             }
+#endif
 
             if (m_RenderingMode.intValue == (int)RenderingMode.Deferred || m_RenderingMode.intValue == (int)RenderingMode.DeferredPlus)
             {
@@ -220,10 +230,10 @@ namespace UnityEditor.Rendering.Universal
 
             EditorGUILayout.PropertyField(m_DepthTextureFormat, Styles.DepthTextureFormat);
 
-
             EditorGUI.indentLevel--;
-            if (GraphicsSettings.TryGetRenderPipelineSettings<RenderGraphSettings>(out var renderGraphSettings)
-                && renderGraphSettings.enableRenderCompatibilityMode)
+
+#if URP_COMPATIBILITY_MODE
+            if (renderGraphSettings != null && renderGraphSettings.enableRenderCompatibilityMode)
             {
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField(Styles.RenderPassSectionLabel, EditorStyles.boldLabel);
@@ -231,6 +241,7 @@ namespace UnityEditor.Rendering.Universal
                 EditorGUILayout.PropertyField(m_UseNativeRenderPass, Styles.RenderPassLabel);
                 EditorGUI.indentLevel--;
             }
+#endif
             EditorGUILayout.Space();
             EditorGUILayout.LabelField(Styles.ShadowsSectionLabel, EditorStyles.boldLabel);
             EditorGUI.indentLevel++;

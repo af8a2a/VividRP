@@ -155,6 +155,17 @@ namespace UnityEngine.Rendering.Universal
             get => m_LUTBuilderHdrPS;
             set => this.SetValueAndNotify(ref m_LUTBuilderHdrPS, value);
         }
+        
+        
+        
+        
+        [SerializeField, ResourcePath("Runtime/Extension/Postprocessing/SuperResolution/DLSS/Shader/DLSSBiasColorMask.shader")]
+        private Shader m_DLSSBiasColorMaskPS;
+        public Shader DLSSBiasColorMaskPS
+        {
+            get => m_DLSSBiasColorMaskPS;
+            set => this.SetValueAndNotify(ref m_DLSSBiasColorMaskPS, value);
+        }
 
     }
 }

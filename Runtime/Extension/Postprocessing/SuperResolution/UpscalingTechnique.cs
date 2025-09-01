@@ -16,5 +16,9 @@
         /// </summary>
         TAAU,
         
+        /// <summary>
+        /// DLSS upscaler
+        /// </summary>
+        DLSS
     }
 }

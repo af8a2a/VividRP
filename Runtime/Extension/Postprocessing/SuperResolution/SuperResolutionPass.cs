@@ -11,14 +11,17 @@ namespace UnityEngine.Rendering.Universal
         private URPTemporalAAPass _urpTemporalAAPass = new URPTemporalAAPass();
 
 
+        private DLSSWarpPass _dlssPass = new DLSSWarpPass();
+
+
         class BlitPassData
         {
             internal TextureHandle source;
             internal TextureHandle destination;
         }
 
-        
-        static ProfilingSampler _bilinearSampler = new ProfilingSampler("Bilinear Upscaler"); 
+
+        static ProfilingSampler _bilinearSampler = new ProfilingSampler("Bilinear Upscaler");
 
         public TextureHandle Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle source)
         {
@@ -44,6 +47,10 @@ namespace UnityEngine.Rendering.Universal
             {
                 dest = _taauUpscaler.Render(renderGraph, frameData, source);
             }
+            else if (cameraData.upscalingTechnique is UpscalingTechnique.DLSS)
+            {
+                dest = _dlssPass.Render(renderGraph, frameData, source);
+            }
             // else if (useTemporalAA)
             // {
             //     dest = _urpTemporalAAPass.Render(renderGraph, frameData, source);
@@ -68,14 +75,11 @@ namespace UnityEngine.Rendering.Universal
                     builder.SetRenderAttachment(passData.destination, 0);
 
                     builder.AllowPassCulling(false);
-                    builder.SetRenderFunc<BlitPassData>((data, ctx) =>
-                    {
-                        Blitter.BlitTexture(ctx.cmd, data.source, Vector2.one, 0, true);
-                    });
+                    builder.SetRenderFunc<BlitPassData>((data, ctx) => { Blitter.BlitTexture(ctx.cmd, data.source, Vector2.one, 0, true); });
                 }
             }
-            
-            
+
+
             SuperResolutionUtil.UpdateCameraResolution(renderGraph, cameraData, new Vector2Int(cameraData.pixelWidth, cameraData.pixelHeight));
             return dest;
         }

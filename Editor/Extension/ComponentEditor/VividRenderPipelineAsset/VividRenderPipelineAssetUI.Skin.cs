@@ -1,10 +1,9 @@
-
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
 
 namespace UnityEditor.Rendering.Universal
 {
-    internal partial class UniversalRenderPipelineAssetUI
+    internal partial class VividRenderPipelineAssetUI
     {
         internal static class Styles
         {
@@ -162,6 +161,66 @@ namespace UnityEditor.Rendering.Universal
             public static string[] mainLightOptions = { "Disabled", "Per Pixel" };
             public static string[] volumeFrameworkUpdateOptions = { "Every Frame", "Via Scripting" };
             public static string[] opaqueDownsamplingOptions = { "None", "2x (Bilinear)", "4x (Box)", "4x (Bilinear)" };
+            
+            
+            
+            
+            public static readonly GUIContent enableDLSS = EditorGUIUtility.TrTextContent("Enable DLSS", "Enables NVIDIA Deep Learning Super Sampling (DLSS).");
+            public static readonly GUIContent DLSSQualitySettingContent = EditorGUIUtility.TrTextContent("DLSS Mode", "Selects a performance quality setting for NVIDIA Deep Learning Super Sampling (DLSS).");
+            public static readonly GUIContent DLSSUseOptimalSettingsContent = EditorGUIUtility.TrTextContent("DLSS Use Optimal Settings", "Sets the scale automatically for NVIDIA Deep Learning Super Sampling, depending on the values of quality settings. When DLSS Optimal Settings is on, the percentage settings for Dynamic Resolution Scaling are ignored.");
+            public static readonly GUIContent DLSSRenderPresetsContent = EditorGUIUtility.TrTextContent("DLSS Render Presets", "DLSS will use the specified render preset for each quality value.");
+#if ENABLE_NVIDIA && ENABLE_NVIDIA_MODULE
+            public static readonly string[] DLSSPerfQualityLabels = 
+            {   // should follow enum value ordering in DLSSQuality enum
+                UnityEngine.NVIDIA.DLSSQuality.MaximumPerformance.ToString(),
+                UnityEngine.NVIDIA.DLSSQuality.Balanced.ToString(),
+                UnityEngine.NVIDIA.DLSSQuality.MaximumQuality.ToString(),
+                UnityEngine.NVIDIA.DLSSQuality.UltraPerformance.ToString(),
+                UnityEngine.NVIDIA.DLSSQuality.DLAA.ToString()
+            };
+            public static string[][] DLSSPresetOptionsForEachPerfQuality = PopulateDLSSQualityPresetLabels();
+            private static string[][] PopulateDLSSQualityPresetLabels()
+            {
+                int CountBits(uint bitMask) // System.Numerics.BitOperations not available
+                {
+                    int count = 0;
+                    while (bitMask > 0)
+                    {
+                        count += (bitMask & 1) > 0 ? 1 : 0;
+                        bitMask >>= 1;
+                    }
+                    return count;
+                }
+
+                System.Array perfQualities = System.Enum.GetValues(typeof(UnityEngine.NVIDIA.DLSSQuality));
+                string[][] labels = new string[perfQualities.Length][];
+                foreach(UnityEngine.NVIDIA.DLSSQuality quality in perfQualities)
+                {
+                    uint presetBitmask = UnityEngine.NVIDIA.GraphicsDevice.GetAvailableDLSSPresetsForQuality(quality);
+                    int numPresets = CountBits(presetBitmask) + 1; // +1 for default option which is available to all quality enums
+                    labels[(int)quality] = new string[numPresets];
+
+                    int iWrite = 0;
+                    System.Array presets = System.Enum.GetValues(typeof(UnityEngine.NVIDIA.DLSSPreset));
+                    foreach(UnityEngine.NVIDIA.DLSSPreset preset in presets)
+                    {
+                        if (preset == UnityEngine.NVIDIA.DLSSPreset.Preset_Default)
+                        {
+                            labels[(int)quality][iWrite++] = "Default Preset";
+                            continue;
+                        }
+
+                        if ((presetBitmask & (uint)preset) != 0)
+                        {
+                            string presetName = preset.ToString().Replace('_', ' ');
+                            labels[(int)quality][iWrite++] = presetName + " - " + UnityEngine.NVIDIA.GraphicsDevice.GetDLSSPresetExplanation(preset);
+                        }
+                    }
+                }
+                return labels;
+            }
+#endif
+
         }
     }
 }

@@ -1,4 +1,3 @@
-#if false
 using UnityEditorInternal;
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
@@ -10,7 +9,7 @@ namespace UnityEditor.Rendering.Universal
     /// Editor script for a <c>UniversalRenderPipelineAsset</c> class.
     /// </summary>
     [CustomEditor(typeof(UniversalRenderPipelineAsset)), CanEditMultipleObjects]
-    public class UniversalRenderPipelineAssetEditor : Editor
+    public class VividRenderPipelineAssetEditor : Editor
     {
         SerializedProperty m_RendererDataProp;
         SerializedProperty m_DefaultRendererProp;
@@ -18,19 +17,19 @@ namespace UnityEditor.Rendering.Universal
         internal ReorderableList rendererList => m_RendererDataList;
         ReorderableList m_RendererDataList;
 
-        private SerializedUniversalRenderPipelineAsset m_SerializedURPAsset;
+        private SerializedVividRenderPipelineAsset m_SerializedURPAsset;
 
         /// <inheritdoc/>
         public override void OnInspectorGUI()
         {
             m_SerializedURPAsset.Update();
-            UniversalRenderPipelineAssetUI.Inspector.Draw(m_SerializedURPAsset, this);
+            VividRenderPipelineAssetUI.Inspector.Draw(m_SerializedURPAsset, this);
             m_SerializedURPAsset.Apply();
         }
 
         void OnEnable()
         {
-            m_SerializedURPAsset = new SerializedUniversalRenderPipelineAsset(serializedObject);
+            m_SerializedURPAsset = new SerializedVividRenderPipelineAsset(serializedObject);
             CreateRendererReorderableList();
         }
 
@@ -44,7 +43,8 @@ namespace UnityEditor.Rendering.Universal
                 drawHeaderCallback = (Rect rect) => EditorGUI.LabelField(rect, Styles.rendererHeaderText),
                 onCanRemoveCallback = reorderableList => reorderableList.count > 1,
                 onRemoveCallback = OnRemoveElement,
-                onReorderCallbackWithDetails = (reorderableList, index, newIndex) => UpdateDefaultRendererValue(index, newIndex) // Need to update the default renderer index
+                onReorderCallbackWithDetails =
+                    (reorderableList, index, newIndex) => UpdateDefaultRendererValue(index, newIndex) // Need to update the default renderer index
             };
         }
 
@@ -143,4 +143,3 @@ namespace UnityEditor.Rendering.Universal
         }
     }
 }
-#endif

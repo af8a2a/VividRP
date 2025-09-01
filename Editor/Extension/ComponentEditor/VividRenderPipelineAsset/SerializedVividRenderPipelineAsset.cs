@@ -1,10 +1,10 @@
-
+using UnityEditor.Rendering.HighDefinition;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
 namespace UnityEditor.Rendering.Universal
 {
-    internal class SerializedUniversalRenderPipelineAsset
+    internal class SerializedVividRenderPipelineAsset
     {
         public SerializedProperty rendererDataProp { get; }
         public SerializedProperty defaultRendererProp { get; }
@@ -94,6 +94,29 @@ namespace UnityEditor.Rendering.Universal
         public SerializedProperty smallMeshScreenPercentage { get; }
         public SerializedProperty gpuResidentDrawerEnableOcclusionCullingInCameras { get; }
 
+
+        #region Upscaler
+
+        public SerializedProperty DLSSPerfQualitySetting;
+
+        /// <summary> Specifies the DLSS Render Preset to use for the Quality performance quality setting.</summary>
+        public SerializedProperty DLSSRenderPresetForQuality ;
+
+        /// <summary> Specifies the DLSS Render Preset to use for the Balanced performance quality setting.</summary>
+        public SerializedProperty DLSSRenderPresetForBalanced ;
+
+        /// <summary> Specifies the DLSS Render Preset to use for the Performance performance quality setting.</summary>
+        public SerializedProperty DLSSRenderPresetForPerformance ;
+
+        /// <summary> Specifies the DLSS Render Preset to use for the UltraPerformance performance quality setting.</summary>
+        public SerializedProperty DLSSRenderPresetForUltraPerformance;
+
+        /// <summary> Specifies the DLSS Render Preset to use for the DLAA performance quality setting.</summary>
+        public SerializedProperty DLSSRenderPresetForDLAA ;
+
+        #endregion
+        
+
 #if ENABLE_ADAPTIVE_PERFORMANCE
         public SerializedProperty useAdaptivePerformance { get; }
 #endif
@@ -102,7 +125,7 @@ namespace UnityEditor.Rendering.Universal
 
         public EditorPrefBoolFlags<EditorUtils.Unit> state;
 
-        public SerializedUniversalRenderPipelineAsset(SerializedObject serializedObject)
+        public SerializedVividRenderPipelineAsset(SerializedObject serializedObject)
         {
             asset = serializedObject.targetObject as UniversalRenderPipelineAsset;
             this.serializedObject = serializedObject;
@@ -193,6 +216,18 @@ namespace UnityEditor.Rendering.Universal
             gpuResidentDrawerMode = serializedObject.FindProperty("m_GPUResidentDrawerMode");
             smallMeshScreenPercentage = serializedObject.FindProperty("m_SmallMeshScreenPercentage");
             gpuResidentDrawerEnableOcclusionCullingInCameras = serializedObject.FindProperty("m_GPUResidentDrawerEnableOcclusionCullingInCameras");
+
+            using (var o = new PropertyFetcher<UniversalRenderPipelineAsset>(serializedObject))
+            {
+                DLSSPerfQualitySetting = o.Find(x => x.m_DLSSPreset.DLSSRenderPresetForPerformance);
+                DLSSRenderPresetForQuality = o.Find(x => x.m_DLSSPreset.DLSSRenderPresetForQuality);
+                DLSSRenderPresetForBalanced = o.Find(x => x.m_DLSSPreset.DLSSRenderPresetForBalanced);
+                DLSSRenderPresetForPerformance = o.Find(x => x.m_DLSSPreset.DLSSRenderPresetForPerformance);
+                DLSSRenderPresetForUltraPerformance = o.Find(x => x.m_DLSSPreset.DLSSRenderPresetForUltraPerformance);
+                DLSSRenderPresetForDLAA = o.Find(x => x.m_DLSSPreset.DLSSRenderPresetForDLAA);
+                
+            }
+
 
 #if ENABLE_ADAPTIVE_PERFORMANCE
             useAdaptivePerformance = serializedObject.FindProperty("m_UseAdaptivePerformance");

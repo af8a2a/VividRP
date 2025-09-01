@@ -146,18 +146,7 @@ namespace UnityEngine.Rendering.Universal
         /// The min dimension is 1.
         /// </summary>
         public int scaledHeight;
-
-
-        #region Extension
-
-        //for integrate HDRP Feature ..
-        public int actualWidth => scaledWidth;
-
-        public int actualHeight => scaledHeight;
-
-        #endregion
-
-
+        
         // NOTE: This is internal instead of private to allow ref return in the old CameraData compatibility property.
         // We can make this private when it is removed.
         //
@@ -209,11 +198,7 @@ namespace UnityEngine.Rendering.Universal
         internal bool fsrOverrideSharpness;
         internal float fsrSharpness;
         internal HDRColorBufferPrecision hdrColorBufferPrecision;
-
-
-
-        internal UpscalingTechnique upscalingTechnique;
-
+        
         /// <summary>
         /// True if this camera should clear depth buffer. This setting only applies to cameras of type <c>CameraRenderType.Overlay</c>
         /// <seealso cref="CameraRenderType"/>
@@ -462,22 +447,11 @@ namespace UnityEngine.Rendering.Universal
         /// <returns>True if STP is requested</returns>
         internal bool IsSTPRequested()
         {
-#if false
-            return (imageScalingMode == ImageScalingMode.Upscaling) && (upscalingFilter == ImageUpscalingFilter.STP);
-#endif
             return (imageScalingMode == ImageScalingMode.Upscaling) && (upscalingTechnique == UpscalingTechnique.STP);
         }
 
 
-        /// <summary>
-        /// Returns true if the TAAU upscaler has been requested
-        /// Use IsTAAUEnabled() to ensure that TAAU upscaler is active at runtime, it necessitates TAA pre-processing
-        /// </summary>
-        /// <returns>True if TAAU is requested</returns>
-        internal bool IsTAAUEnabled()
-        {
-            return (imageScalingMode == ImageScalingMode.Upscaling) && (upscalingTechnique == UpscalingTechnique.TAAU);
-        }
+
 
 
         /// <summary>
@@ -628,20 +602,6 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         internal bool isLastBaseCamera;
 
-
-        public HistoryFrameRTSystem historyFrameRTSystem => HistoryFrameRTSystem.GetOrCreate(camera);
-
-        public RayTracingSystem rayTracingSystem => RayTracingSystem.GetOrCreate(camera);
-
-
-        internal DenoiseSystem denoiseSystem => DenoiseSystem.GetOrCreate(camera);
-
-        internal Vector4 resolution => new Vector4(actualWidth, actualHeight, 1.0f / actualWidth, 1.0f / actualHeight);
-
-        public Frustum frustum;
-
-
-        public Vector4 jitter;
 
         ///<inheritdoc/>
         public override void Reset()

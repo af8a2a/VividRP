@@ -176,8 +176,8 @@ CBUFFER_START(ShaderVariablesLightList)
     uint g_isLogBaseBufferEnabled;
     uint _NumTileClusteredX;
     uint _NumTileClusteredY;
-    uint _DirectionalLightCount;
-    int _EnvSliceSize;
+    uint _EnvSliceSize;
+    uint _unused;
 CBUFFER_END
 
 //

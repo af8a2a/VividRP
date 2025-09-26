@@ -73,7 +73,7 @@ TEXTURE2D_X(_GBuffer5);
 TEXTURE2D_X(_GBuffer6);
 #endif
 
-// TEXTURE2D(_SSRLightingTexture);
+TEXTURE2D(_SSRLightingTexture);
 
 RWTexture2D<float4> _LightingTexture;
 

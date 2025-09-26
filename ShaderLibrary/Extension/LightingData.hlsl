@@ -19,4 +19,5 @@ GPULightData FetchLight(uint index)
 //--------------------------------------------------------------------------------------------------
 // Directional light data
 //--------------------------------------------------------------------------------------------------
+uint _DirectionalLightCount;
 StructuredBuffer<DirectionalLightData> g_DirectionalLightDatas;

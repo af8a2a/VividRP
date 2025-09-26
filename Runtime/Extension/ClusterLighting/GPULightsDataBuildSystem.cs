@@ -25,26 +25,18 @@ namespace UnityEngine.Rendering.Universal.Internal
         private int m_LightCapacity = 0;
         private int m_LightCount = 0;
 
-        private NativeArray<DirectionalLightData> m_DirectionalLightsData;
-        private int m_DirectionalLightCapacity = 0;
-        private int m_DirectionalLightCount = 0;
 
         private NativeArray<EnvLightData> m_EnvLightsData;
         private int m_EnvLightCapacity = 0;
         private int m_EnvLightsCount = 0;
 
-        private AdditionalLightsShadowCasterPass m_AdditionalLightsShadowCasterPass;
-        private LightCookieManager m_LightCookieManager;
 
         //Auxiliary GPU arrays for coarse culling
         public NativeArray<SFiniteLightBound> lightBounds => m_LightBounds;
         public NativeArray<LightVolumeData> lightVolumes => m_LightVolumes;
         public NativeArray<GPULightData> gpuLightsData => m_GPULightsData;
-        public NativeArray<DirectionalLightData> directionalLightsData => m_DirectionalLightsData;
-        public NativeArray<EnvLightData> envLightsData => m_EnvLightsData;
 
         public int lightsCount => m_LightCount;
-        public int directionalLightCount => m_DirectionalLightCount;
         public int boundsCount => m_boundsCount;
         public int envLightsCount => m_EnvLightsCount;
 
@@ -53,7 +45,7 @@ namespace UnityEngine.Rendering.Universal.Internal
 
 
         //Preallocates number of lights for bounds arrays and resets all internal counters. Must be called once per frame per view always.
-        public void NewFrame(int maxBoundsCount, AdditionalLightsShadowCasterPass addShadowCaster, LightCookieManager cookieManager)
+        public void NewFrame(int maxBoundsCount)
         {
             int requestedBoundsCount = Math.Max(maxBoundsCount, 1);
             if (requestedBoundsCount > m_LightBoundsCapacity)
@@ -68,12 +60,10 @@ namespace UnityEngine.Rendering.Universal.Internal
             //m_probeBoundsOffset = maxBoundsCount;
             m_boundsCount = 0;
 
-            m_AdditionalLightsShadowCasterPass = addShadowCaster;
-            m_LightCookieManager = cookieManager;
         }
 
 
-        private void AllocateGPULightsData(int lightCount, int directionalLightCount)
+        private void AllocateGPULightsData(int lightCount)
         {
             int requestedLightCount = Math.Max(1, lightCount);
             if (requestedLightCount > m_LightCapacity)
@@ -84,14 +74,6 @@ namespace UnityEngine.Rendering.Universal.Internal
 
             m_LightCount = lightCount;
 
-            int requestedDurectinalCount = Math.Max(1, directionalLightCount);
-            if (requestedDurectinalCount > m_DirectionalLightCapacity)
-            {
-                m_DirectionalLightCapacity = Math.Max(Math.Max(m_DirectionalLightCapacity * 2, requestedDurectinalCount), ArrayCapacity);
-                m_DirectionalLightsData.ResizeArray(m_DirectionalLightCapacity);
-            }
-
-            m_DirectionalLightCount = directionalLightCount;
         }
 
         //Adds bounds for a new light type. Reflection probes / decals add their bounds here.
@@ -111,48 +93,48 @@ namespace UnityEngine.Rendering.Universal.Internal
             var visibleLights = lightData.visibleLights;
 
             var dirlightCount = lightData.directionalLightsCount;
-            AllocateGPULightsData(visibleLights.Length - dirlightCount, dirlightCount);
+            AllocateGPULightsData(visibleLights.Length - dirlightCount);
 
             for (int visLightIndex = 0; visLightIndex < visibleLights.Length; visLightIndex++)
             {
                 var light = visibleLights[visLightIndex].light;
                 if (visibleLights[visLightIndex].lightType == LightType.Directional)
                 {
-                    var additionalLightData = light.GetUniversalAdditionalLightData();
-
-                    var directionalLightData = new DirectionalLightData();
-
-                    Vector4 lightPos, lightColor, lightAttenuation, lightSpotDir, lightOcclusionChannel;
-                    // Directional lightPos is direction
-                    UniversalRenderPipeline.InitializeLightConstants_Common(visibleLights, visLightIndex, out lightPos, out lightColor, out lightAttenuation,
-                        out lightSpotDir, out lightOcclusionChannel);
-                    uint lightLayerMask = RenderingLayerUtils.ToValidRenderingLayers(additionalLightData.renderingLayers);
-
-                    int lightFlags = 0;
-                    if (light.bakingOutput.lightmapBakeType == LightmapBakeType.Mixed)
-                        lightFlags |= (int)LightFlag.SubtractiveMixedLighting;
-
-                    // As we said before.
-                    directionalLightData.positionWS = visibleLights[visLightIndex].GetPosition();
-                    directionalLightData.dir = lightPos;
-                    directionalLightData.color = lightColor;
-                    directionalLightData.lightAttenuation = lightAttenuation;
-                    // directionalLightData.lightOcclusionProbInfo = lightOcclusionChannel;
-                    directionalLightData.lightFlags = lightFlags;
-                    //directionalLightData.shadowlightIndex = shadowLightIndex;
-                    directionalLightData.lightLayerMask = lightLayerMask;
-
-                    //Value of max smoothness is derived from AngularDiameter. Formula results from eyeballing. Angular diameter of 0 results in 1 and angular diameter of 80 results in 0.
-                    float maxSmoothness = Mathf.Clamp01(1.35f / (1.0f + Mathf.Pow(1.15f * (0.0315f * additionalLightData.angularDiameter + 0.4f), 2f)) - 0.11f);
-                    // Value of max smoothness is from artists point of view, need to convert from perceptual smoothness to roughness
-                    directionalLightData.minRoughness = (1.0f - maxSmoothness) * (1.0f - maxSmoothness);
-                    directionalLightData.lightDimmer = 1;
-                    directionalLightData.diffuseDimmer = 1;
-                    directionalLightData.specularDimmer = 1;
-                    directionalLightData.volumetricLightDimmer = additionalLightData.volumetricDimmer;
-
-
-                    m_DirectionalLightsData[visLightIndex] = directionalLightData;
+                    // var additionalLightData = light.GetUniversalAdditionalLightData();
+                    //
+                    // var directionalLightData = new DirectionalLightData();
+                    //
+                    // Vector4 lightPos, lightColor, lightAttenuation, lightSpotDir, lightOcclusionChannel;
+                    // // Directional lightPos is direction
+                    // UniversalRenderPipeline.InitializeLightConstants_Common(visibleLights, visLightIndex, out lightPos, out lightColor, out lightAttenuation,
+                    //     out lightSpotDir, out lightOcclusionChannel);
+                    // uint lightLayerMask = RenderingLayerUtils.ToValidRenderingLayers(additionalLightData.renderingLayers);
+                    //
+                    // int lightFlags = 0;
+                    // if (light.bakingOutput.lightmapBakeType == LightmapBakeType.Mixed)
+                    //     lightFlags |= (int)LightFlag.SubtractiveMixedLighting;
+                    //
+                    // // As we said before.
+                    // directionalLightData.positionWS = visibleLights[visLightIndex].GetPosition();
+                    // directionalLightData.dir = lightPos;
+                    // directionalLightData.color = lightColor;
+                    // directionalLightData.lightAttenuation = lightAttenuation;
+                    // // directionalLightData.lightOcclusionProbInfo = lightOcclusionChannel;
+                    // directionalLightData.lightFlags = lightFlags;
+                    // //directionalLightData.shadowlightIndex = shadowLightIndex;
+                    // directionalLightData.lightLayerMask = lightLayerMask;
+                    //
+                    // //Value of max smoothness is derived from AngularDiameter. Formula results from eyeballing. Angular diameter of 0 results in 1 and angular diameter of 80 results in 0.
+                    // float maxSmoothness = Mathf.Clamp01(1.35f / (1.0f + Mathf.Pow(1.15f * (0.0315f * additionalLightData.angularDiameter + 0.4f), 2f)) - 0.11f);
+                    // // Value of max smoothness is from artists point of view, need to convert from perceptual smoothness to roughness
+                    // directionalLightData.minRoughness = (1.0f - maxSmoothness) * (1.0f - maxSmoothness);
+                    // directionalLightData.lightDimmer = 1;
+                    // directionalLightData.diffuseDimmer = 1;
+                    // directionalLightData.specularDimmer = 1;
+                    // directionalLightData.volumetricLightDimmer = additionalLightData.volumetricDimmer;
+                    //
+                    //
+                    // m_DirectionalLightsData[visLightIndex] = directionalLightData;
                 }
                 else
                 {
@@ -168,15 +150,8 @@ namespace UnityEngine.Rendering.Universal.Internal
                     int lightFlags = 0;
                     if (light.bakingOutput.lightmapBakeType == LightmapBakeType.Mixed)
                         lightFlags |= (int)LightFlag.SubtractiveMixedLighting;
-                    int shadowLightIndex = m_AdditionalLightsShadowCasterPass != null
-                        ? m_AdditionalLightsShadowCasterPass.GetShadowLightIndexFromLightIndex(visLightIndex)
-                        : -1;
+                    int shadowLightIndex =  -1;
 
-                    if (m_LightCookieManager != null)
-                    {
-                        int cookieLightIndex = m_LightCookieManager.GetLightCookieShaderDataIndex(visLightIndex);
-                        gpuLightsData.cookieLightIndex = cookieLightIndex;
-                    }
 
                     gpuLightsData.positionWS = lightPos;
                     gpuLightsData.color = lightColor;
@@ -420,8 +395,6 @@ namespace UnityEngine.Rendering.Universal.Internal
             if (m_GPULightsData.IsCreated)
                 m_GPULightsData.Dispose();
 
-            if (m_DirectionalLightsData.IsCreated)
-                m_DirectionalLightsData.Dispose();
 
             if (m_EnvLightsData.IsCreated)
                 m_EnvLightsData.Dispose();

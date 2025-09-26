@@ -4,7 +4,7 @@ namespace UnityEngine.Rendering.Universal
 {
     public partial class UniversalRenderPipelineDebugShaders : IRenderPipelineResources
     {
-        [Header("Debug")] [SerializeField, ResourcePath("Runtime/Extension/RayTracing/Shaders/RTASDebug.raytrace")]
+        [Header("Debug")] [SerializeField, ResourcePath("Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RTASDebug.raytrace")]
         public RayTracingShader m_RtasDebugRT;
 
         public RayTracingShader debugRTASRT

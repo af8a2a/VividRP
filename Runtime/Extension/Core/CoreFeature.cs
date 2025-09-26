@@ -16,6 +16,9 @@ namespace UnityEngine.Rendering.Universal
         HistoryCapturePass historyCapturePass;
         HistoryValidityPass historyValidityPass;
         SceneViewMotionVectorPass sceneViewMotionVectorPass;
+
+        private DirectionalLighting _directionalLighting;
+        private ClusterLighting _clusterLighting;
         public override void Create()
         {
             colorPyramid = new ColorPyramidPass(RenderPassEvent.BeforeRenderingPostProcessing);
@@ -32,6 +35,8 @@ namespace UnityEngine.Rendering.Universal
             };
             sceneViewMotionVectorPass = new SceneViewMotionVectorPass();
             depthPyramid = new DepthPyramidPass(RenderPassEvent.AfterRenderingPrePasses);
+            _directionalLighting = new DirectionalLighting();
+            _clusterLighting = new ClusterLighting();
         }
         
 
@@ -58,6 +63,8 @@ namespace UnityEngine.Rendering.Universal
             renderer.EnqueuePass(historyValidityPass);
             
             renderer.EnqueuePass(sceneViewMotionVectorPass);
+            renderer.EnqueuePass(_directionalLighting);
+            renderer.EnqueuePass(_clusterLighting);
         }
     }
 }

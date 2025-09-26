@@ -938,7 +938,8 @@ namespace UnityEngine.Rendering.Universal
             }
             ScriptableRenderer.current = null;
         }
-
+        
+        
         private static void CreateShadowAtlasAndCullShadowCasters(UniversalLightData lightData, UniversalShadowData shadowData, UniversalCameraData cameraData, ref CullingResults cullResults, ref ScriptableRenderContext context)
         {
             if (!shadowData.supportsMainLightShadows && !shadowData.supportsAdditionalLightShadows)
@@ -1392,7 +1393,7 @@ namespace UnityEngine.Rendering.Universal
             var renderer = GetRenderer(camera, additionalCameraData);
             UniversalCameraData cameraData = frameData.Create<UniversalCameraData>();
             InitializeStackedCameraData(camera, additionalCameraData, cameraData);
-
+            
             cameraData.camera = camera;
 
             // Add reference to writable camera history to give access to injected user render passes which can produce history.
@@ -1519,7 +1520,7 @@ namespace UnityEngine.Rendering.Universal
                 Math.Abs(cameraRect.width) < 1.0f || Math.Abs(cameraRect.height) < 1.0f));
 
             bool isScenePreviewOrReflectionCamera = cameraData.cameraType == CameraType.SceneView || cameraData.cameraType == CameraType.Preview || cameraData.cameraType == CameraType.Reflection;
-
+            
             // Discard variations lesser than kRenderScaleThreshold.
             // Scale is only enabled for gameview.
             const float kRenderScaleThreshold = 0.05f;

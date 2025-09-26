@@ -109,7 +109,8 @@ namespace UnityEngine.Rendering.Universal
         }
         
         
-        [SerializeField, ResourcePath("Runtime/Extension/Postprocessing/UberPost/Shader/UberPost.shader")]
+        
+        [SerializeField, ResourcePath("Runtime/Extension/Postprocessing/UberPass/Shader/UberPost.shader")]
         private Shader m_UberPostShader;
 
         public Shader uberPost

@@ -23,7 +23,6 @@ namespace UnityEngine.Rendering.Universal
         }
         
         
-        
         [SerializeField] [ResourcePath("Runtime/Extension/Postprocessing/Bloom/MobileBloom/Shader/URPBloom.shader")]
         private Shader m_URPBloomShader;
 

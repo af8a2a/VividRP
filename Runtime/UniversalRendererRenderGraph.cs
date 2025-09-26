@@ -503,7 +503,6 @@ namespace UnityEngine.Rendering.Universal
                 m_DeferredLights.UseFramebufferFetch = renderGraph.nativeRenderPassesEnabled;
                 m_DeferredLights.SetupRenderGraphLights(renderGraph, cameraData, lightData);
             }
-            m_GPULights.SetupRenderGraphLights(renderGraph, renderingData, cameraData, lightData);
             
         }
 
@@ -1111,16 +1110,16 @@ namespace UnityEngine.Rendering.Universal
                 m_XROcclusionMeshPass.Render(renderGraph, frameData, resourceData.activeColorTexture, resourceData.activeDepthTexture);
 #endif
             
-            {
-                var punctualLightCount = lightData.additionalLightsCount;
-                var reflectionProbes = renderingData.cullResults.visibleReflectionProbes;
-                var reflectionProbeCount = Mathf.Min(reflectionProbes.Length, UniversalRenderPipeline.maxVisibleReflectionProbes);
-                m_GPULights.NewFrame(punctualLightCount + reflectionProbeCount, m_AdditionalLightsShadowCasterPass, m_LightCookieManager);
-                m_GPULights.PreSetup(lightData, cameraData);
-                // GPULightList
-                m_GPULights.Render(renderGraph, frameData);
-                m_GPULights.RenderSetGlobalSync(renderGraph, frameData);
-            }
+            // {
+            //     var punctualLightCount = lightData.additionalLightsCount;
+            //     var reflectionProbes = renderingData.cullResults.visibleReflectionProbes;
+            //     var reflectionProbeCount = Mathf.Min(reflectionProbes.Length, UniversalRenderPipeline.maxVisibleReflectionProbes);
+            //     m_GPULights.NewFrame(punctualLightCount + reflectionProbeCount, m_AdditionalLightsShadowCasterPass, m_LightCookieManager);
+            //     m_GPULights.PreSetup(lightData, cameraData);
+            //     // GPULightList
+            //     m_GPULights.Render(renderGraph, frameData);
+            //     m_GPULights.RenderSetGlobalSync(renderGraph, frameData);
+            // }
 
             if (usesDeferredLighting)
             {
@@ -1179,7 +1178,6 @@ namespace UnityEngine.Rendering.Universal
                 RecordCustomRenderGraphPasses(renderGraph, RenderPassEvent.AfterRenderingGbuffer, RenderPassEvent.BeforeRenderingDeferredLights);
 
 
-                m_ClusterDeferredLights.Render(renderGraph, frameData, resourceData.activeColorTexture, resourceData.activeDepthTexture, resourceData.gBuffer);
 
                 // m_DeferredPass.Render(renderGraph, frameData, resourceData.activeColorTexture, resourceData.activeDepthTexture, resourceData.gBuffer);
 

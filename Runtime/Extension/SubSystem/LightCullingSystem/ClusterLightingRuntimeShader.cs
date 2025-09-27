@@ -8,7 +8,7 @@ namespace UnityEngine.Rendering.Universal
     public class ClusterLightingRuntimeShader : IRenderPipelineResources
 
     {
-        [SerializeField] [HideInInspector] private int _version;
+        [SerializeField] [HideInInspector] private int _version = 1;
         public int version => _version;
 
         #region Cluster
@@ -16,7 +16,7 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// GPU lights list compute shader.
         /// </summary>
-        [SerializeField, ResourcePath("Runtime/Extension/ClusterLighting/Shader/GPULightsClearLists.compute")]
+        [SerializeField, ResourcePath("Runtime/Extension/SubSystem/LightCullingSystem/Shader/GPULightsClearLists.compute")]
         private ComputeShader m_GpuLightsClearLists;
 
         public ComputeShader gpuLightsClearLists
@@ -25,7 +25,7 @@ namespace UnityEngine.Rendering.Universal
             set => this.SetValueAndNotify(ref m_GpuLightsClearLists, value);
         }
 
-        [SerializeField, ResourcePath("Runtime/Extension/ClusterLighting/Shader/GPULightsCoarseCulling.compute")]
+        [SerializeField, ResourcePath("Runtime/Extension/SubSystem/LightCullingSystem/Shader/GPULightsCoarseCulling.compute")]
         private ComputeShader m_GpuLightsCoarseCullingCS;
 
         public ComputeShader gpuLightsCoarseCullingCS
@@ -35,7 +35,7 @@ namespace UnityEngine.Rendering.Universal
         }
 
 
-        [SerializeField, ResourcePath("Runtime/Extension/ClusterLighting/Shader/GPULightsCluster.compute")]
+        [SerializeField, ResourcePath("Runtime/Extension/SubSystem/LightCullingSystem/Shader/GPULightsCluster.compute")]
         private ComputeShader m_GpuLightsCluster;
 
         public ComputeShader gpuLightsCluster
@@ -49,7 +49,7 @@ namespace UnityEngine.Rendering.Universal
 
         #region FPTL
 
-        [SerializeField, ResourcePath("Runtime/Extension/ClusterLighting/Shader/GPULightsBigTile.compute")]
+        [SerializeField, ResourcePath("Runtime/Extension/SubSystem/LightCullingSystem/Shader/GPULightsBigTile.compute")]
         private ComputeShader m_GPULightsBigTile;
 
         public ComputeShader gpuLightsBigTile
@@ -58,7 +58,7 @@ namespace UnityEngine.Rendering.Universal
             set => this.SetValueAndNotify(ref m_GPULightsBigTile, value);
         }
 
-        [SerializeField, ResourcePath("Runtime/Extension/ClusterLighting/Shader/GPULightListBuild.compute")]
+        [SerializeField, ResourcePath("Runtime/Extension/SubSystem/LightCullingSystem/Shader/GPULightListBuild.compute")]
         private ComputeShader m_GPULightListBuild;
 
         public ComputeShader gpuLightListBuild
@@ -69,7 +69,6 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
 
-        
         /// <summary>
         /// Deferred lighting compute shader.
         /// </summary>

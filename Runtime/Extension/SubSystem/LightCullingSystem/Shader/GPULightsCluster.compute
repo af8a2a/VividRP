@@ -15,8 +15,7 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/UnityInput.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/ClusterLight.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/ClusterLighting/GPULights.cs.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/LightCullingSystem/GPULights.cs.hlsl"
 #include "GPULightsCullingUtils.hlsl"
 #include "SortingComputeUtils.hlsl"
 

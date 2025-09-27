@@ -178,7 +178,7 @@ CBUFFER_END
 #endif
 #endif
 
-#if USE_CLUSTER_LIGHT_LOOP||defined(_GPU_LIGHTS_CLUSTER)
+// #if USE_CLUSTER_LIGHT_LOOP||defined(_GPU_LIGHTS_CLUSTER)
 
 CBUFFER_START(urp_ZBinBuffer)
         float4 urp_ZBins[MAX_ZBIN_VEC4S];
@@ -205,7 +205,7 @@ float4 urp_ReflProbes_Rotation[MAX_REFLECTION_PROBES];
 CBUFFER_END
 #endif
 
-#endif
+// #endif
 
 #define UNITY_MATRIX_M     unity_ObjectToWorld
 #define UNITY_MATRIX_I_M   unity_WorldToObject

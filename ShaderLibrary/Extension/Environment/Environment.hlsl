@@ -1,3 +1,5 @@
+#ifndef VIVID_ENVIRONMENT_INCLUDED
+#define VIVID_ENVIRONMENT_INCLUDED
 TEXTURECUBE(_SkyTexture);
 StructuredBuffer<float4> _AmbientProbeData;
 
@@ -13,7 +15,6 @@ float3 SampleSkyEnvironment(float3 reflectVector, float perceptualRoughness)
     return SampleSkyTexture(reflectVector, mip).rgb;
 }
 
-#if defined(_GPU_LIGHTS_CLUSTER)
 float3 EvaluateEnvProbes(PositionInputs posInput, float3 reflectDirWS, float perceptualRoughness, inout float hierarchyWeight)
 {
     float3 irradiance = 0;

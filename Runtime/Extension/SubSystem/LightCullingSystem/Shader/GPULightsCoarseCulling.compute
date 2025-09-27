@@ -15,7 +15,7 @@
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "GPULightsCullingUtils.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/ClusterLighting/GPULights.cs.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/LightCullingSystem/GPULights.cs.hlsl"
 
 
 //--------------------------------------------------------------------------------------------------
@@ -193,7 +193,7 @@ float4x4 PerspectiveProjection4x4(float a, float g, float n, float f)
 #elif defined(GPULIGHTS_COARSECULLING)
 
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/UnityInput.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/ClusterLighting/Shader//SortingComputeUtils.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/LightCullingSystem/Shader/SortingComputeUtils.hlsl"
 
 #define EXACT_EDGE_TESTS
 #define PERFORM_SPHERICAL_INTERSECTION_TESTS

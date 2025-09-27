@@ -1,6 +1,19 @@
 #include "Packages/com.unity.render-pipelines.universal//Runtime/Extension/Filter/PreIntegratedFGD/PreIntegratedFGD.cs.hlsl"
 TEXTURE2D(_PreIntegratedFGD_GGXDisneyDiffuse);
 
+// This F90 term can be used as a way to suppress completely specular when using the specular workflow.
+float ComputeF90(real3 F0)
+{
+    #if HAS_REFRACTION
+    // With refraction fresnel0 is computed from IOR hence it might reach below 2%, but in that case is not necessarily to kill specular, hence we use a neutral F90
+    return 1.0;
+    #elif SPECULAR_FADE
+    // This F90 term can be used as a way to suppress completely specular when using the specular workflow.
+    return saturate(50.0 * dot(F0, 0.333))
+    #else
+    return 1.0;
+    #endif
+}
 
 // For image based lighting, a part of the BSDF is pre-integrated.
 // This is done both for specular GGX height-correlated and DisneyDiffuse

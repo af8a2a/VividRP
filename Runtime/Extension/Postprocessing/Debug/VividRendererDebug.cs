@@ -219,7 +219,7 @@ namespace UnityEngine.Rendering.Universal
             if ((DebugHandler != null) && DebugHandler.IsActiveForCamera(cameraData.isPreviewCamera))
             {
                 if (DebugHandler.TryGetFullscreenDebugMode(out var debugFullscreenMode, out int textureHeightPercent) &&
-                    (debugFullscreenMode == DebugFullScreenMode.STP))
+                    (debugFullscreenMode == DebugFullScreenMode.STP) && cameraData.upscalingTechnique is UpscalingTechnique.STP)
                 {
                     CreateDebugTexture(cameraData.cameraTargetDescriptor);
 

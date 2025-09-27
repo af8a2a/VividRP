@@ -8,8 +8,8 @@ namespace UnityEngine.Rendering.Universal
         CorePostProcessPass _corePostProcessPass = new CorePostProcessPass();
         
         
-        ExposurePass exposurePass;
-        ExposureSetupPass exposureSetupPass;
+        ExposurePass exposurePass = new ExposurePass();
+        ExposureSetupPass exposureSetupPass = new ExposureSetupPass();
 
         #region ColorGrading
 
@@ -25,8 +25,6 @@ namespace UnityEngine.Rendering.Universal
 
         public override void Create()
         {
-            exposurePass = new ExposurePass();
-            exposureSetupPass = new ExposureSetupPass();
 
         }
 

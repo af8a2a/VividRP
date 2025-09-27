@@ -1,4 +1,4 @@
-Shader "Hidden/Universal Render Pipeline/FinalPost"
+Shader "Hidden/VividRP/FinalPost"
 {
     HLSLINCLUDE
         #pragma multi_compile_local_fragment _ _POINT_SAMPLING _RCAS _EASU_RCAS_AND_HDR_INPUT

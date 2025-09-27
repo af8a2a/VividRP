@@ -241,7 +241,7 @@ namespace UnityEngine.Rendering.Universal
                 var gbuffer = resourceData.gBuffer;
                 for (int i = 0; i < gbuffer.Length; ++i)
                 {
-                    if (i != GBufferLightingIndex)
+                    if (i != GBufferLightingIndex && gbuffer[i].IsValid())
                         builder.UseTexture(gbuffer[i], AccessFlags.Read);
                 }
 

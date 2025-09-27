@@ -81,7 +81,7 @@ namespace UnityEngine.Rendering.Universal
     }
 
 
-    public class UberPostPass
+    public class UberPostPass : ScriptableRenderPass
     {
         Material material;
         RTHandle m_UserLut;
@@ -445,6 +445,8 @@ namespace UnityEngine.Rendering.Universal
             internal TextureHandle sourceTexture;
             internal TextureHandle userLutTexture;
             internal Vector4 userLutParams;
+            internal bool enableAlphaOutput;
+            internal bool useFastSRGBLinearConversion;
 
             internal Material material;
         }
@@ -457,8 +459,9 @@ namespace UnityEngine.Rendering.Universal
                 var runtimeShader = GraphicsSettings.GetRenderPipelineSettings<PostProcessingRuntimeShader>();
                 material = CoreUtils.CreateEngineMaterial(runtimeShader.uberPost);
             }
-            var cameraData = frameData.Get<UniversalCameraData>();
 
+            var cameraData = frameData.Get<UniversalCameraData>();
+            UniversalPostProcessingData postProcessingData = frameData.Get<UniversalPostProcessingData>();
             material.enabledKeywords = null;
 
 
@@ -470,7 +473,7 @@ namespace UnityEngine.Rendering.Universal
             ImportResourceParams importColorParams = new ImportResourceParams();
             importColorParams.clearOnFirstUse = true;
             importColorParams.clearColor = Color.black;
-            importColorParams.discardOnLastUse = cameraData.resolveFinalTarget;  // check if last camera in the stack
+            importColorParams.discardOnLastUse = cameraData.resolveFinalTarget; // check if last camera in the stack
 
             var destTexture = renderGraph.CreateTexture(new TextureDesc(cameraData.scaledWidth, cameraData.scaledHeight)
             {
@@ -479,7 +482,10 @@ namespace UnityEngine.Rendering.Universal
                 name = "UberPost Texture",
                 clearBuffer = true,
             });
-            
+
+            DebugHandler debugHandler = GetActiveDebugHandler(cameraData);
+            debugHandler?.UpdateShaderGlobalPropertiesForFinalValidationPass(renderGraph, cameraData, false);
+
             using (var builder = renderGraph.AddRasterRenderPass<UberPostPassData>("Vivid UberPost", out var passData))
             {
                 passData.destTexture = destTexture;
@@ -488,9 +494,17 @@ namespace UnityEngine.Rendering.Universal
                 builder.UseTexture(passData.sourceTexture, AccessFlags.Read);
                 passData.material = material;
                 builder.AllowPassCulling(false);
+
+                passData.enableAlphaOutput = cameraData.isAlphaOutputEnabled;
+                passData.useFastSRGBLinearConversion = postProcessingData.useFastSRGBLinearConversion;
                 builder.SetRenderFunc(static (UberPostPassData data, RasterGraphContext context) =>
                 {
                     var cmd = context.cmd;
+                    CoreUtils.SetKeyword(data.material, ShaderKeywordStrings._ENABLE_ALPHA_OUTPUT, data.enableAlphaOutput);
+                    if (data.useFastSRGBLinearConversion)
+                    {
+                        data.material.EnableKeyword(ShaderKeywordStrings.UseFastSRGBLinearConversion);
+                    }
 
                     Blitter.BlitTexture(cmd, data.sourceTexture, Vector2.one, data.material, 0);
                 });

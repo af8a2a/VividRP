@@ -186,6 +186,9 @@ namespace UnityEngine.Rendering.Universal
             #endregion
             
             #region UberPost
+            
+            
+            
             currentRT = _uberPostPass.Render(renderGraph, frameData, currentRT);
             
             #endregion

@@ -364,11 +364,34 @@ namespace UnityEngine.Rendering.Universal
                 material.EnableKeyword(ShaderKeywordStrings.Fxaa);
             }
 
-            var overlayUITexture = resourceData.overlayUITexture;
             using (var builder = renderGraph.AddRasterRenderPass<PostProcessingFinalBlitPassData>("Vivid Final", out var passData))
             {
+
                 builder.AllowGlobalStateModification(true);
-                passData.destinationTexture = resourceData.backBufferColor;
+
+                // var target = resourceData.backBufferColor;
+                // TextureHandle debugHandlerColorTarget = resourceData.afterPostProcessColor;
+                //
+                //
+                // if (resolveToDebugScreen)
+                // {
+                //     debugHandlerColorTarget = target;
+                //     target = resourceData.debugScreenColor;
+                // }
+                
+                TextureHandle backbuffer = resourceData.backBufferColor;
+                TextureHandle overlayUITexture = resourceData.overlayUITexture;
+                // Desired target for post-processing pass.
+                TextureHandle target = backbuffer;
+
+                if (resolveToDebugScreen)
+                {
+                    resourceData.afterPostProcessColor = target;
+                    target = resourceData.debugScreenColor;
+                }
+                
+                passData.destinationTexture = target;
+
                 builder.SetRenderAttachment(passData.destinationTexture, 0, AccessFlags.Write);
                 passData.sourceTexture = source;
                 builder.UseTexture(source, AccessFlags.Read);
@@ -455,7 +478,6 @@ namespace UnityEngine.Rendering.Universal
                 });
 
             }
-
             resourceData.activeColorID = UniversalResourceData.ActiveID.BackBuffer;
             resourceData.activeDepthID = UniversalResourceData.ActiveID.BackBuffer;
 

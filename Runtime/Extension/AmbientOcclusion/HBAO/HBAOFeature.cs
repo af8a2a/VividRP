@@ -2,7 +2,7 @@
 
 namespace UnityEngine.Rendering.Universal
 {
-    [DisallowMultipleRendererFeature]
+    [DisallowMultipleRendererFeature("HBAO")]
     public class HBAOFeature : ScriptableRendererFeature
     {
         private HBAOPass pass;

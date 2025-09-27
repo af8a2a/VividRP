@@ -2,6 +2,7 @@
 
 namespace UnityEngine.Rendering.Universal
 {
+    [DisallowMultipleRendererFeature("RTAO")]
     public class RaytracingAmbientOcclusionFeature : ScriptableRendererFeature
     {
         RaytracingAmbientOcclusionPass pass;

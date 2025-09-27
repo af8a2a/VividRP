@@ -474,9 +474,10 @@ namespace UnityEngine.Rendering.Universal.Internal
                 }
 
                 ComputeLightVolumeDataAndBound(lightIndex, lightCategory, gpuLightType, lightVolumeType,
-                                               light, new Vector3(0.5f, 0.5f, light.range), worldToViewMatrix);
+                    light, new Vector3(light.areaSize.x, light.areaSize.y, light.range), worldToViewMatrix);
 
             }
+
 
             /// <summary>
             /// 

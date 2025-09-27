@@ -145,7 +145,9 @@ namespace UnityEngine.Rendering.Universal
         DrawObjectsPass m_RenderOpaqueForwardOnlyPass;
         DrawObjectsPass m_RenderOpaqueForwardPass;
         DrawObjectsWithRenderingLayersPass m_RenderOpaqueForwardWithRenderingLayersPass;
+        #if VIVID_DEPRECATED
         DrawSkyboxPass m_DrawSkyboxPass;
+        #endif
         CopyDepthPass m_CopyDepthPass;
         CopyColorPass m_CopyColorPass;
         TransparentSettingsPass m_TransparentSettingsPass;
@@ -347,8 +349,9 @@ namespace UnityEngine.Rendering.Universal
 
             // Motion vectors depend on the (copy) depth texture. Depth is reprojected to calculate motion vectors.
             m_MotionVectorPass = new MotionVectorRenderPass(copyDepthEvent + 1, m_CameraMotionVecMaterial, data.opaqueLayerMask);
-
+#if VIVID_DEPRECATED
             m_DrawSkyboxPass = new DrawSkyboxPass(RenderPassEvent.BeforeRenderingSkybox);
+#endif
             m_CopyColorPass = new CopyColorPass(RenderPassEvent.AfterRenderingSkybox, m_SamplingMaterial, m_BlitMaterial);
 #if ENABLE_ADAPTIVE_PERFORMANCE
             if (needTransparencyPass)

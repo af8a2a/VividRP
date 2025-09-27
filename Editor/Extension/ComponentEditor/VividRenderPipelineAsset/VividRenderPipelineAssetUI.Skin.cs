@@ -156,6 +156,12 @@ namespace UnityEditor.Rendering.Universal
                 EditorGUIUtility.TrTextContent("Render Graph must be enabled to use occlusion culling.");
             public static GUIContent stencilLodCrossFadeWarningMessage =
                 EditorGUIUtility.TrTextContent("LOD Cross Fade with stencil dithering is not compatible with stencil override in Renderer.");
+            
+            
+            // Sky reflection
+            public static GUIContent skySettingsText = EditorGUIUtility.TrTextContent("Sky");
+            public static GUIContent skyReflectionSizeContent = EditorGUIUtility.TrTextContent("Reflection Size", "Specifies the maximum resolution of the cube map uses to represent the sky.");
+
 
             // Dropdown menu options
             public static string[] mainLightOptions = { "Disabled", "Per Pixel" };

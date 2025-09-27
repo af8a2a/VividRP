@@ -5,7 +5,7 @@ using UnityEngine.Rendering.Universal.Internal;
 
 namespace UnityEngine.Rendering.Universal
 {
-    [DisallowMultipleRendererFeature]
+    [DisallowMultipleRendererFeature("Vivid Core")]
     public class CoreFeature : ScriptableRendererFeature
     {
         private readonly string[] m_GBufferPassNames = new string[] { "UniversalGBuffer" };

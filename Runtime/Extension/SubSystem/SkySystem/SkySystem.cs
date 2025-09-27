@@ -16,7 +16,8 @@ namespace UnityEngine.Rendering.Universal
 
         //bool m_UpdateRequired = false;
         //bool m_StaticSkyUpdateRequired = false;
-        int m_Resolution, m_LowResolution;
+        private int m_Resolution = (int)SkyResolution._512;
+        private int m_LowResolution = (int)SkyResolution._128;
 
         // Sky used for static lighting. It will be used for ambient lighting if Ambient Mode is set to Static (even when realtime GI is enabled)
         // It will also be used for lightmap and light probe baking
@@ -119,7 +120,6 @@ namespace UnityEngine.Rendering.Universal
         }
 
 
-
         static class Profiling
         {
             public static ProfilingSampler RenderSkyToCubemap = new ProfilingSampler(nameof(RenderSkyToCubemap));
@@ -175,7 +175,7 @@ namespace UnityEngine.Rendering.Universal
             var runtimeResources = GraphicsSettings.GetRenderPipelineSettings<SkyRuntimeResources>();
 
             m_LowResolution = 16;
-            m_Resolution =  (int)VolumeManager.instance.stack.GetComponent<VisualSky>().resolutionParameter.value;
+            m_Resolution = (int)UniversalRenderPipeline.asset.skyReflectionSize;
 
             m_ComputeAmbientProbeCS = runtimeResources.ambientProbeConvolutionCS;
             m_ComputeAmbientProbeKernel = m_ComputeAmbientProbeCS.FindKernel("AmbientProbeConvolutionDiffuse");
@@ -210,7 +210,6 @@ namespace UnityEngine.Rendering.Universal
                     blackValues[i] = 0.0f;
                 m_BlackAmbientProbeBuffer.SetData(blackValues);
             }
-            
         }
 
         internal RTHandle AllocSkyboxCubeMapRT(int resolution, string name)
@@ -348,7 +347,9 @@ namespace UnityEngine.Rendering.Universal
         TextureHandle GenerateSkyCubemap(RenderGraph renderGraph, ContextContainer frameData)
         {
             if (m_SkyboxCubemapRT == null)
+            {
                 m_SkyboxCubemapRT = AllocSkyboxCubeMapRT(m_Resolution, "SkyboxCubemapRT");
+            }
 
             //RenderSkyToCubemap
             var outCubemap = renderGraph.ImportTexture(m_SkyboxCubemapRT);
@@ -359,12 +360,12 @@ namespace UnityEngine.Rendering.Universal
             //GenerateMipmaps
             //Note: MipGenerator should adjust with Cube TextureArray
             GenerateMipmaps(renderGraph, outCubemap);
-            
-            
+
+
             return outCubemap;
         }
 
-        
+
         internal void GenerateMipmaps(RenderGraph renderGraph, TextureHandle texture)
         {
             using (var builder = renderGraph.AddUnsafePass<GenerateMipmapsPassData>("CubemapMipmaps", out var passData, Profiling.GenerateMipmaps))
@@ -625,6 +626,13 @@ namespace UnityEngine.Rendering.Universal
             bool staticSky,
             SkyAmbientMode ambientMode)
         {
+            if (!m_ComputeAmbientProbeCS)
+            {
+                var runtimeResources = GraphicsSettings.GetRenderPipelineSettings<SkyRuntimeResources>();
+                m_ComputeAmbientProbeCS = runtimeResources.ambientProbeConvolutionCS;
+                m_ComputeAmbientProbeKernel = m_ComputeAmbientProbeCS.FindKernel("AmbientProbeConvolutionDiffuse");
+            }
+            
             UpdateEnvironment_Internal(renderGraph, frameData, lightData, updateRequired, updateAmbientProbe, staticSky, ambientMode);
 
             // Always inject to renderGraph
@@ -650,7 +658,7 @@ namespace UnityEngine.Rendering.Universal
                 var basePassData = new SkyBasePassData();
                 basePassData.pixelCoordToViewDirMatrix = cameraData.GetPixelCoordToViewDirWSMatrix();
                 basePassData.lightData = lightData;
-                
+
                 m_SkyRenderer.RenderSky(cmd, basePassData, skySettings, renderForCubemap: false);
             }
         }

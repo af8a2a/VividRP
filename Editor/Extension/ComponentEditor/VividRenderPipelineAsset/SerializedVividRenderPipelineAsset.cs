@@ -115,7 +115,13 @@ namespace UnityEditor.Rendering.Universal
         public SerializedProperty DLSSRenderPresetForDLAA ;
 
         #endregion
+
+
+        #region Sky
+
+        public SerializedProperty skyReflectionSizeProp { get; }
         
+        #endregion
 
 #if ENABLE_ADAPTIVE_PERFORMANCE
         public SerializedProperty useAdaptivePerformance { get; }
@@ -226,6 +232,7 @@ namespace UnityEditor.Rendering.Universal
                 DLSSRenderPresetForUltraPerformance = o.Find(x => x.m_DLSSPreset.DLSSRenderPresetForUltraPerformance);
                 DLSSRenderPresetForDLAA = o.Find(x => x.m_DLSSPreset.DLSSRenderPresetForDLAA);
                 
+                skyReflectionSizeProp = o.Find(x => x.skyReflectionSize);
             }
 
 

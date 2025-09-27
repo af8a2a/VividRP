@@ -2,9 +2,14 @@
 
 namespace UnityEngine.Rendering.Universal
 {
+    [DisallowMultipleRendererFeature("Vivid Postprocessing")]
     public class CorePostProcessingFeature : ScriptableRendererFeature
     {
         CorePostProcessPass _corePostProcessPass = new CorePostProcessPass();
+        
+        
+        ExposurePass exposurePass;
+        ExposureSetupPass exposureSetupPass;
 
         #region ColorGrading
 
@@ -20,12 +25,16 @@ namespace UnityEngine.Rendering.Universal
 
         public override void Create()
         {
+            exposurePass = new ExposurePass();
+            exposureSetupPass = new ExposureSetupPass();
+
         }
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
             renderer.EnqueuePass(_colorGradingLutPass);
-
+            renderer.EnqueuePass(exposureSetupPass);
+            renderer.EnqueuePass(exposurePass);
             renderer.EnqueuePass(_corePostProcessPass);
             renderer.EnqueuePass(_uberFinalPass);
         }

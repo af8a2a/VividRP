@@ -1,6 +1,8 @@
 // The implementation is based on the demo on "fine pruned tiled lighting" published in GPU Pro 7.
 // https://github.com/wolfgangfengel/GPU-Pro-7
 
+#pragma use_dxc
+#define PLATFORM_SUPPORTS_WAVE_INTRINSICS
 #pragma kernel TileLightListGen
 
 #pragma multi_compile _ USE_TWO_PASS_TILED_LIGHTING
@@ -8,7 +10,6 @@
 #pragma multi_compile _ USE_OBLIQUE_MODE
 
 //#pragma enable_d3d11_debug_symbols
-
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 

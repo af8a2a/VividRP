@@ -727,11 +727,11 @@ namespace UnityEngine.Rendering.Universal
                 resourceData.additionalShadowsTexture = m_AdditionalLightsShadowCasterPass.Render(renderGraph, frameData);
             }
 
-            #region Extension
-
-            SkySystem.instance.UpdateEnvironment(renderGraph, frameData, lightData, false, false, false, SkyAmbientMode.Dynamic);
-
-            #endregion
+            // #region Extension
+            //
+            // SkySystem.instance.UpdateEnvironment(renderGraph, frameData, lightData, false, false, false, SkyAmbientMode.Dynamic);
+            //
+            // #endregion
             
             // The camera need to be setup again after the shadows since those passes override some settings
             // TODO RENDERGRAPH: move the setup code into the shadow passes

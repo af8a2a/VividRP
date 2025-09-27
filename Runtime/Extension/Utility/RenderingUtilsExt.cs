@@ -316,5 +316,23 @@ namespace UnityEngine.Rendering.Universal
             s_DefaultColorFormat = requestColorFormat;
             return requestColorFormat;
         }
+
+        internal static Rect CalculateUVRect(UniversalCameraData cameraData, float width, float height)
+        {
+            float normalizedSizeX = width / cameraData.pixelWidth;
+            float normalizedSizeY = height / cameraData.pixelHeight;
+
+            return new Rect(1 - normalizedSizeX, 1 - normalizedSizeY, normalizedSizeX, normalizedSizeY);
+        }
+
+        internal static Rect CalculateUVRect(UniversalCameraData cameraData, int textureHeightPercent)
+        {
+            var relativeSize = Mathf.Clamp01(textureHeightPercent / 100f);
+            var width = relativeSize * cameraData.pixelWidth;
+            var height = relativeSize * cameraData.pixelHeight;
+
+            return CalculateUVRect(cameraData, width, height);
+        }
     }
+    
 }

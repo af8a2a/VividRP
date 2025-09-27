@@ -1,18 +1,15 @@
-﻿using UnityEngine.Rendering.Universal;
+﻿#if VIVID_DEPRECATED
+using UnityEngine.Rendering.Universal;
 
 namespace UnityEngine.Rendering.Universal
 {
     public class ExposureFeature : ScriptableRendererFeature
     {
         ExposurePass exposurePass;
-
         ExposureSetupPass exposureSetupPass;
         public override void Create()
         {
-            exposurePass = new ExposurePass()
-            {
-                renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing
-            };
+            exposurePass = new ExposurePass();
             exposureSetupPass = new ExposureSetupPass();
         }
         
@@ -24,3 +21,4 @@ namespace UnityEngine.Rendering.Universal
         }
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if VIVID_DEPRECATED
 using System;
 using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Experimental.Rendering;
@@ -169,3 +170,4 @@ namespace UnityEngine.Rendering.Universal
         }
     }
 }
+#endif

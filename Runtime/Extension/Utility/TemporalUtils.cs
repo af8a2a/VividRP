@@ -1,8 +1,5 @@
 ﻿using System;
-using Features.Filter.TemporalDenoiser;
 using Unity.Mathematics;
-using UnityEngine;
-using Random = System.Random;
 
 namespace UnityEngine.Rendering.Universal
 {
@@ -17,8 +14,8 @@ namespace UnityEngine.Rendering.Universal
             // The variance between 0 and the actual halton sequence values reveals noticeable instability
             // in Unity's shadow maps, so we avoid index 0.
             var offset = new Vector2(
-                HaltonSeq.Get((sampleIndex & 1023) + 1, 2) - 0.5f,
-                HaltonSeq.Get((sampleIndex & 1023) + 1, 3) - 0.5f
+               HaltonSequence.Get((sampleIndex & 1023) + 1, 2) - 0.5f,
+               HaltonSequence.Get((sampleIndex & 1023) + 1, 3) - 0.5f
             );
 
             if (++sampleIndex >= k_SampleCount)

@@ -9,6 +9,11 @@ namespace UnityEngine.Rendering.Universal
 {
     public partial class ExposurePass : ScriptableRenderPass, IDisposable
     {
+        public ExposurePass()
+        {
+            renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing;
+        }
+
         public class ShaderIDs
         {
             public static readonly int _ExposureTexture = Shader.PropertyToID("_ExposureTexture");

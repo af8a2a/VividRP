@@ -194,6 +194,17 @@ namespace UnityEditor.Rendering.Universal
         }
 
 
+        static void DrawSky(SerializedVividRenderPipelineAsset serialized, Editor ownerEditor)
+        {
+            EditorGUILayout.LabelField(Styles.skySettingsText);
+            EditorGUI.indentLevel++;
+            EditorGUILayout.PropertyField(serialized.skyReflectionSizeProp, Styles.skyReflectionSizeContent);
+            EditorGUI.indentLevel--;
+
+        }
+
+        
+
         static void DrawQuality(SerializedVividRenderPipelineAsset serialized, Editor ownerEditor)
         {
             DrawHDR(serialized, ownerEditor);
@@ -219,6 +230,8 @@ namespace UnityEditor.Rendering.Universal
                 }
             }
 
+            DrawSky(serialized, ownerEditor);
+            
             EditorGUI.EndDisabledGroup();
         }
 

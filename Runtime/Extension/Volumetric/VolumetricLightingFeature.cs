@@ -2,7 +2,7 @@
 
 namespace UnityEngine.Rendering.Universal
 {
-    [DisallowMultipleRendererFeature("VolumetricLightingFeature")]
+    [DisallowMultipleRendererFeature("Volumetric Lighting")]
 
     public class VolumetricLightingFeature: ScriptableRendererFeature
     {

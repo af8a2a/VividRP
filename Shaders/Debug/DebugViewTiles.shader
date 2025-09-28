@@ -37,7 +37,7 @@ Shader "Hidden/Universal/DebugViewTiles"
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Debug/DebuggingFullscreen.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/LightCullingSystem/GPULights.cs.hlsl"
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/ClusterLight.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/LightGrid/ClusterLight.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Debug/DebugViewEnums.cs.hlsl"

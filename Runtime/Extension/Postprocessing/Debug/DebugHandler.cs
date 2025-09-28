@@ -76,9 +76,11 @@ namespace UnityEngine.Rendering.Universal
 
         readonly Material m_ReplacementMaterial;
         readonly Material m_HDRDebugViewMaterial;
+        readonly Material m_TileClusterDebugMaterial;
 
         HDRDebugViewPass m_HDRDebugViewPass;
         RaytracingRTASDebugPass m_RaytracingRTASDebugPass;
+        TileClusterDebugPass m_TileClusterDebugPass;
 
 
         RTHandle m_DebugScreenColorHandle;
@@ -138,6 +140,7 @@ namespace UnityEngine.Rendering.Universal
         internal HDRDebugViewPass hdrDebugViewPass => m_HDRDebugViewPass;
         
         internal RaytracingRTASDebugPass raytracingRTASDebugPass => m_RaytracingRTASDebugPass;
+        internal TileClusterDebugPass tileClusterDebugPass => m_TileClusterDebugPass;
 
         internal bool HDRDebugViewIsActive(bool resolveFinalTarget)
         {
@@ -195,10 +198,13 @@ namespace UnityEngine.Rendering.Universal
             {
                 m_ReplacementMaterial = (shaders.debugReplacementPS != null) ? CoreUtils.CreateEngineMaterial(shaders.debugReplacementPS) : null;
                 m_HDRDebugViewMaterial = (shaders.hdrDebugViewPS != null) ? CoreUtils.CreateEngineMaterial(shaders.hdrDebugViewPS) : null;
+                m_TileClusterDebugMaterial = (shaders.tileClusterDebugPS != null) ? CoreUtils.CreateEngineMaterial(shaders.tileClusterDebugPS) : null;
+
             }
 
             m_HDRDebugViewPass = new HDRDebugViewPass(m_HDRDebugViewMaterial);
             m_RaytracingRTASDebugPass = new RaytracingRTASDebugPass();
+            m_TileClusterDebugPass = new TileClusterDebugPass(m_TileClusterDebugMaterial);
 
             m_RuntimeTextures = GraphicsSettings.GetRenderPipelineSettings<UniversalRenderPipelineRuntimeTextures>();
             if (m_RuntimeTextures != null)
@@ -587,6 +593,26 @@ namespace UnityEngine.Rendering.Universal
 
         }
 
+        [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
+        internal void Render(RenderGraph renderGraph, ContextContainer frameData, UniversalCameraData cameraData, TextureHandle srcColor,
+            TextureHandle overlayTexture, TextureHandle dstColor)
+        {
+            if (IsActiveForCamera(cameraData.isPreviewCamera) && HDRDebugViewIsActive(cameraData.resolveFinalTarget))
+            {
+                m_HDRDebugViewPass.RenderHDRDebug(renderGraph, cameraData, srcColor, overlayTexture, dstColor, LightingSettings.hdrDebugMode);
+            }
+
+            if (IsActiveForCamera(cameraData.isPreviewCamera) && RTASDebugIsActive(cameraData.resolveFinalTarget))
+            {
+                m_RaytracingRTASDebugPass.RenderRTASDebug(renderGraph, cameraData, LightingSettings.rtasDebugView, LightingSettings.rtasDebugMode, dstColor);
+            }
+
+            if (IsActiveForCamera(cameraData.isPreviewCamera) && TileClusterDebugIsActive(cameraData.resolveFinalTarget))
+            {
+                m_TileClusterDebugPass.RenderTileClusterDebug(renderGraph, frameData, cameraData, LightingSettings.tileClusterDebugMode,
+                    LightingSettings.clusterDebugID, LightingSettings.clusterCategoryDebugMode);
+            }
+        }
         #region DebugRendererLists
 
         internal DebugRendererLists CreateRendererListsWithDebugRenderState(

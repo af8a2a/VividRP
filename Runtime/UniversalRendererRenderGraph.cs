@@ -1566,7 +1566,7 @@ namespace UnityEngine.Rendering.Universal
                 TextureHandle overlayUITexture = resourceData.overlayUITexture;
                 TextureHandle debugScreenTexture = resourceData.debugScreenColor;
 
-                debugHandler.Render(renderGraph, cameraData, debugScreenTexture, overlayUITexture, debugHandlerColorTarget);
+                debugHandler.Render(renderGraph,frameData, cameraData, debugScreenTexture, overlayUITexture, debugHandlerColorTarget);
             }
 
             if (cameraData.resolveFinalTarget)

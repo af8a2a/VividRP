@@ -121,10 +121,6 @@ namespace UnityEngine.Rendering.Universal
         /// Displays the active STP debug view.
         /// </summary>
         STP,
-        /// <summary>
-        /// Displays the Raytracing RTAS.
-        /// </summary>
-        RTAS
     }
 
     /// <summary>

@@ -15,21 +15,20 @@
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingIntersection.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/RayTracingFallbackHierarchy.cs.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingSampling.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/ClusterLight.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/LightGrid/ClusterLight.hlsl"
 //--------------------------------------------------------------------------------------------------
 // Inputs & outputs
 //--------------------------------------------------------------------------------------------------
 // Input
 float radius;
-int   sampleCount;
-int   frameIndex;
+int sampleCount;
+int frameIndex;
 // Output structure of the shadows raytrace shader
 RW_TEXTURE2D(float2, _RayTracingShadowsTextureRW);
 
 //--------------------------------------------------------------------------------------------------
 // Helpers
 //--------------------------------------------------------------------------------------------------
-
 
 
 //--------------------------------------------------------------------------------------------------
@@ -66,7 +65,7 @@ void SingleRayGen()
     PositionInputs posInput = GetPositionInput(coordSS, _ScreenSize.zw, rawDepth, UNITY_MATRIX_I_VP, GetWorldToViewMatrix(), 0);
     float3 V = GetWorldSpaceNormalizeViewDir(posInput.positionWS);
 
-    float3 normalWS= LoadSceneNormals(coordSS);
+    float3 normalWS = LoadSceneNormals(coordSS);
 
     // Evaluate the ray bias
     float rayBias = EvaluateRayTracingBias(posInput.positionWS);
@@ -99,29 +98,28 @@ void SingleRayGen()
         // Create the ray descriptor for this pixel
         RayDesc rayDescriptor;
         rayDescriptor.Origin = posInput.positionWS + normalWS * rayBias * 1.5;
-        rayDescriptor.Direction =wsDir; ;
-        rayDescriptor.TMin = 0.0;
+        rayDescriptor.Direction = wsDir;
+        rayDescriptor.TMin = 0;
         rayDescriptor.TMax = _RaytracingRayMaxLength;
 
         // Create and init the RayIntersectionVisibility structure for this
         RayIntersectionVisibility rayIntersection;
-        rayIntersection.color = float3(1.0, 1.0, 1.0);
+        rayIntersection.color = float3(0.0,0.0, 0.0);
         rayIntersection.t = -1.0;
         rayIntersection.pixelCoord = coordSS;
-
+        rayIntersection.velocity = 0;
 
         // First we cast scene shadow
-        TraceRay(_RaytracingAccelerationStructure, RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, RAYTRACINGRENDERERFLAG_CAST_SHADOW, 0, 1, 0, rayDescriptor, rayIntersection);
+        TraceRay(_RaytracingAccelerationStructure, RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
+                 RAYTRACINGRENDERERFLAG_CAST_SHADOW, 0, 1, 0, rayDescriptor, rayIntersection);
         float3 sceneShadowColor = rayIntersection.color;
         // Second we cast character shadow
 
         // Contribute to the pixel
-        visibility = sceneShadowColor.x ;//* rcp(sampleCount);
+        visibility += sceneShadowColor.x; //* rcp(sampleCount);
     }
-
+    visibility /= max(1, sampleCount);
     // Combine scene shadow and character shadow for deferredlighting.
 
     _RayTracingShadowsTextureRW[coordSS] = visibility;
 }
-
-

@@ -336,17 +336,6 @@ namespace UnityEngine.Rendering.Universal
         }
         private TextureHandle _stpDebugView;
 
-        #region Vivid
-
-        internal TextureHandle rtasDebugView
-        {
-            get => CheckAndGetTextureHandle(ref _rtasDebugView);
-            set => CheckAndSetTextureHandle(ref _rtasDebugView, value);
-        }
-
-        private TextureHandle _rtasDebugView;
-
-        #endregion
 
 
         /// <inheritdoc />
@@ -388,11 +377,6 @@ namespace UnityEngine.Rendering.Universal
             #endregion
 
 
-            #region RTAS
-
-            _rtasDebugView = TextureHandle.nullHandle;
-
-            #endregion
 
             _bloomTexture = TextureHandle.nullHandle;
             

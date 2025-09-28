@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using UnityEditor;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RenderGraphModule.Util;
 
 namespace UnityEngine.Rendering.Universal
 {
@@ -77,6 +78,9 @@ namespace UnityEngine.Rendering.Universal
         readonly Material m_HDRDebugViewMaterial;
 
         HDRDebugViewPass m_HDRDebugViewPass;
+        RaytracingRTASDebugPass m_RaytracingRTASDebugPass;
+
+
         RTHandle m_DebugScreenColorHandle;
         RTHandle m_DebugScreenDepthHandle;
 
@@ -132,16 +136,33 @@ namespace UnityEngine.Rendering.Universal
         internal ref RTHandle DebugScreenColorHandle => ref m_DebugScreenColorHandle;
         internal ref RTHandle DebugScreenDepthHandle => ref m_DebugScreenDepthHandle;
         internal HDRDebugViewPass hdrDebugViewPass => m_HDRDebugViewPass;
+        
+        internal RaytracingRTASDebugPass raytracingRTASDebugPass => m_RaytracingRTASDebugPass;
 
         internal bool HDRDebugViewIsActive(bool resolveFinalTarget)
         {
             // HDR debug views should only apply to the last camera in the stack
             return DebugDisplaySettings.lightingSettings.hdrDebugMode != HDRDebugMode.None && resolveFinalTarget;
         }
+        
+        internal bool TileClusterDebugIsActive(bool resolveFinalTarget)
+        {
+            // TileC luster debug views should only apply to the last camera in the stack
+            return DebugDisplaySettings.lightingSettings.tileClusterDebugMode != DebugTileClusterMode.None && resolveFinalTarget;
+        }
+        
+        
+        internal bool RTASDebugIsActive(bool resolveFinalTarget)
+        {
+            // TileC luster debug views should only apply to the last camera in the stack
+            return DebugDisplaySettings.lightingSettings.rtasDebugView != RTASDebugView.None && resolveFinalTarget;
+        }
+
+
 
         internal bool WriteToDebugScreenTexture(bool resolveFinalTarget)
         {
-            return HDRDebugViewIsActive(resolveFinalTarget);
+            return HDRDebugViewIsActive(resolveFinalTarget) || RTASDebugIsActive(resolveFinalTarget);
         }
 
         internal bool IsScreenClearNeeded
@@ -177,6 +198,7 @@ namespace UnityEngine.Rendering.Universal
             }
 
             m_HDRDebugViewPass = new HDRDebugViewPass(m_HDRDebugViewMaterial);
+            m_RaytracingRTASDebugPass = new RaytracingRTASDebugPass();
 
             m_RuntimeTextures = GraphicsSettings.GetRenderPipelineSettings<UniversalRenderPipelineRuntimeTextures>();
             if (m_RuntimeTextures != null)
@@ -555,6 +577,14 @@ namespace UnityEngine.Rendering.Universal
             {
                 m_HDRDebugViewPass.RenderHDRDebug(renderGraph, cameraData, srcColor, overlayTexture, dstColor, LightingSettings.hdrDebugMode);
             }
+
+            if (IsActiveForCamera(cameraData.isPreviewCamera) && RTASDebugIsActive(cameraData.resolveFinalTarget))
+            {
+                m_RaytracingRTASDebugPass.RenderRTASDebug(renderGraph, cameraData, LightingSettings.rtasDebugView, LightingSettings.rtasDebugMode, dstColor);
+                
+
+            }
+
         }
 
         #region DebugRendererLists

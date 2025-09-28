@@ -25,6 +25,11 @@ namespace UnityEngine.Rendering.Universal
 
             // Output
             public TextureHandle outputTexture;
+
+//Blit to Backbuffer
+            public UniversalCameraData cameraData;
+            public TextureHandle source;
+            public TextureHandle destination;
         }
 
         static ProfilingSampler RaytracingBuildAccelerationStructureDebug = new ProfilingSampler("RaytracingBuildAccelerationStructureDebug");
@@ -71,10 +76,10 @@ namespace UnityEngine.Rendering.Universal
 
 
         internal void RenderRTASDebug(RenderGraph renderGraph,
-            ContextContainer frameData,
             UniversalCameraData cameraData,
             RTASDebugView rtasDebugView,
-            RTASDebugMode rtasDebugMode
+            RTASDebugMode rtasDebugMode,
+            TextureHandle dstColor
         )
         {
             // If the ray tracing state is not valid, we cannot evaluate the debug view
@@ -82,7 +87,8 @@ namespace UnityEngine.Rendering.Universal
             if (!cameraData.rayTracingSystem.GetRayTracingState())
                 return;
 
-            using (var builder = renderGraph.AddUnsafePass<RTASDebugPassData>("Debug view of the RTAS", out var passData,
+            TextureHandle rtas;
+            using (var builder = renderGraph.AddComputePass<RTASDebugPassData>("Debug view of the RTAS", out var passData,
                        RaytracingBuildAccelerationStructureDebug))
             {
                 builder.EnableAsyncCompute(false);
@@ -105,7 +111,7 @@ namespace UnityEngine.Rendering.Universal
 
 
                 // Depending of if we will have to denoise (or not), we need to allocate the final format, or a bigger texture
-                passData.outputTexture = (renderGraph.CreateTexture(new TextureDesc(Vector2.one)
+                passData.outputTexture = (renderGraph.CreateTexture(new TextureDesc(cameraData.pixelWidth,cameraData.pixelHeight)
                 {
                     format = GraphicsFormat.R16G16B16A16_SFloat,
                     enableRandomWrite = true,
@@ -117,7 +123,7 @@ namespace UnityEngine.Rendering.Universal
 
                 builder.SetRenderFunc<RTASDebugPassData>((data, ctx) =>
                 {
-                    var cmd = CommandBufferHelpers.GetNativeCommandBuffer(ctx.cmd);
+                    var cmd = ctx.cmd;
 
                     // Define the shader pass to use for the reflection pass
                     cmd.SetRayTracingShaderPass(data.debugRTASRT, "DebugDXR");
@@ -138,7 +144,35 @@ namespace UnityEngine.Rendering.Universal
                     cmd.DispatchRays(data.debugRTASRT, m_RTASDebugRTKernel, (uint)data.actualWidth, (uint)data.actualHeight, 1);
 
                 });
-                frameData.Get<UniversalResourceData>().rtasDebugView = passData.outputTexture;
+                rtas = passData.outputTexture;
+            }
+            using (var builder = renderGraph.AddRasterRenderPass<RTASDebugPassData>("Copy RTAS View", out var passData,
+                       RaytracingBuildAccelerationStructureDebug))
+            {
+
+                passData.source = rtas;
+                passData.destination = dstColor;
+                passData.cameraData = cameraData;
+                builder.SetRenderAttachment(dstColor,0);
+                builder.UseTexture(passData.source);
+                builder.AllowPassCulling(false);
+                builder.SetRenderFunc<RTASDebugPassData>((data, ctx) =>
+                {
+
+                    var cmd = ctx.cmd;
+                    bool isRenderToBackBufferTarget = !data.cameraData.isSceneViewCamera;
+#if ENABLE_VR && ENABLE_XR_MODULE
+                    if (data.cameraData.xr.enabled)
+                        isRenderToBackBufferTarget = new RenderTargetIdentifier(((RTHandle)data.destination).nameID, 0, CubemapFace.Unknown, -1) ==
+                                                     new RenderTargetIdentifier(data.cameraData.xr.renderTarget, 0, CubemapFace.Unknown, -1);
+#endif
+                    Vector4 scaleBias = RenderingUtils.GetFinalBlitScaleBias(data.source, data.destination, data.cameraData);
+                    if (isRenderToBackBufferTarget)
+                        cmd.SetViewport(data.cameraData.pixelRect);
+
+
+                    Blitter.BlitTexture(cmd, data.source, scaleBias, 0, true);
+                });
             }
 
         }

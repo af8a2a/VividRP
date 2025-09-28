@@ -1,5 +1,8 @@
 #ifndef VIVID_ENVIRONMENT_INCLUDED
 #define VIVID_ENVIRONMENT_INCLUDED
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/LightGrid/ClusterLight.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/Material.hlsl"
+
 TEXTURECUBE(_SkyTexture);
 StructuredBuffer<float4> _AmbientProbeData;
 

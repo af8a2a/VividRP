@@ -311,8 +311,8 @@ namespace UnityEngine.Rendering.Universal
             MipGenerator.instance.Init();
             PreIntegratedFGD.instance.Build(PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse);
             BlueNoiseSystem.instance.Init();
-            SkySystem.instance.Build(asset);
             IBLFilterGGX.instance.Initialize();
+            SkySystem.instance.Build(asset);
             Hammersley.Initialize();
             AreaLightSystem.instance.Build();
             #endregion
@@ -360,6 +360,7 @@ namespace UnityEngine.Rendering.Universal
             DenoiseSystem.ClearAll();
             ExtensionSystem.Clean();
             AreaLightSystem.instance.Cleanup();
+            LocalVolumetricFogManager.manager.CleanupGraphicsBuffers();
             #endregion
 
 #if UNITY_EDITOR

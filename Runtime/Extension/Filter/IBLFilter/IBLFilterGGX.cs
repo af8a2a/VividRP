@@ -173,6 +173,11 @@ namespace UnityEngine.Rendering.Universal
             Texture source, RenderTexture target,
             Matrix4x4[] worldToViewMatrices)
         {
+            if (!m_convolveMaterial)
+            {
+                Initialize();
+            }
+            
             using (new ProfilingScope(cmd, Profiling.FilterCubemapGGX))
             {
                 int mipCount = 1 + (int)Mathf.Log(source.width, 2.0f);

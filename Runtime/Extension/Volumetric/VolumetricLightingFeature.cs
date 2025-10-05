@@ -19,5 +19,11 @@ namespace UnityEngine.Rendering.Universal
         {
             renderer.EnqueuePass(_pass);
         }
+
+        protected override void Dispose(bool disposing)
+        {
+            _pass.Dispose();
+        }
+
     }
 }

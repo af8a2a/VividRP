@@ -1,0 +1,15 @@
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#pragma kernel Init
+#pragma enable_d3d11_debug_symbols
+
+//-------------------------------------------------------------------------------------------------
+//Parameter
+//-------------------------------------------------------------------------------------------------
+RWTexture2D<float2> _PressureTextureRW;
+
+[numthreads(8, 8, 1)]
+void Init(uint3 dispatchThreadId : SV_DispatchThreadID, uint threadID : SV_GroupIndex)
+{
+    uint2 id = dispatchThreadId.xy;
+    _PressureTextureRW[id] = 0;
+}

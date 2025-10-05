@@ -496,5 +496,12 @@ namespace UnityEngine.Rendering.Universal
                 // return passData.dilatedMaxZBuffer;
             }
         }
+        
+        public void Dispose()
+        { 
+            m_VisibleVolumeBoundsBuffer?.Release();
+            m_VisibleVolumeIndicesBuffer?.Release();
+        }
+
     }
 }

@@ -9,12 +9,9 @@ Texture2D _VelocityTexture;
 
 RWTexture2D<float2> _DiffusionTextureRW;
 
-float4 _DiffusionParameter;
 
-#define _Viscosity _DiffusionParameter.x
-#define _Alpha _DiffusionParameter.y
-#define _Beta _DiffusionParameter.z
-#define _SimulationResolution _DiffusionParameter.w
+float _Viscosity;
+float _SimulationResolution;
 
 #define _DeltaTime unity_DeltaTime.x
 
@@ -37,5 +34,10 @@ void Diffusion(uint3 dispatchThreadId : SV_DispatchThreadID, uint threadID : SV_
 
     float2 bC = _VelocityTexture.SampleLevel(sampler_LinearClamp, uv, 0).xy;
 
-    _DiffusionTextureRW[id] = float4((L + R + T + B + _Alpha * bC) / _Beta, 0, 1);
+    float dt = _DeltaTime;
+    float dx = 1.0f / _SimulationResolution;
+    float alpha = dx * dx / (max(_Viscosity, 1e-12f) * max(dt, 1e-12f));
+    float beta = 4 + alpha;
+
+    _DiffusionTextureRW[id] = float4((L + R + T + B + alpha * bC) / beta, 0, 1);
 }

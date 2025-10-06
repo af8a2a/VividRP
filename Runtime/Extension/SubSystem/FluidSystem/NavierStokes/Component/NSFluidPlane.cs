@@ -35,17 +35,19 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
 
+        #region Public
 
-        #region Interface
-
-        [Range(1, 8)] public int diffusionTimes = 4;
-        [Range(1, 8)] public int pressureTimes = 4;
+        [Range(1, 30)] public int diffusionTimes = 4;
+        [Range(1, 30)] public int pressureTimes = 4;
 
         public SimulationResolution resolution = SimulationResolution._512;
-        [Range(0.0001f, 0.1f)] public float Viscosity = 0.05f;
+        [Min(0.00001f)] public float Viscosity = 0.05f;
         public int interactorsCount => m_InteractorsCount;
         [Min(0.001f)] public float advectSpeed = 1;
 
+        #endregion
+
+        #region Interface
 
         public void RegisterInteractor(FluidInteractor interactor)
         {
@@ -97,10 +99,13 @@ namespace UnityEngine.Rendering.Universal
         {
             Vector3 local = transform.InverseTransformPoint(worldPos);
 
-            float u = (local.x / areaSize.x) + 0.5f;
-            float v = (local.z / areaSize.y) + 0.5f;
+            var areaExtents = areaSize * 0.5f;
+            var uv = new Vector2(local.x / areaExtents.x, local.z / areaExtents.y);
+            uv = (uv + Vector2.one) * 0.5f;
 
-            return new Vector2(u, v);
+            // float u = (local.x / areaSize.x) + 0.5f;
+            // float v = (local.z / areaSize.y) + 0.5f;
+            return uv;
         }
 
         bool Inside(Vector2 localPos)
@@ -181,15 +186,20 @@ namespace UnityEngine.Rendering.Universal
                 .Select(item =>
                 {
                     var currentPositionOS = TransformWorldToPlaneSpace(item.CurrentPosition);
+                    //todo:consider inside necessary?
+                    var inside = Inside(currentPositionOS) ? 1f : 0f;
+                    var previousPositionOS = TransformWorldToPlaneSpace(item.PreviousPosition);
+
+
                     return new InteractorData()
                     {
                         PositionOS = currentPositionOS,
                         Radius = item.radius,
-                        Force = (currentPositionOS - TransformWorldToPlaneSpace(item.PreviousPosition)) * item.forceScale
+                        Force = (currentPositionOS - previousPositionOS) * item.forceScale
                     };
                 })
-                .Where(item => Inside(item.PositionOS))
                 .ToList();
+
             m_InteractorData.SetData(datas);
         }
     }

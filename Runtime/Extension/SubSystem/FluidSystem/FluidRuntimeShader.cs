@@ -80,5 +80,14 @@ namespace UnityEngine.Rendering.Universal
             set => this.SetValueAndNotify(ref m_FluidGradient, value);
         }
 
+        [SerializeField, ResourcePath("Runtime/Extension/SubSystem/FluidSystem/NavierStokes/Shader/Mobile/NSFluidMobile.shader")]
+        private Shader m_FluidMobile;
+
+        public Shader fluidMobile
+        {
+            get => m_FluidMobile;
+            set => this.SetValueAndNotify(ref m_FluidMobile, value);
+        }
+
     }
 }

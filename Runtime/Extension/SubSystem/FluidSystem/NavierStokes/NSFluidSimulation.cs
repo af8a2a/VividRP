@@ -13,7 +13,8 @@ namespace UnityEngine.Rendering.Universal
 
             foreach (var plane in planes)
             {
-                var nsResult = NSFluidEvaluator.instance.EvaluateNavierStokesFluid(renderGraph, plane);
+                // var nsResult = NSFluidEvaluator.instance.EvaluateNavierStokesFluid(renderGraph, plane);
+                var nsResult = NSFluidEvaluator.instance.EvaluateNavierStokesFluidMobile(renderGraph, plane);
                 var nsPlane = renderGraph.ImportTexture(plane.nsFluidTexture);
                 MipGenerator.instance.CopyColor(renderGraph, frameData, nsResult, nsPlane);
                 plane.ApplyFluid();

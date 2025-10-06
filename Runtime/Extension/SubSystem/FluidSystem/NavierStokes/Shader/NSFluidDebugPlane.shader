@@ -2,12 +2,14 @@ Shader "Vivid/Debug/NSFluidDebugPlane"
 {
     Properties
     {
+        _Scale("Debug Scale", Range(0.0, 10.0)) = 1
+
     }
     SubShader
     {
         Tags
         {
-            "RenderType" = "Opaque"
+            "RenderType" = "Transparent"
         }
 
         Pass
@@ -37,6 +39,7 @@ Shader "Vivid/Debug/NSFluidDebugPlane"
 
             TEXTURE2D(_FluidTex);
             float4x4 _WorldToFluid;
+            float _Scale;
 
             v2f vert(appdata v)
             {
@@ -53,7 +56,7 @@ Shader "Vivid/Debug/NSFluidDebugPlane"
                 float4 debug = SAMPLE_TEXTURE2D(_FluidTex, sampler_LinearClamp, i.uv);
 
 
-                return debug;
+                return debug * _Scale;
             }
             ENDHLSL
         }

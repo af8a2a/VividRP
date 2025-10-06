@@ -7,13 +7,12 @@
 
 Texture2D _VelocityTexture;
 
-RWTexture2D<float2> _DivergenceTextureRW;
+RWTexture2D<float> _DivergenceTextureRW;
 
 float _SimulationResolution;
-#define _DeltaTime unity_DeltaTime.x
 
 [numthreads(8, 8, 1)]
-void Divergence(uint3 dispatchThreadId : SV_DispatchThreadID, uint threadID : SV_GroupIndex)
+void Divergence(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 id = dispatchThreadId.xy;
     float invResolution = rcp(_SimulationResolution);
@@ -30,11 +29,11 @@ void Divergence(uint3 dispatchThreadId : SV_DispatchThreadID, uint threadID : SV
     float2 B = _VelocityTexture.SampleLevel(sampler_LinearClamp, uvB, 0).xy;
 
     float2 C = _VelocityTexture.SampleLevel(sampler_LinearClamp, uv, 0).xy;
-    if(uvL.x <= 0) L = -C;
-    if(uvR.x >= 1) R = -C;
-    if(uvT.y >= 1) T = -C;
-    if(uvB.y <= 0) B = -C;
+    if(uvL.x <= 0) L.x = -C.x;
+    if(uvR.x >= 1) R.x = -C.x;
+    if(uvT.y >= 1) T.y = -C.y;
+    if(uvB.y <= 0) B.y = -C.y;
 
-    float dx_Half = 1.0f * invResolution * 0.5f;
+    float dx_Half =  0.5f;
     _DivergenceTextureRW[id] = dx_Half * (R.x - L.x + T.y - B.y);
 }

@@ -15,14 +15,14 @@ RWTexture2D<float2> _VelocityTextureRW;
 RWTexture2D<float4> _Material;
 
 float _AdvectSpeed;
-float4 _SimulationResolution; //width,height,1/width,1/height
+float _SimulationResolution; 
 #define _DeltaTime unity_DeltaTime.x
 
 [numthreads(8, 8, 1)]
 void Advection(uint3 dispatchThreadId : SV_DispatchThreadID, uint threadID : SV_GroupIndex)
 {
     uint2 id = dispatchThreadId.xy;
-    float2 uv = (id + 0.5) * _SimulationResolution.zw;
+    float2 uv = (id + 0.5) * rcp(_SimulationResolution);
 
     float2 velocity = _VelocityTexture.SampleLevel(sampler_LinearClamp, uv, 0);
     float2 newUV = uv - velocity * _DeltaTime * _AdvectSpeed * 0.2;

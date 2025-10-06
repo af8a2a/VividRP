@@ -3,7 +3,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal
 {
-    public class NSFluidEvaluator : Singleton<NSFluidEvaluator>
+    public partial class NSFluidEvaluator : Singleton<NSFluidEvaluator>
     {
         private ComputeShader m_Advection;
         private ComputeShader m_Diffusion;
@@ -19,7 +19,7 @@ namespace UnityEngine.Rendering.Universal
         static int _VelocityTextureRW = Shader.PropertyToID("_VelocityTextureRW");
         static int _SimulationResolution = Shader.PropertyToID("_SimulationResolution");
         static int _AdvectSpeed = Shader.PropertyToID("_AdvectSpeed");
-        static int _DiffusionParameter = Shader.PropertyToID("_DiffusionParameter");
+        static int _Viscosity = Shader.PropertyToID("_Viscosity");
         static int _DiffusionTextureRW = Shader.PropertyToID("_DiffusionTextureRW");
         static int _InteractorCount = Shader.PropertyToID("_InteractorCount");
         static int _InteractorData = Shader.PropertyToID("_InteractorData");
@@ -46,12 +46,10 @@ namespace UnityEngine.Rendering.Universal
                 cmd.SetComputeTextureParam(cs, kernel, _VelocityTexture, passData.VelocityTexture);
                 cmd.SetComputeTextureParam(cs, kernel, _VelocityTextureRW, passData.VelocityTextureRW);
 
-                var simulationResolution = passData.SimulationResolution;
-                cmd.SetComputeVectorParam(cs, _SimulationResolution,
-                    new Vector4(simulationResolution, simulationResolution, 1f / simulationResolution, 1f / simulationResolution));
+                cmd.SetComputeFloatParam(cs, _SimulationResolution, passData.SimulationResolution);
                 cmd.SetComputeFloatParam(cs, _AdvectSpeed, passData.AdvectSpeed);
-                var tx = CoreUtils.DivRoundUp((int)simulationResolution, 8);
-                var ty = CoreUtils.DivRoundUp((int)simulationResolution, 8);
+                var tx = CoreUtils.DivRoundUp((int)passData.SimulationResolution, 8);
+                var ty = CoreUtils.DivRoundUp((int)passData.SimulationResolution, 8);
 
                 cmd.DispatchCompute(cs, kernel, tx, ty, 1);
 
@@ -71,13 +69,8 @@ namespace UnityEngine.Rendering.Universal
             var kernel = 0;
             using (new ProfilingScope(cmd, FluidDiffusion))
             {
-                var dt = Time.deltaTime;
-                var dx = 1.0f / passData.SimulationResolution;
-                var alpha = dx * dx / (Mathf.Max(passData.Viscosity, 1e-12f) * Mathf.Max(dt, 1e-12f));
-                var beta = 4 + alpha;
-
-                var parameter = new Vector4(passData.Viscosity, alpha, beta, passData.SimulationResolution);
-                cmd.SetComputeVectorParam(cs, _DiffusionParameter, parameter);
+                cmd.SetComputeFloatParam(cs, _SimulationResolution, passData.SimulationResolution);
+                cmd.SetComputeFloatParam(cs, _Viscosity, passData.Viscosity);
                 var tx = CoreUtils.DivRoundUp((int)passData.SimulationResolution, 8);
                 var ty = CoreUtils.DivRoundUp((int)passData.SimulationResolution, 8);
 
@@ -146,12 +139,10 @@ namespace UnityEngine.Rendering.Universal
                 cmd.DispatchCompute(cs, kernel, tx, ty, 1);
 
 
-                cs = passData.Pressure;
                 //eval pressure
+                cs = passData.Pressure;
                 cmd.SetComputeFloatParam(cs, _SimulationResolution, passData.SimulationResolution);
                 cmd.SetComputeTextureParam(cs, kernel, _DivergenceTexture, passData.DivergenceTexture);
-
-
                 for (int i = 0; i < passData.PressureTimes; i++)
                 {
                     cmd.SetComputeTextureParam(cs, kernel, _PressureTexture, passData.PressureTexture[0]);
@@ -271,7 +262,7 @@ namespace UnityEngine.Rendering.Universal
 
                 passData.DivergenceTexture = renderGraph.CreateTexture(new TextureDesc(resolution, resolution)
                 {
-                    format = GraphicsFormat.R16G16_SFloat,
+                    format = GraphicsFormat.R16_SFloat,
                     enableRandomWrite = true,
                     name = "DivergenceTexture",
                 });
@@ -325,7 +316,7 @@ namespace UnityEngine.Rendering.Universal
                     EvaluatePressure(cmd, data);
                     EvaluateGradient(cmd, data);
                 });
-                result = passData.VelocityTexture;
+                result = passData.DivergenceTexture;
             }
 
             return result;

@@ -2,7 +2,7 @@ Shader "Vivid/Debug/NSFluidDebugPlane"
 {
     Properties
     {
-        _Scale("Debug Scale", Range(0.0, 10.0)) = 1
+        _Scale("Debug Scale", Range(0.0, 100.0)) = 1
 
     }
     SubShader

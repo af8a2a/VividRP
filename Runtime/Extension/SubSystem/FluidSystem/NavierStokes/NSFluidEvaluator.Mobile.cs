@@ -194,7 +194,7 @@ namespace UnityEngine.Rendering.Universal
                         (passData.VelocityTexture, passData.VelocityTextureRW) = (passData.VelocityTextureRW, passData.VelocityTexture);
                     }
                 });
-                result = data.DivergenceTexture;
+                result = data.VelocityTexture;
             }
 
             return result;

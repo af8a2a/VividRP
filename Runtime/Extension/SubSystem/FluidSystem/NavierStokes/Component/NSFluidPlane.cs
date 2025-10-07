@@ -44,6 +44,9 @@ namespace UnityEngine.Rendering.Universal
         [Min(0.00001f)] public float Viscosity = 0.05f;
         public int interactorsCount => m_InteractorsCount;
         [Min(0.001f)] public float advectSpeed = 1;
+        
+        [Header("Debug")]
+        [Min(0.001f)] public bool useMobileNS = false;
 
         #endregion
 

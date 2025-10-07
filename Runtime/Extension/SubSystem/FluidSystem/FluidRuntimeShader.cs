@@ -89,5 +89,14 @@ namespace UnityEngine.Rendering.Universal
             set => this.SetValueAndNotify(ref m_FluidMobile, value);
         }
 
+        
+        [SerializeField, ResourcePath("Runtime/Extension/SubSystem/FluidSystem/NavierStokes/Shader/FluidGenerateNormal.compute")]
+        private ComputeShader m_GenerateNormal;
+
+        public ComputeShader generateNormal
+        {
+            get => m_GenerateNormal;
+            set => this.SetValueAndNotify(ref m_GenerateNormal, value);
+        }
     }
 }

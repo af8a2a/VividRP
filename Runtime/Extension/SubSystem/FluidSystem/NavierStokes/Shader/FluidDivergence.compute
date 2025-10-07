@@ -16,24 +16,25 @@ void Divergence(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 id = dispatchThreadId.xy;
     float invResolution = rcp(_SimulationResolution);
-    float2 uv = (id + 0.5) * invResolution;
+    float2 uv = id * invResolution + 0.5 * invResolution;
+
 
     float2 uvL = uv - float2(1, 0) * invResolution;
     float2 uvR = uv + float2(1, 0) * invResolution;
     float2 uvT = uv + float2(0, 1) * invResolution;
     float2 uvB = uv - float2(0, 1) * invResolution;
 
-    float2 L = _VelocityTexture.SampleLevel(sampler_LinearClamp, uvL, 0).xy;
-    float2 R = _VelocityTexture.SampleLevel(sampler_LinearClamp, uvR, 0).xy;
-    float2 T = _VelocityTexture.SampleLevel(sampler_LinearClamp, uvT, 0).xy;
-    float2 B = _VelocityTexture.SampleLevel(sampler_LinearClamp, uvB, 0).xy;
+    float4 L = _VelocityTexture.SampleLevel(sampler_LinearClamp, uvL, 0);
+    float4 R = _VelocityTexture.SampleLevel(sampler_LinearClamp, uvR, 0);
+    float4 T = _VelocityTexture.SampleLevel(sampler_LinearClamp, uvT, 0);
+    float4 B = _VelocityTexture.SampleLevel(sampler_LinearClamp, uvB, 0);
 
-    float2 C = _VelocityTexture.SampleLevel(sampler_LinearClamp, uv, 0).xy;
-    if(uvL.x <= 0) L.x = -C.x;
-    if(uvR.x >= 1) R.x = -C.x;
-    if(uvT.y >= 1) T.y = -C.y;
-    if(uvB.y <= 0) B.y = -C.y;
+    float4 C = _VelocityTexture.SampleLevel(sampler_LinearClamp, uv, 0);
+    if (uvL.x <= 0) L = -C;
+    if (uvR.x >= 1) R = -C;
+    if (uvT.y >= 1) T = -C;
+    if (uvB.y <= 0) B = -C;
 
-    float dx_Half =  0.5f;
+    float dx_Half = 0.5f;
     _DivergenceTextureRW[id] = dx_Half * (R.x - L.x + T.y - B.y);
 }

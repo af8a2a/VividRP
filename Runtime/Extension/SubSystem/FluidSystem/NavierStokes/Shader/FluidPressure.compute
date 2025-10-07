@@ -5,18 +5,18 @@
 //-------------------------------------------------------------------------------------------------
 //Parameter
 //-------------------------------------------------------------------------------------------------
-RWTexture2D<float2> _PressureTextureRW;
+RWTexture2D<float> _PressureTextureRW;
 float _SimulationResolution;
 Texture2D _PressureTexture;
 Texture2D _DivergenceTexture;
 
 
 [numthreads(8, 8, 1)]
-void Pressure(uint3 dispatchThreadId : SV_DispatchThreadID, uint threadID : SV_GroupIndex)
+void Pressure(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 id = dispatchThreadId.xy;
     float invResolution = rcp(_SimulationResolution);
-    float2 uv = (id + 0.5) * invResolution;
+    float2 uv = id * invResolution + 0.5 * invResolution;
 
     float2 uvL = uv - float2(1, 0) * invResolution;
     float2 uvR = uv + float2(1, 0) * invResolution;
@@ -28,11 +28,11 @@ void Pressure(uint3 dispatchThreadId : SV_DispatchThreadID, uint threadID : SV_G
     float T = _PressureTexture.SampleLevel(sampler_LinearClamp, uvT, 0).x;
     float B = _PressureTexture.SampleLevel(sampler_LinearClamp, uvB, 0).x;
 
-    float2 C = _DivergenceTexture.SampleLevel(sampler_LinearClamp, uv, 0).xy;
+    float4 C = _DivergenceTexture.SampleLevel(sampler_LinearClamp, uv, 0);
 
-    float dx = 1.0f * invResolution;
+    float dx = 1.0f;
     float alpha = -(dx * dx);
     float beta = 4;
-    
+
     _PressureTextureRW[id] = (L + R + T + B + alpha * C) / beta;
 }

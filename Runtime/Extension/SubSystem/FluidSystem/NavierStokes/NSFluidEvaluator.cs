@@ -94,9 +94,9 @@ namespace UnityEngine.Rendering.Universal
                 var ty = CoreUtils.DivRoundUp((int)passData.SimulationResolution, 8);
 
                 cmd.SetComputeBufferParam(cs, kernel, _InteractorData, passData.InteractorData);
+                cmd.SetComputeIntParam(cs, _InteractorCount, passData.InteractorCount);
                 cmd.SetComputeFloatParam(cs, _SimulationResolution, passData.SimulationResolution);
 
-                cmd.SetComputeIntParam(cs, _InteractorCount, passData.InteractorCount);
                 cmd.SetComputeTextureParam(cs, kernel, _VelocityTexture, passData.VelocityTexture);
                 cmd.SetComputeTextureParam(cs, kernel, _VelocityTextureRW, passData.VelocityTextureRW);
 
@@ -316,7 +316,7 @@ namespace UnityEngine.Rendering.Universal
                     EvaluatePressure(cmd, data);
                     EvaluateGradient(cmd, data);
                 });
-                result = passData.DivergenceTexture;
+                result = passData.VelocityTexture;
             }
 
             return result;

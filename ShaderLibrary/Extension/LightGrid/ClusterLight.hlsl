@@ -3,7 +3,7 @@
 
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/LightCullingSystem/GPULights.cs.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/LightCullingSystem/Shader/GPULightsCullingUtils.hlsl"
-#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/LightingData.hlsl"
+#include "Private/LightingData.hlsl"
 // #pragma enable_d3d11_debug_symbols
 
 

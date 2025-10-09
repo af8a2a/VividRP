@@ -1,6 +1,6 @@
 #ifndef AREA_LIGHT_COMMON_INCLUDED
 #define AREA_LIGHT_COMMON_INCLUDED
-#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/AreaLight/AreaLightSystem.cs.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/AreaLightSystem/AreaLightSystem.cs.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/AreaLighting.hlsl"
 
 

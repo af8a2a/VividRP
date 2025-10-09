@@ -32,7 +32,7 @@ Shader "Universal Render Pipeline/PBR Toon"
 
     }
     HLSLINCLUDE
-    #include "HLSL/PBRToonInput.hlsl"
+    #include "Private/PBRToonInput.hlsl"
     ENDHLSL
 
 
@@ -87,7 +87,7 @@ Shader "Universal Render Pipeline/PBR Toon"
             #pragma instancing_options renderinglayer
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
-            #include "HLSL/PBRLighting.hlsl"
+            #include "Private/PBRLighting.hlsl"
             ENDHLSL
 
         }
@@ -136,7 +136,7 @@ Shader "Universal Render Pipeline/PBR Toon"
 
             // -------------------------------------
             // Includes
-            #include "HLSL/PBRLightingShadowCaster.hlsl"
+            #include "Private/Pass/PBRLightingShadowCaster.hlsl"
             ENDHLSL
         }
 
@@ -177,7 +177,7 @@ Shader "Universal Render Pipeline/PBR Toon"
 
             // -------------------------------------
             // Includes
-            #include "HLSL/PBRLightingDepthOnly.hlsl"
+            #include "Private/Pass/PBRLightingDepthOnly.hlsl"
             ENDHLSL
         }
 
@@ -225,7 +225,7 @@ Shader "Universal Render Pipeline/PBR Toon"
 
             // -------------------------------------
             // Includes
-            #include "HLSL/PBRLightingDepthNormal.hlsl"
+            #include "Private/Pass/PBRLightingDepthNormal.hlsl"
             ENDHLSL
         }
 
@@ -243,7 +243,7 @@ Shader "Universal Render Pipeline/PBR Toon"
             #pragma multi_compile _ LOD_FADE_CROSSFADE
             #pragma shader_feature_local_vertex _ADD_PRECOMPUTED_VELOCITY
 
-            #include_with_pragmas "HLSL/PBRLightingMotionVector.hlsl"
+            #include_with_pragmas "Private/Pass/PBRLightingMotionVector.hlsl"
             ENDHLSL
         }
     }

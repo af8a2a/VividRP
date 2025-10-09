@@ -46,7 +46,7 @@ RW_TEXTURE2D(float3, _SSRRayInfoTexture);
 
 #define NV_HITOBJECT_USE_MACRO_API
 #define NV_SHADER_EXTN_SLOT u1
-#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Plugin/NVAPI_SER/nvHLSLExtns.h"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/ExtensionSystem/NVAPI_SER/nvHLSLExtns.h"
 
 
 

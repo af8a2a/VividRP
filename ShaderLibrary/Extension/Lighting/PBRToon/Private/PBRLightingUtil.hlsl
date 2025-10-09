@@ -1,6 +1,6 @@
 
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Filter/PreIntegratedFGD/Shader/PreIntegratedFGD.hlsl"
-
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/Lighting/Common/LightingCommon.hlsl"
 #ifndef kDieletricSpec
 #define kDieletricSpec half4(0.04, 0.04, 0.04, 1.0 - 0.04) // standard dielectric reflectivity coef at incident angle (= 4%)
 #endif

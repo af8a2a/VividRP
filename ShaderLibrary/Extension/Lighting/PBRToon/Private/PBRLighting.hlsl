@@ -133,6 +133,7 @@ half4 ToonLitPassFragment(Varyings input): SV_Target0
     UNITY_SETUP_INSTANCE_ID(input);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
+    float3 V = GetWorldSpaceNormalizeViewDir(input.positionWS);
 
     SurfaceData surfaceData;
     InitializeCharacterSurfaceData(input.uv, surfaceData);

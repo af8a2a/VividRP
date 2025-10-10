@@ -40,40 +40,6 @@ DirectLighting Lightloop(float3 V, PositionInputs posInput, ShadingData shadingD
 
     DirectLighting dirLight = EvaluateDirectional(preLightData, shadingData, V);
 
-    // // Accumulate Direct (Directional Lights, Punctual Lights, TODO: Area Lights)
-    // uint dirLightIndex = 0;
-    // // bool materialReceiveShadowsOff = (shadingData.materialFlags & kMaterialFlagReceiveShadowsOff) != 0;
-    // UNITY_LOOP
-    // for (dirLightIndex = 0; dirLightIndex < _DirectionalLightCount; dirLightIndex++)
-    // {
-    //     DirectionalLightData dirLight = g_DirectionalLightDatas[dirLightIndex];
-    //     // #ifdef _LIGHT_LAYERS
-    //     //     if (IsMatchingLightLayer(dirLight.lightLayerMask, shadingData.meshRenderingLayers))
-    //     // #endif
-    //     {
-    //         float3 lightDirWS = dirLight.dir;
-    //         float NdotL = dot(normalWS, lightDirWS);
-    //
-    //         float clampedNdotL = saturate(NdotL);
-    //         float clampedRoughness = max(shadingData.roughness, dirLight.minRoughness);
-    //
-    //         float LdotV, NdotH, LdotH, invLenLV;
-    //         GetBSDFAngle(viewDirWS, lightDirWS, NdotL, NdotV, LdotV, NdotH, LdotH, invLenLV);
-    //
-    //
-    //         float3 F = F_Schlick(shadingData.fresnel0, LdotH);
-    //         float DV = DV_SmithJointGGX(NdotH, abs(NdotL), clampedNdotV, clampedRoughness);
-    //         float3 specTerm = F * DV;
-    //         float diffTerm = DisneyDiffuse(clampedNdotV, abs(NdotL), LdotV, shadingData.perceptualRoughness);
-    //
-    //         diffTerm *= clampedNdotL;
-    //         specTerm *= clampedNdotL;
-    //
-    //         directDiffuse += shadingData.diffuseColor * diffTerm * dirLight.color;
-    //         directSpecular += specTerm * dirLight.color;
-    //     }
-    // }
-
     directDiffuse += dirLight.diffuse;
     directSpecular += dirLight.specular;
 

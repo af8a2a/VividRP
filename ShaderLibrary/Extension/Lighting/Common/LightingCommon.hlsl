@@ -1,6 +1,6 @@
 #ifndef LIGHT_COMMON_INCLUDED
 #define LIGHT_COMMON_INCLUDED
-
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RealtimeLights.hlsl"
 struct DirectLighting
 {
     float3 diffuse;

@@ -249,6 +249,14 @@ float LoadScreenSpaceShadowmap(uint2 coordSS)
     return attenuation;
 }
 
+float SampleVividScreenSpaceShadowmap(float2 screenUV)
+{
+    float attenuation = SAMPLE_TEXTURE2D(_ScreenSpaceShadowmapTexture, sampler_PointClamp, screenUV).x;
+
+    return attenuation;
+}
+
+
 
 real SampleShadowmapFilteredLowQuality(TEXTURE2D_SHADOW_PARAM(ShadowMap, sampler_ShadowMap), float4 shadowCoord, ShadowSamplingData samplingData)
 {
@@ -476,6 +484,14 @@ float4 TransformWorldToShadowCoord(float3 positionWS)
 #endif
     return shadowCoord;
 }
+
+float4 TransformWorldToScreenShadowCoord(float3 positionWS)
+{
+    float4 shadowCoord = float4(ComputeNormalizedDeviceCoordinatesWithZ(positionWS, GetWorldToHClipMatrix()), 1.0);
+    return shadowCoord;
+}
+
+
 
 half MainLightRealtimeShadow(float4 shadowCoord, half4 shadowParams, ShadowSamplingData shadowSamplingData)
 {

@@ -25,15 +25,12 @@ Shader "Universal Render Pipeline/PBR Toon"
         [HideInInspector]_RoughnessStart ("Start", Range(0.0, 1)) = 0.0
         [HideInInspector]_RoughnessEnd ("End", Range(0.0, 1.0)) = 1.0
 
-        [ShowIf(_PBRGroup, Equal, 1)] [MinMaxSlider(PBRParameterSettingGroup,_OcclusionRange, _OcclusionEnd)] _OcclusionSlider ("Occlusion Remap Slider (0 - 1)", Range(0.0, 1.0)) = 1.0
-        [HideInInspector]_OcclusionRange ("Start", Range(0.0, 1)) = 0.0
+        [ShowIf(_PBRGroup, Equal, 1)] [MinMaxSlider(PBRParameterSettingGroup,_OcclusionStart, _OcclusionEnd)] _OcclusionSlider ("Occlusion Remap Slider (0 - 1)", Range(0.0, 1.0)) = 1.0
+        [HideInInspector]_OcclusionStart ("Start", Range(0.0, 1)) = 0.0
         [HideInInspector]_OcclusionEnd ("End", Range(0.0, 1.0)) = 1.0
 
 
     }
-    HLSLINCLUDE
-    #include "Private/PBRToonInput.hlsl"
-    ENDHLSL
 
 
     SubShader
@@ -74,20 +71,23 @@ Shader "Universal Render Pipeline/PBR Toon"
             #pragma multi_compile_fragment _ _REFLECTION_PROBE_ATLAS
 
 
+            #pragma multi_compile_fragment _ DEBUG_DISPLAY
+
+            
             // -------------------------------------
             // Universal Pipeline keywords
-            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
-            #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
-            #pragma multi_compile_fragment _ _SCREEN_SPACE_OCCLUSION
-            #pragma multi_compile _ _CLUSTER_LIGHT_LOOP
+            // #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
+            // #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
+            // #pragma multi_compile_fragment _ _SCREEN_SPACE_OCCLUSION
+            // #pragma multi_compile _ _CLUSTER_LIGHT_LOOP
 
             //--------------------------------------
             // GPU Instancing
             #pragma multi_compile_instancing
             #pragma instancing_options renderinglayer
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
-
-            #include "Private/PBRLighting.hlsl"
+            #include "Private/PBRToon_Common.hlsl"
+            #include "Private/PBRToon_Evalution.hlsl"
             ENDHLSL
 
         }
@@ -137,6 +137,7 @@ Shader "Universal Render Pipeline/PBR Toon"
             // -------------------------------------
             // Includes
             #include "Private/Pass/PBRLightingShadowCaster.hlsl"
+            #include "Private/PBRToonInput.hlsl"
             ENDHLSL
         }
 
@@ -178,6 +179,7 @@ Shader "Universal Render Pipeline/PBR Toon"
             // -------------------------------------
             // Includes
             #include "Private/Pass/PBRLightingDepthOnly.hlsl"
+            #include "Private/PBRToonInput.hlsl"
             ENDHLSL
         }
 
@@ -226,6 +228,7 @@ Shader "Universal Render Pipeline/PBR Toon"
             // -------------------------------------
             // Includes
             #include "Private/Pass/PBRLightingDepthNormal.hlsl"
+            #include "Private/PBRToonInput.hlsl"
             ENDHLSL
         }
 
@@ -271,7 +274,8 @@ Shader "Universal Render Pipeline/PBR Toon"
             #pragma multi_compile  _  _GBUFFER_NORMALS_OCT
 
 
-            
+            #include "Private/PBRToon_Common.hlsl"
+            #include "Private/PBRToonInput.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/ShaderVariablesRaytracing.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingIntersection.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingFragInputs.hlsl"

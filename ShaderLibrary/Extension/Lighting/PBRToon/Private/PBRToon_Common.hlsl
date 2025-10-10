@@ -1,31 +1,119 @@
-#ifndef LIT_COMMON_INCLUDED
-#define LIT_COMMON_INCLUDED
+#ifndef PBRTOON_COMMON_INCLUDED
+#define PBRTOON_COMMON_INCLUDED
 
-
-#define DEFERRED_LIGHTING_TILE_SIZE (16)
-#define DEFERRED_LIGHTING_GROUP_SIZE (DEFERRED_LIGHTING_TILE_SIZE / 2)
-#define DEFERRED_LIGHTING_THREADS   (64)
-#define HasShadingModel(stencilVal) ((stencilVal >> SHADINGMODELS_USER_MASK_BITS) > 0)
-#define StencilToShadingModel(stencilVal) (stencilVal & SHADINGMODELS_MODELS_MASK)
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/BSDF.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/Lighting/Common/LightingCommon.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/BSDF.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Filter/PreIntegratedFGD/Shader/PreIntegratedFGD.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/LightGrid/ClusterLight.hlsl"
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
+
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/Lighting/Common/AreaLightCommon.hlsl"
+
+#include "PBRToonInput.hlsl"
+
+
+
+half3 SampleNormal(float2 uv, TEXTURE2D_PARAM(bumpMap, sampler_bumpMap), half scale = half(1.0))
+{
+    #ifdef _NORMALMAP
+    half4 n = SAMPLE_TEXTURE2D(bumpMap, sampler_bumpMap, uv);
+    #if BUMP_SCALE_NOT_SUPPORTED
+    return UnpackNormal(n);
+    #else
+    return UnpackNormalScale(n, scale);
+    #endif
+    #else
+    return half3(0.0h, 0.0h, 1.0h);
+    #endif
+}
+
+// void InitializeCharacterInputData(Varyings input, half3 normalTS, out InputData inputData)
+// {
+//     inputData = (InputData)0;
+//
+//     inputData.positionWS = input.positionWS;
+//
+//     inputData.positionCS = input.positionCS;
+//
+//     half3 viewDirWS = GetWorldSpaceNormalizeViewDir(input.positionWS);
+//     #if defined(_NORMALMAP) || defined(_DETAIL)
+//     float sgn = input.tangentWS.w; // should be either +1 or -1
+//     float3 bitangent = sgn * cross(input.normalWS.xyz, input.tangentWS.xyz);
+//     half3x3 tangentToWorld = half3x3(input.tangentWS.xyz, bitangent.xyz, input.normalWS.xyz);
+//
+//     #if defined(_NORMALMAP)
+//     inputData.tangentToWorld = tangentToWorld;
+//     #endif
+//     inputData.normalWS = TransformTangentToWorld(normalTS, tangentToWorld);
+//     #else
+//     inputData.normalWS = input.normalWS;
+//     #endif
+//
+//     inputData.normalWS = NormalizeNormalPerPixel(inputData.normalWS);
+//     inputData.viewDirectionWS = viewDirWS;
+//
+//     inputData.shadowCoord = TransformWorldToShadowCoord(inputData.positionWS);
+//
+//     inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);
+// }
+
+
+// void InitializeCharacterBRDFData(SurfaceData surfaceData, out BRDFData brdfData)
+// {
+//     brdfData = (BRDFData)0;
+//     brdfData.albedo = surfaceData.albedo;
+//
+//     brdfData.diffuse = surfaceData.albedo * (1 - surfaceData.metallic);
+//     brdfData.specular = lerp(kDieletricSpec.rgb, surfaceData.albedo, surfaceData.metallic);
+//     brdfData.reflectivity = surfaceData.metallic;
+//     brdfData.perceptualRoughness = PerceptualSmoothnessToPerceptualRoughness(surfaceData.smoothness);
+//     brdfData.roughness = max(PerceptualRoughnessToRoughness(brdfData.perceptualRoughness), HALF_MIN_SQRT);
+//     brdfData.roughness2 = max(brdfData.roughness * brdfData.roughness, HALF_MIN);
+//     brdfData.normalizationTerm = brdfData.roughness * half(4.0) + half(2.0);
+//     brdfData.roughness2MinusOne = brdfData.roughness2 - half(1.0);
+// }
 
 
 //--------------------------------------------------------------------------------------------------
 // Def
 //--------------------------------------------------------------------------------------------------
-// Shading data decode from gbuffer
+
+// keep this file in sync with LitGBufferPass.hlsl
+struct Attributes
+{
+    float4 positionOS : POSITION;
+    float3 normalOS : NORMAL;
+    float4 tangentOS : TANGENT;
+    float2 texcoord : TEXCOORD0;
+    UNITY_VERTEX_INPUT_INSTANCE_ID
+};
+
+struct Varyings
+{
+    float2 uv : TEXCOORD0;
+    float3 positionWS : TEXCOORD1;
+    float3 normalWS : TEXCOORD2;
+    half4 tangentWS : TEXCOORD3; // xyz: tangent, w: sign
+
+    float4 positionCS : SV_POSITION;
+    UNITY_VERTEX_INPUT_INSTANCE_ID
+    UNITY_VERTEX_OUTPUT_STEREO
+};
+
 
 struct ShadingData
 {
     float3 normalWS;
 
     float3 albedo;
+    float3 emissive;
     float metallic;
     float occlusion;
     float smoothness;
-    uint materialFlags;
 
     float perceptualRoughness;
     float roughness;
@@ -48,27 +136,41 @@ struct ShadingData
     #endif
 };
 
-ShadingData DecodeShadingDataFromGBuffer(PositionInputs posInput)
+ShadingData GetShadingData(Varyings input)
 {
+    float2 uv = input.uv;
     ShadingData shadingData;
     ZERO_INITIALIZE(ShadingData, shadingData);
 
-    float4 gbuffer0 = LOAD_TEXTURE2D_X(_GBuffer0, posInput.positionSS);
-    float4 gbuffer1 = LOAD_TEXTURE2D_X(_GBuffer1, posInput.positionSS);
-    float4 gbuffer2 = LOAD_TEXTURE2D_X(_GBuffer2, posInput.positionSS);
 
-    // Unpack GBuffer informations. Init datas.
-    // See UnityGBuffer for more information.
-    // GBuffer0: diffuse           diffuse         diffuse         materialFlags   (sRGB rendertarget)
-    // GBuffer1: metallic/specular specular        specular        occlusion
-    // GBuffer2: encoded-normal    encoded-normal  encoded-normal  smoothness
-    shadingData.normalWS = normalize(UnpackNormal(gbuffer2.xyz));
+    half4 albedoAlpha = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, uv);
 
-    shadingData.albedo = gbuffer0.rgb;
-    shadingData.metallic = MetallicFromReflectivity(gbuffer1.r); // TODO: handle with Specular Metallic and setup.
-    shadingData.occlusion = gbuffer1.a;
-    shadingData.smoothness = gbuffer2.a;
-    shadingData.materialFlags = UnpackMaterialFlags(gbuffer0.a);
+
+    AlphaDiscard(albedoAlpha.a * _BaseColor.a, _Cutoff);
+    shadingData.albedo = albedoAlpha.rgb * _BaseColor.rgb;
+
+    half4 meor = SAMPLE_TEXTURE2D_X(_PBRMap, sampler_PBRMap, uv);
+
+
+    shadingData.smoothness = 1 - saturate(mad(meor.a, _RoughnessStart, _RoughnessEnd));
+    shadingData.metallic = saturate(mad(meor.r, _MetallicStart, _MetallicEnd));
+    shadingData.occlusion = saturate(mad(meor.b, _OcclusionStart, _OcclusionEnd));
+    shadingData.emissive = meor.g * _EmissionColor * shadingData.albedo;
+
+
+    half3 normalTS = SampleNormal(uv, TEXTURE2D_ARGS(_NormalMap, sampler_NormalMap), _NormalScale);
+
+
+    #if defined(_NORMALMAP) || defined(_DETAIL)
+    float sgn = input.tangentWS.w; // should be either +1 or -1
+    float3 bitangent = sgn * cross(input.normalWS.xyz, input.tangentWS.xyz);
+    shadingData.normalWS = TransformTangentToWorld(normalTS, half3x3(input.tangentWS.xyz, bitangent.xyz, input.normalWS.xyz));
+    #else
+    shadingData.normalWS = input.normalWS;
+    #endif
+
+    shadingData.normalWS = NormalizeNormalPerPixel(shadingData.normalWS);
+
 
     shadingData.perceptualRoughness = PerceptualSmoothnessToPerceptualRoughness(shadingData.smoothness);
     shadingData.roughness = PerceptualRoughnessToRoughness(shadingData.perceptualRoughness);

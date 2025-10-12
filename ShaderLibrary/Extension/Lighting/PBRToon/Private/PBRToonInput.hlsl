@@ -23,7 +23,15 @@ CBUFFER_START(UnityPerMaterial)
 
 
 CBUFFER_END
+
+/// -------------------------------------
+///  Outline Global Param
+/// -------------------------------------
+
 float _OutlineMaxOffsetMultiplier;
+
+
+
 TEXTURE2D(_PBRMap);          SAMPLER(sampler_PBRMap);
 TEXTURE2D(_NormalMap);       SAMPLER(sampler_NormalMap);
 TEXTURE2D(_BaseMap);         SAMPLER(sampler_BaseMap);

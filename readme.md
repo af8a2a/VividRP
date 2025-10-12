@@ -22,7 +22,7 @@ This package provides a custom implementation of Unity's **Universal Render Pipe
   - [x] Forward ToonMaterial  
     - [x] PBR Lighting
     - [ ] Rimlight
-    - [ ] Outline
+    - [x] Outline
     - [ ] Shadow
     - [ ] Fur
     - [ ] Stocking

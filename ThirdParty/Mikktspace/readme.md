@@ -1,0 +1,1 @@
+Generated artifact from repo: https://github.com/af8a2a/Mikktspace.NET

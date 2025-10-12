@@ -1,0 +1,157 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- master
+
+stages:
+- stage: BuildNative
+  jobs:
+  - job: Native
+    strategy:
+      matrix:
+        windows:
+          imageName: 'windows-latest'
+          cmakeArgs: '-G "Visual Studio 16 2019"'
+          buildSystem : 'CMAKE'
+          sourceFolder: 'Native/Release'
+          sourceFile: 'mikktspace.dll'
+          artifactName : 'windows_x64'
+        linux:
+          imageName: 'ubuntu-latest'
+          cmakeArgs: ''
+          buildSystem : 'CMAKE'
+          sourceFolder: 'Native/'
+          sourceFile: 'libmikktspace.so'
+          artifactName : 'linux_x64'
+        android:
+          imageName: 'windows-latest'
+          buildSystem : 'JNI'
+          sourceFolder : 'Native/libs/armeabi-v7a'
+          sourceFile: 'libmikktspace.so'
+          artifactName : 'android_ARMv7'
+
+    pool:
+      vmImage: $(imageName)
+
+    steps:
+    - task: PowerShell@2
+      inputs:
+        targetType: 'inline'
+        script: 'choco install ninja'
+      condition: eq( variables['Agent.JobName'], 'Native android' )
+
+    - task: CMake@1
+      inputs:
+        workingDirectory: 'Native'
+        cmakeArgs: 'CMakeLists.txt $(cmakeArgs)'
+      condition: eq( variables['buildSystem'], 'CMAKE' )
+
+    - task: VSBuild@1
+      inputs:
+        solution: 'Native\mikktspace.sln'
+        platform: 'x64'
+        configuration: 'Release'
+        msbuildArchitecture: 'x64'
+      condition: eq( variables['Agent.JobName'], 'Native windows' )
+
+    - task: Bash@3
+      inputs:
+        targetType: 'inline'
+        script: |
+          cd Native
+          make
+          tree
+      condition: eq( variables['Agent.OS'], 'Linux' )
+
+    - task: PowerShell@2
+      inputs:
+        targetType: 'inline'
+        script: |
+          cd Native
+          $(ANDROID_NDK_PATH)/ndk-build
+      condition: eq( variables['Agent.JobName'], 'Native android' )
+
+    - task: PowerShell@2
+      inputs:
+        targetType: 'inline'
+        script: 'tree /F /A'
+        errorActionPreference: 'continue'
+
+    - task: CopyFiles@2
+      inputs:
+        SourceFolder: '$(sourceFolder)'
+        Contents: '$(sourceFile)'
+        TargetFolder: '$(Build.ArtifactStagingDirectory)'
+        CleanTargetFolder: true
+
+    - task: PowerShell@2
+      inputs:
+        targetType: 'inline'
+        script: |
+          cd "$(Build.ArtifactStagingDirectory)"
+          tree /F /A
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: '$(artifactName)'
+        publishLocation: 'Container'
+
+- stage: BuildManaged
+  jobs:
+  - job: Managed
+    pool:
+      vmImage: 'windows-latest'
+    
+    steps:
+    - task: NuGetToolInstaller@1
+
+    - task: NuGetCommand@2
+      inputs:
+        restoreSolution: 'CSharp\Mikktspace.NET.sln'
+
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        buildType: 'current'
+        artifactName: 'windows_x64'
+        targetPath: 'CSharp/runtimes/win-x64/native'
+
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        buildType: 'current'
+        artifactName: 'linux_x64'
+        targetPath: 'CSharp/runtimes/linux-x64/native'
+
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        buildType: 'current'
+        artifactName: 'android_ARMv7'
+        targetPath: 'CSharp/runtimes/android-arm/native'
+
+    - task: VSBuild@1
+      inputs:
+        solution: 'CSharp\Mikktspace.NET.sln'
+        platform: 'any cpu'
+        configuration: 'Release'
+        msbuildArchitecture: 'x64'
+
+    - task: NuGetCommand@2
+      inputs:
+        command: 'pack'
+        packagesToPack: 'CSharp/Mikktspace.NET.csproj'
+        configuration: 'Release'
+        versioningScheme: 'byPrereleaseNumber'
+        majorVersion: '1'
+        minorVersion: '0'
+        patchVersion: '0'
+        
+    - task: NuGetCommand@2
+      inputs:
+        command: 'push'
+        packagesToPush: '$(Build.ArtifactStagingDirectory)/**/*.nupkg;!$(Build.ArtifactStagingDirectory)/**/*.symbols.nupkg'
+        nuGetFeedType: 'internal'
+        publishVstsFeed: 'd04c348e-3752-477f-9659-fb7b72738d76/951cbf21-f9fe-4ddf-835a-1992fcbc702b'
+

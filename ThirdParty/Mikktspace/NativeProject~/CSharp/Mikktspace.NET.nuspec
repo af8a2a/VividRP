@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package >
+  <metadata>
+    <id>$id$</id>
+    <version>$version$</version>
+    <title>$title$</title>
+    <authors>$authors$</authors>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <license type="expression">MIT</license>
+    <projectUrl>https://github.com/Neos-Metaverse/Mikktspace.NET</projectUrl>
+    <description>$description$</description>
+    <copyright>$copyright$</copyright>
+  </metadata>
+  <files>
+    <file src="runtimes\win-x64\native\**" target="runtimes\win-x64\native\" />
+    <file src="runtimes\linux-x64\native\**" target="runtimes\linux-x64\native\" />
+    <file src="runtimes\android-arm\native\**" target="runtimes\android-arm\native\" />
+  </files>
+</package>

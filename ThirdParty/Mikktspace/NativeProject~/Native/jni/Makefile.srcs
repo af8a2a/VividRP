@@ -1,0 +1,5 @@
+
+SRCS =  ../src/mikktspace.c ../src/mikktspace_api.cpp
+INCLS =  ../src/dll_exports.h ../src/mikktspace.h ../src/mikktspace_api.h
+
+INCLUDE = -I../src

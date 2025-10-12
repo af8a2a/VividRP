@@ -12,8 +12,18 @@ CBUFFER_START(UnityPerMaterial)
     float _OcclusionStart;
     float _OcclusionEnd;
     float _Cutoff;
-CBUFFER_END
 
+    /// -------------------------------------
+    ///  Outline
+    /// -------------------------------------
+    float _OutlineWidth;
+    float _OutlineZBias;
+    float _OutlineIntensity;
+    float4 _OutlineColor;
+
+
+CBUFFER_END
+float _OutlineMaxOffsetMultiplier;
 TEXTURE2D(_PBRMap);          SAMPLER(sampler_PBRMap);
 TEXTURE2D(_NormalMap);       SAMPLER(sampler_NormalMap);
 TEXTURE2D(_BaseMap);         SAMPLER(sampler_BaseMap);

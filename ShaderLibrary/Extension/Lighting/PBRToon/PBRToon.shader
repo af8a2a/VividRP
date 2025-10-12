@@ -12,7 +12,7 @@ Shader "Universal Render Pipeline/PBR Toon"
         [ShowIf(_PBRGroup, Equal, 1)][TexKW(PBRParameterSettingGroup,_NORMALMAP,_NormalScale)] _NormalMap ("Normal Map", 2D) = "bump" { }
         [HideInInspector] _NormalScale("Normal Scale", Range(0, 5)) = 1
 
-        [ShowIf(_PBRGroup, Equal, 1)][Tex(PBRParameterSettingGroup,_EmissionColor)] _PBRMap ("PBR Map", 2D) = "white" { }//Metallic & Emission & Occlusion & Roughness
+        [ShowIf(_PBRGroup, Equal, 1)][Tex(PBRParameterSettingGroup)] _PBRMap ("PBR Map", 2D) = "white" { }//Metallic & Emission & Occlusion & Roughness
         [HideInInspector][HDR] _EmissionColor ("Emission Color", Color) = (1, 1, 1, 1)
 
 
@@ -29,6 +29,14 @@ Shader "Universal Render Pipeline/PBR Toon"
         [HideInInspector]_OcclusionStart ("Start", Range(0.0, 1)) = 0.0
         [HideInInspector]_OcclusionEnd ("End", Range(0.0, 1.0)) = 1.0
 
+
+        [PassSwitch(CharacterOutline)]
+        [Main(_OutlineSettingGroup)] _OutlineSettingGroup ("Outline", Float) = 0.0
+        [ShowIf(_OutlineSettingGroup, Equal, 1)][Sub(OutlineSettingGroup)][HideInInspector] _OutlineOffset("Outline Offset", Range(0.000, 20.000)) = 0.000
+        [ShowIf(_OutlineSettingGroup, Equal, 1)][Sub(OutlineSettingGroup)] _OutlineColor("Outline Color", Color) = (0.600, 0.600, 0.600, 0.100)
+        [ShowIf(_OutlineSettingGroup, Equal, 1)][Sub(OutlineSettingGroup)] _OutlineWidth("Outline width", Range(0.000, 10.000)) = 1.000
+        [ShowIf(_OutlineSettingGroup, Equal, 1)][Sub(OutlineSettingGroup)] _OutlineZBias("Outline Z-Bias", Range(0.000, 1.000)) = 0.001
+        [ShowIf(_OutlineSettingGroup, Equal, 1)][Sub(OutlineSettingGroup)] _OutlineIntensity("Outline Intensity", Range(1.000, 30.000)) = 1.000
 
     }
 
@@ -73,13 +81,6 @@ Shader "Universal Render Pipeline/PBR Toon"
 
             #pragma multi_compile_fragment _ DEBUG_DISPLAY
 
-            
-            // -------------------------------------
-            // Universal Pipeline keywords
-            // #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
-            // #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
-            // #pragma multi_compile_fragment _ _SCREEN_SPACE_OCCLUSION
-            // #pragma multi_compile _ _CLUSTER_LIGHT_LOOP
 
             //--------------------------------------
             // GPU Instancing
@@ -87,10 +88,52 @@ Shader "Universal Render Pipeline/PBR Toon"
             #pragma instancing_options renderinglayer
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
             #include "Private/PBRToon_Common.hlsl"
-            #include "Private/PBRToon_Evalution.hlsl"
+            #include "Private/Pass/PBRLightingBasePass.hlsl"
             ENDHLSL
 
         }
+
+
+
+        Pass
+        {
+            Tags
+            {
+                "RenderType" = "Opaque"
+                "RenderPipeline" = "UniversalPipeline"
+                "UniversalMaterialType" = "Lit"
+                "IgnoreProjector" = "True"
+                "LightMode" = "CharacterOutline"
+            }
+
+            Cull Front
+            Blend SrcAlpha OneMinusSrcAlpha,One Zero
+            ZTest Less
+
+
+            HLSLPROGRAM
+            #pragma target 4.5
+            // -------------------------------------
+            // Shader Stages
+            #pragma vertex OutlineVert
+            #pragma fragment OutlineFrag
+
+            // -------------------------------------
+            // Material Keywords
+            #pragma shader_feature_local _NORMALMAP
+
+
+            //--------------------------------------
+            // GPU Instancing
+            #pragma multi_compile_instancing
+            #pragma instancing_options renderinglayer
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
+            #include "Private/PBRToon_Common.hlsl"
+            #include "Private/Pass/PBRLightingOutline.hlsl"
+            ENDHLSL
+
+        }
+
 
 
         Pass

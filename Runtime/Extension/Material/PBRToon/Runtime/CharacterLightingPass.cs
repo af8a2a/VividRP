@@ -20,6 +20,8 @@ namespace UnityEngine.Rendering.Universal
         };
         // Constants
 
+        public static readonly int _OutlineMaxOffsetMultiplier = Shader.PropertyToID("_OutlineMaxOffsetMultiplier");
+
         // Statics
 
         public CharacterLightingPass()
@@ -45,6 +47,8 @@ namespace UnityEngine.Rendering.Universal
 
             // Sky Reflect
             internal TextureHandle reflectProbe;
+
+            internal float outlineMaxOffsetMultiplier;
 
             internal UniversalCameraData cameraData;
 
@@ -110,11 +114,12 @@ namespace UnityEngine.Rendering.Universal
 
             cmd.SetGlobalBuffer("_AmbientProbeData", data.ambientProbe);
             cmd.SetGlobalTexture("_SkyTexture", data.reflectProbe);
+            cmd.SetGlobalFloat(_OutlineMaxOffsetMultiplier, data.outlineMaxOffsetMultiplier);
 
 
             cmd.DrawRendererList(data.rendererListBase);
-            cmd.DrawRendererList(data.rendererListTrans);
             cmd.DrawRendererList(data.rendererListOutline);
+            cmd.DrawRendererList(data.rendererListTrans);
         }
         
 
@@ -170,6 +175,13 @@ namespace UnityEngine.Rendering.Universal
                     builder.UseTexture(additionalShadowsTexture, AccessFlags.Read);
                 if (passData.SSShadowsTexture.IsValid())
                     builder.UseTexture(passData.SSShadowsTexture, AccessFlags.Read);
+                
+                
+                var outlineMaxOffsetMultiplier = Mathf.Max(0, cameraData.camera.pixelWidth / 768f - 1);
+                if (cameraData.isSceneViewCamera)
+                    outlineMaxOffsetMultiplier = Camera.main ? Camera.main.pixelWidth / 768f : 2;
+
+                passData.outlineMaxOffsetMultiplier = outlineMaxOffsetMultiplier;
 
                 builder.UseRendererList(passData.rendererListBase);
                 builder.UseRendererList(passData.rendererListTrans);

@@ -4,7 +4,7 @@
     public class VividLightingFeature:ScriptableRendererFeature
     {
         private CharacterLightingPass _pass;
-        private  VividDeferredLighting _DeferredLights;
+        private VividDeferredLighting _DeferredLights;
 
         public override void Create()
         {

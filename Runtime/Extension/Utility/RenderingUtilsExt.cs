@@ -1,4 +1,5 @@
-﻿using Unity.Mathematics;
+﻿using System;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 
@@ -333,6 +334,20 @@ namespace UnityEngine.Rendering.Universal
 
             return CalculateUVRect(cameraData, width, height);
         }
+
+
+        public static void GetBasis(Vector3 N, out Vector3 T, out Vector3 B)
+        {
+            float sz = Mathf.Sign(N.z);
+            float a = 1.0f / (sz + N.z);
+            float ya = N.y * a;
+            float b = N.x * ya;
+            float c = N.x * sz;
+
+            T = new Vector3(c * N.x * a - 1.0f, sz * b, c);
+            B = new Vector3(b, N.y * ya - sz, N.y);
+        }
+
     }
     
 }

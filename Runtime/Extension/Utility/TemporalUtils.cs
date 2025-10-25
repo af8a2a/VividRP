@@ -9,6 +9,8 @@ namespace UnityEngine.Rendering.Universal
 
         public static int sampleIndex { get; private set; }
 
+        private static Vector2 TemporalAAProjectionJitter;
+
         public static Vector2 GenerateRandomOffset()
         {
             // The variance between 0 and the actual halton sequence values reveals noticeable instability
@@ -99,7 +101,7 @@ namespace UnityEngine.Rendering.Universal
         /// Note: VividRP not support XR yet
         /// </summary>
         /// <param name="cameraData"></param>
-        /// <returns></returns>
+        /// <returns>xy:RawJitter,zw:Jitter div resolution</returns>
         public static Vector4 GetJitter(this UniversalCameraData cameraData)
         {
             float jitterX;
@@ -171,7 +173,7 @@ namespace UnityEngine.Rendering.Universal
                 // Reconstruct the far plane for the jittered matrix.
                 // For extremely high far clip planes, the decomposed projection zFar evaluates to infinity.
                 if (float.IsInfinity(planes.zFar))
-                    planes.zFar = cameraData.frustum.planes[5].distance;
+                    planes.zFar = cameraData.cameraExtension.frustum.planes[5].distance;
 
                 proj = Matrix4x4.Frustum(planes);
             }

@@ -25,7 +25,6 @@ namespace UnityEngine.Rendering.Universal
         {
             renderPassEvent = RenderPassEvent.BeforeRenderingPrePasses;
         }
-            
 
 
         // This class stores the data needed by the pass, passed as parameter to the delegate function that executes the pass

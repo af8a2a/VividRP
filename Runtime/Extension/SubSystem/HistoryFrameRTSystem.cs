@@ -92,7 +92,12 @@ namespace UnityEngine.Rendering.Universal
         DepthOfFieldCoC,
         
         
-        URPTemporalAA
+        URPTemporalAA,
+        
+        
+        NRDSigmaHistory,
+        NRDSigmaHistoryLength,
+
     }
 
     /// <summary>

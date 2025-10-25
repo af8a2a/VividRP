@@ -113,6 +113,11 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         public int fullScreenDebugModeOutputSizeScreenPercent { get; set; } = 50;
 
+        /// <summary>
+        /// Size of the debug fullscreen overlay, as percentage of the screen size.
+        /// </summary>
+        public int fullScreenDebugModeCascadeIndex { get; set; } = 0;
+
         internal DebugSceneOverrideMode sceneOverrideMode { get; set; } = DebugSceneOverrideMode.None;
 
         /// <summary>
@@ -224,6 +229,7 @@ namespace UnityEngine.Rendering.Universal
 
             public static readonly NameAndTooltip MapOverlays = new() { name = "Map Overlays", tooltip = "Overlays render pipeline textures to validate the scene." };
             public static readonly NameAndTooltip StpDebugViews = new() { name = "STP Debug Views", tooltip = "Debug visualizations provided by STP." };
+            public static readonly NameAndTooltip CascadeIndex = new() { name = "CascadeIndex", tooltip = "CSM index." };
             public static readonly NameAndTooltip MapSize = new() { name = "Map Size", tooltip = "Set the size of the render pipeline texture in the scene." };
             public static readonly NameAndTooltip AdditionalWireframeModes = new() { name = "Additional Wireframe Modes", tooltip = "Debug the scene with additional wireframe shader views that are different from those in the scene view." };
             public static readonly NameAndTooltip WireframeNotSupportedWarning = new() { name = "Warning: This platform might not support wireframe rendering.", tooltip = "Some platforms, for example, mobile platforms using OpenGL ES and Vulkan, might not support wireframe rendering." };
@@ -285,7 +291,18 @@ namespace UnityEngine.Rendering.Universal
                         incStep = 10,
                         min = () => 0,
                         max = () => 100
+                    },
+                    new DebugUI.IntField
+                    {
+                        isHiddenCallback =() => panel.data.fullScreenDebugMode != DebugFullScreenMode.DirectionalLightShadowMap,
+                        nameAndTooltip = Strings.CascadeIndex,
+                        getter = () => panel.data.fullScreenDebugModeCascadeIndex,
+                        setter = value => panel.data.fullScreenDebugModeCascadeIndex = value,
+                        incStep = 1,
+                        min = () => 0,
+                        max = () => 3
                     }
+
                 }
             };
 

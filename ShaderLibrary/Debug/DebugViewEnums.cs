@@ -109,6 +109,18 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>Display the main shadow map.</summary>
         MainLightShadowMap,
 
+
+        /// <summary>
+        /// CSM.
+        /// </summary>
+        DirectionalLightShadowMap,
+
+        /// <summary>
+        /// RT Shadow.
+        /// </summary>
+        RaytracingShadowMap,
+
+        
         /// <summary> Display the light cookie atlas for additional lights.</summary>
         AdditionalLightsCookieAtlas,
 

@@ -1,14 +1,13 @@
 #ifndef SHADER_RAYTRACING_COMMON_INCLUDED
 #define SHADER_RAYTRACING_COMMON_INCLUDED
 
-#if defined(SHADER_STAGE_RAY_TRACING)
-float EvaluateRayTracingBias(float3 positionRWS)
+float EvaluateRayTracingBias(float3 positionWS)
 {
-    float distanceToCamera = length(positionRWS);
+
+    float distanceToCamera = length(positionWS - GetCameraPositionWS());
     float blend = saturate((distanceToCamera - _ProjectionParams.y) / (_ProjectionParams.z - _ProjectionParams.y));
     return lerp(_RayTracingRayBias, _RayTracingDistantRayBias, blend);
 }
-#endif
 
 // Using this function instead of accessing the constant directly allows for overrides, in particular
 // in Path Tracing where we want to change the sidedness behaviour based on the transparency mode.

@@ -27,7 +27,7 @@ namespace UnityEngine.Rendering.Universal
 
                 var normal = NSFluidEvaluator.instance.GenerateNormalTexture(renderGraph, nsResult);
 
-                MipGenerator.instance.CopyColor(renderGraph, frameData, normal, nsPlane);
+                MipGenerator.instance.CopyColor(renderGraph,  normal, nsPlane);
                 plane.ApplyFluid();
             }
         }

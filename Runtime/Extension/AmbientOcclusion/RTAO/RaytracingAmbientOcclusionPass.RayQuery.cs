@@ -122,7 +122,7 @@ namespace UnityEngine.Rendering.Universal
 
             
 
-            MipGenerator.instance.CopyColor(renderGraph, frameData, denoisedRTAO, AOHistory);
+            MipGenerator.instance.CopyColor(renderGraph,  denoisedRTAO, AOHistory);
             
             
             SpatialDenoiser.DiffuseDenoiserParameters ddParams;

@@ -1,11 +1,32 @@
 ﻿#pragma kernel KMain
+#pragma kernel KMainDebug  ARRAY
 
+
+#if defined(ARRAY)
+Texture2DArray _Input;
+int _SourceSlice;
+#else 
 Texture2D _Input;
+#endif
 RWTexture2D<float4> _Output;
-
 [numthreads(8, 8, 1)]
 void KMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 positionSS = dispatchThreadId.xy;
-    _Output[positionSS] = _Input[positionSS];
+    #if !defined(ARRAY)
+    _Output[positionSS.xy] = _Input[positionSS];
+    #endif
+
+}
+
+
+[numthreads(8, 8, 1)]
+void KMainDebug(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 positionSS = dispatchThreadId.xy;
+    #if defined(ARRAY)
+    uint src = _SourceSlice;
+    _Output[positionSS] = _Input[int3(positionSS, src)];
+    #endif
+
 }

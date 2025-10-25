@@ -115,7 +115,9 @@ namespace UnityEngine.Rendering.Universal
             internal bool rayTracingShadowsEnabled;
 
             internal TextureHandle SSShadowsTexture;
-            // internal TextureHandle shadowScatterTexture;
+            
+            
+            internal TextureHandle RaytracingShadowTexture;
         }
 
         static void ExecutePass(PassData data, ComputeGraphContext context)
@@ -156,7 +158,13 @@ namespace UnityEngine.Rendering.Universal
 
                     cmd.SetComputeBufferParam(data.deferredLightingCS, kernelIndex, "_AmbientProbeData", data.ambientProbe);
                     cmd.SetComputeTextureParam(data.deferredLightingCS, kernelIndex, "_SkyTexture", data.reflectProbe);
+                    if (data.RaytracingShadowTexture.IsValid())
+                    {
+                        cmd.SetComputeTextureParam(data.deferredLightingCS, kernelIndex, "_RaytracingShadowTexture", data.RaytracingShadowTexture);
+                    }
 
+                    
+                    
                     // ScreenSpaceLighting ShaderVariables
                     // cmd.SetComputeTextureParam(data.deferredLightingCS, kernelIndex, "_ScreenSpaceShadowmapTexture", data.SSShadowsTexture);
                     // if (data.shadowScatterTexture.IsValid())
@@ -222,6 +230,12 @@ namespace UnityEngine.Rendering.Universal
                 // passData.rayTracingShadowsEnabled = shadowData.rayTracingShadowsEnabled;
 
                 // Declare input/output
+                if (resourceData.raytracingShadowTexture.IsValid())
+                {
+                    passData.RaytracingShadowTexture = resourceData.raytracingShadowTexture;
+
+                    builder.UseTexture(passData.RaytracingShadowTexture);
+                }
                 builder.UseTexture(passData.lightingHandle, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.stencilHandle, AccessFlags.Read);
                 builder.UseBuffer(passData.dispatchIndirectBuffer, AccessFlags.ReadWrite);

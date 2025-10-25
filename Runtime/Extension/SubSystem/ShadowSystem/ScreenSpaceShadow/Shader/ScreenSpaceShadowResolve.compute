@@ -1,0 +1,149 @@
+// Definitions
+//--------------------------------------------------------------------------------------------------
+
+// #pragma enable_d3d11_debug_symbols
+#pragma kernel ShadowResolve
+
+
+#pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
+#pragma multi_compile _ _CUSTOM_SHADOWS_CASCADE
+#pragma multi_compile _ _PEROBJECT_SCREEN_SPACE_SHADOW
+#pragma multi_compile _ _RAYTRACING_SHADOW
+
+//--------------------------------------------------------------------------------------------------
+// Included headers
+//--------------------------------------------------------------------------------------------------
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Shaders/Utils/Deferred.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/Shadow/ShadowsPCSS.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/TileClassify.hlsl"
+
+//--------------------------------------------------------------------------------------------------
+// Inputs & outputs
+//--------------------------------------------------------------------------------------------------
+
+RWStructuredBuffer<uint> g_TileList;
+
+TEXTURE2D_ARRAY(_DirShadowmapTexture);
+TEXTURE2D(_PerObjectScreenSpaceShadowmapTexture);
+
+RW_TEXTURE2D(float, _SSDirShadowmapTexture);
+
+RW_TEXTURE2D(float, _Shadowmap);
+
+#if defined(_RAYTRACING_SHADOW)
+
+TEXTURE2D(_RaytracingShadowTexture);
+
+half SampleRaytracingShadowmap(float2 PositionSS)
+{
+    half attenuation = _RaytracingShadowTexture[PositionSS.xy].x;
+
+    return attenuation;
+}
+
+#endif
+
+//--------------------------------------------------------------------------------------------------
+// Helpers
+//--------------------------------------------------------------------------------------------------
+
+#define SCREENSPACE_SHADOWS_TILE_SIZE   (16)
+#define SCREENSPACE_SHADOWS_GROUP_SIZE  (SCREENSPACE_SHADOWS_TILE_SIZE / 2)
+#define SCREENSPACE_SHADOWS_THREADS     (64)
+
+
+int _CamHistoryFrameCount;
+#if defined(_PEROBJECT_SCREEN_SPACE_SHADOW)
+
+half SamplePerObjectShadowmap(float2 PositionSS)
+{
+    half attenuation =_PerObjectScreenSpaceShadowmapTexture[PositionSS.xy].x;
+
+    return attenuation;
+}
+#endif
+void InitializeDispatchThreadIdFromTileList(uint groupId, uint2 gThreadId, out uint2 tileCoord, out uint2 dThreadId)
+{
+    uint encodedTileIndex = g_TileList[groupId / 4];
+
+    tileCoord = DecodeTileIndex(encodedTileIndex);
+    dThreadId = tileCoord * SCREENSPACE_SHADOWS_TILE_SIZE
+        + uint2(groupId & 1, (groupId >> 1) & 1) * SCREENSPACE_SHADOWS_GROUP_SIZE
+        + gThreadId;
+}
+
+
+[numthreads(SCREENSPACE_SHADOWS_GROUP_SIZE, SCREENSPACE_SHADOWS_GROUP_SIZE, 1)]
+void ShadowResolve(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId : SV_GroupThreadID, uint groupId : SV_GroupID)
+{
+    uint2 coordSS;
+    uint2 tileCoord;
+    InitializeDispatchThreadIdFromTileList(groupId, groupThreadId, tileCoord, coordSS);
+    if (_Shadowmap[coordSS] == 0.0 || _Shadowmap[coordSS] == 1.0)
+        return;
+
+    _Shadowmap[coordSS]=1;
+    float2 screenUV = coordSS * _ScreenSize.zw + (0.5 * _ScreenSize.zw);
+    float depth = LoadSceneDepth(coordSS);
+
+    // Position
+    PositionInputs posInput = GetPositionInput(coordSS.xy, _ScreenSize.zw, depth, UNITY_MATRIX_I_VP, UNITY_MATRIX_V, uint2(0, 0));
+    float3 positionWS = posInput.positionWS;
+    float cascadeIndex = ComputeCascadeIndex(positionWS);
+    float4 shadowCoord = TransformWorldToShadowCoord(positionWS);
+
+
+    float radial2ShadowmapDepth = _PerCascadePCSSData[cascadeIndex].x;
+    float texelSizeWS           = _PerCascadePCSSData[cascadeIndex].y;
+    float farToNear             = _PerCascadePCSSData[cascadeIndex].z;
+    float blockerInvTangent     = _PerCascadePCSSData[cascadeIndex].w;
+
+    // Sample Noise: Use Jitter instead.
+    float2 noiseJitter = 0;
+    noiseJitter.xy = InterleavedGradientNoise(coordSS.xy, _CamHistoryFrameCount);
+    noiseJitter *= TWO_PI;
+    noiseJitter.x = sin(noiseJitter.x);
+    noiseJitter.y = cos(noiseJitter.y);
+
+
+    // Blocker Search
+    float filterSize = FILTER_SIZE_BLOCKER / texelSizeWS; // texel count
+    filterSize = max(filterSize, 1.0);
+    float2 avgDepthAndCount = BlockerSearch(BLOCKER_SAMPLE_COUNT, filterSize, shadowCoord.xyz, noiseJitter, cascadeIndex);
+    if (avgDepthAndCount.y == 0) // No Blocker
+    {
+        _Shadowmap[coordSS] = 1.0;
+        return;
+    }
+
+
+
+    // Penumbra Estimation
+    float blockerDistance = abs(avgDepthAndCount.x - shadowCoord.z);
+    blockerDistance *= farToNear;
+    blockerDistance = min(blockerDistance, 10.0);
+
+    float maxPCSSoffset = blockerDistance / farToNear * 0.25;
+
+    float pcssFilterSize = DIR_LIGHT_PENUMBRA_WIDTH * blockerDistance * 0.01 / texelSizeWS;
+    pcssFilterSize = max(pcssFilterSize, 0.01);
+
+
+    // PCSS Filter
+    float pcssResult = PCSSFilter(PCSS_SAMPLE_COUNT, pcssFilterSize, shadowCoord.xyz, noiseJitter, cascadeIndex, maxPCSSoffset);
+    #if defined(_PEROBJECT_SCREEN_SPACE_SHADOW)
+    pcssResult=min(pcssResult,SamplePerObjectShadowmap(coordSS));
+    #endif
+
+    #if defined(_RAYTRACING_SHADOW)
+    pcssResult = min(pcssResult, SampleRaytracingShadowmap(coordSS));
+    #endif
+
+
+    _Shadowmap[coordSS] = pcssResult;
+}

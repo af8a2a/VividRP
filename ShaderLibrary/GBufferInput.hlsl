@@ -120,7 +120,7 @@ GBufferData UnpackGBuffers(uint2 unCoord2)
     gBufferData.specularColor = gBuffer1.rgb;
     gBufferData.occlusion = gBuffer1.a;
     gBufferData.normalWS = normalize(UnpackGBufferNormal(gBuffer2.rgb));
-    gBufferData.smoothness = gBuffer2.a;
+    gBufferData.roughness = gBuffer2.a;
     gBufferData.depth = depth;
     gBufferData.shadowMask = shadowMask;
     gBufferData.meshRenderingLayers = renderingLayers;
@@ -179,7 +179,7 @@ BRDFData GBufferDataToBRDFData(GBufferData gBufferData)
         brdfSpecular = lerp(kDielectricSpec.rgb, albedo, metallic);
     }
 
-    InitializeBRDFDataDirect(albedo, brdfDiffuse, brdfSpecular, reflectivity, oneMinusReflectivity, smoothness, alpha, brdfData);
+    InitializeBRDFDataDirect(albedo, brdfDiffuse, brdfSpecular, reflectivity, oneMinusReflectivity, 1 - roughness, alpha, brdfData);
 
     return brdfData;
 }

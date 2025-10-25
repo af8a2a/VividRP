@@ -246,7 +246,7 @@ namespace UnityEngine.Rendering.Universal
         }
 
 
-        internal static void BindDitheredTextureSet(ComputeShader computeShader, int kernel, ComputeCommandBuffer cmd,
+        internal static void BindDitheredTextureSet(ComputeCommandBuffer cmd,ComputeShader computeShader, int kernel, 
             DitheredTextureHandleSet ditheredTextureSet)
         {
             cmd.SetComputeTextureParam(computeShader, kernel, _OwenScrambledTexture, ditheredTextureSet.owenScrambled256Tex);

@@ -123,7 +123,7 @@ namespace UnityEngine.Rendering.Universal
             return m_ProjectionMatrix;
         }
         
-        internal Matrix4x4 GetGPUProjectionMatrix(bool renderIntoTexture, int viewIndex = 0)
+        internal Matrix4x4 GetGPUProjectionMatrix(bool renderIntoTexture=true, int viewIndex = 0)
         {
             return GL.GetGPUProjectionMatrix(GetProjectionMatrix(viewIndex), renderIntoTexture);
         }
@@ -665,7 +665,6 @@ namespace UnityEngine.Rendering.Universal
             stackAnyPostProcessingEnabled = false;
             stackLastCameraOutputToHDR = false;
 
-            jitter = default;
         }
     }
 }

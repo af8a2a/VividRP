@@ -20,19 +20,25 @@ namespace UnityEngine.Rendering.Universal
 
             public int width;
             public int height;
+            public int sourceSlice, destSlice;
         }
+
+        static int _SourceSlice = Shader.PropertyToID("_SourceSlice");
+        static int _DestSlice = Shader.PropertyToID("_DestSlice");
 
 
         //assume src format equal to dst
-        public void CopyColor(RenderGraph renderGraph, ContextContainer frameData, TextureHandle src, TextureHandle dst)
+        public void CopyColor(RenderGraph renderGraph,  TextureHandle src, TextureHandle dst)
         {
             using (var builder = renderGraph.AddComputePass<ColorPyramidPassData>("GPU Color Copy", out var passData))
             {
                 passData.GPUCopyShader = GPUCopyColor;
                 passData.GPUCopyKernelID = GPUCopyColorKernelID;
-                var cameraData = frameData.Get<UniversalCameraData>();
-                passData.width = cameraData.pixelWidth;
-                passData.height = cameraData.pixelHeight;
+                var desc = renderGraph.GetTextureDesc(src);
+
+                passData.width = desc.width;
+                passData.height = desc.height;
+
 
                 passData.colorTexture = src;
                 passData.tempTexture = dst;
@@ -56,6 +62,49 @@ namespace UnityEngine.Rendering.Universal
                 });
             }
         }
+        
+        
+        //assume src format equal to dst
+        public void CopyColorArray(RenderGraph renderGraph,  TextureHandle src, TextureHandle dst, int sourceSlice = 0, int destSlice = 0)
+        {
+            using (var builder = renderGraph.AddComputePass<ColorPyramidPassData>("GPU Color Copy", out var passData))
+            {
+                passData.GPUCopyShader = GPUCopyColor;
+                passData.GPUCopyKernelID = 1;
+                var desc = renderGraph.GetTextureDesc(src);
+
+                passData.width = desc.width;
+                passData.height = desc.height;
+                passData.sourceSlice = sourceSlice;
+                passData.destSlice = destSlice;
+
+                passData.colorTexture = src;
+                passData.tempTexture = dst;
+
+                builder.UseTexture(passData.colorTexture);
+                builder.UseTexture(passData.tempTexture, AccessFlags.ReadWrite);
+
+                builder.AllowPassCulling(false);
+
+                builder.SetRenderFunc((ColorPyramidPassData data, ComputeGraphContext context) =>
+                {
+                    var cmd = context.cmd;
+
+
+                    var threadX = RenderingUtilsExt.DivRoundUp(data.width, 8);
+                    var threadY = RenderingUtilsExt.DivRoundUp(data.height, 8);
+
+                    cmd.SetComputeIntParam(data.GPUCopyShader,_SourceSlice, data.sourceSlice);
+                    cmd.SetComputeIntParam(data.GPUCopyShader,_DestSlice, data.destSlice);
+
+
+                    cmd.SetComputeTextureParam(data.GPUCopyShader, data.GPUCopyKernelID, "_Input", data.colorTexture);
+                    cmd.SetComputeTextureParam(data.GPUCopyShader, data.GPUCopyKernelID, "_Output", data.tempTexture);
+                    cmd.DispatchCompute(data.GPUCopyShader, data.GPUCopyKernelID, threadX, threadY, 1);
+                });
+            }
+        }
+
 
 
         public TextureHandle RenderColorPyramid(RenderGraph renderGraph, ContextContainer frameData)

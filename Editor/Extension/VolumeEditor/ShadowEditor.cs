@@ -11,32 +11,38 @@ namespace UnityEditor.Rendering.Universal
         private SerializedDataParameter m_Enable;
         private SerializedDataParameter m_CascadeMode;
 
-        SerializedDataParameter m_RayTracing;
-        SerializedDataParameter m_DirShadowsRayLength;
-        SerializedDataParameter m_sampleCount;
-        SerializedDataParameter m_radius;
-        SerializedDataParameter m_CharacterLayerMask;
+        private SerializedDataParameter m_RayTracing;
+        private SerializedDataParameter m_DirShadowsRayLength;
+        private SerializedDataParameter m_sampleCount;
+        private SerializedDataParameter m_radius;
+        private SerializedDataParameter m_CharacterLayerMask;
 
 
-        SerializedDataParameter m_ShadowsAlgo;
-        SerializedDataParameter m_ShadowsIntensity;
+        private SerializedDataParameter m_ShadowsAlgo;
+        private SerializedDataParameter m_ShadowsIntensity;
 
-        SerializedDataParameter m_MaxShadowDistance;
-        SerializedDataParameter m_CascadeShadowSplitCount;
-        SerializedDataParameter[] m_CascadeShadowSplits = new SerializedDataParameter[7];
-        SerializedDataParameter m_CascadeBorder;
+        private SerializedDataParameter m_MaxShadowDistance;
+        private SerializedDataParameter m_CascadeShadowSplitCount;
+        private SerializedDataParameter[] m_CascadeShadowSplits = new SerializedDataParameter[7];
+        private SerializedDataParameter m_CascadeBorder;
 
 
-        SerializedDataParameter m_Penumbra;
-        SerializedDataParameter m_PerObjectShadowPenumbra;
-        
-        SerializedDataParameter m_ShadowScatterMode;
-        SerializedDataParameter m_ShadowRampTex;
-        SerializedDataParameter m_ScatterR;
-        SerializedDataParameter m_ScatterG;
-        SerializedDataParameter m_ScatterB;
+        private SerializedDataParameter m_Penumbra;
+        private SerializedDataParameter m_PerObjectShadowPenumbra;
 
-        SerializedDataParameter m_ShadowDenoise;
+        private SerializedDataParameter m_ShadowScatterMode;
+
+        private SerializedDataParameter m_ShadowRampTex;
+        private SerializedDataParameter m_ScatterR;
+        private SerializedDataParameter m_ScatterG;
+        private SerializedDataParameter m_ScatterB;
+
+        private SerializedDataParameter m_ShadowDenoise;
+
+        private SerializedDataParameter m_UseFullRTShadow;
+
+        private SerializedDataParameter m_SunAngularDiameter;
+        private SerializedDataParameter m_MaxStabilizedFrameNum;
 
 
         private enum Unit
@@ -65,7 +71,7 @@ namespace UnityEditor.Rendering.Universal
 
             m_RayTracing = Unpack(o.Find(x => x.rayTracing));
             m_DirShadowsRayLength = Unpack(o.Find(x => x.dirShadowsRayLength));
-            m_sampleCount= Unpack(o.Find(x => x.sampleCount));
+            m_sampleCount = Unpack(o.Find(x => x.sampleCount));
             m_radius = Unpack(o.Find(x => x.radius));
             m_CharacterLayerMask = Unpack(o.Find(x => x.characterLayerMask));
 
@@ -100,13 +106,18 @@ namespace UnityEditor.Rendering.Universal
             }
 
             (serializedObject.targetObject as Shadows)?.InitNormalized(m_State.value == Unit.Percent);
+
+            m_UseFullRTShadow = Unpack(o.Find(x => x.useFullRTShadow));
+
+            m_SunAngularDiameter = Unpack(o.Find(x => x.sunAngularDiameter));
+            m_MaxStabilizedFrameNum = Unpack(o.Find(x => x.maxStabilizedFrameNum));
         }
 
 
         public override void OnInspectorGUI()
         {
             PropertyField(m_Enable, EditorGUIUtility.TrTextContent("Shadow Enable"));
-            PropertyField(m_RayTracing,EditorGUIUtility.TrTextContent("Raytracing Shadow"));
+            PropertyField(m_RayTracing, EditorGUIUtility.TrTextContent("Raytracing Shadow"));
 
             bool rayTracingSettingsDisplayed = m_RayTracing.overrideState.boolValue
                                                && m_RayTracing.value.boolValue;
@@ -115,13 +126,20 @@ namespace UnityEditor.Rendering.Universal
             // The rest of the ray tracing UI is only displayed if the asset supports ray tracing and the checkbox is checked.
             if (rayTracingSettingsDisplayed)
             {
-                RayTracedShadowsGUI();
+                PropertyField(m_UseFullRTShadow);
+                if (m_UseFullRTShadow.value.boolValue)
+                {
+                    FullRayTracedShadowsGUI();
+                }
+                else
+                {
+                    RayTracedShadowsGUI();
+                }
             }
             else
             {
                 RasterShadowsGUI();
             }
-
         }
 
 
@@ -143,6 +161,14 @@ namespace UnityEditor.Rendering.Universal
                 PropertyField(m_ShadowsIntensity);
             }
         }
+
+
+        void FullRayTracedShadowsGUI()
+        {
+            PropertyField(m_SunAngularDiameter);
+            PropertyField(m_MaxStabilizedFrameNum);
+        }
+
 
         void RasterShadowsGUI()
         {
@@ -249,6 +275,7 @@ namespace UnityEditor.Rendering.Universal
             {
                 PropertyField(m_ShadowRampTex, EditorGUIUtility.TrTextContent("ShadowRampTex"));
             }
+
             if (mode is ShadowScatterMode.SubSurface)
             {
                 // PropertyField(m_OcclusionPenumbra, EditorGUIUtility.TrTextContent("OcclusionPenumbra"));
@@ -256,14 +283,12 @@ namespace UnityEditor.Rendering.Universal
                 PropertyField(m_ScatterG, EditorGUIUtility.TrTextContent("ScatterG"));
                 PropertyField(m_ScatterB, EditorGUIUtility.TrTextContent("ScatterB"));
             }
-            
+
             PropertyField(m_PerObjectShadowPenumbra, EditorGUIUtility.TrTextContent("PerObjectShadow Penumbra"));
 
-            
-            
+
             GUILayout.Label("Shadow Denoise");
             PropertyField(m_ShadowDenoise, EditorGUIUtility.TrTextContent("Shadow Denoise"));
-
         }
 
 

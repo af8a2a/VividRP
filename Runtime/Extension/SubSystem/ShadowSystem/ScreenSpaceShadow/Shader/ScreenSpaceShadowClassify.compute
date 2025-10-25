@@ -1,0 +1,148 @@
+// Definitions
+//--------------------------------------------------------------------------------------------------
+
+// #pragma enable_d3d11_debug_symbols
+#pragma kernel ShadowClassifyTiles   
+
+
+#pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
+#pragma multi_compile _ _CUSTOM_SHADOWS_CASCADE
+
+//--------------------------------------------------------------------------------------------------
+// Included headers
+//--------------------------------------------------------------------------------------------------
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Shaders/Utils/Deferred.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/Shadow/ShadowsPCSS.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/TileClassify.hlsl"
+
+//--------------------------------------------------------------------------------------------------
+// Inputs & outputs
+//--------------------------------------------------------------------------------------------------
+
+RWStructuredBuffer<uint> g_TileList;
+RW_TEXTURE2D(float, _SSDirShadowmapTexture);
+RWBuffer<uint> g_DispatchIndirectBuffer;
+
+
+
+//--------------------------------------------------------------------------------------------------
+// Helpers
+//--------------------------------------------------------------------------------------------------
+
+#define SCREENSPACE_SHADOWS_TILE_SIZE   (16)
+#define SCREENSPACE_SHADOWS_GROUP_SIZE  (SCREENSPACE_SHADOWS_TILE_SIZE / 2)
+#define SCREENSPACE_SHADOWS_THREADS     (64)
+
+
+#define PREFILTER_SAMPLE_COUNT          (32)
+#define BLOCKER_SAMPLE_COUNT            (16)
+#define PCSS_SAMPLE_COUNT               (32)
+
+// World space filter size.
+#define FILTER_SIZE_PREFILTER           (0.3)
+#define FILTER_SIZE_BLOCKER             (0.2)
+
+#define DIR_LIGHT_PENUMBRA_WIDTH        _DirLightShadowPenumbraParams.x
+
+
+int _CamHistoryFrameCount;
+
+
+
+//--------------------------------------------------------------------------------------------------
+// Implementation Classify Tiles
+//--------------------------------------------------------------------------------------------------
+
+groupshared uint gTileCount = 0;
+
+// Dispatch size is 16*16 (tile size), each group has 64 threads, each thread handle 4 piexels.
+[numthreads(SCREENSPACE_SHADOWS_THREADS, 1, 1)]
+void ShadowClassifyTiles(uint3 dispatchThreadId : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex, uint3 groupID : SV_GroupID)
+{
+    uint2 tileID = groupID.xy;
+    bool needPenumbra = false;
+    uint2 screenSize = _ScreenSize.xy;
+    uint tilesNum;
+    tilesNum = (screenSize.x + SCREENSPACE_SHADOWS_TILE_SIZE - 1) / SCREENSPACE_SHADOWS_TILE_SIZE;
+    tilesNum *= (screenSize.y + SCREENSPACE_SHADOWS_TILE_SIZE - 1) / SCREENSPACE_SHADOWS_TILE_SIZE;
+
+    uint2 coordBoundLL = SCREENSPACE_SHADOWS_TILE_SIZE * tileID;
+    
+
+    // Sampling shadows
+    UNITY_UNROLL
+    for (int i = 0; i < 4; i++)
+    {
+        int idx = i * SCREENSPACE_SHADOWS_THREADS + groupIndex;
+        uint2 coordSS = min(uint2(coordBoundLL.x + (idx & 0xf), coordBoundLL.y + (idx >> 4)), uint2(screenSize.x - 1, screenSize.y - 1));
+
+        // Check valid first. Reject the sky/background
+        float depth = LoadSceneDepth(coordSS);
+        if (depth == UNITY_RAW_FAR_CLIP_VALUE)
+        {
+            _SSDirShadowmapTexture[coordSS] = 1.0;
+            continue;
+        }
+
+        // Position
+        PositionInputs posInput = GetPositionInput(coordSS.xy, _ScreenSize.zw, depth, UNITY_MATRIX_I_VP, UNITY_MATRIX_V, uint2(0, 0));
+        float3 positionWS = posInput.positionWS;
+        float cascadeIndex = ComputeCascadeIndex(positionWS);
+        float4 shadowCoord = TransformWorldToShadowCoord(positionWS);
+        bool isNotDistFar = GetMainLightShadowFade(positionWS) < 1;
+
+        float radial2ShadowmapDepth = _PerCascadePCSSData[cascadeIndex].x;
+        float texelSizeWS           = _PerCascadePCSSData[cascadeIndex].y;
+        float farToNear             = _PerCascadePCSSData[cascadeIndex].z;
+        float blockerInvTangent     = _PerCascadePCSSData[cascadeIndex].w;
+
+        // Sample Noise: Use Jitter instead.
+        float2 noiseJitter = 0;
+        noiseJitter.xy = InterleavedGradientNoise(coordSS.xy, _CamHistoryFrameCount);
+        noiseJitter *= TWO_PI;
+        noiseJitter.x = sin(noiseJitter.x);
+        noiseJitter.y = cos(noiseJitter.y);
+
+        // PreFilter Search
+        float preFilterSize = FILTER_SIZE_PREFILTER / texelSizeWS; // texel count
+        preFilterSize = max(preFilterSize, 1.0);
+        float preFilterRet = PreFilterSearch(PREFILTER_SAMPLE_COUNT, preFilterSize, shadowCoord.xyz, cascadeIndex, noiseJitter);
+        bool isOcclusion = preFilterRet > 0 && isNotDistFar;
+        if (isOcclusion && preFilterRet < PREFILTER_SAMPLE_COUNT)
+        {
+            needPenumbra = true;
+        }
+        if (isOcclusion)
+        {
+            _SSDirShadowmapTexture[coordSS] = (preFilterRet == PREFILTER_SAMPLE_COUNT) ? 0.0 : 0.5;
+        }
+    }
+
+    // Set group shared.
+    if (needPenumbra)
+    {
+        InterlockedAdd(gTileCount, 1);
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    // Write per tile data.
+    if (groupIndex == 0 && gTileCount > 0)
+    {
+        uint tileOffset = 0;
+        uint prevGroupCnt;
+        // We are filling up an indirect argument buffer for DispatchIndirect.
+        // The buffer contains {groupCntX, groupCntY, groupCntZ} = {groupCnt, 0, 0}.
+        // Current thread contorls 4 pixels.
+        InterlockedAdd(g_DispatchIndirectBuffer[0], 4, prevGroupCnt);
+        tileOffset = prevGroupCnt / 4; // 4x 8x8 groups per a 16x16 tile
+        g_TileList[tileOffset] = EncodeTileIndex(tileID.xy);
+    }
+
+}
+

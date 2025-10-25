@@ -135,6 +135,19 @@ namespace UnityEngine.Rendering.Universal
                                 BlitToDebugTexture(renderGraph, resourceData.mainShadowsTexture, debugTexture);
                                 break;
                             }
+                            case DebugFullScreenMode.DirectionalLightShadowMap:
+                            {
+                                var index = DebugHandler.DebugDisplaySettings.renderingSettings.fullScreenDebugModeCascadeIndex;
+                                BlitToDebugTextureArray(renderGraph, resourceData.directionalShadowsTexture, debugTexture, slice: index);
+                                break;
+                            }
+                            case DebugFullScreenMode.RaytracingShadowMap:
+                            {
+
+                                BlitToDebugTexture(renderGraph, resourceData.raytracingShadowTexture, debugTexture);
+                                break;
+                            }
+
                             case DebugFullScreenMode.AdditionalLightsCookieAtlas:
                             {
                                 // Copy atlas texture to make it "readonly". Direct reference (debug=atlas) can lead to handle->texture reallocation.
@@ -239,9 +252,51 @@ namespace UnityEngine.Rendering.Universal
         class CopyToDebugTexturePassData
         {
             internal TextureHandle src;
+            internal TextureHandle transientTexture;
             internal TextureHandle dest;
         }
 
+
+        private void BlitToDebugTextureArray(RenderGraph renderGraph, TextureHandle source, TextureHandle destination, bool isSourceTextureColor = false,
+            int slice = 0)
+        {
+            
+
+            if (source.IsValid())
+            {
+                var desc = renderGraph.GetTextureDesc(source);
+                var transientTexture = renderGraph.CreateTexture(new TextureDesc(desc.width,desc.height)
+                {
+                    format = GraphicsFormat.R16G16B16A16_SFloat,
+                    enableRandomWrite = true,
+                });
+                MipGenerator.instance.CopyColorArray(renderGraph,  source, transientTexture, slice);
+                
+
+                using (var builder = renderGraph.AddRasterRenderPass<CopyToDebugTexturePassData>("Copy To Debug Texture", out var passData))
+                {
+                    
+                    passData.src = transientTexture;
+                    passData.dest = destination;
+                    builder.UseTexture(passData.src);
+
+                    builder.SetRenderAttachment(destination, 0);
+
+                    builder.AllowPassCulling(false);
+                    builder.SetRenderFunc<CopyToDebugTexturePassData>((data, context) => 
+                    {
+
+                        Blitter.BlitTexture(context.cmd, data.src, new Vector4(1,1,0,0), 0, false);
+                    });
+                }
+            }
+            else // Texture is invalid, just show a black view
+            {
+                BlitEmptyTexture(renderGraph, destination);
+            }
+        }
+
+        
         private void BlitToDebugTexture(RenderGraph renderGraph, TextureHandle source, TextureHandle destination, bool isSourceTextureColor = false)
         {
             if (source.IsValid())

@@ -11,7 +11,8 @@ namespace UnityEngine.Rendering.Universal
     {
         PlaceHolder,
         ShaderExecutionReordering,
-        Bindless
+        Bindless,
+        NvidiaRealtimeDenoiser
     }
 
 

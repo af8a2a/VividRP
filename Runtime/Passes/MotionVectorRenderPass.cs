@@ -90,27 +90,6 @@ namespace UnityEngine.Rendering.Universal
             DrawObjectMotionVectors(cmd, passData.xr, ref rendererList);
         }
 
-#if URP_COMPATIBILITY_MODE
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
-        public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
-        {
-            ContextContainer frameData = renderingData.frameData;
-            UniversalRenderingData universalRenderingData = frameData.Get<UniversalRenderingData>();
-            UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
-
-            var cmd = CommandBufferHelpers.GetRasterCommandBuffer(renderingData.commandBuffer);
-
-            // Profiling command
-            using (new ProfilingScope(cmd,profilingSampler))
-            {
-                InitPassData(ref m_PassData, cameraData);
-                InitRendererLists(ref m_PassData, ref universalRenderingData.cullResults, universalRenderingData.supportsDynamicBatching,
-                    context, default(RenderGraph), false);
-
-                ExecutePass(cmd, m_PassData, m_PassData.rendererList);
-            }
-        }
-#endif
 
         private static DrawingSettings GetDrawingSettings(Camera camera, bool supportsDynamicBatching)
         {
@@ -258,15 +237,6 @@ namespace UnityEngine.Rendering.Universal
             public XRPass xr;
         };
 
-#if URP_COMPATIBILITY_MODE
-        internal static void SetMotionVectorGlobalMatrices(CommandBuffer cmd, UniversalCameraData cameraData)
-        {
-            if (cameraData.camera.TryGetComponent<UniversalAdditionalCameraData>(out var additionalCameraData))
-            {
-                additionalCameraData.motionVectorsPersistentData?.SetGlobalMotionMatrices(CommandBufferHelpers.GetRasterCommandBuffer(cmd), cameraData.xr);
-            }
-        }
-#endif
 
         internal static void SetRenderGraphMotionVectorGlobalMatrices(RenderGraph renderGraph, UniversalCameraData cameraData)
         {

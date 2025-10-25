@@ -223,7 +223,7 @@ namespace UnityEngine.Rendering.Universal
 
                 var transform = volume.transform;
                 var bounds = GeometryUtils.OBBToAABB(transform.right, transform.up, transform.forward, volume.parameters.size, center);
-                if (GeometryUtility.TestPlanesAABB(cameraData.frustum.planes, bounds))
+                if (GeometryUtility.TestPlanesAABB(cameraData.cameraExtension.frustum.planes, bounds))
                 {
                     if (visibleCount >= fogManager.maxVolumeCountOnScreen)
                     {

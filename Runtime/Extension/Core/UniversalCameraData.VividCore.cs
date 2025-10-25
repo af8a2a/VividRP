@@ -11,19 +11,26 @@ namespace UnityEngine.Rendering.Universal
         public int actualHeight => scaledHeight;
 
 
-        public HistoryFrameRTSystem historyFrameRTSystem => HistoryFrameRTSystem.GetOrCreate(camera);
+        private HistoryFrameRTSystem _historyFrameRTSystem;
+        private RayTracingSystem _rayTracingSystem;
+        private DenoiseSystem _denoiseSystem;
+        private VividCameraExtension _cameraExtension;
 
-        public RayTracingSystem rayTracingSystem => RayTracingSystem.GetOrCreate(camera);
+        public HistoryFrameRTSystem historyFrameRTSystem => _historyFrameRTSystem ??= HistoryFrameRTSystem.GetOrCreate(camera);
+
+        public RayTracingSystem rayTracingSystem => _rayTracingSystem ??= RayTracingSystem.GetOrCreate(camera);
 
 
-        internal DenoiseSystem denoiseSystem => DenoiseSystem.GetOrCreate(camera);
+        internal DenoiseSystem denoiseSystem => _denoiseSystem ??= DenoiseSystem.GetOrCreate(camera);
+
+        internal VividCameraExtension cameraExtension => _cameraExtension ??= VividCameraExtension.GetOrCreate(camera);
 
         internal Vector4 resolution => new Vector4(actualWidth, actualHeight, 1.0f / actualWidth, 1.0f / actualHeight);
 
-        public Frustum frustum;
 
 
-        public Vector4 jitter;
+        public Vector2 jitter => cameraExtension.jitter;
+        public Vector2 previousJitter => cameraExtension.previousJitter;
 
 
         #region Exposure
@@ -105,7 +112,7 @@ namespace UnityEngine.Rendering.Universal
             PumpReadbackQueue();
             return m_GpuDeExposureValue;
         }
-        
+
         internal RTHandle GetExposureTexture()
         {
             return historyFrameRTSystem.GetCurrentFrameRT(HistoryFrameType.Exposure);

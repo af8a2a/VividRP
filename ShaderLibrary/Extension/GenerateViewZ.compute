@@ -1,0 +1,17 @@
+﻿#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GlobalSamplers.hlsl"
+
+#pragma kernel KMain
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+Texture2D<float> _DepthTexture;
+RWTexture2D<float> _LinearDepthOutput;
+
+
+[numthreads(8,8,1)]
+void KMain(uint3 tid : SV_DispatchThreadID)
+{
+    int2 baseCoord = tid;
+
+
+    _LinearDepthOutput[baseCoord] = LinearEyeDepth(_DepthTexture[baseCoord], _ZBufferParams);
+}

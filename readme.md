@@ -64,7 +64,7 @@ This package provides a custom implementation of Unity's **Universal Render Pipe
   - [x] FidelityFX Reflection Denoiser
   - [x] Bilatal Filter 
   - [x] Temporal Filter
-  - [ ] NVIDIA NRD
+  - [x] NVIDIA NRD
 - Lighting Culling
   - [x] Cluster based deferred Lighting(CBDL)
   - [ ] Fine Pruned Tiled Light Lists(FPTL)
@@ -83,6 +83,7 @@ This package provides a custom implementation of Unity's **Universal Render Pipe
   - [x] Realtime AreaLight
   - [x] FidelityFX SinglePassDownsample
   - [x] FidelityFX SinglePassGaussianBlur
+  - [x] NVIDIA Real-time Denoising (NRD)  
 
 
 

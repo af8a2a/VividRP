@@ -172,6 +172,10 @@ namespace UnityEngine.Rendering.Universal
 
         public ClampedIntParameter maxStabilizedFrameNum = new ClampedIntParameter(0, 0, 6);
 
+        [Header("NRD Debug Split")]
+        [AdditionalProperty] public ClampedFloatParameter splitScreen = new ClampedFloatParameter(0, 0, 1);
+
+        
 
         #endregion
         

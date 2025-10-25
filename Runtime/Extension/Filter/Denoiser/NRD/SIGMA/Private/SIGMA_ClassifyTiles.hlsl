@@ -7,7 +7,6 @@ and any modifications thereto. Any use, reproduction, disclosure or
 distribution of this software and related documentation without an express
 license agreement from NVIDIA CORPORATION is strictly prohibited.
 */
-#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 groupshared uint s_Mask;
 groupshared uint s_Radius;
 
@@ -37,7 +36,7 @@ NRD_EXPORT void NRD_CS_MAIN( uint2 threadPos : SV_GroupThreadId, uint2 tilePos :
             float h = gIn_Penumbra[ pos ];
             float viewZ = UnpackViewZ( gIn_ViewZ[ WithRectOrigin( pos ) ] );
 
-            bool isInf = viewZ >=_ProjectionParams.z;
+            bool isInf = viewZ >= gDenoisingRange;
             bool isShadow = h == 0;
             bool isLit = IsLit( h );
 

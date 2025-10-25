@@ -16,6 +16,8 @@ namespace UnityEngine.Rendering.Universal
         ComputeShader m_ShadowPostBlur;
         ComputeShader m_ShadowTemporalStabilization;
 
+        ComputeShader m_ShadowSplitScreen;
+
         RTHandle _HistoryLength;
         RTHandle _History;
 
@@ -31,6 +33,7 @@ namespace UnityEngine.Rendering.Universal
             m_ShadowBlur = runtimeShaders.shadowBlur;
             m_ShadowPostBlur = runtimeShaders.shadowPostBlur;
             m_ShadowTemporalStabilization = runtimeShaders.shadowTemporalStabilization;
+            m_ShadowSplitScreen = runtimeShaders.shadowSplitScreen;
 
             NRDContext = NRDInitlizer.NRD_GetContext();
         }
@@ -52,6 +55,7 @@ namespace UnityEngine.Rendering.Universal
             internal ComputeShader ShadowBlur;
             internal ComputeShader ShadowPostBlur;
             internal ComputeShader ShadowTemporalStabilization;
+            internal ComputeShader ShadowSplitScreen;
 
 
             internal TextureHandle motionTexture;
@@ -88,11 +92,12 @@ namespace UnityEngine.Rendering.Universal
             internal TextureHandle SmoothTileTexture;
 
 
+            //debug
+            internal float SplitScreen;
+
             //out
             internal TextureHandle ShadowTexture;
         }
-
-
 
 
         static int gIn_ViewZ = Shader.PropertyToID("gIn_ViewZ");
@@ -115,7 +120,7 @@ namespace UnityEngine.Rendering.Universal
         static int SIGMA_SmoothTilesConstants = Shader.PropertyToID("SIGMA_SmoothTilesConstants");
         static int SIGMA_BlurConstants = Shader.PropertyToID("SIGMA_BlurConstants");
         static int SIGMA_TemporalStabilizationConstants = Shader.PropertyToID("SIGMA_TemporalStabilizationConstants");
-
+        static int SIGMA_SplitScreenConstants = Shader.PropertyToID("SIGMA_SplitScreenConstants");
 
         static void ExecutePass(PassData data, ComputeGraphContext context)
         {
@@ -151,8 +156,7 @@ namespace UnityEngine.Rendering.Universal
             tx = CoreUtils.DivRoundUp(data.width, 8);
             ty = CoreUtils.DivRoundUp(data.height, 16);
 
-            
-            
+
             cs = data.ShadowCopy;
             {
                 cmd.SetComputeTextureParam(cs, kernel, gIn_Tiles, data.SmoothTileTexture);
@@ -164,7 +168,6 @@ namespace UnityEngine.Rendering.Universal
             }
 
 
-            
             cs = data.ShadowBlur;
             {
                 ConstantBuffer.Push(cmd, data.SigmaSharedConstants, cs, SIGMA_BlurConstants);
@@ -178,7 +181,6 @@ namespace UnityEngine.Rendering.Universal
                 cmd.SetComputeTextureParam(cs, kernel, gOut_Shadow_Translucency, data.ShadowTransientTexture_1);
                 cmd.DispatchCompute(cs, kernel, tx, ty, 1);
             }
-
 
 
             cs = data.ShadowPostBlur;
@@ -207,24 +209,38 @@ namespace UnityEngine.Rendering.Universal
                 // Inputs
                 cmd.SetComputeTextureParam(cs, kernel, gIn_ViewZ, data.viewZTexture);
                 cmd.SetComputeTextureParam(cs, kernel, gIn_Mv, data.motionTexture);
-            
+
                 cmd.SetComputeTextureParam(cs, kernel, gIn_Penumbra, data.ShadowTransientTexture_2);
                 cmd.SetComputeTextureParam(cs, kernel, gIn_Shadow_Translucency, data.ShadowTransientTexture_3);
-            
-            
+
+
                 cmd.SetComputeTextureParam(cs, kernel, gIn_History, data.TransientSigmaHistory);
                 cmd.SetComputeTextureParam(cs, kernel, gIn_HistoryLength, data.TransientSigmaHistoryLength);
-            
+
                 cmd.SetComputeTextureParam(cs, kernel, gIn_Tiles, data.SmoothTileTexture);
-            
-            
+
+
                 // Outputs
                 cmd.SetComputeTextureParam(cs, kernel, gOut_Shadow_Translucency, data.ShadowTexture);
                 cmd.SetComputeTextureParam(cs, kernel, gOut_HistoryLength, data.PersistSigmaHistoryLength);
                 cmd.SetComputeTextureParam(cs, kernel, gOut_History, data.PersistSigmaHistory);
-            
+
                 // Shaders
                 cmd.DispatchCompute(cs, kernel, tx, ty, 1);
+            }
+
+            if (data.SplitScreen > 0)
+            {
+                cs = data.ShadowSplitScreen;
+                ConstantBuffer.Push(cmd, data.SigmaSharedConstants, cs, SIGMA_SplitScreenConstants);
+
+                cmd.SetComputeTextureParam(cs, kernel, gIn_ViewZ, data.viewZTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Penumbra, data.PenumbraTexture);
+
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Shadow_Translucency, data.ShadowTexture);
+
+                cmd.DispatchCompute(cs, kernel, tx, ty, 1);
+                
             }
         }
 
@@ -305,8 +321,11 @@ namespace UnityEngine.Rendering.Universal
                 commonSettings.resourceSizePrev = new[] { (ushort)cameraData.scaledWidth, (ushort)cameraData.scaledHeight };
                 commonSettings.rectSize = new[] { (ushort)cameraData.scaledWidth, (ushort)cameraData.scaledHeight };
                 commonSettings.rectSizePrev = new[] { (ushort)cameraData.scaledWidth, (ushort)cameraData.scaledHeight };
-                commonSettings.accumulationMode = AccumulationMode.CLEAR_AND_RESTART;
-
+                commonSettings.frameIndex = (uint)Time.frameCount;
+                commonSettings.timeDeltaBetweenFrames = Time.deltaTime;
+                commonSettings.denoisingRange = cameraData.camera.farClipPlane;
+                commonSettings.accumulationMode = AccumulationMode.CONTINUE;
+                commonSettings.splitScreen = shadowSetting.splitScreen.value;
 
                 NRDInitlizer.NRD_SetCommonSettings(NRDContext, ref commonSettings);
 
@@ -324,6 +343,7 @@ namespace UnityEngine.Rendering.Universal
                 data.ShadowBlur = m_ShadowBlur;
                 data.ShadowPostBlur = m_ShadowPostBlur;
                 data.ShadowTemporalStabilization = m_ShadowTemporalStabilization;
+                data.ShadowSplitScreen = m_ShadowSplitScreen;
 
                 data.motionTexture = motionTexture;
                 data.gBufferNormalRoughnessTexture = gBufferNormalRoughnessTexture;
@@ -396,7 +416,7 @@ namespace UnityEngine.Rendering.Universal
 
                 data.width = cameraData.actualWidth;
                 data.height = cameraData.actualHeight;
-
+                data.SplitScreen = shadowSetting.splitScreen.value;
 
                 builder.UseTexture(data.motionTexture);
                 builder.UseTexture(data.gBufferNormalRoughnessTexture);

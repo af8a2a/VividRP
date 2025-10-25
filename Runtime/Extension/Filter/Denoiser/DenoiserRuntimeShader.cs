@@ -93,5 +93,16 @@ namespace UnityEngine.Rendering.Universal
             set => this.SetValueAndNotify(ref m_ShadowTemporalStabilization, value);
         }
 
+        
+        [SerializeField, ResourcePath("Runtime/Extension/Filter/Denoiser/NRD/SIGMA/SIGMA_Shadow_SplitScreen.compute")]
+        private ComputeShader m_ShadowSplitScreen;
+        
+        public ComputeShader shadowSplitScreen
+        {
+            get => m_ShadowSplitScreen;
+            set => this.SetValueAndNotify(ref m_ShadowSplitScreen, value);
+        }
+
+        
     }
 }

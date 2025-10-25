@@ -7,7 +7,6 @@ and any modifications thereto. Any use, reproduction, disclosure or
 distribution of this software and related documentation without an express
 license agreement from NVIDIA CORPORATION is strictly prohibited.
 */
-#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
 groupshared float s_Penumbra[ BUFFER_Y ][ BUFFER_X ];
 groupshared SIGMA_TYPE s_Shadow_Translucency[ BUFFER_Y ][ BUFFER_X ];
@@ -55,7 +54,7 @@ NRD_EXPORT void NRD_CS_MAIN( NRD_CS_MAIN_ARGS )
     float viewZ = UnpackViewZ( gIn_ViewZ[ WithRectOrigin( pixelPos ) ] );
 
     // Early out #1
-    if( isSky != 0.0 || any( pixelPos > gRectSizeMinusOne ) || viewZ >= _ProjectionParams.z )
+    if( isSky != 0.0 || any( pixelPos > gRectSizeMinusOne ) || viewZ >= gDenoisingRange )
         return;
 
     // Early out #2

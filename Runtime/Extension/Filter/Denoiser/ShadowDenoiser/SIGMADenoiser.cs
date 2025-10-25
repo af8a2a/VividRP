@@ -186,7 +186,7 @@ namespace UnityEngine.Rendering.Universal
             cs = data.ShadowPostBlur;
             ConstantBuffer.Push(cmd, data.SigmaSharedConstants, cs, SIGMA_BlurConstants);
 
-            for (int i = 0; i < data.Settings.maxStabilizedFrameNum; i++)
+            for (int i = 0; i < 2; i++)
             {
                 bool isStabilizationEnabled = (((i >> 0) & 0x1) != 0);
 
@@ -203,30 +203,33 @@ namespace UnityEngine.Rendering.Universal
             }
 
 
-            cs = data.ShadowTemporalStabilization;
-            ConstantBuffer.Push(cmd, data.SigmaSharedConstants, cs, SIGMA_TemporalStabilizationConstants);
+            if (data.Settings.maxStabilizedFrameNum > 0)
             {
-                // Inputs
-                cmd.SetComputeTextureParam(cs, kernel, gIn_ViewZ, data.viewZTexture);
-                cmd.SetComputeTextureParam(cs, kernel, gIn_Mv, data.motionTexture);
+                cs = data.ShadowTemporalStabilization;
+                ConstantBuffer.Push(cmd, data.SigmaSharedConstants, cs, SIGMA_TemporalStabilizationConstants);
+                {
+                    // Inputs
+                    cmd.SetComputeTextureParam(cs, kernel, gIn_ViewZ, data.viewZTexture);
+                    cmd.SetComputeTextureParam(cs, kernel, gIn_Mv, data.motionTexture);
 
-                cmd.SetComputeTextureParam(cs, kernel, gIn_Penumbra, data.ShadowTransientTexture_2);
-                cmd.SetComputeTextureParam(cs, kernel, gIn_Shadow_Translucency, data.ShadowTransientTexture_3);
-
-
-                cmd.SetComputeTextureParam(cs, kernel, gIn_History, data.TransientSigmaHistory);
-                cmd.SetComputeTextureParam(cs, kernel, gIn_HistoryLength, data.TransientSigmaHistoryLength);
-
-                cmd.SetComputeTextureParam(cs, kernel, gIn_Tiles, data.SmoothTileTexture);
+                    cmd.SetComputeTextureParam(cs, kernel, gIn_Penumbra, data.ShadowTransientTexture_2);
+                    cmd.SetComputeTextureParam(cs, kernel, gIn_Shadow_Translucency, data.ShadowTransientTexture_3);
 
 
-                // Outputs
-                cmd.SetComputeTextureParam(cs, kernel, gOut_Shadow_Translucency, data.ShadowTexture);
-                cmd.SetComputeTextureParam(cs, kernel, gOut_HistoryLength, data.PersistSigmaHistoryLength);
-                cmd.SetComputeTextureParam(cs, kernel, gOut_History, data.PersistSigmaHistory);
+                    cmd.SetComputeTextureParam(cs, kernel, gIn_History, data.TransientSigmaHistory);
+                    cmd.SetComputeTextureParam(cs, kernel, gIn_HistoryLength, data.TransientSigmaHistoryLength);
 
-                // Shaders
-                cmd.DispatchCompute(cs, kernel, tx, ty, 1);
+                    cmd.SetComputeTextureParam(cs, kernel, gIn_Tiles, data.SmoothTileTexture);
+
+
+                    // Outputs
+                    cmd.SetComputeTextureParam(cs, kernel, gOut_Shadow_Translucency, data.ShadowTexture);
+                    cmd.SetComputeTextureParam(cs, kernel, gOut_HistoryLength, data.PersistSigmaHistoryLength);
+                    cmd.SetComputeTextureParam(cs, kernel, gOut_History, data.PersistSigmaHistory);
+
+                    // Shaders
+                    cmd.DispatchCompute(cs, kernel, tx, ty, 1);
+                }
             }
 
             if (data.SplitScreen > 0)

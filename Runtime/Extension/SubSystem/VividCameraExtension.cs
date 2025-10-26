@@ -1,4 +1,6 @@
-﻿namespace UnityEngine.Rendering.Universal
+﻿using Unity.Mathematics;
+
+namespace UnityEngine.Rendering.Universal
 {
     public class VividCameraExtension : CameraRelatedSystem<VividCameraExtension>
     {
@@ -13,14 +15,14 @@
 
         private int previousWidth;
         private int previousHeight;
-        
-        
+
+
         private Vector2 _previousJitter;
         private Vector2 _jitter;
 
 
         public Matrix4x4 gpuViewProjectionMatrix => _camVPMatrix;
-        
+
         public Matrix4x4 gpuProjectionMatrix => _camPMatrix;
         public Matrix4x4 previousGPUProjectionMatrix => _prevCamPMatrix;
 
@@ -31,7 +33,7 @@
         public Vector2 previousJitter => _previousJitter;
         public Vector2 jitter => _jitter;
 
-        
+
         public Frustum frustum;
         public Frustum previousfrustum;
 
@@ -41,16 +43,17 @@
             _camVMatrix = camera.worldToCameraMatrix;
             _prevCamVMatrix = _camVMatrix;
             _camPMatrix = GL.GetGPUProjectionMatrix(camera.nonJitteredProjectionMatrix, true);
-            _prevCamPMatrix= _camPMatrix;
-            
+            _prevCamPMatrix = _camPMatrix;
+
             _camVPMatrix = _camPMatrix * camera.cameraToWorldMatrix;
             _prevCamVPMatrix = _camVPMatrix;
             previousWidth = camera.scaledPixelWidth;
-            
 
-            TemporalAA.CalculateJitter(Time.frameCount,out var taa_jitter,out var _);
-            _jitter = taa_jitter;
-            _previousJitter = taa_jitter;
+
+            _jitter = (Sequence.Halton2D((uint)Time.frameCount) - 0.5f) / new float2(camera.scaledPixelWidth, camera.scaledPixelHeight);
+
+            
+            _previousJitter = _jitter;
             previousfrustum = new Frustum
             {
                 corners = new Vector3[8],
@@ -69,15 +72,15 @@
         {
             _prevCamVMatrix = _camVMatrix;
             _camVMatrix = camera.worldToCameraMatrix;
-            
-            _prevCamPMatrix= _camPMatrix;
+
+            _prevCamPMatrix = _camPMatrix;
             _camPMatrix = GL.GetGPUProjectionMatrix(camera.nonJitteredProjectionMatrix, true);
 
 
             _previousJitter = _jitter;
 
-            TemporalAA.CalculateJitter(Time.frameCount, out var taa_jitter, out var _);
-            _jitter = taa_jitter;
+            _jitter = (Sequence.Halton2D((uint)Time.frameCount) - 0.5f) / new float2(camera.scaledPixelWidth, camera.scaledPixelHeight);
+            
 
 
             _prevCamVPMatrix = _camVPMatrix;
@@ -85,7 +88,7 @@
 
             previousfrustum = frustum;
 
-            
+
             Vector3 viewDir = -_camVMatrix.GetColumn(2);
             viewDir.Normalize();
             float n = camera.nearClipPlane;
@@ -93,7 +96,6 @@
 
             Frustum.Create(ref frustum, gpuViewProjectionMatrix, camera.worldToCameraMatrix.inverse.GetColumn(3), viewDir,
                 n, f);
-
         }
 
         public override void Dispose()

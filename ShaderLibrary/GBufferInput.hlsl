@@ -120,7 +120,7 @@ GBufferData UnpackGBuffers(uint2 unCoord2)
     gBufferData.specularColor = gBuffer1.rgb;
     gBufferData.occlusion = gBuffer1.a;
     gBufferData.normalWS = normalize(UnpackGBufferNormal(gBuffer2.rgb));
-    gBufferData.roughness = gBuffer2.a;
+    gBufferData.smoothness = gBuffer2.a;
     gBufferData.depth = depth;
     gBufferData.shadowMask = shadowMask;
     gBufferData.meshRenderingLayers = renderingLayers;

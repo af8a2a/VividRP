@@ -66,6 +66,7 @@ NRD_EXPORT void NRD_CS_MAIN( NRD_CS_MAIN_ARGS )
     {
         gOut_Shadow_Translucency[ pixelPos ] = PackShadow( s_Shadow_Translucency[ smemPos.y ][ smemPos.x ] );
         gOut_HistoryLength[ pixelPos ] = PackViewZAndHistoryLength( viewZ, SIGMA_MAX_ACCUM_FRAME_NUM ); // TODO: yes, SIGMA_MAX_ACCUM_FRAME_NUM to allow accumulation in neighbors
+        gOut_History[ pixelPos ] = PackShadow( s_Shadow_Translucency[ smemPos.y ][ smemPos.x ] );
 
         return;
     }

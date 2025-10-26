@@ -22,7 +22,7 @@ namespace UnityEngine.Rendering.Universal
             internal uint dispatchRaySizeX;
             internal uint dispatchRaySizeY;
             internal ShaderVariablesRaytracing rayTracingCB;
-            internal BlueNoiseSystem.DitheredTextureHandleSet ditheredTextureHandleSet;
+            internal RuntimeTextureSystem.DitheredTextureHandleSet ditheredTextureHandleSet;
 
             internal float radius;
             internal int sampleCount;
@@ -97,7 +97,7 @@ namespace UnityEngine.Rendering.Universal
                     passData.rayTracingCB._RayTracingLastBounceFallbackHierarchy = 0;
                     passData.rayTracingCB._RayTracingAmbientProbeDimmer = 1.0f;
                 }
-                passData.ditheredTextureHandleSet = BlueNoiseSystem.instance.DitheredTextureSet8SPP().RenderGraphImport(renderGraph);
+                passData.ditheredTextureHandleSet = RuntimeTextureSystem.instance.DitheredTextureSet8SPP().RenderGraphImport(renderGraph);
                 passData.cameraDepthTexture = resourceData.activeDepthTexture;
                 passData.normalGBuffer = resourceData.gBuffer[2];
                 passData.frameIndex = historyRT.historyFrameCount;
@@ -123,7 +123,7 @@ namespace UnityEngine.Rendering.Universal
                     // SetConstantBuffer
                     ConstantBuffer.PushGlobal(cmd, data.rayTracingCB, RayTracingSystem._ShaderVariablesRaytracing);
 
-                    BlueNoiseSystem.BindRaytraceDitheredTextureSet(cmd,data.rtrtShader, data.ditheredTextureHandleSet);
+                    RuntimeTextureSystem.BindRaytraceDitheredTextureSet(cmd,data.rtrtShader, data.ditheredTextureHandleSet);
                     // SetTextures
                     cmd.SetRayTracingTextureParam(data.rtrtShader, ShaderConstants._RayTracingShadowsTextureRW, data.raytracingShadowmapTex);
                     cmd.SetRayTracingTextureParam(data.rtrtShader, ShaderConstants._CameraDepthTexture, data.cameraDepthTexture);

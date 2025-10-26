@@ -48,7 +48,7 @@ namespace UnityEngine.Rendering.Universal
         public void Init()
         {
             var runtimeShaders = GraphicsSettings.GetRenderPipelineSettings<DenoiserRuntimeShader>();
-            var blueNoise = BlueNoiseSystem.instance;
+            var blueNoise = RuntimeTextureSystem.instance;
 
             // Keep track of the resources
             m_DiffuseDenoiser = runtimeShaders.SpatialDenoiserCS;

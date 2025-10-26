@@ -117,5 +117,90 @@ namespace UnityEngine.Rendering.Universal
             set => this.SetValueAndNotify(ref m_BlueNoise128RGTex, value);
         }
 
+        
+        
+        [SerializeField, ResourcePath("Textures/NVIDIA/scrambling_ranking_128x128_2d_1spp.png")]
+        private Texture2D m_ScramblingRanking1SPP;
+        public Texture2D scramblingRanking1SPP
+        {
+            get => m_ScramblingRanking1SPP;
+            set => this.SetValueAndNotify(ref m_ScramblingRanking1SPP, value);
+        }
+
+        [SerializeField, ResourcePath("Textures/NVIDIA/scrambling_ranking_128x128_2d_2spp.png")]
+        private Texture2D m_ScramblingRanking2SPP;
+        public Texture2D scramblingRanking2SPP
+        {
+            get => m_ScramblingRanking2SPP;
+            set => this.SetValueAndNotify(ref m_ScramblingRanking2SPP, value);
+        }
+
+        
+        [SerializeField, ResourcePath("Textures/NVIDIA/scrambling_ranking_128x128_2d_4spp.png")]
+        private Texture2D m_ScramblingRanking4SPP;
+        public Texture2D scramblingRanking4SPP
+        {
+            get => m_ScramblingRanking4SPP;
+            set => this.SetValueAndNotify(ref m_ScramblingRanking4SPP, value);
+        }
+
+        [SerializeField, ResourcePath("Textures/NVIDIA/scrambling_ranking_128x128_2d_8spp.png")]
+        private Texture2D m_ScramblingRanking8SPP;
+        public Texture2D scramblingRanking8SPP
+        {
+            get => m_ScramblingRanking8SPP;
+            set => this.SetValueAndNotify(ref m_ScramblingRanking8SPP, value);
+        }
+
+        [SerializeField, ResourcePath("Textures/NVIDIA/scrambling_ranking_128x128_2d_16spp.png")]
+        private Texture2D m_ScramblingRanking16SPP;
+        public Texture2D scramblingRanking16SPP
+        {
+            get => m_ScramblingRanking16SPP;
+            set => this.SetValueAndNotify(ref m_ScramblingRanking16SPP, value);
+        }
+
+        
+        [SerializeField, ResourcePath("Textures/NVIDIA/scrambling_ranking_128x128_2d_32spp.png")]
+        private Texture2D m_ScramblingRanking32SPP;
+        public Texture2D scramblingRanking32SPP
+        {
+            get => m_ScramblingRanking32SPP;
+            set => this.SetValueAndNotify(ref m_ScramblingRanking32SPP, value);
+        }
+
+        [SerializeField, ResourcePath("Textures/NVIDIA/scrambling_ranking_128x128_2d_64spp.png")]
+        private Texture2D m_ScramblingRanking64SPP;
+        public Texture2D scramblingRanking64SPP
+        {
+            get => m_ScramblingRanking64SPP;
+            set => this.SetValueAndNotify(ref m_ScramblingRanking64SPP, value);
+        }
+
+        [SerializeField, ResourcePath("Textures/NVIDIA/scrambling_ranking_128x128_2d_128spp.png")]
+        private Texture2D m_ScramblingRanking128SPP;
+        public Texture2D scramblingRanking128SPP
+        {
+            get => m_ScramblingRanking128SPP;
+            set => this.SetValueAndNotify(ref m_ScramblingRanking128SPP, value);
+        }
+
+        [SerializeField, ResourcePath("Textures/NVIDIA/scrambling_ranking_128x128_2d_256spp.png")]
+        private Texture2D m_ScramblingRanking256SPP;
+        public Texture2D scramblingRanking256SPP
+        {
+            get => m_ScramblingRanking256SPP;
+            set => this.SetValueAndNotify(ref m_ScramblingRanking256SPP, value);
+        }
+
+
+        [SerializeField, ResourcePath("Textures/NVIDIA/sobol_256_4d.png")]
+        private Texture2D m_Sobol256_4DTex;
+        public Texture2D sobol256_4DTex
+        {
+            get => m_Sobol256_4DTex;
+            set => this.SetValueAndNotify(ref m_Sobol256_4DTex, value);
+        }
+
     }
 }

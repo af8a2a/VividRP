@@ -79,7 +79,7 @@ NOISY INPUTS:
 //VividRP only support D3D12
 //will be Vulkan or metal?
 //only support DXC for wave operation...
-
+#define PLATFORM_SUPPORTS_WAVE_INTRINSICS
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
 

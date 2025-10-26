@@ -68,7 +68,7 @@ namespace UnityEngine.Rendering.Universal
                         lightFlags |= (int)LightFlag.SubtractiveMixedLighting;
 
                     // As we said before.
-                    directionalLightData.positionWS = visibleLights[visLightIndex].GetPosition();
+                    directionalLightData.positionWS = visibleLights[visLightIndex].GetForward();
                     directionalLightData.dir = lightPos;
                     directionalLightData.color = lightColor;
                     directionalLightData.lightAttenuation = lightAttenuation;

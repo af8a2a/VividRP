@@ -247,6 +247,11 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
+        static uint GetMaxAccumulatedFrameNum(float accumulationTime, float fps)
+        {
+            return (uint)(accumulationTime * fps + 0.5f);
+        }
+
 
         /// <summary>
         /// NRD SIGMA Denoise
@@ -292,6 +297,7 @@ namespace UnityEngine.Rendering.Universal
             {
                 NRDCommonSettings commonSettings = NRDCommonSettings.Default();
 
+                
 
                 var cameraExt = cameraData.cameraExtension;
 
@@ -327,14 +333,31 @@ namespace UnityEngine.Rendering.Universal
                 commonSettings.frameIndex = (uint)Time.frameCount;
                 commonSettings.timeDeltaBetweenFrames = Time.deltaTime;
                 commonSettings.denoisingRange = cameraData.camera.farClipPlane;
-                commonSettings.accumulationMode = AccumulationMode.CONTINUE;
+                commonSettings.accumulationMode = AccumulationMode.MAX_NUM;
                 commonSettings.splitScreen = shadowSetting.splitScreen.value;
+
 
                 NRDInitlizer.NRD_SetCommonSettings(NRDContext, ref commonSettings);
 
                 data.Settings = SigmaSettings.Default();
+
+                if (shadowSetting.adaptiveAccumulation.value)
+                {
+                    //at least 30 fps...
+                    var fps = Mathf.Min(1f / Mathf.Min(Time.deltaTime, 0.033f), 121.0f);
+                    const float sigmaDefaultAccumulationTime = 0.084f; // sec
+
+                    var maxSigmaStabilizedFrames = GetMaxAccumulatedFrameNum(sigmaDefaultAccumulationTime, fps);
+                    const uint sigmaMaxHistoryFrameNum = 7;
+                    data.Settings.maxStabilizedFrameNum = (uint)Mathf.Min(maxSigmaStabilizedFrames, sigmaMaxHistoryFrameNum);
+                }
+                else
+                {
+                    data.Settings.maxStabilizedFrameNum = (uint)shadowSetting.maxStabilizedFrameNum.value;
+                }
+
                 data.Settings.maxStabilizedFrameNum = (uint)shadowSetting.maxStabilizedFrameNum.value;
-                data.Settings.lightDirection = lightData.visibleLights[lightData.mainLightIndex].GetForward().Pack();
+                data.Settings.lightDirection = (-lightData.visibleLights[lightData.mainLightIndex].GetForward()).Pack();
 
                 data.SigmaSharedConstants = new SigmaSharedConstants();
                 NRDInitlizer.NRD_SetupSigmaConstBuffer(NRDContext, ref commonSettings, ref data.Settings, ref data.SigmaSharedConstants);

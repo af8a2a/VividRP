@@ -19,7 +19,7 @@ namespace UnityEngine.Rendering.Universal
                 // SetConstantBuffer
                 ConstantBuffer.PushGlobal(cmd, data.rayTracingCB, RayTracingSystem._ShaderVariablesRaytracing);
 
-                BlueNoiseSystem.BindDitheredTextureSet(cmd, data.ditheredTextureHandleSet);
+                RuntimeTextureSystem.BindDitheredTextureSet(cmd, data.ditheredTextureHandleSet);
                 // SetTextures
                 cmd.SetComputeTextureParam(data.rtaoRayQueryShader, data.RTAOKernelID, ShaderConstants.SceneDepth, data.DepthTexture);
                 cmd.SetComputeTextureParam(data.rtaoRayQueryShader, data.RTAOKernelID, ShaderConstants.SceneNormal, data.NormalTexture);

@@ -97,7 +97,7 @@ namespace UnityEngine.Rendering.Universal
             public int projectKernel;
 
             // Other parameters
-            public BlueNoiseSystem.DitheredTextureHandleSet ditheredTextureSet;
+            public RuntimeTextureSystem.DitheredTextureHandleSet ditheredTextureSet;
             public ShaderVariablesRaytracing shaderVariablesRayTracingCB;
 
             // Prepass buffers
@@ -162,7 +162,7 @@ namespace UnityEngine.Rendering.Universal
                 passData.traceKernel = giSettings.fullResolutionSS.value ? m_TraceGlobalIlluminationKernel : m_TraceGlobalIlluminationHalfKernel;
                 passData.projectKernel = giSettings.fullResolutionSS.value ? m_ReprojectGlobalIlluminationKernel : m_ReprojectGlobalIlluminationHalfKernel;
 
-                var blueNoise = BlueNoiseSystem.instance;
+                var blueNoise = RuntimeTextureSystem.instance;
                 var rayTracingSettings = VolumeManager.instance.stack.GetComponent<RayTracingSettings>();
 
                 passData.ditheredTextureSet = blueNoise.DitheredTextureSet8SPP().RenderGraphImport(renderGraph);
@@ -231,7 +231,7 @@ namespace UnityEngine.Rendering.Universal
 
                     // Inject the ray-tracing sampling data
 
-                    BlueNoiseSystem.BindDitheredTextureSet(ctx.cmd, data.ditheredTextureSet);
+                    RuntimeTextureSystem.BindDitheredTextureSet(ctx.cmd, data.ditheredTextureSet);
                     // Inject all the input textures/buffers
                     ctx.cmd.SetComputeTextureParam(data.ssGICS, data.traceKernel, _DepthTexture, data.depthTexture);
                     ctx.cmd.SetComputeTextureParam(data.ssGICS, data.traceKernel, _NormalBufferTexture, data.normalBuffer);

@@ -44,7 +44,8 @@ namespace UnityEditor.Rendering.Universal
         private SerializedDataParameter m_SunAngularDiameter;
         private SerializedDataParameter m_MaxStabilizedFrameNum;
         private SerializedDataParameter m_SplitScreen;
-
+        private SerializedDataParameter m_AdaptiveAccumulation;
+        
 
         private enum Unit
         {
@@ -113,6 +114,7 @@ namespace UnityEditor.Rendering.Universal
             m_SunAngularDiameter = Unpack(o.Find(x => x.sunAngularDiameter));
             m_MaxStabilizedFrameNum = Unpack(o.Find(x => x.maxStabilizedFrameNum));
             m_SplitScreen = Unpack(o.Find(x => x.splitScreen));
+            m_AdaptiveAccumulation= Unpack(o.Find(x => x.adaptiveAccumulation));
         }
 
 
@@ -169,7 +171,7 @@ namespace UnityEditor.Rendering.Universal
         {
             PropertyField(m_SunAngularDiameter);
             PropertyField(m_MaxStabilizedFrameNum);
-
+            PropertyField(m_AdaptiveAccumulation);
             PropertyField(m_SplitScreen);
         }
 

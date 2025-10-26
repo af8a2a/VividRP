@@ -37,7 +37,7 @@ namespace UnityEngine.Rendering.Universal
             internal uint dispatchRaySizeX;
             internal uint dispatchRaySizeY;
             internal ShaderVariablesRaytracing rayTracingCB;
-            internal BlueNoiseSystem.DitheredTextureHandleSet ditheredTextureHandleSet;
+            internal RuntimeTextureSystem.DitheredTextureHandleSet ditheredTextureHandleSet;
             internal float intensity;
             internal float radius;
             internal float directLightingStrength;
@@ -115,7 +115,7 @@ namespace UnityEngine.Rendering.Universal
                 passData.rayTracingCB._RayTracingLastBounceFallbackHierarchy = 0;
                 passData.rayTracingCB._RayTracingAmbientProbeDimmer = 1.0f;
             }
-            passData.ditheredTextureHandleSet = BlueNoiseSystem.instance.DitheredTextureSet8SPP().RenderGraphImport(renderGraph);
+            passData.ditheredTextureHandleSet = RuntimeTextureSystem.instance.DitheredTextureSet8SPP().RenderGraphImport(renderGraph);
 
 
             passData.frameIndex = historyRT.historyFrameCount;
@@ -180,7 +180,7 @@ namespace UnityEngine.Rendering.Universal
                 // SetConstantBuffer
                 ConstantBuffer.PushGlobal(cmd, data.rayTracingCB, RayTracingSystem._ShaderVariablesRaytracing);
 
-                BlueNoiseSystem.BindDitheredTextureSet(cmd, data.ditheredTextureHandleSet);
+                RuntimeTextureSystem.BindDitheredTextureSet(cmd, data.ditheredTextureHandleSet);
 
                 cmd.SetRayTracingShaderPass(data.rtaoShader, "VisibilityDXR");
                 cmd.SetRayTracingAccelerationStructure(data.rtaoShader, ShaderConstants._RaytracingAccelerationStructure, data.rtas);

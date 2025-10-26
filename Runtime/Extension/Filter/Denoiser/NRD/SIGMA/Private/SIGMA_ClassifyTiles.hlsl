@@ -7,18 +7,9 @@ and any modifications thereto. Any use, reproduction, disclosure or
 distribution of this software and related documentation without an express
 license agreement from NVIDIA CORPORATION is strictly prohibited.
 */
-groupshared uint s_Mask;
-groupshared uint s_Radius;
-
 [numthreads( 8, 4, 1 )]
 NRD_EXPORT void NRD_CS_MAIN( uint2 threadPos : SV_GroupThreadId, uint2 tilePos : SV_GroupId, uint threadIndex : SV_GroupIndex )
 {
-    if( threadIndex == 0 )
-    {
-        s_Mask = 0;
-        s_Radius = 0;
-    }
-
     GroupMemoryBarrier();
 
     uint2 pixelPos = tilePos * 16 + threadPos * uint2( 2, 4 );
@@ -58,12 +49,9 @@ NRD_EXPORT void NRD_CS_MAIN( uint2 threadPos : SV_GroupThreadId, uint2 tilePos :
         }
     }
 
-    InterlockedAdd( s_Mask, mask );
-    InterlockedMax( s_Radius, asuint( maxRadius ) );
-
-    GroupMemoryBarrier();
-
-    if( threadIndex == 0 )
+    uint s_Mask=WaveActiveSum(mask);
+    uint s_Radius=WaveActiveMax(asuint( maxRadius ));
+    if( WaveIsFirstLane() )
     {
         bool isLit = ((s_Mask >> 0) & 511) == 256;
         bool isUmbra = ((s_Mask >> 9) & 511) == 256;

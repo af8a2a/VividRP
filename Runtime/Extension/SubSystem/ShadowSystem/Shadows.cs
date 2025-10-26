@@ -170,10 +170,13 @@ namespace UnityEngine.Rendering.Universal
         
         [Tooltip("Sun size (deg).")] public ClampedFloatParameter sunAngularDiameter = new ClampedFloatParameter(0.533f, 0, 3);
 
-        public ClampedIntParameter maxStabilizedFrameNum = new ClampedIntParameter(0, 0, 6);
+        public ClampedIntParameter maxStabilizedFrameNum = new ClampedIntParameter(0, 0, 7);
 
         [Header("NRD Debug Split")]
         [AdditionalProperty] public ClampedFloatParameter splitScreen = new ClampedFloatParameter(0, 0, 1);
+
+        
+        [AdditionalProperty] public BoolParameter adaptiveAccumulation = new BoolParameter(false);
 
         
 

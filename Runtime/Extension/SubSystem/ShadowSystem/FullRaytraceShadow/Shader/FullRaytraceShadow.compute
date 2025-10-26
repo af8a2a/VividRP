@@ -27,8 +27,9 @@ Texture2D<float>  _SceneDepth;
 Texture2D<float4> _SceneNormal;
 
 
-int frameIndex;
-float _TanSunAngularRadius;
+int gFrameIndex;
+float gTanSunAngularRadius;
+float2 gJitter;
 
 RWTexture2D<float> _UnfilterShadowTexture;
 
@@ -51,7 +52,7 @@ void GetBasis(float3 N, out float3 T, out float3 B)
 float2 GetConeAngleFromAngularRadius( float mip, float tanConeAngle )
 {
     // In any case, we are limited by the output resolution
-    tanConeAngle = max( tanConeAngle, _TanSunAngularRadius );
+    tanConeAngle = max( tanConeAngle, gTanSunAngularRadius );
 
     return float2( mip, tanConeAngle );
 }
@@ -80,33 +81,52 @@ float PackPenumbra( float distanceToOccluder, float tanOfLightAngularRadius )
 
 
 
-[numthreads(8, 8, 1)]
-void main(const uint2 coordSS : SV_DispatchThreadID)
+[numthreads(16, 16, 1)]
+void main(uint2 pixelPos : SV_DispatchThreadId)
 {
-    float2 positionSS = coordSS + 0.5f;
-    // Load depth
-    float rawDepth = _SceneDepth[coordSS];
-    // Background, early out.
-    if (rawDepth == UNITY_RAW_FAR_CLIP_VALUE)
+
+
+    // Pixel and sample UV
+    float2 pixelUv = float2(pixelPos + 0.5) * _ScreenSize.zw;
+    float2 sampleUv = pixelUv + gJitter;
+    
+    
+    // Do not generate NANs for unused threads
+    if (pixelUv.x > 1.0 || pixelUv.y > 1.0)
     {
-        _UnfilterShadowTexture[positionSS] = 1;
         return;
     }
 
+    
 
-    PositionInputs posInput = GetPositionInput(positionSS, _ScreenSize.zw, rawDepth, UNITY_MATRIX_I_VP, UNITY_MATRIX_V);
+
+    //trace for positionWS
+    UnityRayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> primaryRayQuery;
+    
+    float znear = _ProjectionParams.y;
+    float3 nearPlanePositionWS = ComputeWorldSpacePosition(sampleUv, znear, UNITY_MATRIX_I_VP);
+    float3 viewDirection = normalize(nearPlanePositionWS - _WorldSpaceCameraPos);
+    
+    RayDesc primaryRay;
+    primaryRay.Origin = _WorldSpaceCameraPos;
+    primaryRay.Direction = viewDirection;
+    primaryRay.TMin = 0;
+    primaryRay.TMax = FLT_INF;
+    primaryRayQuery.TraceRayInline(_AccelerationStructure, 0, RAYTRACINGRENDERERFLAG_CAST_SHADOW, primaryRay);
+    primaryRayQuery.Proceed();
+    float shadowHitDist = primaryRayQuery.CommittedRayT();
+    float3 positionWS = _WorldSpaceCameraPos + viewDirection * shadowHitDist;
 
 
-    float3 normalWS = UnpackGBufferNormal(_SceneNormal[coordSS]);
+    float3 normalWS = UnpackGBufferNormal(_SceneNormal[pixelPos]);
 
     // Evaluate the ray bias
-    float rayBias = EvaluateRayTracingBias(posInput.positionWS);
+    float rayBias = EvaluateRayTracingBias(positionWS);
 
 
     DirectionalLightData dirLight = g_DirectionalLightDatas[0];
 
 
-    // float3x3 localToWorld = GetLocalFrame(dirLight.dir);
 
     float3 sunT, sunB;
 
@@ -115,20 +135,18 @@ void main(const uint2 coordSS : SV_DispatchThreadID)
     UnityRayQuery < RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES > shadowQuery;
     RayDesc shadowRay;
     float2 rnd;
-    rnd.x = GetBNDSequenceSample(positionSS, frameIndex, 0);
-    rnd.y = GetBNDSequenceSample(positionSS, frameIndex, 1);
-    
+    rnd.x = GetBNDSequenceSample(pixelPos, gFrameIndex, 0);
+    rnd.y = GetBNDSequenceSample(pixelPos, gFrameIndex, 1);
+
     rnd = ImportanceSampling::Cosine::GetRay(rnd).xy;
-    rnd *= _TanSunAngularRadius;
+    rnd =ImportanceSampling::Uniform::GetRay(rnd).xy;
+    rnd *= gTanSunAngularRadius;
 
     float3 sunDirection = normalize(sunT.xyz * rnd.x + sunB.xyz * rnd.y + dirLight.dir);
 
 
-    // // We need to convert the diameter to a radius for our sampling
-    // float3 localDir = SampleConeUniform(rnd.x, rnd.y, cos(radius * 0.5));
-    // float3 wsDir = mul(localDir, localToWorld);
 
-    shadowRay.Origin = posInput.positionWS + normalWS * rayBias;
+    shadowRay.Origin = positionWS + normalWS * rayBias;
     shadowRay.Direction = sunDirection;
     shadowRay.TMin = 0;
     shadowRay.TMax = FLT_MAX;
@@ -138,8 +156,8 @@ void main(const uint2 coordSS : SV_DispatchThreadID)
     shadowQuery.Proceed();
 
 
-    float shadowHitDist = shadowQuery.CommittedRayT();
+    shadowHitDist = shadowQuery.CommittedRayT();
 
 
-    _UnfilterShadowTexture[positionSS] = PackPenumbra(shadowHitDist, _TanSunAngularRadius);
+    _UnfilterShadowTexture[pixelPos] = PackPenumbra(shadowHitDist, gTanSunAngularRadius);
 }

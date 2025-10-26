@@ -325,7 +325,7 @@ namespace UnityEngine.Rendering.Universal
             ExtensionSystem.Init();
             MipGenerator.instance.Init();
             PreIntegratedFGD.instance.Build(PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse);
-            BlueNoiseSystem.instance.Init();
+            RuntimeTextureSystem.instance.Init();
             IBLFilterGGX.instance.Initialize();
             SkySystem.instance.Build(asset);
             Hammersley.Initialize();
@@ -369,7 +369,7 @@ namespace UnityEngine.Rendering.Universal
             PreIntegratedFGD.instance.Cleanup(PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse);
             IBLFilterGGX.Clean();
             SkySystem.ClearAll();
-            BlueNoiseSystem.ClearAll();
+            RuntimeTextureSystem.ClearAll();
             RayTracingSystem.ClearAll();
             HistoryFrameRTSystem.ClearAll();
             GraphicsBufferSystem.ClearAll();

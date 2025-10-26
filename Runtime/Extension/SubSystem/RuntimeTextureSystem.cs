@@ -18,11 +18,11 @@ namespace UnityEngine.Rendering.Universal
     /// ref: https://github.com/NVIDIAGameWorks/SpatiotemporalBlueNoiseSDK/tree/main
     /// </summary>
     [Serializable]
-    public sealed class BlueNoiseSystem : IDisposable
+    public sealed class RuntimeTextureSystem : IDisposable
     {
-        private static Lazy<BlueNoiseSystem> m_Instance = new Lazy<BlueNoiseSystem>();
+        private static Lazy<RuntimeTextureSystem> m_Instance = new Lazy<RuntimeTextureSystem>();
 
-        public static BlueNoiseSystem instance => m_Instance.Value;
+        public static RuntimeTextureSystem instance => m_Instance.Value;
 
         public static int blueNoiseArraySize = 64;
 
@@ -64,6 +64,19 @@ namespace UnityEngine.Rendering.Universal
         public RTHandle rankingTile8SPP;
         public RTHandle rankingTile256SPP;
         public RTHandle scramblingTex;
+        
+        
+        public RTHandle scramblingRanking1SPP;
+        public RTHandle scramblingRanking2SPP;
+        public RTHandle scramblingRanking4SPP;
+        public RTHandle scramblingRanking8SPP;
+        public RTHandle scramblingRanking16SPP;
+        public RTHandle scramblingRanking32SPP;
+        public RTHandle scramblingRanking64SPP;
+        public RTHandle scramblingRanking128SPP;
+        public RTHandle scramblingRanking256SPP;
+        public RTHandle sobel;
+
 
 
         DitheredTextureSet m_DitheredTextureSet1SPP;
@@ -76,6 +89,19 @@ namespace UnityEngine.Rendering.Universal
             InitTextures(128, TextureFormat.R16, textures.blueNoise128RTex, out m_TextureArray128R, out m_TextureHandle128R);
             InitTextures(128, TextureFormat.RG32, textures.blueNoise128RGTex, out m_TextureArray128RG, out m_TextureHandle128RG);
 
+
+            scramblingRanking1SPP = RTHandles.Alloc(textures.scramblingRanking1SPP);
+            scramblingRanking2SPP = RTHandles.Alloc(textures.scramblingRanking2SPP);
+            scramblingRanking4SPP = RTHandles.Alloc(textures.scramblingRanking4SPP);
+            scramblingRanking8SPP = RTHandles.Alloc(textures.scramblingRanking8SPP);
+            scramblingRanking16SPP = RTHandles.Alloc(textures.scramblingRanking16SPP);
+            scramblingRanking32SPP = RTHandles.Alloc(textures.scramblingRanking32SPP);
+            scramblingRanking64SPP = RTHandles.Alloc(textures.scramblingRanking64SPP);
+            scramblingRanking128SPP = RTHandles.Alloc(textures.scramblingRanking128SPP);
+            scramblingRanking256SPP = RTHandles.Alloc(textures.scramblingRanking256SPP);
+            sobel = RTHandles.Alloc(textures.sobol256_4DTex);
+
+            
             owenScrambled256Tex = RTHandles.Alloc(textures.owenScrambled256Tex);
             owenScrambledRGBATex = RTHandles.Alloc(textures.owenScrambledRGBATex);
             scramblingTile1SPP = RTHandles.Alloc(textures.scramblingTile1SPP);
@@ -111,7 +137,7 @@ namespace UnityEngine.Rendering.Universal
             };
         }
 
-        public BlueNoiseSystem()
+        public RuntimeTextureSystem()
         {
         }
 

@@ -1,4 +1,5 @@
-﻿using UnityEngine.Experimental.Rendering;
+﻿using Unity.Mathematics;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal
@@ -14,18 +15,29 @@ namespace UnityEngine.Rendering.Universal
             internal TextureHandle normalGBuffer;
             internal TextureHandle cameraDepthTexture;
 
+            internal TextureHandle ScramblingRanking;
+            internal TextureHandle Sobol;
+
 
             // Ray Tracing
             internal bool requireRayTracing;
             internal ComputeShader fullRayTracingShadowShader;
             internal RayTracingAccelerationStructure rtas;
+
+            internal Vector3 gSunBasisX;
+            internal Vector3 gSunBasisY;
+            internal Vector3 gSunDirection;
+            internal Vector2 gJitter;
+
             internal int dispatchRaySizeX;
             internal int dispatchRaySizeY;
             internal ShaderVariablesRaytracing rayTracingCB;
-            internal BlueNoiseSystem.DitheredTextureHandleSet ditheredTextureHandleSet;
+            internal RuntimeTextureSystem.DitheredTextureHandleSet ditheredTextureHandleSet;
             internal int frameIndex;
 
             internal float TanSunAngularRadius;
+
+            internal float gAngularDiameter;
         }
 
         static class ShaderConstants
@@ -37,7 +49,30 @@ namespace UnityEngine.Rendering.Universal
             public static readonly int _SceneNormal = Shader.PropertyToID("_SceneNormal");
 
             public static readonly int _TanSunAngularRadius = Shader.PropertyToID("_TanSunAngularRadius");
-            public static readonly int frameIndex = Shader.PropertyToID("frameIndex");
+
+            public static readonly int gSunBasisX = Shader.PropertyToID("gSunBasisX");
+            public static readonly int gSunBasisY = Shader.PropertyToID("gSunBasisY");
+            public static readonly int gSunDirection = Shader.PropertyToID("gSunDirection");
+            public static readonly int gJitter = Shader.PropertyToID("gJitter");
+            public static readonly int gTanSunAngularRadius = Shader.PropertyToID("gTanSunAngularRadius");
+            public static readonly int gTanPixelAngularRadius = Shader.PropertyToID("gTanPixelAngularRadius");
+            public static readonly int gIn_ScramblingRanking = Shader.PropertyToID("gIn_ScramblingRanking");
+            public static readonly int gIn_Sobol = Shader.PropertyToID("gIn_Sobol");
+            public static readonly int gAngularDiameter = Shader.PropertyToID("gAngularDiameter");
+            public static readonly int gFrameIndex = Shader.PropertyToID("gFrameIndex");
+        }
+
+
+        void GetBasis(Vector3 N, ref Vector3 T, ref Vector3 B)
+        {
+            float sz = math.sign(N.z);
+            float a = 1.0f / (sz + N.z);
+            float ya = N.y * a;
+            float b = N.x * ya;
+            float c = N.x * sz;
+
+            T = new Vector3(c * N.x * a - 1.0f, sz * b, c);
+            B = new Vector3(b, N.y * ya - sz, N.y);
         }
 
 
@@ -68,8 +103,8 @@ namespace UnityEngine.Rendering.Universal
 
                 var width = cameraData.cameraTargetDescriptor.width;
                 var height = cameraData.cameraTargetDescriptor.height;
-                passData.dispatchRaySizeX = CoreUtils.DivRoundUp(width, 8);
-                passData.dispatchRaySizeY = CoreUtils.DivRoundUp(height, 8);
+                passData.dispatchRaySizeX = CoreUtils.DivRoundUp(width, 16);
+                passData.dispatchRaySizeY = CoreUtils.DivRoundUp(height, 16);
 
                 passData.raytracingShadowmapTex = renderGraph.CreateTexture(new TextureDesc(width, height)
                 {
@@ -94,11 +129,12 @@ namespace UnityEngine.Rendering.Universal
                     passData.rayTracingCB._RayTracingLastBounceFallbackHierarchy = 0;
                     passData.rayTracingCB._RayTracingAmbientProbeDimmer = 1.0f;
                 }
-                passData.ditheredTextureHandleSet = BlueNoiseSystem.instance.DitheredTextureSet8SPP().RenderGraphImport(renderGraph);
+                passData.ditheredTextureHandleSet = RuntimeTextureSystem.instance.DitheredTextureSet8SPP().RenderGraphImport(renderGraph);
                 passData.cameraDepthTexture = resourceData.activeDepthTexture;
                 passData.normalGBuffer = resourceData.gBuffer[2];
                 passData.frameIndex = historyRT.historyFrameCount;
                 passData.TanSunAngularRadius = Mathf.Tan(Mathf.Deg2Rad * volumeSettings.sunAngularDiameter.value * 0.5f);
+                passData.gAngularDiameter = volumeSettings.sunAngularDiameter.value;
             }
         }
 
@@ -119,18 +155,28 @@ namespace UnityEngine.Rendering.Universal
                     // SetConstantBuffer
                     ConstantBuffer.PushGlobal(cmd, data.rayTracingCB, RayTracingSystem._ShaderVariablesRaytracing);
 
-                    BlueNoiseSystem.BindDitheredTextureSet(cmd, cs, kernel, data.ditheredTextureHandleSet);
+                    RuntimeTextureSystem.BindDitheredTextureSet(cmd, cs, kernel, data.ditheredTextureHandleSet);
                     // SetTextures
                     cmd.SetComputeTextureParam(cs, kernel, ShaderConstants._UnfilterShadowTexture, data.raytracingShadowmapTex);
                     cmd.SetComputeTextureParam(cs, kernel, ShaderConstants._SceneDepth, data.cameraDepthTexture);
                     cmd.SetComputeTextureParam(cs, kernel, ShaderConstants._SceneNormal, data.normalGBuffer);
+                    
+
+                    cmd.SetComputeTextureParam(cs, kernel, ShaderConstants.gIn_ScramblingRanking, data.ScramblingRanking);
+                    cmd.SetComputeTextureParam(cs, kernel, ShaderConstants.gIn_Sobol, data.Sobol);
 
 
-                    cmd.SetComputeFloatParam(cs, ShaderConstants._TanSunAngularRadius, data.TanSunAngularRadius);
 
-                    cmd.SetComputeIntParam(cs, ShaderConstants.frameIndex, data.frameIndex);
+                    cmd.SetComputeIntParam(cs, ShaderConstants.gFrameIndex, data.frameIndex);
                     cmd.SetComputeTextureParam(cs, kernel, ShaderConstants._SceneNormal, data.normalGBuffer);
 
+
+                    cmd.SetComputeFloatParam(cs, ShaderConstants.gTanSunAngularRadius, data.TanSunAngularRadius);
+                    cmd.SetComputeVectorParam(cs, ShaderConstants.gSunBasisX, data.gSunBasisX);
+                    cmd.SetComputeVectorParam(cs, ShaderConstants.gSunBasisY, data.gSunBasisY);
+                    cmd.SetComputeVectorParam(cs, ShaderConstants.gSunDirection, data.gSunDirection);
+                    cmd.SetComputeVectorParam(cs, ShaderConstants.gJitter, data.gJitter);
+                    cmd.SetComputeFloatParam(cs, ShaderConstants.gAngularDiameter, data.gAngularDiameter);
 
                     cmd.DispatchCompute(cs, kernel, data.dispatchRaySizeX, data.dispatchRaySizeY, 1);
                     CoreUtils.SetKeyword(cmd, "_RAYTRACING_SHADOW", true);
@@ -147,6 +193,7 @@ namespace UnityEngine.Rendering.Universal
         {
             UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
             UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
+            var lightData = frameData.Get<UniversalLightData>();
             var stack = VolumeManager.instance.stack;
             var volumeSettings = stack.GetComponent<Shadows>();
 
@@ -164,15 +211,25 @@ namespace UnityEngine.Rendering.Universal
 
                 InitRayTracingPassData(renderGraph, passData, raytracingData, cameraData, resourceData);
 
+                passData.gSunDirection = -lightData.visibleLights[lightData.mainLightIndex].GetForward();
+                GetBasis(passData.gSunDirection, ref passData.gSunBasisX, ref passData.gSunBasisY);
+                passData.gJitter = (Sequence.Halton2D((uint)Time.frameCount) - 0.5f) / new float2(cameraData.actualWidth, cameraData.actualHeight);
+
                 if (!passData.requireRayTracing)
                 {
                     return;
                 }
 
+                var noise = RuntimeTextureSystem.instance;
+                passData.ScramblingRanking = renderGraph.ImportTexture(noise.scramblingRanking4SPP);
+                passData.Sobol = renderGraph.ImportTexture(noise.sobel);
                 passData.ditheredTextureHandleSet.Use(builder);
+
                 builder.UseTexture(passData.raytracingShadowmapTex, AccessFlags.Write);
                 builder.UseTexture(passData.cameraDepthTexture);
                 builder.UseTexture(passData.normalGBuffer);
+                builder.UseTexture(passData.ScramblingRanking);
+                builder.UseTexture(passData.Sobol);
 
 
                 builder.AllowPassCulling(false);
@@ -188,16 +245,14 @@ namespace UnityEngine.Rendering.Universal
             }
 
 
-
             // SigmaTileClassifier.instance.ClassifyShadowPenumbra(renderGraph, cameraData, volumeSettings, resourceData.linearDepthTexture,
             //     resourceData.raytracingShadowTexture);
-           var denoised= cameraData.denoiseSystem.nrdSIGMADenoiser.Denoise(renderGraph, frameData,
+            var denoised = cameraData.denoiseSystem.nrdSIGMADenoiser.Denoise(renderGraph, frameData,
                 resourceData.motionVectorDepth, resourceData.gBuffer[2], resourceData.linearDepthTexture, resourceData.raytracingShadowTexture,
                 TextureHandle.nullHandle);
 
-           resourceData.mainShadowsTexture = denoised;
-           resourceData.screenSpaceShadowsTexture = denoised;
-
+            resourceData.mainShadowsTexture = denoised;
+            resourceData.screenSpaceShadowsTexture = denoised;
         }
     }
 }

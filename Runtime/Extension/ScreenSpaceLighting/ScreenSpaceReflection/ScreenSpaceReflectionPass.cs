@@ -215,7 +215,7 @@ namespace UnityEngine.Rendering.Universal
             passData.cameraDepthTexture = resourceData.cameraDepthTexture;
             passData.depthPyramidTexture = resourceData.cameraDepthPyramidTexture;
             
-            var blueNoiseSystem = BlueNoiseSystem.instance;
+            var blueNoiseSystem = RuntimeTextureSystem.instance;
             if (blueNoiseSystem != null)
             {
                 passData.camHistoryFrameCount = historyRTSystem.historyFrameCount;
@@ -389,7 +389,7 @@ namespace UnityEngine.Rendering.Universal
             // ScreenSpace Tracing
             using (new ProfilingScope(cmd, m_SSRTracingProfilingSampler))
             {
-                BlueNoiseSystem.BindSTBNParams(BlueNoiseTexFormat._128RG, cmd, data.cs, data.tracingKernel, data.blueNoiseArray, data.camHistoryFrameCount);
+                RuntimeTextureSystem.BindSTBNParams(BlueNoiseTexFormat._128RG, cmd, data.cs, data.tracingKernel, data.blueNoiseArray, data.camHistoryFrameCount);
                 cmd.SetComputeTextureParam(data.cs, data.tracingKernel, ShaderConstants._CameraDepthPyramidTexture, data.depthPyramidTexture);
                 cmd.SetComputeTextureParam(data.cs, data.tracingKernel, ShaderConstants._SSRRayInfoTexture, data.rayInfoTexture);
 

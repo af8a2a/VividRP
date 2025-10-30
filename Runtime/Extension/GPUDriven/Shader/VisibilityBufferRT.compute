@@ -1,0 +1,60 @@
+﻿#include "UnityRayQuery.cginc"
+#pragma kernel main
+#pragma use_dxc
+
+#pragma require inlineraytracing
+
+#pragma only_renderers d3d11 xboxseries ps5
+
+
+#pragma only_renderers d3d11 xboxseries ps5
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/ShaderVariablesRaytracing.hlsl"
+
+RWTexture2D<float2> _VisibilityBuffer;
+
+RaytracingAccelerationStructure _AccelerationStructure;
+
+
+
+
+
+
+
+[numthreads(16, 16, 1)]
+void main(uint2 pixelPos : SV_DispatchThreadId)
+{
+    // Pixel and sample UV
+    float2 pixelUv = float2(pixelPos + 0.5) * _ScreenSize.zw;
+    float2 sampleUv = pixelUv;
+    
+
+    //trace for visiblitybuffer
+    UnityRayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> primaryRayQuery;
+    
+    float znear = _ProjectionParams.y;
+    float3 nearPlanePositionWS = ComputeWorldSpacePosition(sampleUv, znear, UNITY_MATRIX_I_VP);
+    float3 viewDirection = normalize(nearPlanePositionWS - _WorldSpaceCameraPos);
+    
+    RayDesc primaryRay;
+    primaryRay.Origin = _WorldSpaceCameraPos;
+    primaryRay.Direction = viewDirection;
+    primaryRay.TMin = 0;
+    primaryRay.TMax = FLT_INF;
+    primaryRayQuery.TraceRayInline(_AccelerationStructure, 0, RAYTRACINGRENDERERFLAG_CAST_SHADOW_OPAQUE, primaryRay);
+    primaryRayQuery.Proceed();
+
+    float2 Barycentrics=0;
+    uint primitiveID=0;
+    uint GeometryID= 0;
+
+    if (primaryRayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+    {
+        Barycentrics = primaryRayQuery.CommittedTriangleBarycentrics();
+        primitiveID = primaryRayQuery.CandidatePrimitiveIndex();
+        GeometryID = primaryRayQuery.CandidateGeometryIndex();
+    }
+
+    _VisibilityBuffer[pixelPos] = float4(Barycentrics, asfloat(primitiveID), asfloat(GeometryID));
+}

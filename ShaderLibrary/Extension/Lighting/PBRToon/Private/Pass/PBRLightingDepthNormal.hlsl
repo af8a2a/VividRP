@@ -136,7 +136,7 @@ void DepthNormalsFragment(
         #if defined(_NORMALMAP) || defined(_DETAIL)
             float sgn = input.tangentWS.w;      // should be either +1 or -1
             float3 bitangent = sgn * cross(input.normalWS.xyz, input.tangentWS.xyz);
-            float3 normalTS = UnpackNormalScale(SAMPLE_TEXTURE2D_X(_NormalMap, sampler_TrilinearClamp, input.uv), _NormalScale);
+            float3 normalTS = UnpackNormalScale(SAMPLE_TEXTURE2D_X(_NormalMap, sampler_NormalMap, input.uv), _NormalScale);
 
 
             #if defined(_DETAIL)

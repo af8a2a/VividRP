@@ -4,9 +4,6 @@ using System.Runtime.InteropServices;
 namespace UnityEngine.Rendering.Universal
 {
 
-   
-
-
     /// <summary>
     /// Use to init NRD dispatch parameter
     /// is very dirty to configure the NRD constBuffer...
@@ -14,23 +11,32 @@ namespace UnityEngine.Rendering.Universal
     public class NRDInitlizer : IExtension
     {
         
-        [DllImport("NRDUnityPlugin")]
+        private const string DLLName =
+#if (PLATFORM_IOS || PLATFORM_TVOS || PLATFORM_BRATWURST || PLATFORM_SWITCH) && !UNITY_EDITOR
+            "__Internal";
+#else
+            "NRDUnityPlugin";
+#endif
+
+
+        
+        [DllImport(DLLName)]
         public static extern int NRD_Test();
 
-        [DllImport("NRDUnityPlugin")]
+        [DllImport(DLLName)]
         public static extern IntPtr NRD_GetContext();
 
-        [DllImport("NRDUnityPlugin")]
+        [DllImport(DLLName)]
         public static extern void NRD_ReleaseContext(IntPtr ctx);
 
 
-        [DllImport("NRDUnityPlugin")]
+        [DllImport(DLLName)]
         public static extern NRDResult NRD_SetCommonSettings(
             IntPtr nrdContext,
             ref NRDCommonSettings commonSettings
         );
 
-        [DllImport("NRDUnityPlugin")]
+        [DllImport(DLLName)]
         public static extern bool NRD_SetupSigmaConstBuffer(
             IntPtr nrdContext,
             ref NRDCommonSettings commonSettings,

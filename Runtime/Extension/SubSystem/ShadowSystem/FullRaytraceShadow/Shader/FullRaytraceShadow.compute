@@ -139,7 +139,6 @@ void main(uint2 pixelPos : SV_DispatchThreadId)
     rnd.y = GetBNDSequenceSample(pixelPos, gFrameIndex, 1);
 
     rnd = ImportanceSampling::Cosine::GetRay(rnd).xy;
-    rnd =ImportanceSampling::Uniform::GetRay(rnd).xy;
     rnd *= gTanSunAngularRadius;
 
     float3 sunDirection = normalize(sunT.xyz * rnd.x + sunB.xyz * rnd.y + dirLight.dir);

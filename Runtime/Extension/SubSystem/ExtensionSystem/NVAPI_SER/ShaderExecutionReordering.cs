@@ -4,14 +4,21 @@ namespace UnityEngine.Rendering.Universal
 {
     public class ShaderExecutionReordering : IExtension
     {
+        private const string DLLName =
+#if (PLATFORM_IOS || PLATFORM_TVOS || PLATFORM_BRATWURST || PLATFORM_SWITCH) && !UNITY_EDITOR
+            "__Internal";
+#else
+            "NVAPIPlugin";
+#endif
+
         
-        [DllImport("NVAPIPlugin")]
+        [DllImport(DLLName)]
         public static extern bool NvAPI_IsShaderExecutionReorderingAPISupported();
 
-        [DllImport("NVAPIPlugin")]
+        [DllImport(DLLName)]
         public static extern bool NvAPI_IsShaderExecutionReorderingSupportedByGPU();
 
-        [DllImport("NVAPIPlugin")]
+        [DllImport(DLLName)]
         public static extern bool NvAPI_SetNvShaderExtnSlot(uint uavSlot);
 
         private bool useHWSER = false;

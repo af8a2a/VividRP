@@ -129,7 +129,7 @@ namespace UnityEngine.Rendering.Universal
                     passData.rayTracingCB._RayTracingLastBounceFallbackHierarchy = 0;
                     passData.rayTracingCB._RayTracingAmbientProbeDimmer = 1.0f;
                 }
-                passData.ditheredTextureHandleSet = RuntimeTextureSystem.instance.DitheredTextureSet8SPP().RenderGraphImport(renderGraph);
+                passData.ditheredTextureHandleSet = RuntimeTextureSystem.instance.DitheredTextureSet256SPP().RenderGraphImport(renderGraph);
                 passData.cameraDepthTexture = resourceData.activeDepthTexture;
                 passData.normalGBuffer = resourceData.gBuffer[2];
                 passData.frameIndex = historyRT.historyFrameCount;

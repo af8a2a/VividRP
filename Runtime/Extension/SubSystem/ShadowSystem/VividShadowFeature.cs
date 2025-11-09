@@ -38,17 +38,21 @@
             var setting = VolumeManager.instance.stack.GetComponent<Shadows>();
             bool hybridShadow = setting.rayTracing.value && !setting.useFullRTShadow.value;
             bool fullRT = setting.useFullRTShadow.value;
+            bool onlyCSM = !setting.rayTracing.value && !setting.useFullRTShadow.value;
 
-            if (hybridShadow)
-            {
-                renderer.EnqueuePass(m_DirectionalLightsShadowCasterPass);
-                renderer.EnqueuePass(m_ScreenSpaceShadowPass);
-                renderer.EnqueuePass(m_ScreenSpaceShadowsPostPass);
-                renderer.EnqueuePass(raytracingShadowPass);
-            }
-            else if (fullRT)
+            if (fullRT)
             {
                 renderer.EnqueuePass(fullRaytracingShadowPass);
+            }
+            else
+            {
+                renderer.EnqueuePass(m_DirectionalLightsShadowCasterPass);
+                if (hybridShadow)
+                {
+                    renderer.EnqueuePass(raytracingShadowPass);
+                }
+                renderer.EnqueuePass(m_ScreenSpaceShadowPass);
+                renderer.EnqueuePass(m_ScreenSpaceShadowsPostPass);
             }
         }
     }

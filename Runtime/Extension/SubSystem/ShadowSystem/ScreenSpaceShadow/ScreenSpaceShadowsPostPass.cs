@@ -43,7 +43,6 @@ namespace UnityEngine.Rendering.Universal
 
             cmd.SetGlobalFloat(ShaderIDs._ShadowScatterEnable, passData.pass.ShadowScatterEnable ? 1f : 0f);
             cmd.SetGlobalFloat(ShaderIDs._DirLightShadowScatterPenumbraOnly, 1);
-            Shader.SetGlobalTexture(ShaderIDs._DirShadowRampTexture, passData.pass.shadows.shadowRampTex.value);   
             
         }
 

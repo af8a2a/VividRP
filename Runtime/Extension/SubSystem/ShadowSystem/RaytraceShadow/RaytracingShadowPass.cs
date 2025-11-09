@@ -178,14 +178,6 @@ namespace UnityEngine.Rendering.Universal
 
                 builder.SetRenderFunc((PassData data, ComputeGraphContext context) => { ExecutePass(data, context); });
                 resourceData.raytracingShadowTexture = passData.raytracingShadowmapTex;
-                // var stack = VolumeManager.instance.stack;
-                // var volumeSettings = stack.GetComponent<Shadows>();
-
-                // if (volumeSettings.useFullRTShadow.value)
-                // {
-                //     resourceData.screenSpaceShadowsTexture = passData.raytracingShadowmapTex;
-                //     resourceData.mainShadowsTexture = passData.raytracingShadowmapTex;
-                // }
             }
         }
     }

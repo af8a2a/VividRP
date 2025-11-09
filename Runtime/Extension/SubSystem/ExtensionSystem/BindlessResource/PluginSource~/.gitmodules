@@ -1,0 +1,4 @@
+[submodule "External/minhook"]
+	path = External/minhook
+	url = https://github.com/TsudaKageyu/minhook.git
+	branch = master

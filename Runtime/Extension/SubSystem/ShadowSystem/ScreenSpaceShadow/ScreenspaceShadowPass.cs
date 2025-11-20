@@ -219,7 +219,6 @@ namespace UnityEngine.Rendering.Universal
                     builder.UseTexture(passData.raytracingShadowTexture, AccessFlags.Read);
                 }
 
-                Debug.Log(passData.screenSpaceShadowmapTex.IsValid());
 
                 builder.AllowPassCulling(true);
                 builder.AllowGlobalStateModification(true);

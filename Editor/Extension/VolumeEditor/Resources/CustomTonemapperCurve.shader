@@ -14,7 +14,7 @@ Shader "Hidden/HD PostProcessing/Editor/Custom Tonemapper Curve"
     #pragma editor_sync_compilation
     #pragma target 3.5
 
-    #pragma multi_compile_local_fragment _ _TONEMAP_GT _TONEMAP_ACES _TONEMAP_NEUTRAL _TONEMAP_AGX _TONEMAP_AGX_APPROX
+    #pragma multi_compile_local_fragment _ _TONEMAP_GT _TONEMAP_ACES _TONEMAP_NEUTRAL _TONEMAP_AGX _TONEMAP_KHRONOSPBR
 
     struct Attributes
     {
@@ -54,9 +54,9 @@ Shader "Hidden/HD PostProcessing/Editor/Custom Tonemapper Curve"
         #elif  _TONEMAP_NEUTRAL
         float y = NeutralTonemap(i.uv.xxx);
         #elif _TONEMAP_AGX
-        float y = TonemapAgx(i.uv.xxx);
+        float y = tonemapAgX(i.uv.xxx);
         #elif _TONEMAP_AGX_APPROX
-        float y = AgxApproximate(i.uv.xxx);
+        float y = tonemapKhronosPBR(i.uv.xxx);
         #else
         float y = i.uv.x;
         #endif

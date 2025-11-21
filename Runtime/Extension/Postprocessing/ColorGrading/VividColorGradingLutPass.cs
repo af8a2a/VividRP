@@ -100,7 +100,7 @@ namespace UnityEngine.Rendering.Universal
                     break;
                 case VividTonemappingMode.AgX:
                     break;
-                case VividTonemappingMode.AgxApprox:
+                case VividTonemappingMode.KhronosPBR:
                     break;
                 default:
                     throw new ArgumentOutOfRangeException();
@@ -252,8 +252,8 @@ namespace UnityEngine.Rendering.Universal
                             material.EnableKeyword(ShaderKeywordStrings.TonemapAgx);
 
                             break;
-                        case VividTonemappingMode.AgxApprox:
-                            material.EnableKeyword(ShaderKeywordStrings.TonemapAgxApprox);
+                        case VividTonemappingMode.KhronosPBR:
+                            material.EnableKeyword(ShaderKeywordStrings.KhronosPBR);
 
                             break;
                         case VividTonemappingMode.None:

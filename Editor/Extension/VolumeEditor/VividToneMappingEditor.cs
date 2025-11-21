@@ -144,8 +144,8 @@ namespace UnityEditor.Rendering.Universal
                 case VividTonemappingMode.AgX:
                     m_Material.EnableKeyword(ShaderKeywordStrings.TonemapAgx);
                     break;
-                case VividTonemappingMode.AgxApprox:
-                    m_Material.EnableKeyword(ShaderKeywordStrings.TonemapAgxApprox);
+                case VividTonemappingMode.KhronosPBR:
+                    m_Material.EnableKeyword(ShaderKeywordStrings.KhronosPBR);
                     break;
             }
 

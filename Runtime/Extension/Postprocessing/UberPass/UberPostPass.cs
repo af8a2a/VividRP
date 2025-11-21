@@ -9,7 +9,7 @@ namespace UnityEngine.Rendering.Universal
         public const string TonemapGranTurismo = "_TONEMAP_GT";
 
         public const string TonemapAgx = "_TONEMAP_AGX";
-        public const string TonemapAgxApprox = "_TONEMAP_AGX_APPROX";
+        public const string KhronosPBR = "_TONEMAP_KHRONOSPBR";
     }
 
     // Precomputed shader ids to same some CPU cycles (mostly affects mobile)
@@ -256,7 +256,7 @@ namespace UnityEngine.Rendering.Universal
                             case VividTonemappingMode.ACES: material.EnableKeyword(ShaderKeywordStrings.TonemapACES); break;
                             case VividTonemappingMode.GranTurismo: material.EnableKeyword(ShaderKeywordStrings.TonemapGranTurismo); break;
                             case VividTonemappingMode.AgX: material.EnableKeyword(ShaderKeywordStrings.TonemapAgx); break;
-                            case VividTonemappingMode.AgxApprox: material.EnableKeyword(ShaderKeywordStrings.TonemapAgxApprox); break;
+                            case VividTonemappingMode.KhronosPBR: material.EnableKeyword(ShaderKeywordStrings.KhronosPBR); break;
                             default: break; // None
                         }
                     }

@@ -30,8 +30,8 @@ namespace UnityEngine.Rendering.Universal
 
         AgX,
         
+        KhronosPBR
         
-        AgxApprox
     }
 
     /// <summary>

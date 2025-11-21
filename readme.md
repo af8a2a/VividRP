@@ -44,6 +44,7 @@ This package provides a custom implementation of Unity's **Universal Render Pipe
     - [x] GranTurismo
     - [x] AgX
     - [x] LumaPreservingMapper
+    - [x] KhronosPBR
 - GlobalIllumination
   - [x] Hybrid Reflection
   - [x] ScreenSpace Global Illumination

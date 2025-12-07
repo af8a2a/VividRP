@@ -248,7 +248,7 @@ namespace UnityEngine.Rendering.Universal
             // SigmaTileClassifier.instance.ClassifyShadowPenumbra(renderGraph, cameraData, volumeSettings, resourceData.linearDepthTexture,
             //     resourceData.raytracingShadowTexture);
             var denoised = cameraData.denoiseSystem.nrdSIGMADenoiser.Denoise(renderGraph, frameData,
-                resourceData.motionVectorDepth, resourceData.gBuffer[2], resourceData.linearDepthTexture, resourceData.raytracingShadowTexture,
+                resourceData.motionVectorColor, resourceData.gBuffer[2], resourceData.linearDepthTexture, resourceData.raytracingShadowTexture,
                 TextureHandle.nullHandle);
 
             resourceData.mainShadowsTexture = denoised;

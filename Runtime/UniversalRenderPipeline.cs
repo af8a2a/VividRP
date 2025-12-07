@@ -378,7 +378,7 @@ namespace UnityEngine.Rendering.Universal
             ExtensionSystem.Clean();
             AreaLightSystem.instance.Cleanup();
             LocalVolumetricFogManager.manager.CleanupGraphicsBuffers();
-
+            VividCameraExtension.ClearAll();
             #endregion
 
 #if UNITY_EDITOR
@@ -510,6 +510,7 @@ namespace UnityEngine.Rendering.Universal
                     HistoryFrameRTSystem.CleanUnused();
                     RayTracingSystem.CleanUnused();
                     DenoiseSystem.CleanUnused();
+                    VividCameraExtension.CleanUnused();
                 }
 
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
@@ -905,6 +906,9 @@ namespace UnityEngine.Rendering.Universal
                  */
                 var historyFrameRTSystem = HistoryFrameRTSystem.GetOrCreate(camera);
                 historyFrameRTSystem.SetReferenceSize(cameraData.cameraTargetDescriptor.width, cameraData.cameraTargetDescriptor.height);
+                var cameraExt = VividCameraExtension.GetOrCreate(camera);
+                cameraExt.Update();
+                
                 // Do NOT use cameraData after 'InitializeRenderingData'. CameraData state may diverge otherwise.
                 // RenderingData takes a copy of the CameraData.
                 // UniversalRenderingData needs to be created here to avoid copying cullResults.
@@ -1474,7 +1478,7 @@ namespace UnityEngine.Rendering.Universal
             if (cameraData.camera.cameraType == CameraType.SceneView && CoreUtils.IsSceneFilteringEnabled())
                 cameraData.isAlphaOutputEnabled = true;
 
-            cameraData.cameraExtension.Update();
+
             return cameraData;
         }
 

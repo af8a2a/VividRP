@@ -73,6 +73,7 @@ namespace UnityEngine.Rendering.Universal
             _prevCamVMatrix = _camVMatrix;
             _camVMatrix = camera.worldToCameraMatrix;
 
+            
             _prevCamPMatrix = _camPMatrix;
             _camPMatrix = GL.GetGPUProjectionMatrix(camera.nonJitteredProjectionMatrix, true);
 

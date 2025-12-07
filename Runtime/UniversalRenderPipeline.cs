@@ -508,6 +508,7 @@ namespace UnityEngine.Rendering.Universal
                     m_FrameCount = newCount;
 
                     HistoryFrameRTSystem.CleanUnused();
+                    VividCameraExtension.CleanUnused();
                     RayTracingSystem.CleanUnused();
                     DenoiseSystem.CleanUnused();
                 }
@@ -537,10 +538,10 @@ namespace UnityEngine.Rendering.Universal
                     var camera = cameras[i];
                     bool isLastBaseCamera = i == lastBaseCameraIndex;
                     // inspector scene view camera will break temporal filter
-                    if (camera.cameraType is CameraType.Preview && isLastBaseCamera)
-                    {
-                        continue;
-                    }
+                    // if (camera.cameraType is CameraType.Preview && isLastBaseCamera)
+                    // {
+                    //     continue;
+                    // }
 
                     if (IsGameCamera(camera))
                     {
@@ -1424,9 +1425,8 @@ namespace UnityEngine.Rendering.Universal
             using var profScope = new ProfilingScope(Profiling.Pipeline.initializeCameraData);
 
             var renderer = GetRenderer(camera, additionalCameraData);
-            UniversalCameraData cameraData = frameData.Create<UniversalCameraData>();
+            UniversalCameraData cameraData = frameData.GetOrCreate<UniversalCameraData>();
             InitializeStackedCameraData(camera, additionalCameraData, cameraData);
-
             cameraData.camera = camera;
 
             // Add reference to writable camera history to give access to injected user render passes which can produce history.

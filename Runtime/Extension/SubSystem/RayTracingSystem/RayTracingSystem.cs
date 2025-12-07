@@ -534,7 +534,6 @@ namespace UnityEngine.Rendering.Universal
 
                 // Build the ray tracing acceleration structure
                 m_AccelerationStructureSystem.Build();
-                Debug.Log(m_AccelerationStructureSystem.rtas.GetInstanceCount());
 
                 // tag the structures as valid
                 m_ValidRayTracingState = true;

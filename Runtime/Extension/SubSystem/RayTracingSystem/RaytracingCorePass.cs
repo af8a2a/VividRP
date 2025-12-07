@@ -56,7 +56,6 @@ namespace UnityEngine.Rendering.Universal
                         builder.SetRenderFunc<RaytracingCorePassData>((passData, ctx) =>
                         {
                             var cmd = ctx.cmd;
-
                             cmd.SetGlobalBuffer(g_NvidiaExt, passData.nvidiaExt);
                             
                             if (!ShaderExecutionReordering.NvAPI_SetNvShaderExtnSlot(1))

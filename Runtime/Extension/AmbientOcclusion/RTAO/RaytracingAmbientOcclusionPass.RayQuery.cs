@@ -70,6 +70,7 @@ namespace UnityEngine.Rendering.Universal
                 RaytracingData raytracingData = frameData.Get<RaytracingData>();
 
                 var requireRayTracingVaild = raytracingData.rayTracingSystem.GetRayTracingState();
+                
                 if (!requireRayTracingVaild || !RayTracingSystem.SupportedCamera(cameraData.camera))
                 {
                     return TextureHandle.nullHandle;

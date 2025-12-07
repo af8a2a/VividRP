@@ -425,7 +425,8 @@ namespace UnityEngine.Rendering.Universal
                     RTHandle sourceTextureHdl = data.sourceTexture;
                     RTHandle destinationTextureHdl = data.destinationTexture;
 
-                    PostProcessUtils.SetSourceSize(cmd, data.sourceTexture);
+                    var sourceSize = PostProcessUtils.CalcShaderSourceSize(sourceTextureHdl);
+                    data.material.SetVector("_SourceSize", sourceSize);
 
 
                     if (isFsrEnabled)

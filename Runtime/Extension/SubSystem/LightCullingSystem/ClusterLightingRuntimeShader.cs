@@ -72,7 +72,7 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// Deferred lighting compute shader.
         /// </summary>
-        [SerializeField, ResourcePath("ShaderLibrary/Extension/Lighting/DeferredLit.compute")]
+        [SerializeField, ResourcePath("ShaderLibrary/Extension/Lighting/Lit/DeferredLit.compute")]
         private ComputeShader m_DeferredLightingCS;
 
         public ComputeShader deferredLightingCS

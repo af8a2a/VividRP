@@ -27,7 +27,7 @@ namespace UnityEngine.Rendering.Universal
         }
         
         
-        [SerializeField] [ResourcePath("Runtime/Extension/Shadow/UberScreenSpaceShadow/Shader/ScreenSpaceShadowClassify.compute")]
+        [SerializeField] [ResourcePath("Runtime/Extension/SubSystem/ShadowSystem/ScreenSpaceShadow/Shader/ScreenSpaceShadowClassify.compute")]
         private ComputeShader m_ShadowClassifyShader;
 
         /// <summary>
@@ -39,7 +39,7 @@ namespace UnityEngine.Rendering.Universal
             set => this.SetValueAndNotify(ref m_ShadowClassifyShader, value, nameof(m_ShadowClassifyShader));
         }
 
-        [SerializeField] [ResourcePath("Runtime/Extension/Shadow/UberScreenSpaceShadow/Shader/ScreenSpaceShadowResolve.compute")]
+        [SerializeField] [ResourcePath("Runtime/Extension/SubSystem/ShadowSystem/ScreenSpaceShadow/Shader/ScreenSpaceShadowResolve.compute")]
         private ComputeShader m_ShadowmapResolveShader;
 
         /// <summary>
@@ -51,7 +51,7 @@ namespace UnityEngine.Rendering.Universal
             set => this.SetValueAndNotify(ref m_ShadowmapResolveShader, value, nameof(m_ShadowmapResolveShader));
         }
 
-        [SerializeField] [ResourcePath("Runtime/Extension/Shadow/UberScreenSpaceShadow/Shader/ScreenSpaceShadowFilter.compute")]
+        [SerializeField] [ResourcePath("Runtime/Extension/SubSystem/ShadowSystem/ScreenSpaceShadow/Shader/ScreenSpaceShadowFilter.compute")]
         private ComputeShader m_shadowmapFilterShader;
 
         /// <summary>

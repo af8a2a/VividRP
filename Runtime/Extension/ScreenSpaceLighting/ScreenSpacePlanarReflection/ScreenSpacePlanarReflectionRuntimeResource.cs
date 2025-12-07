@@ -13,7 +13,7 @@ namespace UnityEngine.Rendering.Universal
         public int version => _version;
 
 
-        [SerializeField] [ResourcePath("Runtime/Extension/ScreenSpaceRaytracing/ScreenSpacePlanarReflection/Shader/SSPRComputeShader.compute")]
+        [SerializeField] [ResourcePath("Runtime/Extension/ScreenSpaceLighting/ScreenSpacePlanarReflection/Shader/SSPRComputeShader.compute")]
         private ComputeShader m_SSPRShader;
 
         public ComputeShader SSPRShader

@@ -79,7 +79,6 @@ namespace UnityEngine.Rendering.Universal
                     cmd.SetGlobalMatrix(ShaderPropertyId.inverseProjectionMatrix, inverseProjectionMatrix);
                     cmd.SetGlobalMatrix(ShaderPropertyId.inverseViewAndProjectionMatrix, inverseViewProjection);
                 }
-
                 m_CachedRenderIntoTextureXR = renderIntoTexture;
                 m_InitBuiltinXRConstants = true;
             }
@@ -122,8 +121,8 @@ namespace UnityEngine.Rendering.Universal
 #endif
             return m_ProjectionMatrix;
         }
-        
-        internal Matrix4x4 GetGPUProjectionMatrix(bool renderIntoTexture=true, int viewIndex = 0)
+
+        internal Matrix4x4 GetGPUProjectionMatrix(bool renderIntoTexture, int viewIndex = 0)
         {
             return GL.GetGPUProjectionMatrix(GetProjectionMatrix(viewIndex), renderIntoTexture);
         }
@@ -146,7 +145,7 @@ namespace UnityEngine.Rendering.Universal
         /// The min dimension is 1.
         /// </summary>
         public int scaledHeight;
-        
+
         // NOTE: This is internal instead of private to allow ref return in the old CameraData compatibility property.
         // We can make this private when it is removed.
         //
@@ -176,7 +175,6 @@ namespace UnityEngine.Rendering.Universal
         /// Render texture settings used to create intermediate camera textures for rendering.
         /// </summary>
         public RenderTextureDescriptor cameraTargetDescriptor;
-
         internal Rect pixelRect;
         internal bool useScreenCoordOverride;
         internal Vector4 screenSizeOverride;
@@ -189,16 +187,12 @@ namespace UnityEngine.Rendering.Universal
         /// Render scale to apply when creating camera textures. Scaled extents are rounded down to integers.
         /// </summary>
         public float renderScale;
-
         internal ImageScalingMode imageScalingMode;
-
-        [Obsolete("VividRP use upscalingTechnique")]
         internal ImageUpscalingFilter upscalingFilter;
-
         internal bool fsrOverrideSharpness;
         internal float fsrSharpness;
         internal HDRColorBufferPrecision hdrColorBufferPrecision;
-        
+
         /// <summary>
         /// True if this camera should clear depth buffer. This setting only applies to cameras of type <c>CameraRenderType.Overlay</c>
         /// <seealso cref="CameraRenderType"/>
@@ -391,7 +385,6 @@ namespace UnityEngine.Rendering.Universal
 #endif
             return !isBackbuffer;
         }
-        
 
         /// <summary>
         /// True if the render target's projection matrix is flipped. This happens when the pipeline is rendering
@@ -447,12 +440,8 @@ namespace UnityEngine.Rendering.Universal
         /// <returns>True if STP is requested</returns>
         internal bool IsSTPRequested()
         {
-            return (imageScalingMode == ImageScalingMode.Upscaling) && (upscalingTechnique == UpscalingTechnique.STP);
+            return (imageScalingMode == ImageScalingMode.Upscaling) && (upscalingFilter == ImageUpscalingFilter.STP);
         }
-
-
-
-
 
         /// <summary>
         /// Returns true if the pipeline and the given camera are configured to render with the STP upscaler
@@ -549,13 +538,6 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         public ScriptableRenderer renderer;
 
-        
-        /// <summary>
-        /// Returns the current renderer used by this camera.
-        /// <see cref="ScriptableRenderer"/>
-        /// </summary>
-        public UniversalRenderer urpRenderer => renderer as UniversalRenderer;
-
         /// <summary>
         /// True if this camera is resolving rendering to the final camera render target.
         /// When rendering a stack of cameras only the last camera in the stack will resolve to camera target.
@@ -588,7 +570,7 @@ namespace UnityEngine.Rendering.Universal
         // Post-process history reset has been triggered for this camera.
         internal bool resetHistory
         {
-            get => taaSettings.resetHistoryFrames != 0 || historyFrameRTSystem.historyFrameCount <= 1 ;
+            get => taaSettings.resetHistoryFrames != 0;
         }
 
         /// <summary>
@@ -601,7 +583,6 @@ namespace UnityEngine.Rendering.Universal
         /// While the last camera in a camera stack implies a last overlay camera, this indicates the last of all input base cameras.
         /// </summary>
         internal bool isLastBaseCamera;
-
 
         ///<inheritdoc/>
         public override void Reset()
@@ -627,7 +608,6 @@ namespace UnityEngine.Rendering.Universal
             renderScale = 1.0f;
             imageScalingMode = ImageScalingMode.None;
             upscalingFilter = ImageUpscalingFilter.Point;
-            upscalingTechnique = UpscalingTechnique.Linear;
             fsrOverrideSharpness = false;
             fsrSharpness = 0.0f;
             hdrColorBufferPrecision = HDRColorBufferPrecision._32Bits;
@@ -664,7 +644,6 @@ namespace UnityEngine.Rendering.Universal
             isLastBaseCamera = false;
             stackAnyPostProcessingEnabled = false;
             stackLastCameraOutputToHDR = false;
-
         }
     }
 }

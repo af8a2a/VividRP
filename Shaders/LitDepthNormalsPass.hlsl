@@ -88,6 +88,13 @@ Varyings DepthNormalsVertex(Attributes input)
     return output;
 }
 
+half3 PackNormal(half3 normalWS)
+{
+    float2 octNormalWS = PackNormalOctQuadEncode(normalWS);           // values between [-1, +1], must use fp32 on some platforms.
+    float2 remappedOctNormalWS = saturate(octNormalWS * 0.5 + 0.5);   // values between [ 0, +1]
+    return half3(PackFloat2To888(remappedOctNormalWS));               // values between [ 0, +1]
+}
+
 void DepthNormalsFragment(
     Varyings input
     , out half4 outNormalWS : SV_Target0
@@ -107,13 +114,13 @@ void DepthNormalsFragment(
         LODFadeCrossFade(input.positionCS);
     #endif
 
-    #if defined(_GBUFFER_NORMALS_OCT)
-        float3 normalWS = normalize(input.normalWS);
-        float2 octNormalWS = PackNormalOctQuadEncode(normalWS);           // values between [-1, +1], must use fp32 on some platforms
-        float2 remappedOctNormalWS = saturate(octNormalWS * 0.5 + 0.5);   // values between [ 0,  1]
-        half3 packedNormalWS = PackFloat2To888(remappedOctNormalWS);      // values between [ 0,  1]
-        outNormalWS = half4(packedNormalWS, 0.0);
-    #else
+    // #if defined(_GBUFFER_NORMALS_OCT)
+        // float3 normalWS = normalize(input.normalWS);
+        // float2 octNormalWS = PackNormalOctQuadEncode(normalWS);           // values between [-1, +1], must use fp32 on some platforms
+        // float2 remappedOctNormalWS = saturate(octNormalWS * 0.5 + 0.5);   // values between [ 0,  1]
+        // half3 packedNormalWS = PackFloat2To888(remappedOctNormalWS);      // values between [ 0,  1]
+        // outNormalWS = half4(packedNormalWS, 0.0);
+    // #else
         #if defined(_PARALLAXMAP)
             #if defined(REQUIRES_TANGENT_SPACE_VIEW_DIR_INTERPOLATOR)
                 half3 viewDirTS = input.viewDirTS;
@@ -139,8 +146,8 @@ void DepthNormalsFragment(
             float3 normalWS = input.normalWS;
         #endif
 
-        outNormalWS = half4(NormalizeNormalPerPixel(normalWS), 0.0);
-    #endif
+        outNormalWS = half4(PackNormal(NormalizeNormalPerPixel(normalWS)), 0.0);
+    // #endif
 
     #ifdef _WRITE_RENDERING_LAYERS
         outRenderingLayers = EncodeMeshRenderingLayer();

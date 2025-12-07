@@ -113,11 +113,11 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                     fieldDependencies = CoreFieldDependencies.Default,
 
                     // Conditional State
-                    renderStates = target.sort3Das2DCompatible ? Universal2DSubTargetDescriptors.RenderStateCollections.Sort3Das2DCompatible : CoreRenderStates.Default,
+                    renderStates = target.sort3DAs2DCompatible ? Universal2DSubTargetDescriptors.RenderStateCollections.Sort3DAs2DCompatible : CoreRenderStates.Default,
                     pragmas = CorePragmas._2DDefault,
                     defines = new DefineCollection(),
                     keywords = SpriteCustomLitKeywords.Lit,
-                    includes = target.sort3Das2DCompatible ? MeshUnlitIncludes.Unlit : SpriteCustomLitIncludes.Unlit,
+                    includes = target.sort3DAs2DCompatible ? MeshUnlitIncludes.Unlit : SpriteCustomLitIncludes.Unlit,
 
                     // Custom Interpolator Support
                     customInterpolators = CoreCustomInterpDescriptors.Common
@@ -156,10 +156,11 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
 
                     // Conditional State
 
-                    renderStates = target.sort3Das2DCompatible ? Universal2DSubTargetDescriptors.RenderStateCollections.Sort3Das2DCompatible : CoreRenderStates.Default,
+                    renderStates = target.sort3DAs2DCompatible ? Universal2DSubTargetDescriptors.RenderStateCollections.Sort3DAs2DCompatible : CoreRenderStates.Default,
                     pragmas = CorePragmas._2DDefault,
                     defines = new DefineCollection(),
-                    includes = target.sort3Das2DCompatible ? UniversalMeshLitInfo.Includes.Normal : SpriteCustomLitIncludes.Normal,
+                    keywords = SpriteCustomLitKeywords.Normal,
+                    includes = target.sort3DAs2DCompatible ? UniversalMeshLitInfo.Includes.Normal : SpriteCustomLitIncludes.Normal,
 
                     // Custom Interpolator Support
                     customInterpolators = CoreCustomInterpDescriptors.Common
@@ -224,15 +225,16 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
             {
                 BlockFields.SurfaceDescription.BaseColor,
                 BlockFields.SurfaceDescriptionLegacy.SpriteColor,
-                BlockFields.SurfaceDescription.Alpha,
                 UniversalBlockFields.SurfaceDescription.SpriteMask,
+                BlockFields.SurfaceDescription.NormalTS,
+                BlockFields.SurfaceDescription.Alpha,
                 BlockFields.SurfaceDescription.AlphaClipThreshold,
             };
 
             public static BlockFieldDescriptor[] FragmentNormal = new BlockFieldDescriptor[]
             {
-                BlockFields.SurfaceDescription.Alpha,
                 BlockFields.SurfaceDescription.NormalTS,
+                BlockFields.SurfaceDescription.Alpha,
                 BlockFields.SurfaceDescription.AlphaClipThreshold,
             };
 
@@ -255,6 +257,7 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
                 StructFields.Varyings.positionWS,
                 StructFields.Varyings.texCoord0,
                 StructFields.Varyings.screenPosition,
+                StructFields.Varyings.normalWS,
             };
 
             public static FieldCollection Normal = new FieldCollection()
@@ -279,6 +282,11 @@ namespace UnityEditor.Rendering.Universal.ShaderGraph
             public static KeywordCollection Lit = new KeywordCollection
             {
                 { CoreKeywordDescriptors.DebugDisplay },
+                { CoreKeywordDescriptors.UseSkinnedSprite },
+            };
+
+            public static KeywordCollection Normal = new KeywordCollection
+            {
                 { CoreKeywordDescriptors.UseSkinnedSprite },
             };
 

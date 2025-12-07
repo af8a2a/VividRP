@@ -10,7 +10,7 @@ namespace UnityEngine.Rendering.Universal
         public int version => _version;
         
         
-        [SerializeField] [ResourcePath("Runtime/Extension/Shadow/RaytraceShadow/Shader/RayTracingShadows.raytrace")]
+        [SerializeField] [ResourcePath("Runtime/Extension/SubSystem/ShadowSystem/RaytraceShadow/Shader/RayTracingShadows.raytrace")]
         private RayTracingShader m_RayTracingShadowShader;
 
 

@@ -1,5 +1,6 @@
 ﻿namespace UnityEngine.Rendering.Universal
 {
+    [DisallowMultipleRendererFeature("Raytracing Core")]
     public class RaytracingCoreFeature : ScriptableRendererFeature
     {
         RaytracingCorePass raytracingCorePass;

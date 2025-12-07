@@ -182,6 +182,7 @@ namespace UnityEngine.Rendering.Universal
             internal TextureHandle finalTexture;
             internal TextureHandle blurTexture;
             internal TextureHandle cameraNormalsTexture;
+            internal UniversalCameraData cameraData;
         }
 
         private void SetupKeywordsAndParameters(ref MobileGroundTruthAmbientOcclusion settings,
@@ -316,6 +317,7 @@ namespace UnityEngine.Rendering.Universal
                 passData.AOTexture = aoTexture;
                 passData.finalTexture = finalTexture;
                 passData.blurTexture = blurTexture;
+                passData.cameraData = cameraData;
 
                 // Declare input textures
                 builder.UseTexture(passData.AOTexture, AccessFlags.ReadWrite);
@@ -346,8 +348,8 @@ namespace UnityEngine.Rendering.Universal
 
                     // Setup
                     if (data.cameraColor.IsValid())
-                        PostProcessUtils.SetSourceSize(cmd, data.cameraColor);
-
+                        PostProcessUtils.SetGlobalShaderSourceSize(cmd, data.cameraData.cameraTargetDescriptor.width, data.cameraData.cameraTargetDescriptor.height, data.cameraColor);
+                    
                     if (data.cameraNormalsTexture.IsValid())
                         data.material.SetTexture(s_CameraNormalsTextureID, data.cameraNormalsTexture);
 

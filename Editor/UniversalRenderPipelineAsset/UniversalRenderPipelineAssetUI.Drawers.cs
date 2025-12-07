@@ -152,10 +152,6 @@ namespace UnityEditor.Rendering.Universal
                         EditorGUILayout.HelpBox(Styles.lightModeErrorMessage.text, MessageType.Warning, true);
                     if (staticBatchingWarning)
                         EditorGUILayout.HelpBox(Styles.staticBatchingInfoMessage.text, MessageType.Info, true);
-#if URP_COMPATIBILITY_MODE
-                    if (serialized.gpuResidentDrawerEnableOcclusionCullingInCameras.boolValue && GraphicsSettings.GetRenderPipelineSettings<RenderGraphSettings>().enableRenderCompatibilityMode)
-                        EditorGUILayout.HelpBox(Styles.renderGraphNotEnabledErrorMessage.text, MessageType.Info, true);
-#endif
                 }
             }
         }
@@ -191,7 +187,12 @@ namespace UnityEditor.Rendering.Universal
             EditorGUILayout.PropertyField(serialized.msaa, Styles.msaaText);
             serialized.renderScale.floatValue = EditorGUILayout.Slider(Styles.renderScaleText, serialized.renderScale.floatValue, UniversalRenderPipeline.minRenderScale, UniversalRenderPipeline.maxRenderScale);
 
-            DrawUpscalingFilterDropdownAndOptions(serialized);
+            DrawUpscalingFilterDropdownAndOptions(serialized, ownerEditor);
+
+            if (serialized.renderScale.floatValue < 1.0f || serialized.asset.upscalingFilter == UpscalingFilterSelection.STP || serialized.asset.upscalingFilter == UpscalingFilterSelection.FSR)
+            {
+                EditorGUILayout.HelpBox("Camera depth isn't supported when Upscaling is turned on in the game view. We will automatically fall back to not doing depth-testing for this pass.", MessageType.Warning, true);
+            }
 
             EditorGUILayout.PropertyField(serialized.enableLODCrossFadeProp, Styles.enableLODCrossFadeText);
             EditorGUI.BeginDisabledGroup(!serialized.enableLODCrossFadeProp.boolValue);
@@ -208,7 +209,7 @@ namespace UnityEditor.Rendering.Universal
             EditorGUI.EndDisabledGroup();
         }
 
-        static void DrawUpscalingFilterDropdownAndOptions(SerializedUniversalRenderPipelineAsset serialized)
+        static void DrawUpscalingFilterDropdownAndOptions(SerializedUniversalRenderPipelineAsset serialized, Editor ownerEditor)
         {
             // Get the names of IUpscalers currently present
             string[] iUpscalerNames = { };
@@ -318,13 +319,6 @@ namespace UnityEditor.Rendering.Universal
 
                 case UpscalingFilterSelection.STP:
                 {
-#if URP_COMPATIBILITY_MODE
-                    // Warn users if they attempt to enable STP without render graph
-                    if (GraphicsSettings.GetRenderPipelineSettings<RenderGraphSettings>().enableRenderCompatibilityMode)
-                    {
-                        EditorGUILayout.HelpBox(Styles.stpRequiresRenderGraph, MessageType.Warning, true);
-                    }
-#endif
                     // Warn users about performance expectations if they attempt to enable STP on a mobile platform
                     if (PlatformAutoDetect.isShaderAPIMobileDefined)
                     {
@@ -338,21 +332,20 @@ namespace UnityEditor.Rendering.Universal
                     if (RenderPipelineManager.currentPipeline is UniversalRenderPipeline && selectedIUpscalerIndex != -1)
                     {
                         UpscalerOptions options = serialized.asset.GetIUpscalerOptions(serialized.iUpscalerName.stringValue);
-                        if (options != null)
+
+                        UniversalRenderPipelineAssetEditor urpEditor = ownerEditor as UniversalRenderPipelineAssetEditor;
+
+                        Editor upscalerOptionsEditor = urpEditor.upscalerOptionsEditorCache.GetOrCreateEditor(options);
+                        if (upscalerOptionsEditor != null)
                         {
                             ++EditorGUI.indentLevel;
-                            bool optionChanged = options.DrawOptionsEditorGUI();
-                            if (optionChanged)
-                            {
-                                EditorUtility.SetDirty(serialized.asset);
-                            }
+                            upscalerOptionsEditor.OnInspectorGUI();
                             --EditorGUI.indentLevel;
                         }
                     }
                 } break;
 #endif
             }
-
         }
 
         static void DrawHDR(SerializedUniversalRenderPipelineAsset serialized, Editor ownerEditor)

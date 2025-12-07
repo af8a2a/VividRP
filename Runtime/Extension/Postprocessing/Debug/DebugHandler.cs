@@ -6,7 +6,6 @@ using System.Runtime.InteropServices;
 using UnityEditor;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
-using UnityEngine.Rendering.RenderGraphModule.Util;
 
 namespace UnityEngine.Rendering.Universal
 {
@@ -165,7 +164,7 @@ namespace UnityEngine.Rendering.Universal
 
         internal bool WriteToDebugScreenTexture(bool resolveFinalTarget)
         {
-            return HDRDebugViewIsActive(resolveFinalTarget) || RTASDebugIsActive(resolveFinalTarget);
+            return HDRDebugViewIsActive(resolveFinalTarget);
         }
 
         internal bool IsScreenClearNeeded
@@ -615,17 +614,6 @@ namespace UnityEngine.Rendering.Universal
         }
         #region DebugRendererLists
 
-        internal DebugRendererLists CreateRendererListsWithDebugRenderState(
-             ScriptableRenderContext context,
-             ref CullingResults cullResults,
-             ref DrawingSettings drawingSettings,
-             ref FilteringSettings filteringSettings,
-             ref RenderStateBlock renderStateBlock)
-        {
-            DebugRendererLists debug = new DebugRendererLists(this, filteringSettings);
-            debug.CreateRendererListsWithDebugRenderState(context, ref cullResults, ref drawingSettings, ref filteringSettings, ref renderStateBlock);
-            return debug;
-        }
 
         internal DebugRendererLists CreateRendererListsWithDebugRenderState(
             RenderGraph renderGraph,
@@ -673,24 +661,6 @@ namespace UnityEngine.Rendering.Universal
             m_DebugRenderSetups.Clear();
             m_ActiveDebugRendererList.Clear();
             m_ActiveDebugRendererListHdl.Clear();
-        }
-
-        internal void CreateRendererListsWithDebugRenderState(
-             ScriptableRenderContext context,
-             ref CullingResults cullResults,
-             ref DrawingSettings drawingSettings,
-             ref FilteringSettings filteringSettings,
-             ref RenderStateBlock renderStateBlock)
-        {
-            CreateDebugRenderSetups(filteringSettings);
-            foreach (DebugRenderSetup debugRenderSetup in m_DebugRenderSetups)
-            {
-                DrawingSettings debugDrawingSettings = debugRenderSetup.CreateDrawingSettings(drawingSettings);
-                RenderStateBlock debugRenderStateBlock = debugRenderSetup.GetRenderStateBlock(renderStateBlock);
-                RendererList rendererList = new RendererList();
-                RenderingUtils.CreateRendererListWithRenderStateBlock(context, ref cullResults, debugDrawingSettings, filteringSettings, debugRenderStateBlock, ref rendererList);
-                m_ActiveDebugRendererList.Add((rendererList));
-            }
         }
 
         internal void CreateRendererListsWithDebugRenderState(

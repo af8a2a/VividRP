@@ -453,7 +453,7 @@ namespace UnityEngine.Rendering.Universal
 
             // Aggregate the shadow requirements
             Shadows shadowSettings = volumeStack.GetComponent<Shadows>();
-            bool opaqueShadows = shadowSettings.rayTracing.value;
+            bool opaqueShadows = shadowSettings.rayTracing.value || shadowSettings.useFullRTShadow.value;
             // bool transparentReflections = shadowSettings.enabledTransparent.value;
             parameters.shadows = opaqueShadows;
             parameters.characterShadowLayerMask = shadowSettings.characterLayerMask.value;
@@ -508,6 +508,7 @@ namespace UnityEngine.Rendering.Universal
             if (!effectParameters.rayTracingRequired)
                 return;
 
+
             // Grab the ray tracing settings
             RayTracingSettings rtSettings = volumeStack.GetComponent<RayTracingSettings>();
 
@@ -533,6 +534,7 @@ namespace UnityEngine.Rendering.Universal
 
                 // Build the ray tracing acceleration structure
                 m_AccelerationStructureSystem.Build();
+                Debug.Log(m_AccelerationStructureSystem.rtas.GetInstanceCount());
 
                 // tag the structures as valid
                 m_ValidRayTracingState = true;

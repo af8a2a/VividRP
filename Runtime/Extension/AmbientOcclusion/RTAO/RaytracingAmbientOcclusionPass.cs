@@ -60,7 +60,7 @@ namespace UnityEngine.Rendering.Universal
         private void InitRayTracingPassData(
             RenderGraph renderGraph,
             PassData passData,
-            RaytracingData raytracingData,
+            RayTracingSystem rayTracingSystem,
             UniversalCameraData cameraData,
             UniversalResourceData resourceData)
         {
@@ -83,7 +83,7 @@ namespace UnityEngine.Rendering.Universal
 
             passData.rtaoShader = runtimeShaders.raytracingAmbientOcclusionRTShader;
 
-            passData.rtas = raytracingData.rayTracingSystem.RequestAccelerationStructure();
+            passData.rtas = rayTracingSystem.RequestAccelerationStructure(cameraData);
             passData.SER = volumeSettings.shaderExecutionReordering.value && ExtensionSystem.SupportedExtension.Contains(HardwareExtension.ShaderExecutionReordering);
 
             
@@ -103,7 +103,7 @@ namespace UnityEngine.Rendering.Universal
             {
                 var rayTracingSettings = stack.GetComponent<RayTracingSettings>();
 
-                passData.rayTracingCB = raytracingData.rayTracingSystem.GetShaderVariablesRaytracingCB(new Vector2Int(width, height), rayTracingSettings);
+                passData.rayTracingCB = rayTracingSystem.GetShaderVariablesRaytracingCB(cameraData);
                 passData.rayTracingCB._RaytracingRayMaxLength = rayTracingSettings.directionalShadowRayLength.value;
                 passData.rayTracingCB._RayTracingClampingFlag = 1;
                 passData.rayTracingCB._RaytracingIntensityClamp = 1.0f;
@@ -228,20 +228,15 @@ namespace UnityEngine.Rendering.Universal
             TextureHandle aoTexture;
             using (var builder = renderGraph.AddComputePass<PassData>("Raytracing AmbientOcclusion", out var passData))
             {
-                if (!frameData.Contains<RaytracingData>())
-                {
-                    return TextureHandle.nullHandle;
-                }
+                var rayTracingSystem = RayTracingSystem.instance;
 
-                RaytracingData raytracingData = frameData.Get<RaytracingData>();
-
-                var requireRayTracingVaild = raytracingData.rayTracingSystem.GetRayTracingState();
+                var requireRayTracingVaild = rayTracingSystem.GetRayTracingState();
                 if (!requireRayTracingVaild || !RayTracingSystem.SupportedCamera(cameraData.camera))
                 {
                     return TextureHandle.nullHandle;
                 }
 
-                InitRayTracingPassData(renderGraph, passData, raytracingData, cameraData, resourceData);
+                InitRayTracingPassData(renderGraph, passData, rayTracingSystem, cameraData, resourceData);
                 passData.ditheredTextureHandleSet.Use(builder);
                 passData.velocityTexture = velocity;
 

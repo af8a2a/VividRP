@@ -40,11 +40,11 @@ namespace UnityEngine.Rendering.Universal
             using (var builder = renderGraph.AddComputePass<PassData>("VisibilityBuffer", out var passData))
             {
                 var cameraData = frameData.Get<UniversalCameraData>();
-                if (!cameraData.rayTracingSystem.GetRayTracingState())
+                if (!RayTracingSystem.instance.GetRayTracingState())
                 {
                     return;
                 }
-                passData.AccelerationStructure = cameraData.rayTracingSystem.RequestAccelerationStructure();
+                passData.AccelerationStructure = RayTracingSystem.instance.RequestAccelerationStructure(cameraData);
                 
                 
                 passData.visibilityBufferHandle = renderGraph.CreateTexture(new TextureDesc(cameraData.scaledWidth,cameraData.scaledHeight)

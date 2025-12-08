@@ -409,7 +409,7 @@ namespace UnityEngine.Rendering.Universal
             _previousExposure = TextureHandle.nullHandle;
             useFetchedExposure = false;
             fetchedGpuExposure = 1.0f;
-
+            
             #endregion
 
             _debugScreenColor = TextureHandle.nullHandle;

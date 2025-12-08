@@ -84,7 +84,7 @@ namespace UnityEngine.Rendering.Universal
         {
             // If the ray tracing state is not valid, we cannot evaluate the debug view
 
-            if (!cameraData.rayTracingSystem.GetRayTracingState())
+            if (!RayTracingSystem.instance.GetRayTracingState())
                 return;
 
             TextureHandle rtas;
@@ -107,7 +107,7 @@ namespace UnityEngine.Rendering.Universal
                 var runtimeShader = GraphicsSettings.GetRenderPipelineSettings<UniversalRenderPipelineDebugShaders>();
 
                 passData.debugRTASRT = runtimeShader.debugRTASRT;
-                passData.rayTracingAccelerationStructure = cameraData.rayTracingSystem.RequestAccelerationStructure();
+                passData.rayTracingAccelerationStructure = RayTracingSystem.instance.RequestAccelerationStructure(cameraData);
 
 
                 // Depending of if we will have to denoise (or not), we need to allocate the final format, or a bigger texture

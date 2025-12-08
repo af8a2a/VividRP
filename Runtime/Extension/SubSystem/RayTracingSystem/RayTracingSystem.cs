@@ -50,10 +50,11 @@ namespace UnityEngine.Rendering.Universal
     /// Different from HDRP.
     /// RayTracing System will only handles tracing part, no denoiser, different denoiser system will add in the future.
     /// </summary>
-    public class RayTracingSystem : CameraRelatedSystem<RayTracingSystem>
+    public class RayTracingSystem : Singleton<RayTracingSystem>
     {
         private RayTracingAccelerationStructure m_UserFedAccelerationStructure;
-        private RayTracingAccelerationStructureSystem m_AccelerationStructureSystem;
+
+        internal RTASManager m_RTASManager;
 
         private ShaderVariablesRaytracing m_ShaderVariablesRayTracingCB = new ShaderVariablesRaytracing();
 
@@ -88,13 +89,8 @@ namespace UnityEngine.Rendering.Universal
             return camera.cameraType == CameraType.SceneView || camera.cameraType == CameraType.Game;
         }
 
-        protected override void Initialize(Camera camera)
+        public void Initialize()
         {
-            if (!SupportedCamera(camera))
-            {
-                Debug.LogError("Camera type " + camera.cameraType + " not supported RayTracing");
-                return;
-            }
 
 
             if (ExtensionSystem.RegisteredExtensions.TryGetValue(HardwareExtension.ShaderExecutionReordering,out var ser ))
@@ -108,22 +104,19 @@ namespace UnityEngine.Rendering.Universal
             // light cluster system
 
             // RTAS system
-            m_AccelerationStructureSystem = new RayTracingAccelerationStructureSystem();
-            m_AccelerationStructureSystem.Initialize(camera);
+            m_RTASManager = new RTASManager();
+            m_RTASManager.Initialize();
         }
 
-        public override void Dispose()
+        public void Dispose()
         {
             // Ray count system
 
             // light cluster system
 
             // RTAS system
-            if (m_AccelerationStructureSystem != null)
-            {
-                m_AccelerationStructureSystem.Dispose();
-                m_AccelerationStructureSystem = null;
-            }
+            m_RTASManager?.ReleaseResources();
+            m_RTASManager = null;
 
             NVAPI_Buffer?.Release();
         }
@@ -483,10 +476,10 @@ namespace UnityEngine.Rendering.Universal
             return parameters;
         }
 
-        internal void BuildRayTracingAccelerationStructure()
+        internal void BuildRayTracingAccelerationStructure(UniversalCameraData cameraData)
         {
             // Resets the rtas
-            m_AccelerationStructureSystem.Reset();
+            m_RTASManager.Reset();
 
             // Reset all the flags
             m_ValidRayTracingState = false;
@@ -496,7 +489,7 @@ namespace UnityEngine.Rendering.Universal
             m_RayTracedContactShadowsRequired = false;
 
             // Only build SceneView and GameView.
-            if (camera.cameraType != CameraType.SceneView && camera.cameraType != CameraType.Game)
+            if (cameraData.cameraType != CameraType.SceneView && cameraData.cameraType != CameraType.Game)
                 return;
 
             // TODO: Light information?
@@ -513,27 +506,27 @@ namespace UnityEngine.Rendering.Universal
             RayTracingSettings rtSettings = volumeStack.GetComponent<RayTracingSettings>();
 
 #if UNITY_EDITOR
-            if (rtSettings.buildMode.value == RTASBuildMode.Automatic || camera.cameraType == CameraType.SceneView)
+            if (rtSettings.buildMode.value == RTASBuildMode.Automatic || cameraData.cameraType == CameraType.SceneView)
 #else
             if (rtSettings.buildMode.value == RTASBuildMode.Automatic)
 #endif
             {
                 // Cull the scene for the RTAS
-                RayTracingInstanceCullingResults cullingResults = m_AccelerationStructureSystem.Cull(effectParameters);
+                RayTracingInstanceCullingResults cullingResults = m_RTASManager.Cull(cameraData,effectParameters);
 
                 // Update the material dirtiness for the PT
                 if (effectParameters.pathTracing)
                 {
-                    m_AccelerationStructureSystem.transformsDirty |= cullingResults.transformsChanged;
+                    m_RTASManager.transformsDirty |= cullingResults.transformsChanged;
                     for (int i = 0; i < cullingResults.materialsCRC.Length; i++)
                     {
                         RayTracingInstanceMaterialCRC matCRC = cullingResults.materialsCRC[i];
-                        m_AccelerationStructureSystem.materialsDirty |= UpdateMaterialCRC(matCRC.instanceID, matCRC.crc);
+                        m_RTASManager.materialsDirty |= UpdateMaterialCRC(matCRC.instanceID, matCRC.crc);
                     }
                 }
 
                 // Build the ray tracing acceleration structure
-                m_AccelerationStructureSystem.Build();
+                m_RTASManager.Build(cameraData);
 
                 // tag the structures as valid
                 m_ValidRayTracingState = true;
@@ -578,17 +571,17 @@ namespace UnityEngine.Rendering.Universal
             return m_ValidRayTracingCluster;
         }
 
-        internal RayTracingAccelerationStructure RequestAccelerationStructure()
+        internal RayTracingAccelerationStructure RequestAccelerationStructure(UniversalCameraData cameraData)
         {
             if (m_ValidRayTracingState)
             {
                 RayTracingSettings rtSettings = VolumeManager.instance.stack.GetComponent<RayTracingSettings>();
 #if UNITY_EDITOR
-                if (rtSettings.buildMode.value == RTASBuildMode.Automatic || camera.cameraType == CameraType.SceneView)
+                if (rtSettings.buildMode.value == RTASBuildMode.Automatic || cameraData.cameraType == CameraType.SceneView)
 #else
                 if (rtSettings.buildMode.value == RTASBuildMode.Automatic)
 #endif
-                    return m_AccelerationStructureSystem.rtas;
+                    return m_RTASManager.rtas;
                 else
                     return m_UserFedAccelerationStructure;
             }
@@ -597,13 +590,15 @@ namespace UnityEngine.Rendering.Universal
         }
 
 
-        internal ShaderVariablesRaytracing GetShaderVariablesRaytracingCB(Vector2Int pixelSize, RayTracingSettings rayTracingSettings)
+        internal ShaderVariablesRaytracing GetShaderVariablesRaytracingCB(UniversalCameraData cameraData)
         {
+            RayTracingSettings rayTracingSettings = VolumeManager.instance.stack.GetComponent<RayTracingSettings>();
+
             m_ShaderVariablesRayTracingCB._RayTracingRayBias = rayTracingSettings.rayBias.value;
             m_ShaderVariablesRayTracingCB._RayTracingDistantRayBias = rayTracingSettings.distantRayBias.value;
             m_ShaderVariablesRayTracingCB._RayCountEnabled = 0;
-            m_ShaderVariablesRayTracingCB._RaytracingCameraNearPlane = camera.nearClipPlane;
-            m_ShaderVariablesRayTracingCB._RaytracingPixelSpreadAngle = RenderingUtilsExt.GetPixelSpreadAngle(camera.fieldOfView, pixelSize.x, pixelSize.y);
+            m_ShaderVariablesRayTracingCB._RaytracingCameraNearPlane = cameraData.camera.nearClipPlane;
+            m_ShaderVariablesRayTracingCB._RaytracingPixelSpreadAngle = RenderingUtilsExt.GetPixelSpreadAngle(cameraData.camera.fieldOfView, cameraData.actualWidth, cameraData.actualHeight);
             m_ShaderVariablesRayTracingCB._DirectionalShadowFallbackIntensity = rayTracingSettings.directionalShadowFallbackIntensity.value;
             m_ShaderVariablesRayTracingCB._RayTracingLodBias = 0;
 
@@ -611,5 +606,12 @@ namespace UnityEngine.Rendering.Universal
         }
 
         public static readonly int _ShaderVariablesRaytracing = Shader.PropertyToID("ShaderVariablesRaytracing");
+
+       public static void ClearAll()
+        {
+            instance.Dispose();
+        }
+
     }
+    
 }

@@ -36,21 +36,20 @@ namespace UnityEngine.Rendering.Universal
 
             if (RayTracingSystem.SupportedCamera(cameraData.camera))
             {
-                var raytracingData = frameData.GetOrCreate<RaytracingData>();
-                raytracingData.rayTracingSystem = RayTracingSystem.GetOrCreate(cameraData.camera);
+                var rayTracingSystem = RayTracingSystem.instance;
 
                 // TODO: Check HDRP for update. It might change to a single one system, not current per camera.
                 using (new ProfilingScope(Profiling.RaytracingBuildAccelerationStructure))
                 {
-                    raytracingData.rayTracingSystem.BuildRayTracingAccelerationStructure();
+                    rayTracingSystem.BuildRayTracingAccelerationStructure(cameraData);
                 }
 
-                if (raytracingData.rayTracingSystem.SupportSER&&!raytracingData.rayTracingSystem.SERSetup)
+                if (rayTracingSystem.SupportSER&&!rayTracingSystem.SERSetup)
                 {
-                    raytracingData.rayTracingSystem.SERSetup = false;
+                    rayTracingSystem.SERSetup = false;
                     using (var builder = renderGraph.AddUnsafePass<RaytracingCorePassData>("Raytracing Core", out var data))
                     {
-                        data.nvidiaExt = renderGraph.ImportBuffer(raytracingData.rayTracingSystem.NVAPI_Buffer);
+                        data.nvidiaExt = renderGraph.ImportBuffer(rayTracingSystem.NVAPI_Buffer);
                         builder.AllowGlobalStateModification(true);
                         builder.AllowPassCulling(false);
                         builder.SetRenderFunc<RaytracingCorePassData>((passData, ctx) =>

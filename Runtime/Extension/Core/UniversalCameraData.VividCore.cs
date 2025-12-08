@@ -18,7 +18,6 @@ namespace UnityEngine.Rendering.Universal
 
         public HistoryFrameRTSystem historyFrameRTSystem => _historyFrameRTSystem ??= HistoryFrameRTSystem.GetOrCreate(camera);
 
-        public RayTracingSystem rayTracingSystem => _rayTracingSystem ??= RayTracingSystem.GetOrCreate(camera);
 
 
         internal DenoiseSystem denoiseSystem => _denoiseSystem ??= DenoiseSystem.GetOrCreate(camera);

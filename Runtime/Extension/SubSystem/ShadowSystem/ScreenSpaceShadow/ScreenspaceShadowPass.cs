@@ -39,6 +39,7 @@ namespace UnityEngine.Rendering.Universal
             internal BufferHandle tileListBuffer;
 
             // Texture
+            internal TextureHandle cameraDepthTexture;
             internal TextureHandle dirShadowmapTex;
             internal TextureHandle perObjectShadowTexture;
             internal TextureHandle raytracingShadowTexture;
@@ -102,6 +103,7 @@ namespace UnityEngine.Rendering.Universal
 
 
             passData.dirShadowmapTex = resourceData.directionalShadowsTexture;
+            passData.cameraDepthTexture = resourceData.cameraDepthTexture;
             passData.screenSpaceShadowmapTex = renderGraph.CreateTexture(new TextureDesc(width, height)
             {
                 format = GraphicsFormat.R32_SFloat,

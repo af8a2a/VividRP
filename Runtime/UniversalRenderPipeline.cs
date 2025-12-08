@@ -316,7 +316,7 @@ namespace UnityEngine.Rendering.Universal
             SkySystem.instance.Build(asset);
             Hammersley.Initialize();
             AreaLightSystem.instance.Build();
-
+            RayTracingSystem.instance.Initialize();
             #endregion
         }
 
@@ -493,7 +493,6 @@ namespace UnityEngine.Rendering.Universal
 
                     HistoryFrameRTSystem.CleanUnused();
                     VividCameraExtension.CleanUnused();
-                    RayTracingSystem.CleanUnused();
                     DenoiseSystem.CleanUnused();
                     VividCameraExtension.CleanUnused();
                 }

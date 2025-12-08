@@ -340,7 +340,7 @@ namespace UnityEngine.Rendering.Universal
                 var stack = VolumeManager.instance.stack;
                 var rayTracingSettings = stack.GetComponent<RayTracingSettings>();
 
-                passData.rayTracingCB = cameraData.rayTracingSystem.GetShaderVariablesRaytracingCB(passData.TraceTextureSize, rayTracingSettings);
+                passData.rayTracingCB = RayTracingSystem.instance.GetShaderVariablesRaytracingCB(cameraData);
                 passData.rayTracingCB._RaytracingRayMaxLength = m_volumeSettings.rayLength;
                 passData.rayTracingCB._RayTracingClampingFlag = 1;
                 passData.rayTracingCB._RaytracingIntensityClamp = m_volumeSettings.clampValue;
@@ -502,7 +502,7 @@ namespace UnityEngine.Rendering.Universal
                 UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
 
                 // Ray Tracing
-                passData.requireRayTracing = cameraData.rayTracingSystem.GetRayTracingState();
+                passData.requireRayTracing = RayTracingSystem.instance.GetRayTracingState();
 
 
                 // Set passData
@@ -540,7 +540,7 @@ namespace UnityEngine.Rendering.Universal
                 {
                     var runtimeShaders = GraphicsSettings.GetRenderPipelineSettings<ScreenSpaceReflectionRuntimeShader>();
                     passData.rtrtShader = runtimeShaders.rayTracingReflections;
-                    passData.rtas = cameraData.rayTracingSystem.RequestAccelerationStructure();
+                    passData.rtas = RayTracingSystem.instance.RequestAccelerationStructure(cameraData);
                 }
                 // Sky Environment
                 {

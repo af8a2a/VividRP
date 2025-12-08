@@ -79,7 +79,7 @@ namespace UnityEngine.Rendering.Universal
         private void InitRayTracingPassData(
             RenderGraph renderGraph,
             PassData passData,
-            RaytracingData raytracingData,
+            RayTracingSystem raytracing,
             UniversalCameraData cameraData, UniversalResourceData resourceData)
         {
             var stack = VolumeManager.instance.stack;
@@ -99,7 +99,7 @@ namespace UnityEngine.Rendering.Universal
             {
                 var runtimeShaders = GraphicsSettings.GetRenderPipelineSettings<RaytracingShadowRuntimeShaders>();
                 passData.fullRayTracingShadowShader = runtimeShaders.fullRayTracingShadowShader;
-                passData.rtas = raytracingData.rayTracingSystem.RequestAccelerationStructure();
+                passData.rtas = raytracing.RequestAccelerationStructure(cameraData);
 
                 var width = cameraData.cameraTargetDescriptor.width;
                 var height = cameraData.cameraTargetDescriptor.height;
@@ -116,7 +116,7 @@ namespace UnityEngine.Rendering.Universal
                 {
                     var rayTracingSettings = stack.GetComponent<RayTracingSettings>();
 
-                    passData.rayTracingCB = raytracingData.rayTracingSystem.GetShaderVariablesRaytracingCB(new Vector2Int(width, height), rayTracingSettings);
+                    passData.rayTracingCB = raytracing.GetShaderVariablesRaytracingCB(cameraData);
                     passData.rayTracingCB._RaytracingRayMaxLength =
                         Mathf.Min(volumeSettings.dirShadowsRayLength.value, rayTracingSettings.directionalShadowRayLength.value);
                     passData.rayTracingCB._RayTracingClampingFlag = 1;
@@ -200,16 +200,12 @@ namespace UnityEngine.Rendering.Universal
 
             using (var builder = renderGraph.AddComputePass<PassData>(" Raytracing Shadow", out var passData))
             {
-                if (!frameData.Contains<RaytracingData>())
-                {
-                    return;
-                }
 
-                RaytracingData raytracingData = frameData.Get<RaytracingData>();
+                var rayTracingSystem = RayTracingSystem.instance;
 
-                passData.requireRayTracing = raytracingData.rayTracingSystem.GetRayTracingState();
+                passData.requireRayTracing = rayTracingSystem.GetRayTracingState();
 
-                InitRayTracingPassData(renderGraph, passData, raytracingData, cameraData, resourceData);
+                InitRayTracingPassData(renderGraph, passData, rayTracingSystem, cameraData, resourceData);
 
                 passData.gSunDirection = -lightData.visibleLights[lightData.mainLightIndex].GetForward();
                 GetBasis(passData.gSunDirection, ref passData.gSunBasisX, ref passData.gSunBasisY);

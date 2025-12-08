@@ -62,21 +62,15 @@ namespace UnityEngine.Rendering.Universal
 
             using (var builder = renderGraph.AddComputePass<PassData>("Raytracing AmbientOcclusion", out var passData))
             {
-                if (!frameData.Contains<RaytracingData>())
-                {
-                    return TextureHandle.nullHandle;
-                }
-
-                RaytracingData raytracingData = frameData.Get<RaytracingData>();
-
-                var requireRayTracingVaild = raytracingData.rayTracingSystem.GetRayTracingState();
+                var rayTracingSystem = RayTracingSystem.instance;
+                var requireRayTracingVaild = rayTracingSystem.GetRayTracingState();
                 
                 if (!requireRayTracingVaild || !RayTracingSystem.SupportedCamera(cameraData.camera))
                 {
                     return TextureHandle.nullHandle;
                 }
 
-                InitRayTracingPassData(renderGraph, passData, raytracingData, cameraData, resourceData);
+                InitRayTracingPassData(renderGraph, passData, rayTracingSystem, cameraData, resourceData);
                 passData.ditheredTextureHandleSet.Use(builder);
 
                 builder.UseTexture(passData.DepthTexture);

@@ -166,9 +166,7 @@ namespace UnityEngine.Rendering.Universal
                 var rayTracingSettings = VolumeManager.instance.stack.GetComponent<RayTracingSettings>();
 
                 passData.ditheredTextureSet = blueNoise.DitheredTextureSet8SPP().RenderGraphImport(renderGraph);
-                passData.shaderVariablesRayTracingCB =
-                    cameraData.rayTracingSystem.GetShaderVariablesRaytracingCB(new Vector2Int(cameraData.scaledWidth, cameraData.scaledHeight),
-                        rayTracingSettings);
+                passData.shaderVariablesRayTracingCB =  RayTracingSystem.instance.GetShaderVariablesRaytracingCB(cameraData);
 
 
                 // passData.lightList = (lightList);

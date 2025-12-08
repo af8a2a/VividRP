@@ -10,6 +10,7 @@ namespace UnityEngine.Rendering.Universal
     {
         /// <summary>HDRP automatically collects mesh renderers and builds the ray tracing acceleration structure every frame</summary>
         Automatic,
+
         /// <summary>Uses a ray tracing acceleration structure handeled by the user.</summary>
         Manual
     }
@@ -25,7 +26,9 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         /// <param name="value">The initial value to store in the parameter.</param>
         /// <param name="overrideState">The initial override state for the parameter.</param>
-        public RTASBuildModeParameter(RTASBuildMode value, bool overrideState = false) : base(value, overrideState) { }
+        public RTASBuildModeParameter(RTASBuildMode value, bool overrideState = false) : base(value, overrideState)
+        {
+        }
     }
 
     /// <summary>
@@ -35,10 +38,15 @@ namespace UnityEngine.Rendering.Universal
     {
         /// <summary>HDRP automatically extends the camera's frustum when culling for the ray tracing acceleration structure.</summary>
         ExtendedFrustum,
+
         /// <summary>The user provides the radius of the sphere used to cull objects out of the ray tracing acceleration structure.</summary>
         Sphere,
+
         /// <summary>HDRP does not perform any culling step on the ray tracing acceleration structure.</summary>
-        None
+        None,
+
+        /// <summary>The user provides the minimum solid angle relative to the camera position to accept object to the ray tracing acceleration structure.</summary>
+        SolidAngle
     }
 
     /// <summary>
@@ -52,7 +60,9 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         /// <param name="value">The initial value to store in the parameter.</param>
         /// <param name="overrideState">The initial override state for the parameter.</param>
-        public RTASCullingModeParameter(RTASCullingMode value, bool overrideState = false) : base(value, overrideState) { }
+        public RTASCullingModeParameter(RTASCullingMode value, bool overrideState = false) : base(value, overrideState)
+        {
+        }
     }
 
     /// <summary>
@@ -62,7 +72,6 @@ namespace UnityEngine.Rendering.Universal
     [SupportedOnRenderPipeline(typeof(UniversalRenderPipelineAsset))]
     public sealed class RayTracingSettings : VolumeComponent
     {
-
         /// <summary>
         /// Controls the bias for all real-time ray tracing effects.
         /// </summary>
@@ -72,13 +81,15 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// Controls the Ray Bias value used when the distance between the pixel and the camera is close to the far plane. Between the near and far plane the Ray Bias and Distant Ray Bias are interpolated linearly. This does not affect Path Tracing or Recursive Rendering. This value can be increased to mitigate Ray Tracing z-fighting issues at a distance.
         /// </summary>
-        [Tooltip("Controls the Ray Bias value used when the distance between the pixel and the camera is close to the far plane. Between the near and far plane the Ray Bias and Distant Ray Bias are interpolated linearly. This does not affect Path Tracing or Recursive Rendering. This value can be increased to mitigate Ray Tracing z-fighting issues at a distance.")]
+        [Tooltip(
+            "Controls the Ray Bias value used when the distance between the pixel and the camera is close to the far plane. Between the near and far plane the Ray Bias and Distant Ray Bias are interpolated linearly. This does not affect Path Tracing or Recursive Rendering. This value can be increased to mitigate Ray Tracing z-fighting issues at a distance.")]
         public ClampedFloatParameter distantRayBias = new ClampedFloatParameter(0.001f, 0.0f, 0.1f);
 
         /// <summary>
         /// When enabled, the culling region for punctual and area lights shadow maps is increased from frustum culling to extended culling. For Directional lights, cascades are not extended, but additional objects may appear in the cascades.
         /// </summary>
-        [Tooltip("When enabled, the culling region for punctual and area lights shadow maps is increased from frustum culling to extended culling. For Directional lights, cascades are not extended, but additional objects may appear in the cascades.")]
+        [Tooltip(
+            "When enabled, the culling region for punctual and area lights shadow maps is increased from frustum culling to extended culling. For Directional lights, cascades are not extended, but additional objects may appear in the cascades.")]
         [FormerlySerializedAs("extendCulling")]
         public BoolParameter extendShadowCulling = new BoolParameter(true);
 
@@ -103,22 +114,28 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// Controls how the ray tracing acceleration structure is build.
         /// </summary>
-        [Tooltip("Controls how the ray tracing acceleration structure is build.")]
-        [AdditionalProperty]
+        [Tooltip("Controls how the ray tracing acceleration structure is build.")] [AdditionalProperty]
         public RTASBuildModeParameter buildMode = new RTASBuildModeParameter(RTASBuildMode.Automatic);
 
         /// <summary>
-        /// Controls how the maximum distance for the ray tracing culling is defined.
+        /// Specifies the method used for the ray tracing culling.
         /// </summary>
-        [Tooltip("Controls how the maximum distance for the ray tracing culling is defined.")]
-        [AdditionalProperty]
+        [Tooltip("Specifies the method used for the ray tracing culling.")] [AdditionalProperty]
         public RTASCullingModeParameter cullingMode = new RTASCullingModeParameter(RTASCullingMode.ExtendedFrustum);
 
         /// <summary>
         /// Specifies the radius of the sphere used to cull objects out of the ray tracing acceleration structure when the culling mode is set to Sphere.
         /// </summary>
-        [Tooltip("Specifies the radius of the sphere used to cull objects out of the ray tracing acceleration structure when the culling mode is set to Sphere.")]
+        [Tooltip(
+            "Specifies the radius of the sphere used to cull objects out of the ray tracing acceleration structure when the culling mode is set to Sphere.")]
         public MinFloatParameter cullingDistance = new MinFloatParameter(1000.0f, 0.01f);
+
+        /// <summary>
+        /// Specifies the minimum object solid angle in degrees relative to the camera position to accept objects to the ray tracing acceleration structure when the culling mode is set to Solid Angle.
+        /// </summary>
+        [Tooltip(
+            "Specifies the minimum object solid angle in degrees relative to the camera position to accept objects to the ray tracing acceleration structure when the culling mode is set to Solid Angle.")]
+        public ClampedFloatParameter minSolidAngle = new ClampedFloatParameter(4.0f, 0.01f, 180f);
 
         /// <summary>
         /// Default constructor for the ray tracing settings volume component.
@@ -129,4 +146,3 @@ namespace UnityEngine.Rendering.Universal
         }
     }
 }
-

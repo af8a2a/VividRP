@@ -80,7 +80,7 @@ namespace UnityEngine.Rendering.Universal
         #region private members, nvidia specific code
 
 #if ENABLE_NVIDIA && ENABLE_NVIDIA_MODULE
-        private static uint s_ExpectedDeviceVersion = 0x05;
+        private static uint s_ExpectedDeviceVersion = 0x06;
 
         private UpscalerCameras m_CameraStates = new UpscalerCameras();
 

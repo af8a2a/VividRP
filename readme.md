@@ -55,7 +55,7 @@ This package provides a custom implementation of Unity's **Universal Render Pipe
 - AmbientOcclusion
   - [x] HBAO
   - [x] XeGTAO
-  - [x] RTAO
+  - [x] RTAO(RT Pipeline + Rayquery)
 - Shadow
   - [X] Hybrid Shadow
   - [X] Cascade Shadow

@@ -22,7 +22,6 @@ namespace UnityEngine.Rendering.Universal.Internal
             m_DeferredLights = deferredLights;
         }
 
-
         private class PassData
         {
             internal UniversalCameraData cameraData;
@@ -46,7 +45,7 @@ namespace UnityEngine.Rendering.Universal.Internal
                 passData.shadowData = shadowData;
 
                 builder.SetRenderAttachment(color, 0, AccessFlags.Write);
-                builder.SetRenderAttachmentDepth(depth, AccessFlags.Write);
+                builder.SetRenderAttachmentDepth(depth, AccessFlags.ReadWrite);
                 passData.deferredLights = m_DeferredLights;
 
                 if (!m_DeferredLights.UseFramebufferFetch)
@@ -64,7 +63,7 @@ namespace UnityEngine.Rendering.Universal.Internal
                     {
                         if (i != m_DeferredLights.GBufferLightingIndex)
                         {
-                            builder.SetInputAttachment(gbuffer[i], idx, AccessFlags.Read);
+                            builder.SetInputAttachment(gbuffer[i], idx);
                             idx++;
                         }
                     }
@@ -72,7 +71,7 @@ namespace UnityEngine.Rendering.Universal.Internal
 
                 builder.AllowGlobalStateModification(true);
 
-                builder.SetRenderFunc((PassData data, RasterGraphContext context) =>
+                builder.SetRenderFunc(static (PassData data, RasterGraphContext context) =>
                 {
                     data.deferredLights.ExecuteDeferredPass(context.cmd, data.cameraData, data.lightData, data.shadowData);
                 });

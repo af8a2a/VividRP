@@ -300,8 +300,9 @@ namespace UnityEngine.Rendering.Universal
     }
 
     /// <summary>
-    /// Defines if Unity discards or stores the render targets of the DrawObjects Passes. Selecting the Store option significantly increases the memory bandwidth on mobile and tile-based GPUs.
+    /// Obsolete from 6000.3.
     /// </summary>
+    [Obsolete("#from(6000.0) #breakingFrom(6000.4)", true)]
     public enum StoreActionsOptimization
     {
         /// <summary>Unity uses the Discard option by default, and falls back to the Store option if it detects any injected Passes.</summary>
@@ -420,28 +421,6 @@ namespace UnityEngine.Rendering.Universal
         PerPixel = 3,
     }
 
-#if URP_COMPATIBILITY_MODE
-    internal struct DeprecationMessage
-    {
-        internal const string CompatibilityScriptingAPIObsolete = "This rendering path is for compatibility mode only (when Render Graph is disabled). Use Render Graph API instead.";
-        internal const string CompatibilityScriptingAPIObsoleteFrom2023_3 = CompatibilityScriptingAPIObsolete + " #from(2023.3)";
-        internal const string CompatibilityScriptingAPIConsoleWarning = "Your project uses Compatibility Mode, which disables the render graph system. Compatibility Mode is deprecated. Migrate your ScriptableRenderPasses to the Render Graph API instead. After you migrate, go to Edit > Project Settings > Player and remove the URP_COMPATIBILITY_MODE define from the Scripting Define Symbols. If you don't remove the define, build time and build size are slightly increased.";
-    }
-#endif
-    
-#if UNITY_EDITOR && URP_COMPATIBILITY_MODE
-    internal class WarnUsingNonRenderGraph
-    {
-        [InitializeOnLoadMethod]
-        internal static void EmitConsoleWarning()
-        {
-            RenderGraphSettings rgs = GraphicsSettings.GetRenderPipelineSettings<RenderGraphSettings>();
-            if (rgs != null && rgs.enableRenderCompatibilityMode)
-                Debug.LogWarning(DeprecationMessage.CompatibilityScriptingAPIConsoleWarning);
-        }
-    }
-#endif
-
     /// <summary>
     /// The asset that contains the URP setting.
     /// You can use this asset as a graphics quality level.
@@ -450,6 +429,7 @@ namespace UnityEngine.Rendering.Universal
     /// <see cref="UniversalRenderPipeline"/>
     [ExcludeFromPreset]
     [URPHelpURL("universalrp-asset")]
+    [Icon("UnityEngine/Rendering/RenderPipelineAsset Icon")]
 #if UNITY_EDITOR
     [ShaderKeywordFilter.ApplyRulesIfTagsEqual("RenderPipeline", "UniversalPipeline")]
 #endif
@@ -459,7 +439,7 @@ namespace UnityEngine.Rendering.Universal
 
         internal bool IsAtLastVersion() => k_LastVersion == k_AssetVersion;
 
-        private const int k_LastVersion = 12;
+        private const int k_LastVersion = 13;
         // Default values set when a new UniversalRenderPipeline asset is created
         [SerializeField] int k_AssetVersion = k_LastVersion;
         [SerializeField] int k_AssetPreviousVersion = k_LastVersion;
@@ -596,8 +576,8 @@ namespace UnityEngine.Rendering.Universal
         [ShaderKeywordFilter.SelectOrRemove(true, keywordNames: ShaderKeywordStrings.LightLayers)]
 #endif
         [SerializeField] bool m_SupportsLightLayers = false;
-        [SerializeField] [Obsolete("#from(2022.1) #breakingFrom(2023.1)", true)] PipelineDebugLevel m_DebugLevel;
-        [SerializeField] StoreActionsOptimization m_StoreActionsOptimization = StoreActionsOptimization.Auto;
+        [SerializeField][Obsolete("#from(2022.1) #breakingFrom(2023.1)", true)] PipelineDebugLevel m_DebugLevel;
+        [SerializeField][Obsolete("#from(6000.0) #breakingFrom(6000.4)", true)] StoreActionsOptimization m_StoreActionsOptimization = StoreActionsOptimization.Auto;
 
         // Adaptive performance settings
         [SerializeField] bool m_UseAdaptivePerformance = true;
@@ -699,6 +679,18 @@ namespace UnityEngine.Rendering.Universal
 #if UNITY_EDITOR
         public static readonly string packagePath = "Packages/com.unity.render-pipelines.universal";
 
+        internal void Reset()
+        {
+            // If the asset path is valid, it means we are explicitly resetting an existing asset, so we will create
+            // a new default renderer asset to avoid errors. If the path is invalid, it means we are creating a new asset
+            // for which the default renderer is provided through UniversalRenderPipelineAsset.Create.
+            string path = AssetDatabase.GetAssetPath(this);
+            if (!string.IsNullOrEmpty(path))
+            {
+                m_RendererDataList[0] = CreateRendererAsset(path, m_RendererType);
+            }
+        }
+
         public static UniversalRenderPipelineAsset Create(ScriptableRendererData rendererData = null)
         {
             // Create Universal RP Asset
@@ -716,9 +708,9 @@ namespace UnityEngine.Rendering.Universal
         }
 
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Performance", "CA1812")]
-        internal class CreateUniversalPipelineAsset : EndNameEditAction
+        internal class CreateUniversalPipelineAsset : AssetCreationEndAction
         {
-            public override void Action(int instanceId, string pathName, string resourceFile)
+            public override void Action(EntityId entityId, string pathName, string resourceFile)
             {
                 //Create asset
                 AssetDatabase.CreateAsset(Create(CreateRendererAsset(pathName, RendererType.UniversalRenderer)), pathName);
@@ -728,8 +720,8 @@ namespace UnityEngine.Rendering.Universal
         [MenuItem("Assets/Create/Rendering/URP Asset (with Universal Renderer)", priority = CoreUtils.Sections.section2 + CoreUtils.Priorities.assetsCreateRenderingMenuPriority + 1)]
         static void CreateUniversalPipeline()
         {
-            ProjectWindowUtil.StartNameEditingIfProjectWindowExists(0, CreateInstance<CreateUniversalPipelineAsset>(),
-                "New Universal Render Pipeline Asset.asset", null, null);
+            ProjectWindowUtil.StartNameEditingIfProjectWindowExists(EntityId.None, CreateInstance<CreateUniversalPipelineAsset>(),
+                "New Universal Render Pipeline Asset.asset", CoreUtils.GetIconForType<UniversalRenderPipelineAsset>(), null);
         }
 
         internal static ScriptableRendererData CreateRendererAsset(string path, RendererType type, bool relativePath = true, string suffix = "Renderer")
@@ -1081,9 +1073,10 @@ namespace UnityEngine.Rendering.Universal
         public bool supportsTerrainHoles => m_SupportsTerrainHoles;
 
         /// <summary>
-        /// Returns the active store action optimization value.
+        /// Obsolete from 6000.0.
         /// </summary>
         /// <returns>Returns the active store action optimization value.</returns>
+        [Obsolete("#from(6000.0) #breakingFrom(6000.4)", true)]
         public StoreActionsOptimization storeActionsOptimization
         {
             get => m_StoreActionsOptimization;
@@ -1627,30 +1620,6 @@ namespace UnityEngine.Rendering.Universal
         }
 
         /// <summary>
-        /// Controls whether the RenderGraph render path is enabled.
-        /// </summary>
-        [Obsolete("This has been deprecated, please use GraphicsSettings.GetRenderPipelineSettings<RenderGraphSettings>().enableRenderCompatibilityMode instead. #from(2023.3)")]
-        public bool enableRenderGraph
-#if URP_COMPATIBILITY_MODE
-        {
-            get
-            {
-                if (GraphicsSettings.TryGetRenderPipelineSettings<RenderGraphSettings>(out var renderGraphSettings))
-                    return !renderGraphSettings.enableRenderCompatibilityMode;
-
-                return false;
-            }
-        }
-#else
-            => true;
-#endif
-
-        internal void OnEnableRenderGraphChanged()
-        {
-            OnValidate();
-        }
-
-        /// <summary>
         /// Returns the selected ColorGradingMode in the URP Asset.
         /// <see cref="ColorGradingMode"/>
         /// </summary>
@@ -1924,6 +1893,12 @@ namespace UnityEngine.Rendering.Universal
                 k_AssetVersion = 12;
             }
 
+            if (k_AssetVersion < 13)
+            {
+                k_AssetPreviousVersion = k_AssetVersion;
+                k_AssetVersion = 13;
+            }
+
 #if UNITY_EDITOR
             if (k_AssetPreviousVersion != k_AssetVersion)
             {
@@ -1986,6 +1961,11 @@ namespace UnityEngine.Rendering.Universal
                     globalSettings.apvScenesData = asset.apvScenesData;
 #pragma warning restore CS0618 // Type or member is obsolete
                 asset.k_AssetPreviousVersion = 12;
+            }
+
+            if (asset.k_AssetPreviousVersion < 13)
+            {
+                asset.k_AssetPreviousVersion = 13;
             }
 
             ResourceReloader.ReloadAllNullIn(asset, packagePath);

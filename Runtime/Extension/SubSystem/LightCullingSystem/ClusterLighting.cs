@@ -578,7 +578,7 @@ namespace UnityEngine.Rendering.Universal
                 // builder.UseBuffer(passData.bigTileVolumetricLightList, AccessFlags.Write);
 
                 // Setup builder state
-#if DANBAIDONGRP_ASYNC_COMPUTE
+#if ASYNC_COMPUTE
                 builder.EnableAsyncCompute(true);
 #endif
                 builder.AllowPassCulling(false);

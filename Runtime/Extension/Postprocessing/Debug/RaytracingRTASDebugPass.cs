@@ -166,7 +166,7 @@ namespace UnityEngine.Rendering.Universal
                         isRenderToBackBufferTarget = new RenderTargetIdentifier(((RTHandle)data.destination).nameID, 0, CubemapFace.Unknown, -1) ==
                                                      new RenderTargetIdentifier(data.cameraData.xr.renderTarget, 0, CubemapFace.Unknown, -1);
 #endif
-                    Vector4 scaleBias = RenderingUtils.GetFinalBlitScaleBias(data.source, data.destination, data.cameraData);
+                    Vector4 scaleBias = RenderingUtils.GetFinalBlitScaleBias(ctx, data.source, data.destination);
                     if (isRenderToBackBufferTarget)
                         cmd.SetViewport(data.cameraData.pixelRect);
 

@@ -173,7 +173,6 @@ namespace UnityEngine.Rendering.Universal
                 builder.UseTexture(passData.normalGBuffer);
 
 
-                builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(passData.requireRayTracing);
 
                 builder.SetRenderFunc((PassData data, ComputeGraphContext context) => { ExecutePass(data, context); });

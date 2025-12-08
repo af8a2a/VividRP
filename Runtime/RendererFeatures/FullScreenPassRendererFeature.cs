@@ -108,13 +108,6 @@ namespace UnityEngine.Rendering.Universal
             renderer.EnqueuePass(m_FullScreenPass);
         }
 
-#if URP_COMPATIBILITY_MODE
-        /// <inheritdoc/>
-        protected override void Dispose(bool disposing)
-        {
-            m_FullScreenPass.Dispose();
-        }
-#endif
 
         internal class FullScreenRenderPass : ScriptableRenderPass
         {
@@ -124,10 +117,6 @@ namespace UnityEngine.Rendering.Universal
             private bool m_BindDepthStencilAttachment;
 
             private static MaterialPropertyBlock s_SharedPropertyBlock = new MaterialPropertyBlock();
-
-#if URP_COMPATIBILITY_MODE
-            private RTHandle m_CopiedColor;
-#endif
 
             public FullScreenRenderPass(string passName)
             {
@@ -142,11 +131,10 @@ namespace UnityEngine.Rendering.Universal
                 m_BindDepthStencilAttachment = bindDepthStencilAttachment;
             }
 
-
             internal void ReAllocate(RenderTextureDescriptor desc)
             {
-            }
 
+            }
 
             private static void ExecuteCopyColorPass(RasterCommandBuffer cmd, RTHandle sourceTexture)
             {
@@ -164,7 +152,6 @@ namespace UnityEngine.Rendering.Universal
 
                 cmd.DrawProcedural(Matrix4x4.identity, material, passIndex, MeshTopology.Triangles, 3, 1, s_SharedPropertyBlock);
             }
-
 
             public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
             {
@@ -262,12 +249,12 @@ namespace UnityEngine.Rendering.Universal
                     builder.SetRenderAttachment(destination, 0, AccessFlags.Write);
 
                     if (m_BindDepthStencilAttachment)
-                        builder.SetRenderAttachmentDepth(resourcesData.activeDepthTexture, AccessFlags.Write);
+                        builder.SetRenderAttachmentDepth(resourcesData.activeDepthTexture, AccessFlags.ReadWrite);
 
-                    builder.SetRenderFunc((MainPassData data, RasterGraphContext rgContext) =>
+                    builder.SetRenderFunc(static (MainPassData data, RasterGraphContext rgContext) =>
                     {
                         ExecuteMainPass(rgContext.cmd, data.inputTexture, data.material, data.passIndex);
-                    });                
+                    });
                 }
             }
 
@@ -280,7 +267,7 @@ namespace UnityEngine.Rendering.Universal
 
                     builder.SetRenderAttachment(destination, 0, AccessFlags.Write);
 
-                    builder.SetRenderFunc((CopyPassData data, RasterGraphContext rgContext) =>
+                    builder.SetRenderFunc(static (CopyPassData data, RasterGraphContext rgContext) =>
                     {
                         ExecuteCopyColorPass(rgContext.cmd, data.inputTexture);
                     });

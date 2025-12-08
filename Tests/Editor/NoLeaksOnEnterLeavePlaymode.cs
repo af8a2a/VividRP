@@ -107,7 +107,6 @@ class NoLeaksOnEnterLeavePlaymode
             // Debug materials
             "Hidden/Universal/HDRDebugView",
             "Hidden/Universal Render Pipeline/Debug/DebugReplacement",
-            "2D/RenderAs2D-Flattening",                 // Add an exception for RenderAs2D Default Material.
 
             // Fonts are intentionally preserved in the editor for performance reasons.
             "Apple Color Emoji - Regular Material",
@@ -115,6 +114,7 @@ class NoLeaksOnEnterLeavePlaymode
             "Arial Unicode MS - Regular Material",
             "Helvetica Neue - Regular Material",
             "Inter - Regular Material",                // UUM-28555
+            "Inter - Regular Material + Inter - Semi Bold Atlas",                // UUM-28555
             "Malgun Gothic - Regular Material",
             "Microsoft Sans Serif - Regular Material",
             "Microsoft YaHei - Regular Material",
@@ -144,6 +144,7 @@ class NoLeaksOnEnterLeavePlaymode
             "Arial Unicode MS - Regular Atlas",
             "Helvetica Neue - Regular Atlas",
             "Inter - Regular Atlas",
+            "Inter - Regular Material + Inter - Semi Bold Atlas",
             "Malgun Gothic - Regular Atlas",
             "Microsoft Sans Serif - Regular Atlas",
             "Microsoft YaHei - Regular Atlas",

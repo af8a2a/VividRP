@@ -2,7 +2,6 @@ using System;
 
 namespace UnityEngine.Rendering.Universal
 {
-
     /// <summary>
     /// Contains extension methods for Light class.
     /// </summary>
@@ -24,7 +23,6 @@ namespace UnityEngine.Rendering.Universal
 
             return lightData;
         }
-        
     }
     
     /// <summary>
@@ -300,10 +298,10 @@ namespace UnityEngine.Rendering.Universal
             
             if (m_Version < Version.RenderingLayers)
             {
-#pragma warning disable 618 // Obsolete warning
-                m_RenderingLayers = (uint)m_LightLayerMask;
-                m_ShadowRenderingLayers = (uint)m_ShadowLayerMask;
-#pragma warning restore 618 // Obsolete warning
+// #pragma warning disable 618 // Obsolete warning
+//                 m_RenderingLayers = (uint)m_LightLayerMask;
+//                 m_ShadowRenderingLayers = (uint)m_ShadowLayerMask;
+// #pragma warning restore 618 // Obsolete warning
                 m_Version = Version.RenderingLayers;
             }
 
@@ -316,10 +314,10 @@ namespace UnityEngine.Rendering.Universal
             
             if (m_Version <  Version.RenderingLayersMask)
             {
-#pragma warning disable 618 // Obsolete warning
-                m_RenderingLayersMask = m_RenderingLayers;
-                m_ShadowRenderingLayersMask = m_ShadowRenderingLayers;
-#pragma warning restore 618 // Obsolete warning
+// #pragma warning disable 618 // Obsolete warning
+//                 m_RenderingLayersMask = m_RenderingLayers;
+//                 m_ShadowRenderingLayersMask = m_ShadowRenderingLayers;
+// #pragma warning restore 618 // Obsolete warning
                 m_Version = Version.RenderingLayersMask;
             }
         }

@@ -56,10 +56,9 @@ namespace UnityEngine.Rendering.Universal
             internal RendererListHandle rendererListBase;
             internal RendererListHandle rendererListTrans;
             internal RendererListHandle rendererListOutline;
-            
+
             // PreIntergratedFGD
             internal TextureHandle FGD_GGXAndDisneyDiffuse;
-
         }
 
         internal void InitRendererLists(
@@ -110,7 +109,10 @@ namespace UnityEngine.Rendering.Universal
             cmd.SetGlobalVector(ShaderPropertyId.scaleBiasRt, scaleBias);
             cmd.SetGlobalFloat(ShaderPropertyId.alphaToMaskAvailable, 0);
 
-            cmd.SetGlobalTexture(ShaderConstants._ScreenSpaceShadowmapTexture, data.SSShadowsTexture);
+            if (data.SSShadowsTexture.IsValid())
+            {
+                cmd.SetGlobalTexture(ShaderConstants._ScreenSpaceShadowmapTexture, data.SSShadowsTexture);
+            }
 
             cmd.SetGlobalBuffer("_AmbientProbeData", data.ambientProbe);
             cmd.SetGlobalTexture("_SkyTexture", data.reflectProbe);
@@ -121,14 +123,14 @@ namespace UnityEngine.Rendering.Universal
             cmd.DrawRendererList(data.rendererListOutline);
             cmd.DrawRendererList(data.rendererListTrans);
         }
-        
+
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
             using (var builder = renderGraph.AddRasterRenderPass<PassData>("Character Lighting", out var passData, base.profilingSampler))
             {
                 // Access resources
-                
+
                 UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
                 UniversalRenderingData renderingData = frameData.Get<UniversalRenderingData>();
                 UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
@@ -175,8 +177,8 @@ namespace UnityEngine.Rendering.Universal
                     builder.UseTexture(additionalShadowsTexture, AccessFlags.Read);
                 if (passData.SSShadowsTexture.IsValid())
                     builder.UseTexture(passData.SSShadowsTexture, AccessFlags.Read);
-                
-                
+
+
                 var outlineMaxOffsetMultiplier = Mathf.Max(0, cameraData.camera.pixelWidth / 768f - 1);
                 if (cameraData.isSceneViewCamera)
                     outlineMaxOffsetMultiplier = Camera.main ? Camera.main.pixelWidth / 768f : 2;
@@ -192,8 +194,8 @@ namespace UnityEngine.Rendering.Universal
                 builder.SetRenderFunc((PassData data, RasterGraphContext context) =>
                 {
                     bool yFlip = data.cameraData.IsRenderTargetProjectionMatrixFlipped(data.albedoHdl, data.depthHdl);
-                
-                    PreIntegratedFGD.instance.Bind(context.cmd,PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse,data.FGD_GGXAndDisneyDiffuse);
+
+                    PreIntegratedFGD.instance.Bind(context.cmd, PreIntegratedFGD.FGDIndex.FGD_GGXAndDisneyDiffuse, data.FGD_GGXAndDisneyDiffuse);
                     ExecutePass(context.cmd, data, yFlip);
                 });
             }

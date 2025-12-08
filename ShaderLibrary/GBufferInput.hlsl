@@ -179,7 +179,7 @@ BRDFData GBufferDataToBRDFData(GBufferData gBufferData)
         brdfSpecular = lerp(kDielectricSpec.rgb, albedo, metallic);
     }
 
-    InitializeBRDFDataDirect(albedo, brdfDiffuse, brdfSpecular, reflectivity, oneMinusReflectivity, 1 - roughness, alpha, brdfData);
+    InitializeBRDFDataDirect(albedo, brdfDiffuse, brdfSpecular, reflectivity, oneMinusReflectivity, smoothness, alpha, brdfData);
 
     return brdfData;
 }

@@ -59,8 +59,6 @@ namespace UnityEngine.Rendering.Universal
         const int k_FinalBlitPassQueueOffset = 1;
         const int k_AfterFinalBlitPassQueueOffset = k_FinalBlitPassQueueOffset + 1;
 
-        static readonly List<ShaderTagId> k_DepthNormalsOnly = new List<ShaderTagId> { new ShaderTagId("DepthNormalsOnly") };
-        
         /// <inheritdoc/>
         public override int SupportedCameraStackingTypes()
         {
@@ -135,6 +133,7 @@ namespace UnityEngine.Rendering.Universal
 #endif
         /// <summary>Property to control the depth priming behavior of the forward rendering path.</summary>
         public DepthPrimingMode depthPrimingMode { get { return m_DepthPrimingMode; } set { m_DepthPrimingMode = value; } }
+
         DepthOnlyPass m_DepthPrepass;
         DepthNormalOnlyPass m_DepthNormalPrepass;
         MotionVectorRenderPass m_MotionVectorPass;
@@ -145,9 +144,7 @@ namespace UnityEngine.Rendering.Universal
         DrawObjectsPass m_RenderOpaqueForwardOnlyPass;
         DrawObjectsPass m_RenderOpaqueForwardPass;
         DrawObjectsWithRenderingLayersPass m_RenderOpaqueForwardWithRenderingLayersPass;
-        #if VIVID_DEPRECATED
         DrawSkyboxPass m_DrawSkyboxPass;
-        #endif
         CopyDepthPass m_CopyDepthPass;
         CopyColorPass m_CopyColorPass;
         TransparentSettingsPass m_TransparentSettingsPass;
@@ -155,7 +152,6 @@ namespace UnityEngine.Rendering.Universal
         InvokeOnRenderObjectCallbackPass m_OnRenderObjectCallbackPass;
         FinalBlitPass m_FinalBlitPass;
         CapturePass m_CapturePass;
-        
 #if ENABLE_VR && ENABLE_XR_MODULE
         XROcclusionMeshPass m_XROcclusionMeshPass;
         CopyDepthPass m_XRCopyDepthPass;
@@ -194,6 +190,8 @@ namespace UnityEngine.Rendering.Universal
         Material m_StencilDeferredMaterial = null;
         Material m_ClusterDeferredMaterial = null;
         Material m_CameraMotionVecMaterial = null;
+
+        internal bool isPostProcessActive { get => m_PostProcess != null; }
         
         internal DeferredLights deferredLights { get => m_DeferredLights; }
         internal LayerMask prepassLayerMask { get; set; }
@@ -249,12 +247,11 @@ namespace UnityEngine.Rendering.Universal
             m_DefaultStencilState.SetZFailOperation(stencilData.zFailOperation);
 
             m_IntermediateTextureMode = data.intermediateTextureMode;
-
             prepassLayerMask = data.prepassLayerMask;
             opaqueLayerMask = data.opaqueLayerMask;
             transparentLayerMask = data.transparentLayerMask;
             shadowTransparentReceive = data.shadowTransparentReceive;
-            
+
             var asset = UniversalRenderPipeline.asset;
             if (asset != null && asset.supportsLightCookies)
             {
@@ -301,7 +298,6 @@ namespace UnityEngine.Rendering.Universal
 #endif
             m_DepthPrepass = new DepthOnlyPass(RenderPassEvent.BeforeRenderingPrePasses, RenderQueueRange.opaque, prepassLayerMask);
             m_DepthNormalPrepass = new DepthNormalOnlyPass(RenderPassEvent.BeforeRenderingPrePasses, RenderQueueRange.opaque, prepassLayerMask);
-
             if (renderingModeRequested == RenderingMode.Deferred || renderingModeRequested == RenderingMode.DeferredPlus)
             {
                 var deferredInitParams = new DeferredLights.InitParams();
@@ -369,17 +365,12 @@ namespace UnityEngine.Rendering.Universal
 
             m_DrawOffscreenUIPass = new DrawScreenSpaceUIPass(RenderPassEvent.BeforeRenderingPostProcessing, true);
             m_DrawOverlayUIPass = new DrawScreenSpaceUIPass(RenderPassEvent.AfterRendering + k_AfterFinalBlitPassQueueOffset, false); // after m_FinalBlitPass
-
+            
+            //No postProcessData means that post processes are disabled
+            if (data.postProcessData != null)
             {
-                //No postProcessData means that post processes are disabled
-                if (data.postProcessData != null)
-                {
-                    var requestColorFormat = asset == null 
-                        ? GraphicsFormat.B10G11R11_UFloatPack32
-                        : UniversalRenderPipeline.MakeRenderTextureGraphicsFormat(asset.supportsHDR, asset.hdrColorBufferPrecision, false);
-                    m_PostProcessPassRenderGraph = new PostProcessPassRenderGraph(data.postProcessData, requestColorFormat);
-                    m_ColorGradingLutPassRenderGraph = new ColorGradingLutPass(RenderPassEvent.BeforeRenderingPrePasses, data.postProcessData);
-                }
+                m_PostProcess = new PostProcess(data.postProcessData);
+                m_ColorGradingLutPassRenderGraph = new ColorGradingLutPass(RenderPassEvent.BeforeRenderingPrePasses, data.postProcessData);
             }
 
             m_CapturePass = new CapturePass(RenderPassEvent.AfterRendering);
@@ -390,7 +381,6 @@ namespace UnityEngine.Rendering.Universal
             if (GraphicsSettings.TryGetRenderPipelineSettings<UniversalRenderPipelineDebugShaders>(out var debugShaders))
                 m_ProbeVolumeDebugPass = new ProbeVolumeDebugPass(RenderPassEvent.BeforeRenderingTransparents, debugShaders.probeVolumeSamplingDebugComputeShader);
 #endif
-
 
             supportedRenderingFeatures = new RenderingFeatures();
 
@@ -403,7 +393,6 @@ namespace UnityEngine.Rendering.Universal
             LensFlareCommonSRP.mergeNeeded = 0;
             LensFlareCommonSRP.maxLensFlareWithOcclusionTemporalSample = 1;
             LensFlareCommonSRP.Initialize();
-
         }
 
         /// <inheritdoc />
@@ -411,7 +400,6 @@ namespace UnityEngine.Rendering.Universal
         {
             m_ForwardLights.Cleanup();
             m_GBufferPass?.Dispose();
-            
 
             m_FinalBlitPass?.Dispose();
             m_DrawOffscreenUIPass?.Dispose();
@@ -431,7 +419,7 @@ namespace UnityEngine.Rendering.Universal
             m_StencilCrossFadeRenderPass?.Dispose();
 
             // RG
-            m_PostProcessPassRenderGraph?.Cleanup();
+            m_PostProcess?.Dispose();
             m_ColorGradingLutPassRenderGraph?.Cleanup();
 
             m_TargetColorHandle?.Release();
@@ -451,7 +439,7 @@ namespace UnityEngine.Rendering.Universal
             LensFlareCommonSRP.Dispose();
 
 #if ENABLE_VR && ENABLE_XR_MODULE
-            Experimental.Rendering.XRSystem.Dispose();
+            XRSystem.Dispose();
 #endif
         }
 
@@ -462,10 +450,7 @@ namespace UnityEngine.Rendering.Universal
             
             m_MainLightShadowCasterPass?.Dispose();
             m_AdditionalLightsShadowCasterPass?.Dispose();
-
-            hasReleasedRTs = true;
         }
-
 
         /// <summary>
         /// Returns if the camera renders to a offscreen depth texture.
@@ -480,7 +465,6 @@ namespace UnityEngine.Rendering.Universal
         /// <param name="cameraData">The camera data for the camera being rendered.</param>
         /// <returns>Returns true if the camera renders to depth without any color buffer. It will return false otherwise.</returns>
         public static bool IsOffscreenDepthTexture(UniversalCameraData cameraData) => cameraData.targetTexture != null && cameraData.targetTexture.format == RenderTextureFormat.Depth;
-
 
         static bool IsWebGL()
         {
@@ -555,7 +539,6 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
-
         /// <inheritdoc />
         public override void SetupCullingParameters(ref ScriptableCullingParameters cullingParameters,
             ref CameraData cameraData)
@@ -610,7 +593,6 @@ namespace UnityEngine.Rendering.Universal
         public override void FinishRendering(CommandBuffer cmd)
         {
         }
-
 
         struct RenderPassInputSummary
         {
@@ -681,7 +663,7 @@ namespace UnityEngine.Rendering.Universal
 
             return inputSummary;
         }
-
+        
         internal static bool PlatformRequiresExplicitMsaaResolve()
         {
 #if UNITY_EDITOR
@@ -737,13 +719,14 @@ namespace UnityEngine.Rendering.Universal
                 isCompatibleBackbufferTextureDimension = cameraData.xr.renderTargetDesc.dimension == cameraTargetDescriptor.dimension;
             }
 #endif
-            bool requiresBlitForOffscreenCamera = applyPostProcessing || cameraData.requiresOpaqueTexture || requiresExplicitMsaaResolve || !cameraData.isDefaultViewport;
+            bool requiresOpaqueTexture = cameraData.requiresOpaqueTexture || renderPassInputs.requiresColorTexture;
+
+            bool requiresBlitForOffscreenCamera = applyPostProcessing || requiresOpaqueTexture || requiresExplicitMsaaResolve || !cameraData.isDefaultViewport;
             if (isOffscreenRender)
                 return requiresBlitForOffscreenCamera;
 
             return requiresBlitForOffscreenCamera || isScaledRender || isScalableBufferManagerUsed || cameraData.isHdrEnabled ||
-                !isCompatibleBackbufferTextureDimension || isCapturing || cameraData.requireSrgbConversion ||
-                renderPassInputs.requiresColorTexture;
+                !isCompatibleBackbufferTextureDimension || isCapturing || cameraData.requireSrgbConversion;
         }
 
         // There is two ways to control the dynamic resolution in URP:
@@ -779,7 +762,5 @@ namespace UnityEngine.Rendering.Universal
 
             return supportsDepthCopy || msaaDepthResolve;
         }
-        
-        internal override bool supportsNativeRenderPassRendergraphCompiler => true;
     }
 }

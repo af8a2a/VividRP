@@ -21,14 +21,6 @@ namespace UnityEngine.Rendering.Universal
         private static readonly int k_HDREmulationScaleID = Shader.PropertyToID("_HDREmulationScale");
         private static readonly int k_RendererColorID = Shader.PropertyToID("_RendererColor");
 
-#if URP_COMPATIBILITY_MODE
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
-        public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
-        {
-            throw new NotImplementedException();
-        }
-#endif
-
         private static void Execute(RasterGraphContext context, PassData passData)
         {
             var cmd = context.cmd;
@@ -56,8 +48,15 @@ namespace UnityEngine.Rendering.Universal
                 }
             }
 
-            // Draw all renderers in layer batch
-            cmd.DrawRendererList(passData.rendererList);
+            if (passData.activeDebugHandler)
+            {
+                passData.debugRendererLists.DrawWithRendererList(cmd);
+            }
+            else
+            {
+                // Draw all renderers in layer batch
+                cmd.DrawRendererList(passData.rendererList);
+            }
 
             RendererLighting.DisableAllKeywords(cmd);
         }
@@ -76,21 +75,24 @@ namespace UnityEngine.Rendering.Universal
             internal bool layerUseLights;
             internal TextureHandle[] lightTextures;
             internal RendererListHandle rendererList;
+            internal DebugRendererLists debugRendererLists;
+            internal bool activeDebugHandler;
 
 #if UNITY_EDITOR
             internal bool isLitView; // Required for prefab view and preview camera
 #endif
         }
 
-        public void Render(RenderGraph graph, ContextContainer frameData, Renderer2DData rendererData, ref LayerBatch[] layerBatches, int batchIndex, ref FilteringSettings filterSettings)
+        public void Render(RenderGraph graph, ContextContainer frameData, int batchIndex, ref FilteringSettings filterSettings)
         {
             UniversalRenderingData renderingData = frameData.Get<UniversalRenderingData>();
             UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
             UniversalLightData lightData = frameData.Get<UniversalLightData>();
             Universal2DResourceData universal2DResourceData = frameData.Get<Universal2DResourceData>();
             CommonResourceData commonResourceData = frameData.Get<CommonResourceData>();
+            Renderer2DData rendererData = frameData.Get<Universal2DRenderingData>().renderingData;
+            var layerBatch = frameData.Get<Universal2DRenderingData>().layerBatches[batchIndex];
 
-            var layerBatch = layerBatches[batchIndex];
             bool isLitView = true;
 
 #if UNITY_EDITOR
@@ -115,18 +117,21 @@ namespace UnityEngine.Rendering.Universal
                             builder.UseTexture(passData.lightTextures[i]);
                     }
 
-                    SetGlobalLightTextures(graph, builder, passData.lightTextures, ref layerBatch, rendererData, isLitView);
+                    SetGlobalLightTextures(graph, builder, frameData, batchIndex, isLitView);
 
                     builder.AllowGlobalStateModification(true);
 
-                    builder.SetRenderFunc((SetGlobalPassData data, RasterGraphContext context) =>
+                    builder.SetRenderFunc(static (SetGlobalPassData data, RasterGraphContext context) =>
                     {
                     });
                 }
             }
 
             // Renderer Pass
-            using (var builder = graph.AddRasterRenderPass<PassData>(k_RenderPass, out var passData, m_ProfilingSampler))
+            var passName = k_RenderPass;
+            LayerDebug.FormatPassName(layerBatch, ref passName);
+
+            using (var builder = graph.AddRasterRenderPass<PassData>(passName, out var passData, LayerDebug.GetProfilingSampler(passName, m_ProfilingSampler)))
             {
                 passData.lightBlendStyles = rendererData.lightBlendStyles;
                 passData.blendStyleIndices = layerBatch.activeBlendStylesIndices;
@@ -142,9 +147,22 @@ namespace UnityEngine.Rendering.Universal
                 RendererLighting.GetTransparencySortingMode(rendererData, cameraData.camera, ref sortSettings);
                 drawSettings.sortingSettings = sortSettings;
 
-                var param = new RendererListParams(renderingData.cullResults, drawSettings, filterSettings);
-                passData.rendererList = graph.CreateRendererList(param);
-                builder.UseRendererList(passData.rendererList);
+                var activeDebugHandler = GetActiveDebugHandler(cameraData);
+                passData.activeDebugHandler = activeDebugHandler != null;
+
+                if (activeDebugHandler != null)
+                {
+                    var renderStateBlock = new RenderStateBlock(RenderStateMask.Nothing);
+                    passData.debugRendererLists = activeDebugHandler.CreateRendererListsWithDebugRenderState(graph,
+                        ref renderingData.cullResults, ref drawSettings, ref filterSettings, ref renderStateBlock);
+                    passData.debugRendererLists.PrepareRendererListForRasterPass(builder);
+                }
+                else
+                {
+                    var param = new RendererListParams(renderingData.cullResults, drawSettings, filterSettings);
+                    passData.rendererList = graph.CreateRendererList(param);
+                    builder.UseRendererList(passData.rendererList);
+                }
 
                 if (passData.layerUseLights)
                 {
@@ -159,7 +177,7 @@ namespace UnityEngine.Rendering.Universal
                 // Set color and depth attachments
                 builder.SetRenderAttachment(commonResourceData.activeColorTexture, 0);
 
-                if (rendererData.useDepthStencilBuffer)
+                if (Renderer2D.IsDepthUsageAllowed(frameData, rendererData))
                     builder.SetRenderAttachmentDepth(commonResourceData.activeDepthTexture);
 
                 builder.AllowGlobalStateModification(true);
@@ -167,17 +185,21 @@ namespace UnityEngine.Rendering.Universal
                 // Post set global light textures for next renderer pass 
                 var nextBatch = batchIndex + 1;
                 if (nextBatch < universal2DResourceData.lightTextures.Length)
-                    SetGlobalLightTextures(graph, builder, universal2DResourceData.lightTextures[nextBatch], ref layerBatches[nextBatch], rendererData, isLitView);
+                    SetGlobalLightTextures(graph, builder, frameData, nextBatch, isLitView);
 
-                builder.SetRenderFunc((PassData data, RasterGraphContext context) =>
+                builder.SetRenderFunc(static (PassData data, RasterGraphContext context) =>
                 {
                     Execute(context, data);
                 });
             }
         }
 
-        void SetGlobalLightTextures(RenderGraph graph, IRasterRenderGraphBuilder builder, TextureHandle[] lightTextures, ref LayerBatch layerBatch, Renderer2DData rendererData, bool isLitView)
+        void SetGlobalLightTextures(RenderGraph graph, IRasterRenderGraphBuilder builder, ContextContainer frameData, int batchIndex, bool isLitView)
         {
+            Renderer2DData rendererData = frameData.Get<Universal2DRenderingData>().renderingData;
+            var layerBatch = frameData.Get<Universal2DRenderingData>().layerBatches[batchIndex];
+            var lightTextures = frameData.Get<Universal2DResourceData>().lightTextures[batchIndex];
+
             if (isLitView)
             {
                 if (layerBatch.lightStats.useLights)

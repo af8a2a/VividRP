@@ -48,7 +48,7 @@ Material:
     - _MaxSample: 256
     - _MaxSteps: 24
     - _RayCount: 1
-    - _Sample: 50
+    - _Sample: 129
     - _Seed: 0
     - _StepSize: 0.4
     - _TemporalIntensity: 0.936

@@ -103,7 +103,6 @@ namespace UnityEngine.Rendering.Universal
 
         internal UniversalRenderingData universalRenderingData => frameData.Get<UniversalRenderingData>();
 
-
         /// <summary>
         /// Returns culling results that exposes handles to visible objects, lights and probes.
         /// You can use this to draw objects with <c>ScriptableRenderContext.DrawRenderers</c>
@@ -281,7 +280,6 @@ namespace UnityEngine.Rendering.Universal
             return frameData.Get<UniversalCameraData>().GetProjectionMatrixNoJitter(viewIndex);
         }
 
-
         internal Matrix4x4 GetGPUProjectionMatrix(bool renderIntoTexture, int viewIndex = 0)
         {
             return frameData.Get<UniversalCameraData>().GetGPUProjectionMatrix(renderIntoTexture, viewIndex);
@@ -434,21 +432,6 @@ namespace UnityEngine.Rendering.Universal
         {
             return frameData.Get<UniversalCameraData>().IsHandleYFlipped(handle);
         }
-
-#if URP_COMPATIBILITY_MODE
-        /// <summary>
-        /// True if the camera device projection matrix is flipped. This happens when the pipeline is rendering
-        /// to a render texture in non OpenGL platforms. If you are doing a custom Blit pass to copy camera textures
-        /// (_CameraColorTexture, _CameraDepthAttachment) you need to check this flag to know if you should flip the
-        /// matrix when rendering with for cmd.Draw* and reading from camera textures.
-        /// </summary>
-        /// <returns> True if the camera device projection matrix is flipped. </returns>
-        [Obsolete(DeprecationMessage.CompatibilityScriptingAPIObsoleteFrom2023_3)]
-        public bool IsCameraProjectionMatrixFlipped()
-        {
-            return frameData.Get<UniversalCameraData>().IsCameraProjectionMatrixFlipped();
-        }
-#endif
 
         /// <summary>
         /// True if the render target's projection matrix is flipped. This happens when the pipeline is rendering
@@ -1446,7 +1429,13 @@ namespace UnityEngine.Rendering.Universal
 
         /// <summary> Deprecated keyword. Use ClusterLightLoop instead. </summary>
         internal const string ForwardPlus = "_FORWARD_PLUS"; // Backward compatibility. Deprecated in 6.1.
-        
+
+        /// <summary> Keyword used for Multi Sampling Anti-Aliasing (MSAA) with 2 per pixel sample count. </summary>
+        public const string Msaa2 = "_MSAA_2";
+
+        /// <summary> Keyword used for Multi Sampling Anti-Aliasing (MSAA) with 4 per pixel sample count. </summary>
+        public const string Msaa4 = "_MSAA_4";
+
         /// <summary> Keyword used for ScreenSpaceReflection.</summary>
         public const string ScreenSpaceReflection = "_SCREEN_SPACE_REFLECTION";
     }
@@ -2048,11 +2037,5 @@ namespace UnityEngine.Rendering.Universal
         }
 
         internal static bool isRunningOnPowerVRGPU = SystemInfo.graphicsDeviceName.Contains("PowerVR");
-
-        // Mali Valhall architecture GPUs (G76, G77, G78, etc.) have issues with separate depth textures when SSAO is enabled
-        // This affects depth texture sampling patterns in SSAO passes
-        internal static bool isRunningOnMaliValhallGPU = SystemInfo.graphicsDeviceName.StartsWith("Mali-G5") ||
-                                                         SystemInfo.graphicsDeviceName.StartsWith("Mali-G6") ||
-                                                         SystemInfo.graphicsDeviceName.StartsWith("Mali-G7");
     }
 }

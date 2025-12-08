@@ -155,16 +155,8 @@ half4 DeferredShadingClustered(Varyings input) : SV_Target
     #if defined(_SCREEN_SPACE_OCCLUSION)
         mainLight.shadowAttenuation *= aoFactor.directAmbientOcclusion;
     #endif
-    mainLight.shadowScatter = EvaluateShadowScatter(mainLight.shadowAttenuation * mainLight.distanceAttenuation);
 
     color += DeferredLightContribution(mainLight, inputData, gBufferData);
-
-
-    #if defined(_SCREEN_SPACE_REFLECTION)
-    half4 ssrLighting = SAMPLE_TEXTURE2D_LOD(_SSRLightingTexture, sampler_TrilinearClamp, input.screenUV, 0);
-    color +=  ssrLighting.rgb*ssrLighting.a ;
-
-    #endif
 
     // Additional light loop
     // We do additional directional lights last because otherwise FXC complains...

@@ -5,7 +5,6 @@ namespace UnityEngine.Rendering.Universal
     /// </summary>
     public class UniversalRenderingData : ContextItem
     {
-
         /// <summary>
         /// Returns culling results that exposes handles to visible objects, lights and probes.
         /// You can use this to draw objects with <c>ScriptableRenderContext.DrawRenderers</c>

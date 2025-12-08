@@ -166,7 +166,8 @@ namespace UnityEngine.Rendering.Universal
                     
                     
                     // ScreenSpaceLighting ShaderVariables
-                    // cmd.SetComputeTextureParam(data.deferredLightingCS, kernelIndex, "_ScreenSpaceShadowmapTexture", data.SSShadowsTexture);
+                    if(data.SSShadowsTexture.IsValid())
+                        cmd.SetComputeTextureParam(data.deferredLightingCS, kernelIndex, "_ScreenSpaceShadowmapTexture", data.SSShadowsTexture);
                     // if (data.shadowScatterTexture.IsValid())
                     //     cmd.SetComputeTextureParam(data.deferredLightingCS, kernelIndex, "_ShadowScatterTexture", data.shadowScatterTexture);
                     if (data.SSRLightingTexture.IsValid())
@@ -245,10 +246,10 @@ namespace UnityEngine.Rendering.Universal
                 builder.UseBuffer(passData.ambientProbe, AccessFlags.Read);
                 builder.UseTexture(passData.reflectProbe, AccessFlags.Read);
 
-                builder.UseTexture(passData.SSShadowsTexture, AccessFlags.Read);
-                // if (passData.shadowScatterTexture.IsValid())
-                //     builder.UseTexture(passData.shadowScatterTexture, AccessFlags.Read);
+                if(passData.SSShadowsTexture.IsValid())
+                    builder.UseTexture(passData.SSShadowsTexture, AccessFlags.Read);
 
+                
                 if (passData.SSRLightingTexture.IsValid())
                     builder.UseTexture(passData.SSRLightingTexture, AccessFlags.Read);
 

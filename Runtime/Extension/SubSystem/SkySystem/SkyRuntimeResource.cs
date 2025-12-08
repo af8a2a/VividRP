@@ -15,7 +15,7 @@ namespace UnityEngine.Rendering.Universal
 
         
         
-        [SerializeField, ResourcePath("Runtime/Extension/Sky/Shader/AmbientProbeConvolution.compute")]
+        [SerializeField, ResourcePath("Runtime/Extension/SubSystem/SkySystem/Shader/AmbientProbeConvolution.compute")]
         private ComputeShader m_AmbientProbeConvolutionCS;
 
         public ComputeShader ambientProbeConvolutionCS
@@ -30,7 +30,7 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// Sky.
         /// </summary>
-        [SerializeField, ResourcePath("Runtime/Extension/Sky/Shader/HDRISky.shader")]
+        [SerializeField, ResourcePath("Runtime/Extension/SubSystem/SkySystem/Shader/HDRISky.shader")]
         private Shader m_HdriSkyPS;
 
         public Shader hdriSkyPS
@@ -39,7 +39,7 @@ namespace UnityEngine.Rendering.Universal
             set => this.SetValueAndNotify(ref m_HdriSkyPS, value);
         }
 
-        [SerializeField, ResourcePath("Runtime/Extension/Sky/Shader/GradientSky.shader")]
+        [SerializeField, ResourcePath("Runtime/Extension/SubSystem/SkySystem/Shader/GradientSky.shader")]
         private Shader m_GradientSkyPS;
 
         public Shader gradientSkyPS

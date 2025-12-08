@@ -16,12 +16,6 @@ namespace UnityEngine.Rendering.Universal.Internal
 
         FilteringSettings m_FilteringSettings;
 
-#if URP_COMPATIBILITY_MODE
-        private RTHandle destination { get; set; }
-        private GraphicsFormat depthStencilFormat;
-        private PassData m_PassData;
-#endif
-
         // Statics
         private static readonly ShaderTagId k_ShaderTagId = new ShaderTagId("DepthOnly");
         private static readonly int s_CameraDepthTextureID = Shader.PropertyToID("_CameraDepthTexture");
@@ -40,8 +34,7 @@ namespace UnityEngine.Rendering.Universal.Internal
             profilingSampler = new ProfilingSampler("Draw Depth Only");
             m_FilteringSettings = new FilteringSettings(renderQueueRange, layerMask);
             renderPassEvent = evt;
-            this.shaderTagId = k_ShaderTagId;
-
+            shaderTagId = k_ShaderTagId;
         }
 
         /// <summary>
@@ -58,7 +51,6 @@ namespace UnityEngine.Rendering.Universal.Internal
         {
         }
 
-
         private static void ExecutePass(RasterCommandBuffer cmd, RendererList rendererList)
         {
             using (new ProfilingScope(cmd, ProfilingSampler.Get(URPProfileId.DepthPrepass)))
@@ -66,7 +58,6 @@ namespace UnityEngine.Rendering.Universal.Internal
                 cmd.DrawRendererList(rendererList);
             }
         }
-
 
         private class PassData
         {
@@ -82,7 +73,7 @@ namespace UnityEngine.Rendering.Universal.Internal
             return new RendererListParams(renderingData.cullResults, drawSettings, m_FilteringSettings);
         }
 
-        internal void Render(RenderGraph renderGraph, ContextContainer frameData, ref TextureHandle cameraDepthTexture, uint batchLayerMask, bool setGlobalDepth)
+        internal void Render(RenderGraph renderGraph, ContextContainer frameData, in TextureHandle depthTexture, uint batchLayerMask, bool setGlobalDepth)
         {
             UniversalRenderingData renderingData = frameData.Get<UniversalRenderingData>();
             UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
@@ -95,19 +86,23 @@ namespace UnityEngine.Rendering.Universal.Internal
                 passData.rendererList = renderGraph.CreateRendererList(param);
                 builder.UseRendererList(passData.rendererList);
 
-                builder.SetRenderAttachmentDepth(cameraDepthTexture, AccessFlags.Write);
+                builder.SetRenderAttachmentDepth(depthTexture, AccessFlags.ReadWrite);
 
                 if (setGlobalDepth)
-                    builder.SetGlobalTextureAfterPass(cameraDepthTexture, s_CameraDepthTextureID);
+                    builder.SetGlobalTextureAfterPass(depthTexture, s_CameraDepthTextureID);
 
                 builder.AllowGlobalStateModification(true);
                 if (cameraData.xr.enabled)
                 {
                     builder.EnableFoveatedRasterization(cameraData.xr.supportsFoveatedRendering && cameraData.xrUniversal.canFoveateIntermediatePasses);
-                    builder.SetExtendedFeatureFlags(ExtendedFeatureFlags.MultiviewRenderRegionsCompatible);
+                    // Apply MultiviewRenderRegionsCompatible flag only to the peripheral view in Quad Views
+                    if (cameraData.xr.multipassId == 0)
+                    {
+                        builder.SetExtendedFeatureFlags(ExtendedFeatureFlags.MultiviewRenderRegionsCompatible);
+                    }
                 }
 
-                builder.SetRenderFunc((PassData data, RasterGraphContext context) =>
+                builder.SetRenderFunc(static (PassData data, RasterGraphContext context) =>
                 {
                     ExecutePass(context.cmd, data.rendererList);
                 });

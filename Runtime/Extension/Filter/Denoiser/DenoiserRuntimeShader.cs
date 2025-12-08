@@ -20,7 +20,7 @@ namespace UnityEngine.Rendering.Universal
         }
 
 
-        [SerializeField, ResourcePath("Runtime/Extension/Filter/Denoiser/TemporalDenoiser/Shader/TemporalFilter.compute")]
+        [SerializeField, ResourcePath("Runtime/Extension/Filter/Denoiser/TemporalFilter/Shader/TemporalFilter.compute")]
         private ComputeShader m_TemporalFilterCS;
 
         public ComputeShader temporalFilterCS

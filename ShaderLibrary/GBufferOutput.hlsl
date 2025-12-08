@@ -54,7 +54,7 @@ GBufferFragOutput PackGBuffersSurfaceData(SurfaceData surfaceData, InputData inp
     GBufferFragOutput output;
     output.gBuffer0 = half4(surfaceData.albedo.rgb, PackGBufferMaterialFlags(materialFlags));   // albedo          albedo          albedo          materialFlags   (sRGB rendertarget)
     output.gBuffer1 = half4(surfaceData.specular.rgb, surfaceData.occlusion);                   // specular        specular        specular        occlusion
-    output.gBuffer2 = half4(packedNormalWS, 1 - surfaceData.smoothness); // encoded-normal  encoded-normal  encoded-normal  roughness
+    output.gBuffer2 = half4(packedNormalWS, surfaceData.smoothness);                            // encoded-normal  encoded-normal  encoded-normal  smoothness
     output.color    = half4(globalIllumination, 1);                                             // GI              GI              GI              unused          (lighting buffer)
 
     #if defined(GBUFFER_FEATURE_DEPTH)
@@ -108,7 +108,7 @@ GBufferFragOutput PackGBuffersBRDFData(BRDFData brdfData, InputData inputData, h
     GBufferFragOutput output;
     output.gBuffer0 = half4(brdfData.albedo.rgb, PackGBufferMaterialFlags(materialFlags));  // diffuse           diffuse         diffuse         materialFlags   (sRGB rendertarget)
     output.gBuffer1 = half4(packedSpecular, occlusion);                                     // metallic/specular specular        specular        occlusion
-    output.gBuffer2 = half4(packedNormalWS, 1 - smoothness); // encoded-normal    encoded-normal  encoded-normal  smoothness
+    output.gBuffer2 = half4(packedNormalWS, smoothness);                                    // encoded-normal    encoded-normal  encoded-normal  smoothness
     output.color = half4(globalIllumination, 1);                                            // GI                GI              GI              unused          (lighting buffer)
 
     #if defined(GBUFFER_FEATURE_DEPTH)

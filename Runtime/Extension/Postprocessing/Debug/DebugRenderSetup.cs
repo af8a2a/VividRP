@@ -72,16 +72,6 @@ namespace UnityEngine.Rendering.Universal
             m_Index = index;
         }
 
-        internal void CreateRendererList(
-            ScriptableRenderContext context,
-            ref CullingResults cullResults,
-            ref DrawingSettings drawingSettings,
-            ref FilteringSettings filteringSettings,
-            ref RenderStateBlock renderStateBlock,
-            ref RendererList rendererList)
-        {
-            RenderingUtils.CreateRendererListWithRenderStateBlock(context, ref cullResults, drawingSettings, filteringSettings, renderStateBlock, ref rendererList);
-        }
 
         internal void CreateRendererList(
             RenderGraph renderGraph,

@@ -195,15 +195,19 @@ namespace UnityEngine.Rendering.Universal
     {
         // Deprecated in 10.x
         /// <summary>
-        /// The render target identifier for camera depth.
-        /// This is obsolete, cameraDepth has been renamed to cameraDepthTarget.
+        /// Controls when URP renders via an intermediate texture.
         /// </summary>
-        [Obsolete("cameraDepth has been renamed to cameraDepthTarget. #from(2021.1) #breakingFrom(2023.1) (UnityUpgradable) -> cameraDepthTarget", true)]
-        [EditorBrowsable(EditorBrowsableState.Never)]
-        public RenderTargetIdentifier cameraDepth
+        [Obsolete("This property is not used. #from(6000.3)", false)]
+        public IntermediateTextureMode intermediateTextureMode
         {
-            get => m_CameraDepthTarget.nameID;
+            get => default;
+            set {}
         }
+    }
+
+    public abstract partial class ScriptableRenderer
+    {
+
     }
 
     public abstract partial class ScriptableRendererData
@@ -618,7 +622,5 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         [Obsolete("Please use stripRuntimeDebugShaders instead. #from(2023.1)")]
         public bool supportRuntimeDebugDisplay = false;
-
-        [SerializeField, Obsolete("Keep for migration. #from(2023.2)")] internal bool m_EnableRenderGraph;
     }
 }

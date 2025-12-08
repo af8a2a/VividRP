@@ -8,16 +8,16 @@ using UnityEngine.PathTracing.Core;
 using UnityEngine.Rendering.LiveGI;
 using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Rendering.UnifiedRayTracing;
-using InstanceHandle = UnityEngine.PathTracing.Core.Handle<UnityEngine.PathTracing.Core.World.InstanceKey>;
-using LightHandle = UnityEngine.PathTracing.Core.Handle<UnityEngine.PathTracing.Core.World.LightDescriptor>;
-using MaterialHandle = UnityEngine.PathTracing.Core.Handle<UnityEngine.PathTracing.Core.World.MaterialDescriptor>;
+using InstanceHandle = UnityEngine.PathTracing.Core.Handle<UnityEngine.Rendering.SurfaceCacheWorld.Instance>;
+using LightHandle = UnityEngine.PathTracing.Core.Handle<UnityEngine.Rendering.SurfaceCacheWorld.Light>;
+using MaterialHandle = UnityEngine.PathTracing.Core.Handle<UnityEngine.PathTracing.Core.MaterialPool.MaterialDescriptor>;
 
 namespace UnityEngine.Rendering.Universal
 {
     [Serializable]
     [SupportedOnRenderPipeline]
     [Categorization.CategoryInfo(Name = "R: Surface Cache URP Integration", Order = 1000), HideInInspector]
-    class SurfaceCacheRenderPipelineResourceSet : IRenderPipelineResources
+    sealed class SurfaceCacheRenderPipelineResourceSet : IRenderPipelineResources
     {
         [SerializeField, HideInInspector]
         int m_Version = 6;
@@ -25,22 +25,22 @@ namespace UnityEngine.Rendering.Universal
         int IRenderPipelineGraphicsSettings.version => m_Version;
 
         [ResourcePath("Runtime/RendererFeatures/SurfaceCacheGlobalIlluminationRendererFeature/FallbackMaterial.mat")]
-        Material m_FallbackMaterial;
+        public Material m_FallbackMaterial;
 
         [ResourcePath("Runtime/RendererFeatures/SurfaceCacheGlobalIlluminationRendererFeature/PatchAllocation.compute")]
-        ComputeShader m_AllocationShader;
+        public ComputeShader m_AllocationShader;
 
         [ResourcePath("Runtime/RendererFeatures/SurfaceCacheGlobalIlluminationRendererFeature/ScreenResolveLookup.compute")]
-        ComputeShader m_ScreenResolveLookupShader;
+        public ComputeShader m_ScreenResolveLookupShader;
 
         [ResourcePath("Runtime/RendererFeatures/SurfaceCacheGlobalIlluminationRendererFeature/ScreenResolveUpsampling.compute")]
-        ComputeShader m_ScreenResolveUpsamplingShader;
+        public ComputeShader m_ScreenResolveUpsamplingShader;
 
         [ResourcePath("Runtime/RendererFeatures/SurfaceCacheGlobalIlluminationRendererFeature/Debug.compute")]
-        ComputeShader m_DebugShader;
+        public ComputeShader m_DebugShader;
 
         [ResourcePath("Runtime/RendererFeatures/SurfaceCacheGlobalIlluminationRendererFeature/FlatNormalResolution.compute")]
-        ComputeShader m_FlatNormalResolutionShader;
+        public ComputeShader m_FlatNormalResolutionShader;
 
         public Material fallbackMaterial
         {
@@ -162,7 +162,7 @@ namespace UnityEngine.Rendering.Universal
         {
             private class WorldUpdatePassData
             {
-                internal PathTracing.Core.World World;
+                internal SurfaceCacheWorld World;
             }
 
             private class DebugPassData
@@ -297,7 +297,7 @@ namespace UnityEngine.Rendering.Universal
 
             private readonly SceneUpdatesTracker _sceneTracker;
             private readonly WorldAdapter _worldAdapter;
-            private readonly World _pathTracingWorld;
+            private readonly SurfaceCacheWorld _world;
             private readonly Material _fallbackMaterial;
 
             private readonly ComputeShader _screenResolveLookupShader;
@@ -324,14 +324,14 @@ namespace UnityEngine.Rendering.Universal
             private bool _cascadeMovement;
 
             // Debug
-            readonly private bool _debugEnabled;
-            readonly private DebugViewMode_ _debugViewMode;
-            readonly private bool _debugShowSamplePosition;
+            private readonly bool _debugEnabled;
+            private readonly DebugViewMode_ _debugViewMode;
+            private readonly bool _debugShowSamplePosition;
 
             // Screen Filtering
-            readonly private uint _lookupSampleCount;
-            readonly private float _upsamplingKernelSize;
-            readonly private uint _upsamplingSampleCount;
+            private readonly uint _lookupSampleCount;
+            private readonly float _upsamplingKernelSize;
+            private readonly uint _upsamplingSampleCount;
 
             private SurfaceCache _cache;
 
@@ -350,30 +350,16 @@ namespace UnityEngine.Rendering.Universal
                 bool debugEnabled,
                 DebugViewMode_ debugViewMode,
                 bool debugShowSamplePosition,
-                bool multiBounce,
-                SurfaceCacheEstimationMethod estimationMethod,
-                uint restirEstimationConfidenceCap,
-                uint restirEstimationSpatialSampleCount,
-                float restirEstimationSpatialFilterSize,
-                uint restirEstimationValidationFrameInterval,
-                uint uniformEstimationSampleCount,
-                uint risEstimationCandidateCount,
-                float risEstimationTargetFunctionUpdateWeight,
-                float temporalSmoothing,
-                bool spatialFilterEnabled,
-                uint spatialFilterSampleCount,
-                float spatialFilterRadius,
-                bool temporalPostFilterEnabled,
                 uint lookupSampleCount,
                 float upsamplingKernelSize,
                 uint upsamplingSampleCount,
-                uint gridSize,
-                float voxelMinSize,
-                uint cascadeCount,
+                SurfaceCacheGridParameterSet gridParams,
+                SurfaceCacheEstimationParameterSet estimationParams,
+                SurfaceCachePatchFilteringParameterSet patchFilteringParams,
                 bool cascadeMovement)
             {
-                Debug.Assert(cascadeCount != 0);
-                Debug.Assert(cascadeCount <= SurfaceCache.CascadeMax);
+                Debug.Assert(gridParams.CascadeCount != 0);
+                Debug.Assert(gridParams.CascadeCount <= SurfaceCache.CascadeMax);
 
                 _screenResolveLookupShader = screenResolveLookupShader;
                 _screenResolveUpsamplingShader = screenResolveUpsamplingShader;
@@ -406,33 +392,14 @@ namespace UnityEngine.Rendering.Universal
                 _upsamplingSampleCount = upsamplingSampleCount;
                 _lookupSampleCount = lookupSampleCount;
 
-                _cache = new SurfaceCache(
-                    resourceSet,
-                    gridSize,
-                    voxelMinSize,
-                    cascadeCount,
-                    estimationMethod,
-                    multiBounce,
-                    restirEstimationConfidenceCap,
-                    restirEstimationSpatialSampleCount,
-                    restirEstimationSpatialFilterSize,
-                    restirEstimationValidationFrameInterval,
-                    uniformEstimationSampleCount,
-                    risEstimationCandidateCount,
-                    risEstimationTargetFunctionUpdateWeight,
-                    temporalSmoothing,
-                    spatialFilterEnabled,
-                    spatialFilterSampleCount,
-                    spatialFilterRadius,
-                    temporalPostFilterEnabled);
-
+                _cache = new SurfaceCache(resourceSet, gridParams, estimationParams, patchFilteringParams);
                 _sceneTracker = new SceneUpdatesTracker();
 
-                _pathTracingWorld = new World();
-                _pathTracingWorld.Init(_rtContext, worldResources);
+                _world = new SurfaceCacheWorld();
+                _world.Init(_rtContext, worldResources);
 
                 _fallbackMaterial = fallbackMaterial;
-                _worldAdapter = new WorldAdapter(_pathTracingWorld, _fallbackMaterial);
+                _worldAdapter = new WorldAdapter(_world, _fallbackMaterial);
             }
 
             public void Dispose()
@@ -446,7 +413,7 @@ namespace UnityEngine.Rendering.Universal
                 _lowResScreenNdcDepths?.Release();
                 _sceneTracker.Dispose();
                 _cache.Dispose();
-                _pathTracingWorld.Dispose();
+                _world.Dispose();
                 _worldAdapter.Dispose();
                 _worldUpdateScratch?.Dispose();
             }
@@ -590,26 +557,23 @@ namespace UnityEngine.Rendering.Universal
 
                 using (var builder = renderGraph.AddUnsafePass("Surface Cache World Update", out WorldUpdatePassData passData))
                 {
-                    const bool filterRealtimeLights = false;
                     const bool filterBakedLights = true;
-                    const bool filterMixedLights = true;
-                    var changes = _sceneTracker.GetChanges(filterRealtimeLights, filterBakedLights, filterMixedLights);
+                    var changes = _sceneTracker.GetChanges(filterBakedLights);
 
-                    _worldAdapter.UpdateMaterials(_pathTracingWorld, changes.addedMaterials, changes.removedMaterials, changes.changedMaterials);
-                    _worldAdapter.UpdateInstances(_pathTracingWorld, changes.addedInstances, changes.changedInstances, changes.removedInstances, RenderedGameObjectsFilter.All, true, _fallbackMaterial);
+                    _worldAdapter.UpdateMaterials(_world, changes.addedMaterials, changes.removedMaterials, changes.changedMaterials);
+                    _worldAdapter.UpdateInstances(_world, changes.addedInstances, changes.changedInstances, changes.removedInstances, RenderedGameObjectsFilter.All, _fallbackMaterial);
                     const bool multiplyPunctualLightIntensityByPI = false;
-                    _worldAdapter.UpdateLights(_pathTracingWorld, changes.addedLights, changes.removedLights, changes.changedLights, LightPickingMethod.Uniform, multiplyPunctualLightIntensityByPI, false, false);
+                    _worldAdapter.UpdateLights(_world, changes.addedLights, changes.removedLights, changes.changedLights, multiplyPunctualLightIntensityByPI);
 
-                    passData.World = _pathTracingWorld;
+                    passData.World = _world;
 
-                    _pathTracingWorld.SetEnvironmentMaterial(RenderSettings.skybox);
-                    _pathTracingWorld.EnableEmissiveSampling = true;
+                    _world.SetEnvironmentMaterial(RenderSettings.skybox);
 
                     builder.AllowGlobalStateModification(true);
                     builder.SetRenderFunc((WorldUpdatePassData data, UnsafeGraphContext graphCtx) => UpdateWorld(data, graphCtx, ref _worldUpdateScratch));
                 }
 
-                uint outputIrradianceBufferIdx = _cache.RecordPatchUpdate(renderGraph, _frameIdx, _pathTracingWorld);
+                uint outputIrradianceBufferIdx = _cache.RecordPatchUpdate(renderGraph, _frameIdx, _world);
 
                 using (var builder = renderGraph.AddComputePass("Surface Cache Screen Lookup", out ScreenIrradianceLookupPassData data))
                 {
@@ -730,9 +694,8 @@ namespace UnityEngine.Rendering.Universal
 
             static void UpdateWorld(WorldUpdatePassData data, UnsafeGraphContext graphCtx, ref GraphicsBuffer scratch)
             {
-                Bounds sceneBounds = new Bounds(); // We assume that world doesn't need scene bounds because it only needs this when using power sampling, and we don't support that yet anyway.
                 var cmd = CommandBufferHelpers.GetNativeCommandBuffer(graphCtx.cmd);
-                data.World.Build(sceneBounds, cmd, ref scratch);
+                data.World.Build(cmd, ref scratch);
             }
 
             static void LookupScreenIrradiance(ScreenIrradianceLookupPassData data, ComputeGraphContext cgContext)
@@ -875,55 +838,55 @@ namespace UnityEngine.Rendering.Universal
 
         class WorldAdapter : IDisposable
         {
-            // This dictionary maps from Unity InstanceID for MeshRenderer or Terrain, to corresponding InstanceHandle for accessing World.
-            private readonly Dictionary<int, InstanceHandle> _instanceIDToWorldInstanceHandles = new();
+            // This dictionary maps from Unity EntityID for MeshRenderer or Terrain, to corresponding InstanceHandle for accessing World.
+            private readonly Dictionary<EntityId, InstanceHandle> _entityIDToWorldInstanceHandles = new();
 
             // Same as above but for Lights
-            private readonly Dictionary<int, LightHandle> _instanceIDToWorldLightHandles = new();
+            private readonly Dictionary<EntityId, LightHandle> _entityIDToWorldLightHandles = new();
 
             // Same as above but for Materials
-            private Dictionary<int, MaterialHandle> _instanceIDToWorldMaterialHandles = new();
+            private Dictionary<EntityId, MaterialHandle> _entityIDToWorldMaterialHandles = new();
 
             // We also keep track of associated material descriptors, so we can free temporary temporary textures when a material is removed
-            private Dictionary<int, World.MaterialDescriptor> _instanceIDToWorldMaterialDescriptors = new();
+            private Dictionary<EntityId, MaterialPool.MaterialDescriptor> _entityIDToWorldMaterialDescriptors = new();
 
-            private World.MaterialDescriptor _fallbackMaterialDescriptor;
+            private MaterialPool.MaterialDescriptor _fallbackMaterialDescriptor;
             private MaterialHandle _fallbackMaterialHandle;
 
-            public WorldAdapter(World world, Material fallbackMaterial)
+            public WorldAdapter(SurfaceCacheWorld world, Material fallbackMaterial)
             {
                 _fallbackMaterialDescriptor = MaterialPool.ConvertUnityMaterialToMaterialDescriptor(fallbackMaterial);
                 _fallbackMaterialHandle = world.AddMaterial(in _fallbackMaterialDescriptor, UVChannel.UV0);
-                _instanceIDToWorldMaterialHandles.Add(fallbackMaterial.GetInstanceID(), _fallbackMaterialHandle);
-                _instanceIDToWorldMaterialDescriptors.Add(fallbackMaterial.GetInstanceID(), _fallbackMaterialDescriptor);
+                _entityIDToWorldMaterialHandles.Add(fallbackMaterial.GetEntityId(), _fallbackMaterialHandle);
+                _entityIDToWorldMaterialDescriptors.Add(fallbackMaterial.GetEntityId(), _fallbackMaterialDescriptor);
             }
 
-            public void UpdateMaterials(World world, List<Material> addedMaterials, List<int> removedMaterials, List<Material> changedMaterials)
+            public void UpdateMaterials(SurfaceCacheWorld world, List<Material> addedMaterials, List<EntityId> removedMaterials, List<Material> changedMaterials)
             {
-                UpdateMaterials(world, _instanceIDToWorldMaterialHandles, _instanceIDToWorldMaterialDescriptors, addedMaterials, removedMaterials, changedMaterials);
+                UpdateMaterials(world, _entityIDToWorldMaterialHandles, _entityIDToWorldMaterialDescriptors, addedMaterials, removedMaterials, changedMaterials);
             }
 
-            private static void UpdateMaterials(World world, Dictionary<int, MaterialHandle> instanceIDToHandle, Dictionary<int, World.MaterialDescriptor> instanceIDToDescriptor, List<Material> addedMaterials, List<int> removedMaterials, List<Material> changedMaterials)
+            private static void UpdateMaterials(SurfaceCacheWorld world, Dictionary<EntityId, MaterialHandle> entityIDToHandle, Dictionary<EntityId, MaterialPool.MaterialDescriptor> entityIDToDescriptor, List<Material> addedMaterials, List<EntityId> removedMaterials, List<Material> changedMaterials)
             {
-                static void DeleteTemporaryTextures(ref World.MaterialDescriptor desc)
+                static void DeleteTemporaryTextures(ref MaterialPool.MaterialDescriptor desc)
                 {
                     CoreUtils.Destroy(desc.Albedo);
                     CoreUtils.Destroy(desc.Emission);
                     CoreUtils.Destroy(desc.Transmission);
                 }
 
-                foreach (var materialInstanceID in removedMaterials)
+                foreach (var entityID in removedMaterials)
                 {
                     // Clean up temporary textures in the descriptor
-                    UnityEngine.Debug.Assert(instanceIDToDescriptor.ContainsKey(materialInstanceID));
-                    var descriptor = instanceIDToDescriptor[materialInstanceID];
+                    Debug.Assert(entityIDToDescriptor.ContainsKey(entityID));
+                    var descriptor = entityIDToDescriptor[entityID];
                     DeleteTemporaryTextures(ref descriptor);
-                    instanceIDToDescriptor.Remove(materialInstanceID);
+                    entityIDToDescriptor.Remove(entityID);
 
                     // Remove the material from the world
-                    UnityEngine.Debug.Assert(instanceIDToHandle.ContainsKey(materialInstanceID));
-                    world.RemoveMaterial(instanceIDToHandle[materialInstanceID]);
-                    instanceIDToHandle.Remove(materialInstanceID);
+                    Debug.Assert(entityIDToHandle.ContainsKey(entityID));
+                    world.RemoveMaterial(entityIDToHandle[entityID]);
+                    entityIDToHandle.Remove(entityID);
                 }
 
                 foreach (var material in addedMaterials)
@@ -931,276 +894,149 @@ namespace UnityEngine.Rendering.Universal
                     // Add material to the world
                     var descriptor = MaterialPool.ConvertUnityMaterialToMaterialDescriptor(material);
                     var handle = world.AddMaterial(in descriptor, UVChannel.UV0);
-                    instanceIDToHandle.Add(material.GetInstanceID(), handle);
+                    entityIDToHandle.Add(material.GetEntityId(), handle);
 
                     // Keep track of the descriptor
-                    instanceIDToDescriptor.Add(material.GetInstanceID(), descriptor);
+                    entityIDToDescriptor.Add(material.GetEntityId(), descriptor);
                 }
 
                 foreach (var material in changedMaterials)
                 {
                     // Clean up temporary textures in the old descriptor
-                    UnityEngine.Debug.Assert(instanceIDToDescriptor.ContainsKey(material.GetInstanceID()));
-                    var oldDescriptor = instanceIDToDescriptor[material.GetInstanceID()];
+                    Debug.Assert(entityIDToDescriptor.ContainsKey(material.GetEntityId()));
+                    var oldDescriptor = entityIDToDescriptor[material.GetEntityId()];
                     DeleteTemporaryTextures(ref oldDescriptor);
 
                     // Update the material in the world using the new descriptor
-                    UnityEngine.Debug.Assert(instanceIDToHandle.ContainsKey(material.GetInstanceID()));
+                    Debug.Assert(entityIDToHandle.ContainsKey(material.GetEntityId()));
                     var newDescriptor = MaterialPool.ConvertUnityMaterialToMaterialDescriptor(material);
-                    world.UpdateMaterial(instanceIDToHandle[material.GetInstanceID()], in newDescriptor, UVChannel.UV0);
-                    instanceIDToDescriptor[material.GetInstanceID()] = newDescriptor;
+                    world.UpdateMaterial(entityIDToHandle[material.GetEntityId()], in newDescriptor, UVChannel.UV0);
+                    entityIDToDescriptor[material.GetEntityId()] = newDescriptor;
                 }
             }
 
-            private int _sunlightInstanceID = -1; // Used to track the sunlight instance ID, if any.
-            // Hack: Ensures that we only add one Directional light as the "sunlight" into World
-            private void FilterForSunlight(List<Light> addedLights, List<int> removedLights, List<Light> changedLights)
+            internal void UpdateLights(SurfaceCacheWorld world, List<Light> addedLights, List<EntityId> removedLights,
+                List<Light> changedLights, bool multiplyPunctualLightIntensityByPI)
             {
-                for(var i = 0; i < removedLights.Count; i++)
-                {
-                    if (removedLights[i] == _sunlightInstanceID)
-                    {
-                        _sunlightInstanceID = -1;
-                    }
-                    else
-                    {
-                        removedLights.RemoveAt(i--);
-                    }
-                }
-
-                // If the sunlight was removed, try to find a new one
-                if (_sunlightInstanceID == -1)
-                {
-                    // Get all the active realtime directional lights in the scenr
-                    var allLights = FindObjectsByType<Light>(FindObjectsSortMode.None);
-                    var realtimeDirectionalLights = new List<Light>();
-                    for (int i = 0; i < allLights.Length; i++)
-                    {
-                        var light = allLights[i];
-                        if (light.type == LightType.Directional && light.lightmapBakeType == LightmapBakeType.Realtime)
-                        {
-                            realtimeDirectionalLights.Add(light);
-                        }
-                    }
-
-                    foreach (var directionalLight in realtimeDirectionalLights)
-                    {
-                        _sunlightInstanceID = directionalLight.GetInstanceID();
-                        if (!addedLights.Contains(directionalLight))
-                        {
-                            addedLights.Add(directionalLight);
-                        }
-                        break;
-                    }
-                }
-
-                for (var i = 0; i < addedLights.Count; i++)
-                {
-                    var addedLight = addedLights[i];
-                    if (addedLight.GetInstanceID() != _sunlightInstanceID)
-                    {
-                        addedLights.RemoveAt(i--);
-                    }
-                }
-
-                for(var i = 0; i < changedLights.Count; i++)
-                {
-                    var changedLight = changedLights[i];
-                    if (changedLight.GetInstanceID() != _sunlightInstanceID)
-                    {
-                        changedLights.RemoveAt(i--);
-                    }
-                }
-            }
-
-            internal void UpdateLights(World world, List<Light> addedLights, List<int> removedLights,
-                List<Light> changedLights, LightPickingMethod pickingMethod, bool multiplyPunctualLightIntensityByPI, bool respectLightLayers, bool autoEstimateLUTRange)
-            {
-                // Filter lights to ensure only one is added as the "sunlight"
-                FilterForSunlight(addedLights, removedLights, changedLights);
-                UpdateLights(world, _instanceIDToWorldLightHandles, addedLights, removedLights, changedLights, pickingMethod, multiplyPunctualLightIntensityByPI, respectLightLayers, autoEstimateLUTRange);
+                UpdateLights(world, _entityIDToWorldLightHandles, addedLights, removedLights, changedLights, multiplyPunctualLightIntensityByPI);
             }
 
             private static void UpdateLights(
-                World world,
-                Dictionary<int, LightHandle> instanceIDToHandle, List<Light> addedLights, List<int> removedLights,
+                SurfaceCacheWorld world,
+                Dictionary<EntityId, LightHandle> entityIDToHandle, List<Light> addedLights, List<EntityId> removedLights,
                 List<Light> changedLights,
-                LightPickingMethod pickingMethod,
-                bool multiplyPunctualLightIntensityByPI,
-                bool respectLightLayers,
-                bool autoEstimateLUTRange,
-                MixedLightingMode mixedLightingMode = MixedLightingMode.IndirectOnly)
+                bool multiplyPunctualLightIntensityByPI)
             {
-                world.cdfLightPicking = pickingMethod == LightPickingMethod.Power;
-
                 // Remove deleted lights
                 LightHandle[] handlesToRemove = new LightHandle[removedLights.Count];
                 for (int i = 0; i < removedLights.Count; i++)
                 {
-                    int lightInstanceID = removedLights[i];
-                    handlesToRemove[i] = instanceIDToHandle[lightInstanceID];
-                    instanceIDToHandle.Remove(lightInstanceID);
+                    int lightEntityID = removedLights[i];
+                    handlesToRemove[i] = entityIDToHandle[lightEntityID];
+                    entityIDToHandle.Remove(lightEntityID);
                 }
                 world.RemoveLights(handlesToRemove);
 
                 // Add new lights
-                LightHandle[] addedHandles = world.AddLights(Util.ConvertUnityLightsToLightDescriptors(addedLights.ToArray(), multiplyPunctualLightIntensityByPI), respectLightLayers, autoEstimateLUTRange, mixedLightingMode);
+                var lightDescriptors = ConvertUnityLightsToLightDescriptors(addedLights.ToArray(), multiplyPunctualLightIntensityByPI);
+                LightHandle[] addedHandles = world.AddLights(lightDescriptors);
                 for (int i = 0; i < addedLights.Count; ++i)
-                    instanceIDToHandle.Add(addedLights[i].GetInstanceID(), addedHandles[i]);
+                    entityIDToHandle.Add(addedLights[i].GetEntityId(), addedHandles[i]);
 
                 // Update changed lights
                 LightHandle[] handlesToUpdate = new LightHandle[changedLights.Count];
                 for (int i = 0; i < changedLights.Count; i++)
-                    handlesToUpdate[i] = instanceIDToHandle[changedLights[i].GetInstanceID()];
+                    handlesToUpdate[i] = entityIDToHandle[changedLights[i].GetEntityId()];
 
-                world.UpdateLights(handlesToUpdate, Util.ConvertUnityLightsToLightDescriptors(changedLights.ToArray(), multiplyPunctualLightIntensityByPI), respectLightLayers, autoEstimateLUTRange, mixedLightingMode);
+                world.UpdateLights(handlesToUpdate, ConvertUnityLightsToLightDescriptors(changedLights.ToArray(), multiplyPunctualLightIntensityByPI));
             }
 
             internal void UpdateInstances(
-                World world,
+                SurfaceCacheWorld world,
                 List<MeshRenderer> addedInstances,
                 List<InstanceChanges> changedInstances,
-                List<int> removedInstances,
+                List<EntityId> removedInstances,
                 RenderedGameObjectsFilter renderedGameObjects,
-                bool enableEmissiveSampling,
                 Material fallbackMaterial)
             {
-                UpdateInstances(world, _instanceIDToWorldInstanceHandles, _instanceIDToWorldMaterialHandles, addedInstances, changedInstances, removedInstances, renderedGameObjects, enableEmissiveSampling, fallbackMaterial);
+                UpdateInstances(world, _entityIDToWorldInstanceHandles, _entityIDToWorldMaterialHandles, addedInstances, changedInstances, removedInstances, renderedGameObjects, fallbackMaterial);
             }
 
             private static void UpdateInstances(
-                World world,
-                Dictionary<int, InstanceHandle> instanceIDToInstanceHandle,
-                Dictionary<int, MaterialHandle> instanceIDToMaterialHandle,
+                SurfaceCacheWorld world,
+                Dictionary<EntityId, InstanceHandle> entityIDToInstanceHandle,
+                Dictionary<EntityId, MaterialHandle> entityIDToMaterialHandle,
                 List<MeshRenderer> addedInstances,
                 List<InstanceChanges> changedInstances,
-                List<int> removedInstances,
+                List<EntityId> removedInstances,
                 RenderedGameObjectsFilter renderedGameObjects,
-                bool enableEmissiveSampling,
                 Material fallbackMaterial)
             {
-                foreach (var meshRendererInstanceID in removedInstances)
+                foreach (var meshRendererEntityID in removedInstances)
                 {
-                    if (instanceIDToInstanceHandle.TryGetValue(meshRendererInstanceID, out InstanceHandle instance))
-                    {
-                        world.RemoveInstance(instance);
-                        instanceIDToInstanceHandle.Remove(meshRendererInstanceID);
-                    }
-                    else
-                    {
-                        UnityEngine.Debug.LogError($"Failed to remove an instance with InstanceID {meshRendererInstanceID}");
-                    }
+                    Debug.Assert(entityIDToInstanceHandle.ContainsKey(meshRendererEntityID));
+                    world.RemoveInstance(entityIDToInstanceHandle[meshRendererEntityID]);
+                    entityIDToInstanceHandle.Remove(meshRendererEntityID);
                 }
 
                 foreach (var meshRenderer in addedInstances)
                 {
-                    if (meshRenderer.isPartOfStaticBatch)
-                    {
-                        UnityEngine.Debug.LogError("Static batching should be disabled when using the real time path tracer in play mode. You can disable it from the project settings.");
-                        continue;
-                    }
+                    Debug.Assert(!meshRenderer.isPartOfStaticBatch);
 
                     var mesh = meshRenderer.GetComponent<MeshFilter>().sharedMesh;
                     var localToWorldMatrix = meshRenderer.transform.localToWorldMatrix;
 
                     var materials = Util.GetMaterials(meshRenderer);
                     var materialHandles = new MaterialHandle[materials.Length];
-                    bool[] visibility = new bool[materials.Length];
                     for (int i = 0; i < materials.Length; i++)
                     {
-                        if (materials[i] == null)
-                        {
-                            materialHandles[i] = instanceIDToMaterialHandle[fallbackMaterial.GetInstanceID()];
-                            visibility[i] = false;
-                        }
-                        else
-                        {
-                            materialHandles[i] = instanceIDToMaterialHandle[materials[i].GetInstanceID()];
-                            visibility[i] = true;
-                        }
+                        var matEntityId = materials[i] == null ? fallbackMaterial.GetEntityId() : materials[i].GetEntityId();
+                        materialHandles[i] = entityIDToMaterialHandle[matEntityId];
                     }
                     uint[] masks = new uint[materials.Length];
                     for (int i = 0; i < masks.Length; i++)
                     {
-                        bool hasLightmaps = (meshRenderer.receiveGI == ReceiveGI.Lightmaps);
-                        var mask = World.GetInstanceMask(meshRenderer.shadowCastingMode, Util.IsStatic(meshRenderer.gameObject), renderedGameObjects, hasLightmaps);
-                        masks[i] = visibility[i] ? mask : 0u;
+                        masks[i] = materials[i] != null ? 1u : 0u;
                     }
 
-                    InstanceHandle instance = world.AddInstance(
-                        mesh,
-                        materialHandles,
-                        masks,
-                        1u << meshRenderer.gameObject.layer,
-                        in localToWorldMatrix,
-                        meshRenderer.bounds,
-                        Util.IsStatic(meshRenderer.gameObject),
-                        renderedGameObjects,
-                        enableEmissiveSampling);
-                    int instanceID = meshRenderer.GetInstanceID();
-                    UnityEngine.Debug.Assert(!instanceIDToInstanceHandle.ContainsKey(instanceID));
-                    instanceIDToInstanceHandle.Add(instanceID, instance);
+                    InstanceHandle instance = world.AddInstance(mesh, materialHandles, masks, in localToWorldMatrix);
+                    int entityID = meshRenderer.GetEntityId();
+                    Debug.Assert(!entityIDToInstanceHandle.ContainsKey(entityID));
+                    entityIDToInstanceHandle.Add(entityID, instance);
                 }
 
                 foreach (var instanceUpdate in changedInstances)
                 {
-                    try
+                    var meshRenderer = instanceUpdate.meshRenderer;
+                    var gameObject = meshRenderer.gameObject;
+
+                    Debug.Assert(entityIDToInstanceHandle.ContainsKey(meshRenderer.GetEntityId()));
+                    var instanceHandle = entityIDToInstanceHandle[meshRenderer.GetEntityId()];
+
+                    if ((instanceUpdate.changes & ModifiedProperties.Transform) != 0)
                     {
-                        var renderer = instanceUpdate.meshRenderer;
-                        var gameObject = renderer.gameObject;
-
-                        if (!instanceIDToInstanceHandle.TryGetValue(renderer.GetInstanceID(), out InstanceHandle instance))
-                        {
-                            UnityEngine.Debug.LogError($"Failed to update an instance with InstanceID {instanceUpdate.meshRenderer.GetInstanceID()}");
-                            continue;
-                        }
-
-                        if ((instanceUpdate.changes & ModifiedProperties.Transform) != 0)
-                        {
-                            world.UpdateInstanceTransform(instance, gameObject.transform.localToWorldMatrix);
-                        }
-
-                        bool materialChanged = (instanceUpdate.changes & ModifiedProperties.Material) != 0;
-                        bool maskPropertiesChanged = (instanceUpdate.changes & ModifiedProperties.IsStatic) != 0 || (instanceUpdate.changes & ModifiedProperties.ShadowCasting) != 0 || (instanceUpdate.changes & ModifiedProperties.Layer) != 0;
-                        if (materialChanged || enableEmissiveSampling || maskPropertiesChanged)
-                        {
-                            var materials = Util.GetMaterials(renderer);
-                            var materialHandles = new MaterialHandle[materials.Length];
-                            for (int i = 0; i < materials.Length; i++)
-                            {
-                                if (materials[i] == null)
-                                {
-                                    materialHandles[i] = instanceIDToMaterialHandle[fallbackMaterial.GetInstanceID()];
-                                }
-                                else
-                                {
-                                    materialHandles[i] = instanceIDToMaterialHandle[materials[i].GetInstanceID()];
-                                }
-                            }
-
-                            if (materialChanged)
-                                world.UpdateInstanceMaterials(instance, materialHandles);
-                            if (enableEmissiveSampling)
-                                world.UpdateInstanceEmission(instance, instanceUpdate.meshRenderer.GetComponent<MeshFilter>().sharedMesh, instanceUpdate.meshRenderer.bounds, materialHandles, Util.IsStatic(gameObject), renderedGameObjects);
-                            if (maskPropertiesChanged || materialChanged)
-                            {
-                                bool[] visibility = new bool[materials.Length];
-                                for (int i = 0; i < materials.Length; i++)
-                                    visibility[i] = materials[i] != null;
-                                uint[] masks = new uint[materials.Length];
-                                for (int i = 0; i < masks.Length; i++)
-                                {
-                                    bool hasLightmaps = (renderer.receiveGI == ReceiveGI.Lightmaps);
-                                    var mask = World.GetInstanceMask(renderer.shadowCastingMode, Util.IsStatic(renderer.gameObject), renderedGameObjects, hasLightmaps);
-                                    masks[i] = visibility[i] ? mask : 0u;
-                                }
-                                world.UpdateInstanceMask(instance, masks);
-                            }
-                        }
+                        world.UpdateInstanceTransform(instanceHandle, gameObject.transform.localToWorldMatrix);
                     }
-                    catch (Exception e)
+
+                    if ((instanceUpdate.changes & ModifiedProperties.Material) != 0)
                     {
-                        UnityEngine.Debug.LogError($"Failed to modify instance {instanceUpdate.meshRenderer.name}: {e}");
+                        var materials = Util.GetMaterials(meshRenderer);
+                        var materialHandles = new MaterialHandle[materials.Length];
+                        for (int i = 0; i < materials.Length; i++)
+                        {
+                            var matEntityId = materials[i] == null ? fallbackMaterial.GetEntityId() : materials[i].GetEntityId();
+                            materialHandles[i] = entityIDToMaterialHandle[matEntityId];
+                        }
+
+                        world.UpdateInstanceMaterials(instanceHandle, materialHandles);
+
+                        uint[] masks = new uint[materials.Length];
+                        for (int i = 0; i < masks.Length; i++)
+                        {
+                            masks[i] = materials[i] != null ? 1u : 0u;
+                        }
+
+                        world.UpdateInstanceMask(instanceHandle, masks);
                     }
                 }
             }
@@ -1210,6 +1046,26 @@ namespace UnityEngine.Rendering.Universal
                 CoreUtils.Destroy(_fallbackMaterialDescriptor.Albedo);
                 CoreUtils.Destroy(_fallbackMaterialDescriptor.Emission);
                 CoreUtils.Destroy(_fallbackMaterialDescriptor.Transmission);
+            }
+
+            internal static SurfaceCacheWorld.LightDescriptor[] ConvertUnityLightsToLightDescriptors(Light[] lights, bool multiplyPunctualLightIntensityByPI)
+            {
+                var descriptors = new SurfaceCacheWorld.LightDescriptor[lights.Length];
+                for (int i = 0; i < lights.Length; i++)
+                {
+                    Light light = lights[i];
+                    ref SurfaceCacheWorld.LightDescriptor descriptor = ref descriptors[i];
+                    descriptor.Type = light.type;
+                    descriptor.LinearLightColor = Util.GetLinearLightColor(light);
+                    if (multiplyPunctualLightIntensityByPI && Util.IsPunctualLightType(light.type))
+                        descriptor.LinearLightColor *= Mathf.PI;
+                    descriptor.Transform = light.transform.localToWorldMatrix;
+                    descriptor.ColorTemperature = light.colorTemperature;
+                    descriptor.SpotAngle = light.spotAngle;
+                    descriptor.InnerSpotAngle = light.innerSpotAngle;
+                    descriptor.Range = light.range;
+                }
+                return descriptors;
             }
         }
 
@@ -1302,7 +1158,11 @@ namespace UnityEngine.Rendering.Universal
 
                 {
                     var resources = new RayTracingResources();
+#if UNITY_EDITOR
                     resources.Load();
+#else
+                    resources.LoadFromRenderPipelineResources();
+#endif
                     _rtContext = new RayTracingContext(rtBackend, resources);
                 }
 
@@ -1314,8 +1174,37 @@ namespace UnityEngine.Rendering.Universal
                 Debug.Assert(worldLoadResult);
 
                 var coreResources = new Rendering.SurfaceCacheResourceSet((uint)SystemInfo.computeSubGroupSize);
-                var coreResourceLoadResult = coreResources.LoadFromRenderPipeResources(_rtContext);
+                var coreResourceLoadResult = coreResources.LoadFromRenderPipelineResources(_rtContext);
                 Debug.Assert(coreResourceLoadResult);
+
+                var gridParams = new SurfaceCacheGridParameterSet
+                {
+                    GridSize = _parameterSet.GridParams.GridSize,
+                    VoxelMinSize = _parameterSet.GridParams.VoxelMinSize,
+                    CascadeCount = _parameterSet.GridParams.CascadeCount,
+                };
+
+                var estimationParams = new SurfaceCacheEstimationParameterSet
+                {
+                    Method = _parameterSet.EstimationMethod,
+                    MultiBounce = _parameterSet.MultiBounce,
+                    RestirEstimationConfidenceCap = _parameterSet.RestirEstimationParams.ConfidenceCap,
+                    RestirEstimationSpatialSampleCount = _parameterSet.RestirEstimationParams.SpatialSampleCount,
+                    RestirEstimationSpatialFilterSize = _parameterSet.RestirEstimationParams.SpatialFilterSize,
+                    RestirEstimationValidationFrameInterval = _parameterSet.RestirEstimationParams.ValidationFrameInterval,
+                    UniformEstimationSampleCount = _parameterSet.UniformEstimationParams.SampleCount,
+                    RisEstimationCandidateCount = _parameterSet.RisEstimationParams.CandidateCount,
+                    RisEstimationTargetFunctionUpdateWeight = _parameterSet.RisEstimationParams.TargetFunctionUpdateWeight
+                };
+
+                var patchFilteringParams = new SurfaceCachePatchFilteringParameterSet
+                {
+                    TemporalSmoothing = _parameterSet.PatchFilteringParams.TemporalSmoothing,
+                    SpatialFilterEnabled = _parameterSet.PatchFilteringParams.SpatialFilterEnabled,
+                    SpatialFilterSampleCount = _parameterSet.PatchFilteringParams.SpatialFilterSampleCount,
+                    SpatialFilterRadius = _parameterSet.PatchFilteringParams.SpatialFilterRadius,
+                    TemporalPostFilterEnabled = _parameterSet.PatchFilteringParams.TemporalPostFilterEnabled
+                };
 
                 _pass = new SurfaceCachePass(
                     _rtContext,
@@ -1330,27 +1219,14 @@ namespace UnityEngine.Rendering.Universal
                     _parameterSet.DebugEnabled,
                     _parameterSet.DebugViewMode,
                     _parameterSet.DebugShowSamplePosition,
-                    _parameterSet.MultiBounce,
-                    _parameterSet.EstimationMethod,
-                    _parameterSet.RestirEstimationParams.ConfidenceCap,
-                    _parameterSet.RestirEstimationParams.SpatialSampleCount,
-                    _parameterSet.RestirEstimationParams.SpatialFilterSize,
-                    _parameterSet.RestirEstimationParams.ValidationFrameInterval,
-                    _parameterSet.UniformEstimationParams.SampleCount,
-                    _parameterSet.RisEstimationParams.CandidateCount,
-                    _parameterSet.RisEstimationParams.TargetFunctionUpdateWeight,
-                    _parameterSet.PatchFilteringParams.TemporalSmoothing,
-                    _parameterSet.PatchFilteringParams.SpatialFilterEnabled,
-                    _parameterSet.PatchFilteringParams.SpatialFilterSampleCount,
-                    _parameterSet.PatchFilteringParams.SpatialFilterRadius,
-                    _parameterSet.PatchFilteringParams.TemporalPostFilterEnabled,
                     _parameterSet.ScreenFilteringParams.LookupSampleCount,
                     _parameterSet.ScreenFilteringParams.UpsamplingKernelSize,
                     _parameterSet.ScreenFilteringParams.UpsamplingSampleCount,
-                    _parameterSet.GridParams.GridSize,
-                    _parameterSet.GridParams.VoxelMinSize,
-                    _parameterSet.GridParams.CascadeCount,
+                    gridParams,
+                    estimationParams,
+                    patchFilteringParams,
                     _parameterSet.GridParams.CascadeMovement);
+
                 _pass.renderPassEvent = RenderPassEvent.AfterRenderingPrePasses + 1;
             }
         }

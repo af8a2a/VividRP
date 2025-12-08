@@ -36,7 +36,7 @@ namespace UnityEditor.Rendering.Universal
                         // Baked Shadow radius
                         case LightType.Point:
                         case LightType.Spot:
-                            serializedLight.settings.DrawBakedShadowRadius();
+                            serializedLight.settings.DrawShapeRadius();
                             break;
                         case LightType.Directional:
                             serializedLight.settings.DrawBakedShadowAngle();

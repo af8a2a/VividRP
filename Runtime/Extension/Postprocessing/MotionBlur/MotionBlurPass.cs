@@ -155,7 +155,9 @@ namespace UnityEngine.Rendering.Universal
                     data.material.SetFloat("_Clamp", data.clamp);
                     CoreUtils.SetKeyword(data.material, ShaderKeywordStrings._ENABLE_ALPHA_OUTPUT, data.enableAlphaOutput);
 
-                    PostProcessUtils.SetSourceSize(cmd, data.sourceTexture);
+                    var sourceSize = PostProcessUtils.CalcShaderSourceSize(sourceTextureHdl);
+                    data.material.SetVector("_SourceSize", sourceSize);
+
                     Vector2 viewportScale = sourceTextureHdl.useScaling
                         ? new Vector2(sourceTextureHdl.rtHandleProperties.rtHandleScale.x, sourceTextureHdl.rtHandleProperties.rtHandleScale.y)
                         : Vector2.one;

@@ -297,6 +297,7 @@ namespace UnityEngine.Rendering.Universal
 
         public RayTracingInstanceCullingResults Cull(in RayTracedEffectsParameters parameters)
         {
+            Debug.Log(m_Camera.name);
             // The list of instanceTestArray needs to be cleared every frame as the list depends on the active effects and their parameters.
             instanceTestArray.Clear();
 

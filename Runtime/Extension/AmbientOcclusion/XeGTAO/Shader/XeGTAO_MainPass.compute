@@ -1,3 +1,4 @@
+#pragma use_dxc
 #pragma kernel CSGTAOLow
 #pragma kernel CSGTAOMedium
 #pragma kernel CSGTAOHigh
@@ -5,7 +6,6 @@
 
 #pragma multi_compile_local _ XE_GTAO_COMPUTE_BENT_NORMALS
 
-#pragma multi_compile_local _ DEFERRED
 
 #include "XeGTAOCommon.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/NormalBuffer.hlsl"
@@ -25,12 +25,7 @@ RWTexture2D<unorm float> g_outWorkingEdges; // output depth-based edges used by 
 // Engine-specific normal map loader
 lpfloat3 LoadNormal(int2 pos, GTAOConstants gtaoConstants)
 {
-    #if defined(DEFERRED)
-    float3 normalWS = UnpackGBufferNormal(SAMPLE_TEXTURE2D_LOD(_GBuffer_Normals, sampler_LinearClamp, (pos + 0.5) * gtaoConstants.ViewportPixelSize, 0).xy);
-    #else
-    float3 normalWS = UnpackGBufferNormal(
-        SAMPLE_TEXTURE2D_LOD(g_CameraNormalTexture, sampler_LinearClamp, (pos + 0.5) * gtaoConstants.ViewportPixelSize, 0).xyz);
-    #endif
+    float3 normalWS = UnpackGBufferNormal(SAMPLE_TEXTURE2D_LOD(g_CameraNormalTexture, sampler_LinearClamp, (pos + 0.5) * gtaoConstants.ViewportPixelSize, 0).xyz);
     // ReSharper disable once CppRedundantCastExpression
     float3 normalVS = (lpfloat3)TransformWorldToViewNormal(normalWS, true);
     // AAAA RP: Unity's view-space Z is negated.

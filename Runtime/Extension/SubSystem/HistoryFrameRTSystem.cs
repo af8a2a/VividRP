@@ -207,6 +207,7 @@ namespace UnityEngine.Rendering.Universal
             return m_BufferedRTHandleSystem.GetFrameRT((int)id, 0);
         }
 
+        
         /// <summary>
         /// Queries the number of RT handle buffers allocated for a buffer ID.
         /// </summary>

@@ -1,3 +1,4 @@
+#pragma use_dxc
 #pragma kernel CSPrefilterDepths16x16
 
 #include "XeGTAOCommon.hlsl"

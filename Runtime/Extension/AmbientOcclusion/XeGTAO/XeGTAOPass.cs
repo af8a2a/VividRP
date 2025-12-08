@@ -9,25 +9,22 @@ namespace UnityEngine.Rendering.Universal
 {
     public class XeGTAOPass : ScriptableRenderPass
     {
-        private readonly ComputeShader _denoiseCS;
-        private readonly ComputeShader _mainPassCS;
-        private readonly ComputeShader _prefilterDepthsCS;
+        private ComputeShader _denoiseCS;
+        private ComputeShader _mainPassCS;
+        private ComputeShader _prefilterDepthsCS;
 
 
         public XeGTAOPass()
         {
-            _prefilterDepthsCS = Resources.Load<ComputeShader>("XeGTAO_PrefilterDepths16x16");
-            _mainPassCS = Resources.Load<ComputeShader>("XeGTAO_MainPass");
-            _denoiseCS = Resources.Load<ComputeShader>("XeGTAO_Denoise");
+            renderPassEvent = RenderPassEvent.AfterRenderingPrePasses;
         }
 
-        public void Setup()
-        {
-            ConfigureInput(ScriptableRenderPassInput.Normal | ScriptableRenderPassInput.Depth);
-        }
 
         public class PassData
         {
+            public ComputeShader DenoiseCS;
+            public ComputeShader MainPassCS;
+            public ComputeShader PrefilterDepthsCS;
             public TextureHandle AOTerm;
             public TextureHandle AOTermPong;
             public TextureHandle Edges;
@@ -104,9 +101,18 @@ namespace UnityEngine.Rendering.Universal
             using var builder = renderGraph.AddComputePass("XeGTAO", out PassData passData);
             var setting = VolumeManager.instance.stack.GetComponent<XeGTAOSetting>();
 
-            if (setting is null || !setting.IsActive())
+            if (!setting.IsActive())
             {
                 return;
+            }
+
+            if (!_prefilterDepthsCS)
+            {
+                var runtimeShader = GraphicsSettings.GetRenderPipelineSettings<AmbientOcclusionRuntimeShader>();
+
+                _prefilterDepthsCS = runtimeShader.XeGTAOPrefilter;
+                _mainPassCS = runtimeShader.XeGTAOMainPass;
+                _denoiseCS = runtimeShader.XeGTAODenoise;
             }
 
 
@@ -121,7 +127,7 @@ namespace UnityEngine.Rendering.Universal
             passData.Settings.FinalValuePower *= setting.FinalValuePower.value;
             passData.Settings.FalloffRange *= setting.FalloffRange.value;
             passData.OutputBentNormals = setting.BentNormals.value;
-            passData.Resolution = new int2(cameraData.pixelWidth, cameraData.pixelHeight);
+            passData.Resolution = new int2(cameraData.actualWidth, cameraData.actualHeight);
             passData.DirectLightingStrength = setting.directLightingStrength.value;
             const bool rowMajor = false;
             const uint frameCounter = 0;
@@ -130,10 +136,12 @@ namespace UnityEngine.Rendering.Universal
                 cameraData.GetGPUProjectionMatrix(true) * viewCorrectionMatrix, rowMajor, frameCounter
             );
 
-
+            passData.PrefilterDepthsCS = _prefilterDepthsCS;
+            passData.MainPassCS = _mainPassCS;
+            passData.DenoiseCS = _denoiseCS;
             passData.NormalTexture = resourcesData.cameraNormalsTexture;
             passData.SrcRawDepth = resourcesData.cameraDepthTexture;
-            passData.WorkingDepths = builder.CreateTransientTexture(new TextureDesc(cameraData.pixelWidth, cameraData.pixelHeight)
+            passData.WorkingDepths = builder.CreateTransientTexture(new TextureDesc(cameraData.actualWidth, cameraData.actualHeight)
             {
                 enableRandomWrite = true,
                 format = GraphicsFormat.R32_SFloat,
@@ -143,14 +151,14 @@ namespace UnityEngine.Rendering.Universal
                 autoGenerateMips = false,
             });
 
-            passData.AOTerm = builder.CreateTransientTexture(new TextureDesc(cameraData.pixelWidth, cameraData.pixelHeight)
+            passData.AOTerm = builder.CreateTransientTexture(new TextureDesc(cameraData.actualWidth, cameraData.actualHeight)
             {
                 enableRandomWrite = true,
                 format = passData.OutputBentNormals ? GraphicsFormat.R32_UInt : GraphicsFormat.R8_UInt,
                 name = "AOTerm"
             });
 
-            passData.AOTermPong = builder.CreateTransientTexture(new TextureDesc(cameraData.pixelWidth, cameraData.pixelHeight)
+            passData.AOTermPong = builder.CreateTransientTexture(new TextureDesc(cameraData.actualWidth, cameraData.actualHeight)
             {
                 enableRandomWrite = true,
                 format = passData.OutputBentNormals ? GraphicsFormat.R32_UInt : GraphicsFormat.R8_UInt,
@@ -158,21 +166,21 @@ namespace UnityEngine.Rendering.Universal
             });
 
 
-            passData.Edges = builder.CreateTransientTexture(new TextureDesc(cameraData.pixelWidth, cameraData.pixelHeight)
+            passData.Edges = builder.CreateTransientTexture(new TextureDesc(cameraData.actualWidth, cameraData.actualHeight)
             {
                 enableRandomWrite = true,
                 format = GraphicsFormat.R8_UNorm,
                 name = "Edges",
             });
 
-            passData.FinalAOTerm = renderGraph.CreateTexture(new TextureDesc(cameraData.pixelWidth, cameraData.pixelHeight)
+            passData.FinalAOTerm = renderGraph.CreateTexture(new TextureDesc(cameraData.actualWidth, cameraData.actualHeight)
             {
                 enableRandomWrite = true,
                 format = passData.OutputBentNormals ? GraphicsFormat.R32_UInt : GraphicsFormat.R8_UInt,
                 name = "FinalAOTerm"
             }); //visibility & BentNormal
 
-            passData.RawAOTerm = renderGraph.CreateTexture(new TextureDesc(cameraData.pixelWidth, cameraData.pixelHeight)
+            passData.RawAOTerm = renderGraph.CreateTexture(new TextureDesc(cameraData.actualWidth, cameraData.actualHeight)
             {
                 enableRandomWrite = true,
                 format = GraphicsFormat.R8_UNorm,
@@ -199,39 +207,42 @@ namespace UnityEngine.Rendering.Universal
                     const int threadGroupSizeDim = 16;
                     int threadGroupsX = RenderingUtilsExt.DivRoundUp(data.Resolution.x, threadGroupSizeDim);
                     int threadGroupsY = RenderingUtilsExt.DivRoundUp(data.Resolution.y, threadGroupSizeDim);
-                    context.cmd.SetComputeTextureParam(_prefilterDepthsCS, kernelIndex, ShaderIDs.PrefilterDepths.g_srcRawDepth, data.SrcRawDepth);
-                    context.cmd.SetComputeTextureParam(_prefilterDepthsCS, kernelIndex, ShaderIDs.PrefilterDepths.g_outWorkingDepthMIP0, data.WorkingDepths, 0);
-                    context.cmd.SetComputeTextureParam(_prefilterDepthsCS, kernelIndex, ShaderIDs.PrefilterDepths.g_outWorkingDepthMIP1, data.WorkingDepths, 1);
-                    context.cmd.SetComputeTextureParam(_prefilterDepthsCS, kernelIndex, ShaderIDs.PrefilterDepths.g_outWorkingDepthMIP2, data.WorkingDepths, 2);
-                    context.cmd.SetComputeTextureParam(_prefilterDepthsCS, kernelIndex, ShaderIDs.PrefilterDepths.g_outWorkingDepthMIP3, data.WorkingDepths, 3);
-                    context.cmd.SetComputeTextureParam(_prefilterDepthsCS, kernelIndex, ShaderIDs.PrefilterDepths.g_outWorkingDepthMIP4, data.WorkingDepths, 4);
-                    ConstantBuffer.Push(data.GTAOConstants, _prefilterDepthsCS, Shader.PropertyToID(nameof(XeGTAO.GTAOConstantsCS)));
+                    context.cmd.SetComputeTextureParam(data.PrefilterDepthsCS, kernelIndex, ShaderIDs.PrefilterDepths.g_srcRawDepth, data.SrcRawDepth);
+                    context.cmd.SetComputeTextureParam(data.PrefilterDepthsCS, kernelIndex, ShaderIDs.PrefilterDepths.g_outWorkingDepthMIP0, data.WorkingDepths,
+                        0);
+                    context.cmd.SetComputeTextureParam(data.PrefilterDepthsCS, kernelIndex, ShaderIDs.PrefilterDepths.g_outWorkingDepthMIP1, data.WorkingDepths,
+                        1);
+                    context.cmd.SetComputeTextureParam(data.PrefilterDepthsCS, kernelIndex, ShaderIDs.PrefilterDepths.g_outWorkingDepthMIP2, data.WorkingDepths,
+                        2);
+                    context.cmd.SetComputeTextureParam(data.PrefilterDepthsCS, kernelIndex, ShaderIDs.PrefilterDepths.g_outWorkingDepthMIP3, data.WorkingDepths,
+                        3);
+                    context.cmd.SetComputeTextureParam(data.PrefilterDepthsCS, kernelIndex, ShaderIDs.PrefilterDepths.g_outWorkingDepthMIP4, data.WorkingDepths,
+                        4);
+                    ConstantBuffer.Push(context.cmd, data.GTAOConstants, data.PrefilterDepthsCS, Shader.PropertyToID(nameof(XeGTAO.GTAOConstantsCS)));
 
-                    context.cmd.DispatchCompute(_prefilterDepthsCS, kernelIndex, threadGroupsX, threadGroupsY, 1);
+                    context.cmd.DispatchCompute(data.PrefilterDepthsCS, kernelIndex, threadGroupsX, threadGroupsY, 1);
                 }
 
                 using (new ProfilingScope(context.cmd, Profiling.MainPass))
                 {
-                    CoreUtils.SetKeyword(_mainPassCS, Keywords.XE_GTAO_COMPUTE_BENT_NORMALS, data.OutputBentNormals);
+                    CoreUtils.SetKeyword(data.MainPassCS, Keywords.XE_GTAO_COMPUTE_BENT_NORMALS, data.OutputBentNormals);
 
                     int kernelIndex = data.Settings.QualityLevel;
                     int threadGroupsX = RenderingUtilsExt.DivRoundUp(data.Resolution.x, XeGTAO.XE_GTAO_NUMTHREADS_X);
                     int threadGroupsY = RenderingUtilsExt.DivRoundUp(data.Resolution.y, XeGTAO.XE_GTAO_NUMTHREADS_Y);
 
-                    context.cmd.SetComputeTextureParam(_mainPassCS, kernelIndex, ShaderIDs.MainPass.g_srcWorkingDepth, data.WorkingDepths, 0);
-                    context.cmd.SetComputeTextureParam(_mainPassCS, kernelIndex, ShaderIDs.MainPass.g_srcWorkingDepth, data.WorkingDepths, 0);
-                    context.cmd.SetComputeTextureParam(_mainPassCS, kernelIndex, ShaderIDs.MainPass.g_CameraNormalTexture, data.NormalTexture, 0);
-
-                    context.cmd.SetComputeTextureParam(_mainPassCS, kernelIndex, ShaderIDs.MainPass.g_outWorkingAOTerm, data.AOTerm);
-                    context.cmd.SetComputeTextureParam(_mainPassCS, kernelIndex, ShaderIDs.MainPass.g_outWorkingEdges, data.Edges);
-                    ConstantBuffer.Push(data.GTAOConstants, _mainPassCS, Shader.PropertyToID(nameof(XeGTAO.GTAOConstantsCS)));
-
-                    context.cmd.DispatchCompute(_mainPassCS, kernelIndex, threadGroupsX, threadGroupsY, 1);
+                    context.cmd.SetComputeTextureParam(data.MainPassCS, kernelIndex, ShaderIDs.MainPass.g_srcWorkingDepth, data.WorkingDepths, 0);
+                    context.cmd.SetComputeTextureParam(data.MainPassCS, kernelIndex, ShaderIDs.MainPass.g_srcWorkingDepth, data.WorkingDepths, 0);
+                    context.cmd.SetComputeTextureParam(data.MainPassCS, kernelIndex, ShaderIDs.MainPass.g_CameraNormalTexture, data.NormalTexture, 0);
+                    context.cmd.SetComputeTextureParam(data.MainPassCS, kernelIndex, ShaderIDs.MainPass.g_outWorkingAOTerm, data.AOTerm);
+                    context.cmd.SetComputeTextureParam(data.MainPassCS, kernelIndex, ShaderIDs.MainPass.g_outWorkingEdges, data.Edges);
+                    ConstantBuffer.Push(context.cmd, data.GTAOConstants, data.MainPassCS, Shader.PropertyToID(nameof(XeGTAO.GTAOConstantsCS)));
+                    context.cmd.DispatchCompute(data.MainPassCS, kernelIndex, threadGroupsX, threadGroupsY, 1);
                 }
 
                 using (new ProfilingScope(context.cmd, Profiling.Denoise))
                 {
-                    CoreUtils.SetKeyword(_denoiseCS, Keywords.XE_GTAO_COMPUTE_BENT_NORMALS, data.OutputBentNormals);
+                    CoreUtils.SetKeyword(data.DenoiseCS, Keywords.XE_GTAO_COMPUTE_BENT_NORMALS, data.OutputBentNormals);
 
                     int passCount = math.max(1, data.Settings.DenoisePasses);
                     for (int passIndex = 0; passIndex < passCount; passIndex++)
@@ -242,16 +253,17 @@ namespace UnityEngine.Rendering.Universal
                         int threadGroupsX = RenderingUtilsExt.DivRoundUp(data.Resolution.x, XeGTAO.XE_GTAO_NUMTHREADS_X);
                         int threadGroupsY = RenderingUtilsExt.DivRoundUp(data.Resolution.y, XeGTAO.XE_GTAO_NUMTHREADS_Y);
 
-                        context.cmd.SetComputeTextureParam(_denoiseCS, kernelIndex, ShaderIDs.Denoise.g_srcWorkingAOTerm, data.AOTerm);
-                        context.cmd.SetComputeTextureParam(_denoiseCS, kernelIndex, ShaderIDs.Denoise.g_srcWorkingEdges, data.Edges);
-                        context.cmd.SetComputeTextureParam(_denoiseCS, kernelIndex, ShaderIDs.Denoise.g_outFinalAOTerm,
+                        context.cmd.SetComputeTextureParam(data.DenoiseCS, kernelIndex, ShaderIDs.Denoise.g_srcWorkingAOTerm, data.AOTerm);
+                        context.cmd.SetComputeTextureParam(data.DenoiseCS, kernelIndex, ShaderIDs.Denoise.g_srcWorkingEdges, data.Edges);
+                        context.cmd.SetComputeTextureParam(data.DenoiseCS, kernelIndex, ShaderIDs.Denoise.g_outFinalAOTerm,
                             isLastPass ? data.FinalAOTerm : data.AOTermPong
                         );
-                        context.cmd.SetComputeTextureParam(_denoiseCS, kernelIndex, ShaderIDs.Denoise.g_RawAOTerm, data.RawAOTerm);
+                        context.cmd.SetComputeTextureParam(data.DenoiseCS, kernelIndex, ShaderIDs.Denoise.g_RawAOTerm, data.RawAOTerm);
 
-                        ConstantBuffer.Push(data.GTAOConstants, _denoiseCS, Shader.PropertyToID(nameof(XeGTAO.GTAOConstantsCS)));
+                        // ConstantBuffer.PushGlobal(context.cmd, data.GTAOConstants, Shader.PropertyToID(nameof(XeGTAO.GTAOConstantsCS)));
 
-                        context.cmd.DispatchCompute(_denoiseCS, kernelIndex, threadGroupsX, threadGroupsY, 1);
+                        ConstantBuffer.Push(context.cmd, data.GTAOConstants, data.DenoiseCS, Shader.PropertyToID(nameof(XeGTAO.GTAOConstantsCS)));
+                        context.cmd.DispatchCompute(data.DenoiseCS, kernelIndex, threadGroupsX, threadGroupsY, 1);
                         (data.AOTerm, data.AOTermPong) = (data.AOTermPong, data.AOTerm);
                     }
                 }

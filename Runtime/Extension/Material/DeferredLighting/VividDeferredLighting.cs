@@ -41,7 +41,7 @@ namespace UnityEngine.Rendering.Universal
         public VividDeferredLighting()
         {
             base.profilingSampler = new ProfilingSampler(nameof(VividDeferredLighting));
-            base.renderPassEvent = RenderPassEvent.BeforeRenderingDeferredLights;
+            base.renderPassEvent = RenderPassEvent.BeforeRenderingDeferredLights + 1;
         }
 
         void Init()

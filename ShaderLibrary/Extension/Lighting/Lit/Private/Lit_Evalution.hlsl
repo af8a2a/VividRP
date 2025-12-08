@@ -122,8 +122,23 @@ DirectLighting Lightloop(float3 V, PositionInputs posInput, ShadingData shadingD
     }
 
     // Post evaluate indirect diffuse or energy.
-    indirectDiffuse *= shadingData.occlusion;
-    indirectSpecular *= shadingData.occlusion;
+
+    VividAmbientOcclusionFactor aoFactor = VividAmbientOcclusionFactor::GetScreenSpaceAmbientOcclusionMultibounce(
+        posInput.positionSS,
+        preLightData.NdotV,
+        shadingData.perceptualRoughness,
+        shadingData.occlusion,
+        shadingData.specularOcclusion,
+        shadingData.diffuseColor,
+        shadingData.fresnel0,
+        _SpecularOcclusionBlend);
+    
+
+    indirectDiffuse *=  aoFactor.indirectAmbientOcclusion;
+    indirectSpecular *= aoFactor.indirectSpecularOcclusion;
+    directDiffuse *=    aoFactor.directAmbientOcclusion;
+    directSpecular *=   aoFactor.directSpecularOcclusion;
+    
     lightOutput.diffuse = directDiffuse + indirectDiffuse;
     lightOutput.specular = directSpecular + indirectSpecular;
     lightOutput.specular *= 1.0 + shadingData.fresnel0 * energyCompensation;

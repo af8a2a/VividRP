@@ -24,7 +24,7 @@
 #pragma multi_compile _ _LIGHT_LAYERS
 #pragma multi_compile _ _PEROBJECT_SCREEN_SPACE_SHADOW
 #pragma multi_compile _ _SCREEN_SPACE_REFLECTION
-
+#pragma multi_compile _ _SCREEN_SPACE_OCCLUSION
 
 #pragma enable_d3d11_debug_symbols
 
@@ -79,7 +79,7 @@ TEXTURE2D_X_FLOAT(_RaytracingShadowTexture);
 int _ShadingModelIndex;
 int _ShadingModelStencil;
 int2 _TilesNum;
-
+float _SpecularOcclusionBlend;
 #include "Private/Lit_Common.hlsl"
 #include "Private/Lit_Evalution.hlsl"
 
@@ -234,7 +234,9 @@ void DeferredLighting(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 groupT
 
     ShadingData shadingData = DecodeShadingDataFromGBuffer(posInput);
     DirectLighting lightOutput = Lightloop(V, posInput, shadingData);
-
+    // _LightingTexture[coordSS]=float4(lightOutput.diffuse.rgb,1);
+    // return;
+    
     float3 diffuseLighting = lightOutput.diffuse;
     float3 specularLighting = lightOutput.specular;
     diffuseLighting *= GetCurrentExposureMultiplier();

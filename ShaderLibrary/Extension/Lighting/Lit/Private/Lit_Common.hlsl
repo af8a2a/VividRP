@@ -43,6 +43,8 @@ struct ShadingData
     float3 specularFGD; // Store preintegrated BSDF for both specular and diffuse
     float diffuseFGD;
 
+    float specularOcclusion;
+
     #ifdef _LIGHT_LAYERS
     uint meshRenderingLayers;
     #endif
@@ -84,6 +86,7 @@ ShadingData DecodeShadingDataFromGBuffer(PositionInputs posInput)
     // shadingData.meshRenderingLayers = DecodeMeshRenderingLayer(renderingLayers.r);
     // #endif
 
+    shadingData.specularOcclusion = 1.0;
     return shadingData;
 }
 

@@ -1,3 +1,4 @@
+#pragma use_dxc
 #pragma kernel CSDenoisePass
 #pragma kernel CSDenoiseLastPass
 

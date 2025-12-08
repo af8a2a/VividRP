@@ -591,10 +591,10 @@ lpfloat XeGTAO_DepthMIPFilter( lpfloat depth0, lpfloat depth1, lpfloat depth2, l
     const lpfloat falloffMul        = (lpfloat)-1.0 / ( falloffRange );
     const lpfloat falloffAdd        = falloffFrom / ( falloffRange ) + (lpfloat)1.0;
 
-    lpfloat weight0 = saturate( (maxDepth-depth0) * falloffMul + falloffAdd );
-    lpfloat weight1 = saturate( (maxDepth-depth1) * falloffMul + falloffAdd );
-    lpfloat weight2 = saturate( (maxDepth-depth2) * falloffMul + falloffAdd );
-    lpfloat weight3 = saturate( (maxDepth-depth3) * falloffMul + falloffAdd );
+    lpfloat weight0 = saturate( saturate(maxDepth-depth0) * falloffMul + falloffAdd );
+    lpfloat weight1 = saturate( saturate(maxDepth-depth1) * falloffMul + falloffAdd );
+    lpfloat weight2 = saturate( saturate(maxDepth-depth2) * falloffMul + falloffAdd );
+    lpfloat weight3 = saturate( saturate(maxDepth-depth3) * falloffMul + falloffAdd );
 
     lpfloat weightSum = weight0 + weight1 + weight2 + weight3;
     return (weight0 * depth0 + weight1 * depth1 + weight2 * depth2 + weight3 * depth3) / weightSum;

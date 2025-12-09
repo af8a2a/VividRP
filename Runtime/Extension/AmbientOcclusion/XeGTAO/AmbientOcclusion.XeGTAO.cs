@@ -52,8 +52,7 @@ namespace UnityEngine.Rendering.Universal
         }
     }
 
-    [VolumeComponentMenu("Ground Truth Ambient Occlusion")]
-    public class XeGTAOSetting : VolumeComponent, IPostProcessComponent
+    public partial class AmbientOcclusion
     {
         public BoolParameter Enabled = new(false);
         public ClampedFloatParameter FinalValuePower = new(1.0f, 0.0f, 5.0f);
@@ -68,7 +67,7 @@ namespace UnityEngine.Rendering.Universal
 
 
         
-        public XeGTAOSetting() => displayName = "Ground Truth Ambient Occlusion";
+        public AmbientOcclusion() => displayName = "Ambient Occlusion";
 
 
         public bool IsActive()

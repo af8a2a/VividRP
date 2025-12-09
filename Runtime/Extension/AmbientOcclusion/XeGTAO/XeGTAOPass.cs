@@ -99,9 +99,9 @@ namespace UnityEngine.Rendering.Universal
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
             using var builder = renderGraph.AddComputePass("XeGTAO", out PassData passData);
-            var setting = VolumeManager.instance.stack.GetComponent<XeGTAOSetting>();
+            var setting = VolumeManager.instance.stack.GetComponent<AmbientOcclusion>();
 
-            if (!setting.IsActive())
+            if (!setting.IsActive() || setting.ambientOcclusionModeParameter.value is not AmbientOcclusionMode.GroundTruthAmbientOcclusion)
             {
                 return;
             }

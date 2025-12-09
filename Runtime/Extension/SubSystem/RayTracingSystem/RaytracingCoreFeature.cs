@@ -11,7 +11,6 @@
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
-            raytracingCorePass.Setup();
             renderer.EnqueuePass(raytracingCorePass);
         }
     }

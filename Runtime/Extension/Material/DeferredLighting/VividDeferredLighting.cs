@@ -115,7 +115,8 @@ namespace UnityEngine.Rendering.Universal
             internal bool rayTracingShadowsEnabled;
 
             internal TextureHandle SSShadowsTexture;
-            
+            internal TextureHandle AmbientOcclusionTexture;
+
             
             internal TextureHandle RaytracingShadowTexture;
         }
@@ -161,6 +162,12 @@ namespace UnityEngine.Rendering.Universal
                     if (data.RaytracingShadowTexture.IsValid())
                     {
                         cmd.SetComputeTextureParam(data.deferredLightingCS, kernelIndex, "_RaytracingShadowTexture", data.RaytracingShadowTexture);
+                    }
+
+
+                    if (data.AmbientOcclusionTexture.IsValid())
+                    {
+                        cmd.SetComputeTextureParam(data.deferredLightingCS, kernelIndex, "_ScreenSpaceOcclusionTexture", data.AmbientOcclusionTexture);
                     }
 
                     
@@ -227,6 +234,10 @@ namespace UnityEngine.Rendering.Universal
                 // Lighting Buffers (SSAO, SSR, SSGI, SSShadow)
                 passData.SSRLightingTexture = resourceData.ssrLightingTexture;
                 passData.SSShadowsTexture = resourceData.screenSpaceShadowsTexture;
+
+                passData.AmbientOcclusionTexture = resourceData.ssaoTexture;
+                
+                
                 // passData.shadowScatterTexture = resourceData.shadowScatterTexture;
                 // passData.rayTracingShadowsEnabled = shadowData.rayTracingShadowsEnabled;
 
@@ -252,6 +263,10 @@ namespace UnityEngine.Rendering.Universal
                 
                 if (passData.SSRLightingTexture.IsValid())
                     builder.UseTexture(passData.SSRLightingTexture, AccessFlags.Read);
+                
+                if (passData.AmbientOcclusionTexture.IsValid())
+                    builder.UseTexture(passData.AmbientOcclusionTexture, AccessFlags.Read);
+
 
                 var gbuffer = resourceData.gBuffer;
                 for (int i = 0; i < gbuffer.Length; ++i)

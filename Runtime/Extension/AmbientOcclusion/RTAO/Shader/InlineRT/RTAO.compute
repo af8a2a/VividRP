@@ -71,7 +71,7 @@ void RTAO(const uint2 coordSS : SV_DispatchThreadID)
     float block = 0;
 
 
-    UnityRayQuery<RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> shadowQuery;
+    UnityRayQuery< RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> shadowQuery;
     RayDesc aoRay;
 
     // Ray

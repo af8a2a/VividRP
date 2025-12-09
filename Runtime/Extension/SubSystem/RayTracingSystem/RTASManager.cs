@@ -325,7 +325,7 @@ namespace UnityEngine.Rendering.Universal
                 ShO_CT.allowVisualEffects = false;
                 ShT_CT.allowVisualEffects = false;
             }
-
+            
             if (parameters.shadows || parameters.pathTracing)
             {
                 ShO_CT.allowVisualEffects = parameters.includeVFX;

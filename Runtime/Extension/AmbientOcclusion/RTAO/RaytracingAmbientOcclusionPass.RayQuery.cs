@@ -88,7 +88,7 @@ namespace UnityEngine.Rendering.Universal
 
             }
 
-            var volumeSettings = VolumeManager.instance.stack.GetComponent<RaytracingAmbientOcclusion>();
+            var volumeSettings = VolumeManager.instance.stack.GetComponent<AmbientOcclusion>();
 
 
             var spatialDenoiser = cameraData.denoiseSystem.spatialDenoiser;
@@ -111,7 +111,7 @@ namespace UnityEngine.Rendering.Universal
                 renderGraph.defaultResources.blackTexture,
                 AOHistory,
                 resourceData.cameraDepthTexture,
-                urpRenderer.usesDeferredLighting ? resourceData.cameraNormalsTexture : resourceData.gBuffer[2],
+                 resourceData.gBuffer[2],
                 resourceData.motionVectorColor,
                 cameraData.denoiseSystem.historyValidity);
 
@@ -127,7 +127,7 @@ namespace UnityEngine.Rendering.Universal
             ddParams.jitterFilter = false;
             ddParams.resolutionMultiplier = 1.0f;
             denoisedRTAO = spatialDenoiser.Denoise(renderGraph, cameraData, ddParams, denoisedRTAO, resourceData.cameraDepthTexture,
-                resourceData.cameraNormalsTexture, aoTexture);
+                resourceData.gBuffer[2], aoTexture);
 
             
             

@@ -41,6 +41,7 @@ namespace UnityEngine.Rendering.Universal
 
         public void Setup()
         {
+            ConfigureInput(ScriptableRenderPassInput.Motion);
             var runtimeShader = GraphicsSettings.GetRenderPipelineSettings<MipGeneratorRuntimeShader>();
             
             m_Shader = runtimeShader.colorPyramid;

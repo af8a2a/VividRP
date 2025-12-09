@@ -21,10 +21,6 @@ namespace UnityEngine.Rendering.Universal
             public BufferHandle nvidiaExt;
         }
 
-        public void Setup()
-        {
-            ConfigureInput(ScriptableRenderPassInput.Normal | ScriptableRenderPassInput.Motion);
-        }
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
@@ -44,7 +40,7 @@ namespace UnityEngine.Rendering.Universal
                     rayTracingSystem.BuildRayTracingAccelerationStructure(cameraData);
                 }
 
-                if (rayTracingSystem.SupportSER&&!rayTracingSystem.SERSetup)
+                if (rayTracingSystem.SupportSER && !rayTracingSystem.SERSetup)
                 {
                     rayTracingSystem.SERSetup = false;
                     using (var builder = renderGraph.AddUnsafePass<RaytracingCorePassData>("Raytracing Core", out var data))

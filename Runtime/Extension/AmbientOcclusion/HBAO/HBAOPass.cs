@@ -7,7 +7,6 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal
 {
-
     public class HBAOPass : ScriptableRenderPass
     {
         private ComputeShader DeinterleaveDepthShader;
@@ -27,28 +26,9 @@ namespace UnityEngine.Rendering.Universal
 
         public HBAOPass()
         {
-            
             renderPassEvent = RenderPassEvent.AfterRenderingPrePasses;
-            DeinterleaveDepthShader = Resources.Load<ComputeShader>("HBAODeinterleaveDepth");
-            DeinterleaveDepthKernel = DeinterleaveDepthShader.FindKernel("KMain");
-
-            DeinterleaveNormalShader = Resources.Load<ComputeShader>("HBAODeinterleaveNormal");
-            DeinterleaveNormalKernel = DeinterleaveNormalShader.FindKernel("KMain");
-
-            DeinterleaveAOShader = Resources.Load<ComputeShader>("HBAOCalc");
-            DeinterleaveAOKernel = DeinterleaveAOShader.FindKernel("KMain");
-
-            ReinterleaveAOShader = Resources.Load<ComputeShader>("HBAOReinterleave");
-            ReinterleaveAOKernel = ReinterleaveAOShader.FindKernel("KMain");
-
-            BlurAOShader = Resources.Load<ComputeShader>("HBAOBlur");
-            BlurAOKernel = BlurAOShader.FindKernel("KMain");
         }
 
-        public void Setup()
-        {
-            ConfigureInput(ScriptableRenderPassInput.Normal );
-        }
 
         enum ProfileID
         {
@@ -78,7 +58,7 @@ namespace UnityEngine.Rendering.Universal
             internal int HBAOBlurKernelID;
 
 
-            internal HBAOSetting setting;
+            internal AmbientOcclusion setting;
             internal UniversalCameraData cameraData;
             internal float2 Dimension;
 
@@ -121,15 +101,15 @@ namespace UnityEngine.Rendering.Universal
         static void ExecutePass(PassData data, ComputeGraphContext context)
         {
             var cmd = context.cmd;
-            
-            
+
+
             float fovRad = data.cameraData.camera.fieldOfView * Mathf.Deg2Rad;
             float invHalfTanFov = 1 / Mathf.Tan(fovRad * 0.5f);
             Vector2 focalLen = new Vector2(invHalfTanFov * data.cameraData.camera.aspect, invHalfTanFov);
             Vector2 invFocalLen = new Vector2(1 / focalLen.x, 1 / focalLen.y);
-            
+
             float4 uvToView = new Vector4(2 * invFocalLen.x, 2 * invFocalLen.y, -1 * invFocalLen.x, -1 * invFocalLen.y);
-            
+
             float R = data.setting.radius.value;
             float R2 = R * R;
             float NegInvR2 = -1.0f / R2;
@@ -139,12 +119,12 @@ namespace UnityEngine.Rendering.Universal
             float AOMultiplier = 1.0f / (1.0f - NDotVBias);
             int halfWidth = ((data.cameraData.camera.pixelWidth + 1) / 2);
             int halfHeight = ((data.cameraData.camera.pixelHeight + 1) / 2);
-            
+
             float2 HalfResolution = new float2(halfWidth, halfHeight);
             float2 InvHalfResolution = new float2(1.0f / halfWidth, 1.0f / halfHeight);
             float2 InvFullResolution = new float2(1.0f / (data.cameraData.pixelWidth), 1.0f / data.cameraData.pixelHeight);
-            
-            
+
+
             using (new ProfilingScope(cmd, ProfilingSampler.Get(ProfileID.DeinterleaveDepth)))
             {
                 cmd.SetComputeTextureParam(data.DeinterleaveDepthShader, data.DeinterleaveDepthKernel, "LinearDepthInput", data.depthTexture);
@@ -154,79 +134,79 @@ namespace UnityEngine.Rendering.Universal
                 var threadY = RenderingUtilsExt.DivRoundUp((int)data.Dimension.y, 8 * 2);
                 cmd.DispatchCompute(data.DeinterleaveDepthShader, data.DeinterleaveDepthKernel, threadX, threadY, 1);
             }
-            
+
             using (new ProfilingScope(cmd, ProfilingSampler.Get(ProfileID.DeinterleaveNormal)))
             {
                 cmd.SetComputeTextureParam(data.DeinterleaveNormalShader, data.DeinterleaveNormalKernel, "NormalInput", data.normalTexture);
                 cmd.SetComputeTextureParam(data.DeinterleaveNormalShader, data.DeinterleaveNormalKernel, "DeinterleaveNormalOutput",
                     data.deinterleaveNormalTexture);
-            
+
                 var threadX = RenderingUtilsExt.DivRoundUp((int)data.Dimension.x, 8 * 2);
                 var threadY = RenderingUtilsExt.DivRoundUp((int)data.Dimension.y, 8 * 2);
                 cmd.DispatchCompute(data.DeinterleaveNormalShader, data.DeinterleaveNormalKernel, threadX, threadY, 1);
             }
-            
+
             using (new ProfilingScope(cmd, ProfilingSampler.Get(ProfileID.SSAOCalc)))
             {
                 cmd.SetComputeTextureParam(data.HBAOCalcShader, data.HBAOCalcKernelID, "LinearDepthInput", data.deinterleaveDepthTexture);
                 cmd.SetComputeTextureParam(data.HBAOCalcShader, data.HBAOCalcKernelID, "NormalViewInput", data.deinterleaveNormalTexture);
                 cmd.SetComputeTextureParam(data.HBAOCalcShader, data.HBAOCalcKernelID, "AOOutput", data.deinterleaveSSAOTexture);
-            
-            
+
+
                 cmd.SetComputeFloatParam(data.HBAOCalcShader, "RadiusToScreen", RadiusToScreen);
                 cmd.SetComputeFloatParam(data.HBAOCalcShader, "R2", R2);
                 cmd.SetComputeFloatParam(data.HBAOCalcShader, "NegInvR2", NegInvR2);
                 cmd.SetComputeFloatParam(data.HBAOCalcShader, "NDotVBias", NDotVBias);
                 cmd.SetComputeFloatParam(data.HBAOCalcShader, "AOMultiplier", AOMultiplier);
                 cmd.SetComputeFloatParam(data.HBAOCalcShader, "PowExponent", PowExponent);
-            
+
                 cmd.SetComputeVectorParam(data.HBAOCalcShader, "InvFullResolution", InvFullResolution.xyxx);
                 cmd.SetComputeVectorParam(data.HBAOCalcShader, "InvHalfResolution", InvHalfResolution.xyxx);
                 cmd.SetComputeVectorParam(data.HBAOCalcShader, "_SSAO_UVToView", uvToView);
-            
+
                 cmd.SetComputeVectorArrayParam(data.HBAOCalcShader, "jitters", GetJitter());
-            
+
                 var threadX = RenderingUtilsExt.DivRoundUp((int)HalfResolution.x, 8);
                 var threadY = RenderingUtilsExt.DivRoundUp((int)HalfResolution.y, 8);
                 cmd.DispatchCompute(data.HBAOCalcShader, data.HBAOCalcKernelID, threadX, threadY, 4);
             }
-            
+
             using (new ProfilingScope(cmd, ProfilingSampler.Get(ProfileID.Reinterleave)))
             {
                 cmd.SetComputeTextureParam(data.HBAOReinterleaveShader, data.HBAOReinterleaveKernelID, "DeinterleaveAOInput", data.deinterleaveSSAOTexture);
                 cmd.SetComputeTextureParam(data.HBAOReinterleaveShader, data.HBAOReinterleaveKernelID, "ReinterleaveOutput", data.reinterleaveSSAOTexture);
-            
+
                 var threadX = RenderingUtilsExt.DivRoundUp((int)HalfResolution.x, 8);
                 var threadY = RenderingUtilsExt.DivRoundUp((int)HalfResolution.y, 8);
-            
+
                 cmd.DispatchCompute(data.HBAOReinterleaveShader, data.HBAOReinterleaveKernelID, threadX, threadY, 1);
             }
-            
+
             using (new ProfilingScope(cmd, ProfilingSampler.Get(ProfileID.SSAOBlur)))
             {
                 cmd.SetComputeTextureParam(data.HBAOBlurShader, data.HBAOBlurKernelID, "AOInput", data.reinterleaveSSAOTexture);
                 cmd.SetComputeTextureParam(data.HBAOBlurShader, data.HBAOBlurKernelID, "AOBlurOutput", data.SSAOPing);
-            
+
                 CoreUtils.SetKeyword(cmd, "PRESENT", false);
-            
+
                 cmd.SetComputeFloatParam(data.HBAOBlurShader, "Sharpness", data.setting.sharpness.value * 100);
                 cmd.SetComputeVectorParam(data.HBAOBlurShader, "InvResolutionDirection", new Vector4(1.0f / data.Dimension.x, 0, 0, 0));
-            
+
                 var threadX = RenderingUtilsExt.DivRoundUp((int)data.Dimension.x, 8);
                 var threadY = RenderingUtilsExt.DivRoundUp((int)data.Dimension.y, 8);
                 cmd.DispatchCompute(data.HBAOBlurShader, data.HBAOBlurKernelID, threadX, threadY, 1);
-            
-            
+
+
                 CoreUtils.SetKeyword(cmd, "PRESENT", true);
                 cmd.SetComputeVectorParam(data.HBAOBlurShader, "InvResolutionDirection", new Vector4(0, 1.0f / data.Dimension.y, 0, 0));
-            
+
                 cmd.SetComputeTextureParam(data.HBAOBlurShader, data.HBAOBlurKernelID, "AOInput", data.SSAOPing);
                 cmd.SetComputeTextureParam(data.HBAOBlurShader, data.HBAOBlurKernelID, "AOBlurOutput", data.SSAOPong);
-            
-            
+
+
                 cmd.DispatchCompute(data.HBAOBlurShader, data.HBAOBlurKernelID, threadX, threadY, 1);
             }
-            
+
             cmd.SetGlobalVector("_AmbientOcclusionParam",
                 new Vector4(1f, 0f, 0f, data.setting.directLightingStrength.value));
             CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.ScreenSpaceOcclusion, true);
@@ -234,7 +214,6 @@ namespace UnityEngine.Rendering.Universal
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
-            
             using (var builder = renderGraph.AddComputePass<PassData>("HBAO", out var data))
             {
                 var cameraData = frameData.Get<UniversalCameraData>();
@@ -243,14 +222,35 @@ namespace UnityEngine.Rendering.Universal
                 var depthTexture = resourceData.cameraDepthTexture;
                 var normalTexture = resourceData.cameraNormalsTexture;
 
-                var setting = VolumeManager.instance.stack.GetComponent<HBAOSetting>();
-                if (!setting || !setting.IsActive())
+                var setting = VolumeManager.instance.stack.GetComponent<AmbientOcclusion>();
+                if (!setting.IsActive() || setting.ambientOcclusionModeParameter.value is not AmbientOcclusionMode.HorizonBasedAmbientOcclusion)
                 {
                     return;
                 }
 
 
-                var deinterleaveDepthTexture = renderGraph.CreateTexture(new TextureDesc(cameraData.pixelWidth / 2, cameraData.pixelHeight / 2)
+
+                if (!DeinterleaveDepthShader)
+                {
+                    var runtimeShader = GraphicsSettings.GetRenderPipelineSettings<AmbientOcclusionRuntimeShader>();
+                    DeinterleaveDepthShader = runtimeShader.HBAODeinterleaveDepth;
+                    DeinterleaveDepthKernel = DeinterleaveDepthShader.FindKernel("KMain");
+
+                    DeinterleaveNormalShader = runtimeShader.HBAODeinterleaveNormal;
+                    DeinterleaveNormalKernel = DeinterleaveNormalShader.FindKernel("KMain");
+
+                    DeinterleaveAOShader = runtimeShader.HBAOCalc;
+                    DeinterleaveAOKernel = DeinterleaveAOShader.FindKernel("KMain");
+
+                    ReinterleaveAOShader = runtimeShader.HBAOReinterleave;
+                    ReinterleaveAOKernel = ReinterleaveAOShader.FindKernel("KMain");
+
+                    BlurAOShader = runtimeShader.HBAOBlur;
+                    BlurAOKernel = BlurAOShader.FindKernel("KMain");
+                }
+
+
+                var deinterleaveDepthTexture = renderGraph.CreateTexture(new TextureDesc(cameraData.actualWidth / 2, cameraData.actualHeight / 2)
                 {
                     enableRandomWrite = true,
                     dimension = TextureDimension.Tex2DArray,
@@ -260,7 +260,7 @@ namespace UnityEngine.Rendering.Universal
                     name = "deinterleaveDepthTexture"
                 });
 
-                var deinterleaveNormalTexture = renderGraph.CreateTexture(new TextureDesc(cameraData.pixelWidth / 2, cameraData.pixelHeight / 2)
+                var deinterleaveNormalTexture = renderGraph.CreateTexture(new TextureDesc(cameraData.actualWidth / 2, cameraData.actualHeight / 2)
                 {
                     enableRandomWrite = true,
                     dimension = TextureDimension.Tex2DArray,
@@ -270,31 +270,32 @@ namespace UnityEngine.Rendering.Universal
                     name = "deinterleaveNormalTexture"
                 });
 
-                var deinterleaveSSAOTexture = renderGraph.CreateTexture(new TextureDesc(new TextureDesc(cameraData.pixelWidth / 2, cameraData.pixelHeight / 2))
-                {
-                    enableRandomWrite = true,
-                    dimension = TextureDimension.Tex2DArray,
-                    slices = 4,
-                    colorFormat = GraphicsFormat.R16G16_SFloat,
-                    name = "deinterleaveSSAOTexture",
-                    depthBufferBits = 0,
-                });
+                var deinterleaveSSAOTexture = renderGraph.CreateTexture(
+                    new TextureDesc(new TextureDesc(cameraData.actualWidth / 2, cameraData.actualHeight / 2))
+                    {
+                        enableRandomWrite = true,
+                        dimension = TextureDimension.Tex2DArray,
+                        slices = 4,
+                        colorFormat = GraphicsFormat.R16G16_SFloat,
+                        name = "deinterleaveSSAOTexture",
+                        depthBufferBits = 0,
+                    });
 
-                var reinterleaveSSAOTexture = renderGraph.CreateTexture(new TextureDesc(new TextureDesc(cameraData.pixelWidth, cameraData.pixelHeight))
+                var reinterleaveSSAOTexture = renderGraph.CreateTexture(new TextureDesc(new TextureDesc(cameraData.actualWidth, cameraData.actualHeight))
                 {
                     enableRandomWrite = true,
                     colorFormat = GraphicsFormat.R16G16_SFloat,
                     depthBufferBits = 0,
                     name = "reinterleaveSSAOTexture"
                 });
-                var SSAOPing = renderGraph.CreateTexture(new TextureDesc(new TextureDesc(cameraData.pixelWidth, cameraData.pixelHeight))
+                var SSAOPing = renderGraph.CreateTexture(new TextureDesc(new TextureDesc(cameraData.actualWidth, cameraData.actualHeight))
                 {
                     enableRandomWrite = true,
                     colorFormat = GraphicsFormat.R16G16_SFloat,
                     depthBufferBits = 0,
                     name = "SSAOPing"
                 });
-                var SSAOPong = renderGraph.CreateTexture(new TextureDesc(new TextureDesc(cameraData.pixelWidth, cameraData.pixelHeight))
+                var SSAOPong = renderGraph.CreateTexture(new TextureDesc(new TextureDesc(cameraData.actualWidth, cameraData.actualHeight))
                 {
                     enableRandomWrite = true,
                     colorFormat = GraphicsFormat.R16_SFloat,
@@ -303,17 +304,9 @@ namespace UnityEngine.Rendering.Universal
                 });
 
 
-                
-                // if (cameraData.isSceneViewCamera)
-                // {
-                //     return;
-                // }
-
-                var camera = cameraData.camera;
-
                 data.setting = setting;
 
-                data.Dimension = new float2(camera.pixelWidth, camera.pixelHeight);
+                data.Dimension = new float2(cameraData.actualWidth, cameraData.actualHeight);
 
                 data.cameraData = cameraData;
 
@@ -344,10 +337,9 @@ namespace UnityEngine.Rendering.Universal
                 data.HBAOBlurShader = BlurAOShader;
                 data.HBAOBlurKernelID = BlurAOKernel;
 
-                builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);
 
-                builder.UseTexture(data.depthTexture,AccessFlags.ReadWrite);
+                builder.UseTexture(data.depthTexture, AccessFlags.ReadWrite);
                 builder.UseTexture(data.normalTexture);
                 builder.UseTexture(data.deinterleaveDepthTexture, AccessFlags.ReadWrite);
                 builder.UseTexture(data.deinterleaveNormalTexture, AccessFlags.ReadWrite);
@@ -355,13 +347,12 @@ namespace UnityEngine.Rendering.Universal
                 builder.UseTexture(data.reinterleaveSSAOTexture, AccessFlags.ReadWrite);
                 builder.UseTexture(data.SSAOPing, AccessFlags.ReadWrite);
                 builder.UseTexture(data.SSAOPong, AccessFlags.ReadWrite);
-                builder.SetGlobalTextureAfterPass(data.SSAOPong, Shader.PropertyToID("_ScreenSpaceOcclusionTexture"));
-
                 builder.SetRenderFunc((PassData passdata, ComputeGraphContext context) => ExecutePass(passdata, context));
                 resourceData.ssaoTexture = SSAOPong;
             }
         }
 
+        
         public override void OnCameraCleanup(CommandBuffer cmd)
         {
             CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.ScreenSpaceOcclusion, false);

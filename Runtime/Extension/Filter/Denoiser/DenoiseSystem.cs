@@ -11,6 +11,7 @@ namespace UnityEngine.Rendering.Universal
         public TemporalFilter temporalDenoiser = new();
         public SIGMADenoiser nrdSIGMADenoiser = new();
 
+        public AmbientOcclusionDenoiser ambientOcclusionDenoiser = new();
         
         public TextureHandle historyValidity;
         
@@ -21,7 +22,7 @@ namespace UnityEngine.Rendering.Universal
             spatialDenoiser?.Init();
             temporalDenoiser?.Init();
             nrdSIGMADenoiser?.Init(camera);
-            
+            ambientOcclusionDenoiser?.Init(camera);
         }
 
 
@@ -29,7 +30,8 @@ namespace UnityEngine.Rendering.Universal
         {
             spatialDenoiser?.Release();
             temporalDenoiser?.Release();
-
+            nrdSIGMADenoiser?.Dispose();
+            ambientOcclusionDenoiser?.Dispose();
         }
     }
 }

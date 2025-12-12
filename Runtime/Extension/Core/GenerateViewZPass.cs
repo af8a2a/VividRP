@@ -24,6 +24,18 @@ namespace UnityEngine.Rendering.Universal
             renderPassEvent = RenderPassEvent.AfterRenderingPrePasses;
         }
 
+        
+        static RTHandle HistoryAccumulateTextureAllocator(Vector2Int viewport,GraphicsFormat graphicsFormat, string viewName, int frameIndex, RTHandleSystem rtHandleSystem)
+        {
+
+            frameIndex &= 1;
+
+            return rtHandleSystem.Alloc(viewport.x,viewport.y, colorFormat: graphicsFormat,
+                filterMode: FilterMode.Point, enableRandomWrite: true,
+                useDynamicScale:false,
+                name: string.Format("{0}ViewSpace Depth{1}", viewName, frameIndex));
+        }
+
 
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
@@ -40,11 +52,16 @@ namespace UnityEngine.Rendering.Universal
                 var resourceData = frameData.Get<UniversalResourceData>();
                 var cameraData = frameData.Get<UniversalCameraData>();
 
-                passData.LinearDepthTexture = renderGraph.CreateTexture(new TextureDesc(cameraData.actualWidth, cameraData.actualHeight)
-                {
-                    enableRandomWrite = true,
-                    format = GraphicsFormat.R32_SFloat
-                });
+                RTHandle  nextHistory;
+
+                cameraData.historyFrameRTSystem.ReAllocatedAccumulateTextureIfNeeded(
+                    HistoryAccumulateTextureAllocator, new Vector2Int(cameraData.actualWidth, cameraData.actualHeight), GraphicsFormat.R32_SFloat,
+                    HistoryFrameType.ViewZ, out _,
+                    out nextHistory);
+
+
+                passData.LinearDepthTexture = renderGraph.ImportTexture(nextHistory);
+                    
                 passData.DepthTexture = resourceData.cameraDepthTexture;
                 passData.GenerateViewZ = m_GenerateViewZ;
 
@@ -56,7 +73,6 @@ namespace UnityEngine.Rendering.Universal
                 builder.UseTexture(passData.LinearDepthTexture, AccessFlags.Write);
 
 
-                // builder.AllowPassCulling(false);
                 
                 //in Unity 6000.3.0a5,crash :(
                 // builder.EnableAsyncCompute(true);

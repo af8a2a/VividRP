@@ -8,6 +8,11 @@ This package provides a custom implementation of Unity's **Universal Render Pipe
 
 **VividRP** is currently undergoing radical evolution, and some interfaces and implementations may be completely rewritten. Maintain maximum compatibility with existing resources and be ready to upgrade to the latest version of Unity at any time
 
+## Unity and Graphics API Versions
+> [!IMPORTANT]  
+> Developed with Unity 6000.4.0a5.  
+> Only Windows/DirectX 12
+
 
 ## Key Features
 - SuperResolution
@@ -55,9 +60,12 @@ This package provides a custom implementation of Unity's **Universal Render Pipe
 - AmbientOcclusion
   - [x] HBAO
   - [x] XeGTAO
-  - [x] RTAO(RT Pipeline + Rayquery)
+  - [x] RTAO
 - Shadow
   - [X] Hybrid Shadow
+  - [X] Full Raytrace Shadow
+    - [X] Opaque
+    - [ ] Transparency
   - [X] Cascade Shadow
   - [X] Shadow Scatter
   - [x] PerObject Shadow
@@ -85,6 +93,9 @@ This package provides a custom implementation of Unity's **Universal Render Pipe
   - [x] FidelityFX SinglePassDownsample
   - [x] FidelityFX SinglePassGaussianBlur
   - [x] NVIDIA Real-time Denoising (NRD)  
+  - [x] Bindless Resoucre(SM 6.6)
+  - [x] RayQuery
+  - [x] Wave Intrinsics(SM6.0)
 
 
 
@@ -97,3 +108,4 @@ This package provides a custom implementation of Unity's **Universal Render Pipe
 - [Intel GameTechDev](https://github.com/GameTechDev)
 - [SnapdragonStudios](https://github.com/SnapdragonStudios/snapdragon-gsr)
 - [NVIDIA DesignWorks Samples](https://github.com/nvpro-samples)
+- [NVIDIA-RTX](https://github.com/NVIDIA-RTX)

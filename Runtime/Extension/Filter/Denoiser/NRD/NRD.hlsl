@@ -8,7 +8,7 @@ distribution of this software and related documentation without an express
 license agreement from NVIDIA CORPORATION is strictly prohibited.
 */
 
-// NRD v4.15
+// NRD v4.16
 
 // IMPORTANT: DO NOT MODIFY THIS FILE WITHOUT FULL RECOMPILATION OF NRD LIBRARY!
 
@@ -75,7 +75,7 @@ NOISY INPUTS:
 // VividRP SPEC SETTINGS
 //=================================================================================================================================
 
-#include "NRDEncoding.hlsl"
+#include "NRDConfig.hlsl"
 //VividRP only support D3D12
 //will be Vulkan or metal?
 //only support DXC for wave operation...
@@ -90,11 +90,13 @@ NOISY INPUTS:
 // SETTINGS
 //=================================================================================================================================
 
+
 // ( Optional ) Bindings
 #define NRD_CONSTANT_BUFFER_REGISTER_INDEX                                              0
 
-#define NRD_CONSTANT_BUFFER_AND_RESOURCES_SPACE_INDEX                                   0
-#define NRD_SAMPLERS_SPACE_INDEX                                                        1 // better keep in a separate space for sharing
+// ( Optional ) Spaces ( NRD integration expects unique values )
+#define NRD_RESOURCES_SPACE_INDEX                                                       0 // SRVs and UAVs
+#define NRD_CONSTANT_BUFFER_AND_SAMPLERS_SPACE_INDEX                                    1 // constant buffer and samplers
 
 // ( Optional ) Entry point
 #ifndef NRD_CS_MAIN
@@ -136,20 +138,20 @@ NOISY INPUTS:
         #define NRD_FORMAT_UNKNOWN
     #endif
 
-    #define NRD_CONSTANTS_START( resourceName )                                         cbuffer resourceName : register( NRD_MERGE_TOKENS( b, NRD_CONSTANT_BUFFER_REGISTER_INDEX ), NRD_MERGE_TOKENS( space, NRD_CONSTANT_BUFFER_AND_RESOURCES_SPACE_INDEX ) ) {
+    #define NRD_CONSTANTS_START( resourceName )                                         cbuffer resourceName : register( NRD_MERGE_TOKENS( b, NRD_CONSTANT_BUFFER_REGISTER_INDEX ), NRD_MERGE_TOKENS( space, NRD_CONSTANT_BUFFER_AND_SAMPLERS_SPACE_INDEX ) ) {
     #define NRD_CONSTANT( constantType, constantName )                                  constantType constantName;
     #define NRD_CONSTANTS_END                                                           };
 
     #define NRD_INPUTS_START
-    #define NRD_INPUT( resourceType, resourceName, regName, bindingIndex )              resourceType resourceName : register( NRD_MERGE_TOKENS( regName, bindingIndex ), NRD_MERGE_TOKENS( space, NRD_CONSTANT_BUFFER_AND_RESOURCES_SPACE_INDEX ) );
+    #define NRD_INPUT( resourceType, dataType, resourceName, regName, bindingIndex )    resourceType<dataType> resourceName : register( NRD_MERGE_TOKENS( regName, bindingIndex ), NRD_MERGE_TOKENS( space, NRD_RESOURCES_SPACE_INDEX ) );
     #define NRD_INPUTS_END
 
     #define NRD_OUTPUTS_START
-    #define NRD_OUTPUT( resourceType, resourceName, regName, bindingIndex )             NRD_FORMAT_UNKNOWN resourceType resourceName : register( NRD_MERGE_TOKENS( regName, bindingIndex ), NRD_MERGE_TOKENS( space, NRD_CONSTANT_BUFFER_AND_RESOURCES_SPACE_INDEX ) );
+    #define NRD_OUTPUT( resourceType, dataType, resourceName, regName, bindingIndex )   NRD_FORMAT_UNKNOWN resourceType<dataType> resourceName : register( NRD_MERGE_TOKENS( regName, bindingIndex ), NRD_MERGE_TOKENS( space, NRD_RESOURCES_SPACE_INDEX ) );
     #define NRD_OUTPUTS_END
 
     #define NRD_SAMPLERS_START
-    #define NRD_SAMPLER( resourceType, resourceName, regName, bindingIndex )            resourceType resourceName : register( NRD_MERGE_TOKENS( regName, bindingIndex ), NRD_MERGE_TOKENS( space, NRD_SAMPLERS_SPACE_INDEX ) );
+    #define NRD_SAMPLER( resourceType, resourceName, regName, bindingIndex )            resourceType resourceName : register( NRD_MERGE_TOKENS( regName, bindingIndex ), NRD_MERGE_TOKENS( space, NRD_CONSTANT_BUFFER_AND_SAMPLERS_SPACE_INDEX ) );
     #define NRD_SAMPLERS_END
 
     #define NRD_EXPORT
@@ -176,11 +178,11 @@ NOISY INPUTS:
     #define NRD_CONSTANTS_END                                                           };
 
     #define NRD_INPUTS_START
-    #define NRD_INPUT( resourceType, resourceName, regName, bindingIndex )              resourceType resourceName : register( NRD_MERGE_TOKENS( regName, bindingIndex ) );
+    #define NRD_INPUT( resourceType, dataType, resourceName, regName, bindingIndex )    resourceType<dataType> resourceName : register( NRD_MERGE_TOKENS( regName, bindingIndex ) );
     #define NRD_INPUTS_END
 
     #define NRD_OUTPUTS_START
-    #define NRD_OUTPUT( resourceType, resourceName, regName, bindingIndex )             resourceType resourceName : register( NRD_MERGE_TOKENS( regName, bindingIndex ) );
+    #define NRD_OUTPUT( resourceType, dataType, resourceName, regName, bindingIndex )   resourceType<dataType> resourceName : register( NRD_MERGE_TOKENS( regName, bindingIndex ) );
     #define NRD_OUTPUTS_END
 
     #define NRD_SAMPLERS_START
@@ -216,18 +218,19 @@ NOISY INPUTS:
     #endif
 
 // Unreal Engine
-#elif( defined( NRD_COMPILER_UNREAL_ENGINE ) ) // TODO: is there a predefined macro in UE?
+#elif( defined( NRD_COMPILER_UNREAL_ENGINE ) ||defined(NRD_VIVIDRP)) // TODO: is there a predefined macro in UE?
 
-    #define NRD_CONSTANTS_START( resourceName )
+    #define NRD_CONSTANTS_START( resourceName )                                         cbuffer resourceName{
     #define NRD_CONSTANT( constantType, constantName )                                  constantType constantName;
-    #define NRD_CONSTANTS_END
+    #define NRD_CONSTANTS_END                                                           };
 
     #define NRD_INPUTS_START
-    #define NRD_INPUT( resourceType, resourceName, regName, bindingIndex )              resourceType resourceName;
+    #define NRD_INPUT( resourceType, dataType, resourceName, regName, bindingIndex )    resourceType<dataType> resourceName;
     #define NRD_INPUTS_END
 
     #define NRD_OUTPUTS_START
-    #define NRD_OUTPUT( resourceType, resourceName, regName, bindingIndex )             resourceType resourceName;
+    #define NRD_OUTPUT( resourceType, dataType, resourceName, regName, bindingIndex )   resourceType<dataType> resourceName;
+    #define NRD_OUTPUT_NOTYPE( resourceType, resourceName)                                     resourceType resourceName;
     #define NRD_OUTPUTS_END
 
     #define NRD_SAMPLERS_START
@@ -237,18 +240,18 @@ NOISY INPUTS:
     #define NRD_EXPORT
 
 // FXC
-#else // TODO: is there a predefined macro in FXC?
+#else
 
     #define NRD_CONSTANTS_START( resourceName )                                         cbuffer resourceName : register( NRD_MERGE_TOKENS( b, NRD_CONSTANT_BUFFER_REGISTER_INDEX ) ) {
     #define NRD_CONSTANT( constantType, constantName )                                  constantType constantName;
     #define NRD_CONSTANTS_END                                                           };
 
     #define NRD_INPUTS_START
-    #define NRD_INPUT( resourceType, resourceName, regName, bindingIndex )              resourceType resourceName : register( NRD_MERGE_TOKENS( regName, bindingIndex ) );
+    #define NRD_INPUT( resourceType, dataType, resourceName, regName, bindingIndex )    resourceType<dataType> resourceName : register( NRD_MERGE_TOKENS( regName, bindingIndex ) );
     #define NRD_INPUTS_END
 
     #define NRD_OUTPUTS_START
-    #define NRD_OUTPUT( resourceType, resourceName, regName, bindingIndex )             resourceType resourceName : register( NRD_MERGE_TOKENS( regName, bindingIndex ) );
+    #define NRD_OUTPUT( resourceType, dataType, resourceName, regName, bindingIndex )   resourceType<dataType> resourceName : register( NRD_MERGE_TOKENS( regName, bindingIndex ) );
     #define NRD_OUTPUTS_END
 
     #define NRD_SAMPLERS_START
@@ -306,14 +309,19 @@ NOISY INPUTS:
 #ifdef NRD_INTERNAL
     // Explicitly set matrix layout for shader compilation outside of NRD environment
     #pragma pack_matrix( column_major )
-#endif
 
-#if( !defined( NRD_NORMAL_ENCODING ) || !defined( NRD_ROUGHNESS_ENCODING ) )
-    #ifdef NRD_INTERNAL
-        #error "For NRD project compilation, encoding variants must be set using Cmake parameters."
-    #else
-        #error "Include 'NRDEncoding.hlsli' file beforehand to get a match with the settings NRD has been compiled with. Or define encoding variants using Cmake parameters."
-    #endif
+    // Permutations
+    #define RADIANCE                                                                    0 // normal mode
+    #define SH                                                                          1 // spherical harmonics ( gaussian )
+    #define OCCLUSION                                                                   2
+    #define DO                                                                          3 // directional occlusion
+
+    #define DIFF                                                                        0x1 // diffuse
+    #define SPEC                                                                        0x2 // specular
+    #define BOTH                                                                        ( DIFF | SPEC )
+
+    #define NRD_DIFF                                                                    ( ( NRD_SIGNAL & DIFF ) != 0 )
+    #define NRD_SPEC                                                                    ( ( NRD_SIGNAL & SPEC ) != 0 )
 #endif
 
 // Normal encoding variants ( match NormalEncoding )
@@ -365,8 +373,6 @@ float3 _NRD_DecodeUnitVector( float2 p, const bool bSigned, const bool bNormaliz
 
     return bNormalize ? normalize( n ) : n;
 }
-
-
 
 // Color space
 float _NRD_Luminance( float3 linearColor )
@@ -632,7 +638,6 @@ float4 NRD_FrontEnd_UnpackNormalAndRoughness( float4 p, out float materialID )
         half2 remappedOctNormalWS = half2(Unpack888ToFloat2(p.xyz)); // values between [ 0, +1]
         half2 octNormalWS = remappedOctNormalWS.xy * half(2.0) - half(1.0); // values between [-1, +1]
         p.xyz = float3(UnpackNormalOctQuadEncode(octNormalWS)); // values between [-1, +1]
-
         #endif
 
         r.xyz = p.xyz;
@@ -661,36 +666,36 @@ float4 NRD_FrontEnd_UnpackNormalAndRoughness( float4 p )
     return NRD_FrontEnd_UnpackNormalAndRoughness( p, unused );
 }
 
-// Not used in NRD
-// X => IN_NORMAL_ROUGHNESS
-float4 NRD_FrontEnd_PackNormalAndRoughness( float3 N, float roughness, float materialID )
-{
-    float4 p;
-
-    #if( NRD_ROUGHNESS_ENCODING == NRD_ROUGHNESS_ENCODING_SQRT_LINEAR )
-        roughness = sqrt( saturate( roughness ) );
-    #elif( NRD_ROUGHNESS_ENCODING == NRD_ROUGHNESS_ENCODING_SQ_LINEAR )
-        roughness *= roughness;
-    #endif
-
-    #if( NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_R10G10B10A2_UNORM )
-        p.xy = _NRD_EncodeUnitVector( N, false );
-        p.z = roughness;
-        p.w = saturate( materialID / 3.0 );
-    #else
-        // Best fit ( optional )
-        N /= max( abs( N.x ), max( abs( N.y ), abs( N.z ) ) );
-
-        #if( NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_RGBA8_UNORM || NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_RGBA16_UNORM )
-            N = N * 0.5 + 0.5;
-        #endif
-
-        p.xyz = N;
-        p.w = roughness;
-    #endif
-
-    return p;
-}
+// // Not used in NRD
+// // X => IN_NORMAL_ROUGHNESS
+// float4 NRD_FrontEnd_PackNormalAndRoughness( float3 N, float roughness, float materialID )
+// {
+//     float4 p;
+//
+//     #if( NRD_ROUGHNESS_ENCODING == NRD_ROUGHNESS_ENCODING_SQRT_LINEAR )
+//         roughness = sqrt( saturate( roughness ) );
+//     #elif( NRD_ROUGHNESS_ENCODING == NRD_ROUGHNESS_ENCODING_SQ_LINEAR )
+//         roughness *= roughness;
+//     #endif
+//
+//     #if( NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_R10G10B10A2_UNORM )
+//         p.xy = _NRD_EncodeUnitVector( N, false );
+//         p.z = roughness;
+//         p.w = saturate( materialID / 3.0 );
+//     #else
+//         // Best fit ( optional )
+//         N /= max( abs( N.x ), max( abs( N.y ), abs( N.z ) ) );
+//
+//         #if( NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_RGBA8_UNORM || NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_RGBA16_UNORM )
+//             N = N * 0.5 + 0.5;
+//         #endif
+//
+//         p.xyz = N;
+//         p.w = roughness;
+//     #endif
+//
+//     return p;
+// }
 
 // Material de-modulation
 //   Front-end usage ( before NRD, convert irradiance into radiance ):

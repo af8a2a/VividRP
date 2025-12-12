@@ -34,7 +34,16 @@
         public FloatParameter denoiseRadius = new ClampedFloatParameter(0f, 0.01f, 1f);
 
         
+        public FloatParameter NRDBlurMinRadius = new ClampedFloatParameter(0f, 0f, 4f);
+        public FloatParameter NRDBlurMaxRadius = new ClampedFloatParameter(0f, 0f, 4f);
+        
+        [Header("NRD Debug Split")]
+        [AdditionalProperty] public ClampedFloatParameter splitScreen = new ClampedFloatParameter(0, 0, 1);
+
         //experiment option
+        [AdditionalProperty]
+        public BoolParameter useNRD = new BoolParameter(false);
+
         [AdditionalProperty]
         public BoolParameter rayQuery = new BoolParameter(false);
         [AdditionalProperty]

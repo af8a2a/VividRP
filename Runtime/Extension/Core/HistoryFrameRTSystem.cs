@@ -83,7 +83,7 @@ namespace UnityEngine.Rendering.Universal
         Exposure,
         
         Depth,
-        Normal,
+        PrevNormalRoughness,
         Color,
 
         HistoryValidity,
@@ -95,8 +95,14 @@ namespace UnityEngine.Rendering.Universal
         URPTemporalAA,
         
         
-        NRDSigmaHistory,
-        NRDSigmaHistoryLength,
+        NRDSIGMAHistory,
+        SIGMAHistoryLength,
+        REBLURPrevInternalData,
+        REBLURAmbientOcclusionDiffuse,
+        REBLURAmbientOcclusionDiffuseFast,
+        
+        ViewZ,
+
 
     }
 

@@ -176,7 +176,7 @@ namespace UnityEngine.Rendering.Universal
 
                 // Grab and import the history buffers
                 var historyDepth = camHistoryRTSystem.GetCurrentFrameRT(HistoryFrameType.Depth);
-                var historyNormal = camHistoryRTSystem.GetCurrentFrameRT(HistoryFrameType.Normal);
+                var historyNormal = camHistoryRTSystem.GetCurrentFrameRT(HistoryFrameType.PrevNormalRoughness);
                 passData.historyDepthTexture = renderGraph.ImportTexture(historyDepth);
                 passData.historyNormalTexture = renderGraph.ImportTexture(historyNormal);
 

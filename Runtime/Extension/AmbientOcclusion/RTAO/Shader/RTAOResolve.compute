@@ -14,7 +14,7 @@
 
 float intensity;
 RW_TEXTURE2D(float, _AmbientOcclusionTextureRW);
-
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Filter/Denoiser/NRD/NRD.hlsl"
 [numthreads(RAYTRACING_AMBIENT_OCCLUSION_TILE_SIZE, RAYTRACING_AMBIENT_OCCLUSION_TILE_SIZE, 1)]
 void RTAOApplyIntensity(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 groupThreadId : SV_GroupThreadID, uint2 groupId : SV_GroupID)
 {
@@ -24,5 +24,6 @@ void RTAOApplyIntensity(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 grou
 
     // Grab the AO value without the intensity
     float value = _AmbientOcclusionTextureRW[(currentCoord)];
+    float ao=
     _AmbientOcclusionTextureRW[(currentCoord)] = PositivePow(value, intensity);//1.0 - PositivePow(value, intensity);
 }

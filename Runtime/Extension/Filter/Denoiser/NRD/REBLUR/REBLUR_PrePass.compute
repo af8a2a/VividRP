@@ -1,0 +1,28 @@
+﻿/*
+Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
+
+NVIDIA CORPORATION and its licensors retain all intellectual property
+and proprietary rights in and to this software, related documentation
+and any modifications thereto. Any use, reproduction, disclosure or
+distribution of this software and related documentation without an express
+license agreement from NVIDIA CORPORATION is strictly prohibited.
+*/
+
+#pragma only_renderers d3d11 xboxseries ps5
+#pragma use_dxc
+#define NRD_VIVIDRP
+#define gNearestClamp gPointClamp
+
+#include "../NRD.hlsl"
+#include "../ml.hlsl"
+
+#include "Private/REBLUR_Config.hlsl"
+#include "Private/REBLUR_PrePass.resources.hlsl"
+
+#include "../Common.hlsl"
+#include "Private/REBLUR_Common.hlsl"
+#include "Private/REBLUR_PrePass.hlsl"
+
+#pragma kernel main
+
+

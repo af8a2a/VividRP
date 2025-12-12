@@ -3,14 +3,12 @@ using System.Runtime.InteropServices;
 
 namespace UnityEngine.Rendering.Universal
 {
-
     /// <summary>
     /// Use to init NRD dispatch parameter
     /// is very dirty to configure the NRD constBuffer...
     /// </summary>
     public class NRDInitlizer : IExtension
     {
-        
         private const string DLLName =
 #if (PLATFORM_IOS || PLATFORM_TVOS || PLATFORM_BRATWURST || PLATFORM_SWITCH) && !UNITY_EDITOR
             "__Internal";
@@ -19,7 +17,6 @@ namespace UnityEngine.Rendering.Universal
 #endif
 
 
-        
         [DllImport(DLLName)]
         public static extern int NRD_Test();
 
@@ -45,6 +42,16 @@ namespace UnityEngine.Rendering.Universal
             ref SigmaSharedConstants data
         );
 
+        
+        [DllImport(DLLName)]
+        public static extern bool NRD_SetupReblurConstBuffer(
+            IntPtr nrdContext,
+            ref NRDCommonSettings commonSettings,
+            ref ReblurSettings sigmaSettings,
+            //out constbuffer
+            ref ReblurSharedConstants data
+        );
+
 
         public void Init()
         {
@@ -52,6 +59,7 @@ namespace UnityEngine.Rendering.Universal
 
         public bool Support()
         {
+            Debug.Log($"NRDInitlizer support:{NRD_Test() > 0}");
             return true;
         }
 

@@ -40,6 +40,10 @@ namespace UnityEditor.Rendering.Universal
         SerializedDataParameter m_RayQuery;
         SerializedDataParameter m_LayerMask;
         SerializedDataParameter m_ShaderExecutionReordering;
+        SerializedDataParameter m_useNRD;
+        SerializedDataParameter m_NRDBlurMinRadius;
+        SerializedDataParameter m_NRDBlurMaxRadius;
+        SerializedDataParameter m_SplitScreen;
 
         static class Styles
         {
@@ -72,6 +76,11 @@ namespace UnityEditor.Rendering.Universal
             public static readonly GUIContent RayQuery = EditorGUIUtility.TrTextContent("Ray Query (Experimental)");
             public static readonly GUIContent ShaderExecutionReordering = EditorGUIUtility.TrTextContent("Shader Execution Reordering");
             public static readonly GUIContent AoLayerMask = EditorGUIUtility.TrTextContent("AO Layer Mask");
+            public static readonly GUIContent UseNRD = EditorGUIUtility.TrTextContent("Use NRD");
+            public static readonly GUIContent NRDBlurMinRadius = EditorGUIUtility.TrTextContent("Min Blur Radius(px)");
+            public static readonly GUIContent NRDBlurMaxRadius = EditorGUIUtility.TrTextContent("Max Blur Radius(px)");
+            public static readonly GUIContent SplitScreen = EditorGUIUtility.TrTextContent("Debug SplitScreen");
+            
         }
 
         public override void OnEnable()
@@ -106,6 +115,11 @@ namespace UnityEditor.Rendering.Universal
             m_RayQuery = Unpack(o.Find(x => x.rayQuery));
             m_ShaderExecutionReordering = Unpack(o.Find(x => x.shaderExecutionReordering));
             m_LayerMask = Unpack(o.Find(x => x.layerMask));
+            m_useNRD= Unpack(o.Find(x => x.useNRD));
+            m_NRDBlurMinRadius = Unpack(o.Find(x => x.NRDBlurMinRadius));
+            m_NRDBlurMaxRadius = Unpack(o.Find(x => x.NRDBlurMaxRadius));
+            m_SplitScreen= Unpack(o.Find(x => x.splitScreen));
+
 
             base.OnEnable();
         }
@@ -162,15 +176,26 @@ namespace UnityEditor.Rendering.Universal
         void DrawRaytracedAo()
         {
             PropertyField(m_Intensity, Styles.Intensity);
-            PropertyField(m_Radius, Styles.Radius);
             PropertyField(m_RayLength, Styles.RayLength);
             PropertyField(m_SamplesPerPixel, Styles.SamplesPerPixel);
             PropertyField(m_LayerMask, Styles.AoLayerMask);
             DrawHeader("Denoise");
-            PropertyField(m_DenoiseRadius, Styles.DenoiseRadius);
-            PropertyField(m_OccluderMotionRejection, Styles.OccluderMotionRejection);
-            PropertyField(m_ReceiverMotionRejection, Styles.ReceiverMotionRejection);
+            if (m_useNRD.value.boolValue)
+            {
+                PropertyField(m_NRDBlurMinRadius, Styles.NRDBlurMinRadius);
+                PropertyField(m_NRDBlurMaxRadius, Styles.NRDBlurMaxRadius);
+                PropertyField(m_SplitScreen, Styles.SplitScreen);
+            }
+            else
+            {
+                PropertyField(m_DenoiseRadius, Styles.DenoiseRadius);
+                PropertyField(m_OccluderMotionRejection, Styles.OccluderMotionRejection);
+                PropertyField(m_ReceiverMotionRejection, Styles.ReceiverMotionRejection);
+            }
+            
+            
             DrawHeader("Experiment Option");
+            PropertyField(m_useNRD, Styles.UseNRD);
             PropertyField(m_RayQuery, Styles.RayQuery);
             PropertyField(m_ShaderExecutionReordering, Styles.ShaderExecutionReordering);
 

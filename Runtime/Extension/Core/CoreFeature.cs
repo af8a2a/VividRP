@@ -12,7 +12,6 @@ namespace UnityEngine.Rendering.Universal
 
         ColorPyramidPass colorPyramid;
         DepthPyramidPass depthPyramid;
-        ForwardGBufferPass forwardGBufferPass;
         HistoryCapturePass historyCapturePass;
         HistoryValidityPass historyValidityPass;
         SceneViewMotionVectorPass sceneViewMotionVectorPass;
@@ -25,7 +24,6 @@ namespace UnityEngine.Rendering.Universal
         public override void Create()
         {
             colorPyramid = new ColorPyramidPass(RenderPassEvent.BeforeRenderingPostProcessing);
-            forwardGBufferPass = new ForwardGBufferPass(m_GBufferPassNames);
 
             historyCapturePass = new HistoryCapturePass()
             {
@@ -34,7 +32,7 @@ namespace UnityEngine.Rendering.Universal
 
             historyValidityPass = new HistoryValidityPass()
             {
-                renderPassEvent = RenderPassEvent.AfterRenderingPrePasses,
+                renderPassEvent = RenderPassEvent.AfterRenderingGbuffer,
             };
             sceneViewMotionVectorPass = new SceneViewMotionVectorPass();
             depthPyramid = new DepthPyramidPass(RenderPassEvent.AfterRenderingPrePasses);
@@ -48,7 +46,6 @@ namespace UnityEngine.Rendering.Universal
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
             
-            var deferred = renderingData.universalRenderingData.renderingMode is RenderingMode.Deferred;
 
             if (HistoryBufferCaptureManager.instance.EnableHistoryPasses())
             {
@@ -62,7 +59,6 @@ namespace UnityEngine.Rendering.Universal
             renderer.EnqueuePass(colorPyramid);
             renderer.EnqueuePass(depthPyramid);
 
-            historyValidityPass.Setup(deferred);
             renderer.EnqueuePass(historyValidityPass);
 
             renderer.EnqueuePass(sceneViewMotionVectorPass);

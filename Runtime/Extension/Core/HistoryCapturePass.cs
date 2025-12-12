@@ -59,20 +59,20 @@ namespace UnityEngine.Rendering.Universal
 
         internal bool ReAllocatedHistoryNormalTextureIfNeeded(HistoryFrameRTSystem historyRTSystem, out RTHandle currFrameRT)
         {
-            var curTexture = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.Normal);
+            var curTexture = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.PrevNormalRoughness);
             bool vaild = true;
 
             if (curTexture == null)
             {
                 vaild = false;
 
-                historyRTSystem.ReleaseHistoryFrameRT(HistoryFrameType.Normal);
+                historyRTSystem.ReleaseHistoryFrameRT(HistoryFrameType.PrevNormalRoughness);
 
-                historyRTSystem.AllocHistoryFrameRT((int)HistoryFrameType.Normal,
+                historyRTSystem.AllocHistoryFrameRT((int)HistoryFrameType.PrevNormalRoughness,
                     HistoryCaptureBufferAllocatorFunction, GraphicsFormat.R8G8B8A8_UNorm, 1);
             }
 
-            currFrameRT = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.Normal);
+            currFrameRT = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.PrevNormalRoughness);
             return vaild;
         }
 
@@ -86,7 +86,6 @@ namespace UnityEngine.Rendering.Universal
             var camHistoryRTSystem = HistoryFrameRTSystem.GetOrCreate(cameraData.camera);
 
 
-            var deferred = frameData.Get<UniversalRenderingData>().renderingMode is RenderingMode.Deferred;
 
 
             bool vaild = true;
@@ -100,8 +99,7 @@ namespace UnityEngine.Rendering.Universal
 
             MipGenerator.instance.CopyColor(renderGraph, resourceData.activeColorTexture, historyCaptureData.HistoryColorTexture);
             MipGenerator.instance.CopyColor(renderGraph, resourceData.activeDepthTexture, historyCaptureData.HistoryDepthTexture);
-            MipGenerator.instance.CopyColor(renderGraph, deferred ? resourceData.gBuffer[2] : resourceData.cameraNormalsTexture,
-                historyCaptureData.HistoryNormalTexture);
+            MipGenerator.instance.CopyColor(renderGraph, resourceData.gBuffer[2], historyCaptureData.HistoryNormalTexture);
 
         }
     }

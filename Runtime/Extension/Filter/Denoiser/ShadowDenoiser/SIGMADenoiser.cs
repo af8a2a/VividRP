@@ -186,9 +186,8 @@ namespace UnityEngine.Rendering.Universal
             cs = data.ShadowPostBlur;
             ConstantBuffer.Push(cmd, data.SigmaSharedConstants, cs, SIGMA_BlurConstants);
 
-            for (int i = 0; i < 2; i++)
             {
-                bool isStabilizationEnabled = (((i >> 0) & 0x1) != 0);
+                bool isStabilizationEnabled = data.Settings.maxStabilizedFrameNum > 0; 
 
                 cmd.SetComputeTextureParam(cs, kernel, gIn_ViewZ, data.viewZTexture);
                 cmd.SetComputeTextureParam(cs, kernel, gIn_Normal_Roughness, data.gBufferNormalRoughnessTexture);
@@ -203,7 +202,7 @@ namespace UnityEngine.Rendering.Universal
             }
 
 
-            if (data.Settings.maxStabilizedFrameNum > 0)
+            if (data.Settings.maxStabilizedFrameNum > 0 )
             {
                 cs = data.ShadowTemporalStabilization;
                 ConstantBuffer.Push(cmd, data.SigmaSharedConstants, cs, SIGMA_TemporalStabilizationConstants);

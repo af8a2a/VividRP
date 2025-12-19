@@ -251,7 +251,7 @@ float LoadScreenSpaceShadowmap(uint2 coordSS)
 
 float SampleVividScreenSpaceShadowmap(float2 screenUV)
 {
-    float attenuation = SAMPLE_TEXTURE2D(_ScreenSpaceShadowmapTexture, sampler_PointClamp, screenUV).x;
+    float attenuation = SAMPLE_TEXTURE2D_LOD(_ScreenSpaceShadowmapTexture, sampler_PointClamp, screenUV, 0).x;
 
     return attenuation;
 }

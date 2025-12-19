@@ -1,0 +1,145 @@
+#include "UnityRayQuery.cginc"
+#pragma kernel main
+
+#pragma require inlineraytracing
+#pragma require Native16Bit
+
+#pragma only_renderers d3d11 xboxseries ps5
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.core/Runtime/Sampling/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/ShaderVariablesRaytracing.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RayTracingCommon.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingIntersection.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/RayTracingFallbackHierarchy.cs.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingSampling.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Sampling.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/GBufferCommon.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/LightGrid/ClusterLight.hlsl"
+
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Filter/Denoiser/NRD/NRD.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Filter/Denoiser/NRD/ml.hlsl"
+
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/UnityGBuffer.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Filter/Denoiser/FidelityFXShadowDenoiser/Shader/Utilities.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Filter/Denoiser/FidelityFXShadowDenoiser/Shader/RaytracingCommon.hlsl"
+
+
+//--------------------------------------------------------------------------------------
+// I/O Structures
+//--------------------------------------------------------------------------------------
+
+//--------------------------------------------------------------------------------------
+// Texture definitions
+//--------------------------------------------------------------------------------------
+Texture2D<float> _CameraDepthTexture;
+Texture2D<float3> _CameraNormalsTexture;
+
+StructuredBuffer<uint4> _ShadowTileBuffer;
+
+RaytracingAccelerationStructure _RaytracingAccelerationStructure;
+// RaytracingAccelerationStructure ras_nonOpaque : register(t1, space1);
+
+
+RWTexture2D<uint> _ShadowMaskTexture;
+RWTexture2D<float> debugTexture;
+
+
+bool TraceOpaque(RaytracingAccelerationStructure ras, RayDesc ray)
+{
+    UnityRayQuery < RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES > primaryRayQuery;
+
+    primaryRayQuery.TraceRayInline(ras, 0, RAYTRACINGRENDERERFLAG_CAST_SHADOW, ray);
+
+    primaryRayQuery.Proceed();
+
+    return primaryRayQuery.CommittedStatus() != COMMITTED_NOTHING;
+}
+
+
+bool TraceShadows(
+    uint2 localID,
+    Tile const currentTile,
+    bool const bTraceOpaqueTlas,
+    bool const bTraceNonOpaqueTlas,
+    bool const bTlasIsMixed)
+{
+    uint2 const pixelCoord = currentTile.location * k_tileSize + localID;
+
+    // use tile mask to decide what pixels will fire a ray
+    bool const bActiveLane = WaveMaskToBool(currentTile.mask, localID);
+    bool bRayHitSomething = true;
+    if (bActiveLane)
+    {
+        float const depth = _CameraDepthTexture[pixelCoord];
+        float3 const normal = normalize(UnpackGBufferNormal(_CameraNormalsTexture[pixelCoord].xyz));
+
+        float2 const uv = pixelCoord * textureSize.zw;
+        float4 const homogeneous = mul(viewToWorld, float4(2.0f * float2(uv.x, 1.0f - uv.y) - 1.0f, (depth), 1));
+        float3 const worldPos = homogeneous.xyz / homogeneous.w;
+
+        float rayBias = EvaluateRayTracingBias(worldPos);
+
+        RayDesc ray;
+        ray.Origin = worldPos + normal * rayBias;
+        ray.Direction = -lightDir;
+        ray.TMin = currentTile.minT;
+        ray.TMax = currentTile.maxT;
+
+        {
+            float2 const noise = _ScramblingTexture[pixelCoord % 256].rg + noisePhase;
+
+            ray.Direction = normalize(MapToCone(fmod(noise, 1), ray.Direction, sunSize));
+        }
+
+        // reverse ray direction for better traversal 
+        if (bUseCascadesForRayT)
+        {
+            ray.Origin = ray.Origin + ray.Direction * (currentTile.maxT);
+            ray.Direction = -ray.Direction;
+            ray.TMin = 0;
+            ray.TMax = currentTile.maxT - currentTile.minT;
+        }
+
+        if (bTraceOpaqueTlas)
+        {
+            bRayHitSomething = TraceOpaque(_RaytracingAccelerationStructure, ray);
+        }
+
+        //todo:comming soon...
+        // if (bTraceNonOpaqueTlas && !bRayHitSomething)
+        // {
+        //     bRayHitSomething = TraceNonOpaque(ras_nonOpaque, ray);
+        // }
+        //
+        // if (bTlasIsMixed)
+        // {
+        //     bRayHitSomething = TraceMixed(ras_opaque, ray);
+        // }
+    }
+
+    return bRayHitSomething;
+}
+
+
+[numthreads(TILE_SIZE_X* TILE_SIZE_Y,1, 1)]
+void main(uint localIndex : SV_GroupIndex, uint3 groupID : SV_GroupID)
+{
+    uint2 const localID = FXX_Rmp8x8(localIndex);
+    Tile const currentTile = Tile::FromUint(_ShadowTileBuffer[groupID.x]);
+
+    bool const bRayHitSomething = TraceShadows(
+        localID,
+        currentTile,
+        true,
+        false,
+        false);
+
+    uint const waveOutput = BoolToWaveMask(bRayHitSomething, localID);
+    if (localIndex == 0)
+    {
+        // add results to mask
+        _ShadowMaskTexture[currentTile.location] = waveOutput;
+    }
+}

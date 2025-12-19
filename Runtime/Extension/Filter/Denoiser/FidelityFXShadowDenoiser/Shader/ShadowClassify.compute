@@ -1,0 +1,281 @@
+﻿// AMD Cauldron code
+// 
+// Copyright(c) 2020 Advanced Micro Devices, Inc.All rights reserved.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files(the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions :
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+#pragma use_dxc
+#pragma only_renderers d3d11 xboxseries ps5
+#pragma require Native16Bit
+#define PLATFORM_SUPPORTS_WAVE_INTRINSICS
+#pragma kernel ClassifyByNormal
+#pragma kernel ClassifyByCascadeRange
+#pragma kernel ClassifyByCascades
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "RaytracingCommon.hlsl"
+#include "Utilities.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/NormalBuffer.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
+
+//--------------------------------------------------------------------------------------
+// I/O Structures
+//--------------------------------------------------------------------------------------
+
+struct ClassifyResults
+{
+    bool bIsActiveLane;
+    bool bIsInLight;
+    float minT;
+    float maxT;
+};
+
+//--------------------------------------------------------------------------------------
+// Texture definitions
+//--------------------------------------------------------------------------------------
+Texture2D<float> t2d_depth    ;
+Texture2D<float3> t2d_normals ;
+Texture2DArray<float> t2d_shadowMap ;
+
+// using uint4 so we can pack the tile ourselves
+RWStructuredBuffer<uint4> rwsb_tiles;
+globallycoherent RWBuffer<uint> rwb_tileCount ;
+
+RWTexture2D<uint> rwt2d_rayHitResults ;
+
+#define ss_point sampler_PointClamp
+#define scs_shadows sampler_LinearClampCompare
+
+
+//--------------------------------------------------------------------------------------
+// Main function
+//--------------------------------------------------------------------------------------
+
+void WriteTile(Tile const currentTile)
+{
+    uint index = ~0;
+    InterlockedAdd(rwb_tileCount[0], 1, index);
+    rwsb_tiles[index] = Tile::ToUint(currentTile);
+}
+
+ClassifyResults Classify(
+    uint2 const pixelCoord,
+    bool const bUseNormal,
+    bool const bUseCascadeSplits,
+    bool const bUseCascadeBlocking)
+{
+    bool const bIsInViewport = all(pixelCoord.xy < textureSize.xy);
+
+    float const depth = t2d_depth[pixelCoord];
+
+    bool bIsActiveLane = bIsInViewport && (depth > UNITY_RAW_FAR_CLIP_VALUE);
+    bool bIsInLight = false;
+    float minT = 1.#INF;
+    float maxT = 0.f;
+
+    if (bUseNormal && bIsActiveLane)
+    {
+        float3 const normal = UnpackGBufferNormal(t2d_normals[pixelCoord].xyz);
+        bool const bIsNormalFacingLight = dot(normal, -lightDir) > 0;
+
+        bIsActiveLane = bIsActiveLane && bIsNormalFacingLight;
+    }
+
+    if ((bUseCascadeSplits || bUseCascadeBlocking) && bIsActiveLane)
+    {
+        PositionInputs positionInput = GetPositionInput(pixelCoord, textureSize.zw, depth,UNITY_MATRIX_I_VP,UNITY_MATRIX_V);
+        float2 const uv = positionInput.positionNDC;
+
+        float3 const worldPos = positionInput.positionWS;
+
+        float3 const lightViewSpacePos = mul(lightView, float4(worldPos, 1)).xyz;
+
+        bool bIsInActiveCascade = false;
+        if (bUseCascadeSplits)
+        {
+            for (uint i = 0; i < cascadeCount; ++i)
+            {
+                uint const cascadeMask = 1 << i;
+        
+                float4 const shadowCoord = TransformWorldToShadowCoord(worldPos);
+                if (min(shadowCoord.x, shadowCoord.y) > 0 && max(shadowCoord.x, shadowCoord.y) < 1)
+                {
+                    bIsInActiveCascade = cascadeMask & activeCascades;
+                    break;
+                }
+            }
+        }
+
+        if (bUseCascadeBlocking)
+        {
+            float const radius = sunSizeLightSpace * lightViewSpacePos.z;
+
+            float4 shadowCoord = TransformWorldToShadowCoord(worldPos);
+            uint cascadeIndex = shadowCoord.w;
+
+            // grow search area by a pixel to make sure we search a wide enough area
+            // also scale everything from UV to pixel coord for image loads.
+            float2 const radiusCoord = abs(radius * cascadeScale[cascadeIndex].xy) * cascadeSize + 1.xx;
+            shadowCoord.xy *= cascadeSize;
+
+            float const depthCmp = shadowCoord.z + blockerOffset;
+
+            float maxD = 1;
+            float minD = 0;
+            float closetDepth = 1;
+
+            // With small shadow maps we will be bound on filtering since the shadow map can end up completely in LO cache
+            // useing an image load is faster then a sample in RDNA but we will be losing the benifit of doing some of the ALU
+            // in the filter and getting 4 pixels of data per tap. 
+            for (uint x = 0; x < k_poissonDiscSampleCountHigh; ++x)
+            {
+                float2 const sampleUV = shadowCoord.xy + k_poissonDisc[x] * radiusCoord + 0.5f;
+                float const pixelDepth = t2d_shadowMap.Load(uint4(sampleUV, cascadeIndex, 0)).x;
+
+                // using min and max to reduce number of cmps
+                maxD = min(maxD, pixelDepth);
+                minD = max(minD, pixelDepth);
+
+                // need to find closet point in front of the receiver
+                if (pixelDepth > depthCmp)
+                {
+                    closetDepth = min(closetDepth, pixelDepth);
+                }
+            }
+
+
+            const bool bIsInShadow = (maxD >= depthCmp);
+            bIsInLight = bRejectLitPixels && (minD <= depthCmp);
+            bIsInActiveCascade = !bIsInShadow && !bIsInLight;
+
+            if (bIsInActiveCascade && bUseCascadesForRayT)
+            {
+                float const viewMinT = abs(max(shadowCoord.z - closetDepth - blockerOffset, 0) / cascadeScale[cascadeIndex].z);
+                float const viewMaxT = abs((shadowCoord.z - minD + blockerOffset) / cascadeScale[cascadeIndex].z);
+
+                // if its knowen that the light view matrix is only a rotation or has unifrom scale this can be optimized.
+                minT = length(mul(inverseLightView, float4(0, 0, viewMinT, 0)).xyz);
+                maxT = length(mul(inverseLightView, float4(0, radius, viewMaxT, 0)).xyz);
+            }
+        }
+
+        bIsActiveLane = bIsActiveLane && bIsInActiveCascade;
+    }
+
+    ClassifyResults const results = {bIsActiveLane, bIsInLight, minT, maxT};
+
+    return results;
+}
+
+[numthreads(TILE_SIZE_X * TILE_SIZE_Y, 1, 1)]
+void ClassifyByNormal(uint localIndex : SV_GroupIndex, uint3 groupID : SV_GroupID)
+{
+    uint2 const localID = FXX_Rmp8x8(localIndex);
+    uint2 const pixelCoord = groupID.xy * k_tileSize + localID.xy;
+
+    ClassifyResults const results =
+        Classify(
+            pixelCoord,
+            true,
+            false,
+            false);
+
+    Tile currentTile = Tile::Create(groupID.xy);
+    uint const mask = BoolToWaveMask(results.bIsActiveLane, localID);
+    currentTile.mask = mask;
+
+    uint const lightMask = BoolToWaveMask(results.bIsInLight, localID);
+
+    bool const bDiscardTile = (countbits(mask) <= tileTolerance);
+    if (localIndex == 0)
+    {
+        if (!bDiscardTile)
+        {
+            WriteTile(currentTile);
+        }
+
+        rwt2d_rayHitResults[groupID.xy] = ~lightMask;
+    }
+}
+
+[numthreads(TILE_SIZE_X * TILE_SIZE_Y, 1, 1)]
+void ClassifyByCascadeRange(uint localIndex : SV_GroupIndex, uint3 groupID : SV_GroupID)
+{
+    uint2 const localID = FXX_Rmp8x8(localIndex);
+    uint2 const pixelCoord = groupID.xy * k_tileSize + localID.xy;
+
+    ClassifyResults const results =
+        Classify(
+            pixelCoord,
+            true,
+            true,
+            false);
+
+    Tile currentTile = Tile::Create(groupID.xy);
+    uint const mask = BoolToWaveMask(results.bIsActiveLane, localID);
+    currentTile.mask = mask;
+
+    uint const lightMask = BoolToWaveMask(results.bIsInLight, localID);
+
+    bool const bDiscardTile = (countbits(mask) <= tileTolerance);
+    if (localIndex == 0)
+    {
+        if (!bDiscardTile)
+        {
+            WriteTile(currentTile);
+        }
+
+        rwt2d_rayHitResults[groupID.xy] = ~lightMask;
+    }
+}
+
+
+[numthreads(TILE_SIZE_X * TILE_SIZE_Y, 1, 1)]
+void ClassifyByCascades(uint localIndex : SV_GroupIndex, uint3 groupID : SV_GroupID)
+{
+    uint2 const localID = FXX_Rmp8x8(localIndex);
+    uint2 const pixelCoord = groupID.xy * k_tileSize + localID.xy;
+
+    ClassifyResults const results =
+        Classify(
+            pixelCoord,
+            true,
+            false,
+            true);
+
+    Tile currentTile = Tile::Create(groupID.xy);
+    uint const mask = BoolToWaveMask(results.bIsActiveLane, localID);
+    currentTile.mask = mask;
+    if (bUseCascadesForRayT)
+    {
+        // At lest one lane must be active for the tile to be written out, so the infinitly and zero will be removed by the wave min and max.
+        // Otherwise we will get minT to be infinite and maxT to be 0
+        currentTile.minT = max(WaveActiveMin(results.minT), currentTile.minT);
+        currentTile.maxT = min(WaveActiveMax(results.maxT), currentTile.maxT);
+    }
+
+    uint const lightMask = BoolToWaveMask(results.bIsInLight, localID);
+
+    bool const bDiscardTile = (countbits(mask) <= tileTolerance);
+    if (localIndex == 0)
+    {
+        if (!bDiscardTile)
+        {
+            WriteTile(currentTile);
+        }
+
+        rwt2d_rayHitResults[groupID.xy] = ~lightMask;
+    }
+}

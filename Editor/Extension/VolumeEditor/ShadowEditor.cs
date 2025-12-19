@@ -1,4 +1,5 @@
-﻿using UnityEditorInternal;
+﻿using System;
+using UnityEditorInternal;
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
 
@@ -9,14 +10,14 @@ namespace UnityEditor.Rendering.Universal
     public class ShadowEditor : VolumeComponentEditor
     {
         private SerializedDataParameter m_Enable;
-        private SerializedDataParameter m_CascadeMode;
 
-        private SerializedDataParameter m_RayTracing;
         private SerializedDataParameter m_DirShadowsRayLength;
         private SerializedDataParameter m_sampleCount;
         private SerializedDataParameter m_radius;
         private SerializedDataParameter m_CharacterLayerMask;
 
+
+        private SerializedDataParameter m_ShadowMode;
 
         private SerializedDataParameter m_ShadowsAlgo;
         private SerializedDataParameter m_ShadowsIntensity;
@@ -39,13 +40,18 @@ namespace UnityEditor.Rendering.Universal
 
         private SerializedDataParameter m_ShadowDenoise;
 
-        private SerializedDataParameter m_UseFullRTShadow;
+        private SerializedDataParameter m_ShadowClassifyMode;
+
+
+        #region FullRaytrace Shadow
 
         private SerializedDataParameter m_SunAngularDiameter;
         private SerializedDataParameter m_MaxStabilizedFrameNum;
         private SerializedDataParameter m_SplitScreen;
         private SerializedDataParameter m_AdaptiveAccumulation;
-        
+
+        #endregion
+
 
         private enum Unit
         {
@@ -69,9 +75,8 @@ namespace UnityEditor.Rendering.Universal
             var o = new PropertyFetcher<Shadows>(serializedObject);
 
             m_Enable = Unpack(o.Find(x => x.enable));
-            m_CascadeMode = Unpack(o.Find(x => x.cascadeMode));
 
-            m_RayTracing = Unpack(o.Find(x => x.rayTracing));
+            m_ShadowMode = Unpack(o.Find(x => x.shadowMode));
             m_DirShadowsRayLength = Unpack(o.Find(x => x.dirShadowsRayLength));
             m_sampleCount = Unpack(o.Find(x => x.sampleCount));
             m_radius = Unpack(o.Find(x => x.radius));
@@ -109,45 +114,41 @@ namespace UnityEditor.Rendering.Universal
 
             (serializedObject.targetObject as Shadows)?.InitNormalized(m_State.value == Unit.Percent);
 
-            m_UseFullRTShadow = Unpack(o.Find(x => x.useFullRTShadow));
 
             m_SunAngularDiameter = Unpack(o.Find(x => x.sunAngularDiameter));
             m_MaxStabilizedFrameNum = Unpack(o.Find(x => x.maxStabilizedFrameNum));
             m_SplitScreen = Unpack(o.Find(x => x.splitScreen));
-            m_AdaptiveAccumulation= Unpack(o.Find(x => x.adaptiveAccumulation));
+            m_AdaptiveAccumulation = Unpack(o.Find(x => x.adaptiveAccumulation));
+
+
+            m_ShadowClassifyMode = Unpack(o.Find(x => x.shadowClassifyMode));
         }
 
 
         public override void OnInspectorGUI()
         {
             PropertyField(m_Enable, EditorGUIUtility.TrTextContent("Shadow Enable"));
-            PropertyField(m_RayTracing, EditorGUIUtility.TrTextContent("Raytracing Shadow"));
+            PropertyField(m_ShadowMode, EditorGUIUtility.TrTextContent("Shadow Mode"));
 
-            bool rayTracingSettingsDisplayed = m_RayTracing.overrideState.boolValue
-                                               && m_RayTracing.value.boolValue;
-
-
-            // The rest of the ray tracing UI is only displayed if the asset supports ray tracing and the checkbox is checked.
-            if (rayTracingSettingsDisplayed)
+            switch ((ShadowMode)m_ShadowMode.value.intValue)
             {
-                PropertyField(m_UseFullRTShadow);
-                if (m_UseFullRTShadow.value.boolValue)
-                {
+                case ShadowMode.FullRasterShadow:
+                    RasterShadowsGUI();
+                    break;
+                case ShadowMode.HybridShadow:
+                    RasterShadowsGUI();
+                    HybridShadowsGUI();
+                    break;
+                case ShadowMode.FullRaytraceShadow:
                     FullRayTracedShadowsGUI();
-                }
-                else
-                {
-                    RayTracedShadowsGUI();
-                }
-            }
-            else
-            {
-                RasterShadowsGUI();
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
             }
         }
 
 
-        void RayTracedShadowsGUI()
+        void HybridShadowsGUI()
         {
             if (!SystemInfo.supportsRayTracing)
             {
@@ -163,6 +164,9 @@ namespace UnityEditor.Rendering.Universal
                 EditorGUILayout.Space(10);
 
                 PropertyField(m_ShadowsIntensity);
+                
+                
+                PropertyField(m_ShadowClassifyMode);
             }
         }
 
@@ -179,7 +183,6 @@ namespace UnityEditor.Rendering.Universal
         void RasterShadowsGUI()
         {
             PropertyField(m_ShadowsAlgo, EditorGUIUtility.TrTextContent("Shadow Algo"));
-            PropertyField(m_CascadeMode, EditorGUIUtility.TrTextContent("Cascade Mode"));
 
             PropertyField(m_ShadowsIntensity, EditorGUIUtility.TrTextContent("Shadow Intensity"));
 

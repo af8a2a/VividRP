@@ -9,9 +9,6 @@ namespace UnityEngine.Rendering.Universal
         {
             var cameraData = frameData.Get<UniversalCameraData>();
             var resourceData = frameData.Get<UniversalResourceData>();
-            var renderingData = frameData.Get<UniversalRenderingData>();
-
-
 
 
             var temporalFilter = cameraData.denoiseSystem.temporalDenoiser;

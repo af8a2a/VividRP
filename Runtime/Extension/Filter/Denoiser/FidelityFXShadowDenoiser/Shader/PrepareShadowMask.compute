@@ -1,0 +1,58 @@
+﻿/**********************************************************************
+Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+RTShadowDenoiser
+
+prepare_shadow_mask - reads RT output and creates a packed buffer
+of the results for use in the denoiser.
+
+********************************************************************/
+#pragma use_dxc
+#pragma only_renderers d3d11 xboxseries ps5
+#pragma require Native16Bit
+#pragma kernel main
+#define TILE_SIZE_X 8
+#define TILE_SIZE_Y 4
+
+
+uint LaneIdToBitShift(uint2 localID)
+{
+    return localID.y * TILE_SIZE_X + localID.x;
+}
+
+
+bool WaveMaskToBool(uint mask, uint2 localID)
+{
+    return (1 << LaneIdToBitShift(localID.xy)) & mask;
+}
+
+cbuffer PassData : register(b0)
+{
+    int2 BufferDimensions;
+}
+
+Texture2D<uint> t2d_hitMaskResults : register(t0);
+RWStructuredBuffer<uint> rwsb_shadowMask : register(u0);
+RWTexture2D<uint> debugTexture ;
+
+int2 FFX_DNSR_Shadows_GetBufferDimensions()
+{
+    return BufferDimensions;
+}
+
+bool FFX_DNSR_Shadows_HitsLight(uint2 did, uint2 gtid, uint2 gid)
+{
+    return !WaveMaskToBool(t2d_hitMaskResults[gid], gtid);
+}
+
+void FFX_DNSR_Shadows_WriteMask(uint offset, uint value)
+{
+    rwsb_shadowMask[offset] = value;
+} 
+
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/FidelityFX/FidelityFXShadowDenoiser/ffx_denoiser_shadows_prepare.hlsl"
+
+[numthreads(TILE_SIZE_X, TILE_SIZE_Y, 1)]
+void main(uint2 gtid : SV_GroupThreadID, uint2 gid : SV_GroupID)
+{
+    FFX_DNSR_Shadows_PrepareShadowMask(gtid, gid);
+}

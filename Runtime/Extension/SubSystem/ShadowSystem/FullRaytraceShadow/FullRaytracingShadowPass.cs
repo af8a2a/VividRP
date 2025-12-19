@@ -93,7 +93,6 @@ namespace UnityEngine.Rendering.Universal
             var historyRT = HistoryFrameRTSystem.GetOrCreate(cameraData.camera);
 
 
-            passData.requireRayTracing &= volumeSettings.rayTracing.value;
 
             if (passData.requireRayTracing)
             {
@@ -195,10 +194,9 @@ namespace UnityEngine.Rendering.Universal
             UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
             var lightData = frameData.Get<UniversalLightData>();
             var stack = VolumeManager.instance.stack;
-            var volumeSettings = stack.GetComponent<Shadows>();
 
 
-            using (var builder = renderGraph.AddComputePass<PassData>(" Raytracing Shadow", out var passData))
+            using (var builder = renderGraph.AddComputePass<PassData>("Full Raytracing Shadow", out var passData))
             {
 
                 var rayTracingSystem = RayTracingSystem.instance;
@@ -233,21 +231,17 @@ namespace UnityEngine.Rendering.Universal
 
                 builder.SetRenderFunc((PassData data, ComputeGraphContext context) => { ExecutePass(data, context); });
                 resourceData.raytracingShadowTexture = passData.raytracingShadowmapTex;
-                if (volumeSettings.useFullRTShadow.value)
-                {
-                    resourceData.mainShadowsTexture = passData.raytracingShadowmapTex;
-                    resourceData.screenSpaceShadowsTexture = passData.raytracingShadowmapTex;
-                }
+                resourceData.mainShadowsTexture = passData.raytracingShadowmapTex;
+                resourceData.screenSpaceShadowsTexture = passData.raytracingShadowmapTex;
+                
             }
-
-
-            // SigmaTileClassifier.instance.ClassifyShadowPenumbra(renderGraph, cameraData, volumeSettings, resourceData.linearDepthTexture,
-            //     resourceData.raytracingShadowTexture);
             var denoised = cameraData.denoiseSystem.nrdSIGMADenoiser.Denoise(renderGraph, frameData,
                 resourceData.motionVectorColor, resourceData.gBuffer[2], resourceData.linearDepthTexture, resourceData.raytracingShadowTexture,
                 TextureHandle.nullHandle);
 
+            
             resourceData.mainShadowsTexture = denoised;
+            resourceData.raytracingShadowTexture = denoised;
             resourceData.screenSpaceShadowsTexture = denoised;
         }
     }

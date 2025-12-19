@@ -239,6 +239,13 @@ namespace UnityEngine.Rendering.Universal
                 material.EnableKeyword(ShaderKeywordStrings._ENABLE_ALPHA_OUTPUT);
             }
         }
+        static void UpdateGlobalDebugHandlerPass(RenderGraph renderGraph, UniversalCameraData cameraData, bool isFinalPass)
+        {
+            // NOTE: Debug handling injects a global state render pass.
+            DebugHandler debugHandler = ScriptableRenderPass.GetActiveDebugHandler(cameraData);
+            bool resolveToDebugScreen = debugHandler != null && debugHandler.WriteToDebugScreenTexture(cameraData.resolveFinalTarget);
+            debugHandler?.UpdateShaderGlobalPropertiesForFinalValidationPass(renderGraph, cameraData, isFinalPass && !resolveToDebugScreen);
+        }
 
         #endregion
 
@@ -369,26 +376,20 @@ namespace UnityEngine.Rendering.Universal
 
                 builder.AllowGlobalStateModification(true);
 
-                // var target = resourceData.backBufferColor;
-                // TextureHandle debugHandlerColorTarget = resourceData.afterPostProcessColor;
-                //
-                //
-                // if (resolveToDebugScreen)
-                // {
-                //     debugHandlerColorTarget = target;
-                //     target = resourceData.debugScreenColor;
-                // }
-                
+
                 TextureHandle backbuffer = resourceData.backBufferColor;
                 TextureHandle overlayUITexture = resourceData.overlayUITexture;
                 // Desired target for post-processing pass.
                 TextureHandle target = backbuffer;
 
-                if (resolveToDebugScreen)
-                {
-                    resourceData.afterPostProcessColor = target;
-                    target = resourceData.debugScreenColor;
-                }
+                // if (resolveToDebugScreen)
+                // {
+                //     ImportResourceParams importParams = new ImportResourceParams();
+                //     importParams.clearOnFirstUse = false;
+                //     importParams.discardOnLastUse = false;
+                //     TextureHandle debugTexture = renderGraph.ImportTexture(debugHandler.DebugScreenColorHandle, importParams);
+                //     target = debugTexture;
+                // }
                 
                 passData.destinationTexture = target;
 

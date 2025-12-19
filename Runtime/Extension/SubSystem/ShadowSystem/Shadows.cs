@@ -3,12 +3,6 @@
 namespace UnityEngine.Rendering.Universal
 {
     
-    public enum CascadeMode
-    {
-        URP = 0, //default URP CSM
-        Custom = 1,//Texture2DArray
-    }
-
     
     
     public enum ShadowFilter
@@ -25,16 +19,12 @@ namespace UnityEngine.Rendering.Universal
         SubSurface = 2,
     }
 
-    
-    [Serializable]
-    public sealed class CascadeModeParameter : VolumeParameter<CascadeMode>
+    public enum ShadowMode
     {
-        public CascadeModeParameter(CascadeMode value, bool overrideState = false) : base(value, overrideState)
-        {
-        }
+        FullRasterShadow,
+        HybridShadow,
+        FullRaytraceShadow,
     }
-
-
     
     
     [Serializable]
@@ -50,6 +40,15 @@ namespace UnityEngine.Rendering.Universal
     public sealed class ShadowAlgoParameter : VolumeParameter<ShadowFilter>
     {
         public ShadowAlgoParameter(ShadowFilter value, bool overrideState = false) : base(value, overrideState)
+        {
+        }
+    }
+    
+    
+    [Serializable]
+    public sealed class ShadowModeParameter : VolumeParameter<ShadowMode>
+    {
+        public ShadowModeParameter(ShadowMode value, bool overrideState = false) : base(value, overrideState)
         {
         }
     }
@@ -102,12 +101,11 @@ namespace UnityEngine.Rendering.Universal
 
     [Serializable, VolumeComponentMenu("Lighting/Shadows")]
     [SupportedOnRenderPipeline(typeof(UniversalRenderPipelineAsset))]
-    public sealed partial class Shadows : VolumeComponent, IPostProcessComponent
+    public sealed partial class Shadows : VolumeComponent
     {
         public BoolParameter enable = new BoolParameter(false, BoolParameter.DisplayType.EnumPopup);
 
-        public CascadeModeParameter cascadeMode = new CascadeModeParameter(CascadeMode.URP, true);
-
+        public ShadowModeParameter shadowMode = new ShadowModeParameter(ShadowMode.HybridShadow, true);
         
         public ShadowAlgoParameter shadowAlgo = new ShadowAlgoParameter(ShadowFilter.PCF, true);
 
@@ -165,7 +163,6 @@ namespace UnityEngine.Rendering.Universal
 
         #region RT Shadow
 
-        [AdditionalProperty] public BoolParameter useFullRTShadow = new BoolParameter(false, BoolParameter.DisplayType.EnumPopup);
         
         
         [Tooltip("Sun size (deg).")] public ClampedFloatParameter sunAngularDiameter = new ClampedFloatParameter(0.533f, 0, 3);
@@ -195,7 +192,7 @@ namespace UnityEngine.Rendering.Universal
         #endregion
 
 
-        /// <inheritdoc/>
+
         public bool IsActive() => enable.value; // Always enable screenSpaceShadows.
 
 

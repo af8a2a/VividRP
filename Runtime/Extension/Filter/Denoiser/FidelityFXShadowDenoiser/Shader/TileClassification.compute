@@ -1,0 +1,167 @@
+﻿/**********************************************************************
+Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+RTShadowDenoiser
+
+tile_classification
+
+********************************************************************/
+
+#pragma use_dxc
+#pragma only_renderers d3d11 xboxseries ps5
+#define PLATFORM_SUPPORTS_WAVE_INTRINSICS
+#pragma kernel main
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/NormalBuffer.hlsl"
+cbuffer cbPassData : register(b0)
+{
+    float3   Eye;
+    int      FirstFrame;
+    int2     BufferDimensions;
+    float2   InvBufferDimensions;
+    float4x4 ProjectionInverse;
+    float4x4 ReprojectionMatrix;
+    float4x4 ViewProjectionInverse;
+}
+
+Texture2D<float> t2d_depth;
+Texture2D<float2> t2d_velocity;
+Texture2D<float3> t2d_normal;
+Texture2D<float2> t2d_history;
+Texture2D<float> t2d_previousDepth;
+StructuredBuffer<uint> sb_raytracerResult;
+Texture2D<uint> sb_raytracerResult_raw;
+
+
+RWStructuredBuffer<uint> rwsb_tileMetaData;
+RWTexture2D<float2> rwt2d_reprojectionResults;
+
+Texture2D<float3> t2d_previousMoments;
+RWTexture2D<float3> rwt2d_momentsBuffer;
+RWTexture2D<float4> debugTexture;
+
+#define ss_trilinerClamp sampler_TrilinearClamp
+// SamplerState ss_trilinerClamp : register(s0);
+
+float4x4 FFX_DNSR_Shadows_GetViewProjectionInverse()
+{
+    return ViewProjectionInverse;
+}
+
+float4x4 FFX_DNSR_Shadows_GetReprojectionMatrix()
+{
+    return ReprojectionMatrix;
+}
+
+float4x4 FFX_DNSR_Shadows_GetProjectionInverse()
+{
+    return ProjectionInverse;
+}
+
+float2 FFX_DNSR_Shadows_GetInvBufferDimensions()
+{
+    return InvBufferDimensions;
+}
+
+int2 FFX_DNSR_Shadows_GetBufferDimensions()
+{
+    return BufferDimensions;
+}
+
+int FFX_DNSR_Shadows_IsFirstFrame()
+{
+    return FirstFrame;
+}
+
+float3 FFX_DNSR_Shadows_GetEye()
+{
+    return Eye;
+}
+
+float FFX_DNSR_Shadows_ReadDepth(int2 p)
+{
+    return t2d_depth.Load(int3(p, 0)).x;
+}
+
+float FFX_DNSR_Shadows_ReadPreviousDepth(int2 p)
+{
+    return t2d_previousDepth.Load(int3(p, 0)).x;
+} 
+
+float3 FFX_DNSR_Shadows_ReadNormals(int2 p)
+{
+    return normalize(UnpackGBufferNormal(t2d_normal.Load(int3(p, 0)).xyz));
+}
+
+float2 FFX_DNSR_Shadows_ReadVelocity(int2 p)
+{
+    return t2d_velocity.Load(int3(p, 0));
+}
+
+float FFX_DNSR_Shadows_ReadHistory(float2 p)
+{
+    return t2d_history.SampleLevel(ss_trilinerClamp, p, 0).x;
+}
+
+float3 FFX_DNSR_Shadows_ReadPreviousMomentsBuffer(int2 p)
+{
+    return t2d_previousMoments.Load(int3(p, 0)).xyz;
+}
+
+uint  FFX_DNSR_Shadows_ReadRaytracedShadowMask(uint p)
+{
+    return sb_raytracerResult[p];
+}
+
+uint  FFX_DNSR_Shadows_ReadRaytracedShadowMask_Raw(uint2 p)
+{
+    return sb_raytracerResult_raw[p];
+}
+
+
+void  FFX_DNSR_Shadows_WriteMetadata(uint p, uint val)
+{
+    rwsb_tileMetaData[p] = val;
+}
+
+void  FFX_DNSR_Shadows_WriteMoments(uint2 p, float3 val)
+{
+    rwt2d_momentsBuffer[p] = val;
+}
+
+void FFX_DNSR_Shadows_WriteReprojectionResults(uint2 p, float2 val)
+{
+    rwt2d_reprojectionResults[p] = val;
+}
+
+bool FFX_DNSR_Shadows_IsShadowReciever(uint2 p)
+{
+    float depth = FFX_DNSR_Shadows_ReadDepth(p);
+    return (depth > 0.0f) && (depth < 1.0f);
+}
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/FidelityFX/FidelityFXShadowDenoiser/ffx_denoiser_shadows_tileclassification.hlsl"
+
+
+uint LaneIdToBitShift(uint2 localID)
+{
+    return localID.y * 8 + localID.x;
+}
+
+
+bool WaveMaskToBool(uint mask, uint2 localID)
+{
+    return (1 << LaneIdToBitShift(localID.xy)) & mask;
+}
+
+[numthreads(8, 8, 1)]
+void main(uint3 did : SV_DispatchThreadID,uint3 localID : SV_GroupThreadID,uint group_index : SV_GroupIndex, uint2 gid : SV_GroupID)
+{
+    const uint2 tile_index = FFX_DNSR_Shadows_GetTileIndexFromPixelPosition(did);
+
+    uint const mask = sb_raytracerResult_raw[tile_index];
+    bool const threadHit = WaveMaskToBool(mask, localID.xy);
+    float4 const output = (threadHit == true) ? 0 : float4(1, 0, 0, 0);
+
+    debugTexture[did.xy]=output;
+
+    FFX_DNSR_Shadows_TileClassification(group_index, gid);
+}

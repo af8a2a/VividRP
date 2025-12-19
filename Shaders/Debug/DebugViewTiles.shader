@@ -228,37 +228,6 @@ Shader "Hidden/Universal/DebugViewTiles"
                     }
 
 
-                    // float3 positionWS = ComputeWorldSpacePosition(uv, LoadSceneDepth(pixelCoord), UNITY_MATRIX_I_VP);
-                    // half4 gbuffer0 = SAMPLE_TEXTURE2D_X_LOD(_GBuffer0, sampler_PointClamp, uv, 0);
-
-                    // half3 albedo = gbuffer0.xyz;
-                    // uint v_lightListOffset = 0;
-                    // uint v_lightIdx = lightStart;
-                    // int maxIndex = 0;
-                    // while (v_lightListOffset < lightCount)
-                    // {
-                    //     v_lightIdx = FetchIndex(lightStart, v_lightListOffset);
-                    //     if (v_lightIdx == -1)
-                    //         break;
-
-                    //     GPULightData gpuLight = FetchLight(v_lightIdx);
-                    //     {
-                    //         float3 lightVector = gpuLight.lightPosWS - positionWS.xyz;
-                    //         float distanceSqr = max(dot(lightVector, lightVector), HALF_MIN);
-
-                    //         half3 lightDirection = half3(lightVector * rsqrt(distanceSqr));
-
-                    //         // full-float precision required on some platforms
-                    //         float attenuation = DistanceAttenuation(distanceSqr, gpuLight.lightAttenuation.xy);
-
-
-
-                    //         float3 lightResult = albedo * gpuLight.lightColor * attenuation;
-                    //         result += float4(lightResult, 1);
-                    //     }
-
-                    //     v_lightListOffset++;
-                    // }
 
                 }
 

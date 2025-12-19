@@ -101,7 +101,7 @@ namespace UnityEngine.Rendering.Universal
             scramblingRanking256SPP = RTHandles.Alloc(textures.scramblingRanking256SPP);
             sobel = RTHandles.Alloc(textures.sobol256_4DTex);
 
-            
+            scramblingTex = RTHandles.Alloc(textures.scramblingTex);
             owenScrambled256Tex = RTHandles.Alloc(textures.owenScrambled256Tex);
             owenScrambledRGBATex = RTHandles.Alloc(textures.owenScrambledRGBATex);
             scramblingTile1SPP = RTHandles.Alloc(textures.scramblingTile1SPP);

@@ -20,7 +20,7 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/GBufferCommon.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/DenoisingUtils.hlsl"
 #include "TemporalFilter.hlsl"
-#pragma enable_d3d11_debug_symbols
+// #pragma enable_d3d11_debug_symbols
 
 // Tile size of this compute shaders
 #define TEMPORAL_FILTER_TILE_SIZE 8
@@ -117,7 +117,7 @@ void ValidateHistory(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 groupTh
     // Compute the max reprojection distance. This is evaluated as the max between a fixed radius value and an approximation of the footprint of the pixel.
     float maxRadius = ComputeMaxReprojectionWorldRadius(posInputs.positionWS, normalWS, _PixelSpreadAngleTangent);
 
-    _DebugTexture[centerCoord] = historyDepth-depth;
+    // _DebugTexture[centerCoord] = historyDepth-depth;
     // Is it too far from the current position?
     if (length(historyPositionWS - posInputs.positionWS) > maxRadius)
         historyRejectionResult = historyRejectionResult | HISTORYREJECTIONFLAGS_POSITION;

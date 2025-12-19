@@ -102,6 +102,9 @@ namespace UnityEngine.Rendering.Universal
         REBLURAmbientOcclusionDiffuseFast,
         
         ViewZ,
+        
+        FidelityFXShadowMoment,
+        FidelityFXShadowResult,
 
 
     }

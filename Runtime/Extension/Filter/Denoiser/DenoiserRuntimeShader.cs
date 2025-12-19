@@ -215,5 +215,36 @@ namespace UnityEngine.Rendering.Universal
         }
 
         #endregion
+
+        #region FidelityFX Shadow Denoiser
+
+        [SerializeField, ResourcePath("Runtime/Extension/Filter/Denoiser/FidelityFXShadowDenoiser/Shader/PrepareShadowMask.compute")]
+        private ComputeShader m_FidelityFXPrepareShadowMask;
+
+        public ComputeShader fidelityFXPrepareShadowMask
+        {
+            get => m_FidelityFXPrepareShadowMask;
+            set => this.SetValueAndNotify(ref m_FidelityFXPrepareShadowMask, value);
+        }
+
+        [SerializeField, ResourcePath("Runtime/Extension/Filter/Denoiser/FidelityFXShadowDenoiser/Shader/TileClassification.compute")]
+        private ComputeShader m_FidelityFXTileClassification;
+
+        public ComputeShader fidelityFXTileClassification
+        {
+            get => m_FidelityFXTileClassification;
+            set => this.SetValueAndNotify(ref m_FidelityFXTileClassification, value);
+        }
+
+        [SerializeField, ResourcePath("Runtime/Extension/Filter/Denoiser/FidelityFXShadowDenoiser/Shader/FilterSoftShadows.compute")]
+        private ComputeShader m_FidelityFXFilterSoftShadows;
+
+        public ComputeShader fidelityFXFilterSoftShadows
+        {
+            get => m_FidelityFXFilterSoftShadows;
+            set => this.SetValueAndNotify(ref m_FidelityFXFilterSoftShadows, value);
+        }
+
+        #endregion
     }
 }

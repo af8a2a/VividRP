@@ -432,6 +432,11 @@ namespace UnityEngine.Rendering.Universal
 
             for (int i = 0; i < _dBuffer.Length; i++)
                 _dBuffer[i] = TextureHandle.nullHandle;
+            
+            tilesBuffer = BufferHandle.nullHandle;
+            tileCountBuffer = BufferHandle.nullHandle;
+            shadowMaskTexture = TextureHandle.nullHandle;
+
         }
     }
 }

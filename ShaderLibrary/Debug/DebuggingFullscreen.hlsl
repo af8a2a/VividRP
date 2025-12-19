@@ -77,13 +77,17 @@ bool CalculateDebugColorRenderingSettings(half4 color, float2 uv, inout half4 de
 
     switch(_DebugFullScreenMode)
     {
-        case DEBUGFULLSCREENMODE_DEPTH:
-        case DEBUGFULLSCREENMODE_MOTION_VECTOR:
-        case DEBUGFULLSCREENMODE_MAIN_LIGHT_SHADOW_MAP:
-        case DEBUGFULLSCREENMODE_ADDITIONAL_LIGHTS_SHADOW_MAP:
-        case DEBUGFULLSCREENMODE_ADDITIONAL_LIGHTS_COOKIE_ATLAS:
-        case DEBUGFULLSCREENMODE_REFLECTION_PROBE_ATLAS:
-        case DEBUGFULLSCREENMODE_STP:
+       case DEBUGFULLSCREENMODE_NONE :
+       case DEBUGFULLSCREENMODE_DEPTH :
+       case DEBUGFULLSCREENMODE_MOTION_VECTOR :
+       case DEBUGFULLSCREENMODE_ADDITIONAL_LIGHTS_SHADOW_MAP :
+       case DEBUGFULLSCREENMODE_MAIN_LIGHT_SHADOW_MAP :
+       case DEBUGFULLSCREENMODE_SCREEN_SPACE_SHADOW_MAP:
+       case DEBUGFULLSCREENMODE_DIRECTIONAL_LIGHT_SHADOW_MAP :
+       case DEBUGFULLSCREENMODE_RAYTRACING_SHADOW_MAP :
+       case DEBUGFULLSCREENMODE_ADDITIONAL_LIGHTS_COOKIE_ATLAS :
+       case DEBUGFULLSCREENMODE_REFLECTION_PROBE_ATLAS :
+       case DEBUGFULLSCREENMODE_STP :
         {
             float2 uvOffset = half2(uv.x - _DebugTextureDisplayRect.x, uv.y - _DebugTextureDisplayRect.y);
 
@@ -117,6 +121,11 @@ bool CalculateDebugColorRenderingSettings(half4 color, float2 uv, inout half4 de
                 {
                     // This is encoded in gamma 2.0 (so the square is needed to get it back to linear).
                     debugColor = sampleColor * sampleColor;
+                }
+                else if (_DebugFullScreenMode == DEBUGFULLSCREENMODE_DIRECTIONAL_LIGHT_SHADOW_MAP || _DebugFullScreenMode ==
+                    DEBUGFULLSCREENMODE_SCREEN_SPACE_SHADOW_MAP)
+                {
+                    debugColor = half4(sampleColor.rrr, 1);
                 }
                 else
                 {

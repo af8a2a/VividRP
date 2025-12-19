@@ -2455,6 +2455,26 @@ namespace UnityEngine.Rendering.Universal
             hdrOutputParameters = new Vector4(minNits, maxNits, paperWhite, 1f / paperWhite);
         }
 
+        
+        internal static void GetHDROutputLuminanceParameters(HDROutputUtils.HDRDisplayInformation hdrDisplayInformation, ColorGamut hdrDisplayColorGamut, VividToneMapping tonemapping, out Vector4 hdrOutputParameters)
+        {
+            float minNits = hdrDisplayInformation.minToneMapLuminance;
+            float maxNits = hdrDisplayInformation.maxToneMapLuminance;
+            float paperWhite = hdrDisplayInformation.paperWhiteNits;
+
+            if (!tonemapping.detectPaperWhite.value)
+            {
+                paperWhite = tonemapping.paperWhite.value;
+            }
+            if (!tonemapping.detectBrightnessLimits.value)
+            {
+                minNits = tonemapping.minNits.value;
+                maxNits = tonemapping.maxNits.value;
+            }
+
+            hdrOutputParameters = new Vector4(minNits, maxNits, paperWhite, 1f / paperWhite);
+        }
+
         internal static void GetHDROutputGradingParameters(Tonemapping tonemapping, out Vector4 hdrOutputParameters)
         {
             int eetfMode = 0;

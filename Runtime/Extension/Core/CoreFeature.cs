@@ -45,12 +45,8 @@ namespace UnityEngine.Rendering.Universal
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
+            renderer.EnqueuePass(historyCapturePass);
             
-
-            if (HistoryBufferCaptureManager.instance.EnableHistoryPasses())
-            {
-                renderer.EnqueuePass(historyCapturePass);
-            }
 
             renderer.EnqueuePass(generateViewZPass);
 

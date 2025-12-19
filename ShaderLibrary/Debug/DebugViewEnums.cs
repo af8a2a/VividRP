@@ -119,7 +119,11 @@ namespace UnityEngine.Rendering.Universal
         /// RT Shadow.
         /// </summary>
         RaytracingShadowMap,
-
+        
+        /// <summary>
+        /// ScreenSpace Shadow.
+        /// </summary>
+        ScreenSpaceShadowMap,
         
         /// <summary> Display the light cookie atlas for additional lights.</summary>
         AdditionalLightsCookieAtlas,
@@ -432,6 +436,42 @@ namespace UnityEngine.Rendering.Universal
         /// Displacing the primitiveID as the RTAS Debug view.
         /// </summary>
         PrimitiveID,
+    }
+
+    /// <summary>
+    /// List of Shadow Classify Debug modes.
+    /// </summary>
+    public enum ShadowClassifyDebugMode
+    {
+        /// <summary>
+        /// No debug view.
+        /// </summary>
+        None,
+
+        /// <summary>
+        /// Display active tiles (green) and inactive tiles (red).
+        /// </summary>
+        TileMask,
+
+        /// <summary>
+        /// Display minimum T value (ray distance).
+        /// </summary>
+        MinT,
+
+        /// <summary>
+        /// Display maximum T value (ray distance).
+        /// </summary>
+        MaxT,
+
+        /// <summary>
+        /// Display T range (maxT - minT).
+        /// </summary>
+        TRange,
+
+        /// <summary>
+        /// Display raw hit mask from raytracing (red = miss, else transparent).
+        /// </summary>
+        HitMask,
     }
 
     #endregion

@@ -42,6 +42,8 @@ namespace UnityEngine.Rendering.Universal
         //DeferredLightingTileList,
         /// <summary>ScreenSpace Shadow GraphicsBuffer.</summary>
         ScreenSpaceShadowIndirect,
+        
+        ShadowTileCountBuffer,
     }
 
     /// <summary>

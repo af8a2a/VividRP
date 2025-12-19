@@ -150,7 +150,6 @@ namespace UnityEngine.Rendering.Universal
 
             using (var builder = renderGraph.AddComputePass<HistoryValidityPassData>("History Validity Evaluation", out var passData))
             {
-                builder.AllowPassCulling(false);
                 passData.texWidth = cameraData.scaledWidth;
                 passData.texHeight = cameraData.scaledHeight;
 
@@ -226,8 +225,8 @@ namespace UnityEngine.Rendering.Universal
                         data.historyNormalTexture);
                     ctx.cmd.SetComputeTextureParam(data.temporalFilterCS, data.validateHistoryKernel, _CameraMotionVectorsTexture,
                         data.motionVectorBuffer);
-                    ctx.cmd.SetComputeTextureParam(data.temporalFilterCS, data.validateHistoryKernel,"_DebugTexture",
-                        data.debugTexture);
+                    // ctx.cmd.SetComputeTextureParam(data.temporalFilterCS, data.validateHistoryKernel,"_DebugTexture",
+                    //     data.debugTexture);
 
                     // Bind the constants
                     ctx.cmd.SetComputeFloatParam(data.temporalFilterCS, _PixelSpreadAngleTangent, data.pixelSpreadTangent);

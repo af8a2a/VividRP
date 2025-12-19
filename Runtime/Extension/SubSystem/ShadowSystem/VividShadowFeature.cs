@@ -1,4 +1,6 @@
-﻿namespace UnityEngine.Rendering.Universal
+﻿using System;
+
+namespace UnityEngine.Rendering.Universal
 {
     [DisallowMultipleRendererFeature("Vivid Shadow")]
     public class ScreenspaceShadowFeature : ScriptableRendererFeature
@@ -7,13 +9,14 @@
         ScreenspaceShadowPass m_ScreenSpaceShadowPass;
         ScreenSpaceShadowsPostPass m_ScreenSpaceShadowsPostPass;
 
-        RaytracingShadowPass raytracingShadowPass;
+        RaytracingShadowPass m_RaytracingShadowPass;
 
         FullRaytracingShadowPass fullRaytracingShadowPass;
 
         public override void Create()
         {
             m_DirectionalLightsShadowCasterPass = new DirectionalLightsShadowCasterPass(RenderPassEvent.BeforeRenderingShadows);
+
             m_ScreenSpaceShadowPass = new ScreenspaceShadowPass()
             {
                 renderPassEvent = RenderPassEvent.BeforeRenderingDeferredLights
@@ -22,7 +25,7 @@
             {
                 renderPassEvent = RenderPassEvent.BeforeRenderingTransparents,
             };
-            raytracingShadowPass = new RaytracingShadowPass()
+            m_RaytracingShadowPass = new RaytracingShadowPass()
             {
                 renderPassEvent = RenderPassEvent.AfterRenderingGbuffer,
             };
@@ -31,28 +34,31 @@
             {
                 renderPassEvent = RenderPassEvent.AfterRenderingGbuffer,
             };
+            
         }
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
             var setting = VolumeManager.instance.stack.GetComponent<Shadows>();
-            bool hybridShadow = setting.rayTracing.value && !setting.useFullRTShadow.value;
-            bool fullRT = setting.useFullRTShadow.value;
-            bool onlyCSM = !setting.rayTracing.value && !setting.useFullRTShadow.value;
-
-            if (fullRT)
+            var shadowMode=setting.shadowMode.value;
+            switch (shadowMode)
             {
-                renderer.EnqueuePass(fullRaytracingShadowPass);
-            }
-            else
-            {
-                renderer.EnqueuePass(m_DirectionalLightsShadowCasterPass);
-                if (hybridShadow)
-                {
-                    renderer.EnqueuePass(raytracingShadowPass);
-                }
-                renderer.EnqueuePass(m_ScreenSpaceShadowPass);
-                renderer.EnqueuePass(m_ScreenSpaceShadowsPostPass);
+                case ShadowMode.FullRasterShadow:
+                    renderer.EnqueuePass(m_DirectionalLightsShadowCasterPass);
+                    renderer.EnqueuePass(m_ScreenSpaceShadowPass);
+                    renderer.EnqueuePass(m_ScreenSpaceShadowsPostPass);
+                    break;
+                case ShadowMode.HybridShadow:
+                    renderer.EnqueuePass(m_DirectionalLightsShadowCasterPass);
+                    renderer.EnqueuePass(m_RaytracingShadowPass);
+                    renderer.EnqueuePass(m_ScreenSpaceShadowPass);
+                    renderer.EnqueuePass(m_ScreenSpaceShadowsPostPass);
+                    break;
+                case ShadowMode.FullRaytraceShadow:
+                    renderer.EnqueuePass(fullRaytracingShadowPass);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
             }
         }
     }

@@ -1132,7 +1132,7 @@ namespace UnityEngine.Rendering.Universal
 #endif
             
 
-            if (usesDeferredLighting)
+            // if (usesDeferredLighting)
             {
                 m_DeferredLights.Setup(m_AdditionalLightsShadowCasterPass);
 
@@ -1196,61 +1196,61 @@ namespace UnityEngine.Rendering.Universal
                 // TextureHandle additionalShadowsTexture = resourceData.additionalShadowsTexture;
                 // m_RenderOpaqueForwardOnlyPass.Render(renderGraph, frameData, resourceData.activeColorTexture, resourceData.activeDepthTexture, mainShadowsTexture, additionalShadowsTexture, uint.MaxValue);
             }
-            else
-            {
-                RecordCustomRenderGraphPasses(renderGraph, RenderPassEvent.BeforeRenderingGbuffer, RenderPassEvent.BeforeRenderingOpaques);
-
-                bool needsOccluderUpdate = occluderPass == OccluderPass.ForwardOpaque;
-                var passCount = needsOccluderUpdate ? 2 : 1;
-                for (int passIndex = 0; passIndex < passCount; ++passIndex)
-                {
-                    uint batchLayerMask = uint.MaxValue;
-                    if (needsOccluderUpdate)
-                    {
-                        // first pass: test everything against previous frame final depth pyramid
-                        // second pass: re-test culled against current frame intermediate depth pyramid
-                        OcclusionTest occlusionTest = (passIndex) == 0 ? OcclusionTest.TestAll : OcclusionTest.TestCulled;
-                        InstanceOcclusionTest(renderGraph, cameraData, occlusionTest);
-                        batchLayerMask = occlusionTest.GetBatchLayerMask();
-                    }
-
-                    if (m_RenderingLayerProvidesRenderObjectPass)
-                    {
-                        m_RenderOpaqueForwardWithRenderingLayersPass.Render(
-                            renderGraph,
-                            frameData,
-                            resourceData.activeColorTexture,
-                            resourceData.renderingLayersTexture,
-                            resourceData.activeDepthTexture,
-                            resourceData.mainShadowsTexture,
-                            resourceData.additionalShadowsTexture,
-                            m_RenderingLayersMaskSize,
-                            batchLayerMask);
-                        SetRenderingLayersGlobalTextures(renderGraph);
-                    }
-                    else
-                    {
-                        m_RenderOpaqueForwardPass.Render(
-                            renderGraph,
-                            frameData,
-                            resourceData.activeColorTexture,
-                            resourceData.activeDepthTexture,
-                            resourceData.mainShadowsTexture,
-                            resourceData.additionalShadowsTexture,
-                            batchLayerMask,
-                            true);
-                    }
-
-                    if (needsOccluderUpdate)
-                    {
-                        // first pass: make current frame intermediate depth pyramid
-                        // second pass: make current frame final depth pyramid, set occlusion test results for later passes
-                        UpdateInstanceOccluders(renderGraph, cameraData, resourceData.activeDepthTexture);
-                        if (passIndex != 0)
-                            InstanceOcclusionTest(renderGraph, cameraData, OcclusionTest.TestAll);
-                    }
-                }
-            }
+            // else
+            // {
+            //     RecordCustomRenderGraphPasses(renderGraph, RenderPassEvent.BeforeRenderingGbuffer, RenderPassEvent.BeforeRenderingOpaques);
+            //
+            //     bool needsOccluderUpdate = occluderPass == OccluderPass.ForwardOpaque;
+            //     var passCount = needsOccluderUpdate ? 2 : 1;
+            //     for (int passIndex = 0; passIndex < passCount; ++passIndex)
+            //     {
+            //         uint batchLayerMask = uint.MaxValue;
+            //         if (needsOccluderUpdate)
+            //         {
+            //             // first pass: test everything against previous frame final depth pyramid
+            //             // second pass: re-test culled against current frame intermediate depth pyramid
+            //             OcclusionTest occlusionTest = (passIndex) == 0 ? OcclusionTest.TestAll : OcclusionTest.TestCulled;
+            //             InstanceOcclusionTest(renderGraph, cameraData, occlusionTest);
+            //             batchLayerMask = occlusionTest.GetBatchLayerMask();
+            //         }
+            //
+            //         if (m_RenderingLayerProvidesRenderObjectPass)
+            //         {
+            //             m_RenderOpaqueForwardWithRenderingLayersPass.Render(
+            //                 renderGraph,
+            //                 frameData,
+            //                 resourceData.activeColorTexture,
+            //                 resourceData.renderingLayersTexture,
+            //                 resourceData.activeDepthTexture,
+            //                 resourceData.mainShadowsTexture,
+            //                 resourceData.additionalShadowsTexture,
+            //                 m_RenderingLayersMaskSize,
+            //                 batchLayerMask);
+            //             SetRenderingLayersGlobalTextures(renderGraph);
+            //         }
+            //         else
+            //         {
+            //             m_RenderOpaqueForwardPass.Render(
+            //                 renderGraph,
+            //                 frameData,
+            //                 resourceData.activeColorTexture,
+            //                 resourceData.activeDepthTexture,
+            //                 resourceData.mainShadowsTexture,
+            //                 resourceData.additionalShadowsTexture,
+            //                 batchLayerMask,
+            //                 true);
+            //         }
+            //
+            //         if (needsOccluderUpdate)
+            //         {
+            //             // first pass: make current frame intermediate depth pyramid
+            //             // second pass: make current frame final depth pyramid, set occlusion test results for later passes
+            //             UpdateInstanceOccluders(renderGraph, cameraData, resourceData.activeDepthTexture);
+            //             if (passIndex != 0)
+            //                 InstanceOcclusionTest(renderGraph, cameraData, OcclusionTest.TestAll);
+            //         }
+            //     }
+            // }
 
             if (copySchedules.depth == DepthCopySchedule.AfterOpaques)
                 RecordCustomPassesWithDepthCopyAndMotion(renderGraph, resourceData, renderPassInputs.requiresDepthTextureEarliestEvent, RenderPassEvent.AfterRenderingOpaques, renderPassInputs.requiresMotionVectors);
@@ -1260,17 +1260,6 @@ namespace UnityEngine.Rendering.Universal
             RecordCustomRenderGraphPasses(renderGraph, RenderPassEvent.BeforeRenderingSkybox);
 
             
-            //now SkySystem will override URP Skybox
-            //not ready to disable URP Skybox...
-            #if false
-            if (cameraData.camera.clearFlags == CameraClearFlags.Skybox && cameraData.renderType != CameraRenderType.Overlay)
-            {
-                cameraData.camera.TryGetComponent(out Skybox cameraSkybox);
-                Material skyboxMaterial = cameraSkybox != null ? cameraSkybox.material : RenderSettings.skybox;
-                if (skyboxMaterial != null)
-                    m_DrawSkyboxPass.Render(renderGraph, frameData, context, resourceData.activeColorTexture, resourceData.activeDepthTexture, skyboxMaterial);
-            }
-            #endif
             if (copySchedules.depth == DepthCopySchedule.AfterSkybox)
                 ExecuteScheduledDepthCopyWithMotion(renderGraph, resourceData, renderPassInputs.requiresMotionVectors);
 
@@ -1436,9 +1425,6 @@ namespace UnityEngine.Rendering.Universal
                     SetupAfterPostRenderGraphFinalPassDebug(renderGraph, frameData);
             }
 
-            //We already checked the passes so we can skip here if there are none as a small optimization 
-            if (hasPassesAfterPostProcessing)
-                RecordCustomRenderGraphPasses(renderGraph, RenderPassEvent.AfterRenderingPostProcessing);
 
             //TODO we should check if the custom (users) passes swapped the camera color when the camera is part of a stack, because this will break camera stacking.
             //We need to copy back to a persistent A/B texture if that is the case to ensure correctness.
@@ -1447,23 +1433,12 @@ namespace UnityEngine.Rendering.Universal
             {
                 m_CapturePass.RecordRenderGraph(renderGraph, frameData);
             }
+            
+            //We already checked the passes so we can skip here if there are none as a small optimization 
+            debugHandler?.UpdateShaderGlobalPropertiesForFinalValidationPass(renderGraph, cameraData, !resolveToDebugScreen);
+            RecordCustomRenderGraphPasses(renderGraph, RenderPassEvent.AfterRenderingPostProcessing);
 
-            if (applyFinalPostProcessing)
-            {
-                //Will swap the active camera targets to backbuffer (resourceData.SwitchActiveTexturesToBackbuffer)
-                m_PostProcess.RenderFinalPostProcessing(renderGraph, frameData, needsColorEncoding);
-            }
-
-            //Keep in mind that also our users could have done the final blit / final post processing and called SwitchActiveTexturesToBackbuffer().
-            //Checking resourceData.isActiveTargetBackBuffer is a robust way to check if this has happened, by our own code or by the user.
-            if (!resourceData.isActiveTargetBackBuffer && cameraData.resolveFinalTarget)
-            {
-                debugHandler?.UpdateShaderGlobalPropertiesForFinalValidationPass(renderGraph, cameraData, !resolveToDebugScreen);
-
-                //Will swap the active camera targets to backbuffer (resourceData.SwitchActiveTexturesToBackbuffer)
-                m_FinalBlitPass.RecordRenderGraph(renderGraph, frameData);                
-            }
-
+            
             RecordCustomRenderGraphPasses(renderGraph, RenderPassEvent.AfterRendering);
 
             // We can explicitely render the overlay UI from URP when HDR output is not enabled.
@@ -1475,26 +1450,14 @@ namespace UnityEngine.Rendering.Universal
                 m_DrawOverlayUIPass.RenderOverlay(renderGraph, frameData, resourceData.activeColorTexture, resourceData.activeDepthTexture);
             }
 
-#if ENABLE_VR && ENABLE_XR_MODULE
-            if (cameraData.xr.enabled)
-            {
-                // Populate XR depth as requested by XR provider.
-                if (!xrDepthTargetResolved && cameraData.xr.copyDepth)
-                {
-                    m_XRCopyDepthPass.CopyToDepthXR = true;
-                    m_XRCopyDepthPass.MsaaSamples = 1;
-                    m_XRCopyDepthPass.Render(renderGraph, frameData, resourceData.backBufferDepth, resourceData.cameraDepth, bindAsCameraDepth: false, "XR Depth Copy");
-                }
-            }
-#endif
 
             if (resolveToDebugScreen)
             {
                 //We swapped the backBuffer textures to the debug screen textures before post processing. This way, all those passes don't need to be aware of the debughandling at all.
                 var debugScreenTexture = resourceData.backBufferColor;
-
-                debugHandler.Render(renderGraph, cameraData, debugScreenTexture, resourceData.overlayUITexture, debugRealBackBufferColor);
-
+            
+                // debugHandler.Render(renderGraph, cameraData, debugScreenTexture, resourceData.overlayUITexture, debugRealBackBufferColor);
+                debugHandler.Render(renderGraph,frameData, cameraData, debugScreenTexture, resourceData.overlayUITexture, debugRealBackBufferColor);
                 //Swapping the backbuffer textures back
                 resourceData.backBufferColor = debugRealBackBufferColor;
                 resourceData.backBufferDepth = debugRealBackBufferDepth;

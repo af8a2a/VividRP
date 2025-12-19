@@ -67,6 +67,16 @@ namespace UnityEngine.Rendering.Universal
             set => this.SetValueAndNotify(ref m_CopyChannelCS, value);
         }
 
+        
+        [SerializeField, ResourcePath("Runtime/Extension/Utility/MipmapGenerator/Shader/ColorClear.compute")]
+        private ComputeShader m_ColorClearCS;
+
+        public ComputeShader colorClearCS
+        {
+            get => m_ColorClearCS;
+            set => this.SetValueAndNotify(ref m_ColorClearCS, value);
+        }
+
 
     }
 }

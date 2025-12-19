@@ -13,6 +13,8 @@ namespace UnityEngine.Rendering.Universal
 
         public AmbientOcclusionDenoiser ambientOcclusionDenoiser = new();
         
+        public FidelityFXShadowDenoiser  fidelityFXShadowDenoiser = new();
+        
         public TextureHandle historyValidity;
         
 
@@ -23,6 +25,7 @@ namespace UnityEngine.Rendering.Universal
             temporalDenoiser?.Init();
             nrdSIGMADenoiser?.Init(camera);
             ambientOcclusionDenoiser?.Init(camera);
+            fidelityFXShadowDenoiser?.Init(camera);
         }
 
 
@@ -32,6 +35,7 @@ namespace UnityEngine.Rendering.Universal
             temporalDenoiser?.Release();
             nrdSIGMADenoiser?.Dispose();
             ambientOcclusionDenoiser?.Dispose();
+            fidelityFXShadowDenoiser?.Dispose();
         }
     }
 }

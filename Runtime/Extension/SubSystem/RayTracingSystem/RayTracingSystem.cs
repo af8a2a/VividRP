@@ -446,7 +446,7 @@ namespace UnityEngine.Rendering.Universal
 
             // Aggregate the shadow requirements
             Shadows shadowSettings = volumeStack.GetComponent<Shadows>();
-            bool opaqueShadows = shadowSettings.rayTracing.value || shadowSettings.useFullRTShadow.value;
+            bool opaqueShadows = shadowSettings.shadowMode.value  is ShadowMode.HybridShadow or ShadowMode.FullRaytraceShadow;
             // bool transparentReflections = shadowSettings.enabledTransparent.value;
             parameters.shadows = opaqueShadows;
             parameters.characterShadowLayerMask = shadowSettings.characterLayerMask.value;

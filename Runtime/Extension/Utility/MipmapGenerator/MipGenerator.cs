@@ -39,6 +39,12 @@ namespace UnityEngine.Rendering.Universal
         #endregion
 
 
+        #region ColorClear
+
+        ComputeShader m_ColorClearShader;
+
+        #endregion
+
         public void Init()
         {
             var runtimeShaders = GraphicsSettings.GetRenderPipelineSettings<MipGeneratorRuntimeShader>();
@@ -84,6 +90,12 @@ namespace UnityEngine.Rendering.Universal
             m_HDRPGPUCopyShader = runtimeShaders.copyChannelCS;
             k_SampleKernel_xyzw2x_8 = m_HDRPGPUCopyShader.FindKernel("KSampleCopy4_1_x_8");
             k_SampleKernel_xyzw2x_1 = m_HDRPGPUCopyShader.FindKernel("KSampleCopy4_1_x_1");
+
+            #endregion
+
+            #region ColorClear
+
+            m_ColorClearShader = runtimeShaders.colorClearCS;
 
             #endregion
         }

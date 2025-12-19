@@ -124,7 +124,7 @@ namespace UnityEngine.Rendering.Universal
             }
 
             currFrameRT = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.REBLURAmbientOcclusionDiffuseFast);
-            prevFrameRT = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.REBLURAmbientOcclusionDiffuse);
+            prevFrameRT = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.REBLURAmbientOcclusionDiffuseFast);
             return vaild;
         }
         

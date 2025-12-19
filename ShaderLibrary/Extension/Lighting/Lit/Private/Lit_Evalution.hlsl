@@ -44,7 +44,7 @@ DirectLighting Lightloop(float3 V, PositionInputs posInput, ShadingData shadingD
     directSpecular += dirLight.specular;
 
 
-    float shadowAttenuation =saturate( LoadScreenSpaceShadowmap(posInput.positionSS).x);
+    float shadowAttenuation =saturate( SampleVividScreenSpaceShadowmap(posInput.positionNDC).x);
 
     half3 shadowScatter = EvaluateShadowScatter(shadowAttenuation);
 

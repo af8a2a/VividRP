@@ -147,12 +147,6 @@ namespace UnityEngine.Rendering.Universal
                 m_TransparentGBufferPass.renderPassEvent = RenderPassEvent.AfterRenderingSkybox + 1;
             }
 
-            if (m_ForwardGBufferPass == null)
-            {
-                m_ForwardGBufferPass = new ForwardGBufferPass(m_GBufferPassNames);
-                // Set this to "After Opaques" so that we can enable GBuffers Depth Priming on non-GL platforms.
-                m_ForwardGBufferPass.renderPassEvent = RenderPassEvent.AfterRenderingOpaques;
-            }
         }
 
         protected override void Dispose(bool disposing)
@@ -170,8 +164,6 @@ namespace UnityEngine.Rendering.Universal
 
             if (m_TransparentGBufferPass! != null)
                 m_TransparentGBufferPass.Dispose();
-            if (m_ForwardGBufferPass! != null)
-                m_ForwardGBufferPass.Dispose();
         }
 
         void StoreAmbientSettings(ScreenSpacePathTracing ssptVolume)
@@ -241,7 +233,6 @@ namespace UnityEngine.Rendering.Universal
         private ScreenSpaceAccumulationPass m_AccumulationPass;
         private BackfaceDepthPass m_BackfaceDepthPass;
         private TransparentGBufferPass m_TransparentGBufferPass;
-        private ForwardGBufferPass m_ForwardGBufferPass;
 
         private readonly static FieldInfo renderingModeFieldInfo =
             typeof(UniversalRenderer).GetField("m_RenderingMode", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -444,28 +435,6 @@ namespace UnityEngine.Rendering.Universal
                 m_PathTracingMaterial.DisableKeyword("_SUPPORT_REFRACTION");
             }
 
-            // If GBuffer exists, URP is in Deferred path. (Actual rendering mode can be different from settings, such as URP forces Forward on OpenGL)
-            bool isUsingDeferred = gBufferFieldInfo.GetValue(renderer) != null;
-            // OpenGL won't use deferred path.
-            isUsingDeferred &= (SystemInfo.graphicsDeviceType != GraphicsDeviceType.OpenGLES3) &
-                               (SystemInfo.graphicsDeviceType !=
-                                GraphicsDeviceType.OpenGLCore); // GLES 2 is deprecated.
-
-            // Render Forward GBuffer pass if the current device supports MRT.
-            if (!isUsingDeferred)
-            {
-                if (SystemInfo.supportedRenderTargetCount >= 3)
-                {
-                    renderer.EnqueuePass(m_ForwardGBufferPass);
-                    isMRTLogPrinted = false;
-                }
-                else
-                {
-                    Debug.LogError(
-                        "Screen Space Path Tracing: The current device does not support rendering to multiple render targets.");
-                    isMRTLogPrinted = true;
-                }
-            }
         }
     }
 }

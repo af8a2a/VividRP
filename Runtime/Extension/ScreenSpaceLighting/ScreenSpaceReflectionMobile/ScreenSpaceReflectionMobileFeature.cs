@@ -3,7 +3,6 @@
     [DisallowMultipleRendererFeature]
     public class ScreenSpaceReflectionMobileFeature : ScriptableRendererFeature
     {
-        ForwardGBufferPass m_GBufferPass;
         BackfaceDepthPass m_BackfaceDepthPass;
         ScreenSpaceReflectionMobilePass _ScreenSpaceReflectionMobilePass;
 

@@ -174,13 +174,42 @@ while (WorldLightIteratorNext(iter, lightIdx)) {
 
 ### Path Tracing Features
 
-- **Ray Generation Shader**: Primary rays from camera
+- **Ray Generation Shader**: Primary rays from camera (`ReferencedPathTracing.hlsl`)
 - **Miss Shader**: Samples sky/environment for missed rays
+- **Closest Hit Shader**: Surface material evaluation with WorldLightCluster (`RayTracingShaderPassPathTracing.hlsl`)
 - **Direct Lighting**: WorldLightCluster queries at each bounce
 - **Multi-bounce GI**: Up to 4 bounces configurable
 - **Russian Roulette**: Path termination for efficiency
 - **Importance Sampling**: GGX for specular, cosine for diffuse
 - **NVIDIA SER**: Shader Execution Reordering for improved ray coherence (optional)
+
+### Lit Shader PathTracingDXR Pass
+
+The `Universal Render Pipeline/Lit` shader now includes a `PathTracingDXR` pass for ray traced global illumination:
+
+```hlsl
+Pass
+{
+    Name "PathTracingDXR"
+    Tags { "LightMode" = "PathTracingDXR" }
+    
+    // Supports all standard Lit shader features:
+    // - Normal mapping, parallax, detail maps
+    // - Metallic/Specular workflow
+    // - Emission, occlusion
+    // - Alpha testing for foliage
+    // - Shadow receiving from main light
+    // - Light layers support
+}
+```
+
+**Key Features:**
+- Full material property support (albedo, metallic, roughness, normal maps)
+- WorldLightCluster integration for out-of-view lighting
+- Alpha testing support for transparent/cutout materials
+- Automatic BRDF evaluation (Cook-Torrance for specular, Lambert for diffuse)
+- Cosine-weighted hemisphere sampling for diffuse bounces
+- Ray bias for avoiding self-intersection artifacts
 
 ### Path Tracing Shader Parameters
 

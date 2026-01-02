@@ -10,6 +10,7 @@ Provides efficient light queries at arbitrary world positions via 3D spatial gri
 - Reuses `GPULightData` format for easy integration with existing lighting loop
 - Only punctual lights (Point/Spot)
 - StructuredBuffer storage for shader access
+- Integrated with path tracing via `ReferencedPathTracing.hlsl`
 
 ## Architecture
 
@@ -151,9 +152,40 @@ struct GPULightData
 };
 ```
 
+## Path Tracing Integration
+
+The system is integrated into `ReferencedPathTracing.hlsl` for multi-bounce global illumination:
+
+```hlsl
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/WorldLightCluster.hlsl"
+
+// In path tracing bounce shader
+float3 directLight = EvaluateDirectLighting(hitPositionWS, hitNormalWS, viewDirWS, 
+                                            albedo, metallic, roughness, randomSeed);
+
+// Or manual iteration
+WorldLightIterator iter = WorldLightIteratorInit(hitPositionWS);
+uint lightIdx;
+while (WorldLightIteratorNext(iter, lightIdx)) {
+    GPULightData light = GetWorldLight(lightIdx);
+    // Evaluate lighting...
+}
+```
+
+### Path Tracing Features
+
+- **Ray Generation Shader**: Primary rays from camera
+- **Miss Shader**: Samples sky/environment for missed rays
+- **Direct Lighting**: WorldLightCluster queries at each bounce
+- **Multi-bounce GI**: Up to 4 bounces configurable
+- **Russian Roulette**: Path termination for efficiency
+- **Importance Sampling**: GGX for specular, cosine for diffuse
+
 ## Performance Notes
 
 - Grid resolution trades memory for query speed
 - `k_MaxLightsPerCell = 32` limits lights per cell
 - `WORLD_LIGHT_MAX_ITERATION = 64` limits shader iterations
 - Consider cell size based on typical light range in scene
+- Path tracing max bounces: 4 (configurable via `_PathTracingMaxBounces`)
+- Samples per pixel: Configurable via `_PathTracingSamplesPerPixel`

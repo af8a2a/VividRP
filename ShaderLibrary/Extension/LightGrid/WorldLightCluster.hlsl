@@ -254,4 +254,3 @@ half3 EvaluateWorldLightsDiffuse(float3 positionWS, half3 normalWS)
 }
 
 #endif // UNIVERSAL_WORLD_LIGHT_CLUSTER_INCLUDED
-

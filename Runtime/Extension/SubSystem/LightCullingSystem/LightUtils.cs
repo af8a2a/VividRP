@@ -72,7 +72,7 @@ namespace UnityEngine.Rendering.Universal
     /// <summary>
     /// Light Utils contains function to convert light intensities between units
     /// </summary>
-    class LightUtils
+   static class LightUtils
     {
         static float s_LuminanceToEvFactor => Mathf.Log(100f / ColorUtils.s_LightMeterCalibrationConstant, 2);
         static float s_EvToLuminanceFactor => -Mathf.Log(100f / ColorUtils.s_LightMeterCalibrationConstant, 2);
@@ -630,6 +630,11 @@ namespace UnityEngine.Rendering.Universal
             GetScaleAndBiasForLinearDistanceFade(fadeDistance, out scale, out bias);
 
             return 1.0f - Mathf.Clamp01(distanceToCamera * scale + bias);
+        }
+
+        internal static Vector3 ColorToVector3(this Color color)
+        {
+            return new Vector3(color.r, color.g, color.b);
         }
 
         internal static void EvaluateGPULightType(LightType lightType, ref LightCategory lightCategory,

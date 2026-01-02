@@ -20,6 +20,7 @@ namespace UnityEngine.Rendering.Universal
 
         private DirectionalLighting _directionalLighting;
         private ClusterLighting _clusterLighting;
+        private WorldLightClusterPass _worldLightClusterPass;
 
         public override void Create()
         {
@@ -38,6 +39,8 @@ namespace UnityEngine.Rendering.Universal
             depthPyramid = new DepthPyramidPass(RenderPassEvent.AfterRenderingPrePasses);
             _directionalLighting = new DirectionalLighting();
             _clusterLighting = new ClusterLighting();
+            _worldLightClusterPass = new WorldLightClusterPass();
+            _worldLightClusterPass.Setup();
 
             generateViewZPass = new GenerateViewZPass();
         }
@@ -60,6 +63,15 @@ namespace UnityEngine.Rendering.Universal
             renderer.EnqueuePass(sceneViewMotionVectorPass);
             renderer.EnqueuePass(_directionalLighting);
             renderer.EnqueuePass(_clusterLighting);
+            
+            // World light cluster for path tracing GI
+            renderer.EnqueuePass(_worldLightClusterPass);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            _worldLightClusterPass?.Dispose();
         }
     }
 }

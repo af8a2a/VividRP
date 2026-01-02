@@ -32,6 +32,11 @@
 // World light cluster for light queries
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/LightGrid/WorldLightCluster.hlsl"
 
+// NVIDIA SER support
+#define NV_HITOBJECT_USE_MACRO_API
+#define NV_SHADER_EXTN_SLOT u1
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/ExtensionSystem/NVAPI_SER/nvHLSLExtns.h"
+
 //--------------------------------------------------------------------------------------------------
 // Constants
 //--------------------------------------------------------------------------------------------------
@@ -56,6 +61,7 @@ int _PathTracingMaxBounces;
 float _PathTracingFireflyClamp;
 int _PathTracingSamplesPerPixel;
 int _PathTracingFrameIndex;
+float _UseNVSER; // Enable NVIDIA SER
 
 //--------------------------------------------------------------------------------------------------
 // Ray Payload
@@ -343,12 +349,37 @@ void RayGenPathTracing()
             rayIntersection.remainingDepth = _PathTracingMaxBounces - bounce - 1;
             rayIntersection.pixelCoord = pixelCoord;
 
-            TraceRay(_RaytracingAccelerationStructure,
-                     RAY_FLAG_CULL_BACK_FACING_TRIANGLES,
-                     RAYTRACINGRENDERERFLAG_PATH_TRACING,
-                     0, 1, 0,
-                     rayDesc,
-                     rayIntersection);
+            // NVIDIA SER: Shader Execution Reordering for improved coherence
+            UNITY_BRANCH
+            if (_UseNVSER)
+            {
+                // SER is extremely useful in path tracing for coherent ray execution
+                NvHitObject hitObject;
+
+                NvTraceRayHitObject(_RaytracingAccelerationStructure,
+                                    RAY_FLAG_CULL_BACK_FACING_TRIANGLES,
+                                    RAYTRACINGRENDERERFLAG_PATH_TRACING,
+                                    0, 1, 0,
+                                    rayDesc,
+                                    rayIntersection,
+                                    hitObject);
+
+                // Reorder threads for better coherence
+                NvReorderThread(hitObject);
+
+                // Invoke the hit shader
+                NvInvokeHitObject(_RaytracingAccelerationStructure, hitObject, rayIntersection);
+            }
+            else
+            {
+                // Standard ray tracing without SER
+                TraceRay(_RaytracingAccelerationStructure,
+                         RAY_FLAG_CULL_BACK_FACING_TRIANGLES,
+                         RAYTRACINGRENDERERFLAG_PATH_TRACING,
+                         0, 1, 0,
+                         rayDesc,
+                         rayIntersection);
+            }
 
             // If hit, evaluate lighting at hit point
             if (rayIntersection.t > 0.0 && rayIntersection.t < _RaytracingRayMaxLength)

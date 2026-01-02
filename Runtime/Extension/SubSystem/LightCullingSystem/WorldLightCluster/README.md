@@ -180,6 +180,18 @@ while (WorldLightIteratorNext(iter, lightIdx)) {
 - **Multi-bounce GI**: Up to 4 bounces configurable
 - **Russian Roulette**: Path termination for efficiency
 - **Importance Sampling**: GGX for specular, cosine for diffuse
+- **NVIDIA SER**: Shader Execution Reordering for improved ray coherence (optional)
+
+### Path Tracing Shader Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `_PathTracingMaxBounces` | `int` | Max path depth (default: 4) |
+| `_PathTracingFireflyClamp` | `float` | Radiance clamp threshold to reduce fireflies |
+| `_PathTracingSamplesPerPixel` | `int` | Samples per pixel for Monte Carlo integration |
+| `_PathTracingFrameIndex` | `int` | Frame index for temporal sampling |
+| `_UseNVSER` | `float` | Enable NVIDIA SER (1.0 = on, 0.0 = off) |
+| `_PathTracingOutput` | `RWTexture2D<float4>` | Output radiance buffer |
 
 ## Performance Notes
 
@@ -189,3 +201,4 @@ while (WorldLightIteratorNext(iter, lightIdx)) {
 - Consider cell size based on typical light range in scene
 - Path tracing max bounces: 4 (configurable via `_PathTracingMaxBounces`)
 - Samples per pixel: Configurable via `_PathTracingSamplesPerPixel`
+- **NVIDIA SER**: Highly recommended for path tracing to improve ray coherence and performance (requires RTX hardware)

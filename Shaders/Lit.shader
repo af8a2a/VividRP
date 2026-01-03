@@ -721,8 +721,7 @@ Shader "Universal Render Pipeline/Lit"
             #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingFragInputs.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RayTracingCommon.hlsl"
 
-            #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
-
+            // Note: LitInput.hlsl is included by LitInputPathTracing.hlsl
             // World Light Cluster for path tracing light queries
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/LightGrid/WorldLightCluster.hlsl"
             

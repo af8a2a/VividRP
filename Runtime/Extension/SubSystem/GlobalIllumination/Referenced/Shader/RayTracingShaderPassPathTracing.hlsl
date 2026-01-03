@@ -6,6 +6,7 @@
 
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/BRDF.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/GlobalIllumination/Referenced/Shader/LitInputPathTracing.hlsl"
 
 // Path tracing payload structure (defined in ReferencedPathTracing.hlsl)
 struct PathTracingPayload
@@ -122,11 +123,9 @@ float3 EvaluatePathTracingDirectLighting(float3 positionWS, float3 normalWS, flo
 [shader("closesthit")]
 void ClosestHitPathTracing(inout PathTracingPayload payload : SV_RayPayload,  AttributeData attributeData : SV_IntersectionAttributes)
 {
-    
-    
-
     // Get hit position in world space
     float3 hitPositionWS = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
+    float hitDistance = RayTCurrent();
     
     // Build fragment inputs
     IntersectionVertex currentVertex;
@@ -138,9 +137,16 @@ void ClosestHitPathTracing(inout PathTracingPayload payload : SV_RayPayload,  At
     posInput.positionWS = hitPositionWS;
     posInput.positionSS = float2(0, 0); // Not used in path tracing
     
-    // Sample material properties
+    // Calculate texture LOD based on ray distance
+    // Uses distance-based heuristic: farther hits use lower resolution textures
+    float textureLOD = ComputeTextureLODFromDistance(hitDistance, 1.0);
+    
+    // For secondary bounces, increase LOD to reduce aliasing and improve performance
+    textureLOD += payload.bounceCount * 0.5;
+    
+    // Sample material properties with explicit LOD (ray tracing compatible)
     SurfaceData surfaceData;
-    InitializeStandardLitSurfaceData(fragInput.texCoord0, surfaceData);
+    InitializeStandardLitSurfaceDataRT(fragInput.texCoord0, textureLOD, surfaceData);
     
     // Apply normal mapping if enabled
     float3 normalWS = fragInput.tangentToWorld[2];
@@ -200,11 +206,13 @@ void AnyHitPathTracing(inout PathTracingPayload payload : SV_RayPayload, in Attr
 {
     // Alpha testing for transparent materials
     #ifdef _ALPHATEST_ON
+        IntersectionVertex currentVertex;
         FragInputs fragInput;
-        BuildFragInputsFromIntersection(attribs, fragInput);
+        GetCurrentVertexAndBuildFragInputs(attributeData, currentVertex, fragInput);
         
+        // Use LOD 0 for alpha testing (need accurate alpha values)
         SurfaceData surfaceData;
-        InitializeStandardLitSurfaceData(fragInput.texCoord0, surfaceData);
+        InitializeStandardLitSurfaceDataRT(fragInput.texCoord0, 0.0, surfaceData);
         
         // Ignore this hit if alpha is below threshold
         if (surfaceData.alpha < surfaceData.alphaClipThreshold)

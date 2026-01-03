@@ -151,7 +151,7 @@ void ClosestHitPathTracing(inout PathTracingPayload payload : SV_RayPayload,  At
     // Apply normal mapping if enabled
     float3 normalWS = fragInput.tangentToWorld[2];
     #ifdef _NORMALMAP
-        float3 normalTS = SampleNormal(fragInput.texCoord0, TEXTURE2D_ARGS(_BumpMap, sampler_BumpMap), _BumpScale);
+        float3 normalTS = SampleNormalRT(fragInput.texCoord0,textureLOD, TEXTURE2D_ARGS(_BumpMap, sampler_BumpMap), _BumpScale);
         normalWS = TransformTangentToWorld(normalTS, fragInput.tangentToWorld);
     #endif
     normalWS = normalize(normalWS);
@@ -182,7 +182,7 @@ void ClosestHitPathTracing(inout PathTracingPayload payload : SV_RayPayload,  At
     
     // Accumulate direct lighting
     payload.radiance += payload.throughput * directLight;
-    
+
     // Update throughput for next bounce (simplified diffuse BRDF)
     payload.throughput *= albedo * occlusion;
     

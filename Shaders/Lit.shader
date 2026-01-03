@@ -632,9 +632,6 @@ Shader "Universal Render Pipeline/Lit"
 
             HLSLPROGRAM
 
-            #pragma only_renderers d3d11 xboxseries ps5
-            #pragma raytracing surface_shader
-
             #pragma shader_feature_local_raytracing _DISABLE_DECALS
             #pragma shader_feature_local_raytracing _NORMALMAP
             #pragma shader_feature_local_raytracing _ALPHATEST_ON

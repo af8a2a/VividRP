@@ -5,7 +5,7 @@ namespace UnityEngine.Rendering.Universal
     
     [Serializable]
     [SupportedOnRenderPipeline(typeof(UniversalRenderPipelineAsset))]
-    public class VividRuntimeShader: IRenderPipelineResources
+    public partial class VividRuntimeShader: IRenderPipelineResources
     {
         public int version { get; }
         

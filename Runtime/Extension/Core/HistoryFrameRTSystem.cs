@@ -106,6 +106,8 @@ namespace UnityEngine.Rendering.Universal
         FidelityFXShadowMoment,
         FidelityFXShadowResult,
 
+        /// <summary>Path tracing accumulated radiance history.</summary>
+        PathTracingHistory,
 
     }
 

@@ -76,11 +76,13 @@ namespace UnityEngine.Rendering.Universal
         readonly Material m_ReplacementMaterial;
         readonly Material m_HDRDebugViewMaterial;
         readonly Material m_TileClusterDebugMaterial;
+        readonly Material m_WorldLightClusterDebugMaterial;
 
         HDRDebugViewPass m_HDRDebugViewPass;
         RaytracingRTASDebugPass m_RaytracingRTASDebugPass;
         TileClusterDebugPass m_TileClusterDebugPass;
         ShadowClassifyDebugPass m_ShadowClassifyDebugPass;
+        WorldLightClusterDebugPass m_WorldLightClusterDebugPass;
 
 
         RTHandle m_DebugScreenColorHandle;
@@ -142,6 +144,7 @@ namespace UnityEngine.Rendering.Universal
         internal RaytracingRTASDebugPass raytracingRTASDebugPass => m_RaytracingRTASDebugPass;
         internal TileClusterDebugPass tileClusterDebugPass => m_TileClusterDebugPass;
         internal ShadowClassifyDebugPass shadowClassifyDebugPass => m_ShadowClassifyDebugPass;
+        internal WorldLightClusterDebugPass worldLightClusterDebugPass => m_WorldLightClusterDebugPass;
 
         internal bool HDRDebugViewIsActive(bool resolveFinalTarget)
         {
@@ -167,11 +170,17 @@ namespace UnityEngine.Rendering.Universal
             return DebugDisplaySettings.lightingSettings.shadowClassifyDebugMode != ShadowClassifyDebugMode.None && resolveFinalTarget;
         }
 
+        internal bool WorldLightClusterDebugIsActive(bool resolveFinalTarget)
+        {
+            // World Light Cluster debug views should only apply to the last camera in the stack
+            return DebugDisplaySettings.lightingSettings.worldLightClusterDebugMode != DebugWorldLightClusterMode.None && resolveFinalTarget;
+        }
+
 
 
         internal bool WriteToDebugScreenTexture(bool resolveFinalTarget)
         {
-            return HDRDebugViewIsActive(resolveFinalTarget) || RTASDebugIsActive(resolveFinalTarget) || TileClusterDebugIsActive(resolveFinalTarget) || ShadowClassifyDebugIsActive(resolveFinalTarget);
+            return HDRDebugViewIsActive(resolveFinalTarget) || RTASDebugIsActive(resolveFinalTarget) || TileClusterDebugIsActive(resolveFinalTarget) || ShadowClassifyDebugIsActive(resolveFinalTarget) || WorldLightClusterDebugIsActive(resolveFinalTarget);
         }
 
         internal bool IsScreenClearNeeded
@@ -205,6 +214,7 @@ namespace UnityEngine.Rendering.Universal
                 m_ReplacementMaterial = (shaders.debugReplacementPS != null) ? CoreUtils.CreateEngineMaterial(shaders.debugReplacementPS) : null;
                 m_HDRDebugViewMaterial = (shaders.hdrDebugViewPS != null) ? CoreUtils.CreateEngineMaterial(shaders.hdrDebugViewPS) : null;
                 m_TileClusterDebugMaterial = (shaders.tileClusterDebugPS != null) ? CoreUtils.CreateEngineMaterial(shaders.tileClusterDebugPS) : null;
+                m_WorldLightClusterDebugMaterial = (shaders.worldLightClusterDebugPS != null) ? CoreUtils.CreateEngineMaterial(shaders.worldLightClusterDebugPS) : null;
 
             }
 
@@ -212,6 +222,7 @@ namespace UnityEngine.Rendering.Universal
             m_RaytracingRTASDebugPass = new RaytracingRTASDebugPass();
             m_TileClusterDebugPass = new TileClusterDebugPass(m_TileClusterDebugMaterial);
             m_ShadowClassifyDebugPass = new ShadowClassifyDebugPass();
+            m_WorldLightClusterDebugPass = new WorldLightClusterDebugPass(m_WorldLightClusterDebugMaterial);
 
             m_RuntimeTextures = GraphicsSettings.GetRenderPipelineSettings<UniversalRenderPipelineRuntimeTextures>();
             if (m_RuntimeTextures != null)
@@ -225,12 +236,14 @@ namespace UnityEngine.Rendering.Universal
         public void Dispose()
         {
             m_HDRDebugViewPass.Dispose();
+            m_WorldLightClusterDebugPass.Dispose();
             m_DebugScreenColorHandle?.Release();
             m_DebugScreenDepthHandle?.Release();
             m_DebugFontTexture?.Release();
             m_debugDisplayConstant.Dispose();
             CoreUtils.Destroy(m_HDRDebugViewMaterial);
             CoreUtils.Destroy(m_ReplacementMaterial);
+            CoreUtils.Destroy(m_WorldLightClusterDebugMaterial);
         }
 
         internal bool IsActiveForCamera(bool isPreviewCamera)
@@ -625,13 +638,21 @@ namespace UnityEngine.Rendering.Universal
                 var shadowClassifyData = frameData.Get<UniversalResourceData>();
                 if (shadowClassifyData != null && shadowClassifyData.tilesBuffer.IsValid())
                 {
-                    m_ShadowClassifyDebugPass.RenderShadowClassifyDebug(renderGraph, cameraData, 
-                        LightingSettings.shadowClassifyDebugMode, 
-                        shadowClassifyData.tilesBuffer, 
-                        shadowClassifyData.tileCountBuffer, 
+                    m_ShadowClassifyDebugPass.RenderShadowClassifyDebug(renderGraph, cameraData,
+                        LightingSettings.shadowClassifyDebugMode,
+                        shadowClassifyData.tilesBuffer,
+                        shadowClassifyData.tileCountBuffer,
                         shadowClassifyData.shadowMaskTexture,
                         dstColor);
                 }
+            }
+
+            if (IsActiveForCamera(cameraData.isPreviewCamera) && WorldLightClusterDebugIsActive(cameraData.resolveFinalTarget))
+            {
+                m_WorldLightClusterDebugPass.RenderWorldLightClusterDebug(renderGraph, cameraData,
+                    LightingSettings.worldLightClusterDebugMode,
+                    LightingSettings.worldLightClusterMaxLightsPerCell,
+                    dstColor);
             }
         }
         #region DebugRendererLists

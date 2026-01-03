@@ -42,6 +42,16 @@ namespace UnityEngine.Rendering.Universal
         
         internal ShadowClassifyDebugMode shadowClassifyDebugMode = ShadowClassifyDebugMode.None;
 
+        /// <summary>
+        /// Current World Light Cluster Debug Mode.
+        /// </summary>
+        internal DebugWorldLightClusterMode worldLightClusterDebugMode = DebugWorldLightClusterMode.None;
+
+        /// <summary>
+        /// Maximum lights per cell for heatmap display scaling.
+        /// </summary>
+        internal int worldLightClusterMaxLightsPerCell = 32;
+
 
         static internal class Strings
         {
@@ -68,6 +78,18 @@ namespace UnityEngine.Rendering.Universal
             {
                 name = "Shadow Classify Debug Mode",
                 tooltip = "Use the drop-down to select a debug view for shadow classification tiles."
+            };
+
+            public static readonly DebugUI.Widget.NameAndTooltip WorldLightClusterDebugMode = new()
+            {
+                name = "World Light Cluster Debug",
+                tooltip = "Use the drop-down to select a debug view for the world-space light cluster used in path tracing."
+            };
+
+            public static readonly DebugUI.Widget.NameAndTooltip WorldLightClusterMaxLights = new()
+            {
+                name = "Max Lights Per Cell (Heatmap)",
+                tooltip = "Maximum lights per cell for heatmap color scaling. Higher values will show more lights as cooler colors."
             };
 
 
@@ -188,6 +210,33 @@ namespace UnityEngine.Rendering.Universal
                 setIndex = (value) => panel.data.shadowClassifyDebugMode = (ShadowClassifyDebugMode)value,
             };
 
+            internal static DebugUI.Widget CreateWorldLightClusterDebugMode(SettingsPanel panel) => new DebugUI.EnumField
+            {
+                nameAndTooltip = Strings.WorldLightClusterDebugMode,
+                getter = () => (int)panel.data.worldLightClusterDebugMode,
+                setter = value => panel.data.worldLightClusterDebugMode = (DebugWorldLightClusterMode)value,
+                autoEnum = typeof(DebugWorldLightClusterMode),
+                getIndex = () => (int)panel.data.worldLightClusterDebugMode,
+                setIndex = (value) => panel.data.worldLightClusterDebugMode = (DebugWorldLightClusterMode)value,
+            };
+
+            internal static DebugUI.Widget CreateWorldLightClusterMaxLights(SettingsPanel panel) => new DebugUI.Container
+            {
+                isHiddenCallback = () => panel.data.worldLightClusterDebugMode == DebugWorldLightClusterMode.None,
+                children =
+                {
+                    new DebugUI.IntField
+                    {
+                        nameAndTooltip = Strings.WorldLightClusterMaxLights,
+                        getter = () => panel.data.worldLightClusterMaxLightsPerCell,
+                        setter = value => panel.data.worldLightClusterMaxLightsPerCell = value,
+                        incStep = 4,
+                        min = () => 1,
+                        max = () => 128
+                    }
+                }
+            };
+
         }
 
         [DisplayInfo(name = "Lighting", order = 3)]
@@ -211,6 +260,8 @@ namespace UnityEngine.Rendering.Universal
                         WidgetFactory.CreateTileClusterDebugMode(this),
                         WidgetFactory.CreateClusterIDSelect(this),
                         WidgetFactory.CreateClusterCategoryDebugMode(this),
+                        WidgetFactory.CreateWorldLightClusterDebugMode(this),
+                        WidgetFactory.CreateWorldLightClusterMaxLights(this),
                         WidgetFactory.CreateRTASDebugView(this),
                         WidgetFactory.CreateRTASDebugDebugMode(this),
                         WidgetFactory.CreateShadowClassifyDebugMode(this),
@@ -222,12 +273,13 @@ namespace UnityEngine.Rendering.Universal
         #region IDebugDisplaySettingsData
 
         /// <inheritdoc/>
-        public bool AreAnySettingsActive => (lightingDebugMode != DebugLightingMode.None) 
-                                            || (lightingFeatureFlags != DebugLightingFeatureFlags.None) 
-                                            || (hdrDebugMode != HDRDebugMode.None) 
+        public bool AreAnySettingsActive => (lightingDebugMode != DebugLightingMode.None)
+                                            || (lightingFeatureFlags != DebugLightingFeatureFlags.None)
+                                            || (hdrDebugMode != HDRDebugMode.None)
                                             || (tileClusterDebugMode != DebugTileClusterMode.None)
                                             || rtasDebugView != RTASDebugView.None
-                                            || shadowClassifyDebugMode != ShadowClassifyDebugMode.None;
+                                            || shadowClassifyDebugMode != ShadowClassifyDebugMode.None
+                                            || worldLightClusterDebugMode != DebugWorldLightClusterMode.None;
 
         /// <inheritdoc/>
         public bool IsPostProcessingAllowed => (lightingDebugMode != DebugLightingMode.Reflections && lightingDebugMode != DebugLightingMode.ReflectionsWithSmoothness);

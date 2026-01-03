@@ -103,6 +103,19 @@ namespace UnityEngine.Rendering.Universal
             set => this.SetValueAndNotify(ref m_TileClusterDebugPS, value, nameof(m_HdrDebugViewPS));
         }
 
+        [SerializeField]
+        [ResourcePath("Shaders/Debug/WorldLightClusterDebug.shader")]
+        Shader m_WorldLightClusterDebugPS;
+
+        /// <summary>
+        /// Debug shader used to visualize world light cluster data for path tracing.
+        /// </summary>
+        public Shader worldLightClusterDebugPS
+        {
+            get => m_WorldLightClusterDebugPS;
+            set => this.SetValueAndNotify(ref m_WorldLightClusterDebugPS, value, nameof(m_WorldLightClusterDebugPS));
+        }
+
 
     }
 }

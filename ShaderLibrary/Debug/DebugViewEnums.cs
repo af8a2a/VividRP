@@ -383,6 +383,28 @@ namespace UnityEngine.Rendering.Universal
 
     #endregion
 
+    #region World Light Cluster
+
+    /// <summary>
+    /// World Light Cluster Debug Mode for path tracing light culling visualization.
+    /// </summary>
+    [GenerateHLSL]
+    public enum DebugWorldLightClusterMode
+    {
+        /// <summary>No World Light Cluster debug.</summary>
+        None,
+        /// <summary>Display light count per cell as heatmap.</summary>
+        LightCountHeatmap,
+        /// <summary>Display cell grid boundaries.</summary>
+        CellGrid,
+        /// <summary>Display light coverage (which cells contain lights).</summary>
+        LightCoverage,
+        /// <summary>Display cell index (for debugging spatial queries).</summary>
+        CellIndex,
+    }
+
+    #endregion
+
     #region Raytracing
 
     /// <summary>

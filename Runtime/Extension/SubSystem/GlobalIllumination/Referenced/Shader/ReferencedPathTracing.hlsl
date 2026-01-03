@@ -244,8 +244,7 @@ void RayGenPathTracing()
 {
     // Get pixel coordinate
     uint2 launchIndex = DispatchRaysIndex().xy;
-    uint2 launchDim = DispatchRaysDimensions().xy;
-    float2 pixelCoord = float2(launchIndex.x, launchDim.y - launchIndex.y - 1) + 0.5;
+    float2 pixelCoord = float2(launchIndex) + 0.5;
 
     // Load depth
     float rawDepth = LoadSceneDepth(pixelCoord);

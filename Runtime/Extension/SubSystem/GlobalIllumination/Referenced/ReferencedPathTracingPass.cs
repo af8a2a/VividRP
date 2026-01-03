@@ -29,7 +29,7 @@ namespace UnityEngine.Rendering.Universal
         }
 
         /// <summary>
-        /// Configure path tracing settings
+        /// Configure path tracing settings (optional - will use volume settings if not called)
         /// </summary>
         public void Setup(int maxBounces = 4, int samplesPerPixel = 1, float fireflyClamp = 10.0f, bool useNVSER = true, bool accumulate = true)
         {
@@ -38,6 +38,21 @@ namespace UnityEngine.Rendering.Universal
             m_FireflyClamp = fireflyClamp;
             m_UseNVSER = useNVSER && ExtensionSystem.SupportedExtension.Contains(HardwareExtension.ShaderExecutionReordering);
             m_AccumulateFrames = accumulate;
+        }
+
+        /// <summary>
+        /// Apply settings from volume component
+        /// </summary>
+        private void ApplyVolumeSettings(GlobalIllumination settings)
+        {
+            if (settings == null || !settings.IsPathTracingActive())
+                return;
+
+            m_MaxBounces = settings.GetMaxBounces();
+            m_SamplesPerPixel = settings.GetSamplesPerPixel();
+            m_FireflyClamp = settings.fireflyClamp.value;
+            m_UseNVSER = settings.useNVSER.value && ExtensionSystem.SupportedExtension.Contains(HardwareExtension.ShaderExecutionReordering);
+            m_AccumulateFrames = settings.temporalAccumulation.value;
         }
 
         class PassData
@@ -68,6 +83,12 @@ namespace UnityEngine.Rendering.Universal
             internal bool useNVSER;
             internal int frameIndex;
             internal bool accumulate;
+            internal float intensity;
+            internal float rayLength;
+            internal float environmentIntensity;
+            internal bool includeEmissive;
+            internal bool includeDirectLighting;
+            internal int debugVisualizeBounce;
         }
 
         static class ShaderConstants
@@ -86,6 +107,12 @@ namespace UnityEngine.Rendering.Universal
             public static readonly int _PathTracingFrameIndex = Shader.PropertyToID("_PathTracingFrameIndex");
             public static readonly int _UseNVSER = Shader.PropertyToID("_UseNVSER");
             public static readonly int _PathTracingAccumulate = Shader.PropertyToID("_PathTracingAccumulate");
+            public static readonly int _PathTracingIntensity = Shader.PropertyToID("_PathTracingIntensity");
+            public static readonly int _RaytracingRayMaxLength = Shader.PropertyToID("_RaytracingRayMaxLength");
+            public static readonly int _PathTracingEnvironmentIntensity = Shader.PropertyToID("_PathTracingEnvironmentIntensity");
+            public static readonly int _PathTracingIncludeEmissive = Shader.PropertyToID("_PathTracingIncludeEmissive");
+            public static readonly int _PathTracingIncludeDirectLighting = Shader.PropertyToID("_PathTracingIncludeDirectLighting");
+            public static readonly int _PathTracingDebugVisualizeBounce = Shader.PropertyToID("_PathTracingDebugVisualizeBounce");
             public static readonly int _OwenScrambledTexture = Shader.PropertyToID("_OwenScrambledTexture");
             public static readonly int _ScramblingTileXSPP = Shader.PropertyToID("_ScramblingTileXSPP");
             public static readonly int _RankingTileXSPP = Shader.PropertyToID("_RankingTileXSPP");
@@ -97,7 +124,8 @@ namespace UnityEngine.Rendering.Universal
             PassData passData,
             RayTracingSystem rayTracingSystem,
             UniversalCameraData cameraData,
-            UniversalResourceData resourceData)
+            UniversalResourceData resourceData,
+            GlobalIllumination giSettings)
         {
             var runtimeShaders = GraphicsSettings.GetRenderPipelineSettings<VividRuntimeShader>();
 
@@ -125,13 +153,19 @@ namespace UnityEngine.Rendering.Universal
             passData.dispatchWidth = (uint)cameraData.cameraTargetDescriptor.width;
             passData.dispatchHeight = (uint)cameraData.cameraTargetDescriptor.height;
 
-            // Path tracing parameters
+            // Path tracing parameters from volume settings
             passData.maxBounces = m_MaxBounces;
             passData.samplesPerPixel = m_SamplesPerPixel;
             passData.fireflyClamp = m_FireflyClamp;
             passData.useNVSER = m_UseNVSER;
             passData.frameIndex = m_FrameIndex;
             passData.accumulate = m_AccumulateFrames;
+            passData.intensity = giSettings.pathTracingIntensity.value;
+            passData.rayLength = giSettings.rayLength.value;
+            passData.environmentIntensity = giSettings.environmentIntensity.value;
+            passData.includeEmissive = giSettings.includeEmissive.value;
+            passData.includeDirectLighting = giSettings.includeDirectLighting.value;
+            passData.debugVisualizeBounce = giSettings.debugVisualizeBounce.value;
         }
 
         private static void ExecutePathTracing(PassData data, ComputeGraphContext context)
@@ -180,6 +214,12 @@ namespace UnityEngine.Rendering.Universal
                 cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingFrameIndex, data.frameIndex);
                 cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._UseNVSER, data.useNVSER ? 1.0f : 0.0f);
                 cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingAccumulate, data.accumulate ? 1 : 0);
+                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._PathTracingIntensity, data.intensity);
+                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._RaytracingRayMaxLength, data.rayLength);
+                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._PathTracingEnvironmentIntensity, data.environmentIntensity);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingIncludeEmissive, data.includeEmissive ? 1 : 0);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingIncludeDirectLighting, data.includeDirectLighting ? 1 : 0);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingDebugVisualizeBounce, data.debugVisualizeBounce);
 
                 // Dispatch rays
                 cmd.DispatchRays(data.pathTracingShader, "RayGenPathTracing", data.dispatchWidth, data.dispatchHeight, 1);
@@ -221,6 +261,19 @@ namespace UnityEngine.Rendering.Universal
             UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
             UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
 
+            // Get volume settings
+            var stack = VolumeManager.instance.stack;
+            var giSettings = stack.GetComponent<GlobalIllumination>();
+
+            // Check if path tracing is enabled
+            if (giSettings == null || !giSettings.IsPathTracingActive())
+            {
+                return;
+            }
+
+            // Apply volume settings
+            ApplyVolumeSettings(giSettings);
+
             // Check if ray tracing is supported
             var rayTracingSystem = RayTracingSystem.instance;
             if (!rayTracingSystem.GetRayTracingState() || !RayTracingSystem.SupportedCamera(cameraData.camera))
@@ -251,7 +304,7 @@ namespace UnityEngine.Rendering.Universal
             // Add path tracing pass
             using (var builder = renderGraph.AddComputePass<PassData>(kPassName, out var passData, s_ProfilingSampler))
             {
-                InitializePassData(renderGraph, passData, rayTracingSystem, cameraData, resourceData);
+                InitializePassData(renderGraph, passData, rayTracingSystem, cameraData, resourceData, giSettings);
 
                 passData.outputTexture = outputTexture;
                 passData.historyTexture = historyTexture;

@@ -34,13 +34,19 @@ namespace UnityEngine.Rendering.Universal
             {
                 renderPassEvent = RenderPassEvent.AfterRenderingGbuffer,
             };
-            
         }
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
+            var pathTracing =
+                VolumeManager.instance.stack.GetComponent<GlobalIllumination>().technique.value is GlobalIlluminationTechnique.ReferencedPathTracing;
+            if (pathTracing)
+            {
+                return;
+            }
+
             var setting = VolumeManager.instance.stack.GetComponent<Shadows>();
-            var shadowMode=setting.shadowMode.value;
+            var shadowMode = setting.shadowMode.value;
             switch (shadowMode)
             {
                 case ShadowMode.FullRasterShadow:

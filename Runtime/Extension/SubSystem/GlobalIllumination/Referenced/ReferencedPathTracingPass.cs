@@ -76,15 +76,9 @@ namespace UnityEngine.Rendering.Universal
             internal uint dispatchWidth;
             internal uint dispatchHeight;
 
-            // Path tracing parameters
-            internal int maxBounces;
-            internal int samplesPerPixel;
-            internal float fireflyClamp;
-            internal bool useNVSER;
-            internal int frameIndex;
+            // Path tracing specific parameters (not in ShaderVariablesRaytracing CB)
             internal bool accumulate;
             internal float intensity;
-            internal float rayLength;
             internal float environmentIntensity;
             internal bool includeEmissive;
             internal bool includeDirectLighting;
@@ -101,22 +95,14 @@ namespace UnityEngine.Rendering.Universal
             public static readonly int _GBuffer2 = Shader.PropertyToID("_GBuffer2");
             public static readonly int _CameraDepthTexture = Shader.PropertyToID("_CameraDepthTexture");
             public static readonly int _SkyTexture = Shader.PropertyToID("_SkyTexture");
-            public static readonly int _PathTracingMaxBounces = Shader.PropertyToID("_PathTracingMaxBounces");
-            public static readonly int _PathTracingSamplesPerPixel = Shader.PropertyToID("_PathTracingSamplesPerPixel");
-            public static readonly int _PathTracingFireflyClamp = Shader.PropertyToID("_PathTracingFireflyClamp");
-            public static readonly int _PathTracingFrameIndex = Shader.PropertyToID("_PathTracingFrameIndex");
-            public static readonly int _UseNVSER = Shader.PropertyToID("_UseNVSER");
+
+            // Path tracing specific parameters (not in ShaderVariablesRaytracing CB)
             public static readonly int _PathTracingAccumulate = Shader.PropertyToID("_PathTracingAccumulate");
             public static readonly int _PathTracingIntensity = Shader.PropertyToID("_PathTracingIntensity");
-            public static readonly int _RaytracingRayMaxLength = Shader.PropertyToID("_RaytracingRayMaxLength");
             public static readonly int _PathTracingEnvironmentIntensity = Shader.PropertyToID("_PathTracingEnvironmentIntensity");
             public static readonly int _PathTracingIncludeEmissive = Shader.PropertyToID("_PathTracingIncludeEmissive");
             public static readonly int _PathTracingIncludeDirectLighting = Shader.PropertyToID("_PathTracingIncludeDirectLighting");
             public static readonly int _PathTracingDebugVisualizeBounce = Shader.PropertyToID("_PathTracingDebugVisualizeBounce");
-            public static readonly int _OwenScrambledTexture = Shader.PropertyToID("_OwenScrambledTexture");
-            public static readonly int _ScramblingTileXSPP = Shader.PropertyToID("_ScramblingTileXSPP");
-            public static readonly int _RankingTileXSPP = Shader.PropertyToID("_RankingTileXSPP");
-            public static readonly int _ScramblingTexture = Shader.PropertyToID("_ScramblingTexture");
         }
 
         private void InitializePassData(
@@ -133,8 +119,14 @@ namespace UnityEngine.Rendering.Universal
             passData.pathTracingShader = runtimeShaders.referencedPathTracingRTShader;
             passData.rtas = rayTracingSystem.RequestAccelerationStructure(cameraData);
 
-            // Setup ray tracing constant buffer
+            // Setup ray tracing constant buffer with path tracing parameters
             passData.rayTracingCB = rayTracingSystem.GetShaderVariablesRaytracingCB(cameraData);
+            passData.rayTracingCB._RaytracingMaxRecursion = m_MaxBounces;
+            passData.rayTracingCB._RaytracingNumSamples = m_SamplesPerPixel;
+            passData.rayTracingCB._RaytracingIntensityClamp = m_FireflyClamp;
+            passData.rayTracingCB._RaytracingSampleIndex = m_FrameIndex;
+            passData.rayTracingCB._RaytracingRayMaxLength = giSettings.rayLength.value;
+            passData.rayTracingCB._nvSER = m_UseNVSER ? 1 : 0;
 
             // Setup dithered texture set for blue noise sampling
             passData.ditheredTextureHandleSet = RuntimeTextureSystem.instance.DitheredTextureSet8SPP().RenderGraphImport(renderGraph);
@@ -147,21 +139,15 @@ namespace UnityEngine.Rendering.Universal
 
             // TODO: Get sky texture from environment settings
             // For now, we'll use a default black texture
-            passData.skyTexture = TextureHandle.nullHandle;
+            passData.skyTexture =renderGraph.ImportTexture(SkySystem.instance.GetSkyCubemap()) ;
 
             // Dispatch size
             passData.dispatchWidth = (uint)cameraData.cameraTargetDescriptor.width;
             passData.dispatchHeight = (uint)cameraData.cameraTargetDescriptor.height;
 
-            // Path tracing parameters from volume settings
-            passData.maxBounces = m_MaxBounces;
-            passData.samplesPerPixel = m_SamplesPerPixel;
-            passData.fireflyClamp = m_FireflyClamp;
-            passData.useNVSER = m_UseNVSER;
-            passData.frameIndex = m_FrameIndex;
+            // Path tracing specific parameters (not in CB)
             passData.accumulate = m_AccumulateFrames;
             passData.intensity = giSettings.pathTracingIntensity.value;
-            passData.rayLength = giSettings.rayLength.value;
             passData.environmentIntensity = giSettings.environmentIntensity.value;
             passData.includeEmissive = giSettings.includeEmissive.value;
             passData.includeDirectLighting = giSettings.includeDirectLighting.value;
@@ -180,7 +166,7 @@ namespace UnityEngine.Rendering.Universal
                 // Bind acceleration structure
                 cmd.SetRayTracingAccelerationStructure(data.pathTracingShader, ShaderConstants._RaytracingAccelerationStructure, data.rtas);
 
-                // Push ray tracing constant buffer
+                // Push ray tracing constant buffer (contains maxBounces, samplesPerPixel, fireflyClamp, frameIndex, rayLength, nvSER)
                 ConstantBuffer.PushGlobal(cmd, data.rayTracingCB, RayTracingSystem._ShaderVariablesRaytracing);
 
                 // Bind dithered texture set (blue noise)
@@ -207,15 +193,9 @@ namespace UnityEngine.Rendering.Universal
                     cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._SkyTexture, data.skyTexture);
                 }
 
-                // Set path tracing parameters
-                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingMaxBounces, data.maxBounces);
-                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingSamplesPerPixel, data.samplesPerPixel);
-                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._PathTracingFireflyClamp, data.fireflyClamp);
-                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingFrameIndex, data.frameIndex);
-                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._UseNVSER, data.useNVSER ? 1.0f : 0.0f);
+                // Set path tracing specific parameters (not in ShaderVariablesRaytracing CB)
                 cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingAccumulate, data.accumulate ? 1 : 0);
                 cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._PathTracingIntensity, data.intensity);
-                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._RaytracingRayMaxLength, data.rayLength);
                 cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._PathTracingEnvironmentIntensity, data.environmentIntensity);
                 cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingIncludeEmissive, data.includeEmissive ? 1 : 0);
                 cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingIncludeDirectLighting, data.includeDirectLighting ? 1 : 0);

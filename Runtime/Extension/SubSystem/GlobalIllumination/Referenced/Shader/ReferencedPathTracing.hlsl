@@ -56,12 +56,13 @@ TEXTURE2D_X(_GBuffer2);
 // Output
 RW_TEXTURE2D(float4, _PathTracingOutput);
 
-// Settings
-int _PathTracingMaxBounces;
-float _PathTracingFireflyClamp;
-int _PathTracingSamplesPerPixel;
-int _PathTracingFrameIndex;
-float _UseNVSER; // Enable NVIDIA SER
+// Path tracing specific parameters (not in ShaderVariablesRaytracing CB)
+int _PathTracingAccumulate;
+float _PathTracingIntensity;
+float _PathTracingEnvironmentIntensity;
+int _PathTracingIncludeEmissive;
+int _PathTracingIncludeDirectLighting;
+int _PathTracingDebugVisualizeBounce;
 
 //--------------------------------------------------------------------------------------------------
 // Ray Payload
@@ -276,15 +277,15 @@ void RayGenPathTracing()
     float perceptualRoughness = PerceptualSmoothnessToPerceptualRoughness(smoothness);
     float roughness = clamp(PerceptualRoughnessToRoughness(perceptualRoughness), MIN_PATH_ROUGHNESS, MAX_PATH_ROUGHNESS);
 
-    // Initialize random seed
-    Rng::Hash::Initialize(launchIndex, _PathTracingFrameIndex);
+    // Initialize random seed (using frame index from CB)
+    Rng::Hash::Initialize(launchIndex, _RaytracingSampleIndex);
 
     uint randomSeed = Rng::Hash::GetFloat();
 
     // Accumulate radiance over multiple samples
     float3 accumulatedRadiance = float3(0, 0, 0);
 
-    for (int sampleIdx = 0; sampleIdx < _PathTracingSamplesPerPixel; sampleIdx++)
+    for (int sampleIdx = 0; sampleIdx < _RaytracingNumSamples; sampleIdx++)
     {
         // Initialize path payload
         PathTracingPayload payload;
@@ -300,8 +301,8 @@ void RayGenPathTracing()
         // Add direct lighting at camera hit point
         payload.radiance += EvaluateDirectLighting(positionWS, normalWS, viewDirWS, albedo, metallic, roughness, randomSeed);
 
-        // Path tracing bounces
-        for (int bounce = 0; bounce < _PathTracingMaxBounces; bounce++)
+        // Path tracing bounces (using max recursion from CB)
+        for (int bounce = 0; bounce < _RaytracingMaxRecursion; bounce++)
         {
             if (!payload.active)
                 break;
@@ -345,12 +346,12 @@ void RayGenPathTracing()
             RayIntersection rayIntersection;
             rayIntersection.color = float3(0, 0, 0);
             rayIntersection.t = -1.0;
-            rayIntersection.remainingDepth = _PathTracingMaxBounces - bounce - 1;
+            rayIntersection.remainingDepth = _RaytracingMaxRecursion - bounce - 1;
             rayIntersection.pixelCoord = pixelCoord;
 
-            // NVIDIA SER: Shader Execution Reordering for improved coherence
+            // NVIDIA SER: Shader Execution Reordering for improved coherence (using flag from CB)
             UNITY_BRANCH
-            if (_UseNVSER)
+            if (_nvSER)
             {
                 // SER is extremely useful in path tracing for coherent ray execution
                 NvHitObject hitObject;
@@ -398,10 +399,10 @@ void RayGenPathTracing()
             // Update throughput (simplified)
             payload.throughput *= albedo;
 
-            // Firefly clamping
-            if (_PathTracingFireflyClamp > 0.0)
+            // Firefly clamping (using intensity clamp from CB)
+            if (_RaytracingIntensityClamp > 0.0)
             {
-                payload.radiance = min(payload.radiance, _PathTracingFireflyClamp);
+                payload.radiance = min(payload.radiance, _RaytracingIntensityClamp);
             }
         }
 
@@ -409,7 +410,7 @@ void RayGenPathTracing()
     }
 
     // Average over samples
-    accumulatedRadiance /= max(_PathTracingSamplesPerPixel, 1);
+    accumulatedRadiance /= max(_RaytracingNumSamples, 1);
 
     // Output
     _PathTracingOutput[launchIndex] = float4(accumulatedRadiance, 1.0);

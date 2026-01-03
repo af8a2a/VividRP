@@ -473,6 +473,11 @@ namespace UnityEngine.Rendering.Universal
             // We need to check if at least one effect will require the acceleration structure
             parameters.rayTracingRequired = parameters.ambientOcclusion || parameters.reflections
                                                                         || parameters.globalIllumination || parameters.shadows;
+
+            var pathTracing = volumeStack.GetComponent<GlobalIllumination>();
+            parameters.pathTracing = pathTracing.technique.value is GlobalIlluminationTechnique.ReferencedPathTracing;
+            parameters.ptLayerMask = pathTracing.layerMask.value;
+
             // Return the result
             return parameters;
         }

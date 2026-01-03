@@ -120,14 +120,18 @@ float3 EvaluatePathTracingDirectLighting(float3 positionWS, float3 normalWS, flo
 }
 
 [shader("closesthit")]
-void ClosestHitPathTracing(inout PathTracingPayload payload : SV_RayPayload, in BuiltInTriangleIntersectionAttributes attribs : SV_IntersectionAttributes)
+void ClosestHitPathTracing(inout PathTracingPayload payload : SV_RayPayload,  AttributeData attributeData : SV_IntersectionAttributes)
 {
+    
+    
+
     // Get hit position in world space
     float3 hitPositionWS = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
     
     // Build fragment inputs
+    IntersectionVertex currentVertex;
     FragInputs fragInput;
-    BuildFragInputsFromIntersection(attribs, fragInput);
+    GetCurrentVertexAndBuildFragInputs(attributeData, currentVertex, fragInput);
     
     // Get position inputs
     PositionInputs posInput;
@@ -192,7 +196,7 @@ void ClosestHitPathTracing(inout PathTracingPayload payload : SV_RayPayload, in 
 }
 
 [shader("anyhit")]
-void AnyHitPathTracing(inout PathTracingPayload payload : SV_RayPayload, in BuiltInTriangleIntersectionAttributes attribs : SV_IntersectionAttributes)
+void AnyHitPathTracing(inout PathTracingPayload payload : SV_RayPayload, in AttributeData attributeData : SV_IntersectionAttributes)
 {
     // Alpha testing for transparent materials
     #ifdef _ALPHATEST_ON
@@ -211,4 +215,5 @@ void AnyHitPathTracing(inout PathTracingPayload payload : SV_RayPayload, in Buil
 }
 
 #endif // UNIVERSAL_RAYTRACING_SHADER_PASS_PATH_TRACING_INCLUDED
+
 

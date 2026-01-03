@@ -336,18 +336,23 @@ void RayGenPathTracing()
             // Evaluate ray bias
             float rayBias = EvaluateRayTracingBias(payload.origin);
 
-            // Trace ray
+            // Trace ray using PathTracingPayload
             RayDesc rayDesc;
             rayDesc.Origin = payload.origin + normalWS * rayBias;
             rayDesc.Direction = sampledDir;
             rayDesc.TMin = 0.001;
             rayDesc.TMax = _RaytracingRayMaxLength;
 
-            RayIntersection rayIntersection;
-            rayIntersection.color = float3(0, 0, 0);
-            rayIntersection.t = -1.0;
-            rayIntersection.remainingDepth = _RaytracingMaxRecursion - bounce - 1;
-            rayIntersection.pixelCoord = pixelCoord;
+            // Initialize bounce payload
+            PathTracingPayload bouncePayload;
+            bouncePayload.radiance = float3(0, 0, 0);
+            bouncePayload.throughput = payload.throughput;
+            bouncePayload.origin = rayDesc.Origin;
+            bouncePayload.direction = sampledDir;
+            bouncePayload.bounceCount = bounce + 1;
+            bouncePayload.active = true;
+            bouncePayload.pdf = 1.0;
+            bouncePayload.randomSeed = randomSeed;
 
             // NVIDIA SER: Shader Execution Reordering for improved coherence (using flag from CB)
             UNITY_BRANCH
@@ -361,14 +366,14 @@ void RayGenPathTracing()
                                     RAYTRACINGRENDERERFLAG_PATH_TRACING,
                                     0, 1, 0,
                                     rayDesc,
-                                    rayIntersection,
+                                    bouncePayload,
                                     hitObject);
 
                 // Reorder threads for better coherence
                 NvReorderThread(hitObject);
 
                 // Invoke the hit shader
-                NvInvokeHitObject(_RaytracingAccelerationStructure, hitObject, rayIntersection);
+                NvInvokeHitObject(_RaytracingAccelerationStructure, hitObject, bouncePayload);
             }
             else
             {
@@ -378,26 +383,22 @@ void RayGenPathTracing()
                          RAYTRACINGRENDERERFLAG_PATH_TRACING,
                          0, 1, 0,
                          rayDesc,
-                         rayIntersection);
+                         bouncePayload);
             }
 
-            // If hit, evaluate lighting at hit point
-            if (rayIntersection.t > 0.0 && rayIntersection.t < _RaytracingRayMaxLength)
+            // Accumulate radiance from bounce
+            payload.radiance += bouncePayload.radiance;
+
+            // Check if path should continue
+            if (!bouncePayload.active)
             {
-                // TODO: Get hit surface properties and evaluate direct lighting
-                // For now, use intersection color
-                payload.radiance += payload.throughput * rayIntersection.color;
-            }
-            else
-            {
-                // Hit sky
-                float3 skyColor = SAMPLE_TEXTURECUBE_LOD(_SkyTexture, sampler_TrilinearClamp, sampledDir, 0).xyz;
-                payload.radiance += payload.throughput * skyColor;
                 break;
             }
 
-            // Update throughput (simplified)
-            payload.throughput *= albedo;
+            // Update payload for next bounce
+            payload.origin = bouncePayload.origin;
+            payload.throughput = bouncePayload.throughput;
+            randomSeed = bouncePayload.randomSeed;
 
             // Firefly clamping (using intensity clamp from CB)
             if (_RaytracingIntensityClamp > 0.0)

@@ -235,7 +235,6 @@ void MissShaderPathTracing(inout PathTracingPayload payload : SV_RayPayload)
 
     // Add to radiance
     payload.radiance += payload.throughput * skyColor;
-
     // Terminate path
     payload.active = false;
 }
@@ -295,7 +294,7 @@ void RayGenPathTracing()
         payload.direction = viewDirWS;
         payload.bounceCount = 0;
         payload.active = true;
-        payload.pdf = 1.0;
+        payload.pdf = 0;
         payload.randomSeed = randomSeed;
 
         // Add direct lighting at camera hit point
@@ -362,7 +361,7 @@ void RayGenPathTracing()
                 NvHitObject hitObject;
 
                 NvTraceRayHitObject(_RaytracingAccelerationStructure,
-                                    RAY_FLAG_CULL_BACK_FACING_TRIANGLES,
+                                    RAY_FLAG_NONE,
                                     RAYTRACINGRENDERERFLAG_PATH_TRACING,
                                     0, 1, 0,
                                     rayDesc,
@@ -379,7 +378,7 @@ void RayGenPathTracing()
             {
                 // Standard ray tracing without SER
                 TraceRay(_RaytracingAccelerationStructure,
-                         RAY_FLAG_CULL_BACK_FACING_TRIANGLES,
+                         RAY_FLAG_NONE,
                          RAYTRACINGRENDERERFLAG_PATH_TRACING,
                          0, 1, 0,
                          rayDesc,
@@ -407,14 +406,14 @@ void RayGenPathTracing()
             }
         }
 
-        accumulatedRadiance += payload.radiance;
+        accumulatedRadiance += payload.pdf;
     }
 
     // Average over samples
     accumulatedRadiance /= max(_RaytracingNumSamples, 1);
 
     // Output
-    _PathTracingOutput[launchIndex] = float4(accumulatedRadiance, 1.0);
+    _PathTracingOutput[launchIndex] =1.0 / PI; float4(accumulatedRadiance, 1.0);
 }
 
 #endif // REFERENCED_PATH_TRACING_INCLUDED

@@ -62,11 +62,6 @@ namespace UnityEngine.Rendering.Universal
     {
         #region General Settings
 
-        /// <summary>
-        /// Enable path tracing global illumination
-        /// </summary>
-        [Tooltip("Enable path tracing global illumination.")]
-        public BoolParameter enablePathTracing = new BoolParameter(false);
 
         /// <summary>
         /// Quality preset for path tracing
@@ -259,7 +254,7 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         public bool IsPathTracingActive()
         {
-            return technique.value == GlobalIlluminationTechnique.ReferencedPathTracing && enablePathTracing.value;
+            return technique.value == GlobalIlluminationTechnique.ReferencedPathTracing;
         }
 
         /// <summary>

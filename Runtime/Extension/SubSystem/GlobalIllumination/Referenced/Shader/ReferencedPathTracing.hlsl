@@ -406,14 +406,14 @@ void RayGenPathTracing()
             }
         }
 
-        accumulatedRadiance += payload.pdf;
+        accumulatedRadiance += payload.radiance;
     }
 
     // Average over samples
     accumulatedRadiance /= max(_RaytracingNumSamples, 1);
 
     // Output
-    _PathTracingOutput[launchIndex] =1.0 / PI; float4(accumulatedRadiance, 1.0);
+    _PathTracingOutput[launchIndex] =float4(accumulatedRadiance, 1.0);
 }
 
 #endif // REFERENCED_PATH_TRACING_INCLUDED

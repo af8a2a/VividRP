@@ -1,5 +1,5 @@
 // Referenced Path Tracing for Multi-Bounce Global Illumination
-// Uses WorldLightCluster for light queries at arbitrary world positions
+// DXR 1.0 compatible - material evaluation in closesthit, path tracing loop in raygen
 
 #ifndef REFERENCED_PATH_TRACING_INCLUDED
 #define REFERENCED_PATH_TRACING_INCLUDED
@@ -28,9 +28,12 @@
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/ShaderVariablesRaytracing.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RayTracingCommon.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RaytracingIntersection.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RayTracingFragInputs.hlsl"
 
 // World light cluster for light queries
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/LightGrid/WorldLightCluster.hlsl"
+
+#include "LitInputPathTracing.hlsl"
 
 // NVIDIA SER support
 #define NV_HITOBJECT_USE_MACRO_API
@@ -41,14 +44,15 @@
 // Constants
 //--------------------------------------------------------------------------------------------------
 
-#define MAX_PATH_DEPTH 4
-#define MIN_PATH_ROUGHNESS 0.001
-#define MAX_PATH_ROUGHNESS 0.999
-#define FIREFLY_CLAMP_THRESHOLD 10.0
+#define BOUNCES_MIN             3       // Minimum bounces before Russian roulette
+#define MIN_ROUGHNESS           0.04    // Minimum roughness to avoid fireflies
+#define THROUGHPUT_THRESHOLD    0.001   // Terminate paths with very low throughput
+#define MAX_RADIANCE            10.0    // Maximum radiance per bounce
 
 //--------------------------------------------------------------------------------------------------
 // Shader Resources
 //--------------------------------------------------------------------------------------------------
+
 TEXTURE2D_X(_GBuffer0);
 TEXTURE2D_X(_GBuffer1);
 TEXTURE2D_X(_GBuffer2);
@@ -65,19 +69,26 @@ int _PathTracingIncludeDirectLighting;
 int _PathTracingDebugVisualizeBounce;
 
 //--------------------------------------------------------------------------------------------------
-// Ray Payload
+// Path Tracing Payload - carries material data from closesthit (DXR 1.0 compatible)
 //--------------------------------------------------------------------------------------------------
 
 struct PathTracingPayload
 {
-    float3 radiance; // Accumulated radiance
-    float3 throughput; // Path throughput (attenuation)
-    float3 origin; // Next ray origin
-    float3 direction; // Next ray direction
-    int bounceCount; // Current bounce count
-    bool active; // Is path still active
-    float pdf; // PDF of current bounce
-    uint randomSeed; // Random seed for this path
+    // Hit information
+    float hitDistance;          // >0 if hit, <0 if miss
+
+    // Material data (evaluated in closesthit, used in raygen)
+    float3 albedo;
+    float3 normalWS;
+    float3 emission;
+    float metallic;
+    float roughness;
+    float occlusion;
+
+    // Hit position for next bounce
+    float3 hitPositionWS;
+
+    bool Hit() { return hitDistance > 0.0f; }
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -91,23 +102,41 @@ uint PCGHash(uint seed)
     return (word >> 22u) ^ word;
 }
 
-float RandomFloat(inout uint seed)
+float RandomFloat(inout uint rngState)
 {
-    seed = PCGHash(seed);
-    return float(seed) / 4294967296.0;
+    rngState = PCGHash(rngState);
+    return float(rngState) / 4294967296.0;
 }
 
-float2 RandomFloat2(inout uint seed)
+float2 RandomFloat2(inout uint rngState)
 {
-    return float2(RandomFloat(seed), RandomFloat(seed));
+    return float2(RandomFloat(rngState), RandomFloat(rngState));
+}
+
+uint InitRNG(uint2 pixelCoord, uint frameIndex)
+{
+    return PCGHash(pixelCoord.x + pixelCoord.y * 16384 + frameIndex * 16384 * 16384);
 }
 
 //--------------------------------------------------------------------------------------------------
-// BRDF Sampling
+// Utility Functions
 //--------------------------------------------------------------------------------------------------
 
-// Cosine-weighted hemisphere sampling
-float3 SampleCosineHemisphere(float2 u, float3 normal)
+bool IsFinite3(float3 v) { return IsFinite(v.x) && IsFinite(v.y) && IsFinite(v.z); }
+
+float3 SanitizeRadiance(float3 radiance, float maxValue)
+{
+    if (!IsFinite3(radiance)) return float3(0, 0, 0);
+    return clamp(radiance, 0.0, maxValue);
+}
+
+
+//--------------------------------------------------------------------------------------------------
+// BRDF Sampling Functions
+//--------------------------------------------------------------------------------------------------
+
+// Cosine-weighted hemisphere sampling for diffuse
+float3 SampleCosineHemisphere(float2 u, float3 normal, out float pdf)
 {
     float phi = 2.0 * PI * u.x;
     float cosTheta = sqrt(u.y);
@@ -115,24 +144,21 @@ float3 SampleCosineHemisphere(float2 u, float3 normal)
 
     float3 tangent, bitangent;
     if (abs(normal.y) < 0.999)
-    {
         tangent = normalize(cross(normal, float3(0, 1, 0)));
-    }
     else
-    {
         tangent = normalize(cross(normal, float3(1, 0, 0)));
-    }
     bitangent = cross(normal, tangent);
 
-    return normalize(
-        sinTheta * cos(phi) * tangent +
-        sinTheta * sin(phi) * bitangent +
-        cosTheta * normal
-    );
+    float3 dir = normalize(sinTheta * cos(phi) * tangent +
+                          sinTheta * sin(phi) * bitangent +
+                          cosTheta * normal);
+
+    pdf = cosTheta / PI;
+    return dir;
 }
 
 // GGX importance sampling for specular
-float3 SampleGGXDirection(float2 u, float3 normal, float3 viewDir, float roughness)
+float3 SampleGGX(float2 u, float3 normal, float3 viewDir, float roughness, out float pdf)
 {
     float a = roughness * roughness;
     float a2 = a * a;
@@ -147,27 +173,51 @@ float3 SampleGGXDirection(float2 u, float3 normal, float3 viewDir, float roughne
     // Transform to world space
     float3 tangent, bitangent;
     if (abs(normal.y) < 0.999)
-    {
         tangent = normalize(cross(normal, float3(0, 1, 0)));
-    }
     else
-    {
         tangent = normalize(cross(normal, float3(1, 0, 0)));
-    }
     bitangent = cross(normal, tangent);
 
     float3 halfVector = normalize(h.x * tangent + h.y * bitangent + h.z * normal);
+    float3 dir = reflect(-viewDir, halfVector);
 
-    // Reflect view direction around half vector
-    return reflect(-viewDir, halfVector);
+    // Compute PDF
+    float NdotH = saturate(dot(normal, halfVector));
+    float VdotH = saturate(dot(viewDir, halfVector));
+    float D = D_GGX(NdotH, roughness);
+    pdf = (D * NdotH) / (4.0 * VdotH + 0.0001);
+
+    return dir;
+}
+
+// Probability of selecting specular vs diffuse BRDF
+float GetSpecularProbability(float3 albedo, float metallic, float roughness, float NdotV)
+{
+    // For perfect mirrors
+    if (metallic >= 0.99 && roughness <= 0.01)
+        return 1.0;
+
+    float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
+    float fresnel = saturate(Luminance(F_Schlick(F0, NdotV)));
+    float diffuseWeight = Luminance(albedo) * (1.0 - metallic) * (1.0 - fresnel);
+    float specularWeight = fresnel;
+
+    float probability = specularWeight / max(0.0001, specularWeight + diffuseWeight);
+    return clamp(probability, 0.1, 0.9); // Avoid undersampling either lobe
 }
 
 //--------------------------------------------------------------------------------------------------
-// Direct Lighting from World Light Cluster
+// Direct Lighting Evaluation
 //--------------------------------------------------------------------------------------------------
 
-float3 EvaluateDirectLighting(float3 positionWS, float3 normalWS, float3 viewDirWS,
-                              float3 albedo, float metallic, float roughness, inout uint randomSeed)
+float3 EvaluateDirectLighting(
+    float3 positionWS,
+    float3 normalWS,
+    float3 viewDirWS,
+    float3 albedo,
+    float metallic,
+    float roughness,
+    inout uint rngState)
 {
     float3 directLight = float3(0, 0, 0);
 
@@ -184,69 +234,61 @@ float3 EvaluateDirectLighting(float3 positionWS, float3 normalWS, float3 viewDir
 
         // Light direction and distance
         float3 lightVector = light.positionWS - positionWS;
-        float distanceSq = max(dot(lightVector, lightVector), 0.0001);
-        float3 lightDir = normalize(lightVector);
+        float lightDistSq = max(dot(lightVector, lightVector), 0.0001);
+        float lightDist = sqrt(lightDistSq);
+        float3 lightDir = lightVector / lightDist;
 
-        // Check visibility (simple dot product test)
         float NdotL = dot(normalWS, lightDir);
         if (NdotL <= 0.0)
             continue;
 
-        // TODO: Shadow ray tracing
-        // For now, assume visible
+        // TODO: Cast shadow ray for accurate shadows
 
         // Evaluate BRDF
         float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
-        float NdotV = saturate(dot(normalWS, viewDirWS));
+        float NdotV = max(dot(normalWS, viewDirWS), 0.001);
         float3 H = normalize(viewDirWS + lightDir);
         float NdotH = saturate(dot(normalWS, H));
         float LdotH = saturate(dot(lightDir, H));
 
         // Cook-Torrance BRDF
         float3 F = F_Schlick(F0, LdotH);
-        float D = D_GGX(NdotH, roughness);
-        float G = V_SmithJointGGX(NdotL, NdotV, roughness);
+        float D = D_GGX(NdotH, max(roughness, MIN_ROUGHNESS));
+        float G = V_SmithJointGGX(saturate(NdotL), NdotV, max(roughness, MIN_ROUGHNESS));
 
-        float3 specular = F * D * G;
+        float3 specular = min(F * D * G, MAX_RADIANCE);
         float3 diffuse = (1.0 - F) * (1.0 - metallic) * albedo / PI;
 
-        // Attenuation
         float attenuation = GetWorldLightAttenuation(positionWS, light);
+        float3 lightContrib = (diffuse + specular) * light.color * attenuation * saturate(NdotL);
 
-        // Accumulate
-        directLight += (diffuse + specular) * light.color * attenuation * NdotL;
+        directLight += SanitizeRadiance(lightContrib, MAX_RADIANCE);
     }
 
     return directLight;
 }
 
 //--------------------------------------------------------------------------------------------------
-// Path Tracing Shaders
+// Miss Shader
 //--------------------------------------------------------------------------------------------------
 
 [shader("miss")]
 void MissShaderPathTracing(inout PathTracingPayload payload : SV_RayPayload)
 {
-    // Sample environment
-    float3 rayDirection = WorldRayDirection();
-
-    // Sky
-    float3 skyColor = SAMPLE_TEXTURECUBE_LOD(_SkyTexture, sampler_TrilinearClamp, rayDirection, 0).xyz;
-
-    // Add to radiance
-    payload.radiance += payload.throughput * skyColor;
-    // Terminate path
-    payload.active = false;
+    payload.hitDistance = -1.0f;
 }
+
+//--------------------------------------------------------------------------------------------------
+// Ray Generation Shader - Main Path Tracing Loop
+//--------------------------------------------------------------------------------------------------
 
 [shader("raygeneration")]
 void RayGenPathTracing()
 {
-    // Get pixel coordinate
     uint2 launchIndex = DispatchRaysIndex().xy;
     float2 pixelCoord = float2(launchIndex) + 0.5;
 
-    // Load depth
+    // Load depth for primary visibility
     float rawDepth = LoadSceneDepth(pixelCoord);
 
     // Background pixels - sample sky directly
@@ -255,165 +297,203 @@ void RayGenPathTracing()
         float2 uv = pixelCoord * _ScreenSize.zw;
         float3 viewDir = normalize(mul(UNITY_MATRIX_I_VP, float4(uv * 2.0 - 1.0, 0.0, 1.0)).xyz);
         float3 skyColor = SAMPLE_TEXTURECUBE_LOD(_SkyTexture, sampler_TrilinearClamp, viewDir, 0).xyz;
+        skyColor *= _PathTracingEnvironmentIntensity;
         _PathTracingOutput[launchIndex] = float4(skyColor, 1.0);
         return;
     }
 
-    // Get position and view direction
+    // Get primary hit position from GBuffer
     PositionInputs posInput = GetPositionInput(pixelCoord, _ScreenSize.zw, rawDepth, UNITY_MATRIX_I_VP, GetWorldToViewMatrix(), 0);
-    float3 positionWS = posInput.positionWS;
-    float3 viewDirWS = GetWorldSpaceNormalizeViewDir(positionWS);
+    float3 primaryHitPos = posInput.positionWS;
+    float3 viewDirWS = GetWorldSpaceNormalizeViewDir(primaryHitPos);
 
-    // Load GBuffer data
+    // Load GBuffer data for primary hit
     float4 gbuffer0 = LOAD_TEXTURE2D_X(_GBuffer0, launchIndex);
     float4 gbuffer1 = LOAD_TEXTURE2D_X(_GBuffer1, launchIndex);
     float4 gbuffer2 = LOAD_TEXTURE2D_X(_GBuffer2, launchIndex);
 
-    float3 albedo = gbuffer0.rgb;
-    float3 normalWS = normalize(UnpackNormal(gbuffer2.xyz));
-    float metallic = gbuffer1.r;
-    float smoothness = gbuffer2.a;
-    float perceptualRoughness = PerceptualSmoothnessToPerceptualRoughness(smoothness);
-    float roughness = clamp(PerceptualRoughnessToRoughness(perceptualRoughness), MIN_PATH_ROUGHNESS, MAX_PATH_ROUGHNESS);
+    float3 primaryAlbedo = gbuffer0.rgb;
+    float3 primaryNormal = normalize(UnpackNormal(gbuffer2.xyz));
+    float primaryMetallic = gbuffer1.r;
+    float primarySmoothness = gbuffer2.a;
+    float primaryPerceptualRoughness = PerceptualSmoothnessToPerceptualRoughness(primarySmoothness);
+    float primaryRoughness = max(PerceptualRoughnessToRoughness(primaryPerceptualRoughness), MIN_ROUGHNESS);
 
-    // Initialize random seed (using frame index from CB)
-    Rng::Hash::Initialize(launchIndex, _RaytracingSampleIndex);
-
-    uint randomSeed = Rng::Hash::GetFloat();
+    // Initialize RNG
+    uint rngState = InitRNG(launchIndex, _RaytracingSampleIndex);
 
     // Accumulate radiance over multiple samples
     float3 accumulatedRadiance = float3(0, 0, 0);
 
     for (int sampleIdx = 0; sampleIdx < _RaytracingNumSamples; sampleIdx++)
     {
-        // Initialize path payload
-        PathTracingPayload payload;
-        payload.radiance = float3(0, 0, 0);
-        payload.throughput = float3(1, 1, 1);
-        payload.origin = positionWS;
-        payload.direction = viewDirWS;
-        payload.bounceCount = 0;
-        payload.active = true;
-        payload.pdf = 0;
-        payload.randomSeed = randomSeed;
+        float3 sampleRadiance = float3(0, 0, 0);
+        float3 throughput = float3(1, 1, 1);
 
-        // Add direct lighting at camera hit point
-        payload.radiance += EvaluateDirectLighting(positionWS, normalWS, viewDirWS, albedo, metallic, roughness, randomSeed);
+        // Current path state (start from primary hit from GBuffer)
+        float3 currentPos = primaryHitPos;
+        float3 currentNormal = primaryNormal;
+        float3 currentAlbedo = primaryAlbedo;
+        float currentMetallic = primaryMetallic;
+        float currentRoughness = primaryRoughness;
+        float3 currentViewDir = viewDirWS;
 
-        // Path tracing bounces (using max recursion from CB)
+        // Add direct lighting at primary hit (Next Event Estimation)
+        if (_PathTracingIncludeDirectLighting)
+        {
+            float3 directLight = EvaluateDirectLighting(
+                primaryHitPos, primaryNormal, viewDirWS,
+                primaryAlbedo, primaryMetallic, primaryRoughness, rngState);
+            sampleRadiance += throughput * directLight;
+        }
+
+        //------------------------------------------------------------------
+        // Path Tracing Loop
+        //------------------------------------------------------------------
         for (int bounce = 0; bounce < _RaytracingMaxRecursion; bounce++)
         {
-            if (!payload.active)
-                break;
-
-            // Russian roulette for path termination
-            float survivalProbability = max(payload.throughput.r, max(payload.throughput.g, payload.throughput.b));
-            if (survivalProbability < 0.1 && bounce > 2)
+            // Russian roulette for path termination (after minimum bounces)
+            if (bounce >= BOUNCES_MIN)
             {
-                if (RandomFloat(randomSeed) > survivalProbability)
+                float rrProbability = min(0.95, Luminance(throughput));
+                if (RandomFloat(rngState) > rrProbability)
                     break;
-                payload.throughput /= survivalProbability;
+                throughput /= rrProbability;
             }
 
-            // Sample next direction
-            float2 u = RandomFloat2(randomSeed);
+            // Terminate if throughput is too low
+            if (Luminance(throughput) < THROUGHPUT_THRESHOLD)
+                break;
 
-            // Choose between diffuse and specular based on material
-            float specularProbability = lerp(0.1, 0.9, metallic);
-            bool sampleSpecular = RandomFloat(randomSeed) < specularProbability;
+            // Sample BRDF to get next ray direction
+            float NdotV = max(dot(currentNormal, currentViewDir), 0.001);
+            float specularProb = GetSpecularProbability(currentAlbedo, currentMetallic, currentRoughness, NdotV);
+            bool sampleSpecular = (RandomFloat(rngState) < specularProb);
 
-            float3 sampledDir;
+            float2 u = RandomFloat2(rngState);
+            float3 nextDirection;
+            float pdf;
+
             if (sampleSpecular)
             {
-                sampledDir = SampleGGXDirection(u, normalWS, viewDirWS, roughness);
+                nextDirection = SampleGGX(u, currentNormal, currentViewDir, currentRoughness, pdf);
+                throughput /= specularProb;
             }
             else
             {
-                sampledDir = SampleCosineHemisphere(u, normalWS);
+                nextDirection = SampleCosineHemisphere(u, currentNormal, pdf);
+                throughput /= (1.0 - specularProb);
             }
 
-            // Evaluate ray bias
-            float rayBias = EvaluateRayTracingBias(payload.origin);
+            // Validate direction
+            if (!IsFinite3(nextDirection) || dot(nextDirection, currentNormal) <= 0.0)
+                break;
 
-            // Trace ray using PathTracingPayload
+            // Setup ray
+            float rayBias = EvaluateRayTracingBias(currentPos);
             RayDesc rayDesc;
-            rayDesc.Origin = payload.origin + normalWS * rayBias;
-            rayDesc.Direction = sampledDir;
+            rayDesc.Origin = currentPos + currentNormal * rayBias;
+            rayDesc.Direction = nextDirection;
             rayDesc.TMin = 0.001;
             rayDesc.TMax = _RaytracingRayMaxLength;
 
-            // Initialize bounce payload
-            PathTracingPayload bouncePayload;
-            bouncePayload.radiance = float3(0, 0, 0);
-            bouncePayload.throughput = payload.throughput;
-            bouncePayload.origin = rayDesc.Origin;
-            bouncePayload.direction = sampledDir;
-            bouncePayload.bounceCount = bounce + 1;
-            bouncePayload.active = true;
-            bouncePayload.pdf = 1.0;
-            bouncePayload.randomSeed = randomSeed;
+            // Initialize payload
+            PathTracingPayload payload;
+            payload.hitDistance = -1.0f;
+            payload.albedo = float3(0, 0, 0);
+            payload.normalWS = float3(0, 1, 0);
+            payload.emission = float3(0, 0, 0);
+            payload.metallic = 0.0;
+            payload.roughness = 1.0;
+            payload.occlusion = 1.0;
+            payload.hitPositionWS = float3(0, 0, 0);
 
-            // NVIDIA SER: Shader Execution Reordering for improved coherence (using flag from CB)
-            UNITY_BRANCH
+            // Trace ray - closesthit will populate payload with material data
             if (_nvSER)
             {
-                // SER is extremely useful in path tracing for coherent ray execution
                 NvHitObject hitObject;
-
                 NvTraceRayHitObject(_RaytracingAccelerationStructure,
                                     RAY_FLAG_NONE,
                                     RAYTRACINGRENDERERFLAG_PATH_TRACING,
                                     0, 1, 0,
                                     rayDesc,
-                                    bouncePayload,
+                                    payload,
                                     hitObject);
-
-                // Reorder threads for better coherence
                 NvReorderThread(hitObject);
-
-                // Invoke the hit shader
-                NvInvokeHitObject(_RaytracingAccelerationStructure, hitObject, bouncePayload);
+                NvInvokeHitObject(_RaytracingAccelerationStructure, hitObject, payload);
             }
             else
             {
-                // Standard ray tracing without SER
                 TraceRay(_RaytracingAccelerationStructure,
                          RAY_FLAG_NONE,
                          RAYTRACINGRENDERERFLAG_PATH_TRACING,
                          0, 1, 0,
                          rayDesc,
-                         bouncePayload);
+                         payload);
             }
 
-            // Accumulate radiance from bounce
-            payload.radiance += bouncePayload.radiance;
-
-            // Check if path should continue
-            if (!bouncePayload.active)
+            // Handle miss - sample environment
+            if (!payload.Hit())
             {
+                float3 skyColor = SAMPLE_TEXTURECUBE_LOD(_SkyTexture, sampler_TrilinearClamp, nextDirection, 0).xyz;
+                skyColor *= _PathTracingEnvironmentIntensity;
+                sampleRadiance += throughput * skyColor;
                 break;
             }
 
-            // Update payload for next bounce
-            payload.origin = bouncePayload.origin;
-            payload.throughput = bouncePayload.throughput;
-            randomSeed = bouncePayload.randomSeed;
+            // Hit - use material data from payload (evaluated in closesthit)
+            float3 hitPos = payload.hitPositionWS;
+            float3 hitNormal = payload.normalWS;
+            float3 hitAlbedo = payload.albedo;
+            float hitMetallic = payload.metallic;
+            float hitRoughness = payload.roughness;
+            float hitOcclusion = payload.occlusion;
+            float3 hitEmission = payload.emission;
 
-            // Firefly clamping (using intensity clamp from CB)
-            if (_RaytracingIntensityClamp > 0.0)
+            // Add emission
+            if (_PathTracingIncludeEmissive)
             {
-                payload.radiance = min(payload.radiance, _RaytracingIntensityClamp);
+                sampleRadiance += throughput * hitEmission;
             }
+
+            // Add direct lighting at this hit (Next Event Estimation)
+            if (_PathTracingIncludeDirectLighting)
+            {
+                float3 hitViewDir = -nextDirection;
+                float3 directLight = EvaluateDirectLighting(
+                    hitPos, hitNormal, hitViewDir,
+                    hitAlbedo, hitMetallic, hitRoughness, rngState);
+                sampleRadiance += throughput * directLight;
+            }
+
+            // Update throughput with BRDF weight
+            float3 brdfWeight = hitAlbedo * hitOcclusion;
+            throughput *= brdfWeight;
+
+            // Clamp radiance to avoid fireflies
+            sampleRadiance = SanitizeRadiance(sampleRadiance,
+                _RaytracingIntensityClamp > 0 ? _RaytracingIntensityClamp : 100.0);
+
+            // Update path state for next bounce
+            currentPos = hitPos;
+            currentNormal = hitNormal;
+            currentAlbedo = hitAlbedo;
+            currentMetallic = hitMetallic;
+            currentRoughness = hitRoughness;
+            currentViewDir = -nextDirection;
         }
 
-        accumulatedRadiance += payload.radiance;
+        accumulatedRadiance += sampleRadiance;
     }
 
     // Average over samples
     accumulatedRadiance /= max(_RaytracingNumSamples, 1);
 
+    // Apply intensity
+    accumulatedRadiance *= _PathTracingIntensity;
+
     // Output
-    _PathTracingOutput[launchIndex] =float4(accumulatedRadiance, 1.0);
+    _PathTracingOutput[launchIndex] = float4(accumulatedRadiance, 1.0);
 }
 
 #endif // REFERENCED_PATH_TRACING_INCLUDED

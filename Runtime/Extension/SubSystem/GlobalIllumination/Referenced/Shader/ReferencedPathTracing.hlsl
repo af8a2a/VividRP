@@ -7,6 +7,41 @@
 #define SHADER_TARGET 50
 
 //--------------------------------------------------------------------------------------------------
+// SHARC Configuration
+// SHARC_UPDATE and SHARC_QUERY are defined via multi_compile in .raytrace file
+//--------------------------------------------------------------------------------------------------
+
+// Check if SHARC is enabled (either UPDATE or QUERY keyword is defined)
+#if defined(SHARC_UPDATE) || defined(SHARC_QUERY)
+    #define SHARC_ENABLE_SHARC              1
+#else
+    #define SHARC_ENABLE_SHARC              0
+#endif
+
+// SHARC compile-time settings (features that affect struct layouts)
+#define SHARC_MATERIAL_DEMODULATION     1       // Enable material demodulation
+#define SHARC_SEPARATE_EMISSIVE         1       // Handle emissive separately
+#define SHARC_ENABLE_64_BIT_ATOMICS     1       // Use 64-bit atomics (SM 6.6+)
+
+// SHARC settings that will be controlled via shader parameters from volume
+// These defines provide defaults/fallbacks
+#ifndef SHARC_PROPAGATION_DEPTH
+#define SHARC_PROPAGATION_DEPTH         4       // Number of vertices stored for backpropagation
+#endif
+
+#ifndef SHARC_SAMPLE_NUM_THRESHOLD
+#define SHARC_SAMPLE_NUM_THRESHOLD      2       // Minimum samples for valid cache entry
+#endif
+
+#ifndef SHARC_GRID_LOGARITHM_BASE
+#define SHARC_GRID_LOGARITHM_BASE       2.0f
+#endif
+
+#ifndef SHARC_GRID_LEVEL_BIAS
+#define SHARC_GRID_LEVEL_BIAS           0
+#endif
+
+//--------------------------------------------------------------------------------------------------
 // Includes
 //--------------------------------------------------------------------------------------------------
 
@@ -40,6 +75,11 @@
 #define NV_SHADER_EXTN_SLOT u1
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/ExtensionSystem/NVAPI_SER/nvHLSLExtns.h"
 
+// SHARC (Spatially Hashed Radiance Cache)
+#if SHARC_ENABLE_SHARC
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/SHARC/SharcCommon.hlsl"
+#endif
+
 //--------------------------------------------------------------------------------------------------
 // Constants
 //--------------------------------------------------------------------------------------------------
@@ -57,8 +97,9 @@ TEXTURE2D_X(_GBuffer0);
 TEXTURE2D_X(_GBuffer1);
 TEXTURE2D_X(_GBuffer2);
 
-// Output
+// Output and History for temporal accumulation
 RW_TEXTURE2D(float4, _PathTracingOutput);
+TEXTURE2D_X(_PathTracingHistory);
 
 // Path tracing specific parameters (not in ShaderVariablesRaytracing CB)
 int _PathTracingAccumulate;
@@ -67,6 +108,88 @@ float _PathTracingEnvironmentIntensity;
 int _PathTracingIncludeEmissive;
 int _PathTracingIncludeDirectLighting;
 int _PathTracingDebugVisualizeBounce;
+int _PathTracingDebugMode;  // 0=Normal, 1=ShowFrameCount, 2=ShowNormals, 3=ShowAlbedo
+
+//--------------------------------------------------------------------------------------------------
+// SHARC Buffers and Parameters
+//--------------------------------------------------------------------------------------------------
+
+#if SHARC_ENABLE_SHARC
+// SHARC buffers
+RWStructuredBuffer<uint64_t>            _SharcHashEntriesBuffer     : register(u2);
+RWStructuredBuffer<uint>                _SharcLockBuffer            : register(u3);
+RWStructuredBuffer<SharcAccumulationData>   _SharcAccumulationBuffer    : register(u4);
+RWStructuredBuffer<SharcPackedData>     _SharcResolvedBuffer        : register(u5);
+
+// SHARC parameters from C# (volume-controlled)
+float3 _SharcCameraPosition;
+float _SharcSceneScale;
+float _SharcRoughnessThreshold;
+float _SharcRadianceScale;          // Quantization factor for atomic accumulation
+int _SharcGridLevelBias;            // LOD bias for grid levels
+int _SharcSampleThreshold;          // Minimum samples for valid cache entry
+uint _SharcEntriesNum;
+int _SharcEnableAntifirefly;
+int _SharcDebug;
+
+// Helper function to initialize SHARC parameters
+SharcParameters GetSharcParameters()
+{
+    SharcParameters params;
+
+    // Grid parameters
+    params.gridParameters.cameraPosition = _SharcCameraPosition;
+    params.gridParameters.sceneScale = _SharcSceneScale;
+    params.gridParameters.logarithmBase = SHARC_GRID_LOGARITHM_BASE;
+    params.gridParameters.levelBias = _SharcGridLevelBias;
+
+    // Hash map data
+    params.hashMapData.capacity = _SharcEntriesNum;
+    params.hashMapData.hashEntriesBuffer = _SharcHashEntriesBuffer;
+
+#if !SHARC_ENABLE_64_BIT_ATOMICS
+    params.hashMapData.lockBuffer = _SharcLockBuffer;
+#endif
+
+    // Buffers
+    params.accumulationBuffer = _SharcAccumulationBuffer;
+    params.resolvedBuffer = _SharcResolvedBuffer;
+
+    // Settings - use shader parameter instead of define
+    params.radianceScale = _SharcRadianceScale;
+    params.enableAntiFireflyFilter = _SharcEnableAntifirefly != 0;
+
+    return params;
+}
+
+// Get sample threshold from shader parameter
+int GetSharcSampleThreshold()
+{
+    return _SharcSampleThreshold;
+}
+
+// Helper function to create SharcHitData
+SharcHitData CreateSharcHitData(float3 positionWS, float3 normalWS, float3 albedo, float metallic, float3 emission)
+{
+    SharcHitData hitData;
+    hitData.positionWorld = positionWS;
+    hitData.normalWorld = normalWS;
+
+#if SHARC_MATERIAL_DEMODULATION
+    // Demodulation preserves material details in the cache
+    float3 specularF0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
+    float3 specularFAvg = specularF0 + (1.0 - specularF0) * 0.047619; // 1/21
+    float3 diffuseAlbedo = albedo * (1.0 - metallic);
+    hitData.materialDemodulation = max(diffuseAlbedo, 0.05) + max(specularF0, 0.02) * Luminance(specularFAvg);
+#endif
+
+#if SHARC_SEPARATE_EMISSIVE
+    hitData.emissive = emission;
+#endif
+
+    return hitData;
+}
+#endif // SHARC_ENABLE_SHARC
 
 //--------------------------------------------------------------------------------------------------
 // Path Tracing Payload - carries material data from closesthit (DXR 1.0 compatible)
@@ -424,7 +547,17 @@ void RayGenPathTracing()
         float3 viewDir = normalize(mul(UNITY_MATRIX_I_VP, float4(uv * 2.0 - 1.0, 0.0, 1.0)).xyz);
         float3 skyColor = SAMPLE_TEXTURECUBE_LOD(_SkyTexture, sampler_TrilinearClamp, viewDir, 0).xyz;
         skyColor *= _PathTracingEnvironmentIntensity;
-        _PathTracingOutput[launchIndex] = float4(skyColor, 1.0);
+
+        // Apply temporal accumulation to sky pixels too
+        float3 finalSkyColor = skyColor;
+        if (_PathTracingAccumulate && _RaytracingSampleIndex > 0)
+        {
+            float3 historySky = LOAD_TEXTURE2D_X(_PathTracingHistory, launchIndex).rgb;
+            float blendWeight = 1.0 / (float)(_RaytracingSampleIndex + 1);
+            finalSkyColor = lerp(historySky, skyColor, blendWeight);
+        }
+
+        _PathTracingOutput[launchIndex] = float4(finalSkyColor, 1.0);
         return;
     }
 
@@ -457,14 +590,26 @@ void RayGenPathTracing()
     // Initialize RNG
     uint rngState = InitRNG(launchIndex, _RaytracingSampleIndex);
 
+#if SHARC_ENABLE_SHARC
+    // Initialize SHARC parameters (shared across all samples)
+    SharcParameters sharcParameters = GetSharcParameters();
+#endif
+
     // Accumulate radiance over multiple samples
     float3 accumulatedRadiance = float3(0, 0, 0);
 
-    
+
     for (int sampleIdx = 0; sampleIdx < _RaytracingNumSamples; sampleIdx++)
     {
         float3 sampleRadiance = float3(0, 0, 0);
         float3 throughput = float3(1, 1, 1);
+
+#if SHARC_ENABLE_SHARC
+        // Initialize SHARC state for this path
+        SharcState sharcState;
+        SharcInit(sharcState);
+        float accumulatedRoughness = 0.0; // Track roughness for SHARC query validation
+#endif
 
         // Current path state (start from primary hit from GBuffer)
         float3 currentPos = primaryHitPos;
@@ -593,6 +738,12 @@ void RayGenPathTracing()
             {
                 float3 skyColor = SAMPLE_TEXTURECUBE_LOD(_SkyTexture, sampler_TrilinearClamp, nextDirection, 0).xyz;
                 skyColor *= _PathTracingEnvironmentIntensity;
+
+#if SHARC_UPDATE
+                // Propagate sky radiance back through the path
+                SharcUpdateMiss(sharcParameters, sharcState, skyColor);
+#endif
+
                 sampleRadiance += throughput * skyColor;
                 break;
             }
@@ -606,22 +757,77 @@ void RayGenPathTracing()
             float hitOcclusion = payload.occlusion;
             float3 hitEmission = payload.emission;
 
-            // Add emission
+#if SHARC_ENABLE_SHARC
+            // Create SHARC hit data for this hit
+            SharcHitData sharcHitData = CreateSharcHitData(hitPos, hitNormal, hitAlbedo, hitMetallic, hitEmission);
+#endif
+
+#if SHARC_QUERY
+            // Try to get cached radiance from SHARC for early path termination
+            {
+                uint gridLevel = HashGridGetLevel(hitPos, sharcParameters.gridParameters);
+                float voxelSize = HashGridGetVoxelSize(gridLevel, sharcParameters.gridParameters);
+                bool isValidHit = payload.hitDistance > voxelSize * sqrt(3.0);
+
+                // Check roughness-based footprint for valid query
+                accumulatedRoughness = min(accumulatedRoughness, 0.99);
+                float alpha = accumulatedRoughness * accumulatedRoughness;
+                float footprint = payload.hitDistance * sqrt(0.5 * alpha * alpha / (1.0 - alpha * alpha + 0.0001));
+                isValidHit = isValidHit && (footprint > voxelSize);
+
+                float3 cachedRadiance;
+                if (isValidHit && SharcGetCachedRadiance(sharcParameters, sharcHitData, cachedRadiance, false))
+                {
+                    // Found valid cached radiance - use it and terminate path
+                    sampleRadiance += throughput * cachedRadiance;
+                    break;
+                }
+
+                // Debug visualization for SHARC cache
+                if (_SharcDebug != 0)
+                {
+                    float3 debugColor;
+                    SharcGetCachedRadiance(sharcParameters, sharcHitData, debugColor, true);
+                    _PathTracingOutput[launchIndex] = float4(debugColor, 1.0);
+                    return;
+                }
+            }
+#endif // SHARC_QUERY
+
+            // Add emission (handled separately for SHARC)
+#if SHARC_SEPARATE_EMISSIVE
+            // Emission is stored separately in SHARC, so add it here
             if (_PathTracingIncludeEmissive)
             {
                 sampleRadiance += throughput * hitEmission;
             }
+#else
+            if (_PathTracingIncludeEmissive)
+            {
+                sampleRadiance += throughput * hitEmission;
+            }
+#endif
 
             // Add direct lighting at this hit (Next Event Estimation)
+            float3 directLightAtHit = float3(0, 0, 0);
             if (_PathTracingIncludeDirectLighting)
             {
                 float3 hitViewDir = -nextDirection;
-                float3 directLight = EvaluateDirectLighting(
+                directLightAtHit = EvaluateDirectLighting(
                     hitPos, hitNormal, hitViewDir,
                     hitAlbedo, hitMetallic, hitRoughness, rngState);
                 // Apply occlusion to direct lighting only (throughput already accounts for BRDF)
-                sampleRadiance += throughput * directLight * hitOcclusion;
+                sampleRadiance += throughput * directLightAtHit * hitOcclusion;
             }
+
+#if SHARC_UPDATE
+            // Update SHARC cache with direct lighting at this hit
+            // SharcUpdateHit returns false if we should terminate (cache resampling found valid data)
+            if (!SharcUpdateHit(sharcParameters, sharcState, sharcHitData, directLightAtHit * hitOcclusion, RandomFloat(rngState)))
+            {
+                break; // Cache resampling found valid cached radiance
+            }
+#endif
 
             // Clamp radiance to avoid fireflies
             sampleRadiance = SanitizeRadiance(sampleRadiance,
@@ -635,6 +841,15 @@ void RayGenPathTracing()
             currentMetallic = hitMetallic;
             currentRoughness = hitRoughness;
             currentViewDir = -nextDirection;
+
+#if SHARC_ENABLE_SHARC
+            // Track accumulated roughness for SHARC query validation
+            // Diffuse surfaces add 1.0, specular adds roughness
+            accumulatedRoughness += sampleSpecular ? hitRoughness : 1.0;
+
+            // Update SHARC state with new throughput
+            SharcSetThroughput(sharcState, throughput);
+#endif
         }
 
         accumulatedRadiance += sampleRadiance;
@@ -646,8 +861,113 @@ void RayGenPathTracing()
     // Apply intensity
     accumulatedRadiance *= _PathTracingIntensity;
 
-    // Output
-    _PathTracingOutput[launchIndex] = float4(accumulatedRadiance, 1.0);
+    //------------------------------------------------------------------
+    // Temporal Accumulation
+    //------------------------------------------------------------------
+    float3 finalRadiance = accumulatedRadiance;
+
+    if (_PathTracingAccumulate)
+    {
+        // _RaytracingSampleIndex is used as the frame count for accumulation
+        // Frame 0: just use current sample
+        // Frame N: blend with history using running average
+        int frameCount = _RaytracingSampleIndex;
+
+        if (frameCount > 0)
+        {
+            // Sample history buffer
+            float3 historyRadiance = LOAD_TEXTURE2D_X(_PathTracingHistory, launchIndex).rgb;
+
+            // Running average: result = (history * frameCount + current) / (frameCount + 1)
+            // This is equivalent to: result = lerp(history, current, 1.0 / (frameCount + 1))
+            float blendWeight = 1.0 / (float)(frameCount + 1);
+            finalRadiance = lerp(historyRadiance, accumulatedRadiance, blendWeight);
+        }
+        // else: frameCount == 0, use current sample directly (no history yet)
+    }
+
+    // Sanitize final output to avoid NaN propagation in accumulation
+    if (!IsFinite3(finalRadiance))
+    {
+        finalRadiance = float3(0, 0, 0);
+    }
+
+    //------------------------------------------------------------------
+    // Debug Visualization
+    //------------------------------------------------------------------
+    float3 outputColor = finalRadiance;
+
+    if (_PathTracingDebugMode > 0)
+    {
+        switch (_PathTracingDebugMode)
+        {
+            case 1: // Show Frame Count - Heatmap visualization
+            {
+                // Blue (0 frames) -> Cyan (32) -> Green (64) -> Yellow (128) -> Red (256+)
+                float normalizedFrameCount = saturate(_RaytracingSampleIndex / 256.0);
+                float3 heatmapColor;
+                if (normalizedFrameCount < 0.25)
+                {
+                    // Blue to Cyan
+                    heatmapColor = lerp(float3(0, 0, 1), float3(0, 1, 1), normalizedFrameCount * 4.0);
+                }
+                else if (normalizedFrameCount < 0.5)
+                {
+                    // Cyan to Green
+                    heatmapColor = lerp(float3(0, 1, 1), float3(0, 1, 0), (normalizedFrameCount - 0.25) * 4.0);
+                }
+                else if (normalizedFrameCount < 0.75)
+                {
+                    // Green to Yellow
+                    heatmapColor = lerp(float3(0, 1, 0), float3(1, 1, 0), (normalizedFrameCount - 0.5) * 4.0);
+                }
+                else
+                {
+                    // Yellow to Red
+                    heatmapColor = lerp(float3(1, 1, 0), float3(1, 0, 0), (normalizedFrameCount - 0.75) * 4.0);
+                }
+                outputColor = heatmapColor;
+                break;
+            }
+
+            case 2: // Show Primary Normals
+            {
+                outputColor = primaryNormal * 0.5 + 0.5;  // Remap [-1,1] to [0,1]
+                break;
+            }
+
+            case 3: // Show Primary Albedo
+            {
+                outputColor = primaryAlbedo;
+                break;
+            }
+
+            case 4: // Show Primary Metallic
+            {
+                outputColor = float3(primaryMetallic, primaryMetallic, primaryMetallic);
+                break;
+            }
+
+            case 5: // Show Primary Roughness
+            {
+                outputColor = float3(primaryRoughness, primaryRoughness, primaryRoughness);
+                break;
+            }
+
+            case 6: // Show Primary Occlusion
+            {
+                outputColor = float3(primaryOcclusion, primaryOcclusion, primaryOcclusion);
+                break;
+            }
+
+            default:
+                outputColor = finalRadiance;
+                break;
+        }
+    }
+
+    // Output result
+    _PathTracingOutput[launchIndex] = float4(outputColor, 1.0);
 }
 
 #endif // REFERENCED_PATH_TRACING_INCLUDED

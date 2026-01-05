@@ -16,5 +16,18 @@ namespace UnityEngine.Rendering.Universal
             get => m_ReferencedPathTracingRTShader;
             set => this.SetValueAndNotify(ref m_ReferencedPathTracingRTShader, value, nameof(m_ReferencedPathTracingRTShader));
         }
+
+        [SerializeField]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/Referenced/Shader/SharcResolve.compute")]
+        private ComputeShader m_SharcResolveCS;
+
+        /// <summary>
+        /// SHARC Resolve compute shader
+        /// </summary>
+        public ComputeShader sharcResolveCS
+        {
+            get => m_SharcResolveCS;
+            set => this.SetValueAndNotify(ref m_SharcResolveCS, value, nameof(m_SharcResolveCS));
+        }
     }
 }

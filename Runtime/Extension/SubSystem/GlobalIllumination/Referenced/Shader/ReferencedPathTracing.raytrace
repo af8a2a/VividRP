@@ -1,7 +1,16 @@
-#pragma max_recursion_depth 4
+#pragma max_recursion_depth 8
+
+// SHARC shader variants
+#pragma multi_compile _ SHARC_UPDATE
+#pragma multi_compile _ SHARC_QUERY
+
+// 64-bit atomics support (required for SHARC)
+#pragma require Int64BufferAtomics
+#pragma require Native16Bit
 
 #include "ReferencedPathTracing.hlsl"
 
 // Entry points defined in ReferencedPathTracing.hlsl:
 // - [shader("raygeneration")] RayGenPathTracing()
 // - [shader("miss")] MissShaderPathTracing()
+// - [shader("miss")] MissShadow()

@@ -48,7 +48,36 @@ namespace UnityEngine.Rendering.Universal
     [Serializable]
     public sealed class PathTracingDenoiseModeParameter : VolumeParameter<PathTracingDenoiseMode>
     {
-        public PathTracingDenoiseModeParameter(PathTracingDenoiseMode value, bool overrideState = false) 
+        public PathTracingDenoiseModeParameter(PathTracingDenoiseMode value, bool overrideState = false)
+            : base(value, overrideState) { }
+    }
+
+    /// <summary>
+    /// Debug visualization mode for path tracing
+    /// </summary>
+    [Serializable]
+    public enum PathTracingDebugMode
+    {
+        /// <summary>Normal rendering - Show path tracing result</summary>
+        None = 0,
+        /// <summary>Show accumulated frame count as heatmap</summary>
+        FrameCount = 1,
+        /// <summary>Show primary hit normals</summary>
+        Normals = 2,
+        /// <summary>Show primary hit albedo</summary>
+        Albedo = 3,
+        /// <summary>Show primary hit metallic</summary>
+        Metallic = 4,
+        /// <summary>Show primary hit roughness</summary>
+        Roughness = 5,
+        /// <summary>Show primary hit occlusion</summary>
+        Occlusion = 6
+    }
+
+    [Serializable]
+    public sealed class PathTracingDebugModeParameter : VolumeParameter<PathTracingDebugMode>
+    {
+        public PathTracingDebugModeParameter(PathTracingDebugMode value, bool overrideState = false)
             : base(value, overrideState) { }
     }
 
@@ -234,6 +263,14 @@ namespace UnityEngine.Rendering.Universal
         #region Debug Settings
 
         /// <summary>
+        /// Debug visualization mode
+        /// </summary>
+        [Tooltip("Debug visualization mode. None = normal path tracing, other modes show GBuffer data or accumulation info.")]
+        [AdditionalProperty]
+        public PathTracingDebugModeParameter debugMode =
+            new PathTracingDebugModeParameter(PathTracingDebugMode.None);
+
+        /// <summary>
         /// Visualize bounces only
         /// </summary>
         [Tooltip("Show only a specific bounce number for debugging. 0 = all bounces, 1 = first bounce only, etc.")]
@@ -246,6 +283,105 @@ namespace UnityEngine.Rendering.Universal
         [Tooltip("Show only path tracing output without compositing with main rendering.")]
         [AdditionalProperty]
         public BoolParameter debugShowPathTracingOnly = new BoolParameter(false);
+
+        #endregion
+
+        #region SHARC Settings (Spatially Hashed Radiance Cache)
+
+        /// <summary>
+        /// Enable SHARC for radiance caching
+        /// </summary>
+        [Tooltip("Enable SHARC (Spatially Hashed Radiance Cache) for accelerated path tracing convergence. SHARC caches radiance at hit points in a spatial hash grid.")]
+        public BoolParameter enableSharc = new BoolParameter(false);
+
+        /// <summary>
+        /// SHARC update mode - write radiance to cache
+        /// </summary>
+        [Tooltip("Enable SHARC update mode. When enabled, path tracing will write radiance values to the cache.")]
+        public BoolParameter sharcUpdate = new BoolParameter(true);
+
+        /// <summary>
+        /// SHARC query mode - read cached radiance for early termination
+        /// </summary>
+        [Tooltip("Enable SHARC query mode. When enabled, path tracing will query the cache for early path termination.")]
+        public BoolParameter sharcQuery = new BoolParameter(true);
+
+        /// <summary>
+        /// SHARC scene scale
+        /// </summary>
+        [Tooltip("Scene scale for SHARC grid. Adjust based on your scene size. Larger values create finer grids.")]
+        [AdditionalProperty]
+        public ClampedFloatParameter sharcSceneScale = new ClampedFloatParameter(1.0f, 0.01f, 100.0f);
+
+        /// <summary>
+        /// SHARC hash entries count (in thousands)
+        /// </summary>
+        [Tooltip("Number of hash entries in SHARC cache (in thousands). Higher values allow more cached data but use more memory.")]
+        [AdditionalProperty]
+        public ClampedIntParameter sharcEntriesK = new ClampedIntParameter(1024, 256, 8192);
+
+        /// <summary>
+        /// SHARC roughness threshold
+        /// </summary>
+        [Tooltip("Minimum roughness for SHARC update. Surfaces with lower roughness won't be cached during update pass.")]
+        [AdditionalProperty]
+        public ClampedFloatParameter sharcRoughnessThreshold = new ClampedFloatParameter(0.3f, 0.0f, 1.0f);
+
+        /// <summary>
+        /// SHARC radiance scale for quantization
+        /// </summary>
+        [Tooltip("Quantization factor for atomic radiance accumulation. Reduce for large radiance values to prevent overflow.")]
+        [AdditionalProperty]
+        public ClampedFloatParameter sharcRadianceScale = new ClampedFloatParameter(1000.0f, 100.0f, 10000.0f);
+
+        /// <summary>
+        /// SHARC propagation depth
+        /// </summary>
+        [Tooltip("Number of path vertices stored for backpropagation. Higher values improve cache quality but use more memory.")]
+        [AdditionalProperty]
+        public ClampedIntParameter sharcPropagationDepth = new ClampedIntParameter(4, 1, 8);
+
+        /// <summary>
+        /// SHARC sample threshold for resampling
+        /// </summary>
+        [Tooltip("Minimum sample count for valid cache entry. Entries with fewer samples won't be used for early termination.")]
+        [AdditionalProperty]
+        public ClampedIntParameter sharcSampleThreshold = new ClampedIntParameter(2, 0, 16);
+
+        /// <summary>
+        /// SHARC grid level bias
+        /// </summary>
+        [Tooltip("LOD bias for grid levels. Positive values add magnified levels, negative reduces levels.")]
+        [AdditionalProperty]
+        public ClampedIntParameter sharcGridLevelBias = new ClampedIntParameter(0, -4, 4);
+
+        /// <summary>
+        /// SHARC anti-firefly filter
+        /// </summary>
+        [Tooltip("Enable anti-firefly filter for SHARC to reduce bright noise pixels in the cache.")]
+        [AdditionalProperty]
+        public BoolParameter sharcAntiFirefly = new BoolParameter(true);
+
+        /// <summary>
+        /// SHARC debug visualization
+        /// </summary>
+        [Tooltip("Enable SHARC debug visualization to show cached data.")]
+        [AdditionalProperty]
+        public BoolParameter sharcDebug = new BoolParameter(false);
+
+        /// <summary>
+        /// SHARC accumulation frame count
+        /// </summary>
+        [Tooltip("Maximum number of frames for SHARC temporal accumulation. Higher values produce smoother results but take longer to update.")]
+        [AdditionalProperty]
+        public ClampedIntParameter sharcAccumulationFrames = new ClampedIntParameter(64, 1, 1024);
+
+        /// <summary>
+        /// SHARC stale frame count
+        /// </summary>
+        [Tooltip("Maximum number of frames without new samples before a cache entry is evicted.")]
+        [AdditionalProperty]
+        public ClampedIntParameter sharcStaleFrames = new ClampedIntParameter(256, 8, 1024);
 
         #endregion
 

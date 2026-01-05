@@ -1,0 +1,69 @@
+// SHARC Resolve Compute Shader
+// Processes accumulated radiance samples and updates the resolved cache
+
+#pragma kernel CSResolveEntries
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+
+// SHARC configuration
+#pragma require Int64BufferAtomics
+#pragma require Native16Bit
+
+#define SHARC_ENABLE_64_BIT_ATOMICS     1
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/SHARC/SharcCommon.hlsl"
+
+// Resolve parameters (volume-controlled from C#)
+float3 _SharcCameraPosition;
+float3 _SharcCameraPositionPrev;
+float _SharcSceneScale;
+float _SharcRadianceScale;          // Quantization factor for atomic accumulation
+int _SharcGridLevelBias;            // LOD bias for grid levels
+uint _SharcEntriesNum;
+uint _SharcAccumulationFrameNum;
+uint _SharcStaleFrameNumMax;
+int _SharcEnableAntifirefly;
+
+// Buffers
+RWStructuredBuffer<uint64_t>            _SharcHashEntriesBuffer;
+RWStructuredBuffer<uint>                _SharcLockBuffer;
+RWStructuredBuffer<SharcAccumulationData>   _SharcAccumulationBuffer;
+RWStructuredBuffer<SharcPackedData>     _SharcResolvedBuffer;
+
+[numthreads(64, 1, 1)]
+void CSResolveEntries(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    uint entryIndex = dispatchThreadID.x;
+
+    if (entryIndex >= _SharcEntriesNum)
+        return;
+
+    // Build SHARC parameters using volume-controlled values
+    SharcParameters sharcParameters;
+    sharcParameters.gridParameters.cameraPosition = _SharcCameraPosition;
+    sharcParameters.gridParameters.sceneScale = _SharcSceneScale;
+    sharcParameters.gridParameters.logarithmBase = SHARC_GRID_LOGARITHM_BASE;
+    sharcParameters.gridParameters.levelBias = _SharcGridLevelBias;
+
+    sharcParameters.hashMapData.capacity = _SharcEntriesNum;
+    sharcParameters.hashMapData.hashEntriesBuffer = _SharcHashEntriesBuffer;
+
+#if !SHARC_ENABLE_64_BIT_ATOMICS
+    sharcParameters.hashMapData.lockBuffer = _SharcLockBuffer;
+#endif
+
+    sharcParameters.accumulationBuffer = _SharcAccumulationBuffer;
+    sharcParameters.resolvedBuffer = _SharcResolvedBuffer;
+    sharcParameters.radianceScale = _SharcRadianceScale;
+    sharcParameters.enableAntiFireflyFilter = _SharcEnableAntifirefly != 0;
+
+    // Build resolve parameters
+    SharcResolveParameters resolveParameters;
+    resolveParameters.cameraPositionPrev = _SharcCameraPositionPrev;
+    resolveParameters.accumulationFrameNum = _SharcAccumulationFrameNum;
+    resolveParameters.staleFrameNumMax = _SharcStaleFrameNumMax;
+    resolveParameters.enableAntiFireflyFilter = _SharcEnableAntifirefly != 0;
+
+    // Resolve this entry
+    SharcResolveEntry(entryIndex, sharcParameters, resolveParameters);
+}

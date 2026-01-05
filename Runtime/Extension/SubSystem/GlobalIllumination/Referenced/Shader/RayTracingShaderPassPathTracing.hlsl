@@ -55,7 +55,6 @@ struct ShadowRayPayload
 // Utility Functions
 //--------------------------------------------------------------------------------------------------
 
-bool IsFinite(float x) { return !isnan(x) && !isinf(x); }
 bool IsFinite3(float3 v) { return IsFinite(v.x) && IsFinite(v.y) && IsFinite(v.z); }
 
 float3 SanitizeValue(float3 v, float maxValue)

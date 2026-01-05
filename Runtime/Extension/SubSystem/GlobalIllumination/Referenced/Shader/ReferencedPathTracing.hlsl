@@ -158,7 +158,7 @@ float3 SampleCosineHemisphere(float2 u, float3 normal, out float pdf)
 }
 
 // GGX importance sampling for specular
-float3 SampleGGX(float2 u, float3 normal, float3 viewDir, float roughness, out float pdf)
+float3 SampleGGX(float2 u, float3 normal, float3 viewDir, float roughness, out float pdf, out float3 halfVector)
 {
     float a = roughness * roughness;
     float a2 = a * a;
@@ -178,10 +178,10 @@ float3 SampleGGX(float2 u, float3 normal, float3 viewDir, float roughness, out f
         tangent = normalize(cross(normal, float3(1, 0, 0)));
     bitangent = cross(normal, tangent);
 
-    float3 halfVector = normalize(h.x * tangent + h.y * bitangent + h.z * normal);
+    halfVector = normalize(h.x * tangent + h.y * bitangent + h.z * normal);
     float3 dir = reflect(-viewDir, halfVector);
 
-    // Compute PDF
+    // Compute PDF: p(h) = D(h) * NdotH, p(L) = p(h) / (4 * VdotH)
     float NdotH = saturate(dot(normal, halfVector));
     float VdotH = saturate(dot(viewDir, halfVector));
     float D = D_GGX(NdotH, roughness);
@@ -204,6 +204,74 @@ float GetSpecularProbability(float3 albedo, float metallic, float roughness, flo
 
     float probability = specularWeight / max(0.0001, specularWeight + diffuseWeight);
     return clamp(probability, 0.1, 0.9); // Avoid undersampling either lobe
+}
+
+//--------------------------------------------------------------------------------------------------
+// BRDF Evaluation Functions (returns BRDF * NdotL / PDF for importance sampling)
+//--------------------------------------------------------------------------------------------------
+
+// Evaluate diffuse BRDF weight for cosine-weighted sampling
+// BRDF = (1-F) * (1-metallic) * albedo / PI
+// PDF = NdotL / PI
+// Weight = BRDF * NdotL / PDF = (1-F) * (1-metallic) * albedo
+float3 EvaluateDiffuseBRDFWeight(float3 albedo, float metallic, float3 F)
+{
+    return (1.0 - F) * (1.0 - metallic) * albedo;
+}
+
+// Evaluate specular BRDF weight for GGX importance sampling
+// BRDF = F * D * G / (4 * NdotL * NdotV)
+// PDF = D * NdotH / (4 * VdotH)
+// Weight = BRDF * NdotL / PDF = F * G * VdotH / (NdotV * NdotH)
+float3 EvaluateSpecularBRDFWeight(
+    float3 F0,
+    float roughness,
+    float NdotL,
+    float NdotV,
+    float NdotH,
+    float VdotH)
+{
+    // Fresnel
+    float3 F = F_Schlick(F0, VdotH);
+
+    // Geometry (visibility) term - using Smith Joint approximation
+    float G = V_SmithJointGGX(NdotL, NdotV, roughness);
+
+    // Weight = F * G * VdotH / (NdotV * NdotH)
+    // Note: G already includes the 1/(4*NdotL*NdotV) factor in V_SmithJointGGX
+    // So actual weight = F * G * 4 * NdotL * VdotH / NdotH
+    float3 weight = F * G * 4.0 * NdotL * VdotH / max(NdotH, 0.0001);
+
+    return weight;
+}
+
+// Combined BRDF evaluation - evaluates the sampled lobe and returns weight
+float3 EvaluateBRDFWeight(
+    float3 albedo,
+    float metallic,
+    float roughness,
+    float3 normal,
+    float3 viewDir,
+    float3 lightDir,
+    float3 halfVector,
+    bool isSpecular)
+{
+    float NdotL = saturate(dot(normal, lightDir));
+    float NdotV = max(dot(normal, viewDir), 0.001);
+    float NdotH = saturate(dot(normal, halfVector));
+    float VdotH = saturate(dot(viewDir, halfVector));
+
+    float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
+    float3 F = F_Schlick(F0, VdotH);
+
+    if (isSpecular)
+    {
+        return EvaluateSpecularBRDFWeight(F0, roughness, NdotL, NdotV, NdotH, VdotH);
+    }
+    else
+    {
+        return EvaluateDiffuseBRDFWeight(albedo, metallic, F);
+    }
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -308,13 +376,22 @@ void RayGenPathTracing()
     float3 viewDirWS = GetWorldSpaceNormalizeViewDir(primaryHitPos);
 
     // Load GBuffer data for primary hit
+    // GBuffer format (see ShaderLibrary/GBufferOutput.hlsl):
+    // gBuffer0: RGB = albedo, A = material flags
+    // gBuffer1: RGB = specular color, A = occlusion
+    // gBuffer2: RGB = packed normal, A = smoothness
     float4 gbuffer0 = LOAD_TEXTURE2D_X(_GBuffer0, launchIndex);
     float4 gbuffer1 = LOAD_TEXTURE2D_X(_GBuffer1, launchIndex);
     float4 gbuffer2 = LOAD_TEXTURE2D_X(_GBuffer2, launchIndex);
 
     float3 primaryAlbedo = gbuffer0.rgb;
-    float3 primaryNormal = normalize(UnpackNormal(gbuffer2.xyz));
-    float primaryMetallic = gbuffer1.r;
+    float primaryOcclusion = gbuffer1.a;  // Occlusion is in gBuffer1.a
+    float3 primaryNormal = normalize(UnpackGBufferNormal(gbuffer2.xyz));  // Use correct unpack function
+
+    // gBuffer1.r contains reflectivity in metallic workflow, convert to metallic
+    float reflectivity = gbuffer1.r;
+    float primaryMetallic = MetallicFromReflectivity(reflectivity);  // Convert reflectivity to metallic
+
     float primarySmoothness = gbuffer2.a;
     float primaryPerceptualRoughness = PerceptualSmoothnessToPerceptualRoughness(primarySmoothness);
     float primaryRoughness = max(PerceptualRoughnessToRoughness(primaryPerceptualRoughness), MIN_ROUGHNESS);
@@ -325,6 +402,7 @@ void RayGenPathTracing()
     // Accumulate radiance over multiple samples
     float3 accumulatedRadiance = float3(0, 0, 0);
 
+    
     for (int sampleIdx = 0; sampleIdx < _RaytracingNumSamples; sampleIdx++)
     {
         float3 sampleRadiance = float3(0, 0, 0);
@@ -334,6 +412,7 @@ void RayGenPathTracing()
         float3 currentPos = primaryHitPos;
         float3 currentNormal = primaryNormal;
         float3 currentAlbedo = primaryAlbedo;
+        float currentOcclusion = primaryOcclusion;
         float currentMetallic = primaryMetallic;
         float currentRoughness = primaryRoughness;
         float3 currentViewDir = viewDirWS;
@@ -344,7 +423,8 @@ void RayGenPathTracing()
             float3 directLight = EvaluateDirectLighting(
                 primaryHitPos, primaryNormal, viewDirWS,
                 primaryAlbedo, primaryMetallic, primaryRoughness, rngState);
-            sampleRadiance += throughput * directLight;
+            // Apply occlusion to direct lighting
+            sampleRadiance += throughput * directLight * primaryOcclusion;
         }
 
         //------------------------------------------------------------------
@@ -372,22 +452,40 @@ void RayGenPathTracing()
 
             float2 u = RandomFloat2(rngState);
             float3 nextDirection;
+            float3 halfVector;
             float pdf;
 
             if (sampleSpecular)
             {
-                nextDirection = SampleGGX(u, currentNormal, currentViewDir, currentRoughness, pdf);
-                throughput /= specularProb;
+                nextDirection = SampleGGX(u, currentNormal, currentViewDir, currentRoughness, pdf, halfVector);
             }
             else
             {
                 nextDirection = SampleCosineHemisphere(u, currentNormal, pdf);
-                throughput /= (1.0 - specularProb);
+                // For diffuse, half vector is between view and light direction
+                halfVector = normalize(currentViewDir + nextDirection);
             }
 
-            // Validate direction
-            if (!IsFinite3(nextDirection) || dot(nextDirection, currentNormal) <= 0.0)
+            // Validate direction and PDF
+            float NdotL = dot(nextDirection, currentNormal);
+            if (!IsFinite3(nextDirection) || NdotL <= 0.0 || pdf <= 0.0)
                 break;
+
+            // Evaluate BRDF weight (BRDF * NdotL / PDF) and apply MIS weight for lobe selection
+            float3 brdfWeight = EvaluateBRDFWeight(
+                currentAlbedo, currentMetallic, currentRoughness,
+                currentNormal, currentViewDir, nextDirection, halfVector,
+                sampleSpecular);
+
+            // Apply probability of selecting this lobe (MIS between diffuse/specular)
+            float lobeProb = sampleSpecular ? specularProb : (1.0 - specularProb);
+            brdfWeight /= lobeProb;
+
+            // Sanitize BRDF weight to avoid fireflies
+            brdfWeight = SanitizeRadiance(brdfWeight, MAX_RADIANCE);
+
+            // Update throughput with BRDF weight
+            throughput *= brdfWeight;
 
             // Setup ray
             float rayBias = EvaluateRayTracingBias(currentPos);
@@ -463,12 +561,9 @@ void RayGenPathTracing()
                 float3 directLight = EvaluateDirectLighting(
                     hitPos, hitNormal, hitViewDir,
                     hitAlbedo, hitMetallic, hitRoughness, rngState);
-                sampleRadiance += throughput * directLight;
+                // Apply occlusion to direct lighting only (throughput already accounts for BRDF)
+                sampleRadiance += throughput * directLight * hitOcclusion;
             }
-
-            // Update throughput with BRDF weight
-            float3 brdfWeight = hitAlbedo * hitOcclusion;
-            throughput *= brdfWeight;
 
             // Clamp radiance to avoid fireflies
             sampleRadiance = SanitizeRadiance(sampleRadiance,
@@ -478,6 +573,7 @@ void RayGenPathTracing()
             currentPos = hitPos;
             currentNormal = hitNormal;
             currentAlbedo = hitAlbedo;
+            currentOcclusion = hitOcclusion;
             currentMetallic = hitMetallic;
             currentRoughness = hitRoughness;
             currentViewDir = -nextDirection;

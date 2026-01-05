@@ -134,13 +134,14 @@ void ClosestHitPathTracing(inout PathTracingPayload payload : SV_RayPayload, Att
 }
 
 //--------------------------------------------------------------------------------------------------
-// Any Hit Shader - Alpha testing
+// Any Hit Shader - Alpha testing and opaque handling
 //--------------------------------------------------------------------------------------------------
 
 [shader("anyhit")]
 void AnyHitPathTracing(inout PathTracingPayload payload : SV_RayPayload, in AttributeData attributeData : SV_IntersectionAttributes)
 {
     #ifdef _ALPHATEST_ON
+        // Alpha-tested material: sample alpha and test
         IntersectionVertex currentVertex;
         FragInputs fragInput;
         GetCurrentVertexAndBuildFragInputs(attributeData, currentVertex, fragInput);
@@ -150,9 +151,15 @@ void AnyHitPathTracing(inout PathTracingPayload payload : SV_RayPayload, in Attr
 
         if (surfaceData.alpha < surfaceData.alphaClipThreshold)
         {
-            IgnoreHit();
+            IgnoreHit();  // Transparent pixel, continue ray
+            return;
         }
+        // Alpha test passed, accept this hit
     #endif
+
+    // For opaque materials (no _ALPHATEST_ON) or alpha-tested materials that passed the test:
+    // Accept this hit as valid geometry
+    // Note: We don't call AcceptHitAndEndSearch() here because we want to find the closest hit
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -169,6 +176,7 @@ void ClosestHitShadow(inout ShadowRayPayload payload : SV_RayPayload, in Attribu
 void AnyHitShadow(inout ShadowRayPayload payload : SV_RayPayload, in AttributeData attributeData : SV_IntersectionAttributes)
 {
     #ifdef _ALPHATEST_ON
+        // Alpha-tested material: sample alpha and test
         IntersectionVertex currentVertex;
         FragInputs fragInput;
         GetCurrentVertexAndBuildFragInputs(attributeData, currentVertex, fragInput);
@@ -178,10 +186,15 @@ void AnyHitShadow(inout ShadowRayPayload payload : SV_RayPayload, in AttributeDa
 
         if (surfaceData.alpha < surfaceData.alphaClipThreshold)
         {
-            IgnoreHit();
+            IgnoreHit();  // Transparent pixel, light can pass through
+            return;
         }
+        // Alpha test passed, this pixel is opaque and blocks light
     #endif
 
+    // For shadow rays, any opaque hit (either opaque material or alpha-tested pixel that passed)
+    // means the light is occluded. Set visibility to 0 and end search immediately.
+    payload.visibility = 0.0;
     AcceptHitAndEndSearch();
 }
 
@@ -190,5 +203,6 @@ void MissShadow(inout ShadowRayPayload payload : SV_RayPayload)
 {
     payload.visibility = 1.0;
 }
+
 
 #endif // UNIVERSAL_RAYTRACING_SHADER_PASS_PATH_TRACING_INCLUDED

@@ -275,6 +275,55 @@ float3 EvaluateBRDFWeight(
 }
 
 //--------------------------------------------------------------------------------------------------
+// Shadow Ray Payload (must match RayTracingShaderPassPathTracing.hlsl)
+//--------------------------------------------------------------------------------------------------
+
+struct ShadowRayPayload
+{
+    float visibility;  // 1.0 = visible, 0.0 = shadowed
+};
+
+
+//--------------------------------------------------------------------------------------------------
+// Shadow Ray Casting
+//--------------------------------------------------------------------------------------------------
+
+// Cast shadow ray to test visibility between hit point and light
+// Returns 1.0 if light is visible, 0.0 if occluded
+float CastShadowRay(float3 hitPosition, float3 surfaceNormal, float3 directionToLight, float lightDistance)
+{
+    // Offset ray origin to avoid self-intersection
+    float rayBias = EvaluateRayTracingBias(hitPosition);
+
+    RayDesc shadowRay;
+    shadowRay.Origin = hitPosition + surfaceNormal * rayBias;
+    shadowRay.Direction = directionToLight;
+    shadowRay.TMin = 0.001;
+    shadowRay.TMax = lightDistance - 0.001;  // Stop just before the light
+
+    ShadowRayPayload shadowPayload;
+    shadowPayload.visibility = 0.0;
+
+    // Trace shadow ray
+    // RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH: terminate on first hit
+    // RAY_FLAG_SKIP_CLOSEST_HIT_SHADER: we only need anyhit for alpha testing
+    uint rayFlags = RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER;
+
+    // Use hit group index 1 for shadow rays (0=main path tracing, 1=shadow)
+    // missShaderIndex 1 for shadow miss shader
+    TraceRay(_RaytracingAccelerationStructure,
+             rayFlags,
+            RAYTRACINGRENDERERFLAG_PATH_TRACING ,  // Instance mask - trace against all geometry
+             1,     // Ray contribution to hit group index (shadow shaders)
+             2,     // Hit group stride (2 groups: 0=main, 1=shadow)
+             1,     // Miss shader index (shadow miss)
+             shadowRay,
+             shadowPayload);
+
+    return shadowPayload.visibility;
+}
+
+//--------------------------------------------------------------------------------------------------
 // Direct Lighting Evaluation
 //--------------------------------------------------------------------------------------------------
 
@@ -310,7 +359,10 @@ float3 EvaluateDirectLighting(
         if (NdotL <= 0.0)
             continue;
 
-        // TODO: Cast shadow ray for accurate shadows
+        // Cast shadow ray for visibility testing
+        float visibility = CastShadowRay(positionWS, normalWS, lightDir, lightDist);
+        if (visibility <= 0.0)
+            continue;  // Light is occluded
 
         // Evaluate BRDF
         float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
@@ -328,7 +380,7 @@ float3 EvaluateDirectLighting(
         float3 diffuse = (1.0 - F) * (1.0 - metallic) * albedo / PI;
 
         float attenuation = GetWorldLightAttenuation(positionWS, light);
-        float3 lightContrib = (diffuse + specular) * light.color * attenuation * saturate(NdotL);
+        float3 lightContrib = (diffuse + specular) * light.color * attenuation * saturate(NdotL) * visibility;
 
         directLight += SanitizeRadiance(lightContrib, MAX_RADIANCE);
     }
@@ -337,13 +389,19 @@ float3 EvaluateDirectLighting(
 }
 
 //--------------------------------------------------------------------------------------------------
-// Miss Shader
+// Miss Shaders
 //--------------------------------------------------------------------------------------------------
 
 [shader("miss")]
 void MissShaderPathTracing(inout PathTracingPayload payload : SV_RayPayload)
 {
     payload.hitDistance = -1.0f;
+}
+
+[shader("miss")]
+void MissShadow(inout ShadowRayPayload payload : SV_RayPayload)
+{
+    payload.visibility = 1.0;
 }
 
 //--------------------------------------------------------------------------------------------------

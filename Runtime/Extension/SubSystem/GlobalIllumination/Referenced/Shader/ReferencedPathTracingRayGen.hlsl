@@ -1,8 +1,10 @@
-// Referenced Path Tracing for Multi-Bounce Global Illumination
+// Referenced Path Tracing RayGen Shader
+// Contains: RayGeneration shader, Miss shaders, and supporting functions
+// This file should only be included by .raytrace files
 // DXR 1.0 compatible - material evaluation in closesthit, path tracing loop in raygen
 
-#ifndef REFERENCED_PATH_TRACING_INCLUDED
-#define REFERENCED_PATH_TRACING_INCLUDED
+#ifndef REFERENCED_PATH_TRACING_RAYGEN_INCLUDED
+#define REFERENCED_PATH_TRACING_RAYGEN_INCLUDED
 
 #define SHADER_TARGET 50
 
@@ -70,7 +72,7 @@
 
 #include "LitInputPathTracing.hlsl"
 
-// Include common payload definitions (shared with RayTracingShaderPassPathTracing.hlsl)
+// Include common payload definitions (shared with closesthit shaders)
 #include "PathTracingCommon.hlsl"
 
 // NVIDIA SER support
@@ -193,8 +195,6 @@ SharcHitData CreateSharcHitData(float3 positionWS, float3 normalWS, float3 albed
     return hitData;
 }
 #endif // SHARC_ENABLE_SHARC
-
-// Note: PathTracingPayload struct is defined in PathTracingCommon.hlsl
 
 //--------------------------------------------------------------------------------------------------
 // Random Number Generator (PCG)
@@ -379,8 +379,6 @@ float3 EvaluateBRDFWeight(
     }
 }
 
-// Note: ShadowRayPayload struct is defined in PathTracingCommon.hlsl
-
 //--------------------------------------------------------------------------------------------------
 // Shadow Ray Casting
 //--------------------------------------------------------------------------------------------------
@@ -487,9 +485,7 @@ float3 EvaluateDirectLighting(
 
 //--------------------------------------------------------------------------------------------------
 // Miss Shaders
-// Note: Only compiled when PATH_TRACING_RAYTRACE_SHADER is defined (in .raytrace files)
 //--------------------------------------------------------------------------------------------------
-
 
 [shader("miss")]
 void MissShaderPathTracing(inout PathTracingPayload payload : SV_RayPayload)
@@ -947,4 +943,4 @@ void RayGenPathTracing()
 }
 
 
-#endif // REFERENCED_PATH_TRACING_INCLUDED
+#endif // REFERENCED_PATH_TRACING_RAYGEN_INCLUDED

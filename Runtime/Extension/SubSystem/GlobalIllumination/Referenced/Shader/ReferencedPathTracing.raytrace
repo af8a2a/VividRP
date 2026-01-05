@@ -8,9 +8,16 @@
 #pragma require Int64BufferAtomics
 #pragma require Native16Bit
 
-#include "ReferencedPathTracing.hlsl"
+// Include the RayGen shader file (contains raygen + miss shaders)
+// Note: RayGen and Miss shaders can ONLY be compiled in .raytrace files
+#include "ReferencedPathTracingRayGen.hlsl"
 
-// Entry points defined in ReferencedPathTracing.hlsl:
+// Entry points defined in ReferencedPathTracingRayGen.hlsl:
 // - [shader("raygeneration")] RayGenPathTracing()
 // - [shader("miss")] MissShaderPathTracing()
 // - [shader("miss")] MissShadow()
+//
+// ClosestHit and AnyHit shaders are in:
+// - ReferencedPathTracingRayHit.hlsl (path tracing hits)
+// - ReferencedPathTracingShadowRayHit.hlsl (shadow ray hits)
+// These are included by Lit.shader's PathTracingDXR pass

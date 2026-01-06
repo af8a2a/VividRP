@@ -385,6 +385,7 @@ float3 EvaluateBRDFWeight(
 
 // Cast shadow ray to test visibility between hit point and light
 // Returns 1.0 if light is visible, 0.0 if occluded
+// Uses the same uber payload as path tracing rays
 float CastShadowRay(float3 hitPosition, float3 surfaceNormal, float3 directionToLight, float lightDistance)
 {
     // Offset ray origin to avoid self-intersection
@@ -396,22 +397,22 @@ float CastShadowRay(float3 hitPosition, float3 surfaceNormal, float3 directionTo
     shadowRay.TMin = 0.001;
     shadowRay.TMax = lightDistance - 0.001;  // Stop just before the light
 
-    ShadowRayPayload shadowPayload;
-    shadowPayload.visibility = 0.0;
+    // Use uber payload initialized for shadow ray
+    PathTracingPayload shadowPayload = InitShadowPayload();
 
-    // Trace shadow ray
-    // RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH: terminate on first hit
-    // RAY_FLAG_SKIP_CLOSEST_HIT_SHADER: we only need anyhit for alpha testing
-    uint rayFlags = RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER;
+    // Trace shadow ray using the same hit group as path tracing
+    // The closesthit/anyhit shaders check payload.rayType to handle differently
+    // RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH: terminate on first hit (optimization)
+    // Note: We still go through closesthit for alpha testing support
+    uint rayFlags = RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH;
 
-    // Use hit group index 1 for shadow rays (0=main path tracing, 1=shadow)
-    // missShaderIndex 1 for shadow miss shader
+    // Use the same hit group (index 0) - closesthit checks rayType
     TraceRay(_RaytracingAccelerationStructure,
              rayFlags,
-            RAYTRACINGRENDERERFLAG_PATH_TRACING ,  // Instance mask - trace against all geometry
-             1,     // Ray contribution to hit group index (shadow shaders)
-             2,     // Hit group stride (2 groups: 0=main, 1=shadow)
-             1,     // Miss shader index (shadow miss)
+             RAYTRACINGRENDERERFLAG_PATH_TRACING,
+             0,     // Hit group index (same as path tracing)
+             1,     // Hit group stride (only 1 group now)
+             0,     // Miss shader index (unified miss shader)
              shadowRay,
              shadowPayload);
 
@@ -484,19 +485,22 @@ float3 EvaluateDirectLighting(
 }
 
 //--------------------------------------------------------------------------------------------------
-// Miss Shaders
+// Unified Miss Shader
+// Handles both path tracing rays (sky miss) and shadow rays (visibility = 1)
 //--------------------------------------------------------------------------------------------------
 
 [shader("miss")]
 void MissShaderPathTracing(inout PathTracingPayload payload : SV_RayPayload)
 {
+    // Mark as miss (no geometry hit)
     payload.hitDistance = -1.0f;
-}
 
-[shader("miss")]
-void MissShadow(inout ShadowRayPayload payload : SV_RayPayload)
-{
-    payload.visibility = 1.0;
+    // For shadow rays, miss means the light is visible
+    if (payload.IsShadowRay())
+    {
+        payload.visibility = 1.0f;
+    }
+    // For path tracing rays, hitDistance = -1 indicates sky sampling needed in raygen
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -670,16 +674,8 @@ void RayGenPathTracing()
             rayDesc.TMin = 0.001;
             rayDesc.TMax = _RaytracingRayMaxLength;
 
-            // Initialize payload
-            PathTracingPayload payload;
-            payload.hitDistance = -1.0f;
-            payload.albedo = float3(0, 0, 0);
-            payload.normalWS = float3(0, 1, 0);
-            payload.emission = float3(0, 0, 0);
-            payload.metallic = 0.0;
-            payload.roughness = 1.0;
-            payload.occlusion = 1.0;
-            payload.hitPositionWS = float3(0, 0, 0);
+            // Initialize payload using helper function
+            PathTracingPayload payload = InitPathTracingPayload();
 
             // Trace ray - closesthit will populate payload with material data
             if (_nvSER)
@@ -700,7 +696,9 @@ void RayGenPathTracing()
                 TraceRay(_RaytracingAccelerationStructure,
                          RAY_FLAG_NONE,
                          RAYTRACINGRENDERERFLAG_PATH_TRACING,
-                         0, 1, 0,
+                         0,     // Hit group index
+                         1,     // Hit group stride (only 1 group now)
+                         0,     // Miss shader index (unified)
                          rayDesc,
                          payload);
             }

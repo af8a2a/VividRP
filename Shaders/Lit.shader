@@ -722,10 +722,9 @@ Shader "Universal Render Pipeline/Lit"
             // World Light Cluster for path tracing light queries
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/LightGrid/WorldLightCluster.hlsl"
 
-            // Path tracing hit shaders (closesthit + anyhit for path tracing rays)
+            // Unified path tracing hit shaders (single closesthit + anyhit for both path tracing and shadow rays)
+            // The shaders check payload.rayType to handle different ray types appropriately
             #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/GlobalIllumination/Referenced/Shader/ReferencedPathTracingRayHit.hlsl"
-            // Shadow ray hit shaders (closesthit + anyhit for shadow rays)
-            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/GlobalIllumination/Referenced/Shader/ReferencedPathTracingShadowRayHit.hlsl"
             ENDHLSL
         }
 

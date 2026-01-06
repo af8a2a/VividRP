@@ -1,5 +1,5 @@
-// Path Tracing Ray Hit Shaders
-// Contains: ClosestHit and AnyHit shaders for path tracing rays
+// Path Tracing Ray Hit Shaders (Unified)
+// Contains: Single ClosestHit and AnyHit that handle both path tracing and shadow rays
 // Used by material shaders (Lit.shader, etc.) for DXR 1.0 compatible ray tracing
 // Note: Miss and RayGen shaders are in ReferencedPathTracingRayGen.hlsl (.raytrace file only)
 
@@ -14,11 +14,12 @@
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/RayTracingSystem/Shaders/RayTracingFragInputs.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/GlobalIllumination/Referenced/Shader/LitInputPathTracing.hlsl"
 
-// Include common payload definitions
+// Include common payload definitions (uber payload)
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/GlobalIllumination/Referenced/Shader/PathTracingCommon.hlsl"
 
 //--------------------------------------------------------------------------------------------------
-// Closest Hit Shader - Evaluates material and populates payload
+// Unified Closest Hit Shader
+// Handles both path tracing rays (full material evaluation) and shadow rays (visibility only)
 //--------------------------------------------------------------------------------------------------
 
 [shader("closesthit")]
@@ -28,6 +29,14 @@ void ClosestHitPathTracing(inout PathTracingPayload payload : SV_RayPayload, Att
     float hitDistance = RayTCurrent();
     payload.hitDistance = hitDistance;
 
+    // For shadow rays, we just need to mark as occluded
+    if (payload.IsShadowRay())
+    {
+        payload.visibility = 0.0;
+        return;
+    }
+
+    // Full material evaluation for path tracing rays
     // Compute hit position
     float3 hitPositionWS = WorldRayOrigin() + WorldRayDirection() * hitDistance;
     payload.hitPositionWS = hitPositionWS;
@@ -88,7 +97,8 @@ void ClosestHitPathTracing(inout PathTracingPayload payload : SV_RayPayload, Att
 }
 
 //--------------------------------------------------------------------------------------------------
-// Any Hit Shader - Alpha testing for path tracing rays
+// Unified Any Hit Shader
+// Handles alpha testing for both path tracing and shadow rays
 //--------------------------------------------------------------------------------------------------
 
 [shader("anyhit")]
@@ -108,11 +118,20 @@ void AnyHitPathTracing(inout PathTracingPayload payload : SV_RayPayload, in Attr
             IgnoreHit();  // Transparent pixel, continue ray
             return;
         }
-        // Alpha test passed, accept this hit
+        // Alpha test passed, this pixel is opaque
     #endif
 
-    // For opaque materials (no _ALPHATEST_ON) or alpha-tested materials that passed the test:
-    // Accept this hit as valid geometry
+    // For shadow rays, any opaque hit means the light is occluded
+    // End search immediately for better performance
+    if (payload.IsShadowRay())
+    {
+        payload.visibility = 0.0;
+        AcceptHitAndEndSearch();
+        return;
+    }
+
+    // For path tracing rays, continue to find closest hit
+    // (default behavior - no AcceptHitAndEndSearch)
 }
 
 #endif // REFERENCED_PATH_TRACING_RAY_HIT_INCLUDED

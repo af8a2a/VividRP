@@ -55,6 +55,84 @@ struct PathTracingPayload
 };
 
 //--------------------------------------------------------------------------------------------------
+// Path Accumulator - Tracks diffuse/specular contributions separately for NRD denoising
+// This structure accumulates radiance and hit distances for both lobes
+//--------------------------------------------------------------------------------------------------
+
+struct PathAccumulator
+{
+    // Diffuse lobe accumulation
+    float3 diffuseRadiance;     // Accumulated diffuse radiance
+    float diffuseHitDist;       // Hit distance for diffuse (sum of all bounces after first)
+    float diffuseWeight;        // Weight for diffuse contribution
+
+    // Specular lobe accumulation
+    float3 specularRadiance;    // Accumulated specular radiance
+    float specularHitDist;      // Hit distance for specular (first bounce hit distance)
+    float specularWeight;       // Weight for specular contribution
+
+    // Combined (for backward compatibility)
+    float3 combinedRadiance;    // Total radiance (diffuse + specular)
+
+    // Path state
+    bool isFirstBounce;         // Track if this is the first bounce (for hit distance)
+    bool lastBounceWasSpecular; // Track lobe type for hit distance attribution
+};
+
+// Initialize path accumulator
+PathAccumulator InitPathAccumulator()
+{
+    PathAccumulator acc;
+    acc.diffuseRadiance = float3(0, 0, 0);
+    acc.diffuseHitDist = 0.0;
+    acc.diffuseWeight = 0.0;
+    acc.specularRadiance = float3(0, 0, 0);
+    acc.specularHitDist = 0.0;
+    acc.specularWeight = 0.0;
+    acc.combinedRadiance = float3(0, 0, 0);
+    acc.isFirstBounce = true;
+    acc.lastBounceWasSpecular = false;
+    return acc;
+}
+
+// Add diffuse contribution
+void AccumulateDiffuse(inout PathAccumulator acc, float3 radiance, float hitDist, float weight)
+{
+    acc.diffuseRadiance += radiance * weight;
+    acc.diffuseHitDist += hitDist * weight;
+    acc.diffuseWeight += weight;
+    acc.combinedRadiance += radiance * weight;
+}
+
+// Add specular contribution
+void AccumulateSpecular(inout PathAccumulator acc, float3 radiance, float hitDist, float weight)
+{
+    acc.specularRadiance += radiance * weight;
+    // For specular, use minimum hit distance (first hit is most important)
+    if (acc.specularWeight == 0.0 || hitDist < acc.specularHitDist)
+    {
+        acc.specularHitDist = hitDist;
+    }
+    acc.specularWeight += weight;
+    acc.combinedRadiance += radiance * weight;
+}
+
+// Finalize accumulator - normalize by weights
+void FinalizeAccumulator(inout PathAccumulator acc)
+{
+    if (acc.diffuseWeight > 0.0)
+    {
+        acc.diffuseRadiance /= acc.diffuseWeight;
+        acc.diffuseHitDist /= acc.diffuseWeight;
+    }
+    if (acc.specularWeight > 0.0)
+    {
+        acc.specularRadiance /= acc.specularWeight;
+        // specularHitDist is already the minimum, no normalization needed
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
 // Payload Initialization Helpers
 //--------------------------------------------------------------------------------------------------
 

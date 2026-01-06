@@ -66,6 +66,12 @@ namespace UnityEngine.Rendering.Universal
             internal TextureHandle historyTexture;
             internal TextureHandle skyTexture;
 
+            // NRD separate diffuse/specular outputs
+            internal TextureHandle diffuseOutputTexture;
+            internal TextureHandle specularOutputTexture;
+            internal TextureHandle diffuseHistoryTexture;
+            internal TextureHandle specularHistoryTexture;
+
             // Ray tracing resources
             internal RayTracingShader pathTracingShader;
             internal RayTracingAccelerationStructure rtas;
@@ -84,6 +90,9 @@ namespace UnityEngine.Rendering.Universal
             internal bool includeDirectLighting;
             internal int debugVisualizeBounce;
             internal int debugMode;
+
+            // NRD parameters
+            internal float nrdHitDistanceParams;
 
             // SHARC parameters
             internal bool enableSharc;
@@ -153,6 +162,13 @@ namespace UnityEngine.Rendering.Universal
             public static readonly int _RaytracingAccelerationStructure = Shader.PropertyToID("_RaytracingAccelerationStructure");
             public static readonly int _PathTracingOutput = Shader.PropertyToID("_PathTracingOutput");
             public static readonly int _PathTracingHistory = Shader.PropertyToID("_PathTracingHistory");
+
+            // Separate diffuse/specular outputs for NRD denoising
+            public static readonly int _PathTracingDiffuseOutput = Shader.PropertyToID("_PathTracingDiffuseOutput");
+            public static readonly int _PathTracingSpecularOutput = Shader.PropertyToID("_PathTracingSpecularOutput");
+            public static readonly int _PathTracingDiffuseHistory = Shader.PropertyToID("_PathTracingDiffuseHistory");
+            public static readonly int _PathTracingSpecularHistory = Shader.PropertyToID("_PathTracingSpecularHistory");
+
             public static readonly int _GBuffer0 = Shader.PropertyToID("_GBuffer0");
             public static readonly int _GBuffer1 = Shader.PropertyToID("_GBuffer1");
             public static readonly int _GBuffer2 = Shader.PropertyToID("_GBuffer2");
@@ -167,6 +183,9 @@ namespace UnityEngine.Rendering.Universal
             public static readonly int _PathTracingIncludeDirectLighting = Shader.PropertyToID("_PathTracingIncludeDirectLighting");
             public static readonly int _PathTracingDebugVisualizeBounce = Shader.PropertyToID("_PathTracingDebugVisualizeBounce");
             public static readonly int _PathTracingDebugMode = Shader.PropertyToID("_PathTracingDebugMode");
+
+            // NRD parameters
+            public static readonly int _NRDHitDistanceParams = Shader.PropertyToID("_NRDHitDistanceParams");
 
             // SHARC parameters
             public static readonly int _SharcHashEntriesBuffer = Shader.PropertyToID("_SharcHashEntriesBuffer");
@@ -240,10 +259,14 @@ namespace UnityEngine.Rendering.Universal
             passData.debugVisualizeBounce = giSettings.debugVisualizeBounce.value;
             passData.debugMode = (int)giSettings.debugMode.value;
 
+            // NRD parameters - use a default value for hit distance normalization
+            // This can be exposed in volume settings later
+            passData.nrdHitDistanceParams = 0.1f;  // Scene-dependent constant
+
             // SHARC parameters
             passData.enableSharc = giSettings.enableSharc.value;
             passData.sharcUpdate = giSettings.sharcUpdate.value;
-            passData.sharcQuery = giSettini gs.sharcQuery.value;
+            passData.sharcQuery = giSettings.sharcQuery.value;
             passData.sharcCameraPosition = cameraData.camera.transform.position;
             passData.sharcSceneScale = giSettings.sharcSceneScale.value;
             passData.sharcRoughnessThreshold = giSettings.sharcRoughnessThreshold.value;
@@ -303,6 +326,32 @@ namespace UnityEngine.Rendering.Universal
                 cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingIncludeDirectLighting, data.includeDirectLighting ? 1 : 0);
                 cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingDebugVisualizeBounce, data.debugVisualizeBounce);
                 cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingDebugMode, data.debugMode);
+
+                // NRD parameters
+                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._NRDHitDistanceParams, data.nrdHitDistanceParams);
+
+                // Bind diffuse/specular output textures for NRD
+                if (data.diffuseOutputTexture.IsValid())
+                {
+                    cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._PathTracingDiffuseOutput, data.diffuseOutputTexture);
+                }
+                if (data.specularOutputTexture.IsValid())
+                {
+                    cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._PathTracingSpecularOutput, data.specularOutputTexture);
+                }
+
+                // Bind diffuse/specular history textures if accumulating
+                if (data.accumulate)
+                {
+                    if (data.diffuseHistoryTexture.IsValid())
+                    {
+                        cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._PathTracingDiffuseHistory, data.diffuseHistoryTexture);
+                    }
+                    if (data.specularHistoryTexture.IsValid())
+                    {
+                        cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._PathTracingSpecularHistory, data.specularHistoryTexture);
+                    }
+                }
 
                 // Bind SHARC buffers and parameters if enabled
                 if (data.enableSharc && data.sharcHashEntriesBuffer.IsValid())
@@ -404,15 +453,39 @@ namespace UnityEngine.Rendering.Universal
             };
             var outputTexture = renderGraph.CreateTexture(outputDesc);
 
+            // Create separate diffuse/specular output textures for NRD
+            // Format: RGB = radiance, A = normalized hit distance
+            var diffuseOutputDesc = new TextureDesc(cameraData.cameraTargetDescriptor.width, cameraData.cameraTargetDescriptor.height)
+            {
+                enableRandomWrite = true,
+                format = GraphicsFormat.R16G16B16A16_SFloat,
+                name = "PathTracingDiffuseOutput"
+            };
+            var diffuseOutputTexture = renderGraph.CreateTexture(diffuseOutputDesc);
+
+            var specularOutputDesc = new TextureDesc(cameraData.cameraTargetDescriptor.width, cameraData.cameraTargetDescriptor.height)
+            {
+                enableRandomWrite = true,
+                format = GraphicsFormat.R16G16B16A16_SFloat,
+                name = "PathTracingSpecularOutput"
+            };
+            var specularOutputTexture = renderGraph.CreateTexture(specularOutputDesc);
+
             // Setup history buffer for temporal accumulation
             var historyRTSystem = HistoryFrameRTSystem.GetOrCreate(cameraData.camera);
             RTHandle historyRT = null;
             TextureHandle historyTexture = TextureHandle.nullHandle;
+            TextureHandle diffuseHistoryTexture = TextureHandle.nullHandle;
+            TextureHandle specularHistoryTexture = TextureHandle.nullHandle;
 
             if (m_AccumulateFrames)
             {
                 historyRT = ReAllocateHistoryBufferIfNeeded(historyRTSystem);
                 historyTexture = renderGraph.ImportTexture(historyRT);
+
+                // Note: For now, we don't have separate diffuse/specular history buffers
+                // In Phase 2, we'll add proper history buffer management for NRD
+                // The shader handles this gracefully by checking if textures are valid
             }
 
             // Initialize and import SHARC buffers if enabled
@@ -445,6 +518,12 @@ namespace UnityEngine.Rendering.Universal
                 passData.outputTexture = outputTexture;
                 passData.historyTexture = historyTexture;
 
+                // NRD diffuse/specular output textures
+                passData.diffuseOutputTexture = diffuseOutputTexture;
+                passData.specularOutputTexture = specularOutputTexture;
+                passData.diffuseHistoryTexture = diffuseHistoryTexture;
+                passData.specularHistoryTexture = specularHistoryTexture;
+
                 // Pass imported SHARC buffer handles
                 passData.sharcHashEntriesBuffer = sharcHashEntriesBuffer;
                 passData.sharcLockBuffer = sharcLockBuffer;
@@ -458,13 +537,23 @@ namespace UnityEngine.Rendering.Universal
                 builder.UseTexture(passData.gBuffer2);
                 builder.UseTexture(passData.depthTexture);
 
-                // Use output texture
+                // Use output textures
                 builder.UseTexture(passData.outputTexture, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.diffuseOutputTexture, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.specularOutputTexture, AccessFlags.ReadWrite);
 
                 // Use history texture if available
                 if (passData.historyTexture.IsValid())
                 {
                     builder.UseTexture(passData.historyTexture, AccessFlags.Read);
+                }
+                if (passData.diffuseHistoryTexture.IsValid())
+                {
+                    builder.UseTexture(passData.diffuseHistoryTexture, AccessFlags.Read);
+                }
+                if (passData.specularHistoryTexture.IsValid())
+                {
+                    builder.UseTexture(passData.specularHistoryTexture, AccessFlags.Read);
                 }
 
                 // Use sky texture if available

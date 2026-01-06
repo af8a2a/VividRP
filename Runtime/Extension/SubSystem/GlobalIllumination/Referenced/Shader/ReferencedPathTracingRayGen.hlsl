@@ -106,6 +106,13 @@ TEXTURE2D_X(_GBuffer2);
 RW_TEXTURE2D(float4, _PathTracingOutput);
 TEXTURE2D_X(_PathTracingHistory);
 
+// Separate diffuse/specular outputs for NRD denoising
+// Format: RGB = radiance, A = normalized hit distance
+RW_TEXTURE2D(float4, _PathTracingDiffuseOutput);
+RW_TEXTURE2D(float4, _PathTracingSpecularOutput);
+TEXTURE2D_X(_PathTracingDiffuseHistory);
+TEXTURE2D_X(_PathTracingSpecularHistory);
+
 // Path tracing specific parameters (not in ShaderVariablesRaytracing CB)
 int _PathTracingAccumulate;
 float _PathTracingIntensity;
@@ -114,6 +121,9 @@ int _PathTracingIncludeEmissive;
 int _PathTracingIncludeDirectLighting;
 int _PathTracingDebugVisualizeBounce;
 int _PathTracingDebugMode;  // 0=Normal, 1=ShowFrameCount, 2=ShowNormals, 3=ShowAlbedo
+
+// NRD parameters for hit distance normalization
+float _NRDHitDistanceParams;  // Hit distance normalization parameter (view-z based)
 
 //--------------------------------------------------------------------------------------------------
 // SHARC Buffers and Parameters
@@ -233,6 +243,31 @@ float3 SanitizeRadiance(float3 radiance, float maxValue)
 {
     if (!IsFinite3(radiance)) return float3(0, 0, 0);
     return clamp(radiance, 0.0, maxValue);
+}
+
+//--------------------------------------------------------------------------------------------------
+// NRD Hit Distance Functions
+// NRD expects normalized hit distances for temporal stability
+//--------------------------------------------------------------------------------------------------
+
+// Normalize hit distance for NRD (REBLUR front-end compatible)
+// Uses view-z based normalization: hitDist / (hitDist + viewZ * A)
+// where A is a scene-dependent constant (typically 0.1-1.0)
+float NormalizeHitDistance(float hitDistance, float viewZ)
+{
+    // Simple linear normalization with view-z scaling
+    // This helps maintain temporal stability across different depths
+    float A = _NRDHitDistanceParams;
+    return hitDistance / (hitDistance + abs(viewZ) * A + 0.0001);
+}
+
+// Denormalize hit distance (for debugging or if needed)
+float DenormalizeHitDistance(float normalizedHitDist, float viewZ)
+{
+    float A = _NRDHitDistanceParams;
+    float denom = 1.0 - normalizedHitDist;
+    if (denom <= 0.0001) return 1e6; // Very large distance
+    return normalizedHitDist * abs(viewZ) * A / denom;
 }
 
 
@@ -571,14 +606,23 @@ void RayGenPathTracing()
     SharcParameters sharcParameters = GetSharcParameters();
 #endif
 
-    // Accumulate radiance over multiple samples
-    float3 accumulatedRadiance = float3(0, 0, 0);
+    // Get view-space Z for hit distance normalization (NRD)
+    float viewZ = posInput.linearDepth;
+
+    // Accumulate radiance over multiple samples (separate diffuse/specular for NRD)
+    PathAccumulator accumulatorTotal = InitPathAccumulator();
 
 
     for (int sampleIdx = 0; sampleIdx < _RaytracingNumSamples; sampleIdx++)
     {
-        float3 sampleRadiance = float3(0, 0, 0);
+        // Initialize per-sample accumulator for diffuse/specular separation
+        PathAccumulator sampleAccumulator = InitPathAccumulator();
         float3 throughput = float3(1, 1, 1);
+
+        // Track first bounce for NRD hit distance attribution
+        bool firstBounceWasSpecular = false;
+        float firstBounceHitDist = 0.0;
+        float accumulatedHitDist = 0.0;  // For diffuse: sum of all path segment lengths
 
 #if SHARC_ENABLE_SHARC
         // Initialize SHARC state for this path
@@ -597,13 +641,16 @@ void RayGenPathTracing()
         float3 currentViewDir = viewDirWS;
 
         // Add direct lighting at primary hit (Next Event Estimation)
+        // Note: Direct lighting at G-buffer hit is NOT split into diffuse/specular for NRD
+        // because the deferred lighting pass handles this. We only track indirect bounces.
         if (_PathTracingIncludeDirectLighting)
         {
             float3 directLight = EvaluateDirectLighting(
                 primaryHitPos, primaryNormal, viewDirWS,
                 primaryAlbedo, primaryMetallic, primaryRoughness, rngState);
             // Apply occlusion to direct lighting
-            sampleRadiance += throughput * directLight * primaryOcclusion;
+            // Add to combined radiance (direct light is handled separately by deferred pass)
+            sampleAccumulator.combinedRadiance += throughput * directLight * primaryOcclusion;
         }
 
         //------------------------------------------------------------------
@@ -714,9 +761,44 @@ void RayGenPathTracing()
                 SharcUpdateMiss(sharcParameters, sharcState, skyColor);
 #endif
 
-                sampleRadiance += throughput * skyColor;
+                // Accumulate sky contribution to appropriate lobe based on first bounce type
+                float3 skyContrib = throughput * skyColor;
+                if (bounce == 0)
+                {
+                    // First bounce determines the lobe type
+                    // For miss on first bounce, use infinite hit distance
+                    if (sampleSpecular)
+                    {
+                        AccumulateSpecular(sampleAccumulator, skyContrib, _RaytracingRayMaxLength, 1.0);
+                    }
+                    else
+                    {
+                        AccumulateDiffuse(sampleAccumulator, skyContrib, _RaytracingRayMaxLength, 1.0);
+                    }
+                }
+                else
+                {
+                    // Subsequent bounces: attribute based on first bounce type
+                    if (firstBounceWasSpecular)
+                    {
+                        AccumulateSpecular(sampleAccumulator, skyContrib, firstBounceHitDist, 1.0);
+                    }
+                    else
+                    {
+                        AccumulateDiffuse(sampleAccumulator, skyContrib, accumulatedHitDist + _RaytracingRayMaxLength, 1.0);
+                    }
+                }
                 break;
             }
+
+            // Track hit distance
+            float hitDist = payload.hitDistance;
+            if (bounce == 0)
+            {
+                firstBounceWasSpecular = sampleSpecular;
+                firstBounceHitDist = hitDist;
+            }
+            accumulatedHitDist += hitDist;
 
             // Hit - use material data from payload (evaluated in closesthit)
             float3 hitPos = payload.hitPositionWS;
@@ -769,12 +851,42 @@ void RayGenPathTracing()
             // Emission is stored separately in SHARC, so add it here
             if (_PathTracingIncludeEmissive)
             {
-                sampleRadiance += throughput * hitEmission;
+                float3 emissionContrib = throughput * hitEmission;
+                // Attribute emission to the lobe type of first bounce
+                if (bounce == 0)
+                {
+                    if (sampleSpecular)
+                        AccumulateSpecular(sampleAccumulator, emissionContrib, hitDist, 1.0);
+                    else
+                        AccumulateDiffuse(sampleAccumulator, emissionContrib, accumulatedHitDist, 1.0);
+                }
+                else
+                {
+                    if (firstBounceWasSpecular)
+                        AccumulateSpecular(sampleAccumulator, emissionContrib, firstBounceHitDist, 1.0);
+                    else
+                        AccumulateDiffuse(sampleAccumulator, emissionContrib, accumulatedHitDist, 1.0);
+                }
             }
 #else
             if (_PathTracingIncludeEmissive)
             {
-                sampleRadiance += throughput * hitEmission;
+                float3 emissionContrib = throughput * hitEmission;
+                // Attribute emission to the lobe type of first bounce
+                if (bounce == 0)
+                {
+                    if (sampleSpecular)
+                        AccumulateSpecular(sampleAccumulator, emissionContrib, hitDist, 1.0);
+                    else
+                        AccumulateDiffuse(sampleAccumulator, emissionContrib, accumulatedHitDist, 1.0);
+                }
+                else
+                {
+                    if (firstBounceWasSpecular)
+                        AccumulateSpecular(sampleAccumulator, emissionContrib, firstBounceHitDist, 1.0);
+                    else
+                        AccumulateDiffuse(sampleAccumulator, emissionContrib, accumulatedHitDist, 1.0);
+                }
             }
 #endif
 
@@ -787,7 +899,23 @@ void RayGenPathTracing()
                     hitPos, hitNormal, hitViewDir,
                     hitAlbedo, hitMetallic, hitRoughness, rngState);
                 // Apply occlusion to direct lighting only (throughput already accounts for BRDF)
-                sampleRadiance += throughput * directLightAtHit * hitOcclusion;
+                float3 directLightContrib = throughput * directLightAtHit * hitOcclusion;
+
+                // Attribute direct lighting to the lobe type of first bounce
+                if (bounce == 0)
+                {
+                    if (sampleSpecular)
+                        AccumulateSpecular(sampleAccumulator, directLightContrib, hitDist, 1.0);
+                    else
+                        AccumulateDiffuse(sampleAccumulator, directLightContrib, accumulatedHitDist, 1.0);
+                }
+                else
+                {
+                    if (firstBounceWasSpecular)
+                        AccumulateSpecular(sampleAccumulator, directLightContrib, firstBounceHitDist, 1.0);
+                    else
+                        AccumulateDiffuse(sampleAccumulator, directLightContrib, accumulatedHitDist, 1.0);
+                }
             }
 
 #if SHARC_UPDATE
@@ -799,9 +927,11 @@ void RayGenPathTracing()
             }
 #endif
 
-            // Clamp radiance to avoid fireflies
-            sampleRadiance = SanitizeRadiance(sampleRadiance,
-                _RaytracingIntensityClamp > 0 ? _RaytracingIntensityClamp : 100.0);
+            // Clamp radiance in accumulator to avoid fireflies
+            float maxRadiance = _RaytracingIntensityClamp > 0 ? _RaytracingIntensityClamp : 100.0;
+            sampleAccumulator.diffuseRadiance = SanitizeRadiance(sampleAccumulator.diffuseRadiance, maxRadiance);
+            sampleAccumulator.specularRadiance = SanitizeRadiance(sampleAccumulator.specularRadiance, maxRadiance);
+            sampleAccumulator.combinedRadiance = SanitizeRadiance(sampleAccumulator.combinedRadiance, maxRadiance);
 
             // Update path state for next bounce
             currentPos = hitPos;
@@ -822,19 +952,46 @@ void RayGenPathTracing()
 #endif
         }
 
-        accumulatedRadiance += sampleRadiance;
+        // Finalize and merge sample accumulator into total
+        FinalizeAccumulator(sampleAccumulator);
+
+        // Merge into total accumulator (weighted average across samples)
+        accumulatorTotal.diffuseRadiance += sampleAccumulator.diffuseRadiance;
+        accumulatorTotal.diffuseHitDist += sampleAccumulator.diffuseHitDist;
+        accumulatorTotal.diffuseWeight += sampleAccumulator.diffuseWeight > 0 ? 1.0 : 0.0;
+
+        accumulatorTotal.specularRadiance += sampleAccumulator.specularRadiance;
+        accumulatorTotal.specularHitDist += sampleAccumulator.specularHitDist;
+        accumulatorTotal.specularWeight += sampleAccumulator.specularWeight > 0 ? 1.0 : 0.0;
+
+        accumulatorTotal.combinedRadiance += sampleAccumulator.combinedRadiance;
     }
 
     // Average over samples
-    accumulatedRadiance /= max(_RaytracingNumSamples, 1);
+    float invNumSamples = 1.0 / max(_RaytracingNumSamples, 1);
+    accumulatorTotal.diffuseRadiance *= invNumSamples;
+    accumulatorTotal.specularRadiance *= invNumSamples;
+    accumulatorTotal.combinedRadiance *= invNumSamples;
+
+    // Average hit distances across samples that had valid contributions
+    if (accumulatorTotal.diffuseWeight > 0)
+        accumulatorTotal.diffuseHitDist /= accumulatorTotal.diffuseWeight;
+    if (accumulatorTotal.specularWeight > 0)
+        accumulatorTotal.specularHitDist /= accumulatorTotal.specularWeight;
 
     // Apply intensity
-    accumulatedRadiance *= _PathTracingIntensity;
+    accumulatorTotal.diffuseRadiance *= _PathTracingIntensity;
+    accumulatorTotal.specularRadiance *= _PathTracingIntensity;
+    accumulatorTotal.combinedRadiance *= _PathTracingIntensity;
 
     //------------------------------------------------------------------
     // Temporal Accumulation
     //------------------------------------------------------------------
-    float3 finalRadiance = accumulatedRadiance;
+    float3 finalRadiance = accumulatorTotal.combinedRadiance;
+    float3 finalDiffuse = accumulatorTotal.diffuseRadiance;
+    float3 finalSpecular = accumulatorTotal.specularRadiance;
+    float finalDiffuseHitDist = accumulatorTotal.diffuseHitDist;
+    float finalSpecularHitDist = accumulatorTotal.specularHitDist;
 
     if (_PathTracingAccumulate)
     {
@@ -845,13 +1002,21 @@ void RayGenPathTracing()
 
         if (frameCount > 0)
         {
-            // Sample history buffer
+            // Sample history buffers
             float3 historyRadiance = LOAD_TEXTURE2D_X(_PathTracingHistory, launchIndex).rgb;
+            float4 historyDiffuse = LOAD_TEXTURE2D_X(_PathTracingDiffuseHistory, launchIndex);
+            float4 historySpecular = LOAD_TEXTURE2D_X(_PathTracingSpecularHistory, launchIndex);
 
             // Running average: result = (history * frameCount + current) / (frameCount + 1)
             // This is equivalent to: result = lerp(history, current, 1.0 / (frameCount + 1))
             float blendWeight = 1.0 / (float)(frameCount + 1);
-            finalRadiance = lerp(historyRadiance, accumulatedRadiance, blendWeight);
+            finalRadiance = lerp(historyRadiance, accumulatorTotal.combinedRadiance, blendWeight);
+            finalDiffuse = lerp(historyDiffuse.rgb, accumulatorTotal.diffuseRadiance, blendWeight);
+            finalSpecular = lerp(historySpecular.rgb, accumulatorTotal.specularRadiance, blendWeight);
+
+            // Hit distance blending (use min for specular - first hit most important)
+            finalDiffuseHitDist = lerp(historyDiffuse.a, finalDiffuseHitDist, blendWeight);
+            finalSpecularHitDist = min(historySpecular.a, finalSpecularHitDist);
         }
         // else: frameCount == 0, use current sample directly (no history yet)
     }
@@ -861,6 +1026,20 @@ void RayGenPathTracing()
     {
         finalRadiance = float3(0, 0, 0);
     }
+    if (!IsFinite3(finalDiffuse))
+    {
+        finalDiffuse = float3(0, 0, 0);
+        finalDiffuseHitDist = 0.0;
+    }
+    if (!IsFinite3(finalSpecular))
+    {
+        finalSpecular = float3(0, 0, 0);
+        finalSpecularHitDist = 0.0;
+    }
+
+    // Normalize hit distances for NRD
+    float normalizedDiffuseHitDist = NormalizeHitDistance(finalDiffuseHitDist, viewZ);
+    float normalizedSpecularHitDist = NormalizeHitDistance(finalSpecularHitDist, viewZ);
 
     //------------------------------------------------------------------
     // Debug Visualization
@@ -930,14 +1109,44 @@ void RayGenPathTracing()
                 break;
             }
 
+            case 7: // Show Diffuse Radiance
+            {
+                outputColor = finalDiffuse;
+                break;
+            }
+
+            case 8: // Show Specular Radiance
+            {
+                outputColor = finalSpecular;
+                break;
+            }
+
+            case 9: // Show Diffuse Hit Distance
+            {
+                outputColor = float3(normalizedDiffuseHitDist, normalizedDiffuseHitDist, normalizedDiffuseHitDist);
+                break;
+            }
+
+            case 10: // Show Specular Hit Distance
+            {
+                outputColor = float3(normalizedSpecularHitDist, normalizedSpecularHitDist, normalizedSpecularHitDist);
+                break;
+            }
+
             default:
                 outputColor = finalRadiance;
                 break;
         }
     }
 
-    // Output result
+    // Output results
+    // Combined output (for compatibility and debug visualization)
     _PathTracingOutput[launchIndex] = float4(outputColor, 1.0);
+
+    // Separate diffuse/specular outputs for NRD denoising
+    // Format: RGB = radiance, A = normalized hit distance
+    _PathTracingDiffuseOutput[launchIndex] = float4(finalDiffuse, normalizedDiffuseHitDist);
+    _PathTracingSpecularOutput[launchIndex] = float4(finalSpecular, normalizedSpecularHitDist);
 }
 
 

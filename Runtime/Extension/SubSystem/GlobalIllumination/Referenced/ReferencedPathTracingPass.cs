@@ -23,9 +23,23 @@ namespace UnityEngine.Rendering.Universal
         // History management
         private int m_FrameIndex = 0;
 
+        // NRD REBLUR Denoiser
+        private PathTracingDenoiser m_Denoiser;
+        private bool m_UseNRDDenoising = true;
+
         public ReferencedPathTracingPass()
         {
             renderPassEvent = RenderPassEvent.AfterRenderingGbuffer;
+            m_Denoiser = new PathTracingDenoiser();
+        }
+
+        /// <summary>
+        /// Cleanup resources
+        /// </summary>
+        public void Dispose()
+        {
+            m_Denoiser?.Dispose();
+            m_Denoiser = null;
         }
 
         /// <summary>
@@ -792,13 +806,55 @@ namespace UnityEngine.Rendering.Universal
                 }
             }
 
+            // NRD REBLUR Denoising Pass
+            TextureHandle denoisedOutput = outputTexture;
+            if (m_UseNRDDenoising && giSettings.useNRDDenoising.value)
+            {
+                // Get motion vectors and view-Z from resource data
+                var motionTexture = resourceData.motionVectorColor;
+                var viewZTexture = renderGraph.ImportTexture(historyRTSystem.GetCurrentFrameRT(HistoryFrameType.ViewZ));
+                var normalRoughnessTexture = resourceData.gBuffer[2]; // Normal + roughness from GBuffer
+
+                // Setup denoiser settings from volume
+                var denoiserSettings = new PathTracingDenoiser.Settings
+                {
+                    minBlurRadius = giSettings.nrdMinBlurRadius.value,
+                    maxBlurRadius = giSettings.nrdMaxBlurRadius.value,
+                    diffusePrepassBlurRadius = 30.0f,
+                    specularPrepassBlurRadius = 50.0f,
+                    splitScreen = giSettings.nrdSplitScreen.value,
+                    enableAntiFirefly = giSettings.nrdAntiFirefly.value,
+                    maxAccumulatedFrameNum = giSettings.nrdMaxAccumulatedFrameNum.value,
+                    maxFastAccumulatedFrameNum = 6
+                };
+
+                // Run denoiser
+                var denoiseResult = m_Denoiser.Denoise(
+                    renderGraph,
+                    frameData,
+                    motionTexture,
+                    normalRoughnessTexture,
+                    viewZTexture,
+                    diffuseOutputTexture,
+                    specularOutputTexture,
+                    materialFactorsTexture,
+                    denoiserSettings
+                );
+
+                // Use composited (re-modulated) output
+                denoisedOutput = denoiseResult.compositedOutput;
+            }
+
             // Debug visualization: Blit path tracing output directly to screen
             // This is useful for viewing the raw path tracing result before full integration
             if (giSettings.debugShowPathTracingOnly.value)
             {
+                // Use denoised output if NRD is enabled, otherwise use raw output
+                var debugSource = denoisedOutput;
+
                 using (var builder = renderGraph.AddRasterRenderPass<DebugVisualizationPassData>("Path Tracing - Debug Visualization", out var passData))
                 {
-                    passData.source = outputTexture;
+                    passData.source = debugSource;
                     passData.destination = resourceData.activeColorTexture;
 
                     builder.UseTexture(passData.source);
@@ -813,7 +869,6 @@ namespace UnityEngine.Rendering.Universal
                 }
             }
 
-            // TODO: Apply denoising if enabled
             // TODO: Composite path tracing result with main rendering (additive blend for GI)
 
             // Increment frame index for temporal sampling

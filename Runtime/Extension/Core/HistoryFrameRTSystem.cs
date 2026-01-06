@@ -115,6 +115,24 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>Path tracing specular radiance history (for NRD REBLUR).</summary>
         PathTracingSpecularHistory,
 
+        /// <summary>NRD REBLUR internal data for path tracing diffuse.</summary>
+        REBLURPathTracingDiffuseInternalData,
+
+        /// <summary>NRD REBLUR internal data for path tracing specular.</summary>
+        REBLURPathTracingSpecularInternalData,
+
+        /// <summary>NRD REBLUR fast history for path tracing diffuse.</summary>
+        REBLURPathTracingDiffuseFast,
+
+        /// <summary>NRD REBLUR fast history for path tracing specular.</summary>
+        REBLURPathTracingSpecularFast,
+
+        /// <summary>NRD REBLUR diffuse radiance history (accumulated).</summary>
+        REBLURPathTracingDiffuseRadiance,
+
+        /// <summary>NRD REBLUR specular radiance history (accumulated).</summary>
+        REBLURPathTracingSpecularRadiance,
+
     }
 
     /// <summary>

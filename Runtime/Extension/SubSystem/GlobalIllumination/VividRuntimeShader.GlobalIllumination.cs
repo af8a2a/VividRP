@@ -29,5 +29,18 @@ namespace UnityEngine.Rendering.Universal
             get => m_SharcResolveCS;
             set => this.SetValueAndNotify(ref m_SharcResolveCS, value, nameof(m_SharcResolveCS));
         }
+
+        [SerializeField]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/Referenced/Shader/PathTracingRemodulation.compute")]
+        private ComputeShader m_PathTracingRemodulationCS;
+
+        /// <summary>
+        /// Path Tracing Remodulation compute shader for applying material factors after NRD denoising
+        /// </summary>
+        public ComputeShader pathTracingRemodulationCS
+        {
+            get => m_PathTracingRemodulationCS;
+            set => this.SetValueAndNotify(ref m_PathTracingRemodulationCS, value, nameof(m_PathTracingRemodulationCS));
+        }
     }
 }

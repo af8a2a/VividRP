@@ -1,0 +1,75 @@
+// Path Tracing Re-modulation Compute Shader
+// Applies material factors to denoised diffuse/specular radiance to recover final colors
+// This is the inverse of the de-modulation done before denoising
+
+#pragma kernel CSRemodulate
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+
+// Input textures (denoised radiance from NRD REBLUR)
+Texture2D<float4> _DenoisedDiffuse;     // RGB = denoised de-modulated diffuse, A = hit distance
+Texture2D<float4> _DenoisedSpecular;    // RGB = denoised de-modulated specular, A = hit distance
+Texture2D<float4> _MaterialFactors;      // RGB = diffuse factor, A = specular luminance
+
+// Output texture
+RWTexture2D<float4> _OutputTexture;
+
+// Parameters
+float4 _ScreenSize;  // xy = size, zw = 1/size
+
+// Minimum scale to avoid numerical instabilities (must match PathTracingCommon.hlsl)
+#define PT_MATERIAL_FACTOR_MIN_SCALE 0.02
+
+// Re-modulate radiance: multiply by material factor
+float3 RemodulateRadiance(float3 radiance, float3 factor)
+{
+    return radiance * factor;
+}
+
+// Unpack material factors from storage format
+// Input: RGB = diffuse factor, A = specular luminance
+void UnpackMaterialFactors(float4 packed, out float3 diffuseFactor, out float3 specularFactor)
+{
+    diffuseFactor = packed.rgb;
+    // Reconstruct specular as grayscale (approximation matching PathTracingCommon.hlsl)
+    specularFactor = packed.aaa;
+}
+
+[numthreads(8, 8, 1)]
+void CSRemodulate(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+
+    // Bounds check
+    if (pixelCoord.x >= (uint)_ScreenSize.x || pixelCoord.y >= (uint)_ScreenSize.y)
+        return;
+
+    // Load denoised radiance
+    float4 denoisedDiffuse = _DenoisedDiffuse[pixelCoord];
+    float4 denoisedSpecular = _DenoisedSpecular[pixelCoord];
+    float4 materialFactorsPacked = _MaterialFactors[pixelCoord];
+
+    // Unpack material factors
+    float3 diffuseFactor, specularFactor;
+    UnpackMaterialFactors(materialFactorsPacked, diffuseFactor, specularFactor);
+
+    // Re-modulate: multiply denoised radiance by material factors
+    // This recovers the original material-dependent appearance
+    float3 finalDiffuse = RemodulateRadiance(denoisedDiffuse.rgb, diffuseFactor);
+    float3 finalSpecular = RemodulateRadiance(denoisedSpecular.rgb, specularFactor);
+
+    // Combine diffuse and specular for final output
+    float3 finalColor = finalDiffuse + finalSpecular;
+
+    // Preserve hit distance from specular (more important for reflections)
+    // Could also blend or use diffuse based on material type
+    float hitDistance = denoisedSpecular.a;
+
+    // Handle NaN/Inf
+    if (any(isnan(finalColor)) || any(isinf(finalColor)))
+    {
+        finalColor = float3(0, 0, 0);
+    }
+
+    _OutputTexture[pixelCoord] = float4(finalColor, hitDistance);
+}

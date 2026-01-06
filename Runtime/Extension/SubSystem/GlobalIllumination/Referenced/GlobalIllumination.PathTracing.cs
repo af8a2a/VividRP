@@ -210,7 +210,7 @@ namespace UnityEngine.Rendering.Universal
         /// Denoising mode
         /// </summary>
         [Tooltip("Denoising mode. None = raw output, Temporal = accumulation only, SpatialTemporal = bilateral filter, NRD = NVIDIA denoisers (best quality).")]
-        public PathTracingDenoiseModeParameter denoiseMode = 
+        public PathTracingDenoiseModeParameter denoiseMode =
             new PathTracingDenoiseModeParameter(PathTracingDenoiseMode.Temporal);
 
         /// <summary>
@@ -225,6 +225,51 @@ namespace UnityEngine.Rendering.Universal
         [Tooltip("Use NVIDIA Real-time Denoisers for high-quality denoising. Requires NRD integration.")]
         [AdditionalProperty]
         public BoolParameter useNRD = new BoolParameter(false);
+
+        #endregion
+
+        #region NRD REBLUR Settings
+
+        /// <summary>
+        /// Enable NRD REBLUR denoising
+        /// </summary>
+        [Tooltip("Enable NRD REBLUR denoising for path tracing output. Uses separate diffuse/specular denoising with material de-modulation.")]
+        public BoolParameter useNRDDenoising = new BoolParameter(false);
+
+        /// <summary>
+        /// NRD minimum blur radius
+        /// </summary>
+        [Tooltip("Minimum blur radius for NRD REBLUR. Controls the minimum denoising strength when converged.")]
+        [AdditionalProperty]
+        public ClampedFloatParameter nrdMinBlurRadius = new ClampedFloatParameter(1.0f, 0.0f, 10.0f);
+
+        /// <summary>
+        /// NRD maximum blur radius
+        /// </summary>
+        [Tooltip("Maximum blur radius for NRD REBLUR. Controls the initial denoising strength before temporal convergence.")]
+        [AdditionalProperty]
+        public ClampedFloatParameter nrdMaxBlurRadius = new ClampedFloatParameter(30.0f, 1.0f, 60.0f);
+
+        /// <summary>
+        /// NRD anti-firefly filter
+        /// </summary>
+        [Tooltip("Enable anti-firefly filter in NRD REBLUR to suppress bright noise pixels.")]
+        [AdditionalProperty]
+        public BoolParameter nrdAntiFirefly = new BoolParameter(true);
+
+        /// <summary>
+        /// NRD maximum accumulated frame count
+        /// </summary>
+        [Tooltip("Maximum number of frames for NRD temporal accumulation. Higher values produce smoother results but may ghost more.")]
+        [AdditionalProperty]
+        public ClampedIntParameter nrdMaxAccumulatedFrameNum = new ClampedIntParameter(30, 1, 63);
+
+        /// <summary>
+        /// NRD split screen visualization
+        /// </summary>
+        [Tooltip("Split screen visualization for NRD debugging. 0 = off, 0.5 = half screen shows unfiltered.")]
+        [AdditionalProperty]
+        public ClampedFloatParameter nrdSplitScreen = new ClampedFloatParameter(0.0f, 0.0f, 1.0f);
 
         #endregion
 

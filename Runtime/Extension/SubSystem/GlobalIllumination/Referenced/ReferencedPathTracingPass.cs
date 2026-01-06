@@ -818,14 +818,41 @@ namespace UnityEngine.Rendering.Universal
                 // Setup denoiser settings from volume
                 var denoiserSettings = new PathTracingDenoiser.Settings
                 {
+                    // Blur Radius Settings
                     minBlurRadius = giSettings.nrdMinBlurRadius.value,
                     maxBlurRadius = giSettings.nrdMaxBlurRadius.value,
-                    diffusePrepassBlurRadius = 30.0f,
-                    specularPrepassBlurRadius = 50.0f,
-                    splitScreen = giSettings.nrdSplitScreen.value,
-                    enableAntiFirefly = giSettings.nrdAntiFirefly.value,
+                    diffusePrepassBlurRadius = giSettings.nrdDiffusePrepassBlurRadius.value,
+                    specularPrepassBlurRadius = giSettings.nrdSpecularPrepassBlurRadius.value,
+
+                    // Temporal Accumulation Settings
                     maxAccumulatedFrameNum = giSettings.nrdMaxAccumulatedFrameNum.value,
-                    maxFastAccumulatedFrameNum = 6
+                    maxFastAccumulatedFrameNum = giSettings.nrdMaxFastAccumulatedFrameNum.value,
+                    maxStabilizedFrameNum = giSettings.nrdMaxStabilizedFrameNum.value,
+                    historyFixFrameNum = giSettings.nrdHistoryFixFrameNum.value,
+
+                    // Quality Settings
+                    enableAntiFirefly = giSettings.nrdAntiFirefly.value,
+                    fireflySuppressorMinRelativeScale = giSettings.nrdFireflySuppressorMinRelativeScale.value,
+                    fastHistoryClampingSigmaScale = giSettings.nrdFastHistoryClampingSigmaScale.value,
+                    minHitDistanceWeight = giSettings.nrdMinHitDistanceWeight.value,
+
+                    // Rejection Settings
+                    lobeAngleFraction = giSettings.nrdLobeAngleFraction.value,
+                    roughnessFraction = giSettings.nrdRoughnessFraction.value,
+                    planeDistanceSensitivity = giSettings.nrdPlaneDistanceSensitivity.value,
+
+                    // Antilag Settings
+                    antilagLuminanceSigmaScale = giSettings.nrdAntilagLuminanceSigmaScale.value,
+                    antilagLuminanceSensitivity = giSettings.nrdAntilagLuminanceSensitivity.value,
+
+                    // Hit Distance Parameters
+                    hitDistanceA = giSettings.nrdHitDistanceA.value,
+                    hitDistanceB = giSettings.nrdHitDistanceB.value,
+                    hitDistanceC = giSettings.nrdHitDistanceC.value,
+                    hitDistanceD = giSettings.nrdHitDistanceD.value,
+
+                    // Debug
+                    splitScreen = giSettings.nrdSplitScreen.value
                 };
 
                 // Run denoiser

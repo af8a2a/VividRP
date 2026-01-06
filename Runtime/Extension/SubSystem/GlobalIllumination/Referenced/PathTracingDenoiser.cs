@@ -32,25 +32,79 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         public struct Settings
         {
+            // Blur Radius Settings
             public float minBlurRadius;
             public float maxBlurRadius;
             public float diffusePrepassBlurRadius;
             public float specularPrepassBlurRadius;
-            public float splitScreen;
-            public bool enableAntiFirefly;
+
+            // Temporal Accumulation Settings
             public int maxAccumulatedFrameNum;
             public int maxFastAccumulatedFrameNum;
+            public int maxStabilizedFrameNum;
+            public int historyFixFrameNum;
+
+            // Quality Settings
+            public bool enableAntiFirefly;
+            public float fireflySuppressorMinRelativeScale;
+            public float fastHistoryClampingSigmaScale;
+            public float minHitDistanceWeight;
+
+            // Rejection Settings
+            public float lobeAngleFraction;
+            public float roughnessFraction;
+            public float planeDistanceSensitivity;
+
+            // Antilag Settings
+            public float antilagLuminanceSigmaScale;
+            public float antilagLuminanceSensitivity;
+
+            // Hit Distance Parameters (ABCD)
+            public float hitDistanceA;
+            public float hitDistanceB;
+            public float hitDistanceC;
+            public float hitDistanceD;
+
+            // Debug
+            public float splitScreen;
 
             public static Settings Default => new Settings
             {
+                // Blur Radius
                 minBlurRadius = 1.0f,
                 maxBlurRadius = 30.0f,
                 diffusePrepassBlurRadius = 30.0f,
                 specularPrepassBlurRadius = 50.0f,
-                splitScreen = 0.0f,
-                enableAntiFirefly = true,
+
+                // Temporal Accumulation
                 maxAccumulatedFrameNum = 30,
-                maxFastAccumulatedFrameNum = 6
+                maxFastAccumulatedFrameNum = 6,
+                maxStabilizedFrameNum = 0,
+                historyFixFrameNum = 3,
+
+                // Quality
+                enableAntiFirefly = true,
+                fireflySuppressorMinRelativeScale = 1.0f,
+                fastHistoryClampingSigmaScale = 2.0f,
+                minHitDistanceWeight = 0.1f,
+
+                // Rejection
+                lobeAngleFraction = 0.15f,
+                roughnessFraction = 0.15f,
+                planeDistanceSensitivity = 0.005f,
+
+                // Antilag
+                antilagLuminanceSigmaScale = 4.0f,
+                antilagLuminanceSensitivity = 3.0f,
+
+                // Hit Distance Parameters
+                hitDistanceA = 3.0f,
+                hitDistanceB = 0.1f,
+                hitDistanceC = 20.0f,
+                hitDistanceD = -25.0f,
+
+                // Debug
+                splitScreen = 0.0f
             };
         }
 
@@ -685,15 +739,41 @@ namespace UnityEngine.Rendering.Universal
 
             NRDInitlizer.NRD_SetCommonSettings(m_NRDContext, ref commonSettings);
 
-            // Setup REBLUR settings
+            // Setup REBLUR settings with all volume parameters
             var reblurSettings = ReblurSettings.Default();
+
+            // Blur Radius Settings
             reblurSettings.minBlurRadius = settings.minBlurRadius;
             reblurSettings.maxBlurRadius = settings.maxBlurRadius;
             reblurSettings.diffusePrepassBlurRadius = settings.diffusePrepassBlurRadius;
             reblurSettings.specularPrepassBlurRadius = settings.specularPrepassBlurRadius;
-            reblurSettings.enableAntiFirefly = settings.enableAntiFirefly;
+
+            // Temporal Accumulation Settings
             reblurSettings.maxAccumulatedFrameNum = (uint)settings.maxAccumulatedFrameNum;
             reblurSettings.maxFastAccumulatedFrameNum = (uint)settings.maxFastAccumulatedFrameNum;
+            reblurSettings.maxStabilizedFrameNum = (uint)settings.maxStabilizedFrameNum;
+            reblurSettings.historyFixFrameNum = (uint)settings.historyFixFrameNum;
+
+            // Quality Settings
+            reblurSettings.enableAntiFirefly = settings.enableAntiFirefly;
+            reblurSettings.fireflySuppressorMinRelativeScale = settings.fireflySuppressorMinRelativeScale;
+            reblurSettings.fastHistoryClampingSigmaScale = settings.fastHistoryClampingSigmaScale;
+            reblurSettings.minHitDistanceWeight = settings.minHitDistanceWeight;
+
+            // Rejection Settings
+            reblurSettings.lobeAngleFraction = settings.lobeAngleFraction;
+            reblurSettings.roughnessFraction = settings.roughnessFraction;
+            reblurSettings.planeDistanceSensitivity = settings.planeDistanceSensitivity;
+
+            // Antilag Settings
+            reblurSettings.antilagSettings.luminanceSigmaScale = settings.antilagLuminanceSigmaScale;
+            reblurSettings.antilagSettings.luminanceSensitivity = settings.antilagLuminanceSensitivity;
+
+            // Hit Distance Parameters
+            reblurSettings.hitDistanceParameters.A = settings.hitDistanceA;
+            reblurSettings.hitDistanceParameters.B = settings.hitDistanceB;
+            reblurSettings.hitDistanceParameters.C = settings.hitDistanceC;
+            reblurSettings.hitDistanceParameters.D = settings.hitDistanceD;
 
             var reblurConstants = new ReblurSharedConstants();
             NRDInitlizer.NRD_SetupReblurConstBuffer(m_NRDContext, ref commonSettings, ref reblurSettings, ref reblurConstants);

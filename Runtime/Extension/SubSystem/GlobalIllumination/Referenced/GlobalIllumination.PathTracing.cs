@@ -236,38 +236,167 @@ namespace UnityEngine.Rendering.Universal
         [Tooltip("Enable NRD REBLUR denoising for path tracing output. Uses separate diffuse/specular denoising with material de-modulation.")]
         public BoolParameter useNRDDenoising = new BoolParameter(false);
 
+        // --- Blur Radius Settings ---
+
         /// <summary>
         /// NRD minimum blur radius
         /// </summary>
-        [Tooltip("Minimum blur radius for NRD REBLUR. Controls the minimum denoising strength when converged.")]
-        [AdditionalProperty]
+        [Tooltip("Minimum blur radius for NRD REBLUR (in pixels). Controls the minimum denoising strength when converged.")]
         public ClampedFloatParameter nrdMinBlurRadius = new ClampedFloatParameter(1.0f, 0.0f, 10.0f);
 
         /// <summary>
         /// NRD maximum blur radius
         /// </summary>
-        [Tooltip("Maximum blur radius for NRD REBLUR. Controls the initial denoising strength before temporal convergence.")]
-        [AdditionalProperty]
+        [Tooltip("Maximum blur radius for NRD REBLUR (in pixels). Controls the initial denoising strength before temporal convergence.")]
         public ClampedFloatParameter nrdMaxBlurRadius = new ClampedFloatParameter(30.0f, 1.0f, 60.0f);
 
         /// <summary>
-        /// NRD anti-firefly filter
+        /// Diffuse prepass blur radius
         /// </summary>
-        [Tooltip("Enable anti-firefly filter in NRD REBLUR to suppress bright noise pixels.")]
+        [Tooltip("Pre-accumulation spatial blur radius for diffuse signal (in pixels). Helps reduce noise before temporal accumulation.")]
         [AdditionalProperty]
-        public BoolParameter nrdAntiFirefly = new BoolParameter(true);
+        public ClampedFloatParameter nrdDiffusePrepassBlurRadius = new ClampedFloatParameter(30.0f, 0.0f, 75.0f);
+
+        /// <summary>
+        /// Specular prepass blur radius
+        /// </summary>
+        [Tooltip("Pre-accumulation spatial blur radius for specular signal (in pixels). Helps reduce noise before temporal accumulation.")]
+        [AdditionalProperty]
+        public ClampedFloatParameter nrdSpecularPrepassBlurRadius = new ClampedFloatParameter(50.0f, 0.0f, 75.0f);
+
+        // --- Temporal Accumulation Settings ---
 
         /// <summary>
         /// NRD maximum accumulated frame count
         /// </summary>
-        [Tooltip("Maximum number of frames for NRD temporal accumulation. Higher values produce smoother results but may ghost more.")]
-        [AdditionalProperty]
+        [Tooltip("Maximum number of frames for NRD temporal accumulation. Higher values produce smoother results but may ghost more. [1-63]")]
         public ClampedIntParameter nrdMaxAccumulatedFrameNum = new ClampedIntParameter(30, 1, 63);
+
+        /// <summary>
+        /// NRD maximum fast accumulated frame count
+        /// </summary>
+        [Tooltip("Maximum frames for fast history (responsive accumulation). Lower values respond faster to changes. [1-63]")]
+        [AdditionalProperty]
+        public ClampedIntParameter nrdMaxFastAccumulatedFrameNum = new ClampedIntParameter(6, 1, 63);
+
+        /// <summary>
+        /// NRD maximum stabilized frame count
+        /// </summary>
+        [Tooltip("Maximum frames for stabilized radiance. Controls temporal stability vs responsiveness. [1-63]")]
+        [AdditionalProperty]
+        public ClampedIntParameter nrdMaxStabilizedFrameNum = new ClampedIntParameter(0, 0, 63);
+
+        /// <summary>
+        /// History fix frame count
+        /// </summary>
+        [Tooltip("Number of frames to reconstruct history after disocclusion or reset. Higher values fill holes better but may blur.")]
+        [AdditionalProperty]
+        public ClampedIntParameter nrdHistoryFixFrameNum = new ClampedIntParameter(3, 0, 6);
+
+        // --- Quality Settings ---
+
+        /// <summary>
+        /// NRD anti-firefly filter
+        /// </summary>
+        [Tooltip("Enable anti-firefly filter in NRD REBLUR to suppress bright noise pixels (fireflies).")]
+        public BoolParameter nrdAntiFirefly = new BoolParameter(true);
+
+        /// <summary>
+        /// Firefly suppressor minimum relative scale
+        /// </summary>
+        [Tooltip("Minimum relative scale for firefly suppression. Higher values suppress more aggressively. [1.0-3.0]")]
+        [AdditionalProperty]
+        public ClampedFloatParameter nrdFireflySuppressorMinRelativeScale = new ClampedFloatParameter(1.0f, 1.0f, 3.0f);
+
+        /// <summary>
+        /// Fast history clamping sigma scale
+        /// </summary>
+        [Tooltip("Sigma scale for fast history clamping. Higher values allow more variance. [1.0-3.0]")]
+        [AdditionalProperty]
+        public ClampedFloatParameter nrdFastHistoryClampingSigmaScale = new ClampedFloatParameter(2.0f, 1.0f, 3.0f);
+
+        /// <summary>
+        /// Minimum hit distance weight
+        /// </summary>
+        [Tooltip("Minimum weight for hit distance in filtering. Lower values increase sensitivity to shadows. (0.0-0.2]")]
+        [AdditionalProperty]
+        public ClampedFloatParameter nrdMinHitDistanceWeight = new ClampedFloatParameter(0.1f, 0.01f, 0.2f);
+
+        // --- Rejection Settings ---
+
+        /// <summary>
+        /// Lobe angle fraction for normal rejection
+        /// </summary>
+        [Tooltip("Fraction of lobe angle used for normal-based rejection. Higher values are more permissive. [0.0-1.0]")]
+        [AdditionalProperty]
+        public ClampedFloatParameter nrdLobeAngleFraction = new ClampedFloatParameter(0.15f, 0.0f, 1.0f);
+
+        /// <summary>
+        /// Roughness fraction for rejection
+        /// </summary>
+        [Tooltip("Fraction of roughness used for roughness-based rejection. Higher values are more permissive. [0.0-1.0]")]
+        [AdditionalProperty]
+        public ClampedFloatParameter nrdRoughnessFraction = new ClampedFloatParameter(0.15f, 0.0f, 1.0f);
+
+        /// <summary>
+        /// Plane distance sensitivity
+        /// </summary>
+        [Tooltip("Sensitivity to tangent plane deviation. Higher values reject more samples based on depth discontinuities. [0.0-1.0]")]
+        [AdditionalProperty]
+        public ClampedFloatParameter nrdPlaneDistanceSensitivity = new ClampedFloatParameter(0.005f, 0.0f, 0.1f);
+
+        // --- Antilag Settings ---
+
+        /// <summary>
+        /// Antilag luminance sigma scale
+        /// </summary>
+        [Tooltip("Variance multiplier for antilag detection. Higher values are less sensitive to luminance changes. [1.0-5.0]")]
+        [AdditionalProperty]
+        public ClampedFloatParameter nrdAntilagLuminanceSigmaScale = new ClampedFloatParameter(4.0f, 1.0f, 5.0f);
+
+        /// <summary>
+        /// Antilag luminance sensitivity
+        /// </summary>
+        [Tooltip("Sensitivity of antilag to luminance differences. Higher values trigger antilag more easily. [1.0-5.0]")]
+        [AdditionalProperty]
+        public ClampedFloatParameter nrdAntilagLuminanceSensitivity = new ClampedFloatParameter(3.0f, 1.0f, 5.0f);
+
+        // --- Hit Distance Parameters ---
+
+        /// <summary>
+        /// Hit distance parameter A (constant)
+        /// </summary>
+        [Tooltip("Constant value for hit distance normalization (in world units). Affects near-field shadow sensitivity.")]
+        [AdditionalProperty]
+        public ClampedFloatParameter nrdHitDistanceA = new ClampedFloatParameter(3.0f, 0.0f, 50.0f);
+
+        /// <summary>
+        /// Hit distance parameter B (viewZ scale)
+        /// </summary>
+        [Tooltip("ViewZ-based linear scale for hit distance normalization. Affects distance-dependent shadow softness.")]
+        [AdditionalProperty]
+        public ClampedFloatParameter nrdHitDistanceB = new ClampedFloatParameter(0.1f, 0.0f, 1.0f);
+
+        /// <summary>
+        /// Hit distance parameter C (roughness scale)
+        /// </summary>
+        [Tooltip("Roughness-based scale for hit distance. Higher values make rough surfaces use longer hit distances.")]
+        [AdditionalProperty]
+        public ClampedFloatParameter nrdHitDistanceC = new ClampedFloatParameter(20.0f, 1.0f, 100.0f);
+
+        /// <summary>
+        /// Hit distance parameter D (roughness collapse)
+        /// </summary>
+        [Tooltip("Roughness collapse factor for hit distance. Negative values, affects very rough surface behavior.")]
+        [AdditionalProperty]
+        public ClampedFloatParameter nrdHitDistanceD = new ClampedFloatParameter(-25.0f, -100.0f, 0.0f);
+
+        // --- Debug Settings ---
 
         /// <summary>
         /// NRD split screen visualization
         /// </summary>
-        [Tooltip("Split screen visualization for NRD debugging. 0 = off, 0.5 = half screen shows unfiltered.")]
+        [Tooltip("Split screen visualization for NRD debugging. 0 = off, 0.5 = half screen shows unfiltered input.")]
         [AdditionalProperty]
         public ClampedFloatParameter nrdSplitScreen = new ClampedFloatParameter(0.0f, 0.0f, 1.0f);
 

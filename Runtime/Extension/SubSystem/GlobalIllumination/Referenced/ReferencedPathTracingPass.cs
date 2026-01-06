@@ -225,7 +225,7 @@ namespace UnityEngine.Rendering.Universal
 
             // TODO: Get sky texture from environment settings
             // For now, we'll use a default black texture
-            passData.skyTexture =renderGraph.ImportTexture(SkySystem.instance.GetSkyCubemap()) ;
+            passData.skyTexture = renderGraph.ImportTexture(SkySystem.instance.GetSkyCubemap());
 
             // Dispatch size
             passData.dispatchWidth = (uint)cameraData.cameraTargetDescriptor.width;
@@ -243,7 +243,7 @@ namespace UnityEngine.Rendering.Universal
             // SHARC parameters
             passData.enableSharc = giSettings.enableSharc.value;
             passData.sharcUpdate = giSettings.sharcUpdate.value;
-            passData.sharcQuery = giSettings.sharcQuery.value;
+            passData.sharcQuery = giSettini gs.sharcQuery.value;
             passData.sharcCameraPosition = cameraData.camera.transform.position;
             passData.sharcSceneScale = giSettings.sharcSceneScale.value;
             passData.sharcRoughnessThreshold = giSettings.sharcRoughnessThreshold.value;
@@ -304,36 +304,36 @@ namespace UnityEngine.Rendering.Universal
                 cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingDebugVisualizeBounce, data.debugVisualizeBounce);
                 cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingDebugMode, data.debugMode);
 
-                // // Bind SHARC buffers and parameters if enabled
-                // if (data.enableSharc && data.sharcHashEntriesBuffer.IsValid())
-                // {
-                //     // Enable/disable SHARC shader keywords based on volume settings
-                //     cmd.SetKeyword(ShaderConstants.SharcUpdateKeyword, data.sharcUpdate);
-                //     cmd.SetKeyword(ShaderConstants.SharcQueryKeyword, data.sharcQuery);
-                //
-                //     // Bind SHARC buffers (RenderGraph managed)
-                //     cmd.SetRayTracingBufferParam(data.pathTracingShader, ShaderConstants._SharcHashEntriesBuffer, data.sharcHashEntriesBuffer);
-                //     cmd.SetRayTracingBufferParam(data.pathTracingShader, ShaderConstants._SharcLockBuffer, data.sharcLockBuffer);
-                //     cmd.SetRayTracingBufferParam(data.pathTracingShader, ShaderConstants._SharcAccumulationBuffer, data.sharcAccumulationBuffer);
-                //     cmd.SetRayTracingBufferParam(data.pathTracingShader, ShaderConstants._SharcResolvedBuffer, data.sharcResolvedBuffer);
-                //
-                //     // Bind SHARC parameters
-                //     cmd.SetRayTracingVectorParam(data.pathTracingShader, ShaderConstants._SharcCameraPosition, data.sharcCameraPosition);
-                //     cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._SharcSceneScale, data.sharcSceneScale);
-                //     cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._SharcRoughnessThreshold, data.sharcRoughnessThreshold);
-                //     cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._SharcRadianceScale, data.sharcRadianceScale);
-                //     cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcGridLevelBias, data.sharcGridLevelBias);
-                //     cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcSampleThreshold, data.sharcSampleThreshold);
-                //     cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcEntriesNum, data.sharcEntriesNum);
-                //     cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcEnableAntifirefly, data.sharcAntiFirefly ? 1 : 0);
-                //     cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcDebug, data.sharcDebug ? 1 : 0);
-                // }
-                // else
-                // {
-                // Disable SHARC keywords when not enabled
-                cmd.SetKeyword(ShaderConstants.SharcUpdateKeyword, false);
-                cmd.SetKeyword(ShaderConstants.SharcQueryKeyword, false);
-                // }
+                // Bind SHARC buffers and parameters if enabled
+                if (data.enableSharc && data.sharcHashEntriesBuffer.IsValid())
+                {
+                    // Enable/disable SHARC shader keywords based on volume settings
+                    cmd.SetKeyword(ShaderConstants.SharcUpdateKeyword, data.sharcUpdate);
+                    cmd.SetKeyword(ShaderConstants.SharcQueryKeyword, data.sharcQuery);
+
+                    // Bind SHARC buffers (RenderGraph managed)
+                    cmd.SetRayTracingBufferParam(data.pathTracingShader, ShaderConstants._SharcHashEntriesBuffer, data.sharcHashEntriesBuffer);
+                    cmd.SetRayTracingBufferParam(data.pathTracingShader, ShaderConstants._SharcLockBuffer, data.sharcLockBuffer);
+                    cmd.SetRayTracingBufferParam(data.pathTracingShader, ShaderConstants._SharcAccumulationBuffer, data.sharcAccumulationBuffer);
+                    cmd.SetRayTracingBufferParam(data.pathTracingShader, ShaderConstants._SharcResolvedBuffer, data.sharcResolvedBuffer);
+
+                    // Bind SHARC parameters
+                    cmd.SetRayTracingVectorParam(data.pathTracingShader, ShaderConstants._SharcCameraPosition, data.sharcCameraPosition);
+                    cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._SharcSceneScale, data.sharcSceneScale);
+                    cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._SharcRoughnessThreshold, data.sharcRoughnessThreshold);
+                    cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._SharcRadianceScale, data.sharcRadianceScale);
+                    cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcGridLevelBias, data.sharcGridLevelBias);
+                    cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcSampleThreshold, data.sharcSampleThreshold);
+                    cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcEntriesNum, data.sharcEntriesNum);
+                    cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcEnableAntifirefly, data.sharcAntiFirefly ? 1 : 0);
+                    cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcDebug, data.sharcDebug ? 1 : 0);
+                }
+                else
+                {
+                    // Disable SHARC keywords when not enabled
+                    cmd.SetKeyword(ShaderConstants.SharcUpdateKeyword, false);
+                    cmd.SetKeyword(ShaderConstants.SharcQueryKeyword, false);
+                }
 
                 // Dispatch rays
                 cmd.DispatchRays(data.pathTracingShader, "RayGenPathTracing", data.dispatchWidth, data.dispatchHeight, 1);
@@ -528,7 +528,8 @@ namespace UnityEngine.Rendering.Universal
                         // Bind SHARC buffers (RenderGraph managed)
                         cmd.SetComputeBufferParam(data.resolveShader, data.resolveKernel, ShaderConstants._SharcHashEntriesBuffer, data.sharcHashEntriesBuffer);
                         cmd.SetComputeBufferParam(data.resolveShader, data.resolveKernel, ShaderConstants._SharcLockBuffer, data.sharcLockBuffer);
-                        cmd.SetComputeBufferParam(data.resolveShader, data.resolveKernel, ShaderConstants._SharcAccumulationBuffer, data.sharcAccumulationBuffer);
+                        cmd.SetComputeBufferParam(data.resolveShader, data.resolveKernel, ShaderConstants._SharcAccumulationBuffer,
+                            data.sharcAccumulationBuffer);
                         cmd.SetComputeBufferParam(data.resolveShader, data.resolveKernel, ShaderConstants._SharcResolvedBuffer, data.sharcResolvedBuffer);
 
                         // Bind SHARC parameters (volume-controlled)

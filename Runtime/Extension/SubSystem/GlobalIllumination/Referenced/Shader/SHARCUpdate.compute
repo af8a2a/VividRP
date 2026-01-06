@@ -1,9 +1,0 @@
-// © 2024 NVIDIA Corporation
-#pragma kernel main
-#pragma require Int64BufferAtomics
-
-
-[numthreads( 16, 16, 1 )]
-void main( uint2 pixelPos : SV_DispatchThreadId )
-{
-}

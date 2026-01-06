@@ -109,6 +109,12 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>Path tracing accumulated radiance history.</summary>
         PathTracingHistory,
 
+        /// <summary>Path tracing diffuse radiance history (for NRD REBLUR).</summary>
+        PathTracingDiffuseHistory,
+
+        /// <summary>Path tracing specular radiance history (for NRD REBLUR).</summary>
+        PathTracingSpecularHistory,
+
     }
 
     /// <summary>

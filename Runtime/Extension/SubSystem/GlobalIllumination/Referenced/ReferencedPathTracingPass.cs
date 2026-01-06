@@ -406,6 +406,40 @@ namespace UnityEngine.Rendering.Universal
         }
 
         /// <summary>
+        /// Diffuse history buffer allocator function (for NRD REBLUR)
+        /// Format: RGB = diffuse radiance, A = normalized hit distance
+        /// </summary>
+        static RTHandle PathTracingDiffuseHistoryBufferAllocator(GraphicsFormat graphicsFormat, string viewName, int frameIndex, RTHandleSystem rtHandleSystem)
+        {
+            frameIndex &= 1; // Ping-pong between 2 buffers
+
+            return rtHandleSystem.Alloc(
+                Vector2.one,
+                colorFormat: graphicsFormat,
+                enableRandomWrite: true,
+                useDynamicScale: true,
+                name: $"{viewName}_PathTracingDiffuseHistory{frameIndex}"
+            );
+        }
+
+        /// <summary>
+        /// Specular history buffer allocator function (for NRD REBLUR)
+        /// Format: RGB = specular radiance, A = normalized hit distance
+        /// </summary>
+        static RTHandle PathTracingSpecularHistoryBufferAllocator(GraphicsFormat graphicsFormat, string viewName, int frameIndex, RTHandleSystem rtHandleSystem)
+        {
+            frameIndex &= 1; // Ping-pong between 2 buffers
+
+            return rtHandleSystem.Alloc(
+                Vector2.one,
+                colorFormat: graphicsFormat,
+                enableRandomWrite: true,
+                useDynamicScale: true,
+                name: $"{viewName}_PathTracingSpecularHistory{frameIndex}"
+            );
+        }
+
+        /// <summary>
         /// Reallocate history buffer if needed
         /// </summary>
         internal RTHandle ReAllocateHistoryBufferIfNeeded(HistoryFrameRTSystem historyRTSystem)
@@ -414,6 +448,34 @@ namespace UnityEngine.Rendering.Universal
                    ?? historyRTSystem.AllocHistoryFrameRT(
                        (int)HistoryFrameType.PathTracingHistory,
                        PathTracingHistoryBufferAllocator,
+                       GraphicsFormat.R16G16B16A16_SFloat,
+                       1
+                   );
+        }
+
+        /// <summary>
+        /// Reallocate diffuse history buffer if needed (for NRD REBLUR)
+        /// </summary>
+        internal RTHandle ReAllocateDiffuseHistoryBufferIfNeeded(HistoryFrameRTSystem historyRTSystem)
+        {
+            return historyRTSystem.GetCurrentFrameRT(HistoryFrameType.PathTracingDiffuseHistory)
+                   ?? historyRTSystem.AllocHistoryFrameRT(
+                       (int)HistoryFrameType.PathTracingDiffuseHistory,
+                       PathTracingDiffuseHistoryBufferAllocator,
+                       GraphicsFormat.R16G16B16A16_SFloat,
+                       1
+                   );
+        }
+
+        /// <summary>
+        /// Reallocate specular history buffer if needed (for NRD REBLUR)
+        /// </summary>
+        internal RTHandle ReAllocateSpecularHistoryBufferIfNeeded(HistoryFrameRTSystem historyRTSystem)
+        {
+            return historyRTSystem.GetCurrentFrameRT(HistoryFrameType.PathTracingSpecularHistory)
+                   ?? historyRTSystem.AllocHistoryFrameRT(
+                       (int)HistoryFrameType.PathTracingSpecularHistory,
+                       PathTracingSpecularHistoryBufferAllocator,
                        GraphicsFormat.R16G16B16A16_SFloat,
                        1
                    );
@@ -474,18 +536,23 @@ namespace UnityEngine.Rendering.Universal
             // Setup history buffer for temporal accumulation
             var historyRTSystem = HistoryFrameRTSystem.GetOrCreate(cameraData.camera);
             RTHandle historyRT = null;
+            RTHandle diffuseHistoryRT = null;
+            RTHandle specularHistoryRT = null;
             TextureHandle historyTexture = TextureHandle.nullHandle;
             TextureHandle diffuseHistoryTexture = TextureHandle.nullHandle;
             TextureHandle specularHistoryTexture = TextureHandle.nullHandle;
 
             if (m_AccumulateFrames)
             {
+                // Combined history buffer
                 historyRT = ReAllocateHistoryBufferIfNeeded(historyRTSystem);
                 historyTexture = renderGraph.ImportTexture(historyRT);
 
-                // Note: For now, we don't have separate diffuse/specular history buffers
-                // In Phase 2, we'll add proper history buffer management for NRD
-                // The shader handles this gracefully by checking if textures are valid
+                // Diffuse/Specular history buffers for NRD REBLUR
+                diffuseHistoryRT = ReAllocateDiffuseHistoryBufferIfNeeded(historyRTSystem);
+                specularHistoryRT = ReAllocateSpecularHistoryBufferIfNeeded(historyRTSystem);
+                diffuseHistoryTexture = renderGraph.ImportTexture(diffuseHistoryRT);
+                specularHistoryTexture = renderGraph.ImportTexture(specularHistoryRT);
             }
 
             // Initialize and import SHARC buffers if enabled
@@ -649,6 +716,44 @@ namespace UnityEngine.Rendering.Universal
                 {
                     passData.source = outputTexture;
                     passData.destination = historyTexture;
+
+                    builder.UseTexture(passData.source);
+                    builder.SetRenderAttachment(passData.destination, 0, AccessFlags.Write);
+                    builder.AllowPassCulling(false);
+
+                    builder.SetRenderFunc<CopyToHistoryPassData>((data, context) =>
+                    {
+                        Blitter.BlitTexture(context.cmd, data.source, new Vector4(1, 1, 0, 0), 0, false);
+                    });
+                }
+            }
+
+            // Copy diffuse output to history buffer for NRD REBLUR
+            if (m_AccumulateFrames && diffuseHistoryTexture.IsValid())
+            {
+                using (var builder = renderGraph.AddRasterRenderPass<CopyToHistoryPassData>("Path Tracing - Copy Diffuse to History", out var passData))
+                {
+                    passData.source = diffuseOutputTexture;
+                    passData.destination = diffuseHistoryTexture;
+
+                    builder.UseTexture(passData.source);
+                    builder.SetRenderAttachment(passData.destination, 0, AccessFlags.Write);
+                    builder.AllowPassCulling(false);
+
+                    builder.SetRenderFunc<CopyToHistoryPassData>((data, context) =>
+                    {
+                        Blitter.BlitTexture(context.cmd, data.source, new Vector4(1, 1, 0, 0), 0, false);
+                    });
+                }
+            }
+
+            // Copy specular output to history buffer for NRD REBLUR
+            if (m_AccumulateFrames && specularHistoryTexture.IsValid())
+            {
+                using (var builder = renderGraph.AddRasterRenderPass<CopyToHistoryPassData>("Path Tracing - Copy Specular to History", out var passData))
+                {
+                    passData.source = specularOutputTexture;
+                    passData.destination = specularHistoryTexture;
 
                     builder.UseTexture(passData.source);
                     builder.SetRenderAttachment(passData.destination, 0, AccessFlags.Write);

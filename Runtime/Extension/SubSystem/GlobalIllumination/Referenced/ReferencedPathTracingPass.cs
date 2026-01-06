@@ -72,6 +72,9 @@ namespace UnityEngine.Rendering.Universal
             internal TextureHandle diffuseHistoryTexture;
             internal TextureHandle specularHistoryTexture;
 
+            // Material factors for NRD de-modulation/re-modulation
+            internal TextureHandle materialFactorsTexture;
+
             // Ray tracing resources
             internal RayTracingShader pathTracingShader;
             internal RayTracingAccelerationStructure rtas;
@@ -186,6 +189,9 @@ namespace UnityEngine.Rendering.Universal
 
             // NRD parameters
             public static readonly int _NRDHitDistanceParams = Shader.PropertyToID("_NRDHitDistanceParams");
+
+            // Material factors for NRD de-modulation/re-modulation
+            public static readonly int _PathTracingMaterialFactors = Shader.PropertyToID("_PathTracingMaterialFactors");
 
             // SHARC parameters
             public static readonly int _SharcHashEntriesBuffer = Shader.PropertyToID("_SharcHashEntriesBuffer");
@@ -338,6 +344,12 @@ namespace UnityEngine.Rendering.Universal
                 if (data.specularOutputTexture.IsValid())
                 {
                     cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._PathTracingSpecularOutput, data.specularOutputTexture);
+                }
+
+                // Bind material factors texture for NRD de-modulation
+                if (data.materialFactorsTexture.IsValid())
+                {
+                    cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._PathTracingMaterialFactors, data.materialFactorsTexture);
                 }
 
                 // Bind diffuse/specular history textures if accumulating
@@ -533,6 +545,16 @@ namespace UnityEngine.Rendering.Universal
             };
             var specularOutputTexture = renderGraph.CreateTexture(specularOutputDesc);
 
+            // Material factors texture for NRD de-modulation/re-modulation
+            // Format: RGB = diffuse factor, A = specular luminance
+            var materialFactorsDesc = new TextureDesc(cameraData.cameraTargetDescriptor.width, cameraData.cameraTargetDescriptor.height)
+            {
+                enableRandomWrite = true,
+                format = GraphicsFormat.R16G16B16A16_SFloat,
+                name = "PathTracingMaterialFactors"
+            };
+            var materialFactorsTexture = renderGraph.CreateTexture(materialFactorsDesc);
+
             // Setup history buffer for temporal accumulation
             var historyRTSystem = HistoryFrameRTSystem.GetOrCreate(cameraData.camera);
             RTHandle historyRT = null;
@@ -591,6 +613,9 @@ namespace UnityEngine.Rendering.Universal
                 passData.diffuseHistoryTexture = diffuseHistoryTexture;
                 passData.specularHistoryTexture = specularHistoryTexture;
 
+                // Material factors for NRD de-modulation
+                passData.materialFactorsTexture = materialFactorsTexture;
+
                 // Pass imported SHARC buffer handles
                 passData.sharcHashEntriesBuffer = sharcHashEntriesBuffer;
                 passData.sharcLockBuffer = sharcLockBuffer;
@@ -608,6 +633,7 @@ namespace UnityEngine.Rendering.Universal
                 builder.UseTexture(passData.outputTexture, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.diffuseOutputTexture, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.specularOutputTexture, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.materialFactorsTexture, AccessFlags.ReadWrite);
 
                 // Use history texture if available
                 if (passData.historyTexture.IsValid())

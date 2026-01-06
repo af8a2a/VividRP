@@ -113,6 +113,10 @@ RW_TEXTURE2D(float4, _PathTracingSpecularOutput);
 TEXTURE2D_X(_PathTracingDiffuseHistory);
 TEXTURE2D_X(_PathTracingSpecularHistory);
 
+// Material factors for NRD de-modulation/re-modulation
+// Format: RGB = diffuse factor, A = specular luminance
+RW_TEXTURE2D(float4, _PathTracingMaterialFactors);
+
 // Path tracing specific parameters (not in ShaderVariablesRaytracing CB)
 int _PathTracingAccumulate;
 float _PathTracingIntensity;
@@ -609,6 +613,19 @@ void RayGenPathTracing()
     // Get view-space Z for hit distance normalization (NRD)
     float viewZ = posInput.linearDepth;
 
+    // Compute material factors for NRD de-modulation at primary hit
+    // These factors are used to divide out material properties before denoising
+    // and re-modulate after denoising for better temporal stability
+    float3 diffuseMaterialFactor, specularMaterialFactor;
+    PT_ComputeMaterialFactors(
+        primaryNormal,
+        viewDirWS,
+        primaryAlbedo,
+        primaryMetallic,
+        primaryRoughness,
+        diffuseMaterialFactor,
+        specularMaterialFactor);
+
     // Accumulate radiance over multiple samples (separate diffuse/specular for NRD)
     PathAccumulator accumulatorTotal = InitPathAccumulator();
 
@@ -1041,6 +1058,12 @@ void RayGenPathTracing()
     float normalizedDiffuseHitDist = NormalizeHitDistance(finalDiffuseHitDist, viewZ);
     float normalizedSpecularHitDist = NormalizeHitDistance(finalSpecularHitDist, viewZ);
 
+    // De-modulate radiance for NRD denoising
+    // Dividing out material factors before denoising improves temporal stability
+    // The denoised result will be re-modulated by multiplying these factors back
+    float3 demodulatedDiffuse = PT_DemodulateRadiance(finalDiffuse, diffuseMaterialFactor);
+    float3 demodulatedSpecular = PT_DemodulateRadiance(finalSpecular, specularMaterialFactor);
+
     //------------------------------------------------------------------
     // Debug Visualization
     //------------------------------------------------------------------
@@ -1144,9 +1167,14 @@ void RayGenPathTracing()
     _PathTracingOutput[launchIndex] = float4(outputColor, 1.0);
 
     // Separate diffuse/specular outputs for NRD denoising
-    // Format: RGB = radiance, A = normalized hit distance
-    _PathTracingDiffuseOutput[launchIndex] = float4(finalDiffuse, normalizedDiffuseHitDist);
-    _PathTracingSpecularOutput[launchIndex] = float4(finalSpecular, normalizedSpecularHitDist);
+    // Format: RGB = de-modulated radiance, A = normalized hit distance
+    // De-modulated radiance = radiance / material_factor for better denoising
+    _PathTracingDiffuseOutput[launchIndex] = float4(demodulatedDiffuse, normalizedDiffuseHitDist);
+    _PathTracingSpecularOutput[launchIndex] = float4(demodulatedSpecular, normalizedSpecularHitDist);
+
+    // Material factors for re-modulation after denoising
+    // Pack: RGB = diffuse factor, A = specular luminance
+    _PathTracingMaterialFactors[launchIndex] = PT_PackMaterialFactors(diffuseMaterialFactor, specularMaterialFactor);
 }
 
 

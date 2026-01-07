@@ -12,7 +12,9 @@
 // SHARC Configuration
 // SHARC_UPDATE and SHARC_QUERY are defined via multi_compile in .raytrace file
 //--------------------------------------------------------------------------------------------------
-
+#if __JETBRAINS_IDE__
+#define SHARC_UPDATE 1
+#endif
 // Check if SHARC is enabled (either UPDATE or QUERY keyword is defined)
 #if defined(SHARC_UPDATE) || defined(SHARC_QUERY)
     #define SHARC_ENABLE_SHARC              1

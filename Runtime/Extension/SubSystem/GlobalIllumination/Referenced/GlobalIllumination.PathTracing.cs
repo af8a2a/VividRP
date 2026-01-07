@@ -35,14 +35,12 @@ namespace UnityEngine.Rendering.Universal
     [Serializable]
     public enum PathTracingDenoiseMode
     {
-        /// <summary>No denoising - Raw path tracing output</summary>
+        /// <summary>No denoising - Raw path tracing output (noisy but fast)</summary>
         None = 0,
-        /// <summary>Temporal accumulation only</summary>
-        Temporal = 1,
-        /// <summary>Spatial + Temporal (simple bilateral filter)</summary>
-        SpatialTemporal = 2,
-        /// <summary>NRD (NVIDIA Real-time Denoisers) - Best quality</summary>
-        NRD = 3
+        /// <summary>Simple temporal accumulation with optional reprojection rejection</summary>
+        TemporalAccumulation = 1,
+        /// <summary>NRD REBLUR - High quality spatio-temporal denoising with separate diffuse/specular</summary>
+        NRDReblur = 2
     }
 
     [Serializable]
@@ -174,13 +172,18 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
 
-        #region Temporal Accumulation
+        #region Denoising
 
         /// <summary>
-        /// Enable temporal accumulation across frames
+        /// Denoising mode for path tracing output
         /// </summary>
-        [Tooltip("Enable temporal accumulation for progressive refinement. Produces cleaner results over time but can cause ghosting with camera or object movement.")]
-        public BoolParameter temporalAccumulation = new BoolParameter(true);
+        [Tooltip("Denoising mode. None = raw output (noisy), TemporalAccumulation = simple accumulation with reprojection, NRDReblur = NVIDIA REBLUR denoiser (best quality).")]
+        public PathTracingDenoiseModeParameter denoiseMode =
+            new PathTracingDenoiseModeParameter(PathTracingDenoiseMode.TemporalAccumulation);
+
+        #endregion
+
+        #region Temporal Accumulation Settings
 
         /// <summary>
         /// Maximum number of accumulated frames
@@ -254,37 +257,7 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
 
-        #region Denoising
-
-        /// <summary>
-        /// Denoising mode
-        /// </summary>
-        [Tooltip("Denoising mode. None = raw output, Temporal = accumulation only, SpatialTemporal = bilateral filter, NRD = NVIDIA denoisers (best quality).")]
-        public PathTracingDenoiseModeParameter denoiseMode =
-            new PathTracingDenoiseModeParameter(PathTracingDenoiseMode.Temporal);
-
-        /// <summary>
-        /// Spatial denoising radius
-        /// </summary>
-        [Tooltip("Radius for spatial denoising filter. Larger values produce smoother results but may blur details.")]
-        public ClampedFloatParameter denoiseRadius = new ClampedFloatParameter(8.0f, 1.0f, 32.0f);
-
-        /// <summary>
-        /// Use NRD (NVIDIA Real-time Denoisers)
-        /// </summary>
-        [Tooltip("Use NVIDIA Real-time Denoisers for high-quality denoising. Requires NRD integration.")]
-        [AdditionalProperty]
-        public BoolParameter useNRD = new BoolParameter(false);
-
-        #endregion
-
         #region NRD REBLUR Settings
-
-        /// <summary>
-        /// Enable NRD REBLUR denoising
-        /// </summary>
-        [Tooltip("Enable NRD REBLUR denoising for path tracing output. Uses separate diffuse/specular denoising with material de-modulation.")]
-        public BoolParameter useNRDDenoising = new BoolParameter(false);
 
         // --- Blur Radius Settings ---
 
@@ -615,6 +588,30 @@ namespace UnityEngine.Rendering.Universal
         public bool IsPathTracingActive()
         {
             return technique.value == GlobalIlluminationTechnique.ReferencedPathTracing;
+        }
+
+        /// <summary>
+        /// Check if temporal accumulation is enabled (either mode uses accumulation)
+        /// </summary>
+        public bool UseTemporalAccumulation()
+        {
+            return denoiseMode.value != PathTracingDenoiseMode.None;
+        }
+
+        /// <summary>
+        /// Check if NRD REBLUR denoising is enabled
+        /// </summary>
+        public bool UseNRDDenoising()
+        {
+            return denoiseMode.value == PathTracingDenoiseMode.NRDReblur;
+        }
+
+        /// <summary>
+        /// Check if simple temporal accumulation with reprojection is enabled
+        /// </summary>
+        public bool UseSimpleTemporalAccumulation()
+        {
+            return denoiseMode.value == PathTracingDenoiseMode.TemporalAccumulation;
         }
 
         /// <summary>

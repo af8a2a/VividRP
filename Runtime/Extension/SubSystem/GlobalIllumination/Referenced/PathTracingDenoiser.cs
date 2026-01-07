@@ -322,6 +322,7 @@ namespace UnityEngine.Rendering.Universal
             internal TextureHandle TempTexture1;
             internal TextureHandle TempTexture2;
             internal TextureHandle TempDataTexture;
+            internal TextureHandle TempData2Texture;
             internal TextureHandle InternalDataTexture;
 
             // Input/Output
@@ -360,6 +361,7 @@ namespace UnityEngine.Rendering.Universal
             internal TextureHandle TempTexture1;
             internal TextureHandle TempTexture2;
             internal TextureHandle TempDataTexture;
+            internal TextureHandle TempData2Texture;
             internal TextureHandle InternalDataTexture;
 
             // Input/Output
@@ -404,6 +406,7 @@ namespace UnityEngine.Rendering.Universal
         static readonly int gHistory_SpecFast = Shader.PropertyToID("gHistory_SpecFast");
         static readonly int gPrev_InternalData = Shader.PropertyToID("gPrev_InternalData");
         static readonly int gOut_Data1 = Shader.PropertyToID("gOut_Data1");
+        static readonly int gOut_Data2 = Shader.PropertyToID("gOut_Data2");
         static readonly int gIn_Data1 = Shader.PropertyToID("gIn_Data1");
         static readonly int gOut_DiffFast = Shader.PropertyToID("gOut_DiffFast");
         static readonly int gOut_SpecFast = Shader.PropertyToID("gOut_SpecFast");
@@ -475,6 +478,7 @@ namespace UnityEngine.Rendering.Universal
                 cmd.SetComputeTextureParam(cs, kernel, gHistory_DiffFast, data.PrevDiffuseFastTexture);
 
                 cmd.SetComputeTextureParam(cs, kernel, gOut_Data1, data.TempDataTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Data2, data.TempData2Texture);
                 cmd.SetComputeTextureParam(cs, kernel, gOut_Diff, data.TempTexture2);
                 cmd.SetComputeTextureParam(cs, kernel, gOut_DiffFast, data.CurrDiffuseFastTexture);
 
@@ -586,6 +590,7 @@ namespace UnityEngine.Rendering.Universal
                 cmd.SetComputeTextureParam(cs, kernel, gHistory_SpecFast, data.PrevSpecularFastTexture);
 
                 cmd.SetComputeTextureParam(cs, kernel, gOut_Data1, data.TempDataTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Data2, data.TempData2Texture);
                 cmd.SetComputeTextureParam(cs, kernel, gOut_Spec, data.TempTexture2);
                 cmd.SetComputeTextureParam(cs, kernel, gOut_SpecFast, data.CurrSpecularFastTexture);
 
@@ -864,6 +869,13 @@ namespace UnityEngine.Rendering.Universal
                     name = "REBLUR_TempData"
                 });
 
+                data.TempData2Texture = builder.CreateTransientTexture(new TextureDesc(width, height)
+                {
+                    format = GraphicsFormat.R8_UNorm,
+                    enableRandomWrite = true,
+                    name = "REBLUR_TempData2"
+                });
+
                 data.InternalDataTexture = builder.CreateTransientTexture(new TextureDesc(width, height)
                 {
                     format = GraphicsFormat.R8_UNorm,
@@ -945,6 +957,13 @@ namespace UnityEngine.Rendering.Universal
                     format = GraphicsFormat.R8_UNorm,
                     enableRandomWrite = true,
                     name = "REBLUR_TempDataSpec"
+                });
+
+                data.TempData2Texture = builder.CreateTransientTexture(new TextureDesc(width, height)
+                {
+                    format = GraphicsFormat.R8_UNorm,
+                    enableRandomWrite = true,
+                    name = "REBLUR_TempData2Spec"
                 });
 
                 data.InternalDataTexture = builder.CreateTransientTexture(new TextureDesc(width, height)

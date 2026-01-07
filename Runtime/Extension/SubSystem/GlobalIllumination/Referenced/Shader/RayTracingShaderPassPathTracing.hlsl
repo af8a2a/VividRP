@@ -114,41 +114,6 @@ void AnyHitPathTracing(inout PathTracingPayload payload : SV_RayPayload, in Attr
     // Accept this hit as valid geometry
 }
 
-//--------------------------------------------------------------------------------------------------
-// Shadow Ray Shaders
-//--------------------------------------------------------------------------------------------------
-
-[shader("closesthit")]
-void ClosestHitShadow(inout ShadowRayPayload payload : SV_RayPayload, in AttributeData attributeData : SV_IntersectionAttributes)
-{
-    payload.visibility = 0.0;
-}
-
-[shader("anyhit")]
-void AnyHitShadow(inout ShadowRayPayload payload : SV_RayPayload, in AttributeData attributeData : SV_IntersectionAttributes)
-{
-    #ifdef _ALPHATEST_ON
-        // Alpha-tested material: sample alpha and test
-        IntersectionVertex currentVertex;
-        FragInputs fragInput;
-        GetCurrentVertexAndBuildFragInputs(attributeData, currentVertex, fragInput);
-
-        SurfaceData surfaceData;
-        InitializeStandardLitSurfaceDataRT(fragInput.texCoord0, 0.0, surfaceData);
-
-        if (surfaceData.alpha < surfaceData.alphaClipThreshold)
-        {
-            IgnoreHit();  // Transparent pixel, light can pass through
-            return;
-        }
-        // Alpha test passed, this pixel is opaque and blocks light
-    #endif
-
-    // For shadow rays, any opaque hit means the light is occluded
-    payload.visibility = 0.0;
-    AcceptHitAndEndSearch();
-}
-
 // Note: MissShadow is defined in ReferencedPathTracing.hlsl (included by .raytrace file only)
 // Miss shaders can only be compiled in .raytrace files, not in regular .shader files
 

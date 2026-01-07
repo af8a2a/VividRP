@@ -18,20 +18,17 @@ namespace UnityEngine.Rendering.Universal
         private int m_SamplesPerPixel = 1;
         private float m_FireflyClamp = 10.0f;
         private bool m_UseNVSER = true;
-        private bool m_AccumulateFrames = true;
 
         // History management
         private int m_FrameIndex = 0;
 
-        
+
         // NRD REBLUR Denoiser
         private PathTracingDenoiser m_Denoiser;
-        private bool m_UseNRDDenoising = true;
 
         // Temporal reprojection shader
         private ComputeShader m_TemporalReprojectionCS;
         private int m_TemporalReprojectionKernel;
-        private bool m_UseReprojectionRejection = true;
 
         public ReferencedPathTracingPass()
         {
@@ -62,13 +59,12 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// Configure path tracing settings (optional - will use volume settings if not called)
         /// </summary>
-        public void Setup(int maxBounces = 4, int samplesPerPixel = 1, float fireflyClamp = 10.0f, bool useNVSER = true, bool accumulate = true)
+        public void Setup(int maxBounces = 4, int samplesPerPixel = 1, float fireflyClamp = 10.0f, bool useNVSER = true)
         {
             m_MaxBounces = maxBounces;
             m_SamplesPerPixel = samplesPerPixel;
             m_FireflyClamp = fireflyClamp;
             m_UseNVSER = useNVSER && ExtensionSystem.SupportedExtension.Contains(HardwareExtension.ShaderExecutionReordering);
-            m_AccumulateFrames = accumulate;
         }
 
         /// <summary>
@@ -83,7 +79,6 @@ namespace UnityEngine.Rendering.Universal
             m_SamplesPerPixel = settings.GetSamplesPerPixel();
             m_FireflyClamp = settings.fireflyClamp.value;
             m_UseNVSER = settings.useNVSER.value && ExtensionSystem.SupportedExtension.Contains(HardwareExtension.ShaderExecutionReordering);
-            m_AccumulateFrames = settings.temporalAccumulation.value;
         }
 
         class PassData
@@ -322,7 +317,7 @@ namespace UnityEngine.Rendering.Universal
             passData.dispatchHeight = (uint)cameraData.cameraTargetDescriptor.height;
 
             // Path tracing specific parameters (not in CB)
-            passData.accumulate = m_AccumulateFrames;
+            passData.accumulate = giSettings.UseTemporalAccumulation();
             passData.intensity = giSettings.pathTracingIntensity.value;
             passData.environmentIntensity = giSettings.environmentIntensity.value;
             passData.includeEmissive = giSettings.includeEmissive.value;
@@ -660,7 +655,7 @@ namespace UnityEngine.Rendering.Universal
             TextureHandle diffuseHistoryTexture = TextureHandle.nullHandle;
             TextureHandle specularHistoryTexture = TextureHandle.nullHandle;
 
-            if (m_AccumulateFrames)
+            if (giSettings.UseTemporalAccumulation())
             {
                 // Combined history buffer
                 historyRT = ReAllocateHistoryBufferIfNeeded(historyRTSystem);
@@ -831,13 +826,14 @@ namespace UnityEngine.Rendering.Universal
                 }
             }
 
-            // Temporal Reprojection Pass - before copy-to-history
+            // Temporal Reprojection Pass - only for simple temporal accumulation mode (not NRD)
             // This pass reprojects history, validates it, and performs temporal accumulation with rejection
             TextureHandle reprojectedRadiance = outputTexture;
             TextureHandle reprojectedDiffuse = diffuseOutputTexture;
             TextureHandle reprojectedSpecular = specularOutputTexture;
 
-            bool useReprojection = m_AccumulateFrames &&
+            // Only use reprojection for TemporalAccumulation mode (NRD handles its own temporal logic)
+            bool useReprojection = giSettings.UseSimpleTemporalAccumulation() &&
                                    giSettings.enableReprojectionRejection.value &&
                                    m_TemporalReprojectionCS != null &&
                                    historyTexture.IsValid();
@@ -1028,7 +1024,7 @@ namespace UnityEngine.Rendering.Universal
 
             // Copy output to history buffer for next frame's temporal accumulation
             // Use reprojected output if reprojection was enabled
-            if (m_AccumulateFrames && historyTexture.IsValid())
+            if (giSettings.UseTemporalAccumulation() && historyTexture.IsValid())
             {
                 using (var builder = renderGraph.AddRasterRenderPass<CopyToHistoryPassData>("Path Tracing - Copy to History", out var passData))
                 {
@@ -1047,7 +1043,7 @@ namespace UnityEngine.Rendering.Universal
             }
 
             // Copy diffuse output to history buffer for NRD REBLUR
-            if (m_AccumulateFrames && diffuseHistoryTexture.IsValid())
+            if (giSettings.UseTemporalAccumulation() && diffuseHistoryTexture.IsValid())
             {
                 using (var builder = renderGraph.AddRasterRenderPass<CopyToHistoryPassData>("Path Tracing - Copy Diffuse to History", out var passData))
                 {
@@ -1066,7 +1062,7 @@ namespace UnityEngine.Rendering.Universal
             }
 
             // Copy specular output to history buffer for NRD REBLUR
-            if (m_AccumulateFrames && specularHistoryTexture.IsValid())
+            if (giSettings.UseTemporalAccumulation() && specularHistoryTexture.IsValid())
             {
                 using (var builder = renderGraph.AddRasterRenderPass<CopyToHistoryPassData>("Path Tracing - Copy Specular to History", out var passData))
                 {
@@ -1084,9 +1080,9 @@ namespace UnityEngine.Rendering.Universal
                 }
             }
 
-            // NRD REBLUR Denoising Pass
+            // NRD REBLUR Denoising Pass - only when NRDReblur mode is selected
             TextureHandle denoisedOutput = outputTexture;
-            if (m_UseNRDDenoising && giSettings.useNRDDenoising.value)
+            if (giSettings.UseNRDDenoising())
             {
                 // Get motion vectors and view-Z from resource data
                 var motionTexture = resourceData.motionVectorColor;

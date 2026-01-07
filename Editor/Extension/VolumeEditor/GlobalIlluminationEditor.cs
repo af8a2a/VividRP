@@ -30,13 +30,15 @@ namespace UnityEditor.Rendering.Universal
         SerializedDataParameter m_UseNVSER;
         SerializedDataParameter m_TextureLODBias;
 
-        // Path Tracing - Temporal Accumulation
-        SerializedDataParameter m_TemporalAccumulation;
+        // Path Tracing - Denoising
+        SerializedDataParameter m_DenoiseMode;
+
+        // Path Tracing - Temporal Accumulation Settings (for TemporalAccumulation mode)
         SerializedDataParameter m_MaxAccumulatedFrames;
         SerializedDataParameter m_ResetOnCameraMove;
         SerializedDataParameter m_CameraMovementThreshold;
 
-        // Path Tracing - Reprojection Rejection
+        // Path Tracing - Reprojection Rejection (for TemporalAccumulation mode)
         SerializedDataParameter m_EnableReprojectionRejection;
         SerializedDataParameter m_ReprojectionDepthThreshold;
         SerializedDataParameter m_ReprojectionNormalThreshold;
@@ -45,13 +47,7 @@ namespace UnityEditor.Rendering.Universal
         SerializedDataParameter m_VarianceClampingGamma;
         SerializedDataParameter m_MinTemporalBlendWeight;
 
-        // Path Tracing - Denoising (Basic)
-        SerializedDataParameter m_DenoiseMode;
-        SerializedDataParameter m_DenoiseRadius;
-        SerializedDataParameter m_UseNRD;
-
-        // NRD REBLUR Settings
-        SerializedDataParameter m_UseNRDDenoising;
+        // NRD REBLUR Settings (for NRDReblur mode)
         SerializedDataParameter m_NrdMinBlurRadius;
         SerializedDataParameter m_NrdMaxBlurRadius;
         SerializedDataParameter m_NrdDiffusePrepassBlurRadius;
@@ -130,9 +126,9 @@ namespace UnityEditor.Rendering.Universal
             public static readonly GUIContent Technique = EditorGUIUtility.TrTextContent("Technique", "Global illumination technique to use.");
             public static readonly GUIContent PathTracingQuality = EditorGUIUtility.TrTextContent("Quality Preset", "Quality preset for path tracing. Custom allows manual control of all parameters.");
             public static readonly GUIContent PathTracingIntensity = EditorGUIUtility.TrTextContent("Intensity", "Global intensity multiplier for path traced indirect lighting.");
+            public static readonly GUIContent DenoiseMode = EditorGUIUtility.TrTextContent("Denoise Mode", "Denoising mode. None = raw output (noisy), TemporalAccumulation = simple accumulation with reprojection, NRDReblur = NVIDIA REBLUR denoiser (best quality).");
 
             // NRD REBLUR
-            public static readonly GUIContent UseNRDDenoising = EditorGUIUtility.TrTextContent("Enable NRD REBLUR", "Enable NRD REBLUR denoising for path tracing output.");
             public static readonly GUIContent NrdMinBlurRadius = EditorGUIUtility.TrTextContent("Min Blur Radius (px)", "Minimum blur radius when converged.");
             public static readonly GUIContent NrdMaxBlurRadius = EditorGUIUtility.TrTextContent("Max Blur Radius (px)", "Maximum blur radius before temporal convergence.");
             public static readonly GUIContent NrdDiffusePrepassBlurRadius = EditorGUIUtility.TrTextContent("Diffuse Prepass Radius", "Pre-accumulation blur radius for diffuse.");
@@ -185,13 +181,15 @@ namespace UnityEditor.Rendering.Universal
             m_UseNVSER = Unpack(o.Find(x => x.useNVSER));
             m_TextureLODBias = Unpack(o.Find(x => x.textureLODBias));
 
-            // Path Tracing - Temporal Accumulation
-            m_TemporalAccumulation = Unpack(o.Find(x => x.temporalAccumulation));
+            // Path Tracing - Denoising Mode
+            m_DenoiseMode = Unpack(o.Find(x => x.denoiseMode));
+
+            // Path Tracing - Temporal Accumulation Settings (for TemporalAccumulation mode)
             m_MaxAccumulatedFrames = Unpack(o.Find(x => x.maxAccumulatedFrames));
             m_ResetOnCameraMove = Unpack(o.Find(x => x.resetOnCameraMove));
             m_CameraMovementThreshold = Unpack(o.Find(x => x.cameraMovementThreshold));
 
-            // Path Tracing - Reprojection Rejection
+            // Path Tracing - Reprojection Rejection (for TemporalAccumulation mode)
             m_EnableReprojectionRejection = Unpack(o.Find(x => x.enableReprojectionRejection));
             m_ReprojectionDepthThreshold = Unpack(o.Find(x => x.reprojectionDepthThreshold));
             m_ReprojectionNormalThreshold = Unpack(o.Find(x => x.reprojectionNormalThreshold));
@@ -200,13 +198,7 @@ namespace UnityEditor.Rendering.Universal
             m_VarianceClampingGamma = Unpack(o.Find(x => x.varianceClampingGamma));
             m_MinTemporalBlendWeight = Unpack(o.Find(x => x.minTemporalBlendWeight));
 
-            // Path Tracing - Denoising (Basic)
-            m_DenoiseMode = Unpack(o.Find(x => x.denoiseMode));
-            m_DenoiseRadius = Unpack(o.Find(x => x.denoiseRadius));
-            m_UseNRD = Unpack(o.Find(x => x.useNRD));
-
-            // NRD REBLUR Settings
-            m_UseNRDDenoising = Unpack(o.Find(x => x.useNRDDenoising));
+            // NRD REBLUR Settings (for NRDReblur mode)
             m_NrdMinBlurRadius = Unpack(o.Find(x => x.nrdMinBlurRadius));
             m_NrdMaxBlurRadius = Unpack(o.Find(x => x.nrdMaxBlurRadius));
             m_NrdDiffusePrepassBlurRadius = Unpack(o.Find(x => x.nrdDiffusePrepassBlurRadius));
@@ -317,13 +309,19 @@ namespace UnityEditor.Rendering.Universal
 
             EditorGUILayout.Space();
 
-            // Temporal Accumulation
-            DrawHeader(Styles.HeaderTemporalAccumulation);
+            // Denoising Section
+            DrawHeader(Styles.HeaderDenoising);
             using (new EditorGUI.IndentLevelScope())
             {
-                PropertyField(m_TemporalAccumulation);
-                if (m_TemporalAccumulation.value.boolValue)
+                PropertyField(m_DenoiseMode, Styles.DenoiseMode);
+
+                var denoiseMode = (PathTracingDenoiseMode)m_DenoiseMode.value.intValue;
+
+                // Temporal Accumulation mode settings
+                if (denoiseMode == PathTracingDenoiseMode.TemporalAccumulation)
                 {
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField("Temporal Accumulation Settings", EditorStyles.boldLabel);
                     using (new EditorGUI.IndentLevelScope())
                     {
                         PropertyField(m_MaxAccumulatedFrames);
@@ -355,17 +353,8 @@ namespace UnityEditor.Rendering.Universal
                         }
                     }
                 }
-            }
-
-            EditorGUILayout.Space();
-
-            // NRD REBLUR Denoising
-            DrawHeader(Styles.HeaderNRDReblur);
-            using (new EditorGUI.IndentLevelScope())
-            {
-                PropertyField(m_UseNRDDenoising, Styles.UseNRDDenoising);
-
-                if (m_UseNRDDenoising.value.boolValue)
+                // NRD REBLUR mode settings
+                else if (denoiseMode == PathTracingDenoiseMode.NRDReblur)
                 {
                     EditorGUILayout.Space();
 

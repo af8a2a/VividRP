@@ -4,6 +4,9 @@
 #pragma multi_compile _ SHARC_UPDATE
 #pragma multi_compile _ SHARC_QUERY
 
+// Temporal accumulation variant
+#pragma multi_compile _ _PATH_TRACING_ACCUMULATE
+
 // 64-bit atomics support (required for SHARC)
 #pragma require Int64BufferAtomics
 #pragma require Native16Bit

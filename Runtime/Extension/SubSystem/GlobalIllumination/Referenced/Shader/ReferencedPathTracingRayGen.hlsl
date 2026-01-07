@@ -14,6 +14,7 @@
 //--------------------------------------------------------------------------------------------------
 #if __JETBRAINS_IDE__
 #define SHARC_UPDATE 1
+#define SHARC_QUERY 1
 #endif
 // Check if SHARC is enabled (either UPDATE or QUERY keyword is defined)
 #if defined(SHARC_UPDATE) || defined(SHARC_QUERY)
@@ -120,7 +121,7 @@ TEXTURE2D_X(_PathTracingSpecularHistory);
 RW_TEXTURE2D(float4, _PathTracingMaterialFactors);
 
 // Path tracing specific parameters (not in ShaderVariablesRaytracing CB)
-int _PathTracingAccumulate;
+// Note: _PATH_TRACING_ACCUMULATE is now a multi_compile keyword, not a runtime parameter
 float _PathTracingIntensity;
 float _PathTracingEnvironmentIntensity;
 int _PathTracingIncludeEmissive;
@@ -567,12 +568,14 @@ void RayGenPathTracing()
 
         // Apply temporal accumulation to sky pixels too
         float3 finalSkyColor = skyColor;
-        if (_PathTracingAccumulate && _RaytracingSampleIndex > 0)
+#if defined(_PATH_TRACING_ACCUMULATE)
+        if (_RaytracingSampleIndex > 0)
         {
             float3 historySky = LOAD_TEXTURE2D_X(_PathTracingHistory, launchIndex).rgb;
             float blendWeight = 1.0 / (float)(_RaytracingSampleIndex + 1);
             finalSkyColor = lerp(historySky, skyColor, blendWeight);
         }
+#endif
 
         _PathTracingOutput[launchIndex] = float4(finalSkyColor, 1.0);
         return;
@@ -1012,33 +1015,32 @@ void RayGenPathTracing()
     float finalDiffuseHitDist = accumulatorTotal.diffuseHitDist;
     float finalSpecularHitDist = accumulatorTotal.specularHitDist;
 
-    if (_PathTracingAccumulate)
+#if defined(_PATH_TRACING_ACCUMULATE)
+    // _RaytracingSampleIndex is used as the frame count for accumulation
+    // Frame 0: just use current sample
+    // Frame N: blend with history using running average
+    int frameCount = _RaytracingSampleIndex;
+
+    if (frameCount > 0)
     {
-        // _RaytracingSampleIndex is used as the frame count for accumulation
-        // Frame 0: just use current sample
-        // Frame N: blend with history using running average
-        int frameCount = _RaytracingSampleIndex;
+        // Sample history buffers
+        float3 historyRadiance = LOAD_TEXTURE2D_X(_PathTracingHistory, launchIndex).rgb;
+        float4 historyDiffuse = LOAD_TEXTURE2D_X(_PathTracingDiffuseHistory, launchIndex);
+        float4 historySpecular = LOAD_TEXTURE2D_X(_PathTracingSpecularHistory, launchIndex);
 
-        if (frameCount > 0)
-        {
-            // Sample history buffers
-            float3 historyRadiance = LOAD_TEXTURE2D_X(_PathTracingHistory, launchIndex).rgb;
-            float4 historyDiffuse = LOAD_TEXTURE2D_X(_PathTracingDiffuseHistory, launchIndex);
-            float4 historySpecular = LOAD_TEXTURE2D_X(_PathTracingSpecularHistory, launchIndex);
+        // Running average: result = (history * frameCount + current) / (frameCount + 1)
+        // This is equivalent to: result = lerp(history, current, 1.0 / (frameCount + 1))
+        float blendWeight = 1.0 / (float)(frameCount + 1);
+        finalRadiance = lerp(historyRadiance, accumulatorTotal.combinedRadiance, blendWeight);
+        finalDiffuse = lerp(historyDiffuse.rgb, accumulatorTotal.diffuseRadiance, blendWeight);
+        finalSpecular = lerp(historySpecular.rgb, accumulatorTotal.specularRadiance, blendWeight);
 
-            // Running average: result = (history * frameCount + current) / (frameCount + 1)
-            // This is equivalent to: result = lerp(history, current, 1.0 / (frameCount + 1))
-            float blendWeight = 1.0 / (float)(frameCount + 1);
-            finalRadiance = lerp(historyRadiance, accumulatorTotal.combinedRadiance, blendWeight);
-            finalDiffuse = lerp(historyDiffuse.rgb, accumulatorTotal.diffuseRadiance, blendWeight);
-            finalSpecular = lerp(historySpecular.rgb, accumulatorTotal.specularRadiance, blendWeight);
-
-            // Hit distance blending (use min for specular - first hit most important)
-            finalDiffuseHitDist = lerp(historyDiffuse.a, finalDiffuseHitDist, blendWeight);
-            finalSpecularHitDist = min(historySpecular.a, finalSpecularHitDist);
-        }
-        // else: frameCount == 0, use current sample directly (no history yet)
+        // Hit distance blending (use min for specular - first hit most important)
+        finalDiffuseHitDist = lerp(historyDiffuse.a, finalDiffuseHitDist, blendWeight);
+        finalSpecularHitDist = min(historySpecular.a, finalSpecularHitDist);
     }
+    // else: frameCount == 0, use current sample directly (no history yet)
+#endif
 
     // Sanitize final output to avoid NaN propagation in accumulation
     if (!IsFinite3(finalRadiance))

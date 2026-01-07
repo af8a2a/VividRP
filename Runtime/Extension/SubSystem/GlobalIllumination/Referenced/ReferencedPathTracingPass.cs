@@ -239,7 +239,7 @@ namespace UnityEngine.Rendering.Universal
             public static readonly int _SkyTexture = Shader.PropertyToID("_SkyTexture");
 
             // Path tracing specific parameters (not in ShaderVariablesRaytracing CB)
-            public static readonly int _PathTracingAccumulate = Shader.PropertyToID("_PathTracingAccumulate");
+            // Note: _PATH_TRACING_ACCUMULATE is now a multi_compile keyword, not a runtime parameter
             public static readonly int _PathTracingIntensity = Shader.PropertyToID("_PathTracingIntensity");
             public static readonly int _PathTracingEnvironmentIntensity = Shader.PropertyToID("_PathTracingEnvironmentIntensity");
             public static readonly int _PathTracingIncludeEmissive = Shader.PropertyToID("_PathTracingIncludeEmissive");
@@ -386,7 +386,8 @@ namespace UnityEngine.Rendering.Universal
                 }
 
                 // Set path tracing specific parameters (not in ShaderVariablesRaytracing CB)
-                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingAccumulate, data.accumulate ? 1 : 0);
+                // Set accumulation keyword (compile-time branch for better performance)
+                CoreUtils.SetKeyword(cmd, "_PATH_TRACING_ACCUMULATE", data.accumulate);
                 cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._PathTracingIntensity, data.intensity);
                 cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._PathTracingEnvironmentIntensity, data.environmentIntensity);
                 cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingIncludeEmissive, data.includeEmissive ? 1 : 0);

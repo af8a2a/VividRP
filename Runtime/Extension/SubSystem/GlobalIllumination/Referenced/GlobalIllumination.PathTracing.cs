@@ -202,6 +202,56 @@ namespace UnityEngine.Rendering.Universal
         [AdditionalProperty]
         public ClampedFloatParameter cameraMovementThreshold = new ClampedFloatParameter(0.01f, 0.0f, 1.0f);
 
+        // --- History Reprojection Rejection ---
+
+        /// <summary>
+        /// Enable history reprojection with rejection
+        /// </summary>
+        [Tooltip("Enable motion-vector based history reprojection with disocclusion rejection. Improves temporal stability while reducing ghosting.")]
+        public BoolParameter enableReprojectionRejection = new BoolParameter(true);
+
+        /// <summary>
+        /// Depth rejection threshold
+        /// </summary>
+        [Tooltip("Relative depth difference threshold for rejecting history. Higher values are more permissive. (0.01-0.5)")]
+        [AdditionalProperty]
+        public ClampedFloatParameter reprojectionDepthThreshold = new ClampedFloatParameter(0.05f, 0.01f, 0.5f);
+
+        /// <summary>
+        /// Normal rejection threshold
+        /// </summary>
+        [Tooltip("Normal difference threshold (1 - dot product) for rejecting history. Higher values are more permissive. (0.01-0.5)")]
+        [AdditionalProperty]
+        public ClampedFloatParameter reprojectionNormalThreshold = new ClampedFloatParameter(0.1f, 0.01f, 0.5f);
+
+        /// <summary>
+        /// Roughness rejection threshold
+        /// </summary>
+        [Tooltip("Roughness difference threshold for rejecting history. Higher values are more permissive. (0.05-0.5)")]
+        [AdditionalProperty]
+        public ClampedFloatParameter reprojectionRoughnessThreshold = new ClampedFloatParameter(0.2f, 0.05f, 0.5f);
+
+        /// <summary>
+        /// Enable variance clamping
+        /// </summary>
+        [Tooltip("Enable variance-based history clamping to reduce ghosting artifacts.")]
+        [AdditionalProperty]
+        public BoolParameter enableVarianceClamping = new BoolParameter(true);
+
+        /// <summary>
+        /// Variance clamping gamma
+        /// </summary>
+        [Tooltip("Gamma value for variance clamping. Higher values allow more variance. (0.5-3.0)")]
+        [AdditionalProperty]
+        public ClampedFloatParameter varianceClampingGamma = new ClampedFloatParameter(1.5f, 0.5f, 3.0f);
+
+        /// <summary>
+        /// Minimum blend weight
+        /// </summary>
+        [Tooltip("Minimum weight for current frame contribution. Prevents over-reliance on history. (0.01-0.5)")]
+        [AdditionalProperty]
+        public ClampedFloatParameter minTemporalBlendWeight = new ClampedFloatParameter(0.05f, 0.01f, 0.5f);
+
         #endregion
 
         #region Denoising

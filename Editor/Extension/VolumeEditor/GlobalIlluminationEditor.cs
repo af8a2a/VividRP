@@ -36,6 +36,15 @@ namespace UnityEditor.Rendering.Universal
         SerializedDataParameter m_ResetOnCameraMove;
         SerializedDataParameter m_CameraMovementThreshold;
 
+        // Path Tracing - Reprojection Rejection
+        SerializedDataParameter m_EnableReprojectionRejection;
+        SerializedDataParameter m_ReprojectionDepthThreshold;
+        SerializedDataParameter m_ReprojectionNormalThreshold;
+        SerializedDataParameter m_ReprojectionRoughnessThreshold;
+        SerializedDataParameter m_EnableVarianceClamping;
+        SerializedDataParameter m_VarianceClampingGamma;
+        SerializedDataParameter m_MinTemporalBlendWeight;
+
         // Path Tracing - Denoising (Basic)
         SerializedDataParameter m_DenoiseMode;
         SerializedDataParameter m_DenoiseRadius;
@@ -182,6 +191,15 @@ namespace UnityEditor.Rendering.Universal
             m_ResetOnCameraMove = Unpack(o.Find(x => x.resetOnCameraMove));
             m_CameraMovementThreshold = Unpack(o.Find(x => x.cameraMovementThreshold));
 
+            // Path Tracing - Reprojection Rejection
+            m_EnableReprojectionRejection = Unpack(o.Find(x => x.enableReprojectionRejection));
+            m_ReprojectionDepthThreshold = Unpack(o.Find(x => x.reprojectionDepthThreshold));
+            m_ReprojectionNormalThreshold = Unpack(o.Find(x => x.reprojectionNormalThreshold));
+            m_ReprojectionRoughnessThreshold = Unpack(o.Find(x => x.reprojectionRoughnessThreshold));
+            m_EnableVarianceClamping = Unpack(o.Find(x => x.enableVarianceClamping));
+            m_VarianceClampingGamma = Unpack(o.Find(x => x.varianceClampingGamma));
+            m_MinTemporalBlendWeight = Unpack(o.Find(x => x.minTemporalBlendWeight));
+
             // Path Tracing - Denoising (Basic)
             m_DenoiseMode = Unpack(o.Find(x => x.denoiseMode));
             m_DenoiseRadius = Unpack(o.Find(x => x.denoiseRadius));
@@ -313,6 +331,27 @@ namespace UnityEditor.Rendering.Universal
                         if (m_ResetOnCameraMove.value.boolValue)
                         {
                             PropertyField(m_CameraMovementThreshold);
+                        }
+
+                        EditorGUILayout.Space();
+
+                        // Reprojection Rejection
+                        EditorGUILayout.LabelField("History Reprojection Rejection", EditorStyles.boldLabel);
+                        PropertyField(m_EnableReprojectionRejection);
+                        if (m_EnableReprojectionRejection.value.boolValue)
+                        {
+                            using (new EditorGUI.IndentLevelScope())
+                            {
+                                PropertyField(m_ReprojectionDepthThreshold);
+                                PropertyField(m_ReprojectionNormalThreshold);
+                                PropertyField(m_ReprojectionRoughnessThreshold);
+                                PropertyField(m_EnableVarianceClamping);
+                                if (m_EnableVarianceClamping.value.boolValue)
+                                {
+                                    PropertyField(m_VarianceClampingGamma);
+                                }
+                                PropertyField(m_MinTemporalBlendWeight);
+                            }
                         }
                     }
                 }

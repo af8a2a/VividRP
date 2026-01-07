@@ -42,5 +42,18 @@ namespace UnityEngine.Rendering.Universal
             get => m_PathTracingRemodulationCS;
             set => this.SetValueAndNotify(ref m_PathTracingRemodulationCS, value, nameof(m_PathTracingRemodulationCS));
         }
+
+        [SerializeField]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/Referenced/Shader/PathTracingTemporalReprojection.compute")]
+        private ComputeShader m_PathTracingTemporalReprojectionCS;
+
+        /// <summary>
+        /// Path Tracing Temporal Reprojection compute shader for history validation and accumulation
+        /// </summary>
+        public ComputeShader pathTracingTemporalReprojectionCS
+        {
+            get => m_PathTracingTemporalReprojectionCS;
+            set => this.SetValueAndNotify(ref m_PathTracingTemporalReprojectionCS, value, nameof(m_PathTracingTemporalReprojectionCS));
+        }
     }
 }

@@ -23,14 +23,31 @@ namespace UnityEngine.Rendering.Universal
         // History management
         private int m_FrameIndex = 0;
 
+        
         // NRD REBLUR Denoiser
         private PathTracingDenoiser m_Denoiser;
         private bool m_UseNRDDenoising = true;
+
+        // Temporal reprojection shader
+        private ComputeShader m_TemporalReprojectionCS;
+        private int m_TemporalReprojectionKernel;
+        private bool m_UseReprojectionRejection = true;
 
         public ReferencedPathTracingPass()
         {
             renderPassEvent = RenderPassEvent.AfterRenderingGbuffer;
             m_Denoiser = new PathTracingDenoiser();
+
+            // Initialize temporal reprojection shader
+            var vividShaders = GraphicsSettings.GetRenderPipelineSettings<VividRuntimeShader>();
+            if (vividShaders != null)
+            {
+                m_TemporalReprojectionCS = vividShaders.pathTracingTemporalReprojectionCS;
+                if (m_TemporalReprojectionCS != null)
+                {
+                    m_TemporalReprojectionKernel = m_TemporalReprojectionCS.FindKernel("CSTemporalReprojection");
+                }
+            }
         }
 
         /// <summary>
@@ -139,6 +156,40 @@ namespace UnityEngine.Rendering.Universal
         {
             internal TextureHandle source;
             internal TextureHandle destination;
+        }
+
+        class TemporalReprojectionPassData
+        {
+            // Compute shader
+            internal ComputeShader reprojectionCS;
+            internal int kernel;
+
+            // Current frame inputs
+            internal TextureHandle currentRadiance;
+            internal TextureHandle currentDiffuse;
+            internal TextureHandle currentSpecular;
+            internal TextureHandle currentDepth;
+            internal TextureHandle currentNormalRoughness;
+            internal TextureHandle motionVectors;
+
+            // History inputs
+            internal TextureHandle historyRadiance;
+            internal TextureHandle historyDiffuse;
+            internal TextureHandle historySpecular;
+            internal TextureHandle historyDepth;
+            internal TextureHandle historyNormalRoughness;
+            internal TextureHandle inputAccumulationCount;
+
+            // Outputs
+            internal TextureHandle outputRadiance;
+            internal TextureHandle outputDiffuse;
+            internal TextureHandle outputSpecular;
+            internal TextureHandle outputAccumulationCount;
+
+            // Parameters
+            internal Vector4 screenSize;
+            internal Vector4 reprojectionParams; // (depthThreshold, normalThreshold, roughnessThreshold, maxAccumFrames)
+            internal Vector4 temporalParams; // (minBlendWeight, enableSeparateChannels, varianceClampingGamma, unused)
         }
 
         /// <summary>
@@ -507,6 +558,37 @@ namespace UnityEngine.Rendering.Universal
                    );
         }
 
+        /// <summary>
+        /// Accumulation count buffer allocator function (for temporal reprojection)
+        /// Format: R32_SFloat - per-pixel frame count
+        /// </summary>
+        static RTHandle PathTracingAccumulationCountBufferAllocator(GraphicsFormat graphicsFormat, string viewName, int frameIndex, RTHandleSystem rtHandleSystem)
+        {
+            frameIndex &= 1; // Ping-pong between 2 buffers
+
+            return rtHandleSystem.Alloc(
+                Vector2.one,
+                colorFormat: graphicsFormat,
+                enableRandomWrite: true,
+                useDynamicScale: true,
+                name: $"{viewName}_PathTracingAccumCount{frameIndex}"
+            );
+        }
+
+        /// <summary>
+        /// Reallocate accumulation count buffer if needed (for temporal reprojection)
+        /// </summary>
+        internal RTHandle ReAllocateAccumulationCountBufferIfNeeded(HistoryFrameRTSystem historyRTSystem)
+        {
+            return historyRTSystem.GetCurrentFrameRT(HistoryFrameType.PathTracingAccumulationCount)
+                   ?? historyRTSystem.AllocHistoryFrameRT(
+                       (int)HistoryFrameType.PathTracingAccumulationCount,
+                       PathTracingAccumulationCountBufferAllocator,
+                       GraphicsFormat.R32_SFloat,
+                       1
+                   );
+        }
+
         public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
         {
             UniversalResourceData resourceData = frameData.Get<UniversalResourceData>();
@@ -749,12 +831,208 @@ namespace UnityEngine.Rendering.Universal
                 }
             }
 
+            // Temporal Reprojection Pass - before copy-to-history
+            // This pass reprojects history, validates it, and performs temporal accumulation with rejection
+            TextureHandle reprojectedRadiance = outputTexture;
+            TextureHandle reprojectedDiffuse = diffuseOutputTexture;
+            TextureHandle reprojectedSpecular = specularOutputTexture;
+
+            bool useReprojection = m_AccumulateFrames &&
+                                   giSettings.enableReprojectionRejection.value &&
+                                   m_TemporalReprojectionCS != null &&
+                                   historyTexture.IsValid();
+
+            if (useReprojection)
+            {
+                // Allocate accumulation count buffer
+                RTHandle accumCountRT = ReAllocateAccumulationCountBufferIfNeeded(historyRTSystem);
+                TextureHandle accumCountTexture = renderGraph.ImportTexture(accumCountRT);
+
+                // Get previous frame's accumulation count - safely check if buffer exists
+                RTHandle prevAccumCountRT = null;
+                if (historyRTSystem.GetNumFramesAllocated(HistoryFrameType.PathTracingAccumulationCount) >= 2)
+                {
+                    prevAccumCountRT = historyRTSystem.GetPreviousFrameRT(HistoryFrameType.PathTracingAccumulationCount);
+                }
+                TextureHandle prevAccumCountTexture = prevAccumCountRT != null
+                    ? renderGraph.ImportTexture(prevAccumCountRT)
+                    : accumCountTexture; // Use current if no history
+
+                // Get previous depth - safely check if buffer exists
+                RTHandle prevDepthRT = null;
+                if (historyRTSystem.GetNumFramesAllocated(HistoryFrameType.Depth) >= 2)
+                {
+                    prevDepthRT = historyRTSystem.GetPreviousFrameRT(HistoryFrameType.Depth);
+                }
+                if (prevDepthRT == null)
+                {
+                    prevDepthRT = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.Depth);
+                }
+                TextureHandle prevDepthTexture = prevDepthRT != null
+                    ? renderGraph.ImportTexture(prevDepthRT)
+                    : resourceData.cameraDepthTexture; // Fallback to current depth
+
+                // Get previous normal/roughness - safely check if buffer exists
+                RTHandle prevNormalRoughnessRT = null;
+                if (historyRTSystem.GetNumFramesAllocated(HistoryFrameType.PrevNormalRoughness) >= 2)
+                {
+                    prevNormalRoughnessRT = historyRTSystem.GetPreviousFrameRT(HistoryFrameType.PrevNormalRoughness);
+                }
+                if (prevNormalRoughnessRT == null)
+                {
+                    prevNormalRoughnessRT = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.PrevNormalRoughness);
+                }
+                TextureHandle prevNormalRoughnessTexture = prevNormalRoughnessRT != null
+                    ? renderGraph.ImportTexture(prevNormalRoughnessRT)
+                    : resourceData.gBuffer[2]; // Fallback to current normal/roughness
+
+                // Create output textures for reprojection
+                var reprojOutputDesc = new TextureDesc(cameraData.cameraTargetDescriptor.width, cameraData.cameraTargetDescriptor.height)
+                {
+                    enableRandomWrite = true,
+                    format = GraphicsFormat.R16G16B16A16_SFloat,
+                    name = "PathTracingReprojectedRadiance"
+                };
+                reprojectedRadiance = renderGraph.CreateTexture(reprojOutputDesc);
+
+                reprojOutputDesc.name = "PathTracingReprojectedDiffuse";
+                reprojectedDiffuse = renderGraph.CreateTexture(reprojOutputDesc);
+
+                reprojOutputDesc.name = "PathTracingReprojectedSpecular";
+                reprojectedSpecular = renderGraph.CreateTexture(reprojOutputDesc);
+
+                var accumOutputDesc = new TextureDesc(cameraData.cameraTargetDescriptor.width, cameraData.cameraTargetDescriptor.height)
+                {
+                    enableRandomWrite = true,
+                    format = GraphicsFormat.R32_SFloat,
+                    name = "PathTracingNewAccumCount"
+                };
+                TextureHandle newAccumCountTexture = renderGraph.CreateTexture(accumOutputDesc);
+
+                using (var builder = renderGraph.AddComputePass<TemporalReprojectionPassData>("Path Tracing - Temporal Reprojection", out var passData))
+                {
+                    passData.reprojectionCS = m_TemporalReprojectionCS;
+                    passData.kernel = m_TemporalReprojectionKernel;
+
+                    // Current frame inputs
+                    passData.currentRadiance = outputTexture;
+                    passData.currentDiffuse = diffuseOutputTexture;
+                    passData.currentSpecular = specularOutputTexture;
+                    passData.currentDepth = resourceData.cameraDepthTexture;
+                    passData.currentNormalRoughness = resourceData.gBuffer[2];
+                    passData.motionVectors = resourceData.motionVectorColor;
+
+                    // History inputs
+                    passData.historyRadiance = historyTexture;
+                    passData.historyDiffuse = diffuseHistoryTexture;
+                    passData.historySpecular = specularHistoryTexture;
+                    passData.historyDepth = prevDepthTexture;
+                    passData.historyNormalRoughness = prevNormalRoughnessTexture;
+                    passData.inputAccumulationCount = prevAccumCountTexture;
+
+                    // Outputs
+                    passData.outputRadiance = reprojectedRadiance;
+                    passData.outputDiffuse = reprojectedDiffuse;
+                    passData.outputSpecular = reprojectedSpecular;
+                    passData.outputAccumulationCount = newAccumCountTexture;
+
+                    // Parameters
+                    int width = cameraData.cameraTargetDescriptor.width;
+                    int height = cameraData.cameraTargetDescriptor.height;
+                    passData.screenSize = new Vector4(width, height, 1.0f / width, 1.0f / height);
+                    passData.reprojectionParams = new Vector4(
+                        giSettings.reprojectionDepthThreshold.value,
+                        giSettings.reprojectionNormalThreshold.value,
+                        giSettings.reprojectionRoughnessThreshold.value,
+                        giSettings.maxAccumulatedFrames.value
+                    );
+                    passData.temporalParams = new Vector4(
+                        giSettings.minTemporalBlendWeight.value,
+                        1.0f, // Enable separate channels
+                        giSettings.varianceClampingGamma.value,
+                        0.0f
+                    );
+
+                    // Declare texture usage
+                    builder.UseTexture(passData.currentRadiance, AccessFlags.Read);
+                    builder.UseTexture(passData.currentDiffuse, AccessFlags.Read);
+                    builder.UseTexture(passData.currentSpecular, AccessFlags.Read);
+                    builder.UseTexture(passData.currentDepth, AccessFlags.Read);
+                    builder.UseTexture(passData.currentNormalRoughness, AccessFlags.Read);
+                    builder.UseTexture(passData.motionVectors, AccessFlags.Read);
+                    builder.UseTexture(passData.historyRadiance, AccessFlags.Read);
+                    builder.UseTexture(passData.historyDiffuse, AccessFlags.Read);
+                    builder.UseTexture(passData.historySpecular, AccessFlags.Read);
+                    builder.UseTexture(passData.historyDepth, AccessFlags.Read);
+                    builder.UseTexture(passData.historyNormalRoughness, AccessFlags.Read);
+                    builder.UseTexture(passData.inputAccumulationCount, AccessFlags.Read);
+                    builder.UseTexture(passData.outputRadiance, AccessFlags.Write);
+                    builder.UseTexture(passData.outputDiffuse, AccessFlags.Write);
+                    builder.UseTexture(passData.outputSpecular, AccessFlags.Write);
+                    builder.UseTexture(passData.outputAccumulationCount, AccessFlags.Write);
+
+                    builder.AllowPassCulling(false);
+
+                    builder.SetRenderFunc<TemporalReprojectionPassData>((data, context) =>
+                    {
+                        var cmd = context.cmd;
+
+                        // Bind textures
+                        cmd.SetComputeTextureParam(data.reprojectionCS, data.kernel, "_CurrentRadiance", data.currentRadiance);
+                        cmd.SetComputeTextureParam(data.reprojectionCS, data.kernel, "_CurrentDiffuse", data.currentDiffuse);
+                        cmd.SetComputeTextureParam(data.reprojectionCS, data.kernel, "_CurrentSpecular", data.currentSpecular);
+                        cmd.SetComputeTextureParam(data.reprojectionCS, data.kernel, "_CurrentDepth", data.currentDepth);
+                        cmd.SetComputeTextureParam(data.reprojectionCS, data.kernel, "_CurrentNormalRoughness", data.currentNormalRoughness);
+                        cmd.SetComputeTextureParam(data.reprojectionCS, data.kernel, "_MotionVectors", data.motionVectors);
+
+                        cmd.SetComputeTextureParam(data.reprojectionCS, data.kernel, "_HistoryRadiance", data.historyRadiance);
+                        cmd.SetComputeTextureParam(data.reprojectionCS, data.kernel, "_HistoryDiffuse", data.historyDiffuse);
+                        cmd.SetComputeTextureParam(data.reprojectionCS, data.kernel, "_HistorySpecular", data.historySpecular);
+                        cmd.SetComputeTextureParam(data.reprojectionCS, data.kernel, "_HistoryDepth", data.historyDepth);
+                        cmd.SetComputeTextureParam(data.reprojectionCS, data.kernel, "_HistoryNormalRoughness", data.historyNormalRoughness);
+                        cmd.SetComputeTextureParam(data.reprojectionCS, data.kernel, "_InputAccumulationCount", data.inputAccumulationCount);
+
+                        cmd.SetComputeTextureParam(data.reprojectionCS, data.kernel, "_OutputRadiance", data.outputRadiance);
+                        cmd.SetComputeTextureParam(data.reprojectionCS, data.kernel, "_OutputDiffuse", data.outputDiffuse);
+                        cmd.SetComputeTextureParam(data.reprojectionCS, data.kernel, "_OutputSpecular", data.outputSpecular);
+                        cmd.SetComputeTextureParam(data.reprojectionCS, data.kernel, "_OutputAccumulationCount", data.outputAccumulationCount);
+
+                        // Bind parameters
+                        cmd.SetComputeVectorParam(data.reprojectionCS, "_ScreenSize", data.screenSize);
+                        cmd.SetComputeVectorParam(data.reprojectionCS, "_ReprojectionParams", data.reprojectionParams);
+                        cmd.SetComputeVectorParam(data.reprojectionCS, "_TemporalParams", data.temporalParams);
+
+                        // Dispatch
+                        int threadGroupsX = Mathf.CeilToInt(data.screenSize.x / 8.0f);
+                        int threadGroupsY = Mathf.CeilToInt(data.screenSize.y / 8.0f);
+                        cmd.DispatchCompute(data.reprojectionCS, data.kernel, threadGroupsX, threadGroupsY, 1);
+                    });
+                }
+
+                // Copy new accumulation count to history
+                using (var builder = renderGraph.AddRasterRenderPass<CopyToHistoryPassData>("Path Tracing - Copy AccumCount to History", out var passData))
+                {
+                    passData.source = newAccumCountTexture;
+                    passData.destination = accumCountTexture;
+
+                    builder.UseTexture(passData.source);
+                    builder.SetRenderAttachment(passData.destination, 0, AccessFlags.Write);
+                    builder.AllowPassCulling(false);
+
+                    builder.SetRenderFunc<CopyToHistoryPassData>((data, context) =>
+                    {
+                        Blitter.BlitTexture(context.cmd, data.source, new Vector4(1, 1, 0, 0), 0, false);
+                    });
+                }
+            }
+
             // Copy output to history buffer for next frame's temporal accumulation
+            // Use reprojected output if reprojection was enabled
             if (m_AccumulateFrames && historyTexture.IsValid())
             {
                 using (var builder = renderGraph.AddRasterRenderPass<CopyToHistoryPassData>("Path Tracing - Copy to History", out var passData))
                 {
-                    passData.source = outputTexture;
+                    passData.source = reprojectedRadiance;
                     passData.destination = historyTexture;
 
                     builder.UseTexture(passData.source);
@@ -773,7 +1051,7 @@ namespace UnityEngine.Rendering.Universal
             {
                 using (var builder = renderGraph.AddRasterRenderPass<CopyToHistoryPassData>("Path Tracing - Copy Diffuse to History", out var passData))
                 {
-                    passData.source = diffuseOutputTexture;
+                    passData.source = reprojectedDiffuse;
                     passData.destination = diffuseHistoryTexture;
 
                     builder.UseTexture(passData.source);
@@ -792,7 +1070,7 @@ namespace UnityEngine.Rendering.Universal
             {
                 using (var builder = renderGraph.AddRasterRenderPass<CopyToHistoryPassData>("Path Tracing - Copy Specular to History", out var passData))
                 {
-                    passData.source = specularOutputTexture;
+                    passData.source = reprojectedSpecular;
                     passData.destination = specularHistoryTexture;
 
                     builder.UseTexture(passData.source);
@@ -898,6 +1176,7 @@ namespace UnityEngine.Rendering.Universal
 
             // TODO: Composite path tracing result with main rendering (additive blend for GI)
 
+            resourceData.cameraColor = outputTexture;
             // Increment frame index for temporal sampling
             m_FrameIndex++;
         }

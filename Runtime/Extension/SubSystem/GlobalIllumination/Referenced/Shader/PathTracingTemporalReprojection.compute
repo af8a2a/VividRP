@@ -1,0 +1,333 @@
+#pragma kernel CSTemporalReprojection
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+// Input textures
+Texture2D<float4> _CurrentRadiance;         // Current frame path traced result
+Texture2D<float4> _HistoryRadiance;         // Previous frame accumulated result
+Texture2D<float2> _MotionVectors;           // Motion vectors (screen space)
+Texture2D<float> _CurrentDepth;             // Current frame depth
+Texture2D<float> _HistoryDepth;             // Previous frame depth
+Texture2D<float4> _CurrentNormalRoughness;  // Current frame normal + roughness (packed)
+Texture2D<float4> _HistoryNormalRoughness;  // Previous frame normal + roughness
+
+// For separate diffuse/specular
+Texture2D<float4> _CurrentDiffuse;
+Texture2D<float4> _HistoryDiffuse;
+Texture2D<float4> _CurrentSpecular;
+Texture2D<float4> _HistorySpecular;
+
+// Output textures
+RWTexture2D<float4> _OutputRadiance;
+RWTexture2D<float4> _OutputDiffuse;
+RWTexture2D<float4> _OutputSpecular;
+RWTexture2D<float> _OutputAccumulationCount;  // Per-pixel frame count
+
+// Input accumulation count
+Texture2D<float> _InputAccumulationCount;
+
+// Parameters
+float4 _ReprojectionParams;          // (depthThreshold, normalThreshold, roughnessThreshold, maxAccumFrames)
+float4 _TemporalParams;              // (minBlendWeight, enableSeparateChannels, unused, unused)
+
+#define DEPTH_REJECTION_THRESHOLD _ReprojectionParams.x
+#define NORMAL_REJECTION_THRESHOLD _ReprojectionParams.y
+#define ROUGHNESS_REJECTION_THRESHOLD _ReprojectionParams.z
+#define MAX_ACCUMULATED_FRAMES _ReprojectionParams.w
+#define MIN_BLEND_WEIGHT _TemporalParams.x
+#define ENABLE_SEPARATE_CHANNELS (_TemporalParams.y > 0.5)
+
+// Bilinear sampling with custom weights
+float4 SampleHistoryBilinear(Texture2D<float4> historyTex, float2 uv, float2 screenSize)
+{
+    float2 texelPos = uv * screenSize - 0.5;
+    float2 texelFloor = floor(texelPos);
+    float2 texelFrac = texelPos - texelFloor;
+
+    int2 coord00 = int2(texelFloor);
+    int2 coord10 = coord00 + int2(1, 0);
+    int2 coord01 = coord00 + int2(0, 1);
+    int2 coord11 = coord00 + int2(1, 1);
+
+    // Clamp to screen bounds
+    coord00 = clamp(coord00, int2(0, 0), int2(screenSize) - 1);
+    coord10 = clamp(coord10, int2(0, 0), int2(screenSize) - 1);
+    coord01 = clamp(coord01, int2(0, 0), int2(screenSize) - 1);
+    coord11 = clamp(coord11, int2(0, 0), int2(screenSize) - 1);
+
+    float4 s00 = historyTex[coord00];
+    float4 s10 = historyTex[coord10];
+    float4 s01 = historyTex[coord01];
+    float4 s11 = historyTex[coord11];
+
+    float4 row0 = lerp(s00, s10, texelFrac.x);
+    float4 row1 = lerp(s01, s11, texelFrac.x);
+
+    return lerp(row0, row1, texelFrac.y);
+}
+
+float SampleHistoryDepthBilinear(Texture2D<float> depthTex, float2 uv, float2 screenSize)
+{
+    float2 texelPos = uv * screenSize - 0.5;
+    float2 texelFloor = floor(texelPos);
+    float2 texelFrac = texelPos - texelFloor;
+
+    int2 coord00 = int2(texelFloor);
+    int2 coord10 = coord00 + int2(1, 0);
+    int2 coord01 = coord00 + int2(0, 1);
+    int2 coord11 = coord00 + int2(1, 1);
+
+    coord00 = clamp(coord00, int2(0, 0), int2(screenSize) - 1);
+    coord10 = clamp(coord10, int2(0, 0), int2(screenSize) - 1);
+    coord01 = clamp(coord01, int2(0, 0), int2(screenSize) - 1);
+    coord11 = clamp(coord11, int2(0, 0), int2(screenSize) - 1);
+
+    float s00 = depthTex[coord00];
+    float s10 = depthTex[coord10];
+    float s01 = depthTex[coord01];
+    float s11 = depthTex[coord11];
+
+    float row0 = lerp(s00, s10, texelFrac.x);
+    float row1 = lerp(s01, s11, texelFrac.x);
+
+    return lerp(row0, row1, texelFrac.y);
+}
+
+
+float GetRoughness(float4 normalRoughness)
+{
+    return normalRoughness.w;
+}
+
+// Convert depth to linear view-space Z
+float LinearizeDepth(float depth)
+{
+    // Reverse-Z: near = 1, far = 0
+    float near = _ProjectionParams.y;
+    float far = _ProjectionParams.z;
+
+    #if UNITY_REVERSED_Z
+        depth = 1.0 - depth;
+    #endif
+
+    return near * far / (far - depth * (far - near));
+}
+
+// Compute rejection weight based on various factors
+float ComputeRejectionWeight(
+    float currentDepth,
+    float historyDepth,
+    float3 currentNormal,
+    float3 historyNormal,
+    float currentRoughness,
+    float historyRoughness,
+    float2 historyUV)
+{
+    float weight = 1.0;
+
+    // Check if history UV is out of bounds
+    if (any(historyUV < 0.0) || any(historyUV > 1.0))
+    {
+        return 0.0; // Complete rejection for out-of-bounds
+    }
+
+    // Depth rejection
+    float linearCurrentDepth = LinearizeDepth(currentDepth);
+    float linearHistoryDepth = LinearizeDepth(historyDepth);
+    float depthDiff = abs(linearCurrentDepth - linearHistoryDepth) / max(linearCurrentDepth, 0.001);
+
+    if (depthDiff > DEPTH_REJECTION_THRESHOLD)
+    {
+        // Gradual falloff instead of hard rejection
+        float depthWeight = saturate(1.0 - (depthDiff - DEPTH_REJECTION_THRESHOLD) / DEPTH_REJECTION_THRESHOLD);
+        weight *= depthWeight;
+    }
+
+    // Normal rejection
+    float normalDot = dot(currentNormal, historyNormal);
+    float normalDiff = 1.0 - saturate(normalDot);
+
+    if (normalDiff > NORMAL_REJECTION_THRESHOLD)
+    {
+        float normalWeight = saturate(1.0 - (normalDiff - NORMAL_REJECTION_THRESHOLD) / NORMAL_REJECTION_THRESHOLD);
+        weight *= normalWeight;
+    }
+
+    // Roughness rejection (less strict, mainly for specular)
+    float roughnessDiff = abs(currentRoughness - historyRoughness);
+    if (roughnessDiff > ROUGHNESS_REJECTION_THRESHOLD)
+    {
+        float roughnessWeight = saturate(1.0 - (roughnessDiff - ROUGHNESS_REJECTION_THRESHOLD) / ROUGHNESS_REJECTION_THRESHOLD);
+        weight *= roughnessWeight;
+    }
+
+    return weight;
+}
+
+// Neighborhood clamping to reduce ghosting
+float4 ClampToNeighborhood(float4 history, int2 pixelCoord, Texture2D<float4> currentTex)
+{
+    float4 minVal = float4(1e10, 1e10, 1e10, 1e10);
+    float4 maxVal = float4(-1e10, -1e10, -1e10, -1e10);
+
+    // 3x3 neighborhood
+    [unroll]
+    for (int y = -1; y <= 1; y++)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; x++)
+        {
+            int2 sampleCoord = pixelCoord + int2(x, y);
+            sampleCoord = clamp(sampleCoord, int2(0, 0), int2(_ScreenSize.xy) - 1);
+
+            float4 sample = currentTex[sampleCoord];
+            minVal = min(minVal, sample);
+            maxVal = max(maxVal, sample);
+        }
+    }
+
+    // Clamp history to the neighborhood bounds
+    return clamp(history, minVal, maxVal);
+}
+
+// Variance-based clamping (more sophisticated)
+float4 VarianceClamp(float4 history, int2 pixelCoord, Texture2D<float4> currentTex, float gamma)
+{
+    float4 m1 = 0;  // Mean
+    float4 m2 = 0;  // Mean of squares
+    float count = 0;
+
+    // 3x3 neighborhood
+    [unroll]
+    for (int y = -1; y <= 1; y++)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; x++)
+        {
+            int2 sampleCoord = pixelCoord + int2(x, y);
+            sampleCoord = clamp(sampleCoord, int2(0, 0), int2(_ScreenSize.xy) - 1);
+
+            float4 sample = currentTex[sampleCoord];
+            m1 += sample;
+            m2 += sample * sample;
+            count += 1.0;
+        }
+    }
+
+    m1 /= count;
+    m2 /= count;
+
+    float4 variance = sqrt(max(m2 - m1 * m1, 0.0));
+    float4 minVal = m1 - gamma * variance;
+    float4 maxVal = m1 + gamma * variance;
+
+    return clamp(history, minVal, maxVal);
+}
+
+[numthreads(8, 8, 1)]
+void CSTemporalReprojection(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int2 pixelCoord = int2(dispatchThreadId.xy);
+
+    if (any(pixelCoord >= int2(_ScreenSize.xy)))
+        return;
+
+    float2 screenSize = _ScreenSize.xy;
+    float2 currentUV = (float2(pixelCoord) + 0.5) / screenSize;
+
+    // Read current frame data
+    float4 currentRadiance = _CurrentRadiance[pixelCoord];
+    float currentDepth = _CurrentDepth[pixelCoord];
+    float4 currentNormalRoughness = _CurrentNormalRoughness[pixelCoord];
+    float3 currentNormal = UnpackNormal(currentNormalRoughness);
+    float currentRoughness = GetRoughness(currentNormalRoughness);
+
+    // Get motion vector and compute history UV
+    float2 motionVector = _MotionVectors[pixelCoord].xy;
+    float2 historyUV = currentUV - motionVector;
+
+    // Read history data at reprojected location
+    float4 historyRadiance = SampleHistoryBilinear(_HistoryRadiance, historyUV, screenSize);
+    float historyDepth = SampleHistoryDepthBilinear(_HistoryDepth, historyUV, screenSize);
+    float4 historyNormalRoughness = SampleHistoryBilinear(_HistoryNormalRoughness, historyUV, screenSize);
+    float3 historyNormal = UnpackNormal(historyNormalRoughness);
+    float historyRoughness = GetRoughness(historyNormalRoughness);
+
+    // Get previous accumulation count
+    float prevAccumCount = _InputAccumulationCount[pixelCoord];
+
+    // Compute rejection weight
+    float rejectionWeight = ComputeRejectionWeight(
+        currentDepth, historyDepth,
+        currentNormal, historyNormal,
+        currentRoughness, historyRoughness,
+        historyUV
+    );
+
+    // Apply neighborhood clamping to reduce ghosting
+    float4 clampedHistory = VarianceClamp(historyRadiance, pixelCoord, _CurrentRadiance, 1.5);
+
+    // Blend clamped and unclamped history based on rejection
+    historyRadiance = lerp(clampedHistory, historyRadiance, rejectionWeight * 0.5);
+
+    // Compute new accumulation count based on rejection
+    float newAccumCount;
+    if (rejectionWeight < 0.1)
+    {
+        // Strong rejection - reset accumulation
+        newAccumCount = 1.0;
+    }
+    else
+    {
+        // Partial rejection - reduce accumulation count proportionally
+        newAccumCount = min(prevAccumCount * rejectionWeight + 1.0, MAX_ACCUMULATED_FRAMES);
+    }
+
+    // Compute blend weight based on accumulation count
+    float blendWeight = 1.0 / newAccumCount;
+    blendWeight = max(blendWeight, MIN_BLEND_WEIGHT);
+
+    // If history was rejected, use more of current frame
+    blendWeight = lerp(1.0, blendWeight, rejectionWeight);
+
+    // Temporal blend
+    float4 outputRadiance = lerp(historyRadiance, currentRadiance, blendWeight);
+
+    // Write combined output
+    _OutputRadiance[pixelCoord] = outputRadiance;
+    _OutputAccumulationCount[pixelCoord] = newAccumCount;
+
+    // Handle separate diffuse/specular channels if enabled
+    if (ENABLE_SEPARATE_CHANNELS)
+    {
+        float4 currentDiffuse = _CurrentDiffuse[pixelCoord];
+        float4 currentSpecular = _CurrentSpecular[pixelCoord];
+
+        float4 historyDiffuse = SampleHistoryBilinear(_HistoryDiffuse, historyUV, screenSize);
+        float4 historySpecular = SampleHistoryBilinear(_HistorySpecular, historyUV, screenSize);
+
+        // Apply variance clamping to diffuse/specular
+        float4 clampedDiffuse = VarianceClamp(historyDiffuse, pixelCoord, _CurrentDiffuse, 1.5);
+        float4 clampedSpecular = VarianceClamp(historySpecular, pixelCoord, _CurrentSpecular, 2.0); // More aggressive for specular
+
+        historyDiffuse = lerp(clampedDiffuse, historyDiffuse, rejectionWeight * 0.5);
+        historySpecular = lerp(clampedSpecular, historySpecular, rejectionWeight * 0.5);
+
+        // Blend with adjusted weight
+        // Specular is more sensitive to disocclusion, so use stronger rejection
+        float specularBlendWeight = lerp(1.0, blendWeight, rejectionWeight * rejectionWeight);
+
+        float4 outputDiffuse = lerp(historyDiffuse, currentDiffuse, blendWeight);
+        float4 outputSpecular = lerp(historySpecular, currentSpecular, specularBlendWeight);
+
+        // For hit distance (alpha channel), handle specially
+        // Diffuse: blend hit distances
+        outputDiffuse.a = lerp(historyDiffuse.a, currentDiffuse.a, blendWeight);
+        // Specular: use minimum (first hit is most important), but reset on rejection
+        outputSpecular.a = rejectionWeight > 0.5 ? min(historySpecular.a, currentSpecular.a) : currentSpecular.a;
+
+        _OutputDiffuse[pixelCoord] = outputDiffuse;
+        _OutputSpecular[pixelCoord] = outputSpecular;
+    }
+}

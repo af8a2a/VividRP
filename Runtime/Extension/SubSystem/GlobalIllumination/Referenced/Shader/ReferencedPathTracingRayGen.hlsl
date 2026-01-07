@@ -848,7 +848,7 @@ void RayGenPathTracing()
                 if (isValidHit && SharcGetCachedRadiance(sharcParameters, sharcHitData, cachedRadiance, false))
                 {
                     // Found valid cached radiance - use it and terminate path
-                    sampleRadiance += throughput * cachedRadiance;
+                    sampleAccumulator.combinedRadiance += throughput * cachedRadiance;
                     break;
                 }
 

@@ -115,6 +115,9 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>Path tracing specular radiance history (for NRD REBLUR).</summary>
         PathTracingSpecularHistory,
 
+        /// <summary>Path tracing per-pixel accumulation count for temporal reprojection rejection.</summary>
+        PathTracingAccumulationCount,
+
         /// <summary>NRD REBLUR internal data for path tracing diffuse.</summary>
         REBLURPathTracingDiffuseInternalData,
 

@@ -317,7 +317,8 @@ namespace UnityEngine.Rendering.Universal
             passData.dispatchHeight = (uint)cameraData.cameraTargetDescriptor.height;
 
             // Path tracing specific parameters (not in CB)
-            passData.accumulate = giSettings.UseTemporalAccumulation();
+            // Only accumulate in shader for simple temporal mode, not for NRD (which has its own temporal accumulation)
+            passData.accumulate = giSettings.UseSimpleTemporalAccumulation();
             passData.intensity = giSettings.pathTracingIntensity.value;
             passData.environmentIntensity = giSettings.environmentIntensity.value;
             passData.includeEmissive = giSettings.includeEmissive.value;
@@ -1172,7 +1173,7 @@ namespace UnityEngine.Rendering.Universal
 
             // TODO: Composite path tracing result with main rendering (additive blend for GI)
 
-            resourceData.cameraColor = outputTexture;
+            resourceData.cameraColor = denoisedOutput;
             // Increment frame index for temporal sampling
             m_FrameIndex++;
         }

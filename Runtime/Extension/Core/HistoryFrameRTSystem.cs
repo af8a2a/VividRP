@@ -139,6 +139,9 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>NRD REBLUR specular hit distance for tracking.</summary>
         REBLURPathTracingSpecHitDistForTracking,
 
+        /// <summary>NRD REBLUR combined internal data for DiffuseSpecular variant.</summary>
+        REBLURPathTracingCombinedInternalData,
+
     }
 
     /// <summary>

@@ -13,6 +13,30 @@ license agreement from NVIDIA CORPORATION is strictly prohibited.
 #define NRD_VIVIDRP
 #define gNearestClamp gPointClamp
 
+// Signal type keywords: DIFFUSE, SPECULAR, or DIFFUSE_SPECULAR (combined)
+#pragma multi_compile _NRD_DIFFUSE _NRD_SPECULAR _NRD_DIFFUSE_SPECULAR
+
+// Mode keywords
+#pragma multi_compile _ _NRD_OCCLUSION
+
+#if defined(_NRD_DIFFUSE_SPECULAR)
+    #define NRD_DIFF 1
+    #define NRD_SPEC 1
+    #define NRD_SIGNAL DIFF_SPEC
+#elif defined(_NRD_SPECULAR)
+    #define NRD_SPEC 1
+    #define NRD_SIGNAL SPEC
+#else // _NRD_DIFFUSE (default)
+    #define NRD_DIFF 1
+    #define NRD_SIGNAL DIFF
+#endif
+
+#if defined(_NRD_OCCLUSION)
+    #define NRD_MODE OCCLUSION
+#endif
+
+#define NRD_INTERNAL 1
+
 #include "../NRD.hlsl"
 #include "../ml.hlsl"
 

@@ -83,7 +83,7 @@ NRD_EXPORT void NRD_CS_MAIN( NRD_CS_MAIN_ARGS )
             float4 specSh = gIn_SpecSh[ pixelPos ];
         #endif
 
-        #include "REBLUR_Common_SpecularSpatialFilter.hlsli"
+        #include "REBLUR_Common_SpecularSpatialFilter.hlsl"
 
         #if( TEMPORAL_STABILIZATION == 0 )
             #if( NRD_MODE != OCCLUSION && NRD_MODE != DO )

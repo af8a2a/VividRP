@@ -315,6 +315,33 @@ namespace UnityEngine.Rendering.Universal
             return valid;
         }
 
+        /// <summary>
+        /// Allocate combined internal data for DiffuseSpecular variant (shared between diffuse and specular)
+        /// </summary>
+        internal bool ReAllocateCombinedInternalDataIfNeeded(HistoryFrameRTSystem historyRTSystem, out RTHandle currFrameRT)
+        {
+            static RTHandle Allocator(GraphicsFormat graphicsFormat, string viewName, int frameIndex, RTHandleSystem rtHandleSystem)
+            {
+                frameIndex &= 1;
+                return rtHandleSystem.Alloc(Vector2.one, colorFormat: graphicsFormat,
+                    enableRandomWrite: true, useDynamicScale: true,
+                    name: $"{viewName}_REBLUR_PT_CombinedInternalData{frameIndex}");
+            }
+
+            var curTexture = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.REBLURPathTracingCombinedInternalData);
+            bool valid = curTexture != null;
+
+            if (!valid)
+            {
+                historyRTSystem.ReleaseHistoryFrameRT(HistoryFrameType.REBLURPathTracingCombinedInternalData);
+                historyRTSystem.AllocHistoryFrameRT((int)HistoryFrameType.REBLURPathTracingCombinedInternalData,
+                    Allocator, GraphicsFormat.R32_UInt, 1);
+            }
+
+            currFrameRT = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.REBLURPathTracingCombinedInternalData);
+            return valid;
+        }
+
         #endregion
 
             #region Pass Data
@@ -411,6 +438,67 @@ namespace UnityEngine.Rendering.Universal
             internal int width, height;
         }
 
+        /// <summary>
+        /// Combined DiffuseSpecular pass data (NRD_DIFF && NRD_SPEC variant)
+        /// More efficient than separate passes as it shares tile classification and some computations
+        /// </summary>
+        class DiffuseSpecularDenoisePassData
+        {
+            internal ComputeShader ClassifyTiles;
+            internal ComputeShader PrePass;
+            internal ComputeShader TemporalAccumulation;
+            internal ComputeShader HistoryFix;
+            internal ComputeShader Blur;
+            internal ComputeShader PostBlur;
+            internal ComputeShader SplitScreen;
+
+            // Input textures
+            internal TextureHandle MotionTexture;
+            internal TextureHandle CurrNormalRoughnessTexture;
+            internal TextureHandle PrevNormalRoughnessTexture;
+            internal TextureHandle CurrViewZTexture;
+            internal TextureHandle PrevViewZTexture;
+            internal TextureHandle DummyTexture;
+
+            // History textures - shared internal data for DiffuseSpecular
+            internal TextureHandle PrevInternalDataTexture;
+
+            // Diffuse history
+            internal TextureHandle PrevDiffuseFastTexture;
+            internal TextureHandle CurrDiffuseFastTexture;
+            internal TextureHandle PrevDiffuseRadianceTexture;
+
+            // Specular history
+            internal TextureHandle PrevSpecularFastTexture;
+            internal TextureHandle CurrSpecularFastTexture;
+            internal TextureHandle PrevSpecularRadianceTexture;
+
+            // SpecHitDistForTracking (for specular tracking in DiffuseSpecular variant)
+            internal TextureHandle PrevSpecHitDistForTrackingTexture;
+            internal TextureHandle CurrSpecHitDistForTrackingTexture;
+            internal TextureHandle TransientSpecHitDistForTrackingTexture;
+
+            // Transient textures
+            internal TextureHandle TileTexture;
+            internal TextureHandle TempDiffTexture1;
+            internal TextureHandle TempDiffTexture2;
+            internal TextureHandle TempSpecTexture1;
+            internal TextureHandle TempSpecTexture2;
+            internal TextureHandle TempDataTexture;      // DATA1: RG8_UNORM
+            internal TextureHandle TempData2Texture;     // DATA2: R32_UINT
+            internal TextureHandle InternalDataTexture;
+
+            // Input/Output
+            internal TextureHandle UnfilteredDiffuseTexture;
+            internal TextureHandle UnfilteredSpecularTexture;
+            internal TextureHandle OutputDiffuseTexture;
+            internal TextureHandle OutputSpecularTexture;
+
+            internal int width, height;
+            internal ReblurSharedConstants ReblurSharedConstants;
+            internal bool usePrePass;
+        }
+
         #endregion
 
         #region Shader Property IDs
@@ -453,6 +541,7 @@ namespace UnityEngine.Rendering.Universal
         static readonly int gPrev_SpecHitDistForTracking = Shader.PropertyToID("gPrev_SpecHitDistForTracking");
 
         static readonly int REBLUR_ClassifyTilesConstants = Shader.PropertyToID("REBLUR_ClassifyTilesConstants");
+        static readonly int REBLUR_PrePassConstants = Shader.PropertyToID("REBLUR_PrePassConstants");
         static readonly int REBLUR_TemporalAccumulationConstants = Shader.PropertyToID("REBLUR_TemporalAccumulationConstants");
         static readonly int REBLUR_HistoryFixConstants = Shader.PropertyToID("REBLUR_HistoryFixConstants");
         static readonly int REBLUR_BlurConstants = Shader.PropertyToID("REBLUR_BlurConstants");
@@ -481,6 +570,7 @@ namespace UnityEngine.Rendering.Universal
             // Enable diffuse-only keyword
             CoreUtils.SetKeyword(cmd, "_NRD_DIFFUSE", true);
             CoreUtils.SetKeyword(cmd, "_NRD_SPECULAR", false);
+            CoreUtils.SetKeyword(cmd, "_NRD_DIFFUSE_SPECULAR", false);
 
             // CLASSIFY_TILES
             {
@@ -593,6 +683,7 @@ namespace UnityEngine.Rendering.Universal
             // Enable specular-only keyword
             CoreUtils.SetKeyword(cmd, "_NRD_DIFFUSE", false);
             CoreUtils.SetKeyword(cmd, "_NRD_SPECULAR", true);
+            CoreUtils.SetKeyword(cmd, "_NRD_DIFFUSE_SPECULAR", false);
 
             // CLASSIFY_TILES (reuse tiles from diffuse pass if running both)
             {
@@ -696,6 +787,171 @@ namespace UnityEngine.Rendering.Universal
                 ConstantBuffer.Push(cmd, data.ReblurSharedConstants, cs, REBLUR_SplitScreenConstants);
                 cmd.SetComputeTextureParam(cs, kernel, gIn_ViewZ, data.CurrViewZTexture);
                 cmd.SetComputeTextureParam(cs, kernel, gIn_Spec, data.UnfilteredSpecularTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Spec, data.OutputSpecularTexture);
+                cmd.DispatchCompute(cs, kernel, tx, ty, 1);
+            }
+        }
+
+        /// <summary>
+        /// Execute combined DiffuseSpecular REBLUR pass (NRD_DIFF && NRD_SPEC variant)
+        /// Processes both diffuse and specular in a single pass for better efficiency
+        /// </summary>
+        static void ExecuteDiffuseSpecularPass(DiffuseSpecularDenoisePassData data, ComputeGraphContext context)
+        {
+            var cmd = context.cmd;
+            var kernel = 0;
+
+            var tx = CoreUtils.DivRoundUp(data.width, 16);
+            var ty = CoreUtils.DivRoundUp(data.height, 16);
+
+            // Enable combined diffuse+specular keyword
+            CoreUtils.SetKeyword(cmd, "_NRD_DIFFUSE", false);
+            CoreUtils.SetKeyword(cmd, "_NRD_SPECULAR", false);
+            CoreUtils.SetKeyword(cmd, "_NRD_DIFFUSE_SPECULAR", true);
+
+            // CLASSIFY_TILES
+            {
+                var cs = data.ClassifyTiles;
+                ConstantBuffer.Push(cmd, data.ReblurSharedConstants, cs, REBLUR_ClassifyTilesConstants);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_ViewZ, data.CurrViewZTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Tiles, data.TileTexture);
+                cmd.DispatchCompute(cs, kernel, tx, ty, 1);
+            }
+
+            tx = CoreUtils.DivRoundUp(data.width, 8);
+            ty = CoreUtils.DivRoundUp(data.height, 16);
+
+            // PRE_PASS (optional, outputs SpecHitDistForTracking)
+            if (data.usePrePass && data.PrePass != null)
+            {
+                var cs = data.PrePass;
+                ConstantBuffer.Push(cmd, data.ReblurSharedConstants, cs, REBLUR_PrePassConstants);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Tiles, data.TileTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Normal_Roughness, data.CurrNormalRoughnessTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_ViewZ, data.CurrViewZTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Diff, data.UnfilteredDiffuseTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Spec, data.UnfilteredSpecularTexture);
+
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Diff, data.TempDiffTexture1);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Spec, data.TempSpecTexture1);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_SpecHitDistForTracking, data.TransientSpecHitDistForTrackingTexture);
+
+                cmd.DispatchCompute(cs, kernel, tx, ty, 1);
+            }
+
+            // TEMPORAL_ACCUMULATION (DiffuseSpecular variant)
+            {
+                var cs = data.TemporalAccumulation;
+                ConstantBuffer.Push(cmd, data.ReblurSharedConstants, cs, REBLUR_TemporalAccumulationConstants);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Tiles, data.TileTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Normal_Roughness, data.CurrNormalRoughnessTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_ViewZ, data.CurrViewZTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Mv, data.MotionTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gPrev_ViewZ, data.PrevViewZTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gPrev_Normal_Roughness, data.PrevNormalRoughnessTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gPrev_InternalData, data.PrevInternalDataTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_DisocclusionThresholdMix, data.DummyTexture);
+                // Confidence inputs (DiffuseSpecular variant has both)
+                cmd.SetComputeTextureParam(cs, kernel, gIn_DiffConfidence, data.DummyTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_SpecConfidence, data.DummyTexture);
+                // Input radiance (use prepass output if available, otherwise unfiltered)
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Diff, data.usePrePass ? data.TempDiffTexture1 : data.UnfilteredDiffuseTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Spec, data.usePrePass ? data.TempSpecTexture1 : data.UnfilteredSpecularTexture);
+                // History inputs
+                cmd.SetComputeTextureParam(cs, kernel, gHistory_Diff, data.PrevDiffuseRadianceTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gHistory_Spec, data.PrevSpecularRadianceTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gHistory_DiffFast, data.PrevDiffuseFastTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gHistory_SpecFast, data.PrevSpecularFastTexture);
+                // SpecHitDistForTracking inputs (DiffuseSpecular variant)
+                cmd.SetComputeTextureParam(cs, kernel, gPrev_SpecHitDistForTracking, data.PrevSpecHitDistForTrackingTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_SpecHitDistForTracking, data.usePrePass ? data.TransientSpecHitDistForTrackingTexture : data.DummyTexture);
+
+                // Outputs
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Data1, data.TempDataTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Diff, data.TempDiffTexture2);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Spec, data.TempSpecTexture2);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_DiffFast, data.CurrDiffuseFastTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_SpecFast, data.CurrSpecularFastTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_SpecHitDistForTracking, data.CurrSpecHitDistForTrackingTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Data2, data.TempData2Texture);
+
+                cmd.DispatchCompute(cs, kernel, tx, ty, 1);
+            }
+
+            // HISTORY_FIX (DiffuseSpecular variant)
+            {
+                var cs = data.HistoryFix;
+                ConstantBuffer.Push(cmd, data.ReblurSharedConstants, cs, REBLUR_HistoryFixConstants);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Tiles, data.TileTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Normal_Roughness, data.CurrNormalRoughnessTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Data1, data.TempDataTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_ViewZ, data.CurrViewZTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Diff, data.TempDiffTexture2);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Spec, data.TempSpecTexture2);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_DiffFast, data.CurrDiffuseFastTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_SpecFast, data.CurrSpecularFastTexture);
+                // SpecHitDistForTracking input
+                cmd.SetComputeTextureParam(cs, kernel, gIn_SpecHitDistForTracking, data.CurrSpecHitDistForTrackingTexture);
+
+                // Outputs
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Diff, data.TempDiffTexture1);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Spec, data.TempSpecTexture1);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_DiffFast, data.PrevDiffuseFastTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_SpecFast, data.PrevSpecularFastTexture);
+
+                cmd.DispatchCompute(cs, kernel, tx, ty, 1);
+            }
+
+            // BLUR (DiffuseSpecular variant)
+            {
+                var cs = data.Blur;
+                ConstantBuffer.Push(cmd, data.ReblurSharedConstants, cs, REBLUR_BlurConstants);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Tiles, data.TileTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Normal_Roughness, data.CurrNormalRoughnessTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_ViewZ, data.CurrViewZTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Data1, data.TempDataTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Diff, data.TempDiffTexture1);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Spec, data.TempSpecTexture1);
+
+                // Outputs
+                cmd.SetComputeTextureParam(cs, kernel, gOut_ViewZ, data.PrevViewZTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Diff, data.TempDiffTexture2);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Spec, data.TempSpecTexture2);
+
+                cmd.DispatchCompute(cs, kernel, tx, ty, 1);
+            }
+
+            // POST_BLUR (DiffuseSpecular variant, no temporal stabilization)
+            {
+                var cs = data.PostBlur;
+                ConstantBuffer.Push(cmd, data.ReblurSharedConstants, cs, REBLUR_PostBlurConstants);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Tiles, data.TileTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Normal_Roughness, data.CurrNormalRoughnessTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Data1, data.TempDataTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_ViewZ, data.PrevViewZTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Diff, data.TempDiffTexture2);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Spec, data.TempSpecTexture2);
+
+                // Outputs
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Normal_Roughness, data.PrevNormalRoughnessTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Diff, data.PrevDiffuseRadianceTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Spec, data.PrevSpecularRadianceTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_InternalData, data.InternalDataTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_DiffCopy, data.OutputDiffuseTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_SpecCopy, data.OutputSpecularTexture);
+
+                cmd.DispatchCompute(cs, kernel, tx, ty, 1);
+            }
+
+            // SPLIT_SCREEN (optional debug, DiffuseSpecular variant)
+            if (data.ReblurSharedConstants.gSplitScreen > 0)
+            {
+                var cs = data.SplitScreen;
+                ConstantBuffer.Push(cmd, data.ReblurSharedConstants, cs, REBLUR_SplitScreenConstants);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_ViewZ, data.CurrViewZTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Diff, data.UnfilteredDiffuseTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_Spec, data.UnfilteredSpecularTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gOut_Diff, data.OutputDiffuseTexture);
                 cmd.SetComputeTextureParam(cs, kernel, gOut_Spec, data.OutputSpecularTexture);
                 cmd.DispatchCompute(cs, kernel, tx, ty, 1);
             }
@@ -904,9 +1160,10 @@ namespace UnityEngine.Rendering.Universal
                     name = "REBLUR_TempDiff2"
                 });
 
+                // DATA1: RG8_UNORM per C++ code (Format::RG8_UNORM)
                 data.TempDataTexture = builder.CreateTransientTexture(new TextureDesc(width, height)
                 {
-                    format = GraphicsFormat.R32G32_SFloat,
+                    format = GraphicsFormat.R8G8_UNorm,
                     enableRandomWrite = true,
                     name = "REBLUR_TempData"
                 });
@@ -998,9 +1255,10 @@ namespace UnityEngine.Rendering.Universal
                     name = "REBLUR_TempSpec2"
                 });
 
+                // DATA1: RG8_UNORM per C++ code (Format::RG8_UNORM)
                 data.TempDataTexture = builder.CreateTransientTexture(new TextureDesc(width, height)
                 {
-                    format = GraphicsFormat.R32G32_SFloat,
+                    format = GraphicsFormat.R8G8_UNorm,
                     enableRandomWrite = true,
                     name = "REBLUR_TempDataSpec"
                 });
@@ -1042,6 +1300,288 @@ namespace UnityEngine.Rendering.Universal
 
                 builder.AllowPassCulling(false);
                 builder.SetRenderFunc<SpecularDenoisePassData>(ExecuteSpecularPass);
+            }
+
+            // Re-modulation pass: apply material factors to recover final colors
+            if (m_RemodulationCS != null)
+            {
+                using (var builder = renderGraph.AddComputePass<RemodulationPassData>("Path Tracing Remodulation", out var data))
+                {
+                    data.RemodulationCS = m_RemodulationCS;
+                    data.DenoisedDiffuseTexture = outputDiffuseTexture;
+                    data.DenoisedSpecularTexture = outputSpecularTexture;
+                    data.MaterialFactorsTexture = materialFactorsTexture;
+                    data.OutputTexture = compositeOutputTexture;
+                    data.width = width;
+                    data.height = height;
+
+                    builder.UseTexture(data.DenoisedDiffuseTexture);
+                    builder.UseTexture(data.DenoisedSpecularTexture);
+                    builder.UseTexture(data.MaterialFactorsTexture);
+                    builder.UseTexture(data.OutputTexture, AccessFlags.ReadWrite);
+
+                    builder.AllowPassCulling(false);
+                    builder.SetRenderFunc<RemodulationPassData>(ExecuteRemodulationPass);
+                }
+            }
+
+            result.denoisedDiffuse = outputDiffuseTexture;
+            result.denoisedSpecular = outputSpecularTexture;
+            result.compositedOutput = compositeOutputTexture;
+
+            return result;
+        }
+
+        /// <summary>
+        /// Denoise path tracing using combined DiffuseSpecular REBLUR pass (NRD_DIFF && NRD_SPEC variant)
+        /// More efficient than separate passes as it shares tile classification and some computations
+        /// </summary>
+        public DenoiseResult DenoiseDiffuseSpecular(
+            RenderGraph renderGraph,
+            ContextContainer frameData,
+            TextureHandle motionTexture,
+            TextureHandle normalRoughnessTexture,
+            TextureHandle viewZTexture,
+            TextureHandle unfilteredDiffuseTexture,
+            TextureHandle unfilteredSpecularTexture,
+            TextureHandle materialFactorsTexture,
+            Settings settings,
+            bool usePrePass = true)
+        {
+            if (!m_Initialized)
+            {
+                Init();
+            }
+
+            var result = new DenoiseResult();
+            var cameraData = frameData.Get<UniversalCameraData>();
+            var historyRT = HistoryFrameRTSystem.GetOrCreate(cameraData.camera);
+
+            int width = cameraData.scaledWidth;
+            int height = cameraData.scaledHeight;
+
+            // Setup NRD common settings
+            NRDCommonSettings commonSettings = NRDCommonSettings.Default();
+            var cameraExt = cameraData.cameraExtension;
+
+            var view = cameraExt.previousViewMatrix;
+            var viewPrev = cameraExt.previousViewMatrix;
+            var gpuProj = cameraExt.gpuProjectionMatrix;
+            var gpuProjPrev = cameraExt.previousGPUProjectionMatrix;
+
+            commonSettings.viewToClipMatrix = gpuProj.Pack();
+            commonSettings.viewToClipMatrixPrev = gpuProjPrev.Pack();
+            commonSettings.worldToViewMatrix = view.Pack();
+            commonSettings.worldToViewMatrixPrev = viewPrev.Pack();
+            commonSettings.cameraJitter = cameraExt.jitter.Pack();
+            commonSettings.cameraJitterPrev = cameraExt.previousJitter.Pack();
+            commonSettings.resourceSize = new[] { (ushort)width, (ushort)height };
+            commonSettings.resourceSizePrev = new[] { (ushort)width, (ushort)height };
+            commonSettings.rectSize = new[] { (ushort)width, (ushort)height };
+            commonSettings.rectSizePrev = new[] { (ushort)width, (ushort)height };
+            commonSettings.frameIndex = (uint)Time.frameCount;
+            commonSettings.timeDeltaBetweenFrames = Time.deltaTime;
+            commonSettings.denoisingRange = cameraData.camera.farClipPlane;
+            commonSettings.accumulationMode = AccumulationMode.CONTINUE;
+            commonSettings.splitScreen = settings.splitScreen;
+
+            NRDInitlizer.NRD_SetCommonSettings(m_NRDContext, ref commonSettings);
+
+            // Setup REBLUR settings
+            var reblurSettings = ReblurSettings.Default();
+            reblurSettings.minBlurRadius = settings.minBlurRadius;
+            reblurSettings.maxBlurRadius = settings.maxBlurRadius;
+            reblurSettings.diffusePrepassBlurRadius = settings.diffusePrepassBlurRadius;
+            reblurSettings.specularPrepassBlurRadius = settings.specularPrepassBlurRadius;
+            reblurSettings.maxAccumulatedFrameNum = (uint)settings.maxAccumulatedFrameNum;
+            reblurSettings.maxFastAccumulatedFrameNum = (uint)settings.maxFastAccumulatedFrameNum;
+            reblurSettings.maxStabilizedFrameNum = (uint)settings.maxStabilizedFrameNum;
+            reblurSettings.historyFixFrameNum = (uint)settings.historyFixFrameNum;
+            reblurSettings.enableAntiFirefly = settings.enableAntiFirefly;
+            reblurSettings.fireflySuppressorMinRelativeScale = settings.fireflySuppressorMinRelativeScale;
+            reblurSettings.fastHistoryClampingSigmaScale = settings.fastHistoryClampingSigmaScale;
+            reblurSettings.minHitDistanceWeight = settings.minHitDistanceWeight;
+            reblurSettings.lobeAngleFraction = settings.lobeAngleFraction;
+            reblurSettings.roughnessFraction = settings.roughnessFraction;
+            reblurSettings.planeDistanceSensitivity = settings.planeDistanceSensitivity;
+            reblurSettings.antilagSettings.luminanceSigmaScale = settings.antilagLuminanceSigmaScale;
+            reblurSettings.antilagSettings.luminanceSensitivity = settings.antilagLuminanceSensitivity;
+            reblurSettings.hitDistanceParameters.A = settings.hitDistanceA;
+            reblurSettings.hitDistanceParameters.B = settings.hitDistanceB;
+            reblurSettings.hitDistanceParameters.C = settings.hitDistanceC;
+            reblurSettings.hitDistanceParameters.D = settings.hitDistanceD;
+
+            var reblurConstants = new ReblurSharedConstants();
+            NRDInitlizer.NRD_SetupReblurConstBuffer(m_NRDContext, ref commonSettings, ref reblurSettings, ref reblurConstants);
+            reblurConstants.gDenoisingRange = 10000;
+
+            // Allocate history buffers for DiffuseSpecular variant
+            ReAllocateCombinedInternalDataIfNeeded(historyRT, out var combinedInternalData);
+            ReAllocateDiffuseRadianceHistoryIfNeeded(historyRT, out var prevDiffuseRadiance);
+            ReAllocateSpecularRadianceHistoryIfNeeded(historyRT, out var prevSpecularRadiance);
+            ReAllocateDiffuseFastHistoryIfNeeded(historyRT, out var prevDiffuseFast, out var currDiffuseFast);
+            ReAllocateSpecularFastHistoryIfNeeded(historyRT, out var prevSpecularFast, out var currSpecularFast);
+            ReAllocateSpecHitDistForTrackingIfNeeded(historyRT, out var prevSpecHitDistForTracking, out var currSpecHitDistForTracking);
+
+            // Create output textures
+            var outputDiffuseTexture = renderGraph.CreateTexture(new TextureDesc(width, height)
+            {
+                format = GraphicsFormat.R16G16B16A16_SFloat,
+                enableRandomWrite = true,
+                name = "REBLUR_DenoisedDiffuse"
+            });
+
+            var outputSpecularTexture = renderGraph.CreateTexture(new TextureDesc(width, height)
+            {
+                format = GraphicsFormat.R16G16B16A16_SFloat,
+                enableRandomWrite = true,
+                name = "REBLUR_DenoisedSpecular"
+            });
+
+            var compositeOutputTexture = renderGraph.CreateTexture(new TextureDesc(width, height)
+            {
+                format = GraphicsFormat.R16G16B16A16_SFloat,
+                enableRandomWrite = true,
+                name = "PathTracing_CompositeOutput"
+            });
+
+            // Combined DiffuseSpecular denoise pass
+            using (var builder = renderGraph.AddComputePass<DiffuseSpecularDenoisePassData>("NRD REBLUR DiffuseSpecular Denoise", out var data))
+            {
+                data.ClassifyTiles = m_ClassifyTiles;
+                data.PrePass = m_PrePass;
+                data.TemporalAccumulation = m_TemporalAccumulation;
+                data.HistoryFix = m_HistoryFix;
+                data.Blur = m_Blur;
+                data.PostBlur = m_PostBlur;
+                data.SplitScreen = m_SplitScreen;
+                data.usePrePass = usePrePass && m_PrePass != null;
+
+                data.MotionTexture = motionTexture;
+                data.CurrNormalRoughnessTexture = normalRoughnessTexture;
+                data.CurrViewZTexture = viewZTexture;
+                data.PrevViewZTexture = renderGraph.ImportTexture(historyRT.GetPreviousFrameRT(HistoryFrameType.ViewZ));
+                data.PrevNormalRoughnessTexture = renderGraph.ImportTexture(historyRT.GetCurrentFrameRT(HistoryFrameType.PrevNormalRoughness));
+
+                // Combined internal data (shared between diffuse and specular)
+                data.PrevInternalDataTexture = renderGraph.ImportTexture(combinedInternalData);
+
+                // Diffuse history
+                data.PrevDiffuseRadianceTexture = renderGraph.ImportTexture(prevDiffuseRadiance);
+                data.PrevDiffuseFastTexture = renderGraph.ImportTexture(prevDiffuseFast);
+                data.CurrDiffuseFastTexture = renderGraph.ImportTexture(currDiffuseFast);
+
+                // Specular history
+                data.PrevSpecularRadianceTexture = renderGraph.ImportTexture(prevSpecularRadiance);
+                data.PrevSpecularFastTexture = renderGraph.ImportTexture(prevSpecularFast);
+                data.CurrSpecularFastTexture = renderGraph.ImportTexture(currSpecularFast);
+
+                // SpecHitDistForTracking (DiffuseSpecular variant needs both prev/curr and transient)
+                data.PrevSpecHitDistForTrackingTexture = renderGraph.ImportTexture(prevSpecHitDistForTracking);
+                data.CurrSpecHitDistForTrackingTexture = renderGraph.ImportTexture(currSpecHitDistForTracking);
+
+                data.UnfilteredDiffuseTexture = unfilteredDiffuseTexture;
+                data.UnfilteredSpecularTexture = unfilteredSpecularTexture;
+                data.OutputDiffuseTexture = outputDiffuseTexture;
+                data.OutputSpecularTexture = outputSpecularTexture;
+
+                // Transient textures
+                data.TileTexture = builder.CreateTransientTexture(new TextureDesc(
+                    CoreUtils.DivRoundUp(width, 16), CoreUtils.DivRoundUp(height, 16))
+                {
+                    format = GraphicsFormat.R8_UNorm,
+                    enableRandomWrite = true,
+                    name = "REBLUR_Tiles_DiffSpec"
+                });
+
+                data.TempDiffTexture1 = builder.CreateTransientTexture(new TextureDesc(width, height)
+                {
+                    format = GraphicsFormat.R16G16B16A16_SFloat,
+                    enableRandomWrite = true,
+                    name = "REBLUR_TempDiff1"
+                });
+
+                data.TempDiffTexture2 = builder.CreateTransientTexture(new TextureDesc(width, height)
+                {
+                    format = GraphicsFormat.R16G16B16A16_SFloat,
+                    enableRandomWrite = true,
+                    name = "REBLUR_TempDiff2"
+                });
+
+                data.TempSpecTexture1 = builder.CreateTransientTexture(new TextureDesc(width, height)
+                {
+                    format = GraphicsFormat.R16G16B16A16_SFloat,
+                    enableRandomWrite = true,
+                    name = "REBLUR_TempSpec1"
+                });
+
+                data.TempSpecTexture2 = builder.CreateTransientTexture(new TextureDesc(width, height)
+                {
+                    format = GraphicsFormat.R16G16B16A16_SFloat,
+                    enableRandomWrite = true,
+                    name = "REBLUR_TempSpec2"
+                });
+
+                // DATA1: RG8_UNORM per C++ code (Format::RG8_UNORM)
+                data.TempDataTexture = builder.CreateTransientTexture(new TextureDesc(width, height)
+                {
+                    format = GraphicsFormat.R8G8_UNorm,
+                    enableRandomWrite = true,
+                    name = "REBLUR_TempData_DiffSpec"
+                });
+
+                // DATA2: R32_UINT
+                data.TempData2Texture = builder.CreateTransientTexture(new TextureDesc(width, height)
+                {
+                    format = GraphicsFormat.R32_UInt,
+                    enableRandomWrite = true,
+                    name = "REBLUR_TempData2_DiffSpec"
+                });
+
+                data.InternalDataTexture = builder.CreateTransientTexture(new TextureDesc(width, height)
+                {
+                    format = GraphicsFormat.R32_UInt,
+                    enableRandomWrite = true,
+                    name = "REBLUR_InternalData_DiffSpec"
+                });
+
+                // Transient SpecHitDistForTracking (output from PrePass)
+                data.TransientSpecHitDistForTrackingTexture = builder.CreateTransientTexture(new TextureDesc(width, height)
+                {
+                    format = GraphicsFormat.R16_SFloat,
+                    enableRandomWrite = true,
+                    name = "REBLUR_TransientSpecHitDist"
+                });
+
+                data.DummyTexture = renderGraph.defaultResources.blackTexture;
+
+                data.width = width;
+                data.height = height;
+                data.ReblurSharedConstants = reblurConstants;
+
+                // UseTexture declarations
+                builder.UseTexture(data.MotionTexture);
+                builder.UseTexture(data.CurrNormalRoughnessTexture);
+                builder.UseTexture(data.CurrViewZTexture);
+                builder.UseTexture(data.PrevViewZTexture, AccessFlags.ReadWrite);
+                builder.UseTexture(data.PrevNormalRoughnessTexture, AccessFlags.ReadWrite);
+                builder.UseTexture(data.PrevInternalDataTexture, AccessFlags.ReadWrite);
+                builder.UseTexture(data.PrevDiffuseRadianceTexture, AccessFlags.ReadWrite);
+                builder.UseTexture(data.PrevDiffuseFastTexture, AccessFlags.ReadWrite);
+                builder.UseTexture(data.CurrDiffuseFastTexture, AccessFlags.ReadWrite);
+                builder.UseTexture(data.PrevSpecularRadianceTexture, AccessFlags.ReadWrite);
+                builder.UseTexture(data.PrevSpecularFastTexture, AccessFlags.ReadWrite);
+                builder.UseTexture(data.CurrSpecularFastTexture, AccessFlags.ReadWrite);
+                builder.UseTexture(data.PrevSpecHitDistForTrackingTexture, AccessFlags.ReadWrite);
+                builder.UseTexture(data.CurrSpecHitDistForTrackingTexture, AccessFlags.ReadWrite);
+                builder.UseTexture(data.UnfilteredDiffuseTexture);
+                builder.UseTexture(data.UnfilteredSpecularTexture);
+                builder.UseTexture(data.OutputDiffuseTexture, AccessFlags.ReadWrite);
+                builder.UseTexture(data.OutputSpecularTexture, AccessFlags.ReadWrite);
+                builder.UseTexture(data.DummyTexture);
+
+                builder.AllowPassCulling(false);
+                builder.SetRenderFunc<DiffuseSpecularDenoisePassData>(ExecuteDiffuseSpecularPass);
             }
 
             // Re-modulation pass: apply material factors to recover final colors

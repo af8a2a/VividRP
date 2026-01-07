@@ -11,6 +11,20 @@ license agreement from NVIDIA CORPORATION is strictly prohibited.
 groupshared float4 s_Normal_Roughness[ BUFFER_Y ][ BUFFER_X ];
 groupshared float s_HitDistForTracking[ BUFFER_Y ][ BUFFER_X ];
 
+float2 StochasticBilinear( float2 uv, float2 texSize )
+{
+#if( REBLUR_USE_STF == 1 && NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_R10G10B10A2_UNORM )
+    // Requires: Rng::Hash::Initialize( pixelPos, gFrameIndex )
+    Filtering::Bilinear f = Filtering::GetBilinearFilter( uv, texSize );
+
+    float2 rnd = Rng::Hash::GetFloat2( );
+    f.origin += step( rnd, f.weights );
+
+    return ( f.origin + 0.5 ) / texSize;
+#else
+    return uv;
+#endif
+}
 
 void Preload( uint2 sharedPos, int2 globalPos )
 {

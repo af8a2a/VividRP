@@ -218,11 +218,11 @@ NOISY INPUTS:
     #endif
 
 // Unreal Engine
-#elif( defined( NRD_COMPILER_UNREAL_ENGINE ) ||defined(NRD_VIVIDRP)) // TODO: is there a predefined macro in UE?
+#elif( defined( NRD_COMPILER_UNREAL_ENGINE ) ) // TODO: is there a predefined macro in UE?
 
-    #define NRD_CONSTANTS_START( resourceName )                                         cbuffer resourceName{
+    #define NRD_CONSTANTS_START( resourceName )
     #define NRD_CONSTANT( constantType, constantName )                                  constantType constantName;
-    #define NRD_CONSTANTS_END                                                           };
+    #define NRD_CONSTANTS_END
 
     #define NRD_INPUTS_START
     #define NRD_INPUT( resourceType, dataType, resourceName, regName, bindingIndex )    resourceType<dataType> resourceName;
@@ -230,7 +230,6 @@ NOISY INPUTS:
 
     #define NRD_OUTPUTS_START
     #define NRD_OUTPUT( resourceType, dataType, resourceName, regName, bindingIndex )   resourceType<dataType> resourceName;
-    #define NRD_OUTPUT_NOTYPE( resourceType, resourceName)                                     resourceType resourceName;
     #define NRD_OUTPUTS_END
 
     #define NRD_SAMPLERS_START
@@ -351,27 +350,40 @@ float3 _NRD_SafeNormalize( float3 v )
     return v * rsqrt( dot( v, v ) + 1e-9 );
 }
 
-// Oct packing
-float2 _NRD_EncodeUnitVector( float3 v, const bool bSigned )
+// Improved oct-packing
+// https://twitter.com/Stubbesaurus/status/937994790553227264
+// https://johnwhite3d.blogspot.com/2017/10/signed-octahedron-normal-encoding.html
+
+float3 _NRD_EncodeNormalRoughness101010( float3 n, float roughness )
 {
-    v /= dot( abs( v ), float3( 1.0, 1.0, 1.0 ) );
+    n /= abs( n.x ) + abs( n.y ) + abs( n.z );
 
-    float2 octWrap = ( 1.0 - abs( v.yx ) ) * ( step( 0.0, v.xy ) * 2.0 - 1.0 );
-    v.xy = v.z >= 0.0 ? v.xy : octWrap;
+    float3 r;
+    r.y = n.y * 0.5 + 0.5;
+    r.x = n.x * 0.5 + r.y;
+    r.y -= n.x * 0.5;
 
-    return bSigned ? v.xy : v.xy * 0.5 + 0.5;
+    // Encode "roughness" and "n.z" sign into z-channel ( 10-bits is too much for roughness, linear at least )
+    roughness = max( roughness, 1.5 / 512.0 ); // can't be 0 to not ruin "n.z" sign bit
+    float s = n.z < 0 ? -roughness : roughness;
+    r.z = s * 0.5 + 0.5;
+
+    return r;
 }
 
-float3 _NRD_DecodeUnitVector( float2 p, const bool bSigned, const bool bNormalize )
+float4 _NRD_DecodeNormalRoughness101010( float3 p )
 {
-    p = bSigned ? p : ( p * 2.0 - 1.0 );
+    float t = p.z * 2.0 - 1.0; // signed roughness
 
-    // https://twitter.com/Stubbesaurus/status/937994790553227264
-    float3 n = float3( p.xy, 1.0 - abs( p.x ) - abs( p.y ) );
-    float t = saturate( -n.z );
-    n.xy -= t * ( step( 0.0, n.xy ) * 2.0 - 1.0 );
+    float4 r;
+    r.x = p.x - p.y;
+    r.y = p.x + p.y - 1.0;
+    r.z = t < 0 ? -1 : 1;
+    r.z *= 1.0 - abs( r.x ) - abs( r.y );
 
-    return bNormalize ? normalize( n ) : n;
+    r.w = abs( t );
+
+    return r; // "r.xyz" gets normalized later
 }
 
 // Color space
@@ -623,14 +635,31 @@ float _NRD_SG_InnerProduct( NRD_SG a, NRD_SG b )
 // FRONT-END - GENERAL
 //=================================================================================================================================
 
-// This function is used in all denoisers to decode normal, roughness and optional materialID
+// Used to decode linear roughness accessed via "Gather" instructions
+float4 NRD_FrontEnd_UnpackRoughness( float4 r )
+{
+    // This is a part of improved oct-packing
+    #if( NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_R10G10B10A2_UNORM )
+        r = abs( r * 2.0 - 1.0 );
+    #endif
+
+    // Decode to linear roughness
+    #if( NRD_ROUGHNESS_ENCODING == NRD_ROUGHNESS_ENCODING_SQRT_LINEAR )
+        r.w = saturate( r.w * r.w );
+    #elif( NRD_ROUGHNESS_ENCODING == NRD_ROUGHNESS_ENCODING_SQ_LINEAR )
+        r.w = sqrt( saturate( r.w ) );
+    #endif
+
+    return r;
+}
+
+// This function is used in all denoisers to decode normal, linear roughness and optional materialID
 // IN_NORMAL_ROUGHNESS => X
 float4 NRD_FrontEnd_UnpackNormalAndRoughness( float4 p, out float materialID )
 {
     float4 r;
     #if( NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_R10G10B10A2_UNORM )
-        r.xyz = _NRD_DecodeUnitVector( p.xy, false, false );
-        r.w = p.z;
+        r = _NRD_DecodeNormalRoughness101010( p.xyz );
 
         materialID = p.w * 3.0;
     #else
@@ -649,8 +678,9 @@ float4 NRD_FrontEnd_UnpackNormalAndRoughness( float4 p, out float materialID )
 
     r.xyz = _NRD_SafeNormalize( r.xyz );
 
+    // Decode to linear roughness
     #if( NRD_ROUGHNESS_ENCODING == NRD_ROUGHNESS_ENCODING_SQRT_LINEAR )
-        r.w *= r.w;
+        r.w = saturate( r.w * r.w );
     #elif( NRD_ROUGHNESS_ENCODING == NRD_ROUGHNESS_ENCODING_SQ_LINEAR )
         r.w = sqrt( saturate( r.w ) );
     #endif
@@ -666,36 +696,35 @@ float4 NRD_FrontEnd_UnpackNormalAndRoughness( float4 p )
     return NRD_FrontEnd_UnpackNormalAndRoughness( p, unused );
 }
 
-// // Not used in NRD
-// // X => IN_NORMAL_ROUGHNESS
-// float4 NRD_FrontEnd_PackNormalAndRoughness( float3 N, float roughness, float materialID )
-// {
-//     float4 p;
-//
-//     #if( NRD_ROUGHNESS_ENCODING == NRD_ROUGHNESS_ENCODING_SQRT_LINEAR )
-//         roughness = sqrt( saturate( roughness ) );
-//     #elif( NRD_ROUGHNESS_ENCODING == NRD_ROUGHNESS_ENCODING_SQ_LINEAR )
-//         roughness *= roughness;
-//     #endif
-//
-//     #if( NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_R10G10B10A2_UNORM )
-//         p.xy = _NRD_EncodeUnitVector( N, false );
-//         p.z = roughness;
-//         p.w = saturate( materialID / 3.0 );
-//     #else
-//         // Best fit ( optional )
-//         N /= max( abs( N.x ), max( abs( N.y ), abs( N.z ) ) );
-//
-//         #if( NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_RGBA8_UNORM || NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_RGBA16_UNORM )
-//             N = N * 0.5 + 0.5;
-//         #endif
-//
-//         p.xyz = N;
-//         p.w = roughness;
-//     #endif
-//
-//     return p;
-// }
+// Not used in NRD
+// X => IN_NORMAL_ROUGHNESS
+float4 NRD_FrontEnd_PackNormalAndRoughness( float3 N, float roughness, float materialID )
+{
+    float4 p;
+
+    #if( NRD_ROUGHNESS_ENCODING == NRD_ROUGHNESS_ENCODING_SQRT_LINEAR )
+        roughness = sqrt( saturate( roughness ) );
+    #elif( NRD_ROUGHNESS_ENCODING == NRD_ROUGHNESS_ENCODING_SQ_LINEAR )
+        roughness *= roughness;
+    #endif
+
+    #if( NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_R10G10B10A2_UNORM )
+        p.xyz = _NRD_EncodeNormalRoughness101010( N, roughness );
+        p.w = saturate( materialID / 3.0 );
+    #else
+        // Best fit ( optional )
+        N /= max( abs( N.x ), max( abs( N.y ), abs( N.z ) ) );
+
+        #if( NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_RGBA8_UNORM || NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_RGBA16_UNORM )
+            N = N * 0.5 + 0.5;
+        #endif
+
+        p.xyz = N;
+        p.w = roughness;
+    #endif
+
+    return p;
+}
 
 // Material de-modulation
 //   Front-end usage ( before NRD, convert irradiance into radiance ):
@@ -1188,7 +1217,7 @@ float REBLUR_GetHitDist( float normHitDist, float viewZ, float4 hitDistParams, f
 // pixelSize = gUnproject * ( isOrtho ? 1.0 : abs( viewZ ) )
 float NRD_GetNormalizedStrandThickness( float strandThickness, float pixelSize )
 {
-    return pixelSize / ( pixelSize + strandThickness );
+    return saturate( 0.5 * pixelSize / ( strandThickness + NRD_EPS ) );
 }
 
 #endif // __cplusplus

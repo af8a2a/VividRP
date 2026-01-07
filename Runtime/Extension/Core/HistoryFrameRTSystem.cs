@@ -136,6 +136,9 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>NRD REBLUR specular radiance history (accumulated).</summary>
         REBLURPathTracingSpecularRadiance,
 
+        /// <summary>NRD REBLUR specular hit distance for tracking.</summary>
+        REBLURPathTracingSpecHitDistForTracking,
+
     }
 
     /// <summary>

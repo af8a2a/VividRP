@@ -161,7 +161,7 @@ namespace UnityEngine.Rendering.Universal
             {
                 historyRTSystem.ReleaseHistoryFrameRT(HistoryFrameType.REBLURPathTracingDiffuseInternalData);
                 historyRTSystem.AllocHistoryFrameRT((int)HistoryFrameType.REBLURPathTracingDiffuseInternalData,
-                    Allocator, GraphicsFormat.R8_UNorm, 1);
+                    Allocator, GraphicsFormat.R32_UInt, 1);
             }
 
             currFrameRT = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.REBLURPathTracingDiffuseInternalData);
@@ -185,7 +185,7 @@ namespace UnityEngine.Rendering.Universal
             {
                 historyRTSystem.ReleaseHistoryFrameRT(HistoryFrameType.REBLURPathTracingSpecularInternalData);
                 historyRTSystem.AllocHistoryFrameRT((int)HistoryFrameType.REBLURPathTracingSpecularInternalData,
-                    Allocator, GraphicsFormat.R8_UNorm, 1);
+                    Allocator, GraphicsFormat.R32_UInt, 1);
             }
 
             currFrameRT = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.REBLURPathTracingSpecularInternalData);
@@ -290,6 +290,31 @@ namespace UnityEngine.Rendering.Universal
             return valid;
         }
 
+        internal bool ReAllocateSpecHitDistForTrackingIfNeeded(HistoryFrameRTSystem historyRTSystem, out RTHandle prevFrameRT, out RTHandle currFrameRT)
+        {
+            static RTHandle Allocator(GraphicsFormat graphicsFormat, string viewName, int frameIndex, RTHandleSystem rtHandleSystem)
+            {
+                frameIndex &= 1;
+                return rtHandleSystem.Alloc(Vector2.one, colorFormat: graphicsFormat,
+                    enableRandomWrite: true, useDynamicScale: true,
+                    name: $"{viewName}_REBLUR_PT_SpecHitDistForTracking{frameIndex}");
+            }
+
+            var curTexture = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.REBLURPathTracingSpecHitDistForTracking);
+            bool valid = curTexture != null;
+
+            if (!valid)
+            {
+                historyRTSystem.ReleaseHistoryFrameRT(HistoryFrameType.REBLURPathTracingSpecHitDistForTracking);
+                historyRTSystem.AllocHistoryFrameRT((int)HistoryFrameType.REBLURPathTracingSpecHitDistForTracking,
+                    Allocator, GraphicsFormat.R16_SFloat, 2);
+            }
+
+            currFrameRT = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.REBLURPathTracingSpecHitDistForTracking);
+            prevFrameRT = historyRTSystem.GetPreviousFrameRT(HistoryFrameType.REBLURPathTracingSpecHitDistForTracking);
+            return valid;
+        }
+
         #endregion
 
             #region Pass Data
@@ -356,6 +381,10 @@ namespace UnityEngine.Rendering.Universal
             internal TextureHandle CurrSpecularFastTexture;
             internal TextureHandle PrevSpecularRadianceTexture;
 
+            // SpecHitDistForTracking (for specular tracking)
+            internal TextureHandle PrevSpecHitDistForTrackingTexture;
+            internal TextureHandle CurrSpecHitDistForTrackingTexture;
+
             // Transient textures
             internal TextureHandle TileTexture;
             internal TextureHandle TempTexture1;
@@ -417,6 +446,11 @@ namespace UnityEngine.Rendering.Universal
         static readonly int gOut_InternalData = Shader.PropertyToID("gOut_InternalData");
         static readonly int gOut_DiffCopy = Shader.PropertyToID("gOut_DiffCopy");
         static readonly int gOut_SpecCopy = Shader.PropertyToID("gOut_SpecCopy");
+
+        // SpecHitDistForTracking (for DiffuseSpecular variant)
+        static readonly int gOut_SpecHitDistForTracking = Shader.PropertyToID("gOut_SpecHitDistForTracking");
+        static readonly int gIn_SpecHitDistForTracking = Shader.PropertyToID("gIn_SpecHitDistForTracking");
+        static readonly int gPrev_SpecHitDistForTracking = Shader.PropertyToID("gPrev_SpecHitDistForTracking");
 
         static readonly int REBLUR_ClassifyTilesConstants = Shader.PropertyToID("REBLUR_ClassifyTilesConstants");
         static readonly int REBLUR_TemporalAccumulationConstants = Shader.PropertyToID("REBLUR_TemporalAccumulationConstants");
@@ -588,11 +622,16 @@ namespace UnityEngine.Rendering.Universal
                 cmd.SetComputeTextureParam(cs, kernel, gIn_Spec, data.UnfilteredSpecularTexture);
                 cmd.SetComputeTextureParam(cs, kernel, gHistory_Spec, data.PrevSpecularRadianceTexture);
                 cmd.SetComputeTextureParam(cs, kernel, gHistory_SpecFast, data.PrevSpecularFastTexture);
+                // SpecHitDistForTracking inputs (for specular reflections tracking)
+                cmd.SetComputeTextureParam(cs, kernel, gPrev_SpecHitDistForTracking, data.PrevSpecHitDistForTrackingTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_SpecHitDistForTracking, data.CurrSpecHitDistForTrackingTexture);
 
                 cmd.SetComputeTextureParam(cs, kernel, gOut_Data1, data.TempDataTexture);
                 cmd.SetComputeTextureParam(cs, kernel, gOut_Data2, data.TempData2Texture);
                 cmd.SetComputeTextureParam(cs, kernel, gOut_Spec, data.TempTexture2);
                 cmd.SetComputeTextureParam(cs, kernel, gOut_SpecFast, data.CurrSpecularFastTexture);
+                // SpecHitDistForTracking output
+                cmd.SetComputeTextureParam(cs, kernel, gOut_SpecHitDistForTracking, data.CurrSpecHitDistForTrackingTexture);
 
                 cmd.DispatchCompute(cs, kernel, tx, ty, 1);
             }
@@ -607,6 +646,8 @@ namespace UnityEngine.Rendering.Universal
                 cmd.SetComputeTextureParam(cs, kernel, gIn_ViewZ, data.CurrViewZTexture);
                 cmd.SetComputeTextureParam(cs, kernel, gIn_Spec, data.TempTexture2);
                 cmd.SetComputeTextureParam(cs, kernel, gIn_SpecFast, data.CurrSpecularFastTexture);
+                // SpecHitDistForTracking input (uses current frame from temporal accumulation)
+                cmd.SetComputeTextureParam(cs, kernel, gIn_SpecHitDistForTracking, data.CurrSpecHitDistForTrackingTexture);
 
                 cmd.SetComputeTextureParam(cs, kernel, gOut_Spec, data.TempTexture1);
                 cmd.SetComputeTextureParam(cs, kernel, gOut_SpecFast, data.PrevSpecularFastTexture);
@@ -782,7 +823,7 @@ namespace UnityEngine.Rendering.Universal
 
             var reblurConstants = new ReblurSharedConstants();
             NRDInitlizer.NRD_SetupReblurConstBuffer(m_NRDContext, ref commonSettings, ref reblurSettings, ref reblurConstants);
-
+            reblurConstants.gDenoisingRange = 10000;
             // Allocate history buffers
             ReAllocateDiffuseInternalDataIfNeeded(historyRT, out var diffuseInternalData);
             ReAllocateSpecularInternalDataIfNeeded(historyRT, out var specularInternalData);
@@ -790,6 +831,7 @@ namespace UnityEngine.Rendering.Universal
             ReAllocateSpecularRadianceHistoryIfNeeded(historyRT, out var prevSpecularRadiance);
             ReAllocateDiffuseFastHistoryIfNeeded(historyRT, out var prevDiffuseFast, out var currDiffuseFast);
             ReAllocateSpecularFastHistoryIfNeeded(historyRT, out var prevSpecularFast, out var currSpecularFast);
+            ReAllocateSpecHitDistForTrackingIfNeeded(historyRT, out var prevSpecHitDistForTracking, out var currSpecHitDistForTracking);
 
             // Create output textures
             var outputDiffuseDesc = new TextureDesc(width, height)
@@ -864,21 +906,21 @@ namespace UnityEngine.Rendering.Universal
 
                 data.TempDataTexture = builder.CreateTransientTexture(new TextureDesc(width, height)
                 {
-                    format = GraphicsFormat.R8_UNorm,
+                    format = GraphicsFormat.R32G32_SFloat,
                     enableRandomWrite = true,
                     name = "REBLUR_TempData"
                 });
 
                 data.TempData2Texture = builder.CreateTransientTexture(new TextureDesc(width, height)
                 {
-                    format = GraphicsFormat.R8_UNorm,
+                    format = GraphicsFormat.R32_UInt,
                     enableRandomWrite = true,
                     name = "REBLUR_TempData2"
                 });
 
                 data.InternalDataTexture = builder.CreateTransientTexture(new TextureDesc(width, height)
                 {
-                    format = GraphicsFormat.R8_UNorm,
+                    format = GraphicsFormat.R32_UInt,
                     enableRandomWrite = true,
                     name = "REBLUR_InternalData"
                 });
@@ -927,6 +969,10 @@ namespace UnityEngine.Rendering.Universal
                 data.PrevSpecularFastTexture = renderGraph.ImportTexture(prevSpecularFast);
                 data.CurrSpecularFastTexture = renderGraph.ImportTexture(currSpecularFast);
 
+                // SpecHitDistForTracking (for specular reflections tracking)
+                data.PrevSpecHitDistForTrackingTexture = renderGraph.ImportTexture(prevSpecHitDistForTracking);
+                data.CurrSpecHitDistForTrackingTexture = renderGraph.ImportTexture(currSpecHitDistForTracking);
+
                 data.UnfilteredSpecularTexture = unfilteredSpecularTexture;
                 data.OutputSpecularTexture = outputSpecularTexture;
 
@@ -954,21 +1000,21 @@ namespace UnityEngine.Rendering.Universal
 
                 data.TempDataTexture = builder.CreateTransientTexture(new TextureDesc(width, height)
                 {
-                    format = GraphicsFormat.R8_UNorm,
+                    format = GraphicsFormat.R32G32_SFloat,
                     enableRandomWrite = true,
                     name = "REBLUR_TempDataSpec"
                 });
 
                 data.TempData2Texture = builder.CreateTransientTexture(new TextureDesc(width, height)
                 {
-                    format = GraphicsFormat.R8_UNorm,
+                    format = GraphicsFormat.R32_UInt,
                     enableRandomWrite = true,
                     name = "REBLUR_TempData2Spec"
                 });
 
                 data.InternalDataTexture = builder.CreateTransientTexture(new TextureDesc(width, height)
                 {
-                    format = GraphicsFormat.R8_UNorm,
+                    format = GraphicsFormat.R32_UInt,
                     enableRandomWrite = true,
                     name = "REBLUR_InternalDataSpec"
                 });
@@ -988,6 +1034,8 @@ namespace UnityEngine.Rendering.Universal
                 builder.UseTexture(data.PrevSpecularRadianceTexture, AccessFlags.ReadWrite);
                 builder.UseTexture(data.PrevSpecularFastTexture, AccessFlags.ReadWrite);
                 builder.UseTexture(data.CurrSpecularFastTexture, AccessFlags.ReadWrite);
+                builder.UseTexture(data.PrevSpecHitDistForTrackingTexture, AccessFlags.ReadWrite);
+                builder.UseTexture(data.CurrSpecHitDistForTrackingTexture, AccessFlags.ReadWrite);
                 builder.UseTexture(data.UnfilteredSpecularTexture);
                 builder.UseTexture(data.OutputSpecularTexture, AccessFlags.ReadWrite);
                 builder.UseTexture(data.DummyTexture);

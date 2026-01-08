@@ -4,6 +4,9 @@
 #ifndef PATH_TRACING_COMMON_INCLUDED
 #define PATH_TRACING_COMMON_INCLUDED
 
+// Include NRD helper functions for material de-modulation
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Filter/Denoiser/NRD/NRD.hlsl"
+
 //--------------------------------------------------------------------------------------------------
 // Constants
 //--------------------------------------------------------------------------------------------------
@@ -198,50 +201,9 @@ float3 SanitizeValue_PT(float3 v, float maxValue)
 // Re-modulation multiplies denoised result by material factors to recover final color
 //--------------------------------------------------------------------------------------------------
 
-// Minimum scale to avoid numerical instabilities (from NRD)
-#define PT_MATERIAL_FACTOR_MIN_SCALE    0.02
-#define PT_ROUGHNESS_FACTOR_MIN_SCALE   0.1
-
-// Fresnel term using Schlick approximation
-float3 PT_FresnelSchlick(float3 F0, float VdotH)
-{
-    float t = 1.0 - VdotH;
-    float t2 = t * t;
-    float t5 = t2 * t2 * t;
-    return F0 + (1.0 - F0) * t5;
-}
-
-// Environment term approximation from Ray Tracing Gems (for specular factor)
-float3 PT_EnvironmentTerm(float3 Rf0, float NoV, float roughness)
-{
-    float m = saturate(roughness * roughness);
-
-    float4 X;
-    X.x = 1.0;
-    X.y = NoV;
-    X.z = NoV * NoV;
-    X.w = NoV * X.z;
-
-    float4 Y;
-    Y.x = 1.0;
-    Y.y = m;
-    Y.z = m * m;
-    Y.w = m * Y.z;
-
-    const float2x2 M1 = float2x2(0.99044, -1.28514, 1.29678, -0.755907);
-    const float3x3 M2 = float3x3(1.0, 2.92338, 59.4188, 20.3225, -27.0302, 222.592, 121.563, 626.13, 316.627);
-
-    const float2x2 M3 = float2x2(0.0365463, 3.32707, 9.0632, -9.04756);
-    const float3x3 M4 = float3x3(1.0, 3.59685, -1.36772, 9.04401, -16.3174, 9.22949, 5.56589, 19.7886, -20.2123);
-
-    float bias = dot(mul(M1, X.xy), Y.xy) / max(dot(mul(M2, X.xyw), Y.xyw), 0.000001);
-    float scale = dot(mul(M3, X.xy), Y.xy) / max(dot(mul(M4, X.xzw), Y.xyw), 0.000001);
-
-    return saturate(Rf0 * scale + bias);
-}
-
 // Compute material factors for de-modulation/re-modulation
-// Compatible with NRD's NRD_MaterialFactors function
+// Uses NRD's official NRD_MaterialFactors function (NRD.hlsl line 736)
+// This ensures consistency with NRD denoiser expectations
 void PT_ComputeMaterialFactors(
     float3 normalWS,
     float3 viewDirWS,
@@ -252,33 +214,21 @@ void PT_ComputeMaterialFactors(
     out float3 specularFactor)
 {
     // Compute F0 (specular reflectance at normal incidence)
+    // F0 = 0.04 for dielectrics, albedo for metals
     float3 Rf0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
 
-    float NoV = abs(dot(normalWS, viewDirWS));
-
-    // Environment term (Fresnel with roughness consideration)
-    float3 Fenv = PT_EnvironmentTerm(Rf0, NoV, roughness);
-
-    // Diffuse factor: (1 - F) * albedo, accounting for energy conservation
-    // For metals, diffuse is effectively 0 (handled by (1-metallic) in diffuse BRDF)
-    float3 diffuseAlbedo = albedo * (1.0 - metallic);
-    diffuseFactor = (1.0 - Fenv) * diffuseAlbedo;
-    diffuseFactor = lerp(float3(PT_MATERIAL_FACTOR_MIN_SCALE, PT_MATERIAL_FACTOR_MIN_SCALE, PT_MATERIAL_FACTOR_MIN_SCALE),
-                         float3(1.0, 1.0, 1.0), diffuseFactor);
-
-    // Specular factor: Fresnel * roughness factor
-    specularFactor = Fenv;
-    specularFactor *= lerp(float3(PT_ROUGHNESS_FACTOR_MIN_SCALE, PT_ROUGHNESS_FACTOR_MIN_SCALE, PT_ROUGHNESS_FACTOR_MIN_SCALE),
-                           float3(1.0, 1.0, 1.0), roughness);
-    specularFactor = lerp(float3(PT_MATERIAL_FACTOR_MIN_SCALE, PT_MATERIAL_FACTOR_MIN_SCALE, PT_MATERIAL_FACTOR_MIN_SCALE),
-                          float3(1.0, 1.0, 1.0), specularFactor);
+    // Use NRD's official material factor computation
+    // NRD_MaterialFactors implements the same environment term and factor scaling
+    // that REBLUR expects for proper de-modulation
+    NRD_MaterialFactors(normalWS, viewDirWS, albedo, Rf0, roughness, diffuseFactor, specularFactor);
 }
 
 // De-modulate radiance (before denoising): radiance / factor
 float3 PT_DemodulateRadiance(float3 radiance, float3 factor)
 {
     // Safe division to avoid issues with very small factors
-    return radiance / max(factor, PT_MATERIAL_FACTOR_MIN_SCALE);
+    // Use NRD's minimum scale constant for consistency
+    return radiance / max(factor, NRD_MATERIAL_FACTOR_MIN_SCALE);
 }
 
 // Re-modulate radiance (after denoising): radiance * factor

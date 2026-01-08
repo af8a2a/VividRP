@@ -662,21 +662,15 @@ void RayGenPathTracing()
         float currentRoughness = primaryRoughness;
         float3 currentViewDir = viewDirWS;
 
-        // Add direct lighting at primary hit (Next Event Estimation)
-        // Note: Direct lighting at G-buffer hit is NOT split into diffuse/specular for NRD
-        // because the deferred lighting pass handles this. We only track indirect bounces.
-        if (_PathTracingIncludeDirectLighting)
-        {
-            float3 directLight = EvaluateDirectLighting(
-                primaryHitPos, primaryNormal, viewDirWS,
-                primaryAlbedo, primaryMetallic, primaryRoughness, rngState);
-            // Apply occlusion to direct lighting
-            // Add to combined radiance (direct light is handled separately by deferred pass)
-            sampleAccumulator.combinedRadiance += throughput * directLight * primaryOcclusion;
-        }
+        // NOTE: Direct lighting at primary hit is NOT included in path tracer output!
+        // Following NRD-Sample architecture:
+        // - Path tracer outputs ONLY indirect lighting (secondary bounces)
+        // - Direct lighting is handled by the deferred lighting pass
+        // - Composition combines denoised indirect + direct lighting
+        // This prevents luminance mismatch between denoised and undenoised results.
 
         //------------------------------------------------------------------
-        // Path Tracing Loop
+        // Path Tracing Loop - traces INDIRECT lighting only
         //------------------------------------------------------------------
         for (int bounce = 0; bounce < _RaytracingMaxRecursion; bounce++)
         {

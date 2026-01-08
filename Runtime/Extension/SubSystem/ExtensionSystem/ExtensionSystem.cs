@@ -12,7 +12,8 @@ namespace UnityEngine.Rendering.Universal
         PlaceHolder,
         ShaderExecutionReordering,
         Bindless,
-        NvidiaRealtimeDenoiser
+        NvidiaRealtimeDenoiser,
+        DLSS  // NVIDIA DLSS (Deep Learning Super Sampling) - SR and RR
     }
 
 

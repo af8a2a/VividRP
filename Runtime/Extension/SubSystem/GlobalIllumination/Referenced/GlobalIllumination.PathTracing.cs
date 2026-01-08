@@ -40,7 +40,9 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>Simple temporal accumulation with optional reprojection rejection</summary>
         TemporalAccumulation = 1,
         /// <summary>NRD REBLUR - High quality spatio-temporal denoising with separate diffuse/specular</summary>
-        NRDReblur = 2
+        NRDReblur = 2,
+        /// <summary>DLSS Ray Reconstruction - NVIDIA's AI-based ray tracing denoiser with upscaling</summary>
+        DLSSRR = 3
     }
 
     [Serializable]
@@ -612,6 +614,14 @@ namespace UnityEngine.Rendering.Universal
         public bool UseSimpleTemporalAccumulation()
         {
             return denoiseMode.value == PathTracingDenoiseMode.TemporalAccumulation;
+        }
+
+        /// <summary>
+        /// Check if DLSS Ray Reconstruction denoising is enabled
+        /// </summary>
+        public bool UseDLSSRRDenoising()
+        {
+            return denoiseMode.value == PathTracingDenoiseMode.DLSSRR;
         }
 
         /// <summary>

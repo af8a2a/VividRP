@@ -1,6 +1,9 @@
 ﻿using System.Linq;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+#if DLSS_PLUGIN_INTEGRATE
+using DLSS;
+#endif
 
 namespace UnityEngine.Rendering.Universal
 {
@@ -25,6 +28,11 @@ namespace UnityEngine.Rendering.Universal
 
         // NRD REBLUR Denoiser
         private PathTracingDenoiser m_Denoiser;
+
+#if DLSS_PLUGIN_INTEGRATE
+        // DLSS-RR Denoiser
+        private DLSSRRDenoiser m_DLSSRRDenoiser;
+#endif
 
         // Temporal reprojection shader
         private ComputeShader m_TemporalReprojectionCS;
@@ -54,6 +62,11 @@ namespace UnityEngine.Rendering.Universal
         {
             m_Denoiser?.Dispose();
             m_Denoiser = null;
+
+#if DLSS_PLUGIN_INTEGRATE
+            m_DLSSRRDenoiser?.Dispose();
+            m_DLSSRRDenoiser = null;
+#endif
         }
 
         /// <summary>
@@ -1147,6 +1160,96 @@ namespace UnityEngine.Rendering.Universal
                 // Use composited (re-modulated) output
                 denoisedOutput = denoiseResult.compositedOutput;
             }
+#if DLSS_PLUGIN_INTEGRATE
+            // DLSS-RR Denoising Pass - alternative to NRD when DLSS-RR mode is selected
+            else if (giSettings.UseDLSSRRDenoising() &&
+                     ExtensionSystem.SupportedExtension.Contains(HardwareExtension.DLSS) &&
+                     DLSSExtension.Instance?.IsRRSupported == true)
+            {
+                // Create or get DLSS-RR denoiser instance
+                uint viewId = (uint)cameraData.camera.GetInstanceID();
+                if (m_DLSSRRDenoiser == null || m_DLSSRRDenoiser.ViewId != viewId)
+                {
+                    m_DLSSRRDenoiser?.Dispose();
+                    m_DLSSRRDenoiser = new DLSSRRDenoiser(viewId);
+                }
+
+                // Get optimal render resolution for DLSS-RR
+                int outputWidth = cameraData.cameraTargetDescriptor.width;
+                int outputHeight = cameraData.cameraTargetDescriptor.height;
+                int inputWidth = outputWidth;
+                int inputHeight = outputHeight;
+
+                // For DLSS-RR, we can use lower render resolution
+                if (DLSSRRDenoiser.TryGetOptimalRenderSize(DLSSQuality.Balanced, outputWidth, outputHeight, out var optimalSize))
+                {
+                    inputWidth = optimalSize.x;
+                    inputHeight = optimalSize.y;
+                }
+
+                // Initialize DLSS-RR context
+                if (m_DLSSRRDenoiser.Initialize(inputWidth, inputHeight, outputWidth, outputHeight, DLSSQuality.Balanced))
+                {
+                    // Create combined noisy input (diffuse + specular)
+                    // DLSS-RR expects a single combined color input
+                    var combinedNoisyDesc = new TextureDesc(inputWidth, inputHeight)
+                    {
+                        colorFormat = GraphicsFormat.R16G16B16A16_SFloat,
+                        enableRandomWrite = true,
+                        name = "DLSS_RR_CombinedNoisy"
+                    };
+                    var combinedNoisyTexture = renderGraph.CreateTexture(combinedNoisyDesc);
+
+                    // Create DLSS-RR output texture (at output resolution)
+                    var dlssOutputDesc = new TextureDesc(outputWidth, outputHeight)
+                    {
+                        colorFormat = GraphicsFormat.R16G16B16A16_SFloat,
+                        enableRandomWrite = true,
+                        name = "DLSS_RR_Output"
+                    };
+                    var dlssOutputTexture = renderGraph.CreateTexture(dlssOutputDesc);
+
+                    // Get required textures
+                    var motionTexture = resourceData.motionVectorColor;
+                    var depthTexture = resourceData.cameraDepthTexture;
+
+                    // GBuffer textures
+                    var diffuseAlbedo = resourceData.gBuffer[0];  // Albedo from GBuffer
+                    var specularAlbedo = resourceData.gBuffer[1]; // Specular from GBuffer
+                    var normalRoughness = resourceData.gBuffer[2]; // Normal + Roughness from GBuffer
+
+                    // Combine diffuse + specular into single texture for DLSS-RR input
+                    // We need a compute shader pass to do this (re-modulate then combine)
+                    // For now, use the combined output from path tracer
+                    var combinedInput = outputTexture;  // Use raw path tracing output for now
+
+                    // Get matrices for DLSS-RR
+                    var worldToView = cameraData.camera.worldToCameraMatrix;
+                    var viewToClip = cameraData.camera.projectionMatrix;
+
+                    // Calculate jitter
+                    var jitterOffset = cameraData.GetJitter();
+
+                    // Setup DLSS-RR settings
+                    var dlssSettings = new DLSSRRDenoiser.Settings
+                    {
+                        quality = DLSSQuality.Balanced,
+                        resetHistory = m_FrameIndex == 0,
+                        preExposure = 1.0f,
+                        frameTimeDeltaMs = Time.deltaTime * 1000.0f
+                    };
+
+                    // TODO: Execute DLSS-RR when proper texture handles are available
+                    // This requires converting TextureHandle to RTHandle which is complex in RenderGraph
+                    // For now, we use the NRD path or temporal accumulation as fallback
+
+                    // Mark that we would use DLSS-RR output
+                    // denoisedOutput = dlssOutputTexture;
+
+                    Debug.LogWarning("[DLSS-RR] DLSS-RR denoising path is initialized but RenderGraph integration is pending.");
+                }
+            }
+#endif
 
             // Debug visualization: Blit path tracing output directly to screen
             // This is useful for viewing the raw path tracing result before full integration

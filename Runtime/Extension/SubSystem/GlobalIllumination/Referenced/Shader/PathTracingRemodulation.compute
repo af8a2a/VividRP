@@ -5,6 +5,7 @@
 #pragma kernel CSRemodulate
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/Filter/Denoiser/NRD/NRD.hlsl"
 
 // Input textures (denoised radiance from NRD REBLUR)
 Texture2D<float4> _DenoisedDiffuse;     // RGB = denoised de-modulated diffuse, A = hit distance
@@ -16,9 +17,6 @@ RWTexture2D<float4> _OutputTexture;
 
 // Parameters
 float4 _ScreenSize;  // xy = size, zw = 1/size
-
-// Minimum scale to avoid numerical instabilities (must match PathTracingCommon.hlsl)
-#define PT_MATERIAL_FACTOR_MIN_SCALE 0.02
 
 // Re-modulate radiance: multiply by material factor
 float3 RemodulateRadiance(float3 radiance, float3 factor)

@@ -98,6 +98,19 @@ namespace UnityEditor.Rendering.Universal
         SerializedDataParameter m_SharcAccumulationFrames;
         SerializedDataParameter m_SharcStaleFrames;
 
+#if DLSS_PLUGIN_INTEGRATE
+        // DLSS-RR Settings (for DLSSRR mode)
+        SerializedDataParameter m_DlssRRQuality;
+        SerializedDataParameter m_DlssRRHitDistanceScale;
+        SerializedDataParameter m_DlssRRPreExposure;
+        SerializedDataParameter m_DlssRRExposureScale;
+        SerializedDataParameter m_DlssRRResetHistory;
+        SerializedDataParameter m_DlssRRSharpness;
+        SerializedDataParameter m_DlssRRAutoExposure;
+        SerializedDataParameter m_DlssRRIsHDR;
+        SerializedDataParameter m_DlssRRSplitScreen;
+#endif
+
         #endregion
 
         #region Styles
@@ -151,6 +164,18 @@ namespace UnityEditor.Rendering.Universal
             public static readonly GUIContent NrdHitDistanceC = EditorGUIUtility.TrTextContent("C (Roughness Scale)", "Roughness-based scale.");
             public static readonly GUIContent NrdHitDistanceD = EditorGUIUtility.TrTextContent("D (Roughness Collapse)", "Roughness collapse factor.");
             public static readonly GUIContent NrdSplitScreen = EditorGUIUtility.TrTextContent("Split Screen Debug", "Split screen visualization for debugging.");
+
+            // DLSS-RR
+            public static readonly GUIContent HeaderDLSSRR = EditorGUIUtility.TrTextContent("DLSS Ray Reconstruction");
+            public static readonly GUIContent DlssRRQuality = EditorGUIUtility.TrTextContent("Quality Preset", "DLSS-RR quality preset. Higher quality modes use lower internal resolution for better performance.");
+            public static readonly GUIContent DlssRRHitDistanceScale = EditorGUIUtility.TrTextContent("Hit Distance Scale", "World-space scale for hit distances. Adjust based on scene scale (larger scenes need larger values).");
+            public static readonly GUIContent DlssRRPreExposure = EditorGUIUtility.TrTextContent("Pre-Exposure", "Pre-exposure value for DLSS-RR input. Should match your rendering's pre-exposure if used.");
+            public static readonly GUIContent DlssRRExposureScale = EditorGUIUtility.TrTextContent("Exposure Scale", "Exposure scale multiplier for DLSS-RR. Used when auto-exposure is enabled.");
+            public static readonly GUIContent DlssRRResetHistory = EditorGUIUtility.TrTextContent("Reset History", "Force reset DLSS-RR temporal history. Enable temporarily when scene changes significantly.");
+            public static readonly GUIContent DlssRRSharpness = EditorGUIUtility.TrTextContent("Sharpness", "Sharpness applied to DLSS-RR output. 0 = no sharpening, 1 = maximum sharpening.");
+            public static readonly GUIContent DlssRRAutoExposure = EditorGUIUtility.TrTextContent("Auto Exposure", "Enable auto-exposure handling in DLSS-RR. Should be enabled if your rendering uses auto-exposure.");
+            public static readonly GUIContent DlssRRIsHDR = EditorGUIUtility.TrTextContent("HDR Input", "Indicate that input is HDR (pre-tonemapped). Should be enabled for path tracing which outputs linear HDR radiance.");
+            public static readonly GUIContent DlssRRSplitScreen = EditorGUIUtility.TrTextContent("Split Screen Debug", "Split screen visualization for DLSS-RR debugging. 0 = off, 0.5 = half screen shows raw input.");
         }
 
         #endregion
@@ -248,6 +273,19 @@ namespace UnityEditor.Rendering.Universal
             m_SharcDebug = Unpack(o.Find(x => x.sharcDebug));
             m_SharcAccumulationFrames = Unpack(o.Find(x => x.sharcAccumulationFrames));
             m_SharcStaleFrames = Unpack(o.Find(x => x.sharcStaleFrames));
+
+#if DLSS_PLUGIN_INTEGRATE
+            // DLSS-RR Settings
+            m_DlssRRQuality = Unpack(o.Find(x => x.dlssRRQuality));
+            m_DlssRRHitDistanceScale = Unpack(o.Find(x => x.dlssRRHitDistanceScale));
+            m_DlssRRPreExposure = Unpack(o.Find(x => x.dlssRRPreExposure));
+            m_DlssRRExposureScale = Unpack(o.Find(x => x.dlssRRExposureScale));
+            m_DlssRRResetHistory = Unpack(o.Find(x => x.dlssRRResetHistory));
+            m_DlssRRSharpness = Unpack(o.Find(x => x.dlssRRSharpness));
+            m_DlssRRAutoExposure = Unpack(o.Find(x => x.dlssRRAutoExposure));
+            m_DlssRRIsHDR = Unpack(o.Find(x => x.dlssRRIsHDR));
+            m_DlssRRSplitScreen = Unpack(o.Find(x => x.dlssRRSplitScreen));
+#endif
 
             base.OnEnable();
         }
@@ -430,6 +468,57 @@ namespace UnityEditor.Rendering.Universal
                     // Debug
                     PropertyField(m_NrdSplitScreen, Styles.NrdSplitScreen);
                 }
+#if DLSS_PLUGIN_INTEGRATE
+                // DLSS-RR mode settings
+                else if (denoiseMode == PathTracingDenoiseMode.DLSSRR)
+                {
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField(Styles.HeaderDLSSRR, EditorStyles.boldLabel);
+                    using (new EditorGUI.IndentLevelScope())
+                    {
+                        PropertyField(m_DlssRRQuality, Styles.DlssRRQuality);
+                        PropertyField(m_DlssRRHitDistanceScale, Styles.DlssRRHitDistanceScale);
+
+                        EditorGUILayout.Space();
+
+                        // Exposure settings
+                        EditorGUILayout.LabelField("Exposure", EditorStyles.boldLabel);
+                        using (new EditorGUI.IndentLevelScope())
+                        {
+                            PropertyField(m_DlssRRIsHDR, Styles.DlssRRIsHDR);
+                            PropertyField(m_DlssRRAutoExposure, Styles.DlssRRAutoExposure);
+                            PropertyField(m_DlssRRPreExposure, Styles.DlssRRPreExposure);
+                            if (m_DlssRRAutoExposure.value.boolValue)
+                            {
+                                PropertyField(m_DlssRRExposureScale, Styles.DlssRRExposureScale);
+                            }
+                        }
+
+                        EditorGUILayout.Space();
+
+                        // Quality settings
+                        EditorGUILayout.LabelField("Quality", EditorStyles.boldLabel);
+                        using (new EditorGUI.IndentLevelScope())
+                        {
+                            PropertyField(m_DlssRRSharpness, Styles.DlssRRSharpness);
+                        }
+
+                        EditorGUILayout.Space();
+
+                        // History settings
+                        EditorGUILayout.LabelField("History", EditorStyles.boldLabel);
+                        using (new EditorGUI.IndentLevelScope())
+                        {
+                            PropertyField(m_DlssRRResetHistory, Styles.DlssRRResetHistory);
+                        }
+
+                        EditorGUILayout.Space();
+
+                        // Debug
+                        PropertyField(m_DlssRRSplitScreen, Styles.DlssRRSplitScreen);
+                    }
+                }
+#endif
             }
 
             EditorGUILayout.Space();

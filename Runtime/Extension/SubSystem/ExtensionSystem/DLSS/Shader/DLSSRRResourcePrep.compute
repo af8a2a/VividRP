@@ -65,20 +65,6 @@ float3 _CameraPosition;         // Camera world position
 // OctQuad Decoding - Matches URP GBuffer encoding
 //------------------------------------------------------------------------------
 
-// Unpack normal from OctQuadEncoded format (URP uses this in GBuffer2)
-float3 UnpackNormalOctQuadEncode(float2 encodedNormal)
-{
-    // OctQuad encoding stores normal in [-1,1] range packed to [0,1]
-    float2 f = encodedNormal * 2.0 - 1.0;
-
-    // Decode octahedron
-    float3 n = float3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
-    float t = max(-n.z, 0.0);
-    n.x += n.x >= 0.0 ? -t : t;
-    n.y += n.y >= 0.0 ? -t : t;
-
-    return normalize(n);
-}
 
 //------------------------------------------------------------------------------
 // Smoothness/Roughness Conversion for DLSS-RR

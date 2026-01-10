@@ -440,7 +440,6 @@ namespace UnityEngine.Rendering.Universal
         /// Hit distance scale for DLSS-RR
         /// </summary>
         [Tooltip("World-space scale for hit distances. Adjust based on scene scale (larger scenes need larger values).")]
-        [AdditionalProperty]
         public ClampedFloatParameter dlssRRHitDistanceScale = new ClampedFloatParameter(1000.0f, 1.0f, 100000.0f);
 
         /// <summary>
@@ -449,6 +448,48 @@ namespace UnityEngine.Rendering.Universal
         [Tooltip("Pre-exposure value for DLSS-RR input. Should match your rendering's pre-exposure if used.")]
         [AdditionalProperty]
         public ClampedFloatParameter dlssRRPreExposure = new ClampedFloatParameter(1.0f, 0.001f, 100.0f);
+
+        /// <summary>
+        /// Exposure scale for DLSS-RR auto-exposure
+        /// </summary>
+        [Tooltip("Exposure scale multiplier for DLSS-RR. Used when auto-exposure is enabled.")]
+        [AdditionalProperty]
+        public ClampedFloatParameter dlssRRExposureScale = new ClampedFloatParameter(1.0f, 0.001f, 100.0f);
+
+        /// <summary>
+        /// Force reset DLSS-RR history
+        /// </summary>
+        [Tooltip("Force reset DLSS-RR temporal history. Enable temporarily when scene changes significantly (teleportation, scene load, etc.).")]
+        [AdditionalProperty]
+        public BoolParameter dlssRRResetHistory = new BoolParameter(false);
+
+        /// <summary>
+        /// DLSS-RR sharpness
+        /// </summary>
+        [Tooltip("Sharpness applied to DLSS-RR output. 0 = no sharpening, 1 = maximum sharpening.")]
+        [AdditionalProperty]
+        public ClampedFloatParameter dlssRRSharpness = new ClampedFloatParameter(0.0f, 0.0f, 1.0f);
+
+        /// <summary>
+        /// Use auto-exposure for DLSS-RR
+        /// </summary>
+        [Tooltip("Enable auto-exposure handling in DLSS-RR. Should be enabled if your rendering uses auto-exposure.")]
+        [AdditionalProperty]
+        public BoolParameter dlssRRAutoExposure = new BoolParameter(false);
+
+        /// <summary>
+        /// Enable HDR input for DLSS-RR
+        /// </summary>
+        [Tooltip("Indicate that input is HDR (pre-tonemapped). Should be enabled for path tracing which outputs linear HDR radiance.")]
+        [AdditionalProperty]
+        public BoolParameter dlssRRIsHDR = new BoolParameter(true);
+
+        /// <summary>
+        /// DLSS-RR debug split screen
+        /// </summary>
+        [Tooltip("Split screen visualization for DLSS-RR debugging. 0 = off, 0.5 = half screen shows raw input.")]
+        [AdditionalProperty]
+        public ClampedFloatParameter dlssRRSplitScreen = new ClampedFloatParameter(0.0f, 0.0f, 1.0f);
 
         #endregion
 #endif

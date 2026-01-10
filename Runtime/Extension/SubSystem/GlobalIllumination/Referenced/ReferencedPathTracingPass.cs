@@ -1226,8 +1226,10 @@ namespace UnityEngine.Rendering.Universal
                 // Get DLSS quality from volume settings
                 DLSSQuality dlssQuality = giSettings.dlssRRQuality.value;
 
-                // Initialize DLSS-RR context
-                if (m_DLSSRRDenoiser.Initialize(inputWidth, inputHeight, outputWidth, outputHeight, dlssQuality))
+                // Initialize DLSS-RR context with volume settings
+                if (m_DLSSRRDenoiser.Initialize(
+                    inputWidth, inputHeight, outputWidth, outputHeight, dlssQuality,
+                    giSettings.dlssRRIsHDR.value, giSettings.dlssRRAutoExposure.value))
                 {
                     // Get jitter offset and camera matrices from camera extension
                     var cameraExt = cameraData.cameraExtension;
@@ -1271,10 +1273,14 @@ namespace UnityEngine.Rendering.Universal
                         passData.settings = new DLSSRRDenoiser.Settings
                         {
                             quality = dlssQuality,
-                            resetHistory = m_FrameIndex == 0,
-                            preExposure = 1.0f,
+                            resetHistory = m_FrameIndex == 0 || giSettings.dlssRRResetHistory.value,
+                            preExposure = giSettings.dlssRRPreExposure.value,
+                            exposureScale = giSettings.dlssRRExposureScale.value,
                             frameTimeDeltaMs = Time.deltaTime * 1000.0f,
-                            hitDistanceScale = giSettings.dlssRRHitDistanceScale.value
+                            hitDistanceScale = giSettings.dlssRRHitDistanceScale.value,
+                            sharpness = giSettings.dlssRRSharpness.value,
+                            autoExposure = giSettings.dlssRRAutoExposure.value,
+                            isHDR = giSettings.dlssRRIsHDR.value
                         };
 
                         // Declare texture usage for RenderGraph

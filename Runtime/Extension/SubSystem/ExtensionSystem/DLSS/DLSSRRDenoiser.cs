@@ -77,16 +77,24 @@ namespace UnityEngine.Rendering.Universal
             public DLSSQuality quality;
             public bool resetHistory;
             public float preExposure;
+            public float exposureScale;
             public float frameTimeDeltaMs;
             public float hitDistanceScale; // Scale for denormalizing hit distance
+            public float sharpness;
+            public bool autoExposure;
+            public bool isHDR;
 
             public static Settings Default => new Settings
             {
                 quality = DLSSQuality.Balanced,
                 resetHistory = false,
                 preExposure = 1.0f,
+                exposureScale = 1.0f,
                 frameTimeDeltaMs = 16.67f, // ~60fps
-                hitDistanceScale = 1000.0f // Default scene scale
+                hitDistanceScale = 1000.0f, // Default scene scale
+                sharpness = 0.0f,
+                autoExposure = false,
+                isHDR = true
             };
         }
 
@@ -157,7 +165,15 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// Initialize or update the DLSS-RR context for the given resolution
         /// </summary>
-        public bool Initialize(int inputWidth, int inputHeight, int outputWidth, int outputHeight, DLSSQuality quality)
+        /// <param name="inputWidth">Input render width</param>
+        /// <param name="inputHeight">Input render height</param>
+        /// <param name="outputWidth">Output display width</param>
+        /// <param name="outputHeight">Output display height</param>
+        /// <param name="quality">DLSS quality preset</param>
+        /// <param name="isHDR">True if input is HDR (pre-tonemapped)</param>
+        /// <param name="autoExposure">True to enable auto-exposure handling</param>
+        public bool Initialize(int inputWidth, int inputHeight, int outputWidth, int outputHeight,
+            DLSSQuality quality, bool isHDR = true, bool autoExposure = false)
         {
             if (!DLSSManager.IsInitialized)
             {
@@ -200,8 +216,15 @@ namespace UnityEngine.Rendering.Universal
 
             // Create new context using DLSSManager
             var flags = DLSSFeatureFlags.DepthInverted // Unity uses reversed-Z
-                        | DLSSFeatureFlags.MVLowRes // Motion vectors at render resolution
-                        | DLSSFeatureFlags.IsHDR; // HDR input
+                        | DLSSFeatureFlags.MVLowRes; // Motion vectors at render resolution
+
+            // Add HDR flag if input is HDR (pre-tonemapped)
+            if (isHDR)
+                flags |= DLSSFeatureFlags.IsHDR;
+
+            // Add auto-exposure flag if enabled
+            if (autoExposure)
+                flags |= DLSSFeatureFlags.AutoExposure;
 
             if (!DLSSManager.CreateRRContext(
                     m_ViewId,
@@ -655,7 +678,7 @@ namespace UnityEngine.Rendering.Universal
                     renderSubrectDimensions = m_InputResolution,
                     reset = settings.resetHistory ? (byte)1 : (byte)0,
                     preExposure = settings.preExposure,
-                    exposureScale = 1.0f
+                    exposureScale = settings.exposureScale
                 },
 
                 rrParams = new DLSSRRParams

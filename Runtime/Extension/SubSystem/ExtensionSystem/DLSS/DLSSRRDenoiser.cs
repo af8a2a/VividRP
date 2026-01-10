@@ -34,6 +34,7 @@ namespace UnityEngine.Rendering.Universal
         private int m_GenerateSpecularAlbedoKernel;
         private int m_PrepareNormalRoughnessKernel;
         private int m_PrepareRayDirectionsKernel;
+        private int m_GenerateRayDirectionsKernel;
 
         // Internal RTHandle buffers for DLSS-RR
         private RTHandle m_DiffuseHitDistanceRT;
@@ -149,6 +150,7 @@ namespace UnityEngine.Rendering.Universal
                 m_GenerateSpecularAlbedoKernel = m_ResourcePrepCS.FindKernel("CSGenerateSpecularAlbedo");
                 m_PrepareNormalRoughnessKernel = m_ResourcePrepCS.FindKernel("CSPrepareNormalRoughness");
                 m_PrepareRayDirectionsKernel = m_ResourcePrepCS.FindKernel("CSPrepareRayDirections");
+                m_GenerateRayDirectionsKernel = m_ResourcePrepCS.FindKernel("CSGenerateRayDirections");
             }
         }
 
@@ -210,7 +212,7 @@ namespace UnityEngine.Rendering.Universal
                     newOutputRes.height,
                     flags,
                     DLSSDepthType.Hardware,
-                    DLSSRoughnessMode.Unpacked))
+                    DLSSRoughnessMode.PackedInNormalsW))
             {
                 Debug.LogError("[DLSSRRDenoiser] Failed to create DLSS-RR context");
                 return false;
@@ -502,9 +504,10 @@ namespace UnityEngine.Rendering.Universal
 
             cmd.DispatchCompute(m_ResourcePrepCS, m_GenerateSpecularAlbedoKernel, threadGroupsX, threadGroupsY, 1);
 
-            // Prepare ray directions - normalize if provided
+            // Prepare ray directions - either normalize from input or generate from GBuffer
             if (diffuseRayDirection != null && specularRayDirection != null)
             {
+                // Ray directions provided by path tracer - normalize them
                 cmd.SetComputeTextureParam(m_ResourcePrepCS, m_PrepareRayDirectionsKernel, ShaderIDs._DiffuseRayDirectionInput, diffuseRayDirection);
                 cmd.SetComputeTextureParam(m_ResourcePrepCS, m_PrepareRayDirectionsKernel, ShaderIDs._SpecularRayDirectionInput, specularRayDirection);
                 cmd.SetComputeTextureParam(m_ResourcePrepCS, m_PrepareRayDirectionsKernel, ShaderIDs._DiffuseRayDirectionOutput, m_DiffuseRayDirectionRT);
@@ -512,7 +515,17 @@ namespace UnityEngine.Rendering.Universal
 
                 cmd.DispatchCompute(m_ResourcePrepCS, m_PrepareRayDirectionsKernel, threadGroupsX, threadGroupsY, 1);
             }
-            
+            else
+            {
+                // No ray directions from path tracer - generate from GBuffer
+                // Diffuse: use surface normal, Specular: use reflection direction
+                cmd.SetComputeTextureParam(m_ResourcePrepCS, m_GenerateRayDirectionsKernel, ShaderIDs._GBuffer2, normalRoughness);
+                cmd.SetComputeTextureParam(m_ResourcePrepCS, m_GenerateRayDirectionsKernel, ShaderIDs._DepthTexture, depth);
+                cmd.SetComputeTextureParam(m_ResourcePrepCS, m_GenerateRayDirectionsKernel, ShaderIDs._DiffuseRayDirectionOutput, m_DiffuseRayDirectionRT);
+                cmd.SetComputeTextureParam(m_ResourcePrepCS, m_GenerateRayDirectionsKernel, ShaderIDs._SpecularRayDirectionOutput, m_SpecularRayDirectionRT);
+
+                cmd.DispatchCompute(m_ResourcePrepCS, m_GenerateRayDirectionsKernel, threadGroupsX, threadGroupsY, 1);
+            }
 
             // Execute DLSS-RR with prepared resources
             // Use caller-provided colorOutput for proper RenderGraph resource tracking
@@ -528,8 +541,8 @@ namespace UnityEngine.Rendering.Universal
                 null, // Roughness is in m_NormalRoughnessRT.a
                 m_DiffuseHitDistanceRT?.rt, // Extracted diffuse hit distance
                 m_SpecularHitDistanceRT?.rt, // Extracted specular hit distance
-                (diffuseRayDirection != null) ? m_DiffuseRayDirectionRT?.rt : null, // Ray directions (if provided)
-                (specularRayDirection != null) ? m_SpecularRayDirectionRT?.rt : null,
+                m_DiffuseRayDirectionRT?.rt, // Always provide ray directions (generated if not from path tracer)
+                m_SpecularRayDirectionRT?.rt,
                 jitterOffset,
                 worldToView,
                 viewToClip,

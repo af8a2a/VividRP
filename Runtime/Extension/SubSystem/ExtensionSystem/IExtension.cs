@@ -9,6 +9,13 @@
             Debug.LogError(this.GetType().Name + ": Extension support not implemented.");
             return false;
         }
+        
+        public bool ShutDown()
+        {
+            Debug.LogWarning(this.GetType().Name + ": do noting on ShutDown().");
+            return false;
+        }
+
 
         public HardwareExtension GetExtension()
         {

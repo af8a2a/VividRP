@@ -88,7 +88,6 @@ namespace UnityEngine.Rendering.Universal
         {
             return camera.cameraType == CameraType.SceneView || camera.cameraType == CameraType.Game;
         }
-
         public void Initialize()
         {
 

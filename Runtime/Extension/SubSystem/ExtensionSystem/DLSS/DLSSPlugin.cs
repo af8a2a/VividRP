@@ -666,9 +666,6 @@ namespace DLSS
         [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION)]
         public static extern int DLSS_GetLastNGXError();
 
-        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION)]
-        [return: MarshalAs(UnmanagedType.LPStr)]
-        public static extern string DLSS_GetResultString(DLSSResult result);
 
         /// <summary>
         /// Render event ID for DLSS: 'DLSS' = 0x444C5353
@@ -701,7 +698,7 @@ namespace DLSS
 
             if (!s_Initialized)
             {
-                Debug.LogError($"[DLSS] Failed to initialize: {GetResultString(result)}");
+                Debug.LogError($"[DLSS] Failed to initialize: {result.ToString()}");
             }
 
             return s_Initialized;
@@ -732,7 +729,7 @@ namespace DLSS
             var result = DLSSNative.DLSS_GetCapabilities(out info);
             if (result != DLSSResult.Success)
             {
-                Debug.LogWarning($"[DLSS] Failed to get capabilities: {GetResultString(result)}");
+                Debug.LogWarning($"[DLSS] Failed to get capabilities: {result.ToString()}");
                 return false;
             }
             return true;
@@ -751,7 +748,7 @@ namespace DLSS
             var result = DLSSNative.DLSS_GetOptimalSettings(mode, quality, outputWidth, outputHeight, out settings);
             if (result != DLSSResult.Success)
             {
-                Debug.LogWarning($"[DLSS] Failed to get optimal settings: {GetResultString(result)}");
+                Debug.LogWarning($"[DLSS] Failed to get optimal settings: {result.ToString()}");
                 return false;
             }
             return true;
@@ -773,7 +770,7 @@ namespace DLSS
             var result = DLSSNative.DLSS_CreateContext(viewId, ref createParams);
             if (result != DLSSResult.Success)
             {
-                Debug.LogError($"[DLSS] Failed to create SR context for view {viewId}: {GetResultString(result)}");
+                Debug.LogError($"[DLSS] Failed to create SR context for view {viewId}: {result.ToString()}");
                 return false;
             }
             return true;
@@ -797,7 +794,7 @@ namespace DLSS
             var result = DLSSNative.DLSS_CreateContext(viewId, ref createParams);
             if (result != DLSSResult.Success)
             {
-                Debug.LogError($"[DLSS] Failed to create RR context for view {viewId}: {GetResultString(result)}");
+                Debug.LogError($"[DLSS] Failed to create RR context for view {viewId}: {result.ToString()}");
                 return false;
             }
             return true;
@@ -835,25 +832,10 @@ namespace DLSS
             var result = DLSSNative.DLSS_Execute(viewId, ref executeParams);
             if (result != DLSSResult.Success)
             {
-                Debug.LogError($"[DLSS] Failed to execute for view {viewId}: {GetResultString(result)}");
+                Debug.LogError($"[DLSS] Failed to execute for view {viewId}: {result.ToString()}");
                 return false;
             }
             return true;
-        }
-
-        /// <summary>
-        /// Get a human-readable result string.
-        /// </summary>
-        public static string GetResultString(DLSSResult result)
-        {
-            try
-            {
-                return DLSSNative.DLSS_GetResultString(result) ?? result.ToString();
-            }
-            catch
-            {
-                return result.ToString();
-            }
         }
 
         /// <summary>

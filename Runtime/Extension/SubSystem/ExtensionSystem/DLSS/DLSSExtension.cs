@@ -57,6 +57,7 @@ namespace UnityEngine.Rendering.Universal
 
         public void Init()
         {
+            // Debug.Log($"[DLSSExtension] {DLSSNative.DLSS_GetResultString(DLSSResult.Success)}");
 #if DLSS_PLUGIN_INTEGRATE
             Debug.Log("[DLSSExtension] Initializing DLSS...");
             Debug.Log($"[DLSSExtension] Graphics Device: {SystemInfo.graphicsDeviceName}");
@@ -81,19 +82,13 @@ namespace UnityEngine.Rendering.Universal
             try
             {
                 // Initialize DLSS
-                var result = DLSSNative.DLSS_Initialize(
-                    0,  // appId (0 = generic)
+                m_Initialized = DLSSManager.Initialize(
+                    0Xffaacae,  // appId (0 = generic)
                     Application.productName,
                     Application.unityVersion,
                     Application.persistentDataPath + "/DLSS"
                 );
 
-                if (result != DLSSResult.Success)
-                {
-                    Debug.LogWarning($"[DLSSExtension] DLSS initialization failed: {DLSSNative.DLSS_GetResultString(result)}");
-                    m_Initialized = false;
-                    return;
-                }
 
                 // Query capabilities
                 if (DLSSNative.DLSS_GetCapabilities(out var caps) == DLSSResult.Success)
@@ -192,8 +187,8 @@ namespace UnityEngine.Rendering.Universal
         {
             if (m_Initialized)
             {
-                DLSSNative.DLSS_DestroyAllContexts();
-                DLSSNative.DLSS_Shutdown();
+                DLSSManager.DestroyAllContexts();
+                DLSSManager.Shutdown();
                 m_Initialized = false;
                 Debug.Log("[DLSSExtension] DLSS shutdown complete.");
             }

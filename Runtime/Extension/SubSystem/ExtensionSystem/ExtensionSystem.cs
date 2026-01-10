@@ -50,6 +50,10 @@ namespace UnityEngine.Rendering.Universal
 
         public static void Clean()
         {
+            foreach (var extension in extensions)
+            {
+                extension.Value.ShutDown();
+            }
             extensions.Clear();
             supportedExtension.Clear();
         }

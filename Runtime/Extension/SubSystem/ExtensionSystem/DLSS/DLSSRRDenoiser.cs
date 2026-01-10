@@ -64,21 +64,6 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
-        /// <summary>
-        /// Initialize DLSS system (call once at startup)
-        /// </summary>
-        public static bool InitializeDLSS(string projectId = null, string logPath = null)
-        {
-            if (DLSSManager.IsInitialized)
-                return true;
-
-            return DLSSManager.Initialize(
-                appId: 0,
-                projectId: projectId ?? Application.productName,
-                engineVersion: Application.unityVersion,
-                logPath: logPath ?? Application.persistentDataPath + "/DLSS"
-            );
-        }
 
         /// <summary>
         /// Shutdown DLSS system (call on application quit)
@@ -156,9 +141,10 @@ namespace UnityEngine.Rendering.Universal
             };
 
             var result = DLSSNative.DLSS_CreateContext(m_ViewId, ref createParams);
+
             if (result != DLSSResult.Success)
             {
-                Debug.LogError($"[DLSSRRDenoiser] Failed to create DLSS-RR context: {DLSSManager.GetResultString(result)}");
+                Debug.LogError($"[DLSSRRDenoiser] Failed to create DLSS-RR context: {result.ToString()}");
                 return false;
             }
 
@@ -277,7 +263,7 @@ namespace UnityEngine.Rendering.Universal
             var result = DLSSNative.DLSS_Execute(m_ViewId, ref executeParams);
             if (result != DLSSResult.Success)
             {
-                Debug.LogError($"[DLSSRRDenoiser] DLSS-RR execute failed: {DLSSManager.GetResultString(result)}");
+                Debug.LogError($"[DLSSRRDenoiser] DLSS-RR execute failed: {result.ToString()}");
                 return false;
             }
 

@@ -1,8 +1,8 @@
-﻿using UnityEngine.NVIDIA;
+﻿using DLSS;
+using UnityEngine.NVIDIA;
 
 namespace UnityEngine.Rendering.Universal
 {
-    using DLSSQuality = NVIDIA.DLSSQuality;
 
     partial class UniversalCameraData
     {
@@ -22,7 +22,7 @@ namespace UnityEngine.Rendering.Universal
 
         #region DLSS
 
-        internal DLSSQuality dlssQuality = DLSSQuality.MaximumQuality;
+        internal DLSSQuality dlssQuality = DLSSQuality.MaxQuality;
 
 
         internal bool IsDLSSEnabled()

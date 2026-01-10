@@ -16,7 +16,7 @@ This package provides a custom implementation of Unity's **Universal Render Pipe
 
 ## Key Features
 - SuperResolution
-  - [x] DLSS4
+  - [x] DLSS 4.5
   - [x] TAAU
   - [x] STP  
   - [x] FSR1
@@ -51,16 +51,19 @@ This package provides a custom implementation of Unity's **Universal Render Pipe
     - [x] LumaPreservingMapper
     - [x] KhronosPBR
 - GlobalIllumination
-  - [x] Hybrid Reflection
-  - [x] ScreenSpace Global Illumination
-  - [X] ScreenSpace PathTracing
-  - [x] ScreenSpace PlanarReflection
-  - [ ] RTGI
-  - [ ] SDFGI
-- AmbientOcclusion
-  - [x] HBAO
-  - [x] XeGTAO
-  - [x] RTAO
+  - ScreenSpaceLighting
+    - [x] ScreenSpace Global Illumination
+    - [x] Hybrid Reflection
+    - [X] ScreenSpace PathTracing
+    - [x] ScreenSpace PlanarReflection
+  - AmbientOcclusion
+    - [x] HBAO
+    - [x] XeGTAO
+    - [x] RTAO
+  - [ ] Referenced PathTracing
+  - [ ] SDFGI(Lumen Like)
+  - [ ] DDGI
+  - [ ] RESTIR DI
 - Shadow
   - [X] Hybrid Shadow
   - [X] Full Raytrace Shadow
@@ -74,9 +77,15 @@ This package provides a custom implementation of Unity's **Universal Render Pipe
   - [x] Bilatal Filter 
   - [x] Temporal Filter
   - [x] NVIDIA NRD
+    - [x] SIGMA
+    - [x] REBLUR
+      - [x] REBLUR-DIFFUSE
+      - [x] REBLUR-DIFFUSESPECULAR
+      - [x] REBLUR-AMBIENTOCCLUSION
 - Lighting Culling
   - [x] Cluster based deferred Lighting(CBDL)
   - [ ] Fine Pruned Tiled Light Lists(FPTL)
+  - [x] World Cluster(prototype..)
 - Sky
   - [x] HDRI
   - [x] Gradient
@@ -96,6 +105,10 @@ This package provides a custom implementation of Unity's **Universal Render Pipe
   - [x] Bindless Resoucre(SM 6.6)
   - [x] RayQuery
   - [x] Wave Intrinsics(SM6.0)
+  - [x] DLSS 4.5
+    - [x] DLSS Ray Reconstruction
+    - [x] DLSS Super Resolution
+  -[x] SHARC(Spatially Hashed Radiance Cache)
 
 
 
@@ -109,3 +122,4 @@ This package provides a custom implementation of Unity's **Universal Render Pipe
 - [SnapdragonStudios](https://github.com/SnapdragonStudios/snapdragon-gsr)
 - [NVIDIA DesignWorks Samples](https://github.com/nvpro-samples)
 - [NVIDIA-RTX](https://github.com/NVIDIA-RTX)
+- [Adria](https://github.com/mateeeeeee/Adria)

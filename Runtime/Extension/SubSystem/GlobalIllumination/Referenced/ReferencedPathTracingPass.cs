@@ -228,11 +228,14 @@ namespace UnityEngine.Rendering.Universal
             internal TextureHandle normalRoughness;
             internal TextureHandle diffuseHitDistance;
             internal TextureHandle specularHitDistance;
+            internal TextureHandle diffuseRayDirection;
+            internal TextureHandle specularRayDirection;
 
             // Per-frame parameters
             internal Vector2 jitterOffset;
             internal Matrix4x4 worldToView;
             internal Matrix4x4 viewToClip;
+            internal Vector3 cameraPosition;
             internal DLSSRRDenoiser.Settings settings;
         }
 #endif
@@ -1256,11 +1259,15 @@ namespace UnityEngine.Rendering.Universal
                         passData.normalRoughness = resourceData.gBuffer[2];
                         passData.diffuseHitDistance = reprojectedDiffuse; // Diffuse radiance with hit distance in alpha
                         passData.specularHitDistance = reprojectedSpecular; // Specular radiance with hit distance in alpha
+                        // Ray directions - not currently output by path tracer, pass null handles
+                        passData.diffuseRayDirection = TextureHandle.nullHandle;
+                        passData.specularRayDirection = TextureHandle.nullHandle;
 
                         // Per-frame parameters
                         passData.jitterOffset = jitterOffset;
                         passData.worldToView = worldToView;
                         passData.viewToClip = viewToClip;
+                        passData.cameraPosition = cameraData.camera.transform.position;
                         passData.settings = new DLSSRRDenoiser.Settings
                         {
                             quality = dlssQuality,
@@ -1287,20 +1294,28 @@ namespace UnityEngine.Rendering.Universal
                         {
                             var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
 
-                            // Get RenderTextures from UnsafeContext resources
-                            var colorInputRT = data.colorInput;
-                            var depthRT = data.depth;
-                            var motionVectorsRT = data.motionVectors;
-                            var diffuseAlbedoRT = data.diffuseAlbedo;
-                            var gbuffer1RT = data.specularAlbedo;
-                            var normalRoughnessRT = data.normalRoughness;
-                            var diffuseRadianceRT = data.diffuseHitDistance;
-                            var specularRadianceRT = data.specularHitDistance;
+                            // Get RenderTextures from passData TextureHandles
+                            // Note: For UnsafePass, we need to get RenderTexture from TextureHandle
+                            // TextureHandle can be implicitly converted to RenderTexture for this purpose
+                            RenderTexture colorInputRT = data.colorInput;
+                            RenderTexture depthRT = data.depth;
+                            RenderTexture motionVectorsRT = data.motionVectors;
+                            RenderTexture diffuseAlbedoRT = data.diffuseAlbedo;
+                            RenderTexture gbuffer1RT = data.specularAlbedo;
+                            RenderTexture normalRoughnessRT = data.normalRoughness;
+                            RenderTexture diffuseRadianceRT = data.diffuseHitDistance;
+                            RenderTexture specularRadianceRT = data.specularHitDistance;
+                            RenderTexture colorOutputRT = data.colorOutput;
+                            // Ray directions - null if not provided
+                            RenderTexture diffuseRayDirRT = data.diffuseRayDirection.IsValid() ? (RenderTexture)data.diffuseRayDirection : null;
+                            RenderTexture specularRayDirRT = data.specularRayDirection.IsValid() ? (RenderTexture)data.specularRayDirection : null;
 
                             // Execute DLSS-RR with resource preparation
+                            // The denoiser will extract hit distances, decode normals, and generate specular albedo internally
                             data.denoiser.ExecuteWithRenderTextures(
                                 cmd,
                                 colorInputRT,
+                                colorOutputRT,  // Output texture for RenderGraph tracking
                                 depthRT,
                                 motionVectorsRT,
                                 diffuseAlbedoRT,
@@ -1308,9 +1323,12 @@ namespace UnityEngine.Rendering.Universal
                                 normalRoughnessRT,
                                 diffuseRadianceRT,
                                 specularRadianceRT,
+                                diffuseRayDirRT,
+                                specularRayDirRT,
                                 data.jitterOffset,
                                 data.worldToView,
                                 data.viewToClip,
+                                data.cameraPosition,
                                 data.settings
                             );
                         });

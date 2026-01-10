@@ -43,8 +43,8 @@ namespace DLSS
     public enum DLSSMode : int
     {
         Off = 0,
-        SuperResolution = 1,    // Standard DLSS-SR (upscaling + AA)
-        RayReconstruction = 2   // DLSS-RR (ray tracing denoiser + upscaler)
+        SuperResolution = 1, // Standard DLSS-SR (upscaling + AA)
+        RayReconstruction = 2 // DLSS-RR (ray tracing denoiser + upscaler)
     }
 
     /// <summary>
@@ -52,12 +52,12 @@ namespace DLSS
     /// </summary>
     public enum DLSSQuality : int
     {
-        MaxPerformance = 0,     // UltraPerformance equivalent
+        MaxPerformance = 0, // UltraPerformance equivalent
         Balanced = 1,
         MaxQuality = 2,
         UltraPerformance = 3,
         UltraQuality = 4,
-        DLAA = 5                // No upscaling, AA only (1:1)
+        DLAA = 5 // No upscaling, AA only (1:1)
     }
 
     /// <summary>
@@ -66,12 +66,12 @@ namespace DLSS
     public enum DLSSSRPreset : int
     {
         Default = 0,
-        F = 6,      // Deprecated
-        G = 7,      // Reverts to default
-        J = 10,     // Less ghosting, more flickering
-        K = 11,     // Best quality (transformer-based)
-        L = 12,     // Default for Ultra Perf
-        M = 13      // Default for Perf
+        F = 6, // Deprecated
+        G = 7, // Reverts to default
+        J = 10, // Less ghosting, more flickering
+        K = 11, // Best quality (transformer-based)
+        L = 12, // Default for Ultra Perf
+        M = 13 // Default for Perf
     }
 
     /// <summary>
@@ -80,8 +80,8 @@ namespace DLSS
     public enum DLSSRRPreset : int
     {
         Default = 0,
-        D = 4,      // Default transformer model
-        E = 5       // Latest transformer (required for DoF guide)
+        D = 4, // Default transformer model
+        E = 5 // Latest transformer (required for DoF guide)
     }
 
     /// <summary>
@@ -91,12 +91,12 @@ namespace DLSS
     public enum DLSSFeatureFlags : uint
     {
         None = 0,
-        IsHDR = (1 << 0),               // Input is HDR (pre-tonemapped)
-        MVLowRes = (1 << 1),            // Motion vectors are low-res
-        MVJittered = (1 << 2),          // Motion vectors include jitter
-        DepthInverted = (1 << 3),       // Reversed-Z depth buffer
-        AutoExposure = (1 << 6),        // Use auto-exposure
-        AlphaUpscaling = (1 << 7)       // Upscale alpha channel
+        IsHDR = (1 << 0), // Input is HDR (pre-tonemapped)
+        MVLowRes = (1 << 1), // Motion vectors are low-res
+        MVJittered = (1 << 2), // Motion vectors include jitter
+        DepthInverted = (1 << 3), // Reversed-Z depth buffer
+        AutoExposure = (1 << 6), // Use auto-exposure
+        AlphaUpscaling = (1 << 7) // Upscale alpha channel
     }
 
     /// <summary>
@@ -104,8 +104,8 @@ namespace DLSS
     /// </summary>
     public enum DLSSDepthType : int
     {
-        Linear = 0,     // Linear depth buffer
-        Hardware = 1    // Hardware Z-buffer
+        Linear = 0, // Linear depth buffer
+        Hardware = 1 // Hardware Z-buffer
     }
 
     /// <summary>
@@ -113,8 +113,8 @@ namespace DLSS
     /// </summary>
     public enum DLSSRoughnessMode : int
     {
-        Unpacked = 0,           // Roughness in separate texture
-        PackedInNormalsW = 1    // Roughness in normals.w channel
+        Unpacked = 0, // Roughness in separate texture
+        PackedInNormalsW = 1 // Roughness in normals.w channel
     }
 
     /// <summary>
@@ -123,7 +123,7 @@ namespace DLSS
     public enum DLSSDenoiseMode : int
     {
         Off = 0,
-        DLUnified = 1   // DL-based unified upscaler (required for RR)
+        DLUnified = 1 // DL-based unified upscaler (required for RR)
     }
 
     //--------------------------------------------------------------------------
@@ -178,10 +178,10 @@ namespace DLSS
     public struct DLSSMatrix4x4
     {
         // Column-major: m[0-3]=col0, m[4-7]=col1, etc.
-        public float m00, m10, m20, m30;  // Column 0
-        public float m01, m11, m21, m31;  // Column 1
-        public float m02, m12, m22, m32;  // Column 2
-        public float m03, m13, m23, m33;  // Column 3
+        public float m00, m10, m20, m30; // Column 0
+        public float m01, m11, m21, m31; // Column 1
+        public float m02, m12, m22, m32; // Column 2
+        public float m03, m13, m23, m33; // Column 3
 
         public static implicit operator DLSSMatrix4x4(Matrix4x4 m)
         {
@@ -220,7 +220,7 @@ namespace DLSS
         public DLSSQuality quality;
         public DLSSDimensions inputResolution;
         public DLSSDimensions outputResolution;
-        public uint featureFlags;   // DLSSFeatureFlags bitmask
+        public uint featureFlags; // DLSSFeatureFlags bitmask
 
         // === SR-specific presets (one per quality level) ===
         public DLSSSRPreset presetDLAA;
@@ -311,12 +311,12 @@ namespace DLSS
     [StructLayout(LayoutKind.Sequential)]
     public struct DLSSCommonTextures
     {
-        public IntPtr colorInput;       // Required: Noisy/low-res color input
-        public IntPtr colorOutput;      // Required: Upscaled output destination
-        public IntPtr depth;            // Required: Depth buffer
-        public IntPtr motionVectors;    // Required: Motion vectors (2D screen-space)
-        public IntPtr exposureTexture;  // Optional: 1x1 exposure scale texture
-        public IntPtr biasColorMask;    // Optional: Bias current color mask
+        public IntPtr colorInput; // Required: Noisy/low-res color input
+        public IntPtr colorOutput; // Required: Upscaled output destination
+        public IntPtr depth; // Required: Depth buffer
+        public IntPtr motionVectors; // Required: Motion vectors (2D screen-space)
+        public IntPtr exposureTexture; // Optional: 1x1 exposure scale texture
+        public IntPtr biasColorMask; // Optional: Bias current color mask
         public IntPtr transparencyMask; // Optional: Reserved for future use
     }
 
@@ -388,7 +388,7 @@ namespace DLSS
     {
         public IntPtr diffuseAlbedo;    // Required: Diffuse albedo
         public IntPtr specularAlbedo;   // Required: Specular albedo
-        public IntPtr normals;          // Required: World-space normals
+        public IntPtr normals;          // Required: World-space normals (optionally with roughness in .w)
         public IntPtr roughness;        // Optional if packed in normals.w
         public IntPtr emissive;         // Optional: Emissive channel
     }
@@ -400,14 +400,14 @@ namespace DLSS
     public struct DLSSRRRayTextures
     {
         // === Separate ray direction and hit distance (recommended) ===
-        public IntPtr diffuseRayDirection;
-        public IntPtr diffuseHitDistance;
-        public IntPtr specularRayDirection;
-        public IntPtr specularHitDistance;
+        public IntPtr diffuseRayDirection;  // RGB: normalized ray direction 
+        public IntPtr diffuseHitDistance;   // R: hit distance
+        public IntPtr specularRayDirection; // RGB: normalized ray direction  
+        public IntPtr specularHitDistance;  // R: hit distance 
 
         // === Combined direction+distance (alternative) ===
-        public IntPtr diffuseRayDirectionHitDistance;
-        public IntPtr specularRayDirectionHitDistance;
+        public IntPtr diffuseRayDirectionHitDistance;// RGBA: direction.xyz + distance.w
+        public IntPtr specularRayDirectionHitDistance;// RGBA: direction.xyz + distance.w
     }
 
     /// <summary>
@@ -488,7 +488,7 @@ namespace DLSS
         public DLSSMode mode;
         public DLSSCommonTextures textures;
         public DLSSCommonParams common;
-        public DLSSRRParams rrParams;   // Only used when mode == RayReconstruction
+        public DLSSRRParams rrParams; // Only used when mode == RayReconstruction
 
         /// <summary>
         /// Create SR execution parameters.
@@ -583,7 +583,6 @@ namespace DLSS
     /// </summary>
     public static class DLSSNative
     {
-        
         private const string DLL_NAME =
 #if (PLATFORM_IOS || PLATFORM_TVOS || PLATFORM_BRATWURST || PLATFORM_SWITCH) && !UNITY_EDITOR
             "__Internal";
@@ -739,6 +738,7 @@ namespace DLSS
                 Debug.LogWarning($"[DLSS] Failed to get capabilities: {result.ToString()}");
                 return false;
             }
+
             return true;
         }
 
@@ -758,6 +758,7 @@ namespace DLSS
                 Debug.LogWarning($"[DLSS] Failed to get optimal settings: {result.ToString()}");
                 return false;
             }
+
             return true;
         }
 
@@ -780,6 +781,7 @@ namespace DLSS
                 Debug.LogError($"[DLSS] Failed to create SR context for view {viewId}: {result.ToString()}");
                 return false;
             }
+
             return true;
         }
 
@@ -804,6 +806,7 @@ namespace DLSS
                 Debug.LogError($"[DLSS] Failed to create RR context for view {viewId}: {result.ToString()}");
                 return false;
             }
+
             return true;
         }
 
@@ -848,7 +851,26 @@ namespace DLSS
                 Debug.LogError($"[DLSS] Failed to execute for view {viewId}: {result.ToString()}");
                 return false;
             }
+
             return true;
+        }
+
+        /// <summary>
+        /// Execute DLSS for a view via command buffer using IssuePluginEventAndData.
+        /// This queues the DLSS execution properly in the GPU command stream.
+        /// </summary>
+        public static void ExecuteOnCommandBuffer(CommandBuffer cmd, uint viewId, ref DLSSExecuteParams executeParams)
+        {
+            // Set the current view and execute parameters for the render event
+            DLSSNative.DLSS_SetCurrentView(viewId);
+            DLSSNative.DLSS_SetExecuteParams(ref executeParams);
+
+            // Queue the DLSS execution via the render event callback
+            cmd.IssuePluginEventAndData(
+                DLSSNative.DLSS_GetRenderEventFunc(),
+                DLSSNative.DLSS_RENDER_EVENT_ID,
+                IntPtr.Zero
+            );
         }
 
         /// <summary>
@@ -871,7 +893,9 @@ namespace DLSS
     public sealed class DLSSQualityParameter : UnityEngine.Rendering.VolumeParameter<DLSSQuality>
     {
         public DLSSQualityParameter(DLSSQuality value, bool overrideState = false)
-            : base(value, overrideState) { }
+            : base(value, overrideState)
+        {
+        }
     }
 }
 

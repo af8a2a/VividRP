@@ -4,13 +4,18 @@
 // Prepares the required resources for DLSS-RR:
 // 1. Extracts hit distances from path tracing output (alpha channel)
 // 2. Generates proper specular albedo using EnvBRDFApprox2 formula
+// 3. Decodes OctQuadEncoded normals and converts PerceptualSmoothness to roughness
+// 4. Normalizes ray directions for DLSS-RR
 //------------------------------------------------------------------------------
 
 #pragma kernel CSExtractHitDistances
 #pragma kernel CSGenerateSpecularAlbedo
+#pragma kernel CSPrepareNormalRoughness
+#pragma kernel CSPrepareRayDirections
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
 
 //------------------------------------------------------------------------------
 // Resources
@@ -21,18 +26,50 @@ Texture2D<float4> _DiffuseRadianceInput;    // RGB = diffuse radiance, A = norma
 Texture2D<float4> _SpecularRadianceInput;   // RGB = specular radiance, A = normalized hit distance
 Texture2D<float4> _GBuffer0;                // Albedo (diffuse)
 Texture2D<float4> _GBuffer1;                // Specular + Metallic
-Texture2D<float4> _GBuffer2;                // Normal + Roughness
+Texture2D<float4> _GBuffer2;                // OctQuadEncoded Normal (RG) + flags (B) + PerceptualSmoothness (A)
 Texture2D<float> _DepthTexture;             // Depth buffer
 
+// Ray direction inputs (from path tracer)
+Texture2D<float4> _DiffuseRayDirectionInput;   // RGB = normalized direction, A = unused
+Texture2D<float4> _SpecularRayDirectionInput;  // RGB = normalized direction, A = unused
+
 // Output textures
-RWTexture2D<float> _DiffuseHitDistanceOutput;   // R16F or R32F
-RWTexture2D<float> _SpecularHitDistanceOutput;  // R16F or R32F
-RWTexture2D<float4> _SpecularAlbedoOutput;      // RGBA16F - computed specular albedo
+RWTexture2D<float> _DiffuseHitDistanceOutput;      // R16F or R32F
+RWTexture2D<float> _SpecularHitDistanceOutput;     // R16F or R32F
+RWTexture2D<float4> _SpecularAlbedoOutput;         // RGBA16F - computed specular albedo
+RWTexture2D<float4> _NormalRoughnessOutput;        // RGB = world normal, A = roughness (for DLSS-RR)
+RWTexture2D<float4> _DiffuseRayDirectionOutput;    // RGB = normalized direction
+RWTexture2D<float4> _SpecularRayDirectionOutput;   // RGB = normalized direction
 
 // Parameters
 float4 _TextureSize;            // xy = size, zw = 1/size
 float _HitDistanceScale;        // Scale factor for denormalizing hit distance
 float _ViewZScale;              // View-Z normalization factor
+
+// Camera matrices for view direction calculation
+float4x4 _InvViewProjMatrix;    // Inverse view-projection matrix
+float3 _CameraPosition;         // Camera world position
+
+
+//------------------------------------------------------------------------------
+// Smoothness/Roughness Conversion
+//------------------------------------------------------------------------------
+
+// Convert PerceptualSmoothness to Roughness
+// URP stores PerceptualSmoothness in GBuffer, DLSS-RR needs roughness
+float PerceptualSmoothnessToRoughness(float perceptualSmoothness)
+{
+    // PerceptualSmoothness = 1 - PerceptualRoughness
+    // Roughness = PerceptualRoughness^2
+    float perceptualRoughness = 1.0 - perceptualSmoothness;
+    return perceptualRoughness * perceptualRoughness;
+}
+
+// Alternative: Linear conversion (simpler)
+float SmoothnessToRoughness(float smoothness)
+{
+    return 1.0 - smoothness;
+}
 
 //------------------------------------------------------------------------------
 // EnvBRDFApprox2 - From NVIDIA DLSS-RR Programming Guide
@@ -71,6 +108,22 @@ float3 EnvBRDFApprox2(float3 SpecularColor, float alpha, float NoV)
 }
 
 //------------------------------------------------------------------------------
+// Get World Position from Depth
+//------------------------------------------------------------------------------
+float3 GetWorldPositionFromDepth(uint2 pixelCoord, float depth)
+{
+    float2 uv = (pixelCoord + 0.5f) * _TextureSize.zw;
+    float2 ndc = uv * 2.0f - 1.0f;
+
+    // Reconstruct clip space position
+    float4 clipPos = float4(ndc.x, ndc.y, depth, 1.0f);
+
+    // Transform to world space
+    float4 worldPos = mul(_InvViewProjMatrix, clipPos);
+    return worldPos.xyz / worldPos.w;
+}
+
+//------------------------------------------------------------------------------
 // CSExtractHitDistances - Extract hit distances from path tracing output
 //------------------------------------------------------------------------------
 [numthreads(8, 8, 1)]
@@ -88,7 +141,6 @@ void CSExtractHitDistances(uint3 dispatchThreadId : SV_DispatchThreadID)
     // For DLSS-RR, we need world-space hit distance
     // The path tracer stores normalized hit distance using NRD formula
     // DLSS-RR expects world-space distance, so we may need to denormalize
-    // For now, pass through the normalized value (DLSS-RR can work with this)
     float diffuseHitDist = normalizedDiffuseHitDist * _HitDistanceScale;
     float specularHitDist = normalizedSpecularHitDist * _HitDistanceScale;
 
@@ -101,6 +153,33 @@ void CSExtractHitDistances(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     _DiffuseHitDistanceOutput[pixelCoord] = diffuseHitDist;
     _SpecularHitDistanceOutput[pixelCoord] = specularHitDist;
+}
+
+//------------------------------------------------------------------------------
+// CSPrepareNormalRoughness - Decode OctQuad normals and convert smoothness to roughness
+//------------------------------------------------------------------------------
+[numthreads(8, 8, 1)]
+void CSPrepareNormalRoughness(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+
+    if (pixelCoord.x >= (uint)_TextureSize.x || pixelCoord.y >= (uint)_TextureSize.y)
+        return;
+
+    // Read GBuffer2: OctQuadEncoded Normal (RG) + flags (B) + PerceptualSmoothness (A)
+    float4 gbuffer2 = _GBuffer2[pixelCoord];
+
+    // Decode OctQuadEncoded normal from RG channels
+    float3 normalWS = UnpackNormalOctQuadEncode(gbuffer2.rg);
+
+    // Convert PerceptualSmoothness to roughness
+    // URP stores PerceptualSmoothness in alpha
+    float perceptualSmoothness = gbuffer2.a;
+    float roughness = PerceptualSmoothnessToRoughness(perceptualSmoothness);
+
+    // Output: RGB = world-space normal, A = roughness
+    // DLSS-RR expects normals in [-1, 1] range (not encoded)
+    _NormalRoughnessOutput[pixelCoord] = float4(normalWS, roughness);
 }
 
 //------------------------------------------------------------------------------
@@ -117,32 +196,28 @@ void CSGenerateSpecularAlbedo(uint3 dispatchThreadId : SV_DispatchThreadID)
     // Read GBuffer data
     float4 gbuffer0 = _GBuffer0[pixelCoord];    // Albedo
     float4 gbuffer1 = _GBuffer1[pixelCoord];    // Specular/Metallic
-    float4 gbuffer2 = _GBuffer2[pixelCoord];    // Normal + Roughness
+    float4 gbuffer2 = _GBuffer2[pixelCoord];    // OctQuad Normal + PerceptualSmoothness
 
     // Decode GBuffer
     float3 albedo = gbuffer0.rgb;
     float metallic = gbuffer1.r;
-    float3 specularColor = gbuffer1.rgb;
-    float roughness = gbuffer2.a;
+
+    // Decode normal and roughness
+    float3 normalWS = UnpackNormalOctQuadEncode(gbuffer2.rg);
+    float perceptualSmoothness = gbuffer2.a;
+    float roughness = PerceptualSmoothnessToRoughness(perceptualSmoothness);
 
     // For metallic workflow: specular color is derived from albedo and metallic
     // F0 = lerp(0.04, albedo, metallic)
     float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
 
-    // Decode world-space normal
-    float3 normalWS = normalize(gbuffer2.rgb * 2.0f - 1.0f);
-
-    // Get view direction (approximate using screen position)
-    // For more accuracy, we could pass camera matrices
-    float2 uv = (pixelCoord + 0.5f) * _TextureSize.zw;
-    float2 ndc = uv * 2.0f - 1.0f;
-
-    // Approximate view direction (assumes camera at origin looking at -Z)
-    // This is a simplification - for accurate results, use proper camera matrices
-    float3 viewDir = normalize(float3(ndc.x, ndc.y, -1.0f));
+    // Get view direction using camera position and world position
+    float depth = _DepthTexture[pixelCoord];
+    float3 worldPos = GetWorldPositionFromDepth(pixelCoord, depth);
+    float3 viewDir = normalize(_CameraPosition - worldPos);
 
     // N dot V
-    float NoV = saturate(dot(normalWS, -viewDir));
+    float NoV = saturate(dot(normalWS, viewDir));
 
     // Compute alpha (roughness squared) for EnvBRDFApprox2
     float alpha = roughness * roughness;
@@ -152,4 +227,32 @@ void CSGenerateSpecularAlbedo(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     // Output
     _SpecularAlbedoOutput[pixelCoord] = float4(specularAlbedo, 1.0f);
+}
+
+//------------------------------------------------------------------------------
+// CSPrepareRayDirections - Normalize and prepare ray directions for DLSS-RR
+//------------------------------------------------------------------------------
+[numthreads(8, 8, 1)]
+void CSPrepareRayDirections(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+
+    if (pixelCoord.x >= (uint)_TextureSize.x || pixelCoord.y >= (uint)_TextureSize.y)
+        return;
+
+    // Read ray directions from path tracer output
+    float3 diffuseRayDir = _DiffuseRayDirectionInput[pixelCoord].rgb;
+    float3 specularRayDir = _SpecularRayDirectionInput[pixelCoord].rgb;
+
+    // Normalize ray directions (DLSS-RR expects normalized directions)
+    // If ray direction is zero (invalid), output zero
+    float diffuseLength = length(diffuseRayDir);
+    float specularLength = length(specularRayDir);
+
+    float3 normalizedDiffuseDir = diffuseLength > 0.001f ? diffuseRayDir / diffuseLength : float3(0, 0, 0);
+    float3 normalizedSpecularDir = specularLength > 0.001f ? specularRayDir / specularLength : float3(0, 0, 0);
+
+    // Output normalized directions
+    _DiffuseRayDirectionOutput[pixelCoord] = float4(normalizedDiffuseDir, 0.0f);
+    _SpecularRayDirectionOutput[pixelCoord] = float4(normalizedSpecularDir, 0.0f);
 }

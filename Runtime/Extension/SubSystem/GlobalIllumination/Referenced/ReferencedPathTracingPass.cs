@@ -209,6 +209,34 @@ namespace UnityEngine.Rendering.Universal
             internal TextureHandle destination;
         }
 
+#if DLSS_PLUGIN_INTEGRATE
+        /// <summary>
+        /// Pass data for DLSS-RR denoising.
+        /// </summary>
+        class DLSSRRPassData
+        {
+            // Denoiser instance
+            internal DLSSRRDenoiser denoiser;
+
+            // TextureHandles for RenderGraph tracking
+            internal TextureHandle colorInput;
+            internal TextureHandle colorOutput;
+            internal TextureHandle depth;
+            internal TextureHandle motionVectors;
+            internal TextureHandle diffuseAlbedo;
+            internal TextureHandle specularAlbedo;
+            internal TextureHandle normalRoughness;
+            internal TextureHandle diffuseHitDistance;
+            internal TextureHandle specularHitDistance;
+
+            // Per-frame parameters
+            internal Vector2 jitterOffset;
+            internal Matrix4x4 worldToView;
+            internal Matrix4x4 viewToClip;
+            internal DLSSRRDenoiser.Settings settings;
+        }
+#endif
+
         /// <summary>
         /// Pass data for SHARC resolve pass
         /// </summary>
@@ -341,7 +369,7 @@ namespace UnityEngine.Rendering.Universal
 
             // NRD parameters - use a default value for hit distance normalization
             // This can be exposed in volume settings later
-            passData.nrdHitDistanceParams = 0.1f;  // Scene-dependent constant
+            passData.nrdHitDistanceParams = 0.1f; // Scene-dependent constant
 
             // SHARC parameters
             passData.enableSharc = giSettings.enableSharc.value;
@@ -416,6 +444,7 @@ namespace UnityEngine.Rendering.Universal
                 {
                     cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._PathTracingDiffuseOutput, data.diffuseOutputTexture);
                 }
+
                 if (data.specularOutputTexture.IsValid())
                 {
                     cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._PathTracingSpecularOutput, data.specularOutputTexture);
@@ -434,6 +463,7 @@ namespace UnityEngine.Rendering.Universal
                     {
                         cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._PathTracingDiffuseHistory, data.diffuseHistoryTexture);
                     }
+
                     if (data.specularHistoryTexture.IsValid())
                     {
                         cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._PathTracingSpecularHistory, data.specularHistoryTexture);
@@ -572,7 +602,8 @@ namespace UnityEngine.Rendering.Universal
         /// Accumulation count buffer allocator function (for temporal reprojection)
         /// Format: R32_SFloat - per-pixel frame count
         /// </summary>
-        static RTHandle PathTracingAccumulationCountBufferAllocator(GraphicsFormat graphicsFormat, string viewName, int frameIndex, RTHandleSystem rtHandleSystem)
+        static RTHandle PathTracingAccumulationCountBufferAllocator(GraphicsFormat graphicsFormat, string viewName, int frameIndex,
+            RTHandleSystem rtHandleSystem)
         {
             frameIndex &= 1; // Ping-pong between 2 buffers
 
@@ -746,10 +777,12 @@ namespace UnityEngine.Rendering.Universal
                 {
                     builder.UseTexture(passData.historyTexture, AccessFlags.Read);
                 }
+
                 if (passData.diffuseHistoryTexture.IsValid())
                 {
                     builder.UseTexture(passData.diffuseHistoryTexture, AccessFlags.Read);
                 }
+
                 if (passData.specularHistoryTexture.IsValid())
                 {
                     builder.UseTexture(passData.specularHistoryTexture, AccessFlags.Read);
@@ -865,6 +898,7 @@ namespace UnityEngine.Rendering.Universal
                 {
                     prevAccumCountRT = historyRTSystem.GetPreviousFrameRT(HistoryFrameType.PathTracingAccumulationCount);
                 }
+
                 TextureHandle prevAccumCountTexture = prevAccumCountRT != null
                     ? renderGraph.ImportTexture(prevAccumCountRT)
                     : accumCountTexture; // Use current if no history
@@ -875,10 +909,12 @@ namespace UnityEngine.Rendering.Universal
                 {
                     prevDepthRT = historyRTSystem.GetPreviousFrameRT(HistoryFrameType.Depth);
                 }
+
                 if (prevDepthRT == null)
                 {
                     prevDepthRT = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.Depth);
                 }
+
                 TextureHandle prevDepthTexture = prevDepthRT != null
                     ? renderGraph.ImportTexture(prevDepthRT)
                     : resourceData.cameraDepthTexture; // Fallback to current depth
@@ -889,10 +925,12 @@ namespace UnityEngine.Rendering.Universal
                 {
                     prevNormalRoughnessRT = historyRTSystem.GetPreviousFrameRT(HistoryFrameType.PrevNormalRoughness);
                 }
+
                 if (prevNormalRoughnessRT == null)
                 {
                     prevNormalRoughnessRT = historyRTSystem.GetCurrentFrameRT(HistoryFrameType.PrevNormalRoughness);
                 }
+
                 TextureHandle prevNormalRoughnessTexture = prevNormalRoughnessRT != null
                     ? renderGraph.ImportTexture(prevNormalRoughnessRT)
                     : resourceData.gBuffer[2]; // Fallback to current normal/roughness
@@ -1162,11 +1200,12 @@ namespace UnityEngine.Rendering.Universal
             }
 #if DLSS_PLUGIN_INTEGRATE
             // DLSS-RR Denoising Pass - alternative to NRD when DLSS-RR mode is selected
+            // DLSS-RR uses AI-based denoising with integrated upscaling
             else if (giSettings.UseDLSSRRDenoising() &&
                      ExtensionSystem.SupportedExtension.Contains(HardwareExtension.DLSS) &&
                      DLSSExtension.Instance?.IsRRSupported == true)
             {
-                // Create or get DLSS-RR denoiser instance
+                // Create or get DLSS-RR denoiser instance (camera-relative)
                 uint viewId = (uint)cameraData.camera.GetInstanceID();
 
                 if (m_DLSSRRDenoiser == null || m_DLSSRRDenoiser.ViewId != viewId)
@@ -1175,79 +1214,110 @@ namespace UnityEngine.Rendering.Universal
                     m_DLSSRRDenoiser = new DLSSRRDenoiser(viewId);
                 }
 
-                // Get optimal render resolution for DLSS-RR
-                int outputWidth = cameraData.cameraTargetDescriptor.width;
-                int outputHeight = cameraData.cameraTargetDescriptor.height;
-                int inputWidth = outputWidth;
-                int inputHeight = outputHeight;
+                // Get render resolution
+                int inputWidth = cameraData.cameraTargetDescriptor.width;
+                int inputHeight = cameraData.cameraTargetDescriptor.height;
+                int outputWidth = inputWidth; // For now, no upscaling
+                int outputHeight = inputHeight;
 
-                // For DLSS-RR, we can use lower render resolution
-                if (DLSSRRDenoiser.TryGetOptimalRenderSize(DLSSQuality.Balanced, outputWidth, outputHeight, out var optimalSize))
-                {
-                    inputWidth = optimalSize.x;
-                    inputHeight = optimalSize.y;
-                }
+                // Get DLSS quality from volume settings
+                DLSSQuality dlssQuality = giSettings.dlssRRQuality.value;
 
                 // Initialize DLSS-RR context
-                if (m_DLSSRRDenoiser.Initialize(inputWidth, inputHeight, outputWidth, outputHeight, DLSSQuality.Balanced))
+                if (m_DLSSRRDenoiser.Initialize(inputWidth, inputHeight, outputWidth, outputHeight, dlssQuality))
                 {
-                    // Create combined noisy input (diffuse + specular)
-                    // DLSS-RR expects a single combined color input
-                    var combinedNoisyDesc = new TextureDesc(inputWidth, inputHeight)
-                    {
-                        colorFormat = GraphicsFormat.R16G16B16A16_SFloat,
-                        enableRandomWrite = true,
-                        name = "DLSS_RR_CombinedNoisy"
-                    };
-                    var combinedNoisyTexture = renderGraph.CreateTexture(combinedNoisyDesc);
+                    // Get jitter offset and camera matrices from camera extension
+                    var cameraExt = cameraData.cameraExtension;
+                    Vector2 jitterOffset = cameraExt.jitter;
+                    Matrix4x4 worldToView = cameraData.GetViewMatrix();
+                    Matrix4x4 viewToClip = cameraExt.gpuProjectionMatrix;
 
                     // Create DLSS-RR output texture (at output resolution)
                     var dlssOutputDesc = new TextureDesc(outputWidth, outputHeight)
                     {
-                        colorFormat = GraphicsFormat.R16G16B16A16_SFloat,
                         enableRandomWrite = true,
+                        format = GraphicsFormat.R16G16B16A16_SFloat,
                         name = "DLSS_RR_Output"
                     };
                     var dlssOutputTexture = renderGraph.CreateTexture(dlssOutputDesc);
 
-                    // Get required textures
-                    var motionTexture = resourceData.motionVectorColor;
-                    var depthTexture = resourceData.cameraDepthTexture;
-
-                    // GBuffer textures
-                    var diffuseAlbedo = resourceData.gBuffer[0];  // Albedo from GBuffer
-                    var specularAlbedo = resourceData.gBuffer[1]; // Specular from GBuffer
-                    var normalRoughness = resourceData.gBuffer[2]; // Normal + Roughness from GBuffer
-
-                    // Combine diffuse + specular into single texture for DLSS-RR input
-                    // We need a compute shader pass to do this (re-modulate then combine)
-                    // For now, use the combined output from path tracer
-                    var combinedInput = outputTexture;  // Use raw path tracing output for now
-
-                    // Get matrices for DLSS-RR
-                    var worldToView = cameraData.camera.worldToCameraMatrix;
-                    var viewToClip = cameraData.camera.projectionMatrix;
-
-                    // Calculate jitter
-                    var jitterOffset = cameraData.GetJitter();
-
-                    // Setup DLSS-RR settings
-                    var dlssSettings = new DLSSRRDenoiser.Settings
+                    // DLSS-RR Unsafe Pass - requires native texture access for DLSS plugin
+                    using (var builder = renderGraph.AddUnsafePass<DLSSRRPassData>("DLSS-RR Denoise", out var passData))
                     {
-                        quality = DLSSQuality.Balanced,
-                        resetHistory = m_FrameIndex == 0,
-                        preExposure = 1.0f,
-                        frameTimeDeltaMs = Time.deltaTime * 1000.0f
-                    };
+                        passData.denoiser = m_DLSSRRDenoiser;
 
-                    // TODO: Execute DLSS-RR when proper texture handles are available
-                    // This requires converting TextureHandle to RTHandle which is complex in RenderGraph
-                    // For now, we use the NRD path or temporal accumulation as fallback
+                        // TextureHandles for RenderGraph resource tracking
+                        passData.colorInput = reprojectedRadiance; // Use reprojected output as color input
+                        passData.colorOutput = dlssOutputTexture;
+                        passData.depth = resourceData.cameraDepthTexture;
+                        passData.motionVectors = resourceData.motionVectorColor;
+                        passData.diffuseAlbedo = resourceData.gBuffer[0];
+                        passData.specularAlbedo = resourceData.gBuffer[1]; // GBuffer1 for specular/metallic
+                        passData.normalRoughness = resourceData.gBuffer[2];
+                        passData.diffuseHitDistance = reprojectedDiffuse; // Diffuse radiance with hit distance in alpha
+                        passData.specularHitDistance = reprojectedSpecular; // Specular radiance with hit distance in alpha
 
-                    // Mark that we would use DLSS-RR output
-                    // denoisedOutput = dlssOutputTexture;
+                        // Per-frame parameters
+                        passData.jitterOffset = jitterOffset;
+                        passData.worldToView = worldToView;
+                        passData.viewToClip = viewToClip;
+                        passData.settings = new DLSSRRDenoiser.Settings
+                        {
+                            quality = dlssQuality,
+                            resetHistory = m_FrameIndex == 0,
+                            preExposure = 1.0f,
+                            frameTimeDeltaMs = Time.deltaTime * 1000.0f,
+                            hitDistanceScale = giSettings.dlssRRHitDistanceScale.value
+                        };
 
-                    Debug.LogWarning("[DLSS-RR] DLSS-RR denoising path is initialized but RenderGraph integration is pending.");
+                        // Declare texture usage for RenderGraph
+                        builder.UseTexture(passData.colorInput, AccessFlags.Read);
+                        builder.UseTexture(passData.colorOutput, AccessFlags.Write);
+                        builder.UseTexture(passData.depth, AccessFlags.Read);
+                        builder.UseTexture(passData.motionVectors, AccessFlags.Read);
+                        builder.UseTexture(passData.diffuseAlbedo, AccessFlags.Read);
+                        builder.UseTexture(passData.specularAlbedo, AccessFlags.Read);
+                        builder.UseTexture(passData.normalRoughness, AccessFlags.Read);
+                        builder.UseTexture(passData.diffuseHitDistance, AccessFlags.Read);
+                        builder.UseTexture(passData.specularHitDistance, AccessFlags.Read);
+
+                        builder.AllowPassCulling(false);
+
+                        builder.SetRenderFunc<DLSSRRPassData>((data, context) =>
+                        {
+                            var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
+
+                            // Get RenderTextures from UnsafeContext resources
+                            var colorInputRT = data.colorInput;
+                            var depthRT = data.depth;
+                            var motionVectorsRT = data.motionVectors;
+                            var diffuseAlbedoRT = data.diffuseAlbedo;
+                            var gbuffer1RT = data.specularAlbedo;
+                            var normalRoughnessRT = data.normalRoughness;
+                            var diffuseRadianceRT = data.diffuseHitDistance;
+                            var specularRadianceRT = data.specularHitDistance;
+
+                            // Execute DLSS-RR with resource preparation
+                            data.denoiser.ExecuteWithRenderTextures(
+                                cmd,
+                                colorInputRT,
+                                depthRT,
+                                motionVectorsRT,
+                                diffuseAlbedoRT,
+                                gbuffer1RT,
+                                normalRoughnessRT,
+                                diffuseRadianceRT,
+                                specularRadianceRT,
+                                data.jitterOffset,
+                                data.worldToView,
+                                data.viewToClip,
+                                data.settings
+                            );
+                        });
+                    }
+
+                    // Use DLSS-RR output as denoised result
+                    denoisedOutput = dlssOutputTexture;
                 }
             }
 #endif

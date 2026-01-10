@@ -852,6 +852,20 @@ namespace DLSS
             return DLSSNative.DLSS_GetLastNGXError();
         }
     }
+
+    //--------------------------------------------------------------------------
+    // SECTION 6: Volume Parameters
+    //--------------------------------------------------------------------------
+
+    /// <summary>
+    /// Volume parameter wrapper for DLSSQuality enum.
+    /// </summary>
+    [Serializable]
+    public sealed class DLSSQualityParameter : UnityEngine.Rendering.VolumeParameter<DLSSQuality>
+    {
+        public DLSSQualityParameter(DLSSQuality value, bool overrideState = false)
+            : base(value, overrideState) { }
+    }
 }
 
 #endif

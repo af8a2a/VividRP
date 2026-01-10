@@ -427,6 +427,32 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
 
+#if DLSS_PLUGIN_INTEGRATE
+        #region DLSS-RR Settings
+
+        /// <summary>
+        /// DLSS-RR quality preset
+        /// </summary>
+        [Tooltip("DLSS Ray Reconstruction quality preset. Higher quality modes use lower internal resolution for better performance.")]
+        public DLSS.DLSSQualityParameter dlssRRQuality = new DLSS.DLSSQualityParameter(DLSS.DLSSQuality.Balanced);
+
+        /// <summary>
+        /// Hit distance scale for DLSS-RR
+        /// </summary>
+        [Tooltip("World-space scale for hit distances. Adjust based on scene scale (larger scenes need larger values).")]
+        [AdditionalProperty]
+        public ClampedFloatParameter dlssRRHitDistanceScale = new ClampedFloatParameter(1000.0f, 1.0f, 100000.0f);
+
+        /// <summary>
+        /// Pre-exposure value for DLSS-RR
+        /// </summary>
+        [Tooltip("Pre-exposure value for DLSS-RR input. Should match your rendering's pre-exposure if used.")]
+        [AdditionalProperty]
+        public ClampedFloatParameter dlssRRPreExposure = new ClampedFloatParameter(1.0f, 0.001f, 100.0f);
+
+        #endregion
+#endif
+
         #region Advanced Settings
 
         /// <summary>

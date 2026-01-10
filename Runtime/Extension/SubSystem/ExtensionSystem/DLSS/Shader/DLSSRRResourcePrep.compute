@@ -1,0 +1,155 @@
+//------------------------------------------------------------------------------
+// DLSSRRResourcePrep.compute - DLSS Ray Reconstruction Resource Preparation
+//------------------------------------------------------------------------------
+// Prepares the required resources for DLSS-RR:
+// 1. Extracts hit distances from path tracing output (alpha channel)
+// 2. Generates proper specular albedo using EnvBRDFApprox2 formula
+//------------------------------------------------------------------------------
+
+#pragma kernel CSExtractHitDistances
+#pragma kernel CSGenerateSpecularAlbedo
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
+
+//------------------------------------------------------------------------------
+// Resources
+//------------------------------------------------------------------------------
+
+// Input textures
+Texture2D<float4> _DiffuseRadianceInput;    // RGB = diffuse radiance, A = normalized hit distance
+Texture2D<float4> _SpecularRadianceInput;   // RGB = specular radiance, A = normalized hit distance
+Texture2D<float4> _GBuffer0;                // Albedo (diffuse)
+Texture2D<float4> _GBuffer1;                // Specular + Metallic
+Texture2D<float4> _GBuffer2;                // Normal + Roughness
+Texture2D<float> _DepthTexture;             // Depth buffer
+
+// Output textures
+RWTexture2D<float> _DiffuseHitDistanceOutput;   // R16F or R32F
+RWTexture2D<float> _SpecularHitDistanceOutput;  // R16F or R32F
+RWTexture2D<float4> _SpecularAlbedoOutput;      // RGBA16F - computed specular albedo
+
+// Parameters
+float4 _TextureSize;            // xy = size, zw = 1/size
+float _HitDistanceScale;        // Scale factor for denormalizing hit distance
+float _ViewZScale;              // View-Z normalization factor
+
+//------------------------------------------------------------------------------
+// EnvBRDFApprox2 - From NVIDIA DLSS-RR Programming Guide
+// Computes proper specular albedo for denoising
+//------------------------------------------------------------------------------
+float3 EnvBRDFApprox2(float3 SpecularColor, float alpha, float NoV)
+{
+    NoV = abs(NoV);
+
+    // [Ray Tracing Gems, Chapter 32]
+    float4 X;
+    X.x = 1.0f;
+    X.y = NoV;
+    X.z = NoV * NoV;
+    X.w = NoV * X.z;
+
+    float4 Y;
+    Y.x = 1.0f;
+    Y.y = alpha;
+    Y.z = alpha * alpha;
+    Y.w = alpha * Y.z;
+
+    // Matrix coefficients
+    float2x2 M1 = float2x2(0.99044f, -1.28514f, 1.29678f, -0.755907f);
+    float3x3 M2 = float3x3(1.0f, 2.92338f, 59.4188f, 20.3225f, -27.0302f, 222.592f, 121.563f, 626.13f, 316.627f);
+    float2x2 M3 = float2x2(0.0365463f, 3.32707f, 9.0632f, -9.04756f);
+    float3x3 M4 = float3x3(1.0f, 3.59685f, -1.36772f, 9.04401f, -16.3174f, 9.22949f, 5.56589f, 19.7886f, -20.2123f);
+
+    float bias = dot(mul(M1, X.xy), Y.xy) * rcp(dot(mul(M2, X.xyw), Y.xyw));
+    float scale = dot(mul(M3, X.xy), Y.xy) * rcp(dot(mul(M4, X.xzw), Y.xyw));
+
+    // Hack for specular reflectance of 0
+    bias *= saturate(SpecularColor.g * 50.0f);
+
+    return mad(SpecularColor, max(0.0f, scale), max(0.0f, bias));
+}
+
+//------------------------------------------------------------------------------
+// CSExtractHitDistances - Extract hit distances from path tracing output
+//------------------------------------------------------------------------------
+[numthreads(8, 8, 1)]
+void CSExtractHitDistances(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+
+    if (pixelCoord.x >= (uint)_TextureSize.x || pixelCoord.y >= (uint)_TextureSize.y)
+        return;
+
+    // Read normalized hit distances from alpha channel
+    float normalizedDiffuseHitDist = _DiffuseRadianceInput[pixelCoord].a;
+    float normalizedSpecularHitDist = _SpecularRadianceInput[pixelCoord].a;
+
+    // For DLSS-RR, we need world-space hit distance
+    // The path tracer stores normalized hit distance using NRD formula
+    // DLSS-RR expects world-space distance, so we may need to denormalize
+    // For now, pass through the normalized value (DLSS-RR can work with this)
+    float diffuseHitDist = normalizedDiffuseHitDist * _HitDistanceScale;
+    float specularHitDist = normalizedSpecularHitDist * _HitDistanceScale;
+
+    // Handle invalid/sky pixels (hit distance = 0 or very large)
+    // DLSS-RR expects 0 for sky/miss
+    if (normalizedDiffuseHitDist >= 0.999f)
+        diffuseHitDist = 0.0f;
+    if (normalizedSpecularHitDist >= 0.999f)
+        specularHitDist = 0.0f;
+
+    _DiffuseHitDistanceOutput[pixelCoord] = diffuseHitDist;
+    _SpecularHitDistanceOutput[pixelCoord] = specularHitDist;
+}
+
+//------------------------------------------------------------------------------
+// CSGenerateSpecularAlbedo - Generate proper specular albedo for DLSS-RR
+//------------------------------------------------------------------------------
+[numthreads(8, 8, 1)]
+void CSGenerateSpecularAlbedo(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+
+    if (pixelCoord.x >= (uint)_TextureSize.x || pixelCoord.y >= (uint)_TextureSize.y)
+        return;
+
+    // Read GBuffer data
+    float4 gbuffer0 = _GBuffer0[pixelCoord];    // Albedo
+    float4 gbuffer1 = _GBuffer1[pixelCoord];    // Specular/Metallic
+    float4 gbuffer2 = _GBuffer2[pixelCoord];    // Normal + Roughness
+
+    // Decode GBuffer
+    float3 albedo = gbuffer0.rgb;
+    float metallic = gbuffer1.r;
+    float3 specularColor = gbuffer1.rgb;
+    float roughness = gbuffer2.a;
+
+    // For metallic workflow: specular color is derived from albedo and metallic
+    // F0 = lerp(0.04, albedo, metallic)
+    float3 F0 = lerp(float3(0.04f, 0.04f, 0.04f), albedo, metallic);
+
+    // Decode world-space normal
+    float3 normalWS = normalize(gbuffer2.rgb * 2.0f - 1.0f);
+
+    // Get view direction (approximate using screen position)
+    // For more accuracy, we could pass camera matrices
+    float2 uv = (pixelCoord + 0.5f) * _TextureSize.zw;
+    float2 ndc = uv * 2.0f - 1.0f;
+
+    // Approximate view direction (assumes camera at origin looking at -Z)
+    // This is a simplification - for accurate results, use proper camera matrices
+    float3 viewDir = normalize(float3(ndc.x, ndc.y, -1.0f));
+
+    // N dot V
+    float NoV = saturate(dot(normalWS, -viewDir));
+
+    // Compute alpha (roughness squared) for EnvBRDFApprox2
+    float alpha = roughness * roughness;
+
+    // Generate specular albedo using EnvBRDFApprox2
+    float3 specularAlbedo = EnvBRDFApprox2(F0, alpha, NoV);
+
+    // Output
+    _SpecularAlbedoOutput[pixelCoord] = float4(specularAlbedo, 1.0f);
+}

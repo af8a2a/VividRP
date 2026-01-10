@@ -55,5 +55,20 @@ namespace UnityEngine.Rendering.Universal
             get => m_PathTracingTemporalReprojectionCS;
             set => this.SetValueAndNotify(ref m_PathTracingTemporalReprojectionCS, value, nameof(m_PathTracingTemporalReprojectionCS));
         }
+
+#if DLSS_PLUGIN_INTEGRATE
+        [SerializeField]
+        [ResourcePath("Runtime/Extension/SubSystem/ExtensionSystem/DLSS/Shader/DLSSRRResourcePrep.compute")]
+        private ComputeShader m_DLSSRRResourcePrepCS;
+
+        /// <summary>
+        /// DLSS-RR Resource Preparation compute shader for extracting hit distances and generating specular albedo
+        /// </summary>
+        public ComputeShader dlssRRResourcePrepCS
+        {
+            get => m_DLSSRRResourcePrepCS;
+            set => this.SetValueAndNotify(ref m_DLSSRRResourcePrepCS, value, nameof(m_DLSSRRResourcePrepCS));
+        }
+#endif
     }
 }

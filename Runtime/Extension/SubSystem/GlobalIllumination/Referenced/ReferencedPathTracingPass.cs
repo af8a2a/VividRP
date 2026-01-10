@@ -1168,6 +1168,7 @@ namespace UnityEngine.Rendering.Universal
             {
                 // Create or get DLSS-RR denoiser instance
                 uint viewId = (uint)cameraData.camera.GetInstanceID();
+
                 if (m_DLSSRRDenoiser == null || m_DLSSRRDenoiser.ViewId != viewId)
                 {
                     m_DLSSRRDenoiser?.Dispose();

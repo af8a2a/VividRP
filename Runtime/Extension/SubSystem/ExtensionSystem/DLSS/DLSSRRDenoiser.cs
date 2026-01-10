@@ -64,15 +64,6 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
-
-        /// <summary>
-        /// Shutdown DLSS system (call on application quit)
-        /// </summary>
-        public static void ShutdownDLSS()
-        {
-            DLSSManager.Shutdown();
-        }
-
         /// <summary>
         /// Create a new DLSS-RR denoiser instance
         /// </summary>
@@ -90,12 +81,20 @@ namespace UnityEngine.Rendering.Universal
         {
             if (!DLSSManager.IsInitialized)
             {
-                Debug.LogError("[DLSSRRDenoiser] DLSS not initialized. Call DLSSRRDenoiser.InitializeDLSS() first.");
+                Debug.LogError("[DLSSRRDenoiser] DLSS not initialized. Ensure DLSSExtension is initialized.");
                 return false;
             }
 
             var newInputRes = new DLSSDimensions((uint)inputWidth, (uint)inputHeight);
             var newOutputRes = new DLSSDimensions((uint)outputWidth, (uint)outputHeight);
+
+            // Sync m_ContextCreated with native state (handles domain reload, etc.)
+            bool nativeContextExists = DLSSManager.HasContext(m_ViewId);
+            if (nativeContextExists && !m_ContextCreated)
+            {
+                // Native context exists but we don't track it - sync state
+                m_ContextCreated = true;
+            }
 
             // Check if we need to recreate the context
             bool needsRecreate = !m_ContextCreated ||
@@ -108,43 +107,30 @@ namespace UnityEngine.Rendering.Universal
             if (!needsRecreate)
                 return true;
 
-            // Destroy existing context if any
-            if (m_ContextCreated)
+            // Destroy existing context if any (check native state, not just C# flag)
+            if (DLSSManager.HasContext(m_ViewId))
             {
                 DLSSManager.DestroyContext(m_ViewId);
-                m_ContextCreated = false;
             }
+            m_ContextCreated = false;
 
-            // Create new context
+            // Create new context using DLSSManager
             var flags = DLSSFeatureFlags.DepthInverted  // Unity uses reversed-Z
                       | DLSSFeatureFlags.MVLowRes        // Motion vectors at render resolution
                       | DLSSFeatureFlags.IsHDR;          // HDR input
 
-            var createParams = new DLSSContextCreateParams
+            if (!DLSSManager.CreateRRContext(
+                m_ViewId,
+                quality,
+                newInputRes.width,
+                newInputRes.height,
+                newOutputRes.width,
+                newOutputRes.height,
+                flags,
+                DLSSDepthType.Hardware,
+                DLSSRoughnessMode.Unpacked))
             {
-                mode = DLSSMode.RayReconstruction,
-                quality = quality,
-                inputResolution = newInputRes,
-                outputResolution = newOutputRes,
-                featureFlags = (uint)flags,
-                denoiseMode = DLSSDenoiseMode.DLUnified,
-                depthType = DLSSDepthType.Hardware,
-                roughnessMode = DLSSRoughnessMode.Unpacked,
-
-                // RR presets (use E for latest transformer with DoF support)
-                presetRR_DLAA = DLSSRRPreset.E,
-                presetRR_Quality = DLSSRRPreset.E,
-                presetRR_Balanced = DLSSRRPreset.E,
-                presetRR_Performance = DLSSRRPreset.E,
-                presetRR_UltraPerformance = DLSSRRPreset.E,
-                presetRR_UltraQuality = DLSSRRPreset.E
-            };
-
-            var result = DLSSNative.DLSS_CreateContext(m_ViewId, ref createParams);
-
-            if (result != DLSSResult.Success)
-            {
-                Debug.LogError($"[DLSSRRDenoiser] Failed to create DLSS-RR context: {result.ToString()}");
+                Debug.LogError("[DLSSRRDenoiser] Failed to create DLSS-RR context");
                 return false;
             }
 
@@ -260,10 +246,10 @@ namespace UnityEngine.Rendering.Universal
                 }
             };
 
-            var result = DLSSNative.DLSS_Execute(m_ViewId, ref executeParams);
-            if (result != DLSSResult.Success)
+            // Use DLSSManager to execute
+            if (!DLSSManager.Execute(m_ViewId, ref executeParams))
             {
-                Debug.LogError($"[DLSSRRDenoiser] DLSS-RR execute failed: {result.ToString()}");
+                Debug.LogError("[DLSSRRDenoiser] DLSS-RR execute failed");
                 return false;
             }
 

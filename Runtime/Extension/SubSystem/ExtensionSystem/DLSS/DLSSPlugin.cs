@@ -803,9 +803,15 @@ namespace DLSS
         /// <summary>
         /// Destroy a DLSS context.
         /// </summary>
-        public static void DestroyContext(uint viewId)
+        public static bool DestroyContext(uint viewId)
         {
-            DLSSNative.DLSS_DestroyContext(viewId);
+            var result = DLSSNative.DLSS_DestroyContext(viewId);
+            if (result != DLSSResult.Success)
+            {
+                Debug.LogError($"[DLSS] Failed to destroy context: {result.ToString()}");
+            }
+
+            return result == DLSSResult.Success;
         }
 
         /// <summary>

@@ -81,17 +81,22 @@ namespace UnityEngine.Rendering.Universal
 
             try
             {
-                // Initialize DLSS
+                // Initialize DLSS through DLSSManager (sets internal s_Initialized flag)
                 m_Initialized = DLSSManager.Initialize(
-                    0Xffaacae,  // appId (0 = generic)
+                    0Xffaacae,  // appId
                     Application.productName,
                     Application.unityVersion,
                     Application.persistentDataPath + "/DLSS"
                 );
 
+                if (!m_Initialized)
+                {
+                    Debug.LogWarning("[DLSSExtension] DLSS initialization failed");
+                    return;
+                }
 
-                // Query capabilities
-                if (DLSSNative.DLSS_GetCapabilities(out var caps) == DLSSResult.Success)
+                // Query capabilities using DLSSManager
+                if (DLSSManager.TryGetCapabilities(out var caps))
                 {
                     m_SRSupported = caps.IsSRAvailable;
                     m_RRSupported = caps.IsRRAvailable;
@@ -106,7 +111,6 @@ namespace UnityEngine.Rendering.Universal
                     }
                 }
 
-                m_Initialized = true;
                 Debug.Log("[DLSSExtension] DLSS initialized successfully!");
             }
             catch (DllNotFoundException e)
@@ -156,15 +160,13 @@ namespace UnityEngine.Rendering.Universal
             if (!m_Initialized)
                 return false;
 
-            var result = DLSSNative.DLSS_GetOptimalSettings(
+            return DLSSManager.TryGetOptimalSettings(
                 mode,
                 quality,
                 (uint)outputWidth,
                 (uint)outputHeight,
                 out settings
             );
-
-            return result == DLSSResult.Success;
         }
 
         /// <summary>

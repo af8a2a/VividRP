@@ -553,6 +553,7 @@ namespace UnityEngine.Rendering.Universal
             // Use DLSSManager to execute
             if (!DLSSManager.Execute(m_ViewId, ref executeParams))
             {
+                // cmd.IssuePluginEventAndData();
                 Debug.LogError("[DLSSRRDenoiser] DLSS-RR execute failed");
                 return false;
             }

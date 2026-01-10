@@ -12,6 +12,7 @@
 using System;
 using System.Runtime.InteropServices;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace DLSS
 {
@@ -582,7 +583,13 @@ namespace DLSS
     /// </summary>
     public static class DLSSNative
     {
-        private const string DLL_NAME = "UnityPlugin";
+        
+        private const string DLL_NAME =
+#if (PLATFORM_IOS || PLATFORM_TVOS || PLATFORM_BRATWURST || PLATFORM_SWITCH) && !UNITY_EDITOR
+            "__Internal";
+#else
+            "UnityDLSS";
+#endif
         private const CallingConvention CALLING_CONVENTION = CallingConvention.StdCall;
 
         //--- Initialization/Shutdown ---

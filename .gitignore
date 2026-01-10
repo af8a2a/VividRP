@@ -2,7 +2,9 @@
 /Runtime/Extension/SubSystem/ExtensionSystem/DLSS/nvngx_dlssd.dll
 /Runtime/Extension/SubSystem/ExtensionSystem/DLSS/nvngx_dlssg.dll
 /Runtime/Extension/SubSystem/ExtensionSystem/DLSS/UnityPlugin.dll
+/Runtime/Extension/SubSystem/ExtensionSystem/DLSS/UnityDLSS.dll
 /Runtime/Extension/SubSystem/ExtensionSystem/DLSS/nvngx_dlss.dll.meta
 /Runtime/Extension/SubSystem/ExtensionSystem/DLSS/nvngx_dlssd.dll.meta
 /Runtime/Extension/SubSystem/ExtensionSystem/DLSS/nvngx_dlssg.dll.meta
 /Runtime/Extension/SubSystem/ExtensionSystem/DLSS/UnityPlugin.dll.meta
+/Runtime/Extension/SubSystem/ExtensionSystem/DLSS/UnityDLSS.dll.meta

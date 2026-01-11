@@ -15,7 +15,7 @@ Shader "Hidden/HDRP/TemporalAA"
         #pragma multi_compile_local_fragment _ ANTI_RINGING
         #pragma multi_compile_local_fragment _ HISTORY_CONTRAST_ANTI_FLICKER
         #pragma multi_compile_local_fragment _ DIRECT_STENCIL_SAMPLE
-        #pragma multi_compile_local_fragment LOW_QUALITY MEDIUM_QUALITY HIGH_QUALITY TAA_UPSAMPLE 
+        #pragma multi_compile_local_fragment _ LOW_QUALITY MEDIUM_QUALITY HIGH_QUALITY TAA_UPSAMPLE 
 
         #pragma editor_sync_compilation
        // #pragma enable_d3d11_debug_symbols
@@ -23,7 +23,6 @@ Shader "Hidden/HDRP/TemporalAA"
         #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
-        #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/PostProcess/PostProcessDefines.hlsl"
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/MotionVector.hlsl"
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
@@ -113,6 +112,7 @@ Shader "Hidden/HDRP/TemporalAA"
         #include "TemporalAntialiasing.hlsl"
 
         TEXTURE2D_X(_DepthTexture);
+        TEXTURE2D_X(_InputTexture);
         TEXTURE2D_X(_InputHistoryTexture);
         #ifdef SHADER_API_PSSL
         RW_TEXTURE2D(CTYPE, _OutputHistoryTexture) : register(u0);
@@ -172,6 +172,28 @@ Shader "Hidden/HDRP/TemporalAA"
         #endif
 #endif
 
+    struct Attributes
+    {
+        uint vertexID : SV_VertexID;
+        UNITY_VERTEX_INPUT_INSTANCE_ID
+    };
+
+    struct Varyings
+    {
+        float4 positionCS : SV_POSITION;
+        float2 texcoord : TEXCOORD0;
+        UNITY_VERTEX_OUTPUT_STEREO
+    };
+
+    Varyings Vert(Attributes input)
+    {
+        Varyings output;
+        UNITY_SETUP_INSTANCE_ID(input);
+        UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
+        output.positionCS = GetFullScreenTriangleVertexPosition(input.vertexID);
+        output.texcoord = GetFullScreenTriangleTexCoord(input.vertexID);
+        return output;
+    }
 
     // ------------------------------------------------------------------
 
@@ -219,7 +241,7 @@ Shader "Hidden/HDRP/TemporalAA"
             // -----------------------------------------------------
 
             // --------------- Gather neigbourhood data ---------------
-            CTYPE color = Fetch4(_BlitTexture, uv, 0.0).CTYPE_SWIZZLE;
+            CTYPE color = Fetch4(_InputTexture, uv, 0.0).CTYPE_SWIZZLE;
 
 #if defined(ENABLE_ALPHA)
             // Removes history rejection when the current alpha value is 0. Instead it does blend with the history color when alpha value is 0 on the current plane.
@@ -234,7 +256,8 @@ Shader "Hidden/HDRP/TemporalAA"
                 color = ConvertToWorkingSpace(color);
 
                 NeighbourhoodSamples samples;
-                GatherNeighbourhood(_BlitTexture, uv, floor(input.positionCS.xy), color,  samples);
+                GatherNeighbourhood(_InputTexture, uv, floor(input.positionCS.xy), color,  samples);
+
                 // --------------------------------------------------------
 
                 // --------------- Filter central sample ---------------
@@ -339,7 +362,7 @@ Shader "Hidden/HDRP/TemporalAA"
             float2 jitter = _TaaJitterStrength.zw;
             float2 uv = input.texcoord - jitter;
 
-            outColor = Fetch4(_BlitTexture, uv, 0.0).CTYPE_SWIZZLE;
+            outColor = Fetch4(_InputTexture, uv, 0.0).CTYPE_SWIZZLE;
         }
 
         void FragCopyHistory(Varyings input, out CTYPE outColor : SV_Target0)
@@ -354,7 +377,7 @@ Shader "Hidden/HDRP/TemporalAA"
 
             uv = _InputSize.zw * (0.5f + floor(outputPixInInput));
 #endif
-            CTYPE color = Fetch4(_BlitTexture, uv, 0.0).CTYPE_SWIZZLE;
+            CTYPE color = Fetch4(_InputTexture, uv, 0.0).CTYPE_SWIZZLE;
 
             outColor = color;
         }

@@ -95,28 +95,6 @@ namespace UnityEditor.Rendering.Universal
         public SerializedProperty gpuResidentDrawerEnableOcclusionCullingInCameras { get; }
 
 
-        #region Upscaler
-
-        public SerializedProperty DLSSPerfQualitySetting;
-
-        /// <summary> Specifies the DLSS Render Preset to use for the Quality performance quality setting.</summary>
-        public SerializedProperty DLSSRenderPresetForQuality ;
-
-        /// <summary> Specifies the DLSS Render Preset to use for the Balanced performance quality setting.</summary>
-        public SerializedProperty DLSSRenderPresetForBalanced ;
-
-        /// <summary> Specifies the DLSS Render Preset to use for the Performance performance quality setting.</summary>
-        public SerializedProperty DLSSRenderPresetForPerformance ;
-
-        /// <summary> Specifies the DLSS Render Preset to use for the UltraPerformance performance quality setting.</summary>
-        public SerializedProperty DLSSRenderPresetForUltraPerformance;
-
-        /// <summary> Specifies the DLSS Render Preset to use for the DLAA performance quality setting.</summary>
-        public SerializedProperty DLSSRenderPresetForDLAA ;
-
-        #endregion
-
-
         #region Sky
 
         public SerializedProperty skyReflectionSizeProp { get; }
@@ -225,13 +203,6 @@ namespace UnityEditor.Rendering.Universal
 
             using (var o = new PropertyFetcher<UniversalRenderPipelineAsset>(serializedObject))
             {
-                DLSSPerfQualitySetting = o.Find(x => x.m_DLSSPreset.DLSSRenderPresetForPerformance);
-                DLSSRenderPresetForQuality = o.Find(x => x.m_DLSSPreset.DLSSRenderPresetForQuality);
-                DLSSRenderPresetForBalanced = o.Find(x => x.m_DLSSPreset.DLSSRenderPresetForBalanced);
-                DLSSRenderPresetForPerformance = o.Find(x => x.m_DLSSPreset.DLSSRenderPresetForPerformance);
-                DLSSRenderPresetForUltraPerformance = o.Find(x => x.m_DLSSPreset.DLSSRenderPresetForUltraPerformance);
-                DLSSRenderPresetForDLAA = o.Find(x => x.m_DLSSPreset.DLSSRenderPresetForDLAA);
-                
                 skyReflectionSizeProp = o.Find(x => x.skyReflectionSize);
             }
 

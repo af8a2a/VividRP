@@ -3,7 +3,6 @@ using System.Reflection;
 using UnityEditor.Graphs;
 using UnityEditor.Rendering.HighDefinition;
 using UnityEngine;
-using UnityEngine.NVIDIA;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
@@ -211,7 +210,6 @@ namespace UnityEditor.Rendering.Universal
 
             EditorGUILayout.PropertyField(serialized.msaa, Styles.msaaText);
 
-            DrawerDLSSSettings(serialized, ownerEditor);
             // serialized.renderScale.floatValue = EditorGUILayout.Slider(Styles.renderScaleText, serialized.renderScale.floatValue,
             //     UniversalRenderPipeline.minRenderScale, UniversalRenderPipeline.maxRenderScale);
 
@@ -899,94 +897,6 @@ namespace UnityEditor.Rendering.Universal
 #endif
 
 
-        static void DrawerDLSSSettings(SerializedVividRenderPipelineAsset serialized, Editor owner)
-        {
-            EditorGUI.BeginChangeCheck();
-            var v = EditorGUILayout.EnumPopup(Styles.DLSSQualitySettingContent,
-                (UnityEngine.NVIDIA.DLSSQuality)serialized.DLSSPerfQualitySetting.intValue);
-            
-            if (EditorGUI.EndChangeCheck())
-            {
-                serialized.DLSSPerfQualitySetting.intValue = (int)(object)v;;
-            }
-            
-
-#if ENABLE_NVIDIA && ENABLE_NVIDIA_MODULE
-            EditorGUILayout.PrefixLabel(Styles.DLSSRenderPresetsContent);
-            ++EditorGUI.indentLevel;
-
-            void DrawPresetDropdown(ref SerializedProperty presetProp, UnityEngine.NVIDIA.DLSSQuality perfQuality)
-            {
-                // each DLSSQuality has a different set of DLSSPresets, represented by a bitmask.
-                uint presetBitmask = UnityEngine.NVIDIA.GraphicsDevice.GetAvailableDLSSPresetsForQuality(perfQuality);
-                if (presetProp.uintValue != 0 && (presetBitmask & presetProp.uintValue) == 0)
-                {
-                    Debug.LogWarningFormat("DLSS Preset {0} not found for quality setting {1}, resetting to default value.",
-                        ((UnityEngine.NVIDIA.DLSSPreset)presetProp.uintValue).ToString(),
-                        perfQuality.ToString()
-                    );
-                    presetProp.uintValue = 0;
-                }
-
-                // We don't want to deal with List<DLSSPreset> & using bitmasks,
-                // so we need some bit ops to convert between GUI index <--> Preset value
-                int FindPresetGUIIndex(uint presetBitmask, uint presetValue)
-                {
-                    int i = 0;
-                    while (presetValue > 0)
-                    {
-                        i += (presetBitmask & 1) > 0 ? 1 : 0;
-                        presetBitmask >>= 1;
-                        presetValue >>= 1;
-                    }
-
-                    return i; // includes 0=default, goes like 1=preset_A, 2=preset_B ...
-                }
-
-                uint GUIIndexToPresetValue(uint presetBitmask, uint index)
-                {
-                    // e.g. bitset: 100101 --> 3 bits set, supports 4 presets (0=default, +3 other presets).
-                    //                   ^ i = 1 -> Preset A = 1
-                    //                 ^   i = 2 -> Preset C = 4
-                    //              ^      i = 3 -> Preset F = 32
-                    uint val = 0;
-                    while (index > 0 && presetBitmask > 0)
-                    {
-                        if ((presetBitmask & 1) != 0)
-                            --index;
-                        presetBitmask >>= 1;
-                        val = val == 0 ? 1 : (val << 1);
-                    }
-
-                    if (index != 0)
-                    {
-                        Debug.LogWarningFormat("DLSSPreset (index={0}) not found in the supported preset list (mask={1}), setting to default value.", index,
-                            presetBitmask);
-                        return 0;
-                    }
-
-                    // Debug.LogFormat("Setting preset {0} : {1}", ((DLSSPreset)val).ToString(), val);
-                    return val;
-                }
-
-                int presetIndex = FindPresetGUIIndex(presetBitmask, presetProp.uintValue);
-                int iNew = EditorGUILayout.Popup(Styles.DLSSPerfQualityLabels[(int)perfQuality], presetIndex,
-                    Styles.DLSSPresetOptionsForEachPerfQuality[(int)perfQuality]);
-                if (iNew != presetIndex)
-                    presetProp.uintValue = GUIIndexToPresetValue(presetBitmask, (uint)iNew);
-            }
-
-            DrawPresetDropdown(ref serialized.DLSSRenderPresetForQuality, UnityEngine.NVIDIA.DLSSQuality.MaximumQuality);
-            DrawPresetDropdown(ref serialized.DLSSRenderPresetForBalanced, UnityEngine.NVIDIA.DLSSQuality.Balanced);
-            DrawPresetDropdown(ref serialized.DLSSRenderPresetForPerformance, UnityEngine.NVIDIA.DLSSQuality.MaximumPerformance);
-            DrawPresetDropdown(ref serialized.DLSSRenderPresetForUltraPerformance, UnityEngine.NVIDIA.DLSSQuality.UltraPerformance);
-            DrawPresetDropdown(ref serialized.DLSSRenderPresetForDLAA, UnityEngine.NVIDIA.DLSSQuality.DLAA);
-
-            --EditorGUI.indentLevel;
-
-#endif
-
-        }
     }
 
 }

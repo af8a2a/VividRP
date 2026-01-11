@@ -1,5 +1,4 @@
 ﻿using DLSS;
-using UnityEngine.NVIDIA;
 
 namespace UnityEngine.Rendering.Universal
 {
@@ -22,15 +21,17 @@ namespace UnityEngine.Rendering.Universal
 
         #region DLSS
 
-        internal DLSSQuality dlssQuality = DLSSQuality.MaxQuality;
+        /// <summary>
+        /// DLSS quality level for this camera.
+        /// </summary>
+        internal DLSSQuality dlssQuality = DLSSQuality.Balanced;
 
 
         internal bool IsDLSSEnabled()
         {
-
-            return  (upscalingTechnique == UpscalingTechnique.DLSS);
+            return (upscalingTechnique == UpscalingTechnique.DLSS);
         }
-
+        
         #endregion
     }
 }

@@ -63,7 +63,7 @@ namespace DLSS
     /// <summary>
     /// Render presets for DLSS-SR.
     /// </summary>
-    public enum DLSSSRPreset : int
+    public enum DLSSSRPreset : uint
     {
         Default = 0,
         F = 6, // Deprecated
@@ -260,12 +260,12 @@ namespace DLSS
                 inputResolution = new DLSSDimensions(inputWidth, inputHeight),
                 outputResolution = new DLSSDimensions(outputWidth, outputHeight),
                 featureFlags = (uint)flags,
-                presetDLAA = DLSSSRPreset.Default,
-                presetQuality = DLSSSRPreset.Default,
+                presetDLAA = DLSSSRPreset.K,
+                presetQuality = DLSSSRPreset.J,
                 presetBalanced = DLSSSRPreset.Default,
-                presetPerformance = DLSSSRPreset.Default,
-                presetUltraPerformance = DLSSSRPreset.Default,
-                presetUltraQuality = DLSSSRPreset.Default
+                presetPerformance = DLSSSRPreset.M,
+                presetUltraPerformance = DLSSSRPreset.L,
+                presetUltraQuality = DLSSSRPreset.K
             };
         }
 

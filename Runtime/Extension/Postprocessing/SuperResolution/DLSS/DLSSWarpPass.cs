@@ -2,6 +2,10 @@
 using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Rendering.Universal.Internal;
 
+#if DLSS_PLUGIN_INTEGRATE
+using DLSS;
+#endif
+
 namespace UnityEngine.Rendering.Universal
 {
     public class DLSSWarpPass
@@ -89,7 +93,6 @@ namespace UnityEngine.Rendering.Universal
                 cameraData.RequestGpuExposureValue(cameraData.GetExposureTexture());
                 passData.parameters = new DLSSPass.Parameters();
                 passData.parameters.resetHistory = cameraData.resetHistory;
-                passData.parameters.dlssPreset = UniversalRenderPipeline.asset.m_DLSSPreset;
                 // Must check this with nvidia. After trying many things this gives the least amount of ghosting.
                 // For now we clamp the exposure to a reasonable value.
                 passData.parameters.preExposure = Mathf.Clamp(cameraData.GpuExposureValue(), 0.20f, 2.0f);

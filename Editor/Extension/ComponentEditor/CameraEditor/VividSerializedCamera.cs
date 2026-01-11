@@ -70,7 +70,12 @@ namespace UnityEditor.Rendering.Universal
 
 
         #endregion
-        
+
+        #region DLSS
+
+        public SerializedProperty dlssQualityLevel;
+        #endregion
+
 
         #endregion
 
@@ -169,7 +174,8 @@ namespace UnityEditor.Rendering.Universal
                 taaBaseBlendFactor = serializedAdditionalDataObject.Find((UniversalAdditionalCameraData d) => d.taaBaseBlendFactor);
                 taaJitterScale = serializedAdditionalDataObject.Find((UniversalAdditionalCameraData d) => d.taaJitterScale);
 
-                
+                // DLSS properties
+                dlssQualityLevel = serializedAdditionalDataObject.Find((UniversalAdditionalCameraData d) => d.DLSSQualityLevel);
             }
 
             #endregion

@@ -353,6 +353,10 @@ namespace UnityEngine.Rendering.Universal
             using (var builder = renderGraph.AddUnsafePass<TemporalAntiAliasingData>("Temporal Anti-Aliasing", out var passData, _profilingSampler))
             {
                 var cameraData = frameData.Get<UniversalCameraData>();
+                if (cameraData.cameraType != CameraType.Game)
+                {
+                    return source;
+                }
                 var resourceData = frameData.Get<UniversalResourceData>();
                 PrepareTAAPassData(renderGraph, builder, passData, cameraData, resourceData.cameraDepthTexture, resourceData.motionVectorColor,
                     resourceData.cameraDepthPyramidTexture, source);
@@ -366,6 +370,7 @@ namespace UnityEngine.Rendering.Universal
                     var prevHistory = (RTHandle)data.prevHistory;
                     var nextHistory = (RTHandle)data.nextHistory;
 
+                    
                     int taaPass = data.temporalAAMaterial.FindPass("TAA");
                     int excludeTaaPass = data.temporalAAMaterial.FindPass("Excluded From TAA");
                     int taauPass = data.temporalAAMaterial.FindPass("TAAU");

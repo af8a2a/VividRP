@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using System;
+using UnityEngine;
 using UnityEngine.Rendering.Universal;
 
 namespace UnityEditor.Rendering.Universal
@@ -59,6 +60,16 @@ namespace UnityEditor.Rendering.Universal
             }
 
 
+            static void DrawerDLSS(VividSerializedCamera p, Editor owner)
+            {
+                // EditorGUILayout.Space();
+                EditorGUILayout.LabelField(Styles.DLSSHeader, EditorStyles.boldLabel);
+                //
+                // // Quality Level selector
+                EditorGUILayout.PropertyField(p.dlssQualityLevel);
+            }
+
+
             static void DrawerUpscaler(VividSerializedCamera p, Editor owner)
             {
                 p.renderScale.floatValue = EditorGUILayout.Slider(Styles.renderScaleText, p.renderScale.floatValue, UniversalRenderPipeline.minRenderScale,
@@ -71,6 +82,10 @@ namespace UnityEditor.Rendering.Universal
                 if (p.upscalerTechnique.intValue == (int)UpscalingTechnique.TAAU)
                 {
                     DrawerTAAU(p, owner);
+                }
+                else if (p.upscalerTechnique.intValue == (int)UpscalingTechnique.DLSS)
+                {
+                    DrawerDLSS(p, owner);
                 }
             }
             

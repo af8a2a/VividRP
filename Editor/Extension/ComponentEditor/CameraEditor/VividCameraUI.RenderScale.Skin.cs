@@ -34,7 +34,18 @@ namespace UnityEditor.Rendering.Universal
                 public static readonly GUIContent TAABaseBlendFactor = EditorGUIUtility.TrTextContent("Base Blend Factor", "Determines how much the history buffer is blended together with current frame result. Higher values means more history contribution, which leads to better anti aliasing, but also more prone to ghosting.");
                 public static readonly GUIContent TAAJitterScale = EditorGUIUtility.TrTextContent("Jitter Scale", "Determines the scale to the jitter applied when TAA is enabled. Lowering this value will lead to less visible flickering and jittering, but also will produce more aliased images.");
 
-                
+                // DLSS Settings
+                public static readonly GUIContent DLSSHeader = EditorGUIUtility.TrTextContent("DLSS Settings", "NVIDIA DLSS Super Resolution settings.");
+                public static readonly GUIContent DLSSQualityLevel = EditorGUIUtility.TrTextContent("Quality Level", "DLSS quality mode. Higher quality = less upscaling. DLAA = no upscaling, only anti-aliasing.");
+                public static readonly string[] DLSSPresetOptions = new string[]
+                {
+                    "Default - Auto select preset",
+                    "Preset J - Reduced ghosting, more flickering",
+                    "Preset K - Transformer-based, best quality",
+                    "Preset L - Default for Ultra Performance",
+                    "Preset M - Default for Performance"
+                };
+                public static readonly uint[] DLSSPresetValues = new uint[] { 0, 10, 11, 12, 13 };
             }
         }
     }

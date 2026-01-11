@@ -1,4 +1,6 @@
-﻿namespace UnityEngine.Rendering.Universal
+﻿using DLSS;
+
+namespace UnityEngine.Rendering.Universal
 {
     partial class UniversalAdditionalCameraData
     {
@@ -6,7 +8,14 @@
 
 
         [SerializeField] UpscalingTechnique m_UpscalerTechnique = UpscalingTechnique.Linear;
-        
+
+        /// <summary>
+        /// DLSS quality level (DLAA, MaxQuality, Balanced, MaxPerformance, UltraPerformance).
+        /// </summary>
+        public DLSSQuality DLSSQualityLevel = DLSSQuality.Balanced;
+
+
+
         /// <summary>
         /// Controls if this camera should render shadows.
         /// </summary>
@@ -23,5 +32,6 @@
             get => m_UpscalerTechnique;
             set => m_UpscalerTechnique = value;
         }
+
     }
 }

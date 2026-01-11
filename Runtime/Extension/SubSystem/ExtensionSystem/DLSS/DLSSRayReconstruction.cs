@@ -11,8 +11,6 @@ using UnityEngine.Rendering;
 
 namespace UnityEngine.Rendering.Universal
 {
-    using static DLSSSdk;
-
     /// <summary>
     /// GBuffer input configuration for DLSS-RR.
     /// </summary>
@@ -64,7 +62,8 @@ namespace UnityEngine.Rendering.Universal
     /// </summary>
     public class DLSSRayReconstruction : IDisposable
     {
-        private int m_dlssHandle = DLSS_INVALID_FEATURE_HANDLE;
+#if DLSS_PLUGIN_INTEGRATE
+        private int m_dlssHandle = DLSSExtension.DLSS_INVALID_FEATURE_HANDLE;
         private IntPtr m_dlssParameters = IntPtr.Zero;
         private bool m_initialized = false;
         private bool m_disposed = false;
@@ -78,29 +77,18 @@ namespace UnityEngine.Rendering.Universal
         private NVSDK_NGX_DLSS_Feature_Flags m_featureFlags;
         private bool m_createParamsChanged = false;
 
-        // RR-specific NGX parameter names
-        private const string NVSDK_NGX_Parameter_DLSS_Denoise_Mode = "DLSS.Denoise.Mode";
-        private const string NVSDK_NGX_Parameter_DLSS_Depth_Type = "DLSS.Depth.Type";
-        private const string NVSDK_NGX_Parameter_DLSS_Roughness_Mode = "DLSS.Roughness.Mode";
+        // Cached extension reference
+        private DLSSExtension m_Extension;
 
-        // GBuffer parameters
-        private const string NVSDK_NGX_Parameter_DiffuseAlbedo = "DiffuseAlbedo";
-        private const string NVSDK_NGX_Parameter_SpecularAlbedo = "SpecularAlbedo";
-        private const string NVSDK_NGX_Parameter_Normals = "Normals";
-        private const string NVSDK_NGX_Parameter_Roughness = "Roughness";
-        private const string NVSDK_NGX_Parameter_Emissive = "Emissive";
-
-        // Ray data parameters
-        private const string NVSDK_NGX_Parameter_DiffuseRayDirection = "DiffuseRayDirection";
-        private const string NVSDK_NGX_Parameter_DiffuseHitDistance = "DiffuseHitDistance";
-        private const string NVSDK_NGX_Parameter_SpecularRayDirection = "SpecularRayDirection";
-        private const string NVSDK_NGX_Parameter_SpecularHitDistance = "SpecularHitDistance";
-        private const string NVSDK_NGX_Parameter_DiffuseRayDirectionHitDistance = "DiffuseRayDirectionHitDistance";
-        private const string NVSDK_NGX_Parameter_SpecularRayDirectionHitDistance = "SpecularRayDirectionHitDistance";
-
-        // Matrix parameters
-        private const string NVSDK_NGX_Parameter_WorldToViewMatrix = "WorldToViewMatrix";
-        private const string NVSDK_NGX_Parameter_ViewToClipMatrix = "ViewToClipMatrix";
+        private DLSSExtension Extension
+        {
+            get
+            {
+                if (m_Extension == null)
+                    m_Extension = DLSSExtension.Instance;
+                return m_Extension;
+            }
+        }
 
         /// <summary>
         /// Denoise mode for RR.
@@ -146,8 +134,6 @@ namespace UnityEngine.Rendering.Universal
             DepthType depthType = DepthType.Hardware,
             RoughnessMode roughnessMode = RoughnessMode.Unpacked)
         {
-            DLSS_Init();
-
             m_featureFlags = featureFlags;
             m_qualityValue = qualityValue;
             m_depthType = depthType;
@@ -157,7 +143,7 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// Check if DLSS-RR is supported on the current system.
         /// </summary>
-        public bool IsSupported => DLSS_IsRayReconstructionAvailable();
+        public bool IsSupported => Extension?.IsRRSupported ?? false;
 
         /// <summary>
         /// Set the quality/performance preset.
@@ -219,7 +205,7 @@ namespace UnityEngine.Rendering.Universal
             bool reset = false,
             float frameTimeDeltaMs = 0.0f)
         {
-            if (!IsSupported)
+            if (!IsSupported || Extension == null)
             {
                 Debug.LogError("[DLSSRayReconstruction] DLSS-RR is not supported");
                 return false;
@@ -272,7 +258,7 @@ namespace UnityEngine.Rendering.Universal
                 reset, frameTimeDeltaMs);
 
             // Execute
-            DLSS_EvaluateFeature(cmd, m_dlssHandle, m_dlssParameters);
+            Extension.EvaluateFeature(cmd, m_dlssHandle, m_dlssParameters);
             return true;
         }
 
@@ -322,36 +308,43 @@ namespace UnityEngine.Rendering.Universal
             if (m_initialized)
                 return true;
 
+            var ext = Extension;
+            if (ext == null)
+            {
+                Debug.LogError("[DLSSRayReconstruction] DLSSExtension not available");
+                return false;
+            }
+
             // Allocate parameters
-            var result = DLSS_AllocateParameters_D3D12(out m_dlssParameters);
-            if (NVSDK_NGX_FAILED(result))
+            var result = ext.AllocateParameters(out m_dlssParameters);
+            if (DLSSExtension.NVSDK_NGX_FAILED(result))
             {
                 Debug.LogError($"[DLSSRayReconstruction] Failed to allocate parameters: {result}");
                 return false;
             }
 
             // Set creation parameters
-            DLSS_Parameter_SetUI(m_dlssParameters, NVSDK_NGX_Parameter_CreationNodeMask, 1);
-            DLSS_Parameter_SetUI(m_dlssParameters, NVSDK_NGX_Parameter_VisibilityNodeMask, 1);
-            DLSS_Parameter_SetUI(m_dlssParameters, NVSDK_NGX_Parameter_Width, m_inputWidth);
-            DLSS_Parameter_SetUI(m_dlssParameters, NVSDK_NGX_Parameter_Height, m_inputHeight);
-            DLSS_Parameter_SetUI(m_dlssParameters, NVSDK_NGX_Parameter_OutWidth, m_outputWidth);
-            DLSS_Parameter_SetUI(m_dlssParameters, NVSDK_NGX_Parameter_OutHeight, m_outputHeight);
-            DLSS_Parameter_SetI(m_dlssParameters, NVSDK_NGX_Parameter_PerfQualityValue, (int)m_qualityValue);
-            DLSS_Parameter_SetI(m_dlssParameters, NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags, (int)m_featureFlags);
-            DLSS_Parameter_SetI(m_dlssParameters, NVSDK_NGX_Parameter_DLSS_Enable_Output_Subrects, 0);
+            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_CreationNodeMask, 1);
+            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_VisibilityNodeMask, 1);
+            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Width, m_inputWidth);
+            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Height, m_inputHeight);
+            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_OutWidth, m_outputWidth);
+            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_OutHeight, m_outputHeight);
+            ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_PerfQualityValue, (int)m_qualityValue);
+            ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags, (int)m_featureFlags);
+            ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Enable_Output_Subrects, 0);
 
             // RR-specific creation parameters
-            DLSS_Parameter_SetI(m_dlssParameters, NVSDK_NGX_Parameter_DLSS_Denoise_Mode, (int)m_denoiseMode);
-            DLSS_Parameter_SetI(m_dlssParameters, NVSDK_NGX_Parameter_DLSS_Depth_Type, (int)m_depthType);
-            DLSS_Parameter_SetI(m_dlssParameters, NVSDK_NGX_Parameter_DLSS_Roughness_Mode, (int)m_roughnessMode);
+            ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Denoise_Mode, (int)m_denoiseMode);
+            ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Depth_Type, (int)m_depthType);
+            ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Roughness_Mode, (int)m_roughnessMode);
 
             // Create feature
-            m_dlssHandle = DLSS_CreateFeature(cmd, NVSDK_NGX_Feature.NVSDK_NGX_Feature_RayReconstruction, m_dlssParameters);
-            if (m_dlssHandle == DLSS_INVALID_FEATURE_HANDLE)
+            m_dlssHandle = ext.CreateFeature(cmd, NVSDK_NGX_Feature.NVSDK_NGX_Feature_RayReconstruction, m_dlssParameters);
+            if (m_dlssHandle == DLSSExtension.DLSS_INVALID_FEATURE_HANDLE)
             {
                 Debug.LogError("[DLSSRayReconstruction] Failed to create DLSS-RR feature");
-                DLSS_DestroyParameters_D3D12(m_dlssParameters);
+                ext.DestroyParameters(m_dlssParameters);
                 m_dlssParameters = IntPtr.Zero;
                 return false;
             }
@@ -379,92 +372,98 @@ namespace UnityEngine.Rendering.Universal
             bool reset,
             float frameTimeDeltaMs)
         {
+            var ext = Extension;
+
             // Common textures
-            DLSS_Parameter_SetD3d12RenderTexture(m_dlssParameters, NVSDK_NGX_Parameter_Color, colorInput);
-            DLSS_Parameter_SetD3d12RenderTexture(m_dlssParameters, NVSDK_NGX_Parameter_Output, colorOutput);
-            DLSS_Parameter_SetD3d12RenderTexture(m_dlssParameters, NVSDK_NGX_Parameter_Depth, depth);
-            DLSS_Parameter_SetD3d12RenderTexture(m_dlssParameters, NVSDK_NGX_Parameter_MotionVectors, motionVectors);
+            ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Color, colorInput);
+            ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Output, colorOutput);
+            ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Depth, depth);
+            ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_MotionVectors, motionVectors);
 
             // GBuffer
-            DLSS_Parameter_SetD3d12RenderTexture(m_dlssParameters, NVSDK_NGX_Parameter_DiffuseAlbedo, gbuffer.DiffuseAlbedo);
-            DLSS_Parameter_SetD3d12RenderTexture(m_dlssParameters, NVSDK_NGX_Parameter_SpecularAlbedo, gbuffer.SpecularAlbedo);
-            DLSS_Parameter_SetD3d12RenderTexture(m_dlssParameters, NVSDK_NGX_Parameter_Normals, gbuffer.Normals);
+            ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DiffuseAlbedo, gbuffer.DiffuseAlbedo);
+            ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_SpecularAlbedo, gbuffer.SpecularAlbedo);
+            ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Normals, gbuffer.Normals);
 
             if (gbuffer.Roughness != null)
             {
-                DLSS_Parameter_SetD3d12RenderTexture(m_dlssParameters, NVSDK_NGX_Parameter_Roughness, gbuffer.Roughness);
+                ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Roughness, gbuffer.Roughness);
             }
             if (gbuffer.Emissive != null)
             {
-                DLSS_Parameter_SetD3d12RenderTexture(m_dlssParameters, NVSDK_NGX_Parameter_Emissive, gbuffer.Emissive);
+                ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Emissive, gbuffer.Emissive);
             }
 
             // Ray inputs (prefer separate direction/distance if available)
             if (rayInputs.DiffuseRayDirection != null)
             {
-                DLSS_Parameter_SetD3d12RenderTexture(m_dlssParameters, NVSDK_NGX_Parameter_DiffuseRayDirection, rayInputs.DiffuseRayDirection);
-                DLSS_Parameter_SetD3d12RenderTexture(m_dlssParameters, NVSDK_NGX_Parameter_DiffuseHitDistance, rayInputs.DiffuseHitDistance);
+                ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DiffuseRayDirection, rayInputs.DiffuseRayDirection);
+                ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DiffuseHitDistance, rayInputs.DiffuseHitDistance);
             }
             else
             {
-                DLSS_Parameter_SetD3d12RenderTexture(m_dlssParameters, NVSDK_NGX_Parameter_DiffuseRayDirectionHitDistance, rayInputs.DiffuseRayDirectionHitDistance);
+                ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DiffuseRayDirectionHitDistance, rayInputs.DiffuseRayDirectionHitDistance);
             }
 
             if (rayInputs.SpecularRayDirection != null)
             {
-                DLSS_Parameter_SetD3d12RenderTexture(m_dlssParameters, NVSDK_NGX_Parameter_SpecularRayDirection, rayInputs.SpecularRayDirection);
-                DLSS_Parameter_SetD3d12RenderTexture(m_dlssParameters, NVSDK_NGX_Parameter_SpecularHitDistance, rayInputs.SpecularHitDistance);
+                ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_SpecularRayDirection, rayInputs.SpecularRayDirection);
+                ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_SpecularHitDistance, rayInputs.SpecularHitDistance);
             }
             else
             {
-                DLSS_Parameter_SetD3d12RenderTexture(m_dlssParameters, NVSDK_NGX_Parameter_SpecularRayDirectionHitDistance, rayInputs.SpecularRayDirectionHitDistance);
+                ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_SpecularRayDirectionHitDistance, rayInputs.SpecularRayDirectionHitDistance);
             }
 
             // Matrices (required for RR)
-            DLSS_Parameter_SetMatrix4x4(m_dlssParameters, NVSDK_NGX_Parameter_WorldToViewMatrix, worldToView);
-            DLSS_Parameter_SetMatrix4x4(m_dlssParameters, NVSDK_NGX_Parameter_ViewToClipMatrix, viewToClip);
+            ext.SetParameterMatrix4x4(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_WorldToViewMatrix, worldToView);
+            ext.SetParameterMatrix4x4(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_ViewToClipMatrix, viewToClip);
 
             // Jitter
-            DLSS_Parameter_SetF(m_dlssParameters, NVSDK_NGX_Parameter_Jitter_Offset_X, jitterX);
-            DLSS_Parameter_SetF(m_dlssParameters, NVSDK_NGX_Parameter_Jitter_Offset_Y, jitterY);
+            ext.SetParameterF(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Jitter_Offset_X, jitterX);
+            ext.SetParameterF(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Jitter_Offset_Y, jitterY);
 
             // Motion vector scale
-            DLSS_Parameter_SetF(m_dlssParameters, NVSDK_NGX_Parameter_MV_Scale_X, mvScaleX == 0 ? 1.0f : mvScaleX);
-            DLSS_Parameter_SetF(m_dlssParameters, NVSDK_NGX_Parameter_MV_Scale_Y, mvScaleY == 0 ? 1.0f : mvScaleY);
+            ext.SetParameterF(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_MV_Scale_X, mvScaleX == 0 ? 1.0f : mvScaleX);
+            ext.SetParameterF(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_MV_Scale_Y, mvScaleY == 0 ? 1.0f : mvScaleY);
 
             // Reset flag
-            DLSS_Parameter_SetI(m_dlssParameters, NVSDK_NGX_Parameter_Reset, reset ? 1 : 0);
+            ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Reset, reset ? 1 : 0);
 
             // Render subrect dimensions
-            DLSS_Parameter_SetUI(m_dlssParameters, NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, m_inputWidth);
-            DLSS_Parameter_SetUI(m_dlssParameters, NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, m_inputHeight);
+            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, m_inputWidth);
+            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, m_inputHeight);
 
             // Frame time delta
-            DLSS_Parameter_SetF(m_dlssParameters, NVSDK_NGX_Parameter_FrameTimeDeltaInMsec, frameTimeDeltaMs);
+            ext.SetParameterF(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_FrameTimeDeltaInMsec, frameTimeDeltaMs);
 
             // Exposure defaults
-            DLSS_Parameter_SetF(m_dlssParameters, NVSDK_NGX_Parameter_DLSS_Pre_Exposure, 1.0f);
-            DLSS_Parameter_SetF(m_dlssParameters, NVSDK_NGX_Parameter_DLSS_Exposure_Scale, 1.0f);
+            ext.SetParameterF(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Pre_Exposure, 1.0f);
+            ext.SetParameterF(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Exposure_Scale, 1.0f);
 
             // Y-axis inversion for Unity
-            DLSS_Parameter_SetI(m_dlssParameters, NVSDK_NGX_Parameter_DLSS_Indicator_Invert_Y_Axis, 1);
-            DLSS_Parameter_SetI(m_dlssParameters, NVSDK_NGX_Parameter_DLSS_Indicator_Invert_X_Axis, 0);
+            ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Indicator_Invert_Y_Axis, 1);
+            ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Indicator_Invert_X_Axis, 0);
         }
 
         private void DisposeResources(CommandBuffer cmd)
         {
             if (m_initialized)
             {
-                if (m_dlssHandle != DLSS_INVALID_FEATURE_HANDLE)
+                var ext = Extension;
+                if (ext != null)
                 {
-                    DLSS_DestroyFeature(cmd, m_dlssHandle);
-                    m_dlssHandle = DLSS_INVALID_FEATURE_HANDLE;
-                }
+                    if (m_dlssHandle != DLSSExtension.DLSS_INVALID_FEATURE_HANDLE)
+                    {
+                        ext.DestroyFeature(cmd, m_dlssHandle);
+                        m_dlssHandle = DLSSExtension.DLSS_INVALID_FEATURE_HANDLE;
+                    }
 
-                if (m_dlssParameters != IntPtr.Zero)
-                {
-                    DLSS_DestroyParameters_D3D12(m_dlssParameters);
-                    m_dlssParameters = IntPtr.Zero;
+                    if (m_dlssParameters != IntPtr.Zero)
+                    {
+                        ext.DestroyParameters(m_dlssParameters);
+                        m_dlssParameters = IntPtr.Zero;
+                    }
                 }
 
                 m_initialized = false;
@@ -492,7 +491,6 @@ namespace UnityEngine.Rendering.Universal
                 }
             }
 
-            DLSS_Shutdown();
             m_disposed = true;
         }
 
@@ -500,5 +498,46 @@ namespace UnityEngine.Rendering.Universal
         {
             Dispose(false);
         }
+#else
+        public enum DenoiseMode : int { Off = 0, DLUnified = 1 }
+        public enum DepthType : int { Linear = 0, Hardware = 1 }
+        public enum RoughnessMode : int { Unpacked = 0, PackedInNormalsW = 1 }
+
+        public DLSSRayReconstruction(
+            NVSDK_NGX_DLSS_Feature_Flags featureFlags = NVSDK_NGX_DLSS_Feature_Flags.None,
+            NVSDK_NGX_PerfQuality_Value qualityValue = NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_Balanced,
+            DepthType depthType = DepthType.Hardware,
+            RoughnessMode roughnessMode = RoughnessMode.Unpacked)
+        {
+        }
+
+        public bool IsSupported => false;
+
+        public void SetQuality(NVSDK_NGX_PerfQuality_Value quality) { }
+
+        public void SetFeatureFlags(NVSDK_NGX_DLSS_Feature_Flags flags) { }
+
+        public bool Render(
+            CommandBuffer cmd,
+            RenderTexture colorInput,
+            RenderTexture colorOutput,
+            RenderTexture depth,
+            RenderTexture motionVectors,
+            DLSSRRGBuffer gbuffer,
+            DLSSRRRayInputs rayInputs,
+            Matrix4x4 worldToView,
+            Matrix4x4 viewToClip,
+            float jitterX,
+            float jitterY,
+            float mvScaleX,
+            float mvScaleY,
+            bool reset = false,
+            float frameTimeDeltaMs = 0.0f)
+        {
+            return false;
+        }
+
+        public void Dispose() { }
+#endif
     }
 }

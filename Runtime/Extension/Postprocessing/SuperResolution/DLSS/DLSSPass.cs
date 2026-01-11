@@ -5,8 +5,6 @@ using UnityEngine.Rendering;
 
 namespace UnityEngine.Rendering.Universal
 {
-    using static DLSSSdk;
-
     internal class DLSSPass
     {
         #region public members, general engine code
@@ -21,9 +19,9 @@ namespace UnityEngine.Rendering.Universal
         public static bool SetupFeature()
         {
 #if DLSS_PLUGIN_INTEGRATE
-            // Initialize and check DLSS-SR capability
-            DLSS_Init();
-            return DLSS_IsSuperSamplingAvailable();
+            // Check DLSS-SR capability via DLSSExtension
+            var ext = DLSSExtension.Instance;
+            return ext != null && ext.IsSRSupported;
 #else
             return false;
 #endif

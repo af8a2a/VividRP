@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using UnityEditor;
 
 namespace UnityEngine.Rendering.Universal
 {
@@ -15,8 +16,7 @@ namespace UnityEngine.Rendering.Universal
         NvidiaRealtimeDenoiser,
         DLSS  // NVIDIA DLSS (Deep Learning Super Sampling) - SR and RR
     }
-
-
+    
     public static class ExtensionSystem
     {
         private static Dictionary<HardwareExtension,IExtension> extensions =new Dictionary<HardwareExtension, IExtension>();
@@ -26,8 +26,6 @@ namespace UnityEngine.Rendering.Universal
         public static void Init()
         {
             var extensionPlugins = ExtensionFinder.GetAllExtensionInstances();
-
-
 
 
             foreach (var extension in extensionPlugins)

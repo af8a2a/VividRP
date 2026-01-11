@@ -2,7 +2,7 @@
 // DLSSDef.cs - DLSS Type Definitions for VividRP
 //------------------------------------------------------------------------------
 // User-facing enums and types for DLSS configuration.
-// These map to the low-level NGX types in DLSSSdk.cs
+// These map to the low-level NGX types in DLSSExtension.cs
 //------------------------------------------------------------------------------
 
 using System;

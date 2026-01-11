@@ -15,7 +15,6 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal
 {
-    using static DLSSSdk;
     /// <summary>
     /// DLSS Ray Reconstruction (RR) denoiser for path tracing.
     /// Uses NVIDIA's AI-based denoiser with integrated upscaling.
@@ -132,7 +131,7 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// Check if DLSS-RR is available on the current system
         /// </summary>
-        public static bool IsSupported => DLSS_IsRayReconstructionAvailable();
+        public static bool IsSupported => DLSSExtension.Instance?.IsRRSupported ?? false;
 
         /// <summary>
         /// Create a new DLSS-RR denoiser instance

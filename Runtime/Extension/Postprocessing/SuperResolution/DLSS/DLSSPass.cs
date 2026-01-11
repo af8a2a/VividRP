@@ -258,7 +258,9 @@ namespace UnityEngine.Rendering.Universal
                     m_ContextCreated = false;
 
                     // Create new context with DLSSNative directly to support custom presets
-                    var flags = DLSSFeatureFlags.IsHDR | DLSSFeatureFlags.MVJittered | DLSSFeatureFlags.DepthInverted;
+                    // Note: Do NOT set MVJittered - motion vectors are calculated using GetProjectionMatrixNoJitter()
+                    // and do not contain jitter offset
+                    var flags = DLSSFeatureFlags.IsHDR | DLSSFeatureFlags.DepthInverted;
 
                     var createParams = DLSSContextCreateParams.CreateSR(
                         newParams.quality,
@@ -330,8 +332,8 @@ namespace UnityEngine.Rendering.Universal
                     Debug.Assert(motionVectorsPtr != IntPtr.Zero, "[DLSSPass] Motion vectors texture not created");
                     Debug.Assert(inputWidth > 0 && inputHeight > 0, "[DLSSPass] Invalid input resolution");
 #endif
-
                     // Build execute parameters
+                    // In DLSS X-jitter should go left-to-right, Y-jitter should go top-to-bottom.
                     var executeParams = DLSSExecuteParams.CreateSR(
                         sourcePtr,
                         outputPtr,
@@ -666,8 +668,10 @@ namespace UnityEngine.Rendering.Universal
                 (uint)parameters.cameraData.actualHeight,
                 (uint)parameters.cameraData.pixelWidth,
                 (uint)parameters.cameraData.pixelHeight,
-                -parameters.cameraData.jitter.x,
-                -parameters.cameraData.jitter.y,
+                // DLSS expects jitter in pixel space (±0.5 pixels), not NDC
+                // Jitter from VividCameraExtension is in NDC, need to scale to pixels
+                -parameters.cameraData.jitter.x * parameters.cameraData.actualWidth,
+                -parameters.cameraData.jitter.y * parameters.cameraData.actualHeight,
                 resources,
                 cmdBuffer
             );

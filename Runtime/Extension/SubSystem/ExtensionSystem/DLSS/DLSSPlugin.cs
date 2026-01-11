@@ -3,18 +3,13 @@
 //------------------------------------------------------------------------------
 // Auto-generated wrapper matching DLSSPlugin.h API.
 // Supports both DLSS-SR (Super Resolution) and DLSS-RR (Ray Reconstruction).
-//
-// Enable with scripting define: DLSS_PLUGIN_INTEGRATE
 //------------------------------------------------------------------------------
-
-#if DLSS_PLUGIN_INTEGRATE
 
 using System;
 using System.Runtime.InteropServices;
 using UnityEngine;
-using UnityEngine.Rendering;
 
-namespace UnityEngine.Rendering.Universal
+namespace DLSS
 {
     //--------------------------------------------------------------------------
     // SECTION 1: Enumerations
@@ -43,8 +38,8 @@ namespace UnityEngine.Rendering.Universal
     public enum DLSSMode : int
     {
         Off = 0,
-        SuperResolution = 1, // Standard DLSS-SR (upscaling + AA)
-        RayReconstruction = 2 // DLSS-RR (ray tracing denoiser + upscaler)
+        SuperResolution = 1,    // Standard DLSS-SR (upscaling + AA)
+        RayReconstruction = 2   // DLSS-RR (ray tracing denoiser + upscaler)
     }
 
     /// <summary>
@@ -52,26 +47,26 @@ namespace UnityEngine.Rendering.Universal
     /// </summary>
     public enum DLSSQuality : int
     {
-        MaxPerformance = 0, // UltraPerformance equivalent
+        MaxPerformance = 0,     // UltraPerformance equivalent
         Balanced = 1,
         MaxQuality = 2,
         UltraPerformance = 3,
         UltraQuality = 4,
-        DLAA = 5 // No upscaling, AA only (1:1)
+        DLAA = 5                // No upscaling, AA only (1:1)
     }
 
     /// <summary>
     /// Render presets for DLSS-SR.
     /// </summary>
-    public enum DLSSSRPreset : uint
+    public enum DLSSSRPreset : int
     {
         Default = 0,
-        F = 6, // Deprecated
-        G = 7, // Reverts to default
-        J = 10, // Less ghosting, more flickering
-        K = 11, // Best quality (transformer-based)
-        L = 12, // Default for Ultra Perf
-        M = 13 // Default for Perf
+        F = 6,      // Deprecated
+        G = 7,      // Reverts to default
+        J = 10,     // Less ghosting, more flickering
+        K = 11,     // Best quality (transformer-based)
+        L = 12,     // Default for Ultra Perf
+        M = 13      // Default for Perf
     }
 
     /// <summary>
@@ -80,8 +75,8 @@ namespace UnityEngine.Rendering.Universal
     public enum DLSSRRPreset : int
     {
         Default = 0,
-        D = 4, // Default transformer model
-        E = 5 // Latest transformer (required for DoF guide)
+        D = 4,      // Default transformer model
+        E = 5       // Latest transformer (required for DoF guide)
     }
 
     /// <summary>
@@ -91,12 +86,12 @@ namespace UnityEngine.Rendering.Universal
     public enum DLSSFeatureFlags : uint
     {
         None = 0,
-        IsHDR = (1 << 0), // Input is HDR (pre-tonemapped)
-        MVLowRes = (1 << 1), // Motion vectors are low-res
-        MVJittered = (1 << 2), // Motion vectors include jitter
-        DepthInverted = (1 << 3), // Reversed-Z depth buffer
-        AutoExposure = (1 << 6), // Use auto-exposure
-        AlphaUpscaling = (1 << 7) // Upscale alpha channel
+        IsHDR = (1 << 0),               // Input is HDR (pre-tonemapped)
+        MVLowRes = (1 << 1),            // Motion vectors are low-res
+        MVJittered = (1 << 2),          // Motion vectors include jitter
+        DepthInverted = (1 << 3),       // Reversed-Z depth buffer
+        AutoExposure = (1 << 6),        // Use auto-exposure
+        AlphaUpscaling = (1 << 7)       // Upscale alpha channel
     }
 
     /// <summary>
@@ -104,8 +99,8 @@ namespace UnityEngine.Rendering.Universal
     /// </summary>
     public enum DLSSDepthType : int
     {
-        Linear = 0, // Linear depth buffer
-        Hardware = 1 // Hardware Z-buffer
+        Linear = 0,     // Linear depth buffer
+        Hardware = 1    // Hardware Z-buffer
     }
 
     /// <summary>
@@ -113,8 +108,8 @@ namespace UnityEngine.Rendering.Universal
     /// </summary>
     public enum DLSSRoughnessMode : int
     {
-        Unpacked = 0, // Roughness in separate texture
-        PackedInNormalsW = 1 // Roughness in normals.w channel
+        Unpacked = 0,           // Roughness in separate texture
+        PackedInNormalsW = 1    // Roughness in normals.w channel
     }
 
     /// <summary>
@@ -123,12 +118,23 @@ namespace UnityEngine.Rendering.Universal
     public enum DLSSDenoiseMode : int
     {
         Off = 0,
-        DLUnified = 1 // DL-based unified upscaler (required for RR)
+        DLUnified = 1   // DL-based unified upscaler (required for RR)
     }
 
     //--------------------------------------------------------------------------
     // SECTION 2: Parameter Structures
     //--------------------------------------------------------------------------
+
+    /// <summary>
+    /// Log level enumeration matching native plugin.
+    /// </summary>
+    public enum DLSSLogLevel : int
+    {
+        Debug = 0,
+        Info = 1,
+        Warning = 2,
+        Error = 3
+    }
 
     /// <summary>
     /// Common resolution/dimension parameters.
@@ -178,10 +184,10 @@ namespace UnityEngine.Rendering.Universal
     public struct DLSSMatrix4x4
     {
         // Column-major: m[0-3]=col0, m[4-7]=col1, etc.
-        public float m00, m10, m20, m30; // Column 0
-        public float m01, m11, m21, m31; // Column 1
-        public float m02, m12, m22, m32; // Column 2
-        public float m03, m13, m23, m33; // Column 3
+        public float m00, m10, m20, m30;  // Column 0
+        public float m01, m11, m21, m31;  // Column 1
+        public float m02, m12, m22, m32;  // Column 2
+        public float m03, m13, m23, m33;  // Column 3
 
         public static implicit operator DLSSMatrix4x4(Matrix4x4 m)
         {
@@ -220,7 +226,7 @@ namespace UnityEngine.Rendering.Universal
         public DLSSQuality quality;
         public DLSSDimensions inputResolution;
         public DLSSDimensions outputResolution;
-        public uint featureFlags; // DLSSFeatureFlags bitmask
+        public uint featureFlags;   // DLSSFeatureFlags bitmask
 
         // === SR-specific presets (one per quality level) ===
         public DLSSSRPreset presetDLAA;
@@ -260,12 +266,12 @@ namespace UnityEngine.Rendering.Universal
                 inputResolution = new DLSSDimensions(inputWidth, inputHeight),
                 outputResolution = new DLSSDimensions(outputWidth, outputHeight),
                 featureFlags = (uint)flags,
-                presetDLAA = DLSSSRPreset.K,
-                presetQuality = DLSSSRPreset.J,
+                presetDLAA = DLSSSRPreset.Default,
+                presetQuality = DLSSSRPreset.Default,
                 presetBalanced = DLSSSRPreset.Default,
-                presetPerformance = DLSSSRPreset.M,
-                presetUltraPerformance = DLSSSRPreset.L,
-                presetUltraQuality = DLSSSRPreset.K
+                presetPerformance = DLSSSRPreset.Default,
+                presetUltraPerformance = DLSSSRPreset.Default,
+                presetUltraQuality = DLSSSRPreset.Default
             };
         }
 
@@ -311,12 +317,12 @@ namespace UnityEngine.Rendering.Universal
     [StructLayout(LayoutKind.Sequential)]
     public struct DLSSCommonTextures
     {
-        public IntPtr colorInput; // Required: Noisy/low-res color input
-        public IntPtr colorOutput; // Required: Upscaled output destination
-        public IntPtr depth; // Required: Depth buffer
-        public IntPtr motionVectors; // Required: Motion vectors (2D screen-space)
-        public IntPtr exposureTexture; // Optional: 1x1 exposure scale texture
-        public IntPtr biasColorMask; // Optional: Bias current color mask
+        public IntPtr colorInput;       // Required: Noisy/low-res color input
+        public IntPtr colorOutput;      // Required: Upscaled output destination
+        public IntPtr depth;            // Required: Depth buffer
+        public IntPtr motionVectors;    // Required: Motion vectors (2D screen-space)
+        public IntPtr exposureTexture;  // Optional: 1x1 exposure scale texture
+        public IntPtr biasColorMask;    // Optional: Bias current color mask
         public IntPtr transparencyMask; // Optional: Reserved for future use
     }
 
@@ -388,7 +394,7 @@ namespace UnityEngine.Rendering.Universal
     {
         public IntPtr diffuseAlbedo;    // Required: Diffuse albedo
         public IntPtr specularAlbedo;   // Required: Specular albedo
-        public IntPtr normals;          // Required: World-space normals (optionally with roughness in .w)
+        public IntPtr normals;          // Required: World-space normals
         public IntPtr roughness;        // Optional if packed in normals.w
         public IntPtr emissive;         // Optional: Emissive channel
     }
@@ -400,14 +406,14 @@ namespace UnityEngine.Rendering.Universal
     public struct DLSSRRRayTextures
     {
         // === Separate ray direction and hit distance (recommended) ===
-        public IntPtr diffuseRayDirection;  // RGB: normalized ray direction 
-        public IntPtr diffuseHitDistance;   // R: hit distance
-        public IntPtr specularRayDirection; // RGB: normalized ray direction  
-        public IntPtr specularHitDistance;  // R: hit distance 
+        public IntPtr diffuseRayDirection;
+        public IntPtr diffuseHitDistance;
+        public IntPtr specularRayDirection;
+        public IntPtr specularHitDistance;
 
         // === Combined direction+distance (alternative) ===
-        public IntPtr diffuseRayDirectionHitDistance;// RGBA: direction.xyz + distance.w
-        public IntPtr specularRayDirectionHitDistance;// RGBA: direction.xyz + distance.w
+        public IntPtr diffuseRayDirectionHitDistance;
+        public IntPtr specularRayDirectionHitDistance;
     }
 
     /// <summary>
@@ -488,7 +494,7 @@ namespace UnityEngine.Rendering.Universal
         public DLSSMode mode;
         public DLSSCommonTextures textures;
         public DLSSCommonParams common;
-        public DLSSRRParams rrParams; // Only used when mode == RayReconstruction
+        public DLSSRRParams rrParams;   // Only used when mode == RayReconstruction
 
         /// <summary>
         /// Create SR execution parameters.
@@ -583,12 +589,7 @@ namespace UnityEngine.Rendering.Universal
     /// </summary>
     public static class DLSSNative
     {
-        private const string DLL_NAME =
-#if (PLATFORM_IOS || PLATFORM_TVOS || PLATFORM_BRATWURST || PLATFORM_SWITCH) && !UNITY_EDITOR
-            "__Internal";
-#else
-            "UnityDLSS";
-#endif
+        private const string DLL_NAME = "UnityDLSS";
         private const CallingConvention CALLING_CONVENTION = CallingConvention.StdCall;
 
         //--- Initialization/Shutdown ---
@@ -672,6 +673,145 @@ namespace UnityEngine.Rendering.Universal
         [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION)]
         public static extern int DLSS_GetLastNGXError();
 
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION)]
+        [return: MarshalAs(UnmanagedType.LPStr)]
+        public static extern string DLSS_GetResultString(DLSSResult result);
+
+        //--- Logging ---
+
+        /// <summary>
+        /// Delegate for native log callback.
+        /// </summary>
+        [UnmanagedFunctionPointer(CALLING_CONVENTION)]
+        public delegate void DLSSLogCallback(DLSSLogLevel level, [MarshalAs(UnmanagedType.LPStr)] string message);
+
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION)]
+        public static extern void DLSS_SetLogCallback(DLSSLogCallback callback);
+
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION)]
+        public static extern void DLSS_SetLogLevel(DLSSLogLevel level);
+
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION)]
+        public static extern DLSSLogLevel DLSS_GetLogLevel();
+
+        //--- Low-Level NGX Parameter API ---
+        // These provide direct access to NGX SDK for maximum flexibility
+
+        public const int DLSS_INVALID_FEATURE_HANDLE = -1;
+
+        /// <summary>
+        /// Render event IDs for IssuePluginEventAndData
+        /// </summary>
+        public enum DLSSRenderEventId : int
+        {
+            CreateFeature = 0,
+            EvaluateFeature = 1,
+            DestroyFeature = 2
+        }
+
+        /// <summary>
+        /// NGX Feature types (subset relevant to DLSS)
+        /// </summary>
+        public enum DLSSNGXFeature : int
+        {
+            SuperSampling = 1,          // DLSS-SR
+            RayReconstruction = 13      // DLSS-RR
+        }
+
+        /// <summary>
+        /// Parameters for create feature render event
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct DLSSCreateFeatureEventData
+        {
+            public int handle;
+            public DLSSNGXFeature feature;
+            public IntPtr parameters;   // NVSDK_NGX_Parameter*
+        }
+
+        /// <summary>
+        /// Parameters for evaluate feature render event
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct DLSSEvaluateFeatureEventData
+        {
+            public int handle;
+            public IntPtr parameters;   // NVSDK_NGX_Parameter*
+        }
+
+        /// <summary>
+        /// Parameters for destroy feature render event
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct DLSSDestroyFeatureEventData
+        {
+            public int handle;
+        }
+
+        // Parameter Management
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION)]
+        public static extern DLSSResult DLSS_AllocateParameters(out IntPtr outParams);
+
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION)]
+        public static extern DLSSResult DLSS_GetCapabilityParameters(out IntPtr outParams);
+
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION)]
+        public static extern DLSSResult DLSS_DestroyParameters(IntPtr param);
+
+        // Parameter Setters
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION, CharSet = CharSet.Ansi)]
+        public static extern void DLSS_Parameter_SetI(IntPtr param, string name, int value);
+
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION, CharSet = CharSet.Ansi)]
+        public static extern void DLSS_Parameter_SetUI(IntPtr param, string name, uint value);
+
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION, CharSet = CharSet.Ansi)]
+        public static extern void DLSS_Parameter_SetF(IntPtr param, string name, float value);
+
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION, CharSet = CharSet.Ansi)]
+        public static extern void DLSS_Parameter_SetD(IntPtr param, string name, double value);
+
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION, CharSet = CharSet.Ansi)]
+        public static extern void DLSS_Parameter_SetULL(IntPtr param, string name, ulong value);
+
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION, CharSet = CharSet.Ansi)]
+        public static extern void DLSS_Parameter_SetD3D12Resource(IntPtr param, string name, IntPtr resource);
+
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION, CharSet = CharSet.Ansi)]
+        public static extern void DLSS_Parameter_SetVoidPointer(IntPtr param, string name, IntPtr ptr);
+
+        // Parameter Getters
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION, CharSet = CharSet.Ansi)]
+        public static extern DLSSResult DLSS_Parameter_GetI(IntPtr param, string name, out int outValue);
+
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION, CharSet = CharSet.Ansi)]
+        public static extern DLSSResult DLSS_Parameter_GetUI(IntPtr param, string name, out uint outValue);
+
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION, CharSet = CharSet.Ansi)]
+        public static extern DLSSResult DLSS_Parameter_GetF(IntPtr param, string name, out float outValue);
+
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION, CharSet = CharSet.Ansi)]
+        public static extern DLSSResult DLSS_Parameter_GetD(IntPtr param, string name, out double outValue);
+
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION, CharSet = CharSet.Ansi)]
+        public static extern DLSSResult DLSS_Parameter_GetULL(IntPtr param, string name, out ulong outValue);
+
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION, CharSet = CharSet.Ansi)]
+        public static extern DLSSResult DLSS_Parameter_GetD3D12Resource(IntPtr param, string name, out IntPtr outResource);
+
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION, CharSet = CharSet.Ansi)]
+        public static extern DLSSResult DLSS_Parameter_GetVoidPointer(IntPtr param, string name, out IntPtr outPtr);
+
+        // Feature Handle Management
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION)]
+        public static extern int DLSS_AllocateFeatureHandle();
+
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION)]
+        public static extern int DLSS_FreeFeatureHandle(int handle);
+
+        // Render Event with Data (for IssuePluginEventAndData)
+        [DllImport(DLL_NAME, CallingConvention = CALLING_CONVENTION)]
+        public static extern IntPtr DLSS_GetRenderEventAndDataFunc();
 
         /// <summary>
         /// Render event ID for DLSS: 'DLSS' = 0x444C5353
@@ -704,7 +844,7 @@ namespace UnityEngine.Rendering.Universal
 
             if (!s_Initialized)
             {
-                Debug.LogError($"[DLSS] Failed to initialize: {result.ToString()}");
+                Debug.LogError($"[DLSS] Failed to initialize: {GetResultString(result)}");
             }
 
             return s_Initialized;
@@ -735,10 +875,9 @@ namespace UnityEngine.Rendering.Universal
             var result = DLSSNative.DLSS_GetCapabilities(out info);
             if (result != DLSSResult.Success)
             {
-                Debug.LogWarning($"[DLSS] Failed to get capabilities: {result.ToString()}");
+                Debug.LogWarning($"[DLSS] Failed to get capabilities: {GetResultString(result)}");
                 return false;
             }
-
             return true;
         }
 
@@ -755,10 +894,9 @@ namespace UnityEngine.Rendering.Universal
             var result = DLSSNative.DLSS_GetOptimalSettings(mode, quality, outputWidth, outputHeight, out settings);
             if (result != DLSSResult.Success)
             {
-                Debug.LogWarning($"[DLSS] Failed to get optimal settings: {result.ToString()}");
+                Debug.LogWarning($"[DLSS] Failed to get optimal settings: {GetResultString(result)}");
                 return false;
             }
-
             return true;
         }
 
@@ -778,10 +916,9 @@ namespace UnityEngine.Rendering.Universal
             var result = DLSSNative.DLSS_CreateContext(viewId, ref createParams);
             if (result != DLSSResult.Success)
             {
-                Debug.LogError($"[DLSS] Failed to create SR context for view {viewId}: {result.ToString()}");
+                Debug.LogError($"[DLSS] Failed to create SR context for view {viewId}: {GetResultString(result)}");
                 return false;
             }
-
             return true;
         }
 
@@ -803,25 +940,18 @@ namespace UnityEngine.Rendering.Universal
             var result = DLSSNative.DLSS_CreateContext(viewId, ref createParams);
             if (result != DLSSResult.Success)
             {
-                Debug.LogError($"[DLSS] Failed to create RR context for view {viewId}: {result.ToString()}");
+                Debug.LogError($"[DLSS] Failed to create RR context for view {viewId}: {GetResultString(result)}");
                 return false;
             }
-
             return true;
         }
 
         /// <summary>
         /// Destroy a DLSS context.
         /// </summary>
-        public static bool DestroyContext(uint viewId)
+        public static void DestroyContext(uint viewId)
         {
-            var result = DLSSNative.DLSS_DestroyContext(viewId);
-            if (result != DLSSResult.Success)
-            {
-                Debug.LogError($"[DLSS] Failed to destroy context: {result.ToString()}");
-            }
-
-            return result == DLSSResult.Success;
+            DLSSNative.DLSS_DestroyContext(viewId);
         }
 
         /// <summary>
@@ -848,29 +978,25 @@ namespace UnityEngine.Rendering.Universal
             var result = DLSSNative.DLSS_Execute(viewId, ref executeParams);
             if (result != DLSSResult.Success)
             {
-                Debug.LogError($"[DLSS] Failed to execute for view {viewId}: {result.ToString()}");
+                Debug.LogError($"[DLSS] Failed to execute for view {viewId}: {GetResultString(result)}");
                 return false;
             }
-
             return true;
         }
 
         /// <summary>
-        /// Execute DLSS for a view via command buffer using IssuePluginEventAndData.
-        /// This queues the DLSS execution properly in the GPU command stream.
+        /// Get a human-readable result string.
         /// </summary>
-        public static void ExecuteOnCommandBuffer(CommandBuffer cmd, uint viewId, ref DLSSExecuteParams executeParams)
+        public static string GetResultString(DLSSResult result)
         {
-            // Set the current view and execute parameters for the render event
-            DLSSNative.DLSS_SetCurrentView(viewId);
-            DLSSNative.DLSS_SetExecuteParams(ref executeParams);
-
-            // Queue the DLSS execution via the render event callback
-            cmd.IssuePluginEventAndData(
-                DLSSNative.DLSS_GetRenderEventFunc(),
-                DLSSNative.DLSS_RENDER_EVENT_ID,
-                IntPtr.Zero
-            );
+            try
+            {
+                return DLSSNative.DLSS_GetResultString(result) ?? result.ToString();
+            }
+            catch
+            {
+                return result.ToString();
+            }
         }
 
         /// <summary>
@@ -880,23 +1006,62 @@ namespace UnityEngine.Rendering.Universal
         {
             return DLSSNative.DLSS_GetLastNGXError();
         }
-    }
 
-    //--------------------------------------------------------------------------
-    // SECTION 6: Volume Parameters
-    //--------------------------------------------------------------------------
+        //--- Logging ---
+        // Note: Logging is automatic via Unity's native IUnityLog interface.
+        // By default, all logs at Info level and above are output to Unity Console.
+        // Use SetCustomLogCallback to override the default Unity logging behavior.
 
-    /// <summary>
-    /// Volume parameter wrapper for DLSSQuality enum.
-    /// </summary>
-    [Serializable]
-    public sealed class DLSSQualityParameter : UnityEngine.Rendering.VolumeParameter<DLSSQuality>
-    {
-        public DLSSQualityParameter(DLSSQuality value, bool overrideState = false)
-            : base(value, overrideState)
+        private static DLSSNative.DLSSLogCallback s_LogCallback;
+
+        /// <summary>
+        /// Set the minimum log level for native plugin logging.
+        /// Logs are automatically output to Unity Console via native IUnityLog interface.
+        /// Default level is Info.
+        /// </summary>
+        /// <param name="level">Minimum log level.</param>
+        public static void SetLogLevel(DLSSLogLevel level)
         {
+            DLSSNative.DLSS_SetLogLevel(level);
+        }
+
+        /// <summary>
+        /// Get the current log level.
+        /// </summary>
+        public static DLSSLogLevel GetLogLevel()
+        {
+            return DLSSNative.DLSS_GetLogLevel();
+        }
+
+        /// <summary>
+        /// Set a custom log callback to override the default Unity logging.
+        /// When a callback is set, logs are sent to the callback instead of Unity Console.
+        /// Pass null to restore default Unity logging behavior.
+        /// </summary>
+        /// <param name="callback">Custom callback, or null to use Unity Console.</param>
+        public static void SetCustomLogCallback(System.Action<DLSSLogLevel, string> callback)
+        {
+            if (callback != null)
+            {
+                // Keep reference to prevent GC
+                s_LogCallback = (level, message) => callback(level, message);
+                DLSSNative.DLSS_SetLogCallback(s_LogCallback);
+            }
+            else
+            {
+                // Clear callback to restore Unity log
+                DLSSNative.DLSS_SetLogCallback(null);
+                s_LogCallback = null;
+            }
+        }
+
+        /// <summary>
+        /// Clear any custom log callback and restore default Unity Console logging.
+        /// </summary>
+        public static void ResetLoggingToDefault()
+        {
+            DLSSNative.DLSS_SetLogCallback(null);
+            s_LogCallback = null;
         }
     }
 }
-
-#endif

@@ -11,7 +11,6 @@
 using System;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
-using DLSS;
 
 namespace UnityEngine.Rendering.Universal
 {

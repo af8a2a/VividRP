@@ -9,7 +9,6 @@
 
 #if DLSS_PLUGIN_INTEGRATE
 using System;
-using DLSS;
 #endif
 
 namespace UnityEngine.Rendering.Universal

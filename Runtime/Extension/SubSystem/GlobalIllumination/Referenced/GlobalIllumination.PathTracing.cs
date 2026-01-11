@@ -434,7 +434,7 @@ namespace UnityEngine.Rendering.Universal
         /// DLSS-RR quality preset
         /// </summary>
         [Tooltip("DLSS Ray Reconstruction quality preset. Higher quality modes use lower internal resolution for better performance.")]
-        public DLSS.DLSSQualityParameter dlssRRQuality = new DLSS.DLSSQualityParameter(DLSS.DLSSQuality.Balanced);
+        public DLSSQualityParameter dlssRRQuality = new DLSSQualityParameter(DLSSQuality.Balanced);
 
         /// <summary>
         /// Hit distance scale for DLSS-RR

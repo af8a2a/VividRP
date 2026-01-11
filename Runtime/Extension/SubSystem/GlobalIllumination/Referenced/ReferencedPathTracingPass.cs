@@ -1,9 +1,6 @@
 ﻿using System.Linq;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
-#if DLSS_PLUGIN_INTEGRATE
-using DLSS;
-#endif
 
 namespace UnityEngine.Rendering.Universal
 {

@@ -3,9 +3,6 @@ using System.Collections.Generic;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 
-#if DLSS_PLUGIN_INTEGRATE
-using DLSS;
-#endif
 
 namespace UnityEngine.Rendering.Universal
 {
@@ -261,7 +258,7 @@ namespace UnityEngine.Rendering.Universal
                     m_ContextCreated = false;
 
                     // Create new context with DLSSNative directly to support custom presets
-                    var flags = DLSSFeatureFlags.IsHDR | DLSSFeatureFlags.MVLowRes | DLSSFeatureFlags.DepthInverted;
+                    var flags = DLSSFeatureFlags.IsHDR | DLSSFeatureFlags.MVJittered | DLSSFeatureFlags.DepthInverted;
 
                     var createParams = DLSSContextCreateParams.CreateSR(
                         newParams.quality,

@@ -14,7 +14,7 @@ using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace DLSS
+namespace UnityEngine.Rendering.Universal
 {
     //--------------------------------------------------------------------------
     // SECTION 1: Enumerations

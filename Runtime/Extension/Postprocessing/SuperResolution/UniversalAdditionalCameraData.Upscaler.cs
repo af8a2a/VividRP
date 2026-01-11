@@ -1,5 +1,4 @@
-﻿using DLSS;
-
+﻿
 namespace UnityEngine.Rendering.Universal
 {
     partial class UniversalAdditionalCameraData

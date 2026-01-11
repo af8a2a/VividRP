@@ -2,9 +2,6 @@
 using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Rendering.Universal.Internal;
 
-#if DLSS_PLUGIN_INTEGRATE
-using DLSS;
-#endif
 
 namespace UnityEngine.Rendering.Universal
 {

@@ -89,20 +89,6 @@ namespace UnityEngine.Rendering.Universal
             public static readonly ProfilingSampler Render = new ProfilingSampler("DLSS-SR Render");
         }
 
-        // Map Unity quality to NGX quality
-        private static NVSDK_NGX_PerfQuality_Value MapQuality(DLSSQuality unityQuality)
-        {
-            switch (unityQuality)
-            {
-                case DLSSQuality.MaxQuality: return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_MaxQuality;
-                case DLSSQuality.Balanced: return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_Balanced;
-                case DLSSQuality.MaxPerformance: return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_MaxPerf;
-                case DLSSQuality.UltraPerformance: return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_UltraPerformance;
-                case DLSSQuality.DLAA: return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_DLAA;
-                default: return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_Balanced;
-            }
-        }
-
         //--------------------------------------------------------------------------
         // DLSSViewContext - Uses DLSSSuperResolution wrapper
         //--------------------------------------------------------------------------
@@ -252,7 +238,7 @@ namespace UnityEngine.Rendering.Universal
                 }
 
                 // Map quality and update all view contexts
-                var ngxQuality = MapQuality(quality);
+                var ngxQuality = quality.ToNGXQuality();
                 foreach (var ctx in m_ViewContexts)
                 {
                     ctx.SetQuality(ngxQuality);
@@ -396,7 +382,7 @@ namespace UnityEngine.Rendering.Universal
             // You can implement custom DRS logic here if needed
             if (enableAutomaticSettings)
             {
-                dlssCameraState.SetOptimalScale(true, 66.7f); // Default to ~67% for balanced quality
+                dlssCameraState.SetOptimalScale(true, DLSSConstants.DEFAULT_DRS_SCALE_PERCENT);
                 DynamicResolutionHandler.SetSystemDynamicResScaler(dlssCameraState.ScaleDelegate,
                     DynamicResScalePolicyType.ReturnsPercentage);
                 DynamicResolutionHandler.SetActiveDynamicScalerSlot(DynamicResScalerSlot.System);

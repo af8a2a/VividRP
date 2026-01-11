@@ -171,4 +171,59 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>Roughness packed in normals.w channel</summary>
         PackedInNormalsW = 1
     }
+
+    /// <summary>
+    /// DLSS runtime constants and default values.
+    /// </summary>
+    public static class DLSSConstants
+    {
+        /// <summary>
+        /// Default DRS scale for balanced quality (~67% render resolution).
+        /// This provides a good balance between performance and visual quality.
+        /// </summary>
+        public const float DEFAULT_DRS_SCALE_PERCENT = 66.7f;
+
+        /// <summary>
+        /// Number of inactive frames before cleaning up camera state.
+        /// Prevents memory leaks from abandoned cameras while allowing
+        /// temporary camera deactivation (e.g., cutscenes).
+        /// </summary>
+        public const ulong CAMERA_STATE_EXPIRATION_FRAMES = 400;
+
+        /// <summary>
+        /// Motion vector scale sign convention.
+        /// Unity uses negative scale for motion vectors (left-handed).
+        /// </summary>
+        public const float MOTION_VECTOR_SCALE_SIGN = -1.0f;
+    }
+
+    /// <summary>
+    /// Extension methods for DLSS quality enum.
+    /// </summary>
+    public static class DLSSQualityExtensions
+    {
+        /// <summary>
+        /// Convert DLSSQuality to NGX SDK quality value.
+        /// </summary>
+        public static NVSDK_NGX_PerfQuality_Value ToNGXQuality(this DLSSQuality quality)
+        {
+            switch (quality)
+            {
+                case DLSSQuality.MaxQuality:
+                    return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_MaxQuality;
+                case DLSSQuality.Balanced:
+                    return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_Balanced;
+                case DLSSQuality.MaxPerformance:
+                    return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_MaxPerf;
+                case DLSSQuality.UltraPerformance:
+                    return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_UltraPerformance;
+                case DLSSQuality.UltraQuality:
+                    return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_UltraQuality;
+                case DLSSQuality.DLAA:
+                    return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_DLAA;
+                default:
+                    return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_Balanced;
+            }
+        }
+    }
 }

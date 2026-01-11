@@ -191,7 +191,7 @@ namespace UnityEngine.Rendering.Universal
         }
 
         //Amount of inactive frames dlss has rendered before we clean / destroy the plugin state.
-        private static UInt64 sMaximumFrameExpiration = 400;
+        private static UInt64 sMaximumFrameExpiration = DLSSConstants.CAMERA_STATE_EXPIRATION_FRAMES;
 
         private Dictionary<int, State> m_CameraStates = new Dictionary<int, State>();
         private List<int> m_InvalidCameraKeys = new List<int>();

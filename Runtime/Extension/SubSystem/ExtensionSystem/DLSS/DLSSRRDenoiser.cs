@@ -98,21 +98,6 @@ namespace UnityEngine.Rendering.Universal
             };
         }
 
-        // Map user-facing DLSSQuality to internal NGX quality value
-        private static NVSDK_NGX_PerfQuality_Value MapQuality(DLSSQuality quality)
-        {
-            switch (quality)
-            {
-                case DLSSQuality.MaxQuality: return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_MaxQuality;
-                case DLSSQuality.Balanced: return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_Balanced;
-                case DLSSQuality.MaxPerformance: return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_MaxPerf;
-                case DLSSQuality.UltraPerformance: return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_UltraPerformance;
-                case DLSSQuality.UltraQuality: return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_MaxQuality; // Fallback
-                case DLSSQuality.DLAA: return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_DLAA;
-                default: return NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_Balanced;
-            }
-        }
-
         /// <summary>
         /// Input textures for DLSS-RR resource preparation
         /// </summary>
@@ -173,7 +158,7 @@ namespace UnityEngine.Rendering.Universal
             }
 
             // Map user-facing quality to internal NGX value
-            var ngxQuality = MapQuality(quality);
+            var ngxQuality = quality.ToNGXQuality();
 
             bool needsRecreate = !m_Initialized ||
                                  m_InputWidth != inputWidth ||

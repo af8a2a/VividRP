@@ -1413,6 +1413,7 @@ namespace UnityEngine.Rendering.Universal
             InitializeStackedCameraData(camera, additionalCameraData, cameraData);
             cameraData.camera = camera;
 
+            
             // Add reference to writable camera history to give access to injected user render passes which can produce history.
             cameraData.historyManager = additionalCameraData?.historyManager;
 

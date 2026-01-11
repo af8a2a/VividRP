@@ -13,6 +13,8 @@ using System;
 
 namespace UnityEngine.Rendering.Universal
 {
+    using static DLSSSdk;
+
     /// <summary>
     /// DLSS Extension for VividRP ExtensionSystem.
     /// Handles initialization and capability detection for NVIDIA DLSS.
@@ -23,7 +25,6 @@ namespace UnityEngine.Rendering.Universal
         private bool m_Initialized = false;
         private bool m_SRSupported = false;
         private bool m_RRSupported = false;
-        private bool m_NeedsDriverUpdate = false;
 
         /// <summary>
         /// Check if DLSS-SR (Super Resolution) is supported
@@ -34,11 +35,6 @@ namespace UnityEngine.Rendering.Universal
         /// Check if DLSS-RR (Ray Reconstruction) is supported
         /// </summary>
         public bool IsRRSupported => m_RRSupported;
-
-        /// <summary>
-        /// Check if driver update is needed for full DLSS support
-        /// </summary>
-        public bool NeedsDriverUpdate => m_NeedsDriverUpdate;
 
         /// <summary>
         /// Get the singleton instance from ExtensionSystem
@@ -56,7 +52,6 @@ namespace UnityEngine.Rendering.Universal
 
         public void Init()
         {
-            // Debug.Log($"[DLSSExtension] {DLSSNative.DLSS_GetResultString(DLSSResult.Success)}");
 #if DLSS_PLUGIN_INTEGRATE
             Debug.Log("[DLSSExtension] Initializing DLSS...");
             Debug.Log($"[DLSSExtension] Graphics Device: {SystemInfo.graphicsDeviceName}");
@@ -80,42 +75,29 @@ namespace UnityEngine.Rendering.Universal
 
             try
             {
-                // Initialize DLSS through DLSSManager (sets internal s_Initialized flag)
-                m_Initialized = DLSSManager.Initialize(
-                    0Xffaacae,  // appId
-                    Application.productName,
-                    Application.unityVersion,
-                    Application.persistentDataPath + "/DLSS"
-                );
+                // Initialize DLSS using new SDK (reference-counted)
+                var result = DLSS_Init();
+                m_Initialized = NVSDK_NGX_SUCCEED(result);
 
                 if (!m_Initialized)
                 {
-                    Debug.LogWarning("[DLSSExtension] DLSS initialization failed");
+                    Debug.LogWarning($"[DLSSExtension] DLSS initialization failed: {result}");
                     return;
                 }
 
-                // Query capabilities using DLSSManager
-                if (DLSSManager.TryGetCapabilities(out var caps))
-                {
-                    m_SRSupported = caps.IsSRAvailable;
-                    m_RRSupported = caps.IsRRAvailable;
-                    m_NeedsDriverUpdate = caps.NeedsDriverUpdate;
+                // Query capabilities using new SDK
+                m_SRSupported = DLSS_IsSuperSamplingAvailable();
+                m_RRSupported = DLSS_IsRayReconstructionAvailable();
 
-                    Debug.Log($"[DLSSExtension] DLSS-SR Available: {m_SRSupported}");
-                    Debug.Log($"[DLSSExtension] DLSS-RR Available: {m_RRSupported}");
-
-                    if (m_NeedsDriverUpdate)
-                    {
-                        Debug.LogWarning($"[DLSSExtension] Driver update recommended. Min version: {caps.minDriverVersionMajor}.{caps.minDriverVersionMinor}");
-                    }
-                }
+                Debug.Log($"[DLSSExtension] DLSS-SR Available: {m_SRSupported}");
+                Debug.Log($"[DLSSExtension] DLSS-RR Available: {m_RRSupported}");
 
                 Debug.Log("[DLSSExtension] DLSS initialized successfully!");
             }
             catch (DllNotFoundException e)
             {
                 Debug.LogWarning($"[DLSSExtension] DLSS DLL not found: {e.Message}");
-                Debug.LogWarning("[DLSSExtension] Make sure UnityPlugin.dll and nvngx_*.dll are in Assets/Plugins/x86_64/");
+                Debug.LogWarning("[DLSSExtension] Make sure UnityDLSS.dll and nvngx_*.dll are in Assets/Plugins/x86_64/");
                 m_Initialized = false;
             }
             catch (Exception e)
@@ -145,52 +127,16 @@ namespace UnityEngine.Rendering.Universal
 
 #if DLSS_PLUGIN_INTEGRATE
         /// <summary>
-        /// Get optimal render resolution for DLSS
-        /// </summary>
-        public bool TryGetOptimalSettings(
-            DLSSMode mode,
-            DLSSQuality quality,
-            int outputWidth,
-            int outputHeight,
-            out DLSSOptimalSettings settings)
-        {
-            settings = default;
-
-            if (!m_Initialized)
-                return false;
-
-            return DLSSManager.TryGetOptimalSettings(
-                mode,
-                quality,
-                (uint)outputWidth,
-                (uint)outputHeight,
-                out settings
-            );
-        }
-
-        /// <summary>
-        /// Get DLSS memory statistics
-        /// </summary>
-        public bool TryGetStats(DLSSMode mode, out DLSSStats stats)
-        {
-            stats = default;
-
-            if (!m_Initialized)
-                return false;
-
-            return DLSSNative.DLSS_GetStats(mode, out stats) == DLSSResult.Success;
-        }
-
-        /// <summary>
         /// Shutdown DLSS (call on application quit)
         /// </summary>
         public void Shutdown()
         {
             if (m_Initialized)
             {
-                DLSSManager.DestroyAllContexts();
-                DLSSManager.Shutdown();
+                DLSS_Shutdown();
                 m_Initialized = false;
+                m_SRSupported = false;
+                m_RRSupported = false;
                 Debug.Log("[DLSSExtension] DLSS shutdown complete.");
             }
         }

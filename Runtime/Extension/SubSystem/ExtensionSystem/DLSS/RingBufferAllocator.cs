@@ -9,7 +9,7 @@ using System;
 using System.Runtime.InteropServices;
 using UnityEngine;
 
-namespace DLSS
+namespace UnityEngine.Rendering.Universal
 {
     /// <summary>
     /// Ring buffer allocator for passing structured data from C# to native plugin.

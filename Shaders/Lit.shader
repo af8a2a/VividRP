@@ -728,7 +728,45 @@ Shader "Universal Render Pipeline/Lit"
             ENDHLSL
         }
 
+        // Raytracing GBuffer pass for DLSS-RR
+        // Outputs DLSS-RR native format directly (world-space normals, sqrt(alphaRoughness), EnvBRDFApprox2 specular)
+        // This eliminates the need for DLSSRRResourcePrep.compute transformation pass
+        Pass
+        {
+            Name "GBufferDXR"
+            Tags
+            {
+                "LightMode" = "GBufferDXR"
+            }
 
+            HLSLPROGRAM
+            // -------------------------------------
+            // Shader Stages
+            #pragma only_renderers d3d11 xboxseries ps5
+            #pragma raytracing surface_shader
+
+            // -------------------------------------
+            // Material Keywords
+            #pragma shader_feature_local _NORMALMAP
+            #pragma shader_feature_local _PARALLAXMAP
+            #pragma shader_feature_local _ _DETAIL_MULX2 _DETAIL_SCALED
+            #pragma shader_feature_local_fragment _ALPHATEST_ON
+            #pragma shader_feature_local_fragment _METALLICSPECGLOSSMAP
+            #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+            #pragma shader_feature_local_fragment _OCCLUSIONMAP
+            #pragma shader_feature_local_fragment _SPECULAR_SETUP
+
+            // List all the attributes needed in raytracing shader
+            #define ATTRIBUTES_NEED_TEXCOORD0
+            #define ATTRIBUTES_NEED_NORMAL
+            #define ATTRIBUTES_NEED_TANGENT
+
+            #define SHADERPASS SHADERPASS_RAYTRACING_GBUFFER
+
+            // GBuffer DXR hit shaders for DLSS-RR native output
+            #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/GlobalIllumination/Referenced/Shader/RayTracingGBufferHit.hlsl"
+            ENDHLSL
+        }
 
 
 

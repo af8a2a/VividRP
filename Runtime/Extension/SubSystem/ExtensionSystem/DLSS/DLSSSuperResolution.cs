@@ -33,17 +33,8 @@ namespace UnityEngine.Rendering.Universal
         private bool m_createParamsChanged = false;
 
         // Cached extension reference
-        private DLSSExtension m_Extension;
 
-        private DLSSExtension Extension
-        {
-            get
-            {
-                if (m_Extension == null)
-                    m_Extension = DLSSExtension.Instance;
-                return m_Extension;
-            }
-        }
+        private DLSSExtension Extension => DLSSExtension.Instance;
 
         /// <summary>
         /// Create a new DLSS-SR instance.
@@ -121,6 +112,11 @@ namespace UnityEngine.Rendering.Universal
         {
             if (!IsSupported || Extension == null)
             {
+                if (Extension == null)
+                {
+                    Debug.LogError("[DLSSSuperResolution] DLSS-SR Extension is null");
+                }
+
                 Debug.LogError("[DLSSSuperResolution] DLSS-SR is not supported");
                 return false;
             }

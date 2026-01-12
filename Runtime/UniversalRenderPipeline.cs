@@ -1556,12 +1556,10 @@ namespace UnityEngine.Rendering.Universal
 #endif
 
 
-            if (!isScenePreviewOrReflectionCamera)
-                cameraData.upscalingTechnique = baseAdditionalCameraData.upscalerTechnique;
-
             // Initialize per-camera DLSS settings
             if (baseAdditionalCameraData)
             {
+                cameraData.upscalingTechnique = baseAdditionalCameraData.upscalerTechnique;
                 cameraData.dlssQuality = baseAdditionalCameraData.DLSSQualityLevel;
             }
             else

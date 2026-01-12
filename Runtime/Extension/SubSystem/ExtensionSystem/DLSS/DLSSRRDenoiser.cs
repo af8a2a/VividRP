@@ -409,6 +409,107 @@ namespace UnityEngine.Rendering.Universal
         }
 
         /// <summary>
+        /// Execute DLSS-RR with pre-prepared inputs (skips resource preparation).
+        /// Use this when raytracing GBuffer provides DLSS-RR native format directly.
+        /// </summary>
+        /// <param name="cmd">Command buffer for rendering commands</param>
+        /// <param name="colorInput">Input color texture</param>
+        /// <param name="colorOutput">Output color texture</param>
+        /// <param name="depth">Depth texture</param>
+        /// <param name="motionVectors">Motion vectors texture</param>
+        /// <param name="diffuseAlbedo">Pre-computed diffuse albedo (albedo * (1-metallic))</param>
+        /// <param name="specularAlbedo">Pre-computed specular albedo (EnvBRDFApprox2)</param>
+        /// <param name="normalRoughness">World normal + sqrt(alphaRoughness) in alpha</param>
+        /// <param name="diffuseHitDistance">Diffuse hit distance (optional)</param>
+        /// <param name="specularHitDistance">Specular hit distance (optional)</param>
+        /// <param name="jitterOffset">Camera jitter offset in normalized coordinates</param>
+        /// <param name="worldToView">World to view matrix</param>
+        /// <param name="viewToClip">View to clip matrix</param>
+        /// <param name="settings">Denoiser settings</param>
+        /// <returns>True on success</returns>
+        public bool ExecuteWithPreparedInputs(
+            CommandBuffer cmd,
+            RenderTexture colorInput,
+            RenderTexture colorOutput,
+            RenderTexture depth,
+            RenderTexture motionVectors,
+            RenderTexture diffuseAlbedo,
+            RenderTexture specularAlbedo,
+            RenderTexture normalRoughness,
+            RenderTexture diffuseHitDistance,
+            RenderTexture specularHitDistance,
+            Vector2 jitterOffset,
+            Matrix4x4 worldToView,
+            Matrix4x4 viewToClip,
+            Settings settings)
+        {
+            if (!m_Initialized || m_DlssRR == null)
+            {
+                Debug.LogError("[DLSSRRDenoiser] Denoiser not initialized");
+                return false;
+            }
+
+            if (colorInput == null || colorOutput == null || depth == null || motionVectors == null)
+            {
+                Debug.LogError("[DLSSRRDenoiser] Required textures are null");
+                return false;
+            }
+
+            // Generate ray directions from normal/roughness if not provided
+            if (m_ResourcePrepCS != null)
+            {
+                int width = m_InputWidth;
+                int height = m_InputHeight;
+                Vector4 textureSize = new Vector4(width, height, 1.0f / width, 1.0f / height);
+                int threadGroupsX = (width + 7) / 8;
+                int threadGroupsY = (height + 7) / 8;
+
+                cmd.SetComputeVectorParam(m_ResourcePrepCS, ShaderIDs._TextureSize, textureSize);
+                cmd.SetComputeTextureParam(m_ResourcePrepCS, m_GenerateRayDirectionsKernel, ShaderIDs._GBuffer2, normalRoughness);
+                cmd.SetComputeTextureParam(m_ResourcePrepCS, m_GenerateRayDirectionsKernel, ShaderIDs._DepthTexture, depth);
+                cmd.SetComputeTextureParam(m_ResourcePrepCS, m_GenerateRayDirectionsKernel, ShaderIDs._DiffuseRayDirectionOutput, m_DiffuseRayDirectionRT);
+                cmd.SetComputeTextureParam(m_ResourcePrepCS, m_GenerateRayDirectionsKernel, ShaderIDs._SpecularRayDirectionOutput, m_SpecularRayDirectionRT);
+                cmd.DispatchCompute(m_ResourcePrepCS, m_GenerateRayDirectionsKernel, threadGroupsX, threadGroupsY, 1);
+            }
+
+            // Build GBuffer from pre-prepared inputs (no resource prep needed)
+            var gbuffer = new DLSSRRGBuffer
+            {
+                DiffuseAlbedo = diffuseAlbedo,
+                SpecularAlbedo = specularAlbedo,
+                Normals = normalRoughness,
+                Roughness = null  // Packed in normals.w
+            };
+
+            var rayInputs = new DLSSRRRayInputs
+            {
+                DiffuseRayDirection = m_DiffuseRayDirectionRT?.rt,
+                DiffuseHitDistance = diffuseHitDistance,
+                SpecularRayDirection = m_SpecularRayDirectionRT?.rt,
+                SpecularHitDistance = specularHitDistance
+            };
+
+            // Execute via wrapper
+            return m_DlssRR.Render(
+                cmd,
+                colorInput,
+                colorOutput,
+                depth,
+                motionVectors,
+                gbuffer,
+                rayInputs,
+                worldToView,
+                viewToClip,
+                jitterOffset.x * m_InputWidth,   // Convert to pixel space
+                jitterOffset.y * m_InputHeight,
+                -(float)m_InputWidth,   // Unity convention
+                -(float)m_InputHeight,
+                settings.resetHistory,
+                settings.frameTimeDeltaMs
+            );
+        }
+
+        /// <summary>
         /// Get the internal output RTHandle
         /// </summary>
         public RTHandle OutputRT => m_OutputRT;

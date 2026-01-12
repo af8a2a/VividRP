@@ -606,6 +606,8 @@ namespace UnityEngine.Rendering.Universal
             m_ShaderVariablesRayTracingCB._RaytracingPixelSpreadAngle = RenderingUtilsExt.GetPixelSpreadAngle(cameraData.camera.fieldOfView, cameraData.actualWidth, cameraData.actualHeight);
             m_ShaderVariablesRayTracingCB._DirectionalShadowFallbackIntensity = rayTracingSettings.directionalShadowFallbackIntensity.value;
             m_ShaderVariablesRayTracingCB._RayTracingLodBias = 0;
+            m_ShaderVariablesRayTracingCB._RaytracingRayMaxLength = rayTracingSettings.directionalShadowRayLength.value;
+
 
             return m_ShaderVariablesRayTracingCB;
         }

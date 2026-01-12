@@ -68,6 +68,7 @@ namespace UnityEngine.Rendering.Universal
         private bool m_initialized = false;
         private bool m_disposed = false;
 
+        
         // Create params tracking for recreation
         private uint m_inputWidth;
         private uint m_inputHeight;
@@ -78,17 +79,8 @@ namespace UnityEngine.Rendering.Universal
         private bool m_createParamsChanged = false;
 
         // Cached extension reference
-        private DLSSExtension m_Extension;
 
-        private DLSSExtension Extension
-        {
-            get
-            {
-                if (m_Extension == null)
-                    m_Extension = DLSSExtension.Instance;
-                return m_Extension;
-            }
-        }
+        private DLSSExtension Extension => DLSSExtension.Instance;
 
         /// <summary>
         /// Denoise mode for RR.

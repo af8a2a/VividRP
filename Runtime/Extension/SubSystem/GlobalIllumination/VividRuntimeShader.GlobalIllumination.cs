@@ -16,6 +16,22 @@ namespace UnityEngine.Rendering.Universal
             get => m_ReferencedPathTracingRTShader;
             set => this.SetValueAndNotify(ref m_ReferencedPathTracingRTShader, value, nameof(m_ReferencedPathTracingRTShader));
         }
+        
+        
+        
+        [SerializeField]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/Referenced/Shader/RayTracingGBuffer.raytrace")]
+        private RayTracingShader m_RayTracingGBufferRTShader;
+
+        /// <summary>
+        /// Referenced Path Tracing ray tracing shader
+        /// </summary>
+        public RayTracingShader rayTracingGBufferRTShader
+        {
+            get => m_RayTracingGBufferRTShader;
+            set => this.SetValueAndNotify(ref m_RayTracingGBufferRTShader, value, nameof(m_RayTracingGBufferRTShader));
+        }
+
 
         [SerializeField]
         [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/Referenced/Shader/SharcResolve.compute")]

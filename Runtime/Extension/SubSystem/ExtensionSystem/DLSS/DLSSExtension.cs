@@ -132,12 +132,16 @@ namespace UnityEngine.Rendering.Universal
     /// </summary>
     public class DLSSExtension : IExtension
     {
+        public DLSSExtension()
+        {
+        }
+
         #region Constants
 
         private const string DLL_NAME = "UnityDLSS";
         private const CallingConvention CALLING_CONVENTION = CallingConvention.Cdecl;
 
-        public const int DLSS_INVALID_FEATURE_HANDLE = -1;
+        public const int DLSS_INVALID_FEATURE_HANDLE = 0;
 
         // Event IDs for native plugin
         private const int EVENT_ID_CREATE_FEATURE = 0;
@@ -510,7 +514,7 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         public static bool NVSDK_NGX_SUCCEED(NVSDK_NGX_Result result)
         {
-            return (int)result > 0;
+            return result is NVSDK_NGX_Result.NVSDK_NGX_Result_Success;
         }
 
         /// <summary>
@@ -518,7 +522,7 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         public static bool NVSDK_NGX_FAILED(NVSDK_NGX_Result result)
         {
-            return (int)result <= 0;
+            return result is not NVSDK_NGX_Result.NVSDK_NGX_Result_Success;
         }
 
         #endregion

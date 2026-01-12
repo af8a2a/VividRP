@@ -24,6 +24,16 @@ namespace UnityEngine.Rendering.Universal
 
         #region ReferencedPathTracing
 
+        // Path Tracing raw material data (from DXR GBuffer)
+        private TextureHandle _materialData;
+
+        public TextureHandle materialData
+        {
+            get => CheckAndGetTextureHandle(ref _materialData);
+            set => CheckAndSetTextureHandle(ref _materialData, value);
+        }
+
+        // DLSS-RR GBuffer outputs
         private TextureHandle _diffuseAlbedo;
 
         public TextureHandle diffuseAlbedo

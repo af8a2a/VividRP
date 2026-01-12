@@ -93,10 +93,9 @@ namespace UnityEngine.Rendering.Universal
 
         class PassData
         {
-            // Textures
-            internal TextureHandle gBuffer0; // Albedo + AO
-            internal TextureHandle gBuffer1; // Specular/Metallic + Roughness
-            internal TextureHandle gBuffer2; // World space normal
+            // DXR GBuffer Textures (replaced URP GBuffer)
+            internal TextureHandle materialData;      // RGB = albedo, A = metallic
+            internal TextureHandle normalRoughness;   // RGB = world normal, A = sqrt(alphaRoughness)
             internal TextureHandle depthTexture;
             internal TextureHandle outputTexture;
             internal TextureHandle historyTexture;
@@ -273,9 +272,9 @@ namespace UnityEngine.Rendering.Universal
             public static readonly int _PathTracingDiffuseHistory = Shader.PropertyToID("_PathTracingDiffuseHistory");
             public static readonly int _PathTracingSpecularHistory = Shader.PropertyToID("_PathTracingSpecularHistory");
 
-            public static readonly int _GBuffer0 = Shader.PropertyToID("_GBuffer0");
-            public static readonly int _GBuffer1 = Shader.PropertyToID("_GBuffer1");
-            public static readonly int _GBuffer2 = Shader.PropertyToID("_GBuffer2");
+            // DXR GBuffer textures (replaced URP GBuffer)
+            public static readonly int _DXRGBufferMaterialData = Shader.PropertyToID("_DXRGBufferMaterialData");
+            public static readonly int _DXRGBufferNormalRoughness = Shader.PropertyToID("_DXRGBufferNormalRoughness");
             public static readonly int _CameraDepthTexture = Shader.PropertyToID("_CameraDepthTexture");
             public static readonly int _SkyTexture = Shader.PropertyToID("_SkyTexture");
 
@@ -343,10 +342,9 @@ namespace UnityEngine.Rendering.Universal
             // Setup dithered texture set for blue noise sampling
             passData.ditheredTextureHandleSet = RuntimeTextureSystem.instance.DitheredTextureSet8SPP().RenderGraphImport(renderGraph);
 
-            // Input textures
-            passData.gBuffer0 = resourceData.gBuffer[0];
-            passData.gBuffer1 = resourceData.gBuffer[1];
-            passData.gBuffer2 = resourceData.gBuffer[2];
+            // Input textures - DXR GBuffer (from RayTracingGBufferPass)
+            passData.materialData = resourceData.materialData;
+            passData.normalRoughness = resourceData.normalRoughness;
             passData.depthTexture = resourceData.cameraDepthTexture;
 
             // TODO: Get sky texture from environment settings
@@ -405,10 +403,9 @@ namespace UnityEngine.Rendering.Universal
                 // Bind dithered texture set (blue noise)
                 RuntimeTextureSystem.BindDitheredTextureSet(cmd, data.ditheredTextureHandleSet);
 
-                // Bind input textures
-                cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._GBuffer0, data.gBuffer0);
-                cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._GBuffer1, data.gBuffer1);
-                cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._GBuffer2, data.gBuffer2);
+                // Bind input textures - DXR GBuffer
+                cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._DXRGBufferMaterialData, data.materialData);
+                cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._DXRGBufferNormalRoughness, data.normalRoughness);
                 cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._CameraDepthTexture, data.depthTexture);
 
                 // Bind output texture
@@ -759,11 +756,10 @@ namespace UnityEngine.Rendering.Universal
                 passData.sharcAccumulationBuffer = sharcAccumulationBuffer;
                 passData.sharcResolvedBuffer = sharcResolvedBuffer;
 
-                // Use input textures
+                // Use input textures - DXR GBuffer
                 passData.ditheredTextureHandleSet.Use(builder);
-                builder.UseTexture(passData.gBuffer0);
-                builder.UseTexture(passData.gBuffer1);
-                builder.UseTexture(passData.gBuffer2);
+                builder.UseTexture(passData.materialData);
+                builder.UseTexture(passData.normalRoughness);
                 builder.UseTexture(passData.depthTexture);
 
                 // Use output textures

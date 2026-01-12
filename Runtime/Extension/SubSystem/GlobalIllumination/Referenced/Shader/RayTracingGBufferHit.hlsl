@@ -30,12 +30,17 @@
 //------------------------------------------------------------------------------
 struct GBufferPayload
 {
+    // DLSS-RR outputs
     float3 diffuseAlbedo;
     float3 specularAlbedo;
     float3 normalWS;
     float roughness;
     float hitDistance;
     uint hitType; // 0 = miss, 1 = hit
+
+    // Path Tracing outputs (raw material data)
+    float3 rawAlbedo;
+    float metallic;
 };
 
 //------------------------------------------------------------------------------
@@ -106,11 +111,15 @@ void GBufferClosestHit(inout GBufferPayload payload : SV_RayPayload, AttributeDa
     float3 diffuseAlbedo, specularAlbedo;
     ComputeDLSSRRAlbedos(albedo, metallic, dlssRoughness, NoV, diffuseAlbedo, specularAlbedo);
 
-    // Fill payload
+    // Fill payload - DLSS-RR outputs
     payload.diffuseAlbedo = diffuseAlbedo;
     payload.specularAlbedo = specularAlbedo;
     payload.normalWS = normalWS;
     payload.roughness = dlssRoughness;
+
+    // Fill payload - Path Tracing raw material data
+    payload.rawAlbedo = albedo;
+    payload.metallic = metallic;
 }
 
 //------------------------------------------------------------------------------

@@ -101,9 +101,9 @@
 // Shader Resources
 //--------------------------------------------------------------------------------------------------
 
-TEXTURE2D_X(_GBuffer0);
-TEXTURE2D_X(_GBuffer1);
-TEXTURE2D_X(_GBuffer2);
+// DXR GBuffer inputs (from RayTracingGBufferPass)
+TEXTURE2D_X(_DXRGBufferMaterialData);      // RGB = albedo, A = metallic
+TEXTURE2D_X(_DXRGBufferNormalRoughness);   // RGB = world normal, A = sqrt(alphaRoughness)
 
 // Output and History for temporal accumulation
 RW_TEXTURE2D(float4, _PathTracingOutput);
@@ -586,24 +586,23 @@ void RayGenPathTracing()
     float3 primaryHitPos = posInput.positionWS;
     float3 viewDirWS = GetWorldSpaceNormalizeViewDir(primaryHitPos);
 
-    // Load GBuffer data for primary hit
-    // GBuffer format (see ShaderLibrary/GBufferOutput.hlsl):
-    // gBuffer0: RGB = albedo, A = material flags
-    // gBuffer1: RGB = specular color, A = occlusion
-    // gBuffer2: RGB = packed normal, A = smoothness
-    float4 gbuffer0 = LOAD_TEXTURE2D_X(_GBuffer0, launchIndex);
-    float4 gbuffer1 = LOAD_TEXTURE2D_X(_GBuffer1, launchIndex);
-    float4 gbuffer2 = LOAD_TEXTURE2D_X(_GBuffer2, launchIndex);
+    // Load DXR GBuffer data for primary hit - MUCH SIMPLER than URP GBuffer!
+    // DXR GBuffer format:
+    // - MaterialData: RGB = raw albedo, A = metallic
+    // - NormalRoughness: RGB = world normal (already unpacked), A = sqrt(alphaRoughness)
+    float4 materialData = LOAD_TEXTURE2D_X(_DXRGBufferMaterialData, launchIndex);
+    float4 normalRoughness = LOAD_TEXTURE2D_X(_DXRGBufferNormalRoughness, launchIndex);
 
-    float3 primaryAlbedo = gbuffer0.rgb;
-    float primaryOcclusion = gbuffer1.a;  // Occlusion is in gBuffer1.a
-    float3 primaryNormal = normalize(UnpackGBufferNormal(gbuffer2.xyz));  // Use correct unpack function
+    // Direct extraction - no OctQuad decode or reflectivity conversion needed!
+    float3 primaryAlbedo = materialData.rgb;
+    float primaryMetallic = materialData.a;
+    float3 primaryNormal = normalRoughness.rgb;  // Already world-space, already normalized
+    float primaryOcclusion = 1.0;  // Occlusion not stored in DXR GBuffer, use default
 
-    // gBuffer1.r contains reflectivity in metallic workflow, convert to metallic
-    float reflectivity = gbuffer1.r;
-    float primaryMetallic = MetallicFromReflectivity(reflectivity);  // Convert reflectivity to metallic
-
-    float primarySmoothness = gbuffer2.a;
+    // Convert sqrt(alphaRoughness) back to smoothness
+    // sqrt(alphaRoughness) = perceptualRoughness (because alphaRoughness = perceptualRoughness²)
+    // smoothness = 1 - perceptualRoughness
+    float primarySmoothness = 1.0 - normalRoughness.a;
     float primaryPerceptualRoughness = PerceptualSmoothnessToPerceptualRoughness(primarySmoothness);
     float primaryRoughness = max(PerceptualRoughnessToRoughness(primaryPerceptualRoughness), MIN_ROUGHNESS);
 

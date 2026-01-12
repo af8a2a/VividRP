@@ -17,6 +17,7 @@ namespace UnityEngine.Rendering.Universal
         private RayTracingShader m_GBufferRayTracingShader;
 
         // Shader property IDs
+        private static readonly int s_GBufferMaterialDataId = Shader.PropertyToID("_GBufferMaterialData");
         private static readonly int s_GBufferDiffuseAlbedoId = Shader.PropertyToID("_GBufferDiffuseAlbedo");
         private static readonly int s_GBufferSpecularAlbedoId = Shader.PropertyToID("_GBufferSpecularAlbedo");
         private static readonly int s_GBufferNormalRoughnessId = Shader.PropertyToID("_GBufferNormalRoughness");
@@ -43,6 +44,9 @@ namespace UnityEngine.Rendering.Universal
         {
             internal RayTracingShader rayTracingShader;
             internal RayTracingAccelerationStructure rtas;
+            // Path Tracing output
+            internal TextureHandle materialData;
+            // DLSS-RR outputs
             internal TextureHandle diffuseAlbedo;
             internal TextureHandle specularAlbedo;
             internal TextureHandle normalRoughness;
@@ -61,8 +65,15 @@ namespace UnityEngine.Rendering.Universal
             var resourceData = frameData.Get<UniversalResourceData>();
             var cameraData = frameData.Get<UniversalCameraData>();
             var rtas = RayTracingSystem.instance.RequestAccelerationStructure(cameraData);
-            Render(renderGraph, cameraData, rtas, out var diffuseAlbedo, out var specularAlbedo, out var normalRoughness, out var hitDistance);
+            Render(renderGraph, cameraData, rtas,
+                out var materialData,
+                out var diffuseAlbedo,
+                out var specularAlbedo,
+                out var normalRoughness,
+                out var hitDistance);
 
+            // Export to resource data for use by Path Tracing and DLSS-RR
+            resourceData.materialData = materialData;
             resourceData.diffuseAlbedo = diffuseAlbedo;
             resourceData.specularAlbedo = specularAlbedo;
             resourceData.normalRoughness = normalRoughness;
@@ -76,6 +87,7 @@ namespace UnityEngine.Rendering.Universal
             RenderGraph renderGraph,
             UniversalCameraData cameraData,
             RayTracingAccelerationStructure rtas,
+            out TextureHandle materialData,
             out TextureHandle diffuseAlbedo,
             out TextureHandle specularAlbedo,
             out TextureHandle normalRoughness,
@@ -91,6 +103,14 @@ namespace UnityEngine.Rendering.Universal
             int height = cameraData.camera.pixelHeight;
 
             // Create texture descriptors
+            var materialDataDesc = new TextureDesc(width, height)
+            {
+                colorFormat = GraphicsFormat.R16G16B16A16_SFloat,
+                enableRandomWrite = true,
+                clearBuffer = true,
+                name = "_RTGBufferMaterialData"
+            };
+
             var albedoDesc = new TextureDesc(width, height)
             {
                 colorFormat = GraphicsFormat.R16G16B16A16_SFloat,
@@ -116,6 +136,7 @@ namespace UnityEngine.Rendering.Universal
             };
 
             // Create render targets
+            materialData = renderGraph.CreateTexture(materialDataDesc);
             diffuseAlbedo = renderGraph.CreateTexture(albedoDesc);
             albedoDesc.name = "_RTGBufferSpecularAlbedo";
             specularAlbedo = renderGraph.CreateTexture(albedoDesc);
@@ -127,6 +148,7 @@ namespace UnityEngine.Rendering.Universal
                 // Setup pass data
                 passData.rayTracingShader = m_GBufferRayTracingShader;
                 passData.rtas = rtas;
+                passData.materialData = materialData;
                 passData.diffuseAlbedo = diffuseAlbedo;
                 passData.specularAlbedo = specularAlbedo;
                 passData.normalRoughness = normalRoughness;
@@ -144,6 +166,7 @@ namespace UnityEngine.Rendering.Universal
                 passData.rayTracingCB = RayTracingSystem.instance.GetShaderVariablesRaytracingCB(cameraData);
 
                 // Declare texture usage
+                builder.UseTexture(materialData, AccessFlags.Write);
                 builder.UseTexture(diffuseAlbedo, AccessFlags.Write);
                 builder.UseTexture(specularAlbedo, AccessFlags.Write);
                 builder.UseTexture(normalRoughness, AccessFlags.Write);
@@ -168,6 +191,9 @@ namespace UnityEngine.Rendering.Universal
                     cmd.SetRayTracingVectorParam(data.rayTracingShader, s_ScreenSizeId, data.screenSize);
 
                     // Output UAVs - use RenderGraph handles
+                    // Path Tracing material data
+                    cmd.SetRayTracingTextureParam(data.rayTracingShader, s_GBufferMaterialDataId, data.materialData);
+                    // DLSS-RR outputs
                     cmd.SetRayTracingTextureParam(data.rayTracingShader, s_GBufferDiffuseAlbedoId, data.diffuseAlbedo);
                     cmd.SetRayTracingTextureParam(data.rayTracingShader, s_GBufferSpecularAlbedoId, data.specularAlbedo);
                     cmd.SetRayTracingTextureParam(data.rayTracingShader, s_GBufferNormalRoughnessId, data.normalRoughness);

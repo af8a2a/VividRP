@@ -29,13 +29,17 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/RayTracingGBufferOutput.hlsl"
 
 //------------------------------------------------------------------------------
-// Output UAVs - DLSS-RR GBuffer Format
+// Output UAVs - DXR GBuffer Format (Extended for Path Tracing + DLSS-RR)
 //------------------------------------------------------------------------------
 
-RWTexture2D<float4> _GBufferDiffuseAlbedo;      // RGB = diffuse albedo, A = unused
-RWTexture2D<float4> _GBufferSpecularAlbedo;    // RGB = specular albedo (EnvBRDF), A = unused
-RWTexture2D<float4> _GBufferNormalRoughness;   // RGB = world normal, A = sqrt(alphaRoughness)
-RWTexture2D<float>  _GBufferHitDistance;       // Hit distance for DLSS-RR
+// Path Tracing outputs
+RWTexture2D<float4> _GBufferMaterialData;      // RGB = raw albedo, A = metallic (for path tracing)
+
+// DLSS-RR outputs
+RWTexture2D<float4> _GBufferDiffuseAlbedo;     // RGB = diffuse albedo (albedo * (1-metallic)), A = unused
+RWTexture2D<float4> _GBufferSpecularAlbedo;   // RGB = specular albedo (EnvBRDF), A = unused
+RWTexture2D<float4> _GBufferNormalRoughness;  // RGB = world normal, A = sqrt(alphaRoughness)
+RWTexture2D<float>  _GBufferHitDistance;      // Hit distance for DLSS-RR
 
 //------------------------------------------------------------------------------
 // Camera Parameters
@@ -49,12 +53,17 @@ float3 _CameraPositionWS;
 
 struct GBufferPayload
 {
+    // DLSS-RR outputs
     float3 diffuseAlbedo;
     float3 specularAlbedo;
     float3 normalWS;
     float roughness;
     float hitDistance;
     uint hitType;  // 0 = miss, 1 = hit
+
+    // Path Tracing outputs (raw material data)
+    float3 rawAlbedo;
+    float metallic;
 };
 
 //------------------------------------------------------------------------------
@@ -67,11 +76,15 @@ void GBufferMiss(inout GBufferPayload payload : SV_RayPayload)
     payload.hitType = 0;
     payload.hitDistance = 65504.0;  // FP16 max for sky
 
-    // Default values for sky pixels
+    // Default values for sky pixels (DLSS-RR)
     payload.diffuseAlbedo = float3(0, 0, 0);
     payload.specularAlbedo = float3(0, 0, 0);
     payload.normalWS = float3(0, 0, 1);  // Default normal
     payload.roughness = 1.0;
+
+    // Default values for sky pixels (Path Tracing)
+    payload.rawAlbedo = float3(0, 0, 0);
+    payload.metallic = 0.0;
 }
 
 //------------------------------------------------------------------------------
@@ -107,6 +120,8 @@ void GBufferRayGeneration()
     payload.specularAlbedo = float3(0, 0, 0);
     payload.normalWS = float3(0, 0, 1);
     payload.roughness = 1.0;
+    payload.rawAlbedo = float3(0, 0, 0);
+    payload.metallic = 0.0;
 
     // Trace primary visibility ray
     TraceRay(_RaytracingAccelerationStructure,
@@ -118,7 +133,11 @@ void GBufferRayGeneration()
              ray,
              payload);
 
-    // Write outputs in DLSS-RR native format
+    // Write outputs
+    // Path Tracing raw material data
+    _GBufferMaterialData[dispatchIdx] = float4(payload.rawAlbedo, payload.metallic);
+
+    // DLSS-RR native format
     _GBufferDiffuseAlbedo[dispatchIdx] = float4(payload.diffuseAlbedo, 1.0);
     _GBufferSpecularAlbedo[dispatchIdx] = float4(payload.specularAlbedo, 1.0);
     _GBufferNormalRoughness[dispatchIdx] = float4(payload.normalWS, payload.roughness);

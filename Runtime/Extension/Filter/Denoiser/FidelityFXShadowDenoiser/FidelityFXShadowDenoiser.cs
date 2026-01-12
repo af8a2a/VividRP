@@ -425,13 +425,14 @@ namespace UnityEngine.Rendering.Universal
                 // data.previousMomentsTexture = previousMomentsTexture;
 
                 // Setup matrices
-                data.eye = cameraExt.camera.transform.position;
+                data.eye = cameraData.camera.transform.position;
                 data.firstFrame = firstFrame ? 1 : 0;
                 data.projectionInverse = cameraExt.gpuProjectionMatrix.inverse;
                 data.reprojectionMatrix = cameraExt.gpuProjectionMatrix * cameraExt.previousViewMatrix * cameraExt.gpuViewProjectionMatrix.inverse;
                 data.viewProjectionInverse = (cameraExt.gpuViewProjectionMatrix).inverse;
                 data.depthSimilaritySigma = 0.01f; // TODO: Make this configurable
 
+                
                 // Create transient textures
 
                 data.transientBuffer = builder.CreateTransientTexture(new TextureDesc(cameraData.scaledWidth, cameraData.scaledHeight)

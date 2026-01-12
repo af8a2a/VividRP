@@ -20,8 +20,8 @@ DirectLighting EvaluatePunctual(PositionInputs posInput, PreLightData preLightDa
             float4 cookieUvRect = GetLightCookieAtlasUVRect(gpuLight.cookieLightIndex);
             float4x4 worldToLight = GetLightCookieWorldToLightMatrix(gpuLight.cookieLightIndex);
             float2 cookieUv = float2(0, 0);
-            cookieUv = ComputeLightCookieUVSpot(worldToLight, positionWS.xyz, cookieUvRect);
-            cookieUv = ComputeLightCookieUVPoint(worldToLight, positionWS.xyz, cookieUvRect);
+            cookieUv = ComputeLightCookieUVSpot(worldToLight, gpuLight.positionWS.xyz, cookieUvRect);
+            cookieUv = ComputeLightCookieUVPoint(worldToLight, gpuLight.positionWS.xyz, cookieUvRect);
             half4 cookieColor = SampleAdditionalLightsCookieAtlasTexture(cookieUv);
             cookieColor = half4(IsAdditionalLightsCookieAtlasTextureRGBFormat()
                                     ? cookieColor.rgb

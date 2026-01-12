@@ -26,7 +26,7 @@
 #pragma multi_compile _ _SCREEN_SPACE_REFLECTION
 #pragma multi_compile _ _SCREEN_SPACE_OCCLUSION
 
-#pragma enable_d3d11_debug_symbols
+// #pragma enable_d3d11_debug_symbols
 
 //--------------------------------------------------------------------------------------------------
 // Included headers

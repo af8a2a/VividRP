@@ -158,6 +158,11 @@ namespace UnityEngine.Rendering.Universal
 
         private BufferedRTHandleSystem m_BufferedRTHandleSystem;
 
+        /// <summary>
+        /// Returns true if this system has been disposed and should not be used.
+        /// </summary>
+        public bool IsDisposed => m_BufferedRTHandleSystem == null;
+
         public Camera camera;
         public int historyFrameCount = 0;
 

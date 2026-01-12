@@ -16,7 +16,15 @@ namespace UnityEngine.Rendering.Universal
         private DenoiseSystem _denoiseSystem;
         private VividCameraExtension _cameraExtension;
 
-        public HistoryFrameRTSystem historyFrameRTSystem => _historyFrameRTSystem ??= HistoryFrameRTSystem.GetOrCreate(camera);
+        public HistoryFrameRTSystem historyFrameRTSystem
+        {
+            get
+            {
+                if (_historyFrameRTSystem == null || _historyFrameRTSystem.IsDisposed)
+                    _historyFrameRTSystem = HistoryFrameRTSystem.GetOrCreate(camera);
+                return _historyFrameRTSystem;
+            }
+        }
 
 
 

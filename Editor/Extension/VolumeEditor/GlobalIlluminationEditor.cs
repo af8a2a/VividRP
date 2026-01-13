@@ -470,7 +470,7 @@ namespace UnityEditor.Rendering.Universal
                 }
 #if DLSS_PLUGIN_INTEGRATE
                 // DLSS-RR mode settings
-                else if (denoiseMode == PathTracingDenoiseMode.DLSSRR)
+                else if (denoiseMode == PathTracingDenoiseMode.RayReconstruction)
                 {
                     EditorGUILayout.Space();
                     EditorGUILayout.LabelField(Styles.HeaderDLSSRR, EditorStyles.boldLabel);

@@ -94,8 +94,8 @@ namespace UnityEngine.Rendering.Universal
         class PassData
         {
             // DXR GBuffer Textures (replaced URP GBuffer)
-            internal TextureHandle materialData;      // RGB = albedo, A = metallic
-            internal TextureHandle normalRoughness;   // RGB = world normal, A = sqrt(alphaRoughness)
+            internal TextureHandle materialData; // RGB = albedo, A = metallic
+            internal TextureHandle normalRoughness; // RGB = world normal, A = sqrt(alphaRoughness)
             internal TextureHandle depthTexture;
             internal TextureHandle outputTexture;
             internal TextureHandle historyTexture;
@@ -218,7 +218,9 @@ namespace UnityEngine.Rendering.Universal
             internal TextureHandle colorInput;
             internal TextureHandle colorOutput;
             internal TextureHandle depth;
+
             internal TextureHandle motionVectors;
+
             // DXR GBuffer outputs (already in DLSS-RR native format)
             internal TextureHandle diffuseAlbedo;
             internal TextureHandle specularAlbedo;
@@ -1052,78 +1054,81 @@ namespace UnityEngine.Rendering.Universal
                     });
                 }
 
-                // Copy new accumulation count to history
-                using (var builder = renderGraph.AddRasterRenderPass<CopyToHistoryPassData>("Path Tracing - Copy AccumCount to History", out var passData))
+                if (giSettings.denoiseMode.value is not PathTracingDenoiseMode.RayReconstruction)
                 {
-                    passData.source = newAccumCountTexture;
-                    passData.destination = accumCountTexture;
-
-                    builder.UseTexture(passData.source);
-                    builder.SetRenderAttachment(passData.destination, 0, AccessFlags.Write);
-                    builder.AllowPassCulling(false);
-
-                    builder.SetRenderFunc<CopyToHistoryPassData>((data, context) =>
+                    // Copy new accumulation count to history
+                    using (var builder = renderGraph.AddRasterRenderPass<CopyToHistoryPassData>("Path Tracing - Copy AccumCount to History", out var passData))
                     {
-                        Blitter.BlitTexture(context.cmd, data.source, new Vector4(1, 1, 0, 0), 0, false);
-                    });
+                        passData.source = newAccumCountTexture;
+                        passData.destination = accumCountTexture;
+
+                        builder.UseTexture(passData.source);
+                        builder.SetRenderAttachment(passData.destination, 0, AccessFlags.Write);
+                        builder.AllowPassCulling(false);
+
+                        builder.SetRenderFunc<CopyToHistoryPassData>((data, context) =>
+                        {
+                            Blitter.BlitTexture(context.cmd, data.source, new Vector4(1, 1, 0, 0), 0, false);
+                        });
+                    }
                 }
-            }
 
-            // Copy output to history buffer for next frame's temporal accumulation
-            // Use reprojected output if reprojection was enabled
-            if (giSettings.UseTemporalAccumulation() && historyTexture.IsValid())
-            {
-                using (var builder = renderGraph.AddRasterRenderPass<CopyToHistoryPassData>("Path Tracing - Copy to History", out var passData))
+                // Copy output to history buffer for next frame's temporal accumulation
+                // Use reprojected output if reprojection was enabled
+                if (giSettings.UseTemporalAccumulation() && historyTexture.IsValid())
                 {
-                    passData.source = reprojectedRadiance;
-                    passData.destination = historyTexture;
-
-                    builder.UseTexture(passData.source);
-                    builder.SetRenderAttachment(passData.destination, 0, AccessFlags.Write);
-                    builder.AllowPassCulling(false);
-
-                    builder.SetRenderFunc<CopyToHistoryPassData>((data, context) =>
+                    using (var builder = renderGraph.AddRasterRenderPass<CopyToHistoryPassData>("Path Tracing - Copy to History", out var passData))
                     {
-                        Blitter.BlitTexture(context.cmd, data.source, new Vector4(1, 1, 0, 0), 0, false);
-                    });
+                        passData.source = reprojectedRadiance;
+                        passData.destination = historyTexture;
+
+                        builder.UseTexture(passData.source);
+                        builder.SetRenderAttachment(passData.destination, 0, AccessFlags.Write);
+                        builder.AllowPassCulling(false);
+
+                        builder.SetRenderFunc<CopyToHistoryPassData>((data, context) =>
+                        {
+                            Blitter.BlitTexture(context.cmd, data.source, new Vector4(1, 1, 0, 0), 0, false);
+                        });
+                    }
                 }
-            }
 
-            // Copy diffuse output to history buffer for NRD REBLUR
-            if (giSettings.UseTemporalAccumulation() && diffuseHistoryTexture.IsValid())
-            {
-                using (var builder = renderGraph.AddRasterRenderPass<CopyToHistoryPassData>("Path Tracing - Copy Diffuse to History", out var passData))
+                // Copy diffuse output to history buffer for NRD REBLUR
+                if (giSettings.UseTemporalAccumulation() && diffuseHistoryTexture.IsValid())
                 {
-                    passData.source = reprojectedDiffuse;
-                    passData.destination = diffuseHistoryTexture;
-
-                    builder.UseTexture(passData.source);
-                    builder.SetRenderAttachment(passData.destination, 0, AccessFlags.Write);
-                    builder.AllowPassCulling(false);
-
-                    builder.SetRenderFunc<CopyToHistoryPassData>((data, context) =>
+                    using (var builder = renderGraph.AddRasterRenderPass<CopyToHistoryPassData>("Path Tracing - Copy Diffuse to History", out var passData))
                     {
-                        Blitter.BlitTexture(context.cmd, data.source, new Vector4(1, 1, 0, 0), 0, false);
-                    });
+                        passData.source = reprojectedDiffuse;
+                        passData.destination = diffuseHistoryTexture;
+
+                        builder.UseTexture(passData.source);
+                        builder.SetRenderAttachment(passData.destination, 0, AccessFlags.Write);
+                        builder.AllowPassCulling(false);
+
+                        builder.SetRenderFunc<CopyToHistoryPassData>((data, context) =>
+                        {
+                            Blitter.BlitTexture(context.cmd, data.source, new Vector4(1, 1, 0, 0), 0, false);
+                        });
+                    }
                 }
-            }
 
-            // Copy specular output to history buffer for NRD REBLUR
-            if (giSettings.UseTemporalAccumulation() && specularHistoryTexture.IsValid())
-            {
-                using (var builder = renderGraph.AddRasterRenderPass<CopyToHistoryPassData>("Path Tracing - Copy Specular to History", out var passData))
+                // Copy specular output to history buffer for NRD REBLUR
+                if (giSettings.UseTemporalAccumulation() && specularHistoryTexture.IsValid())
                 {
-                    passData.source = reprojectedSpecular;
-                    passData.destination = specularHistoryTexture;
-
-                    builder.UseTexture(passData.source);
-                    builder.SetRenderAttachment(passData.destination, 0, AccessFlags.Write);
-                    builder.AllowPassCulling(false);
-
-                    builder.SetRenderFunc<CopyToHistoryPassData>((data, context) =>
+                    using (var builder = renderGraph.AddRasterRenderPass<CopyToHistoryPassData>("Path Tracing - Copy Specular to History", out var passData))
                     {
-                        Blitter.BlitTexture(context.cmd, data.source, new Vector4(1, 1, 0, 0), 0, false);
-                    });
+                        passData.source = reprojectedSpecular;
+                        passData.destination = specularHistoryTexture;
+
+                        builder.UseTexture(passData.source);
+                        builder.SetRenderAttachment(passData.destination, 0, AccessFlags.Write);
+                        builder.AllowPassCulling(false);
+
+                        builder.SetRenderFunc<CopyToHistoryPassData>((data, context) =>
+                        {
+                            Blitter.BlitTexture(context.cmd, data.source, new Vector4(1, 1, 0, 0), 0, false);
+                        });
+                    }
                 }
             }
 
@@ -1214,11 +1219,11 @@ namespace UnityEngine.Rendering.Universal
                 // Get DLSS quality from volume settings
                 DLSSQuality dlssQuality = giSettings.dlssRRQuality.value;
 
-                
+
                 // Initialize DLSS-RR context with volume settings
                 if (m_DLSSRRDenoiser.Initialize(
-                    inputWidth, inputHeight, outputWidth, outputHeight, dlssQuality,
-                    giSettings.dlssRRIsHDR.value, giSettings.dlssRRAutoExposure.value))
+                        inputWidth, inputHeight, outputWidth, outputHeight, dlssQuality,
+                        giSettings.dlssRRIsHDR.value, giSettings.dlssRRAutoExposure.value))
                 {
                     // Get jitter offset and camera matrices from camera extension
                     var cameraExt = cameraData.cameraExtension;

@@ -42,7 +42,7 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>NRD REBLUR - High quality spatio-temporal denoising with separate diffuse/specular</summary>
         NRDReblur = 2,
         /// <summary>DLSS Ray Reconstruction - NVIDIA's AI-based ray tracing denoiser with upscaling</summary>
-        DLSSRR = 3
+        RayReconstruction = 3
     }
 
     [Serializable]
@@ -688,7 +688,7 @@ namespace UnityEngine.Rendering.Universal
         /// </summary>
         public bool UseDLSSRRDenoising()
         {
-            return denoiseMode.value == PathTracingDenoiseMode.DLSSRR;
+            return denoiseMode.value == PathTracingDenoiseMode.RayReconstruction;
         }
 
         /// <summary>

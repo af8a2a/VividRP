@@ -88,6 +88,11 @@ bool CalculateDebugColorRenderingSettings(half4 color, float2 uv, inout half4 de
        case DEBUGFULLSCREENMODE_ADDITIONAL_LIGHTS_COOKIE_ATLAS :
        case DEBUGFULLSCREENMODE_REFLECTION_PROBE_ATLAS :
        case DEBUGFULLSCREENMODE_STP :
+       case DEBUGFULLSCREENMODE_DXRGBUFFER_MATERIAL_DATA :
+       case DEBUGFULLSCREENMODE_DXRGBUFFER_DIFFUSE_ALBEDO :
+       case DEBUGFULLSCREENMODE_DXRGBUFFER_SPECULAR_ALBEDO :
+       case DEBUGFULLSCREENMODE_DXRGBUFFER_NORMAL_ROUGHNESS :
+       case DEBUGFULLSCREENMODE_DXRGBUFFER_HIT_DISTANCE :
         {
             float2 uvOffset = half2(uv.x - _DebugTextureDisplayRect.x, uv.y - _DebugTextureDisplayRect.y);
 

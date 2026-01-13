@@ -178,6 +178,34 @@ namespace UnityEngine.Rendering.Universal
                                 BlitToDebugTexture(renderGraph, textureHandle, debugTexture);
                                 break;
                             }
+
+                            // DXR GBuffer Debug Views
+                            case DebugFullScreenMode.DXRGBufferMaterialData:
+                            {
+                                BlitToDebugTexture(renderGraph, resourceData.materialData, debugTexture, isSourceTextureColor: true);
+                                break;
+                            }
+                            case DebugFullScreenMode.DXRGBufferDiffuseAlbedo:
+                            {
+                                BlitToDebugTexture(renderGraph, resourceData.diffuseAlbedo, debugTexture, isSourceTextureColor: true);
+                                break;
+                            }
+                            case DebugFullScreenMode.DXRGBufferSpecularAlbedo:
+                            {
+                                BlitToDebugTexture(renderGraph, resourceData.specularAlbedo, debugTexture, isSourceTextureColor: true);
+                                break;
+                            }
+                            case DebugFullScreenMode.DXRGBufferNormalRoughness:
+                            {
+                                BlitToDebugTexture(renderGraph, resourceData.normalRoughness, debugTexture, isSourceTextureColor: true);
+                                break;
+                            }
+                            case DebugFullScreenMode.DXRGBufferHitDistance:
+                            {
+                                BlitToDebugTexture(renderGraph, resourceData.hitDistance, debugTexture);
+                                break;
+                            }
+
                             default:
                             {
                                 break;

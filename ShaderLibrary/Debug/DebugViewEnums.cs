@@ -137,6 +137,36 @@ namespace UnityEngine.Rendering.Universal
         /// Displays the active STP debug view.
         /// </summary>
         STP,
+
+        /// <summary>
+        /// Display DXR GBuffer Material Data (RGB=albedo, A=metallic).
+        /// </summary>
+        [InspectorName("DXR GBuffer - Material Data")]
+        DXRGBufferMaterialData,
+
+        /// <summary>
+        /// Display DXR GBuffer Diffuse Albedo (for DLSS-RR).
+        /// </summary>
+        [InspectorName("DXR GBuffer - Diffuse Albedo")]
+        DXRGBufferDiffuseAlbedo,
+
+        /// <summary>
+        /// Display DXR GBuffer Specular Albedo (for DLSS-RR).
+        /// </summary>
+        [InspectorName("DXR GBuffer - Specular Albedo")]
+        DXRGBufferSpecularAlbedo,
+
+        /// <summary>
+        /// Display DXR GBuffer Normal + Roughness (RGB=world normal, A=roughness).
+        /// </summary>
+        [InspectorName("DXR GBuffer - Normal + Roughness")]
+        DXRGBufferNormalRoughness,
+
+        /// <summary>
+        /// Display DXR GBuffer Hit Distance.
+        /// </summary>
+        [InspectorName("DXR GBuffer - Hit Distance")]
+        DXRGBufferHitDistance,
     }
 
     /// <summary>

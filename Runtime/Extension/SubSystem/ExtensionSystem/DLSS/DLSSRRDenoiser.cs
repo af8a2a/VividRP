@@ -121,7 +121,7 @@ namespace UnityEngine.Rendering.Universal
         /// <summary>
         /// Create a new DLSS-RR denoiser instance
         /// </summary>
-        public DLSSRRDenoiser(uint viewId)
+        public DLSSRRDenoiser()
         {
             m_Initialized = false;
             LoadResourcePrepShader();

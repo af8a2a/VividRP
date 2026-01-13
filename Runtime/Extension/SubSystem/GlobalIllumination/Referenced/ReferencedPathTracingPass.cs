@@ -219,19 +219,17 @@ namespace UnityEngine.Rendering.Universal
             internal TextureHandle colorOutput;
             internal TextureHandle depth;
             internal TextureHandle motionVectors;
+            // DXR GBuffer outputs (already in DLSS-RR native format)
             internal TextureHandle diffuseAlbedo;
             internal TextureHandle specularAlbedo;
             internal TextureHandle normalRoughness;
             internal TextureHandle diffuseHitDistance;
             internal TextureHandle specularHitDistance;
-            internal TextureHandle diffuseRayDirection;
-            internal TextureHandle specularRayDirection;
 
             // Per-frame parameters
             internal Vector2 jitterOffset;
             internal Matrix4x4 worldToView;
             internal Matrix4x4 viewToClip;
-            internal Vector3 cameraPosition;
             internal DLSSRRDenoiser.Settings settings;
         }
 #endif
@@ -1194,150 +1192,143 @@ namespace UnityEngine.Rendering.Universal
                 // Use composited (re-modulated) output
                 denoisedOutput = denoiseResult.compositedOutput;
             }
-// #if DLSS_PLUGIN_INTEGRATE
-//             // DLSS-RR Denoising Pass - alternative to NRD when DLSS-RR mode is selected
-//             // DLSS-RR uses AI-based denoising with integrated upscaling
-//             else if (giSettings.UseDLSSRRDenoising() &&
-//                      ExtensionSystem.SupportedExtension.Contains(HardwareExtension.DLSS) &&
-//                      DLSSExtension.Instance?.IsRRSupported == true)
-//             {
-//                 // Create or get DLSS-RR denoiser instance (camera-relative)
-//                 uint viewId = (uint)cameraData.camera.GetInstanceID();
-//
-//                 if (m_DLSSRRDenoiser == null || m_DLSSRRDenoiser != viewId)
-//                 {
-//                     m_DLSSRRDenoiser?.Dispose();
-//                     m_DLSSRRDenoiser = new DLSSRRDenoiser(viewId);
-//                 }
-//
-//                 // Get render resolution
-//                 int inputWidth = cameraData.cameraTargetDescriptor.width;
-//                 int inputHeight = cameraData.cameraTargetDescriptor.height;
-//                 int outputWidth = inputWidth; // For now, no upscaling
-//                 int outputHeight = inputHeight;
-//
-//                 // Get DLSS quality from volume settings
-//                 DLSSQuality dlssQuality = giSettings.dlssRRQuality.value;
-//
-//                 // Initialize DLSS-RR context with volume settings
-//                 if (m_DLSSRRDenoiser.Initialize(
-//                     inputWidth, inputHeight, outputWidth, outputHeight, dlssQuality,
-//                     giSettings.dlssRRIsHDR.value, giSettings.dlssRRAutoExposure.value))
-//                 {
-//                     // Get jitter offset and camera matrices from camera extension
-//                     var cameraExt = cameraData.cameraExtension;
-//                     Vector2 jitterOffset = cameraExt.jitter;
-//                     Matrix4x4 worldToView = cameraData.GetViewMatrix();
-//                     Matrix4x4 viewToClip = cameraExt.gpuProjectionMatrix;
-//
-//                     // Create DLSS-RR output texture (at output resolution)
-//                     var dlssOutputDesc = new TextureDesc(outputWidth, outputHeight)
-//                     {
-//                         enableRandomWrite = true,
-//                         format = GraphicsFormat.R16G16B16A16_SFloat,
-//                         name = "DLSS_RR_Output"
-//                     };
-//                     var dlssOutputTexture = renderGraph.CreateTexture(dlssOutputDesc);
-//
-//                     // DLSS-RR Unsafe Pass - requires native texture access for DLSS plugin
-//                     using (var builder = renderGraph.AddUnsafePass<DLSSRRPassData>("DLSS-RR Denoise", out var passData))
-//                     {
-//                         passData.denoiser = m_DLSSRRDenoiser;
-//
-//                         // TextureHandles for RenderGraph resource tracking
-//                         passData.colorInput = reprojectedRadiance; // Use reprojected output as color input
-//                         passData.colorOutput = dlssOutputTexture;
-//                         passData.depth = resourceData.cameraDepthTexture;
-//                         passData.motionVectors = resourceData.motionVectorColor;
-//                         passData.diffuseAlbedo = resourceData.gBuffer[0];
-//                         passData.specularAlbedo = resourceData.gBuffer[1]; // GBuffer1 for specular/metallic
-//                         passData.normalRoughness = resourceData.gBuffer[2];
-//                         passData.diffuseHitDistance = reprojectedDiffuse; // Diffuse radiance with hit distance in alpha
-//                         passData.specularHitDistance = reprojectedSpecular; // Specular radiance with hit distance in alpha
-//                         // Ray directions - not currently output by path tracer, pass null handles
-//                         passData.diffuseRayDirection = TextureHandle.nullHandle;
-//                         passData.specularRayDirection = TextureHandle.nullHandle;
-//
-//                         // Per-frame parameters
-//                         passData.jitterOffset = jitterOffset;
-//                         passData.worldToView = worldToView;
-//                         passData.viewToClip = viewToClip;
-//                         passData.cameraPosition = cameraData.camera.transform.position;
-//                         passData.settings = new DLSSRRDenoiser.Settings
-//                         {
-//                             quality = dlssQuality,
-//                             resetHistory = m_FrameIndex == 0 || giSettings.dlssRRResetHistory.value,
-//                             preExposure = giSettings.dlssRRPreExposure.value,
-//                             exposureScale = giSettings.dlssRRExposureScale.value,
-//                             frameTimeDeltaMs = Time.deltaTime * 1000.0f,
-//                             hitDistanceScale = giSettings.dlssRRHitDistanceScale.value,
-//                             sharpness = giSettings.dlssRRSharpness.value,
-//                             autoExposure = giSettings.dlssRRAutoExposure.value,
-//                             isHDR = giSettings.dlssRRIsHDR.value
-//                         };
-//
-//                         // Declare texture usage for RenderGraph
-//                         builder.UseTexture(passData.colorInput, AccessFlags.Read);
-//                         builder.UseTexture(passData.colorOutput, AccessFlags.Write);
-//                         builder.UseTexture(passData.depth, AccessFlags.Read);
-//                         builder.UseTexture(passData.motionVectors, AccessFlags.Read);
-//                         builder.UseTexture(passData.diffuseAlbedo, AccessFlags.Read);
-//                         builder.UseTexture(passData.specularAlbedo, AccessFlags.Read);
-//                         builder.UseTexture(passData.normalRoughness, AccessFlags.Read);
-//                         builder.UseTexture(passData.diffuseHitDistance, AccessFlags.Read);
-//                         builder.UseTexture(passData.specularHitDistance, AccessFlags.Read);
-//
-//                         builder.AllowPassCulling(false);
-//
-//                         builder.SetRenderFunc<DLSSRRPassData>((data, context) =>
-//                         {
-//                             var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
-//
-//                             // Get RenderTextures from passData TextureHandles
-//                             // Note: For UnsafePass, we need to get RenderTexture from TextureHandle
-//                             // TextureHandle can be implicitly converted to RenderTexture for this purpose
-//                             RenderTexture colorInputRT = data.colorInput;
-//                             RenderTexture depthRT = data.depth;
-//                             RenderTexture motionVectorsRT = data.motionVectors;
-//                             RenderTexture diffuseAlbedoRT = data.diffuseAlbedo;
-//                             RenderTexture gbuffer1RT = data.specularAlbedo;
-//                             RenderTexture normalRoughnessRT = data.normalRoughness;
-//                             RenderTexture diffuseRadianceRT = data.diffuseHitDistance;
-//                             RenderTexture specularRadianceRT = data.specularHitDistance;
-//                             RenderTexture colorOutputRT = data.colorOutput;
-//                             // Ray directions - null if not provided
-//                             RenderTexture diffuseRayDirRT = data.diffuseRayDirection.IsValid() ? (RenderTexture)data.diffuseRayDirection : null;
-//                             RenderTexture specularRayDirRT = data.specularRayDirection.IsValid() ? (RenderTexture)data.specularRayDirection : null;
-//
-//                             // Execute DLSS-RR with resource preparation
-//                             // The denoiser will extract hit distances, decode normals, and generate specular albedo internally
-//                             data.denoiser.ExecuteWithRenderTextures(
-//                                 cmd,
-//                                 colorInputRT,
-//                                 colorOutputRT,  // Output texture for RenderGraph tracking
-//                                 depthRT,
-//                                 motionVectorsRT,
-//                                 diffuseAlbedoRT,
-//                                 gbuffer1RT,
-//                                 normalRoughnessRT,
-//                                 diffuseRadianceRT,
-//                                 specularRadianceRT,
-//                                 diffuseRayDirRT,
-//                                 specularRayDirRT,
-//                                 data.jitterOffset,
-//                                 data.worldToView,
-//                                 data.viewToClip,
-//                                 data.cameraPosition,
-//                                 data.settings
-//                             );
-//                         });
-//                     }
-//
-//                     // Use DLSS-RR output as denoised result
-//                     denoisedOutput = dlssOutputTexture;
-//                 }
-//             }
-// #endif
+#if DLSS_PLUGIN_INTEGRATE
+            // DLSS-RR Denoising Pass - alternative to NRD when DLSS-RR mode is selected
+            // DLSS-RR uses AI-based denoising with integrated upscaling
+            else if (giSettings.UseDLSSRRDenoising() &&
+                     ExtensionSystem.SupportedExtension.Contains(HardwareExtension.DLSS) &&
+                     DLSSExtension.Instance?.IsRRSupported == true)
+            {
+                // Create DLSS-RR denoiser instance if needed
+                if (m_DLSSRRDenoiser == null)
+                {
+                    m_DLSSRRDenoiser = new DLSSRRDenoiser();
+                }
+
+                // Get render resolution
+                int inputWidth = cameraData.cameraTargetDescriptor.width;
+                int inputHeight = cameraData.cameraTargetDescriptor.height;
+                int outputWidth = inputWidth; // For now, no upscaling
+                int outputHeight = inputHeight;
+
+                // Get DLSS quality from volume settings
+                DLSSQuality dlssQuality = giSettings.dlssRRQuality.value;
+
+                
+                // Initialize DLSS-RR context with volume settings
+                if (m_DLSSRRDenoiser.Initialize(
+                    inputWidth, inputHeight, outputWidth, outputHeight, dlssQuality,
+                    giSettings.dlssRRIsHDR.value, giSettings.dlssRRAutoExposure.value))
+                {
+                    // Get jitter offset and camera matrices from camera extension
+                    var cameraExt = cameraData.cameraExtension;
+                    Vector2 jitterOffset = cameraExt.jitter;
+                    Matrix4x4 worldToView = cameraData.GetViewMatrix();
+                    Matrix4x4 viewToClip = cameraExt.gpuProjectionMatrix;
+
+                    // Create DLSS-RR output texture (at output resolution)
+                    var dlssOutputDesc = new TextureDesc(outputWidth, outputHeight)
+                    {
+                        enableRandomWrite = true,
+                        format = GraphicsFormat.R16G16B16A16_SFloat,
+                        name = "DLSS_RR_Output"
+                    };
+                    var dlssOutputTexture = renderGraph.CreateTexture(dlssOutputDesc);
+
+                    // DLSS-RR Unsafe Pass - requires native texture access for DLSS plugin
+                    using (var builder = renderGraph.AddUnsafePass<DLSSRRPassData>("DLSS-RR Denoise", out var passData))
+                    {
+                        passData.denoiser = m_DLSSRRDenoiser;
+
+                        // TextureHandles for RenderGraph resource tracking
+                        passData.colorInput = reprojectedRadiance; // Use reprojected output as color input
+                        passData.colorOutput = dlssOutputTexture;
+                        passData.depth = resourceData.cameraDepthTexture;
+                        passData.motionVectors = resourceData.motionVectorColor;
+                        // Use DXR GBuffer outputs - already in DLSS-RR native format!
+                        passData.diffuseAlbedo = resourceData.diffuseAlbedo;
+                        passData.specularAlbedo = resourceData.specularAlbedo;
+                        passData.normalRoughness = resourceData.normalRoughness;
+                        passData.diffuseHitDistance = reprojectedDiffuse; // Diffuse radiance with hit distance in alpha
+                        passData.specularHitDistance = reprojectedSpecular; // Specular radiance with hit distance in alpha
+
+                        // Per-frame parameters
+                        passData.jitterOffset = jitterOffset;
+                        passData.worldToView = worldToView;
+                        passData.viewToClip = viewToClip;
+                        passData.settings = new DLSSRRDenoiser.Settings
+                        {
+                            quality = dlssQuality,
+                            resetHistory = m_FrameIndex == 0 || giSettings.dlssRRResetHistory.value,
+                            preExposure = giSettings.dlssRRPreExposure.value,
+                            exposureScale = giSettings.dlssRRExposureScale.value,
+                            frameTimeDeltaMs = Time.deltaTime * 1000.0f,
+                            hitDistanceScale = giSettings.dlssRRHitDistanceScale.value,
+                            sharpness = giSettings.dlssRRSharpness.value,
+                            autoExposure = giSettings.dlssRRAutoExposure.value,
+                            isHDR = giSettings.dlssRRIsHDR.value
+                        };
+
+                        // Declare texture usage for RenderGraph
+                        builder.UseTexture(passData.colorInput, AccessFlags.Read);
+                        builder.UseTexture(passData.colorOutput, AccessFlags.Write);
+                        builder.UseTexture(passData.depth, AccessFlags.Read);
+                        builder.UseTexture(passData.motionVectors, AccessFlags.Read);
+                        builder.UseTexture(passData.diffuseAlbedo, AccessFlags.Read);
+                        builder.UseTexture(passData.specularAlbedo, AccessFlags.Read);
+                        builder.UseTexture(passData.normalRoughness, AccessFlags.Read);
+                        builder.UseTexture(passData.diffuseHitDistance, AccessFlags.Read);
+                        builder.UseTexture(passData.specularHitDistance, AccessFlags.Read);
+
+                        builder.AllowPassCulling(false);
+
+                        builder.SetRenderFunc<DLSSRRPassData>((data, context) =>
+                        {
+                            var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
+
+                            // Get RenderTextures from passData TextureHandles
+                            // Note: For UnsafePass, we need to get RenderTexture from TextureHandle
+                            // TextureHandle can be implicitly converted to RenderTexture for this purpose
+                            RenderTexture colorInputRT = data.colorInput;
+                            RenderTexture depthRT = data.depth;
+                            RenderTexture motionVectorsRT = data.motionVectors;
+                            // DXR GBuffer outputs - already in DLSS-RR native format!
+                            RenderTexture diffuseAlbedoRT = data.diffuseAlbedo;
+                            RenderTexture specularAlbedoRT = data.specularAlbedo;
+                            RenderTexture normalRoughnessRT = data.normalRoughness;
+                            RenderTexture diffuseHitDistRT = data.diffuseHitDistance;
+                            RenderTexture specularHitDistRT = data.specularHitDistance;
+                            RenderTexture colorOutputRT = data.colorOutput;
+
+                            // Execute DLSS-RR with pre-prepared inputs (skip resource prep)
+                            // DXR GBuffer already outputs DLSS-RR native format:
+                            // - DiffuseAlbedo: albedo * (1-metallic)
+                            // - SpecularAlbedo: EnvBRDFApprox2(F0, roughness, NoV)
+                            // - NormalRoughness: world normal + sqrt(alphaRoughness)
+                            data.denoiser.ExecuteWithPreparedInputs(
+                                cmd,
+                                colorInputRT,
+                                colorOutputRT,
+                                depthRT,
+                                motionVectorsRT,
+                                diffuseAlbedoRT,
+                                specularAlbedoRT,
+                                normalRoughnessRT,
+                                diffuseHitDistRT,
+                                specularHitDistRT,
+                                data.jitterOffset,
+                                data.worldToView,
+                                data.viewToClip,
+                                data.settings
+                            );
+                        });
+                    }
+
+                    // Use DLSS-RR output as denoised result
+                    denoisedOutput = dlssOutputTexture;
+                }
+            }
+#endif
 
             // Debug visualization: Blit path tracing output directly to screen
             // This is useful for viewing the raw path tracing result before full integration

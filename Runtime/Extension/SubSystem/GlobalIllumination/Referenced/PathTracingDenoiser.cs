@@ -139,6 +139,7 @@ namespace UnityEngine.Rendering.Universal
                 NRDInitlizer.NRD_ReleaseContext(m_NRDContext);
                 m_NRDContext = IntPtr.Zero;
             }
+
             m_Initialized = false;
         }
 
@@ -344,7 +345,7 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
 
-            #region Pass Data
+        #region Pass Data
 
         class DiffuseDenoisePassData
         {
@@ -484,8 +485,8 @@ namespace UnityEngine.Rendering.Universal
             internal TextureHandle TempDiffTexture2;
             internal TextureHandle TempSpecTexture1;
             internal TextureHandle TempSpecTexture2;
-            internal TextureHandle TempDataTexture;      // DATA1: RG8_UNORM
-            internal TextureHandle TempData2Texture;     // DATA2: R32_UINT
+            internal TextureHandle TempDataTexture; // DATA1: RG8_UNORM
+            internal TextureHandle TempData2Texture; // DATA2: R32_UINT
             internal TextureHandle InternalDataTexture;
 
             // Input/Output
@@ -864,7 +865,8 @@ namespace UnityEngine.Rendering.Universal
                 cmd.SetComputeTextureParam(cs, kernel, gHistory_SpecFast, data.PrevSpecularFastTexture);
                 // SpecHitDistForTracking inputs (DiffuseSpecular variant)
                 cmd.SetComputeTextureParam(cs, kernel, gPrev_SpecHitDistForTracking, data.PrevSpecHitDistForTrackingTexture);
-                cmd.SetComputeTextureParam(cs, kernel, gIn_SpecHitDistForTracking, data.usePrePass ? data.TransientSpecHitDistForTrackingTexture : data.DummyTexture);
+                cmd.SetComputeTextureParam(cs, kernel, gIn_SpecHitDistForTracking,
+                    data.usePrePass ? data.TransientSpecHitDistForTrackingTexture : data.DummyTexture);
 
                 // Outputs
                 cmd.SetComputeTextureParam(cs, kernel, gOut_Data1, data.TempDataTexture);

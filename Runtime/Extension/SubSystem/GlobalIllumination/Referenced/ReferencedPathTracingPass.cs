@@ -1263,7 +1263,6 @@ namespace UnityEngine.Rendering.Universal
                             preExposure = giSettings.dlssRRPreExposure.value,
                             exposureScale = giSettings.dlssRRExposureScale.value,
                             frameTimeDeltaMs = Time.deltaTime * 1000.0f,
-                            hitDistanceScale = giSettings.dlssRRHitDistanceScale.value,
                             sharpness = giSettings.dlssRRSharpness.value,
                             autoExposure = giSettings.dlssRRAutoExposure.value,
                             isHDR = giSettings.dlssRRIsHDR.value
@@ -1287,25 +1286,19 @@ namespace UnityEngine.Rendering.Universal
                             var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
 
                             // Get RenderTextures from passData TextureHandles
-                            // Note: For UnsafePass, we need to get RenderTexture from TextureHandle
-                            // TextureHandle can be implicitly converted to RenderTexture for this purpose
                             RenderTexture colorInputRT = data.colorInput;
+                            RenderTexture colorOutputRT = data.colorOutput;
                             RenderTexture depthRT = data.depth;
                             RenderTexture motionVectorsRT = data.motionVectors;
-                            // DXR GBuffer outputs - already in DLSS-RR native format!
+                            // DXR GBuffer outputs - already in DLSS-RR native format
                             RenderTexture diffuseAlbedoRT = data.diffuseAlbedo;
                             RenderTexture specularAlbedoRT = data.specularAlbedo;
                             RenderTexture normalRoughnessRT = data.normalRoughness;
                             RenderTexture diffuseHitDistRT = data.diffuseHitDistance;
                             RenderTexture specularHitDistRT = data.specularHitDistance;
-                            RenderTexture colorOutputRT = data.colorOutput;
 
-                            // Execute DLSS-RR with pre-prepared inputs (skip resource prep)
-                            // DXR GBuffer already outputs DLSS-RR native format:
-                            // - DiffuseAlbedo: albedo * (1-metallic)
-                            // - SpecularAlbedo: EnvBRDFApprox2(F0, roughness, NoV)
-                            // - NormalRoughness: world normal + sqrt(alphaRoughness)
-                            data.denoiser.ExecuteWithPreparedInputs(
+                            // Execute DLSS-RR denoising
+                            data.denoiser.Execute(
                                 cmd,
                                 colorInputRT,
                                 colorOutputRT,

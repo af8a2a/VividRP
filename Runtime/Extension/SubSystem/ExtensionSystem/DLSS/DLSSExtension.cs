@@ -141,7 +141,8 @@ namespace UnityEngine.Rendering.Universal
         private const string DLL_NAME = "UnityDLSS";
         private const CallingConvention CALLING_CONVENTION = CallingConvention.Cdecl;
 
-        public const int DLSS_INVALID_FEATURE_HANDLE = 0;
+        
+        public const int DLSS_INVALID_FEATURE_HANDLE = -1;
 
         // Event IDs for native plugin
         private const int EVENT_ID_CREATE_FEATURE = 0;
@@ -212,23 +213,24 @@ namespace UnityEngine.Rendering.Universal
 
         // RR-specific parameters
         public const string NVSDK_NGX_Parameter_DLSS_Denoise_Mode = "DLSS.Denoise.Mode";
-        public const string NVSDK_NGX_Parameter_DLSS_Depth_Type = "DLSS.Depth.Type";
+        public const string NVSDK_NGX_Parameter_Use_HW_Depth = "DLSS.Use.HW.Depth";
         public const string NVSDK_NGX_Parameter_DLSS_Roughness_Mode = "DLSS.Roughness.Mode";
 
         // GBuffer parameters
-        public const string NVSDK_NGX_Parameter_DiffuseAlbedo = "DiffuseAlbedo";
-        public const string NVSDK_NGX_Parameter_SpecularAlbedo = "SpecularAlbedo";
-        public const string NVSDK_NGX_Parameter_Normals = "Normals";
-        public const string NVSDK_NGX_Parameter_Roughness = "Roughness";
-        public const string NVSDK_NGX_Parameter_Emissive = "Emissive";
+        public const string NVSDK_NGX_Parameter_DiffuseAlbedo = "DLSS.Input.DiffuseAlbedo";
+        public const string NVSDK_NGX_Parameter_SpecularAlbedo = "DLSS.Input.SpecularAlbedo";
+        public const string NVSDK_NGX_Parameter_Normals = "GBuffer.Normals";
+        public const string NVSDK_NGX_Parameter_Roughness = "GBuffer.Roughness";
+        public const string NVSDK_NGX_Parameter_Emissive = "GBuffer.Emissive";
 
+        
         // Ray data parameters
-        public const string NVSDK_NGX_Parameter_DiffuseRayDirection = "DiffuseRayDirection";
-        public const string NVSDK_NGX_Parameter_DiffuseHitDistance = "DiffuseHitDistance";
-        public const string NVSDK_NGX_Parameter_SpecularRayDirection = "SpecularRayDirection";
-        public const string NVSDK_NGX_Parameter_SpecularHitDistance = "SpecularHitDistance";
-        public const string NVSDK_NGX_Parameter_DiffuseRayDirectionHitDistance = "DiffuseRayDirectionHitDistance";
-        public const string NVSDK_NGX_Parameter_SpecularRayDirectionHitDistance = "SpecularRayDirectionHitDistance";
+        public const string NVSDK_NGX_Parameter_DiffuseRayDirection = "DLSSD.DiffuseRayDirection";
+        public const string NVSDK_NGX_Parameter_DiffuseHitDistance = "DLSSD.DiffuseHitDistance";
+        public const string NVSDK_NGX_Parameter_SpecularRayDirection = "DLSSD.SpecularRayDirection";
+        public const string NVSDK_NGX_Parameter_SpecularHitDistance = "DLSSD.SpecularHitDistance";
+        public const string NVSDK_NGX_Parameter_DiffuseRayDirectionHitDistance = "DLSSD.DiffuseRayDirectionHitDistance";
+        public const string NVSDK_NGX_Parameter_SpecularRayDirectionHitDistance = "DLSSD.SpecularRayDirectionHitDistance";
 
         // Matrix parameters
         public const string NVSDK_NGX_Parameter_WorldToViewMatrix = "WorldToViewMatrix";

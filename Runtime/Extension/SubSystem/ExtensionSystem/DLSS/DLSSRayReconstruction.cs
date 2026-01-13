@@ -111,7 +111,7 @@ namespace UnityEngine.Rendering.Universal
 
         private DenoiseMode m_denoiseMode = DenoiseMode.DLUnified;
         private DepthType m_depthType = DepthType.Hardware;
-        private RoughnessMode m_roughnessMode = RoughnessMode.Unpacked;
+        private RoughnessMode m_roughnessMode = RoughnessMode.PackedInNormalsW;
 
         /// <summary>
         /// Create a new DLSS-RR instance.
@@ -124,7 +124,7 @@ namespace UnityEngine.Rendering.Universal
             NVSDK_NGX_DLSS_Feature_Flags featureFlags = NVSDK_NGX_DLSS_Feature_Flags.None,
             NVSDK_NGX_PerfQuality_Value qualityValue = NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_Balanced,
             DepthType depthType = DepthType.Hardware,
-            RoughnessMode roughnessMode = RoughnessMode.Unpacked)
+            RoughnessMode roughnessMode = RoughnessMode.PackedInNormalsW)
         {
             m_featureFlags = featureFlags;
             m_qualityValue = qualityValue;
@@ -328,8 +328,8 @@ namespace UnityEngine.Rendering.Universal
 
             // RR-specific creation parameters
             ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Denoise_Mode, (int)m_denoiseMode);
-            ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Depth_Type, (int)m_depthType);
-            ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Roughness_Mode, (int)m_roughnessMode);
+            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Use_HW_Depth, m_depthType is DepthType.Hardware ? 1u : 0);
+            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Roughness_Mode, (uint)m_roughnessMode);
 
             // Create feature
             m_dlssHandle = ext.CreateFeature(cmd, NVSDK_NGX_Feature.NVSDK_NGX_Feature_RayReconstruction, m_dlssParameters);
@@ -377,9 +377,14 @@ namespace UnityEngine.Rendering.Universal
             ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_SpecularAlbedo, gbuffer.SpecularAlbedo);
             ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Normals, gbuffer.Normals);
 
-            if (gbuffer.Roughness != null)
+            if (m_roughnessMode is RoughnessMode.Unpacked)
             {
                 ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Roughness, gbuffer.Roughness);
+            }
+            else
+            {
+                ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Roughness, gbuffer.Normals);
+
             }
             if (gbuffer.Emissive != null)
             {
@@ -488,6 +493,7 @@ namespace UnityEngine.Rendering.Universal
 
         ~DLSSRayReconstruction()
         {
+            
             Dispose(false);
         }
 #else

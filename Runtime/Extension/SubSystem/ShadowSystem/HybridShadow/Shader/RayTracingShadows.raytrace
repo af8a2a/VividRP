@@ -9,7 +9,7 @@
  *  1. max_recursion_depth must positive > 0
  *  2. If TraceRay() inside a closest hit shader, must > 1
  */
-#pragma max_recursion_depth 2
+#pragma max_recursion_depth 1
 #pragma multi_compile _ _GBUFFER_NORMALS_OCT
 
 

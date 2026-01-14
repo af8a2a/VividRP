@@ -5,6 +5,14 @@
 // Uses solid angle sampling for physically correct light integration
 // Requires: BSDF.hlsl (F_Schlick) and BRDF.hlsl (D_GGX, V_SmithJointGGX) to be included before this file
 
+// Shared constants with path tracer (use existing defines if available)
+#ifndef MIN_ROUGHNESS
+#define MIN_ROUGHNESS 0.04
+#endif
+#ifndef MAX_RADIANCE
+#define MAX_RADIANCE 10.0
+#endif
+
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/BSDF.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/BRDF.hlsl"
@@ -189,11 +197,11 @@ float3 EvaluateRectangleLightDirect(
     float LdotH = saturate(dot(lightDir, H));
 
     float3 F = F_Schlick(F0, LdotH);
-    float clampedRoughness = max(roughness, 0.04);  // MIN_ROUGHNESS
+    float clampedRoughness = max(roughness, MIN_ROUGHNESS);
     float D = D_GGX(NdotH, clampedRoughness);
     float G = V_SmithJointGGX(NdotL, NdotV, clampedRoughness);
 
-    float3 specular = min(F * D * G, 10.0);  // MAX_RADIANCE
+    float3 specular = min(F * D * G, MAX_RADIANCE);
     float3 diffuse = (1.0 - F) * (1.0 - metallic) * albedo / PI;
     float3 brdf = diffuse + specular;
 
@@ -236,6 +244,100 @@ float GetRectangleLightImportance(
 
     // Combined importance
     return luminance * solidAngle * NdotL * lightCos;
+}
+
+// ============================================================================
+// MIS (Multiple Importance Sampling) Utilities
+// ============================================================================
+
+// Power heuristic for MIS weight calculation (beta = 2)
+float MISWeightPowerHeuristic(float pdf1, float pdf2)
+{
+    float pdf1Sq = pdf1 * pdf1;
+    float pdf2Sq = pdf2 * pdf2;
+    return pdf1Sq / max(pdf1Sq + pdf2Sq, 1e-8);
+}
+
+// Balance heuristic for MIS weight calculation
+float MISWeightBalanceHeuristic(float pdf1, float pdf2)
+{
+    return pdf1 / max(pdf1 + pdf2, 1e-8);
+}
+
+// ============================================================================
+// Punctual Light Importance (for Point/Spot lights)
+// ============================================================================
+
+// Calculate importance of a punctual light for importance sampling
+float GetPunctualLightImportance(
+    GPULightData light,
+    float3 surfacePos,
+    float3 surfaceNormal)
+{
+    float3 toLight = light.positionWS - surfacePos;
+    float distSq = max(dot(toLight, toLight), 0.0001);
+    float dist = sqrt(distSq);
+    float3 lightDir = toLight / dist;
+
+    // Cosine at surface
+    float NdotL = max(dot(surfaceNormal, lightDir), 0.0);
+
+    // Luminance of light color
+    float luminance = dot(light.color, float3(0.2126, 0.7152, 0.0722));
+
+    // Attenuation estimate (inverse square with range falloff)
+    float rangeSq = 1.0 / max(light.lightAttenuation.x, 0.0001);
+    float distAtten = saturate(1.0 - distSq / rangeSq);
+    distAtten *= distAtten;
+
+    return luminance * distAtten * NdotL / distSq;
+}
+
+// ============================================================================
+// Rectangle Light PDF Evaluation (for MIS)
+// ============================================================================
+
+// Evaluate the solid angle PDF for sampling a specific point on rectangle light
+// Used for MIS weight calculation when BSDF sampling hits the light
+float EvaluateRectangleLightPDF(
+    GPULightData light,
+    float3 surfacePos,
+    float3 lightSamplePos)
+{
+    float area = light.size.x * light.size.y;
+    float areaPDF = 1.0 / area;
+
+    // Convert area PDF to solid angle PDF
+    float3 lightVec = lightSamplePos - surfacePos;
+    float distSq = dot(lightVec, lightVec);
+    float dist = sqrt(distSq);
+    float3 lightDir = lightVec / dist;
+
+    // Light normal (forward direction)
+    float lightCos = max(dot(light.forward, -lightDir), 1e-4);
+
+    // Solid angle PDF = area PDF * dist² / cos
+    return areaPDF * distSq / lightCos;
+}
+
+// ============================================================================
+// Unified Light Importance
+// ============================================================================
+
+// Get importance for any light type (for light selection)
+float GetLightImportance(
+    GPULightData light,
+    float3 surfacePos,
+    float3 surfaceNormal)
+{
+    if (IsRectangleLight(light))
+    {
+        return GetRectangleLightImportance(light, surfacePos, surfaceNormal);
+    }
+    else
+    {
+        return GetPunctualLightImportance(light, surfacePos, surfaceNormal);
+    }
 }
 
 #endif // RECTANGLE_LIGHT_SAMPLING_INCLUDED

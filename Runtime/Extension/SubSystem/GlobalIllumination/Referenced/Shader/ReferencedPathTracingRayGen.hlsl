@@ -465,6 +465,47 @@ float CastShadowRay(float3 hitPosition, float3 surfaceNormal, float3 directionTo
 }
 
 //--------------------------------------------------------------------------------------------------
+// BRDF PDF Evaluation (for MIS)
+//--------------------------------------------------------------------------------------------------
+
+// Evaluate combined BRDF PDF for a given direction (used for MIS weight calculation)
+float EvaluateBRDFPDF(
+    float3 normal,
+    float3 viewDir,
+    float3 lightDir,
+    float3 albedo,
+    float metallic,
+    float roughness)
+{
+    float NdotL = saturate(dot(normal, lightDir));
+    float NdotV = max(dot(normal, viewDir), 0.001);
+
+    if (NdotL <= 0.0)
+        return 0.0;
+
+    // Specular probability (same as in path tracing loop)
+    float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
+    float fresnel = saturate(Luminance(F_Schlick(F0, NdotV)));
+    float diffuseWeight = Luminance(albedo) * (1.0 - metallic) * (1.0 - fresnel);
+    float specularWeight = fresnel;
+    float specularProb = clamp(specularWeight / max(0.0001, specularWeight + diffuseWeight), 0.1, 0.9);
+
+    // Diffuse PDF (cosine-weighted)
+    float diffusePDF = NdotL / PI;
+
+    // Specular PDF (GGX)
+    float3 H = normalize(viewDir + lightDir);
+    float NdotH = saturate(dot(normal, H));
+    float VdotH = saturate(dot(viewDir, H));
+    float clampedRoughness = max(roughness, MIN_ROUGHNESS);
+    float D = D_GGX(NdotH, clampedRoughness);
+    float specularPDF = (D * NdotH) / max(4.0 * VdotH, 0.0001);
+
+    // Combined PDF weighted by lobe selection probability
+    return (1.0 - specularProb) * diffusePDF + specularProb * specularPDF;
+}
+
+//--------------------------------------------------------------------------------------------------
 // Direct Lighting Evaluation
 //--------------------------------------------------------------------------------------------------
 
@@ -483,17 +524,73 @@ float3 EvaluateDirectLighting(
     WorldLightIterator iter = WorldLightIteratorInit(positionWS);
     uint lightIdx;
 
-    while (WorldLightIteratorNext(iter, lightIdx))
+    // First pass: collect lights and compute total importance for light selection
+    uint lightIndices[WORLD_LIGHT_MAX_ITERATION];
+    float lightImportances[WORLD_LIGHT_MAX_ITERATION];
+    uint lightCount = 0;
+    float totalImportance = 0.0;
+
+    while (WorldLightIteratorNext(iter, lightIdx) && lightCount < WORLD_LIGHT_MAX_ITERATION)
     {
         GPULightData light = GetWorldLight(lightIdx);
-
         if (!IsInLightRange(positionWS, light))
             continue;
+
+        float importance = GetLightImportance(light, positionWS, normalWS);
+        if (importance > 0.0)
+        {
+            lightIndices[lightCount] = lightIdx;
+            lightImportances[lightCount] = importance;
+            totalImportance += importance;
+            lightCount++;
+        }
+    }
+
+    if (lightCount == 0 || totalImportance <= 0.0)
+        return directLight;
+
+    // Light sampling strategy: sample one light based on importance when many lights
+    // For few lights (<=4), sample all for lower variance
+    uint maxLightsToSample = min(lightCount, 4u);
+    float invSampleCount = 1.0 / float(maxLightsToSample);
+
+    for (uint sampleIdx = 0; sampleIdx < maxLightsToSample; sampleIdx++)
+    {
+        // Select light based on importance (weighted random selection)
+        uint selectedIdx;
+        float selectionPDF;
+
+        if (lightCount <= 4)
+        {
+            // Few lights: sample all deterministically
+            selectedIdx = sampleIdx;
+            selectionPDF = lightImportances[selectedIdx] / totalImportance;
+        }
+        else
+        {
+            // Many lights: importance-weighted random selection
+            float xi = RandomFloat(rngState);
+            float cumulativeProb = 0.0;
+            selectedIdx = 0;
+
+            for (uint i = 0; i < lightCount; i++)
+            {
+                cumulativeProb += lightImportances[i] / totalImportance;
+                if (xi < cumulativeProb)
+                {
+                    selectedIdx = i;
+                    break;
+                }
+            }
+            selectionPDF = lightImportances[selectedIdx] / totalImportance;
+        }
+
+        GPULightData light = GetWorldLight(lightIndices[selectedIdx]);
 
         // Branch based on light type
         if (IsRectangleLight(light))
         {
-            // Rectangle area light: use solid angle sampling
+            // Rectangle area light: use solid angle sampling with MIS
             float2 randomSample = RandomFloat2(rngState);
 
             float3 lightDir;
@@ -509,7 +606,19 @@ float3 EvaluateDirectLighting(
                 float visibility = CastShadowRay(positionWS, normalWS, lightDir, lightDist);
                 if (visibility > 0.0)
                 {
-                    directLight += SanitizeRadiance(contribution * visibility, MAX_RADIANCE);
+                    // Compute light sampling PDF (solid angle)
+                    float3 lightSamplePos = positionWS + lightDir * lightDist;
+                    float lightPDF = EvaluateRectangleLightPDF(light, positionWS, lightSamplePos);
+
+                    // Compute BSDF PDF for MIS
+                    float bsdfPDF = EvaluateBRDFPDF(normalWS, viewDirWS, lightDir, albedo, metallic, roughness);
+
+                    // MIS weight using power heuristic
+                    float misWeight = MISWeightPowerHeuristic(lightPDF, bsdfPDF);
+
+                    // Apply selection PDF and MIS weight
+                    float3 finalContrib = contribution * visibility * misWeight / max(selectionPDF, 1e-6);
+                    directLight += SanitizeRadiance(finalContrib * invSampleCount, MAX_RADIANCE);
                 }
             }
         }
@@ -548,7 +657,10 @@ float3 EvaluateDirectLighting(
             float attenuation = GetWorldLightAttenuation(positionWS, light);
             float3 lightContrib = (diffuse + specular) * light.color * attenuation * saturate(NdotL) * visibility;
 
-            directLight += SanitizeRadiance(lightContrib, MAX_RADIANCE);
+            // Apply selection PDF for importance sampling across multiple lights
+            // Note: Punctual lights are delta distributions, so no MIS with BSDF sampling
+            float3 finalContrib = lightContrib / max(selectionPDF, 1e-6);
+            directLight += SanitizeRadiance(finalContrib * invSampleCount, MAX_RADIANCE);
         }
     }
 

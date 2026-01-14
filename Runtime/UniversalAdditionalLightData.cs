@@ -83,6 +83,7 @@ namespace UnityEngine.Rendering.Universal
     [DisallowMultipleComponent]
     [RequireComponent(typeof(Light))]
     [URPHelpURL("universal-additional-light-data")]
+    [ExecuteAlways]
     public partial class UniversalAdditionalLightData : MonoBehaviour, ISerializationCallbackReceiver, IAdditionalData
     {
         

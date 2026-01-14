@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Unity.Collections;
 using Unity.Mathematics;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -13,7 +14,7 @@ namespace UnityEngine.Rendering.Universal
     /// <summary>
     /// World-space light culling system for path tracing and multi-bounce global illumination.
     /// Provides GPU-side light queries for arbitrary world positions via 3D spatial grid.
-    /// Only supports punctual lights (Point/Spot).
+    /// Supports punctual lights (Point/Spot) and area lights (Rectangle).
     /// </summary>
     public class WorldLightCluster : IDisposable
     {
@@ -152,7 +153,7 @@ namespace UnityEngine.Rendering.Universal
         }
 
         /// <summary>
-        /// Collects all punctual lights (Point/Spot) from the scene.
+        /// Collects all punctual lights (Point/Spot) and area lights (Rectangle) from the scene.
         /// </summary>
         private void CollectPunctualLights()
         {
@@ -160,18 +161,8 @@ namespace UnityEngine.Rendering.Universal
             AddLightsFromList(LightManager.PointLights);
             AddLightsFromList(LightManager.SpotLights);
 
-            // Fallback if LightManager is empty
-            if (m_LightData.Length == 0)
-            {
-                var allLights = UnityEngine.Object.FindObjectsByType<Light>(FindObjectsSortMode.None);
-                foreach (var light in allLights)
-                {
-                    if (light.type == LightType.Point || light.type == LightType.Spot)
-                    {
-                        AddLight(light);
-                    }
-                }
-            }
+            // Collect rectangle/area lights
+            AddAreaLightsFromList(LightManager.AreaLight);
         }
 
         private void AddLightsFromList(List<Light> lights)
@@ -201,6 +192,37 @@ namespace UnityEngine.Rendering.Universal
                 return;
 
             var gpuLightData = CreateGPULightData(light, m_LightData.Length);
+            m_LightData.Add(gpuLightData);
+            m_LightReferences.Add(light);
+        }
+
+        private void AddAreaLightsFromList(List<Light> lights)
+        {
+            if (lights == null) return;
+
+            foreach (var light in lights)
+            {
+                AddRectangleLight(light);
+            }
+        }
+
+        private void AddRectangleLight(Light light)
+        {
+            if (light == null || !light.enabled || !light.gameObject.activeInHierarchy)
+                return;
+
+            // Skip baked lights
+            if (light.bakingOutput.lightmapBakeType == LightmapBakeType.Baked)
+                return;
+
+            // Only process rectangle lights
+            if (light.type != LightType.Rectangle)
+                return;
+
+            if (m_LightData.Length >= m_MaxLights)
+                return;
+
+            var gpuLightData = CreateGPURectangleLightData(light, m_LightData.Length);
             m_LightData.Add(gpuLightData);
             m_LightReferences.Add(light);
         }
@@ -270,6 +292,57 @@ namespace UnityEngine.Rendering.Universal
                 baseContribution = additionalData.baseContribution,
                 minRoughness = minRoughness,
                 size = new Vector4(shapeRadius * shapeRadius, 0, 0, 0),
+                forward = transform.forward,
+                rangeAttenuationScale = rangeAttenuationScale,
+                up = transform.up,
+                rangeAttenuationBias = rangeAttenuationBias,
+                right = transform.right,
+                volumetricLightDimmer = additionalData.volumetricDimmer
+            };
+        }
+
+        /// <summary>
+        /// Creates GPULightData from a Rectangle area light.
+        /// Light type is encoded in lightFlags bits 16-19 (GPULIGHTTYPE_RECTANGLE = 6).
+        /// </summary>
+        private GPULightData CreateGPURectangleLightData(Light light, int lightIndex)
+        {
+            var additionalData = light.GetUniversalAdditionalLightData();
+            var transform = light.transform;
+
+            // Rectangle light dimensions
+            float width = light.areaSize.x;
+            float height = light.areaSize.y;
+
+            // Calculate range attenuation
+            const float hugeValue = 16777216.0f;
+            const float sqrtHuge = 4096.0f;
+            float rangeAttenuationScale = sqrtHuge / (light.range * light.range);
+            float rangeAttenuationBias = hugeValue;
+
+            // Encode light type in lightFlags bits 16-19: GPULIGHTTYPE_RECTANGLE = 6
+            const int GPULIGHTTYPE_RECTANGLE = 6;
+            int lightFlags = (GPULIGHTTYPE_RECTANGLE << 16);
+            if (light.bakingOutput.lightmapBakeType == LightmapBakeType.Mixed)
+                lightFlags |= (int)LightFlag.SubtractiveMixedLighting;
+
+            uint lightLayerMask = RenderingLayerUtils.ToValidRenderingLayers(additionalData.renderingLayers);
+
+            return new GPULightData
+            {
+                positionWS = transform.position,
+                lightLayerMask = lightLayerMask,
+                color = light.color.linear.ColorToVector3() * light.intensity,
+                lightFlags = lightFlags,
+                lightAttenuation = Vector4.zero, // Not used for area lights
+                dir = Vector4.zero,
+                shadowLightIndex = -1,
+                lightOcclusionProbInfo = Vector4.zero,
+                cookieLightIndex = -1,
+                shadowType = (int)light.shadows,
+                baseContribution = additionalData.baseContribution,
+                minRoughness = 0,
+                size = new Vector4(width, height, 1.0f / width, 1.0f / height),
                 forward = transform.forward,
                 rangeAttenuationScale = rangeAttenuationScale,
                 up = transform.up,
@@ -351,12 +424,21 @@ namespace UnityEngine.Rendering.Universal
 
         private float GetLightRange(GPULightData lightData)
         {
-            // Inverse of attenuation calculation to get range
+            // For punctual lights, use lightAttenuation.x
             float oneOverRangeSqr = lightData.lightAttenuation.x;
             if (oneOverRangeSqr > 0)
             {
                 return Mathf.Sqrt(1.0f / oneOverRangeSqr);
             }
+
+            // For area lights, use rangeAttenuationScale
+            // rangeAttenuationScale = sqrtHuge / (range * range), so range = sqrt(sqrtHuge / scale)
+            const float sqrtHuge = 4096.0f;
+            if (lightData.rangeAttenuationScale > 0)
+            {
+                return Mathf.Sqrt(sqrtHuge / lightData.rangeAttenuationScale);
+            }
+
             return 100.0f; // Fallback
         }
 

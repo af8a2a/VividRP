@@ -3,8 +3,15 @@
 
 // World Light Cluster - GPU-side light queries for path tracing GI
 // Uses the same GPULightData format as cluster lighting for easy migration
+// Supports punctual lights (Point/Spot) and area lights (Rectangle)
 
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/LightCullingSystem/GPULights.cs.hlsl"
+
+// Light type constants (encoded in lightFlags bits 16-19)
+#define GPULIGHTTYPE_POINT 0
+#define GPULIGHTTYPE_SPOT 1
+#define GPULIGHTTYPE_TUBE 5
+#define GPULIGHTTYPE_RECTANGLE 6
 
 // Shader resources
 StructuredBuffer<GPULightData> _WorldLightData;
@@ -59,33 +66,113 @@ GPULightData GetWorldLight(uint lightIndex)
     return _WorldLightData[lightIndex];
 }
 
+// ============================================================================
+// Light Type Helpers
+// ============================================================================
+
+// Get light type from lightFlags (bits 16-19)
+uint GetWorldLightType(GPULightData light)
+{
+    return (light.lightFlags >> 16) & 0xF;
+}
+
+// Check if light is a rectangle area light
+bool IsRectangleLight(GPULightData light)
+{
+    return GetWorldLightType(light) == GPULIGHTTYPE_RECTANGLE;
+}
+
+// Check if light is a spot light
+bool IsSpotLight(GPULightData light)
+{
+    return light.lightAttenuation.z > 0;
+}
+
+// ============================================================================
+// Rectangle Light Range and Attenuation
+// ============================================================================
+
+// Check if position is in rectangle light range
+bool IsInRectangleLightRange(float3 positionWS, GPULightData light)
+{
+    float3 lightToPoint = positionWS - light.positionWS;
+
+    // Rectangle emits in -forward direction, so check if point is in front
+    float forwardDist = dot(lightToPoint, light.forward);
+    if (forwardDist < 0.0)
+        return false;
+
+    // Calculate range from rangeAttenuationScale
+    // rangeAttenuationScale = sqrtHuge / (range * range), sqrtHuge = 4096
+    float rangeSq = 4096.0 / max(light.rangeAttenuationScale, 0.0001);
+
+    float distSq = dot(lightToPoint, lightToPoint);
+    return distSq <= rangeSq;
+}
+
+// Calculate rectangle light attenuation
+float GetRectangleLightAttenuation(float3 positionWS, GPULightData light)
+{
+    float3 lightToPoint = positionWS - light.positionWS;
+    float distSq = dot(lightToPoint, lightToPoint);
+
+    // Range attenuation using rangeAttenuationScale
+    float rangeSq = 4096.0 / max(light.rangeAttenuationScale, 0.0001);
+    float distAtten = saturate(1.0 - distSq / rangeSq);
+    distAtten *= distAtten;
+
+    // One-sided emission: smooth fade at light plane
+    float forwardDist = dot(lightToPoint, light.forward);
+    float sideFade = saturate(forwardDist * 10.0);
+
+    return distAtten * sideFade;
+}
+
+// ============================================================================
+// Light Range and Attenuation
+// ============================================================================
+
 // Check if position is within light's influence range
 bool IsInLightRange(float3 positionWS, GPULightData light)
 {
+    // Handle rectangle lights separately
+    if (IsRectangleLight(light))
+    {
+        return IsInRectangleLightRange(positionWS, light);
+    }
+
+    // Punctual lights (Point/Spot)
     float3 toLight = light.positionWS - positionWS;
     float distSq = dot(toLight, toLight);
-    
+
     // lightAttenuation.x = 1 / (range * range)
     float rangeSq = 1.0 / max(light.lightAttenuation.x, 0.0001);
-    
+
     return distSq <= rangeSq;
 }
 
 // Calculate light attenuation at position (same as cluster lighting)
 float GetWorldLightAttenuation(float3 positionWS, GPULightData light)
 {
+    // Handle rectangle lights separately
+    if (IsRectangleLight(light))
+    {
+        return GetRectangleLightAttenuation(positionWS, light);
+    }
+
+    // Punctual lights (Point/Spot)
     float3 lightVector = light.positionWS - positionWS;
     float distanceSqr = max(dot(lightVector, lightVector), 0.0001);
-    
+
     // Distance attenuation
     float lightAtten = rcp(distanceSqr);
     float factor = distanceSqr * light.lightAttenuation.x;
     float smoothFactor = saturate(1.0 - factor * factor);
     smoothFactor *= smoothFactor;
     lightAtten *= smoothFactor;
-    
+
     // Spot attenuation
-    if (light.lightAttenuation.z > 0) // Is spot light
+    if (IsSpotLight(light))
     {
         float3 lightDir = normalize(lightVector);
         float SdotL = dot(float3(light.dir), lightDir);
@@ -93,7 +180,7 @@ float GetWorldLightAttenuation(float3 positionWS, GPULightData light)
         atten *= atten;
         lightAtten *= atten;
     }
-    
+
     return lightAtten;
 }
 

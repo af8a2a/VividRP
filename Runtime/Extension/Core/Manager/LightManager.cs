@@ -25,10 +25,10 @@ namespace UnityEngine.Rendering.Universal
                     m_SpotLights.Add(light);
                     break;
                 case LightType.Directional:
-                    m_AreaLight.Add(light);
+                    m_DirectionalLights.Add(light);
                     break;
                 case LightType.Rectangle:
-                    m_PointLights.Add(light);
+                    m_AreaLight.Add(light);
                     break;
                 case LightType.Point:
                     m_PointLights.Add(light);
@@ -46,10 +46,10 @@ namespace UnityEngine.Rendering.Universal
                     m_SpotLights.Remove(light);
                     break;
                 case LightType.Directional:
-                    m_AreaLight.Remove(light);
+                    m_DirectionalLights.Remove(light);
                     break;
                 case LightType.Rectangle:
-                    m_PointLights.Remove(light);
+                    m_AreaLight.Remove(light);
                     break;
                 case LightType.Point:
                     m_PointLights.Remove(light);

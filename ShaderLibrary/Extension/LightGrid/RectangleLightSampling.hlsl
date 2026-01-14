@@ -1,0 +1,222 @@
+#ifndef RECTANGLE_LIGHT_SAMPLING_INCLUDED
+#define RECTANGLE_LIGHT_SAMPLING_INCLUDED
+
+// Rectangle Area Light Sampling for Path Tracing
+// Uses solid angle sampling for physically correct light integration
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/LightCullingSystem/GPULights.cs.hlsl"
+
+// ============================================================================
+// Rectangle Light Sampling
+// ============================================================================
+
+// Sample a point on rectangle light surface using uniform area sampling
+// Returns: sampled position in world space
+// Outputs: PDF for the sample, light normal at sample point
+float3 SampleRectangleLightSurface(
+    GPULightData light,
+    float2 u,               // Random numbers in [0,1]
+    out float pdf,
+    out float3 lightNormal)
+{
+    // Rectangle dimensions from light.size (x = width, y = height)
+    float width = light.size.x;
+    float height = light.size.y;
+    float area = width * height;
+
+    // Sample point on rectangle surface (uniform)
+    float2 localPoint = float2(
+        (u.x - 0.5) * width,
+        (u.y - 0.5) * height
+    );
+
+    // Transform to world space using light's local axes
+    float3 samplePos = light.positionWS
+                     + light.right * localPoint.x
+                     + light.up * localPoint.y;
+
+    // Light normal (rectangle emits in -forward direction)
+    lightNormal = -light.forward;
+
+    // PDF for uniform area sampling
+    pdf = 1.0 / area;
+
+    return samplePos;
+}
+
+// ============================================================================
+// Pillow Windowing (Soft Edge Falloff)
+// ============================================================================
+
+// Pillow window function for soft rectangle edges
+// Creates smooth falloff at rectangle boundaries
+float PillowWindowing(float2 uv)
+{
+    // Map UV to [-1, 1] range
+    float2 d = abs(uv - 0.5) * 2.0;
+    // Smooth quadratic falloff at edges
+    float2 falloff = saturate(1.0 - d * d);
+    return falloff.x * falloff.y;
+}
+
+
+// ============================================================================
+// Simple BRDF Evaluation for Rectangle Lights
+// ============================================================================
+
+// Simplified BRDF for direct lighting (can be replaced with full BRDF)
+float3 EvaluateSimpleBRDF(
+    float3 albedo,
+    float roughness,
+    float metallic,
+    float3 N,
+    float3 V,
+    float3 L)
+{
+    // Diffuse (Lambertian)
+    float3 diffuseColor = albedo * (1.0 - metallic);
+    float3 diffuse = diffuseColor * (1.0 / PI);
+
+    // Specular (simplified GGX)
+    float3 H = normalize(V + L);
+    float NdotH = saturate(dot(N, H));
+    float NdotV = saturate(dot(N, V));
+    float NdotL = saturate(dot(N, L));
+
+    // Roughness to alpha
+    float alpha = roughness * roughness;
+    float alpha2 = alpha * alpha;
+
+    // GGX NDF
+    float denom = NdotH * NdotH * (alpha2 - 1.0) + 1.0;
+    float D = alpha2 / (PI * denom * denom);
+
+    // Fresnel (Schlick approximation)
+    float3 F0 = lerp(0.04, albedo, metallic);
+    float3 F = F0 + (1.0 - F0) * pow(1.0 - saturate(dot(H, V)), 5.0);
+
+    // Geometry term (Smith GGX)
+    float k = alpha / 2.0;
+    float G1_V = NdotV / (NdotV * (1.0 - k) + k);
+    float G1_L = NdotL / (NdotL * (1.0 - k) + k);
+    float G = G1_V * G1_L;
+
+    // Specular BRDF
+    float3 specular = (D * F * G) / max(4.0 * NdotV * NdotL, 0.001);
+
+    return diffuse + specular;
+}
+
+// ============================================================================
+// Rectangle Light Direct Lighting Evaluation
+// ============================================================================
+
+// Evaluate rectangle light contribution for path tracing direct lighting
+// Uses solid angle sampling with proper PDF conversion
+// Returns: contribution (BRDF * emission * cos / PDF)
+// Outputs: lightDir and lightDist for shadow ray
+float3 EvaluateRectangleLightDirect(
+    GPULightData light,
+    float3 surfacePos,
+    float3 surfaceNormal,
+    float3 viewDir,
+    float3 albedo,
+    float roughness,
+    float metallic,
+    float2 randomSample,
+    out float3 lightDir,
+    out float lightDist)
+{
+    // Initialize outputs
+    lightDir = float3(0, 1, 0);
+    lightDist = 0;
+
+    // Sample point on rectangle surface
+    float pdf;
+    float3 lightNormal;
+    float3 lightSamplePos = SampleRectangleLightSurface(light, randomSample, pdf, lightNormal);
+
+    // Vector from surface to light sample
+    float3 lightVec = lightSamplePos - surfacePos;
+    float distSq = dot(lightVec, lightVec);
+    lightDist = sqrt(distSq);
+    lightDir = lightVec / lightDist;
+
+    // Geometry term: cos at surface * cos at light
+    float NdotL = saturate(dot(surfaceNormal, lightDir));
+    float lightCos = saturate(dot(lightNormal, -lightDir));
+
+    // Early out if light doesn't contribute
+    if (NdotL <= 0.0 || lightCos <= 0.0)
+    {
+        return 0.0;
+    }
+
+    // Convert area PDF to solid angle PDF
+    // pdf_solidAngle = pdf_area * distSq / lightCos
+    float pdfSolidAngle = pdf * distSq / lightCos;
+
+    // Light emission (already in linear space)
+    float3 emission = light.color;
+
+    // Apply range attenuation
+    // rangeAttenuationScale = sqrtHuge / (range * range), sqrtHuge = 4096
+    float rangeSq = 4096.0 / max(light.rangeAttenuationScale, 0.0001);
+    float distAtten = saturate(1.0 - distSq / rangeSq);
+    distAtten *= distAtten;
+
+    // Apply pillow windowing for soft edges
+    // Calculate local UV on rectangle surface
+    float2 localUV = float2(
+        dot(lightVec, light.right) / light.size.x + 0.5,
+        dot(lightVec, light.up) / light.size.y + 0.5
+    );
+    float pillowAtten = PillowWindowing(localUV);
+
+    // Simple BRDF evaluation (Lambertian diffuse + simplified specular)
+    // For path tracing, we use a more complete BRDF evaluation
+    float3 brdf = EvaluateSimpleBRDF(albedo, roughness, metallic, surfaceNormal, viewDir, lightDir);
+
+    // Monte Carlo estimator: BRDF * emission * cos / pdf
+    float3 contribution = brdf * emission * NdotL * distAtten * pillowAtten / pdfSolidAngle;
+
+    return contribution;
+}
+// ============================================================================
+// Rectangle Light Importance
+// ============================================================================
+
+// Calculate importance of a rectangle light for importance sampling
+// Higher importance = more likely to be sampled
+float GetRectangleLightImportance(
+    GPULightData light,
+    float3 surfacePos,
+    float3 surfaceNormal)
+{
+    float3 lightCenter = light.positionWS;
+    float3 toLight = lightCenter - surfacePos;
+    float distSq = dot(toLight, toLight);
+    float dist = sqrt(distSq);
+
+    // Direction to light center
+    float3 lightDir = toLight / dist;
+
+    // Approximate solid angle
+    float area = light.size.x * light.size.y;
+    float solidAngle = area / distSq;
+
+    // Cosine at surface
+    float NdotL = max(dot(surfaceNormal, lightDir), 0.0);
+
+    // Cosine at light (approximate - facing towards surface)
+    float lightCos = max(dot(-light.forward, -lightDir), 0.0);
+
+    // Luminance of light color
+    float luminance = dot(light.color, float3(0.2126, 0.7152, 0.0722));
+
+    // Combined importance
+    return luminance * solidAngle * NdotL * lightCos;
+}
+
+#endif // RECTANGLE_LIGHT_SAMPLING_INCLUDED

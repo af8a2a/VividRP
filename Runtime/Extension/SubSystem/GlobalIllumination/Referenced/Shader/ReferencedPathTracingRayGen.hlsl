@@ -73,6 +73,9 @@
 // World light cluster for light queries
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/LightGrid/WorldLightCluster.hlsl"
 
+// Rectangle area light sampling for path tracing
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/LightGrid/RectangleLightSampling.hlsl"
+
 #include "LitInputPathTracing.hlsl"
 
 // Include common payload definitions (shared with closesthit shaders)
@@ -487,40 +490,66 @@ float3 EvaluateDirectLighting(
         if (!IsInLightRange(positionWS, light))
             continue;
 
-        // Light direction and distance
-        float3 lightVector = light.positionWS - positionWS;
-        float lightDistSq = max(dot(lightVector, lightVector), 0.0001);
-        float lightDist = sqrt(lightDistSq);
-        float3 lightDir = lightVector / lightDist;
+        // Branch based on light type
+        if (IsRectangleLight(light))
+        {
+            // Rectangle area light: use solid angle sampling
+            float2 randomSample = RandomFloat2(rngState);
 
-        float NdotL = dot(normalWS, lightDir);
-        if (NdotL <= 0.0)
-            continue;
+            float3 lightDir;
+            float lightDist;
+            float3 contribution = EvaluateRectangleLightDirect(
+                light, positionWS, normalWS, viewDirWS,
+                albedo, roughness, metallic,
+                randomSample, lightDir, lightDist);
 
-        // Cast shadow ray for visibility testing
-        float visibility = CastShadowRay(positionWS, normalWS, lightDir, lightDist);
-        if (visibility <= 0.0)
-            continue;  // Light is occluded
+            if (any(contribution > 0))
+            {
+                // Cast shadow ray for visibility testing
+                float visibility = CastShadowRay(positionWS, normalWS, lightDir, lightDist);
+                if (visibility > 0.0)
+                {
+                    directLight += SanitizeRadiance(contribution * visibility, MAX_RADIANCE);
+                }
+            }
+        }
+        else
+        {
+            // Point/Spot lights: existing code path
+            float3 lightVector = light.positionWS - positionWS;
+            float lightDistSq = max(dot(lightVector, lightVector), 0.0001);
+            float lightDist = sqrt(lightDistSq);
+            float3 lightDir = lightVector / lightDist;
 
-        // Evaluate BRDF
-        float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
-        float NdotV = max(dot(normalWS, viewDirWS), 0.001);
-        float3 H = normalize(viewDirWS + lightDir);
-        float NdotH = saturate(dot(normalWS, H));
-        float LdotH = saturate(dot(lightDir, H));
+            float NdotL = dot(normalWS, lightDir);
+            if (NdotL <= 0.0)
+                continue;
 
-        // Cook-Torrance BRDF
-        float3 F = F_Schlick(F0, LdotH);
-        float D = D_GGX(NdotH, max(roughness, MIN_ROUGHNESS));
-        float G = V_SmithJointGGX(saturate(NdotL), NdotV, max(roughness, MIN_ROUGHNESS));
+            // Cast shadow ray for visibility testing
+            float visibility = CastShadowRay(positionWS, normalWS, lightDir, lightDist);
+            if (visibility <= 0.0)
+                continue;  // Light is occluded
 
-        float3 specular = min(F * D * G, MAX_RADIANCE);
-        float3 diffuse = (1.0 - F) * (1.0 - metallic) * albedo / PI;
+            // Evaluate BRDF
+            float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
+            float NdotV = max(dot(normalWS, viewDirWS), 0.001);
+            float3 H = normalize(viewDirWS + lightDir);
+            float NdotH = saturate(dot(normalWS, H));
+            float LdotH = saturate(dot(lightDir, H));
 
-        float attenuation = GetWorldLightAttenuation(positionWS, light);
-        float3 lightContrib = (diffuse + specular) * light.color * attenuation * saturate(NdotL) * visibility;
+            // Cook-Torrance BRDF
+            float3 F = F_Schlick(F0, LdotH);
+            float D = D_GGX(NdotH, max(roughness, MIN_ROUGHNESS));
+            float G = V_SmithJointGGX(saturate(NdotL), NdotV, max(roughness, MIN_ROUGHNESS));
 
-        directLight += SanitizeRadiance(lightContrib, MAX_RADIANCE);
+            float3 specular = min(F * D * G, MAX_RADIANCE);
+            float3 diffuse = (1.0 - F) * (1.0 - metallic) * albedo / PI;
+
+            float attenuation = GetWorldLightAttenuation(positionWS, light);
+            float3 lightContrib = (diffuse + specular) * light.color * attenuation * saturate(NdotL) * visibility;
+
+            directLight += SanitizeRadiance(lightContrib, MAX_RADIANCE);
+        }
     }
 
     return directLight;

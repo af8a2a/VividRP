@@ -125,7 +125,7 @@ void GBufferRayGeneration()
 
     // Trace primary visibility ray
     TraceRay(_RaytracingAccelerationStructure,
-              RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
+              RAY_FLAG_NONE,
              RAYTRACINGRENDERERFLAG_PATH_TRACING,  // Use same instance mask as path tracing
              0,    // Hit group index (GBufferDXR pass)
              1,    // Hit group stride

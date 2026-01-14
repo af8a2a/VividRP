@@ -562,9 +562,11 @@ float3 EvaluateDirectLighting(
 
         if (lightCount <= 4)
         {
-            // Few lights: sample all deterministically
+            // Few lights: sample all deterministically (exhaustive sampling)
+            // Use selectionPDF = 1.0 since we're sampling every light exactly once
+            // The invSampleCount averaging handles the 1/N weighting
             selectedIdx = sampleIdx;
-            selectionPDF = lightImportances[selectedIdx] / totalImportance;
+            selectionPDF = 1.0;
         }
         else
         {

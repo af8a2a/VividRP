@@ -107,6 +107,7 @@
 // DXR GBuffer inputs (from RayTracingGBufferPass)
 TEXTURE2D_X(_DXRGBufferMaterialData);      // RGB = albedo, A = metallic
 TEXTURE2D_X(_DXRGBufferNormalRoughness);   // RGB = world normal, A = sqrt(alphaRoughness)
+TEXTURE2D_X(_DXRGBufferEmission);          // RGB = emission for self-illumination
 
 // Output and History for temporal accumulation
 RW_TEXTURE2D(float4, _PathTracingOutput);
@@ -742,6 +743,9 @@ void RayGenPathTracing()
     float3 primaryNormal = normalRoughness.rgb;  // Already world-space, already normalized
     float primaryOcclusion = 1.0;  // Occlusion not stored in DXR GBuffer, use default
 
+    // Load primary surface emission for self-illumination
+    float3 primaryEmission = LOAD_TEXTURE2D_X(_DXRGBufferEmission, launchIndex).rgb;
+
     // Convert sqrt(alphaRoughness) back to smoothness
     // sqrt(alphaRoughness) = perceptualRoughness (because alphaRoughness = perceptualRoughness²)
     // smoothness = 1 - perceptualRoughness
@@ -1004,10 +1008,12 @@ void RayGenPathTracing()
             }
 #endif // SHARC_QUERY
 
-            // Add emission (handled separately for SHARC)
+            // Add emission when rays hit emissive surfaces
+            // Following HDRP's approach: emission is simply added to path contribution
+            // No explicit light sampling of emissive meshes, so no MIS needed
 #if SHARC_SEPARATE_EMISSIVE
             // Emission is stored separately in SHARC, so add it here
-            if (_PathTracingIncludeEmissive)
+            if (_PathTracingIncludeEmissive && any(hitEmission > 0))
             {
                 float3 emissionContrib = throughput * hitEmission;
                 // Attribute emission to the lobe type of first bounce
@@ -1027,7 +1033,7 @@ void RayGenPathTracing()
                 }
             }
 #else
-            if (_PathTracingIncludeEmissive)
+            if (_PathTracingIncludeEmissive && any(hitEmission > 0))
             {
                 float3 emissionContrib = throughput * hitEmission;
                 // Attribute emission to the lobe type of first bounce
@@ -1192,6 +1198,14 @@ void RayGenPathTracing()
     {
         finalSpecular = float3(0, 0, 0);
         finalSpecularHitDist = 0.0;
+    }
+
+    // Add primary surface emission (self-illumination)
+    // This is the emissive glow of the primary visible surface - NOT indirect lighting
+    // Following HDRP's approach where emission is set directly in closesthit payload
+    if (_PathTracingIncludeEmissive)
+    {
+        finalRadiance += primaryEmission;
     }
 
     // Normalize hit distances for NRD

@@ -66,6 +66,15 @@ namespace UnityEngine.Rendering.Universal
             set => CheckAndSetTextureHandle(ref _hitDistance, value);
         }
 
+        // Emission for self-illumination (from DXR GBuffer)
+        private TextureHandle _emission;
+
+        public TextureHandle emission
+        {
+            get => CheckAndGetTextureHandle(ref _emission);
+            set => CheckAndSetTextureHandle(ref _emission, value);
+        }
+
         #endregion
     }
 }

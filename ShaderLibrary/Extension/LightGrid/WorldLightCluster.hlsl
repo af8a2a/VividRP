@@ -4,7 +4,7 @@
 // World Light Cluster - GPU-side light queries for path tracing GI
 // Uses the same GPULightData format as cluster lighting for easy migration
 // Supports punctual lights (Point/Spot) and area lights (Rectangle)
-
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/LightCullingSystem/GPULights.cs.hlsl"
 
 // Light type constants (encoded in lightFlags bits 16-19)

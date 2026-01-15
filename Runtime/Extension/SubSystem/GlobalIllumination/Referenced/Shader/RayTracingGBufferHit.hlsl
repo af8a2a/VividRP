@@ -41,6 +41,9 @@ struct GBufferPayload
     // Path Tracing outputs (raw material data)
     float3 rawAlbedo;
     float metallic;
+
+    // Emission for self-illumination
+    float3 emission;
 };
 
 //------------------------------------------------------------------------------
@@ -120,6 +123,9 @@ void GBufferClosestHit(inout GBufferPayload payload : SV_RayPayload, AttributeDa
     // Fill payload - Path Tracing raw material data
     payload.rawAlbedo = albedo;
     payload.metallic = metallic;
+
+    // Fill payload - Emission for self-illumination
+    payload.emission = surfaceData.emission;
 }
 
 //------------------------------------------------------------------------------

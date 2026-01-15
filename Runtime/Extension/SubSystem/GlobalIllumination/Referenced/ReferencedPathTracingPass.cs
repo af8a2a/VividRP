@@ -96,6 +96,7 @@ namespace UnityEngine.Rendering.Universal
             // DXR GBuffer Textures (replaced URP GBuffer)
             internal TextureHandle materialData; // RGB = albedo, A = metallic
             internal TextureHandle normalRoughness; // RGB = world normal, A = sqrt(alphaRoughness)
+            internal TextureHandle emission; // RGB = emission for self-illumination
             internal TextureHandle depthTexture;
             internal TextureHandle outputTexture;
             internal TextureHandle historyTexture;
@@ -275,6 +276,7 @@ namespace UnityEngine.Rendering.Universal
             // DXR GBuffer textures (replaced URP GBuffer)
             public static readonly int _DXRGBufferMaterialData = Shader.PropertyToID("_DXRGBufferMaterialData");
             public static readonly int _DXRGBufferNormalRoughness = Shader.PropertyToID("_DXRGBufferNormalRoughness");
+            public static readonly int _DXRGBufferEmission = Shader.PropertyToID("_DXRGBufferEmission");
             public static readonly int _CameraDepthTexture = Shader.PropertyToID("_CameraDepthTexture");
             public static readonly int _SkyTexture = Shader.PropertyToID("_SkyTexture");
 
@@ -345,6 +347,7 @@ namespace UnityEngine.Rendering.Universal
             // Input textures - DXR GBuffer (from RayTracingGBufferPass)
             passData.materialData = resourceData.materialData;
             passData.normalRoughness = resourceData.normalRoughness;
+            passData.emission = resourceData.emission;
             passData.depthTexture = resourceData.cameraDepthTexture;
 
             // TODO: Get sky texture from environment settings
@@ -406,6 +409,7 @@ namespace UnityEngine.Rendering.Universal
                 // Bind input textures - DXR GBuffer
                 cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._DXRGBufferMaterialData, data.materialData);
                 cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._DXRGBufferNormalRoughness, data.normalRoughness);
+                cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._DXRGBufferEmission, data.emission);
                 cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._CameraDepthTexture, data.depthTexture);
 
                 // Bind output texture
@@ -760,6 +764,7 @@ namespace UnityEngine.Rendering.Universal
                 passData.ditheredTextureHandleSet.Use(builder);
                 builder.UseTexture(passData.materialData);
                 builder.UseTexture(passData.normalRoughness);
+                builder.UseTexture(passData.emission);
                 builder.UseTexture(passData.depthTexture);
 
                 // Use output textures

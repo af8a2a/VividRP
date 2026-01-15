@@ -163,6 +163,11 @@ namespace UnityEngine.Rendering.Universal
 
             // Collect rectangle/area lights
             AddAreaLightsFromList(LightManager.AreaLight);
+
+            // Note: Emissive meshes are NOT collected as explicit lights.
+            // Following HDRP's approach: emission is evaluated in the closesthit shader
+            // and added to path contribution when rays hit emissive surfaces.
+            // This is simpler and doesn't require manual emissive mesh tracking.
         }
 
         private void AddLightsFromList(List<Light> lights)
@@ -351,6 +356,7 @@ namespace UnityEngine.Rendering.Universal
                 volumetricLightDimmer = additionalData.volumetricDimmer
             };
         }
+
 
         /// <summary>
         /// Builds the spatial grid for GPU queries.

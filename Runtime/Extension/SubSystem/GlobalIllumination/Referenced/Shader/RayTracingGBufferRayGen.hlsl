@@ -40,6 +40,7 @@ RWTexture2D<float4> _GBufferDiffuseAlbedo;     // RGB = diffuse albedo (albedo *
 RWTexture2D<float4> _GBufferSpecularAlbedo;   // RGB = specular albedo (EnvBRDF), A = unused
 RWTexture2D<float4> _GBufferNormalRoughness;  // RGB = world normal, A = sqrt(alphaRoughness)
 RWTexture2D<float>  _GBufferHitDistance;      // Hit distance for DLSS-RR
+RWTexture2D<float4> _GBufferEmission;         // RGB = emission, A = unused
 
 //------------------------------------------------------------------------------
 // Camera Parameters
@@ -64,6 +65,9 @@ struct GBufferPayload
     // Path Tracing outputs (raw material data)
     float3 rawAlbedo;
     float metallic;
+
+    // Emission for self-illumination
+    float3 emission;
 };
 
 //------------------------------------------------------------------------------
@@ -85,6 +89,9 @@ void GBufferMiss(inout GBufferPayload payload : SV_RayPayload)
     // Default values for sky pixels (Path Tracing)
     payload.rawAlbedo = float3(0, 0, 0);
     payload.metallic = 0.0;
+
+    // Default emission for sky (no emission)
+    payload.emission = float3(0, 0, 0);
 }
 
 //------------------------------------------------------------------------------
@@ -122,6 +129,7 @@ void GBufferRayGeneration()
     payload.roughness = 1.0;
     payload.rawAlbedo = float3(0, 0, 0);
     payload.metallic = 0.0;
+    payload.emission = float3(0, 0, 0);
 
     // Trace primary visibility ray
     TraceRay(_RaytracingAccelerationStructure,
@@ -142,6 +150,9 @@ void GBufferRayGeneration()
     _GBufferSpecularAlbedo[dispatchIdx] = float4(payload.specularAlbedo, 1.0);
     _GBufferNormalRoughness[dispatchIdx] = float4(payload.normalWS, payload.roughness);
     _GBufferHitDistance[dispatchIdx] = payload.hitType == 1 ? payload.hitDistance : 0.0;
+
+    // Emission for self-illumination in path tracing
+    _GBufferEmission[dispatchIdx] = float4(payload.emission, 1.0);
 }
 
 // Entry points:

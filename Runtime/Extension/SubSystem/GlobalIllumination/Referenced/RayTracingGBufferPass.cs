@@ -22,6 +22,7 @@ namespace UnityEngine.Rendering.Universal
         private static readonly int s_GBufferSpecularAlbedoId = Shader.PropertyToID("_GBufferSpecularAlbedo");
         private static readonly int s_GBufferNormalRoughnessId = Shader.PropertyToID("_GBufferNormalRoughness");
         private static readonly int s_GBufferHitDistanceId = Shader.PropertyToID("_GBufferHitDistance");
+        private static readonly int s_GBufferEmissionId = Shader.PropertyToID("_GBufferEmission");
         private static readonly int s_InvViewProjMatrixId = Shader.PropertyToID("_InvViewProjMatrix");
         private static readonly int s_CameraPositionWSId = Shader.PropertyToID("_CameraPositionWS");
         private static readonly int s_ScreenSizeId = Shader.PropertyToID("_ScreenSize");
@@ -51,6 +52,7 @@ namespace UnityEngine.Rendering.Universal
             internal TextureHandle specularAlbedo;
             internal TextureHandle normalRoughness;
             internal TextureHandle hitDistance;
+            internal TextureHandle emission;
             internal Matrix4x4 invViewProjMatrix;
             internal Vector3 cameraPositionWS;
             internal Vector4 screenSize;
@@ -70,7 +72,8 @@ namespace UnityEngine.Rendering.Universal
                 out var diffuseAlbedo,
                 out var specularAlbedo,
                 out var normalRoughness,
-                out var hitDistance);
+                out var hitDistance,
+                out var emission);
 
             // Export to resource data for use by Path Tracing and DLSS-RR
             resourceData.materialData = materialData;
@@ -78,6 +81,7 @@ namespace UnityEngine.Rendering.Universal
             resourceData.specularAlbedo = specularAlbedo;
             resourceData.normalRoughness = normalRoughness;
             resourceData.hitDistance = hitDistance;
+            resourceData.emission = emission;
         }
 
         /// <summary>
@@ -91,7 +95,8 @@ namespace UnityEngine.Rendering.Universal
             out TextureHandle diffuseAlbedo,
             out TextureHandle specularAlbedo,
             out TextureHandle normalRoughness,
-            out TextureHandle hitDistance)
+            out TextureHandle hitDistance,
+            out TextureHandle emission)
         {
             if (!m_GBufferRayTracingShader)
             {
@@ -135,6 +140,14 @@ namespace UnityEngine.Rendering.Universal
                 name = "_RTGBufferHitDistance"
             };
 
+            var emissionDesc = new TextureDesc(width, height)
+            {
+                colorFormat = GraphicsFormat.R16G16B16A16_SFloat,
+                enableRandomWrite = true,
+                clearBuffer = true,
+                name = "_RTGBufferEmission"
+            };
+
             // Create render targets
             materialData = renderGraph.CreateTexture(materialDataDesc);
             diffuseAlbedo = renderGraph.CreateTexture(albedoDesc);
@@ -142,6 +155,7 @@ namespace UnityEngine.Rendering.Universal
             specularAlbedo = renderGraph.CreateTexture(albedoDesc);
             normalRoughness = renderGraph.CreateTexture(normalRoughnessDesc);
             hitDistance = renderGraph.CreateTexture(hitDistDesc);
+            emission = renderGraph.CreateTexture(emissionDesc);
 
             using (var builder = renderGraph.AddComputePass<RenderGraphPassData>(kPassName, out var passData, s_ProfilingSampler))
             {
@@ -153,6 +167,7 @@ namespace UnityEngine.Rendering.Universal
                 passData.specularAlbedo = specularAlbedo;
                 passData.normalRoughness = normalRoughness;
                 passData.hitDistance = hitDistance;
+                passData.emission = emission;
 
                 // Camera parameters
                 Matrix4x4 viewMatrix = cameraData.GetViewMatrix();
@@ -171,6 +186,7 @@ namespace UnityEngine.Rendering.Universal
                 builder.UseTexture(specularAlbedo, AccessFlags.Write);
                 builder.UseTexture(normalRoughness, AccessFlags.Write);
                 builder.UseTexture(hitDistance, AccessFlags.Write);
+                builder.UseTexture(emission, AccessFlags.Write);
 
                 builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);
@@ -198,6 +214,7 @@ namespace UnityEngine.Rendering.Universal
                     cmd.SetRayTracingTextureParam(data.rayTracingShader, s_GBufferSpecularAlbedoId, data.specularAlbedo);
                     cmd.SetRayTracingTextureParam(data.rayTracingShader, s_GBufferNormalRoughnessId, data.normalRoughness);
                     cmd.SetRayTracingTextureParam(data.rayTracingShader, s_GBufferHitDistanceId, data.hitDistance);
+                    cmd.SetRayTracingTextureParam(data.rayTracingShader, s_GBufferEmissionId, data.emission);
 
                     // Dispatch rays
                     cmd.DispatchRays(data.rayTracingShader, "GBufferRayGeneration", data.dispatchWidth, data.dispatchHeight, 1);

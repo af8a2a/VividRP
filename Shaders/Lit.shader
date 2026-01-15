@@ -755,6 +755,7 @@ Shader "Universal Render Pipeline/Lit"
             #pragma shader_feature_local_raytracing _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
             #pragma shader_feature_local_raytracing _OCCLUSIONMAP
             #pragma shader_feature_local_raytracing _SPECULAR_SETUP
+            #pragma shader_feature_local_raytracing _ _EMISSION
 
             // List all the attributes needed in raytracing shader
             #define ATTRIBUTES_NEED_TEXCOORD0

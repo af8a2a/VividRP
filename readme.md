@@ -60,7 +60,7 @@ This package provides a custom implementation of Unity's **Universal Render Pipe
     - [x] HBAO
     - [x] XeGTAO
     - [x] RTAO
-  - [ ] Referenced PathTracing
+  - [x] Referenced PathTracing
   - [ ] SDFGI(Lumen Like)
   - [ ] DDGI
   - [ ] RESTIR DI
@@ -108,7 +108,7 @@ This package provides a custom implementation of Unity's **Universal Render Pipe
   - [x] DLSS 4.5
     - [x] DLSS Ray Reconstruction
     - [x] DLSS Super Resolution
-  - [x] SHARC(Spatially Hashed Radiance Cache)
+  - [x] SHARC(Spatially Hashed Radiance Cache)(SM 6.6)
 
 
 

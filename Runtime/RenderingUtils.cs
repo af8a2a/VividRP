@@ -167,6 +167,17 @@ namespace UnityEngine.Rendering.Universal
             cmd.SetGlobalVector(Shader.PropertyToID("_ScaleBiasRt"), scaleBiasRt);
         }
 
+        internal static void SetupOffscreenUIViewportParams(Material material, ref Rect pixelRect, bool isRenderToBackBufferTarget)
+        {
+            Vector4 offscreenUIViewportParams = new Vector4(0f, 0f, 1f, 1f);
+            if (isRenderToBackBufferTarget)
+            {
+                var rcpScreenSize = new Vector2(1f / Screen.width, 1f / Screen.height);
+                offscreenUIViewportParams = new Vector4(pixelRect.x * rcpScreenSize.x, pixelRect.y * rcpScreenSize.y, pixelRect.width * rcpScreenSize.x, pixelRect.height * rcpScreenSize.y);
+            }
+            material.SetVector(ShaderPropertyId.offscreenUIViewportParams, offscreenUIViewportParams);
+        }
+
         // This is used to render materials that contain built-in shader passes not compatible with URP.
         // It will render those legacy passes with error/pink shader.
         [Conditional("DEVELOPMENT_BUILD"), Conditional("UNITY_EDITOR")]
@@ -275,6 +286,22 @@ namespace UnityEngine.Rendering.Universal
 
             // Should we also check if the format has stencil and check stencil resolve capability only in that case?
             return SystemInfo.supportsMultisampleResolveDepth && SystemInfo.supportsMultisampleResolveStencil;
+        }
+
+        internal static bool ShouldDepthAttachmentBindMS()
+        {
+            bool canResolveDepth = RenderingUtils.MultisampleDepthResolveSupported();
+            var canSampleMSAADepth = SystemInfo.supportsMultisampledTextures != 0;
+
+            // If we aren't using hardware depth resolves and we have MSAA, we need to resolve depth manually by binding as an MSAA texture.
+            bool bindMS = !canResolveDepth && canSampleMSAADepth;
+
+            // binding MS surfaces is not supported by the GLES backend, and it won't be fixed after investigating
+            // the high performance impact of potential fixes, which would make it more expensive than depth prepass (fogbugz 1339401 for more info)
+            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3)
+                bindMS = false;
+
+            return bindMS; 
         }
 
         /// <summary>
@@ -761,7 +788,23 @@ namespace UnityEngine.Rendering.Universal
             return renderGraphContext.GetTextureUVOrigin(textureHandle) == TextureUVOrigin.BottomLeft;
         }
 
+#if URP_COMPATIBILITY_MODE
+        /// <summary>
+        /// Returns the scale bias vector to use for final blits to the backbuffer, based on scaling mode and y-flip platform requirements.
+        /// </summary>
+        /// <param name="source"></param>
+        /// <param name="destination"></param>
+        /// <param name="cameraData"></param>
+        /// <returns></returns>
+        internal static Vector4 GetFinalBlitScaleBias(RTHandle source, RTHandle destination, UniversalCameraData cameraData)
+        {
+            Vector2 scale = source.useScaling ? new Vector2(source.rtHandleProperties.rtHandleScale.x, source.rtHandleProperties.rtHandleScale.y) : Vector2.one;
+            var yflip = cameraData.IsRenderTargetProjectionMatrixFlipped(destination);
+            Vector4 scaleBias = !yflip ? new Vector4(scale.x, -scale.y, 0, scale.y) : new Vector4(scale.x, scale.y, 0, 0);
 
+            return scaleBias;
+        }
+#endif
         internal static Vector4 GetFinalBlitScaleBias(in RasterGraphContext renderGraphContext, in TextureHandle source, in TextureHandle destination)
         {
             RTHandle srcRTHandle = source;

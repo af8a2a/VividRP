@@ -518,6 +518,12 @@ namespace UnityEngine.Rendering.Universal
 
         // Additional lights settings
         [SerializeField] LightRenderingMode m_AdditionalLightsRenderingMode = LightRenderingMode.PerPixel;
+
+#if UNITY_META_QUEST
+#if UNITY_EDITOR // multi_compile _ META_QUEST_LIGHTUNROLL (only on  meta platforms)
+        [ShaderKeywordFilter.RemoveIfNot(1, keywordNames: ShaderKeywordStrings.META_QUEST_LIGHTUNROLL)]
+#endif
+#endif
         [SerializeField] int m_AdditionalLightsPerObjectLimit = 4;
         [SerializeField] bool m_AdditionalLightShadowsSupported = false;
         [SerializeField] ShadowResolution m_AdditionalLightsShadowmapResolution = ShadowResolution._2048;
@@ -1005,26 +1011,6 @@ namespace UnityEngine.Rendering.Universal
                 }
 
                 return result;
-            }
-        }
-
-        internal GraphicsFormat colorFormat
-        {
-            get
-            {
-                if (!supportsHDR)
-                {
-                    return GraphicsFormat.R8G8B8A8_SRGB;
-                }
-
-                if (hdrColorBufferPrecision is HDRColorBufferPrecision._32Bits)
-                {
-                    return GraphicsFormat.B10G11R11_UFloatPack32;
-                }
-                else
-                {
-                    return GraphicsFormat.R16G16B16A16_SFloat;
-                }
             }
         }
 
@@ -1690,6 +1676,9 @@ namespace UnityEngine.Rendering.Universal
         /// <inheritdoc/>
         public override string renderPipelineShaderTag => UniversalRenderPipeline.k_ShaderTagName;
 
+        /// <inheritdoc/>
+        protected override bool requiresCompatibleRenderPipelineGlobalSettings => true;
+
         /// <summary>Names used for display of rendering layer masks.</summary>
         [Obsolete("This property is obsolete. Use RenderingLayerMask API and Tags & Layers project settings instead. #from(2023.3)")]
         public override string[] renderingLayerMaskNames => RenderingLayerMask.GetDefinedRenderingLayerNames();
@@ -2057,5 +2046,6 @@ namespace UnityEngine.Rendering.Universal
                 ;
             }
         }
+
     }
 }

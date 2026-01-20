@@ -72,7 +72,10 @@ TEXTURE2D_X (_GBuffer6);
 
 TEXTURE2D(_SSRLightingTexture);
 
-RWTexture2D<float4> _LightingTexture;
+Texture2D<float4> _LightingTexture;
+RWTexture2D<float4> _OutputTexture;
+
+
 
 TEXTURE2D_X_FLOAT(_RaytracingShadowTexture);
 
@@ -243,5 +246,5 @@ void DeferredLighting(uint3 dispatchThreadId : SV_DispatchThreadID, uint2 groupT
     specularLighting *= GetCurrentExposureMultiplier();
 
     float3 emission = _LightingTexture[coordSS].rgb;
-    _LightingTexture[coordSS] = float4(diffuseLighting + specularLighting + emission, 1.0);;
+    _OutputTexture[coordSS] = float4(diffuseLighting + specularLighting + emission, 1.0);;
 }

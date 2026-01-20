@@ -34,7 +34,7 @@ namespace UnityEngine.Rendering.Universal
         static void CreatePostProcessData()
         {
             var icon = EditorGUIUtility.IconContent("ScriptableObject Icon").image as Texture2D;
-            ProjectWindowUtil.StartNameEditingIfProjectWindowExists(0, CreateInstance<CreatePostProcessDataAsset>(), "CustomPostProcessData.asset", icon, null);
+            ProjectWindowUtil.StartNameEditingIfProjectWindowExists(EntityId.None, CreateInstance<CreatePostProcessDataAsset>(), "CustomPostProcessData.asset", icon, null);
         }
 
         internal static PostProcessData GetDefaultPostProcessData()
@@ -233,7 +233,7 @@ namespace UnityEngine.Rendering.Universal
             /// <summary>
             /// Pre-baked Blue noise textures.
             /// </summary>
-            [ResourceFormattedPaths("Textures/BlueNoise16/L/LDR_LLL1_{0}.png", 0, 32)]
+            // [ResourceFormattedPaths("Textures/BlueNoise16/L/LDR_LLL1_{0}.png", 0, 32)]
             public Texture2D[] blueNoise16LTex;
 
             /// <summary>

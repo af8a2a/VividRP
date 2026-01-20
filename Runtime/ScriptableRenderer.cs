@@ -222,8 +222,6 @@ namespace UnityEngine.Rendering.Universal
             {
                 cameraWidth = (float)cameraTargetSizeCopy.x;
                 cameraHeight = (float)cameraTargetSizeCopy.y;
-
-                useRenderPassEnabled = false;
             }
 
             if (camera.allowDynamicResolution)
@@ -444,8 +442,6 @@ namespace UnityEngine.Rendering.Universal
         // Trying to access the camera target before or after might be that the pipeline texture have already been disposed.
         bool m_IsPipelineExecuting = false;
 
-        internal bool useRenderPassEnabled = false;
-
         ContextContainer m_frameData = new();
         internal ContextContainer frameData => m_frameData;
 
@@ -481,7 +477,6 @@ namespace UnityEngine.Rendering.Universal
                 feature.Create();
                 m_RendererFeatures.Add(feature);
             }
-            useRenderPassEnabled = data.useNativeRenderPass;
             m_ActiveRenderPassQueue.Clear();
         }
 
@@ -641,7 +636,7 @@ namespace UnityEngine.Rendering.Universal
             }
         }
 
-        internal void SetupRenderGraphCameraProperties(RenderGraph renderGraph, TextureHandle target)
+        internal void SetupRenderGraphCameraProperties(RenderGraph renderGraph, in TextureHandle target)
         {
             using (var builder = renderGraph.AddRasterRenderPass<PassData>(Profiling.setupCamera.name, out var passData,
                 Profiling.setupCamera))
@@ -707,7 +702,7 @@ namespace UnityEngine.Rendering.Universal
         /// <param name="depth"></param>
         /// <param name="gizmoSubset"></param>
         /// <param name="renderingData"></param>
-        internal void DrawRenderGraphGizmos(RenderGraph renderGraph, ContextContainer frameData, TextureHandle color, TextureHandle depth, GizmoSubset gizmoSubset)
+        internal void DrawRenderGraphGizmos(RenderGraph renderGraph, ContextContainer frameData, in TextureHandle color, in TextureHandle depth, GizmoSubset gizmoSubset)
         {
 #if UNITY_EDITOR
             UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
@@ -746,7 +741,7 @@ namespace UnityEngine.Rendering.Universal
             public RendererListHandle wireOverlayList;
         };
 
-        internal void DrawRenderGraphWireOverlay(RenderGraph renderGraph, ContextContainer frameData, TextureHandle color)
+        internal void DrawRenderGraphWireOverlay(RenderGraph renderGraph, ContextContainer frameData, in TextureHandle color)
         {
 #if UNITY_EDITOR
             UniversalCameraData cameraData = frameData.Get<UniversalCameraData>();
@@ -1183,7 +1178,6 @@ namespace UnityEngine.Rendering.Universal
             // doing so, we avoid storing costly MSAA samples back to system memory for nothing
             bool canOptimizeScreenMSAASamples = UniversalRenderPipeline.canOptimizeScreenMSAASamples
                                                 && useIntermediateColorTarget
-                                                && renderGraph.nativeRenderPassesEnabled
                                                 && Screen.msaaSamples > 1;
 
             if (canOptimizeScreenMSAASamples)

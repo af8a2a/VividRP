@@ -1,4 +1,3 @@
-#if false
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
 
@@ -71,4 +70,3 @@ namespace UnityEditor.Rendering.Universal
         }
     }
 }
-#endif

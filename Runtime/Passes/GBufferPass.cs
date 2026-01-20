@@ -59,11 +59,6 @@ namespace UnityEngine.Rendering.Universal.Internal
             }
         }
 
-        public void Dispose()
-        {
-            m_DeferredLights?.ReleaseGbufferResources();
-        }
-        
         static void ExecutePass(RasterCommandBuffer cmd, PassData data, RendererList rendererList, RendererList errorRendererList)
         {
             bool usesRenderingLayers = data.deferredLights.UseRenderingLayers && !data.deferredLights.HasRenderingLayerPrepass;
@@ -130,7 +125,7 @@ namespace UnityEngine.Rendering.Universal.Internal
             stateBlocks.Dispose();
         }
 
-        internal void Render(RenderGraph renderGraph, ContextContainer frameData, TextureHandle cameraColor, TextureHandle cameraDepth, bool setGlobalTextures, uint batchLayerMask = uint.MaxValue)
+        internal void Render(RenderGraph renderGraph, ContextContainer frameData, bool setGlobalTextures, uint batchLayerMask = uint.MaxValue)
         {
             var pathTracing =
                 VolumeManager.instance.stack.GetComponent<GlobalIllumination>().technique.value is GlobalIlluminationTechnique.ReferencedPathTracing;
@@ -145,8 +140,11 @@ namespace UnityEngine.Rendering.Universal.Internal
             using var builder = renderGraph.AddRasterRenderPass<PassData>(passName, out var passData, profilingSampler);
             bool useCameraRenderingLayersTexture = m_DeferredLights.UseRenderingLayers && !m_DeferredLights.UseLightLayers;
 
-            var gbuffer = m_DeferredLights.GbufferTextureHandles;
-            for (int i = 0; i < m_DeferredLights.GBufferSliceCount; i++)
+            var cameraColor = resourceData.activeColorTexture;
+            var cameraDepth = resourceData.activeDepthTexture;
+            var gbuffer = resourceData.gBuffer;
+
+            for (int i = 0; i < gbuffer.Length; i++)
             {
                 Debug.Assert(gbuffer[i].IsValid());
                 builder.SetRenderAttachment(gbuffer[i], i, AccessFlags.Write);
@@ -198,11 +196,11 @@ namespace UnityEngine.Rendering.Universal.Internal
             if (gbuffer[deferredLights.GBufferNormalSmoothnessIndex].IsValid())
                 builder.SetGlobalTextureAfterPass(gbuffer[deferredLights.GBufferNormalSmoothnessIndex], s_CameraNormalsTextureID);
 
-            if (deferredLights.UseRenderingLayers && gbuffer[deferredLights.GBufferRenderingLayers].IsValid())
-            {
-                builder.SetGlobalTextureAfterPass(gbuffer[deferredLights.GBufferRenderingLayers], Shader.PropertyToID(DeferredLights.k_GBufferNames[deferredLights.GBufferRenderingLayers]));
-                builder.SetGlobalTextureAfterPass(gbuffer[deferredLights.GBufferRenderingLayers], s_CameraRenderingLayersTextureID);
-            }
+            // if (deferredLights.UseRenderingLayers && gbuffer[deferredLights.GBufferRenderingLayers].IsValid())
+            // {
+            //     builder.SetGlobalTextureAfterPass(gbuffer[deferredLights.GBufferRenderingLayers], Shader.PropertyToID(DeferredLights.k_GBufferNames[deferredLights.GBufferRenderingLayers]));
+            //     builder.SetGlobalTextureAfterPass(gbuffer[deferredLights.GBufferRenderingLayers], s_CameraRenderingLayersTextureID);
+            // }
         }
 
     }

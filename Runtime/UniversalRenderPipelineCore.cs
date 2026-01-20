@@ -852,7 +852,7 @@ namespace UnityEngine.Rendering.Universal
         public static readonly int overlayUITexture = Shader.PropertyToID("_OverlayUITexture");
         public static readonly int hdrOutputLuminanceParams = Shader.PropertyToID("_HDROutputLuminanceParams");
         public static readonly int hdrOutputGradingParams = Shader.PropertyToID("_HDROutputGradingParams");
-
+        public static readonly int offscreenUIViewportParams = Shader.PropertyToID("_OffscreenUIViewportParams");
         public static readonly int screenSpaceIrradiance = Shader.PropertyToID("_ScreenSpaceIrradiance");
     }
 
@@ -982,6 +982,9 @@ namespace UnityEngine.Rendering.Universal
         public static GlobalKeyword _ENABLE_ALPHA_OUTPUT;
         public static GlobalKeyword ForwardPlus; // Backward compatibility. Deprecated in 6.1.
         public static GlobalKeyword ScreenSpaceReflection;
+#if UNITY_META_QUEST
+        public static GlobalKeyword META_QUEST_LIGHTUNROLL;
+#endif
 
         // TODO: Move following keywords to Local keywords?
         // https://docs.unity3d.com/ScriptReference/Rendering.LocalKeyword.html
@@ -1096,7 +1099,9 @@ namespace UnityEngine.Rendering.Universal
             ShaderGlobalKeywords.LinearToSRGBConversion = GlobalKeyword.Create(ShaderKeywordStrings.LinearToSRGBConversion);
             ShaderGlobalKeywords._ENABLE_ALPHA_OUTPUT = GlobalKeyword.Create(ShaderKeywordStrings._ENABLE_ALPHA_OUTPUT);
             ShaderGlobalKeywords.ForwardPlus = GlobalKeyword.Create(ShaderKeywordStrings.ForwardPlus); // Backward compatibility. Deprecated in 6.1.
-            ShaderGlobalKeywords.ScreenSpaceReflection = GlobalKeyword.Create(ShaderKeywordStrings.ScreenSpaceReflection);
+#if UNITY_META_QUEST
+            ShaderGlobalKeywords.META_QUEST_LIGHTUNROLL = GlobalKeyword.Create(ShaderKeywordStrings.META_QUEST_LIGHTUNROLL);
+#endif
 
         }
     }
@@ -1430,14 +1435,16 @@ namespace UnityEngine.Rendering.Universal
         /// <summary> Deprecated keyword. Use ClusterLightLoop instead. </summary>
         internal const string ForwardPlus = "_FORWARD_PLUS"; // Backward compatibility. Deprecated in 6.1.
 
+#if UNITY_META_QUEST
+        /// <summary> Unroll light loop if there is only one additional light on Meta Quest device . </summary>
+        internal const string META_QUEST_LIGHTUNROLL = "META_QUEST_LIGHTUNROLL";
+#endif
+
         /// <summary> Keyword used for Multi Sampling Anti-Aliasing (MSAA) with 2 per pixel sample count. </summary>
         public const string Msaa2 = "_MSAA_2";
 
         /// <summary> Keyword used for Multi Sampling Anti-Aliasing (MSAA) with 4 per pixel sample count. </summary>
         public const string Msaa4 = "_MSAA_4";
-
-        /// <summary> Keyword used for ScreenSpaceReflection.</summary>
-        public const string ScreenSpaceReflection = "_SCREEN_SPACE_REFLECTION";
     }
 
     public sealed partial class UniversalRenderPipeline
@@ -1503,8 +1510,9 @@ namespace UnityEngine.Rendering.Universal
             int lastBaseCameraIndex = 0;
             for (int i = 0; i < cameras.Count; i++)
             {
+                // Assume a camera is a base camera if no UniversalAdditionalCameraData is available (e.g., for cameras created at runtime).
                 cameras[i].TryGetComponent<UniversalAdditionalCameraData>(out var baseCameraAdditionalData);
-                if (baseCameraAdditionalData?.renderType == CameraRenderType.Base)
+                if (baseCameraAdditionalData == null || baseCameraAdditionalData.renderType == CameraRenderType.Base)
                     lastBaseCameraIndex = i;
             }
             return lastBaseCameraIndex;
@@ -1541,7 +1549,7 @@ namespace UnityEngine.Rendering.Universal
         }
 
         internal static RenderTextureDescriptor CreateRenderTextureDescriptor(Camera camera, UniversalCameraData cameraData,
-            bool isHdrEnabled, HDRColorBufferPrecision requestHDRColorBufferPrecision, int msaaSamples, bool needsAlpha, bool requiresOpaqueTexture)
+            bool isHdrEnabled, HDRColorBufferPrecision requestHDRColorBufferPrecision, int msaaSamples, bool needsAlpha)
         {
             RenderTextureDescriptor desc;
 
@@ -1966,7 +1974,7 @@ namespace UnityEngine.Rendering.Universal
         internal static void Initialize()
         {
             bool isRunningMobile = false;
-            #if ENABLE_VR && ENABLE_VR_MODULE
+            #if ENABLE_VR && ENABLE_XR_MODULE
                 #if PLATFORM_WINRT || PLATFORM_ANDROID
                     isRunningMobile = IsRunningXRMobile();
                 #endif
@@ -1978,7 +1986,7 @@ namespace UnityEngine.Rendering.Universal
             isSwitch2 = Application.platform == RuntimePlatform.Switch2;
         }
 
-#if ENABLE_VR && ENABLE_VR_MODULE
+#if ENABLE_VR && ENABLE_XR_MODULE
     #if PLATFORM_WINRT || PLATFORM_ANDROID
         // XR mobile platforms are not treated as dedicated mobile platforms in Core. Handle them specially here. (Quest and HL).
         private static List<XR.XRDisplaySubsystem> displaySubsystemList = new List<XR.XRDisplaySubsystem>();

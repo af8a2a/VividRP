@@ -276,18 +276,6 @@ namespace UnityEngine.Rendering.Universal
             HDROutputUtils.ConfigureHDROutput(material, hdrDisplayColorGamut, hdrOperations);
             CoreUtils.SetKeyword(material, ShaderKeywordStrings.HDROverlay, rendersOverlayUI);
         }
-        
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        internal static void SetupHDROutput(Material material, HDROutputUtils.HDRDisplayInformation hdrDisplayInformation, ColorGamut hdrDisplayColorGamut, VividToneMapping tonemapping, HDROutputUtils.Operation hdrOperations, bool rendersOverlayUI)
-        {
-            Vector4 hdrOutputLuminanceParams;
-            UniversalRenderPipeline.GetHDROutputLuminanceParameters(hdrDisplayInformation, hdrDisplayColorGamut, tonemapping, out hdrOutputLuminanceParams);
-            material.SetVector(ShaderPropertyId.hdrOutputLuminanceParams, hdrOutputLuminanceParams);
-
-            HDROutputUtils.ConfigureHDROutput(material, hdrDisplayColorGamut, hdrOperations);
-            CoreUtils.SetKeyword(material, ShaderKeywordStrings.HDROverlay, rendersOverlayUI);
-        }
-
 #endregion
 
 #region Blit

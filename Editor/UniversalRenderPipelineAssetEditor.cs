@@ -1,4 +1,3 @@
-#if false
 using UnityEditorInternal;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -161,4 +160,3 @@ namespace UnityEditor.Rendering.Universal
         }
     }
 }
-#endif

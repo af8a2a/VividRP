@@ -3,7 +3,6 @@ using UnityEngine.Rendering.Universal;
 
 namespace UnityEditor.Rendering.Universal
 {
-#if false
     [CustomEditor(typeof(ScreenSpaceShadows))]
     internal class ScreenSpaceShadowsEditor : Editor
     {
@@ -34,5 +33,4 @@ namespace UnityEditor.Rendering.Universal
             EditorGUILayout.HelpBox(Styles.k_NoSettingsHelpBox, MessageType.Info);
         }
     }
-#endif
 }

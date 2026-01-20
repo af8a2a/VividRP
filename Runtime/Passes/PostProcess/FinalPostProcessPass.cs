@@ -33,6 +33,13 @@ namespace UnityEngine.Rendering.Universal
             m_Material = PostProcessUtils.LoadShader(shader, passName);
             m_IsValid = m_Material != null;
             m_FilmGrainTextures = filmGrainTextures;
+
+            // Defaults
+            m_FilteringOperation = FilteringOperation.Linear;   // Common case.
+            m_HdrOperations = HDROutputUtils.Operation.None;    // HDR disabled by default.
+            m_ApplySrgbEncoding = false;    // sRGB conversion is typically automatic based on format.
+            m_ApplyFxaa = true; // Upscale disabled by default. Apply FXAA in final pass.
+            m_RenderOverlayUI = false;  // HDR disabled by default. HDR only.
         }
 
         public override void Dispose()
@@ -187,8 +194,11 @@ namespace UnityEngine.Rendering.Universal
                     if (applySrgbEncoding)
                         material.EnableKeyword(ShaderKeywordStrings.LinearToSRGBConversion);
 
-                    if(hdrColorEncoding)
+                    if (hdrColorEncoding)
+                    {
                         PostProcessUtils.SetupHDROutput(material, cameraData.hdrDisplayInformation, cameraData.hdrDisplayColorGamut, data.tonemapping, data.hdrOperations, cameraData.rendersOverlayUI);
+                        RenderingUtils.SetupOffscreenUIViewportParams(material, ref cameraData.pixelRect, cameraData.resolveFinalTarget);
+                    }
 
                     material.SetVector(ShaderConstants._SourceSize, PostProcessUtils.CalcShaderSourceSize(sourceTextureHdl));
 

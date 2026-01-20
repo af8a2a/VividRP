@@ -84,6 +84,8 @@ namespace UnityEngine.Rendering.Universal
             internal UniversalShadowData shadowData;
 
             internal TextureHandle lightingHandle;
+            internal TextureHandle colorTexture;
+
             internal TextureHandle stencilHandle;
             internal TextureHandle[] gbuffer;
             // internal DeferredLights deferredLights;
@@ -155,6 +157,8 @@ namespace UnityEngine.Rendering.Universal
 
                     cmd.SetComputeBufferParam(data.deferredLightingCS, kernelIndex, "g_TileList", data.tileListBuffer);
                     cmd.SetComputeTextureParam(data.deferredLightingCS, kernelIndex, "_LightingTexture", data.lightingHandle);
+                    cmd.SetComputeTextureParam(data.deferredLightingCS, kernelIndex, "_OutputTexture", data.colorTexture);
+
                     cmd.SetComputeTextureParam(data.deferredLightingCS, kernelIndex, "_StencilTexture", data.stencilHandle, 0, RenderTextureSubElement.Stencil);
 
                     cmd.SetComputeBufferParam(data.deferredLightingCS, kernelIndex, "_AmbientProbeData", data.ambientProbe);
@@ -202,7 +206,14 @@ namespace UnityEngine.Rendering.Universal
                 passData.lightData = lightData;
                 passData.shadowData = shadowData;
 
+
                 passData.lightingHandle = resourceData.activeColorTexture;
+
+                passData.colorTexture = renderGraph.CreateTexture(new TextureDesc(cameraData.actualWidth, cameraData.actualHeight)
+                {
+                    format = resourceData.activeColorTexture.GetDescriptor(renderGraph).format,
+                    enableRandomWrite = true,
+                });
                 passData.stencilHandle = resourceData.activeDepthTexture;
 
                 passData.deferredLightingCS = m_DeferredLightingCS;
@@ -248,7 +259,9 @@ namespace UnityEngine.Rendering.Universal
 
                     builder.UseTexture(passData.RaytracingShadowTexture);
                 }
-                builder.UseTexture(passData.lightingHandle, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.lightingHandle, AccessFlags.Read);
+                builder.UseTexture(passData.colorTexture, AccessFlags.Write);
+
                 builder.UseTexture(passData.stencilHandle, AccessFlags.Read);
                 builder.UseBuffer(passData.dispatchIndirectBuffer, AccessFlags.ReadWrite);
                 builder.UseBuffer(passData.tileListBuffer, AccessFlags.ReadWrite);

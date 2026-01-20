@@ -32,12 +32,12 @@ namespace UnityEditor.Rendering.Universal
             Quality = 1 << 5,
         }
 
-        internal static void RegisterEditor(VividRenderPipelineAssetEditor editor)
+        internal static void RegisterEditor(UniversalRenderPipelineAssetEditor editor)
         {
             k_AdditionalPropertiesState.RegisterEditor(editor);
         }
 
-        internal static void UnregisterEditor(VividRenderPipelineAssetEditor editor)
+        internal static void UnregisterEditor(UniversalRenderPipelineAssetEditor editor)
         {
             k_AdditionalPropertiesState.UnregisterEditor(editor);
         }
@@ -114,7 +114,7 @@ namespace UnityEditor.Rendering.Universal
 
         static void DrawRendering(SerializedUniversalRenderPipelineAsset serialized, Editor ownerEditor)
         {
-            if (ownerEditor is VividRenderPipelineAssetEditor urpAssetEditor)
+            if (ownerEditor is UniversalRenderPipelineAssetEditor urpAssetEditor)
             {
                 EditorGUILayout.Space();
                 urpAssetEditor.rendererList.DoLayoutList();

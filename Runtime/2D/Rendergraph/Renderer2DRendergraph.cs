@@ -40,9 +40,11 @@ namespace UnityEngine.Rendering.Universal
         RTHandle m_RenderGraphBackbufferColorHandle;
         RTHandle m_RenderGraphBackbufferDepthHandle;
         RTHandle m_CameraSortingLayerHandle;
+        static RTHandle m_OffscreenUIColorHandle;
 
         Material m_BlitMaterial;
         Material m_BlitHDRMaterial;
+        Material m_BlitOffscreenUICoverMaterial;
         Material m_SamplingMaterial;
 
         // 2D specific render passes
@@ -55,6 +57,7 @@ namespace UnityEngine.Rendering.Universal
         UpscalePass m_UpscalePass;
         CopyCameraSortingLayerPass m_CopyCameraSortingLayerPass;
         FinalBlitPass m_FinalBlitPass;
+        FinalBlitPass m_OffscreenUICoverPrepass;
         DrawScreenSpaceUIPass m_DrawOffscreenUIPass;
         DrawScreenSpaceUIPass m_DrawOverlayUIPass; // from HDRP code
 
@@ -97,6 +100,7 @@ namespace UnityEngine.Rendering.Universal
             {
                 m_BlitMaterial = CoreUtils.CreateEngineMaterial(shadersResources.coreBlitPS);
                 m_BlitHDRMaterial = CoreUtils.CreateEngineMaterial(shadersResources.blitHDROverlay);
+                m_BlitOffscreenUICoverMaterial = CoreUtils.CreateEngineMaterial(shadersResources.blitHDROverlay);
                 m_SamplingMaterial = CoreUtils.CreateEngineMaterial(shadersResources.samplingPS);
             }
 
@@ -105,16 +109,16 @@ namespace UnityEngine.Rendering.Universal
                 m_CopyDepthPass = new CopyDepthPass(
                     RenderPassEvent.AfterRenderingTransparents,
                     renderer2DResources.copyDepthPS,
-                    shouldClear: true,
-                    copyResolvedDepth: RenderingUtils.MultisampleDepthResolveSupported());
+                    shouldClear: true);
             }
 
             m_UpscalePass = new UpscalePass(RenderPassEvent.AfterRenderingPostProcessing, m_BlitMaterial);
             m_CopyCameraSortingLayerPass = new CopyCameraSortingLayerPass(m_BlitMaterial);
             m_FinalBlitPass = new FinalBlitPass(RenderPassEvent.AfterRendering + k_FinalBlitPassQueueOffset, m_BlitMaterial, m_BlitHDRMaterial);
+            m_OffscreenUICoverPrepass = new FinalBlitPass(RenderPassEvent.BeforeRenderingPostProcessing, m_BlitMaterial, m_BlitOffscreenUICoverMaterial);
 
-            m_DrawOffscreenUIPass = new DrawScreenSpaceUIPass(RenderPassEvent.BeforeRenderingPostProcessing, true);
-            m_DrawOverlayUIPass = new DrawScreenSpaceUIPass(RenderPassEvent.AfterRendering + k_AfterFinalBlitPassQueueOffset, false); // after m_FinalBlitPass
+            m_DrawOffscreenUIPass = new DrawScreenSpaceUIPass(RenderPassEvent.BeforeRenderingPostProcessing);
+            m_DrawOverlayUIPass = new DrawScreenSpaceUIPass(RenderPassEvent.AfterRendering + k_AfterFinalBlitPassQueueOffset); // after m_FinalBlitPass
 
             m_Renderer2DData = data;
             m_Renderer2DData.lightCullResult = new Light2DCullResult();
@@ -459,20 +463,8 @@ namespace UnityEngine.Rendering.Universal
                     depthDescriptor.useMipMap = false;
                     depthDescriptor.autoGenerateMips = false;
 
-                    bool hasMSAA = depthDescriptor.msaaSamples > 1 && (SystemInfo.supportsMultisampledTextures != 0);
-                    bool resolveDepth = RenderingUtils.MultisampleDepthResolveSupported() && renderGraph.nativeRenderPassesEnabled;
-
-                    depthDescriptor.bindMS = !resolveDepth && hasMSAA;
-
-                    // binding MS surfaces is not supported by the GLES backend
-                    if (IsGLESDevice())
-                        depthDescriptor.bindMS = false;
-
-                    if (m_CopyDepthPass != null)
-                    {
-                        m_CopyDepthPass.MsaaSamples = depthDescriptor.msaaSamples;
-                        m_CopyDepthPass.m_CopyResolvedDepth = !depthDescriptor.bindMS;
-                    }
+                    bool hasMSAA = depthDescriptor.msaaSamples > 1;
+                    depthDescriptor.bindMS = hasMSAA && RenderingUtils.ShouldDepthAttachmentBindMS();
 
                     depthDescriptor.graphicsFormat = GraphicsFormat.None;
                     depthDescriptor.depthStencilFormat = CoreUtils.GetDefaultDepthStencilFormat();
@@ -545,6 +537,9 @@ namespace UnityEngine.Rendering.Universal
 
             if (RequiresDepthCopyPass())
                 CreateCameraDepthCopyTexture(renderGraph, cameraTargetDescriptor);
+
+            if (cameraData.isHDROutputActive && cameraData.rendersOverlayUI)
+                CreateOffscreenUITexture(renderGraph, cameraTargetDescriptor);
         }
 
         void CreateCameraNormalsTextures(RenderGraph renderGraph, RenderTextureDescriptor descriptor, int width, int height)
@@ -656,6 +651,15 @@ namespace UnityEngine.Rendering.Universal
             depthDescriptor.depthStencilFormat = GraphicsFormat.None;
 
             resourceData.cameraDepthTexture = UniversalRenderer.CreateRenderGraphTexture(renderGraph, depthDescriptor, "_CameraDepthTexture", true);
+        }
+
+        void CreateOffscreenUITexture(RenderGraph renderGraph, in RenderTextureDescriptor descriptor)
+        {
+            UniversalResourceData resourceData = frameData.Get<CommonResourceData>();
+            TextureDesc textureDesc = new TextureDesc(descriptor);
+            DrawScreenSpaceUIPass.ConfigureOffscreenUITextureDesc(ref textureDesc);
+            RenderingUtils.ReAllocateHandleIfNeeded(ref m_OffscreenUIColorHandle, textureDesc, name: "_OverlayUITexture");
+            resourceData.overlayUITexture = renderGraph.ImportTexture(m_OffscreenUIColorHandle);
         }
 
         public override void OnBeginRenderGraphFrame()
@@ -827,15 +831,7 @@ namespace UnityEngine.Rendering.Universal
             // Default Render Pass
             for (var i = 0; i < batchCount; i++)
             {
-                if (!renderGraph.nativeRenderPassesEnabled && i == 0)
-                {
-                    RTClearFlags clearFlags = (RTClearFlags)GetCameraClearFlag(cameraData);
-                    if (clearFlags != RTClearFlags.None)
-                        ClearTargetsPass.Render(renderGraph, commonResourceData.activeColorTexture, commonResourceData.activeDepthTexture, clearFlags, cameraData.backgroundColor);
-                }
-
                 RecordCustomRenderGraphPasses(renderGraph, RenderPassEvent2D.BeforeRenderingSprites, i);
-
 
                 LayerUtility.GetFilterSettings(m_Renderer2DData, layerBatches[i], out var filterSettings);
                 m_RendererPass.Render(renderGraph, frameData, i, ref filterSettings);
@@ -867,9 +863,17 @@ namespace UnityEngine.Rendering.Universal
             bool outputToHDR = cameraData.isHDROutputActive;
             if (shouldRenderUI && outputToHDR)
             {
-                TextureHandle overlayUI;
-                m_DrawOffscreenUIPass.RenderOffscreen(renderGraph, frameData, CoreUtils.GetDefaultDepthStencilFormat(), out overlayUI);
-                commonResourceData.overlayUITexture = overlayUI;
+                if (cameraData.rendersOffscreenUI)
+                {
+                    m_DrawOffscreenUIPass.RenderOffscreen(renderGraph, frameData, CoreUtils.GetDefaultDepthStencilFormat(), commonResourceData.overlayUITexture);
+                    if (cameraData.blitsOffscreenUICover)
+                        m_OffscreenUICoverPrepass.Render(renderGraph, cameraData, commonResourceData, renderGraph.defaultResources.blackTexture, true);
+                }
+                else
+                {
+                    // When the first camera renders the shared offscreen UI texture, register it as a global texture so subsequent cameras can use it in their final passes.
+                    RenderGraphUtils.SetGlobalTexture(renderGraph, ShaderPropertyId.overlayUITexture, commonResourceData.overlayUITexture);
+                }
             }
         }
 
@@ -1028,6 +1032,7 @@ namespace UnityEngine.Rendering.Universal
             m_UpscalePass.Dispose();
             m_CopyDepthPass?.Dispose();
             m_FinalBlitPass?.Dispose();
+            m_OffscreenUICoverPrepass?.Dispose();
             m_DrawOffscreenUIPass?.Dispose();
             m_DrawOverlayUIPass?.Dispose();
             m_PostProcess?.Dispose();
@@ -1045,6 +1050,7 @@ namespace UnityEngine.Rendering.Universal
 
             CoreUtils.Destroy(m_BlitMaterial);
             CoreUtils.Destroy(m_BlitHDRMaterial);
+            CoreUtils.Destroy(m_BlitOffscreenUICoverMaterial);
             CoreUtils.Destroy(m_SamplingMaterial);
 
 #if ENABLE_VR && ENABLE_XR_MODULE

@@ -171,11 +171,19 @@ namespace UnityEngine.Rendering.Universal
         [SerializeField] int m_AdditionalLightsShadowResolutionTier = AdditionalLightsShadowDefaultResolutionTier;
 
         /// <summary>
-        /// Returns the selected shadow resolution tier.
+        /// Gets or sets the selected shadow resolution tier.
+        /// Can only be modified during Play mode.
         /// </summary>
+        /// <exception cref="InvalidOperationException">Thrown when attempting to set the value outside of play mode.</exception>
         public int additionalLightsShadowResolutionTier
         {
             get { return m_AdditionalLightsShadowResolutionTier; }
+            set
+            {
+                if (!Application.isPlaying)
+                    throw new InvalidOperationException("Cannot modify additionalLightsShadowResolutionTier outside of play mode.");
+                m_AdditionalLightsShadowResolutionTier = value;
+            }
         }
 
         [SerializeField] bool m_CustomShadowLayers = false;
@@ -299,10 +307,10 @@ namespace UnityEngine.Rendering.Universal
             
             if (m_Version < Version.RenderingLayers)
             {
-// #pragma warning disable 618 // Obsolete warning
-//                 m_RenderingLayers = (uint)m_LightLayerMask;
-//                 m_ShadowRenderingLayers = (uint)m_ShadowLayerMask;
-// #pragma warning restore 618 // Obsolete warning
+#pragma warning disable 618 // Obsolete warning
+                m_RenderingLayers = (uint)m_LightLayerMask;
+                m_ShadowRenderingLayers = (uint)m_ShadowLayerMask;
+#pragma warning restore 618 // Obsolete warning
                 m_Version = Version.RenderingLayers;
             }
 
@@ -315,10 +323,10 @@ namespace UnityEngine.Rendering.Universal
             
             if (m_Version <  Version.RenderingLayersMask)
             {
-// #pragma warning disable 618 // Obsolete warning
-//                 m_RenderingLayersMask = m_RenderingLayers;
-//                 m_ShadowRenderingLayersMask = m_ShadowRenderingLayers;
-// #pragma warning restore 618 // Obsolete warning
+#pragma warning disable 618 // Obsolete warning
+                m_RenderingLayersMask = m_RenderingLayers;
+                m_ShadowRenderingLayersMask = m_ShadowRenderingLayers;
+#pragma warning restore 618 // Obsolete warning
                 m_Version = Version.RenderingLayersMask;
             }
         }

@@ -4,7 +4,6 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace UnityEngine.Rendering.Universal
 {
-    #if false
     [Serializable]
     internal class ScreenSpaceShadowsSettings
     {
@@ -241,5 +240,4 @@ namespace UnityEngine.Rendering.Universal
             }
         }
     }
-#endif
 }

@@ -41,11 +41,6 @@
             "define": "ENABLE_BURST_1_0_0_OR_NEWER"
         },
         {
-            "name": "com.unity.modules.vr",
-            "expression": "1.0.0",
-            "define": "ENABLE_VR_MODULE"
-        },
-        {
             "name": "com.unity.modules.xr",
             "expression": "1.0.0",
             "define": "ENABLE_XR_MODULE"
@@ -64,7 +59,12 @@
             "name": "com.unity.inputsystem",
             "expression": "0.0.0",
             "define": "ENABLE_INPUT_SYSTEM_PACKAGE"
-        }
+        },
+        {
+            "name": "com.unity.2d.common",
+            "expression": "13.0.0",
+            "define": "USING_2DCOMMON"
+        }        
     ],
     "noEngineReferences": false
 }

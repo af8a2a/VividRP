@@ -215,7 +215,6 @@ namespace ShaderStrippingAndPrefiltering
 
                 rendererData.renderingMode = RenderingMode.Forward;
 
-                scriptableRenderer.useRenderPassEnabled = false;
                 scriptableRendererData.stripAdditionalLightOffVariants = true;
                 scriptableRendererData.stripShadowsOffVariants = true;
 
@@ -439,7 +438,6 @@ namespace ShaderStrippingAndPrefiltering
 
             // Native Render Pass
             m_TestHelper.rendererData.renderingMode = RenderingMode.Forward;
-            m_TestHelper.scriptableRenderer.useRenderPassEnabled = true;
             expected = m_TestHelper.defaultRendererRequirements;
             expected.renderingMode = m_TestHelper.rendererData.renderingMode;
             expected.needsRenderPass = false;
@@ -447,7 +445,6 @@ namespace ShaderStrippingAndPrefiltering
             m_TestHelper.AssertRendererRequirementsAndReset(expected, actual);
 
             m_TestHelper.rendererData.renderingMode = RenderingMode.ForwardPlus;
-            m_TestHelper.scriptableRenderer.useRenderPassEnabled = true;
             expected = m_TestHelper.defaultRendererRequirements;
             expected.renderingMode = m_TestHelper.rendererData.renderingMode;
             expected.needsRenderPass = false;
@@ -455,7 +452,6 @@ namespace ShaderStrippingAndPrefiltering
             m_TestHelper.AssertRendererRequirementsAndReset(expected, actual);
 
             m_TestHelper.rendererData.renderingMode = RenderingMode.Deferred;
-            m_TestHelper.scriptableRenderer.useRenderPassEnabled = true;
             expected = m_TestHelper.defaultRendererRequirements;
             expected.renderingMode = m_TestHelper.rendererData.renderingMode;
             expected.needsRenderPass = true;
@@ -846,8 +842,6 @@ namespace ShaderStrippingAndPrefiltering
             m_TestHelper.rendererFeatures.Remove(ssaoFeature);
         }
 
-#if false
-        
         [Test]
         public void TestGetSupportedShaderFeaturesFromRendererFeatures_ScreenSpaceShadows()
         {
@@ -866,7 +860,6 @@ namespace ShaderStrippingAndPrefiltering
             expected = ShaderFeatures.None;
             m_TestHelper.AssertShaderFeaturesAndReset(expected, actual);
         }
-#endif
 
         // Screen Space Ambient Occlusion (SSAO)...
         [Test]

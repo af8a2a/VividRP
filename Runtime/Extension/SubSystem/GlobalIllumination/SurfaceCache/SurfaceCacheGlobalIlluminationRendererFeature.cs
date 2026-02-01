@@ -333,6 +333,11 @@ namespace UnityEngine.Rendering.Universal
             private SurfaceCache _cache;
             private SurfaceCacheResourceSet _resourceSet;
 
+            // Screen Probes integration
+            private ScreenProbeGather _screenProbeGather;
+            private bool _screenProbesInitialized;
+            private bool _screenProbesEnabled;
+
             private Matrix4x4 _prevClipToWorldTransform = Matrix4x4.identity;
 
             readonly private uint _environmentCubemapResolution = 32;
@@ -413,6 +418,13 @@ namespace UnityEngine.Rendering.Universal
                     EnsureResourcesLoaded(estimationParams.Method);
 
                     _cache = new SurfaceCache(_resourceSet, defragCount, volParams, estimationParams, patchFilteringParams);
+                }
+
+                // Screen Probes integration
+                _screenProbesEnabled = settings.IsScreenProbesEnabled();
+                if (_screenProbesEnabled)
+                {
+                    InitializeScreenProbes(settings);
                 }
             }
 
@@ -506,6 +518,55 @@ namespace UnityEngine.Rendering.Universal
                 return false;
             }
 
+            private void InitializeScreenProbes(GlobalIllumination settings)
+            {
+                // Get quality settings
+                settings.GetScreenProbeSettings(
+                    out uint downsampleFactor,
+                    out uint tracingResolution,
+                    out uint gatherResolution);
+
+                // Build parameters
+                var screenProbeParams = new ScreenProbeParameters
+                {
+                    DownsampleFactor = downsampleFactor,
+                    TracingOctahedronResolution = tracingResolution,
+                    GatherOctahedronResolution = gatherResolution,
+                    MaxRayDistance = settings.screenProbesMaxRayDistance.value,
+                    NearFieldMaxDistance = settings.screenProbesNearFieldDistance.value,
+                    UseImportanceSampling = settings.screenProbesUseImportanceSampling.value,
+                    UseRadianceCacheFallback = settings.screenProbesUseSurfaceCacheFallback.value,
+                    TemporalFilterStrength = settings.screenProbesTemporalFilterStrength.value,
+                    SpatialFilterRadius = settings.screenProbesSpatialFilterRadius.value,
+                    SpatialFilterSamples = (uint)settings.screenProbesSpatialFilterSamples.value,
+                    DepthRejectionThreshold = settings.screenProbesDepthRejectionThreshold.value,
+                    NormalRejectionThreshold = settings.screenProbesNormalRejectionThreshold.value,
+                    EnableVarianceClamping = settings.screenProbesEnableVarianceClamping.value
+                };
+
+                // Initialize if needed
+                if (!_screenProbesInitialized)
+                {
+                    _screenProbeGather = new ScreenProbeGather();
+                    if (_screenProbeGather.Initialize(screenProbeParams))
+                    {
+                        _screenProbesInitialized = true;
+                        Debug.Log("Screen Probes initialized successfully");
+                    }
+                    else
+                    {
+                        Debug.LogWarning("Failed to initialize Screen Probes. Please ensure ScreenProbeRenderPipelineResourceSet is configured in Graphics Settings with all compute shaders assigned. Screen Probes will be disabled.");
+                        _screenProbeGather?.Dispose();
+                        _screenProbeGather = null;
+                        _screenProbesEnabled = false;
+                    }
+                }
+                else
+                {
+                    _screenProbeGather?.UpdateParameters(screenProbeParams);
+                }
+            }
+
             public void Dispose()
             {
                 _fullResScreenIrradiances?.Release();
@@ -521,6 +582,8 @@ namespace UnityEngine.Rendering.Universal
                 _worldAdapter?.Dispose();
                 _worldUpdateScratch?.Dispose();
                 _rtContext?.Dispose();
+                _screenProbeGather?.Dispose();
+                _screenProbesInitialized = false;
             }
 
             const int k_UpscaleFactor = 4;
@@ -804,7 +867,33 @@ namespace UnityEngine.Rendering.Universal
                     }
                 }
 
-                resourceData.irradianceTexture = fullResScreenIrradiancesHandle;
+                // Screen Probes integration for near-field detail
+                TextureHandle finalIrradianceHandle = fullResScreenIrradiancesHandle;
+                if (_screenProbesEnabled && _screenProbesInitialized && _screenProbeGather != null)
+                {
+                    // Run screen probes with Surface Cache data for far-field fallback
+                    TextureHandle screenProbeIrradiance = _screenProbeGather.RecordRenderGraph(
+                        renderGraph,
+                        resourceData,
+                        cameraData,
+                        screenResolution,
+                        // Surface cache data for far-field fallback
+                        _cache.Volume.CellPatchIndices,
+                        _cache.Patches.Irradiances[outputIrradianceBufferIdx],
+                        _cache.Volume.CascadeOffsetBuffer,
+                        _cache.Volume.SpatialResolution,
+                        _cache.Volume.CascadeCount,
+                        _cache.Volume.VoxelMinSize,
+                        _cache.Volume.TargetPos
+                    );
+
+                    // Composite screen probes with surface cache
+                    // For now, screen probes replace surface cache in near-field
+                    // TODO: Add proper blending/compositing pass
+                    finalIrradianceHandle = screenProbeIrradiance;
+                }
+
+                resourceData.irradianceTexture = finalIrradianceHandle;
                 _frameIdx++;
                 _prevClipToWorldTransform = clipToWorldTransform;
             }

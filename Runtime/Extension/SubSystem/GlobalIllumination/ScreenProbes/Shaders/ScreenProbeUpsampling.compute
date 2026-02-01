@@ -1,0 +1,99 @@
+#pragma kernel UpsampleToScreen
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+// Samplers
+
+// Parameters
+uint _DownsampleFactor;
+uint _GatherOctahedronResolution;
+float _SpatialFilterRadius;
+uint _SpatialFilterSamples;
+
+// Textures
+Texture2D<float4> _ProbeRadianceAtlas;
+Texture2D<float> _DepthTexture;
+Texture2D<float4> _NormalTexture;
+
+RWTexture2D<float4> _OutputRadiance;
+
+// Octahedral mapping
+float2 OctahedralEncode(float3 n)
+{
+    n /= (abs(n.x) + abs(n.y) + abs(n.z));
+    float2 p = n.xy;
+    if (n.z < 0.0)
+    {
+        p = (1.0 - abs(p.yx)) * (step(0.0, p) * 2.0 - 1.0);
+    }
+    return p * 0.5 + 0.5;
+}
+
+// Sample probe radiance in a given direction
+float3 SampleProbeRadiance(uint2 probeCoord, float3 direction)
+{
+    // Encode direction to octahedral UV
+    float2 octUV = OctahedralEncode(direction);
+
+    // Calculate atlas coordinate
+    uint2 atlasBase = probeCoord * _GatherOctahedronResolution;
+    uint2 atlasCoord = atlasBase + uint2(octUV * float(_GatherOctahedronResolution));
+
+    // Sample with bilinear filtering
+    float4 radiance = _ProbeRadianceAtlas[atlasCoord];
+    return radiance.rgb;
+}
+
+// Bilateral upsampling
+[numthreads(8, 8, 1)]
+void UpsampleToScreen(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    float2 screenUV = (float2(pixelCoord) + 0.5) / _ScreenParams.xy;
+
+    // Sample depth and normal
+    float depth = _DepthTexture.SampleLevel(sampler_PointClamp, screenUV, 0);
+
+    // Early out for sky
+    if (depth >= 1.0)
+    {
+        _OutputRadiance[pixelCoord] = float4(0, 0, 0, 0);
+        return;
+    }
+
+    float4 normalSample = _NormalTexture.SampleLevel(sampler_PointClamp, screenUV, 0);
+    float3 normal = normalize(normalSample.xyz * 2.0 - 1.0);
+
+    // Find nearest probes
+    uint2 probeCoord = pixelCoord / _DownsampleFactor;
+
+    // Bilinear interpolation between 4 nearest probes
+    float2 probeUV = (float2(pixelCoord) / float(_DownsampleFactor)) - float2(probeCoord);
+
+    float3 accumulatedRadiance = float3(0, 0, 0);
+    float accumulatedWeight = 0.0;
+
+    // Sample 4 nearest probes
+    for (int y = 0; y <= 1; y++)
+    {
+        for (int x = 0; x <= 1; x++)
+        {
+            uint2 sampleProbeCoord = probeCoord + uint2(x, y);
+
+            // Sample probe in normal direction
+            float3 probeRadiance = SampleProbeRadiance(sampleProbeCoord, normal);
+
+            // Bilinear weight
+            float2 weight2D = float2(1.0 - abs(float(x) - probeUV.x), 1.0 - abs(float(y) - probeUV.y));
+            float weight = weight2D.x * weight2D.y;
+
+            accumulatedRadiance += probeRadiance * weight;
+            accumulatedWeight += weight;
+        }
+    }
+
+    float3 finalRadiance = accumulatedRadiance / max(accumulatedWeight, 0.0001);
+
+    _OutputRadiance[pixelCoord] = float4(finalRadiance, 1.0);
+}

@@ -154,6 +154,31 @@ namespace UnityEditor.Rendering.Universal
         SerializedDataParameter m_SurfaceCacheDebugViewMode;
         SerializedDataParameter m_SurfaceCacheDebugShowSamplePosition;
 
+        // Screen Probes - General
+        SerializedDataParameter m_ScreenProbesEnabled;
+        SerializedDataParameter m_ScreenProbesQuality;
+        SerializedDataParameter m_ScreenProbesIntensity;
+
+        // Screen Probes - Tracing
+        SerializedDataParameter m_ScreenProbesMaxRayDistance;
+        SerializedDataParameter m_ScreenProbesNearFieldDistance;
+        SerializedDataParameter m_ScreenProbesUseImportanceSampling;
+        SerializedDataParameter m_ScreenProbesUseSurfaceCacheFallback;
+
+        // Screen Probes - Temporal Filtering
+        SerializedDataParameter m_ScreenProbesTemporalFilterStrength;
+        SerializedDataParameter m_ScreenProbesDepthRejectionThreshold;
+        SerializedDataParameter m_ScreenProbesNormalRejectionThreshold;
+        SerializedDataParameter m_ScreenProbesEnableVarianceClamping;
+
+        // Screen Probes - Spatial Filtering
+        SerializedDataParameter m_ScreenProbesSpatialFilterRadius;
+        SerializedDataParameter m_ScreenProbesSpatialFilterSamples;
+
+        // Screen Probes - Debug
+        SerializedDataParameter m_ScreenProbesDebugVisualization;
+        SerializedDataParameter m_ScreenProbesDebugShowOnlyProbes;
+
         #endregion
 
         #region Styles
@@ -383,6 +408,31 @@ namespace UnityEditor.Rendering.Universal
             m_SurfaceCacheDebugViewMode = Unpack(o.Find(x => x.surfaceCacheDebugViewMode));
             m_SurfaceCacheDebugShowSamplePosition = Unpack(o.Find(x => x.surfaceCacheDebugShowSamplePosition));
 
+            // Screen Probes - General
+            m_ScreenProbesEnabled = Unpack(o.Find(x => x.screenProbesEnabled));
+            m_ScreenProbesQuality = Unpack(o.Find(x => x.screenProbesQuality));
+            m_ScreenProbesIntensity = Unpack(o.Find(x => x.screenProbesIntensity));
+
+            // Screen Probes - Tracing
+            m_ScreenProbesMaxRayDistance = Unpack(o.Find(x => x.screenProbesMaxRayDistance));
+            m_ScreenProbesNearFieldDistance = Unpack(o.Find(x => x.screenProbesNearFieldDistance));
+            m_ScreenProbesUseImportanceSampling = Unpack(o.Find(x => x.screenProbesUseImportanceSampling));
+            m_ScreenProbesUseSurfaceCacheFallback = Unpack(o.Find(x => x.screenProbesUseSurfaceCacheFallback));
+
+            // Screen Probes - Temporal Filtering
+            m_ScreenProbesTemporalFilterStrength = Unpack(o.Find(x => x.screenProbesTemporalFilterStrength));
+            m_ScreenProbesDepthRejectionThreshold = Unpack(o.Find(x => x.screenProbesDepthRejectionThreshold));
+            m_ScreenProbesNormalRejectionThreshold = Unpack(o.Find(x => x.screenProbesNormalRejectionThreshold));
+            m_ScreenProbesEnableVarianceClamping = Unpack(o.Find(x => x.screenProbesEnableVarianceClamping));
+
+            // Screen Probes - Spatial Filtering
+            m_ScreenProbesSpatialFilterRadius = Unpack(o.Find(x => x.screenProbesSpatialFilterRadius));
+            m_ScreenProbesSpatialFilterSamples = Unpack(o.Find(x => x.screenProbesSpatialFilterSamples));
+
+            // Screen Probes - Debug
+            m_ScreenProbesDebugVisualization = Unpack(o.Find(x => x.screenProbesDebugVisualization));
+            m_ScreenProbesDebugShowOnlyProbes = Unpack(o.Find(x => x.screenProbesDebugShowOnlyProbes));
+
             base.OnEnable();
         }
 
@@ -399,6 +449,14 @@ namespace UnityEditor.Rendering.Universal
             else if (technique == GlobalIlluminationTechnique.SurfaceCache)
             {
                 DrawSurfaceCacheUI();
+            }
+
+            // Screen Probes (can be used with Surface Cache)
+            if (technique == GlobalIlluminationTechnique.SurfaceCache)
+            {
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Near-Field Enhancement", EditorStyles.boldLabel);
+                DrawScreenProbesUI();
             }
         }
 
@@ -790,6 +848,75 @@ namespace UnityEditor.Rendering.Universal
                     {
                         PropertyField(m_SurfaceCacheDebugViewMode);
                         PropertyField(m_SurfaceCacheDebugShowSamplePosition);
+                    }
+                }
+            }
+        }
+
+        void DrawScreenProbesUI()
+        {
+            // General Settings
+            PropertyField(m_ScreenProbesEnabled);
+
+            if (!m_ScreenProbesEnabled.value.boolValue)
+                return;
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                EditorGUILayout.Space();
+
+                // Quality
+                EditorGUILayout.LabelField("Quality", EditorStyles.boldLabel);
+                using (new EditorGUI.IndentLevelScope())
+                {
+                    PropertyField(m_ScreenProbesQuality);
+                    PropertyField(m_ScreenProbesIntensity);
+                }
+
+                EditorGUILayout.Space();
+
+                // Tracing
+                EditorGUILayout.LabelField("Tracing", EditorStyles.boldLabel);
+                using (new EditorGUI.IndentLevelScope())
+                {
+                    PropertyField(m_ScreenProbesMaxRayDistance);
+                    PropertyField(m_ScreenProbesNearFieldDistance);
+                    PropertyField(m_ScreenProbesUseSurfaceCacheFallback);
+                    PropertyField(m_ScreenProbesUseImportanceSampling);
+                }
+
+                EditorGUILayout.Space();
+
+                // Temporal Filtering
+                EditorGUILayout.LabelField("Temporal Filtering", EditorStyles.boldLabel);
+                using (new EditorGUI.IndentLevelScope())
+                {
+                    PropertyField(m_ScreenProbesTemporalFilterStrength);
+                    PropertyField(m_ScreenProbesDepthRejectionThreshold);
+                    PropertyField(m_ScreenProbesNormalRejectionThreshold);
+                    PropertyField(m_ScreenProbesEnableVarianceClamping);
+                }
+
+                EditorGUILayout.Space();
+
+                // Spatial Filtering
+                EditorGUILayout.LabelField("Spatial Filtering", EditorStyles.boldLabel);
+                using (new EditorGUI.IndentLevelScope())
+                {
+                    PropertyField(m_ScreenProbesSpatialFilterRadius);
+                    PropertyField(m_ScreenProbesSpatialFilterSamples);
+                }
+
+                EditorGUILayout.Space();
+
+                // Debug
+                EditorGUILayout.LabelField("Debug", EditorStyles.boldLabel);
+                using (new EditorGUI.IndentLevelScope())
+                {
+                    PropertyField(m_ScreenProbesDebugVisualization);
+                    if (m_ScreenProbesDebugVisualization.value.boolValue)
+                    {
+                        PropertyField(m_ScreenProbesDebugShowOnlyProbes);
                     }
                 }
             }

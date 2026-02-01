@@ -1,0 +1,163 @@
+#pragma kernel TemporalFilter
+#pragma kernel SpatialFilter
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+// Samplers
+
+// Temporal Filter Parameters
+float _TemporalFilterStrength;
+float _DepthRejectionThreshold;
+float _NormalRejectionThreshold;
+int _EnableVarianceClamping;
+float4x4 _CurrentViewProjectionMatrix;
+float4x4 _PrevViewProjectionMatrix;
+
+// Textures
+Texture2D<float4> _CurrentRadianceAtlas;
+Texture2D<float> _CurrentDepthAtlas;
+Texture2D<float4> _PrevRadianceAtlas;
+Texture2D<float> _PrevDepthAtlas;
+Texture2D<float> _DepthTexture;
+Texture2D<float4> _NormalTexture;
+Texture2D<float2> _MotionVectorTexture;
+
+RWTexture2D<float4> _FilteredRadianceAtlas;
+
+// Spatial Filter Parameters
+float _SpatialFilterRadius;
+uint _SpatialFilterSamples;
+
+// Helper functions
+float Luminance(float3 color)
+{
+    return dot(color, float3(0.299, 0.587, 0.114));
+}
+
+// Compute variance from neighborhood
+void ComputeNeighborhoodVariance(uint2 coord, out float3 mean, out float3 variance)
+{
+    float3 m1 = float3(0, 0, 0);
+    float3 m2 = float3(0, 0, 0);
+    float count = 0.0;
+
+    // 3x3 neighborhood
+    for (int y = -1; y <= 1; y++)
+    {
+        for (int x = -1; x <= 1; x++)
+        {
+            uint2 sampleCoord = coord + int2(x, y);
+            float4 sample = _CurrentRadianceAtlas[sampleCoord];
+            float3 color = sample.rgb;
+
+            m1 += color;
+            m2 += color * color;
+            count += 1.0;
+        }
+    }
+
+    mean = m1 / count;
+    variance = (m2 / count) - (mean * mean);
+    variance = max(variance, float3(0, 0, 0));
+}
+
+[numthreads(8, 8, 1)]
+void TemporalFilter(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 probeCoord = dispatchThreadId.xy;
+
+    // Sample current frame
+    float4 currentRadiance = _CurrentRadianceAtlas[probeCoord];
+    float currentDepth = _CurrentDepthAtlas[probeCoord];
+
+    // Early out for invalid pixels
+    if (currentDepth >= 1.0)
+    {
+        _FilteredRadianceAtlas[probeCoord] = currentRadiance;
+        return;
+    }
+
+    // Reproject to previous frame
+    // For simplicity, assume probe grid is stable (no camera rotation)
+    // In full implementation, use motion vectors
+    uint2 prevCoord = probeCoord; // Simplified - should use motion vectors
+
+    float4 prevRadiance = _PrevRadianceAtlas[prevCoord];
+    float prevDepth = _PrevDepthAtlas[prevCoord];
+
+    // Rejection tests
+    bool valid = true;
+
+    // Depth rejection
+    float depthDiff = abs(currentDepth - prevDepth);
+    if (depthDiff > _DepthRejectionThreshold)
+        valid = false;
+
+    // Variance clamping
+    if (valid && _EnableVarianceClamping > 0)
+    {
+        float3 mean, variance;
+        ComputeNeighborhoodVariance(probeCoord, mean, variance);
+
+        float3 sigma = sqrt(variance);
+        float gamma = 1.5; // Variance clamping gamma
+
+        float3 minColor = mean - sigma * gamma;
+        float3 maxColor = mean + sigma * gamma;
+
+        prevRadiance.rgb = clamp(prevRadiance.rgb, minColor, maxColor);
+    }
+
+    // Blend current and previous
+    float alpha = valid ? _TemporalFilterStrength : 0.0;
+    float3 filteredColor = lerp(currentRadiance.rgb, prevRadiance.rgb, alpha);
+
+    _FilteredRadianceAtlas[probeCoord] = float4(filteredColor, currentRadiance.a);
+}
+
+[numthreads(8, 8, 1)]
+void SpatialFilter(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 probeCoord = dispatchThreadId.xy;
+
+    float4 centerRadiance = _CurrentRadianceAtlas[probeCoord];
+    float centerDepth = _CurrentDepthAtlas[probeCoord];
+
+    if (centerDepth >= 1.0)
+    {
+        _FilteredRadianceAtlas[probeCoord] = centerRadiance;
+        return;
+    }
+
+    // Bilateral spatial filter
+    float3 accumulatedColor = float3(0, 0, 0);
+    float accumulatedWeight = 0.0;
+
+    // Sample in a circular pattern
+    for (uint i = 0; i < _SpatialFilterSamples; i++)
+    {
+        float angle = (float(i) / float(_SpatialFilterSamples)) * 2.0 * 3.14159265;
+        float2 offset = float2(cos(angle), sin(angle)) * _SpatialFilterRadius;
+        int2 sampleCoord = int2(probeCoord) + int2(offset);
+
+        float4 sampleRadiance = _CurrentRadianceAtlas[sampleCoord];
+        float sampleDepth = _CurrentDepthAtlas[sampleCoord];
+
+        // Bilateral weights
+        float depthWeight = exp(-abs(sampleDepth - centerDepth) * 10.0);
+        float spatialWeight = exp(-length(offset) / _SpatialFilterRadius);
+
+        float weight = depthWeight * spatialWeight;
+
+        accumulatedColor += sampleRadiance.rgb * weight;
+        accumulatedWeight += weight;
+    }
+
+    // Add center sample
+    accumulatedColor += centerRadiance.rgb;
+    accumulatedWeight += 1.0;
+
+    float3 filteredColor = accumulatedColor / accumulatedWeight;
+    _FilteredRadianceAtlas[probeCoord] = float4(filteredColor, centerRadiance.a);
+}

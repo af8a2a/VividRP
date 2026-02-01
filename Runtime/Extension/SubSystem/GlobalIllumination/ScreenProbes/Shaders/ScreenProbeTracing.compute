@@ -1,0 +1,265 @@
+#pragma kernel TraceScreenProbes
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareDepthTexture.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareNormalsTexture.hlsl"
+
+// Samplers
+
+// Unity built-in variables
+
+// Parameters
+uint _FrameIndex;
+uint _DownsampleFactor;
+uint _TracingOctahedronResolution;
+float _MaxRayDistance;
+float _NearFieldMaxDistance;
+float4x4 _InvViewProjectionMatrix;
+float4x4 _ViewProjectionMatrix;
+
+// Textures
+Texture2D<float> _DepthTexture;
+Texture2D<float4> _NormalTexture;
+RWTexture2D<float4> _ProbeRadianceAtlas;
+RWTexture2D<float> _ProbeHitDistanceAtlas;
+RWTexture2D<float> _ProbeDepthAtlas;
+
+// Surface cache integration
+int _UseSurfaceCacheFallback;
+StructuredBuffer<uint> _SurfaceCacheCellPatchIndices;
+StructuredBuffer<float4> _SurfaceCachePatchIrradiances;
+StructuredBuffer<int3> _SurfaceCacheCascadeOffsets;
+uint _SurfaceCacheGridResolution;
+uint _SurfaceCacheCascadeCount;
+float _SurfaceCacheVoxelMinSize;
+float3 _SurfaceCacheVolumeCenter;
+
+// Octahedral mapping functions
+float2 OctahedralEncode(float3 n)
+{
+    n /= (abs(n.x) + abs(n.y) + abs(n.z));
+    float2 p = n.xy;
+    if (n.z < 0.0)
+    {
+        p = (1.0 - abs(p.yx)) * (step(0.0, p) * 2.0 - 1.0);
+    }
+    return p * 0.5 + 0.5;
+}
+
+float3 OctahedralDecode(float2 f)
+{
+    f = f * 2.0 - 1.0;
+    float3 n = float3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
+    float t = saturate(-n.z);
+    n.xy += (step(0.0, n.xy) * 2.0 - 1.0) * t;
+    return normalize(n);
+}
+
+// Get direction from octahedral index
+float3 GetOctahedralDirection(uint index, uint resolution)
+{
+    uint x = index % resolution;
+    uint y = index / resolution;
+    float2 uv = (float2(x, y) + 0.5) / float(resolution);
+    return OctahedralDecode(uv);
+}
+
+
+float2 Hash2(uint2 s)
+{
+    return float2(Hash(s.x + s.y * 19349663u), Hash(s.y + s.x * 83492791u));
+}
+
+// Reconstruct world position from depth
+float3 ReconstructWorldPosition(float2 uv, float depth)
+{
+    float4 clipPos = float4(uv * 2.0 - 1.0, depth, 1.0);
+    #if UNITY_UV_STARTS_AT_TOP
+    clipPos.y = -clipPos.y;
+    #endif
+
+    float4 worldPos = mul(_InvViewProjectionMatrix, clipPos);
+    return worldPos.xyz / worldPos.w;
+}
+
+// Simple screen-space ray marching
+bool TraceScreenSpaceRay(float3 rayOrigin, float3 rayDir, float maxDistance, out float3 hitPos, out float hitDistance)
+{
+    const int maxSteps = 32;
+    const float stepSize = maxDistance / float(maxSteps);
+
+    hitDistance = maxDistance;
+    hitPos = rayOrigin + rayDir * maxDistance;
+
+    for (int i = 0; i < maxSteps; i++)
+    {
+        float t = stepSize * float(i + 1);
+        float3 samplePos = rayOrigin + rayDir * t;
+
+        // Project to screen space
+        float4 clipPos = mul(_ViewProjectionMatrix, float4(samplePos, 1.0));
+        float3 ndcPos = clipPos.xyz / clipPos.w;
+        float2 screenUV = ndcPos.xy * 0.5 + 0.5;
+
+        #if UNITY_UV_STARTS_AT_TOP
+        screenUV.y = 1.0 - screenUV.y;
+        #endif
+
+        // Check if in screen bounds
+        if (any(screenUV < 0.0) || any(screenUV > 1.0))
+            continue;
+
+        // Sample depth
+        float sceneDepth = _DepthTexture.SampleLevel(sampler_PointClamp, screenUV, 0);
+        float3 sceneWorldPos = ReconstructWorldPosition(screenUV, sceneDepth);
+
+        // Check intersection
+        float depthDiff = length(sceneWorldPos - rayOrigin) - t;
+        if (depthDiff < 0.0 && depthDiff > -stepSize * 2.0)
+        {
+            hitPos = sceneWorldPos;
+            hitDistance = t;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// Query surface cache for far-field lighting
+float3 QuerySurfaceCache(float3 worldPos, float3 normal)
+{
+    if (_UseSurfaceCacheFallback == 0)
+        return float3(0, 0, 0);
+
+    // Find cascade
+    float3 relativePos = worldPos - _SurfaceCacheVolumeCenter;
+    uint cascadeIndex = 0;
+
+    for (uint c = 0; c < _SurfaceCacheCascadeCount; c++)
+    {
+        float voxelSize = _SurfaceCacheVoxelMinSize * pow(2.0, float(c));
+        float cascadeExtent = voxelSize * float(_SurfaceCacheGridResolution) * 0.5;
+
+        if (all(abs(relativePos) < cascadeExtent))
+        {
+            cascadeIndex = c;
+            break;
+        }
+    }
+
+    if (cascadeIndex >= _SurfaceCacheCascadeCount)
+        return float3(0, 0, 0);
+
+    // Calculate voxel coordinates
+    float voxelSize = _SurfaceCacheVoxelMinSize * pow(2.0, float(cascadeIndex));
+    int3 cascadeOffset = _SurfaceCacheCascadeOffsets[cascadeIndex];
+    int3 voxelCoord = int3(floor(relativePos / voxelSize)) - cascadeOffset;
+
+    // Clamp to grid bounds
+    voxelCoord = clamp(voxelCoord, int3(0, 0, 0), int3(_SurfaceCacheGridResolution - 1, _SurfaceCacheGridResolution - 1, _SurfaceCacheGridResolution - 1));
+
+    // Calculate cell index
+    uint cellIndex = voxelCoord.x + voxelCoord.y * _SurfaceCacheGridResolution + voxelCoord.z * _SurfaceCacheGridResolution * _SurfaceCacheGridResolution;
+    cellIndex += cascadeIndex * _SurfaceCacheGridResolution * _SurfaceCacheGridResolution * _SurfaceCacheGridResolution;
+
+    // Query patch
+    uint patchIndex = _SurfaceCacheCellPatchIndices[cellIndex];
+    if (patchIndex == 0xFFFFFFFF)
+        return float3(0, 0, 0);
+
+    // Sample irradiance (simplified - just use L0 coefficient)
+    float4 irradiance = _SurfaceCachePatchIrradiances[patchIndex * 3]; // L0 coefficient
+    return irradiance.rgb * 0.282095; // SH L0 basis function
+}
+
+[numthreads(8, 8, 1)]
+void TraceScreenProbes(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 probeCoord = dispatchThreadId.xy;
+    uint2 screenCoord = probeCoord * _DownsampleFactor;
+
+    // Sample depth and normal at probe location
+    float2 screenUV = (float2(screenCoord) + 0.5) / _ScreenParams.xy;
+    float depth = _DepthTexture.SampleLevel(sampler_PointClamp, screenUV, 0);
+
+    // Early out for sky pixels
+    if (depth >= 1.0)
+    {
+        _ProbeDepthAtlas[probeCoord] = 1.0;
+        return;
+    }
+
+    float4 normalSample = _NormalTexture.SampleLevel(sampler_PointClamp, screenUV, 0);
+    float3 normal = normalize(normalSample.xyz * 2.0 - 1.0);
+    float3 worldPos = ReconstructWorldPosition(screenUV, depth);
+
+    // Store depth for temporal reprojection
+    _ProbeDepthAtlas[probeCoord] = depth;
+
+    // Trace rays in octahedral pattern
+    uint numRays = _TracingOctahedronResolution * _TracingOctahedronResolution;
+    float3 accumulatedRadiance = float3(0, 0, 0);
+    float accumulatedHitDistance = 0.0;
+
+    // Random offset for temporal variation
+    float2 random = Hash2(probeCoord + _FrameIndex * 1973u);
+
+    for (uint rayIndex = 0; rayIndex < numRays; rayIndex++)
+    {
+        // Get ray direction from octahedral mapping
+        float3 rayDir = GetOctahedralDirection(rayIndex, _TracingOctahedronResolution);
+
+        // Transform to world space (align with normal hemisphere)
+        float3 tangent = abs(normal.z) < 0.999 ? normalize(cross(normal, float3(0, 0, 1))) : float3(1, 0, 0);
+        float3 bitangent = cross(normal, tangent);
+        float3x3 tbn = float3x3(tangent, bitangent, normal);
+        rayDir = mul(tbn, rayDir);
+
+        // Skip rays pointing away from surface
+        if (dot(rayDir, normal) < 0.01)
+            continue;
+
+        // Trace ray
+        float3 hitPos;
+        float hitDistance;
+        bool hit = TraceScreenSpaceRay(worldPos + normal * 0.01, rayDir, _MaxRayDistance, hitPos, hitDistance);
+
+        float3 radiance = float3(0, 0, 0);
+
+        if (hit && hitDistance < _NearFieldMaxDistance)
+        {
+            // Near-field hit - sample lighting at hit point
+            // For now, just use a simple ambient term
+            radiance = float3(0.1, 0.1, 0.1);
+        }
+        else
+        {
+            // Far-field or miss - query surface cache
+            radiance = QuerySurfaceCache(worldPos + rayDir * _NearFieldMaxDistance, rayDir);
+        }
+
+        accumulatedRadiance += radiance;
+        accumulatedHitDistance += hitDistance;
+    }
+
+    // Average results
+    accumulatedRadiance /= float(numRays);
+    accumulatedHitDistance /= float(numRays);
+
+    // Write to atlas
+    uint2 atlasCoord = probeCoord * _TracingOctahedronResolution;
+
+    // For now, write the same radiance to all octahedral texels
+    // In a full implementation, we'd store per-direction radiance
+    for (uint y = 0; y < _TracingOctahedronResolution; y++)
+    {
+        for (uint x = 0; x < _TracingOctahedronResolution; x++)
+        {
+            uint2 texelCoord = atlasCoord + uint2(x, y);
+            _ProbeRadianceAtlas[texelCoord] = float4(accumulatedRadiance, 1.0);
+            _ProbeHitDistanceAtlas[texelCoord] = accumulatedHitDistance;
+        }
+    }
+}

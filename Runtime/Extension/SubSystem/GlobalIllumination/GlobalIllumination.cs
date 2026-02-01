@@ -7,7 +7,9 @@ namespace UnityEngine.Rendering.Universal
     public enum GlobalIlluminationTechnique
     {
         Disabled = 0,
-        ReferencedPathTracing
+        ReferencedPathTracing,
+        PrecomputedRadianceTransfer,
+        SurfaceCache
     }
 
     [Serializable]

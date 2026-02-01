@@ -111,6 +111,49 @@ namespace UnityEditor.Rendering.Universal
         SerializedDataParameter m_DlssRRSplitScreen;
 #endif
 
+        // Surface Cache - General
+        SerializedDataParameter m_SurfaceCacheEstimationMethod;
+        SerializedDataParameter m_SurfaceCacheMultiBounce;
+
+        // Surface Cache - Grid
+        SerializedDataParameter m_SurfaceCacheGridResolution;
+        SerializedDataParameter m_SurfaceCacheVolumeSize;
+        SerializedDataParameter m_SurfaceCacheCascadeCount;
+        SerializedDataParameter m_SurfaceCacheCascadeMovement;
+
+        // Surface Cache - Uniform Estimation
+        SerializedDataParameter m_SurfaceCacheUniformSampleCount;
+
+        // Surface Cache - Restir Estimation
+        SerializedDataParameter m_SurfaceCacheRestirConfidenceCap;
+        SerializedDataParameter m_SurfaceCacheRestirSpatialSampleCount;
+        SerializedDataParameter m_SurfaceCacheRestirSpatialFilterSize;
+        SerializedDataParameter m_SurfaceCacheRestirValidationFrameInterval;
+
+        // Surface Cache - RIS Estimation
+        SerializedDataParameter m_SurfaceCacheRisCandidateCount;
+        SerializedDataParameter m_SurfaceCacheRisTargetFunctionUpdateWeight;
+
+        // Surface Cache - Patch Filtering
+        SerializedDataParameter m_SurfaceCacheTemporalSmoothing;
+        SerializedDataParameter m_SurfaceCacheSpatialFilterEnabled;
+        SerializedDataParameter m_SurfaceCacheSpatialFilterSampleCount;
+        SerializedDataParameter m_SurfaceCacheSpatialFilterRadius;
+        SerializedDataParameter m_SurfaceCacheTemporalPostFilterEnabled;
+
+        // Surface Cache - Screen Filtering
+        SerializedDataParameter m_SurfaceCacheLookupSampleCount;
+        SerializedDataParameter m_SurfaceCacheUpsamplingKernelSize;
+        SerializedDataParameter m_SurfaceCacheUpsamplingSampleCount;
+
+        // Surface Cache - Advanced
+        SerializedDataParameter m_SurfaceCacheDefragCount;
+
+        // Surface Cache - Debug
+        SerializedDataParameter m_SurfaceCacheDebugEnabled;
+        SerializedDataParameter m_SurfaceCacheDebugViewMode;
+        SerializedDataParameter m_SurfaceCacheDebugShowSamplePosition;
+
         #endregion
 
         #region Styles
@@ -134,6 +177,16 @@ namespace UnityEditor.Rendering.Universal
             public static readonly GUIContent HeaderAdvanced = EditorGUIUtility.TrTextContent("Advanced");
             public static readonly GUIContent HeaderDebug = EditorGUIUtility.TrTextContent("Debug");
             public static readonly GUIContent HeaderSharc = EditorGUIUtility.TrTextContent("SHARC (Radiance Cache)");
+
+            // Surface Cache Headers
+            public static readonly GUIContent HeaderSurfaceCache = EditorGUIUtility.TrTextContent("Surface Cache");
+            public static readonly GUIContent HeaderSurfaceCacheGeneral = EditorGUIUtility.TrTextContent("General");
+            public static readonly GUIContent HeaderSurfaceCacheGrid = EditorGUIUtility.TrTextContent("Grid/Volume");
+            public static readonly GUIContent HeaderSurfaceCacheEstimation = EditorGUIUtility.TrTextContent("Estimation");
+            public static readonly GUIContent HeaderSurfaceCachePatchFiltering = EditorGUIUtility.TrTextContent("Patch Filtering");
+            public static readonly GUIContent HeaderSurfaceCacheScreenFiltering = EditorGUIUtility.TrTextContent("Screen Filtering");
+            public static readonly GUIContent HeaderSurfaceCacheAdvanced = EditorGUIUtility.TrTextContent("Advanced");
+            public static readonly GUIContent HeaderSurfaceCacheDebug = EditorGUIUtility.TrTextContent("Debug");
 
             // Tooltips
             public static readonly GUIContent Technique = EditorGUIUtility.TrTextContent("Technique", "Global illumination technique to use.");
@@ -287,6 +340,49 @@ namespace UnityEditor.Rendering.Universal
             m_DlssRRSplitScreen = Unpack(o.Find(x => x.dlssRRSplitScreen));
 #endif
 
+            // Surface Cache - General
+            m_SurfaceCacheEstimationMethod = Unpack(o.Find(x => x.surfaceCacheEstimationMethod));
+            m_SurfaceCacheMultiBounce = Unpack(o.Find(x => x.surfaceCacheMultiBounce));
+
+            // Surface Cache - Grid
+            m_SurfaceCacheGridResolution = Unpack(o.Find(x => x.surfaceCacheGridResolution));
+            m_SurfaceCacheVolumeSize = Unpack(o.Find(x => x.surfaceCacheVolumeSize));
+            m_SurfaceCacheCascadeCount = Unpack(o.Find(x => x.surfaceCacheCascadeCount));
+            m_SurfaceCacheCascadeMovement = Unpack(o.Find(x => x.surfaceCacheCascadeMovement));
+
+            // Surface Cache - Uniform Estimation
+            m_SurfaceCacheUniformSampleCount = Unpack(o.Find(x => x.surfaceCacheUniformSampleCount));
+
+            // Surface Cache - Restir Estimation
+            m_SurfaceCacheRestirConfidenceCap = Unpack(o.Find(x => x.surfaceCacheRestirConfidenceCap));
+            m_SurfaceCacheRestirSpatialSampleCount = Unpack(o.Find(x => x.surfaceCacheRestirSpatialSampleCount));
+            m_SurfaceCacheRestirSpatialFilterSize = Unpack(o.Find(x => x.surfaceCacheRestirSpatialFilterSize));
+            m_SurfaceCacheRestirValidationFrameInterval = Unpack(o.Find(x => x.surfaceCacheRestirValidationFrameInterval));
+
+            // Surface Cache - RIS Estimation
+            m_SurfaceCacheRisCandidateCount = Unpack(o.Find(x => x.surfaceCacheRisCandidateCount));
+            m_SurfaceCacheRisTargetFunctionUpdateWeight = Unpack(o.Find(x => x.surfaceCacheRisTargetFunctionUpdateWeight));
+
+            // Surface Cache - Patch Filtering
+            m_SurfaceCacheTemporalSmoothing = Unpack(o.Find(x => x.surfaceCacheTemporalSmoothing));
+            m_SurfaceCacheSpatialFilterEnabled = Unpack(o.Find(x => x.surfaceCacheSpatialFilterEnabled));
+            m_SurfaceCacheSpatialFilterSampleCount = Unpack(o.Find(x => x.surfaceCacheSpatialFilterSampleCount));
+            m_SurfaceCacheSpatialFilterRadius = Unpack(o.Find(x => x.surfaceCacheSpatialFilterRadius));
+            m_SurfaceCacheTemporalPostFilterEnabled = Unpack(o.Find(x => x.surfaceCacheTemporalPostFilterEnabled));
+
+            // Surface Cache - Screen Filtering
+            m_SurfaceCacheLookupSampleCount = Unpack(o.Find(x => x.surfaceCacheLookupSampleCount));
+            m_SurfaceCacheUpsamplingKernelSize = Unpack(o.Find(x => x.surfaceCacheUpsamplingKernelSize));
+            m_SurfaceCacheUpsamplingSampleCount = Unpack(o.Find(x => x.surfaceCacheUpsamplingSampleCount));
+
+            // Surface Cache - Advanced
+            m_SurfaceCacheDefragCount = Unpack(o.Find(x => x.surfaceCacheDefragCount));
+
+            // Surface Cache - Debug
+            m_SurfaceCacheDebugEnabled = Unpack(o.Find(x => x.surfaceCacheDebugEnabled));
+            m_SurfaceCacheDebugViewMode = Unpack(o.Find(x => x.surfaceCacheDebugViewMode));
+            m_SurfaceCacheDebugShowSamplePosition = Unpack(o.Find(x => x.surfaceCacheDebugShowSamplePosition));
+
             base.OnEnable();
         }
 
@@ -299,6 +395,10 @@ namespace UnityEditor.Rendering.Universal
             if (technique == GlobalIlluminationTechnique.ReferencedPathTracing)
             {
                 DrawPathTracingUI();
+            }
+            else if (technique == GlobalIlluminationTechnique.SurfaceCache)
+            {
+                DrawSurfaceCacheUI();
             }
         }
 
@@ -570,6 +670,128 @@ namespace UnityEditor.Rendering.Universal
                 PropertyField(m_DebugMode);
                 PropertyField(m_DebugVisualizeBounce);
                 PropertyField(m_DebugShowPathTracingOnly);
+            }
+        }
+
+        void DrawSurfaceCacheUI()
+        {
+            EditorGUILayout.Space();
+
+            // General Settings
+            DrawHeader(Styles.HeaderSurfaceCacheGeneral);
+            using (new EditorGUI.IndentLevelScope())
+            {
+                PropertyField(m_SurfaceCacheEstimationMethod);
+                PropertyField(m_SurfaceCacheMultiBounce);
+            }
+
+            EditorGUILayout.Space();
+
+            // Grid/Volume Settings
+            DrawHeader(Styles.HeaderSurfaceCacheGrid);
+            using (new EditorGUI.IndentLevelScope())
+            {
+                PropertyField(m_SurfaceCacheGridResolution);
+                PropertyField(m_SurfaceCacheVolumeSize);
+                PropertyField(m_SurfaceCacheCascadeCount);
+                PropertyField(m_SurfaceCacheCascadeMovement);
+            }
+
+            EditorGUILayout.Space();
+
+            // Estimation Settings (method-specific)
+            DrawHeader(Styles.HeaderSurfaceCacheEstimation);
+            using (new EditorGUI.IndentLevelScope())
+            {
+                var estimationMethod = (SurfaceCacheEstimationMethod)m_SurfaceCacheEstimationMethod.value.intValue;
+
+                // Uniform Estimation
+                if (estimationMethod == SurfaceCacheEstimationMethod.Uniform)
+                {
+                    EditorGUILayout.LabelField("Uniform Estimation", EditorStyles.boldLabel);
+                    using (new EditorGUI.IndentLevelScope())
+                    {
+                        PropertyField(m_SurfaceCacheUniformSampleCount);
+                    }
+                }
+                // Restir Estimation
+                else if (estimationMethod == SurfaceCacheEstimationMethod.Restir)
+                {
+                    EditorGUILayout.LabelField("Restir Estimation", EditorStyles.boldLabel);
+                    using (new EditorGUI.IndentLevelScope())
+                    {
+                        PropertyField(m_SurfaceCacheRestirConfidenceCap);
+                        PropertyField(m_SurfaceCacheRestirSpatialSampleCount);
+                        PropertyField(m_SurfaceCacheRestirSpatialFilterSize);
+                        PropertyField(m_SurfaceCacheRestirValidationFrameInterval);
+                    }
+                }
+                // RIS Estimation
+                else if (estimationMethod == SurfaceCacheEstimationMethod.Ris)
+                {
+                    EditorGUILayout.LabelField("RIS Estimation", EditorStyles.boldLabel);
+                    using (new EditorGUI.IndentLevelScope())
+                    {
+                        PropertyField(m_SurfaceCacheRisCandidateCount);
+                        PropertyField(m_SurfaceCacheRisTargetFunctionUpdateWeight);
+                    }
+                }
+            }
+
+            EditorGUILayout.Space();
+
+            // Patch Filtering Settings
+            DrawHeader(Styles.HeaderSurfaceCachePatchFiltering);
+            using (new EditorGUI.IndentLevelScope())
+            {
+                PropertyField(m_SurfaceCacheTemporalSmoothing);
+                PropertyField(m_SurfaceCacheSpatialFilterEnabled);
+                if (m_SurfaceCacheSpatialFilterEnabled.value.boolValue)
+                {
+                    using (new EditorGUI.IndentLevelScope())
+                    {
+                        PropertyField(m_SurfaceCacheSpatialFilterSampleCount);
+                        PropertyField(m_SurfaceCacheSpatialFilterRadius);
+                    }
+                }
+                PropertyField(m_SurfaceCacheTemporalPostFilterEnabled);
+            }
+
+            EditorGUILayout.Space();
+
+            // Screen Filtering Settings
+            DrawHeader(Styles.HeaderSurfaceCacheScreenFiltering);
+            using (new EditorGUI.IndentLevelScope())
+            {
+                PropertyField(m_SurfaceCacheLookupSampleCount);
+                PropertyField(m_SurfaceCacheUpsamplingKernelSize);
+                PropertyField(m_SurfaceCacheUpsamplingSampleCount);
+            }
+
+            EditorGUILayout.Space();
+
+            // Advanced Settings
+            DrawHeader(Styles.HeaderSurfaceCacheAdvanced);
+            using (new EditorGUI.IndentLevelScope())
+            {
+                PropertyField(m_SurfaceCacheDefragCount);
+            }
+
+            EditorGUILayout.Space();
+
+            // Debug Settings
+            DrawHeader(Styles.HeaderSurfaceCacheDebug);
+            using (new EditorGUI.IndentLevelScope())
+            {
+                PropertyField(m_SurfaceCacheDebugEnabled);
+                if (m_SurfaceCacheDebugEnabled.value.boolValue)
+                {
+                    using (new EditorGUI.IndentLevelScope())
+                    {
+                        PropertyField(m_SurfaceCacheDebugViewMode);
+                        PropertyField(m_SurfaceCacheDebugShowSamplePosition);
+                    }
+                }
             }
         }
 

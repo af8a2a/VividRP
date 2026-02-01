@@ -8,51 +8,107 @@ namespace UnityEngine.Rendering.Universal
     {
 
         
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/TemporalFiltering.compute")]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/TemporalFiltering.compute")]
         public ComputeShader m_TemporalFilteringShader;
 
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/SpatialFiltering.compute")]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/SpatialFiltering.compute")]
         public ComputeShader m_SpatialFilteringShader;
 
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/RestirEstimation.compute")]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/RestirEstimation.compute")]
         public ComputeShader m_RestirEstimationShader;
 
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/RisEstimation.urtshader")]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/RisEstimation.urtshader")]
         public ComputeShader m_RisEstimationComputeShader;
 
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/RisEstimation.urtshader")]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/RisEstimation.urtshader")]
         public RayTracingShader m_RisEstimationRayTracingShader;
 
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Scrolling.compute")]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/Scrolling.compute")]
         public ComputeShader m_ScrollingShader;
 
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Defrag.compute")]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/Defrag.compute")]
         public ComputeShader m_DefragShader;
 
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Eviction.compute")]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/Eviction.compute")]
         public ComputeShader m_EvictionShader;
 
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/PunctualLightSampling.urtshader")]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/PunctualLightSampling.urtshader")]
         public ComputeShader m_PunctualLightSamplingComputeShader;
 
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/PunctualLightSampling.urtshader")]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/PunctualLightSampling.urtshader")]
         public RayTracingShader m_PunctualLightSamplingRayTracingShader;
 
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/UniformEstimation.urtshader")]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/UniformEstimation.urtshader")]
         public ComputeShader m_UniformEstimationComputeShader;
 
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/UniformEstimation.urtshader")]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/UniformEstimation.urtshader")]
         public RayTracingShader m_UniformEstimationRayTracingShader;
 
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/RestirCandidateTemporal.urtshader")]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/RestirCandidateTemporal.urtshader")]
         public ComputeShader m_RestirCandidateTemporalComputeShader;
 
         
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/RestirCandidateTemporal.urtshader")]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/RestirCandidateTemporal.urtshader")]
         public RayTracingShader m_RestirCandidateTemporalRayTracingShader;
 
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/RestirSpatial.compute")]
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/RestirSpatial.compute")]
         public ComputeShader m_RestirSpatialShader;
+
+        
+        
+                [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/FallbackMaterial.mat")]
+        public Material m_FallbackMaterial;
+
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/PatchAllocation.compute")]
+        public ComputeShader m_AllocationShader;
+
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/ScreenResolveLookup.compute")]
+        public ComputeShader m_ScreenResolveLookupShader;
+
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/ScreenResolveUpsampling.compute")]
+        public ComputeShader m_ScreenResolveUpsamplingShader;
+
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/Debug.compute")]
+        public ComputeShader m_DebugShader;
+
+        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Shader/FlatNormalResolution.compute")]
+        public ComputeShader m_FlatNormalResolutionShader;
+
+        public Material fallbackMaterial
+        {
+            get => m_FallbackMaterial;
+            set => this.SetValueAndNotify(ref m_FallbackMaterial, value, nameof(m_FallbackMaterial));
+        }
+
+        public ComputeShader allocationShader
+        {
+            get => m_AllocationShader;
+            set => this.SetValueAndNotify(ref m_AllocationShader, value, nameof(m_AllocationShader));
+        }
+
+        public ComputeShader screenResolveLookupShader
+        {
+            get => m_ScreenResolveLookupShader;
+            set => this.SetValueAndNotify(ref m_ScreenResolveLookupShader, value, nameof(m_ScreenResolveLookupShader));
+        }
+
+        public ComputeShader screenResolveUpsamplingShader
+        {
+            get => m_ScreenResolveUpsamplingShader;
+            set => this.SetValueAndNotify(ref m_ScreenResolveUpsamplingShader, value, nameof(m_ScreenResolveUpsamplingShader));
+        }
+
+        public ComputeShader debugShader
+        {
+            get => m_DebugShader;
+            set => this.SetValueAndNotify(ref m_DebugShader, value, nameof(m_DebugShader));
+        }
+
+        public ComputeShader flatNormalResolutionShader
+        {
+            get => m_FlatNormalResolutionShader;
+            set => this.SetValueAndNotify(ref m_FlatNormalResolutionShader, value, nameof(m_FlatNormalResolutionShader));
+        }
 
         public ComputeShader spatialFilteringShader
         {
@@ -143,5 +199,7 @@ namespace UnityEngine.Rendering.Universal
             get => m_EvictionShader;
             set => this.SetValueAndNotify(ref m_EvictionShader, value, nameof(m_EvictionShader));
         }
+
+        public int version { get; }
     }
 }

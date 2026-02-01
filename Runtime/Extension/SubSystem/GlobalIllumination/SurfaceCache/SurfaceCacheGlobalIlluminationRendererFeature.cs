@@ -12,67 +12,6 @@ using LightHandle = UnityEngine.PathTracing.Core.Handle<UnityEngine.Rendering.Un
 using MaterialHandle = UnityEngine.PathTracing.Core.Handle<UnityEngine.PathTracing.Core.MaterialPool.MaterialDescriptor>;
 namespace UnityEngine.Rendering.Universal
 {
-    partial class SurfaceCacheRenderPipelineResourceSet : IRenderPipelineResources
-    {
-        [SerializeField, HideInInspector]
-        int m_Version = 6;
-
-        int IRenderPipelineGraphicsSettings.version => m_Version;
-
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/FallbackMaterial.mat")]
-        public Material m_FallbackMaterial;
-
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/PatchAllocation.compute")]
-        public ComputeShader m_AllocationShader;
-
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/ScreenResolveLookup.compute")]
-        public ComputeShader m_ScreenResolveLookupShader;
-
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/ScreenResolveUpsampling.compute")]
-        public ComputeShader m_ScreenResolveUpsamplingShader;
-
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/Debug.compute")]
-        public ComputeShader m_DebugShader;
-
-        [ResourcePath("Runtime/Extension/SubSystem/GlobalIllumination/SurfaceCache/FlatNormalResolution.compute")]
-        public ComputeShader m_FlatNormalResolutionShader;
-
-        public Material fallbackMaterial
-        {
-            get => m_FallbackMaterial;
-            set => this.SetValueAndNotify(ref m_FallbackMaterial, value, nameof(m_FallbackMaterial));
-        }
-
-        public ComputeShader allocationShader
-        {
-            get => m_AllocationShader;
-            set => this.SetValueAndNotify(ref m_AllocationShader, value, nameof(m_AllocationShader));
-        }
-
-        public ComputeShader screenResolveLookupShader
-        {
-            get => m_ScreenResolveLookupShader;
-            set => this.SetValueAndNotify(ref m_ScreenResolveLookupShader, value, nameof(m_ScreenResolveLookupShader));
-        }
-
-        public ComputeShader screenResolveUpsamplingShader
-        {
-            get => m_ScreenResolveUpsamplingShader;
-            set => this.SetValueAndNotify(ref m_ScreenResolveUpsamplingShader, value, nameof(m_ScreenResolveUpsamplingShader));
-        }
-
-        public ComputeShader debugShader
-        {
-            get => m_DebugShader;
-            set => this.SetValueAndNotify(ref m_DebugShader, value, nameof(m_DebugShader));
-        }
-
-        public ComputeShader flatNormalResolutionShader
-        {
-            get => m_FlatNormalResolutionShader;
-            set => this.SetValueAndNotify(ref m_FlatNormalResolutionShader, value, nameof(m_FlatNormalResolutionShader));
-        }
-    }
 
     [DisallowMultipleRendererFeature("Surface Cache Global Illumination")]
     public class SurfaceCacheGlobalIlluminationRendererFeature : ScriptableRendererFeature

@@ -145,7 +145,7 @@ void GBufferAnyHit(inout GBufferPayload payload : SV_RayPayload, in AttributeDat
         InitializeStandardLitSurfaceDataRT(fragInput.texCoord0.xy, 0.0, surfaceData);
 
         // Alpha test
-        if (surfaceData.alpha < surfaceData.alphaClipThreshold)
+        if (surfaceData.alpha < _Cutoff)
         {
             IgnoreHit();  // Transparent pixel, continue ray
         }

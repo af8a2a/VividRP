@@ -85,6 +85,28 @@ inline half3 SampleEmissionRT(float2 uv, float lod)
 #endif
 }
 
+// Helper for detail maps with explicit LOD
+#if defined(_DETAIL)
+inline half3 ApplyDetailAlbedo(float2 detailUv, half3 albedo, half detailMask, float lod)
+{
+#if defined(_DETAIL_MULX2)
+    half3 detailAlbedo = SAMPLE_TEXTURE2D_LOD(_DetailAlbedoMap, sampler_DetailAlbedoMap, detailUv, lod).rgb;
+    albedo = albedo * LerpWhiteTo(detailAlbedo * 2.0, detailMask);
+#elif defined(_DETAIL_SCALED)
+    half3 detailAlbedo = SAMPLE_TEXTURE2D_LOD(_DetailAlbedoMap, sampler_DetailAlbedoMap, detailUv, lod).rgb;
+    albedo = lerp(albedo, albedo * detailAlbedo * 2.0, detailMask);
+#endif
+    return albedo;
+}
+
+inline half3 ApplyDetailNormal(float2 detailUv, half3 normalTS, half detailMask, float lod)
+{
+    half3 detailNormalTS = UnpackNormalScale(SAMPLE_TEXTURE2D_LOD(_DetailNormalMap, sampler_DetailNormalMap, detailUv, lod), _DetailNormalMapScale);
+    normalTS = lerp(normalTS, BlendNormalRNM(normalTS, detailNormalTS), detailMask);
+    return normalTS;
+}
+#endif
+
 // Path Tracing version of InitializeStandardLitSurfaceData
 // Uses explicit LOD sampling suitable for ray tracing shaders
 inline void InitializeStandardLitSurfaceDataRT(float2 uv, float lod, out SurfaceData outSurfaceData)
@@ -124,28 +146,6 @@ inline void InitializeStandardLitSurfaceDataRT(float2 uv, float lod, out Surface
     outSurfaceData.normalTS = ApplyDetailNormal(detailUv, outSurfaceData.normalTS, detailMask, lod);
 #endif
 }
-
-// Helper for detail maps with explicit LOD
-#if defined(_DETAIL)
-inline half3 ApplyDetailAlbedo(float2 detailUv, half3 albedo, half detailMask, float lod)
-{
-#if defined(_DETAIL_MULX2)
-    half3 detailAlbedo = SAMPLE_TEXTURE2D_LOD(_DetailAlbedoMap, sampler_DetailAlbedoMap, detailUv, lod).rgb;
-    albedo = albedo * LerpWhiteTo(detailAlbedo * 2.0, detailMask);
-#elif defined(_DETAIL_SCALED)
-    half3 detailAlbedo = SAMPLE_TEXTURE2D_LOD(_DetailAlbedoMap, sampler_DetailAlbedoMap, detailUv, lod).rgb;
-    albedo = lerp(albedo, albedo * detailAlbedo * 2.0, detailMask);
-#endif
-    return albedo;
-}
-
-inline half3 ApplyDetailNormal(float2 detailUv, half3 normalTS, half detailMask, float lod)
-{
-    half3 detailNormalTS = UnpackNormalScale(SAMPLE_TEXTURE2D_LOD(_DetailNormalMap, sampler_DetailNormalMap, detailUv, lod), _DetailNormalMapScale);
-    normalTS = lerp(normalTS, BlendNormalRNM(normalTS, detailNormalTS), detailMask);
-    return normalTS;
-}
-#endif
 
 // Ray differential approximation for automatic LOD calculation
 // Based on "Texture Level of Detail Strategies for Real-Time Ray Tracing" (Akenine-Möller et al.)

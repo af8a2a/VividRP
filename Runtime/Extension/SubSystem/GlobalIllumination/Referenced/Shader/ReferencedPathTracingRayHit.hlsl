@@ -23,7 +23,8 @@
 //--------------------------------------------------------------------------------------------------
 
 [shader("closesthit")]
-void ClosestHitPathTracing(inout PathTracingPayload payload : SV_RayPayload, AttributeData attributeData : SV_IntersectionAttributes)
+void ClosestHitPathTracing(inout PathTracingPayload payload : SV_RayPayload,
+                           AttributeData attributeData : SV_IntersectionAttributes)
 {
     // Get hit distance
     float hitDistance = RayTCurrent();
@@ -57,8 +58,9 @@ void ClosestHitPathTracing(inout PathTracingPayload payload : SV_RayPayload, Att
     // Get normal
     float3 normalWS = normalize(fragInput.tangentToWorld[2]);
     #ifdef _NORMALMAP
-        float3 normalTS = SampleNormalRT(fragInput.texCoord0, textureLOD, TEXTURE2D_ARGS(_BumpMap, sampler_BumpMap), _BumpScale);
-        normalWS = normalize(TransformTangentToWorld(normalTS, fragInput.tangentToWorld));
+    float3 normalTS = SampleNormalRT(fragInput.texCoord0, textureLOD, TEXTURE2D_ARGS(_BumpMap, sampler_BumpMap),
+                                     _BumpScale);
+    normalWS = normalize(TransformTangentToWorld(normalTS, fragInput.tangentToWorld));
     #endif
 
     // Validate normal
@@ -88,11 +90,11 @@ void ClosestHitPathTracing(inout PathTracingPayload payload : SV_RayPayload, Att
 
     // Alpha testing
     #ifdef _ALPHATEST_ON
-        if (surfaceData.alpha < surfaceData.alphaClipThreshold)
-        {
-            // This shouldn't happen if anyhit is working, but safety check
-            payload.hitDistance = -1.0;
-        }
+    if (surfaceData.alpha < _Cutoff)
+    {
+        // This shouldn't happen if anyhit is working, but safety check
+        payload.hitDistance = -1.0;
+    }
     #endif
 }
 
@@ -102,23 +104,24 @@ void ClosestHitPathTracing(inout PathTracingPayload payload : SV_RayPayload, Att
 //--------------------------------------------------------------------------------------------------
 
 [shader("anyhit")]
-void AnyHitPathTracing(inout PathTracingPayload payload : SV_RayPayload, in AttributeData attributeData : SV_IntersectionAttributes)
+void AnyHitPathTracing(inout PathTracingPayload payload : SV_RayPayload,
+                       in AttributeData attributeData : SV_IntersectionAttributes)
 {
     #ifdef _ALPHATEST_ON
-        // Alpha-tested material: sample alpha and test
-        IntersectionVertex currentVertex;
-        FragInputs fragInput;
-        GetCurrentVertexAndBuildFragInputs(attributeData, currentVertex, fragInput);
+    // Alpha-tested material: sample alpha and test
+    IntersectionVertex currentVertex;
+    FragInputs fragInput;
+    GetCurrentVertexAndBuildFragInputs(attributeData, currentVertex, fragInput);
 
-        SurfaceData surfaceData;
-        InitializeStandardLitSurfaceDataRT(fragInput.texCoord0, 0.0, surfaceData);
+    SurfaceData surfaceData;
+    InitializeStandardLitSurfaceDataRT(fragInput.texCoord0, 0.0, surfaceData);
 
-        if (surfaceData.alpha < surfaceData.alphaClipThreshold)
-        {
-            IgnoreHit();  // Transparent pixel, continue ray
-            return;
-        }
-        // Alpha test passed, this pixel is opaque
+    if (surfaceData.alpha < _Cutoff)
+    {
+        IgnoreHit(); // Transparent pixel, continue ray
+        return;
+    }
+    // Alpha test passed, this pixel is opaque
     #endif
 
     // For shadow rays, any opaque hit means the light is occluded

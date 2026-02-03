@@ -86,6 +86,7 @@ namespace UnityEditor.Rendering.Universal
         SerializedDataParameter m_EnableSharc;
         SerializedDataParameter m_SharcUpdate;
         SerializedDataParameter m_SharcQuery;
+        SerializedDataParameter m_SharcUpdateDownscale;
         SerializedDataParameter m_SharcSceneScale;
         SerializedDataParameter m_SharcEntriesK;
         SerializedDataParameter m_SharcRoughnessThreshold;
@@ -340,6 +341,7 @@ namespace UnityEditor.Rendering.Universal
             m_EnableSharc = Unpack(o.Find(x => x.enableSharc));
             m_SharcUpdate = Unpack(o.Find(x => x.sharcUpdate));
             m_SharcQuery = Unpack(o.Find(x => x.sharcQuery));
+            m_SharcUpdateDownscale = Unpack(o.Find(x => x.sharcUpdateDownscale));
             m_SharcSceneScale = Unpack(o.Find(x => x.sharcSceneScale));
             m_SharcEntriesK = Unpack(o.Find(x => x.sharcEntriesK));
             m_SharcRoughnessThreshold = Unpack(o.Find(x => x.sharcRoughnessThreshold));
@@ -690,19 +692,41 @@ namespace UnityEditor.Rendering.Universal
                 {
                     using (new EditorGUI.IndentLevelScope())
                     {
-                        PropertyField(m_SharcUpdate);
-                        PropertyField(m_SharcQuery);
-                        PropertyField(m_SharcSceneScale);
-                        PropertyField(m_SharcEntriesK);
-                        PropertyField(m_SharcRoughnessThreshold);
-                        PropertyField(m_SharcRadianceScale);
-                        PropertyField(m_SharcPropagationDepth);
-                        PropertyField(m_SharcSampleThreshold);
-                        PropertyField(m_SharcGridLevelBias);
-                        PropertyField(m_SharcAntiFirefly);
-                        PropertyField(m_SharcAccumulationFrames);
-                        PropertyField(m_SharcStaleFrames);
-                        PropertyField(m_SharcDebug);
+                        EditorGUILayout.LabelField("Pass Control", EditorStyles.boldLabel);
+                        using (new EditorGUI.IndentLevelScope())
+                        {
+                            PropertyField(m_SharcUpdate);
+                            if (m_SharcUpdate.value.boolValue)
+                            {
+                                PropertyField(m_SharcUpdateDownscale);
+                            }
+                            PropertyField(m_SharcQuery);
+                        }
+
+                        EditorGUILayout.Space();
+
+                        EditorGUILayout.LabelField("Cache Settings", EditorStyles.boldLabel);
+                        using (new EditorGUI.IndentLevelScope())
+                        {
+                            PropertyField(m_SharcSceneScale);
+                            PropertyField(m_SharcEntriesK);
+                            PropertyField(m_SharcRoughnessThreshold);
+                            PropertyField(m_SharcRadianceScale);
+                            PropertyField(m_SharcPropagationDepth);
+                            PropertyField(m_SharcSampleThreshold);
+                            PropertyField(m_SharcGridLevelBias);
+                            PropertyField(m_SharcAntiFirefly);
+                            PropertyField(m_SharcAccumulationFrames);
+                            PropertyField(m_SharcStaleFrames);
+                        }
+
+                        EditorGUILayout.Space();
+
+                        EditorGUILayout.LabelField("Debug", EditorStyles.boldLabel);
+                        using (new EditorGUI.IndentLevelScope())
+                        {
+                            PropertyField(m_SharcDebug);
+                        }
                     }
                 }
             }

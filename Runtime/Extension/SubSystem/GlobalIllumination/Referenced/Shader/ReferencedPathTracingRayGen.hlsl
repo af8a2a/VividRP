@@ -135,7 +135,7 @@ int _PathTracingDebugMode;  // 0=Normal, 1=ShowFrameCount, 2=ShowNormals, 3=Show
 
 // NRD parameters for hit distance normalization
 float _NRDHitDistanceParams;  // Hit distance normalization parameter (view-z based)
-
+int _SharcDownscale;
 //--------------------------------------------------------------------------------------------------
 // SHARC Buffers and Parameters
 //--------------------------------------------------------------------------------------------------
@@ -696,7 +696,12 @@ void MissShaderPathTracing(inout PathTracingPayload payload : SV_RayPayload)
 [shader("raygeneration")]
 void RayGenPathTracing()
 {
-    uint2 launchIndex = DispatchRaysIndex().xy;
+    uint2 SharcUpdateScale = _SharcDownscale;
+    #if !defined(SHARC_UPDATE)  
+    SharcUpdateScale = 1;;
+    #endif
+    
+    uint2 launchIndex = DispatchRaysIndex().xy * SharcUpdateScale;
     float2 pixelCoord = float2(launchIndex) + 0.5;
 
     // Load depth for primary visibility

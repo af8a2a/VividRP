@@ -137,6 +137,7 @@ namespace UnityEngine.Rendering.Universal
             internal bool enableSharc;
             internal bool sharcUpdate;
             internal bool sharcQuery;
+            internal int sharcUpdateDownscale;
             internal Vector3 sharcCameraPosition;
             internal float sharcSceneScale;
             internal float sharcRoughnessThreshold;
@@ -307,6 +308,7 @@ namespace UnityEngine.Rendering.Universal
             public static readonly int _SharcEntriesNum = Shader.PropertyToID("_SharcEntriesNum");
             public static readonly int _SharcEnableAntifirefly = Shader.PropertyToID("_SharcEnableAntifirefly");
             public static readonly int _SharcDebug = Shader.PropertyToID("_SharcDebug");
+            public static readonly int _SharcDownscale = Shader.PropertyToID("_SharcDownscale");
             public static readonly int _SharcAccumulationFrameNum = Shader.PropertyToID("_SharcAccumulationFrameNum");
             public static readonly int _SharcStaleFrameNumMax = Shader.PropertyToID("_SharcStaleFrameNumMax");
             public static readonly int _SharcRadianceScale = Shader.PropertyToID("_SharcRadianceScale");
@@ -376,6 +378,7 @@ namespace UnityEngine.Rendering.Universal
             passData.enableSharc = giSettings.enableSharc.value;
             passData.sharcUpdate = giSettings.sharcUpdate.value;
             passData.sharcQuery = giSettings.sharcQuery.value;
+            passData.sharcUpdateDownscale = giSettings.sharcUpdateDownscale.value;
             passData.sharcCameraPosition = cameraData.camera.transform.position;
             passData.sharcSceneScale = giSettings.sharcSceneScale.value;
             passData.sharcRoughnessThreshold = giSettings.sharcRoughnessThreshold.value;
@@ -471,38 +474,186 @@ namespace UnityEngine.Rendering.Universal
                     }
                 }
 
-                // Bind SHARC buffers and parameters if enabled
-                if (data.enableSharc && data.sharcHashEntriesBuffer.IsValid())
-                {
-                    // Enable/disable SHARC shader keywords based on volume settings
-                    cmd.SetKeyword(ShaderConstants.SharcUpdateKeyword, data.sharcUpdate);
-                    cmd.SetKeyword(ShaderConstants.SharcQueryKeyword, data.sharcQuery);
-
-                    // Bind SHARC buffers (RenderGraph managed)
-                    cmd.SetRayTracingBufferParam(data.pathTracingShader, ShaderConstants._SharcHashEntriesBuffer, data.sharcHashEntriesBuffer);
-                    cmd.SetRayTracingBufferParam(data.pathTracingShader, ShaderConstants._SharcLockBuffer, data.sharcLockBuffer);
-                    cmd.SetRayTracingBufferParam(data.pathTracingShader, ShaderConstants._SharcAccumulationBuffer, data.sharcAccumulationBuffer);
-                    cmd.SetRayTracingBufferParam(data.pathTracingShader, ShaderConstants._SharcResolvedBuffer, data.sharcResolvedBuffer);
-
-                    // Bind SHARC parameters
-                    cmd.SetRayTracingVectorParam(data.pathTracingShader, ShaderConstants._SharcCameraPosition, data.sharcCameraPosition);
-                    cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._SharcSceneScale, data.sharcSceneScale);
-                    cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._SharcRoughnessThreshold, data.sharcRoughnessThreshold);
-                    cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._SharcRadianceScale, data.sharcRadianceScale);
-                    cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcGridLevelBias, data.sharcGridLevelBias);
-                    cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcSampleThreshold, data.sharcSampleThreshold);
-                    cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcEntriesNum, data.sharcEntriesNum);
-                    cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcEnableAntifirefly, data.sharcAntiFirefly ? 1 : 0);
-                    cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcDebug, data.sharcDebug ? 1 : 0);
-                }
-                else
-                {
-                    // Disable SHARC keywords when not enabled
-                    cmd.SetKeyword(ShaderConstants.SharcUpdateKeyword, false);
-                    cmd.SetKeyword(ShaderConstants.SharcQueryKeyword, false);
-                }
+                // Disable SHARC keywords for standard path tracing
+                cmd.SetKeyword(ShaderConstants.SharcUpdateKeyword, false);
+                cmd.SetKeyword(ShaderConstants.SharcQueryKeyword, false);
 
                 // Dispatch rays
+                cmd.DispatchRays(data.pathTracingShader, "RayGenPathTracing", data.dispatchWidth, data.dispatchHeight, 1);
+            }
+        }
+
+        /// <summary>
+        /// Execute SHARC Update pass - writes radiance to cache at downscaled resolution
+        /// </summary>
+        private static void ExecuteSharcUpdate(PassData data, ComputeGraphContext context)
+        {
+            var cmd = context.cmd;
+
+            using (new ProfilingScope(cmd, new ProfilingSampler("SHARC Update")))
+            {
+                // Set ray tracing shader pass
+                cmd.SetRayTracingShaderPass(data.pathTracingShader, "PathTracingDXR");
+
+                // Bind acceleration structure
+                cmd.SetRayTracingAccelerationStructure(data.pathTracingShader, ShaderConstants._RaytracingAccelerationStructure, data.rtas);
+
+                // Push ray tracing constant buffer
+                ConstantBuffer.PushGlobal(cmd, data.rayTracingCB, RayTracingSystem._ShaderVariablesRaytracing);
+
+                // Bind dithered texture set (blue noise)
+                RuntimeTextureSystem.BindDitheredTextureSet(cmd, data.ditheredTextureHandleSet);
+
+                // Bind input textures - DXR GBuffer
+                cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._DXRGBufferMaterialData, data.materialData);
+                cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._DXRGBufferNormalRoughness, data.normalRoughness);
+                cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._DXRGBufferEmission, data.emission);
+                cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._CameraDepthTexture, data.depthTexture);
+
+                // Bind sky texture if available
+                if (data.skyTexture.IsValid())
+                {
+                    cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._SkyTexture, data.skyTexture);
+                }
+
+                // Set path tracing parameters
+                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._PathTracingIntensity, data.intensity);
+                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._PathTracingEnvironmentIntensity, data.environmentIntensity);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingIncludeEmissive, data.includeEmissive ? 1 : 0);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingIncludeDirectLighting, data.includeDirectLighting ? 1 : 0);
+
+                // Enable SHARC Update keyword, disable Query
+                cmd.SetKeyword(ShaderConstants.SharcUpdateKeyword, true);
+                cmd.SetKeyword(ShaderConstants.SharcQueryKeyword, false);
+
+                // Bind SHARC buffers (Update pass: all 4 buffers)
+                cmd.SetRayTracingBufferParam(data.pathTracingShader, ShaderConstants._SharcHashEntriesBuffer, data.sharcHashEntriesBuffer);
+                cmd.SetRayTracingBufferParam(data.pathTracingShader, ShaderConstants._SharcLockBuffer, data.sharcLockBuffer);
+                cmd.SetRayTracingBufferParam(data.pathTracingShader, ShaderConstants._SharcAccumulationBuffer, data.sharcAccumulationBuffer);
+                cmd.SetRayTracingBufferParam(data.pathTracingShader, ShaderConstants._SharcResolvedBuffer, data.sharcResolvedBuffer);
+
+                // Bind SHARC parameters
+                cmd.SetRayTracingVectorParam(data.pathTracingShader, ShaderConstants._SharcCameraPosition, data.sharcCameraPosition);
+                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._SharcSceneScale, data.sharcSceneScale);
+                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._SharcRoughnessThreshold, data.sharcRoughnessThreshold);
+                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._SharcRadianceScale, data.sharcRadianceScale);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcGridLevelBias, data.sharcGridLevelBias);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcSampleThreshold, data.sharcSampleThreshold);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcEntriesNum, data.sharcEntriesNum);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcEnableAntifirefly, data.sharcAntiFirefly ? 1 : 0);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcDebug, data.sharcDebug ? 1 : 0);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcDownscale, data.sharcUpdateDownscale);
+
+                // Dispatch rays at downscaled resolution
+                uint updateWidth = data.dispatchWidth / (uint)data.sharcUpdateDownscale;
+                uint updateHeight = data.dispatchHeight / (uint)data.sharcUpdateDownscale;
+                cmd.DispatchRays(data.pathTracingShader, "RayGenPathTracing", updateWidth, updateHeight, 1);
+            }
+        }
+
+        /// <summary>
+        /// Execute SHARC Query pass - reads cached radiance at full resolution
+        /// </summary>
+        private static void ExecuteSharcQuery(PassData data, ComputeGraphContext context)
+        {
+            var cmd = context.cmd;
+
+            using (new ProfilingScope(cmd, new ProfilingSampler("SHARC Query")))
+            {
+                // Set ray tracing shader pass
+                cmd.SetRayTracingShaderPass(data.pathTracingShader, "PathTracingDXR");
+
+                // Bind acceleration structure
+                cmd.SetRayTracingAccelerationStructure(data.pathTracingShader, ShaderConstants._RaytracingAccelerationStructure, data.rtas);
+
+                // Push ray tracing constant buffer
+                ConstantBuffer.PushGlobal(cmd, data.rayTracingCB, RayTracingSystem._ShaderVariablesRaytracing);
+
+                // Bind dithered texture set (blue noise)
+                RuntimeTextureSystem.BindDitheredTextureSet(cmd, data.ditheredTextureHandleSet);
+
+                // Bind input textures - DXR GBuffer
+                cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._DXRGBufferMaterialData, data.materialData);
+                cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._DXRGBufferNormalRoughness, data.normalRoughness);
+                cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._DXRGBufferEmission, data.emission);
+                cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._CameraDepthTexture, data.depthTexture);
+
+                // Bind output texture
+                cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._PathTracingOutput, data.outputTexture);
+
+                // Bind history texture if accumulating
+                if (data.accumulate && data.historyTexture.IsValid())
+                {
+                    cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._PathTracingHistory, data.historyTexture);
+                }
+
+                // Bind sky texture if available
+                if (data.skyTexture.IsValid())
+                {
+                    cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._SkyTexture, data.skyTexture);
+                }
+
+                // Set path tracing parameters
+                CoreUtils.SetKeyword(cmd, "_PATH_TRACING_ACCUMULATE", data.accumulate);
+                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._PathTracingIntensity, data.intensity);
+                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._PathTracingEnvironmentIntensity, data.environmentIntensity);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingIncludeEmissive, data.includeEmissive ? 1 : 0);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingIncludeDirectLighting, data.includeDirectLighting ? 1 : 0);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingDebugVisualizeBounce, data.debugVisualizeBounce);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._PathTracingDebugMode, data.debugMode);
+
+                // NRD parameters
+                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._NRDHitDistanceParams, data.nrdHitDistanceParams);
+
+                // Bind diffuse/specular output textures for NRD
+                if (data.diffuseOutputTexture.IsValid())
+                {
+                    cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._PathTracingDiffuseOutput, data.diffuseOutputTexture);
+                }
+
+                if (data.specularOutputTexture.IsValid())
+                {
+                    cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._PathTracingSpecularOutput, data.specularOutputTexture);
+                }
+
+                // Bind material factors texture for NRD de-modulation
+                if (data.materialFactorsTexture.IsValid())
+                {
+                    cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._PathTracingMaterialFactors, data.materialFactorsTexture);
+                }
+
+                // Bind diffuse/specular history textures if accumulating
+                if (data.accumulate)
+                {
+                    if (data.diffuseHistoryTexture.IsValid())
+                    {
+                        cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._PathTracingDiffuseHistory, data.diffuseHistoryTexture);
+                    }
+
+                    if (data.specularHistoryTexture.IsValid())
+                    {
+                        cmd.SetRayTracingTextureParam(data.pathTracingShader, ShaderConstants._PathTracingSpecularHistory, data.specularHistoryTexture);
+                    }
+                }
+
+                // Enable SHARC Query keyword, disable Update
+                cmd.SetKeyword(ShaderConstants.SharcUpdateKeyword, false);
+                cmd.SetKeyword(ShaderConstants.SharcQueryKeyword, true);
+
+                // Bind SHARC buffers (Query pass: only HashEntries and Resolved)
+                cmd.SetRayTracingBufferParam(data.pathTracingShader, ShaderConstants._SharcHashEntriesBuffer, data.sharcHashEntriesBuffer);
+                cmd.SetRayTracingBufferParam(data.pathTracingShader, ShaderConstants._SharcResolvedBuffer, data.sharcResolvedBuffer);
+
+                // Bind SHARC parameters
+                cmd.SetRayTracingVectorParam(data.pathTracingShader, ShaderConstants._SharcCameraPosition, data.sharcCameraPosition);
+                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._SharcSceneScale, data.sharcSceneScale);
+                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._SharcRoughnessThreshold, data.sharcRoughnessThreshold);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcGridLevelBias, data.sharcGridLevelBias);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcSampleThreshold, data.sharcSampleThreshold);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcEntriesNum, data.sharcEntriesNum);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcDebug, data.sharcDebug ? 1 : 0);
+
+                // Dispatch rays at full resolution
                 cmd.DispatchRays(data.pathTracingShader, "RayGenPathTracing", data.dispatchWidth, data.dispatchHeight, 1);
             }
         }
@@ -737,8 +888,120 @@ namespace UnityEngine.Rendering.Universal
                 }
             }
 
-            // Add path tracing pass
-            using (var builder = renderGraph.AddComputePass<PassData>(kPassName, out var passData, s_ProfilingSampler))
+            // Add path tracing pass(es)
+            // When SHARC is enabled, we need three separate passes: Update -> Resolve -> Query
+            // When SHARC is disabled, we use a single standard path tracing pass
+            if (sharcEnabled && sharcHashEntriesBuffer.IsValid() && giSettings.sharcUpdate.value)
+            {
+                // ===== SHARC Update Pass =====
+                // Writes radiance to cache at downscaled resolution
+                using (var builder = renderGraph.AddComputePass<PassData>("SHARC Update", out var passData, new ProfilingSampler("SHARC Update")))
+                {
+                    InitializePassData(renderGraph, passData, rayTracingSystem, cameraData, resourceData, giSettings);
+
+                    // Pass imported SHARC buffer handles
+                    passData.sharcHashEntriesBuffer = sharcHashEntriesBuffer;
+                    passData.sharcLockBuffer = sharcLockBuffer;
+                    passData.sharcAccumulationBuffer = sharcAccumulationBuffer;
+                    passData.sharcResolvedBuffer = sharcResolvedBuffer;
+
+                    // Use input textures - DXR GBuffer
+                    passData.ditheredTextureHandleSet.Use(builder);
+                    builder.UseTexture(passData.materialData);
+                    builder.UseTexture(passData.normalRoughness);
+                    builder.UseTexture(passData.emission);
+                    builder.UseTexture(passData.depthTexture);
+
+                    // Use sky texture if available
+                    if (passData.skyTexture.IsValid())
+                    {
+                        builder.UseTexture(passData.skyTexture);
+                    }
+
+                    // Update pass: HashEntries(RW), LockBuffer(RW), Accumulation(Write), Resolved(Read)
+                    builder.UseBuffer(sharcHashEntriesBuffer, AccessFlags.ReadWrite);
+                    builder.UseBuffer(sharcLockBuffer, AccessFlags.ReadWrite);
+                    builder.UseBuffer(sharcAccumulationBuffer, AccessFlags.Write);
+                    builder.UseBuffer(sharcResolvedBuffer, AccessFlags.Read);
+
+                    builder.AllowPassCulling(false);
+                    builder.AllowGlobalStateModification(true);
+
+                    builder.SetRenderFunc<PassData>(ExecuteSharcUpdate);
+                }
+            }
+
+            // ===== SHARC Resolve Pass =====
+            // Must run after Update to merge accumulated samples
+            if (sharcEnabled && sharcHashEntriesBuffer.IsValid() && giSettings.sharcUpdate.value)
+            {
+                var runtimeShaders = GraphicsSettings.GetRenderPipelineSettings<VividRuntimeShader>();
+
+                using (var builder = renderGraph.AddComputePass<SharcResolvePassData>("SHARC Resolve", out var passData))
+                {
+                    passData.resolveShader = runtimeShaders.sharcResolveCS;
+                    passData.resolveKernel = runtimeShaders.sharcResolveCS.FindKernel("CSResolveEntries");
+                    passData.cameraPosition = cameraData.camera.transform.position;
+                    passData.cameraPositionPrev = SharcSystem.instance.PreviousCameraPosition;
+                    passData.sceneScale = giSettings.sharcSceneScale.value;
+                    passData.radianceScale = giSettings.sharcRadianceScale.value;
+                    passData.gridLevelBias = giSettings.sharcGridLevelBias.value;
+                    passData.entriesNum = giSettings.sharcEntriesK.value * 1024;
+                    passData.accumulationFrameNum = giSettings.sharcAccumulationFrames.value;
+                    passData.staleFrameNumMax = giSettings.sharcStaleFrames.value;
+                    passData.enableAntifirefly = giSettings.sharcAntiFirefly.value;
+
+                    // Pass imported SHARC buffer handles
+                    passData.sharcHashEntriesBuffer = sharcHashEntriesBuffer;
+                    passData.sharcLockBuffer = sharcLockBuffer;
+                    passData.sharcAccumulationBuffer = sharcAccumulationBuffer;
+                    passData.sharcResolvedBuffer = sharcResolvedBuffer;
+
+                    // Resolve pass: HashEntries(Read), Accumulation(Read), Resolved(RW)
+                    builder.UseBuffer(sharcHashEntriesBuffer, AccessFlags.Read);
+                    builder.UseBuffer(sharcAccumulationBuffer, AccessFlags.Read);
+                    builder.UseBuffer(sharcResolvedBuffer, AccessFlags.ReadWrite);
+
+                    builder.AllowPassCulling(false);
+
+                    builder.SetRenderFunc<SharcResolvePassData>((data, context) =>
+                    {
+                        var cmd = context.cmd;
+
+                        // Bind SHARC buffers (RenderGraph managed)
+                        cmd.SetComputeBufferParam(data.resolveShader, data.resolveKernel, ShaderConstants._SharcHashEntriesBuffer, data.sharcHashEntriesBuffer);
+                        cmd.SetComputeBufferParam(data.resolveShader, data.resolveKernel, ShaderConstants._SharcAccumulationBuffer,
+                            data.sharcAccumulationBuffer);
+                        cmd.SetComputeBufferParam(data.resolveShader, data.resolveKernel, ShaderConstants._SharcResolvedBuffer, data.sharcResolvedBuffer);
+
+                        // Bind SHARC parameters (volume-controlled)
+                        cmd.SetComputeVectorParam(data.resolveShader, ShaderConstants._SharcCameraPosition, data.cameraPosition);
+                        cmd.SetComputeVectorParam(data.resolveShader, ShaderConstants._SharcCameraPositionPrev, data.cameraPositionPrev);
+                        cmd.SetComputeFloatParam(data.resolveShader, ShaderConstants._SharcSceneScale, data.sceneScale);
+                        cmd.SetComputeFloatParam(data.resolveShader, ShaderConstants._SharcRadianceScale, data.radianceScale);
+                        cmd.SetComputeIntParam(data.resolveShader, ShaderConstants._SharcGridLevelBias, data.gridLevelBias);
+                        cmd.SetComputeIntParam(data.resolveShader, ShaderConstants._SharcEntriesNum, data.entriesNum);
+                        cmd.SetComputeIntParam(data.resolveShader, ShaderConstants._SharcAccumulationFrameNum, data.accumulationFrameNum);
+                        cmd.SetComputeIntParam(data.resolveShader, ShaderConstants._SharcStaleFrameNumMax, data.staleFrameNumMax);
+                        cmd.SetComputeIntParam(data.resolveShader, ShaderConstants._SharcEnableAntifirefly, data.enableAntifirefly ? 1 : 0);
+
+                        // Dispatch: process all entries
+                        int threadGroups = (data.entriesNum + 63) / 64;
+                        cmd.DispatchCompute(data.resolveShader, data.resolveKernel, threadGroups, 1, 1);
+
+                        // Update previous camera position for next frame
+                        SharcSystem.instance.UpdatePreviousCameraPosition(data.cameraPosition);
+                    });
+                }
+            }
+
+            // ===== SHARC Query Pass OR Standard Path Tracing Pass =====
+            // Query pass reads from cache at full resolution
+            // Standard pass runs when SHARC is disabled
+            using (var builder = renderGraph.AddComputePass<PassData>(
+                sharcEnabled && giSettings.sharcQuery.value ? "SHARC Query" : kPassName,
+                out var passData,
+                sharcEnabled && giSettings.sharcQuery.value ? new ProfilingSampler("SHARC Query") : s_ProfilingSampler))
             {
                 InitializePassData(renderGraph, passData, rayTracingSystem, cameraData, resourceData, giSettings);
 
@@ -795,83 +1058,24 @@ namespace UnityEngine.Rendering.Universal
                     builder.UseTexture(passData.skyTexture);
                 }
 
-                // Use SHARC buffers if enabled (read/write for update, read for query)
-                if (sharcEnabled && sharcHashEntriesBuffer.IsValid())
+                // Use SHARC buffers if enabled (Query pass: only HashEntries and Resolved, both read-only)
+                if (sharcEnabled && sharcHashEntriesBuffer.IsValid() && giSettings.sharcQuery.value)
                 {
-                    builder.UseBuffer(sharcHashEntriesBuffer, AccessFlags.ReadWrite);
-                    builder.UseBuffer(sharcLockBuffer, AccessFlags.ReadWrite);
-                    builder.UseBuffer(sharcAccumulationBuffer, AccessFlags.ReadWrite);
+                    builder.UseBuffer(sharcHashEntriesBuffer, AccessFlags.Read);
                     builder.UseBuffer(sharcResolvedBuffer, AccessFlags.Read);
                 }
 
                 builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);
 
-                builder.SetRenderFunc<PassData>(ExecutePathTracing);
-            }
-
-            // SHARC Resolve Pass - must run after path tracing to merge accumulated samples
-            if (sharcEnabled && sharcHashEntriesBuffer.IsValid())
-            {
-                var runtimeShaders = GraphicsSettings.GetRenderPipelineSettings<VividRuntimeShader>();
-
-                using (var builder = renderGraph.AddComputePass<SharcResolvePassData>("SHARC Resolve", out var passData))
+                // Use appropriate render function based on SHARC mode
+                if (sharcEnabled && giSettings.sharcQuery.value)
                 {
-                    passData.resolveShader = runtimeShaders.sharcResolveCS;
-                    passData.resolveKernel = runtimeShaders.sharcResolveCS.FindKernel("CSResolveEntries");
-                    passData.cameraPosition = cameraData.camera.transform.position;
-                    passData.cameraPositionPrev = SharcSystem.instance.PreviousCameraPosition;
-                    passData.sceneScale = giSettings.sharcSceneScale.value;
-                    passData.radianceScale = giSettings.sharcRadianceScale.value;
-                    passData.gridLevelBias = giSettings.sharcGridLevelBias.value;
-                    passData.entriesNum = giSettings.sharcEntriesK.value * 1024;
-                    passData.accumulationFrameNum = giSettings.sharcAccumulationFrames.value;
-                    passData.staleFrameNumMax = giSettings.sharcStaleFrames.value;
-                    passData.enableAntifirefly = giSettings.sharcAntiFirefly.value;
-
-                    // Pass imported SHARC buffer handles
-                    passData.sharcHashEntriesBuffer = sharcHashEntriesBuffer;
-                    passData.sharcLockBuffer = sharcLockBuffer;
-                    passData.sharcAccumulationBuffer = sharcAccumulationBuffer;
-                    passData.sharcResolvedBuffer = sharcResolvedBuffer;
-
-                    // Declare buffer usage for RenderGraph
-                    builder.UseBuffer(sharcHashEntriesBuffer, AccessFlags.ReadWrite);
-                    builder.UseBuffer(sharcLockBuffer, AccessFlags.ReadWrite);
-                    builder.UseBuffer(sharcAccumulationBuffer, AccessFlags.ReadWrite);
-                    builder.UseBuffer(sharcResolvedBuffer, AccessFlags.ReadWrite);
-
-                    builder.AllowPassCulling(false);
-
-                    builder.SetRenderFunc<SharcResolvePassData>((data, context) =>
-                    {
-                        var cmd = context.cmd;
-
-                        // Bind SHARC buffers (RenderGraph managed)
-                        cmd.SetComputeBufferParam(data.resolveShader, data.resolveKernel, ShaderConstants._SharcHashEntriesBuffer, data.sharcHashEntriesBuffer);
-                        cmd.SetComputeBufferParam(data.resolveShader, data.resolveKernel, ShaderConstants._SharcLockBuffer, data.sharcLockBuffer);
-                        cmd.SetComputeBufferParam(data.resolveShader, data.resolveKernel, ShaderConstants._SharcAccumulationBuffer,
-                            data.sharcAccumulationBuffer);
-                        cmd.SetComputeBufferParam(data.resolveShader, data.resolveKernel, ShaderConstants._SharcResolvedBuffer, data.sharcResolvedBuffer);
-
-                        // Bind SHARC parameters (volume-controlled)
-                        cmd.SetComputeVectorParam(data.resolveShader, ShaderConstants._SharcCameraPosition, data.cameraPosition);
-                        cmd.SetComputeVectorParam(data.resolveShader, ShaderConstants._SharcCameraPositionPrev, data.cameraPositionPrev);
-                        cmd.SetComputeFloatParam(data.resolveShader, ShaderConstants._SharcSceneScale, data.sceneScale);
-                        cmd.SetComputeFloatParam(data.resolveShader, ShaderConstants._SharcRadianceScale, data.radianceScale);
-                        cmd.SetComputeIntParam(data.resolveShader, ShaderConstants._SharcGridLevelBias, data.gridLevelBias);
-                        cmd.SetComputeIntParam(data.resolveShader, ShaderConstants._SharcEntriesNum, data.entriesNum);
-                        cmd.SetComputeIntParam(data.resolveShader, ShaderConstants._SharcAccumulationFrameNum, data.accumulationFrameNum);
-                        cmd.SetComputeIntParam(data.resolveShader, ShaderConstants._SharcStaleFrameNumMax, data.staleFrameNumMax);
-                        cmd.SetComputeIntParam(data.resolveShader, ShaderConstants._SharcEnableAntifirefly, data.enableAntifirefly ? 1 : 0);
-
-                        // Dispatch: process all entries
-                        int threadGroups = (data.entriesNum + 63) / 64;
-                        cmd.DispatchCompute(data.resolveShader, data.resolveKernel, threadGroups, 1, 1);
-
-                        // Update previous camera position for next frame
-                        SharcSystem.instance.UpdatePreviousCameraPosition(data.cameraPosition);
-                    });
+                    builder.SetRenderFunc<PassData>(ExecuteSharcQuery);
+                }
+                else
+                {
+                    builder.SetRenderFunc<PassData>(ExecutePathTracing);
                 }
             }
 

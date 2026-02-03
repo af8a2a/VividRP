@@ -573,6 +573,13 @@ namespace UnityEngine.Rendering.Universal
         public BoolParameter sharcQuery = new BoolParameter(true);
 
         /// <summary>
+        /// SHARC update downscale factor
+        /// </summary>
+        [Tooltip("Downscale factor for SHARC update pass. Higher values improve performance but reduce cache quality. 1 = full resolution, 2 = half resolution, 4 = quarter resolution.")]
+        [AdditionalProperty]
+        public ClampedIntParameter sharcUpdateDownscale = new ClampedIntParameter(2, 1, 4);
+
+        /// <summary>
         /// SHARC scene scale
         /// </summary>
         [Tooltip("Scene scale for SHARC grid. Adjust based on your scene size. Larger values create finer grids.")]

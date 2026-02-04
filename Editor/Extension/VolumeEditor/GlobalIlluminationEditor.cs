@@ -99,6 +99,14 @@ namespace UnityEditor.Rendering.Universal
         SerializedDataParameter m_SharcAccumulationFrames;
         SerializedDataParameter m_SharcStaleFrames;
 
+        // RTXTF Settings
+        SerializedDataParameter m_EnableRTXTF;
+        SerializedDataParameter m_RtxtfFilterType;
+        SerializedDataParameter m_RtxtfMagnificationMethod;
+        SerializedDataParameter m_RtxtfAnisotropyMethod;
+        SerializedDataParameter m_RtxtfGaussianSigma;
+        SerializedDataParameter m_RtxtfReseedOnSample;
+
 #if DLSS_PLUGIN_INTEGRATE
         // DLSS-RR Settings (for DLSSRR mode)
         SerializedDataParameter m_DlssRRQuality;
@@ -353,6 +361,14 @@ namespace UnityEditor.Rendering.Universal
             m_SharcDebug = Unpack(o.Find(x => x.sharcDebug));
             m_SharcAccumulationFrames = Unpack(o.Find(x => x.sharcAccumulationFrames));
             m_SharcStaleFrames = Unpack(o.Find(x => x.sharcStaleFrames));
+
+            // RTXTF Settings
+            m_EnableRTXTF = Unpack(o.Find(x => x.enableRTXTF));
+            m_RtxtfFilterType = Unpack(o.Find(x => x.rtxtfFilterType));
+            m_RtxtfMagnificationMethod = Unpack(o.Find(x => x.rtxtfMagnificationMethod));
+            m_RtxtfAnisotropyMethod = Unpack(o.Find(x => x.rtxtfAnisotropyMethod));
+            m_RtxtfGaussianSigma = Unpack(o.Find(x => x.rtxtfGaussianSigma));
+            m_RtxtfReseedOnSample = Unpack(o.Find(x => x.rtxtfReseedOnSample));
 
 #if DLSS_PLUGIN_INTEGRATE
             // DLSS-RR Settings
@@ -726,6 +742,30 @@ namespace UnityEditor.Rendering.Universal
                         using (new EditorGUI.IndentLevelScope())
                         {
                             PropertyField(m_SharcDebug);
+                        }
+                    }
+                }
+            }
+
+            EditorGUILayout.Space();
+
+            // RTXTF Settings
+            DrawHeader(EditorGUIUtility.TrTextContent("RTXTF (Stochastic Texture Filtering)"));
+            using (new EditorGUI.IndentLevelScope())
+            {
+                PropertyField(m_EnableRTXTF);
+                if (m_EnableRTXTF.value.boolValue)
+                {
+                    using (new EditorGUI.IndentLevelScope())
+                    {
+                        EditorGUILayout.LabelField("Filter Settings", EditorStyles.boldLabel);
+                        using (new EditorGUI.IndentLevelScope())
+                        {
+                            PropertyField(m_RtxtfFilterType);
+                            PropertyField(m_RtxtfMagnificationMethod);
+                            PropertyField(m_RtxtfAnisotropyMethod);
+                            PropertyField(m_RtxtfGaussianSigma);
+                            PropertyField(m_RtxtfReseedOnSample);
                         }
                     }
                 }

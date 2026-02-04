@@ -658,6 +658,51 @@ namespace UnityEngine.Rendering.Universal
 
         #endregion
 
+        #region RTXTF Settings (Ray Tracing Stochastic Texture Filtering)
+
+        /// <summary>
+        /// Enable RTXTF for stochastic texture filtering
+        /// </summary>
+        [Tooltip("Enable RTXTF (Ray Tracing Stochastic Texture Filtering) for improved texture sampling quality. Performs shading before filtering to reduce aliasing.")]
+        public BoolParameter enableRTXTF = new BoolParameter(false);
+
+        /// <summary>
+        /// RTXTF filter type
+        /// </summary>
+        [Tooltip("Filter type for RTXTF. Linear = bilinear filtering, Cubic = bicubic filtering, Gaussian = Gaussian filtering.")]
+        [AdditionalProperty]
+        public ClampedIntParameter rtxtfFilterType = new ClampedIntParameter(1, 0, 2); // 0=Point, 1=Linear, 2=Cubic, 3=Gaussian
+
+        /// <summary>
+        /// RTXTF magnification method
+        /// </summary>
+        [Tooltip("Magnification method for RTXTF. Controls how texture magnification is handled. Higher values use more sophisticated methods.")]
+        [AdditionalProperty]
+        public ClampedIntParameter rtxtfMagnificationMethod = new ClampedIntParameter(0, 0, 15);
+
+        /// <summary>
+        /// RTXTF anisotropy method
+        /// </summary>
+        [Tooltip("Anisotropy handling method. 0 = None, 1 = Default anisotropic filtering.")]
+        [AdditionalProperty]
+        public ClampedIntParameter rtxtfAnisotropyMethod = new ClampedIntParameter(1, 0, 1);
+
+        /// <summary>
+        /// RTXTF Gaussian sigma
+        /// </summary>
+        [Tooltip("Gaussian filter width (sigma) for RTXTF when using Gaussian filter type. Higher values produce more blur.")]
+        [AdditionalProperty]
+        public ClampedFloatParameter rtxtfGaussianSigma = new ClampedFloatParameter(0.5f, 0.1f, 2.0f);
+
+        /// <summary>
+        /// RTXTF reseed on sample
+        /// </summary>
+        [Tooltip("Update RNG state after each texture sample. Improves quality when sampling multiple textures but may increase noise.")]
+        [AdditionalProperty]
+        public BoolParameter rtxtfReseedOnSample = new BoolParameter(true);
+
+        #endregion
+
         /// <summary>
         /// Check if path tracing is active
         /// </summary>

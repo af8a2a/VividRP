@@ -91,6 +91,14 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/SHARC/SharcCommon.hlsl"
 #endif
 
+// RTXTF (Ray Tracing Stochastic Texture Filtering)
+#define STF_SHADER_STAGE STF_SHADER_STAGE_LIBRARY
+#define STF_SHADER_MODEL_MAJOR __SHADER_MODEL_MAJOR
+#define STF_SHADER_MODEL_MINOR __SHADER_MODEL_MINOR
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/RTXTF/RNG.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/RTXTF/STFSamplerState.hlsl"
+
 //--------------------------------------------------------------------------------------------------
 // Constants
 //--------------------------------------------------------------------------------------------------
@@ -136,6 +144,16 @@ int _PathTracingDebugMode;  // 0=Normal, 1=ShowFrameCount, 2=ShowNormals, 3=Show
 // NRD parameters for hit distance normalization
 float _NRDHitDistanceParams;  // Hit distance normalization parameter (view-z based)
 int _SharcDownscale;
+
+// RTXTF parameters
+int _RTXTFEnable;
+int _RTXTFFilterType;
+int _RTXTFMagnificationMethod;
+int _RTXTFAnisotropyMethod;
+float _RTXTFGaussianSigma;
+int _RTXTFReseedOnSample;
+uint _RTXTFFrameIndex;
+
 //--------------------------------------------------------------------------------------------------
 // SHARC Buffers and Parameters
 //--------------------------------------------------------------------------------------------------

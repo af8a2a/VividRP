@@ -17,20 +17,21 @@ CBUFFER_START(UnityPerMaterial)
 float4 _BaseMap_ST;
 float4 _BaseMap_TexelSize;
 float4 _DetailAlbedoMap_ST;
-half4 _BaseColor;
-half4 _SpecColor;
-half4 _EmissionColor;
-half _Cutoff;
-half _Smoothness;
-half _Metallic;
-half _BumpScale;
-half _Parallax;
-half _OcclusionStrength;
-half _ClearCoatMask;
-half _ClearCoatSmoothness;
-half _DetailAlbedoMapScale;
-half _DetailNormalMapScale;
-half _Surface;
+//in raytracing hit shader,cannot use float16_t ?? :(
+float4 _BaseColor;
+float4 _SpecColor;
+float4 _EmissionColor;
+float _Cutoff;
+float _Smoothness;
+float _Metallic;
+float _BumpScale;
+float _Parallax;
+float _OcclusionStrength;
+float _ClearCoatMask;
+float _ClearCoatSmoothness;
+float _DetailAlbedoMapScale;
+float _DetailNormalMapScale;
+float _Surface;
 UNITY_TEXTURE_STREAMING_DEBUG_VARS;
 CBUFFER_END
 

@@ -17,6 +17,22 @@
 // Include common payload definitions (uber payload)
 #include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/GlobalIllumination/Referenced/Shader/PathTracingCommon.hlsl"
 
+// RTXTF support
+// RTXTF parameters (defined in RayGen shader)
+
+int _RTXTFEnable;
+int _RTXTFFilterType;
+int _RTXTFMagnificationMethod;
+int _RTXTFAnisotropyMethod;
+float _RTXTFGaussianSigma;
+int _RTXTFReseedOnSample;
+uint _RTXTFFrameIndex;
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/RTXTF/RNG.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Extension/RTXTF/STFSamplerState.hlsl"
+#include "Packages/com.unity.render-pipelines.universal/Runtime/Extension/SubSystem/GlobalIllumination/Referenced/Shader/LitInputPathTracingRTXTF.hlsl"
+
+
 //--------------------------------------------------------------------------------------------------
 // Unified Closest Hit Shader
 // Handles both path tracing rays (full material evaluation) and shadow rays (visibility only)
@@ -51,15 +67,41 @@ void ClosestHitPathTracing(inout PathTracingPayload payload : SV_RayPayload,
     float textureLOD = ComputeTextureLODFromDistance(hitDistance, 1.0);
     textureLOD = min(textureLOD, 8.0);
 
-    // Sample surface data with LOD
+    // Initialize RTXTF sampler state if enabled
+    STF_SamplerState stfSamplerState;
+    bool useRTXTF = (_RTXTFEnable != 0);
+    if (useRTXTF)
+    {
+        // Use DispatchRaysIndex() to get pixel position for RNG
+        uint2 pixelPos = DispatchRaysIndex().xy;
+        InitRTXTF(stfSamplerState, pixelPos);
+    }
+
+    // Sample surface data with LOD (with optional RTXTF)
     SurfaceData surfaceData;
-    InitializeStandardLitSurfaceDataRT(fragInput.texCoord0, textureLOD, surfaceData);
+    if (useRTXTF)
+    {
+        InitializeStandardLitSurfaceDataRT_RTXTF(stfSamplerState, true, fragInput.texCoord0, textureLOD, surfaceData);
+    }
+    else
+    {
+        InitializeStandardLitSurfaceDataRT(fragInput.texCoord0, textureLOD, surfaceData);
+    }
 
     // Get normal
     float3 normalWS = normalize(fragInput.tangentToWorld[2]);
     #ifdef _NORMALMAP
-    float3 normalTS = SampleNormalRT(fragInput.texCoord0, textureLOD, TEXTURE2D_ARGS(_BumpMap, sampler_BumpMap),
-                                     _BumpScale);
+    float3 normalTS;
+    if (useRTXTF)
+    {
+        normalTS = SampleNormalRT_RTXTF(stfSamplerState, true, fragInput.texCoord0, textureLOD,
+                                         TEXTURE2D_ARGS(_BumpMap, sampler_BumpMap), _BumpScale);
+    }
+    else
+    {
+        normalTS = SampleNormalRT(fragInput.texCoord0, textureLOD,
+                                   TEXTURE2D_ARGS(_BumpMap, sampler_BumpMap), _BumpScale);
+    }
     normalWS = normalize(TransformTangentToWorld(normalTS, fragInput.tangentToWorld));
     #endif
 

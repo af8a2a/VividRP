@@ -707,7 +707,16 @@ Shader "Universal Render Pipeline/Lit"
             #define ATTRIBUTES_NEED_TEXCOORD0
             #define ATTRIBUTES_NEED_NORMAL
             #define ATTRIBUTES_NEED_TANGENT
+            #pragma require int64
+            #pragma require native16bit
 
+            #define STF_SHADER_STAGE STF_SHADER_STAGE_LIBRARY
+            #define STF_SHADER_MODEL_MAJOR 6 
+            #define STF_SHADER_MODEL_MINOR 6
+            #define STF_ALLOW_WAVE_READ 1
+            #define UNITY_COMPILER_DXC
+
+            
             #define SHADERPASS SHADERPASS_RAYTRACING_PATH_TRACING
 
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"

@@ -153,6 +153,15 @@ namespace UnityEngine.Rendering.Universal
             internal BufferHandle sharcLockBuffer;
             internal BufferHandle sharcAccumulationBuffer;
             internal BufferHandle sharcResolvedBuffer;
+
+            // RTXTF parameters
+            internal bool enableRTXTF;
+            internal int rtxtfFilterType;
+            internal int rtxtfMagnificationMethod;
+            internal int rtxtfAnisotropyMethod;
+            internal float rtxtfGaussianSigma;
+            internal bool rtxtfReseedOnSample;
+            internal uint rtxtfFrameIndex;
         }
 
         /// <summary>
@@ -318,6 +327,15 @@ namespace UnityEngine.Rendering.Universal
             // SHARC shader keywords
             public static readonly GlobalKeyword SharcUpdateKeyword = GlobalKeyword.Create("SHARC_UPDATE");
             public static readonly GlobalKeyword SharcQueryKeyword = GlobalKeyword.Create("SHARC_QUERY");
+
+            // RTXTF parameters
+            public static readonly int _RTXTFEnable = Shader.PropertyToID("_RTXTFEnable");
+            public static readonly int _RTXTFFilterType = Shader.PropertyToID("_RTXTFFilterType");
+            public static readonly int _RTXTFMagnificationMethod = Shader.PropertyToID("_RTXTFMagnificationMethod");
+            public static readonly int _RTXTFAnisotropyMethod = Shader.PropertyToID("_RTXTFAnisotropyMethod");
+            public static readonly int _RTXTFGaussianSigma = Shader.PropertyToID("_RTXTFGaussianSigma");
+            public static readonly int _RTXTFReseedOnSample = Shader.PropertyToID("_RTXTFReseedOnSample");
+            public static readonly int _RTXTFFrameIndex = Shader.PropertyToID("_RTXTFFrameIndex");
         }
 
         private void InitializePassData(
@@ -388,6 +406,16 @@ namespace UnityEngine.Rendering.Universal
             passData.sharcEntriesNum = giSettings.sharcEntriesK.value * 1024;
             passData.sharcAntiFirefly = giSettings.sharcAntiFirefly.value;
             passData.sharcDebug = giSettings.sharcDebug.value;
+
+            // RTXTF parameters
+            passData.enableRTXTF = giSettings.enableRTXTF.value;
+            passData.rtxtfFilterType = giSettings.rtxtfFilterType.value;
+            passData.rtxtfMagnificationMethod = giSettings.rtxtfMagnificationMethod.value;
+            passData.rtxtfAnisotropyMethod = giSettings.rtxtfAnisotropyMethod.value;
+            passData.rtxtfGaussianSigma = giSettings.rtxtfGaussianSigma.value;
+            passData.rtxtfReseedOnSample = giSettings.rtxtfReseedOnSample.value;
+            passData.rtxtfFrameIndex = (uint)m_FrameIndex;
+
             // Note: SHARC buffer handles are set in RecordRenderGraph after importing
         }
 
@@ -544,6 +572,15 @@ namespace UnityEngine.Rendering.Universal
                 cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcDebug, data.sharcDebug ? 1 : 0);
                 cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcDownscale, data.sharcUpdateDownscale);
 
+                // Bind RTXTF parameters
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._RTXTFEnable, data.enableRTXTF ? 1 : 0);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._RTXTFFilterType, data.rtxtfFilterType);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._RTXTFMagnificationMethod, data.rtxtfMagnificationMethod);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._RTXTFAnisotropyMethod, data.rtxtfAnisotropyMethod);
+                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._RTXTFGaussianSigma, data.rtxtfGaussianSigma);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._RTXTFReseedOnSample, data.rtxtfReseedOnSample ? 1 : 0);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._RTXTFFrameIndex, (int)data.rtxtfFrameIndex);
+
                 // Dispatch rays at downscaled resolution
                 uint updateWidth = data.dispatchWidth / (uint)data.sharcUpdateDownscale;
                 uint updateHeight = data.dispatchHeight / (uint)data.sharcUpdateDownscale;
@@ -652,6 +689,15 @@ namespace UnityEngine.Rendering.Universal
                 cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcSampleThreshold, data.sharcSampleThreshold);
                 cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcEntriesNum, data.sharcEntriesNum);
                 cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._SharcDebug, data.sharcDebug ? 1 : 0);
+
+                // Bind RTXTF parameters
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._RTXTFEnable, data.enableRTXTF ? 1 : 0);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._RTXTFFilterType, data.rtxtfFilterType);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._RTXTFMagnificationMethod, data.rtxtfMagnificationMethod);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._RTXTFAnisotropyMethod, data.rtxtfAnisotropyMethod);
+                cmd.SetRayTracingFloatParam(data.pathTracingShader, ShaderConstants._RTXTFGaussianSigma, data.rtxtfGaussianSigma);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._RTXTFReseedOnSample, data.rtxtfReseedOnSample ? 1 : 0);
+                cmd.SetRayTracingIntParam(data.pathTracingShader, ShaderConstants._RTXTFFrameIndex, (int)data.rtxtfFrameIndex);
 
                 // Dispatch rays at full resolution
                 cmd.DispatchRays(data.pathTracingShader, "RayGenPathTracing", data.dispatchWidth, data.dispatchHeight, 1);

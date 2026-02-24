@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using UnityEditor;
 using UnityEditor.Experimental.GraphView;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -9,10 +10,12 @@ namespace VividRP.Editor.RenderGraph
     public class RenderGraphSearchWindow : ScriptableObject, ISearchWindowProvider
     {
         private RenderGraphView m_GraphView;
+        private EditorWindow m_Window;
 
-        public void Init(RenderGraphView graphView)
+        public void Init(RenderGraphView graphView, EditorWindow window)
         {
             m_GraphView = graphView;
+            m_Window = window;
         }
 
         public List<SearchTreeEntry> CreateSearchTree(SearchWindowContext context)
@@ -35,11 +38,13 @@ namespace VividRP.Editor.RenderGraph
             var type = (System.Type)entry.userData;
             var nodeData = (RenderGraphNodeData)System.Activator.CreateInstance(type);
 
-            var worldMousePos = m_GraphView.ChangeCoordinatesTo(
-                m_GraphView.contentViewContainer,
-                context.screenMousePosition - m_GraphView.parent.worldBound.position);
+            // Screen → window-local → graph content container
+            var windowMousePos = m_Window.rootVisualElement.ChangeCoordinatesTo(
+                m_Window.rootVisualElement.parent,
+                context.screenMousePosition - m_Window.position.position);
+            var graphMousePos = m_GraphView.contentViewContainer.WorldToLocal(windowMousePos);
 
-            m_GraphView.AddNodeToGraph(nodeData, worldMousePos);
+            m_GraphView.AddNodeToGraph(nodeData, graphMousePos);
             return true;
         }
     }

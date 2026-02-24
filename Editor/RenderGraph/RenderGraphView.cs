@@ -32,7 +32,7 @@ namespace VividRP.Editor.RenderGraph
             Add(minimap);
 
             m_SearchWindow = ScriptableObject.CreateInstance<RenderGraphSearchWindow>();
-            m_SearchWindow.Init(this);
+            m_SearchWindow.Init(this, window);
             nodeCreationRequest = ctx =>
                 SearchWindow.Open(new SearchWindowContext(ctx.screenMousePosition), m_SearchWindow);
 

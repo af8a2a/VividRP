@@ -1,0 +1,27 @@
+GridBackground {
+    --grid-background-color: #1e1e1e;
+    --line-color: rgba(255, 255, 255, 0.05);
+    --thick-line-color: rgba(255, 255, 255, 0.08);
+    --spacing: 25;
+}
+
+.node {
+    min-width: 180px;
+}
+
+.node #title {
+    font-size: 13px;
+    -unity-font-style: bold;
+}
+
+.node #extension {
+    padding: 4px 8px;
+}
+
+.node #extension .unity-base-field {
+    margin: 2px 0;
+}
+
+.minimap {
+    background-color: rgba(30, 30, 30, 0.85);
+}

@@ -1,10 +1,12 @@
 {
-  "name": "VividRP.Editor",
-  "references": [
-    "GUID:5cf6ab670f860794abf61e39f9402b99"
-  ],
-  "includePlatforms": [
-    "Editor"
-  ],
-  "excludePlatforms": []
+    "name": "VividRP.Editor",
+    "rootNamespace": "VividRP.Editor",
+    "references": [
+        "GUID:5cf6ab670f860794abf61e39f9402b99",
+        "GUID:df380645f10b7bc4b97d4f5eb6303d95"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": []
 }

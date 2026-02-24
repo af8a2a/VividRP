@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(head:*)",
+      "Bash(grep:*)",
+      "Bash(find E:\\\\VividRP_Reborn\\\\Packages\\\\CoreRP\\\\Runtime\\\\RenderGraph:*)",
+      "mcp__sequential-thinking__sequentialthinking",
+      "Bash(cd:*)"
+    ]
+  }
+}

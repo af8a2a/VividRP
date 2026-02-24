@@ -175,12 +175,21 @@ namespace VividRP.Editor.RenderGraph
             if (change.edgesToCreate != null)
             {
                 Undo.RecordObject(m_Asset, "Create Edge");
-                foreach (var edge in change.edgesToCreate)
+                for (int i = change.edgesToCreate.Count - 1; i >= 0; i--)
                 {
-                    var outputData = (RenderGraphPortData)edge.output.userData;
-                    var inputData = (RenderGraphPortData)edge.input.userData;
+                    var edge = change.edgesToCreate[i];
                     var outputNode = (RenderGraphNodeView)edge.output.node;
                     var inputNode = (RenderGraphNodeView)edge.input.node;
+
+                    if (m_Asset.WouldCreateCycle(outputNode.NodeData.Guid, inputNode.NodeData.Guid))
+                    {
+                        Debug.LogWarning($"[RenderGraph] Rejected edge: {outputNode.NodeData.NodeName} → {inputNode.NodeData.NodeName} would create a cycle.");
+                        change.edgesToCreate.RemoveAt(i);
+                        continue;
+                    }
+
+                    var outputData = (RenderGraphPortData)edge.output.userData;
+                    var inputData = (RenderGraphPortData)edge.input.userData;
                     m_Asset.AddEdge(new RenderGraphEdgeData
                     {
                         OutputNodeGuid = outputNode.NodeData.Guid,

@@ -61,6 +61,9 @@ namespace VividRP.Editor.RenderGraph
             autoSaveToggle.RegisterValueChangedCallback(evt => m_AutoSave = evt.newValue);
             toolbar.Add(autoSaveToggle);
 
+            var validateButton = new ToolbarButton(() => ValidateGraph()) { text = "Validate" };
+            toolbar.Add(validateButton);
+
             rootVisualElement.Add(toolbar);
         }
 
@@ -79,6 +82,26 @@ namespace VividRP.Editor.RenderGraph
             m_Asset = asset;
             if (m_GraphView != null)
                 m_GraphView.PopulateFromAsset(m_Asset);
+        }
+
+        private void ValidateGraph()
+        {
+            if (m_Asset == null)
+            {
+                EditorUtility.DisplayDialog("Validate", "No asset loaded.", "OK");
+                return;
+            }
+
+            var result = m_Asset.Validate();
+            if (result.IsValid)
+            {
+                EditorUtility.DisplayDialog("Validate", "Graph is a valid DAG.", "OK");
+            }
+            else
+            {
+                EditorUtility.DisplayDialog("Validate",
+                    string.Join("\n", result.Errors), "OK");
+            }
         }
     }
 }

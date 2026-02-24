@@ -4,7 +4,7 @@
 //
 // -----------------------------------------------------------------------------
 
-namespace Af8a2a.Vividrp
+namespace VividRP.Runtime
 {
     /// <summary>
     /// Provide a general description of the public class.

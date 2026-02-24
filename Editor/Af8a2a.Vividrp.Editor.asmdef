@@ -1,0 +1,10 @@
+{
+    "name": "Af8a2a.Vividrp.Editor",
+    "references": [
+      "Af8a2a.Vividrp"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": []
+}

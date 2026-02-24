@@ -1,0 +1,14 @@
+{
+    "name": "Af8a2a.Vividrp.Editor.Tests",
+    "references": [
+        "Af8a2a.Vividrp.Editor",
+        "Af8a2a.Vividrp"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": []
+}

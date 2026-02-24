@@ -1,0 +1,11 @@
+{
+    "name": "Af8a2a.Vividrp.Tests",
+    "references": [
+        "Af8a2a.Vividrp"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": []
+}

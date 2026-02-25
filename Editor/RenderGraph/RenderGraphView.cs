@@ -161,6 +161,19 @@ namespace VividRP.Editor.RenderGraph
         {
             if (m_IsPopulatingFromAsset || m_Asset == null) return change;
 
+            if (change.movedElements != null)
+            {
+                foreach (var element in change.movedElements)
+                {
+                    if (element is not RenderGraphNodeView)
+                        continue;
+
+                    Undo.RecordObject(m_Asset, "Move Nodes");
+                    EditorUtility.SetDirty(m_Asset);
+                    break;
+                }
+            }
+
             if (change.elementsToRemove != null)
             {
                 Undo.RecordObject(m_Asset, "Remove Elements");
@@ -168,6 +181,9 @@ namespace VividRP.Editor.RenderGraph
                 {
                     if (element is RenderGraphNodeView nodeView)
                     {
+                        if (nodeView.NodeData is PreviewPassNodeData previewNode)
+                            PreviewPassNodeData.ReleasePreviewResources(previewNode.Guid);
+
                         m_Asset.RemoveNode(nodeView.NodeData.Guid);
                     }
                     else if (element is Edge edge)

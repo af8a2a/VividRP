@@ -45,6 +45,8 @@ namespace VividRP.Editor.RenderGraph
             if (m_GraphView != null)
             {
                 m_GraphView.SaveToAsset();
+                if (m_Asset != null)
+                    AssetDatabase.SaveAssetIfDirty(m_Asset);
                 m_GraphView.RemoveFromHierarchy();
             }
         }
@@ -66,7 +68,12 @@ namespace VividRP.Editor.RenderGraph
             });
             toolbar.Add(assetField);
 
-            var saveButton = new ToolbarButton(() => m_GraphView?.SaveToAsset()) { text = "Save" };
+            var saveButton = new ToolbarButton(() =>
+            {
+                m_GraphView?.SaveToAsset();
+                if (m_Asset != null)
+                    AssetDatabase.SaveAssetIfDirty(m_Asset);
+            }) { text = "Save" };
             toolbar.Add(saveButton);
 
             var autoSaveToggle = new ToolbarToggle { text = "Auto Save", value = m_AutoSave };

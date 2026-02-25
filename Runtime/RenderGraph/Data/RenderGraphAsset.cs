@@ -23,6 +23,18 @@ namespace VividRP.Runtime.RenderGraph.Data
 
         public void RemoveNode(string guid)
         {
+            if (Nodes != null)
+            {
+                foreach (var node in Nodes)
+                {
+                    if (node.Guid == guid && node is PreviewPassNodeData previewNode)
+                    {
+                        PreviewPassNodeData.ReleasePreviewResources(previewNode.Guid);
+                        break;
+                    }
+                }
+            }
+
             Nodes.RemoveAll(n => n.Guid == guid);
             Edges.RemoveAll(e => e.OutputNodeGuid == guid || e.InputNodeGuid == guid);
         }

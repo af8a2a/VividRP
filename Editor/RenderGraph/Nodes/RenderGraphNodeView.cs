@@ -47,6 +47,13 @@ namespace VividRP.Editor.RenderGraph.Nodes
             return port;
         }
 
+        public override void SetPosition(Rect newPos)
+        {
+            base.SetPosition(newPos);
+            if (NodeData != null)
+                NodeData.Position = newPos.position;
+        }
+
         private static System.Type PortTypeToSystemType(PortType type)
         {
             return type switch

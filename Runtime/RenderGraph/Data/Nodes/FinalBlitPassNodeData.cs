@@ -27,6 +27,9 @@ namespace VividRP.Runtime.RenderGraph.Data
         {
             public Material Material;
             public TextureHandle Source;
+            public TextureHandle Destination;
+            public bool IsSceneViewCamera;
+            public Rect PixelRect;
         }
 
         private static Material GetBlitMaterial()
@@ -48,10 +51,13 @@ namespace VividRP.Runtime.RenderGraph.Data
             UnityEngine.Rendering.RenderGraphModule.RenderGraph renderGraph,
             PassExecutionContext context)
         {
+            var camera = context.Camera;
+            bool isSceneView = camera.cameraType == CameraType.SceneView;
+
             var importInfo = new RenderTargetInfo
             {
-                width = Screen.width,
-                height = Screen.height,
+                width = camera.pixelWidth,
+                height = camera.pixelHeight,
                 volumeDepth = 1,
                 msaaSamples = 1,
                 format = GraphicsFormat.R8G8B8A8_SRGB
@@ -63,7 +69,14 @@ namespace VividRP.Runtime.RenderGraph.Data
                 NodeName, out var passData);
 
             passData.Material = GetBlitMaterial();
-            builder.SetRenderAttachment(backBuffer, 0);
+            passData.Destination = backBuffer;
+            passData.IsSceneViewCamera = isSceneView;
+            passData.PixelRect = camera.pixelRect;
+
+            // Scene view: use Write so depth/stencil is preserved for gizmos
+            // Game view: use WriteAll since we're doing a full-screen blit
+            builder.SetRenderAttachment(backBuffer, 0,
+                isSceneView ? AccessFlags.Write : AccessFlags.WriteAll);
 
             foreach (var port in Ports)
             {
@@ -79,15 +92,26 @@ namespace VividRP.Runtime.RenderGraph.Data
                 }
             }
 
+            builder.AllowGlobalStateModification(true);
+
             builder.SetRenderFunc<PassData>((data, rasterGraphContext) =>
             {
-                if (data.Material != null)
-                {
-                    data.Material.SetTexture(s_BlitTextureId, data.Source);
-                    rasterGraphContext.cmd.DrawProcedural(
-                        Matrix4x4.identity, data.Material, 0,
-                        MeshTopology.Triangles, 3);
-                }
+                if (data.Material == null) return;
+
+                var cmd = rasterGraphContext.cmd;
+
+                // Disable wireframe so the blit quad doesn't render as wireframe in scene view
+                cmd.SetWireframe(false);
+
+                // Game view: set viewport to camera pixel rect
+                // Scene view: skip viewport setup (scene view manages its own viewport)
+                if (!data.IsSceneViewCamera)
+                    cmd.SetViewport(data.PixelRect);
+
+                data.Material.SetTexture(s_BlitTextureId, data.Source);
+                cmd.DrawProcedural(
+                    Matrix4x4.identity, data.Material, 0,
+                    MeshTopology.Triangles, 3);
             });
         }
     }

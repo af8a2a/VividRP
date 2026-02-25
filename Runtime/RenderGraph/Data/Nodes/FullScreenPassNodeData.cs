@@ -41,6 +41,17 @@ namespace VividRP.Runtime.RenderGraph.Data
             }
             return s_FullScreenMaterial;
         }
+        
+        
+        internal static Vector4 GetFinalBlitScaleBias(in RasterGraphContext renderGraphContext, in TextureHandle source, in TextureHandle destination)
+        {
+            RTHandle srcRTHandle = source;
+            Vector2 scale = srcRTHandle is { useScaling: true } ? new Vector2(srcRTHandle.rtHandleProperties.rtHandleScale.x, srcRTHandle.rtHandleProperties.rtHandleScale.y) : Vector2.one;
+            var yflip = renderGraphContext.GetTextureUVOrigin(in source) != renderGraphContext.GetTextureUVOrigin(in destination);
+            Vector4 scaleBias = yflip ? new Vector4(scale.x, -scale.y, 0, scale.y) : new Vector4(scale.x, scale.y, 0, 0);
+
+            return scaleBias;
+        }
 
         public override void Record(
             UnityEngine.Rendering.RenderGraphModule.RenderGraph renderGraph,

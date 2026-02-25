@@ -26,6 +26,9 @@ namespace VividRP.Editor.RenderGraph
 
         private void OnEnable()
         {
+            rootVisualElement.Clear();
+            rootVisualElement.style.flexDirection = FlexDirection.Column;
+
             BuildToolbar();
             BuildGraphView();
         }
@@ -42,6 +45,7 @@ namespace VividRP.Editor.RenderGraph
         private void BuildToolbar()
         {
             var toolbar = new Toolbar();
+            toolbar.style.flexShrink = 0;
 
             var assetField = new ObjectField("Asset")
             {
@@ -70,7 +74,7 @@ namespace VividRP.Editor.RenderGraph
         private void BuildGraphView()
         {
             m_GraphView = new RenderGraphView(this);
-            m_GraphView.StretchToParentSize();
+            m_GraphView.style.flexGrow = 1;
             rootVisualElement.Add(m_GraphView);
 
             if (m_Asset != null)

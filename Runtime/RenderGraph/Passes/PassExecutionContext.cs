@@ -12,6 +12,7 @@ namespace VividRP.Runtime.RenderGraph.Passes
         public CullingResults CullingResults { get; }
 
         private readonly Dictionary<string, ResourceSlot> m_ResolvedResources;
+        private readonly Dictionary<string, ResourceSlot> m_Outputs = new();
 
         public PassExecutionContext(
             Camera camera,
@@ -28,6 +29,20 @@ namespace VividRP.Runtime.RenderGraph.Passes
             if (m_ResolvedResources.TryGetValue(port.Id, out var slot))
                 return slot;
             return default;
+        }
+
+        /// <summary>
+        /// Allows a pass to publish a resource it created for an output port,
+        /// overriding the default pass-through propagation.
+        /// </summary>
+        public void StoreOutput(string portId, ResourceSlot slot)
+        {
+            m_Outputs[portId] = slot;
+        }
+
+        internal bool TryGetOutput(string portId, out ResourceSlot slot)
+        {
+            return m_Outputs.TryGetValue(portId, out slot);
         }
     }
 }

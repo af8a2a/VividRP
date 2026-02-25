@@ -64,11 +64,15 @@ namespace VividRP.Runtime.RenderGraph
                     var context = new PassExecutionContext(camera, cullingResults, resolved);
                     passNode.Record(renderGraph, context);
 
-                    // Propagate outputs: output ports inherit handles from matching input ports
+                    // Propagate outputs: prefer explicitly stored outputs, fall back to pass-through
                     foreach (var outPort in passNode.Ports)
                     {
                         if (outPort.IsInput) continue;
-                        PropagateOutput(outPort, passNode, resolved, slots);
+
+                        if (context.TryGetOutput(outPort.Id, out var stored) && stored.IsValid)
+                            slots[outPort.Id] = stored;
+                        else
+                            PropagateOutput(outPort, passNode, resolved, slots);
                     }
                 }
             }

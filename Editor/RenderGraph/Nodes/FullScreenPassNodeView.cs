@@ -10,7 +10,7 @@ namespace VividRP.Editor.RenderGraph.Nodes
         {
             titleContainer.style.backgroundColor = new StyleColor(new UnityEngine.Color(0.5f, 0.2f, 0.6f));
 
-            var label = new Label("Full-screen effect (assign material at runtime)");
+            var label = new Label("Draws full-screen UV gradient");
             label.style.color = new StyleColor(new UnityEngine.Color(0.8f, 0.7f, 1f));
             label.style.unityFontStyleAndWeight = UnityEngine.FontStyle.Italic;
 

@@ -1,4 +1,6 @@
 using System;
+using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime.RenderGraph.Passes;
@@ -15,30 +17,42 @@ namespace VividRP.Runtime.RenderGraph.Data
         public FullScreenPassNodeData()
         {
             NodeName = "Full Screen Pass";
-            AddPort("Input Texture", PortType.Texture, true, AccessFlags.Read);
             AddPort("Output Texture", PortType.Texture, false, AccessFlags.ReadWrite);
         }
 
-        private class PassData { }
+        private class PassData
+        {
+            public TextureHandle Output;
+        }
 
         public override void Record(
             UnityEngine.Rendering.RenderGraphModule.RenderGraph renderGraph,
             PassExecutionContext context)
         {
-            using var builder = renderGraph.AddRasterRenderPass<PassData>(
-                NodeName, out _);
-
-            foreach (var port in Ports)
+            var desc = new TextureDesc(Screen.width, Screen.height)
             {
-                if (!port.IsInput) continue;
+                colorFormat = GraphicsFormat.R8G8B8A8_SRGB,
+                clearBuffer = true,
+                clearColor = Color.clear,
+                name = "FullScreenPassOutput"
+            };
+            var outputTex = renderGraph.CreateTexture(desc);
 
-                var slot = context.ResolveInput(port);
-                if (!slot.IsValid) continue;
+            // Store the created texture in the context so the executor can propagate it
+            context.StoreOutput(Ports[0].Id, ResourceSlot.FromTexture(outputTex));
 
-                builder.UseTexture(slot.TextureHandle, port.Access);
-            }
+            using var builder = renderGraph.AddRasterRenderPass<PassData>(
+                NodeName, out var passData);
 
-            builder.SetRenderFunc<PassData>((_, _) => { });
+            passData.Output = outputTex;
+            builder.SetRenderAttachment(outputTex, 0);
+
+            builder.SetRenderFunc<PassData>((data, rasterGraphContext) =>
+            {
+                // Draw a full-screen triangle outputting UV coordinates
+                Blitter.BlitTexture(rasterGraphContext.cmd,
+                    new Vector4(1f, 1f, 0f, 0f), 0f, false);
+            });
         }
     }
 }

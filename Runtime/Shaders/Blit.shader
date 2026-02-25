@@ -20,6 +20,19 @@ Shader "Hidden/VividRP/Blit"
 
             TEXTURE2D(_BlitTexture);
             SAMPLER(sampler_BlitTexture);
+            float4 _BlitScaleBias;
+            float2 DynamicScalingApplyScaleBias(float2 xy, float4 dynamicScalingScaleBias)
+            {
+                return dynamicScalingScaleBias.zw + xy * dynamicScalingScaleBias.xy;
+            }
+
+            float2 DynamicScalingRemoveScaleBias(float2 xy, float4 dynamicScalingScaleBias)
+            {
+                return (xy - dynamicScalingScaleBias.zw) / dynamicScalingScaleBias.xy;
+            }
+
+            #define DYNAMIC_SCALING_APPLY_SCALEBIAS(uv)  DynamicScalingApplyScaleBias(uv, _BlitScaleBias)
+            #define DYNAMIC_SCALING_REMOVE_SCALEBIAS(uv) DynamicScalingRemoveScaleBias(uv, _BlitScaleBias)
 
             struct Attributes
             {
@@ -34,11 +47,13 @@ Shader "Hidden/VividRP/Blit"
 
             Varyings Vert(Attributes input)
             {
-                Varyings o;
-                o.uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
-                o.positionCS = float4(o.uv * 2.0 - 1.0, 0.0, 1.0);
-                o.positionCS.y *= -1.0;
-                return o;
+                Varyings output;
+                float4 pos = GetFullScreenTriangleVertexPosition(input.vertexID);
+                float2 uv  = GetFullScreenTriangleTexCoord(input.vertexID);
+
+                output.positionCS = pos;
+                output.uv   = DYNAMIC_SCALING_APPLY_SCALEBIAS(uv);
+                return output;
             }
 
             float4 Frag(Varyings input) : SV_Target

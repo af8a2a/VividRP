@@ -1,0 +1,14 @@
+{
+    "name": "VividRP.Tests.Editor",
+    "rootNamespace": "VividRP.Tests.Editor",
+    "references": [
+        "VividRP.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ]
+}

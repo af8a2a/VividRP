@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime.RenderGraph;
+using VividRP.Runtime.Utility;
 
 namespace VividRP.Runtime
 {
@@ -15,6 +16,7 @@ namespace VividRP.Runtime
         public VividRenderPipeline(VividRenderPipelineAsset asset)
         {
             m_Asset = asset;
+            VividResourceManager.Initialize();
             m_RenderGraph = new UnityEngine.Rendering.RenderGraphModule.RenderGraph("VividRP RenderGraph");
             m_Executor = new RenderGraphExecutor();
         }

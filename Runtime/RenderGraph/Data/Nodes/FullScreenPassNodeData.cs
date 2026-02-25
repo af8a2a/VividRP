@@ -5,6 +5,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime.RenderGraph.Passes;
 using VividRP.Runtime.RenderGraph.Resource;
+using VividRP.Runtime.Utility;
 
 namespace VividRP.Runtime.RenderGraph.Data
 {
@@ -31,10 +32,10 @@ namespace VividRP.Runtime.RenderGraph.Data
         {
             if (s_FullScreenMaterial == null)
             {
-                var shader = Shader.Find("Hidden/VividRP/FullScreenUV");
+                var shader = VividResources.FullScreenUVShader;
                 if (shader == null)
                 {
-                    Debug.LogError("[VividRP] Could not find shader Hidden/VividRP/FullScreenUV");
+                    Debug.LogError("[VividRP] Could not find shader Hidden/VividRP/FullScreenUV in VividResources.");
                     return null;
                 }
                 s_FullScreenMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };

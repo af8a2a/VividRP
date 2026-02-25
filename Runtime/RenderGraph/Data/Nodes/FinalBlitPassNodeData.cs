@@ -5,14 +5,15 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime.RenderGraph.Passes;
 using VividRP.Runtime.RenderGraph.Resource;
+using VividRP.Runtime.Utility;
 
 namespace VividRP.Runtime.RenderGraph.Data
 {
     [Serializable]
-    [RenderPass("Final Blit", PassType.Raster)]
+    [RenderPass("Final Blit", PassType.Unsafe)]
     public class FinalBlitPassNodeData : RenderPassNodeData
     {
-        public override PassType Type => PassType.Raster;
+        public override PassType Type => PassType.Unsafe;
 
         private static Material s_BlitMaterial;
         private static readonly int s_BlitTextureId = Shader.PropertyToID("_BlitTexture");
@@ -34,18 +35,22 @@ namespace VividRP.Runtime.RenderGraph.Data
 
         private static Material GetBlitMaterial()
         {
+            
             if (s_BlitMaterial == null)
             {
-                var shader = Shader.Find("Hidden/VividRP/Blit");
+                var shader = VividResources.BlitShader;
                 if (shader == null)
                 {
-                    Debug.LogError("[VividRP] Could not find shader Hidden/VividRP/Blit");
+                    Debug.LogError("[VividRP] Could not find shader Hidden/VividRP/Blit in VividResources.");
                     return null;
                 }
                 s_BlitMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
             }
             return s_BlitMaterial;
         }
+        
+        
+
 
         public override void Record(
             UnityEngine.Rendering.RenderGraphModule.RenderGraph renderGraph,
@@ -79,7 +84,7 @@ namespace VividRP.Runtime.RenderGraph.Data
 
             var backBuffer = renderGraph.ImportBackbuffer(BuiltinRenderTextureType.CameraTarget, importInfo);
 
-            using var builder = renderGraph.AddRasterRenderPass<PassData>(
+            using var builder = renderGraph.AddUnsafePass<PassData>(
                 NodeName, out var passData);
 
             passData.Material = GetBlitMaterial();
@@ -108,11 +113,11 @@ namespace VividRP.Runtime.RenderGraph.Data
 
             builder.AllowGlobalStateModification(true);
 
-            builder.SetRenderFunc<PassData>((data, rasterGraphContext) =>
+            builder.SetRenderFunc<PassData>((data, unsafeGraphContext) =>
             {
                 if (data.Material == null) return;
 
-                var cmd = rasterGraphContext.cmd;
+                var cmd = unsafeGraphContext.cmd;
 
                 // Disable wireframe so the blit quad doesn't render as wireframe in scene view
                 cmd.SetWireframe(false);
@@ -123,9 +128,13 @@ namespace VividRP.Runtime.RenderGraph.Data
                     cmd.SetViewport(data.PixelRect);
 
                 data.Material.SetTexture(s_BlitTextureId, data.Source);
-                cmd.DrawProcedural(
-                    Matrix4x4.identity, data.Material, 0,
-                    MeshTopology.Triangles, 3);
+                
+                var yflip = !data.IsSceneViewCamera;
+                Vector2 scaleBias = yflip ? new Vector2(1, -1) : new Vector2(1, 1);
+
+
+                Blitter.BlitTexture(cmd, data.Source, scaleBias, data.Material, 0);
+
             });
         }
     }

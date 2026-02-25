@@ -12,6 +12,7 @@ namespace VividRP.Editor.RenderGraph
     {
         private RenderGraphAsset m_Asset;
         private RenderGraphSearchWindow m_SearchWindow;
+        private bool m_IsPopulatingFromAsset;
 
         public RenderGraphView(RenderGraphEditorWindow window)
         {
@@ -41,13 +42,31 @@ namespace VividRP.Editor.RenderGraph
 
         public void PopulateFromAsset(RenderGraphAsset asset)
         {
-            m_Asset = asset;
+            m_IsPopulatingFromAsset = true;
+            try
+            {
+                // Clear only graph content; keep utility UI elements like grid and minimap.
+                var elementsToRemove = new List<GraphElement>();
+                foreach (var element in graphElements.ToList())
+                {
+                    if (element is RenderGraphNodeView || element is Edge)
+                        elementsToRemove.Add(element);
+                }
 
-            // Clear existing
-            DeleteElements(graphElements.ToList());
+                if (elementsToRemove.Count > 0)
+                    DeleteElements(elementsToRemove);
 
-            LoadNodes();
-            LoadEdges();
+                m_Asset = asset;
+                if (m_Asset == null)
+                    return;
+
+                LoadNodes();
+                LoadEdges();
+            }
+            finally
+            {
+                m_IsPopulatingFromAsset = false;
+            }
         }
 
         private void LoadNodes()
@@ -140,7 +159,7 @@ namespace VividRP.Editor.RenderGraph
 
         private GraphViewChange OnGraphViewChanged(GraphViewChange change)
         {
-            if (m_Asset == null) return change;
+            if (m_IsPopulatingFromAsset || m_Asset == null) return change;
 
             if (change.elementsToRemove != null)
             {

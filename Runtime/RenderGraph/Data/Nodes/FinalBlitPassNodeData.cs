@@ -54,10 +54,24 @@ namespace VividRP.Runtime.RenderGraph.Data
             var camera = context.Camera;
             bool isSceneView = camera.cameraType == CameraType.SceneView;
 
+            // Scene view renders to a target texture whose size may differ from camera.pixelWidth/Height.
+            // Use the actual target texture dimensions to avoid attachment size mismatch.
+            int width, height;
+            if (camera.targetTexture != null)
+            {
+                width = camera.targetTexture.width;
+                height = camera.targetTexture.height;
+            }
+            else
+            {
+                width = camera.pixelWidth;
+                height = camera.pixelHeight;
+            }
+
             var importInfo = new RenderTargetInfo
             {
-                width = camera.pixelWidth,
-                height = camera.pixelHeight,
+                width = width,
+                height = height,
                 volumeDepth = 1,
                 msaaSamples = 1,
                 format = GraphicsFormat.R8G8B8A8_SRGB

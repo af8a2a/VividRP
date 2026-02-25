@@ -19,7 +19,7 @@ namespace VividRP.Runtime.RenderGraph.Data
         public FullScreenPassNodeData()
         {
             NodeName = "Full Screen Pass";
-            AddPort("Output Texture", PortType.Texture, false, AccessFlags.ReadWrite);
+            AddPort("Output Texture", PortType.Texture, false, AccessFlags.Write);
         }
 
         private class PassData

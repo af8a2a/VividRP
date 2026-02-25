@@ -14,6 +14,8 @@ namespace VividRP.Runtime.RenderGraph.Data
     {
         public override PassType Type => PassType.Raster;
 
+        private static Material s_FullScreenMaterial;
+
         public FullScreenPassNodeData()
         {
             NodeName = "Full Screen Pass";
@@ -22,7 +24,22 @@ namespace VividRP.Runtime.RenderGraph.Data
 
         private class PassData
         {
-            public TextureHandle Output;
+            public Material Material;
+        }
+
+        private static Material GetFullScreenMaterial()
+        {
+            if (s_FullScreenMaterial == null)
+            {
+                var shader = Shader.Find("Hidden/VividRP/FullScreenUV");
+                if (shader == null)
+                {
+                    Debug.LogError("[VividRP] Could not find shader Hidden/VividRP/FullScreenUV");
+                    return null;
+                }
+                s_FullScreenMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+            }
+            return s_FullScreenMaterial;
         }
 
         public override void Record(
@@ -38,20 +55,20 @@ namespace VividRP.Runtime.RenderGraph.Data
             };
             var outputTex = renderGraph.CreateTexture(desc);
 
-            // Store the created texture in the context so the executor can propagate it
             context.StoreOutput(Ports[0].Id, ResourceSlot.FromTexture(outputTex));
 
             using var builder = renderGraph.AddRasterRenderPass<PassData>(
                 NodeName, out var passData);
 
-            passData.Output = outputTex;
+            passData.Material = GetFullScreenMaterial();
             builder.SetRenderAttachment(outputTex, 0);
 
             builder.SetRenderFunc<PassData>((data, rasterGraphContext) =>
             {
-                // Draw a full-screen triangle outputting UV coordinates
-                Blitter.BlitTexture(rasterGraphContext.cmd,
-                    new Vector4(1f, 1f, 0f, 0f), 0f, false);
+                if (data.Material != null)
+                    rasterGraphContext.cmd.DrawProcedural(
+                        Matrix4x4.identity, data.Material, 0,
+                        MeshTopology.Triangles, 3);
             });
         }
     }

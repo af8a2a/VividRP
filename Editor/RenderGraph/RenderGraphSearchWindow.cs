@@ -20,17 +20,33 @@ namespace VividRP.Editor.RenderGraph
 
         public List<SearchTreeEntry> CreateSearchTree(SearchWindowContext context)
         {
-            return new List<SearchTreeEntry>
+            var tree = new List<SearchTreeEntry>
             {
                 new SearchTreeGroupEntry(new GUIContent("Create Node")),
                 new SearchTreeGroupEntry(new GUIContent("Pass"), 1),
-                new SearchTreeEntry(new GUIContent("Raster Pass")) { level = 2, userData = typeof(RasterPassNodeData) },
-                new SearchTreeEntry(new GUIContent("Compute Pass")) { level = 2, userData = typeof(ComputePassNodeData) },
-                new SearchTreeEntry(new GUIContent("Unsafe Pass")) { level = 2, userData = typeof(UnsafePassNodeData) },
-                new SearchTreeGroupEntry(new GUIContent("Resource"), 1),
-                new SearchTreeEntry(new GUIContent("Texture")) { level = 2, userData = typeof(TextureNodeData) },
-                new SearchTreeEntry(new GUIContent("Buffer")) { level = 2, userData = typeof(BufferNodeData) },
             };
+
+            foreach (var entry in RenderNodeRegistry.GetAllPassTypes())
+            {
+                tree.Add(new SearchTreeEntry(new GUIContent(entry.DisplayName))
+                {
+                    level = 2,
+                    userData = entry.DataType
+                });
+            }
+
+            tree.Add(new SearchTreeGroupEntry(new GUIContent("Resource"), 1));
+
+            foreach (var entry in RenderNodeRegistry.GetAllResourceTypes())
+            {
+                tree.Add(new SearchTreeEntry(new GUIContent(entry.DisplayName))
+                {
+                    level = 2,
+                    userData = entry.DataType
+                });
+            }
+
+            return tree;
         }
 
         public bool OnSelectEntry(SearchTreeEntry entry, SearchWindowContext context)
@@ -38,7 +54,6 @@ namespace VividRP.Editor.RenderGraph
             var type = (System.Type)entry.userData;
             var nodeData = (RenderGraphNodeData)System.Activator.CreateInstance(type);
 
-            // Screen → window-local → graph content container
             var windowMousePos = m_Window.rootVisualElement.ChangeCoordinatesTo(
                 m_Window.rootVisualElement.parent,
                 context.screenMousePosition - m_Window.position.position);

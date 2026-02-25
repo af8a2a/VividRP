@@ -3,6 +3,7 @@ using VividRP.Runtime.RenderGraph.Data;
 
 namespace VividRP.Editor.RenderGraph.Nodes
 {
+    [NodeEditor(typeof(ComputePassNodeData))]
     public class ComputePassNodeView : RenderGraphNodeView
     {
         public ComputePassNodeView(ComputePassNodeData data) : base(data)

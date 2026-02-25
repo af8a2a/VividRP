@@ -1,10 +1,14 @@
 using System;
+using UnityEngine;
 using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
+using VividRP.Runtime.RenderGraph.Resource;
 
 namespace VividRP.Runtime.RenderGraph.Data
 {
     [Serializable]
-    public class TextureNodeData : RenderGraphNodeData
+    [ResourceNode("Texture")]
+    public class TextureNodeData : ResourceNodeData
     {
         public int Width = 1920;
         public int Height = 1080;
@@ -15,6 +19,20 @@ namespace VividRP.Runtime.RenderGraph.Data
         {
             NodeName = "Texture";
             AddPort("Texture Out", PortType.Texture, false);
+        }
+
+        public override ResourceSlot CreateResource(
+            UnityEngine.Rendering.RenderGraphModule.RenderGraph renderGraph,
+            Camera camera)
+        {
+            var desc = new TextureDesc(Width, Height)
+            {
+                colorFormat = Format,
+                clearBuffer = true,
+                clearColor = Color.clear,
+                name = NodeName
+            };
+            return ResourceSlot.FromTexture(renderGraph.CreateTexture(desc));
         }
     }
 }

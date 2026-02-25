@@ -6,6 +6,7 @@ using VividRP.Runtime.RenderGraph.Data;
 
 namespace VividRP.Editor.RenderGraph.Nodes
 {
+    [NodeEditor(typeof(RasterPassNodeData))]
     public class RasterPassNodeView : RenderGraphNodeView
     {
         public RasterPassNodeView(RasterPassNodeData data) : base(data)

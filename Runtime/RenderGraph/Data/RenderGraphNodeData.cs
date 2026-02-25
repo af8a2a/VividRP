@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderGraph.Data
 {
@@ -19,12 +20,19 @@ namespace VividRP.Runtime.RenderGraph.Data
 
         protected RenderGraphPortData AddPort(string displayName, PortType type, bool isInput)
         {
+            return AddPort(displayName, type, isInput,
+                isInput ? AccessFlags.Read : AccessFlags.ReadWrite);
+        }
+
+        protected RenderGraphPortData AddPort(string displayName, PortType type, bool isInput, AccessFlags access)
+        {
             var port = new RenderGraphPortData
             {
                 Id = System.Guid.NewGuid().ToString(),
                 DisplayName = displayName,
                 Type = type,
-                IsInput = isInput
+                IsInput = isInput,
+                Access = access
             };
             Ports.Add(port);
             return port;

@@ -4,6 +4,7 @@ using VividRP.Runtime.RenderGraph.Data;
 
 namespace VividRP.Editor.RenderGraph.Nodes
 {
+    [NodeEditor(typeof(BufferNodeData))]
     public class BufferNodeView : RenderGraphNodeView
     {
         public BufferNodeView(BufferNodeData data) : base(data)

@@ -125,15 +125,7 @@ namespace VividRP.Editor.RenderGraph
 
         private RenderGraphNodeView CreateNodeView(RenderGraphNodeData data)
         {
-            return data switch
-            {
-                RasterPassNodeData raster => new RasterPassNodeView(raster),
-                ComputePassNodeData compute => new ComputePassNodeView(compute),
-                UnsafePassNodeData unsafePass => new UnsafePassNodeView(unsafePass),
-                TextureNodeData texture => new TextureNodeView(texture),
-                BufferNodeData buffer => new BufferNodeView(buffer),
-                _ => new RenderGraphNodeView(data)
-            };
+            return NodeViewFactory.Create(data);
         }
 
         private RenderGraphNodeView FindNodeView(string guid)

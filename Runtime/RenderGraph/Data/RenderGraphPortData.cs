@@ -1,4 +1,5 @@
 using System;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderGraph.Data
 {
@@ -9,5 +10,6 @@ namespace VividRP.Runtime.RenderGraph.Data
         public string DisplayName;
         public PortType Type;
         public bool IsInput;
+        public AccessFlags Access;
     }
 }

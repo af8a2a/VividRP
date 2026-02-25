@@ -5,6 +5,7 @@ using VividRP.Runtime.RenderGraph.Data;
 
 namespace VividRP.Editor.RenderGraph.Nodes
 {
+    [NodeEditor(typeof(TextureNodeData))]
     public class TextureNodeView : RenderGraphNodeView
     {
         public TextureNodeView(TextureNodeData data) : base(data)

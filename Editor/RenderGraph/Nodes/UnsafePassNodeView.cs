@@ -3,6 +3,7 @@ using VividRP.Runtime.RenderGraph.Data;
 
 namespace VividRP.Editor.RenderGraph.Nodes
 {
+    [NodeEditor(typeof(UnsafePassNodeData))]
     public class UnsafePassNodeView : RenderGraphNodeView
     {
         public UnsafePassNodeView(UnsafePassNodeData data) : base(data)

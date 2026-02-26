@@ -21,7 +21,7 @@ namespace VividRP.Runtime.RenderPipeline
 
             PipelineResourceManager.Initialize();
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            // Blitter.Initialize(resources.CoreBlitShader, resources.CoreBlitColorAndDepthShader);
+            Blitter.Initialize(resources.CoreBlitShader, resources.CoreBlitColorAndDepthShader);
 
             m_RenderGraph = new UnityEngine.Rendering.RenderGraphModule.RenderGraph("VividRP RenderGraph");
             m_Executor = new RenderGraphExecutor();

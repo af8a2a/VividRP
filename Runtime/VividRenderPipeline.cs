@@ -3,22 +3,27 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime.RenderGraph;
+using VividRP.Runtime.RenderGraph.Resource;
 using VividRP.Runtime.Utility;
+using RenderGraph = UnityEngine.Rendering.RenderGraphModule.RenderGraph;
 
 namespace VividRP.Runtime
 {
     public class VividRenderPipeline : RenderPipeline
     {
         private readonly VividRenderPipelineAsset m_Asset;
-        private readonly UnityEngine.Rendering.RenderGraphModule.RenderGraph m_RenderGraph;
+        private readonly RenderGraph m_RenderGraph;
         private readonly RenderGraphExecutor m_Executor;
+        private readonly HistoryResourceManager m_HistoryManager;
 
         public VividRenderPipeline(VividRenderPipelineAsset asset)
         {
             m_Asset = asset;
             VividResourceManager.Initialize();
-            m_RenderGraph = new UnityEngine.Rendering.RenderGraphModule.RenderGraph("VividRP RenderGraph");
+            Blitter.Initialize(VividResources.CoreBlitShader, VividResources.CoreBlitColorAndDepthShader);
+            m_RenderGraph = new RenderGraph("VividRP RenderGraph");
             m_Executor = new RenderGraphExecutor();
+            m_HistoryManager = new HistoryResourceManager();
         }
 
         protected override void Render(ScriptableRenderContext context, Camera[] cameras)
@@ -59,8 +64,9 @@ namespace VividRP.Runtime
                     currentFrameIndex = Time.frameCount
                 };
 
+                m_HistoryManager.SwapBuffers();
                 m_RenderGraph.BeginRecording(renderGraphParams);
-                m_Executor.Execute(m_RenderGraph, graphAsset, camera, cullingResults);
+                m_Executor.Execute(m_RenderGraph, graphAsset, camera, cullingResults, m_HistoryManager);
                 m_RenderGraph.EndRecordingAndExecute();
             }
 
@@ -74,7 +80,9 @@ namespace VividRP.Runtime
 
         protected override void Dispose(bool disposing)
         {
+            m_HistoryManager.ReleaseAll();
             m_RenderGraph?.Cleanup();
+            Blitter.Cleanup();
             base.Dispose(disposing);
         }
     }

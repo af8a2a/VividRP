@@ -14,7 +14,8 @@ namespace VividRP.Runtime.RenderGraph
             UnityEngine.Rendering.RenderGraphModule.RenderGraph renderGraph,
             RenderGraphAsset asset,
             Camera camera,
-            CullingResults cullingResults)
+            CullingResults cullingResults,
+            HistoryResourceManager historyManager)
         {
             var validation = asset.Validate();
             if (!validation.IsValid)
@@ -34,17 +35,32 @@ namespace VividRP.Runtime.RenderGraph
             // Unified resource slot map keyed by port ID
             var slots = new Dictionary<string, ResourceSlot>();
 
+            var creationContext = new ResourceCreationContext
+            {
+                RenderGraph = renderGraph,
+                Camera = camera,
+                HistoryManager = historyManager
+            };
+
             foreach (var guid in validation.TopologicalOrder)
             {
                 var node = nodeMap[guid];
 
                 if (node is ResourceNodeData resourceNode)
                 {
-                    var slot = resourceNode.CreateResource(renderGraph, camera);
+                    var slot = resourceNode.CreateResource(creationContext);
                     foreach (var port in resourceNode.Ports)
                     {
                         if (!port.IsInput)
                             slots[port.Id] = slot;
+                    }
+
+                    // History resource nodes produce a second slot for the history port
+                    if (resourceNode is IHistoryResourceNode historyNode)
+                    {
+                        var historySlot = historyNode.CreateHistorySlot(creationContext);
+                        if (historySlot.IsValid)
+                            slots[historyNode.HistoryPortId] = historySlot;
                     }
                 }
                 else if (node is RenderPassNodeData passNode)

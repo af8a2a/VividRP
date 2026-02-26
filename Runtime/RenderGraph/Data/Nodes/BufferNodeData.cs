@@ -19,15 +19,13 @@ namespace VividRP.Runtime.RenderGraph.Data
             AddPort("Buffer Out", PortType.Buffer, false);
         }
 
-        public override ResourceSlot CreateResource(
-            UnityEngine.Rendering.RenderGraphModule.RenderGraph renderGraph,
-            Camera camera)
+        public override ResourceSlot CreateResource(ResourceCreationContext context)
         {
             var desc = new BufferDesc(Count, Stride)
             {
                 name = NodeName
             };
-            return ResourceSlot.FromBuffer(renderGraph.CreateBuffer(desc));
+            return ResourceSlot.FromBuffer(context.RenderGraph.CreateBuffer(desc));
         }
     }
 }

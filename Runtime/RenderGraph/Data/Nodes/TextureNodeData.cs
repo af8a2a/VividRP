@@ -21,9 +21,7 @@ namespace VividRP.Runtime.RenderGraph.Data
             AddPort("Texture Out", PortType.Texture, false);
         }
 
-        public override ResourceSlot CreateResource(
-            UnityEngine.Rendering.RenderGraphModule.RenderGraph renderGraph,
-            Camera camera)
+        public override ResourceSlot CreateResource(ResourceCreationContext context)
         {
             var desc = new TextureDesc(Width, Height)
             {
@@ -32,7 +30,7 @@ namespace VividRP.Runtime.RenderGraph.Data
                 clearColor = Color.clear,
                 name = NodeName
             };
-            return ResourceSlot.FromTexture(renderGraph.CreateTexture(desc));
+            return ResourceSlot.FromTexture(context.RenderGraph.CreateTexture(desc));
         }
     }
 }

@@ -6,6 +6,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime.RenderGraph.Passes;
 using VividRP.Runtime.RenderGraph.Resource;
 using VividRP.Runtime.Utility;
+using VividRP.Runtime.Utility.PipelineResource;
 
 namespace VividRP.Runtime.RenderGraph.Data
 {
@@ -32,7 +33,7 @@ namespace VividRP.Runtime.RenderGraph.Data
         {
             if (s_FullScreenMaterial == null)
             {
-                var shader = VividResources.FullScreenUVShader;
+                var shader = PipelineResourceManager.Get<VividRPCoreResources>().FullScreenUVShader;
                 if (shader == null)
                 {
                     Debug.LogError("[VividRP] Could not find shader Hidden/VividRP/FullScreenUV in VividResources.");

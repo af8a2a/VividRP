@@ -5,7 +5,9 @@
       "Bash(grep:*)",
       "Bash(find E:\\\\VividRP_Reborn\\\\Packages\\\\CoreRP\\\\Runtime\\\\RenderGraph:*)",
       "mcp__sequential-thinking__sequentialthinking",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(find E:\\\\VividRP_Reborn:*)",
+      "Bash(\"E:\\\\VividRP_Reborn\\\\Packages\\\\VividRP\\\\Runtime\\\\Utility\\\\PipelineResource\\\\PipelineResourceManager.cs.meta\":*)"
     ]
   }
 }

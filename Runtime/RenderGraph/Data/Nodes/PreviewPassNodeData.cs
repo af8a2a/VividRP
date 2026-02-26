@@ -6,6 +6,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime.RenderGraph.Passes;
 using VividRP.Runtime.RenderGraph.Resource;
 using VividRP.Runtime.Utility;
+using VividRP.Runtime.Utility.PipelineResource;
 
 namespace VividRP.Runtime.RenderGraph.Data
 {
@@ -62,7 +63,7 @@ namespace VividRP.Runtime.RenderGraph.Data
 
         private Material GetPreviewMaterial()
         {
-            var shader = PreviewShader != null ? PreviewShader : VividResources.BlitShader;
+            var shader = PreviewShader != null ? PreviewShader : PipelineResourceManager.Get<VividRPCoreResources>().BlitShader;
             if (shader == null)
             {
                 Debug.LogError("[VividRP] Preview node requires a shader. Assign a ShaderGraph shader or ensure Hidden/VividRP/Blit exists.");

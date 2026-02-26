@@ -4,24 +4,26 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime.RenderGraph;
 using VividRP.Runtime.RenderGraph.Resource;
-using VividRP.Runtime.Utility;
-using RenderGraph = UnityEngine.Rendering.RenderGraphModule.RenderGraph;
+using VividRP.Runtime.Utility.PipelineResource;
 
-namespace VividRP.Runtime
+namespace VividRP.Runtime.RenderPipeline
 {
-    public class VividRenderPipeline : RenderPipeline
+    public class VividRenderPipeline : UnityEngine.Rendering.RenderPipeline, IRenderGraphEnabledRenderPipeline
     {
         private readonly VividRenderPipelineAsset m_Asset;
-        private readonly RenderGraph m_RenderGraph;
+        private readonly UnityEngine.Rendering.RenderGraphModule.RenderGraph m_RenderGraph;
         private readonly RenderGraphExecutor m_Executor;
         private readonly HistoryResourceManager m_HistoryManager;
 
         public VividRenderPipeline(VividRenderPipelineAsset asset)
         {
             m_Asset = asset;
-            VividResourceManager.Initialize();
-            Blitter.Initialize(VividResources.CoreBlitShader, VividResources.CoreBlitColorAndDepthShader);
-            m_RenderGraph = new RenderGraph("VividRP RenderGraph");
+
+            PipelineResourceManager.Initialize();
+            var resources = PipelineResourceManager.Get<VividRPCoreResources>();
+            // Blitter.Initialize(resources.CoreBlitShader, resources.CoreBlitColorAndDepthShader);
+
+            m_RenderGraph = new UnityEngine.Rendering.RenderGraphModule.RenderGraph("VividRP RenderGraph");
             m_Executor = new RenderGraphExecutor();
             m_HistoryManager = new HistoryResourceManager();
         }
@@ -70,6 +72,7 @@ namespace VividRP.Runtime
                 m_RenderGraph.EndRecordingAndExecute();
             }
 
+
             context.ExecuteCommandBuffer(cmdBuffer);
             CommandBufferPool.Release(cmdBuffer);
 
@@ -83,7 +86,11 @@ namespace VividRP.Runtime
             m_HistoryManager.ReleaseAll();
             m_RenderGraph?.Cleanup();
             Blitter.Cleanup();
+            PipelineResourceManager.Cleanup();
             base.Dispose(disposing);
         }
+
+        /// <inheritdoc/>
+        public bool isImmediateModeSupported => false;
     }
 }

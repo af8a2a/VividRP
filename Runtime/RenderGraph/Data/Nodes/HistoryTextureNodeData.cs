@@ -6,13 +6,22 @@ using VividRP.Runtime.RenderGraph.Resource;
 
 namespace VividRP.Runtime.RenderGraph.Data
 {
+    public enum TextureSizeMode
+    {
+        Explicit,
+        CameraRelative
+    }
+
     [Serializable]
     [ResourceNode("History Texture")]
     public class HistoryTextureNodeData : ResourceNodeData, IHistoryResourceNode
     {
+        public TextureSizeMode SizeMode = TextureSizeMode.Explicit;
         public int Width = 1920;
         public int Height = 1080;
+        public float Scale = 1.0f;
         public GraphicsFormat Format = GraphicsFormat.R8G8B8A8_SRGB;
+        public bool EnableRandomWrite;
 
         public string HistoryPortId
         {
@@ -34,17 +43,34 @@ namespace VividRP.Runtime.RenderGraph.Data
             AddPort("History", PortType.Texture, false, AccessFlags.Read);
         }
 
+        private void ResolveSize(Camera camera, out int width, out int height)
+        {
+            if (SizeMode == TextureSizeMode.CameraRelative && camera != null)
+            {
+                width = Mathf.Max(1, Mathf.RoundToInt(camera.pixelWidth * Scale));
+                height = Mathf.Max(1, Mathf.RoundToInt(camera.pixelHeight * Scale));
+            }
+            else
+            {
+                width = Width;
+                height = Height;
+            }
+        }
+
         public override ResourceSlot CreateResource(ResourceCreationContext context)
         {
-            var desc = new TextureDesc(Width, Height)
+            ResolveSize(context.Camera, out var w, out var h);
+
+            var desc = new TextureDesc(w, h)
             {
                 colorFormat = Format,
                 clearBuffer = true,
                 clearColor = Color.clear,
+                enableRandomWrite = EnableRandomWrite,
                 name = NodeName
             };
 
-            var rtHandle = context.HistoryManager.GetOrAllocate(Guid, desc);
+            var rtHandle = context.HistoryManager.GetOrAllocate(Guid, desc, EnableRandomWrite);
             return ResourceSlot.FromTexture(context.RenderGraph.ImportTexture(rtHandle));
         }
 

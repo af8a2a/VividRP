@@ -10,6 +10,9 @@ namespace VividRP.Runtime.RenderGraph
 {
     public class RenderGraphExecutor
     {
+        private CompiledRenderGraph m_Compiled;
+        private int m_LastVersion = -1;
+
         public void Execute(
             UnityEngine.Rendering.RenderGraphModule.RenderGraph renderGraph,
             RenderGraphAsset asset,
@@ -17,100 +20,117 @@ namespace VividRP.Runtime.RenderGraph
             CullingResults cullingResults,
             HistoryResourceManager historyManager)
         {
-            var validation = asset.Validate();
-            if (!validation.IsValid)
+            EnsureCompiled(asset);
+
+            if (m_Compiled.Warnings != null)
             {
+                foreach (var warning in m_Compiled.Warnings)
+                    Debug.LogWarning($"[VividRP] {warning}");
+            }
+
+            if (!m_Compiled.IsValid)
+            {
+                if (m_Compiled.Errors != null)
+                {
+                    foreach (var error in m_Compiled.Errors)
+                        Debug.LogError($"[VividRP] {error}");
+                }
+
                 Debug.LogError("[VividRP] RenderGraph validation failed, skipping execution.");
                 return;
             }
 
-            var nodeMap = new Dictionary<string, RenderGraphNodeData>();
-            foreach (var node in asset.Nodes)
-                nodeMap[node.Guid] = node;
-
-            var portSourceMap = new Dictionary<string, (string nodeGuid, string portId)>();
-            foreach (var edge in asset.Edges)
-                portSourceMap[edge.InputPortId] = (edge.OutputNodeGuid, edge.OutputPortId);
-
-            // Unified resource slot map keyed by port ID
             var slots = new Dictionary<string, ResourceSlot>();
 
             var creationContext = new ResourceCreationContext
             {
                 RenderGraph = renderGraph,
                 Camera = camera,
+                CullingResults = cullingResults,
                 HistoryManager = historyManager
             };
 
-            foreach (var guid in validation.TopologicalOrder)
+            for (int i = 0; i < m_Compiled.Entries.Length; i++)
             {
-                var node = nodeMap[guid];
+                ref var entry = ref m_Compiled.Entries[i];
 
-                if (node is ResourceNodeData resourceNode)
-                {
-                    var slot = resourceNode.CreateResource(creationContext);
-                    foreach (var port in resourceNode.Ports)
-                    {
-                        if (!port.IsInput)
-                            slots[port.Id] = slot;
-                    }
-
-                    // History resource nodes produce a second slot for the history port
-                    if (resourceNode is IHistoryResourceNode historyNode)
-                    {
-                        var historySlot = historyNode.CreateHistorySlot(creationContext);
-                        if (historySlot.IsValid)
-                            slots[historyNode.HistoryPortId] = historySlot;
-                    }
-                }
-                else if (node is RenderPassNodeData passNode)
-                {
-                    // Resolve input slots for this pass
-                    var resolved = new Dictionary<string, ResourceSlot>();
-                    foreach (var port in passNode.Ports)
-                    {
-                        if (!port.IsInput) continue;
-                        if (portSourceMap.TryGetValue(port.Id, out var source) &&
-                            slots.TryGetValue(source.portId, out var slot))
-                        {
-                            resolved[port.Id] = slot;
-                        }
-                    }
-
-                    var context = new PassExecutionContext(camera, cullingResults, resolved);
-                    passNode.Record(renderGraph, context);
-
-                    // Propagate outputs: prefer explicitly stored outputs, fall back to pass-through
-                    foreach (var outPort in passNode.Ports)
-                    {
-                        if (outPort.IsInput) continue;
-
-                        if (context.TryGetOutput(outPort.Id, out var stored) && stored.IsValid)
-                            slots[outPort.Id] = stored;
-                        else
-                            PropagateOutput(outPort, passNode, resolved, slots);
-                    }
-                }
+                if (entry.Node is ResourceNodeData resourceNode)
+                    ExecuteResourceNode(resourceNode, creationContext, slots);
+                else if (entry.Node is RenderPassNodeData passNode)
+                    ExecutePassNode(passNode, ref entry, renderGraph, camera, cullingResults, slots);
             }
         }
 
-        private static void PropagateOutput(
-            RenderGraphPortData outputPort,
-            RenderGraphNodeData node,
-            Dictionary<string, ResourceSlot> resolvedInputs,
+        private void EnsureCompiled(RenderGraphAsset asset)
+        {
+            if (m_Compiled != null && asset.Version == m_LastVersion)
+                return;
+
+            m_Compiled = CompiledRenderGraph.Compile(asset);
+            m_LastVersion = asset.Version;
+        }
+
+        private static void ExecuteResourceNode(
+            ResourceNodeData resourceNode,
+            ResourceCreationContext creationContext,
             Dictionary<string, ResourceSlot> slots)
         {
-            var matchName = outputPort.DisplayName.Replace("Output", "Input")
-                                                  .Replace("Out", "In");
-            foreach (var inPort in node.Ports)
+            var slot = resourceNode.CreateResource(creationContext);
+            foreach (var port in resourceNode.Ports)
             {
-                if (!inPort.IsInput || inPort.Type != outputPort.Type ||
-                    inPort.DisplayName != matchName)
-                    continue;
+                if (!port.IsInput)
+                    slots[port.Id] = slot;
+            }
 
-                if (resolvedInputs.TryGetValue(inPort.Id, out var slot) && slot.IsValid)
-                    slots[outputPort.Id] = slot;
-                break;
+            if (resourceNode is IHistoryResourceNode historyNode)
+            {
+                var historySlot = historyNode.CreateHistorySlot(creationContext);
+                if (historySlot.IsValid)
+                    slots[historyNode.HistoryPortId] = historySlot;
+            }
+        }
+
+        private static void ExecutePassNode(
+            RenderPassNodeData passNode,
+            ref CompiledRenderGraph.NodeEntry entry,
+            UnityEngine.Rendering.RenderGraphModule.RenderGraph renderGraph,
+            Camera camera,
+            CullingResults cullingResults,
+            Dictionary<string, ResourceSlot> slots)
+        {
+            // Resolve inputs from pre-compiled bindings
+            var resolved = new Dictionary<string, ResourceSlot>();
+            if (entry.InputBindings != null)
+            {
+                foreach (var binding in entry.InputBindings)
+                {
+                    if (slots.TryGetValue(binding.SourceOutputPortId, out var slot))
+                        resolved[binding.InputPortId] = slot;
+                }
+            }
+
+            var context = new PassExecutionContext(camera, cullingResults, resolved);
+            passNode.Record(renderGraph, context);
+
+            // Propagate outputs: prefer explicitly stored, fall back to pre-compiled pass-through
+            foreach (var outPort in passNode.Ports)
+            {
+                if (outPort.IsInput) continue;
+
+                if (context.TryGetOutput(outPort.Id, out var stored) && stored.IsValid)
+                {
+                    slots[outPort.Id] = stored;
+                }
+                else if (entry.PassThroughBindings != null)
+                {
+                    foreach (var pt in entry.PassThroughBindings)
+                    {
+                        if (pt.OutputPortId != outPort.Id) continue;
+                        if (resolved.TryGetValue(pt.MatchedInputPortId, out var s) && s.IsValid)
+                            slots[outPort.Id] = s;
+                        break;
+                    }
+                }
             }
         }
     }

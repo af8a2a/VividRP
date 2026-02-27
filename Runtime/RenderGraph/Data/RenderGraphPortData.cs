@@ -11,5 +11,6 @@ namespace VividRP.Runtime.RenderGraph.Data
         public PortType Type;
         public bool IsInput;
         public AccessFlags Access;
+        public ResourceIntent Intent;
     }
 }

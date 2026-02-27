@@ -8,6 +8,9 @@ namespace VividRP.Editor.RenderGraph
     {
         public static RenderGraphNodeView Create(RenderGraphNodeData data)
         {
+            if (data is RasterPassNodeData rasterPass)
+                rasterPass.EnsureBakedDescriptor();
+
             if (RenderNodeRegistry.TryGetViewType(data.GetType(), out var viewType))
             {
                 try

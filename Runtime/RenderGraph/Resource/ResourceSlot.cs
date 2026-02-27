@@ -1,3 +1,4 @@
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime.RenderGraph.Data;
 
@@ -8,6 +9,7 @@ namespace VividRP.Runtime.RenderGraph.Resource
         public ResourceType Type { get; private set; }
         public TextureHandle TextureHandle { get; private set; }
         public BufferHandle BufferHandle { get; private set; }
+        public RendererListHandle RendererListHandle { get; private set; }
         public bool IsValid { get; private set; }
 
         public static ResourceSlot FromTexture(TextureHandle handle)
@@ -27,6 +29,16 @@ namespace VividRP.Runtime.RenderGraph.Resource
                 Type = ResourceType.Buffer,
                 BufferHandle = handle,
                 IsValid = handle.IsValid()
+            };
+        }
+
+        public static ResourceSlot FromRendererList(RendererListHandle handle)
+        {
+            return new ResourceSlot
+            {
+                Type = ResourceType.RendererList,
+                RendererListHandle = handle,
+                IsValid = true
             };
         }
     }

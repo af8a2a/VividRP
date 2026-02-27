@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace VividRP.Runtime.RenderGraph.Resource
 {
@@ -6,6 +7,7 @@ namespace VividRP.Runtime.RenderGraph.Resource
     {
         public UnityEngine.Rendering.RenderGraphModule.RenderGraph RenderGraph;
         public Camera Camera;
+        public CullingResults CullingResults;
         public HistoryResourceManager HistoryManager;
     }
 }

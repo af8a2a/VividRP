@@ -7,6 +7,7 @@ namespace VividRP.Runtime.RenderGraph.Data
     {
         public bool IsValid;
         public List<string> Errors;
+        public List<string> Warnings;
         public List<string> TopologicalOrder;
     }
 
@@ -16,9 +17,16 @@ namespace VividRP.Runtime.RenderGraph.Data
         [SerializeReference] public List<RenderGraphNodeData> Nodes = new List<RenderGraphNodeData>();
         public List<RenderGraphEdgeData> Edges = new List<RenderGraphEdgeData>();
 
+        /// <summary>
+        /// Monotonically increasing version counter. Incremented on any structural mutation.
+        /// Used by the executor to detect when recompilation is needed.
+        /// </summary>
+        [System.NonSerialized] public int Version;
+
         public void AddNode(RenderGraphNodeData node)
         {
             Nodes.Add(node);
+            Version++;
         }
 
         public void RemoveNode(string guid)
@@ -37,11 +45,13 @@ namespace VividRP.Runtime.RenderGraph.Data
 
             Nodes.RemoveAll(n => n.Guid == guid);
             Edges.RemoveAll(e => e.OutputNodeGuid == guid || e.InputNodeGuid == guid);
+            Version++;
         }
 
         public void AddEdge(RenderGraphEdgeData edge)
         {
             Edges.Add(edge);
+            Version++;
         }
 
         public void RemoveEdge(string outputNodeGuid, string outputPortId, string inputNodeGuid, string inputPortId)
@@ -51,6 +61,7 @@ namespace VividRP.Runtime.RenderGraph.Data
                 e.OutputPortId == outputPortId &&
                 e.InputNodeGuid == inputNodeGuid &&
                 e.InputPortId == inputPortId);
+            Version++;
         }
 
         /// <summary>
@@ -59,7 +70,11 @@ namespace VividRP.Runtime.RenderGraph.Data
         /// </summary>
         public GraphValidationResult Validate()
         {
-            var result = new GraphValidationResult { Errors = new List<string>() };
+            var result = new GraphValidationResult
+            {
+                Errors = new List<string>(),
+                Warnings = new List<string>()
+            };
 
             if (Nodes == null || Nodes.Count == 0)
             {
@@ -132,6 +147,10 @@ namespace VividRP.Runtime.RenderGraph.Data
                     string.Join(", ", CycleNodeNames(inCycle, nameMap)));
             }
 
+            ValidateRasterPasses(ref result);
+            if (result.Errors.Count > 0)
+                result.IsValid = false;
+
             return result;
         }
 
@@ -172,6 +191,86 @@ namespace VividRP.Runtime.RenderGraph.Data
         {
             foreach (var guid in guids)
                 yield return nameMap.TryGetValue(guid, out var name) ? name : guid;
+        }
+
+        private void ValidateRasterPasses(ref GraphValidationResult result)
+        {
+            if (Nodes == null || Nodes.Count == 0)
+                return;
+
+            var nodeMap = new Dictionary<string, RenderGraphNodeData>();
+            foreach (var node in Nodes)
+                nodeMap[node.Guid] = node;
+
+            foreach (var node in Nodes)
+            {
+                if (node is not RasterPassNodeData rasterPass)
+                    continue;
+
+                if (!rasterPass.TryCompileLayout(out var compileErrors))
+                {
+                    foreach (var error in compileErrors)
+                    {
+                        result.Errors.Add(
+                            $"Raster pass '{node.NodeName}' compile error: {error}");
+                    }
+                    continue;
+                }
+
+                rasterPass.EnsureBakedDescriptor();
+
+                var baked = rasterPass.BakedPass;
+                int colorAttachmentCount = baked?.ColorAttachments?.Length ?? 0;
+                if (colorAttachmentCount > RasterPassNodeData.MaxColorAttachments)
+                {
+                    result.Errors.Add(
+                        $"Raster pass '{node.NodeName}' MRT overflow: {colorAttachmentCount} > {RasterPassNodeData.MaxColorAttachments}.");
+                }
+
+                if (rasterPass.HasDepthAttachment())
+                    continue;
+
+                if (baked == null || baked.RendererLists == null || baked.RendererLists.Length == 0)
+                    continue;
+
+                if (!RendererListRequiresDepthBuffer(rasterPass, baked, nodeMap))
+                    continue;
+
+                result.Warnings.Add(
+                    $"Raster pass '{node.NodeName}' consumes a depth-writing renderer list but has no depth attachment.");
+            }
+        }
+
+        private bool RendererListRequiresDepthBuffer(
+            RasterPassNodeData rasterPass,
+            BakedRasterPass bakedPass,
+            Dictionary<string, RenderGraphNodeData> nodeMap)
+        {
+            if (Edges == null || Edges.Count == 0)
+                return false;
+
+            foreach (var rendererList in bakedPass.RendererLists)
+            {
+                foreach (var edge in Edges)
+                {
+                    if (edge.InputNodeGuid != rasterPass.Guid ||
+                        edge.InputPortId != rendererList.InputPortId)
+                    {
+                        continue;
+                    }
+
+                    if (!nodeMap.TryGetValue(edge.OutputNodeGuid, out var sourceNode))
+                        continue;
+
+                    if (sourceNode is RendererFilterNodeData filterNode &&
+                        filterNode.Settings.RequireDepthBuffer)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
     }
 }

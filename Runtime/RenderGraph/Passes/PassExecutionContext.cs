@@ -31,6 +31,16 @@ namespace VividRP.Runtime.RenderGraph.Passes
             return default;
         }
 
+        public ResourceSlot ResolveInput(string portId)
+        {
+            if (string.IsNullOrEmpty(portId))
+                return default;
+
+            if (m_ResolvedResources.TryGetValue(portId, out var slot))
+                return slot;
+            return default;
+        }
+
         /// <summary>
         /// Allows a pass to publish a resource it created for an output port,
         /// overriding the default pass-through propagation.

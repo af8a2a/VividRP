@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEditor.Experimental.GraphView;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.UIElements;
 using VividRP.Runtime.RenderGraph.Data;
 
@@ -60,7 +61,7 @@ namespace VividRP.Editor.RenderGraph.Nodes
             {
                 PortType.Texture => typeof(Texture),
                 PortType.Buffer => typeof(ComputeBuffer),
-                PortType.RendererList => typeof(Renderer),
+                PortType.RendererList => typeof(RendererListHandle),
                 _ => typeof(object)
             };
         }

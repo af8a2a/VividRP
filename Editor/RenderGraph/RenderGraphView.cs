@@ -131,15 +131,76 @@ namespace VividRP.Editor.RenderGraph
         public override List<Port> GetCompatiblePorts(Port startPort, NodeAdapter nodeAdapter)
         {
             var compatible = new List<Port>();
+            var startData = startPort.userData as RenderGraphPortData;
+
             ports.ForEach(port =>
             {
                 if (port == startPort) return;
                 if (port.node == startPort.node) return;
                 if (port.direction == startPort.direction) return;
                 if (port.portType != startPort.portType) return;
+
+                var candidateData = port.userData as RenderGraphPortData;
+                if (!IsPortIntentCompatible(startPort, startData, port, candidateData))
+                    return;
+
                 compatible.Add(port);
             });
             return compatible;
+        }
+
+        private static bool IsPortIntentCompatible(
+            Port startPort,
+            RenderGraphPortData startData,
+            Port candidatePort,
+            RenderGraphPortData candidateData)
+        {
+            if (startData == null || candidateData == null)
+                return true;
+
+            var outputPort = startPort.direction == Direction.Output ? startPort : candidatePort;
+            var inputPort = startPort.direction == Direction.Input ? startPort : candidatePort;
+
+            var outputData = startPort.direction == Direction.Output ? startData : candidateData;
+            var inputData = startPort.direction == Direction.Input ? startData : candidateData;
+
+            var outputNode = (RenderGraphNodeView)outputPort.node;
+            var inputNode = (RenderGraphNodeView)inputPort.node;
+
+            if (outputData.Type == PortType.RendererList || inputData.Type == PortType.RendererList)
+            {
+                return outputNode.NodeData is RendererFilterNodeData &&
+                       inputNode.NodeData is RasterPassNodeData &&
+                       inputData.IsInput &&
+                       !outputData.IsInput;
+            }
+
+            var outputIntent = ResolveIntent(outputData);
+            var inputIntent = ResolveIntent(inputData);
+
+            if (outputIntent == ResourceIntent.Read)
+                return false;
+
+            return inputIntent switch
+            {
+                ResourceIntent.Read => outputIntent == ResourceIntent.Write ||
+                                       outputIntent == ResourceIntent.ReadWrite,
+                ResourceIntent.ReadWrite => outputIntent == ResourceIntent.Write ||
+                                            outputIntent == ResourceIntent.ReadWrite,
+                ResourceIntent.Write => outputIntent == ResourceIntent.ReadWrite,
+                _ => false
+            };
+        }
+
+        private static ResourceIntent ResolveIntent(RenderGraphPortData portData)
+        {
+            return portData.Access switch
+            {
+                UnityEngine.Rendering.RenderGraphModule.AccessFlags.Write => ResourceIntent.Write,
+                UnityEngine.Rendering.RenderGraphModule.AccessFlags.WriteAll => ResourceIntent.Write,
+                UnityEngine.Rendering.RenderGraphModule.AccessFlags.ReadWrite => ResourceIntent.ReadWrite,
+                _ => portData.IsInput ? ResourceIntent.Read : ResourceIntent.ReadWrite
+            };
         }
 
         private RenderGraphNodeView CreateNodeView(RenderGraphNodeData data)

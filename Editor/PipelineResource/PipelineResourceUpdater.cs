@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using UnityEditor;
 using UnityEngine;
@@ -10,7 +11,7 @@ namespace VividRP.Editor.PipelineResource
     public class PipelineResourceUpdater : AssetPostprocessor
     {
         private const string ContainerPath = "Packages/com.af8a2a.vividrp/Runtime/Resources/PipelineResources.asset";
-        private const string PackageRuntimeRoot = "Packages/com.af8a2a.vividrp/Runtime/";
+        private const string PackageRuntimeRoot = "Packages/com.af8a2a.vividrp/";
 
         [InitializeOnLoadMethod]
         private static void OnLoad()

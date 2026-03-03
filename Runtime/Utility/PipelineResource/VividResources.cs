@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace VividRP.Runtime.Utility.PipelineResource
+namespace VividRP.Runtime
 {
     //can provide PipelineResourceManager.Get<VividRPCoreResources>().BlitShader  accessor
     [PipelineResource] 

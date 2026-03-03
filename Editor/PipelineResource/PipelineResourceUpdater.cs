@@ -4,9 +4,9 @@ using System.IO;
 using System.Reflection;
 using UnityEditor;
 using UnityEngine;
-using VividRP.Runtime.Utility.PipelineResource;
+using VividRP.Runtime;
 
-namespace VividRP.Editor.PipelineResource
+namespace VividRP.Editor
 {
     public class PipelineResourceUpdater : AssetPostprocessor
     {

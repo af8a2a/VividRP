@@ -1,6 +1,6 @@
 using System;
 
-namespace VividRP.Runtime.Utility.PipelineResource
+namespace VividRP.Runtime
 {
     [AttributeUsage(AttributeTargets.Class)]
     public class PipelineResourceAttribute : Attribute

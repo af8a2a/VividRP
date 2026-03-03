@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace VividRP.Runtime.Utility.PipelineResource
+namespace VividRP.Runtime
 {
     [Serializable]
     public class ResourceEntry

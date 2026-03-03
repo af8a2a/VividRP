@@ -2,18 +2,13 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
-using VividRP.Runtime.RenderGraph;
-using VividRP.Runtime.RenderGraph.Resource;
-using VividRP.Runtime.Utility.PipelineResource;
 
-namespace VividRP.Runtime.RenderPipeline
+namespace VividRP.Runtime
 {
     public class VividRenderPipeline : UnityEngine.Rendering.RenderPipeline, IRenderGraphEnabledRenderPipeline
     {
         private readonly VividRenderPipelineAsset m_Asset;
         private readonly UnityEngine.Rendering.RenderGraphModule.RenderGraph m_RenderGraph;
-        private readonly RenderGraphExecutor m_Executor;
-        private readonly HistoryResourceManager m_HistoryManager;
 
         public VividRenderPipeline(VividRenderPipelineAsset asset)
         {
@@ -24,8 +19,6 @@ namespace VividRP.Runtime.RenderPipeline
             Blitter.Initialize(resources.CoreBlitShader, resources.CoreBlitColorAndDepthShader);
 
             m_RenderGraph = new UnityEngine.Rendering.RenderGraphModule.RenderGraph("VividRP RenderGraph");
-            m_Executor = new RenderGraphExecutor();
-            m_HistoryManager = new HistoryResourceManager();
         }
 
         protected override void Render(ScriptableRenderContext context, Camera[] cameras)
@@ -56,8 +49,8 @@ namespace VividRP.Runtime.RenderPipeline
 
             var cmdBuffer = CommandBufferPool.Get("VividRP");
 
-            var graphAsset = m_Asset.RenderGraphAsset;
-            if (graphAsset != null)
+            // var graphAsset = m_Asset.RenderGraphAsset;
+            // if (graphAsset != null)
             {
                 var renderGraphParams = new RenderGraphParameters
                 {
@@ -66,9 +59,9 @@ namespace VividRP.Runtime.RenderPipeline
                     currentFrameIndex = Time.frameCount
                 };
 
-                m_HistoryManager.SwapBuffers();
                 m_RenderGraph.BeginRecording(renderGraphParams);
-                m_Executor.Execute(m_RenderGraph, graphAsset, camera, cullingResults, m_HistoryManager);
+
+                
                 m_RenderGraph.EndRecordingAndExecute();
             }
 
@@ -77,13 +70,12 @@ namespace VividRP.Runtime.RenderPipeline
             CommandBufferPool.Release(cmdBuffer);
 
             context.Submit();
-
+            m_RenderGraph.EndFrame();
             EndCameraRendering(context, camera);
         }
 
         protected override void Dispose(bool disposing)
         {
-            m_HistoryManager.ReleaseAll();
             m_RenderGraph?.Cleanup();
             Blitter.Cleanup();
             PipelineResourceManager.Cleanup();

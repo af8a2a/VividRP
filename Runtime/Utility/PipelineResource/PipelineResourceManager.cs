@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
 
-namespace VividRP.Runtime.Utility.PipelineResource
+namespace VividRP.Runtime
 {
     public static class PipelineResourceManager
     {

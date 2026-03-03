@@ -2,12 +2,12 @@
 
 ## Overview
 
-VividRP's RenderGraph now includes serializable resource descriptor classes that mirror Unity's `TextureDesc` and `BufferDesc` but can be fully serialized in assets. This allows pass nodes to define resource properties declaratively.
+VividRP's RenderGraph now includes serializable resource descriptor classes that mirror Unity's `TextureDesc`, `BufferDesc`, and `RayTracingAccelerationStructureDesc` but can be fully serialized in assets. This allows pass nodes to define resource properties declaratively.
 
 ## Core Classes
 
 ### RenderGraphTextureDesc
-Location: `Runtime/RenderGraph/Data/RenderGraphTextureDesc.cs`
+Location: `Runtime/RenderGraph/Resource/RenderGraphTextureDesc.cs`
 
 Serializable texture descriptor with full support for:
 - Dimensions (width, height, slices, dimension)
@@ -25,7 +25,7 @@ Serializable texture descriptor with full support for:
 - `CreateDepthTarget(width, height, depthBits)` - Factory for depth targets
 
 ### RenderGraphBufferDesc
-Location: `Runtime/RenderGraph/Data/RenderGraphBufferDesc.cs`
+Location: `Runtime/RenderGraph/Resource/RenderGraphBufferDesc.cs`
 
 Serializable buffer descriptor with support for:
 - Count and stride
@@ -39,6 +39,17 @@ Serializable buffer descriptor with support for:
 - `CreateAppend(count, stride)` - Factory for append/consume buffers
 - `CreateIndirectArguments(count)` - Factory for indirect args buffers
 
+### RenderGraphAccelerationStructureDesc
+Location: `Runtime/RenderGraph/Resource/RenderGraphAccelerationStructureDesc.cs`
+
+Serializable acceleration structure descriptor for ray tracing:
+- Name metadata for debugging and profiling
+
+**Key Methods:**
+- `ToAccelerationStructureDesc()` - Converts to Unity's `RayTracingAccelerationStructureDesc`
+- `FromAccelerationStructureDesc(RayTracingAccelerationStructureDesc)` - Creates from Unity's descriptor
+- `Create(name)` - Factory for acceleration structures
+
 ## Port Integration
 
 ### RenderGraphPortData
@@ -47,6 +58,7 @@ Location: `Runtime/RenderGraph/Data/RenderGraphPortData.cs`
 Ports now optionally store resource descriptors:
 - `TextureDesc` - For texture ports
 - `BufferDesc` - For buffer ports
+- `AccelerationStructureDesc` - For acceleration structure ports (ray tracing)
 
 **Key Methods:**
 - `GetDescriptor()` - Returns the appropriate descriptor based on port type
@@ -89,6 +101,36 @@ All resource and pass nodes have been updated to use the new descriptor system:
 - Creates transient attachments using existing serialized fields
 - Can be extended to use descriptors per-attachment in the future
 
+## Ray Tracing Support
+
+VividRP now includes full support for ray tracing acceleration structures through the descriptor system. See `Runtime/RenderGraph/RayTracingPassExample.cs` for complete examples of:
+
+1. **Building Acceleration Structures** - `RayTracingAccelerationStructurePass` demonstrates how to build a RTAS from scene geometry
+2. **Using Acceleration Structures** - `RayTracingPass` shows how to use RTAS in compute shaders for ray queries
+
+### Ray Tracing Usage Example
+
+```csharp
+// Create acceleration structure descriptor
+var accelStructDesc = RenderGraphAccelerationStructureDesc.Create("SceneAccelerationStructure");
+
+// Import into RenderGraph
+var rtasHandle = renderGraph.ImportRayTracingAccelerationStructure(accelStruct);
+
+// Use in compute pass
+using (var builder = renderGraph.AddComputePass<PassData>("Ray Tracing", out var passData))
+{
+    builder.UseAccelerationStructure(rtasHandle);
+
+    builder.SetRenderFunc<PassData>((data, context) =>
+    {
+        context.cmd.SetComputeRayTracingAccelerationStructureParam(
+            shader, kernelIndex, "_AccelStruct", accelStruct);
+        context.cmd.DispatchCompute(shader, kernelIndex, width / 8, height / 8, 1);
+    });
+}
+```
+
 ## Benefits
 
 1. **Declarative Configuration** - Resource properties are defined in the asset, not hardcoded
@@ -97,6 +139,7 @@ All resource and pass nodes have been updated to use the new descriptor system:
 4. **Type Safety** - Compile-time checking of descriptor properties
 5. **Extensibility** - Easy to add new descriptor types for future resource types
 6. **Serialization** - Full Unity serialization support with `[SerializeReference]`
+7. **Ray Tracing Ready** - First-class support for acceleration structures
 
 ## Usage Example
 
@@ -110,7 +153,10 @@ textureNode.TextureDesc.AutoGenerateMips = true;
 // Create a buffer node with custom descriptor
 var bufferNode = new BufferNodeData();
 bufferNode.BufferDesc = RenderGraphBufferDesc.CreateStructured(1024, 16);
-bufferNode.BufferDesc.Target = ComputeBufferType.Append;
+bufferNode.BufferDesc.Target = GraphicsBuffer.Target.Append;
+
+// Create an acceleration structure descriptor
+var accelStructDesc = RenderGraphAccelerationStructureDesc.Create("MyAccelerationStructure");
 
 // Access descriptor from port
 var port = textureNode.Ports[0];
@@ -124,3 +170,4 @@ var desc = port.TextureDesc; // Returns RenderGraphTextureDesc
 3. **Validation** - Runtime validation of descriptor properties
 4. **Per-Attachment Descriptors** - RasterPassNodeData could use descriptors per color/depth attachment
 5. **Descriptor Inheritance** - Ports could inherit descriptors from connected ports
+6. **Ray Tracing Node** - Dedicated node type for ray tracing passes with RTAS inputs

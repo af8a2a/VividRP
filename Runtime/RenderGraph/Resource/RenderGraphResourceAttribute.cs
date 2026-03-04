@@ -7,7 +7,16 @@ namespace VividRP.Runtime
     public class RenderGraphResource : Attribute
     {
         public string Name;
-        public string Label;
-        public AccessFlags Flags;
+        public AccessFlags Access;
+
+        /// <summary>
+        /// For raster passes: color attachment index (0-7). -1 means not an attachment.
+        /// </summary>
+        public int AttachmentIndex = -1;
+
+        /// <summary>
+        /// For raster passes: marks this texture as the depth attachment.
+        /// </summary>
+        public bool IsDepthAttachment;
     }
 }

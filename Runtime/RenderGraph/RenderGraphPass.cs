@@ -28,51 +28,11 @@ namespace VividRP.Runtime
         }
     }
 
-    /// <summary>
-    /// Provides resolved RenderGraph handles to the pass during Record().
-    /// Handles are keyed by the field name declared on the pass class.
-    /// </summary>
-    public class PassRecordContext
-    {
-        private readonly Dictionary<string, TextureHandle> m_Textures = new();
-        private readonly Dictionary<string, BufferHandle> m_Buffers = new();
-        private readonly Dictionary<string, RayTracingAccelerationStructureHandle> m_AccelerationStructures = new();
-
-        public void SetTexture(string fieldName, TextureHandle handle) => m_Textures[fieldName] = handle;
-        public void SetBuffer(string fieldName, BufferHandle handle) => m_Buffers[fieldName] = handle;
-
-        public TextureHandle GetTexture(string fieldName)
-        {
-            return m_Textures.TryGetValue(fieldName, out var h) ? h : default;
-        }
-
-        public BufferHandle GetBuffer(string fieldName)
-        {
-            return m_Buffers.TryGetValue(fieldName, out var h) ? h : default;
-        }
-
-        public RayTracingAccelerationStructureHandle GetAccelerationStructure(string fieldName)
-        {
-            return m_AccelerationStructures.TryGetValue(fieldName, out var h) ? h : default;
-        }
-    }
 
     public interface IRenderPass
     {
-        /// <summary>
-        /// Prepare runtime resources (e.g. dynamic count buffer).
-        /// Called each frame before the RenderGraph pass is recorded.
-        /// After Prepare, the RenderGraph will automatically use the resource info
-        /// collected by Initialize() to set up builder calls.
-        /// </summary>
-        void Prepare(ContextContainer frameData);
-
-        /// <summary>
-        /// Record rendering commands. Called from within the RenderGraph render func.
-        /// Use the context to access resolved handles by field name.
-        /// </summary>
-        void Record(PassRecordContext context);
-
+        
+        
         /// <summary>
         /// Collects all [RenderGraphResource]-annotated fields via reflection
         /// and returns a PassResource describing the pass's resource requirements.
@@ -130,20 +90,70 @@ namespace VividRP.Runtime
                 Buffers = buffers.ToArray(),
             };
         }
+        
+        
+        /// <summary>
+        /// Prepare runtime resources (e.g. dynamic count buffer).
+        /// Called each frame before the RenderGraph pass is recorded.
+        /// After Prepare, the RenderGraph will automatically use the resource info
+        /// collected by Initialize() to set up builder calls.
+        /// </summary>
+        public void Prepare(ContextContainer frameData);
+        
+        
+        /// <summary>
+        /// Only once prepare resource  (e.g. shader).
+        /// </summary>
+        public void Create();
+
     }
 
 
-    public interface IComputePass : IRenderPass
+    public abstract class ComputePass : IRenderPass
     {
+
+        /// <summary>
+        /// Record rendering commands. Called from within the RenderGraph render func.
+        /// Use the context to access resolved handles by field name.
+        /// </summary>
+        public abstract void Record(ComputeGraphContext context) ;
+
+        public abstract void Prepare(ContextContainer frameData);
+        public abstract void Create();
     }
 
 
-    public interface IRasterPass : IRenderPass
+    public abstract class RasterPass : IRenderPass
     {
+
+        /// <summary>
+        /// Record rendering commands. Called from within the RenderGraph render func.
+        /// Use the context to access resolved handles by field name.
+        /// </summary>
+        public abstract void Record(RasterGraphContext context) ;
+
+        public abstract void Prepare(ContextContainer frameData);
+        public abstract void Create();
     }
 
 
-    public interface IUnsafePass : IRenderPass
+    public abstract class UnsafePass : IRenderPass
     {
+        /// <summary>
+        /// Prepare runtime resources (e.g. dynamic count buffer).
+        /// Called each frame before the RenderGraph pass is recorded.
+        /// After Prepare, the RenderGraph will automatically use the resource info
+        /// collected by Initialize() to set up builder calls.
+        /// </summary>
+        public abstract void Prepare(ContextContainer frameData);
+
+        public abstract void Create();
+
+        /// <summary>
+        /// Record rendering commands. Called from within the RenderGraph render func.
+        /// Use the context to access resolved handles by field name.
+        /// </summary>
+        public abstract void Record(UnsafeGraphContext context) ;
+
     }
 }

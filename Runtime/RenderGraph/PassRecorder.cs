@@ -7,33 +7,30 @@ namespace VividRP.Runtime
     /// Automatically records a RenderGraph pass from a PassResource.
     /// Creates resources, calls builder methods, and invokes the pass's Record().
     /// </summary>
-    public static class PassRecorder
+    public static partial class PassRecorder
     {
         private class ComputePassData
         {
-            public IRenderPass Pass;
-            public PassRecordContext Context;
+            public ComputePass Pass;
         }
 
         private class RasterPassData
         {
-            public IRenderPass Pass;
-            public PassRecordContext Context;
+            public RasterPass Pass;
         }
 
         private class UnsafePassData
         {
-            public IRenderPass Pass;
-            public PassRecordContext Context;
+            public UnsafePass Pass;
         }
 
         /// <summary>
         /// Records a compute pass. Creates resources from PassResource, sets up builder calls,
         /// and wires the render func to call pass.Record().
         /// </summary>
-        public static void RecordComputePass(
+        static void RecordComputePass(
             RenderGraph renderGraph,
-            IComputePass pass,
+            ComputePass pass,
             PassResource resource,
             string passName = null)
         {
@@ -41,23 +38,19 @@ namespace VividRP.Runtime
                 passName ?? pass.GetType().Name, out var passData);
 
             passData.Pass = pass;
-            passData.Context = new PassRecordContext();
 
-            SetupResources(renderGraph, builder, resource, passData.Context);
+            SetupResources(renderGraph, builder, resource);
 
-            builder.SetRenderFunc<ComputePassData>(static (data, _) =>
-            {
-                data.Pass.Record(data.Context);
-            });
+            builder.SetRenderFunc<ComputePassData>(static (data, ctx) => { data.Pass.Record(ctx); });
         }
 
         /// <summary>
         /// Records a raster pass. Creates resources, sets up attachments and builder calls,
         /// and wires the render func to call pass.Record().
         /// </summary>
-        public static void RecordRasterPass(
+        static void RecordRasterPass(
             RenderGraph renderGraph,
-            IRasterPass pass,
+            RasterPass pass,
             PassResource resource,
             string passName = null)
         {
@@ -65,23 +58,19 @@ namespace VividRP.Runtime
                 passName ?? pass.GetType().Name, out var passData);
 
             passData.Pass = pass;
-            passData.Context = new PassRecordContext();
 
-            SetupRasterResources(renderGraph, builder, resource, passData.Context);
+            SetupRasterResources(renderGraph, builder, resource);
 
-            builder.SetRenderFunc<RasterPassData>(static (data, _) =>
-            {
-                data.Pass.Record(data.Context);
-            });
+            builder.SetRenderFunc<RasterPassData>(static (data, ctx) => { data.Pass.Record(ctx); });
         }
 
         /// <summary>
         /// Records an unsafe pass. Creates resources from PassResource, sets up builder calls,
         /// and wires the render func to call pass.Record().
         /// </summary>
-        public static void RecordUnsafePass(
+        static void RecordUnsafePass(
             RenderGraph renderGraph,
-            IUnsafePass pass,
+            UnsafePass pass,
             PassResource resource,
             string passName = null)
         {
@@ -89,14 +78,10 @@ namespace VividRP.Runtime
                 passName ?? pass.GetType().Name, out var passData);
 
             passData.Pass = pass;
-            passData.Context = new PassRecordContext();
 
-            SetupResources(renderGraph, builder, resource, passData.Context);
+            SetupResources(renderGraph, builder, resource);
 
-            builder.SetRenderFunc<UnsafePassData>(static (data, _) =>
-            {
-                data.Pass.Record(data.Context);
-            });
+            builder.SetRenderFunc<UnsafePassData>(static (data, ctx) => { data.Pass.Record(ctx); });
         }
 
         /// <summary>
@@ -105,8 +90,7 @@ namespace VividRP.Runtime
         private static void SetupResources(
             RenderGraph renderGraph,
             IBaseRenderGraphBuilder builder,
-            PassResource resource,
-            PassRecordContext context)
+            PassResource resource)
         {
             foreach (var entry in resource.Textures)
             {
@@ -119,13 +103,11 @@ namespace VividRP.Runtime
                     // Create a placeholder — the pipeline will replace this with the actual handle.
                     var handle = renderGraph.CreateTexture(desc.ToTextureDesc());
                     builder.UseTexture(handle, AccessFlags.Read);
-                    context.SetTexture(entry.Field.Name, handle);
                 }
                 else
                 {
                     var handle = renderGraph.CreateTexture(desc.ToTextureDesc());
                     builder.UseTexture(handle, entry.Access);
-                    context.SetTexture(entry.Field.Name, handle);
                 }
             }
 
@@ -136,9 +118,7 @@ namespace VividRP.Runtime
 
                 var handle = renderGraph.CreateBuffer(desc.ToBufferDesc());
                 builder.UseBuffer(handle, entry.Access);
-                context.SetBuffer(entry.Field.Name, handle);
             }
-
         }
 
         /// <summary>
@@ -148,8 +128,7 @@ namespace VividRP.Runtime
         private static void SetupRasterResources(
             RenderGraph renderGraph,
             IRasterRenderGraphBuilder builder,
-            PassResource resource,
-            PassRecordContext context)
+            PassResource resource)
         {
             foreach (var entry in resource.Textures)
             {
@@ -170,8 +149,6 @@ namespace VividRP.Runtime
                 {
                     builder.UseTexture(handle, entry.Access);
                 }
-
-                context.SetTexture(entry.Field.Name, handle);
             }
 
             foreach (var entry in resource.Buffers)
@@ -181,9 +158,7 @@ namespace VividRP.Runtime
 
                 var handle = renderGraph.CreateBuffer(desc.ToBufferDesc());
                 builder.UseBuffer(handle, entry.Access);
-                context.SetBuffer(entry.Field.Name, handle);
             }
-
         }
     }
 }

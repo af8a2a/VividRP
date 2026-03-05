@@ -7,43 +7,40 @@ namespace VividRP.Runtime
 {
     public class VividRenderPipeline : UnityEngine.Rendering.RenderPipeline, IRenderGraphEnabledRenderPipeline
     {
-        private readonly VividRenderPipelineAsset m_Asset;
-        private readonly UnityEngine.Rendering.RenderGraphModule.RenderGraph m_RenderGraph;
+        private VividRenderPipelineAsset m_Asset;
+        private RenderGraph m_RenderGraph;
 
         public VividRenderPipeline(VividRenderPipelineAsset asset)
         {
             m_Asset = asset;
 
-            PipelineResourceManager.Initialize();
-            var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            Blitter.Initialize(resources.CoreBlitShader, resources.CoreBlitColorAndDepthShader);
+            // PipelineResourceManager.Initialize();
+            // var resources = PipelineResourceManager.Get<VividRPCoreResources>();
+            // Blitter.Initialize(resources.CoreBlitShader, resources.CoreBlitColorAndDepthShader);
 
-            m_RenderGraph = new UnityEngine.Rendering.RenderGraphModule.RenderGraph("VividRP RenderGraph");
+            m_RenderGraph = new RenderGraph("VividRP RenderGraph");
         }
 
-        protected override void Render(ScriptableRenderContext context, Camera[] cameras)
-        {
-            foreach (var camera in cameras)
-                RenderCamera(context, camera);
-        }
 
         protected override void Render(ScriptableRenderContext context, List<Camera> cameras)
         {
             foreach (var camera in cameras)
                 RenderCamera(context, camera);
+            
+            m_RenderGraph.EndFrame();
         }
 
         private void RenderCamera(ScriptableRenderContext context, Camera camera)
         {
             BeginCameraRendering(context, camera);
 
-            if (!camera.TryGetCullingParameters(out var cullingParams))
-            {
-                EndCameraRendering(context, camera);
-                return;
-            }
+            // if (!camera.TryGetCullingParameters(out var cullingParams))
+            // {
+            //     EndCameraRendering(context, camera);
+            //     return;
+            // }
 
-            var cullingResults = context.Cull(ref cullingParams);
+            // var cullingResults = context.Cull(ref cullingParams);
 
             context.SetupCameraProperties(camera);
 
@@ -56,12 +53,13 @@ namespace VividRP.Runtime
                 {
                     scriptableRenderContext = context,
                     commandBuffer = cmdBuffer,
-                    currentFrameIndex = Time.frameCount
+                    currentFrameIndex = Time.frameCount,
+                    executionId = camera.GetEntityId(),
+                    generateDebugData = camera.cameraType != CameraType.Preview && !camera.isProcessingRenderRequest,
                 };
 
                 m_RenderGraph.BeginRecording(renderGraphParams);
-
-                
+                PassRecorder.RecordRenderGraph(m_RenderGraph, context);
                 m_RenderGraph.EndRecordingAndExecute();
             }
 
@@ -70,14 +68,14 @@ namespace VividRP.Runtime
             CommandBufferPool.Release(cmdBuffer);
 
             context.Submit();
-            m_RenderGraph.EndFrame();
             EndCameraRendering(context, camera);
         }
 
         protected override void Dispose(bool disposing)
         {
             m_RenderGraph?.Cleanup();
-            Blitter.Cleanup();
+            m_RenderGraph = null;
+            // Blitter.Cleanup();
             PipelineResourceManager.Cleanup();
             base.Dispose(disposing);
         }

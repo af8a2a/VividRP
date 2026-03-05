@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -42,6 +42,13 @@ namespace VividRP.Runtime
 
         [Header("Metadata")] public string Name = "Texture";
 
+        /// <summary>
+        /// Creates a runtime copy of this descriptor.
+        /// </summary>
+        public RenderGraphTextureDesc Clone()
+        {
+            return (RenderGraphTextureDesc)MemberwiseClone();
+        }
 
         /// <summary>
         /// Converts this serializable descriptor to Unity's TextureDesc.
@@ -69,7 +76,6 @@ namespace VividRP.Runtime
                 useDynamicScaleExplicit = UseDynamicScaleExplicit,
                 name = Name
             };
-
 
             if (UseMipMap && MipCount > 1)
             {
@@ -154,7 +160,6 @@ namespace VividRP.Runtime
     public class RenderGraphTexture
     {
         public RenderGraphTextureDesc desc;
-
 
         public RenderGraphTexture()
         {

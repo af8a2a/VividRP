@@ -17,6 +17,14 @@ namespace VividRP.Runtime
         public string Name = "Buffer";
 
         /// <summary>
+        /// Creates a runtime copy of this descriptor.
+        /// </summary>
+        public RenderGraphBufferDesc Clone()
+        {
+            return (RenderGraphBufferDesc)MemberwiseClone();
+        }
+
+        /// <summary>
         /// Converts this serializable descriptor to Unity's BufferDesc.
         /// </summary>
         private BufferDesc ToBufferDesc()

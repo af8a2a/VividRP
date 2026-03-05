@@ -3,7 +3,7 @@ using System.ComponentModel;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace VividRP.Runtime.RenderPipeline
+namespace VividRP.Runtime
 {
     [DisplayInfo(name = "VividRP Global Settings", order = CoreUtils.Sections.section1)]
     [SupportedOnRenderPipeline(typeof(VividRenderPipelineAsset))]

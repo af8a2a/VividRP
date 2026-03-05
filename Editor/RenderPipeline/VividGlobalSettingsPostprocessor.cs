@@ -1,5 +1,5 @@
 using UnityEditor;
-using VividRP.Runtime.RenderPipeline;
+using VividRP.Runtime;
 
 namespace VividRP.Editor.RenderPipeline
 {

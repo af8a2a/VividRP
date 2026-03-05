@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
@@ -8,7 +8,7 @@ namespace VividRP.Runtime
     {
         Material material;
 
-        [RenderGraphResource(Access = AccessFlags.Write,AttachmentIndex = 0)]
+        [RenderGraphResource(Access = AccessFlags.Write, AttachmentIndex = 0)]
         RenderGraphTexture texture = new RenderGraphTexture();
 
         public override void Record(RasterGraphContext context)
@@ -17,7 +17,15 @@ namespace VividRP.Runtime
             Blitter.BlitTexture(cmd, Vector2.one, material, 0);
         }
 
-        
+        public override void Dispose()
+        {
+            if (material != null)
+            {
+                CoreUtils.Destroy(material);
+                material = null;
+            }
+        }
+
         public override void Prepare(ContextContainer frameData)
         {
             var desc = texture.desc;

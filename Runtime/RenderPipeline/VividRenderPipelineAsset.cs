@@ -6,10 +6,8 @@ namespace VividRP.Runtime
     [CreateAssetMenu(menuName = "VividRP/Vivid Render Pipeline")]
     public class VividRenderPipelineAsset : RenderPipelineAsset<VividRenderPipeline>
     {
-        // public RenderGraphAsset RenderGraphAsset;
+        public RenderGraphData RenderGraphAsset;
 
-        
-        
         protected override UnityEngine.Rendering.RenderPipeline CreatePipeline()
         {
 #if UNITY_EDITOR

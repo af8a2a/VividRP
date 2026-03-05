@@ -5,7 +5,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
 {
-    public class VividRenderPipeline : UnityEngine.Rendering.RenderPipeline, IRenderGraphEnabledRenderPipeline
+    public class VividRenderPipeline : RenderPipeline, IRenderGraphEnabledRenderPipeline
     {
         private VividRenderPipelineAsset m_Asset;
         private RenderGraph m_RenderGraph;
@@ -21,40 +21,34 @@ namespace VividRP.Runtime
             m_RenderGraph = new RenderGraph("VividRP RenderGraph");
         }
 
-
         protected override void Render(ScriptableRenderContext context, List<Camera> cameras)
         {
             foreach (var camera in cameras)
                 RenderCamera(context, camera);
-            
+
             m_RenderGraph.EndFrame();
         }
-
 
         private void RenderCamera(ScriptableRenderContext context, Camera camera)
         {
             BeginCameraRendering(context, camera);
             var cmdBuffer = CommandBufferPool.Get("VividRP");
 
-
             PassRecorder.InitializeContext(context, camera);
-            // var graphAsset = m_Asset.RenderGraphAsset;
-            // if (graphAsset != null)
+            var graphAsset = m_Asset.RenderGraphAsset;
+
+            var renderGraphParams = new RenderGraphParameters
             {
-                var renderGraphParams = new RenderGraphParameters
-                {
-                    scriptableRenderContext = context,
-                    commandBuffer = cmdBuffer,
-                    currentFrameIndex = Time.frameCount,
-                    executionId = camera.GetEntityId(),
-                    generateDebugData = camera.cameraType != CameraType.Preview && !camera.isProcessingRenderRequest,
-                };
+                scriptableRenderContext = context,
+                commandBuffer = cmdBuffer,
+                currentFrameIndex = Time.frameCount,
+                executionId = camera.GetEntityId(),
+                generateDebugData = camera.cameraType != CameraType.Preview && !camera.isProcessingRenderRequest,
+            };
 
-                m_RenderGraph.BeginRecording(renderGraphParams);
-                PassRecorder.RecordRenderGraph(m_RenderGraph, context);
-                m_RenderGraph.EndRecordingAndExecute();
-            }
-
+            m_RenderGraph.BeginRecording(renderGraphParams);
+            PassRecorder.RecordRenderGraph(m_RenderGraph, context, graphAsset);
+            m_RenderGraph.EndRecordingAndExecute();
 
             context.ExecuteCommandBuffer(cmdBuffer);
             CommandBufferPool.Release(cmdBuffer);
@@ -65,6 +59,8 @@ namespace VividRP.Runtime
 
         protected override void Dispose(bool disposing)
         {
+            PassRecorder.Dispose();
+
             m_RenderGraph?.Cleanup();
             m_RenderGraph = null;
             Blitter.Cleanup();

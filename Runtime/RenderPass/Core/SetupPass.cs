@@ -1,4 +1,4 @@
-﻿using UnityEngine.Rendering;
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
@@ -14,6 +14,10 @@ namespace VividRP.Runtime.RenderPass.Core
         }
 
         public override void Record(UnsafeGraphContext context)
+        {
+        }
+
+        public override void Dispose()
         {
         }
     }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine.Rendering;
@@ -28,7 +28,6 @@ namespace VividRP.Runtime
         }
     }
 
-
     public interface IRenderPass
     {
         /// <summary>
@@ -44,7 +43,7 @@ namespace VividRP.Runtime
             var textures = new List<PassResourceEntry>();
             var buffers = new List<PassResourceEntry>();
             var accelStructs = new List<PassResourceEntry>();
-            
+
             foreach (var field in fields)
             {
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
@@ -75,10 +74,10 @@ namespace VividRP.Runtime
                         entry.ResourceType = PassResourceType.Buffer;
                         buffers.Add(entry);
                         break;
-                    // case RenderGraphAccelerationStructureDesc:
-                    //     entry.ResourceType = PassResourceType.AccelerationStructure;
-                    //     accelStructs.Add(entry);
-                    //     break;
+                        // case RenderGraphAccelerationStructureDesc:
+                        //     entry.ResourceType = PassResourceType.AccelerationStructure;
+                        //     accelStructs.Add(entry);
+                        //     break;
                 }
             }
 
@@ -89,22 +88,24 @@ namespace VividRP.Runtime
             };
         }
 
-
         /// <summary>
         /// Prepare runtime resources (e.g. dynamic count buffer).
         /// Called each frame before the RenderGraph pass is recorded.
         /// After Prepare, the RenderGraph will automatically use the resource info
         /// collected by Initialize() to set up builder calls.
         /// </summary>
-        public void Prepare(ContextContainer frameData);
-
+        void Prepare(ContextContainer frameData);
 
         /// <summary>
-        /// Only once prepare resource  (e.g. shader).
+        /// Called once to create persistent objects (e.g. shaders/materials).
         /// </summary>
-        public void Create();
-    }
+        void Create();
 
+        /// <summary>
+        /// Called when the pipeline is disposed or the graph is recompiled.
+        /// </summary>
+        void Dispose();
+    }
 
     public abstract class ComputePass : IRenderPass
     {
@@ -116,13 +117,13 @@ namespace VividRP.Runtime
         /// Use the context to access resolved handles by field name.
         /// </summary>
         public abstract void Record(ComputeGraphContext context);
-    }
 
+        public abstract void Dispose();
+    }
 
     public abstract class RasterPass : IRenderPass
     {
         public abstract void Create();
-
         public abstract void Prepare(ContextContainer frameData);
 
         /// <summary>
@@ -130,8 +131,9 @@ namespace VividRP.Runtime
         /// Use the context to access resolved handles by field name.
         /// </summary>
         public abstract void Record(RasterGraphContext context);
-    }
 
+        public abstract void Dispose();
+    }
 
     public abstract class UnsafePass : IRenderPass
     {
@@ -145,11 +147,12 @@ namespace VividRP.Runtime
         /// </summary>
         public abstract void Prepare(ContextContainer frameData);
 
-
         /// <summary>
         /// Record rendering commands. Called from within the RenderGraph render func.
         /// Use the context to access resolved handles by field name.
         /// </summary>
         public abstract void Record(UnsafeGraphContext context);
+
+        public abstract void Dispose();
     }
 }

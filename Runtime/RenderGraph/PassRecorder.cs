@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering.RenderGraphModule;
 
@@ -33,6 +34,8 @@ namespace VividRP.Runtime
             RenderGraph renderGraph,
             ComputePass pass,
             PassResource resource,
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache,
+            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
             string passName = null)
         {
             using var builder = renderGraph.AddComputePass<ComputePassData>(
@@ -40,7 +43,7 @@ namespace VividRP.Runtime
 
             passData.Pass = pass;
 
-            SetupComputeResources(renderGraph, builder, resource);
+            SetupComputeResources(renderGraph, builder, resource, textureCache, bufferCache);
 
             builder.SetRenderFunc<ComputePassData>(static (data, ctx) => { data.Pass.Record(ctx); });
         }
@@ -53,6 +56,8 @@ namespace VividRP.Runtime
             RenderGraph renderGraph,
             RasterPass pass,
             PassResource resource,
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache,
+            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
             string passName = null)
         {
             using var builder = renderGraph.AddRasterRenderPass<RasterPassData>(
@@ -60,14 +65,13 @@ namespace VividRP.Runtime
 
             passData.Pass = pass;
 
-            SetupRasterResources(renderGraph, builder, resource);
+            SetupRasterResources(renderGraph, builder, resource, textureCache, bufferCache);
 
             builder.SetRenderFunc<RasterPassData>(static (data, ctx) =>
             {
                 data.Pass.Record(ctx);
             });
         }
-
 
         /// <summary>
         /// Records an unsafe pass. Creates resources from PassResource, sets up builder calls,
@@ -77,6 +81,8 @@ namespace VividRP.Runtime
             RenderGraph renderGraph,
             UnsafePass pass,
             PassResource resource,
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache,
+            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
             string passName = null)
         {
             using var builder = renderGraph.AddUnsafePass<UnsafePassData>(
@@ -84,11 +90,36 @@ namespace VividRP.Runtime
 
             passData.Pass = pass;
 
-            SetupUnsafeResources(renderGraph, builder, resource);
+            SetupUnsafeResources(renderGraph, builder, resource, textureCache, bufferCache);
 
             builder.SetRenderFunc<UnsafePassData>(static (data, ctx) => { data.Pass.Record(ctx); });
         }
 
+        private static TextureHandle GetOrCreateTextureHandle(
+            RenderGraph renderGraph,
+            RenderGraphTexture texture,
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache)
+        {
+            if (textureCache.TryGetValue(texture, out var handle))
+                return handle;
+
+            handle = renderGraph.CreateTexture(texture.desc);
+            textureCache.Add(texture, handle);
+            return handle;
+        }
+
+        private static BufferHandle GetOrCreateBufferHandle(
+            RenderGraph renderGraph,
+            RenderGraphBuffer buffer,
+            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache)
+        {
+            if (bufferCache.TryGetValue(buffer, out var handle))
+                return handle;
+
+            handle = renderGraph.CreateBuffer(buffer.desc);
+            bufferCache.Add(buffer, handle);
+            return handle;
+        }
 
         /// <summary>
         /// Sets up resources for compute and unsafe passes using IBaseRenderGraphBuilder.
@@ -96,7 +127,9 @@ namespace VividRP.Runtime
         private static void SetupUnsafeResources(
             RenderGraph renderGraph,
             IUnsafeRenderGraphBuilder builder,
-            PassResource resource)
+            PassResource resource,
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache,
+            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache)
         {
             foreach (var entry in resource.Textures)
             {
@@ -105,22 +138,23 @@ namespace VividRP.Runtime
 
                 // Read-only textures are expected to be imported or created externally.
                 // Create a placeholder — the pipeline will replace this with the actual handle.
-                var actualDesc = texture.desc;
-                texture.innerHandle = renderGraph.CreateTexture(actualDesc);
-                builder.UseTexture(texture.innerHandle, entry.Access);
+                var handle = GetOrCreateTextureHandle(renderGraph, texture, textureCache);
+                texture.innerHandle = handle;
+                builder.UseTexture(handle, entry.Access);
             }
 
             foreach (var entry in resource.Buffers)
             {
                 var buffer = entry.Buffer;
                 if (buffer == null) continue;
-                buffer.innerHandle = renderGraph.CreateBuffer(buffer.desc);
-                builder.UseBuffer(buffer.innerHandle, entry.Access);
+
+                var handle = GetOrCreateBufferHandle(renderGraph, buffer, bufferCache);
+                buffer.innerHandle = handle;
+                builder.UseBuffer(handle, entry.Access);
             }
+
             builder.AllowPassCulling(false);
-
         }
-
 
         /// <summary>
         /// Sets up resources for compute and unsafe passes using IBaseRenderGraphBuilder.
@@ -128,7 +162,9 @@ namespace VividRP.Runtime
         private static void SetupComputeResources(
             RenderGraph renderGraph,
             IComputeRenderGraphBuilder builder,
-            PassResource resource)
+            PassResource resource,
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache,
+            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache)
         {
             foreach (var entry in resource.Textures)
             {
@@ -137,18 +173,21 @@ namespace VividRP.Runtime
 
                 // Read-only textures are expected to be imported or created externally.
                 // Create a placeholder — the pipeline will replace this with the actual handle.
-                var actualDesc = texture.desc;
-                texture.innerHandle = renderGraph.CreateTexture(actualDesc);
-                builder.UseTexture(texture.innerHandle, entry.Access);
+                var handle = GetOrCreateTextureHandle(renderGraph, texture, textureCache);
+                texture.innerHandle = handle;
+                builder.UseTexture(handle, entry.Access);
             }
 
             foreach (var entry in resource.Buffers)
             {
                 var buffer = entry.Buffer;
                 if (buffer == null) continue;
-                buffer.innerHandle = renderGraph.CreateBuffer(buffer.desc);
-                builder.UseBuffer(buffer.innerHandle, entry.Access);
+
+                var handle = GetOrCreateBufferHandle(renderGraph, buffer, bufferCache);
+                buffer.innerHandle = handle;
+                builder.UseBuffer(handle, entry.Access);
             }
+
             builder.AllowPassCulling(false);
         }
 
@@ -159,26 +198,29 @@ namespace VividRP.Runtime
         private static void SetupRasterResources(
             RenderGraph renderGraph,
             IRasterRenderGraphBuilder builder,
-            PassResource resource)
+            PassResource resource,
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache,
+            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache)
         {
             foreach (var entry in resource.Textures)
             {
                 var texture = entry.Texture;
                 if (texture == null) continue;
 
-                texture.innerHandle = renderGraph.CreateTexture(texture.desc);
+                var handle = GetOrCreateTextureHandle(renderGraph, texture, textureCache);
+                texture.innerHandle = handle;
 
                 if (entry.IsDepthAttachment)
                 {
-                    builder.SetRenderAttachmentDepth(texture.innerHandle, entry.Access);
+                    builder.SetRenderAttachmentDepth(handle, entry.Access);
                 }
                 else if (entry.AttachmentIndex >= 0)
                 {
-                    builder.SetRenderAttachment(texture.innerHandle, entry.AttachmentIndex, entry.Access);
+                    builder.SetRenderAttachment(handle, entry.AttachmentIndex, entry.Access);
                 }
                 else
                 {
-                    builder.UseTexture(texture.innerHandle, entry.Access);
+                    builder.UseTexture(handle, entry.Access);
                 }
             }
 
@@ -187,11 +229,12 @@ namespace VividRP.Runtime
                 var buffer = entry.Buffer;
                 if (buffer == null) continue;
 
-                buffer.innerHandle = renderGraph.CreateBuffer(buffer.desc);
-                builder.UseBuffer(buffer.innerHandle, entry.Access);
+                var handle = GetOrCreateBufferHandle(renderGraph, buffer, bufferCache);
+                buffer.innerHandle = handle;
+                builder.UseBuffer(handle, entry.Access);
             }
-            builder.AllowPassCulling(false);
 
+            builder.AllowPassCulling(false);
         }
     }
 }

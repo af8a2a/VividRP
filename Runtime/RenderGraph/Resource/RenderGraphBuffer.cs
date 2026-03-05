@@ -19,13 +19,18 @@ namespace VividRP.Runtime
         /// <summary>
         /// Converts this serializable descriptor to Unity's BufferDesc.
         /// </summary>
-        public BufferDesc ToBufferDesc()
+        private BufferDesc ToBufferDesc()
         {
             return new BufferDesc(Count, Stride)
             {
                 target = Target,
                 name = Name
             };
+        }
+
+        public static implicit operator BufferDesc(RenderGraphBufferDesc buffer)
+        {
+            return buffer.ToBufferDesc();
         }
 
         /// <summary>
@@ -82,6 +87,18 @@ namespace VividRP.Runtime
                 Target = GraphicsBuffer.Target.IndirectArguments,
                 Name = "IndirectArgsBuffer"
             };
+        }
+    }
+
+    [Serializable]
+    public class RenderGraphBuffer
+    {
+        public RenderGraphBufferDesc desc;
+        internal BufferHandle innerHandle;
+
+        public static implicit operator BufferHandle(RenderGraphBuffer buffer)
+        {
+            return buffer.innerHandle;
         }
     }
 }

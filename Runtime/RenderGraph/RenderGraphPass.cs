@@ -31,8 +31,6 @@ namespace VividRP.Runtime
 
     public interface IRenderPass
     {
-        
-        
         /// <summary>
         /// Collects all [RenderGraphResource]-annotated fields via reflection
         /// and returns a PassResource describing the pass's resource requirements.
@@ -46,7 +44,7 @@ namespace VividRP.Runtime
             var textures = new List<PassResourceEntry>();
             var buffers = new List<PassResourceEntry>();
             var accelStructs = new List<PassResourceEntry>();
-
+            
             foreach (var field in fields)
             {
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
@@ -69,18 +67,18 @@ namespace VividRP.Runtime
 
                 switch (value)
                 {
-                    case RenderGraphTextureDesc:
+                    case RenderGraphTexture:
                         entry.ResourceType = PassResourceType.Texture;
                         textures.Add(entry);
                         break;
-                    case RenderGraphBufferDesc:
+                    case RenderGraphBuffer:
                         entry.ResourceType = PassResourceType.Buffer;
                         buffers.Add(entry);
                         break;
-                    case RenderGraphAccelerationStructureDesc:
-                        entry.ResourceType = PassResourceType.AccelerationStructure;
-                        accelStructs.Add(entry);
-                        break;
+                    // case RenderGraphAccelerationStructureDesc:
+                    //     entry.ResourceType = PassResourceType.AccelerationStructure;
+                    //     accelStructs.Add(entry);
+                    //     break;
                 }
             }
 
@@ -90,8 +88,8 @@ namespace VividRP.Runtime
                 Buffers = buffers.ToArray(),
             };
         }
-        
-        
+
+
         /// <summary>
         /// Prepare runtime resources (e.g. dynamic count buffer).
         /// Called each frame before the RenderGraph pass is recorded.
@@ -99,46 +97,46 @@ namespace VividRP.Runtime
         /// collected by Initialize() to set up builder calls.
         /// </summary>
         public void Prepare(ContextContainer frameData);
-        
-        
+
+
         /// <summary>
         /// Only once prepare resource  (e.g. shader).
         /// </summary>
         public void Create();
-
     }
 
 
     public abstract class ComputePass : IRenderPass
     {
+        public abstract void Create();
+        public abstract void Prepare(ContextContainer frameData);
 
         /// <summary>
         /// Record rendering commands. Called from within the RenderGraph render func.
         /// Use the context to access resolved handles by field name.
         /// </summary>
-        public abstract void Record(ComputeGraphContext context) ;
-
-        public abstract void Prepare(ContextContainer frameData);
-        public abstract void Create();
+        public abstract void Record(ComputeGraphContext context);
     }
 
 
     public abstract class RasterPass : IRenderPass
     {
+        public abstract void Create();
+
+        public abstract void Prepare(ContextContainer frameData);
 
         /// <summary>
         /// Record rendering commands. Called from within the RenderGraph render func.
         /// Use the context to access resolved handles by field name.
         /// </summary>
-        public abstract void Record(RasterGraphContext context) ;
-
-        public abstract void Prepare(ContextContainer frameData);
-        public abstract void Create();
+        public abstract void Record(RasterGraphContext context);
     }
 
 
     public abstract class UnsafePass : IRenderPass
     {
+        public abstract void Create();
+
         /// <summary>
         /// Prepare runtime resources (e.g. dynamic count buffer).
         /// Called each frame before the RenderGraph pass is recorded.
@@ -147,13 +145,11 @@ namespace VividRP.Runtime
         /// </summary>
         public abstract void Prepare(ContextContainer frameData);
 
-        public abstract void Create();
 
         /// <summary>
         /// Record rendering commands. Called from within the RenderGraph render func.
         /// Use the context to access resolved handles by field name.
         /// </summary>
-        public abstract void Record(UnsafeGraphContext context) ;
-
+        public abstract void Record(UnsafeGraphContext context);
     }
 }

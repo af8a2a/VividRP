@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -13,46 +13,40 @@ namespace VividRP.Runtime
     [Serializable]
     public class RenderGraphTextureDesc
     {
-        [Header("Dimensions")]
-        public int Width = 1920;
+        [Header("Dimensions")] public int Width = 1920;
         public int Height = 1080;
         public int Slices = 1;
         public TextureDimension Dimension = TextureDimension.Tex2D;
 
-        [Header("Format")]
-        public GraphicsFormat ColorFormat = GraphicsFormat.R8G8B8A8_SRGB;
+        [Header("Format")] public GraphicsFormat ColorFormat = GraphicsFormat.R8G8B8A8_SRGB;
         public DepthBits DepthBufferBits = DepthBits.None;
 
-        [Header("Sampling")]
-        public MSAASamples MsaaSamples = MSAASamples.None;
+        [Header("Sampling")] public MSAASamples MsaaSamples = MSAASamples.None;
         public FilterMode FilterMode = FilterMode.Bilinear;
         public TextureWrapMode WrapMode = TextureWrapMode.Clamp;
         public int AnisoLevel = 1;
         public float MipMapBias = 0f;
 
-        [Header("Mip Maps")]
-        public bool UseMipMap = false;
+        [Header("Mip Maps")] public bool UseMipMap = false;
         public bool AutoGenerateMips = false;
         public int MipCount = 1;
 
-        [Header("Clear")]
-        public bool ClearBuffer = true;
+        [Header("Clear")] public bool ClearBuffer = true;
         public Color ClearColor = Color.clear;
 
-        [Header("Flags")]
-        public bool EnableRandomWrite = false;
+        [Header("Flags")] public bool EnableRandomWrite = false;
         public bool BindTextureMS = false;
         public bool UseDynamicScale = false;
         public bool UseDynamicScaleExplicit = false;
         public Vector2 ScaleFactor = Vector2.one;
 
-        [Header("Metadata")]
-        public string Name = "Texture";
+        [Header("Metadata")] public string Name = "Texture";
+
 
         /// <summary>
         /// Converts this serializable descriptor to Unity's TextureDesc.
         /// </summary>
-        public TextureDesc ToTextureDesc()
+        private TextureDesc ToTextureDesc()
         {
             var desc = new TextureDesc(Width, Height, Slices > 1)
             {
@@ -84,6 +78,11 @@ namespace VividRP.Runtime
             }
 
             return desc;
+        }
+
+        public static implicit operator TextureDesc(RenderGraphTextureDesc rt)
+        {
+            return rt.ToTextureDesc();
         }
 
         /// <summary>
@@ -119,7 +118,8 @@ namespace VividRP.Runtime
         /// <summary>
         /// Creates a default descriptor for a standard color target.
         /// </summary>
-        public static RenderGraphTextureDesc CreateColorTarget(int width, int height, GraphicsFormat format = GraphicsFormat.R8G8B8A8_SRGB)
+        public static RenderGraphTextureDesc CreateColorTarget(int width, int height,
+            GraphicsFormat format = GraphicsFormat.R8G8B8A8_SRGB)
         {
             return new RenderGraphTextureDesc
             {
@@ -135,7 +135,8 @@ namespace VividRP.Runtime
         /// <summary>
         /// Creates a default descriptor for a depth target.
         /// </summary>
-        public static RenderGraphTextureDesc CreateDepthTarget(int width, int height, DepthBits depthBits = DepthBits.Depth32)
+        public static RenderGraphTextureDesc CreateDepthTarget(int width, int height,
+            DepthBits depthBits = DepthBits.Depth32)
         {
             return new RenderGraphTextureDesc
             {
@@ -146,6 +147,25 @@ namespace VividRP.Runtime
                 ClearBuffer = true,
                 Name = "DepthTarget"
             };
+        }
+    }
+
+    [Serializable]
+    public class RenderGraphTexture
+    {
+        public RenderGraphTextureDesc desc;
+
+
+        public RenderGraphTexture()
+        {
+            desc = new RenderGraphTextureDesc();
+        }
+
+        internal TextureHandle innerHandle;
+
+        public static implicit operator TextureHandle(RenderGraphTexture rt)
+        {
+            return rt.innerHandle;
         }
     }
 }

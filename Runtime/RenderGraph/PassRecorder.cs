@@ -1,4 +1,5 @@
 using System;
+using UnityEngine;
 using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
@@ -39,7 +40,7 @@ namespace VividRP.Runtime
 
             passData.Pass = pass;
 
-            SetupResources(renderGraph, builder, resource);
+            SetupComputeResources(renderGraph, builder, resource);
 
             builder.SetRenderFunc<ComputePassData>(static (data, ctx) => { data.Pass.Record(ctx); });
         }
@@ -61,8 +62,12 @@ namespace VividRP.Runtime
 
             SetupRasterResources(renderGraph, builder, resource);
 
-            builder.SetRenderFunc<RasterPassData>(static (data, ctx) => { data.Pass.Record(ctx); });
+            builder.SetRenderFunc<RasterPassData>(static (data, ctx) =>
+            {
+                data.Pass.Record(ctx);
+            });
         }
+
 
         /// <summary>
         /// Records an unsafe pass. Creates resources from PassResource, sets up builder calls,
@@ -79,46 +84,72 @@ namespace VividRP.Runtime
 
             passData.Pass = pass;
 
-            SetupResources(renderGraph, builder, resource);
+            SetupUnsafeResources(renderGraph, builder, resource);
 
             builder.SetRenderFunc<UnsafePassData>(static (data, ctx) => { data.Pass.Record(ctx); });
         }
 
+
         /// <summary>
         /// Sets up resources for compute and unsafe passes using IBaseRenderGraphBuilder.
         /// </summary>
-        private static void SetupResources(
+        private static void SetupUnsafeResources(
             RenderGraph renderGraph,
-            IBaseRenderGraphBuilder builder,
+            IUnsafeRenderGraphBuilder builder,
             PassResource resource)
         {
             foreach (var entry in resource.Textures)
             {
-                var desc = entry.TextureDesc;
-                if (desc == null) continue;
+                var texture = entry.Texture;
+                if (texture == null) continue;
 
-                if (entry.Access == AccessFlags.Read)
-                {
-                    // Read-only textures are expected to be imported or created externally.
-                    // Create a placeholder — the pipeline will replace this with the actual handle.
-                    var handle = renderGraph.CreateTexture(desc.ToTextureDesc());
-                    builder.UseTexture(handle, AccessFlags.Read);
-                }
-                else
-                {
-                    var handle = renderGraph.CreateTexture(desc.ToTextureDesc());
-                    builder.UseTexture(handle, entry.Access);
-                }
+                // Read-only textures are expected to be imported or created externally.
+                // Create a placeholder — the pipeline will replace this with the actual handle.
+                var actualDesc = texture.desc;
+                texture.innerHandle = renderGraph.CreateTexture(actualDesc);
+                builder.UseTexture(texture.innerHandle, entry.Access);
             }
 
             foreach (var entry in resource.Buffers)
             {
-                var desc = entry.BufferDesc;
-                if (desc == null) continue;
-
-                var handle = renderGraph.CreateBuffer(desc.ToBufferDesc());
-                builder.UseBuffer(handle, entry.Access);
+                var buffer = entry.Buffer;
+                if (buffer == null) continue;
+                buffer.innerHandle = renderGraph.CreateBuffer(buffer.desc);
+                builder.UseBuffer(buffer.innerHandle, entry.Access);
             }
+            builder.AllowPassCulling(false);
+
+        }
+
+
+        /// <summary>
+        /// Sets up resources for compute and unsafe passes using IBaseRenderGraphBuilder.
+        /// </summary>
+        private static void SetupComputeResources(
+            RenderGraph renderGraph,
+            IComputeRenderGraphBuilder builder,
+            PassResource resource)
+        {
+            foreach (var entry in resource.Textures)
+            {
+                var texture = entry.Texture;
+                if (texture == null) continue;
+
+                // Read-only textures are expected to be imported or created externally.
+                // Create a placeholder — the pipeline will replace this with the actual handle.
+                var actualDesc = texture.desc;
+                texture.innerHandle = renderGraph.CreateTexture(actualDesc);
+                builder.UseTexture(texture.innerHandle, entry.Access);
+            }
+
+            foreach (var entry in resource.Buffers)
+            {
+                var buffer = entry.Buffer;
+                if (buffer == null) continue;
+                buffer.innerHandle = renderGraph.CreateBuffer(buffer.desc);
+                builder.UseBuffer(buffer.innerHandle, entry.Access);
+            }
+            builder.AllowPassCulling(false);
         }
 
         /// <summary>
@@ -132,33 +163,35 @@ namespace VividRP.Runtime
         {
             foreach (var entry in resource.Textures)
             {
-                var desc = entry.TextureDesc;
-                if (desc == null) continue;
+                var texture = entry.Texture;
+                if (texture == null) continue;
 
-                var handle = renderGraph.CreateTexture(desc.ToTextureDesc());
+                texture.innerHandle = renderGraph.CreateTexture(texture.desc);
 
                 if (entry.IsDepthAttachment)
                 {
-                    builder.SetRenderAttachmentDepth(handle, entry.Access);
+                    builder.SetRenderAttachmentDepth(texture.innerHandle, entry.Access);
                 }
                 else if (entry.AttachmentIndex >= 0)
                 {
-                    builder.SetRenderAttachment(handle, entry.AttachmentIndex, entry.Access);
+                    builder.SetRenderAttachment(texture.innerHandle, entry.AttachmentIndex, entry.Access);
                 }
                 else
                 {
-                    builder.UseTexture(handle, entry.Access);
+                    builder.UseTexture(texture.innerHandle, entry.Access);
                 }
             }
 
             foreach (var entry in resource.Buffers)
             {
-                var desc = entry.BufferDesc;
-                if (desc == null) continue;
+                var buffer = entry.Buffer;
+                if (buffer == null) continue;
 
-                var handle = renderGraph.CreateBuffer(desc.ToBufferDesc());
-                builder.UseBuffer(handle, entry.Access);
+                buffer.innerHandle = renderGraph.CreateBuffer(buffer);
+                builder.UseBuffer(buffer.innerHandle, entry.Access);
             }
+            builder.AllowPassCulling(false);
+
         }
     }
 }

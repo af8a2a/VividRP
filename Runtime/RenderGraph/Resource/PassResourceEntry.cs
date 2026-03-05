@@ -53,8 +53,7 @@ namespace VividRP.Runtime
         /// </summary>
         public bool IsDepthAttachment;
 
-        public RenderGraphTextureDesc TextureDesc => Descriptor as RenderGraphTextureDesc;
-        public RenderGraphBufferDesc BufferDesc => Descriptor as RenderGraphBufferDesc;
-        public RenderGraphAccelerationStructureDesc AccelerationStructureDesc => Descriptor as RenderGraphAccelerationStructureDesc;
+        public RenderGraphTexture Texture => Descriptor as RenderGraphTexture;
+        public RenderGraphBuffer Buffer => Descriptor as RenderGraphBuffer;
     }
 }

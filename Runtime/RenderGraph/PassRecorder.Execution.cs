@@ -20,13 +20,19 @@ namespace VividRP.Runtime
             cameraData.camera = camera;
             cameraData.pixelWidth = camera.pixelWidth;
             cameraData.pixelHeight = camera.pixelHeight;
+            cameraData.actualWidth = camera.scaledPixelWidth;
+            cameraData.actualHeight = camera.scaledPixelHeight;
             renderingData.context = context;
         }
 
         static void Compile()
         {
+            
+            _renderPasses.Add(new FullScreenPass());
+            
             foreach (var pass in _renderPasses)
             {
+                pass.Create();
                 m_passResources[pass] = pass.Initialize();
             }
 
@@ -46,6 +52,7 @@ namespace VividRP.Runtime
             {
                 pass.Prepare(m_frameData);
             }
+            
 
             foreach (var pass in _renderPasses)
             {

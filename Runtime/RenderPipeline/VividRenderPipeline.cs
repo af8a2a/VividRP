@@ -14,9 +14,9 @@ namespace VividRP.Runtime
         {
             m_Asset = asset;
 
-            // PipelineResourceManager.Initialize();
-            // var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            // Blitter.Initialize(resources.CoreBlitShader, resources.CoreBlitColorAndDepthShader);
+            PipelineResourceManager.Initialize();
+            var resources = PipelineResourceManager.Get<VividRPCoreResources>();
+            Blitter.Initialize(resources.CoreBlitShader, resources.CoreBlitColorAndDepthShader);
 
             m_RenderGraph = new RenderGraph("VividRP RenderGraph");
         }
@@ -30,22 +30,14 @@ namespace VividRP.Runtime
             m_RenderGraph.EndFrame();
         }
 
+
         private void RenderCamera(ScriptableRenderContext context, Camera camera)
         {
             BeginCameraRendering(context, camera);
-
-            // if (!camera.TryGetCullingParameters(out var cullingParams))
-            // {
-            //     EndCameraRendering(context, camera);
-            //     return;
-            // }
-
-            // var cullingResults = context.Cull(ref cullingParams);
-
-            context.SetupCameraProperties(camera);
-
             var cmdBuffer = CommandBufferPool.Get("VividRP");
 
+
+            PassRecorder.InitializeContext(context, camera);
             // var graphAsset = m_Asset.RenderGraphAsset;
             // if (graphAsset != null)
             {
@@ -75,7 +67,7 @@ namespace VividRP.Runtime
         {
             m_RenderGraph?.Cleanup();
             m_RenderGraph = null;
-            // Blitter.Cleanup();
+            Blitter.Cleanup();
             PipelineResourceManager.Cleanup();
             base.Dispose(disposing);
         }

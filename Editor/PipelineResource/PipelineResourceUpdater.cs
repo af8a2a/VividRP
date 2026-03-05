@@ -19,6 +19,7 @@ namespace VividRP.Editor
             // Delay to avoid asset database issues during domain reload
             EditorApplication.delayCall += UpdateAllResources;
         }
+        
 
         private static void OnPostprocessAllAssets(
             string[] importedAssets, string[] deletedAssets,

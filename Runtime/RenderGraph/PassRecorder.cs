@@ -187,7 +187,7 @@ namespace VividRP.Runtime
                 var buffer = entry.Buffer;
                 if (buffer == null) continue;
 
-                buffer.innerHandle = renderGraph.CreateBuffer(buffer);
+                buffer.innerHandle = renderGraph.CreateBuffer(buffer.desc);
                 builder.UseBuffer(buffer.innerHandle, entry.Access);
             }
             builder.AllowPassCulling(false);

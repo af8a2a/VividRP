@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-VividRP is a Unity custom Scriptable Render Pipeline (SRP) package with a data-driven, node-based RenderGraph editor. It targets Unity 6000.5+ and depends on `com.unity.render-pipelines.core` 17.5.0.
+VividRP is a Unity custom Scriptable Render Pipeline (SRP) package with a reflection-based, attribute-driven RenderGraph pass system. It targets Unity 6000.5+ and depends on `com.unity.render-pipelines.core` 17.5.0.
 
 Package ID: `com.af8a2a.vividrp`
 
@@ -18,6 +18,7 @@ No tests exist yet (test framework dependency is declared but unused).
 
 - `VividRP.Runtime` — Runtime code. References `com.unity.render-pipelines.core`. Root namespace: `VividRP.Runtime`. Platforms: all.
 - `VividRP.Editor` — Editor-only code. References both Runtime and Core RP. Root namespace: `VividRP.Editor`. Platform: Editor only.
+- `VividRP.Shaders` — Shader assembly (Dummy.cs + shader files).
 
 ## Directory Layout
 
@@ -25,132 +26,134 @@ No tests exist yet (test framework dependency is declared but unused).
 Runtime/
   RenderPipeline/          — SRP entry points (asset, pipeline, global settings)
   RenderGraph/
-    Data/                  — Serializable graph model
-      Nodes/               — Node data classes (10 types)
-      Enums/               — PassType, PortType, ResourceType, TextureSizeMode
-    Passes/                — Pass execution infrastructure
-    Resource/              — Resource creation & history management
+    Data/                  — RenderGraphData.cs (empty ScriptableObject stub)
+    FrameContext/          — VividCameraData, VividRenderingData (ContextItem subclasses)
+    Resource/              — Resource descriptor wrappers and attributes
+    PassRecorder.cs        — Reflection-based pass recording (partial class)
+    PassRecorder.Execution.cs — Execution logic for PassRecorder
+    RenderGraphPass.cs     — Pass base classes (IRenderPass, ComputePass, RasterPass, UnsafePass)
+  RenderPass/
+    Core/                  — SetupPass.cs (stub)
+    Example/               — FullScreenPass.cs (example raster pass)
   Utility/
     PipelineResource/      — Reflection-based resource loading
-  Resources/               — Shader assets (loaded via PipelineResourceManager)
-  Shaders/                 — Shader source files
+  Resources/               — PipelineResources.asset (loaded via PipelineResourceManager)
+  Shaders/                 — Shader source files (Core/, FullScreenUV.shader)
 Editor/
-  RenderGraph/
-    Nodes/                 — Node view classes (10 types, one per node)
-    Styles/                — USS stylesheets
+  PipelineResource/        — PipelineResourceUpdater.cs
+  RenderGraph/             — RenderGraphEditor.cs (minimal GraphToolkit stub)
+  RenderPipeline/          — VividGlobalSettingsPostprocessor.cs
 ```
 
 ## Architecture
 
 ### SRP Entry Point
 
-- `VividRenderPipelineAsset` (ScriptableObject, `CreateAssetMenu`) — creates `VividRenderPipeline`, holds a reference to a `RenderGraphAsset`
-- `VividRenderPipeline` — implements `IRenderGraphEnabledRenderPipeline`, initializes Blitter and PipelineResourceManager in constructor, calls `BeginRecording` → `RenderGraphExecutor` → `EndRecordingAndExecute`, disposes resources on cleanup
-- `VividRenderPipelineGlobalSettings` — extends `RenderPipelineGlobalSettings<VividRenderPipelineGlobalSettings, VividRenderPipeline>` for Unity's global settings integration
+- `VividRenderPipelineAsset` (ScriptableObject, `CreateAssetMenu`) — creates `VividRenderPipeline`
+- `VividRenderPipeline` — implements `IRenderGraphEnabledRenderPipeline`. Constructor initializes `PipelineResourceManager` and `Blitter` (from Core RP). `Render()` calls `RenderCamera()` per camera then `m_RenderGraph.EndFrame()`. `RenderCamera()` initializes frame context and calls `PassRecorder.RecordRenderGraph()`.
+- `VividRenderPipelineGlobalSettings` — extends `RenderPipelineGlobalSettings<VividRenderPipelineGlobalSettings, VividRenderPipeline>`
 
-### Data Model (Runtime/RenderGraph/Data/)
+### Pass System (Runtime/RenderGraph/)
 
-The graph is serialized as a `RenderGraphAsset` (ScriptableObject) containing:
-- `List<RenderGraphNodeData>` (uses `[SerializeReference]` for polymorphism)
-- `List<RenderGraphEdgeData>` (output port → input port connections)
+Passes are C# classes that declare their resources via `[RenderGraphResource]` attributes. `PassRecorder` discovers and records them automatically.
 
-Base classes:
-- `RenderGraphNodeData` — GUID, position, name, list of `RenderGraphPortData`
-- `ResourceNodeData` (abstract) — base for resource-producing nodes
-- `RenderPassNodeData` (abstract) — base for pass nodes
+**`IRenderPass` (interface)** — implemented by all pass classes:
+- `PassResource Initialize()` — reflects on `[RenderGraphResource]` fields to collect resource requirements
+- `void Prepare(ContextContainer frameData)` — called each frame to update dynamic resource descriptors
+- `void Create()` — one-time init (load shaders, create materials)
 
-Node types (10 total):
+**Pass base classes** (in `RenderGraphPass.cs`):
+- `ComputePass` — `abstract void Record(ComputeGraphContext context)`
+- `RasterPass` — `abstract void Record(RasterGraphContext context)`
+- `UnsafePass` — `abstract void Record(UnsafeGraphContext context)`
 
-**Resource nodes** (output ports only):
-- `TextureNodeData` — explicit-dimension textures
-- `BufferNodeData` — graphics buffers
-- `HistoryTextureNodeData` — double-buffered texture with Current/History ports, supports `TextureSizeMode` (Explicit/CameraRelative) and scaling; implements `IHistoryResourceNode`
-- `HistoryBufferNodeData` — double-buffered buffer with Current/History ports; implements `IHistoryResourceNode`
+**`PassRecorder` (static partial class)**:
+- `Compile()` — one-time: instantiates all pass types, calls `Create()` and `Initialize()`
+- `RecordRenderGraph(RenderGraph, ScriptableRenderContext)` — main entry point each frame
+- `InitializeContext()` — populates `ContextContainer` with `VividCameraData` and `VividRenderingData`
+- Type-specific methods: `RecordComputePass()`, `RecordRasterPass()`, `RecordUnsafePass()`
+- Resource setup: `SetupComputeResources()`, `SetupRasterResources()`, `SetupUnsafeResources()`
+- Static state: `_renderPasses`, `m_passResources`, `m_frameData`
 
-**Pass nodes** (consume and produce resources):
-- `RasterPassNodeData` — standard raster rendering
-- `ComputePassNodeData` — compute shader dispatch
-- `UnsafePassNodeData` — low-level pass with direct command buffer access
-- `FullScreenPassNodeData` — full-screen quad rendering (creates its own output texture)
-- `FinalBlitPassNodeData` — blits to backbuffer, handles scene view vs game view
-- `PreviewPassNodeData` — generates preview textures for editor visualization
+### Resource Descriptors (Runtime/RenderGraph/Resource/)
 
-Ports have an ID, display name, `PortType` (Texture/Buffer/RendererList), direction (input/output), and `AccessFlags`.
+**`[RenderGraphResource]` attribute** — marks fields on pass classes:
+- `string Name` — optional display name
+- `AccessFlags Access` — read/write flags
+- `int AttachmentIndex` — color attachment slot for raster passes (0–7; -1 = not an attachment)
+- `bool IsDepthAttachment` — marks as depth attachment
 
-Edges connect `OutputNodeGuid:OutputPortId` → `InputNodeGuid:InputPortId`.
+**`RenderGraphTexture`** — serializable texture descriptor wrapper:
+- `RenderGraphTextureDesc desc` — serializable descriptor (Width, Height, ColorFormat, DepthBufferBits, MSAASamples, etc.)
+- `internal TextureHandle innerHandle` — set by PassRecorder
+- Implicit conversion to `TextureHandle`
+- Static factories: `CreateColorTarget()`, `CreateDepthTarget()`
 
-Enums: `PassType` (Raster/Compute/Unsafe), `PortType` (Texture/Buffer/RendererList), `ResourceType` (Texture/Buffer), `TextureSizeMode` (Explicit/CameraRelative).
+**`RenderGraphBuffer`** — serializable buffer descriptor wrapper:
+- `RenderGraphBufferDesc desc` — serializable descriptor (Count, Stride, Target, Name)
+- `internal BufferHandle innerHandle` — set by PassRecorder
+- Implicit conversion to `BufferHandle`
+- Static factories: `CreateStructured()`, `CreateAppend()`, `CreateIndirectArguments()`
 
-### Graph Validation
+**`RenderGraphAccelerationStructureDesc`** — ray tracing acceleration structure descriptor:
+- `ToAccelerationStructureDesc()` — converts to Unity's type
+- Static factory: `Create()`
 
-`RenderGraphAsset.Validate()` enforces DAG constraints using Kahn's algorithm, returning topological order or cycle errors. `WouldCreateCycle()` does a DFS check before edge creation.
+**`PassResource`** — container for all resources collected from a pass:
+- `PassResourceEntry[] Textures`, `PassResourceEntry[] Buffers`
+- `IEnumerable<PassResourceEntry> AllEntries`
 
-### Execution (Runtime/RenderGraph/RenderGraphExecutor.cs)
+**`PassResourceEntry`** — metadata for a single resource field:
+- `FieldInfo Field`, `string Name`, `AccessFlags Access`, `PassResourceType ResourceType`
+- `object Descriptor`, `int AttachmentIndex`, `bool IsDepthAttachment`
+- Typed accessors: `RenderGraphTexture Texture`, `RenderGraphBuffer Buffer`
 
-`RenderGraphExecutor.Execute()` walks the validated topological order and:
-1. Creates resources via `ResourceNodeData.CreateResource()` (passing `ResourceCreationContext` with RenderGraph, Camera, HistoryManager)
-2. Records passes via `RenderPassNodeData.Record()` (passing `PassExecutionContext` with Camera, CullingResults, resolved input slots, output storage)
-3. Resolves input ports to `ResourceSlot` (wraps `TextureHandle`/`BufferHandle`) via the edge map
-4. Pass-through propagation: output ports inherit handles from matching input ports (naming convention: "Output X" ↔ "Input X")
+### Frame Context (Runtime/RenderGraph/FrameContext/)
 
-Key context types:
-- `PassExecutionContext` — Camera, CullingResults, resolved input ResourceSlots, output storage
-- `ResourceCreationContext` — RenderGraph, Camera, HistoryResourceManager
-- `ResourceSlot` — wraps TextureHandle or BufferHandle with validity check
+Both extend Unity's `ContextItem` and are stored in `ContextContainer`:
 
-### History Resource System (Runtime/RenderGraph/Resource/)
-
-`HistoryResourceManager` manages double-buffered textures and buffers for temporal effects:
-- `GetOrAllocate()` — allocates or reuses RTHandles with Current/History pair
-- `GetCurrentHandle()` / `GetHistoryHandle()` — retrieves current or previous frame's resource
-- `SwapBuffers()` — called each frame to rotate buffers
-- `ReleaseAll()` — cleanup on pipeline disposal
-
-`IHistoryResourceNode` interface (implemented by `HistoryTextureNodeData`, `HistoryBufferNodeData`):
-- `CreateHistorySlot()` — creates ResourceSlot for the history output port
-- `HistoryPortId` — identifies the history output port
+- `VividCameraData` — `Camera camera`, `actualWidth`, `actualHeight`, `pixelWidth`, `pixelHeight`
+- `VividRenderingData` — `CullingResults cullingResults`, `ScriptableRenderContext context`
 
 ### Pipeline Resource System (Runtime/Utility/PipelineResource/)
 
 `PipelineResourceManager` (static utility) loads shader/asset references via reflection:
 - `Initialize()` — loads `PipelineResourcesContainer` from `Resources/PipelineResources`
 - `Get<T>()` — returns cached instance of resource class T
-- `BuildInstance<T>()` — reflects on fields with `[ResourcePath]` attribute, populates from container
+- `BuildInstance<T>()` — reflects on `[ResourcePath]` fields, populates from container
 - `Cleanup()` — clears cache on pipeline disposal
 
 `PipelineResourcesContainer` (ScriptableObject) holds `List<ResourceEntry>` mapping TypeName + FieldName → Asset.
 
-Resource classes are marked with `[PipelineResource]`; fields use `[ResourcePath("path")]` (e.g., `VividRPCoreResources` with BlitShader, CoreBlitShader, FullScreenUVShader, etc.).
+Resource classes use `[PipelineResource]` on the class and `[ResourcePath("path")]` on fields. Example: `VividRPCoreResources` with `BlitShader`, `CoreBlitShader`, `CoreBlitColorAndDepthShader`, `FullScreenUVShader`.
 
-### Blitter (Runtime utility)
+### Blitter
 
-`Blitter` is a static utility for texture blitting operations:
+`Blitter` is from `com.unity.render-pipelines.core` (not defined in this package):
 - `Initialize(coreBlitShader, coreBlitColorAndDepthShader)` — called in `VividRenderPipeline` constructor
-- `BlitTexture(cmd, source, scaleBias, material, pass)` — used by `FinalBlitPassNodeData` and `PreviewPassNodeData`
+- `BlitTexture(cmd, source, scaleBias, material, pass)` — used by pass implementations
 - `Cleanup()` — called on pipeline disposal
 
-### Editor (Editor/RenderGraph/)
+### Editor (Editor/)
 
-Built on `UnityEditor.Experimental.GraphView`:
-- `RenderGraphEditorWindow` — main window, opened via `VividRP/Render Graph Editor` menu or double-clicking a `RenderGraphAsset`
-- `RenderGraphView` — the GraphView subclass handling node/edge CRUD with Undo support and cycle prevention on edge creation
-- `RenderGraphSearchWindow` — right-click node creation menu (Pass group + Resource group)
-- `RenderNodeRegistry` — node type registry for the editor
-- `NodeViewFactory` — creates the appropriate NodeView for each node data type
-- `RenderGraphNodeView` — base node view; uses `[NodeEditor]` attribute for registration
-- Node views (one per node type): `TextureNodeView`, `BufferNodeView`, `HistoryTextureNodeView`, `HistoryBufferNodeView`, `RasterPassNodeView`, `ComputePassNodeView`, `UnsafePassNodeView`, `FullScreenPassNodeView`, `FinalBlitPassNodeView`, `PreviewPassNodeView`
-- `RenderGraphAssetEditor` — custom Inspector with "Open in Graph Editor" button
-- `PipelineResourceUpdater` — updates `PipelineResourcesContainer` asset
-- `VividGlobalSettingsPostprocessor` — handles global settings initialization
-- Styles in `Editor/RenderGraph/Styles/RenderGraphEditor.uss`, loaded via package path `Packages/com.af8a2a.vividrp/...`
+- `RenderGraphEditor` — minimal stub using `Unity.GraphToolkit`, `[Graph("RenderGraph")]` attribute, single `Graph m_Graph` field. Not yet functional.
+- `PipelineResourceUpdater` — `AssetPostprocessor` with `[InitializeOnLoadMethod]`; reflects on all `[PipelineResource]` classes, resolves assets, updates `PipelineResourcesContainer`
+- `VividGlobalSettingsPostprocessor` — ensures global settings on asset import
+
+### Example Pass (Runtime/RenderPass/Example/)
+
+`FullScreenPass` extends `RasterPass`:
+- `[RenderGraphResource(Access = AccessFlags.Write, AttachmentIndex = 0)] RenderGraphTexture texture` — output color attachment
+- `Create()` — loads `FullScreenUVShader`, creates material
+- `Prepare()` — updates texture dimensions from `VividCameraData`
+- `Record()` — calls `Blitter.BlitTexture()` for full-screen quad
 
 ## Conventions
 
-- Node data classes are `[Serializable]` and use `[SerializeReference]` on the asset's node list for polymorphic serialization
-- Resource nodes are marked with `[ResourceNode(displayName)]`; pass nodes with `[RenderPass(displayName, passType)]`
+- Pass classes extend `ComputePass`, `RasterPass`, or `UnsafePass` and implement `IRenderPass`
+- Resource fields on passes use `[RenderGraphResource]` attribute
 - Resource classes use `[PipelineResource]` on the class and `[ResourcePath(path)]` on fields
-- Node views use `[NodeEditor]` attribute for registration with `NodeViewFactory`
-- GUIDs are `System.Guid.NewGuid().ToString()` strings
-- Editor code uses Undo recording (`Undo.RecordObject`) before mutating the asset
 - Private fields use `m_` prefix (Unity convention)
-- USS stylesheets are referenced by package path, not asset path
+- `PassRecorder` is a `static partial class` split across two files
+- Frame data accessed via `ContextContainer.Get<VividCameraData>()` / `ContextContainer.Get<VividRenderingData>()`
+- `Blitter` is from Core RP, not this package

@@ -13,6 +13,7 @@ namespace VividRP.Editor.RenderGraph
     [CustomPropertyDrawer(typeof(TexturePreviewValue))]
     internal sealed class TexturePreviewValueDrawer : PropertyDrawer
     {
+        internal const float PreviewElementWidth = 240f;
         private const float PreviewHeight = 120f;
         private const float VerticalSpacing = 4f;
 
@@ -26,7 +27,7 @@ namespace VividRP.Editor.RenderGraph
             var state = BuildPreviewState(property);
             var height = EditorGUIUtility.singleLineHeight;
             height += VerticalSpacing;
-            height += GetHelpBoxHeight(state.Message);
+            height += GetHelpBoxHeight(state.Message, PreviewElementWidth);
 
             if (state.DisplayTexture != null)
             {
@@ -47,17 +48,20 @@ namespace VividRP.Editor.RenderGraph
                 return;
             }
 
-            var lineRect = new Rect(position.x, position.y, position.width, EditorGUIUtility.singleLineHeight);
+            var contentWidth = Mathf.Min(position.width, PreviewElementWidth);
+            var contentX = position.x + Mathf.Max(0f, (position.width - contentWidth) * 0.5f);
+            var contentRect = new Rect(contentX, position.y, contentWidth, position.height);
+            var lineRect = new Rect(contentRect.x, contentRect.y, contentRect.width, EditorGUIUtility.singleLineHeight);
             EditorGUI.BeginProperty(position, label, property);
             EditorGUI.PropertyField(lineRect, textureProperty, new GUIContent("Fallback"));
 
-            var helpHeight = GetHelpBoxHeight(state.Message);
-            var helpRect = new Rect(position.x, lineRect.yMax + VerticalSpacing, position.width, helpHeight);
+            var helpHeight = GetHelpBoxHeight(state.Message, contentRect.width);
+            var helpRect = new Rect(contentRect.x, lineRect.yMax + VerticalSpacing, contentRect.width, helpHeight);
             EditorGUI.HelpBox(helpRect, state.Message, MessageType.Info);
 
             if (state.DisplayTexture != null)
             {
-                var previewRect = new Rect(position.x, helpRect.yMax + VerticalSpacing, position.width, PreviewHeight);
+                var previewRect = new Rect(contentRect.x, helpRect.yMax + VerticalSpacing, contentRect.width, PreviewHeight);
                 DrawPreview(previewRect, state.DisplayTexture);
             }
 
@@ -66,37 +70,71 @@ namespace VividRP.Editor.RenderGraph
 
         public override VisualElement CreatePropertyGUI(SerializedProperty property)
         {
-            var root = new VisualElement();
+            var root = new VisualElement
+            {
+                name = "vivid-texture-preview-root",
+            };
+            ConfigureFixedWidthElement(root);
+            root.style.minWidth = PreviewElementWidth;
+            root.style.alignSelf = Align.FlexStart;
+            root.style.flexShrink = 0f;
+
             var textureProperty = property.FindPropertyRelative("m_Texture");
             if (textureProperty == null)
                 return root;
 
-            var liveInfo = new HelpBox(string.Empty, HelpBoxMessageType.Info);
+            var liveInfo = new HelpBox(string.Empty, HelpBoxMessageType.Info)
+            {
+                name = "vivid-texture-preview-info",
+            };
+            ConfigureFixedWidthElement(liveInfo);
             liveInfo.style.marginBottom = VerticalSpacing;
+            liveInfo.style.whiteSpace = WhiteSpace.Normal;
             root.Add(liveInfo);
 
             var textureField = new ObjectField("Fallback")
             {
+                name = "vivid-texture-preview-fallback",
                 objectType = typeof(Texture),
                 allowSceneObjects = false,
             };
+            ConfigureFixedWidthElement(textureField);
             textureField.BindProperty(textureProperty);
             root.Add(textureField);
 
+            var previewContainer = new VisualElement
+            {
+                name = "vivid-texture-preview-container",
+            };
+            ConfigureFixedWidthElement(previewContainer);
+            previewContainer.style.height = PreviewHeight;
+            previewContainer.style.minWidth = PreviewElementWidth;
+            previewContainer.style.marginTop = VerticalSpacing;
+            previewContainer.style.alignSelf = Align.Center;
+            previewContainer.style.justifyContent = Justify.Center;
+            previewContainer.style.backgroundColor = new Color(0.18f, 0.18f, 0.18f);
+            previewContainer.style.overflow = Overflow.Hidden;
+            root.Add(previewContainer);
+
             var previewImage = new Image
             {
+                name = "vivid-texture-preview-image",
                 scaleMode = ScaleMode.ScaleToFit,
             };
+            ConfigureFixedWidthElement(previewImage);
             previewImage.style.height = PreviewHeight;
-            previewImage.style.marginTop = VerticalSpacing;
-            root.Add(previewImage);
+            previewImage.style.minWidth = PreviewElementWidth;
+            previewImage.style.alignSelf = Align.Center;
+            previewContainer.Add(previewImage);
 
             void RefreshPreview()
             {
                 var state = BuildPreviewState(property);
                 liveInfo.text = state.Message;
                 previewImage.image = state.DisplayTexture;
-                previewImage.style.display = state.DisplayTexture != null ? DisplayStyle.Flex : DisplayStyle.None;
+                var hasPreview = state.DisplayTexture != null;
+                previewContainer.style.display = hasPreview ? DisplayStyle.Flex : DisplayStyle.None;
+                previewImage.style.display = hasPreview ? DisplayStyle.Flex : DisplayStyle.None;
             }
 
             RefreshPreview();
@@ -105,12 +143,22 @@ namespace VividRP.Editor.RenderGraph
             return root;
         }
 
-        private static float GetHelpBoxHeight(string message)
+        private static float GetHelpBoxHeight(string message, float width)
         {
             var content = EditorGUIUtility.TrTextContent(string.IsNullOrEmpty(message) ? " " : message);
             return Mathf.Max(
                 EditorGUIUtility.singleLineHeight * 2f,
-                EditorStyles.helpBox.CalcHeight(content, EditorGUIUtility.currentViewWidth));
+                EditorStyles.helpBox.CalcHeight(content, Mathf.Max(width, 1f)));
+        }
+
+        private static void ConfigureFixedWidthElement(VisualElement element)
+        {
+            element.style.width = PreviewElementWidth;
+            element.style.maxWidth = PreviewElementWidth;
+            element.style.minWidth = 0f;
+            element.style.flexGrow = 0f;
+            element.style.flexShrink = 1f;
+            element.style.alignSelf = Align.Stretch;
         }
 
         private static void DrawPreview(Rect rect, Texture texture)
@@ -424,5 +472,3 @@ namespace VividRP.Editor.RenderGraph
         }
     }
 }
-
-

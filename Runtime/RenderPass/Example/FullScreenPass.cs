@@ -32,6 +32,7 @@ namespace VividRP.Runtime
             var cameraData = frameData.Get<VividCameraData>();
             desc.Width = cameraData.actualWidth;
             desc.Height = cameraData.actualHeight;
+            
         }
 
         public override void Create()

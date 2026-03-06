@@ -121,6 +121,7 @@ namespace VividRP.Runtime
             s_IsCompiled = true;
         }
 
+        
         private static RenderGraphTexture[] CreateRuntimeTextures(RenderGraphData graphAsset)
         {
             if (graphAsset.TextureDescriptors == null || graphAsset.TextureDescriptors.Count == 0)

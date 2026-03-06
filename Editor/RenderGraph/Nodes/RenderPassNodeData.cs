@@ -8,12 +8,19 @@ using VividRP.Runtime;
 namespace VividRP.Editor.RenderGraph
 {
     [Serializable]
-    internal sealed class RenderPassNodeData : RenderGraphNodeData
+    internal class RenderPassNodeData : RenderGraphNodeData
     {
         private const string PassScriptOptionName = "PassScript";
 
+        protected virtual string RegisteredPassTypeName => null;
+
+        internal bool UsesPassScriptSelection => string.IsNullOrEmpty(RegisteredPassTypeName);
+
         protected override void OnDefineOptions(IOptionDefinitionContext context)
         {
+            if (!UsesPassScriptSelection)
+                return;
+
             context.AddOption<MonoScript>(PassScriptOptionName)
                 .WithDisplayName("Pass Script")
                 .Delayed();
@@ -73,15 +80,53 @@ namespace VividRP.Editor.RenderGraph
 
         internal Type GetPassType()
         {
+            if (!UsesPassScriptSelection)
+                return ResolveType(RegisteredPassTypeName);
+
             var option = GetNodeOptionByName(PassScriptOptionName);
             option.TryGetValue<MonoScript>(out var script);
             return script != null ? script.GetClass() : null;
         }
 
+        internal string GetRegisteredPassTypeName()
+        {
+            return RegisteredPassTypeName;
+        }
+
         internal bool TryGetPassScript(out MonoScript script)
         {
+            if (!UsesPassScriptSelection)
+            {
+                script = null;
+                return false;
+            }
+
             var option = GetNodeOptionByName(PassScriptOptionName);
             return option.TryGetValue(out script);
+        }
+
+        private static Type ResolveType(string assemblyQualifiedOrFullName)
+        {
+            if (string.IsNullOrEmpty(assemblyQualifiedOrFullName))
+                return null;
+
+            var type = Type.GetType(assemblyQualifiedOrFullName, throwOnError: false);
+            if (type != null)
+                return type;
+
+            var fullName = assemblyQualifiedOrFullName;
+            var separatorIndex = assemblyQualifiedOrFullName.IndexOf(',');
+            if (separatorIndex >= 0)
+                fullName = assemblyQualifiedOrFullName.Substring(0, separatorIndex);
+
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                type = assembly.GetType(fullName, throwOnError: false);
+                if (type != null)
+                    return type;
+            }
+
+            return null;
         }
     }
 }

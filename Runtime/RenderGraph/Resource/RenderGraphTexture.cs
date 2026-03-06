@@ -31,7 +31,7 @@ namespace VividRP.Runtime
         public bool AutoGenerateMips = false;
         public int MipCount = 1;
 
-        [Header("Clear")] public bool ClearBuffer = true;
+        [Header("Clear")] public bool ClearBuffer = false;
         public Color ClearColor = Color.clear;
 
         [Header("Flags")] public bool EnableRandomWrite = false;
@@ -172,5 +172,11 @@ namespace VividRP.Runtime
         {
             return rt.innerHandle;
         }
+        
+        public static implicit operator RenderTargetIdentifier(RenderGraphTexture rt)
+        {
+            return rt.innerHandle;
+        }
+
     }
 }

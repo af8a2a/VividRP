@@ -18,22 +18,40 @@ namespace VividRP.Editor.RenderGraph
 
             foreach (var passNode in passNodes)
             {
-                if (!passNode.TryGetPassScript(out var script) || script == null)
-                {
-                    infos.LogError("Select a pass script (a class implementing IRenderPass).", passNode);
-                    continue;
-                }
-
-                var passType = script.GetClass();
+                var passType = passNode.GetPassType();
                 if (passType == null)
                 {
-                    infos.LogError("Pass script does not reference a valid class.", passNode);
+                    if (passNode.UsesPassScriptSelection)
+                    {
+                        infos.LogError("Select a pass script (a class implementing IRenderPass).", passNode);
+                    }
+                    else
+                    {
+                        infos.LogError(
+                            $"Registered pass type '{passNode.GetRegisteredPassTypeName()}' could not be resolved.",
+                            passNode);
+                    }
+
                     continue;
                 }
 
                 if (!typeof(IRenderPass).IsAssignableFrom(passType))
                 {
                     infos.LogError($"Pass type '{passType.FullName}' must implement {nameof(IRenderPass)}.", passNode);
+                    continue;
+                }
+
+                if (passType.IsAbstract)
+                {
+                    infos.LogError($"Pass type '{passType.FullName}' must be a concrete class.", passNode);
+                    continue;
+                }
+
+                if (passType.GetConstructor(System.Type.EmptyTypes) == null)
+                {
+                    infos.LogError(
+                        $"Pass type '{passType.FullName}' must expose a public parameterless constructor.",
+                        passNode);
                     continue;
                 }
 

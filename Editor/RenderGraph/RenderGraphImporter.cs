@@ -67,7 +67,7 @@ namespace VividRP.Editor.RenderGraph
 
                 var passDef = new RenderGraphPassDefinition
                 {
-                    PassType = passType.AssemblyQualifiedName,
+                    PassType = $"{passType.FullName}, {passType.Assembly.GetName().Name}",
                 };
 
                 var fields = passType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);

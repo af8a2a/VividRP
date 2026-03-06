@@ -10,12 +10,21 @@ namespace VividRP.Runtime
         Buffer
     }
 
+    public enum RenderGraphPassBindingSourceKind
+    {
+        Resource,
+        PassField
+    }
+
     [Serializable]
     public sealed class RenderGraphPassResourceBinding
     {
         public string FieldName;
         public RenderGraphResourceKind ResourceKind;
         public int ResourceIndex;
+        public RenderGraphPassBindingSourceKind SourceKind;
+        public int SourcePassIndex = -1;
+        public string SourceFieldName;
     }
 
     [Serializable]

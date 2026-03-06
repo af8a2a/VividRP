@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using Unity.GraphToolkit.Editor;
 using UnityEditor.AssetImporters;
@@ -36,6 +37,12 @@ namespace VividRP.Editor.RenderGraph
 
             var textureNodeToIndex = new Dictionary<TextureResourceNodeData, int>();
             var bufferNodeToIndex = new Dictionary<BufferResourceNodeData, int>();
+            var passNodes = graph.GetNodes().OfType<RenderPassNodeData>().ToList();
+            var passNodeToIndex = new Dictionary<RenderPassNodeData, int>();
+            for (var index = 0; index < passNodes.Count; index++)
+            {
+                passNodeToIndex[passNodes[index]] = index;
+            }
 
             foreach (var node in graph.GetNodes())
             {
@@ -53,10 +60,9 @@ namespace VividRP.Editor.RenderGraph
                 }
             }
 
-            foreach (var node in graph.GetNodes())
+            foreach (var node in passNodes)
             {
-                if (node is not RenderPassNodeData passNode)
-                    continue;
+                var passNode = node;
 
                 var passType = passNode.GetPassType();
                 if (passType == null)
@@ -79,10 +85,12 @@ namespace VividRP.Editor.RenderGraph
 
                     var inputPortName = RenderPassPortUtility.GetInputPortName(field.Name, attr.Access);
                     var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
-                    var inputResourceNode = GetConnectedNode(
-                        string.IsNullOrEmpty(inputPortName) ? null : passNode.GetInputPortByName(inputPortName));
-                    var outputResourceNode = GetConnectedNode(
-                        string.IsNullOrEmpty(outputPortName) ? null : passNode.GetOutputPortByName(outputPortName));
+                    var inputPort = string.IsNullOrEmpty(inputPortName) ? null : passNode.GetInputPortByName(inputPortName);
+                    var outputPort = string.IsNullOrEmpty(outputPortName) ? null : passNode.GetOutputPortByName(outputPortName);
+                    var inputConnectedPort = inputPort?.FirstConnectedPort;
+                    var outputConnectedPort = outputPort?.FirstConnectedPort;
+                    var inputResourceNode = inputConnectedPort?.GetNode();
+                    var outputResourceNode = outputConnectedPort?.GetNode();
 
                     if (inputResourceNode != null && outputResourceNode != null && inputResourceNode != outputResourceNode)
                     {
@@ -105,8 +113,11 @@ namespace VividRP.Editor.RenderGraph
                                 FieldName = field.Name,
                                 ResourceKind = RenderGraphResourceKind.Texture,
                                 ResourceIndex = resourceIndex,
+                                SourceKind = RenderGraphPassBindingSourceKind.Resource,
                             });
                         }
+
+                        continue;
                     }
                     else if (field.FieldType == typeof(RenderGraphBuffer) && resourceNode is BufferResourceNodeData bufferNode)
                     {
@@ -117,13 +128,98 @@ namespace VividRP.Editor.RenderGraph
                                 FieldName = field.Name,
                                 ResourceKind = RenderGraphResourceKind.Buffer,
                                 ResourceIndex = resourceIndex,
+                                SourceKind = RenderGraphPassBindingSourceKind.Resource,
                             });
                         }
+
+                        continue;
+                    }
+
+                    if (field.FieldType == typeof(RenderGraphTexture) && RenderPassPortUtility.CanRead(attr.Access))
+                    {
+                        TryAddPassFieldBinding(
+                            passDef,
+                            field.Name,
+                            RenderGraphResourceKind.Texture,
+                            inputConnectedPort,
+                            passNodeToIndex);
+                    }
+                    else if (field.FieldType == typeof(RenderGraphBuffer) && RenderPassPortUtility.CanRead(attr.Access))
+                    {
+                        TryAddPassFieldBinding(
+                            passDef,
+                            field.Name,
+                            RenderGraphResourceKind.Buffer,
+                            inputConnectedPort,
+                            passNodeToIndex);
                     }
                 }
 
                 runtimeAsset.Passes.Add(passDef);
             }
+        }
+
+        private static void TryAddPassFieldBinding(
+            RenderGraphPassDefinition passDef,
+            string targetFieldName,
+            RenderGraphResourceKind resourceKind,
+            IPort connectedPort,
+            IReadOnlyDictionary<RenderPassNodeData, int> passNodeToIndex)
+        {
+            if (connectedPort?.GetNode() is not RenderPassNodeData sourcePassNode)
+                return;
+
+            if (!passNodeToIndex.TryGetValue(sourcePassNode, out var sourcePassIndex))
+                return;
+
+            var sourcePassType = sourcePassNode.GetPassType();
+            var sourceFieldName = GetConnectedOutputFieldName(sourcePassNode, sourcePassType, connectedPort, resourceKind);
+            if (string.IsNullOrEmpty(sourceFieldName))
+                return;
+
+            passDef.ResourceBindings.Add(new RenderGraphPassResourceBinding
+            {
+                FieldName = targetFieldName,
+                ResourceKind = resourceKind,
+                SourceKind = RenderGraphPassBindingSourceKind.PassField,
+                SourcePassIndex = sourcePassIndex,
+                SourceFieldName = sourceFieldName,
+            });
+        }
+
+        private static string GetConnectedOutputFieldName(
+            RenderPassNodeData passNode,
+            Type passType,
+            IPort connectedPort,
+            RenderGraphResourceKind resourceKind)
+        {
+            if (passNode == null || passType == null || connectedPort == null)
+                return null;
+
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+            var expectedFieldType = resourceKind == RenderGraphResourceKind.Texture
+                ? typeof(RenderGraphTexture)
+                : typeof(RenderGraphBuffer);
+
+            foreach (var field in passType.GetFields(flags))
+            {
+                if (field.FieldType != expectedFieldType)
+                    continue;
+
+                var attr = field.GetCustomAttribute<RenderGraphResource>();
+                if (attr == null)
+                    continue;
+
+                var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
+                if (string.IsNullOrEmpty(outputPortName))
+                    continue;
+
+                var outputPort = passNode.GetOutputPortByName(outputPortName);
+                if (ReferenceEquals(outputPort, connectedPort))
+                    return field.Name;
+            }
+
+            return null;
         }
 
         private static INode GetConnectedNode(IPort port)

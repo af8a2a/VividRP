@@ -6,23 +6,25 @@ namespace VividRP.Runtime.RenderPass.Core
 {
     public class FinalBlitPass : UnsafePass
     {
-        private static readonly Vector4 s_DefaultScaleBias = new(1f, 1f, 0f, 0f);
-
         [RenderGraphResource(Access = AccessFlags.Read)]
         private RenderGraphTexture source = new();
 
-        Material m_Material;
+        private Material m_Material;
         private RenderTargetIdentifier m_CameraBackBufferTarget;
+        private TextureUVOrigin m_CameraBackBufferTextureUVOrigin;
         private Rect m_Viewport;
 
         public override void Prepare(ContextContainer frameData)
         {
             var cameraData = frameData.Get<VividCameraData>();
             var camera = cameraData.camera;
+            var hasTargetTexture = camera != null && camera.targetTexture != null;
+            var cameraType = camera != null ? camera.cameraType : CameraType.Game;
 
-            m_CameraBackBufferTarget = camera != null && camera.targetTexture != null
+            m_CameraBackBufferTarget = hasTargetTexture
                 ? new RenderTargetIdentifier(camera.targetTexture)
                 : BuiltinRenderTextureType.CameraTarget;
+            m_CameraBackBufferTextureUVOrigin = GetCameraBackBufferTextureUVOrigin(cameraType, hasTargetTexture);
 
             var width = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
             var height = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
@@ -48,15 +50,54 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var cmd = context.cmd;
             var unsafeCmd = CommandBufferHelpers.GetNativeCommandBuffer(cmd);
+            RTHandle sourceHandle = source.innerHandle;
+            var scale = Vector2.one;
+
+            if (sourceHandle != null && sourceHandle.useScaling)
+            {
+                scale.x = sourceHandle.rtHandleProperties.rtHandleScale.x;
+                scale.y = sourceHandle.rtHandleProperties.rtHandleScale.y;
+            }
+
+            var sourceTextureUVOrigin = context.GetTextureUVOrigin(source.innerHandle);
+            var scaleBias = GetFinalBlitScaleBias(scale, sourceTextureUVOrigin, m_CameraBackBufferTextureUVOrigin);
 
             cmd.SetRenderTarget(m_CameraBackBufferTarget);
             cmd.SetViewport(m_Viewport);
 
-            Blitter.BlitTexture(unsafeCmd, source.innerHandle,Vector2.one, m_Material,0);
+            Blitter.BlitTexture(unsafeCmd, sourceHandle, scaleBias, m_Material, 0);
         }
 
         public override void Dispose()
         {
+            if (m_Material != null)
+            {
+                CoreUtils.Destroy(m_Material);
+                m_Material = null;
+            }
+        }
+
+        private static TextureUVOrigin GetCameraBackBufferTextureUVOrigin(CameraType cameraType, bool hasTargetTexture)
+        {
+            var useActualBackbufferOrientation = cameraType != CameraType.SceneView
+                && cameraType != CameraType.Preview
+                && !hasTargetTexture;
+
+            if (!useActualBackbufferOrientation)
+                return TextureUVOrigin.BottomLeft;
+
+            return SystemInfo.graphicsUVStartsAtTop ? TextureUVOrigin.TopLeft : TextureUVOrigin.BottomLeft;
+        }
+
+        private static Vector4 GetFinalBlitScaleBias(
+            Vector2 scale,
+            TextureUVOrigin sourceTextureUVOrigin,
+            TextureUVOrigin destinationTextureUVOrigin)
+        {
+            var yFlip = sourceTextureUVOrigin != destinationTextureUVOrigin;
+            return yFlip
+                ? new Vector4(scale.x, -scale.y, 0f, scale.y)
+                : new Vector4(scale.x, scale.y, 0f, 0f);
         }
     }
 }

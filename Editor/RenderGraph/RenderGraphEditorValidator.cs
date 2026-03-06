@@ -57,6 +57,8 @@ namespace VividRP.Editor.RenderGraph
 
                 ValidateReadWriteBindings(passNode, passType, infos);
             }
+
+            ValidatePreviewNodes(graph, infos);
         }
 
         private static void ValidateReadWriteBindings(RenderPassNodeData passNode, System.Type passType, GraphLogger infos)
@@ -83,6 +85,25 @@ namespace VividRP.Editor.RenderGraph
                         $"Read/write field '{field.Name}' must connect to the same resource node on both input and output ports.",
                         passNode);
                 }
+            }
+        }
+
+        private static void ValidatePreviewNodes(RenderGraphEditorGraph graph, GraphLogger infos)
+        {
+            foreach (var previewNode in graph.GetNodes().OfType<PreviewNodeData>())
+            {
+                var inputPort = previewNode.GetInputPortByName(PreviewNodeData.TextureInputPortName);
+                if (inputPort == null || !inputPort.IsConnected)
+                {
+                    infos.LogWarning("Preview node is not connected to a texture resource.", previewNode);
+                    continue;
+                }
+
+                var sourceNode = inputPort.FirstConnectedPort?.GetNode();
+                if (sourceNode is TextureResourceNodeData || sourceNode is RenderPassNodeData)
+                    continue;
+
+                infos.LogWarning("Preview node only supports texture outputs.", previewNode);
             }
         }
     }

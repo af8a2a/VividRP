@@ -11,6 +11,55 @@ namespace VividRP.Editor.Tests
     public class FinalBlitPassTests
     {
         [Test]
+        public void GetCameraBackBufferTextureUVOrigin_UsesBottomLeft_ForSceneAndPreviewAndTargetTexture()
+        {
+            var method = typeof(FinalBlitPass).GetMethod(
+                "GetCameraBackBufferTextureUVOrigin",
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            Assert.That(method, Is.Not.Null);
+            Assert.That(
+                (TextureUVOrigin)method.Invoke(null, new object[] { CameraType.SceneView, false }),
+                Is.EqualTo(TextureUVOrigin.BottomLeft));
+            Assert.That(
+                (TextureUVOrigin)method.Invoke(null, new object[] { CameraType.Preview, false }),
+                Is.EqualTo(TextureUVOrigin.BottomLeft));
+            Assert.That(
+                (TextureUVOrigin)method.Invoke(null, new object[] { CameraType.Game, true }),
+                Is.EqualTo(TextureUVOrigin.BottomLeft));
+        }
+
+        [Test]
+        public void GetCameraBackBufferTextureUVOrigin_UsesPlatformBackBufferOrientation_ForGameCamera()
+        {
+            var method = typeof(FinalBlitPass).GetMethod(
+                "GetCameraBackBufferTextureUVOrigin",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            var expected = SystemInfo.graphicsUVStartsAtTop ? TextureUVOrigin.TopLeft : TextureUVOrigin.BottomLeft;
+
+            Assert.That(method, Is.Not.Null);
+            Assert.That(
+                (TextureUVOrigin)method.Invoke(null, new object[] { CameraType.Game, false }),
+                Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void GetFinalBlitScaleBias_FlipsY_WhenOriginsDiffer()
+        {
+            var method = typeof(FinalBlitPass).GetMethod(
+                "GetFinalBlitScaleBias",
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            Assert.That(method, Is.Not.Null);
+            Assert.That(
+                (Vector4)method.Invoke(null, new object[] { new Vector2(1f, 1f), TextureUVOrigin.BottomLeft, TextureUVOrigin.TopLeft }),
+                Is.EqualTo(new Vector4(1f, -1f, 0f, 1f)));
+            Assert.That(
+                (Vector4)method.Invoke(null, new object[] { new Vector2(1f, 1f), TextureUVOrigin.BottomLeft, TextureUVOrigin.BottomLeft }),
+                Is.EqualTo(new Vector4(1f, 1f, 0f, 0f)));
+        }
+
+        [Test]
         public void Initialize_RegistersReadOnlySourceTexture()
         {
             IRenderPass renderPass = new FinalBlitPass();

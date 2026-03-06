@@ -50,6 +50,49 @@ namespace VividRP.Runtime
             return texture != null;
         }
 
+        internal static bool TryGetSinglePreview(out Type passType, out string fieldName, out Texture texture)
+        {
+            passType = null;
+            fieldName = null;
+            texture = null;
+
+            string singleKey = null;
+            foreach (var pair in s_TexturePreviews)
+            {
+                var candidateTexture = GetPreviewTexture(pair.Value);
+                if (candidateTexture == null)
+                    continue;
+
+                if (singleKey != null)
+                    return false;
+
+                singleKey = pair.Key;
+                texture = candidateTexture;
+            }
+
+            if (string.IsNullOrEmpty(singleKey))
+                return false;
+
+            var separatorIndex = singleKey.LastIndexOf('|');
+            if (separatorIndex <= 0 || separatorIndex >= singleKey.Length - 1)
+            {
+                texture = null;
+                return false;
+            }
+
+            var passTypeName = singleKey.Substring(0, separatorIndex);
+            fieldName = singleKey.Substring(separatorIndex + 1);
+            passType = Type.GetType(passTypeName, throwOnError: false);
+            if (passType == null || string.IsNullOrEmpty(fieldName))
+            {
+                texture = null;
+                fieldName = null;
+                return false;
+            }
+
+            return true;
+        }
+
         internal static void SetPreview(Type passType, string fieldName, Texture texture)
         {
             if (passType == null || string.IsNullOrEmpty(fieldName))
@@ -200,4 +243,3 @@ namespace VividRP.Runtime
         }
     }
 }
-

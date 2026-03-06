@@ -33,5 +33,32 @@ namespace VividRP.Editor.Tests
                 Object.DestroyImmediate(texture);
             }
         }
+
+        [Test]
+        public void TryGetConnectedPassOutput_ReturnsStoredConnectionMetadata()
+        {
+            var previewValue = new TexturePreviewValue();
+
+            previewValue.SetConnectedPassOutput(typeof(TexturePreviewValueTests), "Color");
+
+            var found = previewValue.TryGetConnectedPassOutput(out var passType, out var fieldName);
+
+            Assert.That(found, Is.True);
+            Assert.That(passType, Is.EqualTo(typeof(TexturePreviewValueTests)));
+            Assert.That(fieldName, Is.EqualTo("Color"));
+            Assert.That(previewValue.HasConnectedTextureInput, Is.True);
+        }
+
+        [Test]
+        public void ClearConnectionMetadata_RemovesStoredConnectionMetadata()
+        {
+            var previewValue = new TexturePreviewValue();
+            previewValue.SetConnectedPassOutput(typeof(TexturePreviewValueTests), "Color");
+
+            previewValue.ClearConnectionMetadata();
+
+            Assert.That(previewValue.TryGetConnectedPassOutput(out _, out _), Is.False);
+            Assert.That(previewValue.HasConnectedTextureInput, Is.False);
+        }
     }
 }

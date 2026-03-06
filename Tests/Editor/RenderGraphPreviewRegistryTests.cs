@@ -28,6 +28,25 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        private sealed class AnotherPreviewTestPass : RasterPass
+        {
+            public override void Create()
+            {
+            }
+
+            public override void Prepare(ContextContainer frameData)
+            {
+            }
+
+            public override void Record(RasterGraphContext context)
+            {
+            }
+
+            public override void Dispose()
+            {
+            }
+        }
+
         [OneTimeSetUp]
         public void OneTimeSetUp()
         {
@@ -58,6 +77,50 @@ namespace VividRP.Editor.Tests
                 var found = RenderGraphPreviewRegistry.TryGetPreview(typeof(PreviewTestPass), "Color", out var previewTexture);
 
                 Assert.That(found, Is.True);
+                Assert.That(previewTexture, Is.SameAs(texture));
+            }
+            finally
+            {
+                Object.DestroyImmediate(texture);
+            }
+        }
+
+        [Test]
+        public void TryGetSinglePreview_ReturnsFalse_WhenMultiplePreviewsExist()
+        {
+            var firstTexture = new Texture2D(4, 4);
+            var secondTexture = new Texture2D(4, 4);
+
+            try
+            {
+                RenderGraphPreviewRegistry.SetPreview(typeof(PreviewTestPass), "Color", firstTexture);
+                RenderGraphPreviewRegistry.SetPreview(typeof(AnotherPreviewTestPass), "Color", secondTexture);
+
+                var found = RenderGraphPreviewRegistry.TryGetSinglePreview(out _, out _, out _);
+
+                Assert.That(found, Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(firstTexture);
+                Object.DestroyImmediate(secondTexture);
+            }
+        }
+
+        [Test]
+        public void TryGetSinglePreview_ReturnsSingleRegisteredPreview()
+        {
+            var texture = new Texture2D(4, 4);
+
+            try
+            {
+                RenderGraphPreviewRegistry.SetPreview(typeof(PreviewTestPass), "Color", texture);
+
+                var found = RenderGraphPreviewRegistry.TryGetSinglePreview(out var passType, out var fieldName, out var previewTexture);
+
+                Assert.That(found, Is.True);
+                Assert.That(passType, Is.EqualTo(typeof(PreviewTestPass)));
+                Assert.That(fieldName, Is.EqualTo("Color"));
                 Assert.That(previewTexture, Is.SameAs(texture));
             }
             finally
@@ -155,4 +218,3 @@ namespace VividRP.Editor.Tests
         }
     }
 }
-

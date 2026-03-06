@@ -39,6 +39,26 @@ namespace VividRP.Editor.RenderGraph
             return GetPreviewValue().Texture;
         }
 
+        internal void RefreshPreviewConnectionMetadata()
+        {
+            var previewValue = GetPreviewValue();
+            if (previewValue == null)
+                return;
+
+            if (TryGetConnectedPassOutput(out var passType, out var fieldName))
+            {
+                previewValue.SetConnectedPassOutput(passType, fieldName);
+            }
+            else if (HasConnectedTextureInput())
+            {
+                previewValue.SetConnectedTextureInput();
+            }
+            else
+            {
+                previewValue.ClearConnectionMetadata();
+            }
+        }
+
         internal bool HasConnectedTextureInput()
         {
             return GetInputPortByName(TextureInputPortName)?.IsConnected == true;

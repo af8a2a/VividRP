@@ -92,6 +92,8 @@ namespace VividRP.Editor.RenderGraph
         {
             foreach (var previewNode in graph.GetNodes().OfType<PreviewNodeData>())
             {
+                previewNode.RefreshPreviewConnectionMetadata();
+
                 var inputPort = previewNode.GetInputPortByName(PreviewNodeData.TextureInputPortName);
                 if (inputPort == null || !inputPort.IsConnected)
                 {

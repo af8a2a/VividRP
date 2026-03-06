@@ -34,15 +34,39 @@ namespace VividRP.Editor.RenderGraph
 
                 if (field.FieldType == typeof(RenderGraphTexture))
                 {
-                    context.AddInputPort<RenderGraphTexture>(field.Name)
-                        .WithDisplayName(BuildResourcePortDisplayName(field, attr))
-                        .Build();
+                    var inputPortName = RenderPassPortUtility.GetInputPortName(field.Name, attr.Access);
+                    if (!string.IsNullOrEmpty(inputPortName))
+                    {
+                        context.AddInputPort<RenderGraphTexture>(inputPortName)
+                            .WithDisplayName(RenderPassPortUtility.BuildPortDisplayName(field, attr, attr.Access & ~AccessFlags.Write))
+                            .Build();
+                    }
+
+                    var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
+                    if (!string.IsNullOrEmpty(outputPortName))
+                    {
+                        context.AddOutputPort<RenderGraphTexture>(outputPortName)
+                            .WithDisplayName(RenderPassPortUtility.BuildPortDisplayName(field, attr, attr.Access & ~AccessFlags.Read))
+                            .Build();
+                    }
                 }
                 else if (field.FieldType == typeof(RenderGraphBuffer))
                 {
-                    context.AddInputPort<RenderGraphBuffer>(field.Name)
-                        .WithDisplayName(BuildResourcePortDisplayName(field, attr))
-                        .Build();
+                    var inputPortName = RenderPassPortUtility.GetInputPortName(field.Name, attr.Access);
+                    if (!string.IsNullOrEmpty(inputPortName))
+                    {
+                        context.AddInputPort<RenderGraphBuffer>(inputPortName)
+                            .WithDisplayName(RenderPassPortUtility.BuildPortDisplayName(field, attr, attr.Access & ~AccessFlags.Write))
+                            .Build();
+                    }
+
+                    var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
+                    if (!string.IsNullOrEmpty(outputPortName))
+                    {
+                        context.AddOutputPort<RenderGraphBuffer>(outputPortName)
+                            .WithDisplayName(RenderPassPortUtility.BuildPortDisplayName(field, attr, attr.Access & ~AccessFlags.Read))
+                            .Build();
+                    }
                 }
             }
         }
@@ -58,35 +82,6 @@ namespace VividRP.Editor.RenderGraph
         {
             var option = GetNodeOptionByName(PassScriptOptionName);
             return option.TryGetValue(out script);
-        }
-
-        private static string BuildResourcePortDisplayName(FieldInfo field, RenderGraphResource attr)
-        {
-            var displayName = string.IsNullOrEmpty(attr.Name) ? field.Name : attr.Name;
-
-            var accessLabel = AccessFlagsToShortName(attr.Access);
-            var attachmentLabel = attr.IsDepthAttachment
-                ? "Depth"
-                : attr.AttachmentIndex >= 0
-                    ? $"A{attr.AttachmentIndex}"
-                    : null;
-
-            if (!string.IsNullOrEmpty(attachmentLabel))
-                return $"{displayName} ({accessLabel}, {attachmentLabel})";
-
-            return $"{displayName} ({accessLabel})";
-        }
-
-        private static string AccessFlagsToShortName(AccessFlags access)
-        {
-            var canRead = (access & AccessFlags.Read) != 0;
-            var canWrite = (access & AccessFlags.Write) != 0;
-
-            if (canRead && canWrite) return "RW";
-            if (canRead) return "R";
-            if (canWrite) return "W";
-
-            return access.ToString();
         }
     }
 }

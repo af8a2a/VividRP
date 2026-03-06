@@ -77,13 +77,26 @@ namespace VividRP.Editor.RenderGraph
                     if (attr == null)
                         continue;
 
-                    var port = passNode.GetInputPortByName(field.Name);
-                    if (port == null || !port.IsConnected)
+                    var inputPortName = RenderPassPortUtility.GetInputPortName(field.Name, attr.Access);
+                    var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
+                    var inputResourceNode = GetConnectedNode(
+                        string.IsNullOrEmpty(inputPortName) ? null : passNode.GetInputPortByName(inputPortName));
+                    var outputResourceNode = GetConnectedNode(
+                        string.IsNullOrEmpty(outputPortName) ? null : passNode.GetOutputPortByName(outputPortName));
+
+                    if (inputResourceNode != null && outputResourceNode != null && inputResourceNode != outputResourceNode)
+                    {
+                        Debug.LogWarning(
+                            $"Render pass field '{field.Name}' on '{passType.FullName}' is connected to different resources on its read/write ports. " +
+                            "Skip importing this binding until both ports target the same resource node.");
+                        continue;
+                    }
+
+                    var resourceNode = RenderPassPortUtility.ResolveConnectedNode(attr.Access, inputResourceNode, outputResourceNode);
+                    if (resourceNode == null)
                         continue;
 
-                    var sourceNode = port.FirstConnectedPort?.GetNode();
-
-                    if (field.FieldType == typeof(RenderGraphTexture) && sourceNode is TextureResourceNodeData textureNode)
+                    if (field.FieldType == typeof(RenderGraphTexture) && resourceNode is TextureResourceNodeData textureNode)
                     {
                         if (textureNodeToIndex.TryGetValue(textureNode, out var resourceIndex))
                         {
@@ -95,7 +108,7 @@ namespace VividRP.Editor.RenderGraph
                             });
                         }
                     }
-                    else if (field.FieldType == typeof(RenderGraphBuffer) && sourceNode is BufferResourceNodeData bufferNode)
+                    else if (field.FieldType == typeof(RenderGraphBuffer) && resourceNode is BufferResourceNodeData bufferNode)
                     {
                         if (bufferNodeToIndex.TryGetValue(bufferNode, out var resourceIndex))
                         {
@@ -111,6 +124,14 @@ namespace VividRP.Editor.RenderGraph
 
                 runtimeAsset.Passes.Add(passDef);
             }
+        }
+
+        private static INode GetConnectedNode(IPort port)
+        {
+            if (port == null || !port.IsConnected)
+                return null;
+
+            return port.FirstConnectedPort?.GetNode();
         }
     }
 }

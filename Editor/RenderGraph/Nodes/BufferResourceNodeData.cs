@@ -7,6 +7,7 @@ namespace VividRP.Editor.RenderGraph
     [Serializable]
     internal sealed class BufferResourceNodeData : RenderGraphNodeData
     {
+        internal const string InputPortName = "BufferInput";
         internal const string OutputPortName = "Buffer";
 
         private const string DescriptorOptionName = "Descriptor";
@@ -20,6 +21,10 @@ namespace VividRP.Editor.RenderGraph
 
         protected override void OnDefinePorts(IPortDefinitionContext context)
         {
+            context.AddInputPort<RenderGraphBuffer>(InputPortName)
+                .WithDisplayName("In")
+                .Build();
+
             context.AddOutputPort<RenderGraphBuffer>(OutputPortName)
                 .WithDisplayName("Out")
                 .Build();

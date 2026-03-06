@@ -1,0 +1,24 @@
+{
+    "name": "VividRP.Editor.Tests",
+    "rootNamespace": "VividRP.Editor.Tests",
+    "references": [
+        "VividRP.Editor",
+        "VividRP.Runtime",
+        "GUID:df380645f10b7bc4b97d4f5eb6303d95",
+        "Unity.GraphToolkit.Editor",
+        "Unity.GraphToolkit.Common.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "noEngineReferences": false
+}

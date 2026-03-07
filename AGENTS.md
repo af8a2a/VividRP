@@ -11,6 +11,7 @@
 - `Shaders/` is a top-level package folder with package shaders and the `VividRP.Shaders` assembly; shader assets are not stored under `Runtime/Shaders/`.
 - `Documentation/` contains the current package notes for RenderGraph editor usage, resource descriptors, and acceleration-structure support; keep higher-level workflow docs there.
 - `Tests/Editor/` currently contains all committed tests through the `VividRP.Editor.Tests` assembly. Add `Tests/Runtime/` only when runtime-specific coverage is needed.
+- Do not manually create or edit `*.meta` files; let Unity generate and maintain them automatically.
 - Unity `.meta` files, generated assets, and package-relative paths must stay in sync when moving or renaming files. If the package path or package name changes, update both `Editor/PipelineResource/PipelineResourceUpdater.cs` and `Editor/RenderGraph/RenderPassNodeRegistryGenerator.cs`.
 
 ## Build, Test, and Development Commands

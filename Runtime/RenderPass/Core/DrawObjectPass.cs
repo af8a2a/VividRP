@@ -23,7 +23,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_RenderList = new RenderGraphRenderList
             {
-                desc = RenderGraphRenderListDesc.CreateOpaque("SRPDefaultUnlit")
+                desc = RenderGraphRenderListDesc.CreateOpaque()
             };
 
             m_ColorTarget = new RenderGraphTexture

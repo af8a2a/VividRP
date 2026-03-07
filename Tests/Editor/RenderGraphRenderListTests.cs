@@ -61,5 +61,17 @@ namespace VividRP.Editor.Tests
                 Object.DestroyImmediate(gameObject);
             }
         }
+
+        [Test]
+        public void CreateOpaque_UsesForwardThenUnlitShaderTags_WhenNoTagsProvided()
+        {
+            var descriptor = RenderGraphRenderListDesc.CreateOpaque();
+
+            Assert.That(descriptor.ShaderTagNames, Is.EqualTo(new[]
+            {
+                RenderGraphRenderListDesc.ForwardShaderTagName,
+                RenderGraphRenderListDesc.DefaultUnlitShaderTagName,
+            }));
+        }
     }
 }

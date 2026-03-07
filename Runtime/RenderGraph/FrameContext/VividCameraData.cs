@@ -6,6 +6,9 @@ namespace VividRP.Runtime
     public class VividCameraData : ContextItem
     {
         public Camera camera;
+        public VividAdditionalCameraData additionalData;
+        public VividCameraRenderType renderType;
+        public bool clearDepth;
         public int actualWidth;
         public int actualHeight;
         public int pixelWidth;
@@ -15,6 +18,13 @@ namespace VividRP.Runtime
         public override void Reset()
         {
             camera = null;
+            additionalData = null;
+            renderType = VividCameraRenderType.Base;
+            clearDepth = true;
+            actualWidth = 0;
+            actualHeight = 0;
+            pixelWidth = 0;
+            pixelHeight = 0;
             pixelRect = default;
         }
     }

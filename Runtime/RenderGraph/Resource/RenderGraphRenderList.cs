@@ -16,7 +16,16 @@ namespace VividRP.Runtime
     [Serializable]
     public class RenderGraphRenderListDesc
     {
-        public string[] ShaderTagNames = { "SRPDefaultUnlit" };
+        internal const string ForwardShaderTagName = "VividForward";
+        internal const string DefaultUnlitShaderTagName = "SRPDefaultUnlit";
+
+        private static readonly string[] s_DefaultShaderTagNames =
+        {
+            ForwardShaderTagName,
+            DefaultUnlitShaderTagName,
+        };
+
+        public string[] ShaderTagNames = (string[])s_DefaultShaderTagNames.Clone();
         public RenderGraphRenderQueueRange RenderQueueRange = RenderGraphRenderQueueRange.Opaque;
         public SortingCriteria SortingCriteria = SortingCriteria.CommonOpaque;
         public LayerMask LayerMask = ~0;
@@ -73,7 +82,7 @@ namespace VividRP.Runtime
             {
                 ShaderTagNames = shaderTagNames != null && shaderTagNames.Length > 0
                     ? (string[])shaderTagNames.Clone()
-                    : new[] { "SRPDefaultUnlit" },
+                    : (string[])s_DefaultShaderTagNames.Clone(),
                 RenderQueueRange = RenderGraphRenderQueueRange.Opaque,
                 SortingCriteria = SortingCriteria.CommonOpaque,
             };
@@ -85,7 +94,7 @@ namespace VividRP.Runtime
             {
                 ShaderTagNames = shaderTagNames != null && shaderTagNames.Length > 0
                     ? (string[])shaderTagNames.Clone()
-                    : new[] { "SRPDefaultUnlit" },
+                    : (string[])s_DefaultShaderTagNames.Clone(),
                 RenderQueueRange = RenderGraphRenderQueueRange.Transparent,
                 SortingCriteria = SortingCriteria.CommonTransparent,
             };
@@ -94,7 +103,7 @@ namespace VividRP.Runtime
         private ShaderTagId[] BuildShaderTagIds()
         {
             if (ShaderTagNames == null || ShaderTagNames.Length == 0)
-                return new[] { new ShaderTagId("SRPDefaultUnlit") };
+                return BuildDefaultShaderTagIds();
 
             var validCount = 0;
             for (var i = 0; i < ShaderTagNames.Length; i++)
@@ -104,7 +113,7 @@ namespace VividRP.Runtime
             }
 
             if (validCount == 0)
-                return new[] { new ShaderTagId("SRPDefaultUnlit") };
+                return BuildDefaultShaderTagIds();
 
             var shaderTags = new ShaderTagId[validCount];
             var outputIndex = 0;
@@ -118,6 +127,15 @@ namespace VividRP.Runtime
             }
 
             return shaderTags;
+        }
+
+        private static ShaderTagId[] BuildDefaultShaderTagIds()
+        {
+            return new[]
+            {
+                new ShaderTagId(ForwardShaderTagName),
+                new ShaderTagId(DefaultUnlitShaderTagName),
+            };
         }
 
         private static RenderQueueRange ResolveRenderQueueRange(RenderGraphRenderQueueRange range)

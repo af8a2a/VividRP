@@ -25,7 +25,14 @@ namespace VividRP.Runtime
         {
             var renderingData = s_FrameData.GetOrCreate<VividRenderingData>();
             var cameraData = s_FrameData.GetOrCreate<VividCameraData>();
+            var additionalCameraData = camera.GetComponent<VividAdditionalCameraData>();
+            if (additionalCameraData == null && camera.cameraType == CameraType.Game)
+                additionalCameraData = camera.GetVividAdditionalCameraData();
+
             cameraData.camera = camera;
+            cameraData.additionalData = additionalCameraData;
+            cameraData.renderType = additionalCameraData != null ? additionalCameraData.renderType : VividCameraRenderType.Base;
+            cameraData.clearDepth = additionalCameraData == null || additionalCameraData.clearDepth;
             cameraData.pixelWidth = camera.pixelWidth;
             cameraData.pixelHeight = camera.pixelHeight;
             cameraData.pixelRect = camera.pixelRect;

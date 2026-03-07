@@ -6,6 +6,7 @@ using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Rendering.RenderGraphModule.Util;
+using VividRP.Runtime;
 
 namespace VividRP.Runtime
 {
@@ -167,7 +168,7 @@ namespace VividRP.Runtime
             foreach (var pass in s_RenderPasses)
             {
                 pass.Create();
-                s_PassResources[pass] = pass.Initialize();
+                GetCurrentPassResources(pass);
             }
 
             s_CurrentGraphAsset = graphAsset;
@@ -540,9 +541,16 @@ namespace VividRP.Runtime
                 if (!CanPreviewTexture(sourceInfo))
                     continue;
 
+                var previewFieldName = !string.IsNullOrEmpty(entry.Name)
+                    ? entry.Name
+                    : entry.Field?.Name;
+
+                if (string.IsNullOrEmpty(previewFieldName))
+                    continue;
+
                 var previewTarget = RenderGraphPreviewRegistry.GetOrCreatePreviewTarget(
                     passType,
-                    entry.Field.Name,
+                    previewFieldName,
                     sourceInfo,
                     entry.Texture.desc);
                 if (previewTarget == null)
@@ -552,7 +560,7 @@ namespace VividRP.Runtime
                 if (!destination.IsValid() || !renderGraph.CanAddCopyPass(source, destination))
                     continue;
 
-                renderGraph.AddCopyPass(source, destination, $"{passType.Name}.{entry.Field.Name} Preview");
+                renderGraph.AddCopyPass(source, destination, $"{passType.Name}.{previewFieldName} Preview");
             }
         }
 
@@ -560,8 +568,7 @@ namespace VividRP.Runtime
         {
             return entry != null
                 && entry.Texture != null
-                && entry.Field != null
-                && !string.IsNullOrEmpty(entry.Field.Name)
+                && (!string.IsNullOrEmpty(entry.Name) || (entry.Field != null && !string.IsNullOrEmpty(entry.Field.Name)))
                 && (entry.Access & AccessFlags.Write) != 0
                 && !entry.IsDepthAttachment;
         }
@@ -590,8 +597,7 @@ namespace VividRP.Runtime
 
             foreach (var pass in s_RenderPasses)
             {
-                if (!s_PassResources.TryGetValue(pass, out var resources))
-                    resources = pass.Initialize();
+                var resources = GetCurrentPassResources(pass);
 
                 if (pass is ComputePass computePass)
                 {
@@ -611,6 +617,23 @@ namespace VividRP.Runtime
             }
 
             RecordHistoryUpdatePasses(renderGraph, graphAsset);
+        }
+
+        private static PassResource GetCurrentPassResources(IRenderPass pass)
+        {
+            var needsRefresh = pass is IDynamicPassResourceLayout dynamicLayoutPass
+                               && dynamicLayoutPass.IsPassResourceLayoutDirty;
+
+            if (!s_PassResources.TryGetValue(pass, out var resources) || needsRefresh)
+            {
+                resources = pass.Initialize();
+                s_PassResources[pass] = resources;
+
+                if (pass is IDynamicPassResourceLayout refreshedDynamicLayoutPass)
+                    refreshedDynamicLayoutPass.ClearPassResourceLayoutDirty();
+            }
+
+            return resources;
         }
     }
 }

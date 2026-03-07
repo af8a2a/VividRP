@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
@@ -85,6 +86,59 @@ namespace VividRP.Editor.Tests
             Assert.That(externalColor.desc.Height, Is.EqualTo(64));
             Assert.That(externalDepth.desc.Width, Is.EqualTo(96));
             Assert.That(externalDepth.desc.Height, Is.EqualTo(48));
+        }
+
+        [Test]
+        public void Initialize_RegistersSequentialColorAttachments_WhenAdditionalTargetsAreAdded()
+        {
+            IRenderPass renderPass = new DrawObjectPass();
+            var pass = (DrawObjectPass)renderPass;
+
+            pass.AddColorTarget(new RenderGraphTexture
+            {
+                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16G16_SFloat)
+            });
+            pass.AddColorTarget(new RenderGraphTexture
+            {
+                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.B10G11R11_UFloatPack32)
+            });
+
+            var resources = renderPass.Initialize();
+            var colorEntries = resources.Textures
+                .Where(entry => !entry.IsDepthAttachment)
+                .OrderBy(entry => entry.AttachmentIndex)
+                .ToArray();
+
+            Assert.That(colorEntries, Has.Length.EqualTo(3));
+            Assert.That(colorEntries[0].Name, Is.EqualTo("Color"));
+            Assert.That(colorEntries[0].AttachmentIndex, Is.EqualTo(0));
+            Assert.That(colorEntries[1].Name, Is.EqualTo("Color1"));
+            Assert.That(colorEntries[1].AttachmentIndex, Is.EqualTo(1));
+            Assert.That(colorEntries[2].Name, Is.EqualTo("Color2"));
+            Assert.That(colorEntries[2].AttachmentIndex, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void SetColorTargets_MarksPassResourceLayoutDirty_WhenAttachmentsChange()
+        {
+            var pass = new DrawObjectPass();
+
+            Assert.That(pass.IsPassResourceLayoutDirty, Is.False);
+
+            pass.AddColorTarget(new RenderGraphTexture
+            {
+                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16G16_SFloat)
+            });
+
+            Assert.That(pass.IsPassResourceLayoutDirty, Is.True);
+
+            pass.ClearPassResourceLayoutDirty();
+            pass.SetColorTargets(new RenderGraphTexture
+            {
+                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R8G8B8A8_UNorm)
+            });
+
+            Assert.That(pass.IsPassResourceLayoutDirty, Is.True);
         }
 
         private static RenderGraphTexture GetTextureField(DrawObjectPass pass, string fieldName)

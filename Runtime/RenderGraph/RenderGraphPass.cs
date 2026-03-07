@@ -30,16 +30,11 @@ namespace VividRP.Runtime
         }
     }
 
-    public interface IRenderPass
+    internal static class PassResourceCollector
     {
-        /// <summary>
-        /// Collects all [RenderGraphResource]-annotated fields via reflection
-        /// and returns a PassResource describing the pass's resource requirements.
-        /// Called once (or when the pass layout changes) to bake resource info.
-        /// </summary>
-        PassResource Initialize()
+        public static PassResource Collect(object pass)
         {
-            var type = GetType();
+            var type = pass.GetType();
             var fields = type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
 
             var textures = new List<PassResourceEntry>();
@@ -52,38 +47,45 @@ namespace VividRP.Runtime
                 if (attr == null)
                     continue;
 
-                var value = field.GetValue(this);
+                var value = field.GetValue(pass);
                 if (value == null)
                     continue;
 
-                var entry = new PassResourceEntry
-                {
-                    Field = field,
-                    Name = string.IsNullOrEmpty(attr.Name) ? field.Name : attr.Name,
-                    Access = attr.Access,
-                    AttachmentIndex = attr.AttachmentIndex,
-                    IsDepthAttachment = attr.IsDepthAttachment,
-                    Descriptor = value
-                };
-
                 switch (value)
                 {
-                    case RenderGraphTexture:
-                        entry.ResourceType = PassResourceType.Texture;
-                        textures.Add(entry);
+                    case RenderGraphTexture texture:
+                        textures.Add(CreateEntry(
+                            field,
+                            string.IsNullOrEmpty(attr.Name) ? field.Name : attr.Name,
+                            attr.Access,
+                            PassResourceType.Texture,
+                            texture,
+                            attr.AttachmentIndex,
+                            attr.IsDepthAttachment));
                         break;
-                    case RenderGraphBuffer:
-                        entry.ResourceType = PassResourceType.Buffer;
-                        buffers.Add(entry);
+                    case IEnumerable<RenderGraphTexture> textureCollection:
+                        AddTextureCollectionEntries(textures, field, attr, textureCollection);
                         break;
-                    case RenderGraphRenderList:
-                        entry.ResourceType = PassResourceType.RenderList;
-                        renderLists.Add(entry);
+                    case RenderGraphBuffer buffer:
+                        buffers.Add(CreateEntry(
+                            field,
+                            string.IsNullOrEmpty(attr.Name) ? field.Name : attr.Name,
+                            attr.Access,
+                            PassResourceType.Buffer,
+                            buffer,
+                            attr.AttachmentIndex,
+                            attr.IsDepthAttachment));
                         break;
-                        // case RenderGraphAccelerationStructureDesc:
-                        //     entry.ResourceType = PassResourceType.AccelerationStructure;
-                        //     accelStructs.Add(entry);
-                        //     break;
+                    case RenderGraphRenderList renderList:
+                        renderLists.Add(CreateEntry(
+                            field,
+                            string.IsNullOrEmpty(attr.Name) ? field.Name : attr.Name,
+                            attr.Access,
+                            PassResourceType.RenderList,
+                            renderList,
+                            attr.AttachmentIndex,
+                            attr.IsDepthAttachment));
+                        break;
                 }
             }
 
@@ -93,6 +95,82 @@ namespace VividRP.Runtime
                 Buffers = buffers.ToArray(),
                 RenderLists = renderLists.ToArray(),
             };
+        }
+
+        private static PassResourceEntry CreateEntry(
+            FieldInfo field,
+            string name,
+            AccessFlags access,
+            PassResourceType resourceType,
+            object descriptor,
+            int attachmentIndex,
+            bool isDepthAttachment)
+        {
+            return new PassResourceEntry
+            {
+                Field = field,
+                Name = name,
+                Access = access,
+                ResourceType = resourceType,
+                Descriptor = descriptor,
+                AttachmentIndex = attachmentIndex,
+                IsDepthAttachment = isDepthAttachment,
+            };
+        }
+
+        private static void AddTextureCollectionEntries(
+            List<PassResourceEntry> textures,
+            FieldInfo field,
+            RenderGraphResource attr,
+            IEnumerable<RenderGraphTexture> textureCollection)
+        {
+            var baseName = string.IsNullOrEmpty(attr.Name) ? field.Name : attr.Name;
+            var collectionIndex = 0;
+
+            foreach (var texture in textureCollection)
+            {
+                var entryAttachmentIndex = attr.AttachmentIndex >= 0
+                    ? attr.AttachmentIndex + collectionIndex
+                    : -1;
+
+                var entryNameSuffix = entryAttachmentIndex >= 0
+                    ? entryAttachmentIndex.ToString()
+                    : collectionIndex.ToString();
+
+                if (texture != null)
+                {
+                    textures.Add(CreateEntry(
+                        null,
+                        $"{baseName}{entryNameSuffix}",
+                        attr.Access,
+                        PassResourceType.Texture,
+                        texture,
+                        entryAttachmentIndex,
+                        attr.IsDepthAttachment));
+                }
+
+                collectionIndex++;
+            }
+        }
+    }
+
+    public interface IDynamicPassResourceLayout
+    {
+        bool IsPassResourceLayoutDirty { get; }
+
+        void ClearPassResourceLayoutDirty();
+    }
+
+    public interface IRenderPass
+    {
+        /// <summary>
+        /// Collects all [RenderGraphResource]-annotated fields via reflection
+        /// and returns a PassResource describing the pass's resource requirements.
+        /// Called once (or when the pass layout changes) to bake resource info.
+        /// </summary>
+        PassResource Initialize()
+        {
+            return PassResourceCollector.Collect(this);
         }
 
         /// <summary>

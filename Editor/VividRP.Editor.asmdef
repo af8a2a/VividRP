@@ -5,7 +5,8 @@
         "GUID:5cf6ab670f860794abf61e39f9402b99",
         "GUID:df380645f10b7bc4b97d4f5eb6303d95",
         "Unity.GraphToolkit.Editor",
-        "Unity.GraphToolkit.Common.Editor"
+        "Unity.GraphToolkit.Common.Editor",
+        "GUID:3eae0364be2026648bf74846acb8a731"
     ],
     "includePlatforms": [
         "Editor"

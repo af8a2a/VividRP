@@ -10,10 +10,12 @@ namespace VividRP.Runtime
         public int actualHeight;
         public int pixelWidth;
         public int pixelHeight;
+        public Rect pixelRect;
 
         public override void Reset()
         {
             camera = null;
+            pixelRect = default;
         }
     }
 }

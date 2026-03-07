@@ -60,6 +60,37 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ShouldSetViewport_IsFalse_ForSceneView()
+        {
+            var method = typeof(FinalBlitPass).GetMethod(
+                "ShouldSetViewport",
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            Assert.That(method, Is.Not.Null);
+            Assert.That((bool)method.Invoke(null, new object[] { CameraType.SceneView }), Is.False);
+            Assert.That((bool)method.Invoke(null, new object[] { CameraType.Game }), Is.True);
+        }
+
+        [Test]
+        public void GetViewport_UsesCameraPixelRect_WhenAvailable()
+        {
+            var method = typeof(FinalBlitPass).GetMethod(
+                "GetViewport",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            var cameraData = new VividCameraData
+            {
+                pixelRect = new Rect(12f, 34f, 320f, 180f),
+                actualWidth = 640,
+                actualHeight = 360,
+            };
+
+            Assert.That(method, Is.Not.Null);
+            Assert.That(
+                (Rect)method.Invoke(null, new object[] { cameraData }),
+                Is.EqualTo(new Rect(12f, 34f, 320f, 180f)));
+        }
+
+        [Test]
         public void Initialize_RegistersReadOnlySourceTexture()
         {
             IRenderPass renderPass = new FinalBlitPass();
@@ -80,15 +111,14 @@ namespace VividRP.Editor.Tests
             var pass = new FinalBlitPass();
             var frameData = new ContextContainer();
             var cameraData = frameData.GetOrCreate<VividCameraData>();
-            cameraData.actualWidth = 320;
-            cameraData.actualHeight = 180;
+            cameraData.pixelRect = new Rect(4f, 8f, 320f, 180f);
 
             pass.Prepare(frameData);
 
             var viewportField = typeof(FinalBlitPass).GetField("m_Viewport", BindingFlags.Instance | BindingFlags.NonPublic);
 
             Assert.That(viewportField, Is.Not.Null);
-            Assert.That((Rect)viewportField.GetValue(pass), Is.EqualTo(new Rect(0f, 0f, 320f, 180f)));
+            Assert.That((Rect)viewportField.GetValue(pass), Is.EqualTo(new Rect(4f, 8f, 320f, 180f)));
         }
     }
 }

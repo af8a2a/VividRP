@@ -12,6 +12,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private Material m_Material;
         private RenderTargetIdentifier m_CameraBackBufferTarget;
         private TextureUVOrigin m_CameraBackBufferTextureUVOrigin;
+        private bool m_ShouldSetViewport;
         private Rect m_Viewport;
 
         public override void Prepare(ContextContainer frameData)
@@ -25,17 +26,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 ? new RenderTargetIdentifier(camera.targetTexture)
                 : BuiltinRenderTextureType.CameraTarget;
             m_CameraBackBufferTextureUVOrigin = GetCameraBackBufferTextureUVOrigin(cameraType, hasTargetTexture);
+            m_ShouldSetViewport = ShouldSetViewport(cameraType);
 
-            var width = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
-            var height = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
-
-            if (width <= 0 || height <= 0)
-            {
-                width = Screen.width;
-                height = Screen.height;
-            }
-
-            m_Viewport = new Rect(0f, 0f, width, height);
+            m_Viewport = GetViewport(cameraData);
         }
 
         public override void Create()
@@ -63,7 +56,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var scaleBias = GetFinalBlitScaleBias(scale, sourceTextureUVOrigin, m_CameraBackBufferTextureUVOrigin);
 
             cmd.SetRenderTarget(m_CameraBackBufferTarget);
-            cmd.SetViewport(m_Viewport);
+            if (m_ShouldSetViewport)
+                cmd.SetViewport(m_Viewport);
 
             Blitter.BlitTexture(unsafeCmd, sourceHandle, scaleBias, m_Material, 0);
         }
@@ -87,6 +81,25 @@ namespace VividRP.Runtime.RenderPass.Core
                 return TextureUVOrigin.BottomLeft;
 
             return SystemInfo.graphicsUVStartsAtTop ? TextureUVOrigin.TopLeft : TextureUVOrigin.BottomLeft;
+        }
+
+        private static bool ShouldSetViewport(CameraType cameraType)
+        {
+            return cameraType != CameraType.SceneView;
+        }
+
+        private static Rect GetViewport(VividCameraData cameraData)
+        {
+            if (cameraData.pixelRect.width > 0f && cameraData.pixelRect.height > 0f)
+                return cameraData.pixelRect;
+
+            var width = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
+            var height = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
+
+            if (width <= 0 || height <= 0)
+                return new Rect(0f, 0f, Screen.width, Screen.height);
+
+            return new Rect(0f, 0f, width, height);
         }
 
         private static Vector4 GetFinalBlitScaleBias(

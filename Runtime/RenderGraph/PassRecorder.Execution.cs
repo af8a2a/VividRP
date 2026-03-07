@@ -28,6 +28,7 @@ namespace VividRP.Runtime
             cameraData.camera = camera;
             cameraData.pixelWidth = camera.pixelWidth;
             cameraData.pixelHeight = camera.pixelHeight;
+            cameraData.pixelRect = camera.pixelRect;
             cameraData.actualWidth = camera.scaledPixelWidth;
             cameraData.actualHeight = camera.scaledPixelHeight;
             renderingData.cullingResults = cullingResults;

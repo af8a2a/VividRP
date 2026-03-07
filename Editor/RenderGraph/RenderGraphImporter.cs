@@ -42,11 +42,18 @@ namespace VividRP.Editor.RenderGraph
             var historyNodeToIndex = new Dictionary<HistoryResourceNodeData, int>();
             var bufferNodeToIndex = new Dictionary<BufferResourceNodeData, int>();
             var renderListNodeToIndex = new Dictionary<RenderListResourceNodeData, int>();
-            var passNodes = graph.GetNodes().OfType<RenderPassNodeData>().ToList();
+            var passNodes = new List<RenderPassNodeData>();
             var passNodeToIndex = new Dictionary<RenderPassNodeData, int>();
-            for (var index = 0; index < passNodes.Count; index++)
+            var passNodeTypes = new Dictionary<RenderPassNodeData, Type>();
+            foreach (var passNode in graph.GetNodes().OfType<RenderPassNodeData>())
             {
-                passNodeToIndex[passNodes[index]] = index;
+                var passType = passNode.GetPassType();
+                if (passType == null || !typeof(IRenderPass).IsAssignableFrom(passType))
+                    continue;
+
+                passNodeToIndex[passNode] = passNodes.Count;
+                passNodeTypes[passNode] = passType;
+                passNodes.Add(passNode);
             }
 
             foreach (var node in graph.GetNodes())
@@ -83,12 +90,7 @@ namespace VividRP.Editor.RenderGraph
             {
                 var passNode = node;
 
-                var passType = passNode.GetPassType();
-                if (passType == null)
-                    continue;
-
-                if (!typeof(IRenderPass).IsAssignableFrom(passType))
-                    continue;
+                var passType = passNodeTypes[passNode];
 
                 var passDef = new RenderGraphPassDefinition
                 {
@@ -211,7 +213,48 @@ namespace VividRP.Editor.RenderGraph
                 compiledPassDefinitions.Add(passDef);
             }
 
+            PopulatePreviewTextureFields(graph, compiledPassDefinitions, passNodeToIndex, passNodeTypes);
             runtimeAsset.Passes.AddRange(RenderGraphPassCompilationUtility.OrderPassDefinitions(compiledPassDefinitions));
+        }
+
+        private static void PopulatePreviewTextureFields(
+            RenderGraphEditorGraph graph,
+            IReadOnlyList<RenderGraphPassDefinition> passDefinitions,
+            IReadOnlyDictionary<RenderPassNodeData, int> passNodeToIndex,
+            IReadOnlyDictionary<RenderPassNodeData, Type> passNodeTypes)
+        {
+            if (graph == null || passDefinitions == null || passDefinitions.Count == 0)
+                return;
+
+            foreach (var previewNode in graph.GetNodes().OfType<PreviewNodeData>())
+            {
+                var inputPort = previewNode.GetInputPortByName(PreviewNodeData.TextureInputPortName);
+                var connectedPort = inputPort?.FirstConnectedPort;
+                if (connectedPort?.GetNode() is not RenderPassNodeData sourcePassNode)
+                    continue;
+
+                if (!passNodeToIndex.TryGetValue(sourcePassNode, out var sourcePassIndex)
+                    || sourcePassIndex < 0
+                    || sourcePassIndex >= passDefinitions.Count)
+                    continue;
+
+                if (!passNodeTypes.TryGetValue(sourcePassNode, out var sourcePassType) || sourcePassType == null)
+                    continue;
+
+                var sourceFieldName = GetConnectedOutputFieldName(
+                    sourcePassNode,
+                    sourcePassType,
+                    connectedPort,
+                    RenderGraphResourceKind.Texture);
+                if (string.IsNullOrEmpty(sourceFieldName))
+                    continue;
+
+                var previewTextureFields = passDefinitions[sourcePassIndex]?.PreviewTextureFields;
+                if (previewTextureFields == null || previewTextureFields.Contains(sourceFieldName))
+                    continue;
+
+                previewTextureFields.Add(sourceFieldName);
+            }
         }
 
         private static bool TryAddHistoryTextureBinding(

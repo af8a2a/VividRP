@@ -17,11 +17,8 @@ namespace VividRP.Editor.RenderGraph
         private const float PreviewHeight = 120f;
         private const float VerticalSpacing = 4f;
 
-        public override bool CanCacheInspectorGUI(SerializedProperty property)
-        {
-            return false;
-        }
 
+        
         public override float GetPropertyHeight(SerializedProperty property, GUIContent label)
         {
             var state = BuildPreviewState(property);
@@ -38,35 +35,6 @@ namespace VividRP.Editor.RenderGraph
             return height;
         }
 
-        public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
-        {
-            var state = BuildPreviewState(property);
-            var textureProperty = property.FindPropertyRelative("m_Texture");
-            if (textureProperty == null)
-            {
-                EditorGUI.LabelField(position, label, EditorGUIUtility.TrTextContent("Texture preview property is invalid."));
-                return;
-            }
-
-            var contentWidth = Mathf.Min(position.width, PreviewElementWidth);
-            var contentX = position.x + Mathf.Max(0f, (position.width - contentWidth) * 0.5f);
-            var contentRect = new Rect(contentX, position.y, contentWidth, position.height);
-            var lineRect = new Rect(contentRect.x, contentRect.y, contentRect.width, EditorGUIUtility.singleLineHeight);
-            EditorGUI.BeginProperty(position, label, property);
-            EditorGUI.PropertyField(lineRect, textureProperty, new GUIContent("Fallback"));
-
-            var helpHeight = GetHelpBoxHeight(state.Message, contentRect.width);
-            var helpRect = new Rect(contentRect.x, lineRect.yMax + VerticalSpacing, contentRect.width, helpHeight);
-            EditorGUI.HelpBox(helpRect, state.Message, MessageType.Info);
-
-            if (state.DisplayTexture != null)
-            {
-                var previewRect = new Rect(contentRect.x, helpRect.yMax + VerticalSpacing, contentRect.width, PreviewHeight);
-                DrawPreview(previewRect, state.DisplayTexture);
-            }
-
-            EditorGUI.EndProperty();
-        }
 
         public override VisualElement CreatePropertyGUI(SerializedProperty property)
         {
@@ -131,12 +99,12 @@ namespace VividRP.Editor.RenderGraph
             {
                 var state = BuildPreviewState(property);
                 liveInfo.text = state.Message;
-                previewImage.image = state.DisplayTexture;
+                previewImage.image =  state.DisplayTexture;
                 var hasPreview = state.DisplayTexture != null;
                 previewContainer.style.display = hasPreview ? DisplayStyle.Flex : DisplayStyle.None;
                 previewImage.style.display = hasPreview ? DisplayStyle.Flex : DisplayStyle.None;
             }
-
+            
             RefreshPreview();
             textureField.RegisterValueChangedCallback(_ => RefreshPreview());
             root.schedule.Execute(RefreshPreview).Every(250);
@@ -161,14 +129,6 @@ namespace VividRP.Editor.RenderGraph
             element.style.alignSelf = Align.Stretch;
         }
 
-        private static void DrawPreview(Rect rect, Texture texture)
-        {
-            EditorGUI.DrawRect(rect, new Color(0.18f, 0.18f, 0.18f));
-            if (texture == null)
-                return;
-
-            EditorGUI.DrawPreviewTexture(rect, texture, null, ScaleMode.ScaleToFit);
-        }
 
         private static PreviewState BuildPreviewState(SerializedProperty property)
         {
@@ -176,6 +136,10 @@ namespace VividRP.Editor.RenderGraph
             var fallbackTexture = textureProperty?.objectReferenceValue as Texture;
             var displayTexture = fallbackTexture;
             var message = "Connect a texture output to preview it.";
+            var hasConnectedPassOutput = false;
+            var hasConnectedTextureInput = false;
+            Type passType = null;
+            string fieldName = null;
 
             var previewValue = TryGetPreviewValue(property);
             var previewNode = ResolvePreviewNode(property);
@@ -183,13 +147,21 @@ namespace VividRP.Editor.RenderGraph
             {
                 previewNode.RefreshPreviewConnectionMetadata();
                 previewValue = previewNode.GetPreviewValue();
+                hasConnectedPassOutput = previewNode.TryGetConnectedPassOutput(out passType, out fieldName);
+                hasConnectedTextureInput = previewNode.HasConnectedTextureInput();
+            }
+            else if (previewValue != null)
+            {
+                hasConnectedPassOutput = previewValue.TryGetConnectedPassOutput(out passType, out fieldName);
+                hasConnectedTextureInput = previewValue.HasConnectedTextureInput;
             }
 
-            if (previewValue != null && previewValue.TryGetConnectedPassOutput(out var passType, out var fieldName))
+            if (hasConnectedPassOutput)
             {
                 if (RenderGraphPreviewRegistry.TryGetPreview(passType, fieldName, out var runtimeTexture))
                 {
                     displayTexture = runtimeTexture;
+                    previewValue.Texture = runtimeTexture;
                     message = $"Live preview from {passType.Name}.{fieldName}.";
                 }
                 else if (fallbackTexture != null)
@@ -201,7 +173,7 @@ namespace VividRP.Editor.RenderGraph
                     message = $"Connected to {passType.Name}.{fieldName}. Enter Play Mode and let a camera render to populate the preview.";
                 }
             }
-            else if (previewValue != null && previewValue.HasConnectedTextureInput)
+            else if (hasConnectedTextureInput)
             {
                 message = fallbackTexture != null
                     ? "Connected texture has no live preview provider yet. Showing fallback texture."

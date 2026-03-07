@@ -168,6 +168,7 @@ namespace VividRP.Editor.RenderGraph
 
         private static void ValidatePreviewNodes(RenderGraphEditorGraph graph, GraphLogger infos)
         {
+            var debug = graph.GetNodes().OfType<PreviewNodeData>();
             foreach (var previewNode in graph.GetNodes().OfType<PreviewNodeData>())
             {
                 previewNode.RefreshPreviewConnectionMetadata();

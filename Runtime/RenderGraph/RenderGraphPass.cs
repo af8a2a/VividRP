@@ -73,6 +73,16 @@ namespace VividRP.Runtime
 
             return null;
         }
+
+        internal static string GetRenderGraphResourceName(FieldInfo field, RenderGraphResource attr)
+        {
+            if (field == null)
+                return attr?.Name;
+
+            return string.IsNullOrEmpty(attr?.Name)
+                ? field.Name
+                : attr.Name;
+        }
     }
 
     internal static class PassResourceCollector
@@ -98,7 +108,7 @@ namespace VividRP.Runtime
                     case RenderGraphTexture texture:
                         textures.Add(CreateEntry(
                             field,
-                            string.IsNullOrEmpty(attr.Name) ? field.Name : attr.Name,
+                            RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr),
                             attr.Access,
                             PassResourceType.Texture,
                             texture,
@@ -111,7 +121,7 @@ namespace VividRP.Runtime
                     case RenderGraphBuffer buffer:
                         buffers.Add(CreateEntry(
                             field,
-                            string.IsNullOrEmpty(attr.Name) ? field.Name : attr.Name,
+                            RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr),
                             attr.Access,
                             PassResourceType.Buffer,
                             buffer,
@@ -121,7 +131,7 @@ namespace VividRP.Runtime
                     case RenderGraphRenderList renderList:
                         renderLists.Add(CreateEntry(
                             field,
-                            string.IsNullOrEmpty(attr.Name) ? field.Name : attr.Name,
+                            RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr),
                             attr.Access,
                             PassResourceType.RenderList,
                             renderList,
@@ -166,7 +176,7 @@ namespace VividRP.Runtime
             RenderGraphResource attr,
             IEnumerable<RenderGraphTexture> textureCollection)
         {
-            var baseName = string.IsNullOrEmpty(attr.Name) ? field.Name : attr.Name;
+            var baseName = RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr);
             var collectionIndex = 0;
 
             foreach (var texture in textureCollection)

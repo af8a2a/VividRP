@@ -41,6 +41,7 @@ namespace VividRP.Runtime
     {
         public string PassType;
         public List<RenderGraphPassResourceBinding> ResourceBindings = new();
+        public List<string> PreviewTextureFields = new();
     }
 
     public sealed class RenderGraphData : ScriptableObject

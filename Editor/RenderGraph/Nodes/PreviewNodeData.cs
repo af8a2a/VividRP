@@ -13,11 +13,14 @@ namespace VividRP.Editor.RenderGraph
 
         private const string PreviewOptionName = "Preview";
 
+        // [UnityEngine.SerializeField]
+        // private TexturePreviewValue m_PreviewValue = new();
+
         protected override void OnDefineOptions(IOptionDefinitionContext context)
         {
             context.AddOption<TexturePreviewValue>(PreviewOptionName)
-                .WithDisplayName("Texture Preview")
-                .WithDefaultValue(new TexturePreviewValue());
+                .WithDisplayName("Texture Preview");
+            // .WithDefaultValue(m_PreviewValue ??= new TexturePreviewValue());
         }
 
         protected override void OnDefinePorts(IPortDefinitionContext context)
@@ -30,8 +33,9 @@ namespace VividRP.Editor.RenderGraph
         internal TexturePreviewValue GetPreviewValue()
         {
             var option = GetNodeOptionByName(PreviewOptionName);
-            option.TryGetValue<TexturePreviewValue>(out var previewValue);
-            return previewValue ?? new TexturePreviewValue();
+            TexturePreviewValue previewValue=new TexturePreviewValue();
+            option.TryGetValue<TexturePreviewValue>(out previewValue);
+            return previewValue;
         }
 
         internal Texture GetPreviewTexture()
@@ -90,7 +94,7 @@ namespace VividRP.Editor.RenderGraph
 
                 if (ReferenceEquals(sourcePassNode.GetOutputPortByName(outputPortName), connectedPort))
                 {
-                    fieldName = field.Name;
+                    fieldName = RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr);
                     return true;
                 }
             }

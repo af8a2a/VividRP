@@ -230,6 +230,9 @@ namespace VividRP.Editor.RenderGraph
                 PassType = source?.PassType,
             };
 
+            if (source?.PreviewTextureFields != null)
+                clone.PreviewTextureFields.AddRange(source.PreviewTextureFields);
+
             if (source?.ResourceBindings == null)
                 return clone;
 

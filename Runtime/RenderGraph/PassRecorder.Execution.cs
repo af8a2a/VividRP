@@ -517,7 +517,8 @@ namespace VividRP.Runtime
         private static void RecordTexturePreviewPasses(
             RenderGraph renderGraph,
             IRenderPass pass,
-            PassResource resources)
+            PassResource resources,
+            RenderGraphPassDefinition passDefinition)
         {
             if (renderGraph == null || pass == null || resources?.Textures == null || resources.Textures.Length == 0)
                 return;
@@ -525,7 +526,7 @@ namespace VividRP.Runtime
             var passType = pass.GetType();
             foreach (var entry in resources.Textures)
             {
-                if (!ShouldRecordTexturePreview(entry))
+                if (!ShouldRecordTexturePreview(passDefinition, entry))
                     continue;
 
                 var source = entry.Texture.innerHandle;
@@ -559,10 +560,14 @@ namespace VividRP.Runtime
             }
         }
 
-        private static bool ShouldRecordTexturePreview(PassResourceEntry entry)
+        internal static bool ShouldRecordTexturePreview(RenderGraphPassDefinition passDefinition, PassResourceEntry entry)
         {
-            return entry != null
+            return passDefinition?.PreviewTextureFields != null
+                && passDefinition.PreviewTextureFields.Count > 0
+                && entry != null
                 && entry.Texture != null
+                && entry.Field != null
+                && passDefinition.PreviewTextureFields.Contains(entry.Field.Name)
                 && (!string.IsNullOrEmpty(entry.Name) || (entry.Field != null && !string.IsNullOrEmpty(entry.Field.Name)))
                 && (entry.Access & AccessFlags.Write) != 0
                 && !entry.IsDepthAttachment;
@@ -590,24 +595,29 @@ namespace VividRP.Runtime
             var bufferCache = new Dictionary<RenderGraphBuffer, BufferHandle>();
             var renderListCache = new Dictionary<RenderGraphRenderList, RendererListHandle>();
 
-            foreach (var pass in s_RenderPasses)
+            var passDefinitions = graphAsset?.Passes;
+            for (var passIndex = 0; passIndex < s_RenderPasses.Count; passIndex++)
             {
+                var pass = s_RenderPasses[passIndex];
                 var resources = GetCurrentPassResources(pass);
+                var passDefinition = passDefinitions != null && passIndex < passDefinitions.Count
+                    ? passDefinitions[passIndex]
+                    : null;
 
                 if (pass is ComputePass computePass)
                 {
                     RecordComputePass(renderGraph, computePass, resources, textureCache, bufferCache, renderListCache);
-                    RecordTexturePreviewPasses(renderGraph, computePass, resources);
+                    RecordTexturePreviewPasses(renderGraph, computePass, resources, passDefinition);
                 }
                 else if (pass is RasterPass rasterPass)
                 {
                     RecordRasterPass(renderGraph, rasterPass, resources, textureCache, bufferCache, renderListCache);
-                    RecordTexturePreviewPasses(renderGraph, rasterPass, resources);
+                    RecordTexturePreviewPasses(renderGraph, rasterPass, resources, passDefinition);
                 }
                 else if (pass is UnsafePass unsafePass)
                 {
                     RecordUnsafePass(renderGraph, unsafePass, resources, textureCache, bufferCache, renderListCache);
-                    RecordTexturePreviewPasses(renderGraph, unsafePass, resources);
+                    RecordTexturePreviewPasses(renderGraph, unsafePass, resources, passDefinition);
                 }
             }
 

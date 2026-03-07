@@ -63,7 +63,7 @@ namespace VividRP.Editor.RenderGraph
 
         internal static string BuildPortDisplayName(FieldInfo field, RenderGraphResource attr, AccessFlags access)
         {
-            var displayName = string.IsNullOrEmpty(attr.Name) ? field.Name : attr.Name;
+            var displayName = RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr);
             var accessLabel = AccessFlagsToShortName(access);
             var attachmentLabel = attr.IsDepthAttachment
                 ? "Depth"

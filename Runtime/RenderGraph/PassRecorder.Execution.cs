@@ -14,12 +14,14 @@ namespace VividRP.Runtime
         private static readonly List<IRenderPass> s_RenderPasses = new();
         private static readonly ContextContainer s_FrameData = new();
         private static readonly Dictionary<IRenderPass, PassResource> s_PassResources = new();
+        private static RenderGraphTexture[] s_HistoryPreviousTextures = Array.Empty<RenderGraphTexture>();
+        private static RenderGraphTexture[] s_HistoryCurrentTextures = Array.Empty<RenderGraphTexture>();
 
         private static RenderGraphData s_CurrentGraphAsset;
         private static long s_CurrentImportVersion;
         private static bool s_IsCompiled;
 
-        internal static void InitializeContext(ScriptableRenderContext context, Camera camera)
+        internal static void InitializeContext(ScriptableRenderContext context, Camera camera, CullingResults cullingResults)
         {
             var renderingData = s_FrameData.GetOrCreate<VividRenderingData>();
             var cameraData = s_FrameData.GetOrCreate<VividCameraData>();
@@ -28,6 +30,7 @@ namespace VividRP.Runtime
             cameraData.pixelHeight = camera.pixelHeight;
             cameraData.actualWidth = camera.scaledPixelWidth;
             cameraData.actualHeight = camera.scaledPixelHeight;
+            renderingData.cullingResults = cullingResults;
             renderingData.context = context;
         }
 
@@ -47,10 +50,19 @@ namespace VividRP.Runtime
 
             s_RenderPasses.Clear();
             s_PassResources.Clear();
+            s_HistoryPreviousTextures = Array.Empty<RenderGraphTexture>();
+            s_HistoryCurrentTextures = Array.Empty<RenderGraphTexture>();
+            RenderGraphHistoryRegistry.Clear();
             RenderGraphPreviewRegistry.Clear();
             s_CurrentGraphAsset = null;
             s_CurrentImportVersion = 0;
             s_IsCompiled = false;
+        }
+
+        internal static void PrepareFrame(RenderGraphData graphAsset, CommandBuffer cmdBuffer)
+        {
+            EnsureCompiled(graphAsset);
+            PrepareHistoryTargets(graphAsset, cmdBuffer);
         }
 
         private static void EnsureCompiled(RenderGraphData graphAsset)
@@ -76,7 +88,9 @@ namespace VividRP.Runtime
             else
             {
                 var textures = CreateRuntimeTextures(graphAsset);
+                CreateRuntimeHistoryTextures(graphAsset, out s_HistoryPreviousTextures, out s_HistoryCurrentTextures);
                 var buffers = CreateRuntimeBuffers(graphAsset);
+                var renderLists = CreateRuntimeRenderLists(graphAsset);
                 var indexedPasses = new IRenderPass[graphAsset.Passes.Count];
                 var indexedPassTypes = new Type[graphAsset.Passes.Count];
 
@@ -110,7 +124,15 @@ namespace VividRP.Runtime
                         continue;
                     }
 
-                    ApplyResourceBindings(pass, passType, passDef, textures, buffers);
+                    ApplyResourceBindings(
+                        pass,
+                        passType,
+                        passDef,
+                        textures,
+                        s_HistoryPreviousTextures,
+                        s_HistoryCurrentTextures,
+                        buffers,
+                        renderLists);
 
                     indexedPasses[passIndex] = pass;
                     indexedPassTypes[passIndex] = passType;
@@ -163,6 +185,35 @@ namespace VividRP.Runtime
             return textures;
         }
 
+        private static void CreateRuntimeHistoryTextures(
+            RenderGraphData graphAsset,
+            out RenderGraphTexture[] previousTextures,
+            out RenderGraphTexture[] currentTextures)
+        {
+            if (graphAsset?.HistoryTextureDescriptors == null || graphAsset.HistoryTextureDescriptors.Count == 0)
+            {
+                previousTextures = Array.Empty<RenderGraphTexture>();
+                currentTextures = Array.Empty<RenderGraphTexture>();
+                return;
+            }
+
+            var count = graphAsset.HistoryTextureDescriptors.Count;
+            previousTextures = new RenderGraphTexture[count];
+            currentTextures = new RenderGraphTexture[count];
+            for (var i = 0; i < count; i++)
+            {
+                var descriptor = graphAsset.HistoryTextureDescriptors[i];
+                previousTextures[i] = new RenderGraphTexture
+                {
+                    desc = descriptor != null ? descriptor.Clone() : new RenderGraphTextureDesc(),
+                };
+                currentTextures[i] = new RenderGraphTexture
+                {
+                    desc = descriptor != null ? descriptor.Clone() : new RenderGraphTextureDesc(),
+                };
+            }
+        }
+
         private static RenderGraphBuffer[] CreateRuntimeBuffers(RenderGraphData graphAsset)
         {
             if (graphAsset.BufferDescriptors == null || graphAsset.BufferDescriptors.Count == 0)
@@ -178,6 +229,23 @@ namespace VividRP.Runtime
             }
 
             return buffers;
+        }
+
+        private static RenderGraphRenderList[] CreateRuntimeRenderLists(RenderGraphData graphAsset)
+        {
+            if (graphAsset.RenderListDescriptors == null || graphAsset.RenderListDescriptors.Count == 0)
+                return Array.Empty<RenderGraphRenderList>();
+
+            var renderLists = new RenderGraphRenderList[graphAsset.RenderListDescriptors.Count];
+            for (var i = 0; i < renderLists.Length; i++)
+            {
+                var renderList = new RenderGraphRenderList();
+                var desc = graphAsset.RenderListDescriptors[i];
+                renderList.desc = desc != null ? desc.Clone() : new RenderGraphRenderListDesc();
+                renderLists[i] = renderList;
+            }
+
+            return renderLists;
         }
 
         private static Type ResolveType(string assemblyQualifiedOrFullName)
@@ -201,7 +269,10 @@ namespace VividRP.Runtime
             Type passType,
             RenderGraphPassDefinition passDef,
             RenderGraphTexture[] textures,
-            RenderGraphBuffer[] buffers)
+            RenderGraphTexture[] historyPreviousTextures,
+            RenderGraphTexture[] historyCurrentTextures,
+            RenderGraphBuffer[] buffers,
+            RenderGraphRenderList[] renderLists)
         {
             if (passDef.ResourceBindings == null || passDef.ResourceBindings.Count == 0)
                 return;
@@ -223,10 +294,19 @@ namespace VividRP.Runtime
                 switch (binding.ResourceKind)
                 {
                     case RenderGraphResourceKind.Texture:
-                        if (binding.ResourceIndex >= 0 && binding.ResourceIndex < textures.Length &&
-                            field.FieldType == typeof(RenderGraphTexture))
+                        if (field.FieldType != typeof(RenderGraphTexture))
+                            break;
+
+                        var textureArray = binding.ResourceBindingVariant switch
                         {
-                            field.SetValue(pass, textures[binding.ResourceIndex]);
+                            RenderGraphResourceBindingVariant.HistoryPrevious => historyPreviousTextures,
+                            RenderGraphResourceBindingVariant.HistoryCurrent => historyCurrentTextures,
+                            _ => textures,
+                        };
+
+                        if (binding.ResourceIndex >= 0 && binding.ResourceIndex < textureArray.Length)
+                        {
+                            field.SetValue(pass, textureArray[binding.ResourceIndex]);
                         }
                         break;
                     case RenderGraphResourceKind.Buffer:
@@ -234,6 +314,13 @@ namespace VividRP.Runtime
                             field.FieldType == typeof(RenderGraphBuffer))
                         {
                             field.SetValue(pass, buffers[binding.ResourceIndex]);
+                        }
+                        break;
+                    case RenderGraphResourceKind.RenderList:
+                        if (binding.ResourceIndex >= 0 && binding.ResourceIndex < renderLists.Length &&
+                            field.FieldType == typeof(RenderGraphRenderList))
+                        {
+                            field.SetValue(pass, renderLists[binding.ResourceIndex]);
                         }
                         break;
                 }
@@ -325,6 +412,104 @@ namespace VividRP.Runtime
             return sourceValue;
         }
 
+        private static void PrepareHistoryTargets(RenderGraphData graphAsset, CommandBuffer cmdBuffer)
+        {
+            if (cmdBuffer == null || graphAsset?.HistoryTextureDescriptors == null || graphAsset.HistoryTextureDescriptors.Count == 0)
+                return;
+
+            var camera = s_FrameData.GetOrCreate<VividCameraData>().camera;
+            if (camera == null)
+                return;
+
+            for (var i = 0; i < graphAsset.HistoryTextureDescriptors.Count; i++)
+            {
+                RenderGraphHistoryRegistry.GetOrCreateHistoryTarget(camera, graphAsset, i, graphAsset.HistoryTextureDescriptors[i], cmdBuffer);
+            }
+        }
+
+        private static void PrepareFrameHistoryTextures(RenderGraph renderGraph, RenderGraphData graphAsset)
+        {
+            if (renderGraph == null)
+                return;
+
+            foreach (var texture in s_HistoryPreviousTextures)
+            {
+                texture?.ClearImportedHandle();
+            }
+
+            foreach (var texture in s_HistoryCurrentTextures)
+            {
+                texture?.ClearImportedHandle();
+            }
+
+            if (graphAsset?.HistoryTextureDescriptors == null || graphAsset.HistoryTextureDescriptors.Count == 0)
+                return;
+
+            var camera = s_FrameData.GetOrCreate<VividCameraData>().camera;
+            if (camera == null)
+                return;
+
+            for (var i = 0; i < graphAsset.HistoryTextureDescriptors.Count && i < s_HistoryPreviousTextures.Length; i++)
+            {
+                if (!RenderGraphHistoryRegistry.TryGetHistoryTarget(camera, graphAsset, i, out var target, out _)
+                    || target == null)
+                {
+                    continue;
+                }
+
+                s_HistoryPreviousTextures[i].SetImportedHandle(renderGraph.ImportTexture(target));
+            }
+        }
+
+        private static void RecordHistoryUpdatePasses(RenderGraph renderGraph, RenderGraphData graphAsset)
+        {
+            if (renderGraph == null || graphAsset?.HistoryTextureDescriptors == null || graphAsset.HistoryTextureDescriptors.Count == 0)
+                return;
+
+            var camera = s_FrameData.GetOrCreate<VividCameraData>().camera;
+            if (camera == null)
+                return;
+
+            for (var i = 0; i < graphAsset.HistoryTextureDescriptors.Count && i < s_HistoryCurrentTextures.Length; i++)
+            {
+                var currentTexture = s_HistoryCurrentTextures[i];
+                if (currentTexture == null || !currentTexture.innerHandle.IsValid() || !ShouldPersistHistoryTexture(currentTexture))
+                    continue;
+
+                var target = RenderGraphHistoryRegistry.GetOrCreateHistoryTarget(camera, graphAsset, i, graphAsset.HistoryTextureDescriptors[i]);
+                if (target == null)
+                    continue;
+
+                var destination = renderGraph.ImportTexture(target);
+                if (!destination.IsValid() || !renderGraph.CanAddCopyPass(currentTexture.innerHandle, destination))
+                    continue;
+
+                var historyName = graphAsset.HistoryTextureDescriptors[i]?.Name;
+                if (string.IsNullOrEmpty(historyName))
+                    historyName = $"History_{i}";
+
+                renderGraph.AddCopyPass(currentTexture.innerHandle, destination, $"{historyName} Persist");
+                RenderGraphHistoryRegistry.MarkHistoryValid(camera, graphAsset, i);
+            }
+        }
+
+        private static bool ShouldPersistHistoryTexture(RenderGraphTexture texture)
+        {
+            foreach (var resources in s_PassResources.Values)
+            {
+                if (resources?.Textures == null)
+                    continue;
+
+                foreach (var entry in resources.Textures)
+                {
+                    if (ReferenceEquals(entry?.Texture, texture) && (entry.Access & AccessFlags.Write) != 0)
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
         private static void RecordTexturePreviewPasses(
             RenderGraph renderGraph,
             IRenderPass pass,
@@ -384,6 +569,7 @@ namespace VividRP.Runtime
         public static void RecordRenderGraph(RenderGraph renderGraph, ScriptableRenderContext context, RenderGraphData graphAsset)
         {
             EnsureCompiled(graphAsset);
+            PrepareFrameHistoryTextures(renderGraph, graphAsset);
 
             foreach (var pass in s_RenderPasses)
             {
@@ -392,6 +578,7 @@ namespace VividRP.Runtime
 
             var textureCache = new Dictionary<RenderGraphTexture, TextureHandle>();
             var bufferCache = new Dictionary<RenderGraphBuffer, BufferHandle>();
+            var renderListCache = new Dictionary<RenderGraphRenderList, RendererListHandle>();
 
             foreach (var pass in s_RenderPasses)
             {
@@ -400,20 +587,22 @@ namespace VividRP.Runtime
 
                 if (pass is ComputePass computePass)
                 {
-                    RecordComputePass(renderGraph, computePass, resources, textureCache, bufferCache);
+                    RecordComputePass(renderGraph, computePass, resources, textureCache, bufferCache, renderListCache);
                     RecordTexturePreviewPasses(renderGraph, computePass, resources);
                 }
                 else if (pass is RasterPass rasterPass)
                 {
-                    RecordRasterPass(renderGraph, rasterPass, resources, textureCache, bufferCache);
+                    RecordRasterPass(renderGraph, rasterPass, resources, textureCache, bufferCache, renderListCache);
                     RecordTexturePreviewPasses(renderGraph, rasterPass, resources);
                 }
                 else if (pass is UnsafePass unsafePass)
                 {
-                    RecordUnsafePass(renderGraph, unsafePass, resources, textureCache, bufferCache);
+                    RecordUnsafePass(renderGraph, unsafePass, resources, textureCache, bufferCache, renderListCache);
                     RecordTexturePreviewPasses(renderGraph, unsafePass, resources);
                 }
             }
+
+            RecordHistoryUpdatePasses(renderGraph, graphAsset);
         }
     }
 }

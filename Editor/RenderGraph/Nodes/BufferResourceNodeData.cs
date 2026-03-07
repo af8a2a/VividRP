@@ -21,10 +21,6 @@ namespace VividRP.Editor.RenderGraph
 
         protected override void OnDefinePorts(IPortDefinitionContext context)
         {
-            context.AddInputPort<RenderGraphBuffer>(InputPortName)
-                .WithDisplayName("In")
-                .Build();
-
             context.AddOutputPort<RenderGraphBuffer>(OutputPortName)
                 .WithDisplayName("Out")
                 .Build();

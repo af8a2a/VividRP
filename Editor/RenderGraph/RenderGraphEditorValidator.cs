@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Reflection;
 using Unity.GraphToolkit.Editor;
+using UnityEngine.Experimental.Rendering;
 using VividRP.Runtime;
 
 namespace VividRP.Editor.RenderGraph
@@ -56,8 +57,10 @@ namespace VividRP.Editor.RenderGraph
                 }
 
                 ValidateReadWriteBindings(passNode, passType, infos);
+                ValidateHistoryBindings(passNode, passType, infos);
             }
 
+            ValidateHistoryResourceNodes(graph, infos);
             ValidatePreviewNodes(graph, infos);
         }
 
@@ -79,11 +82,88 @@ namespace VividRP.Editor.RenderGraph
                     ? null
                     : passNode.GetOutputPortByName(outputPortName)?.FirstConnectedPort?.GetNode();
 
-                if (inputNode != null && outputNode != null && inputNode != outputNode)
+                var inputResourceNode = IsStandaloneResourceNode(inputNode) ? inputNode : null;
+                var outputResourceNode = IsStandaloneResourceNode(outputNode) ? outputNode : null;
+                if (inputResourceNode != null && outputResourceNode != null && inputResourceNode != outputResourceNode)
                 {
                     infos.LogError(
                         $"Read/write field '{field.Name}' must connect to the same resource node on both input and output ports.",
                         passNode);
+                }
+            }
+        }
+
+        private static void ValidateHistoryBindings(RenderPassNodeData passNode, System.Type passType, GraphLogger infos)
+        {
+            var fields = passType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            foreach (var field in fields)
+            {
+                var attr = field.GetCustomAttribute<RenderGraphResource>();
+                if (attr == null || field.FieldType != typeof(RenderGraphTexture))
+                    continue;
+
+                var inputPortName = RenderPassPortUtility.GetInputPortName(field.Name, attr.Access);
+                var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
+                var inputConnectedPort = string.IsNullOrEmpty(inputPortName)
+                    ? null
+                    : passNode.GetInputPortByName(inputPortName)?.FirstConnectedPort;
+                var outputConnectedPort = string.IsNullOrEmpty(outputPortName)
+                    ? null
+                    : passNode.GetOutputPortByName(outputPortName)?.FirstConnectedPort;
+                var inputHistoryNode = inputConnectedPort?.GetNode() as HistoryResourceNodeData;
+                var outputHistoryNode = outputConnectedPort?.GetNode() as HistoryResourceNodeData;
+
+                if (inputHistoryNode == null && outputHistoryNode == null)
+                    continue;
+
+                var canRead = RenderPassPortUtility.CanRead(attr.Access);
+                var canWrite = RenderPassPortUtility.CanWrite(attr.Access);
+
+                if (canRead && canWrite)
+                {
+                    var isValidCurrentHistoryBinding = inputHistoryNode != null
+                        && outputConnectedPort == null
+                        && inputHistoryNode.IsCurrentOutputPort(inputConnectedPort);
+
+                    if (!isValidCurrentHistoryBinding)
+                    {
+                        infos.LogError(
+                            $"Read/write field '{field.Name}' must connect only its input port to CurrOut on a history node and leave the output port unconnected.",
+                            passNode);
+                    }
+
+                    continue;
+                }
+
+                if (canRead && inputHistoryNode != null && !inputHistoryNode.IsPreviousOutputPort(inputConnectedPort) && !inputHistoryNode.IsCurrentOutputPort(inputConnectedPort))
+                {
+                    infos.LogError($"Read field '{field.Name}' must connect to PrevOut or CurrOut on a history node.", passNode);
+                }
+
+                if (canWrite && (inputHistoryNode != null || outputHistoryNode != null))
+                {
+                    infos.LogError(
+                        $"Write-only field '{field.Name}' cannot bind directly to a history node. Use a ReadWrite field and connect its input port to CurrOut instead.",
+                        passNode);
+                }
+            }
+        }
+
+        private static bool IsStandaloneResourceNode(INode node)
+        {
+            return node is TextureResourceNodeData
+                || node is BufferResourceNodeData
+                || node is RenderListResourceNodeData;
+        }
+
+        private static void ValidateHistoryResourceNodes(RenderGraphEditorGraph graph, GraphLogger infos)
+        {
+            foreach (var historyNode in graph.GetNodes().OfType<HistoryResourceNodeData>())
+            {
+                var desc = historyNode.GetDescriptor();
+                if (desc == null || desc.ColorFormat == GraphicsFormat.None)
+                {
+                    infos.LogError("History resource requires a valid color format.", historyNode);
                 }
             }
         }
@@ -102,7 +182,7 @@ namespace VividRP.Editor.RenderGraph
                 }
 
                 var sourceNode = inputPort.FirstConnectedPort?.GetNode();
-                if (sourceNode is TextureResourceNodeData || sourceNode is RenderPassNodeData)
+                if (sourceNode is TextureResourceNodeData || sourceNode is HistoryResourceNodeData || sourceNode is RenderPassNodeData)
                     continue;
 
                 infos.LogWarning("Preview node only supports texture outputs.", previewNode);

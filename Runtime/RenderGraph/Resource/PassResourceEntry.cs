@@ -8,6 +8,7 @@ namespace VividRP.Runtime
     {
         Texture,
         Buffer,
+        RenderList,
         AccelerationStructure
     }
 
@@ -39,7 +40,7 @@ namespace VividRP.Runtime
 
         /// <summary>
         /// The serializable descriptor instance read from the field.
-        /// Cast to RenderGraphTextureDesc / RenderGraphBufferDesc / RenderGraphAccelerationStructureDesc.
+        /// Cast to RenderGraphTexture / RenderGraphBuffer / RenderGraphRenderList.
         /// </summary>
         public object Descriptor;
 
@@ -55,5 +56,6 @@ namespace VividRP.Runtime
 
         public RenderGraphTexture Texture => Descriptor as RenderGraphTexture;
         public RenderGraphBuffer Buffer => Descriptor as RenderGraphBuffer;
+        public RenderGraphRenderList RenderList => Descriptor as RenderGraphRenderList;
     }
 }

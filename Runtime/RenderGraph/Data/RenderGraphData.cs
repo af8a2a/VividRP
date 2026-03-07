@@ -7,7 +7,8 @@ namespace VividRP.Runtime
     public enum RenderGraphResourceKind
     {
         Texture,
-        Buffer
+        Buffer,
+        RenderList
     }
 
     public enum RenderGraphPassBindingSourceKind
@@ -16,12 +17,20 @@ namespace VividRP.Runtime
         PassField
     }
 
+    public enum RenderGraphResourceBindingVariant
+    {
+        Default,
+        HistoryPrevious,
+        HistoryCurrent
+    }
+
     [Serializable]
     public sealed class RenderGraphPassResourceBinding
     {
         public string FieldName;
         public RenderGraphResourceKind ResourceKind;
         public int ResourceIndex;
+        public RenderGraphResourceBindingVariant ResourceBindingVariant;
         public RenderGraphPassBindingSourceKind SourceKind;
         public int SourcePassIndex = -1;
         public string SourceFieldName;
@@ -39,7 +48,9 @@ namespace VividRP.Runtime
         public long ImportVersion;
 
         public List<RenderGraphTextureDesc> TextureDescriptors = new();
+        public List<RenderGraphTextureDesc> HistoryTextureDescriptors = new();
         public List<RenderGraphBufferDesc> BufferDescriptors = new();
+        public List<RenderGraphRenderListDesc> RenderListDescriptors = new();
 
         public List<RenderGraphPassDefinition> Passes = new();
     }

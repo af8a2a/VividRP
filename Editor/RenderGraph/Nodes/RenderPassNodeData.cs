@@ -45,7 +45,7 @@ namespace VividRP.Editor.RenderGraph
                     if (!string.IsNullOrEmpty(inputPortName))
                     {
                         context.AddInputPort<RenderGraphTexture>(inputPortName)
-                            .WithDisplayName(RenderPassPortUtility.BuildPortDisplayName(field, attr, attr.Access & ~AccessFlags.Write))
+                            .WithDisplayName(RenderPassPortUtility.BuildPortDisplayName(field, attr, RenderPassPortUtility.GetInputPortDisplayAccess(attr.Access)))
                             .Build();
                     }
 
@@ -53,7 +53,7 @@ namespace VividRP.Editor.RenderGraph
                     if (!string.IsNullOrEmpty(outputPortName))
                     {
                         context.AddOutputPort<RenderGraphTexture>(outputPortName)
-                            .WithDisplayName(RenderPassPortUtility.BuildPortDisplayName(field, attr, attr.Access & ~AccessFlags.Read))
+                            .WithDisplayName(RenderPassPortUtility.BuildPortDisplayName(field, attr, RenderPassPortUtility.GetOutputPortDisplayAccess(attr.Access)))
                             .Build();
                     }
                 }
@@ -63,7 +63,7 @@ namespace VividRP.Editor.RenderGraph
                     if (!string.IsNullOrEmpty(inputPortName))
                     {
                         context.AddInputPort<RenderGraphBuffer>(inputPortName)
-                            .WithDisplayName(RenderPassPortUtility.BuildPortDisplayName(field, attr, attr.Access & ~AccessFlags.Write))
+                            .WithDisplayName(RenderPassPortUtility.BuildPortDisplayName(field, attr, RenderPassPortUtility.GetInputPortDisplayAccess(attr.Access)))
                             .Build();
                     }
 
@@ -71,7 +71,25 @@ namespace VividRP.Editor.RenderGraph
                     if (!string.IsNullOrEmpty(outputPortName))
                     {
                         context.AddOutputPort<RenderGraphBuffer>(outputPortName)
-                            .WithDisplayName(RenderPassPortUtility.BuildPortDisplayName(field, attr, attr.Access & ~AccessFlags.Read))
+                            .WithDisplayName(RenderPassPortUtility.BuildPortDisplayName(field, attr, RenderPassPortUtility.GetOutputPortDisplayAccess(attr.Access)))
+                            .Build();
+                    }
+                }
+                else if (field.FieldType == typeof(RenderGraphRenderList))
+                {
+                    var inputPortName = RenderPassPortUtility.GetInputPortName(field.Name, attr.Access);
+                    if (!string.IsNullOrEmpty(inputPortName))
+                    {
+                        context.AddInputPort<RenderGraphRenderList>(inputPortName)
+                            .WithDisplayName(RenderPassPortUtility.BuildPortDisplayName(field, attr, RenderPassPortUtility.GetInputPortDisplayAccess(attr.Access)))
+                            .Build();
+                    }
+
+                    var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
+                    if (!string.IsNullOrEmpty(outputPortName))
+                    {
+                        context.AddOutputPort<RenderGraphRenderList>(outputPortName)
+                            .WithDisplayName(RenderPassPortUtility.BuildPortDisplayName(field, attr, RenderPassPortUtility.GetOutputPortDisplayAccess(attr.Access)))
                             .Build();
                     }
                 }

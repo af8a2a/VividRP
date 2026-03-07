@@ -161,12 +161,28 @@ namespace VividRP.Runtime
     {
         public RenderGraphTextureDesc desc;
 
+        private bool m_UsesImportedHandle;
+
         public RenderGraphTexture()
         {
             desc = new RenderGraphTextureDesc();
         }
 
         internal TextureHandle innerHandle;
+
+        internal bool HasImportedHandle => m_UsesImportedHandle && innerHandle.IsValid();
+
+        internal void SetImportedHandle(TextureHandle handle)
+        {
+            innerHandle = handle;
+            m_UsesImportedHandle = handle.IsValid();
+        }
+
+        internal void ClearImportedHandle()
+        {
+            innerHandle = default;
+            m_UsesImportedHandle = false;
+        }
 
         public static implicit operator TextureHandle(RenderGraphTexture rt)
         {

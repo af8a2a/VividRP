@@ -21,10 +21,14 @@ namespace VividRP.Editor.RenderGraph
 
         internal static string GetInputPortName(string fieldName, AccessFlags access)
         {
-            if (!CanRead(access))
+            if (!CanRead(access) && !CanWrite(access))
                 return null;
 
-            return CanWrite(access) ? $"{fieldName}{InputPortSuffix}" : fieldName;
+            return !CanRead(access) && CanWrite(access)
+                ? $"{fieldName}{InputPortSuffix}"
+                : CanWrite(access)
+                    ? $"{fieldName}{InputPortSuffix}"
+                    : fieldName;
         }
 
         internal static string GetOutputPortName(string fieldName, AccessFlags access)
@@ -33,6 +37,28 @@ namespace VividRP.Editor.RenderGraph
                 return null;
 
             return CanRead(access) ? $"{fieldName}{OutputPortSuffix}" : fieldName;
+        }
+
+        internal static AccessFlags GetInputPortDisplayAccess(AccessFlags access)
+        {
+            if (CanRead(access) && CanWrite(access))
+                return AccessFlags.Read;
+
+            if (CanRead(access))
+                return AccessFlags.Read;
+
+            if (CanWrite(access))
+                return AccessFlags.Write;
+
+            return access;
+        }
+
+        internal static AccessFlags GetOutputPortDisplayAccess(AccessFlags access)
+        {
+            if (CanWrite(access))
+                return AccessFlags.Write;
+
+            return access;
         }
 
         internal static string BuildPortDisplayName(FieldInfo field, RenderGraphResource attr, AccessFlags access)

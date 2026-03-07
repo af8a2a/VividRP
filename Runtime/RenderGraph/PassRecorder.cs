@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
@@ -36,6 +37,7 @@ namespace VividRP.Runtime
             PassResource resource,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
             Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
+            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
             string passName = null)
         {
             using var builder = renderGraph.AddComputePass<ComputePassData>(
@@ -43,7 +45,7 @@ namespace VividRP.Runtime
 
             passData.Pass = pass;
 
-            SetupComputeResources(renderGraph, builder, resource, textureCache, bufferCache);
+            SetupComputeResources(renderGraph, builder, resource, textureCache, bufferCache, renderListCache);
 
             builder.SetRenderFunc<ComputePassData>(static (data, ctx) => { data.Pass.Record(ctx); });
         }
@@ -58,6 +60,7 @@ namespace VividRP.Runtime
             PassResource resource,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
             Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
+            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
             string passName = null)
         {
             using var builder = renderGraph.AddRasterRenderPass<RasterPassData>(
@@ -65,7 +68,7 @@ namespace VividRP.Runtime
 
             passData.Pass = pass;
 
-            SetupRasterResources(renderGraph, builder, resource, textureCache, bufferCache);
+            SetupRasterResources(renderGraph, builder, resource, textureCache, bufferCache, renderListCache);
 
             builder.SetRenderFunc<RasterPassData>(static (data, ctx) =>
             {
@@ -83,6 +86,7 @@ namespace VividRP.Runtime
             PassResource resource,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
             Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
+            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
             string passName = null)
         {
             using var builder = renderGraph.AddUnsafePass<UnsafePassData>(
@@ -90,7 +94,7 @@ namespace VividRP.Runtime
 
             passData.Pass = pass;
 
-            SetupUnsafeResources(renderGraph, builder, resource, textureCache, bufferCache);
+            SetupUnsafeResources(renderGraph, builder, resource, textureCache, bufferCache, renderListCache);
 
             builder.SetRenderFunc<UnsafePassData>(static (data, ctx) => { data.Pass.Record(ctx); });
         }
@@ -102,6 +106,13 @@ namespace VividRP.Runtime
         {
             if (textureCache.TryGetValue(texture, out var handle))
                 return handle;
+
+            if (texture != null && texture.HasImportedHandle)
+            {
+                handle = texture.innerHandle;
+                textureCache.Add(texture, handle);
+                return handle;
+            }
 
             handle = renderGraph.CreateTexture(texture.desc);
             textureCache.Add(texture, handle);
@@ -121,6 +132,59 @@ namespace VividRP.Runtime
             return handle;
         }
 
+        private static RendererListHandle GetOrCreateRenderListHandle(
+            RenderGraph renderGraph,
+            RenderGraphRenderList renderList,
+            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache)
+        {
+            if (renderList == null)
+                return default;
+
+            if (renderListCache.TryGetValue(renderList, out var handle))
+                return handle;
+
+            var camera = s_FrameData.GetOrCreate<VividCameraData>().camera;
+            if (camera == null)
+                return default;
+
+            var renderingData = s_FrameData.GetOrCreate<VividRenderingData>();
+            var desc = renderList.desc?.CreateRendererListDesc(renderingData.cullingResults, camera) ?? default;
+            if (!desc.IsValid())
+                return default;
+
+            handle = renderGraph.CreateRendererList(desc);
+            renderListCache.Add(renderList, handle);
+            return handle;
+        }
+
+        private static void SetupRenderLists(
+            RenderGraph renderGraph,
+            IBaseRenderGraphBuilder builder,
+            PassResource resource,
+            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache)
+        {
+            var usesRendererList = false;
+
+            foreach (var entry in resource.RenderLists)
+            {
+                var renderList = entry.RenderList;
+                if (renderList == null)
+                    continue;
+
+                var handle = GetOrCreateRenderListHandle(renderGraph, renderList, renderListCache);
+                renderList.innerHandle = handle;
+
+                if (!handle.IsValid())
+                    continue;
+
+                builder.UseRendererList(handle);
+                usesRendererList = true;
+            }
+
+            if (usesRendererList)
+                builder.UseAllGlobalTextures(true);
+        }
+
         /// <summary>
         /// Sets up resources for compute and unsafe passes using IBaseRenderGraphBuilder.
         /// </summary>
@@ -129,7 +193,8 @@ namespace VividRP.Runtime
             IUnsafeRenderGraphBuilder builder,
             PassResource resource,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
-            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache)
+            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
+            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache)
         {
             foreach (var entry in resource.Textures)
             {
@@ -152,6 +217,8 @@ namespace VividRP.Runtime
                 buffer.innerHandle = handle;
                 builder.UseBuffer(handle, entry.Access);
             }
+
+            SetupRenderLists(renderGraph, builder, resource, renderListCache);
 
             builder.AllowPassCulling(false);
         }
@@ -164,7 +231,8 @@ namespace VividRP.Runtime
             IComputeRenderGraphBuilder builder,
             PassResource resource,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
-            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache)
+            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
+            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache)
         {
             foreach (var entry in resource.Textures)
             {
@@ -187,6 +255,8 @@ namespace VividRP.Runtime
                 buffer.innerHandle = handle;
                 builder.UseBuffer(handle, entry.Access);
             }
+
+            SetupRenderLists(renderGraph, builder, resource, renderListCache);
 
             builder.AllowPassCulling(false);
         }
@@ -200,7 +270,8 @@ namespace VividRP.Runtime
             IRasterRenderGraphBuilder builder,
             PassResource resource,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
-            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache)
+            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
+            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache)
         {
             foreach (var entry in resource.Textures)
             {
@@ -233,6 +304,8 @@ namespace VividRP.Runtime
                 buffer.innerHandle = handle;
                 builder.UseBuffer(handle, entry.Access);
             }
+
+            SetupRenderLists(renderGraph, builder, resource, renderListCache);
 
             builder.AllowPassCulling(false);
         }

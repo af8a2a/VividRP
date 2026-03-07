@@ -26,7 +26,7 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(
                 RenderPassPortUtility.GetInputPortName("Color", AccessFlags.Write),
-                Is.Null);
+                Is.EqualTo("Color_In"));
             Assert.That(
                 RenderPassPortUtility.GetOutputPortName("Color", AccessFlags.Write),
                 Is.EqualTo("Color"));

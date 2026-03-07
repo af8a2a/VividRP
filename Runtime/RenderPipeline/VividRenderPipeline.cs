@@ -32,10 +32,23 @@ namespace VividRP.Runtime
         private void RenderCamera(ScriptableRenderContext context, Camera camera)
         {
             BeginCameraRendering(context, camera);
+
+            if (!camera.TryGetCullingParameters(out var cullingParameters))
+            {
+                EndCameraRendering(context, camera);
+                return;
+            }
+
+            var cullingResults = context.Cull(ref cullingParameters);
+            context.SetupCameraProperties(camera);
+
             var cmdBuffer = CommandBufferPool.Get("VividRP");
 
-            PassRecorder.InitializeContext(context, camera);
+            PassRecorder.InitializeContext(context, camera, cullingResults);
             var graphAsset = m_Asset.RenderGraphAsset;
+            PassRecorder.PrepareFrame(graphAsset, cmdBuffer);
+            context.ExecuteCommandBuffer(cmdBuffer);
+            cmdBuffer.Clear();
 
             var renderGraphParams = new RenderGraphParameters
             {

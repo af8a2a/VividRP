@@ -3,6 +3,12 @@ using System;
 namespace VividRP.Editor.RenderGraph.Generated
 {
     [Serializable]
+    internal sealed class DrawObjectPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.DrawObjectPass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class FinalBlitPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.FinalBlitPass, VividRP.Runtime";

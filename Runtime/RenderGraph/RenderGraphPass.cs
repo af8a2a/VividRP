@@ -14,6 +14,7 @@ namespace VividRP.Runtime
     {
         public PassResourceEntry[] Textures = Array.Empty<PassResourceEntry>();
         public PassResourceEntry[] Buffers = Array.Empty<PassResourceEntry>();
+        public PassResourceEntry[] RenderLists = Array.Empty<PassResourceEntry>();
 
         /// <summary>
         /// All entries across all resource types.
@@ -24,6 +25,7 @@ namespace VividRP.Runtime
             {
                 foreach (var e in Textures) yield return e;
                 foreach (var e in Buffers) yield return e;
+                foreach (var e in RenderLists) yield return e;
             }
         }
     }
@@ -42,7 +44,7 @@ namespace VividRP.Runtime
 
             var textures = new List<PassResourceEntry>();
             var buffers = new List<PassResourceEntry>();
-            var accelStructs = new List<PassResourceEntry>();
+            var renderLists = new List<PassResourceEntry>();
 
             foreach (var field in fields)
             {
@@ -74,6 +76,10 @@ namespace VividRP.Runtime
                         entry.ResourceType = PassResourceType.Buffer;
                         buffers.Add(entry);
                         break;
+                    case RenderGraphRenderList:
+                        entry.ResourceType = PassResourceType.RenderList;
+                        renderLists.Add(entry);
+                        break;
                         // case RenderGraphAccelerationStructureDesc:
                         //     entry.ResourceType = PassResourceType.AccelerationStructure;
                         //     accelStructs.Add(entry);
@@ -85,6 +91,7 @@ namespace VividRP.Runtime
             {
                 Textures = textures.ToArray(),
                 Buffers = buffers.ToArray(),
+                RenderLists = renderLists.ToArray(),
             };
         }
 

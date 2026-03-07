@@ -10,7 +10,7 @@ using VividRP.Runtime;
 
 namespace VividRP.Editor.RenderGraph
 {
-    [ScriptedImporter(1, RenderGraphEditorGraph.AssetExtension)]
+    [ScriptedImporter(2, RenderGraphEditorGraph.AssetExtension)]
     internal sealed class RenderGraphImporter : ScriptedImporter
     {
         public override void OnImportAsset(AssetImportContext ctx)
@@ -76,6 +76,8 @@ namespace VividRP.Editor.RenderGraph
                     runtimeAsset.RenderListDescriptors.Add(renderListNode.GetDescriptor());
                 }
             }
+
+            var compiledPassDefinitions = new List<RenderGraphPassDefinition>(passNodes.Count);
 
             foreach (var node in passNodes)
             {
@@ -210,8 +212,10 @@ namespace VividRP.Editor.RenderGraph
                     }
                 }
 
-                runtimeAsset.Passes.Add(passDef);
+                compiledPassDefinitions.Add(passDef);
             }
+
+            runtimeAsset.Passes.AddRange(RenderGraphPassCompilationUtility.OrderPassDefinitions(compiledPassDefinitions));
         }
 
         private static bool TryAddHistoryTextureBinding(

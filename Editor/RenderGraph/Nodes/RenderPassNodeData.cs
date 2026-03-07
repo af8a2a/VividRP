@@ -32,12 +32,9 @@ namespace VividRP.Editor.RenderGraph
             if (passType == null)
                 return;
 
-            var fields = passType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-            foreach (var field in fields)
+            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
             {
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
-                if (attr == null)
-                    continue;
 
                 if (field.FieldType == typeof(RenderGraphTexture))
                 {

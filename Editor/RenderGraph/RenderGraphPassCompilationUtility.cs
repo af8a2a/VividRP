@@ -192,13 +192,9 @@ namespace VividRP.Editor.RenderGraph
             if (passType == null)
                 return result;
 
-            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
-            foreach (var field in passType.GetFields(flags))
+            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
             {
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
-                if (attr == null)
-                    continue;
-
                 result[field.Name] = attr.Access;
             }
 

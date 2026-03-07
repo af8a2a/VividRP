@@ -78,16 +78,12 @@ namespace VividRP.Editor.RenderGraph
             if (passType == null)
                 return false;
 
-            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
-            foreach (var field in passType.GetFields(flags))
+            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
             {
                 if (field.FieldType != typeof(RenderGraphTexture))
                     continue;
 
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
-                if (attr == null)
-                    continue;
-
                 var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
                 if (string.IsNullOrEmpty(outputPortName))
                     continue;

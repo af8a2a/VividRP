@@ -21,6 +21,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class GBufferPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.GBufferPass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class SetupPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.SetupPass, VividRP.Runtime";

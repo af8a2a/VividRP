@@ -55,6 +55,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_IsPassResourceLayoutDirty = false;
         }
 
+        public void SetRenderListDescriptor(RenderGraphRenderListDesc renderListDesc)
+        {
+            m_RenderList ??= new RenderGraphRenderList();
+            m_RenderList.desc = renderListDesc ?? new RenderGraphRenderListDesc();
+        }
+
         public void SetColorTarget(RenderGraphTexture colorTarget)
         {
             m_ColorTarget = colorTarget ?? throw new ArgumentNullException(nameof(colorTarget));

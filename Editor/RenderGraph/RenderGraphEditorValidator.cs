@@ -66,11 +66,10 @@ namespace VividRP.Editor.RenderGraph
 
         private static void ValidateReadWriteBindings(RenderPassNodeData passNode, System.Type passType, GraphLogger infos)
         {
-            var fields = passType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-            foreach (var field in fields)
+            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
             {
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
-                if (attr == null || !RenderPassPortUtility.CanRead(attr.Access) || !RenderPassPortUtility.CanWrite(attr.Access))
+                if (!RenderPassPortUtility.CanRead(attr.Access) || !RenderPassPortUtility.CanWrite(attr.Access))
                     continue;
 
                 var inputPortName = RenderPassPortUtility.GetInputPortName(field.Name, attr.Access);
@@ -95,11 +94,10 @@ namespace VividRP.Editor.RenderGraph
 
         private static void ValidateHistoryBindings(RenderPassNodeData passNode, System.Type passType, GraphLogger infos)
         {
-            var fields = passType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-            foreach (var field in fields)
+            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
             {
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
-                if (attr == null || field.FieldType != typeof(RenderGraphTexture))
+                if (field.FieldType != typeof(RenderGraphTexture))
                     continue;
 
                 var inputPortName = RenderPassPortUtility.GetInputPortName(field.Name, attr.Access);

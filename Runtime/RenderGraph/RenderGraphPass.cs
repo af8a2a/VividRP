@@ -30,22 +30,64 @@ namespace VividRP.Runtime
         }
     }
 
+    internal static class RenderGraphPassReflectionUtility
+    {
+        private const BindingFlags DeclaredInstanceFieldFlags =
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+
+        internal static IEnumerable<FieldInfo> EnumerateInstanceFields(Type type)
+        {
+            if (type == null)
+                yield break;
+
+            var hierarchy = new Stack<Type>();
+            for (var current = type; current != null && current != typeof(object); current = current.BaseType)
+                hierarchy.Push(current);
+
+            while (hierarchy.Count > 0)
+            {
+                foreach (var field in hierarchy.Pop().GetFields(DeclaredInstanceFieldFlags))
+                    yield return field;
+            }
+        }
+
+        internal static IEnumerable<FieldInfo> EnumerateRenderGraphResourceFields(Type type)
+        {
+            foreach (var field in EnumerateInstanceFields(type))
+            {
+                if (field.GetCustomAttribute<RenderGraphResource>() != null)
+                    yield return field;
+            }
+        }
+
+        internal static FieldInfo GetInstanceField(Type type, string fieldName)
+        {
+            if (type == null || string.IsNullOrEmpty(fieldName))
+                return null;
+
+            foreach (var field in EnumerateInstanceFields(type))
+            {
+                if (field.Name == fieldName)
+                    return field;
+            }
+
+            return null;
+        }
+    }
+
     internal static class PassResourceCollector
     {
         public static PassResource Collect(object pass)
         {
             var type = pass.GetType();
-            var fields = type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
 
             var textures = new List<PassResourceEntry>();
             var buffers = new List<PassResourceEntry>();
             var renderLists = new List<PassResourceEntry>();
 
-            foreach (var field in fields)
+            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(type))
             {
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
-                if (attr == null)
-                    continue;
 
                 var value = field.GetValue(pass);
                 if (value == null)

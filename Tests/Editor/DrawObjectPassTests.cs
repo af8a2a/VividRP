@@ -11,6 +11,10 @@ namespace VividRP.Editor.Tests
 {
     public class DrawObjectPassTests
     {
+        private sealed class DerivedDrawObjectPass : DrawObjectPass
+        {
+        }
+
         [Test]
         public void Initialize_RegistersRenderListAndAttachments()
         {
@@ -29,6 +33,19 @@ namespace VividRP.Editor.Tests
             Assert.That(colorEntry.IsDepthAttachment, Is.False);
             Assert.That(depthEntry.AttachmentIndex, Is.EqualTo(-1));
             Assert.That(depthEntry.IsDepthAttachment, Is.True);
+        }
+
+        [Test]
+        public void Initialize_IncludesInheritedPrivateResources_WhenPassDerivesFromDrawObjectPass()
+        {
+            IRenderPass renderPass = new DerivedDrawObjectPass();
+
+            var resources = renderPass.Initialize();
+
+            Assert.That(resources.RenderLists, Has.Length.EqualTo(1));
+            Assert.That(resources.Textures, Has.Length.EqualTo(2));
+            Assert.That(resources.Textures.Any(entry => entry.Name == "Color"), Is.True);
+            Assert.That(resources.Textures.Any(entry => entry.Name == "Depth"), Is.True);
         }
 
         [Test]

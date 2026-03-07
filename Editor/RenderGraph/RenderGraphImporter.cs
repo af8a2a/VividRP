@@ -95,13 +95,9 @@ namespace VividRP.Editor.RenderGraph
                     PassType = $"{passType.FullName}, {passType.Assembly.GetName().Name}",
                 };
 
-                var fields = passType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                foreach (var field in fields)
+                foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
                 {
                     var attr = field.GetCustomAttribute<RenderGraphResource>();
-                    if (attr == null)
-                        continue;
-
                     var inputPortName = RenderPassPortUtility.GetInputPortName(field.Name, attr.Access);
                     var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
                     var inputPort = string.IsNullOrEmpty(inputPortName) ? null : passNode.GetInputPortByName(inputPortName);
@@ -369,7 +365,6 @@ namespace VividRP.Editor.RenderGraph
             if (passNode == null || passType == null || connectedPort == null)
                 return null;
 
-            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
             var expectedFieldType = resourceKind switch
             {
                 RenderGraphResourceKind.Texture => typeof(RenderGraphTexture),
@@ -381,15 +376,12 @@ namespace VividRP.Editor.RenderGraph
             if (expectedFieldType == null)
                 return null;
 
-            foreach (var field in passType.GetFields(flags))
+            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
             {
                 if (field.FieldType != expectedFieldType)
                     continue;
 
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
-                if (attr == null)
-                    continue;
-
                 var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
                 if (string.IsNullOrEmpty(outputPortName))
                     continue;

@@ -286,14 +286,12 @@ namespace VividRP.Runtime
             if (passDef.ResourceBindings == null || passDef.ResourceBindings.Count == 0)
                 return;
 
-            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
-
             foreach (var binding in passDef.ResourceBindings)
             {
                 if (binding == null || string.IsNullOrEmpty(binding.FieldName))
                     continue;
 
-                var field = passType.GetField(binding.FieldName, flags);
+                var field = RenderGraphPassReflectionUtility.GetInstanceField(passType, binding.FieldName);
                 if (field == null)
                     continue;
 
@@ -348,14 +346,12 @@ namespace VividRP.Runtime
             if (passDef?.ResourceBindings == null || passDef.ResourceBindings.Count == 0)
                 return;
 
-            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
-
             foreach (var binding in passDef.ResourceBindings)
             {
                 if (binding == null || binding.SourceKind != RenderGraphPassBindingSourceKind.PassField || string.IsNullOrEmpty(binding.FieldName))
                     continue;
 
-                var field = passType.GetField(binding.FieldName, flags);
+                var field = RenderGraphPassReflectionUtility.GetInstanceField(passType, binding.FieldName);
                 if (field == null)
                     continue;
 
@@ -394,8 +390,7 @@ namespace VividRP.Runtime
             if (sourcePass == null || sourcePassType == null)
                 return null;
 
-            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
-            var sourceField = sourcePassType.GetField(fieldName, flags);
+            var sourceField = RenderGraphPassReflectionUtility.GetInstanceField(sourcePassType, fieldName);
             if (sourceField == null)
                 return null;
 
@@ -637,4 +632,3 @@ namespace VividRP.Runtime
         }
     }
 }
-

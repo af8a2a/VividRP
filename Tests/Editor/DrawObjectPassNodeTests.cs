@@ -7,10 +7,20 @@ namespace VividRP.Editor.Tests
 {
     public class DrawObjectPassNodeTests
     {
+        private sealed class DerivedDrawObjectPass : DrawObjectPass
+        {
+        }
+
         [Serializable]
         private sealed class AutoRegisteredDrawObjectPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(DrawObjectPass).AssemblyQualifiedName;
+        }
+
+        [Serializable]
+        private sealed class AutoRegisteredDerivedDrawObjectPassNode : RenderPassNodeData
+        {
+            protected override string RegisteredPassTypeName => typeof(DerivedDrawObjectPass).AssemblyQualifiedName;
         }
 
         [Test]
@@ -25,6 +35,16 @@ namespace VividRP.Editor.Tests
             Assert.That(renderListInput, Is.Not.Null);
             Assert.That(colorOutput, Is.Not.Null);
             Assert.That(depthOutput, Is.Not.Null);
+        }
+
+        [Test]
+        public void DerivedDrawObjectPassNode_DefinesInheritedPorts()
+        {
+            var node = new AutoRegisteredDerivedDrawObjectPassNode();
+
+            Assert.That(node.GetInputPortByName("m_RenderList"), Is.Not.Null);
+            Assert.That(node.GetOutputPortByName("m_ColorTarget"), Is.Not.Null);
+            Assert.That(node.GetOutputPortByName("m_DepthTarget"), Is.Not.Null);
         }
     }
 }

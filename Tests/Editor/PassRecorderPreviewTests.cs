@@ -21,7 +21,22 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ShouldRecordTexturePreview_ReturnsTrue_WhenFieldIsReferencedByPreview()
+        public void ShouldRecordTexturePreview_ReturnsTrue_WhenCanonicalPreviewKeyIsReferenced()
+        {
+            var passDefinition = new RenderGraphPassDefinition
+            {
+                PreviewTextureFields = { "Color" }
+            };
+
+            var entry = CreateTextureEntry("m_ColorTarget");
+
+            var shouldRecord = PassRecorder.ShouldRecordTexturePreview(passDefinition, entry);
+
+            Assert.That(shouldRecord, Is.True);
+        }
+
+        [Test]
+        public void ShouldRecordTexturePreview_ReturnsTrue_WhenLegacyFieldNameIsReferenced()
         {
             var passDefinition = new RenderGraphPassDefinition
             {
@@ -40,7 +55,7 @@ namespace VividRP.Editor.Tests
         {
             var passDefinition = new RenderGraphPassDefinition
             {
-                PreviewTextureFields = { "m_DepthTarget" }
+                PreviewTextureFields = { "Depth" }
             };
 
             var entry = CreateTextureEntry("m_ColorTarget");
@@ -55,7 +70,7 @@ namespace VividRP.Editor.Tests
         {
             var passDefinition = new RenderGraphPassDefinition
             {
-                PreviewTextureFields = { "m_ColorTarget" }
+                PreviewTextureFields = { "Color" }
             };
 
             var entry = CreateTextureEntry("m_ColorTarget");
@@ -73,7 +88,7 @@ namespace VividRP.Editor.Tests
             return new PassResourceEntry
             {
                 Field = field,
-                Name = fieldName,
+                Name = RenderGraphPassReflectionUtility.GetPreviewTextureKey(field, field?.GetCustomAttribute<RenderGraphResource>()),
                 Access = AccessFlags.Write,
                 Descriptor = new RenderGraphTexture(),
             };

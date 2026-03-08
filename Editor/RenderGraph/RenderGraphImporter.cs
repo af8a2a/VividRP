@@ -44,7 +44,6 @@ namespace VividRP.Editor.RenderGraph
             var renderListNodeToIndex = new Dictionary<RenderListResourceNodeData, int>();
             var passNodes = new List<RenderPassNodeData>();
             var passNodeToIndex = new Dictionary<RenderPassNodeData, int>();
-            var passNodeTypes = new Dictionary<RenderPassNodeData, Type>();
             foreach (var passNode in graph.GetNodes().OfType<RenderPassNodeData>())
             {
                 var passType = passNode.GetPassType();
@@ -52,7 +51,6 @@ namespace VividRP.Editor.RenderGraph
                     continue;
 
                 passNodeToIndex[passNode] = passNodes.Count;
-                passNodeTypes[passNode] = passType;
                 passNodes.Add(passNode);
             }
 
@@ -90,7 +88,9 @@ namespace VividRP.Editor.RenderGraph
             {
                 var passNode = node;
 
-                var passType = passNodeTypes[passNode];
+                var passType = passNode.GetPassType();
+                if (passType == null)
+                    continue;
 
                 var passDef = new RenderGraphPassDefinition
                 {
@@ -213,15 +213,14 @@ namespace VividRP.Editor.RenderGraph
                 compiledPassDefinitions.Add(passDef);
             }
 
-            PopulatePreviewTextureFields(graph, compiledPassDefinitions, passNodeToIndex, passNodeTypes);
+            PopulatePreviewTextureFields(graph, compiledPassDefinitions, passNodeToIndex);
             runtimeAsset.Passes.AddRange(RenderGraphPassCompilationUtility.OrderPassDefinitions(compiledPassDefinitions));
         }
 
         private static void PopulatePreviewTextureFields(
             RenderGraphEditorGraph graph,
             IReadOnlyList<RenderGraphPassDefinition> passDefinitions,
-            IReadOnlyDictionary<RenderPassNodeData, int> passNodeToIndex,
-            IReadOnlyDictionary<RenderPassNodeData, Type> passNodeTypes)
+            IReadOnlyDictionary<RenderPassNodeData, int> passNodeToIndex)
         {
             if (graph == null || passDefinitions == null || passDefinitions.Count == 0)
                 return;
@@ -238,22 +237,17 @@ namespace VividRP.Editor.RenderGraph
                     || sourcePassIndex >= passDefinitions.Count)
                     continue;
 
-                if (!passNodeTypes.TryGetValue(sourcePassNode, out var sourcePassType) || sourcePassType == null)
+                if (!previewNode.TryGetConnectedPassOutput(out _, out var sourcePreviewKey)
+                    || string.IsNullOrEmpty(sourcePreviewKey))
+                {
                     continue;
-
-                var sourceFieldName = GetConnectedOutputFieldName(
-                    sourcePassNode,
-                    sourcePassType,
-                    connectedPort,
-                    RenderGraphResourceKind.Texture);
-                if (string.IsNullOrEmpty(sourceFieldName))
-                    continue;
+                }
 
                 var previewTextureFields = passDefinitions[sourcePassIndex]?.PreviewTextureFields;
-                if (previewTextureFields == null || previewTextureFields.Contains(sourceFieldName))
+                if (previewTextureFields == null || previewTextureFields.Contains(sourcePreviewKey))
                     continue;
 
-                previewTextureFields.Add(sourceFieldName);
+                previewTextureFields.Add(sourcePreviewKey);
             }
         }
 

@@ -112,14 +112,14 @@ namespace VividRP.Editor.Tests
                 new()
                 {
                     PassType = GetPassTypeName<DrawObjectPass>(),
-                    PreviewTextureFields = { "m_ColorTarget" }
+                    PreviewTextureFields = { "Color" }
                 }
             };
 
             var ordered = RenderGraphPassCompilationUtility.OrderPassDefinitions(passDefinitions);
 
             Assert.That(ordered[0].PassType, Is.EqualTo(GetPassTypeName<DrawObjectPass>()));
-            Assert.That(ordered[0].PreviewTextureFields, Is.EquivalentTo(new[] { "m_ColorTarget" }));
+            Assert.That(ordered[0].PreviewTextureFields, Is.EquivalentTo(new[] { "Color" }));
             Assert.That(ordered[1].PreviewTextureFields, Is.Empty);
         }
 

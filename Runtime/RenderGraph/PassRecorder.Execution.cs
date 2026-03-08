@@ -566,16 +566,23 @@ namespace VividRP.Runtime
 
         internal static bool ShouldRecordTexturePreview(RenderGraphPassDefinition passDefinition, PassResourceEntry entry)
         {
-            return RenderGraphPreviewRegistry.IsAvailable
-                && passDefinition?.PreviewTextureFields != null
-                && passDefinition.PreviewTextureFields.Count > 0
-                && entry != null
-                && entry.Texture != null
-                && entry.Field != null
-                && passDefinition.PreviewTextureFields.Contains(entry.Field.Name)
-                && (!string.IsNullOrEmpty(entry.Name) || (entry.Field != null && !string.IsNullOrEmpty(entry.Field.Name)))
-                && (entry.Access & AccessFlags.Write) != 0
-                && !entry.IsDepthAttachment;
+            if (!RenderGraphPreviewRegistry.IsAvailable
+                || passDefinition?.PreviewTextureFields == null
+                || passDefinition.PreviewTextureFields.Count == 0
+                || entry?.Texture == null
+                || (entry.Access & AccessFlags.Write) == 0
+                || entry.IsDepthAttachment)
+            {
+                return false;
+            }
+
+            var previewKey = entry.Name;
+            if (!string.IsNullOrEmpty(previewKey) && passDefinition.PreviewTextureFields.Contains(previewKey))
+                return true;
+
+            var legacyFieldName = entry.Field?.Name;
+            return !string.IsNullOrEmpty(legacyFieldName)
+                && passDefinition.PreviewTextureFields.Contains(legacyFieldName);
         }
 
         private static bool CanPreviewTexture(in RenderTargetInfo sourceInfo)

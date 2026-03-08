@@ -91,7 +91,7 @@ namespace VividRP.Editor.RenderGraph
 
                 if (ReferenceEquals(sourcePassNode.GetOutputPortByName(outputPortName), connectedPort))
                 {
-                    fieldName = RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr);
+                    fieldName = RenderGraphPassReflectionUtility.GetPreviewTextureKey(field, attr);
                     return true;
                 }
             }

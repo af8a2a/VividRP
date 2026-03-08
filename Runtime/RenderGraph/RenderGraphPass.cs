@@ -83,6 +83,20 @@ namespace VividRP.Runtime
                 ? field.Name
                 : attr.Name;
         }
+
+        internal static string GetPreviewTextureKey(FieldInfo field, RenderGraphResource attr)
+        {
+            return GetRenderGraphResourceName(field, attr);
+        }
+
+        internal static string GetPreviewTextureCollectionKey(string baseName, int attachmentIndex, int collectionIndex)
+        {
+            var entryNameSuffix = attachmentIndex >= 0
+                ? attachmentIndex.ToString()
+                : collectionIndex.ToString();
+
+            return $"{baseName}{entryNameSuffix}";
+        }
     }
 
     internal static class PassResourceCollector
@@ -176,7 +190,7 @@ namespace VividRP.Runtime
             RenderGraphResource attr,
             IEnumerable<RenderGraphTexture> textureCollection)
         {
-            var baseName = RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr);
+            var baseName = RenderGraphPassReflectionUtility.GetPreviewTextureKey(field, attr);
             var collectionIndex = 0;
 
             foreach (var texture in textureCollection)
@@ -185,15 +199,11 @@ namespace VividRP.Runtime
                     ? attr.AttachmentIndex + collectionIndex
                     : -1;
 
-                var entryNameSuffix = entryAttachmentIndex >= 0
-                    ? entryAttachmentIndex.ToString()
-                    : collectionIndex.ToString();
-
                 if (texture != null)
                 {
                     textures.Add(CreateEntry(
                         null,
-                        $"{baseName}{entryNameSuffix}",
+                        RenderGraphPassReflectionUtility.GetPreviewTextureCollectionKey(baseName, entryAttachmentIndex, collectionIndex),
                         attr.Access,
                         PassResourceType.Texture,
                         texture,

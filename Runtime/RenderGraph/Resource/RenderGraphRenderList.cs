@@ -17,6 +17,7 @@ namespace VividRP.Runtime
     public class RenderGraphRenderListDesc
     {
         internal const string ForwardShaderTagName = "VividForward";
+        internal const string PreDepthShaderTagName = "VividPreDepth";
         internal const string DefaultUnlitShaderTagName = "SRPDefaultUnlit";
 
         private static readonly string[] s_DefaultShaderTagNames =

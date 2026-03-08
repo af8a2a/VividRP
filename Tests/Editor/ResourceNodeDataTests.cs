@@ -22,5 +22,13 @@ namespace VividRP.Editor.Tests
             Assert.That(node.GetInputPortByName(BufferResourceNodeData.InputPortName), Is.Null);
             Assert.That(node.GetOutputPortByName(BufferResourceNodeData.OutputPortName), Is.Not.Null);
         }
+
+        [Test]
+        public void ClassificationResourceNode_DefinesMultipleOutPortsOnly()
+        {
+            var node = new ClassificationResourceNodeData();
+
+            Assert.That(node.GetOutputPortByName(ClassificationResourceNodeData.StandardMaterialIndicesOutputPortName), Is.Not.Null);
+        }
     }
 }

@@ -1,3 +1,4 @@
+using System.IO;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -72,6 +73,27 @@ namespace VividRP.Editor.Tests
                 RenderGraphRenderListDesc.ForwardShaderTagName,
                 RenderGraphRenderListDesc.DefaultUnlitShaderTagName,
             }));
+        }
+
+        [Test]
+        public void SimpleLitShader_DeclaresPreDepthPass_ForDrawObjectPass()
+        {
+            var shaderPath = Path.GetFullPath(Path.Combine(
+                Application.dataPath,
+                "..",
+                "Packages",
+                "com.af8a2a.vividrp",
+                "Shaders",
+                "Material",
+                "SimpleLit.shader"));
+
+            Assert.That(File.Exists(shaderPath), Is.True, $"Expected shader source at '{shaderPath}'.");
+
+            var shaderSource = File.ReadAllText(shaderPath);
+
+            Assert.That(shaderSource, Does.Contain($"Name \"{RenderGraphRenderListDesc.PreDepthShaderTagName}\""));
+            Assert.That(shaderSource, Does.Contain($"\"LightMode\" = \"{RenderGraphRenderListDesc.PreDepthShaderTagName}\""));
+            Assert.That(shaderSource, Does.Contain("#pragma fragment FragPreDepth"));
         }
     }
 }

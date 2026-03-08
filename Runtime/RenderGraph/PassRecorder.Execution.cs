@@ -15,6 +15,7 @@ namespace VividRP.Runtime
         private static readonly List<IRenderPass> s_RenderPasses = new();
         private static readonly ContextContainer s_FrameData = new();
         private static readonly Dictionary<IRenderPass, PassResource> s_PassResources = new();
+        private static readonly Dictionary<IRenderPass, Dictionary<string, AccessFlags>> s_PassResourceAccessOverrides = new();
         private static RenderGraphTexture[] s_HistoryPreviousTextures = Array.Empty<RenderGraphTexture>();
         private static RenderGraphTexture[] s_HistoryCurrentTextures = Array.Empty<RenderGraphTexture>();
 
@@ -61,6 +62,7 @@ namespace VividRP.Runtime
 
             s_RenderPasses.Clear();
             s_PassResources.Clear();
+            s_PassResourceAccessOverrides.Clear();
             s_HistoryPreviousTextures = Array.Empty<RenderGraphTexture>();
             s_HistoryCurrentTextures = Array.Empty<RenderGraphTexture>();
             RenderGraphHistoryRegistry.Clear();
@@ -144,6 +146,10 @@ namespace VividRP.Runtime
                         s_HistoryCurrentTextures,
                         buffers,
                         renderLists);
+
+                    var accessOverrides = BuildResourceAccessOverrides(passType, passDef);
+                    if (accessOverrides != null && accessOverrides.Count > 0)
+                        s_PassResourceAccessOverrides[pass] = accessOverrides;
 
                     indexedPasses[passIndex] = pass;
                     indexedPassTypes[passIndex] = passType;
@@ -370,6 +376,37 @@ namespace VividRP.Runtime
                     field.SetValue(pass, sharedResource);
                 }
             }
+        }
+
+        private static Dictionary<string, AccessFlags> BuildResourceAccessOverrides(Type passType, RenderGraphPassDefinition passDef)
+        {
+            if (passType == null || passDef?.ResourceBindings == null || passDef.ResourceBindings.Count == 0)
+                return null;
+
+            Dictionary<string, AccessFlags> accessOverrides = null;
+
+            foreach (var binding in passDef.ResourceBindings)
+            {
+                if (binding == null
+                    || string.IsNullOrEmpty(binding.FieldName))
+                {
+                    continue;
+                }
+
+                var field = RenderGraphPassReflectionUtility.GetInstanceField(passType, binding.FieldName);
+                var attr = field?.GetCustomAttribute<RenderGraphResource>();
+                if (attr == null)
+                    continue;
+
+                var effectiveAccess = RenderGraphPassBindingUtility.ResolveEffectiveAccess(binding, attr.Access);
+                if (effectiveAccess == attr.Access)
+                    continue;
+
+                accessOverrides ??= new Dictionary<string, AccessFlags>(StringComparer.Ordinal);
+                accessOverrides[field.Name] = effectiveAccess;
+            }
+
+            return accessOverrides;
         }
 
         private static object ResolvePassFieldValue(
@@ -650,6 +687,7 @@ namespace VividRP.Runtime
             if (!s_PassResources.TryGetValue(pass, out var resources) || needsRefresh)
             {
                 resources = pass.Initialize();
+                ApplyResourceAccessOverrides(pass, resources);
                 s_PassResources[pass] = resources;
 
                 if (pass is IDynamicPassResourceLayout refreshedDynamicLayoutPass)
@@ -657,6 +695,28 @@ namespace VividRP.Runtime
             }
 
             return resources;
+        }
+
+        private static void ApplyResourceAccessOverrides(IRenderPass pass, PassResource resources)
+        {
+            if (pass == null
+                || resources == null
+                || !s_PassResourceAccessOverrides.TryGetValue(pass, out var accessOverrides)
+                || accessOverrides == null
+                || accessOverrides.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var entry in resources.AllEntries)
+            {
+                var fieldName = entry?.Field?.Name;
+                if (string.IsNullOrEmpty(fieldName))
+                    continue;
+
+                if (accessOverrides.TryGetValue(fieldName, out var access))
+                    entry.Access = access;
+            }
         }
     }
 }

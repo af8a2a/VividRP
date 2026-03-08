@@ -83,7 +83,7 @@ namespace VividRP.Editor.RenderGraph
                 if (!TryGetFieldAccess(fieldAccessMaps[passIndex], binding.FieldName, out var access))
                     continue;
 
-                if (!RenderPassPortUtility.CanRead(access))
+                if (!RenderGraphPassBindingUtility.ConsumesExistingState(binding, access))
                     continue;
 
                 if (binding.ResourceBindingVariant == RenderGraphResourceBindingVariant.HistoryPrevious)
@@ -252,6 +252,7 @@ namespace VividRP.Editor.RenderGraph
                     ResourceIndex = binding.ResourceIndex,
                     ResourceBindingVariant = binding.ResourceBindingVariant,
                     SourceKind = binding.SourceKind,
+                    ConnectionKind = binding.ConnectionKind,
                     SourcePassIndex = binding.SourcePassIndex,
                     SourceFieldName = binding.SourceFieldName,
                 });

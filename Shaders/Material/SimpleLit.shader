@@ -23,12 +23,33 @@ Shader "VividRP/Material/SimpleLit"
 
         Pass
         {
+            Name "VividPreDepth"
+            Tags { "LightMode" = "VividPreDepth" }
+
+            Blend One Zero
+            ZWrite On
+            ZTest LEqual
+            Cull Back
+            ColorMask 0
+
+            HLSLPROGRAM
+                #pragma target 4.5
+                #pragma multi_compile_instancing
+                #pragma vertex Vert
+                #pragma fragment FragPreDepth
+
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/SimpleLitGBufferPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
             Name "VividGBuffer"
             Tags { "LightMode" = "VividGBuffer" }
 
             Blend One Zero
             ZWrite On
-            ZTest LEqual
+            ZTest Equal
             Cull Back
 
             HLSLPROGRAM

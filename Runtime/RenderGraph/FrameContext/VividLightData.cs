@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -7,6 +9,17 @@ namespace VividRP.Runtime
 {
     public class VividLightData : ContextItem
     {
+        [StructLayout(LayoutKind.Sequential)]
+        public struct DirectionalLightData
+        {
+            public Vector3 directionWS;
+            public float shadowStrength;
+            public Vector3 color;
+            public uint renderingLayerMask;
+
+            internal static int Stride => Marshal.SizeOf<DirectionalLightData>();
+        }
+
         internal readonly struct VisibleLightDescriptor
         {
             public VisibleLightDescriptor(EntityId lightEntityId, LightType lightType, Color finalColor)
@@ -25,8 +38,12 @@ namespace VividRP.Runtime
 
         public NativeArray<VisibleLight> visibleLights;
         public NativeArray<VisibleReflectionProbe> visibleReflectionProbes;
+        public DirectionalLightData[] directionalLights = Array.Empty<DirectionalLightData>();
         public int mainLightIndex;
         public EntityId mainLightEntityId;
+        public int directionalLightCount;
+        public int mainDirectionalLightIndex;
+        public EntityId mainDirectionalLightEntityId;
 
         public bool hasVisibleLights => visibleLights.IsCreated && visibleLights.Length > 0;
 
@@ -34,15 +51,23 @@ namespace VividRP.Runtime
 
         public bool hasMainLight => IsValidLightIndex(mainLightIndex);
 
+        public bool hasDirectionalLights => directionalLightCount > 0;
+
+        public bool hasMainDirectionalLight => IsValidDirectionalLightIndex(mainDirectionalLightIndex);
+
         public int visibleLightCount => hasVisibleLights ? visibleLights.Length : 0;
 
         public int additionalLightsCount => hasVisibleLights ? visibleLights.Length - (hasMainLight ? 1 : 0) : 0;
 
         public int visibleReflectionProbeCount => hasVisibleReflectionProbes ? visibleReflectionProbes.Length : 0;
 
+        public int additionalDirectionalLightsCount => hasDirectionalLights ? directionalLightCount - (hasMainDirectionalLight ? 1 : 0) : 0;
+
         public VisibleLight mainVisibleLight => hasMainLight ? visibleLights[mainLightIndex] : default;
 
         public Light mainLight => hasMainLight ? visibleLights[mainLightIndex].light : null;
+
+        public DirectionalLightData mainDirectionalLight => hasMainDirectionalLight ? directionalLights[mainDirectionalLightIndex] : default;
 
         internal void Update(CullingResults cullingResults)
         {
@@ -52,6 +77,56 @@ namespace VividRP.Runtime
             mainLightEntityId = hasMainLight && visibleLights[mainLightIndex].light != null
                 ? visibleLights[mainLightIndex].light.GetEntityId()
                 : EntityId.None;
+            UpdateDirectionalLights(UnityEngine.Object.FindObjectsByType<Light>(FindObjectsInactive.Exclude, FindObjectsSortMode.None), RenderSettings.sun);
+        }
+
+        internal void UpdateDirectionalLights(IReadOnlyList<Light> lights, Light sunLight)
+        {
+            EnsureDirectionalLightCapacity(CountDirectionalLights(lights));
+
+            directionalLightCount = 0;
+            mainDirectionalLightIndex = -1;
+            mainDirectionalLightEntityId = EntityId.None;
+
+            if (lights == null || lights.Count == 0)
+                return;
+
+            var sunLightEntityId = sunLight != null ? sunLight.GetEntityId() : EntityId.None;
+            var brightestDirectionalIndex = -1;
+            var brightestDirectionalEntityId = EntityId.None;
+            var brightestDirectionalIntensity = float.NegativeInfinity;
+
+            for (var lightIndex = 0; lightIndex < lights.Count; lightIndex++)
+            {
+                var light = lights[lightIndex];
+                if (!IsDirectionalLightSupported(light))
+                    continue;
+
+                directionalLights[directionalLightCount] = CreateDirectionalLightData(light);
+
+                var lightEntityId = light.GetEntityId();
+                if (!sunLightEntityId.Equals(EntityId.None) && lightEntityId.Equals(sunLightEntityId))
+                {
+                    mainDirectionalLightIndex = directionalLightCount;
+                    mainDirectionalLightEntityId = lightEntityId;
+                }
+
+                var lightIntensity = GetLightIntensity(directionalLights[directionalLightCount].color);
+                if (lightIntensity > brightestDirectionalIntensity)
+                {
+                    brightestDirectionalIntensity = lightIntensity;
+                    brightestDirectionalIndex = directionalLightCount;
+                    brightestDirectionalEntityId = lightEntityId;
+                }
+
+                directionalLightCount++;
+            }
+
+            if (mainDirectionalLightIndex >= 0)
+                return;
+
+            mainDirectionalLightIndex = brightestDirectionalIndex;
+            mainDirectionalLightEntityId = brightestDirectionalEntityId;
         }
 
         public override void Reset()
@@ -60,6 +135,9 @@ namespace VividRP.Runtime
             visibleReflectionProbes = default;
             mainLightIndex = -1;
             mainLightEntityId = EntityId.None;
+            directionalLightCount = 0;
+            mainDirectionalLightIndex = -1;
+            mainDirectionalLightEntityId = EntityId.None;
         }
 
         internal static int FindMainLightIndex(NativeArray<VisibleLight> visibleLights, Light sunLight)
@@ -126,9 +204,62 @@ namespace VividRP.Runtime
             return hasVisibleLights && lightIndex >= 0 && lightIndex < visibleLights.Length;
         }
 
+        private bool IsValidDirectionalLightIndex(int lightIndex)
+        {
+            return hasDirectionalLights && directionalLights != null && lightIndex >= 0 && lightIndex < directionalLightCount;
+        }
+
+        private void EnsureDirectionalLightCapacity(int requiredCapacity)
+        {
+            if (requiredCapacity <= directionalLights.Length)
+                return;
+
+            directionalLights = new DirectionalLightData[requiredCapacity];
+        }
+
+        private static int CountDirectionalLights(IReadOnlyList<Light> lights)
+        {
+            if (lights == null || lights.Count == 0)
+                return 0;
+
+            var directionalLightCount = 0;
+            for (var lightIndex = 0; lightIndex < lights.Count; lightIndex++)
+            {
+                if (IsDirectionalLightSupported(lights[lightIndex]))
+                    directionalLightCount++;
+            }
+
+            return directionalLightCount;
+        }
+
+        private static DirectionalLightData CreateDirectionalLightData(Light light)
+        {
+            var finalColor = light.color.linear * light.intensity;
+            return new DirectionalLightData
+            {
+                directionWS = -light.transform.forward,
+                shadowStrength = light.shadows != LightShadows.None ? light.shadowStrength : 0f,
+                color = new Vector3(finalColor.r, finalColor.g, finalColor.b),
+                renderingLayerMask = (uint)light.renderingLayerMask,
+            };
+        }
+
+        private static bool IsDirectionalLightSupported(Light light)
+        {
+            return light != null
+                   && light.type == LightType.Directional
+                   && light.enabled
+                   && light.gameObject.activeInHierarchy;
+        }
+
         private static float GetLightIntensity(Color finalColor)
         {
             return Mathf.Max(finalColor.r, finalColor.g, finalColor.b);
+        }
+
+        private static float GetLightIntensity(Vector3 finalColor)
+        {
+            return Mathf.Max(finalColor.x, finalColor.y, finalColor.z);
         }
     }
 }

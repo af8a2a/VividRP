@@ -81,6 +81,14 @@ VividGBufferFragmentOutput FragGBuffer(Varyings input)
     return PackVividGBufferSurfaceData(BuildSimpleLitSurfaceData(input));
 }
 
+half4 FragPreDepth(Varyings input) : SV_Target
+{
+    UNITY_SETUP_INSTANCE_ID(input);
+    UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+
+    return 0.0;
+}
+
 half4 FragDebug(Varyings input) : SV_Target
 {
     UNITY_SETUP_INSTANCE_ID(input);

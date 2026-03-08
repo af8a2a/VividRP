@@ -10,7 +10,7 @@ using VividRP.Runtime;
 
 namespace VividRP.Editor.RenderGraph
 {
-    [ScriptedImporter(2, RenderGraphEditorGraph.AssetExtension)]
+    [ScriptedImporter(4, RenderGraphEditorGraph.AssetExtension)]
     internal sealed class RenderGraphImporter : ScriptedImporter
     {
         public override void OnImportAsset(AssetImportContext ctx)
@@ -42,6 +42,8 @@ namespace VividRP.Editor.RenderGraph
             var historyNodeToIndex = new Dictionary<HistoryResourceNodeData, int>();
             var bufferNodeToIndex = new Dictionary<BufferResourceNodeData, int>();
             var renderListNodeToIndex = new Dictionary<RenderListResourceNodeData, int>();
+            var texturePortToIndex = new Dictionary<IPort, int>();
+            var bufferPortToIndex = new Dictionary<IPort, int>();
             var passNodes = new List<RenderPassNodeData>();
             var passNodeToIndex = new Dictionary<RenderPassNodeData, int>();
             foreach (var passNode in graph.GetNodes().OfType<RenderPassNodeData>())
@@ -61,6 +63,7 @@ namespace VividRP.Editor.RenderGraph
                     var index = runtimeAsset.TextureDescriptors.Count;
                     textureNodeToIndex.Add(textureNode, index);
                     runtimeAsset.TextureDescriptors.Add(textureNode.GetDescriptor());
+                    AddPortBindingIndex(texturePortToIndex, textureNode.GetOutputPortByName(TextureResourceNodeData.OutputPortName), index);
                 }
                 else if (node is HistoryResourceNodeData historyNode)
                 {
@@ -73,12 +76,22 @@ namespace VividRP.Editor.RenderGraph
                     var index = runtimeAsset.BufferDescriptors.Count;
                     bufferNodeToIndex.Add(bufferNode, index);
                     runtimeAsset.BufferDescriptors.Add(bufferNode.GetDescriptor());
+                    AddPortBindingIndex(bufferPortToIndex, bufferNode.GetOutputPortByName(BufferResourceNodeData.OutputPortName), index);
                 }
                 else if (node is RenderListResourceNodeData renderListNode)
                 {
                     var index = runtimeAsset.RenderListDescriptors.Count;
                     renderListNodeToIndex.Add(renderListNode, index);
                     runtimeAsset.RenderListDescriptors.Add(renderListNode.GetDescriptor());
+                }
+                else if (node is ClassificationResourceNodeData classificationNode)
+                {
+                    foreach (var (portName, descriptor) in classificationNode.EnumerateBufferDescriptors())
+                    {
+                        var index = runtimeAsset.BufferDescriptors.Count;
+                        runtimeAsset.BufferDescriptors.Add(descriptor);
+                        AddPortBindingIndex(bufferPortToIndex, classificationNode.GetOutputPortByName(portName), index);
+                    }
                 }
             }
 
@@ -106,6 +119,7 @@ namespace VividRP.Editor.RenderGraph
                     var outputPort = string.IsNullOrEmpty(outputPortName) ? null : passNode.GetOutputPortByName(outputPortName);
                     var inputConnectedPort = inputPort?.FirstConnectedPort;
                     var outputConnectedPort = outputPort?.FirstConnectedPort;
+                    var connectionKind = GetConnectionKind(inputConnectedPort, outputConnectedPort);
                     var inputResourceNode = GetBindableResourceNode(field.FieldType, inputConnectedPort);
                     var outputResourceNode = GetBindableResourceNode(field.FieldType, outputConnectedPort);
 
@@ -116,6 +130,7 @@ namespace VividRP.Editor.RenderGraph
                             attr.Access,
                             inputConnectedPort,
                             outputConnectedPort,
+                            connectionKind,
                             historyNodeToIndex))
                     {
                         continue;
@@ -129,10 +144,48 @@ namespace VividRP.Editor.RenderGraph
                         continue;
                     }
 
+                    if (inputResourceNode != null
+                        && outputResourceNode != null
+                        && RequiresMatchingStandaloneResourcePorts(inputResourceNode)
+                        && !ReferenceEquals(inputConnectedPort, outputConnectedPort))
+                    {
+                        Debug.LogWarning(
+                            $"Render pass field '{field.Name}' on '{passType.FullName}' is connected to different outputs on the same composite resource node. " +
+                            "Skip importing this binding until both ports target the same resource output.");
+                        continue;
+                    }
+
+                    if (field.FieldType == typeof(RenderGraphTexture)
+                        && TryAddStandaloneResourceBinding(
+                            passDef,
+                            field.Name,
+                            RenderGraphResourceKind.Texture,
+                            inputConnectedPort,
+                            outputConnectedPort,
+                            connectionKind,
+                            texturePortToIndex))
+                    {
+                        continue;
+                    }
+
+                    if (field.FieldType == typeof(RenderGraphBuffer)
+                        && TryAddStandaloneResourceBinding(
+                            passDef,
+                            field.Name,
+                            RenderGraphResourceKind.Buffer,
+                            inputConnectedPort,
+                            outputConnectedPort,
+                            connectionKind,
+                            bufferPortToIndex))
+                    {
+                        continue;
+                    }
+
                     var resourceNode = inputResourceNode ?? outputResourceNode;
                     if (resourceNode == null)
                     {
-                        if (field.FieldType == typeof(RenderGraphTexture) && RenderPassPortUtility.CanRead(attr.Access))
+                        if (field.FieldType == typeof(RenderGraphTexture)
+                            && ShouldImportPassFieldBinding(inputConnectedPort != null, resourceNode != null))
                         {
                             TryAddPassFieldBinding(
                                 passDef,
@@ -141,7 +194,8 @@ namespace VividRP.Editor.RenderGraph
                                 inputConnectedPort,
                                 passNodeToIndex);
                         }
-                        else if (field.FieldType == typeof(RenderGraphBuffer) && RenderPassPortUtility.CanRead(attr.Access))
+                        else if (field.FieldType == typeof(RenderGraphBuffer)
+                                 && ShouldImportPassFieldBinding(inputConnectedPort != null, resourceNode != null))
                         {
                             TryAddPassFieldBinding(
                                 passDef,
@@ -150,7 +204,8 @@ namespace VividRP.Editor.RenderGraph
                                 inputConnectedPort,
                                 passNodeToIndex);
                         }
-                        else if (field.FieldType == typeof(RenderGraphRenderList) && RenderPassPortUtility.CanRead(attr.Access))
+                        else if (field.FieldType == typeof(RenderGraphRenderList)
+                                 && ShouldImportPassFieldBinding(inputConnectedPort != null, resourceNode != null))
                         {
                             TryAddPassFieldBinding(
                                 passDef,
@@ -173,6 +228,7 @@ namespace VividRP.Editor.RenderGraph
                                 ResourceKind = RenderGraphResourceKind.Texture,
                                 ResourceIndex = resourceIndex,
                                 SourceKind = RenderGraphPassBindingSourceKind.Resource,
+                                ConnectionKind = connectionKind,
                             });
                         }
 
@@ -188,6 +244,7 @@ namespace VividRP.Editor.RenderGraph
                                 ResourceKind = RenderGraphResourceKind.Buffer,
                                 ResourceIndex = resourceIndex,
                                 SourceKind = RenderGraphPassBindingSourceKind.Resource,
+                                ConnectionKind = connectionKind,
                             });
                         }
 
@@ -203,6 +260,7 @@ namespace VividRP.Editor.RenderGraph
                                 ResourceKind = RenderGraphResourceKind.RenderList,
                                 ResourceIndex = resourceIndex,
                                 SourceKind = RenderGraphPassBindingSourceKind.Resource,
+                                ConnectionKind = connectionKind,
                             });
                         }
 
@@ -257,6 +315,7 @@ namespace VividRP.Editor.RenderGraph
             AccessFlags access,
             IPort inputConnectedPort,
             IPort outputConnectedPort,
+            RenderGraphPassBindingConnectionKind connectionKind,
             IReadOnlyDictionary<HistoryResourceNodeData, int> historyNodeToIndex)
         {
             var hasInputHistory = TryGetHistoryBindingReference(
@@ -289,6 +348,7 @@ namespace VividRP.Editor.RenderGraph
                         ResourceIndex = inputHistoryIndex,
                         ResourceBindingVariant = RenderGraphResourceBindingVariant.HistoryCurrent,
                         SourceKind = RenderGraphPassBindingSourceKind.Resource,
+                        ConnectionKind = connectionKind,
                     });
                 }
 
@@ -304,6 +364,7 @@ namespace VividRP.Editor.RenderGraph
                     ResourceIndex = inputHistoryIndex,
                     ResourceBindingVariant = inputVariant,
                     SourceKind = RenderGraphPassBindingSourceKind.Resource,
+                    ConnectionKind = connectionKind,
                 });
                 return true;
             }
@@ -347,6 +408,73 @@ namespace VividRP.Editor.RenderGraph
             return false;
         }
 
+        private static bool TryAddStandaloneResourceBinding(
+            RenderGraphPassDefinition passDef,
+            string targetFieldName,
+            RenderGraphResourceKind resourceKind,
+            IPort inputConnectedPort,
+            IPort outputConnectedPort,
+            RenderGraphPassBindingConnectionKind connectionKind,
+            IReadOnlyDictionary<IPort, int> portToIndex)
+        {
+            if (!TryGetStandaloneResourceIndex(inputConnectedPort, outputConnectedPort, portToIndex, out var resourceIndex))
+                return false;
+
+            passDef.ResourceBindings.Add(new RenderGraphPassResourceBinding
+            {
+                FieldName = targetFieldName,
+                ResourceKind = resourceKind,
+                ResourceIndex = resourceIndex,
+                SourceKind = RenderGraphPassBindingSourceKind.Resource,
+                ConnectionKind = connectionKind,
+            });
+            return true;
+        }
+
+        private static RenderGraphPassBindingConnectionKind GetConnectionKind(IPort inputConnectedPort, IPort outputConnectedPort)
+        {
+            var connectionKind = RenderGraphPassBindingConnectionKind.None;
+
+            if (inputConnectedPort != null)
+                connectionKind |= RenderGraphPassBindingConnectionKind.Input;
+
+            if (outputConnectedPort != null)
+                connectionKind |= RenderGraphPassBindingConnectionKind.Output;
+
+            return connectionKind;
+        }
+
+        private static bool TryGetStandaloneResourceIndex(
+            IPort inputConnectedPort,
+            IPort outputConnectedPort,
+            IReadOnlyDictionary<IPort, int> portToIndex,
+            out int resourceIndex)
+        {
+            resourceIndex = -1;
+
+            if (inputConnectedPort == null && outputConnectedPort == null)
+                return false;
+
+            if (inputConnectedPort != null && outputConnectedPort != null)
+            {
+                if (!ReferenceEquals(inputConnectedPort, outputConnectedPort))
+                    return false;
+
+                return portToIndex.TryGetValue(inputConnectedPort, out resourceIndex);
+            }
+
+            var connectedPort = inputConnectedPort ?? outputConnectedPort;
+            return connectedPort != null && portToIndex.TryGetValue(connectedPort, out resourceIndex);
+        }
+
+        private static void AddPortBindingIndex(IDictionary<IPort, int> portToIndex, IPort port, int resourceIndex)
+        {
+            if (port == null)
+                return;
+
+            portToIndex[port] = resourceIndex;
+        }
+
         private static object GetBindableResourceNode(Type fieldType, IPort connectedPort)
         {
             var connectedNode = connectedPort?.GetNode();
@@ -359,10 +487,23 @@ namespace VividRP.Editor.RenderGraph
             if (fieldType == typeof(RenderGraphBuffer) && connectedNode is BufferResourceNodeData bufferNode)
                 return bufferNode;
 
+            if (fieldType == typeof(RenderGraphBuffer) && connectedNode is ClassificationResourceNodeData classificationBufferNode)
+                return classificationBufferNode;
+
             if (fieldType == typeof(RenderGraphRenderList) && connectedNode is RenderListResourceNodeData renderListNode)
                 return renderListNode;
 
             return null;
+        }
+
+        private static bool RequiresMatchingStandaloneResourcePorts(object node)
+        {
+            return node is ClassificationResourceNodeData;
+        }
+
+        internal static bool ShouldImportPassFieldBinding(bool hasInputConnection, bool hasBoundResourceNode)
+        {
+            return hasInputConnection && !hasBoundResourceNode;
         }
 
         private static void TryAddPassFieldBinding(
@@ -388,6 +529,7 @@ namespace VividRP.Editor.RenderGraph
                 FieldName = targetFieldName,
                 ResourceKind = resourceKind,
                 SourceKind = RenderGraphPassBindingSourceKind.PassField,
+                ConnectionKind = RenderGraphPassBindingConnectionKind.Input,
                 SourcePassIndex = sourcePassIndex,
                 SourceFieldName = sourceFieldName,
             });

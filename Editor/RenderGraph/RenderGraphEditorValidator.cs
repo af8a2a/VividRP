@@ -89,6 +89,17 @@ namespace VividRP.Editor.RenderGraph
                         $"Read/write field '{field.Name}' must connect to the same resource node on both input and output ports.",
                         passNode);
                 }
+
+                if (inputResourceNode != null
+                    && outputResourceNode != null
+                    && inputResourceNode == outputResourceNode
+                    && RequiresMatchingStandaloneResourcePorts(inputResourceNode)
+                    && !ReferenceEquals(passNode.GetInputPortByName(inputPortName)?.FirstConnectedPort, passNode.GetOutputPortByName(outputPortName)?.FirstConnectedPort))
+                {
+                    infos.LogError(
+                        $"Read/write field '{field.Name}' must connect to the same resource output on composite resource nodes.",
+                        passNode);
+                }
             }
         }
 
@@ -151,7 +162,13 @@ namespace VividRP.Editor.RenderGraph
         {
             return node is TextureResourceNodeData
                 || node is BufferResourceNodeData
-                || node is RenderListResourceNodeData;
+                || node is RenderListResourceNodeData
+                || node is ClassificationResourceNodeData;
+        }
+
+        private static bool RequiresMatchingStandaloneResourcePorts(INode node)
+        {
+            return node is ClassificationResourceNodeData;
         }
 
         private static void ValidateHistoryResourceNodes(RenderGraphEditorGraph graph, GraphLogger infos)
@@ -181,7 +198,7 @@ namespace VividRP.Editor.RenderGraph
                 }
 
                 var sourceNode = inputPort.FirstConnectedPort?.GetNode();
-                if (sourceNode is TextureResourceNodeData || sourceNode is HistoryResourceNodeData || sourceNode is RenderPassNodeData)
+                if (sourceNode is TextureResourceNodeData || sourceNode is HistoryResourceNodeData || sourceNode is RenderPassNodeData || sourceNode is ClassificationResourceNodeData)
                     continue;
 
                 infos.LogWarning("Preview node only supports texture outputs.", previewNode);

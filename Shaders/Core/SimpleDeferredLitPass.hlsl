@@ -2,6 +2,7 @@
 #define VIVIDRP_SIMPLE_DEFERRED_LIT_PASS_INCLUDED
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/GBuffer.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Lighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/TextureXR.hlsl"
 
 TEXTURE2D_X(_GBuffer0);
@@ -100,7 +101,20 @@ float3 GetDeferredViewDirectionWS(float3 positionWS)
 
 float3 GetDeferredLightDirectionWS()
 {
+    DirectionalLightData mainLight;
+    if (TryGetMainDirectionalLight(mainLight))
+        return SafeNormalize(mainLight.directionWS);
+
     return SafeNormalize(_MainLightDirection.xyz);
+}
+
+float3 GetDeferredLightColor()
+{
+    DirectionalLightData mainLight;
+    if (TryGetMainDirectionalLight(mainLight))
+        return mainLight.color;
+
+    return _MainLightColor.rgb;
 }
 
 VividGBufferSurfaceData SampleVividGBuffer(float2 uv)
@@ -144,46 +158,96 @@ float3 EvaluateSimpleDeferredLighting(VividGBufferSurfaceData surfaceData, float
 {
     float3 normalWS = surfaceData.normalWS;
     float3 viewDirectionWS = GetDeferredViewDirectionWS(positionWS);
-    float3 lightDirectionWS = GetDeferredLightDirectionWS();
-    float3 halfVectorWS = SafeNormalize(viewDirectionWS + lightDirectionWS);
-
-    float nDotL = saturate(dot(normalWS, lightDirectionWS));
-    float nDotV = saturate(dot(normalWS, viewDirectionWS));
-    float nDotH = saturate(dot(normalWS, halfVectorWS));
-    float vDotH = saturate(dot(viewDirectionWS, halfVectorWS));
-
-    float3 f0 = lerp(kDielectricF0, surfaceData.baseColor, surfaceData.metallic);
-    float3 fresnel = F_Schlick(vDotH, f0);
-    float distribution = D_GGX(nDotH, surfaceData.linearRoughness);
-    float visibility = V_SmithGGXCorrelated(nDotV, nDotL, surfaceData.linearRoughness);
-
-    float3 specular = distribution * visibility * fresnel;
     float3 diffuseColor = surfaceData.baseColor * (1.0 - surfaceData.metallic);
-    float3 diffuse = diffuseColor * INV_PI;
-
-    float3 directLighting = (diffuse + specular) * _MainLightColor.rgb * nDotL;
     float3 ambientLighting = diffuseColor * _AmbientColor.rgb * surfaceData.ambientOcclusion;
-    float3 materialLighting = 0.0;
 
-    if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+    if (!HasDirectionalLights())
     {
-        materialLighting += EvaluateFabricFuzz(
-            surfaceData.baseColor,
-            normalWS,
-            viewDirectionWS,
-            lightDirectionWS,
-            surfaceData.customData) * _MainLightColor.rgb;
-    }
-    else if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_CLEARCOAT)
-    {
-        materialLighting += EvaluateClearCoatSpecular(
-            normalWS,
-            viewDirectionWS,
-            lightDirectionWS,
-            surfaceData.customData) * _MainLightColor.rgb * nDotL;
+        float3 lightDirectionWS = GetDeferredLightDirectionWS();
+        float3 halfVectorWS = SafeNormalize(viewDirectionWS + lightDirectionWS);
+
+        float nDotL = saturate(dot(normalWS, lightDirectionWS));
+        float nDotV = saturate(dot(normalWS, viewDirectionWS));
+        float nDotH = saturate(dot(normalWS, halfVectorWS));
+        float vDotH = saturate(dot(viewDirectionWS, halfVectorWS));
+
+        float3 f0 = lerp(kDielectricF0, surfaceData.baseColor, surfaceData.metallic);
+        float3 fresnel = F_Schlick(vDotH, f0);
+        float distribution = D_GGX(nDotH, surfaceData.linearRoughness);
+        float visibility = V_SmithGGXCorrelated(nDotV, nDotL, surfaceData.linearRoughness);
+
+        float3 specular = distribution * visibility * fresnel;
+        float3 diffuse = diffuseColor * INV_PI;
+        float3 lightColor = GetDeferredLightColor();
+        float3 directLighting = (diffuse + specular) * lightColor * nDotL;
+        float3 materialLighting = 0.0;
+
+        if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+        {
+            materialLighting += EvaluateFabricFuzz(
+                surfaceData.baseColor,
+                normalWS,
+                viewDirectionWS,
+                lightDirectionWS,
+                surfaceData.customData) * lightColor;
+        }
+        else if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_CLEARCOAT)
+        {
+            materialLighting += EvaluateClearCoatSpecular(
+                normalWS,
+                viewDirectionWS,
+                lightDirectionWS,
+                surfaceData.customData) * lightColor * nDotL;
+        }
+
+        return directLighting + ambientLighting + materialLighting + surfaceData.emissive;
     }
 
-    return directLighting + ambientLighting + materialLighting + surfaceData.emissive;
+    float3 accumulatedDirectionalLighting = 0.0;
+
+    [loop]
+    for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)
+    {
+        DirectionalLightData directionalLight = GetDirectionalLight(lightIndex);
+        float3 lightDirectionWS = SafeNormalize(directionalLight.directionWS);
+        float3 halfVectorWS = SafeNormalize(viewDirectionWS + lightDirectionWS);
+
+        float nDotL = saturate(dot(normalWS, lightDirectionWS));
+        float nDotV = saturate(dot(normalWS, viewDirectionWS));
+        float nDotH = saturate(dot(normalWS, halfVectorWS));
+        float vDotH = saturate(dot(viewDirectionWS, halfVectorWS));
+
+        float3 f0 = lerp(kDielectricF0, surfaceData.baseColor, surfaceData.metallic);
+        float3 fresnel = F_Schlick(vDotH, f0);
+        float distribution = D_GGX(nDotH, surfaceData.linearRoughness);
+        float visibility = V_SmithGGXCorrelated(nDotV, nDotL, surfaceData.linearRoughness);
+
+        float3 specular = distribution * visibility * fresnel;
+        float3 diffuse = diffuseColor * INV_PI;
+        float3 directionalLighting = (diffuse + specular) * directionalLight.color * nDotL;
+
+        if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+        {
+            directionalLighting += EvaluateFabricFuzz(
+                surfaceData.baseColor,
+                normalWS,
+                viewDirectionWS,
+                lightDirectionWS,
+                surfaceData.customData) * directionalLight.color;
+        }
+        else if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_CLEARCOAT)
+        {
+            directionalLighting += EvaluateClearCoatSpecular(
+                normalWS,
+                viewDirectionWS,
+                lightDirectionWS,
+                surfaceData.customData) * directionalLight.color * nDotL;
+        }
+
+        accumulatedDirectionalLighting += directionalLighting;
+    }
+
+    return accumulatedDirectionalLighting + ambientLighting + surfaceData.emissive;
 }
 
 float4 Frag(Varyings input) : SV_Target

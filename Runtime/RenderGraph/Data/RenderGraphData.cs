@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
 {
@@ -15,6 +16,14 @@ namespace VividRP.Runtime
     {
         Resource,
         PassField
+    }
+
+    [Flags]
+    public enum RenderGraphPassBindingConnectionKind
+    {
+        None = 0,
+        Input = 1 << 0,
+        Output = 1 << 1,
     }
 
     public enum RenderGraphResourceBindingVariant
@@ -32,8 +41,35 @@ namespace VividRP.Runtime
         public int ResourceIndex;
         public RenderGraphResourceBindingVariant ResourceBindingVariant;
         public RenderGraphPassBindingSourceKind SourceKind;
+        public RenderGraphPassBindingConnectionKind ConnectionKind;
         public int SourcePassIndex = -1;
         public string SourceFieldName;
+    }
+
+    internal static class RenderGraphPassBindingUtility
+    {
+        internal static bool UsesInputConnection(RenderGraphPassBindingConnectionKind connectionKind)
+        {
+            return (connectionKind & RenderGraphPassBindingConnectionKind.Input) != 0;
+        }
+
+        internal static bool ConsumesExistingState(RenderGraphPassResourceBinding binding, AccessFlags declaredAccess)
+        {
+            if ((declaredAccess & AccessFlags.Read) != 0)
+                return true;
+
+            return binding != null && UsesInputConnection(binding.ConnectionKind);
+        }
+
+        internal static AccessFlags ResolveEffectiveAccess(RenderGraphPassResourceBinding binding, AccessFlags declaredAccess)
+        {
+            if ((declaredAccess & AccessFlags.Read) != 0)
+                return declaredAccess;
+
+            return binding != null && UsesInputConnection(binding.ConnectionKind)
+                ? declaredAccess | AccessFlags.Read
+                : declaredAccess;
+        }
     }
 
     [Serializable]

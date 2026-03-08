@@ -77,7 +77,56 @@ namespace VividRP.Runtime
             mainLightEntityId = hasMainLight && visibleLights[mainLightIndex].light != null
                 ? visibleLights[mainLightIndex].light.GetEntityId()
                 : EntityId.None;
-            UpdateDirectionalLights(UnityEngine.Object.FindObjectsByType<Light>(FindObjectsInactive.Exclude, FindObjectsSortMode.None), RenderSettings.sun);
+            UpdateDirectionalLights(visibleLights, RenderSettings.sun);
+        }
+
+        internal void UpdateDirectionalLights(NativeArray<VisibleLight> visibleLights, Light sunLight)
+        {
+            EnsureDirectionalLightCapacity(CountDirectionalLights(visibleLights));
+
+            directionalLightCount = 0;
+            mainDirectionalLightIndex = -1;
+            mainDirectionalLightEntityId = EntityId.None;
+
+            if (!visibleLights.IsCreated || visibleLights.Length == 0)
+                return;
+
+            var sunLightEntityId = sunLight != null ? sunLight.GetEntityId() : EntityId.None;
+            var brightestDirectionalIndex = -1;
+            var brightestDirectionalEntityId = EntityId.None;
+            var brightestDirectionalIntensity = float.NegativeInfinity;
+
+            for (var lightIndex = 0; lightIndex < visibleLights.Length; lightIndex++)
+            {
+                var visibleLight = visibleLights[lightIndex];
+                if (visibleLight.lightType != LightType.Directional)
+                    continue;
+
+                directionalLights[directionalLightCount] = CreateDirectionalLightData(visibleLight);
+
+                var lightEntityId = visibleLight.light != null ? visibleLight.light.GetEntityId() : EntityId.None;
+                if (!sunLightEntityId.Equals(EntityId.None) && lightEntityId.Equals(sunLightEntityId))
+                {
+                    mainDirectionalLightIndex = directionalLightCount;
+                    mainDirectionalLightEntityId = lightEntityId;
+                }
+
+                var lightIntensity = GetLightIntensity(directionalLights[directionalLightCount].color);
+                if (lightIntensity > brightestDirectionalIntensity)
+                {
+                    brightestDirectionalIntensity = lightIntensity;
+                    brightestDirectionalIndex = directionalLightCount;
+                    brightestDirectionalEntityId = lightEntityId;
+                }
+
+                directionalLightCount++;
+            }
+
+            if (mainDirectionalLightIndex >= 0)
+                return;
+
+            mainDirectionalLightIndex = brightestDirectionalIndex;
+            mainDirectionalLightEntityId = brightestDirectionalEntityId;
         }
 
         internal void UpdateDirectionalLights(IReadOnlyList<Light> lights, Light sunLight)
@@ -232,6 +281,21 @@ namespace VividRP.Runtime
             return directionalLightCount;
         }
 
+        private static int CountDirectionalLights(NativeArray<VisibleLight> visibleLights)
+        {
+            if (!visibleLights.IsCreated || visibleLights.Length == 0)
+                return 0;
+
+            var directionalLightCount = 0;
+            for (var lightIndex = 0; lightIndex < visibleLights.Length; lightIndex++)
+            {
+                if (visibleLights[lightIndex].lightType == LightType.Directional)
+                    directionalLightCount++;
+            }
+
+            return directionalLightCount;
+        }
+
         private static DirectionalLightData CreateDirectionalLightData(Light light)
         {
             var finalColor = light.color.linear * light.intensity;
@@ -241,6 +305,24 @@ namespace VividRP.Runtime
                 shadowStrength = light.shadows != LightShadows.None ? light.shadowStrength : 0f,
                 color = new Vector3(finalColor.r, finalColor.g, finalColor.b),
                 renderingLayerMask = (uint)light.renderingLayerMask,
+            };
+        }
+
+        private static DirectionalLightData CreateDirectionalLightData(VisibleLight visibleLight)
+        {
+            var forward = visibleLight.localToWorldMatrix.GetColumn(2);
+            var directionWS = new Vector3(-forward.x, -forward.y, -forward.z);
+            var shadowStrength = visibleLight.light != null && visibleLight.light.shadows != LightShadows.None
+                ? visibleLight.light.shadowStrength
+                : 0f;
+            var renderingLayerMask = visibleLight.light != null ? (uint)visibleLight.light.renderingLayerMask : 0u;
+
+            return new DirectionalLightData
+            {
+                directionWS = directionWS,
+                shadowStrength = shadowStrength,
+                color = new Vector3(visibleLight.finalColor.r, visibleLight.finalColor.g, visibleLight.finalColor.b),
+                renderingLayerMask = renderingLayerMask,
             };
         }
 

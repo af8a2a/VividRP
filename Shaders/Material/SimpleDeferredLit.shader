@@ -29,7 +29,7 @@ Shader "Hidden/VividRP/SimpleDeferredLit"
                 #pragma vertex Vert
                 #pragma fragment Frag
 
-                #include "Packages/com.af8a2a.vividrp/Shaders/Core/SimpleDeferredLitPass.hlsl"
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/SimpleDeferredLitPass.hlsl"
             ENDHLSL
         }
     }

@@ -8,7 +8,8 @@
   "dependencies": {
     "com.unity.render-pipelines.core": "17.5.0",
     "com.unity.test-framework": "1.6.0",
-    "com.unity.graphtoolkit": "0.4.0-exp.2"
+    "com.unity.graphtoolkit": "0.4.0-exp.2",
+    "com.unity.timeline": "1.8.9"
   },
   "author": {
     "name": "jwt",

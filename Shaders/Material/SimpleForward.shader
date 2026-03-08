@@ -2,8 +2,9 @@ Shader "VividRP/Material/SimpleForward"
 {
     Properties
     {
-        [MainTexture] _BaseMap("Base Map", 2D) = "white" {}
-        [MainColor] _BaseColor("Base Color", Color) = (1, 1, 1, 1)
+        [Main(SurfaceInputs, _, on, off)] _SurfaceInputs("Surface Inputs", Float) = 1
+        [MainTexture] [Tex(SurfaceInputs, _BaseColor)] _BaseMap("Base Map", 2D) = "white" {}
+        [HideInInspector] [MainColor] _BaseColor("Base Color", Color) = (1, 1, 1, 1)
     }
 
     SubShader
@@ -100,6 +101,8 @@ Shader "VividRP/Material/SimpleForward"
             ENDHLSL
         }
     }
+
+    CustomEditor "LWGUI.LWGUI"
 
     FallBack Off
 }

@@ -1,0 +1,181 @@
+#ifndef VIVIDRP_STANDARD_LIT_GBUFFER_PASS_INCLUDED
+#define VIVIDRP_STANDARD_LIT_GBUFFER_PASS_INCLUDED
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/GBuffer.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
+
+CBUFFER_START(UnityPerMaterial)
+    float4 _BaseColor;
+    float4 _BaseMap_ST;
+    float4 _EmissionColor;
+    float _Cutoff;
+    float _Smoothness;
+    float _SmoothnessTextureChannel;
+    float _Metallic;
+    float _BumpScale;
+    float _OcclusionStrength;
+    float _ClearCoatMask;
+    float _ClearCoatSmoothness;
+    float _AlphaClip;
+    float _WorkflowMode;
+CBUFFER_END
+
+TEXTURE2D(_BaseMap);
+SAMPLER(sampler_BaseMap);
+TEXTURE2D(_MetallicGlossMap);
+SAMPLER(sampler_MetallicGlossMap);
+TEXTURE2D(_BumpMap);
+SAMPLER(sampler_BumpMap);
+TEXTURE2D(_OcclusionMap);
+SAMPLER(sampler_OcclusionMap);
+TEXTURE2D(_EmissionMap);
+SAMPLER(sampler_EmissionMap);
+
+struct Attributes
+{
+    float4 positionOS : POSITION;
+    float3 normalOS : NORMAL;
+    float4 tangentOS : TANGENT;
+    float2 uv : TEXCOORD0;
+    UNITY_VERTEX_INPUT_INSTANCE_ID
+};
+
+struct Varyings
+{
+    float4 positionCS : SV_POSITION;
+    float3 normalWS : TEXCOORD0;
+    float4 tangentWS : TEXCOORD1;
+    float2 uv : TEXCOORD2;
+    UNITY_VERTEX_INPUT_INSTANCE_ID
+    UNITY_VERTEX_OUTPUT_STEREO
+};
+
+float3 UnpackVividNormalScale(float4 packedNormal, float scale)
+{
+    float3 normalTS;
+    normalTS.xy = packedNormal.wy * 2.0 - 1.0;
+    normalTS.xy *= scale;
+    normalTS.z = sqrt(saturate(1.0 - dot(normalTS.xy, normalTS.xy)));
+    return normalTS;
+}
+
+Varyings Vert(Attributes input)
+{
+    Varyings output;
+
+    UNITY_SETUP_INSTANCE_ID(input);
+    UNITY_TRANSFER_INSTANCE_ID(input, output);
+    UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
+
+    output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
+    output.normalWS = TransformObjectToWorldNormal(input.normalOS);
+    output.tangentWS = float4(TransformObjectToWorldDir(input.tangentOS.xyz), input.tangentOS.w);
+    output.uv = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
+    return output;
+}
+
+float4 SampleBase(float2 uv)
+{
+    return SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, uv) * _BaseColor;
+}
+
+void ApplyAlphaClip(float alpha)
+{
+    if (_AlphaClip > 0.5)
+    {
+        clip(alpha - _Cutoff);
+    }
+}
+
+float2 SampleMetallicSmoothness(float2 uv, float baseAlpha)
+{
+    float4 metallicGlossSample = SAMPLE_TEXTURE2D(_MetallicGlossMap, sampler_MetallicGlossMap, uv);
+    float metallic = saturate(_Metallic);
+
+    float smoothness;
+
+#if defined(_METALLICSPECGLOSSMAP)
+    metallic = saturate(metallicGlossSample.r);
+#endif
+
+    if (_SmoothnessTextureChannel > 0.5)
+    {
+        smoothness = baseAlpha * _Smoothness;
+    }
+    else
+    {
+        smoothness = metallicGlossSample.a * _Smoothness;
+    }
+
+    return float2(metallic, saturate(smoothness));
+}
+
+float SampleAmbientOcclusion(float2 uv)
+{
+    float occlusion = SAMPLE_TEXTURE2D(_OcclusionMap, sampler_OcclusionMap, uv).g;
+    return saturate(lerp(1.0, occlusion, _OcclusionStrength));
+}
+
+float3 SampleEmission(float2 uv)
+{
+    return max(SAMPLE_TEXTURE2D(_EmissionMap, sampler_EmissionMap, uv).rgb * _EmissionColor.rgb, 0.0);
+}
+
+float3 SampleNormalWS(Varyings input)
+{
+    float3 normalWS = normalize(input.normalWS);
+    float3 tangentWS = normalize(input.tangentWS.xyz);
+    float tangentSign = input.tangentWS.w * GetOddNegativeScale();
+    float3 bitangentWS = normalize(cross(normalWS, tangentWS) * tangentSign);
+    float3 normalTS = UnpackVividNormalScale(SAMPLE_TEXTURE2D(_BumpMap, sampler_BumpMap, input.uv), _BumpScale);
+    return normalize(normalTS.x * tangentWS + normalTS.y * bitangentWS + normalTS.z * normalWS);
+}
+
+VividGBufferSurfaceData BuildStandardLitSurfaceData(Varyings input)
+{
+    float4 baseSample = SampleBase(input.uv);
+    ApplyAlphaClip(baseSample.a);
+
+    float2 metallicSmoothness = SampleMetallicSmoothness(input.uv, baseSample.a);
+    float clearCoatMask = saturate(_ClearCoatMask);
+
+    VividGBufferSurfaceData surfaceData;
+    surfaceData.baseColor = baseSample.rgb;
+    surfaceData.normalWS = SampleNormalWS(input);
+    surfaceData.linearRoughness = (1.0 - metallicSmoothness.y) * (1.0 - metallicSmoothness.y);
+    surfaceData.metallic = metallicSmoothness.x;
+    surfaceData.ambientOcclusion = SampleAmbientOcclusion(input.uv);
+    surfaceData.customData = clearCoatMask;
+    surfaceData.materialId = clearCoatMask > 0.0 ? VIVID_GBUFFER_MATERIAL_CLEARCOAT : VIVID_GBUFFER_MATERIAL_STANDARD;
+    surfaceData.emissive = SampleEmission(input.uv);
+    return surfaceData;
+}
+
+VividGBufferFragmentOutput FragGBuffer(Varyings input)
+{
+    UNITY_SETUP_INSTANCE_ID(input);
+    UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+
+    return PackVividGBufferSurfaceData(BuildStandardLitSurfaceData(input));
+}
+
+half4 FragPreDepth(Varyings input) : SV_Target
+{
+    UNITY_SETUP_INSTANCE_ID(input);
+    UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+
+    ApplyAlphaClip(SampleBase(input.uv).a);
+    return 0.0;
+}
+
+half4 FragDebug(Varyings input) : SV_Target
+{
+    UNITY_SETUP_INSTANCE_ID(input);
+    UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+
+    VividGBufferSurfaceData surfaceData = BuildStandardLitSurfaceData(input);
+    float3 debugColor = surfaceData.baseColor + surfaceData.emissive;
+    return half4(debugColor, 1.0);
+}
+
+#endif

@@ -19,7 +19,7 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/FullScreenUV")]
         public Shader FullScreenUVShader;
 
-        [ResourcePath("Shaders/Core/MaterialClassification")]
+        [ResourcePath("Shaders/Material/MaterialClassification")]
         public ComputeShader MaterialClassificationCompute;
     }
 }

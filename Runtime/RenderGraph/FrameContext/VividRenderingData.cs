@@ -9,7 +9,6 @@ namespace VividRP.Runtime
 
         public override void Reset()
         {
-            
         }
     }
 }

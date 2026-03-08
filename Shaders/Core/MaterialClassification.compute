@@ -1,0 +1,98 @@
+#pragma kernel ClearMaterialCounts
+#pragma kernel ClassifyMaterialIds
+#pragma kernel BuildIndirectArgs
+
+#define VIVID_GBUFFER_MATERIAL_STANDARD  0u
+#define VIVID_GBUFFER_MATERIAL_FABRIC    1u
+#define VIVID_GBUFFER_MATERIAL_CLEARCOAT 2u
+
+Texture2D<float4> _GBuffer0;
+Texture2D<float> _DepthTexture;
+
+RWStructuredBuffer<uint> _StandardMaterialIndices;
+RWStructuredBuffer<uint> _FabricMaterialIndices;
+RWStructuredBuffer<uint> _ClearCoatMaterialIndices;
+RWStructuredBuffer<uint> _MaterialClassCounts;
+RWStructuredBuffer<uint> _StandardIndirectArgs;
+RWStructuredBuffer<uint> _FabricIndirectArgs;
+RWStructuredBuffer<uint> _ClearCoatIndirectArgs;
+
+uint _ClassificationWidth;
+uint _ClassificationHeight;
+uint _StandardVertexCountPerInstance;
+uint _FabricVertexCountPerInstance;
+uint _ClearCoatVertexCountPerInstance;
+
+uint DecodeVividMaterialId(float encodedMaterialId)
+{
+    return (uint)min(round(saturate(encodedMaterialId) * 255.0), 255.0);
+}
+
+bool IsSkyPixel(float deviceDepth)
+{
+#if UNITY_REVERSED_Z
+    return deviceDepth <= 0.0;
+#else
+    return deviceDepth >= 1.0;
+#endif
+}
+
+[numthreads(1, 1, 1)]
+void ClearMaterialCounts(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    _MaterialClassCounts[0] = 0;
+    _MaterialClassCounts[1] = 0;
+    _MaterialClassCounts[2] = 0;
+}
+
+[numthreads(8, 8, 1)]
+void ClassifyMaterialIds(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x >= _ClassificationWidth || dispatchThreadId.y >= _ClassificationHeight)
+        return;
+
+    uint2 pixelCoord = dispatchThreadId.xy;
+    float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
+    if (IsSkyPixel(deviceDepth))
+        return;
+
+    float4 gbuffer0 = _GBuffer0.Load(int3(pixelCoord, 0));
+    uint materialId = DecodeVividMaterialId(gbuffer0.a);
+    uint pixelIndex = pixelCoord.y * _ClassificationWidth + pixelCoord.x;
+    uint writeIndex = 0;
+
+    if (materialId == VIVID_GBUFFER_MATERIAL_STANDARD)
+    {
+        InterlockedAdd(_MaterialClassCounts[0], 1, writeIndex);
+        _StandardMaterialIndices[writeIndex] = pixelIndex;
+    }
+    else if (materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+    {
+        InterlockedAdd(_MaterialClassCounts[1], 1, writeIndex);
+        _FabricMaterialIndices[writeIndex] = pixelIndex;
+    }
+    else if (materialId == VIVID_GBUFFER_MATERIAL_CLEARCOAT)
+    {
+        InterlockedAdd(_MaterialClassCounts[2], 1, writeIndex);
+        _ClearCoatMaterialIndices[writeIndex] = pixelIndex;
+    }
+}
+
+[numthreads(1, 1, 1)]
+void BuildIndirectArgs(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    _StandardIndirectArgs[0] = _StandardVertexCountPerInstance;
+    _StandardIndirectArgs[1] = _MaterialClassCounts[0];
+    _StandardIndirectArgs[2] = 0;
+    _StandardIndirectArgs[3] = 0;
+
+    _FabricIndirectArgs[0] = _FabricVertexCountPerInstance;
+    _FabricIndirectArgs[1] = _MaterialClassCounts[1];
+    _FabricIndirectArgs[2] = 0;
+    _FabricIndirectArgs[3] = 0;
+
+    _ClearCoatIndirectArgs[0] = _ClearCoatVertexCountPerInstance;
+    _ClearCoatIndirectArgs[1] = _MaterialClassCounts[2];
+    _ClearCoatIndirectArgs[2] = 0;
+    _ClearCoatIndirectArgs[3] = 0;
+}

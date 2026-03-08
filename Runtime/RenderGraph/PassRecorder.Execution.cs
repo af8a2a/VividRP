@@ -26,6 +26,7 @@ namespace VividRP.Runtime
         {
             var renderingData = s_FrameData.GetOrCreate<VividRenderingData>();
             var cameraData = s_FrameData.GetOrCreate<VividCameraData>();
+            var lightData = s_FrameData.GetOrCreate<VividLightData>();
             var additionalCameraData = camera.GetComponent<VividAdditionalCameraData>();
             if (additionalCameraData == null && camera.cameraType == CameraType.Game)
                 additionalCameraData = camera.GetVividAdditionalCameraData();
@@ -41,6 +42,7 @@ namespace VividRP.Runtime
             cameraData.actualHeight = camera.scaledPixelHeight;
             renderingData.cullingResults = cullingResults;
             renderingData.context = context;
+            lightData.Update(cullingResults);
         }
 
         public static void Dispose()

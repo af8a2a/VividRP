@@ -189,6 +189,7 @@ namespace VividRP.Editor.RenderGraph
                 message = "Showing fallback texture.";
             }
 
+
             return new PreviewState(displayTexture, message);
         }
 

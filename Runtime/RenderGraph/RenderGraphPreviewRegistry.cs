@@ -9,6 +9,8 @@ namespace VividRP.Runtime
 {
     internal static class RenderGraphPreviewRegistry
     {
+        private static bool? s_AvailabilityOverride;
+
         private sealed class PreviewEntry
         {
             public RTHandle Handle;
@@ -27,6 +29,28 @@ namespace VividRP.Runtime
 
         private static readonly Dictionary<string, PreviewEntry> s_TexturePreviews = new(StringComparer.Ordinal);
 
+        internal static bool IsAvailable
+        {
+            get
+            {
+                if (s_AvailabilityOverride.HasValue)
+                    return s_AvailabilityOverride.Value;
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                return true;
+#else
+                return false;
+#endif
+            }
+        }
+
+        internal static void SetAvailabilityOverrideForTests(bool? isAvailable)
+        {
+            s_AvailabilityOverride = isAvailable;
+            if (isAvailable == false)
+                Clear();
+        }
+
         internal static void Clear()
         {
             foreach (var entry in s_TexturePreviews.Values)
@@ -40,6 +64,9 @@ namespace VividRP.Runtime
         internal static bool TryGetPreview(Type passType, string fieldName, out Texture texture)
         {
             texture = null;
+            if (!IsAvailable)
+                return false;
+
             if (passType == null || string.IsNullOrEmpty(fieldName))
                 return false;
 
@@ -55,6 +82,9 @@ namespace VividRP.Runtime
             passType = null;
             fieldName = null;
             texture = null;
+
+            if (!IsAvailable)
+                return false;
 
             string singleKey = null;
             foreach (var pair in s_TexturePreviews)
@@ -95,6 +125,9 @@ namespace VividRP.Runtime
 
         internal static void SetPreview(Type passType, string fieldName, Texture texture)
         {
+            if (!IsAvailable)
+                return;
+
             if (passType == null || string.IsNullOrEmpty(fieldName))
                 return;
 
@@ -123,6 +156,9 @@ namespace VividRP.Runtime
             in RenderTargetInfo sourceInfo,
             RenderGraphTextureDesc sourceDesc)
         {
+            if (!IsAvailable)
+                return null;
+
             if (passType == null || string.IsNullOrEmpty(fieldName))
                 return null;
 

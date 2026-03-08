@@ -13,14 +13,11 @@ namespace VividRP.Editor.RenderGraph
 
         private const string PreviewOptionName = "Preview";
 
-        // [UnityEngine.SerializeField]
-        // private TexturePreviewValue m_PreviewValue = new();
 
         protected override void OnDefineOptions(IOptionDefinitionContext context)
         {
             context.AddOption<TexturePreviewValue>(PreviewOptionName)
                 .WithDisplayName("Texture Preview");
-            // .WithDefaultValue(m_PreviewValue ??= new TexturePreviewValue());
         }
 
         protected override void OnDefinePorts(IPortDefinitionContext context)

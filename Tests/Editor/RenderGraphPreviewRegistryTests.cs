@@ -56,6 +56,7 @@ namespace VividRP.Editor.Tests
         [SetUp]
         public void SetUp()
         {
+            RenderGraphPreviewRegistry.SetAvailabilityOverrideForTests(null);
             RenderGraphPreviewRegistry.Clear();
         }
 
@@ -63,6 +64,28 @@ namespace VividRP.Editor.Tests
         public void TearDown()
         {
             RenderGraphPreviewRegistry.Clear();
+            RenderGraphPreviewRegistry.SetAvailabilityOverrideForTests(null);
+        }
+
+        [Test]
+        public void TryGetPreview_ReturnsFalse_WhenPreviewRuntimeIsDisabled()
+        {
+            var texture = new Texture2D(4, 4);
+
+            try
+            {
+                RenderGraphPreviewRegistry.SetAvailabilityOverrideForTests(false);
+                RenderGraphPreviewRegistry.SetPreview(typeof(PreviewTestPass), "Color", texture);
+
+                var found = RenderGraphPreviewRegistry.TryGetPreview(typeof(PreviewTestPass), "Color", out var previewTexture);
+
+                Assert.That(found, Is.False);
+                Assert.That(previewTexture, Is.Null);
+            }
+            finally
+            {
+                Object.DestroyImmediate(texture);
+            }
         }
 
         [Test]

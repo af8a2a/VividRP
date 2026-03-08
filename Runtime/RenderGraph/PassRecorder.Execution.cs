@@ -520,7 +520,11 @@ namespace VividRP.Runtime
             PassResource resources,
             RenderGraphPassDefinition passDefinition)
         {
-            if (renderGraph == null || pass == null || resources?.Textures == null || resources.Textures.Length == 0)
+            if (!RenderGraphPreviewRegistry.IsAvailable
+                || renderGraph == null
+                || pass == null
+                || resources?.Textures == null
+                || resources.Textures.Length == 0)
                 return;
 
             var passType = pass.GetType();
@@ -562,7 +566,8 @@ namespace VividRP.Runtime
 
         internal static bool ShouldRecordTexturePreview(RenderGraphPassDefinition passDefinition, PassResourceEntry entry)
         {
-            return passDefinition?.PreviewTextureFields != null
+            return RenderGraphPreviewRegistry.IsAvailable
+                && passDefinition?.PreviewTextureFields != null
                 && passDefinition.PreviewTextureFields.Count > 0
                 && entry != null
                 && entry.Texture != null
@@ -594,6 +599,7 @@ namespace VividRP.Runtime
             var textureCache = new Dictionary<RenderGraphTexture, TextureHandle>();
             var bufferCache = new Dictionary<RenderGraphBuffer, BufferHandle>();
             var renderListCache = new Dictionary<RenderGraphRenderList, RendererListHandle>();
+            var shouldRecordPreviews = RenderGraphPreviewRegistry.IsAvailable;
 
             var passDefinitions = graphAsset?.Passes;
             for (var passIndex = 0; passIndex < s_RenderPasses.Count; passIndex++)
@@ -607,17 +613,20 @@ namespace VividRP.Runtime
                 if (pass is ComputePass computePass)
                 {
                     RecordComputePass(renderGraph, computePass, resources, textureCache, bufferCache, renderListCache);
-                    RecordTexturePreviewPasses(renderGraph, computePass, resources, passDefinition);
+                    if (shouldRecordPreviews)
+                        RecordTexturePreviewPasses(renderGraph, computePass, resources, passDefinition);
                 }
                 else if (pass is RasterPass rasterPass)
                 {
                     RecordRasterPass(renderGraph, rasterPass, resources, textureCache, bufferCache, renderListCache);
-                    RecordTexturePreviewPasses(renderGraph, rasterPass, resources, passDefinition);
+                    if (shouldRecordPreviews)
+                        RecordTexturePreviewPasses(renderGraph, rasterPass, resources, passDefinition);
                 }
                 else if (pass is UnsafePass unsafePass)
                 {
                     RecordUnsafePass(renderGraph, unsafePass, resources, textureCache, bufferCache, renderListCache);
-                    RecordTexturePreviewPasses(renderGraph, unsafePass, resources, passDefinition);
+                    if (shouldRecordPreviews)
+                        RecordTexturePreviewPasses(renderGraph, unsafePass, resources, passDefinition);
                 }
             }
 

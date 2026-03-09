@@ -26,5 +26,11 @@ MonoBehaviour:
     FieldName: FullScreenUVShader
     Asset: {fileID: 4800000, guid: d59dc5dd19265494ca5c586c2e4ce4fe, type: 3}
   - TypeName: VividRP.Runtime.VividRPCoreResources
+    FieldName: HDRISkyShader
+    Asset: {fileID: 4800000, guid: d41d44af2b5e2ff49b8312d9fe8aab8b, type: 3}
+  - TypeName: VividRP.Runtime.VividRPCoreResources
+    FieldName: CopyDepthShader
+    Asset: {fileID: 4800000, guid: d1e81e551800135429c7550ad3907c25, type: 3}
+  - TypeName: VividRP.Runtime.VividRPCoreResources
     FieldName: MaterialClassificationCompute
     Asset: {fileID: 7200000, guid: 10706a155531873498d61668200a903d, type: 3}

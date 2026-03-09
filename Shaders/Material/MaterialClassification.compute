@@ -2,6 +2,8 @@
 #pragma kernel ClassifyMaterialIds
 #pragma kernel BuildIndirectArgs
 
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/SkyDepth.hlsl"
+
 #define VIVID_GBUFFER_MATERIAL_STANDARD  0u
 #define VIVID_GBUFFER_MATERIAL_FABRIC    1u
 #define VIVID_GBUFFER_MATERIAL_CLEARCOAT 2u
@@ -26,15 +28,6 @@ uint _ClearCoatVertexCountPerInstance;
 uint DecodeVividMaterialId(float encodedMaterialId)
 {
     return (uint)min(round(saturate(encodedMaterialId) * 255.0), 255.0);
-}
-
-bool IsSkyPixel(float deviceDepth)
-{
-#if UNITY_REVERSED_Z
-    return deviceDepth <= 0.0;
-#else
-    return deviceDepth >= 1.0;
-#endif
 }
 
 [numthreads(1, 1, 1)]

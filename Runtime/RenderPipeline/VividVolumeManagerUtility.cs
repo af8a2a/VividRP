@@ -46,5 +46,10 @@ namespace VividRP.Runtime
                 .GetSettings<VividDefaultVolumeProfileSettings>()?
                 .volumeProfile;
         }
+
+        internal static HDRISkyVolume GetHDRISkyVolume()
+        {
+            return VolumeManager.instance.stack?.GetComponent<HDRISkyVolume>();
+        }
     }
 }

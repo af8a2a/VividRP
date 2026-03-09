@@ -29,6 +29,15 @@ namespace VividRP.Runtime
 
         public override void Initialize(RenderPipelineGlobalSettings source = null)
         {
+            EnsureSettings<VividDefaultVolumeProfileSettings>();
+        }
+
+        private void EnsureSettings<T>() where T : class, IRenderPipelineGraphicsSettings, new()
+        {
+            if (GetSettings<T>() != null)
+                return;
+
+            m_Settings.settingsList.Add(new T());
         }
 
 #if UNITY_EDITOR

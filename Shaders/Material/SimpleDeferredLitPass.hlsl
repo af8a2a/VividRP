@@ -3,6 +3,7 @@
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/GBuffer.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Lighting.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/SkyDepth.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/TextureXR.hlsl"
 
 TEXTURE2D_X(_GBuffer0);
@@ -80,15 +81,6 @@ float3 F_Schlick(float vDotH, float3 f0)
 {
     float fresnel = Pow5Fast(1.0 - vDotH);
     return f0 + (1.0 - f0) * fresnel;
-}
-
-bool IsSkyPixel(float deviceDepth)
-{
-#if UNITY_REVERSED_Z
-    return deviceDepth <= 0.0;
-#else
-    return deviceDepth >= 1.0;
-#endif
 }
 
 float3 GetDeferredViewDirectionWS(float3 positionWS)

@@ -9,6 +9,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class CopyDepthPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.CopyDepthPass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class DrawObjectPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.DrawObjectPass, VividRP.Runtime";
@@ -30,6 +36,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class GBufferPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.GBufferPass, VividRP.Runtime";
+    }
+
+    [Serializable]
+    internal sealed class HDRISkyPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.HDRISkyPass, VividRP.Runtime";
     }
 
     [Serializable]

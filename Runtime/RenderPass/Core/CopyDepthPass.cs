@@ -1,0 +1,173 @@
+using UnityEngine;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
+
+namespace VividRP.Runtime.RenderPass.Core
+{
+    public class CopyDepthPass : RasterPass
+    {
+        private const string CopyDepthShaderName = "Hidden/VividRP/CopyDepth";
+
+        [RenderGraphResource(Name = "DepthAttachment", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_DepthAttachment;
+
+        [RenderGraphResource(Name = "DepthTexture", Access = AccessFlags.Write, AttachmentIndex = 0)]
+        private RenderGraphTexture m_DepthTexture;
+
+        private Material m_Material;
+
+        public CopyDepthPass()
+        {
+            m_DepthAttachment = CreateDepthAttachment("DepthAttachment");
+            m_DepthTexture = CreateDepthTexture("DepthTexture");
+        }
+
+        public override void Create()
+        {
+            var resources = PipelineResourceManager.Get<VividRPCoreResources>();
+            var shader = resources.CopyDepthShader != null
+                ? resources.CopyDepthShader
+                : Shader.Find(CopyDepthShaderName);
+            if (shader == null)
+            {
+                Debug.LogWarning($"[VividRP] Could not find shader '{CopyDepthShaderName}' for {nameof(CopyDepthPass)}.");
+                return;
+            }
+
+            m_Material = CoreUtils.CreateEngineMaterial(shader);
+        }
+
+        public override void Prepare(ContextContainer frameData)
+        {
+            var cameraData = frameData.Get<VividCameraData>();
+            var sourceDescriptor = m_DepthAttachment?.desc;
+            var hasExplicitSourceSize = HasExplicitSize(sourceDescriptor);
+            var width = hasExplicitSourceSize
+                ? Mathf.Max(1, sourceDescriptor.Width)
+                : ResolveCameraDimension(cameraData.actualWidth, cameraData.pixelWidth, Screen.width);
+            var height = hasExplicitSourceSize
+                ? Mathf.Max(1, sourceDescriptor.Height)
+                : ResolveCameraDimension(cameraData.actualHeight, cameraData.pixelHeight, Screen.height);
+
+            if (sourceDescriptor != null && !hasExplicitSourceSize)
+            {
+                sourceDescriptor.Width = width;
+                sourceDescriptor.Height = height;
+            }
+
+            ConfigureDepthTextureOutput(width, height);
+        }
+
+        public override void Record(RasterGraphContext context)
+        {
+            if (m_Material == null || !m_DepthAttachment.innerHandle.IsValid() || !m_DepthTexture.innerHandle.IsValid())
+                return;
+
+            RTHandle sourceHandle = m_DepthAttachment.innerHandle;
+
+
+            Blitter.BlitTexture(context.cmd, sourceHandle, Vector2.one, m_Material, 0);
+        }
+
+        public override void Dispose()
+        {
+            if (m_Material != null)
+            {
+                CoreUtils.Destroy(m_Material);
+                m_Material = null;
+            }
+        }
+
+        private void ConfigureDepthTextureOutput(int width, int height)
+        {
+            if (m_DepthTexture?.desc == null)
+                return;
+
+            m_DepthTexture.desc.Width = width;
+            m_DepthTexture.desc.Height = height;
+            m_DepthTexture.desc.ColorFormat = GraphicsFormat.R32_SFloat;
+            m_DepthTexture.desc.DepthBufferBits = DepthBits.None;
+            m_DepthTexture.desc.MsaaSamples = MSAASamples.None;
+            m_DepthTexture.desc.FilterMode = FilterMode.Point;
+            m_DepthTexture.desc.WrapMode = TextureWrapMode.Clamp;
+            m_DepthTexture.desc.ClearBuffer = false;
+            m_DepthTexture.desc.UseMipMap = false;
+            m_DepthTexture.desc.AutoGenerateMips = false;
+            m_DepthTexture.desc.MipCount = 1;
+            m_DepthTexture.desc.EnableRandomWrite = false;
+            m_DepthTexture.desc.BindTextureMS = false;
+            m_DepthTexture.desc.Name = "DepthTexture";
+
+            if (m_DepthAttachment?.desc == null)
+                return;
+
+            m_DepthTexture.desc.Dimension = m_DepthAttachment.desc.Dimension;
+            m_DepthTexture.desc.Slices = Mathf.Max(1, m_DepthAttachment.desc.Slices);
+            m_DepthTexture.desc.UseDynamicScale = m_DepthAttachment.desc.UseDynamicScale;
+            m_DepthTexture.desc.UseDynamicScaleExplicit = m_DepthAttachment.desc.UseDynamicScaleExplicit;
+            m_DepthTexture.desc.ScaleFactor = m_DepthAttachment.desc.ScaleFactor;
+        }
+
+        private static bool HasExplicitSize(RenderGraphTextureDesc descriptor)
+        {
+            return descriptor != null
+                && descriptor.Width > 0
+                && descriptor.Height > 0
+                && !(descriptor.Width == 1 && descriptor.Height == 1);
+        }
+
+        private static int ResolveCameraDimension(int actualCameraDimension, int cameraDimension, int screenDimension)
+        {
+            if (actualCameraDimension > 0)
+                return actualCameraDimension;
+
+            if (cameraDimension > 0)
+                return cameraDimension;
+
+            return Mathf.Max(1, screenDimension);
+        }
+
+        private static RenderGraphTexture CreateDepthAttachment(string name)
+        {
+            var texture = new RenderGraphTexture
+            {
+                desc = RenderGraphTextureDesc.CreateDepthTarget(1, 1, DepthBits.Depth32)
+            };
+
+            texture.desc.Name = name;
+            texture.desc.ClearBuffer = false;
+            return texture;
+        }
+
+        
+        private static RenderGraphTexture CreateDepthTexture(string name)
+        {
+            return new RenderGraphTexture
+            {
+                desc = new RenderGraphTextureDesc
+                {
+                    Width = 1,
+                    Height = 1,
+                    ColorFormat = GraphicsFormat.R32_SFloat,
+                    DepthBufferBits = DepthBits.None,
+                    FilterMode = FilterMode.Point,
+                    WrapMode = TextureWrapMode.Clamp,
+                    ClearBuffer = false,
+                    Name = name
+                }
+            };
+        }
+
+        private static Vector4 GetScaleBias(
+            Vector2 scale,
+            TextureUVOrigin sourceTextureUVOrigin,
+            TextureUVOrigin destinationTextureUVOrigin)
+        {
+            var yFlip = sourceTextureUVOrigin != destinationTextureUVOrigin;
+            return yFlip
+                ? new Vector4(scale.x, -scale.y, 0f, scale.y)
+                : new Vector4(scale.x, scale.y, 0f, 0f);
+        }
+    }
+}

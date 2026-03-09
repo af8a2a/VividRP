@@ -1,0 +1,115 @@
+Shader "Hidden/VividRP/HDRISky"
+{
+    Properties
+    {
+        [NoScaleOffset] _DepthTexture("Depth", 2D) = "white" {}
+        [NoScaleOffset] _SkyCubemap("Sky Cubemap", Cube) = "" {}
+        [HDR] _SkyTint("Sky Tint", Color) = (1, 1, 1, 1)
+        _SkyExposure("Sky Exposure", Float) = 1
+        _SkyRotation("Sky Rotation", Float) = 0
+    }
+
+    SubShader
+    {
+        Tags { "RenderPipeline" = "VividRenderPipeline" }
+
+        Pass
+        {
+            Name "HDRISky"
+            ZWrite Off
+            ZTest Always
+            Cull Off
+            Blend SrcAlpha OneMinusSrcAlpha
+
+            HLSLPROGRAM
+                #pragma target 4.5
+                #pragma vertex Vert
+                #pragma fragment Frag
+
+                #include "Packages/com.af8a2a.vividrp/Shaders/Core/Core.hlsl"
+                #include "Packages/com.af8a2a.vividrp/Shaders/Core/SkyDepth.hlsl"
+                #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+
+                TEXTURE2D_X_FLOAT(_DepthTexture);
+                SAMPLER(sampler_DepthTexture);
+                TEXTURECUBE(_SkyCubemap);
+                SAMPLER(sampler_SkyCubemap);
+
+                float4 _SkyTint;
+                float _SkyExposure;
+                float _SkyRotation;
+
+                struct Attributes
+                {
+                    uint vertexID : SV_VertexID;
+                    UNITY_VERTEX_INPUT_INSTANCE_ID
+                };
+
+                struct Varyings
+                {
+                    float4 positionCS : SV_POSITION;
+                    float2 uv : TEXCOORD0;
+                    UNITY_VERTEX_OUTPUT_STEREO
+                };
+
+                Varyings Vert(Attributes input)
+                {
+                    Varyings output;
+
+                    UNITY_SETUP_INSTANCE_ID(input);
+                    UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
+
+                    output.positionCS = GetFullScreenTriangleVertexPosition(input.vertexID);
+                    output.uv = GetFullScreenTriangleTexCoord(input.vertexID);
+                    return output;
+                }
+
+                float3 RotateAroundYAxis(float3 directionWS, float rotationDegrees)
+                {
+                    float rotationRadians = radians(rotationDegrees);
+                    float s;
+                    float c;
+                    sincos(rotationRadians, s, c);
+
+                    return float3(
+                        c * directionWS.x - s * directionWS.z,
+                        directionWS.y,
+                        s * directionWS.x + c * directionWS.z);
+                }
+
+                float3 GetSkyViewDirectionWS(float2 uv)
+                {
+                    float2 clipXY = uv * 2.0 - 1.0;
+                    float4 farClipPosition = float4(clipXY, UNITY_RAW_FAR_CLIP_VALUE, 1.0);
+                    float4 farViewPosition = mul(UNITY_MATRIX_I_P, farClipPosition);
+
+                    if (unity_OrthoParams.w > 0.5)
+                    {
+                        return SafeNormalize(TransformViewToWorldDir(float3(0.0, 0.0, 1.0), true));
+                    }
+
+                    float3 viewDirectionVS = SafeNormalize(farViewPosition.xyz / max(abs(farViewPosition.w), 1e-5));
+                    return SafeNormalize(TransformViewToWorldDir(viewDirectionVS, true));
+                }
+
+                float4 Frag(Varyings input) : SV_Target
+                {
+                    UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+
+                    float deviceDepth = SAMPLE_TEXTURE2D_X(_DepthTexture, sampler_DepthTexture, input.uv).r;
+                    if (!IsSkyPixel(deviceDepth))
+                        return float4(0.0, 0.0, 0.0, 0.0);
+
+                    float3 directionWS = GetSkyViewDirectionWS(input.uv);
+                    directionWS = RotateAroundYAxis(directionWS, _SkyRotation);
+
+                    float3 skyColor = SAMPLE_TEXTURECUBE(_SkyCubemap, sampler_SkyCubemap, directionWS).rgb;
+                    skyColor *= _SkyTint.rgb * _SkyExposure;
+                    return float4(skyColor, 1.0);
+                }
+            ENDHLSL
+        }
+    }
+
+    FallBack Off
+}

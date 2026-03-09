@@ -14,6 +14,7 @@ namespace VividRP.Runtime
         {
             m_Asset = asset;
 
+            VividVolumeManagerUtility.Initialize();
             PipelineResourceManager.Initialize();
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             Blitter.Initialize(resources.CoreBlitShader, resources.CoreBlitColorAndDepthShader);
@@ -41,6 +42,7 @@ namespace VividRP.Runtime
 
             var cullingResults = context.Cull(ref cullingParameters);
             context.SetupCameraProperties(camera);
+            VividVolumeManagerUtility.Update(camera);
 
             var cmdBuffer = CommandBufferPool.Get("VividRP");
 
@@ -73,6 +75,7 @@ namespace VividRP.Runtime
         protected override void Dispose(bool disposing)
         {
             PassRecorder.Dispose();
+            VividVolumeManagerUtility.Deinitialize();
 
             m_RenderGraph?.Cleanup();
             m_RenderGraph = null;

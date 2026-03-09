@@ -16,7 +16,18 @@ namespace VividRP.Runtime
 
         protected override List<IRenderPipelineGraphicsSettings> settingsList => m_Settings.settingsList;
 
-        public void Initialize(RenderPipelineGlobalSettings source = null)
+        internal T GetSettings<T>() where T : class, IRenderPipelineGraphicsSettings
+        {
+            foreach (var settings in m_Settings.settingsList)
+            {
+                if (settings is T typedSettings)
+                    return typedSettings;
+            }
+
+            return null;
+        }
+
+        public override void Initialize(RenderPipelineGlobalSettings source = null)
         {
         }
 

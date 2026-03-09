@@ -11,7 +11,11 @@ namespace VividRP.Editor.RenderPipeline
             string[] movedAssets,
             string[] movedFromAssetPaths)
         {
-            EditorApplication.delayCall += () => VividRenderPipelineGlobalSettings.Ensure();
+            EditorApplication.delayCall += () =>
+            {
+                var globalSettings = VividRenderPipelineGlobalSettings.Ensure();
+                VividDefaultVolumeProfileEditorUtility.EnsureDefaultVolumeProfile(globalSettings);
+            };
         }
     }
 }

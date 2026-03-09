@@ -11,7 +11,7 @@ namespace VividRP.Runtime
         protected override UnityEngine.Rendering.RenderPipeline CreatePipeline()
         {
 #if UNITY_EDITOR
-            // VividRenderPipelineGlobalSettings.Ensure();
+            VividRenderPipelineGlobalSettings.Ensure();
 #endif
             return new VividRenderPipeline(this);
         }

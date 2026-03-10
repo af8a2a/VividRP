@@ -28,7 +28,7 @@ namespace VividRP.Runtime
     [DisallowMultipleComponent]
     [RequireComponent(typeof(Camera))]
     [ExecuteAlways]
-    public class VividAdditionalCameraData : MonoBehaviour, IAdditionalData
+    public partial class VividAdditionalCameraData : MonoBehaviour, IAdditionalData
     {
         [SerializeField]
         private VividCameraRenderType m_RenderType = VividCameraRenderType.Base;
@@ -44,6 +44,30 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private bool m_Dithering;
+        
+        
+        
+        // Internal camera data as we are not yet sure how to expose View in stereo context.
+        // We might change this API soon.
+        Matrix4x4 m_ViewMatrix;
+        Matrix4x4 m_ProjectionMatrix;
+        Matrix4x4 m_JitterMatrix;
+
+        internal void SetViewAndProjectionMatrix(Matrix4x4 viewMatrix, Matrix4x4 projectionMatrix)
+        {
+            m_ViewMatrix = viewMatrix;
+            m_ProjectionMatrix = projectionMatrix;
+            m_JitterMatrix = Matrix4x4.identity;
+        }
+
+        internal void SetViewProjectionAndJitterMatrix(Matrix4x4 viewMatrix, Matrix4x4 projectionMatrix, Matrix4x4 jitterMatrix)
+        {
+            m_ViewMatrix = viewMatrix;
+            m_ProjectionMatrix = projectionMatrix;
+            m_JitterMatrix = jitterMatrix;
+        }
+
+
 
         private Camera m_Camera;
 

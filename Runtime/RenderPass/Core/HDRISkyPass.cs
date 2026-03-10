@@ -55,6 +55,8 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_Material == null)
                 return;
 
+            m_Material.SetTexture(DepthTextureID, m_DepthTexture.innerHandle);
+
             Blitter.BlitTexture(context.cmd, Vector2.one, m_Material, 0);
         }
 
@@ -83,7 +85,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Material.SetColor(SkyTintId, tint);
             m_Material.SetFloat(SkyExposureId, exposure);
             m_Material.SetFloat(SkyRotationId, rotation);
-            m_Material.SetTexture(DepthTextureID, m_DepthTexture.innerHandle);
         }
 
         private static RenderGraphTexture CreateColorTarget(string name, GraphicsFormat format)

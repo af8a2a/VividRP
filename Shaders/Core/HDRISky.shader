@@ -38,6 +38,7 @@ Shader "Hidden/VividRP/HDRISky"
                 float4 _SkyTint;
                 float _SkyExposure;
                 float _SkyRotation;
+                float4x4 _PixelCoordToViewDirWS;
 
                 struct Attributes
                 {
@@ -92,12 +93,18 @@ Shader "Hidden/VividRP/HDRISky"
                     return SafeNormalize(TransformViewToWorldDir(viewDirectionVS, true));
                 }
 
+            float3 GetSkyViewDirWS(float2 positionCS)
+            {
+                float4 viewDirWS = mul(float4(positionCS.xy, 1.0f, 1.0f), _PixelCoordToViewDirWS);
+                return normalize(viewDirWS.xyz);
+            }
+
                 float4 Frag(Varyings input) : SV_Target
                 {
-                    UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
                     float deviceDepth = SAMPLE_TEXTURE2D_X(_DepthTexture, sampler_DepthTexture, input.uv).r;
-                    if (!IsSkyPixel(deviceDepth))
+
+                    if (deviceDepth==UNITY_RAW_FAR_CLIP_VALUE)
                         return float4(0.0, 0.0, 0.0, 0.0);
 
                     float3 directionWS = GetSkyViewDirectionWS(input.uv);

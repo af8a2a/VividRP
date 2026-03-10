@@ -58,8 +58,8 @@
             // Transpose for HLSL.
             return Matrix4x4.Transpose(worldToViewMatrix.transpose * viewSpaceRasterTransform);
         }
-        
-        
+
+
         /// <summary>
         /// Determine if a projection matrix is off-center (asymmetric).
         /// </summary>
@@ -68,5 +68,28 @@
         public static bool IsProjectionMatrixAsymmetric(in Matrix4x4 matrix)
             => matrix.m02 != 0 || matrix.m12 != 0;
 
+
+        /// <summary>Get the aspect ratio of a projection matrix.</summary>
+        /// <param name="matrix"></param>
+        /// <returns></returns>
+        public static float ProjectionMatrixAspect(in Matrix4x4 matrix)
+            => -matrix.m11 / matrix.m00;
+
+
+        public static Matrix4x4 ComputePixelCoordToWorldSpaceViewDirectionMatrix(Camera camera, Matrix4x4 viewMatrix,
+            Matrix4x4 gpuProjMatrix,
+            Vector4 resolution, float aspect = -1)
+        {
+            float verticalFoV = camera.GetGateFittedFieldOfView() * Mathf.Deg2Rad;
+            if (!camera.usePhysicalProperties)
+            {
+                verticalFoV = Mathf.Atan(-1.0f / gpuProjMatrix[1, 1]) * 2;
+            }
+
+            Vector2 lensShift = camera.GetGateFittedLensShift();
+
+            return ComputePixelCoordToWorldSpaceViewDirectionMatrix(verticalFoV, lensShift, resolution, viewMatrix,
+                false, aspect, camera.orthographic);
+        }
     }
 }

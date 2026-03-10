@@ -1,55 +1,130 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
     public partial class VividAdditionalCameraData
     {
-        /// <summary>
-        /// Returns the camera projection matrix. Might be jittered for temporal features.
-        /// </summary>
-        /// <param name="viewIndex"> View index in case of stereo rendering. By default <c>viewIndex</c> is set to 0. </param>
-        /// <returns> The camera projection matrix. </returns>
-        public Matrix4x4 GetProjectionMatrix(int viewIndex = 0)
+        public Matrix4x4 viewMatrix => GetViewMatrix();
+        public Matrix4x4 inverseViewMatrix => GetInverseViewMatrix();
+        public Matrix4x4 projectionMatrix => GetProjectionMatrix();
+        public Matrix4x4 nonJitteredProjectionMatrix => GetProjectionMatrixNoJitter();
+        public Matrix4x4 gpuProjectionMatrix => GetGPUProjectionMatrix();
+        public Matrix4x4 gpuProjectionMatrixNoJitter => GetGPUProjectionMatrixNoJitter();
+        public Matrix4x4 jitterMatrix => GetJitterMatrix();
+        public Vector2 jitter => m_HasStoredMatrixData ? m_Jitter : GetCameraJitter();
+        public Matrix4x4 viewProjectionMatrix => GetViewProjectionMatrix();
+        public Matrix4x4 gpuViewProjectionMatrix => GetGPUViewProjectionMatrix();
+
+        public Matrix4x4 GetViewMatrix(int viewIndex = 0)
         {
-            return m_JitterMatrix * m_ProjectionMatrix;
+            return m_HasStoredMatrixData ? m_ViewMatrix : GetCameraViewMatrix();
         }
 
-        internal Matrix4x4 GetGPUProjectionMatrix(bool renderIntoTexture, int viewIndex = 0)
+        public Matrix4x4 GetInverseViewMatrix(int viewIndex = 0)
+        {
+            return GetViewMatrix(viewIndex).inverse;
+        }
+
+        public Matrix4x4 GetProjectionMatrixNoJitter(int viewIndex = 0)
+        {
+            return m_HasStoredMatrixData ? m_ProjectionMatrix : GetCameraProjectionMatrix();
+        }
+
+        public Matrix4x4 GetProjectionMatrix(int viewIndex = 0)
+        {
+            return GetJitterMatrix(viewIndex) * GetProjectionMatrixNoJitter(viewIndex);
+        }
+
+        public Matrix4x4 GetInverseProjectionMatrix(int viewIndex = 0)
+        {
+            return GetProjectionMatrix(viewIndex).inverse;
+        }
+
+        public Matrix4x4 GetJitterMatrix(int viewIndex = 0)
+        {
+            return m_HasStoredMatrixData ? m_JitterMatrix : GetCameraJitterMatrix();
+        }
+
+        public Matrix4x4 GetViewProjectionMatrix(int viewIndex = 0)
+        {
+            return GetProjectionMatrix(viewIndex) * GetViewMatrix(viewIndex);
+        }
+
+        public Matrix4x4 GetGPUProjectionMatrix(int viewIndex = 0)
+        {
+            return GetGPUProjectionMatrix(GetRenderIntoTexture(), viewIndex);
+        }
+
+        public Matrix4x4 GetGPUProjectionMatrix(bool renderIntoTexture, int viewIndex = 0)
         {
             return GL.GetGPUProjectionMatrix(GetProjectionMatrix(viewIndex), renderIntoTexture);
         }
 
-        /// <summary>
-        /// Compute the matrix from screen space (pixel) to world space direction (RHS).
-        ///
-        /// You can use this matrix on the GPU to compute the direction to look in a cubemap for a specific
-        /// screen pixel.
-        /// </summary>
-        /// <param name="viewConstants"></param>
-        /// <param name="resolution">The target texture resolution.</param>
-        /// <param name="aspect">
-        /// The aspect ratio to use.
-        ///
-        /// if negative, then the aspect ratio of <paramref name="resolution"/> will be used.
-        ///
-        /// It is different from the aspect ratio of <paramref name="resolution"/> for anamorphic projections.
-        /// </param>
-        /// <param name="cameraRelativeRendering">If non-zero, then assume Camera Relative Rendering is enabled.</param>
-        /// <returns></returns>
-        internal Matrix4x4 ComputePixelCoordToWorldSpaceViewDirectionMatrix(Vector4 resolution, float aspect = -1,
-            int cameraRelativeRendering = 1)
+        public Matrix4x4 GetGPUProjectionMatrixNoJitter(int viewIndex = 0)
         {
-            float verticalFoV = camera.GetGateFittedFieldOfView() * Mathf.Deg2Rad;
-            if (!camera.usePhysicalProperties)
-            {
-                verticalFoV = Mathf.Atan(-1.0f / camera.gp.projMatrix[1, 1]) * 2;
-            }
+            return GetGPUProjectionMatrixNoJitter(GetRenderIntoTexture(), viewIndex);
+        }
 
-            Vector2 lensShift = camera.GetGateFittedLensShift();
+        public Matrix4x4 GetGPUProjectionMatrixNoJitter(bool renderIntoTexture, int viewIndex = 0)
+        {
+            return GL.GetGPUProjectionMatrix(GetProjectionMatrixNoJitter(viewIndex), renderIntoTexture);
+        }
 
-            return CoreUtils.ComputePixelCoordToWorldSpaceViewDirectionMatrix(verticalFoV, lensShift, resolution,
-                viewConstants.viewMatrix, false, aspect, camera.orthographic);
+        public Matrix4x4 GetGPUViewProjectionMatrix(int viewIndex = 0)
+        {
+            return GetGPUViewProjectionMatrix(GetRenderIntoTexture(), viewIndex);
+        }
+
+        public Matrix4x4 GetGPUViewProjectionMatrix(bool renderIntoTexture, int viewIndex = 0)
+        {
+            return GetGPUProjectionMatrix(renderIntoTexture, viewIndex) * GetViewMatrix(viewIndex);
+        }
+
+        private Matrix4x4 GetCameraViewMatrix()
+        {
+            var currentCamera = camera;
+            return currentCamera != null ? currentCamera.worldToCameraMatrix : Matrix4x4.identity;
+        }
+
+        private Matrix4x4 GetCameraProjectionMatrix()
+        {
+            var currentCamera = camera;
+            return currentCamera != null ? currentCamera.nonJitteredProjectionMatrix : Matrix4x4.identity;
+        }
+
+        private Matrix4x4 GetCameraJitterMatrix()
+        {
+            var currentCamera = camera;
+            if (currentCamera == null)
+                return Matrix4x4.identity;
+
+            var nonJitteredProjectionMatrix = currentCamera.nonJitteredProjectionMatrix;
+            return currentCamera.projectionMatrix * nonJitteredProjectionMatrix.inverse;
+        }
+
+        private Vector2 GetCameraJitter()
+        {
+            var cameraJitterMatrix = GetCameraJitterMatrix();
+            return new Vector2(cameraJitterMatrix.m03, cameraJitterMatrix.m13);
+        }
+
+        private bool GetRenderIntoTexture()
+        {
+            var currentCamera = camera;
+            return m_RenderIntoTexture || (currentCamera != null && currentCamera.targetTexture != null);
+        }
+        
+        
+        public Matrix4x4 GetPixelCoordToViewDirWSMatrix()
+        {
+            var gpuProj = GetGPUProjectionMatrix(true);
+            var gpuProjAspect = CoreUtils.ProjectionMatrixAspect(gpuProj);
+
+            var screenSize = new Vector4(camera.scaledPixelWidth, camera.scaledPixelHeight, 1.0f / camera.scaledPixelWidth, 1.0f / camera.scaledPixelHeight);
+
+            return CoreUtils.ComputePixelCoordToWorldSpaceViewDirectionMatrix(camera, camera.worldToCameraMatrix, gpuProj,
+                screenSize, gpuProjAspect);
         }
 
     }

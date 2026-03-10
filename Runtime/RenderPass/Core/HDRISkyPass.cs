@@ -21,10 +21,11 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
 
+        private Matrix4x4 m_PixelCoordToViewDirMatrix;
         public HDRISkyPass()
         {
             m_ColorTarget = CreateColorTarget("SkyColor", GraphicsFormat.R8G8B8A8_SRGB);
-            m_DepthTexture = CreateDepthTarget("SkyDepth");
+            m_DepthTexture = CreateDepthTexture("SkyDepth");
         }
 
         public override void Create()
@@ -47,16 +48,17 @@ namespace VividRP.Runtime.RenderPass.Core
 
             ResizeTexture(m_ColorTarget, width, height);
             ResizeTexture(m_DepthTexture, width, height);
+            m_PixelCoordToViewDirMatrix = cameraData.GetPixelCoordToViewDirWSMatrix();
             UpdateMaterialProperties();
         }
 
         public override void Record(RasterGraphContext context)
         {
-            if (m_Material == null)
+            if (m_Material == null || !m_DepthTexture.innerHandle.IsValid())
                 return;
 
             m_Material.SetTexture(DepthTextureID, m_DepthTexture.innerHandle);
-
+            m_Material.SetMatrix("_PixelCoordToViewDirWS", m_PixelCoordToViewDirMatrix);
             Blitter.BlitTexture(context.cmd, Vector2.one, m_Material, 0);
         }
 
@@ -80,8 +82,6 @@ namespace VividRP.Runtime.RenderPass.Core
             var exposure = skySettings?.exposure.value ?? 1f;
             var rotation = skySettings?.rotation.value ?? 0f;
             m_Material.SetTexture(SkyCubemapId, cubemap);
-
-            m_Material.SetTexture(SkyCubemapId, cubemap);
             m_Material.SetColor(SkyTintId, tint);
             m_Material.SetFloat(SkyExposureId, exposure);
             m_Material.SetFloat(SkyRotationId, rotation);
@@ -97,14 +97,22 @@ namespace VividRP.Runtime.RenderPass.Core
             return texture;
         }
 
-        private static RenderGraphTexture CreateDepthTarget(string name)
+        private static RenderGraphTexture CreateDepthTexture(string name)
         {
-            var texture = new RenderGraphTexture
+            return new RenderGraphTexture
             {
-                desc = RenderGraphTextureDesc.CreateDepthTarget(1, 1, DepthBits.Depth32)
+                desc = new RenderGraphTextureDesc
+                {
+                    Width = 1,
+                    Height = 1,
+                    ColorFormat = GraphicsFormat.R32_SFloat,
+                    DepthBufferBits = DepthBits.None,
+                    FilterMode = FilterMode.Point,
+                    WrapMode = TextureWrapMode.Clamp,
+                    ClearBuffer = false,
+                    Name = name
+                }
             };
-            texture.desc.Name = name;
-            return texture;
         }
 
         private static void ResizeTexture(RenderGraphTexture texture, int width, int height)

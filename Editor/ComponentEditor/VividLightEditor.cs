@@ -65,7 +65,11 @@ namespace VividRP.Editor
             switch (settings.light.type)
             {
                 case LightType.Spot:
+                    var oldSpotAngle = settings.spotAngle.floatValue;
+                    EditorGUI.BeginChangeCheck();
                     settings.DrawInnerAndOuterSpotAngle();
+                    if (EditorGUI.EndChangeCheck())
+                        VividLightIntensityUnitUtility.PreserveSpotLightLumenIntensity(settings, oldSpotAngle);
                     break;
                 case LightType.Rectangle:
                 case LightType.Disc:
@@ -199,6 +203,7 @@ namespace VividRP.Editor
                     Initialize(additionalData);
                 }
 
+                VividLightIntensityUnitUtility.InitializeDefaultLightUnit(light);
                 return;
             }
 
@@ -209,6 +214,22 @@ namespace VividRP.Editor
 
     internal static class VividLightIntensityUnitUtility
     {
+        internal static void InitializeDefaultLightUnit(Light light)
+        {
+            if (light == null)
+                return;
+
+            if (light.type != LightType.Point && light.type != LightType.Spot)
+                return;
+
+            if (light.lightUnit == LightUnit.Lumen)
+                return;
+
+            Undo.RecordObject(light, "Initialize Vivid Light Intensity Unit");
+            light.lightUnit = LightUnit.Lumen;
+            EditorUtility.SetDirty(light);
+        }
+
         internal static void NormalizeUnsupportedLightUnit(Light light)
         {
             if (light == null)
@@ -225,6 +246,38 @@ namespace VividRP.Editor
                 light.luxAtDistance = 1.0f;
 
             EditorUtility.SetDirty(light);
+        }
+
+        internal static void PreserveSpotLightLumenIntensity(LightEditor.Settings settings, float oldSpotAngle)
+        {
+            if (settings == null || settings.lightType.hasMultipleDifferentValues)
+                return;
+
+            if (settings.light.type != LightType.Spot)
+                return;
+
+            if (settings.lightUnit.hasMultipleDifferentValues || settings.lightUnit.GetEnumValue<LightUnit>() != LightUnit.Lumen)
+                return;
+
+            if (settings.enableSpotReflector.hasMultipleDifferentValues)
+                return;
+
+            var newSpotAngle = settings.spotAngle.floatValue;
+            if (Mathf.Approximately(oldSpotAngle, newSpotAngle))
+                return;
+
+            var oldSolidAngle = LightUnitUtils.GetSolidAngle(
+                LightType.Spot,
+                settings.enableSpotReflector.boolValue,
+                oldSpotAngle,
+                1.0f);
+            var oldLumen = LightUnitUtils.CandelaToLumen(settings.intensity.floatValue, oldSolidAngle);
+            var newSolidAngle = LightUnitUtils.GetSolidAngle(
+                LightType.Spot,
+                settings.enableSpotReflector.boolValue,
+                newSpotAngle,
+                1.0f);
+            settings.intensity.floatValue = LightUnitUtils.LumenToCandela(oldLumen, newSolidAngle);
         }
     }
 }

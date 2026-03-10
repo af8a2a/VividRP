@@ -11,7 +11,10 @@ Shader "Hidden/VividRP/HDRISky"
 
     SubShader
     {
-        Tags { "RenderPipeline" = "VividRenderPipeline" }
+        Tags
+        {
+            "RenderPipeline" = "VividRenderPipeline"
+        }
 
         Pass
         {
@@ -19,101 +22,96 @@ Shader "Hidden/VividRP/HDRISky"
             ZWrite Off
             ZTest Always
             Cull Off
-            Blend SrcAlpha OneMinusSrcAlpha
+            Blend Off
 
             HLSLPROGRAM
-                #pragma target 4.5
-                #pragma vertex Vert
-                #pragma fragment Frag
+            #pragma target 4.5
+            #pragma vertex Vert
+            #pragma fragment Frag
 
-                #include "Packages/com.af8a2a.vividrp/Shaders/Core/Core.hlsl"
-                #include "Packages/com.af8a2a.vividrp/Shaders/Core/SkyDepth.hlsl"
-                #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Core.hlsl"
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/SkyDepth.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 
-                TEXTURE2D_X_FLOAT(_DepthTexture);
-                SAMPLER(sampler_DepthTexture);
-                TEXTURECUBE(_SkyCubemap);
-                SAMPLER(sampler_SkyCubemap);
+            TEXTURE2D_X_FLOAT(_DepthTexture);
+            SAMPLER(sampler_DepthTexture);
+            TEXTURECUBE(_SkyCubemap);
+            SAMPLER(sampler_SkyCubemap);
+            float4x4 _PixelCoordToViewDirWS;
+            float4 _SkyTint;
+            float _SkyExposure;
+            float _SkyRotation;
 
-                float4 _SkyTint;
-                float _SkyExposure;
-                float _SkyRotation;
-                float4x4 _PixelCoordToViewDirWS;
+            struct Attributes
+            {
+                uint vertexID : SV_VertexID;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
 
-                struct Attributes
-                {
-                    uint vertexID : SV_VertexID;
-                    UNITY_VERTEX_INPUT_INSTANCE_ID
-                };
+            struct Varyings
+            {
+                float4 positionCS : SV_POSITION;
+                float2 uv : TEXCOORD0;
+                UNITY_VERTEX_OUTPUT_STEREO
+            };
 
-                struct Varyings
-                {
-                    float4 positionCS : SV_POSITION;
-                    float2 uv : TEXCOORD0;
-                    UNITY_VERTEX_OUTPUT_STEREO
-                };
+            Varyings Vert(Attributes input)
+            {
+                Varyings output;
 
-                Varyings Vert(Attributes input)
-                {
-                    Varyings output;
+                UNITY_SETUP_INSTANCE_ID(input);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
-                    UNITY_SETUP_INSTANCE_ID(input);
-                    UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
+                output.positionCS = GetFullScreenTriangleVertexPosition(input.vertexID);
+                output.uv = GetFullScreenTriangleTexCoord(input.vertexID);
+                return output;
+            }
 
-                    output.positionCS = GetFullScreenTriangleVertexPosition(input.vertexID);
-                    output.uv = GetFullScreenTriangleTexCoord(input.vertexID);
-                    return output;
-                }
+            float3 RotateAroundYAxis(float3 directionWS, float rotationDegrees)
+            {
+                float rotationRadians = radians(rotationDegrees);
+                float s;
+                float c;
+                sincos(rotationRadians, s, c);
 
-                float3 RotateAroundYAxis(float3 directionWS, float rotationDegrees)
-                {
-                    float rotationRadians = radians(rotationDegrees);
-                    float s;
-                    float c;
-                    sincos(rotationRadians, s, c);
+                return float3(
+                    c * directionWS.x - s * directionWS.z,
+                    directionWS.y,
+                    s * directionWS.x + c * directionWS.z);
+            }
 
-                    return float3(
-                        c * directionWS.x - s * directionWS.z,
-                        directionWS.y,
-                        s * directionWS.x + c * directionWS.z);
-                }
+            float3 RotationUp(float3 p, float2 cos_sin)
+            {
+                float3 rotDirX = float3(cos_sin.x, 0, -cos_sin.y);
+                float3 rotDirY = float3(cos_sin.y, 0, cos_sin.x);
 
-                float3 GetSkyViewDirectionWS(float2 uv)
-                {
-                    float2 clipXY = uv * 2.0 - 1.0;
-                    float4 farClipPosition = float4(clipXY, UNITY_RAW_FAR_CLIP_VALUE, 1.0);
-                    float4 farViewPosition = mul(UNITY_MATRIX_I_P, farClipPosition);
+                return float3(dot(rotDirX, p), p.y, dot(rotDirY, p));
+            }
 
-                    if (unity_OrthoParams.w > 0.5)
-                    {
-                        return SafeNormalize(TransformViewToWorldDir(float3(0.0, 0.0, 1.0), true));
-                    }
-
-                    float3 viewDirectionVS = SafeNormalize(farViewPosition.xyz / max(abs(farViewPosition.w), 1e-5));
-                    return SafeNormalize(TransformViewToWorldDir(viewDirectionVS, true));
-                }
-
+            // Generates a world-space view direction for sky and atmospheric effects
             float3 GetSkyViewDirWS(float2 positionCS)
             {
                 float4 viewDirWS = mul(float4(positionCS.xy, 1.0f, 1.0f), _PixelCoordToViewDirWS);
                 return normalize(viewDirWS.xyz);
             }
 
-                float4 Frag(Varyings input) : SV_Target
-                {
 
-                    float deviceDepth = SAMPLE_TEXTURE2D_X(_DepthTexture, sampler_DepthTexture, input.uv).r;
+            float4 Frag(Varyings input) : SV_Target
+            {
+                float deviceDepth = SAMPLE_TEXTURE2D_X(_DepthTexture, sampler_DepthTexture, input.uv).r;
 
-                    if (deviceDepth==UNITY_RAW_FAR_CLIP_VALUE)
-                        return float4(0.0, 0.0, 0.0, 0.0);
+                if (!IsSkyPixel(deviceDepth))
+                    discard;
 
-                    float3 directionWS = GetSkyViewDirectionWS(input.uv);
-                    directionWS = RotateAroundYAxis(directionWS, _SkyRotation);
+                float3 viewDirWS = GetSkyViewDirWS(input.positionCS.xy);
 
-                    float3 skyColor = SAMPLE_TEXTURECUBE(_SkyCubemap, sampler_SkyCubemap, directionWS).rgb;
-                    skyColor *= _SkyTint.rgb * _SkyExposure;
-                    return float4(skyColor, 1.0);
-                }
+                // Reverse it to point into the scene
+                float3 dir = -viewDirWS;
+
+                float3 skyColor = SAMPLE_TEXTURECUBE(_SkyCubemap, sampler_SkyCubemap, dir).rgb;
+                skyColor *= _SkyTint.rgb * _SkyExposure;
+                return float4(skyColor, 1.0);
+            }
             ENDHLSL
         }
     }

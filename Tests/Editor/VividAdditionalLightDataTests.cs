@@ -51,12 +51,13 @@ namespace VividRP.Editor.Tests
         [Test]
         public void ObjectFactory_AddsAdditionalLightData_WhenLightComponentIsCreated()
         {
-            ObjectFactory.AddComponent<Light>(m_GameObject);
+            var light = ObjectFactory.AddComponent<Light>(m_GameObject);
 
             var additionalData = m_GameObject.GetComponent<VividAdditionalLightData>();
 
             Assert.That(additionalData, Is.Not.Null);
             Assert.That((additionalData.hideFlags & HideFlags.HideInInspector) != 0, Is.True);
+            Assert.That(light.lightUnit, Is.EqualTo(LightUnit.Lumen));
         }
 
         [Test]
@@ -74,16 +75,20 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void NormalizeUnsupportedLightUnit_PreservesSupportedLuxOnPointLights()
+        [TestCase(LightUnit.Lux)]
+        [TestCase(LightUnit.Lumen)]
+        [TestCase(LightUnit.Candela)]
+        [TestCase(LightUnit.Ev100)]
+        public void NormalizeUnsupportedLightUnit_PreservesSupportedUnitsOnPointLights(LightUnit unit)
         {
             var light = m_GameObject.AddComponent<Light>();
             light.type = LightType.Point;
-            light.lightUnit = LightUnit.Lux;
+            light.lightUnit = unit;
             light.luxAtDistance = 5.0f;
 
             VividLightIntensityUnitUtility.NormalizeUnsupportedLightUnit(light);
 
-            Assert.That(light.lightUnit, Is.EqualTo(LightUnit.Lux));
+            Assert.That(light.lightUnit, Is.EqualTo(unit));
             Assert.That(light.luxAtDistance, Is.EqualTo(5.0f));
         }
     }

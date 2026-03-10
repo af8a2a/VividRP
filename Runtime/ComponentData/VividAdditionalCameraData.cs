@@ -44,27 +44,70 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private bool m_Dithering;
-        
-        
-        
-        // Internal camera data as we are not yet sure how to expose View in stereo context.
-        // We might change this API soon.
-        Matrix4x4 m_ViewMatrix;
-        Matrix4x4 m_ProjectionMatrix;
-        Matrix4x4 m_JitterMatrix;
+
+        private Matrix4x4 m_ViewMatrix = Matrix4x4.identity;
+        private Matrix4x4 m_ProjectionMatrix = Matrix4x4.identity;
+        private Matrix4x4 m_JitterMatrix = Matrix4x4.identity;
+        private Vector2 m_Jitter;
+        private bool m_RenderIntoTexture;
+        private bool m_HasStoredMatrixData;
+
+        internal void UpdateCameraMatrices(bool renderIntoTexture)
+        {
+            m_RenderIntoTexture = renderIntoTexture;
+
+            var currentCamera = camera;
+            if (currentCamera == null)
+            {
+                ResetCameraMatrices();
+                return;
+            }
+
+            var nonJitteredProjectionMatrix = currentCamera.nonJitteredProjectionMatrix;
+            var jitterMatrix = currentCamera.projectionMatrix * nonJitteredProjectionMatrix.inverse;
+            var jitter = new Vector2(jitterMatrix.m03, jitterMatrix.m13);
+            SetViewProjectionAndJitterMatrix(
+                currentCamera.worldToCameraMatrix,
+                nonJitteredProjectionMatrix,
+                jitterMatrix,
+                jitter);
+        }
+
+        internal void ResetCameraMatrices()
+        {
+            m_ViewMatrix = Matrix4x4.identity;
+            m_ProjectionMatrix = Matrix4x4.identity;
+            m_JitterMatrix = Matrix4x4.identity;
+            m_Jitter = Vector2.zero;
+            m_RenderIntoTexture = false;
+            m_HasStoredMatrixData = false;
+        }
 
         internal void SetViewAndProjectionMatrix(Matrix4x4 viewMatrix, Matrix4x4 projectionMatrix)
         {
+            m_HasStoredMatrixData = true;
             m_ViewMatrix = viewMatrix;
             m_ProjectionMatrix = projectionMatrix;
             m_JitterMatrix = Matrix4x4.identity;
+            m_Jitter = Vector2.zero;
         }
 
         internal void SetViewProjectionAndJitterMatrix(Matrix4x4 viewMatrix, Matrix4x4 projectionMatrix, Matrix4x4 jitterMatrix)
         {
+            SetViewProjectionAndJitterMatrix(viewMatrix, projectionMatrix, jitterMatrix, Vector2.zero);
+        }
+
+        internal void SetViewProjectionAndJitterMatrix(
+            Matrix4x4 viewMatrix,
+            Matrix4x4 projectionMatrix,
+            Matrix4x4 jitterMatrix,
+            Vector2 jitter)
+        {
+            m_HasStoredMatrixData = true;
             m_ViewMatrix = viewMatrix;
             m_ProjectionMatrix = projectionMatrix;
             m_JitterMatrix = jitterMatrix;
+            m_Jitter = jitter;
         }
 
 

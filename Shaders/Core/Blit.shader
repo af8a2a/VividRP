@@ -12,15 +12,20 @@ Shader "Hidden/VividRP/Blit"
             Cull Off
 
             HLSLPROGRAM
+            #pragma target 3.5
             #pragma vertex Vert
             #pragma fragment Frag
 
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
 
             TEXTURE2D(_BlitTexture);
             SAMPLER(sampler_BlitTexture);
+            TEXTURE3D(_VividColorGradingLut);
+            SAMPLER(sampler_VividColorGradingLut);
             float4 _BlitScaleBias;
+            float4 _VividColorGradingParams;
             float2 DynamicScalingApplyScaleBias(float2 xy, float4 dynamicScalingScaleBias)
             {
                 return dynamicScalingScaleBias.zw + xy * dynamicScalingScaleBias.xy;
@@ -58,7 +63,19 @@ Shader "Hidden/VividRP/Blit"
 
             float4 Frag(Varyings input) : SV_Target
             {
-                return SAMPLE_TEXTURE2D(_BlitTexture, sampler_BlitTexture, input.uv);
+                float4 color = SAMPLE_TEXTURE2D(_BlitTexture, sampler_BlitTexture, input.uv);
+                float3 postProcessed = color.rgb * _VividColorGradingParams.w;
+
+                if (_VividColorGradingParams.z > 0.5)
+                {
+                    float3 lutSpace = saturate(LinearToLogC(max(postProcessed, 0.0)));
+                    postProcessed = ApplyLut3D(
+                        TEXTURE3D_ARGS(_VividColorGradingLut, sampler_VividColorGradingLut),
+                        lutSpace,
+                        _VividColorGradingParams.xy);
+                }
+
+                return float4(postProcessed, color.a);
             }
             ENDHLSL
         }

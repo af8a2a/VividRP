@@ -169,7 +169,7 @@ namespace VividRP.Runtime
     /// A volume component that holds settings for the Tonemapping effect.
     /// </summary>
     [Serializable, VolumeComponentMenu("Post-processing/Tonemapping")]
-    public class Tonemapping : VolumeComponent
+    public class Tonemapping : VolumeComponent, IPostProcessComponent
     {
         /// <summary>
         /// Specifies the tonemapping algorithm to use for the color grading process.
@@ -297,6 +297,14 @@ namespace VividRP.Runtime
         /// </summary>
         [Tooltip("The maximum brightness (in nits) of the screen. Note that this is assumed to be defined by the preset when ACES Tonemap is used.")]
         public ClampedFloatParameter maxNits = new ClampedFloatParameter(1000.0f, 0.0f, 5000.0f);
+
+        public bool IsActive()
+        {
+            if (mode.value == TonemappingMode.External)
+                return lutTexture.value != null && lutContribution.value > 0f;
+
+            return mode.value != TonemappingMode.None;
+        }
 
     }
 }

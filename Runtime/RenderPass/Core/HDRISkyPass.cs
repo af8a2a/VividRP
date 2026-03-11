@@ -9,8 +9,7 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         private static readonly int SkyCubemapId = Shader.PropertyToID("_SkyCubemap");
         private static readonly int SkyTintId = Shader.PropertyToID("_SkyTint");
-        private static readonly int SkyExposureId = Shader.PropertyToID("_SkyExposure");
-        private static readonly int SkyRotationId = Shader.PropertyToID("_SkyRotation");
+        private static readonly int SkyParamId = Shader.PropertyToID("_SkyParam");
         private static readonly int DepthTextureID = Shader.PropertyToID("_DepthTexture");
 
         private Material m_Material;
@@ -83,8 +82,12 @@ namespace VividRP.Runtime.RenderPass.Core
             var rotation = skySettings?.rotation.value ?? 0f;
             m_Material.SetTexture(SkyCubemapId, cubemap);
             m_Material.SetColor(SkyTintId, tint);
-            m_Material.SetFloat(SkyExposureId, exposure);
-            m_Material.SetFloat(SkyRotationId, rotation);
+            m_Material.SetVector(SkyParamId, BuildSkyParam(exposure, rotation));
+        }
+
+        internal static Vector4 BuildSkyParam(float exposure, float rotation)
+        {
+            return new Vector4(0f, exposure, -rotation, 0f);
         }
 
         private static RenderGraphTexture CreateColorTarget(string name, GraphicsFormat format)

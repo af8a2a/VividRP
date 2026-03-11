@@ -49,6 +49,17 @@ namespace VividRP.Editor.Tests
             AssertTextureSize(pass, "m_DepthTexture", 640, 360);
         }
 
+        [Test]
+        public void BuildSkyParam_UsesHdrpCompatibleLayout_WhenVolumeSettingsAreApplied()
+        {
+            var skyParam = HDRISkyPass.BuildSkyParam(2.5f, 45f);
+
+            Assert.That(skyParam.x, Is.EqualTo(0f));
+            Assert.That(skyParam.y, Is.EqualTo(2.5f));
+            Assert.That(skyParam.z, Is.EqualTo(-45f));
+            Assert.That(skyParam.w, Is.EqualTo(0f));
+        }
+
         private static void AssertTextureSize(HDRISkyPass pass, string fieldName, int expectedWidth, int expectedHeight)
         {
             var field = typeof(HDRISkyPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);

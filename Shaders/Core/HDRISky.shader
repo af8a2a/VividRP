@@ -5,8 +5,7 @@ Shader "Hidden/VividRP/HDRISky"
         [NoScaleOffset] _DepthTexture("Depth", 2D) = "white" {}
         [NoScaleOffset] _SkyCubemap("Sky Cubemap", Cube) = "" {}
         [HDR] _SkyTint("Sky Tint", Color) = (1, 1, 1, 1)
-        _SkyExposure("Sky Exposure", Float) = 1
-        _SkyRotation("Sky Rotation", Float) = 0
+        [HideInInspector] _SkyParam("Sky Param", Vector) = (0, 1, 0, 0)
     }
 
     SubShader
@@ -39,8 +38,7 @@ Shader "Hidden/VividRP/HDRISky"
             SAMPLER(sampler_SkyCubemap);
             float4x4 _PixelCoordToViewDirWS;
             float4 _SkyTint;
-            float _SkyExposure;
-            float _SkyRotation;
+            float4 _SkyParam;
 
             struct Attributes
             {
@@ -80,14 +78,6 @@ Shader "Hidden/VividRP/HDRISky"
                     s * directionWS.x + c * directionWS.z);
             }
 
-            float3 RotationUp(float3 p, float2 cos_sin)
-            {
-                float3 rotDirX = float3(cos_sin.x, 0, -cos_sin.y);
-                float3 rotDirY = float3(cos_sin.y, 0, cos_sin.x);
-
-                return float3(dot(rotDirX, p), p.y, dot(rotDirY, p));
-            }
-
             // Generates a world-space view direction for sky and atmospheric effects
             float3 GetSkyViewDirWS(float2 positionCS)
             {
@@ -106,10 +96,10 @@ Shader "Hidden/VividRP/HDRISky"
                 float3 viewDirWS = GetSkyViewDirWS(input.positionCS.xy);
 
                 // Reverse it to point into the scene
-                float3 dir = -viewDirWS;
+                float3 dir = RotateAroundYAxis(-viewDirWS, _SkyParam.z);
 
                 float3 skyColor = SAMPLE_TEXTURECUBE(_SkyCubemap, sampler_SkyCubemap, dir).rgb;
-                skyColor *= _SkyTint.rgb * _SkyExposure;
+                skyColor *= _SkyTint.rgb * exp2(_SkyParam.x) * _SkyParam.y;
                 return float4(skyColor, 1.0);
             }
             ENDHLSL

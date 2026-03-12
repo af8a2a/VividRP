@@ -1,5 +1,4 @@
 using UnityEngine;
-using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
@@ -13,10 +12,11 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Access = AccessFlags.Read)]
         private RenderGraphTexture source = new();
 
+        [RenderGraphResource(Name = "ColorGradingTexture", Access = AccessFlags.Read)]
+        private RenderGraphTexture colorGradingLut = new();
+
         private Material m_Material;
-        private ColorGradingLutBuilder m_ColorGradingLutBuilder;
         private ColorGradingSettingsData m_ColorGradingSettings;
-        private RenderTexture m_ColorGradingLut;
         private RenderTargetIdentifier m_CameraBackBufferTarget;
         private TextureUVOrigin m_CameraBackBufferTextureUVOrigin;
         private bool m_ShouldSetViewport;
@@ -48,8 +48,6 @@ namespace VividRP.Runtime.RenderPass.Core
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
 
             m_Material = CoreUtils.CreateEngineMaterial(resources.BlitShader);
-            m_ColorGradingLutBuilder = new ColorGradingLutBuilder();
-            EnsureColorGradingLut();
         }
         
 
@@ -74,12 +72,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var useColorGradingLut = m_PostProcessingAllowed
                 && m_ColorGradingSettings.RequiresLut
-                && EnsureColorGradingLut()
-                && m_ColorGradingLutBuilder != null
-                && m_ColorGradingLutBuilder.IsValid;
-
-            if (useColorGradingLut)
-                m_ColorGradingLutBuilder.Build(unsafeCmd, m_ColorGradingSettings, m_ColorGradingLut);
+                && colorGradingLut != null
+                && colorGradingLut.innerHandle.IsValid();
 
             m_Material.SetVector(
                 ColorGradingParamsId,
@@ -89,8 +83,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     useColorGradingLut ? 1f : 0f,
                     m_ColorGradingSettings.postExposureLinear));
 
-            if (m_ColorGradingLut != null)
-                m_Material.SetTexture(ColorGradingLutId, m_ColorGradingLut);
+            if (useColorGradingLut)
+                cmd.SetGlobalTexture(ColorGradingLutId, colorGradingLut.innerHandle);
 
             var sourceTextureUVOrigin = context.GetTextureUVOrigin(source.innerHandle);
             var scaleBias = GetFinalBlitScaleBias(scale, sourceTextureUVOrigin, m_CameraBackBufferTextureUVOrigin);
@@ -109,15 +103,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 CoreUtils.Destroy(m_Material);
                 m_Material = null;
             }
-
-            if (m_ColorGradingLut != null)
-            {
-                CoreUtils.Destroy(m_ColorGradingLut);
-                m_ColorGradingLut = null;
-            }
-
-            m_ColorGradingLutBuilder?.Dispose();
-            m_ColorGradingLutBuilder = null;
         }
 
         private static TextureUVOrigin GetCameraBackBufferTextureUVOrigin(CameraType cameraType, bool hasTargetTexture)
@@ -160,47 +145,6 @@ namespace VividRP.Runtime.RenderPass.Core
             return yFlip
                 ? new Vector4(scale.x, -scale.y, 0f, scale.y)
                 : new Vector4(scale.x, scale.y, 0f, 0f);
-        }
-
-        private bool EnsureColorGradingLut()
-        {
-            if (!SystemInfo.supports3DTextures)
-                return false;
-
-            if (m_ColorGradingLut != null)
-            {
-                if (!m_ColorGradingLut.IsCreated())
-                    m_ColorGradingLut.Create();
-
-                return m_ColorGradingLut.IsCreated();
-            }
-
-            var descriptor = new RenderTextureDescriptor(
-                ColorGradingLutBuilder.LutSize,
-                ColorGradingLutBuilder.LutSize,
-                GraphicsFormat.R16G16B16A16_SFloat,
-                0)
-            {
-                dimension = TextureDimension.Tex3D,
-                volumeDepth = ColorGradingLutBuilder.LutSize,
-                msaaSamples = 1,
-                mipCount = 1,
-                useMipMap = false,
-                autoGenerateMips = false,
-                enableRandomWrite = true,
-                sRGB = false,
-            };
-
-            m_ColorGradingLut = new RenderTexture(descriptor)
-            {
-                name = "VividColorGradingLut",
-                hideFlags = HideFlags.HideAndDontSave,
-                filterMode = FilterMode.Bilinear,
-                wrapMode = TextureWrapMode.Clamp,
-                anisoLevel = 0,
-            };
-            m_ColorGradingLut.Create();
-            return m_ColorGradingLut.IsCreated();
         }
     }
 }

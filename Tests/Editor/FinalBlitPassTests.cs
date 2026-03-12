@@ -91,18 +91,22 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Initialize_RegistersReadOnlySourceTexture()
+        public void Initialize_RegistersReadOnlySourceAndColorGradingTextures()
         {
             IRenderPass renderPass = new FinalBlitPass();
 
             var resources = renderPass.Initialize();
 
-            Assert.That(resources.Textures, Has.Length.EqualTo(1));
+            Assert.That(resources.Textures, Has.Length.EqualTo(2));
             Assert.That(resources.Buffers, Is.Empty);
             Assert.That(resources.Textures[0].Name, Is.EqualTo("source"));
             Assert.That(resources.Textures[0].Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(resources.Textures[0].AttachmentIndex, Is.EqualTo(-1));
             Assert.That(resources.Textures[0].IsDepthAttachment, Is.False);
+            Assert.That(resources.Textures[1].Name, Is.EqualTo("ColorGradingTexture"));
+            Assert.That(resources.Textures[1].Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(resources.Textures[1].AttachmentIndex, Is.EqualTo(-1));
+            Assert.That(resources.Textures[1].IsDepthAttachment, Is.False);
         }
 
         [Test]

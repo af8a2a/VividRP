@@ -225,6 +225,7 @@ namespace VividRP.Runtime
 
     public interface IRenderPass
     {
+        
         /// <summary>
         /// Collects all [RenderGraphResource]-annotated fields via reflection
         /// and returns a PassResource describing the pass's resource requirements.
@@ -256,6 +257,8 @@ namespace VividRP.Runtime
 
     public abstract class ComputePass : IRenderPass
     {
+        protected  ProfilingSampler profilingSampler;
+
         public abstract void Create();
         public abstract void Prepare(ContextContainer frameData);
 
@@ -270,6 +273,8 @@ namespace VividRP.Runtime
 
     public abstract class RasterPass : IRenderPass
     {
+        protected ProfilingSampler profilingSampler;
+
         public abstract void Create();
         public abstract void Prepare(ContextContainer frameData);
 
@@ -284,6 +289,8 @@ namespace VividRP.Runtime
 
     public abstract class UnsafePass : IRenderPass
     {
+        
+       protected ProfilingSampler profilingSampler;
         public abstract void Create();
 
         /// <summary>

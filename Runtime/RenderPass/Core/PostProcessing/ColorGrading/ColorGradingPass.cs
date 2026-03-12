@@ -13,6 +13,11 @@ namespace VividRP.Runtime
         [RenderGraphResource(Name = "ColorGradingTexture", Access = AccessFlags.Write)]
         private RenderGraphTexture colorGradingTex = new();
 
+        public ColorGradingPass()
+        {
+            profilingSampler = new ProfilingSampler(nameof(ColorGradingPass));
+        }
+
         public override void Create()
         {
             m_LutBuilder = new ColorGradingLutBuilder();
@@ -44,15 +49,18 @@ namespace VividRP.Runtime
 
         public override void Record(UnsafeGraphContext context)
         {
-            if (m_LutBuilder == null
-                || !m_LutBuilder.IsValid
-                || !colorGradingTex.innerHandle.IsValid())
+            using (new ProfilingScope(context.cmd, profilingSampler))
             {
-                return;
-            }
+                if (m_LutBuilder == null
+                    || !m_LutBuilder.IsValid
+                    || !colorGradingTex.innerHandle.IsValid())
+                {
+                    return;
+                }
 
-            var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
-            m_LutBuilder.Build(cmd, m_Settings, colorGradingTex);
+                var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
+                m_LutBuilder.Build(cmd, m_Settings, colorGradingTex);
+            }
         }
     }
 }

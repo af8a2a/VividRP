@@ -26,9 +26,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Create()
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            var shader = resources.CopyDepthShader != null
-                ? resources.CopyDepthShader
-                : Shader.Find(CopyDepthShaderName);
+            var shader = resources.CopyDepthShader;
             if (shader == null)
             {
                 Debug.LogWarning($"[VividRP] Could not find shader '{CopyDepthShaderName}' for {nameof(CopyDepthPass)}.");

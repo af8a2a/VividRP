@@ -298,13 +298,56 @@ namespace VividRP.Runtime
         [Tooltip("The maximum brightness (in nits) of the screen. Note that this is assumed to be defined by the preset when ACES Tonemap is used.")]
         public ClampedFloatParameter maxNits = new ClampedFloatParameter(1000.0f, 0.0f, 5000.0f);
 
+        /// <summary>
+        /// Tells if the effect needs to be rendered or not.
+        /// </summary>
+        /// <returns><c>true</c> if the effect should be rendered, <c>false</c> otherwise.</returns>
         public bool IsActive()
         {
             if (mode.value == TonemappingMode.External)
-                return lutTexture.value != null && lutContribution.value > 0f;
+                return ValidateLUT() && lutContribution.value > 0f;
 
             return mode.value != TonemappingMode.None;
         }
+
+        internal TonemappingMode GetHDRTonemappingMode()
+        {
+            if (mode.value == TonemappingMode.Custom ||
+                mode.value == TonemappingMode.External)
+            {
+                if (fallbackMode.value == FallbackHDRTonemap.None) return TonemappingMode.None;
+                if (fallbackMode.value == FallbackHDRTonemap.Neutral) return TonemappingMode.Neutral;
+                if (fallbackMode.value == FallbackHDRTonemap.ACES) return TonemappingMode.ACES;
+            }
+
+            return mode.value;
+        }
+
+        /// <summary>
+        /// Validates the format and size of the LUT texture set in <see cref="lutTexture"/>.
+        /// </summary>
+        /// <returns><c>true</c> if the LUT is valid, <c>false</c> otherwise.</returns>
+        public bool ValidateLUT()
+        {
+
+            bool valid = false;
+
+            switch (lutTexture.value)
+            {
+                case Texture3D t:
+                    valid |= t.width == t.height
+                        && t.height == t.depth;
+                    break;
+                case RenderTexture rt:
+                    valid |= rt.dimension == TextureDimension.Tex3D
+                        && rt.width == rt.height
+                        && rt.height == rt.volumeDepth;
+                    break;
+            }
+
+            return valid;
+        }
+
 
     }
 }

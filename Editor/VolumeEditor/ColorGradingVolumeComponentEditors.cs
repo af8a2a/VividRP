@@ -472,19 +472,34 @@ namespace VividRP.Editor
 
     [CanEditMultipleObjects]
     [CustomEditor(typeof(ShadowsMidtonesHighlights))]
-    internal sealed class ShadowsMidtonesHighlightsEditor : VolumeComponentEditor
+    sealed class ShadowsMidtonesHighlightsEditor : VolumeComponentEditor
     {
-        private SerializedDataParameter m_Shadows;
-        private SerializedDataParameter m_Midtones;
-        private SerializedDataParameter m_Highlights;
-        private SerializedDataParameter m_ShadowsStart;
-        private SerializedDataParameter m_ShadowsEnd;
-        private SerializedDataParameter m_HighlightsStart;
-        private SerializedDataParameter m_HighlightsEnd;
+        static class Styles
+        {
+            public static readonly GUIContent shadowsLabel = EditorGUIUtility.TrTextContent("Shadows","Use this to control and apply a hue to the shadows.");
+            public static readonly GUIContent midtonesLabel = EditorGUIUtility.TrTextContent("Midtones", "Use this to control and apply a hue to the midtones.");
+            public static readonly GUIContent highlightsLabel = EditorGUIUtility.TrTextContent("Highlights", "Use this to control and apply a hue to the highlights.");
+        }
+
+        SerializedDataParameter m_Shadows;
+        SerializedDataParameter m_Midtones;
+        SerializedDataParameter m_Highlights;
+        SerializedDataParameter m_ShadowsStart;
+        SerializedDataParameter m_ShadowsEnd;
+        SerializedDataParameter m_HighlightsStart;
+        SerializedDataParameter m_HighlightsEnd;
+
+        readonly TrackballUIDrawer m_TrackballUIDrawer = new TrackballUIDrawer();
+
+        // Curve drawing utilities
+        Rect m_CurveRect;
+        Material m_Material;
+        RenderTexture m_CurveTex;
 
         public override void OnEnable()
         {
             var o = new PropertyFetcher<ShadowsMidtonesHighlights>(serializedObject);
+
             m_Shadows = Unpack(o.Find(x => x.shadows));
             m_Midtones = Unpack(o.Find(x => x.midtones));
             m_Highlights = Unpack(o.Find(x => x.highlights));
@@ -492,20 +507,74 @@ namespace VividRP.Editor
             m_ShadowsEnd = Unpack(o.Find(x => x.shadowsEnd));
             m_HighlightsStart = Unpack(o.Find(x => x.highlightsStart));
             m_HighlightsEnd = Unpack(o.Find(x => x.highlightsEnd));
+
+            m_Material = new Material(Shader.Find("Hidden/VividRP/Editor/Shadows Midtones Highlights Curve"));
         }
 
         public override void OnInspectorGUI()
         {
-            DrawHeader("Color Weights");
-            PropertyField(m_Shadows);
-            PropertyField(m_Midtones);
-            PropertyField(m_Highlights);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                m_TrackballUIDrawer.OnGUI(m_Shadows.value, enableOverrides ? m_Shadows.overrideState : null, Styles.shadowsLabel, GetWheelValue);
+                GUILayout.Space(4f);
+                m_TrackballUIDrawer.OnGUI(m_Midtones.value, enableOverrides ? m_Midtones.overrideState : null, Styles.midtonesLabel, GetWheelValue);
+                GUILayout.Space(4f);
+                m_TrackballUIDrawer.OnGUI(m_Highlights.value, enableOverrides ? m_Highlights.overrideState : null, Styles.highlightsLabel, GetWheelValue);
+            }
+            EditorGUILayout.Space();
 
-            DrawHeader("Ranges");
-            PropertyField(m_ShadowsStart);
-            PropertyField(m_ShadowsEnd);
-            PropertyField(m_HighlightsStart);
-            PropertyField(m_HighlightsEnd);
+            // Reserve GUI space
+            m_CurveRect = GUILayoutUtility.GetRect(128, 80);
+            m_CurveRect.xMin += EditorGUI.indentLevel * 15f;
+
+            if (Event.current.type == EventType.Repaint)
+            {
+                float alpha = GUI.enabled ? 1f : 0.4f;
+                var limits = new Vector4(m_ShadowsStart.value.floatValue, m_ShadowsEnd.value.floatValue, m_HighlightsStart.value.floatValue, m_HighlightsEnd.value.floatValue);
+
+                m_Material.SetVector("_ShaHiLimits", limits);
+                m_Material.SetVector("_Variants", new Vector4(alpha, Mathf.Max(m_HighlightsEnd.value.floatValue, 1f), 0f, 0f));
+
+                CheckCurveRT((int)m_CurveRect.width, (int)m_CurveRect.height);
+
+                var oldRt = RenderTexture.active;
+                Graphics.Blit(null, m_CurveTex, m_Material, EditorGUIUtility.isProSkin ? 0 : 1);
+                RenderTexture.active = oldRt;
+
+                GUI.DrawTexture(m_CurveRect, m_CurveTex);
+
+                Handles.DrawSolidRectangleWithOutline(m_CurveRect, Color.clear, Color.white * 0.4f);
+            }
+
+            PropertyField(m_ShadowsStart, EditorGUIUtility.TrTextContent("Start"));
+            m_ShadowsStart.value.floatValue = Mathf.Min(m_ShadowsStart.value.floatValue, m_ShadowsEnd.value.floatValue);
+            PropertyField(m_ShadowsEnd, EditorGUIUtility.TrTextContent("End"));
+            m_ShadowsEnd.value.floatValue = Mathf.Max(m_ShadowsStart.value.floatValue, m_ShadowsEnd.value.floatValue);
+
+            PropertyField(m_HighlightsStart, EditorGUIUtility.TrTextContent("Start"));
+            m_HighlightsStart.value.floatValue = Mathf.Min(m_HighlightsStart.value.floatValue, m_HighlightsEnd.value.floatValue);
+            PropertyField(m_HighlightsEnd, EditorGUIUtility.TrTextContent("End"));
+            m_HighlightsEnd.value.floatValue = Mathf.Max(m_HighlightsStart.value.floatValue, m_HighlightsEnd.value.floatValue);
+        }
+
+        void CheckCurveRT(int width, int height)
+        {
+            if (m_CurveTex == null || !m_CurveTex.IsCreated() || m_CurveTex.width != width || m_CurveTex.height != height)
+            {
+                CoreUtils.Destroy(m_CurveTex);
+                m_CurveTex = new RenderTexture(width, height, 0, GraphicsFormat.R8G8B8A8_SRGB);
+                m_CurveTex.hideFlags = HideFlags.HideAndDontSave;
+            }
+        }
+
+        Vector3 GetWheelValue(Vector4 v)
+        {
+            float w = v.w * (Mathf.Sign(v.w) < 0f ? 1f : 4f);
+            return new Vector3(
+                Mathf.Max(v.x + w, 0f),
+                Mathf.Max(v.y + w, 0f),
+                Mathf.Max(v.z + w, 0f)
+            );
         }
     }
 
@@ -1004,33 +1073,44 @@ namespace VividRP.Editor
 
     [CanEditMultipleObjects]
     [CustomEditor(typeof(Tonemapping))]
-    internal sealed class TonemappingEditor : VolumeComponentEditor
+    sealed class TonemappingEditor : VolumeComponentEditor
     {
-        private SerializedDataParameter m_Mode;
-        private SerializedDataParameter m_UseFullAces;
-        private SerializedDataParameter m_ToeStrength;
-        private SerializedDataParameter m_ToeLength;
-        private SerializedDataParameter m_ShoulderStrength;
-        private SerializedDataParameter m_ShoulderLength;
-        private SerializedDataParameter m_ShoulderAngle;
-        private SerializedDataParameter m_Gamma;
-        private SerializedDataParameter m_LutTexture;
-        private SerializedDataParameter m_LutContribution;
-        private SerializedDataParameter m_NeutralHdrRangeReductionMode;
-        private SerializedDataParameter m_AcesPreset;
-        private SerializedDataParameter m_FallbackMode;
-        private SerializedDataParameter m_HueShiftAmount;
-        private SerializedDataParameter m_DetectPaperWhite;
-        private SerializedDataParameter m_PaperWhite;
-        private SerializedDataParameter m_DetectBrightnessLimits;
-        private SerializedDataParameter m_MinNits;
-        private SerializedDataParameter m_MaxNits;
+        SerializedDataParameter m_Mode;
+        SerializedDataParameter m_UseFullACES;
+        SerializedDataParameter m_ToeStrength;
+        SerializedDataParameter m_ToeLength;
+        SerializedDataParameter m_ShoulderStrength;
+        SerializedDataParameter m_ShoulderLength;
+        SerializedDataParameter m_ShoulderAngle;
+        SerializedDataParameter m_Gamma;
+        SerializedDataParameter m_LutTexture;
+        SerializedDataParameter m_LutContribution;
+
+        // HDR Mode.
+        SerializedDataParameter m_NeutralHDRRangeReductionMode;
+        SerializedDataParameter m_HueShiftAmount;
+        SerializedDataParameter m_HDRDetectPaperWhite;
+        SerializedDataParameter m_HDRPaperwhite;
+        SerializedDataParameter m_HDRDetectNitLimits;
+        SerializedDataParameter m_HDRMinNits;
+        SerializedDataParameter m_HDRMaxNits;
+        SerializedDataParameter m_HDRAcesPreset;
+        SerializedDataParameter m_HDRFallbackMode;
+
+        public override bool hasAdditionalProperties => true;
+
+        // Curve drawing utilities
+        readonly HableCurve m_HableCurve = new HableCurve();
+        Rect m_CurveRect;
+        Material m_Material;
+        RenderTexture m_CurveTex;
 
         public override void OnEnable()
         {
             var o = new PropertyFetcher<Tonemapping>(serializedObject);
+
             m_Mode = Unpack(o.Find(x => x.mode));
-            m_UseFullAces = Unpack(o.Find(x => x.useFullACES));
+            m_UseFullACES = Unpack(o.Find(x => x.useFullACES));
             m_ToeStrength = Unpack(o.Find(x => x.toeStrength));
             m_ToeLength = Unpack(o.Find(x => x.toeLength));
             m_ShoulderStrength = Unpack(o.Find(x => x.shoulderStrength));
@@ -1039,71 +1119,178 @@ namespace VividRP.Editor
             m_Gamma = Unpack(o.Find(x => x.gamma));
             m_LutTexture = Unpack(o.Find(x => x.lutTexture));
             m_LutContribution = Unpack(o.Find(x => x.lutContribution));
-            m_NeutralHdrRangeReductionMode = Unpack(o.Find(x => x.neutralHDRRangeReductionMode));
-            m_AcesPreset = Unpack(o.Find(x => x.acesPreset));
-            m_FallbackMode = Unpack(o.Find(x => x.fallbackMode));
+
+            m_NeutralHDRRangeReductionMode = Unpack(o.Find(x => x.neutralHDRRangeReductionMode));
             m_HueShiftAmount = Unpack(o.Find(x => x.hueShiftAmount));
-            m_DetectPaperWhite = Unpack(o.Find(x => x.detectPaperWhite));
-            m_PaperWhite = Unpack(o.Find(x => x.paperWhite));
-            m_DetectBrightnessLimits = Unpack(o.Find(x => x.detectBrightnessLimits));
-            m_MinNits = Unpack(o.Find(x => x.minNits));
-            m_MaxNits = Unpack(o.Find(x => x.maxNits));
+            m_HDRDetectPaperWhite = Unpack(o.Find(x => x.detectPaperWhite));
+            m_HDRPaperwhite = Unpack(o.Find(x => x.paperWhite));
+            m_HDRDetectNitLimits = Unpack(o.Find(x => x.detectBrightnessLimits));
+            m_HDRMinNits = Unpack(o.Find(x => x.minNits));
+            m_HDRMaxNits = Unpack(o.Find(x => x.maxNits));
+            m_HDRAcesPreset = Unpack(o.Find(x => x.acesPreset));
+            m_HDRFallbackMode = Unpack(o.Find(x => x.fallbackMode));
+
+            m_Material = new Material(Shader.Find("Hidden/VividRP/Editor/Custom Tonemapper Curve"));
         }
+
+        public override void OnDisable()
+        {
+            CoreUtils.Destroy(m_Material);
+            m_Material = null;
+
+            CoreUtils.Destroy(m_CurveTex);
+            m_CurveTex = null;
+        }
+
+        internal bool HDROutputIsActive()
+        {
+            return SystemInfo.hdrDisplaySupportFlags.HasFlag(HDRDisplaySupportFlags.Supported) && HDROutputSettings.main.active;
+        }
+
 
         public override void OnInspectorGUI()
         {
+            bool hdrInPlayerSettings = UnityEditor.PlayerSettings.allowHDRDisplaySupport;
+
             PropertyField(m_Mode);
 
-            var mode = (TonemappingMode)m_Mode.value.enumValueIndex;
-            switch (mode)
+            // Draw a curve for the custom tonemapping mode to make it easier to tweak visually
+            if (m_Mode.value.intValue == (int)TonemappingMode.Custom)
             {
-                case TonemappingMode.ACES:
-                    if (BeginAdditionalPropertiesScope())
+                EditorGUILayout.Space();
+
+                // Reserve GUI space
+                m_CurveRect = GUILayoutUtility.GetRect(128, 80);
+                m_CurveRect.xMin += EditorGUI.indentLevel * 15f;
+
+                if (Event.current.type == EventType.Repaint)
+                {
+                    // Prepare curve data
+                    float toeStrength = m_ToeStrength.value.floatValue;
+                    float toeLength = m_ToeLength.value.floatValue;
+                    float shoulderStrength = m_ShoulderStrength.value.floatValue;
+                    float shoulderLength = m_ShoulderLength.value.floatValue;
+                    float shoulderAngle = m_ShoulderAngle.value.floatValue;
+                    float gamma = m_Gamma.value.floatValue;
+
+                    m_HableCurve.Init(
+                        toeStrength,
+                        toeLength,
+                        shoulderStrength,
+                        shoulderLength,
+                        shoulderAngle,
+                        gamma
+                    );
+
+                    float alpha = GUI.enabled ? 1f : 0.5f;
+
+                    m_Material.SetVector("_CustomToneCurve", m_HableCurve.uniforms.curve);
+                    m_Material.SetVector("_ToeSegmentA", m_HableCurve.uniforms.toeSegmentA);
+                    m_Material.SetVector("_ToeSegmentB", m_HableCurve.uniforms.toeSegmentB);
+                    m_Material.SetVector("_MidSegmentA", m_HableCurve.uniforms.midSegmentA);
+                    m_Material.SetVector("_MidSegmentB", m_HableCurve.uniforms.midSegmentB);
+                    m_Material.SetVector("_ShoSegmentA", m_HableCurve.uniforms.shoSegmentA);
+                    m_Material.SetVector("_ShoSegmentB", m_HableCurve.uniforms.shoSegmentB);
+                    m_Material.SetVector("_Variants", new Vector4(alpha, m_HableCurve.whitePoint, 0f, 0f));
+
+                    CheckCurveRT((int)m_CurveRect.width, (int)m_CurveRect.height);
+
+                    var oldRt = RenderTexture.active;
+                    Graphics.Blit(null, m_CurveTex, m_Material, EditorGUIUtility.isProSkin ? 0 : 1);
+                    RenderTexture.active = oldRt;
+
+                    GUI.DrawTexture(m_CurveRect, m_CurveTex);
+
+                    Handles.DrawSolidRectangleWithOutline(m_CurveRect, Color.clear, Color.white * 0.4f);
+                }
+
+                PropertyField(m_ToeStrength);
+                PropertyField(m_ToeLength);
+                PropertyField(m_ShoulderStrength);
+                PropertyField(m_ShoulderLength);
+                PropertyField(m_ShoulderAngle);
+                PropertyField(m_Gamma);
+            }
+            else if (m_Mode.value.intValue == (int)TonemappingMode.External)
+            {
+                PropertyField(m_LutTexture, EditorGUIUtility.TrTextContent("Lookup Texture"));
+
+                var lut = m_LutTexture.value.objectReferenceValue;
+                if (lut != null && !((Tonemapping)target).ValidateLUT())
+                    EditorGUILayout.HelpBox("Invalid lookup texture. It must be a 3D Texture or a Render Texture and have the same size as set in the HDRP settings.", MessageType.Warning);
+
+                PropertyField(m_LutContribution, EditorGUIUtility.TrTextContent("Contribution"));
+
+                EditorGUILayout.HelpBox("Use \"Edit > Rendering > Render Selected HDRP Camera to Log EXR\" to export a log-encoded frame for external grading.", MessageType.Info);
+            }
+            else if (m_Mode.value.intValue == (int)TonemappingMode.ACES)
+            {
+                PropertyField(m_UseFullACES);
+            }
+
+            if (hdrInPlayerSettings && m_Mode.value.intValue != (int)TonemappingMode.None)
+            {
+                EditorGUILayout.LabelField("HDR Output");
+
+                if (!HDROutputIsActive())
+                {
+                    EditorGUILayout.HelpBox("HDR is not currently active. Settings will take effect when a compatible device is found.", MessageType.Info);
+                }
+
+                int hdrTonemapMode = m_Mode.value.intValue;
+                if (m_Mode.value.intValue == (int)TonemappingMode.Custom || hdrTonemapMode == (int)TonemappingMode.External)
+                {
+                    EditorGUILayout.HelpBox("The selected tonemapping mode is not supported in HDR Output mode. Select a fallback mode.", MessageType.Warning);
+                    PropertyField(m_HDRFallbackMode);
+                    hdrTonemapMode = (m_HDRFallbackMode.value.intValue == (int)FallbackHDRTonemap.ACES) ? (int)TonemappingMode.ACES :
+                                     (m_HDRFallbackMode.value.intValue == (int)FallbackHDRTonemap.Neutral) ? (int)TonemappingMode.Neutral :
+                                     (int)TonemappingMode.None;
+                }
+
+                if (hdrTonemapMode == (int)TonemappingMode.Neutral)
+                {
+                    PropertyField(m_NeutralHDRRangeReductionMode);
+                    PropertyField(m_HueShiftAmount);
+
+                    PropertyField(m_HDRDetectPaperWhite);
+                    EditorGUI.indentLevel++;
+                    using (new EditorGUI.DisabledScope(m_HDRDetectPaperWhite.value.boolValue))
                     {
-                        PropertyField(m_UseFullAces);
-                        EndAdditionalPropertiesScope();
+                        PropertyField(m_HDRPaperwhite);
                     }
-
-                    break;
-                case TonemappingMode.Custom:
-                    DrawHeader("Custom Curve");
-                    PropertyField(m_ToeStrength);
-                    PropertyField(m_ToeLength);
-                    PropertyField(m_ShoulderStrength);
-                    PropertyField(m_ShoulderLength);
-                    PropertyField(m_ShoulderAngle);
-                    PropertyField(m_Gamma);
-                    break;
-                case TonemappingMode.External:
-                    DrawHeader("External LUT");
-                    PropertyField(m_LutTexture);
-                    PropertyField(m_LutContribution);
-                    break;
+                    EditorGUI.indentLevel--;
+                    PropertyField(m_HDRDetectNitLimits);
+                    EditorGUI.indentLevel++;
+                    using (new EditorGUI.DisabledScope(m_HDRDetectNitLimits.value.boolValue))
+                    {
+                        PropertyField(m_HDRMinNits);
+                        PropertyField(m_HDRMaxNits);
+                    }
+                    EditorGUI.indentLevel--;
+                }
+                if (hdrTonemapMode == (int)TonemappingMode.ACES)
+                {
+                    PropertyField(m_HDRAcesPreset);
+                    PropertyField(m_HDRDetectPaperWhite);
+                    EditorGUI.indentLevel++;
+                    using (new EditorGUI.DisabledScope(m_HDRDetectPaperWhite.value.boolValue))
+                    {
+                        PropertyField(m_HDRPaperwhite);
+                    }
+                    EditorGUI.indentLevel--;
+                }
             }
+        }
 
-            if (!BeginAdditionalPropertiesScope())
-                return;
-
-            DrawHeader("HDR Output");
-            if (mode == TonemappingMode.Neutral)
-                PropertyField(m_NeutralHdrRangeReductionMode);
-            else if (mode == TonemappingMode.ACES)
-                PropertyField(m_AcesPreset);
-
-            PropertyField(m_FallbackMode);
-            PropertyField(m_HueShiftAmount);
-            PropertyField(m_DetectPaperWhite);
-            if (!m_DetectPaperWhite.value.boolValue)
-                PropertyField(m_PaperWhite);
-
-            PropertyField(m_DetectBrightnessLimits);
-            if (!m_DetectBrightnessLimits.value.boolValue)
+        void CheckCurveRT(int width, int height)
+        {
+            if (m_CurveTex == null || !m_CurveTex.IsCreated() || m_CurveTex.width != width || m_CurveTex.height != height)
             {
-                PropertyField(m_MinNits);
-                PropertyField(m_MaxNits);
+                CoreUtils.Destroy(m_CurveTex);
+                m_CurveTex = new RenderTexture(width, height, 0, GraphicsFormat.R8G8B8A8_SRGB);
+                m_CurveTex.hideFlags = HideFlags.HideAndDontSave;
             }
-
-            EndAdditionalPropertiesScope();
         }
     }
+    
 }

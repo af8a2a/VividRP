@@ -17,20 +17,23 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Color", Access = AccessFlags.Write, AttachmentIndex = 0)]
         private RenderGraphTexture m_ColorTarget;
 
-        [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read,IsDepthAttachment = true)]
+        [RenderGraphResource(Name = "Depth", Access = AccessFlags.ReadWrite,IsDepthAttachment = true)]
         private RenderGraphTexture m_DepthTexture;
+        private MaterialPropertyBlock m_PropertyBlock;
 
         private Matrix4x4 m_PixelCoordToViewDirMatrix;
         public HDRISkyPass()
         {
             m_ColorTarget = CreateColorTarget("SkyColor", GraphicsFormat.R8G8B8A8_SRGB);
-            m_DepthTexture = CreateDepthTexture("SkyDepth");
+            m_DepthTexture = CreateDepthTarget("SkyDepth",DepthBits.Depth32);
         }
 
         public override void Create()
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             m_Material = CoreUtils.CreateEngineMaterial(resources.HDRISkyShader);
+            m_PropertyBlock = new MaterialPropertyBlock();
+
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -48,6 +51,8 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizeTexture(m_ColorTarget, width, height);
             ResizeTexture(m_DepthTexture, width, height);
             m_PixelCoordToViewDirMatrix = cameraData.GetPixelCoordToViewDirWSMatrix();
+
+
             UpdateMaterialProperties();
         }
 
@@ -56,8 +61,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_Material == null)
                 return;
 
-            m_Material.SetMatrix("_PixelCoordToViewDirWS", m_PixelCoordToViewDirMatrix);
-            Blitter.BlitTexture(context.cmd, Vector2.one, m_Material, 0);
+            CoreUtils.DrawFullScreen(context.cmd, m_Material, m_PropertyBlock,0);
         }
 
         public override void Dispose()
@@ -79,9 +83,11 @@ namespace VividRP.Runtime.RenderPass.Core
             var tint = skySettings?.tint.value ?? Color.white;
             var exposure = skySettings?.exposure.value ?? 1f;
             var rotation = skySettings?.rotation.value ?? 0f;
-            m_Material.SetTexture(SkyCubemapId, cubemap);
-            m_Material.SetColor(SkyTintId, tint);
-            m_Material.SetVector(SkyParamId, BuildSkyParam(exposure, rotation));
+           m_PropertyBlock.SetTexture(SkyCubemapId, cubemap);
+           m_PropertyBlock.SetColor(SkyTintId, tint);
+           m_PropertyBlock.SetVector(SkyParamId, BuildSkyParam(exposure, rotation));
+           m_PropertyBlock.SetMatrix("_PixelCoordToViewDirWS", m_PixelCoordToViewDirMatrix);
+
         }
 
         internal static Vector4 BuildSkyParam(float exposure, float rotation)
@@ -94,6 +100,16 @@ namespace VividRP.Runtime.RenderPass.Core
             var texture = new RenderGraphTexture
             {
                 desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, format)
+            };
+            texture.desc.Name = name;
+            return texture;
+        }
+
+        private static RenderGraphTexture CreateDepthTarget(string name, DepthBits depthBits)
+        {
+            var texture = new RenderGraphTexture
+            {
+                desc = RenderGraphTextureDesc.CreateDepthTarget(1, 1, depthBits)
             };
             texture.desc.Name = name;
             return texture;

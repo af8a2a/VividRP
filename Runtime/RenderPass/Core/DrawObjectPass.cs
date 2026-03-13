@@ -24,7 +24,7 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Color", Access = AccessFlags.Write, AttachmentIndex = 1)]
         private readonly List<RenderGraphTexture> m_AdditionalColorTargets = new();
 
-        [RenderGraphResource(Name = "Depth", Access = AccessFlags.Write, IsDepthAttachment = true)]
+        [RenderGraphResource(Name = "Depth", Access = AccessFlags.ReadWrite, IsDepthAttachment = true)]
         private RenderGraphTexture m_DepthTarget;
 
         public bool IsPassResourceLayoutDirty => m_IsPassResourceLayoutDirty;

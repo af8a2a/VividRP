@@ -23,7 +23,7 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "GBuffer3", Access = AccessFlags.Write, AttachmentIndex = 3)]
         private RenderGraphTexture m_GBuffer3;
 
-        [RenderGraphResource(Name = "Depth", Access = AccessFlags.Write, IsDepthAttachment = true)]
+        [RenderGraphResource(Name = "Depth", Access = AccessFlags.ReadWrite, IsDepthAttachment = true)]
         private RenderGraphTexture m_GBufferDepth;
 
         public GBufferPass()

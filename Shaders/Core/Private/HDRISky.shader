@@ -19,7 +19,7 @@ Shader "Hidden/VividRP/HDRISky"
         {
             Name "HDRISky"
             ZWrite Off
-            ZTest Always
+            ZTest LEqual
             Cull Off
             Blend Off
 
@@ -87,10 +87,10 @@ Shader "Hidden/VividRP/HDRISky"
 
             float4 Frag(Varyings input) : SV_Target
             {
-                float deviceDepth = SAMPLE_TEXTURE2D_X(_DepthTexture, sampler_DepthTexture, input.uv).r;
-
-                if (!deviceDepth == UNITY_RAW_FAR_CLIP_VALUE)
-                    return 0;
+                // float deviceDepth = SAMPLE_TEXTURE2D_X(_DepthTexture, sampler_DepthTexture, input.uv).r;
+                //
+                // if (!deviceDepth == UNITY_RAW_FAR_CLIP_VALUE)
+                //     return 0;
 
                 float3 viewDirWS = GetSkyViewDirWS(input.positionCS.xy);
 

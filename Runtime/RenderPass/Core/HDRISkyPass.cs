@@ -17,7 +17,7 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Color", Access = AccessFlags.Write, AttachmentIndex = 0)]
         private RenderGraphTexture m_ColorTarget;
 
-        [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
+        [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read,IsDepthAttachment = true)]
         private RenderGraphTexture m_DepthTexture;
 
         private Matrix4x4 m_PixelCoordToViewDirMatrix;
@@ -53,10 +53,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Record(RasterGraphContext context)
         {
-            if (m_Material == null || !m_DepthTexture.innerHandle.IsValid())
+            if (m_Material == null)
                 return;
 
-            m_Material.SetTexture(DepthTextureID, m_DepthTexture.innerHandle);
             m_Material.SetMatrix("_PixelCoordToViewDirWS", m_PixelCoordToViewDirMatrix);
             Blitter.BlitTexture(context.cmd, Vector2.one, m_Material, 0);
         }

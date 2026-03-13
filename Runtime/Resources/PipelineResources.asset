@@ -16,6 +16,15 @@ MonoBehaviour:
   - TypeName: VividRP.Runtime.PostProcessingShader
     FieldName: colorGradingShader
     Asset: {fileID: 7200000, guid: ec9fdcaf78354b1aa25c0158100aae1b, type: 3}
+  - TypeName: VividRP.Runtime.BlueNoiseResources
+    FieldName: ScramblingTile
+    Asset: {fileID: 0}
+  - TypeName: VividRP.Runtime.BlueNoiseResources
+    FieldName: RankingTile
+    Asset: {fileID: 0}
+  - TypeName: VividRP.Runtime.BlueNoiseResources
+    FieldName: OwenScrambledSequence
+    Asset: {fileID: 0}
   - TypeName: VividRP.Runtime.VividRPCoreResources
     FieldName: BlitShader
     Asset: {fileID: 4800000, guid: 88588a6fde9a5844db576cbc17606db2, type: 3}
@@ -33,7 +42,7 @@ MonoBehaviour:
     Asset: {fileID: 4800000, guid: d41d44af2b5e2ff49b8312d9fe8aab8b, type: 3}
   - TypeName: VividRP.Runtime.VividRPCoreResources
     FieldName: CopyDepthShader
-    Asset: {fileID: 0}
+    Asset: {fileID: 4800000, guid: d1e81e551800135429c7550ad3907c25, type: 3}
   - TypeName: VividRP.Runtime.VividRPCoreResources
     FieldName: MaterialClassificationCompute
     Asset: {fileID: 7200000, guid: 10706a155531873498d61668200a903d, type: 3}

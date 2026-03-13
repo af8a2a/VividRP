@@ -711,6 +711,7 @@ namespace VividRP.Runtime
             PrepareFrameHistoryTextures(renderGraph, graphAsset);
 
             s_CurrentRenderGraph = renderGraph;
+            BlueNoise.Instance?.ImportResources(renderGraph);
 
             foreach (var pass in s_RenderPasses)
             {

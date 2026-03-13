@@ -22,7 +22,8 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/HDRISky")]
         public Shader HDRISkyShader;
 
-        [ResourcePath("Shaders/Core/CopyDepth")]
+        
+        [ResourcePath("Shaders/Core/Private/CopyDepth")]
         public Shader CopyDepthShader;
 
         [ResourcePath("Shaders/Material/MaterialClassification")]

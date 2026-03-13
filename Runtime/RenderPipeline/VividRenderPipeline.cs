@@ -18,6 +18,7 @@ namespace VividRP.Runtime
             PipelineResourceManager.Initialize();
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             Blitter.Initialize(resources.CoreBlitShader, resources.CoreBlitColorAndDepthShader);
+            BlueNoise.Initialize();
 
             m_RenderGraph = new RenderGraph("VividRP RenderGraph");
         }
@@ -79,6 +80,7 @@ namespace VividRP.Runtime
 
             m_RenderGraph?.Cleanup();
             m_RenderGraph = null;
+            BlueNoise.Cleanup();
             Blitter.Cleanup();
             PipelineResourceManager.Cleanup();
             base.Dispose(disposing);

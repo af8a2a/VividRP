@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using Unity.GraphToolkit.Editor;
 using UnityEditor;
@@ -11,6 +12,7 @@ namespace VividRP.Editor.RenderGraph
     internal class RenderPassNodeData : RenderGraphNodeData
     {
         private const string PassScriptOptionName = "PassScript";
+        private static readonly Dictionary<Type, MonoScript> s_passScriptCache = new Dictionary<Type, MonoScript>();
 
         protected virtual string RegisteredPassTypeName => null;
 
@@ -110,14 +112,14 @@ namespace VividRP.Editor.RenderGraph
 
         internal bool TryGetPassScript(out MonoScript script)
         {
-            if (!UsesPassScriptSelection)
+            if (UsesPassScriptSelection)
             {
-                script = null;
-                return false;
+                var option = GetNodeOptionByName(PassScriptOptionName);
+                if (option != null && option.TryGetValue(out script) && script != null)
+                    return true;
             }
 
-            var option = GetNodeOptionByName(PassScriptOptionName);
-            return option.TryGetValue(out script);
+            return TryResolvePassScript(GetPassType(), out script);
         }
 
         private static Type ResolveType(string assemblyQualifiedOrFullName)
@@ -142,6 +144,31 @@ namespace VividRP.Editor.RenderGraph
             }
 
             return null;
+        }
+
+        private static bool TryResolvePassScript(Type passType, out MonoScript script)
+        {
+            script = null;
+            if (passType == null)
+                return false;
+
+            if (s_passScriptCache.TryGetValue(passType, out script))
+                return script != null;
+
+            var guids = AssetDatabase.FindAssets($"{passType.Name} t:MonoScript");
+            foreach (var guid in guids)
+            {
+                var assetPath = AssetDatabase.GUIDToAssetPath(guid);
+                var candidate = AssetDatabase.LoadAssetAtPath<MonoScript>(assetPath);
+                if (candidate != null && candidate.GetClass() == passType)
+                {
+                    script = candidate;
+                    break;
+                }
+            }
+
+            s_passScriptCache[passType] = script;
+            return script != null;
         }
     }
 }

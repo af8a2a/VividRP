@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Reflection;
 using UnityEditor;
 using UnityEngine;
@@ -17,7 +16,7 @@ namespace VividRP.Editor
         private static void OnLoad()
         {
             // Delay to avoid asset database issues during domain reload
-            EditorApplication.delayCall += UpdateAllResources;
+            EditorApplication.delayCall += UpdateDefaultContainerResources;
         }
         
 
@@ -37,10 +36,42 @@ namespace VividRP.Editor
             }
 
             if (relevant)
-                UpdateAllResources();
+                UpdateDefaultContainerResources();
         }
 
-        private static void UpdateAllResources()
+        internal static int UpdateContainerResources(
+            PipelineResourcesContainer container,
+            bool recordUndo = false,
+            bool logSummary = false)
+        {
+            if (container == null)
+                throw new ArgumentNullException(nameof(container));
+
+            var entries = CollectEntries();
+
+            if (recordUndo)
+                Undo.RecordObject(container, "Recollect Pipeline Resources");
+
+            container.Entries.Clear();
+            container.Entries.AddRange(entries);
+            EditorUtility.SetDirty(container);
+
+            var assetPath = AssetDatabase.GetAssetPath(container);
+            if (!string.IsNullOrEmpty(assetPath))
+                AssetDatabase.SaveAssetIfDirty(container);
+
+            if (logSummary)
+            {
+                if (string.IsNullOrEmpty(assetPath))
+                    assetPath = container.name;
+
+                Debug.Log($"[VividRP] Recollected {entries.Count} pipeline resources into {assetPath}.");
+            }
+
+            return entries.Count;
+        }
+
+        private static void UpdateDefaultContainerResources()
         {
             var container = AssetDatabase.LoadAssetAtPath<PipelineResourcesContainer>(ContainerPath);
             if (container == null)
@@ -49,6 +80,11 @@ namespace VividRP.Editor
                 AssetDatabase.CreateAsset(container, ContainerPath);
             }
 
+            UpdateContainerResources(container);
+        }
+
+        private static List<ResourceEntry> CollectEntries()
+        {
             var entries = new List<ResourceEntry>();
 
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
@@ -84,10 +120,7 @@ namespace VividRP.Editor
                 }
             }
 
-            container.Entries.Clear();
-            container.Entries.AddRange(entries);
-            EditorUtility.SetDirty(container);
-            AssetDatabase.SaveAssetIfDirty(container);
+            return entries;
         }
 
         private static UnityEngine.Object ResolveAsset(string relativePath, Type fieldType)

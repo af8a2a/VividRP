@@ -10,6 +10,29 @@ namespace VividRP.Editor.Tests
     public class PipelineResourcesContainerEditorTests
     {
         [Test]
+        public void CreateInspectorGUI_BuildsRecollectButtonAndEntriesInspector()
+        {
+            var container = ScriptableObject.CreateInstance<PipelineResourcesContainer>();
+            var editor = UnityEditor.Editor.CreateEditor(container, typeof(VividRP.Editor.PipelineResourcesContainerEditor));
+
+            try
+            {
+                var root = editor.CreateInspectorGUI();
+
+                Assert.That(root, Is.Not.Null);
+                Assert.That(root.Q<HelpBox>("vivid-pipeline-resources-help"), Is.Not.Null);
+                Assert.That(root.Q<Label>("vivid-pipeline-resources-entry-count"), Is.Not.Null);
+                Assert.That(root.Q<Button>("vivid-pipeline-resources-recollect-button"), Is.Not.Null);
+                Assert.That(root.Q<IMGUIContainer>("vivid-pipeline-resources-entries"), Is.Not.Null);
+            }
+            finally
+            {
+                Object.DestroyImmediate(editor);
+                Object.DestroyImmediate(container);
+            }
+        }
+
+        [Test]
         public void UpdateContainerResources_PopulatesEntriesForKnownPipelineResources()
         {
             var container = ScriptableObject.CreateInstance<PipelineResourcesContainer>();
@@ -22,9 +45,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(container.Entries.Count, Is.EqualTo(entryCount));
                 Assert.That(
                     container.Entries.Any(entry =>
-                        entry.TypeName == typeof(VividRPCoreResources).FullName
-                        && entry.FieldName == nameof(VividRPCoreResources.CoreBlitShader)
-                        && entry.Asset != null),
+                        entry.ResourceName == "Shaders/Core/Private/CoreBlit"
+                        && entry.ResourceObject != null),
                     Is.True);
             }
             finally

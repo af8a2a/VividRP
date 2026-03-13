@@ -13,36 +13,25 @@ MonoBehaviour:
   m_Name: PipelineResources
   m_EditorClassIdentifier: VividRP.Runtime::VividRP.Runtime.PipelineResourcesContainer
   m_Entries:
-  - TypeName: VividRP.Runtime.PostProcessingShader
-    FieldName: colorGradingShader
-    Asset: {fileID: 7200000, guid: ec9fdcaf78354b1aa25c0158100aae1b, type: 3}
-  - TypeName: VividRP.Runtime.BlueNoiseResources
-    FieldName: ScramblingTile
-    Asset: {fileID: 0}
-  - TypeName: VividRP.Runtime.BlueNoiseResources
-    FieldName: RankingTile
-    Asset: {fileID: 0}
-  - TypeName: VividRP.Runtime.BlueNoiseResources
-    FieldName: OwenScrambledSequence
-    Asset: {fileID: 0}
-  - TypeName: VividRP.Runtime.VividRPCoreResources
-    FieldName: BlitShader
-    Asset: {fileID: 4800000, guid: 88588a6fde9a5844db576cbc17606db2, type: 3}
-  - TypeName: VividRP.Runtime.VividRPCoreResources
-    FieldName: CoreBlitShader
-    Asset: {fileID: 4800000, guid: fb20577e3a98eaa40bd738cd3008ce12, type: 3}
-  - TypeName: VividRP.Runtime.VividRPCoreResources
-    FieldName: CoreBlitColorAndDepthShader
-    Asset: {fileID: 4800000, guid: 7a938306786128241b2810fe10cd3f55, type: 3}
-  - TypeName: VividRP.Runtime.VividRPCoreResources
-    FieldName: FullScreenUVShader
-    Asset: {fileID: 4800000, guid: d59dc5dd19265494ca5c586c2e4ce4fe, type: 3}
-  - TypeName: VividRP.Runtime.VividRPCoreResources
-    FieldName: HDRISkyShader
-    Asset: {fileID: 4800000, guid: d41d44af2b5e2ff49b8312d9fe8aab8b, type: 3}
-  - TypeName: VividRP.Runtime.VividRPCoreResources
-    FieldName: CopyDepthShader
-    Asset: {fileID: 4800000, guid: d1e81e551800135429c7550ad3907c25, type: 3}
-  - TypeName: VividRP.Runtime.VividRPCoreResources
-    FieldName: MaterialClassificationCompute
-    Asset: {fileID: 7200000, guid: 10706a155531873498d61668200a903d, type: 3}
+  - ResourceName: Shaders/Core/Private/Blit
+    ResourceObject: {fileID: 4800000, guid: 88588a6fde9a5844db576cbc17606db2, type: 3}
+  - ResourceName: Shaders/Core/Private/CopyDepth
+    ResourceObject: {fileID: 4800000, guid: d1e81e551800135429c7550ad3907c25, type: 3}
+  - ResourceName: Shaders/Core/Private/CoreBlit
+    ResourceObject: {fileID: 4800000, guid: fb20577e3a98eaa40bd738cd3008ce12, type: 3}
+  - ResourceName: Shaders/Core/Private/CoreBlitColorAndDepth
+    ResourceObject: {fileID: 4800000, guid: 7a938306786128241b2810fe10cd3f55, type: 3}
+  - ResourceName: Shaders/Core/Private/HDRISky
+    ResourceObject: {fileID: 4800000, guid: d41d44af2b5e2ff49b8312d9fe8aab8b, type: 3}
+  - ResourceName: Shaders/Core/Private/LutBuilder3D.compute
+    ResourceObject: {fileID: 7200000, guid: ec9fdcaf78354b1aa25c0158100aae1b, type: 3}
+  - ResourceName: Shaders/FullScreenUV
+    ResourceObject: {fileID: 4800000, guid: d59dc5dd19265494ca5c586c2e4ce4fe, type: 3}
+  - ResourceName: Shaders/Material/MaterialClassification
+    ResourceObject: {fileID: 7200000, guid: 10706a155531873498d61668200a903d, type: 3}
+  - ResourceName: Texture/BlueNoise/RankingTile256SPP.png
+    ResourceObject: {fileID: 2800000, guid: 948549db1fcb4c1b9fefb0fe55c31b7a, type: 3}
+  - ResourceName: Texture/BlueNoise/ScramblingTile256SPP.png
+    ResourceObject: {fileID: 2800000, guid: 3c978153caa04294a8c9bdef3ded0594, type: 3}
+  - ResourceName: Texture/BlueNoise/SobolOwenScrambled256.png
+    ResourceObject: {fileID: 2800000, guid: 740f2c43de4841599d4b6f676ef3d897, type: 3}

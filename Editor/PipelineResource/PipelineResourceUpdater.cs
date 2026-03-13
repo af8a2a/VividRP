@@ -18,7 +18,6 @@ namespace VividRP.Editor
             // Delay to avoid asset database issues during domain reload
             EditorApplication.delayCall += UpdateDefaultContainerResources;
         }
-        
 
         private static void OnPostprocessAllAssets(
             string[] importedAssets, string[] deletedAssets,
@@ -28,7 +27,12 @@ namespace VividRP.Editor
             foreach (var path in importedAssets)
             {
                 if (path.EndsWith(".shader", StringComparison.OrdinalIgnoreCase) ||
-                    path.EndsWith(".compute", StringComparison.OrdinalIgnoreCase))
+                    path.EndsWith(".shadergraph", StringComparison.OrdinalIgnoreCase) ||
+                    path.EndsWith(".compute", StringComparison.OrdinalIgnoreCase) ||
+                    path.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+                    path.EndsWith(".tga", StringComparison.OrdinalIgnoreCase) ||
+                    path.EndsWith(".exr", StringComparison.OrdinalIgnoreCase) ||
+                    path.EndsWith(".mat", StringComparison.OrdinalIgnoreCase))
                 {
                     relevant = true;
                     break;
@@ -109,9 +113,8 @@ namespace VividRP.Editor
                         var asset = ResolveAsset(attr.Path, field.FieldType);
                         entries.Add(new ResourceEntry
                         {
-                            TypeName = type.FullName,
-                            FieldName = field.Name,
-                            Asset = asset
+                            ResourceName = attr.Path,
+                            ResourceObject = asset,
                         });
 
                         if (asset == null)
@@ -120,6 +123,7 @@ namespace VividRP.Editor
                 }
             }
 
+            entries.Sort((left, right) => string.CompareOrdinal(left?.ResourceName, right?.ResourceName));
             return entries;
         }
 

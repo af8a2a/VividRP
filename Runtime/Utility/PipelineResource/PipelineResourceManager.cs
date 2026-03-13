@@ -9,6 +9,7 @@ namespace VividRP.Runtime
     {
         private static PipelineResourcesContainer s_Container;
         private static readonly Dictionary<Type, object> s_Cache = new();
+        private static readonly Dictionary<string, UnityEngine.Object> s_ResourceLookup = new(StringComparer.Ordinal);
         private static bool s_Initialized;
 
         public static void Initialize()
@@ -18,7 +19,13 @@ namespace VividRP.Runtime
 
             s_Container = Resources.Load<PipelineResourcesContainer>("PipelineResources");
             if (s_Container == null)
+            {
                 Debug.LogWarning("[VividRP] PipelineResourcesContainer not found at Resources/PipelineResources. Resource fields will be null.");
+            }
+            else
+            {
+                BuildResourceLookup();
+            }
 
             s_Initialized = true;
         }
@@ -44,7 +51,6 @@ namespace VividRP.Runtime
                 return instance;
 
             var type = typeof(T);
-            var typeName = type.FullName;
             var fields = type.GetFields(BindingFlags.Public | BindingFlags.Instance);
 
             foreach (var field in fields)
@@ -53,14 +59,18 @@ namespace VividRP.Runtime
                 if (attr == null)
                     continue;
 
-                foreach (var entry in s_Container.Entries)
+                if (!s_ResourceLookup.TryGetValue(attr.Path, out var resourceObject) || resourceObject == null)
+                    continue;
+
+                if (!field.FieldType.IsInstanceOfType(resourceObject))
                 {
-                    if (entry.TypeName == typeName && entry.FieldName == field.Name)
-                    {
-                        field.SetValue(instance, entry.Asset);
-                        break;
-                    }
+                    Debug.LogWarning(
+                        $"[VividRP] Resource '{attr.Path}' is assigned to {resourceObject.GetType().Name}, " +
+                        $"but field {type.Name}.{field.Name} expects {field.FieldType.Name}.");
+                    continue;
                 }
+
+                field.SetValue(instance, resourceObject);
             }
 
             return instance;
@@ -69,8 +79,25 @@ namespace VividRP.Runtime
         public static void Cleanup()
         {
             s_Cache.Clear();
+            s_ResourceLookup.Clear();
             s_Container = null;
             s_Initialized = false;
+        }
+
+        private static void BuildResourceLookup()
+        {
+            s_ResourceLookup.Clear();
+
+            if (s_Container?.Entries == null)
+                return;
+
+            foreach (var entry in s_Container.Entries)
+            {
+                if (entry == null || string.IsNullOrEmpty(entry.ResourceName))
+                    continue;
+
+                s_ResourceLookup[entry.ResourceName] = entry.ResourceObject;
+            }
         }
     }
 }

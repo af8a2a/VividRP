@@ -11,6 +11,7 @@ namespace VividRP.Editor
         private const string RecollectButtonName = "vivid-pipeline-resources-recollect-button";
         private const string EntryCountLabelName = "vivid-pipeline-resources-entry-count";
         private const string EntriesInspectorName = "vivid-pipeline-resources-entries";
+        private const float ResourceNameColumnWidth = 320f;
 
         private Label m_EntryCountLabel;
 
@@ -65,7 +66,40 @@ namespace VividRP.Editor
         private void DrawEntriesInspector()
         {
             serializedObject.Update();
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("m_Entries"), includeChildren: true);
+            var entriesProperty = serializedObject.FindProperty("m_Entries");
+            if (entriesProperty == null)
+            {
+                serializedObject.ApplyModifiedProperties();
+                return;
+            }
+
+            EditorGUILayout.LabelField("Entries", EditorStyles.boldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                using (new EditorGUI.DisabledScope(true))
+                {
+                    EditorGUILayout.IntField("Size", entriesProperty.arraySize);
+                }
+
+                if (entriesProperty.arraySize > 0)
+                {
+                    EditorGUILayout.Space(2f);
+                    DrawEntryHeader();
+
+                    for (var i = 0; i < entriesProperty.arraySize; i++)
+                    {
+                        var entryProperty = entriesProperty.GetArrayElementAtIndex(i);
+                        if (entryProperty == null)
+                            continue;
+
+                        DrawEntryRow(entryProperty);
+
+                        if (i < entriesProperty.arraySize - 1)
+                            EditorGUILayout.Space(2f);
+                    }
+                }
+            }
+
             serializedObject.ApplyModifiedProperties();
         }
 
@@ -74,6 +108,36 @@ namespace VividRP.Editor
             var container = target as PipelineResourcesContainer;
             var count = container != null ? container.Entries.Count : 0;
             m_EntryCountLabel.text = $"Entries: {count}";
+        }
+
+        private static void DrawEntryHeader()
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField("Resource Name", EditorStyles.boldLabel, GUILayout.Width(ResourceNameColumnWidth));
+                EditorGUILayout.LabelField("Resource Object", EditorStyles.boldLabel);
+            }
+        }
+
+        private static void DrawEntryRow(SerializedProperty entryProperty)
+        {
+            var resourceNameProperty = entryProperty.FindPropertyRelative("ResourceName");
+            var resourceObjectProperty = entryProperty.FindPropertyRelative("ResourceObject");
+            if (resourceNameProperty == null || resourceObjectProperty == null)
+                return;
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                using (new EditorGUI.DisabledScope(true))
+                {
+                    EditorGUILayout.TextField(resourceNameProperty.stringValue, GUILayout.Width(ResourceNameColumnWidth));
+                }
+
+                EditorGUILayout.PropertyField(
+                    resourceObjectProperty,
+                    GUIContent.none,
+                    GUILayout.MinWidth(120f));
+            }
         }
     }
 }

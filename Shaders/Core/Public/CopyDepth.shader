@@ -4,7 +4,7 @@ Shader "Hidden/VividRP/CopyDepth"
         #define USE_FULL_PRECISION_BLIT_TEXTURE
         #pragma target 2.0
         #pragma editor_sync_compilation
-        #include "Packages/com.af8a2a.vividrp/Shaders/Core/Core.hlsl"
+        #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
         #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
     ENDHLSL
 

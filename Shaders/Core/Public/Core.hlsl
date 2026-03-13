@@ -1,6 +1,6 @@
 #ifndef VIVIDRP_CORE_INCLUDED
 #define VIVIDRP_CORE_INCLUDED
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Input.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
 #define SLICE_ARRAY_INDEX       0
 

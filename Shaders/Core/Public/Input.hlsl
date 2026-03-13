@@ -2,7 +2,7 @@
 #define VIVIDRP_INPUT_INCLUDED
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/UnityInput.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/UnityInput.hlsl"
 
 // x = Mip Bias
 // y = 2.0 ^ [Mip Bias]

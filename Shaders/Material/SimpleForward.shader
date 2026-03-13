@@ -20,7 +20,7 @@ Shader "VividRP/Material/SimpleForward"
             #pragma target 2.0
             #pragma multi_compile_instancing
 
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Input.hlsl"
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
 
             CBUFFER_START(UnityPerMaterial)

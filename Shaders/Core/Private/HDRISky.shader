@@ -28,8 +28,7 @@ Shader "Hidden/VividRP/HDRISky"
             #pragma vertex Vert
             #pragma fragment Frag
 
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Core.hlsl"
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/SkyDepth.hlsl"
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 
             TEXTURE2D_X_FLOAT(_DepthTexture);
@@ -90,8 +89,8 @@ Shader "Hidden/VividRP/HDRISky"
             {
                 float deviceDepth = SAMPLE_TEXTURE2D_X(_DepthTexture, sampler_DepthTexture, input.uv).r;
 
-                if (!IsSkyPixel(deviceDepth))
-                    discard;
+                if (!deviceDepth == UNITY_RAW_FAR_CLIP_VALUE)
+                    return 0;
 
                 float3 viewDirWS = GetSkyViewDirWS(input.positionCS.xy);
 

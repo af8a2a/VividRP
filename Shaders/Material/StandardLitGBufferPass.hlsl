@@ -1,7 +1,7 @@
 #ifndef VIVIDRP_STANDARD_LIT_GBUFFER_PASS_INCLUDED
 #define VIVIDRP_STANDARD_LIT_GBUFFER_PASS_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/GBuffer.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
 
 CBUFFER_START(UnityPerMaterial)

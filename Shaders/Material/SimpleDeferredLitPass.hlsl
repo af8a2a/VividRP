@@ -1,9 +1,8 @@
 #ifndef VIVIDRP_SIMPLE_DEFERRED_LIT_PASS_INCLUDED
 #define VIVIDRP_SIMPLE_DEFERRED_LIT_PASS_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/GBuffer.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Lighting.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/SkyDepth.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/TextureXR.hlsl"
 
 TEXTURE2D_X(_GBuffer0);
@@ -247,7 +246,7 @@ float4 Frag(Varyings input) : SV_Target
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
     float deviceDepth = SAMPLE_TEXTURE2D_X(_DepthTexture, sampler_DepthTexture, input.uv).r;
-    if (IsSkyPixel(deviceDepth))
+    if (deviceDepth==UNITY_RAW_FAR_CLIP_VALUE)
         return float4(0.0, 0.0, 0.0, 1.0);
 
     VividGBufferSurfaceData surfaceData = SampleVividGBuffer(input.uv);

@@ -7,19 +7,19 @@ namespace VividRP.Runtime
     [PipelineResource] 
     public class VividRPCoreResources
     {
-        [ResourcePath("Shaders/Core/Blit")]
+        [ResourcePath("Shaders/Core/Private/Blit")]
         public Shader BlitShader;
 
-        [ResourcePath("Shaders/Core/CoreBlit")]
+        [ResourcePath("Shaders/Core/Private/CoreBlit")]
         public Shader CoreBlitShader;
 
-        [ResourcePath("Shaders/Core/CoreBlitColorAndDepth")]
+        [ResourcePath("Shaders/Core/Private/CoreBlitColorAndDepth")]
         public Shader CoreBlitColorAndDepthShader;
 
         [ResourcePath("Shaders/FullScreenUV")]
         public Shader FullScreenUVShader;
 
-        [ResourcePath("Shaders/Core/HDRISky")]
+        [ResourcePath("Shaders/Core/Private/HDRISky")]
         public Shader HDRISkyShader;
 
         [ResourcePath("Shaders/Core/CopyDepth")]

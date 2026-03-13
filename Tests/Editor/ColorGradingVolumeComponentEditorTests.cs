@@ -101,5 +101,34 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(Shader.Find("Hidden/VividRP PostProcessing/Editor/CurveBackground"), Is.Not.Null);
         }
+
+        [Test]
+        public void TonemappingEditor_InitializesGranTurismoControls()
+        {
+            var component = ScriptableObject.CreateInstance<Tonemapping>();
+            UnityEditor.Editor editor = null;
+
+            try
+            {
+                editor = UnityEditor.Editor.CreateEditor(component);
+
+                Assert.That(editor, Is.Not.Null);
+
+                var editorType = editor.GetType();
+                var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+
+                Assert.That(editorType.GetField("m_MaxBrightness", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_LinearSectionLength", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_BlackMin", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_Material", flags)?.GetValue(editor), Is.Not.Null);
+            }
+            finally
+            {
+                if (editor != null)
+                    UnityEngine.Object.DestroyImmediate(editor);
+
+                UnityEngine.Object.DestroyImmediate(component);
+            }
+        }
     }
 }

@@ -1,6 +1,6 @@
 #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 
-#pragma multi_compile TONEMAPPING_NONE TONEMAPPING_NEUTRAL TONEMAPPING_ACES_APPROX TONEMAPPING_ACES_FULL TONEMAPPING_CUSTOM TONEMAPPING_EXTERNAL
+#pragma multi_compile TONEMAPPING_NONE TONEMAPPING_NEUTRAL TONEMAPPING_ACES_APPROX TONEMAPPING_ACES_FULL TONEMAPPING_GRAN_TURISMO TONEMAPPING_CUSTOM TONEMAPPING_EXTERNAL
 #pragma multi_compile_local _ HDR_COLORSPACE_CONVERSION
 #pragma multi_compile_local GRADE_IN_SRGB GRADE_IN_ACESCG
 
@@ -53,6 +53,10 @@ CBUFFER_START(cb0)
     float4 _SplitHighlights;    // xyz: color, w: unused
     float4 _Params;             // x: enable grading, yzw: unused
 
+    // Gran Turismo tonemapping settings
+    float4 _GTToneMap_Params0;
+    float4 _GTToneMap_Params1;
+
     // Custom tonemapping settings
     float4 _CustomToneCurve;
     float4 _ToeSegmentA;
@@ -79,6 +83,45 @@ float GetLuminance(float3 colorLinear)
     #else
     return Luminance(colorLinear);
     #endif
+}
+
+float W_f(float x, float e0, float e1)
+{
+    if (x <= e0)
+        return 0.0;
+
+    if (x >= e1)
+        return 1.0;
+
+    float a = (x - e0) / (e1 - e0);
+    return a * a * (3.0 - 2.0 * a);
+}
+
+float H_f(float x, float e0, float e1)
+{
+    if (x <= e0)
+        return 0.0;
+
+    if (x >= e1)
+        return 1.0;
+
+    return (x - e0) / (e1 - e0);
+}
+
+float GranTurismoTonemap(float x, float P, float a, float m, float l, float c, float b)
+{
+    float l0 = (P - m) * l / a;
+    float L_x = m + a * (x - m);
+    float T_x = m * pow(x / m, c) + b;
+    float S0 = m + l0;
+    float S1 = m + a * l0;
+    float C2 = a * P / (P - S1);
+    float S_x = P - (P - S1) * exp(-(C2 * (x - S0) / P));
+    float w0_x = 1.0 - W_f(x, 0.0, m);
+    float w2_x = H_f(x, m + l0, m + l0);
+    float w1_x = 1.0 - w0_x - w2_x;
+    float f_x = T_x * w0_x + L_x * w1_x + S_x * w2_x;
+    return f_x;
 }
 
 float EvaluateCurve(TEXTURE2D(curve), float t)
@@ -279,6 +322,12 @@ float3 Tonemap(float3 colorLinear)
     #elif defined(TONEMAPPING_CUSTOM)
     {
         colorLinear = CustomTonemap(colorLinear, _CustomToneCurve.xyz, _ToeSegmentA, _ToeSegmentB.xy, _MidSegmentA, _MidSegmentB.xy, _ShoSegmentA, _ShoSegmentB.xy);
+    }
+    #elif defined(TONEMAPPING_GRAN_TURISMO)
+    {
+        colorLinear.r = GranTurismoTonemap(colorLinear.r, _GTToneMap_Params0.x, _GTToneMap_Params0.y, _GTToneMap_Params0.z, _GTToneMap_Params0.w, _GTToneMap_Params1.x, _GTToneMap_Params1.y);
+        colorLinear.g = GranTurismoTonemap(colorLinear.g, _GTToneMap_Params0.x, _GTToneMap_Params0.y, _GTToneMap_Params0.z, _GTToneMap_Params0.w, _GTToneMap_Params1.x, _GTToneMap_Params1.y);
+        colorLinear.b = GranTurismoTonemap(colorLinear.b, _GTToneMap_Params0.x, _GTToneMap_Params0.y, _GTToneMap_Params0.z, _GTToneMap_Params0.w, _GTToneMap_Params1.x, _GTToneMap_Params1.y);
     }
     #elif defined(TONEMAPPING_ACES)
     {

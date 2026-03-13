@@ -13,7 +13,9 @@ Shader "Hidden/VividRP/Editor/Custom Tonemapper Curve"
         float4 _MidSegmentB;
         float4 _ShoSegmentA;
         float4 _ShoSegmentB;
-        float4 _Variants; // x: disabled state, y: x-scale, wz: unused
+        float4 _GTToneMap_Params0;
+        float4 _GTToneMap_Params1;
+        float4 _Variants; // x: disabled state, y: x-scale, z: preview mode, w: unused
 
         float EvalCustomSegment(float x, float4 segmentA, float2 segmentB)
         {
@@ -60,17 +62,64 @@ Shader "Hidden/VividRP/Editor/Custom Tonemapper Curve"
             return EvalCustomCurve(normX.x, curve, toeSegmentA, toeSegmentB, midSegmentA, midSegmentB, shoSegmentA, shoSegmentB);
         }
 
+        float W_f(float x, float e0, float e1)
+        {
+            if (x <= e0)
+                return 0.0;
+
+            if (x >= e1)
+                return 1.0;
+
+            float a = (x - e0) / (e1 - e0);
+            return a * a * (3.0 - 2.0 * a);
+        }
+
+        float H_f(float x, float e0, float e1)
+        {
+            if (x <= e0)
+                return 0.0;
+
+            if (x >= e1)
+                return 1.0;
+
+            return (x - e0) / (e1 - e0);
+        }
+
+        float GranTurismoTonemap(float x, float P, float a, float m, float l, float c, float b)
+        {
+            float l0 = (P - m) * l / a;
+            float L_x = m + a * (x - m);
+            float T_x = m * pow(x / m, c) + b;
+            float S0 = m + l0;
+            float S1 = m + a * l0;
+            float C2 = a * P / (P - S1);
+            float S_x = P - (P - S1) * exp(-(C2 * (x - S0) / P));
+            float w0_x = 1.0 - W_f(x, 0.0, m);
+            float w2_x = H_f(x, m + l0, m + l0);
+            float w1_x = 1.0 - w0_x - w2_x;
+            float f_x = T_x * w0_x + L_x * w1_x + S_x * w2_x;
+            return f_x;
+        }
+
         float4 DrawCurve(v2f_img i, float3 background, float3 curveColor)
         {
-            float y = CustomTonemap(i.uv.x * _Variants.y,
-                _CustomToneCurve,
-                _ToeSegmentA,
-                _ToeSegmentB.xy,
-                _MidSegmentA,
-                _MidSegmentB.xy,
-                _ShoSegmentA,
-                _ShoSegmentB.xy
-            );
+            float y;
+            if (_Variants.z > 0.5)
+            {
+                y = GranTurismoTonemap(i.uv.x, _GTToneMap_Params0.x, _GTToneMap_Params0.y, _GTToneMap_Params0.z, _GTToneMap_Params0.w, _GTToneMap_Params1.x, _GTToneMap_Params1.y);
+            }
+            else
+            {
+                y = CustomTonemap(i.uv.x * _Variants.y,
+                    _CustomToneCurve,
+                    _ToeSegmentA,
+                    _ToeSegmentB.xy,
+                    _MidSegmentA,
+                    _MidSegmentB.xy,
+                    _ShoSegmentA,
+                    _ShoSegmentB.xy
+                );
+            }
 
             float aa = fwidth(i.uv.y - y);
             float curve = smoothstep(y - aa, y, i.uv.y) - smoothstep(y, y + aa, i.uv.y);

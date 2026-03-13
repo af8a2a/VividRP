@@ -225,7 +225,7 @@ namespace VividRP.Runtime
 
     public interface IRenderPass
     {
-        
+
         /// <summary>
         /// Collects all [RenderGraphResource]-annotated fields via reflection
         /// and returns a PassResource describing the pass's resource requirements.
@@ -253,6 +253,15 @@ namespace VividRP.Runtime
         /// Called when the pipeline is disposed or the graph is recompiled.
         /// </summary>
         void Dispose();
+
+        /// <summary>
+        /// Imports an external RTHandle into the RenderGraph for use in this pass.
+        /// Call this in Prepare() to import external resources.
+        /// Returns a TextureHandle that can be assigned to pass member variables.
+        /// </summary>
+        /// <param name="rtHandle">The external RTHandle to import</param>
+        /// <returns>TextureHandle that can be used in Record()</returns>
+        TextureHandle Import(RTHandle rtHandle);
     }
 
     public abstract class ComputePass : IRenderPass
@@ -269,6 +278,15 @@ namespace VividRP.Runtime
         public abstract void Record(ComputeGraphContext context);
 
         public abstract void Dispose();
+
+        /// <summary>
+        /// Imports an external RTHandle into the RenderGraph for use in this pass.
+        /// Call this in Prepare() to import external resources.
+        /// </summary>
+        public TextureHandle Import(RTHandle rtHandle)
+        {
+            return PassRecorder.ImportTextureForPass(this, rtHandle);
+        }
     }
 
     public abstract class RasterPass : IRenderPass
@@ -285,11 +303,20 @@ namespace VividRP.Runtime
         public abstract void Record(RasterGraphContext context);
 
         public abstract void Dispose();
+
+        /// <summary>
+        /// Imports an external RTHandle into the RenderGraph for use in this pass.
+        /// Call this in Prepare() to import external resources.
+        /// </summary>
+        public TextureHandle Import(RTHandle rtHandle)
+        {
+            return PassRecorder.ImportTextureForPass(this, rtHandle);
+        }
     }
 
     public abstract class UnsafePass : IRenderPass
     {
-        
+
        protected ProfilingSampler profilingSampler;
         public abstract void Create();
 
@@ -308,5 +335,14 @@ namespace VividRP.Runtime
         public abstract void Record(UnsafeGraphContext context);
 
         public abstract void Dispose();
+
+        /// <summary>
+        /// Imports an external RTHandle into the RenderGraph for use in this pass.
+        /// Call this in Prepare() to import external resources.
+        /// </summary>
+        public TextureHandle Import(RTHandle rtHandle)
+        {
+            return PassRecorder.ImportTextureForPass(this, rtHandle);
+        }
     }
 }

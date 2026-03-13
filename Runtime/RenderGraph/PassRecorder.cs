@@ -114,6 +114,15 @@ namespace VividRP.Runtime
                 return handle;
             }
 
+            // Check if this texture has an imported RTHandle
+            if (texture != null && s_ImportedRTHandles.TryGetValue(texture, out var rtHandle))
+            {
+                handle = renderGraph.ImportTexture(rtHandle);
+                texture.SetImportedHandle(handle);
+                textureCache.Add(texture, handle);
+                return handle;
+            }
+
             handle = renderGraph.CreateTexture(texture.desc);
             textureCache.Add(texture, handle);
             return handle;

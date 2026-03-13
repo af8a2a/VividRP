@@ -1075,8 +1075,18 @@ namespace VividRP.Editor
     [CustomEditor(typeof(Tonemapping))]
     sealed class TonemappingEditor : VolumeComponentEditor
     {
+        static readonly int s_GtToneMapParams0Id = Shader.PropertyToID("_GTToneMap_Params0");
+        static readonly int s_GtToneMapParams1Id = Shader.PropertyToID("_GTToneMap_Params1");
+        static readonly int s_VariantsId = Shader.PropertyToID("_Variants");
+
         SerializedDataParameter m_Mode;
         SerializedDataParameter m_UseFullACES;
+        SerializedDataParameter m_MaxBrightness;
+        SerializedDataParameter m_Contrast;
+        SerializedDataParameter m_LinearSectionStart;
+        SerializedDataParameter m_LinearSectionLength;
+        SerializedDataParameter m_BlackPow;
+        SerializedDataParameter m_BlackMin;
         SerializedDataParameter m_ToeStrength;
         SerializedDataParameter m_ToeLength;
         SerializedDataParameter m_ShoulderStrength;
@@ -1111,6 +1121,12 @@ namespace VividRP.Editor
 
             m_Mode = Unpack(o.Find(x => x.mode));
             m_UseFullACES = Unpack(o.Find(x => x.useFullACES));
+            m_MaxBrightness = Unpack(o.Find(x => x.maxBrightness));
+            m_Contrast = Unpack(o.Find(x => x.contrast));
+            m_LinearSectionStart = Unpack(o.Find(x => x.linearSectionStart));
+            m_LinearSectionLength = Unpack(o.Find(x => x.linearSectionLength));
+            m_BlackPow = Unpack(o.Find(x => x.blackPow));
+            m_BlackMin = Unpack(o.Find(x => x.blackMin));
             m_ToeStrength = Unpack(o.Find(x => x.toeStrength));
             m_ToeLength = Unpack(o.Find(x => x.toeLength));
             m_ShoulderStrength = Unpack(o.Find(x => x.shoulderStrength));
@@ -1130,7 +1146,9 @@ namespace VividRP.Editor
             m_HDRAcesPreset = Unpack(o.Find(x => x.acesPreset));
             m_HDRFallbackMode = Unpack(o.Find(x => x.fallbackMode));
 
-            m_Material = new Material(Shader.Find("Hidden/VividRP/Editor/Custom Tonemapper Curve"));
+            var shader = Shader.Find("Hidden/VividRP/Editor/Custom Tonemapper Curve");
+            if (shader != null)
+                m_Material = new Material(shader);
         }
 
         public override void OnDisable()
@@ -1147,6 +1165,72 @@ namespace VividRP.Editor
             return SystemInfo.hdrDisplaySupportFlags.HasFlag(HDRDisplaySupportFlags.Supported) && HDROutputSettings.main.active;
         }
 
+        void DrawCurvePreview()
+        {
+            if (m_Material == null)
+                return;
+
+            EditorGUILayout.Space();
+            m_CurveRect = GUILayoutUtility.GetRect(128, 80);
+            m_CurveRect.xMin += EditorGUI.indentLevel * 15f;
+
+            if (Event.current.type != EventType.Repaint)
+                return;
+
+            CheckCurveRT((int)m_CurveRect.width, (int)m_CurveRect.height);
+
+            var oldRt = RenderTexture.active;
+            Graphics.Blit(null, m_CurveTex, m_Material, EditorGUIUtility.isProSkin ? 0 : 1);
+            RenderTexture.active = oldRt;
+
+            GUI.DrawTexture(m_CurveRect, m_CurveTex);
+            Handles.DrawSolidRectangleWithOutline(m_CurveRect, Color.clear, Color.white * 0.4f);
+        }
+
+        void ConfigureCustomCurvePreview()
+        {
+            if (m_Material == null)
+                return;
+
+            m_HableCurve.Init(
+                m_ToeStrength.value.floatValue,
+                m_ToeLength.value.floatValue,
+                m_ShoulderStrength.value.floatValue,
+                m_ShoulderLength.value.floatValue,
+                m_ShoulderAngle.value.floatValue,
+                m_Gamma.value.floatValue);
+
+            float alpha = GUI.enabled ? 1f : 0.5f;
+
+            m_Material.SetVector("_CustomToneCurve", m_HableCurve.uniforms.curve);
+            m_Material.SetVector("_ToeSegmentA", m_HableCurve.uniforms.toeSegmentA);
+            m_Material.SetVector("_ToeSegmentB", m_HableCurve.uniforms.toeSegmentB);
+            m_Material.SetVector("_MidSegmentA", m_HableCurve.uniforms.midSegmentA);
+            m_Material.SetVector("_MidSegmentB", m_HableCurve.uniforms.midSegmentB);
+            m_Material.SetVector("_ShoSegmentA", m_HableCurve.uniforms.shoSegmentA);
+            m_Material.SetVector("_ShoSegmentB", m_HableCurve.uniforms.shoSegmentB);
+            m_Material.SetVector(s_GtToneMapParams0Id, Vector4.zero);
+            m_Material.SetVector(s_GtToneMapParams1Id, Vector4.zero);
+            m_Material.SetVector(s_VariantsId, new Vector4(alpha, m_HableCurve.whitePoint, 0f, 0f));
+        }
+
+        void ConfigureGranTurismoCurvePreview()
+        {
+            if (m_Material == null)
+                return;
+
+            float alpha = GUI.enabled ? 1f : 0.5f;
+            m_Material.SetVector(s_GtToneMapParams0Id, ColorGradingSettingsResolver.BuildGranTurismoParams0(
+                m_MaxBrightness.value.floatValue,
+                m_Contrast.value.floatValue,
+                m_LinearSectionStart.value.floatValue,
+                m_LinearSectionLength.value.floatValue));
+            m_Material.SetVector(s_GtToneMapParams1Id, ColorGradingSettingsResolver.BuildGranTurismoParams1(
+                m_BlackPow.value.floatValue,
+                m_BlackMin.value.floatValue));
+            m_Material.SetVector(s_VariantsId, new Vector4(alpha, 1f, 1f, 0f));
+        }
+
 
         public override void OnInspectorGUI()
         {
@@ -1154,55 +1238,22 @@ namespace VividRP.Editor
 
             PropertyField(m_Mode);
 
-            // Draw a curve for the custom tonemapping mode to make it easier to tweak visually
-            if (m_Mode.value.intValue == (int)TonemappingMode.Custom)
+            if (m_Mode.value.intValue == (int)TonemappingMode.GranTurismo)
             {
-                EditorGUILayout.Space();
+                ConfigureGranTurismoCurvePreview();
+                DrawCurvePreview();
 
-                // Reserve GUI space
-                m_CurveRect = GUILayoutUtility.GetRect(128, 80);
-                m_CurveRect.xMin += EditorGUI.indentLevel * 15f;
-
-                if (Event.current.type == EventType.Repaint)
-                {
-                    // Prepare curve data
-                    float toeStrength = m_ToeStrength.value.floatValue;
-                    float toeLength = m_ToeLength.value.floatValue;
-                    float shoulderStrength = m_ShoulderStrength.value.floatValue;
-                    float shoulderLength = m_ShoulderLength.value.floatValue;
-                    float shoulderAngle = m_ShoulderAngle.value.floatValue;
-                    float gamma = m_Gamma.value.floatValue;
-
-                    m_HableCurve.Init(
-                        toeStrength,
-                        toeLength,
-                        shoulderStrength,
-                        shoulderLength,
-                        shoulderAngle,
-                        gamma
-                    );
-
-                    float alpha = GUI.enabled ? 1f : 0.5f;
-
-                    m_Material.SetVector("_CustomToneCurve", m_HableCurve.uniforms.curve);
-                    m_Material.SetVector("_ToeSegmentA", m_HableCurve.uniforms.toeSegmentA);
-                    m_Material.SetVector("_ToeSegmentB", m_HableCurve.uniforms.toeSegmentB);
-                    m_Material.SetVector("_MidSegmentA", m_HableCurve.uniforms.midSegmentA);
-                    m_Material.SetVector("_MidSegmentB", m_HableCurve.uniforms.midSegmentB);
-                    m_Material.SetVector("_ShoSegmentA", m_HableCurve.uniforms.shoSegmentA);
-                    m_Material.SetVector("_ShoSegmentB", m_HableCurve.uniforms.shoSegmentB);
-                    m_Material.SetVector("_Variants", new Vector4(alpha, m_HableCurve.whitePoint, 0f, 0f));
-
-                    CheckCurveRT((int)m_CurveRect.width, (int)m_CurveRect.height);
-
-                    var oldRt = RenderTexture.active;
-                    Graphics.Blit(null, m_CurveTex, m_Material, EditorGUIUtility.isProSkin ? 0 : 1);
-                    RenderTexture.active = oldRt;
-
-                    GUI.DrawTexture(m_CurveRect, m_CurveTex);
-
-                    Handles.DrawSolidRectangleWithOutline(m_CurveRect, Color.clear, Color.white * 0.4f);
-                }
+                PropertyField(m_MaxBrightness);
+                PropertyField(m_Contrast);
+                PropertyField(m_LinearSectionStart);
+                PropertyField(m_LinearSectionLength);
+                PropertyField(m_BlackPow);
+                PropertyField(m_BlackMin);
+            }
+            else if (m_Mode.value.intValue == (int)TonemappingMode.Custom)
+            {
+                ConfigureCustomCurvePreview();
+                DrawCurvePreview();
 
                 PropertyField(m_ToeStrength);
                 PropertyField(m_ToeLength);
@@ -1238,7 +1289,9 @@ namespace VividRP.Editor
                 }
 
                 int hdrTonemapMode = m_Mode.value.intValue;
-                if (m_Mode.value.intValue == (int)TonemappingMode.Custom || hdrTonemapMode == (int)TonemappingMode.External)
+                if (hdrTonemapMode == (int)TonemappingMode.GranTurismo ||
+                    hdrTonemapMode == (int)TonemappingMode.Custom ||
+                    hdrTonemapMode == (int)TonemappingMode.External)
                 {
                     EditorGUILayout.HelpBox("The selected tonemapping mode is not supported in HDR Output mode. Select a fallback mode.", MessageType.Warning);
                     PropertyField(m_HDRFallbackMode);

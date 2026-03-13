@@ -18,6 +18,9 @@ namespace VividRP.Runtime
         private static readonly Dictionary<IRenderPass, Dictionary<string, AccessFlags>> s_PassResourceAccessOverrides = new();
         private static RenderGraphTexture[] s_HistoryPreviousTextures = Array.Empty<RenderGraphTexture>();
         private static RenderGraphTexture[] s_HistoryCurrentTextures = Array.Empty<RenderGraphTexture>();
+        private static readonly Dictionary<RenderGraphTexture, RTHandle> s_ImportedRTHandles = new();
+        private static readonly Dictionary<IRenderPass, List<RTHandle>> s_PassImportedHandles = new();
+        private static RenderGraph s_CurrentRenderGraph;
 
         private static RenderGraphData s_CurrentGraphAsset;
         private static long s_CurrentImportVersion;
@@ -67,6 +70,9 @@ namespace VividRP.Runtime
             s_PassResourceAccessOverrides.Clear();
             s_HistoryPreviousTextures = Array.Empty<RenderGraphTexture>();
             s_HistoryCurrentTextures = Array.Empty<RenderGraphTexture>();
+            s_ImportedRTHandles.Clear();
+            s_PassImportedHandles.Clear();
+            s_CurrentRenderGraph = null;
             RenderGraphHistoryRegistry.Clear();
             RenderGraphPreviewRegistry.Clear();
             s_CurrentGraphAsset = null;
@@ -78,6 +84,71 @@ namespace VividRP.Runtime
         {
             EnsureCompiled(graphAsset);
             PrepareHistoryTargets(graphAsset, cmdBuffer);
+            ClearImportedTextures();
+        }
+
+        /// <summary>
+        /// Imports an external RTHandle for a specific pass during Prepare().
+        /// Returns a TextureHandle that can be assigned to pass member variables.
+        /// </summary>
+        internal static TextureHandle ImportTextureForPass(IRenderPass pass, RTHandle rtHandle)
+        {
+            if (s_CurrentRenderGraph == null)
+            {
+                Debug.LogWarning("[VividRP] Cannot import texture: RenderGraph is not active. Call Import() only during Prepare().");
+                return default;
+            }
+
+            if (rtHandle == null)
+            {
+                Debug.LogWarning("[VividRP] Cannot import texture: RTHandle is null");
+                return default;
+            }
+
+            var handle = s_CurrentRenderGraph.ImportTexture(rtHandle);
+
+            if (!s_PassImportedHandles.TryGetValue(pass, out var handles))
+            {
+                handles = new List<RTHandle>();
+                s_PassImportedHandles[pass] = handles;
+            }
+            handles.Add(rtHandle);
+
+            return handle;
+        }
+
+        /// <summary>
+        /// Imports an external RTHandle into a RenderGraphTexture for use in passes.
+        /// The imported texture will be available for the current frame only.
+        /// Call this before RecordRenderGraph() to make the external resource available to passes.
+        /// </summary>
+        /// <param name="texture">The RenderGraphTexture to import into</param>
+        /// <param name="rtHandle">The external RTHandle to import</param>
+        public static void ImportTexture(RenderGraphTexture texture, RTHandle rtHandle)
+        {
+            if (texture == null)
+            {
+                Debug.LogWarning("[VividRP] Cannot import texture: RenderGraphTexture is null");
+                return;
+            }
+
+            if (rtHandle == null)
+            {
+                Debug.LogWarning("[VividRP] Cannot import texture: RTHandle is null");
+                return;
+            }
+
+            s_ImportedRTHandles[texture] = rtHandle;
+        }
+
+        /// <summary>
+        /// Clears all imported textures at the start of each frame.
+        /// </summary>
+        private static void ClearImportedTextures()
+        {
+            s_ImportedRTHandles.Clear();
+            s_PassImportedHandles.Clear();
+            s_CurrentRenderGraph = null;
         }
 
         private static void EnsureCompiled(RenderGraphData graphAsset)
@@ -639,10 +710,14 @@ namespace VividRP.Runtime
             EnsureCompiled(graphAsset);
             PrepareFrameHistoryTextures(renderGraph, graphAsset);
 
+            s_CurrentRenderGraph = renderGraph;
+
             foreach (var pass in s_RenderPasses)
             {
                 pass.Prepare(s_FrameData);
             }
+
+            s_CurrentRenderGraph = null;
 
             var textureCache = new Dictionary<RenderGraphTexture, TextureHandle>();
             var bufferCache = new Dictionary<RenderGraphBuffer, BufferHandle>();

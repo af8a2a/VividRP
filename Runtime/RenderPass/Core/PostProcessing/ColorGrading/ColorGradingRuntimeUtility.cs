@@ -10,6 +10,7 @@ namespace VividRP.Runtime
         Neutral,
         AcesApprox,
         AcesFull,
+        GranTurismo,
         Custom,
         External
     }
@@ -36,6 +37,8 @@ namespace VividRP.Runtime
         public Vector4 shaHiLimits;
         public Vector4 splitShadows;
         public Vector4 splitHighlights;
+        public Vector4 granTurismoParams0;
+        public Vector4 granTurismoParams1;
         public Vector4 customToneCurve;
         public Vector4 toeSegmentA;
         public Vector4 toeSegmentB;
@@ -93,6 +96,8 @@ namespace VividRP.Runtime
                 shaHiLimits = new Vector4(0f, 0.3f, 0.55f, 1f),
                 splitShadows = splitToning.Item1,
                 splitHighlights = splitToning.Item2,
+                granTurismoParams0 = Vector4.zero,
+                granTurismoParams1 = Vector4.zero,
                 customToneCurve = Vector4.zero,
                 toeSegmentA = Vector4.zero,
                 toeSegmentB = Vector4.zero,
@@ -251,6 +256,16 @@ namespace VividRP.Runtime
             return new Vector4(shadowsStart, shadowsEnd, highlightsStart, highlightsEnd);
         }
 
+        internal static Vector4 BuildGranTurismoParams0(float maxBrightness, float contrast, float linearSectionStart, float linearSectionLength)
+        {
+            return new Vector4(maxBrightness, contrast, linearSectionStart, linearSectionLength);
+        }
+
+        internal static Vector4 BuildGranTurismoParams1(float blackPow, float blackMin)
+        {
+            return new Vector4(blackPow, blackMin, 0f, 0f);
+        }
+
         internal static bool IsColorAdjustmentsLutActive(ColorAdjustments colorAdjustments)
         {
             if (colorAdjustments == null)
@@ -282,6 +297,17 @@ namespace VividRP.Runtime
                     settings.tonemappingMode = tonemapping.useFullACES.value
                         ? ColorGradingTonemappingShaderMode.AcesFull
                         : ColorGradingTonemappingShaderMode.AcesApprox;
+                    break;
+                case TonemappingMode.GranTurismo:
+                    settings.tonemappingMode = ColorGradingTonemappingShaderMode.GranTurismo;
+                    settings.granTurismoParams0 = BuildGranTurismoParams0(
+                        tonemapping.maxBrightness.value,
+                        tonemapping.contrast.value,
+                        tonemapping.linearSectionStart.value,
+                        tonemapping.linearSectionLength.value);
+                    settings.granTurismoParams1 = BuildGranTurismoParams1(
+                        tonemapping.blackPow.value,
+                        tonemapping.blackMin.value);
                     break;
                 case TonemappingMode.Custom:
                     settings.tonemappingMode = ColorGradingTonemappingShaderMode.Custom;
@@ -344,6 +370,8 @@ namespace VividRP.Runtime
         private static readonly int SplitShadowsId = Shader.PropertyToID("_SplitShadows");
         private static readonly int SplitHighlightsId = Shader.PropertyToID("_SplitHighlights");
         private static readonly int ParamsId = Shader.PropertyToID("_Params");
+        private static readonly int GtToneMapParams0Id = Shader.PropertyToID("_GTToneMap_Params0");
+        private static readonly int GtToneMapParams1Id = Shader.PropertyToID("_GTToneMap_Params1");
         private static readonly int CustomToneCurveId = Shader.PropertyToID("_CustomToneCurve");
         private static readonly int ToeSegmentAId = Shader.PropertyToID("_ToeSegmentA");
         private static readonly int ToeSegmentBId = Shader.PropertyToID("_ToeSegmentB");
@@ -424,6 +452,8 @@ namespace VividRP.Runtime
             cmd.SetComputeVectorParam(m_Shader, SplitShadowsId, settings.splitShadows);
             cmd.SetComputeVectorParam(m_Shader, SplitHighlightsId, settings.splitHighlights);
             cmd.SetComputeVectorParam(m_Shader, ParamsId, new Vector4(settings.enableColorGrading ? 1f : 0f, 0f, 0f, 0f));
+            cmd.SetComputeVectorParam(m_Shader, GtToneMapParams0Id, settings.granTurismoParams0);
+            cmd.SetComputeVectorParam(m_Shader, GtToneMapParams1Id, settings.granTurismoParams1);
             cmd.SetComputeVectorParam(m_Shader, CustomToneCurveId, settings.customToneCurve);
             cmd.SetComputeVectorParam(m_Shader, ToeSegmentAId, settings.toeSegmentA);
             cmd.SetComputeVectorParam(m_Shader, ToeSegmentBId, settings.toeSegmentB);
@@ -456,6 +486,7 @@ namespace VividRP.Runtime
             CoreUtils.SetKeyword(cmd, m_Shader, "TONEMAPPING_NEUTRAL", tonemappingMode == ColorGradingTonemappingShaderMode.Neutral);
             CoreUtils.SetKeyword(cmd, m_Shader, "TONEMAPPING_ACES_APPROX", tonemappingMode == ColorGradingTonemappingShaderMode.AcesApprox);
             CoreUtils.SetKeyword(cmd, m_Shader, "TONEMAPPING_ACES_FULL", tonemappingMode == ColorGradingTonemappingShaderMode.AcesFull);
+            CoreUtils.SetKeyword(cmd, m_Shader, "TONEMAPPING_GRAN_TURISMO", tonemappingMode == ColorGradingTonemappingShaderMode.GranTurismo);
             CoreUtils.SetKeyword(cmd, m_Shader, "TONEMAPPING_CUSTOM", tonemappingMode == ColorGradingTonemappingShaderMode.Custom);
             CoreUtils.SetKeyword(cmd, m_Shader, "TONEMAPPING_EXTERNAL", tonemappingMode == ColorGradingTonemappingShaderMode.External);
             CoreUtils.SetKeyword(cmd, m_Shader, "GRADE_IN_SRGB", true);

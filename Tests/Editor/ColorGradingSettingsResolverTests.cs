@@ -37,6 +37,16 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void BuildGranTurismoParams_PacksShaderInputs()
+        {
+            var params0 = ColorGradingSettingsResolver.BuildGranTurismoParams0(4f, 1.25f, 0.3f, 0.45f);
+            var params1 = ColorGradingSettingsResolver.BuildGranTurismoParams1(1.5f, 0.1f);
+
+            Assert.That(params0, Is.EqualTo(new Vector4(4f, 1.25f, 0.3f, 0.45f)));
+            Assert.That(params1, Is.EqualTo(new Vector4(1.5f, 0.1f, 0f, 0f)));
+        }
+
+        [Test]
         public void Tonemapping_IsInactive_WhenExternalModeHasNoLut()
         {
             var tonemapping = new Tonemapping();
@@ -44,6 +54,16 @@ namespace VividRP.Editor.Tests
             tonemapping.lutTexture.value = null;
 
             Assert.That(tonemapping.IsActive(), Is.False);
+        }
+
+        [Test]
+        public void GetHDRTonemappingMode_UsesFallback_WhenGranTurismoIsSelected()
+        {
+            var tonemapping = new Tonemapping();
+            tonemapping.mode.value = TonemappingMode.GranTurismo;
+            tonemapping.fallbackMode.value = FallbackHDRTonemap.ACES;
+
+            Assert.That(tonemapping.GetHDRTonemappingMode(), Is.EqualTo(TonemappingMode.ACES));
         }
 
         [Test]

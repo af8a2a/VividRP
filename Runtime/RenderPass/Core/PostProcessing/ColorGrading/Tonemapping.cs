@@ -14,30 +14,34 @@ namespace VividRP.Runtime
         /// <summary>
         /// No tonemapping.
         /// </summary>
-        None,
+        None = 0,
 
         /// <summary>
         /// Tonemapping mode with minimal impact on color hue and saturation.
         /// </summary>
-        Neutral,
+        Neutral = 1,
 
         /// <summary>
         /// ACES tonemapper for a more filmic look.
         /// </summary>
-        ACES,
+        ACES = 2,
 
+        /// <summary>
+        /// Gran Turismo inspired tonemapping curve.
+        /// </summary>
+        GranTurismo = 5,
 
         /// <summary>
         /// A tweakable, artist-friendly tonemapping curve.
         /// </summary>
-        Custom,
+        Custom = 3,
 
         /// <summary>
         /// Specifies a custom lookup table.
         /// </summary>
         /// <seealso cref="Tonemapping.lutTexture"/>
         /// <seealso cref="Tonemapping.lutContribution"/>
-        External
+        External = 4
     }
 
 
@@ -186,6 +190,48 @@ namespace VividRP.Runtime
         public BoolParameter useFullACES = new BoolParameter(false);
 
         /// <summary>
+        /// The maximum brightness the Gran Turismo tonemapper maps towards.
+        /// This parameter is only used when <see cref="TonemappingMode.GranTurismo"/> is set.
+        /// </summary>
+        [Tooltip("The maximum brightness of the Gran Turismo tonemapper.")]
+        public ClampedFloatParameter maxBrightness = new ClampedFloatParameter(1.0f, 1.0f, 20.0f);
+
+        /// <summary>
+        /// Controls the overall contrast of the Gran Turismo tonemapper.
+        /// This parameter is only used when <see cref="TonemappingMode.GranTurismo"/> is set.
+        /// </summary>
+        [Tooltip("Controls the overall contrast of the Gran Turismo tonemapper.")]
+        public ClampedFloatParameter contrast = new ClampedFloatParameter(1.11f, 0.0f, 5.0f);
+
+        /// <summary>
+        /// Controls where the linear section begins.
+        /// This parameter is only used when <see cref="TonemappingMode.GranTurismo"/> is set.
+        /// </summary>
+        [Tooltip("Controls where the linear section begins.")]
+        public ClampedFloatParameter linearSectionStart = new ClampedFloatParameter(0.2f, 0.01f, 1.0f);
+
+        /// <summary>
+        /// Controls the length of the linear section.
+        /// This parameter is only used when <see cref="TonemappingMode.GranTurismo"/> is set.
+        /// </summary>
+        [Tooltip("Controls the length of the linear section.")]
+        public ClampedFloatParameter linearSectionLength = new ClampedFloatParameter(0.4f, 0.0f, 1.0f);
+
+        /// <summary>
+        /// Controls the dark-region curve exponent.
+        /// This parameter is only used when <see cref="TonemappingMode.GranTurismo"/> is set.
+        /// </summary>
+        [Tooltip("Controls the dark-region curve exponent.")]
+        public ClampedFloatParameter blackPow = new ClampedFloatParameter(1.29f, 1.0f, 3.0f);
+
+        /// <summary>
+        /// Controls the dark-region lift.
+        /// This parameter is only used when <see cref="TonemappingMode.GranTurismo"/> is set.
+        /// </summary>
+        [Tooltip("Controls the dark-region lift.")]
+        public ClampedFloatParameter blackMin = new ClampedFloatParameter(0.0f, 0.0f, 1.0f);
+
+        /// <summary>
         /// Controls the transition between the toe and the mid section of the curve. A value of 0
         /// results in no transition and a value of 1 results in a very hard transition.
         /// This parameter is only used when <see cref="TonemappingMode.Custom"/> is set.
@@ -312,7 +358,8 @@ namespace VividRP.Runtime
 
         internal TonemappingMode GetHDRTonemappingMode()
         {
-            if (mode.value == TonemappingMode.Custom ||
+            if (mode.value == TonemappingMode.GranTurismo ||
+                mode.value == TonemappingMode.Custom ||
                 mode.value == TonemappingMode.External)
             {
                 if (fallbackMode.value == FallbackHDRTonemap.None) return TonemappingMode.None;

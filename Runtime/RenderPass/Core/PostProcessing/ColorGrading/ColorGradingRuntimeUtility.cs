@@ -11,6 +11,8 @@ namespace VividRP.Runtime
         AcesApprox,
         AcesFull,
         GranTurismo,
+        AgX,
+        KhronosPBR,
         Custom,
         External
     }
@@ -309,6 +311,12 @@ namespace VividRP.Runtime
                         tonemapping.blackPow.value,
                         tonemapping.blackMin.value);
                     break;
+                case TonemappingMode.AgX:
+                    settings.tonemappingMode = ColorGradingTonemappingShaderMode.AgX;
+                    break;
+                case TonemappingMode.KhronosPBR:
+                    settings.tonemappingMode = ColorGradingTonemappingShaderMode.KhronosPBR;
+                    break;
                 case TonemappingMode.Custom:
                     settings.tonemappingMode = ColorGradingTonemappingShaderMode.Custom;
                     s_CustomToneCurve.Init(
@@ -487,6 +495,8 @@ namespace VividRP.Runtime
             CoreUtils.SetKeyword(cmd, m_Shader, "TONEMAPPING_ACES_APPROX", tonemappingMode == ColorGradingTonemappingShaderMode.AcesApprox);
             CoreUtils.SetKeyword(cmd, m_Shader, "TONEMAPPING_ACES_FULL", tonemappingMode == ColorGradingTonemappingShaderMode.AcesFull);
             CoreUtils.SetKeyword(cmd, m_Shader, "TONEMAPPING_GRAN_TURISMO", tonemappingMode == ColorGradingTonemappingShaderMode.GranTurismo);
+            CoreUtils.SetKeyword(cmd, m_Shader, "TONEMAPPING_AGX", tonemappingMode == ColorGradingTonemappingShaderMode.AgX);
+            CoreUtils.SetKeyword(cmd, m_Shader, "TONEMAPPING_KHRONOS_PBR", tonemappingMode == ColorGradingTonemappingShaderMode.KhronosPBR);
             CoreUtils.SetKeyword(cmd, m_Shader, "TONEMAPPING_CUSTOM", tonemappingMode == ColorGradingTonemappingShaderMode.Custom);
             CoreUtils.SetKeyword(cmd, m_Shader, "TONEMAPPING_EXTERNAL", tonemappingMode == ColorGradingTonemappingShaderMode.External);
             CoreUtils.SetKeyword(cmd, m_Shader, "GRADE_IN_SRGB", true);

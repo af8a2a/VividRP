@@ -67,6 +67,26 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void GetHDRTonemappingMode_ReturnsAgX_WhenAgXIsSelected()
+        {
+            var tonemapping = new Tonemapping();
+            tonemapping.mode.value = TonemappingMode.AgX;
+            tonemapping.fallbackMode.value = FallbackHDRTonemap.ACES;
+
+            Assert.That(tonemapping.GetHDRTonemappingMode(), Is.EqualTo(TonemappingMode.AgX));
+        }
+
+        [Test]
+        public void GetHDRTonemappingMode_UsesFallback_WhenKhronosPbrIsSelected()
+        {
+            var tonemapping = new Tonemapping();
+            tonemapping.mode.value = TonemappingMode.KhronosPBR;
+            tonemapping.fallbackMode.value = FallbackHDRTonemap.Neutral;
+
+            Assert.That(tonemapping.GetHDRTonemappingMode(), Is.EqualTo(TonemappingMode.Neutral));
+        }
+
+        [Test]
         public void ColorCurves_IsInactive_WithDefaultCurves()
         {
             var colorCurves = new ColorCurves();

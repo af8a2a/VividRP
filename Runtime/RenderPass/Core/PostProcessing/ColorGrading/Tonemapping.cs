@@ -32,6 +32,18 @@ namespace VividRP.Runtime
         GranTurismo = 5,
 
         /// <summary>
+        /// AgX tonemapper.
+        /// </summary>
+        [InspectorName("AgX")]
+        AgX = 6,
+
+        /// <summary>
+        /// Khronos PBR neutral tonemapper.
+        /// </summary>
+        [InspectorName("Khronos PBR Neutral")]
+        KhronosPBR = 7,
+
+        /// <summary>
         /// A tweakable, artist-friendly tonemapping curve.
         /// </summary>
         Custom = 3,
@@ -359,6 +371,7 @@ namespace VividRP.Runtime
         internal TonemappingMode GetHDRTonemappingMode()
         {
             if (mode.value == TonemappingMode.GranTurismo ||
+                mode.value == TonemappingMode.KhronosPBR ||
                 mode.value == TonemappingMode.Custom ||
                 mode.value == TonemappingMode.External)
             {

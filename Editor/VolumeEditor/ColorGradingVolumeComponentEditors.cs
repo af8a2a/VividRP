@@ -1231,6 +1231,24 @@ namespace VividRP.Editor
             m_Material.SetVector(s_VariantsId, new Vector4(alpha, 1f, 1f, 0f));
         }
 
+        void ConfigureAgXCurvePreview()
+        {
+            if (m_Material == null)
+                return;
+
+            float alpha = GUI.enabled ? 1f : 0.5f;
+            m_Material.SetVector(s_VariantsId, new Vector4(alpha, 1f, 2f, 0f));
+        }
+
+        void ConfigureKhronosPbrCurvePreview()
+        {
+            if (m_Material == null)
+                return;
+
+            float alpha = GUI.enabled ? 1f : 0.5f;
+            m_Material.SetVector(s_VariantsId, new Vector4(alpha, 1f, 3f, 0f));
+        }
+
 
         public override void OnInspectorGUI()
         {
@@ -1249,6 +1267,16 @@ namespace VividRP.Editor
                 PropertyField(m_LinearSectionLength);
                 PropertyField(m_BlackPow);
                 PropertyField(m_BlackMin);
+            }
+            else if (m_Mode.value.intValue == (int)TonemappingMode.AgX)
+            {
+                ConfigureAgXCurvePreview();
+                DrawCurvePreview();
+            }
+            else if (m_Mode.value.intValue == (int)TonemappingMode.KhronosPBR)
+            {
+                ConfigureKhronosPbrCurvePreview();
+                DrawCurvePreview();
             }
             else if (m_Mode.value.intValue == (int)TonemappingMode.Custom)
             {
@@ -1290,6 +1318,7 @@ namespace VividRP.Editor
 
                 int hdrTonemapMode = m_Mode.value.intValue;
                 if (hdrTonemapMode == (int)TonemappingMode.GranTurismo ||
+                    hdrTonemapMode == (int)TonemappingMode.KhronosPBR ||
                     hdrTonemapMode == (int)TonemappingMode.Custom ||
                     hdrTonemapMode == (int)TonemappingMode.External)
                 {

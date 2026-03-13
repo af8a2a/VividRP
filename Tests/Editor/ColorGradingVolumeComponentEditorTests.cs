@@ -130,5 +130,75 @@ namespace VividRP.Editor.Tests
                 UnityEngine.Object.DestroyImmediate(component);
             }
         }
+
+        [Test]
+        public void TonemappingEditor_ConfigureAgXPreview_SetsAgXVariant()
+        {
+            var component = ScriptableObject.CreateInstance<Tonemapping>();
+            component.mode.value = TonemappingMode.AgX;
+            UnityEditor.Editor editor = null;
+
+            try
+            {
+                editor = UnityEditor.Editor.CreateEditor(component);
+
+                Assert.That(editor, Is.Not.Null);
+
+                var editorType = editor.GetType();
+                var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+                var configureMethod = editorType.GetMethod("ConfigureAgXCurvePreview", flags);
+                var material = editorType.GetField("m_Material", flags)?.GetValue(editor) as Material;
+
+                Assert.That(configureMethod, Is.Not.Null);
+                Assert.That(material, Is.Not.Null);
+
+                configureMethod.Invoke(editor, null);
+
+                var variants = material.GetVector("_Variants");
+                Assert.That(variants.z, Is.EqualTo(2f));
+            }
+            finally
+            {
+                if (editor != null)
+                    UnityEngine.Object.DestroyImmediate(editor);
+
+                UnityEngine.Object.DestroyImmediate(component);
+            }
+        }
+
+        [Test]
+        public void TonemappingEditor_ConfigureKhronosPbrPreview_SetsKhronosVariant()
+        {
+            var component = ScriptableObject.CreateInstance<Tonemapping>();
+            component.mode.value = TonemappingMode.KhronosPBR;
+            UnityEditor.Editor editor = null;
+
+            try
+            {
+                editor = UnityEditor.Editor.CreateEditor(component);
+
+                Assert.That(editor, Is.Not.Null);
+
+                var editorType = editor.GetType();
+                var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+                var configureMethod = editorType.GetMethod("ConfigureKhronosPbrCurvePreview", flags);
+                var material = editorType.GetField("m_Material", flags)?.GetValue(editor) as Material;
+
+                Assert.That(configureMethod, Is.Not.Null);
+                Assert.That(material, Is.Not.Null);
+
+                configureMethod.Invoke(editor, null);
+
+                var variants = material.GetVector("_Variants");
+                Assert.That(variants.z, Is.EqualTo(3f));
+            }
+            finally
+            {
+                if (editor != null)
+                    UnityEngine.Object.DestroyImmediate(editor);
+
+                UnityEngine.Object.DestroyImmediate(component);
+            }
+        }
     }
 }

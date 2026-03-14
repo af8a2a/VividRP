@@ -1,6 +1,7 @@
 using NUnit.Framework;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Editor.RenderGraph;
+using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
 {
@@ -41,6 +42,30 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 RenderPassPortUtility.GetOutputPortName("History", AccessFlags.ReadWrite),
                 Is.EqualTo("History_Out"));
+        }
+
+        [Test]
+        public void GetInputPortName_ReturnsNull_WhenPassOwnedOverrideableOverrideIsDisabled()
+        {
+            Assert.That(
+                RenderPassPortUtility.GetInputPortName(
+                    "Color",
+                    AccessFlags.Write,
+                    RenderGraphResourceBindingMode.PassOwnedOverrideable,
+                    overrideEnabled: false),
+                Is.Null);
+        }
+
+        [Test]
+        public void GetInputPortName_ReturnsLegacyName_WhenPassOwnedOverrideableOverrideIsEnabled()
+        {
+            Assert.That(
+                RenderPassPortUtility.GetInputPortName(
+                    "Color",
+                    AccessFlags.Write,
+                    RenderGraphResourceBindingMode.PassOwnedOverrideable,
+                    overrideEnabled: true),
+                Is.EqualTo("Color_In"));
         }
 
         [Test]

@@ -8,12 +8,12 @@ using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
 {
-    public class SetupPassTests
+    public class LightGridPassTests
     {
         [Test]
         public void Prepare_AllocatesDirectionalLightBuffer_WhenDirectionalLightsAreAvailable()
         {
-            var pass = new SetupPass();
+            var pass = new LightGridPass();
             var frameData = new ContextContainer();
             var lightData = frameData.GetOrCreate<VividLightData>();
 
@@ -91,7 +91,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void Prepare_UsesSingleElementFallbackBuffer_WhenDirectionalLightsAreMissing()
         {
-            var pass = new SetupPass();
+            var pass = new LightGridPass();
             var frameData = new ContextContainer();
 
             try
@@ -126,12 +126,12 @@ namespace VividRP.Editor.Tests
         [Test]
         public void SupportsAsyncCompute_ReturnsFalse_ForSetupPass()
         {
-            Assert.That(RenderGraphPassExecutionUtility.SupportsAsyncCompute(typeof(SetupPass)), Is.False);
+            Assert.That(RenderGraphPassExecutionUtility.SupportsAsyncCompute(typeof(LightGridPass)), Is.False);
         }
 
-        private static object GetFieldValue(SetupPass pass, string fieldName)
+        private static object GetFieldValue(LightGridPass pass, string fieldName)
         {
-            var field = typeof(SetupPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            var field = typeof(LightGridPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
 
             Assert.That(field, Is.Not.Null);
 
@@ -140,7 +140,7 @@ namespace VividRP.Editor.Tests
 
         private static int GetPunctualUploadStride()
         {
-            var uploadType = typeof(SetupPass).GetNestedType("PunctualLightUploadData", BindingFlags.NonPublic);
+            var uploadType = typeof(LightGridPass).GetNestedType("PunctualLightUploadData", BindingFlags.NonPublic);
 
             Assert.That(uploadType, Is.Not.Null);
 

@@ -168,7 +168,7 @@ namespace VividRP.Editor.RenderGraph
                 foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
                 {
                     var attr = field.GetCustomAttribute<RenderGraphResource>();
-                    var inputPortName = RenderPassPortUtility.GetInputPortName(field.Name, attr.Access);
+                    var inputPortName = passNode.GetInputPortName(field, attr);
                     var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
                     var inputPort = string.IsNullOrEmpty(inputPortName) ? null : passNode.GetInputPortByName(inputPortName);
                     var outputPort = string.IsNullOrEmpty(outputPortName) ? null : passNode.GetOutputPortByName(outputPortName);

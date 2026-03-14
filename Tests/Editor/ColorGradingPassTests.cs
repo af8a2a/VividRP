@@ -16,6 +16,11 @@ namespace VividRP.Editor.Tests
         private sealed class AutoRegisteredColorGradingPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(ColorGradingPass).AssemblyQualifiedName;
+
+            internal bool HasOverrideOption(string fieldName)
+            {
+                return GetNodeOptionByName(RenderPassPortUtility.GetOverrideOptionName(fieldName)) != null;
+            }
         }
 
         [Test]
@@ -67,6 +72,16 @@ namespace VividRP.Editor.Tests
 
             Assert.That(node.HasAsyncComputeOption(), Is.True);
             Assert.That(node.GetEnableAsyncCompute(), Is.False);
+        }
+
+        [Test]
+        public void ColorGradingPassNode_HidesInputPortAndKeepsOutputPort_ForPassOwnedLut()
+        {
+            var node = new AutoRegisteredColorGradingPassNode();
+
+            Assert.That(node.HasOverrideOption("colorGradingTex"), Is.True);
+            Assert.That(node.GetInputPortByName("colorGradingTex_In"), Is.Null);
+            Assert.That(node.GetOutputPortByName("colorGradingTex"), Is.Not.Null);
         }
 
         [Test]

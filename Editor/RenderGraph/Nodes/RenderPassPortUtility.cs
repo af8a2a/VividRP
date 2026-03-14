@@ -8,6 +8,7 @@ namespace VividRP.Editor.RenderGraph
     {
         private const string InputPortSuffix = "_In";
         private const string OutputPortSuffix = "_Out";
+        private const string OverrideOptionPrefix = "Override_";
 
         internal static bool CanRead(AccessFlags access)
         {
@@ -29,6 +30,18 @@ namespace VividRP.Editor.RenderGraph
                 : CanWrite(access)
                     ? $"{fieldName}{InputPortSuffix}"
                     : fieldName;
+        }
+
+        internal static string GetInputPortName(
+            string fieldName,
+            AccessFlags access,
+            RenderGraphResourceBindingMode bindingMode,
+            bool overrideEnabled)
+        {
+            if (!ShouldDefineInputPort(access, bindingMode, overrideEnabled))
+                return null;
+
+            return GetInputPortName(fieldName, access);
         }
 
         internal static string GetOutputPortName(string fieldName, AccessFlags access)
@@ -59,6 +72,34 @@ namespace VividRP.Editor.RenderGraph
                 return AccessFlags.Write;
 
             return access;
+        }
+
+        internal static bool SupportsExternalOverride(RenderGraphResource attr)
+        {
+            return attr != null && attr.BindingMode == RenderGraphResourceBindingMode.PassOwnedOverrideable;
+        }
+
+        internal static bool ShouldDefineInputPort(
+            AccessFlags access,
+            RenderGraphResourceBindingMode bindingMode,
+            bool overrideEnabled)
+        {
+            if (!CanRead(access) && !CanWrite(access))
+                return false;
+
+            return bindingMode != RenderGraphResourceBindingMode.PassOwnedOverrideable || overrideEnabled;
+        }
+
+        internal static string GetOverrideOptionName(string fieldName)
+        {
+            return string.IsNullOrEmpty(fieldName)
+                ? OverrideOptionPrefix
+                : $"{OverrideOptionPrefix}{fieldName}";
+        }
+
+        internal static string BuildOverrideOptionDisplayName(FieldInfo field, RenderGraphResource attr)
+        {
+            return $"Override {RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr)}";
         }
 
         internal static string BuildPortDisplayName(FieldInfo field, RenderGraphResource attr, AccessFlags access)

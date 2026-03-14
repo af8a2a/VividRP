@@ -21,6 +21,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class Core_LightGridPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.LightGridPass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class DeferredDirectionalLightingPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.DeferredDirectionalLightingPass, VividRP.Runtime";
@@ -69,15 +75,15 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
-    internal sealed class MotionVectorPass : RenderPassNodeData
+    internal sealed class LightGridPass : RenderPassNodeData
     {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.MotionVectorPass, VividRP.Runtime";
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.SetupPass, VividRP.Runtime";
     }
 
     [Serializable]
-    internal sealed class SetupPass : RenderPassNodeData
+    internal sealed class MotionVectorPass : RenderPassNodeData
     {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.SetupPass, VividRP.Runtime";
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.MotionVectorPass, VividRP.Runtime";
     }
 
 }

@@ -6,7 +6,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public class SetupPass : UnsafePass
+    public class LightGridPass : UnsafePass
     {
         internal const int ClusterTileSize = 32;
         internal const int ClusterSliceCount = 24;

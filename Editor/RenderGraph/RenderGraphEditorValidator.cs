@@ -73,7 +73,7 @@ namespace VividRP.Editor.RenderGraph
                 if (!RenderPassPortUtility.CanRead(attr.Access) || !RenderPassPortUtility.CanWrite(attr.Access))
                     continue;
 
-                var inputPortName = RenderPassPortUtility.GetInputPortName(field.Name, attr.Access);
+                var inputPortName = passNode.GetInputPortName(field, attr);
                 var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
                 var inputNode = string.IsNullOrEmpty(inputPortName)
                     ? null
@@ -123,7 +123,7 @@ namespace VividRP.Editor.RenderGraph
                 if (field.FieldType != typeof(RenderGraphTexture))
                     continue;
 
-                var inputPortName = RenderPassPortUtility.GetInputPortName(field.Name, attr.Access);
+                var inputPortName = passNode.GetInputPortName(field, attr);
                 var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
                 var inputConnectedPort = string.IsNullOrEmpty(inputPortName)
                     ? null

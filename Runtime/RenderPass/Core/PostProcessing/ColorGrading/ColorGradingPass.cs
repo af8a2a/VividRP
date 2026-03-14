@@ -33,7 +33,10 @@ namespace VividRP.Runtime
         private readonly ImportedTextureState[] m_ImportedTextures = new ImportedTextureState[(int)ImportedTextureSlot.Count];
         private ColorGradingLutTextures m_LutTextures;
 
-        [RenderGraphResource(Name = "ColorGradingTexture", Access = AccessFlags.Write)]
+        [RenderGraphResource(
+            Name = "ColorGradingTexture",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture colorGradingTex = new();
 
         public ColorGradingPass()

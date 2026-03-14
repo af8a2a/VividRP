@@ -25,6 +25,7 @@ namespace VividRP.Editor.RenderGraph
 
             if (!UsesPassScriptSelection)
             {
+                AddPassOwnedOverrideOptions(context, passType);
                 if (ShouldDefineAsyncComputeOption(passType))
                     AddAsyncComputeOption(context);
                 return;
@@ -33,6 +34,8 @@ namespace VividRP.Editor.RenderGraph
             context.AddOption<MonoScript>(PassScriptOptionName)
                 .WithDisplayName("Pass Script")
                 .Delayed();
+
+            AddPassOwnedOverrideOptions(context, passType);
 
             if (ShouldDefineAsyncComputeOption(passType))
                 AddAsyncComputeOption(context);
@@ -47,10 +50,11 @@ namespace VividRP.Editor.RenderGraph
             foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
             {
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
+                var inputPortName = GetInputPortName(field, attr);
+                var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
 
                 if (field.FieldType == typeof(RenderGraphTexture))
                 {
-                    var inputPortName = RenderPassPortUtility.GetInputPortName(field.Name, attr.Access);
                     if (!string.IsNullOrEmpty(inputPortName))
                     {
                         context.AddInputPort<RenderGraphTexture>(inputPortName)
@@ -58,7 +62,6 @@ namespace VividRP.Editor.RenderGraph
                             .Build();
                     }
 
-                    var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
                     if (!string.IsNullOrEmpty(outputPortName))
                     {
                         context.AddOutputPort<RenderGraphTexture>(outputPortName)
@@ -68,7 +71,6 @@ namespace VividRP.Editor.RenderGraph
                 }
                 else if (field.FieldType == typeof(RenderGraphBuffer))
                 {
-                    var inputPortName = RenderPassPortUtility.GetInputPortName(field.Name, attr.Access);
                     if (!string.IsNullOrEmpty(inputPortName))
                     {
                         context.AddInputPort<RenderGraphBuffer>(inputPortName)
@@ -76,7 +78,6 @@ namespace VividRP.Editor.RenderGraph
                             .Build();
                     }
 
-                    var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
                     if (!string.IsNullOrEmpty(outputPortName))
                     {
                         context.AddOutputPort<RenderGraphBuffer>(outputPortName)
@@ -86,7 +87,6 @@ namespace VividRP.Editor.RenderGraph
                 }
                 else if (field.FieldType == typeof(RenderGraphRenderList))
                 {
-                    var inputPortName = RenderPassPortUtility.GetInputPortName(field.Name, attr.Access);
                     if (!string.IsNullOrEmpty(inputPortName))
                     {
                         context.AddInputPort<RenderGraphRenderList>(inputPortName)
@@ -94,7 +94,6 @@ namespace VividRP.Editor.RenderGraph
                             .Build();
                     }
 
-                    var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
                     if (!string.IsNullOrEmpty(outputPortName))
                     {
                         context.AddOutputPort<RenderGraphRenderList>(outputPortName)
@@ -147,6 +146,18 @@ namespace VividRP.Editor.RenderGraph
             }
 
             return TryResolvePassScript(GetPassType(), out script);
+        }
+
+        internal string GetInputPortName(FieldInfo field, RenderGraphResource attr)
+        {
+            if (field == null || attr == null)
+                return null;
+
+            return RenderPassPortUtility.GetInputPortName(
+                field.Name,
+                attr.Access,
+                attr.BindingMode,
+                GetPassOwnedResourceOverrideEnabled(field, attr));
         }
 
         private static Type ResolveType(string assemblyQualifiedOrFullName)
@@ -205,6 +216,17 @@ namespace VividRP.Editor.RenderGraph
                 : ResolveType(RegisteredPassTypeName);
         }
 
+        protected virtual bool GetPassOwnedResourceOverrideEnabled(FieldInfo field, RenderGraphResource attr)
+        {
+            if (field == null || !RenderPassPortUtility.SupportsExternalOverride(attr))
+                return false;
+
+            var option = GetNodeOptionByName(RenderPassPortUtility.GetOverrideOptionName(field.Name));
+            return option != null
+                   && option.TryGetValue<bool>(out var overrideEnabled)
+                   && overrideEnabled;
+        }
+
         private Type ResolvePassTypeFromOption(string optionName)
         {
             var option = GetNodeOptionByName(optionName);
@@ -218,6 +240,23 @@ namespace VividRP.Editor.RenderGraph
         {
             return RenderGraphPassExecutionUtility.SupportsAsyncCompute(passType)
                 || HasAsyncComputeOption();
+        }
+
+        private void AddPassOwnedOverrideOptions(IOptionDefinitionContext context, Type passType)
+        {
+            if (context == null || passType == null)
+                return;
+
+            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
+            {
+                var attr = field.GetCustomAttribute<RenderGraphResource>();
+                if (!RenderPassPortUtility.SupportsExternalOverride(attr))
+                    continue;
+
+                context.AddOption<bool>(RenderPassPortUtility.GetOverrideOptionName(field.Name))
+                    .WithDisplayName(RenderPassPortUtility.BuildOverrideOptionDisplayName(field, attr))
+                    .WithDefaultValue(false);
+            }
         }
 
         private static void AddAsyncComputeOption(IOptionDefinitionContext context)

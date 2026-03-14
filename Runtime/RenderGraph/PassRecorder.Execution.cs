@@ -234,6 +234,8 @@ namespace VividRP.Runtime
                         continue;
                     }
 
+                    RenderGraphPassFloatParameterUtility.ApplyFloatParameters(pass, passType, passDef?.FloatParameters);
+
                     ApplyResourceBindings(
                         pass,
                         passType,

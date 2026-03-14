@@ -156,6 +156,8 @@ namespace VividRP.Editor.RenderGraph
                     EnableAsyncCompute = ResolveAsyncComputeSetting(passType, passNode.GetEnableAsyncCompute()),
                 };
 
+                passNode.PopulateFloatParameters(passDefinition);
+
                 foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
                 {
                     var attr = field.GetCustomAttribute<RenderGraphResource>();

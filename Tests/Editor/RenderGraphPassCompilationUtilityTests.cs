@@ -126,6 +126,49 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void OrderPassDefinitions_PreservesFloatParameters_WhenPassesAreReordered()
+        {
+            var passDefinitions = new List<RenderGraphPassDefinition>
+            {
+                new()
+                {
+                    PassType = GetPassTypeName<FinalBlitPass>(),
+                    ResourceBindings =
+                    {
+                        new RenderGraphPassResourceBinding
+                        {
+                            FieldName = "source",
+                            ResourceKind = RenderGraphResourceKind.Texture,
+                            SourceKind = RenderGraphPassBindingSourceKind.PassField,
+                            SourcePassIndex = 1,
+                            SourceFieldName = "m_OutputTexture",
+                        }
+                    }
+                },
+                new()
+                {
+                    PassType = GetPassTypeName<SliderDebugPass>(),
+                    FloatParameters =
+                    {
+                        new RenderGraphPassFloatParameter
+                        {
+                            FieldName = "m_Slider",
+                            Value = 65f,
+                        }
+                    }
+                }
+            };
+
+            var ordered = RenderGraphPassCompilationUtility.OrderPassDefinitions(passDefinitions);
+
+            Assert.That(ordered[0].PassType, Is.EqualTo(GetPassTypeName<SliderDebugPass>()));
+            Assert.That(ordered[0].FloatParameters, Has.Count.EqualTo(1));
+            Assert.That(ordered[0].FloatParameters[0].FieldName, Is.EqualTo("m_Slider"));
+            Assert.That(ordered[0].FloatParameters[0].Value, Is.EqualTo(65f));
+            Assert.That(ordered[1].ResourceBindings[0].SourcePassIndex, Is.EqualTo(0));
+        }
+
+        [Test]
         public void OrderPassDefinitions_SortsSharedResourceWriterBeforeWriteOnlyInputConsumer()
         {
             var passDefinitions = new List<RenderGraphPassDefinition>

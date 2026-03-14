@@ -86,4 +86,10 @@ namespace VividRP.Editor.RenderGraph.Generated
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.MotionVectorPass, VividRP.Runtime";
     }
 
+    [Serializable]
+    internal sealed class SliderDebugPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.SliderDebugPass, VividRP.Runtime";
+    }
+
 }

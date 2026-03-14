@@ -252,6 +252,25 @@ namespace VividRP.Editor.RenderGraph
                 EnableAsyncCompute = source?.EnableAsyncCompute ?? false,
             };
 
+            if (source?.FloatParameters != null)
+            {
+                for (var i = 0; i < source.FloatParameters.Count; i++)
+                {
+                    var parameter = source.FloatParameters[i];
+                    if (parameter == null)
+                    {
+                        clone.FloatParameters.Add(null);
+                        continue;
+                    }
+
+                    clone.FloatParameters.Add(new RenderGraphPassFloatParameter
+                    {
+                        FieldName = parameter.FieldName,
+                        Value = parameter.Value,
+                    });
+                }
+            }
+
             if (source?.PreviewTextureFields != null)
                 clone.PreviewTextureFields.AddRange(source.PreviewTextureFields);
 

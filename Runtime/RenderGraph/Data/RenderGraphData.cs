@@ -46,6 +46,13 @@ namespace VividRP.Runtime
         public string SourceFieldName;
     }
 
+    [Serializable]
+    public sealed class RenderGraphPassFloatParameter
+    {
+        public string FieldName;
+        public float Value;
+    }
+
     internal static class RenderGraphPassBindingUtility
     {
         internal static bool UsesInputConnection(RenderGraphPassBindingConnectionKind connectionKind)
@@ -78,6 +85,7 @@ namespace VividRP.Runtime
         public string PassType;
         public bool EnableAsyncCompute;
         public List<RenderGraphPassResourceBinding> ResourceBindings = new();
+        public List<RenderGraphPassFloatParameter> FloatParameters = new();
         public List<string> PreviewTextureFields = new();
     }
 

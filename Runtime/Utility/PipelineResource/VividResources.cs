@@ -43,5 +43,8 @@ namespace VividRP.Runtime
 
         [ResourcePath("Shaders/Material/DeferredDirectionalLightingIndirect")]
         public Shader DeferredDirectionalLightingIndirectShader;
+
+        [ResourcePath("Shaders/Core/Private/SliderDebug")]
+        public Shader SliderDebugShader;
     }
 }

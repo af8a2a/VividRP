@@ -26,6 +26,7 @@ namespace VividRP.Editor.RenderGraph
             if (!UsesPassScriptSelection)
             {
                 AddPassOwnedOverrideOptions(context, passType);
+                AddFloatParameterOptions(context, passType);
                 if (ShouldDefineAsyncComputeOption(passType))
                     AddAsyncComputeOption(context);
                 return;
@@ -36,6 +37,7 @@ namespace VividRP.Editor.RenderGraph
                 .Delayed();
 
             AddPassOwnedOverrideOptions(context, passType);
+            AddFloatParameterOptions(context, passType);
 
             if (ShouldDefineAsyncComputeOption(passType))
                 AddAsyncComputeOption(context);
@@ -134,6 +136,37 @@ namespace VividRP.Editor.RenderGraph
         internal string GetRegisteredPassTypeName()
         {
             return RegisteredPassTypeName;
+        }
+
+        internal void PopulateFloatParameters(RenderGraphPassDefinition passDefinition)
+        {
+            if (passDefinition == null)
+                return;
+
+            var passType = GetPassType();
+            if (passType == null)
+                return;
+
+            foreach (var field in RenderGraphPassFloatParameterUtility.EnumerateSerializableFloatFields(passType))
+            {
+                var option = GetNodeOptionByName(RenderGraphPassFloatParameterUtility.GetOptionName(field.Name));
+                if (option == null || !option.TryGetValue<float>(out var value))
+                    continue;
+
+                passDefinition.FloatParameters.Add(new RenderGraphPassFloatParameter
+                {
+                    FieldName = field.Name,
+                    Value = value,
+                });
+            }
+        }
+
+        internal bool TryGetFloatParameterValue(string fieldName, out float value)
+        {
+            value = default;
+
+            var option = GetNodeOptionByName(RenderGraphPassFloatParameterUtility.GetOptionName(fieldName));
+            return option != null && option.TryGetValue<float>(out value);
         }
 
         internal bool TryGetPassScript(out MonoScript script)
@@ -259,11 +292,36 @@ namespace VividRP.Editor.RenderGraph
             }
         }
 
+        private static void AddFloatParameterOptions(IOptionDefinitionContext context, Type passType)
+        {
+            if (context == null || passType == null)
+                return;
+
+            foreach (var field in RenderGraphPassFloatParameterUtility.EnumerateSerializableFloatFields(passType))
+            {
+                context.AddOption<float>(RenderGraphPassFloatParameterUtility.GetOptionName(field.Name))
+                    .WithDisplayName(BuildFloatParameterDisplayName(field))
+                    .WithDefaultValue(RenderGraphPassFloatParameterUtility.GetDefaultValue(passType, field));
+            }
+        }
+
         private static void AddAsyncComputeOption(IOptionDefinitionContext context)
         {
             context.AddOption<bool>(AsyncComputeOptionName)
                 .WithDisplayName("Async Compute")
                 .WithDefaultValue(false);
+        }
+
+        private static string BuildFloatParameterDisplayName(FieldInfo field)
+        {
+            var fieldName = field?.Name;
+            if (string.IsNullOrEmpty(fieldName))
+                return "Float";
+
+            if (fieldName.StartsWith("m_", StringComparison.Ordinal))
+                fieldName = fieldName.Substring(2);
+
+            return ObjectNames.NicifyVariableName(fieldName);
         }
     }
 }

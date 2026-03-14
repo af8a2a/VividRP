@@ -29,6 +29,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: ec9fdcaf78354b1aa25c0158100aae1b, type: 3}
   - ResourceName: Shaders/Core/Private/ObjectMotionVectorFallback
     ResourceObject: {fileID: 4800000, guid: 050cc193933fca74a87ed5fc32a98f21, type: 3}
+  - ResourceName: Shaders/Core/Private/SliderDebug
+    ResourceObject: {fileID: 4800000, guid: 985a5b1e96340614fb6346ff8c3108ad, type: 3}
   - ResourceName: Shaders/FullScreenUV
     ResourceObject: {fileID: 4800000, guid: d59dc5dd19265494ca5c586c2e4ce4fe, type: 3}
   - ResourceName: Shaders/Material/DeferredDirectionalLighting

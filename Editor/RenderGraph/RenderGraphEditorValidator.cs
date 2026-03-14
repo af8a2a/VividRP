@@ -56,6 +56,7 @@ namespace VividRP.Editor.RenderGraph
                     continue;
                 }
 
+                ValidateAsyncCompute(passNode, passType, infos);
                 ValidateReadWriteBindings(passNode, passType, infos);
                 ValidateHistoryBindings(passNode, passType, infos);
             }
@@ -101,6 +102,17 @@ namespace VividRP.Editor.RenderGraph
                         passNode);
                 }
             }
+        }
+
+        private static void ValidateAsyncCompute(RenderPassNodeData passNode, System.Type passType, GraphLogger infos)
+        {
+            var enableAsyncCompute = passNode.GetEnableAsyncCompute();
+            if (IsAsyncComputeConfigurationValid(passType, enableAsyncCompute))
+                return;
+
+            infos.LogError(
+                $"Async Compute can only be enabled on {nameof(ComputePass)} or {nameof(UnsafePass)} types that implement {nameof(IAsyncComputeSupportedPass)}. Disable Async Compute or reselect a supported pass.",
+                passNode);
         }
 
         private static void ValidateHistoryBindings(RenderPassNodeData passNode, System.Type passType, GraphLogger infos)
@@ -203,6 +215,11 @@ namespace VividRP.Editor.RenderGraph
 
                 infos.LogWarning("Preview node only supports texture outputs.", previewNode);
             }
+        }
+
+        internal static bool IsAsyncComputeConfigurationValid(System.Type passType, bool enableAsyncCompute)
+        {
+            return !enableAsyncCompute || RenderGraphPassExecutionUtility.SupportsAsyncCompute(passType);
         }
     }
 }

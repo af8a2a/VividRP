@@ -5,7 +5,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public class ClassificationPass : ComputePass
+    public class ClassificationPass : ComputePass, IAsyncComputeSupportedPass
     {
         private const int MaterialClassCount = 3;
         private const int IndirectArgsElementCount = 4;

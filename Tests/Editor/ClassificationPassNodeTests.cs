@@ -28,5 +28,14 @@ namespace VividRP.Editor.Tests
             Assert.That(node.GetOutputPortByName("m_FabricIndirectArgs"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_ClearCoatIndirectArgs"), Is.Not.Null);
         }
+
+        [Test]
+        public void ClassificationPassNode_ExposesAsyncComputeOption()
+        {
+            var node = new AutoRegisteredClassificationPassNode();
+
+            Assert.That(node.HasAsyncComputeOption(), Is.True);
+            Assert.That(node.GetEnableAsyncCompute(), Is.False);
+        }
     }
 }

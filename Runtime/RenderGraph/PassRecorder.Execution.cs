@@ -19,7 +19,7 @@ namespace VividRP.Runtime
         private static RenderGraphTexture[] s_HistoryPreviousTextures = Array.Empty<RenderGraphTexture>();
         private static RenderGraphTexture[] s_HistoryCurrentTextures = Array.Empty<RenderGraphTexture>();
         private static readonly Dictionary<RenderGraphTexture, RTHandle> s_ImportedRTHandles = new();
-        private static readonly Dictionary<IRenderPass, List<RTHandle>> s_PassImportedHandles = new();
+        private static readonly Dictionary<IRenderPass, List<ImportedPassTexture>> s_PassImportedHandles = new();
         private static RenderGraph s_CurrentRenderGraph;
 
         private static RenderGraphData s_CurrentGraphAsset;
@@ -91,7 +91,7 @@ namespace VividRP.Runtime
         /// Imports an external RTHandle for a specific pass during Prepare().
         /// Returns a TextureHandle that can be assigned to pass member variables.
         /// </summary>
-        internal static TextureHandle ImportTextureForPass(IRenderPass pass, RTHandle rtHandle)
+        internal static TextureHandle ImportTextureForPass(IRenderPass pass, RTHandle rtHandle, AccessFlags access = AccessFlags.Read)
         {
             if (s_CurrentRenderGraph == null)
             {
@@ -109,13 +109,18 @@ namespace VividRP.Runtime
 
             if (!s_PassImportedHandles.TryGetValue(pass, out var handles))
             {
-                handles = new List<RTHandle>();
+                handles = new List<ImportedPassTexture>();
                 s_PassImportedHandles[pass] = handles;
             }
-            handles.Add(rtHandle);
+
+            var importedTexture = new ImportedPassTexture(handle, access);
+            if (!handles.Contains(importedTexture))
+                handles.Add(importedTexture);
 
             return handle;
         }
+
+        internal static bool IsPassTextureImportActive => s_CurrentRenderGraph != null;
 
         /// <summary>
         /// Imports an external RTHandle into a RenderGraphTexture for use in passes.
@@ -736,7 +741,7 @@ namespace VividRP.Runtime
 
                 if (pass is ComputePass computePass)
                 {
-                    RecordComputePass(renderGraph, computePass, resources, textureCache, bufferCache, renderListCache);
+                    RecordComputePass(renderGraph, computePass, resources, passDefinition, textureCache, bufferCache, renderListCache);
                     if (shouldRecordPreviews)
                         RecordTexturePreviewPasses(renderGraph, computePass, resources, passDefinition);
                 }
@@ -748,7 +753,7 @@ namespace VividRP.Runtime
                 }
                 else if (pass is UnsafePass unsafePass)
                 {
-                    RecordUnsafePass(renderGraph, unsafePass, resources, textureCache, bufferCache, renderListCache);
+                    RecordUnsafePass(renderGraph, unsafePass, resources, passDefinition, textureCache, bufferCache, renderListCache);
                     if (shouldRecordPreviews)
                         RecordTexturePreviewPasses(renderGraph, unsafePass, resources, passDefinition);
                 }

@@ -228,6 +228,7 @@ namespace VividRP.Editor.RenderGraph
             var clone = new RenderGraphPassDefinition
             {
                 PassType = source?.PassType,
+                EnableAsyncCompute = source?.EnableAsyncCompute ?? false,
             };
 
             if (source?.PreviewTextureFields != null)

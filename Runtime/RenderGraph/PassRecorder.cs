@@ -12,6 +12,34 @@ namespace VividRP.Runtime
     /// </summary>
     public static partial class PassRecorder
     {
+        private readonly struct ImportedPassTexture : IEquatable<ImportedPassTexture>
+        {
+            public ImportedPassTexture(TextureHandle handle, AccessFlags access)
+            {
+                Handle = handle;
+                Access = access;
+            }
+
+            public TextureHandle Handle { get; }
+
+            public AccessFlags Access { get; }
+
+            public bool Equals(ImportedPassTexture other)
+            {
+                return Handle.Equals(other.Handle) && Access == other.Access;
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is ImportedPassTexture other && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                return HashCode.Combine(Handle, Access);
+            }
+        }
+
         private class ComputePassData
         {
             public ComputePass Pass;
@@ -35,6 +63,7 @@ namespace VividRP.Runtime
             RenderGraph renderGraph,
             ComputePass pass,
             PassResource resource,
+            RenderGraphPassDefinition passDefinition,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
             Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
             Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
@@ -46,6 +75,11 @@ namespace VividRP.Runtime
             passData.Pass = pass;
 
             SetupComputeResources(renderGraph, builder, resource, textureCache, bufferCache, renderListCache);
+            SetupImportedTextures(builder, pass);
+            ConfigureGlobalStateModification(builder, pass);
+
+            if (ShouldEnableAsyncCompute(pass, passDefinition))
+                builder.EnableAsyncCompute(true);
 
             builder.SetRenderFunc<ComputePassData>(static (data, ctx) => { data.Pass.Record(ctx); });
         }
@@ -69,6 +103,8 @@ namespace VividRP.Runtime
             passData.Pass = pass;
 
             SetupRasterResources(renderGraph, builder, resource, textureCache, bufferCache, renderListCache);
+            SetupImportedTextures(builder, pass);
+            ConfigureGlobalStateModification(builder, pass);
 
             builder.SetRenderFunc<RasterPassData>(static (data, ctx) =>
             {
@@ -84,6 +120,7 @@ namespace VividRP.Runtime
             RenderGraph renderGraph,
             UnsafePass pass,
             PassResource resource,
+            RenderGraphPassDefinition passDefinition,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
             Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
             Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
@@ -95,8 +132,49 @@ namespace VividRP.Runtime
             passData.Pass = pass;
 
             SetupUnsafeResources(renderGraph, builder, resource, textureCache, bufferCache, renderListCache);
+            SetupImportedTextures(builder, pass);
+            ConfigureGlobalStateModification(builder, pass);
+
+            if (ShouldEnableAsyncCompute(pass, passDefinition))
+                builder.EnableAsyncCompute(true);
 
             builder.SetRenderFunc<UnsafePassData>(static (data, ctx) => { data.Pass.Record(ctx); });
+        }
+
+        private static bool ShouldEnableAsyncCompute(IRenderPass pass, RenderGraphPassDefinition passDefinition)
+        {
+            return pass != null
+                && passDefinition != null
+                && passDefinition.EnableAsyncCompute
+                && SystemInfo.supportsAsyncCompute
+                && RenderGraphPassExecutionUtility.SupportsAsyncCompute(pass.GetType());
+        }
+
+        private static void SetupImportedTextures(IBaseRenderGraphBuilder builder, IRenderPass pass)
+        {
+            if (builder == null
+                || pass == null
+                || !s_PassImportedHandles.TryGetValue(pass, out var importedTextures)
+                || importedTextures == null)
+            {
+                return;
+            }
+
+            foreach (var importedTexture in importedTextures)
+            {
+                if (!importedTexture.Handle.IsValid())
+                    continue;
+
+                builder.UseTexture(importedTexture.Handle, importedTexture.Access);
+            }
+        }
+
+        private static void ConfigureGlobalStateModification(IBaseRenderGraphBuilder builder, IRenderPass pass)
+        {
+            if (builder == null || pass is not IAllowGlobalStateModificationPass)
+                return;
+
+            builder.AllowGlobalStateModification(true);
         }
 
         private static TextureHandle GetOrCreateTextureHandle(

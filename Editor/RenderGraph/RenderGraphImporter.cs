@@ -108,6 +108,7 @@ namespace VividRP.Editor.RenderGraph
                 var passDef = new RenderGraphPassDefinition
                 {
                     PassType = $"{passType.FullName}, {passType.Assembly.GetName().Name}",
+                    EnableAsyncCompute = ResolveAsyncComputeSetting(passType, passNode.GetEnableAsyncCompute()),
                 };
 
                 foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
@@ -504,6 +505,11 @@ namespace VividRP.Editor.RenderGraph
         internal static bool ShouldImportPassFieldBinding(bool hasInputConnection, bool hasBoundResourceNode)
         {
             return hasInputConnection && !hasBoundResourceNode;
+        }
+
+        internal static bool ResolveAsyncComputeSetting(Type passType, bool enableAsyncCompute)
+        {
+            return enableAsyncCompute && RenderGraphPassExecutionUtility.SupportsAsyncCompute(passType);
         }
 
         private static void TryAddPassFieldBinding(

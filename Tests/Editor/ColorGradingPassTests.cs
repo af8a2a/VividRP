@@ -1,15 +1,23 @@
+using System;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
 {
     public class ColorGradingPassTests
     {
+        [Serializable]
+        private sealed class AutoRegisteredColorGradingPassNode : RenderPassNodeData
+        {
+            protected override string RegisteredPassTypeName => typeof(ColorGradingPass).AssemblyQualifiedName;
+        }
+
         [Test]
         public void Initialize_RegistersWriteOnlyColorGradingLut()
         {
@@ -44,6 +52,27 @@ namespace VividRP.Editor.Tests
             Assert.That(texture.desc.Dimension, Is.EqualTo(TextureDimension.Tex3D));
             Assert.That(texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
             Assert.That(texture.desc.EnableRandomWrite, Is.True);
+        }
+
+        [Test]
+        public void ColorGradingPass_InheritsFromComputePass()
+        {
+            Assert.That(typeof(ComputePass).IsAssignableFrom(typeof(ColorGradingPass)), Is.True);
+        }
+
+        [Test]
+        public void ColorGradingPassNode_ExposesAsyncComputeOption()
+        {
+            var node = new AutoRegisteredColorGradingPassNode();
+
+            Assert.That(node.HasAsyncComputeOption(), Is.True);
+            Assert.That(node.GetEnableAsyncCompute(), Is.False);
+        }
+
+        [Test]
+        public void SupportsAsyncCompute_ReturnsTrue_ForColorGradingPass()
+        {
+            Assert.That(RenderGraphPassExecutionUtility.SupportsAsyncCompute(typeof(ColorGradingPass)), Is.True);
         }
     }
 }

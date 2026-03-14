@@ -76,6 +76,7 @@ namespace VividRP.Runtime
     public sealed class RenderGraphPassDefinition
     {
         public string PassType;
+        public bool EnableAsyncCompute;
         public List<RenderGraphPassResourceBinding> ResourceBindings = new();
         public List<string> PreviewTextureFields = new();
     }

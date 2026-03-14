@@ -26,6 +26,12 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/CopyDepth")]
         public Shader CopyDepthShader;
 
+        [ResourcePath("Shaders/Core/Private/CameraMotionVectors")]
+        public Shader CameraMotionVectorsShader;
+
+        [ResourcePath("Shaders/Core/Private/ObjectMotionVectorFallback")]
+        public Shader ObjectMotionVectorFallbackShader;
+
         [ResourcePath("Shaders/Material/MaterialClassification")]
         public ComputeShader MaterialClassificationCompute;
     }

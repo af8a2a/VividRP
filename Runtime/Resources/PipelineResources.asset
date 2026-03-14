@@ -15,6 +15,8 @@ MonoBehaviour:
   m_Entries:
   - ResourceName: Shaders/Core/Private/Blit
     ResourceObject: {fileID: 4800000, guid: 88588a6fde9a5844db576cbc17606db2, type: 3}
+  - ResourceName: Shaders/Core/Private/CameraMotionVectors
+    ResourceObject: {fileID: 4800000, guid: 6a169e932f9bd824ca065335bba5eb55, type: 3}
   - ResourceName: Shaders/Core/Private/CopyDepth
     ResourceObject: {fileID: 4800000, guid: d1e81e551800135429c7550ad3907c25, type: 3}
   - ResourceName: Shaders/Core/Private/CoreBlit
@@ -25,6 +27,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: d41d44af2b5e2ff49b8312d9fe8aab8b, type: 3}
   - ResourceName: Shaders/Core/Private/LutBuilder3D.compute
     ResourceObject: {fileID: 7200000, guid: ec9fdcaf78354b1aa25c0158100aae1b, type: 3}
+  - ResourceName: Shaders/Core/Private/ObjectMotionVectorFallback
+    ResourceObject: {fileID: 4800000, guid: 050cc193933fca74a87ed5fc32a98f21, type: 3}
   - ResourceName: Shaders/FullScreenUV
     ResourceObject: {fileID: 4800000, guid: d59dc5dd19265494ca5c586c2e4ce4fe, type: 3}
   - ResourceName: Shaders/Material/MaterialClassification

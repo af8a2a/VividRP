@@ -184,6 +184,58 @@ namespace VividRP.Editor.Tests
             Assert.That(effectiveAccess, Is.EqualTo(AccessFlags.ReadWrite));
         }
 
+        [Test]
+        public void OrderPassDefinitions_PreservesAsyncComputeFlag_WhenPassesAreReordered()
+        {
+            var passDefinitions = new List<RenderGraphPassDefinition>
+            {
+                new()
+                {
+                    PassType = GetPassTypeName<FinalBlitPass>(),
+                    ResourceBindings =
+                    {
+                        new RenderGraphPassResourceBinding
+                        {
+                            FieldName = "source",
+                            ResourceKind = RenderGraphResourceKind.Texture,
+                            SourceKind = RenderGraphPassBindingSourceKind.PassField,
+                            SourcePassIndex = 1,
+                            SourceFieldName = "m_ColorTarget",
+                        }
+                    }
+                },
+                new()
+                {
+                    PassType = GetPassTypeName<ClassificationPass>(),
+                    EnableAsyncCompute = true,
+                }
+            };
+
+            var ordered = RenderGraphPassCompilationUtility.OrderPassDefinitions(passDefinitions);
+
+            Assert.That(ordered[0].PassType, Is.EqualTo(GetPassTypeName<ClassificationPass>()));
+            Assert.That(ordered[0].EnableAsyncCompute, Is.True);
+            Assert.That(ordered[1].EnableAsyncCompute, Is.False);
+        }
+
+        [Test]
+        public void OrderPassDefinitions_PreservesAsyncComputeFlag_WhenPassOrderDoesNotChange()
+        {
+            var passDefinitions = new List<RenderGraphPassDefinition>
+            {
+                new()
+                {
+                    PassType = GetPassTypeName<ClassificationPass>(),
+                    EnableAsyncCompute = true,
+                }
+            };
+
+            var ordered = RenderGraphPassCompilationUtility.OrderPassDefinitions(passDefinitions);
+
+            Assert.That(ordered, Has.Count.EqualTo(1));
+            Assert.That(ordered[0].EnableAsyncCompute, Is.True);
+        }
+
         private static string GetPassTypeName<T>()
         {
             var type = typeof(T);

@@ -1,8 +1,10 @@
+using System;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 
@@ -10,6 +12,12 @@ namespace VividRP.Editor.Tests
 {
     public class FinalBlitPassTests
     {
+        [Serializable]
+        private sealed class AutoRegisteredFinalBlitPassNode : RenderPassNodeData
+        {
+            protected override string RegisteredPassTypeName => typeof(FinalBlitPass).AssemblyQualifiedName;
+        }
+
         [Test]
         public void GetCameraBackBufferTextureUVOrigin_UsesBottomLeft_ForSceneAndPreviewAndTargetTexture()
         {
@@ -123,6 +131,20 @@ namespace VividRP.Editor.Tests
 
             Assert.That(viewportField, Is.Not.Null);
             Assert.That((Rect)viewportField.GetValue(pass), Is.EqualTo(new Rect(4f, 8f, 320f, 180f)));
+        }
+
+        [Test]
+        public void FinalBlitPassNode_DoesNotExposeAsyncComputeOption()
+        {
+            var node = new AutoRegisteredFinalBlitPassNode();
+
+            Assert.That(node.HasAsyncComputeOption(), Is.False);
+        }
+
+        [Test]
+        public void SupportsAsyncCompute_ReturnsFalse_ForFinalBlitPass()
+        {
+            Assert.That(RenderGraphPassExecutionUtility.SupportsAsyncCompute(typeof(FinalBlitPass)), Is.False);
         }
     }
 }

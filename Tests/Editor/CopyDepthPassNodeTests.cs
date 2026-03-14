@@ -21,5 +21,13 @@ namespace VividRP.Editor.Tests
             Assert.That(node.GetInputPortByName("m_DepthAttachment"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_DepthTexture"), Is.Not.Null);
         }
+
+        [Test]
+        public void CopyDepthPassNode_DoesNotExposeAsyncComputeOption()
+        {
+            var node = new AutoRegisteredCopyDepthPassNode();
+
+            Assert.That(node.HasAsyncComputeOption(), Is.False);
+        }
     }
 }

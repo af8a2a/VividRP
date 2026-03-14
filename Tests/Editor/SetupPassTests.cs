@@ -75,6 +75,12 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void SupportsAsyncCompute_ReturnsFalse_ForSetupPass()
+        {
+            Assert.That(RenderGraphPassExecutionUtility.SupportsAsyncCompute(typeof(SetupPass)), Is.False);
+        }
+
         private static object GetFieldValue(SetupPass pass, string fieldName)
         {
             var field = typeof(SetupPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);

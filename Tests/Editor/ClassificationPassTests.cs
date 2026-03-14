@@ -57,6 +57,12 @@ namespace VividRP.Editor.Tests
             AssertStructuredBuffer(pass, "m_ClearCoatIndirectArgs", 4, sizeof(uint), GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
         }
 
+        [Test]
+        public void SupportsAsyncCompute_ReturnsTrue_ForClassificationPass()
+        {
+            Assert.That(RenderGraphPassExecutionUtility.SupportsAsyncCompute(typeof(ClassificationPass)), Is.True);
+        }
+
         private static void AssertTextureSize(ClassificationPass pass, string fieldName, int expectedWidth, int expectedHeight)
         {
             var field = typeof(ClassificationPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);

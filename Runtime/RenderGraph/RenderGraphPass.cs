@@ -223,6 +223,29 @@ namespace VividRP.Runtime
         void ClearPassResourceLayoutDirty();
     }
 
+    public interface IAsyncComputeSupportedPass
+    {
+    }
+
+    public interface IAllowGlobalStateModificationPass
+    {
+    }
+
+    internal static class RenderGraphPassExecutionUtility
+    {
+        internal static bool SupportsAsyncCompute(Type passType)
+        {
+            if (passType == null)
+                return false;
+
+            if (!typeof(IAsyncComputeSupportedPass).IsAssignableFrom(passType))
+                return false;
+
+            return typeof(ComputePass).IsAssignableFrom(passType)
+                || typeof(UnsafePass).IsAssignableFrom(passType);
+        }
+    }
+
     public interface IRenderPass
     {
 

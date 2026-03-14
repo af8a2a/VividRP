@@ -12,6 +12,7 @@ namespace VividRP.Editor.RenderGraph
     internal class RenderPassNodeData : RenderGraphNodeData
     {
         private const string PassScriptOptionName = "PassScript";
+        private const string AsyncComputeOptionName = "AsyncCompute";
         private static readonly Dictionary<Type, MonoScript> s_passScriptCache = new Dictionary<Type, MonoScript>();
 
         protected virtual string RegisteredPassTypeName => null;
@@ -20,12 +21,21 @@ namespace VividRP.Editor.RenderGraph
 
         protected override void OnDefineOptions(IOptionDefinitionContext context)
         {
+            var passType = ResolvePassTypeForOptions();
+
             if (!UsesPassScriptSelection)
+            {
+                if (ShouldDefineAsyncComputeOption(passType))
+                    AddAsyncComputeOption(context);
                 return;
+            }
 
             context.AddOption<MonoScript>(PassScriptOptionName)
                 .WithDisplayName("Pass Script")
                 .Delayed();
+
+            if (ShouldDefineAsyncComputeOption(passType))
+                AddAsyncComputeOption(context);
         }
 
         protected override void OnDefinePorts(IPortDefinitionContext context)
@@ -101,8 +111,25 @@ namespace VividRP.Editor.RenderGraph
                 return ResolveType(RegisteredPassTypeName);
 
             var option = GetNodeOptionByName(PassScriptOptionName);
+            if (option == null)
+                return null;
+
             option.TryGetValue<MonoScript>(out var script);
             return script != null ? script.GetClass() : null;
+        }
+
+        internal bool HasAsyncComputeOption()
+        {
+            return GetNodeOptionByName(AsyncComputeOptionName) != null;
+        }
+
+        internal bool GetEnableAsyncCompute()
+        {
+            var option = GetNodeOptionByName(AsyncComputeOptionName);
+            if (option == null || !option.TryGetValue<bool>(out var enableAsyncCompute))
+                return false;
+
+            return enableAsyncCompute;
         }
 
         internal string GetRegisteredPassTypeName()
@@ -169,6 +196,35 @@ namespace VividRP.Editor.RenderGraph
 
             s_passScriptCache[passType] = script;
             return script != null;
+        }
+
+        private Type ResolvePassTypeForOptions()
+        {
+            return UsesPassScriptSelection
+                ? ResolvePassTypeFromOption(PassScriptOptionName)
+                : ResolveType(RegisteredPassTypeName);
+        }
+
+        private Type ResolvePassTypeFromOption(string optionName)
+        {
+            var option = GetNodeOptionByName(optionName);
+            if (option == null || !option.TryGetValue<MonoScript>(out var script) || script == null)
+                return null;
+
+            return script.GetClass();
+        }
+
+        private bool ShouldDefineAsyncComputeOption(Type passType)
+        {
+            return RenderGraphPassExecutionUtility.SupportsAsyncCompute(passType)
+                || HasAsyncComputeOption();
+        }
+
+        private static void AddAsyncComputeOption(IOptionDefinitionContext context)
+        {
+            context.AddOption<bool>(AsyncComputeOptionName)
+                .WithDisplayName("Async Compute")
+                .WithDefaultValue(false);
         }
     }
 }

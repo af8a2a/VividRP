@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using Unity.GraphToolkit.Editor;
 using UnityEditor;
+using UnityEditor.Overlays;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -258,40 +259,24 @@ namespace VividRP.Editor.RenderGraph
     }
 
     [InitializeOnLoad]
-    internal static class RenderGraphExecutionOrderSidebar
+    internal static class RenderGraphExecutionOrderOverlayBootstrap
     {
-        private static readonly Dictionary<int, SidebarState> s_states = new Dictionary<int, SidebarState>();
-        private static double s_nextWindowScanTime;
+        private static double s_nextScanTime;
 
-        static RenderGraphExecutionOrderSidebar()
+        static RenderGraphExecutionOrderOverlayBootstrap()
         {
-            EditorApplication.delayCall += UpdateSidebars;
-            EditorApplication.update += UpdateSidebars;
+            EditorApplication.delayCall += EnsureOverlays;
+            EditorApplication.update += EnsureOverlays;
         }
 
-        private static void UpdateSidebars()
+        private static void EnsureOverlays()
         {
             var currentTime = EditorApplication.timeSinceStartup;
-            if (currentTime >= s_nextWindowScanTime)
-            {
-                RegisterOpenWindows();
-                s_nextWindowScanTime = currentTime + 0.5d;
-            }
+            if (currentTime < s_nextScanTime)
+                return;
 
-            var closedWindowIds = new List<int>();
-            foreach (var pair in s_states)
-            {
-                if (!pair.Value.Refresh(currentTime))
-                    closedWindowIds.Add(pair.Key);
-            }
-
-            foreach (var windowId in closedWindowIds)
-            {
-                if (s_states.TryGetValue(windowId, out var state))
-                    state.Dispose();
-
-                s_states.Remove(windowId);
-            }
+            s_nextScanTime = currentTime + 0.5d;
+            RegisterOpenWindows();
         }
 
         private static void RegisterOpenWindows()
@@ -301,239 +286,219 @@ namespace VividRP.Editor.RenderGraph
                 if (window == null || !RenderGraphEditorWindowReflectionUtility.IsGraphViewEditorWindow(window.GetType()))
                     continue;
 
-                var windowId = window.GetInstanceID();
-                if (s_states.ContainsKey(windowId))
+                if (window.overlayCanvas == null)
                     continue;
 
-                s_states.Add(windowId, new SidebarState(window));
+                var hasCurrentGraph = RenderGraphEditorWindowReflectionUtility.TryGetCurrentGraph(window, out _);
+                if (window.TryGetOverlay(RenderGraphExecutionOrderOverlay.OverlayId, out var existingOverlay))
+                {
+                    existingOverlay.displayed = hasCurrentGraph;
+                    continue;
+                }
+
+                if (!hasCurrentGraph)
+                    continue;
+
+                var overlay = new RenderGraphExecutionOrderOverlay();
+                window.overlayCanvas.Add(overlay);
+                overlay.displayed = true;
+            }
+        }
+    }
+
+    [Overlay(
+        typeof(EditorWindow),
+        OverlayId,
+        "Execution Order",
+        false,
+        defaultDockZone = DockZone.RightColumn,
+        defaultDockPosition = DockPosition.Top,
+        defaultLayout = Layout.Panel,
+        defaultWidth = 320f,
+        defaultHeight = 420f,
+        minWidth = 240f,
+        minHeight = 180f,
+        group = "VividRP")]
+    internal sealed class RenderGraphExecutionOrderOverlay : Overlay
+    {
+        internal const string OverlayId = "vividrp-rendergraph-execution-order";
+
+        public override VisualElement CreatePanelContent()
+        {
+            return new RenderGraphExecutionOrderOverlayContent(this);
+        }
+    }
+
+    internal sealed class RenderGraphExecutionOrderOverlayContent : VisualElement
+    {
+        private readonly RenderGraphExecutionOrderOverlay m_Overlay;
+        private readonly Label m_TitleLabel;
+        private readonly Label m_StatusLabel;
+        private readonly ScrollView m_ScrollView;
+        private string m_Signature;
+
+        internal RenderGraphExecutionOrderOverlayContent(RenderGraphExecutionOrderOverlay overlay)
+        {
+            m_Overlay = overlay;
+            style.flexGrow = 1f;
+            style.paddingLeft = 8f;
+            style.paddingRight = 8f;
+            style.paddingTop = 6f;
+            style.paddingBottom = 6f;
+
+            m_TitleLabel = CreateTitleLabel();
+            m_StatusLabel = CreateStatusLabel();
+            m_ScrollView = CreateScrollView();
+
+            Add(m_TitleLabel);
+            Add(m_StatusLabel);
+            Add(m_ScrollView);
+
+            schedule.Execute(Refresh).Every(250);
+        }
+
+        private void Refresh()
+        {
+            if (!RenderGraphEditorWindowReflectionUtility.TryGetCurrentGraph(m_Overlay.containerWindow, out var graph))
+            {
+                ApplyUnavailableState();
+                return;
+            }
+
+            try
+            {
+                ApplyCompilation(graph, RenderGraphCompiler.Compile(graph));
+            }
+            catch (Exception ex)
+            {
+                ApplyError(graph.Name, ex);
             }
         }
 
-        private sealed class SidebarState
+        private void ApplyUnavailableState()
         {
-            private readonly EditorWindow m_Window;
-            private readonly VisualElement m_Root;
-            private readonly Label m_TitleLabel;
-            private readonly Label m_StatusLabel;
-            private readonly ScrollView m_ScrollView;
-            private string m_Signature;
-            private double m_NextRefreshTime;
+            const string signature = "unavailable";
+            if (string.Equals(signature, m_Signature, StringComparison.Ordinal))
+                return;
 
-            internal SidebarState(EditorWindow window)
+            m_Signature = signature;
+            m_TitleLabel.text = "Current Graph";
+            m_StatusLabel.text = "Open a VividRP RenderGraph to inspect its compiled order.";
+            m_ScrollView.Clear();
+        }
+
+        private void ApplyCompilation(RenderGraphEditorGraph graph, RenderGraphCompilationResult compilation)
+        {
+            var signature = BuildSignature(graph.Name, compilation.ExecutionOrder);
+            if (string.Equals(signature, m_Signature, StringComparison.Ordinal))
+                return;
+
+            m_Signature = signature;
+            m_TitleLabel.text = string.IsNullOrWhiteSpace(graph.Name) ? "Current Graph" : graph.Name;
+            m_StatusLabel.text = compilation.ExecutionOrder.Count == 0
+                ? "No compiled render passes."
+                : $"{compilation.ExecutionOrder.Count} compiled pass{(compilation.ExecutionOrder.Count == 1 ? string.Empty : "es")}.";
+
+            m_ScrollView.Clear();
+            if (compilation.ExecutionOrder.Count == 0)
             {
-                m_Window = window;
-                m_Root = CreateRoot();
-                m_TitleLabel = CreateTitleLabel();
-                m_StatusLabel = CreateStatusLabel();
-                m_ScrollView = CreateScrollView();
-
-                m_Root.Add(m_TitleLabel);
-                m_Root.Add(m_StatusLabel);
-                m_Root.Add(m_ScrollView);
+                m_ScrollView.Add(CreateInfoLabel("Add valid RenderPass nodes to see the compiled execution order."));
+                return;
             }
 
-            internal bool Refresh(double currentTime)
+            foreach (var passInfo in compilation.ExecutionOrder)
+                m_ScrollView.Add(CreatePassRow(passInfo));
+        }
+
+        private void ApplyError(string graphName, Exception exception)
+        {
+            var errorMessage = exception?.Message ?? "Unknown compilation error.";
+            var signature = $"error:{graphName}:{errorMessage}";
+            if (string.Equals(signature, m_Signature, StringComparison.Ordinal))
+                return;
+
+            m_Signature = signature;
+            m_TitleLabel.text = string.IsNullOrWhiteSpace(graphName) ? "Current Graph" : graphName;
+            m_StatusLabel.text = "Failed to compile the current graph.";
+            m_ScrollView.Clear();
+            m_ScrollView.Add(CreateInfoLabel(errorMessage));
+        }
+
+        private static string BuildSignature(string graphName, IReadOnlyList<RenderGraphCompiledPassInfo> executionOrder)
+        {
+            if (executionOrder == null || executionOrder.Count == 0)
+                return $"{graphName}:empty";
+
+            return string.Join("|", executionOrder.Select(passInfo =>
+                $"{graphName}:{passInfo.ExecutionIndex}:{passInfo.DisplayName}:{passInfo.PassTypeName}:{passInfo.EnableAsyncCompute}"));
+        }
+
+        private static Label CreateTitleLabel()
+        {
+            var label = new Label("Current Graph");
+            label.style.unityFontStyleAndWeight = FontStyle.Bold;
+            label.style.fontSize = 13f;
+            label.style.marginBottom = 4f;
+            label.style.whiteSpace = WhiteSpace.Normal;
+            return label;
+        }
+
+        private static Label CreateStatusLabel()
+        {
+            var label = new Label();
+            label.style.fontSize = 11f;
+            label.style.color = new Color(0.75f, 0.75f, 0.78f, 1f);
+            label.style.marginBottom = 8f;
+            label.style.whiteSpace = WhiteSpace.Normal;
+            return label;
+        }
+
+        private static ScrollView CreateScrollView()
+        {
+            var scrollView = new ScrollView(ScrollViewMode.Vertical);
+            scrollView.style.flexGrow = 1f;
+            scrollView.style.marginTop = 2f;
+            return scrollView;
+        }
+
+        private static VisualElement CreatePassRow(RenderGraphCompiledPassInfo passInfo)
+        {
+            var row = new VisualElement();
+            row.style.flexDirection = FlexDirection.Column;
+            row.style.paddingTop = 8f;
+            row.style.paddingBottom = 8f;
+            row.style.borderBottomWidth = 1f;
+            row.style.borderBottomColor = new Color(0.2f, 0.2f, 0.22f, 1f);
+
+            var titleText = $"{passInfo.ExecutionIndex + 1}. {passInfo.DisplayName}";
+            if (passInfo.EnableAsyncCompute)
+                titleText += " [Async]";
+
+            var titleLabel = new Label(titleText);
+            titleLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+            titleLabel.style.whiteSpace = WhiteSpace.Normal;
+            row.Add(titleLabel);
+
+            if (!string.Equals(passInfo.DisplayName, passInfo.PassTypeName, StringComparison.Ordinal))
             {
-                if (m_Window == null)
-                    return false;
-
-                var container = RenderGraphEditorWindowReflectionUtility.GetGraphContainer(m_Window);
-                if (container == null)
-                    return true;
-
-                EnsureAttached(container);
-
-                if (!RenderGraphEditorWindowReflectionUtility.TryGetCurrentGraph(m_Window, out var graph))
-                {
-                    m_Root.style.display = DisplayStyle.None;
-                    m_Signature = null;
-                    return true;
-                }
-
-                m_Root.style.display = DisplayStyle.Flex;
-
-                if (currentTime < m_NextRefreshTime)
-                    return true;
-
-                m_NextRefreshTime = currentTime + 0.25d;
-
-                try
-                {
-                    var compilation = RenderGraphCompiler.Compile(graph);
-                    ApplyCompilation(graph, compilation);
-                }
-                catch (Exception ex)
-                {
-                    ApplyError(graph.Name, ex);
-                }
-
-                return true;
+                var subtitleLabel = new Label(passInfo.PassTypeName);
+                subtitleLabel.style.fontSize = 11f;
+                subtitleLabel.style.color = new Color(0.72f, 0.72f, 0.75f, 1f);
+                subtitleLabel.style.marginTop = 2f;
+                subtitleLabel.style.whiteSpace = WhiteSpace.Normal;
+                row.Add(subtitleLabel);
             }
 
-            internal void Dispose()
-            {
-                m_Root.RemoveFromHierarchy();
-            }
+            return row;
+        }
 
-            private void EnsureAttached(VisualElement container)
-            {
-                if (m_Root.parent == container)
-                    return;
-
-                m_Root.RemoveFromHierarchy();
-                container.Add(m_Root);
-            }
-
-            private void ApplyCompilation(RenderGraphEditorGraph graph, RenderGraphCompilationResult compilation)
-            {
-                var signature = BuildSignature(graph.Name, compilation.ExecutionOrder);
-                if (string.Equals(signature, m_Signature, StringComparison.Ordinal))
-                    return;
-
-                m_Signature = signature;
-                m_TitleLabel.text = string.IsNullOrWhiteSpace(graph.Name)
-                    ? "Execution Order"
-                    : $"Execution Order - {graph.Name}";
-                m_StatusLabel.text = compilation.ExecutionOrder.Count == 0
-                    ? "No compiled render passes."
-                    : $"{compilation.ExecutionOrder.Count} compiled pass{(compilation.ExecutionOrder.Count == 1 ? string.Empty : "es")}.";
-
-                m_ScrollView.Clear();
-                if (compilation.ExecutionOrder.Count == 0)
-                {
-                    m_ScrollView.Add(CreateInfoLabel("Add valid RenderPass nodes to see the compiled execution order."));
-                    return;
-                }
-
-                foreach (var passInfo in compilation.ExecutionOrder)
-                    m_ScrollView.Add(CreatePassRow(passInfo));
-            }
-
-            private void ApplyError(string graphName, Exception exception)
-            {
-                var errorMessage = exception?.Message ?? "Unknown compilation error.";
-                var signature = $"error:{graphName}:{errorMessage}";
-                if (string.Equals(signature, m_Signature, StringComparison.Ordinal))
-                    return;
-
-                m_Signature = signature;
-                m_TitleLabel.text = string.IsNullOrWhiteSpace(graphName)
-                    ? "Execution Order"
-                    : $"Execution Order - {graphName}";
-                m_StatusLabel.text = "Failed to compile the current graph.";
-                m_ScrollView.Clear();
-                m_ScrollView.Add(CreateInfoLabel(errorMessage));
-            }
-
-            private static string BuildSignature(string graphName, IReadOnlyList<RenderGraphCompiledPassInfo> executionOrder)
-            {
-                if (executionOrder == null || executionOrder.Count == 0)
-                    return $"{graphName}:empty";
-
-                return string.Join("|", executionOrder.Select(passInfo =>
-                    $"{graphName}:{passInfo.ExecutionIndex}:{passInfo.DisplayName}:{passInfo.PassTypeName}:{passInfo.EnableAsyncCompute}"));
-            }
-
-            private static VisualElement CreateRoot()
-            {
-                var root = new VisualElement
-                {
-                    name = "vivid-rendergraph-execution-order-sidebar",
-                    pickingMode = PickingMode.Position,
-                };
-
-                root.style.position = Position.Absolute;
-                root.style.top = 8f;
-                root.style.right = 8f;
-                root.style.bottom = 8f;
-                root.style.width = 300f;
-                root.style.paddingLeft = 12f;
-                root.style.paddingRight = 12f;
-                root.style.paddingTop = 12f;
-                root.style.paddingBottom = 12f;
-                root.style.backgroundColor = new Color(0.11f, 0.11f, 0.12f, 0.94f);
-                root.style.borderLeftWidth = 1f;
-                root.style.borderRightWidth = 1f;
-                root.style.borderTopWidth = 1f;
-                root.style.borderBottomWidth = 1f;
-                root.style.borderLeftColor = new Color(0.23f, 0.23f, 0.25f, 1f);
-                root.style.borderRightColor = new Color(0.23f, 0.23f, 0.25f, 1f);
-                root.style.borderTopColor = new Color(0.23f, 0.23f, 0.25f, 1f);
-                root.style.borderBottomColor = new Color(0.23f, 0.23f, 0.25f, 1f);
-                root.style.borderTopLeftRadius = 6f;
-                root.style.borderTopRightRadius = 6f;
-                root.style.borderBottomLeftRadius = 6f;
-                root.style.borderBottomRightRadius = 6f;
-                root.style.display = DisplayStyle.None;
-                root.style.flexDirection = FlexDirection.Column;
-                return root;
-            }
-
-            private static Label CreateTitleLabel()
-            {
-                var label = new Label("Execution Order");
-                label.style.unityFontStyleAndWeight = FontStyle.Bold;
-                label.style.fontSize = 13f;
-                label.style.marginBottom = 4f;
-                return label;
-            }
-
-            private static Label CreateStatusLabel()
-            {
-                var label = new Label();
-                label.style.fontSize = 11f;
-                label.style.color = new Color(0.75f, 0.75f, 0.78f, 1f);
-                label.style.marginBottom = 8f;
-                return label;
-            }
-
-            private static ScrollView CreateScrollView()
-            {
-                var scrollView = new ScrollView(ScrollViewMode.Vertical);
-                scrollView.style.flexGrow = 1f;
-                scrollView.style.marginTop = 2f;
-                return scrollView;
-            }
-
-            private static VisualElement CreatePassRow(RenderGraphCompiledPassInfo passInfo)
-            {
-                var row = new VisualElement();
-                row.style.flexDirection = FlexDirection.Column;
-                row.style.paddingTop = 8f;
-                row.style.paddingBottom = 8f;
-                row.style.borderBottomWidth = 1f;
-                row.style.borderBottomColor = new Color(0.2f, 0.2f, 0.22f, 1f);
-
-                var titleText = $"{passInfo.ExecutionIndex + 1}. {passInfo.DisplayName}";
-                if (passInfo.EnableAsyncCompute)
-                    titleText += " [Async]";
-
-                var titleLabel = new Label(titleText);
-                titleLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
-                titleLabel.style.whiteSpace = WhiteSpace.Normal;
-                row.Add(titleLabel);
-
-                if (!string.Equals(passInfo.DisplayName, passInfo.PassTypeName, StringComparison.Ordinal))
-                {
-                    var subtitleLabel = new Label(passInfo.PassTypeName);
-                    subtitleLabel.style.fontSize = 11f;
-                    subtitleLabel.style.color = new Color(0.72f, 0.72f, 0.75f, 1f);
-                    subtitleLabel.style.marginTop = 2f;
-                    subtitleLabel.style.whiteSpace = WhiteSpace.Normal;
-                    row.Add(subtitleLabel);
-                }
-
-                return row;
-            }
-
-            private static Label CreateInfoLabel(string text)
-            {
-                var label = new Label(text);
-                label.style.whiteSpace = WhiteSpace.Normal;
-                label.style.color = new Color(0.78f, 0.78f, 0.8f, 1f);
-                label.style.paddingTop = 4f;
-                return label;
-            }
+        private static Label CreateInfoLabel(string text)
+        {
+            var label = new Label(text);
+            label.style.whiteSpace = WhiteSpace.Normal;
+            label.style.color = new Color(0.78f, 0.78f, 0.8f, 1f);
+            label.style.paddingTop = 4f;
+            return label;
         }
     }
 }

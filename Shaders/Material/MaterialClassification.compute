@@ -3,11 +3,15 @@
 #pragma kernel BuildIndirectArgs
 #pragma kernel ClearClusterLightCounter
 #pragma kernel BuildClusteredLightList
+
+#define CLASSIFY_TILE_SIZE 8
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/TileClassification.hlsl"
 
 #define VIVID_GBUFFER_MATERIAL_STANDARD  0u
 #define VIVID_GBUFFER_MATERIAL_FABRIC    1u
 #define VIVID_GBUFFER_MATERIAL_CLEARCOAT 2u
+#define VIVID_GBUFFER_MATERIAL_CLASS_COUNT 3
 #define VIVID_CLUSTER_MAX_LIGHTS_PER_CLUSTER 64u
 #define VIVID_PUNCTUAL_LIGHT_TYPE_POINT 0u
 #define VIVID_PUNCTUAL_LIGHT_TYPE_SPOT  1u
@@ -65,9 +69,40 @@ float _ClusterOrthoHalfWidth;
 float _ClusterOrthoHalfHeight;
 int _ClusterIsOrthographic;
 
+groupshared uint gs_LocalMaterialCounts[VIVID_GBUFFER_MATERIAL_CLASS_COUNT];
+groupshared uint gs_GlobalMaterialOffsets[VIVID_GBUFFER_MATERIAL_CLASS_COUNT];
+
 uint DecodeVividMaterialId(float encodedMaterialId)
 {
     return (uint)min(round(saturate(encodedMaterialId) * 255.0), 255.0);
+}
+
+bool IsSupportedVividMaterialId(uint materialId)
+{
+    return materialId <= VIVID_GBUFFER_MATERIAL_CLEARCOAT;
+}
+
+uint GetMaterialClassificationMask(uint materialId)
+{
+    return IsSupportedVividMaterialId(materialId)
+        ? (1u << materialId)
+        : 0u;
+}
+
+void WriteMaterialPixelIndex(uint materialId, uint writeIndex, uint pixelIndex)
+{
+    if (materialId == VIVID_GBUFFER_MATERIAL_STANDARD)
+    {
+        _StandardMaterialIndices[writeIndex] = pixelIndex;
+    }
+    else if (materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+    {
+        _FabricMaterialIndices[writeIndex] = pixelIndex;
+    }
+    else if (materialId == VIVID_GBUFFER_MATERIAL_CLEARCOAT)
+    {
+        _ClearCoatMaterialIndices[writeIndex] = pixelIndex;
+    }
 }
 
 [numthreads(1, 1, 1)]
@@ -78,37 +113,62 @@ void ClearMaterialCounts(uint3 dispatchThreadId : SV_DispatchThreadID)
     _MaterialClassCounts[2] = 0;
 }
 
-[numthreads(8, 8, 1)]
-void ClassifyMaterialIds(uint3 dispatchThreadId : SV_DispatchThreadID)
+[numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
+void ClassifyMaterialIds(
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint groupIndex : SV_GroupIndex)
 {
-    if (dispatchThreadId.x >= _ClassificationWidth || dispatchThreadId.y >= _ClassificationHeight)
+    InitializeTileClassification(groupIndex);
+
+    if (groupIndex < VIVID_GBUFFER_MATERIAL_CLASS_COUNT)
+    {
+        gs_LocalMaterialCounts[groupIndex] = 0u;
+        gs_GlobalMaterialOffsets[groupIndex] = 0u;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    uint materialId = 0u;
+    uint classificationMask = 0u;
+    uint pixelIndex = 0u;
+    uint localWriteIndex = 0u;
+    bool hasClassifiedPixel = false;
+
+    if (dispatchThreadId.x < _ClassificationWidth && dispatchThreadId.y < _ClassificationHeight)
+    {
+        uint2 pixelCoord = dispatchThreadId.xy;
+        float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
+
+        if (deviceDepth != UNITY_RAW_FAR_CLIP_VALUE)
+        {
+            float4 gbuffer0 = _GBuffer0.Load(int3(pixelCoord, 0));
+            materialId = DecodeVividMaterialId(gbuffer0.a);
+            classificationMask = GetMaterialClassificationMask(materialId);
+
+            if (classificationMask != 0u)
+            {
+                pixelIndex = pixelCoord.y * _ClassificationWidth + pixelCoord.x;
+                InterlockedAdd(gs_LocalMaterialCounts[materialId], 1u, localWriteIndex);
+                hasClassifiedPixel = true;
+            }
+        }
+    }
+
+    SubmitPixelClassification(classificationMask);
+
+    if (groupIndex < VIVID_GBUFFER_MATERIAL_CLASS_COUNT)
+    {
+        uint localMaterialCount = gs_LocalMaterialCounts[groupIndex];
+        if ((gs_TileMask & (1u << groupIndex)) != 0u && localMaterialCount > 0u)
+        {
+            InterlockedAdd(_MaterialClassCounts[groupIndex], localMaterialCount, gs_GlobalMaterialOffsets[groupIndex]);
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    if (!hasClassifiedPixel)
         return;
 
-    uint2 pixelCoord = dispatchThreadId.xy;
-    float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
-    if (deviceDepth==UNITY_RAW_FAR_CLIP_VALUE)
-        return;
-
-    float4 gbuffer0 = _GBuffer0.Load(int3(pixelCoord, 0));
-    uint materialId = DecodeVividMaterialId(gbuffer0.a);
-    uint pixelIndex = pixelCoord.y * _ClassificationWidth + pixelCoord.x;
-    uint writeIndex = 0;
-
-    if (materialId == VIVID_GBUFFER_MATERIAL_STANDARD)
-    {
-        InterlockedAdd(_MaterialClassCounts[0], 1, writeIndex);
-        _StandardMaterialIndices[writeIndex] = pixelIndex;
-    }
-    else if (materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
-    {
-        InterlockedAdd(_MaterialClassCounts[1], 1, writeIndex);
-        _FabricMaterialIndices[writeIndex] = pixelIndex;
-    }
-    else if (materialId == VIVID_GBUFFER_MATERIAL_CLEARCOAT)
-    {
-        InterlockedAdd(_MaterialClassCounts[2], 1, writeIndex);
-        _ClearCoatMaterialIndices[writeIndex] = pixelIndex;
-    }
+    WriteMaterialPixelIndex(materialId, gs_GlobalMaterialOffsets[materialId] + localWriteIndex, pixelIndex);
 }
 
 [numthreads(1, 1, 1)]

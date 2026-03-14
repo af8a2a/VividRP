@@ -194,7 +194,7 @@ namespace VividRP.Runtime
 
         private static string BuildKey(Camera camera, RenderGraphData graphAsset, int historyIndex)
         {
-            return $"{camera.GetInstanceID()}|{graphAsset.GetInstanceID()}|{historyIndex}";
+            return $"{camera.GetEntityId()}|{graphAsset.GetEntityId()}|{historyIndex}";
         }
     }
 }

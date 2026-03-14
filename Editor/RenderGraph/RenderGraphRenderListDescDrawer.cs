@@ -161,7 +161,7 @@ namespace VividRP.Editor.RenderGraph
         private static string BuildSectionStateKey(SerializedProperty property, SectionDefinition section)
         {
             var targetObject = property.serializedObject?.targetObject;
-            var targetId = targetObject != null ? targetObject.GetInstanceID().ToString() : "null";
+            var targetId = targetObject != null ? targetObject.GetEntityId().ToString() : "null";
             return $"{targetId}:{property.propertyPath}:{section.Title}";
         }
 

@@ -1,3 +1,4 @@
+using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -116,6 +117,28 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(found, Is.True);
                 Assert.That(hasValidData, Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(graphAsset);
+            }
+        }
+
+        [Test]
+        public void BuildKey_UsesCameraAndGraphAssetEntityIds()
+        {
+            using var cameraScope = new CameraScope();
+            var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
+
+            try
+            {
+                var buildKeyMethod = typeof(RenderGraphHistoryRegistry).GetMethod("BuildKey", BindingFlags.Static | BindingFlags.NonPublic);
+
+                Assert.That(buildKeyMethod, Is.Not.Null);
+
+                var key = (string)buildKeyMethod.Invoke(null, new object[] { cameraScope.Camera, graphAsset, 3 });
+
+                Assert.That(key, Is.EqualTo($"{cameraScope.Camera.GetEntityId()}|{graphAsset.GetEntityId()}|3"));
             }
             finally
             {

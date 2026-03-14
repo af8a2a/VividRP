@@ -20,6 +20,23 @@ namespace VividRP.Runtime
             internal static int Stride => Marshal.SizeOf<DirectionalLightData>();
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        public struct PunctualLightData
+        {
+            public Vector3 positionWS;
+            public float range;
+            public Vector3 color;
+            public uint lightType;
+            public Vector3 directionWS;
+            public float angleScale;
+            public float angleOffset;
+            public float inverseRangeSquared;
+            public float shadowStrength;
+            public uint renderingLayerMask;
+
+            internal static int Stride => Marshal.SizeOf<PunctualLightData>();
+        }
+
         internal readonly struct VisibleLightDescriptor
         {
             public VisibleLightDescriptor(EntityId lightEntityId, LightType lightType, Color finalColor)
@@ -39,9 +56,11 @@ namespace VividRP.Runtime
         public NativeArray<VisibleLight> visibleLights;
         public NativeArray<VisibleReflectionProbe> visibleReflectionProbes;
         public DirectionalLightData[] directionalLights = Array.Empty<DirectionalLightData>();
+        public PunctualLightData[] punctualLights = Array.Empty<PunctualLightData>();
         public int mainLightIndex;
         public EntityId mainLightEntityId;
         public int directionalLightCount;
+        public int punctualLightCount;
         public int mainDirectionalLightIndex;
         public EntityId mainDirectionalLightEntityId;
 
@@ -52,6 +71,8 @@ namespace VividRP.Runtime
         public bool hasMainLight => IsValidLightIndex(mainLightIndex);
 
         public bool hasDirectionalLights => directionalLightCount > 0;
+
+        public bool hasPunctualLights => punctualLightCount > 0;
 
         public bool hasMainDirectionalLight => IsValidDirectionalLightIndex(mainDirectionalLightIndex);
 
@@ -78,6 +99,7 @@ namespace VividRP.Runtime
                 ? visibleLights[mainLightIndex].light.GetEntityId()
                 : EntityId.None;
             UpdateDirectionalLights(visibleLights, RenderSettings.sun);
+            UpdatePunctualLights(visibleLights);
         }
 
         internal void UpdateDirectionalLights(NativeArray<VisibleLight> visibleLights, Light sunLight)
@@ -178,6 +200,46 @@ namespace VividRP.Runtime
             mainDirectionalLightEntityId = brightestDirectionalEntityId;
         }
 
+        internal void UpdatePunctualLights(NativeArray<VisibleLight> visibleLights)
+        {
+            EnsurePunctualLightCapacity(CountPunctualLights(visibleLights));
+
+            punctualLightCount = 0;
+
+            if (!visibleLights.IsCreated || visibleLights.Length == 0)
+                return;
+
+            for (var lightIndex = 0; lightIndex < visibleLights.Length; lightIndex++)
+            {
+                var visibleLight = visibleLights[lightIndex];
+                if (!IsPunctualLightSupported(visibleLight))
+                    continue;
+
+                punctualLights[punctualLightCount] = CreatePunctualLightData(visibleLight);
+                punctualLightCount++;
+            }
+        }
+
+        internal void UpdatePunctualLights(IReadOnlyList<Light> lights)
+        {
+            EnsurePunctualLightCapacity(CountPunctualLights(lights));
+
+            punctualLightCount = 0;
+
+            if (lights == null || lights.Count == 0)
+                return;
+
+            for (var lightIndex = 0; lightIndex < lights.Count; lightIndex++)
+            {
+                var light = lights[lightIndex];
+                if (!IsPunctualLightSupported(light))
+                    continue;
+
+                punctualLights[punctualLightCount] = CreatePunctualLightData(light);
+                punctualLightCount++;
+            }
+        }
+
         public override void Reset()
         {
             visibleLights = default;
@@ -185,6 +247,7 @@ namespace VividRP.Runtime
             mainLightIndex = -1;
             mainLightEntityId = EntityId.None;
             directionalLightCount = 0;
+            punctualLightCount = 0;
             mainDirectionalLightIndex = -1;
             mainDirectionalLightEntityId = EntityId.None;
         }
@@ -266,6 +329,14 @@ namespace VividRP.Runtime
             directionalLights = new DirectionalLightData[requiredCapacity];
         }
 
+        private void EnsurePunctualLightCapacity(int requiredCapacity)
+        {
+            if (requiredCapacity <= punctualLights.Length)
+                return;
+
+            punctualLights = new PunctualLightData[requiredCapacity];
+        }
+
         private static int CountDirectionalLights(IReadOnlyList<Light> lights)
         {
             if (lights == null || lights.Count == 0)
@@ -281,6 +352,21 @@ namespace VividRP.Runtime
             return directionalLightCount;
         }
 
+        private static int CountPunctualLights(IReadOnlyList<Light> lights)
+        {
+            if (lights == null || lights.Count == 0)
+                return 0;
+
+            var count = 0;
+            for (var lightIndex = 0; lightIndex < lights.Count; lightIndex++)
+            {
+                if (IsPunctualLightSupported(lights[lightIndex]))
+                    count++;
+            }
+
+            return count;
+        }
+
         private static int CountDirectionalLights(NativeArray<VisibleLight> visibleLights)
         {
             if (!visibleLights.IsCreated || visibleLights.Length == 0)
@@ -294,6 +380,21 @@ namespace VividRP.Runtime
             }
 
             return directionalLightCount;
+        }
+
+        private static int CountPunctualLights(NativeArray<VisibleLight> visibleLights)
+        {
+            if (!visibleLights.IsCreated || visibleLights.Length == 0)
+                return 0;
+
+            var count = 0;
+            for (var lightIndex = 0; lightIndex < visibleLights.Length; lightIndex++)
+            {
+                if (IsPunctualLightSupported(visibleLights[lightIndex]))
+                    count++;
+            }
+
+            return count;
         }
 
         private static DirectionalLightData CreateDirectionalLightData(Light light)
@@ -326,12 +427,99 @@ namespace VividRP.Runtime
             };
         }
 
+        private static PunctualLightData CreatePunctualLightData(Light light)
+        {
+            var finalColor = light.color.linear * light.intensity;
+            var lightType = GetPunctualLightType(light.type);
+            var directionWS = light.transform.forward;
+            var range = Mathf.Max(light.range, 0.001f);
+            var inverseRangeSquared = 1.0f / Mathf.Max(range * range, 1e-6f);
+            GetSpotAngleParameters(light.type, light.innerSpotAngle, light.spotAngle, out var angleScale, out var angleOffset);
+
+            return new PunctualLightData
+            {
+                positionWS = light.transform.position,
+                range = range,
+                color = new Vector3(finalColor.r, finalColor.g, finalColor.b),
+                lightType = lightType,
+                directionWS = directionWS,
+                angleScale = angleScale,
+                angleOffset = angleOffset,
+                inverseRangeSquared = inverseRangeSquared,
+                shadowStrength = light.shadows != LightShadows.None ? light.shadowStrength : 0f,
+                renderingLayerMask = (uint)light.renderingLayerMask,
+            };
+        }
+
+        private static PunctualLightData CreatePunctualLightData(VisibleLight visibleLight)
+        {
+            var light = visibleLight.light;
+            var forward = visibleLight.localToWorldMatrix.GetColumn(2);
+            var range = Mathf.Max(visibleLight.range, 0.001f);
+            var inverseRangeSquared = 1.0f / Mathf.Max(range * range, 1e-6f);
+            var innerSpotAngle = light != null ? light.innerSpotAngle : visibleLight.spotAngle;
+            GetSpotAngleParameters(visibleLight.lightType, innerSpotAngle, visibleLight.spotAngle, out var angleScale, out var angleOffset);
+
+            return new PunctualLightData
+            {
+                positionWS = visibleLight.localToWorldMatrix.GetColumn(3),
+                range = range,
+                color = new Vector3(visibleLight.finalColor.r, visibleLight.finalColor.g, visibleLight.finalColor.b),
+                lightType = GetPunctualLightType(visibleLight.lightType),
+                directionWS = new Vector3(forward.x, forward.y, forward.z),
+                angleScale = angleScale,
+                angleOffset = angleOffset,
+                inverseRangeSquared = inverseRangeSquared,
+                shadowStrength = light != null && light.shadows != LightShadows.None ? light.shadowStrength : 0f,
+                renderingLayerMask = light != null ? (uint)light.renderingLayerMask : 0u,
+            };
+        }
+
         private static bool IsDirectionalLightSupported(Light light)
         {
             return light != null
                    && light.type == LightType.Directional
                    && light.enabled
                    && light.gameObject.activeInHierarchy;
+        }
+
+        private static bool IsPunctualLightSupported(Light light)
+        {
+            return light != null
+                   && (light.type == LightType.Point || light.type == LightType.Spot)
+                   && light.enabled
+                   && light.gameObject.activeInHierarchy
+                   && light.range > 0.0f;
+        }
+
+        private static bool IsPunctualLightSupported(VisibleLight visibleLight)
+        {
+            return (visibleLight.lightType == LightType.Point || visibleLight.lightType == LightType.Spot)
+                   && visibleLight.range > 0.0f;
+        }
+
+        private static uint GetPunctualLightType(LightType lightType)
+        {
+            return lightType == LightType.Spot ? 1u : 0u;
+        }
+
+        private static void GetSpotAngleParameters(LightType lightType, float innerSpotAngle, float outerSpotAngle, out float angleScale, out float angleOffset)
+        {
+            if (lightType != LightType.Spot)
+            {
+                angleScale = 0.0f;
+                angleOffset = 1.0f;
+                return;
+            }
+
+            var innerHalfAngle = Mathf.Clamp(innerSpotAngle * 0.5f, 0.0f, 89.0f) * Mathf.Deg2Rad;
+            var outerHalfAngle = Mathf.Clamp(outerSpotAngle * 0.5f, innerSpotAngle * 0.5f + 0.001f, 89.0f) * Mathf.Deg2Rad;
+            var cosInner = Mathf.Cos(innerHalfAngle);
+            var cosOuter = Mathf.Cos(outerHalfAngle);
+            var angleRange = Mathf.Max(cosInner - cosOuter, 0.001f);
+
+            angleScale = 1.0f / angleRange;
+            angleOffset = -cosOuter * angleScale;
         }
 
         private static float GetLightIntensity(Color finalColor)

@@ -22,7 +22,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("_LightingTexture"));
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl\""));
             Assert.That(source, Does.Contain("_DirectionalLightCount"));
+            Assert.That(source, Does.Contain("_PunctualLightCount"));
+            Assert.That(source, Does.Contain("_ClusterLightIndices"));
             Assert.That(source, Does.Contain("EvaluateDeferredDirectionalLighting"));
+            Assert.That(source, Does.Contain("EvaluatePunctualLight"));
             Assert.That(source, Does.Contain("ComputeWorldSpacePosition"));
         }
 

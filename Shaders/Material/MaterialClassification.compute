@@ -1,11 +1,32 @@
 #pragma kernel ClearMaterialCounts
 #pragma kernel ClassifyMaterialIds
 #pragma kernel BuildIndirectArgs
+#pragma kernel ClearClusterLightCounter
+#pragma kernel BuildClusteredLightList
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 
 #define VIVID_GBUFFER_MATERIAL_STANDARD  0u
 #define VIVID_GBUFFER_MATERIAL_FABRIC    1u
 #define VIVID_GBUFFER_MATERIAL_CLEARCOAT 2u
+#define VIVID_CLUSTER_MAX_LIGHTS_PER_CLUSTER 64u
+#define VIVID_PUNCTUAL_LIGHT_TYPE_POINT 0u
+#define VIVID_PUNCTUAL_LIGHT_TYPE_SPOT  1u
+
+struct PunctualLightData
+{
+    float3 positionWS;
+    float range;
+    float3 color;
+    uint lightType;
+    float3 directionWS;
+    float angleScale;
+    float angleOffset;
+    float inverseRangeSquared;
+    float shadowStrength;
+    uint renderingLayerMask;
+    float3 cullingCenterVS;
+    float cullingRadius;
+};
 
 Texture2D<float4> _GBuffer0;
 Texture2D<float> _DepthTexture;
@@ -17,12 +38,32 @@ RWStructuredBuffer<uint> _MaterialClassCounts;
 RWStructuredBuffer<uint> _StandardIndirectArgs;
 RWStructuredBuffer<uint> _FabricIndirectArgs;
 RWStructuredBuffer<uint> _ClearCoatIndirectArgs;
+StructuredBuffer<PunctualLightData> _PunctualLights;
+RWStructuredBuffer<uint2> _ClusterLightGrid;
+RWStructuredBuffer<uint> _ClusterLightIndices;
+RWStructuredBuffer<uint> _ClusterAllocationCounter;
 
 uint _ClassificationWidth;
 uint _ClassificationHeight;
 uint _StandardVertexCountPerInstance;
 uint _FabricVertexCountPerInstance;
 uint _ClearCoatVertexCountPerInstance;
+uint _PunctualLightCount;
+uint _ClusterScreenWidth;
+uint _ClusterScreenHeight;
+uint _ClusterTileSize;
+uint _ClusterSliceCount;
+uint _ClusterTileCountX;
+uint _ClusterTileCountY;
+float _ClusterNearClip;
+float _ClusterFarClip;
+float _ClusterLogDepthScale;
+float _ClusterLinearDepthScale;
+float _ClusterTanHalfFovX;
+float _ClusterTanHalfFovY;
+float _ClusterOrthoHalfWidth;
+float _ClusterOrthoHalfHeight;
+int _ClusterIsOrthographic;
 
 uint DecodeVividMaterialId(float encodedMaterialId)
 {
@@ -87,4 +128,132 @@ void BuildIndirectArgs(uint3 dispatchThreadId : SV_DispatchThreadID)
     _ClearCoatIndirectArgs[1] = _MaterialClassCounts[2];
     _ClearCoatIndirectArgs[2] = 0;
     _ClearCoatIndirectArgs[3] = 0;
+}
+
+float GetClusterSliceNear(uint sliceIndex)
+{
+    if (_ClusterIsOrthographic != 0)
+    {
+        float sliceCount = max((float)_ClusterSliceCount, 1.0);
+        return lerp(_ClusterNearClip, _ClusterFarClip, sliceIndex / sliceCount);
+    }
+
+    return _ClusterNearClip * exp2(sliceIndex / max(_ClusterLogDepthScale, 0.0001));
+}
+
+float GetClusterSliceFar(uint sliceIndex)
+{
+    if (_ClusterIsOrthographic != 0)
+    {
+        float sliceCount = max((float)_ClusterSliceCount, 1.0);
+        return lerp(_ClusterNearClip, _ClusterFarClip, (sliceIndex + 1u) / sliceCount);
+    }
+
+    return min(_ClusterNearClip * exp2((sliceIndex + 1u) / max(_ClusterLogDepthScale, 0.0001)), _ClusterFarClip);
+}
+
+void GetClusterBounds(uint2 tileCoord, uint sliceIndex, out float3 boundsMin, out float3 boundsMax)
+{
+    float x0 = tileCoord.x * _ClusterTileSize;
+    float x1 = min(x0 + _ClusterTileSize, (float)_ClusterScreenWidth);
+    float y0 = tileCoord.y * _ClusterTileSize;
+    float y1 = min(y0 + _ClusterTileSize, (float)_ClusterScreenHeight);
+
+    float ndcX0 = x0 / max((float)_ClusterScreenWidth, 1.0) * 2.0 - 1.0;
+    float ndcX1 = x1 / max((float)_ClusterScreenWidth, 1.0) * 2.0 - 1.0;
+    float ndcY0 = 1.0 - y0 / max((float)_ClusterScreenHeight, 1.0) * 2.0;
+    float ndcY1 = 1.0 - y1 / max((float)_ClusterScreenHeight, 1.0) * 2.0;
+    float zNear = GetClusterSliceNear(sliceIndex);
+    float zFar = GetClusterSliceFar(sliceIndex);
+
+    float3 corners[8];
+
+    if (_ClusterIsOrthographic != 0)
+    {
+        corners[0] = float3(ndcX0 * _ClusterOrthoHalfWidth, ndcY0 * _ClusterOrthoHalfHeight, zNear);
+        corners[1] = float3(ndcX1 * _ClusterOrthoHalfWidth, ndcY0 * _ClusterOrthoHalfHeight, zNear);
+        corners[2] = float3(ndcX0 * _ClusterOrthoHalfWidth, ndcY1 * _ClusterOrthoHalfHeight, zNear);
+        corners[3] = float3(ndcX1 * _ClusterOrthoHalfWidth, ndcY1 * _ClusterOrthoHalfHeight, zNear);
+        corners[4] = float3(ndcX0 * _ClusterOrthoHalfWidth, ndcY0 * _ClusterOrthoHalfHeight, zFar);
+        corners[5] = float3(ndcX1 * _ClusterOrthoHalfWidth, ndcY0 * _ClusterOrthoHalfHeight, zFar);
+        corners[6] = float3(ndcX0 * _ClusterOrthoHalfWidth, ndcY1 * _ClusterOrthoHalfHeight, zFar);
+        corners[7] = float3(ndcX1 * _ClusterOrthoHalfWidth, ndcY1 * _ClusterOrthoHalfHeight, zFar);
+    }
+    else
+    {
+        corners[0] = float3(ndcX0 * zNear * _ClusterTanHalfFovX, ndcY0 * zNear * _ClusterTanHalfFovY, zNear);
+        corners[1] = float3(ndcX1 * zNear * _ClusterTanHalfFovX, ndcY0 * zNear * _ClusterTanHalfFovY, zNear);
+        corners[2] = float3(ndcX0 * zNear * _ClusterTanHalfFovX, ndcY1 * zNear * _ClusterTanHalfFovY, zNear);
+        corners[3] = float3(ndcX1 * zNear * _ClusterTanHalfFovX, ndcY1 * zNear * _ClusterTanHalfFovY, zNear);
+        corners[4] = float3(ndcX0 * zFar * _ClusterTanHalfFovX, ndcY0 * zFar * _ClusterTanHalfFovY, zFar);
+        corners[5] = float3(ndcX1 * zFar * _ClusterTanHalfFovX, ndcY0 * zFar * _ClusterTanHalfFovY, zFar);
+        corners[6] = float3(ndcX0 * zFar * _ClusterTanHalfFovX, ndcY1 * zFar * _ClusterTanHalfFovY, zFar);
+        corners[7] = float3(ndcX1 * zFar * _ClusterTanHalfFovX, ndcY1 * zFar * _ClusterTanHalfFovY, zFar);
+    }
+
+    boundsMin = corners[0];
+    boundsMax = corners[0];
+
+    [unroll]
+    for (uint cornerIndex = 1u; cornerIndex < 8u; cornerIndex++)
+    {
+        boundsMin = min(boundsMin, corners[cornerIndex]);
+        boundsMax = max(boundsMax, corners[cornerIndex]);
+    }
+}
+
+bool SphereIntersectsCluster(float3 sphereCenter, float sphereRadius, float3 boundsMin, float3 boundsMax)
+{
+    float3 closestPoint = clamp(sphereCenter, boundsMin, boundsMax);
+    float3 delta = sphereCenter - closestPoint;
+    return dot(delta, delta) <= sphereRadius * sphereRadius;
+}
+
+[numthreads(1, 1, 1)]
+void ClearClusterLightCounter(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    _ClusterAllocationCounter[0] = 0u;
+}
+
+[numthreads(8, 8, 1)]
+void BuildClusteredLightList(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x >= _ClusterTileCountX
+        || dispatchThreadId.y >= _ClusterTileCountY
+        || dispatchThreadId.z >= _ClusterSliceCount)
+        return;
+
+    uint localLightIndices[VIVID_CLUSTER_MAX_LIGHTS_PER_CLUSTER];
+    uint localLightCount = 0u;
+    float3 boundsMin;
+    float3 boundsMax;
+    GetClusterBounds(dispatchThreadId.xy, dispatchThreadId.z, boundsMin, boundsMax);
+
+    [loop]
+    for (uint lightIndex = 0u; lightIndex < _PunctualLightCount; lightIndex++)
+    {
+        PunctualLightData punctualLight = _PunctualLights[lightIndex];
+        if (!SphereIntersectsCluster(punctualLight.cullingCenterVS, punctualLight.cullingRadius, boundsMin, boundsMax))
+            continue;
+
+        if (localLightCount < VIVID_CLUSTER_MAX_LIGHTS_PER_CLUSTER)
+            localLightIndices[localLightCount] = lightIndex;
+
+        localLightCount++;
+    }
+
+    uint clampedLightCount = min(localLightCount, VIVID_CLUSTER_MAX_LIGHTS_PER_CLUSTER);
+    uint clusterIndex = dispatchThreadId.x
+        + dispatchThreadId.y * _ClusterTileCountX
+        + dispatchThreadId.z * _ClusterTileCountX * _ClusterTileCountY;
+    uint lightStart = 0u;
+
+    if (clampedLightCount > 0u)
+        InterlockedAdd(_ClusterAllocationCounter[0], clampedLightCount, lightStart);
+
+    _ClusterLightGrid[clusterIndex] = uint2(lightStart, clampedLightCount);
+
+    [loop]
+    for (uint localIndex = 0u; localIndex < clampedLightCount; localIndex++)
+        _ClusterLightIndices[lightStart + localIndex] = localLightIndices[localIndex];
 }

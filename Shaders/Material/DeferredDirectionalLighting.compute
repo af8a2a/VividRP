@@ -143,7 +143,83 @@ float3 EvaluateDirectionalLight(
     return lighting;
 }
 
-float3 EvaluateDeferredDirectionalLighting(VividGBufferSurfaceData surfaceData, float3 positionWS)
+float EvaluatePunctualLightDistanceAttenuation(PunctualLightData punctualLight, float distanceSquared)
+{
+    float attenuation = saturate(1.0 - distanceSquared * punctualLight.inverseRangeSquared);
+    return attenuation * attenuation;
+}
+
+float EvaluatePunctualLightSpotAttenuation(PunctualLightData punctualLight, float3 lightDirectionWS)
+{
+    if (punctualLight.lightType != VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
+        return 1.0;
+
+    float spotCosine = saturate(dot(punctualLight.directionWS, -lightDirectionWS));
+    float attenuation = saturate(spotCosine * punctualLight.angleScale + punctualLight.angleOffset);
+    return attenuation * attenuation;
+}
+
+float3 EvaluatePunctualLight(
+    VividGBufferSurfaceData surfaceData,
+    float3 positionWS,
+    float3 viewDirectionWS,
+    PunctualLightData punctualLight)
+{
+    float3 lightVectorWS = punctualLight.positionWS - positionWS;
+    float distanceSquared = dot(lightVectorWS, lightVectorWS);
+
+    if (distanceSquared <= 1e-6)
+        return 0.0;
+
+    float inverseDistance = rsqrt(distanceSquared);
+    float3 lightDirectionWS = lightVectorWS * inverseDistance;
+    float3 halfVectorWS = SafeNormalize(viewDirectionWS + lightDirectionWS);
+    float nDotL = saturate(dot(surfaceData.normalWS, lightDirectionWS));
+
+    if (nDotL <= 0.0)
+        return 0.0;
+
+    float attenuation = EvaluatePunctualLightDistanceAttenuation(punctualLight, distanceSquared)
+        * EvaluatePunctualLightSpotAttenuation(punctualLight, lightDirectionWS);
+
+    if (attenuation <= 0.0)
+        return 0.0;
+
+    float nDotV = saturate(dot(surfaceData.normalWS, viewDirectionWS));
+    float nDotH = saturate(dot(surfaceData.normalWS, halfVectorWS));
+    float vDotH = saturate(dot(viewDirectionWS, halfVectorWS));
+    float3 diffuseColor = surfaceData.baseColor * (1.0 - surfaceData.metallic);
+    float3 f0 = lerp(kDielectricF0, surfaceData.baseColor, surfaceData.metallic);
+    float3 fresnel = F_Schlick(vDotH, f0);
+    float distribution = D_GGX(nDotH, surfaceData.linearRoughness);
+    float visibility = V_SmithGGXCorrelated(nDotV, nDotL, surfaceData.linearRoughness);
+    float3 specular = distribution * visibility * fresnel;
+    float3 diffuse = diffuseColor * INV_PI;
+    float3 lightColor = punctualLight.color * attenuation;
+    float3 lighting = (diffuse + specular) * lightColor * nDotL;
+
+    if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+    {
+        lighting += EvaluateFabricFuzz(
+            surfaceData.baseColor,
+            surfaceData.normalWS,
+            viewDirectionWS,
+            lightDirectionWS,
+            surfaceData.customData) * lightColor;
+    }
+    else if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_CLEARCOAT)
+    {
+        lighting += EvaluateClearCoatSpecular(
+            surfaceData.normalWS,
+            viewDirectionWS,
+            lightDirectionWS,
+            surfaceData.customData) * lightColor * nDotL;
+    }
+
+    return lighting;
+}
+
+float3 EvaluateDeferredDirectionalLighting(VividGBufferSurfaceData surfaceData, uint2 pixelCoord, float3 positionWS)
 {
     float3 viewDirectionWS = GetDeferredViewDirectionWS(positionWS);
     float3 lighting = 0.0;
@@ -153,6 +229,19 @@ float3 EvaluateDeferredDirectionalLighting(VividGBufferSurfaceData surfaceData, 
     {
         DirectionalLightData directionalLight = GetDirectionalLight(lightIndex);
         lighting += EvaluateDirectionalLight(surfaceData, viewDirectionWS, directionalLight);
+    }
+
+    if (HasPunctualLights())
+    {
+        uint2 clusterLightRange = GetClusterLightRange(pixelCoord, positionWS);
+
+        [loop]
+        for (uint lightOffset = 0; lightOffset < clusterLightRange.y; lightOffset++)
+        {
+            uint lightIndex = _ClusterLightIndices[clusterLightRange.x + lightOffset];
+            PunctualLightData punctualLight = GetPunctualLight(lightIndex);
+            lighting += EvaluatePunctualLight(surfaceData, positionWS, viewDirectionWS, punctualLight);
+        }
     }
 
     return lighting + surfaceData.emissive;
@@ -176,7 +265,7 @@ void DeferredDirectionalLighting(uint3 dispatchThreadId : SV_DispatchThreadID)
     VividGBufferSurfaceData surfaceData = LoadVividGBuffer(pixelCoord);
     float2 uv = (float2(pixelCoord) + 0.5) / float2(_LightingWidth, _LightingHeight);
     float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, _InvViewProjMatrix);
-    float3 lighting = EvaluateDeferredDirectionalLighting(surfaceData, positionWS);
+    float3 lighting = EvaluateDeferredDirectionalLighting(surfaceData, pixelCoord, positionWS);
 
     _LightingTexture[pixelCoord] = float4(lighting, 1.0);
 }

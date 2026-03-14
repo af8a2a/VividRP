@@ -21,7 +21,10 @@ namespace VividRP.Editor.Tests
             Assert.That(hlslSource, Does.Contain("_LightingWidth"));
             Assert.That(hlslSource, Does.Contain("_LightingHeight"));
             Assert.That(hlslSource, Does.Contain("_DirectionalLightCount"));
+            Assert.That(hlslSource, Does.Contain("_PunctualLightCount"));
+            Assert.That(hlslSource, Does.Contain("_ClusterLightIndices"));
             Assert.That(hlslSource, Does.Contain("EvaluateDeferredDirectionalLighting"));
+            Assert.That(hlslSource, Does.Contain("EvaluatePunctualLight"));
             Assert.That(hlslSource, Does.Contain("ComputeWorldSpacePosition"));
             Assert.That(passSource, Does.Contain("DrawProceduralIndirect"));
             Assert.That(passSource, Does.Contain("MeshTopology.Points"));

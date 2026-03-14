@@ -102,6 +102,73 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void UpdatePunctualLights_CollectsEnabledPointAndSpotLights_WhenLightsAreProvided()
+        {
+            var pointObject = new GameObject("Point Light");
+            var spotObject = new GameObject("Spot Light");
+            var directionalObject = new GameObject("Directional Light");
+            var disabledSpotObject = new GameObject("Disabled Spot Light");
+
+            var pointLight = pointObject.AddComponent<Light>();
+            var spotLight = spotObject.AddComponent<Light>();
+            var directionalLight = directionalObject.AddComponent<Light>();
+            var disabledSpotLight = disabledSpotObject.AddComponent<Light>();
+
+            pointLight.type = LightType.Point;
+            pointLight.color = Color.cyan;
+            pointLight.intensity = 3.0f;
+            pointLight.range = 8.0f;
+
+            spotLight.type = LightType.Spot;
+            spotLight.color = Color.yellow;
+            spotLight.intensity = 2.0f;
+            spotLight.range = 12.0f;
+            spotLight.innerSpotAngle = 30.0f;
+            spotLight.spotAngle = 50.0f;
+            spotObject.transform.forward = Vector3.forward;
+
+            directionalLight.type = LightType.Directional;
+
+            disabledSpotLight.type = LightType.Spot;
+            disabledSpotLight.enabled = false;
+
+            var lightData = new VividLightData();
+
+            try
+            {
+                lightData.UpdatePunctualLights(new[] { directionalLight, pointLight, disabledSpotLight, spotLight });
+
+                Assert.That(lightData.punctualLightCount, Is.EqualTo(2));
+                Assert.That(lightData.hasPunctualLights, Is.True);
+                AssertPunctualLight(
+                    lightData.punctualLights[0],
+                    pointObject.transform.position,
+                    new Vector3(0.0f, 3.0f, 3.0f),
+                    pointLight.range,
+                    0u,
+                    pointObject.transform.forward);
+                AssertPunctualLight(
+                    lightData.punctualLights[1],
+                    spotObject.transform.position,
+                    new Vector3(2.0f, 2.0f, 0.0f),
+                    spotLight.range,
+                    1u,
+                    spotObject.transform.forward);
+                Assert.That(lightData.punctualLights[0].angleOffset, Is.EqualTo(1.0f).Within(0.0001f));
+                Assert.That(lightData.punctualLights[0].inverseRangeSquared, Is.EqualTo(1.0f / (pointLight.range * pointLight.range)).Within(0.0001f));
+                Assert.That(lightData.punctualLights[1].angleScale, Is.GreaterThan(0.0f));
+                Assert.That(lightData.punctualLights[1].angleOffset, Is.LessThan(0.0f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(pointObject);
+                Object.DestroyImmediate(spotObject);
+                Object.DestroyImmediate(directionalObject);
+                Object.DestroyImmediate(disabledSpotObject);
+            }
+        }
+
+        [Test]
         public void FindMainLightIndex_ReturnsSunLight_WhenVisibleDirectionalSunExists()
         {
             var sunObject = new GameObject("Sun Light Test");
@@ -169,6 +236,7 @@ namespace VividRP.Editor.Tests
                 lightData.visibleReflectionProbes = visibleReflectionProbes;
                 lightData.mainLightIndex = 2;
                 lightData.mainLightEntityId = EntityId.FromULong(42);
+                lightData.punctualLightCount = 3;
 
                 lightData.Reset();
 
@@ -176,6 +244,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(lightData.visibleReflectionProbes.IsCreated, Is.False);
                 Assert.That(lightData.mainLightIndex, Is.EqualTo(-1));
                 Assert.That(lightData.mainLightEntityId, Is.EqualTo(EntityId.None));
+                Assert.That(lightData.punctualLightCount, Is.Zero);
             }
             finally
             {
@@ -199,6 +268,27 @@ namespace VividRP.Editor.Tests
             Assert.That(actual.color.z, Is.EqualTo(expectedColor.z).Within(0.0001f));
             Assert.That(actual.shadowStrength, Is.EqualTo(expectedShadowStrength).Within(0.0001f));
             Assert.That(actual.renderingLayerMask, Is.EqualTo(expectedRenderingLayerMask));
+        }
+
+        private static void AssertPunctualLight(
+            VividLightData.PunctualLightData actual,
+            Vector3 expectedPosition,
+            Vector3 expectedColor,
+            float expectedRange,
+            uint expectedType,
+            Vector3 expectedDirection)
+        {
+            Assert.That(actual.positionWS.x, Is.EqualTo(expectedPosition.x).Within(0.0001f));
+            Assert.That(actual.positionWS.y, Is.EqualTo(expectedPosition.y).Within(0.0001f));
+            Assert.That(actual.positionWS.z, Is.EqualTo(expectedPosition.z).Within(0.0001f));
+            Assert.That(actual.color.x, Is.EqualTo(expectedColor.x).Within(0.0001f));
+            Assert.That(actual.color.y, Is.EqualTo(expectedColor.y).Within(0.0001f));
+            Assert.That(actual.color.z, Is.EqualTo(expectedColor.z).Within(0.0001f));
+            Assert.That(actual.range, Is.EqualTo(expectedRange).Within(0.0001f));
+            Assert.That(actual.lightType, Is.EqualTo(expectedType));
+            Assert.That(actual.directionWS.x, Is.EqualTo(expectedDirection.x).Within(0.0001f));
+            Assert.That(actual.directionWS.y, Is.EqualTo(expectedDirection.y).Within(0.0001f));
+            Assert.That(actual.directionWS.z, Is.EqualTo(expectedDirection.z).Within(0.0001f));
         }
     }
 }

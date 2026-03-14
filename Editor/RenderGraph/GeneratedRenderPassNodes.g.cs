@@ -63,6 +63,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class LTCAreaLightPreparePass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.LTCAreaLightPreparePass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class MotionVectorPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.MotionVectorPass, VividRP.Runtime";

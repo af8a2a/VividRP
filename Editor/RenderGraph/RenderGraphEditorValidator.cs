@@ -94,7 +94,6 @@ namespace VividRP.Editor.RenderGraph
                 if (inputResourceNode != null
                     && outputResourceNode != null
                     && inputResourceNode == outputResourceNode
-                    && RequiresMatchingStandaloneResourcePorts(inputResourceNode)
                     && !ReferenceEquals(passNode.GetInputPortByName(inputPortName)?.FirstConnectedPort, passNode.GetOutputPortByName(outputPortName)?.FirstConnectedPort))
                 {
                     infos.LogError(
@@ -173,15 +172,10 @@ namespace VividRP.Editor.RenderGraph
         private static bool IsStandaloneResourceNode(INode node)
         {
             return node is TextureResourceNodeData
-                || node is BufferResourceNodeData
-                || node is RenderListResourceNodeData
-                || node is ClassificationResourceNodeData;
+                   || node is BufferResourceNodeData
+                   || node is RenderListResourceNodeData;
         }
 
-        private static bool RequiresMatchingStandaloneResourcePorts(INode node)
-        {
-            return node is ClassificationResourceNodeData;
-        }
 
         private static void ValidateHistoryResourceNodes(RenderGraphEditorGraph graph, GraphLogger infos)
         {
@@ -210,7 +204,7 @@ namespace VividRP.Editor.RenderGraph
                 }
 
                 var sourceNode = inputPort.FirstConnectedPort?.GetNode();
-                if (sourceNode is TextureResourceNodeData || sourceNode is HistoryResourceNodeData || sourceNode is RenderPassNodeData || sourceNode is ClassificationResourceNodeData)
+                if (sourceNode is TextureResourceNodeData || sourceNode is HistoryResourceNodeData || sourceNode is RenderPassNodeData )
                     continue;
 
                 infos.LogWarning("Preview node only supports texture outputs.", previewNode);

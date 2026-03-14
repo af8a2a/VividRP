@@ -140,15 +140,6 @@ namespace VividRP.Editor.RenderGraph
                     renderListNodeToIndex.Add(renderListNode, index);
                     result.RenderListDescriptors.Add(renderListNode.GetDescriptor());
                 }
-                else if (node is ClassificationResourceNodeData classificationNode)
-                {
-                    foreach (var (portName, descriptor) in classificationNode.EnumerateBufferDescriptors())
-                    {
-                        var index = result.BufferDescriptors.Count;
-                        result.BufferDescriptors.Add(descriptor);
-                        AddPortBindingIndex(bufferPortToIndex, classificationNode.GetOutputPortByName(portName), index);
-                    }
-                }
             }
 
             var compiledPassDefinitions = new List<RenderGraphPassDefinition>(passNodes.Count);
@@ -202,7 +193,6 @@ namespace VividRP.Editor.RenderGraph
                     if (inputResourceNode != null
                         && outputResourceNode != null
                         && inputResourceNode == outputResourceNode
-                        && RequiresMatchingStandaloneResourcePorts(inputResourceNode)
                         && !ReferenceEquals(inputConnectedPort, outputConnectedPort))
                     {
                         Debug.LogWarning(
@@ -578,20 +568,13 @@ namespace VividRP.Editor.RenderGraph
 
             if (fieldType == typeof(RenderGraphBuffer) && connectedNode is BufferResourceNodeData bufferNode)
                 return bufferNode;
-
-            if (fieldType == typeof(RenderGraphBuffer) && connectedNode is ClassificationResourceNodeData classificationNode)
-                return classificationNode;
-
+            
             if (fieldType == typeof(RenderGraphRenderList) && connectedNode is RenderListResourceNodeData renderListNode)
                 return renderListNode;
 
             return null;
         }
 
-        private static bool RequiresMatchingStandaloneResourcePorts(object node)
-        {
-            return node is ClassificationResourceNodeData;
-        }
 
         private static void TryAddPassFieldBinding(
             RenderGraphPassDefinition passDef,

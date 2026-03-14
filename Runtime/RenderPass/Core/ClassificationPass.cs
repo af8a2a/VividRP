@@ -33,25 +33,46 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
 
-        [RenderGraphResource(Name = "StandardMaterialIndices", Access = AccessFlags.Write)]
+        [RenderGraphResource(
+            Name = "StandardMaterialIndices",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphBuffer m_StandardMaterialIndices;
 
-        [RenderGraphResource(Name = "FabricMaterialIndices", Access = AccessFlags.Write)]
+        [RenderGraphResource(
+            Name = "FabricMaterialIndices",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphBuffer m_FabricMaterialIndices;
 
-        [RenderGraphResource(Name = "ClearCoatMaterialIndices", Access = AccessFlags.Write)]
+        [RenderGraphResource(
+            Name = "ClearCoatMaterialIndices",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphBuffer m_ClearCoatMaterialIndices;
 
-        [RenderGraphResource(Name = "MaterialClassCounts", Access = AccessFlags.Write)]
+        [RenderGraphResource(
+            Name = "MaterialClassCounts",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphBuffer m_MaterialClassCounts;
 
-        [RenderGraphResource(Name = "StandardIndirectArgs", Access = AccessFlags.Write)]
+        [RenderGraphResource(
+            Name = "StandardIndirectArgs",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphBuffer m_StandardIndirectArgs;
 
-        [RenderGraphResource(Name = "FabricIndirectArgs", Access = AccessFlags.Write)]
+        [RenderGraphResource(
+            Name = "FabricIndirectArgs",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphBuffer m_FabricIndirectArgs;
 
-        [RenderGraphResource(Name = "ClearCoatIndirectArgs", Access = AccessFlags.Write)]
+        [RenderGraphResource(
+            Name = "ClearCoatIndirectArgs",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphBuffer m_ClearCoatIndirectArgs;
 
         private ComputeShader m_ClassificationCompute;

@@ -11,6 +11,11 @@ namespace VividRP.Editor.Tests
         private sealed class AutoRegisteredClassificationPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(ClassificationPass).AssemblyQualifiedName;
+
+            internal bool HasOverrideOption(string fieldName)
+            {
+                return GetNodeOptionByName(RenderPassPortUtility.GetOverrideOptionName(fieldName)) != null;
+            }
         }
 
         [Test]
@@ -36,6 +41,28 @@ namespace VividRP.Editor.Tests
 
             Assert.That(node.HasAsyncComputeOption(), Is.True);
             Assert.That(node.GetEnableAsyncCompute(), Is.False);
+        }
+
+        [Test]
+        public void ClassificationPassNode_HidesBufferInputs_AndExposesOverrideOptions()
+        {
+            var node = new AutoRegisteredClassificationPassNode();
+
+            Assert.That(node.HasOverrideOption("m_StandardMaterialIndices"), Is.True);
+            Assert.That(node.HasOverrideOption("m_FabricMaterialIndices"), Is.True);
+            Assert.That(node.HasOverrideOption("m_ClearCoatMaterialIndices"), Is.True);
+            Assert.That(node.HasOverrideOption("m_MaterialClassCounts"), Is.True);
+            Assert.That(node.HasOverrideOption("m_StandardIndirectArgs"), Is.True);
+            Assert.That(node.HasOverrideOption("m_FabricIndirectArgs"), Is.True);
+            Assert.That(node.HasOverrideOption("m_ClearCoatIndirectArgs"), Is.True);
+
+            Assert.That(node.GetInputPortByName("m_StandardMaterialIndices_In"), Is.Null);
+            Assert.That(node.GetInputPortByName("m_FabricMaterialIndices_In"), Is.Null);
+            Assert.That(node.GetInputPortByName("m_ClearCoatMaterialIndices_In"), Is.Null);
+            Assert.That(node.GetInputPortByName("m_MaterialClassCounts_In"), Is.Null);
+            Assert.That(node.GetInputPortByName("m_StandardIndirectArgs_In"), Is.Null);
+            Assert.That(node.GetInputPortByName("m_FabricIndirectArgs_In"), Is.Null);
+            Assert.That(node.GetInputPortByName("m_ClearCoatIndirectArgs_In"), Is.Null);
         }
     }
 }

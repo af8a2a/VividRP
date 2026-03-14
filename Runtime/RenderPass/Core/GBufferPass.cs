@@ -11,16 +11,32 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "RenderList", Access = AccessFlags.Read)]
         private RenderGraphRenderList m_RenderList;
 
-        [RenderGraphResource(Name = "GBuffer0", Access = AccessFlags.Write, AttachmentIndex = 0)]
+        [RenderGraphResource(
+            Name = "GBuffer0",
+            Access = AccessFlags.Write,
+            AttachmentIndex = 0,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_GBuffer0;
 
-        [RenderGraphResource(Name = "GBuffer1", Access = AccessFlags.Write, AttachmentIndex = 1)]
+        [RenderGraphResource(
+            Name = "GBuffer1",
+            Access = AccessFlags.Write,
+            AttachmentIndex = 1,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_GBuffer1;
 
-        [RenderGraphResource(Name = "GBuffer2", Access = AccessFlags.Write, AttachmentIndex = 2)]
+        [RenderGraphResource(
+            Name = "GBuffer2",
+            Access = AccessFlags.Write,
+            AttachmentIndex = 2,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_GBuffer2;
 
-        [RenderGraphResource(Name = "GBuffer3", Access = AccessFlags.Write, AttachmentIndex = 3)]
+        [RenderGraphResource(
+            Name = "GBuffer3",
+            Access = AccessFlags.Write,
+            AttachmentIndex = 3,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_GBuffer3;
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.ReadWrite, IsDepthAttachment = true)]

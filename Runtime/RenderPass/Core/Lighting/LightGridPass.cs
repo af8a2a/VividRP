@@ -4,7 +4,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
-namespace VividRP.Runtime.RenderPass.Core
+namespace VividRP.Runtime
 {
     public class LightGridPass : UnsafePass
     {

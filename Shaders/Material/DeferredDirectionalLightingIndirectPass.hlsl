@@ -295,7 +295,7 @@ float4 Frag(Varyings input) : SV_Target
         return float4(0.0, 0.0, 0.0, 1.0);
 
     VividGBufferSurfaceData surfaceData = LoadVividGBuffer(input.pixelCoord);
-    float3 positionWS = ComputeWorldSpacePosition(input.uv, deviceDepth, _InvViewProjMatrix);
+    float3 positionWS = ComputeWorldSpacePosition(input.uv, deviceDepth, UNITY_MATRIX_I_VP);
     float3 lighting = EvaluateDeferredDirectionalLighting(surfaceData, input.pixelCoord, positionWS);
     return float4(lighting, 1.0);
 }

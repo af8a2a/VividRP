@@ -81,54 +81,63 @@ float4 SampleBase(float2 uv)
 
 void ApplyAlphaClip(float alpha)
 {
-    if (_AlphaClip > 0.5)
-    {
-        clip(alpha - _Cutoff);
-    }
+#if defined(_ALPHATEST_ON)
+    clip(alpha - _Cutoff);
+#endif
 }
 
 float2 SampleMetallicSmoothness(float2 uv, float baseAlpha)
 {
-    float4 metallicGlossSample = SAMPLE_TEXTURE2D(_MetallicGlossMap, sampler_MetallicGlossMap, uv);
     float metallic = saturate(_Metallic);
-
-    float smoothness;
+    float smoothness = saturate(_Smoothness);
 
 #if defined(_METALLICSPECGLOSSMAP)
+    float4 metallicGlossSample = SAMPLE_TEXTURE2D(_MetallicGlossMap, sampler_MetallicGlossMap, uv);
     metallic = saturate(metallicGlossSample.r);
-#endif
 
-    if (_SmoothnessTextureChannel > 0.5)
-    {
-        smoothness = baseAlpha * _Smoothness;
-    }
-    else
-    {
-        smoothness = metallicGlossSample.a * _Smoothness;
-    }
+#if defined(_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A)
+    smoothness = baseAlpha * _Smoothness;
+#else
+    smoothness = metallicGlossSample.a * _Smoothness;
+#endif
+#elif defined(_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A)
+    smoothness = baseAlpha * _Smoothness;
+#endif
 
     return float2(metallic, saturate(smoothness));
 }
 
 float SampleAmbientOcclusion(float2 uv)
 {
+#if defined(_OCCLUSIONMAP)
     float occlusion = SAMPLE_TEXTURE2D(_OcclusionMap, sampler_OcclusionMap, uv).g;
     return saturate(lerp(1.0, occlusion, _OcclusionStrength));
+#else
+    return 1.0;
+#endif
 }
 
 float3 SampleEmission(float2 uv)
 {
+#if defined(_EMISSION)
     return max(SAMPLE_TEXTURE2D(_EmissionMap, sampler_EmissionMap, uv).rgb * _EmissionColor.rgb, 0.0);
+#else
+    return 0.0;
+#endif
 }
 
 float3 SampleNormalWS(Varyings input)
 {
     float3 normalWS = normalize(input.normalWS);
+#if defined(_NORMALMAP)
     float3 tangentWS = normalize(input.tangentWS.xyz);
     float tangentSign = input.tangentWS.w * GetOddNegativeScale();
     float3 bitangentWS = normalize(cross(normalWS, tangentWS) * tangentSign);
     float3 normalTS = UnpackVividNormalScale(SAMPLE_TEXTURE2D(_BumpMap, sampler_BumpMap, input.uv), _BumpScale);
     return normalize(normalTS.x * tangentWS + normalTS.y * bitangentWS + normalTS.z * normalWS);
+#else
+    return normalWS;
+#endif
 }
 
 VividGBufferSurfaceData BuildStandardLitSurfaceData(Varyings input)
@@ -137,7 +146,6 @@ VividGBufferSurfaceData BuildStandardLitSurfaceData(Varyings input)
     ApplyAlphaClip(baseSample.a);
 
     float2 metallicSmoothness = SampleMetallicSmoothness(input.uv, baseSample.a);
-    float clearCoatMask = saturate(_ClearCoatMask);
 
     VividGBufferSurfaceData surfaceData;
     surfaceData.baseColor = baseSample.rgb;
@@ -145,8 +153,16 @@ VividGBufferSurfaceData BuildStandardLitSurfaceData(Varyings input)
     surfaceData.linearRoughness = (1.0 - metallicSmoothness.y) * (1.0 - metallicSmoothness.y);
     surfaceData.metallic = metallicSmoothness.x;
     surfaceData.ambientOcclusion = SampleAmbientOcclusion(input.uv);
+
+#if defined(_CLEARCOAT)
+    float clearCoatMask = saturate(_ClearCoatMask);
     surfaceData.customData = clearCoatMask;
     surfaceData.materialId = clearCoatMask > 0.0 ? VIVID_GBUFFER_MATERIAL_CLEARCOAT : VIVID_GBUFFER_MATERIAL_STANDARD;
+#else
+    surfaceData.customData = 0.0;
+    surfaceData.materialId = VIVID_GBUFFER_MATERIAL_STANDARD;
+#endif
+
     surfaceData.emissive = SampleEmission(input.uv);
     return surfaceData;
 }

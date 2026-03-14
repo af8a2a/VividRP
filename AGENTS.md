@@ -9,6 +9,7 @@
 - `Runtime/Utility/PipelineResource/` plus `Runtime/Resources/PipelineResources.asset` implement package resource lookup based on `[PipelineResource]` and `[ResourcePath]` attributes.
 - `Editor/RenderGraph/` contains the GraphToolkit-based RenderGraph editor, validators, importers, pass-compilation utilities, node data types, drawers, navigation helpers, and pass-node registry generation.
 - `Editor/RenderGraph/GeneratedRenderPassNodes.g.cs` is generated code. Update the generator, registry builder, or runtime pass types instead of editing this file by hand.
+- RenderGraph authoring assets use the `.vrdg` extension and are imported into `RenderGraphData` assets by `Editor/RenderGraph/RenderGraphImporter.cs`; change importer/compiler behavior carefully and keep import-time tests current.
 - `Editor/PipelineResource/` and `Editor/RenderPipeline/` contain editor automation such as resource syncing and global settings hooks.
 - `Editor/ComponentEditor/`, `Editor/Material/`, `Editor/Shader/`, and `Editor/VolumeEditor/` contain custom inspectors, shader GUIs, and editor-only shader assets; keep runtime/editor boundaries clean.
 - `Shaders/` is a top-level package folder with package shaders and the `VividRP.Shaders` assembly; shader assets are not stored under `Runtime/Shaders/`.
@@ -31,6 +32,7 @@
 - Use 4-space indentation, braces on new lines, and small focused methods.
 - Match namespaces to area, for example `VividRP.Runtime`, `VividRP.Runtime.RenderPass.Core`, `VividRP.Editor.RenderGraph`, and `VividRP.Editor.Tests`.
 - Preserve reflection-driven contracts: runtime pass resource fields are discovered via `[RenderGraphResource]`, and editor port generation plus preview lookup depend on those field names, access flags, and field types.
+- Preserve serialized field names in authoring/runtime data models unless you also add an explicit migration path. `RenderGraphData`, `RenderGraphPassDefinition`, and `PipelineResourcesContainer` are serialized assets that survive importer/editor updates.
 - Put `[RenderGraphResource]` on fields, not properties. The collector reflects instance fields across the inheritance chain and ignores null resource values.
 - Initialize pass resource descriptors before `Initialize()` runs; a null `RenderGraphTexture`, `RenderGraphBuffer`, or `RenderGraphRenderList` field is skipped and will not get ports or runtime setup.
 - For `[PipelineResource]` classes, expose resource bindings as `public` instance fields with `[ResourcePath]`; the updater does not populate private fields.
@@ -44,11 +46,19 @@
 - Do not hand-edit generated or synchronized artifacts such as `Editor/RenderGraph/GeneratedRenderPassNodes.g.cs` or `Runtime/Resources/PipelineResources.asset` unless you are intentionally fixing their generator/sync pipeline.
 
 ## RenderGraph Rules
+- `.vrdg` files are the source of truth for graph authoring. Do not manually maintain derived `RenderGraphData` contents; let the importer/compiler regenerate them.
 - New passes should implement `Create()`, `Prepare(...)`, `Record(...)`, and `Dispose()` coherently; `Prepare(...)` is where per-frame descriptor sizing/imports should happen.
 - Use the appropriate resource wrapper type for graph integration: `RenderGraphTexture`, `RenderGraphBuffer`, `RenderGraphRenderList`, and `RenderGraphAccelerationStructureDesc` where supported by the runtime/editor flow.
+- History resource nodes expose `PrevOut` and `CurrOut`; if you change history binding semantics, update importer, compilation ordering, runtime history handling, and tests together.
+- Pass ordering is compiler-driven. When changing binding semantics or connection rules, verify `RenderGraphPassCompilationUtility` still derives the right dependencies and cycle fallback behavior.
 - If a pass changes its exposed resource layout dynamically, keep `IDynamicPassResourceLayout` behavior and the related editor/runtime tests in sync.
 - If a pass supports async compute or global state modification, express that through the existing marker interfaces instead of ad hoc flags.
 - When adding a runtime pass type, verify the generated node registry, navigation helpers, compilation utility, and pass-node tests still reflect the new pass correctly.
+
+## Resource Workflow
+- Use `PipelineResourceUpdater` or the custom inspector on `PipelineResourcesContainer` to recollect engine resources; do not hand-maintain `Runtime/Resources/PipelineResources.asset` entry-by-entry.
+- Resource container entries are normalized and sorted during recollection. If you change resource-key generation, preserve deterministic ordering and update related tests.
+- Keep `ResourceEntry` serialization compatibility in mind when renaming fields; `ResourceObject` already carries a migration attribute from the older `Asset` name.
 
 ## Testing Guidelines
 - Use Unity Test Framework with NUnit under `Tests/Editor/` for current package coverage.

@@ -51,5 +51,10 @@ namespace VividRP.Runtime
         {
             return VolumeManager.instance.stack?.GetComponent<HDRISkyVolume>();
         }
+
+        internal static SliderDebugVolume GetSliderDebugVolume()
+        {
+            return VolumeManager.instance.stack?.GetComponent<SliderDebugVolume>();
+        }
     }
 }

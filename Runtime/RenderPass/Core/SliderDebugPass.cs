@@ -21,13 +21,18 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "RightTexture", Access = AccessFlags.Read)]
         private RenderGraphTexture m_RightTexture;
 
-        [RenderGraphResource(Name = "OutputTexture", Access = AccessFlags.Write, AttachmentIndex = 0,BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        [RenderGraphResource(
+            Name = "OutputTexture",
+            Access = AccessFlags.Write,
+            AttachmentIndex = 0,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_OutputTexture;
 
         [SerializeField, Range(0f, 100f)]
         private float m_Slider = 50f;
 
         private Material m_Material;
+        private float m_ResolvedSlider = 50f;
 
         public float Slider
         {
@@ -45,7 +50,8 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Create()
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            var shader = resources.SliderDebugShader;
+            var shader = resources?.SliderDebugShader;
+            shader ??= Shader.Find(SliderDebugShaderName);
 
             if (shader == null)
             {
@@ -59,6 +65,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             m_Slider = Mathf.Clamp(m_Slider, 0f, 100f);
+            m_ResolvedSlider = ResolveSliderValue(m_Slider, VividVolumeManagerUtility.GetSliderDebugVolume());
 
             var cameraData = frameData.Get<VividCameraData>();
             var width = ResolveOutputDimension(
@@ -99,7 +106,7 @@ namespace VividRP.Runtime.RenderPass.Core
             mpb.SetTexture(RightTextureId, rightTexture);
             mpb.SetVector(LeftTextureScaleBiasId, GetScaleBias(m_LeftTexture.innerHandle));
             mpb.SetVector(RightTextureScaleBiasId, GetScaleBias(m_RightTexture.innerHandle));
-            mpb.SetFloat(SplitId, m_Slider * 0.01f);
+            mpb.SetFloat(SplitId, m_ResolvedSlider * 0.01f);
 
             CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);
         }
@@ -185,6 +192,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 return sourceDescriptor.ColorFormat;
 
             return GraphicsFormat.R8G8B8A8_UNorm;
+        }
+
+        internal static float ResolveSliderValue(float fallbackSlider, SliderDebugVolume volume)
+        {
+            var slider = Mathf.Clamp(fallbackSlider, 0f, 100f);
+            if (volume == null || !volume.active || volume.slider == null || !volume.slider.overrideState)
+                return slider;
+
+            return Mathf.Clamp(volume.slider.value, 0f, 100f);
         }
 
         private static Texture ResolveTexture(RTHandle handle)

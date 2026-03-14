@@ -6,19 +6,10 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/TextureXR.hlsl"
 
 TEXTURE2D_X(_GBuffer0);
-SAMPLER(sampler_GBuffer0);
-
 TEXTURE2D_X(_GBuffer1);
-SAMPLER(sampler_GBuffer1);
-
 TEXTURE2D_X(_GBuffer2);
-SAMPLER(sampler_GBuffer2);
-
 TEXTURE2D_X(_GBuffer3);
-SAMPLER(sampler_GBuffer3);
-
 TEXTURE2D_X_FLOAT(_DepthTexture);
-SAMPLER(sampler_DepthTexture);
 
 float4 _MainLightDirection;
 float4 _MainLightColor;
@@ -35,7 +26,6 @@ struct Attributes
 struct Varyings
 {
     float4 positionCS : SV_POSITION;
-    float2 uv : TEXCOORD0;
     UNITY_VERTEX_OUTPUT_STEREO
 };
 
@@ -47,7 +37,6 @@ Varyings Vert(Attributes input)
     UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
     output.positionCS = GetFullScreenTriangleVertexPosition(input.vertexID);
-    output.uv = GetFullScreenTriangleTexCoord(input.vertexID);
     return output;
 }
 
@@ -108,12 +97,23 @@ float3 GetDeferredLightColor()
     return _MainLightColor.rgb;
 }
 
-VividGBufferSurfaceData SampleVividGBuffer(float2 uv)
+uint2 GetPixelCoord(Varyings input)
 {
-    float4 rt0 = SAMPLE_TEXTURE2D_X(_GBuffer0, sampler_GBuffer0, uv);
-    float4 rt1 = SAMPLE_TEXTURE2D_X(_GBuffer1, sampler_GBuffer1, uv);
-    float4 rt2 = SAMPLE_TEXTURE2D_X(_GBuffer2, sampler_GBuffer2, uv);
-    float4 rt3 = SAMPLE_TEXTURE2D_X(_GBuffer3, sampler_GBuffer3, uv);
+    return uint2(input.positionCS.xy);
+}
+
+float2 GetPixelUV(uint2 pixelCoord)
+{
+    float2 invScaledScreenSize = rcp(max(_ScaledScreenParams.xy, float2(1.0, 1.0)));
+    return (float2(pixelCoord) + 0.5) * invScaledScreenSize;
+}
+
+VividGBufferSurfaceData LoadVividGBuffer(uint2 pixelCoord)
+{
+    float4 rt0 = LOAD_TEXTURE2D_X(_GBuffer0, pixelCoord);
+    float4 rt1 = LOAD_TEXTURE2D_X(_GBuffer1, pixelCoord);
+    float4 rt2 = LOAD_TEXTURE2D_X(_GBuffer2, pixelCoord);
+    float4 rt3 = LOAD_TEXTURE2D_X(_GBuffer3, pixelCoord);
     return UnpackVividGBufferSurfaceData(rt0, rt1, rt2, rt3);
 }
 
@@ -245,12 +245,14 @@ float4 Frag(Varyings input) : SV_Target
 {
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
-    float deviceDepth = SAMPLE_TEXTURE2D_X(_DepthTexture, sampler_DepthTexture, input.uv).r;
-    if (deviceDepth==UNITY_RAW_FAR_CLIP_VALUE)
+    uint2 pixelCoord = GetPixelCoord(input);
+    float deviceDepth = LOAD_TEXTURE2D_X(_DepthTexture, pixelCoord).r;
+    if (deviceDepth == UNITY_RAW_FAR_CLIP_VALUE)
         return float4(0.0, 0.0, 0.0, 1.0);
 
-    VividGBufferSurfaceData surfaceData = SampleVividGBuffer(input.uv);
-    float3 positionWS = ComputeWorldSpacePosition(input.uv, deviceDepth, _InvViewProjMatrix);
+    float2 uv = GetPixelUV(pixelCoord);
+    VividGBufferSurfaceData surfaceData = LoadVividGBuffer(pixelCoord);
+    float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, _InvViewProjMatrix);
     float3 lighting = EvaluateSimpleDeferredLighting(surfaceData, positionWS);
     return float4(lighting, 1.0);
 }

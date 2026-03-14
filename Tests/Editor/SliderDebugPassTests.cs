@@ -95,6 +95,127 @@ namespace VividRP.Editor.Tests
             Assert.That(GetFloatField(pass, "m_Slider"), Is.EqualTo(100f));
         }
 
+        [Test]
+        public void ResolveSliderValue_UsesVolumeOverride_WhenOverrideStateEnabled()
+        {
+            var volume = ScriptableObject.CreateInstance<SliderDebugVolume>();
+
+            try
+            {
+                volume.slider.overrideState = true;
+                volume.slider.value = 25f;
+
+                var slider = SliderDebugPass.ResolveSliderValue(80f, volume);
+
+                Assert.That(slider, Is.EqualTo(25f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(volume);
+            }
+        }
+
+        [Test]
+        public void CreateInstance_UsesMidpointDefaultSlider_WhenVolumeIsCreated()
+        {
+            var volume = ScriptableObject.CreateInstance<SliderDebugVolume>();
+
+            try
+            {
+                Assert.That(volume.slider.value, Is.EqualTo(50f));
+                Assert.That(volume.IsActive(), Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(volume);
+            }
+        }
+
+        [Test]
+        public void ResolveSliderValue_FallsBackToPassSlider_WhenVolumeOverrideIsDisabled()
+        {
+            var volume = ScriptableObject.CreateInstance<SliderDebugVolume>();
+
+            try
+            {
+                volume.slider.overrideState = false;
+                volume.slider.value = 25f;
+
+                var slider = SliderDebugPass.ResolveSliderValue(80f, volume);
+
+                Assert.That(slider, Is.EqualTo(80f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(volume);
+            }
+        }
+
+        [Test]
+        public void GetSliderDebugVolume_ReturnsStackComponent_WhenVolumeManagerIsInitialized()
+        {
+            var profile = ScriptableObject.CreateInstance<VolumeProfile>();
+
+            try
+            {
+                var component = profile.Add<SliderDebugVolume>(false);
+                component.slider.overrideState = true;
+                component.slider.value = 33f;
+
+                if (VolumeManager.instance.isInitialized)
+                    VolumeManager.instance.Deinitialize();
+
+                VolumeManager.instance.Initialize(profile);
+
+                var resolvedVolume = VividVolumeManagerUtility.GetSliderDebugVolume();
+
+                Assert.That(resolvedVolume, Is.Not.Null);
+                Assert.That(resolvedVolume.slider.value, Is.EqualTo(33f));
+            }
+            finally
+            {
+                if (VolumeManager.instance.isInitialized)
+                    VolumeManager.instance.Deinitialize();
+
+                Object.DestroyImmediate(profile);
+            }
+        }
+
+        [Test]
+        public void Prepare_UsesVolumeSlider_WhenVolumeOverrideIsActive()
+        {
+            var profile = ScriptableObject.CreateInstance<VolumeProfile>();
+            var pass = new SliderDebugPass();
+
+            try
+            {
+                var component = profile.Add<SliderDebugVolume>(false);
+                component.slider.overrideState = true;
+                component.slider.value = 33f;
+
+                if (VolumeManager.instance.isInitialized)
+                    VolumeManager.instance.Deinitialize();
+
+                VolumeManager.instance.Initialize(profile);
+
+                var frameData = new ContextContainer();
+                var cameraData = frameData.GetOrCreate<VividCameraData>();
+                cameraData.actualWidth = 640;
+                cameraData.actualHeight = 360;
+
+                pass.Prepare(frameData);
+
+                Assert.That(GetFloatField(pass, "m_ResolvedSlider"), Is.EqualTo(33f));
+            }
+            finally
+            {
+                if (VolumeManager.instance.isInitialized)
+                    VolumeManager.instance.Deinitialize();
+
+                Object.DestroyImmediate(profile);
+            }
+        }
+
         private static RenderGraphTexture GetTextureField(SliderDebugPass pass, string fieldName)
         {
             var field = typeof(SliderDebugPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);

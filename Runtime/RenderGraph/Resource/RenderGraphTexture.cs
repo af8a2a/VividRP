@@ -197,6 +197,10 @@ namespace VividRP.Runtime
         {
             return rt.innerHandle;
         }
+        public static implicit operator Texture(RenderGraphTexture rt)
+        {
+            return rt.innerHandle;
+        }
 
     }
 }

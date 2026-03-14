@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -64,9 +65,17 @@ namespace VividRP.Runtime
         }
 
         [StructLayout(LayoutKind.Sequential)]
+        private struct VisibleLightRenderDataRecord
+        {
+            public int visibleLightIndex;
+            public VividLightRenderData lightRenderData;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
         private struct DirectionalLightCandidate
         {
             public int visibleLightIndex;
+            public EntityId lightEntityId;
             public DirectionalLightData lightData;
             public float intensity;
         }
@@ -74,7 +83,6 @@ namespace VividRP.Runtime
         [StructLayout(LayoutKind.Sequential)]
         private struct PunctualLightCandidate
         {
-            public int visibleLightIndex;
             public PunctualLightData lightData;
         }
 
@@ -82,7 +90,7 @@ namespace VividRP.Runtime
         private struct BuildVisibleLightCandidatesJob : IJob
         {
             [ReadOnly]
-            public NativeArray<VisibleLight> visibleLights;
+            public NativeArray<VisibleLightRenderDataRecord> visibleLightRenderDataRecords;
 
             public bool collectDirectionalLights;
             public bool collectPunctualLights;
@@ -91,15 +99,25 @@ namespace VividRP.Runtime
 
             public void Execute()
             {
-                for (var lightIndex = 0; lightIndex < visibleLights.Length; lightIndex++)
+                for (var lightIndex = 0; lightIndex < visibleLightRenderDataRecords.Length; lightIndex++)
                 {
-                    var visibleLight = visibleLights[lightIndex];
+                    var visibleLightRenderDataRecord = visibleLightRenderDataRecords[lightIndex];
+                    var lightRenderData = visibleLightRenderDataRecord.lightRenderData;
 
-                    if (collectDirectionalLights && visibleLight.lightType == LightType.Directional)
-                        directionalLights.AddNoResize(CreateDirectionalLightCandidate(lightIndex, visibleLight));
+                    if (collectDirectionalLights && lightRenderData.lightType == LightType.Directional)
+                    {
+                        directionalLights.AddNoResize(
+                            CreateDirectionalLightCandidate(
+                                visibleLightRenderDataRecord.visibleLightIndex,
+                                lightRenderData));
+                    }
 
-                    if (collectPunctualLights && IsPunctualLightSupported(visibleLight))
-                        punctualLights.AddNoResize(CreatePunctualLightCandidate(lightIndex, visibleLight));
+                    if (collectPunctualLights && IsPunctualLightSupported(lightRenderData))
+                    {
+                        punctualLights.AddNoResize(
+                            CreatePunctualLightCandidate(
+                                lightRenderData));
+                    }
                 }
             }
         }
@@ -400,20 +418,6 @@ namespace VividRP.Runtime
             };
         }
 
-        private static DirectionalLightData CreateDirectionalLightData(VisibleLight visibleLight)
-        {
-            var localToWorld = visibleLight.localToWorldMatrix;
-            var directionWS = new Vector3(-localToWorld.m02, -localToWorld.m12, -localToWorld.m22);
-
-            return new DirectionalLightData
-            {
-                directionWS = directionWS,
-                shadowStrength = 0f,
-                color = new Vector3(visibleLight.finalColor.r, visibleLight.finalColor.g, visibleLight.finalColor.b),
-                renderingLayerMask = 0u,
-            };
-        }
-
         private static PunctualLightData CreatePunctualLightData(Light light)
         {
             return CreatePunctualLightData(VividLightRenderDatabase.instance.UpdateLightData(light));
@@ -441,28 +445,6 @@ namespace VividRP.Runtime
             };
         }
 
-        private static PunctualLightData CreatePunctualLightData(VisibleLight visibleLight)
-        {
-            var localToWorld = visibleLight.localToWorldMatrix;
-            var range = Mathf.Max(visibleLight.range, 0.001f);
-            var inverseRangeSquared = 1.0f / Mathf.Max(range * range, 1e-6f);
-            GetSpotAngleParameters(visibleLight.lightType, visibleLight.innerSpotAngle, visibleLight.spotAngle, out var angleScale, out var angleOffset);
-
-            return new PunctualLightData
-            {
-                positionWS = new Vector3(localToWorld.m03, localToWorld.m13, localToWorld.m23),
-                range = range,
-                color = new Vector3(visibleLight.finalColor.r, visibleLight.finalColor.g, visibleLight.finalColor.b),
-                lightType = GetPunctualLightType(visibleLight.lightType),
-                directionWS = new Vector3(localToWorld.m02, localToWorld.m12, localToWorld.m22),
-                angleScale = angleScale,
-                angleOffset = angleOffset,
-                inverseRangeSquared = inverseRangeSquared,
-                shadowStrength = 0f,
-                renderingLayerMask = 0u,
-            };
-        }
-
         private void UpdateVisibleLightData(NativeArray<VisibleLight> visibleLights, Light sunLight, VisibleLightCollectionMask collectionMask)
         {
             var collectDirectionalLights = (collectionMask & VisibleLightCollectionMask.Directional) != 0;
@@ -484,12 +466,15 @@ namespace VividRP.Runtime
                 return;
 
             var lightCapacity = Mathf.Max(visibleLights.Length, 1);
+            using var visibleLightRenderDataRecords = new NativeList<VisibleLightRenderDataRecord>(lightCapacity, Allocator.TempJob);
             using var directionalCandidates = new NativeList<DirectionalLightCandidate>(lightCapacity, Allocator.TempJob);
             using var punctualCandidates = new NativeList<PunctualLightCandidate>(lightCapacity, Allocator.TempJob);
 
+            CollectVisibleLightRenderDataRecords(visibleLights, visibleLightRenderDataRecords);
+
             var buildCandidatesJob = new BuildVisibleLightCandidatesJob
             {
-                visibleLights = visibleLights,
+                visibleLightRenderDataRecords = visibleLightRenderDataRecords.AsArray(),
                 collectDirectionalLights = collectDirectionalLights,
                 collectPunctualLights = collectPunctualLights,
                 directionalLights = directionalCandidates,
@@ -499,16 +484,13 @@ namespace VividRP.Runtime
             buildCandidatesJob.Schedule().Complete();
 
             if (collectDirectionalLights)
-                ApplyDirectionalLightCandidates(visibleLights, directionalCandidates, sunLight);
+                ApplyDirectionalLightCandidates(directionalCandidates, sunLight);
 
             if (collectPunctualLights)
-                ApplyPunctualLightCandidates(visibleLights, punctualCandidates);
+                ApplyPunctualLightCandidates(punctualCandidates);
         }
 
-        private void ApplyDirectionalLightCandidates(
-            NativeArray<VisibleLight> visibleLights,
-            NativeList<DirectionalLightCandidate> directionalCandidates,
-            Light sunLight)
+        private void ApplyDirectionalLightCandidates(NativeList<DirectionalLightCandidate> directionalCandidates, Light sunLight)
         {
             EnsureDirectionalLightCapacity(directionalCandidates.Length);
 
@@ -527,28 +509,15 @@ namespace VividRP.Runtime
             for (var directionalIndex = 0; directionalIndex < directionalLightCount; directionalIndex++)
             {
                 var candidate = directionalCandidates[directionalIndex];
-                var lightData = candidate.lightData;
-                var visibleLight = visibleLights[candidate.visibleLightIndex];
-                var light = visibleLight.light;
-                var lightEntityId = EntityId.None;
+                directionalLights[directionalIndex] = candidate.lightData;
 
-                if (light != null)
+                if (!sunLightEntityId.Equals(EntityId.None) && candidate.lightEntityId.Equals(sunLightEntityId))
                 {
-                    var trackedLightData = VividLightRenderDatabase.instance.UpdateLightData(light);
-                    lightEntityId = trackedLightData.lightEntityId;
-                    lightData.shadowStrength = trackedLightData.shadowStrength;
-                    lightData.renderingLayerMask = trackedLightData.renderingLayerMask;
-
-                    if (!sunLightEntityId.Equals(EntityId.None) && lightEntityId.Equals(sunLightEntityId))
-                    {
-                        mainLightIndex = candidate.visibleLightIndex;
-                        mainLightEntityId = lightEntityId;
-                        mainDirectionalLightIndex = directionalIndex;
-                        mainDirectionalLightEntityId = lightEntityId;
-                    }
+                    mainLightIndex = candidate.visibleLightIndex;
+                    mainLightEntityId = candidate.lightEntityId;
+                    mainDirectionalLightIndex = directionalIndex;
+                    mainDirectionalLightEntityId = candidate.lightEntityId;
                 }
-
-                directionalLights[directionalIndex] = lightData;
 
                 if (candidate.intensity <= brightestDirectionalIntensity)
                     continue;
@@ -556,7 +525,7 @@ namespace VividRP.Runtime
                 brightestDirectionalIntensity = candidate.intensity;
                 brightestVisibleLightIndex = candidate.visibleLightIndex;
                 brightestDirectionalIndex = directionalIndex;
-                brightestDirectionalEntityId = lightEntityId;
+                brightestDirectionalEntityId = candidate.lightEntityId;
             }
 
             if (mainDirectionalLightIndex >= 0)
@@ -568,47 +537,82 @@ namespace VividRP.Runtime
             mainDirectionalLightEntityId = brightestDirectionalEntityId;
         }
 
-        private void ApplyPunctualLightCandidates(
-            NativeArray<VisibleLight> visibleLights,
-            NativeList<PunctualLightCandidate> punctualCandidates)
+        private void ApplyPunctualLightCandidates(NativeList<PunctualLightCandidate> punctualCandidates)
         {
             EnsurePunctualLightCapacity(punctualCandidates.Length);
 
             punctualLightCount = punctualCandidates.Length;
 
             for (var punctualIndex = 0; punctualIndex < punctualLightCount; punctualIndex++)
+                punctualLights[punctualIndex] = punctualCandidates[punctualIndex].lightData;
+        }
+
+        private void CollectVisibleLightRenderDataRecords(
+            NativeArray<VisibleLight> visibleLights,
+            NativeList<VisibleLightRenderDataRecord> visibleLightRenderDataRecords)
+        {
+            for (var lightIndex = 0; lightIndex < visibleLights.Length; lightIndex++)
             {
-                var candidate = punctualCandidates[punctualIndex];
-                var lightData = candidate.lightData;
-                var light = visibleLights[candidate.visibleLightIndex].light;
+                var visibleLight = visibleLights[lightIndex];
+                var light = visibleLight.light;
 
-                if (light != null)
+                visibleLightRenderDataRecords.AddNoResize(new VisibleLightRenderDataRecord
                 {
-                    var trackedLightData = VividLightRenderDatabase.instance.UpdateLightData(light);
-                    lightData.shadowStrength = trackedLightData.shadowStrength;
-                    lightData.renderingLayerMask = trackedLightData.renderingLayerMask;
-                }
-
-                punctualLights[punctualIndex] = lightData;
+                    visibleLightIndex = lightIndex,
+                    lightRenderData = GetVisibleLightRenderData(light, visibleLight),
+                });
             }
         }
 
-        private static DirectionalLightCandidate CreateDirectionalLightCandidate(int visibleLightIndex, VisibleLight visibleLight)
+        private static VividLightRenderData GetVisibleLightRenderData(Light light, VisibleLight visibleLight)
+        {
+            if (light != null)
+                return VividLightRenderDatabase.instance.UpdateLightData(light);
+
+            return CreateLightRenderData(visibleLight);
+        }
+
+        private static VividLightRenderData CreateLightRenderData(VisibleLight visibleLight)
+        {
+            var localToWorld = visibleLight.localToWorldMatrix;
+            var range = Mathf.Max(visibleLight.range, 0.0f);
+            var finalColor = visibleLight.finalColor;
+
+            return new VividLightRenderData
+            {
+                lightEntityId = EntityId.None,
+                lightType = visibleLight.lightType,
+                positionWS = new Vector3(localToWorld.m03, localToWorld.m13, localToWorld.m23),
+                range = range,
+                forwardWS = new Vector3(localToWorld.m02, localToWorld.m12, localToWorld.m22),
+                intensity = GetLightIntensity(finalColor),
+                color = new Vector3(finalColor.r, finalColor.g, finalColor.b),
+                shadowStrength = 0.0f,
+                spotAngle = visibleLight.spotAngle,
+                innerSpotAngle = visibleLight.innerSpotAngle,
+                inverseRangeSquared = range > 0.0f ? 1.0f / Mathf.Max(range * range, 1e-6f) : 0.0f,
+                renderingLayerMask = 0u,
+                shadowRenderingLayerMask = 0u,
+                flags = VividLightRenderDataFlags.Enabled | VividLightRenderDataFlags.ActiveInHierarchy,
+            };
+        }
+
+        private static DirectionalLightCandidate CreateDirectionalLightCandidate(int visibleLightIndex, VividLightRenderData trackedLightData)
         {
             return new DirectionalLightCandidate
             {
                 visibleLightIndex = visibleLightIndex,
-                lightData = CreateDirectionalLightData(visibleLight),
-                intensity = GetLightIntensity(visibleLight.finalColor),
+                lightEntityId = trackedLightData.lightEntityId,
+                lightData = CreateDirectionalLightData(trackedLightData),
+                intensity = GetLightIntensity(trackedLightData.color),
             };
         }
 
-        private static PunctualLightCandidate CreatePunctualLightCandidate(int visibleLightIndex, VisibleLight visibleLight)
+        private static PunctualLightCandidate CreatePunctualLightCandidate(VividLightRenderData trackedLightData)
         {
             return new PunctualLightCandidate
             {
-                visibleLightIndex = visibleLightIndex,
-                lightData = CreatePunctualLightData(visibleLight),
+                lightData = CreatePunctualLightData(trackedLightData),
             };
         }
 
@@ -633,6 +637,12 @@ namespace VividRP.Runtime
         {
             return (visibleLight.lightType == LightType.Point || visibleLight.lightType == LightType.Spot)
                    && visibleLight.range > 0.0f;
+        }
+
+        private static bool IsPunctualLightSupported(VividLightRenderData trackedLightData)
+        {
+            return (trackedLightData.lightType == LightType.Point || trackedLightData.lightType == LightType.Spot)
+                   && trackedLightData.range > 0.0f;
         }
 
         private static uint GetPunctualLightType(LightType lightType)
@@ -666,7 +676,7 @@ namespace VividRP.Runtime
 
         private static float GetLightIntensity(Vector3 finalColor)
         {
-            return Mathf.Max(finalColor.x, finalColor.y, finalColor.z);
+            return math.max(finalColor.x, math.max(finalColor.y, finalColor.z));
         }
     }
 }

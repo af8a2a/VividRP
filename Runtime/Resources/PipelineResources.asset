@@ -43,3 +43,5 @@ MonoBehaviour:
     ResourceObject: {fileID: 2800000, guid: 3c978153caa04294a8c9bdef3ded0594, type: 3}
   - ResourceName: Texture/BlueNoise/SobolOwenScrambled256.png
     ResourceObject: {fileID: 2800000, guid: 740f2c43de4841599d4b6f676ef3d897, type: 3}
+  - ResourceName: Texture/Default/DefaultHDRISky.exr
+    ResourceObject: {fileID: 8900000, guid: 6ef3a4217fa94c6ab3c3ebef707ef3f1, type: 3}

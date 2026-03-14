@@ -13,9 +13,36 @@ namespace VividRP.Runtime
         public MinFloatParameter exposure = new(1f, 0f);
         public ClampedFloatParameter rotation = new(0f, -180f, 180f);
 
+        protected override void OnEnable()
+        {
+            EnsureDefaultSkyCubemapAssigned();
+            base.OnEnable();
+        }
+
+        internal static Cubemap GetDefaultSkyCubemap()
+        {
+            return PipelineResourceManager.Get<VividRPCoreResources>().DefaultHDRISkyCubemap;
+        }
+
+        public Cubemap GetSkyCubemapOrDefault()
+        {
+            return skyCubemap.value != null ? skyCubemap.value : GetDefaultSkyCubemap();
+        }
+
         public bool HasSkyCubemap()
         {
-            return skyCubemap.value != null;
+            return GetSkyCubemapOrDefault() != null;
+        }
+
+        private void EnsureDefaultSkyCubemapAssigned()
+        {
+            if (skyCubemap == null)
+                skyCubemap = new NoInterpCubemapParameter(null);
+
+            if (skyCubemap.value != null)
+                return;
+
+            skyCubemap.value = GetDefaultSkyCubemap();
         }
     }
 }

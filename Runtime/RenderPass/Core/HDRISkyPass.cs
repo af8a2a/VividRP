@@ -54,11 +54,11 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Record(RasterGraphContext context)
         {
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
-            var skySettings = VolumeManager.instance.stack.GetComponent<HDRISkyVolume>();
-            var cubemap = skySettings.skyCubemap.value;
-            var tint = skySettings.tint.value ;
-            var exposure = skySettings.exposure.value;
-            var rotation = skySettings.rotation.value;
+            var skySettings = VolumeManager.instance.stack?.GetComponent<HDRISkyVolume>();
+            var cubemap = skySettings?.GetSkyCubemapOrDefault();
+            var tint = skySettings?.tint.value ?? Color.white;
+            var exposure = skySettings?.exposure.value ?? 1f;
+            var rotation = skySettings?.rotation.value ?? 0f;
 
             if (cubemap != null)
             {

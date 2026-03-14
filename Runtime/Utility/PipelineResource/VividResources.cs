@@ -22,6 +22,9 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/HDRISky")]
         public Shader HDRISkyShader;
 
+        [ResourcePath("Texture/Default/DefaultHDRISky.exr")]
+        public Cubemap DefaultHDRISkyCubemap;
+
         
         [ResourcePath("Shaders/Core/Private/CopyDepth")]
         public Shader CopyDepthShader;

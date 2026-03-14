@@ -1,11 +1,13 @@
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
+using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
+using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
 
 namespace VividRP.Editor.Tests
 {
@@ -58,6 +60,36 @@ namespace VividRP.Editor.Tests
             Assert.That(skyParam.y, Is.EqualTo(2.5f));
             Assert.That(skyParam.z, Is.EqualTo(-45f));
             Assert.That(skyParam.w, Is.EqualTo(0f));
+        }
+
+        [Test]
+        public void VividRPCoreResources_DeclaresDefaultHDRISkyCubemap()
+        {
+            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.DefaultHDRISkyCubemap));
+
+            Assert.That(field, Is.Not.Null);
+
+            var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
+
+            Assert.That(resourcePath, Is.Not.Null);
+            Assert.That(resourcePath.Path, Is.EqualTo("Texture/Default/DefaultHDRISky.exr"));
+        }
+
+        [Test]
+        public void CreateInstance_AssignsDefaultSkyCubemap_WhenVolumeComponentIsCreated()
+        {
+            var component = ScriptableObject.CreateInstance<HDRISkyVolume>();
+
+            try
+            {
+                Assert.That(HDRISkyVolume.GetDefaultSkyCubemap(), Is.Not.Null);
+                Assert.That(component.skyCubemap.value, Is.SameAs(HDRISkyVolume.GetDefaultSkyCubemap()));
+                Assert.That(component.HasSkyCubemap(), Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(component);
+            }
         }
 
         private static void AssertTextureSize(HDRISkyPass pass, string fieldName, int expectedWidth, int expectedHeight)

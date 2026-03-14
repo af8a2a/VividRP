@@ -4,15 +4,16 @@
   "version": "0.1.0",
   "unity": "6000.5",
   "unityRelease": "0a7",
-  "description": "Replace this with your own description of the package. \n\nFor best results, use this text to summarize: \n▪ What the package does \n▪ How it can benefit the user \n\nNote: Special formatting characters are supported, including line breaks ('\\n') and bullets ('\\u25AA').",
+  "description": "VividRP is Unity's High-End-platform rendering solution, built on the Scriptable Render Pipeline (SRP) architecture. It is designed to deliver optimized graphics for a wide range of hardware, from mobile devices to high-end PCs and consoles.",
   "dependencies": {
     "com.unity.render-pipelines.core": "17.5.0",
     "com.unity.test-framework": "1.6.0",
     "com.unity.graphtoolkit": "0.4.0-exp.2",
-    "com.unity.timeline": "1.8.9"
+    "com.unity.timeline": "1.8.9",
+    "com.unity.shadergraph": "17.5.0"
   },
   "author": {
-    "name": "jwt",
+    "name": "af8a2a",
     "url": "http://www.example.com",
     "email": "example@email.com"
   },

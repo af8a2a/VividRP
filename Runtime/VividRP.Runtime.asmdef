@@ -2,7 +2,12 @@
     "name": "VividRP.Runtime",
     "rootNamespace": "VividRP.Runtime",
     "references": [
-        "GUID:df380645f10b7bc4b97d4f5eb6303d95"
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.RenderPipelines.Core.Runtime.Shared",
+        "Unity.Mathematics",
+        "Unity.Collections",
+        "Unity.RenderPipelines.GPUDriven.Runtime",
+        "Unity.Burst"
     ],
     "includePlatforms": [],
     "excludePlatforms": []

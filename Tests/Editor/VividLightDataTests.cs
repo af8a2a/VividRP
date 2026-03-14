@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Reflection;
 using NUnit.Framework;
 using Unity.Collections;
 using UnityEngine;
@@ -169,6 +170,81 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void UpdateDirectionalLights_CollectsDirectionalVisibleLights_WhenNativeArrayIsProvided()
+        {
+            var visibleLights = new NativeArray<VisibleLight>(3, Allocator.Temp);
+            var lightData = new VividLightData();
+
+            try
+            {
+                visibleLights[0] = CreateVisibleLight(
+                    LightType.Point,
+                    Color.green,
+                    Matrix4x4.TRS(new Vector3(1.0f, 2.0f, 3.0f), Quaternion.identity, Vector3.one),
+                    range: 6.0f);
+                visibleLights[1] = CreateVisibleLight(
+                    LightType.Directional,
+                    new Color(1.5f, 1.0f, 0.5f),
+                    Matrix4x4.TRS(Vector3.zero, Quaternion.LookRotation(Vector3.forward), Vector3.one));
+                visibleLights[2] = CreateVisibleLight(
+                    LightType.Directional,
+                    new Color(0.5f, 0.25f, 0.125f),
+                    Matrix4x4.TRS(Vector3.zero, Quaternion.LookRotation(Vector3.right), Vector3.one));
+
+                lightData.UpdateDirectionalLights(visibleLights, null);
+
+                Assert.That(lightData.directionalLightCount, Is.EqualTo(2));
+                Assert.That(lightData.mainDirectionalLightIndex, Is.EqualTo(0));
+                Assert.That(lightData.mainLightIndex, Is.EqualTo(1));
+                AssertDirectionalLight(lightData.directionalLights[0], -Vector3.forward, new Vector3(1.5f, 1.0f, 0.5f), 0.0f, 0u);
+                AssertDirectionalLight(lightData.directionalLights[1], -Vector3.right, new Vector3(0.5f, 0.25f, 0.125f), 0.0f, 0u);
+            }
+            finally
+            {
+                visibleLights.Dispose();
+            }
+        }
+
+        [Test]
+        public void UpdatePunctualLights_CollectsPointAndSpotVisibleLights_WhenNativeArrayIsProvided()
+        {
+            var visibleLights = new NativeArray<VisibleLight>(3, Allocator.Temp);
+            var lightData = new VividLightData();
+
+            try
+            {
+                visibleLights[0] = CreateVisibleLight(
+                    LightType.Directional,
+                    Color.white,
+                    Matrix4x4.TRS(Vector3.zero, Quaternion.LookRotation(Vector3.forward), Vector3.one));
+                visibleLights[1] = CreateVisibleLight(
+                    LightType.Point,
+                    new Color(0.25f, 0.5f, 0.75f),
+                    Matrix4x4.TRS(new Vector3(1.0f, 2.0f, 3.0f), Quaternion.identity, Vector3.one),
+                    range: 8.0f);
+                visibleLights[2] = CreateVisibleLight(
+                    LightType.Spot,
+                    new Color(0.9f, 0.4f, 0.1f),
+                    Matrix4x4.TRS(new Vector3(-1.0f, 0.5f, 2.0f), Quaternion.LookRotation(Vector3.right), Vector3.one),
+                    range: 12.0f,
+                    spotAngle: 50.0f,
+                    innerSpotAngle: 30.0f);
+
+                lightData.UpdatePunctualLights(visibleLights);
+
+                Assert.That(lightData.punctualLightCount, Is.EqualTo(2));
+                AssertPunctualLight(lightData.punctualLights[0], new Vector3(1.0f, 2.0f, 3.0f), new Vector3(0.25f, 0.5f, 0.75f), 8.0f, 0u, Vector3.forward);
+                AssertPunctualLight(lightData.punctualLights[1], new Vector3(-1.0f, 0.5f, 2.0f), new Vector3(0.9f, 0.4f, 0.1f), 12.0f, 1u, Vector3.right);
+                Assert.That(lightData.punctualLights[0].renderingLayerMask, Is.Zero);
+                Assert.That(lightData.punctualLights[1].angleScale, Is.GreaterThan(0.0f));
+            }
+            finally
+            {
+                visibleLights.Dispose();
+            }
+        }
+
+        [Test]
         public void FindMainLightIndex_ReturnsSunLight_WhenVisibleDirectionalSunExists()
         {
             var sunObject = new GameObject("Sun Light Test");
@@ -289,6 +365,36 @@ namespace VividRP.Editor.Tests
             Assert.That(actual.directionWS.x, Is.EqualTo(expectedDirection.x).Within(0.0001f));
             Assert.That(actual.directionWS.y, Is.EqualTo(expectedDirection.y).Within(0.0001f));
             Assert.That(actual.directionWS.z, Is.EqualTo(expectedDirection.z).Within(0.0001f));
+        }
+
+        private static VisibleLight CreateVisibleLight(
+            LightType lightType,
+            Color finalColor,
+            Matrix4x4 localToWorldMatrix,
+            float range = 0.0f,
+            float spotAngle = 30.0f,
+            float innerSpotAngle = 30.0f)
+        {
+            var visibleLight = default(VisibleLight);
+            SetVisibleLightField(ref visibleLight, "m_LightType", lightType);
+            SetVisibleLightField(ref visibleLight, "m_FinalColor", finalColor);
+            SetVisibleLightField(ref visibleLight, "m_LocalToWorldMatrix", localToWorldMatrix);
+            SetVisibleLightField(ref visibleLight, "m_Range", range);
+            SetVisibleLightField(ref visibleLight, "m_SpotAngle", spotAngle);
+            SetVisibleLightField(ref visibleLight, "m_InnerSpotAngle", innerSpotAngle);
+            SetVisibleLightField(ref visibleLight, "m_EntityId", EntityId.None);
+            return visibleLight;
+        }
+
+        private static void SetVisibleLightField<T>(ref VisibleLight visibleLight, string fieldName, T value)
+        {
+            var field = typeof(VisibleLight).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(field, Is.Not.Null, $"Expected VisibleLight to contain field '{fieldName}'.");
+
+            object boxedVisibleLight = visibleLight;
+            field.SetValue(boxedVisibleLight, value);
+            visibleLight = (VisibleLight)boxedVisibleLight;
         }
     }
 }

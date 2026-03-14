@@ -37,24 +37,39 @@ namespace VividRP.Editor.Tests
         public void Prepare_ResizesClassificationBuffers_WhenCameraSizeChanges()
         {
             var pass = new ClassificationPass();
-            var frameData = new ContextContainer();
-            var cameraData = frameData.GetOrCreate<VividCameraData>();
-            cameraData.actualWidth = 320;
-            cameraData.actualHeight = 180;
+            try
+            {
+                var frameData = new ContextContainer();
+                var cameraData = frameData.GetOrCreate<VividCameraData>();
+                cameraData.actualWidth = 320;
+                cameraData.actualHeight = 180;
 
-            pass.Prepare(frameData);
+                pass.Prepare(frameData);
 
-            AssertTextureSize(pass, "m_GBuffer0", 320, 180);
-            AssertTextureSize(pass, "m_DepthTexture", 320, 180);
+                AssertTextureSize(pass, "m_GBuffer0", 320, 180);
+                AssertTextureSize(pass, "m_DepthTexture", 320, 180);
 
-            var expectedPixelCount = 320 * 180;
-            AssertStructuredBuffer(pass, "m_StandardMaterialIndices", expectedPixelCount, sizeof(uint), GraphicsBuffer.Target.Structured);
-            AssertStructuredBuffer(pass, "m_FabricMaterialIndices", expectedPixelCount, sizeof(uint), GraphicsBuffer.Target.Structured);
-            AssertStructuredBuffer(pass, "m_ClearCoatMaterialIndices", expectedPixelCount, sizeof(uint), GraphicsBuffer.Target.Structured);
-            AssertStructuredBuffer(pass, "m_MaterialClassCounts", 3, sizeof(uint), GraphicsBuffer.Target.Structured);
-            AssertStructuredBuffer(pass, "m_StandardIndirectArgs", 4, sizeof(uint), GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
-            AssertStructuredBuffer(pass, "m_FabricIndirectArgs", 4, sizeof(uint), GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
-            AssertStructuredBuffer(pass, "m_ClearCoatIndirectArgs", 4, sizeof(uint), GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
+                var expectedPixelCount = 320 * 180;
+                AssertStructuredBuffer(pass, "m_StandardMaterialIndices", expectedPixelCount, sizeof(uint), GraphicsBuffer.Target.Structured);
+                AssertStructuredBuffer(pass, "m_FabricMaterialIndices", expectedPixelCount, sizeof(uint), GraphicsBuffer.Target.Structured);
+                AssertStructuredBuffer(pass, "m_ClearCoatMaterialIndices", expectedPixelCount, sizeof(uint), GraphicsBuffer.Target.Structured);
+                AssertStructuredBuffer(pass, "m_MaterialClassCounts", 3, sizeof(uint), GraphicsBuffer.Target.Structured);
+                AssertStructuredBuffer(pass, "m_StandardIndirectArgs", 4, sizeof(uint), GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
+                AssertStructuredBuffer(pass, "m_FabricIndirectArgs", 4, sizeof(uint), GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
+                AssertStructuredBuffer(pass, "m_ClearCoatIndirectArgs", 4, sizeof(uint), GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
+
+                AssertImportedBuffer(pass, "m_StandardMaterialIndices", expectedPixelCount, sizeof(uint));
+                AssertImportedBuffer(pass, "m_FabricMaterialIndices", expectedPixelCount, sizeof(uint));
+                AssertImportedBuffer(pass, "m_ClearCoatMaterialIndices", expectedPixelCount, sizeof(uint));
+                AssertImportedBuffer(pass, "m_MaterialClassCounts", 3, sizeof(uint));
+                AssertImportedBuffer(pass, "m_StandardIndirectArgs", 4, sizeof(uint));
+                AssertImportedBuffer(pass, "m_FabricIndirectArgs", 4, sizeof(uint));
+                AssertImportedBuffer(pass, "m_ClearCoatIndirectArgs", 4, sizeof(uint));
+            }
+            finally
+            {
+                pass.Dispose();
+            }
         }
 
         [Test]
@@ -86,6 +101,27 @@ namespace VividRP.Editor.Tests
             Assert.That(buffer.desc.Count, Is.EqualTo(expectedCount));
             Assert.That(buffer.desc.Stride, Is.EqualTo(expectedStride));
             Assert.That(buffer.desc.Target, Is.EqualTo(expectedTarget));
+        }
+
+        private static void AssertImportedBuffer(ClassificationPass pass, string fieldName, int expectedCount, int expectedStride)
+        {
+            var field = typeof(ClassificationPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(field, Is.Not.Null);
+
+            var buffer = (RenderGraphBuffer)field.GetValue(pass);
+            Assert.That(buffer, Is.Not.Null);
+
+            var importedGraphicsBufferProperty = typeof(RenderGraphBuffer).GetProperty(
+                "ImportedGraphicsBuffer",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(importedGraphicsBufferProperty, Is.Not.Null);
+
+            var importedGraphicsBuffer = (GraphicsBuffer)importedGraphicsBufferProperty.GetValue(buffer);
+            Assert.That(importedGraphicsBuffer, Is.Not.Null);
+            Assert.That(importedGraphicsBuffer.count, Is.GreaterThanOrEqualTo(expectedCount));
+            Assert.That(importedGraphicsBuffer.stride, Is.EqualTo(expectedStride));
         }
     }
 }

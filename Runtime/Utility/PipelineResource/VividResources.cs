@@ -34,5 +34,11 @@ namespace VividRP.Runtime
 
         [ResourcePath("Shaders/Material/MaterialClassification")]
         public ComputeShader MaterialClassificationCompute;
+
+        [ResourcePath("Shaders/Material/DeferredDirectionalLighting")]
+        public ComputeShader DeferredDirectionalLightingCompute;
+
+        [ResourcePath("Shaders/Material/DeferredDirectionalLightingIndirect")]
+        public Shader DeferredDirectionalLightingIndirectShader;
     }
 }

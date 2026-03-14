@@ -62,6 +62,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_ClassificationHeight = 1;
         private int m_DispatchGroupCountX = 1;
         private int m_DispatchGroupCountY = 1;
+        private GraphicsBuffer m_StandardMaterialIndicesBuffer;
+        private GraphicsBuffer m_FabricMaterialIndicesBuffer;
+        private GraphicsBuffer m_ClearCoatMaterialIndicesBuffer;
+        private GraphicsBuffer m_MaterialClassCountsBuffer;
+        private GraphicsBuffer m_StandardIndirectArgsBuffer;
+        private GraphicsBuffer m_FabricIndirectArgsBuffer;
+        private GraphicsBuffer m_ClearCoatIndirectArgsBuffer;
 
         public ClassificationPass()
         {
@@ -116,6 +123,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizeIndirectArgsBuffer(m_StandardIndirectArgs);
             ResizeIndirectArgsBuffer(m_FabricIndirectArgs);
             ResizeIndirectArgsBuffer(m_ClearCoatIndirectArgs);
+            EnsureImportedBuffers();
         }
 
         public override void Record(ComputeGraphContext context)
@@ -151,6 +159,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Dispose()
         {
+            ReleaseImportedBuffers();
             m_ClassificationCompute = null;
             m_ClearCountsKernel = -1;
             m_ClassifyMaterialKernel = -1;
@@ -238,6 +247,55 @@ namespace VividRP.Runtime.RenderPass.Core
             buffer.desc.Count = IndirectArgsElementCount;
             buffer.desc.Stride = sizeof(uint);
             buffer.desc.Target = GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments;
+        }
+
+        private void EnsureImportedBuffers()
+        {
+            EnsureImportedBuffer(ref m_StandardMaterialIndicesBuffer, m_StandardMaterialIndices);
+            EnsureImportedBuffer(ref m_FabricMaterialIndicesBuffer, m_FabricMaterialIndices);
+            EnsureImportedBuffer(ref m_ClearCoatMaterialIndicesBuffer, m_ClearCoatMaterialIndices);
+            EnsureImportedBuffer(ref m_MaterialClassCountsBuffer, m_MaterialClassCounts);
+            EnsureImportedBuffer(ref m_StandardIndirectArgsBuffer, m_StandardIndirectArgs);
+            EnsureImportedBuffer(ref m_FabricIndirectArgsBuffer, m_FabricIndirectArgs);
+            EnsureImportedBuffer(ref m_ClearCoatIndirectArgsBuffer, m_ClearCoatIndirectArgs);
+        }
+
+        private void ReleaseImportedBuffers()
+        {
+            ReleaseImportedBuffer(ref m_StandardMaterialIndicesBuffer, m_StandardMaterialIndices);
+            ReleaseImportedBuffer(ref m_FabricMaterialIndicesBuffer, m_FabricMaterialIndices);
+            ReleaseImportedBuffer(ref m_ClearCoatMaterialIndicesBuffer, m_ClearCoatMaterialIndices);
+            ReleaseImportedBuffer(ref m_MaterialClassCountsBuffer, m_MaterialClassCounts);
+            ReleaseImportedBuffer(ref m_StandardIndirectArgsBuffer, m_StandardIndirectArgs);
+            ReleaseImportedBuffer(ref m_FabricIndirectArgsBuffer, m_FabricIndirectArgs);
+            ReleaseImportedBuffer(ref m_ClearCoatIndirectArgsBuffer, m_ClearCoatIndirectArgs);
+        }
+
+        private static void EnsureImportedBuffer(ref GraphicsBuffer graphicsBuffer, RenderGraphBuffer renderGraphBuffer)
+        {
+            if (renderGraphBuffer?.desc == null)
+                return;
+
+            var requiredCount = Mathf.Max(1, renderGraphBuffer.desc.Count);
+            var requiredStride = Mathf.Max(1, renderGraphBuffer.desc.Stride);
+            var requiredTarget = renderGraphBuffer.desc.Target;
+
+            if (graphicsBuffer == null
+                || graphicsBuffer.count < requiredCount
+                || graphicsBuffer.stride != requiredStride)
+            {
+                graphicsBuffer?.Dispose();
+                graphicsBuffer = new GraphicsBuffer(requiredTarget, requiredCount, requiredStride);
+            }
+
+            renderGraphBuffer.SetImportedBuffer(graphicsBuffer);
+        }
+
+        private static void ReleaseImportedBuffer(ref GraphicsBuffer graphicsBuffer, RenderGraphBuffer renderGraphBuffer)
+        {
+            renderGraphBuffer?.ClearImportedBuffer();
+            graphicsBuffer?.Dispose();
+            graphicsBuffer = null;
         }
     }
 }

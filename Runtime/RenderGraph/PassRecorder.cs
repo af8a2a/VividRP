@@ -214,6 +214,13 @@ namespace VividRP.Runtime
             if (bufferCache.TryGetValue(buffer, out var handle))
                 return handle;
 
+            if (buffer != null && buffer.HasImportedBuffer)
+            {
+                handle = renderGraph.ImportBuffer(buffer.ImportedGraphicsBuffer);
+                bufferCache.Add(buffer, handle);
+                return handle;
+            }
+
             handle = renderGraph.CreateBuffer(buffer.desc);
             bufferCache.Add(buffer, handle);
             return handle;

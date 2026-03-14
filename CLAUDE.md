@@ -19,7 +19,7 @@ Run EditMode tests with Unity Test Framework:
 Unity.exe -batchmode -projectPath "E:\VividRP_Reborn" -runTests -testPlatform EditMode -testResults Logs/editmode-results.xml -quit -logFile Logs/editmode.log
 ```
 
-Tests are located in `Tests/Editor/` under the `VividRP.Editor.Tests` assembly. No PlayMode tests exist yet.
+Tests are located in `Tests/Editor/` under the `VividRP.Editor.Tests` assembly. No committed PlayMode tests exist yet — add the relevant test assembly before documenting or relying on a PlayMode batch command.
 
 ## Assembly Structure
 
@@ -49,7 +49,7 @@ Runtime/
   Utility/
     PipelineResource/      — Reflection-based resource loading
   Resources/               — PipelineResources.asset (loaded via PipelineResourceManager)
-  CoreRP/                  — Core RP extensions
+  Extension/CoreRP/        — Core RP extension glue plus VividRP.CoreRP.Runtime.asmref
 Shaders/                   — Shader source files (top-level package folder, not under Runtime/)
 Editor/
   PipelineResource/        — PipelineResourceUpdater.cs
@@ -58,7 +58,10 @@ Editor/
   RenderPipeline/          — Global settings, asset editor, volume profile utilities
   ComponentEditor/         — Camera and light component editors
   Material/                — Shader GUI implementations
+  Shader/                  — Editor-only shader assets
+  VolumeEditor/            — Volume component custom inspectors
 Tests/Editor/              — EditMode test suite
+Tests/Runtime/             — Runtime/PlayMode tests (add assembly before relying on batch command)
 Documentation/             — Package documentation
 ```
 
@@ -296,8 +299,9 @@ All post-processing components implement `IPostProcessComponent` with `IsActive(
 ## Conventions
 
 - Pass classes extend `ComputePass`, `RasterPass`, or `UnsafePass` and implement `IRenderPass`
-- Resource fields on passes use `[RenderGraphResource]` attribute
-- Resource classes use `[PipelineResource]` on the class and `[ResourcePath(path)]` on fields
+- Resource fields on passes use `[RenderGraphResource]` attribute — put it on fields, not properties; the collector reflects instance fields across the inheritance chain and ignores null resource values
+- Initialize pass resource descriptors before `Initialize()` runs; a null `RenderGraphTexture`, `RenderGraphBuffer`, or `RenderGraphRenderList` field is skipped and will not get ports or runtime setup
+- Resource classes use `[PipelineResource]` on the class and `[ResourcePath(path)]` on fields; expose resource bindings as `public` instance fields — the updater does not populate private fields
 - Private fields use `m_` prefix (Unity convention)
 - `PassRecorder` is a `static partial class` split across two files
 - Frame data accessed via `ContextContainer.Get<VividCameraData>()` / `ContextContainer.Get<VividRenderingData>()`
@@ -306,15 +310,26 @@ All post-processing components implement `IPostProcessComponent` with `IsActive(
 - Generated files use `.g.cs` suffix and should not be manually edited
 - Node data classes end with `NodeData` suffix
 - Test files end with `Tests.cs` suffix
+- For read/write resources, input port uses `<FieldName>_In`, output port uses `<FieldName>_Out`
+- Preserve existing resource field names when changing pass APIs — read/write ports, preview keys, compiled graph bindings, and tests rely on those exact names
+
+## RenderGraph Rules
+
+- New passes should implement `Create()`, `Prepare(...)`, `Record(...)`, and `Dispose()` coherently; `Prepare(...)` is where per-frame descriptor sizing/imports should happen
+- Use the appropriate resource wrapper type for graph integration: `RenderGraphTexture`, `RenderGraphBuffer`, `RenderGraphRenderList`, and `RenderGraphAccelerationStructureDesc` where supported by the runtime/editor flow
+- If a pass changes its exposed resource layout dynamically, keep `IDynamicPassResourceLayout` behavior and the related editor/runtime tests in sync
+- If a pass supports async compute or global state modification, express that through the existing marker interfaces instead of ad hoc flags
+- When adding a runtime pass type, verify the generated node registry, navigation helpers, compilation utility, and pass-node tests still reflect the new pass correctly
+- Preview nodes are texture-focused; if you add new preview behavior for buffers, render lists, or history resources, update both validator/drawer logic and tests in the same change
 
 ## Coding Style
 
-- Use 4-space indentation, braces on new lines
+- Use 4-space indentation, braces on new lines, and small focused methods
 - Match namespaces to area: `VividRP.Runtime`, `VividRP.Runtime.RenderPass.Core`, `VividRP.Editor.RenderGraph`, `VividRP.Editor.Tests`
 - Preserve reflection-driven contracts: `[RenderGraphResource]` fields are discovered by PassRecorder and used for editor port generation
 - Keep GraphToolkit naming consistent: node models end with `NodeData`, generated files use `.g.cs`
 - Serialized fields often use `m_` prefix, but match the style of the file you're editing
-- Use `Undo.RecordObject(...)` before mutating serialized assets in editor code
+- Use `Undo.RecordObject(...)` before mutating serialized assets in editor code; also persist with `EditorUtility.SetDirty(...)` and `AssetDatabase.SaveAssetIfDirty(...)` when following existing sync/generation patterns
 - Prefer minimal visibility (`internal`, `internal sealed`) for editor helpers
 - Do not hand-edit generated files like `GeneratedRenderPassNodes.g.cs` or `PipelineResources.asset`
 
@@ -322,8 +337,8 @@ All post-processing components implement `IPostProcessComponent` with `IsActive(
 
 - Use Unity Test Framework with NUnit under `Tests/Editor/`
 - Follow naming pattern: `MethodName_ExpectedBehavior_WhenCondition`
-- Add focused EditMode tests with each fix or feature
-- Test pass-port generation, descriptor drawers, preview metadata, registry generation, and reflection-based behavior
+- Add focused EditMode tests with each fix or feature, especially around pass-port generation, descriptor drawers, preview metadata, registry generation, reflection-based pass/resource behavior, render-list/history resources, and custom editor utilities
+- If a change introduces runtime-only behavior that cannot be validated meaningfully in current EditMode tests, add the appropriate `Tests/Runtime/` or PlayMode coverage in the same change
 - Prefer self-contained tests using dummy pass types or temporary ScriptableObjects
 
 ## Commit Guidelines
@@ -331,13 +346,16 @@ All post-processing components implement `IPostProcessComponent` with `IsActive(
 - Prefer short imperative commit titles
 - Use Conventional Commit prefixes when practical: `feat:`, `fix:`, `test:`, `refactor:`
 - Include generated/synchronized outputs in the same commit: `GeneratedRenderPassNodes.g.cs`, `PipelineResources.asset`, `.meta` files
-- PRs should summarize purpose, key changes, and EditMode test evidence
-- Include screenshots for RenderGraph editor UI changes
+- PRs should summarize purpose, key changes, package-path assumptions, and EditMode test evidence
+- Include screenshots or GIFs for RenderGraph editor UI changes and note shader-visible behavior changes when touching passes, shaders, or pipeline resources
 
 ## Important Notes
 
 - Unity `.meta` files are auto-generated; do not manually create or edit them
-- Package path changes require updates to both `PipelineResourceUpdater.cs` and `RenderPassNodeRegistryGenerator.cs`
+- Do not hand-edit generated or synchronized artifacts such as `Editor/RenderGraph/GeneratedRenderPassNodes.g.cs` or `Runtime/Resources/PipelineResources.asset` unless you are intentionally fixing their generator/sync pipeline
+- Unity `.meta` files, generated assets, and package-relative paths must stay in sync when moving or renaming files
+- The repository currently uses both `Packages/com.af8a2a.vividrp/...` and `Packages/VividRP/...` path constants; do not “fix” only one side during refactors — audit all package-relative paths together
+- Package path changes require updates to both `Editor/PipelineResource/PipelineResourceUpdater.cs` and `Editor/RenderGraph/RenderPassNodeRegistryGenerator.cs`
 - Quick searches:
   - Pass/resource search: `rg "IRenderPass|RenderGraphResource|PipelineResource|ResourcePath" Runtime Editor Tests`
   - Editor/codegen search: `rg "GeneratedRenderPassNodes|BuildRegistrations|RegisteredPassTypeName" Editor Runtime Tests`

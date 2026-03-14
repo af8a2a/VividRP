@@ -1,0 +1,182 @@
+#pragma kernel DeferredDirectionalLighting
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
+
+Texture2D<float4> _GBuffer0;
+Texture2D<float4> _GBuffer1;
+Texture2D<float4> _GBuffer2;
+Texture2D<float4> _GBuffer3;
+Texture2D<float> _DepthTexture;
+
+RWTexture2D<float4> _LightingTexture;
+
+uint _LightingWidth;
+uint _LightingHeight;
+
+static const float3 kDielectricF0 = float3(0.04, 0.04, 0.04);
+
+float Pow5Fast(float value)
+{
+    float value2 = value * value;
+    return value2 * value2 * value;
+}
+
+float D_GGX(float nDotH, float linearRoughness)
+{
+    float alpha = max(linearRoughness, 0.002);
+    float alpha2 = alpha * alpha;
+    float denominator = nDotH * nDotH * (alpha2 - 1.0) + 1.0;
+    return alpha2 / max(PI * denominator * denominator, 1e-6);
+}
+
+float V_SmithGGXCorrelated(float nDotV, float nDotL, float linearRoughness)
+{
+    float alpha = max(linearRoughness, 0.002);
+    float alpha2 = alpha * alpha;
+
+    float lambdaV = nDotL * sqrt(max((nDotV - nDotV * alpha2) * nDotV + alpha2, 1e-6));
+    float lambdaL = nDotV * sqrt(max((nDotL - nDotL * alpha2) * nDotL + alpha2, 1e-6));
+
+    return 0.5 / max(lambdaV + lambdaL, 1e-6);
+}
+
+float3 F_Schlick(float vDotH, float3 f0)
+{
+    float fresnel = Pow5Fast(1.0 - vDotH);
+    return f0 + (1.0 - f0) * fresnel;
+}
+
+bool IsSkyPixel(float deviceDepth)
+{
+    return deviceDepth == UNITY_RAW_FAR_CLIP_VALUE;
+}
+
+float3 GetDeferredViewDirectionWS(float3 positionWS)
+{
+    if (unity_OrthoParams.w > 0.5)
+        return TransformViewToWorldDir(float3(0.0, 0.0, -1.0), true);
+
+    return SafeNormalize(_WorldSpaceCameraPos.xyz - positionWS);
+}
+
+VividGBufferSurfaceData LoadVividGBuffer(uint2 pixelCoord)
+{
+    float4 rt0 = _GBuffer0.Load(int3(pixelCoord, 0));
+    float4 rt1 = _GBuffer1.Load(int3(pixelCoord, 0));
+    float4 rt2 = _GBuffer2.Load(int3(pixelCoord, 0));
+    float4 rt3 = _GBuffer3.Load(int3(pixelCoord, 0));
+    return UnpackVividGBufferSurfaceData(rt0, rt1, rt2, rt3);
+}
+
+float3 EvaluateClearCoatSpecular(float3 normalWS, float3 viewDirectionWS, float3 lightDirectionWS, float clearCoatMask)
+{
+    if (clearCoatMask <= 0.0)
+        return 0.0;
+
+    float3 halfVectorWS = SafeNormalize(viewDirectionWS + lightDirectionWS);
+    float nDotV = saturate(dot(normalWS, viewDirectionWS));
+    float nDotL = saturate(dot(normalWS, lightDirectionWS));
+    float nDotH = saturate(dot(normalWS, halfVectorWS));
+    float vDotH = saturate(dot(viewDirectionWS, halfVectorWS));
+
+    float linearRoughness = 0.04;
+    float distribution = D_GGX(nDotH, linearRoughness);
+    float visibility = V_SmithGGXCorrelated(nDotV, nDotL, linearRoughness);
+    float3 fresnel = F_Schlick(vDotH, kDielectricF0) * clearCoatMask;
+    return distribution * visibility * fresnel;
+}
+
+float3 EvaluateFabricFuzz(float3 baseColor, float3 normalWS, float3 viewDirectionWS, float3 lightDirectionWS, float fuzzAmount)
+{
+    if (fuzzAmount <= 0.0)
+        return 0.0;
+
+    float nDotL = saturate(dot(normalWS, lightDirectionWS));
+    float fresnel = Pow5Fast(1.0 - saturate(dot(normalWS, viewDirectionWS)));
+    return baseColor * fuzzAmount * fresnel * nDotL * 0.25;
+}
+
+float3 EvaluateDirectionalLight(
+    VividGBufferSurfaceData surfaceData,
+    float3 viewDirectionWS,
+    DirectionalLightData directionalLight)
+{
+    float3 normalWS = surfaceData.normalWS;
+    float3 diffuseColor = surfaceData.baseColor * (1.0 - surfaceData.metallic);
+    float3 lightDirectionWS = SafeNormalize(directionalLight.directionWS);
+    float3 halfVectorWS = SafeNormalize(viewDirectionWS + lightDirectionWS);
+
+    float nDotL = saturate(dot(normalWS, lightDirectionWS));
+    float nDotV = saturate(dot(normalWS, viewDirectionWS));
+    float nDotH = saturate(dot(normalWS, halfVectorWS));
+    float vDotH = saturate(dot(viewDirectionWS, halfVectorWS));
+
+    float3 f0 = lerp(kDielectricF0, surfaceData.baseColor, surfaceData.metallic);
+    float3 fresnel = F_Schlick(vDotH, f0);
+    float distribution = D_GGX(nDotH, surfaceData.linearRoughness);
+    float visibility = V_SmithGGXCorrelated(nDotV, nDotL, surfaceData.linearRoughness);
+
+    float3 specular = distribution * visibility * fresnel;
+    float3 diffuse = diffuseColor * INV_PI;
+    float3 lighting = (diffuse + specular) * directionalLight.color * nDotL;
+
+    if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+    {
+        lighting += EvaluateFabricFuzz(
+            surfaceData.baseColor,
+            normalWS,
+            viewDirectionWS,
+            lightDirectionWS,
+            surfaceData.customData) * directionalLight.color;
+    }
+    else if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_CLEARCOAT)
+    {
+        lighting += EvaluateClearCoatSpecular(
+            normalWS,
+            viewDirectionWS,
+            lightDirectionWS,
+            surfaceData.customData) * directionalLight.color * nDotL;
+    }
+
+    return lighting;
+}
+
+float3 EvaluateDeferredDirectionalLighting(VividGBufferSurfaceData surfaceData, float3 positionWS)
+{
+    float3 viewDirectionWS = GetDeferredViewDirectionWS(positionWS);
+    float3 lighting = 0.0;
+
+    [loop]
+    for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)
+    {
+        DirectionalLightData directionalLight = GetDirectionalLight(lightIndex);
+        lighting += EvaluateDirectionalLight(surfaceData, viewDirectionWS, directionalLight);
+    }
+
+    return lighting + surfaceData.emissive;
+}
+
+[numthreads(8, 8, 1)]
+void DeferredDirectionalLighting(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x >= _LightingWidth || dispatchThreadId.y >= _LightingHeight)
+        return;
+
+    uint2 pixelCoord = dispatchThreadId.xy;
+    float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
+
+    if (IsSkyPixel(deviceDepth))
+    {
+        _LightingTexture[pixelCoord] = float4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
+
+    VividGBufferSurfaceData surfaceData = LoadVividGBuffer(pixelCoord);
+    float2 uv = (float2(pixelCoord) + 0.5) / float2(_LightingWidth, _LightingHeight);
+    float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, _InvViewProjMatrix);
+    float3 lighting = EvaluateDeferredDirectionalLighting(surfaceData, positionWS);
+
+    _LightingTexture[pixelCoord] = float4(lighting, 1.0);
+}

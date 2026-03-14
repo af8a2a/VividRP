@@ -87,6 +87,12 @@ namespace VividRP.Runtime
             ClearImportedTextures();
         }
 
+        internal static void AbortFrame()
+        {
+            ClearImportedTextures();
+            ClearHistoryImportedHandles();
+        }
+
         /// <summary>
         /// Imports an external RTHandle for a specific pass during Prepare().
         /// Returns a TextureHandle that can be assigned to pass member variables.
@@ -154,6 +160,19 @@ namespace VividRP.Runtime
             s_ImportedRTHandles.Clear();
             s_PassImportedHandles.Clear();
             s_CurrentRenderGraph = null;
+        }
+
+        private static void ClearHistoryImportedHandles()
+        {
+            foreach (var texture in s_HistoryPreviousTextures)
+            {
+                texture?.ClearImportedHandle();
+            }
+
+            foreach (var texture in s_HistoryCurrentTextures)
+            {
+                texture?.ClearImportedHandle();
+            }
         }
 
         private static void EnsureCompiled(RenderGraphData graphAsset)
@@ -553,15 +572,7 @@ namespace VividRP.Runtime
             if (renderGraph == null)
                 return;
 
-            foreach (var texture in s_HistoryPreviousTextures)
-            {
-                texture?.ClearImportedHandle();
-            }
-
-            foreach (var texture in s_HistoryCurrentTextures)
-            {
-                texture?.ClearImportedHandle();
-            }
+            ClearHistoryImportedHandles();
 
             if (graphAsset?.HistoryTextureDescriptors == null || graphAsset.HistoryTextureDescriptors.Count == 0)
                 return;

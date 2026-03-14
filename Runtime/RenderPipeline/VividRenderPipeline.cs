@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -7,6 +8,8 @@ namespace VividRP.Runtime
 {
     public class VividRenderPipeline : RenderPipeline, IRenderGraphEnabledRenderPipeline
     {
+        private const string RenderGraphName = "VividRP RenderGraph";
+
         private VividRenderPipelineAsset m_Asset;
         private RenderGraph m_RenderGraph;
 
@@ -20,7 +23,7 @@ namespace VividRP.Runtime
             Blitter.Initialize(resources.CoreBlitShader, resources.CoreBlitColorAndDepthShader);
             BlueNoise.Initialize();
 
-            m_RenderGraph = new RenderGraph("VividRP RenderGraph");
+            m_RenderGraph = new RenderGraph(RenderGraphName);
         }
 
         protected override void Render(ScriptableRenderContext context, List<Camera> cameras)
@@ -35,42 +38,95 @@ namespace VividRP.Runtime
         {
             BeginCameraRendering(context, camera);
 
-            if (!camera.TryGetCullingParameters(out var cullingParameters))
+            CommandBuffer cmdBuffer = null;
+            var shouldSubmit = false;
+
+            try
             {
-                EndCameraRendering(context, camera);
-                return;
+                if (!camera.TryGetCullingParameters(out var cullingParameters))
+                    return;
+
+                var cullingResults = context.Cull(ref cullingParameters);
+                context.SetupCameraProperties(camera);
+                VividVolumeManagerUtility.Update(camera);
+
+                cmdBuffer = CommandBufferPool.Get("VividRP");
+
+                PassRecorder.InitializeContext(context, camera, cullingResults);
+                var graphAsset = m_Asset.RenderGraphAsset;
+                PassRecorder.PrepareFrame(graphAsset, cmdBuffer);
+
+                shouldSubmit = true;
+                context.ExecuteCommandBuffer(cmdBuffer);
+                cmdBuffer.Clear();
+
+                var renderGraphParams = new RenderGraphParameters
+                {
+                    scriptableRenderContext = context,
+                    commandBuffer = cmdBuffer,
+                    currentFrameIndex = Time.frameCount,
+                    executionId = camera.GetEntityId(),
+                    generateDebugData = camera.cameraType != CameraType.Preview && !camera.isProcessingRenderRequest,
+                };
+
+                if (!TryRecordAndExecuteRenderGraph(
+                        m_RenderGraph,
+                        renderGraphParams,
+                        () => PassRecorder.RecordRenderGraph(m_RenderGraph, context, graphAsset),
+                        PassRecorder.AbortFrame))
+                {
+                    return;
+                }
+
+                context.ExecuteCommandBuffer(cmdBuffer);
             }
-
-            var cullingResults = context.Cull(ref cullingParameters);
-            context.SetupCameraProperties(camera);
-            VividVolumeManagerUtility.Update(camera);
-
-            var cmdBuffer = CommandBufferPool.Get("VividRP");
-
-            PassRecorder.InitializeContext(context, camera, cullingResults);
-            var graphAsset = m_Asset.RenderGraphAsset;
-            PassRecorder.PrepareFrame(graphAsset, cmdBuffer);
-            context.ExecuteCommandBuffer(cmdBuffer);
-            cmdBuffer.Clear();
-
-            var renderGraphParams = new RenderGraphParameters
+            finally
             {
-                scriptableRenderContext = context,
-                commandBuffer = cmdBuffer,
-                currentFrameIndex = Time.frameCount,
-                executionId = camera.GetEntityId(),
-                generateDebugData = camera.cameraType != CameraType.Preview && !camera.isProcessingRenderRequest,
-            };
+                if (cmdBuffer != null)
+                {
+                    cmdBuffer.Clear();
+                    CommandBufferPool.Release(cmdBuffer);
+                }
 
-            m_RenderGraph.BeginRecording(renderGraphParams);
-            PassRecorder.RecordRenderGraph(m_RenderGraph, context, graphAsset);
-            m_RenderGraph.EndRecordingAndExecute();
+                if (shouldSubmit)
+                    context.Submit();
 
-            context.ExecuteCommandBuffer(cmdBuffer);
-            CommandBufferPool.Release(cmdBuffer);
+                EndCameraRendering(context, camera);
+            }
+        }
 
-            context.Submit();
-            EndCameraRendering(context, camera);
+        internal static bool TryRecordAndExecuteRenderGraph(
+            RenderGraph renderGraph,
+            in RenderGraphParameters renderGraphParams,
+            Action recordRenderGraph,
+            Action onException = null)
+        {
+            if (renderGraph == null)
+                throw new ArgumentNullException(nameof(renderGraph));
+            if (recordRenderGraph == null)
+                throw new ArgumentNullException(nameof(recordRenderGraph));
+
+            try
+            {
+                renderGraph.BeginRecording(renderGraphParams);
+                recordRenderGraph();
+                renderGraph.EndRecordingAndExecute();
+                return true;
+            }
+            catch (Exception exception)
+            {
+                try
+                {
+                    onException?.Invoke();
+                }
+                catch (Exception cleanupException)
+                {
+                    Debug.LogException(cleanupException);
+                }
+
+                renderGraph.ResetGraphAndLogException(exception);
+                return false;
+            }
         }
 
         protected override void Dispose(bool disposing)

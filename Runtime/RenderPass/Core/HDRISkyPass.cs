@@ -32,7 +32,6 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             m_Material = CoreUtils.CreateEngineMaterial(resources.HDRISkyShader);
-            m_PropertyBlock = new MaterialPropertyBlock();
 
         }
 
@@ -83,10 +82,12 @@ namespace VividRP.Runtime.RenderPass.Core
             var tint = skySettings?.tint.value ?? Color.white;
             var exposure = skySettings?.exposure.value ?? 1f;
             var rotation = skySettings?.rotation.value ?? 0f;
-           m_PropertyBlock.SetTexture(SkyCubemapId, cubemap);
-           m_PropertyBlock.SetColor(SkyTintId, tint);
-           m_PropertyBlock.SetVector(SkyParamId, BuildSkyParam(exposure, rotation));
-           m_PropertyBlock.SetMatrix("_PixelCoordToViewDirWS", m_PixelCoordToViewDirMatrix);
+
+            m_PropertyBlock ??= new MaterialPropertyBlock();
+            m_PropertyBlock.SetTexture(SkyCubemapId, cubemap);
+            m_PropertyBlock.SetColor(SkyTintId, tint);
+            m_PropertyBlock.SetVector(SkyParamId, BuildSkyParam(exposure, rotation));
+            m_PropertyBlock.SetMatrix("_PixelCoordToViewDirWS", m_PixelCoordToViewDirMatrix);
 
         }
 

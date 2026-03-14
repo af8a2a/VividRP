@@ -386,13 +386,17 @@ namespace VividRP.Runtime
 
         private static DirectionalLightData CreateDirectionalLightData(Light light)
         {
-            var finalColor = light.color.linear * light.intensity;
+            return CreateDirectionalLightData(VividLightRenderDatabase.instance.UpdateLightData(light));
+        }
+
+        private static DirectionalLightData CreateDirectionalLightData(VividLightRenderData trackedLightData)
+        {
             return new DirectionalLightData
             {
-                directionWS = -light.transform.forward,
-                shadowStrength = light.shadows != LightShadows.None ? light.shadowStrength : 0f,
-                color = new Vector3(finalColor.r, finalColor.g, finalColor.b),
-                renderingLayerMask = (uint)light.renderingLayerMask,
+                directionWS = -trackedLightData.forwardWS,
+                shadowStrength = trackedLightData.shadowStrength,
+                color = trackedLightData.color,
+                renderingLayerMask = trackedLightData.renderingLayerMask,
             };
         }
 
@@ -412,25 +416,28 @@ namespace VividRP.Runtime
 
         private static PunctualLightData CreatePunctualLightData(Light light)
         {
-            var finalColor = light.color.linear * light.intensity;
-            var lightType = GetPunctualLightType(light.type);
-            var directionWS = light.transform.forward;
-            var range = Mathf.Max(light.range, 0.001f);
-            var inverseRangeSquared = 1.0f / Mathf.Max(range * range, 1e-6f);
-            GetSpotAngleParameters(light.type, light.innerSpotAngle, light.spotAngle, out var angleScale, out var angleOffset);
+            return CreatePunctualLightData(VividLightRenderDatabase.instance.UpdateLightData(light));
+        }
+
+        private static PunctualLightData CreatePunctualLightData(VividLightRenderData trackedLightData)
+        {
+            var range = Mathf.Max(trackedLightData.range, 0.001f);
+            GetSpotAngleParameters(trackedLightData.lightType, trackedLightData.innerSpotAngle, trackedLightData.spotAngle, out var angleScale, out var angleOffset);
 
             return new PunctualLightData
             {
-                positionWS = light.transform.position,
+                positionWS = trackedLightData.positionWS,
                 range = range,
-                color = new Vector3(finalColor.r, finalColor.g, finalColor.b),
-                lightType = lightType,
-                directionWS = directionWS,
+                color = trackedLightData.color,
+                lightType = GetPunctualLightType(trackedLightData.lightType),
+                directionWS = trackedLightData.forwardWS,
                 angleScale = angleScale,
                 angleOffset = angleOffset,
-                inverseRangeSquared = inverseRangeSquared,
-                shadowStrength = light.shadows != LightShadows.None ? light.shadowStrength : 0f,
-                renderingLayerMask = (uint)light.renderingLayerMask,
+                inverseRangeSquared = trackedLightData.inverseRangeSquared > 0.0f
+                    ? trackedLightData.inverseRangeSquared
+                    : 1.0f / Mathf.Max(range * range, 1e-6f),
+                shadowStrength = trackedLightData.shadowStrength,
+                renderingLayerMask = trackedLightData.renderingLayerMask,
             };
         }
 
@@ -527,9 +534,10 @@ namespace VividRP.Runtime
 
                 if (light != null)
                 {
-                    lightEntityId = light.GetEntityId();
-                    lightData.shadowStrength = light.shadows != LightShadows.None ? light.shadowStrength : 0f;
-                    lightData.renderingLayerMask = (uint)light.renderingLayerMask;
+                    var trackedLightData = VividLightRenderDatabase.instance.UpdateLightData(light);
+                    lightEntityId = trackedLightData.lightEntityId;
+                    lightData.shadowStrength = trackedLightData.shadowStrength;
+                    lightData.renderingLayerMask = trackedLightData.renderingLayerMask;
 
                     if (!sunLightEntityId.Equals(EntityId.None) && lightEntityId.Equals(sunLightEntityId))
                     {
@@ -576,8 +584,9 @@ namespace VividRP.Runtime
 
                 if (light != null)
                 {
-                    lightData.shadowStrength = light.shadows != LightShadows.None ? light.shadowStrength : 0f;
-                    lightData.renderingLayerMask = (uint)light.renderingLayerMask;
+                    var trackedLightData = VividLightRenderDatabase.instance.UpdateLightData(light);
+                    lightData.shadowStrength = trackedLightData.shadowStrength;
+                    lightData.renderingLayerMask = trackedLightData.renderingLayerMask;
                 }
 
                 punctualLights[punctualIndex] = lightData;

@@ -22,21 +22,76 @@ namespace VividRP.Editor.RenderGraph
                 return;
             }
 
-            var runtimeAsset = ScriptableObject.CreateInstance<RenderGraphData>();
-            Compile(graph, runtimeAsset);
+            var runtimeAsset = ScriptableObject.CreateInstance<VividRP.Runtime.RenderGraphData>();
+            runtimeAsset.ImportVersion = DateTime.UtcNow.Ticks;
+            RenderGraphCompiler.Compile(graph).ApplyTo(runtimeAsset);
 
             ctx.AddObjectToAsset("RuntimeAsset", runtimeAsset);
             ctx.SetMainObject(runtimeAsset);
         }
 
-        private static void Compile(RenderGraphEditorGraph graph, RenderGraphData runtimeAsset)
+        internal static bool ShouldImportPassFieldBinding(bool hasInputConnection, bool hasBoundResourceNode)
         {
-            runtimeAsset.ImportVersion = DateTime.UtcNow.Ticks;
+            return RenderGraphCompiler.ShouldImportPassFieldBinding(hasInputConnection, hasBoundResourceNode);
+        }
+
+        internal static bool ResolveAsyncComputeSetting(Type passType, bool enableAsyncCompute)
+        {
+            return RenderGraphCompiler.ResolveAsyncComputeSetting(passType, enableAsyncCompute);
+        }
+    }
+
+    internal readonly struct RenderGraphCompiledPassInfo
+    {
+        internal RenderGraphCompiledPassInfo(int executionIndex, string displayName, string passTypeName, bool enableAsyncCompute)
+        {
+            ExecutionIndex = executionIndex;
+            DisplayName = displayName;
+            PassTypeName = passTypeName;
+            EnableAsyncCompute = enableAsyncCompute;
+        }
+
+        internal int ExecutionIndex { get; }
+        internal string DisplayName { get; }
+        internal string PassTypeName { get; }
+        internal bool EnableAsyncCompute { get; }
+    }
+
+    internal sealed class RenderGraphCompilationResult
+    {
+        internal List<RenderGraphTextureDesc> TextureDescriptors { get; } = new List<RenderGraphTextureDesc>();
+        internal List<RenderGraphTextureDesc> HistoryTextureDescriptors { get; } = new List<RenderGraphTextureDesc>();
+        internal List<RenderGraphBufferDesc> BufferDescriptors { get; } = new List<RenderGraphBufferDesc>();
+        internal List<RenderGraphRenderListDesc> RenderListDescriptors { get; } = new List<RenderGraphRenderListDesc>();
+        internal List<RenderGraphPassDefinition> Passes { get; } = new List<RenderGraphPassDefinition>();
+        internal List<RenderGraphCompiledPassInfo> ExecutionOrder { get; } = new List<RenderGraphCompiledPassInfo>();
+
+        internal void ApplyTo(RenderGraphData runtimeAsset)
+        {
+            if (runtimeAsset == null)
+                return;
+
             runtimeAsset.TextureDescriptors.Clear();
             runtimeAsset.HistoryTextureDescriptors.Clear();
             runtimeAsset.BufferDescriptors.Clear();
             runtimeAsset.RenderListDescriptors.Clear();
             runtimeAsset.Passes.Clear();
+
+            runtimeAsset.TextureDescriptors.AddRange(TextureDescriptors);
+            runtimeAsset.HistoryTextureDescriptors.AddRange(HistoryTextureDescriptors);
+            runtimeAsset.BufferDescriptors.AddRange(BufferDescriptors);
+            runtimeAsset.RenderListDescriptors.AddRange(RenderListDescriptors);
+            runtimeAsset.Passes.AddRange(Passes);
+        }
+    }
+
+    internal static class RenderGraphCompiler
+    {
+        internal static RenderGraphCompilationResult Compile(RenderGraphEditorGraph graph)
+        {
+            var result = new RenderGraphCompilationResult();
+            if (graph == null)
+                return result;
 
             var textureNodeToIndex = new Dictionary<TextureResourceNodeData, int>();
             var historyNodeToIndex = new Dictionary<HistoryResourceNodeData, int>();
@@ -46,6 +101,7 @@ namespace VividRP.Editor.RenderGraph
             var bufferPortToIndex = new Dictionary<IPort, int>();
             var passNodes = new List<RenderPassNodeData>();
             var passNodeToIndex = new Dictionary<RenderPassNodeData, int>();
+
             foreach (var passNode in graph.GetNodes().OfType<RenderPassNodeData>())
             {
                 var passType = passNode.GetPassType();
@@ -60,36 +116,36 @@ namespace VividRP.Editor.RenderGraph
             {
                 if (node is TextureResourceNodeData textureNode)
                 {
-                    var index = runtimeAsset.TextureDescriptors.Count;
+                    var index = result.TextureDescriptors.Count;
                     textureNodeToIndex.Add(textureNode, index);
-                    runtimeAsset.TextureDescriptors.Add(textureNode.GetDescriptor());
+                    result.TextureDescriptors.Add(textureNode.GetDescriptor());
                     AddPortBindingIndex(texturePortToIndex, textureNode.GetOutputPortByName(TextureResourceNodeData.OutputPortName), index);
                 }
                 else if (node is HistoryResourceNodeData historyNode)
                 {
-                    var index = runtimeAsset.HistoryTextureDescriptors.Count;
+                    var index = result.HistoryTextureDescriptors.Count;
                     historyNodeToIndex.Add(historyNode, index);
-                    runtimeAsset.HistoryTextureDescriptors.Add(historyNode.GetDescriptor());
+                    result.HistoryTextureDescriptors.Add(historyNode.GetDescriptor());
                 }
                 else if (node is BufferResourceNodeData bufferNode)
                 {
-                    var index = runtimeAsset.BufferDescriptors.Count;
+                    var index = result.BufferDescriptors.Count;
                     bufferNodeToIndex.Add(bufferNode, index);
-                    runtimeAsset.BufferDescriptors.Add(bufferNode.GetDescriptor());
+                    result.BufferDescriptors.Add(bufferNode.GetDescriptor());
                     AddPortBindingIndex(bufferPortToIndex, bufferNode.GetOutputPortByName(BufferResourceNodeData.OutputPortName), index);
                 }
                 else if (node is RenderListResourceNodeData renderListNode)
                 {
-                    var index = runtimeAsset.RenderListDescriptors.Count;
+                    var index = result.RenderListDescriptors.Count;
                     renderListNodeToIndex.Add(renderListNode, index);
-                    runtimeAsset.RenderListDescriptors.Add(renderListNode.GetDescriptor());
+                    result.RenderListDescriptors.Add(renderListNode.GetDescriptor());
                 }
                 else if (node is ClassificationResourceNodeData classificationNode)
                 {
                     foreach (var (portName, descriptor) in classificationNode.EnumerateBufferDescriptors())
                     {
-                        var index = runtimeAsset.BufferDescriptors.Count;
-                        runtimeAsset.BufferDescriptors.Add(descriptor);
+                        var index = result.BufferDescriptors.Count;
+                        result.BufferDescriptors.Add(descriptor);
                         AddPortBindingIndex(bufferPortToIndex, classificationNode.GetOutputPortByName(portName), index);
                     }
                 }
@@ -97,15 +153,13 @@ namespace VividRP.Editor.RenderGraph
 
             var compiledPassDefinitions = new List<RenderGraphPassDefinition>(passNodes.Count);
 
-            foreach (var node in passNodes)
+            foreach (var passNode in passNodes)
             {
-                var passNode = node;
-
                 var passType = passNode.GetPassType();
                 if (passType == null)
                     continue;
 
-                var passDef = new RenderGraphPassDefinition
+                var passDefinition = new RenderGraphPassDefinition
                 {
                     PassType = $"{passType.FullName}, {passType.Assembly.GetName().Name}",
                     EnableAsyncCompute = ResolveAsyncComputeSetting(passType, passNode.GetEnableAsyncCompute()),
@@ -126,7 +180,7 @@ namespace VividRP.Editor.RenderGraph
 
                     if (field.FieldType == typeof(RenderGraphTexture)
                         && TryAddHistoryTextureBinding(
-                            passDef,
+                            passDefinition,
                             field.Name,
                             attr.Access,
                             inputConnectedPort,
@@ -147,6 +201,7 @@ namespace VividRP.Editor.RenderGraph
 
                     if (inputResourceNode != null
                         && outputResourceNode != null
+                        && inputResourceNode == outputResourceNode
                         && RequiresMatchingStandaloneResourcePorts(inputResourceNode)
                         && !ReferenceEquals(inputConnectedPort, outputConnectedPort))
                     {
@@ -158,7 +213,7 @@ namespace VividRP.Editor.RenderGraph
 
                     if (field.FieldType == typeof(RenderGraphTexture)
                         && TryAddStandaloneResourceBinding(
-                            passDef,
+                            passDefinition,
                             field.Name,
                             RenderGraphResourceKind.Texture,
                             inputConnectedPort,
@@ -171,7 +226,7 @@ namespace VividRP.Editor.RenderGraph
 
                     if (field.FieldType == typeof(RenderGraphBuffer)
                         && TryAddStandaloneResourceBinding(
-                            passDef,
+                            passDefinition,
                             field.Name,
                             RenderGraphResourceKind.Buffer,
                             inputConnectedPort,
@@ -186,30 +241,30 @@ namespace VividRP.Editor.RenderGraph
                     if (resourceNode == null)
                     {
                         if (field.FieldType == typeof(RenderGraphTexture)
-                            && ShouldImportPassFieldBinding(inputConnectedPort != null, resourceNode != null))
+                            && ShouldImportPassFieldBinding(inputConnectedPort != null, false))
                         {
                             TryAddPassFieldBinding(
-                                passDef,
+                                passDefinition,
                                 field.Name,
                                 RenderGraphResourceKind.Texture,
                                 inputConnectedPort,
                                 passNodeToIndex);
                         }
                         else if (field.FieldType == typeof(RenderGraphBuffer)
-                                 && ShouldImportPassFieldBinding(inputConnectedPort != null, resourceNode != null))
+                                 && ShouldImportPassFieldBinding(inputConnectedPort != null, false))
                         {
                             TryAddPassFieldBinding(
-                                passDef,
+                                passDefinition,
                                 field.Name,
                                 RenderGraphResourceKind.Buffer,
                                 inputConnectedPort,
                                 passNodeToIndex);
                         }
                         else if (field.FieldType == typeof(RenderGraphRenderList)
-                                 && ShouldImportPassFieldBinding(inputConnectedPort != null, resourceNode != null))
+                                 && ShouldImportPassFieldBinding(inputConnectedPort != null, false))
                         {
                             TryAddPassFieldBinding(
-                                passDef,
+                                passDefinition,
                                 field.Name,
                                 RenderGraphResourceKind.RenderList,
                                 inputConnectedPort,
@@ -219,11 +274,11 @@ namespace VividRP.Editor.RenderGraph
                         continue;
                     }
 
-                    if (field.FieldType == typeof(RenderGraphTexture) && resourceNode is TextureResourceNodeData textureNode)
+                    if (field.FieldType == typeof(RenderGraphTexture) && resourceNode is TextureResourceNodeData textureResourceNode)
                     {
-                        if (textureNodeToIndex.TryGetValue(textureNode, out var resourceIndex))
+                        if (textureNodeToIndex.TryGetValue(textureResourceNode, out var resourceIndex))
                         {
-                            passDef.ResourceBindings.Add(new RenderGraphPassResourceBinding
+                            passDefinition.ResourceBindings.Add(new RenderGraphPassResourceBinding
                             {
                                 FieldName = field.Name,
                                 ResourceKind = RenderGraphResourceKind.Texture,
@@ -235,11 +290,12 @@ namespace VividRP.Editor.RenderGraph
 
                         continue;
                     }
-                    else if (field.FieldType == typeof(RenderGraphBuffer) && resourceNode is BufferResourceNodeData bufferNode)
+
+                    if (field.FieldType == typeof(RenderGraphBuffer) && resourceNode is BufferResourceNodeData bufferResourceNode)
                     {
-                        if (bufferNodeToIndex.TryGetValue(bufferNode, out var resourceIndex))
+                        if (bufferNodeToIndex.TryGetValue(bufferResourceNode, out var resourceIndex))
                         {
-                            passDef.ResourceBindings.Add(new RenderGraphPassResourceBinding
+                            passDefinition.ResourceBindings.Add(new RenderGraphPassResourceBinding
                             {
                                 FieldName = field.Name,
                                 ResourceKind = RenderGraphResourceKind.Buffer,
@@ -251,11 +307,12 @@ namespace VividRP.Editor.RenderGraph
 
                         continue;
                     }
-                    else if (field.FieldType == typeof(RenderGraphRenderList) && resourceNode is RenderListResourceNodeData renderListNode)
+
+                    if (field.FieldType == typeof(RenderGraphRenderList) && resourceNode is RenderListResourceNodeData renderListResourceNode)
                     {
-                        if (renderListNodeToIndex.TryGetValue(renderListNode, out var resourceIndex))
+                        if (renderListNodeToIndex.TryGetValue(renderListResourceNode, out var resourceIndex))
                         {
-                            passDef.ResourceBindings.Add(new RenderGraphPassResourceBinding
+                            passDefinition.ResourceBindings.Add(new RenderGraphPassResourceBinding
                             {
                                 FieldName = field.Name,
                                 ResourceKind = RenderGraphResourceKind.RenderList,
@@ -264,16 +321,50 @@ namespace VividRP.Editor.RenderGraph
                                 ConnectionKind = connectionKind,
                             });
                         }
-
-                        continue;
                     }
                 }
 
-                compiledPassDefinitions.Add(passDef);
+                compiledPassDefinitions.Add(passDefinition);
             }
 
             PopulatePreviewTextureFields(graph, compiledPassDefinitions, passNodeToIndex);
-            runtimeAsset.Passes.AddRange(RenderGraphPassCompilationUtility.OrderPassDefinitions(compiledPassDefinitions));
+
+            var orderedIndices = RenderGraphPassCompilationUtility.GetOrderedPassIndices(compiledPassDefinitions);
+            result.Passes.AddRange(RenderGraphPassCompilationUtility.OrderPassDefinitions(compiledPassDefinitions, orderedIndices));
+
+            for (var compiledIndex = 0; compiledIndex < orderedIndices.Count; compiledIndex++)
+            {
+                var originalIndex = orderedIndices[compiledIndex];
+                if (originalIndex < 0 || originalIndex >= passNodes.Count)
+                    continue;
+
+                var passNode = passNodes[originalIndex];
+                var passType = passNode.GetPassType();
+                var passTypeName = passType?.Name ?? "<Missing Pass>";
+                result.ExecutionOrder.Add(new RenderGraphCompiledPassInfo(
+                    compiledIndex,
+                    GetPassDisplayName(passNode, passTypeName),
+                    passTypeName,
+                    result.Passes[compiledIndex].EnableAsyncCompute));
+            }
+
+            return result;
+        }
+
+        internal static bool ShouldImportPassFieldBinding(bool hasInputConnection, bool hasBoundResourceNode)
+        {
+            return hasInputConnection && !hasBoundResourceNode;
+        }
+
+        internal static bool ResolveAsyncComputeSetting(Type passType, bool enableAsyncCompute)
+        {
+            return enableAsyncCompute && RenderGraphPassExecutionUtility.SupportsAsyncCompute(passType);
+        }
+
+        private static string GetPassDisplayName(RenderPassNodeData passNode, string fallbackName)
+        {
+            var title = passNode?.Title;
+            return string.IsNullOrWhiteSpace(title) ? fallbackName : title;
         }
 
         private static void PopulatePreviewTextureFields(
@@ -294,7 +385,9 @@ namespace VividRP.Editor.RenderGraph
                 if (!passNodeToIndex.TryGetValue(sourcePassNode, out var sourcePassIndex)
                     || sourcePassIndex < 0
                     || sourcePassIndex >= passDefinitions.Count)
+                {
                     continue;
+                }
 
                 if (!previewNode.TryGetConnectedPassOutput(out _, out var sourcePreviewKey)
                     || string.IsNullOrEmpty(sourcePreviewKey))
@@ -371,9 +464,7 @@ namespace VividRP.Editor.RenderGraph
             }
 
             if (canWrite && (hasInputHistory || hasOutputHistory))
-            {
                 return true;
-            }
 
             return true;
         }
@@ -488,8 +579,8 @@ namespace VividRP.Editor.RenderGraph
             if (fieldType == typeof(RenderGraphBuffer) && connectedNode is BufferResourceNodeData bufferNode)
                 return bufferNode;
 
-            if (fieldType == typeof(RenderGraphBuffer) && connectedNode is ClassificationResourceNodeData classificationBufferNode)
-                return classificationBufferNode;
+            if (fieldType == typeof(RenderGraphBuffer) && connectedNode is ClassificationResourceNodeData classificationNode)
+                return classificationNode;
 
             if (fieldType == typeof(RenderGraphRenderList) && connectedNode is RenderListResourceNodeData renderListNode)
                 return renderListNode;
@@ -500,16 +591,6 @@ namespace VividRP.Editor.RenderGraph
         private static bool RequiresMatchingStandaloneResourcePorts(object node)
         {
             return node is ClassificationResourceNodeData;
-        }
-
-        internal static bool ShouldImportPassFieldBinding(bool hasInputConnection, bool hasBoundResourceNode)
-        {
-            return hasInputConnection && !hasBoundResourceNode;
-        }
-
-        internal static bool ResolveAsyncComputeSetting(Type passType, bool enableAsyncCompute)
-        {
-            return enableAsyncCompute && RenderGraphPassExecutionUtility.SupportsAsyncCompute(passType);
         }
 
         private static void TryAddPassFieldBinding(
@@ -577,14 +658,6 @@ namespace VividRP.Editor.RenderGraph
             }
 
             return null;
-        }
-
-        private static INode GetConnectedNode(IPort port)
-        {
-            if (port == null || !port.IsConnected)
-                return null;
-
-            return port.FirstConnectedPort?.GetNode();
         }
     }
 }

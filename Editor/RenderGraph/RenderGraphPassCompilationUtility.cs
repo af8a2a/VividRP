@@ -15,6 +15,18 @@ namespace VividRP.Editor.RenderGraph
             if (passDefinitions == null || passDefinitions.Count <= 1)
                 return ClonePassDefinitions(passDefinitions);
 
+            var orderedIndices = GetOrderedPassIndices(passDefinitions);
+            return OrderPassDefinitions(passDefinitions, orderedIndices);
+        }
+
+        internal static List<int> GetOrderedPassIndices(IReadOnlyList<RenderGraphPassDefinition> passDefinitions)
+        {
+            if (passDefinitions == null || passDefinitions.Count == 0)
+                return new List<int>();
+
+            if (passDefinitions.Count == 1)
+                return new List<int> { 0 };
+
             var passTypes = new Type[passDefinitions.Count];
             var fieldAccessMaps = new Dictionary<string, AccessFlags>[passDefinitions.Count];
             for (var i = 0; i < passDefinitions.Count; i++)
@@ -29,7 +41,16 @@ namespace VividRP.Editor.RenderGraph
                 dependencies.Add(CollectDependencies(i, passDefinitions, fieldAccessMaps));
             }
 
-            var orderedIndices = TopologicalSort(dependencies);
+            return TopologicalSort(dependencies);
+        }
+
+        internal static List<RenderGraphPassDefinition> OrderPassDefinitions(
+            IReadOnlyList<RenderGraphPassDefinition> passDefinitions,
+            IReadOnlyList<int> orderedIndices)
+        {
+            if (passDefinitions == null || orderedIndices == null)
+                return new List<RenderGraphPassDefinition>();
+
             var orderedDefinitions = new List<RenderGraphPassDefinition>(orderedIndices.Count);
             var oldToNewIndex = new Dictionary<int, int>(orderedIndices.Count);
 

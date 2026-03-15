@@ -81,6 +81,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class LightGridGlobalPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.LightGridGlobalPass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class LightGridPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.LightGridPass, VividRP.Runtime";

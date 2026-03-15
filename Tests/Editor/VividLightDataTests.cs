@@ -355,6 +355,55 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void UpdatePunctualLightCoarseCullingData_BuildsSliceRangesAndRecords_FromScreenSpaceBounds()
+        {
+            var lightData = new VividLightData
+            {
+                punctualLightScreenSpaceBounds = new[]
+                {
+                    new VividLightData.PunctualLightScreenSpaceBounds
+                    {
+                        sliceMin = 0,
+                        sliceMax = 1,
+                        tileMinX = 1,
+                        tileMaxX = 2,
+                        tileMinY = 3,
+                        tileMaxY = 4,
+                        isValid = 1u,
+                    },
+                    new VividLightData.PunctualLightScreenSpaceBounds
+                    {
+                        isValid = 0u,
+                    },
+                    new VividLightData.PunctualLightScreenSpaceBounds
+                    {
+                        sliceMin = 1,
+                        sliceMax = 2,
+                        tileMinX = 4,
+                        tileMaxX = 5,
+                        tileMinY = 6,
+                        tileMaxY = 7,
+                        isValid = 1u,
+                    }
+                },
+                punctualLightCount = 3,
+            };
+
+            lightData.UpdatePunctualLightCoarseCullingData(4);
+
+            Assert.That(lightData.punctualLightCoarseRangeCount, Is.EqualTo(4));
+            Assert.That(lightData.punctualLightCoarseRecordCount, Is.EqualTo(4));
+            AssertPunctualLightCoarseRange(lightData.punctualLightCoarseRanges[0], 0, 1);
+            AssertPunctualLightCoarseRange(lightData.punctualLightCoarseRanges[1], 1, 2);
+            AssertPunctualLightCoarseRange(lightData.punctualLightCoarseRanges[2], 3, 1);
+            AssertPunctualLightCoarseRange(lightData.punctualLightCoarseRanges[3], 4, 0);
+            AssertPunctualLightCoarseRecord(lightData.punctualLightCoarseRecords[0], 0, 1, 2, 3, 4);
+            AssertPunctualLightCoarseRecord(lightData.punctualLightCoarseRecords[1], 0, 1, 2, 3, 4);
+            AssertPunctualLightCoarseRecord(lightData.punctualLightCoarseRecords[2], 2, 4, 5, 6, 7);
+            AssertPunctualLightCoarseRecord(lightData.punctualLightCoarseRecords[3], 2, 4, 5, 6, 7);
+        }
+
+        [Test]
         public void FindMainLightIndex_ReturnsSunLight_WhenVisibleDirectionalSunExists()
         {
             var sunObject = new GameObject("Sun Light Test");
@@ -424,6 +473,10 @@ namespace VividRP.Editor.Tests
                 lightData.mainLightEntityId = EntityId.FromULong(42);
                 lightData.punctualLightCount = 3;
                 lightData.punctualLightScreenSpaceBounds = new[] { default(VividLightData.PunctualLightScreenSpaceBounds) };
+                lightData.punctualLightCoarseRanges = new[] { default(VividLightData.PunctualLightCoarseRange) };
+                lightData.punctualLightCoarseRecords = new[] { default(VividLightData.PunctualLightCoarseRecord) };
+                lightData.punctualLightCoarseRangeCount = 1;
+                lightData.punctualLightCoarseRecordCount = 1;
 
                 lightData.Reset();
 
@@ -433,6 +486,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(lightData.mainLightEntityId, Is.EqualTo(EntityId.None));
                 Assert.That(lightData.punctualLightCount, Is.Zero);
                 Assert.That(lightData.punctualLightScreenSpaceBounds, Is.Empty);
+                Assert.That(lightData.punctualLightCoarseRanges, Is.Empty);
+                Assert.That(lightData.punctualLightCoarseRecords, Is.Empty);
+                Assert.That(lightData.punctualLightCoarseRangeCount, Is.Zero);
+                Assert.That(lightData.punctualLightCoarseRecordCount, Is.Zero);
             }
             finally
             {
@@ -504,6 +561,30 @@ namespace VividRP.Editor.Tests
             Assert.That(actual.cullingCenterWS.y, Is.EqualTo(expectedCenter.y).Within(0.0001f));
             Assert.That(actual.cullingCenterWS.z, Is.EqualTo(expectedCenter.z).Within(0.0001f));
             Assert.That(actual.cullingRadius, Is.EqualTo(expectedRadius).Within(0.0001f));
+        }
+
+        private static void AssertPunctualLightCoarseRange(
+            VividLightData.PunctualLightCoarseRange actual,
+            int expectedStartIndex,
+            int expectedLightCount)
+        {
+            Assert.That(actual.startIndex, Is.EqualTo(expectedStartIndex));
+            Assert.That(actual.lightCount, Is.EqualTo(expectedLightCount));
+        }
+
+        private static void AssertPunctualLightCoarseRecord(
+            VividLightData.PunctualLightCoarseRecord actual,
+            int expectedLightIndex,
+            int expectedTileMinX,
+            int expectedTileMaxX,
+            int expectedTileMinY,
+            int expectedTileMaxY)
+        {
+            Assert.That(actual.lightIndex, Is.EqualTo(expectedLightIndex));
+            Assert.That(actual.tileMinX, Is.EqualTo(expectedTileMinX));
+            Assert.That(actual.tileMaxX, Is.EqualTo(expectedTileMaxX));
+            Assert.That(actual.tileMinY, Is.EqualTo(expectedTileMinY));
+            Assert.That(actual.tileMaxY, Is.EqualTo(expectedTileMaxY));
         }
 
         private static float GetSpotOuterCos(VividLightData.PunctualLightData punctualLight)

@@ -138,8 +138,6 @@ namespace VividRP.Runtime
         private PunctualLightCullUploadData[] m_PunctualLightCullData = Array.Empty<PunctualLightCullUploadData>();
         private SliceLightRangeUploadData[] m_ClusterCoarseLightRanges = Array.Empty<SliceLightRangeUploadData>();
         private PunctualLightCoarseRecordUploadData[] m_ClusterCoarseLightRecords = Array.Empty<PunctualLightCoarseRecordUploadData>();
-        private int[] m_ClusterSliceLightCounts = Array.Empty<int>();
-        private int[] m_ClusterSliceWriteOffsets = Array.Empty<int>();
         private int m_DirectionalLightCount;
         private int m_PunctualLightCount;
         private int m_MainDirectionalLightIndex;
@@ -221,12 +219,18 @@ namespace VividRP.Runtime
                 BuildPunctualLightUploadData(lightData);
                 BuildPunctualLightCullData(lightData, screenSpaceBoundsParameters);
                 lightData.UpdatePunctualLightScreenSpaceBounds(screenSpaceBoundsParameters);
-                BuildClusterCoarseLightBins(lightData);
+                lightData.UpdatePunctualLightCoarseCullingData(ClusterSliceCount);
+                BuildClusterCoarseLightUploadData(lightData);
+                m_ClusterCoarseLightRecordCount = lightData.punctualLightCoarseRecordCount;
                 m_PunctualLightBuffer.SetData(m_PunctualLights, 0, 0, m_PunctualLightCount);
                 m_PunctualLightCullBuffer.SetData(m_PunctualLightCullData, 0, 0, m_PunctualLightCount);
-                EnsureClusterCoarseLightRangesBuffer(ClusterSliceCount);
+                EnsureClusterCoarseLightRangesBuffer(Mathf.Max(lightData.punctualLightCoarseRangeCount, 1));
                 EnsureClusterCoarseLightRecordsBuffer(Mathf.Max(m_ClusterCoarseLightRecordCount, 1));
-                m_ClusterCoarseLightRangesBuffer.SetData(m_ClusterCoarseLightRanges, 0, 0, ClusterSliceCount);
+                m_ClusterCoarseLightRangesBuffer.SetData(
+                    m_ClusterCoarseLightRanges,
+                    0,
+                    0,
+                    lightData.punctualLightCoarseRangeCount);
 
                 if (m_ClusterCoarseLightRecordCount > 0)
                     m_ClusterCoarseLightRecordsBuffer.SetData(m_ClusterCoarseLightRecords, 0, 0, m_ClusterCoarseLightRecordCount);
@@ -369,8 +373,6 @@ namespace VividRP.Runtime
             m_PunctualLightCullData = Array.Empty<PunctualLightCullUploadData>();
             m_ClusterCoarseLightRanges = Array.Empty<SliceLightRangeUploadData>();
             m_ClusterCoarseLightRecords = Array.Empty<PunctualLightCoarseRecordUploadData>();
-            m_ClusterSliceLightCounts = Array.Empty<int>();
-            m_ClusterSliceWriteOffsets = Array.Empty<int>();
             m_DirectionalLightCount = 0;
             m_PunctualLightCount = 0;
             m_MainDirectionalLightIndex = -1;
@@ -420,12 +422,6 @@ namespace VividRP.Runtime
         {
             if (requiredCapacity > m_ClusterCoarseLightRanges.Length)
                 m_ClusterCoarseLightRanges = new SliceLightRangeUploadData[requiredCapacity];
-
-            if (requiredCapacity > m_ClusterSliceLightCounts.Length)
-                m_ClusterSliceLightCounts = new int[requiredCapacity];
-
-            if (requiredCapacity > m_ClusterSliceWriteOffsets.Length)
-                m_ClusterSliceWriteOffsets = new int[requiredCapacity];
         }
 
         private void EnsureClusterCoarseLightRecordCapacity(int requiredCapacity)
@@ -610,61 +606,32 @@ namespace VividRP.Runtime
             };
         }
 
-        private void BuildClusterCoarseLightBins(VividLightData lightData)
+        private void BuildClusterCoarseLightUploadData(VividLightData lightData)
         {
-            Array.Clear(m_ClusterSliceLightCounts, 0, ClusterSliceCount);
-            Array.Clear(m_ClusterSliceWriteOffsets, 0, ClusterSliceCount);
-            m_ClusterCoarseLightRecordCount = 0;
+            EnsureClusterCoarseLightRangeCapacity(lightData.punctualLightCoarseRangeCount);
+            EnsureClusterCoarseLightRecordCapacity(lightData.punctualLightCoarseRecordCount);
 
-            for (var sliceIndex = 0; sliceIndex < ClusterSliceCount; sliceIndex++)
-                m_ClusterCoarseLightRanges[sliceIndex] = default;
-
-            for (var lightIndex = 0; lightIndex < m_PunctualLightCount; lightIndex++)
+            for (var sliceIndex = 0; sliceIndex < lightData.punctualLightCoarseRangeCount; sliceIndex++)
             {
-                var screenSpaceBounds = lightData.punctualLightScreenSpaceBounds[lightIndex];
-                if (screenSpaceBounds.isValid == 0u)
-                    continue;
-
-                var recordCount = screenSpaceBounds.sliceMax - screenSpaceBounds.sliceMin + 1;
-                m_ClusterCoarseLightRecordCount += recordCount;
-
-                for (var sliceIndex = screenSpaceBounds.sliceMin; sliceIndex <= screenSpaceBounds.sliceMax; sliceIndex++)
-                    m_ClusterSliceLightCounts[sliceIndex]++;
-            }
-
-            var writeOffset = 0;
-            for (var sliceIndex = 0; sliceIndex < ClusterSliceCount; sliceIndex++)
-            {
-                var lightCount = m_ClusterSliceLightCounts[sliceIndex];
+                var coarseRange = lightData.punctualLightCoarseRanges[sliceIndex];
                 m_ClusterCoarseLightRanges[sliceIndex] = new SliceLightRangeUploadData
                 {
-                    startIndex = (uint)writeOffset,
-                    lightCount = (uint)lightCount,
+                    startIndex = (uint)coarseRange.startIndex,
+                    lightCount = (uint)coarseRange.lightCount,
                 };
-                m_ClusterSliceWriteOffsets[sliceIndex] = writeOffset;
-                writeOffset += lightCount;
             }
 
-            EnsureClusterCoarseLightRecordCapacity(Mathf.Max(m_ClusterCoarseLightRecordCount, 1));
-
-            for (var lightIndex = 0; lightIndex < m_PunctualLightCount; lightIndex++)
+            for (var recordIndex = 0; recordIndex < lightData.punctualLightCoarseRecordCount; recordIndex++)
             {
-                var screenSpaceBounds = lightData.punctualLightScreenSpaceBounds[lightIndex];
-                if (screenSpaceBounds.isValid == 0u)
-                    continue;
-
-                for (var sliceIndex = screenSpaceBounds.sliceMin; sliceIndex <= screenSpaceBounds.sliceMax; sliceIndex++)
+                var coarseRecord = lightData.punctualLightCoarseRecords[recordIndex];
+                m_ClusterCoarseLightRecords[recordIndex] = new PunctualLightCoarseRecordUploadData
                 {
-                    var recordIndex = m_ClusterSliceWriteOffsets[sliceIndex]++;
-                    m_ClusterCoarseLightRecords[recordIndex] = new PunctualLightCoarseRecordUploadData
-                    {
-                        lightIndex = (uint)lightIndex,
-                        tileMinX = (uint)screenSpaceBounds.tileMinX,
-                        tileMaxX = (uint)screenSpaceBounds.tileMaxX,
-                        tileMinY = (uint)screenSpaceBounds.tileMinY,
-                        tileMaxY = (uint)screenSpaceBounds.tileMaxY,
-                    };
-                }
+                    lightIndex = (uint)coarseRecord.lightIndex,
+                    tileMinX = (uint)coarseRecord.tileMinX,
+                    tileMaxX = (uint)coarseRecord.tileMaxX,
+                    tileMinY = (uint)coarseRecord.tileMinY,
+                    tileMaxY = (uint)coarseRecord.tileMaxY,
+                };
             }
         }
 

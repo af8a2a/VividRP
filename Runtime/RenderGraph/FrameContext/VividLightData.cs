@@ -73,6 +73,27 @@ namespace VividRP.Runtime
             internal static int Stride => Marshal.SizeOf<PunctualLightScreenSpaceBounds>();
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        public struct PunctualLightCoarseRange
+        {
+            public int startIndex;
+            public int lightCount;
+
+            internal static int Stride => Marshal.SizeOf<PunctualLightCoarseRange>();
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct PunctualLightCoarseRecord
+        {
+            public int lightIndex;
+            public int tileMinX;
+            public int tileMaxX;
+            public int tileMinY;
+            public int tileMaxY;
+
+            internal static int Stride => Marshal.SizeOf<PunctualLightCoarseRecord>();
+        }
+
         internal readonly struct PunctualLightScreenSpaceBoundsParameters
         {
             public readonly Matrix4x4 worldToViewMatrix;
@@ -287,16 +308,88 @@ namespace VividRP.Runtime
             }
         }
 
+        [BurstCompile]
+        private struct CountPunctualLightCoarseRangesJob : IJobParallelFor
+        {
+            [ReadOnly]
+            public NativeArray<PunctualLightScreenSpaceBoundsRecord> punctualLightScreenSpaceBounds;
+
+            [WriteOnly]
+            public NativeArray<int> sliceLightCounts;
+
+            public void Execute(int sliceIndex)
+            {
+                var lightCount = 0;
+
+                for (var lightIndex = 0; lightIndex < punctualLightScreenSpaceBounds.Length; lightIndex++)
+                {
+                    var screenSpaceBounds = punctualLightScreenSpaceBounds[lightIndex];
+                    if (screenSpaceBounds.isValid == 0u
+                        || sliceIndex < screenSpaceBounds.sliceMin
+                        || sliceIndex > screenSpaceBounds.sliceMax)
+                    {
+                        continue;
+                    }
+
+                    lightCount++;
+                }
+
+                sliceLightCounts[sliceIndex] = lightCount;
+            }
+        }
+
+        [BurstCompile]
+        private struct BuildPunctualLightCoarseRecordsJob : IJobParallelFor
+        {
+            [ReadOnly]
+            public NativeArray<PunctualLightScreenSpaceBoundsRecord> punctualLightScreenSpaceBounds;
+
+            [ReadOnly]
+            public NativeArray<int> sliceStartOffsets;
+
+            [WriteOnly]
+            public NativeArray<PunctualLightCoarseRecord> punctualLightCoarseRecords;
+
+            public void Execute(int sliceIndex)
+            {
+                var recordIndex = sliceStartOffsets[sliceIndex];
+
+                for (var lightIndex = 0; lightIndex < punctualLightScreenSpaceBounds.Length; lightIndex++)
+                {
+                    var screenSpaceBounds = punctualLightScreenSpaceBounds[lightIndex];
+                    if (screenSpaceBounds.isValid == 0u
+                        || sliceIndex < screenSpaceBounds.sliceMin
+                        || sliceIndex > screenSpaceBounds.sliceMax)
+                    {
+                        continue;
+                    }
+
+                    punctualLightCoarseRecords[recordIndex++] = new PunctualLightCoarseRecord
+                    {
+                        lightIndex = lightIndex,
+                        tileMinX = screenSpaceBounds.tileMinX,
+                        tileMaxX = screenSpaceBounds.tileMaxX,
+                        tileMinY = screenSpaceBounds.tileMinY,
+                        tileMaxY = screenSpaceBounds.tileMaxY,
+                    };
+                }
+            }
+        }
+
         public NativeArray<VisibleLight> visibleLights;
         public NativeArray<VisibleReflectionProbe> visibleReflectionProbes;
         public DirectionalLightData[] directionalLights = Array.Empty<DirectionalLightData>();
         public PunctualLightData[] punctualLights = Array.Empty<PunctualLightData>();
         public PunctualLightCullData[] punctualLightCullData = Array.Empty<PunctualLightCullData>();
         public PunctualLightScreenSpaceBounds[] punctualLightScreenSpaceBounds = Array.Empty<PunctualLightScreenSpaceBounds>();
+        public PunctualLightCoarseRange[] punctualLightCoarseRanges = Array.Empty<PunctualLightCoarseRange>();
+        public PunctualLightCoarseRecord[] punctualLightCoarseRecords = Array.Empty<PunctualLightCoarseRecord>();
         public int mainLightIndex;
         public EntityId mainLightEntityId;
         public int directionalLightCount;
         public int punctualLightCount;
+        public int punctualLightCoarseRangeCount;
+        public int punctualLightCoarseRecordCount;
         public int mainDirectionalLightIndex;
         public EntityId mainDirectionalLightEntityId;
 
@@ -397,6 +490,8 @@ namespace VividRP.Runtime
             EnsurePunctualLightCapacity(CountPunctualLights(lights));
 
             punctualLightCount = 0;
+            punctualLightCoarseRangeCount = 0;
+            punctualLightCoarseRecordCount = 0;
 
             if (lights == null || lights.Count == 0)
                 return;
@@ -418,6 +513,8 @@ namespace VividRP.Runtime
         internal void UpdatePunctualLightScreenSpaceBounds(in PunctualLightScreenSpaceBoundsParameters parameters)
         {
             EnsurePunctualLightCapacity(punctualLightCount);
+            punctualLightCoarseRangeCount = 0;
+            punctualLightCoarseRecordCount = 0;
 
             if (punctualLightCount <= 0)
                 return;
@@ -458,6 +555,95 @@ namespace VividRP.Runtime
             }
         }
 
+        internal void UpdatePunctualLightCoarseCullingData(int sliceCount)
+        {
+            sliceCount = Mathf.Max(sliceCount, 1);
+            EnsurePunctualLightCoarseCapacity(sliceCount, 0);
+
+            punctualLightCoarseRangeCount = sliceCount;
+            punctualLightCoarseRecordCount = 0;
+
+            for (var sliceIndex = 0; sliceIndex < sliceCount; sliceIndex++)
+                punctualLightCoarseRanges[sliceIndex] = default;
+
+            if (punctualLightCount <= 0)
+                return;
+
+            var nativePunctualLightScreenSpaceBounds = new NativeArray<PunctualLightScreenSpaceBoundsRecord>(
+                punctualLightCount,
+                Allocator.TempJob,
+                NativeArrayOptions.UninitializedMemory);
+            var nativeSliceLightCounts = new NativeArray<int>(
+                sliceCount,
+                Allocator.TempJob,
+                NativeArrayOptions.UninitializedMemory);
+            var nativeSliceStartOffsets = new NativeArray<int>(
+                sliceCount,
+                Allocator.TempJob,
+                NativeArrayOptions.UninitializedMemory);
+            NativeArray<PunctualLightCoarseRecord> nativePunctualLightCoarseRecords = default;
+
+            try
+            {
+                for (var lightIndex = 0; lightIndex < punctualLightCount; lightIndex++)
+                {
+                    nativePunctualLightScreenSpaceBounds[lightIndex] = ConvertPunctualLightScreenSpaceBoundsRecord(
+                        punctualLightScreenSpaceBounds[lightIndex]);
+                }
+
+                var countCoarseRangesJob = new CountPunctualLightCoarseRangesJob
+                {
+                    punctualLightScreenSpaceBounds = nativePunctualLightScreenSpaceBounds,
+                    sliceLightCounts = nativeSliceLightCounts,
+                };
+
+                countCoarseRangesJob.Schedule(sliceCount, 1).Complete();
+
+                var startIndex = 0;
+                for (var sliceIndex = 0; sliceIndex < sliceCount; sliceIndex++)
+                {
+                    var lightCount = nativeSliceLightCounts[sliceIndex];
+                    punctualLightCoarseRanges[sliceIndex] = new PunctualLightCoarseRange
+                    {
+                        startIndex = startIndex,
+                        lightCount = lightCount,
+                    };
+                    nativeSliceStartOffsets[sliceIndex] = startIndex;
+                    punctualLightCoarseRecordCount += lightCount;
+                    startIndex += lightCount;
+                }
+
+                if (punctualLightCoarseRecordCount <= 0)
+                    return;
+
+                EnsurePunctualLightCoarseCapacity(sliceCount, punctualLightCoarseRecordCount);
+
+                nativePunctualLightCoarseRecords = new NativeArray<PunctualLightCoarseRecord>(
+                    punctualLightCoarseRecordCount,
+                    Allocator.TempJob,
+                    NativeArrayOptions.UninitializedMemory);
+
+                var buildCoarseRecordsJob = new BuildPunctualLightCoarseRecordsJob
+                {
+                    punctualLightScreenSpaceBounds = nativePunctualLightScreenSpaceBounds,
+                    sliceStartOffsets = nativeSliceStartOffsets,
+                    punctualLightCoarseRecords = nativePunctualLightCoarseRecords,
+                };
+
+                buildCoarseRecordsJob.Schedule(sliceCount, 1).Complete();
+                nativePunctualLightCoarseRecords.CopyTo(punctualLightCoarseRecords);
+            }
+            finally
+            {
+                if (nativePunctualLightCoarseRecords.IsCreated)
+                    nativePunctualLightCoarseRecords.Dispose();
+
+                nativePunctualLightScreenSpaceBounds.Dispose();
+                nativeSliceLightCounts.Dispose();
+                nativeSliceStartOffsets.Dispose();
+            }
+        }
+
         public override void Reset()
         {
             visibleLights = default;
@@ -466,9 +652,13 @@ namespace VividRP.Runtime
             mainLightEntityId = EntityId.None;
             directionalLightCount = 0;
             punctualLightCount = 0;
+            punctualLightCoarseRangeCount = 0;
+            punctualLightCoarseRecordCount = 0;
             mainDirectionalLightIndex = -1;
             mainDirectionalLightEntityId = EntityId.None;
             punctualLightScreenSpaceBounds = Array.Empty<PunctualLightScreenSpaceBounds>();
+            punctualLightCoarseRanges = Array.Empty<PunctualLightCoarseRange>();
+            punctualLightCoarseRecords = Array.Empty<PunctualLightCoarseRecord>();
         }
 
         internal static PunctualLightScreenSpaceBoundsParameters CreatePunctualLightScreenSpaceBoundsParameters(
@@ -618,6 +808,15 @@ namespace VividRP.Runtime
 
             if (requiredCapacity > punctualLightScreenSpaceBounds.Length)
                 punctualLightScreenSpaceBounds = new PunctualLightScreenSpaceBounds[requiredCapacity];
+        }
+
+        private void EnsurePunctualLightCoarseCapacity(int requiredRangeCapacity, int requiredRecordCapacity)
+        {
+            if (requiredRangeCapacity > punctualLightCoarseRanges.Length)
+                punctualLightCoarseRanges = new PunctualLightCoarseRange[requiredRangeCapacity];
+
+            if (requiredRecordCapacity > punctualLightCoarseRecords.Length)
+                punctualLightCoarseRecords = new PunctualLightCoarseRecord[requiredRecordCapacity];
         }
 
         private static int CountDirectionalLights(IReadOnlyList<Light> lights)
@@ -770,7 +969,11 @@ namespace VividRP.Runtime
             }
 
             if (collectPunctualLights)
+            {
                 punctualLightCount = 0;
+                punctualLightCoarseRangeCount = 0;
+                punctualLightCoarseRecordCount = 0;
+            }
 
             if (!visibleLights.IsCreated || visibleLights.Length == 0)
                 return;
@@ -852,6 +1055,8 @@ namespace VividRP.Runtime
             EnsurePunctualLightCapacity(punctualCandidates.Length);
 
             punctualLightCount = punctualCandidates.Length;
+            punctualLightCoarseRangeCount = 0;
+            punctualLightCoarseRecordCount = 0;
 
             for (var punctualIndex = 0; punctualIndex < punctualLightCount; punctualIndex++)
             {
@@ -1056,6 +1261,24 @@ namespace VividRP.Runtime
                 viewSpaceAabbMax = new Vector3(source.viewSpaceAabbMax.x, source.viewSpaceAabbMax.y, source.viewSpaceAabbMax.z),
                 clipSpaceAabbMin = new Vector2(source.clipSpaceAabbMin.x, source.clipSpaceAabbMin.y),
                 clipSpaceAabbMax = new Vector2(source.clipSpaceAabbMax.x, source.clipSpaceAabbMax.y),
+                sliceMin = source.sliceMin,
+                sliceMax = source.sliceMax,
+                tileMinX = source.tileMinX,
+                tileMaxX = source.tileMaxX,
+                tileMinY = source.tileMinY,
+                tileMaxY = source.tileMaxY,
+                isValid = source.isValid,
+            };
+        }
+
+        private static PunctualLightScreenSpaceBoundsRecord ConvertPunctualLightScreenSpaceBoundsRecord(PunctualLightScreenSpaceBounds source)
+        {
+            return new PunctualLightScreenSpaceBoundsRecord
+            {
+                viewSpaceAabbMin = new float3(source.viewSpaceAabbMin.x, source.viewSpaceAabbMin.y, source.viewSpaceAabbMin.z),
+                viewSpaceAabbMax = new float3(source.viewSpaceAabbMax.x, source.viewSpaceAabbMax.y, source.viewSpaceAabbMax.z),
+                clipSpaceAabbMin = new float2(source.clipSpaceAabbMin.x, source.clipSpaceAabbMin.y),
+                clipSpaceAabbMax = new float2(source.clipSpaceAabbMax.x, source.clipSpaceAabbMax.y),
                 sliceMin = source.sliceMin,
                 sliceMax = source.sliceMax,
                 tileMinX = source.tileMinX,

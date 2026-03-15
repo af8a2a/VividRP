@@ -464,6 +464,7 @@ namespace VividRP.Editor.Tests
                     320,
                     180,
                     32,
+                    64,
                     24,
                     3,
                     64);
@@ -476,6 +477,11 @@ namespace VividRP.Editor.Tests
                 Assert.That(parameters.sliceCount, Is.EqualTo(24));
                 Assert.That(parameters.clusterCount, Is.EqualTo(1440));
                 Assert.That(parameters.lightIndexCapacity, Is.EqualTo(4320));
+                Assert.That(parameters.bigTileSize, Is.EqualTo(64));
+                Assert.That(parameters.bigTileCountX, Is.EqualTo(5));
+                Assert.That(parameters.bigTileCountY, Is.EqualTo(3));
+                Assert.That(parameters.bigTileCount, Is.EqualTo(15));
+                Assert.That(parameters.bigTileLightIndexCapacity, Is.EqualTo(45));
                 Assert.That(parameters.screenSpaceBoundsParameters.tileCountX, Is.EqualTo(10));
                 Assert.That(parameters.screenSpaceBoundsParameters.tileCountY, Is.EqualTo(6));
             }
@@ -605,6 +611,7 @@ namespace VividRP.Editor.Tests
                     320,
                     180,
                     32,
+                    64,
                     24,
                     lightData.punctualLightCount,
                     64);
@@ -620,6 +627,77 @@ namespace VividRP.Editor.Tests
 
                 for (var sliceIndex = 0; sliceIndex < parameters.sliceCount; sliceIndex++)
                     AssertPunctualLightCoarseRange(lightData.punctualLightCoarseRanges[sliceIndex], 0, 0);
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void UpdatePunctualLightClusteredLightListData_ClampsTileRangeAndBuildsMultiSliceRecords_WhenPointLightTouchesScreenEdge()
+        {
+            var cameraObject = new GameObject("Clustered Edge Point Camera");
+            var camera = cameraObject.AddComponent<Camera>();
+            var lightData = new VividLightData();
+
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 1000.0f;
+            camera.fieldOfView = 60.0f;
+            camera.transform.position = Vector3.zero;
+            camera.transform.rotation = Quaternion.identity;
+
+            lightData.punctualLightCullData = new[]
+            {
+                new VividLightData.PunctualLightCullData
+                {
+                    positionWS = new Vector3(5.0f, 0.0f, 6.0f),
+                    range = 3.0f,
+                    directionWS = Vector3.forward,
+                    lightType = 0u,
+                    cosOuterAngle = 1.0f,
+                    radiusAtRange = 0.0f,
+                    cullingCenterWS = new Vector3(5.0f, 0.0f, 6.0f),
+                    cullingRadius = 3.0f,
+                }
+            };
+            lightData.punctualLightCount = 1;
+
+            try
+            {
+                var parameters = VividLightData.CreatePunctualLightClusteredLightListParameters(
+                    camera,
+                    320,
+                    180,
+                    32,
+                    64,
+                    24,
+                    lightData.punctualLightCount,
+                    64);
+                var buildResult = lightData.UpdatePunctualLightClusteredLightListData(parameters);
+                var bounds = lightData.punctualLightScreenSpaceBounds[0];
+                var expectedRecordCount = bounds.sliceMax - bounds.sliceMin + 1;
+
+                Assert.That(bounds.isValid, Is.EqualTo(1u));
+                Assert.That(bounds.tileMaxX, Is.EqualTo(parameters.tileCountX - 1));
+                Assert.That(bounds.tileMinX, Is.LessThan(bounds.tileMaxX));
+                Assert.That(bounds.sliceMax, Is.GreaterThan(bounds.sliceMin));
+                Assert.That(buildResult.coarseRangeCount, Is.EqualTo(parameters.sliceCount));
+                Assert.That(buildResult.coarseRecordCount, Is.EqualTo(expectedRecordCount));
+
+                for (var sliceIndex = bounds.sliceMin; sliceIndex <= bounds.sliceMax; sliceIndex++)
+                {
+                    var range = lightData.punctualLightCoarseRanges[sliceIndex];
+                    Assert.That(range.lightCount, Is.EqualTo(1));
+                    Assert.That(range.startIndex, Is.EqualTo(sliceIndex - bounds.sliceMin));
+                    AssertPunctualLightCoarseRecord(
+                        lightData.punctualLightCoarseRecords[range.startIndex],
+                        0,
+                        bounds.tileMinX,
+                        bounds.tileMaxX,
+                        bounds.tileMinY,
+                        bounds.tileMaxY);
+                }
             }
             finally
             {

@@ -10,7 +10,7 @@ namespace VividRP.Editor.Tests
     public class LightGridPassTests
     {
         [Test]
-        public void Prepare_AllocatesDirectionalLightBuffer_WhenDirectionalLightsAreAvailable()
+        public void Prepare_AllocatesDirectionalAndGpuCoarseBuffers_WhenLightsAreAvailable()
         {
             var pass = new LightGridPass();
             var frameData = new ContextContainer();
@@ -70,8 +70,9 @@ namespace VividRP.Editor.Tests
                 var directionalLightBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_DirectionalLightBuffer");
                 var punctualLightBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_PunctualLightBuffer");
                 var punctualLightCullBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_PunctualLightCullBuffer");
-                var clusterCoarseLightRangesBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterCoarseLightRangesBuffer");
-                var clusterCoarseLightRecordsBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterCoarseLightRecordsBuffer");
+                var punctualLightScreenSpaceBoundsBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_PunctualLightScreenSpaceBoundsBuffer");
+                var clusterBigTileLightRangesBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterBigTileLightRangesBuffer");
+                var clusterBigTileLightIndicesBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterBigTileLightIndicesBuffer");
                 var clusterLightGridBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterLightGridBuffer");
                 var clusterLightIndicesBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterLightIndicesBuffer");
                 var directionalLightCount = (int)GetFieldValue(pass, "m_DirectionalLightCount");
@@ -79,27 +80,31 @@ namespace VividRP.Editor.Tests
                 var mainDirectionalLightIndex = (int)GetFieldValue(pass, "m_MainDirectionalLightIndex");
                 var clusterTileCountX = (int)GetFieldValue(pass, "m_ClusterTileCountX");
                 var clusterTileCountY = (int)GetFieldValue(pass, "m_ClusterTileCountY");
+                var clusterBigTileCountX = (int)GetFieldValue(pass, "m_ClusterBigTileCountX");
+                var clusterBigTileCountY = (int)GetFieldValue(pass, "m_ClusterBigTileCountY");
                 var clusterLightIndexCapacity = (int)GetFieldValue(pass, "m_ClusterLightIndexCapacity");
-                var clusterCoarseLightRecordCount = (int)GetFieldValue(pass, "m_ClusterCoarseLightRecordCount");
+                var clusterBigTileLightIndexCapacity = (int)GetFieldValue(pass, "m_ClusterBigTileLightIndexCapacity");
 
                 Assert.That(directionalLightBuffer, Is.Not.Null);
                 Assert.That(punctualLightBuffer, Is.Not.Null);
                 Assert.That(punctualLightCullBuffer, Is.Not.Null);
-                Assert.That(clusterCoarseLightRangesBuffer, Is.Not.Null);
-                Assert.That(clusterCoarseLightRecordsBuffer, Is.Not.Null);
+                Assert.That(punctualLightScreenSpaceBoundsBuffer, Is.Not.Null);
+                Assert.That(clusterBigTileLightRangesBuffer, Is.Not.Null);
+                Assert.That(clusterBigTileLightIndicesBuffer, Is.Not.Null);
                 Assert.That(clusterLightGridBuffer, Is.Not.Null);
                 Assert.That(clusterLightIndicesBuffer, Is.Not.Null);
                 Assert.That(directionalLightBuffer.count, Is.EqualTo(1));
                 Assert.That(directionalLightBuffer.stride, Is.EqualTo(VividLightData.DirectionalLightData.Stride));
                 Assert.That(punctualLightBuffer.count, Is.EqualTo(1));
-                Assert.That(punctualLightBuffer.stride, Is.EqualTo(GetPunctualUploadStride()));
+                Assert.That(punctualLightBuffer.stride, Is.EqualTo(VividLightData.PunctualLightData.Stride));
                 Assert.That(punctualLightCullBuffer.count, Is.EqualTo(1));
-                Assert.That(punctualLightCullBuffer.stride, Is.EqualTo(GetPunctualCullUploadStride()));
-                Assert.That(clusterCoarseLightRangesBuffer.count, Is.EqualTo(GetClusterSliceCount()));
-                Assert.That(clusterCoarseLightRangesBuffer.stride, Is.EqualTo(GetCoarseRangeUploadStride()));
-                Assert.That(clusterCoarseLightRecordCount, Is.GreaterThan(0));
-                Assert.That(clusterCoarseLightRecordsBuffer.count, Is.EqualTo(clusterCoarseLightRecordCount));
-                Assert.That(clusterCoarseLightRecordsBuffer.stride, Is.EqualTo(GetCoarseRecordUploadStride()));
+                Assert.That(punctualLightCullBuffer.stride, Is.EqualTo(VividLightData.PunctualLightViewSpaceCullData.Stride));
+                Assert.That(punctualLightScreenSpaceBoundsBuffer.count, Is.EqualTo(1));
+                Assert.That(punctualLightScreenSpaceBoundsBuffer.stride, Is.EqualTo(VividLightData.PunctualLightScreenSpaceBounds.Stride));
+                Assert.That(clusterBigTileLightRangesBuffer.count, Is.EqualTo(15));
+                Assert.That(clusterBigTileLightRangesBuffer.stride, Is.EqualTo(VividLightData.PunctualLightCoarseRange.Stride));
+                Assert.That(clusterBigTileLightIndicesBuffer.count, Is.EqualTo(15));
+                Assert.That(clusterBigTileLightIndicesBuffer.stride, Is.EqualTo(sizeof(uint)));
                 Assert.That(clusterLightGridBuffer.count, Is.EqualTo(1440));
                 Assert.That(clusterLightGridBuffer.stride, Is.EqualTo(sizeof(uint) * 2));
                 Assert.That(clusterLightIndicesBuffer.count, Is.EqualTo(1440));
@@ -109,7 +114,11 @@ namespace VividRP.Editor.Tests
                 Assert.That(mainDirectionalLightIndex, Is.EqualTo(0));
                 Assert.That(clusterTileCountX, Is.EqualTo(10));
                 Assert.That(clusterTileCountY, Is.EqualTo(6));
+                Assert.That(clusterBigTileCountX, Is.EqualTo(5));
+                Assert.That(clusterBigTileCountY, Is.EqualTo(3));
                 Assert.That(clusterLightIndexCapacity, Is.EqualTo(1440));
+                Assert.That(clusterBigTileLightIndexCapacity, Is.EqualTo(15));
+                Assert.That(lightData.punctualLightScreenSpaceBounds[0].isValid, Is.EqualTo(1u));
             }
             finally
             {
@@ -119,7 +128,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Prepare_UsesSingleElementFallbackBuffer_WhenDirectionalLightsAreMissing()
+        public void Prepare_UsesSingleElementFallbackBuffer_WhenLightsAreMissing()
         {
             var pass = new LightGridPass();
             var frameData = new ContextContainer();
@@ -131,35 +140,39 @@ namespace VividRP.Editor.Tests
                 var directionalLightBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_DirectionalLightBuffer");
                 var punctualLightBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_PunctualLightBuffer");
                 var punctualLightCullBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_PunctualLightCullBuffer");
-                var clusterCoarseLightRangesBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterCoarseLightRangesBuffer");
-                var clusterCoarseLightRecordsBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterCoarseLightRecordsBuffer");
+                var punctualLightScreenSpaceBoundsBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_PunctualLightScreenSpaceBoundsBuffer");
+                var clusterBigTileLightRangesBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterBigTileLightRangesBuffer");
+                var clusterBigTileLightIndicesBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterBigTileLightIndicesBuffer");
                 var clusterLightIndicesBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterLightIndicesBuffer");
                 var directionalLightCount = (int)GetFieldValue(pass, "m_DirectionalLightCount");
                 var punctualLightCount = (int)GetFieldValue(pass, "m_PunctualLightCount");
                 var mainDirectionalLightIndex = (int)GetFieldValue(pass, "m_MainDirectionalLightIndex");
-                var clusterCoarseLightRecordCount = (int)GetFieldValue(pass, "m_ClusterCoarseLightRecordCount");
+                var clusterBigTileLightIndexCapacity = (int)GetFieldValue(pass, "m_ClusterBigTileLightIndexCapacity");
 
                 Assert.That(directionalLightBuffer, Is.Not.Null);
                 Assert.That(punctualLightBuffer, Is.Not.Null);
                 Assert.That(punctualLightCullBuffer, Is.Not.Null);
-                Assert.That(clusterCoarseLightRangesBuffer, Is.Not.Null);
-                Assert.That(clusterCoarseLightRecordsBuffer, Is.Not.Null);
+                Assert.That(punctualLightScreenSpaceBoundsBuffer, Is.Not.Null);
+                Assert.That(clusterBigTileLightRangesBuffer, Is.Not.Null);
+                Assert.That(clusterBigTileLightIndicesBuffer, Is.Not.Null);
                 Assert.That(clusterLightIndicesBuffer, Is.Not.Null);
                 Assert.That(directionalLightBuffer.count, Is.EqualTo(1));
                 Assert.That(directionalLightBuffer.stride, Is.EqualTo(VividLightData.DirectionalLightData.Stride));
                 Assert.That(punctualLightBuffer.count, Is.EqualTo(1));
-                Assert.That(punctualLightBuffer.stride, Is.EqualTo(GetPunctualUploadStride()));
+                Assert.That(punctualLightBuffer.stride, Is.EqualTo(VividLightData.PunctualLightData.Stride));
                 Assert.That(punctualLightCullBuffer.count, Is.EqualTo(1));
-                Assert.That(punctualLightCullBuffer.stride, Is.EqualTo(GetPunctualCullUploadStride()));
-                Assert.That(clusterCoarseLightRangesBuffer.count, Is.EqualTo(1));
-                Assert.That(clusterCoarseLightRangesBuffer.stride, Is.EqualTo(GetCoarseRangeUploadStride()));
-                Assert.That(clusterCoarseLightRecordsBuffer.count, Is.EqualTo(1));
-                Assert.That(clusterCoarseLightRecordsBuffer.stride, Is.EqualTo(GetCoarseRecordUploadStride()));
-                Assert.That(clusterCoarseLightRecordCount, Is.Zero);
+                Assert.That(punctualLightCullBuffer.stride, Is.EqualTo(VividLightData.PunctualLightViewSpaceCullData.Stride));
+                Assert.That(punctualLightScreenSpaceBoundsBuffer.count, Is.EqualTo(1));
+                Assert.That(punctualLightScreenSpaceBoundsBuffer.stride, Is.EqualTo(VividLightData.PunctualLightScreenSpaceBounds.Stride));
+                Assert.That(clusterBigTileLightRangesBuffer.count, Is.EqualTo(1));
+                Assert.That(clusterBigTileLightRangesBuffer.stride, Is.EqualTo(VividLightData.PunctualLightCoarseRange.Stride));
+                Assert.That(clusterBigTileLightIndicesBuffer.count, Is.EqualTo(1));
+                Assert.That(clusterBigTileLightIndicesBuffer.stride, Is.EqualTo(sizeof(uint)));
                 Assert.That(clusterLightIndicesBuffer.count, Is.EqualTo(1));
                 Assert.That(directionalLightCount, Is.Zero);
                 Assert.That(punctualLightCount, Is.Zero);
                 Assert.That(mainDirectionalLightIndex, Is.EqualTo(-1));
+                Assert.That(clusterBigTileLightIndexCapacity, Is.EqualTo(1));
             }
             finally
             {
@@ -180,35 +193,6 @@ namespace VividRP.Editor.Tests
             Assert.That(field, Is.Not.Null);
 
             return field.GetValue(pass);
-        }
-
-        private static int GetPunctualUploadStride()
-        {
-            return VividLightData.PunctualLightData.Stride;
-        }
-
-        private static int GetPunctualCullUploadStride()
-        {
-            return VividLightData.PunctualLightViewSpaceCullData.Stride;
-        }
-
-        private static int GetCoarseRangeUploadStride()
-        {
-            return VividLightData.PunctualLightCoarseRange.Stride;
-        }
-
-        private static int GetCoarseRecordUploadStride()
-        {
-            return VividLightData.PunctualLightCoarseRecord.Stride;
-        }
-
-        private static int GetClusterSliceCount()
-        {
-            var field = typeof(LightGridPass).GetField("ClusterSliceCount", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public);
-
-            Assert.That(field, Is.Not.Null);
-
-            return (int)field.GetRawConstantValue();
         }
     }
 }

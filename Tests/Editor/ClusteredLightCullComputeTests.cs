@@ -9,21 +9,24 @@ namespace VividRP.Editor.Tests
     public sealed class ClusteredLightCullComputeTests
     {
         [Test]
-        public void ClusteredLightCullCompute_DeclaresExpectedKernelsAndCoarseCullingInputs()
+        public void ClusteredLightCullCompute_DeclaresExpectedKernelsAndGpuCoarseCullingInputs()
         {
             var source = File.ReadAllText(GetComputeShaderSourcePath());
 
             Assert.That(source, Does.Contain("#pragma kernel ClearClusterLightCounter"));
+            Assert.That(source, Does.Contain("#pragma kernel BuildClusterBigTileLightList"));
             Assert.That(source, Does.Contain("#pragma kernel BuildClusteredLightList"));
             Assert.That(source, Does.Contain("StructuredBuffer<PunctualLightCullData> _PunctualLightCullData;"));
-            Assert.That(source, Does.Contain("StructuredBuffer<uint2> _ClusterCoarseLightRanges;"));
-            Assert.That(source, Does.Contain("StructuredBuffer<PunctualLightCoarseRecord> _ClusterCoarseLightRecords;"));
+            Assert.That(source, Does.Contain("StructuredBuffer<PunctualLightScreenSpaceBounds> _PunctualLightScreenSpaceBounds;"));
+            Assert.That(source, Does.Contain("RWStructuredBuffer<uint2> _ClusterBigTileLightRanges;"));
+            Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _ClusterBigTileLightIndices;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint2> _ClusterLightGrid;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _ClusterLightIndices;"));
             Assert.That(source, Does.Contain("bool SphereIntersectsCluster(float3 sphereCenter, float sphereRadius, float3 boundsMin, float3 boundsMax)"));
             Assert.That(source, Does.Contain("bool SpotConeIntersectsCluster(PunctualLightCullData punctualLightCullData, float3 boundsMin, float3 boundsMax)"));
             Assert.That(source, Does.Contain("bool PunctualLightIntersectsCluster(PunctualLightCullData punctualLightCullData, float3 boundsMin, float3 boundsMax)"));
-            Assert.That(source, Does.Contain("PunctualLightCoarseRecord coarseLightRecord = _ClusterCoarseLightRecords[coarseLightRange.x + coarseLightOffset];"));
+            Assert.That(source, Does.Contain("void BuildClusterBigTileLightList(uint3 dispatchThreadId : SV_DispatchThreadID)"));
+            Assert.That(source, Does.Contain("uint2 bigTileLightRange = _ClusterBigTileLightRanges[GetBigTileIndex(bigTileCoord)];"));
         }
 
         [Test]

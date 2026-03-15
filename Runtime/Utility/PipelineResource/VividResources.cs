@@ -50,6 +50,9 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/Lighting/lightlistbuild-clustered")]
         public ComputeShader BuildPerVoxelLightListCompute;
 
+        [ResourcePath("Shaders/Core/Private/Lighting/ClearLightLists")]
+        public ComputeShader ClearLightListsCompute;
+
         [ResourcePath("Shaders/Core/Private/Lighting/lightlistbuild-clearatomic")]
         public ComputeShader ClearClusterAtomicIndexCompute;
 

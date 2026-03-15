@@ -88,6 +88,8 @@ namespace VividRP.Editor.Tests
                 var clusterLightIndexCapacity = (int)GetFieldValue(pass, "m_ClusterLightIndexCapacity");
                 var clusterBigTileLightIndexCapacity = (int)GetFieldValue(pass, "m_ClusterBigTileLightIndexCapacity");
                 var layeredOffsetCapacity = (int)GetFieldValue(pass, "m_LayeredOffsetCapacity");
+                var shaderVariablesLightList = GetFieldValue(pass, "m_ShaderVariablesLightListCB");
+                var lightListDimensions = GetStructFieldValue(shaderVariablesLightList, "g_viDimensions");
 
                 Assert.That(directionalLightBuffer, Is.Not.Null);
                 Assert.That(punctualLightBuffer, Is.Not.Null);
@@ -130,23 +132,14 @@ namespace VividRP.Editor.Tests
                 Assert.That(clusterLightIndexCapacity, Is.EqualTo(491520));
                 Assert.That(clusterBigTileLightIndexCapacity, Is.EqualTo(3840));
                 Assert.That(layeredOffsetCapacity, Is.EqualTo(15360));
+                Assert.That(GetStructFieldValue(shaderVariablesLightList, "g_iNrVisibLights"), Is.EqualTo(1));
+                Assert.That(GetStructFieldValue(shaderVariablesLightList, "g_isOrthographic"), Is.EqualTo(0u));
+                Assert.That(GetStructFieldValue(shaderVariablesLightList, "g_iNumSamplesMSAA"), Is.EqualTo(1));
+                Assert.That(GetStructFieldValue(lightListDimensions, "x"), Is.EqualTo(320));
+                Assert.That(GetStructFieldValue(lightListDimensions, "y"), Is.EqualTo(180));
                 Assert.That(lightData.punctualLightBounds[0].radius, Is.GreaterThan(0.0f));
                 Assert.That(lightData.punctualLightVolumeData[0].radiusSq, Is.EqualTo(36.0f).Within(1e-4f));
                 Assert.That(lightData.punctualLightVolumeData[0].lightVolume, Is.EqualTo(1u));
-
-                var bigTileClearData = new uint[4];
-                var layeredOffsetData = new uint[4];
-                var layeredLightListCounterData = new uint[1];
-                var logBaseData = new float[4];
-                bigTileLightListBuffer.GetData(bigTileClearData, 0, 0, bigTileClearData.Length);
-                layeredOffsetBuffer.GetData(layeredOffsetData, 0, 0, layeredOffsetData.Length);
-                layeredLightListCounterBuffer.GetData(layeredLightListCounterData, 0, 0, layeredLightListCounterData.Length);
-                logBaseBuffer.GetData(logBaseData, 0, 0, logBaseData.Length);
-
-                Assert.That(bigTileClearData, Is.All.EqualTo(0u));
-                Assert.That(layeredOffsetData, Is.All.EqualTo(0u));
-                Assert.That(layeredLightListCounterData[0], Is.Zero);
-                Assert.That(logBaseData, Is.All.EqualTo(1.02f).Within(1e-5f));
             }
             finally
             {
@@ -183,6 +176,7 @@ namespace VividRP.Editor.Tests
                 var directionalLightCount = (int)GetFieldValue(pass, "m_DirectionalLightCount");
                 var punctualLightCount = (int)GetFieldValue(pass, "m_PunctualLightCount");
                 var mainDirectionalLightIndex = (int)GetFieldValue(pass, "m_MainDirectionalLightIndex");
+                var shaderVariablesLightList = GetFieldValue(pass, "m_ShaderVariablesLightListCB");
 
                 Assert.That(directionalLightBuffer, Is.Not.Null);
                 Assert.That(punctualLightBuffer, Is.Not.Null);
@@ -207,6 +201,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(directionalLightCount, Is.Zero);
                 Assert.That(punctualLightCount, Is.Zero);
                 Assert.That(mainDirectionalLightIndex, Is.EqualTo(-1));
+                Assert.That(GetStructFieldValue(shaderVariablesLightList, "g_iNrVisibLights"), Is.Zero);
             }
             finally
             {
@@ -228,6 +223,15 @@ namespace VividRP.Editor.Tests
             Assert.That(field, Is.Not.Null);
 
             return field.GetValue(pass);
+        }
+
+        private static object GetStructFieldValue(object instance, string fieldName)
+        {
+            var field = instance.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+            Assert.That(field, Is.Not.Null);
+
+            return field.GetValue(instance);
         }
     }
 }

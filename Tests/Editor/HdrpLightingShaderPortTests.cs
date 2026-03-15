@@ -1,5 +1,6 @@
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using NUnit.Framework;
 using UnityEngine;
 using VividRP.Runtime;
@@ -18,6 +19,7 @@ namespace VividRP.Editor.Tests
             Assert.That(File.Exists(GetPackagePath("Shaders", "Core", "Private", "Lighting", "scrbound.compute")), Is.True);
             Assert.That(File.Exists(GetPackagePath("Shaders", "Core", "Private", "Lighting", "lightlistbuild-bigtile.compute")), Is.True);
             Assert.That(File.Exists(GetPackagePath("Shaders", "Core", "Private", "Lighting", "lightlistbuild-clustered.compute")), Is.True);
+            Assert.That(File.Exists(GetPackagePath("Shaders", "Core", "Private", "Lighting", "ClearLightLists.compute")), Is.True);
             Assert.That(File.Exists(GetPackagePath("Shaders", "Core", "Private", "Lighting", "lightlistbuild-clearatomic.compute")), Is.True);
         }
 
@@ -78,11 +80,25 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ShaderVariablesLightList_CSharpLayout_MatchesHdrpCBufferPacking()
+        {
+            var assembly = typeof(LightGridPass).Assembly;
+            var dimensionsType = assembly.GetType("VividRP.Runtime.ShaderVariablesLightListInt2");
+            var lightListType = assembly.GetType("VividRP.Runtime.ShaderVariablesLightList");
+
+            Assert.That(dimensionsType, Is.Not.Null);
+            Assert.That(lightListType, Is.Not.Null);
+            Assert.That(Marshal.SizeOf(dimensionsType), Is.EqualTo(8));
+            Assert.That(Marshal.SizeOf(lightListType), Is.EqualTo(560));
+        }
+
+        [Test]
         public void VividRPCoreResources_DeclaresHdrpClusteredLightBuildShaders()
         {
             AssertResourcePath(nameof(VividRPCoreResources.BuildScreenAABBCompute), "Shaders/Core/Private/Lighting/scrbound");
             AssertResourcePath(nameof(VividRPCoreResources.BuildPerBigTileLightListCompute), "Shaders/Core/Private/Lighting/lightlistbuild-bigtile");
             AssertResourcePath(nameof(VividRPCoreResources.BuildPerVoxelLightListCompute), "Shaders/Core/Private/Lighting/lightlistbuild-clustered");
+            AssertResourcePath(nameof(VividRPCoreResources.ClearLightListsCompute), "Shaders/Core/Private/Lighting/ClearLightLists");
             AssertResourcePath(nameof(VividRPCoreResources.ClearClusterAtomicIndexCompute), "Shaders/Core/Private/Lighting/lightlistbuild-clearatomic");
         }
 

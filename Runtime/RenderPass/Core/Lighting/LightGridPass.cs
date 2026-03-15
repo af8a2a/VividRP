@@ -20,6 +20,8 @@ namespace VividRP.Runtime
         private const int HdrpFptlMaxLightCount = 63;
         private const int MaxNrBigTileLightsPlusOne = 512;
         private const int LightsPerScreenAabbGroup = 16;
+        private const int ClearLightListThreadGroupSize = 64;
+        private const int MaxClearLightListDispatchGroups = 65535;
 
         private static readonly Matrix4x4 s_FlipMatrixLhsRhs = Matrix4x4.Scale(new Vector3(1.0f, 1.0f, -1.0f));
 
@@ -37,19 +39,10 @@ namespace VividRP.Runtime
         private static readonly int LayeredOffsetId = Shader.PropertyToID("g_LayeredOffset");
         private static readonly int LayeredLightListCounterId = Shader.PropertyToID("g_LayeredSingleIdxBuffer");
         private static readonly int LogBaseBufferId = Shader.PropertyToID("g_logBaseBuffer");
+        private static readonly int ShaderVariablesLightListId = Shader.PropertyToID("ShaderVariablesLightList");
+        private static readonly int LightListToClearId = Shader.PropertyToID("_LightListToClear");
+        private static readonly int LightListEntriesAndOffsetId = Shader.PropertyToID("_LightListEntriesAndOffset");
         private static readonly int DepthTextureId = Shader.PropertyToID("g_depth_tex");
-        private static readonly int InvScreenProjectionMatricesId = Shader.PropertyToID("g_mInvScrProjectionArr");
-        private static readonly int ScreenProjectionMatricesId = Shader.PropertyToID("g_mScrProjectionArr");
-        private static readonly int InvProjectionMatricesId = Shader.PropertyToID("g_mInvProjectionArr");
-        private static readonly int ProjectionMatricesId = Shader.PropertyToID("g_mProjectionArr");
-        private static readonly int ScreenSizeId = Shader.PropertyToID("g_screenSize");
-        private static readonly int DimensionsId = Shader.PropertyToID("g_viDimensions");
-        private static readonly int VisibleLightCountId = Shader.PropertyToID("g_iNrVisibLights");
-        private static readonly int IsOrthographicLightLoopId = Shader.PropertyToID("g_isOrthographic");
-        private static readonly int BaseFeatureFlagsId = Shader.PropertyToID("g_BaseFeatureFlags");
-        private static readonly int MsaaSampleCountId = Shader.PropertyToID("g_iNumSamplesMSAA");
-        private static readonly int EnvLightIndexShiftId = Shader.PropertyToID("_EnvLightIndexShift");
-        private static readonly int DecalIndexShiftId = Shader.PropertyToID("_DecalIndexShift");
         private static readonly int ClusterScaleId = Shader.PropertyToID("g_fClustScale");
         private static readonly int ClusterBaseId = Shader.PropertyToID("g_fClustBase");
         private static readonly int NearPlaneId = Shader.PropertyToID("g_fNearPlane");
@@ -70,7 +63,6 @@ namespace VividRP.Runtime
         private static readonly VividLightData.PunctualLightData[] s_EmptyPunctualLights = { default };
         private static readonly VividLightData.SFiniteLightBound[] s_EmptyFiniteLightBounds = { default };
         private static readonly VividLightData.LightVolumeData[] s_EmptyLightVolumeData = { default };
-        private static readonly uint[] s_ZeroUintData = { 0u };
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
@@ -85,6 +77,7 @@ namespace VividRP.Runtime
         private GraphicsBuffer m_LayeredLightListBuffer;
         private GraphicsBuffer m_LayeredLightListCounterBuffer;
         private GraphicsBuffer m_LogBaseBuffer;
+        private ComputeShader m_ClearLightListsCompute;
         private ComputeShader m_ClearClusterAtomicIndexCompute;
         private ComputeShader m_BuildScreenAabbCompute;
         private ComputeShader m_BuildPerBigTileLightListCompute;
@@ -93,9 +86,7 @@ namespace VividRP.Runtime
         private readonly Matrix4x4[] m_ScreenProjectionMatrices = new Matrix4x4[2];
         private readonly Matrix4x4[] m_InvProjectionMatrices = new Matrix4x4[2];
         private readonly Matrix4x4[] m_ProjectionMatrices = new Matrix4x4[2];
-        private uint[] m_BigTileLightListClearData;
-        private uint[] m_LayeredOffsetClearData;
-        private float[] m_LogBaseData;
+        private ShaderVariablesLightList m_ShaderVariablesLightListCB;
         private int m_DirectionalLightCount;
         private int m_PunctualLightCount;
         private int m_MainDirectionalLightIndex;
@@ -115,6 +106,7 @@ namespace VividRP.Runtime
         private float m_ClusterFarClip;
         private float m_ClusterScale;
         private int m_ClusterIsOrthographic;
+        private int m_ClearLightListsKernel = -1;
         private int m_ClearClusterAtomicIndexKernel = -1;
         private int m_BuildScreenAabbKernel = -1;
         private int m_BuildPerBigTileLightListKernel = -1;
@@ -196,29 +188,32 @@ namespace VividRP.Runtime
                 m_LightVolumeDataBuffer.SetData(s_EmptyLightVolumeData);
             }
 
-            ClearUintBuffer(m_BigTileLightListBuffer, ref m_BigTileLightListClearData);
-            ClearUintBuffer(m_LayeredOffsetBuffer, ref m_LayeredOffsetClearData);
-            m_LayeredLightListCounterBuffer.SetData(s_ZeroUintData);
-            FillFloatBuffer(m_LogBaseBuffer, ref m_LogBaseData, ClusterLogBase);
+            UpdateShaderVariablesLightListConstantBuffer();
         }
 
         public override void Create()
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
+            m_ClearLightListsCompute = resources?.ClearLightListsCompute;
             m_ClearClusterAtomicIndexCompute = resources?.ClearClusterAtomicIndexCompute;
             m_BuildScreenAabbCompute = resources?.BuildScreenAABBCompute;
             m_BuildPerBigTileLightListCompute = resources?.BuildPerBigTileLightListCompute;
             m_BuildPerVoxelLightListCompute = resources?.BuildPerVoxelLightListCompute;
 
-            if (m_BuildScreenAabbCompute == null
+            if (m_ClearLightListsCompute == null
+                || m_ClearClusterAtomicIndexCompute == null
+                || m_BuildScreenAabbCompute == null
                 || m_BuildPerBigTileLightListCompute == null
                 || m_BuildPerVoxelLightListCompute == null)
             {
+                Debug.LogWarning("[VividRP] Missing one or more HDRP clustered light culling compute shaders. Clustered punctual lighting will be disabled.");
                 return;
             }
 
             try
             {
+                m_ClearLightListsKernel = m_ClearLightListsCompute.FindKernel("ClearList");
+                m_ClearClusterAtomicIndexKernel = m_ClearClusterAtomicIndexCompute.FindKernel("ClearAtomic");
                 m_BuildScreenAabbKernel = m_BuildScreenAabbCompute.FindKernel("main");
                 m_BuildPerBigTileLightListKernel = m_BuildPerBigTileLightListCompute.FindKernel("BigTileLightListGen");
                 m_BuildPerVoxelLightListDepthKernel = m_BuildPerVoxelLightListCompute.FindKernel("TileLightListGen_DepthRT_SrcBigTile");
@@ -227,29 +222,17 @@ namespace VividRP.Runtime
             catch (ArgumentException)
             {
                 Debug.LogWarning("[VividRP] Could not find one or more HDRP clustered light list kernels. Clustered punctual lighting will be disabled.");
+                m_ClearLightListsCompute = null;
                 m_ClearClusterAtomicIndexCompute = null;
                 m_BuildScreenAabbCompute = null;
                 m_BuildPerBigTileLightListCompute = null;
                 m_BuildPerVoxelLightListCompute = null;
+                m_ClearLightListsKernel = -1;
                 m_ClearClusterAtomicIndexKernel = -1;
                 m_BuildScreenAabbKernel = -1;
                 m_BuildPerBigTileLightListKernel = -1;
                 m_BuildPerVoxelLightListDepthKernel = -1;
                 m_BuildPerVoxelLightListNoDepthKernel = -1;
-            }
-
-            if (m_ClearClusterAtomicIndexCompute != null)
-            {
-                try
-                {
-                    m_ClearClusterAtomicIndexKernel = m_ClearClusterAtomicIndexCompute.FindKernel("ClearAtomic");
-                }
-                catch (ArgumentException)
-                {
-                    Debug.LogWarning("[VividRP] Could not find HDRP ClearAtomic kernel. Falling back to CPU-side atomic reset.");
-                    m_ClearClusterAtomicIndexCompute = null;
-                    m_ClearClusterAtomicIndexKernel = -1;
-                }
             }
         }
 
@@ -274,9 +257,13 @@ namespace VividRP.Runtime
             {
                 var hasDepthTexture = m_DepthTexture != null && m_DepthTexture.innerHandle.IsValid();
                 var canBuildClusteredLights = m_PunctualLightCount > 0
+                    && m_ClearLightListsCompute != null
+                    && m_ClearClusterAtomicIndexCompute != null
                     && m_BuildScreenAabbCompute != null
                     && m_BuildPerBigTileLightListCompute != null
                     && m_BuildPerVoxelLightListCompute != null
+                    && m_ClearLightListsKernel >= 0
+                    && m_ClearClusterAtomicIndexKernel >= 0
                     && m_BuildScreenAabbKernel >= 0
                     && m_BuildPerBigTileLightListKernel >= 0
                     && ((hasDepthTexture && m_BuildPerVoxelLightListDepthKernel >= 0)
@@ -286,6 +273,7 @@ namespace VividRP.Runtime
 
                 if (canBuildClusteredLights)
                 {
+                    DispatchClearLightLists(cmd);
                     DispatchScreenSpaceAabb(cmd);
                     DispatchBigTilePrepass(cmd);
                     DispatchClearClusterAtomicIndex(cmd);
@@ -332,13 +320,12 @@ namespace VividRP.Runtime
             m_LayeredLightListBuffer = null;
             m_LayeredLightListCounterBuffer = null;
             m_LogBaseBuffer = null;
+            m_ClearLightListsCompute = null;
             m_ClearClusterAtomicIndexCompute = null;
             m_BuildScreenAabbCompute = null;
             m_BuildPerBigTileLightListCompute = null;
             m_BuildPerVoxelLightListCompute = null;
-            m_BigTileLightListClearData = null;
-            m_LayeredOffsetClearData = null;
-            m_LogBaseData = null;
+            m_ShaderVariablesLightListCB = default;
             m_DirectionalLightCount = 0;
             m_PunctualLightCount = 0;
             m_MainDirectionalLightIndex = -1;
@@ -358,6 +345,7 @@ namespace VividRP.Runtime
             m_ClusterFarClip = 0.0f;
             m_ClusterScale = 0.0f;
             m_ClusterIsOrthographic = 0;
+            m_ClearLightListsKernel = -1;
             m_ClearClusterAtomicIndexKernel = -1;
             m_BuildScreenAabbKernel = -1;
             m_BuildPerBigTileLightListKernel = -1;
@@ -365,10 +353,39 @@ namespace VividRP.Runtime
             m_BuildPerVoxelLightListNoDepthKernel = -1;
         }
 
+        private void DispatchClearLightLists(CommandBuffer cmd)
+        {
+            DispatchClearLightList(cmd, m_BigTileLightListBuffer);
+            DispatchClearLightList(cmd, m_LayeredOffsetBuffer);
+        }
+
+        private void DispatchClearLightList(CommandBuffer cmd, GraphicsBuffer buffer)
+        {
+            if (buffer == null)
+                return;
+
+            cmd.SetComputeBufferParam(m_ClearLightListsCompute, m_ClearLightListsKernel, LightListToClearId, buffer);
+
+            var remainingGroupCount = Mathf.CeilToInt(buffer.count / (float)ClearLightListThreadGroupSize);
+            var dispatchOffset = 0;
+            while (remainingGroupCount > 0)
+            {
+                var currentGroupCount = Mathf.Min(remainingGroupCount, MaxClearLightListDispatchGroups);
+                cmd.SetComputeVectorParam(
+                    m_ClearLightListsCompute,
+                    LightListEntriesAndOffsetId,
+                    new Vector4(buffer.count, dispatchOffset, 0.0f, 0.0f));
+                cmd.DispatchCompute(m_ClearLightListsCompute, m_ClearLightListsKernel, currentGroupCount, 1, 1);
+                remainingGroupCount -= currentGroupCount;
+                dispatchOffset += currentGroupCount * ClearLightListThreadGroupSize;
+            }
+        }
+
         private void DispatchScreenSpaceAabb(CommandBuffer cmd)
         {
             cmd.SetComputeBufferParam(m_BuildScreenAabbCompute, m_BuildScreenAabbKernel, FiniteLightBoundsId, m_FiniteLightBoundBuffer);
             cmd.SetComputeBufferParam(m_BuildScreenAabbCompute, m_BuildScreenAabbKernel, ScreenSpaceBoundsId, m_ScreenSpaceBoundsBuffer);
+            PushShaderVariablesLightList(cmd, m_BuildScreenAabbCompute);
             cmd.DispatchCompute(
                 m_BuildScreenAabbCompute,
                 m_BuildScreenAabbKernel,
@@ -383,6 +400,7 @@ namespace VividRP.Runtime
             cmd.SetComputeBufferParam(m_BuildPerBigTileLightListCompute, m_BuildPerBigTileLightListKernel, LightVolumeDataId, m_LightVolumeDataBuffer);
             cmd.SetComputeBufferParam(m_BuildPerBigTileLightListCompute, m_BuildPerBigTileLightListKernel, FiniteLightBoundsId, m_FiniteLightBoundBuffer);
             cmd.SetComputeBufferParam(m_BuildPerBigTileLightListCompute, m_BuildPerBigTileLightListKernel, PackedBigTileLightListId, m_BigTileLightListBuffer);
+            PushShaderVariablesLightList(cmd, m_BuildPerBigTileLightListCompute);
             cmd.DispatchCompute(
                 m_BuildPerBigTileLightListCompute,
                 m_BuildPerBigTileLightListKernel,
@@ -417,6 +435,7 @@ namespace VividRP.Runtime
             cmd.SetComputeBufferParam(m_BuildPerVoxelLightListCompute, kernel, LayeredLightListId, m_LayeredLightListBuffer);
             cmd.SetComputeBufferParam(m_BuildPerVoxelLightListCompute, kernel, LayeredOffsetId, m_LayeredOffsetBuffer);
             cmd.SetComputeBufferParam(m_BuildPerVoxelLightListCompute, kernel, LayeredLightListCounterId, m_LayeredLightListCounterBuffer);
+            PushShaderVariablesLightList(cmd, m_BuildPerVoxelLightListCompute);
 
             if (hasDepthTexture)
             {
@@ -434,22 +453,6 @@ namespace VividRP.Runtime
 
         private void SetSharedLightLoopGlobals(CommandBuffer cmd, bool enableLogBaseBuffer)
         {
-            cmd.SetGlobalMatrixArray(InvScreenProjectionMatricesId, m_InvScreenProjectionMatrices);
-            cmd.SetGlobalMatrixArray(ScreenProjectionMatricesId, m_ScreenProjectionMatrices);
-            cmd.SetGlobalMatrixArray(InvProjectionMatricesId, m_InvProjectionMatrices);
-            cmd.SetGlobalMatrixArray(ProjectionMatricesId, m_ProjectionMatrices);
-            cmd.SetGlobalVector(ScreenSizeId, new Vector4(
-                m_LightingWidth,
-                m_LightingHeight,
-                1.0f / Mathf.Max(m_LightingWidth, 1),
-                1.0f / Mathf.Max(m_LightingHeight, 1)));
-            cmd.SetGlobalVector(DimensionsId, new Vector4(m_LightingWidth, m_LightingHeight, 0.0f, 0.0f));
-            cmd.SetGlobalInt(VisibleLightCountId, m_PunctualLightCount);
-            cmd.SetGlobalInt(IsOrthographicLightLoopId, m_ClusterIsOrthographic);
-            cmd.SetGlobalInt(BaseFeatureFlagsId, 0);
-            cmd.SetGlobalInt(MsaaSampleCountId, 1);
-            cmd.SetGlobalInt(EnvLightIndexShiftId, 0);
-            cmd.SetGlobalInt(DecalIndexShiftId, 0);
             cmd.SetGlobalFloat(ClusterScaleId, m_ClusterScale);
             cmd.SetGlobalFloat(ClusterBaseId, ClusterLogBase);
             cmd.SetGlobalFloat(NearPlaneId, m_ClusterNearClip);
@@ -458,6 +461,35 @@ namespace VividRP.Runtime
             cmd.SetGlobalInt(IsLogBaseBufferEnabledId, enableLogBaseBuffer ? 1 : 0);
             cmd.SetGlobalInt(NumTileClusteredXId, m_ClusterTileCountX);
             cmd.SetGlobalInt(NumTileClusteredYId, m_ClusterTileCountY);
+        }
+
+        private void UpdateShaderVariablesLightListConstantBuffer()
+        {
+            m_ShaderVariablesLightListCB.g_mInvScrProjectionArr0 = m_InvScreenProjectionMatrices[0];
+            m_ShaderVariablesLightListCB.g_mInvScrProjectionArr1 = m_InvScreenProjectionMatrices[1];
+            m_ShaderVariablesLightListCB.g_mScrProjectionArr0 = m_ScreenProjectionMatrices[0];
+            m_ShaderVariablesLightListCB.g_mScrProjectionArr1 = m_ScreenProjectionMatrices[1];
+            m_ShaderVariablesLightListCB.g_mInvProjectionArr0 = m_InvProjectionMatrices[0];
+            m_ShaderVariablesLightListCB.g_mInvProjectionArr1 = m_InvProjectionMatrices[1];
+            m_ShaderVariablesLightListCB.g_mProjectionArr0 = m_ProjectionMatrices[0];
+            m_ShaderVariablesLightListCB.g_mProjectionArr1 = m_ProjectionMatrices[1];
+            m_ShaderVariablesLightListCB.g_screenSize = new Vector4(
+                m_LightingWidth,
+                m_LightingHeight,
+                1.0f / Mathf.Max(m_LightingWidth, 1),
+                1.0f / Mathf.Max(m_LightingHeight, 1));
+            m_ShaderVariablesLightListCB.g_viDimensions = new ShaderVariablesLightListInt2(m_LightingWidth, m_LightingHeight);
+            m_ShaderVariablesLightListCB.g_iNrVisibLights = m_PunctualLightCount;
+            m_ShaderVariablesLightListCB.g_isOrthographic = (uint)m_ClusterIsOrthographic;
+            m_ShaderVariablesLightListCB.g_BaseFeatureFlags = 0u;
+            m_ShaderVariablesLightListCB.g_iNumSamplesMSAA = 1;
+            m_ShaderVariablesLightListCB._EnvLightIndexShift = 0u;
+            m_ShaderVariablesLightListCB._DecalIndexShift = 0u;
+        }
+
+        private void PushShaderVariablesLightList(CommandBuffer cmd, ComputeShader computeShader)
+        {
+            ConstantBuffer.Push(cmd, m_ShaderVariablesLightListCB, computeShader, ShaderVariablesLightListId);
         }
 
         private void UpdateClusterCameraParameters(Camera camera)
@@ -555,42 +587,6 @@ namespace VividRP.Runtime
 
             buffer?.Dispose();
             buffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, Mathf.Max(requiredCount, 1), stride);
-        }
-
-        private static void ClearUintBuffer(GraphicsBuffer buffer, ref uint[] clearData)
-        {
-            if (buffer == null)
-                return;
-
-            EnsureUintArray(ref clearData, buffer.count);
-            buffer.SetData(clearData, 0, 0, buffer.count);
-        }
-
-        private static void FillFloatBuffer(GraphicsBuffer buffer, ref float[] data, float value)
-        {
-            if (buffer == null)
-                return;
-
-            EnsureFloatArray(ref data, buffer.count, value);
-            buffer.SetData(data, 0, 0, buffer.count);
-        }
-
-        private static void EnsureUintArray(ref uint[] data, int requiredCount)
-        {
-            if (data != null && data.Length == requiredCount)
-                return;
-
-            data = new uint[Mathf.Max(requiredCount, 1)];
-        }
-
-        private static void EnsureFloatArray(ref float[] data, int requiredCount, float value)
-        {
-            if (data != null && data.Length == requiredCount)
-                return;
-
-            data = new float[Mathf.Max(requiredCount, 1)];
-            for (var i = 0; i < data.Length; i++)
-                data[i] = value;
         }
 
         private static int ComputeClusteredLightListCapacity(int clusterTileCount)

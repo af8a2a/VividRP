@@ -21,6 +21,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("groupshared uint gs_GlobalMaterialOffsets"));
             Assert.That(source, Does.Contain("InterlockedAdd(_MaterialClassCounts[groupIndex], localMaterialCount, gs_GlobalMaterialOffsets[groupIndex]);"));
             Assert.That(source, Does.Contain("WriteMaterialPixelIndex(materialId, gs_GlobalMaterialOffsets[materialId] + localWriteIndex, pixelIndex);"));
+            Assert.That(source, Does.Contain("StructuredBuffer<PunctualLightCullData> _PunctualLightCullData;"));
+            Assert.That(source, Does.Contain("bool SpotConeIntersectsCluster(PunctualLightCullData punctualLightCullData, float3 boundsMin, float3 boundsMax)"));
+            Assert.That(source, Does.Contain("return SpotConeIntersectsCluster(punctualLightCullData, boundsMin, boundsMax);"));
+            Assert.That(source, Does.Contain("float radiusAtRange;"));
         }
 
         [Test]

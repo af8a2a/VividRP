@@ -19,6 +19,7 @@ namespace VividRP.Runtime
         private static readonly int DirectionalLightCountId = Shader.PropertyToID("_DirectionalLightCount");
         private static readonly int MainDirectionalLightIndexId = Shader.PropertyToID("_MainDirectionalLightIndex");
         private static readonly int PunctualLightsId = Shader.PropertyToID("_PunctualLights");
+        private static readonly int PunctualLightCullDataId = Shader.PropertyToID("_PunctualLightCullData");
         private static readonly int PunctualLightCountId = Shader.PropertyToID("_PunctualLightCount");
         private static readonly int ClusterLightGridId = Shader.PropertyToID("_ClusterLightGrid");
         private static readonly int ClusterLightIndicesId = Shader.PropertyToID("_ClusterLightIndices");
@@ -49,6 +50,11 @@ namespace VividRP.Runtime
             default
         };
 
+        private static readonly PunctualLightCullUploadData[] s_EmptyPunctualLightCullData =
+        {
+            default
+        };
+
         private static readonly uint[] s_ZeroCounterData =
         {
             0u
@@ -67,19 +73,34 @@ namespace VividRP.Runtime
             public float inverseRangeSquared;
             public float shadowStrength;
             public uint renderingLayerMask;
-            public Vector3 cullingCenterVS;
-            public float cullingRadius;
 
             public static int Stride => Marshal.SizeOf<PunctualLightUploadData>();
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PunctualLightCullUploadData
+        {
+            public Vector3 positionVS;
+            public float range;
+            public Vector3 directionVS;
+            public float cosOuterAngle;
+            public Vector3 cullingCenterVS;
+            public float cullingRadius;
+            public uint lightType;
+            public float radiusAtRange;
+
+            public static int Stride => Marshal.SizeOf<PunctualLightCullUploadData>();
+        }
+
         private GraphicsBuffer m_DirectionalLightBuffer;
         private GraphicsBuffer m_PunctualLightBuffer;
+        private GraphicsBuffer m_PunctualLightCullBuffer;
         private GraphicsBuffer m_ClusterLightGridBuffer;
         private GraphicsBuffer m_ClusterLightIndicesBuffer;
         private GraphicsBuffer m_ClusterAllocationCounterBuffer;
         private ComputeShader m_LightingSetupCompute;
         private PunctualLightUploadData[] m_PunctualLights = Array.Empty<PunctualLightUploadData>();
+        private PunctualLightCullUploadData[] m_PunctualLightCullData = Array.Empty<PunctualLightCullUploadData>();
         private int m_DirectionalLightCount;
         private int m_PunctualLightCount;
         private int m_MainDirectionalLightIndex;
@@ -136,6 +157,7 @@ namespace VividRP.Runtime
                 : 1;
 
             EnsurePunctualLightBuffer(Mathf.Max(m_PunctualLightCount, 1));
+            EnsurePunctualLightCullBuffer(Mathf.Max(m_PunctualLightCount, 1));
             EnsureClusterLightGridBuffer(clusterCount);
             EnsureClusterLightIndicesBuffer(m_ClusterLightIndexCapacity);
             EnsureClusterAllocationCounterBuffer();
@@ -149,12 +171,15 @@ namespace VividRP.Runtime
 
             if (m_PunctualLightCount > 0)
             {
-                BuildPunctualLightUploadData(lightData, camera);
+                BuildPunctualLightUploadData(lightData);
+                BuildPunctualLightCullData(lightData, camera);
                 m_PunctualLightBuffer.SetData(m_PunctualLights, 0, 0, m_PunctualLightCount);
+                m_PunctualLightCullBuffer.SetData(m_PunctualLightCullData, 0, 0, m_PunctualLightCount);
             }
             else
             {
                 m_PunctualLightBuffer.SetData(s_EmptyPunctualLights);
+                m_PunctualLightCullBuffer.SetData(s_EmptyPunctualLightCullData);
             }
 
             m_ClusterAllocationCounterBuffer.SetData(s_ZeroCounterData);
@@ -184,7 +209,7 @@ namespace VividRP.Runtime
 
         public override void Record(UnsafeGraphContext context)
         {
-            if (m_DirectionalLightBuffer == null || m_PunctualLightBuffer == null)
+            if (m_DirectionalLightBuffer == null || m_PunctualLightBuffer == null || m_PunctualLightCullBuffer == null)
                 return;
 
             var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
@@ -192,6 +217,7 @@ namespace VividRP.Runtime
                 && m_LightingSetupCompute != null
                 && m_ClearClusterLightCounterKernel >= 0
                 && m_BuildClusteredLightListKernel >= 0
+                && m_PunctualLightCullBuffer != null
                 && m_ClusterLightGridBuffer != null
                 && m_ClusterLightIndicesBuffer != null
                 && m_ClusterAllocationCounterBuffer != null;
@@ -215,7 +241,7 @@ namespace VividRP.Runtime
                 cmd.SetComputeFloatParam(m_LightingSetupCompute, ClusterOrthoHalfHeightId, m_ClusterOrthoHalfHeight);
                 cmd.SetComputeIntParam(m_LightingSetupCompute, ClusterIsOrthographicId, m_ClusterIsOrthographic);
                 cmd.SetComputeBufferParam(m_LightingSetupCompute, m_ClearClusterLightCounterKernel, ClusterAllocationCounterId, m_ClusterAllocationCounterBuffer);
-                cmd.SetComputeBufferParam(m_LightingSetupCompute, m_BuildClusteredLightListKernel, PunctualLightsId, m_PunctualLightBuffer);
+                cmd.SetComputeBufferParam(m_LightingSetupCompute, m_BuildClusteredLightListKernel, PunctualLightCullDataId, m_PunctualLightCullBuffer);
                 cmd.SetComputeBufferParam(m_LightingSetupCompute, m_BuildClusteredLightListKernel, ClusterLightGridId, m_ClusterLightGridBuffer);
                 cmd.SetComputeBufferParam(m_LightingSetupCompute, m_BuildClusteredLightListKernel, ClusterLightIndicesId, m_ClusterLightIndicesBuffer);
                 cmd.SetComputeBufferParam(m_LightingSetupCompute, m_BuildClusteredLightListKernel, ClusterAllocationCounterId, m_ClusterAllocationCounterBuffer);
@@ -254,16 +280,19 @@ namespace VividRP.Runtime
         {
             m_DirectionalLightBuffer?.Dispose();
             m_PunctualLightBuffer?.Dispose();
+            m_PunctualLightCullBuffer?.Dispose();
             m_ClusterLightGridBuffer?.Dispose();
             m_ClusterLightIndicesBuffer?.Dispose();
             m_ClusterAllocationCounterBuffer?.Dispose();
             m_DirectionalLightBuffer = null;
             m_PunctualLightBuffer = null;
+            m_PunctualLightCullBuffer = null;
             m_ClusterLightGridBuffer = null;
             m_ClusterLightIndicesBuffer = null;
             m_ClusterAllocationCounterBuffer = null;
             m_LightingSetupCompute = null;
             m_PunctualLights = Array.Empty<PunctualLightUploadData>();
+            m_PunctualLightCullData = Array.Empty<PunctualLightCullUploadData>();
             m_DirectionalLightCount = 0;
             m_PunctualLightCount = 0;
             m_MainDirectionalLightIndex = -1;
@@ -301,10 +330,11 @@ namespace VividRP.Runtime
 
         private void EnsurePunctualLightCapacity(int requiredCapacity)
         {
-            if (requiredCapacity <= m_PunctualLights.Length)
-                return;
+            if (requiredCapacity > m_PunctualLights.Length)
+                m_PunctualLights = new PunctualLightUploadData[requiredCapacity];
 
-            m_PunctualLights = new PunctualLightUploadData[requiredCapacity];
+            if (requiredCapacity > m_PunctualLightCullData.Length)
+                m_PunctualLightCullData = new PunctualLightCullUploadData[requiredCapacity];
         }
 
         private void EnsurePunctualLightBuffer(int requiredBufferCount)
@@ -319,6 +349,20 @@ namespace VividRP.Runtime
                 GraphicsBuffer.Target.Structured,
                 requiredBufferCount,
                 PunctualLightUploadData.Stride);
+        }
+
+        private void EnsurePunctualLightCullBuffer(int requiredBufferCount)
+        {
+            if (m_PunctualLightCullBuffer != null
+                && m_PunctualLightCullBuffer.count >= requiredBufferCount
+                && m_PunctualLightCullBuffer.stride == PunctualLightCullUploadData.Stride)
+                return;
+
+            m_PunctualLightCullBuffer?.Dispose();
+            m_PunctualLightCullBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                requiredBufferCount,
+                PunctualLightCullUploadData.Stride);
         }
 
         private void EnsureClusterLightGridBuffer(int requiredClusterCount)
@@ -392,51 +436,22 @@ namespace VividRP.Runtime
             m_ClusterOrthoHalfHeight = 0.0f;
         }
 
-        private void BuildPunctualLightUploadData(VividLightData lightData, Camera camera)
+        private void BuildPunctualLightUploadData(VividLightData lightData)
+        {
+            for (var lightIndex = 0; lightIndex < m_PunctualLightCount; lightIndex++)
+                m_PunctualLights[lightIndex] = BuildPunctualLightUploadData(lightData.punctualLights[lightIndex]);
+        }
+
+        private void BuildPunctualLightCullData(VividLightData lightData, Camera camera)
         {
             var worldToView = camera != null ? camera.worldToCameraMatrix : Matrix4x4.identity;
 
             for (var lightIndex = 0; lightIndex < m_PunctualLightCount; lightIndex++)
-            {
-                m_PunctualLights[lightIndex] = BuildPunctualLightUploadData(lightData.punctualLights[lightIndex], worldToView);
-            }
+                m_PunctualLightCullData[lightIndex] = BuildPunctualLightCullUploadData(lightData.punctualLightCullData[lightIndex], worldToView);
         }
 
-        private static PunctualLightUploadData BuildPunctualLightUploadData(VividLightData.PunctualLightData source, Matrix4x4 worldToView)
+        private static PunctualLightUploadData BuildPunctualLightUploadData(VividLightData.PunctualLightData source)
         {
-            var positionVS = worldToView.MultiplyPoint3x4(source.positionWS);
-            positionVS.z = -positionVS.z;
-
-            var directionVS = worldToView.MultiplyVector(source.directionWS);
-            directionVS.z = -directionVS.z;
-            if (directionVS.sqrMagnitude > 1e-6f)
-                directionVS.Normalize();
-            else
-                directionVS = Vector3.forward;
-
-            var cullingCenterVS = positionVS;
-            var cullingRadius = source.range;
-
-            if (source.lightType == 1u)
-            {
-                var outerCos = Mathf.Clamp01(-source.angleOffset / Mathf.Max(source.angleScale, 1e-6f));
-                var tanOuter = Mathf.Sqrt(Mathf.Max(1.0f / Mathf.Max(outerCos * outerCos, 1e-6f) - 1.0f, 0.0f));
-                float centerDistance;
-
-                if (tanOuter <= 1.0f)
-                {
-                    centerDistance = 0.5f * source.range * (1.0f + tanOuter * tanOuter);
-                    cullingRadius = centerDistance;
-                }
-                else
-                {
-                    centerDistance = source.range;
-                    cullingRadius = source.range * tanOuter;
-                }
-
-                cullingCenterVS = positionVS + directionVS * centerDistance;
-            }
-
             return new PunctualLightUploadData
             {
                 positionWS = source.positionWS,
@@ -449,8 +464,34 @@ namespace VividRP.Runtime
                 inverseRangeSquared = source.inverseRangeSquared,
                 shadowStrength = source.shadowStrength,
                 renderingLayerMask = source.renderingLayerMask,
+            };
+        }
+
+        private static PunctualLightCullUploadData BuildPunctualLightCullUploadData(VividLightData.PunctualLightCullData source, Matrix4x4 worldToView)
+        {
+            var positionVS = worldToView.MultiplyPoint3x4(source.positionWS);
+            positionVS.z = -positionVS.z;
+
+            var directionVS = worldToView.MultiplyVector(source.directionWS);
+            directionVS.z = -directionVS.z;
+            if (directionVS.sqrMagnitude > 1e-6f)
+                directionVS.Normalize();
+            else
+                directionVS = Vector3.forward;
+
+            var cullingCenterVS = worldToView.MultiplyPoint3x4(source.cullingCenterWS);
+            cullingCenterVS.z = -cullingCenterVS.z;
+
+            return new PunctualLightCullUploadData
+            {
+                positionVS = positionVS,
+                range = source.range,
+                directionVS = directionVS,
+                cosOuterAngle = source.cosOuterAngle,
                 cullingCenterVS = cullingCenterVS,
-                cullingRadius = cullingRadius,
+                cullingRadius = source.cullingRadius,
+                lightType = source.lightType,
+                radiusAtRange = source.radiusAtRange,
             };
         }
     }

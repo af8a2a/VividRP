@@ -16,20 +16,16 @@
 #define VIVID_PUNCTUAL_LIGHT_TYPE_POINT 0u
 #define VIVID_PUNCTUAL_LIGHT_TYPE_SPOT  1u
 
-struct PunctualLightData
+struct PunctualLightCullData
 {
-    float3 positionWS;
+    float3 positionVS;
     float range;
-    float3 color;
-    uint lightType;
-    float3 directionWS;
-    float angleScale;
-    float angleOffset;
-    float inverseRangeSquared;
-    float shadowStrength;
-    uint renderingLayerMask;
+    float3 directionVS;
+    float cosOuterAngle;
     float3 cullingCenterVS;
     float cullingRadius;
+    uint lightType;
+    float radiusAtRange;
 };
 
 Texture2D<float4> _GBuffer0;
@@ -42,7 +38,7 @@ RWStructuredBuffer<uint> _MaterialClassCounts;
 RWStructuredBuffer<uint> _StandardIndirectArgs;
 RWStructuredBuffer<uint> _FabricIndirectArgs;
 RWStructuredBuffer<uint> _ClearCoatIndirectArgs;
-StructuredBuffer<PunctualLightData> _PunctualLights;
+StructuredBuffer<PunctualLightCullData> _PunctualLightCullData;
 RWStructuredBuffer<uint2> _ClusterLightGrid;
 RWStructuredBuffer<uint> _ClusterLightIndices;
 RWStructuredBuffer<uint> _ClusterAllocationCounter;
@@ -269,6 +265,40 @@ bool SphereIntersectsCluster(float3 sphereCenter, float sphereRadius, float3 bou
     return dot(delta, delta) <= sphereRadius * sphereRadius;
 }
 
+bool SpotConeIntersectsCluster(PunctualLightCullData punctualLightCullData, float3 boundsMin, float3 boundsMax)
+{
+    float3 clusterCenter = 0.5 * (boundsMin + boundsMax);
+    float clusterRadius = length(boundsMax - boundsMin) * 0.5;
+    float3 toCluster = clusterCenter - punctualLightCullData.positionVS;
+    float axialDistance = dot(toCluster, punctualLightCullData.directionVS);
+    float closestAxialDistance = axialDistance - clusterRadius;
+    float farthestAxialDistance = axialDistance + clusterRadius;
+
+    if (farthestAxialDistance <= 0.0)
+        return false;
+
+    if (closestAxialDistance >= punctualLightCullData.range)
+        return false;
+
+    float distanceSquared = dot(toCluster, toCluster);
+    float radialDistanceSquared = max(distanceSquared - axialDistance * axialDistance, 0.0);
+    float coneRadiusAtDepth = max(farthestAxialDistance, 0.0) * punctualLightCullData.radiusAtRange / max(punctualLightCullData.range, 1e-6);
+    float expandedRadius = coneRadiusAtDepth + clusterRadius;
+
+    return radialDistanceSquared <= expandedRadius * expandedRadius;
+}
+
+bool PunctualLightIntersectsCluster(PunctualLightCullData punctualLightCullData, float3 boundsMin, float3 boundsMax)
+{
+    if (!SphereIntersectsCluster(punctualLightCullData.cullingCenterVS, punctualLightCullData.cullingRadius, boundsMin, boundsMax))
+        return false;
+
+    if (punctualLightCullData.lightType != VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
+        return true;
+
+    return SpotConeIntersectsCluster(punctualLightCullData, boundsMin, boundsMax);
+}
+
 [numthreads(1, 1, 1)]
 void ClearClusterLightCounter(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -292,8 +322,8 @@ void BuildClusteredLightList(uint3 dispatchThreadId : SV_DispatchThreadID)
     [loop]
     for (uint lightIndex = 0u; lightIndex < _PunctualLightCount; lightIndex++)
     {
-        PunctualLightData punctualLight = _PunctualLights[lightIndex];
-        if (!SphereIntersectsCluster(punctualLight.cullingCenterVS, punctualLight.cullingRadius, boundsMin, boundsMax))
+        PunctualLightCullData punctualLightCullData = _PunctualLightCullData[lightIndex];
+        if (!PunctualLightIntersectsCluster(punctualLightCullData, boundsMin, boundsMax))
             continue;
 
         if (localLightCount < VIVID_CLUSTER_MAX_LIGHTS_PER_CLUSTER)

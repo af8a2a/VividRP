@@ -159,6 +159,31 @@ namespace VividRP.Editor.Tests
                 Assert.That(lightData.punctualLights[0].inverseRangeSquared, Is.EqualTo(1.0f / (pointLight.range * pointLight.range)).Within(0.0001f));
                 Assert.That(lightData.punctualLights[1].angleScale, Is.GreaterThan(0.0f));
                 Assert.That(lightData.punctualLights[1].angleOffset, Is.LessThan(0.0f));
+                AssertPunctualLightCullData(
+                    lightData.punctualLightCullData[0],
+                    pointObject.transform.position,
+                    pointObject.transform.forward,
+                    pointLight.range,
+                    0u,
+                    1.0f,
+                    0.0f,
+                    pointObject.transform.position,
+                    pointLight.range);
+                GetExpectedSpotCullSphere(
+                    lightData.punctualLights[1],
+                    out var spotCullCenter,
+                    out var spotCullRadius);
+                var spotOuterCos = GetSpotOuterCos(lightData.punctualLights[1]);
+                AssertPunctualLightCullData(
+                    lightData.punctualLightCullData[1],
+                    spotObject.transform.position,
+                    spotObject.transform.forward,
+                    spotLight.range,
+                    1u,
+                    spotOuterCos,
+                    spotLight.range * Mathf.Sqrt(Mathf.Max(1.0f / Mathf.Max(spotOuterCos * spotOuterCos, 1e-6f) - 1.0f, 0.0f)),
+                    spotCullCenter,
+                    spotCullRadius);
             }
             finally
             {
@@ -237,6 +262,31 @@ namespace VividRP.Editor.Tests
                 AssertPunctualLight(lightData.punctualLights[1], new Vector3(-1.0f, 0.5f, 2.0f), new Vector3(0.9f, 0.4f, 0.1f), 12.0f, 1u, Vector3.right);
                 Assert.That(lightData.punctualLights[0].renderingLayerMask, Is.Zero);
                 Assert.That(lightData.punctualLights[1].angleScale, Is.GreaterThan(0.0f));
+                AssertPunctualLightCullData(
+                    lightData.punctualLightCullData[0],
+                    new Vector3(1.0f, 2.0f, 3.0f),
+                    Vector3.forward,
+                    8.0f,
+                    0u,
+                    1.0f,
+                    0.0f,
+                    new Vector3(1.0f, 2.0f, 3.0f),
+                    8.0f);
+                GetExpectedSpotCullSphere(
+                    lightData.punctualLights[1],
+                    out var spotCullCenter,
+                    out var spotCullRadius);
+                var spotOuterCos = GetSpotOuterCos(lightData.punctualLights[1]);
+                AssertPunctualLightCullData(
+                    lightData.punctualLightCullData[1],
+                    new Vector3(-1.0f, 0.5f, 2.0f),
+                    Vector3.right,
+                    12.0f,
+                    1u,
+                    spotOuterCos,
+                    12.0f * Mathf.Sqrt(Mathf.Max(1.0f / Mathf.Max(spotOuterCos * spotOuterCos, 1e-6f) - 1.0f, 0.0f)),
+                    spotCullCenter,
+                    spotCullRadius);
             }
             finally
             {
@@ -365,6 +415,64 @@ namespace VividRP.Editor.Tests
             Assert.That(actual.directionWS.x, Is.EqualTo(expectedDirection.x).Within(0.0001f));
             Assert.That(actual.directionWS.y, Is.EqualTo(expectedDirection.y).Within(0.0001f));
             Assert.That(actual.directionWS.z, Is.EqualTo(expectedDirection.z).Within(0.0001f));
+        }
+
+        private static void AssertPunctualLightCullData(
+            VividLightData.PunctualLightCullData actual,
+            Vector3 expectedPosition,
+            Vector3 expectedDirection,
+            float expectedRange,
+            uint expectedType,
+            float expectedCosOuterAngle,
+            float expectedRadiusAtRange,
+            Vector3 expectedCenter,
+            float expectedRadius)
+        {
+            Assert.That(actual.positionWS.x, Is.EqualTo(expectedPosition.x).Within(0.0001f));
+            Assert.That(actual.positionWS.y, Is.EqualTo(expectedPosition.y).Within(0.0001f));
+            Assert.That(actual.positionWS.z, Is.EqualTo(expectedPosition.z).Within(0.0001f));
+            Assert.That(actual.directionWS.x, Is.EqualTo(expectedDirection.x).Within(0.0001f));
+            Assert.That(actual.directionWS.y, Is.EqualTo(expectedDirection.y).Within(0.0001f));
+            Assert.That(actual.directionWS.z, Is.EqualTo(expectedDirection.z).Within(0.0001f));
+            Assert.That(actual.range, Is.EqualTo(expectedRange).Within(0.0001f));
+            Assert.That(actual.lightType, Is.EqualTo(expectedType));
+            Assert.That(actual.cosOuterAngle, Is.EqualTo(expectedCosOuterAngle).Within(0.0001f));
+            Assert.That(actual.radiusAtRange, Is.EqualTo(expectedRadiusAtRange).Within(0.0001f));
+            Assert.That(actual.cullingCenterWS.x, Is.EqualTo(expectedCenter.x).Within(0.0001f));
+            Assert.That(actual.cullingCenterWS.y, Is.EqualTo(expectedCenter.y).Within(0.0001f));
+            Assert.That(actual.cullingCenterWS.z, Is.EqualTo(expectedCenter.z).Within(0.0001f));
+            Assert.That(actual.cullingRadius, Is.EqualTo(expectedRadius).Within(0.0001f));
+        }
+
+        private static float GetSpotOuterCos(VividLightData.PunctualLightData punctualLight)
+        {
+            return Mathf.Clamp01(-punctualLight.angleOffset / Mathf.Max(punctualLight.angleScale, 1e-6f));
+        }
+
+        private static void GetExpectedSpotCullSphere(
+            VividLightData.PunctualLightData punctualLight,
+            out Vector3 cullingCenter,
+            out float cullingRadius)
+        {
+            var direction = punctualLight.directionWS.sqrMagnitude > 1e-6f
+                ? punctualLight.directionWS.normalized
+                : Vector3.forward;
+            var outerCos = Mathf.Clamp01(-punctualLight.angleOffset / Mathf.Max(punctualLight.angleScale, 1e-6f));
+            var tanOuter = Mathf.Sqrt(Mathf.Max(1.0f / Mathf.Max(outerCos * outerCos, 1e-6f) - 1.0f, 0.0f));
+            float centerDistance;
+
+            if (tanOuter <= 1.0f)
+            {
+                centerDistance = 0.5f * punctualLight.range * (1.0f + tanOuter * tanOuter);
+                cullingRadius = centerDistance;
+            }
+            else
+            {
+                centerDistance = punctualLight.range;
+                cullingRadius = punctualLight.range * tanOuter;
+            }
+
+            cullingCenter = punctualLight.positionWS + direction * centerDistance;
         }
 
         private static VisibleLight CreateVisibleLight(

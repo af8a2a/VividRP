@@ -43,6 +43,20 @@ namespace VividRP.Editor.Tests
                     renderingLayerMask = 7u,
                 }
             };
+            lightData.punctualLightCullData = new[]
+            {
+                new VividLightData.PunctualLightCullData
+                {
+                    positionWS = new Vector3(1.0f, 2.0f, 3.0f),
+                    range = 10.0f,
+                    directionWS = Vector3.forward,
+                    lightType = 0u,
+                    cosOuterAngle = 1.0f,
+                    radiusAtRange = 0.0f,
+                    cullingCenterWS = new Vector3(1.0f, 2.0f, 3.0f),
+                    cullingRadius = 10.0f,
+                }
+            };
             lightData.punctualLightCount = 1;
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             cameraData.actualWidth = 320;
@@ -54,6 +68,7 @@ namespace VividRP.Editor.Tests
 
                 var directionalLightBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_DirectionalLightBuffer");
                 var punctualLightBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_PunctualLightBuffer");
+                var punctualLightCullBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_PunctualLightCullBuffer");
                 var clusterLightGridBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterLightGridBuffer");
                 var clusterLightIndicesBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterLightIndicesBuffer");
                 var directionalLightCount = (int)GetFieldValue(pass, "m_DirectionalLightCount");
@@ -65,12 +80,15 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(directionalLightBuffer, Is.Not.Null);
                 Assert.That(punctualLightBuffer, Is.Not.Null);
+                Assert.That(punctualLightCullBuffer, Is.Not.Null);
                 Assert.That(clusterLightGridBuffer, Is.Not.Null);
                 Assert.That(clusterLightIndicesBuffer, Is.Not.Null);
                 Assert.That(directionalLightBuffer.count, Is.EqualTo(1));
                 Assert.That(directionalLightBuffer.stride, Is.EqualTo(VividLightData.DirectionalLightData.Stride));
                 Assert.That(punctualLightBuffer.count, Is.EqualTo(1));
                 Assert.That(punctualLightBuffer.stride, Is.EqualTo(GetPunctualUploadStride()));
+                Assert.That(punctualLightCullBuffer.count, Is.EqualTo(1));
+                Assert.That(punctualLightCullBuffer.stride, Is.EqualTo(GetPunctualCullUploadStride()));
                 Assert.That(clusterLightGridBuffer.count, Is.EqualTo(1440));
                 Assert.That(clusterLightGridBuffer.stride, Is.EqualTo(sizeof(uint) * 2));
                 Assert.That(clusterLightIndicesBuffer.count, Is.EqualTo(1440));
@@ -100,6 +118,7 @@ namespace VividRP.Editor.Tests
 
                 var directionalLightBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_DirectionalLightBuffer");
                 var punctualLightBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_PunctualLightBuffer");
+                var punctualLightCullBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_PunctualLightCullBuffer");
                 var clusterLightIndicesBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterLightIndicesBuffer");
                 var directionalLightCount = (int)GetFieldValue(pass, "m_DirectionalLightCount");
                 var punctualLightCount = (int)GetFieldValue(pass, "m_PunctualLightCount");
@@ -107,11 +126,14 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(directionalLightBuffer, Is.Not.Null);
                 Assert.That(punctualLightBuffer, Is.Not.Null);
+                Assert.That(punctualLightCullBuffer, Is.Not.Null);
                 Assert.That(clusterLightIndicesBuffer, Is.Not.Null);
                 Assert.That(directionalLightBuffer.count, Is.EqualTo(1));
                 Assert.That(directionalLightBuffer.stride, Is.EqualTo(VividLightData.DirectionalLightData.Stride));
                 Assert.That(punctualLightBuffer.count, Is.EqualTo(1));
                 Assert.That(punctualLightBuffer.stride, Is.EqualTo(GetPunctualUploadStride()));
+                Assert.That(punctualLightCullBuffer.count, Is.EqualTo(1));
+                Assert.That(punctualLightCullBuffer.stride, Is.EqualTo(GetPunctualCullUploadStride()));
                 Assert.That(clusterLightIndicesBuffer.count, Is.EqualTo(1));
                 Assert.That(directionalLightCount, Is.Zero);
                 Assert.That(punctualLightCount, Is.Zero);
@@ -141,6 +163,15 @@ namespace VividRP.Editor.Tests
         private static int GetPunctualUploadStride()
         {
             var uploadType = typeof(LightGridPass).GetNestedType("PunctualLightUploadData", BindingFlags.NonPublic);
+
+            Assert.That(uploadType, Is.Not.Null);
+
+            return Marshal.SizeOf(uploadType);
+        }
+
+        private static int GetPunctualCullUploadStride()
+        {
+            var uploadType = typeof(LightGridPass).GetNestedType("PunctualLightCullUploadData", BindingFlags.NonPublic);
 
             Assert.That(uploadType, Is.Not.Null);
 

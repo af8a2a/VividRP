@@ -26,8 +26,6 @@ struct PunctualLightData
     float inverseRangeSquared;
     float shadowStrength;
     uint renderingLayerMask;
-    float3 cullingCenterVS;
-    float cullingRadius;
 };
 
 StructuredBuffer<DirectionalLightData> _DirectionalLights;

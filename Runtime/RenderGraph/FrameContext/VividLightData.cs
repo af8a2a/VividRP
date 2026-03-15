@@ -40,6 +40,21 @@ namespace VividRP.Runtime
             internal static int Stride => Marshal.SizeOf<PunctualLightData>();
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        public struct PunctualLightCullData
+        {
+            public Vector3 positionWS;
+            public float range;
+            public Vector3 directionWS;
+            public uint lightType;
+            public float cosOuterAngle;
+            public float radiusAtRange;
+            public Vector3 cullingCenterWS;
+            public float cullingRadius;
+
+            internal static int Stride => Marshal.SizeOf<PunctualLightCullData>();
+        }
+
         internal readonly struct VisibleLightDescriptor
         {
             public VisibleLightDescriptor(EntityId lightEntityId, LightType lightType, Color finalColor)
@@ -84,6 +99,7 @@ namespace VividRP.Runtime
         private struct PunctualLightCandidate
         {
             public PunctualLightData lightData;
+            public PunctualLightCullData lightCullData;
         }
 
         [BurstCompile]
@@ -126,6 +142,7 @@ namespace VividRP.Runtime
         public NativeArray<VisibleReflectionProbe> visibleReflectionProbes;
         public DirectionalLightData[] directionalLights = Array.Empty<DirectionalLightData>();
         public PunctualLightData[] punctualLights = Array.Empty<PunctualLightData>();
+        public PunctualLightCullData[] punctualLightCullData = Array.Empty<PunctualLightCullData>();
         public int mainLightIndex;
         public EntityId mainLightEntityId;
         public int directionalLightCount;
@@ -240,7 +257,10 @@ namespace VividRP.Runtime
                 if (!IsPunctualLightSupported(light))
                     continue;
 
-                punctualLights[punctualLightCount] = CreatePunctualLightData(light);
+                var trackedLightData = VividLightRenderDatabase.instance.UpdateLightData(light);
+                var punctualLightData = CreatePunctualLightData(trackedLightData);
+                punctualLights[punctualLightCount] = punctualLightData;
+                punctualLightCullData[punctualLightCount] = CreatePunctualLightCullData(punctualLightData);
                 punctualLightCount++;
             }
         }
@@ -336,10 +356,11 @@ namespace VividRP.Runtime
 
         private void EnsurePunctualLightCapacity(int requiredCapacity)
         {
-            if (requiredCapacity <= punctualLights.Length)
-                return;
+            if (requiredCapacity > punctualLights.Length)
+                punctualLights = new PunctualLightData[requiredCapacity];
 
-            punctualLights = new PunctualLightData[requiredCapacity];
+            if (requiredCapacity > punctualLightCullData.Length)
+                punctualLightCullData = new PunctualLightCullData[requiredCapacity];
         }
 
         private static int CountDirectionalLights(IReadOnlyList<Light> lights)
@@ -445,6 +466,28 @@ namespace VividRP.Runtime
             };
         }
 
+        private static PunctualLightCullData CreatePunctualLightCullData(PunctualLightData source)
+        {
+            GetPunctualLightCullingShapeData(
+                source,
+                out var directionWS,
+                out var cosOuterAngle,
+                out var radiusAtRange);
+            GetPunctualLightCullingSphere(source, out var cullingCenterWS, out var cullingRadius);
+
+            return new PunctualLightCullData
+            {
+                positionWS = source.positionWS,
+                range = source.range,
+                directionWS = directionWS,
+                lightType = source.lightType,
+                cosOuterAngle = cosOuterAngle,
+                radiusAtRange = radiusAtRange,
+                cullingCenterWS = cullingCenterWS,
+                cullingRadius = cullingRadius,
+            };
+        }
+
         private void UpdateVisibleLightData(NativeArray<VisibleLight> visibleLights, Light sunLight, VisibleLightCollectionMask collectionMask)
         {
             var collectDirectionalLights = (collectionMask & VisibleLightCollectionMask.Directional) != 0;
@@ -544,7 +587,10 @@ namespace VividRP.Runtime
             punctualLightCount = punctualCandidates.Length;
 
             for (var punctualIndex = 0; punctualIndex < punctualLightCount; punctualIndex++)
+            {
                 punctualLights[punctualIndex] = punctualCandidates[punctualIndex].lightData;
+                punctualLightCullData[punctualIndex] = punctualCandidates[punctualIndex].lightCullData;
+            }
         }
 
         private void CollectVisibleLightRenderDataRecords(
@@ -610,9 +656,12 @@ namespace VividRP.Runtime
 
         private static PunctualLightCandidate CreatePunctualLightCandidate(VividLightRenderData trackedLightData)
         {
+            var punctualLightData = CreatePunctualLightData(trackedLightData);
+
             return new PunctualLightCandidate
             {
-                lightData = CreatePunctualLightData(trackedLightData),
+                lightData = punctualLightData,
+                lightCullData = CreatePunctualLightCullData(punctualLightData),
             };
         }
 
@@ -648,6 +697,59 @@ namespace VividRP.Runtime
         private static uint GetPunctualLightType(LightType lightType)
         {
             return lightType == LightType.Spot ? 1u : 0u;
+        }
+
+        private static void GetPunctualLightCullingShapeData(
+            PunctualLightData source,
+            out Vector3 directionWS,
+            out float cosOuterAngle,
+            out float radiusAtRange)
+        {
+            directionWS = NormalizeDirection(source.directionWS, Vector3.forward);
+            cosOuterAngle = 1.0f;
+            radiusAtRange = 0.0f;
+
+            if (source.lightType != 1u)
+                return;
+
+            cosOuterAngle = Mathf.Clamp01(-source.angleOffset / Mathf.Max(source.angleScale, 1e-6f));
+            var tanOuter = Mathf.Sqrt(Mathf.Max(1.0f / Mathf.Max(cosOuterAngle * cosOuterAngle, 1e-6f) - 1.0f, 0.0f));
+            radiusAtRange = source.range * tanOuter;
+        }
+
+        private static void GetPunctualLightCullingSphere(PunctualLightData source, out Vector3 cullingCenterWS, out float cullingRadius)
+        {
+            cullingCenterWS = source.positionWS;
+            cullingRadius = source.range;
+
+            if (source.lightType != 1u)
+                return;
+
+            GetPunctualLightCullingShapeData(source, out var directionWS, out _, out var radiusAtRange);
+            var tanOuter = radiusAtRange / Mathf.Max(source.range, 1e-6f);
+            float centerDistance;
+
+            if (tanOuter <= 1.0f)
+            {
+                centerDistance = 0.5f * source.range * (1.0f + tanOuter * tanOuter);
+                cullingRadius = centerDistance;
+            }
+            else
+            {
+                centerDistance = source.range;
+                cullingRadius = source.range * tanOuter;
+            }
+
+            cullingCenterWS = source.positionWS + directionWS * centerDistance;
+        }
+
+        private static Vector3 NormalizeDirection(Vector3 direction, Vector3 fallback)
+        {
+            var lengthSq = direction.sqrMagnitude;
+            if (lengthSq <= 1e-6f)
+                return fallback;
+
+            return direction / Mathf.Sqrt(lengthSq);
         }
 
         private static void GetSpotAngleParameters(LightType lightType, float innerSpotAngle, float outerSpotAngle, out float angleScale, out float angleOffset)

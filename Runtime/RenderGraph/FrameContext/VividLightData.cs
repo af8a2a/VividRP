@@ -94,6 +94,38 @@ namespace VividRP.Runtime
         }
 
         [StructLayout(LayoutKind.Sequential)]
+        public struct SFiniteLightBound
+        {
+            public Vector3 boxAxisX;
+            public Vector3 boxAxisY;
+            public Vector3 boxAxisZ;
+            public Vector3 center;
+            public float scaleXY;
+            public float radius;
+
+            internal static int Stride => Marshal.SizeOf<SFiniteLightBound>();
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct LightVolumeData
+        {
+            public Vector3 lightPos;
+            public uint lightVolume;
+            public Vector3 lightAxisX;
+            public uint lightCategory;
+            public Vector3 lightAxisY;
+            public float radiusSq;
+            public Vector3 lightAxisZ;
+            public float cotan;
+            public Vector3 boxInnerDist;
+            public uint featureFlags;
+            public Vector3 boxInvRange;
+            public int affectVolumetric;
+
+            internal static int Stride => Marshal.SizeOf<LightVolumeData>();
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
         public struct PunctualLightCoarseRange
         {
             public int startIndex;
@@ -267,6 +299,11 @@ namespace VividRP.Runtime
             Punctual = 1 << 1,
         }
 
+        private const uint HdrpLightCategoryPunctual = 0u;
+        private const uint HdrpLightFeatureFlagsPunctual = 4096u;
+        private const uint HdrpLightVolumeTypeCone = 0u;
+        private const uint HdrpLightVolumeTypeSphere = 1u;
+
         [StructLayout(LayoutKind.Sequential)]
         private struct VisibleLightRenderDataRecord
         {
@@ -374,6 +411,8 @@ namespace VividRP.Runtime
             public NativeArray<PunctualLightCullData> punctualLightCullData;
             public NativeArray<PunctualLightViewSpaceCullDataRecord> punctualLightViewSpaceCullData;
             public NativeArray<PunctualLightScreenSpaceBoundsRecord> punctualLightScreenSpaceBounds;
+            public NativeArray<SFiniteLightBound> punctualLightBounds;
+            public NativeArray<LightVolumeData> punctualLightVolumeData;
 
             public PunctualLightClusteredCullBuildContext(int punctualLightCount)
             {
@@ -389,10 +428,24 @@ namespace VividRP.Runtime
                     punctualLightCount,
                     Allocator.TempJob,
                     NativeArrayOptions.UninitializedMemory);
+                punctualLightBounds = new NativeArray<SFiniteLightBound>(
+                    punctualLightCount,
+                    Allocator.TempJob,
+                    NativeArrayOptions.UninitializedMemory);
+                punctualLightVolumeData = new NativeArray<LightVolumeData>(
+                    punctualLightCount,
+                    Allocator.TempJob,
+                    NativeArrayOptions.UninitializedMemory);
             }
 
             public void Dispose()
             {
+                if (punctualLightVolumeData.IsCreated)
+                    punctualLightVolumeData.Dispose();
+
+                if (punctualLightBounds.IsCreated)
+                    punctualLightBounds.Dispose();
+
                 if (punctualLightCullData.IsCreated)
                     punctualLightCullData.Dispose();
 
@@ -501,6 +554,12 @@ namespace VividRP.Runtime
             [WriteOnly]
             public NativeArray<PunctualLightScreenSpaceBoundsRecord> punctualLightScreenSpaceBounds;
 
+            [WriteOnly]
+            public NativeArray<SFiniteLightBound> punctualLightBounds;
+
+            [WriteOnly]
+            public NativeArray<LightVolumeData> punctualLightVolumeData;
+
             public PunctualLightScreenSpaceBoundsJobParameters parameters;
 
             public void Execute(int index)
@@ -512,6 +571,13 @@ namespace VividRP.Runtime
                 punctualLightScreenSpaceBounds[index] = BuildPunctualLightScreenSpaceBoundsRecord(
                     viewSpaceCullData,
                     parameters);
+                BuildPunctualLightVolumeDataAndBound(
+                    punctualLightCullData[index],
+                    viewSpaceCullData,
+                    out var lightVolumeData,
+                    out var lightBound);
+                punctualLightVolumeData[index] = lightVolumeData;
+                punctualLightBounds[index] = lightBound;
             }
         }
 
@@ -591,6 +657,8 @@ namespace VividRP.Runtime
         public PunctualLightCullData[] punctualLightCullData = Array.Empty<PunctualLightCullData>();
         public PunctualLightViewSpaceCullData[] punctualLightViewSpaceCullData = Array.Empty<PunctualLightViewSpaceCullData>();
         public PunctualLightScreenSpaceBounds[] punctualLightScreenSpaceBounds = Array.Empty<PunctualLightScreenSpaceBounds>();
+        public SFiniteLightBound[] punctualLightBounds = Array.Empty<SFiniteLightBound>();
+        public LightVolumeData[] punctualLightVolumeData = Array.Empty<LightVolumeData>();
         public PunctualLightCoarseRange[] punctualLightCoarseRanges = Array.Empty<PunctualLightCoarseRange>();
         public PunctualLightCoarseRecord[] punctualLightCoarseRecords = Array.Empty<PunctualLightCoarseRecord>();
         public int mainLightIndex;
@@ -877,6 +945,8 @@ namespace VividRP.Runtime
                 punctualLightCullData = buildContext.punctualLightCullData,
                 punctualLightViewSpaceCullData = buildContext.punctualLightViewSpaceCullData,
                 punctualLightScreenSpaceBounds = buildContext.punctualLightScreenSpaceBounds,
+                punctualLightBounds = buildContext.punctualLightBounds,
+                punctualLightVolumeData = buildContext.punctualLightVolumeData,
                 parameters = new PunctualLightScreenSpaceBoundsJobParameters(parameters),
             };
 
@@ -891,6 +961,8 @@ namespace VividRP.Runtime
                     buildContext.punctualLightViewSpaceCullData[lightIndex]);
                 punctualLightScreenSpaceBounds[lightIndex] = ConvertPunctualLightScreenSpaceBounds(
                     buildContext.punctualLightScreenSpaceBounds[lightIndex]);
+                punctualLightBounds[lightIndex] = buildContext.punctualLightBounds[lightIndex];
+                punctualLightVolumeData[lightIndex] = buildContext.punctualLightVolumeData[lightIndex];
             }
         }
 
@@ -938,6 +1010,8 @@ namespace VividRP.Runtime
             mainDirectionalLightEntityId = EntityId.None;
             punctualLightViewSpaceCullData = Array.Empty<PunctualLightViewSpaceCullData>();
             punctualLightScreenSpaceBounds = Array.Empty<PunctualLightScreenSpaceBounds>();
+            punctualLightBounds = Array.Empty<SFiniteLightBound>();
+            punctualLightVolumeData = Array.Empty<LightVolumeData>();
             punctualLightCoarseRanges = Array.Empty<PunctualLightCoarseRange>();
             punctualLightCoarseRecords = Array.Empty<PunctualLightCoarseRecord>();
         }
@@ -1159,6 +1233,12 @@ namespace VividRP.Runtime
 
             if (requiredCapacity > punctualLightScreenSpaceBounds.Length)
                 punctualLightScreenSpaceBounds = new PunctualLightScreenSpaceBounds[requiredCapacity];
+
+            if (requiredCapacity > punctualLightBounds.Length)
+                punctualLightBounds = new SFiniteLightBound[requiredCapacity];
+
+            if (requiredCapacity > punctualLightVolumeData.Length)
+                punctualLightVolumeData = new LightVolumeData[requiredCapacity];
         }
 
         private void EnsurePunctualLightCoarseCapacity(int requiredRangeCapacity, int requiredRecordCapacity)
@@ -1685,6 +1765,76 @@ namespace VividRP.Runtime
             };
         }
 
+        private static void BuildPunctualLightVolumeDataAndBound(
+            PunctualLightCullData source,
+            PunctualLightViewSpaceCullDataRecord viewSpaceCullData,
+            out LightVolumeData lightVolumeData,
+            out SFiniteLightBound lightBound)
+        {
+            lightVolumeData = default;
+            lightBound = default;
+
+            var range = math.max(viewSpaceCullData.range, 1e-4f);
+
+            lightVolumeData.lightCategory = HdrpLightCategoryPunctual;
+            lightVolumeData.affectVolumetric = 0;
+            lightVolumeData.featureFlags = HdrpLightFeatureFlagsPunctual;
+            lightVolumeData.radiusSq = range * range;
+
+            if (source.lightType == 1u)
+            {
+                CreatePerpendicularBasis(viewSpaceCullData.directionVS, out var axisX, out var axisY);
+                var axisZ = NormalizeDirection(viewSpaceCullData.directionVS, new float3(0.0f, 0.0f, 1.0f));
+                var cosOuterAngle = math.clamp(viewSpaceCullData.cosOuterAngle, 0.0f, 0.999999f);
+                var sinOuterAngle = math.sqrt(math.max(1.0f - cosOuterAngle * cosOuterAngle, 0.0f));
+                const float floatMax = 3.402823466e+38f;
+                var tanOuterAngle = cosOuterAngle > 0.0f ? sinOuterAngle / cosOuterAngle : floatMax;
+                var cotan = sinOuterAngle > 0.0f ? cosOuterAngle / sinOuterAngle : floatMax;
+                var halfRange = 0.5f * range;
+                var squeezeScale = tanOuterAngle;
+                var rangeVector = axisZ * halfRange;
+                var sphereAxisX = sinOuterAngle * range;
+                var sphereAxisY = (cosOuterAngle - 0.5f) * range;
+                var radius = math.sqrt(sphereAxisY * sphereAxisY + sphereAxisX * sphereAxisX);
+
+                lightBound.center = new Vector3(
+                    viewSpaceCullData.positionVS.x + rangeVector.x,
+                    viewSpaceCullData.positionVS.y + rangeVector.y,
+                    viewSpaceCullData.positionVS.z + rangeVector.z);
+                lightBound.boxAxisX = new Vector3(axisX.x * squeezeScale * range, axisX.y * squeezeScale * range, axisX.z * squeezeScale * range);
+                lightBound.boxAxisY = new Vector3(axisY.x * squeezeScale * range, axisY.y * squeezeScale * range, axisY.z * squeezeScale * range);
+                lightBound.boxAxisZ = new Vector3(rangeVector.x, rangeVector.y, rangeVector.z);
+                lightBound.scaleXY = 0.01f;
+                lightBound.radius = math.max(radius, halfRange);
+
+                lightVolumeData.lightVolume = HdrpLightVolumeTypeCone;
+                lightVolumeData.lightAxisX = new Vector3(axisX.x, axisX.y, axisX.z);
+                lightVolumeData.lightAxisY = new Vector3(axisY.x, axisY.y, axisY.z);
+                lightVolumeData.lightAxisZ = new Vector3(axisZ.x, axisZ.y, axisZ.z);
+                lightVolumeData.lightPos = new Vector3(viewSpaceCullData.positionVS.x, viewSpaceCullData.positionVS.y, viewSpaceCullData.positionVS.z);
+                lightVolumeData.cotan = cotan;
+                return;
+            }
+
+            var pointAxisX = new Vector3(1.0f, 0.0f, 0.0f);
+            var pointAxisY = new Vector3(0.0f, 1.0f, 0.0f);
+            var pointAxisZ = new Vector3(0.0f, 0.0f, 1.0f);
+            var pointCenter = new Vector3(viewSpaceCullData.positionVS.x, viewSpaceCullData.positionVS.y, viewSpaceCullData.positionVS.z);
+
+            lightBound.center = pointCenter;
+            lightBound.boxAxisX = pointAxisX * range;
+            lightBound.boxAxisY = pointAxisY * range;
+            lightBound.boxAxisZ = pointAxisZ * range;
+            lightBound.scaleXY = 1.0f;
+            lightBound.radius = range;
+
+            lightVolumeData.lightVolume = HdrpLightVolumeTypeSphere;
+            lightVolumeData.lightAxisX = pointAxisX;
+            lightVolumeData.lightAxisY = pointAxisY;
+            lightVolumeData.lightAxisZ = pointAxisZ;
+            lightVolumeData.lightPos = pointCenter;
+        }
+
         private static PunctualLightScreenSpaceBoundsRecord BuildPunctualLightScreenSpaceBoundsRecord(
             PunctualLightViewSpaceCullDataRecord source,
             in PunctualLightScreenSpaceBoundsJobParameters parameters)
@@ -1705,13 +1855,17 @@ namespace VividRP.Runtime
             if (!TryGetPunctualLightSliceRange(viewSpaceAabbMin.z, viewSpaceAabbMax.z, parameters, out var sliceMin, out var sliceMax))
                 return bounds;
 
-            if (!TryGetPunctualLightClipSpaceRect(source.cullingCenterVS, radius, parameters, out var clipSpaceAabbMin, out var clipSpaceAabbMax))
+            if (!TryGetPunctualLightClipSpaceRect(viewSpaceAabbMin, viewSpaceAabbMax, parameters, out var clipSpaceAabbMin, out var clipSpaceAabbMax))
                 return bounds;
 
             if (!TryConvertClipRectToTileRange(clipSpaceAabbMin, clipSpaceAabbMax, parameters, out var tileMinX, out var tileMaxX, out var tileMinY, out var tileMaxY))
                 return bounds;
 
-            if (!TryConvertClipRectToBigTileRange(clipSpaceAabbMin, clipSpaceAabbMax, parameters, out var bigTileMinX, out var bigTileMaxX, out var bigTileMinY, out var bigTileMaxY))
+            ExpandRange(ref sliceMin, ref sliceMax, 1, parameters.sliceCount);
+            ExpandRange(ref tileMinX, ref tileMaxX, 1, parameters.tileCountX);
+            ExpandRange(ref tileMinY, ref tileMaxY, 1, parameters.tileCountY);
+
+            if (!TryConvertTileRangeToBigTileRange(tileMinX, tileMaxX, tileMinY, tileMaxY, parameters, out var bigTileMinX, out var bigTileMaxX, out var bigTileMinY, out var bigTileMaxY))
                 return bounds;
 
             bounds.clipSpaceAabbMin = clipSpaceAabbMin;
@@ -1764,6 +1918,16 @@ namespace VividRP.Runtime
             return direction * math.rsqrt(lengthSq);
         }
 
+        private static void CreatePerpendicularBasis(float3 forward, out float3 axisX, out float3 axisY)
+        {
+            forward = NormalizeDirection(forward, new float3(0.0f, 0.0f, 1.0f));
+            var tangent = math.abs(forward.y) < 0.999f
+                ? new float3(0.0f, 1.0f, 0.0f)
+                : new float3(1.0f, 0.0f, 0.0f);
+            axisX = NormalizeDirection(math.cross(tangent, forward), new float3(1.0f, 0.0f, 0.0f));
+            axisY = NormalizeDirection(math.cross(forward, axisX), new float3(0.0f, 1.0f, 0.0f));
+        }
+
         private static bool TryGetPunctualLightSliceRange(
             float depthMin,
             float depthMax,
@@ -1785,8 +1949,8 @@ namespace VividRP.Runtime
         }
 
         private static bool TryGetPunctualLightClipSpaceRect(
-            float3 cullingCenterVS,
-            float radius,
+            float3 viewSpaceAabbMin,
+            float3 viewSpaceAabbMax,
             in PunctualLightScreenSpaceBoundsJobParameters parameters,
             out float2 clipSpaceAabbMin,
             out float2 clipSpaceAabbMax)
@@ -1794,34 +1958,66 @@ namespace VividRP.Runtime
             clipSpaceAabbMin = default;
             clipSpaceAabbMax = default;
 
-            float minClipX;
-            float maxClipX;
-            float minClipY;
-            float maxClipY;
-
             if (parameters.isOrthographic != 0)
             {
                 var orthoHalfWidth = math.max(parameters.orthoHalfWidth, 1e-6f);
                 var orthoHalfHeight = math.max(parameters.orthoHalfHeight, 1e-6f);
-                minClipX = (cullingCenterVS.x - radius) / orthoHalfWidth;
-                maxClipX = (cullingCenterVS.x + radius) / orthoHalfWidth;
-                minClipY = (cullingCenterVS.y - radius) / orthoHalfHeight;
-                maxClipY = (cullingCenterVS.y + radius) / orthoHalfHeight;
-            }
-            else
-            {
-                var projectionDepth = math.max(cullingCenterVS.z - radius, parameters.nearClip);
-                var projectedHalfWidth = math.max(projectionDepth * parameters.tanHalfFovX, 1e-6f);
-                var projectedHalfHeight = math.max(projectionDepth * parameters.tanHalfFovY, 1e-6f);
-                minClipX = (cullingCenterVS.x - radius) / projectedHalfWidth;
-                maxClipX = (cullingCenterVS.x + radius) / projectedHalfWidth;
-                minClipY = (cullingCenterVS.y - radius) / projectedHalfHeight;
-                maxClipY = (cullingCenterVS.y + radius) / projectedHalfHeight;
+                clipSpaceAabbMin = new float2(
+                    viewSpaceAabbMin.x / orthoHalfWidth,
+                    viewSpaceAabbMin.y / orthoHalfHeight);
+                clipSpaceAabbMax = new float2(
+                    viewSpaceAabbMax.x / orthoHalfWidth,
+                    viewSpaceAabbMax.y / orthoHalfHeight);
+                return true;
             }
 
-            clipSpaceAabbMin = new float2(math.min(minClipX, maxClipX), math.min(minClipY, maxClipY));
-            clipSpaceAabbMax = new float2(math.max(minClipX, maxClipX), math.max(minClipY, maxClipY));
+            var clippedNearZ = math.max(viewSpaceAabbMin.z, parameters.nearClip);
+            var clippedFarZ = math.min(viewSpaceAabbMax.z, parameters.farClip);
+            if (clippedFarZ < parameters.nearClip || clippedNearZ > clippedFarZ)
+                return false;
+
+            var clippedAabbMin = new float3(viewSpaceAabbMin.x, viewSpaceAabbMin.y, clippedNearZ);
+            var clippedAabbMax = new float3(viewSpaceAabbMax.x, viewSpaceAabbMax.y, clippedFarZ);
+            var projectedMin = new float2(float.PositiveInfinity, float.PositiveInfinity);
+            var projectedMax = new float2(float.NegativeInfinity, float.NegativeInfinity);
+
+            for (var cornerIndex = 0; cornerIndex < 8; cornerIndex++)
+            {
+                var corner = new float3(
+                    (cornerIndex & 1) == 0 ? clippedAabbMin.x : clippedAabbMax.x,
+                    (cornerIndex & 2) == 0 ? clippedAabbMin.y : clippedAabbMax.y,
+                    (cornerIndex & 4) == 0 ? clippedAabbMin.z : clippedAabbMax.z);
+                var clipSpacePoint = ProjectViewSpacePointToClipSpace(corner, parameters);
+                projectedMin = math.min(projectedMin, clipSpacePoint);
+                projectedMax = math.max(projectedMax, clipSpacePoint);
+            }
+
+            if (!math.all(math.isfinite(projectedMin)) || !math.all(math.isfinite(projectedMax)))
+                return false;
+
+            clipSpaceAabbMin = projectedMin - 1e-4f;
+            clipSpaceAabbMax = projectedMax + 1e-4f;
             return true;
+        }
+
+        private static float2 ProjectViewSpacePointToClipSpace(
+            float3 viewSpacePoint,
+            in PunctualLightScreenSpaceBoundsJobParameters parameters)
+        {
+            if (parameters.isOrthographic != 0)
+            {
+                var orthoHalfWidth = math.max(parameters.orthoHalfWidth, 1e-6f);
+                var orthoHalfHeight = math.max(parameters.orthoHalfHeight, 1e-6f);
+                return new float2(
+                    viewSpacePoint.x / orthoHalfWidth,
+                    viewSpacePoint.y / orthoHalfHeight);
+            }
+
+            var projectedHalfWidth = math.max(viewSpacePoint.z * parameters.tanHalfFovX, 1e-6f);
+            var projectedHalfHeight = math.max(viewSpacePoint.z * parameters.tanHalfFovY, 1e-6f);
+            return new float2(
+                viewSpacePoint.x / projectedHalfWidth,
+                viewSpacePoint.y / projectedHalfHeight);
         }
 
         private static int GetClusterSliceIndex(float depth, in PunctualLightScreenSpaceBoundsJobParameters parameters)
@@ -1862,27 +2058,35 @@ namespace VividRP.Runtime
                 out tileMaxY);
         }
 
-        private static bool TryConvertClipRectToBigTileRange(
-            float2 clipSpaceAabbMin,
-            float2 clipSpaceAabbMax,
+        private static bool TryConvertTileRangeToBigTileRange(
+            int tileMinX,
+            int tileMaxX,
+            int tileMinY,
+            int tileMaxY,
             in PunctualLightScreenSpaceBoundsJobParameters parameters,
             out int bigTileMinX,
             out int bigTileMaxX,
             out int bigTileMinY,
             out int bigTileMaxY)
         {
-            return TryConvertClipRectToCellRange(
-                clipSpaceAabbMin,
-                clipSpaceAabbMax,
-                parameters.screenWidth,
-                parameters.screenHeight,
-                parameters.bigTileSize,
-                parameters.bigTileCountX,
-                parameters.bigTileCountY,
-                out bigTileMinX,
-                out bigTileMaxX,
-                out bigTileMinY,
-                out bigTileMaxY);
+            bigTileMinX = 0;
+            bigTileMaxX = 0;
+            bigTileMinY = 0;
+            bigTileMaxY = 0;
+
+            if (tileMinX > tileMaxX || tileMinY > tileMaxY)
+                return false;
+
+            var minPixelX = tileMinX * parameters.tileSize;
+            var maxPixelX = math.max((tileMaxX + 1) * parameters.tileSize - 1, minPixelX);
+            var minPixelY = tileMinY * parameters.tileSize;
+            var maxPixelY = math.max((tileMaxY + 1) * parameters.tileSize - 1, minPixelY);
+
+            bigTileMinX = math.clamp(minPixelX / parameters.bigTileSize, 0, parameters.bigTileCountX - 1);
+            bigTileMaxX = math.clamp(maxPixelX / parameters.bigTileSize, 0, parameters.bigTileCountX - 1);
+            bigTileMinY = math.clamp(minPixelY / parameters.bigTileSize, 0, parameters.bigTileCountY - 1);
+            bigTileMaxY = math.clamp(maxPixelY / parameters.bigTileSize, 0, parameters.bigTileCountY - 1);
+            return true;
         }
 
         private static bool TryConvertClipRectToCellRange(
@@ -1931,6 +2135,19 @@ namespace VividRP.Runtime
             cellMinY = math.clamp((int)math.floor(clampedMinY / cellSize), 0, cellCountY - 1);
             cellMaxY = math.clamp((int)math.floor(clampedMaxY / cellSize), 0, cellCountY - 1);
             return true;
+        }
+
+        private static void ExpandRange(ref int minValue, ref int maxValue, int padding, int rangeCount)
+        {
+            if (rangeCount <= 0)
+            {
+                minValue = 0;
+                maxValue = 0;
+                return;
+            }
+
+            minValue = math.clamp(minValue - padding, 0, rangeCount - 1);
+            maxValue = math.clamp(maxValue + padding, 0, rangeCount - 1);
         }
 
         private static float GetScreenXFromClipSpace(float clipSpaceX, int screenWidth)

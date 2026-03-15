@@ -41,11 +41,23 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Material/ClusteredLightCull")]
         public ComputeShader ClusteredLightCullCompute;
 
+        [ResourcePath("Shaders/Core/Private/Lighting/scrbound")]
+        public ComputeShader BuildScreenAABBCompute;
+
+        [ResourcePath("Shaders/Core/Private/Lighting/lightlistbuild-bigtile")]
+        public ComputeShader BuildPerBigTileLightListCompute;
+
+        [ResourcePath("Shaders/Core/Private/Lighting/lightlistbuild-clustered")]
+        public ComputeShader BuildPerVoxelLightListCompute;
+
         [ResourcePath("Shaders/Material/DeferredDirectionalLighting")]
         public ComputeShader DeferredDirectionalLightingCompute;
 
         [ResourcePath("Shaders/Material/DeferredDirectionalLightingIndirect")]
         public Shader DeferredDirectionalLightingIndirectShader;
+
+        [ResourcePath("Shaders/Core/Private/ClusterDebug")]
+        public Shader ClusterDebugShader;
 
         [ResourcePath("Shaders/Core/Private/SliderDebug")]
         public Shader SliderDebugShader;

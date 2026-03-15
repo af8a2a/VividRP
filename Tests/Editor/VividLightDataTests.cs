@@ -353,12 +353,12 @@ namespace VividRP.Editor.Tests
                 Assert.That(bounds.clipSpaceAabbMax.x, Is.EqualTo(0.2436f).Within(0.001f));
                 Assert.That(bounds.clipSpaceAabbMin.y, Is.EqualTo(-0.4330f).Within(0.001f));
                 Assert.That(bounds.clipSpaceAabbMax.y, Is.EqualTo(0.4330f).Within(0.001f));
-                Assert.That(bounds.sliceMin, Is.EqualTo(7));
-                Assert.That(bounds.sliceMax, Is.EqualTo(8));
-                Assert.That(bounds.tileMinX, Is.EqualTo(3));
-                Assert.That(bounds.tileMaxX, Is.EqualTo(6));
-                Assert.That(bounds.tileMinY, Is.EqualTo(1));
-                Assert.That(bounds.tileMaxY, Is.EqualTo(4));
+                Assert.That(bounds.sliceMin, Is.EqualTo(6));
+                Assert.That(bounds.sliceMax, Is.EqualTo(9));
+                Assert.That(bounds.tileMinX, Is.EqualTo(2));
+                Assert.That(bounds.tileMaxX, Is.EqualTo(7));
+                Assert.That(bounds.tileMinY, Is.EqualTo(0));
+                Assert.That(bounds.tileMaxY, Is.EqualTo(5));
                 Assert.That(bounds.bigTileMinX, Is.EqualTo(bounds.tileMinX));
                 Assert.That(bounds.bigTileMaxX, Is.EqualTo(bounds.tileMaxX));
                 Assert.That(bounds.bigTileMinY, Is.EqualTo(bounds.tileMinY));
@@ -750,6 +750,8 @@ namespace VividRP.Editor.Tests
                 var expectedRecordCount = bounds.sliceMax - bounds.sliceMin + 1;
 
                 Assert.That(bounds.isValid, Is.EqualTo(1u));
+                Assert.That(bounds.clipSpaceAabbMin.x, Is.EqualTo(0.2164f).Within(0.001f));
+                Assert.That(bounds.tileMinX, Is.EqualTo(5));
                 Assert.That(bounds.tileMaxX, Is.EqualTo(parameters.tileCountX - 1));
                 Assert.That(bounds.tileMinX, Is.LessThan(bounds.tileMaxX));
                 Assert.That(bounds.sliceMax, Is.GreaterThan(bounds.sliceMin));

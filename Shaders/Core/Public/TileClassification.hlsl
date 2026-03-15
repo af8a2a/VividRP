@@ -8,7 +8,7 @@
 
 
 // 自动检测 SM 6.0，或者允许通过外部定义强制开启
-#if defined(SHADER_STAGE_COMPUTE) && (__SHADER_TARGET__ >= 60)
+#if defined(UNITY_COMPILER_DXC)
 #define USE_WAVE_INTRINSICS 1
 #else
 #define USE_WAVE_INTRINSICS 0

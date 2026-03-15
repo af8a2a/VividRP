@@ -9,6 +9,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class ClusterDebugPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.ClusterDebugPass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class ColorGradingPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.ColorGradingPass, VividRP.Runtime";

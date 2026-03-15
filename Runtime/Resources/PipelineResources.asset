@@ -17,6 +17,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: 88588a6fde9a5844db576cbc17606db2, type: 3}
   - ResourceName: Shaders/Core/Private/CameraMotionVectors
     ResourceObject: {fileID: 4800000, guid: 6a169e932f9bd824ca065335bba5eb55, type: 3}
+  - ResourceName: Shaders/Core/Private/ClusterDebug
+    ResourceObject: {fileID: 4800000, guid: 6f6db95f8fa24fb4a9eb1b9e36203f75, type: 3}
   - ResourceName: Shaders/Core/Private/CopyDepth
     ResourceObject: {fileID: 4800000, guid: d1e81e551800135429c7550ad3907c25, type: 3}
   - ResourceName: Shaders/Core/Private/CoreBlit
@@ -25,6 +27,12 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: 7a938306786128241b2810fe10cd3f55, type: 3}
   - ResourceName: Shaders/Core/Private/HDRISky
     ResourceObject: {fileID: 4800000, guid: d41d44af2b5e2ff49b8312d9fe8aab8b, type: 3}
+  - ResourceName: Shaders/Core/Private/Lighting/lightlistbuild-bigtile
+    ResourceObject: {fileID: 7200000, guid: 071513ee5c7b2734790b449e9173ca2b, type: 3}
+  - ResourceName: Shaders/Core/Private/Lighting/lightlistbuild-clustered
+    ResourceObject: {fileID: 7200000, guid: 0c619324688bbfa47bfa6917dfc94ebd, type: 3}
+  - ResourceName: Shaders/Core/Private/Lighting/scrbound
+    ResourceObject: {fileID: 7200000, guid: 301f78bb40574e64586f1c5f50553db9, type: 3}
   - ResourceName: Shaders/Core/Private/LutBuilder3D.compute
     ResourceObject: {fileID: 7200000, guid: ec9fdcaf78354b1aa25c0158100aae1b, type: 3}
   - ResourceName: Shaders/Core/Private/ObjectMotionVectorFallback

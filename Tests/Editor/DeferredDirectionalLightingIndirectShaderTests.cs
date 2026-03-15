@@ -22,7 +22,7 @@ namespace VividRP.Editor.Tests
             Assert.That(hlslSource, Does.Contain("_LightingHeight"));
             Assert.That(hlslSource, Does.Contain("_DirectionalLightCount"));
             Assert.That(hlslSource, Does.Contain("_PunctualLightCount"));
-            Assert.That(hlslSource, Does.Contain("_ClusterLightIndices"));
+            Assert.That(hlslSource, Does.Contain("GetClusterLightIndex"));
             Assert.That(hlslSource, Does.Contain("EvaluateDeferredDirectionalLighting"));
             Assert.That(hlslSource, Does.Contain("EvaluatePunctualLight"));
             Assert.That(hlslSource, Does.Contain("ComputeWorldSpacePosition"));

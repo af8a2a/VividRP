@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
@@ -9,105 +10,88 @@ namespace VividRP.Runtime
     {
         internal const int ClusterTileSize = 32;
         internal const int ClusterBigTileSize = 64;
-        internal const int ClusterSliceCount = 24;
-        internal const int ClusterMaxLightsPerCluster = 64;
+        internal const int ClusterLog2SliceCount = 6;
+        internal const int ClusterSliceCount = 1 << ClusterLog2SliceCount;
+        internal const float ClusterLogBase = 1.02f;
+        internal const int ClusterMaxLightsPerCluster = 63;
 
-        private const int ClusterBuildGroupSizeX = 8;
-        private const int ClusterBuildGroupSizeY = 8;
-        private const int ClusterLightListStatsCount = 3;
+        private const int MaxViews = 1;
+        private const int HdrpLightCategoryCount = 4;
+        private const int HdrpFptlMaxLightCount = 63;
+        private const int MaxNrBigTileLightsPlusOne = 512;
+        private const int LightsPerScreenAabbGroup = 16;
+
+        private static readonly Matrix4x4 s_FlipMatrixLhsRhs = Matrix4x4.Scale(new Vector3(1.0f, 1.0f, -1.0f));
 
         private static readonly int DirectionalLightsId = Shader.PropertyToID("_DirectionalLights");
         private static readonly int DirectionalLightCountId = Shader.PropertyToID("_DirectionalLightCount");
         private static readonly int MainDirectionalLightIndexId = Shader.PropertyToID("_MainDirectionalLightIndex");
         private static readonly int PunctualLightsId = Shader.PropertyToID("_PunctualLights");
-        private static readonly int PunctualLightCullDataId = Shader.PropertyToID("_PunctualLightCullData");
-        private static readonly int PunctualLightScreenSpaceBoundsId = Shader.PropertyToID("_PunctualLightScreenSpaceBounds");
         private static readonly int PunctualLightCountId = Shader.PropertyToID("_PunctualLightCount");
-        private static readonly int ClusterBigTileLightCountsId = Shader.PropertyToID("_ClusterBigTileLightCounts");
-        private static readonly int ClusterBigTileLightRangesId = Shader.PropertyToID("_ClusterBigTileLightRanges");
-        private static readonly int ClusterBigTileLightIndicesId = Shader.PropertyToID("_ClusterBigTileLightIndices");
-        private static readonly int ClusterLightGridId = Shader.PropertyToID("_ClusterLightGrid");
-        private static readonly int ClusterLightIndicesId = Shader.PropertyToID("_ClusterLightIndices");
-        private static readonly int ClusterLightListStatsId = Shader.PropertyToID("_ClusterLightListStats");
-        private static readonly int ClusterAllocationCounterId = Shader.PropertyToID("_ClusterAllocationCounter");
+        private static readonly int FiniteLightBoundsId = Shader.PropertyToID("g_data");
+        private static readonly int LightVolumeDataId = Shader.PropertyToID("_LightVolumeData");
+        private static readonly int ScreenSpaceBoundsId = Shader.PropertyToID("g_vBoundsBuffer");
+        private static readonly int BigTileLightListId = Shader.PropertyToID("g_vBigTileLightList");
+        private static readonly int LayeredLightListId = Shader.PropertyToID("g_vLayeredLightList");
+        private static readonly int LayeredOffsetId = Shader.PropertyToID("g_LayeredOffset");
+        private static readonly int LayeredLightListCounterId = Shader.PropertyToID("g_LayeredSingleIdxBuffer");
+        private static readonly int LogBaseBufferId = Shader.PropertyToID("g_logBaseBuffer");
+        private static readonly int DepthTextureId = Shader.PropertyToID("g_depth_tex");
+        private static readonly int InvScreenProjectionMatricesId = Shader.PropertyToID("g_mInvScrProjectionArr");
+        private static readonly int ScreenProjectionMatricesId = Shader.PropertyToID("g_mScrProjectionArr");
+        private static readonly int InvProjectionMatricesId = Shader.PropertyToID("g_mInvProjectionArr");
+        private static readonly int ProjectionMatricesId = Shader.PropertyToID("g_mProjectionArr");
+        private static readonly int ScreenSizeId = Shader.PropertyToID("g_screenSize");
+        private static readonly int DimensionsId = Shader.PropertyToID("g_viDimensions");
+        private static readonly int VisibleLightCountId = Shader.PropertyToID("g_iNrVisibLights");
+        private static readonly int IsOrthographicLightLoopId = Shader.PropertyToID("g_isOrthographic");
+        private static readonly int BaseFeatureFlagsId = Shader.PropertyToID("g_BaseFeatureFlags");
+        private static readonly int MsaaSampleCountId = Shader.PropertyToID("g_iNumSamplesMSAA");
+        private static readonly int EnvLightIndexShiftId = Shader.PropertyToID("_EnvLightIndexShift");
+        private static readonly int DecalIndexShiftId = Shader.PropertyToID("_DecalIndexShift");
+        private static readonly int ClusterScaleId = Shader.PropertyToID("g_fClustScale");
+        private static readonly int ClusterBaseId = Shader.PropertyToID("g_fClustBase");
+        private static readonly int NearPlaneId = Shader.PropertyToID("g_fNearPlane");
+        private static readonly int FarPlaneId = Shader.PropertyToID("g_fFarPlane");
+        private static readonly int Log2NumClustersId = Shader.PropertyToID("g_iLog2NumClusters");
+        private static readonly int IsLogBaseBufferEnabledId = Shader.PropertyToID("g_isLogBaseBufferEnabled");
+        private static readonly int NumTileClusteredXId = Shader.PropertyToID("_NumTileClusteredX");
+        private static readonly int NumTileClusteredYId = Shader.PropertyToID("_NumTileClusteredY");
         private static readonly int ClusterTileSizeId = Shader.PropertyToID("_ClusterTileSize");
-        private static readonly int ClusterBigTileSizeId = Shader.PropertyToID("_ClusterBigTileSize");
         private static readonly int ClusterSliceCountId = Shader.PropertyToID("_ClusterSliceCount");
-        private static readonly int ClusterScreenWidthId = Shader.PropertyToID("_ClusterScreenWidth");
-        private static readonly int ClusterScreenHeightId = Shader.PropertyToID("_ClusterScreenHeight");
         private static readonly int ClusterTileCountXId = Shader.PropertyToID("_ClusterTileCountX");
         private static readonly int ClusterTileCountYId = Shader.PropertyToID("_ClusterTileCountY");
-        private static readonly int ClusterBigTileCountXId = Shader.PropertyToID("_ClusterBigTileCountX");
-        private static readonly int ClusterBigTileCountYId = Shader.PropertyToID("_ClusterBigTileCountY");
         private static readonly int ClusterNearClipId = Shader.PropertyToID("_ClusterNearClip");
         private static readonly int ClusterFarClipId = Shader.PropertyToID("_ClusterFarClip");
-        private static readonly int ClusterLogDepthScaleId = Shader.PropertyToID("_ClusterLogDepthScale");
-        private static readonly int ClusterLinearDepthScaleId = Shader.PropertyToID("_ClusterLinearDepthScale");
-        private static readonly int ClusterTanHalfFovXId = Shader.PropertyToID("_ClusterTanHalfFovX");
-        private static readonly int ClusterTanHalfFovYId = Shader.PropertyToID("_ClusterTanHalfFovY");
-        private static readonly int ClusterOrthoHalfWidthId = Shader.PropertyToID("_ClusterOrthoHalfWidth");
-        private static readonly int ClusterOrthoHalfHeightId = Shader.PropertyToID("_ClusterOrthoHalfHeight");
         private static readonly int ClusterIsOrthographicId = Shader.PropertyToID("_ClusterIsOrthographic");
 
-        private static readonly VividLightData.DirectionalLightData[] s_EmptyDirectionalLights =
-        {
-            default
-        };
+        private static readonly VividLightData.DirectionalLightData[] s_EmptyDirectionalLights = { default };
+        private static readonly VividLightData.PunctualLightData[] s_EmptyPunctualLights = { default };
+        private static readonly VividLightData.SFiniteLightBound[] s_EmptyFiniteLightBounds = { default };
+        private static readonly VividLightData.LightVolumeData[] s_EmptyLightVolumeData = { default };
+        private static readonly uint[] s_ZeroUintData = { 0u };
+        private static readonly float[] s_DefaultLogBaseData = { ClusterLogBase };
 
-        private static readonly VividLightData.PunctualLightData[] s_EmptyPunctualLights =
-        {
-            default
-        };
-
-        private static readonly VividLightData.PunctualLightViewSpaceCullData[] s_EmptyPunctualLightCullData =
-        {
-            default
-        };
-
-        private static readonly VividLightData.PunctualLightScreenSpaceBounds[] s_EmptyPunctualLightScreenSpaceBounds =
-        {
-            default
-        };
-
-        private static readonly VividLightData.PunctualLightCoarseRange[] s_EmptyClusterBigTileLightRanges =
-        {
-            default
-        };
-
-        private static readonly uint[] s_EmptyClusterBigTileLightIndices =
-        {
-            0u
-        };
-
-        private static readonly uint[] s_EmptyClusterBigTileLightCounts =
-        {
-            0u
-        };
-
-        private static readonly uint[] s_ZeroCounterData =
-        {
-            0u
-        };
-
-        private static readonly uint[] s_ZeroClusterLightListStatsData =
-        {
-            0u,
-            0u,
-            0u
-        };
+        [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_DepthTexture;
 
         private GraphicsBuffer m_DirectionalLightBuffer;
         private GraphicsBuffer m_PunctualLightBuffer;
-        private GraphicsBuffer m_PunctualLightCullBuffer;
-        private GraphicsBuffer m_PunctualLightScreenSpaceBoundsBuffer;
-        private GraphicsBuffer m_ClusterBigTileLightCountsBuffer;
-        private GraphicsBuffer m_ClusterBigTileLightRangesBuffer;
-        private GraphicsBuffer m_ClusterBigTileLightIndicesBuffer;
-        private GraphicsBuffer m_ClusterLightGridBuffer;
-        private GraphicsBuffer m_ClusterLightIndicesBuffer;
-        private GraphicsBuffer m_ClusterLightListStatsBuffer;
-        private GraphicsBuffer m_ClusterAllocationCounterBuffer;
-        private ComputeShader m_ClusteredLightCullCompute;
+        private GraphicsBuffer m_FiniteLightBoundBuffer;
+        private GraphicsBuffer m_LightVolumeDataBuffer;
+        private GraphicsBuffer m_ScreenSpaceBoundsBuffer;
+        private GraphicsBuffer m_BigTileLightListBuffer;
+        private GraphicsBuffer m_LayeredOffsetBuffer;
+        private GraphicsBuffer m_LayeredLightListBuffer;
+        private GraphicsBuffer m_LayeredLightListCounterBuffer;
+        private GraphicsBuffer m_LogBaseBuffer;
+        private ComputeShader m_BuildScreenAabbCompute;
+        private ComputeShader m_BuildPerBigTileLightListCompute;
+        private ComputeShader m_BuildPerVoxelLightListCompute;
+        private readonly Matrix4x4[] m_InvScreenProjectionMatrices = new Matrix4x4[2];
+        private readonly Matrix4x4[] m_ScreenProjectionMatrices = new Matrix4x4[2];
+        private readonly Matrix4x4[] m_InvProjectionMatrices = new Matrix4x4[2];
+        private readonly Matrix4x4[] m_ProjectionMatrices = new Matrix4x4[2];
         private int m_DirectionalLightCount;
         private int m_PunctualLightCount;
         private int m_MainDirectionalLightIndex;
@@ -115,24 +99,28 @@ namespace VividRP.Runtime
         private int m_LightingHeight;
         private int m_ClusterTileCountX;
         private int m_ClusterTileCountY;
+        private int m_ClusterTileCount;
+        private int m_ClusterCount;
         private int m_ClusterBigTileCountX;
         private int m_ClusterBigTileCountY;
+        private int m_ClusterBigTileCount;
         private int m_ClusterLightIndexCapacity;
         private int m_ClusterBigTileLightIndexCapacity;
+        private int m_LayeredOffsetCapacity;
         private float m_ClusterNearClip;
         private float m_ClusterFarClip;
-        private float m_ClusterLogDepthScale;
-        private float m_ClusterLinearDepthScale;
-        private float m_ClusterTanHalfFovX;
-        private float m_ClusterTanHalfFovY;
-        private float m_ClusterOrthoHalfWidth;
-        private float m_ClusterOrthoHalfHeight;
+        private float m_ClusterScale;
         private int m_ClusterIsOrthographic;
-        private int m_ClearClusterLightCounterKernel = -1;
-        private int m_CountClusterBigTileLightsKernel = -1;
-        private int m_BuildClusterBigTileLightRangesKernel = -1;
-        private int m_BuildClusterBigTileLightListKernel = -1;
-        private int m_BuildClusteredLightListKernel = -1;
+        private int m_BuildScreenAabbKernel = -1;
+        private int m_BuildPerBigTileLightListKernel = -1;
+        private int m_BuildPerVoxelLightListDepthKernel = -1;
+        private int m_BuildPerVoxelLightListNoDepthKernel = -1;
+
+        public LightGridPass()
+        {
+            profilingSampler = new ProfilingSampler(nameof(LightGridPass));
+            m_DepthTexture = CreateDepthTexture("Depth");
+        }
 
         public override void Prepare(ContextContainer frameData)
         {
@@ -143,9 +131,6 @@ namespace VividRP.Runtime
             m_DirectionalLightCount = lightData.directionalLightCount;
             m_PunctualLightCount = lightData.punctualLightCount;
             m_MainDirectionalLightIndex = lightData.mainDirectionalLightIndex;
-
-            EnsureDirectionalLightBuffer(Mathf.Max(lightData.directionalLightCount, 1));
-
             m_LightingWidth = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
             m_LightingHeight = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
 
@@ -155,32 +140,30 @@ namespace VividRP.Runtime
             if (m_LightingHeight <= 0)
                 m_LightingHeight = Mathf.Max(1, Screen.height);
 
-            var clusteredLightListParameters = VividLightData.CreatePunctualLightClusteredLightListParameters(
-                camera,
-                m_LightingWidth,
-                m_LightingHeight,
-                ClusterTileSize,
-                ClusterBigTileSize,
-                ClusterSliceCount,
-                m_PunctualLightCount,
-                ClusterMaxLightsPerCluster);
-            m_ClusterTileCountX = clusteredLightListParameters.tileCountX;
-            m_ClusterTileCountY = clusteredLightListParameters.tileCountY;
-            m_ClusterBigTileCountX = clusteredLightListParameters.bigTileCountX;
-            m_ClusterBigTileCountY = clusteredLightListParameters.bigTileCountY;
-            m_ClusterLightIndexCapacity = clusteredLightListParameters.lightIndexCapacity;
-            m_ClusterBigTileLightIndexCapacity = 1;
+            ResizeDepthTexture(m_DepthTexture, m_LightingWidth, m_LightingHeight);
+            m_ClusterTileCountX = Mathf.Max(1, Mathf.CeilToInt(m_LightingWidth / (float)ClusterTileSize));
+            m_ClusterTileCountY = Mathf.Max(1, Mathf.CeilToInt(m_LightingHeight / (float)ClusterTileSize));
+            m_ClusterTileCount = Mathf.Max(1, m_ClusterTileCountX * m_ClusterTileCountY);
+            m_ClusterCount = Mathf.Max(1, m_ClusterTileCount * ClusterSliceCount * MaxViews);
+            m_ClusterBigTileCountX = Mathf.Max(1, Mathf.CeilToInt(m_LightingWidth / (float)ClusterBigTileSize));
+            m_ClusterBigTileCountY = Mathf.Max(1, Mathf.CeilToInt(m_LightingHeight / (float)ClusterBigTileSize));
+            m_ClusterBigTileCount = Mathf.Max(1, m_ClusterBigTileCountX * m_ClusterBigTileCountY * MaxViews);
+            m_ClusterLightIndexCapacity = ComputeClusteredLightListCapacity(m_ClusterTileCount * MaxViews);
+            m_ClusterBigTileLightIndexCapacity = ComputeBigTileLightListCapacity(m_ClusterBigTileCount);
+            m_LayeredOffsetCapacity = ComputeLayeredOffsetCapacity(m_ClusterCount);
 
+            UpdateClusterCameraParameters(camera);
+            UpdateLightListMatrices(camera);
+            EnsureDirectionalLightBuffer(Mathf.Max(m_DirectionalLightCount, 1));
             EnsurePunctualLightBuffer(Mathf.Max(m_PunctualLightCount, 1));
-            EnsurePunctualLightCullBuffer(Mathf.Max(m_PunctualLightCount, 1));
-            EnsurePunctualLightScreenSpaceBoundsBuffer(Mathf.Max(m_PunctualLightCount, 1));
-            EnsureClusterBigTileLightCountsBuffer(m_PunctualLightCount > 0 ? Mathf.Max(clusteredLightListParameters.bigTileCount, 1) : 1);
-            EnsureClusterBigTileLightRangesBuffer(m_PunctualLightCount > 0 ? Mathf.Max(clusteredLightListParameters.bigTileCount, 1) : 1);
-            EnsureClusterLightGridBuffer(clusteredLightListParameters.clusterCount);
-            EnsureClusterLightIndicesBuffer(m_ClusterLightIndexCapacity);
-            EnsureClusterLightListStatsBuffer();
-            EnsureClusterAllocationCounterBuffer();
-            UpdateClusterProjectionData(clusteredLightListParameters.screenSpaceBoundsParameters);
+            EnsureFiniteLightBoundBuffer(Mathf.Max(m_PunctualLightCount, 1));
+            EnsureLightVolumeDataBuffer(Mathf.Max(m_PunctualLightCount, 1));
+            EnsureScreenSpaceBoundsBuffer(Mathf.Max(m_PunctualLightCount * 2, 1));
+            EnsureBigTileLightListBuffer(Mathf.Max(m_ClusterBigTileLightIndexCapacity, 1));
+            EnsureLayeredOffsetBuffer(Mathf.Max(m_LayeredOffsetCapacity, 1));
+            EnsureLayeredLightListBuffer(Mathf.Max(m_ClusterLightIndexCapacity, 1));
+            EnsureLayeredLightListCounterBuffer();
+            EnsureLogBaseBuffer(Mathf.Max(m_ClusterTileCount, 1));
 
             if (m_DirectionalLightCount > 0)
                 m_DirectionalLightBuffer.SetData(lightData.directionalLights, 0, 0, m_DirectionalLightCount);
@@ -189,53 +172,60 @@ namespace VividRP.Runtime
 
             if (m_PunctualLightCount > 0)
             {
-                lightData.UpdatePunctualLightClusteredCullData(clusteredLightListParameters.screenSpaceBoundsParameters);
-                m_ClusterBigTileLightIndexCapacity = lightData.GetPunctualLightBigTileLightIndexCapacityEstimate();
-                EnsureClusterBigTileLightIndicesBuffer(Mathf.Max(m_ClusterBigTileLightIndexCapacity, 1));
+                var cullParameters = VividLightData.CreatePunctualLightScreenSpaceBoundsParameters(
+                    camera,
+                    m_LightingWidth,
+                    m_LightingHeight,
+                    ClusterTileSize,
+                    ClusterSliceCount,
+                    ClusterBigTileSize);
+                lightData.UpdatePunctualLightClusteredCullData(cullParameters);
                 m_PunctualLightBuffer.SetData(lightData.punctualLights, 0, 0, m_PunctualLightCount);
-                m_PunctualLightCullBuffer.SetData(lightData.punctualLightViewSpaceCullData, 0, 0, m_PunctualLightCount);
-                m_PunctualLightScreenSpaceBoundsBuffer.SetData(lightData.punctualLightScreenSpaceBounds, 0, 0, m_PunctualLightCount);
+                m_FiniteLightBoundBuffer.SetData(lightData.punctualLightBounds, 0, 0, m_PunctualLightCount);
+                m_LightVolumeDataBuffer.SetData(lightData.punctualLightVolumeData, 0, 0, m_PunctualLightCount);
             }
             else
             {
-                EnsureClusterBigTileLightIndicesBuffer(1);
                 m_PunctualLightBuffer.SetData(s_EmptyPunctualLights);
-                m_PunctualLightCullBuffer.SetData(s_EmptyPunctualLightCullData);
-                m_PunctualLightScreenSpaceBoundsBuffer.SetData(s_EmptyPunctualLightScreenSpaceBounds);
-                m_ClusterBigTileLightCountsBuffer.SetData(s_EmptyClusterBigTileLightCounts);
-                m_ClusterBigTileLightRangesBuffer.SetData(s_EmptyClusterBigTileLightRanges);
-                m_ClusterBigTileLightIndicesBuffer.SetData(s_EmptyClusterBigTileLightIndices);
+                m_FiniteLightBoundBuffer.SetData(s_EmptyFiniteLightBounds);
+                m_LightVolumeDataBuffer.SetData(s_EmptyLightVolumeData);
             }
 
-            m_ClusterLightListStatsBuffer.SetData(s_ZeroClusterLightListStatsData);
-            m_ClusterAllocationCounterBuffer.SetData(s_ZeroCounterData);
+            m_LayeredLightListCounterBuffer.SetData(s_ZeroUintData);
+            m_LogBaseBuffer.SetData(s_DefaultLogBaseData);
         }
 
         public override void Create()
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            m_ClusteredLightCullCompute = resources?.ClusteredLightCullCompute;
+            m_BuildScreenAabbCompute = resources?.BuildScreenAABBCompute;
+            m_BuildPerBigTileLightListCompute = resources?.BuildPerBigTileLightListCompute;
+            m_BuildPerVoxelLightListCompute = resources?.BuildPerVoxelLightListCompute;
 
-            if (m_ClusteredLightCullCompute == null)
+            if (m_BuildScreenAabbCompute == null
+                || m_BuildPerBigTileLightListCompute == null
+                || m_BuildPerVoxelLightListCompute == null)
+            {
                 return;
+            }
 
             try
             {
-                m_ClearClusterLightCounterKernel = m_ClusteredLightCullCompute.FindKernel("ClearClusterLightCounter");
-                m_CountClusterBigTileLightsKernel = m_ClusteredLightCullCompute.FindKernel("CountClusterBigTileLights");
-                m_BuildClusterBigTileLightRangesKernel = m_ClusteredLightCullCompute.FindKernel("BuildClusterBigTileLightRanges");
-                m_BuildClusterBigTileLightListKernel = m_ClusteredLightCullCompute.FindKernel("BuildClusterBigTileLightList");
-                m_BuildClusteredLightListKernel = m_ClusteredLightCullCompute.FindKernel("BuildClusteredLightList");
+                m_BuildScreenAabbKernel = m_BuildScreenAabbCompute.FindKernel("main");
+                m_BuildPerBigTileLightListKernel = m_BuildPerBigTileLightListCompute.FindKernel("BigTileLightListGen");
+                m_BuildPerVoxelLightListDepthKernel = m_BuildPerVoxelLightListCompute.FindKernel("TileLightListGen_DepthRT_SrcBigTile");
+                m_BuildPerVoxelLightListNoDepthKernel = m_BuildPerVoxelLightListCompute.FindKernel("TileLightListGen_NoDepthRT_SrcBigTile");
             }
             catch (ArgumentException)
             {
-                Debug.LogWarning($"[VividRP] Could not find clustered light kernels in {m_ClusteredLightCullCompute.name}. Punctual clustered lighting will be disabled.");
-                m_ClusteredLightCullCompute = null;
-                m_ClearClusterLightCounterKernel = -1;
-                m_CountClusterBigTileLightsKernel = -1;
-                m_BuildClusterBigTileLightRangesKernel = -1;
-                m_BuildClusterBigTileLightListKernel = -1;
-                m_BuildClusteredLightListKernel = -1;
+                Debug.LogWarning("[VividRP] Could not find one or more HDRP clustered light list kernels. Clustered punctual lighting will be disabled.");
+                m_BuildScreenAabbCompute = null;
+                m_BuildPerBigTileLightListCompute = null;
+                m_BuildPerVoxelLightListCompute = null;
+                m_BuildScreenAabbKernel = -1;
+                m_BuildPerBigTileLightListKernel = -1;
+                m_BuildPerVoxelLightListDepthKernel = -1;
+                m_BuildPerVoxelLightListNoDepthKernel = -1;
             }
         }
 
@@ -243,139 +233,83 @@ namespace VividRP.Runtime
         {
             if (m_DirectionalLightBuffer == null
                 || m_PunctualLightBuffer == null
-                || m_PunctualLightCullBuffer == null
-                || m_PunctualLightScreenSpaceBoundsBuffer == null
-                || m_ClusterBigTileLightCountsBuffer == null
-                || m_ClusterBigTileLightRangesBuffer == null
-                || m_ClusterBigTileLightIndicesBuffer == null)
+                || m_FiniteLightBoundBuffer == null
+                || m_LightVolumeDataBuffer == null
+                || m_ScreenSpaceBoundsBuffer == null
+                || m_BigTileLightListBuffer == null
+                || m_LayeredOffsetBuffer == null
+                || m_LayeredLightListBuffer == null
+                || m_LayeredLightListCounterBuffer == null
+                || m_LogBaseBuffer == null)
             {
                 return;
             }
 
             var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
-            var canBuildClusteredLights = m_PunctualLightCount > 0
-                && m_ClusteredLightCullCompute != null
-                && m_ClearClusterLightCounterKernel >= 0
-                && m_CountClusterBigTileLightsKernel >= 0
-                && m_BuildClusterBigTileLightRangesKernel >= 0
-                && m_BuildClusterBigTileLightListKernel >= 0
-                && m_BuildClusteredLightListKernel >= 0
-                && m_PunctualLightCullBuffer != null
-                && m_PunctualLightScreenSpaceBoundsBuffer != null
-                && m_ClusterBigTileLightCountsBuffer != null
-                && m_ClusterBigTileLightRangesBuffer != null
-                && m_ClusterBigTileLightIndicesBuffer != null
-                && m_ClusterLightGridBuffer != null
-                && m_ClusterLightIndicesBuffer != null
-                && m_ClusterLightListStatsBuffer != null
-                && m_ClusterAllocationCounterBuffer != null;
-
-            if (canBuildClusteredLights)
+            using (new ProfilingScope(cmd, profilingSampler))
             {
-                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, PunctualLightCountId, m_PunctualLightCount);
-                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, ClusterTileSizeId, ClusterTileSize);
-                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, ClusterBigTileSizeId, ClusterBigTileSize);
-                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, ClusterSliceCountId, ClusterSliceCount);
-                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, ClusterScreenWidthId, m_LightingWidth);
-                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, ClusterScreenHeightId, m_LightingHeight);
-                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, ClusterTileCountXId, m_ClusterTileCountX);
-                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, ClusterTileCountYId, m_ClusterTileCountY);
-                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, ClusterBigTileCountXId, m_ClusterBigTileCountX);
-                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, ClusterBigTileCountYId, m_ClusterBigTileCountY);
-                cmd.SetComputeFloatParam(m_ClusteredLightCullCompute, ClusterNearClipId, m_ClusterNearClip);
-                cmd.SetComputeFloatParam(m_ClusteredLightCullCompute, ClusterFarClipId, m_ClusterFarClip);
-                cmd.SetComputeFloatParam(m_ClusteredLightCullCompute, ClusterLogDepthScaleId, m_ClusterLogDepthScale);
-                cmd.SetComputeFloatParam(m_ClusteredLightCullCompute, ClusterLinearDepthScaleId, m_ClusterLinearDepthScale);
-                cmd.SetComputeFloatParam(m_ClusteredLightCullCompute, ClusterTanHalfFovXId, m_ClusterTanHalfFovX);
-                cmd.SetComputeFloatParam(m_ClusteredLightCullCompute, ClusterTanHalfFovYId, m_ClusterTanHalfFovY);
-                cmd.SetComputeFloatParam(m_ClusteredLightCullCompute, ClusterOrthoHalfWidthId, m_ClusterOrthoHalfWidth);
-                cmd.SetComputeFloatParam(m_ClusteredLightCullCompute, ClusterOrthoHalfHeightId, m_ClusterOrthoHalfHeight);
-                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, ClusterIsOrthographicId, m_ClusterIsOrthographic);
-                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_CountClusterBigTileLightsKernel, PunctualLightScreenSpaceBoundsId, m_PunctualLightScreenSpaceBoundsBuffer);
-                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_CountClusterBigTileLightsKernel, ClusterBigTileLightCountsId, m_ClusterBigTileLightCountsBuffer);
-                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusterBigTileLightRangesKernel, ClusterBigTileLightCountsId, m_ClusterBigTileLightCountsBuffer);
-                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusterBigTileLightRangesKernel, ClusterBigTileLightRangesId, m_ClusterBigTileLightRangesBuffer);
-                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusterBigTileLightListKernel, PunctualLightScreenSpaceBoundsId, m_PunctualLightScreenSpaceBoundsBuffer);
-                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusterBigTileLightListKernel, ClusterBigTileLightRangesId, m_ClusterBigTileLightRangesBuffer);
-                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusterBigTileLightListKernel, ClusterBigTileLightIndicesId, m_ClusterBigTileLightIndicesBuffer);
-                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusteredLightListKernel, PunctualLightCullDataId, m_PunctualLightCullBuffer);
-                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusteredLightListKernel, PunctualLightScreenSpaceBoundsId, m_PunctualLightScreenSpaceBoundsBuffer);
-                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusteredLightListKernel, ClusterBigTileLightRangesId, m_ClusterBigTileLightRangesBuffer);
-                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusteredLightListKernel, ClusterBigTileLightIndicesId, m_ClusterBigTileLightIndicesBuffer);
-                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusteredLightListKernel, ClusterLightGridId, m_ClusterLightGridBuffer);
-                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusteredLightListKernel, ClusterLightIndicesId, m_ClusterLightIndicesBuffer);
-                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusteredLightListKernel, ClusterLightListStatsId, m_ClusterLightListStatsBuffer);
-                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusteredLightListKernel, ClusterAllocationCounterId, m_ClusterAllocationCounterBuffer);
-                cmd.DispatchCompute(
-                    m_ClusteredLightCullCompute,
-                    m_CountClusterBigTileLightsKernel,
-                    Mathf.CeilToInt(m_ClusterBigTileCountX / (float)ClusterBuildGroupSizeX),
-                    Mathf.CeilToInt(m_ClusterBigTileCountY / (float)ClusterBuildGroupSizeY),
-                    1);
-                cmd.DispatchCompute(m_ClusteredLightCullCompute, m_BuildClusterBigTileLightRangesKernel, 1, 1, 1);
-                cmd.DispatchCompute(
-                    m_ClusteredLightCullCompute,
-                    m_BuildClusterBigTileLightListKernel,
-                    Mathf.CeilToInt(m_ClusterBigTileCountX / (float)ClusterBuildGroupSizeX),
-                    Mathf.CeilToInt(m_ClusterBigTileCountY / (float)ClusterBuildGroupSizeY),
-                    1);
-                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_ClearClusterLightCounterKernel, ClusterAllocationCounterId, m_ClusterAllocationCounterBuffer);
-                cmd.DispatchCompute(m_ClusteredLightCullCompute, m_ClearClusterLightCounterKernel, 1, 1, 1);
-                cmd.DispatchCompute(
-                    m_ClusteredLightCullCompute,
-                    m_BuildClusteredLightListKernel,
-                    Mathf.CeilToInt(m_ClusterTileCountX / (float)ClusterBuildGroupSizeX),
-                    Mathf.CeilToInt(m_ClusterTileCountY / (float)ClusterBuildGroupSizeY),
-                    ClusterSliceCount);
-            }
+                var hasDepthTexture = m_DepthTexture != null && m_DepthTexture.innerHandle.IsValid();
+                var canBuildClusteredLights = m_PunctualLightCount > 0
+                    && m_BuildScreenAabbCompute != null
+                    && m_BuildPerBigTileLightListCompute != null
+                    && m_BuildPerVoxelLightListCompute != null
+                    && m_BuildScreenAabbKernel >= 0
+                    && m_BuildPerBigTileLightListKernel >= 0
+                    && ((hasDepthTexture && m_BuildPerVoxelLightListDepthKernel >= 0)
+                        || m_BuildPerVoxelLightListNoDepthKernel >= 0);
 
-            cmd.SetGlobalInt(DirectionalLightCountId, m_DirectionalLightCount);
-            cmd.SetGlobalInt(MainDirectionalLightIndexId, m_MainDirectionalLightIndex);
-            cmd.SetGlobalInt(PunctualLightCountId, canBuildClusteredLights ? m_PunctualLightCount : 0);
-            cmd.SetGlobalInt(ClusterTileSizeId, ClusterTileSize);
-            cmd.SetGlobalInt(ClusterSliceCountId, ClusterSliceCount);
-            cmd.SetGlobalInt(ClusterTileCountXId, m_ClusterTileCountX);
-            cmd.SetGlobalInt(ClusterTileCountYId, m_ClusterTileCountY);
-            cmd.SetGlobalInt(ClusterIsOrthographicId, m_ClusterIsOrthographic);
-            cmd.SetGlobalFloat(ClusterNearClipId, m_ClusterNearClip);
-            cmd.SetGlobalFloat(ClusterFarClipId, m_ClusterFarClip);
-            cmd.SetGlobalFloat(ClusterLogDepthScaleId, m_ClusterLogDepthScale);
-            cmd.SetGlobalFloat(ClusterLinearDepthScaleId, m_ClusterLinearDepthScale);
-            cmd.SetGlobalFloat(ClusterTanHalfFovXId, m_ClusterTanHalfFovX);
-            cmd.SetGlobalFloat(ClusterTanHalfFovYId, m_ClusterTanHalfFovY);
-            cmd.SetGlobalFloat(ClusterOrthoHalfWidthId, m_ClusterOrthoHalfWidth);
-            cmd.SetGlobalFloat(ClusterOrthoHalfHeightId, m_ClusterOrthoHalfHeight);
-            cmd.SetGlobalBuffer(DirectionalLightsId, m_DirectionalLightBuffer);
-            cmd.SetGlobalBuffer(PunctualLightsId, m_PunctualLightBuffer);
-            cmd.SetGlobalBuffer(ClusterLightGridId, m_ClusterLightGridBuffer);
-            cmd.SetGlobalBuffer(ClusterLightIndicesId, m_ClusterLightIndicesBuffer);
+                SetSharedLightLoopGlobals(cmd, canBuildClusteredLights && hasDepthTexture);
+
+                if (canBuildClusteredLights)
+                {
+                    DispatchScreenSpaceAabb(cmd);
+                    DispatchBigTilePrepass(cmd);
+                    DispatchClusteredLightList(cmd, hasDepthTexture);
+                }
+
+                cmd.SetGlobalInt(DirectionalLightCountId, m_DirectionalLightCount);
+                cmd.SetGlobalInt(MainDirectionalLightIndexId, m_MainDirectionalLightIndex);
+                cmd.SetGlobalInt(PunctualLightCountId, canBuildClusteredLights ? m_PunctualLightCount : 0);
+                cmd.SetGlobalInt(ClusterTileSizeId, ClusterTileSize);
+                cmd.SetGlobalInt(ClusterSliceCountId, ClusterSliceCount);
+                cmd.SetGlobalInt(ClusterTileCountXId, m_ClusterTileCountX);
+                cmd.SetGlobalInt(ClusterTileCountYId, m_ClusterTileCountY);
+                cmd.SetGlobalInt(ClusterIsOrthographicId, m_ClusterIsOrthographic);
+                cmd.SetGlobalFloat(ClusterNearClipId, m_ClusterNearClip);
+                cmd.SetGlobalFloat(ClusterFarClipId, m_ClusterFarClip);
+                cmd.SetGlobalBuffer(DirectionalLightsId, m_DirectionalLightBuffer);
+                cmd.SetGlobalBuffer(PunctualLightsId, m_PunctualLightBuffer);
+                cmd.SetGlobalBuffer(LayeredOffsetId, m_LayeredOffsetBuffer);
+                cmd.SetGlobalBuffer(LayeredLightListId, m_LayeredLightListBuffer);
+                cmd.SetGlobalBuffer(LogBaseBufferId, m_LogBaseBuffer);
+            }
         }
 
         public override void Dispose()
         {
             m_DirectionalLightBuffer?.Dispose();
             m_PunctualLightBuffer?.Dispose();
-            m_PunctualLightCullBuffer?.Dispose();
-            m_PunctualLightScreenSpaceBoundsBuffer?.Dispose();
-            m_ClusterBigTileLightCountsBuffer?.Dispose();
-            m_ClusterBigTileLightRangesBuffer?.Dispose();
-            m_ClusterBigTileLightIndicesBuffer?.Dispose();
-            m_ClusterLightGridBuffer?.Dispose();
-            m_ClusterLightIndicesBuffer?.Dispose();
-            m_ClusterLightListStatsBuffer?.Dispose();
-            m_ClusterAllocationCounterBuffer?.Dispose();
+            m_FiniteLightBoundBuffer?.Dispose();
+            m_LightVolumeDataBuffer?.Dispose();
+            m_ScreenSpaceBoundsBuffer?.Dispose();
+            m_BigTileLightListBuffer?.Dispose();
+            m_LayeredOffsetBuffer?.Dispose();
+            m_LayeredLightListBuffer?.Dispose();
+            m_LayeredLightListCounterBuffer?.Dispose();
+            m_LogBaseBuffer?.Dispose();
             m_DirectionalLightBuffer = null;
             m_PunctualLightBuffer = null;
-            m_PunctualLightCullBuffer = null;
-            m_PunctualLightScreenSpaceBoundsBuffer = null;
-            m_ClusterBigTileLightCountsBuffer = null;
-            m_ClusterBigTileLightRangesBuffer = null;
-            m_ClusterBigTileLightIndicesBuffer = null;
-            m_ClusterLightGridBuffer = null;
-            m_ClusterLightIndicesBuffer = null;
-            m_ClusterLightListStatsBuffer = null;
-            m_ClusterAllocationCounterBuffer = null;
-            m_ClusteredLightCullCompute = null;
+            m_FiniteLightBoundBuffer = null;
+            m_LightVolumeDataBuffer = null;
+            m_ScreenSpaceBoundsBuffer = null;
+            m_BigTileLightListBuffer = null;
+            m_LayeredOffsetBuffer = null;
+            m_LayeredLightListBuffer = null;
+            m_LayeredLightListCounterBuffer = null;
+            m_LogBaseBuffer = null;
+            m_BuildScreenAabbCompute = null;
+            m_BuildPerBigTileLightListCompute = null;
+            m_BuildPerVoxelLightListCompute = null;
             m_DirectionalLightCount = 0;
             m_PunctualLightCount = 0;
             m_MainDirectionalLightIndex = -1;
@@ -383,213 +317,242 @@ namespace VividRP.Runtime
             m_LightingHeight = 0;
             m_ClusterTileCountX = 0;
             m_ClusterTileCountY = 0;
+            m_ClusterTileCount = 0;
+            m_ClusterCount = 0;
             m_ClusterBigTileCountX = 0;
             m_ClusterBigTileCountY = 0;
+            m_ClusterBigTileCount = 0;
             m_ClusterLightIndexCapacity = 0;
             m_ClusterBigTileLightIndexCapacity = 0;
+            m_LayeredOffsetCapacity = 0;
             m_ClusterNearClip = 0.0f;
             m_ClusterFarClip = 0.0f;
-            m_ClusterLogDepthScale = 0.0f;
-            m_ClusterLinearDepthScale = 0.0f;
-            m_ClusterTanHalfFovX = 0.0f;
-            m_ClusterTanHalfFovY = 0.0f;
-            m_ClusterOrthoHalfWidth = 0.0f;
-            m_ClusterOrthoHalfHeight = 0.0f;
+            m_ClusterScale = 0.0f;
             m_ClusterIsOrthographic = 0;
-            m_ClearClusterLightCounterKernel = -1;
-            m_CountClusterBigTileLightsKernel = -1;
-            m_BuildClusterBigTileLightRangesKernel = -1;
-            m_BuildClusterBigTileLightListKernel = -1;
-            m_BuildClusteredLightListKernel = -1;
+            m_BuildScreenAabbKernel = -1;
+            m_BuildPerBigTileLightListKernel = -1;
+            m_BuildPerVoxelLightListDepthKernel = -1;
+            m_BuildPerVoxelLightListNoDepthKernel = -1;
         }
 
-        private void EnsureDirectionalLightBuffer(int requiredBufferCount)
+        private void DispatchScreenSpaceAabb(CommandBuffer cmd)
         {
-            if (m_DirectionalLightBuffer != null
-                && m_DirectionalLightBuffer.count >= requiredBufferCount
-                && m_DirectionalLightBuffer.stride == VividLightData.DirectionalLightData.Stride)
-            {
+            cmd.SetComputeBufferParam(m_BuildScreenAabbCompute, m_BuildScreenAabbKernel, FiniteLightBoundsId, m_FiniteLightBoundBuffer);
+            cmd.SetComputeBufferParam(m_BuildScreenAabbCompute, m_BuildScreenAabbKernel, ScreenSpaceBoundsId, m_ScreenSpaceBoundsBuffer);
+            cmd.DispatchCompute(
+                m_BuildScreenAabbCompute,
+                m_BuildScreenAabbKernel,
+                Mathf.Max(1, Mathf.CeilToInt(m_PunctualLightCount / (float)LightsPerScreenAabbGroup)),
+                MaxViews,
+                1);
+        }
+
+        private void DispatchBigTilePrepass(CommandBuffer cmd)
+        {
+            cmd.SetComputeBufferParam(m_BuildPerBigTileLightListCompute, m_BuildPerBigTileLightListKernel, ScreenSpaceBoundsId, m_ScreenSpaceBoundsBuffer);
+            cmd.SetComputeBufferParam(m_BuildPerBigTileLightListCompute, m_BuildPerBigTileLightListKernel, LightVolumeDataId, m_LightVolumeDataBuffer);
+            cmd.SetComputeBufferParam(m_BuildPerBigTileLightListCompute, m_BuildPerBigTileLightListKernel, FiniteLightBoundsId, m_FiniteLightBoundBuffer);
+            cmd.SetComputeBufferParam(m_BuildPerBigTileLightListCompute, m_BuildPerBigTileLightListKernel, BigTileLightListId, m_BigTileLightListBuffer);
+            cmd.DispatchCompute(
+                m_BuildPerBigTileLightListCompute,
+                m_BuildPerBigTileLightListKernel,
+                m_ClusterBigTileCountX,
+                m_ClusterBigTileCountY,
+                MaxViews);
+        }
+
+        private void DispatchClusteredLightList(CommandBuffer cmd, bool hasDepthTexture)
+        {
+            var kernel = hasDepthTexture ? m_BuildPerVoxelLightListDepthKernel : m_BuildPerVoxelLightListNoDepthKernel;
+            if (kernel < 0)
                 return;
+
+            cmd.SetComputeBufferParam(m_BuildPerVoxelLightListCompute, kernel, ScreenSpaceBoundsId, m_ScreenSpaceBoundsBuffer);
+            cmd.SetComputeBufferParam(m_BuildPerVoxelLightListCompute, kernel, LightVolumeDataId, m_LightVolumeDataBuffer);
+            cmd.SetComputeBufferParam(m_BuildPerVoxelLightListCompute, kernel, FiniteLightBoundsId, m_FiniteLightBoundBuffer);
+            cmd.SetComputeBufferParam(m_BuildPerVoxelLightListCompute, kernel, BigTileLightListId, m_BigTileLightListBuffer);
+            cmd.SetComputeBufferParam(m_BuildPerVoxelLightListCompute, kernel, LayeredLightListId, m_LayeredLightListBuffer);
+            cmd.SetComputeBufferParam(m_BuildPerVoxelLightListCompute, kernel, LayeredOffsetId, m_LayeredOffsetBuffer);
+            cmd.SetComputeBufferParam(m_BuildPerVoxelLightListCompute, kernel, LayeredLightListCounterId, m_LayeredLightListCounterBuffer);
+
+            if (hasDepthTexture)
+            {
+                cmd.SetComputeBufferParam(m_BuildPerVoxelLightListCompute, kernel, LogBaseBufferId, m_LogBaseBuffer);
+                cmd.SetComputeTextureParam(m_BuildPerVoxelLightListCompute, kernel, DepthTextureId, m_DepthTexture.innerHandle);
             }
 
-            m_DirectionalLightBuffer?.Dispose();
-            m_DirectionalLightBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                requiredBufferCount,
-                VividLightData.DirectionalLightData.Stride);
+            cmd.DispatchCompute(
+                m_BuildPerVoxelLightListCompute,
+                kernel,
+                m_ClusterTileCountX,
+                m_ClusterTileCountY,
+                MaxViews);
         }
 
-        private void EnsurePunctualLightBuffer(int requiredBufferCount)
+        private void SetSharedLightLoopGlobals(CommandBuffer cmd, bool enableLogBaseBuffer)
         {
-            if (m_PunctualLightBuffer != null
-                && m_PunctualLightBuffer.count >= requiredBufferCount
-                && m_PunctualLightBuffer.stride == VividLightData.PunctualLightData.Stride)
+            cmd.SetGlobalMatrixArray(InvScreenProjectionMatricesId, m_InvScreenProjectionMatrices);
+            cmd.SetGlobalMatrixArray(ScreenProjectionMatricesId, m_ScreenProjectionMatrices);
+            cmd.SetGlobalMatrixArray(InvProjectionMatricesId, m_InvProjectionMatrices);
+            cmd.SetGlobalMatrixArray(ProjectionMatricesId, m_ProjectionMatrices);
+            cmd.SetGlobalVector(ScreenSizeId, new Vector4(
+                m_LightingWidth,
+                m_LightingHeight,
+                1.0f / Mathf.Max(m_LightingWidth, 1),
+                1.0f / Mathf.Max(m_LightingHeight, 1)));
+            cmd.SetGlobalVector(DimensionsId, new Vector4(m_LightingWidth, m_LightingHeight, 0.0f, 0.0f));
+            cmd.SetGlobalInt(VisibleLightCountId, m_PunctualLightCount);
+            cmd.SetGlobalInt(IsOrthographicLightLoopId, m_ClusterIsOrthographic);
+            cmd.SetGlobalInt(BaseFeatureFlagsId, 0);
+            cmd.SetGlobalInt(MsaaSampleCountId, 1);
+            cmd.SetGlobalInt(EnvLightIndexShiftId, 0);
+            cmd.SetGlobalInt(DecalIndexShiftId, 0);
+            cmd.SetGlobalFloat(ClusterScaleId, m_ClusterScale);
+            cmd.SetGlobalFloat(ClusterBaseId, ClusterLogBase);
+            cmd.SetGlobalFloat(NearPlaneId, m_ClusterNearClip);
+            cmd.SetGlobalFloat(FarPlaneId, m_ClusterFarClip);
+            cmd.SetGlobalInt(Log2NumClustersId, ClusterLog2SliceCount);
+            cmd.SetGlobalInt(IsLogBaseBufferEnabledId, enableLogBaseBuffer ? 1 : 0);
+            cmd.SetGlobalInt(NumTileClusteredXId, m_ClusterTileCountX);
+            cmd.SetGlobalInt(NumTileClusteredYId, m_ClusterTileCountY);
+        }
+
+        private void UpdateClusterCameraParameters(Camera camera)
+        {
+            m_ClusterNearClip = Mathf.Max(camera != null ? camera.nearClipPlane : 0.1f, 0.01f);
+            m_ClusterFarClip = Mathf.Max(camera != null ? camera.farClipPlane : 1000.0f, m_ClusterNearClip + 0.01f);
+            m_ClusterIsOrthographic = camera != null && camera.orthographic ? 1 : 0;
+
+            var clusterCount = (float)(1 << ClusterLog2SliceCount);
+            var geometricSeries = (1.0f - Mathf.Pow(ClusterLogBase, clusterCount)) / (1.0f - ClusterLogBase);
+            m_ClusterScale = geometricSeries / Mathf.Max(m_ClusterFarClip - m_ClusterNearClip, 1e-4f);
+        }
+
+        private void UpdateLightListMatrices(Camera camera)
+        {
+            var aspect = m_LightingHeight > 0 ? m_LightingWidth / (float)m_LightingHeight : 1.0f;
+            var projection = camera != null
+                ? camera.projectionMatrix
+                : Matrix4x4.Perspective(60.0f, aspect, m_ClusterNearClip, m_ClusterFarClip);
+            var lightListProjection = projection * s_FlipMatrixLhsRhs;
+            var screenToPixel = Matrix4x4.identity;
+            screenToPixel.SetRow(0, new Vector4(0.5f * m_LightingWidth, 0.0f, 0.0f, 0.5f * m_LightingWidth));
+            screenToPixel.SetRow(1, new Vector4(0.0f, 0.5f * m_LightingHeight, 0.0f, 0.5f * m_LightingHeight));
+            screenToPixel.SetRow(2, new Vector4(0.0f, 0.0f, 0.5f, 0.5f));
+            screenToPixel.SetRow(3, new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
+
+            var screenProjection = screenToPixel * lightListProjection;
+            var projectionToUnit = Matrix4x4.identity;
+            projectionToUnit.SetRow(2, new Vector4(0.0f, 0.0f, 0.5f, 0.5f));
+            var clippedProjection = projectionToUnit * lightListProjection;
+
+            for (var viewIndex = 0; viewIndex < m_InvScreenProjectionMatrices.Length; viewIndex++)
             {
-                return;
+                m_ScreenProjectionMatrices[viewIndex] = screenProjection;
+                m_InvScreenProjectionMatrices[viewIndex] = screenProjection.inverse;
+                m_ProjectionMatrices[viewIndex] = clippedProjection;
+                m_InvProjectionMatrices[viewIndex] = clippedProjection.inverse;
             }
-
-            m_PunctualLightBuffer?.Dispose();
-            m_PunctualLightBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                requiredBufferCount,
-                VividLightData.PunctualLightData.Stride);
         }
 
-        private void EnsurePunctualLightCullBuffer(int requiredBufferCount)
+        private void EnsureDirectionalLightBuffer(int requiredCount)
         {
-            if (m_PunctualLightCullBuffer != null
-                && m_PunctualLightCullBuffer.count >= requiredBufferCount
-                && m_PunctualLightCullBuffer.stride == VividLightData.PunctualLightViewSpaceCullData.Stride)
+            EnsureStructuredBuffer(ref m_DirectionalLightBuffer, requiredCount, VividLightData.DirectionalLightData.Stride);
+        }
+
+        private void EnsurePunctualLightBuffer(int requiredCount)
+        {
+            EnsureStructuredBuffer(ref m_PunctualLightBuffer, requiredCount, VividLightData.PunctualLightData.Stride);
+        }
+
+        private void EnsureFiniteLightBoundBuffer(int requiredCount)
+        {
+            EnsureStructuredBuffer(ref m_FiniteLightBoundBuffer, requiredCount, VividLightData.SFiniteLightBound.Stride);
+        }
+
+        private void EnsureLightVolumeDataBuffer(int requiredCount)
+        {
+            EnsureStructuredBuffer(ref m_LightVolumeDataBuffer, requiredCount, VividLightData.LightVolumeData.Stride);
+        }
+
+        private void EnsureScreenSpaceBoundsBuffer(int requiredCount)
+        {
+            EnsureStructuredBuffer(ref m_ScreenSpaceBoundsBuffer, requiredCount, sizeof(float) * 4);
+        }
+
+        private void EnsureBigTileLightListBuffer(int requiredCount)
+        {
+            EnsureStructuredBuffer(ref m_BigTileLightListBuffer, requiredCount, sizeof(uint));
+        }
+
+        private void EnsureLayeredOffsetBuffer(int requiredCount)
+        {
+            EnsureStructuredBuffer(ref m_LayeredOffsetBuffer, requiredCount, sizeof(uint));
+        }
+
+        private void EnsureLayeredLightListBuffer(int requiredCount)
+        {
+            EnsureStructuredBuffer(ref m_LayeredLightListBuffer, requiredCount, sizeof(uint));
+        }
+
+        private void EnsureLayeredLightListCounterBuffer()
+        {
+            EnsureStructuredBuffer(ref m_LayeredLightListCounterBuffer, 1, sizeof(uint));
+        }
+
+        private void EnsureLogBaseBuffer(int requiredCount)
+        {
+            EnsureStructuredBuffer(ref m_LogBaseBuffer, requiredCount, sizeof(float));
+        }
+
+        private static void EnsureStructuredBuffer(ref GraphicsBuffer buffer, int requiredCount, int stride)
+        {
+            if (buffer != null && buffer.count >= requiredCount && buffer.stride == stride)
+                return;
+
+            buffer?.Dispose();
+            buffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, Mathf.Max(requiredCount, 1), stride);
+        }
+
+        private static int ComputeClusteredLightListCapacity(int clusterTileCount)
+        {
+            var perTileCapacity = (long)(HdrpFptlMaxLightCount + 1) * (1 << (ClusterLog2SliceCount + 1));
+            return ClampToPositiveInt(perTileCapacity * Mathf.Max(clusterTileCount, 1));
+        }
+
+        private static int ComputeBigTileLightListCapacity(int bigTileCount)
+        {
+            return ClampToPositiveInt((long)MaxNrBigTileLightsPlusOne * Mathf.Max(bigTileCount, 1) / 2L);
+        }
+
+        private static int ComputeLayeredOffsetCapacity(int clusterCount)
+        {
+            return ClampToPositiveInt((long)HdrpLightCategoryCount * Mathf.Max(clusterCount, 1));
+        }
+
+        private static int ClampToPositiveInt(long value)
+        {
+            return Mathf.Max(1, (int)Math.Min(value, int.MaxValue));
+        }
+
+        private static RenderGraphTexture CreateDepthTexture(string name)
+        {
+            var texture = new RenderGraphTexture
             {
-                return;
-            }
-
-            m_PunctualLightCullBuffer?.Dispose();
-            m_PunctualLightCullBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                requiredBufferCount,
-                VividLightData.PunctualLightViewSpaceCullData.Stride);
+                desc = RenderGraphTextureDesc.CreateDepthTarget(1, 1, DepthBits.Depth32)
+            };
+            texture.desc.Name = name;
+            texture.desc.ClearBuffer = false;
+            return texture;
         }
 
-        private void EnsurePunctualLightScreenSpaceBoundsBuffer(int requiredBufferCount)
+        private static void ResizeDepthTexture(RenderGraphTexture texture, int width, int height)
         {
-            if (m_PunctualLightScreenSpaceBoundsBuffer != null
-                && m_PunctualLightScreenSpaceBoundsBuffer.count >= requiredBufferCount
-                && m_PunctualLightScreenSpaceBoundsBuffer.stride == VividLightData.PunctualLightScreenSpaceBounds.Stride)
-            {
+            if (texture?.desc == null)
                 return;
-            }
 
-            m_PunctualLightScreenSpaceBoundsBuffer?.Dispose();
-            m_PunctualLightScreenSpaceBoundsBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                requiredBufferCount,
-                VividLightData.PunctualLightScreenSpaceBounds.Stride);
-        }
-
-        private void EnsureClusterBigTileLightRangesBuffer(int requiredBufferCount)
-        {
-            if (m_ClusterBigTileLightRangesBuffer != null
-                && m_ClusterBigTileLightRangesBuffer.count >= requiredBufferCount
-                && m_ClusterBigTileLightRangesBuffer.stride == VividLightData.PunctualLightCoarseRange.Stride)
-            {
-                return;
-            }
-
-            m_ClusterBigTileLightRangesBuffer?.Dispose();
-            m_ClusterBigTileLightRangesBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                requiredBufferCount,
-                VividLightData.PunctualLightCoarseRange.Stride);
-        }
-
-        private void EnsureClusterBigTileLightCountsBuffer(int requiredBufferCount)
-        {
-            if (m_ClusterBigTileLightCountsBuffer != null
-                && m_ClusterBigTileLightCountsBuffer.count >= requiredBufferCount
-                && m_ClusterBigTileLightCountsBuffer.stride == sizeof(uint))
-            {
-                return;
-            }
-
-            m_ClusterBigTileLightCountsBuffer?.Dispose();
-            m_ClusterBigTileLightCountsBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                requiredBufferCount,
-                sizeof(uint));
-        }
-
-        private void EnsureClusterBigTileLightIndicesBuffer(int requiredBufferCount)
-        {
-            if (m_ClusterBigTileLightIndicesBuffer != null
-                && m_ClusterBigTileLightIndicesBuffer.count >= requiredBufferCount
-                && m_ClusterBigTileLightIndicesBuffer.stride == sizeof(uint))
-            {
-                return;
-            }
-
-            m_ClusterBigTileLightIndicesBuffer?.Dispose();
-            m_ClusterBigTileLightIndicesBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                requiredBufferCount,
-                sizeof(uint));
-        }
-
-        private void EnsureClusterLightGridBuffer(int requiredClusterCount)
-        {
-            if (m_ClusterLightGridBuffer != null
-                && m_ClusterLightGridBuffer.count >= requiredClusterCount
-                && m_ClusterLightGridBuffer.stride == sizeof(uint) * 2)
-            {
-                return;
-            }
-
-            m_ClusterLightGridBuffer?.Dispose();
-            m_ClusterLightGridBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                requiredClusterCount,
-                sizeof(uint) * 2);
-        }
-
-        private void EnsureClusterLightIndicesBuffer(int requiredCapacity)
-        {
-            if (m_ClusterLightIndicesBuffer != null
-                && m_ClusterLightIndicesBuffer.count >= requiredCapacity
-                && m_ClusterLightIndicesBuffer.stride == sizeof(uint))
-            {
-                return;
-            }
-
-            m_ClusterLightIndicesBuffer?.Dispose();
-            m_ClusterLightIndicesBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                requiredCapacity,
-                sizeof(uint));
-        }
-
-        private void EnsureClusterLightListStatsBuffer()
-        {
-            if (m_ClusterLightListStatsBuffer != null
-                && m_ClusterLightListStatsBuffer.count >= ClusterLightListStatsCount
-                && m_ClusterLightListStatsBuffer.stride == sizeof(uint))
-            {
-                return;
-            }
-
-            m_ClusterLightListStatsBuffer?.Dispose();
-            m_ClusterLightListStatsBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                ClusterLightListStatsCount,
-                sizeof(uint));
-        }
-
-        private void EnsureClusterAllocationCounterBuffer()
-        {
-            if (m_ClusterAllocationCounterBuffer != null
-                && m_ClusterAllocationCounterBuffer.count >= 1
-                && m_ClusterAllocationCounterBuffer.stride == sizeof(uint))
-            {
-                return;
-            }
-
-            m_ClusterAllocationCounterBuffer?.Dispose();
-            m_ClusterAllocationCounterBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                1,
-                sizeof(uint));
-        }
-
-        private void UpdateClusterProjectionData(VividLightData.PunctualLightScreenSpaceBoundsParameters projectionParameters)
-        {
-            m_ClusterNearClip = projectionParameters.nearClip;
-            m_ClusterFarClip = projectionParameters.farClip;
-            m_ClusterLogDepthScale = projectionParameters.logDepthScale;
-            m_ClusterLinearDepthScale = projectionParameters.linearDepthScale;
-            m_ClusterTanHalfFovX = projectionParameters.tanHalfFovX;
-            m_ClusterTanHalfFovY = projectionParameters.tanHalfFovY;
-            m_ClusterOrthoHalfWidth = projectionParameters.orthoHalfWidth;
-            m_ClusterOrthoHalfHeight = projectionParameters.orthoHalfHeight;
-            m_ClusterIsOrthographic = projectionParameters.isOrthographic;
+            texture.desc.Width = width;
+            texture.desc.Height = height;
         }
     }
 }

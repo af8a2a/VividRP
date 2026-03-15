@@ -238,7 +238,7 @@ float3 EvaluateDeferredDirectionalLighting(VividGBufferSurfaceData surfaceData, 
         [loop]
         for (uint lightOffset = 0; lightOffset < clusterLightRange.y; lightOffset++)
         {
-            uint lightIndex = _ClusterLightIndices[clusterLightRange.x + lightOffset];
+            uint lightIndex = GetClusterLightIndex(clusterLightRange.x, lightOffset);
             PunctualLightData punctualLight = GetPunctualLight(lightIndex);
             lighting += EvaluatePunctualLight(surfaceData, positionWS, viewDirectionWS, punctualLight);
         }

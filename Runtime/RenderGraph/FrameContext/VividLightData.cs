@@ -84,6 +84,10 @@ namespace VividRP.Runtime
             public int tileMaxX;
             public int tileMinY;
             public int tileMaxY;
+            public int bigTileMinX;
+            public int bigTileMaxX;
+            public int bigTileMinY;
+            public int bigTileMaxY;
             public uint isValid;
 
             internal static int Stride => Marshal.SizeOf<PunctualLightScreenSpaceBounds>();
@@ -118,6 +122,9 @@ namespace VividRP.Runtime
             public readonly int tileSize;
             public readonly int tileCountX;
             public readonly int tileCountY;
+            public readonly int bigTileSize;
+            public readonly int bigTileCountX;
+            public readonly int bigTileCountY;
             public readonly int sliceCount;
             public readonly float nearClip;
             public readonly float farClip;
@@ -136,6 +143,9 @@ namespace VividRP.Runtime
                 int tileSize,
                 int tileCountX,
                 int tileCountY,
+                int bigTileSize,
+                int bigTileCountX,
+                int bigTileCountY,
                 int sliceCount,
                 float nearClip,
                 float farClip,
@@ -153,6 +163,9 @@ namespace VividRP.Runtime
                 this.tileSize = tileSize;
                 this.tileCountX = tileCountX;
                 this.tileCountY = tileCountY;
+                this.bigTileSize = bigTileSize;
+                this.bigTileCountX = bigTileCountX;
+                this.bigTileCountY = bigTileCountY;
                 this.sliceCount = sliceCount;
                 this.nearClip = nearClip;
                 this.farClip = farClip;
@@ -303,6 +316,10 @@ namespace VividRP.Runtime
             public int tileMaxX;
             public int tileMinY;
             public int tileMaxY;
+            public int bigTileMinX;
+            public int bigTileMaxX;
+            public int bigTileMinY;
+            public int bigTileMaxY;
             public uint isValid;
         }
 
@@ -314,6 +331,9 @@ namespace VividRP.Runtime
             public readonly int tileSize;
             public readonly int tileCountX;
             public readonly int tileCountY;
+            public readonly int bigTileSize;
+            public readonly int bigTileCountX;
+            public readonly int bigTileCountY;
             public readonly int sliceCount;
             public readonly float nearClip;
             public readonly float farClip;
@@ -333,6 +353,9 @@ namespace VividRP.Runtime
                 tileSize = parameters.tileSize;
                 tileCountX = parameters.tileCountX;
                 tileCountY = parameters.tileCountY;
+                bigTileSize = parameters.bigTileSize;
+                bigTileCountX = parameters.bigTileCountX;
+                bigTileCountY = parameters.bigTileCountY;
                 sliceCount = parameters.sliceCount;
                 nearClip = parameters.nearClip;
                 farClip = parameters.farClip;
@@ -604,6 +627,30 @@ namespace VividRP.Runtime
         public Light mainLight => hasMainLight ? visibleLights[mainLightIndex].light : null;
 
         public DirectionalLightData mainDirectionalLight => hasMainDirectionalLight ? directionalLights[mainDirectionalLightIndex] : default;
+
+        internal int GetPunctualLightBigTileLightIndexCapacityEstimate()
+        {
+            if (punctualLightCount <= 0)
+                return 1;
+
+            long capacity = 0;
+
+            for (var lightIndex = 0; lightIndex < punctualLightCount; lightIndex++)
+            {
+                var screenSpaceBounds = punctualLightScreenSpaceBounds[lightIndex];
+                if (screenSpaceBounds.isValid == 0u)
+                    continue;
+
+                var bigTileSpanX = Math.Max(screenSpaceBounds.bigTileMaxX - screenSpaceBounds.bigTileMinX + 1, 0);
+                var bigTileSpanY = Math.Max(screenSpaceBounds.bigTileMaxY - screenSpaceBounds.bigTileMinY + 1, 0);
+                capacity += (long)bigTileSpanX * bigTileSpanY;
+
+                if (capacity >= int.MaxValue)
+                    return int.MaxValue;
+            }
+
+            return Mathf.Max(1, (int)capacity);
+        }
 
         internal void Update(CullingResults cullingResults)
         {
@@ -900,7 +947,8 @@ namespace VividRP.Runtime
             int screenWidth,
             int screenHeight,
             int tileSize,
-            int sliceCount)
+            int sliceCount,
+            int bigTileSize = 0)
         {
             screenWidth = Mathf.Max(screenWidth, 1);
             screenHeight = Mathf.Max(screenHeight, 1);
@@ -936,13 +984,22 @@ namespace VividRP.Runtime
                 orthoHalfHeight = 0.0f;
             }
 
+            var tileCountX = Mathf.Max(1, Mathf.CeilToInt(screenWidth / (float)tileSize));
+            var tileCountY = Mathf.Max(1, Mathf.CeilToInt(screenHeight / (float)tileSize));
+            bigTileSize = Mathf.Max(bigTileSize > 0 ? bigTileSize : tileSize, tileSize);
+            var bigTileCountX = Mathf.Max(1, Mathf.CeilToInt(screenWidth / (float)bigTileSize));
+            var bigTileCountY = Mathf.Max(1, Mathf.CeilToInt(screenHeight / (float)bigTileSize));
+
             return new PunctualLightScreenSpaceBoundsParameters(
                 camera != null ? camera.worldToCameraMatrix : Matrix4x4.identity,
                 screenWidth,
                 screenHeight,
                 tileSize,
-                Mathf.Max(1, Mathf.CeilToInt(screenWidth / (float)tileSize)),
-                Mathf.Max(1, Mathf.CeilToInt(screenHeight / (float)tileSize)),
+                tileCountX,
+                tileCountY,
+                bigTileSize,
+                bigTileCountX,
+                bigTileCountY,
                 sliceCount,
                 nearClip,
                 farClip,
@@ -970,7 +1027,8 @@ namespace VividRP.Runtime
                 screenWidth,
                 screenHeight,
                 tileSize,
-                sliceCount);
+                sliceCount,
+                bigTileSize);
             var clusterCount = Mathf.Max(
                 1,
                 screenSpaceBoundsParameters.tileCountX
@@ -987,9 +1045,9 @@ namespace VividRP.Runtime
                 lightIndexCapacity = Mathf.Max(1, (int)Math.Min(rawLightIndexCapacity, int.MaxValue));
             }
 
-            bigTileSize = Mathf.Max(bigTileSize, tileSize);
-            var bigTileCountX = Mathf.Max(1, Mathf.CeilToInt(screenWidth / (float)bigTileSize));
-            var bigTileCountY = Mathf.Max(1, Mathf.CeilToInt(screenHeight / (float)bigTileSize));
+            bigTileSize = screenSpaceBoundsParameters.bigTileSize;
+            var bigTileCountX = screenSpaceBoundsParameters.bigTileCountX;
+            var bigTileCountY = screenSpaceBoundsParameters.bigTileCountY;
             var bigTileCount = Mathf.Max(1, bigTileCountX * bigTileCountY);
             var bigTileLightIndexCapacity = 1;
 
@@ -1561,6 +1619,10 @@ namespace VividRP.Runtime
                 tileMaxX = source.tileMaxX,
                 tileMinY = source.tileMinY,
                 tileMaxY = source.tileMaxY,
+                bigTileMinX = source.bigTileMinX,
+                bigTileMaxX = source.bigTileMaxX,
+                bigTileMinY = source.bigTileMinY,
+                bigTileMaxY = source.bigTileMaxY,
                 isValid = source.isValid,
             };
         }
@@ -1594,6 +1656,10 @@ namespace VividRP.Runtime
                 tileMaxX = source.tileMaxX,
                 tileMinY = source.tileMinY,
                 tileMaxY = source.tileMaxY,
+                bigTileMinX = source.bigTileMinX,
+                bigTileMaxX = source.bigTileMaxX,
+                bigTileMinY = source.bigTileMinY,
+                bigTileMaxY = source.bigTileMaxY,
                 isValid = source.isValid,
             };
         }
@@ -1645,6 +1711,9 @@ namespace VividRP.Runtime
             if (!TryConvertClipRectToTileRange(clipSpaceAabbMin, clipSpaceAabbMax, parameters, out var tileMinX, out var tileMaxX, out var tileMinY, out var tileMaxY))
                 return bounds;
 
+            if (!TryConvertClipRectToBigTileRange(clipSpaceAabbMin, clipSpaceAabbMax, parameters, out var bigTileMinX, out var bigTileMaxX, out var bigTileMinY, out var bigTileMaxY))
+                return bounds;
+
             bounds.clipSpaceAabbMin = clipSpaceAabbMin;
             bounds.clipSpaceAabbMax = clipSpaceAabbMax;
             bounds.sliceMin = sliceMin;
@@ -1653,6 +1722,10 @@ namespace VividRP.Runtime
             bounds.tileMaxX = tileMaxX;
             bounds.tileMinY = tileMinY;
             bounds.tileMaxY = tileMaxY;
+            bounds.bigTileMinX = bigTileMinX;
+            bounds.bigTileMaxX = bigTileMaxX;
+            bounds.bigTileMinY = bigTileMinY;
+            bounds.bigTileMaxY = bigTileMaxY;
             bounds.isValid = 1u;
             return bounds;
         }
@@ -1775,21 +1848,71 @@ namespace VividRP.Runtime
             out int tileMinY,
             out int tileMaxY)
         {
-            tileMinX = 0;
-            tileMaxX = 0;
-            tileMinY = 0;
-            tileMaxY = 0;
+            return TryConvertClipRectToCellRange(
+                clipSpaceAabbMin,
+                clipSpaceAabbMax,
+                parameters.screenWidth,
+                parameters.screenHeight,
+                parameters.tileSize,
+                parameters.tileCountX,
+                parameters.tileCountY,
+                out tileMinX,
+                out tileMaxX,
+                out tileMinY,
+                out tileMaxY);
+        }
 
-            var screenMinX = GetScreenXFromClipSpace(clipSpaceAabbMin.x, parameters.screenWidth);
-            var screenMaxX = GetScreenXFromClipSpace(clipSpaceAabbMax.x, parameters.screenWidth);
-            var screenMinY = GetScreenYFromClipSpace(clipSpaceAabbMax.y, parameters.screenHeight);
-            var screenMaxY = GetScreenYFromClipSpace(clipSpaceAabbMin.y, parameters.screenHeight);
+        private static bool TryConvertClipRectToBigTileRange(
+            float2 clipSpaceAabbMin,
+            float2 clipSpaceAabbMax,
+            in PunctualLightScreenSpaceBoundsJobParameters parameters,
+            out int bigTileMinX,
+            out int bigTileMaxX,
+            out int bigTileMinY,
+            out int bigTileMaxY)
+        {
+            return TryConvertClipRectToCellRange(
+                clipSpaceAabbMin,
+                clipSpaceAabbMax,
+                parameters.screenWidth,
+                parameters.screenHeight,
+                parameters.bigTileSize,
+                parameters.bigTileCountX,
+                parameters.bigTileCountY,
+                out bigTileMinX,
+                out bigTileMaxX,
+                out bigTileMinY,
+                out bigTileMaxY);
+        }
+
+        private static bool TryConvertClipRectToCellRange(
+            float2 clipSpaceAabbMin,
+            float2 clipSpaceAabbMax,
+            int screenWidth,
+            int screenHeight,
+            int cellSize,
+            int cellCountX,
+            int cellCountY,
+            out int cellMinX,
+            out int cellMaxX,
+            out int cellMinY,
+            out int cellMaxY)
+        {
+            cellMinX = 0;
+            cellMaxX = 0;
+            cellMinY = 0;
+            cellMaxY = 0;
+
+            var screenMinX = GetScreenXFromClipSpace(clipSpaceAabbMin.x, screenWidth);
+            var screenMaxX = GetScreenXFromClipSpace(clipSpaceAabbMax.x, screenWidth);
+            var screenMinY = GetScreenYFromClipSpace(clipSpaceAabbMax.y, screenHeight);
+            var screenMaxY = GetScreenYFromClipSpace(clipSpaceAabbMin.y, screenHeight);
             var rectMinX = math.min(screenMinX, screenMaxX);
             var rectMaxX = math.max(screenMinX, screenMaxX);
             var rectMinY = math.min(screenMinY, screenMaxY);
             var rectMaxY = math.max(screenMinY, screenMaxY);
-            var maxPixelX = (float)math.max(parameters.screenWidth - 1, 0);
-            var maxPixelY = (float)math.max(parameters.screenHeight - 1, 0);
+            var maxPixelX = (float)math.max(screenWidth - 1, 0);
+            var maxPixelY = (float)math.max(screenHeight - 1, 0);
 
             if (rectMaxX < 0.0f
                 || rectMinX > maxPixelX
@@ -1803,10 +1926,10 @@ namespace VividRP.Runtime
             var clampedMaxX = math.clamp(rectMaxX, 0.0f, maxPixelX);
             var clampedMinY = math.clamp(rectMinY, 0.0f, maxPixelY);
             var clampedMaxY = math.clamp(rectMaxY, 0.0f, maxPixelY);
-            tileMinX = math.clamp((int)math.floor(clampedMinX / parameters.tileSize), 0, parameters.tileCountX - 1);
-            tileMaxX = math.clamp((int)math.floor(clampedMaxX / parameters.tileSize), 0, parameters.tileCountX - 1);
-            tileMinY = math.clamp((int)math.floor(clampedMinY / parameters.tileSize), 0, parameters.tileCountY - 1);
-            tileMaxY = math.clamp((int)math.floor(clampedMaxY / parameters.tileSize), 0, parameters.tileCountY - 1);
+            cellMinX = math.clamp((int)math.floor(clampedMinX / cellSize), 0, cellCountX - 1);
+            cellMaxX = math.clamp((int)math.floor(clampedMaxX / cellSize), 0, cellCountX - 1);
+            cellMinY = math.clamp((int)math.floor(clampedMinY / cellSize), 0, cellCountY - 1);
+            cellMaxY = math.clamp((int)math.floor(clampedMaxY / cellSize), 0, cellCountY - 1);
             return true;
         }
 

@@ -359,6 +359,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(bounds.tileMaxX, Is.EqualTo(6));
                 Assert.That(bounds.tileMinY, Is.EqualTo(1));
                 Assert.That(bounds.tileMaxY, Is.EqualTo(4));
+                Assert.That(bounds.bigTileMinX, Is.EqualTo(bounds.tileMinX));
+                Assert.That(bounds.bigTileMaxX, Is.EqualTo(bounds.tileMaxX));
+                Assert.That(bounds.bigTileMinY, Is.EqualTo(bounds.tileMinY));
+                Assert.That(bounds.bigTileMaxY, Is.EqualTo(bounds.tileMaxY));
             }
             finally
             {
@@ -482,8 +486,75 @@ namespace VividRP.Editor.Tests
                 Assert.That(parameters.bigTileCountY, Is.EqualTo(3));
                 Assert.That(parameters.bigTileCount, Is.EqualTo(15));
                 Assert.That(parameters.bigTileLightIndexCapacity, Is.EqualTo(45));
+                Assert.That(parameters.screenSpaceBoundsParameters.bigTileSize, Is.EqualTo(64));
+                Assert.That(parameters.screenSpaceBoundsParameters.bigTileCountX, Is.EqualTo(5));
+                Assert.That(parameters.screenSpaceBoundsParameters.bigTileCountY, Is.EqualTo(3));
                 Assert.That(parameters.screenSpaceBoundsParameters.tileCountX, Is.EqualTo(10));
                 Assert.That(parameters.screenSpaceBoundsParameters.tileCountY, Is.EqualTo(6));
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void UpdatePunctualLightClusteredCullData_ComputesBigTileBoundsAndTightCapacityEstimate()
+        {
+            var cameraObject = new GameObject("Clustered Big Tile Camera");
+            var camera = cameraObject.AddComponent<Camera>();
+            var lightData = new VividLightData();
+
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 1000.0f;
+            camera.fieldOfView = 60.0f;
+            camera.transform.position = Vector3.zero;
+            camera.transform.rotation = Quaternion.identity;
+
+            lightData.punctualLightCullData = new[]
+            {
+                new VividLightData.PunctualLightCullData
+                {
+                    positionWS = new Vector3(0.0f, 0.0f, 5.0f),
+                    range = 1.0f,
+                    directionWS = Vector3.forward,
+                    lightType = 0u,
+                    cosOuterAngle = 1.0f,
+                    radiusAtRange = 0.0f,
+                    cullingCenterWS = new Vector3(0.0f, 0.0f, 5.0f),
+                    cullingRadius = 1.0f,
+                }
+            };
+            lightData.punctualLightCount = 1;
+
+            try
+            {
+                var parameters = VividLightData.CreatePunctualLightClusteredLightListParameters(
+                    camera,
+                    320,
+                    180,
+                    32,
+                    64,
+                    24,
+                    lightData.punctualLightCount,
+                    64);
+
+                lightData.UpdatePunctualLightClusteredCullData(parameters.screenSpaceBoundsParameters);
+
+                var bounds = lightData.punctualLightScreenSpaceBounds[0];
+                var expectedBigTileCapacity = (bounds.bigTileMaxX - bounds.bigTileMinX + 1)
+                    * (bounds.bigTileMaxY - bounds.bigTileMinY + 1);
+
+                Assert.That(bounds.isValid, Is.EqualTo(1u));
+                Assert.That(bounds.bigTileMinX, Is.GreaterThanOrEqualTo(0));
+                Assert.That(bounds.bigTileMaxX, Is.LessThan(parameters.bigTileCountX));
+                Assert.That(bounds.bigTileMaxX, Is.GreaterThanOrEqualTo(bounds.bigTileMinX));
+                Assert.That(bounds.bigTileMinY, Is.GreaterThanOrEqualTo(0));
+                Assert.That(bounds.bigTileMaxY, Is.LessThan(parameters.bigTileCountY));
+                Assert.That(bounds.bigTileMaxY, Is.GreaterThanOrEqualTo(bounds.bigTileMinY));
+                Assert.That(expectedBigTileCapacity, Is.GreaterThan(0));
+                Assert.That(lightData.GetPunctualLightBigTileLightIndexCapacityEstimate(), Is.EqualTo(expectedBigTileCapacity));
+                Assert.That(lightData.GetPunctualLightBigTileLightIndexCapacityEstimate(), Is.LessThan(parameters.bigTileLightIndexCapacity));
             }
             finally
             {

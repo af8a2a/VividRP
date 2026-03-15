@@ -22,10 +22,17 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _ClusterBigTileLightIndices;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint2> _ClusterLightGrid;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _ClusterLightIndices;"));
+            Assert.That(source, Does.Contain("int bigTileMinX;"));
+            Assert.That(source, Does.Contain("int bigTileMaxX;"));
+            Assert.That(source, Does.Contain("int bigTileMinY;"));
+            Assert.That(source, Does.Contain("int bigTileMaxY;"));
             Assert.That(source, Does.Contain("bool SphereIntersectsCluster(float3 sphereCenter, float sphereRadius, float3 boundsMin, float3 boundsMax)"));
             Assert.That(source, Does.Contain("bool SpotConeIntersectsCluster(PunctualLightCullData punctualLightCullData, float3 boundsMin, float3 boundsMax)"));
             Assert.That(source, Does.Contain("bool PunctualLightIntersectsCluster(PunctualLightCullData punctualLightCullData, float3 boundsMin, float3 boundsMax)"));
             Assert.That(source, Does.Contain("void BuildClusterBigTileLightList(uint3 dispatchThreadId : SV_DispatchThreadID)"));
+            Assert.That(source, Does.Contain("(int)dispatchThreadId.x < screenSpaceBounds.bigTileMinX"));
+            Assert.That(source, Does.Contain("(int)dispatchThreadId.y > screenSpaceBounds.bigTileMaxY"));
+            Assert.That(source, Does.Contain("InterlockedAdd(_ClusterAllocationCounter[0], bigTileLightCount, bigTileStart);"));
             Assert.That(source, Does.Contain("uint2 bigTileLightRange = _ClusterBigTileLightRanges[GetBigTileIndex(bigTileCoord)];"));
         }
 

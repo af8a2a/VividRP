@@ -87,6 +87,7 @@ namespace VividRP.Runtime
         private GraphicsBuffer m_PunctualLightScreenSpaceBoundsBuffer;
         private GraphicsBuffer m_ClusterBigTileLightRangesBuffer;
         private GraphicsBuffer m_ClusterBigTileLightIndicesBuffer;
+        private GraphicsBuffer m_ClusterBigTileAllocationCounterBuffer;
         private GraphicsBuffer m_ClusterLightGridBuffer;
         private GraphicsBuffer m_ClusterLightIndicesBuffer;
         private GraphicsBuffer m_ClusterAllocationCounterBuffer;
@@ -150,15 +151,15 @@ namespace VividRP.Runtime
             m_ClusterBigTileCountX = clusteredLightListParameters.bigTileCountX;
             m_ClusterBigTileCountY = clusteredLightListParameters.bigTileCountY;
             m_ClusterLightIndexCapacity = clusteredLightListParameters.lightIndexCapacity;
-            m_ClusterBigTileLightIndexCapacity = clusteredLightListParameters.bigTileLightIndexCapacity;
+            m_ClusterBigTileLightIndexCapacity = 1;
 
             EnsurePunctualLightBuffer(Mathf.Max(m_PunctualLightCount, 1));
             EnsurePunctualLightCullBuffer(Mathf.Max(m_PunctualLightCount, 1));
             EnsurePunctualLightScreenSpaceBoundsBuffer(Mathf.Max(m_PunctualLightCount, 1));
             EnsureClusterBigTileLightRangesBuffer(m_PunctualLightCount > 0 ? Mathf.Max(clusteredLightListParameters.bigTileCount, 1) : 1);
-            EnsureClusterBigTileLightIndicesBuffer(Mathf.Max(m_ClusterBigTileLightIndexCapacity, 1));
             EnsureClusterLightGridBuffer(clusteredLightListParameters.clusterCount);
             EnsureClusterLightIndicesBuffer(m_ClusterLightIndexCapacity);
+            EnsureClusterBigTileAllocationCounterBuffer();
             EnsureClusterAllocationCounterBuffer();
             UpdateClusterProjectionData(clusteredLightListParameters.screenSpaceBoundsParameters);
 
@@ -170,12 +171,15 @@ namespace VividRP.Runtime
             if (m_PunctualLightCount > 0)
             {
                 lightData.UpdatePunctualLightClusteredCullData(clusteredLightListParameters.screenSpaceBoundsParameters);
+                m_ClusterBigTileLightIndexCapacity = lightData.GetPunctualLightBigTileLightIndexCapacityEstimate();
+                EnsureClusterBigTileLightIndicesBuffer(Mathf.Max(m_ClusterBigTileLightIndexCapacity, 1));
                 m_PunctualLightBuffer.SetData(lightData.punctualLights, 0, 0, m_PunctualLightCount);
                 m_PunctualLightCullBuffer.SetData(lightData.punctualLightViewSpaceCullData, 0, 0, m_PunctualLightCount);
                 m_PunctualLightScreenSpaceBoundsBuffer.SetData(lightData.punctualLightScreenSpaceBounds, 0, 0, m_PunctualLightCount);
             }
             else
             {
+                EnsureClusterBigTileLightIndicesBuffer(1);
                 m_PunctualLightBuffer.SetData(s_EmptyPunctualLights);
                 m_PunctualLightCullBuffer.SetData(s_EmptyPunctualLightCullData);
                 m_PunctualLightScreenSpaceBoundsBuffer.SetData(s_EmptyPunctualLightScreenSpaceBounds);
@@ -183,6 +187,7 @@ namespace VividRP.Runtime
                 m_ClusterBigTileLightIndicesBuffer.SetData(s_EmptyClusterBigTileLightIndices);
             }
 
+            m_ClusterBigTileAllocationCounterBuffer.SetData(s_ZeroCounterData);
             m_ClusterAllocationCounterBuffer.SetData(s_ZeroCounterData);
         }
 
@@ -232,6 +237,7 @@ namespace VividRP.Runtime
                 && m_PunctualLightScreenSpaceBoundsBuffer != null
                 && m_ClusterBigTileLightRangesBuffer != null
                 && m_ClusterBigTileLightIndicesBuffer != null
+                && m_ClusterBigTileAllocationCounterBuffer != null
                 && m_ClusterLightGridBuffer != null
                 && m_ClusterLightIndicesBuffer != null
                 && m_ClusterAllocationCounterBuffer != null;
@@ -257,7 +263,8 @@ namespace VividRP.Runtime
                 cmd.SetComputeFloatParam(m_ClusteredLightCullCompute, ClusterOrthoHalfWidthId, m_ClusterOrthoHalfWidth);
                 cmd.SetComputeFloatParam(m_ClusteredLightCullCompute, ClusterOrthoHalfHeightId, m_ClusterOrthoHalfHeight);
                 cmd.SetComputeIntParam(m_ClusteredLightCullCompute, ClusterIsOrthographicId, m_ClusterIsOrthographic);
-                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_ClearClusterLightCounterKernel, ClusterAllocationCounterId, m_ClusterAllocationCounterBuffer);
+                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_ClearClusterLightCounterKernel, ClusterAllocationCounterId, m_ClusterBigTileAllocationCounterBuffer);
+                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusterBigTileLightListKernel, ClusterAllocationCounterId, m_ClusterBigTileAllocationCounterBuffer);
                 cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusterBigTileLightListKernel, PunctualLightScreenSpaceBoundsId, m_PunctualLightScreenSpaceBoundsBuffer);
                 cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusterBigTileLightListKernel, ClusterBigTileLightRangesId, m_ClusterBigTileLightRangesBuffer);
                 cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusterBigTileLightListKernel, ClusterBigTileLightIndicesId, m_ClusterBigTileLightIndicesBuffer);
@@ -268,12 +275,15 @@ namespace VividRP.Runtime
                 cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusteredLightListKernel, ClusterLightGridId, m_ClusterLightGridBuffer);
                 cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusteredLightListKernel, ClusterLightIndicesId, m_ClusterLightIndicesBuffer);
                 cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusteredLightListKernel, ClusterAllocationCounterId, m_ClusterAllocationCounterBuffer);
+                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_ClearClusterLightCounterKernel, ClusterAllocationCounterId, m_ClusterBigTileAllocationCounterBuffer);
+                cmd.DispatchCompute(m_ClusteredLightCullCompute, m_ClearClusterLightCounterKernel, 1, 1, 1);
                 cmd.DispatchCompute(
                     m_ClusteredLightCullCompute,
                     m_BuildClusterBigTileLightListKernel,
                     Mathf.CeilToInt(m_ClusterBigTileCountX / (float)ClusterBuildGroupSizeX),
                     Mathf.CeilToInt(m_ClusterBigTileCountY / (float)ClusterBuildGroupSizeY),
                     1);
+                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_ClearClusterLightCounterKernel, ClusterAllocationCounterId, m_ClusterAllocationCounterBuffer);
                 cmd.DispatchCompute(m_ClusteredLightCullCompute, m_ClearClusterLightCounterKernel, 1, 1, 1);
                 cmd.DispatchCompute(
                     m_ClusteredLightCullCompute,
@@ -313,6 +323,7 @@ namespace VividRP.Runtime
             m_PunctualLightScreenSpaceBoundsBuffer?.Dispose();
             m_ClusterBigTileLightRangesBuffer?.Dispose();
             m_ClusterBigTileLightIndicesBuffer?.Dispose();
+            m_ClusterBigTileAllocationCounterBuffer?.Dispose();
             m_ClusterLightGridBuffer?.Dispose();
             m_ClusterLightIndicesBuffer?.Dispose();
             m_ClusterAllocationCounterBuffer?.Dispose();
@@ -322,6 +333,7 @@ namespace VividRP.Runtime
             m_PunctualLightScreenSpaceBoundsBuffer = null;
             m_ClusterBigTileLightRangesBuffer = null;
             m_ClusterBigTileLightIndicesBuffer = null;
+            m_ClusterBigTileAllocationCounterBuffer = null;
             m_ClusterLightGridBuffer = null;
             m_ClusterLightIndicesBuffer = null;
             m_ClusterAllocationCounterBuffer = null;
@@ -490,6 +502,22 @@ namespace VividRP.Runtime
 
             m_ClusterAllocationCounterBuffer?.Dispose();
             m_ClusterAllocationCounterBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                1,
+                sizeof(uint));
+        }
+
+        private void EnsureClusterBigTileAllocationCounterBuffer()
+        {
+            if (m_ClusterBigTileAllocationCounterBuffer != null
+                && m_ClusterBigTileAllocationCounterBuffer.count >= 1
+                && m_ClusterBigTileAllocationCounterBuffer.stride == sizeof(uint))
+            {
+                return;
+            }
+
+            m_ClusterBigTileAllocationCounterBuffer?.Dispose();
+            m_ClusterBigTileAllocationCounterBuffer = new GraphicsBuffer(
                 GraphicsBuffer.Target.Structured,
                 1,
                 sizeof(uint));

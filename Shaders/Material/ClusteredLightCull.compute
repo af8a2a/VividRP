@@ -32,6 +32,10 @@ struct PunctualLightScreenSpaceBounds
     int tileMaxX;
     int tileMinY;
     int tileMaxY;
+    int bigTileMinX;
+    int bigTileMaxX;
+    int bigTileMinY;
+    int bigTileMaxY;
     uint isValid;
 };
 
@@ -204,35 +208,51 @@ void BuildClusterBigTileLightList(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
 
     uint bigTileIndex = GetBigTileIndex(dispatchThreadId.xy);
-    uint bigTileStart = bigTileIndex * _PunctualLightCount;
+    uint bigTileStart = 0u;
     uint bigTileLightCount = 0u;
-    uint pixelMinX = dispatchThreadId.x * _ClusterBigTileSize;
-    uint pixelMinY = dispatchThreadId.y * _ClusterBigTileSize;
-    uint pixelMaxX = min(pixelMinX + _ClusterBigTileSize, _ClusterScreenWidth) - 1u;
-    uint pixelMaxY = min(pixelMinY + _ClusterBigTileSize, _ClusterScreenHeight) - 1u;
-    uint bigTileTileMinX = min(pixelMinX / max(_ClusterTileSize, 1u), _ClusterTileCountX - 1u);
-    uint bigTileTileMaxX = min(pixelMaxX / max(_ClusterTileSize, 1u), _ClusterTileCountX - 1u);
-    uint bigTileTileMinY = min(pixelMinY / max(_ClusterTileSize, 1u), _ClusterTileCountY - 1u);
-    uint bigTileTileMaxY = min(pixelMaxY / max(_ClusterTileSize, 1u), _ClusterTileCountY - 1u);
 
     [loop]
     for (uint lightIndex = 0u; lightIndex < _PunctualLightCount; lightIndex++)
     {
         PunctualLightScreenSpaceBounds screenSpaceBounds = _PunctualLightScreenSpaceBounds[lightIndex];
         if (screenSpaceBounds.isValid == 0u
-            || (int)bigTileTileMaxX < screenSpaceBounds.tileMinX
-            || (int)bigTileTileMinX > screenSpaceBounds.tileMaxX
-            || (int)bigTileTileMaxY < screenSpaceBounds.tileMinY
-            || (int)bigTileTileMinY > screenSpaceBounds.tileMaxY)
+            || (int)dispatchThreadId.x < screenSpaceBounds.bigTileMinX
+            || (int)dispatchThreadId.x > screenSpaceBounds.bigTileMaxX
+            || (int)dispatchThreadId.y < screenSpaceBounds.bigTileMinY
+            || (int)dispatchThreadId.y > screenSpaceBounds.bigTileMaxY)
         {
             continue;
         }
 
-        _ClusterBigTileLightIndices[bigTileStart + bigTileLightCount] = lightIndex;
         bigTileLightCount++;
     }
 
+    if (bigTileLightCount > 0u)
+        InterlockedAdd(_ClusterAllocationCounter[0], bigTileLightCount, bigTileStart);
+
     _ClusterBigTileLightRanges[bigTileIndex] = uint2(bigTileStart, bigTileLightCount);
+
+    if (bigTileLightCount == 0u)
+        return;
+
+    uint writeIndex = 0u;
+
+    [loop]
+    for (uint lightIndex = 0u; lightIndex < _PunctualLightCount; lightIndex++)
+    {
+        PunctualLightScreenSpaceBounds screenSpaceBounds = _PunctualLightScreenSpaceBounds[lightIndex];
+        if (screenSpaceBounds.isValid == 0u
+            || (int)dispatchThreadId.x < screenSpaceBounds.bigTileMinX
+            || (int)dispatchThreadId.x > screenSpaceBounds.bigTileMaxX
+            || (int)dispatchThreadId.y < screenSpaceBounds.bigTileMinY
+            || (int)dispatchThreadId.y > screenSpaceBounds.bigTileMaxY)
+        {
+            continue;
+        }
+
+        _ClusterBigTileLightIndices[bigTileStart + writeIndex] = lightIndex;
+        writeIndex++;
+    }
 }
 
 [numthreads(8, 8, 1)]

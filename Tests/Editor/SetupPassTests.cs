@@ -1,5 +1,4 @@
 using System.Reflection;
-using System.Runtime.InteropServices;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -185,11 +184,7 @@ namespace VividRP.Editor.Tests
 
         private static int GetPunctualUploadStride()
         {
-            var uploadType = typeof(LightGridPass).GetNestedType("PunctualLightUploadData", BindingFlags.NonPublic);
-
-            Assert.That(uploadType, Is.Not.Null);
-
-            return Marshal.SizeOf(uploadType);
+            return VividLightData.PunctualLightData.Stride;
         }
 
         private static int GetPunctualCullUploadStride()
@@ -199,20 +194,12 @@ namespace VividRP.Editor.Tests
 
         private static int GetCoarseRangeUploadStride()
         {
-            var uploadType = typeof(LightGridPass).GetNestedType("SliceLightRangeUploadData", BindingFlags.NonPublic);
-
-            Assert.That(uploadType, Is.Not.Null);
-
-            return Marshal.SizeOf(uploadType);
+            return VividLightData.PunctualLightCoarseRange.Stride;
         }
 
         private static int GetCoarseRecordUploadStride()
         {
-            var uploadType = typeof(LightGridPass).GetNestedType("PunctualLightCoarseRecordUploadData", BindingFlags.NonPublic);
-
-            Assert.That(uploadType, Is.Not.Null);
-
-            return Marshal.SizeOf(uploadType);
+            return VividLightData.PunctualLightCoarseRecord.Stride;
         }
 
         private static int GetClusterSliceCount()

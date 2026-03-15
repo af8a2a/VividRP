@@ -448,6 +448,186 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CreatePunctualLightClusteredLightListParameters_ComputesClusterLayoutAndCapacity()
+        {
+            var cameraObject = new GameObject("Clustered Build Parameters Camera");
+            var camera = cameraObject.AddComponent<Camera>();
+
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 1000.0f;
+            camera.fieldOfView = 60.0f;
+
+            try
+            {
+                var parameters = VividLightData.CreatePunctualLightClusteredLightListParameters(
+                    camera,
+                    320,
+                    180,
+                    32,
+                    24,
+                    3,
+                    64);
+
+                Assert.That(parameters.screenWidth, Is.EqualTo(320));
+                Assert.That(parameters.screenHeight, Is.EqualTo(180));
+                Assert.That(parameters.tileSize, Is.EqualTo(32));
+                Assert.That(parameters.tileCountX, Is.EqualTo(10));
+                Assert.That(parameters.tileCountY, Is.EqualTo(6));
+                Assert.That(parameters.sliceCount, Is.EqualTo(24));
+                Assert.That(parameters.clusterCount, Is.EqualTo(1440));
+                Assert.That(parameters.lightIndexCapacity, Is.EqualTo(4320));
+                Assert.That(parameters.screenSpaceBoundsParameters.tileCountX, Is.EqualTo(10));
+                Assert.That(parameters.screenSpaceBoundsParameters.tileCountY, Is.EqualTo(6));
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void UpdatePunctualLightClusteredLightListData_BuildsSpotCullBoundsAndCoarseRecords()
+        {
+            var cameraObject = new GameObject("Clustered Spot Camera");
+            var camera = cameraObject.AddComponent<Camera>();
+            var lightData = new VividLightData();
+            var spotDirection = new Vector3(0.2f, 0.0f, 1.0f).normalized;
+
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 1000.0f;
+            camera.fieldOfView = 60.0f;
+            camera.transform.position = Vector3.zero;
+            camera.transform.rotation = Quaternion.identity;
+
+            lightData.punctualLightCullData = new[]
+            {
+                new VividLightData.PunctualLightCullData
+                {
+                    positionWS = new Vector3(2.0f, 0.0f, 8.0f),
+                    range = 10.0f,
+                    directionWS = spotDirection,
+                    lightType = 1u,
+                    cosOuterAngle = 0.5f,
+                    radiusAtRange = 6.0f,
+                    cullingCenterWS = new Vector3(3.0f, 0.0f, 12.0f),
+                    cullingRadius = 5.0f,
+                }
+            };
+            lightData.punctualLightCount = 1;
+
+            try
+            {
+                var parameters = VividLightData.CreatePunctualLightScreenSpaceBoundsParameters(camera, 320, 180, 32, 24);
+
+                lightData.UpdatePunctualLightClusteredLightListData(parameters);
+
+                var viewSpaceCullData = lightData.punctualLightViewSpaceCullData[0];
+                var bounds = lightData.punctualLightScreenSpaceBounds[0];
+                var expectedRecordCount = bounds.sliceMax - bounds.sliceMin + 1;
+
+                Assert.That(viewSpaceCullData.lightType, Is.EqualTo(1u));
+                Assert.That(viewSpaceCullData.positionVS.x, Is.EqualTo(2.0f).Within(0.0001f));
+                Assert.That(viewSpaceCullData.positionVS.z, Is.EqualTo(8.0f).Within(0.0001f));
+                Assert.That(viewSpaceCullData.directionVS.x, Is.GreaterThan(0.0f));
+                Assert.That(viewSpaceCullData.directionVS.z, Is.GreaterThan(0.9f));
+                Assert.That(viewSpaceCullData.cullingCenterVS.z, Is.EqualTo(12.0f).Within(0.0001f));
+                Assert.That(bounds.isValid, Is.EqualTo(1u));
+                Assert.That(bounds.sliceMin, Is.GreaterThanOrEqualTo(0));
+                Assert.That(bounds.sliceMax, Is.LessThan(parameters.sliceCount));
+                Assert.That(bounds.sliceMax, Is.GreaterThanOrEqualTo(bounds.sliceMin));
+                Assert.That(bounds.tileMinX, Is.GreaterThanOrEqualTo(0));
+                Assert.That(bounds.tileMaxX, Is.LessThan(parameters.tileCountX));
+                Assert.That(bounds.tileMaxX, Is.GreaterThanOrEqualTo(bounds.tileMinX));
+                Assert.That(bounds.tileMinY, Is.GreaterThanOrEqualTo(0));
+                Assert.That(bounds.tileMaxY, Is.LessThan(parameters.tileCountY));
+                Assert.That(bounds.tileMaxY, Is.GreaterThanOrEqualTo(bounds.tileMinY));
+                Assert.That(lightData.punctualLightCoarseRangeCount, Is.EqualTo(parameters.sliceCount));
+                Assert.That(lightData.punctualLightCoarseRecordCount, Is.EqualTo(expectedRecordCount));
+
+                for (var sliceIndex = bounds.sliceMin; sliceIndex <= bounds.sliceMax; sliceIndex++)
+                {
+                    AssertPunctualLightCoarseRange(
+                        lightData.punctualLightCoarseRanges[sliceIndex],
+                        sliceIndex - bounds.sliceMin,
+                        1);
+                }
+
+                for (var recordIndex = 0; recordIndex < expectedRecordCount; recordIndex++)
+                {
+                    AssertPunctualLightCoarseRecord(
+                        lightData.punctualLightCoarseRecords[recordIndex],
+                        0,
+                        bounds.tileMinX,
+                        bounds.tileMaxX,
+                        bounds.tileMinY,
+                        bounds.tileMaxY);
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void UpdatePunctualLightClusteredLightListData_SkipsSpotOutsideView_WhenBuildParametersAreUsed()
+        {
+            var cameraObject = new GameObject("Clustered Invalid Spot Camera");
+            var camera = cameraObject.AddComponent<Camera>();
+            var lightData = new VividLightData();
+
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 1000.0f;
+            camera.fieldOfView = 60.0f;
+            camera.transform.position = Vector3.zero;
+            camera.transform.rotation = Quaternion.identity;
+
+            lightData.punctualLightCullData = new[]
+            {
+                new VividLightData.PunctualLightCullData
+                {
+                    positionWS = new Vector3(0.0f, 0.0f, -6.0f),
+                    range = 4.0f,
+                    directionWS = Vector3.back,
+                    lightType = 1u,
+                    cosOuterAngle = 0.5f,
+                    radiusAtRange = 2.0f,
+                    cullingCenterWS = new Vector3(0.0f, 0.0f, -8.0f),
+                    cullingRadius = 3.0f,
+                }
+            };
+            lightData.punctualLightCount = 1;
+
+            try
+            {
+                var parameters = VividLightData.CreatePunctualLightClusteredLightListParameters(
+                    camera,
+                    320,
+                    180,
+                    32,
+                    24,
+                    lightData.punctualLightCount,
+                    64);
+                var buildResult = lightData.UpdatePunctualLightClusteredLightListData(parameters);
+                var viewSpaceCullData = lightData.punctualLightViewSpaceCullData[0];
+                var bounds = lightData.punctualLightScreenSpaceBounds[0];
+
+                Assert.That(viewSpaceCullData.positionVS.z, Is.LessThan(0.0f));
+                Assert.That(bounds.isValid, Is.Zero);
+                Assert.That(buildResult.punctualLightCount, Is.EqualTo(1));
+                Assert.That(buildResult.coarseRangeCount, Is.EqualTo(parameters.sliceCount));
+                Assert.That(buildResult.coarseRecordCount, Is.Zero);
+
+                for (var sliceIndex = 0; sliceIndex < parameters.sliceCount; sliceIndex++)
+                    AssertPunctualLightCoarseRange(lightData.punctualLightCoarseRanges[sliceIndex], 0, 0);
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
         public void FindMainLightIndex_ReturnsSunLight_WhenVisibleDirectionalSunExists()
         {
             var sunObject = new GameObject("Sun Light Test");

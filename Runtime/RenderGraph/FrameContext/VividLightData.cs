@@ -166,6 +166,55 @@ namespace VividRP.Runtime
             }
         }
 
+        internal readonly struct PunctualLightClusteredLightListParameters
+        {
+            public readonly PunctualLightScreenSpaceBoundsParameters screenSpaceBoundsParameters;
+            public readonly int punctualLightCount;
+            public readonly int clusterCount;
+            public readonly int lightIndexCapacity;
+
+            public int screenWidth => screenSpaceBoundsParameters.screenWidth;
+
+            public int screenHeight => screenSpaceBoundsParameters.screenHeight;
+
+            public int tileSize => screenSpaceBoundsParameters.tileSize;
+
+            public int tileCountX => screenSpaceBoundsParameters.tileCountX;
+
+            public int tileCountY => screenSpaceBoundsParameters.tileCountY;
+
+            public int sliceCount => screenSpaceBoundsParameters.sliceCount;
+
+            public PunctualLightClusteredLightListParameters(
+                PunctualLightScreenSpaceBoundsParameters screenSpaceBoundsParameters,
+                int punctualLightCount,
+                int clusterCount,
+                int lightIndexCapacity)
+            {
+                this.screenSpaceBoundsParameters = screenSpaceBoundsParameters;
+                this.punctualLightCount = punctualLightCount;
+                this.clusterCount = clusterCount;
+                this.lightIndexCapacity = lightIndexCapacity;
+            }
+        }
+
+        internal readonly struct PunctualLightClusteredLightListBuildResult
+        {
+            public readonly int punctualLightCount;
+            public readonly int coarseRangeCount;
+            public readonly int coarseRecordCount;
+
+            public PunctualLightClusteredLightListBuildResult(
+                int punctualLightCount,
+                int coarseRangeCount,
+                int coarseRecordCount)
+            {
+                this.punctualLightCount = punctualLightCount;
+                this.coarseRangeCount = coarseRangeCount;
+                this.coarseRecordCount = coarseRecordCount;
+            }
+        }
+
         internal readonly struct VisibleLightDescriptor
         {
             public VisibleLightDescriptor(EntityId lightEntityId, LightType lightType, Color finalColor)
@@ -553,7 +602,29 @@ namespace VividRP.Runtime
             UpdatePunctualLightClusteredCullData(parameters);
         }
 
+        internal void UpdatePunctualLightClusteredLightListData(in PunctualLightScreenSpaceBoundsParameters parameters)
+        {
+            BuildPunctualLightClusteredCullingData(parameters, buildCoarseCullingData: true);
+        }
+
+        internal PunctualLightClusteredLightListBuildResult UpdatePunctualLightClusteredLightListData(
+            in PunctualLightClusteredLightListParameters parameters)
+        {
+            UpdatePunctualLightClusteredLightListData(parameters.screenSpaceBoundsParameters);
+            return new PunctualLightClusteredLightListBuildResult(
+                punctualLightCount,
+                punctualLightCoarseRangeCount,
+                punctualLightCoarseRecordCount);
+        }
+
         internal void UpdatePunctualLightClusteredCullData(in PunctualLightScreenSpaceBoundsParameters parameters)
+        {
+            BuildPunctualLightClusteredCullingData(parameters, buildCoarseCullingData: false);
+        }
+
+        private void BuildPunctualLightClusteredCullingData(
+            in PunctualLightScreenSpaceBoundsParameters parameters,
+            bool buildCoarseCullingData)
         {
             EnsurePunctualLightCapacity(punctualLightCount);
             punctualLightCoarseRangeCount = 0;
@@ -597,6 +668,9 @@ namespace VividRP.Runtime
                     punctualLightScreenSpaceBounds[lightIndex] = ConvertPunctualLightScreenSpaceBounds(
                         nativePunctualLightScreenSpaceBounds[lightIndex]);
                 }
+
+                if (buildCoarseCullingData)
+                    BuildPunctualLightCoarseCullingData(nativePunctualLightScreenSpaceBounds, parameters.sliceCount);
             }
             finally
             {
@@ -608,6 +682,31 @@ namespace VividRP.Runtime
 
         internal void UpdatePunctualLightCoarseCullingData(int sliceCount)
         {
+            var nativePunctualLightScreenSpaceBounds = new NativeArray<PunctualLightScreenSpaceBoundsRecord>(
+                punctualLightCount,
+                Allocator.TempJob,
+                NativeArrayOptions.UninitializedMemory);
+
+            try
+            {
+                for (var lightIndex = 0; lightIndex < punctualLightCount; lightIndex++)
+                {
+                    nativePunctualLightScreenSpaceBounds[lightIndex] = ConvertPunctualLightScreenSpaceBoundsRecord(
+                        punctualLightScreenSpaceBounds[lightIndex]);
+                }
+
+                BuildPunctualLightCoarseCullingData(nativePunctualLightScreenSpaceBounds, sliceCount);
+            }
+            finally
+            {
+                nativePunctualLightScreenSpaceBounds.Dispose();
+            }
+        }
+
+        private void BuildPunctualLightCoarseCullingData(
+            NativeArray<PunctualLightScreenSpaceBoundsRecord> nativePunctualLightScreenSpaceBounds,
+            int sliceCount)
+        {
             sliceCount = Mathf.Max(sliceCount, 1);
             EnsurePunctualLightCoarseCapacity(sliceCount, 0);
 
@@ -617,13 +716,9 @@ namespace VividRP.Runtime
             for (var sliceIndex = 0; sliceIndex < sliceCount; sliceIndex++)
                 punctualLightCoarseRanges[sliceIndex] = default;
 
-            if (punctualLightCount <= 0)
+            if (nativePunctualLightScreenSpaceBounds.Length <= 0)
                 return;
 
-            var nativePunctualLightScreenSpaceBounds = new NativeArray<PunctualLightScreenSpaceBoundsRecord>(
-                punctualLightCount,
-                Allocator.TempJob,
-                NativeArrayOptions.UninitializedMemory);
             var nativeSliceLightCounts = new NativeArray<int>(
                 sliceCount,
                 Allocator.TempJob,
@@ -636,12 +731,6 @@ namespace VividRP.Runtime
 
             try
             {
-                for (var lightIndex = 0; lightIndex < punctualLightCount; lightIndex++)
-                {
-                    nativePunctualLightScreenSpaceBounds[lightIndex] = ConvertPunctualLightScreenSpaceBoundsRecord(
-                        punctualLightScreenSpaceBounds[lightIndex]);
-                }
-
                 var countCoarseRangesJob = new CountPunctualLightCoarseRangesJob
                 {
                     punctualLightScreenSpaceBounds = nativePunctualLightScreenSpaceBounds,
@@ -691,7 +780,6 @@ namespace VividRP.Runtime
                 if (nativePunctualLightCoarseRecords.IsCreated)
                     nativePunctualLightCoarseRecords.Dispose();
 
-                nativePunctualLightScreenSpaceBounds.Dispose();
                 nativeSliceLightCounts.Dispose();
                 nativeSliceStartOffsets.Dispose();
             }
@@ -773,6 +861,44 @@ namespace VividRP.Runtime
                 orthoHalfWidth,
                 orthoHalfHeight,
                 isOrthographic);
+        }
+
+        internal static PunctualLightClusteredLightListParameters CreatePunctualLightClusteredLightListParameters(
+            Camera camera,
+            int screenWidth,
+            int screenHeight,
+            int tileSize,
+            int sliceCount,
+            int punctualLightCount,
+            int maxLightsPerCluster)
+        {
+            var screenSpaceBoundsParameters = CreatePunctualLightScreenSpaceBoundsParameters(
+                camera,
+                screenWidth,
+                screenHeight,
+                tileSize,
+                sliceCount);
+            var clusterCount = Mathf.Max(
+                1,
+                screenSpaceBoundsParameters.tileCountX
+                * screenSpaceBoundsParameters.tileCountY
+                * screenSpaceBoundsParameters.sliceCount);
+            var perClusterLightCapacity = punctualLightCount > 0
+                ? Mathf.Min(punctualLightCount, Mathf.Max(maxLightsPerCluster, 1))
+                : 1;
+            var lightIndexCapacity = 1;
+
+            if (punctualLightCount > 0)
+            {
+                var rawLightIndexCapacity = (long)clusterCount * perClusterLightCapacity;
+                lightIndexCapacity = Mathf.Max(1, (int)Math.Min(rawLightIndexCapacity, int.MaxValue));
+            }
+
+            return new PunctualLightClusteredLightListParameters(
+                screenSpaceBoundsParameters,
+                punctualLightCount,
+                clusterCount,
+                lightIndexCapacity);
         }
 
         internal static int FindMainLightIndex(NativeArray<VisibleLight> visibleLights, Light sunLight)

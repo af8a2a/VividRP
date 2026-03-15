@@ -133,6 +133,20 @@ namespace VividRP.Editor.Tests
                 Assert.That(lightData.punctualLightBounds[0].radius, Is.GreaterThan(0.0f));
                 Assert.That(lightData.punctualLightVolumeData[0].radiusSq, Is.EqualTo(36.0f).Within(1e-4f));
                 Assert.That(lightData.punctualLightVolumeData[0].lightVolume, Is.EqualTo(1u));
+
+                var bigTileClearData = new uint[4];
+                var layeredOffsetData = new uint[4];
+                var layeredLightListCounterData = new uint[1];
+                var logBaseData = new float[4];
+                bigTileLightListBuffer.GetData(bigTileClearData, 0, 0, bigTileClearData.Length);
+                layeredOffsetBuffer.GetData(layeredOffsetData, 0, 0, layeredOffsetData.Length);
+                layeredLightListCounterBuffer.GetData(layeredLightListCounterData, 0, 0, layeredLightListCounterData.Length);
+                logBaseBuffer.GetData(logBaseData, 0, 0, logBaseData.Length);
+
+                Assert.That(bigTileClearData, Is.All.EqualTo(0u));
+                Assert.That(layeredOffsetData, Is.All.EqualTo(0u));
+                Assert.That(layeredLightListCounterData[0], Is.Zero);
+                Assert.That(logBaseData, Is.All.EqualTo(1.02f).Within(1e-5f));
             }
             finally
             {

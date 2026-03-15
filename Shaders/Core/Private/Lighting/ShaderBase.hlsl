@@ -16,7 +16,7 @@
         return zdpth;
     }
 #else
-    TEXTURE2D_X(g_depth_tex) : register( t0 );
+    Texture2D g_depth_tex;
 
     float FetchDepth(uint2 pixCoord)
     {

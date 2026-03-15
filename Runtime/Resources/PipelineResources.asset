@@ -29,6 +29,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: d41d44af2b5e2ff49b8312d9fe8aab8b, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/lightlistbuild-bigtile
     ResourceObject: {fileID: 7200000, guid: 071513ee5c7b2734790b449e9173ca2b, type: 3}
+  - ResourceName: Shaders/Core/Private/Lighting/lightlistbuild-clearatomic
+    ResourceObject: {fileID: 7200000, guid: 1c4d4ad6d99b22e4c9011685b5421f82, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/lightlistbuild-clustered
     ResourceObject: {fileID: 7200000, guid: 0c619324688bbfa47bfa6917dfc94ebd, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/scrbound

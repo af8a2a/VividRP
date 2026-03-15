@@ -18,6 +18,7 @@ namespace VividRP.Editor.Tests
             Assert.That(File.Exists(GetPackagePath("Shaders", "Core", "Private", "Lighting", "scrbound.compute")), Is.True);
             Assert.That(File.Exists(GetPackagePath("Shaders", "Core", "Private", "Lighting", "lightlistbuild-bigtile.compute")), Is.True);
             Assert.That(File.Exists(GetPackagePath("Shaders", "Core", "Private", "Lighting", "lightlistbuild-clustered.compute")), Is.True);
+            Assert.That(File.Exists(GetPackagePath("Shaders", "Core", "Private", "Lighting", "lightlistbuild-clearatomic.compute")), Is.True);
         }
 
         [Test]
@@ -82,6 +83,7 @@ namespace VividRP.Editor.Tests
             AssertResourcePath(nameof(VividRPCoreResources.BuildScreenAABBCompute), "Shaders/Core/Private/Lighting/scrbound");
             AssertResourcePath(nameof(VividRPCoreResources.BuildPerBigTileLightListCompute), "Shaders/Core/Private/Lighting/lightlistbuild-bigtile");
             AssertResourcePath(nameof(VividRPCoreResources.BuildPerVoxelLightListCompute), "Shaders/Core/Private/Lighting/lightlistbuild-clustered");
+            AssertResourcePath(nameof(VividRPCoreResources.ClearClusterAtomicIndexCompute), "Shaders/Core/Private/Lighting/lightlistbuild-clearatomic");
         }
 
         private static void AssertLocalIncludes(string fileName, params string[] localIncludes)

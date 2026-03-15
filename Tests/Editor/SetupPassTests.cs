@@ -76,6 +76,7 @@ namespace VividRP.Editor.Tests
                 var clusterBigTileLightIndicesBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterBigTileLightIndicesBuffer");
                 var clusterLightGridBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterLightGridBuffer");
                 var clusterLightIndicesBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterLightIndicesBuffer");
+                var clusterLightListStatsBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterLightListStatsBuffer");
                 var directionalLightCount = (int)GetFieldValue(pass, "m_DirectionalLightCount");
                 var punctualLightCount = (int)GetFieldValue(pass, "m_PunctualLightCount");
                 var mainDirectionalLightIndex = (int)GetFieldValue(pass, "m_MainDirectionalLightIndex");
@@ -98,6 +99,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(clusterBigTileLightIndicesBuffer, Is.Not.Null);
                 Assert.That(clusterLightGridBuffer, Is.Not.Null);
                 Assert.That(clusterLightIndicesBuffer, Is.Not.Null);
+                Assert.That(clusterLightListStatsBuffer, Is.Not.Null);
                 Assert.That(directionalLightBuffer.count, Is.EqualTo(1));
                 Assert.That(directionalLightBuffer.stride, Is.EqualTo(VividLightData.DirectionalLightData.Stride));
                 Assert.That(punctualLightBuffer.count, Is.EqualTo(1));
@@ -116,6 +118,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(clusterLightGridBuffer.stride, Is.EqualTo(sizeof(uint) * 2));
                 Assert.That(clusterLightIndicesBuffer.count, Is.EqualTo(1440));
                 Assert.That(clusterLightIndicesBuffer.stride, Is.EqualTo(sizeof(uint)));
+                Assert.That(clusterLightListStatsBuffer.count, Is.EqualTo(3));
+                Assert.That(clusterLightListStatsBuffer.stride, Is.EqualTo(sizeof(uint)));
                 Assert.That(directionalLightCount, Is.EqualTo(1));
                 Assert.That(punctualLightCount, Is.EqualTo(1));
                 Assert.That(mainDirectionalLightIndex, Is.EqualTo(0));
@@ -152,6 +156,7 @@ namespace VividRP.Editor.Tests
                 var clusterBigTileLightRangesBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterBigTileLightRangesBuffer");
                 var clusterBigTileLightIndicesBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterBigTileLightIndicesBuffer");
                 var clusterLightIndicesBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterLightIndicesBuffer");
+                var clusterLightListStatsBuffer = (GraphicsBuffer)GetFieldValue(pass, "m_ClusterLightListStatsBuffer");
                 var directionalLightCount = (int)GetFieldValue(pass, "m_DirectionalLightCount");
                 var punctualLightCount = (int)GetFieldValue(pass, "m_PunctualLightCount");
                 var mainDirectionalLightIndex = (int)GetFieldValue(pass, "m_MainDirectionalLightIndex");
@@ -165,6 +170,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(clusterBigTileLightRangesBuffer, Is.Not.Null);
                 Assert.That(clusterBigTileLightIndicesBuffer, Is.Not.Null);
                 Assert.That(clusterLightIndicesBuffer, Is.Not.Null);
+                Assert.That(clusterLightListStatsBuffer, Is.Not.Null);
                 Assert.That(directionalLightBuffer.count, Is.EqualTo(1));
                 Assert.That(directionalLightBuffer.stride, Is.EqualTo(VividLightData.DirectionalLightData.Stride));
                 Assert.That(punctualLightBuffer.count, Is.EqualTo(1));
@@ -180,6 +186,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(clusterBigTileLightIndicesBuffer.count, Is.EqualTo(1));
                 Assert.That(clusterBigTileLightIndicesBuffer.stride, Is.EqualTo(sizeof(uint)));
                 Assert.That(clusterLightIndicesBuffer.count, Is.EqualTo(1));
+                Assert.That(clusterLightListStatsBuffer.count, Is.EqualTo(3));
+                Assert.That(clusterLightListStatsBuffer.stride, Is.EqualTo(sizeof(uint)));
                 Assert.That(directionalLightCount, Is.Zero);
                 Assert.That(punctualLightCount, Is.Zero);
                 Assert.That(mainDirectionalLightIndex, Is.EqualTo(-1));

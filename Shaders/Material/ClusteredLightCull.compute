@@ -9,6 +9,9 @@
 #define VIVID_CLUSTER_MAX_LIGHTS_PER_CLUSTER 64u
 #define VIVID_PUNCTUAL_LIGHT_TYPE_POINT 0u
 #define VIVID_PUNCTUAL_LIGHT_TYPE_SPOT  1u
+#define VIVID_CLUSTER_LIGHT_LIST_STAT_OVERFLOW_CLUSTER_COUNT 0u
+#define VIVID_CLUSTER_LIGHT_LIST_STAT_MAX_CLUSTER_LIGHT_COUNT 1u
+#define VIVID_CLUSTER_LIGHT_LIST_STAT_DROPPED_LIGHT_COUNT 2u
 
 struct PunctualLightCullData
 {
@@ -48,6 +51,7 @@ RWStructuredBuffer<uint2> _ClusterBigTileLightRanges;
 RWStructuredBuffer<uint> _ClusterBigTileLightIndices;
 RWStructuredBuffer<uint2> _ClusterLightGrid;
 RWStructuredBuffer<uint> _ClusterLightIndices;
+RWStructuredBuffer<uint> _ClusterLightListStats;
 RWStructuredBuffer<uint> _ClusterAllocationCounter;
 
 uint _PunctualLightCount;
@@ -328,9 +332,18 @@ void BuildClusteredLightList(uint3 dispatchThreadId : SV_DispatchThreadID)
         + dispatchThreadId.y * _ClusterTileCountX
         + dispatchThreadId.z * _ClusterTileCountX * _ClusterTileCountY;
     uint lightStart = 0u;
+    uint droppedLightCount = localLightCount - clampedLightCount;
 
     if (clampedLightCount > 0u)
         InterlockedAdd(_ClusterAllocationCounter[0], clampedLightCount, lightStart);
+
+    InterlockedMax(_ClusterLightListStats[VIVID_CLUSTER_LIGHT_LIST_STAT_MAX_CLUSTER_LIGHT_COUNT], localLightCount);
+
+    if (droppedLightCount > 0u)
+    {
+        InterlockedAdd(_ClusterLightListStats[VIVID_CLUSTER_LIGHT_LIST_STAT_OVERFLOW_CLUSTER_COUNT], 1u);
+        InterlockedAdd(_ClusterLightListStats[VIVID_CLUSTER_LIGHT_LIST_STAT_DROPPED_LIGHT_COUNT], droppedLightCount);
+    }
 
     _ClusterLightGrid[clusterIndex] = uint2(lightStart, clampedLightCount);
 

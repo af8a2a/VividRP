@@ -25,6 +25,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _ClusterBigTileLightIndices;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint2> _ClusterLightGrid;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _ClusterLightIndices;"));
+            Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _ClusterLightListStats;"));
             Assert.That(source, Does.Contain("int bigTileMinX;"));
             Assert.That(source, Does.Contain("int bigTileMaxX;"));
             Assert.That(source, Does.Contain("int bigTileMinY;"));
@@ -41,6 +42,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("(int)dispatchThreadId.y > screenSpaceBounds.bigTileMaxY"));
             Assert.That(source, Does.Not.Contain("InterlockedAdd(_ClusterAllocationCounter[0], bigTileLightCount, bigTileStart);"));
             Assert.That(source, Does.Contain("uint2 bigTileLightRange = _ClusterBigTileLightRanges[GetBigTileIndex(bigTileCoord)];"));
+            Assert.That(source, Does.Contain("InterlockedMax(_ClusterLightListStats[VIVID_CLUSTER_LIGHT_LIST_STAT_MAX_CLUSTER_LIGHT_COUNT], localLightCount);"));
+            Assert.That(source, Does.Contain("InterlockedAdd(_ClusterLightListStats[VIVID_CLUSTER_LIGHT_LIST_STAT_OVERFLOW_CLUSTER_COUNT], 1u);"));
+            Assert.That(source, Does.Contain("InterlockedAdd(_ClusterLightListStats[VIVID_CLUSTER_LIGHT_LIST_STAT_DROPPED_LIGHT_COUNT], droppedLightCount);"));
         }
 
         [Test]

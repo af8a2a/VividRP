@@ -295,6 +295,66 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void UpdatePunctualLightScreenSpaceBounds_ComputesPerspectiveViewClipSliceAndTileBounds()
+        {
+            var cameraObject = new GameObject("Screen Space Bounds Camera");
+            var camera = cameraObject.AddComponent<Camera>();
+            var lightData = new VividLightData();
+
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 1000.0f;
+            camera.fieldOfView = 60.0f;
+            camera.transform.position = Vector3.zero;
+            camera.transform.rotation = Quaternion.identity;
+
+            lightData.punctualLightCullData = new[]
+            {
+                new VividLightData.PunctualLightCullData
+                {
+                    positionWS = new Vector3(0.0f, 0.0f, 5.0f),
+                    range = 1.0f,
+                    directionWS = Vector3.forward,
+                    lightType = 0u,
+                    cosOuterAngle = 1.0f,
+                    radiusAtRange = 0.0f,
+                    cullingCenterWS = new Vector3(0.0f, 0.0f, 5.0f),
+                    cullingRadius = 1.0f,
+                }
+            };
+            lightData.punctualLightCount = 1;
+
+            try
+            {
+                var parameters = VividLightData.CreatePunctualLightScreenSpaceBoundsParameters(camera, 320, 180, 32, 24);
+
+                lightData.UpdatePunctualLightScreenSpaceBounds(parameters);
+
+                var bounds = lightData.punctualLightScreenSpaceBounds[0];
+                Assert.That(bounds.isValid, Is.EqualTo(1u));
+                Assert.That(bounds.viewSpaceAabbMin.x, Is.EqualTo(-1.0f).Within(0.0001f));
+                Assert.That(bounds.viewSpaceAabbMin.y, Is.EqualTo(-1.0f).Within(0.0001f));
+                Assert.That(bounds.viewSpaceAabbMin.z, Is.EqualTo(4.0f).Within(0.0001f));
+                Assert.That(bounds.viewSpaceAabbMax.x, Is.EqualTo(1.0f).Within(0.0001f));
+                Assert.That(bounds.viewSpaceAabbMax.y, Is.EqualTo(1.0f).Within(0.0001f));
+                Assert.That(bounds.viewSpaceAabbMax.z, Is.EqualTo(6.0f).Within(0.0001f));
+                Assert.That(bounds.clipSpaceAabbMin.x, Is.EqualTo(-0.2436f).Within(0.001f));
+                Assert.That(bounds.clipSpaceAabbMax.x, Is.EqualTo(0.2436f).Within(0.001f));
+                Assert.That(bounds.clipSpaceAabbMin.y, Is.EqualTo(-0.4330f).Within(0.001f));
+                Assert.That(bounds.clipSpaceAabbMax.y, Is.EqualTo(0.4330f).Within(0.001f));
+                Assert.That(bounds.sliceMin, Is.EqualTo(7));
+                Assert.That(bounds.sliceMax, Is.EqualTo(8));
+                Assert.That(bounds.tileMinX, Is.EqualTo(3));
+                Assert.That(bounds.tileMaxX, Is.EqualTo(6));
+                Assert.That(bounds.tileMinY, Is.EqualTo(1));
+                Assert.That(bounds.tileMaxY, Is.EqualTo(4));
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
         public void FindMainLightIndex_ReturnsSunLight_WhenVisibleDirectionalSunExists()
         {
             var sunObject = new GameObject("Sun Light Test");
@@ -363,6 +423,7 @@ namespace VividRP.Editor.Tests
                 lightData.mainLightIndex = 2;
                 lightData.mainLightEntityId = EntityId.FromULong(42);
                 lightData.punctualLightCount = 3;
+                lightData.punctualLightScreenSpaceBounds = new[] { default(VividLightData.PunctualLightScreenSpaceBounds) };
 
                 lightData.Reset();
 
@@ -371,6 +432,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(lightData.mainLightIndex, Is.EqualTo(-1));
                 Assert.That(lightData.mainLightEntityId, Is.EqualTo(EntityId.None));
                 Assert.That(lightData.punctualLightCount, Is.Zero);
+                Assert.That(lightData.punctualLightScreenSpaceBounds, Is.Empty);
             }
             finally
             {

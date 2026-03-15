@@ -1,5 +1,4 @@
 using System;
-using System;
 using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -203,7 +202,13 @@ namespace VividRP.Runtime
             EnsureClusterLightGridBuffer(clusterCount);
             EnsureClusterLightIndicesBuffer(m_ClusterLightIndexCapacity);
             EnsureClusterAllocationCounterBuffer();
-            UpdateClusterProjectionData(camera);
+            var screenSpaceBoundsParameters = VividLightData.CreatePunctualLightScreenSpaceBoundsParameters(
+                camera,
+                m_LightingWidth,
+                m_LightingHeight,
+                ClusterTileSize,
+                ClusterSliceCount);
+            UpdateClusterProjectionData(screenSpaceBoundsParameters);
 
             if (m_DirectionalLightCount > 0)
                 m_DirectionalLightBuffer.SetData(lightData.directionalLights, 0, 0, m_DirectionalLightCount);
@@ -214,8 +219,9 @@ namespace VividRP.Runtime
             if (m_PunctualLightCount > 0)
             {
                 BuildPunctualLightUploadData(lightData);
-                BuildPunctualLightCullData(lightData, camera);
-                BuildClusterCoarseLightBins();
+                BuildPunctualLightCullData(lightData, screenSpaceBoundsParameters);
+                lightData.UpdatePunctualLightScreenSpaceBounds(screenSpaceBoundsParameters);
+                BuildClusterCoarseLightBins(lightData);
                 m_PunctualLightBuffer.SetData(m_PunctualLights, 0, 0, m_PunctualLightCount);
                 m_PunctualLightCullBuffer.SetData(m_PunctualLightCullData, 0, 0, m_PunctualLightCount);
                 EnsureClusterCoarseLightRangesBuffer(ClusterSliceCount);
@@ -530,33 +536,17 @@ namespace VividRP.Runtime
                 sizeof(uint));
         }
 
-        private void UpdateClusterProjectionData(Camera camera)
+        private void UpdateClusterProjectionData(VividLightData.PunctualLightScreenSpaceBoundsParameters projectionParameters)
         {
-            var nearClip = camera != null ? camera.nearClipPlane : 0.1f;
-            var farClip = camera != null ? camera.farClipPlane : 1000.0f;
-            var aspect = m_LightingHeight > 0 ? m_LightingWidth / (float)m_LightingHeight : 1.0f;
-
-            m_ClusterNearClip = Mathf.Max(nearClip, 0.01f);
-            m_ClusterFarClip = Mathf.Max(farClip, m_ClusterNearClip + 0.01f);
-            m_ClusterLogDepthScale = ClusterSliceCount / Mathf.Max(Mathf.Log(m_ClusterFarClip / m_ClusterNearClip, 2.0f), 0.0001f);
-            m_ClusterLinearDepthScale = ClusterSliceCount / Mathf.Max(m_ClusterFarClip - m_ClusterNearClip, 0.0001f);
-
-            if (camera != null && camera.orthographic)
-            {
-                m_ClusterIsOrthographic = 1;
-                m_ClusterOrthoHalfHeight = Mathf.Max(camera.orthographicSize, 0.01f);
-                m_ClusterOrthoHalfWidth = m_ClusterOrthoHalfHeight * aspect;
-                m_ClusterTanHalfFovX = 0.0f;
-                m_ClusterTanHalfFovY = 0.0f;
-                return;
-            }
-
-            var halfVerticalFov = Mathf.Deg2Rad * (camera != null ? camera.fieldOfView : 60.0f) * 0.5f;
-            m_ClusterIsOrthographic = 0;
-            m_ClusterTanHalfFovY = Mathf.Max(Mathf.Tan(halfVerticalFov), 0.0001f);
-            m_ClusterTanHalfFovX = m_ClusterTanHalfFovY * aspect;
-            m_ClusterOrthoHalfWidth = 0.0f;
-            m_ClusterOrthoHalfHeight = 0.0f;
+            m_ClusterNearClip = projectionParameters.nearClip;
+            m_ClusterFarClip = projectionParameters.farClip;
+            m_ClusterLogDepthScale = projectionParameters.logDepthScale;
+            m_ClusterLinearDepthScale = projectionParameters.linearDepthScale;
+            m_ClusterTanHalfFovX = projectionParameters.tanHalfFovX;
+            m_ClusterTanHalfFovY = projectionParameters.tanHalfFovY;
+            m_ClusterOrthoHalfWidth = projectionParameters.orthoHalfWidth;
+            m_ClusterOrthoHalfHeight = projectionParameters.orthoHalfHeight;
+            m_ClusterIsOrthographic = projectionParameters.isOrthographic;
         }
 
         private void BuildPunctualLightUploadData(VividLightData lightData)
@@ -565,9 +555,11 @@ namespace VividRP.Runtime
                 m_PunctualLights[lightIndex] = BuildPunctualLightUploadData(lightData.punctualLights[lightIndex]);
         }
 
-        private void BuildPunctualLightCullData(VividLightData lightData, Camera camera)
+        private void BuildPunctualLightCullData(
+            VividLightData lightData,
+            VividLightData.PunctualLightScreenSpaceBoundsParameters projectionParameters)
         {
-            var worldToView = camera != null ? camera.worldToCameraMatrix : Matrix4x4.identity;
+            var worldToView = projectionParameters.worldToViewMatrix;
 
             for (var lightIndex = 0; lightIndex < m_PunctualLightCount; lightIndex++)
                 m_PunctualLightCullData[lightIndex] = BuildPunctualLightCullUploadData(lightData.punctualLightCullData[lightIndex], worldToView);
@@ -618,7 +610,7 @@ namespace VividRP.Runtime
             };
         }
 
-        private void BuildClusterCoarseLightBins()
+        private void BuildClusterCoarseLightBins(VividLightData lightData)
         {
             Array.Clear(m_ClusterSliceLightCounts, 0, ClusterSliceCount);
             Array.Clear(m_ClusterSliceWriteOffsets, 0, ClusterSliceCount);
@@ -629,22 +621,14 @@ namespace VividRP.Runtime
 
             for (var lightIndex = 0; lightIndex < m_PunctualLightCount; lightIndex++)
             {
-                if (!TryGetPunctualLightCoarseBounds(
-                        m_PunctualLightCullData[lightIndex],
-                        out var sliceMin,
-                        out var sliceMax,
-                        out _,
-                        out _,
-                        out _,
-                        out _))
-                {
+                var screenSpaceBounds = lightData.punctualLightScreenSpaceBounds[lightIndex];
+                if (screenSpaceBounds.isValid == 0u)
                     continue;
-                }
 
-                var recordCount = sliceMax - sliceMin + 1;
+                var recordCount = screenSpaceBounds.sliceMax - screenSpaceBounds.sliceMin + 1;
                 m_ClusterCoarseLightRecordCount += recordCount;
 
-                for (var sliceIndex = sliceMin; sliceIndex <= sliceMax; sliceIndex++)
+                for (var sliceIndex = screenSpaceBounds.sliceMin; sliceIndex <= screenSpaceBounds.sliceMax; sliceIndex++)
                     m_ClusterSliceLightCounts[sliceIndex]++;
             }
 
@@ -665,199 +649,24 @@ namespace VividRP.Runtime
 
             for (var lightIndex = 0; lightIndex < m_PunctualLightCount; lightIndex++)
             {
-                if (!TryGetPunctualLightCoarseBounds(
-                        m_PunctualLightCullData[lightIndex],
-                        out var sliceMin,
-                        out var sliceMax,
-                        out var tileMinX,
-                        out var tileMaxX,
-                        out var tileMinY,
-                        out var tileMaxY))
-                {
+                var screenSpaceBounds = lightData.punctualLightScreenSpaceBounds[lightIndex];
+                if (screenSpaceBounds.isValid == 0u)
                     continue;
-                }
 
-                for (var sliceIndex = sliceMin; sliceIndex <= sliceMax; sliceIndex++)
+                for (var sliceIndex = screenSpaceBounds.sliceMin; sliceIndex <= screenSpaceBounds.sliceMax; sliceIndex++)
                 {
                     var recordIndex = m_ClusterSliceWriteOffsets[sliceIndex]++;
                     m_ClusterCoarseLightRecords[recordIndex] = new PunctualLightCoarseRecordUploadData
                     {
                         lightIndex = (uint)lightIndex,
-                        tileMinX = (uint)tileMinX,
-                        tileMaxX = (uint)tileMaxX,
-                        tileMinY = (uint)tileMinY,
-                        tileMaxY = (uint)tileMaxY,
+                        tileMinX = (uint)screenSpaceBounds.tileMinX,
+                        tileMaxX = (uint)screenSpaceBounds.tileMaxX,
+                        tileMinY = (uint)screenSpaceBounds.tileMinY,
+                        tileMaxY = (uint)screenSpaceBounds.tileMaxY,
                     };
                 }
             }
         }
 
-        private bool TryGetPunctualLightCoarseBounds(
-            PunctualLightCullUploadData lightData,
-            out int sliceMin,
-            out int sliceMax,
-            out int tileMinX,
-            out int tileMaxX,
-            out int tileMinY,
-            out int tileMaxY)
-        {
-            tileMinX = 0;
-            tileMaxX = 0;
-            tileMinY = 0;
-            tileMaxY = 0;
-
-            if (!TryGetPunctualLightSliceRange(lightData, out sliceMin, out sliceMax))
-                return false;
-
-            return TryGetPunctualLightTileRange(lightData, out tileMinX, out tileMaxX, out tileMinY, out tileMaxY);
-        }
-
-        private bool TryGetPunctualLightSliceRange(PunctualLightCullUploadData lightData, out int sliceMin, out int sliceMax)
-        {
-            sliceMin = 0;
-            sliceMax = 0;
-
-            var depthMin = lightData.cullingCenterVS.z - lightData.cullingRadius;
-            var depthMax = lightData.cullingCenterVS.z + lightData.cullingRadius;
-
-            if (depthMax < m_ClusterNearClip || depthMin > m_ClusterFarClip)
-                return false;
-
-            depthMin = Mathf.Max(depthMin, m_ClusterNearClip);
-            depthMax = Mathf.Min(depthMax, m_ClusterFarClip);
-            sliceMin = GetClusterSliceIndex(depthMin);
-            sliceMax = GetClusterSliceIndex(depthMax);
-            return sliceMax >= sliceMin;
-        }
-
-        private bool TryGetPunctualLightTileRange(
-            PunctualLightCullUploadData lightData,
-            out int tileMinX,
-            out int tileMaxX,
-            out int tileMinY,
-            out int tileMaxY)
-        {
-            tileMinX = 0;
-            tileMaxX = 0;
-            tileMinY = 0;
-            tileMaxY = 0;
-
-            var radius = Mathf.Max(lightData.cullingRadius, 0.0f);
-            if (radius <= 0.0f)
-                return false;
-
-            var centerVS = lightData.cullingCenterVS;
-            float screenMinX;
-            float screenMaxX;
-            float screenMinY;
-            float screenMaxY;
-
-            if (m_ClusterIsOrthographic != 0)
-            {
-                var orthoHalfWidth = Mathf.Max(m_ClusterOrthoHalfWidth, 1e-6f);
-                var orthoHalfHeight = Mathf.Max(m_ClusterOrthoHalfHeight, 1e-6f);
-                var minNdcX = (centerVS.x - radius) / orthoHalfWidth;
-                var maxNdcX = (centerVS.x + radius) / orthoHalfWidth;
-                var minNdcY = (centerVS.y - radius) / orthoHalfHeight;
-                var maxNdcY = (centerVS.y + radius) / orthoHalfHeight;
-
-                screenMinX = GetScreenXFromNdc(minNdcX);
-                screenMaxX = GetScreenXFromNdc(maxNdcX);
-                screenMinY = GetScreenYFromNdc(maxNdcY);
-                screenMaxY = GetScreenYFromNdc(minNdcY);
-            }
-            else
-            {
-                var projectionDepth = Mathf.Max(centerVS.z - radius, m_ClusterNearClip);
-                var projectedHalfWidth = Mathf.Max(projectionDepth * m_ClusterTanHalfFovX, 1e-6f);
-                var projectedHalfHeight = Mathf.Max(projectionDepth * m_ClusterTanHalfFovY, 1e-6f);
-                var minNdcX = (centerVS.x - radius) / projectedHalfWidth;
-                var maxNdcX = (centerVS.x + radius) / projectedHalfWidth;
-                var minNdcY = (centerVS.y - radius) / projectedHalfHeight;
-                var maxNdcY = (centerVS.y + radius) / projectedHalfHeight;
-
-                screenMinX = GetScreenXFromNdc(minNdcX);
-                screenMaxX = GetScreenXFromNdc(maxNdcX);
-                screenMinY = GetScreenYFromNdc(maxNdcY);
-                screenMaxY = GetScreenYFromNdc(minNdcY);
-            }
-
-            return TryConvertScreenRectToTileRange(
-                screenMinX,
-                screenMaxX,
-                screenMinY,
-                screenMaxY,
-                out tileMinX,
-                out tileMaxX,
-                out tileMinY,
-                out tileMaxY);
-        }
-
-        private int GetClusterSliceIndex(float depth)
-        {
-            depth = Mathf.Clamp(depth, m_ClusterNearClip, m_ClusterFarClip);
-
-            if (m_ClusterIsOrthographic != 0)
-            {
-                var linearSlice = Mathf.FloorToInt((depth - m_ClusterNearClip) * m_ClusterLinearDepthScale);
-                return Mathf.Clamp(linearSlice, 0, ClusterSliceCount - 1);
-            }
-
-            var logarithmicDepth = Mathf.Log(Mathf.Max(depth / Mathf.Max(m_ClusterNearClip, 1e-6f), 1.0f), 2.0f);
-            var logarithmicSlice = Mathf.FloorToInt(logarithmicDepth * m_ClusterLogDepthScale);
-            return Mathf.Clamp(logarithmicSlice, 0, ClusterSliceCount - 1);
-        }
-
-        private bool TryConvertScreenRectToTileRange(
-            float screenMinX,
-            float screenMaxX,
-            float screenMinY,
-            float screenMaxY,
-            out int tileMinX,
-            out int tileMaxX,
-            out int tileMinY,
-            out int tileMaxY)
-        {
-            tileMinX = 0;
-            tileMaxX = 0;
-            tileMinY = 0;
-            tileMaxY = 0;
-
-            var rectMinX = Mathf.Min(screenMinX, screenMaxX);
-            var rectMaxX = Mathf.Max(screenMinX, screenMaxX);
-            var rectMinY = Mathf.Min(screenMinY, screenMaxY);
-            var rectMaxY = Mathf.Max(screenMinY, screenMaxY);
-
-            var maxPixelX = Mathf.Max(m_LightingWidth - 1, 0);
-            var maxPixelY = Mathf.Max(m_LightingHeight - 1, 0);
-
-            if (rectMaxX < 0.0f
-                || rectMinX > maxPixelX
-                || rectMaxY < 0.0f
-                || rectMinY > maxPixelY)
-            {
-                return false;
-            }
-
-            var clampedMinX = Mathf.Clamp(rectMinX, 0.0f, maxPixelX);
-            var clampedMaxX = Mathf.Clamp(rectMaxX, 0.0f, maxPixelX);
-            var clampedMinY = Mathf.Clamp(rectMinY, 0.0f, maxPixelY);
-            var clampedMaxY = Mathf.Clamp(rectMaxY, 0.0f, maxPixelY);
-            tileMinX = Mathf.Clamp(Mathf.FloorToInt(clampedMinX / ClusterTileSize), 0, m_ClusterTileCountX - 1);
-            tileMaxX = Mathf.Clamp(Mathf.FloorToInt(clampedMaxX / ClusterTileSize), 0, m_ClusterTileCountX - 1);
-            tileMinY = Mathf.Clamp(Mathf.FloorToInt(clampedMinY / ClusterTileSize), 0, m_ClusterTileCountY - 1);
-            tileMaxY = Mathf.Clamp(Mathf.FloorToInt(clampedMaxY / ClusterTileSize), 0, m_ClusterTileCountY - 1);
-            return true;
-        }
-
-        private float GetScreenXFromNdc(float ndcX)
-        {
-            return (ndcX * 0.5f + 0.5f) * m_LightingWidth;
-        }
-
-        private float GetScreenYFromNdc(float ndcY)
-        {
-            return (1.0f - ndcY) * 0.5f * m_LightingHeight;
-        }
     }
 }

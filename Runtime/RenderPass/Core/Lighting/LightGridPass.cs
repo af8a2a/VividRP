@@ -1,4 +1,5 @@
 using System;
+using System;
 using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -21,6 +22,8 @@ namespace VividRP.Runtime
         private static readonly int PunctualLightsId = Shader.PropertyToID("_PunctualLights");
         private static readonly int PunctualLightCullDataId = Shader.PropertyToID("_PunctualLightCullData");
         private static readonly int PunctualLightCountId = Shader.PropertyToID("_PunctualLightCount");
+        private static readonly int ClusterCoarseLightRangesId = Shader.PropertyToID("_ClusterCoarseLightRanges");
+        private static readonly int ClusterCoarseLightRecordsId = Shader.PropertyToID("_ClusterCoarseLightRecords");
         private static readonly int ClusterLightGridId = Shader.PropertyToID("_ClusterLightGrid");
         private static readonly int ClusterLightIndicesId = Shader.PropertyToID("_ClusterLightIndices");
         private static readonly int ClusterAllocationCounterId = Shader.PropertyToID("_ClusterAllocationCounter");
@@ -51,6 +54,16 @@ namespace VividRP.Runtime
         };
 
         private static readonly PunctualLightCullUploadData[] s_EmptyPunctualLightCullData =
+        {
+            default
+        };
+
+        private static readonly SliceLightRangeUploadData[] s_EmptyClusterCoarseLightRanges =
+        {
+            default
+        };
+
+        private static readonly PunctualLightCoarseRecordUploadData[] s_EmptyClusterCoarseLightRecords =
         {
             default
         };
@@ -92,15 +105,42 @@ namespace VividRP.Runtime
             public static int Stride => Marshal.SizeOf<PunctualLightCullUploadData>();
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SliceLightRangeUploadData
+        {
+            public uint startIndex;
+            public uint lightCount;
+
+            public static int Stride => Marshal.SizeOf<SliceLightRangeUploadData>();
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PunctualLightCoarseRecordUploadData
+        {
+            public uint lightIndex;
+            public uint tileMinX;
+            public uint tileMaxX;
+            public uint tileMinY;
+            public uint tileMaxY;
+
+            public static int Stride => Marshal.SizeOf<PunctualLightCoarseRecordUploadData>();
+        }
+
         private GraphicsBuffer m_DirectionalLightBuffer;
         private GraphicsBuffer m_PunctualLightBuffer;
         private GraphicsBuffer m_PunctualLightCullBuffer;
+        private GraphicsBuffer m_ClusterCoarseLightRangesBuffer;
+        private GraphicsBuffer m_ClusterCoarseLightRecordsBuffer;
         private GraphicsBuffer m_ClusterLightGridBuffer;
         private GraphicsBuffer m_ClusterLightIndicesBuffer;
         private GraphicsBuffer m_ClusterAllocationCounterBuffer;
-        private ComputeShader m_LightingSetupCompute;
+        private ComputeShader m_ClusteredLightCullCompute;
         private PunctualLightUploadData[] m_PunctualLights = Array.Empty<PunctualLightUploadData>();
         private PunctualLightCullUploadData[] m_PunctualLightCullData = Array.Empty<PunctualLightCullUploadData>();
+        private SliceLightRangeUploadData[] m_ClusterCoarseLightRanges = Array.Empty<SliceLightRangeUploadData>();
+        private PunctualLightCoarseRecordUploadData[] m_ClusterCoarseLightRecords = Array.Empty<PunctualLightCoarseRecordUploadData>();
+        private int[] m_ClusterSliceLightCounts = Array.Empty<int>();
+        private int[] m_ClusterSliceWriteOffsets = Array.Empty<int>();
         private int m_DirectionalLightCount;
         private int m_PunctualLightCount;
         private int m_MainDirectionalLightIndex;
@@ -118,6 +158,7 @@ namespace VividRP.Runtime
         private float m_ClusterOrthoHalfWidth;
         private float m_ClusterOrthoHalfHeight;
         private int m_ClusterIsOrthographic;
+        private int m_ClusterCoarseLightRecordCount;
         private int m_ClearClusterLightCounterKernel = -1;
         private int m_BuildClusteredLightListKernel = -1;
 
@@ -158,6 +199,7 @@ namespace VividRP.Runtime
 
             EnsurePunctualLightBuffer(Mathf.Max(m_PunctualLightCount, 1));
             EnsurePunctualLightCullBuffer(Mathf.Max(m_PunctualLightCount, 1));
+            EnsureClusterCoarseLightRangeCapacity(ClusterSliceCount);
             EnsureClusterLightGridBuffer(clusterCount);
             EnsureClusterLightIndicesBuffer(m_ClusterLightIndexCapacity);
             EnsureClusterAllocationCounterBuffer();
@@ -173,13 +215,27 @@ namespace VividRP.Runtime
             {
                 BuildPunctualLightUploadData(lightData);
                 BuildPunctualLightCullData(lightData, camera);
+                BuildClusterCoarseLightBins();
                 m_PunctualLightBuffer.SetData(m_PunctualLights, 0, 0, m_PunctualLightCount);
                 m_PunctualLightCullBuffer.SetData(m_PunctualLightCullData, 0, 0, m_PunctualLightCount);
+                EnsureClusterCoarseLightRangesBuffer(ClusterSliceCount);
+                EnsureClusterCoarseLightRecordsBuffer(Mathf.Max(m_ClusterCoarseLightRecordCount, 1));
+                m_ClusterCoarseLightRangesBuffer.SetData(m_ClusterCoarseLightRanges, 0, 0, ClusterSliceCount);
+
+                if (m_ClusterCoarseLightRecordCount > 0)
+                    m_ClusterCoarseLightRecordsBuffer.SetData(m_ClusterCoarseLightRecords, 0, 0, m_ClusterCoarseLightRecordCount);
+                else
+                    m_ClusterCoarseLightRecordsBuffer.SetData(s_EmptyClusterCoarseLightRecords);
             }
             else
             {
+                m_ClusterCoarseLightRecordCount = 0;
                 m_PunctualLightBuffer.SetData(s_EmptyPunctualLights);
                 m_PunctualLightCullBuffer.SetData(s_EmptyPunctualLightCullData);
+                EnsureClusterCoarseLightRangesBuffer(1);
+                EnsureClusterCoarseLightRecordsBuffer(1);
+                m_ClusterCoarseLightRangesBuffer.SetData(s_EmptyClusterCoarseLightRanges);
+                m_ClusterCoarseLightRecordsBuffer.SetData(s_EmptyClusterCoarseLightRecords);
             }
 
             m_ClusterAllocationCounterBuffer.SetData(s_ZeroCounterData);
@@ -188,20 +244,20 @@ namespace VividRP.Runtime
         public override void Create()
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            m_LightingSetupCompute = resources?.MaterialClassificationCompute;
+            m_ClusteredLightCullCompute = resources?.ClusteredLightCullCompute;
 
-            if (m_LightingSetupCompute == null)
+            if (m_ClusteredLightCullCompute == null)
                 return;
 
             try
             {
-                m_ClearClusterLightCounterKernel = m_LightingSetupCompute.FindKernel("ClearClusterLightCounter");
-                m_BuildClusteredLightListKernel = m_LightingSetupCompute.FindKernel("BuildClusteredLightList");
+                m_ClearClusterLightCounterKernel = m_ClusteredLightCullCompute.FindKernel("ClearClusterLightCounter");
+                m_BuildClusteredLightListKernel = m_ClusteredLightCullCompute.FindKernel("BuildClusteredLightList");
             }
             catch (ArgumentException)
             {
-                Debug.LogWarning($"[VividRP] Could not find clustered light kernels in {m_LightingSetupCompute.name}. Punctual clustered lighting will be disabled.");
-                m_LightingSetupCompute = null;
+                Debug.LogWarning($"[VividRP] Could not find clustered light kernels in {m_ClusteredLightCullCompute.name}. Punctual clustered lighting will be disabled.");
+                m_ClusteredLightCullCompute = null;
                 m_ClearClusterLightCounterKernel = -1;
                 m_BuildClusteredLightListKernel = -1;
             }
@@ -209,45 +265,53 @@ namespace VividRP.Runtime
 
         public override void Record(UnsafeGraphContext context)
         {
-            if (m_DirectionalLightBuffer == null || m_PunctualLightBuffer == null || m_PunctualLightCullBuffer == null)
+            if (m_DirectionalLightBuffer == null
+                || m_PunctualLightBuffer == null
+                || m_PunctualLightCullBuffer == null
+                || m_ClusterCoarseLightRangesBuffer == null
+                || m_ClusterCoarseLightRecordsBuffer == null)
                 return;
 
             var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
             var canBuildClusteredLights = m_PunctualLightCount > 0
-                && m_LightingSetupCompute != null
+                && m_ClusteredLightCullCompute != null
                 && m_ClearClusterLightCounterKernel >= 0
                 && m_BuildClusteredLightListKernel >= 0
                 && m_PunctualLightCullBuffer != null
+                && m_ClusterCoarseLightRangesBuffer != null
+                && m_ClusterCoarseLightRecordsBuffer != null
                 && m_ClusterLightGridBuffer != null
                 && m_ClusterLightIndicesBuffer != null
                 && m_ClusterAllocationCounterBuffer != null;
 
             if (canBuildClusteredLights)
             {
-                cmd.SetComputeIntParam(m_LightingSetupCompute, PunctualLightCountId, m_PunctualLightCount);
-                cmd.SetComputeIntParam(m_LightingSetupCompute, ClusterTileSizeId, ClusterTileSize);
-                cmd.SetComputeIntParam(m_LightingSetupCompute, ClusterSliceCountId, ClusterSliceCount);
-                cmd.SetComputeIntParam(m_LightingSetupCompute, ClusterScreenWidthId, m_LightingWidth);
-                cmd.SetComputeIntParam(m_LightingSetupCompute, ClusterScreenHeightId, m_LightingHeight);
-                cmd.SetComputeIntParam(m_LightingSetupCompute, ClusterTileCountXId, m_ClusterTileCountX);
-                cmd.SetComputeIntParam(m_LightingSetupCompute, ClusterTileCountYId, m_ClusterTileCountY);
-                cmd.SetComputeFloatParam(m_LightingSetupCompute, ClusterNearClipId, m_ClusterNearClip);
-                cmd.SetComputeFloatParam(m_LightingSetupCompute, ClusterFarClipId, m_ClusterFarClip);
-                cmd.SetComputeFloatParam(m_LightingSetupCompute, ClusterLogDepthScaleId, m_ClusterLogDepthScale);
-                cmd.SetComputeFloatParam(m_LightingSetupCompute, ClusterLinearDepthScaleId, m_ClusterLinearDepthScale);
-                cmd.SetComputeFloatParam(m_LightingSetupCompute, ClusterTanHalfFovXId, m_ClusterTanHalfFovX);
-                cmd.SetComputeFloatParam(m_LightingSetupCompute, ClusterTanHalfFovYId, m_ClusterTanHalfFovY);
-                cmd.SetComputeFloatParam(m_LightingSetupCompute, ClusterOrthoHalfWidthId, m_ClusterOrthoHalfWidth);
-                cmd.SetComputeFloatParam(m_LightingSetupCompute, ClusterOrthoHalfHeightId, m_ClusterOrthoHalfHeight);
-                cmd.SetComputeIntParam(m_LightingSetupCompute, ClusterIsOrthographicId, m_ClusterIsOrthographic);
-                cmd.SetComputeBufferParam(m_LightingSetupCompute, m_ClearClusterLightCounterKernel, ClusterAllocationCounterId, m_ClusterAllocationCounterBuffer);
-                cmd.SetComputeBufferParam(m_LightingSetupCompute, m_BuildClusteredLightListKernel, PunctualLightCullDataId, m_PunctualLightCullBuffer);
-                cmd.SetComputeBufferParam(m_LightingSetupCompute, m_BuildClusteredLightListKernel, ClusterLightGridId, m_ClusterLightGridBuffer);
-                cmd.SetComputeBufferParam(m_LightingSetupCompute, m_BuildClusteredLightListKernel, ClusterLightIndicesId, m_ClusterLightIndicesBuffer);
-                cmd.SetComputeBufferParam(m_LightingSetupCompute, m_BuildClusteredLightListKernel, ClusterAllocationCounterId, m_ClusterAllocationCounterBuffer);
-                cmd.DispatchCompute(m_LightingSetupCompute, m_ClearClusterLightCounterKernel, 1, 1, 1);
+                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, PunctualLightCountId, m_PunctualLightCount);
+                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, ClusterTileSizeId, ClusterTileSize);
+                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, ClusterSliceCountId, ClusterSliceCount);
+                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, ClusterScreenWidthId, m_LightingWidth);
+                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, ClusterScreenHeightId, m_LightingHeight);
+                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, ClusterTileCountXId, m_ClusterTileCountX);
+                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, ClusterTileCountYId, m_ClusterTileCountY);
+                cmd.SetComputeFloatParam(m_ClusteredLightCullCompute, ClusterNearClipId, m_ClusterNearClip);
+                cmd.SetComputeFloatParam(m_ClusteredLightCullCompute, ClusterFarClipId, m_ClusterFarClip);
+                cmd.SetComputeFloatParam(m_ClusteredLightCullCompute, ClusterLogDepthScaleId, m_ClusterLogDepthScale);
+                cmd.SetComputeFloatParam(m_ClusteredLightCullCompute, ClusterLinearDepthScaleId, m_ClusterLinearDepthScale);
+                cmd.SetComputeFloatParam(m_ClusteredLightCullCompute, ClusterTanHalfFovXId, m_ClusterTanHalfFovX);
+                cmd.SetComputeFloatParam(m_ClusteredLightCullCompute, ClusterTanHalfFovYId, m_ClusterTanHalfFovY);
+                cmd.SetComputeFloatParam(m_ClusteredLightCullCompute, ClusterOrthoHalfWidthId, m_ClusterOrthoHalfWidth);
+                cmd.SetComputeFloatParam(m_ClusteredLightCullCompute, ClusterOrthoHalfHeightId, m_ClusterOrthoHalfHeight);
+                cmd.SetComputeIntParam(m_ClusteredLightCullCompute, ClusterIsOrthographicId, m_ClusterIsOrthographic);
+                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_ClearClusterLightCounterKernel, ClusterAllocationCounterId, m_ClusterAllocationCounterBuffer);
+                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusteredLightListKernel, PunctualLightCullDataId, m_PunctualLightCullBuffer);
+                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusteredLightListKernel, ClusterCoarseLightRangesId, m_ClusterCoarseLightRangesBuffer);
+                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusteredLightListKernel, ClusterCoarseLightRecordsId, m_ClusterCoarseLightRecordsBuffer);
+                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusteredLightListKernel, ClusterLightGridId, m_ClusterLightGridBuffer);
+                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusteredLightListKernel, ClusterLightIndicesId, m_ClusterLightIndicesBuffer);
+                cmd.SetComputeBufferParam(m_ClusteredLightCullCompute, m_BuildClusteredLightListKernel, ClusterAllocationCounterId, m_ClusterAllocationCounterBuffer);
+                cmd.DispatchCompute(m_ClusteredLightCullCompute, m_ClearClusterLightCounterKernel, 1, 1, 1);
                 cmd.DispatchCompute(
-                    m_LightingSetupCompute,
+                    m_ClusteredLightCullCompute,
                     m_BuildClusteredLightListKernel,
                     Mathf.CeilToInt(m_ClusterTileCountX / (float)ClusterBuildGroupSizeX),
                     Mathf.CeilToInt(m_ClusterTileCountY / (float)ClusterBuildGroupSizeY),
@@ -281,18 +345,26 @@ namespace VividRP.Runtime
             m_DirectionalLightBuffer?.Dispose();
             m_PunctualLightBuffer?.Dispose();
             m_PunctualLightCullBuffer?.Dispose();
+            m_ClusterCoarseLightRangesBuffer?.Dispose();
+            m_ClusterCoarseLightRecordsBuffer?.Dispose();
             m_ClusterLightGridBuffer?.Dispose();
             m_ClusterLightIndicesBuffer?.Dispose();
             m_ClusterAllocationCounterBuffer?.Dispose();
             m_DirectionalLightBuffer = null;
             m_PunctualLightBuffer = null;
             m_PunctualLightCullBuffer = null;
+            m_ClusterCoarseLightRangesBuffer = null;
+            m_ClusterCoarseLightRecordsBuffer = null;
             m_ClusterLightGridBuffer = null;
             m_ClusterLightIndicesBuffer = null;
             m_ClusterAllocationCounterBuffer = null;
-            m_LightingSetupCompute = null;
+            m_ClusteredLightCullCompute = null;
             m_PunctualLights = Array.Empty<PunctualLightUploadData>();
             m_PunctualLightCullData = Array.Empty<PunctualLightCullUploadData>();
+            m_ClusterCoarseLightRanges = Array.Empty<SliceLightRangeUploadData>();
+            m_ClusterCoarseLightRecords = Array.Empty<PunctualLightCoarseRecordUploadData>();
+            m_ClusterSliceLightCounts = Array.Empty<int>();
+            m_ClusterSliceWriteOffsets = Array.Empty<int>();
             m_DirectionalLightCount = 0;
             m_PunctualLightCount = 0;
             m_MainDirectionalLightIndex = -1;
@@ -310,6 +382,7 @@ namespace VividRP.Runtime
             m_ClusterOrthoHalfWidth = 0.0f;
             m_ClusterOrthoHalfHeight = 0.0f;
             m_ClusterIsOrthographic = 0;
+            m_ClusterCoarseLightRecordCount = 0;
             m_ClearClusterLightCounterKernel = -1;
             m_BuildClusteredLightListKernel = -1;
         }
@@ -335,6 +408,24 @@ namespace VividRP.Runtime
 
             if (requiredCapacity > m_PunctualLightCullData.Length)
                 m_PunctualLightCullData = new PunctualLightCullUploadData[requiredCapacity];
+        }
+
+        private void EnsureClusterCoarseLightRangeCapacity(int requiredCapacity)
+        {
+            if (requiredCapacity > m_ClusterCoarseLightRanges.Length)
+                m_ClusterCoarseLightRanges = new SliceLightRangeUploadData[requiredCapacity];
+
+            if (requiredCapacity > m_ClusterSliceLightCounts.Length)
+                m_ClusterSliceLightCounts = new int[requiredCapacity];
+
+            if (requiredCapacity > m_ClusterSliceWriteOffsets.Length)
+                m_ClusterSliceWriteOffsets = new int[requiredCapacity];
+        }
+
+        private void EnsureClusterCoarseLightRecordCapacity(int requiredCapacity)
+        {
+            if (requiredCapacity > m_ClusterCoarseLightRecords.Length)
+                m_ClusterCoarseLightRecords = new PunctualLightCoarseRecordUploadData[requiredCapacity];
         }
 
         private void EnsurePunctualLightBuffer(int requiredBufferCount)
@@ -363,6 +454,38 @@ namespace VividRP.Runtime
                 GraphicsBuffer.Target.Structured,
                 requiredBufferCount,
                 PunctualLightCullUploadData.Stride);
+        }
+
+        private void EnsureClusterCoarseLightRangesBuffer(int requiredBufferCount)
+        {
+            if (m_ClusterCoarseLightRangesBuffer != null
+                && m_ClusterCoarseLightRangesBuffer.count >= requiredBufferCount
+                && m_ClusterCoarseLightRangesBuffer.stride == SliceLightRangeUploadData.Stride)
+            {
+                return;
+            }
+
+            m_ClusterCoarseLightRangesBuffer?.Dispose();
+            m_ClusterCoarseLightRangesBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                requiredBufferCount,
+                SliceLightRangeUploadData.Stride);
+        }
+
+        private void EnsureClusterCoarseLightRecordsBuffer(int requiredBufferCount)
+        {
+            if (m_ClusterCoarseLightRecordsBuffer != null
+                && m_ClusterCoarseLightRecordsBuffer.count >= requiredBufferCount
+                && m_ClusterCoarseLightRecordsBuffer.stride == PunctualLightCoarseRecordUploadData.Stride)
+            {
+                return;
+            }
+
+            m_ClusterCoarseLightRecordsBuffer?.Dispose();
+            m_ClusterCoarseLightRecordsBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                requiredBufferCount,
+                PunctualLightCoarseRecordUploadData.Stride);
         }
 
         private void EnsureClusterLightGridBuffer(int requiredClusterCount)
@@ -493,6 +616,248 @@ namespace VividRP.Runtime
                 lightType = source.lightType,
                 radiusAtRange = source.radiusAtRange,
             };
+        }
+
+        private void BuildClusterCoarseLightBins()
+        {
+            Array.Clear(m_ClusterSliceLightCounts, 0, ClusterSliceCount);
+            Array.Clear(m_ClusterSliceWriteOffsets, 0, ClusterSliceCount);
+            m_ClusterCoarseLightRecordCount = 0;
+
+            for (var sliceIndex = 0; sliceIndex < ClusterSliceCount; sliceIndex++)
+                m_ClusterCoarseLightRanges[sliceIndex] = default;
+
+            for (var lightIndex = 0; lightIndex < m_PunctualLightCount; lightIndex++)
+            {
+                if (!TryGetPunctualLightCoarseBounds(
+                        m_PunctualLightCullData[lightIndex],
+                        out var sliceMin,
+                        out var sliceMax,
+                        out _,
+                        out _,
+                        out _,
+                        out _))
+                {
+                    continue;
+                }
+
+                var recordCount = sliceMax - sliceMin + 1;
+                m_ClusterCoarseLightRecordCount += recordCount;
+
+                for (var sliceIndex = sliceMin; sliceIndex <= sliceMax; sliceIndex++)
+                    m_ClusterSliceLightCounts[sliceIndex]++;
+            }
+
+            var writeOffset = 0;
+            for (var sliceIndex = 0; sliceIndex < ClusterSliceCount; sliceIndex++)
+            {
+                var lightCount = m_ClusterSliceLightCounts[sliceIndex];
+                m_ClusterCoarseLightRanges[sliceIndex] = new SliceLightRangeUploadData
+                {
+                    startIndex = (uint)writeOffset,
+                    lightCount = (uint)lightCount,
+                };
+                m_ClusterSliceWriteOffsets[sliceIndex] = writeOffset;
+                writeOffset += lightCount;
+            }
+
+            EnsureClusterCoarseLightRecordCapacity(Mathf.Max(m_ClusterCoarseLightRecordCount, 1));
+
+            for (var lightIndex = 0; lightIndex < m_PunctualLightCount; lightIndex++)
+            {
+                if (!TryGetPunctualLightCoarseBounds(
+                        m_PunctualLightCullData[lightIndex],
+                        out var sliceMin,
+                        out var sliceMax,
+                        out var tileMinX,
+                        out var tileMaxX,
+                        out var tileMinY,
+                        out var tileMaxY))
+                {
+                    continue;
+                }
+
+                for (var sliceIndex = sliceMin; sliceIndex <= sliceMax; sliceIndex++)
+                {
+                    var recordIndex = m_ClusterSliceWriteOffsets[sliceIndex]++;
+                    m_ClusterCoarseLightRecords[recordIndex] = new PunctualLightCoarseRecordUploadData
+                    {
+                        lightIndex = (uint)lightIndex,
+                        tileMinX = (uint)tileMinX,
+                        tileMaxX = (uint)tileMaxX,
+                        tileMinY = (uint)tileMinY,
+                        tileMaxY = (uint)tileMaxY,
+                    };
+                }
+            }
+        }
+
+        private bool TryGetPunctualLightCoarseBounds(
+            PunctualLightCullUploadData lightData,
+            out int sliceMin,
+            out int sliceMax,
+            out int tileMinX,
+            out int tileMaxX,
+            out int tileMinY,
+            out int tileMaxY)
+        {
+            tileMinX = 0;
+            tileMaxX = 0;
+            tileMinY = 0;
+            tileMaxY = 0;
+
+            if (!TryGetPunctualLightSliceRange(lightData, out sliceMin, out sliceMax))
+                return false;
+
+            return TryGetPunctualLightTileRange(lightData, out tileMinX, out tileMaxX, out tileMinY, out tileMaxY);
+        }
+
+        private bool TryGetPunctualLightSliceRange(PunctualLightCullUploadData lightData, out int sliceMin, out int sliceMax)
+        {
+            sliceMin = 0;
+            sliceMax = 0;
+
+            var depthMin = lightData.cullingCenterVS.z - lightData.cullingRadius;
+            var depthMax = lightData.cullingCenterVS.z + lightData.cullingRadius;
+
+            if (depthMax < m_ClusterNearClip || depthMin > m_ClusterFarClip)
+                return false;
+
+            depthMin = Mathf.Max(depthMin, m_ClusterNearClip);
+            depthMax = Mathf.Min(depthMax, m_ClusterFarClip);
+            sliceMin = GetClusterSliceIndex(depthMin);
+            sliceMax = GetClusterSliceIndex(depthMax);
+            return sliceMax >= sliceMin;
+        }
+
+        private bool TryGetPunctualLightTileRange(
+            PunctualLightCullUploadData lightData,
+            out int tileMinX,
+            out int tileMaxX,
+            out int tileMinY,
+            out int tileMaxY)
+        {
+            tileMinX = 0;
+            tileMaxX = 0;
+            tileMinY = 0;
+            tileMaxY = 0;
+
+            var radius = Mathf.Max(lightData.cullingRadius, 0.0f);
+            if (radius <= 0.0f)
+                return false;
+
+            var centerVS = lightData.cullingCenterVS;
+            float screenMinX;
+            float screenMaxX;
+            float screenMinY;
+            float screenMaxY;
+
+            if (m_ClusterIsOrthographic != 0)
+            {
+                var orthoHalfWidth = Mathf.Max(m_ClusterOrthoHalfWidth, 1e-6f);
+                var orthoHalfHeight = Mathf.Max(m_ClusterOrthoHalfHeight, 1e-6f);
+                var minNdcX = (centerVS.x - radius) / orthoHalfWidth;
+                var maxNdcX = (centerVS.x + radius) / orthoHalfWidth;
+                var minNdcY = (centerVS.y - radius) / orthoHalfHeight;
+                var maxNdcY = (centerVS.y + radius) / orthoHalfHeight;
+
+                screenMinX = GetScreenXFromNdc(minNdcX);
+                screenMaxX = GetScreenXFromNdc(maxNdcX);
+                screenMinY = GetScreenYFromNdc(maxNdcY);
+                screenMaxY = GetScreenYFromNdc(minNdcY);
+            }
+            else
+            {
+                var projectionDepth = Mathf.Max(centerVS.z - radius, m_ClusterNearClip);
+                var projectedHalfWidth = Mathf.Max(projectionDepth * m_ClusterTanHalfFovX, 1e-6f);
+                var projectedHalfHeight = Mathf.Max(projectionDepth * m_ClusterTanHalfFovY, 1e-6f);
+                var minNdcX = (centerVS.x - radius) / projectedHalfWidth;
+                var maxNdcX = (centerVS.x + radius) / projectedHalfWidth;
+                var minNdcY = (centerVS.y - radius) / projectedHalfHeight;
+                var maxNdcY = (centerVS.y + radius) / projectedHalfHeight;
+
+                screenMinX = GetScreenXFromNdc(minNdcX);
+                screenMaxX = GetScreenXFromNdc(maxNdcX);
+                screenMinY = GetScreenYFromNdc(maxNdcY);
+                screenMaxY = GetScreenYFromNdc(minNdcY);
+            }
+
+            return TryConvertScreenRectToTileRange(
+                screenMinX,
+                screenMaxX,
+                screenMinY,
+                screenMaxY,
+                out tileMinX,
+                out tileMaxX,
+                out tileMinY,
+                out tileMaxY);
+        }
+
+        private int GetClusterSliceIndex(float depth)
+        {
+            depth = Mathf.Clamp(depth, m_ClusterNearClip, m_ClusterFarClip);
+
+            if (m_ClusterIsOrthographic != 0)
+            {
+                var linearSlice = Mathf.FloorToInt((depth - m_ClusterNearClip) * m_ClusterLinearDepthScale);
+                return Mathf.Clamp(linearSlice, 0, ClusterSliceCount - 1);
+            }
+
+            var logarithmicDepth = Mathf.Log(Mathf.Max(depth / Mathf.Max(m_ClusterNearClip, 1e-6f), 1.0f), 2.0f);
+            var logarithmicSlice = Mathf.FloorToInt(logarithmicDepth * m_ClusterLogDepthScale);
+            return Mathf.Clamp(logarithmicSlice, 0, ClusterSliceCount - 1);
+        }
+
+        private bool TryConvertScreenRectToTileRange(
+            float screenMinX,
+            float screenMaxX,
+            float screenMinY,
+            float screenMaxY,
+            out int tileMinX,
+            out int tileMaxX,
+            out int tileMinY,
+            out int tileMaxY)
+        {
+            tileMinX = 0;
+            tileMaxX = 0;
+            tileMinY = 0;
+            tileMaxY = 0;
+
+            var rectMinX = Mathf.Min(screenMinX, screenMaxX);
+            var rectMaxX = Mathf.Max(screenMinX, screenMaxX);
+            var rectMinY = Mathf.Min(screenMinY, screenMaxY);
+            var rectMaxY = Mathf.Max(screenMinY, screenMaxY);
+
+            var maxPixelX = Mathf.Max(m_LightingWidth - 1, 0);
+            var maxPixelY = Mathf.Max(m_LightingHeight - 1, 0);
+
+            if (rectMaxX < 0.0f
+                || rectMinX > maxPixelX
+                || rectMaxY < 0.0f
+                || rectMinY > maxPixelY)
+            {
+                return false;
+            }
+
+            var clampedMinX = Mathf.Clamp(rectMinX, 0.0f, maxPixelX);
+            var clampedMaxX = Mathf.Clamp(rectMaxX, 0.0f, maxPixelX);
+            var clampedMinY = Mathf.Clamp(rectMinY, 0.0f, maxPixelY);
+            var clampedMaxY = Mathf.Clamp(rectMaxY, 0.0f, maxPixelY);
+            tileMinX = Mathf.Clamp(Mathf.FloorToInt(clampedMinX / ClusterTileSize), 0, m_ClusterTileCountX - 1);
+            tileMaxX = Mathf.Clamp(Mathf.FloorToInt(clampedMaxX / ClusterTileSize), 0, m_ClusterTileCountX - 1);
+            tileMinY = Mathf.Clamp(Mathf.FloorToInt(clampedMinY / ClusterTileSize), 0, m_ClusterTileCountY - 1);
+            tileMaxY = Mathf.Clamp(Mathf.FloorToInt(clampedMaxY / ClusterTileSize), 0, m_ClusterTileCountY - 1);
+            return true;
+        }
+
+        private float GetScreenXFromNdc(float ndcX)
+        {
+            return (ndcX * 0.5f + 0.5f) * m_LightingWidth;
+        }
+
+        private float GetScreenYFromNdc(float ndcY)
+        {
+            return (1.0f - ndcY) * 0.5f * m_LightingHeight;
         }
     }
 }

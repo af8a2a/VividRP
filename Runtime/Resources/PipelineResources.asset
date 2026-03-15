@@ -33,6 +33,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: 985a5b1e96340614fb6346ff8c3108ad, type: 3}
   - ResourceName: Shaders/FullScreenUV
     ResourceObject: {fileID: 4800000, guid: d59dc5dd19265494ca5c586c2e4ce4fe, type: 3}
+  - ResourceName: Shaders/Material/ClusteredLightCull
+    ResourceObject: {fileID: 7200000, guid: d870db9c6ea94164483da15047a37447, type: 3}
   - ResourceName: Shaders/Material/DeferredDirectionalLighting
     ResourceObject: {fileID: 7200000, guid: 4c43bc7556866e04b985dc155321bc61, type: 3}
   - ResourceName: Shaders/Material/DeferredDirectionalLightingIndirect

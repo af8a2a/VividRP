@@ -14,10 +14,13 @@ namespace VividRP.Editor.Tests
             var source = File.ReadAllText(GetComputeShaderSourcePath());
 
             Assert.That(source, Does.Contain("#pragma kernel ClearClusterLightCounter"));
+            Assert.That(source, Does.Contain("#pragma kernel CountClusterBigTileLights"));
+            Assert.That(source, Does.Contain("#pragma kernel BuildClusterBigTileLightRanges"));
             Assert.That(source, Does.Contain("#pragma kernel BuildClusterBigTileLightList"));
             Assert.That(source, Does.Contain("#pragma kernel BuildClusteredLightList"));
             Assert.That(source, Does.Contain("StructuredBuffer<PunctualLightCullData> _PunctualLightCullData;"));
             Assert.That(source, Does.Contain("StructuredBuffer<PunctualLightScreenSpaceBounds> _PunctualLightScreenSpaceBounds;"));
+            Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _ClusterBigTileLightCounts;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint2> _ClusterBigTileLightRanges;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _ClusterBigTileLightIndices;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint2> _ClusterLightGrid;"));
@@ -29,10 +32,14 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("bool SphereIntersectsCluster(float3 sphereCenter, float sphereRadius, float3 boundsMin, float3 boundsMax)"));
             Assert.That(source, Does.Contain("bool SpotConeIntersectsCluster(PunctualLightCullData punctualLightCullData, float3 boundsMin, float3 boundsMax)"));
             Assert.That(source, Does.Contain("bool PunctualLightIntersectsCluster(PunctualLightCullData punctualLightCullData, float3 boundsMin, float3 boundsMax)"));
+            Assert.That(source, Does.Contain("void CountClusterBigTileLights(uint3 dispatchThreadId : SV_DispatchThreadID)"));
+            Assert.That(source, Does.Contain("void BuildClusterBigTileLightRanges(uint3 dispatchThreadId : SV_DispatchThreadID)"));
             Assert.That(source, Does.Contain("void BuildClusterBigTileLightList(uint3 dispatchThreadId : SV_DispatchThreadID)"));
+            Assert.That(source, Does.Contain("_ClusterBigTileLightCounts[bigTileIndex] = bigTileLightCount;"));
+            Assert.That(source, Does.Contain("_ClusterBigTileLightRanges[bigTileIndex] = uint2(runningOffset, bigTileLightCount);"));
             Assert.That(source, Does.Contain("(int)dispatchThreadId.x < screenSpaceBounds.bigTileMinX"));
             Assert.That(source, Does.Contain("(int)dispatchThreadId.y > screenSpaceBounds.bigTileMaxY"));
-            Assert.That(source, Does.Contain("InterlockedAdd(_ClusterAllocationCounter[0], bigTileLightCount, bigTileStart);"));
+            Assert.That(source, Does.Not.Contain("InterlockedAdd(_ClusterAllocationCounter[0], bigTileLightCount, bigTileStart);"));
             Assert.That(source, Does.Contain("uint2 bigTileLightRange = _ClusterBigTileLightRanges[GetBigTileIndex(bigTileCoord)];"));
         }
 

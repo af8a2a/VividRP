@@ -1,4 +1,6 @@
 #pragma kernel ClearClusterLightCounter
+#pragma kernel CountClusterBigTileLights
+#pragma kernel BuildClusterBigTileLightRanges
 #pragma kernel BuildClusterBigTileLightList
 #pragma kernel BuildClusteredLightList
 
@@ -41,6 +43,7 @@ struct PunctualLightScreenSpaceBounds
 
 StructuredBuffer<PunctualLightCullData> _PunctualLightCullData;
 StructuredBuffer<PunctualLightScreenSpaceBounds> _PunctualLightScreenSpaceBounds;
+RWStructuredBuffer<uint> _ClusterBigTileLightCounts;
 RWStructuredBuffer<uint2> _ClusterBigTileLightRanges;
 RWStructuredBuffer<uint> _ClusterBigTileLightIndices;
 RWStructuredBuffer<uint2> _ClusterLightGrid;
@@ -202,13 +205,12 @@ void ClearClusterLightCounter(uint3 dispatchThreadId : SV_DispatchThreadID)
 }
 
 [numthreads(8, 8, 1)]
-void BuildClusterBigTileLightList(uint3 dispatchThreadId : SV_DispatchThreadID)
+void CountClusterBigTileLights(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     if (dispatchThreadId.x >= _ClusterBigTileCountX || dispatchThreadId.y >= _ClusterBigTileCountY)
         return;
 
     uint bigTileIndex = GetBigTileIndex(dispatchThreadId.xy);
-    uint bigTileStart = 0u;
     uint bigTileLightCount = 0u;
 
     [loop]
@@ -227,12 +229,34 @@ void BuildClusterBigTileLightList(uint3 dispatchThreadId : SV_DispatchThreadID)
         bigTileLightCount++;
     }
 
-    if (bigTileLightCount > 0u)
-        InterlockedAdd(_ClusterAllocationCounter[0], bigTileLightCount, bigTileStart);
+    _ClusterBigTileLightCounts[bigTileIndex] = bigTileLightCount;
+}
 
-    _ClusterBigTileLightRanges[bigTileIndex] = uint2(bigTileStart, bigTileLightCount);
+[numthreads(1, 1, 1)]
+void BuildClusterBigTileLightRanges(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint bigTileCount = _ClusterBigTileCountX * _ClusterBigTileCountY;
+    uint runningOffset = 0u;
 
-    if (bigTileLightCount == 0u)
+    [loop]
+    for (uint bigTileIndex = 0u; bigTileIndex < bigTileCount; bigTileIndex++)
+    {
+        uint bigTileLightCount = _ClusterBigTileLightCounts[bigTileIndex];
+        _ClusterBigTileLightRanges[bigTileIndex] = uint2(runningOffset, bigTileLightCount);
+        runningOffset += bigTileLightCount;
+    }
+}
+
+[numthreads(8, 8, 1)]
+void BuildClusterBigTileLightList(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x >= _ClusterBigTileCountX || dispatchThreadId.y >= _ClusterBigTileCountY)
+        return;
+
+    uint bigTileIndex = GetBigTileIndex(dispatchThreadId.xy);
+    uint2 bigTileLightRange = _ClusterBigTileLightRanges[bigTileIndex];
+
+    if (bigTileLightRange.y == 0u)
         return;
 
     uint writeIndex = 0u;
@@ -250,7 +274,7 @@ void BuildClusterBigTileLightList(uint3 dispatchThreadId : SV_DispatchThreadID)
             continue;
         }
 
-        _ClusterBigTileLightIndices[bigTileStart + writeIndex] = lightIndex;
+        _ClusterBigTileLightIndices[bigTileLightRange.x + writeIndex] = lightIndex;
         writeIndex++;
     }
 }

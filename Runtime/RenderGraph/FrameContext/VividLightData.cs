@@ -176,6 +176,62 @@ namespace VividRP.Runtime
             public PunctualLightCullData lightCullData;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PunctualLightScreenSpaceBoundsRecord
+        {
+            public float3 viewSpaceAabbMin;
+            public float3 viewSpaceAabbMax;
+            public float2 clipSpaceAabbMin;
+            public float2 clipSpaceAabbMax;
+            public int sliceMin;
+            public int sliceMax;
+            public int tileMinX;
+            public int tileMaxX;
+            public int tileMinY;
+            public int tileMaxY;
+            public uint isValid;
+        }
+
+        private readonly struct PunctualLightScreenSpaceBoundsJobParameters
+        {
+            public readonly float4x4 worldToViewMatrix;
+            public readonly int screenWidth;
+            public readonly int screenHeight;
+            public readonly int tileSize;
+            public readonly int tileCountX;
+            public readonly int tileCountY;
+            public readonly int sliceCount;
+            public readonly float nearClip;
+            public readonly float farClip;
+            public readonly float logDepthScale;
+            public readonly float linearDepthScale;
+            public readonly float tanHalfFovX;
+            public readonly float tanHalfFovY;
+            public readonly float orthoHalfWidth;
+            public readonly float orthoHalfHeight;
+            public readonly int isOrthographic;
+
+            public PunctualLightScreenSpaceBoundsJobParameters(in PunctualLightScreenSpaceBoundsParameters parameters)
+            {
+                worldToViewMatrix = ToFloat4x4(parameters.worldToViewMatrix);
+                screenWidth = parameters.screenWidth;
+                screenHeight = parameters.screenHeight;
+                tileSize = parameters.tileSize;
+                tileCountX = parameters.tileCountX;
+                tileCountY = parameters.tileCountY;
+                sliceCount = parameters.sliceCount;
+                nearClip = parameters.nearClip;
+                farClip = parameters.farClip;
+                logDepthScale = parameters.logDepthScale;
+                linearDepthScale = parameters.linearDepthScale;
+                tanHalfFovX = parameters.tanHalfFovX;
+                tanHalfFovY = parameters.tanHalfFovY;
+                orthoHalfWidth = parameters.orthoHalfWidth;
+                orthoHalfHeight = parameters.orthoHalfHeight;
+                isOrthographic = parameters.isOrthographic;
+            }
+        }
+
         [BurstCompile]
         private struct BuildVisibleLightCandidatesJob : IJob
         {
@@ -209,6 +265,25 @@ namespace VividRP.Runtime
                                 lightRenderData));
                     }
                 }
+            }
+        }
+
+        [BurstCompile]
+        private struct BuildPunctualLightScreenSpaceBoundsJob : IJobParallelFor
+        {
+            [ReadOnly]
+            public NativeArray<PunctualLightCullData> punctualLightCullData;
+
+            [WriteOnly]
+            public NativeArray<PunctualLightScreenSpaceBoundsRecord> punctualLightScreenSpaceBounds;
+
+            public PunctualLightScreenSpaceBoundsJobParameters parameters;
+
+            public void Execute(int index)
+            {
+                punctualLightScreenSpaceBounds[index] = BuildPunctualLightScreenSpaceBoundsRecord(
+                    punctualLightCullData[index],
+                    parameters);
             }
         }
 
@@ -344,11 +419,42 @@ namespace VividRP.Runtime
         {
             EnsurePunctualLightCapacity(punctualLightCount);
 
-            for (var lightIndex = 0; lightIndex < punctualLightCount; lightIndex++)
+            if (punctualLightCount <= 0)
+                return;
+
+            var nativePunctualLightCullData = new NativeArray<PunctualLightCullData>(
+                punctualLightCount,
+                Allocator.TempJob,
+                NativeArrayOptions.UninitializedMemory);
+            var nativePunctualLightScreenSpaceBounds = new NativeArray<PunctualLightScreenSpaceBoundsRecord>(
+                punctualLightCount,
+                Allocator.TempJob,
+                NativeArrayOptions.UninitializedMemory);
+
+            try
             {
-                punctualLightScreenSpaceBounds[lightIndex] = CreatePunctualLightScreenSpaceBounds(
-                    punctualLightCullData[lightIndex],
-                    parameters);
+                for (var lightIndex = 0; lightIndex < punctualLightCount; lightIndex++)
+                    nativePunctualLightCullData[lightIndex] = punctualLightCullData[lightIndex];
+
+                var buildScreenSpaceBoundsJob = new BuildPunctualLightScreenSpaceBoundsJob
+                {
+                    punctualLightCullData = nativePunctualLightCullData,
+                    punctualLightScreenSpaceBounds = nativePunctualLightScreenSpaceBounds,
+                    parameters = new PunctualLightScreenSpaceBoundsJobParameters(parameters),
+                };
+
+                buildScreenSpaceBoundsJob.Schedule(punctualLightCount, 32).Complete();
+
+                for (var lightIndex = 0; lightIndex < punctualLightCount; lightIndex++)
+                {
+                    punctualLightScreenSpaceBounds[lightIndex] = ConvertPunctualLightScreenSpaceBounds(
+                        nativePunctualLightScreenSpaceBounds[lightIndex]);
+                }
+            }
+            finally
+            {
+                nativePunctualLightCullData.Dispose();
+                nativePunctualLightScreenSpaceBounds.Dispose();
             }
         }
 
@@ -643,38 +749,10 @@ namespace VividRP.Runtime
             PunctualLightCullData source,
             in PunctualLightScreenSpaceBoundsParameters parameters)
         {
-            var cullingCenterVS = TransformWorldToPositiveViewSpace(parameters.worldToViewMatrix, source.cullingCenterWS);
-            var radius = Mathf.Max(source.cullingRadius, 0.0f);
-            var viewSpaceAabbMin = cullingCenterVS - Vector3.one * radius;
-            var viewSpaceAabbMax = cullingCenterVS + Vector3.one * radius;
-            var bounds = new PunctualLightScreenSpaceBounds
-            {
-                viewSpaceAabbMin = viewSpaceAabbMin,
-                viewSpaceAabbMax = viewSpaceAabbMax,
-            };
-
-            if (radius <= 0.0f)
-                return bounds;
-
-            if (!TryGetPunctualLightSliceRange(viewSpaceAabbMin.z, viewSpaceAabbMax.z, parameters, out var sliceMin, out var sliceMax))
-                return bounds;
-
-            if (!TryGetPunctualLightClipSpaceRect(cullingCenterVS, radius, parameters, out var clipSpaceAabbMin, out var clipSpaceAabbMax))
-                return bounds;
-
-            if (!TryConvertClipRectToTileRange(clipSpaceAabbMin, clipSpaceAabbMax, parameters, out var tileMinX, out var tileMaxX, out var tileMinY, out var tileMaxY))
-                return bounds;
-
-            bounds.clipSpaceAabbMin = clipSpaceAabbMin;
-            bounds.clipSpaceAabbMax = clipSpaceAabbMax;
-            bounds.sliceMin = sliceMin;
-            bounds.sliceMax = sliceMax;
-            bounds.tileMinX = tileMinX;
-            bounds.tileMaxX = tileMaxX;
-            bounds.tileMinY = tileMinY;
-            bounds.tileMaxY = tileMaxY;
-            bounds.isValid = 1u;
-            return bounds;
+            return ConvertPunctualLightScreenSpaceBounds(
+                BuildPunctualLightScreenSpaceBoundsRecord(
+                    source,
+                    new PunctualLightScreenSpaceBoundsJobParameters(parameters)));
         }
 
         private void UpdateVisibleLightData(NativeArray<VisibleLight> visibleLights, Light sunLight, VisibleLightCollectionMask collectionMask)
@@ -970,17 +1048,84 @@ namespace VividRP.Runtime
             return math.max(finalColor.x, math.max(finalColor.y, finalColor.z));
         }
 
-        private static Vector3 TransformWorldToPositiveViewSpace(Matrix4x4 worldToViewMatrix, Vector3 worldPosition)
+        private static PunctualLightScreenSpaceBounds ConvertPunctualLightScreenSpaceBounds(PunctualLightScreenSpaceBoundsRecord source)
         {
-            var viewPosition = worldToViewMatrix.MultiplyPoint3x4(worldPosition);
-            viewPosition.z = -viewPosition.z;
-            return viewPosition;
+            return new PunctualLightScreenSpaceBounds
+            {
+                viewSpaceAabbMin = new Vector3(source.viewSpaceAabbMin.x, source.viewSpaceAabbMin.y, source.viewSpaceAabbMin.z),
+                viewSpaceAabbMax = new Vector3(source.viewSpaceAabbMax.x, source.viewSpaceAabbMax.y, source.viewSpaceAabbMax.z),
+                clipSpaceAabbMin = new Vector2(source.clipSpaceAabbMin.x, source.clipSpaceAabbMin.y),
+                clipSpaceAabbMax = new Vector2(source.clipSpaceAabbMax.x, source.clipSpaceAabbMax.y),
+                sliceMin = source.sliceMin,
+                sliceMax = source.sliceMax,
+                tileMinX = source.tileMinX,
+                tileMaxX = source.tileMaxX,
+                tileMinY = source.tileMinY,
+                tileMaxY = source.tileMaxY,
+                isValid = source.isValid,
+            };
+        }
+
+        private static PunctualLightScreenSpaceBoundsRecord BuildPunctualLightScreenSpaceBoundsRecord(
+            PunctualLightCullData source,
+            in PunctualLightScreenSpaceBoundsJobParameters parameters)
+        {
+            var cullingCenterVS = TransformWorldToPositiveViewSpace(parameters.worldToViewMatrix, source.cullingCenterWS);
+            var radius = math.max(source.cullingRadius, 0.0f);
+            var radiusVector = new float3(radius, radius, radius);
+            var viewSpaceAabbMin = cullingCenterVS - radiusVector;
+            var viewSpaceAabbMax = cullingCenterVS + radiusVector;
+            var bounds = new PunctualLightScreenSpaceBoundsRecord
+            {
+                viewSpaceAabbMin = viewSpaceAabbMin,
+                viewSpaceAabbMax = viewSpaceAabbMax,
+            };
+
+            if (radius <= 0.0f)
+                return bounds;
+
+            if (!TryGetPunctualLightSliceRange(viewSpaceAabbMin.z, viewSpaceAabbMax.z, parameters, out var sliceMin, out var sliceMax))
+                return bounds;
+
+            if (!TryGetPunctualLightClipSpaceRect(cullingCenterVS, radius, parameters, out var clipSpaceAabbMin, out var clipSpaceAabbMax))
+                return bounds;
+
+            if (!TryConvertClipRectToTileRange(clipSpaceAabbMin, clipSpaceAabbMax, parameters, out var tileMinX, out var tileMaxX, out var tileMinY, out var tileMaxY))
+                return bounds;
+
+            bounds.clipSpaceAabbMin = clipSpaceAabbMin;
+            bounds.clipSpaceAabbMax = clipSpaceAabbMax;
+            bounds.sliceMin = sliceMin;
+            bounds.sliceMax = sliceMax;
+            bounds.tileMinX = tileMinX;
+            bounds.tileMaxX = tileMaxX;
+            bounds.tileMinY = tileMinY;
+            bounds.tileMaxY = tileMaxY;
+            bounds.isValid = 1u;
+            return bounds;
+        }
+
+        private static float4x4 ToFloat4x4(Matrix4x4 source)
+        {
+            return new float4x4(
+                new float4(source.m00, source.m10, source.m20, source.m30),
+                new float4(source.m01, source.m11, source.m21, source.m31),
+                new float4(source.m02, source.m12, source.m22, source.m32),
+                new float4(source.m03, source.m13, source.m23, source.m33));
+        }
+
+        private static float3 TransformWorldToPositiveViewSpace(float4x4 worldToViewMatrix, Vector3 worldPosition)
+        {
+            var viewPosition = math.mul(
+                worldToViewMatrix,
+                new float4(worldPosition.x, worldPosition.y, worldPosition.z, 1.0f));
+            return new float3(viewPosition.x, viewPosition.y, -viewPosition.z);
         }
 
         private static bool TryGetPunctualLightSliceRange(
             float depthMin,
             float depthMax,
-            in PunctualLightScreenSpaceBoundsParameters parameters,
+            in PunctualLightScreenSpaceBoundsJobParameters parameters,
             out int sliceMin,
             out int sliceMax)
         {
@@ -990,19 +1135,19 @@ namespace VividRP.Runtime
             if (depthMax < parameters.nearClip || depthMin > parameters.farClip)
                 return false;
 
-            depthMin = Mathf.Max(depthMin, parameters.nearClip);
-            depthMax = Mathf.Min(depthMax, parameters.farClip);
+            depthMin = math.max(depthMin, parameters.nearClip);
+            depthMax = math.min(depthMax, parameters.farClip);
             sliceMin = GetClusterSliceIndex(depthMin, parameters);
             sliceMax = GetClusterSliceIndex(depthMax, parameters);
             return sliceMax >= sliceMin;
         }
 
         private static bool TryGetPunctualLightClipSpaceRect(
-            Vector3 cullingCenterVS,
+            float3 cullingCenterVS,
             float radius,
-            in PunctualLightScreenSpaceBoundsParameters parameters,
-            out Vector2 clipSpaceAabbMin,
-            out Vector2 clipSpaceAabbMax)
+            in PunctualLightScreenSpaceBoundsJobParameters parameters,
+            out float2 clipSpaceAabbMin,
+            out float2 clipSpaceAabbMax)
         {
             clipSpaceAabbMin = default;
             clipSpaceAabbMax = default;
@@ -1014,8 +1159,8 @@ namespace VividRP.Runtime
 
             if (parameters.isOrthographic != 0)
             {
-                var orthoHalfWidth = Mathf.Max(parameters.orthoHalfWidth, 1e-6f);
-                var orthoHalfHeight = Mathf.Max(parameters.orthoHalfHeight, 1e-6f);
+                var orthoHalfWidth = math.max(parameters.orthoHalfWidth, 1e-6f);
+                var orthoHalfHeight = math.max(parameters.orthoHalfHeight, 1e-6f);
                 minClipX = (cullingCenterVS.x - radius) / orthoHalfWidth;
                 maxClipX = (cullingCenterVS.x + radius) / orthoHalfWidth;
                 minClipY = (cullingCenterVS.y - radius) / orthoHalfHeight;
@@ -1023,43 +1168,39 @@ namespace VividRP.Runtime
             }
             else
             {
-                var projectionDepth = Mathf.Max(cullingCenterVS.z - radius, parameters.nearClip);
-                var projectedHalfWidth = Mathf.Max(projectionDepth * parameters.tanHalfFovX, 1e-6f);
-                var projectedHalfHeight = Mathf.Max(projectionDepth * parameters.tanHalfFovY, 1e-6f);
+                var projectionDepth = math.max(cullingCenterVS.z - radius, parameters.nearClip);
+                var projectedHalfWidth = math.max(projectionDepth * parameters.tanHalfFovX, 1e-6f);
+                var projectedHalfHeight = math.max(projectionDepth * parameters.tanHalfFovY, 1e-6f);
                 minClipX = (cullingCenterVS.x - radius) / projectedHalfWidth;
                 maxClipX = (cullingCenterVS.x + radius) / projectedHalfWidth;
                 minClipY = (cullingCenterVS.y - radius) / projectedHalfHeight;
                 maxClipY = (cullingCenterVS.y + radius) / projectedHalfHeight;
             }
 
-            clipSpaceAabbMin = new Vector2(
-                Mathf.Min(minClipX, maxClipX),
-                Mathf.Min(minClipY, maxClipY));
-            clipSpaceAabbMax = new Vector2(
-                Mathf.Max(minClipX, maxClipX),
-                Mathf.Max(minClipY, maxClipY));
+            clipSpaceAabbMin = new float2(math.min(minClipX, maxClipX), math.min(minClipY, maxClipY));
+            clipSpaceAabbMax = new float2(math.max(minClipX, maxClipX), math.max(minClipY, maxClipY));
             return true;
         }
 
-        private static int GetClusterSliceIndex(float depth, in PunctualLightScreenSpaceBoundsParameters parameters)
+        private static int GetClusterSliceIndex(float depth, in PunctualLightScreenSpaceBoundsJobParameters parameters)
         {
-            depth = Mathf.Clamp(depth, parameters.nearClip, parameters.farClip);
+            depth = math.clamp(depth, parameters.nearClip, parameters.farClip);
 
             if (parameters.isOrthographic != 0)
             {
-                var linearSlice = Mathf.FloorToInt((depth - parameters.nearClip) * parameters.linearDepthScale);
-                return Mathf.Clamp(linearSlice, 0, parameters.sliceCount - 1);
+                var linearSlice = (int)math.floor((depth - parameters.nearClip) * parameters.linearDepthScale);
+                return math.clamp(linearSlice, 0, parameters.sliceCount - 1);
             }
 
-            var logarithmicDepth = Mathf.Log(Mathf.Max(depth / Mathf.Max(parameters.nearClip, 1e-6f), 1.0f), 2.0f);
-            var logarithmicSlice = Mathf.FloorToInt(logarithmicDepth * parameters.logDepthScale);
-            return Mathf.Clamp(logarithmicSlice, 0, parameters.sliceCount - 1);
+            var logarithmicDepth = math.log2(math.max(depth / math.max(parameters.nearClip, 1e-6f), 1.0f));
+            var logarithmicSlice = (int)math.floor(logarithmicDepth * parameters.logDepthScale);
+            return math.clamp(logarithmicSlice, 0, parameters.sliceCount - 1);
         }
 
         private static bool TryConvertClipRectToTileRange(
-            Vector2 clipSpaceAabbMin,
-            Vector2 clipSpaceAabbMax,
-            in PunctualLightScreenSpaceBoundsParameters parameters,
+            float2 clipSpaceAabbMin,
+            float2 clipSpaceAabbMax,
+            in PunctualLightScreenSpaceBoundsJobParameters parameters,
             out int tileMinX,
             out int tileMaxX,
             out int tileMinY,
@@ -1074,12 +1215,12 @@ namespace VividRP.Runtime
             var screenMaxX = GetScreenXFromClipSpace(clipSpaceAabbMax.x, parameters.screenWidth);
             var screenMinY = GetScreenYFromClipSpace(clipSpaceAabbMax.y, parameters.screenHeight);
             var screenMaxY = GetScreenYFromClipSpace(clipSpaceAabbMin.y, parameters.screenHeight);
-            var rectMinX = Mathf.Min(screenMinX, screenMaxX);
-            var rectMaxX = Mathf.Max(screenMinX, screenMaxX);
-            var rectMinY = Mathf.Min(screenMinY, screenMaxY);
-            var rectMaxY = Mathf.Max(screenMinY, screenMaxY);
-            var maxPixelX = Mathf.Max(parameters.screenWidth - 1, 0);
-            var maxPixelY = Mathf.Max(parameters.screenHeight - 1, 0);
+            var rectMinX = math.min(screenMinX, screenMaxX);
+            var rectMaxX = math.max(screenMinX, screenMaxX);
+            var rectMinY = math.min(screenMinY, screenMaxY);
+            var rectMaxY = math.max(screenMinY, screenMaxY);
+            var maxPixelX = (float)math.max(parameters.screenWidth - 1, 0);
+            var maxPixelY = (float)math.max(parameters.screenHeight - 1, 0);
 
             if (rectMaxX < 0.0f
                 || rectMinX > maxPixelX
@@ -1089,14 +1230,14 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            var clampedMinX = Mathf.Clamp(rectMinX, 0.0f, maxPixelX);
-            var clampedMaxX = Mathf.Clamp(rectMaxX, 0.0f, maxPixelX);
-            var clampedMinY = Mathf.Clamp(rectMinY, 0.0f, maxPixelY);
-            var clampedMaxY = Mathf.Clamp(rectMaxY, 0.0f, maxPixelY);
-            tileMinX = Mathf.Clamp(Mathf.FloorToInt(clampedMinX / parameters.tileSize), 0, parameters.tileCountX - 1);
-            tileMaxX = Mathf.Clamp(Mathf.FloorToInt(clampedMaxX / parameters.tileSize), 0, parameters.tileCountX - 1);
-            tileMinY = Mathf.Clamp(Mathf.FloorToInt(clampedMinY / parameters.tileSize), 0, parameters.tileCountY - 1);
-            tileMaxY = Mathf.Clamp(Mathf.FloorToInt(clampedMaxY / parameters.tileSize), 0, parameters.tileCountY - 1);
+            var clampedMinX = math.clamp(rectMinX, 0.0f, maxPixelX);
+            var clampedMaxX = math.clamp(rectMaxX, 0.0f, maxPixelX);
+            var clampedMinY = math.clamp(rectMinY, 0.0f, maxPixelY);
+            var clampedMaxY = math.clamp(rectMaxY, 0.0f, maxPixelY);
+            tileMinX = math.clamp((int)math.floor(clampedMinX / parameters.tileSize), 0, parameters.tileCountX - 1);
+            tileMaxX = math.clamp((int)math.floor(clampedMaxX / parameters.tileSize), 0, parameters.tileCountX - 1);
+            tileMinY = math.clamp((int)math.floor(clampedMinY / parameters.tileSize), 0, parameters.tileCountY - 1);
+            tileMaxY = math.clamp((int)math.floor(clampedMaxY / parameters.tileSize), 0, parameters.tileCountY - 1);
             return true;
         }
 

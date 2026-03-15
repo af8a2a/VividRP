@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
@@ -53,6 +54,21 @@ namespace VividRP.Runtime
             public float cullingRadius;
 
             internal static int Stride => Marshal.SizeOf<PunctualLightCullData>();
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct PunctualLightViewSpaceCullData
+        {
+            public Vector3 positionVS;
+            public float range;
+            public Vector3 directionVS;
+            public float cosOuterAngle;
+            public Vector3 cullingCenterVS;
+            public float cullingRadius;
+            public uint lightType;
+            public float radiusAtRange;
+
+            internal static int Stride => Marshal.SizeOf<PunctualLightViewSpaceCullData>();
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -198,6 +214,19 @@ namespace VividRP.Runtime
         }
 
         [StructLayout(LayoutKind.Sequential)]
+        private struct PunctualLightViewSpaceCullDataRecord
+        {
+            public float3 positionVS;
+            public float range;
+            public float3 directionVS;
+            public float cosOuterAngle;
+            public float3 cullingCenterVS;
+            public float cullingRadius;
+            public uint lightType;
+            public float radiusAtRange;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
         private struct PunctualLightScreenSpaceBoundsRecord
         {
             public float3 viewSpaceAabbMin;
@@ -290,10 +319,13 @@ namespace VividRP.Runtime
         }
 
         [BurstCompile]
-        private struct BuildPunctualLightScreenSpaceBoundsJob : IJobParallelFor
+        private struct BuildPunctualLightClusteredCullDataJob : IJobParallelFor
         {
             [ReadOnly]
             public NativeArray<PunctualLightCullData> punctualLightCullData;
+
+            [WriteOnly]
+            public NativeArray<PunctualLightViewSpaceCullDataRecord> punctualLightViewSpaceCullData;
 
             [WriteOnly]
             public NativeArray<PunctualLightScreenSpaceBoundsRecord> punctualLightScreenSpaceBounds;
@@ -302,8 +334,12 @@ namespace VividRP.Runtime
 
             public void Execute(int index)
             {
-                punctualLightScreenSpaceBounds[index] = BuildPunctualLightScreenSpaceBoundsRecord(
+                var viewSpaceCullData = BuildPunctualLightViewSpaceCullDataRecord(
                     punctualLightCullData[index],
+                    parameters.worldToViewMatrix);
+                punctualLightViewSpaceCullData[index] = viewSpaceCullData;
+                punctualLightScreenSpaceBounds[index] = BuildPunctualLightScreenSpaceBoundsRecord(
+                    viewSpaceCullData,
                     parameters);
             }
         }
@@ -348,6 +384,7 @@ namespace VividRP.Runtime
             public NativeArray<int> sliceStartOffsets;
 
             [WriteOnly]
+            [NativeDisableParallelForRestriction]
             public NativeArray<PunctualLightCoarseRecord> punctualLightCoarseRecords;
 
             public void Execute(int sliceIndex)
@@ -381,6 +418,7 @@ namespace VividRP.Runtime
         public DirectionalLightData[] directionalLights = Array.Empty<DirectionalLightData>();
         public PunctualLightData[] punctualLights = Array.Empty<PunctualLightData>();
         public PunctualLightCullData[] punctualLightCullData = Array.Empty<PunctualLightCullData>();
+        public PunctualLightViewSpaceCullData[] punctualLightViewSpaceCullData = Array.Empty<PunctualLightViewSpaceCullData>();
         public PunctualLightScreenSpaceBounds[] punctualLightScreenSpaceBounds = Array.Empty<PunctualLightScreenSpaceBounds>();
         public PunctualLightCoarseRange[] punctualLightCoarseRanges = Array.Empty<PunctualLightCoarseRange>();
         public PunctualLightCoarseRecord[] punctualLightCoarseRecords = Array.Empty<PunctualLightCoarseRecord>();
@@ -512,6 +550,11 @@ namespace VividRP.Runtime
 
         internal void UpdatePunctualLightScreenSpaceBounds(in PunctualLightScreenSpaceBoundsParameters parameters)
         {
+            UpdatePunctualLightClusteredCullData(parameters);
+        }
+
+        internal void UpdatePunctualLightClusteredCullData(in PunctualLightScreenSpaceBoundsParameters parameters)
+        {
             EnsurePunctualLightCapacity(punctualLightCount);
             punctualLightCoarseRangeCount = 0;
             punctualLightCoarseRecordCount = 0;
@@ -520,6 +563,10 @@ namespace VividRP.Runtime
                 return;
 
             var nativePunctualLightCullData = new NativeArray<PunctualLightCullData>(
+                punctualLightCount,
+                Allocator.TempJob,
+                NativeArrayOptions.UninitializedMemory);
+            var nativePunctualLightViewSpaceCullData = new NativeArray<PunctualLightViewSpaceCullDataRecord>(
                 punctualLightCount,
                 Allocator.TempJob,
                 NativeArrayOptions.UninitializedMemory);
@@ -533,17 +580,20 @@ namespace VividRP.Runtime
                 for (var lightIndex = 0; lightIndex < punctualLightCount; lightIndex++)
                     nativePunctualLightCullData[lightIndex] = punctualLightCullData[lightIndex];
 
-                var buildScreenSpaceBoundsJob = new BuildPunctualLightScreenSpaceBoundsJob
+                var buildClusteredCullDataJob = new BuildPunctualLightClusteredCullDataJob
                 {
                     punctualLightCullData = nativePunctualLightCullData,
+                    punctualLightViewSpaceCullData = nativePunctualLightViewSpaceCullData,
                     punctualLightScreenSpaceBounds = nativePunctualLightScreenSpaceBounds,
                     parameters = new PunctualLightScreenSpaceBoundsJobParameters(parameters),
                 };
 
-                buildScreenSpaceBoundsJob.Schedule(punctualLightCount, 32).Complete();
+                buildClusteredCullDataJob.Schedule(punctualLightCount, 32).Complete();
 
                 for (var lightIndex = 0; lightIndex < punctualLightCount; lightIndex++)
                 {
+                    punctualLightViewSpaceCullData[lightIndex] = ConvertPunctualLightViewSpaceCullData(
+                        nativePunctualLightViewSpaceCullData[lightIndex]);
                     punctualLightScreenSpaceBounds[lightIndex] = ConvertPunctualLightScreenSpaceBounds(
                         nativePunctualLightScreenSpaceBounds[lightIndex]);
                 }
@@ -551,6 +601,7 @@ namespace VividRP.Runtime
             finally
             {
                 nativePunctualLightCullData.Dispose();
+                nativePunctualLightViewSpaceCullData.Dispose();
                 nativePunctualLightScreenSpaceBounds.Dispose();
             }
         }
@@ -631,7 +682,9 @@ namespace VividRP.Runtime
                 };
 
                 buildCoarseRecordsJob.Schedule(sliceCount, 1).Complete();
-                nativePunctualLightCoarseRecords.CopyTo(punctualLightCoarseRecords);
+
+                for (var recordIndex = 0; recordIndex < punctualLightCoarseRecordCount; recordIndex++)
+                    punctualLightCoarseRecords[recordIndex] = nativePunctualLightCoarseRecords[recordIndex];
             }
             finally
             {
@@ -656,6 +709,7 @@ namespace VividRP.Runtime
             punctualLightCoarseRecordCount = 0;
             mainDirectionalLightIndex = -1;
             mainDirectionalLightEntityId = EntityId.None;
+            punctualLightViewSpaceCullData = Array.Empty<PunctualLightViewSpaceCullData>();
             punctualLightScreenSpaceBounds = Array.Empty<PunctualLightScreenSpaceBounds>();
             punctualLightCoarseRanges = Array.Empty<PunctualLightCoarseRange>();
             punctualLightCoarseRecords = Array.Empty<PunctualLightCoarseRecord>();
@@ -806,6 +860,9 @@ namespace VividRP.Runtime
             if (requiredCapacity > punctualLightCullData.Length)
                 punctualLightCullData = new PunctualLightCullData[requiredCapacity];
 
+            if (requiredCapacity > punctualLightViewSpaceCullData.Length)
+                punctualLightViewSpaceCullData = new PunctualLightViewSpaceCullData[requiredCapacity];
+
             if (requiredCapacity > punctualLightScreenSpaceBounds.Length)
                 punctualLightScreenSpaceBounds = new PunctualLightScreenSpaceBounds[requiredCapacity];
         }
@@ -948,10 +1005,11 @@ namespace VividRP.Runtime
             PunctualLightCullData source,
             in PunctualLightScreenSpaceBoundsParameters parameters)
         {
+            var jobParameters = new PunctualLightScreenSpaceBoundsJobParameters(parameters);
             return ConvertPunctualLightScreenSpaceBounds(
                 BuildPunctualLightScreenSpaceBoundsRecord(
-                    source,
-                    new PunctualLightScreenSpaceBoundsJobParameters(parameters)));
+                    BuildPunctualLightViewSpaceCullDataRecord(source, jobParameters.worldToViewMatrix),
+                    jobParameters));
         }
 
         private void UpdateVisibleLightData(NativeArray<VisibleLight> visibleLights, Light sunLight, VisibleLightCollectionMask collectionMask)
@@ -1271,6 +1329,21 @@ namespace VividRP.Runtime
             };
         }
 
+        private static PunctualLightViewSpaceCullData ConvertPunctualLightViewSpaceCullData(PunctualLightViewSpaceCullDataRecord source)
+        {
+            return new PunctualLightViewSpaceCullData
+            {
+                positionVS = new Vector3(source.positionVS.x, source.positionVS.y, source.positionVS.z),
+                range = source.range,
+                directionVS = new Vector3(source.directionVS.x, source.directionVS.y, source.directionVS.z),
+                cosOuterAngle = source.cosOuterAngle,
+                cullingCenterVS = new Vector3(source.cullingCenterVS.x, source.cullingCenterVS.y, source.cullingCenterVS.z),
+                cullingRadius = source.cullingRadius,
+                lightType = source.lightType,
+                radiusAtRange = source.radiusAtRange,
+            };
+        }
+
         private static PunctualLightScreenSpaceBoundsRecord ConvertPunctualLightScreenSpaceBoundsRecord(PunctualLightScreenSpaceBounds source)
         {
             return new PunctualLightScreenSpaceBoundsRecord
@@ -1289,15 +1362,35 @@ namespace VividRP.Runtime
             };
         }
 
-        private static PunctualLightScreenSpaceBoundsRecord BuildPunctualLightScreenSpaceBoundsRecord(
+        private static PunctualLightViewSpaceCullDataRecord BuildPunctualLightViewSpaceCullDataRecord(
             PunctualLightCullData source,
+            float4x4 worldToViewMatrix)
+        {
+            var positionVS = TransformWorldToPositiveViewSpace(worldToViewMatrix, source.positionWS);
+            var directionVS = NormalizeDirection(TransformWorldVectorToPositiveViewSpace(worldToViewMatrix, source.directionWS), new float3(0.0f, 0.0f, 1.0f));
+            var cullingCenterVS = TransformWorldToPositiveViewSpace(worldToViewMatrix, source.cullingCenterWS);
+
+            return new PunctualLightViewSpaceCullDataRecord
+            {
+                positionVS = positionVS,
+                range = source.range,
+                directionVS = directionVS,
+                cosOuterAngle = source.cosOuterAngle,
+                cullingCenterVS = cullingCenterVS,
+                cullingRadius = source.cullingRadius,
+                lightType = source.lightType,
+                radiusAtRange = source.radiusAtRange,
+            };
+        }
+
+        private static PunctualLightScreenSpaceBoundsRecord BuildPunctualLightScreenSpaceBoundsRecord(
+            PunctualLightViewSpaceCullDataRecord source,
             in PunctualLightScreenSpaceBoundsJobParameters parameters)
         {
-            var cullingCenterVS = TransformWorldToPositiveViewSpace(parameters.worldToViewMatrix, source.cullingCenterWS);
             var radius = math.max(source.cullingRadius, 0.0f);
             var radiusVector = new float3(radius, radius, radius);
-            var viewSpaceAabbMin = cullingCenterVS - radiusVector;
-            var viewSpaceAabbMax = cullingCenterVS + radiusVector;
+            var viewSpaceAabbMin = source.cullingCenterVS - radiusVector;
+            var viewSpaceAabbMax = source.cullingCenterVS + radiusVector;
             var bounds = new PunctualLightScreenSpaceBoundsRecord
             {
                 viewSpaceAabbMin = viewSpaceAabbMin,
@@ -1310,7 +1403,7 @@ namespace VividRP.Runtime
             if (!TryGetPunctualLightSliceRange(viewSpaceAabbMin.z, viewSpaceAabbMax.z, parameters, out var sliceMin, out var sliceMax))
                 return bounds;
 
-            if (!TryGetPunctualLightClipSpaceRect(cullingCenterVS, radius, parameters, out var clipSpaceAabbMin, out var clipSpaceAabbMax))
+            if (!TryGetPunctualLightClipSpaceRect(source.cullingCenterVS, radius, parameters, out var clipSpaceAabbMin, out var clipSpaceAabbMax))
                 return bounds;
 
             if (!TryConvertClipRectToTileRange(clipSpaceAabbMin, clipSpaceAabbMax, parameters, out var tileMinX, out var tileMaxX, out var tileMinY, out var tileMaxY))
@@ -1343,6 +1436,23 @@ namespace VividRP.Runtime
                 worldToViewMatrix,
                 new float4(worldPosition.x, worldPosition.y, worldPosition.z, 1.0f));
             return new float3(viewPosition.x, viewPosition.y, -viewPosition.z);
+        }
+
+        private static float3 TransformWorldVectorToPositiveViewSpace(float4x4 worldToViewMatrix, Vector3 worldDirection)
+        {
+            var viewDirection = math.mul(
+                worldToViewMatrix,
+                new float4(worldDirection.x, worldDirection.y, worldDirection.z, 0.0f));
+            return new float3(viewDirection.x, viewDirection.y, -viewDirection.z);
+        }
+
+        private static float3 NormalizeDirection(float3 direction, float3 fallback)
+        {
+            var lengthSq = math.lengthsq(direction);
+            if (lengthSq <= 1e-6f)
+                return fallback;
+
+            return direction * math.rsqrt(lengthSq);
         }
 
         private static bool TryGetPunctualLightSliceRange(

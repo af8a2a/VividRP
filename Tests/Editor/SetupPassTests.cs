@@ -194,11 +194,7 @@ namespace VividRP.Editor.Tests
 
         private static int GetPunctualCullUploadStride()
         {
-            var uploadType = typeof(LightGridPass).GetNestedType("PunctualLightCullUploadData", BindingFlags.NonPublic);
-
-            Assert.That(uploadType, Is.Not.Null);
-
-            return Marshal.SizeOf(uploadType);
+            return VividLightData.PunctualLightViewSpaceCullData.Stride;
         }
 
         private static int GetCoarseRangeUploadStride()

@@ -965,6 +965,7 @@ namespace VividRP.Runtime
                 punctualLightVolumeData[lightIndex] = buildContext.punctualLightVolumeData[lightIndex];
             }
         }
+        
 
         private static void RunPunctualLightCoarseRangeCountJob(
             NativeArray<PunctualLightScreenSpaceBoundsRecord> nativePunctualLightScreenSpaceBounds,

@@ -30,7 +30,6 @@ namespace VividRP.Runtime
         {
             foreach (var camera in cameras)
                 RenderCamera(context, camera);
-
             m_RenderGraph.EndFrame();
         }
 
@@ -129,6 +128,11 @@ namespace VividRP.Runtime
             }
         }
 
+        internal static void ReleaseConstantBuffersForShutdown()
+        {
+            ConstantBuffer.ReleaseAll();
+        }
+
         protected override void Dispose(bool disposing)
         {
             PassRecorder.Dispose();
@@ -139,6 +143,7 @@ namespace VividRP.Runtime
             BlueNoise.Cleanup();
             Blitter.Cleanup();
             PipelineResourceManager.Cleanup();
+            ReleaseConstantBuffersForShutdown();
             base.Dispose(disposing);
         }
 

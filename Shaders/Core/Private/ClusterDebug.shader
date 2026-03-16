@@ -19,7 +19,7 @@ Shader "Hidden/VividRP/ClusterDebug"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Debug.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl"
 
             #define VIVID_TILE_CLUSTER_DEBUG_NONE 0
             #define VIVID_TILE_CLUSTER_DEBUG_TILE 1
@@ -109,7 +109,7 @@ Shader "Hidden/VividRP/ClusterDebug"
                 }
 
                 isValid = true;
-                return GetClusterViewDepth(pixelUv, deviceDepth);
+                return VividClusteredLighting::GetViewDepth(pixelUv, deviceDepth);
             }
 
             float EvaluatePunctualLightDistanceAttenuationForDebug(PunctualLightData punctualLight, float distanceSquared)
@@ -177,9 +177,9 @@ Shader "Hidden/VividRP/ClusterDebug"
                 if (!isValid)
                     return sourceColor;
 
-                uint2 clusterLightRange = GetClusterLightRange(pixelCoord, viewDepth);
-                uint lightCount = clusterLightRange.y;
-                uint sliceIndex = GetClusterSliceIndex(pixelCoord, viewDepth);
+                VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, viewDepth);
+                uint lightCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+                uint sliceIndex = VividClusteredLighting::GetSliceIndex(pixelCoord, viewDepth);
                 float3 sliceTint = EvaluateSliceTint(sliceIndex);
                 uint tileSize = max((uint)_ClusterTileSize, 1u);
                 uint2 tileSize2 = uint2(tileSize, tileSize);

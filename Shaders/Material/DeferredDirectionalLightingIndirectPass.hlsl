@@ -3,7 +3,7 @@
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl"
 
 TEXTURE2D_X(_GBuffer0);
 TEXTURE2D_X(_GBuffer1);
@@ -249,13 +249,13 @@ float3 EvaluateDeferredDirectionalLighting(VividGBufferSurfaceData surfaceData, 
 
     if (HasPunctualLights())
     {
-        uint2 clusterLightRange = GetClusterLightRange(pixelCoord, positionWS);
+        VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
+        uint punctualLightCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
 
         [loop]
-        for (uint lightOffset = 0; lightOffset < clusterLightRange.y; lightOffset++)
+        for (uint localLightIndex = 0; localLightIndex < punctualLightCount; localLightIndex++)
         {
-            uint lightIndex = GetClusterLightIndex(clusterLightRange.x, lightOffset);
-            PunctualLightData punctualLight = GetPunctualLight(lightIndex);
+            PunctualLightData punctualLight = VividLightingLoop::LoadPunctualLight(lightLoop, localLightIndex);
             lighting += EvaluatePunctualLight(surfaceData, positionWS, viewDirectionWS, punctualLight);
         }
     }

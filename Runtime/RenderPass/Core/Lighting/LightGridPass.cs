@@ -6,7 +6,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
 {
-    public class LightGridPass : ComputePass, IAsyncComputeSupportedPass
+    public class LightGridPass : ComputePass
     {
         internal const int ClusterTileSize = 32;
         internal const int ClusterBigTileSize = 64;

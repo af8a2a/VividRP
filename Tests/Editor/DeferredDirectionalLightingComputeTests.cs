@@ -20,10 +20,12 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("_GBuffer3"));
             Assert.That(source, Does.Contain("_DepthTexture"));
             Assert.That(source, Does.Contain("_LightingTexture"));
-            Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl\""));
+            Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl\""));
             Assert.That(source, Does.Contain("_DirectionalLightCount"));
             Assert.That(source, Does.Contain("_PunctualLightCount"));
-            Assert.That(source, Does.Contain("GetClusterLightIndex"));
+            Assert.That(source, Does.Contain("VividLightingLoop::Create"));
+            Assert.That(source, Does.Contain("VividLightingLoop::GetPunctualLightCount"));
+            Assert.That(source, Does.Contain("VividLightingLoop::LoadPunctualLight"));
             Assert.That(source, Does.Contain("EvaluateDeferredDirectionalLighting"));
             Assert.That(source, Does.Contain("EvaluatePunctualLight"));
             Assert.That(source, Does.Contain("ComputeWorldSpacePosition"));

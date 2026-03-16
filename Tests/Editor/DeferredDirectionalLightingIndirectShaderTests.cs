@@ -22,7 +22,10 @@ namespace VividRP.Editor.Tests
             Assert.That(hlslSource, Does.Contain("_LightingHeight"));
             Assert.That(hlslSource, Does.Contain("_DirectionalLightCount"));
             Assert.That(hlslSource, Does.Contain("_PunctualLightCount"));
-            Assert.That(hlslSource, Does.Contain("GetClusterLightIndex"));
+            Assert.That(hlslSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl\""));
+            Assert.That(hlslSource, Does.Contain("VividLightingLoop::Create"));
+            Assert.That(hlslSource, Does.Contain("VividLightingLoop::GetPunctualLightCount"));
+            Assert.That(hlslSource, Does.Contain("VividLightingLoop::LoadPunctualLight"));
             Assert.That(hlslSource, Does.Contain("EvaluateDeferredDirectionalLighting"));
             Assert.That(hlslSource, Does.Contain("EvaluatePunctualLight"));
             Assert.That(hlslSource, Does.Contain("ComputeWorldSpacePosition"));

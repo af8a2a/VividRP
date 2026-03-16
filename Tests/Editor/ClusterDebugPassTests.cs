@@ -138,7 +138,9 @@ namespace VividRP.Editor.Tests
             var shaderSource = File.ReadAllText(GetShaderSourcePath());
 
             Assert.That(shaderSource, Does.Contain("#include \"Packages/com.unity.render-pipelines.core/ShaderLibrary/Debug.hlsl\""));
+            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl\""));
             Assert.That(shaderSource, Does.Contain("OverlayHeatMap("));
+            Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetPunctualLightCount"));
             Assert.That(shaderSource, Does.Contain("float2 pixelUv = (float2(pixelCoord) + 0.5) * _ClusterDebugLightViewportSize.zw;"));
             Assert.That(shaderSource, Does.Contain("SAMPLE_TEXTURE2D_LOD(_CameraDepthTexture, sampler_PointClamp, depthUv, 0).r"));
         }

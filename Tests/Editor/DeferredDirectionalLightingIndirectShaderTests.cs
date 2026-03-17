@@ -45,23 +45,33 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void DeferredDirectionalLightingPass_UsesUnsafeComputeDispatchAndBindsIblGlobals()
+        public void DeferredDirectionalLightingPass_UsesUnsafeComputeDispatchAndRenderGraphBackedIblTextures()
         {
             var passSource = File.ReadAllText(GetRenderPassSourcePath());
 
             Assert.That(passSource, Does.Contain("DeferredLitCompute"));
             Assert.That(passSource, Does.Contain("VividPreIntegratedFGD"));
             Assert.That(passSource, Does.Contain("GetNativeCommandBuffer"));
-            Assert.That(passSource, Does.Contain("BindSkyIblGlobals"));
+            Assert.That(passSource, Does.Contain("RenderPreIntegratedFGD"));
+            Assert.That(passSource, Does.Contain("BindIndirectLightingParameters"));
+            Assert.That(passSource, Does.Contain("PrepareSkyIblState"));
+            Assert.That(passSource, Does.Contain("PassRecorder.ImportTexture"));
+            Assert.That(passSource, Does.Contain("PreIntegratedFGD_GGXDisneyDiffuse"));
+            Assert.That(passSource, Does.Contain("PreIntegratedFGD_CharlieAndFabric"));
             Assert.That(passSource, Does.Contain("MaterialPixelIndicesId"));
             Assert.That(passSource, Does.Contain("MaterialDispatchArgsId"));
             Assert.That(passSource, Does.Contain("DispatchMaterialClass"));
             Assert.That(passSource, Does.Contain("SetComputeTextureParam"));
+            Assert.That(passSource, Does.Contain("SetComputeVectorParam"));
             Assert.That(passSource, Does.Contain("SetComputeBufferParam"));
             Assert.That(passSource, Does.Contain("DispatchCompute"));
+            Assert.That(passSource, Does.Contain("CoreUtils.DrawFullScreen"));
             Assert.That(passSource, Does.Not.Contain("DrawProceduralIndirect"));
             Assert.That(passSource, Does.Not.Contain("MeshTopology.Points"));
             Assert.That(passSource, Does.Not.Contain("DeferredDirectionalLightingIndirectShaderName"));
+            Assert.That(passSource, Does.Not.Contain("SetGlobalTexture("));
+            Assert.That(passSource, Does.Not.Contain("SetGlobalColor("));
+            Assert.That(passSource, Does.Not.Contain("SetGlobalVector("));
         }
 
         private static string GetShaderSourcePath()

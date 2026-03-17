@@ -21,7 +21,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Initialize_RegistersGBufferInputsClassificationBuffersAndColorOutput_WhenPassIsCreated()
+        public void Initialize_RegistersDeferredInputsAndPreIntegratedFgdOutputs_WhenPassIsCreated()
         {
             IRenderPass renderPass = new DeferredDirectionalLightingPass();
 
@@ -36,11 +36,22 @@ namespace VividRP.Editor.Tests
                 "GBuffer0",
                 "GBuffer1",
                 "GBuffer2",
-                "GBuffer3"
+                "GBuffer3",
+                "PreIntegratedFGD_CharlieAndFabric",
+                "PreIntegratedFGD_GGXDisneyDiffuse",
+                "SkyIBLCubemap"
             }));
             Assert.That(textureEntries.Single(entry => entry.Name == "Color").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(textureEntries.Single(entry => entry.Name == "Color").AttachmentIndex, Is.EqualTo(0));
-            Assert.That(textureEntries.Where(entry => entry.Name != "Color").Select(entry => entry.Access).Distinct(), Is.EqualTo(new[] { AccessFlags.Read }));
+            Assert.That(textureEntries.Single(entry => entry.Name == "SkyIBLCubemap").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(textureEntries.Single(entry => entry.Name == "PreIntegratedFGD_GGXDisneyDiffuse").Access, Is.EqualTo(AccessFlags.ReadWrite));
+            Assert.That(textureEntries.Single(entry => entry.Name == "PreIntegratedFGD_CharlieAndFabric").Access, Is.EqualTo(AccessFlags.ReadWrite));
+            Assert.That(
+                textureEntries
+                    .Where(entry => entry.Name is not "Color" and not "SkyIBLCubemap" and not "PreIntegratedFGD_GGXDisneyDiffuse" and not "PreIntegratedFGD_CharlieAndFabric")
+                    .Select(entry => entry.Access)
+                    .Distinct(),
+                Is.EqualTo(new[] { AccessFlags.Read }));
 
             Assert.That(bufferEntries.Select(entry => entry.Name), Is.EqualTo(new[]
             {
@@ -71,6 +82,8 @@ namespace VividRP.Editor.Tests
             AssertTextureSize(pass, "m_GBuffer3", 511, 257);
             AssertTextureSize(pass, "m_DepthTexture", 511, 257);
             AssertTextureSize(pass, "m_ColorTexture", 511, 257);
+            AssertTextureSize(pass, "m_PreIntegratedFGDGGXDisneyDiffuseTexture", 64, 64);
+            AssertTextureSize(pass, "m_PreIntegratedFGDCharlieAndFabricTexture", 64, 64);
 
             Assert.That(GetFieldValue<int>(pass, "m_LightingWidth"), Is.EqualTo(511));
             Assert.That(GetFieldValue<int>(pass, "m_LightingHeight"), Is.EqualTo(257));
@@ -82,6 +95,9 @@ namespace VividRP.Editor.Tests
             Assert.That(outputTexture.desc.EnableRandomWrite, Is.True);
             Assert.That(outputTexture.desc.ClearBuffer, Is.True);
             Assert.That(outputTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+
+            var skyCubemap = GetFieldValue<RenderGraphTexture>(pass, "m_SkyIBLCubemap");
+            Assert.That(skyCubemap.desc.Dimension, Is.EqualTo(TextureDimension.Cube));
         }
 
         [Test]

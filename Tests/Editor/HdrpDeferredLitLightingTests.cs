@@ -66,6 +66,17 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void PreIntegratedFGDRuntimeHelper_UsesRenderGraphTextureDescriptors_InsteadOfRenderTextureState()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Lighting", "VividPreIntegratedFGD.cs"));
+
+            Assert.That(source, Does.Contain("RenderGraphTexture CreateTexture"));
+            Assert.That(source, Does.Contain("RenderGraphTextureDesc"));
+            Assert.That(source, Does.Not.Contain("RenderTexture m_"));
+            Assert.That(source, Does.Not.Contain("SetGlobalTexture"));
+        }
+
+        [Test]
         public void DeferredLightingPasses_UseSharedHdrpLitLightingInclude()
         {
             Assert.That(

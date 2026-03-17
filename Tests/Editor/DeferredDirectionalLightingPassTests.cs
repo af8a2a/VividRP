@@ -21,7 +21,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Initialize_RegistersDeferredInputsAndPreIntegratedFgdOutputs_WhenPassIsCreated()
+        public void Initialize_RegistersDeferredInputsAndIndirectLightingDependencies_WhenPassIsCreated()
         {
             IRenderPass renderPass = new DeferredDirectionalLightingPass();
 
@@ -44,11 +44,11 @@ namespace VividRP.Editor.Tests
             Assert.That(textureEntries.Single(entry => entry.Name == "Color").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(textureEntries.Single(entry => entry.Name == "Color").AttachmentIndex, Is.EqualTo(0));
             Assert.That(textureEntries.Single(entry => entry.Name == "SkyIBLCubemap").Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(textureEntries.Single(entry => entry.Name == "PreIntegratedFGD_GGXDisneyDiffuse").Access, Is.EqualTo(AccessFlags.ReadWrite));
-            Assert.That(textureEntries.Single(entry => entry.Name == "PreIntegratedFGD_CharlieAndFabric").Access, Is.EqualTo(AccessFlags.ReadWrite));
+            Assert.That(textureEntries.Single(entry => entry.Name == "PreIntegratedFGD_GGXDisneyDiffuse").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(textureEntries.Single(entry => entry.Name == "PreIntegratedFGD_CharlieAndFabric").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(
                 textureEntries
-                    .Where(entry => entry.Name is not "Color" and not "SkyIBLCubemap" and not "PreIntegratedFGD_GGXDisneyDiffuse" and not "PreIntegratedFGD_CharlieAndFabric")
+                    .Where(entry => entry.Name != "Color")
                     .Select(entry => entry.Access)
                     .Distinct(),
                 Is.EqualTo(new[] { AccessFlags.Read }));

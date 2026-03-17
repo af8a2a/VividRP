@@ -72,8 +72,21 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("RenderGraphTexture CreateTexture"));
             Assert.That(source, Does.Contain("RenderGraphTextureDesc"));
+            Assert.That(source, Does.Contain("CreatePersistentTexture"));
+            Assert.That(source, Does.Contain("Graphics.ExecuteCommandBuffer"));
             Assert.That(source, Does.Not.Contain("RenderTexture m_"));
             Assert.That(source, Does.Not.Contain("SetGlobalTexture"));
+        }
+
+        [Test]
+        public void PreIntegratedFGDPreparePass_ExposesReusablePreparedLutOutputs()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Lighting", "PreIntegratedFGDPreparePass.cs"));
+
+            Assert.That(source, Does.Contain("PreIntegratedFGD_GGXDisneyDiffuse"));
+            Assert.That(source, Does.Contain("PreIntegratedFGD_CharlieAndFabric"));
+            Assert.That(source, Does.Contain("PassOwnedOverrideable"));
+            Assert.That(source, Does.Contain("PassRecorder.ImportTexture"));
         }
 
         [Test]

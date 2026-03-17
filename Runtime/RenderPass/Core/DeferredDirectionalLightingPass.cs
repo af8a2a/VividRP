@@ -77,19 +77,17 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(
             Name = "PreIntegratedFGD_GGXDisneyDiffuse",
-            Access = AccessFlags.ReadWrite,
+            Access = AccessFlags.Read,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_PreIntegratedFGDGGXDisneyDiffuseTexture;
 
         [RenderGraphResource(
             Name = "PreIntegratedFGD_CharlieAndFabric",
-            Access = AccessFlags.ReadWrite,
+            Access = AccessFlags.Read,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_PreIntegratedFGDCharlieAndFabricTexture;
 
         private ComputeShader m_DeferredLitCompute;
-        private Material m_PreIntegratedFGDGGXDisneyDiffuseMaterial;
-        private Material m_PreIntegratedFGDCharlieFabricLambertMaterial;
         private int m_ClearDeferredLitKernel = -1;
         private int m_DeferredLitKernel = -1;
         private int m_LightingWidth = 1;
@@ -97,6 +95,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_ClearDispatchGroupCountX = 1;
         private int m_ClearDispatchGroupCountY = 1;
         private int m_MaterialDispatchGroupCountX = 1;
+        private readonly RenderGraphTexture m_LocalPreIntegratedFGDGGXDisneyDiffuseTexture;
+        private readonly RenderGraphTexture m_LocalPreIntegratedFGDCharlieAndFabricTexture;
+        private VividPreIntegratedFGDTextures m_FallbackPreIntegratedFGDTextures;
         private ImportedSkyCubemapState m_SkyIBLCubemapState;
         private Cubemap m_FallbackSkyIBLCubemap;
         private Color m_SkyIBLTint = Color.white;
@@ -119,16 +120,15 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FabricIndirectArgs = CreateIndirectArgsBuffer("FabricIndirectArgs");
             m_ClearCoatIndirectArgs = CreateIndirectArgsBuffer("ClearCoatIndirectArgs");
             m_ColorTexture = CreateOutputTexture("Color", GraphicsFormat.R16G16B16A16_SFloat);
-            m_PreIntegratedFGDGGXDisneyDiffuseTexture = VividPreIntegratedFGD.CreateTexture("PreIntegratedFGD_GGXDisneyDiffuse");
-            m_PreIntegratedFGDCharlieAndFabricTexture = VividPreIntegratedFGD.CreateTexture("PreIntegratedFGD_CharlieAndFabric");
+            m_LocalPreIntegratedFGDGGXDisneyDiffuseTexture = VividPreIntegratedFGD.CreateTexture("PreIntegratedFGD_GGXDisneyDiffuse");
+            m_LocalPreIntegratedFGDCharlieAndFabricTexture = VividPreIntegratedFGD.CreateTexture("PreIntegratedFGD_CharlieAndFabric");
+            m_PreIntegratedFGDGGXDisneyDiffuseTexture = m_LocalPreIntegratedFGDGGXDisneyDiffuseTexture;
+            m_PreIntegratedFGDCharlieAndFabricTexture = m_LocalPreIntegratedFGDCharlieAndFabricTexture;
         }
 
         public override void Create()
         {
-            var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            m_DeferredLitCompute = resources?.DeferredLitCompute;
-            m_PreIntegratedFGDGGXDisneyDiffuseMaterial = VividPreIntegratedFGD.CreateGGXDisneyDiffuseMaterial(resources);
-            m_PreIntegratedFGDCharlieFabricLambertMaterial = VividPreIntegratedFGD.CreateCharlieFabricLambertMaterial(resources);
+            m_DeferredLitCompute = PipelineResourceManager.Get<VividRPCoreResources>()?.DeferredLitCompute;
             m_FallbackSkyIBLCubemap = CreateFallbackSkyIBLCubemap();
 
             if (m_DeferredLitCompute == null)
@@ -167,6 +167,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizeTexture(m_GBuffer3, width, height);
             ResizeTexture(m_DepthTexture, width, height);
             ResizeTexture(m_ColorTexture, width, height);
+            PreparePreIntegratedFGDResources();
             PrepareSkyIblState();
         }
 
@@ -184,8 +185,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
             using (new ProfilingScope(nativeCmd, profilingSampler))
             {
-                RenderPreIntegratedFGD(nativeCmd);
-
                 BindSharedParameters(cmd, m_ClearDeferredLitKernel);
                 cmd.DispatchCompute(m_DeferredLitCompute, m_ClearDeferredLitKernel, m_ClearDispatchGroupCountX, m_ClearDispatchGroupCountY, 1);
 
@@ -199,17 +198,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Dispose()
         {
-            if (m_PreIntegratedFGDGGXDisneyDiffuseMaterial != null)
-            {
-                CoreUtils.Destroy(m_PreIntegratedFGDGGXDisneyDiffuseMaterial);
-                m_PreIntegratedFGDGGXDisneyDiffuseMaterial = null;
-            }
-
-            if (m_PreIntegratedFGDCharlieFabricLambertMaterial != null)
-            {
-                CoreUtils.Destroy(m_PreIntegratedFGDCharlieFabricLambertMaterial);
-                m_PreIntegratedFGDCharlieFabricLambertMaterial = null;
-            }
+            m_FallbackPreIntegratedFGDTextures?.Dispose();
+            m_FallbackPreIntegratedFGDTextures = null;
 
             ReleaseSkyIblCubemapState();
 
@@ -359,25 +349,36 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.Height = height;
         }
 
-        private void RenderPreIntegratedFGD(CommandBuffer cmd)
+        private void PreparePreIntegratedFGDResources()
         {
-            if (cmd == null || GL.wireframe)
+            if (!PassRecorder.IsPassTextureImportActive)
                 return;
 
-            if (m_PreIntegratedFGDGGXDisneyDiffuseMaterial != null)
+            var needsLocalGGXDisneyDiffuse = ReferenceEquals(
+                m_PreIntegratedFGDGGXDisneyDiffuseTexture,
+                m_LocalPreIntegratedFGDGGXDisneyDiffuseTexture);
+            var needsLocalCharlieAndFabric = ReferenceEquals(
+                m_PreIntegratedFGDCharlieAndFabricTexture,
+                m_LocalPreIntegratedFGDCharlieAndFabricTexture);
+
+            if (!needsLocalGGXDisneyDiffuse && !needsLocalCharlieAndFabric)
+                return;
+
+            m_FallbackPreIntegratedFGDTextures ??= new VividPreIntegratedFGDTextures();
+            m_FallbackPreIntegratedFGDTextures.Create(PipelineResourceManager.Get<VividRPCoreResources>());
+
+            if (needsLocalGGXDisneyDiffuse && m_FallbackPreIntegratedFGDTextures.GGXDisneyDiffuseTexture != null)
             {
-                CoreUtils.DrawFullScreen(
-                    cmd,
-                    m_PreIntegratedFGDGGXDisneyDiffuseMaterial,
-                    (RenderTargetIdentifier)m_PreIntegratedFGDGGXDisneyDiffuseTexture);
+                PassRecorder.ImportTexture(
+                    m_PreIntegratedFGDGGXDisneyDiffuseTexture,
+                    m_FallbackPreIntegratedFGDTextures.GGXDisneyDiffuseTexture);
             }
 
-            if (m_PreIntegratedFGDCharlieFabricLambertMaterial != null)
+            if (needsLocalCharlieAndFabric && m_FallbackPreIntegratedFGDTextures.CharlieAndFabricTexture != null)
             {
-                CoreUtils.DrawFullScreen(
-                    cmd,
-                    m_PreIntegratedFGDCharlieFabricLambertMaterial,
-                    (RenderTargetIdentifier)m_PreIntegratedFGDCharlieAndFabricTexture);
+                PassRecorder.ImportTexture(
+                    m_PreIntegratedFGDCharlieAndFabricTexture,
+                    m_FallbackPreIntegratedFGDTextures.CharlieAndFabricTexture);
             }
         }
 

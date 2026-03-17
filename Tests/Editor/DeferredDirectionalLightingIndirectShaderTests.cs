@@ -45,16 +45,17 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void DeferredDirectionalLightingPass_UsesUnsafeComputeDispatchAndRenderGraphBackedIblTextures()
+        public void DeferredDirectionalLightingPass_UsesUnsafeComputeDispatchAndConsumesPreparedIblResources()
         {
             var passSource = File.ReadAllText(GetRenderPassSourcePath());
 
             Assert.That(passSource, Does.Contain("DeferredLitCompute"));
             Assert.That(passSource, Does.Contain("VividPreIntegratedFGD"));
             Assert.That(passSource, Does.Contain("GetNativeCommandBuffer"));
-            Assert.That(passSource, Does.Contain("RenderPreIntegratedFGD"));
+            Assert.That(passSource, Does.Contain("PreparePreIntegratedFGDResources"));
             Assert.That(passSource, Does.Contain("BindIndirectLightingParameters"));
             Assert.That(passSource, Does.Contain("PrepareSkyIblState"));
+            Assert.That(passSource, Does.Contain("VividPreIntegratedFGDTextures"));
             Assert.That(passSource, Does.Contain("PassRecorder.ImportTexture"));
             Assert.That(passSource, Does.Contain("PreIntegratedFGD_GGXDisneyDiffuse"));
             Assert.That(passSource, Does.Contain("PreIntegratedFGD_CharlieAndFabric"));
@@ -65,13 +66,13 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("SetComputeVectorParam"));
             Assert.That(passSource, Does.Contain("SetComputeBufferParam"));
             Assert.That(passSource, Does.Contain("DispatchCompute"));
-            Assert.That(passSource, Does.Contain("CoreUtils.DrawFullScreen"));
             Assert.That(passSource, Does.Not.Contain("DrawProceduralIndirect"));
             Assert.That(passSource, Does.Not.Contain("MeshTopology.Points"));
             Assert.That(passSource, Does.Not.Contain("DeferredDirectionalLightingIndirectShaderName"));
             Assert.That(passSource, Does.Not.Contain("SetGlobalTexture("));
             Assert.That(passSource, Does.Not.Contain("SetGlobalColor("));
             Assert.That(passSource, Does.Not.Contain("SetGlobalVector("));
+            Assert.That(passSource, Does.Not.Contain("RenderPreIntegratedFGD"));
         }
 
         private static string GetShaderSourcePath()

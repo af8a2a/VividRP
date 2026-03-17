@@ -4,12 +4,20 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/PreIntegratedFGD.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/AmbientProbe.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
 
 static const float3 kVividDielectricF0 = float3(0.04, 0.04, 0.04);
 static const float kVividClearCoatIor = 1.5;
 static const float kVividClearCoatIeta = 1.0 / kVividClearCoatIor;
 static const float kVividClearCoatF0 = 0.04;
 static const float kVividClearCoatRoughness = 0.01;
+
+TEXTURECUBE(_VividSkyIBLCubemap);
+SAMPLER(sampler_VividSkyIBLCubemap);
+float4 _VividSkyIBLTint;
+float4 _VividSkyIBLParams;
 
 struct VividLitBSDFData
 {
@@ -116,6 +124,41 @@ float VividFabricLambert(float roughness)
 float VividGetLuminance(float3 color)
 {
     return dot(color, float3(0.2126729, 0.7151522, 0.0721750));
+}
+
+bool VividHasSkyIBL()
+{
+    return _VividSkyIBLParams.w > 0.5;
+}
+
+float3 VividRotateAroundYAxis(float3 directionWS, float rotationDegrees)
+{
+    float rotationRadians = radians(rotationDegrees);
+    float s;
+    float c;
+    sincos(rotationRadians, s, c);
+
+    return float3(
+        c * directionWS.x - s * directionWS.z,
+        directionWS.y,
+        s * directionWS.x + c * directionWS.z);
+}
+
+float3 VividGetReflectionVector(float3 viewDirectionWS, float3 normalWS)
+{
+    return reflect(-viewDirectionWS, normalWS);
+}
+
+float3 VividSampleSkyIBL(float3 directionWS, float perceptualRoughness)
+{
+    if (!VividHasSkyIBL())
+        return 0.0;
+
+    uint maxMip = (uint)max(_VividSkyIBLParams.z, 0.0);
+    float mipLevel = PerceptualRoughnessToMipmapLevel(saturate(perceptualRoughness), maxMip);
+    float3 rotatedDirectionWS = VividRotateAroundYAxis(directionWS, _VividSkyIBLParams.y);
+    float3 envLighting = SAMPLE_TEXTURECUBE_LOD(_VividSkyIBLCubemap, sampler_VividSkyIBLCubemap, rotatedDirectionWS, mipLevel).rgb;
+    return envLighting * _VividSkyIBLTint.rgb * _VividSkyIBLParams.x;
 }
 
 void VividGetBSDFAngles(
@@ -237,6 +280,98 @@ float3 EvaluateVividFabricDirectLight(
     float3 specular = fabricFresnel0 * VividD_Charlie(nDotH, roughness) * VividV_Ashikhmin(clampedNdotL, clampedNdotV) * fuzzAmount;
     float diffuse = VividFabricLambert(roughness);
     return (diffuseColor * diffuse + specular) * clampedNdotL;
+}
+
+float3 EvaluateVividHdrpLitIndirectLight(
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData,
+    float3 viewDirectionWS)
+{
+    float nDotV = dot(surfaceData.normalWS, viewDirectionWS);
+    float clampedNdotV = saturate(VividClampNdotV(nDotV));
+    float3 specularFGD;
+    float diffuseFGD;
+    float reflectivity;
+    GetPreIntegratedFGDGGXAndDisneyDiffuse(
+        clampedNdotV,
+        bsdfData.perceptualRoughness,
+        bsdfData.fresnel0,
+        specularFGD,
+        diffuseFGD,
+        reflectivity);
+
+    float3 diffuseLighting = SampleSH(surfaceData.normalWS) * bsdfData.diffuseColor * diffuseFGD;
+    float3 reflectionVectorWS = VividGetReflectionVector(viewDirectionWS, surfaceData.normalWS);
+    float3 dominantDirectionWS = GetSpecularDominantDir(
+        surfaceData.normalWS,
+        reflectionVectorWS,
+        bsdfData.perceptualRoughness,
+        clampedNdotV);
+    float3 specularLighting = VividSampleSkyIBL(dominantDirectionWS, bsdfData.perceptualRoughness) * specularFGD;
+
+    if (bsdfData.coatMask > 0.0)
+    {
+        float coatIblF = VividF_Schlick(kVividClearCoatF0, 1.0, clampedNdotV) * bsdfData.coatMask;
+        float attenuation = Sq(1.0 - coatIblF);
+        diffuseLighting *= attenuation;
+        specularLighting *= attenuation;
+
+        float coatPerceptualRoughness = VividRoughnessToPerceptualRoughness(bsdfData.coatRoughness);
+        float3 coatDominantDirectionWS = GetSpecularDominantDir(
+            surfaceData.normalWS,
+            reflectionVectorWS,
+            coatPerceptualRoughness,
+            clampedNdotV);
+        specularLighting += VividSampleSkyIBL(coatDominantDirectionWS, coatPerceptualRoughness) * coatIblF;
+    }
+
+    return (diffuseLighting + specularLighting) * surfaceData.ambientOcclusion;
+}
+
+float3 EvaluateVividFabricIndirectLight(
+    VividGBufferSurfaceData surfaceData,
+    float3 viewDirectionWS)
+{
+    float nDotV = dot(surfaceData.normalWS, viewDirectionWS);
+    float clampedNdotV = saturate(VividClampNdotV(nDotV));
+    float roughness = VividClampRoughnessForAnalyticalLights(surfaceData.linearRoughness);
+    float perceptualRoughness = VividRoughnessToPerceptualRoughness(roughness);
+    float fuzzAmount = saturate(surfaceData.customData);
+    float3 diffuseColor = surfaceData.baseColor * (1.0 - surfaceData.metallic);
+    float3 baseSpecular = lerp(kVividDielectricF0, surfaceData.baseColor, surfaceData.metallic);
+    float luminance = VividGetLuminance(surfaceData.baseColor);
+    float3 sheenTint = lerp(luminance.xxx, surfaceData.baseColor, 0.35);
+    float3 fabricFresnel0 = lerp(baseSpecular, sheenTint, fuzzAmount);
+    float3 specularFGD;
+    float diffuseFGD;
+    float reflectivity;
+    GetPreIntegratedFGDCharlieAndFabricLambert(
+        clampedNdotV,
+        perceptualRoughness,
+        fabricFresnel0,
+        specularFGD,
+        diffuseFGD,
+        reflectivity);
+
+    float3 diffuseLighting = SampleSH(surfaceData.normalWS) * diffuseColor * diffuseFGD;
+    float3 reflectionVectorWS = VividGetReflectionVector(viewDirectionWS, surfaceData.normalWS);
+    float3 dominantDirectionWS = GetSpecularDominantDir(
+        surfaceData.normalWS,
+        reflectionVectorWS,
+        perceptualRoughness,
+        clampedNdotV);
+    float3 specularLighting = VividSampleSkyIBL(dominantDirectionWS, perceptualRoughness) * specularFGD * fuzzAmount;
+    return (diffuseLighting + specularLighting) * surfaceData.ambientOcclusion;
+}
+
+float3 EvaluateIndirectLighting(
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData,
+    float3 viewDirectionWS)
+{
+    return surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC
+        ? EvaluateVividFabricIndirectLight(surfaceData, viewDirectionWS)
+        : EvaluateVividHdrpLitIndirectLight(surfaceData, bsdfData, viewDirectionWS);
 }
 
 float3 EvaluateDirectionalLight(

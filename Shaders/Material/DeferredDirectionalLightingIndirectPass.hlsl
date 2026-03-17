@@ -58,7 +58,7 @@ float3 EvaluateDeferredDirectionalLighting(VividGBufferSurfaceData surfaceData, 
 {
     float3 viewDirectionWS = GetDeferredViewDirectionWS(positionWS);
     VividLitBSDFData bsdfData = BuildVividHdrpLitBSDFData(surfaceData);
-    float3 lighting = 0.0;
+    float3 lighting = EvaluateIndirectLighting(surfaceData, bsdfData, viewDirectionWS);
 
     [loop]
     for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)

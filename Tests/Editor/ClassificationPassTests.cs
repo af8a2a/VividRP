@@ -49,18 +49,20 @@ namespace VividRP.Editor.Tests
                 AssertTextureSize(pass, "m_GBuffer0", 320, 180);
                 AssertTextureSize(pass, "m_DepthTexture", 320, 180);
 
-                var expectedPixelCount = 320 * 180;
-                AssertStructuredBuffer(pass, "m_StandardMaterialIndices", expectedPixelCount, sizeof(uint), GraphicsBuffer.Target.Structured);
-                AssertStructuredBuffer(pass, "m_FabricMaterialIndices", expectedPixelCount, sizeof(uint), GraphicsBuffer.Target.Structured);
-                AssertStructuredBuffer(pass, "m_ClearCoatMaterialIndices", expectedPixelCount, sizeof(uint), GraphicsBuffer.Target.Structured);
+                var expectedTileCountX = (320 + 7) / 8;
+                var expectedTileCountY = (180 + 7) / 8;
+                var expectedTileCount = expectedTileCountX * expectedTileCountY;
+                AssertStructuredBuffer(pass, "m_StandardMaterialIndices", expectedTileCount, sizeof(uint), GraphicsBuffer.Target.Structured);
+                AssertStructuredBuffer(pass, "m_FabricMaterialIndices", expectedTileCount, sizeof(uint), GraphicsBuffer.Target.Structured);
+                AssertStructuredBuffer(pass, "m_ClearCoatMaterialIndices", expectedTileCount, sizeof(uint), GraphicsBuffer.Target.Structured);
                 AssertStructuredBuffer(pass, "m_MaterialClassCounts", 3, sizeof(uint), GraphicsBuffer.Target.Structured);
                 AssertStructuredBuffer(pass, "m_StandardIndirectArgs", 4, sizeof(uint), GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
                 AssertStructuredBuffer(pass, "m_FabricIndirectArgs", 4, sizeof(uint), GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
                 AssertStructuredBuffer(pass, "m_ClearCoatIndirectArgs", 4, sizeof(uint), GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
 
-                AssertImportedBuffer(pass, "m_StandardMaterialIndices", expectedPixelCount, sizeof(uint));
-                AssertImportedBuffer(pass, "m_FabricMaterialIndices", expectedPixelCount, sizeof(uint));
-                AssertImportedBuffer(pass, "m_ClearCoatMaterialIndices", expectedPixelCount, sizeof(uint));
+                AssertImportedBuffer(pass, "m_StandardMaterialIndices", expectedTileCount, sizeof(uint));
+                AssertImportedBuffer(pass, "m_FabricMaterialIndices", expectedTileCount, sizeof(uint));
+                AssertImportedBuffer(pass, "m_ClearCoatMaterialIndices", expectedTileCount, sizeof(uint));
                 AssertImportedBuffer(pass, "m_MaterialClassCounts", 3, sizeof(uint));
                 AssertImportedBuffer(pass, "m_StandardIndirectArgs", 4, sizeof(uint));
                 AssertImportedBuffer(pass, "m_FabricIndirectArgs", 4, sizeof(uint));

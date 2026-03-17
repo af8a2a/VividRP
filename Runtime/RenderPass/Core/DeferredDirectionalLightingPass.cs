@@ -5,18 +5,27 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public class DeferredDirectionalLightingPass : RasterPass, IAllowGlobalStateModificationPass
+    public class DeferredDirectionalLightingPass : UnsafePass, IAllowGlobalStateModificationPass
     {
-        internal const string DeferredDirectionalLightingIndirectShaderName = "Hidden/VividRP/DeferredDirectionalLightingIndirect";
+        private const int ClearThreadGroupSizeX = 8;
+        private const int ClearThreadGroupSizeY = 8;
+        private const int MaterialTileSize = 8;
+        private const string ClearDeferredLitKernelName = "ClearDeferredLit";
+        private const string DeferredLitKernelName = "DeferredLit";
 
         private static readonly int GBuffer0Id = Shader.PropertyToID("_GBuffer0");
         private static readonly int GBuffer1Id = Shader.PropertyToID("_GBuffer1");
         private static readonly int GBuffer2Id = Shader.PropertyToID("_GBuffer2");
         private static readonly int GBuffer3Id = Shader.PropertyToID("_GBuffer3");
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
+        private static readonly int LightingTextureId = Shader.PropertyToID("_LightingTexture");
         private static readonly int LightingWidthId = Shader.PropertyToID("_LightingWidth");
         private static readonly int LightingHeightId = Shader.PropertyToID("_LightingHeight");
         private static readonly int MaterialPixelIndicesId = Shader.PropertyToID("_MaterialPixelIndices");
+        private static readonly int MaterialDispatchArgsId = Shader.PropertyToID("_MaterialDispatchArgs");
+        private static readonly int SkyIBLCubemapId = Shader.PropertyToID("_VividSkyIBLCubemap");
+        private static readonly int SkyIBLTintId = Shader.PropertyToID("_VividSkyIBLTint");
+        private static readonly int SkyIBLParamsId = Shader.PropertyToID("_VividSkyIBLParams");
 
         [RenderGraphResource(Name = "GBuffer0", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer0;
@@ -54,9 +63,15 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Color", Access = AccessFlags.Write, AttachmentIndex = 0)]
         private RenderGraphTexture m_ColorTexture;
 
-        private Material m_DeferredDirectionalLightingMaterial;
+        private ComputeShader m_DeferredLitCompute;
+        private int m_ClearDeferredLitKernel = -1;
+        private int m_DeferredLitKernel = -1;
         private int m_LightingWidth = 1;
         private int m_LightingHeight = 1;
+        private int m_ClearDispatchGroupCountX = 1;
+        private int m_ClearDispatchGroupCountY = 1;
+        private int m_MaterialDispatchGroupCountX = 1;
+        private VividPreIntegratedFGD m_PreIntegratedFGD;
 
         public DeferredDirectionalLightingPass()
         {
@@ -79,16 +94,18 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Create()
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            var shader = resources?.DeferredDirectionalLightingIndirectShader;
-            shader ??= Shader.Find(DeferredDirectionalLightingIndirectShaderName);
+            m_PreIntegratedFGD = new VividPreIntegratedFGD();
+            m_PreIntegratedFGD.Create(resources);
+            m_DeferredLitCompute = resources?.DeferredLitCompute;
 
-            if (shader == null)
+            if (m_DeferredLitCompute == null)
             {
-                Debug.LogWarning($"[VividRP] Could not find shader '{DeferredDirectionalLightingIndirectShaderName}' for {nameof(DeferredDirectionalLightingPass)}.");
+                Debug.LogWarning($"[VividRP] Could not find compute shader resource 'Shaders/Material/DeferredLit' for {nameof(DeferredDirectionalLightingPass)}.");
                 return;
             }
 
-            m_DeferredDirectionalLightingMaterial = CoreUtils.CreateEngineMaterial(shader);
+            m_ClearDeferredLitKernel = m_DeferredLitCompute.FindKernel(ClearDeferredLitKernelName);
+            m_DeferredLitKernel = m_DeferredLitCompute.FindKernel(DeferredLitKernelName);
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -105,6 +122,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_LightingWidth = width;
             m_LightingHeight = height;
+            m_ClearDispatchGroupCountX = Mathf.Max(1, (width + ClearThreadGroupSizeX - 1) / ClearThreadGroupSizeX);
+            m_ClearDispatchGroupCountY = Mathf.Max(1, (height + ClearThreadGroupSizeY - 1) / ClearThreadGroupSizeY);
+            var tileCountX = Mathf.Max(1, (width + MaterialTileSize - 1) / MaterialTileSize);
+            var tileCountY = Mathf.Max(1, (height + MaterialTileSize - 1) / MaterialTileSize);
+            m_MaterialDispatchGroupCountX = Mathf.Max(1, tileCountX * tileCountY);
 
             ResizeTexture(m_GBuffer0, width, height);
             ResizeTexture(m_GBuffer1, width, height);
@@ -114,48 +136,70 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizeTexture(m_ColorTexture, width, height);
         }
 
-        public override void Record(RasterGraphContext context)
+        public override void Record(UnsafeGraphContext context)
         {
-            if (m_DeferredDirectionalLightingMaterial == null)
-                return;
-
-            using (new ProfilingScope(context.cmd, profilingSampler))
+            if (m_DeferredLitCompute == null
+                || m_ClearDeferredLitKernel < 0
+                || m_DeferredLitKernel < 0)
             {
-                context.cmd.SetGlobalTexture(GBuffer0Id, m_GBuffer0.innerHandle);
-                context.cmd.SetGlobalTexture(GBuffer1Id, m_GBuffer1.innerHandle);
-                context.cmd.SetGlobalTexture(GBuffer2Id, m_GBuffer2.innerHandle);
-                context.cmd.SetGlobalTexture(GBuffer3Id, m_GBuffer3.innerHandle);
-                context.cmd.SetGlobalTexture(DepthTextureId, m_DepthTexture.innerHandle);
-                context.cmd.SetGlobalInt(LightingWidthId, m_LightingWidth);
-                context.cmd.SetGlobalInt(LightingHeightId, m_LightingHeight);
+                return;
+            }
 
-                DrawMaterialClass(context.cmd, m_StandardMaterialIndices, m_StandardIndirectArgs);
-                DrawMaterialClass(context.cmd, m_FabricMaterialIndices, m_FabricIndirectArgs);
-                DrawMaterialClass(context.cmd, m_ClearCoatMaterialIndices, m_ClearCoatIndirectArgs);
+            var cmd = context.cmd;
+            var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(cmd);
+
+            using (new ProfilingScope(nativeCmd, profilingSampler))
+            {
+                m_PreIntegratedFGD?.Bind(nativeCmd);
+                BindSkyIblGlobals(nativeCmd);
+
+                BindSharedParameters(cmd, m_ClearDeferredLitKernel);
+                cmd.DispatchCompute(m_DeferredLitCompute, m_ClearDeferredLitKernel, m_ClearDispatchGroupCountX, m_ClearDispatchGroupCountY, 1);
+
+                BindSharedParameters(cmd, m_DeferredLitKernel);
+                DispatchMaterialClass(cmd, m_StandardMaterialIndices, m_StandardIndirectArgs);
+                DispatchMaterialClass(cmd, m_FabricMaterialIndices, m_FabricIndirectArgs);
+                DispatchMaterialClass(cmd, m_ClearCoatMaterialIndices, m_ClearCoatIndirectArgs);
             }
         }
 
         public override void Dispose()
         {
-            if (m_DeferredDirectionalLightingMaterial != null)
+            if (m_PreIntegratedFGD != null)
             {
-                CoreUtils.Destroy(m_DeferredDirectionalLightingMaterial);
-                m_DeferredDirectionalLightingMaterial = null;
+                m_PreIntegratedFGD.Dispose();
+                m_PreIntegratedFGD = null;
             }
+
+            m_DeferredLitCompute = null;
+            m_ClearDeferredLitKernel = -1;
+            m_DeferredLitKernel = -1;
         }
 
-        private void DrawMaterialClass(RasterCommandBuffer cmd, RenderGraphBuffer materialIndices, RenderGraphBuffer indirectArgs)
+        internal static Vector4 BuildSkyIblParams(Cubemap skyCubemap, float exposure, float rotation)
         {
-            if (materialIndices?.ImportedGraphicsBuffer == null || indirectArgs?.ImportedGraphicsBuffer == null)
-                return;
+            var maxMip = skyCubemap != null ? Mathf.Max(0, skyCubemap.mipmapCount - 1) : 0f;
+            var enabled = skyCubemap != null ? 1f : 0f;
+            return new Vector4(Mathf.Max(0f, exposure), -rotation, maxMip, enabled);
+        }
 
-            cmd.SetGlobalBuffer(MaterialPixelIndicesId, materialIndices.ImportedGraphicsBuffer);
-            cmd.DrawProceduralIndirect(
-                Matrix4x4.identity,
-                m_DeferredDirectionalLightingMaterial,
-                0,
-                MeshTopology.Points,
-                indirectArgs.ImportedGraphicsBuffer);
+        private void BindSharedParameters(UnsafeCommandBuffer cmd, int kernel)
+        {
+            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer0Id, m_GBuffer0.innerHandle);
+            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
+            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer2Id, m_GBuffer2.innerHandle);
+            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer3Id, m_GBuffer3.innerHandle);
+            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, DepthTextureId, m_DepthTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, LightingTextureId, m_ColorTexture.innerHandle);
+            cmd.SetComputeIntParam(m_DeferredLitCompute, LightingWidthId, m_LightingWidth);
+            cmd.SetComputeIntParam(m_DeferredLitCompute, LightingHeightId, m_LightingHeight);
+        }
+
+        private void DispatchMaterialClass(UnsafeCommandBuffer cmd, RenderGraphBuffer materialIndices, RenderGraphBuffer materialDispatchArgs)
+        {
+            cmd.SetComputeBufferParam(m_DeferredLitCompute, m_DeferredLitKernel, MaterialPixelIndicesId, materialIndices.innerHandle);
+            cmd.SetComputeBufferParam(m_DeferredLitCompute, m_DeferredLitKernel, MaterialDispatchArgsId, materialDispatchArgs.innerHandle);
+            cmd.DispatchCompute(m_DeferredLitCompute, m_DeferredLitKernel, m_MaterialDispatchGroupCountX, 1, 1);
         }
 
         private static RenderGraphTexture CreateInputTexture(string name, GraphicsFormat format)
@@ -189,7 +233,7 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.Name = name;
             texture.desc.ClearBuffer = true;
             texture.desc.ClearColor = Color.clear;
-            texture.desc.EnableRandomWrite = false;
+            texture.desc.EnableRandomWrite = true;
             return texture;
         }
 
@@ -228,6 +272,22 @@ namespace VividRP.Runtime.RenderPass.Core
 
             texture.desc.Width = width;
             texture.desc.Height = height;
+        }
+
+        private static void BindSkyIblGlobals(CommandBuffer cmd)
+        {
+            var skySettings = VolumeManager.instance.stack?.GetComponent<HDRISkyVolume>();
+            var resources = PipelineResourceManager.Get<VividRPCoreResources>();
+            var skyCubemap = skySettings?.GetSkyCubemapOrDefault() ?? resources?.DefaultHDRISkyCubemap;
+            var skyTint = skySettings?.tint.value ?? Color.white;
+            var skyExposure = skySettings?.exposure.value ?? 1f;
+            var skyRotation = skySettings?.rotation.value ?? 0f;
+
+            if (skyCubemap != null)
+                cmd.SetGlobalTexture(SkyIBLCubemapId, skyCubemap);
+
+            cmd.SetGlobalColor(SkyIBLTintId, skyTint);
+            cmd.SetGlobalVector(SkyIBLParamsId, BuildSkyIblParams(skyCubemap, skyExposure, skyRotation));
         }
     }
 }

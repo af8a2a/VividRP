@@ -4,7 +4,7 @@ using UnityEngine.Rendering;
 namespace VividRP.Runtime
 {
     //can provide PipelineResourceManager.Get<VividRPCoreResources>().BlitShader  accessor
-    [PipelineResource] 
+    [PipelineResource]
     public class VividRPCoreResources
     {
         [ResourcePath("Shaders/Core/Private/Blit")]
@@ -25,7 +25,12 @@ namespace VividRP.Runtime
         [ResourcePath("Texture/Default/DefaultHDRISky.exr")]
         public Cubemap DefaultHDRISkyCubemap;
 
-        
+        [ResourcePath("Shaders/Core/Private/PreIntegratedFGD_GGXDisneyDiffuse")]
+        public Shader PreIntegratedFGDGGXDisneyDiffuseShader;
+
+        [ResourcePath("Shaders/Core/Private/PreIntegratedFGD_CharlieFabricLambert")]
+        public Shader PreIntegratedFGDCharlieFabricLambertShader;
+
         [ResourcePath("Shaders/Core/Private/CopyDepth")]
         public Shader CopyDepthShader;
 
@@ -56,8 +61,8 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/Lighting/lightlistbuild-clearatomic")]
         public ComputeShader ClearClusterAtomicIndexCompute;
 
-        [ResourcePath("Shaders/Material/DeferredDirectionalLighting")]
-        public ComputeShader DeferredDirectionalLightingCompute;
+        [ResourcePath("Shaders/Material/DeferredLit")]
+        public ComputeShader DeferredLitCompute;
 
         [ResourcePath("Shaders/Material/DeferredDirectionalLightingIndirect")]
         public Shader DeferredDirectionalLightingIndirectShader;

@@ -136,10 +136,10 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizeTexture(m_GBuffer0, m_ClassificationWidth, m_ClassificationHeight);
             ResizeTexture(m_DepthTexture, m_ClassificationWidth, m_ClassificationHeight);
 
-            var maxPixelCount = Mathf.Max(1, m_ClassificationWidth * m_ClassificationHeight);
-            ResizeStructuredBuffer(m_StandardMaterialIndices, maxPixelCount, sizeof(uint));
-            ResizeStructuredBuffer(m_FabricMaterialIndices, maxPixelCount, sizeof(uint));
-            ResizeStructuredBuffer(m_ClearCoatMaterialIndices, maxPixelCount, sizeof(uint));
+            var maxTileCount = Mathf.Max(1, m_DispatchGroupCountX * m_DispatchGroupCountY);
+            ResizeStructuredBuffer(m_StandardMaterialIndices, maxTileCount, sizeof(uint));
+            ResizeStructuredBuffer(m_FabricMaterialIndices, maxTileCount, sizeof(uint));
+            ResizeStructuredBuffer(m_ClearCoatMaterialIndices, maxTileCount, sizeof(uint));
             ResizeStructuredBuffer(m_MaterialClassCounts, MaterialClassCount, sizeof(uint));
             ResizeIndirectArgsBuffer(m_StandardIndirectArgs);
             ResizeIndirectArgsBuffer(m_FabricIndirectArgs);

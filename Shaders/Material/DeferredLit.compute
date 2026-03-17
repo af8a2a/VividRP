@@ -1,7 +1,10 @@
-#pragma kernel DeferredDirectionalLighting
+#pragma kernel ClearDeferredLit
+#pragma kernel DeferredLit
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
+#define CLASSIFY_TILE_SIZE 8
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/TileClassification.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/HdrpLitLighting.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl"
 
@@ -10,6 +13,8 @@ Texture2D<float4> _GBuffer1;
 Texture2D<float4> _GBuffer2;
 Texture2D<float4> _GBuffer3;
 Texture2D<float> _DepthTexture;
+StructuredBuffer<uint> _MaterialPixelIndices;
+StructuredBuffer<uint> _MaterialDispatchArgs;
 
 RWTexture2D<float4> _LightingTexture;
 
@@ -38,11 +43,11 @@ VividGBufferSurfaceData LoadVividGBuffer(uint2 pixelCoord)
     return UnpackVividGBufferSurfaceData(rt0, rt1, rt2, rt3);
 }
 
-float3 EvaluateDeferredDirectionalLighting(VividGBufferSurfaceData surfaceData, uint2 pixelCoord, float3 positionWS)
+float3 EvaluateDeferredLitLighting(VividGBufferSurfaceData surfaceData, uint2 pixelCoord, float3 positionWS)
 {
     float3 viewDirectionWS = GetDeferredViewDirectionWS(positionWS);
     VividLitBSDFData bsdfData = BuildVividHdrpLitBSDFData(surfaceData);
-    float3 lighting = 0.0;
+    float3 lighting = EvaluateIndirectLighting(surfaceData, bsdfData, viewDirectionWS);
 
     [loop]
     for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)
@@ -68,24 +73,41 @@ float3 EvaluateDeferredDirectionalLighting(VividGBufferSurfaceData surfaceData, 
 }
 
 [numthreads(8, 8, 1)]
-void DeferredDirectionalLighting(uint3 dispatchThreadId : SV_DispatchThreadID)
+void ClearDeferredLit(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     if (dispatchThreadId.x >= _LightingWidth || dispatchThreadId.y >= _LightingHeight)
         return;
 
-    uint2 pixelCoord = dispatchThreadId.xy;
+    _LightingTexture[dispatchThreadId.xy] = float4(0.0, 0.0, 0.0, 1.0);
+}
+
+[numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
+void DeferredLit(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint tileCount = _MaterialDispatchArgs[1];
+    uint tileListIndex = groupId.x;
+    if (tileListIndex >= tileCount)
+        return;
+
+    uint2 tileCoord = UnpackTileCoord(_MaterialPixelIndices[tileListIndex]);
+    uint2 pixelCoord = tileCoord * CLASSIFY_TILE_SIZE + groupThreadId.xy;
+    if (pixelCoord.x >= _LightingWidth || pixelCoord.y >= _LightingHeight)
+        return;
+
     float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
 
     if (IsSkyPixel(deviceDepth))
-    {
-        _LightingTexture[pixelCoord] = float4(0.0, 0.0, 0.0, 1.0);
         return;
-    }
 
     VividGBufferSurfaceData surfaceData = LoadVividGBuffer(pixelCoord);
+    if (surfaceData.materialId > VIVID_GBUFFER_MATERIAL_CLEARCOAT)
+        return;
+
     float2 uv = (float2(pixelCoord) + 0.5) / float2(_LightingWidth, _LightingHeight);
     float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, _InvViewProjMatrix);
-    float3 lighting = EvaluateDeferredDirectionalLighting(surfaceData, pixelCoord, positionWS);
+    float3 lighting = EvaluateDeferredLitLighting(surfaceData, pixelCoord, positionWS);
 
     _LightingTexture[pixelCoord] = float4(lighting, 1.0);
 }

@@ -90,7 +90,10 @@ float3 EvaluateSimpleDeferredLighting(VividGBufferSurfaceData surfaceData, float
     float3 viewDirectionWS = GetDeferredViewDirectionWS(positionWS);
     VividLitBSDFData bsdfData = BuildVividHdrpLitBSDFData(surfaceData);
     float3 diffuseColor = surfaceData.baseColor * (1.0 - surfaceData.metallic);
-    float3 ambientLighting = diffuseColor * _AmbientColor.rgb * surfaceData.ambientOcclusion;
+    float3 indirectLighting = EvaluateIndirectLighting(surfaceData, bsdfData, viewDirectionWS);
+
+    if (!VividHasSkyIBL())
+        indirectLighting += diffuseColor * _AmbientColor.rgb * surfaceData.ambientOcclusion;
 
     if (!HasDirectionalLights())
     {
@@ -99,7 +102,7 @@ float3 EvaluateSimpleDeferredLighting(VividGBufferSurfaceData surfaceData, float
         float3 directLighting = surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC
             ? EvaluateVividFabricDirectLight(surfaceData, viewDirectionWS, lightDirectionWS) * lightColor
             : EvaluateVividHdrpLitDirectLight(surfaceData, bsdfData, viewDirectionWS, lightDirectionWS) * lightColor;
-        return directLighting + ambientLighting + surfaceData.emissive;
+        return directLighting + indirectLighting + surfaceData.emissive;
     }
 
     float3 accumulatedDirectionalLighting = 0.0;
@@ -111,7 +114,7 @@ float3 EvaluateSimpleDeferredLighting(VividGBufferSurfaceData surfaceData, float
         accumulatedDirectionalLighting += EvaluateDirectionalLight(surfaceData, bsdfData, viewDirectionWS, directionalLight);
     }
 
-    return accumulatedDirectionalLighting + ambientLighting + surfaceData.emissive;
+    return accumulatedDirectionalLighting + indirectLighting + surfaceData.emissive;
 }
 
 float4 Frag(Varyings input) : SV_Target

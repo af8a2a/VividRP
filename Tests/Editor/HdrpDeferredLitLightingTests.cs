@@ -1,6 +1,9 @@
 using System.IO;
+using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
+using VividRP.Runtime;
+using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
 
 namespace VividRP.Editor.Tests
 {
@@ -21,6 +24,48 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void HdrpLitLightingInclude_ContainsHdrpInspiredImageBasedLightingBuildingBlocks()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "HdrpLitLighting.hlsl"));
+
+            Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/PreIntegratedFGD.hlsl\""));
+            Assert.That(source, Does.Contain("_VividSkyIBLCubemap"));
+            Assert.That(source, Does.Contain("EvaluateVividHdrpLitIndirectLight"));
+            Assert.That(source, Does.Contain("EvaluateVividFabricIndirectLight"));
+            Assert.That(source, Does.Contain("EvaluateIndirectLighting"));
+            Assert.That(source, Does.Contain("GetSpecularDominantDir"));
+        }
+
+        [Test]
+        public void PreIntegratedFGDInclude_ContainsHdrpInspiredLutSamplingFunctions()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "PreIntegratedFGD.hlsl"));
+
+            Assert.That(source, Does.Contain("GetPreIntegratedFGDGGXAndDisneyDiffuse"));
+            Assert.That(source, Does.Contain("GetPreIntegratedFGDCharlieAndFabricLambert"));
+            Assert.That(source, Does.Contain("_PreIntegratedFGD_GGXDisneyDiffuse"));
+            Assert.That(source, Does.Contain("_PreIntegratedFGD_CharlieAndFabric"));
+            Assert.That(source, Does.Contain("VIVID_FGD_TEXTURE_RESOLUTION 64"));
+        }
+
+        [Test]
+        public void PreIntegratedFGDShaders_UseHdrpStyleLutIntegrators()
+        {
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "PreIntegratedFGD_GGXDisneyDiffuse.shader")),
+                Does.Contain("IntegrateGGXAndDisneyDiffuseFGD"));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "PreIntegratedFGD_GGXDisneyDiffuse.shader")),
+                Does.Contain("RemapHalfTexelCoordTo01"));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "PreIntegratedFGD_CharlieFabricLambert.shader")),
+                Does.Contain("IntegrateCharlieAndFabricLambertFGD"));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "PreIntegratedFGD_CharlieFabricLambert.shader")),
+                Does.Contain("SampleConeStrata"));
+        }
+
+        [Test]
         public void DeferredLightingPasses_UseSharedHdrpLitLightingInclude()
         {
             Assert.That(
@@ -32,21 +77,68 @@ namespace VividRP.Editor.Tests
                 Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/HdrpLitLighting.hlsl\""));
 
             Assert.That(
-                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "DeferredDirectionalLighting.compute")),
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "DeferredLit.compute")),
                 Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/HdrpLitLighting.hlsl\""));
+        }
+
+        [Test]
+        public void DeferredLightingShaders_EvaluateSharedIndirectLighting()
+        {
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "SimpleDeferredLitPass.hlsl")),
+                Does.Contain("EvaluateIndirectLighting"));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "DeferredDirectionalLightingIndirectPass.hlsl")),
+                Does.Contain("EvaluateIndirectLighting"));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "DeferredLit.compute")),
+                Does.Contain("EvaluateIndirectLighting"));
+        }
+
+        [Test]
+        public void VividRPCoreResources_DeclarePreIntegratedFGDShaders()
+        {
+            AssertResourcePath(
+                nameof(VividRPCoreResources.PreIntegratedFGDGGXDisneyDiffuseShader),
+                "Shaders/Core/Private/PreIntegratedFGD_GGXDisneyDiffuse");
+            AssertResourcePath(
+                nameof(VividRPCoreResources.PreIntegratedFGDCharlieFabricLambertShader),
+                "Shaders/Core/Private/PreIntegratedFGD_CharlieFabricLambert");
+        }
+
+        private static void AssertResourcePath(string fieldName, string expectedPath)
+        {
+            var field = typeof(VividRPCoreResources).GetField(fieldName, BindingFlags.Instance | BindingFlags.Public);
+
+            Assert.That(field, Is.Not.Null);
+
+            var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
+
+            Assert.That(resourcePath, Is.Not.Null);
+            Assert.That(resourcePath.Path, Is.EqualTo(expectedPath));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)
         {
-            var fullPath = Path.GetFullPath(Path.Combine(
+            var vividPath = Path.GetFullPath(Path.Combine(
+                Application.dataPath,
+                "..",
+                "Packages",
+                "VividRP",
+                Path.Combine(relativeParts)));
+
+            if (File.Exists(vividPath))
+                return vividPath;
+
+            var legacyPath = Path.GetFullPath(Path.Combine(
                 Application.dataPath,
                 "..",
                 "Packages",
                 "com.af8a2a.vividrp",
                 Path.Combine(relativeParts)));
 
-            Assert.That(File.Exists(fullPath), Is.True, $"Expected source file at '{fullPath}'.");
-            return fullPath;
+            Assert.That(File.Exists(legacyPath), Is.True, $"Expected source file at '{vividPath}' or '{legacyPath}'.");
+            return legacyPath;
         }
     }
 }

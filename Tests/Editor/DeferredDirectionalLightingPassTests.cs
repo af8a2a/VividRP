@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
+using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -73,25 +74,46 @@ namespace VividRP.Editor.Tests
 
             Assert.That(GetFieldValue<int>(pass, "m_LightingWidth"), Is.EqualTo(511));
             Assert.That(GetFieldValue<int>(pass, "m_LightingHeight"), Is.EqualTo(257));
+            Assert.That(GetFieldValue<int>(pass, "m_ClearDispatchGroupCountX"), Is.EqualTo(64));
+            Assert.That(GetFieldValue<int>(pass, "m_ClearDispatchGroupCountY"), Is.EqualTo(33));
+            Assert.That(GetFieldValue<int>(pass, "m_MaterialDispatchGroupCountX"), Is.EqualTo(2112));
 
             var outputTexture = GetFieldValue<RenderGraphTexture>(pass, "m_ColorTexture");
-            Assert.That(outputTexture.desc.EnableRandomWrite, Is.False);
+            Assert.That(outputTexture.desc.EnableRandomWrite, Is.True);
             Assert.That(outputTexture.desc.ClearBuffer, Is.True);
             Assert.That(outputTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
         }
 
         [Test]
-        public void DeferredDirectionalLightingPass_InheritsFromRasterPass()
+        public void DeferredDirectionalLightingPass_InheritsFromUnsafePass()
         {
-            Assert.That(typeof(RasterPass).IsAssignableFrom(typeof(DeferredDirectionalLightingPass)), Is.True);
+            Assert.That(typeof(UnsafePass).IsAssignableFrom(typeof(DeferredDirectionalLightingPass)), Is.True);
+        }
+
+        [Test]
+        public void BuildSkyIblParams_UsesHdrpCompatibleSkyLayout_WhenSkyIsAvailable()
+        {
+            var cubemap = new Cubemap(16, TextureFormat.RGBA32, true);
+
+            try
+            {
+                var skyParams = DeferredDirectionalLightingPass.BuildSkyIblParams(cubemap, 1.5f, 30f);
+
+                Assert.That(skyParams.x, Is.EqualTo(1.5f));
+                Assert.That(skyParams.y, Is.EqualTo(-30f));
+                Assert.That(skyParams.z, Is.EqualTo(cubemap.mipmapCount - 1));
+                Assert.That(skyParams.w, Is.EqualTo(1f));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(cubemap);
+            }
         }
 
         [Test]
         public void DeferredDirectionalLightingPassNode_DoesNotExposeAsyncComputeOption()
         {
-            var node = new AutoRegisteredDeferredDirectionalLightingPassNode();
-
-            Assert.That(node.HasAsyncComputeOption(), Is.False);
+            Assert.That(typeof(IAsyncComputeSupportedPass).IsAssignableFrom(typeof(DeferredDirectionalLightingPass)), Is.False);
         }
 
         [Test]

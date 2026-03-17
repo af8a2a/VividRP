@@ -110,4 +110,10 @@ namespace VividRP.Editor.RenderGraph.Generated
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.SliderDebugPass, VividRP.Runtime";
     }
 
+    [Serializable]
+    internal sealed class TileDebugPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.TileDebugPass, VividRP.Runtime";
+    }
+
 }

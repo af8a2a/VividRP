@@ -22,9 +22,16 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("InterlockedAdd(_MaterialClassCounts[VIVID_GBUFFER_MATERIAL_CLEARCOAT]"));
             Assert.That(source, Does.Contain("InterlockedAdd(_MaterialClassCounts[VIVID_GBUFFER_MATERIAL_FABRIC]"));
             Assert.That(source, Does.Contain("InterlockedAdd(_MaterialClassCounts[VIVID_GBUFFER_MATERIAL_STANDARD]"));
+            Assert.That(source, Does.Contain("_StandardIndirectArgs[0] = _MaterialClassCounts[0];"));
+            Assert.That(source, Does.Contain("_FabricIndirectArgs[0] = _MaterialClassCounts[1];"));
+            Assert.That(source, Does.Contain("_ClearCoatIndirectArgs[0] = _MaterialClassCounts[2];"));
+            Assert.That(source, Does.Contain("_StandardIndirectArgs[1] = 1;"));
+            Assert.That(source, Does.Contain("_FabricIndirectArgs[1] = 1;"));
+            Assert.That(source, Does.Contain("_ClearCoatIndirectArgs[1] = 1;"));
             Assert.That(source, Does.Not.Contain("gs_LocalMaterialCounts"));
             Assert.That(source, Does.Not.Contain("gs_GlobalMaterialOffsets"));
             Assert.That(source, Does.Not.Contain("WriteMaterialPixelIndex("));
+            Assert.That(source, Does.Not.Contain("VertexCountPerInstance"));
             Assert.That(source, Does.Not.Contain("StructuredBuffer<PunctualLightCullData> _PunctualLightCullData;"));
             Assert.That(source, Does.Not.Contain("BuildClusteredLightList"));
             Assert.That(source, Does.Not.Contain("SpotConeIntersectsCluster"));

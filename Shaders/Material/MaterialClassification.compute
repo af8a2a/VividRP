@@ -21,9 +21,6 @@ RWStructuredBuffer<uint> _ClearCoatIndirectArgs;
 
 uint _ClassificationWidth;
 uint _ClassificationHeight;
-uint _StandardVertexCountPerInstance;
-uint _FabricVertexCountPerInstance;
-uint _ClearCoatVertexCountPerInstance;
 
 bool IsSupportedVividMaterialId(uint materialId)
 {
@@ -114,18 +111,18 @@ void ClassifyMaterialIds(
 [numthreads(1, 1, 1)]
 void BuildIndirectArgs(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    _StandardIndirectArgs[0] = _StandardVertexCountPerInstance;
-    _StandardIndirectArgs[1] = _MaterialClassCounts[0];
-    _StandardIndirectArgs[2] = 0;
+    _StandardIndirectArgs[0] = _MaterialClassCounts[0];
+    _StandardIndirectArgs[1] = 1;
+    _StandardIndirectArgs[2] = 1;
     _StandardIndirectArgs[3] = 0;
 
-    _FabricIndirectArgs[0] = _FabricVertexCountPerInstance;
-    _FabricIndirectArgs[1] = _MaterialClassCounts[1];
-    _FabricIndirectArgs[2] = 0;
+    _FabricIndirectArgs[0] = _MaterialClassCounts[1];
+    _FabricIndirectArgs[1] = 1;
+    _FabricIndirectArgs[2] = 1;
     _FabricIndirectArgs[3] = 0;
 
-    _ClearCoatIndirectArgs[0] = _ClearCoatVertexCountPerInstance;
-    _ClearCoatIndirectArgs[1] = _MaterialClassCounts[2];
-    _ClearCoatIndirectArgs[2] = 0;
+    _ClearCoatIndirectArgs[0] = _MaterialClassCounts[2];
+    _ClearCoatIndirectArgs[1] = 1;
+    _ClearCoatIndirectArgs[2] = 1;
     _ClearCoatIndirectArgs[3] = 0;
 }

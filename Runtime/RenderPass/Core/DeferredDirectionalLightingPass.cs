@@ -32,6 +32,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SkyIBLCubemapId = Shader.PropertyToID("_VividSkyIBLCubemap");
         private static readonly int SkyIBLTintId = Shader.PropertyToID("_VividSkyIBLTint");
         private static readonly int SkyIBLParamsId = Shader.PropertyToID("_VividSkyIBLParams");
+        private const uint IndirectArgsOffset = 0u;
 
         [RenderGraphResource(Name = "GBuffer0", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer0;
@@ -254,6 +255,15 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             cmd.SetComputeBufferParam(m_DeferredLitCompute, m_DeferredLitKernel, MaterialPixelIndicesId, materialIndices.innerHandle);
             cmd.SetComputeBufferParam(m_DeferredLitCompute, m_DeferredLitKernel, MaterialDispatchArgsId, materialDispatchArgs.innerHandle);
+
+            if (materialDispatchArgs?.ImportedGraphicsBuffer != null)
+            {
+                CommandBufferHelpers
+                    .GetNativeCommandBuffer(cmd)
+                    .DispatchCompute(m_DeferredLitCompute, m_DeferredLitKernel, materialDispatchArgs.ImportedGraphicsBuffer, IndirectArgsOffset);
+                return;
+            }
+
             cmd.DispatchCompute(m_DeferredLitCompute, m_DeferredLitKernel, m_MaterialDispatchGroupCountX, 1, 1);
         }
 

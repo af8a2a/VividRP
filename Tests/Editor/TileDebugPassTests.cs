@@ -77,7 +77,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void TileDebugPass_UsesPointIndirectDraw_ToExpandPackedTileInstances()
+        public void TileDebugPass_UsesPointIndirectDraw_ToConsumeDispatchStyleTileArgs()
         {
             var passSource = File.ReadAllText(GetPassSourcePath());
 
@@ -95,6 +95,9 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/TileClassification.hlsl\""));
             Assert.That(shaderSource, Does.Contain("#pragma geometry OverlayGeom"));
             Assert.That(shaderSource, Does.Contain("StructuredBuffer<uint> _TileIndices;"));
+            Assert.That(shaderSource, Does.Contain("uint vertexID : SV_VertexID;"));
+            Assert.That(shaderSource, Does.Contain("_TileIndices[input.vertexID - 1u]"));
+            Assert.That(shaderSource, Does.Not.Contain("uint instanceID : SV_InstanceID;"));
             Assert.That(shaderSource, Does.Contain("UnpackTileCoord("));
             Assert.That(shaderSource, Does.Contain("Blend SrcAlpha OneMinusSrcAlpha"));
         }

@@ -35,7 +35,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EvaluateIndirectLighting"));
             Assert.That(source, Does.Contain("EvaluatePunctualLight"));
             Assert.That(source, Does.Contain("ComputeWorldSpacePosition"));
-            Assert.That(source, Does.Contain("_MaterialDispatchArgs[1]"));
+            Assert.That(source, Does.Contain("_MaterialDispatchArgs[0]"));
+            Assert.That(source, Does.Not.Contain("_MaterialDispatchArgs[1]"));
             Assert.That(source, Does.Contain("UnpackTileCoord"));
             Assert.That(source, Does.Contain("tileCoord * CLASSIFY_TILE_SIZE"));
         }

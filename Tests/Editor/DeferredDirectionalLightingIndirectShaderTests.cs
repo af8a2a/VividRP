@@ -61,6 +61,7 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("PreIntegratedFGD_CharlieAndFabric"));
             Assert.That(passSource, Does.Contain("MaterialPixelIndicesId"));
             Assert.That(passSource, Does.Contain("MaterialDispatchArgsId"));
+            Assert.That(passSource, Does.Contain("ImportedGraphicsBuffer"));
             Assert.That(passSource, Does.Contain("DispatchMaterialClass"));
             Assert.That(passSource, Does.Contain("SetComputeTextureParam"));
             Assert.That(passSource, Does.Contain("SetComputeVectorParam"));

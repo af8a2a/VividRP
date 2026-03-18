@@ -106,6 +106,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_Material.SetBuffer(TileIndicesId, tileIndicesBuffer);
                 m_Material.SetVector(TileDebugScreenSizeId, m_TileDebugScreenSize);
                 m_Material.SetColor(TileDebugColorId, TileDebugColor);
+                // Classification now emits dispatch-style args; the overlay shader consumes them
+                // through SV_VertexID and compensates for startVertexLocation = 1.
                 context.cmd.DrawProceduralIndirect(
                     Matrix4x4.identity,
                     m_Material,

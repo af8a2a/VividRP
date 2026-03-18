@@ -23,10 +23,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int StandardIndirectArgsId = Shader.PropertyToID("_StandardIndirectArgs");
         private static readonly int FabricIndirectArgsId = Shader.PropertyToID("_FabricIndirectArgs");
         private static readonly int ClearCoatIndirectArgsId = Shader.PropertyToID("_ClearCoatIndirectArgs");
-        private static readonly int StandardVertexCountPerInstanceId = Shader.PropertyToID("_StandardVertexCountPerInstance");
-        private static readonly int FabricVertexCountPerInstanceId = Shader.PropertyToID("_FabricVertexCountPerInstance");
-        private static readonly int ClearCoatVertexCountPerInstanceId = Shader.PropertyToID("_ClearCoatVertexCountPerInstance");
-
         [RenderGraphResource(Name = "GBuffer0", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer0;
 
@@ -168,9 +164,6 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.DispatchCompute(m_ClassificationCompute, m_ClassifyMaterialKernel, m_DispatchGroupCountX, m_DispatchGroupCountY, 1);
 
             BindCommonParams(cmd);
-            cmd.SetComputeIntParam(m_ClassificationCompute, StandardVertexCountPerInstanceId, 1);
-            cmd.SetComputeIntParam(m_ClassificationCompute, FabricVertexCountPerInstanceId, 1);
-            cmd.SetComputeIntParam(m_ClassificationCompute, ClearCoatVertexCountPerInstanceId, 1);
             cmd.SetComputeBufferParam(m_ClassificationCompute, m_BuildIndirectArgsKernel, MaterialClassCountsId, m_MaterialClassCounts.innerHandle);
             cmd.SetComputeBufferParam(m_ClassificationCompute, m_BuildIndirectArgsKernel, StandardIndirectArgsId, m_StandardIndirectArgs.innerHandle);
             cmd.SetComputeBufferParam(m_ClassificationCompute, m_BuildIndirectArgsKernel, FabricIndirectArgsId, m_FabricIndirectArgs.innerHandle);

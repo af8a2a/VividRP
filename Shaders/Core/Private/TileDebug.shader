@@ -81,7 +81,7 @@ Shader "Hidden/VividRP/TileDebug"
 
             struct OverlayAttributes
             {
-                uint instanceID : SV_InstanceID;
+                uint vertexID : SV_VertexID;
             };
 
             struct OverlayPoint
@@ -99,7 +99,10 @@ Shader "Hidden/VividRP/TileDebug"
             OverlayPoint OverlayVert(OverlayAttributes input)
             {
                 OverlayPoint output;
-                output.packedTileCoord = _TileIndices[input.instanceID];
+                // Classification now builds DispatchIndirect-style args: { tileCount, 1, 1 }.
+                // DrawProceduralIndirect reinterprets the third uint as startVertexLocation, so the
+                // first generated vertex arrives with SV_VertexID == 1 and needs to be rebased.
+                output.packedTileCoord = _TileIndices[input.vertexID - 1u];
                 return output;
             }
 

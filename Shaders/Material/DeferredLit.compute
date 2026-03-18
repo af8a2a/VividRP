@@ -86,7 +86,7 @@ void DeferredLit(
     uint3 groupId : SV_GroupID,
     uint3 groupThreadId : SV_GroupThreadID)
 {
-    uint tileCount = _MaterialDispatchArgs[1];
+    uint tileCount = _MaterialDispatchArgs[0];
     uint tileListIndex = groupId.x;
     if (tileListIndex >= tileCount)
         return;

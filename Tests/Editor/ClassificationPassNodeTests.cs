@@ -28,6 +28,7 @@ namespace VividRP.Editor.Tests
             Assert.That(node.GetOutputPortByName("m_StandardMaterialIndices"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_FabricMaterialIndices"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_ClearCoatMaterialIndices"), Is.Not.Null);
+            Assert.That(node.GetOutputPortByName("m_MaterialTileClasses"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_MaterialClassCounts"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_StandardIndirectArgs"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_FabricIndirectArgs"), Is.Not.Null);
@@ -51,6 +52,7 @@ namespace VividRP.Editor.Tests
             Assert.That(node.HasOverrideOption("m_StandardMaterialIndices"), Is.True);
             Assert.That(node.HasOverrideOption("m_FabricMaterialIndices"), Is.True);
             Assert.That(node.HasOverrideOption("m_ClearCoatMaterialIndices"), Is.True);
+            Assert.That(node.HasOverrideOption("m_MaterialTileClasses"), Is.True);
             Assert.That(node.HasOverrideOption("m_MaterialClassCounts"), Is.True);
             Assert.That(node.HasOverrideOption("m_StandardIndirectArgs"), Is.True);
             Assert.That(node.HasOverrideOption("m_FabricIndirectArgs"), Is.True);
@@ -59,6 +61,7 @@ namespace VividRP.Editor.Tests
             Assert.That(node.GetInputPortByName("m_StandardMaterialIndices_In"), Is.Null);
             Assert.That(node.GetInputPortByName("m_FabricMaterialIndices_In"), Is.Null);
             Assert.That(node.GetInputPortByName("m_ClearCoatMaterialIndices_In"), Is.Null);
+            Assert.That(node.GetInputPortByName("m_MaterialTileClasses_In"), Is.Null);
             Assert.That(node.GetInputPortByName("m_MaterialClassCounts_In"), Is.Null);
             Assert.That(node.GetInputPortByName("m_StandardIndirectArgs_In"), Is.Null);
             Assert.That(node.GetInputPortByName("m_FabricIndirectArgs_In"), Is.Null);

@@ -28,6 +28,7 @@ namespace VividRP.Editor.Tests
                 "FabricIndirectArgs",
                 "FabricMaterialIndices",
                 "MaterialClassCounts",
+                "MaterialTileClasses",
                 "StandardIndirectArgs",
                 "StandardMaterialIndices"
             }));
@@ -55,6 +56,7 @@ namespace VividRP.Editor.Tests
                 AssertStructuredBuffer(pass, "m_StandardMaterialIndices", expectedTileCount, sizeof(uint), GraphicsBuffer.Target.Structured);
                 AssertStructuredBuffer(pass, "m_FabricMaterialIndices", expectedTileCount, sizeof(uint), GraphicsBuffer.Target.Structured);
                 AssertStructuredBuffer(pass, "m_ClearCoatMaterialIndices", expectedTileCount, sizeof(uint), GraphicsBuffer.Target.Structured);
+                AssertStructuredBuffer(pass, "m_MaterialTileClasses", expectedTileCount, sizeof(uint), GraphicsBuffer.Target.Structured);
                 AssertStructuredBuffer(pass, "m_MaterialClassCounts", 3, sizeof(uint), GraphicsBuffer.Target.Structured);
                 AssertStructuredBuffer(pass, "m_StandardIndirectArgs", 4, sizeof(uint), GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
                 AssertStructuredBuffer(pass, "m_FabricIndirectArgs", 4, sizeof(uint), GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
@@ -63,6 +65,7 @@ namespace VividRP.Editor.Tests
                 AssertImportedBuffer(pass, "m_StandardMaterialIndices", expectedTileCount, sizeof(uint));
                 AssertImportedBuffer(pass, "m_FabricMaterialIndices", expectedTileCount, sizeof(uint));
                 AssertImportedBuffer(pass, "m_ClearCoatMaterialIndices", expectedTileCount, sizeof(uint));
+                AssertImportedBuffer(pass, "m_MaterialTileClasses", expectedTileCount, sizeof(uint));
                 AssertImportedBuffer(pass, "m_MaterialClassCounts", 3, sizeof(uint));
                 AssertImportedBuffer(pass, "m_StandardIndirectArgs", 4, sizeof(uint));
                 AssertImportedBuffer(pass, "m_FabricIndirectArgs", 4, sizeof(uint));
@@ -78,6 +81,30 @@ namespace VividRP.Editor.Tests
         public void SupportsAsyncCompute_ReturnsTrue_ForClassificationPass()
         {
             Assert.That(RenderGraphPassExecutionUtility.SupportsAsyncCompute(typeof(ClassificationPass)), Is.True);
+        }
+
+        [Test]
+        public void Prepare_ComputesBuildIndirectDispatchGroups_WhenTileCountExceedsSingleWave()
+        {
+            var pass = new ClassificationPass();
+            try
+            {
+                var frameData = new ContextContainer();
+                var cameraData = frameData.GetOrCreate<VividCameraData>();
+                cameraData.actualWidth = 320;
+                cameraData.actualHeight = 180;
+
+                pass.Prepare(frameData);
+
+                var field = typeof(ClassificationPass).GetField("m_BuildIndirectDispatchGroupCountX", BindingFlags.Instance | BindingFlags.NonPublic);
+
+                Assert.That(field, Is.Not.Null);
+                Assert.That(field.GetValue(pass), Is.EqualTo(15));
+            }
+            finally
+            {
+                pass.Dispose();
+            }
         }
 
         private static void AssertTextureSize(ClassificationPass pass, string fieldName, int expectedWidth, int expectedHeight)

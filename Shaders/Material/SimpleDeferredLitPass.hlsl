@@ -101,7 +101,7 @@ float3 EvaluateSimpleDeferredLighting(VividGBufferSurfaceData surfaceData, float
         float3 lightColor = GetDeferredLightColor();
         float3 directLighting = surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC
             ? EvaluateVividFabricDirectLight(surfaceData, viewDirectionWS, lightDirectionWS) * lightColor
-            : EvaluateVividHdrpLitDirectLight(surfaceData, bsdfData, viewDirectionWS, lightDirectionWS) * lightColor;
+            : EvaluateVividLitDirectLight(surfaceData, bsdfData, viewDirectionWS, lightDirectionWS) * lightColor;
         return directLighting + indirectLighting + surfaceData.emissive;
     }
 

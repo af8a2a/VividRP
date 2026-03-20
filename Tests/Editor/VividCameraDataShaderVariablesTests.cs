@@ -1,0 +1,149 @@
+using System.IO;
+using NUnit.Framework;
+using UnityEngine;
+using VividRP.Runtime;
+
+namespace VividRP.Editor.Tests
+{
+    public class VividCameraDataShaderVariablesTests
+    {
+        private GameObject m_GameObject;
+
+        [SetUp]
+        public void SetUp()
+        {
+            m_GameObject = new GameObject("Vivid Camera Shader Variables Test");
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            Object.DestroyImmediate(m_GameObject);
+        }
+
+        [Test]
+        public void BuildShaderVariables_ComputesCameraAndScreenGlobals_WhenCameraDataIsAvailable()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            camera.aspect = 16.0f / 9.0f;
+            camera.nearClipPlane = 0.5f;
+            camera.farClipPlane = 250.0f;
+            camera.transform.position = new Vector3(2.0f, 3.0f, -4.0f);
+            camera.transform.rotation = Quaternion.Euler(12.0f, 25.0f, 0.0f);
+
+            var nonJitteredProjectionMatrix = Matrix4x4.Perspective(60.0f, camera.aspect, camera.nearClipPlane, camera.farClipPlane);
+            var jitterMatrix = Matrix4x4.Translate(new Vector3(0.125f, -0.25f, 0.0f));
+            var jitteredProjectionMatrix = jitterMatrix * nonJitteredProjectionMatrix;
+            camera.nonJitteredProjectionMatrix = nonJitteredProjectionMatrix;
+            camera.projectionMatrix = jitteredProjectionMatrix;
+
+            var cameraData = new VividCameraData
+            {
+                camera = camera,
+                actualWidth = 640,
+                actualHeight = 360,
+                pixelWidth = 1280,
+                pixelHeight = 720,
+            };
+
+            var shaderVariables = cameraData.BuildShaderVariables();
+            var expectedGpuProjectionMatrix = GL.GetGPUProjectionMatrix(jitteredProjectionMatrix, false);
+            var expectedNonJitteredGpuProjectionMatrix = GL.GetGPUProjectionMatrix(nonJitteredProjectionMatrix, false);
+            var expectedViewMatrix = camera.worldToCameraMatrix;
+
+            AssertVectorAreEqual(new Vector4(2.0f, 3.0f, -4.0f, 1.0f), shaderVariables.worldSpaceCameraPos);
+            AssertVectorAreEqual(new Vector4(1280.0f, 720.0f, 1.0f + (1.0f / 1280.0f), 1.0f + (1.0f / 720.0f)), shaderVariables.screenParams);
+            AssertVectorAreEqual(new Vector4(640.0f, 360.0f, 1.0f + (1.0f / 640.0f), 1.0f + (1.0f / 360.0f)), shaderVariables.scaledScreenParams);
+            AssertVectorAreEqual(new Vector4(640.0f, 360.0f, 1.0f / 640.0f, 1.0f / 360.0f), shaderVariables.screenSize);
+            Assert.That(shaderVariables.globalMipBias.x, Is.EqualTo(1.0f).Within(0.00001f));
+            Assert.That(shaderVariables.globalMipBias.y, Is.EqualTo(2.0f).Within(0.00001f));
+            Assert.That(shaderVariables.projectionParams.y, Is.EqualTo(0.5f).Within(0.00001f));
+            Assert.That(shaderVariables.projectionParams.z, Is.EqualTo(250.0f).Within(0.00001f));
+            Assert.That(shaderVariables.projectionParams.w, Is.EqualTo(1.0f / 250.0f).Within(0.00001f));
+            Assert.That(shaderVariables.orthoParams, Is.EqualTo(Vector4.zero));
+
+            AssertMatrixAreEqual(jitteredProjectionMatrix, shaderVariables.cameraProjection);
+            AssertMatrixAreEqual(expectedViewMatrix, shaderVariables.worldToCamera);
+            AssertMatrixAreEqual(expectedViewMatrix.inverse, shaderVariables.cameraToWorld);
+            AssertMatrixAreEqual(expectedGpuProjectionMatrix, shaderVariables.glstateMatrixProjection);
+            AssertMatrixAreEqual(expectedGpuProjectionMatrix, shaderVariables.projMatrix);
+            AssertMatrixAreEqual(expectedGpuProjectionMatrix * expectedViewMatrix, shaderVariables.viewProjMatrix);
+            AssertMatrixAreEqual(expectedGpuProjectionMatrix * expectedViewMatrix, shaderVariables.matrixVP);
+            AssertMatrixAreEqual((expectedGpuProjectionMatrix * expectedViewMatrix).inverse, shaderVariables.invViewProjMatrix);
+            AssertMatrixAreEqual(expectedNonJitteredGpuProjectionMatrix * expectedViewMatrix, shaderVariables.nonJitteredViewProjMatrix);
+            AssertMatrixAreEqual(expectedNonJitteredGpuProjectionMatrix * expectedViewMatrix, shaderVariables.prevViewProjMatrix);
+
+            Assert.That(shaderVariables.cameraWorldClipPlanes, Has.Length.EqualTo(6));
+            Assert.That(shaderVariables.frustumPlanes, Has.Length.EqualTo(6));
+            AssertVectorAreEqual(shaderVariables.cameraWorldClipPlanes[3], shaderVariables.frustumPlanes[2]);
+            AssertVectorAreEqual(shaderVariables.cameraWorldClipPlanes[2], shaderVariables.frustumPlanes[3]);
+        }
+
+        [Test]
+        public void BuildShaderVariables_ComputesOrthographicParams_WhenCameraIsOrthographic()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            camera.orthographic = true;
+            camera.orthographicSize = 4.0f;
+            camera.aspect = 2.0f;
+
+            var cameraData = new VividCameraData
+            {
+                camera = camera,
+                actualWidth = 800,
+                actualHeight = 400,
+            };
+
+            var shaderVariables = cameraData.BuildShaderVariables();
+
+            AssertVectorAreEqual(new Vector4(16.0f, 8.0f, 0.0f, 1.0f), shaderVariables.orthoParams);
+        }
+
+        [Test]
+        public void PrepareFrame_UpdatesCameraShaderVariables_BeforePreparingHistoryTargets()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.Execution.cs"));
+            var updateIndex = source.IndexOf("cameraData.UpdateShaderVariables(cmdBuffer);", System.StringComparison.Ordinal);
+            var historyIndex = source.IndexOf("PrepareHistoryTargets(graphAsset, cmdBuffer);", System.StringComparison.Ordinal);
+
+            Assert.That(updateIndex, Is.GreaterThanOrEqualTo(0));
+            Assert.That(historyIndex, Is.GreaterThan(updateIndex));
+        }
+
+        private static void AssertMatrixAreEqual(Matrix4x4 expected, Matrix4x4 actual)
+        {
+            for (var row = 0; row < 4; row++)
+            {
+                for (var column = 0; column < 4; column++)
+                    Assert.That(actual[row, column], Is.EqualTo(expected[row, column]).Within(0.00001f));
+            }
+        }
+
+        private static void AssertVectorAreEqual(Vector4 expected, Vector4 actual)
+        {
+            Assert.That(actual.x, Is.EqualTo(expected.x).Within(0.00001f));
+            Assert.That(actual.y, Is.EqualTo(expected.y).Within(0.00001f));
+            Assert.That(actual.z, Is.EqualTo(expected.z).Within(0.00001f));
+            Assert.That(actual.w, Is.EqualTo(expected.w).Within(0.00001f));
+        }
+
+        private static string GetPackageFilePath(params string[] relativeParts)
+        {
+            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            var packageRoots = new[]
+            {
+                Path.Combine(projectRoot, "Packages", "VividRP"),
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
+            };
+
+            foreach (var packageRoot in packageRoots)
+            {
+                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
+                if (File.Exists(fullPath))
+                    return fullPath;
+            }
+
+            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
+        }
+    }
+}

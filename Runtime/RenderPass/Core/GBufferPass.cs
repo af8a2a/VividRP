@@ -53,6 +53,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer1 = CreateColorTarget("GBuffer1", GraphicsFormat.R16G16_SFloat);
             m_GBuffer2 = CreateColorTarget("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
             m_GBuffer3 = CreateColorTarget("GBuffer3", GraphicsFormat.B10G11R11_UFloatPack32);
+            m_GBuffer3.desc.EnableRandomWrite = true;
             m_GBufferDepth = CreateDepthTarget("GBufferDepth", DepthBits.Depth32);
         }
 

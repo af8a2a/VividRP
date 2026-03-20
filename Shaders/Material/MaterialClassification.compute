@@ -3,10 +3,12 @@
 #pragma kernel BuildIndirectArgs
 
 #define CLASSIFY_TILE_SIZE 8
+#define BUILD_INDIRECT_THREADS 64
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/TileClassification.hlsl"
 
 #define VIVID_GBUFFER_MATERIAL_CLASS_COUNT 3
+#define VIVID_INVALID_MATERIAL_CLASS VIVID_GBUFFER_MATERIAL_CLASS_COUNT
 
 Texture2D<float4> _GBuffer0;
 Texture2D<float> _DepthTexture;
@@ -14,6 +16,7 @@ Texture2D<float> _DepthTexture;
 RWStructuredBuffer<uint> _StandardMaterialIndices;
 RWStructuredBuffer<uint> _FabricMaterialIndices;
 RWStructuredBuffer<uint> _ClearCoatMaterialIndices;
+RWStructuredBuffer<uint> _MaterialTileClasses;
 RWStructuredBuffer<uint> _MaterialClassCounts;
 RWStructuredBuffer<uint> _StandardIndirectArgs;
 RWStructuredBuffer<uint> _FabricIndirectArgs;
@@ -21,10 +24,31 @@ RWStructuredBuffer<uint> _ClearCoatIndirectArgs;
 
 uint _ClassificationWidth;
 uint _ClassificationHeight;
+uint _MaterialTileCount;
+uint _MaterialTileCountX;
+
+groupshared uint gs_LocalMaterialCounts[VIVID_GBUFFER_MATERIAL_CLASS_COUNT];
+groupshared uint gs_GlobalMaterialOffsets[VIVID_GBUFFER_MATERIAL_CLASS_COUNT];
+groupshared uint gs_LocalTileOffsets[BUILD_INDIRECT_THREADS];
+groupshared uint gs_LocalTileClasses[BUILD_INDIRECT_THREADS];
 
 bool IsSupportedVividMaterialId(uint materialId)
 {
     return materialId <= VIVID_GBUFFER_MATERIAL_CLEARCOAT;
+}
+
+uint SelectMaterialClass(uint classificationMask)
+{
+    if ((classificationMask & (1u << VIVID_GBUFFER_MATERIAL_CLEARCOAT)) != 0u)
+        return VIVID_GBUFFER_MATERIAL_CLEARCOAT;
+
+    if ((classificationMask & (1u << VIVID_GBUFFER_MATERIAL_FABRIC)) != 0u)
+        return VIVID_GBUFFER_MATERIAL_FABRIC;
+
+    if ((classificationMask & (1u << VIVID_GBUFFER_MATERIAL_STANDARD)) != 0u)
+        return VIVID_GBUFFER_MATERIAL_STANDARD;
+
+    return VIVID_INVALID_MATERIAL_CLASS;
 }
 
 uint GetMaterialClassificationMask(uint materialId)
@@ -34,20 +58,51 @@ uint GetMaterialClassificationMask(uint materialId)
         : 0u;
 }
 
-void AppendMaterialTile(uint materialId, uint tileWriteIndex, uint2 tileCoord)
+void AppendMaterialTile(uint materialId, uint tileWriteIndex, uint packedTileCoord)
 {
     if (materialId == VIVID_GBUFFER_MATERIAL_STANDARD)
     {
-        _StandardMaterialIndices[tileWriteIndex] = PackTileCoord(tileCoord);
+        _StandardMaterialIndices[tileWriteIndex] = packedTileCoord;
     }
     else if (materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
     {
-        _FabricMaterialIndices[tileWriteIndex] = PackTileCoord(tileCoord);
+        _FabricMaterialIndices[tileWriteIndex] = packedTileCoord;
     }
     else if (materialId == VIVID_GBUFFER_MATERIAL_CLEARCOAT)
     {
-        _ClearCoatMaterialIndices[tileWriteIndex] = PackTileCoord(tileCoord);
+        _ClearCoatMaterialIndices[tileWriteIndex] = packedTileCoord;
     }
+}
+
+void AddMaterialIndirectArgsCount(uint materialId, uint count)
+{
+    uint ignored;
+
+    if (materialId == VIVID_GBUFFER_MATERIAL_STANDARD)
+    {
+        InterlockedAdd(_StandardIndirectArgs[0], count, ignored);
+    }
+    else if (materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+    {
+        InterlockedAdd(_FabricIndirectArgs[0], count, ignored);
+    }
+    else if (materialId == VIVID_GBUFFER_MATERIAL_CLEARCOAT)
+    {
+        InterlockedAdd(_ClearCoatIndirectArgs[0], count, ignored);
+    }
+}
+
+void InitializeMaterialTileListBuild(uint groupIndex)
+{
+    if (groupIndex < VIVID_GBUFFER_MATERIAL_CLASS_COUNT)
+    {
+        gs_LocalMaterialCounts[groupIndex] = 0u;
+        gs_GlobalMaterialOffsets[groupIndex] = 0u;
+    }
+
+    gs_LocalTileOffsets[groupIndex] = 0u;
+    gs_LocalTileClasses[groupIndex] = VIVID_INVALID_MATERIAL_CLASS;
+    GroupMemoryBarrierWithGroupSync();
 }
 
 [numthreads(1, 1, 1)]
@@ -56,6 +111,21 @@ void ClearMaterialCounts(uint3 dispatchThreadId : SV_DispatchThreadID)
     _MaterialClassCounts[0] = 0;
     _MaterialClassCounts[1] = 0;
     _MaterialClassCounts[2] = 0;
+
+    _StandardIndirectArgs[0] = 0;
+    _StandardIndirectArgs[1] = 1;
+    _StandardIndirectArgs[2] = 1;
+    _StandardIndirectArgs[3] = 0;
+
+    _FabricIndirectArgs[0] = 0;
+    _FabricIndirectArgs[1] = 1;
+    _FabricIndirectArgs[2] = 1;
+    _FabricIndirectArgs[3] = 0;
+
+    _ClearCoatIndirectArgs[0] = 0;
+    _ClearCoatIndirectArgs[1] = 1;
+    _ClearCoatIndirectArgs[2] = 1;
+    _ClearCoatIndirectArgs[3] = 0;
 }
 
 [numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
@@ -64,7 +134,7 @@ void ClassifyMaterialIds(
     uint3 groupId : SV_GroupID,
     uint groupIndex : SV_GroupIndex)
 {
-    InitializeTileClassification(groupIndex);
+    TileClassifaction::InitializeTileClassification(groupIndex);
 
     uint classificationMask = 0u;
 
@@ -81,48 +151,61 @@ void ClassifyMaterialIds(
         }
     }
 
-    SubmitPixelClassification(classificationMask);
+    TileClassifaction::SubmitPixelClassification(classificationMask);
 
     if (groupIndex != 0)
         return;
 
-    uint2 tileCoord = groupId.xy;
-    uint tileWriteIndex = 0u;
-
-    // Assign each tile to the most complex material present. This keeps tile lists mutually exclusive,
-    // avoids shading the same pixel multiple times, and matches HDRP-style tile classification.
-    if ((gs_TileMask & (1u << VIVID_GBUFFER_MATERIAL_CLEARCOAT)) != 0u)
-    {
-        InterlockedAdd(_MaterialClassCounts[VIVID_GBUFFER_MATERIAL_CLEARCOAT], 1u, tileWriteIndex);
-        AppendMaterialTile(VIVID_GBUFFER_MATERIAL_CLEARCOAT, tileWriteIndex, tileCoord);
-    }
-    else if ((gs_TileMask & (1u << VIVID_GBUFFER_MATERIAL_FABRIC)) != 0u)
-    {
-        InterlockedAdd(_MaterialClassCounts[VIVID_GBUFFER_MATERIAL_FABRIC], 1u, tileWriteIndex);
-        AppendMaterialTile(VIVID_GBUFFER_MATERIAL_FABRIC, tileWriteIndex, tileCoord);
-    }
-    else if ((gs_TileMask & (1u << VIVID_GBUFFER_MATERIAL_STANDARD)) != 0u)
-    {
-        InterlockedAdd(_MaterialClassCounts[VIVID_GBUFFER_MATERIAL_STANDARD], 1u, tileWriteIndex);
-        AppendMaterialTile(VIVID_GBUFFER_MATERIAL_STANDARD, tileWriteIndex, tileCoord);
-    }
+    uint tileIndex = groupId.y * _MaterialTileCountX + groupId.x;
+    _MaterialTileClasses[tileIndex] = SelectMaterialClass(gs_TileMask);
 }
 
-[numthreads(1, 1, 1)]
-void BuildIndirectArgs(uint3 dispatchThreadId : SV_DispatchThreadID)
+[numthreads(BUILD_INDIRECT_THREADS, 1, 1)]
+void BuildIndirectArgs(
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint groupIndex : SV_GroupIndex)
 {
-    _StandardIndirectArgs[0] = _MaterialClassCounts[0];
-    _StandardIndirectArgs[1] = 1;
-    _StandardIndirectArgs[2] = 1;
-    _StandardIndirectArgs[3] = 0;
+    InitializeMaterialTileListBuild(groupIndex);
 
-    _FabricIndirectArgs[0] = _MaterialClassCounts[1];
-    _FabricIndirectArgs[1] = 1;
-    _FabricIndirectArgs[2] = 1;
-    _FabricIndirectArgs[3] = 0;
+    uint tileIndex = dispatchThreadId.x;
+    uint materialClass = VIVID_INVALID_MATERIAL_CLASS;
+    uint localTileOffset = 0u;
+    
 
-    _ClearCoatIndirectArgs[0] = _MaterialClassCounts[2];
-    _ClearCoatIndirectArgs[1] = 1;
-    _ClearCoatIndirectArgs[2] = 1;
-    _ClearCoatIndirectArgs[3] = 0;
+    if (tileIndex < _MaterialTileCount)
+    {
+        materialClass = _MaterialTileClasses[tileIndex];
+
+        if (materialClass < VIVID_GBUFFER_MATERIAL_CLASS_COUNT)
+        {
+            InterlockedAdd(gs_LocalMaterialCounts[materialClass], 1u, localTileOffset);
+        }
+    }
+
+    gs_LocalTileOffsets[groupIndex] = localTileOffset;
+    gs_LocalTileClasses[groupIndex] = materialClass;
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupIndex < VIVID_GBUFFER_MATERIAL_CLASS_COUNT)
+    {
+        uint localTileCount = gs_LocalMaterialCounts[groupIndex];
+
+        if (localTileCount > 0u)
+        {
+            uint globalTileOffset = 0u;
+            InterlockedAdd(_MaterialClassCounts[groupIndex], localTileCount, globalTileOffset);
+            gs_GlobalMaterialOffsets[groupIndex] = globalTileOffset;
+            AddMaterialIndirectArgsCount(groupIndex, localTileCount);
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    if (tileIndex >= _MaterialTileCount || materialClass >= VIVID_GBUFFER_MATERIAL_CLASS_COUNT)
+        return;
+
+    uint tileY = (uint)((tileIndex + 0.5f) / (float)_MaterialTileCountX);
+    uint tileX = tileIndex - tileY * _MaterialTileCountX;
+    uint packedTileCoord = TileClassifaction::PackTileCoord(uint2(tileX, tileY));
+    uint globalTileOffset = gs_GlobalMaterialOffsets[materialClass] + gs_LocalTileOffsets[groupIndex];
+    AppendMaterialTile(materialClass, globalTileOffset, packedTileCoord);
 }

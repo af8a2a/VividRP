@@ -130,5 +130,11 @@ namespace VividRP.Runtime
         {
             return buffer.innerHandle;
         }
+        
+        public static implicit operator GraphicsBuffer(RenderGraphBuffer buffer)
+        {
+            return buffer.innerHandle;
+        }
+
     }
 }

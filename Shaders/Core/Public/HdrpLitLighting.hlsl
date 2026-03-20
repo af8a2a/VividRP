@@ -5,7 +5,10 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/PreIntegratedFGD.hlsl"
+
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/AmbientProbe.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/BSDF.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
 
 static const float3 kVividDielectricF0 = float3(0.04, 0.04, 0.04);
@@ -37,93 +40,72 @@ float VividClampNdotV(float nDotV)
 
 float VividClampRoughnessForAnalyticalLights(float roughness)
 {
-    return max(roughness, 1.0 / 1024.0);
+    return ClampRoughnessForAnalyticalLights(roughness);
 }
 
 float VividPerceptualRoughnessToRoughness(float perceptualRoughness)
 {
-    return perceptualRoughness * perceptualRoughness;
+    return PerceptualRoughnessToRoughness(perceptualRoughness);
 }
 
 float VividRoughnessToPerceptualRoughness(float roughness)
 {
-    return sqrt(max(roughness, 0.0));
+    return RoughnessToPerceptualRoughness(roughness);
 }
 
 float VividRoughnessToVariance(float roughness)
 {
-    roughness = max(roughness, 1e-4);
-    return 2.0 / (roughness * roughness) - 2.0;
+    return RoughnessToVariance(roughness);
 }
 
 float VividVarianceToRoughness(float variance)
 {
-    return sqrt(2.0 / max(variance + 2.0, 1e-4));
+    return VarianceToRoughness(variance);
 }
 
 float VividF_Schlick(float f0, float f90, float u)
 {
-    float x = 1.0 - u;
-    float x2 = x * x;
-    float x5 = x * x2 * x2;
-    return (f90 - f0) * x5 + f0;
+    return F_Schlick(f0, f90, u);
 }
 
 float3 VividF_Schlick(float3 f0, float3 f90, float u)
 {
-    float x = 1.0 - u;
-    float x2 = x * x;
-    float x5 = x * x2 * x2;
-    return f0 * (1.0 - x5) + f90 * x5;
+    return F_Schlick(f0, f90, u);
 }
 
 float VividDisneyDiffuse(float nDotV, float nDotL, float lDotV, float perceptualRoughness)
 {
-    float fd90 = 0.5 + (perceptualRoughness + perceptualRoughness * lDotV);
-    float lightScatter = VividF_Schlick(1.0, fd90, nDotL);
-    float viewScatter = VividF_Schlick(1.0, fd90, nDotV);
-    return INV_PI * rcp(1.03571) * lightScatter * viewScatter;
+    return DisneyDiffuse(nDotV, nDotL, lDotV, perceptualRoughness);
 }
 
 float VividGetSmithJointGGXPartLambdaV(float nDotV, float roughness)
 {
-    float roughnessSquared = roughness * roughness;
-    return sqrt(max((-nDotV * roughnessSquared + nDotV) * nDotV + roughnessSquared, 0.0));
+    return GetSmithJointGGXPartLambdaV(nDotV, roughness);
 }
 
 float VividDV_SmithJointGGX(float nDotH, float nDotL, float nDotV, float roughness, float partLambdaV)
 {
-    float roughnessSquared = roughness * roughness;
-    float s = (nDotH * roughnessSquared - nDotH) * nDotH + 1.0;
-
-    float lambdaV = nDotL * partLambdaV;
-    float lambdaL = nDotV * sqrt(max((-nDotL * roughnessSquared + nDotL) * nDotL + roughnessSquared, 0.0));
-
-    return INV_PI * 0.5 * roughnessSquared / max(s * s * (lambdaV + lambdaL), 1e-6);
+    return DV_SmithJointGGX(nDotH, nDotL, nDotV, roughness, partLambdaV);
 }
 
 float VividD_Charlie(float nDotH, float roughness)
 {
-    roughness = max(roughness, 1.0 / 1024.0);
-    float invRoughness = rcp(roughness);
-    float cos2h = nDotH * nDotH;
-    float sin2h = saturate(1.0 - cos2h);
-    return INV_PI * (2.0 + invRoughness) * pow(sin2h, invRoughness * 0.5) * 0.5;
+    return D_Charlie(nDotH, roughness);
 }
 
 float VividV_Ashikhmin(float nDotL, float nDotV)
 {
-    return rcp(max(4.0 * (nDotL + nDotV - nDotL * nDotV), 1e-4));
+    return V_Ashikhmin(nDotL, nDotV);
 }
 
 float VividFabricLambert(float roughness)
 {
-    return INV_PI * lerp(1.0, 0.5, saturate(roughness));
+    return FabricLambert(saturate(roughness));
 }
 
 float VividGetLuminance(float3 color)
 {
-    return dot(color, float3(0.2126729, 0.7151522, 0.0721750));
+    return Luminance(color);
 }
 
 bool VividHasSkyIBL()
@@ -211,7 +193,7 @@ VividLitBSDFData BuildVividHdrpLitBSDFData(VividGBufferSurfaceData surfaceData)
     return bsdfData;
 }
 
-float3 EvaluateVividHdrpLitDirectLight(
+float3 EvaluateVividLitDirectLight(
     VividGBufferSurfaceData surfaceData,
     VividLitBSDFData bsdfData,
     float3 viewDirectionWS,
@@ -383,8 +365,8 @@ float3 EvaluateDirectionalLight(
     float3 lightDirectionWS = SafeNormalize(directionalLight.directionWS);
     float3 lighting = surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC
         ? EvaluateVividFabricDirectLight(surfaceData, viewDirectionWS, lightDirectionWS)
-        : EvaluateVividHdrpLitDirectLight(surfaceData, bsdfData, viewDirectionWS, lightDirectionWS);
-    return lighting * directionalLight.color;
+        : EvaluateVividLitDirectLight(surfaceData, bsdfData, viewDirectionWS, lightDirectionWS);
+    return (lighting * directionalLight.color);
 }
 
 float EvaluatePunctualLightDistanceAttenuation(PunctualLightData punctualLight, float distanceSquared)
@@ -431,7 +413,7 @@ float3 EvaluatePunctualLight(
 
     float3 lighting = surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC
         ? EvaluateVividFabricDirectLight(surfaceData, viewDirectionWS, lightDirectionWS)
-        : EvaluateVividHdrpLitDirectLight(surfaceData, bsdfData, viewDirectionWS, lightDirectionWS);
+        : EvaluateVividLitDirectLight(surfaceData, bsdfData, viewDirectionWS, lightDirectionWS);
     return lighting * punctualLight.color * attenuation;
 }
 

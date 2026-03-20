@@ -14,11 +14,16 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "HdrpLitLighting.hlsl"));
 
+            Assert.That(source, Does.Contain("#include \"Packages/com.unity.render-pipelines.core/ShaderLibrary/BSDF.hlsl\""));
+            Assert.That(source, Does.Contain("#include \"Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl\""));
             Assert.That(source, Does.Contain("VividDisneyDiffuse"));
             Assert.That(source, Does.Contain("VividDV_SmithJointGGX"));
             Assert.That(source, Does.Contain("VividD_Charlie"));
+            Assert.That(source, Does.Contain("return DisneyDiffuse("));
+            Assert.That(source, Does.Contain("return DV_SmithJointGGX("));
+            Assert.That(source, Does.Contain("return D_Charlie("));
             Assert.That(source, Does.Contain("BuildVividHdrpLitBSDFData"));
-            Assert.That(source, Does.Contain("EvaluateVividHdrpLitDirectLight"));
+            Assert.That(source, Does.Contain("EvaluateVividLitDirectLight"));
             Assert.That(source, Does.Contain("EvaluateDirectionalLight"));
             Assert.That(source, Does.Contain("EvaluatePunctualLight"));
         }
@@ -30,6 +35,9 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/PreIntegratedFGD.hlsl\""));
             Assert.That(source, Does.Contain("_VividSkyIBLCubemap"));
+            Assert.That(source, Does.Contain("return ClampRoughnessForAnalyticalLights(roughness);"));
+            Assert.That(source, Does.Contain("return RoughnessToVariance(roughness);"));
+            Assert.That(source, Does.Contain("return Luminance(color);"));
             Assert.That(source, Does.Contain("EvaluateVividHdrpLitIndirectLight"));
             Assert.That(source, Does.Contain("EvaluateVividFabricIndirectLight"));
             Assert.That(source, Does.Contain("EvaluateIndirectLighting"));

@@ -83,6 +83,8 @@ namespace VividRP.Runtime
         internal static void PrepareFrame(RenderGraphData graphAsset, CommandBuffer cmdBuffer)
         {
             EnsureCompiled(graphAsset);
+            var cameraData = s_FrameData.GetOrCreate<VividCameraData>();
+            cameraData.UpdateShaderVariables(cmdBuffer);
             PrepareHistoryTargets(graphAsset, cmdBuffer);
             ClearImportedTextures();
         }

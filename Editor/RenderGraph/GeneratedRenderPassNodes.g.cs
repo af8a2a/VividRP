@@ -39,6 +39,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class DeferredLightingPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.DeferredLightingPass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class DrawObjectPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.DrawObjectPass, VividRP.Runtime";
@@ -102,6 +108,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class PreIntegratedFGDPreparePass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.PreIntegratedFGDPreparePass, VividRP.Runtime";
+    }
+
+    [Serializable]
+    internal sealed class SetupPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.SetupPass, VividRP.Runtime";
     }
 
     [Serializable]

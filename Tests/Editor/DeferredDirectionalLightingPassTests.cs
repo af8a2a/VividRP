@@ -1,4 +1,3 @@
-using System;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -6,24 +5,18 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
-using VividRP.Editor.RenderGraph;
+using VividRP.Editor.RenderGraph.Generated;
 using VividRP.Runtime;
-using VividRP.Runtime.RenderPass.Core;
+using DeferredLightingPass = VividRP.Runtime.RenderPass.Core.DeferredLightingPass;
 
 namespace VividRP.Editor.Tests
 {
     public class DeferredDirectionalLightingPassTests
     {
-        [Serializable]
-        private sealed class AutoRegisteredDeferredDirectionalLightingPassNode : RenderPassNodeData
-        {
-            protected override string RegisteredPassTypeName => typeof(DeferredDirectionalLightingPass).AssemblyQualifiedName;
-        }
-
         [Test]
-        public void Initialize_RegistersDeferredInputsAndIndirectLightingDependencies_WhenPassIsCreated()
+        public void Initialize_RegistersDeferredLightBuffersAndIndirectLightingDependencies_WhenPassIsCreated()
         {
-            IRenderPass renderPass = new DeferredDirectionalLightingPass();
+            IRenderPass renderPass = new DeferredLightingPass();
 
             var resources = renderPass.Initialize();
             var textureEntries = resources.Textures.OrderBy(entry => entry.Name).ToArray();
@@ -57,8 +50,13 @@ namespace VividRP.Editor.Tests
             {
                 "ClearCoatIndirectArgs",
                 "ClearCoatMaterialIndices",
+                "DirectionalLights",
                 "FabricIndirectArgs",
                 "FabricMaterialIndices",
+                "LayeredLightList",
+                "LayeredOffset",
+                "LogBaseBuffer",
+                "PunctualLights",
                 "StandardIndirectArgs",
                 "StandardMaterialIndices"
             }));
@@ -68,7 +66,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void Prepare_ResizesInputAndOutputTextures_WhenCameraSizeChanges()
         {
-            var pass = new DeferredDirectionalLightingPass();
+            var pass = new DeferredLightingPass();
             var frameData = new ContextContainer();
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             cameraData.actualWidth = 511;
@@ -89,7 +87,8 @@ namespace VividRP.Editor.Tests
             Assert.That(GetFieldValue<int>(pass, "m_LightingHeight"), Is.EqualTo(257));
             Assert.That(GetFieldValue<int>(pass, "m_ClearDispatchGroupCountX"), Is.EqualTo(64));
             Assert.That(GetFieldValue<int>(pass, "m_ClearDispatchGroupCountY"), Is.EqualTo(33));
-            Assert.That(GetFieldValue<int>(pass, "m_MaterialDispatchGroupCountX"), Is.EqualTo(2112));
+            Assert.That(GetFieldValue<int>(pass, "m_DirectionalLightCount"), Is.EqualTo(0));
+            Assert.That(GetFieldValue<int>(pass, "m_PunctualLightCount"), Is.EqualTo(0));
 
             var outputTexture = GetFieldValue<RenderGraphTexture>(pass, "m_ColorTexture");
             Assert.That(outputTexture.desc.EnableRandomWrite, Is.True);
@@ -101,44 +100,94 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void DeferredDirectionalLightingPass_InheritsFromUnsafePass()
+        public void Prepare_CachesClusteredLightingMetadata_WhenLightGridBuffersAreBound()
         {
-            Assert.That(typeof(UnsafePass).IsAssignableFrom(typeof(DeferredDirectionalLightingPass)), Is.True);
+            var pass = new DeferredLightingPass();
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 640;
+            cameraData.actualHeight = 360;
+
+            SetFieldValue(pass, "m_DirectionalLightBuffer", CreateStructuredBuffer("DirectionalLights", VividLightData.DirectionalLightData.Stride));
+            SetFieldValue(pass, "m_PunctualLightBuffer", CreateStructuredBuffer("PunctualLights", VividLightData.PunctualLightData.Stride));
+            SetFieldValue(pass, "m_LayeredOffsetBuffer", CreateStructuredBuffer("LayeredOffset", sizeof(uint)));
+            SetFieldValue(pass, "m_LayeredLightListBuffer", CreateStructuredBuffer("LayeredLightList", sizeof(uint)));
+            SetFieldValue(pass, "m_LogBaseBuffer", CreateStructuredBuffer("LogBaseBuffer", sizeof(float)));
+
+            var clusteredLightingData = frameData.GetOrCreate<VividClusteredLightingData>();
+            clusteredLightingData.directionalLightCount = 3;
+            clusteredLightingData.punctualLightCount = 7;
+            clusteredLightingData.mainDirectionalLightIndex = 1;
+            clusteredLightingData.clusterTileSize = 64;
+            clusteredLightingData.clusterSliceCount = 32;
+            clusteredLightingData.clusterTileCountX = 10;
+            clusteredLightingData.clusterTileCountY = 6;
+            clusteredLightingData.clusterNearClip = 0.3f;
+            clusteredLightingData.clusterFarClip = 900.0f;
+            clusteredLightingData.clusterIsOrthographic = 1;
+            clusteredLightingData.clusterScale = 2.5f;
+            clusteredLightingData.clusterBase = 1.17f;
+            clusteredLightingData.clusterLog2SliceCount = 5;
+            clusteredLightingData.supportsClusteredPunctualLights = true;
+            clusteredLightingData.isLogBaseBufferEnabled = true;
+
+            pass.Prepare(frameData);
+
+            Assert.That(GetFieldValue<int>(pass, "m_DirectionalLightCount"), Is.EqualTo(3));
+            Assert.That(GetFieldValue<int>(pass, "m_PunctualLightCount"), Is.EqualTo(7));
+            Assert.That(GetFieldValue<int>(pass, "m_MainDirectionalLightIndex"), Is.EqualTo(1));
+            Assert.That(GetFieldValue<int>(pass, "m_ClusterTileSize"), Is.EqualTo(64));
+            Assert.That(GetFieldValue<int>(pass, "m_ClusterSliceCount"), Is.EqualTo(32));
+            Assert.That(GetFieldValue<int>(pass, "m_ClusterTileCountX"), Is.EqualTo(10));
+            Assert.That(GetFieldValue<int>(pass, "m_ClusterTileCountY"), Is.EqualTo(6));
+            Assert.That(GetFieldValue<float>(pass, "m_ClusterNearClip"), Is.EqualTo(0.3f));
+            Assert.That(GetFieldValue<float>(pass, "m_ClusterFarClip"), Is.EqualTo(900.0f));
+            Assert.That(GetFieldValue<int>(pass, "m_ClusterIsOrthographic"), Is.EqualTo(1));
+            Assert.That(GetFieldValue<float>(pass, "m_ClusterScale"), Is.EqualTo(2.5f));
+            Assert.That(GetFieldValue<float>(pass, "m_ClusterBase"), Is.EqualTo(1.17f));
+            Assert.That(GetFieldValue<int>(pass, "m_ClusterLog2SliceCount"), Is.EqualTo(5));
+            Assert.That(GetFieldValue<bool>(pass, "m_SupportsClusteredPunctualLights"), Is.True);
+            Assert.That(GetFieldValue<bool>(pass, "m_IsLogBaseBufferEnabled"), Is.True);
         }
 
         [Test]
-        public void BuildSkyIblParams_UsesHdrpCompatibleSkyLayout_WhenSkyIsAvailable()
+        public void Prepare_ZeroesLightCounts_WhenClusteredBuffersAreNotBound()
         {
-            var cubemap = new Cubemap(16, TextureFormat.RGBA32, true);
+            var pass = new DeferredLightingPass();
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 320;
+            cameraData.actualHeight = 200;
 
-            try
-            {
-                var skyParams = DeferredDirectionalLightingPass.BuildSkyIblParams(cubemap, 1.5f, 30f);
+            var clusteredLightingData = frameData.GetOrCreate<VividClusteredLightingData>();
+            clusteredLightingData.directionalLightCount = 2;
+            clusteredLightingData.punctualLightCount = 5;
+            clusteredLightingData.mainDirectionalLightIndex = 0;
+            clusteredLightingData.clusterTileSize = 32;
+            clusteredLightingData.clusterSliceCount = 64;
+            clusteredLightingData.clusterTileCountX = 10;
+            clusteredLightingData.clusterTileCountY = 7;
+            clusteredLightingData.clusterNearClip = 0.5f;
+            clusteredLightingData.clusterFarClip = 500.0f;
+            clusteredLightingData.clusterScale = 1.5f;
+            clusteredLightingData.clusterBase = 1.1f;
+            clusteredLightingData.clusterLog2SliceCount = 6;
+            clusteredLightingData.supportsClusteredPunctualLights = true;
+            clusteredLightingData.isLogBaseBufferEnabled = true;
 
-                Assert.That(skyParams.x, Is.EqualTo(1.5f));
-                Assert.That(skyParams.y, Is.EqualTo(-30f));
-                Assert.That(skyParams.z, Is.EqualTo(cubemap.mipmapCount - 1));
-                Assert.That(skyParams.w, Is.EqualTo(1f));
-            }
-            finally
-            {
-                UnityEngine.Object.DestroyImmediate(cubemap);
-            }
+            pass.Prepare(frameData);
+
+            Assert.That(GetFieldValue<int>(pass, "m_DirectionalLightCount"), Is.EqualTo(0));
+            Assert.That(GetFieldValue<int>(pass, "m_PunctualLightCount"), Is.EqualTo(0));
+            Assert.That(GetFieldValue<int>(pass, "m_MainDirectionalLightIndex"), Is.EqualTo(-1));
+            Assert.That(GetFieldValue<bool>(pass, "m_SupportsClusteredPunctualLights"), Is.False);
+            Assert.That(GetFieldValue<bool>(pass, "m_IsLogBaseBufferEnabled"), Is.False);
+            Assert.That(GetFieldValue<int>(pass, "m_ClusterTileSize"), Is.EqualTo(32));
+            Assert.That(GetFieldValue<int>(pass, "m_ClusterSliceCount"), Is.EqualTo(64));
         }
 
-        [Test]
-        public void DeferredDirectionalLightingPassNode_DoesNotExposeAsyncComputeOption()
-        {
-            Assert.That(typeof(IAsyncComputeSupportedPass).IsAssignableFrom(typeof(DeferredDirectionalLightingPass)), Is.False);
-        }
 
-        [Test]
-        public void SupportsAsyncCompute_ReturnsFalse_ForDeferredDirectionalLightingPass()
-        {
-            Assert.That(RenderGraphPassExecutionUtility.SupportsAsyncCompute(typeof(DeferredDirectionalLightingPass)), Is.False);
-        }
-
-        private static void AssertTextureSize(DeferredDirectionalLightingPass pass, string fieldName, int expectedWidth, int expectedHeight)
+        private static void AssertTextureSize(DeferredLightingPass pass, string fieldName, int expectedWidth, int expectedHeight)
         {
             var texture = GetFieldValue<RenderGraphTexture>(pass, fieldName);
 
@@ -147,13 +196,38 @@ namespace VividRP.Editor.Tests
             Assert.That(texture.desc.Height, Is.EqualTo(expectedHeight));
         }
 
-        private static T GetFieldValue<T>(DeferredDirectionalLightingPass pass, string fieldName)
+        private static T GetFieldValue<T>(DeferredLightingPass pass, string fieldName)
         {
-            var field = typeof(DeferredDirectionalLightingPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
-
-            Assert.That(field, Is.Not.Null);
-
+            var field = GetField(fieldName);
             return (T)field.GetValue(pass);
+        }
+
+        private static void SetFieldValue<T>(DeferredLightingPass pass, string fieldName, T value)
+        {
+            var field = GetField(fieldName);
+            field.SetValue(pass, value);
+        }
+
+        private static FieldInfo GetField(string fieldName)
+        {
+            var field = typeof(DeferredLightingPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(field, Is.Not.Null, $"Expected private field '{fieldName}' on {nameof(DeferredLightingPass)}.");
+            return field;
+        }
+
+        private static RenderGraphBuffer CreateStructuredBuffer(string name, int stride)
+        {
+            return new RenderGraphBuffer
+            {
+                desc = new RenderGraphBufferDesc
+                {
+                    Count = 1,
+                    Stride = stride,
+                    Target = GraphicsBuffer.Target.Structured,
+                    Name = name
+                }
+            };
         }
     }
 }

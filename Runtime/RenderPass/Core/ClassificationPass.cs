@@ -11,14 +11,18 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int IndirectArgsElementCount = 4;
         private const int ThreadGroupSizeX = 8;
         private const int ThreadGroupSizeY = 8;
+        private const int BuildIndirectThreadGroupSizeX = 64;
 
         private static readonly int GBuffer0Id = Shader.PropertyToID("_GBuffer0");
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
         private static readonly int ClassificationWidthId = Shader.PropertyToID("_ClassificationWidth");
         private static readonly int ClassificationHeightId = Shader.PropertyToID("_ClassificationHeight");
+        private static readonly int MaterialTileCountId = Shader.PropertyToID("_MaterialTileCount");
+        private static readonly int MaterialTileCountXId = Shader.PropertyToID("_MaterialTileCountX");
         private static readonly int StandardMaterialIndicesId = Shader.PropertyToID("_StandardMaterialIndices");
         private static readonly int FabricMaterialIndicesId = Shader.PropertyToID("_FabricMaterialIndices");
         private static readonly int ClearCoatMaterialIndicesId = Shader.PropertyToID("_ClearCoatMaterialIndices");
+        private static readonly int MaterialTileClassesId = Shader.PropertyToID("_MaterialTileClasses");
         private static readonly int MaterialClassCountsId = Shader.PropertyToID("_MaterialClassCounts");
         private static readonly int StandardIndirectArgsId = Shader.PropertyToID("_StandardIndirectArgs");
         private static readonly int FabricIndirectArgsId = Shader.PropertyToID("_FabricIndirectArgs");
@@ -46,6 +50,12 @@ namespace VividRP.Runtime.RenderPass.Core
             Access = AccessFlags.Write,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphBuffer m_ClearCoatMaterialIndices;
+
+        [RenderGraphResource(
+            Name = "MaterialTileClasses",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphBuffer m_MaterialTileClasses;
 
         [RenderGraphResource(
             Name = "MaterialClassCounts",
@@ -79,9 +89,12 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_ClassificationHeight = 1;
         private int m_DispatchGroupCountX = 1;
         private int m_DispatchGroupCountY = 1;
+        private int m_MaterialTileCount = 1;
+        private int m_BuildIndirectDispatchGroupCountX = 1;
         private GraphicsBuffer m_StandardMaterialIndicesBuffer;
         private GraphicsBuffer m_FabricMaterialIndicesBuffer;
         private GraphicsBuffer m_ClearCoatMaterialIndicesBuffer;
+        private GraphicsBuffer m_MaterialTileClassesBuffer;
         private GraphicsBuffer m_MaterialClassCountsBuffer;
         private GraphicsBuffer m_StandardIndirectArgsBuffer;
         private GraphicsBuffer m_FabricIndirectArgsBuffer;
@@ -95,6 +108,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_StandardMaterialIndices = CreateStructuredBuffer("StandardMaterialIndices", 1, sizeof(uint));
             m_FabricMaterialIndices = CreateStructuredBuffer("FabricMaterialIndices", 1, sizeof(uint));
             m_ClearCoatMaterialIndices = CreateStructuredBuffer("ClearCoatMaterialIndices", 1, sizeof(uint));
+            m_MaterialTileClasses = CreateStructuredBuffer("MaterialTileClasses", 1, sizeof(uint));
             m_MaterialClassCounts = CreateStructuredBuffer("MaterialClassCounts", MaterialClassCount, sizeof(uint));
             m_StandardIndirectArgs = CreateIndirectArgsBuffer("StandardIndirectArgs");
             m_FabricIndirectArgs = CreateIndirectArgsBuffer("FabricIndirectArgs");
@@ -133,9 +147,14 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizeTexture(m_DepthTexture, m_ClassificationWidth, m_ClassificationHeight);
 
             var maxTileCount = Mathf.Max(1, m_DispatchGroupCountX * m_DispatchGroupCountY);
+            m_MaterialTileCount = maxTileCount;
+            m_BuildIndirectDispatchGroupCountX = Mathf.Max(
+                1,
+                (m_MaterialTileCount + BuildIndirectThreadGroupSizeX - 1) / BuildIndirectThreadGroupSizeX);
             ResizeStructuredBuffer(m_StandardMaterialIndices, maxTileCount, sizeof(uint));
             ResizeStructuredBuffer(m_FabricMaterialIndices, maxTileCount, sizeof(uint));
             ResizeStructuredBuffer(m_ClearCoatMaterialIndices, maxTileCount, sizeof(uint));
+            ResizeStructuredBuffer(m_MaterialTileClasses, maxTileCount, sizeof(uint));
             ResizeStructuredBuffer(m_MaterialClassCounts, MaterialClassCount, sizeof(uint));
             ResizeIndirectArgsBuffer(m_StandardIndirectArgs);
             ResizeIndirectArgsBuffer(m_FabricIndirectArgs);
@@ -152,23 +171,27 @@ namespace VividRP.Runtime.RenderPass.Core
 
             BindCommonParams(cmd);
             cmd.SetComputeBufferParam(m_ClassificationCompute, m_ClearCountsKernel, MaterialClassCountsId, m_MaterialClassCounts.innerHandle);
+            cmd.SetComputeBufferParam(m_ClassificationCompute, m_ClearCountsKernel, StandardIndirectArgsId, m_StandardIndirectArgs.innerHandle);
+            cmd.SetComputeBufferParam(m_ClassificationCompute, m_ClearCountsKernel, FabricIndirectArgsId, m_FabricIndirectArgs.innerHandle);
+            cmd.SetComputeBufferParam(m_ClassificationCompute, m_ClearCountsKernel, ClearCoatIndirectArgsId, m_ClearCoatIndirectArgs.innerHandle);
             cmd.DispatchCompute(m_ClassificationCompute, m_ClearCountsKernel, 1, 1, 1);
 
             BindCommonParams(cmd);
             cmd.SetComputeTextureParam(m_ClassificationCompute, m_ClassifyMaterialKernel, GBuffer0Id, m_GBuffer0.innerHandle);
             cmd.SetComputeTextureParam(m_ClassificationCompute, m_ClassifyMaterialKernel, DepthTextureId, m_DepthTexture.innerHandle);
-            cmd.SetComputeBufferParam(m_ClassificationCompute, m_ClassifyMaterialKernel, StandardMaterialIndicesId, m_StandardMaterialIndices.innerHandle);
-            cmd.SetComputeBufferParam(m_ClassificationCompute, m_ClassifyMaterialKernel, FabricMaterialIndicesId, m_FabricMaterialIndices.innerHandle);
-            cmd.SetComputeBufferParam(m_ClassificationCompute, m_ClassifyMaterialKernel, ClearCoatMaterialIndicesId, m_ClearCoatMaterialIndices.innerHandle);
-            cmd.SetComputeBufferParam(m_ClassificationCompute, m_ClassifyMaterialKernel, MaterialClassCountsId, m_MaterialClassCounts.innerHandle);
+            cmd.SetComputeBufferParam(m_ClassificationCompute, m_ClassifyMaterialKernel, MaterialTileClassesId, m_MaterialTileClasses.innerHandle);
             cmd.DispatchCompute(m_ClassificationCompute, m_ClassifyMaterialKernel, m_DispatchGroupCountX, m_DispatchGroupCountY, 1);
 
             BindCommonParams(cmd);
+            cmd.SetComputeBufferParam(m_ClassificationCompute, m_BuildIndirectArgsKernel, MaterialTileClassesId, m_MaterialTileClasses.innerHandle);
+            cmd.SetComputeBufferParam(m_ClassificationCompute, m_BuildIndirectArgsKernel, StandardMaterialIndicesId, m_StandardMaterialIndices.innerHandle);
+            cmd.SetComputeBufferParam(m_ClassificationCompute, m_BuildIndirectArgsKernel, FabricMaterialIndicesId, m_FabricMaterialIndices.innerHandle);
+            cmd.SetComputeBufferParam(m_ClassificationCompute, m_BuildIndirectArgsKernel, ClearCoatMaterialIndicesId, m_ClearCoatMaterialIndices.innerHandle);
             cmd.SetComputeBufferParam(m_ClassificationCompute, m_BuildIndirectArgsKernel, MaterialClassCountsId, m_MaterialClassCounts.innerHandle);
             cmd.SetComputeBufferParam(m_ClassificationCompute, m_BuildIndirectArgsKernel, StandardIndirectArgsId, m_StandardIndirectArgs.innerHandle);
             cmd.SetComputeBufferParam(m_ClassificationCompute, m_BuildIndirectArgsKernel, FabricIndirectArgsId, m_FabricIndirectArgs.innerHandle);
             cmd.SetComputeBufferParam(m_ClassificationCompute, m_BuildIndirectArgsKernel, ClearCoatIndirectArgsId, m_ClearCoatIndirectArgs.innerHandle);
-            cmd.DispatchCompute(m_ClassificationCompute, m_BuildIndirectArgsKernel, 1, 1, 1);
+            cmd.DispatchCompute(m_ClassificationCompute, m_BuildIndirectArgsKernel, m_BuildIndirectDispatchGroupCountX, 1, 1);
         }
 
         public override void Dispose()
@@ -184,6 +207,8 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             cmd.SetComputeIntParam(m_ClassificationCompute, ClassificationWidthId, m_ClassificationWidth);
             cmd.SetComputeIntParam(m_ClassificationCompute, ClassificationHeightId, m_ClassificationHeight);
+            cmd.SetComputeIntParam(m_ClassificationCompute, MaterialTileCountId, m_MaterialTileCount);
+            cmd.SetComputeIntParam(m_ClassificationCompute, MaterialTileCountXId, m_DispatchGroupCountX);
         }
 
         private static RenderGraphTexture CreateInputTexture(string name, GraphicsFormat format)
@@ -268,6 +293,7 @@ namespace VividRP.Runtime.RenderPass.Core
             EnsureImportedBuffer(ref m_StandardMaterialIndicesBuffer, m_StandardMaterialIndices);
             EnsureImportedBuffer(ref m_FabricMaterialIndicesBuffer, m_FabricMaterialIndices);
             EnsureImportedBuffer(ref m_ClearCoatMaterialIndicesBuffer, m_ClearCoatMaterialIndices);
+            EnsureImportedBuffer(ref m_MaterialTileClassesBuffer, m_MaterialTileClasses);
             EnsureImportedBuffer(ref m_MaterialClassCountsBuffer, m_MaterialClassCounts);
             EnsureImportedBuffer(ref m_StandardIndirectArgsBuffer, m_StandardIndirectArgs);
             EnsureImportedBuffer(ref m_FabricIndirectArgsBuffer, m_FabricIndirectArgs);
@@ -279,6 +305,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ReleaseImportedBuffer(ref m_StandardMaterialIndicesBuffer, m_StandardMaterialIndices);
             ReleaseImportedBuffer(ref m_FabricMaterialIndicesBuffer, m_FabricMaterialIndices);
             ReleaseImportedBuffer(ref m_ClearCoatMaterialIndicesBuffer, m_ClearCoatMaterialIndices);
+            ReleaseImportedBuffer(ref m_MaterialTileClassesBuffer, m_MaterialTileClasses);
             ReleaseImportedBuffer(ref m_MaterialClassCountsBuffer, m_MaterialClassCounts);
             ReleaseImportedBuffer(ref m_StandardIndirectArgsBuffer, m_StandardIndirectArgs);
             ReleaseImportedBuffer(ref m_FabricIndirectArgsBuffer, m_FabricIndirectArgs);

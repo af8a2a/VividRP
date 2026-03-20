@@ -62,7 +62,7 @@ Shader "Hidden/VividRP/TileDebug"
             ZWrite Off
             ZTest Always
             Cull Off
-            Blend SrcAlpha OneMinusSrcAlpha
+            Blend One Zero
 
             HLSLPROGRAM
             #pragma target 4.5
@@ -122,7 +122,7 @@ Shader "Hidden/VividRP/TileDebug"
             [maxvertexcount(4)]
             void OverlayGeom(point OverlayPoint input[1], inout TriangleStream<OverlayVaryings> stream)
             {
-                uint2 tileCoord = UnpackTileCoord(input[0].packedTileCoord);
+                uint2 tileCoord = TileClassifaction::UnpackTileCoord(input[0].packedTileCoord);
                 float2 screenSize = max(_TileDebugScreenSize.xy, float2(1.0, 1.0));
                 float2 tileMinPixel = float2(tileCoord) * CLASSIFY_TILE_SIZE;
                 float2 tileMaxPixel = min(tileMinPixel + CLASSIFY_TILE_SIZE, screenSize);

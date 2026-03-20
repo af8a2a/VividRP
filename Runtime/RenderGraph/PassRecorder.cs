@@ -64,6 +64,7 @@ namespace VividRP.Runtime
             ComputePass pass,
             PassResource resource,
             RenderGraphPassDefinition passDefinition,
+            bool enableAsyncCompute,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
             Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
             Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
@@ -78,7 +79,7 @@ namespace VividRP.Runtime
             SetupImportedTextures(builder, pass);
             ConfigureGlobalStateModification(builder, pass);
 
-            if (ShouldEnableAsyncCompute(pass, passDefinition))
+            if (ShouldEnableAsyncCompute(enableAsyncCompute, pass, passDefinition))
                 builder.EnableAsyncCompute(true);
 
             builder.SetRenderFunc<ComputePassData>(static (data, ctx) => { data.Pass.Record(ctx); });
@@ -121,6 +122,7 @@ namespace VividRP.Runtime
             UnsafePass pass,
             PassResource resource,
             RenderGraphPassDefinition passDefinition,
+            bool enableAsyncCompute,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
             Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
             Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
@@ -135,15 +137,19 @@ namespace VividRP.Runtime
             SetupImportedTextures(builder, pass);
             ConfigureGlobalStateModification(builder, pass);
 
-            if (ShouldEnableAsyncCompute(pass, passDefinition))
+            if (ShouldEnableAsyncCompute(enableAsyncCompute, pass, passDefinition))
                 builder.EnableAsyncCompute(true);
 
             builder.SetRenderFunc<UnsafePassData>(static (data, ctx) => { data.Pass.Record(ctx); });
         }
 
-        private static bool ShouldEnableAsyncCompute(IRenderPass pass, RenderGraphPassDefinition passDefinition)
+        internal static bool ShouldEnableAsyncCompute(
+            bool enableAsyncCompute,
+            IRenderPass pass,
+            RenderGraphPassDefinition passDefinition)
         {
-            return pass != null
+            return enableAsyncCompute
+                && pass != null
                 && passDefinition != null
                 && passDefinition.EnableAsyncCompute
                 && SystemInfo.supportsAsyncCompute

@@ -725,7 +725,11 @@ namespace VividRP.Runtime
                 && !GraphicsFormatUtility.IsDepthFormat(sourceInfo.format);
         }
 
-        public static void RecordRenderGraph(RenderGraph renderGraph, ScriptableRenderContext context, RenderGraphData graphAsset)
+        public static void RecordRenderGraph(
+            RenderGraph renderGraph,
+            ScriptableRenderContext context,
+            RenderGraphData graphAsset,
+            bool enableAsyncCompute = true)
         {
             EnsureCompiled(graphAsset);
             PrepareFrameHistoryTextures(renderGraph, graphAsset);
@@ -756,7 +760,15 @@ namespace VividRP.Runtime
 
                 if (pass is ComputePass computePass)
                 {
-                    RecordComputePass(renderGraph, computePass, resources, passDefinition, textureCache, bufferCache, renderListCache);
+                    RecordComputePass(
+                        renderGraph,
+                        computePass,
+                        resources,
+                        passDefinition,
+                        enableAsyncCompute,
+                        textureCache,
+                        bufferCache,
+                        renderListCache);
                     if (shouldRecordPreviews)
                         RecordTexturePreviewPasses(renderGraph, computePass, resources, passDefinition);
                 }
@@ -768,7 +780,15 @@ namespace VividRP.Runtime
                 }
                 else if (pass is UnsafePass unsafePass)
                 {
-                    RecordUnsafePass(renderGraph, unsafePass, resources, passDefinition, textureCache, bufferCache, renderListCache);
+                    RecordUnsafePass(
+                        renderGraph,
+                        unsafePass,
+                        resources,
+                        passDefinition,
+                        enableAsyncCompute,
+                        textureCache,
+                        bufferCache,
+                        renderListCache);
                     if (shouldRecordPreviews)
                         RecordTexturePreviewPasses(renderGraph, unsafePass, resources, passDefinition);
                 }

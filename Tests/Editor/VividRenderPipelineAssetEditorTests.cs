@@ -9,6 +9,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.UIElements;
 using VividRP.Editor.RenderPipeline;
 using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Core;
 using Object = UnityEngine.Object;
 
 namespace VividRP.Tests
@@ -26,6 +27,7 @@ namespace VividRP.Tests
 
         private RenderPipelineAsset m_PreviousGraphicsPipeline;
         private RenderPipelineAsset m_PreviousQualityPipeline;
+        private bool m_PreviousUseScriptableRenderPipelineBatching;
         private VividRenderPipelineGlobalSettings m_GlobalSettings;
         private VividRenderPipelineAsset m_PipelineAsset;
 
@@ -40,6 +42,7 @@ namespace VividRP.Tests
         {
             m_PreviousGraphicsPipeline = GraphicsSettings.defaultRenderPipeline;
             m_PreviousQualityPipeline = QualitySettings.renderPipeline;
+            m_PreviousUseScriptableRenderPipelineBatching = GraphicsSettings.useScriptableRenderPipelineBatching;
 
             DeleteAssetIfExists(AlternateVolumeProfilePath);
             DeleteAssetIfExists(DefaultVolumeProfilePath);
@@ -60,6 +63,7 @@ namespace VividRP.Tests
             if (VolumeManager.instance.isInitialized)
                 VolumeManager.instance.Deinitialize();
 
+            GraphicsSettings.useScriptableRenderPipelineBatching = m_PreviousUseScriptableRenderPipelineBatching;
             GraphicsSettings.defaultRenderPipeline = m_PreviousGraphicsPipeline;
             QualitySettings.renderPipeline = m_PreviousQualityPipeline;
             EditorGraphicsSettings.SetRenderPipelineGlobalSettingsAsset<VividRenderPipeline>(null);
@@ -70,6 +74,59 @@ namespace VividRP.Tests
             DeleteAssetIfExists(AlternateVolumeProfilePath);
             DeleteAssetIfExists(DefaultVolumeProfilePath);
             DeleteAssetIfExists(GlobalSettingsPath);
+        }
+
+        [Test]
+        public void CreateInspectorGUI_BuildsRenderGraphAndRenderingOptionFields()
+        {
+            var editor = UnityEditor.Editor.CreateEditor(m_PipelineAsset, typeof(VividRenderPipelineAssetEditor));
+
+            try
+            {
+                var root = editor.CreateInspectorGUI();
+
+                Assert.That(root.Q<PropertyField>("vivid-rp-asset-render-graph-field"), Is.Not.Null);
+                Assert.That(root.Q<PropertyField>("vivid-rp-asset-async-compute-field"), Is.Not.Null);
+                Assert.That(root.Q<PropertyField>("vivid-rp-asset-srp-batcher-field"), Is.Not.Null);
+            }
+            finally
+            {
+                Object.DestroyImmediate(editor);
+            }
+        }
+
+        [Test]
+        public void Asset_DefaultsToAsyncComputeAndSRPBatcherEnabled()
+        {
+            Assert.That(m_PipelineAsset.EnableAsyncCompute, Is.True);
+            Assert.That(m_PipelineAsset.EnableSRPBatcher, Is.True);
+        }
+
+        [Test]
+        public void ApplySRPBatcherSetting_UsesAssetToggle()
+        {
+            m_PipelineAsset.EnableSRPBatcher = false;
+            VividRenderPipeline.ApplySRPBatcherSetting(m_PipelineAsset);
+
+            Assert.That(GraphicsSettings.useScriptableRenderPipelineBatching, Is.False);
+
+            m_PipelineAsset.EnableSRPBatcher = true;
+            VividRenderPipeline.ApplySRPBatcherSetting(m_PipelineAsset);
+
+            Assert.That(GraphicsSettings.useScriptableRenderPipelineBatching, Is.True);
+        }
+
+        [Test]
+        public void ShouldEnableAsyncCompute_ReturnsFalse_WhenPipelineSettingIsDisabled()
+        {
+            var passDefinition = new RenderGraphPassDefinition
+            {
+                EnableAsyncCompute = true,
+            };
+
+            var enabled = PassRecorder.ShouldEnableAsyncCompute(false, new ClassificationPass(), passDefinition);
+
+            Assert.That(enabled, Is.False);
         }
     }
 

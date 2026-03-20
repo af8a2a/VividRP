@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
@@ -33,11 +34,13 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("_WorkflowMode"));
             Assert.That(shaderSource, Does.Contain("_BaseMap"));
             Assert.That(shaderSource, Does.Contain("_BaseColor"));
+            Assert.That(shaderSource, Does.Contain("_OpacityMap"));
             Assert.That(shaderSource, Does.Contain("_Cutoff"));
             Assert.That(shaderSource, Does.Contain("_Smoothness"));
             Assert.That(shaderSource, Does.Contain("_SmoothnessTextureChannel"));
             Assert.That(shaderSource, Does.Contain("_Metallic"));
             Assert.That(shaderSource, Does.Contain("_MetallicGlossMap"));
+            Assert.That(shaderSource, Does.Contain("_RoughnessMap"));
             Assert.That(shaderSource, Does.Contain("_BumpScale"));
             Assert.That(shaderSource, Does.Contain("_BumpMap"));
             Assert.That(shaderSource, Does.Contain("_OcclusionStrength"));
@@ -75,13 +78,18 @@ namespace VividRP.Editor.Tests
         public void SetupMaterial_UpdatesFeatureKeywords_WhenFeatureInputsAssigned()
         {
             Material material = CreateMaterial();
+            Texture2D opacityMap = CreateTexture();
             Texture2D normalMap = CreateTexture();
             Texture2D metallicMap = CreateTexture();
+            Texture2D roughnessMap = CreateTexture();
             Texture2D occlusionMap = CreateTexture();
             try
             {
+                material.SetFloat("_AlphaClip", 1.0f);
+                material.SetTexture("_OpacityMap", opacityMap);
                 material.SetTexture("_BumpMap", normalMap);
                 material.SetTexture("_MetallicGlossMap", metallicMap);
+                material.SetTexture("_RoughnessMap", roughnessMap);
                 material.SetTexture("_OcclusionMap", occlusionMap);
                 material.SetColor("_EmissionColor", new Color(0.25f, 0.5f, 0.75f, 1.0f));
                 material.SetFloat("_ClearCoatMask", 0.8f);
@@ -89,8 +97,11 @@ namespace VividRP.Editor.Tests
 
                 StandardLitMaterialUtility.SetupMaterial(material, null, false);
 
+                Assert.That(material.IsKeywordEnabled("_ALPHATEST_ON"), Is.True);
+                Assert.That(material.IsKeywordEnabled("_OPACITYMAP"), Is.True);
                 Assert.That(material.IsKeywordEnabled("_NORMALMAP"), Is.True);
                 Assert.That(material.IsKeywordEnabled("_METALLICSPECGLOSSMAP"), Is.True);
+                Assert.That(material.IsKeywordEnabled("_ROUGHNESSMAP"), Is.True);
                 Assert.That(material.IsKeywordEnabled("_OCCLUSIONMAP"), Is.True);
                 Assert.That(material.IsKeywordEnabled("_EMISSION"), Is.True);
                 Assert.That(material.IsKeywordEnabled("_CLEARCOAT"), Is.True);
@@ -98,8 +109,10 @@ namespace VividRP.Editor.Tests
             }
             finally
             {
+                Object.DestroyImmediate(opacityMap);
                 Object.DestroyImmediate(normalMap);
                 Object.DestroyImmediate(metallicMap);
+                Object.DestroyImmediate(roughnessMap);
                 Object.DestroyImmediate(occlusionMap);
                 Object.DestroyImmediate(material);
             }
@@ -147,7 +160,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(material.GetTexture("_MainTex"), Is.SameAs(baseMap));
                 Assert.That(material.GetTextureScale("_MainTex"), Is.EqualTo(new Vector2(2.0f, 3.0f)));
                 Assert.That(material.GetTextureOffset("_MainTex"), Is.EqualTo(new Vector2(0.25f, 0.5f)));
-                Assert.That(material.GetColor("_Color"), Is.EqualTo(new Color(0.1f, 0.2f, 0.3f, 0.4f)));
+                Assert.That(material.GetColor("_Color"), Is.EqualTo(new Color(0.1f, 0.2f, 0.3f, 0.4f)).Using(ColorEqualityComparer.Instance));
             }
             finally
             {
@@ -187,6 +200,26 @@ namespace VividRP.Editor.Tests
 
             Assert.That(File.Exists(shaderPath), Is.True, $"Expected shader source at '{shaderPath}'.");
             return shaderPath;
+        }
+
+        private sealed class ColorEqualityComparer : IEqualityComparer<Color>
+        {
+            internal static readonly ColorEqualityComparer Instance = new ColorEqualityComparer();
+
+            private const float Tolerance = 0.0001f;
+
+            public bool Equals(Color x, Color y)
+            {
+                return Mathf.Abs(x.r - y.r) <= Tolerance
+                    && Mathf.Abs(x.g - y.g) <= Tolerance
+                    && Mathf.Abs(x.b - y.b) <= Tolerance
+                    && Mathf.Abs(x.a - y.a) <= Tolerance;
+            }
+
+            public int GetHashCode(Color obj)
+            {
+                return obj.GetHashCode();
+            }
         }
     }
 }

@@ -12,6 +12,8 @@ namespace VividRP.Editor.RenderPipeline
     internal sealed class VividRenderPipelineAssetEditor : UnityEditor.Editor
     {
         private static readonly GUIContent s_RenderGraphLabel = EditorGUIUtility.TrTextContent("Render Graph Asset");
+        private static readonly GUIContent s_AsyncComputeLabel = EditorGUIUtility.TrTextContent("Async Compute");
+        private static readonly GUIContent s_SrpBatcherLabel = EditorGUIUtility.TrTextContent("SRP Batcher");
         private static readonly string s_DefaultVolumeSharedMessage =
             "Default Volume is stored in VividRP Global Settings and shared by all VividRP pipeline assets.";
         private static readonly string s_DefaultVolumeInactiveMessage =
@@ -42,6 +44,18 @@ namespace VividRP.Editor.RenderPipeline
                 name = "vivid-rp-asset-render-graph-field",
             };
             root.Add(renderGraphField);
+
+            var asyncComputeField = new PropertyField(serializedObject.FindProperty("m_EnableAsyncCompute"), s_AsyncComputeLabel.text)
+            {
+                name = "vivid-rp-asset-async-compute-field",
+            };
+            root.Add(asyncComputeField);
+
+            var srpBatcherField = new PropertyField(serializedObject.FindProperty("m_EnableSRPBatcher"), s_SrpBatcherLabel.text)
+            {
+                name = "vivid-rp-asset-srp-batcher-field",
+            };
+            root.Add(srpBatcherField);
 
             var sharedInfoHelpBox = new HelpBox(s_DefaultVolumeSharedMessage, HelpBoxMessageType.Info)
             {

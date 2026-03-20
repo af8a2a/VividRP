@@ -22,8 +22,12 @@ CBUFFER_END
 
 TEXTURE2D(_BaseMap);
 SAMPLER(sampler_BaseMap);
+TEXTURE2D(_OpacityMap);
+SAMPLER(sampler_OpacityMap);
 TEXTURE2D(_MetallicGlossMap);
 SAMPLER(sampler_MetallicGlossMap);
+TEXTURE2D(_RoughnessMap);
+SAMPLER(sampler_RoughnessMap);
 TEXTURE2D(_BumpMap);
 SAMPLER(sampler_BumpMap);
 TEXTURE2D(_OcclusionMap);
@@ -76,7 +80,11 @@ Varyings Vert(Attributes input)
 
 float4 SampleBase(float2 uv)
 {
-    return SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, uv) * _BaseColor;
+    float4 baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, uv) * _BaseColor;
+#if defined(_OPACITYMAP)
+    baseSample.a *= SAMPLE_TEXTURE2D(_OpacityMap, sampler_OpacityMap, uv).r;
+#endif
+    return baseSample;
 }
 
 void ApplyAlphaClip(float alpha)
@@ -93,13 +101,19 @@ float2 SampleMetallicSmoothness(float2 uv, float baseAlpha)
 
 #if defined(_METALLICSPECGLOSSMAP)
     float4 metallicGlossSample = SAMPLE_TEXTURE2D(_MetallicGlossMap, sampler_MetallicGlossMap, uv);
-    metallic = saturate(metallicGlossSample.r);
+    metallic = saturate(metallicGlossSample.r * _Metallic);
 
-#if defined(_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A)
+#if defined(_ROUGHNESSMAP)
+    float roughness = SAMPLE_TEXTURE2D(_RoughnessMap, sampler_RoughnessMap, uv).r;
+    smoothness = (1.0 - roughness) * _Smoothness;
+#elif defined(_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A)
     smoothness = baseAlpha * _Smoothness;
 #else
     smoothness = metallicGlossSample.a * _Smoothness;
 #endif
+#elif defined(_ROUGHNESSMAP)
+    float roughness = SAMPLE_TEXTURE2D(_RoughnessMap, sampler_RoughnessMap, uv).r;
+    smoothness = (1.0 - roughness) * _Smoothness;
 #elif defined(_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A)
     smoothness = baseAlpha * _Smoothness;
 #endif

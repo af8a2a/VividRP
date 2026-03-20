@@ -27,8 +27,10 @@ namespace VividRP.Editor
         private const float EnabledThreshold = 0.001f;
 
         private const string AlphaTestKeyword = "_ALPHATEST_ON";
+        private const string OpacityMapKeyword = "_OPACITYMAP";
         private const string NormalMapKeyword = "_NORMALMAP";
         private const string MetallicGlossMapKeyword = "_METALLICSPECGLOSSMAP";
+        private const string RoughnessMapKeyword = "_ROUGHNESSMAP";
         private const string OcclusionMapKeyword = "_OCCLUSIONMAP";
         private const string EmissionKeyword = "_EMISSION";
         private const string ClearCoatKeyword = "_CLEARCOAT";
@@ -126,8 +128,10 @@ namespace VividRP.Editor
         private static void SyncKeywords(Material material)
         {
             CoreUtils.SetKeyword(material, AlphaTestKeyword, GetFloat(material, "_AlphaClip") > AlphaClipThreshold);
+            CoreUtils.SetKeyword(material, OpacityMapKeyword, material.GetTexture("_OpacityMap") != null);
             CoreUtils.SetKeyword(material, NormalMapKeyword, material.GetTexture("_BumpMap") != null);
             CoreUtils.SetKeyword(material, MetallicGlossMapKeyword, material.GetTexture("_MetallicGlossMap") != null);
+            CoreUtils.SetKeyword(material, RoughnessMapKeyword, material.GetTexture("_RoughnessMap") != null);
             CoreUtils.SetKeyword(material, OcclusionMapKeyword, material.GetTexture("_OcclusionMap") != null);
             CoreUtils.SetKeyword(material, EmissionKeyword, HasEmission(material));
             CoreUtils.SetKeyword(material, ClearCoatKeyword, GetFloat(material, "_ClearCoatMask") > EnabledThreshold);

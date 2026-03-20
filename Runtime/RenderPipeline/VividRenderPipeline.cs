@@ -10,12 +10,15 @@ namespace VividRP.Runtime
     {
         private const string RenderGraphName = "VividRP RenderGraph";
 
-        private VividRenderPipelineAsset m_Asset;
+        private readonly VividRenderPipelineAsset m_Asset;
+        private readonly bool m_PreviousUseScriptableRenderPipelineBatching;
         private RenderGraph m_RenderGraph;
 
         public VividRenderPipeline(VividRenderPipelineAsset asset)
         {
             m_Asset = asset;
+            m_PreviousUseScriptableRenderPipelineBatching = GraphicsSettings.useScriptableRenderPipelineBatching;
+            ApplySRPBatcherSetting(asset);
 
             VividVolumeManagerUtility.Initialize();
             PipelineResourceManager.Initialize();
@@ -28,6 +31,8 @@ namespace VividRP.Runtime
 
         protected override void Render(ScriptableRenderContext context, List<Camera> cameras)
         {
+            ApplySRPBatcherSetting(m_Asset);
+
             foreach (var camera in cameras)
                 RenderCamera(context, camera);
             m_RenderGraph.EndFrame();
@@ -71,7 +76,11 @@ namespace VividRP.Runtime
                 if (!TryRecordAndExecuteRenderGraph(
                         m_RenderGraph,
                         renderGraphParams,
-                        () => PassRecorder.RecordRenderGraph(m_RenderGraph, context, graphAsset),
+                        () => PassRecorder.RecordRenderGraph(
+                            m_RenderGraph,
+                            context,
+                            graphAsset,
+                            m_Asset != null && m_Asset.EnableAsyncCompute),
                         PassRecorder.AbortFrame))
                 {
                     return;
@@ -133,6 +142,11 @@ namespace VividRP.Runtime
             ConstantBuffer.ReleaseAll();
         }
 
+        internal static void ApplySRPBatcherSetting(VividRenderPipelineAsset asset)
+        {
+            GraphicsSettings.useScriptableRenderPipelineBatching = asset != null && asset.EnableSRPBatcher;
+        }
+
         protected override void Dispose(bool disposing)
         {
             PassRecorder.Dispose();
@@ -144,6 +158,11 @@ namespace VividRP.Runtime
             Blitter.Cleanup();
             PipelineResourceManager.Cleanup();
             ReleaseConstantBuffersForShutdown();
+
+            var currentPipeline = RenderPipelineManager.currentPipeline;
+            if (currentPipeline == null || ReferenceEquals(currentPipeline, this))
+                GraphicsSettings.useScriptableRenderPipelineBatching = m_PreviousUseScriptableRenderPipelineBatching;
+
             base.Dispose(disposing);
         }
 
@@ -151,4 +170,3 @@ namespace VividRP.Runtime
         public bool isImmediateModeSupported => false;
     }
 }
-

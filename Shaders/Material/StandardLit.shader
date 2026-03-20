@@ -14,10 +14,12 @@ Shader "VividRP/Material/StandardLit"
         [SubEnum(SurfaceInputs, Specular, 0, Metallic, 1)] _WorkflowMode("Workflow Mode", Float) = 1.0
         [MainTexture] [Tex(SurfaceInputs, _BaseColor)] _BaseMap("Albedo", 2D) = "white" {}
         [HideInInspector] [MainColor] _BaseColor("Color", Color) = (1, 1, 1, 1)
+        [Sub(SurfaceInputs)] _OpacityMap("Opacity Map", 2D) = "white" {}
         [Sub(SurfaceInputs)] _Metallic("Metallic", Range(0.0, 1.0)) = 0.0
         [Sub(SurfaceInputs)] _Smoothness("Smoothness", Range(0.0, 1.0)) = 0.5
         [SubEnum(SurfaceInputs, Metallic Alpha, 0, Albedo Alpha, 1)] _SmoothnessTextureChannel("Smoothness Source", Float) = 0.0
         [Sub(SurfaceInputs)] _MetallicGlossMap("Metallic Map", 2D) = "white" {}
+        [Sub(SurfaceInputs)] _RoughnessMap("Roughness Map", 2D) = "white" {}
         [Sub(SurfaceInputs)] _BumpScale("Normal Scale", Float) = 1.0
         [Sub(SurfaceInputs)] [Normal] _BumpMap("Normal Map", 2D) = "bump" {}
         [Sub(SurfaceInputs)] _OcclusionStrength("Occlusion Strength", Range(0.0, 1.0)) = 1.0
@@ -62,8 +64,10 @@ Shader "VividRP/Material/StandardLit"
                 #pragma target 4.5
                 #pragma multi_compile_instancing
                 #pragma shader_feature_local_fragment _ALPHATEST_ON
+                #pragma shader_feature_local_fragment _OPACITYMAP
                 #pragma shader_feature_local_fragment _NORMALMAP
                 #pragma shader_feature_local_fragment _METALLICSPECGLOSSMAP
+                #pragma shader_feature_local_fragment _ROUGHNESSMAP
                 #pragma shader_feature_local_fragment _OCCLUSIONMAP
                 #pragma shader_feature_local_fragment _EMISSION
                 #pragma shader_feature_local_fragment _CLEARCOAT
@@ -89,8 +93,10 @@ Shader "VividRP/Material/StandardLit"
                 #pragma target 4.5
                 #pragma multi_compile_instancing
                 #pragma shader_feature_local_fragment _ALPHATEST_ON
+                #pragma shader_feature_local_fragment _OPACITYMAP
                 #pragma shader_feature_local_fragment _NORMALMAP
                 #pragma shader_feature_local_fragment _METALLICSPECGLOSSMAP
+                #pragma shader_feature_local_fragment _ROUGHNESSMAP
                 #pragma shader_feature_local_fragment _OCCLUSIONMAP
                 #pragma shader_feature_local_fragment _EMISSION
                 #pragma shader_feature_local_fragment _CLEARCOAT
@@ -116,8 +122,10 @@ Shader "VividRP/Material/StandardLit"
                 #pragma target 4.5
                 #pragma multi_compile_instancing
                 #pragma shader_feature_local_fragment _ALPHATEST_ON
+                #pragma shader_feature_local_fragment _OPACITYMAP
                 #pragma shader_feature_local_fragment _NORMALMAP
                 #pragma shader_feature_local_fragment _METALLICSPECGLOSSMAP
+                #pragma shader_feature_local_fragment _ROUGHNESSMAP
                 #pragma shader_feature_local_fragment _OCCLUSIONMAP
                 #pragma shader_feature_local_fragment _EMISSION
                 #pragma shader_feature_local_fragment _CLEARCOAT

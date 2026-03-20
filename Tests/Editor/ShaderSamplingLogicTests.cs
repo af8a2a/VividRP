@@ -12,9 +12,11 @@ namespace VividRP.Editor.Tests
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "StandardLitGBufferPass.hlsl"));
 
             Assert.That(source, Does.Contain("#if defined(_ALPHATEST_ON)"));
+            Assert.That(source, Does.Contain("#if defined(_OPACITYMAP)"));
             Assert.That(source, Does.Contain("#if defined(_NORMALMAP)"));
             Assert.That(source, Does.Contain("#if defined(_METALLICSPECGLOSSMAP)"));
-            Assert.That(source, Does.Contain("#if defined(_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A)"));
+            Assert.That(source, Does.Contain("#if defined(_ROUGHNESSMAP)"));
+            Assert.That(source, Does.Contain("defined(_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A)"));
             Assert.That(source, Does.Contain("#if defined(_OCCLUSIONMAP)"));
             Assert.That(source, Does.Contain("#if defined(_EMISSION)"));
             Assert.That(source, Does.Contain("#if defined(_CLEARCOAT)"));

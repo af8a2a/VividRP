@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using NUnit.Framework;
+using Unity.GraphToolkit.Editor;
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
@@ -280,6 +282,52 @@ namespace VividRP.Editor.Tests
             Assert.That(ordered[0].EnableAsyncCompute, Is.True);
         }
 
+        [Test]
+        public void OrderPassDefinitions_SortsSharedAccelerationStructureWriteBeforeRead()
+        {
+            var passDefinitions = new List<RenderGraphPassDefinition>
+            {
+                new()
+                {
+                    PassType = GetPassTypeName<RayTracingConsumerPass>(),
+                    ResourceBindings =
+                    {
+                        new RenderGraphPassResourceBinding
+                        {
+                            FieldName = "m_SceneAccelerationStructure",
+                            ResourceKind = RenderGraphResourceKind.AccelerationStructure,
+                            ResourceIndex = 0,
+                            SourceKind = RenderGraphPassBindingSourceKind.Resource,
+                            ConnectionKind = RenderGraphPassBindingConnectionKind.Input,
+                        }
+                    }
+                },
+                new()
+                {
+                    PassType = GetPassTypeName<RTASBuildPass>(),
+                    ResourceBindings =
+                    {
+                        new RenderGraphPassResourceBinding
+                        {
+                            FieldName = "m_SceneAccelerationStructure",
+                            ResourceKind = RenderGraphResourceKind.AccelerationStructure,
+                            ResourceIndex = 0,
+                            SourceKind = RenderGraphPassBindingSourceKind.Resource,
+                            ConnectionKind = RenderGraphPassBindingConnectionKind.Output,
+                        }
+                    }
+                }
+            };
+
+            var ordered = RenderGraphPassCompilationUtility.OrderPassDefinitions(passDefinitions);
+
+            Assert.That(ordered.Select(def => def.PassType), Is.EqualTo(new[]
+            {
+                GetPassTypeName<RTASBuildPass>(),
+                GetPassTypeName<RayTracingConsumerPass>(),
+            }));
+        }
+
         private static string GetPassTypeName<T>()
         {
             var type = typeof(T);
@@ -290,59 +338,149 @@ namespace VividRP.Editor.Tests
     public class RenderGraphCompilerTests
     {
         [Serializable]
+        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class DrawObjectPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(DrawObjectPass).AssemblyQualifiedName;
         }
 
         [Serializable]
+        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class FinalBlitPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(FinalBlitPass).AssemblyQualifiedName;
         }
 
+        [Serializable]
+        [UseWithGraph(typeof(RenderGraphEditorGraph))]
+        private sealed class RTASBuildPassNode : RenderPassNodeData
+        {
+            protected override string RegisteredPassTypeName => typeof(RTASBuildPass).AssemblyQualifiedName;
+        }
+
+        [Serializable]
+        [UseWithGraph(typeof(RenderGraphEditorGraph))]
+        private sealed class RayTracingConsumerPassNode : RenderPassNodeData
+        {
+            protected override string RegisteredPassTypeName => typeof(RayTracingConsumerPass).AssemblyQualifiedName;
+        }
+
         [Test]
         public void Compile_OrdersPassesByExecutionDependencies_WhenPassFieldInputsAreConnected()
         {
-            var graph = new RenderGraphEditorGraph();
-            var finalBlitNode = new FinalBlitPassNode();
-            var drawObjectNode = new DrawObjectPassNode();
+            var graph = RenderGraphTestUtility.CreateGraph();
 
-            graph.AddNode(finalBlitNode);
-            graph.AddNode(drawObjectNode);
-            graph.Connect(
-                drawObjectNode.GetOutputPortByName("m_ColorTarget"),
-                finalBlitNode.GetInputPortByName("source"));
-
-            var result = RenderGraphCompiler.Compile(graph);
-
-            Assert.That(result.ExecutionOrder.Select(pass => pass.PassTypeName), Is.EqualTo(new[]
+            try
             {
-                nameof(DrawObjectPass),
-                nameof(FinalBlitPass),
-            }));
-            Assert.That(result.Passes.Select(pass => pass.PassType), Is.EqualTo(new[]
+                var finalBlitNode = new FinalBlitPassNode();
+                var drawObjectNode = new DrawObjectPassNode();
+
+                graph.AddNode(finalBlitNode);
+                graph.AddNode(drawObjectNode);
+                graph.Connect(
+                    drawObjectNode.GetOutputPortByName("m_ColorTarget"),
+                    finalBlitNode.GetInputPortByName("source"));
+
+                var result = RenderGraphCompiler.Compile(graph);
+
+                Assert.That(result.ExecutionOrder.Select(pass => pass.PassTypeName), Is.EqualTo(new[]
+                {
+                    nameof(DrawObjectPass),
+                    nameof(FinalBlitPass),
+                }));
+                Assert.That(result.Passes.Select(pass => pass.PassType), Is.EqualTo(new[]
+                {
+                    GetPassTypeName<DrawObjectPass>(),
+                    GetPassTypeName<FinalBlitPass>(),
+                }));
+            }
+            finally
             {
-                GetPassTypeName<DrawObjectPass>(),
-                GetPassTypeName<FinalBlitPass>(),
-            }));
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
         }
 
         [Test]
         public void Compile_ReturnsEmptyExecutionOrder_WhenGraphHasNoValidRenderPassNodes()
         {
-            var graph = new RenderGraphEditorGraph();
+            var graph = RenderGraphTestUtility.CreateGraph();
 
-            var result = RenderGraphCompiler.Compile(graph);
+            try
+            {
+                var result = RenderGraphCompiler.Compile(graph);
 
-            Assert.That(result.ExecutionOrder, Is.Empty);
-            Assert.That(result.Passes, Is.Empty);
+                Assert.That(result.ExecutionOrder, Is.Empty);
+                Assert.That(result.Passes, Is.Empty);
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void Compile_OrdersPassesByAccelerationStructureDependencies_WhenPassFieldInputsAreConnected()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var consumerNode = new RayTracingConsumerPassNode();
+                var buildNode = new RTASBuildPassNode();
+
+                graph.AddNode(consumerNode);
+                graph.AddNode(buildNode);
+                graph.Connect(
+                    buildNode.GetOutputPortByName("m_SceneAccelerationStructure"),
+                    consumerNode.GetInputPortByName("m_SceneAccelerationStructure"));
+
+                var result = RenderGraphCompiler.Compile(graph);
+
+                Assert.That(result.ExecutionOrder.Select(pass => pass.PassTypeName), Is.EqualTo(new[]
+                {
+                    nameof(RTASBuildPass),
+                    nameof(RayTracingConsumerPass),
+                }));
+                Assert.That(result.Passes.Select(pass => pass.PassType), Is.EqualTo(new[]
+                {
+                    GetPassTypeName<RTASBuildPass>(),
+                    GetPassTypeName<RayTracingConsumerPass>(),
+                }));
+                Assert.That(result.Passes[1].ResourceBindings[0].ResourceKind, Is.EqualTo(RenderGraphResourceKind.AccelerationStructure));
+                Assert.That(result.Passes[1].ResourceBindings[0].SourceKind, Is.EqualTo(RenderGraphPassBindingSourceKind.PassField));
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
         }
 
         private static string GetPassTypeName<T>()
         {
             var type = typeof(T);
             return $"{type.FullName}, {type.Assembly.GetName().Name}";
+        }
+    }
+
+    public sealed class RayTracingConsumerPass : ComputePass
+    {
+        [RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Read)]
+        private RenderGraphAccelerationStructure m_SceneAccelerationStructure = new();
+
+        public override void Create()
+        {
+        }
+
+        public override void Prepare(ContextContainer frameData)
+        {
+        }
+
+        public override void Record(ComputeGraphContext context)
+        {
+        }
+
+        public override void Dispose()
+        {
         }
     }
 }

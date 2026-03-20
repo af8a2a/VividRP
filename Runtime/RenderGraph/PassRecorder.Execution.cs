@@ -65,6 +65,7 @@ namespace VividRP.Runtime
                 }
             }
 
+            DisposeAccelerationStructures();
             s_RenderPasses.Clear();
             s_PassResources.Clear();
             s_PassResourceAccessOverrides.Clear();
@@ -203,6 +204,7 @@ namespace VividRP.Runtime
                 CreateRuntimeHistoryTextures(graphAsset, out s_HistoryPreviousTextures, out s_HistoryCurrentTextures);
                 var buffers = CreateRuntimeBuffers(graphAsset);
                 var renderLists = CreateRuntimeRenderLists(graphAsset);
+                var accelerationStructures = CreateRuntimeAccelerationStructures(graphAsset);
                 var indexedPasses = new IRenderPass[graphAsset.Passes.Count];
                 var indexedPassTypes = new Type[graphAsset.Passes.Count];
 
@@ -246,7 +248,8 @@ namespace VividRP.Runtime
                         s_HistoryPreviousTextures,
                         s_HistoryCurrentTextures,
                         buffers,
-                        renderLists);
+                        renderLists,
+                        accelerationStructures);
 
                     var accessOverrides = BuildResourceAccessOverrides(passType, passDef);
                     if (accessOverrides != null && accessOverrides.Count > 0)
@@ -366,6 +369,25 @@ namespace VividRP.Runtime
             return renderLists;
         }
 
+        private static RenderGraphAccelerationStructure[] CreateRuntimeAccelerationStructures(RenderGraphData graphAsset)
+        {
+            if (graphAsset.AccelerationStructureDescriptors == null || graphAsset.AccelerationStructureDescriptors.Count == 0)
+                return Array.Empty<RenderGraphAccelerationStructure>();
+
+            var accelerationStructures = new RenderGraphAccelerationStructure[graphAsset.AccelerationStructureDescriptors.Count];
+            for (var i = 0; i < accelerationStructures.Length; i++)
+            {
+                var accelerationStructure = new RenderGraphAccelerationStructure();
+                var desc = graphAsset.AccelerationStructureDescriptors[i];
+                accelerationStructure.desc = desc != null
+                    ? desc.Clone()
+                    : new RenderGraphAccelerationStructureDesc();
+                accelerationStructures[i] = accelerationStructure;
+            }
+
+            return accelerationStructures;
+        }
+
         private static Type ResolveType(string assemblyQualifiedOrFullName)
         {
             var type = Type.GetType(assemblyQualifiedOrFullName, throwOnError: false);
@@ -390,7 +412,8 @@ namespace VividRP.Runtime
             RenderGraphTexture[] historyPreviousTextures,
             RenderGraphTexture[] historyCurrentTextures,
             RenderGraphBuffer[] buffers,
-            RenderGraphRenderList[] renderLists)
+            RenderGraphRenderList[] renderLists,
+            RenderGraphAccelerationStructure[] accelerationStructures)
         {
             if (passDef.ResourceBindings == null || passDef.ResourceBindings.Count == 0)
                 return;
@@ -437,6 +460,13 @@ namespace VividRP.Runtime
                             field.FieldType == typeof(RenderGraphRenderList))
                         {
                             field.SetValue(pass, renderLists[binding.ResourceIndex]);
+                        }
+                        break;
+                    case RenderGraphResourceKind.AccelerationStructure:
+                        if (binding.ResourceIndex >= 0 && binding.ResourceIndex < accelerationStructures.Length &&
+                            field.FieldType == typeof(RenderGraphAccelerationStructure))
+                        {
+                            field.SetValue(pass, accelerationStructures[binding.ResourceIndex]);
                         }
                         break;
                 }
@@ -747,6 +777,7 @@ namespace VividRP.Runtime
             var textureCache = new Dictionary<RenderGraphTexture, TextureHandle>();
             var bufferCache = new Dictionary<RenderGraphBuffer, BufferHandle>();
             var renderListCache = new Dictionary<RenderGraphRenderList, RendererListHandle>();
+            var accelerationStructureCache = new Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle>();
             var shouldRecordPreviews = RenderGraphPreviewRegistry.IsAvailable;
 
             var passDefinitions = graphAsset?.Passes;
@@ -768,13 +799,21 @@ namespace VividRP.Runtime
                         enableAsyncCompute,
                         textureCache,
                         bufferCache,
-                        renderListCache);
+                        renderListCache,
+                        accelerationStructureCache);
                     if (shouldRecordPreviews)
                         RecordTexturePreviewPasses(renderGraph, computePass, resources, passDefinition);
                 }
                 else if (pass is RasterPass rasterPass)
                 {
-                    RecordRasterPass(renderGraph, rasterPass, resources, textureCache, bufferCache, renderListCache);
+                    RecordRasterPass(
+                        renderGraph,
+                        rasterPass,
+                        resources,
+                        textureCache,
+                        bufferCache,
+                        renderListCache,
+                        accelerationStructureCache);
                     if (shouldRecordPreviews)
                         RecordTexturePreviewPasses(renderGraph, rasterPass, resources, passDefinition);
                 }
@@ -788,7 +827,8 @@ namespace VividRP.Runtime
                         enableAsyncCompute,
                         textureCache,
                         bufferCache,
-                        renderListCache);
+                        renderListCache,
+                        accelerationStructureCache);
                     if (shouldRecordPreviews)
                         RecordTexturePreviewPasses(renderGraph, unsafePass, resources, passDefinition);
                 }
@@ -834,6 +874,26 @@ namespace VividRP.Runtime
 
                 if (accessOverrides.TryGetValue(fieldName, out var access))
                     entry.Access = access;
+            }
+        }
+
+        private static void DisposeAccelerationStructures()
+        {
+            if (s_PassResources.Count == 0)
+                return;
+
+            var disposedAccelerationStructures = new HashSet<RenderGraphAccelerationStructure>();
+            foreach (var resources in s_PassResources.Values)
+            {
+                if (resources?.AccelerationStructures == null)
+                    continue;
+
+                foreach (var entry in resources.AccelerationStructures)
+                {
+                    var accelerationStructure = entry?.AccelerationStructure;
+                    if (accelerationStructure != null && disposedAccelerationStructures.Add(accelerationStructure))
+                        accelerationStructure.Dispose();
+                }
             }
         }
     }

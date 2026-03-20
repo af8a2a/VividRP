@@ -1,3 +1,4 @@
+using System.IO;
 using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEditor;
@@ -8,6 +9,8 @@ namespace VividRP.Editor.Tests
     public sealed class StandardLitMaterialImportUtilityTests
     {
         private const string StandardLitShaderAssetPath = "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLit.shader";
+        private const string GeneratedAssetsFolderPath = "Assets/Tests/VividRP/GeneratedMaterialImportUtility";
+        private const string NormalTextureAssetPath = GeneratedAssetsFolderPath + "/Wall_Normal_ImportTest.png";
 
         [Test]
         public void TryImport_Maps3DsMaxPhysicalMaterialProperties_ToStandardLit()
@@ -205,6 +208,54 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void TryImport_ConfiguresNormalTextureImporter_WhenTextureNameContainsNormal()
+        {
+            Material material = CreateMaterial();
+            Texture2D normalTexture = null;
+
+            try
+            {
+                normalTexture = CreateTextureAsset(NormalTextureAssetPath);
+
+                TextureImporter textureImporter = AssetImporter.GetAtPath(NormalTextureAssetPath) as TextureImporter;
+                Assert.That(textureImporter, Is.Not.Null);
+
+                textureImporter.textureType = TextureImporterType.Default;
+                textureImporter.wrapMode = TextureWrapMode.Clamp;
+                textureImporter.filterMode = FilterMode.Point;
+                textureImporter.SaveAndReimport();
+
+                normalTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(NormalTextureAssetPath);
+                Assert.That(normalTexture, Is.Not.Null);
+                Assert.That(StandardLitMaterialImportUtility.ShouldImportTextureAsNormalMap(normalTexture), Is.True);
+
+                var description = new FakeImportedMaterialDescription()
+                    .WithFloat("ClassIDa", 4.1222316e+08f)
+                    .WithFloat("ClassIDb", -5.5903846e+08f)
+                    .WithTexture("bump_map", normalTexture);
+
+                bool imported = StandardLitMaterialImportUtility.TryImport(
+                    description,
+                    material,
+                    StandardLitMaterialImportUtility.GetStandardLitShader());
+
+                textureImporter = AssetImporter.GetAtPath(NormalTextureAssetPath) as TextureImporter;
+
+                Assert.That(imported, Is.True);
+                Assert.That(textureImporter, Is.Not.Null);
+                Assert.That(textureImporter.textureType, Is.EqualTo(TextureImporterType.NormalMap));
+                Assert.That(textureImporter.wrapMode, Is.EqualTo(TextureWrapMode.Repeat));
+                Assert.That(textureImporter.filterMode, Is.EqualTo(FilterMode.Trilinear));
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+                DeleteGeneratedAssetIfExists(NormalTextureAssetPath);
+                DeleteGeneratedFolderIfExists(GeneratedAssetsFolderPath);
+            }
+        }
+
         private static Material CreateMaterial()
         {
             Shader shader = AssetDatabase.LoadAssetAtPath<Shader>(StandardLitShaderAssetPath);
@@ -272,6 +323,74 @@ namespace VividRP.Editor.Tests
             public bool TryGetString(string propertyName, out string value)
             {
                 return m_Strings.TryGetValue(propertyName, out value);
+            }
+        }
+
+        private static Texture2D CreateTextureAsset(string assetPath)
+        {
+            string absolutePath = GetAbsoluteAssetPath(assetPath);
+            string directoryPath = Path.GetDirectoryName(absolutePath);
+            if (!string.IsNullOrEmpty(directoryPath))
+            {
+                Directory.CreateDirectory(directoryPath);
+            }
+
+            Texture2D sourceTexture = new Texture2D(2, 2, TextureFormat.RGBA32, false)
+            {
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+
+            try
+            {
+                sourceTexture.SetPixels(new[]
+                {
+                    new Color(0.5f, 0.5f, 1.0f, 1.0f),
+                    new Color(0.5f, 0.5f, 1.0f, 1.0f),
+                    new Color(0.5f, 0.5f, 1.0f, 1.0f),
+                    new Color(0.5f, 0.5f, 1.0f, 1.0f),
+                });
+                sourceTexture.Apply(updateMipmaps: false, makeNoLongerReadable: false);
+                File.WriteAllBytes(absolutePath, sourceTexture.EncodeToPNG());
+            }
+            finally
+            {
+                Object.DestroyImmediate(sourceTexture);
+            }
+
+            AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+            Texture2D importedTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
+            Assert.That(importedTexture, Is.Not.Null, $"Expected texture asset at '{assetPath}'.");
+            return importedTexture;
+        }
+
+        private static string GetAbsoluteAssetPath(string assetPath)
+        {
+            return Path.GetFullPath(Path.Combine(
+                Application.dataPath,
+                "..",
+                assetPath));
+        }
+
+        private static void DeleteGeneratedAssetIfExists(string assetPath)
+        {
+            if (AssetDatabase.LoadAssetAtPath<Object>(assetPath) != null)
+            {
+                AssetDatabase.DeleteAsset(assetPath);
+                return;
+            }
+
+            string absolutePath = GetAbsoluteAssetPath(assetPath);
+            if (File.Exists(absolutePath))
+            {
+                File.Delete(absolutePath);
+            }
+        }
+
+        private static void DeleteGeneratedFolderIfExists(string folderPath)
+        {
+            if (AssetDatabase.IsValidFolder(folderPath))
+            {
+                AssetDatabase.DeleteAsset(folderPath);
             }
         }
 

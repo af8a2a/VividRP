@@ -15,6 +15,7 @@ namespace VividRP.Runtime
         public PassResourceEntry[] Textures = Array.Empty<PassResourceEntry>();
         public PassResourceEntry[] Buffers = Array.Empty<PassResourceEntry>();
         public PassResourceEntry[] RenderLists = Array.Empty<PassResourceEntry>();
+        public PassResourceEntry[] AccelerationStructures = Array.Empty<PassResourceEntry>();
 
         /// <summary>
         /// All entries across all resource types.
@@ -26,6 +27,7 @@ namespace VividRP.Runtime
                 foreach (var e in Textures) yield return e;
                 foreach (var e in Buffers) yield return e;
                 foreach (var e in RenderLists) yield return e;
+                foreach (var e in AccelerationStructures) yield return e;
             }
         }
     }
@@ -108,6 +110,7 @@ namespace VividRP.Runtime
             var textures = new List<PassResourceEntry>();
             var buffers = new List<PassResourceEntry>();
             var renderLists = new List<PassResourceEntry>();
+            var accelerationStructures = new List<PassResourceEntry>();
 
             foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(type))
             {
@@ -152,6 +155,16 @@ namespace VividRP.Runtime
                             attr.AttachmentIndex,
                             attr.IsDepthAttachment));
                         break;
+                    case RenderGraphAccelerationStructure accelerationStructure:
+                        accelerationStructures.Add(CreateEntry(
+                            field,
+                            RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr),
+                            attr.Access,
+                            PassResourceType.AccelerationStructure,
+                            accelerationStructure,
+                            attr.AttachmentIndex,
+                            attr.IsDepthAttachment));
+                        break;
                 }
             }
 
@@ -160,6 +173,7 @@ namespace VividRP.Runtime
                 Textures = textures.ToArray(),
                 Buffers = buffers.ToArray(),
                 RenderLists = renderLists.ToArray(),
+                AccelerationStructures = accelerationStructures.ToArray(),
             };
         }
 

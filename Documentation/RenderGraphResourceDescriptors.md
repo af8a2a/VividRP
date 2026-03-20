@@ -103,32 +103,22 @@ All resource and pass nodes have been updated to use the new descriptor system:
 
 ## Ray Tracing Support
 
-VividRP now includes full support for ray tracing acceleration structures through the descriptor system. See `Runtime/RenderGraph/RayTracingPassExample.cs` for complete examples of:
+VividRP now includes full support for ray tracing acceleration structures through the descriptor system.
 
-1. **Building Acceleration Structures** - `RayTracingAccelerationStructurePass` demonstrates how to build a RTAS from scene geometry
-2. **Using Acceleration Structures** - `RayTracingPass` shows how to use RTAS in compute shaders for ray queries
+1. **Authoring RTAS Resources** - `Editor/RenderGraph/Nodes/AccelerationStructureResourceNodeData.cs` exposes RTAS descriptors in the graph editor
+2. **Building Scene RTAS** - `Runtime/RenderPass/Core/RTASBuildPass.cs` builds a scene RTAS into a RenderGraph resource
+3. **Passing RTAS Between Passes** - downstream passes can consume `RenderGraphAccelerationStructure` fields through explicit graph edges
 
 ### Ray Tracing Usage Example
 
 ```csharp
-// Create acceleration structure descriptor
-var accelStructDesc = RenderGraphAccelerationStructureDesc.Create("SceneAccelerationStructure");
+// Producer pass
+[RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Write)]
+private RenderGraphAccelerationStructure m_SceneAccelerationStructure = new();
 
-// Import into RenderGraph
-var rtasHandle = renderGraph.ImportRayTracingAccelerationStructure(accelStruct);
-
-// Use in compute pass
-using (var builder = renderGraph.AddComputePass<PassData>("Ray Tracing", out var passData))
-{
-    builder.UseAccelerationStructure(rtasHandle);
-
-    builder.SetRenderFunc<PassData>((data, context) =>
-    {
-        context.cmd.SetComputeRayTracingAccelerationStructureParam(
-            shader, kernelIndex, "_AccelStruct", accelStruct);
-        context.cmd.DispatchCompute(shader, kernelIndex, width / 8, height / 8, 1);
-    });
-}
+// Consumer pass
+[RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Read)]
+private RenderGraphAccelerationStructure m_SceneAccelerationStructure = new();
 ```
 
 ## Benefits

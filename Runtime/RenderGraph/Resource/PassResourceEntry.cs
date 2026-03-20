@@ -57,5 +57,6 @@ namespace VividRP.Runtime
         public RenderGraphTexture Texture => Descriptor as RenderGraphTexture;
         public RenderGraphBuffer Buffer => Descriptor as RenderGraphBuffer;
         public RenderGraphRenderList RenderList => Descriptor as RenderGraphRenderList;
+        public RenderGraphAccelerationStructure AccelerationStructure => Descriptor as RenderGraphAccelerationStructure;
     }
 }

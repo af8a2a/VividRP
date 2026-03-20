@@ -103,6 +103,22 @@ namespace VividRP.Editor.RenderGraph
                             .Build();
                     }
                 }
+                else if (field.FieldType == typeof(RenderGraphAccelerationStructure))
+                {
+                    if (!string.IsNullOrEmpty(inputPortName))
+                    {
+                        context.AddInputPort<RenderGraphAccelerationStructure>(inputPortName)
+                            .WithDisplayName(RenderPassPortUtility.BuildPortDisplayName(field, attr, RenderPassPortUtility.GetInputPortDisplayAccess(attr.Access)))
+                            .Build();
+                    }
+
+                    if (!string.IsNullOrEmpty(outputPortName))
+                    {
+                        context.AddOutputPort<RenderGraphAccelerationStructure>(outputPortName)
+                            .WithDisplayName(RenderPassPortUtility.BuildPortDisplayName(field, attr, RenderPassPortUtility.GetOutputPortDisplayAccess(attr.Access)))
+                            .Build();
+                    }
+                }
             }
         }
 

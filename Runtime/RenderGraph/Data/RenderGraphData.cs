@@ -9,7 +9,8 @@ namespace VividRP.Runtime
     {
         Texture,
         Buffer,
-        RenderList
+        RenderList,
+        AccelerationStructure
     }
 
     public enum RenderGraphPassBindingSourceKind
@@ -60,20 +61,37 @@ namespace VividRP.Runtime
             return (connectionKind & RenderGraphPassBindingConnectionKind.Input) != 0;
         }
 
+        internal static bool UsesOutputConnection(RenderGraphPassBindingConnectionKind connectionKind)
+        {
+            return (connectionKind & RenderGraphPassBindingConnectionKind.Output) != 0;
+        }
+
         internal static bool ConsumesExistingState(RenderGraphPassResourceBinding binding, AccessFlags declaredAccess)
         {
-            if ((declaredAccess & AccessFlags.Read) != 0)
-                return true;
-
-            return binding != null && UsesInputConnection(binding.ConnectionKind);
+            var effectiveAccess = ResolveEffectiveAccess(binding, declaredAccess);
+            return (effectiveAccess & AccessFlags.Read) != 0;
         }
 
         internal static AccessFlags ResolveEffectiveAccess(RenderGraphPassResourceBinding binding, AccessFlags declaredAccess)
         {
-            if ((declaredAccess & AccessFlags.Read) != 0)
+            if (binding == null)
                 return declaredAccess;
 
-            return binding != null && UsesInputConnection(binding.ConnectionKind)
+            var canRead = (declaredAccess & AccessFlags.Read) != 0;
+            var canWrite = (declaredAccess & AccessFlags.Write) != 0;
+            if (canRead && canWrite)
+            {
+                if (UsesInputConnection(binding.ConnectionKind))
+                    return declaredAccess;
+
+                if (UsesOutputConnection(binding.ConnectionKind))
+                    return declaredAccess & ~AccessFlags.Read;
+            }
+
+            if (canRead)
+                return declaredAccess;
+
+            return UsesInputConnection(binding.ConnectionKind)
                 ? declaredAccess | AccessFlags.Read
                 : declaredAccess;
         }
@@ -97,6 +115,7 @@ namespace VividRP.Runtime
         public List<RenderGraphTextureDesc> HistoryTextureDescriptors = new();
         public List<RenderGraphBufferDesc> BufferDescriptors = new();
         public List<RenderGraphRenderListDesc> RenderListDescriptors = new();
+        public List<RenderGraphAccelerationStructureDesc> AccelerationStructureDescriptors = new();
 
         public List<RenderGraphPassDefinition> Passes = new();
     }

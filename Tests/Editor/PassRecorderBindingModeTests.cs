@@ -112,6 +112,114 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void Compile_SharesCtorOwnedAccelerationStructure_WithDownstreamPassFieldBinding()
+        {
+            var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
+            graphAsset.Passes.Add(new RenderGraphPassDefinition
+            {
+                PassType = GetPassTypeName<RuntimePassOwnedAccelerationStructureProducerPass>(),
+            });
+            graphAsset.Passes.Add(new RenderGraphPassDefinition
+            {
+                PassType = GetPassTypeName<RuntimePassOwnedAccelerationStructureConsumerPass>(),
+                ResourceBindings =
+                {
+                    new RenderGraphPassResourceBinding
+                    {
+                        FieldName = RuntimePassOwnedAccelerationStructureConsumerPass.SourceFieldName,
+                        ResourceKind = RenderGraphResourceKind.AccelerationStructure,
+                        SourceKind = RenderGraphPassBindingSourceKind.PassField,
+                        SourcePassIndex = 0,
+                        SourceFieldName = RuntimePassOwnedAccelerationStructureProducerPass.AccelerationStructureFieldName,
+                        ConnectionKind = RenderGraphPassBindingConnectionKind.Input,
+                    }
+                }
+            });
+
+            try
+            {
+                Compile(graphAsset);
+
+                var passes = GetCompiledPasses();
+                Assert.That(passes, Has.Count.EqualTo(2));
+
+                var producer = passes[0] as RuntimePassOwnedAccelerationStructureProducerPass;
+                var consumer = passes[1] as RuntimePassOwnedAccelerationStructureConsumerPass;
+
+                Assert.That(producer, Is.Not.Null);
+                Assert.That(consumer, Is.Not.Null);
+                Assert.That(
+                    GetAccelerationStructureField(consumer, RuntimePassOwnedAccelerationStructureConsumerPass.SourceFieldName),
+                    Is.SameAs(GetAccelerationStructureField(producer, RuntimePassOwnedAccelerationStructureProducerPass.AccelerationStructureFieldName)));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(graphAsset);
+            }
+        }
+
+        [Test]
+        public void Compile_BindsSharedAccelerationStructureResource_WhenStandaloneBindingExists()
+        {
+            var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
+            graphAsset.AccelerationStructureDescriptors.Add(RenderGraphAccelerationStructureDesc.Create("SharedSceneRTAS"));
+            graphAsset.Passes.Add(new RenderGraphPassDefinition
+            {
+                PassType = GetPassTypeName<RuntimePassOwnedAccelerationStructureProducerPass>(),
+                ResourceBindings =
+                {
+                    new RenderGraphPassResourceBinding
+                    {
+                        FieldName = RuntimePassOwnedAccelerationStructureProducerPass.AccelerationStructureFieldName,
+                        ResourceKind = RenderGraphResourceKind.AccelerationStructure,
+                        ResourceIndex = 0,
+                        SourceKind = RenderGraphPassBindingSourceKind.Resource,
+                        ConnectionKind = RenderGraphPassBindingConnectionKind.Output,
+                    }
+                }
+            });
+            graphAsset.Passes.Add(new RenderGraphPassDefinition
+            {
+                PassType = GetPassTypeName<RuntimePassOwnedAccelerationStructureConsumerPass>(),
+                ResourceBindings =
+                {
+                    new RenderGraphPassResourceBinding
+                    {
+                        FieldName = RuntimePassOwnedAccelerationStructureConsumerPass.SourceFieldName,
+                        ResourceKind = RenderGraphResourceKind.AccelerationStructure,
+                        ResourceIndex = 0,
+                        SourceKind = RenderGraphPassBindingSourceKind.Resource,
+                        ConnectionKind = RenderGraphPassBindingConnectionKind.Input,
+                    }
+                }
+            });
+
+            try
+            {
+                Compile(graphAsset);
+
+                var passes = GetCompiledPasses();
+                var producer = passes[0] as RuntimePassOwnedAccelerationStructureProducerPass;
+                var consumer = passes[1] as RuntimePassOwnedAccelerationStructureConsumerPass;
+
+                var producerAccelerationStructure = GetAccelerationStructureField(
+                    producer,
+                    RuntimePassOwnedAccelerationStructureProducerPass.AccelerationStructureFieldName);
+                var consumerAccelerationStructure = GetAccelerationStructureField(
+                    consumer,
+                    RuntimePassOwnedAccelerationStructureConsumerPass.SourceFieldName);
+
+                Assert.That(producerAccelerationStructure, Is.Not.Null);
+                Assert.That(consumerAccelerationStructure, Is.SameAs(producerAccelerationStructure));
+                Assert.That(producerAccelerationStructure.desc.Name, Is.EqualTo("SharedSceneRTAS"));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(graphAsset);
+            }
+        }
+
         private static void Compile(RenderGraphData graphAsset)
         {
             var method = typeof(PassRecorder).GetMethod("Compile", BindingFlags.NonPublic | BindingFlags.Static);
@@ -133,6 +241,15 @@ namespace VividRP.Editor.Tests
             var field = pass.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.That(field, Is.Not.Null);
             return (RenderGraphTexture)field.GetValue(pass);
+        }
+
+        private static RenderGraphAccelerationStructure GetAccelerationStructureField(object pass, string fieldName)
+        {
+            Assert.That(pass, Is.Not.Null);
+
+            var field = pass.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null);
+            return (RenderGraphAccelerationStructure)field.GetValue(pass);
         }
 
         private static string GetPassTypeName<T>()
@@ -199,6 +316,65 @@ namespace VividRP.Editor.Tests
         }
 
         public override void Record(RasterGraphContext context)
+        {
+        }
+
+        public override void Dispose()
+        {
+        }
+    }
+
+    public sealed class RuntimePassOwnedAccelerationStructureProducerPass : ComputePass
+    {
+        internal const string AccelerationStructureFieldName = "m_SceneAccelerationStructure";
+
+        [RenderGraphResource(
+            Name = "SceneRTAS",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphAccelerationStructure m_SceneAccelerationStructure;
+
+        public RuntimePassOwnedAccelerationStructureProducerPass()
+        {
+            m_SceneAccelerationStructure = new RenderGraphAccelerationStructure
+            {
+                desc = RenderGraphAccelerationStructureDesc.Create("CtorOwnedSceneRTAS")
+            };
+        }
+
+        public override void Create()
+        {
+        }
+
+        public override void Prepare(ContextContainer frameData)
+        {
+        }
+
+        public override void Record(ComputeGraphContext context)
+        {
+        }
+
+        public override void Dispose()
+        {
+        }
+    }
+
+    public sealed class RuntimePassOwnedAccelerationStructureConsumerPass : ComputePass
+    {
+        internal const string SourceFieldName = "m_Source";
+
+        [RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Read)]
+        private RenderGraphAccelerationStructure m_Source = new();
+
+        public override void Create()
+        {
+        }
+
+        public override void Prepare(ContextContainer frameData)
+        {
+        }
+
+        public override void Record(ComputeGraphContext context)
         {
         }
 

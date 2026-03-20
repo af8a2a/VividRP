@@ -63,6 +63,7 @@ namespace VividRP.Editor.RenderGraph
         internal List<RenderGraphTextureDesc> HistoryTextureDescriptors { get; } = new List<RenderGraphTextureDesc>();
         internal List<RenderGraphBufferDesc> BufferDescriptors { get; } = new List<RenderGraphBufferDesc>();
         internal List<RenderGraphRenderListDesc> RenderListDescriptors { get; } = new List<RenderGraphRenderListDesc>();
+        internal List<RenderGraphAccelerationStructureDesc> AccelerationStructureDescriptors { get; } = new List<RenderGraphAccelerationStructureDesc>();
         internal List<RenderGraphPassDefinition> Passes { get; } = new List<RenderGraphPassDefinition>();
         internal List<RenderGraphCompiledPassInfo> ExecutionOrder { get; } = new List<RenderGraphCompiledPassInfo>();
 
@@ -75,12 +76,14 @@ namespace VividRP.Editor.RenderGraph
             runtimeAsset.HistoryTextureDescriptors.Clear();
             runtimeAsset.BufferDescriptors.Clear();
             runtimeAsset.RenderListDescriptors.Clear();
+            runtimeAsset.AccelerationStructureDescriptors.Clear();
             runtimeAsset.Passes.Clear();
 
             runtimeAsset.TextureDescriptors.AddRange(TextureDescriptors);
             runtimeAsset.HistoryTextureDescriptors.AddRange(HistoryTextureDescriptors);
             runtimeAsset.BufferDescriptors.AddRange(BufferDescriptors);
             runtimeAsset.RenderListDescriptors.AddRange(RenderListDescriptors);
+            runtimeAsset.AccelerationStructureDescriptors.AddRange(AccelerationStructureDescriptors);
             runtimeAsset.Passes.AddRange(Passes);
         }
     }
@@ -97,8 +100,10 @@ namespace VividRP.Editor.RenderGraph
             var historyNodeToIndex = new Dictionary<HistoryResourceNodeData, int>();
             var bufferNodeToIndex = new Dictionary<BufferResourceNodeData, int>();
             var renderListNodeToIndex = new Dictionary<RenderListResourceNodeData, int>();
+            var accelerationStructureNodeToIndex = new Dictionary<AccelerationStructureResourceNodeData, int>();
             var texturePortToIndex = new Dictionary<IPort, int>();
             var bufferPortToIndex = new Dictionary<IPort, int>();
+            var accelerationStructurePortToIndex = new Dictionary<IPort, int>();
             var passNodes = new List<RenderPassNodeData>();
             var passNodeToIndex = new Dictionary<RenderPassNodeData, int>();
 
@@ -139,6 +144,16 @@ namespace VividRP.Editor.RenderGraph
                     var index = result.RenderListDescriptors.Count;
                     renderListNodeToIndex.Add(renderListNode, index);
                     result.RenderListDescriptors.Add(renderListNode.GetDescriptor());
+                }
+                else if (node is AccelerationStructureResourceNodeData accelerationStructureNode)
+                {
+                    var index = result.AccelerationStructureDescriptors.Count;
+                    accelerationStructureNodeToIndex.Add(accelerationStructureNode, index);
+                    result.AccelerationStructureDescriptors.Add(accelerationStructureNode.GetDescriptor());
+                    AddPortBindingIndex(
+                        accelerationStructurePortToIndex,
+                        accelerationStructureNode.GetOutputPortByName(AccelerationStructureResourceNodeData.OutputPortName),
+                        index);
                 }
             }
 
@@ -229,6 +244,19 @@ namespace VividRP.Editor.RenderGraph
                         continue;
                     }
 
+                    if (field.FieldType == typeof(RenderGraphAccelerationStructure)
+                        && TryAddStandaloneResourceBinding(
+                            passDefinition,
+                            field.Name,
+                            RenderGraphResourceKind.AccelerationStructure,
+                            inputConnectedPort,
+                            outputConnectedPort,
+                            connectionKind,
+                            accelerationStructurePortToIndex))
+                    {
+                        continue;
+                    }
+
                     var resourceNode = inputResourceNode ?? outputResourceNode;
                     if (resourceNode == null)
                     {
@@ -259,6 +287,16 @@ namespace VividRP.Editor.RenderGraph
                                 passDefinition,
                                 field.Name,
                                 RenderGraphResourceKind.RenderList,
+                                inputConnectedPort,
+                                passNodeToIndex);
+                        }
+                        else if (field.FieldType == typeof(RenderGraphAccelerationStructure)
+                                 && ShouldImportPassFieldBinding(inputConnectedPort != null, false))
+                        {
+                            TryAddPassFieldBinding(
+                                passDefinition,
+                                field.Name,
+                                RenderGraphResourceKind.AccelerationStructure,
                                 inputConnectedPort,
                                 passNodeToIndex);
                         }
@@ -308,6 +346,23 @@ namespace VividRP.Editor.RenderGraph
                             {
                                 FieldName = field.Name,
                                 ResourceKind = RenderGraphResourceKind.RenderList,
+                                ResourceIndex = resourceIndex,
+                                SourceKind = RenderGraphPassBindingSourceKind.Resource,
+                                ConnectionKind = connectionKind,
+                            });
+                        }
+
+                        continue;
+                    }
+
+                    if (field.FieldType == typeof(RenderGraphAccelerationStructure) && resourceNode is AccelerationStructureResourceNodeData accelerationStructureResourceNode)
+                    {
+                        if (accelerationStructureNodeToIndex.TryGetValue(accelerationStructureResourceNode, out var resourceIndex))
+                        {
+                            passDefinition.ResourceBindings.Add(new RenderGraphPassResourceBinding
+                            {
+                                FieldName = field.Name,
+                                ResourceKind = RenderGraphResourceKind.AccelerationStructure,
                                 ResourceIndex = resourceIndex,
                                 SourceKind = RenderGraphPassBindingSourceKind.Resource,
                                 ConnectionKind = connectionKind,
@@ -574,6 +629,9 @@ namespace VividRP.Editor.RenderGraph
             if (fieldType == typeof(RenderGraphRenderList) && connectedNode is RenderListResourceNodeData renderListNode)
                 return renderListNode;
 
+            if (fieldType == typeof(RenderGraphAccelerationStructure) && connectedNode is AccelerationStructureResourceNodeData accelerationStructureNode)
+                return accelerationStructureNode;
+
             return null;
         }
 
@@ -621,6 +679,7 @@ namespace VividRP.Editor.RenderGraph
                 RenderGraphResourceKind.Texture => typeof(RenderGraphTexture),
                 RenderGraphResourceKind.Buffer => typeof(RenderGraphBuffer),
                 RenderGraphResourceKind.RenderList => typeof(RenderGraphRenderList),
+                RenderGraphResourceKind.AccelerationStructure => typeof(RenderGraphAccelerationStructure),
                 _ => null,
             };
 

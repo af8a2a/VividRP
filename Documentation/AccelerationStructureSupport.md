@@ -19,13 +19,22 @@ A serializable descriptor class that mirrors Unity's `RayTracingAccelerationStru
 - `FromAccelerationStructureDesc(desc)` - Creates from Unity's descriptor
 - `Create(name)` - Static factory method for creating new descriptors
 
-### Example Passes
-**Location:** `Runtime/RenderGraph/RayTracingPassExample.cs`
+### RenderGraphAccelerationStructure
+**Location:** `Runtime/RenderGraph/Resource/RenderGraphAccelerationStructureDesc.cs`
 
-Two example pass implementations demonstrating acceleration structure usage:
+A serializable RenderGraph resource wrapper around Unity's `RayTracingAccelerationStructure`.
+It can lazily create a native acceleration structure from the serialized descriptor or wrap an externally managed one.
 
-1. **RayTracingAccelerationStructurePass** - Builds a ray tracing acceleration structure from scene geometry
-2. **RayTracingPass** - Uses an acceleration structure for ray queries in a compute shader
+### AccelerationStructureResourceNodeData
+**Location:** `Editor/RenderGraph/Nodes/AccelerationStructureResourceNodeData.cs`
+
+A dedicated resource node for authoring RTAS descriptors directly in the RenderGraph editor.
+
+### RTASBuildPass
+**Location:** `Runtime/RenderPass/Core/RTASBuildPass.cs`
+
+A compute pass that builds a scene RTAS into a RenderGraph resource without relying on
+`SetGlobalRayTracingAccelerationStructure`, so the resource can flow explicitly to downstream passes.
 
 ## Integration with Existing System
 
@@ -40,63 +49,29 @@ The acceleration structure descriptor integrates seamlessly with the existing de
 
 ### Building an Acceleration Structure
 
-```csharp
-// Create descriptor
-var accelStructDesc = RenderGraphAccelerationStructureDesc.Create("SceneAccelerationStructure");
-
-// Build in RenderGraph pass
-using (var builder = renderGraph.AddComputePass<PassData>("Build RTAS", out var passData))
-{
-    var rtasHandle = renderGraph.ImportRayTracingAccelerationStructure(accelStruct);
-    builder.UseAccelerationStructure(rtasHandle);
-
-    builder.SetRenderFunc<PassData>((data, context) =>
-    {
-        context.cmd.BuildRayTracingAccelerationStructure(accelStruct);
-    });
-}
-```
+Connect an `AccelerationStructureResourceNodeData` node to `RTASBuildPass` when you want an authored RTAS descriptor,
+or use the pass-owned default RTAS output directly and forward it to downstream ray tracing passes.
 
 ### Using an Acceleration Structure for Ray Tracing
 
-```csharp
-// Create output texture with random write enabled
-var outputDesc = RenderGraphTextureDesc.CreateColorTarget(1920, 1080, GraphicsFormat.R16G16B16A16_SFloat);
-outputDesc.EnableRandomWrite = true;
-
-// Use in compute pass
-using (var builder = renderGraph.AddComputePass<PassData>("Ray Tracing", out var passData))
-{
-    var outputTexture = renderGraph.CreateTexture(outputDesc.ToTextureDesc());
-    var rtasHandle = renderGraph.ImportRayTracingAccelerationStructure(accelStruct);
-
-    builder.UseTexture(outputTexture, AccessFlags.Write);
-    builder.UseAccelerationStructure(rtasHandle);
-
-    builder.SetRenderFunc<PassData>((data, context) =>
-    {
-        context.cmd.SetComputeTextureParam(shader, kernel, "_OutputTexture", outputTexture);
-        context.cmd.SetComputeRayTracingAccelerationStructureParam(shader, kernel, "_AccelStruct", accelStruct);
-        context.cmd.DispatchCompute(shader, kernel, width / 8, height / 8, 1);
-    });
-}
-```
+In a downstream pass, declare a `[RenderGraphResource] RenderGraphAccelerationStructure` field with `AccessFlags.Read`
+and bind it from `RTASBuildPass` through the graph. At record time, use the wrapped native object with
+`SetRayTracingAccelerationStructure(...)` or other ray tracing command buffer APIs.
 
 ## Benefits
 
-1. **Declarative Configuration** - Acceleration structure properties defined in assets
-2. **Type Safety** - Compile-time checking of descriptor properties
-3. **Serialization** - Full Unity serialization support
-4. **Integration** - Works seamlessly with existing texture and buffer descriptors
-5. **Ray Tracing Ready** - First-class support for modern ray tracing workflows
+1. **Explicit Dependencies** - RTAS lifetime and ordering stay inside RenderGraph instead of hidden global state
+2. **Async Compute Friendly** - RTAS build and consumer passes can use explicit resource edges
+3. **Serialization** - Descriptor and node data are stored in graph assets
+4. **Integration** - Works alongside existing texture, buffer, history, and render-list resources
+5. **Ray Tracing Ready** - Downstream passes can consume the same RTAS resource directly
 
 ## Future Enhancements
 
-1. **AccelerationStructureNodeData** - Dedicated node type for RTAS resources in the graph editor
-2. **Ray Tracing Pass Node** - Specialized pass node with RTAS input ports
-3. **RTAS Builder Node** - Node that builds acceleration structures from geometry
-4. **Inline Ray Tracing** - Support for inline ray tracing in raster passes
-5. **RTAS Validation** - Runtime validation of acceleration structure properties
+1. **Scene Culling Controls** - More authoring-time control over RTAS build scope and filtering
+2. **Ray Tracing Pass Templates** - Prebuilt nodes for common ray tracing workflows
+3. **Inline Ray Tracing** - Support for inline ray tracing in raster passes
+4. **RTAS Validation** - Additional editor/runtime validation for unsupported hardware or pass layouts
 
 ## Hardware Requirements
 

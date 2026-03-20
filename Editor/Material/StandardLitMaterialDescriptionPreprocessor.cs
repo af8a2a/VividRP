@@ -44,6 +44,7 @@ namespace VividRP.Editor
         private const float MaxSimplifiedPhysicalClassIdB = -1.0994388e+09f;
         private const float MaxSimplifiedGlossinessMode = 2.0f;
         private const float DefaultAlphaCutoff = 0.5f;
+        private const string NormalTextureNameKeyword = "normal";
 
         internal static Shader GetStandardLitShader()
         {
@@ -422,9 +423,79 @@ namespace VividRP.Editor
 
         private static void SetMaterialTextureProperty(string propertyName, Material material, ImportedTextureProperty textureProperty)
         {
-            material.SetTexture(propertyName, textureProperty.Texture);
+            Texture texture = PrepareTextureForMaterial(textureProperty);
+            material.SetTexture(propertyName, texture);
             material.SetTextureOffset(propertyName, textureProperty.Offset);
             material.SetTextureScale(propertyName, textureProperty.Scale);
+        }
+
+        private static Texture PrepareTextureForMaterial(ImportedTextureProperty textureProperty)
+        {
+            if (!textureProperty.IsAssigned)
+            {
+                return null;
+            }
+
+            Texture texture = textureProperty.Texture;
+            if (!ShouldImportTextureAsNormalMap(texture))
+            {
+                return texture;
+            }
+
+            string textureAssetPath = AssetDatabase.GetAssetPath(texture);
+            if (string.IsNullOrEmpty(textureAssetPath))
+            {
+                return texture;
+            }
+
+            if (AssetImporter.GetAtPath(textureAssetPath) is not TextureImporter textureImporter)
+            {
+                return texture;
+            }
+
+            if (!ApplyNormalMapImportSettings(textureImporter))
+            {
+                return texture;
+            }
+
+            textureImporter.SaveAndReimport();
+            return AssetDatabase.LoadAssetAtPath<Texture>(textureAssetPath) ?? texture;
+        }
+
+        internal static bool ShouldImportTextureAsNormalMap(Texture texture)
+        {
+            return texture != null
+                && texture.name.IndexOf(NormalTextureNameKeyword, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        internal static bool ApplyNormalMapImportSettings(TextureImporter textureImporter)
+        {
+            if (textureImporter == null)
+            {
+                return false;
+            }
+
+            bool hasChanges = false;
+
+            if (textureImporter.textureType != TextureImporterType.NormalMap)
+            {
+                textureImporter.textureType = TextureImporterType.NormalMap;
+                hasChanges = true;
+            }
+
+            if (textureImporter.wrapMode != TextureWrapMode.Repeat)
+            {
+                textureImporter.wrapMode = TextureWrapMode.Repeat;
+                hasChanges = true;
+            }
+
+            if (textureImporter.filterMode != FilterMode.Trilinear)
+            {
+                textureImporter.filterMode = FilterMode.Trilinear;
+                hasChanges = true;
+            }
+
+            return hasChanges;
         }
 
         private static bool TryGetFloat(IImportedMaterialDescription description, string propertyName, out float value)

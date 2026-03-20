@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -12,6 +13,11 @@ namespace VividRP.Runtime
     /// </summary>
     public static partial class PassRecorder
     {
+        private const BindingFlags BuilderMethodFlags =
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        private static readonly FieldInfo s_AccelerationStructureResourceHandleField =
+            typeof(RayTracingAccelerationStructureHandle).GetField("handle", BuilderMethodFlags);
+
         private readonly struct ImportedPassTexture : IEquatable<ImportedPassTexture>
         {
             public ImportedPassTexture(TextureHandle handle, AccessFlags access)
@@ -68,6 +74,7 @@ namespace VividRP.Runtime
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
             Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
             Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
+            Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache,
             string passName = null)
         {
             using var builder = renderGraph.AddComputePass<ComputePassData>(
@@ -75,7 +82,14 @@ namespace VividRP.Runtime
 
             passData.Pass = pass;
 
-            SetupComputeResources(renderGraph, builder, resource, textureCache, bufferCache, renderListCache);
+            SetupComputeResources(
+                renderGraph,
+                builder,
+                resource,
+                textureCache,
+                bufferCache,
+                renderListCache,
+                accelerationStructureCache);
             SetupImportedTextures(builder, pass);
             ConfigureGlobalStateModification(builder, pass);
 
@@ -96,6 +110,7 @@ namespace VividRP.Runtime
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
             Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
             Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
+            Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache,
             string passName = null)
         {
             using var builder = renderGraph.AddRasterRenderPass<RasterPassData>(
@@ -103,7 +118,14 @@ namespace VividRP.Runtime
 
             passData.Pass = pass;
 
-            SetupRasterResources(renderGraph, builder, resource, textureCache, bufferCache, renderListCache);
+            SetupRasterResources(
+                renderGraph,
+                builder,
+                resource,
+                textureCache,
+                bufferCache,
+                renderListCache,
+                accelerationStructureCache);
             SetupImportedTextures(builder, pass);
             ConfigureGlobalStateModification(builder, pass);
 
@@ -126,6 +148,7 @@ namespace VividRP.Runtime
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
             Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
             Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
+            Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache,
             string passName = null)
         {
             using var builder = renderGraph.AddUnsafePass<UnsafePassData>(
@@ -133,7 +156,14 @@ namespace VividRP.Runtime
 
             passData.Pass = pass;
 
-            SetupUnsafeResources(renderGraph, builder, resource, textureCache, bufferCache, renderListCache);
+            SetupUnsafeResources(
+                renderGraph,
+                builder,
+                resource,
+                textureCache,
+                bufferCache,
+                renderListCache,
+                accelerationStructureCache);
             SetupImportedTextures(builder, pass);
             ConfigureGlobalStateModification(builder, pass);
 
@@ -257,6 +287,36 @@ namespace VividRP.Runtime
             return handle;
         }
 
+        private static RayTracingAccelerationStructureHandle GetOrCreateAccelerationStructureHandle(
+            RenderGraph renderGraph,
+            RenderGraphAccelerationStructure accelerationStructure,
+            Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache)
+        {
+            if (accelerationStructure == null)
+                return default;
+
+            if (accelerationStructureCache.TryGetValue(accelerationStructure, out var handle))
+                return handle;
+
+            if (!accelerationStructure.HasAccelerationStructure)
+            {
+                if (!SystemInfo.supportsRayTracing)
+                    return default;
+
+                accelerationStructure.EnsureCreated();
+            }
+
+            var nativeAccelerationStructure = (RayTracingAccelerationStructure)accelerationStructure;
+            if (nativeAccelerationStructure == null)
+                return default;
+
+            var name = accelerationStructure.desc?.Name;
+            handle = renderGraph.ImportRayTracingAccelerationStructure(nativeAccelerationStructure, name);
+            accelerationStructure.innerHandle = handle;
+            accelerationStructureCache.Add(accelerationStructure, handle);
+            return handle;
+        }
+
         private static void SetupRenderLists(
             RenderGraph renderGraph,
             IBaseRenderGraphBuilder builder,
@@ -285,6 +345,29 @@ namespace VividRP.Runtime
                 builder.UseAllGlobalTextures(true);
         }
 
+        private static void SetupAccelerationStructures(
+            RenderGraph renderGraph,
+            IBaseRenderGraphBuilder builder,
+            PassResource resource,
+            Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache)
+        {
+            foreach (var entry in resource.AccelerationStructures)
+            {
+                var accelerationStructure = entry.AccelerationStructure;
+                if (accelerationStructure == null)
+                    continue;
+
+                var handle = GetOrCreateAccelerationStructureHandle(
+                    renderGraph,
+                    accelerationStructure,
+                    accelerationStructureCache);
+                if (!handle.IsValid())
+                    continue;
+
+                UseAccelerationStructure(builder, handle, entry.Access);
+            }
+        }
+
         /// <summary>
         /// Sets up resources for compute and unsafe passes using IBaseRenderGraphBuilder.
         /// </summary>
@@ -294,7 +377,8 @@ namespace VividRP.Runtime
             PassResource resource,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
             Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
-            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache)
+            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
+            Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache)
         {
             foreach (var entry in resource.Textures)
             {
@@ -319,6 +403,7 @@ namespace VividRP.Runtime
             }
 
             SetupRenderLists(renderGraph, builder, resource, renderListCache);
+            SetupAccelerationStructures(renderGraph, builder, resource, accelerationStructureCache);
 
             builder.AllowPassCulling(false);
         }
@@ -332,7 +417,8 @@ namespace VividRP.Runtime
             PassResource resource,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
             Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
-            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache)
+            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
+            Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache)
         {
             foreach (var entry in resource.Textures)
             {
@@ -357,6 +443,7 @@ namespace VividRP.Runtime
             }
 
             SetupRenderLists(renderGraph, builder, resource, renderListCache);
+            SetupAccelerationStructures(renderGraph, builder, resource, accelerationStructureCache);
 
             builder.AllowPassCulling(false);
         }
@@ -371,7 +458,8 @@ namespace VividRP.Runtime
             PassResource resource,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
             Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
-            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache)
+            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
+            Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache)
         {
             foreach (var entry in resource.Textures)
             {
@@ -406,8 +494,51 @@ namespace VividRP.Runtime
             }
 
             SetupRenderLists(renderGraph, builder, resource, renderListCache);
+            SetupAccelerationStructures(renderGraph, builder, resource, accelerationStructureCache);
 
             builder.AllowPassCulling(false);
+        }
+
+        private static void UseAccelerationStructure(
+            IBaseRenderGraphBuilder builder,
+            RayTracingAccelerationStructureHandle handle,
+            AccessFlags access)
+        {
+            if (builder == null || !handle.IsValid())
+                return;
+
+            InvokeAccelerationStructureBuilderMethod(builder, handle, access);
+        }
+
+        private static void InvokeAccelerationStructureBuilderMethod(
+            IBaseRenderGraphBuilder builder,
+            RayTracingAccelerationStructureHandle handle,
+            AccessFlags access)
+        {
+            if (s_AccelerationStructureResourceHandleField == null)
+            {
+                Debug.LogError("[VividRP] RenderGraph acceleration-structure handle field was not found.");
+                return;
+            }
+
+            var method = builder.GetType().GetMethod("UseResource", BuilderMethodFlags);
+            if (method == null)
+            {
+                Debug.LogError(
+                    $"[VividRP] RenderGraph builder method 'UseResource' was not found on '{builder.GetType().FullName}'.");
+                return;
+            }
+
+            var resourceHandle = s_AccelerationStructureResourceHandleField.GetValue(handle);
+            var builderAccess = access;
+
+            if ((builderAccess & AccessFlags.Write) != 0
+                && (builderAccess & AccessFlags.Read) == 0)
+            {
+                builderAccess |= AccessFlags.Discard;
+            }
+
+            method.Invoke(builder, new[] { resourceHandle, (object)builderAccess });
         }
     }
 }

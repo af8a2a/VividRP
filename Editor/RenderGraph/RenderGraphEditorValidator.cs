@@ -173,7 +173,8 @@ namespace VividRP.Editor.RenderGraph
         {
             return node is TextureResourceNodeData
                    || node is BufferResourceNodeData
-                   || node is RenderListResourceNodeData;
+                   || node is RenderListResourceNodeData
+                   || node is AccelerationStructureResourceNodeData;
         }
 
 

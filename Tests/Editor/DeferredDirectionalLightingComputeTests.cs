@@ -33,6 +33,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("VividLightingLoop::LoadPunctualLight"));
             Assert.That(source, Does.Contain("EvaluateDeferredLitLighting"));
             Assert.That(source, Does.Contain("EvaluateIndirectLighting"));
+            Assert.That(source, Does.Contain("InitVividPreLightData"));
+            Assert.That(source, Does.Contain("VividPreLightData preLightData"));
+            Assert.That(source, Does.Contain("EvaluateDirectional("));
             Assert.That(source, Does.Contain("EvaluatePunctualLight"));
             Assert.That(source, Does.Contain("ComputeWorldSpacePosition"));
             Assert.That(source, Does.Not.Contain("tileCount ="));

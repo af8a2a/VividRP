@@ -1,5 +1,6 @@
 using System.IO;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEngine;
 using VividRP.Runtime;
@@ -105,51 +106,19 @@ namespace VividRP.Editor.Tests
             var graphSource = File.ReadAllText(GetAssetFilePath("Assets", "Vivid Render Graph.vrdg"));
 
             Assert.That(graphSource, Does.Contain("type: {class: DeferredLightingPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}"));
-            Assert.That(graphSource, Does.Contain(
-@"m_ToPortReference:
-          m_NodeModelGuid:
-            m_Value0: 2551610526311484606
-            m_Value1: 4936634331650870990
-          m_NodeModelHashGuid:
-            serializedVersion: 2
-            Hash: be8cf13141246923ce4e0cecc4728244
-          m_UniqueId: m_DirectionalLightBuffer"));
-            Assert.That(graphSource, Does.Contain(
-@"m_ToPortReference:
-          m_NodeModelGuid:
-            m_Value0: 2551610526311484606
-            m_Value1: 4936634331650870990
-          m_NodeModelHashGuid:
-            serializedVersion: 2
-            Hash: be8cf13141246923ce4e0cecc4728244
-          m_UniqueId: m_PunctualLightBuffer"));
-            Assert.That(graphSource, Does.Contain(
-@"m_ToPortReference:
-          m_NodeModelGuid:
-            m_Value0: 2551610526311484606
-            m_Value1: 4936634331650870990
-          m_NodeModelHashGuid:
-            serializedVersion: 2
-            Hash: be8cf13141246923ce4e0cecc4728244
-          m_UniqueId: m_LayeredOffsetBuffer"));
-            Assert.That(graphSource, Does.Contain(
-@"m_ToPortReference:
-          m_NodeModelGuid:
-            m_Value0: 2551610526311484606
-            m_Value1: 4936634331650870990
-          m_NodeModelHashGuid:
-            serializedVersion: 2
-            Hash: be8cf13141246923ce4e0cecc4728244
-          m_UniqueId: m_LayeredLightListBuffer"));
-            Assert.That(graphSource, Does.Contain(
-@"m_ToPortReference:
-          m_NodeModelGuid:
-            m_Value0: 2551610526311484606
-            m_Value1: 4936634331650870990
-          m_NodeModelHashGuid:
-            serializedVersion: 2
-            Hash: be8cf13141246923ce4e0cecc4728244
-          m_UniqueId: m_LogBaseBuffer"));
+            AssertWireExists(graphSource, "m_DirectionalLightBuffer", "DirectionalLights");
+            AssertWireExists(graphSource, "m_PunctualLightBuffer", "PunctualLights");
+            AssertWireExists(graphSource, "m_LayeredOffsetBuffer", "LayeredOffset");
+            AssertWireExists(graphSource, "m_LayeredLightListBuffer", "LayeredLightList");
+            AssertWireExists(graphSource, "m_LogBaseBuffer", "LogBaseBuffer");
+        }
+
+        private static void AssertWireExists(string graphSource, string uniqueId, string title)
+        {
+            var pattern =
+                $@"m_FromPortReference:\s*[\s\S]*?m_UniqueId: {Regex.Escape(uniqueId)}\s*[\s\S]*?m_Title: {Regex.Escape(title)} \(W\)\s*[\s\S]*?m_ToPortReference:\s*[\s\S]*?m_UniqueId: {Regex.Escape(uniqueId)}\s*[\s\S]*?m_Title: {Regex.Escape(title)} \(R\)";
+
+            Assert.That(graphSource, Does.Match(pattern), $"Expected a LightGrid -> DeferredLighting wire for '{uniqueId}'.");
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

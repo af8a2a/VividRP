@@ -4,7 +4,6 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/HdrpLitLighting.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/TextureXR.hlsl"
 
 TEXTURE2D_X(_GBuffer0);
 TEXTURE2D_X(_GBuffer1);
@@ -41,15 +40,17 @@ Varyings Vert(Attributes input)
 
 float3 GetDeferredViewDirectionWS(float3 positionWS)
 {
-    if (unity_OrthoParams.w > 0.5)
-        return TransformViewToWorldDir(float3(0.0, 0.0, -1.0), true);
+    float3 viewDirectionWS = SafeNormalize(_WorldSpaceCameraPos.xyz - positionWS);
 
-    return SafeNormalize(_WorldSpaceCameraPos.xyz - positionWS);
+    if (unity_OrthoParams.w > 0.5)
+        viewDirectionWS = TransformViewToWorldDir(float3(0.0, 0.0, -1.0), true);
+
+    return viewDirectionWS;
 }
 
 float3 GetDeferredLightDirectionWS()
 {
-    DirectionalLightData mainLight;
+    DirectionalLightData mainLight = (DirectionalLightData)0;
     if (TryGetMainDirectionalLight(mainLight))
         return SafeNormalize(mainLight.directionWS);
 
@@ -58,7 +59,7 @@ float3 GetDeferredLightDirectionWS()
 
 float3 GetDeferredLightColor()
 {
-    DirectionalLightData mainLight;
+    DirectionalLightData mainLight = (DirectionalLightData)0;
     if (TryGetMainDirectionalLight(mainLight))
         return mainLight.color;
 
@@ -87,10 +88,11 @@ VividGBufferSurfaceData LoadVividGBuffer(uint2 pixelCoord)
 
 float3 EvaluateSimpleDeferredLighting(VividGBufferSurfaceData surfaceData, float3 positionWS)
 {
-    float3 viewDirectionWS = GetDeferredViewDirectionWS(positionWS);
+    float3 viewDirectionWS = SafeNormalize(GetDeferredViewDirectionWS(positionWS));
     VividLitBSDFData bsdfData = BuildVividHdrpLitBSDFData(surfaceData);
     float3 diffuseColor = surfaceData.baseColor * (1.0 - surfaceData.metallic);
     float3 indirectLighting = EvaluateIndirectLighting(surfaceData, bsdfData, viewDirectionWS);
+    float3 directLighting = float3(0.0, 0.0, 0.0);
 
     if (!VividHasSkyIBL())
         indirectLighting += diffuseColor * _AmbientColor.rgb * surfaceData.ambientOcclusion;
@@ -99,7 +101,7 @@ float3 EvaluateSimpleDeferredLighting(VividGBufferSurfaceData surfaceData, float
     {
         float3 lightDirectionWS = GetDeferredLightDirectionWS();
         float3 lightColor = GetDeferredLightColor();
-        float3 directLighting = surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC
+        directLighting = surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC
             ? EvaluateVividFabricDirectLight(surfaceData, viewDirectionWS, lightDirectionWS) * lightColor
             : EvaluateVividLitDirectLight(surfaceData, bsdfData, viewDirectionWS, lightDirectionWS) * lightColor;
         return directLighting + indirectLighting + surfaceData.emissive;

@@ -64,11 +64,14 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "GBuffer2", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer2;
 
-        [RenderGraphResource(Name = "GBuffer3", Access = AccessFlags.ReadWrite)]
+        [RenderGraphResource(Name = "GBuffer3", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer3;
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
+
+        [RenderGraphResource(Name = "Color", Access = AccessFlags.Write, AttachmentIndex = 0)]
+        private RenderGraphTexture m_ColorTexture;
 
         [RenderGraphResource(
             Name = "SkyIBLCubemap",
@@ -186,6 +189,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer2 = CreateInputTexture("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
             m_GBuffer3 = CreateInputTexture("GBuffer3", GraphicsFormat.B10G11R11_UFloatPack32);
             m_DepthTexture = CreateDepthTexture("Depth");
+            m_ColorTexture = CreateOutputTexture("Color", GraphicsFormat.R16G16B16A16_SFloat);
             m_SkyIBLCubemap = CreateSkyIBLCubemapTexture("SkyIBLCubemap");
             m_StandardMaterialIndices = CreateStructuredBuffer("StandardMaterialIndices", sizeof(uint));
             m_FabricMaterialIndices = CreateStructuredBuffer("FabricMaterialIndices", sizeof(uint));
@@ -246,6 +250,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizeTexture(m_GBuffer2, width, height);
             ResizeTexture(m_GBuffer3, width, height);
             ResizeTexture(m_DepthTexture, width, height);
+            ResizeTexture(m_ColorTexture, width, height);
             PrepareClusteredLightingParameters(frameData);
             PreparePreIntegratedFGDResources();
             PrepareSkyIblState();
@@ -266,7 +271,7 @@ namespace VividRP.Runtime.RenderPass.Core
             using (new ProfilingScope(nativeCmd, profilingSampler))
             {
                 BindSharedParameters(cmd, m_ClearDeferredLitKernel);
-                // cmd.DispatchCompute(m_DeferredLitCompute, m_ClearDeferredLitKernel, m_ClearDispatchGroupCountX, m_ClearDispatchGroupCountY, 1);
+                cmd.DispatchCompute(m_DeferredLitCompute, m_ClearDeferredLitKernel, m_ClearDispatchGroupCountX, m_ClearDispatchGroupCountY, 1);
 
                 BindSharedParameters(cmd, m_DeferredLitKernel);
                 BindIndirectLightingParameters(cmd, m_DeferredLitKernel);
@@ -322,8 +327,9 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer0Id, m_GBuffer0.innerHandle);
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer2Id, m_GBuffer2.innerHandle);
+            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer3Id, m_GBuffer3.innerHandle);
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, DepthTextureId, m_DepthTexture.innerHandle);
-            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, LightingTextureId, m_GBuffer3);
+            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, LightingTextureId, m_ColorTexture.innerHandle);
             cmd.SetComputeIntParam(m_DeferredLitCompute, LightingWidthId, m_LightingWidth);
             cmd.SetComputeIntParam(m_DeferredLitCompute, LightingHeightId, m_LightingHeight);
         }

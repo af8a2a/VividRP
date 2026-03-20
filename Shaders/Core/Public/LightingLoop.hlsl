@@ -13,14 +13,14 @@ struct VividLightingLoop
 {
     static VividLightingLoopContext Create(uint2 pixelCoord, float viewDepth)
     {
-        VividLightingLoopContext context;
+        VividLightingLoopContext context = (VividLightingLoopContext)0;
         context.punctualLightCell = VividClusteredLighting::LoadPunctualLightCell(pixelCoord, viewDepth);
         return context;
     }
 
     static VividLightingLoopContext Create(uint2 pixelCoord, float3 positionWS)
     {
-        VividLightingLoopContext context;
+        VividLightingLoopContext context = (VividLightingLoopContext)0;
         context.punctualLightCell = VividClusteredLighting::LoadPunctualLightCell(pixelCoord, positionWS);
         return context;
     }

@@ -12,6 +12,7 @@
 Texture2D<float4> _GBuffer0;
 Texture2D<float4> _GBuffer1;
 Texture2D<float4> _GBuffer2;
+Texture2D<float4> _GBuffer3;
 Texture2D<float> _DepthTexture;
 StructuredBuffer<uint> _MaterialPixelIndices;
 
@@ -27,90 +28,58 @@ bool IsSkyPixel(float deviceDepth)
 
 float3 GetCameraPositionWS()
 {
-    // Currently we do not support Camera Relative Rendering so
-    // we simply return the _WorldSpaceCameraPos until then
     return _WorldSpaceCameraPos;
-
-    // We will replace the code above with this one once
-    // we start supporting Camera Relative Rendering
-    //#if (SHADEROPTIONS_CAMERA_RELATIVE_RENDERING != 0)
-    //    return float3(0, 0, 0);
-    //#else
-    //    return _WorldSpaceCameraPos;
-    //#endif
 }
 
-// Could be e.g. the position of a primary camera or a shadow-casting light.
 float3 GetCurrentViewPosition()
 {
-    // Currently we do not support Camera Relative Rendering so
-    // we simply return the _WorldSpaceCameraPos until then
     return GetCameraPositionWS();
-
-    // We will replace the code above with this one once
-    // we start supporting Camera Relative Rendering
-    //#if defined(SHADERPASS) && (SHADERPASS != SHADERPASS_SHADOWS)
-    //    return GetCameraPositionWS();
-    //#else
-    //    // This is a generic solution.
-    //    // However, for the primary camera, using '_WorldSpaceCameraPos' is better for cache locality,
-    //    // and in case we enable camera-relative rendering, we can statically set the position is 0.
-    //    return UNITY_MATRIX_I_V._14_24_34;
-    //#endif
 }
 
-// Returns 'true' if the current view performs a perspective projection.
 bool IsPerspectiveProjection()
 {
-    return (unity_OrthoParams.w == 0);
+    return unity_OrthoParams.w == 0;
 }
 
-// Returns the forward (central) direction of the current view in the world space.
 float3 GetViewForwardDir()
 {
     float4x4 viewMat = GetWorldToViewMatrix();
-    return -viewMat[2].xyz;
+    float3 viewForwardDir = -viewMat[2].xyz;
+    return viewForwardDir;
 }
 
-// Computes the world space view direction (pointing towards the viewer).
 float3 GetWorldSpaceViewDir(float3 positionWS)
 {
+    float3 viewDirectionWS = -GetViewForwardDir();
+
     if (IsPerspectiveProjection())
-    {
-        // Perspective
-        return GetCurrentViewPosition() - positionWS;
-    }
-    else
-    {
-        // Orthographic
-        return -GetViewForwardDir();
-    }
+        viewDirectionWS = GetCurrentViewPosition() - positionWS;
+
+    return viewDirectionWS;
 }
-
-
 
 VividGBufferSurfaceData LoadVividGBuffer(uint2 pixelCoord)
 {
     float4 rt0 = _GBuffer0.Load(int3(pixelCoord, 0));
     float4 rt1 = _GBuffer1.Load(int3(pixelCoord, 0));
     float4 rt2 = _GBuffer2.Load(int3(pixelCoord, 0));
-    float4 rt3 = 0;
+    float4 rt3 = _GBuffer3.Load(int3(pixelCoord, 0));
     return UnpackVividGBufferSurfaceData(rt0, rt1, rt2, rt3);
 }
 
 float3 EvaluateDeferredLitLighting(VividGBufferSurfaceData surfaceData, uint2 pixelCoord, float3 positionWS)
 {
-    float3 viewDirectionWS = GetWorldSpaceViewDir(positionWS);
+    float3 viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(positionWS));
     VividLitBSDFData bsdfData = BuildVividHdrpLitBSDFData(surfaceData);
-    float3 lighting =0; EvaluateIndirectLighting(surfaceData, bsdfData, viewDirectionWS);
+    VividPreLightData preLightData = InitVividPreLightData(surfaceData, bsdfData, viewDirectionWS);
+    float3 lighting = EvaluateIndirectLighting(surfaceData, bsdfData, preLightData, viewDirectionWS);
 
     [loop]
     for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)
     {
         DirectionalLightData directionalLight = GetDirectionalLight(lightIndex);
-        lighting += EvaluateDirectionalLight(surfaceData, bsdfData, viewDirectionWS, directionalLight);
+        lighting += EvaluateDirectional(surfaceData, bsdfData, preLightData, viewDirectionWS, directionalLight);
     }
-    return lighting;
 
     if (HasPunctualLights())
     {
@@ -121,7 +90,7 @@ float3 EvaluateDeferredLitLighting(VividGBufferSurfaceData surfaceData, uint2 pi
         for (uint localLightIndex = 0; localLightIndex < punctualLightCount; localLightIndex++)
         {
             PunctualLightData punctualLight = VividLightingLoop::LoadPunctualLight(lightLoop, localLightIndex);
-            lighting += EvaluatePunctualLight(surfaceData, bsdfData, positionWS, viewDirectionWS, punctualLight);
+            lighting += EvaluatePunctualLight(surfaceData, bsdfData, preLightData, positionWS, viewDirectionWS, punctualLight);
         }
     }
 
@@ -134,7 +103,8 @@ void ClearDeferredLit(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (dispatchThreadId.x >= _LightingWidth || dispatchThreadId.y >= _LightingHeight)
         return;
 
-    // _LightingTexture[dispatchThreadId.xy] = float4(0.0, 0.0, 0.0, 1.0);
+    float3 emissive = max(_GBuffer3.Load(int3(dispatchThreadId.xy, 0)).rgb, 0.0);
+    _LightingTexture[dispatchThreadId.xy] = float4(emissive, 1.0);
 }
 
 [numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
@@ -161,6 +131,6 @@ void DeferredLit(
     float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, UNITY_MATRIX_I_VP);
     float3 lighting = EvaluateDeferredLitLighting(surfaceData, pixelCoord, positionWS);
 
-    GetWorldSpaceViewDir(positionWS);
-    _LightingTexture[pixelCoord] += float4(lighting, 1.0);
+    float4 currentLighting = _LightingTexture[pixelCoord];
+    _LightingTexture[pixelCoord] = float4(currentLighting.rgb + lighting, currentLighting.a);
 }

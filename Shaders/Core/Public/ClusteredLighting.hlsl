@@ -27,13 +27,15 @@ struct VividClusteredLighting
 {
     static float GetViewDepthWS(float3 positionWS)
     {
-        float3 positionVS = TransformWorldToView(positionWS);
+        float3 positionVS = float3(0.0, 0.0, 0.0);
+        positionVS = TransformWorldToView(positionWS);
         return max(-positionVS.z, max(_ClusterNearClip, 0.0001));
     }
 
     static float GetViewDepth(float2 uv, float deviceDepth)
     {
-        float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, UNITY_MATRIX_I_VP);
+        float3 positionWS = float3(0.0, 0.0, 0.0);
+        positionWS = ComputeWorldSpacePosition(uv, deviceDepth, UNITY_MATRIX_I_VP);
         return GetViewDepthWS(positionWS);
     }
 
@@ -91,8 +93,10 @@ struct VividClusteredLighting
         float sliceCountF = (float)sliceCount;
         float rangeFittedDistance = saturate((depth - nearPlane) / (farPlane - nearPlane));
         float basePow = pow(logBase, sliceCountF);
-        float slice = log2(lerp(1.0, basePow, rangeFittedDistance)) / log2(logBase);
-        return min((uint)max((int)slice, 0), sliceCount - 1u);
+        float slice = 0.0;
+        slice = log2(lerp(1.0, basePow, rangeFittedDistance)) / log2(logBase);
+        uint sliceIndex = min((uint)max((int)slice, 0), sliceCount - 1u);
+        return sliceIndex;
     }
 
     static uint GetSliceIndex(float viewDepth)
@@ -108,8 +112,10 @@ struct VividClusteredLighting
         float sliceCountF = (float)sliceCount;
         float rangeFittedDistance = saturate((depth - nearPlane) / (farPlane - nearPlane));
         float basePow = pow(logBase, sliceCountF);
-        float slice = log2(lerp(1.0, basePow, rangeFittedDistance)) / log2(logBase);
-        return min((uint)max((int)slice, 0), sliceCount - 1u);
+        float slice = 0.0;
+        slice = log2(lerp(1.0, basePow, rangeFittedDistance)) / log2(logBase);
+        uint sliceIndex = min((uint)max((int)slice, 0), sliceCount - 1u);
+        return sliceIndex;
     }
 
     static uint GetLayeredOffsetBufferIndex(uint lightCategory, uint2 tileCoord, uint sliceIndex)
@@ -122,7 +128,7 @@ struct VividClusteredLighting
 
     static VividClusteredLightCell UnpackLightCell(uint packedOffset)
     {
-        VividClusteredLightCell lightCell;
+        VividClusteredLightCell lightCell = (VividClusteredLightCell)0;
         lightCell.offset = packedOffset & LIGHT_CLUSTER_PACKING_OFFSET_MASK;
         lightCell.count = (packedOffset >> LIGHT_CLUSTER_PACKING_OFFSET_BITS) & LIGHT_CLUSTER_PACKING_COUNT_MASK;
         return lightCell;

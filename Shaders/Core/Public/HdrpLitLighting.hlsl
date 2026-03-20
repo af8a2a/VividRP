@@ -26,11 +26,23 @@ struct VividLitBSDFData
 {
     float3 diffuseColor;
     float3 fresnel0;
-    float3 fresnel90;
+    float fresnel90;
     float perceptualRoughness;
     float roughness;
     float coatMask;
     float coatRoughness;
+};
+
+struct VividPreLightData
+{
+    float NdotV;
+    float partLambdaV;
+    float3 iblR;
+    float iblPerceptualRoughness;
+    float3 specularFGD;
+    float diffuseFGD;
+    float reflectivity;
+    float energyCompensation;
 };
 
 float VividClampNdotV(float nDotV)
@@ -68,7 +80,7 @@ float VividF_Schlick(float f0, float f90, float u)
     return F_Schlick(f0, f90, u);
 }
 
-float3 VividF_Schlick(float3 f0, float3 f90, float u)
+float3 VividF_Schlick(float3 f0, float f90, float u)
 {
     return F_Schlick(f0, f90, u);
 }
@@ -116,8 +128,8 @@ bool VividHasSkyIBL()
 float3 VividRotateAroundYAxis(float3 directionWS, float rotationDegrees)
 {
     float rotationRadians = radians(rotationDegrees);
-    float s;
-    float c;
+    float s = 0.0;
+    float c = 1.0;
     sincos(rotationRadians, s, c);
 
     return float3(
@@ -134,38 +146,19 @@ float3 VividGetReflectionVector(float3 viewDirectionWS, float3 normalWS)
 float3 VividSampleSkyIBL(float3 directionWS, float perceptualRoughness)
 {
     if (!VividHasSkyIBL())
-        return 0.0;
+        return float3(0.0, 0.0, 0.0);
 
     uint maxMip = (uint)max(_VividSkyIBLParams.z, 0.0);
     float mipLevel = PerceptualRoughnessToMipmapLevel(saturate(perceptualRoughness), maxMip);
     float3 rotatedDirectionWS = VividRotateAroundYAxis(directionWS, _VividSkyIBLParams.y);
-    float3 envLighting = SAMPLE_TEXTURECUBE_LOD(_VividSkyIBLCubemap, sampler_VividSkyIBLCubemap, rotatedDirectionWS, mipLevel).rgb;
+    float3 envLighting = float3(0.0, 0.0, 0.0);
+    envLighting = SAMPLE_TEXTURECUBE_LOD(_VividSkyIBLCubemap, sampler_VividSkyIBLCubemap, rotatedDirectionWS, mipLevel).rgb;
     return envLighting * _VividSkyIBLTint.rgb * _VividSkyIBLParams.x;
-}
-
-void VividGetBSDFAngles(
-    float3 normalWS,
-    float3 viewDirectionWS,
-    float3 lightDirectionWS,
-    out float nDotV,
-    out float nDotL,
-    out float lDotV,
-    out float nDotH,
-    out float lDotH)
-{
-    nDotV = dot(normalWS, viewDirectionWS);
-    nDotL = dot(normalWS, lightDirectionWS);
-    lDotV = dot(lightDirectionWS, viewDirectionWS);
-
-    float invLenLV = rsqrt(max(2.0 * lDotV + 2.0, 1e-6));
-    float3 halfVectorWS = (lightDirectionWS + viewDirectionWS) * invLenLV;
-    nDotH = saturate(dot(normalWS, halfVectorWS));
-    lDotH = saturate(dot(lightDirectionWS, halfVectorWS));
 }
 
 VividLitBSDFData BuildVividHdrpLitBSDFData(VividGBufferSurfaceData surfaceData)
 {
-    VividLitBSDFData bsdfData;
+    VividLitBSDFData bsdfData = (VividLitBSDFData)0;
     bsdfData.diffuseColor = surfaceData.baseColor * (1.0 - surfaceData.metallic);
     bsdfData.fresnel0 = lerp(kVividDielectricF0, surfaceData.baseColor, surfaceData.metallic);
     bsdfData.fresnel90 = 1.0;
@@ -193,27 +186,59 @@ VividLitBSDFData BuildVividHdrpLitBSDFData(VividGBufferSurfaceData surfaceData)
     return bsdfData;
 }
 
+VividPreLightData InitVividPreLightData(
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData,
+    float3 viewDirectionWS)
+{
+    VividPreLightData preLightData = (VividPreLightData)0;
+    float clampedNdotV = 0.0;
+
+    preLightData.NdotV = dot(surfaceData.normalWS, viewDirectionWS);
+    preLightData.iblPerceptualRoughness = bsdfData.perceptualRoughness;
+    clampedNdotV = saturate(VividClampNdotV(preLightData.NdotV));
+    preLightData.partLambdaV = VividGetSmithJointGGXPartLambdaV(clampedNdotV, bsdfData.roughness);
+
+    GetPreIntegratedFGDGGXAndDisneyDiffuse(
+        clampedNdotV,
+        preLightData.iblPerceptualRoughness,
+        bsdfData.fresnel0,
+        bsdfData.fresnel90,
+        preLightData.specularFGD,
+        preLightData.diffuseFGD,
+        preLightData.reflectivity);
+
+    preLightData.energyCompensation = rcp(max(preLightData.reflectivity, 1e-4)) - 1.0;
+    preLightData.iblR = VividGetReflectionVector(viewDirectionWS, surfaceData.normalWS);
+    return preLightData;
+}
+
 float3 EvaluateVividLitDirectLight(
     VividGBufferSurfaceData surfaceData,
     VividLitBSDFData bsdfData,
+    VividPreLightData preLightData,
     float3 viewDirectionWS,
     float3 lightDirectionWS)
 {
-    float nDotV;
-    float nDotL;
-    float lDotV;
-    float nDotH;
-    float lDotH;
-    VividGetBSDFAngles(surfaceData.normalWS, viewDirectionWS, lightDirectionWS, nDotV, nDotL, lDotV, nDotH, lDotH);
-
+    float nDotL = dot(surfaceData.normalWS, lightDirectionWS);
     if (nDotL <= 0.0)
-        return 0.0;
+        return float3(0.0, 0.0, 0.0);
 
-    float clampedNdotV = VividClampNdotV(nDotV);
+    float clampedNdotV = VividClampNdotV(preLightData.NdotV);
     float clampedNdotL = saturate(nDotL);
+    float lDotV = 0.0;
+    float nDotH = 0.0;
+    float lDotH = 0.0;
+    float invLenLV = 0.0;
+    GetBSDFAngle(viewDirectionWS, lightDirectionWS, nDotL, preLightData.NdotV, lDotV, nDotH, lDotH, invLenLV);
+
     float3 fresnel = VividF_Schlick(bsdfData.fresnel0, bsdfData.fresnel90, lDotH);
-    float partLambdaV = VividGetSmithJointGGXPartLambdaV(clampedNdotV, bsdfData.roughness);
-    float3 specular = fresnel * VividDV_SmithJointGGX(nDotH, clampedNdotL, clampedNdotV, bsdfData.roughness, partLambdaV);
+    float3 specular = fresnel * VividDV_SmithJointGGX(
+        nDotH,
+        clampedNdotL,
+        clampedNdotV,
+        bsdfData.roughness,
+        preLightData.partLambdaV);
     float diffuse = VividDisneyDiffuse(clampedNdotV, clampedNdotL, lDotV, bsdfData.perceptualRoughness);
 
     if (bsdfData.coatMask > 0.0)
@@ -235,20 +260,34 @@ float3 EvaluateVividLitDirectLight(
     return (bsdfData.diffuseColor * diffuse + specular) * clampedNdotL;
 }
 
+float3 EvaluateVividLitDirectLight(
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData,
+    float3 viewDirectionWS,
+    float3 lightDirectionWS)
+{
+    float3 normalizedViewDirectionWS = SafeNormalize(viewDirectionWS);
+    VividPreLightData preLightData = InitVividPreLightData(surfaceData, bsdfData, normalizedViewDirectionWS);
+    return EvaluateVividLitDirectLight(surfaceData, bsdfData, preLightData, normalizedViewDirectionWS, lightDirectionWS);
+}
+
 float3 EvaluateVividFabricDirectLight(
     VividGBufferSurfaceData surfaceData,
     float3 viewDirectionWS,
     float3 lightDirectionWS)
 {
-    float nDotV;
-    float nDotL;
-    float lDotV;
-    float nDotH;
-    float lDotH;
-    VividGetBSDFAngles(surfaceData.normalWS, viewDirectionWS, lightDirectionWS, nDotV, nDotL, lDotV, nDotH, lDotH);
+    float nDotV = 0.0;
+    float nDotL = 0.0;
+    float lDotV = 0.0;
+    float nDotH = 0.0;
+    float lDotH = 0.0;
+    float invLenLV = 0.0;
+    nDotV = dot(surfaceData.normalWS, viewDirectionWS);
+    nDotL = dot(surfaceData.normalWS, lightDirectionWS);
+    GetBSDFAngle(viewDirectionWS, lightDirectionWS, nDotL, nDotV, lDotV, nDotH, lDotH, invLenLV);
 
     if (nDotL <= 0.0)
-        return 0.0;
+        return float3(0.0, 0.0, 0.0);
 
     float clampedNdotV = VividClampNdotV(nDotV);
     float clampedNdotL = saturate(nDotL);
@@ -267,29 +306,17 @@ float3 EvaluateVividFabricDirectLight(
 float3 EvaluateVividHdrpLitIndirectLight(
     VividGBufferSurfaceData surfaceData,
     VividLitBSDFData bsdfData,
+    VividPreLightData preLightData,
     float3 viewDirectionWS)
 {
-    float nDotV = dot(surfaceData.normalWS, viewDirectionWS);
-    float clampedNdotV = saturate(VividClampNdotV(nDotV));
-    float3 specularFGD;
-    float diffuseFGD;
-    float reflectivity;
-    GetPreIntegratedFGDGGXAndDisneyDiffuse(
-        clampedNdotV,
-        bsdfData.perceptualRoughness,
-        bsdfData.fresnel0,
-        specularFGD,
-        diffuseFGD,
-        reflectivity);
-
-    float3 diffuseLighting = SampleSH(surfaceData.normalWS) * bsdfData.diffuseColor * diffuseFGD;
-    float3 reflectionVectorWS = VividGetReflectionVector(viewDirectionWS, surfaceData.normalWS);
+    float clampedNdotV = saturate(VividClampNdotV(preLightData.NdotV));
+    float3 diffuseLighting = SampleSH(surfaceData.normalWS) * bsdfData.diffuseColor * preLightData.diffuseFGD;
     float3 dominantDirectionWS = GetSpecularDominantDir(
         surfaceData.normalWS,
-        reflectionVectorWS,
-        bsdfData.perceptualRoughness,
+        preLightData.iblR,
+        preLightData.iblPerceptualRoughness,
         clampedNdotV);
-    float3 specularLighting = VividSampleSkyIBL(dominantDirectionWS, bsdfData.perceptualRoughness) * specularFGD;
+    float3 specularLighting = VividSampleSkyIBL(dominantDirectionWS, preLightData.iblPerceptualRoughness) * preLightData.specularFGD;
 
     if (bsdfData.coatMask > 0.0)
     {
@@ -301,13 +328,23 @@ float3 EvaluateVividHdrpLitIndirectLight(
         float coatPerceptualRoughness = VividRoughnessToPerceptualRoughness(bsdfData.coatRoughness);
         float3 coatDominantDirectionWS = GetSpecularDominantDir(
             surfaceData.normalWS,
-            reflectionVectorWS,
+            preLightData.iblR,
             coatPerceptualRoughness,
             clampedNdotV);
         specularLighting += VividSampleSkyIBL(coatDominantDirectionWS, coatPerceptualRoughness) * coatIblF;
     }
 
     return (diffuseLighting + specularLighting) * surfaceData.ambientOcclusion;
+}
+
+float3 EvaluateVividHdrpLitIndirectLight(
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData,
+    float3 viewDirectionWS)
+{
+    float3 normalizedViewDirectionWS = SafeNormalize(viewDirectionWS);
+    VividPreLightData preLightData = InitVividPreLightData(surfaceData, bsdfData, normalizedViewDirectionWS);
+    return EvaluateVividHdrpLitIndirectLight(surfaceData, bsdfData, preLightData, normalizedViewDirectionWS);
 }
 
 float3 EvaluateVividFabricIndirectLight(
@@ -324,9 +361,9 @@ float3 EvaluateVividFabricIndirectLight(
     float luminance = VividGetLuminance(surfaceData.baseColor);
     float3 sheenTint = lerp(luminance.xxx, surfaceData.baseColor, 0.35);
     float3 fabricFresnel0 = lerp(baseSpecular, sheenTint, fuzzAmount);
-    float3 specularFGD;
-    float diffuseFGD;
-    float reflectivity;
+    float3 specularFGD = 0.0;
+    float diffuseFGD = 0.0;
+    float reflectivity = 0.0;
     GetPreIntegratedFGDCharlieAndFabricLambert(
         clampedNdotV,
         perceptualRoughness,
@@ -349,11 +386,46 @@ float3 EvaluateVividFabricIndirectLight(
 float3 EvaluateIndirectLighting(
     VividGBufferSurfaceData surfaceData,
     VividLitBSDFData bsdfData,
+    VividPreLightData preLightData,
     float3 viewDirectionWS)
 {
     return surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC
         ? EvaluateVividFabricIndirectLight(surfaceData, viewDirectionWS)
-        : EvaluateVividHdrpLitIndirectLight(surfaceData, bsdfData, viewDirectionWS);
+        : EvaluateVividHdrpLitIndirectLight(surfaceData, bsdfData, preLightData, viewDirectionWS);
+}
+
+float3 EvaluateIndirectLighting(
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData,
+    float3 viewDirectionWS)
+{
+    float3 normalizedViewDirectionWS = SafeNormalize(viewDirectionWS);
+    VividPreLightData preLightData = InitVividPreLightData(surfaceData, bsdfData, normalizedViewDirectionWS);
+    return EvaluateIndirectLighting(surfaceData, bsdfData, preLightData, normalizedViewDirectionWS);
+}
+
+float3 EvaluateDirectional(
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData,
+    VividPreLightData preLightData,
+    float3 viewDirectionWS,
+    DirectionalLightData directionalLight)
+{
+    float3 lightDirectionWS = SafeNormalize(directionalLight.directionWS);
+    float3 lighting = surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC
+        ? EvaluateVividFabricDirectLight(surfaceData, viewDirectionWS, lightDirectionWS)
+        : EvaluateVividLitDirectLight(surfaceData, bsdfData, preLightData, viewDirectionWS, lightDirectionWS);
+    return lighting * directionalLight.color;
+}
+
+float3 EvaluateDirectionalLight(
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData,
+    VividPreLightData preLightData,
+    float3 viewDirectionWS,
+    DirectionalLightData directionalLight)
+{
+    return EvaluateDirectional(surfaceData, bsdfData, preLightData, viewDirectionWS, directionalLight);
 }
 
 float3 EvaluateDirectionalLight(
@@ -362,11 +434,9 @@ float3 EvaluateDirectionalLight(
     float3 viewDirectionWS,
     DirectionalLightData directionalLight)
 {
-    float3 lightDirectionWS = SafeNormalize(directionalLight.directionWS);
-    float3 lighting = surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC
-        ? EvaluateVividFabricDirectLight(surfaceData, viewDirectionWS, lightDirectionWS)
-        : EvaluateVividLitDirectLight(surfaceData, bsdfData, viewDirectionWS, lightDirectionWS);
-    return (lighting * directionalLight.color);
+    float3 normalizedViewDirectionWS = SafeNormalize(viewDirectionWS);
+    VividPreLightData preLightData = InitVividPreLightData(surfaceData, bsdfData, normalizedViewDirectionWS);
+    return EvaluateDirectional(surfaceData, bsdfData, preLightData, normalizedViewDirectionWS, directionalLight);
 }
 
 float EvaluatePunctualLightDistanceAttenuation(PunctualLightData punctualLight, float distanceSquared)
@@ -377,12 +447,50 @@ float EvaluatePunctualLightDistanceAttenuation(PunctualLightData punctualLight, 
 
 float EvaluatePunctualLightSpotAttenuation(PunctualLightData punctualLight, float3 lightDirectionWS)
 {
-    if (punctualLight.lightType != VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
-        return 1.0;
+    float attenuation = 1.0;
 
-    float spotCosine = saturate(dot(punctualLight.directionWS, -lightDirectionWS));
-    float attenuation = saturate(spotCosine * punctualLight.angleScale + punctualLight.angleOffset);
-    return attenuation * attenuation;
+    if (punctualLight.lightType == VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
+    {
+        float spotCosine = saturate(dot(punctualLight.directionWS, -lightDirectionWS));
+        attenuation = saturate(spotCosine * punctualLight.angleScale + punctualLight.angleOffset);
+        attenuation *= attenuation;
+    }
+
+    return attenuation;
+}
+
+float3 EvaluatePunctualLight(
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData,
+    VividPreLightData preLightData,
+    float3 positionWS,
+    float3 viewDirectionWS,
+    PunctualLightData punctualLight)
+{
+    float3 lightVectorWS = punctualLight.positionWS - positionWS;
+    float distanceSquared = dot(lightVectorWS, lightVectorWS);
+
+    if (distanceSquared <= 1e-6)
+        return float3(0.0, 0.0, 0.0);
+
+    float inverseDistance = rsqrt(distanceSquared);
+    float3 lightDirectionWS = lightVectorWS * inverseDistance;
+    float nDotL = saturate(dot(surfaceData.normalWS, lightDirectionWS));
+
+    if (nDotL <= 0.0)
+        return float3(0.0, 0.0, 0.0);
+
+    float attenuation = EvaluatePunctualLightDistanceAttenuation(punctualLight, distanceSquared)
+        * EvaluatePunctualLightSpotAttenuation(punctualLight, lightDirectionWS);
+
+    if (attenuation <= 0.0)
+        return float3(0.0, 0.0, 0.0);
+
+    float3 lighting = float3(0.0, 0.0, 0.0);
+    lighting = surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC
+        ? EvaluateVividFabricDirectLight(surfaceData, viewDirectionWS, lightDirectionWS)
+        : EvaluateVividLitDirectLight(surfaceData, bsdfData, preLightData, viewDirectionWS, lightDirectionWS);
+    return lighting * punctualLight.color * attenuation;
 }
 
 float3 EvaluatePunctualLight(
@@ -392,29 +500,9 @@ float3 EvaluatePunctualLight(
     float3 viewDirectionWS,
     PunctualLightData punctualLight)
 {
-    float3 lightVectorWS = punctualLight.positionWS - positionWS;
-    float distanceSquared = dot(lightVectorWS, lightVectorWS);
-
-    if (distanceSquared <= 1e-6)
-        return 0.0;
-
-    float inverseDistance = rsqrt(distanceSquared);
-    float3 lightDirectionWS = lightVectorWS * inverseDistance;
-    float nDotL = saturate(dot(surfaceData.normalWS, lightDirectionWS));
-
-    if (nDotL <= 0.0)
-        return 0.0;
-
-    float attenuation = EvaluatePunctualLightDistanceAttenuation(punctualLight, distanceSquared)
-        * EvaluatePunctualLightSpotAttenuation(punctualLight, lightDirectionWS);
-
-    if (attenuation <= 0.0)
-        return 0.0;
-
-    float3 lighting = surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC
-        ? EvaluateVividFabricDirectLight(surfaceData, viewDirectionWS, lightDirectionWS)
-        : EvaluateVividLitDirectLight(surfaceData, bsdfData, viewDirectionWS, lightDirectionWS);
-    return lighting * punctualLight.color * attenuation;
+    float3 normalizedViewDirectionWS = SafeNormalize(viewDirectionWS);
+    VividPreLightData preLightData = InitVividPreLightData(surfaceData, bsdfData, normalizedViewDirectionWS);
+    return EvaluatePunctualLight(surfaceData, bsdfData, preLightData, positionWS, normalizedViewDirectionWS, punctualLight);
 }
 
 #endif

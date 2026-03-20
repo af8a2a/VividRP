@@ -22,6 +22,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("return DisneyDiffuse("));
             Assert.That(source, Does.Contain("return DV_SmithJointGGX("));
             Assert.That(source, Does.Contain("return D_Charlie("));
+            Assert.That(source, Does.Contain("struct VividPreLightData"));
+            Assert.That(source, Does.Contain("InitVividPreLightData("));
+            Assert.That(source, Does.Contain("EvaluateDirectional("));
             Assert.That(source, Does.Contain("BuildVividHdrpLitBSDFData"));
             Assert.That(source, Does.Contain("EvaluateVividLitDirectLight"));
             Assert.That(source, Does.Contain("EvaluateDirectionalLight"));

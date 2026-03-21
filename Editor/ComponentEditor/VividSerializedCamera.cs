@@ -11,6 +11,8 @@ namespace VividRP.Editor
         public CameraEditor.Settings baseCameraSettings { get; }
 
         public SerializedProperty projectionMatrixMode { get; }
+        public SerializedProperty nearClippingPlane { get; }
+        public SerializedProperty farClippingPlane { get; }
         public SerializedProperty dithering { get; }
         public SerializedProperty stopNaNs { get; }
         public SerializedProperty allowDynamicResolution { get; }
@@ -36,6 +38,9 @@ namespace VividRP.Editor
             {
                 baseCameraSettings = settings;
             }
+
+            nearClippingPlane = baseCameraSettings.nearClippingPlane;
+            farClippingPlane = baseCameraSettings.farClippingPlane;
 
             camerasAdditionalData = CoreEditorUtils.GetAdditionalData<VividAdditionalCameraData>(
                 serializedObject.targetObjects,

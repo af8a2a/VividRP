@@ -128,6 +128,8 @@ namespace VividRP.Editor.Tests
             var serializedCamera = new VividSerializedCamera(new SerializedObject(camera));
 
             Assert.That(serializedCamera.camerasAdditionalData, Has.Length.EqualTo(1));
+            Assert.That(serializedCamera.nearClippingPlane, Is.Not.Null);
+            Assert.That(serializedCamera.farClippingPlane, Is.Not.Null);
             Assert.That(serializedCamera.renderType, Is.Not.Null);
             Assert.That(serializedCamera.clearDepth, Is.Not.Null);
             Assert.That(serializedCamera.stopNaNs, Is.Not.Null);

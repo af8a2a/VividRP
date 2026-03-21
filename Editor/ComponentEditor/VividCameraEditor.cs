@@ -11,6 +11,8 @@ namespace VividRP.Editor
     public class VividCameraEditor : UnityEditor.Editor
     {
         private static readonly GUIContent s_VividSettingsLabel = EditorGUIUtility.TrTextContent("VividRP");
+        private static readonly GUIContent s_NearClipPlaneLabel = EditorGUIUtility.TrTextContent("Near Clip Plane");
+        private static readonly GUIContent s_FarClipPlaneLabel = EditorGUIUtility.TrTextContent("Far Clip Plane");
         private static readonly GUIContent s_RenderTypeLabel = EditorGUIUtility.TrTextContent("Render Type");
         private static readonly GUIContent s_ClearDepthLabel = EditorGUIUtility.TrTextContent("Clear Depth");
         private static readonly GUIContent s_StopNaNsLabel = EditorGUIUtility.TrTextContent("Stop NaNs");
@@ -58,6 +60,8 @@ namespace VividRP.Editor
                 CameraEditor.Settings.DrawCameraWarnings(camera);
 
             settings.DrawProjection();
+            EditorGUILayout.PropertyField(m_SerializedCamera.nearClippingPlane, s_NearClipPlaneLabel);
+            EditorGUILayout.PropertyField(m_SerializedCamera.farClippingPlane, s_FarClipPlaneLabel);
             EditorGUILayout.Space();
 
             settings.DrawClearFlags();

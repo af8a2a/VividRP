@@ -44,13 +44,6 @@ void DirectionalRayTracedShadow(uint3 dispatchThreadID : SV_DispatchThreadID)
     float3 normalWS = DecodeVividNormalOct(_GBuffer1.Load(int3(pixelCoord, 0)).xy);
     float3 lightDirectionWS = SafeNormalize(_LightDirectionWS.xyz);
 
-    DebugTexture[pixelCoord]=0;
-
-    if (dot(normalWS, lightDirectionWS) <= 0.0 || _RayLength <= 0.0)
-    {
-        _DirectionalShadowTexture[pixelCoord] = 1.0;
-        return;
-    }
 
     DebugTexture[pixelCoord]=deviceDepth;
     RayDesc shadowRay;

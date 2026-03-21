@@ -5,8 +5,7 @@
         "Unity.RenderPipelines.Core.Runtime",
         "Unity.Mathematics",
         "Unity.Collections",
-        "Unity.Burst",
-        "VividRP.Runtime"
+        "Unity.Burst"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

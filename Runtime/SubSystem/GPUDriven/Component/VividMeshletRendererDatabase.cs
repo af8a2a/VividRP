@@ -71,7 +71,9 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<VividMeshletRendererResources> m_RendererResources = new();
         private readonly Dictionary<EntityId, int> m_EntityIdToDataIndex = new();
 
-        public static VividMeshletRendererDatabase instance => Singleton<VividMeshletRendererDatabase>.instance;
+        private static readonly VividMeshletRendererDatabase s_Instance = new();
+
+        public static VividMeshletRendererDatabase instance => s_Instance;
 
         public int rendererCount => m_RendererData.Count;
 

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Runtime
 {
@@ -32,6 +33,15 @@ namespace VividRP.Runtime
         protected override void Render(ScriptableRenderContext context, List<Camera> cameras)
         {
             ApplySRPBatcherSetting(m_Asset);
+
+            if (m_Asset != null && m_Asset.EnableGPUDriven)
+            {
+                VividGPUDrivenSystem.instance.PrepareFrame();
+            }
+            else
+            {
+                VividGPUDrivenSystem.Shutdown();
+            }
 
             foreach (var camera in cameras)
                 RenderCamera(context, camera);
@@ -149,6 +159,7 @@ namespace VividRP.Runtime
 
         protected override void Dispose(bool disposing)
         {
+            VividGPUDrivenSystem.Shutdown();
             PassRecorder.Dispose();
             VividVolumeManagerUtility.Deinitialize();
 

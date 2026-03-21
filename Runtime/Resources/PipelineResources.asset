@@ -45,6 +45,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: f9ea26c818e16a04fa0b6f8d7ae1a662, type: 3}
   - ResourceName: Shaders/Core/Private/PreIntegratedFGD_GGXDisneyDiffuse
     ResourceObject: {fileID: 4800000, guid: 18a8ea50c3082fb4bba4e2e27578983f, type: 3}
+  - ResourceName: Shaders/Core/Private/RTASInstanceDebug
+    ResourceObject: {fileID: 7200000, guid: 4aee2e660114dc34381676fa542650e2, type: 3}
   - ResourceName: Shaders/Core/Private/SliderDebug
     ResourceObject: {fileID: 4800000, guid: 985a5b1e96340614fb6346ff8c3108ad, type: 3}
   - ResourceName: Shaders/FullScreenUV

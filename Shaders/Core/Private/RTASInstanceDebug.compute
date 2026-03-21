@@ -1,0 +1,97 @@
+#pragma kernel RTASInstanceDebug
+#pragma use_dxc
+#pragma require inlineraytracing
+#pragma only_renderers d3d11 xboxseries ps5
+
+#include "UnityRayQuery.cginc"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+
+RaytracingAccelerationStructure _AccelerationStructure;
+RWTexture2D<float4> _OutputTexture;
+
+int _OutputWidth;
+int _OutputHeight;
+int _VisualizationMode;
+float4 _CameraPositionWS;
+float4 _PixelCoordToViewDirWS_Row0;
+float4 _PixelCoordToViewDirWS_Row1;
+float4 _PixelCoordToViewDirWS_Row2;
+float4 _PixelCoordToViewDirWS_Row3;
+
+#define VIVID_RTAS_DEBUG_MODE_INSTANCE_INDEX 0
+#define VIVID_RTAS_DEBUG_MODE_INSTANCE_ID 1
+#define VIVID_RTAS_DEBUG_MODE_PRIMITIVE_INDEX 2
+
+uint HashUint(uint value)
+{
+    value ^= 2747636419u;
+    value *= 2654435769u;
+    value ^= value >> 16;
+    value *= 2654435769u;
+    value ^= value >> 16;
+    value *= 2654435769u;
+    return value;
+}
+
+float3 HashToColor(uint value)
+{
+    uint hash = HashUint(value + 1u);
+    return float3(
+        (hash & 255u) / 255.0,
+        ((hash >> 8) & 255u) / 255.0,
+        ((hash >> 16) & 255u) / 255.0);
+}
+
+float3 GetPrimaryRayDirectionWS(float2 pixelCoord)
+{
+    float4x4 pixelCoordToViewDirWS = float4x4(
+        _PixelCoordToViewDirWS_Row0,
+        _PixelCoordToViewDirWS_Row1,
+        _PixelCoordToViewDirWS_Row2,
+        _PixelCoordToViewDirWS_Row3);
+    float4 viewDirectionWS = mul(float4(pixelCoord, 1.0, 1.0), pixelCoordToViewDirWS);
+    return -normalize(viewDirectionWS.xyz);
+}
+
+[numthreads(8, 8, 1)]
+void RTASInstanceDebug(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    if (dispatchThreadID.x >= (uint)_OutputWidth || dispatchThreadID.y >= (uint)_OutputHeight)
+        return;
+
+    RayDesc ray;
+    ray.Origin = _CameraPositionWS.xyz;
+    ray.Direction = GetPrimaryRayDirectionWS(dispatchThreadID.xy + 0.5);
+    ray.TMin = 0.01;
+    ray.TMax = FLT_MAX;
+
+    UnityRayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
+    query.TraceRayInline(
+        _AccelerationStructure,
+        RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
+        0xFF,
+        ray);
+
+    while (query.Proceed())
+    {
+    }
+
+    float3 debugColor = 0.0;
+    if (query.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+    {
+        uint visualizationValue = query.CommittedInstanceIndex();
+        switch (_VisualizationMode)
+        {
+            case VIVID_RTAS_DEBUG_MODE_INSTANCE_ID:
+                visualizationValue = query.CommittedInstanceID();
+                break;
+            case VIVID_RTAS_DEBUG_MODE_PRIMITIVE_INDEX:
+                visualizationValue = query.CommittedPrimitiveIndex();
+                break;
+        }
+
+        debugColor = HashToColor(visualizationValue);
+    }
+
+    _OutputTexture[dispatchThreadID.xy] = float4(debugColor, 1.0);
+}

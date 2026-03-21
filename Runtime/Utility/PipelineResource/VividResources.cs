@@ -72,5 +72,8 @@ namespace VividRP.Runtime
 
         [ResourcePath("Shaders/Core/Private/SliderDebug")]
         public Shader SliderDebugShader;
+
+        [ResourcePath("Shaders/Core/Private/RTASInstanceDebug")]
+        public ComputeShader RTASInstanceDebugCompute;
     }
 }

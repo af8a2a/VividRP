@@ -29,6 +29,20 @@ namespace VividRP.Runtime
             return (RenderGraphAccelerationStructureDesc)MemberwiseClone();
         }
 
+        public bool IsEquivalentTo(RenderGraphAccelerationStructureDesc other)
+        {
+            if (other == null)
+                return false;
+
+            return string.Equals(Name, other.Name, StringComparison.Ordinal)
+                && ManagementMode == other.ManagementMode
+                && RayTracingModeMask == other.RayTracingModeMask
+                && LayerMask == other.LayerMask
+                && BuildFlagsStaticGeometries == other.BuildFlagsStaticGeometries
+                && BuildFlagsDynamicGeometries == other.BuildFlagsDynamicGeometries
+                && EnableCompaction == other.EnableCompaction;
+        }
+
         /// <summary>
         /// Converts this serializable descriptor to Unity's RayTracingAccelerationStructureDesc.
         /// </summary>
@@ -102,6 +116,7 @@ namespace VividRP.Runtime
 
         [NonSerialized] private RayTracingAccelerationStructure m_AccelerationStructure;
         [NonSerialized] private bool m_OwnsAccelerationStructure = true;
+        [NonSerialized] private RenderGraphAccelerationStructureDesc m_CreatedDesc;
 
         public RenderGraphAccelerationStructure()
         {
@@ -120,14 +135,26 @@ namespace VividRP.Runtime
 
         public void EnsureCreated()
         {
-            if (m_AccelerationStructure != null)
-                return;
+            var effectiveDesc = desc ?? new RenderGraphAccelerationStructureDesc();
 
-            var settings = desc != null
-                ? desc.ToSettings()
-                : new RenderGraphAccelerationStructureDesc().ToSettings();
+            if (m_AccelerationStructure != null)
+            {
+                if (!m_OwnsAccelerationStructure)
+                    return;
+
+                if (m_CreatedDesc != null && m_CreatedDesc.IsEquivalentTo(effectiveDesc))
+                    return;
+
+                ReleaseOwnedAccelerationStructure();
+                m_AccelerationStructure = null;
+                m_OwnsAccelerationStructure = false;
+                innerHandle = default;
+            }
+
+            var settings = effectiveDesc.ToSettings();
             m_AccelerationStructure = new RayTracingAccelerationStructure(settings);
             m_OwnsAccelerationStructure = true;
+            m_CreatedDesc = effectiveDesc.Clone();
         }
 
         public void SetAccelerationStructure(RayTracingAccelerationStructure accelerationStructure, bool transferOwnership = false)
@@ -135,12 +162,14 @@ namespace VividRP.Runtime
             if (ReferenceEquals(m_AccelerationStructure, accelerationStructure))
             {
                 m_OwnsAccelerationStructure = transferOwnership;
+                m_CreatedDesc = desc?.Clone();
                 return;
             }
 
             ReleaseOwnedAccelerationStructure();
             m_AccelerationStructure = accelerationStructure;
             m_OwnsAccelerationStructure = transferOwnership;
+            m_CreatedDesc = desc?.Clone();
             innerHandle = default;
         }
 
@@ -149,6 +178,7 @@ namespace VividRP.Runtime
             ReleaseOwnedAccelerationStructure();
             m_AccelerationStructure = null;
             m_OwnsAccelerationStructure = false;
+            m_CreatedDesc = null;
             innerHandle = default;
         }
 
@@ -166,6 +196,8 @@ namespace VividRP.Runtime
         {
             if (m_OwnsAccelerationStructure)
                 m_AccelerationStructure?.Dispose();
+
+            m_CreatedDesc = null;
         }
     }
 }

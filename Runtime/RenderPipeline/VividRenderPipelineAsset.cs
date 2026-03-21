@@ -12,6 +12,9 @@ namespace VividRP.Runtime
         private bool m_EnableAsyncCompute = true;
 
         [SerializeField]
+        private bool m_EnableGPUDriven;
+
+        [SerializeField]
         private bool m_EnableSRPBatcher = true;
 
         public bool EnableAsyncCompute
@@ -24,6 +27,12 @@ namespace VividRP.Runtime
         {
             get => m_EnableSRPBatcher;
             set => m_EnableSRPBatcher = value;
+        }
+
+        public bool EnableGPUDriven
+        {
+            get => m_EnableGPUDriven;
+            set => m_EnableGPUDriven = value;
         }
 
         protected override UnityEngine.Rendering.RenderPipeline CreatePipeline()

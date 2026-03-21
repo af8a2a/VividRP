@@ -1,0 +1,19 @@
+#ifndef VIVIDRP_BINDLESS_INCLUDED
+#define VIVIDRP_BINDLESS_INCLUDED
+
+// Forces Shader Model 6.6
+#pragma require Int64BufferAtomics
+
+Texture2D GetBindlessTexture2D(const uint index)
+{
+    Texture2D texture = ResourceDescriptorHeap[index];
+    return texture;
+}
+
+Texture2D<float> GetBindlessTexture2DFloat(const uint index)
+{
+    Texture2D<float> texture = ResourceDescriptorHeap[index];
+    return texture;
+}
+
+#endif // VIVIDRP_BINDLESS_INCLUDED

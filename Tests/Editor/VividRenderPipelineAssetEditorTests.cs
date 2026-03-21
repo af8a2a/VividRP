@@ -87,6 +87,7 @@ namespace VividRP.Tests
 
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-render-graph-field"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-async-compute-field"), Is.Not.Null);
+                Assert.That(root.Q<PropertyField>("vivid-rp-asset-gpu-driven-field"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-srp-batcher-field"), Is.Not.Null);
             }
             finally
@@ -99,6 +100,7 @@ namespace VividRP.Tests
         public void Asset_DefaultsToAsyncComputeAndSRPBatcherEnabled()
         {
             Assert.That(m_PipelineAsset.EnableAsyncCompute, Is.True);
+            Assert.That(m_PipelineAsset.EnableGPUDriven, Is.False);
             Assert.That(m_PipelineAsset.EnableSRPBatcher, Is.True);
         }
 

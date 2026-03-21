@@ -171,6 +171,51 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void OrderPassDefinitions_PreservesEnumParameters_WhenPassesAreReordered()
+        {
+            var passDefinitions = new List<RenderGraphPassDefinition>
+            {
+                new()
+                {
+                    PassType = GetPassTypeName<FinalBlitPass>(),
+                    ResourceBindings =
+                    {
+                        new RenderGraphPassResourceBinding
+                        {
+                            FieldName = "source",
+                            ResourceKind = RenderGraphResourceKind.Texture,
+                            SourceKind = RenderGraphPassBindingSourceKind.PassField,
+                            SourcePassIndex = 1,
+                            SourceFieldName = "m_OutputTexture",
+                        }
+                    }
+                },
+                new()
+                {
+                    PassType = GetPassTypeName<RTASInstanceDebugPass>(),
+                    EnumParameters =
+                    {
+                        new RenderGraphPassEnumParameter
+                        {
+                            FieldName = "m_VisualizationMode",
+                            Value = (int)RTASInstanceDebugVisualizationMode.PrimitiveIndex,
+                        }
+                    }
+                }
+            };
+
+            var ordered = RenderGraphPassCompilationUtility.OrderPassDefinitions(passDefinitions);
+
+            Assert.That(ordered[0].PassType, Is.EqualTo(GetPassTypeName<RTASInstanceDebugPass>()));
+            Assert.That(ordered[0].EnumParameters, Has.Count.EqualTo(1));
+            Assert.That(ordered[0].EnumParameters[0].FieldName, Is.EqualTo("m_VisualizationMode"));
+            Assert.That(
+                ordered[0].EnumParameters[0].Value,
+                Is.EqualTo((int)RTASInstanceDebugVisualizationMode.PrimitiveIndex));
+            Assert.That(ordered[1].ResourceBindings[0].SourcePassIndex, Is.EqualTo(0));
+        }
+
+        [Test]
         public void OrderPassDefinitions_SortsSharedResourceWriterBeforeWriteOnlyInputConsumer()
         {
             var passDefinitions = new List<RenderGraphPassDefinition>

@@ -31,5 +31,23 @@ namespace VividRP.Editor.Tests
             Assert.That(settings.buildFlagsDynamicGeometries, Is.EqualTo(RayTracingAccelerationStructureBuildFlags.PreferFastBuild));
             Assert.That(settings.enableCompaction, Is.True);
         }
+
+        [Test]
+        public void IsEquivalentTo_ReturnsFalse_WhenDescriptorSettingsDiffer()
+        {
+            var lhs = new RenderGraphAccelerationStructureDesc
+            {
+                Name = "SceneRTAS",
+                ManagementMode = RayTracingAccelerationStructure.ManagementMode.Manual,
+                LayerMask = 1 << 2,
+            };
+            var rhs = lhs.Clone();
+
+            Assert.That(lhs.IsEquivalentTo(rhs), Is.True);
+
+            rhs.LayerMask = 1 << 3;
+
+            Assert.That(lhs.IsEquivalentTo(rhs), Is.False);
+        }
     }
 }

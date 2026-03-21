@@ -61,5 +61,10 @@ namespace VividRP.Runtime
         {
             return VolumeManager.instance.stack?.GetComponent<ClusterDebugVolume>();
         }
+
+        internal static RayTracingSettingsVolume GetRayTracingSettingsVolume()
+        {
+            return VolumeManager.instance.stack?.GetComponent<RayTracingSettingsVolume>();
+        }
     }
 }

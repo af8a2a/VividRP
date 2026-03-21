@@ -13,6 +13,7 @@ namespace VividRP.Editor.RenderPipeline
     {
         private static readonly GUIContent s_RenderGraphLabel = EditorGUIUtility.TrTextContent("Render Graph Asset");
         private static readonly GUIContent s_AsyncComputeLabel = EditorGUIUtility.TrTextContent("Async Compute");
+        private static readonly GUIContent s_GpuDrivenLabel = EditorGUIUtility.TrTextContent("GPU Driven");
         private static readonly GUIContent s_SrpBatcherLabel = EditorGUIUtility.TrTextContent("SRP Batcher");
         private static readonly string s_DefaultVolumeSharedMessage =
             "Default Volume is stored in VividRP Global Settings and shared by all VividRP pipeline assets.";
@@ -50,6 +51,12 @@ namespace VividRP.Editor.RenderPipeline
                 name = "vivid-rp-asset-async-compute-field",
             };
             root.Add(asyncComputeField);
+
+            var gpuDrivenField = new PropertyField(serializedObject.FindProperty("m_EnableGPUDriven"), s_GpuDrivenLabel.text)
+            {
+                name = "vivid-rp-asset-gpu-driven-field",
+            };
+            root.Add(gpuDrivenField);
 
             var srpBatcherField = new PropertyField(serializedObject.FindProperty("m_EnableSRPBatcher"), s_SrpBatcherLabel.text)
             {

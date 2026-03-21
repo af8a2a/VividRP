@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using Unity.GraphToolkit.Editor;
 using UnityEditor;
@@ -13,6 +14,20 @@ namespace VividRP.Editor.RenderGraph
     {
         private const string PassScriptOptionName = "PassScript";
         private const string AsyncComputeOptionName = "AsyncCompute";
+        private static readonly MethodInfo s_AddOptionMethodDefinition = typeof(IOptionDefinitionContext)
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .First(method =>
+                method.Name == "AddOption"
+                && method.IsGenericMethodDefinition
+                && method.GetParameters().Length == 1
+                && method.GetParameters()[0].ParameterType == typeof(string));
+        private static readonly MethodInfo s_TryGetEnumParameterValueMethodDefinition = typeof(RenderPassNodeData)
+            .GetMethods(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .First(method =>
+                method.Name == nameof(TryGetEnumParameterValue)
+                && method.IsGenericMethodDefinition
+                && method.GetParameters().Length == 2
+                && method.GetParameters()[0].ParameterType == typeof(string));
         private static readonly Dictionary<Type, MonoScript> s_passScriptCache = new Dictionary<Type, MonoScript>();
 
         protected virtual string RegisteredPassTypeName => null;
@@ -27,6 +42,7 @@ namespace VividRP.Editor.RenderGraph
             {
                 AddPassOwnedOverrideOptions(context, passType);
                 AddFloatParameterOptions(context, passType);
+                AddEnumParameterOptions(context, passType);
                 if (ShouldDefineAsyncComputeOption(passType))
                     AddAsyncComputeOption(context);
                 return;
@@ -38,6 +54,7 @@ namespace VividRP.Editor.RenderGraph
 
             AddPassOwnedOverrideOptions(context, passType);
             AddFloatParameterOptions(context, passType);
+            AddEnumParameterOptions(context, passType);
 
             if (ShouldDefineAsyncComputeOption(passType))
                 AddAsyncComputeOption(context);
@@ -177,12 +194,45 @@ namespace VividRP.Editor.RenderGraph
             }
         }
 
+        internal void PopulateEnumParameters(RenderGraphPassDefinition passDefinition)
+        {
+            if (passDefinition == null)
+                return;
+
+            var passType = GetPassType();
+            if (passType == null)
+                return;
+
+            foreach (var field in RenderGraphPassEnumParameterUtility.EnumerateSerializableEnumFields(passType))
+            {
+                var method = s_TryGetEnumParameterValueMethodDefinition.MakeGenericMethod(field.FieldType);
+                var args = new[] { (object)field.Name, Activator.CreateInstance(field.FieldType) };
+                if (method.Invoke(this, args) is not bool success || !success || args[1] == null)
+                    continue;
+
+                passDefinition.EnumParameters.Add(new RenderGraphPassEnumParameter
+                {
+                    FieldName = field.Name,
+                    Value = Convert.ToInt32(args[1]),
+                });
+            }
+        }
+
         internal bool TryGetFloatParameterValue(string fieldName, out float value)
         {
             value = default;
 
             var option = GetNodeOptionByName(RenderGraphPassFloatParameterUtility.GetOptionName(fieldName));
             return option != null && option.TryGetValue<float>(out value);
+        }
+
+        internal bool TryGetEnumParameterValue<TEnum>(string fieldName, out TEnum value)
+            where TEnum : struct, Enum
+        {
+            value = default;
+
+            var option = GetNodeOptionByName(RenderGraphPassEnumParameterUtility.GetOptionName(fieldName));
+            return option != null && option.TryGetValue(out value);
         }
 
         internal bool TryGetPassScript(out MonoScript script)
@@ -321,6 +371,25 @@ namespace VividRP.Editor.RenderGraph
             }
         }
 
+        private static void AddEnumParameterOptions(IOptionDefinitionContext context, Type passType)
+        {
+            if (context == null || passType == null)
+                return;
+
+            foreach (var field in RenderGraphPassEnumParameterUtility.EnumerateSerializableEnumFields(passType))
+            {
+                var optionBuilder = AddEnumOption(context, field);
+                if (optionBuilder == null)
+                    continue;
+
+                InvokeOptionBuilderMethod(optionBuilder, "WithDisplayName", BuildEnumParameterDisplayName(field));
+
+                var defaultValue = RenderGraphPassEnumParameterUtility.GetDefaultValue(passType, field);
+                if (defaultValue != null)
+                    InvokeOptionBuilderMethod(optionBuilder, "WithDefaultValue", defaultValue);
+            }
+        }
+
         private static void AddAsyncComputeOption(IOptionDefinitionContext context)
         {
             context.AddOption<bool>(AsyncComputeOptionName)
@@ -339,5 +408,38 @@ namespace VividRP.Editor.RenderGraph
 
             return ObjectNames.NicifyVariableName(fieldName);
         }
+
+        private static string BuildEnumParameterDisplayName(FieldInfo field)
+        {
+            return BuildFloatParameterDisplayName(field);
+        }
+
+        private static object AddEnumOption(IOptionDefinitionContext context, FieldInfo field)
+        {
+            if (context == null || field == null || !field.FieldType.IsEnum)
+                return null;
+
+            var method = s_AddOptionMethodDefinition.MakeGenericMethod(field.FieldType);
+            return method.Invoke(context, new object[] { RenderGraphPassEnumParameterUtility.GetOptionName(field.Name) });
+        }
+
+        private static void InvokeOptionBuilderMethod(object optionBuilder, string methodName, object value)
+        {
+            if (optionBuilder == null || string.IsNullOrEmpty(methodName) || value == null)
+                return;
+
+            var method = optionBuilder.GetType()
+                .GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                .FirstOrDefault(candidate =>
+                {
+                    if (candidate.Name != methodName)
+                        return false;
+
+                    var parameters = candidate.GetParameters();
+                    return parameters.Length == 1 && parameters[0].ParameterType.IsInstanceOfType(value);
+                });
+            method?.Invoke(optionBuilder, new[] { value });
+        }
+
     }
 }

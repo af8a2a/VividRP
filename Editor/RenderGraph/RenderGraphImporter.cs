@@ -172,6 +172,7 @@ namespace VividRP.Editor.RenderGraph
                 };
 
                 passNode.PopulateFloatParameters(passDefinition);
+                passNode.PopulateEnumParameters(passDefinition);
 
                 foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
                 {

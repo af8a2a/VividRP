@@ -1,3 +1,7 @@
-﻿{
-  "name": "VividRP.Runtime.GPUDriven"
+{
+    "name": "VividRP.Runtime.GPUDriven",
+    "rootNamespace": "VividRP.Runtime.GPUDriven",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": []
 }

@@ -271,6 +271,25 @@ namespace VividRP.Editor.RenderGraph
                 }
             }
 
+            if (source?.EnumParameters != null)
+            {
+                for (var i = 0; i < source.EnumParameters.Count; i++)
+                {
+                    var parameter = source.EnumParameters[i];
+                    if (parameter == null)
+                    {
+                        clone.EnumParameters.Add(null);
+                        continue;
+                    }
+
+                    clone.EnumParameters.Add(new RenderGraphPassEnumParameter
+                    {
+                        FieldName = parameter.FieldName,
+                        Value = parameter.Value,
+                    });
+                }
+            }
+
             if (source?.PreviewTextureFields != null)
                 clone.PreviewTextureFields.AddRange(source.PreviewTextureFields);
 

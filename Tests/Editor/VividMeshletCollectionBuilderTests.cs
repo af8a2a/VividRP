@@ -2,7 +2,7 @@ using System.IO;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.TestTools;
+using Object = UnityEngine.Object;
 using VividRP.Editor.GPUDriven.Meshlets;
 using VividRP.Runtime.GPUDriven.Meshlets;
 
@@ -74,7 +74,6 @@ namespace VividRP.Editor.Tests
                 string collectionPath = TempFolder + "/TestMesh." + VividMeshletCollectionAssetImporter.Extension;
 
                 AssetDatabase.CreateAsset(mesh, meshPath);
-                LogAssert.Expect(LogType.Error, "Mesh reference is missing.");
                 File.WriteAllText(GetAbsolutePath(collectionPath), string.Empty);
                 AssetDatabase.ImportAsset(collectionPath, ImportAssetOptions.ForceSynchronousImport);
 
@@ -102,6 +101,59 @@ namespace VividRP.Editor.Tests
             }
             finally
             {
+                if (mesh != null)
+                {
+                    Object.DestroyImmediate(mesh, true);
+                }
+            }
+        }
+
+        [Test]
+        public void CreateAssetsForSelection_CreatesMeshletAsset_WhenModelAssetIsSelected()
+        {
+            EnsureSupportedPlatform();
+
+            Mesh mesh = CreateGridMesh(20, 20);
+            GameObject prefabRoot = null;
+
+            try
+            {
+                string meshPath = TempFolder + "/ModelMesh.asset";
+                string prefabPath = TempFolder + "/ImportedModel.prefab";
+
+                AssetDatabase.CreateAsset(mesh, meshPath);
+
+                prefabRoot = new GameObject("ImportedModel");
+                GameObject child = new GameObject("MeshNode");
+                child.transform.SetParent(prefabRoot.transform, false);
+                child.AddComponent<MeshRenderer>();
+                child.AddComponent<MeshFilter>().sharedMesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
+
+                PrefabUtility.SaveAsPrefabAsset(prefabRoot, prefabPath);
+                Object.DestroyImmediate(prefabRoot);
+                prefabRoot = null;
+
+                GameObject modelAsset = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+                string[] createdAssets = VividMeshletCollectionAssetImporter.CreateAssetsForSelection(new Object[] { modelAsset });
+
+                Assert.That(createdAssets, Has.Length.EqualTo(1));
+                Assert.That(createdAssets[0], Does.StartWith(TempFolder + "/TestMesh_Meshlets"));
+
+                VividMeshletCollectionAsset asset = AssetDatabase.LoadAssetAtPath<VividMeshletCollectionAsset>(createdAssets[0]);
+                Assert.That(asset, Is.Not.Null);
+                Assert.That(asset.SourceMeshName, Is.EqualTo("TestMesh"));
+                Assert.That(asset.SourceSubmeshIndex, Is.EqualTo(0));
+                Assert.That(asset.Meshlets, Is.Not.Empty);
+                Assert.That(asset.VertexBuffer, Is.Not.Empty);
+                Assert.That(asset.IndexBuffer, Is.Not.Empty);
+            }
+            finally
+            {
+                if (prefabRoot != null)
+                {
+                    Object.DestroyImmediate(prefabRoot);
+                }
+
                 if (mesh != null)
                 {
                     Object.DestroyImmediate(mesh, true);

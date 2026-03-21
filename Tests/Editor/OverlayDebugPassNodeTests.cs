@@ -1,0 +1,108 @@
+using System;
+using System.Linq;
+using NUnit.Framework;
+using Unity.GraphToolkit.Editor;
+using VividRP.Editor.RenderGraph;
+using VividRP.Runtime.RenderPass.Core;
+
+namespace VividRP.Editor.Tests
+{
+    public sealed class OverlayDebugPassNodeTests
+    {
+        [Serializable]
+        [UseWithGraph(typeof(RenderGraphEditorGraph))]
+        private sealed class AutoRegisteredOverlayDebugPassNode : RenderPassNodeData
+        {
+            protected override string RegisteredPassTypeName => typeof(OverlayDebugPass).AssemblyQualifiedName;
+
+            internal bool TryGetOverlayAmount(out float value)
+            {
+                return TryGetFloatParameterValue("m_OverlayAmount", out value);
+            }
+
+            internal bool TryGetArraySlice(out float value)
+            {
+                return TryGetFloatParameterValue("m_ArraySlice", out value);
+            }
+
+            internal bool TryGetExposure(out float value)
+            {
+                return TryGetFloatParameterValue("m_Exposure", out value);
+            }
+
+            internal bool TryGetVisualizationMode(out OverlayDebugVisualizationMode value)
+            {
+                return TryGetEnumParameterValue("m_VisualizationMode", out value);
+            }
+
+            internal bool TryGetDepthMode(out OverlayDebugDepthMode value)
+            {
+                return TryGetEnumParameterValue("m_DepthMode", out value);
+            }
+        }
+
+        [Test]
+        public void OverlayDebugPassNode_DefinesInputsOutputAndInspectorOptions()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var node = new AutoRegisteredOverlayDebugPassNode();
+                graph.AddNode(node);
+
+                Assert.That(node.GetInputPortByName("m_SourceTexture"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_DebugTexture"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_OutputTexture"), Is.Not.Null);
+                Assert.That(node.TryGetOverlayAmount(out var overlayAmount), Is.True);
+                Assert.That(node.TryGetArraySlice(out var arraySlice), Is.True);
+                Assert.That(node.TryGetExposure(out var exposure), Is.True);
+                Assert.That(node.TryGetVisualizationMode(out var visualizationMode), Is.True);
+                Assert.That(node.TryGetDepthMode(out var depthMode), Is.True);
+                Assert.That(overlayAmount, Is.EqualTo(0f));
+                Assert.That(arraySlice, Is.EqualTo(0f));
+                Assert.That(exposure, Is.EqualTo(0f));
+                Assert.That(visualizationMode, Is.EqualTo(OverlayDebugVisualizationMode.Auto));
+                Assert.That(depthMode, Is.EqualTo(OverlayDebugDepthMode.Raw));
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void Compile_IncludesFloatAndEnumParameters_WhenOverlayDebugPassNodeIsPresent()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var node = new AutoRegisteredOverlayDebugPassNode();
+                graph.AddNode(node);
+
+                var result = RenderGraphCompiler.Compile(graph);
+
+                Assert.That(result.Passes, Has.Count.EqualTo(1));
+                Assert.That(result.Passes[0].FloatParameters.Select(parameter => parameter.FieldName), Is.EquivalentTo(new[]
+                {
+                    "m_OverlayAmount",
+                    "m_ArraySlice",
+                    "m_Exposure",
+                }));
+                Assert.That(result.Passes[0].EnumParameters, Has.Count.EqualTo(2));
+                Assert.That(result.Passes[0].EnumParameters.Select(parameter => parameter.FieldName), Is.EquivalentTo(new[]
+                {
+                    "m_VisualizationMode",
+                    "m_DepthMode",
+                }));
+                Assert.That(result.Passes[0].EnumParameters.Single(parameter => parameter.FieldName == "m_VisualizationMode").Value, Is.EqualTo((int)OverlayDebugVisualizationMode.Auto));
+                Assert.That(result.Passes[0].EnumParameters.Single(parameter => parameter.FieldName == "m_DepthMode").Value, Is.EqualTo((int)OverlayDebugDepthMode.Raw));
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+    }
+}

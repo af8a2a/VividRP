@@ -111,6 +111,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class OverlayDebugPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.OverlayDebugPass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class PreIntegratedFGDPreparePass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.PreIntegratedFGDPreparePass, VividRP.Runtime";

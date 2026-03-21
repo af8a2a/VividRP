@@ -57,6 +57,11 @@ namespace VividRP.Runtime
             return VolumeManager.instance.stack?.GetComponent<SliderDebugVolume>();
         }
 
+        internal static OverlayDebugVolume GetOverlayDebugVolume()
+        {
+            return VolumeManager.instance.stack?.GetComponent<OverlayDebugVolume>();
+        }
+
         internal static ClusterDebugVolume GetClusterDebugVolume()
         {
             return VolumeManager.instance.stack?.GetComponent<ClusterDebugVolume>();

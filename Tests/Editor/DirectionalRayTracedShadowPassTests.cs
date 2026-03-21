@@ -25,6 +25,7 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.AccelerationStructures[0].Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[]
             {
+                "DebugTexture",
                 "Depth",
                 "DirectionalShadowTexture",
                 "GBuffer1"
@@ -55,6 +56,49 @@ namespace VividRP.Editor.Tests
             Assert.That(outputTexture.desc.EnableRandomWrite, Is.True);
             Assert.That(outputTexture.desc.ClearColor, Is.EqualTo(Color.white));
             Assert.That(outputTexture.desc.FilterMode, Is.EqualTo(FilterMode.Point));
+        }
+
+        [Test]
+        public void ResolveInvViewProjectionMatrix_UsesRenderToTextureProjectionForGameViewReconstruction()
+        {
+            var cameraObject = new GameObject("Directional Shadow Camera");
+            var camera = cameraObject.AddComponent<Camera>();
+            camera.aspect = 16.0f / 9.0f;
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 250.0f;
+            camera.transform.position = new Vector3(2.0f, 3.0f, -4.0f);
+            camera.transform.rotation = Quaternion.Euler(12.0f, 25.0f, 0.0f);
+
+            try
+            {
+                var nonJitteredProjectionMatrix = Matrix4x4.Perspective(
+                    60.0f,
+                    camera.aspect,
+                    camera.nearClipPlane,
+                    camera.farClipPlane);
+                var jitterMatrix = Matrix4x4.Translate(new Vector3(0.125f, -0.25f, 0.0f));
+                var jitteredProjectionMatrix = jitterMatrix * nonJitteredProjectionMatrix;
+                camera.nonJitteredProjectionMatrix = nonJitteredProjectionMatrix;
+                camera.projectionMatrix = jitteredProjectionMatrix;
+
+                var cameraData = new VividCameraData
+                {
+                    camera = camera,
+                    actualWidth = 1920,
+                    actualHeight = 1080,
+                    pixelWidth = 1920,
+                    pixelHeight = 1080,
+                };
+
+                var expected = (GL.GetGPUProjectionMatrix(jitteredProjectionMatrix, true) * camera.worldToCameraMatrix).inverse;
+                var actual = DirectionalRayTracedShadowPass.ResolveInvViewProjectionMatrix(cameraData);
+
+                AssertMatrixAreEqual(expected, actual);
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
         }
 
         [Test]
@@ -165,6 +209,15 @@ namespace VividRP.Editor.Tests
             var texture = (RenderGraphTexture)field.GetValue(pass);
             Assert.That(texture, Is.Not.Null);
             return texture;
+        }
+
+        private static void AssertMatrixAreEqual(Matrix4x4 expected, Matrix4x4 actual)
+        {
+            for (var row = 0; row < 4; row++)
+            {
+                for (var column = 0; column < 4; column++)
+                    Assert.That(actual[row, column], Is.EqualTo(expected[row, column]).Within(0.00001f));
+            }
         }
     }
 }

@@ -233,6 +233,29 @@ namespace VividRP.Editor.Tests
             AssertMatrixAreEqual(gpuProjectionMatrix, cameraData.GetGPUProjectionMatrix(false));
         }
 
+        [Test]
+        public void ExplicitRenderIntoTextureGpuProjection_UsesRequestedConvention_WhenAdditionalDataIsMissing()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            var nonJitteredProjectionMatrix = Matrix4x4.Perspective(47.0f, 1.6f, 0.2f, 300.0f);
+            var jitterMatrix = Matrix4x4.Translate(new Vector3(0.03125f, -0.0625f, 0.0f));
+            var jitteredProjectionMatrix = jitterMatrix * nonJitteredProjectionMatrix;
+            camera.nonJitteredProjectionMatrix = nonJitteredProjectionMatrix;
+            camera.projectionMatrix = jitteredProjectionMatrix;
+
+            var cameraData = new VividCameraData
+            {
+                camera = camera,
+            };
+
+            AssertMatrixAreEqual(
+                GL.GetGPUProjectionMatrix(jitteredProjectionMatrix, true),
+                cameraData.GetGPUProjectionMatrix(true));
+            AssertMatrixAreEqual(
+                GL.GetGPUProjectionMatrix(nonJitteredProjectionMatrix, true),
+                cameraData.GetGPUProjectionMatrixNoJitter(true));
+        }
+
         private static void AssertMatrixAreEqual(Matrix4x4 expected, Matrix4x4 actual)
         {
             for (var row = 0; row < 4; row++)

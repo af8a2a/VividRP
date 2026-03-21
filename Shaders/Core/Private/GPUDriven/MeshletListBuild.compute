@@ -1,0 +1,78 @@
+#pragma kernel CS
+
+#pragma use_dxc
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
+
+#define THREAD_GROUP_SIZE 32
+
+uint _ForcedMeshLODNodeDepth;
+float _MeshLODErrorThreshold;
+
+StructuredBuffer<VividGPUCullingContext> _CullingContexts;
+StructuredBuffer<VividGPULODSelectionContext> _LODSelectionContexts;
+
+StructuredBuffer<VividMeshletListBuildJob> _MeshletListBuildJobs;
+StructuredBuffer<uint> _MeshletListBuildJobCounter;
+
+RWStructuredBuffer<VividMeshletRenderRequestPacked> _VisibleMeshletRenderRequests;
+RWStructuredBuffer<uint> _VisibleMeshletRenderRequestCounter;
+RWStructuredBuffer<uint> _VisibleRendererListMeshletCounts;
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CS(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupID : SV_GroupID)
+{
+    if (groupID.x >= _MeshletListBuildJobCounter[0])
+    {
+        return;
+    }
+
+    const VividGPUCullingContext cullingContext = _CullingContexts[0];
+    const VividGPULODSelectionContext lodSelectionContext = _LODSelectionContexts[0];
+    const VividMeshletListBuildJob job = _MeshletListBuildJobs[cullingContext.MeshletListBuildJobsOffset + groupID.x];
+    const VividInstanceData instanceData = PullInstanceData(job.InstanceID);
+    const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
+
+    const float3 aabbCenterOS = (instanceData.AABBMin.xyz + instanceData.AABBMax.xyz) * 0.5f;
+    const float3 aabbCenterWS = TransformPosition(instanceData.ObjectToWorldMatrix, aabbCenterOS);
+    const float distanceToViewSq = LengthSq(lodSelectionContext.CameraPosition.xyz - aabbCenterWS);
+    const uint baseNodeIndex = instanceData.TopMeshLODStartIndex + job.MeshLODNodeOffset;
+
+    for (uint nodeOffset = groupThreadID.x; nodeOffset < job.MeshLODNodeCount; nodeOffset += THREAD_GROUP_SIZE)
+    {
+        const uint nodeIndex = baseNodeIndex + nodeOffset;
+        if (nodeIndex >= _MeshLODNodeCount)
+        {
+            continue;
+        }
+
+        const VividMeshLODNode meshLODNode = PullMeshLODNode(nodeIndex);
+        if (!ShouldSelectMeshLODNode(
+                lodSelectionContext,
+                meshLODNode,
+                instanceData,
+                distanceToViewSq,
+                _ForcedMeshLODNodeDepth,
+                _MeshLODErrorThreshold
+            ))
+        {
+            continue;
+        }
+
+        const uint rendererListIndex = min(materialData.RendererListID, VIVIDRENDERERLISTID_COUNT - 1u);
+
+        [loop]
+        for (uint meshletIndex = 0u; meshletIndex < meshLODNode.MeshletCount; ++meshletIndex)
+        {
+            uint requestIndex;
+            InterlockedAdd(_VisibleMeshletRenderRequestCounter[0], 1u, requestIndex);
+
+            VividMeshletRenderRequestPacked request;
+            request.InstanceID_LOD = job.InstanceID;
+            request.MeshletID = meshLODNode.MeshletStartIndex + meshletIndex;
+            _VisibleMeshletRenderRequests[requestIndex] = request;
+
+            InterlockedAdd(_VisibleRendererListMeshletCounts[rendererListIndex], 1u);
+        }
+    }
+}

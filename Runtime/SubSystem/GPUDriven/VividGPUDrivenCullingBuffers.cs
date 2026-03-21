@@ -1,0 +1,247 @@
+using System;
+using Unity.Collections.LowLevel.Unsafe;
+using UnityEngine;
+using UnityEngine.Rendering;
+
+namespace VividRP.Runtime.GPUDriven
+{
+    internal sealed class VividGPUDrivenCullingBuffers : IDisposable
+    {
+        private static readonly IndirectDispatchArgs[] s_InitialIndirectDispatchArgs =
+        {
+            new()
+            {
+                ThreadGroupsX = 0,
+                ThreadGroupsY = 1,
+                ThreadGroupsZ = 1,
+            },
+        };
+
+        private static readonly uint[] s_ZeroUint = { 0u };
+        private static readonly uint[] s_ZeroRendererListCounts = new uint[(int) VividRendererListID.Count];
+
+        private readonly VividGPUCullingContext[] m_CullingContextUpload = new VividGPUCullingContext[1];
+        private readonly VividGPULODSelectionContext[] m_LodSelectionContextUpload = new VividGPULODSelectionContext[1];
+
+        private GraphicsBuffer m_CullingContextBuffer;
+        private GraphicsBuffer m_LodSelectionContextBuffer;
+        private GraphicsBuffer m_MeshletListBuildJobsBuffer;
+        private GraphicsBuffer m_MeshletListBuildJobCounterBuffer;
+        private GraphicsBuffer m_MeshletListBuildIndirectArgsBuffer;
+        private GraphicsBuffer m_VisibleMeshletRenderRequestsBuffer;
+        private GraphicsBuffer m_VisibleMeshletRenderRequestCounterBuffer;
+        private GraphicsBuffer m_VisibleRendererListMeshletCountsBuffer;
+        private bool m_IsDisposed;
+
+        public GraphicsBuffer CullingContextBuffer => m_CullingContextBuffer;
+
+        public GraphicsBuffer LodSelectionContextBuffer => m_LodSelectionContextBuffer;
+
+        public GraphicsBuffer MeshletListBuildJobsBuffer => m_MeshletListBuildJobsBuffer;
+
+        public GraphicsBuffer MeshletListBuildJobCounterBuffer => m_MeshletListBuildJobCounterBuffer;
+
+        public GraphicsBuffer MeshletListBuildIndirectArgsBuffer => m_MeshletListBuildIndirectArgsBuffer;
+
+        public GraphicsBuffer VisibleMeshletRenderRequestsBuffer => m_VisibleMeshletRenderRequestsBuffer;
+
+        public GraphicsBuffer VisibleMeshletRenderRequestCounterBuffer => m_VisibleMeshletRenderRequestCounterBuffer;
+
+        public GraphicsBuffer VisibleRendererListMeshletCountsBuffer => m_VisibleRendererListMeshletCountsBuffer;
+
+        public int MaxMeshletListBuildJobCount { get; private set; }
+
+        public int MaxVisibleMeshletRenderRequestCount { get; private set; }
+
+        public void EnsureCapacity(VividGPUDrivenSceneData sceneData)
+        {
+            ThrowIfDisposed();
+
+            if (sceneData == null)
+            {
+                throw new ArgumentNullException(nameof(sceneData));
+            }
+
+            MaxMeshletListBuildJobCount = VividGPUDrivenCullingCapacityUtility.GetMaxMeshletListBuildJobCount(sceneData);
+            MaxVisibleMeshletRenderRequestCount = VividGPUDrivenCullingCapacityUtility.GetMaxVisibleMeshletRenderRequestCount(sceneData);
+
+            EnsureStructuredBuffer(
+                ref m_CullingContextBuffer,
+                1,
+                UnsafeUtility.SizeOf<VividGPUCullingContext>(),
+                "VividGPUDriven_CullingContext"
+            );
+            EnsureStructuredBuffer(
+                ref m_LodSelectionContextBuffer,
+                1,
+                UnsafeUtility.SizeOf<VividGPULODSelectionContext>(),
+                "VividGPUDriven_LODSelectionContext"
+            );
+            EnsureStructuredBuffer(
+                ref m_MeshletListBuildJobsBuffer,
+                MaxMeshletListBuildJobCount,
+                UnsafeUtility.SizeOf<Meshlets.VividMeshletListBuildJob>(),
+                "VividGPUDriven_MeshletListBuildJobs"
+            );
+            EnsureStructuredBuffer(
+                ref m_MeshletListBuildJobCounterBuffer,
+                1,
+                sizeof(uint),
+                "VividGPUDriven_MeshletListBuildJobCounter"
+            );
+            EnsureIndirectArgsBuffer(
+                ref m_MeshletListBuildIndirectArgsBuffer,
+                "VividGPUDriven_MeshletListBuildIndirectArgs"
+            );
+            EnsureStructuredBuffer(
+                ref m_VisibleMeshletRenderRequestsBuffer,
+                MaxVisibleMeshletRenderRequestCount,
+                UnsafeUtility.SizeOf<VividMeshletRenderRequestPacked>(),
+                "VividGPUDriven_VisibleMeshletRenderRequests"
+            );
+            EnsureStructuredBuffer(
+                ref m_VisibleMeshletRenderRequestCounterBuffer,
+                1,
+                sizeof(uint),
+                "VividGPUDriven_VisibleMeshletRenderRequestCounter"
+            );
+            EnsureStructuredBuffer(
+                ref m_VisibleRendererListMeshletCountsBuffer,
+                Mathf.Max(1, (int) VividRendererListID.Count),
+                sizeof(uint),
+                "VividGPUDriven_VisibleRendererListMeshletCounts"
+            );
+        }
+
+        public void UploadContexts(
+            CommandBuffer cmd,
+            in VividGPUCullingContext cullingContext,
+            in VividGPULODSelectionContext lodSelectionContext
+        )
+        {
+            ThrowIfDisposed();
+
+            if (cmd == null)
+            {
+                throw new ArgumentNullException(nameof(cmd));
+            }
+
+            m_CullingContextUpload[0] = cullingContext;
+            m_LodSelectionContextUpload[0] = lodSelectionContext;
+
+            cmd.SetBufferData(CullingContextBuffer, m_CullingContextUpload);
+            cmd.SetBufferData(LodSelectionContextBuffer, m_LodSelectionContextUpload);
+        }
+
+        public void Reset(CommandBuffer cmd)
+        {
+            ThrowIfDisposed();
+
+            if (cmd == null)
+            {
+                throw new ArgumentNullException(nameof(cmd));
+            }
+
+            cmd.SetBufferData(MeshletListBuildJobCounterBuffer, s_ZeroUint);
+            cmd.SetBufferData(MeshletListBuildIndirectArgsBuffer, s_InitialIndirectDispatchArgs);
+            cmd.SetBufferData(VisibleMeshletRenderRequestCounterBuffer, s_ZeroUint);
+            cmd.SetBufferData(VisibleRendererListMeshletCountsBuffer, s_ZeroRendererListCounts);
+        }
+
+        public void BindGlobals(CommandBuffer cmd)
+        {
+            ThrowIfDisposed();
+
+            if (cmd == null)
+            {
+                throw new ArgumentNullException(nameof(cmd));
+            }
+
+            cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._CullingContexts, CullingContextBuffer);
+            cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._LODSelectionContexts, LodSelectionContextBuffer);
+            cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._MeshletListBuildJobs, MeshletListBuildJobsBuffer);
+            cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._MeshletListBuildJobCounter, MeshletListBuildJobCounterBuffer);
+            cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._MeshletListBuildIndirectArgs, MeshletListBuildIndirectArgsBuffer);
+            cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._VisibleMeshletRenderRequests, VisibleMeshletRenderRequestsBuffer);
+            cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._VisibleMeshletRenderRequestCounter, VisibleMeshletRenderRequestCounterBuffer);
+            cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._VisibleRendererListMeshletCounts, VisibleRendererListMeshletCountsBuffer);
+        }
+
+        public void Dispose()
+        {
+            if (m_IsDisposed)
+            {
+                return;
+            }
+
+            m_CullingContextBuffer?.Dispose();
+            m_LodSelectionContextBuffer?.Dispose();
+            m_MeshletListBuildJobsBuffer?.Dispose();
+            m_MeshletListBuildJobCounterBuffer?.Dispose();
+            m_MeshletListBuildIndirectArgsBuffer?.Dispose();
+            m_VisibleMeshletRenderRequestsBuffer?.Dispose();
+            m_VisibleMeshletRenderRequestCounterBuffer?.Dispose();
+            m_VisibleRendererListMeshletCountsBuffer?.Dispose();
+
+            m_CullingContextBuffer = null;
+            m_LodSelectionContextBuffer = null;
+            m_MeshletListBuildJobsBuffer = null;
+            m_MeshletListBuildJobCounterBuffer = null;
+            m_MeshletListBuildIndirectArgsBuffer = null;
+            m_VisibleMeshletRenderRequestsBuffer = null;
+            m_VisibleMeshletRenderRequestCounterBuffer = null;
+            m_VisibleRendererListMeshletCountsBuffer = null;
+            MaxMeshletListBuildJobCount = 0;
+            MaxVisibleMeshletRenderRequestCount = 0;
+            m_IsDisposed = true;
+        }
+
+        private static void EnsureStructuredBuffer(
+            ref GraphicsBuffer buffer,
+            int count,
+            int stride,
+            string bufferName
+        )
+        {
+            int clampedCount = Mathf.Max(1, count);
+            int clampedStride = Mathf.Max(1, stride);
+
+            if (buffer != null && buffer.count == clampedCount && buffer.stride == clampedStride)
+            {
+                return;
+            }
+
+            buffer?.Dispose();
+            buffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, clampedCount, clampedStride)
+            {
+                name = bufferName,
+            };
+        }
+
+        private static void EnsureIndirectArgsBuffer(ref GraphicsBuffer buffer, string bufferName)
+        {
+            const int elementCount = 3;
+            const int stride = sizeof(uint);
+            GraphicsBuffer.Target target = GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments;
+
+            if (buffer != null && buffer.count == elementCount && buffer.stride == stride)
+            {
+                return;
+            }
+
+            buffer?.Dispose();
+            buffer = new GraphicsBuffer(target, elementCount, stride)
+            {
+                name = bufferName,
+            };
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (m_IsDisposed)
+            {
+                throw new ObjectDisposedException(nameof(VividGPUDrivenCullingBuffers));
+            }
+        }
+    }
+}

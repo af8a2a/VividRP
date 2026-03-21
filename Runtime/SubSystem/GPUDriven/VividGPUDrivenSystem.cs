@@ -1,5 +1,6 @@
 using System;
 using VividRP.Runtime.GPUDriven.Bindless;
+using UnityEngine;
 using UnityEngine.Rendering;
 
 namespace VividRP.Runtime.GPUDriven
@@ -9,6 +10,7 @@ namespace VividRP.Runtime.GPUDriven
         private static VividGPUDrivenSystem s_Instance;
 
         private readonly VividGPUDrivenBufferSet m_BufferSet;
+        private readonly VividGPUDrivenCullingDispatcher m_CullingDispatcher;
         private readonly VividGPUDrivenSceneDataBuilder m_SceneDataBuilder;
         private bool m_IsDisposed;
 
@@ -29,8 +31,11 @@ namespace VividRP.Runtime.GPUDriven
         {
             BindlessTextureContainer = bindlessTextureContainer ?? throw new ArgumentNullException(nameof(bindlessTextureContainer));
             m_BufferSet = new VividGPUDrivenBufferSet();
+            m_CullingDispatcher = new VividGPUDrivenCullingDispatcher();
             m_SceneDataBuilder = sceneDataBuilder ?? throw new ArgumentNullException(nameof(sceneDataBuilder));
             SceneData = new VividGPUDrivenSceneData();
+            ForcedMeshLODNodeDepth = VividGPUDrivenCullingContextUtility.DefaultForcedMeshLODNodeDepth;
+            MeshLODErrorThreshold = VividGPUDrivenCullingContextUtility.DefaultMeshLODErrorThreshold;
         }
 
         public static VividGPUDrivenSystem instance => s_Instance ??= new VividGPUDrivenSystem();
@@ -45,6 +50,12 @@ namespace VividRP.Runtime.GPUDriven
 
         internal VividGPUDrivenBufferSet BufferSet => m_BufferSet;
 
+        internal VividGPUDrivenCullingBuffers CullingBufferSet => m_CullingDispatcher.BufferSet;
+
+        public int ForcedMeshLODNodeDepth { get; set; }
+
+        public float MeshLODErrorThreshold { get; set; }
+
         public void PrepareFrame()
         {
             ThrowIfDisposed();
@@ -54,10 +65,34 @@ namespace VividRP.Runtime.GPUDriven
             m_BufferSet.Upload(SceneData);
         }
 
+        public void Cull(
+            Camera camera,
+            CommandBuffer cmd,
+            ComputeShader gpuInstanceCullingCompute,
+            ComputeShader meshletListBuildCompute,
+            VividInstancePassMask passMask = VividInstancePassMask.Main
+        )
+        {
+            ThrowIfDisposed();
+
+            m_CullingDispatcher.Dispatch(
+                cmd,
+                camera,
+                SceneData,
+                m_BufferSet,
+                gpuInstanceCullingCompute,
+                meshletListBuildCompute,
+                passMask,
+                ForcedMeshLODNodeDepth,
+                MeshLODErrorThreshold
+            );
+        }
+
         public void BindGlobals(CommandBuffer cmd)
         {
             ThrowIfDisposed();
             m_BufferSet.BindGlobals(cmd);
+            m_CullingDispatcher.BindGlobals(cmd);
         }
 
         public static void Shutdown()
@@ -75,6 +110,7 @@ namespace VividRP.Runtime.GPUDriven
 
             SceneData.Clear();
             m_BufferSet.Dispose();
+            m_CullingDispatcher.Dispose();
             BindlessTextureContainer.Dispose();
             m_IsDisposed = true;
         }

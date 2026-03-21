@@ -68,6 +68,13 @@ namespace VividRP.Runtime
 
                 if (m_Asset != null && m_Asset.EnableGPUDriven)
                 {
+                    VividRPCoreResources resources = PipelineResourceManager.Get<VividRPCoreResources>();
+                    VividGPUDrivenSystem.instance.Cull(
+                        camera,
+                        cmdBuffer,
+                        resources.GPUInstanceCullingCompute,
+                        resources.MeshletListBuildCompute
+                    );
                     VividGPUDrivenSystem.instance.BindGlobals(cmdBuffer);
                 }
 

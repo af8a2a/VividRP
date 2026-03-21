@@ -19,6 +19,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int OutputHeightId = Shader.PropertyToID("_OutputHeight");
         private static readonly int LightDirectionWSId = Shader.PropertyToID("_LightDirectionWS");
         private static readonly int RayLengthId = Shader.PropertyToID("_RayLength");
+        private static readonly int InvViewProjectionMatrixId = Shader.PropertyToID("_InvViewProjectionMatrix");
 
         [RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Read)]
         private RenderGraphAccelerationStructure m_SceneAccelerationStructure;
@@ -45,6 +46,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector4 m_LightDirectionWS = new Vector4(0f, 1f, 0f, 0f);
         private float m_RayLength = VividAdditionalLightData.DefaultRayTracedShadowRayLength;
         private ShaderVariablesRayTracing m_ShaderVariablesRayTracing;
+        private Matrix4x4 m_InvViewProjectionMatrix = Matrix4x4.identity;
 
         internal readonly struct ResolvedDirectionalShadowRequest
         {
@@ -112,6 +114,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             ConfigureOutputTexture(cameraData.actualWidth, cameraData.actualHeight);
+            m_InvViewProjectionMatrix = ResolveInvViewProjectionMatrix(cameraData);
 
             
             m_DispatchGroupCountX = CoreUtils.DivRoundUp(cameraData.actualWidth, ThreadGroupSizeX);
@@ -199,6 +202,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 // Debug.Log(m_LightDirectionWS);
                 nativeCmd.SetComputeVectorParam(m_DirectionalRayTracedShadowCompute, LightDirectionWSId, m_LightDirectionWS);
                 nativeCmd.SetComputeFloatParam(m_DirectionalRayTracedShadowCompute, RayLengthId, m_RayLength);
+                nativeCmd.SetComputeMatrixParam(
+                    m_DirectionalRayTracedShadowCompute,
+                    InvViewProjectionMatrixId,
+                    m_InvViewProjectionMatrix);
 
                 ConstantBuffer.Push(
                     nativeCmd,
@@ -224,6 +231,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LightDirectionWS = new Vector4(0f, 1f, 0f, 0f);
             m_RayLength = VividAdditionalLightData.DefaultRayTracedShadowRayLength;
             m_ShaderVariablesRayTracing = default;
+            m_InvViewProjectionMatrix = Matrix4x4.identity;
         }
 
         internal static ResolvedDirectionalShadowRequest ResolveShadowRequest(
@@ -367,6 +375,14 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 desc = RenderGraphAccelerationStructureDesc.Create("SceneRTAS")
             };
+        }
+
+        internal static Matrix4x4 ResolveInvViewProjectionMatrix(VividCameraData cameraData)
+        {
+            if (cameraData == null)
+                return Matrix4x4.identity;
+
+            return cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true).inverse;
         }
 
         private static RenderGraphTexture CreateInputTexture(string name, GraphicsFormat format, DepthBits depthBits = DepthBits.None)

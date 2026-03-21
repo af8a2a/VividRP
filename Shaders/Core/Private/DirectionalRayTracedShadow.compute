@@ -15,6 +15,7 @@ Texture2D<float4> _GBuffer1;
 RWTexture2D<float> _DirectionalShadowTexture;
 RWTexture2D<float2> DebugTexture;
 
+float4x4 _InvViewProjectionMatrix;
 float4 _LightDirectionWS;
 float _RayLength;
 
@@ -38,9 +39,9 @@ void DirectionalRayTracedShadow(uint3 dispatchThreadID : SV_DispatchThreadID)
     }
 
     float2 uv = (float2(pixelCoord) + 0.5) / float2(_ScreenSize.xy);
-    float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, UNITY_MATRIX_I_VP);
+    float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, _InvViewProjectionMatrix);
     
-    float3 grid = frac(positionWS.xyz);
+    float3 grid = frac(positionWS);
     float lineThickness = 0.2;
     float gridPattern = step(1.0 - lineThickness, grid.x) || 
                         step(1.0 - lineThickness, grid.y) || 
@@ -49,13 +50,10 @@ void DirectionalRayTracedShadow(uint3 dispatchThreadID : SV_DispatchThreadID)
     
     DebugTexture[pixelCoord] =float2(gridPattern,1) ;
 
-    return;
 
     float3 normalWS = DecodeVividNormalOct(_GBuffer1.Load(int3(pixelCoord, 0)).xy);
     float3 lightDirectionWS = SafeNormalize(_LightDirectionWS.xyz);
 
-
-    DebugTexture[pixelCoord]=deviceDepth;
     RayDesc shadowRay;
     shadowRay.Origin = positionWS + normalWS * EvaluateRayTracingBias(positionWS);
     shadowRay.Direction = lightDirectionWS;

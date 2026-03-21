@@ -85,5 +85,11 @@ namespace VividRP.Runtime
 
         [ResourcePath("Shaders/Core/Private/DirectionalRayTracedShadow")]
         public ComputeShader DirectionalRayTracedShadowCompute;
+
+        [ResourcePath("Shaders/Core/Private/GPUDriven/GPUInstanceCulling")]
+        public ComputeShader GPUInstanceCullingCompute;
+
+        [ResourcePath("Shaders/Core/Private/GPUDriven/MeshletListBuild")]
+        public ComputeShader MeshletListBuildCompute;
     }
 }

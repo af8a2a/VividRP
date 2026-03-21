@@ -19,5 +19,16 @@ namespace VividRP.Runtime.GPUDriven
         public static readonly int _MeshletCount = Shader.PropertyToID(nameof(_MeshletCount));
         public static readonly int _SharedVertexCount = Shader.PropertyToID(nameof(_SharedVertexCount));
         public static readonly int _SharedIndexCount = Shader.PropertyToID(nameof(_SharedIndexCount));
+
+        public static readonly int _CullingContexts = Shader.PropertyToID(nameof(_CullingContexts));
+        public static readonly int _LODSelectionContexts = Shader.PropertyToID(nameof(_LODSelectionContexts));
+        public static readonly int _MeshletListBuildJobs = Shader.PropertyToID(nameof(_MeshletListBuildJobs));
+        public static readonly int _MeshletListBuildJobCounter = Shader.PropertyToID(nameof(_MeshletListBuildJobCounter));
+        public static readonly int _MeshletListBuildIndirectArgs = Shader.PropertyToID(nameof(_MeshletListBuildIndirectArgs));
+        public static readonly int _VisibleMeshletRenderRequests = Shader.PropertyToID(nameof(_VisibleMeshletRenderRequests));
+        public static readonly int _VisibleMeshletRenderRequestCounter = Shader.PropertyToID(nameof(_VisibleMeshletRenderRequestCounter));
+        public static readonly int _VisibleRendererListMeshletCounts = Shader.PropertyToID(nameof(_VisibleRendererListMeshletCounts));
+        public static readonly int _ForcedMeshLODNodeDepth = Shader.PropertyToID(nameof(_ForcedMeshLODNodeDepth));
+        public static readonly int _MeshLODErrorThreshold = Shader.PropertyToID(nameof(_MeshLODErrorThreshold));
     }
 }

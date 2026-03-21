@@ -19,8 +19,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("Texture2D<float> _DepthTexture;"));
             Assert.That(source, Does.Contain("Texture2D<float4> _GBuffer1;"));
             Assert.That(source, Does.Contain("RWTexture2D<float> _DirectionalShadowTexture;"));
+            Assert.That(source, Does.Contain("float4x4 _InvViewProjectionMatrix;"));
             Assert.That(source, Does.Contain("DecodeVividNormalOct"));
             Assert.That(source, Does.Contain("ComputeWorldSpacePosition"));
+            Assert.That(source, Does.Not.Contain("UNITY_MATRIX_I_VP"));
             Assert.That(source, Does.Contain("query.TraceRayInline("));
             Assert.That(source, Does.Contain("while (query.Proceed())"));
             Assert.That(source, Does.Contain("query.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 0.0 : 1.0;"));

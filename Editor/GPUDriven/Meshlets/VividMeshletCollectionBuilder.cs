@@ -36,6 +36,7 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             int subMeshIndex = math.clamp(parameters.SubMeshIndex, 0, parameters.Mesh.subMeshCount - 1);
 
             meshletCollection.SourceMeshGUID = parameters.SourceMeshGUID ?? string.Empty;
+            meshletCollection.SourceMeshLocalFileID = parameters.SourceMeshLocalFileID;
             meshletCollection.SourceMeshName = parameters.Mesh.name;
             meshletCollection.SourceSubmeshIndex = subMeshIndex;
 
@@ -531,6 +532,7 @@ namespace VividRP.Editor.GPUDriven.Meshlets
         {
             public Mesh Mesh;
             public string SourceMeshGUID;
+            public long SourceMeshLocalFileID;
             public int SubMeshIndex;
             public Action<string> LogErrorHandler;
             public bool OptimizeVertexCache;

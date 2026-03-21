@@ -48,10 +48,22 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             var timer = Stopwatch.StartNew();
 
             int clampedSubMeshIndex = Mathf.Clamp(SubMeshIndex, 0, Mathf.Max(0, Mesh.subMeshCount - 1));
+            string sourceMeshGuid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(Mesh));
+            long sourceMeshLocalFileId = 0L;
+            if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(Mesh, out string resolvedGuid, out long resolvedLocalFileId))
+            {
+                if (!string.IsNullOrEmpty(resolvedGuid))
+                {
+                    sourceMeshGuid = resolvedGuid;
+                }
+
+                sourceMeshLocalFileId = resolvedLocalFileId;
+            }
             VividMeshletCollectionBuilder.Generate(meshletCollection, new VividMeshletCollectionBuilder.Parameters
             {
                 Mesh = Mesh,
-                SourceMeshGUID = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(Mesh)),
+                SourceMeshGUID = sourceMeshGuid,
+                SourceMeshLocalFileID = sourceMeshLocalFileId,
                 SubMeshIndex = clampedSubMeshIndex,
                 OptimizeVertexCache = OptimizeVertexCache,
                 MaxMeshLODLevelCount = MaxMeshLODLevelCount,
@@ -165,6 +177,28 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             importer.SubMeshIndex = sourceSelection.SubMeshIndex;
             Save(assetPath, importer);
             return assetPath;
+        }
+
+        internal static string CreateAssetForMesh(Mesh mesh, int subMeshIndex)
+        {
+            if (mesh == null)
+            {
+                return string.Empty;
+            }
+
+            int clampedSubMeshIndex = Mathf.Clamp(subMeshIndex, 0, Mathf.Max(0, mesh.subMeshCount - 1));
+            string assetBaseName = mesh.subMeshCount > 1
+                ? $"{mesh.name}_SubMesh{clampedSubMeshIndex}"
+                : mesh.name;
+
+            return CreateAssetForMesh(
+                new MeshSourceSelection(
+                    mesh,
+                    clampedSubMeshIndex,
+                    assetBaseName,
+                    GetTargetFolder(mesh)
+                )
+            );
         }
 
         private static void Save(string assetPath, VividMeshletCollectionAssetImporter importer)

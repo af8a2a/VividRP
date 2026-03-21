@@ -45,6 +45,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(first.IndexBuffer, Is.Not.Empty);
                 Assert.That(second.LeafMeshletCount, Is.EqualTo(first.LeafMeshletCount));
                 Assert.That(second.MeshLODLevelCount, Is.EqualTo(first.MeshLODLevelCount));
+                Assert.That(second.SourceMeshLocalFileID, Is.EqualTo(first.SourceMeshLocalFileID));
                 Assert.That(second.SourceSubmeshIndex, Is.EqualTo(first.SourceSubmeshIndex));
                 Assert.That(second.Bounds.center, Is.EqualTo(first.Bounds.center));
                 Assert.That(second.Bounds.size, Is.EqualTo(first.Bounds.size));
@@ -93,6 +94,7 @@ namespace VividRP.Editor.Tests
                 VividMeshletCollectionAsset asset = AssetDatabase.LoadAssetAtPath<VividMeshletCollectionAsset>(collectionPath);
                 Assert.That(asset, Is.Not.Null);
                 Assert.That(asset.SourceMeshName, Is.EqualTo("TestMesh"));
+                Assert.That(asset.SourceMeshLocalFileID, Is.Not.EqualTo(0L));
                 Assert.That(asset.SourceSubmeshIndex, Is.EqualTo(0));
                 Assert.That(asset.Meshlets, Is.Not.Empty);
                 Assert.That(asset.VertexBuffer, Is.Not.Empty);
@@ -142,6 +144,7 @@ namespace VividRP.Editor.Tests
                 VividMeshletCollectionAsset asset = AssetDatabase.LoadAssetAtPath<VividMeshletCollectionAsset>(createdAssets[0]);
                 Assert.That(asset, Is.Not.Null);
                 Assert.That(asset.SourceMeshName, Is.EqualTo("TestMesh"));
+                Assert.That(asset.SourceMeshLocalFileID, Is.Not.EqualTo(0L));
                 Assert.That(asset.SourceSubmeshIndex, Is.EqualTo(0));
                 Assert.That(asset.Meshlets, Is.Not.Empty);
                 Assert.That(asset.VertexBuffer, Is.Not.Empty);
@@ -167,6 +170,7 @@ namespace VividRP.Editor.Tests
             {
                 Mesh = mesh,
                 SourceMeshGUID = "test-guid",
+                SourceMeshLocalFileID = 12345L,
                 SubMeshIndex = 0,
                 OptimizeVertexCache = true,
                 MaxMeshLODLevelCount = 4,

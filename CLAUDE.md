@@ -53,7 +53,7 @@ Runtime/
 Shaders/                   — Shader source files (top-level package folder, not under Runtime/)
 Editor/
   PipelineResource/        — PipelineResourceUpdater.cs
-  RenderGraph/             — GraphToolkit-based RenderGraph editor, validators, importers, node types
+  RenderGraph/             — GraphToolkit-based RenderGraph editor, validators, importers, node types; .vrdg files imported via RenderGraphImporter.cs
   RenderGraph/Nodes/       — Node data types (RenderPassNodeData, TextureResourceNodeData, etc.)
   RenderPipeline/          — Global settings, asset editor, volume profile utilities
   ComponentEditor/         — Camera and light component editors
@@ -315,8 +315,11 @@ All post-processing components implement `IPostProcessComponent` with `IsActive(
 
 ## RenderGraph Rules
 
+- `.vrdg` files are the source of truth for graph authoring; do not manually maintain derived `RenderGraphData` contents — let the importer/compiler regenerate them
 - New passes should implement `Create()`, `Prepare(...)`, `Record(...)`, and `Dispose()` coherently; `Prepare(...)` is where per-frame descriptor sizing/imports should happen
 - Use the appropriate resource wrapper type for graph integration: `RenderGraphTexture`, `RenderGraphBuffer`, `RenderGraphRenderList`, and `RenderGraphAccelerationStructureDesc` where supported by the runtime/editor flow
+- History resource nodes expose `PrevOut` and `CurrOut`; if you change history binding semantics, update importer, compilation ordering, runtime history handling, and tests together
+- Pass ordering is compiler-driven; when changing binding semantics or connection rules, verify `RenderGraphPassCompilationUtility` still derives the right dependencies and cycle fallback behavior
 - If a pass changes its exposed resource layout dynamically, keep `IDynamicPassResourceLayout` behavior and the related editor/runtime tests in sync
 - If a pass supports async compute or global state modification, express that through the existing marker interfaces instead of ad hoc flags
 - When adding a runtime pass type, verify the generated node registry, navigation helpers, compilation utility, and pass-node tests still reflect the new pass correctly
@@ -327,11 +330,18 @@ All post-processing components implement `IPostProcessComponent` with `IsActive(
 - Use 4-space indentation, braces on new lines, and small focused methods
 - Match namespaces to area: `VividRP.Runtime`, `VividRP.Runtime.RenderPass.Core`, `VividRP.Editor.RenderGraph`, `VividRP.Editor.Tests`
 - Preserve reflection-driven contracts: `[RenderGraphResource]` fields are discovered by PassRecorder and used for editor port generation
+- Preserve serialized field names in authoring/runtime data models unless you also add an explicit migration path — `RenderGraphData`, `RenderGraphPassDefinition`, and `PipelineResourcesContainer` are serialized assets that survive importer/editor updates
 - Keep GraphToolkit naming consistent: node models end with `NodeData`, generated files use `.g.cs`
 - Serialized fields often use `m_` prefix, but match the style of the file you're editing
 - Use `Undo.RecordObject(...)` before mutating serialized assets in editor code; also persist with `EditorUtility.SetDirty(...)` and `AssetDatabase.SaveAssetIfDirty(...)` when following existing sync/generation patterns
 - Prefer minimal visibility (`internal`, `internal sealed`) for editor helpers
 - Do not hand-edit generated files like `GeneratedRenderPassNodes.g.cs` or `PipelineResources.asset`
+
+## Resource Workflow
+
+- Use `PipelineResourceUpdater` or the custom inspector on `PipelineResourcesContainer` to recollect engine resources; do not hand-maintain `Runtime/Resources/PipelineResources.asset` entry-by-entry
+- Resource container entries are normalized and sorted during recollection; if you change resource-key generation, preserve deterministic ordering and update related tests
+- Keep `ResourceEntry` serialization compatibility in mind when renaming fields; `ResourceObject` already carries a migration attribute from the older `Asset` name
 
 ## Testing
 

@@ -14,6 +14,7 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         };
 
         [HideInInspector] public string SourceMeshGUID = string.Empty;
+        [HideInInspector] public long SourceMeshLocalFileID;
         [HideInInspector] public string SourceMeshName = string.Empty;
         [HideInInspector] public int SourceSubmeshIndex = -1;
 

@@ -23,6 +23,7 @@ namespace VividRP.Editor.Tests
             Assert.That(settings.BuildMode, Is.EqualTo(VividRTASBuildMode.Automatic));
             Assert.That(settings.CullingMode, Is.EqualTo(VividRTASCullingMode.ExtendedFrustum));
             Assert.That(settings.CullingDistance, Is.EqualTo(RTASBuildPass.DefaultSphereCullingDistance));
+            Assert.That(settings.MinSolidAngle, Is.EqualTo(RTASBuildPass.DefaultMinSolidAngle));
             Assert.That((int)settings.LayerMask, Is.EqualTo(1 << 7));
             Assert.That(
                 settings.RayTracingModeMask,
@@ -58,6 +59,8 @@ namespace VividRP.Editor.Tests
                 volume.cullingMode.value = VividRTASCullingMode.Sphere;
                 volume.cullingDistance.overrideState = true;
                 volume.cullingDistance.value = 321f;
+                volume.minSolidAngle.overrideState = true;
+                volume.minSolidAngle.value = 12f;
                 volume.layerMask.overrideState = true;
                 volume.layerMask.value = 1 << 4;
                 volume.rayTracingModeMask.overrideState = true;
@@ -77,6 +80,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(settings.BuildMode, Is.EqualTo(VividRTASBuildMode.Manual));
                 Assert.That(settings.CullingMode, Is.EqualTo(VividRTASCullingMode.Sphere));
                 Assert.That(settings.CullingDistance, Is.EqualTo(321f));
+                Assert.That(settings.MinSolidAngle, Is.EqualTo(12f));
                 Assert.That(settings.ExtendShadowCulling, Is.True);
                 Assert.That(settings.ExtendCameraCulling, Is.True);
                 Assert.That(settings.RayBias, Is.EqualTo(0.01f));
@@ -116,6 +120,7 @@ namespace VividRP.Editor.Tests
                     VividRTASBuildMode.Automatic,
                     VividRTASCullingMode.Sphere,
                     42f,
+                    RTASBuildPass.DefaultMinSolidAngle,
                     false,
                     false,
                     RTASBuildPass.DefaultRayBias,
@@ -149,6 +154,42 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CreateCullingConfig_UsesSolidAngleCulling_WhenModeIsSelected()
+        {
+            var cameraObject = new GameObject("RTAS Solid Angle Camera");
+            var camera = cameraObject.AddComponent<Camera>();
+
+            try
+            {
+                var settings = new RTASBuildPass.ResolvedRayTracingSettings(
+                    VividRTASBuildMode.Automatic,
+                    VividRTASCullingMode.SolidAngle,
+                    RTASBuildPass.DefaultSphereCullingDistance,
+                    7.5f,
+                    false,
+                    false,
+                    RTASBuildPass.DefaultRayBias,
+                    RTASBuildPass.DefaultDistantRayBias,
+                    ~0,
+                    RayTracingAccelerationStructure.RayTracingModeMask.Everything,
+                    RayTracingAccelerationStructureBuildFlags.None,
+                    RayTracingAccelerationStructureBuildFlags.None,
+                    false);
+
+                var cullingConfig = RTASBuildPass.CreateCullingConfig(camera, in settings);
+
+                Assert.That((cullingConfig.flags & RayTracingInstanceCullingFlags.EnableSolidAngleCulling) != 0, Is.True);
+                Assert.That(cullingConfig.minSolidAngle, Is.EqualTo(7.5f));
+                Assert.That((cullingConfig.flags & RayTracingInstanceCullingFlags.EnablePlaneCulling) == 0, Is.True);
+                Assert.That((cullingConfig.flags & RayTracingInstanceCullingFlags.EnableSphereCulling) == 0, Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
         public void Prepare_WritesResolvedSettingsIntoFrameContext()
         {
             var profile = ScriptableObject.CreateInstance<VolumeProfile>();
@@ -161,6 +202,8 @@ namespace VividRP.Editor.Tests
                 component.active = true;
                 component.rayBias.overrideState = true;
                 component.rayBias.value = 0.03f;
+                component.minSolidAngle.overrideState = true;
+                component.minSolidAngle.value = 9f;
                 component.buildMode.overrideState = true;
                 component.buildMode.value = VividRTASBuildMode.Manual;
 
@@ -181,6 +224,7 @@ namespace VividRP.Editor.Tests
                 var rayTracingData = frameData.GetOrCreate<VividRayTracingSettingsData>();
                 Assert.That(rayTracingData.buildMode, Is.EqualTo(VividRTASBuildMode.Manual));
                 Assert.That(rayTracingData.rayBias, Is.EqualTo(0.03f));
+                Assert.That(rayTracingData.minSolidAngle, Is.EqualTo(9f));
                 Assert.That(rayTracingData.cullingMode, Is.EqualTo(VividRTASCullingMode.ExtendedFrustum));
             }
             finally

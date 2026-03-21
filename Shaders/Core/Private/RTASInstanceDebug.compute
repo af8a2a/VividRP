@@ -65,10 +65,10 @@ void RTASInstanceDebug(uint3 dispatchThreadID : SV_DispatchThreadID)
     ray.TMin = 0.01;
     ray.TMax = FLT_MAX;
 
-    UnityRayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
+    UnityRayQuery<RAY_FLAG_CULL_BACK_FACING_TRIANGLES> query;
     query.TraceRayInline(
         _AccelerationStructure,
-        RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
+        RAY_FLAG_CULL_BACK_FACING_TRIANGLES,
         0xFF,
         ray);
 

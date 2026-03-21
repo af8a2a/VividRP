@@ -13,7 +13,8 @@ namespace VividRP.Runtime
     public enum VividRTASCullingMode
     {
         ExtendedFrustum,
-        Sphere
+        Sphere,
+        SolidAngle
     }
 
     [Serializable]
@@ -67,6 +68,7 @@ namespace VividRP.Runtime
         public VividRTASBuildModeParameter buildMode = new(VividRTASBuildMode.Automatic);
         public VividRTASCullingModeParameter cullingMode = new(VividRTASCullingMode.ExtendedFrustum);
         public MinFloatParameter cullingDistance = new(1000f, 0f);
+        public ClampedFloatParameter minSolidAngle = new(4f, 0.01f, 180f);
         public LayerMaskParameter layerMask = new(~0);
         public VividRayTracingModeMaskParameter rayTracingModeMask =
             new(RayTracingAccelerationStructure.RayTracingModeMask.Everything);
@@ -86,6 +88,7 @@ namespace VividRP.Runtime
                     || (buildMode != null && buildMode.overrideState)
                     || (cullingMode != null && cullingMode.overrideState)
                     || (cullingDistance != null && cullingDistance.overrideState)
+                    || (minSolidAngle != null && minSolidAngle.overrideState)
                     || (layerMask != null && layerMask.overrideState)
                     || (rayTracingModeMask != null && rayTracingModeMask.overrideState)
                     || (buildFlagsStaticGeometries != null && buildFlagsStaticGeometries.overrideState)

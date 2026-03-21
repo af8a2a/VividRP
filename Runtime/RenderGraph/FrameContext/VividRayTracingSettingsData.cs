@@ -9,6 +9,7 @@ namespace VividRP.Runtime
         public VividRTASBuildMode buildMode;
         public VividRTASCullingMode cullingMode;
         public float cullingDistance;
+        public float minSolidAngle;
         public bool extendShadowCulling;
         public bool extendCameraCulling;
         public float rayBias;
@@ -25,6 +26,7 @@ namespace VividRP.Runtime
             buildMode = VividRTASBuildMode.Automatic;
             cullingMode = VividRTASCullingMode.ExtendedFrustum;
             cullingDistance = 1000f;
+            minSolidAngle = 4f;
             extendShadowCulling = false;
             extendCameraCulling = false;
             rayBias = 0.001f;

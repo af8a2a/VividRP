@@ -9,6 +9,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const float DefaultRayBias = 0.001f;
         internal const float DefaultDistantRayBias = 0.001f;
         internal const float DefaultSphereCullingDistance = 1000f;
+        internal const float DefaultMinSolidAngle = 4f;
 
         private const uint DefaultInstanceMask = 0xFFu;
         private const string RenderPipelineShaderTagName = "RenderPipeline";
@@ -32,6 +33,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 VividRTASBuildMode buildMode,
                 VividRTASCullingMode cullingMode,
                 float cullingDistance,
+                float minSolidAngle,
                 bool extendShadowCulling,
                 bool extendCameraCulling,
                 float rayBias,
@@ -45,6 +47,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 BuildMode = buildMode;
                 CullingMode = cullingMode;
                 CullingDistance = cullingDistance;
+                MinSolidAngle = minSolidAngle;
                 ExtendShadowCulling = extendShadowCulling;
                 ExtendCameraCulling = extendCameraCulling;
                 RayBias = rayBias;
@@ -61,6 +64,8 @@ namespace VividRP.Runtime.RenderPass.Core
             public VividRTASCullingMode CullingMode { get; }
 
             public float CullingDistance { get; }
+
+            public float MinSolidAngle { get; }
 
             public bool ExtendShadowCulling { get; }
 
@@ -159,6 +164,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var buildMode = VividRTASBuildMode.Automatic;
             var cullingMode = VividRTASCullingMode.ExtendedFrustum;
             var cullingDistance = DefaultSphereCullingDistance;
+            var minSolidAngle = DefaultMinSolidAngle;
             var extendShadowCulling = false;
             var extendCameraCulling = false;
             var rayBias = DefaultRayBias;
@@ -174,6 +180,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
                 if (volume.cullingDistance != null && volume.cullingDistance.overrideState)
                     cullingDistance = volume.cullingDistance.value;
+
+                if (volume.minSolidAngle != null && volume.minSolidAngle.overrideState)
+                    minSolidAngle = volume.minSolidAngle.value;
 
                 if (volume.extendShadowCulling != null && volume.extendShadowCulling.overrideState)
                     extendShadowCulling = volume.extendShadowCulling.value;
@@ -207,6 +216,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 buildMode,
                 cullingMode,
                 cullingDistance,
+                minSolidAngle,
                 extendShadowCulling,
                 extendCameraCulling,
                 rayBias,
@@ -287,6 +297,10 @@ namespace VividRP.Runtime.RenderPass.Core
                     cullingConfig.sphereCenter = camera.transform.position;
                     cullingConfig.sphereRadius = Mathf.Max(0f, settings.CullingDistance);
                     break;
+                case VividRTASCullingMode.SolidAngle:
+                    cullingConfig.flags |= RayTracingInstanceCullingFlags.EnableSolidAngleCulling;
+                    cullingConfig.minSolidAngle = Mathf.Max(0.01f, settings.MinSolidAngle);
+                    break;
                 default:
                     cullingConfig.flags |= RayTracingInstanceCullingFlags.EnablePlaneCulling;
                     cullingConfig.planes = BuildExtendedFrustumPlanes(camera);
@@ -317,6 +331,7 @@ namespace VividRP.Runtime.RenderPass.Core
             rayTracingData.buildMode = settings.BuildMode;
             rayTracingData.cullingMode = settings.CullingMode;
             rayTracingData.cullingDistance = settings.CullingDistance;
+            rayTracingData.minSolidAngle = settings.MinSolidAngle;
             rayTracingData.extendShadowCulling = settings.ExtendShadowCulling;
             rayTracingData.extendCameraCulling = settings.ExtendCameraCulling;
             rayTracingData.rayBias = settings.RayBias;

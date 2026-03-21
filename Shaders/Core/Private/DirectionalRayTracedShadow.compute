@@ -39,7 +39,7 @@ void DirectionalRayTracedShadow(uint3 dispatchThreadID : SV_DispatchThreadID)
     }
 
     float2 uv = (float2(pixelCoord) + 0.5) / float2(_ScreenSize.xy);
-    float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, _InvViewProjectionMatrix);
+    float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, UNITY_MATRIX_I_VP);
     
     float3 grid = frac(positionWS);
     float lineThickness = 0.2;

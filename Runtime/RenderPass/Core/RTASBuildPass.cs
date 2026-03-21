@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
@@ -26,6 +27,30 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphAccelerationStructure m_SceneAccelerationStructure;
 
         private bool m_SupportsRayTracing;
+        private VividRayTracingAccelerationStructureStats m_LastStats;
+
+        private readonly struct SceneAccelerationStructureBuildStats
+        {
+            public SceneAccelerationStructureBuildStats(
+                int candidateRendererCount,
+                uint instanceCount,
+                ulong memoryBytes,
+                bool usedShaderTagFallback)
+            {
+                CandidateRendererCount = candidateRendererCount;
+                InstanceCount = instanceCount;
+                MemoryBytes = memoryBytes;
+                UsedShaderTagFallback = usedShaderTagFallback;
+            }
+
+            public int CandidateRendererCount { get; }
+
+            public uint InstanceCount { get; }
+
+            public ulong MemoryBytes { get; }
+
+            public bool UsedShaderTagFallback { get; }
+        }
 
         internal readonly struct ResolvedRayTracingSettings
         {
@@ -101,11 +126,15 @@ namespace VividRP.Runtime.RenderPass.Core
             var resolvedSettings = ResolveSettings(
                 VividVolumeManagerUtility.GetRayTracingSettingsVolume(),
                 m_SceneAccelerationStructure?.desc);
+            var camera = frameData.GetOrCreate<VividCameraData>().camera;
 
             WriteResolvedSettings(frameData, resolvedSettings);
 
             if (m_SceneAccelerationStructure == null)
+            {
+                ReportUnavailableStats(camera, in resolvedSettings, "RTAS resource is not initialized.");
                 return;
+            }
 
             var descriptor = m_SceneAccelerationStructure.desc ?? RenderGraphAccelerationStructureDesc.Create("SceneRTAS");
             if (string.IsNullOrEmpty(descriptor.Name))
@@ -115,22 +144,30 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SceneAccelerationStructure.desc = descriptor;
 
             if (!m_SupportsRayTracing)
+            {
+                ReportUnavailableStats(camera, in resolvedSettings, "Ray tracing is not supported on the current device.");
                 return;
+            }
 
             m_SceneAccelerationStructure.EnsureCreated();
 
             var nativeAccelerationStructure = (RayTracingAccelerationStructure)m_SceneAccelerationStructure;
             if (nativeAccelerationStructure == null)
-                return;
-
-            var camera = frameData.GetOrCreate<VividCameraData>().camera;
-            if (!ShouldBuildForCamera(camera))
             {
-                nativeAccelerationStructure.ClearInstances();
+                ReportUnavailableStats(camera, in resolvedSettings, "Failed to create the native RTAS.");
                 return;
             }
 
-            PopulateSceneAccelerationStructure(nativeAccelerationStructure, camera, in resolvedSettings);
+            if (!ShouldBuildForCamera(camera))
+            {
+                nativeAccelerationStructure.ClearInstances();
+                ReportUnavailableStats(camera, in resolvedSettings, "RTAS stats are available for Game and SceneView cameras only.");
+                return;
+            }
+
+            var buildStats = PopulateSceneAccelerationStructure(nativeAccelerationStructure, camera, in resolvedSettings);
+            m_LastStats = CreateStats(camera, in resolvedSettings, buildStats, null);
+            VividRayTracingAccelerationStructureStatsRegistry.Report(m_LastStats);
         }
 
         public override void Record(ComputeGraphContext context)
@@ -139,11 +176,32 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             context.cmd.BuildRayTracingAccelerationStructure(m_SceneAccelerationStructure);
+
+            var nativeAccelerationStructure = (RayTracingAccelerationStructure)m_SceneAccelerationStructure;
+            if (nativeAccelerationStructure == null || !m_LastStats.IsAvailable)
+                return;
+
+            m_LastStats = new VividRayTracingAccelerationStructureStats(
+                true,
+                null,
+                m_LastStats.CameraName,
+                m_LastStats.CameraType,
+                Time.frameCount,
+                Time.realtimeSinceStartupAsDouble,
+                m_LastStats.BuildMode,
+                m_LastStats.CullingMode,
+                m_LastStats.CandidateRendererCount,
+                nativeAccelerationStructure.GetInstanceCount(),
+                nativeAccelerationStructure.GetSize(),
+                m_LastStats.UsedShaderTagFallback);
+            VividRayTracingAccelerationStructureStatsRegistry.Report(m_LastStats);
         }
 
         public override void Dispose()
         {
             m_SceneAccelerationStructure?.Dispose();
+            m_LastStats = default;
+            VividRayTracingAccelerationStructureStatsRegistry.Clear();
         }
 
         internal static ResolvedRayTracingSettings ResolveSettings(
@@ -349,22 +407,77 @@ namespace VividRP.Runtime.RenderPass.Core
                 && (camera.cameraType == CameraType.Game || camera.cameraType == CameraType.SceneView);
         }
 
-        private static void PopulateSceneAccelerationStructure(
+        private void ReportUnavailableStats(
+            Camera camera,
+            in ResolvedRayTracingSettings settings,
+            string statusMessage)
+        {
+            m_LastStats = new VividRayTracingAccelerationStructureStats(
+                false,
+                statusMessage,
+                camera != null ? camera.name : null,
+                camera != null ? camera.cameraType : default,
+                Time.frameCount,
+                Time.realtimeSinceStartupAsDouble,
+                settings.BuildMode,
+                settings.CullingMode,
+                0,
+                0,
+                0,
+                false);
+            VividRayTracingAccelerationStructureStatsRegistry.Report(m_LastStats);
+        }
+
+        private static VividRayTracingAccelerationStructureStats CreateStats(
+            Camera camera,
+            in ResolvedRayTracingSettings settings,
+            in SceneAccelerationStructureBuildStats buildStats,
+            string statusMessage)
+        {
+            return new VividRayTracingAccelerationStructureStats(
+                true,
+                statusMessage,
+                camera != null ? camera.name : null,
+                camera != null ? camera.cameraType : default,
+                Time.frameCount,
+                Time.realtimeSinceStartupAsDouble,
+                settings.BuildMode,
+                settings.CullingMode,
+                buildStats.CandidateRendererCount,
+                buildStats.InstanceCount,
+                buildStats.MemoryBytes,
+                buildStats.UsedShaderTagFallback);
+        }
+
+        private static SceneAccelerationStructureBuildStats PopulateSceneAccelerationStructure(
             RayTracingAccelerationStructure accelerationStructure,
             Camera camera,
             in ResolvedRayTracingSettings settings)
         {
+            var candidateRendererCount = EstimateCandidateRendererCount(settings.LayerMask, settings.RayTracingModeMask, true);
+            var usedShaderTagFallback = false;
+
             accelerationStructure.ClearInstances();
 
             var cullingConfig = CreateCullingConfig(camera, in settings);
             accelerationStructure.CullInstances(ref cullingConfig);
 
-            if (accelerationStructure.GetInstanceCount() > 0)
-                return;
+            var instanceCount = accelerationStructure.GetInstanceCount();
+            if (instanceCount == 0)
+            {
+                usedShaderTagFallback = true;
+                candidateRendererCount = EstimateCandidateRendererCount(settings.LayerMask, settings.RayTracingModeMask, false);
+                accelerationStructure.ClearInstances();
+                cullingConfig = CreateCullingConfig(camera, in settings, useRenderPipelineTagFilter: false);
+                accelerationStructure.CullInstances(ref cullingConfig);
+                instanceCount = accelerationStructure.GetInstanceCount();
+            }
 
-            accelerationStructure.ClearInstances();
-            cullingConfig = CreateCullingConfig(camera, in settings, useRenderPipelineTagFilter: false);
-            accelerationStructure.CullInstances(ref cullingConfig);
+            return new SceneAccelerationStructureBuildStats(
+                candidateRendererCount,
+                instanceCount,
+                accelerationStructure.GetSize(),
+                usedShaderTagFallback);
         }
 
         private static RayTracingInstanceCullingTest CreateInstanceCullingTest(LayerMask layerMask)
@@ -423,6 +536,95 @@ namespace VividRP.Runtime.RenderPass.Core
             planes[5].distance = -Vector3.Dot(cameraPosition - up * halfHeight, planes[5].normal);
 
             return planes;
+        }
+
+        private static int EstimateCandidateRendererCount(
+            LayerMask layerMask,
+            RayTracingAccelerationStructure.RayTracingModeMask rayTracingModeMask,
+            bool requireVividRenderPipelineTag)
+        {
+            var renderers = Object.FindObjectsByType<Renderer>(FindObjectsInactive.Exclude);
+            var count = 0;
+
+            for (var i = 0; i < renderers.Length; i++)
+            {
+                if (IsCandidateRenderer(renderers[i], layerMask, rayTracingModeMask, requireVividRenderPipelineTag))
+                    count++;
+            }
+
+            return count;
+        }
+
+        private static bool IsCandidateRenderer(
+            Renderer renderer,
+            LayerMask layerMask,
+            RayTracingAccelerationStructure.RayTracingModeMask rayTracingModeMask,
+            bool requireVividRenderPipelineTag)
+        {
+            if (renderer == null
+                || !renderer.enabled
+                || renderer.gameObject == null
+                || !renderer.gameObject.activeInHierarchy
+                || !renderer.gameObject.scene.IsValid()
+                || !renderer.gameObject.scene.isLoaded
+                || !SupportsRayTracingRendererType(renderer)
+                || !IsLayerIncluded(renderer.gameObject.layer, layerMask)
+                || !MatchesRayTracingModeMask(renderer.rayTracingMode, rayTracingModeMask))
+            {
+                return false;
+            }
+
+            return !requireVividRenderPipelineTag || HasVividRenderPipelineMaterial(renderer);
+        }
+
+        private static bool SupportsRayTracingRendererType(Renderer renderer)
+        {
+            return renderer is SkinnedMeshRenderer
+                || (renderer is MeshRenderer && renderer.GetComponent<MeshFilter>() != null);
+        }
+
+        private static bool IsLayerIncluded(int layer, LayerMask layerMask)
+        {
+            return (layerMask.value & (1 << layer)) != 0;
+        }
+
+        private static bool MatchesRayTracingModeMask(
+            RayTracingMode rayTracingMode,
+            RayTracingAccelerationStructure.RayTracingModeMask rayTracingModeMask)
+        {
+            if ((rayTracingModeMask & RayTracingAccelerationStructure.RayTracingModeMask.Everything)
+                == RayTracingAccelerationStructure.RayTracingModeMask.Everything)
+            {
+                return rayTracingMode != RayTracingMode.Off;
+            }
+
+            return rayTracingMode switch
+            {
+                RayTracingMode.Static => (rayTracingModeMask & RayTracingAccelerationStructure.RayTracingModeMask.Static) != 0,
+                RayTracingMode.DynamicTransform => (rayTracingModeMask & RayTracingAccelerationStructure.RayTracingModeMask.DynamicTransform) != 0,
+                RayTracingMode.DynamicGeometry => (rayTracingModeMask & RayTracingAccelerationStructure.RayTracingModeMask.DynamicGeometry) != 0,
+                RayTracingMode.DynamicGeometryManualUpdate => (rayTracingModeMask & RayTracingAccelerationStructure.RayTracingModeMask.DynamicGeometryManualUpdate) != 0,
+                _ => false,
+            };
+        }
+
+        private static bool HasVividRenderPipelineMaterial(Renderer renderer)
+        {
+            var materials = renderer.sharedMaterials;
+            if (materials == null || materials.Length == 0)
+                return false;
+
+            for (var i = 0; i < materials.Length; i++)
+            {
+                var material = materials[i];
+                if (material == null)
+                    continue;
+
+                if (material.GetTag(RenderPipelineShaderTagName, false) == VividRenderPipelineShaderTagValue)
+                    return true;
+            }
+
+            return false;
         }
     }
 }

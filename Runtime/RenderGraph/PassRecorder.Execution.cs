@@ -76,6 +76,7 @@ namespace VividRP.Runtime
             s_CurrentRenderGraph = null;
             RenderGraphHistoryRegistry.Clear();
             RenderGraphPreviewRegistry.Clear();
+            VividRayTracingAccelerationStructureStatsRegistry.Clear();
             s_CurrentGraphAsset = null;
             s_CurrentImportVersion = 0;
             s_IsCompiled = false;

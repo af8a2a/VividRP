@@ -401,7 +401,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var texture = new RenderGraphTexture
             {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R32_SFloat)
+                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R32G32_SFloat)
             };
             texture.desc.Name = name;
             texture.desc.ClearBuffer = true;

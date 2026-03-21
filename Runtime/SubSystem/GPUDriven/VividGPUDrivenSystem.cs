@@ -1,5 +1,6 @@
 using System;
 using VividRP.Runtime.GPUDriven.Bindless;
+using UnityEngine.Rendering;
 
 namespace VividRP.Runtime.GPUDriven
 {
@@ -7,6 +8,7 @@ namespace VividRP.Runtime.GPUDriven
     {
         private static VividGPUDrivenSystem s_Instance;
 
+        private readonly VividGPUDrivenBufferSet m_BufferSet;
         private readonly VividGPUDrivenSceneDataBuilder m_SceneDataBuilder;
         private bool m_IsDisposed;
 
@@ -26,6 +28,7 @@ namespace VividRP.Runtime.GPUDriven
         )
         {
             BindlessTextureContainer = bindlessTextureContainer ?? throw new ArgumentNullException(nameof(bindlessTextureContainer));
+            m_BufferSet = new VividGPUDrivenBufferSet();
             m_SceneDataBuilder = sceneDataBuilder ?? throw new ArgumentNullException(nameof(sceneDataBuilder));
             SceneData = new VividGPUDrivenSceneData();
         }
@@ -40,12 +43,21 @@ namespace VividRP.Runtime.GPUDriven
 
         public string UnavailableReason => BindlessTextureContainer.UnavailableReason;
 
+        internal VividGPUDrivenBufferSet BufferSet => m_BufferSet;
+
         public void PrepareFrame()
         {
             ThrowIfDisposed();
 
             BindlessTextureContainer.PreRender();
             m_SceneDataBuilder.Build(SceneData, VividMeshletRendererDatabase.instance, BindlessTextureContainer);
+            m_BufferSet.Upload(SceneData);
+        }
+
+        public void BindGlobals(CommandBuffer cmd)
+        {
+            ThrowIfDisposed();
+            m_BufferSet.BindGlobals(cmd);
         }
 
         public static void Shutdown()
@@ -62,6 +74,7 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             SceneData.Clear();
+            m_BufferSet.Dispose();
             BindlessTextureContainer.Dispose();
             m_IsDisposed = true;
         }

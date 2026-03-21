@@ -220,6 +220,12 @@ namespace VividRP.Editor.Tests
                 system.PrepareFrame();
 
                 Assert.That(system.SceneData.MaterialCount, Is.EqualTo(1));
+                Assert.That(system.BufferSet.InstanceCount, Is.EqualTo(1));
+                Assert.That(system.BufferSet.MaterialCount, Is.EqualTo(1));
+                Assert.That(system.BufferSet.MeshLODNodeCount, Is.EqualTo(1));
+                Assert.That(system.BufferSet.MeshletCount, Is.EqualTo(1));
+                Assert.That(system.BufferSet.SharedVertexCount, Is.EqualTo(3));
+                Assert.That(system.BufferSet.SharedIndexCount, Is.EqualTo(3));
                 VividMaterialData materialData = system.SceneData.Materials[0];
                 Assert.That(materialData.AlbedoColor.x, Is.EqualTo(0.25f).Within(0.0001f));
                 Assert.That(materialData.AlbedoColor.y, Is.EqualTo(0.5f).Within(0.0001f));

@@ -32,6 +32,10 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "DirectionalShadowTexture", Access = AccessFlags.Write)]
         private RenderGraphTexture m_DirectionalShadowTexture;
 
+        
+        [RenderGraphResource(Name = "DebugTexture", Access = AccessFlags.Write)]
+        private RenderGraphTexture m_debugTexture;
+
         private ComputeShader m_DirectionalRayTracedShadowCompute;
         private int m_Kernel = -1;
         private bool m_SupportsRayTracing;
@@ -84,6 +88,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DepthTexture = CreateInputTexture("Depth", GraphicsFormat.None, DepthBits.Depth32);
             m_GBuffer1 = CreateInputTexture("GBuffer1", GraphicsFormat.R16G16_SFloat);
             m_DirectionalShadowTexture = CreateOutputTexture("DirectionalShadowTexture");
+            
+            m_debugTexture= CreateDebugTexture("DebugTexture");
         }
 
         public override void Create()
@@ -183,6 +189,14 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_Kernel,
                     DirectionalShadowTextureId,
                     m_DirectionalShadowTexture.innerHandle);
+                
+                nativeCmd.SetComputeTextureParam(
+                    m_DirectionalRayTracedShadowCompute,
+                    m_Kernel,
+                    "DebugTexture",
+                    m_debugTexture.innerHandle);
+
+                Debug.Log(m_LightDirectionWS);
                 nativeCmd.SetComputeVectorParam(m_DirectionalRayTracedShadowCompute, LightDirectionWSId, m_LightDirectionWS);
                 nativeCmd.SetComputeFloatParam(m_DirectionalRayTracedShadowCompute, RayLengthId, m_RayLength);
 
@@ -339,6 +353,11 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DirectionalShadowTexture.desc.EnableRandomWrite = true;
             m_DirectionalShadowTexture.desc.BindTextureMS = false;
             m_DirectionalShadowTexture.desc.Name = "DirectionalShadowTexture";
+            
+            
+            m_debugTexture.desc.Width=width;
+            m_debugTexture.desc.Height=height;
+            m_debugTexture.desc.EnableRandomWrite=true;
         }
 
 
@@ -378,5 +397,20 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.EnableRandomWrite = true;
             return texture;
         }
+        private static RenderGraphTexture CreateDebugTexture(string name)
+        {
+            var texture = new RenderGraphTexture
+            {
+                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R8G8B8A8_SNorm)
+            };
+            texture.desc.Name = name;
+            texture.desc.ClearBuffer = true;
+            texture.desc.ClearColor = Color.white;
+            texture.desc.FilterMode = FilterMode.Point;
+            texture.desc.WrapMode = TextureWrapMode.Clamp;
+            texture.desc.EnableRandomWrite = true;
+            return texture;
+        }
+
     }
 }

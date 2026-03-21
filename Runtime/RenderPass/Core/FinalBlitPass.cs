@@ -1,4 +1,4 @@
-    using UnityEngine;
+using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
@@ -47,9 +47,8 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
 
-            m_Material = CoreUtils.CreateEngineMaterial(resources.BlitShader);
+            m_Material = CoreUtils.CreateEngineMaterial(resources.FinalBlitShader);
         }
-        
 
         public override void Record(UnsafeGraphContext context)
         {

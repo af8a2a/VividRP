@@ -96,7 +96,7 @@ namespace VividRP.Runtime
             if (additionalData != null)
                 return additionalData.GetGPUProjectionMatrix(viewIndex);
 
-            return GL.GetGPUProjectionMatrix(GetProjectionMatrix(viewIndex), renderIntoTexture);
+            return GL.GetGPUProjectionMatrix(GetProjectionMatrix(viewIndex), camera.targetTexture);
         }
 
         public Matrix4x4 GetGPUProjectionMatrix(bool renderIntoTexture, int viewIndex = 0)
@@ -104,7 +104,7 @@ namespace VividRP.Runtime
             if (additionalData != null)
                 return additionalData.GetGPUProjectionMatrix(renderIntoTexture, viewIndex);
 
-            return GL.GetGPUProjectionMatrix(GetProjectionMatrix(viewIndex), renderIntoTexture);
+            return GL.GetGPUProjectionMatrix(GetProjectionMatrix(viewIndex), camera.targetTexture);
         }
 
         public Matrix4x4 GetGPUProjectionMatrixNoJitter(int viewIndex = 0,bool renderIntoTexture = true)
@@ -112,7 +112,7 @@ namespace VividRP.Runtime
             if (additionalData != null)
                 return additionalData.GetGPUProjectionMatrixNoJitter(viewIndex);
 
-            return GL.GetGPUProjectionMatrix(GetProjectionMatrixNoJitter(viewIndex), renderIntoTexture);
+            return GL.GetGPUProjectionMatrix(GetProjectionMatrixNoJitter(viewIndex), camera.targetTexture);
         }
 
         public Matrix4x4 GetGPUProjectionMatrixNoJitter(bool renderIntoTexture, int viewIndex = 0)
@@ -120,7 +120,7 @@ namespace VividRP.Runtime
             if (additionalData != null)
                 return additionalData.GetGPUProjectionMatrixNoJitter(renderIntoTexture, viewIndex);
 
-            return GL.GetGPUProjectionMatrix(GetProjectionMatrixNoJitter(viewIndex), renderIntoTexture);
+            return GL.GetGPUProjectionMatrix(GetProjectionMatrixNoJitter(viewIndex), camera.targetTexture);
         }
 
         public Matrix4x4 GetGPUViewProjectionMatrix(int viewIndex = 0)

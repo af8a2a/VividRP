@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
@@ -134,6 +135,40 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void VividRPCoreResources_DeclaresFinalBlitShader()
+        {
+            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.FinalBlitShader));
+
+            Assert.That(field, Is.Not.Null);
+
+            var resourcePath = field.GetCustomAttribute<VividRP.Runtime.ResourcePathAttribute>();
+
+            Assert.That(resourcePath, Is.Not.Null);
+            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/FinalBlit"));
+        }
+
+        [Test]
+        public void FinalBlitShader_ContainsColorGradingLogic_AndSharedBlitShaderDoesNot()
+        {
+            var finalBlitShaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "FinalBlit.shader"));
+            var blitShaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Blit.shader"));
+            var passSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "FinalBlitPass.cs"));
+
+            Assert.That(finalBlitShaderSource, Does.Contain("Shader \"Hidden/VividRP/FinalBlit\""));
+            Assert.That(finalBlitShaderSource, Does.Contain("_VividColorGradingLut"));
+            Assert.That(finalBlitShaderSource, Does.Contain("_VividColorGradingParams"));
+            Assert.That(finalBlitShaderSource, Does.Contain("ApplyLut3D("));
+
+            Assert.That(blitShaderSource, Does.Contain("Shader \"Hidden/VividRP/Blit\""));
+            Assert.That(blitShaderSource, Does.Not.Contain("_VividColorGradingLut"));
+            Assert.That(blitShaderSource, Does.Not.Contain("_VividColorGradingParams"));
+            Assert.That(blitShaderSource, Does.Not.Contain("ApplyLut3D("));
+
+            Assert.That(passSource, Does.Contain("resources.FinalBlitShader"));
+            Assert.That(passSource, Does.Not.Contain("resources.BlitShader"));
+        }
+
+        [Test]
         public void FinalBlitPassNode_DoesNotExposeAsyncComputeOption()
         {
             var node = new AutoRegisteredFinalBlitPassNode();
@@ -145,6 +180,25 @@ namespace VividRP.Editor.Tests
         public void SupportsAsyncCompute_ReturnsFalse_ForFinalBlitPass()
         {
             Assert.That(RenderGraphPassExecutionUtility.SupportsAsyncCompute(typeof(FinalBlitPass)), Is.False);
+        }
+
+        private static string GetPackageFilePath(params string[] relativeParts)
+        {
+            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            var packageRoots = new[]
+            {
+                Path.Combine(projectRoot, "Packages", "VividRP"),
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
+            };
+
+            foreach (var packageRoot in packageRoots)
+            {
+                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
+                if (File.Exists(fullPath))
+                    return fullPath;
+            }
+
+            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 }

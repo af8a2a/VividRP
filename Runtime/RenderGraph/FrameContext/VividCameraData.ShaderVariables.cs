@@ -82,6 +82,7 @@ namespace VividRP.Runtime
         internal ShaderVariables BuildShaderVariables()
         {
             var currentCamera = camera;
+
             var scaledWidth = ResolveScaledDimension(actualWidth, currentCamera != null ? currentCamera.scaledPixelWidth : 0, pixelWidth, Screen.width);
             var scaledHeight = ResolveScaledDimension(actualHeight, currentCamera != null ? currentCamera.scaledPixelHeight : 0, pixelHeight, Screen.height);
             var referenceWidth = ResolveReferenceDimension(pixelWidth, currentCamera != null ? currentCamera.pixelWidth : 0, scaledWidth);
@@ -170,6 +171,7 @@ namespace VividRP.Runtime
             cmd.SetGlobalMatrix(MatrixInvPId, shaderVariables.matrixInvP);
             cmd.SetGlobalMatrix(MatrixVPId, shaderVariables.matrixVP);
             cmd.SetGlobalMatrix(MatrixInvVPId, shaderVariables.matrixInvVP);
+            // Debug.Log(shaderVariables.matrixInvVP);
             cmd.SetGlobalMatrix(PrevViewProjMatrixId, shaderVariables.prevViewProjMatrix);
             cmd.SetGlobalMatrix(NonJitteredViewProjMatrixId, shaderVariables.nonJitteredViewProjMatrix);
             cmd.SetGlobalMatrix(ViewProjMatrixId, shaderVariables.viewProjMatrix);

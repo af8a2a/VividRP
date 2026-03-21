@@ -15,6 +15,12 @@ namespace VividRP.Editor
         private static readonly GUIContent s_UsePipelineSettingsLabel = EditorGUIUtility.TrTextContent("Use Pipeline Settings");
         private static readonly GUIContent s_CustomShadowLayersLabel = EditorGUIUtility.TrTextContent("Custom Shadow Layers");
         private static readonly GUIContent s_ShadowRenderingLayersLabel = EditorGUIUtility.TrTextContent("Shadow Rendering Layers");
+        private static readonly GUIContent s_RayTracedShadowLabel = EditorGUIUtility.TrTextContent("Ray Traced Shadow");
+        private static readonly GUIContent s_EnableRayTracedShadowLabel = EditorGUIUtility.TrTextContent("Enable");
+        private static readonly GUIContent s_RayTracedShadowRayLengthLabel = EditorGUIUtility.TrTextContent("Ray Length");
+        private static readonly GUIContent s_RayTracedShadowRayBiasLabel = EditorGUIUtility.TrTextContent("Ray Bias");
+        private static readonly GUIContent s_RayTracedShadowDistantRayBiasLabel = EditorGUIUtility.TrTextContent("Distant Ray Bias");
+        private static readonly GUIContent s_RayTracedShadowSunAngularDiameterLabel = EditorGUIUtility.TrTextContent("Sun Angular Diameter (Unused in MVP)");
 
         private VividSerializedLight m_SerializedLight;
 
@@ -147,6 +153,46 @@ namespace VividRP.Editor
                     EditorGUILayout.PropertyField(m_SerializedLight.shadowRenderingLayers, s_ShadowRenderingLayersLabel);
                 }
             }
+
+            if (!ShouldShowDirectionalRayTracedShadowControls(m_SerializedLight))
+                return;
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField(s_RayTracedShadowLabel, EditorStyles.boldLabel);
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                EditorGUILayout.PropertyField(m_SerializedLight.enableRayTracedShadow, s_EnableRayTracedShadowLabel);
+
+                if (!ShouldExpandDirectionalRayTracedShadowControls(m_SerializedLight))
+                    return;
+
+                EditorGUILayout.PropertyField(m_SerializedLight.rayTracedShadowRayLength, s_RayTracedShadowRayLengthLabel);
+                EditorGUILayout.PropertyField(m_SerializedLight.rayTracedShadowRayBias, s_RayTracedShadowRayBiasLabel);
+                EditorGUILayout.PropertyField(m_SerializedLight.rayTracedShadowDistantRayBias, s_RayTracedShadowDistantRayBiasLabel);
+                EditorGUILayout.PropertyField(
+                    m_SerializedLight.rayTracedShadowSunAngularDiameter,
+                    s_RayTracedShadowSunAngularDiameterLabel);
+                EditorGUILayout.HelpBox(
+                    "Current hard-shadow MVP stores Sun Angular Diameter for a future soft-shadow path and does not sample it yet.",
+                    MessageType.Info);
+            }
+        }
+
+        internal static bool ShouldShowDirectionalRayTracedShadowControls(VividSerializedLight serializedLight)
+        {
+            return serializedLight != null
+                && serializedLight.settings != null
+                && !serializedLight.settings.lightType.hasMultipleDifferentValues
+                && serializedLight.settings.light != null
+                && serializedLight.settings.light.type == LightType.Directional;
+        }
+
+        internal static bool ShouldExpandDirectionalRayTracedShadowControls(VividSerializedLight serializedLight)
+        {
+            return serializedLight?.enableRayTracedShadow != null
+                && (serializedLight.enableRayTracedShadow.hasMultipleDifferentValues
+                    || serializedLight.enableRayTracedShadow.boolValue);
         }
 
         private void NormalizeSelectedLightIntensityUnits()

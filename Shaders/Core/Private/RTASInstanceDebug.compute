@@ -4,13 +4,10 @@
 #pragma only_renderers d3d11 xboxseries ps5
 
 #include "UnityRayQuery.cginc"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
-
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 RaytracingAccelerationStructure _AccelerationStructure;
 RWTexture2D<float4> _OutputTexture;
 
-int _OutputWidth;
-int _OutputHeight;
 int _VisualizationMode;
 float4 _CameraPositionWS;
 float4 _PixelCoordToViewDirWS_Row0;
@@ -56,7 +53,7 @@ float3 GetPrimaryRayDirectionWS(float2 pixelCoord)
 [numthreads(8, 8, 1)]
 void RTASInstanceDebug(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
-    if (dispatchThreadID.x >= (uint)_OutputWidth || dispatchThreadID.y >= (uint)_OutputHeight)
+    if (dispatchThreadID.x >= (uint)_ScreenSize.x || dispatchThreadID.y >= (uint)_ScreenSize.y)
         return;
 
     RayDesc ray;

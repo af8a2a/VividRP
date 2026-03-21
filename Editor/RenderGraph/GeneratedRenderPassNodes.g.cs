@@ -45,6 +45,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class DirectionalRayTracedShadowPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.DirectionalRayTracedShadowPass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class DrawObjectPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.DrawObjectPass, VividRP.Runtime";

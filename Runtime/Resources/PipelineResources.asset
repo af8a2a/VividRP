@@ -25,6 +25,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: fb20577e3a98eaa40bd738cd3008ce12, type: 3}
   - ResourceName: Shaders/Core/Private/CoreBlitColorAndDepth
     ResourceObject: {fileID: 4800000, guid: 7a938306786128241b2810fe10cd3f55, type: 3}
+  - ResourceName: Shaders/Core/Private/DirectionalRayTracedShadow
+    ResourceObject: {fileID: 7200000, guid: e18c323ebbcd75c45b1c45b7c0bb07b4, type: 3}
   - ResourceName: Shaders/Core/Private/HDRISky
     ResourceObject: {fileID: 4800000, guid: d41d44af2b5e2ff49b8312d9fe8aab8b, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/ClearLightLists

@@ -14,6 +14,11 @@ namespace VividRP.Editor
         internal SerializedProperty usePipelineSettings { get; }
         internal SerializedProperty customShadowLayers { get; }
         internal SerializedProperty shadowRenderingLayers { get; }
+        internal SerializedProperty enableRayTracedShadow { get; }
+        internal SerializedProperty rayTracedShadowRayLength { get; }
+        internal SerializedProperty rayTracedShadowRayBias { get; }
+        internal SerializedProperty rayTracedShadowDistantRayBias { get; }
+        internal SerializedProperty rayTracedShadowSunAngularDiameter { get; }
         internal VividAdditionalLightData[] lightsAdditionalData { get; }
 
         public VividSerializedLight(SerializedObject serializedObject, LightEditor.Settings settings = null)
@@ -41,6 +46,11 @@ namespace VividRP.Editor
             usePipelineSettings = serializedAdditionalDataObject.FindProperty("m_UsePipelineSettings");
             customShadowLayers = serializedAdditionalDataObject.FindProperty("m_CustomShadowLayers");
             shadowRenderingLayers = serializedAdditionalDataObject.FindProperty("m_ShadowRenderingLayersMask");
+            enableRayTracedShadow = serializedAdditionalDataObject.FindProperty("m_EnableRayTracedShadow");
+            rayTracedShadowRayLength = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowRayLength");
+            rayTracedShadowRayBias = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowRayBias");
+            rayTracedShadowDistantRayBias = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowDistantRayBias");
+            rayTracedShadowSunAngularDiameter = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowSunAngularDiameter");
         }
 
         public void Update()

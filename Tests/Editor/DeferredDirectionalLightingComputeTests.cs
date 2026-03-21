@@ -20,6 +20,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("_GBuffer2"));
             Assert.That(source, Does.Contain("_GBuffer3"));
             Assert.That(source, Does.Contain("_DepthTexture"));
+            Assert.That(source, Does.Contain("_DirectionalShadowTexture"));
             Assert.That(source, Does.Contain("_MaterialPixelIndices"));
             Assert.That(source, Does.Not.Contain("_MaterialDispatchArgs"));
             Assert.That(source, Does.Contain("_LightingTexture"));
@@ -36,6 +37,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("InitVividPreLightData"));
             Assert.That(source, Does.Contain("VividPreLightData preLightData"));
             Assert.That(source, Does.Contain("EvaluateDirectional("));
+            Assert.That(source, Does.Contain("SampleDirectionalShadow"));
+            Assert.That(source, Does.Contain("(int)lightIndex == _MainDirectionalLightIndex"));
+            Assert.That(source, Does.Contain("lerp(1.0, directionalShadow, saturate(directionalLight.shadowStrength))"));
             Assert.That(source, Does.Contain("EvaluatePunctualLight"));
             Assert.That(source, Does.Contain("ComputeWorldSpacePosition"));
             Assert.That(source, Does.Not.Contain("tileCount ="));

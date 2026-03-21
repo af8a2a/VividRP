@@ -2,11 +2,16 @@
 #define SHADER_RAYTRACING_COMMON_INCLUDED
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 
+CBUFFER_START(ShaderVariablesRayTracing)
+    float _RayTracingRayBias;
+    float _RayTracingDistantRayBias;
+    float _RayTracingMinSolidAngle;
+    float _RayTracingPadding0;
+CBUFFER_END
 
 float EvaluateRayTracingBias(float3 positionWS)
 {
-
-    float distanceToCamera = length(positionWS - GetCameraPositionWS());
+    float distanceToCamera = length(positionWS - _WorldSpaceCameraPos);
     float blend = saturate((distanceToCamera - _ProjectionParams.y) / (_ProjectionParams.z - _ProjectionParams.y));
     return lerp(_RayTracingRayBias, _RayTracingDistantRayBias, blend);
 }

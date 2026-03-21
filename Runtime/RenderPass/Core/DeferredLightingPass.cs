@@ -23,6 +23,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int GBuffer2Id = Shader.PropertyToID("_GBuffer2");
         private static readonly int GBuffer3Id = Shader.PropertyToID("_GBuffer3");
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
+        private static readonly int DirectionalShadowTextureId = Shader.PropertyToID("_DirectionalShadowTexture");
         private static readonly int LightingTextureId = Shader.PropertyToID("_LightingTexture");
         private static readonly int LightingWidthId = Shader.PropertyToID("_LightingWidth");
         private static readonly int LightingHeightId = Shader.PropertyToID("_LightingHeight");
@@ -69,6 +70,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
+
+        [RenderGraphResource(
+            Name = "DirectionalShadowTexture",
+            Access = AccessFlags.Read,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_DirectionalShadowTexture;
 
         [RenderGraphResource(Name = "Color", Access = AccessFlags.Write, AttachmentIndex = 0)]
         private RenderGraphTexture m_ColorTexture;
@@ -162,6 +169,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_ClusterLog2SliceCount = LightGridPass.ClusterLog2SliceCount;
         private bool m_SupportsClusteredPunctualLights;
         private bool m_IsLogBaseBufferEnabled;
+        private readonly RenderGraphTexture m_LocalDirectionalShadowTexture;
         private readonly RenderGraphBuffer m_LocalDirectionalLightBuffer;
         private readonly RenderGraphBuffer m_LocalPunctualLightBuffer;
         private readonly RenderGraphBuffer m_LocalLayeredOffsetBuffer;
@@ -189,6 +197,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer2 = CreateInputTexture("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
             m_GBuffer3 = CreateInputTexture("GBuffer3", GraphicsFormat.B10G11R11_UFloatPack32);
             m_DepthTexture = CreateDepthTexture("Depth");
+            m_LocalDirectionalShadowTexture = CreateDirectionalShadowTexture("DirectionalShadowTexture");
+            m_DirectionalShadowTexture = m_LocalDirectionalShadowTexture;
             m_ColorTexture = CreateOutputTexture("Color", GraphicsFormat.R16G16B16A16_SFloat);
             m_SkyIBLCubemap = CreateSkyIBLCubemapTexture("SkyIBLCubemap");
             m_StandardMaterialIndices = CreateStructuredBuffer("StandardMaterialIndices", sizeof(uint));
@@ -329,6 +339,24 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer2Id, m_GBuffer2.innerHandle);
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer3Id, m_GBuffer3.innerHandle);
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, DepthTextureId, m_DepthTexture.innerHandle);
+            if (ReferenceEquals(m_DirectionalShadowTexture, m_LocalDirectionalShadowTexture)
+                || m_DirectionalShadowTexture == null
+                || !m_DirectionalShadowTexture.innerHandle.IsValid())
+            {
+                cmd.SetComputeTextureParam(
+                    m_DeferredLitCompute,
+                    kernel,
+                    DirectionalShadowTextureId,
+                    Texture2D.whiteTexture);
+            }
+            else
+            {
+                cmd.SetComputeTextureParam(
+                    m_DeferredLitCompute,
+                    kernel,
+                    DirectionalShadowTextureId,
+                    m_DirectionalShadowTexture.innerHandle);
+            }
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, LightingTextureId, m_ColorTexture.innerHandle);
             cmd.SetComputeIntParam(m_DeferredLitCompute, LightingWidthId, m_LightingWidth);
             cmd.SetComputeIntParam(m_DeferredLitCompute, LightingHeightId, m_LightingHeight);
@@ -519,6 +547,20 @@ namespace VividRP.Runtime.RenderPass.Core
             };
             texture.desc.Name = name;
             texture.desc.ClearBuffer = false;
+            return texture;
+        }
+
+        private static RenderGraphTexture CreateDirectionalShadowTexture(string name)
+        {
+            var texture = new RenderGraphTexture
+            {
+                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16_SFloat)
+            };
+            texture.desc.Name = name;
+            texture.desc.ClearBuffer = true;
+            texture.desc.ClearColor = Color.white;
+            texture.desc.FilterMode = FilterMode.Point;
+            texture.desc.WrapMode = TextureWrapMode.Clamp;
             return texture;
         }
 

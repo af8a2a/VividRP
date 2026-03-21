@@ -52,6 +52,11 @@ namespace VividRP.Editor.Tests
             Assert.That(serializedLight.usePipelineSettings, Is.Not.Null);
             Assert.That(serializedLight.customShadowLayers, Is.Not.Null);
             Assert.That(serializedLight.shadowRenderingLayers, Is.Not.Null);
+            Assert.That(serializedLight.enableRayTracedShadow, Is.Not.Null);
+            Assert.That(serializedLight.rayTracedShadowRayLength, Is.Not.Null);
+            Assert.That(serializedLight.rayTracedShadowRayBias, Is.Not.Null);
+            Assert.That(serializedLight.rayTracedShadowDistantRayBias, Is.Not.Null);
+            Assert.That(serializedLight.rayTracedShadowSunAngularDiameter, Is.Not.Null);
         }
 
         [Test]
@@ -118,6 +123,93 @@ namespace VividRP.Editor.Tests
             Assert.That(trackedLightData.renderingLayerMask, Is.EqualTo(9u));
             Assert.That((trackedLightData.flags & VividLightRenderDataFlags.UsePipelineSettings) != 0, Is.False);
             Assert.That((trackedLightData.flags & VividLightRenderDataFlags.CustomShadowLayers) != 0, Is.True);
+        }
+
+        [Test]
+        public void RayTracedShadowSettings_DefaultToExpectedValues_OnDirectionalLights()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+
+            var additionalData = light.GetVividAdditionalLightData();
+
+            Assert.That(additionalData.enableRayTracedShadow, Is.False);
+            Assert.That(
+                additionalData.rayTracedShadowRayLength,
+                Is.EqualTo(VividAdditionalLightData.DefaultRayTracedShadowRayLength));
+            Assert.That(
+                additionalData.rayTracedShadowRayBias,
+                Is.EqualTo(VividAdditionalLightData.DefaultRayTracedShadowRayBias));
+            Assert.That(
+                additionalData.rayTracedShadowDistantRayBias,
+                Is.EqualTo(VividAdditionalLightData.DefaultRayTracedShadowDistantRayBias));
+            Assert.That(
+                additionalData.rayTracedShadowSunAngularDiameter,
+                Is.EqualTo(VividAdditionalLightData.DefaultRayTracedShadowSunAngularDiameter));
+            Assert.That(additionalData.supportsRayTracedShadow, Is.True);
+            Assert.That(additionalData.isRayTracedShadowActive, Is.False);
+        }
+
+        [Test]
+        public void RayTracedShadowSettings_RemainSerializedButInactive_OnNonDirectionalLights()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Point;
+
+            var additionalData = light.GetVividAdditionalLightData();
+            additionalData.enableRayTracedShadow = true;
+            additionalData.rayTracedShadowRayLength = 24.0f;
+            additionalData.rayTracedShadowRayBias = 0.02f;
+            additionalData.rayTracedShadowDistantRayBias = 0.08f;
+            additionalData.rayTracedShadowSunAngularDiameter = 1.2f;
+
+            Assert.That(additionalData.enableRayTracedShadow, Is.True);
+            Assert.That(additionalData.rayTracedShadowRayLength, Is.EqualTo(24.0f));
+            Assert.That(additionalData.rayTracedShadowRayBias, Is.EqualTo(0.02f));
+            Assert.That(additionalData.rayTracedShadowDistantRayBias, Is.EqualTo(0.08f));
+            Assert.That(additionalData.rayTracedShadowSunAngularDiameter, Is.EqualTo(1.2f));
+            Assert.That(additionalData.supportsRayTracedShadow, Is.False);
+            Assert.That(additionalData.isRayTracedShadowActive, Is.False);
+        }
+
+        [Test]
+        public void VividLightEditor_ShowsDirectionalRayTracedShadowControls_OnlyForDirectionalLights()
+        {
+            var directionalLight = m_GameObject.AddComponent<Light>();
+            directionalLight.type = LightType.Directional;
+
+            var serializedDirectionalLight = new VividSerializedLight(new SerializedObject(directionalLight));
+
+            Assert.That(
+                VividLightEditor.ShouldShowDirectionalRayTracedShadowControls(serializedDirectionalLight),
+                Is.True);
+            Assert.That(
+                VividLightEditor.ShouldExpandDirectionalRayTracedShadowControls(serializedDirectionalLight),
+                Is.False);
+
+            serializedDirectionalLight.enableRayTracedShadow.boolValue = true;
+
+            Assert.That(
+                VividLightEditor.ShouldExpandDirectionalRayTracedShadowControls(serializedDirectionalLight),
+                Is.True);
+
+            var pointLightObject = new GameObject("Vivid Point Light Test");
+
+            try
+            {
+                var pointLight = pointLightObject.AddComponent<Light>();
+                pointLight.type = LightType.Point;
+
+                var serializedPointLight = new VividSerializedLight(new SerializedObject(pointLight));
+
+                Assert.That(
+                    VividLightEditor.ShouldShowDirectionalRayTracedShadowControls(serializedPointLight),
+                    Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(pointLightObject);
+            }
         }
 
         [Test]

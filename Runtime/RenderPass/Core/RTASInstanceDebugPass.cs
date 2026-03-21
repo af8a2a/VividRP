@@ -41,8 +41,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private ComputeShader m_RTASInstanceDebugCompute;
         private int m_Kernel = -1;
         private bool m_SupportsRayTracing;
-        private int m_OutputWidth = 1;
-        private int m_OutputHeight = 1;
         private int m_DispatchGroupCountX = 1;
         private int m_DispatchGroupCountY = 1;
         private Vector4 m_CameraPositionWS;
@@ -82,23 +80,11 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             var cameraData = frameData.Get<VividCameraData>();
-            m_OutputWidth = ResolveOutputDimension(
-                descriptor => descriptor.Width,
-                cameraData.actualWidth,
-                cameraData.pixelWidth,
-                Screen.width,
-                m_OutputTexture?.desc);
-            m_OutputHeight = ResolveOutputDimension(
-                descriptor => descriptor.Height,
-                cameraData.actualHeight,
-                cameraData.pixelHeight,
-                Screen.height,
-                m_OutputTexture?.desc);
 
-            ConfigureOutputTexture(m_OutputWidth, m_OutputHeight);
+            ConfigureOutputTexture(cameraData.actualWidth, cameraData.actualHeight);
 
-            m_DispatchGroupCountX = Mathf.Max(1, (m_OutputWidth + ThreadGroupSizeX - 1) / ThreadGroupSizeX);
-            m_DispatchGroupCountY = Mathf.Max(1, (m_OutputHeight + ThreadGroupSizeY - 1) / ThreadGroupSizeY);
+            m_DispatchGroupCountX = CoreUtils.DivRoundUp(cameraData.actualWidth, ThreadGroupSizeX);
+            m_DispatchGroupCountY = CoreUtils.DivRoundUp(cameraData.actualHeight, ThreadGroupSizeY);
 
             var camera = cameraData.camera;
             if (camera != null)
@@ -138,8 +124,6 @@ namespace VividRP.Runtime.RenderPass.Core
                     AccelerationStructureName,
                     accelerationStructure);
                 cmd.SetComputeTextureParam(m_RTASInstanceDebugCompute, m_Kernel, OutputTextureId, m_OutputTexture.innerHandle);
-                cmd.SetComputeIntParam(m_RTASInstanceDebugCompute, OutputWidthId, m_OutputWidth);
-                cmd.SetComputeIntParam(m_RTASInstanceDebugCompute, OutputHeightId, m_OutputHeight);
                 cmd.SetComputeIntParam(m_RTASInstanceDebugCompute, VisualizationModeId, (int)m_VisualizationMode);
                 cmd.SetComputeVectorParam(m_RTASInstanceDebugCompute, CameraPositionId, m_CameraPositionWS);
                 cmd.SetComputeVectorParam(
@@ -166,8 +150,6 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_RTASInstanceDebugCompute = null;
             m_Kernel = -1;
-            m_OutputWidth = 1;
-            m_OutputHeight = 1;
             m_DispatchGroupCountX = 1;
             m_DispatchGroupCountY = 1;
             m_CameraPositionWS = Vector4.zero;
@@ -196,29 +178,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_OutputTexture.desc.Name = "OutputTexture";
         }
 
-        private static int ResolveOutputDimension(
-            System.Func<RenderGraphTextureDesc, int> selector,
-            int actualCameraDimension,
-            int cameraDimension,
-            int screenDimension,
-            params RenderGraphTextureDesc[] descriptors)
-        {
-            var resolved = 0;
-
-            for (var i = 0; i < descriptors.Length; i++)
-            {
-                var descriptor = descriptors[i];
-                if (!HasExplicitSize(descriptor))
-                    continue;
-
-                resolved = Mathf.Max(resolved, selector(descriptor));
-            }
-
-            if (resolved > 0)
-                return resolved;
-
-            return ResolveCameraDimension(actualCameraDimension, cameraDimension, screenDimension);
-        }
 
         private static bool HasExplicitSize(RenderGraphTextureDesc descriptor)
         {

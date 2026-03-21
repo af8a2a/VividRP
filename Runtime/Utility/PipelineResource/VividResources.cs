@@ -75,5 +75,8 @@ namespace VividRP.Runtime
 
         [ResourcePath("Shaders/Core/Private/RTASInstanceDebug")]
         public ComputeShader RTASInstanceDebugCompute;
+
+        [ResourcePath("Shaders/Core/Private/DirectionalRayTracedShadow")]
+        public ComputeShader DirectionalRayTracedShadowCompute;
     }
 }

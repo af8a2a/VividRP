@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using UnityEditor;
+using VividRP.Editor;
 using VividRP.Runtime;
 
 namespace VividRP.Editor.RenderGraph
@@ -8,7 +9,7 @@ namespace VividRP.Editor.RenderGraph
     [InitializeOnLoad]
     internal static class RenderPassNodeRegistryGenerator
     {
-        private const string GeneratedAssetPath = "Packages/VividRP/Editor/RenderGraph/GeneratedRenderPassNodes.g.cs";
+        private const string GeneratedRelativePath = "Editor/RenderGraph/GeneratedRenderPassNodes.g.cs";
 
         static RenderPassNodeRegistryGenerator()
         {
@@ -23,7 +24,8 @@ namespace VividRP.Editor.RenderGraph
                 return;
             }
 
-            var fullPath = Path.GetFullPath(GeneratedAssetPath);
+            var generatedAssetPath = VividPackagePathUtility.GetPreferredAssetPath(GeneratedRelativePath);
+            var fullPath = Path.GetFullPath(generatedAssetPath);
             var existingSource = File.Exists(fullPath) ? File.ReadAllText(fullPath) : string.Empty;
             var existingRegistrations = RenderPassNodeRegistryBuilder.ParseExistingRegistrations(existingSource);
             var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(
@@ -38,7 +40,7 @@ namespace VividRP.Editor.RenderGraph
                 Directory.CreateDirectory(directory);
 
             File.WriteAllText(fullPath, generatedSource, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-            AssetDatabase.ImportAsset(GeneratedAssetPath);
+            AssetDatabase.ImportAsset(generatedAssetPath);
         }
     }
 }

@@ -26,6 +26,7 @@ namespace VividRP.Editor.Tests
             {
                 "Color",
                 "Depth",
+                "DirectionalShadowTexture",
                 "GBuffer0",
                 "GBuffer1",
                 "GBuffer2",
@@ -97,6 +98,25 @@ namespace VividRP.Editor.Tests
 
             var skyCubemap = GetFieldValue<RenderGraphTexture>(pass, "m_SkyIBLCubemap");
             Assert.That(skyCubemap.desc.Dimension, Is.EqualTo(TextureDimension.Cube));
+        }
+
+        [Test]
+        public void Prepare_KeepsLocalDirectionalShadowFallback_WhenGraphDoesNotBindOne()
+        {
+            var pass = new DeferredLightingPass();
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 256;
+            cameraData.actualHeight = 144;
+
+            pass.Prepare(frameData);
+
+            var localDirectionalShadowTexture = GetFieldValue<RenderGraphTexture>(pass, "m_LocalDirectionalShadowTexture");
+            var directionalShadowTexture = GetFieldValue<RenderGraphTexture>(pass, "m_DirectionalShadowTexture");
+
+            Assert.That(directionalShadowTexture, Is.SameAs(localDirectionalShadowTexture));
+            Assert.That(directionalShadowTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16_SFloat));
+            Assert.That(directionalShadowTexture.desc.ClearColor, Is.EqualTo(Color.white));
         }
 
         [Test]

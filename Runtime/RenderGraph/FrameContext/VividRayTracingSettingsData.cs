@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -36,6 +37,40 @@ namespace VividRP.Runtime
             buildFlagsStaticGeometries = RayTracingAccelerationStructureBuildFlags.None;
             buildFlagsDynamicGeometries = RayTracingAccelerationStructureBuildFlags.None;
             enableCompaction = false;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ShaderVariablesRayTracing
+    {
+        public float _RayTracingRayBias;
+        public float _RayTracingDistantRayBias;
+        public float _RayTracingMinSolidAngle;
+        public float _RayTracingPadding0;
+    }
+
+    internal static class ShaderVariablesRayTracingUtility
+    {
+        internal static readonly int ConstantBufferShaderId = Shader.PropertyToID("ShaderVariablesRayTracing");
+
+        internal static ShaderVariablesRayTracing Create(VividRayTracingSettingsData settings)
+        {
+            return new ShaderVariablesRayTracing
+            {
+                _RayTracingRayBias = Mathf.Max(0f, settings != null ? settings.rayBias : 0f),
+                _RayTracingDistantRayBias = Mathf.Max(0f, settings != null ? settings.distantRayBias : 0f),
+                _RayTracingMinSolidAngle = Mathf.Max(0f, settings != null ? settings.minSolidAngle : 0f),
+                _RayTracingPadding0 = 0f,
+            };
+        }
+
+        internal static void OverrideBiases(
+            ref ShaderVariablesRayTracing shaderVariables,
+            float rayBias,
+            float distantRayBias)
+        {
+            shaderVariables._RayTracingRayBias = Mathf.Max(0f, rayBias);
+            shaderVariables._RayTracingDistantRayBias = Mathf.Max(0f, distantRayBias);
         }
     }
 }

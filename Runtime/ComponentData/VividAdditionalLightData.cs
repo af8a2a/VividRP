@@ -278,6 +278,11 @@ namespace VividRP.Runtime
     [ExecuteAlways]
     public class VividAdditionalLightData : MonoBehaviour, IAdditionalData
     {
+        internal const float DefaultRayTracedShadowRayLength = 1000f;
+        internal const float DefaultRayTracedShadowRayBias = 0.001f;
+        internal const float DefaultRayTracedShadowDistantRayBias = 0.001f;
+        internal const float DefaultRayTracedShadowSunAngularDiameter = 0.533f;
+
         [SerializeField]
         private bool m_UsePipelineSettings = true;
 
@@ -286,6 +291,21 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private RenderingLayerMask m_ShadowRenderingLayersMask = RenderingLayerMask.defaultRenderingLayerMask;
+
+        [SerializeField]
+        private bool m_EnableRayTracedShadow;
+
+        [SerializeField]
+        private float m_RayTracedShadowRayLength = DefaultRayTracedShadowRayLength;
+
+        [SerializeField]
+        private float m_RayTracedShadowRayBias = DefaultRayTracedShadowRayBias;
+
+        [SerializeField]
+        private float m_RayTracedShadowDistantRayBias = DefaultRayTracedShadowDistantRayBias;
+
+        [SerializeField]
+        private float m_RayTracedShadowSunAngularDiameter = DefaultRayTracedShadowSunAngularDiameter;
 
         [NonSerialized]
         private bool m_Animated;
@@ -353,6 +373,59 @@ namespace VividRP.Runtime
             }
         }
 
+        public bool enableRayTracedShadow
+        {
+            get => m_EnableRayTracedShadow;
+            set
+            {
+                if (m_EnableRayTracedShadow == value)
+                    return;
+
+                m_EnableRayTracedShadow = value;
+                NotifyLightDataChanged();
+            }
+        }
+
+        public float rayTracedShadowRayLength
+        {
+            get => m_RayTracedShadowRayLength;
+            set => SetRayTracedShadowFloat(
+                ref m_RayTracedShadowRayLength,
+                value,
+                DefaultRayTracedShadowRayLength);
+        }
+
+        public float rayTracedShadowRayBias
+        {
+            get => m_RayTracedShadowRayBias;
+            set => SetRayTracedShadowFloat(
+                ref m_RayTracedShadowRayBias,
+                value,
+                DefaultRayTracedShadowRayBias);
+        }
+
+        public float rayTracedShadowDistantRayBias
+        {
+            get => m_RayTracedShadowDistantRayBias;
+            set => SetRayTracedShadowFloat(
+                ref m_RayTracedShadowDistantRayBias,
+                value,
+                DefaultRayTracedShadowDistantRayBias);
+        }
+
+        public float rayTracedShadowSunAngularDiameter
+        {
+            get => m_RayTracedShadowSunAngularDiameter;
+            set => SetRayTracedShadowFloat(
+                ref m_RayTracedShadowSunAngularDiameter,
+                value,
+                DefaultRayTracedShadowSunAngularDiameter);
+        }
+
+        internal bool supportsRayTracedShadow => light != null && light.type == LightType.Directional;
+
+        internal bool isRayTracedShadowActive => isActiveAndEnabled && supportsRayTracedShadow && m_EnableRayTracedShadow;
+
         internal void NotifyLightDataChanged()
         {
             VividLightRenderDatabase.instance.UpdateLightData(light, this);
@@ -401,6 +474,7 @@ namespace VividRP.Runtime
         private void OnValidate()
         {
             m_Light = light;
+            ConstrainRayTracedShadowSettings();
             RefreshAnimatedState();
             VividLightRenderDatabase.instance.UpdateLightData(m_Light, this);
         }
@@ -408,6 +482,40 @@ namespace VividRP.Runtime
         private void RefreshAnimatedState()
         {
             m_Animated = GetComponent<Animator>() != null;
+        }
+
+        private void SetRayTracedShadowFloat(ref float field, float value, float defaultValue)
+        {
+            var sanitizedValue = SanitizeRayTracedShadowFloat(value, defaultValue);
+            if (Mathf.Approximately(field, sanitizedValue))
+                return;
+
+            field = sanitizedValue;
+            NotifyLightDataChanged();
+        }
+
+        private void ConstrainRayTracedShadowSettings()
+        {
+            m_RayTracedShadowRayLength = SanitizeRayTracedShadowFloat(
+                m_RayTracedShadowRayLength,
+                DefaultRayTracedShadowRayLength);
+            m_RayTracedShadowRayBias = SanitizeRayTracedShadowFloat(
+                m_RayTracedShadowRayBias,
+                DefaultRayTracedShadowRayBias);
+            m_RayTracedShadowDistantRayBias = SanitizeRayTracedShadowFloat(
+                m_RayTracedShadowDistantRayBias,
+                DefaultRayTracedShadowDistantRayBias);
+            m_RayTracedShadowSunAngularDiameter = SanitizeRayTracedShadowFloat(
+                m_RayTracedShadowSunAngularDiameter,
+                DefaultRayTracedShadowSunAngularDiameter);
+        }
+
+        private static float SanitizeRayTracedShadowFloat(float value, float defaultValue)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                return defaultValue;
+
+            return Mathf.Max(0f, value);
         }
     }
 }

@@ -14,6 +14,7 @@ Texture2D<float4> _GBuffer1;
 Texture2D<float4> _GBuffer2;
 Texture2D<float4> _GBuffer3;
 Texture2D<float> _DepthTexture;
+Texture2D<float> _DirectionalShadowTexture;
 StructuredBuffer<uint> _MaterialPixelIndices;
 
 RWTexture2D<float4> _LightingTexture;
@@ -67,6 +68,12 @@ VividGBufferSurfaceData LoadVividGBuffer(uint2 pixelCoord)
     return UnpackVividGBufferSurfaceData(rt0, rt1, rt2, rt3);
 }
 
+float SampleDirectionalShadow(uint2 pixelCoord)
+{
+    float2 uv = (float2(pixelCoord) + 0.5) / float2(_LightingWidth, _LightingHeight);
+    return _DirectionalShadowTexture.SampleLevel(sampler_PointClamp, uv, 0).x;
+}
+
 float3 EvaluateDeferredLitLighting(VividGBufferSurfaceData surfaceData, uint2 pixelCoord, float3 positionWS)
 {
     float3 viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(positionWS));
@@ -78,7 +85,14 @@ float3 EvaluateDeferredLitLighting(VividGBufferSurfaceData surfaceData, uint2 pi
     for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)
     {
         DirectionalLightData directionalLight = GetDirectionalLight(lightIndex);
-        lighting += EvaluateDirectional(surfaceData, bsdfData, preLightData, viewDirectionWS, directionalLight);
+        float shadowTerm = 1.0;
+        if ((int)lightIndex == _MainDirectionalLightIndex)
+        {
+            float directionalShadow = saturate(SampleDirectionalShadow(pixelCoord));
+            shadowTerm = lerp(1.0, directionalShadow, saturate(directionalLight.shadowStrength));
+        }
+
+        lighting += EvaluateDirectional(surfaceData, bsdfData, preLightData, viewDirectionWS, directionalLight) * shadowTerm;
     }
 
     if (HasPunctualLights())

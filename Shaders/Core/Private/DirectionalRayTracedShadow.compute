@@ -1,0 +1,69 @@
+#pragma kernel DirectionalRayTracedShadow
+#pragma use_dxc
+#pragma require inlineraytracing
+#pragma only_renderers d3d11 xboxseries ps5
+
+#include "UnityRayQuery.cginc"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/RaytracingCommon.hlsl"
+
+RaytracingAccelerationStructure _AccelerationStructure;
+Texture2D<float> _DepthTexture;
+Texture2D<float4> _GBuffer1;
+RWTexture2D<float> _DirectionalShadowTexture;
+
+float4 _LightDirectionWS;
+float _RayLength;
+
+bool IsSkyPixel(float deviceDepth)
+{
+    return deviceDepth == UNITY_RAW_FAR_CLIP_VALUE;
+}
+
+[numthreads(8, 8, 1)]
+void DirectionalRayTracedShadow(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    if (dispatchThreadID.x >= (uint)_ScreenSize.x || dispatchThreadID.y >= (uint)_ScreenSize.y)
+        return;
+
+    uint2 pixelCoord = dispatchThreadID.xy;
+    float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
+
+    if (IsSkyPixel(deviceDepth))
+    {
+        _DirectionalShadowTexture[pixelCoord] = 1.0;
+        return;
+    }
+
+    float2 uv = (float2(pixelCoord) + 0.5) / float2(_ScreenSize.xy);
+    float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, UNITY_MATRIX_I_VP);
+    float3 normalWS = DecodeVividNormalOct(_GBuffer1.Load(int3(pixelCoord, 0)).xy);
+    float3 lightDirectionWS = SafeNormalize(_LightDirectionWS.xyz);
+
+    if (dot(normalWS, lightDirectionWS) <= 0.0 || _RayLength <= 0.0)
+    {
+        _DirectionalShadowTexture[pixelCoord] = 1.0;
+        return;
+    }
+
+    RayDesc shadowRay;
+    shadowRay.Origin = positionWS + normalWS * EvaluateRayTracingBias(positionWS);
+    shadowRay.Direction = lightDirectionWS;
+    shadowRay.TMin = 0.0;
+    shadowRay.TMax = _RayLength;
+
+    UnityRayQuery<RAY_FLAG_CULL_BACK_FACING_TRIANGLES > query;
+    query.TraceRayInline(
+        _AccelerationStructure,
+        RAY_FLAG_CULL_BACK_FACING_TRIANGLES ,
+        0xFF,
+        shadowRay);
+
+    while (query.Proceed())
+    {
+    }
+
+    _DirectionalShadowTexture[pixelCoord] =
+        query.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 0.0 : 1.0;
+}

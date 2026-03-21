@@ -236,5 +236,39 @@ namespace VividRP.Editor.Tests
                 Object.DestroyImmediate(profile);
             }
         }
+
+        [Test]
+        public void ShaderVariablesRayTracingUtility_Create_UsesRayTracingSettingsData()
+        {
+            var settings = new VividRayTracingSettingsData
+            {
+                rayBias = 0.02f,
+                distantRayBias = 0.08f,
+                minSolidAngle = 6f,
+            };
+
+            var shaderVariables = ShaderVariablesRayTracingUtility.Create(settings);
+
+            Assert.That(shaderVariables._RayTracingRayBias, Is.EqualTo(0.02f));
+            Assert.That(shaderVariables._RayTracingDistantRayBias, Is.EqualTo(0.08f));
+            Assert.That(shaderVariables._RayTracingMinSolidAngle, Is.EqualTo(6f));
+        }
+
+        [Test]
+        public void ShaderVariablesRayTracingUtility_OverrideBiases_ReplacesBiasValues()
+        {
+            var shaderVariables = new ShaderVariablesRayTracing
+            {
+                _RayTracingRayBias = 0.01f,
+                _RayTracingDistantRayBias = 0.04f,
+                _RayTracingMinSolidAngle = 3f,
+            };
+
+            ShaderVariablesRayTracingUtility.OverrideBiases(ref shaderVariables, 0.03f, 0.09f);
+
+            Assert.That(shaderVariables._RayTracingRayBias, Is.EqualTo(0.03f));
+            Assert.That(shaderVariables._RayTracingDistantRayBias, Is.EqualTo(0.09f));
+            Assert.That(shaderVariables._RayTracingMinSolidAngle, Is.EqualTo(3f));
+        }
     }
 }

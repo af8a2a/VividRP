@@ -1,7 +1,13 @@
 {
     "name": "VividRP.Runtime.GPUDriven",
     "rootNamespace": "VividRP.Runtime.GPUDriven",
-    "references": [],
+    "references": [
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.Mathematics",
+        "Unity.Collections",
+        "Unity.Burst"
+    ],
     "includePlatforms": [],
-    "excludePlatforms": []
+    "excludePlatforms": [],
+    "allowUnsafeCode": true
 }

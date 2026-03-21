@@ -9,8 +9,7 @@ namespace VividRP.Editor
 {
     public class PipelineResourceUpdater : AssetPostprocessor
     {
-        private const string ContainerPath = "Packages/com.af8a2a.vividrp/Runtime/Resources/PipelineResources.asset";
-        private const string PackageRuntimeRoot = "Packages/com.af8a2a.vividrp/";
+        private const string ContainerRelativePath = "Runtime/Resources/PipelineResources.asset";
 
         [InitializeOnLoadMethod]
         private static void OnLoad()
@@ -77,11 +76,12 @@ namespace VividRP.Editor
 
         private static void UpdateDefaultContainerResources()
         {
-            var container = AssetDatabase.LoadAssetAtPath<PipelineResourcesContainer>(ContainerPath);
+            var containerPath = VividPackagePathUtility.GetPreferredAssetPath(ContainerRelativePath);
+            var container = AssetDatabase.LoadAssetAtPath<PipelineResourcesContainer>(containerPath);
             if (container == null)
             {
                 container = ScriptableObject.CreateInstance<PipelineResourcesContainer>();
-                AssetDatabase.CreateAsset(container, ContainerPath);
+                AssetDatabase.CreateAsset(container, containerPath);
             }
 
             UpdateContainerResources(container);
@@ -134,16 +134,21 @@ namespace VividRP.Editor
 
             foreach (var ext in extensions)
             {
-                var fullPath = PackageRuntimeRoot + relativePath + ext;
-                var asset = AssetDatabase.LoadAssetAtPath(fullPath, fieldType);
+                var asset = LoadFirstMatchingAsset(relativePath + ext, fieldType);
                 if (asset != null)
                     return asset;
             }
 
             // Try the path as-is (already has extension)
+            return LoadFirstMatchingAsset(relativePath, fieldType);
+        }
+
+        private static UnityEngine.Object LoadFirstMatchingAsset(string relativePath, Type fieldType)
+        {
+            var candidateAssetPaths = VividPackagePathUtility.GetCandidateAssetPaths(relativePath);
+            for (var i = 0; i < candidateAssetPaths.Length; i++)
             {
-                var fullPath = PackageRuntimeRoot + relativePath;
-                var asset = AssetDatabase.LoadAssetAtPath(fullPath, fieldType);
+                var asset = AssetDatabase.LoadAssetAtPath(candidateAssetPaths[i], fieldType);
                 if (asset != null)
                     return asset;
             }

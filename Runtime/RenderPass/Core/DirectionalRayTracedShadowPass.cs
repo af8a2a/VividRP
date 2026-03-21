@@ -196,7 +196,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     "DebugTexture",
                     m_debugTexture.innerHandle);
 
-                Debug.Log(m_LightDirectionWS);
+                // Debug.Log(m_LightDirectionWS);
                 nativeCmd.SetComputeVectorParam(m_DirectionalRayTracedShadowCompute, LightDirectionWSId, m_LightDirectionWS);
                 nativeCmd.SetComputeFloatParam(m_DirectionalRayTracedShadowCompute, RayLengthId, m_RayLength);
 
@@ -401,7 +401,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var texture = new RenderGraphTexture
             {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R8G8B8A8_SNorm)
+                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R32_SFloat)
             };
             texture.desc.Name = name;
             texture.desc.ClearBuffer = true;

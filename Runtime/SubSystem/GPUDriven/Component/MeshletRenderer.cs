@@ -153,9 +153,36 @@ namespace VividRP.Runtime.GPUDriven
             RefreshSource();
         }
 
+        private void OnEnable()
+        {
+            RefreshSource();
+            SyncDatabaseRegistration();
+        }
+
+        private void LateUpdate()
+        {
+            if (!isActiveAndEnabled)
+            {
+                return;
+            }
+
+            VividMeshletRendererDatabase.instance.UpdateRendererData(this);
+        }
+
+        private void OnDisable()
+        {
+            VividMeshletRendererDatabase.instance.UnregisterRenderer(this);
+        }
+
+        private void OnDestroy()
+        {
+            VividMeshletRendererDatabase.instance.UnregisterRenderer(this);
+        }
+
         private void OnValidate()
         {
             RefreshSource();
+            SyncDatabaseRegistration();
         }
 
         private bool SetSource(Renderer renderer, Mesh mesh)
@@ -263,6 +290,17 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             return true;
+        }
+
+        private void SyncDatabaseRegistration()
+        {
+            if (isActiveAndEnabled)
+            {
+                VividMeshletRendererDatabase.instance.UpdateRendererData(this);
+                return;
+            }
+
+            VividMeshletRendererDatabase.instance.UnregisterRenderer(this);
         }
     }
 }

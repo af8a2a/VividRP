@@ -13,7 +13,7 @@ RaytracingAccelerationStructure _AccelerationStructure;
 Texture2D<float> _DepthTexture;
 Texture2D<float4> _GBuffer1;
 RWTexture2D<float> _DirectionalShadowTexture;
-RWTexture2D<float4> DebugTexture;
+RWTexture2D<float> DebugTexture;
 
 float4 _LightDirectionWS;
 float _RayLength;
@@ -32,6 +32,7 @@ void DirectionalRayTracedShadow(uint3 dispatchThreadID : SV_DispatchThreadID)
     uint2 pixelCoord = dispatchThreadID.xy;
     float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
 
+
     if (IsSkyPixel(deviceDepth))
     {
         _DirectionalShadowTexture[pixelCoord] = 1.0;
@@ -43,12 +44,15 @@ void DirectionalRayTracedShadow(uint3 dispatchThreadID : SV_DispatchThreadID)
     float3 normalWS = DecodeVividNormalOct(_GBuffer1.Load(int3(pixelCoord, 0)).xy);
     float3 lightDirectionWS = SafeNormalize(_LightDirectionWS.xyz);
 
+    DebugTexture[pixelCoord]=0;
+
     if (dot(normalWS, lightDirectionWS) <= 0.0 || _RayLength <= 0.0)
     {
         _DirectionalShadowTexture[pixelCoord] = 1.0;
         return;
     }
 
+    DebugTexture[pixelCoord]=deviceDepth;
     RayDesc shadowRay;
     shadowRay.Origin = positionWS + normalWS * EvaluateRayTracingBias(positionWS);
     shadowRay.Direction = lightDirectionWS;
@@ -66,7 +70,6 @@ void DirectionalRayTracedShadow(uint3 dispatchThreadID : SV_DispatchThreadID)
     {
     }
 
-    DebugTexture[pixelCoord]=deviceDepth;//float4(positionWS,1);
     _DirectionalShadowTexture[pixelCoord] =
         query.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 0.0 : 1.0;
 }

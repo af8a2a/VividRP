@@ -1,0 +1,66 @@
+#pragma kernel CS
+
+#pragma use_dxc
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
+
+#define THREAD_GROUP_SIZE 32
+
+StructuredBuffer<VividGPUCullingContext> _CullingContexts;
+StructuredBuffer<uint> _VisibleMeshletRenderRequestCounter;
+StructuredBuffer<VividMeshletRenderRequestPacked> _CandidateMeshletRenderRequests;
+
+RWStructuredBuffer<VividMeshletRenderRequestPacked> _VisibleMeshletRenderRequests;
+RWStructuredBuffer<uint> _VisibleRendererListMeshletCounts;
+RWByteAddressBuffer _VisibleMeshletIndirectDrawArgs;
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    const uint candidateIndex = dispatchThreadID.x;
+    if (candidateIndex >= _VisibleMeshletRenderRequestCounter[0])
+    {
+        return;
+    }
+
+    const VividGPUCullingContext cullingContext = _CullingContexts[0];
+    const VividMeshletRenderRequestPacked renderRequest = _CandidateMeshletRenderRequests[candidateIndex];
+
+    if (renderRequest.MeshletID >= _MeshletCount)
+    {
+        return;
+    }
+
+    const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
+    const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
+    const uint rendererListIndex = min(GetRendererListID(instanceData, materialData), VIVIDRENDERERLISTID_COUNT - 1u);
+    const VividMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
+    const float4 boundingSphereWS = TransformSphere(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
+
+    if (!FrustumVsSphere(cullingContext, boundingSphereWS))
+    {
+        return;
+    }
+
+    if ((rendererListIndex & VIVIDRENDERERLISTID_CULL_OFF) == 0u &&
+        !ConeCulling(cullingContext, instanceData, meshlet))
+    {
+        return;
+    }
+
+    const uint drawArgsAddress = GetIndirectDrawArgsByteAddress(rendererListIndex);
+
+    uint localWriteOffset;
+    _VisibleMeshletIndirectDrawArgs.InterlockedAdd(
+        drawArgsAddress + VIVID_INDIRECT_DRAW_ARGS_INSTANCE_COUNT_OFFSET,
+        1u,
+        localWriteOffset
+    );
+
+    const uint startInstance = _VisibleMeshletIndirectDrawArgs.Load(
+        drawArgsAddress + VIVID_INDIRECT_DRAW_ARGS_START_INSTANCE_OFFSET
+    );
+    const uint writeIndex = startInstance + localWriteOffset;
+    _VisibleMeshletRenderRequests[writeIndex] = renderRequest;
+    InterlockedAdd(_VisibleRendererListMeshletCounts[rendererListIndex], 1u);
+}

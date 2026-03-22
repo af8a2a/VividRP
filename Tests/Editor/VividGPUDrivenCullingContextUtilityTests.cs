@@ -72,10 +72,14 @@ namespace VividRP.Editor.Tests
 
                 cmd = CommandBufferPool.Get("VividGPUDrivenCullTest");
 
-                Assert.DoesNotThrow(() => system.Cull(camera, cmd, null, null));
+                Assert.DoesNotThrow(() => system.Cull(camera, cmd, null, null, null));
+                Assert.That(system.CullingBufferSet.CandidateMeshletRenderRequestsBuffer, Is.Not.Null);
+                Assert.That(system.CullingBufferSet.GPUMeshletCullingIndirectDispatchArgsBuffer, Is.Not.Null);
                 Assert.That(system.CullingBufferSet.VisibleMeshletRenderRequestsBuffer, Is.Not.Null);
                 Assert.That(system.CullingBufferSet.VisibleMeshletRenderRequestCounterBuffer, Is.Not.Null);
+                Assert.That(system.CullingBufferSet.VisibleMeshletIndirectDrawArgsBuffer, Is.Not.Null);
                 Assert.That(system.CullingBufferSet.MeshletListBuildJobsBuffer, Is.Not.Null);
+                Assert.That(system.VisibleMeshletIndirectDrawArgsBuffer, Is.Not.Null);
                 Assert.DoesNotThrow(() => system.BindGlobals(cmd));
             }
             finally

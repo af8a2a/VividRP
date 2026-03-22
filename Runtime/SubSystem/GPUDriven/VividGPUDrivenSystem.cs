@@ -56,6 +56,10 @@ namespace VividRP.Runtime.GPUDriven
 
         public float MeshLODErrorThreshold { get; set; }
 
+        public GraphicsBuffer VisibleMeshletRenderRequestsBuffer => m_CullingDispatcher.BufferSet.VisibleMeshletRenderRequestsBuffer;
+
+        public GraphicsBuffer VisibleMeshletIndirectDrawArgsBuffer => m_CullingDispatcher.BufferSet.VisibleMeshletIndirectDrawArgsBuffer;
+
         public void PrepareFrame()
         {
             ThrowIfDisposed();
@@ -70,6 +74,8 @@ namespace VividRP.Runtime.GPUDriven
             CommandBuffer cmd,
             ComputeShader gpuInstanceCullingCompute,
             ComputeShader meshletListBuildCompute,
+            ComputeShader gpuMeshletCullingCompute = null,
+            ComputeShader fixupVisibleMeshletIndirectDrawArgsCompute = null,
             VividInstancePassMask passMask = VividInstancePassMask.Main
         )
         {
@@ -82,6 +88,8 @@ namespace VividRP.Runtime.GPUDriven
                 m_BufferSet,
                 gpuInstanceCullingCompute,
                 meshletListBuildCompute,
+                gpuMeshletCullingCompute,
+                fixupVisibleMeshletIndirectDrawArgsCompute,
                 passMask,
                 ForcedMeshLODNodeDepth,
                 MeshLODErrorThreshold

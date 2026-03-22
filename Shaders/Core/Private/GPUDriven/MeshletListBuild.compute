@@ -15,7 +15,7 @@ StructuredBuffer<VividGPULODSelectionContext> _LODSelectionContexts;
 StructuredBuffer<VividMeshletListBuildJob> _MeshletListBuildJobs;
 StructuredBuffer<uint> _MeshletListBuildJobCounter;
 
-RWStructuredBuffer<VividMeshletRenderRequestPacked> _VisibleMeshletRenderRequests;
+RWStructuredBuffer<VividMeshletRenderRequestPacked> _CandidateMeshletRenderRequests;
 RWStructuredBuffer<uint> _VisibleMeshletRenderRequestCounter;
 RWStructuredBuffer<uint> _VisibleRendererListMeshletCounts;
 
@@ -59,7 +59,7 @@ void CS(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupID : SV_G
             continue;
         }
 
-        const uint rendererListIndex = min(materialData.RendererListID, VIVIDRENDERERLISTID_COUNT - 1u);
+        const uint rendererListIndex = min(GetRendererListID(instanceData, materialData), VIVIDRENDERERLISTID_COUNT - 1u);
 
         [loop]
         for (uint meshletIndex = 0u; meshletIndex < meshLODNode.MeshletCount; ++meshletIndex)
@@ -70,7 +70,7 @@ void CS(const uint3 groupThreadID : SV_GroupThreadID, const uint3 groupID : SV_G
             VividMeshletRenderRequestPacked request;
             request.InstanceID_LOD = job.InstanceID;
             request.MeshletID = meshLODNode.MeshletStartIndex + meshletIndex;
-            _VisibleMeshletRenderRequests[requestIndex] = request;
+            _CandidateMeshletRenderRequests[requestIndex] = request;
 
             InterlockedAdd(_VisibleRendererListMeshletCounts[rendererListIndex], 1u);
         }

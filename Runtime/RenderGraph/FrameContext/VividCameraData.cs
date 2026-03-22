@@ -91,7 +91,7 @@ namespace VividRP.Runtime
             return GetProjectionMatrix(viewIndex) * GetViewMatrix(viewIndex);
         }
 
-        public Matrix4x4 GetGPUProjectionMatrix(int viewIndex = 0,bool renderIntoTexture = true)
+        public Matrix4x4 GetGPUProjectionMatrix(int viewIndex = 0)
         {
             if (additionalData != null)
                 return additionalData.GetGPUProjectionMatrix(viewIndex);

@@ -161,6 +161,16 @@ namespace VividRP.Runtime.GPUDriven
 
     [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
     [StructLayout(LayoutKind.Sequential)]
+    public struct VividIndirectDrawArgs
+    {
+        public uint VertexCountPerInstance;
+        public uint InstanceCount;
+        public uint StartVertex;
+        public uint StartInstance;
+    }
+
+    [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
+    [StructLayout(LayoutKind.Sequential)]
     public struct IndirectDispatchArgs
     {
         public uint ThreadGroupsX;

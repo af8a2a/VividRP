@@ -14,6 +14,7 @@ namespace VividRP.Editor.RenderPipeline
         private static readonly GUIContent s_RenderGraphLabel = EditorGUIUtility.TrTextContent("Render Graph Asset");
         private static readonly GUIContent s_AsyncComputeLabel = EditorGUIUtility.TrTextContent("Async Compute");
         private static readonly GUIContent s_GpuDrivenLabel = EditorGUIUtility.TrTextContent("GPU Driven");
+        private static readonly GUIContent s_GpuDrivenDebugOverlayLabel = EditorGUIUtility.TrTextContent("GPU Driven Debug Overlay");
         private static readonly GUIContent s_SrpBatcherLabel = EditorGUIUtility.TrTextContent("SRP Batcher");
         private static readonly string s_DefaultVolumeSharedMessage =
             "Default Volume is stored in VividRP Global Settings and shared by all VividRP pipeline assets.";
@@ -57,6 +58,15 @@ namespace VividRP.Editor.RenderPipeline
                 name = "vivid-rp-asset-gpu-driven-field",
             };
             root.Add(gpuDrivenField);
+
+            var gpuDrivenDebugOverlayField = new PropertyField(
+                serializedObject.FindProperty("m_EnableGPUDrivenDebugOverlay"),
+                s_GpuDrivenDebugOverlayLabel.text
+            )
+            {
+                name = "vivid-rp-asset-gpu-driven-debug-overlay-field",
+            };
+            root.Add(gpuDrivenDebugOverlayField);
 
             var srpBatcherField = new PropertyField(serializedObject.FindProperty("m_EnableSRPBatcher"), s_SrpBatcherLabel.text)
             {

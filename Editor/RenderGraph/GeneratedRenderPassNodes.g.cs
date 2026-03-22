@@ -45,6 +45,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class DirectionalRayTracedShadowDenoisePass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.DirectionalRayTracedShadowDenoisePass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class DirectionalRayTracedShadowPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.DirectionalRayTracedShadowPass, VividRP.Runtime";
@@ -135,9 +141,21 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class SIGMAShadowDenoisePass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.Sigma.SIGMAShadowDenoisePass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class SetupPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.SetupPass, VividRP.Runtime";
+    }
+
+    [Serializable]
+    internal sealed class ShadowClassifyPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.ShadowClassifyPass, VividRP.Runtime";
     }
 
     [Serializable]

@@ -9,9 +9,10 @@ namespace VividRP.Runtime.GPUDriven.Bindless
 #if (PLATFORM_IOS || PLATFORM_TVOS || PLATFORM_BRATWURST || PLATFORM_SWITCH) && !UNITY_EDITOR
             "__Internal";
 #else
-            "DELTationBindlessPlugin";
+            "UnityBindless";
 #endif
 
+        
         [DllImport(DLLName)]
         public static extern uint GetSRVDescriptorHeapCount();
 

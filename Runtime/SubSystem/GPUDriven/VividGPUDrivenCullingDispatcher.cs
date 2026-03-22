@@ -8,8 +8,12 @@ namespace VividRP.Runtime.GPUDriven
     {
         private ComputeShader m_GPUInstanceCullingCompute;
         private ComputeShader m_MeshletListBuildCompute;
+        private ComputeShader m_GPUMeshletCullingCompute;
+        private ComputeShader m_FixupVisibleMeshletIndirectDrawArgsCompute;
         private int m_GPUInstanceCullingKernel = -1;
         private int m_MeshletListBuildKernel = -1;
+        private int m_GPUMeshletCullingKernel = -1;
+        private int m_FixupVisibleMeshletIndirectDrawArgsKernel = -1;
         private bool m_IsDisposed;
 
         public VividGPUDrivenCullingDispatcher()
@@ -26,6 +30,8 @@ namespace VividRP.Runtime.GPUDriven
             VividGPUDrivenBufferSet sceneBuffers,
             ComputeShader gpuInstanceCullingCompute,
             ComputeShader meshletListBuildCompute,
+            ComputeShader gpuMeshletCullingCompute,
+            ComputeShader fixupVisibleMeshletIndirectDrawArgsCompute,
             VividInstancePassMask passMask,
             int forcedMeshLODNodeDepth,
             float meshLODErrorThreshold
@@ -60,13 +66,21 @@ namespace VividRP.Runtime.GPUDriven
                 sceneBuffers.InstanceDataBuffer == null ||
                 sceneBuffers.MaterialDataBuffer == null ||
                 sceneBuffers.MeshLODNodesBuffer == null ||
+                sceneBuffers.MeshletsBuffer == null ||
                 gpuInstanceCullingCompute == null ||
-                meshletListBuildCompute == null)
+                meshletListBuildCompute == null ||
+                gpuMeshletCullingCompute == null ||
+                fixupVisibleMeshletIndirectDrawArgsCompute == null)
             {
                 return;
             }
 
-            EnsureKernels(gpuInstanceCullingCompute, meshletListBuildCompute);
+            EnsureKernels(
+                gpuInstanceCullingCompute,
+                meshletListBuildCompute,
+                gpuMeshletCullingCompute,
+                fixupVisibleMeshletIndirectDrawArgsCompute
+            );
 
             VividGPUDrivenCullingContextUtility.Build(
                 camera,
@@ -79,6 +93,8 @@ namespace VividRP.Runtime.GPUDriven
 
             DispatchGPUInstanceCulling(cmd, sceneData.InstanceCount, sceneBuffers);
             DispatchMeshletListBuild(cmd, sceneBuffers, forcedMeshLODNodeDepth, meshLODErrorThreshold);
+            DispatchFixupVisibleMeshletIndirectDrawArgs(cmd);
+            DispatchGPUMeshletCulling(cmd, sceneBuffers);
         }
 
         public void BindGlobals(CommandBuffer cmd)
@@ -97,8 +113,12 @@ namespace VividRP.Runtime.GPUDriven
             BufferSet.Dispose();
             m_GPUInstanceCullingCompute = null;
             m_MeshletListBuildCompute = null;
+            m_GPUMeshletCullingCompute = null;
+            m_FixupVisibleMeshletIndirectDrawArgsCompute = null;
             m_GPUInstanceCullingKernel = -1;
             m_MeshletListBuildKernel = -1;
+            m_GPUMeshletCullingKernel = -1;
+            m_FixupVisibleMeshletIndirectDrawArgsKernel = -1;
             m_IsDisposed = true;
         }
 
@@ -212,8 +232,8 @@ namespace VividRP.Runtime.GPUDriven
             cmd.SetComputeBufferParam(
                 m_MeshletListBuildCompute,
                 m_MeshletListBuildKernel,
-                VividGPUDrivenShaderIDs._VisibleMeshletRenderRequests,
-                BufferSet.VisibleMeshletRenderRequestsBuffer
+                VividGPUDrivenShaderIDs._CandidateMeshletRenderRequests,
+                BufferSet.CandidateMeshletRenderRequestsBuffer
             );
             cmd.SetComputeBufferParam(
                 m_MeshletListBuildCompute,
@@ -246,9 +266,110 @@ namespace VividRP.Runtime.GPUDriven
             );
         }
 
+        private void DispatchFixupVisibleMeshletIndirectDrawArgs(CommandBuffer cmd)
+        {
+            cmd.SetComputeBufferParam(
+                m_FixupVisibleMeshletIndirectDrawArgsCompute,
+                m_FixupVisibleMeshletIndirectDrawArgsKernel,
+                VividGPUDrivenShaderIDs._VisibleMeshletRenderRequestCounter,
+                BufferSet.VisibleMeshletRenderRequestCounterBuffer
+            );
+            cmd.SetComputeBufferParam(
+                m_FixupVisibleMeshletIndirectDrawArgsCompute,
+                m_FixupVisibleMeshletIndirectDrawArgsKernel,
+                VividGPUDrivenShaderIDs._VisibleRendererListMeshletCounts,
+                BufferSet.VisibleRendererListMeshletCountsBuffer
+            );
+            cmd.SetComputeBufferParam(
+                m_FixupVisibleMeshletIndirectDrawArgsCompute,
+                m_FixupVisibleMeshletIndirectDrawArgsKernel,
+                VividGPUDrivenShaderIDs._VisibleMeshletIndirectDrawArgs,
+                BufferSet.VisibleMeshletIndirectDrawArgsBuffer
+            );
+            cmd.SetComputeBufferParam(
+                m_FixupVisibleMeshletIndirectDrawArgsCompute,
+                m_FixupVisibleMeshletIndirectDrawArgsKernel,
+                VividGPUDrivenShaderIDs._GPUMeshletCullingIndirectDispatchArgs,
+                BufferSet.GPUMeshletCullingIndirectDispatchArgsBuffer
+            );
+            cmd.DispatchCompute(m_FixupVisibleMeshletIndirectDrawArgsCompute, m_FixupVisibleMeshletIndirectDrawArgsKernel, 1, 1, 1);
+        }
+
+        private void DispatchGPUMeshletCulling(CommandBuffer cmd, VividGPUDrivenBufferSet sceneBuffers)
+        {
+            cmd.SetComputeBufferParam(
+                m_GPUMeshletCullingCompute,
+                m_GPUMeshletCullingKernel,
+                VividGPUDrivenShaderIDs._CullingContexts,
+                BufferSet.CullingContextBuffer
+            );
+            cmd.SetComputeBufferParam(
+                m_GPUMeshletCullingCompute,
+                m_GPUMeshletCullingKernel,
+                VividGPUDrivenShaderIDs._InstanceData,
+                sceneBuffers.InstanceDataBuffer
+            );
+            cmd.SetComputeBufferParam(
+                m_GPUMeshletCullingCompute,
+                m_GPUMeshletCullingKernel,
+                VividGPUDrivenShaderIDs._MaterialData,
+                sceneBuffers.MaterialDataBuffer
+            );
+            cmd.SetComputeBufferParam(
+                m_GPUMeshletCullingCompute,
+                m_GPUMeshletCullingKernel,
+                VividGPUDrivenShaderIDs._Meshlets,
+                sceneBuffers.MeshletsBuffer
+            );
+            cmd.SetComputeIntParam(
+                m_GPUMeshletCullingCompute,
+                VividGPUDrivenShaderIDs._MeshletCount,
+                sceneBuffers.MeshletCount
+            );
+            cmd.SetComputeBufferParam(
+                m_GPUMeshletCullingCompute,
+                m_GPUMeshletCullingKernel,
+                VividGPUDrivenShaderIDs._VisibleMeshletRenderRequestCounter,
+                BufferSet.VisibleMeshletRenderRequestCounterBuffer
+            );
+            cmd.SetComputeBufferParam(
+                m_GPUMeshletCullingCompute,
+                m_GPUMeshletCullingKernel,
+                VividGPUDrivenShaderIDs._CandidateMeshletRenderRequests,
+                BufferSet.CandidateMeshletRenderRequestsBuffer
+            );
+            cmd.SetComputeBufferParam(
+                m_GPUMeshletCullingCompute,
+                m_GPUMeshletCullingKernel,
+                VividGPUDrivenShaderIDs._VisibleMeshletRenderRequests,
+                BufferSet.VisibleMeshletRenderRequestsBuffer
+            );
+            cmd.SetComputeBufferParam(
+                m_GPUMeshletCullingCompute,
+                m_GPUMeshletCullingKernel,
+                VividGPUDrivenShaderIDs._VisibleRendererListMeshletCounts,
+                BufferSet.VisibleRendererListMeshletCountsBuffer
+            );
+            cmd.SetComputeBufferParam(
+                m_GPUMeshletCullingCompute,
+                m_GPUMeshletCullingKernel,
+                VividGPUDrivenShaderIDs._VisibleMeshletIndirectDrawArgs,
+                BufferSet.VisibleMeshletIndirectDrawArgsBuffer
+            );
+
+            cmd.DispatchCompute(
+                m_GPUMeshletCullingCompute,
+                m_GPUMeshletCullingKernel,
+                BufferSet.GPUMeshletCullingIndirectDispatchArgsBuffer,
+                0
+            );
+        }
+
         private void EnsureKernels(
             ComputeShader gpuInstanceCullingCompute,
-            ComputeShader meshletListBuildCompute
+            ComputeShader meshletListBuildCompute,
+            ComputeShader gpuMeshletCullingCompute,
+            ComputeShader fixupVisibleMeshletIndirectDrawArgsCompute
         )
         {
             if (!ReferenceEquals(m_GPUInstanceCullingCompute, gpuInstanceCullingCompute))
@@ -261,6 +382,20 @@ namespace VividRP.Runtime.GPUDriven
             {
                 m_MeshletListBuildCompute = meshletListBuildCompute;
                 m_MeshletListBuildKernel = m_MeshletListBuildCompute.FindKernel("CS");
+            }
+
+            if (!ReferenceEquals(m_GPUMeshletCullingCompute, gpuMeshletCullingCompute))
+            {
+                m_GPUMeshletCullingCompute = gpuMeshletCullingCompute;
+                m_GPUMeshletCullingKernel = m_GPUMeshletCullingCompute.FindKernel("CS");
+            }
+
+            if (!ReferenceEquals(m_FixupVisibleMeshletIndirectDrawArgsCompute, fixupVisibleMeshletIndirectDrawArgsCompute))
+            {
+                m_FixupVisibleMeshletIndirectDrawArgsCompute = fixupVisibleMeshletIndirectDrawArgsCompute;
+                m_FixupVisibleMeshletIndirectDrawArgsKernel = m_FixupVisibleMeshletIndirectDrawArgsCompute != null
+                    ? m_FixupVisibleMeshletIndirectDrawArgsCompute.FindKernel("CS")
+                    : -1;
             }
         }
 

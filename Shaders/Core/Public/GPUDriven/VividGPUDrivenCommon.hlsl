@@ -7,9 +7,13 @@
 #define VIVIDINSTANCEFLAGS_DISABLED 1u
 #define VIVIDINSTANCEFLAGS_FLIP_WINDING_ORDER 2u
 
+#define VIVIDRENDERERLISTID_CULL_FRONT 1u
+#define VIVIDRENDERERLISTID_CULL_OFF 2u
+#define VIVIDRENDERERLISTID_ALPHA_TEST 4u
 #define VIVIDRENDERERLISTID_COUNT 8u
+#define VIVID_MAX_MESHLET_INDICES 384u
 #define VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH 0xffffffffu
-
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
 struct VividInstanceData
 {
     float4x4 ObjectToWorldMatrix;
@@ -66,11 +70,50 @@ struct VividMeshLODNode
     uint Padding2;
 };
 
+struct VividMeshlet
+{
+    uint VertexOffset;
+    uint TriangleOffset;
+    uint VertexCount;
+    uint TriangleCount;
+
+    float4 BoundingSphere;
+    float4 ConeApexCutoff;
+    float4 ConeAxis;
+};
+
+struct VividMeshletVertex
+{
+    float4 Position;
+    float4 Normal;
+    float4 Tangent;
+    float4 UV;
+};
+
 struct VividMeshletRenderRequestPacked
 {
     uint InstanceID_LOD;
     uint MeshletID;
 };
+
+struct VividIndirectDrawArgs
+{
+    uint VertexCountPerInstance;
+    uint InstanceCount;
+    uint StartVertex;
+    uint StartInstance;
+};
+
+static const uint VIVID_INDIRECT_DRAW_ARGS_STRIDE = 16u;
+static const uint VIVID_INDIRECT_DRAW_ARGS_VERTEX_COUNT_OFFSET = 0u;
+static const uint VIVID_INDIRECT_DRAW_ARGS_INSTANCE_COUNT_OFFSET = 4u;
+static const uint VIVID_INDIRECT_DRAW_ARGS_START_VERTEX_OFFSET = 8u;
+static const uint VIVID_INDIRECT_DRAW_ARGS_START_INSTANCE_OFFSET = 12u;
+
+uint GetIndirectDrawArgsByteAddress(const uint drawArgsIndex)
+{
+    return drawArgsIndex * VIVID_INDIRECT_DRAW_ARGS_STRIDE;
+}
 
 struct VividGPUCullingContext
 {
@@ -116,7 +159,9 @@ uint _InstanceDataCount;
 
 StructuredBuffer<VividMaterialData> _MaterialData;
 StructuredBuffer<VividMeshLODNode> _MeshLODNodes;
+StructuredBuffer<VividMeshlet> _Meshlets;
 uint _MeshLODNodeCount;
+uint _MeshletCount;
 
 VividInstanceData PullInstanceData(const uint instanceIndex)
 {
@@ -131,6 +176,11 @@ VividMaterialData PullMaterialData(const uint materialIndex)
 VividMeshLODNode PullMeshLODNode(const uint nodeIndex)
 {
     return _MeshLODNodes[nodeIndex];
+}
+
+VividMeshlet PullMeshletData(const uint meshletIndex)
+{
+    return _Meshlets[meshletIndex];
 }
 
 float LengthSq(const float3 value)
@@ -203,6 +253,56 @@ float GetScreenBoundRadiusSq(const VividGPULODSelectionContext lodSelectionConte
     const float2 screenUp = (up - center) * lodSelectionContext.ScreenSizePixels;
     const float2 screenRight = (right - center) * lodSelectionContext.ScreenSizePixels;
     return max(dot(screenUp, screenUp), dot(screenRight, screenRight));
+}
+
+uint GetRendererListID(const VividInstanceData instanceData, const VividMaterialData materialData)
+{
+    uint rendererListID = materialData.RendererListID;
+
+    if ((instanceData.Flags & VIVIDINSTANCEFLAGS_FLIP_WINDING_ORDER) != 0u &&
+        (rendererListID & VIVIDRENDERERLISTID_CULL_OFF) == 0u)
+    {
+        if ((rendererListID & VIVIDRENDERERLISTID_CULL_FRONT) != 0u)
+        {
+            rendererListID &= ~VIVIDRENDERERLISTID_CULL_FRONT;
+        }
+        else
+        {
+            rendererListID |= VIVIDRENDERERLISTID_CULL_FRONT;
+        }
+    }
+
+    return rendererListID;
+}
+
+float3 GetViewForwardDir(const float4x4 viewMatrix)
+{
+    const float3x3 worldFromViewMatrix = UNITY_MATRIX_I_V;
+    return normalize(mul(worldFromViewMatrix, float3(0.0f, 0.0f, -1.0f)));
+}
+
+bool ConeCulling(
+    const VividGPUCullingContext cullingContext,
+    const VividInstanceData instanceData,
+    const VividMeshlet meshlet
+)
+{
+    const float3 coneApexWS = TransformPosition(instanceData.ObjectToWorldMatrix, meshlet.ConeApexCutoff.xyz);
+    float3 coneAxisWS = mul((float3x3) instanceData.ObjectToWorldMatrix, meshlet.ConeAxis.xyz);
+    const float axisLengthSq = LengthSq(coneAxisWS);
+
+    if (axisLengthSq <= 1e-8f)
+    {
+        return true;
+    }
+
+    coneAxisWS *= rsqrt(axisLengthSq);
+
+    const float3 viewDirWS = cullingContext.CameraIsPerspective != 0
+        ? normalize(coneApexWS - cullingContext.CameraPosition.xyz)
+        : GetViewForwardDir(cullingContext.ViewMatrix);
+    const float dotResult = dot(viewDirWS, coneAxisWS);
+    return !(dotResult >= meshlet.ConeApexCutoff.w);
 }
 
 bool ShouldSelectMeshLODNode(

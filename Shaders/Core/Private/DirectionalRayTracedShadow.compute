@@ -1,4 +1,5 @@
 #pragma kernel DirectionalRayTracedShadow
+#pragma multi_compile _ SHADOW_CLASSIFY_ENABLED
 #pragma use_dxc
 #pragma require inlineraytracing
 #pragma only_renderers d3d11 xboxseries ps5
@@ -8,20 +9,45 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/RaytracingCommon.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BlueNoise.hlsl"
 
 RaytracingAccelerationStructure _AccelerationStructure;
 Texture2D<float> _DepthTexture;
 Texture2D<float4> _GBuffer1;
 RWTexture2D<float> _DirectionalShadowTexture;
-RWTexture2D<float2> DebugTexture;
+
+#ifdef SHADOW_CLASSIFY_ENABLED
+Texture2D<float> _ShadowClassifyMask;
+#endif
 
 float4x4 _InvViewProjectionMatrix;
 float4 _LightDirectionWS;
+float4 _SunBasisX;
+float4 _SunBasisY;
 float _RayLength;
+float _TanSunAngularRadius;
+int _FrameIndex;
+
 
 bool IsSkyPixel(float deviceDepth)
 {
     return deviceDepth == UNITY_RAW_FAR_CLIP_VALUE;
+}
+
+float3 SampleSunDirection(float3 lightDir, float3 sunBasisX, float3 sunBasisY, float tanSunAngularRadius, float2 rnd)
+{
+    float r = sqrt(rnd.x);
+    float phi = 6.28318530718 * rnd.y;
+    float2 disk = float2(r * cos(phi), r * sin(phi)) * tanSunAngularRadius;
+    return normalize(lightDir + sunBasisX * disk.x + sunBasisY * disk.y);
+}
+
+// Encode hit distance as penumbra radius for denoiser consumption.
+// Returns HALF_MAX when no occluder is found (fully lit).
+float PackPenumbra(float distanceToOccluder, float tanSunAngularRadius)
+{
+    float penumbraRadius = distanceToOccluder * tanSunAngularRadius * 0.5;
+    return distanceToOccluder >= HALF_MAX ? HALF_MAX : min(penumbraRadius, 32768.0);
 }
 
 [numthreads(8, 8, 1)]
@@ -34,36 +60,49 @@ void DirectionalRayTracedShadow(uint3 dispatchThreadID : SV_DispatchThreadID)
     float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
     if (IsSkyPixel(deviceDepth))
     {
-        _DirectionalShadowTexture[pixelCoord] = 1.0;
+        _DirectionalShadowTexture[pixelCoord] = HALF_MAX;
         return;
     }
 
+#ifdef SHADOW_CLASSIFY_ENABLED
+    // Skip pixels classified as not needing ray tracing (backfacing, etc.)
+    if (_ShadowClassifyMask.Load(int3(pixelCoord, 0)) < 0.5)
+    {
+        _DirectionalShadowTexture[pixelCoord] = 0.0;
+        return;
+    }
+#endif
+
     float2 uv = (float2(pixelCoord) + 0.5) / float2(_ScreenSize.xy);
     float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, UNITY_MATRIX_I_VP);
-    
-    float3 grid = frac(positionWS);
-    float lineThickness = 0.2;
-    float gridPattern = step(1.0 - lineThickness, grid.x) || 
-                        step(1.0 - lineThickness, grid.y) || 
-                        step(1.0 - lineThickness, grid.z);
-
-    
-    DebugTexture[pixelCoord] =float2(gridPattern,1) ;
-
 
     float3 normalWS = DecodeVividNormalOct(_GBuffer1.Load(int3(pixelCoord, 0)).xy);
     float3 lightDirectionWS = SafeNormalize(_LightDirectionWS.xyz);
 
+    // When tanSunAngularRadius > 0, sample within the sun disk cone for soft shadows
+    float3 rayDirection;
+    if (_TanSunAngularRadius > 0.0)
+    {
+        float2 rnd = float2(
+            GetBNDSequenceSample(pixelCoord, (uint)_FrameIndex, 0),
+            GetBNDSequenceSample(pixelCoord, (uint)_FrameIndex, 1));
+        rayDirection = SampleSunDirection(lightDirectionWS, _SunBasisX.xyz, _SunBasisY.xyz, _TanSunAngularRadius, rnd);
+    }
+    else
+    {
+        rayDirection = lightDirectionWS;
+    }
+
     RayDesc shadowRay;
     shadowRay.Origin = positionWS + normalWS * EvaluateRayTracingBias(positionWS);
-    shadowRay.Direction = lightDirectionWS;
+    shadowRay.Direction = rayDirection;
     shadowRay.TMin = 0.0;
     shadowRay.TMax = _RayLength;
 
-    UnityRayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES > query;
+    UnityRayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
     query.TraceRayInline(
         _AccelerationStructure,
-        RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES ,
+        RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES,
         0xFF,
         shadowRay);
 
@@ -71,6 +110,18 @@ void DirectionalRayTracedShadow(uint3 dispatchThreadID : SV_DispatchThreadID)
     {
     }
 
-    _DirectionalShadowTexture[pixelCoord] =
-        query.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 0.0 : 1.0;
+    float shadowValue;
+    if (query.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+    {
+        float hitDistance = query.CommittedRayT();
+        shadowValue = (_TanSunAngularRadius > 0.0)
+            ? PackPenumbra(hitDistance, _TanSunAngularRadius)
+            : 0.0;
+    }
+    else
+    {
+        shadowValue = HALF_MAX;
+    }
+
+    _DirectionalShadowTexture[pixelCoord] = shadowValue;
 }

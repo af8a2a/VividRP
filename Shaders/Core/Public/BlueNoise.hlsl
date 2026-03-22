@@ -1,5 +1,6 @@
 #ifndef _SAMPLING_SOBOLBLUENOISESAMPLING_HLSL_
 #define _SAMPLING_SOBOLBLUENOISESAMPLING_HLSL_
+#define FLOAT_ONE_MINUS_EPSILON 0.99999994
 
 Texture2D<float>                _SobolScramblingTile;
 Texture2D<float>                _SobolRankingTile;

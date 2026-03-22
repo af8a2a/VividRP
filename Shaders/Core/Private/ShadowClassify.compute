@@ -1,0 +1,62 @@
+#pragma kernel ShadowClassify
+#pragma use_dxc
+#pragma only_renderers d3d11 xboxseries ps5
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
+
+Texture2D<float>  _DepthTexture;
+Texture2D<float4> _GBuffer1;
+RWTexture2D<float> _ShadowClassifyMask;
+
+float4 _LightDirectionWS;
+float _NormalFacingThreshold;
+
+bool IsSkyPixel(float deviceDepth)
+{
+    return deviceDepth == UNITY_RAW_FAR_CLIP_VALUE;
+}
+
+[numthreads(8, 8, 1)]
+void ShadowClassify(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    if (dispatchThreadID.x >= (uint)_ScreenSize.x || dispatchThreadID.y >= (uint)_ScreenSize.y)
+        return;
+
+    uint2 pixelCoord = dispatchThreadID.xy;
+    float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
+
+    // Sky pixels never need shadow rays
+    if (IsSkyPixel(deviceDepth))
+    {
+        _ShadowClassifyMask[pixelCoord] = 0.0;
+        return;
+    }
+
+    float3 normalWS = DecodeVividNormalOct(_GBuffer1.Load(int3(pixelCoord, 0)).xy);
+    float3 lightDir = SafeNormalize(_LightDirectionWS.xyz);
+
+    // Backfacing surfaces are always in shadow — no ray needed
+    float NdotL = dot(normalWS, lightDir);
+    if (NdotL <= _NormalFacingThreshold)
+    {
+        _ShadowClassifyMask[pixelCoord] = 0.0;
+        return;
+    }
+
+    // Depth edge detection: check neighbors for discontinuities
+    // Pixels near depth edges are more likely to be in penumbra
+    float depthCenter = deviceDepth;
+    float depthLeft  = _DepthTexture.Load(int3(max(pixelCoord.x - 1, 0), pixelCoord.y, 0));
+    float depthRight = _DepthTexture.Load(int3(min(pixelCoord.x + 1, (uint)_ScreenSize.x - 1), pixelCoord.y, 0));
+    float depthUp    = _DepthTexture.Load(int3(pixelCoord.x, max(pixelCoord.y - 1, 0), 0));
+    float depthDown  = _DepthTexture.Load(int3(pixelCoord.x, min(pixelCoord.y + 1, (uint)_ScreenSize.y - 1), 0));
+
+    float maxDepthDiff = max(
+        max(abs(depthCenter - depthLeft), abs(depthCenter - depthRight)),
+        max(abs(depthCenter - depthUp), abs(depthCenter - depthDown)));
+
+    // All light-facing pixels need tracing; depth edges get priority
+    // Output 1.0 = needs ray, 0.0 = skip
+    _ShadowClassifyMask[pixelCoord] = 1.0;
+}

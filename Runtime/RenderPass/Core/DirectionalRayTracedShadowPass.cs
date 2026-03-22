@@ -20,6 +20,16 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int LightDirectionWSId = Shader.PropertyToID("_LightDirectionWS");
         private static readonly int RayLengthId = Shader.PropertyToID("_RayLength");
         private static readonly int InvViewProjectionMatrixId = Shader.PropertyToID("_InvViewProjectionMatrix");
+        private static readonly int SunBasisXId = Shader.PropertyToID("_SunBasisX");
+        private static readonly int SunBasisYId = Shader.PropertyToID("_SunBasisY");
+        private static readonly int TanSunAngularRadiusId = Shader.PropertyToID("_TanSunAngularRadius");
+        private static readonly int FrameIndexId = Shader.PropertyToID("_FrameIndex");
+        private static readonly int ShadowClassifyMaskId = Shader.PropertyToID("_ShadowClassifyMask");
+
+        /// <summary>
+        /// Clear value for the raw shadow texture. HALF_MAX (65504) encodes "fully lit / no occluder".
+        /// </summary>
+        private static readonly Color RawShadowClearColor = new Color(65504f, 0f, 0f, 0f);
 
         [RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Read)]
         private RenderGraphAccelerationStructure m_SceneAccelerationStructure;
@@ -33,12 +43,12 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "DirectionalShadowTexture", Access = AccessFlags.Write)]
         private RenderGraphTexture m_DirectionalShadowTexture;
 
-        
-        [RenderGraphResource(Name = "DebugTexture", Access = AccessFlags.Write)]
-        private RenderGraphTexture m_debugTexture;
+        [RenderGraphResource(Name = "ShadowClassifyMask", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_ShadowClassifyMask;
 
         private ComputeShader m_DirectionalRayTracedShadowCompute;
         private int m_Kernel = -1;
+        private const string ClassifyKeyword = "SHADOW_CLASSIFY_ENABLED";
         private bool m_SupportsRayTracing;
         private bool m_ShouldTrace;
         private int m_DispatchGroupCountX = 1;
@@ -47,6 +57,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_RayLength = VividAdditionalLightData.DefaultRayTracedShadowRayLength;
         private ShaderVariablesRayTracing m_ShaderVariablesRayTracing;
         private Matrix4x4 m_InvViewProjectionMatrix = Matrix4x4.identity;
+        private Vector4 m_SunBasisX;
+        private Vector4 m_SunBasisY;
+        private float m_TanSunAngularRadius;
+        private int m_FrameIndex;
 
         internal readonly struct ResolvedDirectionalShadowRequest
         {
@@ -57,7 +71,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 float rayLength,
                 bool usePipelineSettings,
                 float rayBias,
-                float distantRayBias)
+                float distantRayBias,
+                float sunAngularDiameter)
             {
                 ShouldTrace = shouldTrace;
                 LightEntityId = lightEntityId;
@@ -66,6 +81,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 UsePipelineSettings = usePipelineSettings;
                 RayBias = rayBias;
                 DistantRayBias = distantRayBias;
+                SunAngularDiameter = sunAngularDiameter;
             }
 
             public bool ShouldTrace { get; }
@@ -81,6 +97,8 @@ namespace VividRP.Runtime.RenderPass.Core
             public float RayBias { get; }
 
             public float DistantRayBias { get; }
+
+            public float SunAngularDiameter { get; }
         }
 
         public DirectionalRayTracedShadowPass()
@@ -90,8 +108,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DepthTexture = CreateInputTexture("Depth", GraphicsFormat.None, DepthBits.Depth32);
             m_GBuffer1 = CreateInputTexture("GBuffer1", GraphicsFormat.R16G16_SFloat);
             m_DirectionalShadowTexture = CreateOutputTexture("DirectionalShadowTexture");
-            
-            m_debugTexture= CreateDebugTexture("DebugTexture");
+            m_ShadowClassifyMask = CreateClassifyMaskInput("ShadowClassifyMask");
         }
 
         public override void Create()
@@ -148,6 +165,23 @@ namespace VividRP.Runtime.RenderPass.Core
                     request.RayBias,
                     request.DistantRayBias);
             }
+
+            if (request.ShouldTrace)
+            {
+                var dir = request.LightDirectionWS;
+                ComputeSunBasis(dir, out var basisX, out var basisY);
+                m_SunBasisX = new Vector4(basisX.x, basisX.y, basisX.z, 0f);
+                m_SunBasisY = new Vector4(basisY.x, basisY.y, basisY.z, 0f);
+                m_TanSunAngularRadius = Mathf.Tan(Mathf.Deg2Rad * request.SunAngularDiameter * 0.5f);
+                m_FrameIndex = Time.frameCount;
+            }
+            else
+            {
+                m_SunBasisX = Vector4.zero;
+                m_SunBasisY = Vector4.zero;
+                m_TanSunAngularRadius = 0f;
+                m_FrameIndex = 0;
+            }
         }
 
         public override void Record(UnsafeGraphContext context)
@@ -192,16 +226,30 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_Kernel,
                     DirectionalShadowTextureId,
                     m_DirectionalShadowTexture.innerHandle);
-                
-                nativeCmd.SetComputeTextureParam(
-                    m_DirectionalRayTracedShadowCompute,
-                    m_Kernel,
-                    "DebugTexture",
-                    m_debugTexture.innerHandle);
 
-                // Debug.Log(m_LightDirectionWS);
+                BlueNoise.Instance?.Bind(nativeCmd);
+
+                var useClassify = m_ShadowClassifyMask != null && m_ShadowClassifyMask.innerHandle.IsValid();
+                if (useClassify)
+                {
+                    nativeCmd.EnableKeyword(m_DirectionalRayTracedShadowCompute, new LocalKeyword(m_DirectionalRayTracedShadowCompute, ClassifyKeyword));
+                    nativeCmd.SetComputeTextureParam(
+                        m_DirectionalRayTracedShadowCompute,
+                        m_Kernel,
+                        ShadowClassifyMaskId,
+                        m_ShadowClassifyMask.innerHandle);
+                }
+                else
+                {
+                    nativeCmd.DisableKeyword(m_DirectionalRayTracedShadowCompute, new LocalKeyword(m_DirectionalRayTracedShadowCompute, ClassifyKeyword));
+                }
+
                 nativeCmd.SetComputeVectorParam(m_DirectionalRayTracedShadowCompute, LightDirectionWSId, m_LightDirectionWS);
                 nativeCmd.SetComputeFloatParam(m_DirectionalRayTracedShadowCompute, RayLengthId, m_RayLength);
+                nativeCmd.SetComputeVectorParam(m_DirectionalRayTracedShadowCompute, SunBasisXId, m_SunBasisX);
+                nativeCmd.SetComputeVectorParam(m_DirectionalRayTracedShadowCompute, SunBasisYId, m_SunBasisY);
+                nativeCmd.SetComputeFloatParam(m_DirectionalRayTracedShadowCompute, TanSunAngularRadiusId, m_TanSunAngularRadius);
+                nativeCmd.SetComputeIntParam(m_DirectionalRayTracedShadowCompute, FrameIndexId, m_FrameIndex);
                 nativeCmd.SetComputeMatrixParam(
                     m_DirectionalRayTracedShadowCompute,
                     InvViewProjectionMatrixId,
@@ -232,6 +280,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RayLength = VividAdditionalLightData.DefaultRayTracedShadowRayLength;
             m_ShaderVariablesRayTracing = default;
             m_InvViewProjectionMatrix = Matrix4x4.identity;
+            m_SunBasisX = Vector4.zero;
+            m_SunBasisY = Vector4.zero;
+            m_TanSunAngularRadius = 0f;
+            m_FrameIndex = 0;
         }
 
         internal static ResolvedDirectionalShadowRequest ResolveShadowRequest(
@@ -268,7 +320,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 additionalLightData.rayTracedShadowRayLength,
                 additionalLightData.usePipelineSettings,
                 additionalLightData.rayTracedShadowRayBias,
-                additionalLightData.rayTracedShadowDistantRayBias);
+                additionalLightData.rayTracedShadowDistantRayBias,
+                additionalLightData.rayTracedShadowSunAngularDiameter);
         }
 
         internal static bool TryResolveMainDirectionalLight(
@@ -338,7 +391,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             cmd.SetRenderTarget(m_DirectionalShadowTexture);
-            cmd.ClearRenderTarget(false, true, Color.white);
+            cmd.ClearRenderTarget(false, true, RawShadowClearColor);
         }
 
         private void ConfigureOutputTexture(int width, int height)
@@ -354,18 +407,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DirectionalShadowTexture.desc.FilterMode = FilterMode.Point;
             m_DirectionalShadowTexture.desc.WrapMode = TextureWrapMode.Clamp;
             m_DirectionalShadowTexture.desc.ClearBuffer = true;
-            m_DirectionalShadowTexture.desc.ClearColor = Color.white;
+            m_DirectionalShadowTexture.desc.ClearColor = RawShadowClearColor;
             m_DirectionalShadowTexture.desc.UseMipMap = false;
             m_DirectionalShadowTexture.desc.AutoGenerateMips = false;
             m_DirectionalShadowTexture.desc.MipCount = 1;
             m_DirectionalShadowTexture.desc.EnableRandomWrite = true;
             m_DirectionalShadowTexture.desc.BindTextureMS = false;
             m_DirectionalShadowTexture.desc.Name = "DirectionalShadowTexture";
-            
-            
-            m_debugTexture.desc.Width=width;
-            m_debugTexture.desc.Height=height;
-            m_debugTexture.desc.EnableRandomWrite=true;
         }
 
 
@@ -383,6 +431,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 return Matrix4x4.identity;
 
             return cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true).inverse;
+        }
+
+        internal static void ComputeSunBasis(Vector3 sunDirection, out Vector3 basisX, out Vector3 basisY)
+        {
+            var sign = sunDirection.z >= 0f ? 1f : -1f;
+            var a = -1f / (sign + sunDirection.z);
+            var b = sunDirection.x * sunDirection.y * a;
+            basisX = new Vector3(1f + sign * sunDirection.x * sunDirection.x * a, sign * b, -sign * sunDirection.x);
+            basisY = new Vector3(b, sign + sunDirection.y * sunDirection.y * a, -sunDirection.y);
         }
 
         private static RenderGraphTexture CreateInputTexture(string name, GraphicsFormat format, DepthBits depthBits = DepthBits.None)
@@ -407,26 +464,23 @@ namespace VividRP.Runtime.RenderPass.Core
             };
             texture.desc.Name = name;
             texture.desc.ClearBuffer = true;
-            texture.desc.ClearColor = Color.white;
-            texture.desc.FilterMode = FilterMode.Point;
-            texture.desc.WrapMode = TextureWrapMode.Clamp;
-            texture.desc.EnableRandomWrite = true;
-            return texture;
-        }
-        private static RenderGraphTexture CreateDebugTexture(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R32G32_SFloat)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = true;
-            texture.desc.ClearColor = Color.white;
+            texture.desc.ClearColor = RawShadowClearColor;
             texture.desc.FilterMode = FilterMode.Point;
             texture.desc.WrapMode = TextureWrapMode.Clamp;
             texture.desc.EnableRandomWrite = true;
             return texture;
         }
 
+        private static RenderGraphTexture CreateClassifyMaskInput(string name)
+        {
+            var texture = new RenderGraphTexture
+            {
+                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R8_UNorm)
+            };
+            texture.desc.Name = name;
+            texture.desc.ClearBuffer = false;
+            texture.desc.EnableRandomWrite = false;
+            return texture;
+        }
     }
 }

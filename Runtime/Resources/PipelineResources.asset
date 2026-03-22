@@ -27,8 +27,20 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: 7a938306786128241b2810fe10cd3f55, type: 3}
   - ResourceName: Shaders/Core/Private/DirectionalRayTracedShadow
     ResourceObject: {fileID: 7200000, guid: e18c323ebbcd75c45b1c45b7c0bb07b4, type: 3}
+  - ResourceName: Shaders/Core/Private/DirectionalRayTracedShadowDenoise
+    ResourceObject: {fileID: 7200000, guid: bee06f702bd35ad4eb6de470fb83a854, type: 3}
   - ResourceName: Shaders/Core/Private/FinalBlit
     ResourceObject: {fileID: 4800000, guid: 164ed41d2ffc5c042a908c9741e4b9c7, type: 3}
+  - ResourceName: Shaders/Core/Private/GPUDriven/FixupVisibleMeshletIndirectDrawArgs
+    ResourceObject: {fileID: 7200000, guid: 93ae7629a5b753742b1f9d6722e4c3c2, type: 3}
+  - ResourceName: Shaders/Core/Private/GPUDriven/GPUDrivenMeshletDebug
+    ResourceObject: {fileID: 4800000, guid: a1eadec2937792c4d80f16df80c1cc0d, type: 3}
+  - ResourceName: Shaders/Core/Private/GPUDriven/GPUInstanceCulling
+    ResourceObject: {fileID: 7200000, guid: d516b15c49ff807418f906def327fb32, type: 3}
+  - ResourceName: Shaders/Core/Private/GPUDriven/GPUMeshletCulling
+    ResourceObject: {fileID: 7200000, guid: d04bf75b8b000564fa609d6f99f8d981, type: 3}
+  - ResourceName: Shaders/Core/Private/GPUDriven/MeshletListBuild
+    ResourceObject: {fileID: 7200000, guid: 946e513ca242c63479056f13e12cadf9, type: 3}
   - ResourceName: Shaders/Core/Private/HDRISky
     ResourceObject: {fileID: 4800000, guid: d41d44af2b5e2ff49b8312d9fe8aab8b, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/ClearLightLists
@@ -43,14 +55,30 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 301f78bb40574e64586f1c5f50553db9, type: 3}
   - ResourceName: Shaders/Core/Private/LutBuilder3D.compute
     ResourceObject: {fileID: 7200000, guid: ec9fdcaf78354b1aa25c0158100aae1b, type: 3}
+  - ResourceName: Shaders/Core/Private/NRD/SIGMA/SIGMA_Copy
+    ResourceObject: {fileID: 7200000, guid: 0ac28da9973799d4c9d240757266ed45, type: 3}
+  - ResourceName: Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_Blur
+    ResourceObject: {fileID: 7200000, guid: 7413f5f830bc1704f91039e20762e3f1, type: 3}
+  - ResourceName: Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_ClassifyTiles
+    ResourceObject: {fileID: 7200000, guid: 1b00947fcc963d944b5b3dbcf92496a8, type: 3}
+  - ResourceName: Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_PostBlur
+    ResourceObject: {fileID: 7200000, guid: a81f4708bc6a49a4c96de14d36748ea8, type: 3}
+  - ResourceName: Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_TemporalStabilization
+    ResourceObject: {fileID: 7200000, guid: 2cc5f8cc01be1ff479213d1efe509753, type: 3}
+  - ResourceName: Shaders/Core/Private/NRD/SIGMA/SIGMA_SmoothTiles
+    ResourceObject: {fileID: 7200000, guid: 2d4e728e43193eb4c893414774ac9106, type: 3}
   - ResourceName: Shaders/Core/Private/ObjectMotionVectorFallback
     ResourceObject: {fileID: 4800000, guid: 050cc193933fca74a87ed5fc32a98f21, type: 3}
+  - ResourceName: Shaders/Core/Private/OverlayDebug
+    ResourceObject: {fileID: 4800000, guid: e395d09a0901a0f41ab15bd086c17efd, type: 3}
   - ResourceName: Shaders/Core/Private/PreIntegratedFGD_CharlieFabricLambert
     ResourceObject: {fileID: 4800000, guid: f9ea26c818e16a04fa0b6f8d7ae1a662, type: 3}
   - ResourceName: Shaders/Core/Private/PreIntegratedFGD_GGXDisneyDiffuse
     ResourceObject: {fileID: 4800000, guid: 18a8ea50c3082fb4bba4e2e27578983f, type: 3}
   - ResourceName: Shaders/Core/Private/RTASInstanceDebug
     ResourceObject: {fileID: 7200000, guid: 4aee2e660114dc34381676fa542650e2, type: 3}
+  - ResourceName: Shaders/Core/Private/ShadowClassify
+    ResourceObject: {fileID: 7200000, guid: 3a6fdd688e96b924dbaf2f1c27e7b53d, type: 3}
   - ResourceName: Shaders/Core/Private/SliderDebug
     ResourceObject: {fileID: 4800000, guid: 985a5b1e96340614fb6346ff8c3108ad, type: 3}
   - ResourceName: Shaders/FullScreenUV

@@ -1,4 +1,5 @@
 using System;
+using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -19,19 +20,29 @@ namespace VividRP.Runtime.GPUDriven
 
         private static readonly uint[] s_ZeroUint = { 0u };
         private static readonly uint[] s_ZeroRendererListCounts = new uint[(int) VividRendererListID.Count];
+        private static readonly uint[] s_ZeroIndirectDrawArgsWords = new uint[(int) VividRendererListID.Count * 4];
 
-        private readonly VividGPUCullingContext[] m_CullingContextUpload = new VividGPUCullingContext[1];
-        private readonly VividGPULODSelectionContext[] m_LodSelectionContextUpload = new VividGPULODSelectionContext[1];
+        private NativeArray<VividGPUCullingContext> m_CullingContextUpload;
+        private NativeArray<VividGPULODSelectionContext> m_LodSelectionContextUpload;
 
         private GraphicsBuffer m_CullingContextBuffer;
         private GraphicsBuffer m_LodSelectionContextBuffer;
         private GraphicsBuffer m_MeshletListBuildJobsBuffer;
         private GraphicsBuffer m_MeshletListBuildJobCounterBuffer;
         private GraphicsBuffer m_MeshletListBuildIndirectArgsBuffer;
+        private GraphicsBuffer m_CandidateMeshletRenderRequestsBuffer;
+        private GraphicsBuffer m_GPUMeshletCullingIndirectDispatchArgsBuffer;
         private GraphicsBuffer m_VisibleMeshletRenderRequestsBuffer;
         private GraphicsBuffer m_VisibleMeshletRenderRequestCounterBuffer;
         private GraphicsBuffer m_VisibleRendererListMeshletCountsBuffer;
+        private GraphicsBuffer m_VisibleMeshletIndirectDrawArgsBuffer;
         private bool m_IsDisposed;
+
+        public VividGPUDrivenCullingBuffers()
+        {
+            m_CullingContextUpload = new NativeArray<VividGPUCullingContext>(1, Allocator.Persistent);
+            m_LodSelectionContextUpload = new NativeArray<VividGPULODSelectionContext>(1, Allocator.Persistent);
+        }
 
         public GraphicsBuffer CullingContextBuffer => m_CullingContextBuffer;
 
@@ -43,11 +54,17 @@ namespace VividRP.Runtime.GPUDriven
 
         public GraphicsBuffer MeshletListBuildIndirectArgsBuffer => m_MeshletListBuildIndirectArgsBuffer;
 
+        public GraphicsBuffer CandidateMeshletRenderRequestsBuffer => m_CandidateMeshletRenderRequestsBuffer;
+
+        public GraphicsBuffer GPUMeshletCullingIndirectDispatchArgsBuffer => m_GPUMeshletCullingIndirectDispatchArgsBuffer;
+
         public GraphicsBuffer VisibleMeshletRenderRequestsBuffer => m_VisibleMeshletRenderRequestsBuffer;
 
         public GraphicsBuffer VisibleMeshletRenderRequestCounterBuffer => m_VisibleMeshletRenderRequestCounterBuffer;
 
         public GraphicsBuffer VisibleRendererListMeshletCountsBuffer => m_VisibleRendererListMeshletCountsBuffer;
+
+        public GraphicsBuffer VisibleMeshletIndirectDrawArgsBuffer => m_VisibleMeshletIndirectDrawArgsBuffer;
 
         public int MaxMeshletListBuildJobCount { get; private set; }
 
@@ -94,6 +111,16 @@ namespace VividRP.Runtime.GPUDriven
                 "VividGPUDriven_MeshletListBuildIndirectArgs"
             );
             EnsureStructuredBuffer(
+                ref m_CandidateMeshletRenderRequestsBuffer,
+                MaxVisibleMeshletRenderRequestCount,
+                UnsafeUtility.SizeOf<VividMeshletRenderRequestPacked>(),
+                "VividGPUDriven_CandidateMeshletRenderRequests"
+            );
+            EnsureIndirectArgsBuffer(
+                ref m_GPUMeshletCullingIndirectDispatchArgsBuffer,
+                "VividGPUDriven_GPUMeshletCullingIndirectDispatchArgs"
+            );
+            EnsureStructuredBuffer(
                 ref m_VisibleMeshletRenderRequestsBuffer,
                 MaxVisibleMeshletRenderRequestCount,
                 UnsafeUtility.SizeOf<VividMeshletRenderRequestPacked>(),
@@ -110,6 +137,11 @@ namespace VividRP.Runtime.GPUDriven
                 Mathf.Max(1, (int) VividRendererListID.Count),
                 sizeof(uint),
                 "VividGPUDriven_VisibleRendererListMeshletCounts"
+            );
+            EnsureIndirectDrawArgsBuffer(
+                ref m_VisibleMeshletIndirectDrawArgsBuffer,
+                Mathf.Max(1, (int) VividRendererListID.Count),
+                "VividGPUDriven_VisibleMeshletIndirectDrawArgs"
             );
         }
 
@@ -144,8 +176,10 @@ namespace VividRP.Runtime.GPUDriven
 
             cmd.SetBufferData(MeshletListBuildJobCounterBuffer, s_ZeroUint);
             cmd.SetBufferData(MeshletListBuildIndirectArgsBuffer, s_InitialIndirectDispatchArgs);
+            cmd.SetBufferData(GPUMeshletCullingIndirectDispatchArgsBuffer, s_InitialIndirectDispatchArgs);
             cmd.SetBufferData(VisibleMeshletRenderRequestCounterBuffer, s_ZeroUint);
             cmd.SetBufferData(VisibleRendererListMeshletCountsBuffer, s_ZeroRendererListCounts);
+            cmd.SetBufferData(VisibleMeshletIndirectDrawArgsBuffer, s_ZeroIndirectDrawArgsWords);
         }
 
         public void BindGlobals(CommandBuffer cmd)
@@ -165,6 +199,7 @@ namespace VividRP.Runtime.GPUDriven
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._VisibleMeshletRenderRequests, VisibleMeshletRenderRequestsBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._VisibleMeshletRenderRequestCounter, VisibleMeshletRenderRequestCounterBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._VisibleRendererListMeshletCounts, VisibleRendererListMeshletCountsBuffer);
+            cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._VisibleMeshletIndirectDrawArgs, VisibleMeshletIndirectDrawArgsBuffer);
         }
 
         public void Dispose()
@@ -179,18 +214,32 @@ namespace VividRP.Runtime.GPUDriven
             m_MeshletListBuildJobsBuffer?.Dispose();
             m_MeshletListBuildJobCounterBuffer?.Dispose();
             m_MeshletListBuildIndirectArgsBuffer?.Dispose();
+            m_CandidateMeshletRenderRequestsBuffer?.Dispose();
+            m_GPUMeshletCullingIndirectDispatchArgsBuffer?.Dispose();
             m_VisibleMeshletRenderRequestsBuffer?.Dispose();
             m_VisibleMeshletRenderRequestCounterBuffer?.Dispose();
             m_VisibleRendererListMeshletCountsBuffer?.Dispose();
+            m_VisibleMeshletIndirectDrawArgsBuffer?.Dispose();
+            if (m_CullingContextUpload.IsCreated)
+            {
+                m_CullingContextUpload.Dispose();
+            }
+            if (m_LodSelectionContextUpload.IsCreated)
+            {
+                m_LodSelectionContextUpload.Dispose();
+            }
 
             m_CullingContextBuffer = null;
             m_LodSelectionContextBuffer = null;
             m_MeshletListBuildJobsBuffer = null;
             m_MeshletListBuildJobCounterBuffer = null;
             m_MeshletListBuildIndirectArgsBuffer = null;
+            m_CandidateMeshletRenderRequestsBuffer = null;
+            m_GPUMeshletCullingIndirectDispatchArgsBuffer = null;
             m_VisibleMeshletRenderRequestsBuffer = null;
             m_VisibleMeshletRenderRequestCounterBuffer = null;
             m_VisibleRendererListMeshletCountsBuffer = null;
+            m_VisibleMeshletIndirectDrawArgsBuffer = null;
             MaxMeshletListBuildJobCount = 0;
             MaxVisibleMeshletRenderRequestCount = 0;
             m_IsDisposed = true;
@@ -203,16 +252,27 @@ namespace VividRP.Runtime.GPUDriven
             string bufferName
         )
         {
+            EnsureStructuredBuffer(ref buffer, count, stride, GraphicsBuffer.Target.Structured, bufferName);
+        }
+
+        private static void EnsureStructuredBuffer(
+            ref GraphicsBuffer buffer,
+            int count,
+            int stride,
+            GraphicsBuffer.Target target,
+            string bufferName
+        )
+        {
             int clampedCount = Mathf.Max(1, count);
             int clampedStride = Mathf.Max(1, stride);
 
-            if (buffer != null && buffer.count == clampedCount && buffer.stride == clampedStride)
+            if (buffer != null && buffer.count == clampedCount && buffer.stride == clampedStride && buffer.target == target)
             {
                 return;
             }
 
             buffer?.Dispose();
-            buffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, clampedCount, clampedStride)
+            buffer = new GraphicsBuffer(target, clampedCount, clampedStride)
             {
                 name = bufferName,
             };
@@ -225,6 +285,24 @@ namespace VividRP.Runtime.GPUDriven
             GraphicsBuffer.Target target = GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments;
 
             if (buffer != null && buffer.count == elementCount && buffer.stride == stride)
+            {
+                return;
+            }
+
+            buffer?.Dispose();
+            buffer = new GraphicsBuffer(target, elementCount, stride)
+            {
+                name = bufferName,
+            };
+        }
+
+        private static void EnsureIndirectDrawArgsBuffer(ref GraphicsBuffer buffer, int commandCount, string bufferName)
+        {
+            int elementCount = Mathf.Max(4, commandCount * 4);
+            const int stride = sizeof(uint);
+            GraphicsBuffer.Target target = GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments;
+
+            if (buffer != null && buffer.count == elementCount && buffer.stride == stride && buffer.target == target)
             {
                 return;
             }

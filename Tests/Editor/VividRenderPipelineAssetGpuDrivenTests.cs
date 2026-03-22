@@ -16,6 +16,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 Assert.That(asset.EnableGPUDriven, Is.False);
+                Assert.That(asset.EnableGPUDrivenDebugOverlay, Is.False);
             }
             finally
             {
@@ -32,13 +33,17 @@ namespace VividRP.Editor.Tests
             {
                 var serializedObject = new SerializedObject(asset);
                 var property = serializedObject.FindProperty("m_EnableGPUDriven");
+                var debugOverlayProperty = serializedObject.FindProperty("m_EnableGPUDrivenDebugOverlay");
 
                 Assert.That(property, Is.Not.Null);
+                Assert.That(debugOverlayProperty, Is.Not.Null);
 
                 property.boolValue = true;
+                debugOverlayProperty.boolValue = true;
                 serializedObject.ApplyModifiedPropertiesWithoutUndo();
 
                 Assert.That(asset.EnableGPUDriven, Is.True);
+                Assert.That(asset.EnableGPUDrivenDebugOverlay, Is.True);
             }
             finally
             {

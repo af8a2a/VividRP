@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -13,6 +14,7 @@ namespace VividRP.Runtime
 
         private readonly VividRenderPipelineAsset m_Asset;
         private readonly bool m_PreviousUseScriptableRenderPipelineBatching;
+        private readonly VividGPUDrivenDebugOverlayRenderer m_GPUDrivenDebugOverlayRenderer;
         private RenderGraph m_RenderGraph;
 
         public VividRenderPipeline(VividRenderPipelineAsset asset)
@@ -26,6 +28,7 @@ namespace VividRP.Runtime
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             Blitter.Initialize(resources.CoreBlitShader, resources.CoreBlitColorAndDepthShader);
             BlueNoise.Initialize();
+            m_GPUDrivenDebugOverlayRenderer = new VividGPUDrivenDebugOverlayRenderer(resources.GPUDrivenMeshletDebugShader);
 
             m_RenderGraph = new RenderGraph(RenderGraphName);
         }
@@ -73,7 +76,9 @@ namespace VividRP.Runtime
                         camera,
                         cmdBuffer,
                         resources.GPUInstanceCullingCompute,
-                        resources.MeshletListBuildCompute
+                        resources.MeshletListBuildCompute,
+                        resources.GPUMeshletCullingCompute,
+                        resources.FixupVisibleMeshletIndirectDrawArgsCompute
                     );
                     VividGPUDrivenSystem.instance.BindGlobals(cmdBuffer);
                 }
@@ -106,6 +111,13 @@ namespace VividRP.Runtime
                         PassRecorder.AbortFrame))
                 {
                     return;
+                }
+
+                if (m_Asset is { EnableGPUDriven: true, EnableGPUDrivenDebugOverlay: true })
+                {
+                    context.SetupCameraProperties(camera);
+                    VividGPUDrivenSystem.instance.BindGlobals(cmdBuffer);
+                    m_GPUDrivenDebugOverlayRenderer.Draw(cmdBuffer, camera, VividGPUDrivenSystem.instance.VisibleMeshletIndirectDrawArgsBuffer);
                 }
 
                 context.ExecuteCommandBuffer(cmdBuffer);
@@ -177,6 +189,7 @@ namespace VividRP.Runtime
 
             m_RenderGraph?.Cleanup();
             m_RenderGraph = null;
+            m_GPUDrivenDebugOverlayRenderer?.Dispose();
             BlueNoise.Cleanup();
             Blitter.Cleanup();
             PipelineResourceManager.Cleanup();
@@ -191,5 +204,111 @@ namespace VividRP.Runtime
 
         /// <inheritdoc/>
         public bool isImmediateModeSupported => false;
+    }
+
+    internal sealed class VividGPUDrivenDebugOverlayRenderer : IDisposable
+    {
+        private static readonly int s_CullId = Shader.PropertyToID("_Cull");
+        private static readonly int s_OverlayAlphaId = Shader.PropertyToID("_OverlayAlpha");
+
+        private readonly Material[] m_Materials = new Material[(int) VividRendererListID.Count];
+        private readonly ProfilingSampler m_ProfilingSampler = new(nameof(VividGPUDrivenDebugOverlayRenderer));
+
+        public VividGPUDrivenDebugOverlayRenderer(Shader shader)
+        {
+            if (shader == null)
+            {
+                return;
+            }
+
+            for (int rendererListIndex = 0; rendererListIndex < m_Materials.Length; rendererListIndex++)
+            {
+                Material material = CoreUtils.CreateEngineMaterial(shader);
+                material.name = $"{nameof(VividGPUDrivenDebugOverlayRenderer)}_{(VividRendererListID) rendererListIndex}";
+                ConfigureMaterial(material, (VividRendererListID) rendererListIndex);
+                m_Materials[rendererListIndex] = material;
+            }
+        }
+
+        public bool IsAvailable => m_Materials[0] != null;
+
+        public void Draw(CommandBuffer cmd, Camera camera, GraphicsBuffer indirectDrawArgsBuffer)
+        {
+            if (cmd == null)
+            {
+                throw new ArgumentNullException(nameof(cmd));
+            }
+
+            if (camera == null)
+            {
+                throw new ArgumentNullException(nameof(camera));
+            }
+
+            if (!IsAvailable || indirectDrawArgsBuffer == null)
+            {
+                return;
+            }
+
+            using (new ProfilingScope(cmd, m_ProfilingSampler))
+            {
+                RenderTargetIdentifier colorTarget = camera.targetTexture != null
+                    ? new RenderTargetIdentifier(camera.targetTexture)
+                    : BuiltinRenderTextureType.CameraTarget;
+                cmd.SetRenderTarget(colorTarget);
+                cmd.SetViewport(camera.pixelRect);
+
+                int argsStride = UnsafeUtility.SizeOf<VividIndirectDrawArgs>();
+                for (int rendererListIndex = 0; rendererListIndex < m_Materials.Length; rendererListIndex++)
+                {
+                    Material material = m_Materials[rendererListIndex];
+                    if (material == null)
+                    {
+                        continue;
+                    }
+
+                    cmd.DrawProceduralIndirect(
+                        Matrix4x4.identity,
+                        material,
+                        0,
+                        MeshTopology.Triangles,
+                        indirectDrawArgsBuffer,
+                        rendererListIndex * argsStride
+                    );
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            for (int index = 0; index < m_Materials.Length; index++)
+            {
+                if (m_Materials[index] != null)
+                {
+                    CoreUtils.Destroy(m_Materials[index]);
+                    m_Materials[index] = null;
+                }
+            }
+        }
+
+        private static void ConfigureMaterial(Material material, VividRendererListID rendererListID)
+        {
+            material.SetFloat(s_CullId, (float) GetCullMode(rendererListID));
+            material.SetFloat(s_OverlayAlphaId, 0.35f);
+        }
+
+        private static CullMode GetCullMode(VividRendererListID rendererListID)
+        {
+            if ((rendererListID & VividRendererListID.CullFront) != 0)
+            {
+                return CullMode.Front;
+            }
+
+            if ((rendererListID & VividRendererListID.CullOff) != 0)
+            {
+                return CullMode.Off;
+            }
+
+            return CullMode.Back;
+        }
     }
 }

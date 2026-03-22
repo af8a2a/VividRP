@@ -86,10 +86,43 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/DirectionalRayTracedShadow")]
         public ComputeShader DirectionalRayTracedShadowCompute;
 
+        [ResourcePath("Shaders/Core/Private/DirectionalRayTracedShadowDenoise")]
+        public ComputeShader DirectionalRayTracedShadowDenoiseCompute;
+
+        [ResourcePath("Shaders/Core/Private/ShadowClassify")]
+        public ComputeShader ShadowClassifyCompute;
+
+        [ResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_ClassifyTiles")]
+        public ComputeShader SIGMAClassifyTilesCompute;
+
+        [ResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_SmoothTiles")]
+        public ComputeShader SIGMASmoothTilesCompute;
+
+        [ResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_Copy")]
+        public ComputeShader SIGMAShadowCopyCompute;
+
+        [ResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_Blur")]
+        public ComputeShader SIGMAShadowPreBlurCompute;
+
+        [ResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_PostBlur")]
+        public ComputeShader SIGMAShadowPostBlurCompute;
+
+        [ResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_TemporalStabilization")]
+        public ComputeShader SIGMATemporalStabilizationCompute;
+
         [ResourcePath("Shaders/Core/Private/GPUDriven/GPUInstanceCulling")]
         public ComputeShader GPUInstanceCullingCompute;
 
         [ResourcePath("Shaders/Core/Private/GPUDriven/MeshletListBuild")]
         public ComputeShader MeshletListBuildCompute;
+
+        [ResourcePath("Shaders/Core/Private/GPUDriven/GPUMeshletCulling")]
+        public ComputeShader GPUMeshletCullingCompute;
+
+        [ResourcePath("Shaders/Core/Private/GPUDriven/FixupVisibleMeshletIndirectDrawArgs")]
+        public ComputeShader FixupVisibleMeshletIndirectDrawArgsCompute;
+
+        [ResourcePath("Shaders/Core/Private/GPUDriven/GPUDrivenMeshletDebug")]
+        public Shader GPUDrivenMeshletDebugShader;
     }
 }

@@ -119,12 +119,9 @@ namespace VividRP.Runtime
             EnsureCompiled(graphAsset);
             ClearCodeManagedHistoryFrameState();
 
-            // Tick temporal system before shader variables — ensures prev matrices
-            // and temporal globals are set once, before any pass executes.
+            // Advance temporal state and set all shader globals before any pass executes.
             FrameContextSystem.Update(s_FrameData, cmdBuffer);
 
-            var cameraData = s_FrameData.GetOrCreate<VividCameraData>();
-            cameraData.UpdateShaderVariables(cmdBuffer);
             PrepareHistoryTargets(graphAsset, cmdBuffer);
             ClearImportedTextures();
         }

@@ -49,11 +49,10 @@ namespace VividRP.Editor.Tests
                 pixelHeight = 720,
             };
 
-            // Tick temporal system so PrepareMotionVectorMatrices reads valid data
             var temporalData = FrameContextSystem.GetOrCreate(camera);
             temporalData.Update(cameraData);
 
-            var shaderVariables = cameraData.BuildShaderVariables();
+            var shaderVariables = cameraData.BuildShaderVariables(temporalData);
             var expectedGpuProjectionMatrix = GL.GetGPUProjectionMatrix(jitteredProjectionMatrix, false);
             var expectedMotionVectorGpuProjectionMatrix = GL.GetGPUProjectionMatrix(nonJitteredProjectionMatrix, true);
             var expectedViewMatrix = camera.worldToCameraMatrix;
@@ -135,7 +134,7 @@ namespace VividRP.Editor.Tests
             temporalData.Update(cameraData);
 
             var firstExpectedViewProjection = GL.GetGPUProjectionMatrix(firstProjection, true) * camera.worldToCameraMatrix;
-            var firstShaderVariables = cameraData.BuildShaderVariables();
+            var firstShaderVariables = cameraData.BuildShaderVariables(temporalData);
 
             AssertMatrixAreEqual(firstExpectedViewProjection, firstShaderVariables.nonJitteredViewProjMatrix);
             AssertMatrixAreEqual(firstExpectedViewProjection, firstShaderVariables.prevViewProjMatrix);
@@ -152,7 +151,7 @@ namespace VividRP.Editor.Tests
             temporalData.Update(cameraData);
 
             var secondExpectedViewProjection = GL.GetGPUProjectionMatrix(secondProjection, true) * camera.worldToCameraMatrix;
-            var secondShaderVariables = cameraData.BuildShaderVariables();
+            var secondShaderVariables = cameraData.BuildShaderVariables(temporalData);
 
             AssertMatrixAreEqual(secondExpectedViewProjection, secondShaderVariables.nonJitteredViewProjMatrix);
             AssertMatrixAreEqual(firstExpectedViewProjection, secondShaderVariables.prevViewProjMatrix);
@@ -178,10 +177,10 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PrepareFrame_UpdatesCameraShaderVariables_BeforePreparingHistoryTargets()
+        public void PrepareFrame_UpdatesFrameContextSystem_BeforePreparingHistoryTargets()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.Execution.cs"));
-            var updateIndex = source.IndexOf("cameraData.UpdateShaderVariables(cmdBuffer);", System.StringComparison.Ordinal);
+            var updateIndex = source.IndexOf("FrameContextSystem.Update(s_FrameData, cmdBuffer);", System.StringComparison.Ordinal);
             var historyIndex = source.IndexOf("PrepareHistoryTargets(graphAsset, cmdBuffer);", System.StringComparison.Ordinal);
 
             Assert.That(updateIndex, Is.GreaterThanOrEqualTo(0));

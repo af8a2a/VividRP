@@ -6,37 +6,6 @@ namespace VividRP.Runtime
 {
     public partial class VividCameraData
     {
-        private static readonly int WorldSpaceCameraPosId = Shader.PropertyToID("_WorldSpaceCameraPos");
-        private static readonly int ProjectionParamsId = Shader.PropertyToID("_ProjectionParams");
-        private static readonly int ScreenParamsId = Shader.PropertyToID("_ScreenParams");
-        private static readonly int ZBufferParamsId = Shader.PropertyToID("_ZBufferParams");
-        private static readonly int OrthoParamsId = Shader.PropertyToID("unity_OrthoParams");
-        private static readonly int ScaleBiasId = Shader.PropertyToID("_ScaleBias");
-        private static readonly int ScaleBiasRtId = Shader.PropertyToID("_ScaleBiasRt");
-        private static readonly int RtHandleScaleId = Shader.PropertyToID("_RTHandleScale");
-        private static readonly int CameraWorldClipPlanesId = Shader.PropertyToID("unity_CameraWorldClipPlanes");
-        private static readonly int CameraProjectionId = Shader.PropertyToID("unity_CameraProjection");
-        private static readonly int CameraInvProjectionId = Shader.PropertyToID("unity_CameraInvProjection");
-        private static readonly int WorldToCameraId = Shader.PropertyToID("unity_WorldToCamera");
-        private static readonly int CameraToWorldId = Shader.PropertyToID("unity_CameraToWorld");
-        private static readonly int GlstateMatrixProjectionId = Shader.PropertyToID("glstate_matrix_projection");
-        private static readonly int MatrixVId = Shader.PropertyToID("unity_MatrixV");
-        private static readonly int MatrixInvVId = Shader.PropertyToID("unity_MatrixInvV");
-        private static readonly int MatrixInvPId = Shader.PropertyToID("unity_MatrixInvP");
-        private static readonly int MatrixVPId = Shader.PropertyToID("unity_MatrixVP");
-        private static readonly int MatrixInvVPId = Shader.PropertyToID("unity_MatrixInvVP");
-        private static readonly int ViewProjMatrixId = Shader.PropertyToID("_ViewProjMatrix");
-        private static readonly int ViewMatrixId = Shader.PropertyToID("_ViewMatrix");
-        private static readonly int ProjMatrixId = Shader.PropertyToID("_ProjMatrix");
-        private static readonly int InvViewProjMatrixId = Shader.PropertyToID("_InvViewProjMatrix");
-        private static readonly int InvViewMatrixId = Shader.PropertyToID("_InvViewMatrix");
-        private static readonly int InvProjMatrixId = Shader.PropertyToID("_InvProjMatrix");
-        private static readonly int InvProjParamId = Shader.PropertyToID("_InvProjParam");
-        private static readonly int ScreenSizeId = Shader.PropertyToID("_ScreenSize");
-        private static readonly int FrustumPlanesId = Shader.PropertyToID("_FrustumPlanes");
-        private static readonly int GlobalMipBiasId = Shader.PropertyToID("_GlobalMipBias");
-        private static readonly int ScaledScreenParamsId = Shader.PropertyToID("_ScaledScreenParams");
-
         private readonly Plane[] m_CameraFrustumPlanes = new Plane[6];
         private readonly Vector4[] m_CameraWorldClipPlanes = new Vector4[6];
         private readonly Vector4[] m_ShaderFrustumPlanes = new Vector4[6];
@@ -77,9 +46,12 @@ namespace VividRP.Runtime
             public Vector4[] frustumPlanes;
         }
 
-        internal ShaderVariables BuildShaderVariables()
+        internal ShaderVariables BuildShaderVariables(CameraTemporalData temporalData = null)
         {
             var currentCamera = camera;
+
+            if (currentCamera != null)
+                currentCamera.depthTextureMode |= DepthTextureMode.Depth | DepthTextureMode.MotionVectors;
 
             var scaledWidth = ResolveScaledDimension(actualWidth, currentCamera != null ? currentCamera.scaledPixelWidth : 0, pixelWidth, Screen.width);
             var scaledHeight = ResolveScaledDimension(actualHeight, currentCamera != null ? currentCamera.scaledPixelHeight : 0, pixelHeight, Screen.height);
@@ -95,8 +67,16 @@ namespace VividRP.Runtime
             var matrixInvP = glstateMatrixProjection.inverse;
             var matrixVP = glstateMatrixProjection * viewMatrix;
             var matrixInvVP = matrixVP.inverse;
-            var motionVectorMatrices = PrepareMotionVectorMatrices(viewMatrix);
             var projectionFlipSign = glstateMatrixProjection.m11 < 0.0f ? -1.0f : 1.0f;
+
+            // Temporal matrices: use FrameContextSystem data if available, otherwise fallback
+            var nonJitteredVP = matrixVP;
+            var prevVP = matrixVP;
+            if (temporalData != null)
+            {
+                nonJitteredVP = temporalData.ViewProjection;
+                prevVP = temporalData.PreviousViewProjection;
+            }
 
             UpdateFrustumPlanes(currentCamera);
 
@@ -120,8 +100,8 @@ namespace VividRP.Runtime
                 matrixInvP = matrixInvP,
                 matrixVP = matrixVP,
                 matrixInvVP = matrixInvVP,
-                prevViewProjMatrix = motionVectorMatrices.previousViewProjMatrix,
-                nonJitteredViewProjMatrix = motionVectorMatrices.nonJitteredViewProjMatrix,
+                prevViewProjMatrix = prevVP,
+                nonJitteredViewProjMatrix = nonJitteredVP,
                 viewProjMatrix = matrixVP,
                 viewMatrix = viewMatrix,
                 projMatrix = glstateMatrixProjection,
@@ -135,51 +115,6 @@ namespace VividRP.Runtime
                 cameraWorldClipPlanes = m_CameraWorldClipPlanes,
                 frustumPlanes = m_ShaderFrustumPlanes,
             };
-        }
-
-        internal void UpdateShaderVariables(CommandBuffer cmd)
-        {
-            if (cmd == null)
-                throw new ArgumentNullException(nameof(cmd));
-
-            var shaderVariables = BuildShaderVariables();
-
-            cmd.SetGlobalVector(WorldSpaceCameraPosId, shaderVariables.worldSpaceCameraPos);
-            cmd.SetGlobalVector(ProjectionParamsId, shaderVariables.projectionParams);
-            cmd.SetGlobalVector(ScreenParamsId, shaderVariables.screenParams);
-            cmd.SetGlobalVector(ZBufferParamsId, shaderVariables.zBufferParams);
-            cmd.SetGlobalVector(OrthoParamsId, shaderVariables.orthoParams);
-            cmd.SetGlobalVector(ScaleBiasId, shaderVariables.scaleBias);
-            cmd.SetGlobalVector(ScaleBiasRtId, shaderVariables.scaleBiasRt);
-            cmd.SetGlobalVector(RtHandleScaleId, shaderVariables.rtHandleScale);
-            cmd.SetGlobalVector(
-                GlobalMipBiasId,
-                new Vector4(shaderVariables.globalMipBias.x, shaderVariables.globalMipBias.y, 0.0f, 0.0f));
-            cmd.SetGlobalVector(ScaledScreenParamsId, shaderVariables.scaledScreenParams);
-            cmd.SetGlobalVector(ScreenSizeId, shaderVariables.screenSize);
-            cmd.SetGlobalVector(InvProjParamId, shaderVariables.invProjParam);
-
-            cmd.SetGlobalMatrix(CameraProjectionId, shaderVariables.cameraProjection);
-            cmd.SetGlobalMatrix(CameraInvProjectionId, shaderVariables.cameraInvProjection);
-            cmd.SetGlobalMatrix(WorldToCameraId, shaderVariables.worldToCamera);
-            cmd.SetGlobalMatrix(CameraToWorldId, shaderVariables.cameraToWorld);
-            cmd.SetGlobalMatrix(GlstateMatrixProjectionId, shaderVariables.glstateMatrixProjection);
-            cmd.SetGlobalMatrix(MatrixVId, shaderVariables.matrixV);
-            cmd.SetGlobalMatrix(MatrixInvVId, shaderVariables.matrixInvV);
-            cmd.SetGlobalMatrix(MatrixInvPId, shaderVariables.matrixInvP);
-            cmd.SetGlobalMatrix(MatrixVPId, shaderVariables.matrixVP);
-            cmd.SetGlobalMatrix(MatrixInvVPId, shaderVariables.matrixInvVP);
-            // Temporal matrices (_PrevViewProjMatrix, _NonJitteredViewProjMatrix) are set
-            // exclusively by FrameContextSystem.Tick() to avoid order-dependent overwrites.
-            cmd.SetGlobalMatrix(ViewProjMatrixId, shaderVariables.viewProjMatrix);
-            cmd.SetGlobalMatrix(ViewMatrixId, shaderVariables.viewMatrix);
-            cmd.SetGlobalMatrix(ProjMatrixId, shaderVariables.projMatrix);
-            cmd.SetGlobalMatrix(InvViewProjMatrixId, shaderVariables.invViewProjMatrix);
-            cmd.SetGlobalMatrix(InvViewMatrixId, shaderVariables.invViewMatrix);
-            cmd.SetGlobalMatrix(InvProjMatrixId, shaderVariables.invProjMatrix);
-
-            cmd.SetGlobalVectorArray(CameraWorldClipPlanesId, shaderVariables.cameraWorldClipPlanes);
-            cmd.SetGlobalVectorArray(FrustumPlanesId, shaderVariables.frustumPlanes);
         }
 
         private void UpdateFrustumPlanes(Camera currentCamera)
@@ -243,47 +178,24 @@ namespace VividRP.Runtime
 
         private static Vector4 CreateZBufferParams(float nearClip, float farClip)
         {
-            if (SystemInfo.usesReversedZBuffer)
-            {
-                var x = -1.0f + (farClip / nearClip);
-                return new Vector4(x, 1.0f, x / farClip, 1.0f / farClip);
-            }
-
-            var y = farClip / nearClip;
-            var xNonReversed = 1.0f - y;
-            return new Vector4(xNonReversed, y, xNonReversed / farClip, y / farClip);
+            var fpn = farClip / nearClip;
+            return new Vector4(fpn - 1.0f, 1.0f, (fpn - 1.0f) / farClip, 1.0f / farClip);
         }
 
-        private static Vector4 CreateOrthoParams(Camera currentCamera, int width, int height)
+        private static Vector4 CreateOrthoParams(Camera currentCamera, int referenceWidth, int referenceHeight)
         {
             if (currentCamera == null || !currentCamera.orthographic)
                 return Vector4.zero;
 
+            var orthoSize = currentCamera.orthographicSize;
             var aspect = currentCamera.aspect;
-            if (aspect <= 0.0f)
-                aspect = width / (float)Mathf.Max(1, height);
-
-            var orthoHeight = currentCamera.orthographicSize * 2.0f;
-            var orthoWidth = orthoHeight * aspect;
-            return new Vector4(orthoWidth, orthoHeight, 0.0f, 1.0f);
+            return new Vector4(orthoSize * aspect * 2.0f, orthoSize * 2.0f, 0.0f, 1.0f);
         }
 
         private static Vector4 CreateRtHandleScale()
         {
             var rtHandleScale = RTHandles.rtHandleProperties.rtHandleScale;
-            if (rtHandleScale == Vector4.zero)
-                return Vector4.one;
-
-            if (rtHandleScale.x <= 0.0f)
-                rtHandleScale.x = 1.0f;
-            if (rtHandleScale.y <= 0.0f)
-                rtHandleScale.y = 1.0f;
-            if (rtHandleScale.z <= 0.0f)
-                rtHandleScale.z = rtHandleScale.x;
-            if (rtHandleScale.w <= 0.0f)
-                rtHandleScale.w = rtHandleScale.y;
-
-            return rtHandleScale;
+            return new Vector4(rtHandleScale.x, rtHandleScale.y, rtHandleScale.x, rtHandleScale.y);
         }
 
         private static Vector2 CreateGlobalMipBias(int referenceWidth, int referenceHeight, int scaledWidth, int scaledHeight)
@@ -302,33 +214,6 @@ namespace VividRP.Runtime
                 invProjectionMatrix.m11,
                 invProjectionMatrix.m32,
                 invProjectionMatrix.m33);
-        }
-
-        private MotionVectorMatrices PrepareMotionVectorMatrices(Matrix4x4 viewMatrix)
-        {
-            var currentCamera = camera;
-            if (currentCamera != null)
-                currentCamera.depthTextureMode |= DepthTextureMode.Depth | DepthTextureMode.MotionVectors;
-
-            // Read temporal matrices from FrameContextSystem (already ticked before this call)
-            var temporalData = FrameContextSystem.GetOrCreate(currentCamera);
-            if (temporalData != null)
-                return new MotionVectorMatrices(temporalData.PreviousViewProjection, temporalData.ViewProjection);
-
-            var fallback = GetGPUProjectionMatrixNoJitter(true) * viewMatrix;
-            return new MotionVectorMatrices(fallback, fallback);
-        }
-
-        private readonly struct MotionVectorMatrices
-        {
-            public readonly Matrix4x4 previousViewProjMatrix;
-            public readonly Matrix4x4 nonJitteredViewProjMatrix;
-
-            public MotionVectorMatrices(Matrix4x4 previousViewProjMatrix, Matrix4x4 nonJitteredViewProjMatrix)
-            {
-                this.previousViewProjMatrix = previousViewProjMatrix;
-                this.nonJitteredViewProjMatrix = nonJitteredViewProjMatrix;
-            }
         }
     }
 }

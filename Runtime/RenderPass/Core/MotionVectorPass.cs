@@ -28,8 +28,6 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "RenderList", Access = AccessFlags.Read)]
         private RenderGraphRenderList m_RenderList;
 
-        [RenderGraphResource(Name = "FallbackRenderList", Access = AccessFlags.Read)]
-        private RenderGraphRenderList m_FallbackRenderList;
 
         [RenderGraphResource(Name = "CameraDepth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_CameraDepthTexture;
@@ -57,16 +55,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
             };
 
-            m_FallbackRenderList = new RenderGraphRenderList
-            {
-                desc = new RenderGraphRenderListDesc
-                {
-                    ShaderTagNames = (string[])s_DefaultShaderTagNames.Clone(),
-                    RenderQueueRange = RenderGraphRenderQueueRange.Opaque,
-                    SortingCriteria = SortingCriteria.CommonOpaque,
-                    RendererConfiguration = PerObjectData.MotionVectors,
-                }
-            };
 
             m_CameraDepthTexture = CreateInputDepthTexture("CameraDepth");
             m_MotionVectorTexture = CreateMotionVectorTexture("MotionVectors");
@@ -111,9 +99,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 context.cmd.DrawProcedural(Matrix4x4.identity, m_CameraMotionMaterial, 0, MeshTopology.Triangles, 3, 1);
             }
 
-            if (m_FallbackRenderList != null && m_FallbackRenderList.IsValid)
-                context.cmd.DrawRendererList(m_FallbackRenderList);
-
             if (m_RenderList != null && m_RenderList.IsValid)
                 context.cmd.DrawRendererList(m_RenderList);
         }
@@ -155,8 +140,6 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_RenderList ??= new RenderGraphRenderList();
             m_RenderList.desc ??= new RenderGraphRenderListDesc();
-            m_FallbackRenderList ??= new RenderGraphRenderList();
-            m_FallbackRenderList.desc ??= new RenderGraphRenderListDesc();
 
             if (m_RenderList.desc.ShaderTagNames == null || m_RenderList.desc.ShaderTagNames.Length == 0)
                 m_RenderList.desc.ShaderTagNames = (string[])s_MotionVectorShaderTagNames.Clone();
@@ -168,15 +151,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RenderList.desc.OverrideShader = null;
             m_RenderList.desc.OverrideShaderPassIndex = 0;
 
-            if (m_FallbackRenderList.desc.ShaderTagNames == null || m_FallbackRenderList.desc.ShaderTagNames.Length == 0)
-                m_FallbackRenderList.desc.ShaderTagNames = (string[])s_DefaultShaderTagNames.Clone();
-
-            m_FallbackRenderList.desc.RendererConfiguration |= PerObjectData.MotionVectors;
-            m_FallbackRenderList.desc.ExcludeObjectMotionVectors = false;
-            m_FallbackRenderList.desc.OverrideMaterial = null;
-            m_FallbackRenderList.desc.OverrideMaterialPassIndex = 0;
-            m_FallbackRenderList.desc.OverrideShader = m_ObjectMotionVectorFallbackShader;
-            m_FallbackRenderList.desc.OverrideShaderPassIndex = 0;
         }
 
         private void ConfigureTargets(VividCameraData cameraData)

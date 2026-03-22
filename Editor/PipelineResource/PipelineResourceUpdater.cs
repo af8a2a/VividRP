@@ -77,6 +77,7 @@ namespace VividRP.Editor
         private static void UpdateDefaultContainerResources()
         {
             var containerPath = VividPackagePathUtility.GetPreferredAssetPath(ContainerRelativePath);
+            Debug.Log(containerPath);
             var container = AssetDatabase.LoadAssetAtPath<PipelineResourcesContainer>(containerPath);
             if (container == null)
             {

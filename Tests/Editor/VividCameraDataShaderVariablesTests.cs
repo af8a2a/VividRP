@@ -14,11 +14,13 @@ namespace VividRP.Editor.Tests
         public void SetUp()
         {
             m_GameObject = new GameObject("Vivid Camera Shader Variables Test");
+            FrameContextSystem.Clear();
         }
 
         [TearDown]
         public void TearDown()
         {
+            FrameContextSystem.Clear();
             Object.DestroyImmediate(m_GameObject);
         }
 
@@ -46,6 +48,10 @@ namespace VividRP.Editor.Tests
                 pixelWidth = 1280,
                 pixelHeight = 720,
             };
+
+            // Tick temporal system so PrepareMotionVectorMatrices reads valid data
+            var temporalData = FrameContextSystem.GetOrCreate(camera);
+            temporalData.Update(cameraData);
 
             var shaderVariables = cameraData.BuildShaderVariables();
             var expectedGpuProjectionMatrix = GL.GetGPUProjectionMatrix(jitteredProjectionMatrix, false);
@@ -125,6 +131,9 @@ namespace VividRP.Editor.Tests
                 frameIndex = 10,
             };
 
+            var temporalData = FrameContextSystem.GetOrCreate(camera);
+            temporalData.Update(cameraData);
+
             var firstExpectedViewProjection = GL.GetGPUProjectionMatrix(firstProjection, true) * camera.worldToCameraMatrix;
             var firstShaderVariables = cameraData.BuildShaderVariables();
 
@@ -139,6 +148,8 @@ namespace VividRP.Editor.Tests
             camera.nonJitteredProjectionMatrix = secondProjection;
             camera.projectionMatrix = secondJitter * secondProjection;
             cameraData.frameIndex = 11;
+
+            temporalData.Update(cameraData);
 
             var secondExpectedViewProjection = GL.GetGPUProjectionMatrix(secondProjection, true) * camera.worldToCameraMatrix;
             var secondShaderVariables = cameraData.BuildShaderVariables();

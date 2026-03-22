@@ -107,6 +107,7 @@ namespace VividRP.Runtime
             RenderGraphHistoryRegistry.Clear();
             RenderGraphBufferHistoryRegistry.Clear();
             RenderGraphPreviewRegistry.Clear();
+            FrameContextSystem.Clear();
             VividRayTracingAccelerationStructureStatsRegistry.Clear();
             s_CurrentGraphAsset = null;
             s_CurrentImportVersion = 0;
@@ -117,6 +118,11 @@ namespace VividRP.Runtime
         {
             EnsureCompiled(graphAsset);
             ClearCodeManagedHistoryFrameState();
+
+            // Tick temporal system before shader variables — ensures prev matrices
+            // and temporal globals are set once, before any pass executes.
+            FrameContextSystem.Update(s_FrameData, cmdBuffer);
+
             var cameraData = s_FrameData.GetOrCreate<VividCameraData>();
             cameraData.UpdateShaderVariables(cmdBuffer);
             PrepareHistoryTargets(graphAsset, cmdBuffer);

@@ -7,8 +7,8 @@ namespace VividRP.Editor
     {
         private static readonly string[] s_PackageRoots =
         {
-            "Packages/VividRP",
             "Packages/com.af8a2a.vividrp",
+            "Packages/VividRP",
         };
 
         internal static string GetPreferredPackageRoot()

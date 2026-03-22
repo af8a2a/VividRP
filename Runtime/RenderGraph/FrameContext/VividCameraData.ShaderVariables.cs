@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -26,8 +25,6 @@ namespace VividRP.Runtime
         private static readonly int MatrixInvPId = Shader.PropertyToID("unity_MatrixInvP");
         private static readonly int MatrixVPId = Shader.PropertyToID("unity_MatrixVP");
         private static readonly int MatrixInvVPId = Shader.PropertyToID("unity_MatrixInvVP");
-        private static readonly int PrevViewProjMatrixId = Shader.PropertyToID("_PrevViewProjMatrix");
-        private static readonly int NonJitteredViewProjMatrixId = Shader.PropertyToID("_NonJitteredViewProjMatrix");
         private static readonly int ViewProjMatrixId = Shader.PropertyToID("_ViewProjMatrix");
         private static readonly int ViewMatrixId = Shader.PropertyToID("_ViewMatrix");
         private static readonly int ProjMatrixId = Shader.PropertyToID("_ProjMatrix");
@@ -172,9 +169,8 @@ namespace VividRP.Runtime
             cmd.SetGlobalMatrix(MatrixInvPId, shaderVariables.matrixInvP);
             cmd.SetGlobalMatrix(MatrixVPId, shaderVariables.matrixVP);
             cmd.SetGlobalMatrix(MatrixInvVPId, shaderVariables.matrixInvVP);
-            // Debug.Log(shaderVariables.matrixInvVP);
-            cmd.SetGlobalMatrix(PrevViewProjMatrixId, shaderVariables.prevViewProjMatrix);
-            cmd.SetGlobalMatrix(NonJitteredViewProjMatrixId, shaderVariables.nonJitteredViewProjMatrix);
+            // Temporal matrices (_PrevViewProjMatrix, _NonJitteredViewProjMatrix) are set
+            // exclusively by FrameContextSystem.Tick() to avoid order-dependent overwrites.
             cmd.SetGlobalMatrix(ViewProjMatrixId, shaderVariables.viewProjMatrix);
             cmd.SetGlobalMatrix(ViewMatrixId, shaderVariables.viewMatrix);
             cmd.SetGlobalMatrix(ProjMatrixId, shaderVariables.projMatrix);
@@ -310,20 +306,17 @@ namespace VividRP.Runtime
 
         private MotionVectorMatrices PrepareMotionVectorMatrices(Matrix4x4 viewMatrix)
         {
-            var currentViewProjection = GetGPUProjectionMatrixNoJitter(true) * viewMatrix;
             var currentCamera = camera;
+            if (currentCamera != null)
+                currentCamera.depthTextureMode |= DepthTextureMode.Depth | DepthTextureMode.MotionVectors;
 
-            if (currentCamera == null)
-            {
-                return new MotionVectorMatrices(currentViewProjection, currentViewProjection);
-            }
+            // Read temporal matrices from FrameContextSystem (already ticked before this call)
+            var temporalData = FrameContextSystem.GetOrCreate(currentCamera);
+            if (temporalData != null)
+                return new MotionVectorMatrices(temporalData.PreviousViewProjection, temporalData.ViewProjection);
 
-            currentCamera.depthTextureMode |= DepthTextureMode.Depth | DepthTextureMode.MotionVectors;
-
-            var temporalState = MotionVectorTemporalStateRegistry.GetOrCreate(currentCamera);
-            temporalState.Update(this, currentViewProjection);
-
-            return new MotionVectorMatrices(temporalState.PreviousViewProjection, temporalState.ViewProjection);
+            var fallback = GetGPUProjectionMatrixNoJitter(true) * viewMatrix;
+            return new MotionVectorMatrices(fallback, fallback);
         }
 
         private readonly struct MotionVectorMatrices
@@ -336,115 +329,6 @@ namespace VividRP.Runtime
                 this.previousViewProjMatrix = previousViewProjMatrix;
                 this.nonJitteredViewProjMatrix = nonJitteredViewProjMatrix;
             }
-        }
-    }
-
-    internal sealed class MotionVectorTemporalState
-    {
-        private Matrix4x4 m_ViewProjection = Matrix4x4.identity;
-        private Matrix4x4 m_PreviousViewProjection = Matrix4x4.identity;
-        private int m_LastFrameIndex = -1;
-        private float m_LastAspectRatio = -1f;
-
-        public Matrix4x4 ViewProjection => m_ViewProjection;
-        public Matrix4x4 PreviousViewProjection => m_PreviousViewProjection;
-
-        public void Update(VividCameraData cameraData, Matrix4x4 currentViewProjection)
-        {
-            if (cameraData?.camera == null)
-            {
-                Reset();
-                return;
-            }
-
-            var frameIndex = ResolveFrameIndex(cameraData);
-            var aspectRatio = ResolveAspectRatio(cameraData);
-            var hasValidHistory = m_LastFrameIndex >= 0 && Mathf.Abs(m_LastAspectRatio - aspectRatio) < 0.0001f;
-
-            if (!hasValidHistory)
-            {
-                m_PreviousViewProjection = currentViewProjection;
-                m_ViewProjection = currentViewProjection;
-            }
-            else if (m_LastFrameIndex != frameIndex)
-            {
-                m_PreviousViewProjection = m_ViewProjection;
-                m_ViewProjection = currentViewProjection;
-            }
-            else
-            {
-                m_ViewProjection = currentViewProjection;
-            }
-
-            m_LastFrameIndex = frameIndex;
-            m_LastAspectRatio = aspectRatio;
-        }
-
-        private void Reset()
-        {
-            m_ViewProjection = Matrix4x4.identity;
-            m_PreviousViewProjection = Matrix4x4.identity;
-            m_LastFrameIndex = -1;
-            m_LastAspectRatio = -1f;
-        }
-
-        private static int ResolveFrameIndex(VividCameraData cameraData)
-        {
-            return cameraData != null && cameraData.frameIndex >= 0
-                ? cameraData.frameIndex
-                : Time.frameCount;
-        }
-
-        private static float ResolveAspectRatio(VividCameraData cameraData)
-        {
-            var currentCamera = cameraData?.camera;
-            if (currentCamera != null && currentCamera.aspect > 0f)
-                return currentCamera.aspect;
-
-            var width = cameraData != null && cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData?.pixelWidth ?? 0;
-            var height = cameraData != null && cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData?.pixelHeight ?? 0;
-            if (width > 0 && height > 0)
-                return width / (float)height;
-
-            return 1f;
-        }
-    }
-
-    internal static class MotionVectorTemporalStateRegistry
-    {
-        private static readonly Dictionary<Camera, MotionVectorTemporalState> s_DataByCamera = new();
-        private static readonly List<Camera> s_DestroyedCameras = new();
-
-        public static MotionVectorTemporalState GetOrCreate(Camera camera)
-        {
-            if (camera == null)
-                return null;
-
-            PruneDestroyedCameras();
-
-            if (!s_DataByCamera.TryGetValue(camera, out var data))
-            {
-                data = new MotionVectorTemporalState();
-                s_DataByCamera[camera] = data;
-            }
-
-            return data;
-        }
-
-        private static void PruneDestroyedCameras()
-        {
-            if (s_DataByCamera.Count == 0)
-                return;
-
-            s_DestroyedCameras.Clear();
-            foreach (var pair in s_DataByCamera)
-            {
-                if (pair.Key == null)
-                    s_DestroyedCameras.Add(pair.Key);
-            }
-
-            for (var i = 0; i < s_DestroyedCameras.Count; i++)
-                s_DataByCamera.Remove(s_DestroyedCameras[i]);
         }
     }
 }

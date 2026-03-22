@@ -37,9 +37,13 @@ namespace VividRP.Runtime.RenderPass.Core
         public ShadowClassifyPass()
         {
             profilingSampler = new ProfilingSampler(nameof(ShadowClassifyPass));
-            m_DepthTexture = CreateInputTexture("Depth", GraphicsFormat.None, DepthBits.Depth32);
-            m_GBuffer1 = CreateInputTexture("GBuffer1", GraphicsFormat.R16G16_SFloat);
-            m_ShadowClassifyMask = CreateMaskTexture("ShadowClassifyMask");
+            m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
+            m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.R16G16_SFloat);
+            m_ShadowClassifyMask = RenderGraphTexture.CreateOutput("ShadowClassifyMask", GraphicsFormat.R8_UNorm);
+            m_ShadowClassifyMask.desc.ClearBuffer = true;
+            m_ShadowClassifyMask.desc.ClearColor = Color.clear;
+            m_ShadowClassifyMask.desc.FilterMode = FilterMode.Point;
+            m_ShadowClassifyMask.desc.WrapMode = TextureWrapMode.Clamp;
         }
 
         public override void Create()
@@ -114,41 +118,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void ConfigureMaskTexture(int width, int height)
         {
-            if (m_ShadowClassifyMask?.desc == null)
-                return;
-
-            m_ShadowClassifyMask.desc.Width = width;
-            m_ShadowClassifyMask.desc.Height = height;
-            m_ShadowClassifyMask.desc.EnableRandomWrite = true;
+            m_ShadowClassifyMask?.Resize(width, height);
         }
 
-        private static RenderGraphTexture CreateInputTexture(string name, GraphicsFormat format, DepthBits depthBits = DepthBits.None)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = format == GraphicsFormat.None
-                    ? RenderGraphTextureDesc.CreateDepthTarget(1, 1, depthBits)
-                    : RenderGraphTextureDesc.CreateColorTarget(1, 1, format)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = false;
-            texture.desc.EnableRandomWrite = false;
-            return texture;
-        }
-
-        private static RenderGraphTexture CreateMaskTexture(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R8_UNorm)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = true;
-            texture.desc.ClearColor = Color.clear;
-            texture.desc.FilterMode = FilterMode.Point;
-            texture.desc.WrapMode = TextureWrapMode.Clamp;
-            texture.desc.EnableRandomWrite = true;
-            return texture;
-        }
     }
 }

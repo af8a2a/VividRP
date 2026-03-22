@@ -148,7 +148,7 @@ namespace VividRP.Runtime
         public LightGridPass()
         {
             profilingSampler = new ProfilingSampler(nameof(LightGridPass));
-            m_DepthTexture = CreateDepthTexture("Depth");
+            m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
             m_DirectionalLightBuffer = CreateStructuredBuffer("DirectionalLights", 1, VividLightData.DirectionalLightData.Stride);
             m_PunctualLightBuffer = CreateStructuredBuffer("PunctualLights", 1, VividLightData.PunctualLightData.Stride);
             m_FiniteLightBoundBuffer = CreateStructuredBuffer("FiniteLightBounds", 1, VividLightData.SFiniteLightBound.Stride);
@@ -179,7 +179,7 @@ namespace VividRP.Runtime
             if (m_LightingHeight <= 0)
                 m_LightingHeight = Mathf.Max(1, Screen.height);
 
-            ResizeDepthTexture(m_DepthTexture, m_LightingWidth, m_LightingHeight);
+            m_DepthTexture.Resize(m_LightingWidth, m_LightingHeight);
             m_ClusterTileCountX = Mathf.Max(1, Mathf.CeilToInt(m_LightingWidth / (float)ClusterTileSize));
             m_ClusterTileCountY = Mathf.Max(1, Mathf.CeilToInt(m_LightingHeight / (float)ClusterTileSize));
             m_ClusterTileCount = Mathf.Max(1, m_ClusterTileCountX * m_ClusterTileCountY);
@@ -596,16 +596,6 @@ namespace VividRP.Runtime
             ReleaseImportedBuffer(ref m_LogBaseImportedBuffer, m_LogBaseBuffer);
         }
 
-        private static RenderGraphTexture CreateDepthTexture(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateDepthTarget(1, 1, DepthBits.Depth32)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = false;
-            return texture;
-        }
 
         private static RenderGraphBuffer CreateStructuredBuffer(string name, int count, int stride)
         {
@@ -621,14 +611,6 @@ namespace VividRP.Runtime
             };
         }
 
-        private static void ResizeDepthTexture(RenderGraphTexture texture, int width, int height)
-        {
-            if (texture?.desc == null)
-                return;
-
-            texture.desc.Width = width;
-            texture.desc.Height = height;
-        }
 
         private static void ResizeStructuredBuffer(RenderGraphBuffer buffer, int count, int stride)
         {

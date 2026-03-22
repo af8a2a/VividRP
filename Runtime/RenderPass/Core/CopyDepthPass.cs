@@ -19,8 +19,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public CopyDepthPass()
         {
-            m_DepthAttachment = CreateDepthAttachment("DepthAttachment");
-            m_DepthTexture = CreateDepthTexture("DepthTexture");
+            m_DepthAttachment = RenderGraphTexture.CreateInput("DepthAttachment", GraphicsFormat.None, DepthBits.Depth32);
+            m_DepthTexture = RenderGraphTexture.CreateColorTarget("DepthTexture", GraphicsFormat.R32_SFloat);
+            m_DepthTexture.desc.ClearBuffer = false;
+            m_DepthTexture.desc.FilterMode = FilterMode.Point;
         }
 
         public override void Create()
@@ -124,37 +126,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 return cameraDimension;
 
             return Mathf.Max(1, screenDimension);
-        }
-
-        private static RenderGraphTexture CreateDepthAttachment(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateDepthTarget(1, 1, DepthBits.Depth32)
-            };
-
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = false;
-            return texture;
-        }
-
-        
-        private static RenderGraphTexture CreateDepthTexture(string name)
-        {
-            return new RenderGraphTexture
-            {
-                desc = new RenderGraphTextureDesc
-                {
-                    Width = 1,
-                    Height = 1,
-                    ColorFormat = GraphicsFormat.R32_SFloat,
-                    DepthBufferBits = DepthBits.None,
-                    FilterMode = FilterMode.Point,
-                    WrapMode = TextureWrapMode.Clamp,
-                    ClearBuffer = false,
-                    Name = name
-                }
-            };
         }
 
         private static Vector4 GetScaleBias(

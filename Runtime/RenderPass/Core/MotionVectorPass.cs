@@ -56,9 +56,11 @@ namespace VividRP.Runtime.RenderPass.Core
             };
 
 
-            m_CameraDepthTexture = CreateInputDepthTexture("CameraDepth");
-            m_MotionVectorTexture = CreateMotionVectorTexture("MotionVectors");
-            m_MotionVectorDepthTexture = CreateDepthOutputTexture("MotionVectorDepth");
+            m_CameraDepthTexture = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.None, DepthBits.Depth32);
+            m_MotionVectorTexture = RenderGraphTexture.CreateColorTarget("MotionVectors", GraphicsFormat.R16G16_SFloat);
+            m_MotionVectorTexture.desc.ClearBuffer = false;
+            m_MotionVectorDepthTexture = RenderGraphTexture.CreateDepthTarget("MotionVectorDepth");
+            m_MotionVectorDepthTexture.desc.ClearBuffer = false;
         }
 
         public override void Create()
@@ -174,8 +176,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_MotionVectorTexture?.desc == null)
                 return;
 
-            m_MotionVectorTexture.desc.Width = width;
-            m_MotionVectorTexture.desc.Height = height;
+            m_MotionVectorTexture.Resize(width, height);
             m_MotionVectorTexture.desc.ColorFormat = GraphicsFormat.R16G16_SFloat;
             m_MotionVectorTexture.desc.DepthBufferBits = DepthBits.None;
             m_MotionVectorTexture.desc.MsaaSamples = MSAASamples.None;
@@ -205,8 +206,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_MotionVectorDepthTexture?.desc == null)
                 return;
 
-            m_MotionVectorDepthTexture.desc.Width = width;
-            m_MotionVectorDepthTexture.desc.Height = height;
+            m_MotionVectorDepthTexture.Resize(width, height);
             m_MotionVectorDepthTexture.desc.ColorFormat = GraphicsFormat.None;
             m_MotionVectorDepthTexture.desc.DepthBufferBits = sourceDescriptor != null && sourceDescriptor.DepthBufferBits != DepthBits.None
                 ? sourceDescriptor.DepthBufferBits
@@ -244,44 +244,5 @@ namespace VividRP.Runtime.RenderPass.Core
             return Mathf.Max(1, screenDimension);
         }
 
-        private static RenderGraphTexture CreateInputDepthTexture(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateDepthTarget(1, 1, DepthBits.Depth32)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = false;
-            return texture;
-        }
-
-        private static RenderGraphTexture CreateMotionVectorTexture(string name)
-        {
-            return new RenderGraphTexture
-            {
-                desc = new RenderGraphTextureDesc
-                {
-                    Width = 1,
-                    Height = 1,
-                    ColorFormat = GraphicsFormat.R16G16_SFloat,
-                    DepthBufferBits = DepthBits.None,
-                    FilterMode = FilterMode.Point,
-                    WrapMode = TextureWrapMode.Clamp,
-                    ClearBuffer = false,
-                    Name = name
-                }
-            };
-        }
-
-        private static RenderGraphTexture CreateDepthOutputTexture(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateDepthTarget(1, 1, DepthBits.Depth32)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = false;
-            return texture;
-        }
     }
 }

@@ -105,10 +105,14 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             profilingSampler = new ProfilingSampler(nameof(DirectionalRayTracedShadowPass));
             m_SceneAccelerationStructure = CreateSceneAccelerationStructure();
-            m_DepthTexture = CreateInputTexture("Depth", GraphicsFormat.None, DepthBits.Depth32);
-            m_GBuffer1 = CreateInputTexture("GBuffer1", GraphicsFormat.R16G16_SFloat);
-            m_DirectionalShadowTexture = CreateOutputTexture("DirectionalShadowTexture");
-            m_ShadowClassifyMask = CreateClassifyMaskInput("ShadowClassifyMask");
+            m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
+            m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.R16G16_SFloat);
+            m_DirectionalShadowTexture = RenderGraphTexture.CreateOutput("DirectionalShadowTexture", GraphicsFormat.R16_SFloat);
+            m_DirectionalShadowTexture.desc.ClearBuffer = true;
+            m_DirectionalShadowTexture.desc.ClearColor = RawShadowClearColor;
+            m_DirectionalShadowTexture.desc.FilterMode = FilterMode.Point;
+            m_DirectionalShadowTexture.desc.WrapMode = TextureWrapMode.Clamp;
+            m_ShadowClassifyMask = RenderGraphTexture.CreateInput("ShadowClassifyMask", GraphicsFormat.R8_UNorm);
         }
 
         public override void Create()
@@ -399,8 +403,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_DirectionalShadowTexture?.desc == null)
                 return;
 
-            m_DirectionalShadowTexture.desc.Width = width;
-            m_DirectionalShadowTexture.desc.Height = height;
+            m_DirectionalShadowTexture.Resize(width, height);
             m_DirectionalShadowTexture.desc.ColorFormat = GraphicsFormat.R16_SFloat;
             m_DirectionalShadowTexture.desc.DepthBufferBits = DepthBits.None;
             m_DirectionalShadowTexture.desc.MsaaSamples = MSAASamples.None;
@@ -442,45 +445,5 @@ namespace VividRP.Runtime.RenderPass.Core
             basisY = new Vector3(b, sign + sunDirection.y * sunDirection.y * a, -sunDirection.y);
         }
 
-        private static RenderGraphTexture CreateInputTexture(string name, GraphicsFormat format, DepthBits depthBits = DepthBits.None)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = format == GraphicsFormat.None
-                    ? RenderGraphTextureDesc.CreateDepthTarget(1, 1, depthBits)
-                    : RenderGraphTextureDesc.CreateColorTarget(1, 1, format)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = false;
-            texture.desc.EnableRandomWrite = false;
-            return texture;
-        }
-
-        private static RenderGraphTexture CreateOutputTexture(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16_SFloat)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = true;
-            texture.desc.ClearColor = RawShadowClearColor;
-            texture.desc.FilterMode = FilterMode.Point;
-            texture.desc.WrapMode = TextureWrapMode.Clamp;
-            texture.desc.EnableRandomWrite = true;
-            return texture;
-        }
-
-        private static RenderGraphTexture CreateClassifyMaskInput(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R8_UNorm)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = false;
-            texture.desc.EnableRandomWrite = false;
-            return texture;
-        }
     }
 }

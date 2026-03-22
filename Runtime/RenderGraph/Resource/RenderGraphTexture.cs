@@ -184,23 +184,99 @@ namespace VividRP.Runtime
             m_UsesImportedHandle = false;
         }
 
+        /// <summary>
+        /// Creates a color target texture with the given name and format.
+        /// </summary>
+        public static RenderGraphTexture CreateColorTarget(string name, GraphicsFormat format)
+        {
+            var desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, format);
+            desc.Name = name;
+
+            var target = new RenderGraphTexture
+            {
+                desc = desc
+            };
+            return target;
+        }
+
+        /// <summary>
+        /// Creates a depth target texture with the given name and depth bits.
+        /// </summary>
+        public static RenderGraphTexture CreateDepthTarget(string name, DepthBits depthBits = DepthBits.Depth32)
+        {
+            var desc = RenderGraphTextureDesc.CreateDepthTarget(1, 1, depthBits);
+            desc.Name = name;
+
+            var target = new RenderGraphTexture
+            {
+                desc = desc
+            };
+            return target;
+        }
+
+        /// <summary>
+        /// Creates a read-only input texture (ClearBuffer disabled).
+        /// Uses depth target when format is None, otherwise color target.
+        /// </summary>
+        public static RenderGraphTexture CreateInput(string name, GraphicsFormat format,
+            DepthBits depthBits = DepthBits.None)
+        {
+            var texture = new RenderGraphTexture
+            {
+                desc = format == GraphicsFormat.None
+                    ? RenderGraphTextureDesc.CreateDepthTarget(1, 1, depthBits)
+                    : RenderGraphTextureDesc.CreateColorTarget(1, 1, format)
+            };
+            texture.desc.Name = name;
+            texture.desc.ClearBuffer = false;
+            return texture;
+        }
+
+        /// <summary>
+        /// Creates a write-only output texture with random write enabled and ClearBuffer disabled.
+        /// </summary>
+        public static RenderGraphTexture CreateOutput(string name, GraphicsFormat format)
+        {
+            var desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, format);
+            desc.Name = name;
+
+            var target = new RenderGraphTexture
+            {
+                desc = desc
+            };
+            return target;
+        }
+
+        /// <summary>
+        /// Resizes this texture's descriptor to the given dimensions.
+        /// </summary>
+        public void Resize(int width, int height)
+        {
+            if (desc == null)
+                return;
+
+            desc.Width = width;
+            desc.Height = height;
+        }
+
         public static implicit operator TextureHandle(RenderGraphTexture rt)
         {
             return rt.innerHandle;
         }
-        
+
         public static implicit operator RenderTargetIdentifier(RenderGraphTexture rt)
         {
             return rt.innerHandle;
         }
+
         public static implicit operator RenderTexture(RenderGraphTexture rt)
         {
             return rt.innerHandle;
         }
+
         public static implicit operator Texture(RenderGraphTexture rt)
         {
             return rt.innerHandle;
         }
-
     }
 }

@@ -183,14 +183,21 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             profilingSampler = new ProfilingSampler(profilerName);
 
-            m_GBuffer0 = CreateInputTexture("GBuffer0", GraphicsFormat.R8G8B8A8_UNorm);
-            m_GBuffer1 = CreateInputTexture("GBuffer1", GraphicsFormat.R16G16_SFloat);
-            m_GBuffer2 = CreateInputTexture("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
-            m_GBuffer3 = CreateInputTexture("GBuffer3", GraphicsFormat.B10G11R11_UFloatPack32);
-            m_DepthTexture = CreateDepthTexture("Depth");
-            m_LocalDirectionalShadowTexture = CreateDirectionalShadowTexture("DirectionalShadowTexture");
+            m_GBuffer0 = RenderGraphTexture.CreateInput("GBuffer0", GraphicsFormat.R8G8B8A8_UNorm);
+            m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.R16G16_SFloat);
+            m_GBuffer2 = RenderGraphTexture.CreateInput("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
+            m_GBuffer3 = RenderGraphTexture.CreateInput("GBuffer3", GraphicsFormat.B10G11R11_UFloatPack32);
+            m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
+            m_LocalDirectionalShadowTexture = RenderGraphTexture.CreateColorTarget("DirectionalShadowTexture", GraphicsFormat.R16_SFloat);
+            m_LocalDirectionalShadowTexture.desc.ClearBuffer = true;
+            m_LocalDirectionalShadowTexture.desc.ClearColor = Color.white;
+            m_LocalDirectionalShadowTexture.desc.FilterMode = FilterMode.Point;
+            m_LocalDirectionalShadowTexture.desc.WrapMode = TextureWrapMode.Clamp;
             m_DirectionalShadowTexture = m_LocalDirectionalShadowTexture;
-            m_ColorTexture = CreateOutputTexture("Color", GraphicsFormat.R16G16B16A16_SFloat);
+            m_ColorTexture = RenderGraphTexture.CreateOutput("Color", GraphicsFormat.R16G16B16A16_SFloat);
+            m_ColorTexture.desc.EnableRandomWrite = true;
+            m_ColorTexture.desc.ClearBuffer = true;
+            m_ColorTexture.desc.ClearColor = Color.clear;
             m_SkyIBLCubemap = CreateSkyIBLCubemapTexture("SkyIBLCubemap");
             m_StandardMaterialIndices = CreateStructuredBuffer("StandardMaterialIndices", sizeof(uint));
             m_FabricMaterialIndices = CreateStructuredBuffer("FabricMaterialIndices", sizeof(uint));
@@ -246,12 +253,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ClearDispatchGroupCountX = Mathf.Max(1, (width + ClearThreadGroupSizeX - 1) / ClearThreadGroupSizeX);
             m_ClearDispatchGroupCountY = Mathf.Max(1, (height + ClearThreadGroupSizeY - 1) / ClearThreadGroupSizeY);
 
-            ResizeTexture(m_GBuffer0, width, height);
-            ResizeTexture(m_GBuffer1, width, height);
-            ResizeTexture(m_GBuffer2, width, height);
-            ResizeTexture(m_GBuffer3, width, height);
-            ResizeTexture(m_DepthTexture, width, height);
-            ResizeTexture(m_ColorTexture, width, height);
+            m_GBuffer0.Resize(width, height);
+            m_GBuffer1.Resize(width, height);
+            m_GBuffer2.Resize(width, height);
+            m_GBuffer3.Resize(width, height);
+            m_DepthTexture.Resize(width, height);
+            m_ColorTexture.Resize(width, height);
             PrepareClusteredLightingParameters(frameData);
             PreparePreIntegratedFGDResources();
             PrepareSkyIblState();
@@ -499,17 +506,6 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeBufferParam(m_DeferredLitCompute, kernel, propertyId, buffer.innerHandle);
         }
 
-        private static RenderGraphTexture CreateInputTexture(string name, GraphicsFormat format)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, format)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = false;
-            return texture;
-        }
-
         private static RenderGraphTexture CreateSkyIBLCubemapTexture(string name)
         {
             return new RenderGraphTexture
@@ -528,44 +524,6 @@ namespace VividRP.Runtime.RenderPass.Core
                     Name = name
                 }
             };
-        }
-
-        private static RenderGraphTexture CreateDepthTexture(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateDepthTarget(1, 1, DepthBits.Depth32)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = false;
-            return texture;
-        }
-
-        private static RenderGraphTexture CreateDirectionalShadowTexture(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16_SFloat)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = true;
-            texture.desc.ClearColor = Color.white;
-            texture.desc.FilterMode = FilterMode.Point;
-            texture.desc.WrapMode = TextureWrapMode.Clamp;
-            return texture;
-        }
-
-        private static RenderGraphTexture CreateOutputTexture(string name, GraphicsFormat format)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, format)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = true;
-            texture.desc.ClearColor = Color.clear;
-            texture.desc.EnableRandomWrite = true;
-            return texture;
         }
 
         private static RenderGraphBuffer CreateStructuredBuffer(string name, int stride)
@@ -594,15 +552,6 @@ namespace VividRP.Runtime.RenderPass.Core
                     Name = name
                 }
             };
-        }
-
-        private static void ResizeTexture(RenderGraphTexture texture, int width, int height)
-        {
-            if (texture?.desc == null)
-                return;
-
-            texture.desc.Width = width;
-            texture.desc.Height = height;
         }
 
         private void PreparePreIntegratedFGDResources()

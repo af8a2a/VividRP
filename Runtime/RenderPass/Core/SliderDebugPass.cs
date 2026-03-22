@@ -42,9 +42,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public SliderDebugPass()
         {
-            m_LeftTexture = CreateInputTexture("LeftTexture");
-            m_RightTexture = CreateInputTexture("RightTexture");
-            m_OutputTexture = CreateOutputTexture("OutputTexture");
+            m_LeftTexture = RenderGraphTexture.CreateInput("LeftTexture", GraphicsFormat.R8G8B8A8_UNorm);
+            m_RightTexture = RenderGraphTexture.CreateInput("RightTexture", GraphicsFormat.R8G8B8A8_UNorm);
+            m_OutputTexture = RenderGraphTexture.CreateColorTarget("OutputTexture", GraphicsFormat.R8G8B8A8_UNorm);
+            m_OutputTexture.desc.ClearBuffer = true;
+            m_OutputTexture.desc.ClearColor = Color.black;
         }
 
         public override void Create()
@@ -242,27 +244,5 @@ namespace VividRP.Runtime.RenderPass.Core
             return new Vector4(scale.x, scale.y, 0f, 0f);
         }
 
-        private static RenderGraphTexture CreateInputTexture(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R8G8B8A8_UNorm)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = false;
-            return texture;
-        }
-
-        private static RenderGraphTexture CreateOutputTexture(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R8G8B8A8_UNorm)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = true;
-            texture.desc.ClearColor = Color.black;
-            return texture;
-        }
     }
 }

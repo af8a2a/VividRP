@@ -49,12 +49,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 desc = RenderGraphRenderListDesc.CreateOpaque("VividGBuffer")
             };
 
-            m_GBuffer0 = CreateColorTarget("GBuffer0", GraphicsFormat.R8G8B8A8_UNorm);
-            m_GBuffer1 = CreateColorTarget("GBuffer1", GraphicsFormat.R16G16_SFloat);
-            m_GBuffer2 = CreateColorTarget("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
-            m_GBuffer3 = CreateColorTarget("GBuffer3", GraphicsFormat.B10G11R11_UFloatPack32);
+            m_GBuffer0 = RenderGraphTexture.CreateColorTarget("GBuffer0", GraphicsFormat.R8G8B8A8_UNorm);
+            m_GBuffer1 = RenderGraphTexture.CreateColorTarget("GBuffer1", GraphicsFormat.R16G16_SFloat);
+            m_GBuffer2 = RenderGraphTexture.CreateColorTarget("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
+            m_GBuffer3 = RenderGraphTexture.CreateColorTarget("GBuffer3", GraphicsFormat.B10G11R11_UFloatPack32);
             m_GBuffer3.desc.EnableRandomWrite = true;
-            m_GBufferDepth = CreateDepthTarget("GBufferDepth", DepthBits.Depth32);
+            m_GBufferDepth = RenderGraphTexture.CreateDepthTarget("GBufferDepth");
         }
 
         public override void Create()
@@ -73,11 +73,11 @@ namespace VividRP.Runtime.RenderPass.Core
             if (height <= 0)
                 height = Mathf.Max(1, Screen.height);
 
-            ResizeTexture(m_GBuffer0, width, height);
-            ResizeTexture(m_GBuffer1, width, height);
-            ResizeTexture(m_GBuffer2, width, height);
-            ResizeTexture(m_GBuffer3, width, height);
-            ResizeTexture(m_GBufferDepth, width, height);
+            m_GBuffer0.Resize(width, height);
+            m_GBuffer1.Resize(width, height);
+            m_GBuffer2.Resize(width, height);
+            m_GBuffer3.Resize(width, height);
+            m_GBufferDepth.Resize(width, height);
         }
 
         public override void Record(RasterGraphContext context)
@@ -90,35 +90,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Dispose()
         {
-        }
-
-        private static RenderGraphTexture CreateColorTarget(string name, GraphicsFormat format)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, format)
-            };
-            texture.desc.Name = name;
-            return texture;
-        }
-
-        private static RenderGraphTexture CreateDepthTarget(string name, DepthBits depthBits)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateDepthTarget(1, 1, depthBits)
-            };
-            texture.desc.Name = name;
-            return texture;
-        }
-
-        private static void ResizeTexture(RenderGraphTexture texture, int width, int height)
-        {
-            if (texture?.desc == null)
-                return;
-
-            texture.desc.Width = width;
-            texture.desc.Height = height;
         }
     }
 }

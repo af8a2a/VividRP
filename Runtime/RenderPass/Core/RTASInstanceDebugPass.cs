@@ -59,7 +59,9 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             profilingSampler = new ProfilingSampler(nameof(RTASInstanceDebugPass));
             m_SceneAccelerationStructure = CreateSceneAccelerationStructure();
-            m_OutputTexture = CreateOutputTexture("OutputTexture");
+            m_OutputTexture = RenderGraphTexture.CreateOutput("OutputTexture", GraphicsFormat.R16G16B16A16_SFloat);
+            m_OutputTexture.desc.ClearBuffer = true;
+            m_OutputTexture.desc.ClearColor = Color.black;
         }
 
         public override void Create()
@@ -161,8 +163,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_OutputTexture?.desc == null)
                 return;
 
-            m_OutputTexture.desc.Width = width;
-            m_OutputTexture.desc.Height = height;
+            m_OutputTexture.Resize(width, height);
             m_OutputTexture.desc.ColorFormat = ResolveOutputFormat(m_OutputTexture.desc);
             m_OutputTexture.desc.DepthBufferBits = DepthBits.None;
             m_OutputTexture.desc.MsaaSamples = MSAASamples.None;
@@ -214,17 +215,5 @@ namespace VividRP.Runtime.RenderPass.Core
             };
         }
 
-        private static RenderGraphTexture CreateOutputTexture(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16G16B16A16_SFloat)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = true;
-            texture.desc.ClearColor = Color.black;
-            texture.desc.EnableRandomWrite = true;
-            return texture;
-        }
     }
 }

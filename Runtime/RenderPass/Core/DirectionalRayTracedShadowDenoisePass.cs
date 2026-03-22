@@ -61,12 +61,16 @@ namespace VividRP.Runtime.RenderPass.Core
         public DirectionalRayTracedShadowDenoisePass()
         {
             profilingSampler = new ProfilingSampler(nameof(DirectionalRayTracedShadowDenoisePass));
-            m_RawShadowTexture = CreateInputTexture("RawShadow", GraphicsFormat.R16_SFloat);
-            m_MotionVectorTexture = CreateInputTexture("MotionVectors", GraphicsFormat.R16G16_SFloat);
-            m_DepthTexture = CreateInputTexture("Depth", GraphicsFormat.None, DepthBits.Depth32);
-            m_GBuffer1 = CreateInputTexture("GBuffer1", GraphicsFormat.R16G16_SFloat);
-            m_HistoryShadowTexture = CreateInputTexture("HistoryShadow", GraphicsFormat.R16_SFloat);
-            m_DenoisedShadowTexture = CreateOutputTexture("DenoisedShadow");
+            m_RawShadowTexture = RenderGraphTexture.CreateInput("RawShadow", GraphicsFormat.R16_SFloat);
+            m_MotionVectorTexture = RenderGraphTexture.CreateInput("MotionVectors", GraphicsFormat.R16G16_SFloat);
+            m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
+            m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.R16G16_SFloat);
+            m_HistoryShadowTexture = RenderGraphTexture.CreateInput("HistoryShadow", GraphicsFormat.R16_SFloat);
+            m_DenoisedShadowTexture = RenderGraphTexture.CreateOutput("DenoisedShadow", GraphicsFormat.R16_SFloat);
+            m_DenoisedShadowTexture.desc.ClearBuffer = true;
+            m_DenoisedShadowTexture.desc.ClearColor = new Color(65504f, 0f, 0f, 0f);
+            m_DenoisedShadowTexture.desc.FilterMode = FilterMode.Bilinear;
+            m_DenoisedShadowTexture.desc.WrapMode = TextureWrapMode.Clamp;
         }
 
         public override void Create()
@@ -158,8 +162,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_DenoisedShadowTexture?.desc == null)
                 return;
 
-            m_DenoisedShadowTexture.desc.Width = width;
-            m_DenoisedShadowTexture.desc.Height = height;
+            m_DenoisedShadowTexture.Resize(width, height);
             m_DenoisedShadowTexture.desc.ColorFormat = GraphicsFormat.R16_SFloat;
             m_DenoisedShadowTexture.desc.FilterMode = FilterMode.Bilinear;
             m_DenoisedShadowTexture.desc.WrapMode = TextureWrapMode.Clamp;
@@ -168,33 +171,5 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DenoisedShadowTexture.desc.EnableRandomWrite = true;
         }
 
-        private static RenderGraphTexture CreateInputTexture(string name, GraphicsFormat format, DepthBits depthBits = DepthBits.None)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = format == GraphicsFormat.None
-                    ? RenderGraphTextureDesc.CreateDepthTarget(1, 1, depthBits)
-                    : RenderGraphTextureDesc.CreateColorTarget(1, 1, format)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = false;
-            texture.desc.EnableRandomWrite = false;
-            return texture;
-        }
-
-        private static RenderGraphTexture CreateOutputTexture(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16_SFloat)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = true;
-            texture.desc.ClearColor = new Color(65504f, 0f, 0f, 0f);
-            texture.desc.FilterMode = FilterMode.Bilinear;
-            texture.desc.WrapMode = TextureWrapMode.Clamp;
-            texture.desc.EnableRandomWrite = true;
-            return texture;
-        }
     }
 }

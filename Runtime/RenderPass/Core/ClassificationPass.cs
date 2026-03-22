@@ -102,8 +102,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public ClassificationPass()
         {
-            m_GBuffer0 = CreateInputTexture("GBuffer0", GraphicsFormat.R8G8B8A8_UNorm);
-            m_DepthTexture = CreateDepthTexture("Depth");
+            m_GBuffer0 = RenderGraphTexture.CreateInput("GBuffer0", GraphicsFormat.R8G8B8A8_UNorm);
+            m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
 
             m_StandardMaterialIndices = CreateStructuredBuffer("StandardMaterialIndices", 1, sizeof(uint));
             m_FabricMaterialIndices = CreateStructuredBuffer("FabricMaterialIndices", 1, sizeof(uint));
@@ -143,8 +143,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DispatchGroupCountX = Mathf.Max(1, (m_ClassificationWidth + ThreadGroupSizeX - 1) / ThreadGroupSizeX);
             m_DispatchGroupCountY = Mathf.Max(1, (m_ClassificationHeight + ThreadGroupSizeY - 1) / ThreadGroupSizeY);
 
-            ResizeTexture(m_GBuffer0, m_ClassificationWidth, m_ClassificationHeight);
-            ResizeTexture(m_DepthTexture, m_ClassificationWidth, m_ClassificationHeight);
+            m_GBuffer0.Resize(m_ClassificationWidth, m_ClassificationHeight);
+            m_DepthTexture.Resize(m_ClassificationWidth, m_ClassificationHeight);
 
             var maxTileCount = Mathf.Max(1, m_DispatchGroupCountX * m_DispatchGroupCountY);
             m_MaterialTileCount = maxTileCount;
@@ -211,25 +211,6 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_ClassificationCompute, MaterialTileCountXId, m_DispatchGroupCountX);
         }
 
-        private static RenderGraphTexture CreateInputTexture(string name, GraphicsFormat format)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, format)
-            };
-            texture.desc.Name = name;
-            return texture;
-        }
-
-        private static RenderGraphTexture CreateDepthTexture(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateDepthTarget(1, 1, DepthBits.Depth32)
-            };
-            texture.desc.Name = name;
-            return texture;
-        }
 
         private static RenderGraphBuffer CreateStructuredBuffer(string name, int count, int stride)
         {
@@ -259,14 +240,6 @@ namespace VividRP.Runtime.RenderPass.Core
             };
         }
 
-        private static void ResizeTexture(RenderGraphTexture texture, int width, int height)
-        {
-            if (texture?.desc == null)
-                return;
-
-            texture.desc.Width = width;
-            texture.desc.Height = height;
-        }
 
         private static void ResizeStructuredBuffer(RenderGraphBuffer buffer, int count, int stride)
         {

@@ -23,8 +23,8 @@ namespace VividRP.Runtime.RenderPass.Core
         public GenerateViewZPass()
         {
             profilingSampler = new ProfilingSampler(nameof(GenerateViewZPass));
-            m_DepthTexture       = CreateInputTexture("Depth", GraphicsFormat.None, DepthBits.Depth32);
-            m_LinearDepthTexture = CreateOutputTexture("LinearDepth", GraphicsFormat.R32_SFloat);
+            m_DepthTexture       = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
+            m_LinearDepthTexture = RenderGraphTexture.CreateOutput("LinearDepth", GraphicsFormat.R32_SFloat);
         }
 
         public override void Create()
@@ -44,7 +44,9 @@ namespace VividRP.Runtime.RenderPass.Core
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             m_Width  = cameraData.actualWidth;
             m_Height = cameraData.actualHeight;
-            ConfigureTexture(m_LinearDepthTexture, m_Width, m_Height);
+            m_LinearDepthTexture.Resize(m_Width, m_Height);
+            if (m_LinearDepthTexture.desc != null)
+                m_LinearDepthTexture.desc.EnableRandomWrite = true;
         }
 
         public override void Record(ComputeGraphContext context)
@@ -60,40 +62,6 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.DispatchCompute(m_Shader, 0,
                 CoreUtils.DivRoundUp(m_Width,  8),
                 CoreUtils.DivRoundUp(m_Height, 8), 1);
-        }
-
-        private static void ConfigureTexture(RenderGraphTexture tex, int width, int height)
-        {
-            if (tex?.desc == null) return;
-            tex.desc.Width             = width;
-            tex.desc.Height            = height;
-            tex.desc.EnableRandomWrite = true;
-        }
-
-        private static RenderGraphTexture CreateInputTexture(string name, GraphicsFormat format,
-            DepthBits depthBits = DepthBits.None)
-        {
-            var tex = new RenderGraphTexture
-            {
-                desc = format == GraphicsFormat.None
-                    ? RenderGraphTextureDesc.CreateDepthTarget(1, 1, depthBits)
-                    : RenderGraphTextureDesc.CreateColorTarget(1, 1, format)
-            };
-            tex.desc.Name        = name;
-            tex.desc.ClearBuffer = false;
-            return tex;
-        }
-
-        private static RenderGraphTexture CreateOutputTexture(string name, GraphicsFormat format)
-        {
-            var tex = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, format)
-            };
-            tex.desc.Name             = name;
-            tex.desc.ClearBuffer      = false;
-            tex.desc.EnableRandomWrite = true;
-            return tex;
         }
     }
 }

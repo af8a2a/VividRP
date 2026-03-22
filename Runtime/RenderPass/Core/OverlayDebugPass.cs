@@ -134,9 +134,9 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             profilingSampler = new ProfilingSampler(nameof(OverlayDebugPass));
 
-            m_SourceTexture = CreateInputTexture("SourceTexture");
-            m_DebugTexture = CreateInputTexture("DebugTexture");
-            m_OutputTexture = CreateOutputTexture("OutputTexture");
+            m_SourceTexture = RenderGraphTexture.CreateInput("SourceTexture", GraphicsFormat.R8G8B8A8_UNorm);
+            m_DebugTexture = RenderGraphTexture.CreateInput("DebugTexture", GraphicsFormat.R8G8B8A8_UNorm);
+            m_OutputTexture = RenderGraphTexture.CreateInput("OutputTexture", GraphicsFormat.R8G8B8A8_UNorm);
         }
 
         public override void Create()
@@ -356,8 +356,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_OutputTexture?.desc == null)
                 return;
 
-            m_OutputTexture.desc.Width = width;
-            m_OutputTexture.desc.Height = height;
+            m_OutputTexture.Resize(width, height);
             m_OutputTexture.desc.ColorFormat = ResolveOutputFormat(sourceDescriptor);
             m_OutputTexture.desc.DepthBufferBits = DepthBits.None;
             m_OutputTexture.desc.MsaaSamples = MSAASamples.None;
@@ -479,26 +478,5 @@ namespace VividRP.Runtime.RenderPass.Core
             return new Vector4(scale.x, scale.y, 0f, 0f);
         }
 
-        private static RenderGraphTexture CreateInputTexture(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R8G8B8A8_UNorm)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = false;
-            return texture;
-        }
-
-        private static RenderGraphTexture CreateOutputTexture(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R8G8B8A8_UNorm)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = false;
-            return texture;
-        }
     }
 }

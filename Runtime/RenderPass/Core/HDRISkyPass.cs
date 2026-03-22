@@ -24,8 +24,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public HDRISkyPass()
         {
-            m_ColorTarget = CreateColorTarget("SkyColor", GraphicsFormat.R8G8B8A8_SRGB);
-            m_DepthTexture = CreateDepthTarget("SkyDepth", DepthBits.Depth32);
+            m_ColorTarget = RenderGraphTexture.CreateColorTarget("SkyColor", GraphicsFormat.R8G8B8A8_SRGB);
+            m_DepthTexture = RenderGraphTexture.CreateDepthTarget("SkyDepth");
         }
 
         public override void Create()
@@ -75,26 +75,6 @@ namespace VividRP.Runtime.RenderPass.Core
         internal static Vector4 BuildSkyParam(float exposure, float rotation)
         {
             return new Vector4(0f, exposure, -rotation, 0f);
-        }
-
-        private static RenderGraphTexture CreateColorTarget(string name, GraphicsFormat format)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, format)
-            };
-            texture.desc.Name = name;
-            return texture;
-        }
-
-        private static RenderGraphTexture CreateDepthTarget(string name, DepthBits depthBits)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateDepthTarget(1, 1, depthBits)
-            };
-            texture.desc.Name = name;
-            return texture;
         }
 
 

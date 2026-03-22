@@ -61,9 +61,11 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             profilingSampler = new ProfilingSampler(nameof(ClusterDebugPass));
 
-            m_SourceTexture = CreateInputTexture("SourceTexture");
-            m_DepthTexture = CreateDepthTexture("DepthTexture");
-            m_OutputTexture = CreateOutputTexture("OutputTexture");
+            m_SourceTexture = RenderGraphTexture.CreateInput("SourceTexture", GraphicsFormat.R8G8B8A8_UNorm);
+            m_DepthTexture = RenderGraphTexture.CreateInput("DepthTexture", GraphicsFormat.R32_SFloat);
+            m_DepthTexture.desc.FilterMode = FilterMode.Point;
+            m_OutputTexture = RenderGraphTexture.CreateColorTarget("OutputTexture", GraphicsFormat.R8G8B8A8_UNorm);
+            m_OutputTexture.desc.ClearBuffer = false;
             m_ResolvedSettings = new ClusterDebugSettingsData(
                 TileClusterDebug.None,
                 TileClusterCategoryDebug.Punctual,
@@ -299,38 +301,5 @@ namespace VividRP.Runtime.RenderPass.Core
             return new Vector4(scale.x, scale.y, 0f, 0f);
         }
 
-        private static RenderGraphTexture CreateInputTexture(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R8G8B8A8_UNorm)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = false;
-            return texture;
-        }
-
-        private static RenderGraphTexture CreateDepthTexture(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R32_SFloat)
-            };
-            texture.desc.Name = name;
-            texture.desc.FilterMode = FilterMode.Point;
-            texture.desc.ClearBuffer = false;
-            return texture;
-        }
-
-        private static RenderGraphTexture CreateOutputTexture(string name)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R8G8B8A8_UNorm)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = false;
-            return texture;
-        }
     }
 }

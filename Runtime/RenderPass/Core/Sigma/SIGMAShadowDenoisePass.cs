@@ -102,15 +102,15 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
         public SIGMAShadowDenoisePass()
         {
             profilingSampler = new ProfilingSampler(nameof(SIGMAShadowDenoisePass));
-            m_RawShadowTexture = CreateInputTexture("RawShadow", GraphicsFormat.R16_SFloat);
-            m_DepthTexture = CreateInputTexture("LinearDepth", GraphicsFormat.R32_SFloat);
-            m_GBuffer1 = CreateInputTexture("GBuffer1", GraphicsFormat.R16G16_SFloat);
-            m_MotionVectorTexture = CreateInputTexture("MotionVectors", GraphicsFormat.R16G16_SFloat);
-            m_HistoryShadowTexture = CreateInputTexture("HistoryShadow", GraphicsFormat.R8_UNorm);
-            m_HistoryLengthTexture = CreateInputTexture("HistoryLength", GraphicsFormat.R32_UInt);
-            m_DenoisedShadowTexture = CreateOutputTexture("DenoisedShadow", GraphicsFormat.R8_UNorm);
-            m_HistoryShadowOut = CreateOutputTexture("HistoryShadowOut", GraphicsFormat.R8_UNorm);
-            m_HistoryLengthOut = CreateOutputTexture("HistoryLengthOut", GraphicsFormat.R32_UInt);
+            m_RawShadowTexture = RenderGraphTexture.CreateInput("RawShadow", GraphicsFormat.R16_SFloat);
+            m_DepthTexture = RenderGraphTexture.CreateInput("LinearDepth", GraphicsFormat.R32_SFloat);
+            m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.R16G16_SFloat);
+            m_MotionVectorTexture = RenderGraphTexture.CreateInput("MotionVectors", GraphicsFormat.R16G16_SFloat);
+            m_HistoryShadowTexture = RenderGraphTexture.CreateInput("HistoryShadow", GraphicsFormat.R8_UNorm);
+            m_HistoryLengthTexture = RenderGraphTexture.CreateInput("HistoryLength", GraphicsFormat.R32_UInt);
+            m_DenoisedShadowTexture = RenderGraphTexture.CreateOutput("DenoisedShadow", GraphicsFormat.R8_UNorm);
+            m_HistoryShadowOut = RenderGraphTexture.CreateOutput("HistoryShadowOut", GraphicsFormat.R8_UNorm);
+            m_HistoryLengthOut = RenderGraphTexture.CreateOutput("HistoryLengthOut", GraphicsFormat.R32_UInt);
         }
 
         public override void Create()
@@ -330,45 +330,30 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
         private void ConfigureOutputTextures(int width, int height)
         {
-            ConfigureTexture(m_DenoisedShadowTexture, width, height, clearBuffer: false);
-            ConfigureTexture(m_HistoryShadowOut, width, height, clearBuffer: true);
-            ConfigureTexture(m_HistoryLengthOut, width, height, clearBuffer: true);
-        }
-
-        private static void ConfigureTexture(RenderGraphTexture tex, int width, int height, bool clearBuffer)
-        {
-            if (tex?.desc == null) return;
-            tex.desc.Width = width;
-            tex.desc.Height = height;
-            tex.desc.EnableRandomWrite = true;
-            tex.desc.ClearBuffer = clearBuffer;
-            tex.desc.ClearColor = Color.clear;
-        }
-
-        private static RenderGraphTexture CreateInputTexture(string name, GraphicsFormat format, DepthBits depthBits = DepthBits.None)
-        {
-            var texture = new RenderGraphTexture
+            m_DenoisedShadowTexture?.Resize(width, height);
+            if (m_DenoisedShadowTexture?.desc != null)
             {
-                desc = format == GraphicsFormat.None
-                    ? RenderGraphTextureDesc.CreateDepthTarget(1, 1, depthBits)
-                    : RenderGraphTextureDesc.CreateColorTarget(1, 1, format)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = false;
-            texture.desc.EnableRandomWrite = false;
-            return texture;
+                m_DenoisedShadowTexture.desc.EnableRandomWrite = true;
+                m_DenoisedShadowTexture.desc.ClearBuffer = false;
+                m_DenoisedShadowTexture.desc.ClearColor = Color.clear;
+            }
+
+            m_HistoryShadowOut?.Resize(width, height);
+            if (m_HistoryShadowOut?.desc != null)
+            {
+                m_HistoryShadowOut.desc.EnableRandomWrite = true;
+                m_HistoryShadowOut.desc.ClearBuffer = true;
+                m_HistoryShadowOut.desc.ClearColor = Color.clear;
+            }
+
+            m_HistoryLengthOut?.Resize(width, height);
+            if (m_HistoryLengthOut?.desc != null)
+            {
+                m_HistoryLengthOut.desc.EnableRandomWrite = true;
+                m_HistoryLengthOut.desc.ClearBuffer = true;
+                m_HistoryLengthOut.desc.ClearColor = Color.clear;
+            }
         }
 
-        private static RenderGraphTexture CreateOutputTexture(string name, GraphicsFormat format)
-        {
-            var texture = new RenderGraphTexture
-            {
-                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, format)
-            };
-            texture.desc.Name = name;
-            texture.desc.ClearBuffer = false;
-            texture.desc.EnableRandomWrite = true;
-            return texture;
-        }
     }
 }

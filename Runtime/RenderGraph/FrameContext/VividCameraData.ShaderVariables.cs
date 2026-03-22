@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -97,7 +98,7 @@ namespace VividRP.Runtime
             var matrixInvP = glstateMatrixProjection.inverse;
             var matrixVP = glstateMatrixProjection * viewMatrix;
             var matrixInvVP = matrixVP.inverse;
-            var nonJitteredViewProjMatrix = GetGPUProjectionMatrixNoJitter() * viewMatrix;
+            var motionVectorMatrices = PrepareMotionVectorMatrices(viewMatrix);
             var projectionFlipSign = glstateMatrixProjection.m11 < 0.0f ? -1.0f : 1.0f;
 
             UpdateFrustumPlanes(currentCamera);
@@ -122,8 +123,8 @@ namespace VividRP.Runtime
                 matrixInvP = matrixInvP,
                 matrixVP = matrixVP,
                 matrixInvVP = matrixInvVP,
-                prevViewProjMatrix = nonJitteredViewProjMatrix,
-                nonJitteredViewProjMatrix = nonJitteredViewProjMatrix,
+                prevViewProjMatrix = motionVectorMatrices.previousViewProjMatrix,
+                nonJitteredViewProjMatrix = motionVectorMatrices.nonJitteredViewProjMatrix,
                 viewProjMatrix = matrixVP,
                 viewMatrix = viewMatrix,
                 projMatrix = glstateMatrixProjection,
@@ -305,6 +306,145 @@ namespace VividRP.Runtime
                 invProjectionMatrix.m11,
                 invProjectionMatrix.m32,
                 invProjectionMatrix.m33);
+        }
+
+        private MotionVectorMatrices PrepareMotionVectorMatrices(Matrix4x4 viewMatrix)
+        {
+            var currentViewProjection = GetGPUProjectionMatrixNoJitter(true) * viewMatrix;
+            var currentCamera = camera;
+
+            if (currentCamera == null)
+            {
+                return new MotionVectorMatrices(currentViewProjection, currentViewProjection);
+            }
+
+            currentCamera.depthTextureMode |= DepthTextureMode.Depth | DepthTextureMode.MotionVectors;
+
+            var temporalState = MotionVectorTemporalStateRegistry.GetOrCreate(currentCamera);
+            temporalState.Update(this, currentViewProjection);
+
+            return new MotionVectorMatrices(temporalState.PreviousViewProjection, temporalState.ViewProjection);
+        }
+
+        private readonly struct MotionVectorMatrices
+        {
+            public readonly Matrix4x4 previousViewProjMatrix;
+            public readonly Matrix4x4 nonJitteredViewProjMatrix;
+
+            public MotionVectorMatrices(Matrix4x4 previousViewProjMatrix, Matrix4x4 nonJitteredViewProjMatrix)
+            {
+                this.previousViewProjMatrix = previousViewProjMatrix;
+                this.nonJitteredViewProjMatrix = nonJitteredViewProjMatrix;
+            }
+        }
+    }
+
+    internal sealed class MotionVectorTemporalState
+    {
+        private Matrix4x4 m_ViewProjection = Matrix4x4.identity;
+        private Matrix4x4 m_PreviousViewProjection = Matrix4x4.identity;
+        private int m_LastFrameIndex = -1;
+        private float m_LastAspectRatio = -1f;
+
+        public Matrix4x4 ViewProjection => m_ViewProjection;
+        public Matrix4x4 PreviousViewProjection => m_PreviousViewProjection;
+
+        public void Update(VividCameraData cameraData, Matrix4x4 currentViewProjection)
+        {
+            if (cameraData?.camera == null)
+            {
+                Reset();
+                return;
+            }
+
+            var frameIndex = ResolveFrameIndex(cameraData);
+            var aspectRatio = ResolveAspectRatio(cameraData);
+            var hasValidHistory = m_LastFrameIndex >= 0 && Mathf.Abs(m_LastAspectRatio - aspectRatio) < 0.0001f;
+
+            if (!hasValidHistory)
+            {
+                m_PreviousViewProjection = currentViewProjection;
+                m_ViewProjection = currentViewProjection;
+            }
+            else if (m_LastFrameIndex != frameIndex)
+            {
+                m_PreviousViewProjection = m_ViewProjection;
+                m_ViewProjection = currentViewProjection;
+            }
+            else
+            {
+                m_ViewProjection = currentViewProjection;
+            }
+
+            m_LastFrameIndex = frameIndex;
+            m_LastAspectRatio = aspectRatio;
+        }
+
+        private void Reset()
+        {
+            m_ViewProjection = Matrix4x4.identity;
+            m_PreviousViewProjection = Matrix4x4.identity;
+            m_LastFrameIndex = -1;
+            m_LastAspectRatio = -1f;
+        }
+
+        private static int ResolveFrameIndex(VividCameraData cameraData)
+        {
+            return cameraData != null && cameraData.frameIndex >= 0
+                ? cameraData.frameIndex
+                : Time.frameCount;
+        }
+
+        private static float ResolveAspectRatio(VividCameraData cameraData)
+        {
+            var currentCamera = cameraData?.camera;
+            if (currentCamera != null && currentCamera.aspect > 0f)
+                return currentCamera.aspect;
+
+            var width = cameraData != null && cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData?.pixelWidth ?? 0;
+            var height = cameraData != null && cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData?.pixelHeight ?? 0;
+            if (width > 0 && height > 0)
+                return width / (float)height;
+
+            return 1f;
+        }
+    }
+
+    internal static class MotionVectorTemporalStateRegistry
+    {
+        private static readonly Dictionary<Camera, MotionVectorTemporalState> s_DataByCamera = new();
+        private static readonly List<Camera> s_DestroyedCameras = new();
+
+        public static MotionVectorTemporalState GetOrCreate(Camera camera)
+        {
+            if (camera == null)
+                return null;
+
+            PruneDestroyedCameras();
+
+            if (!s_DataByCamera.TryGetValue(camera, out var data))
+            {
+                data = new MotionVectorTemporalState();
+                s_DataByCamera[camera] = data;
+            }
+
+            return data;
+        }
+
+        private static void PruneDestroyedCameras()
+        {
+            if (s_DataByCamera.Count == 0)
+                return;
+
+            s_DestroyedCameras.Clear();
+            foreach (var pair in s_DataByCamera)
+            {
+                if (pair.Key == null)
+                    s_DestroyedCameras.Add(pair.Key);
+            }
+
+            for (var i = 0; i < s_DestroyedCameras.Count; i++)
+                s_DataByCamera.Remove(s_DestroyedCameras[i]);
         }
     }
 }

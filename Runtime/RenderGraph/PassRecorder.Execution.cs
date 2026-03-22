@@ -64,6 +64,7 @@ namespace VividRP.Runtime
             cameraData.pixelRect = camera.pixelRect;
             cameraData.actualWidth = camera.scaledPixelWidth;
             cameraData.actualHeight = camera.scaledPixelHeight;
+            cameraData.frameIndex = Time.frameCount;
             renderingData.cullingResults = cullingResults;
             renderingData.context = context;
             gpuDrivenFrameData.Reset();

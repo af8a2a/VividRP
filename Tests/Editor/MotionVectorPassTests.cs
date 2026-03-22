@@ -26,7 +26,7 @@ namespace VividRP.Editor.Tests
                 "MotionVectorDepth",
                 "MotionVectors",
             }));
-            Assert.That(renderListEntries.Select(entry => entry.Name), Is.EqualTo(new[] { "RenderList" }));
+            Assert.That(renderListEntries.Select(entry => entry.Name), Is.EqualTo(new[] { "FallbackRenderList", "RenderList" }));
         }
 
         [Test]
@@ -67,7 +67,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Prepare_EnablesCameraMotionVectorDepthFlags_WhenCameraIsAvailable()
+        public void Prepare_DoesNotMutateCameraMotionVectorDepthFlags_WhenCameraIsAvailable()
         {
             var pass = new MotionVectorPass();
             var frameData = new ContextContainer();
@@ -80,11 +80,11 @@ namespace VividRP.Editor.Tests
                 cameraData.camera = camera;
                 cameraData.actualWidth = 640;
                 cameraData.actualHeight = 360;
+                camera.depthTextureMode = DepthTextureMode.None;
 
                 pass.Prepare(frameData);
 
-                Assert.That((camera.depthTextureMode & DepthTextureMode.Depth) != 0, Is.True);
-                Assert.That((camera.depthTextureMode & DepthTextureMode.MotionVectors) != 0, Is.True);
+                Assert.That(camera.depthTextureMode, Is.EqualTo(DepthTextureMode.None));
             }
             finally
             {
@@ -97,15 +97,40 @@ namespace VividRP.Editor.Tests
         {
             var pass = new MotionVectorPass();
             var renderList = GetRenderListField(pass, "m_RenderList");
+            var fallbackRenderList = GetRenderListField(pass, "m_FallbackRenderList");
 
             Assert.That(renderList.desc.RenderQueueRange, Is.EqualTo(RenderGraphRenderQueueRange.Opaque));
             Assert.That(renderList.desc.SortingCriteria, Is.EqualTo(SortingCriteria.CommonOpaque));
             Assert.That(renderList.desc.RendererConfiguration, Is.EqualTo(PerObjectData.MotionVectors));
-            Assert.That(renderList.desc.ShaderTagNames, Is.EqualTo(new[]
+            Assert.That(renderList.desc.ShaderTagNames, Is.EqualTo(new[] { MotionVectorPass.MotionVectorsShaderTagName }));
+
+            Assert.That(fallbackRenderList.desc.RenderQueueRange, Is.EqualTo(RenderGraphRenderQueueRange.Opaque));
+            Assert.That(fallbackRenderList.desc.SortingCriteria, Is.EqualTo(SortingCriteria.CommonOpaque));
+            Assert.That(fallbackRenderList.desc.RendererConfiguration, Is.EqualTo(PerObjectData.MotionVectors));
+            Assert.That(fallbackRenderList.desc.ShaderTagNames, Is.EqualTo(new[]
             {
                 "VividGBuffer",
                 RenderGraphRenderListDesc.ForwardShaderTagName,
                 RenderGraphRenderListDesc.DefaultUnlitShaderTagName,
+            }));
+        }
+
+        [Test]
+        public void Prepare_AssignsFallbackOverrideShader_WhenResourcesAreAvailable()
+        {
+            var pass = new MotionVectorPass();
+            var frameData = new ContextContainer();
+
+            pass.Create();
+            pass.Prepare(frameData);
+
+            var renderList = GetRenderListField(pass, "m_RenderList");
+            var fallbackRenderList = GetRenderListField(pass, "m_FallbackRenderList");
+
+            Assert.That(fallbackRenderList.desc.OverrideShader, Is.Not.Null);
+            Assert.That(renderList.desc.ShaderTagNames, Is.EqualTo(new[]
+            {
+                MotionVectorPass.MotionVectorsShaderTagName,
             }));
         }
 

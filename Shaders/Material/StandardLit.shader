@@ -136,6 +136,28 @@ Shader "VividRP/Material/StandardLit"
                 #include "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLitGBufferPass.hlsl"
             ENDHLSL
         }
+
+        Pass
+        {
+            Name "MotionVectors"
+            Tags { "LightMode" = "MotionVectors" }
+
+            ColorMask RG
+            ZWrite [_ZWrite]
+            ZTest LEqual
+            Cull [_Cull]
+
+            HLSLPROGRAM
+                #pragma target 4.5
+                #pragma multi_compile_instancing
+                #pragma shader_feature_local_fragment _ALPHATEST_ON
+                #pragma shader_feature_local_fragment _OPACITYMAP
+                #pragma vertex Vert
+                #pragma fragment Frag
+
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLitMotionVectorPass.hlsl"
+            ENDHLSL
+        }
     }
 
     CustomEditor "VividRP.Editor.StandardLitShaderGUI"

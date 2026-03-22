@@ -1,5 +1,14 @@
 Shader "Hidden/VividRP/ObjectMotionVectorFallback"
 {
+    Properties
+    {
+        [HideInInspector] _BaseMap("BaseMap", 2D) = "white" {}
+        [HideInInspector] _BaseColor("BaseColor", Color) = (1, 1, 1, 1)
+        [HideInInspector] _OpacityMap("Opacity Map", 2D) = "white" {}
+        [HideInInspector] _Cutoff("Cutoff", Range(0.0, 1.0)) = 0.5
+        [HideInInspector] _AlphaClip("Alpha Clip", Float) = 0.0
+    }
+
     SubShader
     {
         Tags { "RenderPipeline" = "VividRenderPipeline" }

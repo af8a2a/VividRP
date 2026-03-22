@@ -14,6 +14,7 @@ namespace VividRP.Runtime
         public int pixelWidth;
         public int pixelHeight;
         public Rect pixelRect;
+        internal int frameIndex = -1;
 
         public Matrix4x4 viewMatrix => GetViewMatrix();
         public Matrix4x4 inverseViewMatrix => GetInverseViewMatrix();
@@ -150,6 +151,7 @@ namespace VividRP.Runtime
             pixelWidth = 0;
             pixelHeight = 0;
             pixelRect = default;
+            frameIndex = -1;
         }
 
         

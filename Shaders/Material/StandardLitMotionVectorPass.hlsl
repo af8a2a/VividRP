@@ -1,10 +1,5 @@
-#ifndef VIVIDRP_OBJECT_MOTION_VECTORS_INCLUDED
-#define VIVIDRP_OBJECT_MOTION_VECTORS_INCLUDED
-
-#pragma target 3.5
-#pragma vertex Vert
-#pragma fragment Frag
-#pragma multi_compile_instancing
+#ifndef VIVIDRP_STANDARD_LIT_MOTION_VECTOR_PASS_INCLUDED
+#define VIVIDRP_STANDARD_LIT_MOTION_VECTOR_PASS_INCLUDED
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/MotionVectorsCommon.hlsl"
@@ -13,8 +8,17 @@
 CBUFFER_START(UnityPerMaterial)
     float4 _BaseColor;
     float4 _BaseMap_ST;
+    float4 _EmissionColor;
     float _Cutoff;
+    float _Smoothness;
+    float _SmoothnessTextureChannel;
+    float _Metallic;
+    float _BumpScale;
+    float _OcclusionStrength;
+    float _ClearCoatMask;
+    float _ClearCoatSmoothness;
     float _AlphaClip;
+    float _WorkflowMode;
 CBUFFER_END
 
 TEXTURE2D(_BaseMap);
@@ -40,11 +44,20 @@ struct Varyings
     UNITY_VERTEX_OUTPUT_STEREO
 };
 
-float SampleMotionVectorAlpha(float2 uv)
+float4 SampleBase(float2 uv)
 {
-    float alpha = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, uv).a * _BaseColor.a;
-    alpha *= SAMPLE_TEXTURE2D(_OpacityMap, sampler_OpacityMap, uv).r;
-    return alpha;
+    float4 baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, uv) * _BaseColor;
+#if defined(_OPACITYMAP)
+    baseSample.a *= SAMPLE_TEXTURE2D(_OpacityMap, sampler_OpacityMap, uv).r;
+#endif
+    return baseSample;
+}
+
+void ApplyAlphaClip(float alpha)
+{
+#if defined(_ALPHATEST_ON)
+    clip(alpha - _Cutoff);
+#endif
 }
 
 Varyings Vert(Attributes input)
@@ -72,9 +85,7 @@ float4 Frag(Varyings input) : SV_Target
     UNITY_SETUP_INSTANCE_ID(input);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
-    if (_AlphaClip > 0.5)
-        clip(SampleMotionVectorAlpha(input.uv) - _Cutoff);
-
+    ApplyAlphaClip(SampleBase(input.uv).a);
     return float4(CalcNdcMotionVectorFromCsPositions(input.positionCSNoJitter, input.previousPositionCSNoJitter), 0.0, 0.0);
 }
 

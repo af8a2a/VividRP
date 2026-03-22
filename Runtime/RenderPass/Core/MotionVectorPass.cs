@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -10,6 +9,7 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         internal const string CameraMotionVectorsShaderName = "Hidden/VividRP/CameraMotionVectors";
         internal const string ObjectMotionVectorFallbackShaderName = "Hidden/VividRP/ObjectMotionVectorFallback";
+        internal const string MotionVectorsShaderTagName = "MotionVectors";
 
         private static readonly string[] s_DefaultShaderTagNames =
         {
@@ -18,10 +18,18 @@ namespace VividRP.Runtime.RenderPass.Core
             RenderGraphRenderListDesc.DefaultUnlitShaderTagName,
         };
 
+        private static readonly string[] s_MotionVectorShaderTagNames =
+        {
+            MotionVectorsShaderTagName,
+        };
+
         private static readonly int CameraDepthTextureId = Shader.PropertyToID("_CameraDepthTexture");
 
         [RenderGraphResource(Name = "RenderList", Access = AccessFlags.Read)]
         private RenderGraphRenderList m_RenderList;
+
+        [RenderGraphResource(Name = "FallbackRenderList", Access = AccessFlags.Read)]
+        private RenderGraphRenderList m_FallbackRenderList;
 
         [RenderGraphResource(Name = "CameraDepth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_CameraDepthTexture;
@@ -33,13 +41,23 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_MotionVectorDepthTexture;
 
         private Material m_CameraMotionMaterial;
-        private Material m_ObjectMotionVectorMaterial;
+        private Shader m_ObjectMotionVectorFallbackShader;
         private Camera m_Camera;
-        private MotionVectorsPersistentData m_PersistentData;
 
         public MotionVectorPass()
         {
             m_RenderList = new RenderGraphRenderList
+            {
+                desc = new RenderGraphRenderListDesc
+                {
+                    ShaderTagNames = (string[])s_MotionVectorShaderTagNames.Clone(),
+                    RenderQueueRange = RenderGraphRenderQueueRange.Opaque,
+                    SortingCriteria = SortingCriteria.CommonOpaque,
+                    RendererConfiguration = PerObjectData.MotionVectors,
+                }
+            };
+
+            m_FallbackRenderList = new RenderGraphRenderList
             {
                 desc = new RenderGraphRenderListDesc
                 {
@@ -64,18 +82,11 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             EnsureMaterialsCreated();
 
-            var cameraData = frameData.Get<VividCameraData>();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
             m_Camera = cameraData.camera;
 
             if (m_Camera != null)
             {
-                m_Camera.depthTextureMode |= DepthTextureMode.Depth | DepthTextureMode.MotionVectors;
-                m_PersistentData = MotionVectorsPersistentDataRegistry.GetOrCreate(m_Camera);
-                m_PersistentData.Update(cameraData);
-            }
-            else
-            {
-                m_PersistentData = null;
             }
 
             ConfigureRenderList();
@@ -94,15 +105,16 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            m_PersistentData?.SetGlobalMotionMatrices(context.cmd);
-
             if (m_CameraMotionMaterial != null)
             {
                 m_CameraMotionMaterial.SetTexture(CameraDepthTextureId, m_CameraDepthTexture.innerHandle);
                 context.cmd.DrawProcedural(Matrix4x4.identity, m_CameraMotionMaterial, 0, MeshTopology.Triangles, 3, 1);
             }
 
-            if (m_ObjectMotionVectorMaterial != null && m_RenderList != null && m_RenderList.IsValid)
+            if (m_FallbackRenderList != null && m_FallbackRenderList.IsValid)
+                context.cmd.DrawRendererList(m_FallbackRenderList);
+
+            if (m_RenderList != null && m_RenderList.IsValid)
                 context.cmd.DrawRendererList(m_RenderList);
         }
 
@@ -114,14 +126,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_CameraMotionMaterial = null;
             }
 
-            if (m_ObjectMotionVectorMaterial != null)
-            {
-                CoreUtils.Destroy(m_ObjectMotionVectorMaterial);
-                m_ObjectMotionVectorMaterial = null;
-            }
-
+            m_ObjectMotionVectorFallbackShader = null;
             m_Camera = null;
-            m_PersistentData = null;
         }
 
         private void EnsureMaterialsCreated()
@@ -136,12 +142,12 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_CameraMotionMaterial = CoreUtils.CreateEngineMaterial(cameraShader);
             }
 
-            if (m_ObjectMotionVectorMaterial == null)
+            if (m_ObjectMotionVectorFallbackShader == null)
             {
                 var objectShader = resources?.ObjectMotionVectorFallbackShader;
                 objectShader ??= Shader.Find(ObjectMotionVectorFallbackShaderName);
                 if (objectShader != null)
-                    m_ObjectMotionVectorMaterial = CoreUtils.CreateEngineMaterial(objectShader);
+                    m_ObjectMotionVectorFallbackShader = objectShader;
             }
         }
 
@@ -149,14 +155,28 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_RenderList ??= new RenderGraphRenderList();
             m_RenderList.desc ??= new RenderGraphRenderListDesc();
+            m_FallbackRenderList ??= new RenderGraphRenderList();
+            m_FallbackRenderList.desc ??= new RenderGraphRenderListDesc();
 
             if (m_RenderList.desc.ShaderTagNames == null || m_RenderList.desc.ShaderTagNames.Length == 0)
-                m_RenderList.desc.ShaderTagNames = (string[])s_DefaultShaderTagNames.Clone();
+                m_RenderList.desc.ShaderTagNames = (string[])s_MotionVectorShaderTagNames.Clone();
 
             m_RenderList.desc.RendererConfiguration |= PerObjectData.MotionVectors;
             m_RenderList.desc.ExcludeObjectMotionVectors = false;
-            m_RenderList.desc.OverrideMaterial = m_ObjectMotionVectorMaterial;
+            m_RenderList.desc.OverrideMaterial = null;
             m_RenderList.desc.OverrideMaterialPassIndex = 0;
+            m_RenderList.desc.OverrideShader = null;
+            m_RenderList.desc.OverrideShaderPassIndex = 0;
+
+            if (m_FallbackRenderList.desc.ShaderTagNames == null || m_FallbackRenderList.desc.ShaderTagNames.Length == 0)
+                m_FallbackRenderList.desc.ShaderTagNames = (string[])s_DefaultShaderTagNames.Clone();
+
+            m_FallbackRenderList.desc.RendererConfiguration |= PerObjectData.MotionVectors;
+            m_FallbackRenderList.desc.ExcludeObjectMotionVectors = false;
+            m_FallbackRenderList.desc.OverrideMaterial = null;
+            m_FallbackRenderList.desc.OverrideMaterialPassIndex = 0;
+            m_FallbackRenderList.desc.OverrideShader = m_ObjectMotionVectorFallbackShader;
+            m_FallbackRenderList.desc.OverrideShaderPassIndex = 0;
         }
 
         private void ConfigureTargets(VividCameraData cameraData)
@@ -288,115 +308,6 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.Name = name;
             texture.desc.ClearBuffer = false;
             return texture;
-        }
-    }
-
-    internal sealed class MotionVectorsPersistentData
-    {
-        private static readonly int PreviousViewProjectionNoJitterId = Shader.PropertyToID("_PrevViewProjMatrix");
-        private static readonly int ViewProjectionNoJitterId = Shader.PropertyToID("_NonJitteredViewProjMatrix");
-
-        private Matrix4x4 m_ViewProjection = Matrix4x4.identity;
-        private Matrix4x4 m_PreviousViewProjection = Matrix4x4.identity;
-        private int m_LastFrameIndex = -1;
-        private float m_LastAspectRatio = -1f;
-
-        public void Reset()
-        {
-            m_ViewProjection = Matrix4x4.identity;
-            m_PreviousViewProjection = Matrix4x4.identity;
-            m_LastFrameIndex = -1;
-            m_LastAspectRatio = -1f;
-        }
-
-        public void Update(VividCameraData cameraData)
-        {
-            if (cameraData?.camera == null)
-            {
-                Reset();
-                return;
-            }
-
-            var frameIndex = Time.frameCount;
-            var aspectRatio = ResolveAspectRatio(cameraData);
-            var currentViewProjection = cameraData.GetGPUProjectionMatrixNoJitter(true) * cameraData.GetViewMatrix();
-            var hasValidHistory = m_LastFrameIndex >= 0 && Mathf.Abs(m_LastAspectRatio - aspectRatio) < 0.0001f;
-
-            if (!hasValidHistory)
-            {
-                m_PreviousViewProjection = currentViewProjection;
-                m_ViewProjection = currentViewProjection;
-            }
-            else if (m_LastFrameIndex != frameIndex)
-            {
-                m_PreviousViewProjection = m_ViewProjection;
-                m_ViewProjection = currentViewProjection;
-            }
-            else
-            {
-                m_ViewProjection = currentViewProjection;
-            }
-
-            m_LastFrameIndex = frameIndex;
-            m_LastAspectRatio = aspectRatio;
-        }
-
-        public void SetGlobalMotionMatrices(RasterCommandBuffer cmd)
-        {
-            cmd.SetGlobalMatrix(PreviousViewProjectionNoJitterId, m_PreviousViewProjection);
-            cmd.SetGlobalMatrix(ViewProjectionNoJitterId, m_ViewProjection);
-        }
-
-        private static float ResolveAspectRatio(VividCameraData cameraData)
-        {
-            var camera = cameraData.camera;
-            if (camera != null && camera.aspect > 0f)
-                return camera.aspect;
-
-            var width = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
-            var height = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
-            if (width > 0 && height > 0)
-                return width / (float)height;
-
-            return 1f;
-        }
-    }
-
-    internal static class MotionVectorsPersistentDataRegistry
-    {
-        private static readonly Dictionary<Camera, MotionVectorsPersistentData> s_DataByCamera = new();
-        private static readonly List<Camera> s_DestroyedCameras = new();
-
-        public static MotionVectorsPersistentData GetOrCreate(Camera camera)
-        {
-            if (camera == null)
-                return null;
-
-            PruneDestroyedCameras();
-
-            if (!s_DataByCamera.TryGetValue(camera, out var data))
-            {
-                data = new MotionVectorsPersistentData();
-                s_DataByCamera[camera] = data;
-            }
-
-            return data;
-        }
-
-        private static void PruneDestroyedCameras()
-        {
-            if (s_DataByCamera.Count == 0)
-                return;
-
-            s_DestroyedCameras.Clear();
-            foreach (var pair in s_DataByCamera)
-            {
-                if (pair.Key == null)
-                    s_DestroyedCameras.Add(pair.Key);
-            }
-
-            for (var i = 0; i < s_DestroyedCameras.Count; i++)
-                s_DataByCamera.Remove(s_DestroyedCameras[i]);
         }
     }
 }

@@ -1,6 +1,7 @@
 using System.IO;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Rendering;
 using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
@@ -48,7 +49,7 @@ namespace VividRP.Editor.Tests
 
             var shaderVariables = cameraData.BuildShaderVariables();
             var expectedGpuProjectionMatrix = GL.GetGPUProjectionMatrix(jitteredProjectionMatrix, false);
-            var expectedNonJitteredGpuProjectionMatrix = GL.GetGPUProjectionMatrix(nonJitteredProjectionMatrix, false);
+            var expectedMotionVectorGpuProjectionMatrix = GL.GetGPUProjectionMatrix(nonJitteredProjectionMatrix, true);
             var expectedViewMatrix = camera.worldToCameraMatrix;
 
             AssertVectorAreEqual(new Vector4(2.0f, 3.0f, -4.0f, 1.0f), shaderVariables.worldSpaceCameraPos);
@@ -70,8 +71,8 @@ namespace VividRP.Editor.Tests
             AssertMatrixAreEqual(expectedGpuProjectionMatrix * expectedViewMatrix, shaderVariables.viewProjMatrix);
             AssertMatrixAreEqual(expectedGpuProjectionMatrix * expectedViewMatrix, shaderVariables.matrixVP);
             AssertMatrixAreEqual((expectedGpuProjectionMatrix * expectedViewMatrix).inverse, shaderVariables.invViewProjMatrix);
-            AssertMatrixAreEqual(expectedNonJitteredGpuProjectionMatrix * expectedViewMatrix, shaderVariables.nonJitteredViewProjMatrix);
-            AssertMatrixAreEqual(expectedNonJitteredGpuProjectionMatrix * expectedViewMatrix, shaderVariables.prevViewProjMatrix);
+            AssertMatrixAreEqual(expectedMotionVectorGpuProjectionMatrix * expectedViewMatrix, shaderVariables.nonJitteredViewProjMatrix);
+            AssertMatrixAreEqual(expectedMotionVectorGpuProjectionMatrix * expectedViewMatrix, shaderVariables.prevViewProjMatrix);
 
             Assert.That(shaderVariables.cameraWorldClipPlanes, Has.Length.EqualTo(6));
             Assert.That(shaderVariables.frustumPlanes, Has.Length.EqualTo(6));
@@ -97,6 +98,72 @@ namespace VividRP.Editor.Tests
             var shaderVariables = cameraData.BuildShaderVariables();
 
             AssertVectorAreEqual(new Vector4(16.0f, 8.0f, 0.0f, 1.0f), shaderVariables.orthoParams);
+        }
+
+        [Test]
+        public void BuildShaderVariables_PersistsPreviousNonJitteredViewProjection_AcrossFrames()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            camera.aspect = 16.0f / 9.0f;
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 200.0f;
+            camera.transform.position = new Vector3(1.0f, 2.0f, -3.0f);
+            camera.transform.rotation = Quaternion.Euler(5.0f, 15.0f, 0.0f);
+
+            var firstProjection = Matrix4x4.Perspective(55.0f, camera.aspect, camera.nearClipPlane, camera.farClipPlane);
+            var firstJitter = Matrix4x4.Translate(new Vector3(0.03125f, -0.0625f, 0.0f));
+            camera.nonJitteredProjectionMatrix = firstProjection;
+            camera.projectionMatrix = firstJitter * firstProjection;
+
+            var cameraData = new VividCameraData
+            {
+                camera = camera,
+                actualWidth = 1280,
+                actualHeight = 720,
+                pixelWidth = 1280,
+                pixelHeight = 720,
+                frameIndex = 10,
+            };
+
+            var firstExpectedViewProjection = GL.GetGPUProjectionMatrix(firstProjection, true) * camera.worldToCameraMatrix;
+            var firstShaderVariables = cameraData.BuildShaderVariables();
+
+            AssertMatrixAreEqual(firstExpectedViewProjection, firstShaderVariables.nonJitteredViewProjMatrix);
+            AssertMatrixAreEqual(firstExpectedViewProjection, firstShaderVariables.prevViewProjMatrix);
+
+            camera.transform.position = new Vector3(-2.0f, 1.0f, -6.0f);
+            camera.transform.rotation = Quaternion.Euler(9.0f, -20.0f, 0.0f);
+
+            var secondProjection = Matrix4x4.Perspective(47.0f, camera.aspect, camera.nearClipPlane, camera.farClipPlane);
+            var secondJitter = Matrix4x4.Translate(new Vector3(-0.015625f, 0.03125f, 0.0f));
+            camera.nonJitteredProjectionMatrix = secondProjection;
+            camera.projectionMatrix = secondJitter * secondProjection;
+            cameraData.frameIndex = 11;
+
+            var secondExpectedViewProjection = GL.GetGPUProjectionMatrix(secondProjection, true) * camera.worldToCameraMatrix;
+            var secondShaderVariables = cameraData.BuildShaderVariables();
+
+            AssertMatrixAreEqual(secondExpectedViewProjection, secondShaderVariables.nonJitteredViewProjMatrix);
+            AssertMatrixAreEqual(firstExpectedViewProjection, secondShaderVariables.prevViewProjMatrix);
+        }
+
+        [Test]
+        public void BuildShaderVariables_EnablesCameraMotionVectorDepthFlags_WhenCameraIsAvailable()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            camera.depthTextureMode = DepthTextureMode.None;
+
+            var cameraData = new VividCameraData
+            {
+                camera = camera,
+                actualWidth = 640,
+                actualHeight = 360,
+            };
+
+            cameraData.BuildShaderVariables();
+
+            Assert.That((camera.depthTextureMode & DepthTextureMode.Depth) != 0, Is.True);
+            Assert.That((camera.depthTextureMode & DepthTextureMode.MotionVectors) != 0, Is.True);
         }
 
         [Test]

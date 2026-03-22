@@ -1,8 +1,10 @@
 using System.IO;
+using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
 {
@@ -94,6 +96,67 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain($"Name \"{RenderGraphRenderListDesc.PreDepthShaderTagName}\""));
             Assert.That(shaderSource, Does.Contain($"\"LightMode\" = \"{RenderGraphRenderListDesc.PreDepthShaderTagName}\""));
             Assert.That(shaderSource, Does.Contain("#pragma fragment FragPreDepth"));
+        }
+
+        [Test]
+        public void StandardLitShader_DeclaresMotionVectorPass_ForMotionVectorPass()
+        {
+            var shaderPath = Path.GetFullPath(Path.Combine(
+                Application.dataPath,
+                "..",
+                "Packages",
+                "com.af8a2a.vividrp",
+                "Shaders",
+                "Material",
+                "StandardLit.shader"));
+
+            Assert.That(File.Exists(shaderPath), Is.True, $"Expected shader source at '{shaderPath}'.");
+
+            var shaderSource = File.ReadAllText(shaderPath);
+
+            Assert.That(shaderSource, Does.Contain($"Name \"{MotionVectorPass.MotionVectorsShaderTagName}\""));
+            Assert.That(shaderSource, Does.Contain($"\"LightMode\" = \"{MotionVectorPass.MotionVectorsShaderTagName}\""));
+            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Material/StandardLitMotionVectorPass.hlsl\""));
+        }
+
+        [Test]
+        public void StandardLitMotionVectorPass_UsesSameUnityPerMaterialLayout_AsGBufferPass()
+        {
+            var gBufferPath = Path.GetFullPath(Path.Combine(
+                Application.dataPath,
+                "..",
+                "Packages",
+                "com.af8a2a.vividrp",
+                "Shaders",
+                "Material",
+                "StandardLitGBufferPass.hlsl"));
+            var motionVectorPath = Path.GetFullPath(Path.Combine(
+                Application.dataPath,
+                "..",
+                "Packages",
+                "com.af8a2a.vividrp",
+                "Shaders",
+                "Material",
+                "StandardLitMotionVectorPass.hlsl"));
+
+            Assert.That(File.Exists(gBufferPath), Is.True, $"Expected shader source at '{gBufferPath}'.");
+            Assert.That(File.Exists(motionVectorPath), Is.True, $"Expected shader source at '{motionVectorPath}'.");
+
+            var gBufferCBuffer = ExtractUnityPerMaterialBlock(File.ReadAllText(gBufferPath));
+            var motionVectorCBuffer = ExtractUnityPerMaterialBlock(File.ReadAllText(motionVectorPath));
+
+            Assert.That(motionVectorCBuffer, Is.EqualTo(gBufferCBuffer));
+        }
+
+        private static string ExtractUnityPerMaterialBlock(string source)
+        {
+            var match = Regex.Match(
+                source,
+                @"CBUFFER_START\(UnityPerMaterial\)(.*?)CBUFFER_END",
+                RegexOptions.Singleline);
+
+            Assert.That(match.Success, Is.True, "Expected UnityPerMaterial cbuffer block.");
+            return match.Value;
         }
     }
 }

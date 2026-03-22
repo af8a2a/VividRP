@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using Unity.GraphToolkit.Editor;
@@ -10,6 +11,9 @@ namespace VividRP.Editor.RenderGraph
     {
         internal static void Validate(RenderGraphEditorGraph graph, GraphLogger infos)
         {
+            if (graph == null)
+                return;
+
             var passNodes = graph.GetNodes().OfType<RenderPassNodeData>().ToList();
             if (passNodes.Count == 0)
             {
@@ -19,6 +23,12 @@ namespace VividRP.Editor.RenderGraph
 
             foreach (var passNode in passNodes)
             {
+                if (IsCorruptedNode(passNode))
+                {
+                    infos.LogError("This pass node is corrupted. Delete it and re-create.", passNode);
+                    continue;
+                }
+
                 var passType = passNode.GetPassType();
                 if (passType == null)
                 {
@@ -215,6 +225,106 @@ namespace VividRP.Editor.RenderGraph
         internal static bool IsAsyncComputeConfigurationValid(System.Type passType, bool enableAsyncCompute)
         {
             return !enableAsyncCompute || RenderGraphPassExecutionUtility.SupportsAsyncCompute(passType);
+        }
+
+        internal static bool IsCorruptedNode(RenderPassNodeData passNode)
+        {
+            if (passNode == null)
+                return true;
+
+            try
+            {
+                // A node is corrupted if its type name is missing or its ports cannot be queried.
+                if (!passNode.UsesPassScriptSelection)
+                {
+                    var typeName = passNode.GetRegisteredPassTypeName();
+                    if (string.IsNullOrEmpty(typeName))
+                        return true;
+                }
+
+                passNode.GetPassType();
+                return false;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Removes corrupted pass nodes and disconnected resource nodes from the graph.
+        /// Returns the number of nodes removed.
+        /// </summary>
+        internal static int TrimGraph(RenderGraphEditorGraph graph)
+        {
+            if (graph == null)
+                return 0;
+
+            var removed = 0;
+            var allNodes = graph.GetNodes().ToList();
+
+            // Remove corrupted pass nodes.
+            foreach (var passNode in allNodes.OfType<RenderPassNodeData>().ToList())
+            {
+                if (!IsCorruptedNode(passNode))
+                    continue;
+
+                graph.RemoveNode(passNode);
+                removed++;
+            }
+
+            // Remove resource nodes that have no connections.
+            allNodes = graph.GetNodes().ToList();
+            foreach (var node in allNodes)
+            {
+                if (node is RenderPassNodeData || node is PreviewNodeData)
+                    continue;
+
+                if (!IsDisconnectedResourceNode(node as Node))
+                    continue;
+
+                graph.RemoveNode(node);
+                removed++;
+            }
+
+            return removed;
+        }
+
+        private static bool IsDisconnectedResourceNode(Node node)
+        {
+            if (node == null)
+                return false;
+
+            string[] portNames;
+            switch (node)
+            {
+                case TextureResourceNodeData:
+                    portNames = new[] { TextureResourceNodeData.InputPortName, TextureResourceNodeData.OutputPortName };
+                    break;
+                case BufferResourceNodeData:
+                    portNames = new[] { BufferResourceNodeData.InputPortName, BufferResourceNodeData.OutputPortName };
+                    break;
+                case RenderListResourceNodeData:
+                    portNames = new[] { RenderListResourceNodeData.InputPortName, RenderListResourceNodeData.OutputPortName };
+                    break;
+                case HistoryResourceNodeData:
+                    portNames = new[] { HistoryResourceNodeData.PreviousOutputPortName, HistoryResourceNodeData.CurrentOutputPortName };
+                    break;
+                case AccelerationStructureResourceNodeData:
+                    portNames = new[] { AccelerationStructureResourceNodeData.InputPortName, AccelerationStructureResourceNodeData.OutputPortName };
+                    break;
+                default:
+                    return false;
+            }
+
+            foreach (var portName in portNames)
+            {
+                var port = node.GetInputPortByName(portName) ?? node.GetOutputPortByName(portName);
+                if (port != null && port.IsConnected)
+                    return false;
+            }
+
+            return true;
         }
     }
 }

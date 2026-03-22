@@ -44,13 +44,13 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
         [RenderGraphResource(
             Name = "HistoryShadow",
-            Access = AccessFlags.Read,
+            Access = AccessFlags.ReadWrite,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
         private RenderGraphTexture m_HistoryShadowTexture;
 
         [RenderGraphResource(
             Name = "HistoryLength",
-            Access = AccessFlags.Read,
+            Access = AccessFlags.ReadWrite,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
         private RenderGraphTexture m_HistoryLengthTexture;
 

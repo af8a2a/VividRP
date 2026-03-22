@@ -129,6 +129,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class PreDepthPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.PreDepthPass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class PreIntegratedFGDPreparePass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.PreIntegratedFGDPreparePass, VividRP.Runtime";

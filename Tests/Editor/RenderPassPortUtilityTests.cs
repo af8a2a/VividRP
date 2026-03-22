@@ -27,7 +27,7 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(
                 RenderPassPortUtility.GetInputPortName("Color", AccessFlags.Write),
-                Is.EqualTo("Color_In"));
+                Is.Null);
             Assert.That(
                 RenderPassPortUtility.GetOutputPortName("Color", AccessFlags.Write),
                 Is.EqualTo("Color"));
@@ -57,7 +57,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void GetInputPortName_ReturnsLegacyName_WhenPassOwnedOverrideableOverrideIsEnabled()
+        public void GetInputPortName_ReturnsNull_WhenPassOwnedOverrideableOverrideIsEnabled_AndWriteOnly()
         {
             Assert.That(
                 RenderPassPortUtility.GetInputPortName(
@@ -65,7 +65,7 @@ namespace VividRP.Editor.Tests
                     AccessFlags.Write,
                     RenderGraphResourceBindingMode.PassOwnedOverrideable,
                     overrideEnabled: true),
-                Is.EqualTo("Color_In"));
+                Is.Null);
         }
 
         [Test]

@@ -352,6 +352,10 @@ namespace VividRP.Editor.RenderGraph
                 if (!RenderPassPortUtility.SupportsExternalOverride(attr))
                     continue;
 
+                // Write-only resources never have input ports, so override is meaningless.
+                if (RenderPassPortUtility.CanWrite(attr.Access) && !RenderPassPortUtility.CanRead(attr.Access))
+                    continue;
+
                 context.AddOption<bool>(RenderPassPortUtility.GetOverrideOptionName(field.Name))
                     .WithDisplayName(RenderPassPortUtility.BuildOverrideOptionDisplayName(field, attr))
                     .WithDefaultValue(false);

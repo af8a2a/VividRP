@@ -73,8 +73,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(
             Name = "DirectionalShadowTexture",
-            Access = AccessFlags.Read,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            Access = AccessFlags.Read)]
         private RenderGraphTexture m_DirectionalShadowTexture;
 
         [RenderGraphResource(Name = "Color", Access = AccessFlags.Write, AttachmentIndex = 0)]
@@ -82,8 +81,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(
             Name = "SkyIBLCubemap",
-            Access = AccessFlags.Read,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            Access = AccessFlags.Read)]
         private RenderGraphTexture m_SkyIBLCubemap;
 
         [RenderGraphResource(Name = "StandardMaterialIndices", Access = AccessFlags.Read)]
@@ -106,45 +104,38 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(
             Name = "DirectionalLights",
-            Access = AccessFlags.Read,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            Access = AccessFlags.Read)]
         private RenderGraphBuffer m_DirectionalLightBuffer;
 
         [RenderGraphResource(
             Name = "PunctualLights",
-            Access = AccessFlags.Read,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            Access = AccessFlags.Read)]
         private RenderGraphBuffer m_PunctualLightBuffer;
 
         [RenderGraphResource(
             Name = "LayeredOffset",
-            Access = AccessFlags.Read,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            Access = AccessFlags.Read)]
         private RenderGraphBuffer m_LayeredOffsetBuffer;
 
         [RenderGraphResource(
             Name = "LayeredLightList",
-            Access = AccessFlags.Read,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            Access = AccessFlags.Read)]
         private RenderGraphBuffer m_LayeredLightListBuffer;
 
         [RenderGraphResource(
             Name = "LogBaseBuffer",
-            Access = AccessFlags.Read,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            Access = AccessFlags.Read)]
         private RenderGraphBuffer m_LogBaseBuffer;
 
 
         [RenderGraphResource(
             Name = "PreIntegratedFGD_GGXDisneyDiffuse",
-            Access = AccessFlags.Read,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            Access = AccessFlags.Read)]
         private RenderGraphTexture m_PreIntegratedFGDGGXDisneyDiffuseTexture;
 
         [RenderGraphResource(
             Name = "PreIntegratedFGD_CharlieAndFabric",
-            Access = AccessFlags.Read,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            Access = AccessFlags.Read)]
         private RenderGraphTexture m_PreIntegratedFGDCharlieAndFabricTexture;
 
         private ComputeShader m_DeferredLitCompute;

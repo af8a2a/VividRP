@@ -14,26 +14,26 @@ namespace VividRP.Editor.Tests
     public class RenderPassNodeBindingModeTests
     {
         [Test]
-        public void PassOwnedResourceNode_HidesInputPortByDefault_AndDefinesOverrideOption()
+        public void PassOwnedResourceNode_HasNoOverrideOption_WhenWriteOnly()
         {
             var node = new PassOwnedTextureProducerNode();
 
-            Assert.That(node.HasOverrideOption(PassOwnedTextureProducerPass.ColorFieldName), Is.True);
+            Assert.That(node.HasOverrideOption(PassOwnedTextureProducerPass.ColorFieldName), Is.False);
             Assert.That(node.GetInputPortByName($"{PassOwnedTextureProducerPass.ColorFieldName}_In"), Is.Null);
             Assert.That(node.GetOutputPortByName(PassOwnedTextureProducerPass.ColorFieldName), Is.Not.Null);
         }
 
         [Test]
-        public void PassOwnedResourceNode_DefinesInputPort_WhenOverrideEnabled()
+        public void PassOwnedResourceNode_HasNoInputPort_WhenWriteOnlyOverrideEnabled()
         {
             var node = new PassOwnedTextureProducerOverrideNode();
 
-            Assert.That(node.GetInputPortByName($"{PassOwnedTextureProducerPass.ColorFieldName}_In"), Is.Not.Null);
+            Assert.That(node.GetInputPortByName($"{PassOwnedTextureProducerPass.ColorFieldName}_In"), Is.Null);
             Assert.That(node.GetOutputPortByName(PassOwnedTextureProducerPass.ColorFieldName), Is.Not.Null);
         }
 
         [Test]
-        public void MixedBindingNode_KeepsExternalInputPort_WhenPassOwnedInputIsHidden()
+        public void MixedBindingNode_KeepsExternalInputPort_WhenWriteOnlyOwnedHasNoInput()
         {
             var node = new MixedBindingPassNode();
 
@@ -71,25 +71,18 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Compile_CreatesResourceBinding_WhenPassOwnedOverrideIsEnabled_AndResourceNodeConnected()
+        public void Compile_DoesNotCreateResourceBinding_WhenPassOwnedOverrideIsEnabled_AndWriteOnly()
         {
             var graph = new RenderGraphEditorGraph();
-            var textureNode = new TextureResourceNodeData();
             var producerNode = new PassOwnedTextureProducerOverrideNode();
 
-            graph.AddNode(textureNode);
             graph.AddNode(producerNode);
-            graph.Connect(
-                textureNode.GetOutputPortByName(TextureResourceNodeData.OutputPortName),
-                producerNode.GetInputPortByName($"{PassOwnedTextureProducerPass.ColorFieldName}_In"));
 
             var result = RenderGraphCompiler.Compile(graph);
-            var binding = result.Passes[0].ResourceBindings.Single();
 
-            Assert.That(binding.FieldName, Is.EqualTo(PassOwnedTextureProducerPass.ColorFieldName));
-            Assert.That(binding.ResourceKind, Is.EqualTo(RenderGraphResourceKind.Texture));
-            Assert.That(binding.SourceKind, Is.EqualTo(RenderGraphPassBindingSourceKind.Resource));
-            Assert.That(binding.ConnectionKind, Is.EqualTo(RenderGraphPassBindingConnectionKind.Input));
+            Assert.That(result.Passes, Has.Count.EqualTo(1));
+            Assert.That(result.Passes[0].PassType, Is.EqualTo(GetPassTypeName<PassOwnedTextureProducerPass>()));
+            Assert.That(result.Passes[0].ResourceBindings, Is.Empty);
         }
 
         [Test]

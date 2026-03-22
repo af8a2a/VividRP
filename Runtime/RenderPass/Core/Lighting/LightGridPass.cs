@@ -57,26 +57,24 @@ namespace VividRP.Runtime
 
         [RenderGraphResource(
             Name = "DirectionalLights",
-            Access = AccessFlags.Write,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            Access = AccessFlags.Write)]
         private RenderGraphBuffer m_DirectionalLightBuffer;
 
         [RenderGraphResource(
             Name = "PunctualLights",
-            Access = AccessFlags.Write,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            Access = AccessFlags.Write)]
         private RenderGraphBuffer m_PunctualLightBuffer;
 
-        [RenderGraphResource(Name = "FiniteLightBounds", Access = AccessFlags.Read)]
+        [RenderGraphResource(Name = "FiniteLightBounds", Access = AccessFlags.Write)]
         private RenderGraphBuffer m_FiniteLightBoundBuffer;
 
-        [RenderGraphResource(Name = "LightVolumeData", Access = AccessFlags.Read)]
+        [RenderGraphResource(Name = "LightVolumeData", Access = AccessFlags.Write)]
         private RenderGraphBuffer m_LightVolumeDataBuffer;
 
-        [RenderGraphResource(Name = "ScreenSpaceBounds", Access = AccessFlags.ReadWrite)]
+        [RenderGraphResource(Name = "ScreenSpaceBounds", Access = AccessFlags.Write)]
         private RenderGraphBuffer m_ScreenSpaceBoundsBuffer;
 
-        [RenderGraphResource(Name = "BigTileLightList", Access = AccessFlags.ReadWrite)]
+        [RenderGraphResource(Name = "BigTileLightList", Access = AccessFlags.Write)]
         private RenderGraphBuffer m_BigTileLightListBuffer;
 
         [RenderGraphResource(

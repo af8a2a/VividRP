@@ -14,7 +14,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private Material m_Material;
 
-        [RenderGraphResource(Name = "Color", Access = AccessFlags.Write, AttachmentIndex = 0)]
+        [RenderGraphResource(Name = "Color", Access = AccessFlags.ReadWrite, AttachmentIndex = 0)]
         private RenderGraphTexture m_ColorTarget;
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.ReadWrite, IsDepthAttachment = true)]
@@ -37,17 +37,6 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             var cameraData = frameData.Get<VividCameraData>();
-            var width = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
-            var height = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
-
-            if (width <= 0)
-                width = Mathf.Max(1, Screen.width);
-
-            if (height <= 0)
-                height = Mathf.Max(1, Screen.height);
-
-            ResizeTexture(m_ColorTarget, width, height);
-            ResizeTexture(m_DepthTexture, width, height);
             m_PixelCoordToViewDirMatrix = cameraData.GetPixelCoordToViewDirWSMatrix();
         }
 
@@ -108,31 +97,6 @@ namespace VividRP.Runtime.RenderPass.Core
             return texture;
         }
 
-        private static RenderGraphTexture CreateDepthTexture(string name)
-        {
-            return new RenderGraphTexture
-            {
-                desc = new RenderGraphTextureDesc
-                {
-                    Width = 1,
-                    Height = 1,
-                    ColorFormat = GraphicsFormat.R32_SFloat,
-                    DepthBufferBits = DepthBits.None,
-                    FilterMode = FilterMode.Point,
-                    WrapMode = TextureWrapMode.Clamp,
-                    ClearBuffer = false,
-                    Name = name
-                }
-            };
-        }
 
-        private static void ResizeTexture(RenderGraphTexture texture, int width, int height)
-        {
-            if (texture?.desc == null)
-                return;
-
-            texture.desc.Width = width;
-            texture.desc.Height = height;
-        }
     }
 }

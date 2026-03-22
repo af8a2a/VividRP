@@ -22,14 +22,12 @@ namespace VividRP.Editor.RenderGraph
 
         internal static string GetInputPortName(string fieldName, AccessFlags access)
         {
-            if (!CanRead(access) && !CanWrite(access))
+            if (!CanRead(access))
                 return null;
 
-            return !CanRead(access) && CanWrite(access)
+            return CanWrite(access)
                 ? $"{fieldName}{InputPortSuffix}"
-                : CanWrite(access)
-                    ? $"{fieldName}{InputPortSuffix}"
-                    : fieldName;
+                : fieldName;
         }
 
         internal static string GetInputPortName(
@@ -95,7 +93,7 @@ namespace VividRP.Editor.RenderGraph
             RenderGraphResourceBindingMode bindingMode,
             bool overrideEnabled)
         {
-            if (!CanRead(access) && !CanWrite(access))
+            if (!CanRead(access))
                 return false;
 
             return bindingMode switch

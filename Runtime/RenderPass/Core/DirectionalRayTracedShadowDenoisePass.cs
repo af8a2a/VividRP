@@ -10,6 +10,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int ThreadGroupSizeX = 8;
         private const int ThreadGroupSizeY = 8;
         private const string KernelName = "ShadowTemporalAccumulation";
+        private const string HistoryShadowKey = "HistoryShadow";
 
         private static readonly int RawShadowTextureId = Shader.PropertyToID("_RawShadowTexture");
         private static readonly int HistoryShadowTextureId = Shader.PropertyToID("_HistoryShadowTexture");
@@ -36,7 +37,10 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "GBuffer1", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer1;
 
-        [RenderGraphResource(Name = "HistoryShadow", Access = AccessFlags.Read)]
+        [RenderGraphResource(
+            Name = "HistoryShadow",
+            Access = AccessFlags.Read,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
         private RenderGraphTexture m_HistoryShadowTexture;
 
         [RenderGraphResource(Name = "DenoisedShadow", Access = AccessFlags.Write)]
@@ -84,14 +88,16 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             ConfigureOutputTexture(cameraData.actualWidth, cameraData.actualHeight);
+            m_HasValidHistory = AllocHistoryTexture(
+                HistoryShadowKey,
+                m_HistoryShadowTexture,
+                m_DenoisedShadowTexture,
+                m_DenoisedShadowTexture?.desc);
             m_InvViewProjectionMatrix =
                 DirectionalRayTracedShadowPass.ResolveInvViewProjectionMatrix(cameraData);
 
             m_DispatchGroupCountX = CoreUtils.DivRoundUp(cameraData.actualWidth, ThreadGroupSizeX);
             m_DispatchGroupCountY = CoreUtils.DivRoundUp(cameraData.actualHeight, ThreadGroupSizeY);
-
-            m_HasValidHistory = m_HistoryShadowTexture != null
-                && m_HistoryShadowTexture.innerHandle.IsValid();
         }
 
         public override void Record(ComputeGraphContext context)

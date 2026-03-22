@@ -1,4 +1,5 @@
-﻿using UnityEngine.Rendering;
+using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
@@ -9,6 +10,18 @@ namespace VividRP.Runtime
 
         public override void Reset()
         {
+        }
+    }
+
+    public sealed class VividGPUDrivenFrameData : ContextItem
+    {
+        public GraphicsBuffer visibleMeshletRenderRequestsBuffer;
+        public GraphicsBuffer visibleMeshletIndirectDrawArgsBuffer;
+
+        public override void Reset()
+        {
+            visibleMeshletRenderRequestsBuffer = null;
+            visibleMeshletIndirectDrawArgsBuffer = null;
         }
     }
 }

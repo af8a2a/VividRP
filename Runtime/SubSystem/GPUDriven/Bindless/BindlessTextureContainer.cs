@@ -30,6 +30,10 @@ namespace VividRP.Runtime.GPUDriven.Bindless
 
         public uint DescriptorHeapCount => m_Allocator.DescriptorHeapCount;
 
+        public uint DescriptorStartIndex => m_Allocator.DescriptorStartIndex;
+
+        public uint DescriptorCapacity => m_Allocator.DescriptorCapacity;
+
         public string UnavailableReason => m_Allocator.UnavailableReason;
 
         public void Dispose()
@@ -82,7 +86,7 @@ namespace VividRP.Runtime.GPUDriven.Bindless
                 return false;
             }
 
-            startIndex = m_Allocator.DescriptorHeapCount - (m_AllocatedDescriptorCount + count);
+            startIndex = m_Allocator.DescriptorStartIndex + m_Allocator.DescriptorCapacity - (m_AllocatedDescriptorCount + count);
             m_AllocatedDescriptorCount += count;
             return true;
         }
@@ -164,13 +168,13 @@ namespace VividRP.Runtime.GPUDriven.Bindless
 
         private bool TryGetNextDescriptorIndex(out uint index)
         {
-            if (!m_Allocator.IsAvailable || m_AllocatedDescriptorCount >= m_Allocator.DescriptorHeapCount)
+            if (!m_Allocator.IsAvailable || m_AllocatedDescriptorCount >= m_Allocator.DescriptorCapacity)
             {
                 index = InvalidTextureIndex;
                 return false;
             }
 
-            index = m_Allocator.DescriptorHeapCount - 1 - m_AllocatedDescriptorCount;
+            index = m_Allocator.DescriptorStartIndex + m_Allocator.DescriptorCapacity - 1 - m_AllocatedDescriptorCount;
             return true;
         }
 
@@ -246,7 +250,7 @@ namespace VividRP.Runtime.GPUDriven.Bindless
 
         private uint RemainingDescriptorCount()
         {
-            return m_Allocator.DescriptorHeapCount - m_AllocatedDescriptorCount;
+            return m_Allocator.DescriptorCapacity - m_AllocatedDescriptorCount;
         }
 
         private static Texture GetEffectiveTexture(Texture texture)

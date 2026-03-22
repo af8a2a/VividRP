@@ -70,7 +70,7 @@ namespace VividRP.Editor.RenderGraph
             {
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
                 var inputPortName = GetInputPortName(field, attr);
-                var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
+                var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access, attr.BindingMode);
 
                 if (field.FieldType == typeof(RenderGraphTexture))
                 {

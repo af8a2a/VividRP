@@ -299,6 +299,18 @@ namespace VividRP.Runtime
         /// <param name="rtHandle">The external RTHandle to import</param>
         /// <returns>TextureHandle that can be used in Record()</returns>
         TextureHandle Import(RTHandle rtHandle);
+
+        /// <summary>
+        /// Allocates or reuses a pass-scoped history texture pair during Prepare().
+        /// previous receives the last valid frame, current is registered as this frame's output.
+        /// </summary>
+        bool AllocHistoryTexture(string key, RenderGraphTexture previous, RenderGraphTexture current, RenderGraphTextureDesc desc);
+
+        /// <summary>
+        /// Allocates or reuses a pass-scoped history buffer pair during Prepare().
+        /// previous receives the last valid frame, current is registered as this frame's output.
+        /// </summary>
+        bool AllocHistoryBuffer(string key, RenderGraphBuffer previous, RenderGraphBuffer current, RenderGraphBufferDesc desc);
     }
 
     public abstract class ComputePass : IRenderPass
@@ -324,6 +336,16 @@ namespace VividRP.Runtime
         {
             return PassRecorder.ImportTextureForPass(this, rtHandle);
         }
+
+        public bool AllocHistoryTexture(string key, RenderGraphTexture previous, RenderGraphTexture current, RenderGraphTextureDesc desc)
+        {
+            return PassRecorder.AllocHistoryTextureForPass(this, key, previous, current, desc);
+        }
+
+        public bool AllocHistoryBuffer(string key, RenderGraphBuffer previous, RenderGraphBuffer current, RenderGraphBufferDesc desc)
+        {
+            return PassRecorder.AllocHistoryBufferForPass(this, key, previous, current, desc);
+        }
     }
 
     public abstract class RasterPass : IRenderPass
@@ -348,6 +370,16 @@ namespace VividRP.Runtime
         public TextureHandle Import(RTHandle rtHandle)
         {
             return PassRecorder.ImportTextureForPass(this, rtHandle);
+        }
+
+        public bool AllocHistoryTexture(string key, RenderGraphTexture previous, RenderGraphTexture current, RenderGraphTextureDesc desc)
+        {
+            return PassRecorder.AllocHistoryTextureForPass(this, key, previous, current, desc);
+        }
+
+        public bool AllocHistoryBuffer(string key, RenderGraphBuffer previous, RenderGraphBuffer current, RenderGraphBufferDesc desc)
+        {
+            return PassRecorder.AllocHistoryBufferForPass(this, key, previous, current, desc);
         }
     }
 
@@ -380,6 +412,16 @@ namespace VividRP.Runtime
         public TextureHandle Import(RTHandle rtHandle)
         {
             return PassRecorder.ImportTextureForPass(this, rtHandle);
+        }
+
+        public bool AllocHistoryTexture(string key, RenderGraphTexture previous, RenderGraphTexture current, RenderGraphTextureDesc desc)
+        {
+            return PassRecorder.AllocHistoryTextureForPass(this, key, previous, current, desc);
+        }
+
+        public bool AllocHistoryBuffer(string key, RenderGraphBuffer previous, RenderGraphBuffer current, RenderGraphBufferDesc desc)
+        {
+            return PassRecorder.AllocHistoryBufferForPass(this, key, previous, current, desc);
         }
     }
 }

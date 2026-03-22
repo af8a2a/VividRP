@@ -85,7 +85,7 @@ namespace VividRP.Editor.RenderGraph
                     continue;
 
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
-                var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
+                var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access, attr.BindingMode);
                 if (string.IsNullOrEmpty(outputPortName))
                     continue;
 

@@ -41,6 +41,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: d04bf75b8b000564fa609d6f99f8d981, type: 3}
   - ResourceName: Shaders/Core/Private/GPUDriven/MeshletListBuild
     ResourceObject: {fileID: 7200000, guid: 946e513ca242c63479056f13e12cadf9, type: 3}
+  - ResourceName: Shaders/Core/Private/GenerateViewZ
+    ResourceObject: {fileID: 7200000, guid: 8164bbffd46662749a6398ba6b7ba0a5, type: 3}
   - ResourceName: Shaders/Core/Private/HDRISky
     ResourceObject: {fileID: 4800000, guid: d41d44af2b5e2ff49b8312d9fe8aab8b, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/ClearLightLists

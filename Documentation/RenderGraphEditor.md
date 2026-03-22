@@ -21,10 +21,18 @@
 ### Pass 自持资源
 
 - `[RenderGraphResource]` 现在支持 `BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable`
+- `[RenderGraphResource]` 现在支持 `BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden`
 - 该模式适合“Pass 在构造函数里创建资源实例，`Prepare()` 每帧修正 descriptor”的固定资源
 - Editor 中该字段默认不显示输入端口，但如果字段可写，仍会保留输出端口给后续 Pass 或 Preview 使用
 - Pass 节点会额外显示一个 `Override <ResourceName>` 选项；打开后重新暴露输入端口，允许用图上的资源节点覆盖
 - 仅建议对已经具备完整默认 descriptor 初始化逻辑的字段启用该模式；如果字段必须依赖外部资源才有意义，继续使用默认的 `External`
+
+### 完全隐藏的 Pass 内部资源
+
+- `BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden` 适合仅在 Pass 内部使用、也不希望暴露到 RenderGraph 图上的资源
+- 该模式不会生成输入/输出端口，也不会显示 override 选项
+- 推荐用于时序累计这类完全由 `Prepare()` 代码管理的 history 资源；共享给其他 Pass 的 history 仍然继续使用图上的 history node
+- `IRenderPass` 现在提供 `AllocHistoryTexture(...)` / `AllocHistoryBuffer(...)`，可以在 `Prepare()` 中直接申请 pass-scoped history 资源
 
 ## 使用方式（最小闭环）
 

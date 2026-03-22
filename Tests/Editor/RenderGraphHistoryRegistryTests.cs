@@ -3,6 +3,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
@@ -18,13 +19,17 @@ namespace VividRP.Editor.Tests
         [SetUp]
         public void SetUp()
         {
+            PassRecorder.Dispose();
             RenderGraphHistoryRegistry.Clear();
+            RenderGraphBufferHistoryRegistry.Clear();
         }
 
         [TearDown]
         public void TearDown()
         {
+            PassRecorder.Dispose();
             RenderGraphHistoryRegistry.Clear();
+            RenderGraphBufferHistoryRegistry.Clear();
         }
 
         [Test]
@@ -146,6 +151,149 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void AllocHistoryTextureForPass_ReturnsValidity_AndResetsWhenDescriptorChanges()
+        {
+            using var cameraScope = new CameraScope();
+            var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
+            graphAsset.Passes.Add(new RenderGraphPassDefinition
+            {
+                PassType = GetPassTypeName<TextureHistoryAllocationPass>(),
+            });
+
+            try
+            {
+                PassRecorder.InitializeContext(default, cameraScope.Camera, default);
+                Compile(graphAsset);
+
+                var pass = GetCompiledPass<TextureHistoryAllocationPass>();
+                Assert.That(pass, Is.Not.Null);
+
+                var previous = GetTextureField(pass, TextureHistoryAllocationPass.PreviousFieldName);
+                var current = GetTextureField(pass, TextureHistoryAllocationPass.CurrentFieldName);
+                var historyKey = PassRecorder.BuildPassHistoryKey(pass, TextureHistoryAllocationPass.HistoryKey);
+                Assert.That(historyKey, Is.Not.Null);
+
+                var hasValidHistory = pass.AllocHistoryTexture(TextureHistoryAllocationPass.HistoryKey, previous, current, current.desc);
+                Assert.That(hasValidHistory, Is.False);
+
+                RenderGraphHistoryRegistry.MarkHistoryValid(cameraScope.Camera, graphAsset, historyKey);
+
+                hasValidHistory = pass.AllocHistoryTexture(TextureHistoryAllocationPass.HistoryKey, previous, current, current.desc);
+                Assert.That(hasValidHistory, Is.True);
+
+                var resizedDescriptor = current.desc.Clone();
+                resizedDescriptor.Width = 128;
+                resizedDescriptor.Height = 64;
+                hasValidHistory = pass.AllocHistoryTexture(TextureHistoryAllocationPass.HistoryKey, previous, current, resizedDescriptor);
+                Assert.That(hasValidHistory, Is.False);
+            }
+            finally
+            {
+                PassRecorder.Dispose();
+                Object.DestroyImmediate(graphAsset);
+            }
+        }
+
+        [Test]
+        public void AllocHistoryBufferForPass_SwapsBuffersAcrossFrames_AndClearsOnDispose()
+        {
+            using var cameraScope = new CameraScope();
+            var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
+            graphAsset.Passes.Add(new RenderGraphPassDefinition
+            {
+                PassType = GetPassTypeName<BufferHistoryAllocationPass>(),
+            });
+
+            try
+            {
+                PassRecorder.InitializeContext(default, cameraScope.Camera, default);
+                Compile(graphAsset);
+
+                var pass = GetCompiledPass<BufferHistoryAllocationPass>();
+                Assert.That(pass, Is.Not.Null);
+
+                var previous = GetBufferField(pass, BufferHistoryAllocationPass.PreviousFieldName);
+                var current = GetBufferField(pass, BufferHistoryAllocationPass.CurrentFieldName);
+                var historyKey = PassRecorder.BuildPassHistoryKey(pass, BufferHistoryAllocationPass.HistoryKey);
+                Assert.That(historyKey, Is.Not.Null);
+
+                var hasValidHistory = pass.AllocHistoryBuffer(BufferHistoryAllocationPass.HistoryKey, previous, current, current.desc);
+                Assert.That(hasValidHistory, Is.False);
+
+                var firstPreviousBuffer = previous.ImportedGraphicsBuffer;
+                var firstCurrentBuffer = current.ImportedGraphicsBuffer;
+                Assert.That(firstPreviousBuffer, Is.Not.Null);
+                Assert.That(firstCurrentBuffer, Is.Not.Null);
+                Assert.That(firstCurrentBuffer, Is.Not.SameAs(firstPreviousBuffer));
+
+                RenderGraphBufferHistoryRegistry.FinalizeFrame(cameraScope.Camera, graphAsset, historyKey);
+
+                hasValidHistory = pass.AllocHistoryBuffer(BufferHistoryAllocationPass.HistoryKey, previous, current, current.desc);
+                Assert.That(hasValidHistory, Is.True);
+                Assert.That(previous.ImportedGraphicsBuffer, Is.SameAs(firstCurrentBuffer));
+                Assert.That(current.ImportedGraphicsBuffer, Is.SameAs(firstPreviousBuffer));
+
+                var resizedDescriptor = current.desc.Clone();
+                resizedDescriptor.Count = 32;
+                hasValidHistory = pass.AllocHistoryBuffer(BufferHistoryAllocationPass.HistoryKey, previous, current, resizedDescriptor);
+                Assert.That(hasValidHistory, Is.False);
+                Assert.That(previous.ImportedGraphicsBuffer, Is.Not.SameAs(firstCurrentBuffer));
+                Assert.That(current.ImportedGraphicsBuffer, Is.Not.SameAs(firstPreviousBuffer));
+
+                PassRecorder.Dispose();
+
+                Assert.That(previous.ImportedGraphicsBuffer, Is.Null);
+                Assert.That(current.ImportedGraphicsBuffer, Is.Null);
+            }
+            finally
+            {
+                PassRecorder.Dispose();
+                Object.DestroyImmediate(graphAsset);
+            }
+        }
+
+        private static void Compile(RenderGraphData graphAsset)
+        {
+            var method = typeof(PassRecorder).GetMethod("Compile", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(method, Is.Not.Null);
+            method.Invoke(null, new object[] { graphAsset });
+        }
+
+        private static TPass GetCompiledPass<TPass>() where TPass : class, IRenderPass
+        {
+            var field = typeof(PassRecorder).GetField("s_RenderPasses", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(field, Is.Not.Null);
+            var passes = (System.Collections.IEnumerable)field.GetValue(null);
+            foreach (var pass in passes)
+            {
+                if (pass is TPass typedPass)
+                    return typedPass;
+            }
+
+            return null;
+        }
+
+        private static RenderGraphTexture GetTextureField(object pass, string fieldName)
+        {
+            var field = pass.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null);
+            return (RenderGraphTexture)field.GetValue(pass);
+        }
+
+        private static RenderGraphBuffer GetBufferField(object pass, string fieldName)
+        {
+            var field = pass.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null);
+            return (RenderGraphBuffer)field.GetValue(pass);
+        }
+
+        private static string GetPassTypeName<TPass>()
+        {
+            var type = typeof(TPass);
+            return $"{type.FullName}, {type.Assembly.GetName().Name}";
+        }
+
         private sealed class CameraScope : System.IDisposable
         {
             private readonly GameObject m_GameObject;
@@ -163,6 +311,88 @@ namespace VividRP.Editor.Tests
                 if (m_GameObject != null)
                     Object.DestroyImmediate(m_GameObject);
             }
+        }
+    }
+
+    internal sealed class TextureHistoryAllocationPass : ComputePass
+    {
+        internal const string PreviousFieldName = "m_Previous";
+        internal const string CurrentFieldName = "m_Current";
+        internal const string HistoryKey = "TemporalHistory";
+
+        [RenderGraphResource(
+            Name = "PreviousHistory",
+            Access = AccessFlags.Read,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private readonly RenderGraphTexture m_Previous = new RenderGraphTexture
+        {
+            desc = RenderGraphTextureDesc.CreateColorTarget(64, 32, GraphicsFormat.R8G8B8A8_UNorm)
+        };
+
+        [RenderGraphResource(
+            Name = "CurrentHistory",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private readonly RenderGraphTexture m_Current = new RenderGraphTexture
+        {
+            desc = RenderGraphTextureDesc.CreateColorTarget(64, 32, GraphicsFormat.R8G8B8A8_UNorm)
+        };
+
+        public override void Create()
+        {
+        }
+
+        public override void Prepare(ContextContainer frameData)
+        {
+        }
+
+        public override void Record(ComputeGraphContext context)
+        {
+        }
+
+        public override void Dispose()
+        {
+        }
+    }
+
+    internal sealed class BufferHistoryAllocationPass : ComputePass
+    {
+        internal const string PreviousFieldName = "m_Previous";
+        internal const string CurrentFieldName = "m_Current";
+        internal const string HistoryKey = "TemporalBufferHistory";
+
+        [RenderGraphResource(
+            Name = "PreviousHistory",
+            Access = AccessFlags.Read,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private readonly RenderGraphBuffer m_Previous = new RenderGraphBuffer
+        {
+            desc = RenderGraphBufferDesc.CreateStructured(16, sizeof(uint))
+        };
+
+        [RenderGraphResource(
+            Name = "CurrentHistory",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private readonly RenderGraphBuffer m_Current = new RenderGraphBuffer
+        {
+            desc = RenderGraphBufferDesc.CreateStructured(16, sizeof(uint))
+        };
+
+        public override void Create()
+        {
+        }
+
+        public override void Prepare(ContextContainer frameData)
+        {
+        }
+
+        public override void Record(ComputeGraphContext context)
+        {
+        }
+
+        public override void Dispose()
+        {
         }
     }
 }

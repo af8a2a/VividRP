@@ -5,6 +5,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.GPUDriven.Bindless;
 
 namespace VividRP.Runtime
 {
@@ -72,7 +73,8 @@ namespace VividRP.Runtime
                 if (m_Asset != null && m_Asset.EnableGPUDriven)
                 {
                     VividRPCoreResources resources = PipelineResourceManager.Get<VividRPCoreResources>();
-                    VividGPUDrivenSystem.instance.Cull(
+                    VividGPUDrivenSystem gpuDrivenSystem = VividGPUDrivenSystem.instance;
+                    gpuDrivenSystem.Cull(
                         camera,
                         cmdBuffer,
                         resources.GPUInstanceCullingCompute,
@@ -80,7 +82,10 @@ namespace VividRP.Runtime
                         resources.GPUMeshletCullingCompute,
                         resources.FixupVisibleMeshletIndirectDrawArgsCompute
                     );
-                    VividGPUDrivenSystem.instance.BindGlobals(cmdBuffer);
+                    gpuDrivenSystem.BindGlobals(cmdBuffer);
+                    PassRecorder.SetGPUDrivenFrameData(
+                        gpuDrivenSystem.VisibleMeshletRenderRequestsBuffer,
+                        gpuDrivenSystem.VisibleMeshletIndirectDrawArgsBuffer);
                 }
 
                 PassRecorder.InitializeContext(context, camera, cullingResults);

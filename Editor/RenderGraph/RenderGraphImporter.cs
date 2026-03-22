@@ -178,7 +178,7 @@ namespace VividRP.Editor.RenderGraph
                 {
                     var attr = field.GetCustomAttribute<RenderGraphResource>();
                     var inputPortName = passNode.GetInputPortName(field, attr);
-                    var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
+                    var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access, attr.BindingMode);
                     var inputPort = string.IsNullOrEmpty(inputPortName) ? null : passNode.GetInputPortByName(inputPortName);
                     var outputPort = string.IsNullOrEmpty(outputPortName) ? null : passNode.GetOutputPortByName(outputPortName);
                     var inputConnectedPort = inputPort?.FirstConnectedPort;
@@ -693,7 +693,7 @@ namespace VividRP.Editor.RenderGraph
                     continue;
 
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
-                var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
+                var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access, attr.BindingMode);
                 if (string.IsNullOrEmpty(outputPortName))
                     continue;
 

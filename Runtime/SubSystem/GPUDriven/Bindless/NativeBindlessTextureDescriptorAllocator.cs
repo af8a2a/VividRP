@@ -6,41 +6,113 @@ namespace VividRP.Runtime.GPUDriven.Bindless
 {
     public sealed class NativeBindlessTextureDescriptorAllocator : IBindlessTextureDescriptorAllocator
     {
+        private readonly Func<Texture, uint, bool> m_CreateTextureDescriptor;
+        private readonly Func<uint> m_GetDescriptorHeapCount;
+        private readonly Func<uint> m_GetDescriptorStartIndex;
+        private readonly Func<uint> m_GetDescriptorCapacity;
+        private readonly Func<GraphicsDeviceType> m_GetGraphicsDeviceType;
+        private readonly Func<Texture> m_GetWhiteTexture;
         private uint m_DescriptorHeapCount;
+        private uint m_DescriptorStartIndex;
+        private uint m_DescriptorCapacity;
         private bool m_IsAvailable;
+        private bool m_IsPermanentlyUnavailable;
         private string m_UnavailableReason = "Bindless allocator has not been initialized.";
 
         public NativeBindlessTextureDescriptorAllocator()
+            : this(
+                BindlessPluginBindings.GetSRVDescriptorHeapCount,
+                BindlessPluginBindings.GetBindlessDescriptorStartIndex,
+                BindlessPluginBindings.GetBindlessDescriptorCount,
+                static (texture, index) => BindlessPluginBindings.CreateSRVDescriptor(texture.GetNativeTexturePtr(), index),
+                static () => SystemInfo.graphicsDeviceType,
+                static () => Texture2D.whiteTexture)
         {
-            Initialize();
         }
 
-        public bool IsAvailable => m_IsAvailable;
+        internal NativeBindlessTextureDescriptorAllocator(
+            Func<uint> getDescriptorHeapCount,
+            Func<uint> getDescriptorStartIndex,
+            Func<uint> getDescriptorCapacity,
+            Func<Texture, uint, bool> createTextureDescriptor,
+            Func<GraphicsDeviceType> getGraphicsDeviceType,
+            Func<Texture> getWhiteTexture)
+        {
+            BindlessPluginBindings.EnsureLoaded();
+            m_GetDescriptorHeapCount = getDescriptorHeapCount ?? throw new ArgumentNullException(nameof(getDescriptorHeapCount));
+            m_GetDescriptorStartIndex = getDescriptorStartIndex ?? throw new ArgumentNullException(nameof(getDescriptorStartIndex));
+            m_GetDescriptorCapacity = getDescriptorCapacity ?? throw new ArgumentNullException(nameof(getDescriptorCapacity));
+            m_CreateTextureDescriptor = createTextureDescriptor ?? throw new ArgumentNullException(nameof(createTextureDescriptor));
+            m_GetGraphicsDeviceType = getGraphicsDeviceType ?? throw new ArgumentNullException(nameof(getGraphicsDeviceType));
+            m_GetWhiteTexture = getWhiteTexture ?? throw new ArgumentNullException(nameof(getWhiteTexture));
 
-        public uint DescriptorHeapCount => m_DescriptorHeapCount;
+            TryInitializeIfNeeded();
+        }
 
-        public string UnavailableReason => m_UnavailableReason;
+        public bool IsAvailable
+        {
+            get
+            {
+                TryInitializeIfNeeded();
+                return m_IsAvailable;
+            }
+        }
+
+        public uint DescriptorHeapCount
+        {
+            get
+            {
+                TryInitializeIfNeeded();
+                return m_DescriptorHeapCount;
+            }
+        }
+
+        public uint DescriptorStartIndex
+        {
+            get
+            {
+                TryInitializeIfNeeded();
+                return m_DescriptorStartIndex;
+            }
+        }
+
+        public uint DescriptorCapacity
+        {
+            get
+            {
+                TryInitializeIfNeeded();
+                return m_DescriptorCapacity;
+            }
+        }
+
+        public string UnavailableReason
+        {
+            get
+            {
+                TryInitializeIfNeeded();
+                return m_UnavailableReason;
+            }
+        }
 
         public bool TryCreateTextureDescriptor(Texture texture, uint index)
         {
-            if (!m_IsAvailable)
+            if (!TryInitializeIfNeeded())
             {
                 return false;
             }
 
-            Texture effectiveTexture = texture != null ? texture : Texture2D.whiteTexture;
+            Texture effectiveTexture = texture != null ? texture : m_GetWhiteTexture();
             if (effectiveTexture == null)
             {
-                SetUnavailable("The fallback white texture is unavailable.");
+                SetPermanentlyUnavailable("The fallback white texture is unavailable.");
                 return false;
             }
 
             try
             {
-                int result = BindlessPluginBindings.CreateSRVDescriptor(effectiveTexture.GetNativeTexturePtr(), index);
-                if (result != 0)
+                if (!m_CreateTextureDescriptor(effectiveTexture, index))
                 {
-                    m_UnavailableReason = $"Bindless plugin returned error code {result} while creating a descriptor.";
+                    m_UnavailableReason = "Bindless plugin failed to create a descriptor.";
                     return false;
                 }
 
@@ -49,44 +121,83 @@ namespace VividRP.Runtime.GPUDriven.Bindless
             }
             catch (Exception exception) when (IsNativePluginException(exception))
             {
-                SetUnavailable($"Bindless plugin invocation failed: {exception.GetType().Name}.");
+                SetPermanentlyUnavailable($"Bindless plugin invocation failed: {exception.GetType().Name}.");
                 return false;
             }
         }
 
-        private void Initialize()
+        private bool TryInitializeIfNeeded()
         {
-            if (SystemInfo.graphicsDeviceType != GraphicsDeviceType.Direct3D12)
+            if (m_IsAvailable && m_DescriptorCapacity > 0)
             {
-                SetUnavailable("Bindless descriptors require the Direct3D12 graphics backend.");
-                return;
+                return true;
+            }
+
+            if (m_IsPermanentlyUnavailable)
+            {
+                return false;
+            }
+
+            return Initialize();
+        }
+
+        private bool Initialize()
+        {
+            if (m_GetGraphicsDeviceType() != GraphicsDeviceType.Direct3D12)
+            {
+                SetPermanentlyUnavailable("Bindless descriptors require the Direct3D12 graphics backend.");
+                return false;
             }
 
             try
             {
-                m_DescriptorHeapCount = BindlessPluginBindings.GetSRVDescriptorHeapCount();
+                BindlessPluginBindings.EnsureLoaded();
+                m_DescriptorHeapCount = m_GetDescriptorHeapCount();
+                m_DescriptorStartIndex = m_GetDescriptorStartIndex();
+                m_DescriptorCapacity = m_GetDescriptorCapacity();
             }
             catch (Exception exception) when (IsNativePluginException(exception))
             {
-                SetUnavailable($"Bindless plugin is unavailable: {exception.GetType().Name}.");
-                return;
+                SetPermanentlyUnavailable($"Bindless plugin is unavailable: {exception.GetType().Name}.");
+                return false;
             }
 
             if (m_DescriptorHeapCount == 0)
             {
-                SetUnavailable("Bindless plugin reported an empty SRV descriptor heap.");
-                return;
+                SetTemporarilyUnavailable("Bindless descriptor heap has not been captured yet.");
+                return false;
+            }
+
+            if (m_DescriptorCapacity == 0)
+            {
+                SetTemporarilyUnavailable("Bindless descriptor heap has not reserved a plugin-owned range yet.");
+                return false;
+            }
+
+            if ((ulong) m_DescriptorStartIndex + m_DescriptorCapacity > m_DescriptorHeapCount)
+            {
+                SetPermanentlyUnavailable("Bindless plugin returned an invalid descriptor range.");
+                return false;
             }
 
             m_IsAvailable = true;
             m_UnavailableReason = string.Empty;
+            return true;
         }
 
-        private void SetUnavailable(string reason)
+        private void SetTemporarilyUnavailable(string reason)
         {
             m_IsAvailable = false;
             m_DescriptorHeapCount = 0;
+            m_DescriptorStartIndex = 0;
+            m_DescriptorCapacity = 0;
             m_UnavailableReason = reason;
+        }
+
+        private void SetPermanentlyUnavailable(string reason)
+        {
+            m_IsPermanentlyUnavailable = true;
+            SetTemporarilyUnavailable(reason);
         }
 
         private static bool IsNativePluginException(Exception exception)

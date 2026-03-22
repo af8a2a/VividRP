@@ -12,14 +12,31 @@ namespace VividRP.Runtime
 {
     public static partial class PassRecorder
     {
+        private sealed class CodeManagedTextureHistoryRequest
+        {
+            public string Key;
+            public RenderGraphTexture CurrentTexture;
+            public RenderGraphTextureDesc Descriptor;
+        }
+
+        private sealed class CodeManagedBufferHistoryRequest
+        {
+            public string Key;
+            public RenderGraphBuffer CurrentBuffer;
+        }
+
         private static readonly List<IRenderPass> s_RenderPasses = new();
         private static readonly ContextContainer s_FrameData = new();
         private static readonly Dictionary<IRenderPass, PassResource> s_PassResources = new();
+        private static readonly Dictionary<IRenderPass, int> s_PassIndices = new();
         private static readonly Dictionary<IRenderPass, Dictionary<string, AccessFlags>> s_PassResourceAccessOverrides = new();
         private static RenderGraphTexture[] s_HistoryPreviousTextures = Array.Empty<RenderGraphTexture>();
         private static RenderGraphTexture[] s_HistoryCurrentTextures = Array.Empty<RenderGraphTexture>();
         private static readonly Dictionary<RenderGraphTexture, RTHandle> s_ImportedRTHandles = new();
         private static readonly Dictionary<IRenderPass, List<ImportedPassTexture>> s_PassImportedHandles = new();
+        private static readonly Dictionary<string, CodeManagedTextureHistoryRequest> s_CodeManagedTextureHistoryRequests = new(StringComparer.Ordinal);
+        private static readonly Dictionary<string, CodeManagedBufferHistoryRequest> s_CodeManagedBufferHistoryRequests = new(StringComparer.Ordinal);
+        private static readonly HashSet<RenderGraphBuffer> s_CodeManagedHistoryImportedBuffers = new();
         private static RenderGraph s_CurrentRenderGraph;
 
         private static RenderGraphData s_CurrentGraphAsset;
@@ -30,6 +47,7 @@ namespace VividRP.Runtime
         {
             var renderingData = s_FrameData.GetOrCreate<VividRenderingData>();
             var cameraData = s_FrameData.GetOrCreate<VividCameraData>();
+            var gpuDrivenFrameData = s_FrameData.GetOrCreate<VividGPUDrivenFrameData>();
             var lightData = s_FrameData.GetOrCreate<VividLightData>();
             var additionalCameraData = camera.GetComponent<VividAdditionalCameraData>();
             if (additionalCameraData == null && camera.cameraType == CameraType.Game)
@@ -48,7 +66,17 @@ namespace VividRP.Runtime
             cameraData.actualHeight = camera.scaledPixelHeight;
             renderingData.cullingResults = cullingResults;
             renderingData.context = context;
+            gpuDrivenFrameData.Reset();
             lightData.Update(cullingResults);
+        }
+
+        internal static void SetGPUDrivenFrameData(
+            GraphicsBuffer visibleMeshletRenderRequestsBuffer,
+            GraphicsBuffer visibleMeshletIndirectDrawArgsBuffer)
+        {
+            var gpuDrivenFrameData = s_FrameData.GetOrCreate<VividGPUDrivenFrameData>();
+            gpuDrivenFrameData.visibleMeshletRenderRequestsBuffer = visibleMeshletRenderRequestsBuffer;
+            gpuDrivenFrameData.visibleMeshletIndirectDrawArgsBuffer = visibleMeshletIndirectDrawArgsBuffer;
         }
 
         public static void Dispose()
@@ -68,13 +96,15 @@ namespace VividRP.Runtime
             DisposeAccelerationStructures();
             s_RenderPasses.Clear();
             s_PassResources.Clear();
+            s_PassIndices.Clear();
             s_PassResourceAccessOverrides.Clear();
+            ClearHistoryImportedHandles();
             s_HistoryPreviousTextures = Array.Empty<RenderGraphTexture>();
             s_HistoryCurrentTextures = Array.Empty<RenderGraphTexture>();
-            s_ImportedRTHandles.Clear();
-            s_PassImportedHandles.Clear();
-            s_CurrentRenderGraph = null;
+            ClearCodeManagedHistoryFrameState();
+            ClearImportedTextures();
             RenderGraphHistoryRegistry.Clear();
+            RenderGraphBufferHistoryRegistry.Clear();
             RenderGraphPreviewRegistry.Clear();
             VividRayTracingAccelerationStructureStatsRegistry.Clear();
             s_CurrentGraphAsset = null;
@@ -85,6 +115,7 @@ namespace VividRP.Runtime
         internal static void PrepareFrame(RenderGraphData graphAsset, CommandBuffer cmdBuffer)
         {
             EnsureCompiled(graphAsset);
+            ClearCodeManagedHistoryFrameState();
             var cameraData = s_FrameData.GetOrCreate<VividCameraData>();
             cameraData.UpdateShaderVariables(cmdBuffer);
             PrepareHistoryTargets(graphAsset, cmdBuffer);
@@ -95,6 +126,7 @@ namespace VividRP.Runtime
         {
             ClearImportedTextures();
             ClearHistoryImportedHandles();
+            ClearCodeManagedHistoryFrameState();
         }
 
         /// <summary>
@@ -156,11 +188,172 @@ namespace VividRP.Runtime
             s_ImportedRTHandles[texture] = rtHandle;
         }
 
+        internal static bool AllocHistoryTextureForPass(
+            IRenderPass pass,
+            string key,
+            RenderGraphTexture previous,
+            RenderGraphTexture current,
+            RenderGraphTextureDesc desc)
+        {
+            if (!TryResolvePassHistoryContext(pass, key, out var historyKey, out var camera, out var graphAsset))
+                return false;
+
+            var descriptor = CloneTextureDescriptor(desc ?? current?.desc ?? previous?.desc);
+            if (descriptor == null)
+            {
+                Debug.LogWarning("[VividRP] Cannot allocate history texture without a descriptor.");
+                return false;
+            }
+
+            if (previous != null)
+            {
+                previous.desc = CloneTextureDescriptor(descriptor);
+            }
+
+            if (current != null)
+            {
+                current.desc = CloneTextureDescriptor(descriptor);
+            }
+
+            var target = RenderGraphHistoryRegistry.GetOrCreateHistoryTarget(camera, graphAsset, historyKey, descriptor);
+            var hasValidHistory = RenderGraphHistoryRegistry.TryGetHistoryTarget(
+                camera,
+                graphAsset,
+                historyKey,
+                out _,
+                out var hasValidData)
+                && hasValidData;
+
+            if (previous != null && target != null)
+                ImportTexture(previous, target);
+
+            if (current != null)
+            {
+                s_CodeManagedTextureHistoryRequests[historyKey] = new CodeManagedTextureHistoryRequest
+                {
+                    Key = historyKey,
+                    CurrentTexture = current,
+                    Descriptor = CloneTextureDescriptor(descriptor),
+                };
+            }
+
+            return hasValidHistory;
+        }
+
+        internal static bool AllocHistoryBufferForPass(
+            IRenderPass pass,
+            string key,
+            RenderGraphBuffer previous,
+            RenderGraphBuffer current,
+            RenderGraphBufferDesc desc)
+        {
+            if (!TryResolvePassHistoryContext(pass, key, out var historyKey, out var camera, out var graphAsset))
+                return false;
+
+            var descriptor = CloneBufferDescriptor(desc ?? current?.desc ?? previous?.desc);
+            if (descriptor == null)
+            {
+                Debug.LogWarning("[VividRP] Cannot allocate history buffer without a descriptor.");
+                return false;
+            }
+
+            if (!RenderGraphBufferHistoryRegistry.PrepareHistoryBuffers(
+                    camera,
+                    graphAsset,
+                    historyKey,
+                    descriptor,
+                    out var previousBuffer,
+                    out var currentBuffer,
+                    out var hasValidHistory))
+            {
+                return false;
+            }
+
+            if (previous != null)
+            {
+                previous.desc = CloneBufferDescriptor(descriptor);
+                previous.SetImportedBuffer(previousBuffer);
+                s_CodeManagedHistoryImportedBuffers.Add(previous);
+            }
+
+            if (current != null)
+            {
+                current.desc = CloneBufferDescriptor(descriptor);
+                current.SetImportedBuffer(currentBuffer);
+                s_CodeManagedHistoryImportedBuffers.Add(current);
+                s_CodeManagedBufferHistoryRequests[historyKey] = new CodeManagedBufferHistoryRequest
+                {
+                    Key = historyKey,
+                    CurrentBuffer = current,
+                };
+            }
+
+            return hasValidHistory;
+        }
+
+        internal static string BuildPassHistoryKey(IRenderPass pass, string key)
+        {
+            if (pass == null || string.IsNullOrWhiteSpace(key))
+                return null;
+
+            if (!s_PassIndices.TryGetValue(pass, out var passIndex))
+            {
+                passIndex = s_RenderPasses.IndexOf(pass);
+                if (passIndex < 0)
+                    return null;
+
+                s_PassIndices[pass] = passIndex;
+            }
+
+            return $"{passIndex}:{key}";
+        }
+
+        private static bool TryResolvePassHistoryContext(
+            IRenderPass pass,
+            string key,
+            out string historyKey,
+            out Camera camera,
+            out RenderGraphData graphAsset)
+        {
+            historyKey = BuildPassHistoryKey(pass, key);
+            camera = s_FrameData.GetOrCreate<VividCameraData>().camera;
+            graphAsset = s_CurrentGraphAsset;
+
+            if (string.IsNullOrEmpty(historyKey) || camera == null || graphAsset == null)
+            {
+                if (string.IsNullOrWhiteSpace(key))
+                    Debug.LogWarning("[VividRP] Cannot allocate history resource with an empty key.");
+                else if (camera == null || graphAsset == null)
+                    Debug.LogWarning("[VividRP] Cannot allocate history resource before PassRecorder has an active camera and graph asset.");
+                else
+                    Debug.LogWarning("[VividRP] Cannot resolve the pass history scope for the requested resource.");
+
+                return false;
+            }
+
+            return true;
+        }
+
+        private static RenderGraphTextureDesc CloneTextureDescriptor(RenderGraphTextureDesc descriptor)
+        {
+            return descriptor?.Clone();
+        }
+
+        private static RenderGraphBufferDesc CloneBufferDescriptor(RenderGraphBufferDesc descriptor)
+        {
+            return descriptor?.Clone();
+        }
+
         /// <summary>
         /// Clears all imported textures at the start of each frame.
         /// </summary>
         private static void ClearImportedTextures()
         {
+            foreach (var importedTexture in s_ImportedRTHandles.Keys)
+            {
+                importedTexture?.ClearImportedHandle();
+            }
+
             s_ImportedRTHandles.Clear();
             s_PassImportedHandles.Clear();
             s_CurrentRenderGraph = null;
@@ -177,6 +370,18 @@ namespace VividRP.Runtime
             {
                 texture?.ClearImportedHandle();
             }
+        }
+
+        private static void ClearCodeManagedHistoryFrameState()
+        {
+            foreach (var buffer in s_CodeManagedHistoryImportedBuffers)
+            {
+                buffer?.ClearImportedBuffer();
+            }
+
+            s_CodeManagedHistoryImportedBuffers.Clear();
+            s_CodeManagedTextureHistoryRequests.Clear();
+            s_CodeManagedBufferHistoryRequests.Clear();
         }
 
         private static void EnsureCompiled(RenderGraphData graphAsset)
@@ -197,7 +402,9 @@ namespace VividRP.Runtime
             if (graphAsset == null || graphAsset.Passes == null || graphAsset.Passes.Count == 0)
             {
                 // Fallback graph (keeps the pipeline running without an authored asset).
-                s_RenderPasses.Add(new FullScreenPass());
+                var fallbackPass = new FullScreenPass();
+                s_PassIndices[fallbackPass] = 0;
+                s_RenderPasses.Add(fallbackPass);
             }
             else
             {
@@ -259,6 +466,7 @@ namespace VividRP.Runtime
 
                     indexedPasses[passIndex] = pass;
                     indexedPassTypes[passIndex] = passType;
+                    s_PassIndices[pass] = s_RenderPasses.Count;
                     s_RenderPasses.Add(pass);
                 }
 
@@ -678,6 +886,81 @@ namespace VividRP.Runtime
             return false;
         }
 
+        private static void RecordCodeManagedTextureHistoryUpdatePasses(RenderGraph renderGraph, RenderGraphData graphAsset)
+        {
+            if (renderGraph == null || graphAsset == null || s_CodeManagedTextureHistoryRequests.Count == 0)
+                return;
+
+            var camera = s_FrameData.GetOrCreate<VividCameraData>().camera;
+            if (camera == null)
+                return;
+
+            foreach (var request in s_CodeManagedTextureHistoryRequests.Values)
+            {
+                var currentTexture = request?.CurrentTexture;
+                if (currentTexture == null
+                    || !currentTexture.innerHandle.IsValid()
+                    || !ShouldPersistHistoryTexture(currentTexture))
+                {
+                    continue;
+                }
+
+                var target = RenderGraphHistoryRegistry.GetOrCreateHistoryTarget(
+                    camera,
+                    graphAsset,
+                    request.Key,
+                    request.Descriptor);
+                if (target == null)
+                    continue;
+
+                var destination = renderGraph.ImportTexture(target);
+                if (!destination.IsValid() || !renderGraph.CanAddCopyPass(currentTexture.innerHandle, destination))
+                    continue;
+
+                var historyName = request.Descriptor?.Name;
+                if (string.IsNullOrEmpty(historyName))
+                    historyName = request.Key;
+
+                renderGraph.AddCopyPass(currentTexture.innerHandle, destination, $"{historyName} Persist");
+                RenderGraphHistoryRegistry.MarkHistoryValid(camera, graphAsset, request.Key);
+            }
+        }
+
+        private static bool ShouldPersistHistoryBuffer(RenderGraphBuffer buffer)
+        {
+            foreach (var resources in s_PassResources.Values)
+            {
+                if (resources?.Buffers == null)
+                    continue;
+
+                foreach (var entry in resources.Buffers)
+                {
+                    if (ReferenceEquals(entry?.Buffer, buffer) && (entry.Access & AccessFlags.Write) != 0)
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static void FinalizeCodeManagedBufferHistories(RenderGraphData graphAsset)
+        {
+            if (graphAsset == null || s_CodeManagedBufferHistoryRequests.Count == 0)
+                return;
+
+            var camera = s_FrameData.GetOrCreate<VividCameraData>().camera;
+            if (camera == null)
+                return;
+
+            foreach (var request in s_CodeManagedBufferHistoryRequests.Values)
+            {
+                if (request?.CurrentBuffer == null || !ShouldPersistHistoryBuffer(request.CurrentBuffer))
+                    continue;
+
+                RenderGraphBufferHistoryRegistry.FinalizeFrame(camera, graphAsset, request.Key);
+            }
+        }
+
         private static void RecordTexturePreviewPasses(
             RenderGraph renderGraph,
             IRenderPass pass,
@@ -837,6 +1120,8 @@ namespace VividRP.Runtime
             }
 
             RecordHistoryUpdatePasses(renderGraph, graphAsset);
+            RecordCodeManagedTextureHistoryUpdatePasses(renderGraph, graphAsset);
+            FinalizeCodeManagedBufferHistories(graphAsset);
         }
 
         private static PassResource GetCurrentPassResources(IRenderPass pass)

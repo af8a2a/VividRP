@@ -6,7 +6,8 @@ namespace VividRP.Runtime
     public enum RenderGraphResourceBindingMode
     {
         External,
-        PassOwnedOverrideable
+        PassOwnedOverrideable,
+        PassOwnedHidden
     }
 
     [AttributeUsage(AttributeTargets.Field)]

@@ -52,6 +52,17 @@ namespace VividRP.Editor.RenderGraph
             return CanRead(access) ? $"{fieldName}{OutputPortSuffix}" : fieldName;
         }
 
+        internal static string GetOutputPortName(
+            string fieldName,
+            AccessFlags access,
+            RenderGraphResourceBindingMode bindingMode)
+        {
+            if (!ShouldDefineOutputPort(access, bindingMode))
+                return null;
+
+            return GetOutputPortName(fieldName, access);
+        }
+
         internal static AccessFlags GetInputPortDisplayAccess(AccessFlags access)
         {
             if (CanRead(access) && CanWrite(access))
@@ -87,7 +98,20 @@ namespace VividRP.Editor.RenderGraph
             if (!CanRead(access) && !CanWrite(access))
                 return false;
 
-            return bindingMode != RenderGraphResourceBindingMode.PassOwnedOverrideable || overrideEnabled;
+            return bindingMode switch
+            {
+                RenderGraphResourceBindingMode.PassOwnedHidden => false,
+                RenderGraphResourceBindingMode.PassOwnedOverrideable => overrideEnabled,
+                _ => true,
+            };
+        }
+
+        internal static bool ShouldDefineOutputPort(
+            AccessFlags access,
+            RenderGraphResourceBindingMode bindingMode)
+        {
+            return bindingMode != RenderGraphResourceBindingMode.PassOwnedHidden
+                && CanWrite(access);
         }
 
         internal static string GetOverrideOptionName(string fieldName)

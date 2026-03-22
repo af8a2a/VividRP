@@ -8,6 +8,10 @@ namespace VividRP.Runtime.GPUDriven.Bindless
 
         uint DescriptorHeapCount { get; }
 
+        uint DescriptorStartIndex { get; }
+
+        uint DescriptorCapacity { get; }
+
         string UnavailableReason { get; }
 
         bool TryCreateTextureDescriptor(Texture texture, uint index);

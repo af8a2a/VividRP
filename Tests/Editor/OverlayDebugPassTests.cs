@@ -122,6 +122,20 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ResolveVisualizationMode_UsesVisibilityBufferForUint2Textures()
+        {
+            var mode = OverlayDebugPass.ResolveVisualizationMode(
+                OverlayDebugVisualizationMode.Auto,
+                new RenderGraphTextureDesc
+                {
+                    ColorFormat = GraphicsFormat.R32G32_UInt
+                },
+                null);
+
+            Assert.That(mode, Is.EqualTo(OverlayDebugVisualizationMode.VisibilityBuffer));
+        }
+
+        [Test]
         public void ResolveSliceIndex_ClampsToValidArrayRange()
         {
             Assert.That(OverlayDebugPass.ResolveSliceIndex(5, 4), Is.EqualTo(3));
@@ -163,12 +177,16 @@ namespace VividRP.Editor.Tests
             var shaderSource = File.ReadAllText(GetShaderSourcePath());
 
             Assert.That(shaderSource, Does.Contain("TEXTURE2D_ARRAY(_DebugTextureArray);"));
+            Assert.That(shaderSource, Does.Contain("TYPED_TEXTURE2D(float2, _DebugVisibilityTexture);"));
             Assert.That(shaderSource, Does.Contain("SAMPLE_TEXTURE2D_ARRAY(_DebugTextureArray"));
             Assert.That(shaderSource, Does.Contain("_OverlayRect"));
             Assert.That(shaderSource, Does.Contain("exp2(_DebugExposure)"));
             Assert.That(shaderSource, Does.Contain("Linear01Depth(depthValue, _ZBufferParams)"));
             Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_DEPTHMODE_LINEAR01"));
             Assert.That(shaderSource, Does.Contain("motion * 0.5 + 0.5"));
+            Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_VISUALIZATION_VISIBILITY_BUFFER"));
+            Assert.That(shaderSource, Does.Contain("UnpackVisibilityBufferValue"));
+            Assert.That(shaderSource, Does.Contain("sampler_PointClamp"));
         }
 
         private static RenderGraphTexture GetTextureField(OverlayDebugPass pass, string fieldName)

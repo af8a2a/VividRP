@@ -1,0 +1,13 @@
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
+
+#pragma kernel main
+
+Texture2D<float>   _DepthTexture;
+RWTexture2D<float> _LinearDepthOutput;
+
+[numthreads(8, 8, 1)]
+void main(uint3 tid : SV_DispatchThreadID)
+{
+    // LinearEyeDepth from Core RP: converts reversed-Z hardware depth to positive linear eye depth
+    _LinearDepthOutput[tid.xy] = LinearEyeDepth(_DepthTexture[tid.xy], _ZBufferParams);
+}

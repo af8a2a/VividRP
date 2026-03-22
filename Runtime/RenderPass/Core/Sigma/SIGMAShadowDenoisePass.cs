@@ -7,6 +7,9 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 {
     public sealed class SIGMAShadowDenoisePass : UnsafePass
     {
+        private const string HistoryShadowKey = "HistoryShadow";
+        private const string HistoryLengthKey = "HistoryLength";
+
         private static readonly int gIn_ViewZ = Shader.PropertyToID("gIn_ViewZ");
         private static readonly int gIn_Penumbra = Shader.PropertyToID("gIn_Penumbra");
         private static readonly int gIn_Tiles = Shader.PropertyToID("gIn_Tiles");
@@ -30,7 +33,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
         [RenderGraphResource(Name = "RawShadow", Access = AccessFlags.Read)]
         private RenderGraphTexture m_RawShadowTexture;
 
-        [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
+        [RenderGraphResource(Name = "LinearDepth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
 
         [RenderGraphResource(Name = "GBuffer1", Access = AccessFlags.Read)]
@@ -39,19 +42,31 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
         [RenderGraphResource(Name = "MotionVectors", Access = AccessFlags.Read)]
         private RenderGraphTexture m_MotionVectorTexture;
 
-        [RenderGraphResource(Name = "HistoryShadow", Access = AccessFlags.Read)]
+        [RenderGraphResource(
+            Name = "HistoryShadow",
+            Access = AccessFlags.Read,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
         private RenderGraphTexture m_HistoryShadowTexture;
 
-        [RenderGraphResource(Name = "HistoryLength", Access = AccessFlags.Read)]
+        [RenderGraphResource(
+            Name = "HistoryLength",
+            Access = AccessFlags.Read,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
         private RenderGraphTexture m_HistoryLengthTexture;
 
         [RenderGraphResource(Name = "DenoisedShadow", Access = AccessFlags.Write)]
         private RenderGraphTexture m_DenoisedShadowTexture;
 
-        [RenderGraphResource(Name = "HistoryShadowOut", Access = AccessFlags.Write)]
+        [RenderGraphResource(
+            Name = "HistoryShadowOut",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
         private RenderGraphTexture m_HistoryShadowOut;
 
-        [RenderGraphResource(Name = "HistoryLengthOut", Access = AccessFlags.Write)]
+        [RenderGraphResource(
+            Name = "HistoryLengthOut",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
         private RenderGraphTexture m_HistoryLengthOut;
 
         private ComputeShader m_ClassifyTiles;
@@ -88,7 +103,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
         {
             profilingSampler = new ProfilingSampler(nameof(SIGMAShadowDenoisePass));
             m_RawShadowTexture = CreateInputTexture("RawShadow", GraphicsFormat.R16_SFloat);
-            m_DepthTexture = CreateInputTexture("Depth", GraphicsFormat.None, DepthBits.Depth32);
+            m_DepthTexture = CreateInputTexture("LinearDepth", GraphicsFormat.R32_SFloat);
             m_GBuffer1 = CreateInputTexture("GBuffer1", GraphicsFormat.R16G16_SFloat);
             m_MotionVectorTexture = CreateInputTexture("MotionVectors", GraphicsFormat.R16G16_SFloat);
             m_HistoryShadowTexture = CreateInputTexture("HistoryShadow", GraphicsFormat.R8_UNorm);
@@ -145,10 +160,22 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 DefaultMaxStabilizedFrameNum / 7f,
                 camera.orthographic);
 
-            m_HasValidHistory = m_HistoryShadowTexture != null
-                && m_HistoryShadowTexture.innerHandle.IsValid()
-                && m_HistoryLengthTexture != null
-                && m_HistoryLengthTexture.innerHandle.IsValid();
+            var hasValidShadowHistory = AllocHistoryTexture(
+                HistoryShadowKey,
+                m_HistoryShadowTexture,
+                null,
+                m_HistoryShadowOut?.desc);
+            AllocHistoryTexture(
+                HistoryShadowKey,
+                m_HistoryShadowTexture,
+                hasValidShadowHistory ? m_HistoryShadowOut : m_DenoisedShadowTexture,
+                hasValidShadowHistory ? m_HistoryShadowOut?.desc : m_DenoisedShadowTexture?.desc);
+            var hasValidHistoryLength = AllocHistoryTexture(
+                HistoryLengthKey,
+                m_HistoryLengthTexture,
+                m_HistoryLengthOut,
+                m_HistoryLengthOut?.desc);
+            m_HasValidHistory = hasValidShadowHistory && hasValidHistoryLength;
 
             // Store for next frame
             m_PrevWorldToView = worldToView;
@@ -303,17 +330,19 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
         private void ConfigureOutputTextures(int width, int height)
         {
-            ConfigureTexture(m_DenoisedShadowTexture, width, height);
-            ConfigureTexture(m_HistoryShadowOut, width, height);
-            ConfigureTexture(m_HistoryLengthOut, width, height);
+            ConfigureTexture(m_DenoisedShadowTexture, width, height, clearBuffer: false);
+            ConfigureTexture(m_HistoryShadowOut, width, height, clearBuffer: true);
+            ConfigureTexture(m_HistoryLengthOut, width, height, clearBuffer: true);
         }
 
-        private static void ConfigureTexture(RenderGraphTexture tex, int width, int height)
+        private static void ConfigureTexture(RenderGraphTexture tex, int width, int height, bool clearBuffer)
         {
             if (tex?.desc == null) return;
             tex.desc.Width = width;
             tex.desc.Height = height;
             tex.desc.EnableRandomWrite = true;
+            tex.desc.ClearBuffer = clearBuffer;
+            tex.desc.ClearColor = Color.clear;
         }
 
         private static RenderGraphTexture CreateInputTexture(string name, GraphicsFormat format, DepthBits depthBits = DepthBits.None)

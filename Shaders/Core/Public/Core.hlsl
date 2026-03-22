@@ -2,6 +2,7 @@
 #define VIVIDRP_CORE_INCLUDED
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GlobalSamplers.hlsl"
 #define SLICE_ARRAY_INDEX       0
 
 #define TEXTURE2D_X(textureName)                                        TEXTURE2D(textureName)

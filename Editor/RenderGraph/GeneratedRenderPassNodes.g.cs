@@ -81,6 +81,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class GenerateViewZPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.GenerateViewZPass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class HDRISkyPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.HDRISkyPass, VividRP.Runtime";
@@ -168,6 +174,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class TileDebugPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.TileDebugPass, VividRP.Runtime";
+    }
+
+    [Serializable]
+    internal sealed class VisibilityBufferPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.VisibilityBufferPass, VividRP.Runtime";
     }
 
 }

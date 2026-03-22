@@ -221,18 +221,18 @@ namespace VividRP.Runtime
             if (textureCache.TryGetValue(texture, out var handle))
                 return handle;
 
-            if (texture != null && texture.HasImportedHandle)
-            {
-                handle = texture.innerHandle;
-                textureCache.Add(texture, handle);
-                return handle;
-            }
-
             // Check if this texture has an imported RTHandle
             if (texture != null && s_ImportedRTHandles.TryGetValue(texture, out var rtHandle))
             {
                 handle = renderGraph.ImportTexture(rtHandle);
                 texture.SetImportedHandle(handle);
+                textureCache.Add(texture, handle);
+                return handle;
+            }
+
+            if (texture != null && texture.HasImportedHandle)
+            {
+                handle = texture.innerHandle;
                 textureCache.Add(texture, handle);
                 return handle;
             }

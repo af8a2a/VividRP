@@ -144,6 +144,8 @@ namespace VividRP.Editor.Tests
             public bool IsAvailable { get; set; } = true;
 
             public uint DescriptorHeapCount { get; }
+            public uint DescriptorStartIndex { get; }
+            public uint DescriptorCapacity { get; }
 
             public string UnavailableReason { get; set; } = string.Empty;
 

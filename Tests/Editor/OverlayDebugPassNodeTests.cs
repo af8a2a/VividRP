@@ -30,6 +30,11 @@ namespace VividRP.Editor.Tests
                 return TryGetFloatParameterValue("m_Exposure", out value);
             }
 
+            internal bool TryGetOpacity(out float value)
+            {
+                return TryGetFloatParameterValue("m_Opacity", out value);
+            }
+
             internal bool TryGetVisualizationMode(out OverlayDebugVisualizationMode value)
             {
                 return TryGetEnumParameterValue("m_VisualizationMode", out value);
@@ -57,11 +62,13 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.TryGetOverlayAmount(out var overlayAmount), Is.True);
                 Assert.That(node.TryGetArraySlice(out var arraySlice), Is.True);
                 Assert.That(node.TryGetExposure(out var exposure), Is.True);
+                Assert.That(node.TryGetOpacity(out var opacity), Is.True);
                 Assert.That(node.TryGetVisualizationMode(out var visualizationMode), Is.True);
                 Assert.That(node.TryGetDepthMode(out var depthMode), Is.True);
                 Assert.That(overlayAmount, Is.EqualTo(0f));
                 Assert.That(arraySlice, Is.EqualTo(0f));
                 Assert.That(exposure, Is.EqualTo(0f));
+                Assert.That(opacity, Is.EqualTo(1f));
                 Assert.That(visualizationMode, Is.EqualTo(OverlayDebugVisualizationMode.Auto));
                 Assert.That(depthMode, Is.EqualTo(OverlayDebugDepthMode.Raw));
             }
@@ -89,6 +96,7 @@ namespace VividRP.Editor.Tests
                     "m_OverlayAmount",
                     "m_ArraySlice",
                     "m_Exposure",
+                    "m_Opacity",
                 }));
                 Assert.That(result.Passes[0].EnumParameters, Has.Count.EqualTo(2));
                 Assert.That(result.Passes[0].EnumParameters.Select(parameter => parameter.FieldName), Is.EquivalentTo(new[]

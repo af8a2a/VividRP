@@ -39,6 +39,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int VisualizationModeId = Shader.PropertyToID("_VisualizationMode");
         private static readonly int DepthModeId = Shader.PropertyToID("_DepthMode");
         private static readonly int DebugExposureId = Shader.PropertyToID("_DebugExposure");
+        private static readonly int DebugOpacityId = Shader.PropertyToID("_DebugOpacity");
 
         [RenderGraphResource(Name = "SourceTexture", Access = AccessFlags.Read)]
         private RenderGraphTexture m_SourceTexture;
@@ -62,6 +63,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [SerializeField, Range(-16f, 16f)]
         private float m_Exposure;
 
+        [SerializeField, Range(0f, 1f)]
+        private float m_Opacity = 1f;
+
         [SerializeField]
         private OverlayDebugVisualizationMode m_VisualizationMode = OverlayDebugVisualizationMode.Auto;
 
@@ -72,6 +76,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_ResolvedOverlayAmount;
         private int m_ResolvedArraySlice;
         private float m_ResolvedExposure;
+        private float m_ResolvedOpacity = 1f;
         private OverlayDebugVisualizationMode m_ResolvedVisualizationMode = OverlayDebugVisualizationMode.Auto;
         private OverlayDebugDepthMode m_ResolvedDepthMode = OverlayDebugDepthMode.Raw;
         private Vector4 m_OverlayRect = new(0.65f, 0.65f, MinOverlayViewportFraction, MinOverlayViewportFraction);
@@ -82,6 +87,7 @@ namespace VividRP.Runtime.RenderPass.Core
             public readonly float overlayAmount;
             public readonly int arraySlice;
             public readonly float exposure;
+            public readonly float opacity;
             public readonly OverlayDebugVisualizationMode visualizationMode;
             public readonly OverlayDebugDepthMode depthMode;
 
@@ -89,12 +95,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 float overlayAmount,
                 int arraySlice,
                 float exposure,
+                float opacity,
                 OverlayDebugVisualizationMode visualizationMode,
                 OverlayDebugDepthMode depthMode)
             {
                 this.overlayAmount = overlayAmount;
                 this.arraySlice = arraySlice;
                 this.exposure = exposure;
+                this.opacity = opacity;
                 this.visualizationMode = visualizationMode;
                 this.depthMode = depthMode;
             }
@@ -116,6 +124,12 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             get => m_Exposure;
             set => m_Exposure = Mathf.Clamp(value, -16f, 16f);
+        }
+
+        public float Opacity
+        {
+            get => m_Opacity;
+            set => m_Opacity = Mathf.Clamp01(value);
         }
 
         public OverlayDebugVisualizationMode VisualizationMode
@@ -160,6 +174,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_OverlayAmount,
                 m_ArraySlice,
                 m_Exposure,
+                m_Opacity,
                 m_VisualizationMode,
                 m_DepthMode,
                 VividVolumeManagerUtility.GetOverlayDebugVolume());
@@ -167,6 +182,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ResolvedOverlayAmount = resolvedSettings.overlayAmount;
             m_ResolvedArraySlice = resolvedSettings.arraySlice;
             m_ResolvedExposure = resolvedSettings.exposure;
+            m_ResolvedOpacity = resolvedSettings.opacity;
             m_ResolvedVisualizationMode = resolvedSettings.visualizationMode;
             m_ResolvedDepthMode = resolvedSettings.depthMode;
 
@@ -238,6 +254,7 @@ namespace VividRP.Runtime.RenderPass.Core
             mpb.SetInt(VisualizationModeId, (int)resolvedVisualizationMode);
             mpb.SetInt(DepthModeId, (int)m_ResolvedDepthMode);
             mpb.SetFloat(DebugExposureId, m_ResolvedExposure);
+            mpb.SetFloat(DebugOpacityId, m_ResolvedOpacity);
             mpb.SetTexture(DebugTextureId, debugTexture != null && !isDebugTextureArray ? debugTexture : Texture2D.blackTexture);
             mpb.SetTexture(DebugVisibilityTextureId, debugTexture != null && !isDebugTextureArray ? debugTexture : Texture2D.blackTexture);
 
@@ -260,6 +277,7 @@ namespace VividRP.Runtime.RenderPass.Core
             float fallbackOverlayAmount,
             float fallbackArraySlice,
             float fallbackExposure,
+            float fallbackOpacity,
             OverlayDebugVisualizationMode fallbackVisualizationMode,
             OverlayDebugDepthMode fallbackDepthMode,
             OverlayDebugVolume volume)
@@ -267,12 +285,13 @@ namespace VividRP.Runtime.RenderPass.Core
             var overlayAmount = Mathf.Clamp01(fallbackOverlayAmount);
             var arraySlice = Mathf.Max(0, Mathf.RoundToInt(fallbackArraySlice));
             var exposure = Mathf.Clamp(fallbackExposure, -16f, 16f);
+            var opacity = Mathf.Clamp01(fallbackOpacity);
             var visualizationMode = fallbackVisualizationMode;
             var depthMode = fallbackDepthMode;
 
             if (volume == null || !volume.active)
             {
-                return new OverlayDebugSettingsData(overlayAmount, arraySlice, exposure, visualizationMode, depthMode);
+                return new OverlayDebugSettingsData(overlayAmount, arraySlice, exposure, opacity, visualizationMode, depthMode);
             }
 
             if (volume.overlayAmount != null && volume.overlayAmount.overrideState)
@@ -284,13 +303,16 @@ namespace VividRP.Runtime.RenderPass.Core
             if (volume.exposure != null && volume.exposure.overrideState)
                 exposure = Mathf.Clamp(volume.exposure.value, -16f, 16f);
 
+            if (volume.opacity != null && volume.opacity.overrideState)
+                opacity = Mathf.Clamp01(volume.opacity.value);
+
             if (volume.visualizationMode != null && volume.visualizationMode.overrideState)
                 visualizationMode = volume.visualizationMode.value;
 
             if (volume.depthMode != null && volume.depthMode.overrideState)
                 depthMode = volume.depthMode.value;
 
-            return new OverlayDebugSettingsData(overlayAmount, arraySlice, exposure, visualizationMode, depthMode);
+            return new OverlayDebugSettingsData(overlayAmount, arraySlice, exposure, opacity, visualizationMode, depthMode);
         }
 
         internal static Vector4 ResolveOverlayRect(float overlayAmount)

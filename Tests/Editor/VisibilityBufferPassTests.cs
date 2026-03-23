@@ -8,6 +8,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
+using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Editor.Tests
 {
@@ -47,25 +48,34 @@ namespace VividRP.Editor.Tests
         [Test]
         public void Prepare_ResizesDefaultOutputs_AndLeavesGPUDrivenBuffersUnbound_WhenFrameDataDoesNotProvideThem()
         {
-            var pass = new VisibilityBufferPass();
-            var frameData = new ContextContainer();
-            var cameraData = frameData.GetOrCreate<VividCameraData>();
-            cameraData.actualWidth = 1024;
-            cameraData.actualHeight = 576;
+            VividGPUDrivenSystem.Shutdown();
 
-            pass.Prepare(frameData);
+            try
+            {
+                var pass = new VisibilityBufferPass();
+                var frameData = new ContextContainer();
+                var cameraData = frameData.GetOrCreate<VividCameraData>();
+                cameraData.actualWidth = 1024;
+                cameraData.actualHeight = 576;
 
-            var visibilityTexture = GetTextureField(pass, "m_VisibilityBuffer");
-            var depthTexture = GetTextureField(pass, "m_Depth");
-            var renderRequestsBuffer = GetBufferField(pass, "m_VisibleMeshletRenderRequests");
-            var indirectArgsBuffer = GetBufferField(pass, "m_VisibleMeshletIndirectArgs");
+                pass.Prepare(frameData);
 
-            Assert.That(visibilityTexture.desc.Width, Is.EqualTo(1024));
-            Assert.That(visibilityTexture.desc.Height, Is.EqualTo(576));
-            Assert.That(depthTexture.desc.Width, Is.EqualTo(1024));
-            Assert.That(depthTexture.desc.Height, Is.EqualTo(576));
-            Assert.That(renderRequestsBuffer.HasImportedBuffer, Is.False);
-            Assert.That(indirectArgsBuffer.HasImportedBuffer, Is.False);
+                var visibilityTexture = GetTextureField(pass, "m_VisibilityBuffer");
+                var depthTexture = GetTextureField(pass, "m_Depth");
+                var renderRequestsBuffer = GetBufferField(pass, "m_VisibleMeshletRenderRequests");
+                var indirectArgsBuffer = GetBufferField(pass, "m_VisibleMeshletIndirectArgs");
+
+                Assert.That(visibilityTexture.desc.Width, Is.EqualTo(1024));
+                Assert.That(visibilityTexture.desc.Height, Is.EqualTo(576));
+                Assert.That(depthTexture.desc.Width, Is.EqualTo(1024));
+                Assert.That(depthTexture.desc.Height, Is.EqualTo(576));
+                Assert.That(renderRequestsBuffer.HasImportedBuffer, Is.False);
+                Assert.That(indirectArgsBuffer.HasImportedBuffer, Is.False);
+            }
+            finally
+            {
+                VividGPUDrivenSystem.Shutdown();
+            }
         }
 
         [Test]
@@ -118,6 +128,7 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("DrawProceduralIndirect("));
             Assert.That(passSource, Does.Contain("rendererListIndex * IndirectDrawArgsByteStride"));
             Assert.That(passSource, Does.Contain("CoreUtils.SetKeyword(material, s_AlphaTestKeyword"));
+            Assert.That(passSource, Does.Contain("TryGetCurrentVisibleMeshletBuffers("));
         }
 
         [Test]

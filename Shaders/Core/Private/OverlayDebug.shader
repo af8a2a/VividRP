@@ -48,6 +48,7 @@ Shader "Hidden/VividRP/OverlayDebug"
             int _VisualizationMode;
             int _DepthMode;
             float _DebugExposure;
+            float _DebugOpacity;
 
             struct Attributes
             {
@@ -164,7 +165,8 @@ Shader "Hidden/VividRP/OverlayDebug"
                     return float4(1.0, 1.0, 1.0, 1.0);
 
                 float2 overlayUv = saturate((input.uv - overlayMin) / max(_OverlayRect.zw, float2(1e-5, 1e-5)));
-                return SampleDebugTexture(overlayUv);
+                float4 debugColor = SampleDebugTexture(overlayUv);
+                return lerp(sourceColor, debugColor, saturate(_DebugOpacity));
             }
             ENDHLSL
         }

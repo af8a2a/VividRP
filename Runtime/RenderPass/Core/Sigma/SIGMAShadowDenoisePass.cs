@@ -7,68 +7,119 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 {
     public sealed class SIGMAShadowDenoisePass : UnsafePass
     {
-        private const string HistoryShadowKey = "HistoryShadow";
-        private const string HistoryLengthKey = "HistoryLength";
+        // --- shader property IDs ---
+        private static readonly int gIn_ViewZ                 = Shader.PropertyToID("gIn_ViewZ");
+        private static readonly int gIn_Penumbra              = Shader.PropertyToID("gIn_Penumbra");
+        private static readonly int gIn_Tiles                 = Shader.PropertyToID("gIn_Tiles");
+        private static readonly int gOut_Tiles                = Shader.PropertyToID("gOut_Tiles");
+        private static readonly int gIn_Normal_Roughness      = Shader.PropertyToID("gIn_Normal_Roughness");
+        private static readonly int gOut_Penumbra             = Shader.PropertyToID("gOut_Penumbra");
+        private static readonly int gIn_Shadow_Translucency   = Shader.PropertyToID("gIn_Shadow_Translucency");
+        private static readonly int gOut_Shadow_Translucency  = Shader.PropertyToID("gOut_Shadow_Translucency");
+        private static readonly int gIn_Mv                    = Shader.PropertyToID("gIn_Mv");
+        private static readonly int gIn_History               = Shader.PropertyToID("gIn_History");
+        private static readonly int gIn_HistoryLength         = Shader.PropertyToID("gIn_HistoryLength");
+        private static readonly int gOut_History              = Shader.PropertyToID("gOut_History");
+        private static readonly int gOut_HistoryLength        = Shader.PropertyToID("gOut_HistoryLength");
 
-        private static readonly int gIn_ViewZ = Shader.PropertyToID("gIn_ViewZ");
-        private static readonly int gIn_Penumbra = Shader.PropertyToID("gIn_Penumbra");
-        private static readonly int gIn_Tiles = Shader.PropertyToID("gIn_Tiles");
-        private static readonly int gOut_Tiles = Shader.PropertyToID("gOut_Tiles");
-        private static readonly int gIn_Normal_Roughness = Shader.PropertyToID("gIn_Normal_Roughness");
-        private static readonly int gOut_Penumbra = Shader.PropertyToID("gOut_Penumbra");
-        private static readonly int gIn_Shadow_Translucency = Shader.PropertyToID("gIn_Shadow_Translucency");
-        private static readonly int gOut_Shadow_Translucency = Shader.PropertyToID("gOut_Shadow_Translucency");
-        private static readonly int gIn_Mv = Shader.PropertyToID("gIn_Mv");
-        private static readonly int gIn_History = Shader.PropertyToID("gIn_History");
-        private static readonly int gIn_HistoryLength = Shader.PropertyToID("gIn_HistoryLength");
-        private static readonly int gOut_History = Shader.PropertyToID("gOut_History");
-        private static readonly int gOut_HistoryLength = Shader.PropertyToID("gOut_HistoryLength");
-
-        private static readonly int SIGMA_ClassifyTilesConstantsId = Shader.PropertyToID("SIGMA_ClassifyTilesConstants");
-        private static readonly int SIGMA_SmoothTilesConstantsId = Shader.PropertyToID("SIGMA_SmoothTilesConstants");
-        private static readonly int SIGMA_BlurConstantsId = Shader.PropertyToID("SIGMA_BlurConstants");
+        private static readonly int SIGMA_ClassifyTilesConstantsId       = Shader.PropertyToID("SIGMA_ClassifyTilesConstants");
+        private static readonly int SIGMA_SmoothTilesConstantsId         = Shader.PropertyToID("SIGMA_SmoothTilesConstants");
+        private static readonly int SIGMA_BlurConstantsId                = Shader.PropertyToID("SIGMA_BlurConstants");
         private static readonly int SIGMA_TemporalStabilizationConstantsId = Shader.PropertyToID("SIGMA_TemporalStabilizationConstants");
-        private static readonly int SIGMA_CopyConstantsId = Shader.PropertyToID("SIGMA_CopyConstants");
+        private static readonly int SIGMA_CopyConstantsId                = Shader.PropertyToID("SIGMA_CopyConstants");
 
-        [RenderGraphResource(Name = "RawShadow", Access = AccessFlags.Read)]
+        // --- external inputs ---
+        [RenderGraphResource(Name = "RawShadow",     Access = AccessFlags.Read)]
         private RenderGraphTexture m_RawShadowTexture;
 
-        [RenderGraphResource(Name = "LinearDepth", Access = AccessFlags.Read)]
+        [RenderGraphResource(Name = "LinearDepth",   Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
 
-        [RenderGraphResource(Name = "GBuffer1", Access = AccessFlags.Read)]
+        [RenderGraphResource(Name = "GBuffer1",      Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer1;
 
         [RenderGraphResource(Name = "MotionVectors", Access = AccessFlags.Read)]
         private RenderGraphTexture m_MotionVectorTexture;
 
-        [RenderGraphResource(
-            Name = "HistoryShadow",
-            Access = AccessFlags.ReadWrite,
+        // --- history (code-managed, hidden from graph editor) ---
+
+        // Previous-frame read inputs (imported RTHandle by AllocHistoryTextureForPass)
+        [RenderGraphResource(Name = "HistoryShadow",
+            Access = AccessFlags.Read,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
         private RenderGraphTexture m_HistoryShadowTexture;
 
-        [RenderGraphResource(
-            Name = "HistoryLength",
-            Access = AccessFlags.ReadWrite,
+        [RenderGraphResource(Name = "HistoryLength",
+            Access = AccessFlags.Read,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
         private RenderGraphTexture m_HistoryLengthTexture;
 
+        // Current-frame write outputs (transient; system copies to history store after frame)
+        [RenderGraphResource(Name = "SIGMA_HistoryShadowCurrent",
+            Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private RenderGraphTexture m_HistoryShadowCurrent;
+
+        [RenderGraphResource(Name = "SIGMA_HistoryLengthCurrent",
+            Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private RenderGraphTexture m_HistoryLengthCurrent;
+
+        // --- external outputs ---
         [RenderGraphResource(Name = "DenoisedShadow", Access = AccessFlags.Write)]
         private RenderGraphTexture m_DenoisedShadowTexture;
 
-        [RenderGraphResource(
-            Name = "HistoryShadowOut",
-            Access = AccessFlags.Write,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
-        private RenderGraphTexture m_HistoryShadowOut;
+        // --- pass-owned transients (hidden from graph editor) ---
 
-        [RenderGraphResource(
-            Name = "HistoryLengthOut",
-            Access = AccessFlags.Write,
+        // Tile classification output  (float4, tile resolution)
+        [RenderGraphResource(Name = "SIGMA_Tiles",
+            Access = AccessFlags.ReadWrite,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
-        private RenderGraphTexture m_HistoryLengthOut;
+        private RenderGraphTexture m_TileTexture;
 
+        // Smoothed tile output  (float2, tile resolution)
+        [RenderGraphResource(Name = "SIGMA_SmoothTiles",
+            Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private RenderGraphTexture m_SmoothTileTexture;
+
+        // Intermediate penumbra after pre-blur  (R16_SFloat, full resolution)
+        [RenderGraphResource(Name = "SIGMA_Penumbra",
+            Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private RenderGraphTexture m_TransientPenumbra;
+
+        // Intermediate shadow after pre-blur  (R8_UNorm, full resolution)
+        [RenderGraphResource(Name = "SIGMA_Shadow",
+            Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private RenderGraphTexture m_TransientShadow;
+
+        // Intermediate penumbra after post-blur  (R16_SFloat, full resolution)
+        [RenderGraphResource(Name = "SIGMA_Penumbra2",
+            Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private RenderGraphTexture m_TransientPenumbra2;
+
+        // Intermediate shadow after post-blur  (R8_UNorm, full resolution)
+        [RenderGraphResource(Name = "SIGMA_Shadow2",
+            Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private RenderGraphTexture m_TransientShadow2;
+
+        // Copy of history shadow for this frame  (R8_UNorm, full resolution)
+        [RenderGraphResource(Name = "SIGMA_TransientHistory",
+            Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private RenderGraphTexture m_TransientHistory;
+
+        // Copy of history length for this frame  (R32_UInt, full resolution)
+        [RenderGraphResource(Name = "SIGMA_TransientHistoryLength",
+            Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private RenderGraphTexture m_TransientHistoryLength;
+
+        // --- compute shaders ---
         private ComputeShader m_ClassifyTiles;
         private ComputeShader m_SmoothTiles;
         private ComputeShader m_ShadowCopy;
@@ -76,41 +127,45 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
         private ComputeShader m_ShadowPostBlur;
         private ComputeShader m_ShadowTemporalStabilization;
 
-        // Internal transient RTHandles
-        private RTHandle m_TileTexture;
-        private RTHandle m_SmoothTileTexture;
-        private RTHandle m_TransientPenumbra;
-        private RTHandle m_TransientShadow;
-        private RTHandle m_TransientPenumbra2;
-        private RTHandle m_TransientShadow2;
-        private RTHandle m_TransientHistory;
-        private RTHandle m_TransientHistoryLength;
-
+        // --- per-frame state ---
         private SigmaSharedConstants m_Constants;
         private int m_Width;
         private int m_Height;
         private int m_PrevWidth;
         private int m_PrevHeight;
-        private Vector3 m_PrevCameraPosition;
-        private Matrix4x4 m_PrevWorldToView = Matrix4x4.identity;
-        private Matrix4x4 m_PrevViewToClip = Matrix4x4.identity;
+        private Vector3    m_PrevCameraPosition;
+        private Matrix4x4  m_PrevWorldToView = Matrix4x4.identity;
+        private Matrix4x4  m_PrevViewToClip  = Matrix4x4.identity;
         private bool m_HasValidHistory;
 
-        private const float DefaultPlaneDistSensitivity = 0.02f;
-        private const uint DefaultMaxStabilizedFrameNum = 5;
+        private const float DefaultPlaneDistSensitivity  = 0.02f;
+        private const uint  DefaultMaxStabilizedFrameNum = 5;
 
         public SIGMAShadowDenoisePass()
         {
             profilingSampler = new ProfilingSampler(nameof(SIGMAShadowDenoisePass));
-            m_RawShadowTexture = RenderGraphTexture.CreateInput("RawShadow", GraphicsFormat.R16_SFloat);
-            m_DepthTexture = RenderGraphTexture.CreateInput("LinearDepth", GraphicsFormat.R32_SFloat);
-            m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.R16G16_SFloat);
-            m_MotionVectorTexture = RenderGraphTexture.CreateInput("MotionVectors", GraphicsFormat.R16G16_SFloat);
-            m_HistoryShadowTexture = RenderGraphTexture.CreateInput("HistoryShadow", GraphicsFormat.R8_UNorm);
-            m_HistoryLengthTexture = RenderGraphTexture.CreateInput("HistoryLength", GraphicsFormat.R32_UInt);
-            m_DenoisedShadowTexture = RenderGraphTexture.CreateOutput("DenoisedShadow", GraphicsFormat.R8_UNorm);
-            m_HistoryShadowOut = RenderGraphTexture.CreateOutput("HistoryShadowOut", GraphicsFormat.R8_UNorm);
-            m_HistoryLengthOut = RenderGraphTexture.CreateOutput("HistoryLengthOut", GraphicsFormat.R32_UInt);
+
+            int tileW = 1, tileH = 1; // resized in Prepare
+
+            m_RawShadowTexture     = RenderGraphTexture.CreateInput("RawShadow",     GraphicsFormat.R16_SFloat);
+            m_DepthTexture         = RenderGraphTexture.CreateInput("LinearDepth",   GraphicsFormat.R32_SFloat);
+            m_GBuffer1             = RenderGraphTexture.CreateInput("GBuffer1",      GraphicsFormat.R16G16_SFloat);
+            m_MotionVectorTexture  = RenderGraphTexture.CreateInput("MotionVectors", GraphicsFormat.R16G16_SFloat);
+            m_HistoryShadowTexture  = RenderGraphTexture.CreateInput("HistoryShadow", GraphicsFormat.R8_UNorm);
+            m_HistoryLengthTexture  = RenderGraphTexture.CreateInput("HistoryLength", GraphicsFormat.R32_UInt);
+            m_HistoryShadowCurrent  = CreatePassOwnedTexture("SIGMA_HistoryShadowCurrent", 1, 1, GraphicsFormat.R8_UNorm);
+            m_HistoryLengthCurrent  = CreatePassOwnedTexture("SIGMA_HistoryLengthCurrent", 1, 1, GraphicsFormat.R32_UInt);
+
+            m_DenoisedShadowTexture = CreatePassOwnedTexture("DenoisedShadow",           1, 1, GraphicsFormat.R8_UNorm);
+
+            m_TileTexture             = CreatePassOwnedTexture("SIGMA_Tiles",                  tileW, tileH, GraphicsFormat.R16G16B16A16_SFloat);
+            m_SmoothTileTexture       = CreatePassOwnedTexture("SIGMA_SmoothTiles",            tileW, tileH, GraphicsFormat.R16G16_SFloat);
+            m_TransientPenumbra       = CreatePassOwnedTexture("SIGMA_Penumbra",               1, 1, GraphicsFormat.R16_SFloat);
+            m_TransientShadow         = CreatePassOwnedTexture("SIGMA_Shadow",                 1, 1, GraphicsFormat.R8_UNorm);
+            m_TransientPenumbra2      = CreatePassOwnedTexture("SIGMA_Penumbra2",              1, 1, GraphicsFormat.R16_SFloat);
+            m_TransientShadow2        = CreatePassOwnedTexture("SIGMA_Shadow2",                1, 1, GraphicsFormat.R8_UNorm);
+            m_TransientHistory        = CreatePassOwnedTexture("SIGMA_TransientHistory",       1, 1, GraphicsFormat.R8_UNorm);
+            m_TransientHistoryLength  = CreatePassOwnedTexture("SIGMA_TransientHistoryLength", 1, 1, GraphicsFormat.R32_UInt);
         }
 
         public override void Create()
@@ -118,33 +173,46 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             if (resources == null) return;
 
-            m_ClassifyTiles = resources.SIGMAClassifyTilesCompute;
-            m_SmoothTiles = resources.SIGMASmoothTilesCompute;
-            m_ShadowCopy = resources.SIGMAShadowCopyCompute;
-            m_ShadowBlur = resources.SIGMAShadowPreBlurCompute;
-            m_ShadowPostBlur = resources.SIGMAShadowPostBlurCompute;
+            m_ClassifyTiles             = resources.SIGMAClassifyTilesCompute;
+            m_SmoothTiles               = resources.SIGMASmoothTilesCompute;
+            m_ShadowCopy                = resources.SIGMAShadowCopyCompute;
+            m_ShadowBlur                = resources.SIGMAShadowPreBlurCompute;
+            m_ShadowPostBlur            = resources.SIGMAShadowPostBlurCompute;
             m_ShadowTemporalStabilization = resources.SIGMATemporalStabilizationCompute;
         }
 
         public override void Prepare(ContextContainer frameData)
         {
             var cameraData = frameData.GetOrCreate<VividCameraData>();
-            m_Width = cameraData.actualWidth;
+            m_Width  = cameraData.actualWidth;
             m_Height = cameraData.actualHeight;
 
-            EnsureTransientTextures(m_Width, m_Height);
-            ConfigureOutputTextures(m_Width, m_Height);
+            int tileW = CoreUtils.DivRoundUp(m_Width,  16);
+            int tileH = CoreUtils.DivRoundUp(m_Height, 16);
 
-            var camera = cameraData.camera;
-            var worldToView = camera.worldToCameraMatrix;
-            var viewToClip = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true);
-            var cameraPos = camera.transform.position;
+            // Resize all pass-owned transient descriptors
+            ResizePassOwned(m_TileTexture,            tileW, tileH);
+            ResizePassOwned(m_SmoothTileTexture,      tileW, tileH);
+            ResizePassOwned(m_TransientPenumbra,      m_Width, m_Height);
+            ResizePassOwned(m_TransientShadow,        m_Width, m_Height);
+            ResizePassOwned(m_TransientPenumbra2,     m_Width, m_Height);
+            ResizePassOwned(m_TransientShadow2,       m_Width, m_Height);
+            ResizePassOwned(m_TransientHistory,       m_Width, m_Height);
+            ResizePassOwned(m_TransientHistoryLength, m_Width, m_Height);
+            ResizePassOwned(m_DenoisedShadowTexture,  m_Width, m_Height);
+            ResizePassOwned(m_HistoryShadowCurrent,   m_Width, m_Height);
+            ResizePassOwned(m_HistoryLengthCurrent,   m_Width, m_Height);
 
             // Light direction
             var lightData = frameData.GetOrCreate<VividLightData>();
-            var lightDir = Vector3.up;
+            var lightDir  = Vector3.up;
             if (lightData != null && lightData.hasMainDirectionalLight)
                 lightDir = lightData.mainDirectionalLight.directionWS.normalized;
+
+            var camera     = cameraData.camera;
+            var worldToView = camera.worldToCameraMatrix;
+            var viewToClip  = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true);
+            var cameraPos   = camera.transform.position;
 
             m_Constants = SigmaSharedConstants.Compute(
                 worldToView, viewToClip,
@@ -160,29 +228,35 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 DefaultMaxStabilizedFrameNum / 7f,
                 camera.orthographic);
 
-            var hasValidShadowHistory = AllocHistoryTexture(
-                HistoryShadowKey,
-                m_HistoryShadowTexture,
-                null,
-                m_HistoryShadowOut?.desc);
-            AllocHistoryTexture(
-                HistoryShadowKey,
-                m_HistoryShadowTexture,
-                hasValidShadowHistory ? m_HistoryShadowOut : m_DenoisedShadowTexture,
-                hasValidShadowHistory ? m_HistoryShadowOut?.desc : m_DenoisedShadowTexture?.desc);
-            var hasValidHistoryLength = AllocHistoryTexture(
-                HistoryLengthKey,
-                m_HistoryLengthTexture,
-                m_HistoryLengthOut,
-                m_HistoryLengthOut?.desc);
-            m_HasValidHistory = hasValidShadowHistory && hasValidHistoryLength;
+            // History allocation (code-managed)
+            var shadowDesc = m_HistoryShadowTexture?.desc ?? m_DenoisedShadowTexture?.desc;
+            var lengthDesc = m_HistoryLengthTexture?.desc;
+
+            if (shadowDesc != null) shadowDesc = shadowDesc.Clone();
+            if (shadowDesc != null) { shadowDesc.Width = m_Width; shadowDesc.Height = m_Height; shadowDesc.EnableRandomWrite = true; }
+            if (lengthDesc != null) lengthDesc = lengthDesc.Clone();
+            if (lengthDesc != null) { lengthDesc.Width = m_Width; lengthDesc.Height = m_Height; lengthDesc.EnableRandomWrite = true; }
+
+            bool hasShadowHistory = PassRecorder.AllocHistoryTextureForPass(
+                this, "HistoryShadow",
+                previous: m_HistoryShadowTexture,
+                current:  m_HistoryShadowCurrent,
+                desc:     shadowDesc);
+
+            bool hasLengthHistory = PassRecorder.AllocHistoryTextureForPass(
+                this, "HistoryLength",
+                previous: m_HistoryLengthTexture,
+                current:  m_HistoryLengthCurrent,
+                desc:     lengthDesc);
+
+            m_HasValidHistory = hasShadowHistory && hasLengthHistory;
 
             // Store for next frame
-            m_PrevWorldToView = worldToView;
-            m_PrevViewToClip = viewToClip;
+            m_PrevWorldToView    = worldToView;
+            m_PrevViewToClip     = viewToClip;
             m_PrevCameraPosition = cameraPos;
-            m_PrevWidth = m_Width;
-            m_PrevHeight = m_Height;
+            m_PrevWidth          = m_Width;
+            m_PrevHeight         = m_Height;
         }
 
         public override void Record(UnsafeGraphContext context)
@@ -193,102 +267,82 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 if (!CanExecute())
                     return;
 
-                int kernel = 0;
-                int tileW = CoreUtils.DivRoundUp(m_Width, 16);
-                int tileH = CoreUtils.DivRoundUp(m_Height, 16);
+                int kernel  = 0;
+                int tileW   = CoreUtils.DivRoundUp(m_Width,  16);
+                int tileH   = CoreUtils.DivRoundUp(m_Height, 16);
+                int dispatchX = CoreUtils.DivRoundUp(m_Width,  8);
+                int dispatchY = CoreUtils.DivRoundUp(m_Height, 8);
 
                 // Stage 1: ClassifyTiles
                 ConstantBuffer.Push(cmd, m_Constants, m_ClassifyTiles, SIGMA_ClassifyTilesConstantsId);
-                cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gIn_ViewZ, m_DepthTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gIn_ViewZ,    m_DepthTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gIn_Penumbra, m_RawShadowTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gOut_Tiles, m_TileTexture);
+                cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gOut_Tiles,   m_TileTexture.innerHandle);
                 cmd.DispatchCompute(m_ClassifyTiles, kernel, tileW, tileH, 1);
 
                 // Stage 2: SmoothTiles
                 int smoothTileW = CoreUtils.DivRoundUp(tileW, 16);
                 int smoothTileH = CoreUtils.DivRoundUp(tileH, 16);
                 ConstantBuffer.Push(cmd, m_Constants, m_SmoothTiles, SIGMA_SmoothTilesConstantsId);
-                cmd.SetComputeTextureParam(m_SmoothTiles, kernel, gIn_Tiles, m_TileTexture);
-                cmd.SetComputeTextureParam(m_SmoothTiles, kernel, gOut_Tiles, m_SmoothTileTexture);
+                cmd.SetComputeTextureParam(m_SmoothTiles, kernel, gIn_Tiles,  m_TileTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_SmoothTiles, kernel, gOut_Tiles, m_SmoothTileTexture.innerHandle);
                 cmd.DispatchCompute(m_SmoothTiles, kernel, smoothTileW, smoothTileH, 1);
-
-                int dispatchX = CoreUtils.DivRoundUp(m_Width, 8);
-                int dispatchY = CoreUtils.DivRoundUp(m_Height, 16);
 
                 // Stage 3: ShadowCopy (history → transient)
                 if (m_HasValidHistory)
                 {
                     ConstantBuffer.Push(cmd, m_Constants, m_ShadowCopy, SIGMA_CopyConstantsId);
-                    cmd.SetComputeTextureParam(m_ShadowCopy, kernel, gIn_Tiles, m_SmoothTileTexture);
-                    cmd.SetComputeTextureParam(m_ShadowCopy, kernel, gIn_History, m_HistoryShadowTexture.innerHandle);
+                    cmd.SetComputeTextureParam(m_ShadowCopy, kernel, gIn_Tiles,        m_SmoothTileTexture.innerHandle);
+                    cmd.SetComputeTextureParam(m_ShadowCopy, kernel, gIn_History,      m_HistoryShadowTexture.innerHandle);
                     cmd.SetComputeTextureParam(m_ShadowCopy, kernel, gIn_HistoryLength, m_HistoryLengthTexture.innerHandle);
-                    cmd.SetComputeTextureParam(m_ShadowCopy, kernel, gOut_History, m_TransientHistory);
-                    cmd.SetComputeTextureParam(m_ShadowCopy, kernel, gOut_HistoryLength, m_TransientHistoryLength);
+                    cmd.SetComputeTextureParam(m_ShadowCopy, kernel, gOut_History,      m_TransientHistory.innerHandle);
+                    cmd.SetComputeTextureParam(m_ShadowCopy, kernel, gOut_HistoryLength, m_TransientHistoryLength.innerHandle);
                     cmd.DispatchCompute(m_ShadowCopy, kernel, dispatchX, dispatchY, 1);
                 }
 
                 // Stage 4: PreBlur
                 ConstantBuffer.Push(cmd, m_Constants, m_ShadowBlur, SIGMA_BlurConstantsId);
-                cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gIn_ViewZ, m_DepthTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gIn_Normal_Roughness, m_GBuffer1.innerHandle);
-                cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gIn_Tiles, m_SmoothTileTexture);
-                cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gIn_Penumbra, m_RawShadowTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gOut_Penumbra, m_TransientPenumbra);
-                cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gOut_Shadow_Translucency, m_TransientShadow);
+                cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gIn_ViewZ,             m_DepthTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gIn_Normal_Roughness,  m_GBuffer1.innerHandle);
+                cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gIn_Tiles,             m_SmoothTileTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gIn_Penumbra,          m_RawShadowTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gOut_Penumbra,         m_TransientPenumbra.innerHandle);
+                cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gOut_Shadow_Translucency, m_TransientShadow.innerHandle);
                 cmd.DispatchCompute(m_ShadowBlur, kernel, dispatchX, dispatchY, 1);
 
                 // Stage 5: PostBlur
                 bool useTemporalStabilization = m_HasValidHistory && DefaultMaxStabilizedFrameNum > 0;
                 ConstantBuffer.Push(cmd, m_Constants, m_ShadowPostBlur, SIGMA_BlurConstantsId);
-                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_ViewZ, m_DepthTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_ViewZ,            m_DepthTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_Normal_Roughness, m_GBuffer1.innerHandle);
-                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_Tiles, m_SmoothTileTexture);
-                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_Penumbra, m_TransientPenumbra);
-                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_Shadow_Translucency, m_TransientShadow);
-                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gOut_Penumbra, m_TransientPenumbra2);
+                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_Tiles,            m_SmoothTileTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_Penumbra,         m_TransientPenumbra.innerHandle);
+                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_Shadow_Translucency, m_TransientShadow.innerHandle);
+                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gOut_Penumbra,        m_TransientPenumbra2.innerHandle);
                 cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gOut_Shadow_Translucency,
-                    useTemporalStabilization ? m_TransientShadow2 : m_DenoisedShadowTexture.innerHandle);
+                    useTemporalStabilization ? m_TransientShadow2.innerHandle : m_DenoisedShadowTexture.innerHandle);
                 cmd.DispatchCompute(m_ShadowPostBlur, kernel, dispatchX, dispatchY, 1);
 
                 // Stage 6: TemporalStabilization
                 if (useTemporalStabilization)
                 {
                     ConstantBuffer.Push(cmd, m_Constants, m_ShadowTemporalStabilization, SIGMA_TemporalStabilizationConstantsId);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_ViewZ, m_DepthTexture.innerHandle);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_Mv, m_MotionVectorTexture.innerHandle);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_Penumbra, m_TransientPenumbra2);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_Shadow_Translucency, m_TransientShadow2);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_History, m_TransientHistory);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_HistoryLength, m_TransientHistoryLength);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_Tiles, m_SmoothTileTexture);
+                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_ViewZ,             m_DepthTexture.innerHandle);
+                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_Mv,                m_MotionVectorTexture.innerHandle);
+                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_Penumbra,          m_TransientPenumbra2.innerHandle);
+                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_Shadow_Translucency, m_TransientShadow2.innerHandle);
+                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_History,           m_TransientHistory.innerHandle);
+                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_HistoryLength,     m_TransientHistoryLength.innerHandle);
+                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_Tiles,             m_SmoothTileTexture.innerHandle);
                     cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gOut_Shadow_Translucency, m_DenoisedShadowTexture.innerHandle);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gOut_HistoryLength, m_HistoryLengthOut.innerHandle);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gOut_History, m_HistoryShadowOut.innerHandle);
+                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gOut_HistoryLength,    m_HistoryLengthCurrent.innerHandle);
+                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gOut_History,          m_HistoryShadowCurrent.innerHandle);
                     cmd.DispatchCompute(m_ShadowTemporalStabilization, kernel, dispatchX, dispatchY, 1);
                 }
             }
         }
 
-        public override void Dispose()
-        {
-            m_TileTexture?.Release();
-            m_SmoothTileTexture?.Release();
-            m_TransientPenumbra?.Release();
-            m_TransientShadow?.Release();
-            m_TransientPenumbra2?.Release();
-            m_TransientShadow2?.Release();
-            m_TransientHistory?.Release();
-            m_TransientHistoryLength?.Release();
-
-            m_TileTexture = null;
-            m_SmoothTileTexture = null;
-            m_TransientPenumbra = null;
-            m_TransientShadow = null;
-            m_TransientPenumbra2 = null;
-            m_TransientShadow2 = null;
-            m_TransientHistory = null;
-            m_TransientHistoryLength = null;
-        }
+        public override void Dispose() { }
 
         private bool CanExecute()
         {
@@ -298,62 +352,31 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 && m_ShadowBlur != null
                 && m_ShadowPostBlur != null
                 && m_ShadowTemporalStabilization != null
-                && m_RawShadowTexture != null && m_RawShadowTexture.innerHandle.IsValid()
-                && m_DepthTexture != null && m_DepthTexture.innerHandle.IsValid()
-                && m_GBuffer1 != null && m_GBuffer1.innerHandle.IsValid()
-                && m_DenoisedShadowTexture != null && m_DenoisedShadowTexture.innerHandle.IsValid();
+                && m_RawShadowTexture?.innerHandle.IsValid() == true
+                && m_DepthTexture?.innerHandle.IsValid() == true
+                && m_GBuffer1?.innerHandle.IsValid() == true
+                && m_DenoisedShadowTexture?.innerHandle.IsValid() == true;
         }
 
-        private void EnsureTransientTextures(int width, int height)
+        private static void ResizePassOwned(RenderGraphTexture tex, int width, int height)
         {
-            int tileW = CoreUtils.DivRoundUp(width, 16);
-            int tileH = CoreUtils.DivRoundUp(height, 16);
-
-            EnsureRTHandle(ref m_TileTexture, tileW, tileH, GraphicsFormat.R16G16B16A16_SFloat, "SIGMA_TileTexture");
-            EnsureRTHandle(ref m_SmoothTileTexture, tileW, tileH, GraphicsFormat.R16G16_SFloat, "SIGMA_SmoothTileTexture");
-            EnsureRTHandle(ref m_TransientPenumbra, width, height, GraphicsFormat.R16_SFloat, "SIGMA_TransientPenumbra");
-            EnsureRTHandle(ref m_TransientShadow, width, height, GraphicsFormat.R8_UNorm, "SIGMA_TransientShadow");
-            EnsureRTHandle(ref m_TransientPenumbra2, width, height, GraphicsFormat.R16_SFloat, "SIGMA_TransientPenumbra2");
-            EnsureRTHandle(ref m_TransientShadow2, width, height, GraphicsFormat.R8_UNorm, "SIGMA_TransientShadow2");
-            EnsureRTHandle(ref m_TransientHistory, width, height, GraphicsFormat.R8_UNorm, "SIGMA_TransientHistory");
-            EnsureRTHandle(ref m_TransientHistoryLength, width, height, GraphicsFormat.R32_UInt, "SIGMA_TransientHistoryLength");
+            if (tex?.desc == null) return;
+            tex.desc.Width              = width;
+            tex.desc.Height             = height;
+            tex.desc.EnableRandomWrite  = true;
+            tex.desc.ClearBuffer        = false;
         }
 
-        private static void EnsureRTHandle(ref RTHandle handle, int width, int height, GraphicsFormat format, string name)
+        private static RenderGraphTexture CreatePassOwnedTexture(string name, int width, int height, GraphicsFormat format)
         {
-            if (handle != null && handle.rt != null && handle.rt.width == width && handle.rt.height == height)
-                return;
-
-            handle?.Release();
-            handle = RTHandles.Alloc(width, height, colorFormat: format, enableRandomWrite: true, name: name);
+            var tex = new RenderGraphTexture
+            {
+                desc = RenderGraphTextureDesc.CreateColorTarget(width, height, format)
+            };
+            tex.desc.Name              = name;
+            tex.desc.EnableRandomWrite = true;
+            tex.desc.ClearBuffer       = false;
+            return tex;
         }
-
-        private void ConfigureOutputTextures(int width, int height)
-        {
-            m_DenoisedShadowTexture?.Resize(width, height);
-            if (m_DenoisedShadowTexture?.desc != null)
-            {
-                m_DenoisedShadowTexture.desc.EnableRandomWrite = true;
-                m_DenoisedShadowTexture.desc.ClearBuffer = false;
-                m_DenoisedShadowTexture.desc.ClearColor = Color.clear;
-            }
-
-            m_HistoryShadowOut?.Resize(width, height);
-            if (m_HistoryShadowOut?.desc != null)
-            {
-                m_HistoryShadowOut.desc.EnableRandomWrite = true;
-                m_HistoryShadowOut.desc.ClearBuffer = true;
-                m_HistoryShadowOut.desc.ClearColor = Color.clear;
-            }
-
-            m_HistoryLengthOut?.Resize(width, height);
-            if (m_HistoryLengthOut?.desc != null)
-            {
-                m_HistoryLengthOut.desc.EnableRandomWrite = true;
-                m_HistoryLengthOut.desc.ClearBuffer = true;
-                m_HistoryLengthOut.desc.ClearColor = Color.clear;
-            }
-        }
-
     }
 }

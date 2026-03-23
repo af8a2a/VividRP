@@ -115,15 +115,27 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizePassOwnedTexture(m_Depth, m_DefaultDepth, width, height);
 
             var gpuDrivenFrameData = frameData.GetOrCreate<VividGPUDrivenFrameData>();
+            GraphicsBuffer visibleMeshletRenderRequestsBuffer = gpuDrivenFrameData.visibleMeshletRenderRequestsBuffer;
+            GraphicsBuffer visibleMeshletIndirectDrawArgsBuffer = gpuDrivenFrameData.visibleMeshletIndirectDrawArgsBuffer;
+
+            if ((visibleMeshletRenderRequestsBuffer == null || visibleMeshletIndirectDrawArgsBuffer == null) &&
+                VividGPUDrivenSystem.TryGetCurrentVisibleMeshletBuffers(
+                    out GraphicsBuffer fallbackVisibleMeshletRenderRequestsBuffer,
+                    out GraphicsBuffer fallbackVisibleMeshletIndirectDrawArgsBuffer))
+            {
+                visibleMeshletRenderRequestsBuffer ??= fallbackVisibleMeshletRenderRequestsBuffer;
+                visibleMeshletIndirectDrawArgsBuffer ??= fallbackVisibleMeshletIndirectDrawArgsBuffer;
+            }
+
             UpdateImportedBuffer(
                 m_VisibleMeshletRenderRequests,
-                gpuDrivenFrameData.visibleMeshletRenderRequestsBuffer,
+                visibleMeshletRenderRequestsBuffer,
                 GraphicsBuffer.Target.Structured,
                 "VisibleMeshletRenderRequests"
             );
             UpdateImportedBuffer(
                 m_VisibleMeshletIndirectArgs,
-                gpuDrivenFrameData.visibleMeshletIndirectDrawArgsBuffer,
+                visibleMeshletIndirectDrawArgsBuffer,
                 GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments,
                 "VisibleMeshletIndirectArgs"
             );

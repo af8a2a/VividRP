@@ -188,4 +188,10 @@ namespace VividRP.Editor.RenderGraph.Generated
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.VisibilityBufferPass, VividRP.Runtime";
     }
 
+    [Serializable]
+    internal sealed class VisibilityBufferResolvePass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.VisibilityBufferResolvePass, VividRP.Runtime";
+    }
+
 }

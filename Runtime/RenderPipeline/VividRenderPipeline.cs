@@ -70,6 +70,8 @@ namespace VividRP.Runtime
 
                 cmdBuffer = CommandBufferPool.Get("VividRP");
 
+                PassRecorder.InitializeContext(context, camera, cullingResults);
+
                 if (m_Asset != null && m_Asset.EnableGPUDriven)
                 {
                     VividRPCoreResources resources = PipelineResourceManager.Get<VividRPCoreResources>();
@@ -88,7 +90,6 @@ namespace VividRP.Runtime
                         gpuDrivenSystem.VisibleMeshletIndirectDrawArgsBuffer);
                 }
 
-                PassRecorder.InitializeContext(context, camera, cullingResults);
                 var graphAsset = m_Asset.RenderGraphAsset;
                 PassRecorder.PrepareFrame(graphAsset, cmdBuffer);
 

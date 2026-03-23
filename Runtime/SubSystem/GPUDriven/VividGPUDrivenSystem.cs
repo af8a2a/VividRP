@@ -40,6 +40,8 @@ namespace VividRP.Runtime.GPUDriven
 
         public static VividGPUDrivenSystem instance => s_Instance ??= new VividGPUDrivenSystem();
 
+        public static bool HasInstance => s_Instance != null && !s_Instance.m_IsDisposed;
+
         public BindlessTextureContainer BindlessTextureContainer { get; }
 
         public VividGPUDrivenSceneData SceneData { get; }
@@ -59,6 +61,22 @@ namespace VividRP.Runtime.GPUDriven
         public GraphicsBuffer VisibleMeshletRenderRequestsBuffer => m_CullingDispatcher.BufferSet.VisibleMeshletRenderRequestsBuffer;
 
         public GraphicsBuffer VisibleMeshletIndirectDrawArgsBuffer => m_CullingDispatcher.BufferSet.VisibleMeshletIndirectDrawArgsBuffer;
+
+        public static bool TryGetCurrentVisibleMeshletBuffers(
+            out GraphicsBuffer visibleMeshletRenderRequestsBuffer,
+            out GraphicsBuffer visibleMeshletIndirectDrawArgsBuffer)
+        {
+            if (s_Instance == null || s_Instance.m_IsDisposed)
+            {
+                visibleMeshletRenderRequestsBuffer = null;
+                visibleMeshletIndirectDrawArgsBuffer = null;
+                return false;
+            }
+
+            visibleMeshletRenderRequestsBuffer = s_Instance.VisibleMeshletRenderRequestsBuffer;
+            visibleMeshletIndirectDrawArgsBuffer = s_Instance.VisibleMeshletIndirectDrawArgsBuffer;
+            return visibleMeshletRenderRequestsBuffer != null && visibleMeshletIndirectDrawArgsBuffer != null;
+        }
 
         public void PrepareFrame()
         {

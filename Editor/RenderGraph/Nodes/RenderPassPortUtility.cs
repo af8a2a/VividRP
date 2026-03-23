@@ -8,6 +8,7 @@ namespace VividRP.Editor.RenderGraph
     {
         private const string InputPortSuffix = "_In";
         private const string OutputPortSuffix = "_Out";
+        private const string DebugOutputPortSuffix = "_Debug";
         private const string OverrideOptionPrefix = "Override_";
 
         internal static bool CanRead(AccessFlags access)
@@ -110,6 +111,11 @@ namespace VividRP.Editor.RenderGraph
         {
             return bindingMode != RenderGraphResourceBindingMode.PassOwnedHidden
                 && CanWrite(access);
+        }
+
+        internal static string GetDebugOutputPortName(string fieldName)
+        {
+            return string.IsNullOrEmpty(fieldName) ? null : $"{fieldName}{DebugOutputPortSuffix}";
         }
 
         internal static string GetOverrideOptionName(string fieldName)

@@ -14,6 +14,7 @@ namespace VividRP.Editor.RenderGraph
     {
         private const string PassScriptOptionName = "PassScript";
         private const string AsyncComputeOptionName = "AsyncCompute";
+        private const string DebugExportOptionName = "DebugExport";
         private static readonly MethodInfo s_AddOptionMethodDefinition = typeof(IOptionDefinitionContext)
             .GetMethods(BindingFlags.Instance | BindingFlags.Public)
             .First(method =>
@@ -45,6 +46,7 @@ namespace VividRP.Editor.RenderGraph
                 AddEnumParameterOptions(context, passType);
                 if (ShouldDefineAsyncComputeOption(passType))
                     AddAsyncComputeOption(context);
+                AddDebugExportOption(context, passType);
                 return;
             }
 
@@ -58,6 +60,8 @@ namespace VividRP.Editor.RenderGraph
 
             if (ShouldDefineAsyncComputeOption(passType))
                 AddAsyncComputeOption(context);
+
+            AddDebugExportOption(context, passType);
         }
 
         protected override void OnDefinePorts(IPortDefinitionContext context)
@@ -137,6 +141,49 @@ namespace VividRP.Editor.RenderGraph
                     }
                 }
             }
+
+            if (GetDebugExportEnabled())
+            {
+                foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
+                {
+                    var attr = field.GetCustomAttribute<RenderGraphResource>();
+
+                    // Only fields without a normal output port need a debug export port.
+                    if (RenderPassPortUtility.ShouldDefineOutputPort(attr.Access, attr.BindingMode))
+                        continue;
+
+                    var debugPortName = RenderPassPortUtility.GetDebugOutputPortName(field.Name);
+                    if (string.IsNullOrEmpty(debugPortName))
+                        continue;
+
+                    var displayName = $"{RenderGraphPassReflectionUtility.GetRenderGraphResourceName(field, attr)} (Debug)";
+
+                    if (field.FieldType == typeof(RenderGraphTexture))
+                    {
+                        context.AddOutputPort<RenderGraphTexture>(debugPortName)
+                            .WithDisplayName(displayName)
+                            .Build();
+                    }
+                    else if (field.FieldType == typeof(RenderGraphBuffer))
+                    {
+                        context.AddOutputPort<RenderGraphBuffer>(debugPortName)
+                            .WithDisplayName(displayName)
+                            .Build();
+                    }
+                    else if (field.FieldType == typeof(RenderGraphRenderList))
+                    {
+                        context.AddOutputPort<RenderGraphRenderList>(debugPortName)
+                            .WithDisplayName(displayName)
+                            .Build();
+                    }
+                    else if (field.FieldType == typeof(RenderGraphAccelerationStructure))
+                    {
+                        context.AddOutputPort<RenderGraphAccelerationStructure>(debugPortName)
+                            .WithDisplayName(displayName)
+                            .Build();
+                    }
+                }
+            }
         }
 
         internal Type GetPassType()
@@ -164,6 +211,12 @@ namespace VividRP.Editor.RenderGraph
                 return false;
 
             return enableAsyncCompute;
+        }
+
+        internal bool GetDebugExportEnabled()
+        {
+            var option = GetNodeOptionByName(DebugExportOptionName);
+            return option != null && option.TryGetValue<bool>(out var enabled) && enabled;
         }
 
         internal string GetRegisteredPassTypeName()
@@ -398,6 +451,30 @@ namespace VividRP.Editor.RenderGraph
         {
             context.AddOption<bool>(AsyncComputeOptionName)
                 .WithDisplayName("Async Compute")
+                .WithDefaultValue(false);
+        }
+
+        private static void AddDebugExportOption(IOptionDefinitionContext context, Type passType)
+        {
+            if (context == null || passType == null)
+                return;
+
+            var hasDebugExportableFields = false;
+            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
+            {
+                var attr = field.GetCustomAttribute<RenderGraphResource>();
+                if (!RenderPassPortUtility.ShouldDefineOutputPort(attr.Access, attr.BindingMode))
+                {
+                    hasDebugExportableFields = true;
+                    break;
+                }
+            }
+
+            if (!hasDebugExportableFields)
+                return;
+
+            context.AddOption<bool>(DebugExportOptionName)
+                .WithDisplayName("Debug Export")
                 .WithDefaultValue(false);
         }
 

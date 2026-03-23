@@ -85,11 +85,20 @@ namespace VividRP.Editor.RenderGraph
                     continue;
 
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
-                var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access, attr.BindingMode);
-                if (string.IsNullOrEmpty(outputPortName))
-                    continue;
 
-                if (ReferenceEquals(sourcePassNode.GetOutputPortByName(outputPortName), connectedPort))
+                // Check normal output port.
+                var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access, attr.BindingMode);
+                if (!string.IsNullOrEmpty(outputPortName)
+                    && ReferenceEquals(sourcePassNode.GetOutputPortByName(outputPortName), connectedPort))
+                {
+                    fieldName = RenderGraphPassReflectionUtility.GetPreviewTextureKey(field, attr);
+                    return true;
+                }
+
+                // Check debug output port (exposed when Debug Export is enabled).
+                var debugPortName = RenderPassPortUtility.GetDebugOutputPortName(field.Name);
+                if (!string.IsNullOrEmpty(debugPortName)
+                    && ReferenceEquals(sourcePassNode.GetOutputPortByName(debugPortName), connectedPort))
                 {
                     fieldName = RenderGraphPassReflectionUtility.GetPreviewTextureKey(field, attr);
                     return true;

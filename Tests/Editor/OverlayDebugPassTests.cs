@@ -68,6 +68,8 @@ namespace VividRP.Editor.Tests
                 volume.arraySlice.value = 5;
                 volume.exposure.overrideState = true;
                 volume.exposure.value = 2f;
+                volume.opacity.overrideState = true;
+                volume.opacity.value = 0.4f;
                 volume.visualizationMode.overrideState = true;
                 volume.visualizationMode.value = OverlayDebugVisualizationMode.MotionVectors;
                 volume.depthMode.overrideState = true;
@@ -77,6 +79,7 @@ namespace VividRP.Editor.Tests
                     0.1f,
                     1f,
                     -1f,
+                    0.9f,
                     OverlayDebugVisualizationMode.Color,
                     OverlayDebugDepthMode.Raw,
                     volume);
@@ -84,6 +87,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(settings.overlayAmount, Is.EqualTo(0.75f));
                 Assert.That(settings.arraySlice, Is.EqualTo(5));
                 Assert.That(settings.exposure, Is.EqualTo(2f));
+                Assert.That(settings.opacity, Is.EqualTo(0.4f));
                 Assert.That(settings.visualizationMode, Is.EqualTo(OverlayDebugVisualizationMode.MotionVectors));
                 Assert.That(settings.depthMode, Is.EqualTo(OverlayDebugDepthMode.Linear01));
             }
@@ -150,11 +154,13 @@ namespace VividRP.Editor.Tests
                 0f,
                 0f,
                 32f,
+                -1f,
                 OverlayDebugVisualizationMode.Auto,
                 OverlayDebugDepthMode.Raw,
                 null);
 
             Assert.That(settings.exposure, Is.EqualTo(16f));
+            Assert.That(settings.opacity, Is.EqualTo(0f));
         }
 
         [Test]
@@ -164,10 +170,12 @@ namespace VividRP.Editor.Tests
                 0f,
                 0f,
                 0f,
+                0.25f,
                 OverlayDebugVisualizationMode.Depth,
                 OverlayDebugDepthMode.Linear01,
                 null);
 
+            Assert.That(settings.opacity, Is.EqualTo(0.25f));
             Assert.That(settings.depthMode, Is.EqualTo(OverlayDebugDepthMode.Linear01));
         }
 
@@ -183,6 +191,7 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("exp2(_DebugExposure)"));
             Assert.That(shaderSource, Does.Contain("Linear01Depth(depthValue, _ZBufferParams)"));
             Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_DEPTHMODE_LINEAR01"));
+            Assert.That(shaderSource, Does.Contain("lerp(sourceColor, debugColor, saturate(_DebugOpacity))"));
             Assert.That(shaderSource, Does.Contain("motion * 0.5 + 0.5"));
             Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_VISUALIZATION_VISIBILITY_BUFFER"));
             Assert.That(shaderSource, Does.Contain("UnpackVisibilityBufferValue"));

@@ -32,6 +32,7 @@ namespace VividRP.Runtime
         public ClampedFloatParameter overlayAmount = new(0f, 0f, 1f);
         public MinIntParameter arraySlice = new(0, 0);
         public ClampedFloatParameter exposure = new(0f, -16f, 16f);
+        public ClampedFloatParameter opacity = new(1f, 0f, 1f);
         public OverlayDebugVisualizationModeParameter visualizationMode =
             new(RenderPass.Core.OverlayDebugVisualizationMode.Auto);
         public OverlayDebugDepthModeParameter depthMode =
@@ -43,6 +44,7 @@ namespace VividRP.Runtime
                 && ((overlayAmount != null && overlayAmount.overrideState)
                     || (arraySlice != null && arraySlice.overrideState)
                     || (exposure != null && exposure.overrideState)
+                    || (opacity != null && opacity.overrideState)
                     || (visualizationMode != null && visualizationMode.overrideState)
                     || (depthMode != null && depthMode.overrideState));
         }

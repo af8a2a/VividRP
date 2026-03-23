@@ -170,7 +170,10 @@ namespace VividRP.Runtime.GPUDriven.Bindless
 
             if (m_DescriptorCapacity == 0)
             {
-                SetTemporarilyUnavailable("Bindless descriptor heap has not reserved a plugin-owned range yet.");
+                SetTemporarilyUnavailable(
+                    "Bindless descriptor heap was captured without a plugin-owned range. " +
+                    "In the Unity Editor on Windows this usually means UnityBindless.dll loaded too late. " +
+                    "Run Packages/VividRP/Setup-Bindless.ps1 to install Assets/Plugins/VividRP/x86_64/UnityBindless.dll, then restart the editor.");
                 return false;
             }
 

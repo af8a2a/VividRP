@@ -1,12 +1,13 @@
 using System;
 using System.Runtime.InteropServices;
+using UnityEditor;
 using UnityEngine;
 
 namespace VividRP.Runtime.GPUDriven.Bindless
 {
     public static class BindlessPluginBindings
     {
-        private static bool s_HasAttemptedLoad;
+        private static bool s_IsLoaded;
 
         private const string DLLName =
 #if (PLATFORM_IOS || PLATFORM_TVOS || PLATFORM_BRATWURST || PLATFORM_SWITCH) && !UNITY_EDITOR
@@ -43,7 +44,33 @@ namespace VividRP.Runtime.GPUDriven.Bindless
         [DllImport(DLLName)]
         public static extern void OpenPixCapture([MarshalAs(UnmanagedType.LPWStr)] string filename);
 
+#if UNITY_EDITOR
+        [InitializeOnLoadMethod]
+#else
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterAssembliesLoaded)]
+#endif
+        private static void WarmupAfterAssembliesLoaded()
+        {
+            EnsureLoaded();
+        }
+
+#if UNITY_EDITOR
+        [InitializeOnLoadMethod]
+#else
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+#endif
+        private static void WarmupOnSubsystemRegistration()
+        {
+            EnsureLoaded();
+        }
+
+        
+#if UNITY_EDITOR
+        [InitializeOnLoadMethod]
+#else
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSplashScreen)]
+#endif
         private static void WarmupOnLoad()
         {
             EnsureLoaded();
@@ -51,16 +78,15 @@ namespace VividRP.Runtime.GPUDriven.Bindless
 
         public static void EnsureLoaded()
         {
-            if (s_HasAttemptedLoad)
+            if (s_IsLoaded)
             {
                 return;
             }
 
-            s_HasAttemptedLoad = true;
-
             try
             {
                 WarmupPlugin();
+                s_IsLoaded = true;
             }
             catch (Exception exception) when (exception is DllNotFoundException
                                              || exception is EntryPointNotFoundException

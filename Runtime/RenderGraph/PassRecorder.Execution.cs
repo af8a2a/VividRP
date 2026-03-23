@@ -1021,12 +1021,14 @@ namespace VividRP.Runtime
                 || passDefinition?.PreviewTextureFields == null
                 || passDefinition.PreviewTextureFields.Count == 0
                 || entry?.Texture == null
-                || (entry.Access & AccessFlags.Write) == 0
                 || entry.IsDepthAttachment)
             {
                 return false;
             }
 
+            // PreviewTextureFields is the authoritative opt-in — check it regardless of access flags.
+            // Debug export ports add read-only resources to PreviewTextureFields explicitly,
+            // so the Write-only guard is not applied here.
             var previewKey = entry.Name;
             if (!string.IsNullOrEmpty(previewKey) && passDefinition.PreviewTextureFields.Contains(previewKey))
                 return true;

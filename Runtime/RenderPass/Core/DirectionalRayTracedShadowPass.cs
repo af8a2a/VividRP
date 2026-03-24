@@ -61,6 +61,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector4 m_SunBasisY;
         private float m_TanSunAngularRadius;
         private int m_FrameIndex;
+        
+        private RTHandle debugTexture;
+
 
         internal readonly struct ResolvedDirectionalShadowRequest
         {
@@ -138,6 +141,14 @@ namespace VividRP.Runtime.RenderPass.Core
             m_InvViewProjectionMatrix = ResolveInvViewProjectionMatrix(cameraData);
 
             
+            
+            var desc = new RenderTextureDescriptor(cameraData.actualWidth, cameraData.actualHeight)
+            {
+                graphicsFormat = GraphicsFormat.R32_SFloat,
+                enableRandomWrite = true
+            };
+            RenderingUtils.ReAllocateHandleIfNeeded(ref debugTexture, desc, name: "NRD-SIGMA TileTexture");
+
             m_DispatchGroupCountX = CoreUtils.DivRoundUp(cameraData.actualWidth, ThreadGroupSizeX);
             m_DispatchGroupCountY = CoreUtils.DivRoundUp(cameraData.actualHeight, ThreadGroupSizeY);
 
@@ -229,11 +240,11 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_DirectionalRayTracedShadowCompute,
                     m_Kernel,
                     DirectionalShadowTextureId,
-                    m_DirectionalShadowTexture.innerHandle);
+                    debugTexture);
 
                 BlueNoise.Instance?.Bind(nativeCmd);
 
-                var useClassify = m_ShadowClassifyMask != null && m_ShadowClassifyMask.innerHandle.IsValid();
+                var useClassify = false;// m_ShadowClassifyMask != null && m_ShadowClassifyMask.innerHandle.IsValid();
                 if (useClassify)
                 {
                     nativeCmd.EnableKeyword(m_DirectionalRayTracedShadowCompute, new LocalKeyword(m_DirectionalRayTracedShadowCompute, ClassifyKeyword));

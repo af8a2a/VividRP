@@ -79,8 +79,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
         // Smoothed tile output  (float2, tile resolution)
         [RenderGraphResource(Name = "SIGMA_SmoothTiles",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_SmoothTileTexture;
 
         // Intermediate penumbra after pre-blur  (R16_SFloat, full resolution)
@@ -141,6 +140,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
         private const float DefaultPlaneDistSensitivity  = 0.02f;
         private const uint  DefaultMaxStabilizedFrameNum = 5;
 
+        private RTHandle debugTexture;
         public SIGMAShadowDenoisePass()
         {
             profilingSampler = new ProfilingSampler(nameof(SIGMAShadowDenoisePass));
@@ -249,6 +249,14 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 current:  m_HistoryLengthCurrent,
                 desc:     lengthDesc);
 
+
+            var desc = new RenderTextureDescriptor(tileW, tileH)
+            {
+                graphicsFormat = GraphicsFormat.R8G8B8A8_UNorm,
+                enableRandomWrite = true
+            };
+            RenderingUtils.ReAllocateHandleIfNeeded(ref debugTexture, desc, name: "NRD-SIGMA TileTexture");
+            
             m_HasValidHistory = hasShadowHistory && hasLengthHistory;
 
             // Store for next frame
@@ -277,7 +285,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 ConstantBuffer.Push(cmd, m_Constants, m_ClassifyTiles, SIGMA_ClassifyTilesConstantsId);
                 cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gIn_ViewZ,    m_DepthTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gIn_Penumbra, m_RawShadowTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gOut_Tiles,   m_TileTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gOut_Tiles,   debugTexture);
                 cmd.DispatchCompute(m_ClassifyTiles, kernel, tileW, tileH, 1);
 
                 // Stage 2: SmoothTiles
@@ -376,6 +384,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             tex.desc.Name              = name;
             tex.desc.EnableRandomWrite = true;
             tex.desc.ClearBuffer       = false;
+            tex.desc.AnisoLevel = 1;
             return tex;
         }
     }

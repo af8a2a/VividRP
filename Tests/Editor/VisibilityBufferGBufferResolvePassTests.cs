@@ -31,12 +31,16 @@ namespace VividRP.Editor.Tests
             Assert.That(visibilityEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32G32_UInt));
             Assert.That(depthEntry.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(depthEntry.Texture.desc.DepthBufferBits, Is.EqualTo(DepthBits.Depth32));
+            Assert.That(gbuffer0Entry.Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(gbuffer0Entry.AttachmentIndex, Is.EqualTo(0));
             Assert.That(gbuffer0Entry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
+            Assert.That(gbuffer1Entry.Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(gbuffer1Entry.AttachmentIndex, Is.EqualTo(1));
             Assert.That(gbuffer1Entry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16_SFloat));
+            Assert.That(gbuffer2Entry.Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(gbuffer2Entry.AttachmentIndex, Is.EqualTo(2));
             Assert.That(gbuffer2Entry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
+            Assert.That(gbuffer3Entry.Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(gbuffer3Entry.AttachmentIndex, Is.EqualTo(3));
             Assert.That(gbuffer3Entry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.B10G11R11_UFloatPack32));
         }
@@ -64,6 +68,34 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Prepare_DoesNotOverwriteOverriddenGBufferDescriptors()
+        {
+            var pass = new VisibilityBufferGBufferResolvePass();
+            var externalGBuffer0 = new RenderGraphTexture
+            {
+                desc = new RenderGraphTextureDesc
+                {
+                    Width = 320,
+                    Height = 240,
+                    ColorFormat = GraphicsFormat.R16G16B16A16_SFloat,
+                }
+            };
+
+            SetTextureField(pass, "m_GBuffer0", externalGBuffer0);
+
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 1920;
+            cameraData.actualHeight = 1080;
+
+            pass.Prepare(frameData);
+
+            Assert.That(externalGBuffer0.desc.Width, Is.EqualTo(320));
+            Assert.That(externalGBuffer0.desc.Height, Is.EqualTo(240));
+            Assert.That(externalGBuffer0.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+        }
+
+        [Test]
         public void VisibilityBufferGBufferResolvePassSource_BindsTexturesAndDrawsFullscreen()
         {
             var passSource = File.ReadAllText(GetPassSourcePath());
@@ -85,10 +117,12 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/VividBarycentric.hlsl\""));
             Assert.That(shaderSource, Does.Contain("PackVividGBufferSurfaceData("));
             Assert.That(shaderSource, Does.Contain("UnpackVisibilityBufferValue("));
+            Assert.That(shaderSource, Does.Contain("IsPackedVisibilityBufferValueValid("));
             Assert.That(shaderSource, Does.Contain("CalculateFullBarycentric("));
             Assert.That(shaderSource, Does.Contain("GetBindlessTexture2D("));
             Assert.That(shaderSource, Does.Contain("NormalsIndex"));
             Assert.That(shaderSource, Does.Contain("ComputeDoubleSidedNormalFlipSign("));
+            Assert.That(shaderSource, Does.Contain("discard;"));
         }
 
         private static RenderGraphTexture GetTextureField(VisibilityBufferGBufferResolvePass pass, string fieldName)
@@ -97,6 +131,14 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
             return (RenderGraphTexture) field.GetValue(pass);
+        }
+
+        private static void SetTextureField(VisibilityBufferGBufferResolvePass pass, string fieldName, RenderGraphTexture value)
+        {
+            var field = typeof(VisibilityBufferGBufferResolvePass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(field, Is.Not.Null);
+            field.SetValue(pass, value);
         }
 
         private static string GetPassSourcePath()

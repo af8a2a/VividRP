@@ -195,6 +195,7 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("motion * 0.5 + 0.5"));
             Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_VISUALIZATION_VISIBILITY_BUFFER"));
             Assert.That(shaderSource, Does.Contain("UnpackVisibilityBufferValue"));
+            Assert.That(shaderSource, Does.Contain("IsPackedVisibilityBufferValueValid"));
             Assert.That(shaderSource, Does.Contain("sampler_PointClamp"));
         }
 

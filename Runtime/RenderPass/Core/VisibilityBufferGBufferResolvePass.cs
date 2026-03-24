@@ -22,32 +22,36 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(
             Name = "GBuffer0",
-            Access = AccessFlags.Write,
+            Access = AccessFlags.ReadWrite,
             AttachmentIndex = 0,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_GBuffer0;
 
         [RenderGraphResource(
             Name = "GBuffer1",
-            Access = AccessFlags.Write,
+            Access = AccessFlags.ReadWrite,
             AttachmentIndex = 1,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_GBuffer1;
 
         [RenderGraphResource(
             Name = "GBuffer2",
-            Access = AccessFlags.Write,
+            Access = AccessFlags.ReadWrite,
             AttachmentIndex = 2,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_GBuffer2;
 
         [RenderGraphResource(
             Name = "GBuffer3",
-            Access = AccessFlags.Write,
+            Access = AccessFlags.ReadWrite,
             AttachmentIndex = 3,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_GBuffer3;
 
+        private readonly RenderGraphTexture m_DefaultGBuffer0;
+        private readonly RenderGraphTexture m_DefaultGBuffer1;
+        private readonly RenderGraphTexture m_DefaultGBuffer2;
+        private readonly RenderGraphTexture m_DefaultGBuffer3;
         private Material m_Material;
 
         public VisibilityBufferGBufferResolvePass()
@@ -65,6 +69,11 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer2 = RenderGraphTexture.CreateColorTarget("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
             m_GBuffer3 = RenderGraphTexture.CreateColorTarget("GBuffer3", GraphicsFormat.B10G11R11_UFloatPack32);
             m_GBuffer3.desc.EnableRandomWrite = true;
+
+            m_DefaultGBuffer0 = m_GBuffer0;
+            m_DefaultGBuffer1 = m_GBuffer1;
+            m_DefaultGBuffer2 = m_GBuffer2;
+            m_DefaultGBuffer3 = m_GBuffer3;
         }
 
         public override void Create()
@@ -96,10 +105,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 Screen.height,
                 m_VisibilityBuffer?.desc);
 
-            ConfigureTarget(m_GBuffer0, width, height, GraphicsFormat.R8G8B8A8_UNorm, false);
-            ConfigureTarget(m_GBuffer1, width, height, GraphicsFormat.R16G16_SFloat, false);
-            ConfigureTarget(m_GBuffer2, width, height, GraphicsFormat.R8G8B8A8_UNorm, false);
-            ConfigureTarget(m_GBuffer3, width, height, GraphicsFormat.B10G11R11_UFloatPack32, true);
+            ConfigurePassOwnedTarget(m_GBuffer0, m_DefaultGBuffer0, width, height, GraphicsFormat.R8G8B8A8_UNorm, false, "GBuffer0");
+            ConfigurePassOwnedTarget(m_GBuffer1, m_DefaultGBuffer1, width, height, GraphicsFormat.R16G16_SFloat, false, "GBuffer1");
+            ConfigurePassOwnedTarget(m_GBuffer2, m_DefaultGBuffer2, width, height, GraphicsFormat.R8G8B8A8_UNorm, false, "GBuffer2");
+            ConfigurePassOwnedTarget(m_GBuffer3, m_DefaultGBuffer3, width, height, GraphicsFormat.B10G11R11_UFloatPack32, true, "GBuffer3");
         }
 
         public override void Record(RasterGraphContext context)
@@ -138,14 +147,16 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
-        private static void ConfigureTarget(
+        private static void ConfigurePassOwnedTarget(
             RenderGraphTexture texture,
+            RenderGraphTexture defaultTexture,
             int width,
             int height,
             GraphicsFormat format,
-            bool enableRandomWrite)
+            bool enableRandomWrite,
+            string name)
         {
-            if (texture?.desc == null)
+            if (!ReferenceEquals(texture, defaultTexture) || texture?.desc == null)
                 return;
 
             texture.desc.Width = width;
@@ -161,6 +172,7 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.MipCount = 1;
             texture.desc.EnableRandomWrite = enableRandomWrite;
             texture.desc.BindTextureMS = false;
+            texture.desc.Name = name;
         }
 
         private static int ResolveOutputDimension(

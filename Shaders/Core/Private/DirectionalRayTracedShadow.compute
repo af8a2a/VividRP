@@ -106,22 +106,12 @@ void DirectionalRayTracedShadow(uint3 dispatchThreadID : SV_DispatchThreadID)
         0xFF,
         shadowRay);
 
-    while (query.Proceed())
-    {
-    }
-
-    float shadowValue;
+    query.Proceed();
+    float shadowHitDist = HALF_MAX;
     if (query.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
     {
-        float hitDistance = query.CommittedRayT();
-        shadowValue = (_TanSunAngularRadius > 0.0)
-            ? PackPenumbra(hitDistance, _TanSunAngularRadius)
-            : 0.0;
-    }
-    else
-    {
-        shadowValue = HALF_MAX;
+        shadowHitDist = query.CommittedRayT();
     }
 
-    _DirectionalShadowTexture[pixelCoord] = shadowValue;
+    _DirectionalShadowTexture[pixelCoord] =PackPenumbra(shadowHitDist, _TanSunAngularRadius) ;
 }

@@ -110,6 +110,9 @@ Shader "Hidden/VividRP/OverlayDebug"
                 float exposureMultiplier = exp2(_DebugExposure);
                 float2 debugUv = ApplyScaleBias(uv, _DebugTextureScaleBias);
                 uint2 packedValue = asuint(SAMPLE_TEXTURE2D_LOD(_DebugVisibilityTexture, sampler_PointClamp, debugUv, 0).xy);
+                if (!IsPackedVisibilityBufferValueValid(packedValue))
+                    return 0.0f.xxxx;
+
                 VividVisibilityBufferValue value = UnpackVisibilityBufferValue(packedValue);
                 uint triangleID = value.IndexID / 3u;
 

@@ -205,6 +205,14 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
 
             bool TryLoadVisibilityValue(Varyings input, out VividVisibilityBufferValue visibilityBufferValue)
             {
+                float2 visibilityUv = ApplyScaleBias(input.uv, _VisibilityBufferScaleBias);
+                uint2 packedValue = asuint(SAMPLE_TEXTURE2D_LOD(_VisibilityBuffer, sampler_PointClamp, visibilityUv, 0).xy);
+                if (!IsPackedVisibilityBufferValueValid(packedValue))
+                {
+                    visibilityBufferValue = (VividVisibilityBufferValue) 0;
+                    return false;
+                }
+
                 float2 depthUv = ApplyScaleBias(input.uv, _DepthTextureScaleBias);
                 float depth = SAMPLE_TEXTURE2D_LOD(_DepthTexture, sampler_PointClamp, depthUv, 0).r;
                 if (depth >= 0.999999f)
@@ -213,8 +221,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     return false;
                 }
 
-                float2 visibilityUv = ApplyScaleBias(input.uv, _VisibilityBufferScaleBias);
-                uint2 packedValue = asuint(SAMPLE_TEXTURE2D_LOD(_VisibilityBuffer, sampler_PointClamp, visibilityUv, 0).xy);
                 visibilityBufferValue = UnpackVisibilityBufferValue(packedValue);
                 return true;
             }
@@ -319,7 +325,10 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             {
                 VividVisibilityBufferValue visibilityBufferValue;
                 if (!TryLoadVisibilityValue(input, visibilityBufferValue))
+                {
+                    discard;
                     return (VividGBufferFragmentOutput) 0;
+                }
 
                 TriangleData triangleData = LoadTriangleData(visibilityBufferValue);
 

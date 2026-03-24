@@ -49,8 +49,8 @@ NRD_EXPORT void NRD_CS_MAIN( uint2 threadPos : SV_GroupThreadId, uint2 tilePos :
         }
     }
 
-    uint s_Mask=WaveActiveSum(mask);
-    uint s_Radius=WaveActiveMax(asuint( maxRadius ));
+    uint s_Mask = WaveActiveSum(mask);
+    uint s_Radius = WaveActiveMax(asuint(maxRadius));
     if( WaveIsFirstLane() )
     {
         bool isLit = ((s_Mask >> 0) & 511) == 256;

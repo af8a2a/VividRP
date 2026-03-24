@@ -1,6 +1,7 @@
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
+using VividRP.Editor.GPUDriven;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Meshlets;
 using Object = UnityEngine.Object;
@@ -85,6 +86,52 @@ namespace VividRP.Editor.Tests
                 Assert.That(trackedResources.MeshletCollections[0], Is.SameAs(meshletCollection));
                 Assert.That(trackedResources.MaterialProxies, Has.Length.EqualTo(1));
                 Assert.That(trackedResources.MaterialProxies[0], Is.SameAs(materialProxy));
+            }
+            finally
+            {
+                if (materialProxy != null)
+                {
+                    Object.DestroyImmediate(materialProxy);
+                }
+
+                if (meshletCollection != null)
+                {
+                    Object.DestroyImmediate(meshletCollection);
+                }
+
+                DestroyTestObjects(gameObject, material, mesh);
+            }
+        }
+
+        [Test]
+        public void UpdateRendererData_PreservesSourceMaterials_WhenMeshRendererWasRemoved()
+        {
+            Material material = null;
+            Mesh mesh = null;
+            GameObject gameObject = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+            GPUDrivenMaterialProxy materialProxy = null;
+
+            try
+            {
+                gameObject = CreateMeshRendererObject("MeshletRenderer_RendererlessResources", out mesh, out material);
+                var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+                meshletCollection = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                meshletCollection.SourceSubmeshIndex = 0;
+
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+                MeshletRendererEditorUtility.TakeOverAndRemoveSourceMeshRenderer(meshletRenderer);
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                Assert.That(VividMeshletRendererDatabase.instance.TryGetRendererData(meshletRenderer, out var trackedData), Is.True);
+                Assert.That(trackedData.sourceRendererEntityId, Is.EqualTo(EntityId.None));
+                Assert.That((trackedData.flags & VividMeshletRendererFlags.SourceRendererEnabled) != 0, Is.True);
+                Assert.That(VividMeshletRendererDatabase.instance.TryGetRendererResources(meshletRenderer, out var trackedResources), Is.True);
+                Assert.That(trackedResources.SourceRenderer, Is.Null);
+                Assert.That(trackedResources.SharedMaterials, Has.Length.EqualTo(1));
+                Assert.That(trackedResources.SharedMaterials[0], Is.SameAs(material));
             }
             finally
             {

@@ -40,11 +40,48 @@ namespace VividRP.Editor.GPUDriven
         public string[] Warnings { get; }
     }
 
+    internal readonly struct MeshletRendererSourceRendererDetachResult
+    {
+        public MeshletRendererSourceRendererDetachResult(
+            bool success,
+            bool changed,
+            string errorMessage,
+            string[] createdMeshletAssetPaths,
+            string[] createdMaterialProxyAssetPaths,
+            string[] warnings)
+        {
+            Success = success;
+            Changed = changed;
+            ErrorMessage = errorMessage;
+            CreatedMeshletAssetPaths = createdMeshletAssetPaths ?? Array.Empty<string>();
+            CreatedMaterialProxyAssetPaths = createdMaterialProxyAssetPaths ?? Array.Empty<string>();
+            Warnings = warnings ?? Array.Empty<string>();
+        }
+
+        public bool Success { get; }
+
+        public bool Changed { get; }
+
+        public string ErrorMessage { get; }
+
+        public string[] CreatedMeshletAssetPaths { get; }
+
+        public string[] CreatedMaterialProxyAssetPaths { get; }
+
+        public string[] Warnings { get; }
+    }
+
     [CustomEditor(typeof(MeshletRenderer))]
     internal sealed class MeshletRendererEditor : UnityEditor.Editor
     {
         private SerializedProperty m_SourceRenderer;
         private SerializedProperty m_SourceMesh;
+        private SerializedProperty m_SourceMaterials;
+        private SerializedProperty m_SourceRenderingEnabled;
+        private SerializedProperty m_ShadowCastingMode;
+        private SerializedProperty m_ReceiveShadows;
+        private SerializedProperty m_MotionVectorGenerationMode;
+        private SerializedProperty m_RenderingLayerMask;
         private SerializedProperty m_MeshletCollections;
         private SerializedProperty m_MaterialProxies;
         private SerializedProperty m_TakeOverSourceRenderer;
@@ -53,6 +90,12 @@ namespace VividRP.Editor.GPUDriven
         {
             m_SourceRenderer = serializedObject.FindProperty("m_SourceRenderer");
             m_SourceMesh = serializedObject.FindProperty("m_SourceMesh");
+            m_SourceMaterials = serializedObject.FindProperty("m_SourceMaterials");
+            m_SourceRenderingEnabled = serializedObject.FindProperty("m_SourceRenderingEnabled");
+            m_ShadowCastingMode = serializedObject.FindProperty("m_ShadowCastingMode");
+            m_ReceiveShadows = serializedObject.FindProperty("m_ReceiveShadows");
+            m_MotionVectorGenerationMode = serializedObject.FindProperty("m_MotionVectorGenerationMode");
+            m_RenderingLayerMask = serializedObject.FindProperty("m_RenderingLayerMask");
             m_MeshletCollections = serializedObject.FindProperty("m_MeshletCollections");
             m_MaterialProxies = serializedObject.FindProperty("m_MaterialProxies");
             m_TakeOverSourceRenderer = serializedObject.FindProperty("m_TakeOverSourceRenderer");
@@ -68,6 +111,12 @@ namespace VividRP.Editor.GPUDriven
                 EditorGUILayout.PropertyField(m_SourceMesh);
             }
 
+            EditorGUILayout.PropertyField(m_SourceMaterials, true);
+            EditorGUILayout.PropertyField(m_SourceRenderingEnabled);
+            EditorGUILayout.PropertyField(m_ShadowCastingMode);
+            EditorGUILayout.PropertyField(m_ReceiveShadows);
+            EditorGUILayout.PropertyField(m_MotionVectorGenerationMode);
+            EditorGUILayout.PropertyField(m_RenderingLayerMask);
             EditorGUILayout.PropertyField(m_TakeOverSourceRenderer);
             EditorGUILayout.PropertyField(m_MeshletCollections, true);
             EditorGUILayout.PropertyField(m_MaterialProxies, true);
@@ -173,7 +222,7 @@ namespace VividRP.Editor.GPUDriven
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                using (new EditorGUI.DisabledScope(meshletRenderer.sourceRenderer == null || meshletRenderer.sourceMesh == null))
+                using (new EditorGUI.DisabledScope(meshletRenderer.sourceMesh == null))
                 {
                     if (GUILayout.Button("Create/Bind GPUDriven Proxies"))
                     {
@@ -202,6 +251,24 @@ namespace VividRP.Editor.GPUDriven
                         LogWarnings(meshletRenderer, syncResult.Warnings);
                         serializedObject.Update();
                     }
+                }
+            }
+
+            using (new EditorGUI.DisabledScope(meshletRenderer.sourceRenderer is not MeshRenderer))
+            {
+                if (GUILayout.Button("Take Over And Remove MeshRenderer"))
+                {
+                    MeshletRendererSourceRendererDetachResult detachResult =
+                        MeshletRendererEditorUtility.TakeOverAndRemoveSourceMeshRenderer(meshletRenderer);
+
+                    if (!detachResult.Success && !string.IsNullOrEmpty(detachResult.ErrorMessage))
+                    {
+                        Debug.LogWarning($"[VividRP] {detachResult.ErrorMessage}", meshletRenderer);
+                    }
+
+                    LogWarnings(meshletRenderer, detachResult.Warnings);
+                    SelectLastCreatedAsset(detachResult.CreatedMaterialProxyAssetPaths, detachResult.CreatedMeshletAssetPaths);
+                    serializedObject.Update();
                 }
             }
         }
@@ -273,13 +340,12 @@ namespace VividRP.Editor.GPUDriven
 
             bool changed = RefreshSource(meshletRenderer);
             Mesh sourceMesh = meshletRenderer.sourceMesh;
-            Renderer sourceRenderer = meshletRenderer.sourceRenderer;
-            if (sourceMesh == null || sourceRenderer == null)
+            if (sourceMesh == null)
             {
                 return new MeshletRendererTakeOverRepairResult(
                     false,
                     changed,
-                    "MeshletRenderer source Mesh/Renderer is not resolved.",
+                    "MeshletRenderer source Mesh is not resolved.",
                     null,
                     null,
                     null
@@ -382,6 +448,78 @@ namespace VividRP.Editor.GPUDriven
                 createdMeshletAssetPaths.ToArray(),
                 bindingResult.CreatedAssetPaths,
                 warnings.ToArray()
+            );
+        }
+
+        internal static MeshletRendererSourceRendererDetachResult TakeOverAndRemoveSourceMeshRenderer(MeshletRenderer meshletRenderer)
+        {
+            if (meshletRenderer == null)
+            {
+                return new MeshletRendererSourceRendererDetachResult(false, false, "MeshletRenderer is null.", null, null, null);
+            }
+
+            MeshletRendererTakeOverRepairResult repairResult = RepairTakeOverBindings(meshletRenderer);
+            if (!repairResult.Success)
+            {
+                return new MeshletRendererSourceRendererDetachResult(
+                    false,
+                    repairResult.Changed,
+                    repairResult.ErrorMessage,
+                    repairResult.CreatedMeshletAssetPaths,
+                    repairResult.CreatedMaterialProxyAssetPaths,
+                    repairResult.Warnings
+                );
+            }
+
+            RefreshSource(meshletRenderer);
+            if (meshletRenderer.sourceRenderer == null)
+            {
+                return new MeshletRendererSourceRendererDetachResult(
+                    true,
+                    repairResult.Changed,
+                    string.Empty,
+                    repairResult.CreatedMeshletAssetPaths,
+                    repairResult.CreatedMaterialProxyAssetPaths,
+                    repairResult.Warnings
+                );
+            }
+
+            if (meshletRenderer.sourceRenderer is not MeshRenderer meshRenderer)
+            {
+                return new MeshletRendererSourceRendererDetachResult(
+                    false,
+                    repairResult.Changed,
+                    "Only MeshRenderer can be removed automatically in the current GPUDriven takeover flow.",
+                    repairResult.CreatedMeshletAssetPaths,
+                    repairResult.CreatedMaterialProxyAssetPaths,
+                    repairResult.Warnings
+                );
+            }
+
+            Undo.DestroyObjectImmediate(meshRenderer);
+            bool changed = true;
+            RefreshSource(meshletRenderer);
+            VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+            if (!meshletRenderer.TryValidate(out string validationMessage))
+            {
+                return new MeshletRendererSourceRendererDetachResult(
+                    false,
+                    true,
+                    validationMessage,
+                    repairResult.CreatedMeshletAssetPaths,
+                    repairResult.CreatedMaterialProxyAssetPaths,
+                    repairResult.Warnings
+                );
+            }
+
+            return new MeshletRendererSourceRendererDetachResult(
+                true,
+                changed || repairResult.Changed,
+                string.Empty,
+                repairResult.CreatedMeshletAssetPaths,
+                repairResult.CreatedMaterialProxyAssetPaths,
+                repairResult.Warnings
             );
         }
 

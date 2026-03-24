@@ -18,6 +18,27 @@ namespace VividRP.Runtime.GPUDriven
         private Mesh m_SourceMesh;
 
         [SerializeField]
+        private Material[] m_SourceMaterials = Array.Empty<Material>();
+
+        [SerializeField]
+        private bool m_SourceRenderingEnabled = true;
+
+        [SerializeField]
+        private ShadowCastingMode m_ShadowCastingMode = ShadowCastingMode.On;
+
+        [SerializeField]
+        private bool m_ReceiveShadows = true;
+
+        [SerializeField]
+        private MotionVectorGenerationMode m_MotionVectorGenerationMode = MotionVectorGenerationMode.Object;
+
+        [SerializeField]
+        private uint m_RenderingLayerMask = 1u;
+
+        [SerializeField]
+        private bool m_SourceWasSkinned;
+
+        [SerializeField]
         private VividMeshletCollectionAsset[] m_MeshletCollections = Array.Empty<VividMeshletCollectionAsset>();
 
         [SerializeField]
@@ -39,6 +60,20 @@ namespace VividRP.Runtime.GPUDriven
 
         public Mesh sourceMesh => m_SourceMesh;
 
+        public IReadOnlyList<Material> sourceMaterials => m_SourceMaterials;
+
+        public bool sourceRenderingEnabled => m_SourceRenderingEnabled;
+
+        public ShadowCastingMode shadowCastingMode => m_ShadowCastingMode;
+
+        public bool receiveShadows => m_ReceiveShadows;
+
+        public MotionVectorGenerationMode motionVectorGenerationMode => m_MotionVectorGenerationMode;
+
+        public uint renderingLayerMask => m_RenderingLayerMask;
+
+        public bool sourceWasSkinned => m_SourceWasSkinned;
+
         public IReadOnlyList<VividMeshletCollectionAsset> meshletCollections => m_MeshletCollections;
 
         public IReadOnlyList<GPUDrivenMaterialProxy> materialProxies => m_MaterialProxies;
@@ -59,6 +94,11 @@ namespace VividRP.Runtime.GPUDriven
             if (TryFindPreferredRenderer(out Renderer renderer) && TryExtractMesh(renderer, out mesh))
             {
                 return SetSource(renderer, mesh);
+            }
+
+            if (TryFindPreferredMesh(out mesh))
+            {
+                return SetSource(null, mesh);
             }
 
             return ClearSource();
@@ -101,6 +141,31 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             m_MeshletCollections = sanitizedCollections;
+            return true;
+        }
+
+        public bool SetSourceMaterials(Material[] sourceMaterials)
+        {
+            int expectedCount = subMeshCount;
+            if (expectedCount <= 0)
+            {
+                bool cleared = m_SourceMaterials is { Length: > 0 };
+                m_SourceMaterials = Array.Empty<Material>();
+                return cleared;
+            }
+
+            var sanitizedMaterials = new Material[expectedCount];
+            if (sourceMaterials != null)
+            {
+                Array.Copy(sourceMaterials, sanitizedMaterials, Mathf.Min(expectedCount, sourceMaterials.Length));
+            }
+
+            if (AreMaterialsEqual(m_SourceMaterials, sanitizedMaterials))
+            {
+                return false;
+            }
+
+            m_SourceMaterials = sanitizedMaterials;
             return true;
         }
 
@@ -149,6 +214,16 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             return m_MeshletCollections[subMeshIndex];
+        }
+
+        public Material GetSourceMaterial(int subMeshIndex)
+        {
+            if (subMeshIndex < 0 || m_SourceMaterials == null || subMeshIndex >= m_SourceMaterials.Length)
+            {
+                return null;
+            }
+
+            return m_SourceMaterials[subMeshIndex];
         }
 
         public GPUDrivenMaterialProxy GetMaterialProxy(int subMeshIndex)
@@ -204,7 +279,7 @@ namespace VividRP.Runtime.GPUDriven
             if (m_SourceMesh == null)
             {
                 validationMessage =
-                    "Source Mesh is not resolved. Attach a MeshRenderer or SkinnedMeshRenderer, or assign a compatible Renderer.";
+                    "Source Mesh is not resolved. Assign a MeshFilter sharedMesh, keep a source Renderer, or assign a compatible Renderer.";
                 return false;
             }
 
@@ -301,22 +376,57 @@ namespace VividRP.Runtime.GPUDriven
             m_SourceRenderer = renderer;
             m_SourceMesh = mesh;
 
+            bool materialsChanged = EnsureSourceMaterialArraySize();
+            bool stateChanged = false;
+            if (renderer != null)
+            {
+                materialsChanged |= SetSourceMaterials(renderer.sharedMaterials);
+                stateChanged = CaptureRendererState(renderer);
+            }
+
             bool collectionsChanged = EnsureMeshletCollectionArraySize();
             bool proxiesChanged = EnsureMaterialProxyArraySize();
-            return rendererChanged || meshChanged || collectionsChanged || proxiesChanged;
+            return rendererChanged || meshChanged || materialsChanged || stateChanged || collectionsChanged || proxiesChanged;
         }
 
         private bool ClearSource()
         {
             bool changed = m_SourceRenderer != null
                 || m_SourceMesh != null
+                || (m_SourceMaterials?.Length ?? 0) > 0
                 || (m_MeshletCollections?.Length ?? 0) > 0
                 || (m_MaterialProxies?.Length ?? 0) > 0;
             m_SourceRenderer = null;
             m_SourceMesh = null;
+            m_SourceMaterials = Array.Empty<Material>();
             m_MeshletCollections = Array.Empty<VividMeshletCollectionAsset>();
             m_MaterialProxies = Array.Empty<GPUDrivenMaterialProxy>();
             return changed;
+        }
+
+        private bool EnsureSourceMaterialArraySize()
+        {
+            int expectedCount = subMeshCount;
+            if (expectedCount <= 0)
+            {
+                bool cleared = m_SourceMaterials is { Length: > 0 };
+                m_SourceMaterials = Array.Empty<Material>();
+                return cleared;
+            }
+
+            if (m_SourceMaterials != null && m_SourceMaterials.Length == expectedCount)
+            {
+                return false;
+            }
+
+            var resizedMaterials = new Material[expectedCount];
+            if (m_SourceMaterials != null)
+            {
+                Array.Copy(m_SourceMaterials, resizedMaterials, Mathf.Min(expectedCount, m_SourceMaterials.Length));
+            }
+
+            m_SourceMaterials = resizedMaterials;
+            return true;
         }
 
         private bool EnsureMeshletCollectionArraySize()
@@ -404,9 +514,69 @@ namespace VividRP.Runtime.GPUDriven
             return renderer != null;
         }
 
+        private bool TryFindPreferredMesh(out Mesh mesh)
+        {
+            if (TryGetComponent(out MeshFilter meshFilter) && TryExtractMesh(meshFilter, out mesh))
+            {
+                return true;
+            }
+
+            MeshFilter candidate = null;
+            foreach (MeshFilter childMeshFilter in GetComponentsInChildren<MeshFilter>(true))
+            {
+                if (!TryExtractMesh(childMeshFilter, out mesh))
+                {
+                    continue;
+                }
+
+                if (candidate != null && candidate != childMeshFilter)
+                {
+                    mesh = null;
+                    return false;
+                }
+
+                candidate = childMeshFilter;
+            }
+
+            if (candidate != null)
+            {
+                mesh = candidate.sharedMesh;
+                return mesh != null;
+            }
+
+            mesh = null;
+            return false;
+        }
+
         private static bool AreCollectionsEqual(
             VividMeshletCollectionAsset[] lhs,
             VividMeshletCollectionAsset[] rhs
+        )
+        {
+            if (ReferenceEquals(lhs, rhs))
+            {
+                return true;
+            }
+
+            if (lhs == null || rhs == null || lhs.Length != rhs.Length)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < lhs.Length; index++)
+            {
+                if (lhs[index] != rhs[index])
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool AreMaterialsEqual(
+            Material[] lhs,
+            Material[] rhs
         )
         {
             if (ReferenceEquals(lhs, rhs))
@@ -454,6 +624,31 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             return true;
+        }
+
+        private bool CaptureRendererState(Renderer renderer)
+        {
+            bool sourceRenderingEnabled = renderer.enabled;
+            ShadowCastingMode shadowCastingMode = renderer.shadowCastingMode;
+            bool receiveShadows = renderer.receiveShadows;
+            MotionVectorGenerationMode motionVectorGenerationMode = renderer.motionVectorGenerationMode;
+            uint renderingLayerMask = (uint) renderer.renderingLayerMask;
+            bool sourceWasSkinned = renderer is SkinnedMeshRenderer;
+
+            bool changed = m_SourceRenderingEnabled != sourceRenderingEnabled
+                || m_ShadowCastingMode != shadowCastingMode
+                || m_ReceiveShadows != receiveShadows
+                || m_MotionVectorGenerationMode != motionVectorGenerationMode
+                || m_RenderingLayerMask != renderingLayerMask
+                || m_SourceWasSkinned != sourceWasSkinned;
+
+            m_SourceRenderingEnabled = sourceRenderingEnabled;
+            m_ShadowCastingMode = shadowCastingMode;
+            m_ReceiveShadows = receiveShadows;
+            m_MotionVectorGenerationMode = motionVectorGenerationMode;
+            m_RenderingLayerMask = renderingLayerMask;
+            m_SourceWasSkinned = sourceWasSkinned;
+            return changed;
         }
 
         private void SyncDatabaseRegistration()
@@ -547,6 +742,12 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             return property.GetValue(currentRenderPipeline) is bool enableGPUDriven && enableGPUDriven;
+        }
+
+        internal static bool TryExtractMesh(MeshFilter meshFilter, out Mesh mesh)
+        {
+            mesh = meshFilter != null ? meshFilter.sharedMesh : null;
+            return mesh != null;
         }
     }
 }

@@ -1,8 +1,10 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Mathematics;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
+using VividRP.Editor.GPUDriven;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Bindless;
 using VividRP.Runtime.GPUDriven.Meshlets;
@@ -244,6 +246,72 @@ namespace VividRP.Editor.Tests
                 if (bumpMap != null)
                 {
                     Object.DestroyImmediate(bumpMap);
+                }
+            }
+        }
+
+        [Test]
+        public void Build_UsesMaterialProxyData_WhenMeshRendererWasRemoved()
+        {
+            Shader shader = Shader.Find("VividRP/Material/StandardLit");
+            if (shader == null)
+            {
+                Assert.Ignore("VividRP/Material/StandardLit shader is not available.");
+            }
+
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            Texture2D baseMap = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+            GPUDrivenMaterialProxy materialProxy = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("RendererlessProxyMesh");
+                material = new Material(shader);
+                baseMap = new Texture2D(1, 1);
+                material.SetColor("_BaseColor", new Color(0.3f, 0.4f, 0.5f, 1.0f));
+                material.SetTexture("_BaseMap", baseMap);
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                materialProxy.SourceMaterial = material;
+
+                meshletCollection = CreateMeshletCollectionAsset(
+                    "RendererlessProxyCollection",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[] { CreateVertex(0.0f, 0.0f, 0.0f), CreateVertex(1.0f, 0.0f, 0.0f), CreateVertex(0.0f, 1.0f, 0.0f) },
+                    new byte[] { 0, 1, 2 }
+                );
+
+                gameObject = CreateMeshletRendererObject("Renderer_RendererlessProxy", mesh, new[] { material }, out MeshletRenderer meshletRenderer);
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+                MeshletRendererEditorUtility.TakeOverAndRemoveSourceMeshRenderer(meshletRenderer);
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+                GPUDrivenMaterialProxy syncedProxy = meshletRenderer.GetMaterialProxy(0);
+
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var bindlessTextureContainer = new BindlessTextureContainer(new FakeBindlessTextureDescriptorAllocator(16));
+
+                builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer);
+
+                Assert.That(gameObject.GetComponent<MeshRenderer>(), Is.Null);
+                Assert.That(sceneData.InstanceCount, Is.EqualTo(1));
+                Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.Materials[0].AlbedoColor.x, Is.EqualTo(syncedProxy.BaseColor.r).Within(0.0001f));
+                Assert.That(sceneData.Materials[0].AlbedoIndex, Is.Not.EqualTo(VividMaterialData.NoTextureIndex));
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, null, material, mesh, meshletCollection, materialProxy);
+
+                if (baseMap != null)
+                {
+                    Object.DestroyImmediate(baseMap);
                 }
             }
         }

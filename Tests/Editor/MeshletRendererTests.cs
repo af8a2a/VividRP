@@ -192,6 +192,45 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void RefreshSource_PreservesSourceMeshAndMaterials_WhenMeshRendererWasRemoved()
+        {
+            Shader shader = Shader.Find("Hidden/InternalErrorShader");
+            Assert.That(shader, Is.Not.Null);
+
+            var gameObject = new GameObject("MeshletRenderer_RendererlessRefresh");
+            Mesh mesh = CreateSingleSubMeshMesh("RendererlessRefreshMesh");
+            var meshFilter = gameObject.AddComponent<MeshFilter>();
+            MeshRenderer meshRenderer = gameObject.AddComponent<MeshRenderer>();
+            meshRenderer.sharedMaterial = new Material(shader);
+            var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+
+            try
+            {
+                meshFilter.sharedMesh = mesh;
+                meshletRenderer.RefreshSource();
+
+                Assert.That(meshletRenderer.GetSourceMaterial(0), Is.SameAs(meshRenderer.sharedMaterial));
+
+                Object.DestroyImmediate(meshRenderer);
+                meshletRenderer.RefreshSource();
+
+                Assert.That(meshletRenderer.sourceRenderer, Is.Null);
+                Assert.That(meshletRenderer.sourceMesh, Is.SameAs(mesh));
+                Assert.That(meshletRenderer.GetSourceMaterial(0), Is.Not.Null);
+            }
+            finally
+            {
+                if (meshletRenderer.GetSourceMaterial(0) != null)
+                {
+                    Object.DestroyImmediate(meshletRenderer.GetSourceMaterial(0));
+                }
+
+                Object.DestroyImmediate(gameObject);
+                Object.DestroyImmediate(mesh);
+            }
+        }
+
+        [Test]
         public void LateUpdate_TogglesForceRenderingOff_WhenTakeOverConditionsChange()
         {
             Shader shader = Shader.Find("Hidden/InternalErrorShader");
@@ -291,6 +330,57 @@ namespace VividRP.Editor.Tests
             {
                 Object.DestroyImmediate(gameObject);
                 Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
+        public void TakeOverAndRemoveSourceMeshRenderer_RemovesRendererButKeepsValidBindings()
+        {
+            Shader shader = Shader.Find("Hidden/InternalErrorShader");
+            Assert.That(shader, Is.Not.Null);
+
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+            GPUDrivenMaterialProxy materialProxy = null;
+
+            try
+            {
+                gameObject = new GameObject("MeshletRenderer_RemoveMeshRenderer");
+                mesh = CreateSingleSubMeshMesh("RemoveMeshRendererMesh");
+                material = new Material(shader);
+                meshletCollection = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+
+                gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+                MeshRenderer meshRenderer = gameObject.AddComponent<MeshRenderer>();
+                meshRenderer.sharedMaterial = material;
+
+                MeshletRenderer meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+                meshletCollection.SourceSubmeshIndex = 0;
+
+                meshletRenderer.RefreshSource();
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+
+                MeshletRendererSourceRendererDetachResult result =
+                    MeshletRendererEditorUtility.TakeOverAndRemoveSourceMeshRenderer(meshletRenderer);
+
+                Assert.That(result.Success, Is.True, result.ErrorMessage);
+                Assert.That(gameObject.GetComponent<MeshRenderer>(), Is.Null);
+                Assert.That(meshletRenderer.sourceRenderer, Is.Null);
+                Assert.That(meshletRenderer.sourceMesh, Is.SameAs(mesh));
+                Assert.That(meshletRenderer.GetSourceMaterial(0), Is.SameAs(material));
+                Assert.That(meshletRenderer.TryValidate(out string validationMessage), Is.True, validationMessage);
+            }
+            finally
+            {
+                Object.DestroyImmediate(materialProxy);
+                Object.DestroyImmediate(meshletCollection);
+                Object.DestroyImmediate(gameObject);
+                Object.DestroyImmediate(material);
+                Object.DestroyImmediate(mesh);
             }
         }
 

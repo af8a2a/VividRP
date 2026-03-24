@@ -43,7 +43,7 @@ namespace VividRP.Runtime.GPUDriven
             MeshletRenderer meshletRenderer,
             Renderer sourceRenderer,
             Mesh sourceMesh,
-            Material[] sharedMaterials,
+            Material[] sourceMaterials,
             VividMeshletCollectionAsset[] meshletCollections,
             GPUDrivenMaterialProxy[] materialProxies
         )
@@ -51,7 +51,7 @@ namespace VividRP.Runtime.GPUDriven
             MeshletRenderer = meshletRenderer;
             SourceRenderer = sourceRenderer;
             SourceMesh = sourceMesh;
-            SharedMaterials = sharedMaterials ?? Array.Empty<Material>();
+            SharedMaterials = sourceMaterials ?? Array.Empty<Material>();
             MeshletCollections = meshletCollections ?? Array.Empty<VividMeshletCollectionAsset>();
             MaterialProxies = materialProxies ?? Array.Empty<GPUDrivenMaterialProxy>();
         }
@@ -254,17 +254,11 @@ namespace VividRP.Runtime.GPUDriven
             Renderer sourceRenderer = meshletRenderer.sourceRenderer;
             Mesh sourceMesh = meshletRenderer.sourceMesh;
             bool isValid = meshletRenderer.TryValidateRuntimeBindings(out _);
-            Matrix4x4 objectToWorldMatrix = sourceRenderer != null
-                ? sourceRenderer.localToWorldMatrix
-                : meshletRenderer.transform.localToWorldMatrix;
-            Matrix4x4 worldToObjectMatrix = sourceRenderer != null
-                ? sourceRenderer.worldToLocalMatrix
-                : meshletRenderer.transform.worldToLocalMatrix;
+            Matrix4x4 objectToWorldMatrix = meshletRenderer.transform.localToWorldMatrix;
+            Matrix4x4 worldToObjectMatrix = meshletRenderer.transform.worldToLocalMatrix;
             Bounds localBounds = sourceMesh != null ? sourceMesh.bounds : default;
-            Bounds worldBounds = sourceRenderer != null
-                ? sourceRenderer.bounds
-                : TransformBounds(localBounds, objectToWorldMatrix);
-            Material[] sharedMaterials = sourceRenderer != null ? sourceRenderer.sharedMaterials : Array.Empty<Material>();
+            Bounds worldBounds = TransformBounds(localBounds, objectToWorldMatrix);
+            int materialCount = meshletRenderer.sourceMaterials.Count;
 
             return new VividMeshletRendererRenderData
             {
@@ -275,21 +269,24 @@ namespace VividRP.Runtime.GPUDriven
                 worldToObjectMatrix = worldToObjectMatrix,
                 localBounds = localBounds,
                 worldBounds = worldBounds,
-                renderingLayerMask = sourceRenderer != null ? (uint) sourceRenderer.renderingLayerMask : 0u,
-                shadowCastingMode = sourceRenderer != null ? sourceRenderer.shadowCastingMode : ShadowCastingMode.Off,
-                motionVectorGenerationMode = sourceRenderer != null
-                    ? sourceRenderer.motionVectorGenerationMode
-                    : MotionVectorGenerationMode.Camera,
-                flags = BuildFlags(meshletRenderer, sourceRenderer, isValid),
+                renderingLayerMask = meshletRenderer.renderingLayerMask,
+                shadowCastingMode = meshletRenderer.shadowCastingMode,
+                motionVectorGenerationMode = meshletRenderer.motionVectorGenerationMode,
+                flags = BuildFlags(meshletRenderer, isValid),
                 subMeshCount = sourceMesh != null ? Mathf.Max(1, sourceMesh.subMeshCount) : 0,
-                materialCount = sharedMaterials.Length,
+                materialCount = materialCount,
             };
         }
 
         private static VividMeshletRendererResources CreateRendererResources(MeshletRenderer meshletRenderer)
         {
             Renderer sourceRenderer = meshletRenderer.sourceRenderer;
-            Material[] sharedMaterials = sourceRenderer != null ? sourceRenderer.sharedMaterials : Array.Empty<Material>();
+            int sourceMaterialCount = meshletRenderer.sourceMaterials.Count;
+            var sourceMaterials = new Material[sourceMaterialCount];
+            for (int index = 0; index < sourceMaterialCount; index++)
+            {
+                sourceMaterials[index] = meshletRenderer.GetSourceMaterial(index);
+            }
 
             int meshletCollectionCount = meshletRenderer.meshletCollections.Count;
             var meshletCollections = new VividMeshletCollectionAsset[meshletCollectionCount];
@@ -309,7 +306,7 @@ namespace VividRP.Runtime.GPUDriven
                 meshletRenderer,
                 sourceRenderer,
                 meshletRenderer.sourceMesh,
-                sharedMaterials,
+                sourceMaterials,
                 meshletCollections,
                 materialProxies
             );
@@ -317,12 +314,11 @@ namespace VividRP.Runtime.GPUDriven
 
         private static VividMeshletRendererFlags BuildFlags(
             MeshletRenderer meshletRenderer,
-            Renderer sourceRenderer,
             bool isValid
         )
         {
             VividMeshletRendererFlags flags = VividMeshletRendererFlags.None;
-            GameObject targetGameObject = sourceRenderer != null ? sourceRenderer.gameObject : meshletRenderer.gameObject;
+            GameObject targetGameObject = meshletRenderer.gameObject;
 
             if (targetGameObject.activeInHierarchy)
             {
@@ -339,17 +335,17 @@ namespace VividRP.Runtime.GPUDriven
                 flags |= VividMeshletRendererFlags.Valid;
             }
 
-            if (sourceRenderer != null && sourceRenderer.enabled)
+            if (meshletRenderer.sourceRenderingEnabled)
             {
                 flags |= VividMeshletRendererFlags.SourceRendererEnabled;
             }
 
-            if (sourceRenderer != null && sourceRenderer.shadowCastingMode != ShadowCastingMode.Off)
+            if (meshletRenderer.shadowCastingMode != ShadowCastingMode.Off)
             {
                 flags |= VividMeshletRendererFlags.CastShadows;
             }
 
-            if (sourceRenderer != null && sourceRenderer.receiveShadows)
+            if (meshletRenderer.receiveShadows)
             {
                 flags |= VividMeshletRendererFlags.ReceiveShadows;
             }
@@ -359,7 +355,7 @@ namespace VividRP.Runtime.GPUDriven
                 flags |= VividMeshletRendererFlags.Static;
             }
 
-            if (sourceRenderer is SkinnedMeshRenderer)
+            if (meshletRenderer.sourceWasSkinned)
             {
                 flags |= VividMeshletRendererFlags.Skinned;
             }

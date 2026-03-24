@@ -38,18 +38,16 @@ namespace VividRP.Editor.GPUDriven
             RefreshSource(meshletRenderer, "Refresh Meshlet Renderer Source");
 
             Mesh sourceMesh = meshletRenderer.sourceMesh;
-            Renderer sourceRenderer = meshletRenderer.sourceRenderer;
-            if (sourceMesh == null || sourceRenderer == null)
+            if (sourceMesh == null)
             {
                 return new GPUDrivenMaterialProxyBindingResult(
                     false,
-                    "MeshletRenderer source Mesh/Renderer is not resolved.",
+                    "MeshletRenderer source Mesh is not resolved.",
                     null,
                     null
                 );
             }
 
-            Material[] sharedMaterials = sourceRenderer.sharedMaterials ?? Array.Empty<Material>();
             int expectedCount = meshletRenderer.subMeshCount;
             var materialProxies = new GPUDrivenMaterialProxy[expectedCount];
             var createdAssetPaths = new List<string>();
@@ -61,7 +59,7 @@ namespace VividRP.Editor.GPUDriven
 
             for (int subMeshIndex = 0; subMeshIndex < expectedCount; subMeshIndex++)
             {
-                Material sourceMaterial = GetMaterialForSubMesh(sharedMaterials, subMeshIndex);
+                Material sourceMaterial = meshletRenderer.GetSourceMaterial(subMeshIndex);
                 if (sourceMaterial == null)
                 {
                     warnings.Add($"Submesh {subMeshIndex} has no source Material, so no GPUDriven proxy was created.");
@@ -130,13 +128,11 @@ namespace VividRP.Editor.GPUDriven
 
             RefreshSource(meshletRenderer, "Refresh Meshlet Renderer Source");
 
-            Renderer sourceRenderer = meshletRenderer.sourceRenderer;
-            if (sourceRenderer == null)
+            if (meshletRenderer.sourceMesh == null)
             {
-                return new GPUDrivenMaterialProxySyncResult(false, false, "MeshletRenderer source Renderer is not resolved.", null);
+                return new GPUDrivenMaterialProxySyncResult(false, false, "MeshletRenderer source Mesh is not resolved.", null);
             }
 
-            Material[] sharedMaterials = sourceRenderer.sharedMaterials ?? Array.Empty<Material>();
             var warnings = new List<string>();
             bool changed = false;
 
@@ -149,7 +145,7 @@ namespace VividRP.Editor.GPUDriven
                     continue;
                 }
 
-                Material sourceMaterial = GetMaterialForSubMesh(sharedMaterials, subMeshIndex);
+                Material sourceMaterial = meshletRenderer.GetSourceMaterial(subMeshIndex);
                 if (sourceMaterial == null)
                 {
                     warnings.Add($"Submesh {subMeshIndex} has no source Material to synchronize from.");

@@ -247,6 +247,54 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void RepairTakeOverBindings_CreatesMissingAssetsAndMaterialProxies_WhenSourceMeshIsPersistent()
+        {
+            EnsureSupportedPlatform();
+
+            Shader shader = Shader.Find("Hidden/InternalErrorShader");
+            Assert.That(shader, Is.Not.Null);
+
+            string meshPath = TempFolder + "/RepairMesh.asset";
+            Mesh mesh = CreateSingleSubMeshMesh("RepairMesh");
+            AssetDatabase.CreateAsset(mesh, meshPath);
+            mesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
+
+            Material material = new Material(shader);
+            GameObject gameObject = null;
+
+            try
+            {
+                gameObject = new GameObject("MeshletRenderer_RepairTakeOver");
+                gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+                MeshRenderer meshRenderer = gameObject.AddComponent<MeshRenderer>();
+                meshRenderer.sharedMaterial = material;
+                MeshletRenderer meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+                meshletRenderer.RefreshSource();
+
+                Assert.That(meshletRenderer.TryValidate(out _), Is.False);
+
+                MeshletRendererTakeOverRepairResult result =
+                    MeshletRendererEditorUtility.RepairTakeOverBindings(meshletRenderer);
+
+                Assert.That(result.Success, Is.True, result.ErrorMessage);
+                Assert.That(result.CreatedMeshletAssetPaths, Has.Length.EqualTo(1));
+                Assert.That(result.CreatedMaterialProxyAssetPaths, Has.Length.EqualTo(1));
+                Assert.That(meshletRenderer.GetMeshletCollection(0), Is.Not.Null);
+                Assert.That(meshletRenderer.GetMaterialProxy(0), Is.Not.Null);
+                Assert.That(meshletRenderer.TryValidate(out string validationMessage), Is.True, validationMessage);
+                Assert.That(
+                    AssetDatabase.GetAssetPath(meshletRenderer.GetMaterialProxy(0)),
+                    Is.EqualTo($"{TempFolder}/RepairMesh_SubMesh0_GPUDriven.asset")
+                );
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
         public void CollectMeshletCollections_DistinguishesMeshesThatShareAssetPath()
         {
             EnsureSupportedPlatform();

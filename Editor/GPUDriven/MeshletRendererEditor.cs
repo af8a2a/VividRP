@@ -9,6 +9,37 @@ using VividRP.Runtime.GPUDriven.Meshlets;
 
 namespace VividRP.Editor.GPUDriven
 {
+    internal readonly struct MeshletRendererTakeOverRepairResult
+    {
+        public MeshletRendererTakeOverRepairResult(
+            bool success,
+            bool changed,
+            string errorMessage,
+            string[] createdMeshletAssetPaths,
+            string[] createdMaterialProxyAssetPaths,
+            string[] warnings)
+        {
+            Success = success;
+            Changed = changed;
+            ErrorMessage = errorMessage;
+            CreatedMeshletAssetPaths = createdMeshletAssetPaths ?? Array.Empty<string>();
+            CreatedMaterialProxyAssetPaths = createdMaterialProxyAssetPaths ?? Array.Empty<string>();
+            Warnings = warnings ?? Array.Empty<string>();
+        }
+
+        public bool Success { get; }
+
+        public bool Changed { get; }
+
+        public string ErrorMessage { get; }
+
+        public string[] CreatedMeshletAssetPaths { get; }
+
+        public string[] CreatedMaterialProxyAssetPaths { get; }
+
+        public string[] Warnings { get; }
+    }
+
     [CustomEditor(typeof(MeshletRenderer))]
     internal sealed class MeshletRendererEditor : UnityEditor.Editor
     {
@@ -78,6 +109,26 @@ namespace VividRP.Editor.GPUDriven
         private void DrawActions(MeshletRenderer meshletRenderer)
         {
             EditorGUILayout.Space();
+
+            if (meshletRenderer.takeOverSourceRenderer && !meshletRenderer.TryValidate(out _))
+            {
+                if (GUILayout.Button("Repair Takeover Bindings"))
+                {
+                    MeshletRendererTakeOverRepairResult repairResult =
+                        MeshletRendererEditorUtility.RepairTakeOverBindings(meshletRenderer);
+
+                    if (!repairResult.Success && !string.IsNullOrEmpty(repairResult.ErrorMessage))
+                    {
+                        Debug.LogWarning($"[VividRP] {repairResult.ErrorMessage}", meshletRenderer);
+                    }
+
+                    LogWarnings(meshletRenderer, repairResult.Warnings);
+                    SelectLastCreatedAsset(repairResult.CreatedMaterialProxyAssetPaths, repairResult.CreatedMeshletAssetPaths);
+                    serializedObject.Update();
+                }
+
+                EditorGUILayout.Space();
+            }
 
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -184,10 +235,156 @@ namespace VividRP.Editor.GPUDriven
                 Debug.LogWarning($"[VividRP] {warnings[warningIndex]}", context);
             }
         }
+
+        private static void SelectLastCreatedAsset(params string[][] assetPathGroups)
+        {
+            if (assetPathGroups == null)
+            {
+                return;
+            }
+
+            for (int groupIndex = assetPathGroups.Length - 1; groupIndex >= 0; groupIndex--)
+            {
+                string[] assetPaths = assetPathGroups[groupIndex];
+                if (assetPaths == null || assetPaths.Length == 0)
+                {
+                    continue;
+                }
+
+                UnityEngine.Object asset = AssetDatabase.LoadMainAssetAtPath(assetPaths[^1]);
+                if (asset != null)
+                {
+                    Selection.activeObject = asset;
+                }
+
+                return;
+            }
+        }
     }
 
     internal static class MeshletRendererEditorUtility
     {
+        internal static MeshletRendererTakeOverRepairResult RepairTakeOverBindings(MeshletRenderer meshletRenderer)
+        {
+            if (meshletRenderer == null)
+            {
+                return new MeshletRendererTakeOverRepairResult(false, false, "MeshletRenderer is null.", null, null, null);
+            }
+
+            bool changed = RefreshSource(meshletRenderer);
+            Mesh sourceMesh = meshletRenderer.sourceMesh;
+            Renderer sourceRenderer = meshletRenderer.sourceRenderer;
+            if (sourceMesh == null || sourceRenderer == null)
+            {
+                return new MeshletRendererTakeOverRepairResult(
+                    false,
+                    changed,
+                    "MeshletRenderer source Mesh/Renderer is not resolved.",
+                    null,
+                    null,
+                    null
+                );
+            }
+
+            int expectedCount = meshletRenderer.subMeshCount;
+            var warnings = new List<string>();
+            var createdMeshletAssetPaths = new List<string>();
+            var resolvedMeshletCollections = new VividMeshletCollectionAsset[expectedCount];
+            for (int subMeshIndex = 0; subMeshIndex < expectedCount; subMeshIndex++)
+            {
+                resolvedMeshletCollections[subMeshIndex] = meshletRenderer.GetMeshletCollection(subMeshIndex);
+            }
+
+            FillMissingMeshletCollections(sourceMesh, resolvedMeshletCollections);
+
+            if (HasMissingEntries(resolvedMeshletCollections))
+            {
+                if (IsPersistentMesh(sourceMesh))
+                {
+                    string[] generatedAssetPaths = GenerateMissingMeshletCollections(sourceMesh);
+                    if (generatedAssetPaths.Length > 0)
+                    {
+                        createdMeshletAssetPaths.AddRange(generatedAssetPaths);
+                        changed = true;
+                    }
+
+                    FillMissingMeshletCollections(sourceMesh, resolvedMeshletCollections);
+                }
+                else
+                {
+                    warnings.Add("Source Mesh is not stored as an asset, so missing meshlet assets cannot be generated automatically.");
+                }
+            }
+
+            Undo.RecordObject(meshletRenderer, "Repair Meshlet Renderer Takeover Bindings");
+            if (meshletRenderer.SetMeshletCollections(resolvedMeshletCollections))
+            {
+                changed = true;
+                EditorUtility.SetDirty(meshletRenderer);
+            }
+
+            GPUDrivenMaterialProxyBindingResult bindingResult =
+                GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxies(meshletRenderer);
+            warnings.AddRange(bindingResult.Warnings);
+
+            if (!bindingResult.Success)
+            {
+                return new MeshletRendererTakeOverRepairResult(
+                    false,
+                    changed,
+                    bindingResult.ErrorMessage,
+                    createdMeshletAssetPaths.ToArray(),
+                    bindingResult.CreatedAssetPaths,
+                    warnings.ToArray()
+                );
+            }
+
+            if (bindingResult.CreatedAssetPaths.Length > 0)
+            {
+                changed = true;
+            }
+
+            GPUDrivenMaterialProxySyncResult syncResult =
+                GPUDrivenMaterialProxyEditorUtility.SyncMaterialProxiesFromSourceMaterials(meshletRenderer);
+            warnings.AddRange(syncResult.Warnings);
+
+            if (!syncResult.Success)
+            {
+                return new MeshletRendererTakeOverRepairResult(
+                    false,
+                    changed || syncResult.Changed,
+                    syncResult.ErrorMessage,
+                    createdMeshletAssetPaths.ToArray(),
+                    bindingResult.CreatedAssetPaths,
+                    warnings.ToArray()
+                );
+            }
+
+            changed |= syncResult.Changed;
+            VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+            if (!meshletRenderer.TryValidate(out string validationMessage))
+            {
+                return new MeshletRendererTakeOverRepairResult(
+                    false,
+                    changed,
+                    validationMessage,
+                    createdMeshletAssetPaths.ToArray(),
+                    bindingResult.CreatedAssetPaths,
+                    warnings.ToArray()
+                );
+            }
+
+            return new MeshletRendererTakeOverRepairResult(
+                true,
+                changed,
+                string.Empty,
+                createdMeshletAssetPaths.ToArray(),
+                bindingResult.CreatedAssetPaths,
+                warnings.ToArray()
+            );
+        }
+
         internal static VividMeshletCollectionAsset[] CollectMeshletCollections(Mesh mesh)
         {
             if (!TryGetMeshAssetKey(mesh, out string meshGuid, out long meshLocalFileId, out string meshName, out string folderPath))
@@ -252,6 +449,57 @@ namespace VividRP.Editor.GPUDriven
         internal static bool IsPersistentMesh(Mesh mesh)
         {
             return TryGetMeshAssetKey(mesh, out _, out _, out _, out _);
+        }
+
+        private static bool RefreshSource(MeshletRenderer meshletRenderer)
+        {
+            Undo.RecordObject(meshletRenderer, "Refresh Meshlet Renderer Source");
+            bool changed = meshletRenderer.RefreshSource();
+            if (changed)
+            {
+                EditorUtility.SetDirty(meshletRenderer);
+            }
+
+            return changed;
+        }
+
+        private static void FillMissingMeshletCollections(
+            Mesh sourceMesh,
+            VividMeshletCollectionAsset[] resolvedMeshletCollections)
+        {
+            if (sourceMesh == null || resolvedMeshletCollections == null || resolvedMeshletCollections.Length == 0)
+            {
+                return;
+            }
+
+            VividMeshletCollectionAsset[] collectedMeshletCollections = CollectMeshletCollections(sourceMesh);
+            int count = Mathf.Min(resolvedMeshletCollections.Length, collectedMeshletCollections.Length);
+            for (int subMeshIndex = 0; subMeshIndex < count; subMeshIndex++)
+            {
+                if (resolvedMeshletCollections[subMeshIndex] == null && collectedMeshletCollections[subMeshIndex] != null)
+                {
+                    resolvedMeshletCollections[subMeshIndex] = collectedMeshletCollections[subMeshIndex];
+                }
+            }
+        }
+
+        private static bool HasMissingEntries<T>(T[] values)
+            where T : UnityEngine.Object
+        {
+            if (values == null)
+            {
+                return true;
+            }
+
+            for (int index = 0; index < values.Length; index++)
+            {
+                if (values[index] == null)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static bool TryGetMeshAssetKey(

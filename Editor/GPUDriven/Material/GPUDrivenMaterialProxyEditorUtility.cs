@@ -35,7 +35,7 @@ namespace VividRP.Editor.GPUDriven
                 return new GPUDrivenMaterialProxyBindingResult(false, "MeshletRenderer is null.", null, null);
             }
 
-            meshletRenderer.RefreshSource();
+            RefreshSource(meshletRenderer, "Refresh Meshlet Renderer Source");
 
             Mesh sourceMesh = meshletRenderer.sourceMesh;
             Renderer sourceRenderer = meshletRenderer.sourceRenderer;
@@ -54,6 +54,10 @@ namespace VividRP.Editor.GPUDriven
             var materialProxies = new GPUDrivenMaterialProxy[expectedCount];
             var createdAssetPaths = new List<string>();
             var warnings = new List<string>();
+            for (int subMeshIndex = 0; subMeshIndex < expectedCount; subMeshIndex++)
+            {
+                materialProxies[subMeshIndex] = meshletRenderer.GetMaterialProxy(subMeshIndex);
+            }
 
             for (int subMeshIndex = 0; subMeshIndex < expectedCount; subMeshIndex++)
             {
@@ -107,9 +111,12 @@ namespace VividRP.Editor.GPUDriven
             }
 
             Undo.RecordObject(meshletRenderer, "Bind GPUDriven Material Proxies");
-            meshletRenderer.SetMaterialProxies(materialProxies);
-            EditorUtility.SetDirty(meshletRenderer);
-            VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+            bool changed = meshletRenderer.SetMaterialProxies(materialProxies);
+            if (changed)
+            {
+                EditorUtility.SetDirty(meshletRenderer);
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+            }
 
             return new GPUDrivenMaterialProxyBindingResult(true, string.Empty, createdAssetPaths.ToArray(), warnings.ToArray());
         }
@@ -121,7 +128,7 @@ namespace VividRP.Editor.GPUDriven
                 return new GPUDrivenMaterialProxySyncResult(false, false, "MeshletRenderer is null.", null);
             }
 
-            meshletRenderer.RefreshSource();
+            RefreshSource(meshletRenderer, "Refresh Meshlet Renderer Source");
 
             Renderer sourceRenderer = meshletRenderer.sourceRenderer;
             if (sourceRenderer == null)
@@ -165,6 +172,20 @@ namespace VividRP.Editor.GPUDriven
             }
 
             return new GPUDrivenMaterialProxySyncResult(true, changed, string.Empty, warnings.ToArray());
+        }
+
+        private static void RefreshSource(MeshletRenderer meshletRenderer, string undoLabel)
+        {
+            if (meshletRenderer == null)
+            {
+                return;
+            }
+
+            Undo.RecordObject(meshletRenderer, undoLabel);
+            if (meshletRenderer.RefreshSource())
+            {
+                EditorUtility.SetDirty(meshletRenderer);
+            }
         }
 
         internal static string ResolveProxyAssetPath(Material sourceMaterial, Mesh sourceMesh, int subMeshIndex)

@@ -35,14 +35,14 @@ namespace VividRP.Editor.GPUDriven
                 return new GPUDrivenMaterialProxyBindingResult(false, "MeshletRenderer is null.", null, null);
             }
 
-            RefreshSource(meshletRenderer, "Refresh Meshlet Renderer Source");
+            RefreshSource(meshletRenderer, "Normalize Meshlet Renderer Source");
 
             Mesh sourceMesh = meshletRenderer.sourceMesh;
             if (sourceMesh == null)
             {
                 return new GPUDrivenMaterialProxyBindingResult(
                     false,
-                    "MeshletRenderer source Mesh is not resolved.",
+                    "MeshletRenderer source Mesh is not captured. Run the takeover flow first.",
                     null,
                     null
                 );
@@ -126,11 +126,16 @@ namespace VividRP.Editor.GPUDriven
                 return new GPUDrivenMaterialProxySyncResult(false, false, "MeshletRenderer is null.", null);
             }
 
-            RefreshSource(meshletRenderer, "Refresh Meshlet Renderer Source");
+            RefreshSource(meshletRenderer, "Normalize Meshlet Renderer Source");
 
             if (meshletRenderer.sourceMesh == null)
             {
-                return new GPUDrivenMaterialProxySyncResult(false, false, "MeshletRenderer source Mesh is not resolved.", null);
+                return new GPUDrivenMaterialProxySyncResult(
+                    false,
+                    false,
+                    "MeshletRenderer source Mesh is not captured. Run the takeover flow first.",
+                    null
+                );
             }
 
             var warnings = new List<string>();

@@ -429,6 +429,7 @@ namespace VividRP.Editor.Tests
             MeshRenderer meshRenderer = gameObject.AddComponent<MeshRenderer>();
             meshRenderer.sharedMaterials = materials;
             meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+            meshletRenderer.CaptureSourceFromRenderer(meshRenderer);
             return gameObject;
         }
 

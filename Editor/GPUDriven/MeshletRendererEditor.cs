@@ -74,7 +74,6 @@ namespace VividRP.Editor.GPUDriven
     [CustomEditor(typeof(MeshletRenderer))]
     internal sealed class MeshletRendererEditor : UnityEditor.Editor
     {
-        private SerializedProperty m_SourceRenderer;
         private SerializedProperty m_SourceMesh;
         private SerializedProperty m_SourceMaterials;
         private SerializedProperty m_SourceRenderingEnabled;
@@ -88,7 +87,6 @@ namespace VividRP.Editor.GPUDriven
 
         private void OnEnable()
         {
-            m_SourceRenderer = serializedObject.FindProperty("m_SourceRenderer");
             m_SourceMesh = serializedObject.FindProperty("m_SourceMesh");
             m_SourceMaterials = serializedObject.FindProperty("m_SourceMaterials");
             m_SourceRenderingEnabled = serializedObject.FindProperty("m_SourceRenderingEnabled");
@@ -105,7 +103,6 @@ namespace VividRP.Editor.GPUDriven
         {
             serializedObject.Update();
 
-            EditorGUILayout.PropertyField(m_SourceRenderer);
             using (new EditorGUI.DisabledScope(true))
             {
                 EditorGUILayout.PropertyField(m_SourceMesh);
@@ -135,6 +132,15 @@ namespace VividRP.Editor.GPUDriven
                 return;
             }
 
+            if (meshletRenderer.sourceMesh == null)
+            {
+                EditorGUILayout.HelpBox(
+                    "Source data has not been captured yet. Use 'Take Over And Remove MeshRenderer' to copy the attached MeshRenderer state into MeshletRenderer.",
+                    MessageType.Info
+                );
+                return;
+            }
+
             if (meshletRenderer.TryValidate(out string validationMessage))
             {
                 EditorGUILayout.HelpBox(
@@ -159,7 +165,7 @@ namespace VividRP.Editor.GPUDriven
         {
             EditorGUILayout.Space();
 
-            if (meshletRenderer.takeOverSourceRenderer && !meshletRenderer.TryValidate(out _))
+            if (meshletRenderer.takeOverSourceRenderer && meshletRenderer.sourceMesh != null && !meshletRenderer.TryValidate(out _))
             {
                 if (GUILayout.Button("Repair Takeover Bindings"))
                 {
@@ -181,9 +187,9 @@ namespace VividRP.Editor.GPUDriven
 
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Refresh Source"))
+                if (GUILayout.Button("Normalize Stored Source"))
                 {
-                    Undo.RecordObject(meshletRenderer, "Refresh Meshlet Renderer Source");
+                    Undo.RecordObject(meshletRenderer, "Normalize Meshlet Renderer Source");
                     meshletRenderer.RefreshSource();
                     EditorUtility.SetDirty(meshletRenderer);
                     serializedObject.Update();
@@ -254,7 +260,7 @@ namespace VividRP.Editor.GPUDriven
                 }
             }
 
-            using (new EditorGUI.DisabledScope(meshletRenderer.sourceRenderer is not MeshRenderer))
+            using (new EditorGUI.DisabledScope(!MeshletRendererEditorUtility.HasAttachedMeshRenderer(meshletRenderer)))
             {
                 if (GUILayout.Button("Take Over And Remove MeshRenderer"))
                 {
@@ -345,7 +351,7 @@ namespace VividRP.Editor.GPUDriven
                 return new MeshletRendererTakeOverRepairResult(
                     false,
                     changed,
-                    "MeshletRenderer source Mesh is not resolved.",
+                    "MeshletRenderer source Mesh is not captured. Run 'Take Over And Remove MeshRenderer' first.",
                     null,
                     null,
                     null
@@ -458,12 +464,32 @@ namespace VividRP.Editor.GPUDriven
                 return new MeshletRendererSourceRendererDetachResult(false, false, "MeshletRenderer is null.", null, null, null);
             }
 
+            if (!TryGetAttachedMeshRenderer(meshletRenderer, out MeshRenderer meshRenderer))
+            {
+                return new MeshletRendererSourceRendererDetachResult(
+                    false,
+                    false,
+                    "No MeshRenderer with a valid MeshFilter is attached to this GameObject.",
+                    null,
+                    null,
+                    null
+                );
+            }
+
+            Undo.RecordObject(meshletRenderer, "Capture Meshlet Renderer Source");
+            bool changed = meshletRenderer.CaptureSourceFromRenderer(meshRenderer);
+            changed |= meshletRenderer.SetTakeOverSourceRenderer(true);
+            if (changed)
+            {
+                EditorUtility.SetDirty(meshletRenderer);
+            }
+
             MeshletRendererTakeOverRepairResult repairResult = RepairTakeOverBindings(meshletRenderer);
             if (!repairResult.Success)
             {
                 return new MeshletRendererSourceRendererDetachResult(
                     false,
-                    repairResult.Changed,
+                    changed || repairResult.Changed,
                     repairResult.ErrorMessage,
                     repairResult.CreatedMeshletAssetPaths,
                     repairResult.CreatedMaterialProxyAssetPaths,
@@ -471,33 +497,7 @@ namespace VividRP.Editor.GPUDriven
                 );
             }
 
-            RefreshSource(meshletRenderer);
-            if (meshletRenderer.sourceRenderer == null)
-            {
-                return new MeshletRendererSourceRendererDetachResult(
-                    true,
-                    repairResult.Changed,
-                    string.Empty,
-                    repairResult.CreatedMeshletAssetPaths,
-                    repairResult.CreatedMaterialProxyAssetPaths,
-                    repairResult.Warnings
-                );
-            }
-
-            if (meshletRenderer.sourceRenderer is not MeshRenderer meshRenderer)
-            {
-                return new MeshletRendererSourceRendererDetachResult(
-                    false,
-                    repairResult.Changed,
-                    "Only MeshRenderer can be removed automatically in the current GPUDriven takeover flow.",
-                    repairResult.CreatedMeshletAssetPaths,
-                    repairResult.CreatedMaterialProxyAssetPaths,
-                    repairResult.Warnings
-                );
-            }
-
             Undo.DestroyObjectImmediate(meshRenderer);
-            bool changed = true;
             RefreshSource(meshletRenderer);
             VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
 
@@ -589,9 +589,14 @@ namespace VividRP.Editor.GPUDriven
             return TryGetMeshAssetKey(mesh, out _, out _, out _, out _);
         }
 
+        internal static bool HasAttachedMeshRenderer(MeshletRenderer meshletRenderer)
+        {
+            return TryGetAttachedMeshRenderer(meshletRenderer, out _);
+        }
+
         private static bool RefreshSource(MeshletRenderer meshletRenderer)
         {
-            Undo.RecordObject(meshletRenderer, "Refresh Meshlet Renderer Source");
+            Undo.RecordObject(meshletRenderer, "Normalize Meshlet Renderer Source");
             bool changed = meshletRenderer.RefreshSource();
             if (changed)
             {
@@ -699,6 +704,23 @@ namespace VividRP.Editor.GPUDriven
             }
 
             return string.Equals(meshletCollection.SourceMeshName, meshName, StringComparison.Ordinal);
+        }
+
+        private static bool TryGetAttachedMeshRenderer(MeshletRenderer meshletRenderer, out MeshRenderer meshRenderer)
+        {
+            meshRenderer = null;
+            if (meshletRenderer == null)
+            {
+                return false;
+            }
+
+            if (!meshletRenderer.TryGetComponent(out meshRenderer))
+            {
+                meshRenderer = null;
+                return false;
+            }
+
+            return MeshletRenderer.TryExtractMesh(meshRenderer, out _);
         }
     }
 }

@@ -11,9 +11,6 @@ namespace VividRP.Runtime.GPUDriven
     public class MeshletRenderer : MonoBehaviour
     {
         [SerializeField]
-        private Renderer m_SourceRenderer;
-
-        [SerializeField]
         [HideInInspector]
         private Mesh m_SourceMesh;
 
@@ -47,16 +44,7 @@ namespace VividRP.Runtime.GPUDriven
         [SerializeField]
         private bool m_TakeOverSourceRenderer = true;
 
-        [NonSerialized]
-        private Renderer m_TakenOverSourceRenderer;
-
-        [NonSerialized]
-        private bool m_CachedSourceRendererForceRenderingOff;
-
-        [NonSerialized]
-        private bool m_HasCachedSourceRendererForceRenderingOff;
-
-        public Renderer sourceRenderer => m_SourceRenderer;
+        public Renderer sourceRenderer => null;
 
         public Mesh sourceMesh => m_SourceMesh;
 
@@ -86,37 +74,37 @@ namespace VividRP.Runtime.GPUDriven
 
         public bool RefreshSource()
         {
-            if (m_SourceRenderer != null && TryExtractMesh(m_SourceRenderer, out Mesh mesh))
-            {
-                return SetSource(m_SourceRenderer, mesh);
-            }
-
-            if (TryFindPreferredRenderer(out Renderer renderer) && TryExtractMesh(renderer, out mesh))
-            {
-                return SetSource(renderer, mesh);
-            }
-
-            if (TryFindPreferredMesh(out mesh))
-            {
-                return SetSource(null, mesh);
-            }
-
-            return ClearSource();
+            bool materialsChanged = EnsureSourceMaterialArraySize();
+            bool collectionsChanged = EnsureMeshletCollectionArraySize();
+            bool proxiesChanged = EnsureMaterialProxyArraySize();
+            return materialsChanged || collectionsChanged || proxiesChanged;
         }
 
-        public bool SetSourceRenderer(Renderer renderer)
+        public bool CaptureSourceFromGameObject()
         {
-            if (renderer == null)
-            {
-                return ClearSource();
-            }
-
-            if (!TryExtractMesh(renderer, out Mesh mesh))
+            if (!TryGetAttachedRenderer(out Renderer renderer))
             {
                 return false;
             }
 
-            return SetSource(renderer, mesh);
+            return CaptureSourceFromRenderer(renderer);
+        }
+
+        public bool CaptureSourceFromRenderer(Renderer renderer)
+        {
+            if (renderer == null || !TryExtractMesh(renderer, out Mesh mesh))
+            {
+                return false;
+            }
+
+            bool meshChanged = m_SourceMesh != mesh;
+            m_SourceMesh = mesh;
+
+            bool materialsChanged = SetSourceMaterials(renderer.sharedMaterials);
+            bool stateChanged = CaptureRendererState(renderer);
+            bool collectionsChanged = EnsureMeshletCollectionArraySize();
+            bool proxiesChanged = EnsureMaterialProxyArraySize();
+            return meshChanged || materialsChanged || stateChanged || collectionsChanged || proxiesChanged;
         }
 
         public bool SetMeshletCollections(VividMeshletCollectionAsset[] meshletCollections)
@@ -202,7 +190,6 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             m_TakeOverSourceRenderer = takeOverSourceRenderer;
-            SyncSourceRendererTakeoverState();
             return true;
         }
 
@@ -279,7 +266,7 @@ namespace VividRP.Runtime.GPUDriven
             if (m_SourceMesh == null)
             {
                 validationMessage =
-                    "Source Mesh is not resolved. Assign a MeshFilter sharedMesh, keep a source Renderer, or assign a compatible Renderer.";
+                    "Source Mesh is not assigned or captured. Capture source data from an attached Renderer before enabling GPUDriven rendering.";
                 return false;
             }
 
@@ -346,19 +333,16 @@ namespace VividRP.Runtime.GPUDriven
                 return;
             }
 
-            SyncSourceRendererTakeoverState();
             VividMeshletRendererDatabase.instance.UpdateRendererData(this);
         }
 
         private void OnDisable()
         {
-            RestoreSourceRendererTakeover();
             VividMeshletRendererDatabase.instance.UnregisterRenderer(this);
         }
 
         private void OnDestroy()
         {
-            RestoreSourceRendererTakeover();
             VividMeshletRendererDatabase.instance.UnregisterRenderer(this);
         }
 
@@ -366,42 +350,6 @@ namespace VividRP.Runtime.GPUDriven
         {
             RefreshSource();
             SyncDatabaseRegistration();
-        }
-
-        private bool SetSource(Renderer renderer, Mesh mesh)
-        {
-            bool rendererChanged = m_SourceRenderer != renderer;
-            bool meshChanged = m_SourceMesh != mesh;
-
-            m_SourceRenderer = renderer;
-            m_SourceMesh = mesh;
-
-            bool materialsChanged = EnsureSourceMaterialArraySize();
-            bool stateChanged = false;
-            if (renderer != null)
-            {
-                materialsChanged |= SetSourceMaterials(renderer.sharedMaterials);
-                stateChanged = CaptureRendererState(renderer);
-            }
-
-            bool collectionsChanged = EnsureMeshletCollectionArraySize();
-            bool proxiesChanged = EnsureMaterialProxyArraySize();
-            return rendererChanged || meshChanged || materialsChanged || stateChanged || collectionsChanged || proxiesChanged;
-        }
-
-        private bool ClearSource()
-        {
-            bool changed = m_SourceRenderer != null
-                || m_SourceMesh != null
-                || (m_SourceMaterials?.Length ?? 0) > 0
-                || (m_MeshletCollections?.Length ?? 0) > 0
-                || (m_MaterialProxies?.Length ?? 0) > 0;
-            m_SourceRenderer = null;
-            m_SourceMesh = null;
-            m_SourceMaterials = Array.Empty<Material>();
-            m_MeshletCollections = Array.Empty<VividMeshletCollectionAsset>();
-            m_MaterialProxies = Array.Empty<GPUDrivenMaterialProxy>();
-            return changed;
         }
 
         private bool EnsureSourceMaterialArraySize()
@@ -479,7 +427,7 @@ namespace VividRP.Runtime.GPUDriven
             return true;
         }
 
-        private bool TryFindPreferredRenderer(out Renderer renderer)
+        private bool TryGetAttachedRenderer(out Renderer renderer)
         {
             if (TryGetComponent(out SkinnedMeshRenderer skinnedMeshRenderer) && TryExtractMesh(skinnedMeshRenderer, out _))
             {
@@ -493,58 +441,7 @@ namespace VividRP.Runtime.GPUDriven
                 return true;
             }
 
-            Renderer candidate = null;
-            foreach (Renderer childRenderer in GetComponentsInChildren<Renderer>(true))
-            {
-                if (!TryExtractMesh(childRenderer, out _))
-                {
-                    continue;
-                }
-
-                if (candidate != null && candidate != childRenderer)
-                {
-                    renderer = null;
-                    return false;
-                }
-
-                candidate = childRenderer;
-            }
-
-            renderer = candidate;
-            return renderer != null;
-        }
-
-        private bool TryFindPreferredMesh(out Mesh mesh)
-        {
-            if (TryGetComponent(out MeshFilter meshFilter) && TryExtractMesh(meshFilter, out mesh))
-            {
-                return true;
-            }
-
-            MeshFilter candidate = null;
-            foreach (MeshFilter childMeshFilter in GetComponentsInChildren<MeshFilter>(true))
-            {
-                if (!TryExtractMesh(childMeshFilter, out mesh))
-                {
-                    continue;
-                }
-
-                if (candidate != null && candidate != childMeshFilter)
-                {
-                    mesh = null;
-                    return false;
-                }
-
-                candidate = childMeshFilter;
-            }
-
-            if (candidate != null)
-            {
-                mesh = candidate.sharedMesh;
-                return mesh != null;
-            }
-
-            mesh = null;
+            renderer = null;
             return false;
         }
 
@@ -653,8 +550,6 @@ namespace VividRP.Runtime.GPUDriven
 
         private void SyncDatabaseRegistration()
         {
-            SyncSourceRendererTakeoverState();
-
             if (isActiveAndEnabled)
             {
                 VividMeshletRendererDatabase.instance.UpdateRendererData(this);
@@ -662,86 +557,6 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             VividMeshletRendererDatabase.instance.UnregisterRenderer(this);
-        }
-
-        private void SyncSourceRendererTakeoverState()
-        {
-            Renderer currentSourceRenderer = m_SourceRenderer;
-            if (m_TakenOverSourceRenderer != null && m_TakenOverSourceRenderer != currentSourceRenderer)
-            {
-                RestoreSourceRendererTakeover();
-            }
-
-            if (!ShouldTakeOverSourceRenderer())
-            {
-                RestoreSourceRendererTakeover();
-                return;
-            }
-
-            if (currentSourceRenderer == null)
-            {
-                RestoreSourceRendererTakeover();
-                return;
-            }
-
-            if (m_TakenOverSourceRenderer != currentSourceRenderer || !m_HasCachedSourceRendererForceRenderingOff)
-            {
-                m_TakenOverSourceRenderer = currentSourceRenderer;
-                m_CachedSourceRendererForceRenderingOff = currentSourceRenderer.forceRenderingOff;
-                m_HasCachedSourceRendererForceRenderingOff = true;
-            }
-
-            currentSourceRenderer.forceRenderingOff = true;
-        }
-
-        private void RestoreSourceRendererTakeover()
-        {
-            if (m_TakenOverSourceRenderer != null && m_HasCachedSourceRendererForceRenderingOff)
-            {
-                m_TakenOverSourceRenderer.forceRenderingOff = m_CachedSourceRendererForceRenderingOff;
-            }
-
-            m_TakenOverSourceRenderer = null;
-            m_HasCachedSourceRendererForceRenderingOff = false;
-            m_CachedSourceRendererForceRenderingOff = false;
-        }
-
-        private bool ShouldTakeOverSourceRenderer()
-        {
-            if (!m_TakeOverSourceRenderer || !isActiveAndEnabled || m_SourceRenderer == null)
-            {
-                return false;
-            }
-
-            if (!TryValidate(out _))
-            {
-                return false;
-            }
-
-            return IsGPUDrivenPipelineEnabled();
-        }
-
-        private static bool IsGPUDrivenPipelineEnabled()
-        {
-            RenderPipelineAsset currentRenderPipeline = GraphicsSettings.currentRenderPipeline;
-            if (currentRenderPipeline == null)
-            {
-                return false;
-            }
-
-            Type pipelineAssetType = currentRenderPipeline.GetType();
-            if (!string.Equals(pipelineAssetType.FullName, "VividRP.Runtime.VividRenderPipelineAsset", StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            var property = pipelineAssetType.GetProperty("EnableGPUDriven");
-            if (property == null || property.PropertyType != typeof(bool))
-            {
-                return false;
-            }
-
-            return property.GetValue(currentRenderPipeline) is bool enableGPUDriven && enableGPUDriven;
         }
 
         internal static bool TryExtractMesh(MeshFilter meshFilter, out Mesh mesh)

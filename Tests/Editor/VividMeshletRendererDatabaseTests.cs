@@ -26,7 +26,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void OnEnable_RegistersRendererData_WhenMeshletRendererIsAdded()
+        public void OnEnable_RegistersRendererData_WithoutCapturedSource()
         {
             Material material = null;
             Mesh mesh = null;
@@ -40,10 +40,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(VividMeshletRendererDatabase.instance.rendererCount, Is.EqualTo(1));
                 Assert.That(VividMeshletRendererDatabase.instance.TryGetRendererData(meshletRenderer, out var trackedData), Is.True);
                 Assert.That(trackedData.meshletRendererEntityId, Is.EqualTo(meshletRenderer.GetEntityId()));
-                Assert.That(trackedData.sourceRendererEntityId, Is.EqualTo(gameObject.GetComponent<MeshRenderer>().GetEntityId()));
-                Assert.That(trackedData.sourceMeshEntityId, Is.EqualTo(mesh.GetEntityId()));
-                Assert.That(trackedData.subMeshCount, Is.EqualTo(1));
-                Assert.That(trackedData.materialCount, Is.EqualTo(1));
+                Assert.That(trackedData.sourceRendererEntityId, Is.EqualTo(EntityId.None));
+                Assert.That(trackedData.sourceMeshEntityId, Is.EqualTo(EntityId.None));
+                Assert.That(trackedData.subMeshCount, Is.Zero);
+                Assert.That(trackedData.materialCount, Is.Zero);
                 Assert.That((trackedData.flags & VividMeshletRendererFlags.Enabled) != 0, Is.True);
                 Assert.That((trackedData.flags & VividMeshletRendererFlags.Valid) != 0, Is.False);
             }
@@ -54,7 +54,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void UpdateRendererData_CapturesResources_WhenBindingsAreValid()
+        public void UpdateRendererData_CapturesResources_WhenSourceWasExplicitlyCaptured()
         {
             Material material = null;
             Mesh mesh = null;
@@ -66,6 +66,8 @@ namespace VividRP.Editor.Tests
             {
                 gameObject = CreateMeshRendererObject("MeshletRenderer_ValidBinding", out mesh, out material);
                 var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+                meshletRenderer.CaptureSourceFromRenderer(gameObject.GetComponent<MeshRenderer>());
+
                 meshletCollection = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
                 materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
                 meshletCollection.SourceSubmeshIndex = 0;
@@ -75,10 +77,12 @@ namespace VividRP.Editor.Tests
                 VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
 
                 Assert.That(VividMeshletRendererDatabase.instance.TryGetRendererData(meshletRenderer, out var trackedData), Is.True);
+                Assert.That(trackedData.sourceRendererEntityId, Is.EqualTo(EntityId.None));
+                Assert.That(trackedData.sourceMeshEntityId, Is.EqualTo(mesh.GetEntityId()));
                 Assert.That((trackedData.flags & VividMeshletRendererFlags.Valid) != 0, Is.True);
                 Assert.That(VividMeshletRendererDatabase.instance.TryGetRendererResources(meshletRenderer, out var trackedResources), Is.True);
                 Assert.That(trackedResources.MeshletRenderer, Is.SameAs(meshletRenderer));
-                Assert.That(trackedResources.SourceRenderer, Is.SameAs(gameObject.GetComponent<MeshRenderer>()));
+                Assert.That(trackedResources.SourceRenderer, Is.Null);
                 Assert.That(trackedResources.SourceMesh, Is.SameAs(mesh));
                 Assert.That(trackedResources.SharedMaterials, Has.Length.EqualTo(1));
                 Assert.That(trackedResources.SharedMaterials[0], Is.SameAs(material));
@@ -116,6 +120,8 @@ namespace VividRP.Editor.Tests
             {
                 gameObject = CreateMeshRendererObject("MeshletRenderer_RendererlessResources", out mesh, out material);
                 var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+                meshletRenderer.CaptureSourceFromRenderer(gameObject.GetComponent<MeshRenderer>());
+
                 meshletCollection = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
                 materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
                 meshletCollection.SourceSubmeshIndex = 0;
@@ -161,6 +167,8 @@ namespace VividRP.Editor.Tests
             {
                 gameObject = CreateMeshRendererObject("MeshletRenderer_LateUpdate", out mesh, out material);
                 var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+                meshletRenderer.CaptureSourceFromRenderer(gameObject.GetComponent<MeshRenderer>());
+
                 meshletCollection = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
                 meshletCollection.SourceSubmeshIndex = 0;
                 meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
@@ -217,7 +225,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void RegisterRenderer_UsesResolvedChildRenderer_WhenSingleChildRendererExists()
+        public void RegisterRenderer_DoesNotResolveChildRenderer_WhenSourceIsNotCaptured()
         {
             Material material = null;
             Mesh mesh = null;
@@ -233,8 +241,8 @@ namespace VividRP.Editor.Tests
                 var meshletRenderer = root.AddComponent<MeshletRenderer>();
 
                 Assert.That(VividMeshletRendererDatabase.instance.TryGetRendererResources(meshletRenderer, out var trackedResources), Is.True);
-                Assert.That(trackedResources.SourceRenderer, Is.SameAs(child.GetComponent<MeshRenderer>()));
-                Assert.That(trackedResources.SourceMesh, Is.SameAs(mesh));
+                Assert.That(trackedResources.SourceRenderer, Is.Null);
+                Assert.That(trackedResources.SourceMesh, Is.Null);
             }
             finally
             {

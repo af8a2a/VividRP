@@ -1,14 +1,11 @@
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
 using VividRP.Editor.GPUDriven;
 using VividRP.Editor.GPUDriven.Meshlets;
-using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Meshlets;
 
@@ -17,8 +14,6 @@ namespace VividRP.Editor.Tests
     public class MeshletRendererTests
     {
         private const string TempFolder = "Assets/VividRP_Temp_MeshletRendererTests";
-        private static readonly MethodInfo s_LateUpdateMethod =
-            typeof(MeshletRenderer).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic);
 
         [SetUp]
         public void SetUp()
@@ -34,7 +29,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void RefreshSource_UsesMeshFilterMesh_WhenMeshRendererIsAttached()
+        public void CaptureSourceFromRenderer_UsesMeshFilterMesh_WhenMeshRendererIsAttached()
         {
             var gameObject = new GameObject("MeshletRenderer_MeshFilter");
             Mesh mesh = CreateSingleSubMeshMesh("SourceMesh");
@@ -45,13 +40,14 @@ namespace VividRP.Editor.Tests
             try
             {
                 meshFilter.sharedMesh = mesh;
-                meshletRenderer.RefreshSource();
 
-                Assert.That(meshletRenderer.sourceRenderer, Is.SameAs(meshRenderer));
+                Assert.That(meshletRenderer.CaptureSourceFromRenderer(meshRenderer), Is.True);
                 Assert.That(meshletRenderer.sourceMesh, Is.SameAs(mesh));
                 Assert.That(meshletRenderer.subMeshCount, Is.EqualTo(1));
+                Assert.That(meshletRenderer.sourceMaterials.Count, Is.EqualTo(1));
                 Assert.That(meshletRenderer.meshletCollections.Count, Is.EqualTo(1));
                 Assert.That(meshletRenderer.materialProxies.Count, Is.EqualTo(1));
+                Assert.That(meshletRenderer.GetSourceMaterial(0), Is.Null);
                 Assert.That(meshletRenderer.GetMeshletCollection(0), Is.Null);
                 Assert.That(meshletRenderer.GetMaterialProxy(0), Is.Null);
             }
@@ -63,7 +59,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void RefreshSource_UsesSkinnedMesh_WhenSkinnedMeshRendererIsAttached()
+        public void CaptureSourceFromRenderer_UsesSkinnedMesh_WhenSkinnedMeshRendererIsAttached()
         {
             var gameObject = new GameObject("MeshletRenderer_Skinned");
             Mesh mesh = CreateSingleSubMeshMesh("SkinnedSource");
@@ -73,12 +69,38 @@ namespace VividRP.Editor.Tests
             try
             {
                 skinnedMeshRenderer.sharedMesh = mesh;
-                meshletRenderer.RefreshSource();
 
-                Assert.That(meshletRenderer.sourceRenderer, Is.SameAs(skinnedMeshRenderer));
+                Assert.That(meshletRenderer.CaptureSourceFromRenderer(skinnedMeshRenderer), Is.True);
                 Assert.That(meshletRenderer.sourceMesh, Is.SameAs(mesh));
                 Assert.That(meshletRenderer.subMeshCount, Is.EqualTo(1));
                 Assert.That(meshletRenderer.materialProxies.Count, Is.EqualTo(1));
+                Assert.That(meshletRenderer.sourceWasSkinned, Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+                Object.DestroyImmediate(mesh);
+            }
+        }
+
+        [Test]
+        public void RefreshSource_DoesNotAutoResolveGameObjectRenderer_WhenSourceIsNotCaptured()
+        {
+            var gameObject = new GameObject("MeshletRenderer_NoAutoResolve");
+            Mesh mesh = CreateSingleSubMeshMesh("NoAutoResolveMesh");
+            gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+            gameObject.AddComponent<MeshRenderer>();
+            var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+
+            try
+            {
+                meshletRenderer.RefreshSource();
+
+                Assert.That(meshletRenderer.sourceMesh, Is.Null);
+                Assert.That(meshletRenderer.subMeshCount, Is.Zero);
+                Assert.That(meshletRenderer.sourceMaterials.Count, Is.Zero);
+                Assert.That(meshletRenderer.meshletCollections.Count, Is.Zero);
+                Assert.That(meshletRenderer.materialProxies.Count, Is.Zero);
             }
             finally
             {
@@ -93,7 +115,7 @@ namespace VividRP.Editor.Tests
             var gameObject = new GameObject("MeshletRenderer_Validation");
             Mesh mesh = CreateTwoSubMeshMesh("MultiSubMesh");
             var meshFilter = gameObject.AddComponent<MeshFilter>();
-            gameObject.AddComponent<MeshRenderer>();
+            MeshRenderer meshRenderer = gameObject.AddComponent<MeshRenderer>();
             var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
             var subMesh0 = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
             var subMesh1 = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
@@ -101,7 +123,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 meshFilter.sharedMesh = mesh;
-                meshletRenderer.RefreshSource();
+                meshletRenderer.CaptureSourceFromRenderer(meshRenderer);
                 meshletRenderer.SetTakeOverSourceRenderer(false);
 
                 subMesh0.SourceSubmeshIndex = 0;
@@ -130,7 +152,7 @@ namespace VividRP.Editor.Tests
             var gameObject = new GameObject("MeshletRenderer_ProxyValidation");
             Mesh mesh = CreateSingleSubMeshMesh("ProxyValidationMesh");
             var meshFilter = gameObject.AddComponent<MeshFilter>();
-            gameObject.AddComponent<MeshRenderer>();
+            MeshRenderer meshRenderer = gameObject.AddComponent<MeshRenderer>();
             var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
             var meshletCollection = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
             var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
@@ -138,7 +160,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 meshFilter.sharedMesh = mesh;
-                meshletRenderer.RefreshSource();
+                meshletRenderer.CaptureSourceFromRenderer(meshRenderer);
                 meshletCollection.SourceSubmeshIndex = 0;
                 meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
 
@@ -159,24 +181,24 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void RefreshSource_ResizesMaterialProxyArray_WhenSubMeshCountChanges()
+        public void CaptureSourceFromRenderer_ResizesMaterialProxyArray_WhenSubMeshCountChanges()
         {
             var gameObject = new GameObject("MeshletRenderer_ProxyResize");
             Mesh firstMesh = CreateSingleSubMeshMesh("ProxyResize_First");
             Mesh secondMesh = CreateTwoSubMeshMesh("ProxyResize_Second");
             var meshFilter = gameObject.AddComponent<MeshFilter>();
-            gameObject.AddComponent<MeshRenderer>();
+            var meshRenderer = gameObject.AddComponent<MeshRenderer>();
             var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
             var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
 
             try
             {
                 meshFilter.sharedMesh = firstMesh;
-                meshletRenderer.RefreshSource();
+                meshletRenderer.CaptureSourceFromRenderer(meshRenderer);
                 meshletRenderer.SetMaterialProxies(new[] { materialProxy });
 
                 meshFilter.sharedMesh = secondMesh;
-                meshletRenderer.RefreshSource();
+                meshletRenderer.CaptureSourceFromRenderer(meshRenderer);
 
                 Assert.That(meshletRenderer.materialProxies.Count, Is.EqualTo(2));
                 Assert.That(meshletRenderer.GetMaterialProxy(0), Is.SameAs(materialProxy));
@@ -192,7 +214,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void RefreshSource_PreservesSourceMeshAndMaterials_WhenMeshRendererWasRemoved()
+        public void RefreshSource_PreservesCapturedMeshAndMaterials_WhenMeshRendererWasRemoved()
         {
             Shader shader = Shader.Find("Hidden/InternalErrorShader");
             Assert.That(shader, Is.Not.Null);
@@ -207,14 +229,13 @@ namespace VividRP.Editor.Tests
             try
             {
                 meshFilter.sharedMesh = mesh;
-                meshletRenderer.RefreshSource();
+                meshletRenderer.CaptureSourceFromRenderer(meshRenderer);
 
                 Assert.That(meshletRenderer.GetSourceMaterial(0), Is.SameAs(meshRenderer.sharedMaterial));
 
                 Object.DestroyImmediate(meshRenderer);
                 meshletRenderer.RefreshSource();
 
-                Assert.That(meshletRenderer.sourceRenderer, Is.Null);
                 Assert.That(meshletRenderer.sourceMesh, Is.SameAs(mesh));
                 Assert.That(meshletRenderer.GetSourceMaterial(0), Is.Not.Null);
             }
@@ -227,61 +248,6 @@ namespace VividRP.Editor.Tests
 
                 Object.DestroyImmediate(gameObject);
                 Object.DestroyImmediate(mesh);
-            }
-        }
-
-        [Test]
-        public void LateUpdate_TogglesForceRenderingOff_WhenTakeOverConditionsChange()
-        {
-            Shader shader = Shader.Find("Hidden/InternalErrorShader");
-            Assert.That(shader, Is.Not.Null);
-
-            RenderPipelineAsset previousGraphicsPipeline = GraphicsSettings.defaultRenderPipeline;
-            RenderPipelineAsset previousQualityPipeline = QualitySettings.renderPipeline;
-            VividRenderPipelineAsset pipelineAsset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
-            pipelineAsset.EnableGPUDriven = true;
-
-            var gameObject = new GameObject("MeshletRenderer_TakeOver");
-            Mesh mesh = CreateSingleSubMeshMesh("TakeOverMesh");
-            var meshFilter = gameObject.AddComponent<MeshFilter>();
-            MeshRenderer meshRenderer = gameObject.AddComponent<MeshRenderer>();
-            meshRenderer.sharedMaterial = new Material(shader);
-            var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
-            var meshletCollection = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
-            var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
-
-            try
-            {
-                GraphicsSettings.defaultRenderPipeline = pipelineAsset;
-                QualitySettings.renderPipeline = pipelineAsset;
-
-                meshFilter.sharedMesh = mesh;
-                meshletRenderer.RefreshSource();
-                meshletCollection.SourceSubmeshIndex = 0;
-                materialProxy.SourceMaterial = meshRenderer.sharedMaterial;
-                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
-                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
-
-                Assert.That(meshRenderer.forceRenderingOff, Is.False);
-
-                InvokeLateUpdate(meshletRenderer);
-                Assert.That(meshRenderer.forceRenderingOff, Is.True);
-
-                meshletRenderer.SetTakeOverSourceRenderer(false);
-                InvokeLateUpdate(meshletRenderer);
-                Assert.That(meshRenderer.forceRenderingOff, Is.False);
-            }
-            finally
-            {
-                GraphicsSettings.defaultRenderPipeline = previousGraphicsPipeline;
-                QualitySettings.renderPipeline = previousQualityPipeline;
-
-                Object.DestroyImmediate(materialProxy);
-                Object.DestroyImmediate(meshletCollection);
-                Object.DestroyImmediate(meshRenderer.sharedMaterial);
-                Object.DestroyImmediate(gameObject);
-                Object.DestroyImmediate(mesh);
-                Object.DestroyImmediate(pipelineAsset);
             }
         }
 
@@ -308,7 +274,7 @@ namespace VividRP.Editor.Tests
                 MeshRenderer meshRenderer = gameObject.AddComponent<MeshRenderer>();
                 meshRenderer.sharedMaterial = material;
                 MeshletRenderer meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
-                meshletRenderer.RefreshSource();
+                meshletRenderer.CaptureSourceFromRenderer(meshRenderer);
 
                 Assert.That(meshletRenderer.TryValidate(out _), Is.False);
 
@@ -358,9 +324,9 @@ namespace VividRP.Editor.Tests
                 meshRenderer.sharedMaterial = material;
 
                 MeshletRenderer meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+                meshletRenderer.CaptureSourceFromRenderer(meshRenderer);
                 meshletCollection.SourceSubmeshIndex = 0;
 
-                meshletRenderer.RefreshSource();
                 meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
                 meshletRenderer.SetMaterialProxies(new[] { materialProxy });
 
@@ -369,7 +335,6 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(result.Success, Is.True, result.ErrorMessage);
                 Assert.That(gameObject.GetComponent<MeshRenderer>(), Is.Null);
-                Assert.That(meshletRenderer.sourceRenderer, Is.Null);
                 Assert.That(meshletRenderer.sourceMesh, Is.SameAs(mesh));
                 Assert.That(meshletRenderer.GetSourceMaterial(0), Is.SameAs(material));
                 Assert.That(meshletRenderer.TryValidate(out string validationMessage), Is.True, validationMessage);
@@ -526,12 +491,6 @@ namespace VividRP.Editor.Tests
             {
                 AssetDatabase.DeleteAsset(TempFolder);
             }
-        }
-
-        private static void InvokeLateUpdate(MeshletRenderer meshletRenderer)
-        {
-            Assert.That(s_LateUpdateMethod, Is.Not.Null);
-            s_LateUpdateMethod.Invoke(meshletRenderer, null);
         }
     }
 }

@@ -97,7 +97,6 @@ namespace VividRP.Runtime.GPUDriven
                 return default;
             }
 
-            
             VividMeshletRendererRenderData trackedData = CreateRendererData(meshletRenderer);
             VividMeshletRendererResources trackedResources = CreateRendererResources(meshletRenderer);
             StoreRendererData(trackedData, trackedResources);
@@ -249,9 +248,6 @@ namespace VividRP.Runtime.GPUDriven
 
         private static VividMeshletRendererRenderData CreateRendererData(MeshletRenderer meshletRenderer)
         {
-            meshletRenderer.RefreshSource();
-
-            Renderer sourceRenderer = meshletRenderer.sourceRenderer;
             Mesh sourceMesh = meshletRenderer.sourceMesh;
             bool isValid = meshletRenderer.TryValidateRuntimeBindings(out _);
             Matrix4x4 objectToWorldMatrix = meshletRenderer.transform.localToWorldMatrix;
@@ -263,7 +259,7 @@ namespace VividRP.Runtime.GPUDriven
             return new VividMeshletRendererRenderData
             {
                 meshletRendererEntityId = meshletRenderer.GetEntityId(),
-                sourceRendererEntityId = sourceRenderer != null ? sourceRenderer.GetEntityId() : EntityId.None,
+                sourceRendererEntityId = EntityId.None,
                 sourceMeshEntityId = sourceMesh != null ? sourceMesh.GetEntityId() : EntityId.None,
                 objectToWorldMatrix = objectToWorldMatrix,
                 worldToObjectMatrix = worldToObjectMatrix,
@@ -280,7 +276,6 @@ namespace VividRP.Runtime.GPUDriven
 
         private static VividMeshletRendererResources CreateRendererResources(MeshletRenderer meshletRenderer)
         {
-            Renderer sourceRenderer = meshletRenderer.sourceRenderer;
             int sourceMaterialCount = meshletRenderer.sourceMaterials.Count;
             var sourceMaterials = new Material[sourceMaterialCount];
             for (int index = 0; index < sourceMaterialCount; index++)
@@ -304,7 +299,7 @@ namespace VividRP.Runtime.GPUDriven
 
             return new VividMeshletRendererResources(
                 meshletRenderer,
-                sourceRenderer,
+                null,
                 meshletRenderer.sourceMesh,
                 sourceMaterials,
                 meshletCollections,

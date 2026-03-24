@@ -10,11 +10,11 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/RaytracingCommon.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BlueNoise.hlsl"
-
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/DebugUtil.hlsl"
 RaytracingAccelerationStructure _AccelerationStructure;
 Texture2D<float> _DepthTexture;
 Texture2D<float4> _GBuffer1;
-RWTexture2D<float> _DirectionalShadowTexture;
+RWTexture2D<float4> _DirectionalShadowTexture;
 
 #ifdef SHADOW_CLASSIFY_ENABLED
 Texture2D<float> _ShadowClassifyMask;
@@ -99,10 +99,10 @@ void DirectionalRayTracedShadow(uint3 dispatchThreadID : SV_DispatchThreadID)
     shadowRay.TMin = 0.0;
     shadowRay.TMax = _RayLength;
 
-    UnityRayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
+    UnityRayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES|RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
     query.TraceRayInline(
         _AccelerationStructure,
-        RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES,
+        RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES|RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH,
         0xFF,
         shadowRay);
 
@@ -113,5 +113,6 @@ void DirectionalRayTracedShadow(uint3 dispatchThreadID : SV_DispatchThreadID)
         shadowHitDist = query.CommittedRayT();
     }
 
-    _DirectionalShadowTexture[pixelCoord] =PackPenumbra(shadowHitDist, _TanSunAngularRadius) ;
+    _DirectionalShadowTexture[pixelCoord] =//float4(Debug_WorldGrid(shadowRay.Origin),1);
+        PackPenumbra(shadowHitDist, _TanSunAngularRadius) ;
 }

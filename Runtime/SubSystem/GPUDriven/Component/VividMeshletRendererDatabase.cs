@@ -44,7 +44,8 @@ namespace VividRP.Runtime.GPUDriven
             Renderer sourceRenderer,
             Mesh sourceMesh,
             Material[] sharedMaterials,
-            VividMeshletCollectionAsset[] meshletCollections
+            VividMeshletCollectionAsset[] meshletCollections,
+            GPUDrivenMaterialProxy[] materialProxies
         )
         {
             MeshletRenderer = meshletRenderer;
@@ -52,6 +53,7 @@ namespace VividRP.Runtime.GPUDriven
             SourceMesh = sourceMesh;
             SharedMaterials = sharedMaterials ?? Array.Empty<Material>();
             MeshletCollections = meshletCollections ?? Array.Empty<VividMeshletCollectionAsset>();
+            MaterialProxies = materialProxies ?? Array.Empty<GPUDrivenMaterialProxy>();
         }
 
         public MeshletRenderer MeshletRenderer { get; }
@@ -63,6 +65,8 @@ namespace VividRP.Runtime.GPUDriven
         public Material[] SharedMaterials { get; }
 
         public VividMeshletCollectionAsset[] MeshletCollections { get; }
+
+        public GPUDrivenMaterialProxy[] MaterialProxies { get; }
     }
 
     public sealed class VividMeshletRendererDatabase
@@ -249,7 +253,7 @@ namespace VividRP.Runtime.GPUDriven
 
             Renderer sourceRenderer = meshletRenderer.sourceRenderer;
             Mesh sourceMesh = meshletRenderer.sourceMesh;
-            bool isValid = meshletRenderer.TryValidate(out _);
+            bool isValid = meshletRenderer.TryValidateRuntimeBindings(out _);
             Matrix4x4 objectToWorldMatrix = sourceRenderer != null
                 ? sourceRenderer.localToWorldMatrix
                 : meshletRenderer.transform.localToWorldMatrix;
@@ -294,12 +298,20 @@ namespace VividRP.Runtime.GPUDriven
                 meshletCollections[index] = meshletRenderer.GetMeshletCollection(index);
             }
 
+            int materialProxyCount = meshletRenderer.materialProxies.Count;
+            var materialProxies = new GPUDrivenMaterialProxy[materialProxyCount];
+            for (int index = 0; index < materialProxyCount; index++)
+            {
+                materialProxies[index] = meshletRenderer.GetMaterialProxy(index);
+            }
+
             return new VividMeshletRendererResources(
                 meshletRenderer,
                 sourceRenderer,
                 meshletRenderer.sourceMesh,
                 sharedMaterials,
-                meshletCollections
+                meshletCollections,
+                materialProxies
             );
         }
 

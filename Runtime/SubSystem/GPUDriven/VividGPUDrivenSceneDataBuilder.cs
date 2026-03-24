@@ -26,6 +26,7 @@ namespace VividRP.Runtime.GPUDriven
 
         private readonly Dictionary<int, int> m_MaterialIndexByObjectId = new();
         private readonly Dictionary<int, MeshletAssetMetadata> m_MeshMetadataByObjectId = new();
+        private readonly HashSet<int> m_MissingProxyWarningKeys = new();
 
         public void Build(
             VividGPUDrivenSceneData sceneData,
@@ -90,7 +91,15 @@ namespace VividRP.Runtime.GPUDriven
 
                 MeshletAssetMetadata meshMetadata = GetOrAppendMeshletAsset(sceneData, meshletCollection);
                 Material material = GetMaterialForSubMesh(trackedResources.SharedMaterials, subMeshIndex);
-                int materialIndex = GetOrAppendMaterial(sceneData, material, bindlessTextureContainer);
+                GPUDrivenMaterialProxy materialProxy = GetMaterialProxyForSubMesh(trackedResources.MaterialProxies, subMeshIndex);
+                int materialIndex = GetOrAppendMaterial(
+                    sceneData,
+                    trackedResources.MeshletRenderer,
+                    materialProxy,
+                    material,
+                    subMeshIndex,
+                    bindlessTextureContainer
+                );
 
                 sceneData.MutableInstances.Add(CreateInstanceData(trackedData, materialIndex, meshMetadata));
             }
@@ -167,21 +176,86 @@ namespace VividRP.Runtime.GPUDriven
 
         private int GetOrAppendMaterial(
             VividGPUDrivenSceneData sceneData,
+            MeshletRenderer meshletRenderer,
+            GPUDrivenMaterialProxy materialProxy,
             Material material,
+            int subMeshIndex,
             BindlessTextureContainer bindlessTextureContainer
         )
         {
-            int objectId = material != null ? material.GetInstanceID() : 0;
+            int objectId = materialProxy != null
+                ? materialProxy.GetInstanceID()
+                : material != null
+                    ? material.GetInstanceID()
+                    : 0;
             if (m_MaterialIndexByObjectId.TryGetValue(objectId, out int materialIndex))
             {
                 return materialIndex;
             }
 
-            VividMaterialData materialData = CreateMaterialData(material, bindlessTextureContainer);
+            VividMaterialData materialData;
+            if (materialProxy != null)
+            {
+                materialData = CreateMaterialData(materialProxy, bindlessTextureContainer);
+            }
+            else
+            {
+                WarnMissingMaterialProxy(meshletRenderer, material, subMeshIndex);
+                materialData = CreateMaterialData(material, bindlessTextureContainer);
+            }
+
             materialIndex = sceneData.MaterialCount;
             sceneData.MutableMaterials.Add(materialData);
             m_MaterialIndexByObjectId.Add(objectId, materialIndex);
             return materialIndex;
+        }
+
+        private void WarnMissingMaterialProxy(
+            MeshletRenderer meshletRenderer,
+            Material material,
+            int subMeshIndex
+        )
+        {
+            int warningKey = material != null
+                ? material.GetInstanceID()
+                : unchecked(((meshletRenderer != null ? meshletRenderer.GetInstanceID() : 0) * 397) ^ subMeshIndex);
+
+            if (!m_MissingProxyWarningKeys.Add(warningKey))
+            {
+                return;
+            }
+
+            string rendererName = meshletRenderer != null ? meshletRenderer.name : "<unknown>";
+            string materialName = material != null ? material.name : "<null>";
+            Debug.LogWarning(
+                $"[VividRP] MeshletRenderer '{rendererName}' submesh {subMeshIndex} is missing a GPUDriven material proxy. Falling back to source Material '{materialName}'.",
+                meshletRenderer
+            );
+        }
+
+        private static VividMaterialData CreateMaterialData(
+            GPUDrivenMaterialProxy materialProxy,
+            BindlessTextureContainer bindlessTextureContainer
+        )
+        {
+            return new VividMaterialData
+            {
+                AlbedoColor = ToFloat4(materialProxy != null ? materialProxy.BaseColor : Color.white),
+                TextureTilingOffset = ToFloat4(materialProxy != null ? materialProxy.TextureTilingOffset : new Vector4(1.0f, 1.0f, 0.0f, 0.0f)),
+                Emission = ToFloat4(materialProxy != null ? materialProxy.EmissionColor : Color.black),
+                AlbedoIndex = GetTextureIndex(bindlessTextureContainer, materialProxy != null ? materialProxy.BaseMap : null),
+                NormalsIndex = GetTextureIndex(bindlessTextureContainer, materialProxy != null ? materialProxy.BumpMap : null),
+                NormalsStrength = materialProxy != null ? materialProxy.BumpScale : 1.0f,
+                MasksIndex = VividMaterialData.NoTextureIndex,
+                Roughness = materialProxy != null ? materialProxy.Roughness : 1.0f,
+                Metallic = materialProxy != null ? materialProxy.Metallic : 0.0f,
+                SpecularAAScreenSpaceVariance = 0.0f,
+                SpecularAAThreshold = 0.0f,
+                GeometryFlags = VividGeometryFlags.None,
+                MaterialFlags = GetMaterialFlags(materialProxy),
+                RendererListID = GetRendererListId(materialProxy),
+                AlphaClipThreshold = GetAlphaClipThreshold(materialProxy),
+            };
         }
 
         private static VividMaterialData CreateMaterialData(
@@ -281,6 +355,20 @@ namespace VividRP.Runtime.GPUDriven
             return sharedMaterials[materialIndex];
         }
 
+        private static GPUDrivenMaterialProxy GetMaterialProxyForSubMesh(
+            GPUDrivenMaterialProxy[] materialProxies,
+            int subMeshIndex
+        )
+        {
+            if (materialProxies == null || materialProxies.Length == 0)
+            {
+                return null;
+            }
+
+            int materialIndex = Mathf.Clamp(subMeshIndex, 0, materialProxies.Length - 1);
+            return materialProxies[materialIndex];
+        }
+
         private static uint GetTextureIndex(BindlessTextureContainer bindlessTextureContainer, Texture texture)
         {
             return bindlessTextureContainer.TryGetOrCreateIndex(texture, out uint textureIndex)
@@ -337,6 +425,13 @@ namespace VividRP.Runtime.GPUDriven
             return 1.0f;
         }
 
+        private static VividMaterialFlags GetMaterialFlags(GPUDrivenMaterialProxy materialProxy)
+        {
+            return materialProxy is { DisableLighting: true }
+                ? VividMaterialFlags.Unlit
+                : VividMaterialFlags.None;
+        }
+
         private static VividMaterialFlags GetMaterialFlags(Material material)
         {
             if (material?.shader != null &&
@@ -346,6 +441,32 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             return VividMaterialFlags.None;
+        }
+
+        private static VividRendererListID GetRendererListId(GPUDrivenMaterialProxy materialProxy)
+        {
+            VividRendererListID rendererListId = VividRendererListID.Default;
+
+            if (materialProxy == null)
+            {
+                return rendererListId;
+            }
+
+            if (materialProxy.CullMode == CullMode.Front)
+            {
+                rendererListId |= VividRendererListID.CullFront;
+            }
+            else if (materialProxy.CullMode == CullMode.Off)
+            {
+                rendererListId |= VividRendererListID.CullOff;
+            }
+
+            if (materialProxy.AlphaClip)
+            {
+                rendererListId |= VividRendererListID.AlphaTest;
+            }
+
+            return rendererListId;
         }
 
         private static VividRendererListID GetRendererListId(Material material)
@@ -390,9 +511,24 @@ namespace VividRP.Runtime.GPUDriven
                 : 0.0f;
         }
 
+        private static float GetAlphaClipThreshold(GPUDrivenMaterialProxy materialProxy)
+        {
+            return materialProxy is { AlphaClip: true } ? materialProxy.Cutoff : 0.0f;
+        }
+
         private static float4 ToFloat4(Vector3 value)
         {
             return new float4(value.x, value.y, value.z, 0.0f);
+        }
+
+        private static float4 ToFloat4(Vector4 value)
+        {
+            return new float4(value.x, value.y, value.z, value.w);
+        }
+
+        private static float4 ToFloat4(Color value)
+        {
+            return new float4(value.r, value.g, value.b, value.a);
         }
 
         private static float4x4 ToFloat4x4(Matrix4x4 value)

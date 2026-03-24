@@ -59,15 +59,18 @@ namespace VividRP.Editor.Tests
             Mesh mesh = null;
             GameObject gameObject = null;
             VividMeshletCollectionAsset meshletCollection = null;
+            GPUDrivenMaterialProxy materialProxy = null;
 
             try
             {
                 gameObject = CreateMeshRendererObject("MeshletRenderer_ValidBinding", out mesh, out material);
                 var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
                 meshletCollection = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
                 meshletCollection.SourceSubmeshIndex = 0;
 
                 meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
                 VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
 
                 Assert.That(VividMeshletRendererDatabase.instance.TryGetRendererData(meshletRenderer, out var trackedData), Is.True);
@@ -80,9 +83,16 @@ namespace VividRP.Editor.Tests
                 Assert.That(trackedResources.SharedMaterials[0], Is.SameAs(material));
                 Assert.That(trackedResources.MeshletCollections, Has.Length.EqualTo(1));
                 Assert.That(trackedResources.MeshletCollections[0], Is.SameAs(meshletCollection));
+                Assert.That(trackedResources.MaterialProxies, Has.Length.EqualTo(1));
+                Assert.That(trackedResources.MaterialProxies[0], Is.SameAs(materialProxy));
             }
             finally
             {
+                if (materialProxy != null)
+                {
+                    Object.DestroyImmediate(materialProxy);
+                }
+
                 if (meshletCollection != null)
                 {
                     Object.DestroyImmediate(meshletCollection);

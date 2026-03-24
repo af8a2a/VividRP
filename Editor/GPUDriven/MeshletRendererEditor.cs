@@ -15,12 +15,16 @@ namespace VividRP.Editor.GPUDriven
         private SerializedProperty m_SourceRenderer;
         private SerializedProperty m_SourceMesh;
         private SerializedProperty m_MeshletCollections;
+        private SerializedProperty m_MaterialProxies;
+        private SerializedProperty m_TakeOverSourceRenderer;
 
         private void OnEnable()
         {
             m_SourceRenderer = serializedObject.FindProperty("m_SourceRenderer");
             m_SourceMesh = serializedObject.FindProperty("m_SourceMesh");
             m_MeshletCollections = serializedObject.FindProperty("m_MeshletCollections");
+            m_MaterialProxies = serializedObject.FindProperty("m_MaterialProxies");
+            m_TakeOverSourceRenderer = serializedObject.FindProperty("m_TakeOverSourceRenderer");
         }
 
         public override void OnInspectorGUI()
@@ -33,7 +37,9 @@ namespace VividRP.Editor.GPUDriven
                 EditorGUILayout.PropertyField(m_SourceMesh);
             }
 
+            EditorGUILayout.PropertyField(m_TakeOverSourceRenderer);
             EditorGUILayout.PropertyField(m_MeshletCollections, true);
+            EditorGUILayout.PropertyField(m_MaterialProxies, true);
 
             serializedObject.ApplyModifiedProperties();
 
@@ -113,6 +119,40 @@ namespace VividRP.Editor.GPUDriven
                     }
                 }
             }
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                using (new EditorGUI.DisabledScope(meshletRenderer.sourceRenderer == null || meshletRenderer.sourceMesh == null))
+                {
+                    if (GUILayout.Button("Create/Bind GPUDriven Proxies"))
+                    {
+                        GPUDrivenMaterialProxyBindingResult bindingResult =
+                            GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxies(meshletRenderer);
+
+                        if (!bindingResult.Success && !string.IsNullOrEmpty(bindingResult.ErrorMessage))
+                        {
+                            Debug.LogWarning($"[VividRP] {bindingResult.ErrorMessage}", meshletRenderer);
+                        }
+
+                        LogWarnings(meshletRenderer, bindingResult.Warnings);
+                        serializedObject.Update();
+                    }
+
+                    if (GUILayout.Button("Sync Proxies From Source Materials"))
+                    {
+                        GPUDrivenMaterialProxySyncResult syncResult =
+                            GPUDrivenMaterialProxyEditorUtility.SyncMaterialProxiesFromSourceMaterials(meshletRenderer);
+
+                        if (!syncResult.Success && !string.IsNullOrEmpty(syncResult.ErrorMessage))
+                        {
+                            Debug.LogWarning($"[VividRP] {syncResult.ErrorMessage}", meshletRenderer);
+                        }
+
+                        LogWarnings(meshletRenderer, syncResult.Warnings);
+                        serializedObject.Update();
+                    }
+                }
+            }
         }
 
         private void AssignMeshletCollections(
@@ -130,6 +170,19 @@ namespace VividRP.Editor.GPUDriven
             meshletRenderer.SetMeshletCollections(meshletCollections);
             EditorUtility.SetDirty(meshletRenderer);
             serializedObject.Update();
+        }
+
+        private static void LogWarnings(UnityEngine.Object context, string[] warnings)
+        {
+            if (warnings == null)
+            {
+                return;
+            }
+
+            for (int warningIndex = 0; warningIndex < warnings.Length; warningIndex++)
+            {
+                Debug.LogWarning($"[VividRP] {warnings[warningIndex]}", context);
+            }
         }
     }
 

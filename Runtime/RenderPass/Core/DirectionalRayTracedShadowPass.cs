@@ -62,7 +62,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_TanSunAngularRadius;
         private int m_FrameIndex;
         
-        private RTHandle debugTexture;
+        // private RTHandle debugTexture;
 
 
         internal readonly struct ResolvedDirectionalShadowRequest
@@ -110,7 +110,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SceneAccelerationStructure = CreateSceneAccelerationStructure();
             m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
             m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.R16G16_SFloat);
-            m_DirectionalShadowTexture = RenderGraphTexture.CreateOutput("DirectionalShadowTexture", GraphicsFormat.R16_SFloat);
+            m_DirectionalShadowTexture = RenderGraphTexture.CreateOutput("DirectionalShadowTexture", GraphicsFormat.R8G8B8A8_UNorm);
             m_DirectionalShadowTexture.desc.ClearBuffer = true;
             m_DirectionalShadowTexture.desc.ClearColor = RawShadowClearColor;
             m_DirectionalShadowTexture.desc.FilterMode = FilterMode.Point;
@@ -142,12 +142,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
             
             
-            var desc = new RenderTextureDescriptor(cameraData.actualWidth, cameraData.actualHeight)
-            {
-                graphicsFormat = GraphicsFormat.R32_SFloat,
-                enableRandomWrite = true
-            };
-            RenderingUtils.ReAllocateHandleIfNeeded(ref debugTexture, desc, name: "NRD-SIGMA TileTexture");
+            // var desc = new RenderTextureDescriptor(cameraData.actualWidth, cameraData.actualHeight)
+            // {
+            //     graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat,
+            //     enableRandomWrite = true
+            // };
+            // RenderingUtils.ReAllocateHandleIfNeeded(ref debugTexture, desc, name: "NRD-SIGMA TileTexture");
 
             m_DispatchGroupCountX = CoreUtils.DivRoundUp(cameraData.actualWidth, ThreadGroupSizeX);
             m_DispatchGroupCountY = CoreUtils.DivRoundUp(cameraData.actualHeight, ThreadGroupSizeY);
@@ -240,7 +240,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_DirectionalRayTracedShadowCompute,
                     m_Kernel,
                     DirectionalShadowTextureId,
-                    debugTexture);
+                    m_DirectionalShadowTexture);
 
                 BlueNoise.Instance?.Bind(nativeCmd);
 

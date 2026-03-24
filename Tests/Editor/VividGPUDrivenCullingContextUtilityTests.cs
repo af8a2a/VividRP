@@ -102,6 +102,7 @@ namespace VividRP.Editor.Tests
             public FakeBindlessTextureDescriptorAllocator(uint descriptorHeapCount)
             {
                 DescriptorHeapCount = descriptorHeapCount;
+                DescriptorCapacity = descriptorHeapCount;
             }
 
             public bool IsAvailable => true;

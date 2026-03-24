@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.Rendering;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Bindless;
 using VividRP.Runtime.GPUDriven.Meshlets;
@@ -161,6 +162,89 @@ namespace VividRP.Editor.Tests
             finally
             {
                 DestroyTestObjects(gameObject, null, material0, material1, mesh, meshletCollection0, meshletCollection1);
+            }
+        }
+
+        [Test]
+        public void Build_UsesMaterialProxyData_WhenProxyIsAssigned()
+        {
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            Texture2D baseMap = null;
+            Texture2D bumpMap = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+            GPUDrivenMaterialProxy materialProxy = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("ProxyMaterialMesh");
+                material = CreateTestMaterial();
+                baseMap = new Texture2D(1, 1);
+                bumpMap = new Texture2D(1, 1);
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                materialProxy.SourceMaterial = material;
+                materialProxy.BaseMap = baseMap;
+                materialProxy.BaseColor = new Color(0.8f, 0.6f, 0.4f, 1.0f);
+                materialProxy.TextureTilingOffset = new Vector4(4.0f, 5.0f, 0.25f, 0.5f);
+                materialProxy.BumpMap = bumpMap;
+                materialProxy.BumpScale = 0.4f;
+                materialProxy.Metallic = 0.75f;
+                materialProxy.Roughness = 0.35f;
+                materialProxy.EmissionColor = new Color(0.1f, 0.2f, 0.3f, 1.0f);
+                materialProxy.AlphaClip = true;
+                materialProxy.Cutoff = 0.4f;
+                materialProxy.CullMode = CullMode.Off;
+                materialProxy.DisableLighting = true;
+
+                meshletCollection = CreateMeshletCollectionAsset(
+                    "ProxyMaterialCollection",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[] { CreateVertex(0.0f, 0.0f, 0.0f), CreateVertex(1.0f, 0.0f, 0.0f), CreateVertex(0.0f, 1.0f, 0.0f) },
+                    new byte[] { 0, 1, 2 }
+                );
+
+                gameObject = CreateMeshletRendererObject("Renderer_ProxyMaterial", mesh, new[] { material }, out MeshletRenderer meshletRenderer);
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var bindlessTextureContainer = new BindlessTextureContainer(new FakeBindlessTextureDescriptorAllocator(16));
+
+                builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer);
+
+                Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
+                VividMaterialData materialData = sceneData.Materials[0];
+                Assert.That(materialData.AlbedoColor.x, Is.EqualTo(0.8f).Within(0.0001f));
+                Assert.That(materialData.TextureTilingOffset.y, Is.EqualTo(5.0f).Within(0.0001f));
+                Assert.That(materialData.AlbedoIndex, Is.Not.EqualTo(VividMaterialData.NoTextureIndex));
+                Assert.That(materialData.NormalsIndex, Is.Not.EqualTo(VividMaterialData.NoTextureIndex));
+                Assert.That(materialData.MasksIndex, Is.EqualTo(VividMaterialData.NoTextureIndex));
+                Assert.That(materialData.NormalsStrength, Is.EqualTo(0.4f).Within(0.0001f));
+                Assert.That(materialData.Metallic, Is.EqualTo(0.75f).Within(0.0001f));
+                Assert.That(materialData.Roughness, Is.EqualTo(0.35f).Within(0.0001f));
+                Assert.That(materialData.MaterialFlags, Is.EqualTo(VividMaterialFlags.Unlit));
+                Assert.That(materialData.RendererListID, Is.EqualTo(VividRendererListID.CullOff | VividRendererListID.AlphaTest));
+                Assert.That(materialData.AlphaClipThreshold, Is.EqualTo(0.4f).Within(0.0001f));
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, null, material, mesh, meshletCollection, materialProxy);
+
+                if (baseMap != null)
+                {
+                    Object.DestroyImmediate(baseMap);
+                }
+
+                if (bumpMap != null)
+                {
+                    Object.DestroyImmediate(bumpMap);
+                }
             }
         }
 
@@ -437,6 +521,7 @@ namespace VividRP.Editor.Tests
             public FakeBindlessTextureDescriptorAllocator(uint descriptorHeapCount)
             {
                 DescriptorHeapCount = descriptorHeapCount;
+                DescriptorCapacity = descriptorHeapCount;
             }
 
             public bool IsAvailable => true;

@@ -149,7 +149,7 @@ namespace VividRP.Editor.GPUDriven
             if (m_ShowMaterials && MeshletRendererEditorUtility.GetMaterialSlotCount(meshletRenderer) > 0)
             {
                 EditorGUILayout.Space();
-                DrawSelectedMaterialInspector(meshletRenderer, MeshletRendererEditorUtility.GetMaterialSlotCount(meshletRenderer));
+                DrawMaterialInspectors(meshletRenderer, MeshletRendererEditorUtility.GetMaterialSlotCount(meshletRenderer));
             }
         }
 
@@ -202,38 +202,43 @@ namespace VividRP.Editor.GPUDriven
             }
         }
 
-        private void DrawSelectedMaterialInspector(MeshletRenderer meshletRenderer, int slotCount)
+        private void DrawMaterialInspectors(MeshletRenderer meshletRenderer, int slotCount)
         {
-            int selectedSlot = NormalizeSelectedMaterialSlot(slotCount);
-            m_SelectedMaterialSlot = selectedSlot;
-
-            string[] slotLabels = BuildElementLabels(slotCount);
-            if (slotCount > 1)
+            for (int subMeshIndex = 0; subMeshIndex < slotCount; subMeshIndex++)
             {
-                m_SelectedMaterialSlot = EditorGUILayout.Popup("Material Slot", selectedSlot, slotLabels);
-                selectedSlot = m_SelectedMaterialSlot;
-            }
+                SerializedProperty sourceMaterialProperty = GetArrayElementAtIndex(m_SourceMaterials, subMeshIndex);
+                var sourceMaterial = sourceMaterialProperty?.objectReferenceValue as Material;
 
-            SerializedProperty sourceMaterialProperty = GetArrayElementAtIndex(m_SourceMaterials, selectedSlot);
-            var sourceMaterial = sourceMaterialProperty?.objectReferenceValue as Material;
+                if (slotCount > 1)
+                {
+                    EditorGUILayout.LabelField($"Element {subMeshIndex}", EditorStyles.miniBoldLabel);
+                }
 
-            if (sourceMaterial == null)
-            {
-                EditorGUILayout.HelpBox("Assign a source Material to edit it inline here.", MessageType.Info);
-                return;
-            }
+                if (sourceMaterial == null)
+                {
+                    EditorGUILayout.HelpBox("No source Material is assigned for this slot.", MessageType.Info);
+                    EditorGUILayout.Space();
+                    continue;
+                }
 
-            DrawMaterialSlotWarnings(meshletRenderer, sourceMaterial, meshletRenderer.GetMaterialProxy(selectedSlot));
+                DrawMaterialSlotWarnings(meshletRenderer, sourceMaterial, meshletRenderer.GetMaterialProxy(subMeshIndex));
 
-            if (GetCachedEditor(sourceMaterial, true) is not MaterialEditor materialEditor)
-            {
-                return;
-            }
+                if (GetCachedEditor(sourceMaterial, true) is not MaterialEditor materialEditor)
+                {
+                    EditorGUILayout.Space();
+                    continue;
+                }
 
-            using (new EditorGUI.DisabledScope((sourceMaterial.hideFlags & HideFlags.NotEditable) != 0))
-            {
-                materialEditor.DrawHeader();
-                materialEditor.OnInspectorGUI();
+                using (new EditorGUI.DisabledScope((sourceMaterial.hideFlags & HideFlags.NotEditable) != 0))
+                {
+                    materialEditor.DrawHeader();
+                    materialEditor.OnInspectorGUI();
+                }
+
+                if (subMeshIndex < slotCount - 1)
+                {
+                    EditorGUILayout.Space();
+                }
             }
         }
 

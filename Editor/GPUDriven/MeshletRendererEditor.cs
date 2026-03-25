@@ -144,6 +144,13 @@ namespace VividRP.Editor.GPUDriven
 
             DrawStatus(meshletRenderer);
             DrawActions(meshletRenderer);
+
+            serializedObject.Update();
+            if (m_ShowMaterials && MeshletRendererEditorUtility.GetMaterialSlotCount(meshletRenderer) > 0)
+            {
+                EditorGUILayout.Space();
+                DrawSelectedMaterialInspector(meshletRenderer, MeshletRendererEditorUtility.GetMaterialSlotCount(meshletRenderer));
+            }
         }
 
         private void DrawMaterialsPanel(MeshletRenderer meshletRenderer)
@@ -171,8 +178,6 @@ namespace VividRP.Editor.GPUDriven
             }
 
             DrawSourceMaterialList(slotCount);
-            EditorGUILayout.Space();
-            DrawSelectedMaterialInspector(meshletRenderer, slotCount);
             EditorGUILayout.Space();
             DrawProxyBindingsPanel(meshletRenderer, slotCount);
         }

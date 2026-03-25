@@ -99,6 +99,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             ThrowIfDisposed();
 
+            cmd.BeginSample("GPUDrivenCulling");
             m_CullingDispatcher.Dispatch(
                 cmd,
                 camera,
@@ -112,6 +113,7 @@ namespace VividRP.Runtime.GPUDriven
                 ForcedMeshLODNodeDepth,
                 MeshLODErrorThreshold
             );
+            cmd.EndSample("GPUDrivenCulling");
         }
 
         public void BindGlobals(CommandBuffer cmd)

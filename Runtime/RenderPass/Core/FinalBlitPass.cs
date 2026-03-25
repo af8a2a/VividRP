@@ -8,6 +8,9 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         private static readonly int ColorGradingLutId = Shader.PropertyToID("_VividColorGradingLut");
         private static readonly int ColorGradingParamsId = Shader.PropertyToID("_VividColorGradingParams");
+        private static readonly int FilmGrainTextureId = Shader.PropertyToID("_VividFilmGrainTexture");
+        private static readonly int FilmGrainParamsId = Shader.PropertyToID("_VividFilmGrainParams");
+        private static readonly int FilmGrainTexParamsId = Shader.PropertyToID("_VividFilmGrainTexParams");
 
         [RenderGraphResource(Access = AccessFlags.Read)]
         private RenderGraphTexture source = new();
@@ -17,11 +20,13 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private Material m_Material;
         private ColorGradingSettingsData m_ColorGradingSettings;
+        private FilmGrainSettingsData m_FilmGrainSettings;
         private RenderTargetIdentifier m_CameraBackBufferTarget;
         private TextureUVOrigin m_CameraBackBufferTextureUVOrigin;
         private bool m_ShouldSetViewport;
         private bool m_PostProcessingAllowed;
         private Rect m_Viewport;
+        private int m_FrameCount;
 
         public override void Prepare(ContextContainer frameData)
         {
@@ -41,6 +46,11 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ColorGradingSettings = m_PostProcessingAllowed
                 ? ColorGradingSettingsResolver.Resolve()
                 : ColorGradingSettingsData.CreateDefault();
+            m_FilmGrainSettings = m_PostProcessingAllowed
+                ? FilmGrainSettingsResolver.Resolve()
+                : FilmGrainSettingsData.CreateDefault();
+
+            m_FrameCount = Time.frameCount;
         }
 
         public override void Create()
@@ -85,6 +95,37 @@ namespace VividRP.Runtime.RenderPass.Core
             if (useColorGradingLut)
                 cmd.SetGlobalTexture(ColorGradingLutId, colorGradingLut.innerHandle);
 
+            // Film Grain
+            if (m_FilmGrainSettings.enabled && m_FilmGrainSettings.texture != null)
+            {
+                m_Material.SetTexture(FilmGrainTextureId, m_FilmGrainSettings.texture);
+                m_Material.SetVector(FilmGrainParamsId, new Vector4(
+                    m_FilmGrainSettings.intensity,
+                    m_FilmGrainSettings.response,
+                    0f, 0f));
+
+                var texWidth = (float)m_FilmGrainSettings.texture.width;
+                var texHeight = (float)m_FilmGrainSettings.texture.height;
+                var screenWidth = m_Viewport.width > 0f ? m_Viewport.width : Screen.width;
+                var screenHeight = m_Viewport.height > 0f ? m_Viewport.height : Screen.height;
+
+                // Per-frame random offset to avoid static tiling
+                var offsetX = (HashFrame(m_FrameCount, 0) % 1024) / 1024f;
+                var offsetY = (HashFrame(m_FrameCount, 1) % 1024) / 1024f;
+
+                m_Material.SetVector(FilmGrainTexParamsId, new Vector4(
+                    screenWidth / texWidth,
+                    screenHeight / texHeight,
+                    offsetX,
+                    offsetY));
+
+                CoreUtils.SetKeyword(m_Material, "_FILM_GRAIN", true);
+            }
+            else
+            {
+                CoreUtils.SetKeyword(m_Material, "_FILM_GRAIN", false);
+            }
+
             var sourceTextureUVOrigin = context.GetTextureUVOrigin(source.innerHandle);
             var scaleBias = GetFinalBlitScaleBias(scale, sourceTextureUVOrigin, m_CameraBackBufferTextureUVOrigin);
 
@@ -102,6 +143,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 CoreUtils.Destroy(m_Material);
                 m_Material = null;
             }
+        }
+
+        private static long HashFrame(int frame, int state)
+        {
+            long hash = frame * 747796405 + 2891336453 + state * 197;
+            hash = ((hash >> 16) ^ hash) * 45679;
+            hash = ((hash >> 16) ^ hash) * 45679;
+            hash = (hash >> 16) ^ hash;
+            return hash & 0x7FFFFFFF;
         }
 
         private static TextureUVOrigin GetCameraBackBufferTextureUVOrigin(CameraType cameraType, bool hasTargetTexture)

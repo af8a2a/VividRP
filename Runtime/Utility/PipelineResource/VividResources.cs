@@ -127,5 +127,36 @@ namespace VividRP.Runtime
 
         [ResourcePath("Shaders/Core/Private/GPUDriven/GPUDrivenMeshletDebug")]
         public Shader GPUDrivenMeshletDebugShader;
+
+        // Film Grain preset textures
+        [ResourcePath("Texture/FilmGrain/Thin01.png")]
+        public Texture2D FilmGrainThin1;
+
+        [ResourcePath("Texture/FilmGrain/Thin02.png")]
+        public Texture2D FilmGrainThin2;
+
+        [ResourcePath("Texture/FilmGrain/Medium01.png")]
+        public Texture2D FilmGrainMedium1;
+
+        [ResourcePath("Texture/FilmGrain/Medium02.png")]
+        public Texture2D FilmGrainMedium2;
+
+        [ResourcePath("Texture/FilmGrain/Medium03.png")]
+        public Texture2D FilmGrainMedium3;
+
+        [ResourcePath("Texture/FilmGrain/Medium04.png")]
+        public Texture2D FilmGrainMedium4;
+
+        [ResourcePath("Texture/FilmGrain/Medium05.png")]
+        public Texture2D FilmGrainMedium5;
+
+        [ResourcePath("Texture/FilmGrain/Medium06.png")]
+        public Texture2D FilmGrainMedium6;
+
+        [ResourcePath("Texture/FilmGrain/Large01.png")]
+        public Texture2D FilmGrainLarge01;
+
+        [ResourcePath("Texture/FilmGrain/Large02.png")]
+        public Texture2D FilmGrainLarge02;
     }
 }

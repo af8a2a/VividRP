@@ -1414,5 +1414,39 @@ namespace VividRP.Editor
             }
         }
     }
-    
+
+    [CanEditMultipleObjects]
+    [CustomEditor(typeof(FilmGrain))]
+    internal sealed class FilmGrainEditor : VolumeComponentEditor
+    {
+        SerializedDataParameter m_Type;
+        SerializedDataParameter m_Intensity;
+        SerializedDataParameter m_Response;
+        SerializedDataParameter m_Texture;
+
+        public override void OnEnable()
+        {
+            var o = new PropertyFetcher<FilmGrain>(serializedObject);
+            m_Type = Unpack(o.Find(x => x.type));
+            m_Intensity = Unpack(o.Find(x => x.intensity));
+            m_Response = Unpack(o.Find(x => x.response));
+            m_Texture = Unpack(o.Find(x => x.texture));
+        }
+
+        public override void OnInspectorGUI()
+        {
+            PropertyField(m_Type);
+            PropertyField(m_Intensity);
+            PropertyField(m_Response);
+
+            if (m_Type.value.intValue == (int)FilmGrainLookup.Custom)
+            {
+                PropertyField(m_Texture);
+
+                if (m_Texture.value.objectReferenceValue == null)
+                    EditorGUILayout.HelpBox("A custom grain texture is required when Type is set to Custom.", MessageType.Warning);
+            }
+        }
+    }
+
 }

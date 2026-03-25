@@ -15,6 +15,7 @@ Shader "Hidden/VividRP/FinalBlit"
             #pragma target 3.5
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma multi_compile_local _ _FILM_GRAIN
 
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
@@ -26,6 +27,13 @@ Shader "Hidden/VividRP/FinalBlit"
             SAMPLER(sampler_VividColorGradingLut);
             float4 _BlitScaleBias;
             float4 _VividColorGradingParams;
+
+            #if defined(_FILM_GRAIN)
+            TEXTURE2D(_VividFilmGrainTexture);
+            SAMPLER(sampler_VividFilmGrainTexture);
+            float4 _VividFilmGrainParams;   // x: intensity, y: response
+            float4 _VividFilmGrainTexParams; // x: scaleX, y: scaleY, z: offsetX, w: offsetY
+            #endif
 
             float2 DynamicScalingApplyScaleBias(float2 xy, float4 dynamicScalingScaleBias)
             {
@@ -75,6 +83,22 @@ Shader "Hidden/VividRP/FinalBlit"
                         lutSpace,
                         _VividColorGradingParams.xy);
                 }
+
+                #if defined(_FILM_GRAIN)
+                {
+                    float2 grainUV = input.uv * _VividFilmGrainTexParams.xy + _VividFilmGrainTexParams.zw;
+                    float grain = SAMPLE_TEXTURE2D(_VividFilmGrainTexture, sampler_VividFilmGrainTexture, grainUV).r;
+
+                    // Remap from [0, 1] to [-1, 1]
+                    grain = (grain - 0.5) * 2.0;
+
+                    // Luminance-based response: reduce grain in bright areas
+                    float lum = Luminance(postProcessed);
+                    float response = 1.0 - saturate(lum) * _VividFilmGrainParams.y;
+
+                    postProcessed += postProcessed * grain * _VividFilmGrainParams.x * response;
+                }
+                #endif
 
                 return float4(postProcessed, color.a);
             }

@@ -345,13 +345,13 @@ namespace VividRP.Runtime.GPUDriven
         {
             VividMeshletRendererDatabase.instance.UnregisterRenderer(this);
         }
-
+#if UNITY_EDITOR
         private void OnValidate()
         {
             RefreshSource();
             SyncDatabaseRegistration();
         }
-
+#endif
         private bool EnsureSourceMaterialArraySize()
         {
             int expectedCount = subMeshCount;

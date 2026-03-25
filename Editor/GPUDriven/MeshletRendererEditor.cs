@@ -76,8 +76,6 @@ namespace VividRP.Editor.GPUDriven
     {
         private readonly Dictionary<int, UnityEditor.Editor> m_SourceMaterialEditors = new();
         private readonly Dictionary<int, UnityEditor.Editor> m_MaterialProxyEditors = new();
-        private readonly HashSet<int> m_ExpandedSourceMaterials = new();
-        private readonly HashSet<int> m_ExpandedMaterialProxies = new();
 
         private SerializedProperty m_SourceMesh;
         private SerializedProperty m_SourceMaterials;
@@ -91,6 +89,9 @@ namespace VividRP.Editor.GPUDriven
         private SerializedProperty m_TakeOverSourceRenderer;
 
         private bool m_ShowMaterials = true;
+        private bool m_ShowProxyBindings = true;
+        private bool m_ShowSelectedProxyInspector;
+        private int m_SelectedMaterialSlot;
 
         private void OnEnable()
         {
@@ -110,8 +111,6 @@ namespace VividRP.Editor.GPUDriven
         {
             DestroyCachedEditors(m_SourceMaterialEditors);
             DestroyCachedEditors(m_MaterialProxyEditors);
-            m_ExpandedSourceMaterials.Clear();
-            m_ExpandedMaterialProxies.Clear();
         }
 
         public override void OnInspectorGUI()
@@ -149,251 +148,304 @@ namespace VividRP.Editor.GPUDriven
 
         private void DrawMaterialsPanel(MeshletRenderer meshletRenderer)
         {
-            m_ShowMaterials = EditorGUILayout.BeginFoldoutHeaderGroup(m_ShowMaterials, "Materials");
+            m_ShowMaterials = EditorGUILayout.Foldout(m_ShowMaterials, "Materials", true);
             if (!m_ShowMaterials)
             {
-                EditorGUILayout.EndFoldoutHeaderGroup();
                 return;
             }
 
             int slotCount = MeshletRendererEditorUtility.GetMaterialSlotCount(meshletRenderer);
 
-            using (new EditorGUI.IndentLevelScope())
+            using (new EditorGUI.DisabledScope(true))
             {
-                using (new EditorGUI.DisabledScope(true))
+                EditorGUILayout.IntField("Size", slotCount);
+            }
+
+            if (slotCount == 0)
+            {
+                EditorGUILayout.HelpBox(
+                    "No material slots are available yet. Capture source data first to expose MeshletRenderer material slots.",
+                    MessageType.Info
+                );
+                return;
+            }
+
+            DrawSourceMaterialList(slotCount);
+            EditorGUILayout.Space();
+            DrawSelectedMaterialInspector(meshletRenderer, slotCount);
+            EditorGUILayout.Space();
+            DrawProxyBindingsPanel(meshletRenderer, slotCount);
+        }
+
+        private void DrawSourceMaterialList(int slotCount)
+        {
+            for (int subMeshIndex = 0; subMeshIndex < slotCount; subMeshIndex++)
+            {
+                SerializedProperty sourceMaterialProperty = GetArrayElementAtIndex(m_SourceMaterials, subMeshIndex);
+                if (sourceMaterialProperty == null)
                 {
-                    EditorGUILayout.IntField("Size", slotCount);
+                    continue;
                 }
 
-                if (slotCount == 0)
-                {
-                    EditorGUILayout.HelpBox(
-                        "No material slots are available yet. Capture source data first to expose MeshletRenderer material slots.",
-                        MessageType.Info
-                    );
-                }
-                else
-                {
-                    for (int subMeshIndex = 0; subMeshIndex < slotCount; subMeshIndex++)
-                    {
-                        DrawMaterialSlot(meshletRenderer, subMeshIndex);
-                    }
-                }
-
-                EditorGUILayout.Space();
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    using (new EditorGUI.DisabledScope(meshletRenderer == null || meshletRenderer.sourceMesh == null))
+                    EditorGUILayout.PropertyField(sourceMaterialProperty, new GUIContent($"Element {subMeshIndex}"));
+                    using (new EditorGUI.DisabledScope(m_SelectedMaterialSlot == subMeshIndex))
                     {
-                        if (GUILayout.Button("Create/Bind GPUDriven Proxies"))
+                        if (GUILayout.Button("Inspect", EditorStyles.miniButton, GUILayout.Width(60.0f)))
                         {
-                            ApplyMaterialChanges(meshletRenderer);
-
-                            GPUDrivenMaterialProxyBindingResult bindingResult =
-                                GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxies(meshletRenderer);
-
-                            if (!bindingResult.Success && !string.IsNullOrEmpty(bindingResult.ErrorMessage))
-                            {
-                                Debug.LogWarning($"[VividRP] {bindingResult.ErrorMessage}", meshletRenderer);
-                            }
-
-                            LogWarnings(meshletRenderer, bindingResult.Warnings);
-                            SelectLastCreatedAsset(bindingResult.CreatedAssetPaths);
-                            serializedObject.Update();
-                        }
-
-                        if (GUILayout.Button("Sync Proxies From Source Materials"))
-                        {
-                            ApplyMaterialChanges(meshletRenderer);
-
-                            GPUDrivenMaterialProxySyncResult syncResult =
-                                GPUDrivenMaterialProxyEditorUtility.SyncMaterialProxiesFromSourceMaterials(meshletRenderer);
-
-                            if (!syncResult.Success && !string.IsNullOrEmpty(syncResult.ErrorMessage))
-                            {
-                                Debug.LogWarning($"[VividRP] {syncResult.ErrorMessage}", meshletRenderer);
-                            }
-
-                            LogWarnings(meshletRenderer, syncResult.Warnings);
-                            serializedObject.Update();
+                            m_SelectedMaterialSlot = subMeshIndex;
                         }
                     }
                 }
             }
-
-            EditorGUILayout.EndFoldoutHeaderGroup();
         }
 
-        private void DrawMaterialSlot(MeshletRenderer meshletRenderer, int subMeshIndex)
+        private void DrawSelectedMaterialInspector(MeshletRenderer meshletRenderer, int slotCount)
         {
-            SerializedProperty sourceMaterialProperty = GetArrayElementAtIndex(m_SourceMaterials, subMeshIndex);
-            SerializedProperty materialProxyProperty = GetArrayElementAtIndex(m_MaterialProxies, subMeshIndex);
+            int selectedSlot = NormalizeSelectedMaterialSlot(slotCount);
+            m_SelectedMaterialSlot = selectedSlot;
+
+            string[] slotLabels = BuildElementLabels(slotCount);
+            if (slotCount > 1)
+            {
+                m_SelectedMaterialSlot = EditorGUILayout.Popup("Inspector Slot", selectedSlot, slotLabels);
+                selectedSlot = m_SelectedMaterialSlot;
+            }
+
+            SerializedProperty sourceMaterialProperty = GetArrayElementAtIndex(m_SourceMaterials, selectedSlot);
             var sourceMaterial = sourceMaterialProperty?.objectReferenceValue as Material;
-            var materialProxy = materialProxyProperty?.objectReferenceValue as GPUDrivenMaterialProxy;
+
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                using (new EditorGUI.DisabledScope(sourceMaterial == null))
+                {
+                    if (GUILayout.Button("Select Material"))
+                    {
+                        Selection.activeObject = sourceMaterial;
+                        EditorGUIUtility.PingObject(sourceMaterial);
+                    }
+                }
+
+                using (new EditorGUI.DisabledScope(meshletRenderer == null || meshletRenderer.sourceMesh == null || sourceMaterial == null))
+                {
+                    if (GUILayout.Button("Bind Proxy"))
+                    {
+                        ApplyMaterialChanges(meshletRenderer);
+                        GPUDrivenMaterialProxyBindingResult bindingResult =
+                            GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxy(meshletRenderer, selectedSlot);
+                        if (!bindingResult.Success && !string.IsNullOrEmpty(bindingResult.ErrorMessage))
+                        {
+                            Debug.LogWarning($"[VividRP] {bindingResult.ErrorMessage}", meshletRenderer);
+                        }
+
+                        LogWarnings(meshletRenderer, bindingResult.Warnings);
+                        SelectLastCreatedAsset(bindingResult.CreatedAssetPaths);
+                        serializedObject.Update();
+                    }
+                }
+
+                using (new EditorGUI.DisabledScope(meshletRenderer == null || meshletRenderer.sourceMesh == null || sourceMaterial == null))
+                {
+                    if (GUILayout.Button("Sync Proxy"))
+                    {
+                        ApplyMaterialChanges(meshletRenderer);
+                        GPUDrivenMaterialProxySyncResult syncResult =
+                            GPUDrivenMaterialProxyEditorUtility.SyncMaterialProxyFromSourceMaterial(meshletRenderer, selectedSlot);
+                        if (!syncResult.Success && !string.IsNullOrEmpty(syncResult.ErrorMessage))
+                        {
+                            Debug.LogWarning($"[VividRP] {syncResult.ErrorMessage}", meshletRenderer);
+                        }
+
+                        LogWarnings(meshletRenderer, syncResult.Warnings);
+                        serializedObject.Update();
+                    }
+                }
+            }
+
+            if (sourceMaterial == null)
+            {
+                EditorGUILayout.HelpBox("Assign a source Material to edit it inline here.", MessageType.Info);
+                return;
+            }
+
+            DrawMaterialSlotWarnings(meshletRenderer, sourceMaterial, meshletRenderer.GetMaterialProxy(selectedSlot));
+
+            if (GetCachedEditor(sourceMaterial, true) is not MaterialEditor materialEditor)
+            {
+                return;
+            }
+
+            using (new EditorGUI.DisabledScope((sourceMaterial.hideFlags & HideFlags.NotEditable) != 0))
+            {
+                materialEditor.DrawHeader();
+                materialEditor.OnInspectorGUI();
+            }
+        }
+
+        private void DrawProxyBindingsPanel(MeshletRenderer meshletRenderer, int slotCount)
+        {
+            m_ShowProxyBindings = EditorGUILayout.Foldout(m_ShowProxyBindings, "GPUDriven Proxies", true);
+            if (!m_ShowProxyBindings)
+            {
+                return;
+            }
 
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                EditorGUILayout.LabelField($"Element {subMeshIndex}", EditorStyles.boldLabel);
+                int selectedSlot = NormalizeSelectedMaterialSlot(slotCount);
+                SerializedProperty selectedProxyProperty = GetArrayElementAtIndex(m_MaterialProxies, selectedSlot);
+                var selectedProxy = selectedProxyProperty?.objectReferenceValue as GPUDrivenMaterialProxy;
+                var selectedSourceMaterial = GetArrayElementAtIndex(m_SourceMaterials, selectedSlot)?.objectReferenceValue as Material;
 
-                if (sourceMaterialProperty != null)
+                using (new EditorGUI.IndentLevelScope())
                 {
-                    EditorGUILayout.PropertyField(sourceMaterialProperty, new GUIContent("Source Material"));
-                }
-
-                DrawObjectToolbar(
-                    sourceMaterial,
-                    subMeshIndex,
-                    true,
-                    meshletRenderer,
-                    () => ApplyMaterialChanges(meshletRenderer),
-                    () => GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxy(meshletRenderer, subMeshIndex),
-                    () => GPUDrivenMaterialProxyEditorUtility.SyncMaterialProxyFromSourceMaterial(meshletRenderer, subMeshIndex)
-                );
-                DrawInlineObjectEditor(sourceMaterial, subMeshIndex, true);
-
-                EditorGUILayout.Space(2.0f);
-
-                if (materialProxyProperty != null)
-                {
-                    EditorGUILayout.PropertyField(materialProxyProperty, new GUIContent("GPUDriven Proxy"));
-                }
-
-                DrawObjectToolbar(
-                    materialProxy,
-                    subMeshIndex,
-                    false,
-                    meshletRenderer,
-                    () => ApplyMaterialChanges(meshletRenderer),
-                    () => GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxy(meshletRenderer, subMeshIndex),
-                    () => GPUDrivenMaterialProxyEditorUtility.SyncMaterialProxyFromSourceMaterial(meshletRenderer, subMeshIndex)
-                );
-                DrawInlineObjectEditor(materialProxy, subMeshIndex, false);
-
-                DrawMaterialSlotWarnings(meshletRenderer, sourceMaterial, materialProxy);
-            }
-        }
-
-        private void DrawObjectToolbar(
-            UnityEngine.Object slotObject,
-            int subMeshIndex,
-            bool isSourceMaterial,
-            MeshletRenderer meshletRenderer,
-            Action applyPendingChanges,
-            Func<GPUDrivenMaterialProxyBindingResult> bindProxy,
-            Func<GPUDrivenMaterialProxySyncResult> syncProxy
-        )
-        {
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                using (new EditorGUI.DisabledScope(slotObject == null))
-                {
-                    if (GUILayout.Button("Select", EditorStyles.miniButtonLeft))
+                    for (int subMeshIndex = 0; subMeshIndex < slotCount; subMeshIndex++)
                     {
-                        Selection.activeObject = slotObject;
-                        EditorGUIUtility.PingObject(slotObject);
-                    }
-                }
-
-                bool expanded = GetExpandedState(subMeshIndex, isSourceMaterial);
-                string expandLabel = expanded ? "Hide Inspector" : "Edit";
-                using (new EditorGUI.DisabledScope(slotObject == null))
-                {
-                    if (GUILayout.Button(expandLabel, EditorStyles.miniButtonMid))
-                    {
-                        SetExpandedState(subMeshIndex, isSourceMaterial, !expanded);
-                    }
-                }
-
-                if (isSourceMaterial)
-                {
-                    using (new EditorGUI.DisabledScope(meshletRenderer == null || meshletRenderer.sourceMesh == null || slotObject == null))
-                    {
-                        if (GUILayout.Button("Bind Proxy", EditorStyles.miniButtonMid))
+                        SerializedProperty materialProxyProperty = GetArrayElementAtIndex(m_MaterialProxies, subMeshIndex);
+                        if (materialProxyProperty == null)
                         {
-                            applyPendingChanges?.Invoke();
-                            GPUDrivenMaterialProxyBindingResult bindingResult = bindProxy();
-                            if (!bindingResult.Success && !string.IsNullOrEmpty(bindingResult.ErrorMessage))
-                            {
-                                Debug.LogWarning($"[VividRP] {bindingResult.ErrorMessage}", meshletRenderer);
-                            }
-
-                            LogWarnings(meshletRenderer, bindingResult.Warnings);
-                            SelectLastCreatedAsset(bindingResult.CreatedAssetPaths);
-                            serializedObject.Update();
+                            continue;
                         }
 
-                        if (GUILayout.Button("Sync Proxy", EditorStyles.miniButtonRight))
+                        using (new EditorGUILayout.HorizontalScope())
                         {
-                            applyPendingChanges?.Invoke();
-                            GPUDrivenMaterialProxySyncResult syncResult = syncProxy();
-                            if (!syncResult.Success && !string.IsNullOrEmpty(syncResult.ErrorMessage))
+                            EditorGUILayout.PropertyField(materialProxyProperty, new GUIContent($"Element {subMeshIndex}"));
+                            using (new EditorGUI.DisabledScope(m_SelectedMaterialSlot == subMeshIndex))
                             {
-                                Debug.LogWarning($"[VividRP] {syncResult.ErrorMessage}", meshletRenderer);
+                                if (GUILayout.Button("Inspect", EditorStyles.miniButton, GUILayout.Width(60.0f)))
+                                {
+                                    m_SelectedMaterialSlot = subMeshIndex;
+                                    selectedSlot = subMeshIndex;
+                                    selectedProxyProperty = materialProxyProperty;
+                                    selectedProxy = materialProxyProperty.objectReferenceValue as GPUDrivenMaterialProxy;
+                                    selectedSourceMaterial = GetArrayElementAtIndex(m_SourceMaterials, subMeshIndex)?.objectReferenceValue as Material;
+                                }
                             }
-
-                            LogWarnings(meshletRenderer, syncResult.Warnings);
-                            serializedObject.Update();
                         }
                     }
-                }
-                else
-                {
-                    using (new EditorGUI.DisabledScope(meshletRenderer == null || meshletRenderer.sourceMesh == null))
+
+                    EditorGUILayout.Space();
+                    using (new EditorGUILayout.HorizontalScope())
                     {
-                        if (GUILayout.Button("Rebind", EditorStyles.miniButtonMid))
+                        using (new EditorGUI.DisabledScope(meshletRenderer == null || meshletRenderer.sourceMesh == null))
                         {
-                            applyPendingChanges?.Invoke();
-                            GPUDrivenMaterialProxyBindingResult bindingResult = bindProxy();
-                            if (!bindingResult.Success && !string.IsNullOrEmpty(bindingResult.ErrorMessage))
+                            if (GUILayout.Button("Create/Bind GPUDriven Proxies"))
                             {
-                                Debug.LogWarning($"[VividRP] {bindingResult.ErrorMessage}", meshletRenderer);
+                                ApplyMaterialChanges(meshletRenderer);
+
+                                GPUDrivenMaterialProxyBindingResult bindingResult =
+                                    GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxies(meshletRenderer);
+
+                                if (!bindingResult.Success && !string.IsNullOrEmpty(bindingResult.ErrorMessage))
+                                {
+                                    Debug.LogWarning($"[VividRP] {bindingResult.ErrorMessage}", meshletRenderer);
+                                }
+
+                                LogWarnings(meshletRenderer, bindingResult.Warnings);
+                                SelectLastCreatedAsset(bindingResult.CreatedAssetPaths);
+                                serializedObject.Update();
                             }
 
-                            LogWarnings(meshletRenderer, bindingResult.Warnings);
-                            SelectLastCreatedAsset(bindingResult.CreatedAssetPaths);
-                            serializedObject.Update();
+                            if (GUILayout.Button("Sync Proxies From Source Materials"))
+                            {
+                                ApplyMaterialChanges(meshletRenderer);
+
+                                GPUDrivenMaterialProxySyncResult syncResult =
+                                    GPUDrivenMaterialProxyEditorUtility.SyncMaterialProxiesFromSourceMaterials(meshletRenderer);
+
+                                if (!syncResult.Success && !string.IsNullOrEmpty(syncResult.ErrorMessage))
+                                {
+                                    Debug.LogWarning($"[VividRP] {syncResult.ErrorMessage}", meshletRenderer);
+                                }
+
+                                LogWarnings(meshletRenderer, syncResult.Warnings);
+                                serializedObject.Update();
+                            }
+                        }
+                    }
+
+                    EditorGUILayout.Space();
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        if (slotCount > 1)
+                        {
+                            m_SelectedMaterialSlot = EditorGUILayout.Popup("Inspector Slot", selectedSlot, BuildElementLabels(slotCount));
+                            selectedSlot = m_SelectedMaterialSlot;
+                            selectedProxyProperty = GetArrayElementAtIndex(m_MaterialProxies, selectedSlot);
+                            selectedProxy = selectedProxyProperty?.objectReferenceValue as GPUDrivenMaterialProxy;
+                            selectedSourceMaterial = GetArrayElementAtIndex(m_SourceMaterials, selectedSlot)?.objectReferenceValue as Material;
                         }
 
-                        if (GUILayout.Button("Sync", EditorStyles.miniButtonRight))
+                        using (new EditorGUI.DisabledScope(selectedProxy == null))
                         {
-                            applyPendingChanges?.Invoke();
-                            GPUDrivenMaterialProxySyncResult syncResult = syncProxy();
-                            if (!syncResult.Success && !string.IsNullOrEmpty(syncResult.ErrorMessage))
+                            if (GUILayout.Button("Select Proxy"))
                             {
-                                Debug.LogWarning($"[VividRP] {syncResult.ErrorMessage}", meshletRenderer);
+                                Selection.activeObject = selectedProxy;
+                                EditorGUIUtility.PingObject(selectedProxy);
                             }
+                        }
 
-                            LogWarnings(meshletRenderer, syncResult.Warnings);
-                            serializedObject.Update();
+                        using (new EditorGUI.DisabledScope(meshletRenderer == null || meshletRenderer.sourceMesh == null || selectedSourceMaterial == null))
+                        {
+                            if (GUILayout.Button(selectedProxy != null ? "Rebind Proxy" : "Bind Proxy"))
+                            {
+                                ApplyMaterialChanges(meshletRenderer);
+                                GPUDrivenMaterialProxyBindingResult bindingResult =
+                                    GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxy(meshletRenderer, selectedSlot);
+                                if (!bindingResult.Success && !string.IsNullOrEmpty(bindingResult.ErrorMessage))
+                                {
+                                    Debug.LogWarning($"[VividRP] {bindingResult.ErrorMessage}", meshletRenderer);
+                                }
+
+                                LogWarnings(meshletRenderer, bindingResult.Warnings);
+                                SelectLastCreatedAsset(bindingResult.CreatedAssetPaths);
+                                serializedObject.Update();
+                                selectedProxyProperty = GetArrayElementAtIndex(m_MaterialProxies, selectedSlot);
+                                selectedProxy = selectedProxyProperty?.objectReferenceValue as GPUDrivenMaterialProxy;
+                            }
+                        }
+
+                        using (new EditorGUI.DisabledScope(meshletRenderer == null || meshletRenderer.sourceMesh == null || selectedProxy == null))
+                        {
+                            if (GUILayout.Button("Sync Proxy"))
+                            {
+                                ApplyMaterialChanges(meshletRenderer);
+                                GPUDrivenMaterialProxySyncResult syncResult =
+                                    GPUDrivenMaterialProxyEditorUtility.SyncMaterialProxyFromSourceMaterial(meshletRenderer, selectedSlot);
+                                if (!syncResult.Success && !string.IsNullOrEmpty(syncResult.ErrorMessage))
+                                {
+                                    Debug.LogWarning($"[VividRP] {syncResult.ErrorMessage}", meshletRenderer);
+                                }
+
+                                LogWarnings(meshletRenderer, syncResult.Warnings);
+                                serializedObject.Update();
+                            }
+                        }
+                    }
+
+                    if (selectedProxy == null)
+                    {
+                        EditorGUILayout.HelpBox("No GPUDriven proxy is bound for the selected slot.", MessageType.Info);
+                    }
+                    else
+                    {
+                        DrawMaterialSlotWarnings(meshletRenderer, selectedSourceMaterial, selectedProxy);
+
+                        UnityEditor.Editor editor = GetCachedEditor(selectedProxy, false);
+                        if (editor != null)
+                        {
+                            m_ShowSelectedProxyInspector = EditorGUILayout.InspectorTitlebar(m_ShowSelectedProxyInspector, selectedProxy);
+                            if (m_ShowSelectedProxyInspector)
+                            {
+                                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                                {
+                                    editor.OnInspectorGUI();
+                                }
+                            }
                         }
                     }
                 }
-            }
-        }
-
-        private void DrawInlineObjectEditor(UnityEngine.Object slotObject, int subMeshIndex, bool isSourceMaterial)
-        {
-            if (slotObject == null || !GetExpandedState(subMeshIndex, isSourceMaterial))
-            {
-                return;
-            }
-
-            bool expanded = EditorGUILayout.InspectorTitlebar(true, slotObject);
-            SetExpandedState(subMeshIndex, isSourceMaterial, expanded);
-            if (!expanded)
-            {
-                return;
-            }
-
-            using (new EditorGUI.IndentLevelScope())
-            {
-                UnityEditor.Editor editor = GetCachedEditor(slotObject, isSourceMaterial);
-                if (editor == null)
-                {
-                    return;
-                }
-
-                editor.OnInspectorGUI();
             }
         }
 
@@ -444,23 +496,22 @@ namespace VividRP.Editor.GPUDriven
                 : null;
         }
 
-        private bool GetExpandedState(int subMeshIndex, bool isSourceMaterial)
+        private static string[] BuildElementLabels(int slotCount)
         {
-            return isSourceMaterial
-                ? m_ExpandedSourceMaterials.Contains(subMeshIndex)
-                : m_ExpandedMaterialProxies.Contains(subMeshIndex);
-        }
-
-        private void SetExpandedState(int subMeshIndex, bool isSourceMaterial, bool expanded)
-        {
-            HashSet<int> expandedSet = isSourceMaterial ? m_ExpandedSourceMaterials : m_ExpandedMaterialProxies;
-            if (expanded)
+            var labels = new string[slotCount];
+            for (int index = 0; index < slotCount; index++)
             {
-                expandedSet.Add(subMeshIndex);
-                return;
+                labels[index] = $"Element {index}";
             }
 
-            expandedSet.Remove(subMeshIndex);
+            return labels;
+        }
+
+        private int NormalizeSelectedMaterialSlot(int slotCount)
+        {
+            return slotCount <= 0
+                ? 0
+                : Mathf.Clamp(m_SelectedMaterialSlot, 0, slotCount - 1);
         }
 
         private UnityEditor.Editor GetCachedEditor(UnityEngine.Object targetObject, bool isSourceMaterial)

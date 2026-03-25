@@ -401,6 +401,114 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void TakeOverAndRemoveSourceMeshRenderersRecursively_ConvertsRootAndChildren()
+        {
+            EnsureSupportedPlatform();
+
+            Shader shader = Shader.Find("Hidden/InternalErrorShader");
+            Assert.That(shader, Is.Not.Null);
+
+            Mesh mesh = CreateSingleSubMeshMesh("RecursiveMesh");
+            AssetDatabase.CreateAsset(mesh, TempFolder + "/RecursiveMesh.asset");
+            mesh = AssetDatabase.LoadAssetAtPath<Mesh>(TempFolder + "/RecursiveMesh.asset");
+
+            var material = new Material(shader);
+            AssetDatabase.CreateAsset(material, TempFolder + "/RecursiveMaterial.mat");
+            material = AssetDatabase.LoadAssetAtPath<Material>(TempFolder + "/RecursiveMaterial.mat");
+
+            GameObject root = null;
+
+            try
+            {
+                root = new GameObject("RecursiveRoot");
+                GameObject child = new GameObject("Child");
+                child.transform.SetParent(root.transform);
+
+                GameObject inactiveChild = new GameObject("InactiveChild");
+                inactiveChild.transform.SetParent(root.transform);
+                inactiveChild.SetActive(false);
+
+                root.AddComponent<MeshFilter>().sharedMesh = mesh;
+                root.AddComponent<MeshRenderer>().sharedMaterial = material;
+
+                child.AddComponent<MeshFilter>().sharedMesh = mesh;
+                child.AddComponent<MeshRenderer>().sharedMaterial = material;
+
+                inactiveChild.AddComponent<MeshFilter>().sharedMesh = mesh;
+                inactiveChild.AddComponent<MeshRenderer>().sharedMaterial = material;
+
+                MeshletRendererRecursiveConversionResult result =
+                    MeshletRendererEditorUtility.TakeOverAndRemoveSourceMeshRenderersRecursively(root);
+
+                Assert.That(result.Success, Is.True, result.ErrorMessage);
+                Assert.That(result.ConvertedRendererCount, Is.EqualTo(3));
+                Assert.That(result.AddedMeshletRendererCount, Is.EqualTo(3));
+                Assert.That(result.FailedRendererCount, Is.Zero);
+                Assert.That(result.SkippedRendererCount, Is.Zero);
+                Assert.That(result.CreatedMeshletAssetPaths, Has.Length.EqualTo(1));
+                Assert.That(result.CreatedMaterialProxyAssetPaths, Has.Length.EqualTo(1));
+
+                AssertMeshletRendererConverted(root, mesh, material);
+                AssertMeshletRendererConverted(child, mesh, material);
+                AssertMeshletRendererConverted(inactiveChild, mesh, material);
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        [Test]
+        public void TakeOverAndRemoveSourceMeshRenderersRecursively_SkipsInvalidMeshRenderersAndContinues()
+        {
+            EnsureSupportedPlatform();
+
+            Shader shader = Shader.Find("Hidden/InternalErrorShader");
+            Assert.That(shader, Is.Not.Null);
+
+            Mesh mesh = CreateSingleSubMeshMesh("RecursiveValidMesh");
+            AssetDatabase.CreateAsset(mesh, TempFolder + "/RecursiveValidMesh.asset");
+            mesh = AssetDatabase.LoadAssetAtPath<Mesh>(TempFolder + "/RecursiveValidMesh.asset");
+
+            var material = new Material(shader);
+            AssetDatabase.CreateAsset(material, TempFolder + "/RecursiveValidMaterial.mat");
+            material = AssetDatabase.LoadAssetAtPath<Material>(TempFolder + "/RecursiveValidMaterial.mat");
+
+            GameObject root = null;
+
+            try
+            {
+                root = new GameObject("RecursiveMixedRoot");
+
+                GameObject validChild = new GameObject("ValidChild");
+                validChild.transform.SetParent(root.transform);
+                validChild.AddComponent<MeshFilter>().sharedMesh = mesh;
+                validChild.AddComponent<MeshRenderer>().sharedMaterial = material;
+
+                GameObject invalidChild = new GameObject("InvalidChild");
+                invalidChild.transform.SetParent(root.transform);
+                invalidChild.AddComponent<MeshRenderer>();
+
+                MeshletRendererRecursiveConversionResult result =
+                    MeshletRendererEditorUtility.TakeOverAndRemoveSourceMeshRenderersRecursively(root);
+
+                Assert.That(result.Success, Is.True, result.ErrorMessage);
+                Assert.That(result.ConvertedRendererCount, Is.EqualTo(1));
+                Assert.That(result.AddedMeshletRendererCount, Is.EqualTo(1));
+                Assert.That(result.FailedRendererCount, Is.Zero);
+                Assert.That(result.SkippedRendererCount, Is.EqualTo(1));
+
+                AssertMeshletRendererConverted(validChild, mesh, material);
+                Assert.That(invalidChild.GetComponent<MeshRenderer>(), Is.Not.Null);
+                Assert.That(invalidChild.GetComponent<MeshletRenderer>(), Is.Null);
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        [Test]
         public void CollectMeshletCollections_DistinguishesMeshesThatShareAssetPath()
         {
             EnsureSupportedPlatform();
@@ -484,6 +592,20 @@ namespace VividRP.Editor.Tests
             mesh.RecalculateBounds();
             mesh.RecalculateTangents();
             return mesh;
+        }
+
+        private static void AssertMeshletRendererConverted(GameObject gameObject, Mesh mesh, Material material)
+        {
+            Assert.That(gameObject, Is.Not.Null);
+            Assert.That(gameObject.GetComponent<MeshRenderer>(), Is.Null);
+
+            MeshletRenderer meshletRenderer = gameObject.GetComponent<MeshletRenderer>();
+            Assert.That(meshletRenderer, Is.Not.Null);
+            Assert.That(meshletRenderer.sourceMesh, Is.SameAs(mesh));
+            Assert.That(meshletRenderer.GetSourceMaterial(0), Is.SameAs(material));
+            Assert.That(meshletRenderer.GetMeshletCollection(0), Is.Not.Null);
+            Assert.That(meshletRenderer.GetMaterialProxy(0), Is.Not.Null);
+            Assert.That(meshletRenderer.TryValidate(out string validationMessage), Is.True, validationMessage);
         }
 
         private static Mesh CreateTwoSubMeshMesh(string meshName)

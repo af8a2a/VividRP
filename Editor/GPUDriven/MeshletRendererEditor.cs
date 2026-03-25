@@ -71,6 +71,49 @@ namespace VividRP.Editor.GPUDriven
         public string[] Warnings { get; }
     }
 
+    internal readonly struct MeshletRendererRecursiveConversionResult
+    {
+        public MeshletRendererRecursiveConversionResult(
+            bool success,
+            int convertedRendererCount,
+            int addedMeshletRendererCount,
+            int failedRendererCount,
+            int skippedRendererCount,
+            string errorMessage,
+            string[] createdMeshletAssetPaths,
+            string[] createdMaterialProxyAssetPaths,
+            string[] warnings)
+        {
+            Success = success;
+            ConvertedRendererCount = convertedRendererCount;
+            AddedMeshletRendererCount = addedMeshletRendererCount;
+            FailedRendererCount = failedRendererCount;
+            SkippedRendererCount = skippedRendererCount;
+            ErrorMessage = errorMessage;
+            CreatedMeshletAssetPaths = createdMeshletAssetPaths ?? Array.Empty<string>();
+            CreatedMaterialProxyAssetPaths = createdMaterialProxyAssetPaths ?? Array.Empty<string>();
+            Warnings = warnings ?? Array.Empty<string>();
+        }
+
+        public bool Success { get; }
+
+        public int ConvertedRendererCount { get; }
+
+        public int AddedMeshletRendererCount { get; }
+
+        public int FailedRendererCount { get; }
+
+        public int SkippedRendererCount { get; }
+
+        public string ErrorMessage { get; }
+
+        public string[] CreatedMeshletAssetPaths { get; }
+
+        public string[] CreatedMaterialProxyAssetPaths { get; }
+
+        public string[] Warnings { get; }
+    }
+
     [CustomEditor(typeof(MeshletRenderer))]
     internal sealed class MeshletRendererEditor : UnityEditor.Editor
     {
@@ -871,6 +914,98 @@ namespace VividRP.Editor.GPUDriven
             );
         }
 
+        internal static MeshletRendererRecursiveConversionResult TakeOverAndRemoveSourceMeshRenderersRecursively(GameObject root)
+        {
+            if (root == null)
+            {
+                return new MeshletRendererRecursiveConversionResult(false, 0, 0, 0, 0, "Root GameObject is null.", null, null, null);
+            }
+
+            MeshRenderer[] meshRenderers = root.GetComponentsInChildren<MeshRenderer>(true);
+            if (meshRenderers == null || meshRenderers.Length == 0)
+            {
+                return new MeshletRendererRecursiveConversionResult(true, 0, 0, 0, 0, string.Empty, null, null, null);
+            }
+
+            int convertedRendererCount = 0;
+            int addedMeshletRendererCount = 0;
+            int failedRendererCount = 0;
+            int skippedRendererCount = 0;
+            var createdMeshletAssetPaths = new List<string>();
+            var createdMaterialProxyAssetPaths = new List<string>();
+            var warnings = new List<string>();
+
+            for (int rendererIndex = 0; rendererIndex < meshRenderers.Length; rendererIndex++)
+            {
+                MeshRenderer meshRenderer = meshRenderers[rendererIndex];
+                if (meshRenderer == null)
+                {
+                    continue;
+                }
+
+                string hierarchyPath = GetHierarchyPath(meshRenderer.transform);
+                if (!MeshletRenderer.TryExtractMesh(meshRenderer, out _))
+                {
+                    skippedRendererCount++;
+                    warnings.Add($"Skipped '{hierarchyPath}' because it has no valid MeshFilter mesh.");
+                    continue;
+                }
+
+                MeshletRenderer meshletRenderer = meshRenderer.GetComponent<MeshletRenderer>();
+                bool addedMeshletRenderer = false;
+                if (meshletRenderer == null)
+                {
+                    meshletRenderer = Undo.AddComponent<MeshletRenderer>(meshRenderer.gameObject);
+                    if (meshletRenderer == null)
+                    {
+                        failedRendererCount++;
+                        warnings.Add($"Failed to add MeshletRenderer to '{hierarchyPath}'.");
+                        continue;
+                    }
+
+                    addedMeshletRenderer = true;
+                    addedMeshletRendererCount++;
+                }
+
+                MeshletRendererSourceRendererDetachResult detachResult = TakeOverAndRemoveSourceMeshRenderer(meshletRenderer);
+                createdMeshletAssetPaths.AddRange(detachResult.CreatedMeshletAssetPaths);
+                createdMaterialProxyAssetPaths.AddRange(detachResult.CreatedMaterialProxyAssetPaths);
+                AddPrefixedWarnings(warnings, hierarchyPath, detachResult.Warnings);
+
+                if (!detachResult.Success)
+                {
+                    failedRendererCount++;
+                    warnings.Add($"Failed to convert '{hierarchyPath}': {detachResult.ErrorMessage}");
+                    if (addedMeshletRenderer && meshletRenderer != null)
+                    {
+                        Undo.DestroyObjectImmediate(meshletRenderer);
+                        addedMeshletRendererCount--;
+                    }
+
+                    continue;
+                }
+
+                convertedRendererCount++;
+            }
+
+            bool success = failedRendererCount == 0;
+            string errorMessage = success
+                ? string.Empty
+                : $"Failed to convert {failedRendererCount} MeshRenderer(s) under '{root.name}'.";
+
+            return new MeshletRendererRecursiveConversionResult(
+                success,
+                convertedRendererCount,
+                addedMeshletRendererCount,
+                failedRendererCount,
+                skippedRendererCount,
+                errorMessage,
+                createdMeshletAssetPaths.ToArray(),
+                createdMaterialProxyAssetPaths.ToArray(),
+                warnings.ToArray()
+            );
+        }
+
         internal static VividMeshletCollectionAsset[] CollectMeshletCollections(Mesh mesh)
         {
             if (!TryGetMeshAssetKey(mesh, out string meshGuid, out long meshLocalFileId, out string meshName, out string folderPath))
@@ -955,6 +1090,25 @@ namespace VividRP.Editor.GPUDriven
             return TryGetAttachedMeshRenderer(meshletRenderer, out _);
         }
 
+        internal static bool HasConvertibleMeshRendererInHierarchy(GameObject root)
+        {
+            if (root == null)
+            {
+                return false;
+            }
+
+            MeshRenderer[] meshRenderers = root.GetComponentsInChildren<MeshRenderer>(true);
+            for (int rendererIndex = 0; rendererIndex < meshRenderers.Length; rendererIndex++)
+            {
+                if (meshRenderers[rendererIndex] != null && MeshletRenderer.TryExtractMesh(meshRenderers[rendererIndex], out _))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private static bool RefreshSource(MeshletRenderer meshletRenderer)
         {
             Undo.RecordObject(meshletRenderer, "Normalize Meshlet Renderer Source");
@@ -1004,6 +1158,44 @@ namespace VividRP.Editor.GPUDriven
             }
 
             return false;
+        }
+
+        private static void AddPrefixedWarnings(List<string> destination, string prefix, string[] source)
+        {
+            if (destination == null || source == null || source.Length == 0)
+            {
+                return;
+            }
+
+            for (int index = 0; index < source.Length; index++)
+            {
+                string warning = source[index];
+                if (string.IsNullOrEmpty(warning))
+                {
+                    continue;
+                }
+
+                destination.Add(string.IsNullOrEmpty(prefix) ? warning : $"{prefix}: {warning}");
+            }
+        }
+
+        private static string GetHierarchyPath(Transform transform)
+        {
+            if (transform == null)
+            {
+                return string.Empty;
+            }
+
+            var pathSegments = new List<string>();
+            Transform current = transform;
+            while (current != null)
+            {
+                pathSegments.Add(current.name);
+                current = current.parent;
+            }
+
+            pathSegments.Reverse();
+            return string.Join("/", pathSegments);
         }
 
         private static bool TryGetMeshAssetKey(

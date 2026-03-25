@@ -192,16 +192,12 @@ namespace VividRP.Editor.GPUDriven
                     continue;
                 }
 
-                using (new EditorGUILayout.HorizontalScope())
+                Rect rowRect = EditorGUILayout.GetControlRect();
+                EditorGUI.PropertyField(rowRect, sourceMaterialProperty, new GUIContent($"Element {subMeshIndex}"));
+
+                if (Event.current.type == EventType.MouseDown && rowRect.Contains(Event.current.mousePosition))
                 {
-                    EditorGUILayout.PropertyField(sourceMaterialProperty, new GUIContent($"Element {subMeshIndex}"));
-                    using (new EditorGUI.DisabledScope(m_SelectedMaterialSlot == subMeshIndex))
-                    {
-                        if (GUILayout.Button("Inspect", EditorStyles.miniButton, GUILayout.Width(60.0f)))
-                        {
-                            m_SelectedMaterialSlot = subMeshIndex;
-                        }
-                    }
+                    m_SelectedMaterialSlot = subMeshIndex;
                 }
             }
         }
@@ -214,59 +210,12 @@ namespace VividRP.Editor.GPUDriven
             string[] slotLabels = BuildElementLabels(slotCount);
             if (slotCount > 1)
             {
-                m_SelectedMaterialSlot = EditorGUILayout.Popup("Inspector Slot", selectedSlot, slotLabels);
+                m_SelectedMaterialSlot = EditorGUILayout.Popup("Material Slot", selectedSlot, slotLabels);
                 selectedSlot = m_SelectedMaterialSlot;
             }
 
             SerializedProperty sourceMaterialProperty = GetArrayElementAtIndex(m_SourceMaterials, selectedSlot);
             var sourceMaterial = sourceMaterialProperty?.objectReferenceValue as Material;
-
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                using (new EditorGUI.DisabledScope(sourceMaterial == null))
-                {
-                    if (GUILayout.Button("Select Material"))
-                    {
-                        Selection.activeObject = sourceMaterial;
-                        EditorGUIUtility.PingObject(sourceMaterial);
-                    }
-                }
-
-                using (new EditorGUI.DisabledScope(meshletRenderer == null || meshletRenderer.sourceMesh == null || sourceMaterial == null))
-                {
-                    if (GUILayout.Button("Bind Proxy"))
-                    {
-                        ApplyMaterialChanges(meshletRenderer);
-                        GPUDrivenMaterialProxyBindingResult bindingResult =
-                            GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxy(meshletRenderer, selectedSlot);
-                        if (!bindingResult.Success && !string.IsNullOrEmpty(bindingResult.ErrorMessage))
-                        {
-                            Debug.LogWarning($"[VividRP] {bindingResult.ErrorMessage}", meshletRenderer);
-                        }
-
-                        LogWarnings(meshletRenderer, bindingResult.Warnings);
-                        SelectLastCreatedAsset(bindingResult.CreatedAssetPaths);
-                        serializedObject.Update();
-                    }
-                }
-
-                using (new EditorGUI.DisabledScope(meshletRenderer == null || meshletRenderer.sourceMesh == null || sourceMaterial == null))
-                {
-                    if (GUILayout.Button("Sync Proxy"))
-                    {
-                        ApplyMaterialChanges(meshletRenderer);
-                        GPUDrivenMaterialProxySyncResult syncResult =
-                            GPUDrivenMaterialProxyEditorUtility.SyncMaterialProxyFromSourceMaterial(meshletRenderer, selectedSlot);
-                        if (!syncResult.Success && !string.IsNullOrEmpty(syncResult.ErrorMessage))
-                        {
-                            Debug.LogWarning($"[VividRP] {syncResult.ErrorMessage}", meshletRenderer);
-                        }
-
-                        LogWarnings(meshletRenderer, syncResult.Warnings);
-                        serializedObject.Update();
-                    }
-                }
-            }
 
             if (sourceMaterial == null)
             {

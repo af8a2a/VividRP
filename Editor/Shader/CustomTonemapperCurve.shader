@@ -188,10 +188,49 @@ Shader "Hidden/VividRP/Editor/Custom Tonemapper Curve"
             return lerp(color, newPeak.xxx, g);
         }
 
+        // Simplified ACES fit (Stephen Hill / Krzysztof Narkowicz)
+        float ACESTonemap(float x)
+        {
+            return saturate((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14));
+        }
+
+        float NeutralCurveScalar(float x, float a, float b, float c, float d, float e, float f)
+        {
+            return ((x * (a * x + c * b) + d * e) / (x * (a * x + b) + d * f)) - e / f;
+        }
+
+        // Neutral tonemapping (Hable/Hejl/Frostbite)
+        float NeutralTonemap(float x)
+        {
+            x = max(0.0, x);
+            const float a = 0.2;
+            const float b = 0.29;
+            const float c = 0.24;
+            const float d = 0.272;
+            const float e = 0.02;
+            const float f = 0.3;
+            const float whiteLevel = 5.3;
+            float whiteScale = 1.0 / NeutralCurveScalar(whiteLevel, a, b, c, d, e, f);
+            float result = NeutralCurveScalar(x * whiteScale, a, b, c, d, e, f) * whiteScale;
+            return result;
+        }
+
         float4 DrawCurve(v2f_img i, float3 background, float3 curveColor)
         {
             float y;
-            if (_Variants.z > 2.5)
+            if (_Variants.z > 5.5)
+            {
+                y = i.uv.x; // None: linear identity
+            }
+            else if (_Variants.z > 4.5)
+            {
+                y = NeutralTonemap(i.uv.x);
+            }
+            else if (_Variants.z > 3.5)
+            {
+                y = ACESTonemap(i.uv.x);
+            }
+            else if (_Variants.z > 2.5)
             {
                 y = KhronosPbrNeutralTonemap(i.uv.xxx).x;
             }

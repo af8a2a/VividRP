@@ -1249,6 +1249,33 @@ namespace VividRP.Editor
             m_Material.SetVector(s_VariantsId, new Vector4(alpha, 1f, 3f, 0f));
         }
 
+        void ConfigureACESCurvePreview()
+        {
+            if (m_Material == null)
+                return;
+
+            float alpha = GUI.enabled ? 1f : 0.5f;
+            m_Material.SetVector(s_VariantsId, new Vector4(alpha, 1f, 4f, 0f));
+        }
+
+        void ConfigureNeutralCurvePreview()
+        {
+            if (m_Material == null)
+                return;
+
+            float alpha = GUI.enabled ? 1f : 0.5f;
+            m_Material.SetVector(s_VariantsId, new Vector4(alpha, 1f, 5f, 0f));
+        }
+
+        void ConfigureNoneCurvePreview()
+        {
+            if (m_Material == null)
+                return;
+
+            float alpha = GUI.enabled ? 1f : 0.5f;
+            m_Material.SetVector(s_VariantsId, new Vector4(alpha, 1f, 6f, 0f));
+        }
+
 
         public override void OnInspectorGUI()
         {
@@ -1256,7 +1283,17 @@ namespace VividRP.Editor
 
             PropertyField(m_Mode);
 
-            if (m_Mode.value.intValue == (int)TonemappingMode.GranTurismo)
+            if (m_Mode.value.intValue == (int)TonemappingMode.None)
+            {
+                ConfigureNoneCurvePreview();
+                DrawCurvePreview();
+            }
+            else if (m_Mode.value.intValue == (int)TonemappingMode.Neutral)
+            {
+                ConfigureNeutralCurvePreview();
+                DrawCurvePreview();
+            }
+            else if (m_Mode.value.intValue == (int)TonemappingMode.GranTurismo)
             {
                 ConfigureGranTurismoCurvePreview();
                 DrawCurvePreview();
@@ -1304,6 +1341,9 @@ namespace VividRP.Editor
             }
             else if (m_Mode.value.intValue == (int)TonemappingMode.ACES)
             {
+                ConfigureACESCurvePreview();
+                DrawCurvePreview();
+
                 PropertyField(m_UseFullACES);
             }
 

@@ -23,6 +23,15 @@ namespace VividRP.Editor
     {
         internal const float MetallicWorkflow = 1.0f;
         internal const float OpaqueSurface = 0.0f;
+
+        /// <summary>
+        /// MaterialFinalizer delegate for use with MaterialUpgrader.
+        /// Calls SetupMaterial to sync keywords, render queue, and other state after conversion.
+        /// </summary>
+        internal static void SetupMaterialFinalizer(Material material)
+        {
+            SetupMaterial(material, null, false);
+        }
         private const float AlphaClipThreshold = 0.5f;
         private const float EnabledThreshold = 0.001f;
 

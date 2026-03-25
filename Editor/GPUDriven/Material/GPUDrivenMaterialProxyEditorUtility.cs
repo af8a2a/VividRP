@@ -28,6 +28,118 @@ namespace VividRP.Editor.GPUDriven
 
     internal static class GPUDrivenMaterialProxyEditorUtility
     {
+        public static GPUDrivenMaterialProxyBindingResult CreateOrBindMaterialProxy(
+            MeshletRenderer meshletRenderer,
+            int subMeshIndex
+        )
+        {
+            if (meshletRenderer == null)
+            {
+                return new GPUDrivenMaterialProxyBindingResult(false, "MeshletRenderer is null.", null, null);
+            }
+
+            RefreshSource(meshletRenderer, "Normalize Meshlet Renderer Source");
+
+            Mesh sourceMesh = meshletRenderer.sourceMesh;
+            if (sourceMesh == null)
+            {
+                return new GPUDrivenMaterialProxyBindingResult(
+                    false,
+                    "MeshletRenderer source Mesh is not captured. Run the takeover flow first.",
+                    null,
+                    null
+                );
+            }
+
+            if (subMeshIndex < 0 || subMeshIndex >= meshletRenderer.subMeshCount)
+            {
+                return new GPUDrivenMaterialProxyBindingResult(
+                    false,
+                    $"Submesh index {subMeshIndex} is out of range.",
+                    null,
+                    null
+                );
+            }
+
+            Material sourceMaterial = meshletRenderer.GetSourceMaterial(subMeshIndex);
+            if (sourceMaterial == null)
+            {
+                return new GPUDrivenMaterialProxyBindingResult(
+                    false,
+                    $"Submesh {subMeshIndex} has no source Material to bind.",
+                    null,
+                    null
+                );
+            }
+
+            string proxyAssetPath = ResolveProxyAssetPath(sourceMaterial, sourceMesh, subMeshIndex);
+            if (string.IsNullOrEmpty(proxyAssetPath))
+            {
+                return new GPUDrivenMaterialProxyBindingResult(
+                    false,
+                    $"Could not determine asset path for GPUDriven material proxy on submesh {subMeshIndex}.",
+                    null,
+                    null
+                );
+            }
+
+            var createdAssetPaths = new List<string>();
+            var warnings = new List<string>();
+            GPUDrivenMaterialProxy materialProxy = LoadOrCreateProxyAsset(
+                proxyAssetPath,
+                sourceMaterial,
+                createdAssetPaths,
+                out bool wasCreated
+            );
+            if (materialProxy == null)
+            {
+                return new GPUDrivenMaterialProxyBindingResult(
+                    false,
+                    $"Failed to create GPUDriven material proxy asset at '{proxyAssetPath}'.",
+                    createdAssetPaths.ToArray(),
+                    warnings.ToArray()
+                );
+            }
+
+            if (materialProxy.SourceMaterial != sourceMaterial)
+            {
+                Undo.RecordObject(materialProxy, "Bind GPUDriven Material Proxy");
+                materialProxy.SourceMaterial = sourceMaterial;
+                EditorUtility.SetDirty(materialProxy);
+                AssetDatabase.SaveAssetIfDirty(materialProxy);
+            }
+
+            var materialProxies = new GPUDrivenMaterialProxy[meshletRenderer.subMeshCount];
+            for (int index = 0; index < materialProxies.Length; index++)
+            {
+                materialProxies[index] = meshletRenderer.GetMaterialProxy(index);
+            }
+
+            materialProxies[subMeshIndex] = materialProxy;
+
+            Undo.RecordObject(meshletRenderer, "Bind GPUDriven Material Proxy");
+            bool changed = meshletRenderer.SetMaterialProxies(materialProxies);
+            if (changed)
+            {
+                EditorUtility.SetDirty(meshletRenderer);
+            }
+
+            GPUDrivenMaterialProxySyncResult syncResult = GPUDrivenMaterialProxySyncUtility.SyncFromSourceMaterial(materialProxy, sourceMaterial);
+            if (!syncResult.Success && !string.IsNullOrEmpty(syncResult.ErrorMessage))
+            {
+                warnings.Add(syncResult.ErrorMessage);
+            }
+
+            warnings.AddRange(syncResult.Warnings);
+
+            if (changed || wasCreated || syncResult.Changed)
+            {
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+            }
+
+            return new GPUDrivenMaterialProxyBindingResult(true, string.Empty, createdAssetPaths.ToArray(), warnings.ToArray());
+        }
+
         public static GPUDrivenMaterialProxyBindingResult CreateOrBindMaterialProxies(MeshletRenderer meshletRenderer)
         {
             if (meshletRenderer == null)
@@ -117,6 +229,69 @@ namespace VividRP.Editor.GPUDriven
             }
 
             return new GPUDrivenMaterialProxyBindingResult(true, string.Empty, createdAssetPaths.ToArray(), warnings.ToArray());
+        }
+
+        public static GPUDrivenMaterialProxySyncResult SyncMaterialProxyFromSourceMaterial(
+            MeshletRenderer meshletRenderer,
+            int subMeshIndex
+        )
+        {
+            if (meshletRenderer == null)
+            {
+                return new GPUDrivenMaterialProxySyncResult(false, false, "MeshletRenderer is null.", null);
+            }
+
+            RefreshSource(meshletRenderer, "Normalize Meshlet Renderer Source");
+
+            if (meshletRenderer.sourceMesh == null)
+            {
+                return new GPUDrivenMaterialProxySyncResult(
+                    false,
+                    false,
+                    "MeshletRenderer source Mesh is not captured. Run the takeover flow first.",
+                    null
+                );
+            }
+
+            if (subMeshIndex < 0 || subMeshIndex >= meshletRenderer.subMeshCount)
+            {
+                return new GPUDrivenMaterialProxySyncResult(
+                    false,
+                    false,
+                    $"Submesh index {subMeshIndex} is out of range.",
+                    null
+                );
+            }
+
+            GPUDrivenMaterialProxy materialProxy = meshletRenderer.GetMaterialProxy(subMeshIndex);
+            if (materialProxy == null)
+            {
+                return new GPUDrivenMaterialProxySyncResult(
+                    false,
+                    false,
+                    $"Submesh {subMeshIndex} is missing a GPUDriven material proxy.",
+                    null
+                );
+            }
+
+            Material sourceMaterial = meshletRenderer.GetSourceMaterial(subMeshIndex);
+            if (sourceMaterial == null)
+            {
+                return new GPUDrivenMaterialProxySyncResult(
+                    false,
+                    false,
+                    $"Submesh {subMeshIndex} has no source Material to synchronize from.",
+                    null
+                );
+            }
+
+            GPUDrivenMaterialProxySyncResult syncResult = GPUDrivenMaterialProxySyncUtility.SyncFromSourceMaterial(materialProxy, sourceMaterial);
+            if (syncResult.Success && syncResult.Changed)
+            {
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+            }
+
+            return syncResult;
         }
 
         public static GPUDrivenMaterialProxySyncResult SyncMaterialProxiesFromSourceMaterials(MeshletRenderer meshletRenderer)
@@ -239,15 +414,5 @@ namespace VividRP.Editor.GPUDriven
             return materialProxy;
         }
 
-        private static Material GetMaterialForSubMesh(Material[] sharedMaterials, int subMeshIndex)
-        {
-            if (sharedMaterials == null || sharedMaterials.Length == 0)
-            {
-                return null;
-            }
-
-            int materialIndex = Mathf.Clamp(subMeshIndex, 0, sharedMaterials.Length - 1);
-            return sharedMaterials[materialIndex];
-        }
     }
 }

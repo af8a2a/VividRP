@@ -64,6 +64,83 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CreateOrBindMaterialProxy_BindsOnlyRequestedSubMesh_WhenMeshHasMultipleSubMeshes()
+        {
+            Shader shader = Shader.Find("Hidden/InternalErrorShader");
+            Assert.That(shader, Is.Not.Null);
+
+            string meshPath = TempFolder + "/MultiSubMesh.asset";
+            Mesh mesh = CreateTwoSubMeshMesh("MultiSubMesh");
+            AssetDatabase.CreateAsset(mesh, meshPath);
+            mesh = AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
+
+            Material material0 = new Material(shader);
+            Material material1 = new Material(shader);
+            GameObject gameObject = CreateMeshletRendererObject(
+                "MultiSubMeshRenderer",
+                mesh,
+                new[] { material0, material1 },
+                out MeshletRenderer meshletRenderer
+            );
+
+            try
+            {
+                GPUDrivenMaterialProxyBindingResult result = GPUDrivenMaterialProxyEditorUtility.CreateOrBindMaterialProxy(meshletRenderer, 1);
+
+                Assert.That(result.Success, Is.True, result.ErrorMessage);
+                Assert.That(meshletRenderer.GetMaterialProxy(0), Is.Null);
+                Assert.That(meshletRenderer.GetMaterialProxy(1), Is.Not.Null);
+                Assert.That(meshletRenderer.GetMaterialProxy(1).SourceMaterial, Is.SameAs(material1));
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+                Object.DestroyImmediate(material0);
+                Object.DestroyImmediate(material1);
+            }
+        }
+
+        [Test]
+        public void SyncMaterialProxyFromSourceMaterial_UpdatesOnlyRequestedSubMesh()
+        {
+            Shader shader = Shader.Find("VividRP/Material/StandardLit");
+            if (shader == null)
+            {
+                Assert.Ignore("VividRP/Material/StandardLit shader is not available.");
+            }
+
+            Mesh mesh = CreateSingleSubMeshMesh("SyncSingleSlot");
+            Material material = new Material(shader);
+            material.SetColor("_BaseColor", new Color(0.2f, 0.4f, 0.6f, 1.0f));
+            material.SetFloat("_Metallic", 0.7f);
+            material.SetFloat("_Smoothness", 0.1f);
+
+            GameObject gameObject = CreateMeshletRendererObject("SyncRenderer", mesh, material, out MeshletRenderer meshletRenderer);
+            GPUDrivenMaterialProxy materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+
+            try
+            {
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+
+                GPUDrivenMaterialProxySyncResult result =
+                    GPUDrivenMaterialProxyEditorUtility.SyncMaterialProxyFromSourceMaterial(meshletRenderer, 0);
+
+                Assert.That(result.Success, Is.True, result.ErrorMessage);
+                Assert.That(materialProxy.SourceMaterial, Is.SameAs(material));
+                Assert.That(materialProxy.BaseColor.r, Is.EqualTo(0.2f).Within(0.0001f));
+                Assert.That(materialProxy.Metallic, Is.EqualTo(0.7f).Within(0.0001f));
+                Assert.That(materialProxy.Roughness, Is.EqualTo(0.9f).Within(0.0001f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(materialProxy);
+                Object.DestroyImmediate(gameObject);
+                Object.DestroyImmediate(material);
+                Object.DestroyImmediate(mesh);
+            }
+        }
+
+        [Test]
         public void CreateOrBindMaterialProxies_CreatesAssetNextToPersistentMesh_WhenMaterialIsNonPersistent()
         {
             Shader shader = Shader.Find("Hidden/InternalErrorShader");
@@ -103,11 +180,22 @@ namespace VividRP.Editor.Tests
             out MeshletRenderer meshletRenderer
         )
         {
+            return CreateMeshletRendererObject(name, mesh, new[] { material }, out meshletRenderer);
+        }
+
+        private static GameObject CreateMeshletRendererObject(
+            string name,
+            Mesh mesh,
+            Material[] materials,
+            out MeshletRenderer meshletRenderer
+        )
+        {
             var gameObject = new GameObject(name);
             gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
             MeshRenderer meshRenderer = gameObject.AddComponent<MeshRenderer>();
-            meshRenderer.sharedMaterial = material;
+            meshRenderer.sharedMaterials = materials;
             meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+            meshletRenderer.CaptureSourceFromRenderer(meshRenderer);
             return gameObject;
         }
 
@@ -137,6 +225,41 @@ namespace VividRP.Editor.Tests
             };
 
             mesh.SetTriangles(new[] { 0, 2, 1 }, 0);
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private static Mesh CreateTwoSubMeshMesh(string meshName)
+        {
+            var mesh = new Mesh
+            {
+                name = meshName,
+                vertices = new[]
+                {
+                    new Vector3(0.0f, 0.0f, 0.0f),
+                    new Vector3(1.0f, 0.0f, 0.0f),
+                    new Vector3(0.0f, 1.0f, 0.0f),
+                    new Vector3(1.0f, 1.0f, 0.0f),
+                },
+                normals = new[]
+                {
+                    Vector3.forward,
+                    Vector3.forward,
+                    Vector3.forward,
+                    Vector3.forward,
+                },
+                uv = new[]
+                {
+                    new Vector2(0.0f, 0.0f),
+                    new Vector2(1.0f, 0.0f),
+                    new Vector2(0.0f, 1.0f),
+                    new Vector2(1.0f, 1.0f),
+                },
+                subMeshCount = 2,
+            };
+
+            mesh.SetTriangles(new[] { 0, 2, 1 }, 0);
+            mesh.SetTriangles(new[] { 1, 2, 3 }, 1);
             mesh.RecalculateBounds();
             return mesh;
         }

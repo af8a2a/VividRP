@@ -1,5 +1,6 @@
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -106,6 +107,56 @@ namespace VividRP.Editor.Tests
             {
                 Object.DestroyImmediate(gameObject);
                 Object.DestroyImmediate(mesh);
+            }
+        }
+
+        [Test]
+        public void GetMaterialSlotCount_ReturnsCapturedSubMeshCount_WhenSourceMeshExists()
+        {
+            var gameObject = new GameObject("MeshletRenderer_MaterialSlotCount");
+            Mesh mesh = CreateTwoSubMeshMesh("MaterialSlotCountMesh");
+            var meshFilter = gameObject.AddComponent<MeshFilter>();
+            MeshRenderer meshRenderer = gameObject.AddComponent<MeshRenderer>();
+            var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+
+            try
+            {
+                meshFilter.sharedMesh = mesh;
+                meshletRenderer.CaptureSourceFromRenderer(meshRenderer);
+
+                Assert.That(MeshletRendererEditorUtility.GetMaterialSlotCount(meshletRenderer), Is.EqualTo(2));
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+                Object.DestroyImmediate(mesh);
+            }
+        }
+
+        [Test]
+        public void GetMaterialSlotCount_UsesStoredArrays_WhenSourceMeshIsMissing()
+        {
+            var gameObject = new GameObject("MeshletRenderer_LegacyMaterialSlots");
+            var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+            var sourceMaterial = new Material(Shader.Find("Hidden/InternalErrorShader"));
+            var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+
+            try
+            {
+                typeof(MeshletRenderer)
+                    .GetField("m_SourceMaterials", BindingFlags.Instance | BindingFlags.NonPublic)
+                    ?.SetValue(meshletRenderer, new Material[] { null, sourceMaterial });
+                typeof(MeshletRenderer)
+                    .GetField("m_MaterialProxies", BindingFlags.Instance | BindingFlags.NonPublic)
+                    ?.SetValue(meshletRenderer, new[] { materialProxy });
+
+                Assert.That(MeshletRendererEditorUtility.GetMaterialSlotCount(meshletRenderer), Is.EqualTo(2));
+            }
+            finally
+            {
+                Object.DestroyImmediate(materialProxy);
+                Object.DestroyImmediate(sourceMaterial);
+                Object.DestroyImmediate(gameObject);
             }
         }
 

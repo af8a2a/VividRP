@@ -11,7 +11,8 @@
         "VividRP.Runtime.GPUDriven",
         "Unity.Collections",
         "Unity.Mathematics",
-        "Unity.Burst"
+        "Unity.Burst",
+        "Unity.RenderPipelines.Core.Editor.Shared"
     ],
     "includePlatforms": [
         "Editor"

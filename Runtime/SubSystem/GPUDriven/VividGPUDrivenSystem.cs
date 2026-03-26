@@ -84,6 +84,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             ThrowIfDisposed();
 
+            BindlessTextureContainer.ResetPerFrameStats();
             BindlessTextureContainer.PreRender();
             bool staticDataChanged = m_SceneDataBuilder.Build(
                 SceneData,
@@ -191,6 +192,7 @@ namespace VividRP.Runtime.GPUDriven
                     BindlessTextureContainer.DescriptorHeapCount,
                     BindlessTextureContainer.DescriptorCapacity,
                     BindlessTextureContainer.AllocatedDescriptorCount,
+                    BindlessTextureContainer.CreateSRVDescriptorCallCountThisFrame,
                     BindlessTextureContainer.RegisteredTextureCount,
                     ForcedMeshLODNodeDepth,
                     MeshLODErrorThreshold));

@@ -42,6 +42,8 @@ namespace VividRP.Runtime.GPUDriven.Bindless
 
         public int RegisteredTextureCount => m_TextureInfos.Count;
 
+        public uint CreateSRVDescriptorCallCountThisFrame => m_Allocator.CreateSRVDescriptorCallCountThisFrame;
+
         public string UnavailableReason => m_Allocator.UnavailableReason;
 
         public void Dispose()
@@ -122,6 +124,12 @@ namespace VividRP.Runtime.GPUDriven.Bindless
         {
             ThrowIfDisposed();
             UpdateDirtyTextures();
+        }
+
+        public void ResetPerFrameStats()
+        {
+            ThrowIfDisposed();
+            m_Allocator.ResetPerFrameStats();
         }
 
         internal void AddPotentialDirtyTextureRange(NativeArray<EntityId> textureIds, List<Object> textures)

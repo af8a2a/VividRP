@@ -109,6 +109,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigurePassOwnedTarget(m_GBuffer1, m_DefaultGBuffer1, width, height, GraphicsFormat.R16G16_SFloat, false, "GBuffer1");
             ConfigurePassOwnedTarget(m_GBuffer2, m_DefaultGBuffer2, width, height, GraphicsFormat.R8G8B8A8_UNorm, false, "GBuffer2");
             ConfigurePassOwnedTarget(m_GBuffer3, m_DefaultGBuffer3, width, height, GraphicsFormat.B10G11R11_UFloatPack32, true, "GBuffer3");
+            
         }
 
         public override void Record(RasterGraphContext context)

@@ -206,10 +206,18 @@ namespace VividRP.Editor.Tests
 
             public string UnavailableReason { get; set; } = string.Empty;
 
+            public uint CreateSRVDescriptorCallCountThisFrame { get; private set; }
+
             public List<DescriptorWrite> DescriptorWrites { get; } = new();
+
+            public void ResetPerFrameStats()
+            {
+                CreateSRVDescriptorCallCountThisFrame = 0;
+            }
 
             public bool TryCreateTextureDescriptor(Texture texture, uint index)
             {
+                CreateSRVDescriptorCallCountThisFrame++;
                 DescriptorWrites.Add(new DescriptorWrite(index, texture));
                 return true;
             }

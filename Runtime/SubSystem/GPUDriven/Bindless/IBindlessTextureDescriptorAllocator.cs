@@ -14,6 +14,10 @@ namespace VividRP.Runtime.GPUDriven.Bindless
 
         string UnavailableReason { get; }
 
+        uint CreateSRVDescriptorCallCountThisFrame { get; }
+
+        void ResetPerFrameStats();
+
         bool TryCreateTextureDescriptor(Texture texture, uint index);
     }
 }

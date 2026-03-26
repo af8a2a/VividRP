@@ -75,5 +75,34 @@ namespace VividRP.Editor.Tests
             Assert.That(heapCountQueryCount, Is.EqualTo(0));
             Assert.That(allocator.UnavailableReason, Is.EqualTo("Bindless descriptors require the Direct3D12 graphics backend."));
         }
+
+        [Test]
+        public void TryCreateTextureDescriptor_TracksPerFrameCreateSRVDescriptorCallCount()
+        {
+            var allocator = new NativeBindlessTextureDescriptorAllocator(
+                static () => 64u,
+                static () => 48u,
+                static () => 16u,
+                static (texture, index) => true,
+                static () => GraphicsDeviceType.Direct3D12,
+                static () => Texture2D.whiteTexture);
+            var texture = new Texture2D(1, 1);
+
+            try
+            {
+                allocator.TryCreateTextureDescriptor(texture, 1);
+                allocator.TryCreateTextureDescriptor(texture, 2);
+
+                Assert.That(allocator.CreateSRVDescriptorCallCountThisFrame, Is.EqualTo(2u));
+
+                allocator.ResetPerFrameStats();
+
+                Assert.That(allocator.CreateSRVDescriptorCallCountThisFrame, Is.EqualTo(0u));
+            }
+            finally
+            {
+                Object.DestroyImmediate(texture);
+            }
+        }
     }
 }

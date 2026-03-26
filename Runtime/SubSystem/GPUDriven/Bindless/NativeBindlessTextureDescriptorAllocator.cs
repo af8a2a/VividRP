@@ -15,6 +15,7 @@ namespace VividRP.Runtime.GPUDriven.Bindless
         private uint m_DescriptorHeapCount;
         private uint m_DescriptorStartIndex;
         private uint m_DescriptorCapacity;
+        private uint m_CreateSRVDescriptorCallCountThisFrame;
         private bool m_IsAvailable;
         private bool m_IsPermanentlyUnavailable;
         private string m_UnavailableReason = "Bindless allocator has not been initialized.";
@@ -94,6 +95,13 @@ namespace VividRP.Runtime.GPUDriven.Bindless
             }
         }
 
+        public uint CreateSRVDescriptorCallCountThisFrame => m_CreateSRVDescriptorCallCountThisFrame;
+
+        public void ResetPerFrameStats()
+        {
+            m_CreateSRVDescriptorCallCountThisFrame = 0;
+        }
+
         public bool TryCreateTextureDescriptor(Texture texture, uint index)
         {
             if (!TryInitializeIfNeeded())
@@ -110,6 +118,7 @@ namespace VividRP.Runtime.GPUDriven.Bindless
 
             try
             {
+                m_CreateSRVDescriptorCallCountThisFrame++;
                 if (!m_CreateTextureDescriptor(effectiveTexture, index))
                 {
                     m_UnavailableReason = "Bindless plugin failed to create a descriptor.";

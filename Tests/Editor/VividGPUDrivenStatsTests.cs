@@ -37,6 +37,7 @@ namespace VividRP.Editor.Tests
                     2,
                     1024,
                     128,
+                    9,
                     7,
                     4,
                     12.5f));
@@ -48,6 +49,7 @@ namespace VividRP.Editor.Tests
             Assert.That(stats.CameraName, Is.EqualTo("Main Camera"));
             Assert.That(stats.MeshletCount, Is.EqualTo(55));
             Assert.That(stats.AllocatedDescriptorCount, Is.EqualTo(128u));
+            Assert.That(stats.CreateSRVDescriptorCallCountThisFrame, Is.EqualTo(9u));
             Assert.That(stats.MeshLODErrorThreshold, Is.EqualTo(12.5f).Within(0.0001f));
         }
 
@@ -76,6 +78,7 @@ namespace VividRP.Editor.Tests
                     1,
                     64,
                     4,
+                    3,
                     2,
                     -1,
                     50f));

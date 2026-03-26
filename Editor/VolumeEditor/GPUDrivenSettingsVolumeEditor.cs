@@ -73,6 +73,7 @@ namespace VividRP.Editor
                 DrawStatLine("Visible Request Capacity", stats.MaxVisibleMeshletRenderRequestCount.ToString("N0"));
                 DrawStatLine("Descriptor Heaps", stats.DescriptorHeapCount.ToString("N0"));
                 DrawStatLine("Descriptors Used", $"{stats.AllocatedDescriptorCount:N0} / {stats.DescriptorCapacity:N0}");
+                DrawStatLine("CreateSRVDescriptor Calls/Frame", stats.CreateSRVDescriptorCallCountThisFrame.ToString("N0"));
                 DrawStatLine("Tracked Textures", stats.RegisteredTextureCount.ToString("N0"));
                 DrawStatLine(
                     "Forced Mesh LOD Depth",

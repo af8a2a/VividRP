@@ -25,6 +25,7 @@ namespace VividRP.Runtime.GPUDriven
             uint descriptorHeapCount,
             uint descriptorCapacity,
             uint allocatedDescriptorCount,
+            uint createSRVDescriptorCallCountThisFrame,
             int registeredTextureCount,
             int forcedMeshLODNodeDepth,
             float meshLODErrorThreshold)
@@ -49,6 +50,7 @@ namespace VividRP.Runtime.GPUDriven
             DescriptorHeapCount = descriptorHeapCount;
             DescriptorCapacity = descriptorCapacity;
             AllocatedDescriptorCount = allocatedDescriptorCount;
+            CreateSRVDescriptorCallCountThisFrame = createSRVDescriptorCallCountThisFrame;
             RegisteredTextureCount = registeredTextureCount;
             ForcedMeshLODNodeDepth = forcedMeshLODNodeDepth;
             MeshLODErrorThreshold = meshLODErrorThreshold;
@@ -74,6 +76,7 @@ namespace VividRP.Runtime.GPUDriven
         internal uint DescriptorHeapCount { get; }
         internal uint DescriptorCapacity { get; }
         internal uint AllocatedDescriptorCount { get; }
+        internal uint CreateSRVDescriptorCallCountThisFrame { get; }
         internal int RegisteredTextureCount { get; }
         internal int ForcedMeshLODNodeDepth { get; }
         internal float MeshLODErrorThreshold { get; }

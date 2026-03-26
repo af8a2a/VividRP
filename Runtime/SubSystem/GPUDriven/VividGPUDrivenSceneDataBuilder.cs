@@ -31,7 +31,7 @@ namespace VividRP.Runtime.GPUDriven
         private readonly HashSet<EntityId> m_CurrentReferencedMeshletAssetIds = new();
         private readonly HashSet<EntityId> m_PreviousReferencedMaterialProxyIds = new();
         private readonly HashSet<EntityId> m_CurrentReferencedMaterialProxyIds = new();
-        private readonly HashSet<int> m_MissingProxyWarningKeys = new();
+        private readonly HashSet<(EntityId entityId, int subMeshIndex)> m_MissingProxyWarningKeys = new();
         private bool m_HasBuiltStaticData;
         private bool m_UsesFallbackMaterials;
 
@@ -447,9 +447,9 @@ namespace VividRP.Runtime.GPUDriven
             int subMeshIndex
         )
         {
-            int warningKey = material != null
-                ? material.GetInstanceID()
-                : unchecked(((meshletRenderer != null ? meshletRenderer.GetInstanceID() : 0) * 397) ^ subMeshIndex);
+            var warningKey = material != null
+                ? (material.GetEntityId(), -1)
+                : (meshletRenderer != null ? meshletRenderer.GetEntityId() : EntityId.None, subMeshIndex);
 
             if (!m_MissingProxyWarningKeys.Add(warningKey))
             {

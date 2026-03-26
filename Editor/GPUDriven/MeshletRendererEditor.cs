@@ -117,8 +117,8 @@ namespace VividRP.Editor.GPUDriven
     [CustomEditor(typeof(MeshletRenderer))]
     internal sealed class MeshletRendererEditor : UnityEditor.Editor
     {
-        private readonly Dictionary<int, UnityEditor.Editor> m_SourceMaterialEditors = new();
-        private readonly Dictionary<int, UnityEditor.Editor> m_MaterialProxyEditors = new();
+        private readonly Dictionary<EntityId, UnityEditor.Editor> m_SourceMaterialEditors = new();
+        private readonly Dictionary<EntityId, UnityEditor.Editor> m_MaterialProxyEditors = new();
 
         private SerializedProperty m_SourceMesh;
         private SerializedProperty m_SourceMaterials;
@@ -523,22 +523,23 @@ namespace VividRP.Editor.GPUDriven
                 return null;
             }
 
-            Dictionary<int, UnityEditor.Editor> editorMap = isSourceMaterial ? m_SourceMaterialEditors : m_MaterialProxyEditors;
-            editorMap.TryGetValue(targetObject.GetInstanceID(), out UnityEditor.Editor cachedEditor);
+            Dictionary<EntityId, UnityEditor.Editor> editorMap = isSourceMaterial ? m_SourceMaterialEditors : m_MaterialProxyEditors;
+            EntityId targetId = targetObject.GetEntityId();
+            editorMap.TryGetValue(targetId, out UnityEditor.Editor cachedEditor);
             Type editorType = isSourceMaterial ? typeof(MaterialEditor) : null;
             UnityEditor.Editor.CreateCachedEditor(targetObject, editorType, ref cachedEditor);
-            editorMap[targetObject.GetInstanceID()] = cachedEditor;
+            editorMap[targetId] = cachedEditor;
             return cachedEditor;
         }
 
-        private static void DestroyCachedEditors(Dictionary<int, UnityEditor.Editor> editors)
+        private static void DestroyCachedEditors(Dictionary<EntityId, UnityEditor.Editor> editors)
         {
             if (editors == null)
             {
                 return;
             }
 
-            foreach (KeyValuePair<int, UnityEditor.Editor> pair in editors)
+            foreach (KeyValuePair<EntityId, UnityEditor.Editor> pair in editors)
             {
                 UnityEditor.Editor cachedEditor = pair.Value;
                 if (cachedEditor != null)

@@ -138,14 +138,14 @@ namespace VividRP.Editor.Tests
             var allocator = new FakeBindlessTextureDescriptorAllocator(8);
             using var container = new BindlessTextureContainer(allocator);
             var texture = new Texture2D(1, 1);
-            var instanceId = GetTrackedTextureId(texture);
+            EntityId textureId = texture.GetEntityId();
 
             try
             {
                 var created = container.TryGetOrCreateIndex(texture, out uint index);
                 Object.DestroyImmediate(texture);
 
-                container.MarkTextureDestroyed(instanceId);
+                container.MarkTextureDestroyed(textureId);
                 container.PreRender();
 
                 Assert.That(created, Is.True);
@@ -188,11 +188,6 @@ namespace VividRP.Editor.Tests
             {
                 Object.DestroyImmediate(texture);
             }
-        }
-
-        private static int GetTrackedTextureId(Texture texture)
-        {
-            return unchecked((int) EntityId.ToULong(texture.GetEntityId()));
         }
 
         private sealed class FakeBindlessTextureDescriptorAllocator : IBindlessTextureDescriptorAllocator

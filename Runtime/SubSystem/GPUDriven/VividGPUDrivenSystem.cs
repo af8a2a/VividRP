@@ -11,6 +11,7 @@ namespace VividRP.Runtime.GPUDriven
 
         private readonly VividGPUDrivenBufferSet m_BufferSet;
         private readonly VividGPUDrivenCullingDispatcher m_CullingDispatcher;
+        private readonly VividGPUDrivenObjectTracker m_ObjectTracker;
         private readonly VividGPUDrivenSceneDataBuilder m_SceneDataBuilder;
         private bool m_IsDisposed;
 
@@ -30,6 +31,7 @@ namespace VividRP.Runtime.GPUDriven
         )
         {
             BindlessTextureContainer = bindlessTextureContainer ?? throw new ArgumentNullException(nameof(bindlessTextureContainer));
+            m_ObjectTracker = new VividGPUDrivenObjectTracker(BindlessTextureContainer);
             m_BufferSet = new VividGPUDrivenBufferSet();
             m_CullingDispatcher = new VividGPUDrivenCullingDispatcher();
             m_SceneDataBuilder = sceneDataBuilder ?? throw new ArgumentNullException(nameof(sceneDataBuilder));
@@ -147,6 +149,7 @@ namespace VividRP.Runtime.GPUDriven
             SceneData.Clear();
             m_BufferSet.Dispose();
             m_CullingDispatcher.Dispose();
+            m_ObjectTracker.Dispose();
             BindlessTextureContainer.Dispose();
             m_IsDisposed = true;
             VividGPUDrivenStatsRegistry.Clear();

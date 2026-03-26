@@ -1,7 +1,9 @@
 using System.Collections.Generic;
 using NUnit.Framework;
+using Unity.Collections;
 using UnityEngine;
 using VividRP.Runtime.GPUDriven.Bindless;
+using Object = UnityEngine.Object;
 
 namespace VividRP.Editor.Tests
 {
@@ -77,12 +79,66 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void PreRender_DoesNotRebindDirtyTexture_WhenNativePointerIsUnchanged()
+        {
+            var allocator = new FakeBindlessTextureDescriptorAllocator(8);
+            using var container = new BindlessTextureContainer(allocator);
+            var texture = new Texture2D(1, 1);
+
+            try
+            {
+                var created = container.TryGetOrCreateIndex(texture, out _);
+
+                container.MarkTextureDirty(texture);
+                container.PreRender();
+
+                Assert.That(created, Is.True);
+                Assert.That(allocator.DescriptorWrites.Count, Is.EqualTo(1));
+            }
+            finally
+            {
+                Object.DestroyImmediate(texture);
+            }
+        }
+
+        [Test]
+        public void PreRender_RebindsTrackedDescriptor_WhenPotentialDirtyTextureRangeProvidesNewPointer()
+        {
+            var allocator = new FakeBindlessTextureDescriptorAllocator(8);
+            using var container = new BindlessTextureContainer(allocator);
+            var originalTexture = new Texture2D(1, 1);
+            var replacementTexture = new Texture2D(1, 1);
+            var changedIds = new NativeArray<EntityId>(1, Allocator.Temp);
+
+            try
+            {
+                var created = container.TryGetOrCreateIndex(originalTexture, out uint index);
+                changedIds[0] = originalTexture.GetEntityId();
+                var changedTextures = new List<Object> { replacementTexture };
+
+                container.AddPotentialDirtyTextureRange(changedIds, changedTextures);
+                container.PreRender();
+
+                Assert.That(created, Is.True);
+                Assert.That(allocator.DescriptorWrites.Count, Is.EqualTo(2));
+                Assert.That(allocator.DescriptorWrites[1].Index, Is.EqualTo(index));
+                Assert.That(allocator.DescriptorWrites[1].Texture, Is.SameAs(replacementTexture));
+            }
+            finally
+            {
+                changedIds.Dispose();
+                Object.DestroyImmediate(originalTexture);
+                Object.DestroyImmediate(replacementTexture);
+            }
+        }
+
+        [Test]
         public void PreRender_RebindsDestroyedTextureToWhiteTexture_WhenTextureWasTracked()
         {
             var allocator = new FakeBindlessTextureDescriptorAllocator(8);
             using var container = new BindlessTextureContainer(allocator);
             var texture = new Texture2D(1, 1);
-            var instanceId = texture.GetInstanceID();
+            var instanceId = GetTrackedTextureId(texture);
 
             try
             {
@@ -132,6 +188,11 @@ namespace VividRP.Editor.Tests
             {
                 Object.DestroyImmediate(texture);
             }
+        }
+
+        private static int GetTrackedTextureId(Texture texture)
+        {
+            return unchecked((int) EntityId.ToULong(texture.GetEntityId()));
         }
 
         private sealed class FakeBindlessTextureDescriptorAllocator : IBindlessTextureDescriptorAllocator

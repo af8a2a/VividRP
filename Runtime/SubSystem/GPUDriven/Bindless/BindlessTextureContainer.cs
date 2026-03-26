@@ -1,17 +1,21 @@
 using System;
 using System.Collections.Generic;
+using Unity.Collections;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
 namespace VividRP.Runtime.GPUDriven.Bindless
 {
     public sealed class BindlessTextureContainer : IDisposable
     {
         public const uint InvalidTextureIndex = uint.MaxValue;
+        private const int InitialDirtyTextureCapacity = 16;
 
         private readonly IBindlessTextureDescriptorAllocator m_Allocator;
         private readonly Dictionary<int, BindlessTextureInfo> m_TextureInfos = new();
-        private readonly Dictionary<int, Texture> m_DirtyTextures = new();
-        private readonly HashSet<int> m_DestroyedTextureIds = new();
+        private readonly List<Texture> m_PotentiallyDirtyTextures = new(InitialDirtyTextureCapacity);
+        private readonly List<int> m_PotentiallyDirtyTextureInstanceIds = new(InitialDirtyTextureCapacity);
+        private readonly List<int> m_PotentiallyDestroyedTextureInstanceIds = new(InitialDirtyTextureCapacity);
 
         private uint m_AllocatedDescriptorCount;
         private bool m_IsDisposed;
@@ -48,8 +52,9 @@ namespace VividRP.Runtime.GPUDriven.Bindless
             }
 
             m_TextureInfos.Clear();
-            m_DirtyTextures.Clear();
-            m_DestroyedTextureIds.Clear();
+            m_PotentiallyDirtyTextures.Clear();
+            m_PotentiallyDirtyTextureInstanceIds.Clear();
+            m_PotentiallyDestroyedTextureInstanceIds.Clear();
             m_IsDisposed = true;
         }
 
@@ -63,14 +68,14 @@ namespace VividRP.Runtime.GPUDriven.Bindless
                 return false;
             }
 
-            return TryGetOrCreateIndex(texture, texture.GetInstanceID(), out index);
+            return TryGetOrCreateIndex(texture, GetTrackedTextureId(texture), out index);
         }
 
         public bool TryGetExistingIndex(Texture texture, out uint index)
         {
             ThrowIfDisposed();
 
-            if (texture != null && m_TextureInfos.TryGetValue(texture.GetInstanceID(), out BindlessTextureInfo info))
+            if (texture != null && m_TextureInfos.TryGetValue(GetTrackedTextureId(texture), out BindlessTextureInfo info))
             {
                 index = info.Index;
                 return true;
@@ -104,20 +109,48 @@ namespace VividRP.Runtime.GPUDriven.Bindless
                 return;
             }
 
-            m_DirtyTextures[texture.GetInstanceID()] = texture;
+            AddPotentialDirtyTexture(GetTrackedTextureId(texture), texture);
         }
 
         public void MarkTextureDestroyed(int instanceId)
         {
             ThrowIfDisposed();
-            m_DestroyedTextureIds.Add(instanceId);
+            AddPotentialDestroyedDirtyTexture(instanceId);
         }
 
         public void PreRender()
         {
             ThrowIfDisposed();
             UpdateDirtyTextures();
-            UpdateDestroyedTextures();
+        }
+
+        internal void AddPotentialDirtyTextureRange(NativeArray<EntityId> textureInstanceIds, List<Object> textures)
+        {
+            ThrowIfDisposed();
+
+            if (textureInstanceIds.Length == 0 || textures == null || textures.Count == 0)
+            {
+                return;
+            }
+
+            int count = Math.Min(textureInstanceIds.Length, textures.Count);
+            for (int index = 0; index < count; index++)
+            {
+                if (textures[index] is Texture texture)
+                {
+                    AddPotentialDirtyTexture(ToTrackedTextureId(textureInstanceIds[index]), texture);
+                }
+            }
+        }
+
+        internal void AddPotentialDestroyedDirtyTextureRange(NativeArray<EntityId> textureInstanceIds)
+        {
+            ThrowIfDisposed();
+
+            for (int index = 0; index < textureInstanceIds.Length; index++)
+            {
+                AddPotentialDestroyedDirtyTexture(ToTrackedTextureId(textureInstanceIds[index]));
+            }
         }
 
         private bool TryGetOrCreateIndex(Texture texture, int instanceId, out uint index)
@@ -184,72 +217,47 @@ namespace VividRP.Runtime.GPUDriven.Bindless
 
         private void UpdateDirtyTextures()
         {
-            if (m_DirtyTextures.Count == 0)
+            if (m_PotentiallyDirtyTextureInstanceIds.Count > 0)
+            {
+                int dirtyTextureCount = Math.Min(m_PotentiallyDirtyTextureInstanceIds.Count, m_PotentiallyDirtyTextures.Count);
+                for (int index = 0; index < dirtyTextureCount; index++)
+                {
+                    int instanceId = m_PotentiallyDirtyTextureInstanceIds[index];
+                    if (!m_TextureInfos.TryGetValue(instanceId, out _))
+                    {
+                        continue;
+                    }
+
+                    Texture texture = m_PotentiallyDirtyTextures[index];
+                    if (texture == null)
+                    {
+                        continue;
+                    }
+
+                    TryGetOrCreateIndex(texture, instanceId, out _);
+                }
+
+                m_PotentiallyDirtyTextureInstanceIds.Clear();
+                m_PotentiallyDirtyTextures.Clear();
+            }
+
+            if (m_PotentiallyDestroyedTextureInstanceIds.Count == 0)
             {
                 return;
             }
 
-            foreach (KeyValuePair<int, Texture> pair in m_DirtyTextures)
+            for (int index = 0; index < m_PotentiallyDestroyedTextureInstanceIds.Count; index++)
             {
-                if (!m_TextureInfos.TryGetValue(pair.Key, out BindlessTextureInfo info))
-                {
-                    continue;
-                }
-
-                Texture texture = pair.Value;
-                if (texture == null)
-                {
-                    continue;
-                }
-
-                IntPtr nativeTexturePtr = texture.GetNativeTexturePtr();
-                if (nativeTexturePtr == info.NativeTexturePtr)
-                {
-                    continue;
-                }
-
-                if (!m_Allocator.TryCreateTextureDescriptor(texture, info.Index))
-                {
-                    continue;
-                }
-
-                m_TextureInfos[pair.Key] = new BindlessTextureInfo(info.Index, nativeTexturePtr);
-            }
-
-            m_DirtyTextures.Clear();
-        }
-
-        private void UpdateDestroyedTextures()
-        {
-            if (m_DestroyedTextureIds.Count == 0)
-            {
-                return;
-            }
-
-            Texture fallbackTexture = GetEffectiveTexture(null);
-            if (fallbackTexture == null)
-            {
-                m_DestroyedTextureIds.Clear();
-                return;
-            }
-
-            IntPtr fallbackNativeTexturePtr = fallbackTexture.GetNativeTexturePtr();
-            foreach (int instanceId in m_DestroyedTextureIds)
-            {
+                int instanceId = m_PotentiallyDestroyedTextureInstanceIds[index];
                 if (!m_TextureInfos.TryGetValue(instanceId, out BindlessTextureInfo info))
                 {
                     continue;
                 }
 
-                if (!m_Allocator.TryCreateTextureDescriptor(fallbackTexture, info.Index))
-                {
-                    continue;
-                }
-
-                m_TextureInfos[instanceId] = new BindlessTextureInfo(info.Index, fallbackNativeTexturePtr);
+                TryGetOrCreateIndex(null, instanceId, out _);
             }
 
-            m_DestroyedTextureIds.Clear();
+            m_PotentiallyDestroyedTextureInstanceIds.Clear();
         }
 
         private uint RemainingDescriptorCount()
@@ -260,6 +268,34 @@ namespace VividRP.Runtime.GPUDriven.Bindless
         private static Texture GetEffectiveTexture(Texture texture)
         {
             return texture != null ? texture : Texture2D.whiteTexture;
+        }
+
+        private static int GetTrackedTextureId(Texture texture)
+        {
+            return texture != null
+                ? ToTrackedTextureId(texture.GetEntityId())
+                : 0;
+        }
+
+        private static int ToTrackedTextureId(EntityId entityId)
+        {
+            return unchecked((int) EntityId.ToULong(entityId));
+        }
+
+        private void AddPotentialDirtyTexture(int instanceId, Texture texture)
+        {
+            if (texture == null)
+            {
+                return;
+            }
+
+            m_PotentiallyDirtyTextureInstanceIds.Add(instanceId);
+            m_PotentiallyDirtyTextures.Add(texture);
+        }
+
+        private void AddPotentialDestroyedDirtyTexture(int instanceId)
+        {
+            m_PotentiallyDestroyedTextureInstanceIds.Add(instanceId);
         }
 
         private void ThrowIfDisposed()

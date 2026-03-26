@@ -200,6 +200,132 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void LateUpdate_PreservesTrackedResources_WhenOnlyTransformChanges()
+        {
+            Material material = null;
+            Mesh mesh = null;
+            GameObject gameObject = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+            GPUDrivenMaterialProxy materialProxy = null;
+
+            try
+            {
+                gameObject = CreateMeshRendererObject("MeshletRenderer_TransformOnlyResources", out mesh, out material);
+                var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+                meshletRenderer.CaptureSourceFromRenderer(gameObject.GetComponent<MeshRenderer>());
+
+                meshletCollection = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+                meshletCollection.SourceSubmeshIndex = 0;
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                Assert.That(VividMeshletRendererDatabase.instance.TryGetRendererResources(meshletRenderer, out var beforeResources), Is.True);
+
+                gameObject.transform.position = new Vector3(3.0f, -2.0f, 5.0f);
+                InvokeLateUpdate(meshletRenderer);
+
+                Assert.That(VividMeshletRendererDatabase.instance.TryGetRendererResources(meshletRenderer, out var afterResources), Is.True);
+                Assert.That(afterResources.SharedMaterials, Is.SameAs(beforeResources.SharedMaterials));
+                Assert.That(afterResources.MeshletCollections, Is.SameAs(beforeResources.MeshletCollections));
+                Assert.That(afterResources.MaterialProxies, Is.SameAs(beforeResources.MaterialProxies));
+            }
+            finally
+            {
+                if (materialProxy != null)
+                {
+                    Object.DestroyImmediate(materialProxy);
+                }
+
+                if (meshletCollection != null)
+                {
+                    Object.DestroyImmediate(meshletCollection);
+                }
+
+                DestroyTestObjects(gameObject, material, mesh);
+            }
+        }
+
+        [Test]
+        public void LateUpdate_RefreshesTrackedResources_WhenBindingsChangeThroughMeshletRenderer()
+        {
+            Material material = null;
+            Material replacementMaterial = null;
+            Mesh mesh = null;
+            GameObject gameObject = null;
+            VividMeshletCollectionAsset firstMeshletCollection = null;
+            VividMeshletCollectionAsset secondMeshletCollection = null;
+            GPUDrivenMaterialProxy firstMaterialProxy = null;
+            GPUDrivenMaterialProxy secondMaterialProxy = null;
+
+            try
+            {
+                gameObject = CreateMeshRendererObject("MeshletRenderer_DirtyBindings", out mesh, out material);
+                replacementMaterial = CreateTestMaterial();
+
+                var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+                meshletRenderer.CaptureSourceFromRenderer(gameObject.GetComponent<MeshRenderer>());
+
+                firstMeshletCollection = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+                firstMeshletCollection.SourceSubmeshIndex = 0;
+                firstMaterialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                meshletRenderer.SetMeshletCollections(new[] { firstMeshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { firstMaterialProxy });
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                Assert.That(VividMeshletRendererDatabase.instance.TryGetRendererResources(meshletRenderer, out var beforeResources), Is.True);
+
+                secondMeshletCollection = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+                secondMeshletCollection.SourceSubmeshIndex = 0;
+                secondMaterialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+
+                meshletRenderer.SetSourceMaterials(new[] { replacementMaterial });
+                meshletRenderer.SetMeshletCollections(new[] { secondMeshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { secondMaterialProxy });
+
+                InvokeLateUpdate(meshletRenderer);
+
+                Assert.That(VividMeshletRendererDatabase.instance.TryGetRendererResources(meshletRenderer, out var afterResources), Is.True);
+                Assert.That(afterResources.SharedMaterials, Is.Not.SameAs(beforeResources.SharedMaterials));
+                Assert.That(afterResources.MeshletCollections, Is.Not.SameAs(beforeResources.MeshletCollections));
+                Assert.That(afterResources.MaterialProxies, Is.Not.SameAs(beforeResources.MaterialProxies));
+                Assert.That(afterResources.SharedMaterials[0], Is.SameAs(replacementMaterial));
+                Assert.That(afterResources.MeshletCollections[0], Is.SameAs(secondMeshletCollection));
+                Assert.That(afterResources.MaterialProxies[0], Is.SameAs(secondMaterialProxy));
+            }
+            finally
+            {
+                if (secondMaterialProxy != null)
+                {
+                    Object.DestroyImmediate(secondMaterialProxy);
+                }
+
+                if (firstMaterialProxy != null)
+                {
+                    Object.DestroyImmediate(firstMaterialProxy);
+                }
+
+                if (secondMeshletCollection != null)
+                {
+                    Object.DestroyImmediate(secondMeshletCollection);
+                }
+
+                if (firstMeshletCollection != null)
+                {
+                    Object.DestroyImmediate(firstMeshletCollection);
+                }
+
+                if (replacementMaterial != null)
+                {
+                    Object.DestroyImmediate(replacementMaterial);
+                }
+
+                DestroyTestObjects(gameObject, material, mesh);
+            }
+        }
+
+        [Test]
         public void OnDisable_UnregistersRendererData_WhenMeshletRendererIsDisabled()
         {
             Material material = null;

@@ -12,8 +12,6 @@ namespace VividRP.Editor.RenderGraph
         private const string OutputPortMappingPropertyName = "OutputPortToVariableDeclarationDictionary";
 
         private static readonly BindingFlags s_InstanceBindings = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-        private static readonly Dictionary<ISubgraphNode, SubgraphPortMappings> s_PortMappings = new(ReferenceEqualityComparer<ISubgraphNode>.Instance);
-
         internal static bool TryGetVariableForInputPort(ISubgraphNode subgraphNode, IPort port, out IVariable variable)
         {
             variable = null;
@@ -56,17 +54,12 @@ namespace VividRP.Editor.RenderGraph
             if (subgraphNode == null)
                 return false;
 
-            if (s_PortMappings.TryGetValue(subgraphNode, out mappings))
-                return true;
-
             if (!TryGetNodeModel(subgraphNode, out var nodeModel))
                 return false;
 
             mappings = new SubgraphPortMappings(
                 BuildPortToVariableMap(nodeModel, InputPortMappingPropertyName),
                 BuildPortToVariableMap(nodeModel, OutputPortMappingPropertyName));
-
-            s_PortMappings[subgraphNode] = mappings;
             return true;
         }
 
@@ -96,6 +89,14 @@ namespace VividRP.Editor.RenderGraph
             nodeModel = null;
             if (node == null)
                 return false;
+
+            var nodeType = node.GetType();
+            if (nodeType.GetProperty(InputPortMappingPropertyName, s_InstanceBindings) != null
+                || nodeType.GetProperty(OutputPortMappingPropertyName, s_InstanceBindings) != null)
+            {
+                nodeModel = node;
+                return true;
+            }
 
             var method = node.GetType().GetMethod("GetImplementation", s_InstanceBindings);
             if (method == null)

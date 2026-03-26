@@ -296,8 +296,8 @@ namespace VividRP.Editor.Tests
                 var subgraphNode = CreateSubSystem(graph, out var subSystemGraph);
                 Assert.That(subgraphNode, Is.Not.Null);
 
-                var nestedSubgraph = subSystemGraph.CreateLocalSubgraphNode<RenderGraphSubSystemGraph>("Nested", new Vector2(200f, 200f));
-                Assert.That(nestedSubgraph, Is.Not.Null);
+                var nestedSubgraph = new NestedSubSystemStubNode();
+                subSystemGraph.AddNode(nestedSubgraph);
 
                 var sink = new TestErrorsAndWarnings();
                 var logger = CreateLogger(sink);
@@ -529,6 +529,16 @@ namespace VividRP.Editor.Tests
     internal sealed class PrivateResourcesConsumerPassNode : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => typeof(PrivateResourcesConsumerPass).AssemblyQualifiedName;
+    }
+
+    [Serializable]
+    [UseWithGraph(typeof(RenderGraphSubSystemGraph))]
+    internal sealed class NestedSubSystemStubNode : Node, ISubgraphNode
+    {
+        public Graph GetSubgraph()
+        {
+            return null;
+        }
     }
 
     internal sealed class TestErrorsAndWarnings : IErrorsAndWarnings

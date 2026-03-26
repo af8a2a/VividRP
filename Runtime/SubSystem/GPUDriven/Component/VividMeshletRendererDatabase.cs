@@ -100,7 +100,48 @@ namespace VividRP.Runtime.GPUDriven
             VividMeshletRendererRenderData trackedData = CreateRendererData(meshletRenderer);
             VividMeshletRendererResources trackedResources = CreateRendererResources(meshletRenderer);
             StoreRendererData(trackedData, trackedResources);
+            meshletRenderer.NotifyRendererDataSynchronized(resourcesUpdated: true);
             return trackedData;
+        }
+
+        internal VividMeshletRendererRenderData UpdateRendererRenderData(MeshletRenderer meshletRenderer)
+        {
+            if (meshletRenderer == null)
+            {
+                return default;
+            }
+
+            EntityId meshletRendererEntityId = meshletRenderer.GetEntityId();
+            if (!TryGetRendererResources(meshletRendererEntityId, out VividMeshletRendererResources trackedResources))
+            {
+                return UpdateRendererData(meshletRenderer);
+            }
+
+            VividMeshletRendererRenderData trackedData = CreateRendererData(meshletRenderer);
+            StoreRendererData(trackedData, trackedResources);
+            meshletRenderer.NotifyRendererDataSynchronized(resourcesUpdated: false);
+            return trackedData;
+        }
+
+        internal VividMeshletRendererRenderData UpdateRendererTransformData(MeshletRenderer meshletRenderer)
+        {
+            if (meshletRenderer == null)
+            {
+                return default;
+            }
+
+            EntityId meshletRendererEntityId = meshletRenderer.GetEntityId();
+            if (!TryGetRendererData(meshletRendererEntityId, out VividMeshletRendererRenderData trackedData)
+                || !TryGetRendererResources(meshletRendererEntityId, out VividMeshletRendererResources trackedResources))
+            {
+                return UpdateRendererData(meshletRenderer);
+            }
+
+            VividMeshletRendererRenderData updatedTrackedData =
+                CreateTransformOnlyRendererData(meshletRenderer, trackedData);
+            StoreRendererData(updatedTrackedData, trackedResources);
+            meshletRenderer.NotifyRendererDataSynchronized(resourcesUpdated: false);
+            return updatedTrackedData;
         }
 
         internal bool TryGetRendererData(MeshletRenderer meshletRenderer, out VividMeshletRendererRenderData trackedData)
@@ -305,6 +346,22 @@ namespace VividRP.Runtime.GPUDriven
                 meshletCollections,
                 materialProxies
             );
+        }
+
+        private static VividMeshletRendererRenderData CreateTransformOnlyRendererData(
+            MeshletRenderer meshletRenderer,
+            VividMeshletRendererRenderData trackedData
+        )
+        {
+            Matrix4x4 objectToWorldMatrix = meshletRenderer.transform.localToWorldMatrix;
+            Matrix4x4 worldToObjectMatrix = meshletRenderer.transform.worldToLocalMatrix;
+            Bounds localBounds = trackedData.localBounds;
+
+            trackedData.objectToWorldMatrix = objectToWorldMatrix;
+            trackedData.worldToObjectMatrix = worldToObjectMatrix;
+            trackedData.localBounds = localBounds;
+            trackedData.worldBounds = TransformBounds(localBounds, objectToWorldMatrix);
+            return trackedData;
         }
 
         private static VividMeshletRendererFlags BuildFlags(

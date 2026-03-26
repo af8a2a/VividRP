@@ -10,6 +10,15 @@ namespace VividRP.Runtime.GPUDriven
     [ExecuteAlways]
     public class MeshletRenderer : MonoBehaviour
     {
+        [Flags]
+        private enum RendererTrackingDirtyFlags : byte
+        {
+            None = 0,
+            RenderData = 1 << 0,
+            Resources = 1 << 1,
+            All = RenderData | Resources,
+        }
+
         [SerializeField]
         [HideInInspector]
         private Mesh m_SourceMesh;
@@ -43,6 +52,8 @@ namespace VividRP.Runtime.GPUDriven
 
         [SerializeField]
         private bool m_TakeOverSourceRenderer = true;
+
+        private RendererTrackingDirtyFlags m_TrackingDirtyFlags = RendererTrackingDirtyFlags.All;
 
         public Renderer sourceRenderer => null;
 
@@ -99,6 +110,10 @@ namespace VividRP.Runtime.GPUDriven
 
             bool meshChanged = m_SourceMesh != mesh;
             m_SourceMesh = mesh;
+            if (meshChanged)
+            {
+                MarkResourcesDirty();
+            }
 
             bool materialsChanged = SetSourceMaterials(renderer.sharedMaterials);
             bool stateChanged = CaptureRendererState(renderer);
@@ -129,6 +144,7 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             m_MeshletCollections = sanitizedCollections;
+            MarkResourcesDirty();
             return true;
         }
 
@@ -154,6 +170,7 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             m_SourceMaterials = sanitizedMaterials;
+            MarkResourcesDirty();
             return true;
         }
 
@@ -179,6 +196,7 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             m_MaterialProxies = sanitizedProxies;
+            MarkResourcesDirty();
             return true;
         }
 
@@ -323,6 +341,7 @@ namespace VividRP.Runtime.GPUDriven
         private void OnEnable()
         {
             RefreshSource();
+            MarkAllDirty();
             SyncDatabaseRegistration();
         }
 
@@ -333,7 +352,7 @@ namespace VividRP.Runtime.GPUDriven
                 return;
             }
 
-            VividMeshletRendererDatabase.instance.UpdateRendererData(this);
+            UpdateDatabaseIfNeeded();
         }
 
         private void OnDisable()
@@ -349,6 +368,7 @@ namespace VividRP.Runtime.GPUDriven
         private void OnValidate()
         {
             RefreshSource();
+            MarkAllDirty();
             SyncDatabaseRegistration();
         }
 #endif
@@ -359,6 +379,10 @@ namespace VividRP.Runtime.GPUDriven
             {
                 bool cleared = m_SourceMaterials is { Length: > 0 };
                 m_SourceMaterials = Array.Empty<Material>();
+                if (cleared)
+                {
+                    MarkResourcesDirty();
+                }
                 return cleared;
             }
 
@@ -374,6 +398,7 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             m_SourceMaterials = resizedMaterials;
+            MarkResourcesDirty();
             return true;
         }
 
@@ -384,6 +409,10 @@ namespace VividRP.Runtime.GPUDriven
             {
                 bool cleared = m_MeshletCollections is { Length: > 0 };
                 m_MeshletCollections = Array.Empty<VividMeshletCollectionAsset>();
+                if (cleared)
+                {
+                    MarkResourcesDirty();
+                }
                 return cleared;
             }
 
@@ -399,6 +428,7 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             m_MeshletCollections = resizedCollections;
+            MarkResourcesDirty();
             return true;
         }
 
@@ -409,6 +439,10 @@ namespace VividRP.Runtime.GPUDriven
             {
                 bool cleared = m_MaterialProxies is { Length: > 0 };
                 m_MaterialProxies = Array.Empty<GPUDrivenMaterialProxy>();
+                if (cleared)
+                {
+                    MarkResourcesDirty();
+                }
                 return cleared;
             }
 
@@ -424,6 +458,7 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             m_MaterialProxies = resizedMaterialProxies;
+            MarkResourcesDirty();
             return true;
         }
 
@@ -545,6 +580,10 @@ namespace VividRP.Runtime.GPUDriven
             m_MotionVectorGenerationMode = motionVectorGenerationMode;
             m_RenderingLayerMask = renderingLayerMask;
             m_SourceWasSkinned = sourceWasSkinned;
+            if (changed)
+            {
+                MarkRenderDataDirty();
+            }
             return changed;
         }
 
@@ -552,11 +591,55 @@ namespace VividRP.Runtime.GPUDriven
         {
             if (isActiveAndEnabled)
             {
-                VividMeshletRendererDatabase.instance.UpdateRendererData(this);
+                UpdateDatabaseIfNeeded();
                 return;
             }
 
             VividMeshletRendererDatabase.instance.UnregisterRenderer(this);
+        }
+
+        internal void NotifyRendererDataSynchronized(bool resourcesUpdated)
+        {
+            m_TrackingDirtyFlags &= resourcesUpdated
+                ? RendererTrackingDirtyFlags.None
+                : ~RendererTrackingDirtyFlags.RenderData;
+            transform.hasChanged = false;
+        }
+
+        private void UpdateDatabaseIfNeeded()
+        {
+            if ((m_TrackingDirtyFlags & RendererTrackingDirtyFlags.Resources) != 0)
+            {
+                VividMeshletRendererDatabase.instance.UpdateRendererData(this);
+                return;
+            }
+
+            if ((m_TrackingDirtyFlags & RendererTrackingDirtyFlags.RenderData) != 0)
+            {
+                VividMeshletRendererDatabase.instance.UpdateRendererRenderData(this);
+                return;
+            }
+
+            if (transform.hasChanged)
+            {
+                VividMeshletRendererDatabase.instance.UpdateRendererTransformData(this);
+            }
+        }
+
+        private void MarkRenderDataDirty()
+        {
+            m_TrackingDirtyFlags |= RendererTrackingDirtyFlags.RenderData;
+        }
+
+        private void MarkResourcesDirty()
+        {
+            m_TrackingDirtyFlags |= RendererTrackingDirtyFlags.All;
+        }
+
+        private void MarkAllDirty()
+        {
+            m_TrackingDirtyFlags = RendererTrackingDirtyFlags.All;
+            transform.hasChanged = true;
         }
 
         internal static bool TryExtractMesh(MeshFilter meshFilter, out Mesh mesh)

@@ -1,3 +1,10 @@
+> [!IMPORTANT]  
+> Currently migrating to the **datadriven** branch.  
+> Only Windows/DirectX 12
+
+
+
+
 # Vivid Render Pipeline (VividRP) – Custom SRP Package
 
 This package provides a custom implementation of Unity's **Universal Render Pipeline (URP)**, a prebuilt Scriptable Render Pipeline (SRP) designed for performance, flexibility, and cross-platform graphics in Unity 6 and above.

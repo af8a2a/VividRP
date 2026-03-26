@@ -43,7 +43,7 @@ namespace VividRP.Runtime.GPUDriven
 
         public int SharedIndexCount { get; private set; }
 
-        public void Upload(VividGPUDrivenSceneData sceneData)
+        public void Upload(VividGPUDrivenSceneData sceneData, bool uploadStaticData = true)
         {
             ThrowIfDisposed();
 
@@ -59,6 +59,8 @@ namespace VividRP.Runtime.GPUDriven
             SharedVertexCount = sceneData.VertexCount;
             SharedIndexCount = sceneData.IndexCount;
 
+            bool shouldUploadStaticData = uploadStaticData || RequiresStaticBufferUpload(sceneData);
+
             UploadStructuredBuffer(
                 ref m_InstanceDataBuffer,
                 sceneData.MutableInstances,
@@ -71,25 +73,29 @@ namespace VividRP.Runtime.GPUDriven
                 UnsafeUtility.SizeOf<VividMaterialData>(),
                 "VividGPUDriven_MaterialData"
             );
-            UploadStructuredBuffer(
-                ref m_MeshLODNodesBuffer,
-                sceneData.MutableMeshLODNodes,
-                UnsafeUtility.SizeOf<VividMeshLODNode>(),
-                "VividGPUDriven_MeshLODNodes"
-            );
-            UploadStructuredBuffer(
-                ref m_MeshletsBuffer,
-                sceneData.MutableMeshlets,
-                UnsafeUtility.SizeOf<VividMeshlet>(),
-                "VividGPUDriven_Meshlets"
-            );
-            UploadStructuredBuffer(
-                ref m_SharedVertexBuffer,
-                sceneData.MutableVertices,
-                UnsafeUtility.SizeOf<VividMeshletVertex>(),
-                "VividGPUDriven_SharedVertices"
-            );
-            UploadRawIndexBuffer(sceneData.MutableIndices);
+
+            if (shouldUploadStaticData)
+            {
+                UploadStructuredBuffer(
+                    ref m_MeshLODNodesBuffer,
+                    sceneData.MutableMeshLODNodes,
+                    UnsafeUtility.SizeOf<VividMeshLODNode>(),
+                    "VividGPUDriven_MeshLODNodes"
+                );
+                UploadStructuredBuffer(
+                    ref m_MeshletsBuffer,
+                    sceneData.MutableMeshlets,
+                    UnsafeUtility.SizeOf<VividMeshlet>(),
+                    "VividGPUDriven_Meshlets"
+                );
+                UploadStructuredBuffer(
+                    ref m_SharedVertexBuffer,
+                    sceneData.MutableVertices,
+                    UnsafeUtility.SizeOf<VividMeshletVertex>(),
+                    "VividGPUDriven_SharedVertices"
+                );
+                UploadRawIndexBuffer(sceneData.MutableIndices);
+            }
         }
 
         public void BindGlobals(CommandBuffer cmd)
@@ -221,6 +227,32 @@ namespace VividRP.Runtime.GPUDriven
         private static int AlignUp(int value, int alignment)
         {
             return ((value + alignment - 1) / alignment) * alignment;
+        }
+
+        private bool RequiresStaticBufferUpload(VividGPUDrivenSceneData sceneData)
+        {
+            return !IsStructuredBufferCompatible(m_MeshLODNodesBuffer, sceneData.MeshLODNodeCount, UnsafeUtility.SizeOf<VividMeshLODNode>()) ||
+                   !IsStructuredBufferCompatible(m_MeshletsBuffer, sceneData.MeshletCount, UnsafeUtility.SizeOf<VividMeshlet>()) ||
+                   !IsStructuredBufferCompatible(m_SharedVertexBuffer, sceneData.VertexCount, UnsafeUtility.SizeOf<VividMeshletVertex>()) ||
+                   !IsRawBufferCompatible(m_SharedIndexBuffer, sceneData.IndexCount);
+        }
+
+        private static bool IsStructuredBufferCompatible(GraphicsBuffer buffer, int count, int stride)
+        {
+            return buffer != null &&
+                   buffer.target == GraphicsBuffer.Target.Structured &&
+                   buffer.count == Mathf.Max(1, count) &&
+                   buffer.stride == stride;
+        }
+
+        private static bool IsRawBufferCompatible(GraphicsBuffer buffer, int byteCount)
+        {
+            int alignedByteCount = AlignUp(Mathf.Max(1, byteCount), RawBufferStride);
+            int rawBufferCount = alignedByteCount / RawBufferStride;
+            return buffer != null &&
+                   buffer.target == GraphicsBuffer.Target.Raw &&
+                   buffer.count == rawBufferCount &&
+                   buffer.stride == RawBufferStride;
         }
 
         private void ThrowIfDisposed()

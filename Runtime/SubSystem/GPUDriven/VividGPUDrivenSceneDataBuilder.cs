@@ -27,8 +27,9 @@ namespace VividRP.Runtime.GPUDriven
         private readonly Dictionary<int, int> m_MaterialIndexByObjectId = new();
         private readonly Dictionary<int, MeshletAssetMetadata> m_MeshMetadataByObjectId = new();
         private readonly HashSet<int> m_MissingProxyWarningKeys = new();
+        private bool m_HasBuiltStaticData;
 
-        public void Build(
+        public bool Build(
             VividGPUDrivenSceneData sceneData,
             VividMeshletRendererDatabase database,
             BindlessTextureContainer bindlessTextureContainer
@@ -49,9 +50,10 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentNullException(nameof(bindlessTextureContainer));
             }
 
-            sceneData.Clear();
+            bool staticDataChanged = !m_HasBuiltStaticData;
+
+            sceneData.ClearDynamic();
             m_MaterialIndexByObjectId.Clear();
-            m_MeshMetadataByObjectId.Clear();
 
             IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
             IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
@@ -63,16 +65,21 @@ namespace VividRP.Runtime.GPUDriven
                     sceneData,
                     rendererData[rendererIndex],
                     rendererResources[rendererIndex],
-                    bindlessTextureContainer
+                    bindlessTextureContainer,
+                    ref staticDataChanged
                 );
             }
+
+            m_HasBuiltStaticData = true;
+            return staticDataChanged;
         }
 
         private void AppendRendererSceneData(
             VividGPUDrivenSceneData sceneData,
             in VividMeshletRendererRenderData trackedData,
             in VividMeshletRendererResources trackedResources,
-            BindlessTextureContainer bindlessTextureContainer
+            BindlessTextureContainer bindlessTextureContainer,
+            ref bool staticDataChanged
         )
         {
             if (!IsRenderable(trackedData, trackedResources))
@@ -89,7 +96,7 @@ namespace VividRP.Runtime.GPUDriven
                     continue;
                 }
 
-                MeshletAssetMetadata meshMetadata = GetOrAppendMeshletAsset(sceneData, meshletCollection);
+                MeshletAssetMetadata meshMetadata = GetOrAppendMeshletAsset(sceneData, meshletCollection, ref staticDataChanged);
                 Material material = GetMaterialForSubMesh(trackedResources.SharedMaterials, subMeshIndex);
                 GPUDrivenMaterialProxy materialProxy = GetMaterialProxyForSubMesh(trackedResources.MaterialProxies, subMeshIndex);
                 int materialIndex = GetOrAppendMaterial(
@@ -130,13 +137,17 @@ namespace VividRP.Runtime.GPUDriven
 
         private MeshletAssetMetadata GetOrAppendMeshletAsset(
             VividGPUDrivenSceneData sceneData,
-            VividMeshletCollectionAsset meshletCollection
+            VividMeshletCollectionAsset meshletCollection,
+            ref bool staticDataChanged
         )
         {
             int objectId = meshletCollection.GetInstanceID();
             if (m_MeshMetadataByObjectId.TryGetValue(objectId, out MeshletAssetMetadata metadata))
             {
-                return metadata;
+                if (metadata.Matches(meshletCollection))
+                {
+                    return metadata;
+                }
             }
 
             uint meshletBaseOffset = (uint) sceneData.MeshletCount;
@@ -167,10 +178,15 @@ namespace VividRP.Runtime.GPUDriven
             metadata = new MeshletAssetMetadata(
                 meshLODStartIndex,
                 (uint) sourceMeshLODNodes.Length,
-                (uint) Mathf.Max(1, meshletCollection.MeshLODLevelCount)
+                (uint) Mathf.Max(1, meshletCollection.MeshLODLevelCount),
+                sourceMeshLODNodes,
+                sourceMeshlets,
+                meshletCollection.VertexBuffer,
+                meshletCollection.IndexBuffer
             );
 
-            m_MeshMetadataByObjectId.Add(objectId, metadata);
+            m_MeshMetadataByObjectId[objectId] = metadata;
+            staticDataChanged = true;
             return metadata;
         }
 
@@ -543,11 +559,23 @@ namespace VividRP.Runtime.GPUDriven
 
         private readonly struct MeshletAssetMetadata
         {
-            public MeshletAssetMetadata(uint topMeshLODStartIndex, uint totalMeshLODCount, uint meshLODLevelCount)
+            public MeshletAssetMetadata(
+                uint topMeshLODStartIndex,
+                uint totalMeshLODCount,
+                uint meshLODLevelCount,
+                VividMeshLODNode[] meshLODNodes,
+                VividMeshlet[] meshlets,
+                VividMeshletVertex[] vertexBuffer,
+                byte[] indexBuffer
+            )
             {
                 TopMeshLODStartIndex = topMeshLODStartIndex;
                 TotalMeshLODCount = totalMeshLODCount;
                 MeshLODLevelCount = meshLODLevelCount;
+                MeshLODNodes = meshLODNodes;
+                Meshlets = meshlets;
+                VertexBuffer = vertexBuffer;
+                IndexBuffer = indexBuffer;
             }
 
             public uint TopMeshLODStartIndex { get; }
@@ -555,6 +583,24 @@ namespace VividRP.Runtime.GPUDriven
             public uint TotalMeshLODCount { get; }
 
             public uint MeshLODLevelCount { get; }
+
+            private VividMeshLODNode[] MeshLODNodes { get; }
+
+            private VividMeshlet[] Meshlets { get; }
+
+            private VividMeshletVertex[] VertexBuffer { get; }
+
+            private byte[] IndexBuffer { get; }
+
+            public bool Matches(VividMeshletCollectionAsset meshletCollection)
+            {
+                return meshletCollection != null &&
+                       MeshLODLevelCount == (uint) Mathf.Max(1, meshletCollection.MeshLODLevelCount) &&
+                       ReferenceEquals(MeshLODNodes, meshletCollection.MeshLODNodes) &&
+                       ReferenceEquals(Meshlets, meshletCollection.Meshlets) &&
+                       ReferenceEquals(VertexBuffer, meshletCollection.VertexBuffer) &&
+                       ReferenceEquals(IndexBuffer, meshletCollection.IndexBuffer);
+            }
         }
     }
 }

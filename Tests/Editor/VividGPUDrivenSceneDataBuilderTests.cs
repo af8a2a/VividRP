@@ -80,6 +80,58 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Build_ReusesStaticMeshletData_WhenSceneIsRebuiltWithoutAssetChanges()
+        {
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("StaticReuseMesh");
+                material = CreateTestMaterial();
+                meshletCollection = CreateMeshletCollectionAsset(
+                    "StaticReuseCollection",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[] { CreateVertex(0.0f, 0.0f, 0.0f), CreateVertex(1.0f, 0.0f, 0.0f), CreateVertex(0.0f, 1.0f, 0.0f) },
+                    new byte[] { 0, 1, 2 }
+                );
+
+                gameObject = CreateMeshletRendererObject("Renderer_StaticReuse", mesh, new[] { material }, out MeshletRenderer meshletRenderer);
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var bindlessTextureContainer = new BindlessTextureContainer(new FakeBindlessTextureDescriptorAllocator(16));
+
+                bool firstStaticDataChanged = builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer);
+                Assert.That(firstStaticDataChanged, Is.True);
+                Assert.That(sceneData.InstanceCount, Is.EqualTo(1));
+                Assert.That(sceneData.MeshLODNodeCount, Is.EqualTo(1));
+                Assert.That(sceneData.MeshletCount, Is.EqualTo(1));
+                Assert.That(sceneData.VertexCount, Is.EqualTo(3));
+                Assert.That(sceneData.IndexCount, Is.EqualTo(3));
+
+                bool secondStaticDataChanged = builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer);
+                Assert.That(secondStaticDataChanged, Is.False);
+                Assert.That(sceneData.InstanceCount, Is.EqualTo(1));
+                Assert.That(sceneData.MeshLODNodeCount, Is.EqualTo(1));
+                Assert.That(sceneData.MeshletCount, Is.EqualTo(1));
+                Assert.That(sceneData.VertexCount, Is.EqualTo(3));
+                Assert.That(sceneData.IndexCount, Is.EqualTo(3));
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, null, material, mesh, meshletCollection);
+            }
+        }
+
+        [Test]
         public void Build_CreatesOneInstancePerSubmeshAndPatchesOffsets_WhenMeshletAssetsAreUnique()
         {
             GameObject gameObject = null;

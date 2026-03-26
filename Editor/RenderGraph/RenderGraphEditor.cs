@@ -9,7 +9,7 @@ namespace VividRP.Editor.RenderGraph
     /// Graph Toolkit authoring model for VividRP RenderGraph.
     /// </summary>
     [Serializable]
-    [Graph(AssetExtension)]
+    [Graph(AssetExtension, GraphOptions.SupportsSubgraphs)]
     internal class RenderGraphEditorGraph : Graph
     {
         internal const string AssetExtension = "vrdg";

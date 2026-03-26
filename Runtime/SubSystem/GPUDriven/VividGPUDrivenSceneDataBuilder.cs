@@ -24,15 +24,31 @@ namespace VividRP.Runtime.GPUDriven
         private static readonly int s_CutoffPropertyId = Shader.PropertyToID("_Cutoff");
         private static readonly int s_CullPropertyId = Shader.PropertyToID("_Cull");
 
-        private readonly Dictionary<int, int> m_MaterialIndexByObjectId = new();
-        private readonly Dictionary<int, MeshletAssetMetadata> m_MeshMetadataByObjectId = new();
+        private readonly Dictionary<EntityId, int> m_MaterialIndexByObjectId = new();
+        private readonly Dictionary<EntityId, MaterialMetadata> m_MaterialMetadataByObjectId = new();
+        private readonly Dictionary<EntityId, MeshletAssetMetadata> m_MeshMetadataByObjectId = new();
+        private readonly HashSet<EntityId> m_PreviousReferencedMeshletAssetIds = new();
+        private readonly HashSet<EntityId> m_CurrentReferencedMeshletAssetIds = new();
+        private readonly HashSet<EntityId> m_PreviousReferencedMaterialProxyIds = new();
+        private readonly HashSet<EntityId> m_CurrentReferencedMaterialProxyIds = new();
         private readonly HashSet<int> m_MissingProxyWarningKeys = new();
         private bool m_HasBuiltStaticData;
+        private bool m_UsesFallbackMaterials;
 
         public bool Build(
             VividGPUDrivenSceneData sceneData,
             VividMeshletRendererDatabase database,
             BindlessTextureContainer bindlessTextureContainer
+        )
+        {
+            return Build(sceneData, database, bindlessTextureContainer, out _);
+        }
+
+        public bool Build(
+            VividGPUDrivenSceneData sceneData,
+            VividMeshletRendererDatabase database,
+            BindlessTextureContainer bindlessTextureContainer,
+            out bool materialDataChanged
         )
         {
             if (sceneData == null)
@@ -51,8 +67,46 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             bool staticDataChanged = !m_HasBuiltStaticData;
+            CollectReferencedMeshletAssetIds(database);
+            CollectReferencedMaterialProxyIds(database);
 
-            sceneData.ClearDynamic();
+            if (!staticDataChanged && !m_CurrentReferencedMeshletAssetIds.SetEquals(m_PreviousReferencedMeshletAssetIds))
+            {
+                staticDataChanged = true;
+            }
+
+            if (!staticDataChanged && HasTrackedMeshletAssetVersionChanges(database))
+            {
+                staticDataChanged = true;
+            }
+
+            materialDataChanged = staticDataChanged || m_UsesFallbackMaterials;
+            if (!materialDataChanged && !m_CurrentReferencedMaterialProxyIds.SetEquals(m_PreviousReferencedMaterialProxyIds))
+            {
+                materialDataChanged = true;
+            }
+
+            if (!materialDataChanged && HasTrackedMaterialProxyVersionChanges(database))
+            {
+                materialDataChanged = true;
+            }
+
+            if (staticDataChanged)
+            {
+                sceneData.Clear();
+                m_MeshMetadataByObjectId.Clear();
+                m_MaterialMetadataByObjectId.Clear();
+            }
+            else if (materialDataChanged)
+            {
+                sceneData.ClearDynamic();
+                m_MaterialMetadataByObjectId.Clear();
+            }
+            else
+            {
+                sceneData.ClearInstances();
+            }
+
             m_MaterialIndexByObjectId.Clear();
 
             IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
@@ -65,21 +119,178 @@ namespace VividRP.Runtime.GPUDriven
                     sceneData,
                     rendererData[rendererIndex],
                     rendererResources[rendererIndex],
-                    bindlessTextureContainer,
-                    ref staticDataChanged
+                    bindlessTextureContainer
                 );
             }
 
+            SwapReferencedMeshletAssetIds();
+            SwapReferencedMaterialProxyIds();
             m_HasBuiltStaticData = true;
             return staticDataChanged;
+        }
+
+        private void CollectReferencedMeshletAssetIds(VividMeshletRendererDatabase database)
+        {
+            m_CurrentReferencedMeshletAssetIds.Clear();
+
+            IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
+            IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
+            int rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+
+            for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
+            {
+                if (!IsRenderable(rendererData[rendererIndex], rendererResources[rendererIndex]))
+                {
+                    continue;
+                }
+
+                VividMeshletCollectionAsset[] meshletCollections = rendererResources[rendererIndex].MeshletCollections;
+                for (int subMeshIndex = 0; subMeshIndex < meshletCollections.Length; subMeshIndex++)
+                {
+                    VividMeshletCollectionAsset meshletCollection = meshletCollections[subMeshIndex];
+                    if (meshletCollection == null)
+                    {
+                        continue;
+                    }
+
+                    m_CurrentReferencedMeshletAssetIds.Add(meshletCollection.GetEntityId());
+                }
+            }
+        }
+
+        private void CollectReferencedMaterialProxyIds(VividMeshletRendererDatabase database)
+        {
+            m_CurrentReferencedMaterialProxyIds.Clear();
+            m_UsesFallbackMaterials = false;
+
+            IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
+            IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
+            int rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+
+            for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
+            {
+                if (!IsRenderable(rendererData[rendererIndex], rendererResources[rendererIndex]))
+                {
+                    continue;
+                }
+
+                VividMeshletCollectionAsset[] meshletCollections = rendererResources[rendererIndex].MeshletCollections;
+                for (int subMeshIndex = 0; subMeshIndex < meshletCollections.Length; subMeshIndex++)
+                {
+                    if (meshletCollections[subMeshIndex] == null)
+                    {
+                        continue;
+                    }
+
+                    GPUDrivenMaterialProxy materialProxy = GetMaterialProxyForSubMesh(rendererResources[rendererIndex].MaterialProxies, subMeshIndex);
+                    if (materialProxy != null)
+                    {
+                        m_CurrentReferencedMaterialProxyIds.Add(materialProxy.GetEntityId());
+                    }
+                    else
+                    {
+                        m_UsesFallbackMaterials = true;
+                    }
+                }
+            }
+        }
+
+        private void SwapReferencedMeshletAssetIds()
+        {
+            m_PreviousReferencedMeshletAssetIds.Clear();
+            foreach (EntityId assetId in m_CurrentReferencedMeshletAssetIds)
+            {
+                m_PreviousReferencedMeshletAssetIds.Add(assetId);
+            }
+        }
+
+        private void SwapReferencedMaterialProxyIds()
+        {
+            m_PreviousReferencedMaterialProxyIds.Clear();
+            foreach (EntityId proxyId in m_CurrentReferencedMaterialProxyIds)
+            {
+                m_PreviousReferencedMaterialProxyIds.Add(proxyId);
+            }
+        }
+
+        private bool HasTrackedMeshletAssetVersionChanges(VividMeshletRendererDatabase database)
+        {
+            IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
+            IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
+            int rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+
+            for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
+            {
+                if (!IsRenderable(rendererData[rendererIndex], rendererResources[rendererIndex]))
+                {
+                    continue;
+                }
+
+                VividMeshletCollectionAsset[] meshletCollections = rendererResources[rendererIndex].MeshletCollections;
+                for (int subMeshIndex = 0; subMeshIndex < meshletCollections.Length; subMeshIndex++)
+                {
+                    VividMeshletCollectionAsset meshletCollection = meshletCollections[subMeshIndex];
+                    if (meshletCollection == null)
+                    {
+                        continue;
+                    }
+
+                    EntityId assetId = meshletCollection.GetEntityId();
+                    if (!m_MeshMetadataByObjectId.TryGetValue(assetId, out MeshletAssetMetadata metadata) ||
+                        metadata.AssetVersion != meshletCollection.ContentVersion)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private bool HasTrackedMaterialProxyVersionChanges(VividMeshletRendererDatabase database)
+        {
+            IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
+            IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
+            int rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+
+            for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
+            {
+                if (!IsRenderable(rendererData[rendererIndex], rendererResources[rendererIndex]))
+                {
+                    continue;
+                }
+
+                VividMeshletCollectionAsset[] meshletCollections = rendererResources[rendererIndex].MeshletCollections;
+                for (int subMeshIndex = 0; subMeshIndex < meshletCollections.Length; subMeshIndex++)
+                {
+                    if (meshletCollections[subMeshIndex] == null)
+                    {
+                        continue;
+                    }
+
+                    GPUDrivenMaterialProxy materialProxy = GetMaterialProxyForSubMesh(rendererResources[rendererIndex].MaterialProxies, subMeshIndex);
+                    if (materialProxy == null)
+                    {
+                        continue;
+                    }
+
+                    EntityId materialProxyId = materialProxy.GetEntityId();
+                    if (!m_MaterialMetadataByObjectId.TryGetValue(materialProxyId, out MaterialMetadata metadata) ||
+                        metadata.Revision != materialProxy.Revision)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         private void AppendRendererSceneData(
             VividGPUDrivenSceneData sceneData,
             in VividMeshletRendererRenderData trackedData,
             in VividMeshletRendererResources trackedResources,
-            BindlessTextureContainer bindlessTextureContainer,
-            ref bool staticDataChanged
+            BindlessTextureContainer bindlessTextureContainer
         )
         {
             if (!IsRenderable(trackedData, trackedResources))
@@ -96,7 +307,7 @@ namespace VividRP.Runtime.GPUDriven
                     continue;
                 }
 
-                MeshletAssetMetadata meshMetadata = GetOrAppendMeshletAsset(sceneData, meshletCollection, ref staticDataChanged);
+                MeshletAssetMetadata meshMetadata = GetOrAppendMeshletAsset(sceneData, meshletCollection);
                 Material material = GetMaterialForSubMesh(trackedResources.SharedMaterials, subMeshIndex);
                 GPUDrivenMaterialProxy materialProxy = GetMaterialProxyForSubMesh(trackedResources.MaterialProxies, subMeshIndex);
                 int materialIndex = GetOrAppendMaterial(
@@ -137,17 +348,13 @@ namespace VividRP.Runtime.GPUDriven
 
         private MeshletAssetMetadata GetOrAppendMeshletAsset(
             VividGPUDrivenSceneData sceneData,
-            VividMeshletCollectionAsset meshletCollection,
-            ref bool staticDataChanged
+            VividMeshletCollectionAsset meshletCollection
         )
         {
-            int objectId = meshletCollection.GetInstanceID();
+            EntityId objectId = meshletCollection.GetEntityId();
             if (m_MeshMetadataByObjectId.TryGetValue(objectId, out MeshletAssetMetadata metadata))
             {
-                if (metadata.Matches(meshletCollection))
-                {
-                    return metadata;
-                }
+                return metadata;
             }
 
             uint meshletBaseOffset = (uint) sceneData.MeshletCount;
@@ -179,14 +386,10 @@ namespace VividRP.Runtime.GPUDriven
                 meshLODStartIndex,
                 (uint) sourceMeshLODNodes.Length,
                 (uint) Mathf.Max(1, meshletCollection.MeshLODLevelCount),
-                sourceMeshLODNodes,
-                sourceMeshlets,
-                meshletCollection.VertexBuffer,
-                meshletCollection.IndexBuffer
+                meshletCollection.ContentVersion
             );
 
             m_MeshMetadataByObjectId[objectId] = metadata;
-            staticDataChanged = true;
             return metadata;
         }
 
@@ -199,13 +402,21 @@ namespace VividRP.Runtime.GPUDriven
             BindlessTextureContainer bindlessTextureContainer
         )
         {
-            int objectId = materialProxy != null
-                ? materialProxy.GetInstanceID()
+            EntityId objectId = materialProxy != null
+                ? materialProxy.GetEntityId()
                 : material != null
-                    ? material.GetInstanceID()
-                    : 0;
+                    ? material.GetEntityId()
+                    : EntityId.None;
             if (m_MaterialIndexByObjectId.TryGetValue(objectId, out int materialIndex))
             {
+                return materialIndex;
+            }
+
+            if (materialProxy != null &&
+                m_MaterialMetadataByObjectId.TryGetValue(objectId, out MaterialMetadata metadata))
+            {
+                materialIndex = metadata.MaterialIndex;
+                m_MaterialIndexByObjectId.Add(objectId, materialIndex);
                 return materialIndex;
             }
 
@@ -223,6 +434,10 @@ namespace VividRP.Runtime.GPUDriven
             materialIndex = sceneData.MaterialCount;
             sceneData.MutableMaterials.Add(materialData);
             m_MaterialIndexByObjectId.Add(objectId, materialIndex);
+            if (materialProxy != null)
+            {
+                m_MaterialMetadataByObjectId[objectId] = new MaterialMetadata(materialIndex, materialProxy.Revision);
+            }
             return materialIndex;
         }
 
@@ -559,23 +774,12 @@ namespace VividRP.Runtime.GPUDriven
 
         private readonly struct MeshletAssetMetadata
         {
-            public MeshletAssetMetadata(
-                uint topMeshLODStartIndex,
-                uint totalMeshLODCount,
-                uint meshLODLevelCount,
-                VividMeshLODNode[] meshLODNodes,
-                VividMeshlet[] meshlets,
-                VividMeshletVertex[] vertexBuffer,
-                byte[] indexBuffer
-            )
+            public MeshletAssetMetadata(uint topMeshLODStartIndex, uint totalMeshLODCount, uint meshLODLevelCount, uint assetVersion)
             {
                 TopMeshLODStartIndex = topMeshLODStartIndex;
                 TotalMeshLODCount = totalMeshLODCount;
                 MeshLODLevelCount = meshLODLevelCount;
-                MeshLODNodes = meshLODNodes;
-                Meshlets = meshlets;
-                VertexBuffer = vertexBuffer;
-                IndexBuffer = indexBuffer;
+                AssetVersion = assetVersion;
             }
 
             public uint TopMeshLODStartIndex { get; }
@@ -584,23 +788,20 @@ namespace VividRP.Runtime.GPUDriven
 
             public uint MeshLODLevelCount { get; }
 
-            private VividMeshLODNode[] MeshLODNodes { get; }
+            public uint AssetVersion { get; }
+        }
 
-            private VividMeshlet[] Meshlets { get; }
-
-            private VividMeshletVertex[] VertexBuffer { get; }
-
-            private byte[] IndexBuffer { get; }
-
-            public bool Matches(VividMeshletCollectionAsset meshletCollection)
+        private readonly struct MaterialMetadata
+        {
+            public MaterialMetadata(int materialIndex, uint revision)
             {
-                return meshletCollection != null &&
-                       MeshLODLevelCount == (uint) Mathf.Max(1, meshletCollection.MeshLODLevelCount) &&
-                       ReferenceEquals(MeshLODNodes, meshletCollection.MeshLODNodes) &&
-                       ReferenceEquals(Meshlets, meshletCollection.Meshlets) &&
-                       ReferenceEquals(VertexBuffer, meshletCollection.VertexBuffer) &&
-                       ReferenceEquals(IndexBuffer, meshletCollection.IndexBuffer);
+                MaterialIndex = materialIndex;
+                Revision = revision;
             }
+
+            public int MaterialIndex { get; }
+
+            public uint Revision { get; }
         }
     }
 }

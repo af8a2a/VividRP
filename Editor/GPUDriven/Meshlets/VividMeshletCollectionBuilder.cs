@@ -328,6 +328,8 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             }
             jobHandles.Dispose();
 
+            meshletCollection.MarkChanged();
+
             if (ownsWorkingIndices)
             {
                 workingIndices.Dispose();

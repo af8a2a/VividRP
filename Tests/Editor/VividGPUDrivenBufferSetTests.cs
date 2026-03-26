@@ -136,13 +136,12 @@ namespace VividRP.Editor.Tests
             bufferSet.Upload(sceneData);
 
             sceneData.MutableInstances.Add(default);
-            sceneData.MutableMaterials.Add(default);
             sceneData.MutableVertices[0] = new VividMeshletVertex
             {
                 Position = new float4(9.0f, 9.0f, 9.0f, 1.0f),
             };
 
-            bufferSet.Upload(sceneData, false);
+            bufferSet.Upload(sceneData, uploadMaterialData: false, uploadStaticData: false);
 
             var vertices = new VividMeshletVertex[1];
             bufferSet.SharedVertexBuffer.GetData(vertices);
@@ -151,7 +150,37 @@ namespace VividRP.Editor.Tests
             Assert.That(vertices[0].Position.y, Is.EqualTo(2.0f).Within(0.0001f));
             Assert.That(vertices[0].Position.z, Is.EqualTo(3.0f).Within(0.0001f));
             Assert.That(bufferSet.InstanceCount, Is.EqualTo(2));
-            Assert.That(bufferSet.MaterialCount, Is.EqualTo(2));
+            Assert.That(bufferSet.MaterialCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Upload_KeepsMaterialBufferContents_WhenMaterialUploadIsSkipped()
+        {
+            var sceneData = new VividGPUDrivenSceneData();
+            sceneData.MutableInstances.Add(default);
+            sceneData.MutableMaterials.Add(new VividMaterialData
+            {
+                AlbedoColor = new float4(1.0f, 0.0f, 0.0f, 1.0f),
+            });
+
+            using var bufferSet = new VividGPUDrivenBufferSet();
+            bufferSet.Upload(sceneData);
+
+            sceneData.MutableInstances.Add(default);
+            sceneData.MutableMaterials[0] = new VividMaterialData
+            {
+                AlbedoColor = new float4(0.0f, 1.0f, 0.0f, 1.0f),
+            };
+
+            bufferSet.Upload(sceneData, uploadMaterialData: false, uploadStaticData: false);
+
+            var materials = new VividMaterialData[1];
+            bufferSet.MaterialDataBuffer.GetData(materials);
+
+            Assert.That(materials[0].AlbedoColor.x, Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(materials[0].AlbedoColor.y, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(bufferSet.InstanceCount, Is.EqualTo(2));
+            Assert.That(bufferSet.MaterialCount, Is.EqualTo(1));
         }
     }
 }

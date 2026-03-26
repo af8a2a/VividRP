@@ -6,6 +6,8 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 {
     public class VividMeshletCollectionAsset : ScriptableObject
     {
+        [SerializeField, HideInInspector] private uint m_ContentVersion = 1u;
+
         public static readonly VividMeshOptimizer.MeshletGenerationParams MeshletGenerationParams = new()
         {
             MaxVertices = VividMeshletConfiguration.MaxMeshletVertices,
@@ -26,5 +28,22 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
         public VividMeshlet[] Meshlets = Array.Empty<VividMeshlet>();
         public VividMeshletVertex[] VertexBuffer = Array.Empty<VividMeshletVertex>();
         public byte[] IndexBuffer = Array.Empty<byte>();
+
+        public uint ContentVersion => m_ContentVersion;
+
+        public void MarkChanged()
+        {
+            unchecked
+            {
+                m_ContentVersion = m_ContentVersion == uint.MaxValue ? 1u : m_ContentVersion + 1u;
+            }
+        }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            MarkChanged();
+        }
+#endif
     }
 }

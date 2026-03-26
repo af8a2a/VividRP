@@ -83,8 +83,13 @@ namespace VividRP.Runtime.GPUDriven
             ThrowIfDisposed();
 
             BindlessTextureContainer.PreRender();
-            bool staticDataChanged = m_SceneDataBuilder.Build(SceneData, VividMeshletRendererDatabase.instance, BindlessTextureContainer);
-            m_BufferSet.Upload(SceneData, staticDataChanged);
+            bool staticDataChanged = m_SceneDataBuilder.Build(
+                SceneData,
+                VividMeshletRendererDatabase.instance,
+                BindlessTextureContainer,
+                out bool materialDataChanged
+            );
+            m_BufferSet.Upload(SceneData, materialDataChanged, staticDataChanged);
         }
 
         public void Cull(

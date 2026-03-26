@@ -43,7 +43,11 @@ namespace VividRP.Runtime.GPUDriven
 
         public int SharedIndexCount { get; private set; }
 
-        public void Upload(VividGPUDrivenSceneData sceneData, bool uploadStaticData = true)
+        public void Upload(
+            VividGPUDrivenSceneData sceneData,
+            bool uploadMaterialData = true,
+            bool uploadStaticData = true
+        )
         {
             ThrowIfDisposed();
 
@@ -59,6 +63,7 @@ namespace VividRP.Runtime.GPUDriven
             SharedVertexCount = sceneData.VertexCount;
             SharedIndexCount = sceneData.IndexCount;
 
+            bool shouldUploadMaterialData = uploadMaterialData || RequiresMaterialBufferUpload(sceneData);
             bool shouldUploadStaticData = uploadStaticData || RequiresStaticBufferUpload(sceneData);
 
             UploadStructuredBuffer(
@@ -67,12 +72,15 @@ namespace VividRP.Runtime.GPUDriven
                 UnsafeUtility.SizeOf<VividInstanceData>(),
                 "VividGPUDriven_InstanceData"
             );
-            UploadStructuredBuffer(
-                ref m_MaterialDataBuffer,
-                sceneData.MutableMaterials,
-                UnsafeUtility.SizeOf<VividMaterialData>(),
-                "VividGPUDriven_MaterialData"
-            );
+            if (shouldUploadMaterialData)
+            {
+                UploadStructuredBuffer(
+                    ref m_MaterialDataBuffer,
+                    sceneData.MutableMaterials,
+                    UnsafeUtility.SizeOf<VividMaterialData>(),
+                    "VividGPUDriven_MaterialData"
+                );
+            }
 
             if (shouldUploadStaticData)
             {
@@ -235,6 +243,11 @@ namespace VividRP.Runtime.GPUDriven
                    !IsStructuredBufferCompatible(m_MeshletsBuffer, sceneData.MeshletCount, UnsafeUtility.SizeOf<VividMeshlet>()) ||
                    !IsStructuredBufferCompatible(m_SharedVertexBuffer, sceneData.VertexCount, UnsafeUtility.SizeOf<VividMeshletVertex>()) ||
                    !IsRawBufferCompatible(m_SharedIndexBuffer, sceneData.IndexCount);
+        }
+
+        private bool RequiresMaterialBufferUpload(VividGPUDrivenSceneData sceneData)
+        {
+            return !IsStructuredBufferCompatible(m_MaterialDataBuffer, sceneData.MaterialCount, UnsafeUtility.SizeOf<VividMaterialData>());
         }
 
         private static bool IsStructuredBufferCompatible(GraphicsBuffer buffer, int count, int stride)

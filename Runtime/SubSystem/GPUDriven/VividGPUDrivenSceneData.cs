@@ -47,10 +47,20 @@ namespace VividRP.Runtime.GPUDriven
 
         internal List<byte> MutableIndices => m_Indices;
 
-        internal void ClearDynamic()
+        internal void ClearInstances()
         {
             m_Instances.Clear();
+        }
+
+        internal void ClearMaterials()
+        {
             m_Materials.Clear();
+        }
+
+        internal void ClearDynamic()
+        {
+            ClearInstances();
+            ClearMaterials();
         }
 
         internal void Clear()

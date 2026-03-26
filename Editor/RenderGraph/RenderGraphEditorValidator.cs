@@ -11,21 +11,35 @@ namespace VividRP.Editor.RenderGraph
     {
         internal static void Validate(RenderGraphEditorGraph graph, GraphLogger infos)
         {
-            if (graph == null)
+            if (graph == null || infos == null)
                 return;
 
+            ValidateGraph(graph, new GraphLoggerValidationReporter(infos), summarizeChildSubgraphs: true);
+        }
+
+        private static ValidationSummary ValidateGraph(
+            RenderGraphEditorGraph graph,
+            IRenderGraphValidationReporter reporter,
+            bool summarizeChildSubgraphs)
+        {
+            var summary = new ValidationSummary();
+            if (graph == null || reporter == null)
+                return summary;
+
             var passNodes = graph.GetNodes().OfType<RenderPassNodeData>().ToList();
-            if (passNodes.Count == 0)
+            var subgraphNodes = graph.GetNodes().OfType<ISubgraphNode>().ToList();
+            if (passNodes.Count == 0 && subgraphNodes.Count == 0)
             {
-                infos.LogWarning("Add at least one pass node to your Render Graph.", graph);
-                return;
+                reporter.LogWarning("Add at least one pass node to your Render Graph.", graph);
+                summary.WarningCount++;
             }
 
             foreach (var passNode in passNodes)
             {
                 if (IsCorruptedNode(passNode))
                 {
-                    infos.LogError("This pass node is corrupted. Delete it and re-create.", passNode);
+                    reporter.LogError("This pass node is corrupted. Delete it and re-create.", passNode);
+                    summary.ErrorCount++;
                     continue;
                 }
 
@@ -34,48 +48,62 @@ namespace VividRP.Editor.RenderGraph
                 {
                     if (passNode.UsesPassScriptSelection)
                     {
-                        infos.LogError("Select a pass script (a class implementing IRenderPass).", passNode);
+                        reporter.LogError("Select a pass script (a class implementing IRenderPass).", passNode);
                     }
                     else
                     {
-                        infos.LogError(
+                        reporter.LogError(
                             $"Registered pass type '{passNode.GetRegisteredPassTypeName()}' could not be resolved.",
                             passNode);
                     }
 
+                    summary.ErrorCount++;
                     continue;
                 }
 
                 if (!typeof(IRenderPass).IsAssignableFrom(passType))
                 {
-                    infos.LogError($"Pass type '{passType.FullName}' must implement {nameof(IRenderPass)}.", passNode);
+                    reporter.LogError($"Pass type '{passType.FullName}' must implement {nameof(IRenderPass)}.", passNode);
+                    summary.ErrorCount++;
                     continue;
                 }
 
                 if (passType.IsAbstract)
                 {
-                    infos.LogError($"Pass type '{passType.FullName}' must be a concrete class.", passNode);
+                    reporter.LogError($"Pass type '{passType.FullName}' must be a concrete class.", passNode);
+                    summary.ErrorCount++;
                     continue;
                 }
 
                 if (passType.GetConstructor(System.Type.EmptyTypes) == null)
                 {
-                    infos.LogError(
+                    reporter.LogError(
                         $"Pass type '{passType.FullName}' must expose a public parameterless constructor.",
                         passNode);
+                    summary.ErrorCount++;
                     continue;
                 }
 
-                ValidateAsyncCompute(passNode, passType, infos);
-                ValidateReadWriteBindings(passNode, passType, infos);
-                ValidateHistoryBindings(passNode, passType, infos);
+                ValidateAsyncCompute(passNode, passType, reporter, ref summary);
+                ValidateReadWriteBindings(passNode, passType, reporter, ref summary);
+                ValidateHistoryBindings(passNode, passType, reporter, ref summary);
             }
 
-            ValidateHistoryResourceNodes(graph, infos);
-            ValidatePreviewNodes(graph, infos);
+            ValidateHistoryResourceNodes(graph, reporter, ref summary);
+            ValidateSubSystemInterfaceVariables(graph, reporter, ref summary);
+
+            var flattenedGraph = RenderGraphSubSystemCompilationUtility.Flatten(graph);
+            ValidatePreviewNodes(graph, flattenedGraph, reporter, ref summary);
+            ValidateSubgraphNodes(graph, reporter, summarizeChildSubgraphs, ref summary);
+
+            return summary;
         }
 
-        private static void ValidateReadWriteBindings(RenderPassNodeData passNode, System.Type passType, GraphLogger infos)
+        private static void ValidateReadWriteBindings(
+            RenderPassNodeData passNode,
+            System.Type passType,
+            IRenderGraphValidationReporter reporter,
+            ref ValidationSummary summary)
         {
             foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
             {
@@ -96,9 +124,10 @@ namespace VividRP.Editor.RenderGraph
                 var outputResourceNode = IsStandaloneResourceNode(outputNode) ? outputNode : null;
                 if (inputResourceNode != null && outputResourceNode != null && inputResourceNode != outputResourceNode)
                 {
-                    infos.LogError(
+                    reporter.LogError(
                         $"Read/write field '{field.Name}' must connect to the same resource node on both input and output ports.",
                         passNode);
+                    summary.ErrorCount++;
                 }
 
                 if (inputResourceNode != null
@@ -106,25 +135,35 @@ namespace VividRP.Editor.RenderGraph
                     && inputResourceNode == outputResourceNode
                     && !ReferenceEquals(passNode.GetInputPortByName(inputPortName)?.FirstConnectedPort, passNode.GetOutputPortByName(outputPortName)?.FirstConnectedPort))
                 {
-                    infos.LogError(
+                    reporter.LogError(
                         $"Read/write field '{field.Name}' must connect to the same resource output on composite resource nodes.",
                         passNode);
+                    summary.ErrorCount++;
                 }
             }
         }
 
-        private static void ValidateAsyncCompute(RenderPassNodeData passNode, System.Type passType, GraphLogger infos)
+        private static void ValidateAsyncCompute(
+            RenderPassNodeData passNode,
+            System.Type passType,
+            IRenderGraphValidationReporter reporter,
+            ref ValidationSummary summary)
         {
             var enableAsyncCompute = passNode.GetEnableAsyncCompute();
             if (IsAsyncComputeConfigurationValid(passType, enableAsyncCompute))
                 return;
 
-            infos.LogError(
+            reporter.LogError(
                 $"Async Compute can only be enabled on {nameof(ComputePass)} or {nameof(UnsafePass)} types that implement {nameof(IAsyncComputeSupportedPass)}. Disable Async Compute or reselect a supported pass.",
                 passNode);
+            summary.ErrorCount++;
         }
 
-        private static void ValidateHistoryBindings(RenderPassNodeData passNode, System.Type passType, GraphLogger infos)
+        private static void ValidateHistoryBindings(
+            RenderPassNodeData passNode,
+            System.Type passType,
+            IRenderGraphValidationReporter reporter,
+            ref ValidationSummary summary)
         {
             foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
             {
@@ -157,9 +196,10 @@ namespace VividRP.Editor.RenderGraph
 
                     if (!isValidCurrentHistoryBinding)
                     {
-                        infos.LogError(
+                        reporter.LogError(
                             $"Read/write field '{field.Name}' must connect only its input port to CurrOut on a history node and leave the output port unconnected.",
                             passNode);
+                        summary.ErrorCount++;
                     }
 
                     continue;
@@ -167,16 +207,134 @@ namespace VividRP.Editor.RenderGraph
 
                 if (canRead && inputHistoryNode != null && !inputHistoryNode.IsPreviousOutputPort(inputConnectedPort) && !inputHistoryNode.IsCurrentOutputPort(inputConnectedPort))
                 {
-                    infos.LogError($"Read field '{field.Name}' must connect to PrevOut or CurrOut on a history node.", passNode);
+                    reporter.LogError($"Read field '{field.Name}' must connect to PrevOut or CurrOut on a history node.", passNode);
+                    summary.ErrorCount++;
                 }
 
                 if (canWrite && (inputHistoryNode != null || outputHistoryNode != null))
                 {
-                    infos.LogError(
+                    reporter.LogError(
                         $"Write-only field '{field.Name}' cannot bind directly to a history node. Use a ReadWrite field and connect its input port to CurrOut instead.",
                         passNode);
+                    summary.ErrorCount++;
                 }
             }
+        }
+
+        private static void ValidateSubSystemInterfaceVariables(
+            RenderGraphEditorGraph graph,
+            IRenderGraphValidationReporter reporter,
+            ref ValidationSummary summary)
+        {
+            if (!RenderGraphSubSystemCompilationUtility.IsSubSystemGraph(graph))
+                return;
+
+            foreach (var variable in graph.GetVariables())
+            {
+                if (variable == null)
+                    continue;
+
+                var kind = variable.VariableKind;
+                if (kind != VariableKind.Input && kind != VariableKind.Output)
+                    continue;
+
+                if (!IsSupportedSubSystemInterfaceType(variable.DataType))
+                {
+                    reporter.LogError(
+                        $"SubSystem interface variable '{variable.Name}' uses unsupported type '{variable.DataType?.FullName ?? "<null>"}'.",
+                        variable);
+                    summary.ErrorCount++;
+                }
+
+                if (kind == VariableKind.Output && GetDistinctConnectedInputCount(variable) > 1)
+                {
+                    reporter.LogError(
+                        $"SubSystem output variable '{variable.Name}' must have a single internal source.",
+                        variable);
+                    summary.ErrorCount++;
+                }
+            }
+        }
+
+        private static void ValidateSubgraphNodes(
+            RenderGraphEditorGraph graph,
+            IRenderGraphValidationReporter reporter,
+            bool summarizeChildSubgraphs,
+            ref ValidationSummary summary)
+        {
+            var subgraphNodes = graph.GetNodes().OfType<ISubgraphNode>().ToList();
+            if (subgraphNodes.Count == 0)
+                return;
+
+            if (RenderGraphSubSystemCompilationUtility.IsSubSystemGraph(graph))
+            {
+                foreach (var subgraphNode in subgraphNodes)
+                {
+                    reporter.LogError("SubSystem graphs cannot contain nested SubSystems.", subgraphNode);
+                    summary.ErrorCount++;
+                }
+
+                return;
+            }
+
+            foreach (var subgraphNode in subgraphNodes)
+            {
+                if (subgraphNode.GetSubgraph() is not RenderGraphSubSystemGraph subSystemGraph)
+                {
+                    reporter.LogError("Only VividRP RenderGraph SubSystem graphs are supported inside RenderGraphEditor.", subgraphNode);
+                    summary.ErrorCount++;
+                    continue;
+                }
+
+                if (!summarizeChildSubgraphs)
+                    continue;
+
+                var childReporter = new CollectingValidationReporter();
+                var childSummary = ValidateGraph(subSystemGraph, childReporter, summarizeChildSubgraphs: false);
+                if (childSummary.ErrorCount > 0)
+                {
+                    reporter.LogError(
+                        $"SubSystem contains {childSummary.ErrorCount} error(s). Open the SubSystem to inspect details.",
+                        subgraphNode);
+                    summary.ErrorCount++;
+                }
+                else if (childSummary.WarningCount > 0)
+                {
+                    reporter.LogWarning(
+                        $"SubSystem contains {childSummary.WarningCount} warning(s). Open the SubSystem to inspect details.",
+                        subgraphNode);
+                    summary.WarningCount++;
+                }
+            }
+        }
+
+        private static bool IsSupportedSubSystemInterfaceType(System.Type type)
+        {
+            return type == typeof(RenderGraphTexture)
+                   || type == typeof(RenderGraphBuffer)
+                   || type == typeof(RenderGraphRenderList)
+                   || type == typeof(RenderGraphAccelerationStructure);
+        }
+
+        private static int GetDistinctConnectedInputCount(IVariable variable)
+        {
+            if (variable == null)
+                return 0;
+
+            var variableNodes = new List<IVariableNode>();
+            variable.GetNodes(variableNodes);
+
+            var connectedPorts = new HashSet<IPort>(ReferenceEqualityComparer<IPort>.Instance);
+            foreach (var variableNode in variableNodes)
+            {
+                foreach (var inputPort in variableNode.GetInputPorts())
+                {
+                    if (inputPort?.IsConnected == true && inputPort.FirstConnectedPort != null)
+                        connectedPorts.Add(inputPort.FirstConnectedPort);
+                }
+            }
+
+            return connectedPorts.Count;
         }
 
         private static bool IsStandaloneResourceNode(INode node)
@@ -187,22 +345,31 @@ namespace VividRP.Editor.RenderGraph
                    || node is AccelerationStructureResourceNodeData;
         }
 
-
-        private static void ValidateHistoryResourceNodes(RenderGraphEditorGraph graph, GraphLogger infos)
+        private static void ValidateHistoryResourceNodes(
+            RenderGraphEditorGraph graph,
+            IRenderGraphValidationReporter reporter,
+            ref ValidationSummary summary)
         {
             foreach (var historyNode in graph.GetNodes().OfType<HistoryResourceNodeData>())
             {
                 var desc = historyNode.GetDescriptor();
                 if (desc == null || desc.ColorFormat == GraphicsFormat.None)
                 {
-                    infos.LogError("History resource requires a valid color format.", historyNode);
+                    reporter.LogError("History resource requires a valid color format.", historyNode);
+                    summary.ErrorCount++;
                 }
             }
         }
 
-        private static void ValidatePreviewNodes(RenderGraphEditorGraph graph, GraphLogger infos)
+        private static void ValidatePreviewNodes(
+            RenderGraphEditorGraph graph,
+            RenderGraphFlattenedGraph flattenedGraph,
+            IRenderGraphValidationReporter reporter,
+            ref ValidationSummary summary)
         {
-            var debug = graph.GetNodes().OfType<PreviewNodeData>();
+            if (graph == null || flattenedGraph == null)
+                return;
+
             foreach (var previewNode in graph.GetNodes().OfType<PreviewNodeData>())
             {
                 previewNode.RefreshPreviewConnectionMetadata();
@@ -210,15 +377,25 @@ namespace VividRP.Editor.RenderGraph
                 var inputPort = previewNode.GetInputPortByName(PreviewNodeData.TextureInputPortName);
                 if (inputPort == null || !inputPort.IsConnected)
                 {
-                    infos.LogWarning("Preview node is not connected to a texture resource.", previewNode);
+                    reporter.LogWarning("Preview node is not connected to a texture resource.", previewNode);
+                    summary.WarningCount++;
                     continue;
                 }
 
-                var sourceNode = inputPort.FirstConnectedPort?.GetNode();
-                if (sourceNode is TextureResourceNodeData || sourceNode is HistoryResourceNodeData || sourceNode is RenderPassNodeData )
+                var connectedPort = RenderGraphSubSystemCompilationUtility.ResolveInputConnection(
+                    flattenedGraph,
+                    previewNode,
+                    inputPort.FirstConnectedPort);
+                var sourceNode = connectedPort?.GetNode();
+                if (sourceNode is TextureResourceNodeData
+                    || sourceNode is HistoryResourceNodeData
+                    || sourceNode is RenderPassNodeData)
+                {
                     continue;
+                }
 
-                infos.LogWarning("Preview node only supports texture outputs.", previewNode);
+                reporter.LogWarning("Preview node only supports texture outputs.", previewNode);
+                summary.WarningCount++;
             }
         }
 
@@ -234,7 +411,6 @@ namespace VividRP.Editor.RenderGraph
 
             try
             {
-                // A node is corrupted if its type name is missing or its ports cannot be queried.
                 if (!passNode.UsesPassScriptSelection)
                 {
                     var typeName = passNode.GetRegisteredPassTypeName();
@@ -251,10 +427,6 @@ namespace VividRP.Editor.RenderGraph
             }
         }
 
-        /// <summary>
-        /// Removes corrupted pass nodes and disconnected resource nodes from the graph.
-        /// Returns the number of nodes removed.
-        /// </summary>
         internal static int TrimGraph(RenderGraphEditorGraph graph)
         {
             if (graph == null)
@@ -263,7 +435,6 @@ namespace VividRP.Editor.RenderGraph
             var removed = 0;
             var allNodes = graph.GetNodes().ToList();
 
-            // Remove corrupted pass nodes.
             foreach (var passNode in allNodes.OfType<RenderPassNodeData>().ToList())
             {
                 if (!IsCorruptedNode(passNode))
@@ -273,7 +444,6 @@ namespace VividRP.Editor.RenderGraph
                 removed++;
             }
 
-            // Remove resource nodes that have no connections.
             allNodes = graph.GetNodes().ToList();
             foreach (var node in allNodes)
             {
@@ -325,6 +495,49 @@ namespace VividRP.Editor.RenderGraph
             }
 
             return true;
+        }
+
+        private struct ValidationSummary
+        {
+            internal int ErrorCount;
+            internal int WarningCount;
+        }
+
+        private interface IRenderGraphValidationReporter
+        {
+            void LogError(string message, object context);
+            void LogWarning(string message, object context);
+        }
+
+        private sealed class GraphLoggerValidationReporter : IRenderGraphValidationReporter
+        {
+            private readonly GraphLogger m_Logger;
+
+            internal GraphLoggerValidationReporter(GraphLogger logger)
+            {
+                m_Logger = logger;
+            }
+
+            public void LogError(string message, object context)
+            {
+                m_Logger?.LogError(message, context);
+            }
+
+            public void LogWarning(string message, object context)
+            {
+                m_Logger?.LogWarning(message, context);
+            }
+        }
+
+        private sealed class CollectingValidationReporter : IRenderGraphValidationReporter
+        {
+            public void LogError(string message, object context)
+            {
+            }
+
+            public void LogWarning(string message, object context)
+            {
+            }
         }
     }
 }

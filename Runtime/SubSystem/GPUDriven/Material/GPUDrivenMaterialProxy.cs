@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -60,85 +61,85 @@ namespace VividRP.Runtime.GPUDriven
         public Material SourceMaterial
         {
             get => m_SourceMaterial;
-            set => m_SourceMaterial = value;
+            set => SetValue(ref m_SourceMaterial, value);
         }
 
         public GPUDrivenMaterialProxyModel Model
         {
             get => m_Model;
-            set => m_Model = value;
+            set => SetValue(ref m_Model, value);
         }
 
         public Texture2D BaseMap
         {
             get => m_BaseMap;
-            set => m_BaseMap = value;
+            set => SetValue(ref m_BaseMap, value);
         }
 
         public Color BaseColor
         {
             get => m_BaseColor;
-            set => m_BaseColor = value;
+            set => SetValue(ref m_BaseColor, value);
         }
 
         public Vector4 TextureTilingOffset
         {
             get => m_TextureTilingOffset;
-            set => m_TextureTilingOffset = value;
+            set => SetValue(ref m_TextureTilingOffset, value);
         }
 
         public Texture2D BumpMap
         {
             get => m_BumpMap;
-            set => m_BumpMap = value;
+            set => SetValue(ref m_BumpMap, value);
         }
 
         public float BumpScale
         {
             get => m_BumpScale;
-            set => m_BumpScale = value;
+            set => SetValue(ref m_BumpScale, value);
         }
 
         public float Metallic
         {
             get => m_Metallic;
-            set => m_Metallic = value;
+            set => SetValue(ref m_Metallic, value);
         }
 
         public float Roughness
         {
             get => m_Roughness;
-            set => m_Roughness = value;
+            set => SetValue(ref m_Roughness, value);
         }
 
         public Color EmissionColor
         {
             get => m_EmissionColor;
-            set => m_EmissionColor = value;
+            set => SetValue(ref m_EmissionColor, value);
         }
 
         public bool AlphaClip
         {
             get => m_AlphaClip;
-            set => m_AlphaClip = value;
+            set => SetValue(ref m_AlphaClip, value);
         }
 
         public float Cutoff
         {
             get => m_Cutoff;
-            set => m_Cutoff = value;
+            set => SetValue(ref m_Cutoff, value);
         }
 
         public CullMode CullMode
         {
             get => m_CullMode;
-            set => m_CullMode = value;
+            set => SetValue(ref m_CullMode, value);
         }
 
         public bool DisableLighting
         {
             get => m_DisableLighting;
-            set => m_DisableLighting = value;
+            set => SetValue(ref m_DisableLighting, value);
         }
 
         public uint Revision => m_Revision;
@@ -157,6 +158,17 @@ namespace VividRP.Runtime.GPUDriven
 
         private void OnValidate()
         {
+            IncrementRevision();
+        }
+
+        private void SetValue<T>(ref T field, T value)
+        {
+            if (EqualityComparer<T>.Default.Equals(field, value))
+            {
+                return;
+            }
+
+            field = value;
             IncrementRevision();
         }
     }

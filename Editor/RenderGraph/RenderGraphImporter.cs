@@ -96,6 +96,7 @@ namespace VividRP.Editor.RenderGraph
             if (graph == null)
                 return result;
 
+            var flattenedGraph = RenderGraphSubSystemCompilationUtility.Flatten(graph);
             var textureNodeToIndex = new Dictionary<TextureResourceNodeData, int>();
             var historyNodeToIndex = new Dictionary<HistoryResourceNodeData, int>();
             var bufferNodeToIndex = new Dictionary<BufferResourceNodeData, int>();
@@ -107,7 +108,7 @@ namespace VividRP.Editor.RenderGraph
             var passNodes = new List<RenderPassNodeData>();
             var passNodeToIndex = new Dictionary<RenderPassNodeData, int>();
 
-            foreach (var passNode in graph.GetNodes().OfType<RenderPassNodeData>())
+            foreach (var passNode in flattenedGraph.PassNodes)
             {
                 var passType = passNode.GetPassType();
                 if (passType == null || !typeof(IRenderPass).IsAssignableFrom(passType))
@@ -117,44 +118,45 @@ namespace VividRP.Editor.RenderGraph
                 passNodes.Add(passNode);
             }
 
-            foreach (var node in graph.GetNodes())
+            foreach (var textureNode in flattenedGraph.TextureNodes)
             {
-                if (node is TextureResourceNodeData textureNode)
-                {
-                    var index = result.TextureDescriptors.Count;
-                    textureNodeToIndex.Add(textureNode, index);
-                    result.TextureDescriptors.Add(textureNode.GetDescriptor());
-                    AddPortBindingIndex(texturePortToIndex, textureNode.GetOutputPortByName(TextureResourceNodeData.OutputPortName), index);
-                }
-                else if (node is HistoryResourceNodeData historyNode)
-                {
-                    var index = result.HistoryTextureDescriptors.Count;
-                    historyNodeToIndex.Add(historyNode, index);
-                    result.HistoryTextureDescriptors.Add(historyNode.GetDescriptor());
-                }
-                else if (node is BufferResourceNodeData bufferNode)
-                {
-                    var index = result.BufferDescriptors.Count;
-                    bufferNodeToIndex.Add(bufferNode, index);
-                    result.BufferDescriptors.Add(bufferNode.GetDescriptor());
-                    AddPortBindingIndex(bufferPortToIndex, bufferNode.GetOutputPortByName(BufferResourceNodeData.OutputPortName), index);
-                }
-                else if (node is RenderListResourceNodeData renderListNode)
-                {
-                    var index = result.RenderListDescriptors.Count;
-                    renderListNodeToIndex.Add(renderListNode, index);
-                    result.RenderListDescriptors.Add(renderListNode.GetDescriptor());
-                }
-                else if (node is AccelerationStructureResourceNodeData accelerationStructureNode)
-                {
-                    var index = result.AccelerationStructureDescriptors.Count;
-                    accelerationStructureNodeToIndex.Add(accelerationStructureNode, index);
-                    result.AccelerationStructureDescriptors.Add(accelerationStructureNode.GetDescriptor());
-                    AddPortBindingIndex(
-                        accelerationStructurePortToIndex,
-                        accelerationStructureNode.GetOutputPortByName(AccelerationStructureResourceNodeData.OutputPortName),
-                        index);
-                }
+                var index = result.TextureDescriptors.Count;
+                textureNodeToIndex.Add(textureNode, index);
+                result.TextureDescriptors.Add(textureNode.GetDescriptor());
+                AddPortBindingIndex(texturePortToIndex, textureNode.GetOutputPortByName(TextureResourceNodeData.OutputPortName), index);
+            }
+
+            foreach (var historyNode in flattenedGraph.HistoryNodes)
+            {
+                var index = result.HistoryTextureDescriptors.Count;
+                historyNodeToIndex.Add(historyNode, index);
+                result.HistoryTextureDescriptors.Add(historyNode.GetDescriptor());
+            }
+
+            foreach (var bufferNode in flattenedGraph.BufferNodes)
+            {
+                var index = result.BufferDescriptors.Count;
+                bufferNodeToIndex.Add(bufferNode, index);
+                result.BufferDescriptors.Add(bufferNode.GetDescriptor());
+                AddPortBindingIndex(bufferPortToIndex, bufferNode.GetOutputPortByName(BufferResourceNodeData.OutputPortName), index);
+            }
+
+            foreach (var renderListNode in flattenedGraph.RenderListNodes)
+            {
+                var index = result.RenderListDescriptors.Count;
+                renderListNodeToIndex.Add(renderListNode, index);
+                result.RenderListDescriptors.Add(renderListNode.GetDescriptor());
+            }
+
+            foreach (var accelerationStructureNode in flattenedGraph.AccelerationStructureNodes)
+            {
+                var index = result.AccelerationStructureDescriptors.Count;
+                accelerationStructureNodeToIndex.Add(accelerationStructureNode, index);
+                result.AccelerationStructureDescriptors.Add(accelerationStructureNode.GetDescriptor());
+                AddPortBindingIndex(
+                    accelerationStructurePortToIndex,
+                    accelerationStructureNode.GetOutputPortByName(AccelerationStructureResourceNodeData.OutputPortName),
+                    index);
             }
 
             var compiledPassDefinitions = new List<RenderGraphPassDefinition>(passNodes.Count);
@@ -181,8 +183,8 @@ namespace VividRP.Editor.RenderGraph
                     var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access, attr.BindingMode);
                     var inputPort = string.IsNullOrEmpty(inputPortName) ? null : passNode.GetInputPortByName(inputPortName);
                     var outputPort = string.IsNullOrEmpty(outputPortName) ? null : passNode.GetOutputPortByName(outputPortName);
-                    var inputConnectedPort = inputPort?.FirstConnectedPort;
-                    var outputConnectedPort = outputPort?.FirstConnectedPort;
+                    var inputConnectedPort = RenderGraphSubSystemCompilationUtility.ResolveInputConnection(flattenedGraph, passNode, inputPort?.FirstConnectedPort);
+                    var outputConnectedPort = RenderGraphSubSystemCompilationUtility.ResolveOutputConnection(flattenedGraph, passNode, outputPort?.FirstConnectedPort);
                     var connectionKind = GetConnectionKind(inputConnectedPort, outputConnectedPort);
                     var inputResourceNode = GetBindableResourceNode(field.FieldType, inputConnectedPort);
                     var outputResourceNode = GetBindableResourceNode(field.FieldType, outputConnectedPort);
@@ -375,7 +377,7 @@ namespace VividRP.Editor.RenderGraph
                 compiledPassDefinitions.Add(passDefinition);
             }
 
-            PopulatePreviewTextureFields(graph, compiledPassDefinitions, passNodeToIndex);
+            PopulatePreviewTextureFields(flattenedGraph, compiledPassDefinitions, passNodeToIndex);
 
             var orderedIndices = RenderGraphPassCompilationUtility.GetOrderedPassIndices(compiledPassDefinitions);
             result.Passes.AddRange(RenderGraphPassCompilationUtility.OrderPassDefinitions(compiledPassDefinitions, orderedIndices));
@@ -416,17 +418,20 @@ namespace VividRP.Editor.RenderGraph
         }
 
         private static void PopulatePreviewTextureFields(
-            RenderGraphEditorGraph graph,
+            RenderGraphFlattenedGraph flattenedGraph,
             IReadOnlyList<RenderGraphPassDefinition> passDefinitions,
             IReadOnlyDictionary<RenderPassNodeData, int> passNodeToIndex)
         {
-            if (graph == null || passDefinitions == null || passDefinitions.Count == 0)
+            if (flattenedGraph == null || passDefinitions == null || passDefinitions.Count == 0)
                 return;
 
-            foreach (var previewNode in graph.GetNodes().OfType<PreviewNodeData>())
+            foreach (var previewNode in flattenedGraph.PreviewNodes)
             {
                 var inputPort = previewNode.GetInputPortByName(PreviewNodeData.TextureInputPortName);
-                var connectedPort = inputPort?.FirstConnectedPort;
+                var connectedPort = RenderGraphSubSystemCompilationUtility.ResolveInputConnection(
+                    flattenedGraph,
+                    previewNode,
+                    inputPort?.FirstConnectedPort);
                 if (connectedPort?.GetNode() is not RenderPassNodeData sourcePassNode)
                     continue;
 
@@ -437,8 +442,8 @@ namespace VividRP.Editor.RenderGraph
                     continue;
                 }
 
-                if (!previewNode.TryGetConnectedPassOutput(out _, out var sourcePreviewKey)
-                    || string.IsNullOrEmpty(sourcePreviewKey))
+                var sourcePreviewKey = GetConnectedPreviewTextureKey(sourcePassNode, sourcePassNode.GetPassType(), connectedPort);
+                if (string.IsNullOrEmpty(sourcePreviewKey))
                 {
                     continue;
                 }
@@ -700,6 +705,39 @@ namespace VividRP.Editor.RenderGraph
                 var outputPort = passNode.GetOutputPortByName(outputPortName);
                 if (ReferenceEquals(outputPort, connectedPort))
                     return field.Name;
+            }
+
+            return null;
+        }
+
+        private static string GetConnectedPreviewTextureKey(
+            RenderPassNodeData passNode,
+            Type passType,
+            IPort connectedPort)
+        {
+            if (passNode == null || passType == null || connectedPort == null)
+                return null;
+
+            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
+            {
+                if (field.FieldType != typeof(RenderGraphTexture))
+                    continue;
+
+                var attr = field.GetCustomAttribute<RenderGraphResource>();
+
+                var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access, attr.BindingMode);
+                if (!string.IsNullOrEmpty(outputPortName)
+                    && ReferenceEquals(passNode.GetOutputPortByName(outputPortName), connectedPort))
+                {
+                    return RenderGraphPassReflectionUtility.GetPreviewTextureKey(field, attr);
+                }
+
+                var debugPortName = RenderPassPortUtility.GetDebugOutputPortName(field.Name);
+                if (!string.IsNullOrEmpty(debugPortName)
+                    && ReferenceEquals(passNode.GetOutputPortByName(debugPortName), connectedPort))
+                {
+                    return RenderGraphPassReflectionUtility.GetPreviewTextureKey(field, attr);
+                }
             }
 
             return null;

@@ -132,6 +132,182 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Build_ReusesMaterialData_WhenProxyRevisionIsUnchanged()
+        {
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+            GPUDrivenMaterialProxy materialProxy = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("MaterialReuseMesh");
+                material = CreateTestMaterial();
+                meshletCollection = CreateMeshletCollectionAsset(
+                    "MaterialReuseCollection",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[] { CreateVertex(0.0f, 0.0f, 0.0f), CreateVertex(1.0f, 0.0f, 0.0f), CreateVertex(0.0f, 1.0f, 0.0f) },
+                    new byte[] { 0, 1, 2 }
+                );
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                materialProxy.SourceMaterial = material;
+                materialProxy.BaseColor = new Color(0.2f, 0.4f, 0.6f, 1.0f);
+
+                gameObject = CreateMeshletRendererObject("Renderer_MaterialReuse", mesh, new[] { material }, out MeshletRenderer meshletRenderer);
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var bindlessTextureContainer = new BindlessTextureContainer(new FakeBindlessTextureDescriptorAllocator(16));
+
+                bool firstStaticDataChanged = builder.Build(
+                    sceneData,
+                    VividMeshletRendererDatabase.instance,
+                    bindlessTextureContainer,
+                    out bool firstMaterialDataChanged
+                );
+                Assert.That(firstStaticDataChanged, Is.True);
+                Assert.That(firstMaterialDataChanged, Is.True);
+
+                bool secondStaticDataChanged = builder.Build(
+                    sceneData,
+                    VividMeshletRendererDatabase.instance,
+                    bindlessTextureContainer,
+                    out bool secondMaterialDataChanged
+                );
+                Assert.That(secondStaticDataChanged, Is.False);
+                Assert.That(secondMaterialDataChanged, Is.False);
+                Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, null, material, mesh, meshletCollection, materialProxy);
+            }
+        }
+
+        [Test]
+        public void Build_RebuildsMaterialData_WhenProxyRevisionChanges()
+        {
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+            GPUDrivenMaterialProxy materialProxy = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("MaterialChangeMesh");
+                material = CreateTestMaterial();
+                meshletCollection = CreateMeshletCollectionAsset(
+                    "MaterialChangeCollection",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[] { CreateVertex(0.0f, 0.0f, 0.0f), CreateVertex(1.0f, 0.0f, 0.0f), CreateVertex(0.0f, 1.0f, 0.0f) },
+                    new byte[] { 0, 1, 2 }
+                );
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                materialProxy.SourceMaterial = material;
+                materialProxy.BaseColor = new Color(0.1f, 0.2f, 0.3f, 1.0f);
+
+                gameObject = CreateMeshletRendererObject("Renderer_MaterialChange", mesh, new[] { material }, out MeshletRenderer meshletRenderer);
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var bindlessTextureContainer = new BindlessTextureContainer(new FakeBindlessTextureDescriptorAllocator(16));
+
+                builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer, out _);
+                materialProxy.BaseColor = new Color(0.8f, 0.7f, 0.6f, 1.0f);
+
+                bool staticDataChanged = builder.Build(
+                    sceneData,
+                    VividMeshletRendererDatabase.instance,
+                    bindlessTextureContainer,
+                    out bool materialDataChanged
+                );
+                Assert.That(staticDataChanged, Is.False);
+                Assert.That(materialDataChanged, Is.True);
+                Assert.That(sceneData.Materials[0].AlbedoColor.x, Is.EqualTo(0.8f).Within(0.0001f));
+                Assert.That(sceneData.Materials[0].AlbedoColor.y, Is.EqualTo(0.7f).Within(0.0001f));
+                Assert.That(sceneData.Materials[0].AlbedoColor.z, Is.EqualTo(0.6f).Within(0.0001f));
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, null, material, mesh, meshletCollection, materialProxy);
+            }
+        }
+
+        [Test]
+        public void Build_RebuildsStaticMeshletData_WhenTrackedMeshletAssetChanges()
+        {
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("TrackedAssetMesh");
+                material = CreateTestMaterial();
+                meshletCollection = CreateMeshletCollectionAsset(
+                    "TrackedAssetCollection",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[] { CreateVertex(0.0f, 0.0f, 0.0f), CreateVertex(1.0f, 0.0f, 0.0f), CreateVertex(0.0f, 1.0f, 0.0f) },
+                    new byte[] { 0, 1, 2 }
+                );
+
+                gameObject = CreateMeshletRendererObject("Renderer_TrackedAsset", mesh, new[] { material }, out MeshletRenderer meshletRenderer);
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var bindlessTextureContainer = new BindlessTextureContainer(new FakeBindlessTextureDescriptorAllocator(16));
+
+                bool firstStaticDataChanged = builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer);
+                Assert.That(firstStaticDataChanged, Is.True);
+                Assert.That(sceneData.VertexCount, Is.EqualTo(3));
+                Assert.That(sceneData.IndexCount, Is.EqualTo(3));
+
+                meshletCollection.Meshlets = new[] { CreateMeshlet(0, 0, 6, 2) };
+                meshletCollection.MeshLODNodes = new[] { CreateMeshLODNode(0, 1, 0) };
+                meshletCollection.VertexBuffer = new[]
+                {
+                    CreateVertex(0.0f, 0.0f, 0.0f),
+                    CreateVertex(1.0f, 0.0f, 0.0f),
+                    CreateVertex(0.0f, 1.0f, 0.0f),
+                    CreateVertex(1.0f, 1.0f, 0.0f),
+                    CreateVertex(2.0f, 0.0f, 0.0f),
+                    CreateVertex(2.0f, 1.0f, 0.0f),
+                };
+                meshletCollection.IndexBuffer = new byte[] { 0, 1, 2, 3, 4, 5 };
+                meshletCollection.MarkChanged();
+
+                bool secondStaticDataChanged = builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer);
+                Assert.That(secondStaticDataChanged, Is.True);
+                Assert.That(sceneData.VertexCount, Is.EqualTo(6));
+                Assert.That(sceneData.IndexCount, Is.EqualTo(6));
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, null, material, mesh, meshletCollection);
+            }
+        }
+
+        [Test]
         public void Build_CreatesOneInstancePerSubmeshAndPatchesOffsets_WhenMeshletAssetsAreUnique()
         {
             GameObject gameObject = null;
@@ -658,5 +834,6 @@ namespace VividRP.Editor.Tests
                 return true;
             }
         }
+
     }
 }

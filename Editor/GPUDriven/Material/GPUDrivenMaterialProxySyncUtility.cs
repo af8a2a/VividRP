@@ -82,6 +82,7 @@ namespace VividRP.Editor.GPUDriven
             int baseTexturePropertyId = sourceMaterial.HasProperty(s_BaseMapId) ? s_BaseMapId : s_MainTexId;
             Texture2D baseMap = GetTexture2D(sourceMaterial, baseTexturePropertyId, "_BaseMap", warnings);
             Texture2D bumpMap = GetTexture2D(sourceMaterial, s_BumpMapId, "_BumpMap", warnings);
+            uint initialRevision = materialProxy.Revision;
 
             Undo.RecordObject(materialProxy, "Sync GPUDriven Material Proxy");
 
@@ -99,12 +100,16 @@ namespace VividRP.Editor.GPUDriven
             materialProxy.Cutoff = GetFloat(sourceMaterial, s_CutoffId, 0.5f);
             materialProxy.CullMode = (CullMode) Mathf.RoundToInt(GetFloat(sourceMaterial, s_CullId, (float) CullMode.Back));
             materialProxy.DisableLighting = false;
-            materialProxy.IncrementRevision();
 
             EditorUtility.SetDirty(materialProxy);
             AssetDatabase.SaveAssetIfDirty(materialProxy);
 
-            return new GPUDrivenMaterialProxySyncResult(true, true, string.Empty, warnings.ToArray());
+            return new GPUDrivenMaterialProxySyncResult(
+                true,
+                materialProxy.Revision != initialRevision,
+                string.Empty,
+                warnings.ToArray()
+            );
         }
 
         public static string[] CollectUnsupportedWarnings(Material sourceMaterial)

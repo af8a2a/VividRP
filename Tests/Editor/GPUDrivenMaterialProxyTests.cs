@@ -35,6 +35,24 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Setter_IncrementsRevision_WhenValueChanges()
+        {
+            var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+
+            try
+            {
+                uint initialRevision = materialProxy.Revision;
+                materialProxy.BaseColor = Color.green;
+
+                Assert.That(materialProxy.Revision, Is.GreaterThan(initialRevision));
+            }
+            finally
+            {
+                Object.DestroyImmediate(materialProxy);
+            }
+        }
+
+        [Test]
         public void SyncFromSourceMaterial_MapsStandardLitCoreProperties_WhenMaterialIsSupported()
         {
             Shader shader = Shader.Find("VividRP/Material/StandardLit");

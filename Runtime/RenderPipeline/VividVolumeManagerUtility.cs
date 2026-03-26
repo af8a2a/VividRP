@@ -71,5 +71,10 @@ namespace VividRP.Runtime
         {
             return VolumeManager.instance.stack?.GetComponent<RayTracingSettingsVolume>();
         }
+
+        internal static GPUDrivenSettingsVolume GetGPUDrivenSettingsVolume()
+        {
+            return VolumeManager.instance.stack?.GetComponent<GPUDrivenSettingsVolume>();
+        }
     }
 }

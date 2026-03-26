@@ -90,6 +90,7 @@ namespace VividRP.Runtime.GPUDriven
                 out bool materialDataChanged
             );
             m_BufferSet.Upload(SceneData, materialDataChanged, staticDataChanged);
+            ReportStats(null);
         }
 
         public void Cull(
@@ -119,6 +120,7 @@ namespace VividRP.Runtime.GPUDriven
                 MeshLODErrorThreshold
             );
             cmd.EndSample("GPUDrivenCulling");
+            ReportStats(camera);
         }
 
         public void BindGlobals(CommandBuffer cmd)
@@ -132,6 +134,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             s_Instance?.Dispose();
             s_Instance = null;
+            VividGPUDrivenStatsRegistry.Clear();
         }
 
         public void Dispose()
@@ -146,6 +149,7 @@ namespace VividRP.Runtime.GPUDriven
             m_CullingDispatcher.Dispose();
             BindlessTextureContainer.Dispose();
             m_IsDisposed = true;
+            VividGPUDrivenStatsRegistry.Clear();
         }
 
         private void ThrowIfDisposed()
@@ -154,6 +158,39 @@ namespace VividRP.Runtime.GPUDriven
             {
                 throw new ObjectDisposedException(nameof(VividGPUDrivenSystem));
             }
+        }
+
+        private void ReportStats(Camera camera)
+        {
+            string statusMessage = BindlessTextureContainer.IsAvailable
+                ? string.Empty
+                : BindlessTextureContainer.UnavailableReason;
+
+            VividGPUDrivenStatsRegistry.Report(
+                new VividGPUDrivenStats(
+                    true,
+                    statusMessage,
+                    camera != null,
+                    camera != null ? camera.name : null,
+                    camera != null ? camera.cameraType : default,
+                    Time.frameCount,
+                    Time.realtimeSinceStartupAsDouble,
+                    BindlessTextureContainer.IsAvailable,
+                    VividMeshletRendererDatabase.instance.rendererCount,
+                    SceneData.InstanceCount,
+                    SceneData.MaterialCount,
+                    SceneData.MeshLODNodeCount,
+                    SceneData.MeshletCount,
+                    SceneData.VertexCount,
+                    SceneData.IndexCount,
+                    m_CullingDispatcher.BufferSet.MaxMeshletListBuildJobCount,
+                    m_CullingDispatcher.BufferSet.MaxVisibleMeshletRenderRequestCount,
+                    BindlessTextureContainer.DescriptorHeapCount,
+                    BindlessTextureContainer.DescriptorCapacity,
+                    BindlessTextureContainer.AllocatedDescriptorCount,
+                    BindlessTextureContainer.RegisteredTextureCount,
+                    ForcedMeshLODNodeDepth,
+                    MeshLODErrorThreshold));
         }
     }
 }

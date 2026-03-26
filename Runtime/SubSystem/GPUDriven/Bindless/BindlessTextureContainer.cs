@@ -34,6 +34,10 @@ namespace VividRP.Runtime.GPUDriven.Bindless
 
         public uint DescriptorCapacity => m_Allocator.DescriptorCapacity;
 
+        public uint AllocatedDescriptorCount => m_AllocatedDescriptorCount;
+
+        public int RegisteredTextureCount => m_TextureInfos.Count;
+
         public string UnavailableReason => m_Allocator.UnavailableReason;
 
         public void Dispose()

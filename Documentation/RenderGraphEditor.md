@@ -41,6 +41,12 @@
 3. 将资源节点输出连接到 Pass 节点对应的资源端口
 4. 在 `VividRenderPipelineAsset` 的 `RenderGraphAsset` 字段中引用该 `.vrdg` 资产（其主对象为 `RenderGraphData`）
 
+## SubSystem
+
+- 主图现在支持基于 Graph Toolkit `Local Subgraph` 的 `SubSystem`
+- `SubSystem` 适合把一组 `RenderPass` 与私有资源折叠成高层节点
+- 详细使用方式见 `Documentation/RenderGraphSubSystem.md`
+
 ## 运行时执行
 
 `PassRecorder` 会在第一次渲染或检测到 `ImportVersion` 变化时：

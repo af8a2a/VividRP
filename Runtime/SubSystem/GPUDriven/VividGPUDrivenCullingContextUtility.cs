@@ -6,8 +6,8 @@ namespace VividRP.Runtime.GPUDriven
 {
     internal static class VividGPUDrivenCullingContextUtility
     {
-        public const int DefaultForcedMeshLODNodeDepth = -1;
-        public const float DefaultMeshLODErrorThreshold = 50.0f;
+        public const int DefaultForcedMeshLODNodeDepth = VividGPUDrivenDefaults.ForcedMeshLODNodeDepth;
+        public const float DefaultMeshLODErrorThreshold = VividGPUDrivenDefaults.MeshLODErrorThreshold;
 
         public static void Build(
             Camera camera,

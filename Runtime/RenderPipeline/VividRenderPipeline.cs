@@ -76,6 +76,9 @@ namespace VividRP.Runtime
                 {
                     VividRPCoreResources resources = PipelineResourceManager.Get<VividRPCoreResources>();
                     VividGPUDrivenSystem gpuDrivenSystem = VividGPUDrivenSystem.instance;
+                    ApplyGPUDrivenSettings(
+                        gpuDrivenSystem,
+                        GPUDrivenSettingsVolume.ResolveSettings(VividVolumeManagerUtility.GetGPUDrivenSettingsVolume()));
                     gpuDrivenSystem.Cull(
                         camera,
                         cmdBuffer,
@@ -185,6 +188,19 @@ namespace VividRP.Runtime
         internal static void ApplySRPBatcherSetting(VividRenderPipelineAsset asset)
         {
             GraphicsSettings.useScriptableRenderPipelineBatching = asset != null && asset.EnableSRPBatcher;
+        }
+
+        private static void ApplyGPUDrivenSettings(
+            VividGPUDrivenSystem gpuDrivenSystem,
+            in GPUDrivenSettingsVolume.GPUDrivenSettingsData settings)
+        {
+            if (gpuDrivenSystem == null)
+            {
+                return;
+            }
+
+            gpuDrivenSystem.ForcedMeshLODNodeDepth = settings.forcedMeshLODNodeDepth;
+            gpuDrivenSystem.MeshLODErrorThreshold = settings.meshLODErrorThreshold;
         }
 
         protected override void Dispose(bool disposing)

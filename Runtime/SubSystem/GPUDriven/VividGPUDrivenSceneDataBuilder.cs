@@ -32,6 +32,7 @@ namespace VividRP.Runtime.GPUDriven
         private readonly HashSet<EntityId> m_PreviousReferencedMaterialProxyIds = new();
         private readonly HashSet<EntityId> m_CurrentReferencedMaterialProxyIds = new();
         private readonly HashSet<(EntityId entityId, int subMeshIndex)> m_MissingProxyWarningKeys = new();
+        private readonly List<VividInstanceData> m_PreviousInstanceData = new();
         private bool m_HasBuiltStaticData;
         private bool m_UsesFallbackMaterials;
 
@@ -49,6 +50,17 @@ namespace VividRP.Runtime.GPUDriven
             VividMeshletRendererDatabase database,
             BindlessTextureContainer bindlessTextureContainer,
             out bool materialDataChanged
+        )
+        {
+            return Build(sceneData, database, bindlessTextureContainer, out materialDataChanged, out _);
+        }
+
+        public bool Build(
+            VividGPUDrivenSceneData sceneData,
+            VividMeshletRendererDatabase database,
+            BindlessTextureContainer bindlessTextureContainer,
+            out bool materialDataChanged,
+            out bool instanceDataChanged
         )
         {
             if (sceneData == null)
@@ -123,10 +135,79 @@ namespace VividRP.Runtime.GPUDriven
                 );
             }
 
+            instanceDataChanged = !AreInstanceDataListsEqual(sceneData.MutableInstances, m_PreviousInstanceData);
+            UpdatePreviousInstanceData(sceneData.MutableInstances);
             SwapReferencedMeshletAssetIds();
             SwapReferencedMaterialProxyIds();
             m_HasBuiltStaticData = true;
             return staticDataChanged;
+        }
+
+        private static bool AreInstanceDataListsEqual(
+            List<VividInstanceData> currentInstanceData,
+            List<VividInstanceData> previousInstanceData
+        )
+        {
+            if (ReferenceEquals(currentInstanceData, previousInstanceData))
+            {
+                return true;
+            }
+
+            if (currentInstanceData == null || previousInstanceData == null || currentInstanceData.Count != previousInstanceData.Count)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < currentInstanceData.Count; index++)
+            {
+                if (!InstanceDataEquals(currentInstanceData[index], previousInstanceData[index]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private void UpdatePreviousInstanceData(List<VividInstanceData> currentInstanceData)
+        {
+            m_PreviousInstanceData.Clear();
+            if (currentInstanceData is { Count: > 0 })
+            {
+                m_PreviousInstanceData.AddRange(currentInstanceData);
+            }
+        }
+
+        private static bool InstanceDataEquals(in VividInstanceData lhs, in VividInstanceData rhs)
+        {
+            return Float4x4Equals(lhs.ObjectToWorldMatrix, rhs.ObjectToWorldMatrix)
+                   && Float4x4Equals(lhs.WorldToObjectMatrix, rhs.WorldToObjectMatrix)
+                   && Float4Equals(lhs.AABBMin, rhs.AABBMin)
+                   && Float4Equals(lhs.AABBMax, rhs.AABBMax)
+                   && lhs.TopMeshLODStartIndex == rhs.TopMeshLODStartIndex
+                   && lhs.TotalMeshLODCount == rhs.TotalMeshLODCount
+                   && lhs.MaterialIndex == rhs.MaterialIndex
+                   && lhs.MeshLODLevelCount == rhs.MeshLODLevelCount
+                   && lhs.LODErrorScale == rhs.LODErrorScale
+                   && lhs.PassMask == rhs.PassMask
+                   && lhs.Flags == rhs.Flags
+                   && lhs.Padding0 == rhs.Padding0;
+        }
+
+        private static bool Float4x4Equals(in float4x4 lhs, in float4x4 rhs)
+        {
+            return Float4Equals(lhs.c0, rhs.c0)
+                   && Float4Equals(lhs.c1, rhs.c1)
+                   && Float4Equals(lhs.c2, rhs.c2)
+                   && Float4Equals(lhs.c3, rhs.c3);
+        }
+
+        private static bool Float4Equals(in float4 lhs, in float4 rhs)
+        {
+            return lhs.x == rhs.x
+                   && lhs.y == rhs.y
+                   && lhs.z == rhs.z
+                   && lhs.w == rhs.w;
         }
 
         private void CollectReferencedMeshletAssetIds(VividMeshletRendererDatabase database)

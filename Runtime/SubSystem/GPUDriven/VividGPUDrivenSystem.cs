@@ -90,9 +90,15 @@ namespace VividRP.Runtime.GPUDriven
                 SceneData,
                 VividMeshletRendererDatabase.instance,
                 BindlessTextureContainer,
-                out bool materialDataChanged
+                out bool materialDataChanged,
+                out bool instanceDataChanged
             );
-            m_BufferSet.Upload(SceneData, materialDataChanged, staticDataChanged);
+            m_BufferSet.Upload(
+                SceneData,
+                uploadInstanceData: instanceDataChanged,
+                uploadMaterialData: materialDataChanged,
+                uploadStaticData: staticDataChanged
+            );
             ReportStats(null);
         }
 

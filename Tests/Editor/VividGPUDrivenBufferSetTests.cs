@@ -182,5 +182,44 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferSet.InstanceCount, Is.EqualTo(2));
             Assert.That(bufferSet.MaterialCount, Is.EqualTo(1));
         }
+
+        [Test]
+        public void Upload_KeepsInstanceBufferContents_WhenInstanceUploadIsSkipped()
+        {
+            var sceneData = new VividGPUDrivenSceneData();
+            sceneData.MutableInstances.Add(new VividInstanceData
+            {
+                ObjectToWorldMatrix = float4x4.identity,
+                WorldToObjectMatrix = float4x4.identity,
+            });
+
+            using var bufferSet = new VividGPUDrivenBufferSet();
+            bufferSet.Upload(sceneData);
+
+            sceneData.MutableInstances[0] = new VividInstanceData
+            {
+                ObjectToWorldMatrix = new float4x4(
+                    new float4(2.0f, 0.0f, 0.0f, 0.0f),
+                    new float4(0.0f, 2.0f, 0.0f, 0.0f),
+                    new float4(0.0f, 0.0f, 2.0f, 0.0f),
+                    new float4(5.0f, 6.0f, 7.0f, 1.0f)),
+                WorldToObjectMatrix = float4x4.identity,
+            };
+
+            bufferSet.Upload(
+                sceneData,
+                uploadInstanceData: false,
+                uploadMaterialData: false,
+                uploadStaticData: false);
+
+            var instances = new VividInstanceData[1];
+            bufferSet.InstanceDataBuffer.GetData(instances);
+
+            Assert.That(instances[0].ObjectToWorldMatrix.c0.x, Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(instances[0].ObjectToWorldMatrix.c3.x, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(instances[0].ObjectToWorldMatrix.c3.y, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(instances[0].ObjectToWorldMatrix.c3.z, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(bufferSet.InstanceCount, Is.EqualTo(1));
+        }
     }
 }

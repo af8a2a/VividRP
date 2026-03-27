@@ -45,6 +45,7 @@ namespace VividRP.Runtime.GPUDriven
 
         public void Upload(
             VividGPUDrivenSceneData sceneData,
+            bool uploadInstanceData = true,
             bool uploadMaterialData = true,
             bool uploadStaticData = true
         )
@@ -63,15 +64,19 @@ namespace VividRP.Runtime.GPUDriven
             SharedVertexCount = sceneData.VertexCount;
             SharedIndexCount = sceneData.IndexCount;
 
+            bool shouldUploadInstanceData = uploadInstanceData || RequiresInstanceBufferUpload(sceneData);
             bool shouldUploadMaterialData = uploadMaterialData || RequiresMaterialBufferUpload(sceneData);
             bool shouldUploadStaticData = uploadStaticData || RequiresStaticBufferUpload(sceneData);
 
-            UploadStructuredBuffer(
-                ref m_InstanceDataBuffer,
-                sceneData.MutableInstances,
-                UnsafeUtility.SizeOf<VividInstanceData>(),
-                "VividGPUDriven_InstanceData"
-            );
+            if (shouldUploadInstanceData)
+            {
+                UploadStructuredBuffer(
+                    ref m_InstanceDataBuffer,
+                    sceneData.MutableInstances,
+                    UnsafeUtility.SizeOf<VividInstanceData>(),
+                    "VividGPUDriven_InstanceData"
+                );
+            }
             if (shouldUploadMaterialData)
             {
                 UploadStructuredBuffer(
@@ -243,6 +248,11 @@ namespace VividRP.Runtime.GPUDriven
                    !IsStructuredBufferCompatible(m_MeshletsBuffer, sceneData.MeshletCount, UnsafeUtility.SizeOf<VividMeshlet>()) ||
                    !IsStructuredBufferCompatible(m_SharedVertexBuffer, sceneData.VertexCount, UnsafeUtility.SizeOf<VividMeshletVertex>()) ||
                    !IsRawBufferCompatible(m_SharedIndexBuffer, sceneData.IndexCount);
+        }
+
+        private bool RequiresInstanceBufferUpload(VividGPUDrivenSceneData sceneData)
+        {
+            return !IsStructuredBufferCompatible(m_InstanceDataBuffer, sceneData.InstanceCount, UnsafeUtility.SizeOf<VividInstanceData>());
         }
 
         private bool RequiresMaterialBufferUpload(VividGPUDrivenSceneData sceneData)

@@ -11,7 +11,6 @@ license agreement from NVIDIA CORPORATION is strictly prohibited.
 groupshared float2 s_Penumbra_ViewZ[ BUFFER_Y ][ BUFFER_X ];
 groupshared SIGMA_TYPE s_Shadow_Translucency[ BUFFER_Y ][ BUFFER_X ];
 
-RWTexture2D<float> _DebugTexture;
 void Preload( uint2 sharedPos, int2 globalPos )
 {
     globalPos = clamp( globalPos, 0, gRectSizeMinusOne );
@@ -147,7 +146,6 @@ NRD_EXPORT void NRD_CS_MAIN( NRD_CS_MAIN_ARGS )
     float penumbraInPixels = penumbra / pixelSize;
     float f = Math::SmoothStep( 0.0, BORDER, penumbraInPixels );
     result = lerp( centerTap, result, f ); // TODO: not the best solution
-    // _DebugTexture[pixelPos]=penumbraInPixels;
 
 #if( SIGMA_USE_SPARSE_BLUR == 1 )
     // Avoid unnecessary weight increase for the unfiltered center sample if the blur radius is small

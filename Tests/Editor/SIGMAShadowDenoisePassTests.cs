@@ -22,9 +22,6 @@ namespace VividRP.Editor.Tests
         {
             var settings = SIGMAShadowDenoisePass.ResolveSettings(null);
 
-            Assert.That(
-                settings.UseNativePluginConstantBuffer,
-                Is.EqualTo(RayTracingSettingsVolume.DefaultSigmaUseNativePluginConstantBuffer));
             Assert.That(settings.DenoisingRange, Is.EqualTo(RayTracingSettingsVolume.DefaultSigmaDenoisingRange));
             Assert.That(
                 settings.PlaneDistanceSensitivity,
@@ -42,8 +39,6 @@ namespace VividRP.Editor.Tests
             try
             {
                 volume.active = true;
-                volume.sigmaUseNativePluginConstantBuffer.overrideState = true;
-                volume.sigmaUseNativePluginConstantBuffer.value = true;
                 volume.sigmaDenoisingRange.overrideState = true;
                 volume.sigmaDenoisingRange.value = 2048.0f;
                 volume.sigmaPlaneDistanceSensitivity.overrideState = true;
@@ -53,7 +48,6 @@ namespace VividRP.Editor.Tests
 
                 var settings = SIGMAShadowDenoisePass.ResolveSettings(volume);
 
-                Assert.That(settings.UseNativePluginConstantBuffer, Is.True);
                 Assert.That(settings.DenoisingRange, Is.EqualTo(2048.0f));
                 Assert.That(settings.PlaneDistanceSensitivity, Is.EqualTo(0.15f));
                 Assert.That(settings.MaxStabilizedFrameNum, Is.EqualTo(3u));
@@ -71,7 +65,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("var sigmaSettings = ResolveSettings(VividVolumeManagerUtility.GetRayTracingSettingsVolume());"));
             Assert.That(source, Does.Contain("m_MaxStabilizedFrameNum = sigmaSettings.MaxStabilizedFrameNum;"));
-            Assert.That(source, Does.Contain("if (sigmaSettings.UseNativePluginConstantBuffer"));
+            Assert.That(source, Does.Contain("m_Constants = SigmaSharedConstants.Compute("));
             Assert.That(source, Does.Contain("float stabilizationStrength = m_HasValidHistory ? sigmaSettings.StabilizationStrength : 0.0f;"));
         }
 
@@ -119,58 +113,6 @@ namespace VividRP.Editor.Tests
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "Utility", "PipelineResource", "VividResources.cs"));
 
             Assert.That(source, Does.Not.Contain("DirectionalRayTracedShadowDenoiseCompute"));
-        }
-
-        [Test]
-        public void SIGMAShadowDenoisePass_SwitchesSigmaConstBufferSource_FromVolumeSetting()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
-
-            Assert.That(source, Does.Contain("if (sigmaSettings.UseNativePluginConstantBuffer"));
-            Assert.That(source, Does.Contain("TryGetNativePluginConstants(nativePluginInput, out SigmaSharedConstants nativeConstants)"));
-            Assert.That(source, Does.Contain("m_Constants = nativeConstants;"));
-            Assert.That(source, Does.Contain("Matrix4x4 previousWorldToView = m_HasValidHistory ? m_PrevWorldToView : worldToView;"));
-            Assert.That(source, Does.Contain("Matrix4x4 previousViewToClip = m_HasValidHistory ? m_PrevViewToClip : viewToClip;"));
-        }
-
-        [Test]
-        public void SigmaNativePluginInterop_UsesLegacyNrdEntryPoints()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SigmaNativePluginInterop.cs"));
-
-            Assert.That(source, Does.Contain("\"NRDUnityPlugin\""));
-            Assert.That(source, Does.Contain("NRD_SetCommonSettings"));
-            Assert.That(source, Does.Contain("NRD_SetupSigmaConstBuffer"));
-            Assert.That(source, Does.Contain("NRD_GetContext"));
-            Assert.That(source, Does.Contain("NRD_ReleaseContext"));
-        }
-
-        [Test]
-        public void RayTracingSettingsVolumeEditor_ExposesSigmaConstBufferSourceToggle()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Editor", "VolumeEditor", "RayTracingSettingsVolumeEditor.cs"));
-
-            Assert.That(source, Does.Contain("m_SigmaUseNativePluginConstantBuffer = Unpack(fetcher.Find(x => x.sigmaUseNativePluginConstantBuffer));"));
-            Assert.That(source, Does.Contain("PropertyField(m_SigmaUseNativePluginConstantBuffer);"));
-        }
-
-        [Test]
-        public void RayTracingSettingsVolume_IsActive_WhenSigmaConstBufferSourceToggleOverrides()
-        {
-            var volume = ScriptableObject.CreateInstance<RayTracingSettingsVolume>();
-
-            try
-            {
-                volume.active = true;
-                volume.sigmaUseNativePluginConstantBuffer.overrideState = true;
-                volume.sigmaUseNativePluginConstantBuffer.value = true;
-
-                Assert.That(volume.IsActive(), Is.True);
-            }
-            finally
-            {
-                Object.DestroyImmediate(volume);
-            }
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

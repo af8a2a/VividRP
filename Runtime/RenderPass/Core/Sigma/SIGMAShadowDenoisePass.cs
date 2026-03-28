@@ -120,10 +120,6 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
         private RenderGraphTexture m_TransientHistoryLength;
         
         
-        // Intermediate shadow after post-blur  (R8_UNorm, full resolution)
-        [RenderGraphResource(Name = "ShadowDebug",
-            Access = AccessFlags.ReadWrite)]
-        private RenderGraphTexture m_Debug;
 
 
         // --- compute shaders ---
@@ -145,28 +141,18 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
         private Matrix4x4  m_PrevViewToClip  = Matrix4x4.identity;
         private bool m_HasValidHistory;
         private uint m_MaxStabilizedFrameNum;
-        private SigmaNativePluginSession m_NativePluginSession;
-
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-        private string m_LastNativeComparisonSignature;
-        private bool m_HasLoggedNativePluginFallback;
-#endif
 
         internal readonly struct ResolvedSigmaSettings
         {
             public ResolvedSigmaSettings(
-                bool useNativePluginConstantBuffer,
                 float denoisingRange,
                 float planeDistanceSensitivity,
                 uint maxStabilizedFrameNum)
             {
-                UseNativePluginConstantBuffer = useNativePluginConstantBuffer;
                 DenoisingRange = denoisingRange;
                 PlaneDistanceSensitivity = planeDistanceSensitivity;
                 MaxStabilizedFrameNum = maxStabilizedFrameNum;
             }
-
-            public bool UseNativePluginConstantBuffer { get; }
 
             public float DenoisingRange { get; }
 
@@ -203,8 +189,6 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             m_TransientHistory        = CreatePassOwnedTexture("SIGMA_TransientHistory",       1, 1, GraphicsFormat.R8_UNorm, clearBuffer: true);
             m_TransientHistoryLength  = CreatePassOwnedTexture("SIGMA_TransientHistoryLength", 1, 1, GraphicsFormat.R32_UInt, clearBuffer: true);
             
-            m_Debug  = CreatePassOwnedTexture("ShadowDebug", 1, 1, GraphicsFormat.R16_SFloat);
-
         }
 
         public override void Create()
@@ -218,7 +202,6 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             m_ShadowBlur                = resources.SIGMAShadowPreBlurCompute;
             m_ShadowPostBlur            = resources.SIGMAShadowPostBlurCompute;
             m_ShadowTemporalStabilization = resources.SIGMATemporalStabilizationCompute;
-            m_NativePluginSession ??= SigmaNativePluginSession.TryCreate();
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -242,7 +225,6 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             ResizePassOwned(m_DenoisedShadowTexture,  m_Width, m_Height);
             ResizePassOwned(m_HistoryShadowCurrent,   m_Width, m_Height);
             ResizePassOwned(m_HistoryLengthCurrent,   m_Width, m_Height);
-            ResizePassOwned(m_Debug,   m_Width, m_Height);      
 
             // Light direction
             var lightData = frameData.GetOrCreate<VividLightData>();
@@ -289,7 +271,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             uint frameIndex = (uint)Time.frameCount;
             float stabilizationStrength = m_HasValidHistory ? sigmaSettings.StabilizationStrength : 0.0f;
 
-            SigmaSharedConstants manualConstants = SigmaSharedConstants.Compute(
+            m_Constants = SigmaSharedConstants.Compute(
                 worldToView, viewToClip,
                 previousWorldToView, previousViewToClip,
                 cameraPos, previousCameraPosition,
@@ -302,35 +284,6 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 sigmaSettings.PlaneDistanceSensitivity,
                 stabilizationStrength,
                 camera != null && camera.orthographic);
-
-            var nativePluginInput = new SigmaNativePluginInput(
-                worldToView,
-                viewToClip,
-                previousWorldToView,
-                previousViewToClip,
-                lightDir,
-                m_Width,
-                m_Height,
-                previousWidth,
-                previousHeight,
-                frameIndex,
-                sigmaSettings.DenoisingRange,
-                sigmaSettings.PlaneDistanceSensitivity,
-                m_MaxStabilizedFrameNum,
-                camera != null && camera.orthographic,
-                m_HasValidHistory);
-
-            m_Constants = manualConstants;
-
-            if (sigmaSettings.UseNativePluginConstantBuffer
-                && TryGetNativePluginConstants(nativePluginInput, out SigmaSharedConstants nativeConstants))
-            {
-                m_Constants = nativeConstants;
-
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                LogNativePluginComparisonIfNeeded(manualConstants, nativeConstants);
-#endif
-            }
 
             // Store for next frame
             m_PrevWorldToView    = worldToView;
@@ -389,7 +342,6 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gIn_Penumbra,          m_RawShadowTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gOut_Penumbra,         m_TransientPenumbra.innerHandle);
                 cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gOut_Shadow_Translucency, m_TransientShadow.innerHandle);
-                cmd.SetComputeTextureParam(m_ShadowBlur, kernel,"_DebugTexture", m_Debug.innerHandle);
 
                 
                 cmd.DispatchCompute(m_ShadowBlur, kernel, dispatchX, dispatchY, 1);
@@ -405,7 +357,6 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gOut_Penumbra,        m_TransientPenumbra2.innerHandle);
                 cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gOut_Shadow_Translucency,
                     useTemporalStabilization ? m_TransientShadow2.innerHandle : m_DenoisedShadowTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel,"_DebugTexture", m_Debug.innerHandle);
                 cmd.DispatchCompute(m_ShadowPostBlur, kernel, dispatchX, dispatchY, 1);
 
                 // Stage 6: TemporalStabilization
@@ -429,8 +380,6 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
         public override void Dispose()
         {
-            m_NativePluginSession?.Dispose();
-            m_NativePluginSession = null;
         }
 
         internal static ResolvedSigmaSettings ResolveSettings(RayTracingSettingsVolume volume)
@@ -438,13 +387,9 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             float denoisingRange = RayTracingSettingsVolume.DefaultSigmaDenoisingRange;
             float planeDistanceSensitivity = RayTracingSettingsVolume.DefaultSigmaPlaneDistanceSensitivity;
             uint maxStabilizedFrameNum = (uint)RayTracingSettingsVolume.DefaultSigmaMaxStabilizedFrameNum;
-            bool useNativePluginConstantBuffer = RayTracingSettingsVolume.DefaultSigmaUseNativePluginConstantBuffer;
 
             if (volume != null && volume.active)
             {
-                if (volume.sigmaUseNativePluginConstantBuffer != null && volume.sigmaUseNativePluginConstantBuffer.overrideState)
-                    useNativePluginConstantBuffer = volume.sigmaUseNativePluginConstantBuffer.value;
-
                 if (volume.sigmaDenoisingRange != null && volume.sigmaDenoisingRange.overrideState)
                     denoisingRange = Mathf.Max(0.0f, volume.sigmaDenoisingRange.value);
 
@@ -461,7 +406,6 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             }
 
             return new ResolvedSigmaSettings(
-                useNativePluginConstantBuffer,
                 denoisingRange,
                 planeDistanceSensitivity,
                 maxStabilizedFrameNum);
@@ -507,67 +451,5 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             tex.desc.AnisoLevel = 1;
             return tex;
         }
-
-        private bool TryGetNativePluginConstants(
-            in SigmaNativePluginInput input,
-            out SigmaSharedConstants nativeConstants)
-        {
-            nativeConstants = default;
-            m_NativePluginSession ??= SigmaNativePluginSession.TryCreate();
-            if (m_NativePluginSession == null)
-            {
-                LogNativePluginFallbackOnce("NRDUnityPlugin is unavailable.");
-                return false;
-            }
-
-            if (!m_NativePluginSession.TryComputeSharedConstants(input, out nativeConstants))
-            {
-                LogNativePluginFallbackOnce("NRDUnityPlugin failed to produce SIGMA shared constants.");
-                return false;
-            }
-
-            return true;
-        }
-
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-        private void LogNativePluginComparisonIfNeeded(
-            in SigmaSharedConstants manualConstants,
-            in SigmaSharedConstants nativeConstants)
-        {
-            SigmaSharedConstantsComparison comparison = SigmaSharedConstantsComparer.Compare(manualConstants, nativeConstants);
-            if (comparison.FieldSignature == m_LastNativeComparisonSignature)
-            {
-                return;
-            }
-
-            m_LastNativeComparisonSignature = comparison.FieldSignature;
-
-            if (!comparison.HasDifferences)
-            {
-                Debug.Log($"{nameof(SIGMAShadowDenoisePass)}: native SIGMA const buffer matches manual setup within tolerance.");
-                return;
-            }
-
-            Debug.LogWarning(
-                $"{nameof(SIGMAShadowDenoisePass)}: native/manual SIGMA const buffer mismatch. " +
-                $"Fields={comparison.DifferentFieldCount}, Max|Δ|={comparison.MaxFloatDifference:G6}. {comparison.Summary}");
-        }
-
-        private void LogNativePluginFallbackOnce(string reason)
-        {
-            if (m_HasLoggedNativePluginFallback)
-            {
-                return;
-            }
-
-            m_HasLoggedNativePluginFallback = true;
-            Debug.LogWarning(
-                $"{nameof(SIGMAShadowDenoisePass)}: falling back to manual SIGMA const buffer setup. {reason}");
-        }
-#else
-        private void LogNativePluginFallbackOnce(string reason)
-        {
-        }
-#endif
     }
 }

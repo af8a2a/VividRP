@@ -145,18 +145,28 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
         private Matrix4x4  m_PrevViewToClip  = Matrix4x4.identity;
         private bool m_HasValidHistory;
         private uint m_MaxStabilizedFrameNum;
+        private SigmaNativePluginSession m_NativePluginSession;
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private string m_LastNativeComparisonSignature;
+        private bool m_HasLoggedNativePluginFallback;
+#endif
 
         internal readonly struct ResolvedSigmaSettings
         {
             public ResolvedSigmaSettings(
+                bool useNativePluginConstantBuffer,
                 float denoisingRange,
                 float planeDistanceSensitivity,
                 uint maxStabilizedFrameNum)
             {
+                UseNativePluginConstantBuffer = useNativePluginConstantBuffer;
                 DenoisingRange = denoisingRange;
                 PlaneDistanceSensitivity = planeDistanceSensitivity;
                 MaxStabilizedFrameNum = maxStabilizedFrameNum;
             }
+
+            public bool UseNativePluginConstantBuffer { get; }
 
             public float DenoisingRange { get; }
 
@@ -208,6 +218,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             m_ShadowBlur                = resources.SIGMAShadowPreBlurCompute;
             m_ShadowPostBlur            = resources.SIGMAShadowPostBlurCompute;
             m_ShadowTemporalStabilization = resources.SIGMATemporalStabilizationCompute;
+            m_NativePluginSession ??= SigmaNativePluginSession.TryCreate();
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -245,20 +256,6 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             var cameraPos4  = cameraData.GetInverseViewMatrix().GetColumn(3);
             var cameraPos   = new Vector3(cameraPos4.x, cameraPos4.y, cameraPos4.z);
             var sigmaSettings = ResolveSettings(VividVolumeManagerUtility.GetRayTracingSettingsVolume());
-
-            m_Constants = SigmaSharedConstants.Compute(
-                worldToView, viewToClip,
-                m_PrevWorldToView, m_PrevViewToClip,
-                cameraPos, m_PrevCameraPosition,
-                lightDir,
-                m_Width, m_Height,
-                m_PrevWidth > 0 ? m_PrevWidth : m_Width,
-                m_PrevHeight > 0 ? m_PrevHeight : m_Height,
-                (uint)Time.frameCount,
-                sigmaSettings.DenoisingRange,
-                sigmaSettings.PlaneDistanceSensitivity,
-                sigmaSettings.StabilizationStrength,
-                camera != null && camera.orthographic);
             m_MaxStabilizedFrameNum = sigmaSettings.MaxStabilizedFrameNum;
 
             // History allocation (code-managed)
@@ -283,6 +280,57 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 desc:     lengthDesc);
 
             m_HasValidHistory = hasShadowHistory && hasLengthHistory;
+
+            Matrix4x4 previousWorldToView = m_HasValidHistory ? m_PrevWorldToView : worldToView;
+            Matrix4x4 previousViewToClip = m_HasValidHistory ? m_PrevViewToClip : viewToClip;
+            Vector3 previousCameraPosition = m_HasValidHistory ? m_PrevCameraPosition : cameraPos;
+            int previousWidth = m_HasValidHistory && m_PrevWidth > 0 ? m_PrevWidth : m_Width;
+            int previousHeight = m_HasValidHistory && m_PrevHeight > 0 ? m_PrevHeight : m_Height;
+            uint frameIndex = (uint)Time.frameCount;
+            float stabilizationStrength = m_HasValidHistory ? sigmaSettings.StabilizationStrength : 0.0f;
+
+            SigmaSharedConstants manualConstants = SigmaSharedConstants.Compute(
+                worldToView, viewToClip,
+                previousWorldToView, previousViewToClip,
+                cameraPos, previousCameraPosition,
+                lightDir,
+                m_Width, m_Height,
+                previousWidth,
+                previousHeight,
+                frameIndex,
+                sigmaSettings.DenoisingRange,
+                sigmaSettings.PlaneDistanceSensitivity,
+                stabilizationStrength,
+                camera != null && camera.orthographic);
+
+            var nativePluginInput = new SigmaNativePluginInput(
+                worldToView,
+                viewToClip,
+                previousWorldToView,
+                previousViewToClip,
+                lightDir,
+                m_Width,
+                m_Height,
+                previousWidth,
+                previousHeight,
+                frameIndex,
+                sigmaSettings.DenoisingRange,
+                sigmaSettings.PlaneDistanceSensitivity,
+                m_MaxStabilizedFrameNum,
+                camera != null && camera.orthographic,
+                m_HasValidHistory);
+
+            m_Constants = manualConstants;
+
+            if (sigmaSettings.UseNativePluginConstantBuffer
+                && TryGetNativePluginConstants(nativePluginInput, out SigmaSharedConstants nativeConstants))
+            {
+                m_Constants = nativeConstants;
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+                LogNativePluginComparisonIfNeeded(manualConstants, nativeConstants);
+#endif
+            }
 
             // Store for next frame
             m_PrevWorldToView    = worldToView;
@@ -381,6 +429,8 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
         public override void Dispose()
         {
+            m_NativePluginSession?.Dispose();
+            m_NativePluginSession = null;
         }
 
         internal static ResolvedSigmaSettings ResolveSettings(RayTracingSettingsVolume volume)
@@ -388,9 +438,13 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             float denoisingRange = RayTracingSettingsVolume.DefaultSigmaDenoisingRange;
             float planeDistanceSensitivity = RayTracingSettingsVolume.DefaultSigmaPlaneDistanceSensitivity;
             uint maxStabilizedFrameNum = (uint)RayTracingSettingsVolume.DefaultSigmaMaxStabilizedFrameNum;
+            bool useNativePluginConstantBuffer = RayTracingSettingsVolume.DefaultSigmaUseNativePluginConstantBuffer;
 
             if (volume != null && volume.active)
             {
+                if (volume.sigmaUseNativePluginConstantBuffer != null && volume.sigmaUseNativePluginConstantBuffer.overrideState)
+                    useNativePluginConstantBuffer = volume.sigmaUseNativePluginConstantBuffer.value;
+
                 if (volume.sigmaDenoisingRange != null && volume.sigmaDenoisingRange.overrideState)
                     denoisingRange = Mathf.Max(0.0f, volume.sigmaDenoisingRange.value);
 
@@ -406,7 +460,11 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 }
             }
 
-            return new ResolvedSigmaSettings(denoisingRange, planeDistanceSensitivity, maxStabilizedFrameNum);
+            return new ResolvedSigmaSettings(
+                useNativePluginConstantBuffer,
+                denoisingRange,
+                planeDistanceSensitivity,
+                maxStabilizedFrameNum);
         }
 
         private bool CanExecute()
@@ -449,5 +507,67 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             tex.desc.AnisoLevel = 1;
             return tex;
         }
+
+        private bool TryGetNativePluginConstants(
+            in SigmaNativePluginInput input,
+            out SigmaSharedConstants nativeConstants)
+        {
+            nativeConstants = default;
+            m_NativePluginSession ??= SigmaNativePluginSession.TryCreate();
+            if (m_NativePluginSession == null)
+            {
+                LogNativePluginFallbackOnce("NRDUnityPlugin is unavailable.");
+                return false;
+            }
+
+            if (!m_NativePluginSession.TryComputeSharedConstants(input, out nativeConstants))
+            {
+                LogNativePluginFallbackOnce("NRDUnityPlugin failed to produce SIGMA shared constants.");
+                return false;
+            }
+
+            return true;
+        }
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+        private void LogNativePluginComparisonIfNeeded(
+            in SigmaSharedConstants manualConstants,
+            in SigmaSharedConstants nativeConstants)
+        {
+            SigmaSharedConstantsComparison comparison = SigmaSharedConstantsComparer.Compare(manualConstants, nativeConstants);
+            if (comparison.FieldSignature == m_LastNativeComparisonSignature)
+            {
+                return;
+            }
+
+            m_LastNativeComparisonSignature = comparison.FieldSignature;
+
+            if (!comparison.HasDifferences)
+            {
+                Debug.Log($"{nameof(SIGMAShadowDenoisePass)}: native SIGMA const buffer matches manual setup within tolerance.");
+                return;
+            }
+
+            Debug.LogWarning(
+                $"{nameof(SIGMAShadowDenoisePass)}: native/manual SIGMA const buffer mismatch. " +
+                $"Fields={comparison.DifferentFieldCount}, Max|Δ|={comparison.MaxFloatDifference:G6}. {comparison.Summary}");
+        }
+
+        private void LogNativePluginFallbackOnce(string reason)
+        {
+            if (m_HasLoggedNativePluginFallback)
+            {
+                return;
+            }
+
+            m_HasLoggedNativePluginFallback = true;
+            Debug.LogWarning(
+                $"{nameof(SIGMAShadowDenoisePass)}: falling back to manual SIGMA const buffer setup. {reason}");
+        }
+#else
+        private void LogNativePluginFallbackOnce(string reason)
+        {
+        }
+#endif
     }
 }

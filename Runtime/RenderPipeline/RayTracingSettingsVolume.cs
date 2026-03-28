@@ -65,6 +65,7 @@ namespace VividRP.Runtime
         public const float DefaultSigmaPlaneDistanceSensitivity = 0.02f;
         public const int DefaultSigmaMaxStabilizedFrameNum = 5;
         public const int MaxSigmaStabilizedFrameNum = 7;
+        public const bool DefaultSigmaUseNativePluginConstantBuffer = false;
 
         public ClampedFloatParameter rayBias = new(0.001f, 0f, 1f);
         public ClampedFloatParameter distantRayBias = new(0.001f, 0f, 10f);
@@ -82,6 +83,7 @@ namespace VividRP.Runtime
         public VividRayTracingBuildFlagsParameter buildFlagsDynamicGeometries =
             new(RayTracingAccelerationStructureBuildFlags.None);
         public BoolParameter enableCompaction = new(false);
+        public BoolParameter sigmaUseNativePluginConstantBuffer = new(DefaultSigmaUseNativePluginConstantBuffer);
         public MinFloatParameter sigmaDenoisingRange = new(DefaultSigmaDenoisingRange, 0f);
         public ClampedFloatParameter sigmaPlaneDistanceSensitivity = new(DefaultSigmaPlaneDistanceSensitivity, 0f, 1f);
         public ClampedIntParameter sigmaMaxStabilizedFrameNum =
@@ -103,6 +105,7 @@ namespace VividRP.Runtime
                     || (buildFlagsStaticGeometries != null && buildFlagsStaticGeometries.overrideState)
                     || (buildFlagsDynamicGeometries != null && buildFlagsDynamicGeometries.overrideState)
                     || (enableCompaction != null && enableCompaction.overrideState)
+                    || (sigmaUseNativePluginConstantBuffer != null && sigmaUseNativePluginConstantBuffer.overrideState)
                     || (sigmaDenoisingRange != null && sigmaDenoisingRange.overrideState)
                     || (sigmaPlaneDistanceSensitivity != null && sigmaPlaneDistanceSensitivity.overrideState)
                     || (sigmaMaxStabilizedFrameNum != null && sigmaMaxStabilizedFrameNum.overrideState));

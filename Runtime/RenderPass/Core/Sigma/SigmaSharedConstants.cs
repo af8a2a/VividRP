@@ -221,7 +221,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 Vector3.Cross(GetColumn(projection, 0), GetColumn(projection, 1)),
                 column2) > 0.0f;
 
-            bool isLeftHanded = projection[0, 0] > 0.0f ? compare : !compare;
+            bool isLeftHanded = projection[1, 1] > 0.0f ? compare : !compare;
             float projectY = Mathf.Abs(2.0f / Mathf.Max(y1 - y0, Epsilon));
             Vector4 frustum = new Vector4(-x0, -y1, x0 - x1, y1 - y0);
 
@@ -337,7 +337,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
         {
             const uint sampleX = 0u;
             const uint sampleY = 0u;
-            uint sampleOffset = frameIndex;
+            uint sampleOffset = ReverseBits4(frameIndex);
             uint a = 2068378560u * (1u - (sampleX >> 1)) + 1500172770u * (sampleX >> 1);
             uint b = (sampleY + ((sampleX & 1u) << 2)) << 2;
             return (((a >> (int)b) + sampleOffset) & 0xFu) / 16.0f;
@@ -346,7 +346,16 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
         public static float Weyl1D(float p, int n)
         {
             const float invPow2_24 = 1.0f / 16777216.0f;
-            return Mathf.Repeat(p + n * 10368889.0f * invPow2_24, 1.0f);
+            int wrapped = unchecked(n * 10368889);
+            return Mathf.Repeat(p + wrapped * invPow2_24, 1.0f);
+        }
+
+        private static uint ReverseBits4(uint value)
+        {
+            value &= 0xFu;
+            value = ((value & 0x5u) << 1) | ((value & 0xAu) >> 1);
+            value = ((value & 0x3u) << 2) | ((value & 0xCu) >> 2);
+            return value;
         }
     }
 }

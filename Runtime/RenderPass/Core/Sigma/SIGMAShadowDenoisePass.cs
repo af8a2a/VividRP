@@ -136,9 +136,28 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
         private Matrix4x4  m_PrevWorldToView = Matrix4x4.identity;
         private Matrix4x4  m_PrevViewToClip  = Matrix4x4.identity;
         private bool m_HasValidHistory;
+        private uint m_MaxStabilizedFrameNum;
 
-        private const float DefaultPlaneDistSensitivity  = 0.02f;
-        private const uint  DefaultMaxStabilizedFrameNum = 5;
+        internal readonly struct ResolvedSigmaSettings
+        {
+            public ResolvedSigmaSettings(
+                float denoisingRange,
+                float planeDistanceSensitivity,
+                uint maxStabilizedFrameNum)
+            {
+                DenoisingRange = denoisingRange;
+                PlaneDistanceSensitivity = planeDistanceSensitivity;
+                MaxStabilizedFrameNum = maxStabilizedFrameNum;
+            }
+
+            public float DenoisingRange { get; }
+
+            public float PlaneDistanceSensitivity { get; }
+
+            public uint MaxStabilizedFrameNum { get; }
+
+            public float StabilizationStrength => MaxStabilizedFrameNum / (1.0f + MaxStabilizedFrameNum);
+        }
 
         public SIGMAShadowDenoisePass()
         {
@@ -213,6 +232,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             var viewToClip  = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true);
             var cameraPos4  = cameraData.GetInverseViewMatrix().GetColumn(3);
             var cameraPos   = new Vector3(cameraPos4.x, cameraPos4.y, cameraPos4.z);
+            var sigmaSettings = ResolveSettings(VividVolumeManagerUtility.GetRayTracingSettingsVolume());
 
             m_Constants = SigmaSharedConstants.Compute(
                 worldToView, viewToClip,
@@ -223,10 +243,11 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 m_PrevWidth > 0 ? m_PrevWidth : m_Width,
                 m_PrevHeight > 0 ? m_PrevHeight : m_Height,
                 (uint)Time.frameCount,
-                camera.farClipPlane,
-                DefaultPlaneDistSensitivity,
-                DefaultMaxStabilizedFrameNum / (1.0f + DefaultMaxStabilizedFrameNum),
-                camera.orthographic);
+                sigmaSettings.DenoisingRange,
+                sigmaSettings.PlaneDistanceSensitivity,
+                sigmaSettings.StabilizationStrength,
+                camera != null && camera.orthographic);
+            m_MaxStabilizedFrameNum = sigmaSettings.MaxStabilizedFrameNum;
 
             // History allocation (code-managed)
             var shadowDesc = m_HistoryShadowTexture?.desc ?? m_DenoisedShadowTexture?.desc;
@@ -311,7 +332,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 cmd.DispatchCompute(m_ShadowBlur, kernel, dispatchX, dispatchY, 1);
 
                 // Stage 5: PostBlur
-                bool useTemporalStabilization = m_HasValidHistory && DefaultMaxStabilizedFrameNum > 0;
+                bool useTemporalStabilization = m_HasValidHistory && m_MaxStabilizedFrameNum > 0;
                 ConstantBuffer.Push(cmd, m_Constants, m_ShadowPostBlur, SIGMA_BlurConstantsId);
                 cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_ViewZ,            m_DepthTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_Normal_Roughness, m_GBuffer1.innerHandle);
@@ -344,6 +365,32 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
         public override void Dispose()
         {
+        }
+
+        internal static ResolvedSigmaSettings ResolveSettings(RayTracingSettingsVolume volume)
+        {
+            float denoisingRange = RayTracingSettingsVolume.DefaultSigmaDenoisingRange;
+            float planeDistanceSensitivity = RayTracingSettingsVolume.DefaultSigmaPlaneDistanceSensitivity;
+            uint maxStabilizedFrameNum = (uint)RayTracingSettingsVolume.DefaultSigmaMaxStabilizedFrameNum;
+
+            if (volume != null && volume.active)
+            {
+                if (volume.sigmaDenoisingRange != null && volume.sigmaDenoisingRange.overrideState)
+                    denoisingRange = Mathf.Max(0.0f, volume.sigmaDenoisingRange.value);
+
+                if (volume.sigmaPlaneDistanceSensitivity != null && volume.sigmaPlaneDistanceSensitivity.overrideState)
+                    planeDistanceSensitivity = Mathf.Clamp01(volume.sigmaPlaneDistanceSensitivity.value);
+
+                if (volume.sigmaMaxStabilizedFrameNum != null && volume.sigmaMaxStabilizedFrameNum.overrideState)
+                {
+                    maxStabilizedFrameNum = (uint)Mathf.Clamp(
+                        volume.sigmaMaxStabilizedFrameNum.value,
+                        0,
+                        RayTracingSettingsVolume.MaxSigmaStabilizedFrameNum);
+                }
+            }
+
+            return new ResolvedSigmaSettings(denoisingRange, planeDistanceSensitivity, maxStabilizedFrameNum);
         }
 
         private bool CanExecute()

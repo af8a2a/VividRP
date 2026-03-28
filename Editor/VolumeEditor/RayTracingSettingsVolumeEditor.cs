@@ -22,6 +22,9 @@ namespace VividRP.Editor
         private SerializedDataParameter m_BuildFlagsStaticGeometries;
         private SerializedDataParameter m_BuildFlagsDynamicGeometries;
         private SerializedDataParameter m_EnableCompaction;
+        private SerializedDataParameter m_SigmaDenoisingRange;
+        private SerializedDataParameter m_SigmaPlaneDistanceSensitivity;
+        private SerializedDataParameter m_SigmaMaxStabilizedFrameNum;
 
         public override void OnEnable()
         {
@@ -39,6 +42,9 @@ namespace VividRP.Editor
             m_BuildFlagsStaticGeometries = Unpack(fetcher.Find(x => x.buildFlagsStaticGeometries));
             m_BuildFlagsDynamicGeometries = Unpack(fetcher.Find(x => x.buildFlagsDynamicGeometries));
             m_EnableCompaction = Unpack(fetcher.Find(x => x.enableCompaction));
+            m_SigmaDenoisingRange = Unpack(fetcher.Find(x => x.sigmaDenoisingRange));
+            m_SigmaPlaneDistanceSensitivity = Unpack(fetcher.Find(x => x.sigmaPlaneDistanceSensitivity));
+            m_SigmaMaxStabilizedFrameNum = Unpack(fetcher.Find(x => x.sigmaMaxStabilizedFrameNum));
         }
 
         public override bool RequiresConstantRepaint()
@@ -60,6 +66,12 @@ namespace VividRP.Editor
             PropertyField(m_BuildFlagsStaticGeometries);
             PropertyField(m_BuildFlagsDynamicGeometries);
             PropertyField(m_EnableCompaction);
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("SIGMA Shadow Denoise", EditorStyles.boldLabel);
+            PropertyField(m_SigmaDenoisingRange);
+            PropertyField(m_SigmaPlaneDistanceSensitivity);
+            PropertyField(m_SigmaMaxStabilizedFrameNum);
 
             EditorGUILayout.Space();
             DrawStatsPanel();

@@ -61,6 +61,11 @@ namespace VividRP.Runtime
     [VolumeComponentMenu("VividRP/Ray Tracing/Settings")]
     public sealed class RayTracingSettingsVolume : VolumeComponent
     {
+        public const float DefaultSigmaDenoisingRange = 500000.0f;
+        public const float DefaultSigmaPlaneDistanceSensitivity = 0.02f;
+        public const int DefaultSigmaMaxStabilizedFrameNum = 5;
+        public const int MaxSigmaStabilizedFrameNum = 7;
+
         public ClampedFloatParameter rayBias = new(0.001f, 0f, 1f);
         public ClampedFloatParameter distantRayBias = new(0.001f, 0f, 10f);
         public BoolParameter extendShadowCulling = new(false);
@@ -77,6 +82,10 @@ namespace VividRP.Runtime
         public VividRayTracingBuildFlagsParameter buildFlagsDynamicGeometries =
             new(RayTracingAccelerationStructureBuildFlags.None);
         public BoolParameter enableCompaction = new(false);
+        public MinFloatParameter sigmaDenoisingRange = new(DefaultSigmaDenoisingRange, 0f);
+        public ClampedFloatParameter sigmaPlaneDistanceSensitivity = new(DefaultSigmaPlaneDistanceSensitivity, 0f, 1f);
+        public ClampedIntParameter sigmaMaxStabilizedFrameNum =
+            new(DefaultSigmaMaxStabilizedFrameNum, 0, MaxSigmaStabilizedFrameNum);
 
         public bool IsActive()
         {
@@ -93,7 +102,10 @@ namespace VividRP.Runtime
                     || (rayTracingModeMask != null && rayTracingModeMask.overrideState)
                     || (buildFlagsStaticGeometries != null && buildFlagsStaticGeometries.overrideState)
                     || (buildFlagsDynamicGeometries != null && buildFlagsDynamicGeometries.overrideState)
-                    || (enableCompaction != null && enableCompaction.overrideState));
+                    || (enableCompaction != null && enableCompaction.overrideState)
+                    || (sigmaDenoisingRange != null && sigmaDenoisingRange.overrideState)
+                    || (sigmaPlaneDistanceSensitivity != null && sigmaPlaneDistanceSensitivity.overrideState)
+                    || (sigmaMaxStabilizedFrameNum != null && sigmaMaxStabilizedFrameNum.overrideState));
         }
     }
 }

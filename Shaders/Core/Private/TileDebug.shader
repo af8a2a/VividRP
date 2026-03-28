@@ -62,7 +62,7 @@ Shader "Hidden/VividRP/TileDebug"
             ZWrite Off
             ZTest Always
             Cull Off
-            Blend One Zero
+            Blend One One
 
             HLSLPROGRAM
             #pragma target 4.5

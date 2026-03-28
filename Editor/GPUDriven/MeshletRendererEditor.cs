@@ -115,6 +115,7 @@ namespace VividRP.Editor.GPUDriven
     }
 
     [CustomEditor(typeof(MeshletRenderer))]
+    [CanEditMultipleObjects]
     internal sealed class MeshletRendererEditor : UnityEditor.Editor
     {
         private readonly Dictionary<EntityId, UnityEditor.Editor> m_SourceMaterialEditors = new();

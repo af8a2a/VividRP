@@ -24,8 +24,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public HDRISkyPass()
         {
-            m_ColorTarget = RenderGraphTexture.CreateColorTarget("SkyColor", GraphicsFormat.R8G8B8A8_SRGB);
-            m_DepthTexture = RenderGraphTexture.CreateDepthTarget("SkyDepth");
+            m_ColorTarget = RenderGraphTexture.CreateInput("SkyColor", GraphicsFormat.R8G8B8A8_SRGB);
+            m_DepthTexture = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.None, DepthBits.Depth32);
         }
 
         public override void Create()
@@ -38,6 +38,18 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var cameraData = frameData.Get<VividCameraData>();
             m_PixelCoordToViewDirMatrix = cameraData.GetPixelCoordToViewDirWSMatrix();
+
+            var width = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
+            var height = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
+
+            if (width <= 0)
+                width = Mathf.Max(1, Screen.width);
+
+            if (height <= 0)
+                height = Mathf.Max(1, Screen.height);
+
+            m_ColorTarget.Resize(width, height);
+            m_DepthTexture.Resize(width, height);
         }
 
         public override void Record(RasterGraphContext context)

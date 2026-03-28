@@ -224,6 +224,16 @@ namespace VividRP.Editor.Tests
             Assert.That(historyIndex, Is.GreaterThan(updateIndex));
         }
 
+        [Test]
+        public void RecordRenderGraph_PreparesHistoryImports_WithoutRecordingHistoryCopyPasses()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.Execution.cs"));
+
+            Assert.That(source, Does.Contain("PreparePendingHistoryTextureImports(renderGraph);"));
+            Assert.That(source, Does.Not.Contain("RecordHistoryUpdatePasses(renderGraph, graphAsset);"));
+            Assert.That(source, Does.Not.Contain("RecordCodeManagedTextureHistoryUpdatePasses(renderGraph, graphAsset);"));
+        }
+
         private static void AssertMatrixAreEqual(Matrix4x4 expected, Matrix4x4 actual)
         {
             for (var row = 0; row < 4; row++)

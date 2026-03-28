@@ -33,7 +33,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void GetOrCreateHistoryTarget_ReusesHandle_WhenDescriptorMatches()
+        public void AcquireHistoryTextures_ReusesHandles_WhenDescriptorMatches()
         {
             using var cameraScope = new CameraScope();
             var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
@@ -48,14 +48,32 @@ namespace VividRP.Editor.Tests
                     Name = "HistoryA",
                 };
 
-                var first = RenderGraphHistoryRegistry.GetOrCreateHistoryTarget(cameraScope.Camera, graphAsset, 0, descriptor);
-                var second = RenderGraphHistoryRegistry.GetOrCreateHistoryTarget(cameraScope.Camera, graphAsset, 0, descriptor);
+                var firstFound = RenderGraphHistoryRegistry.AcquireHistoryTextures(
+                    cameraScope.Camera,
+                    graphAsset,
+                    0,
+                    descriptor,
+                    out var firstPrevious,
+                    out var firstCurrent,
+                    out var firstHasValidData);
+                var secondFound = RenderGraphHistoryRegistry.AcquireHistoryTextures(
+                    cameraScope.Camera,
+                    graphAsset,
+                    0,
+                    descriptor,
+                    out var secondPrevious,
+                    out var secondCurrent,
+                    out var secondHasValidData);
 
-                Assert.That(first, Is.Not.Null);
-                Assert.That(second, Is.SameAs(first));
-                Assert.That(RenderGraphHistoryRegistry.TryGetHistoryTarget(cameraScope.Camera, graphAsset, 0, out var handle, out var hasValidData), Is.True);
-                Assert.That(handle, Is.SameAs(first));
-                Assert.That(hasValidData, Is.False);
+                Assert.That(firstFound, Is.True);
+                Assert.That(secondFound, Is.True);
+                Assert.That(firstPrevious, Is.Not.Null);
+                Assert.That(firstCurrent, Is.Not.Null);
+                Assert.That(firstCurrent, Is.Not.SameAs(firstPrevious));
+                Assert.That(secondPrevious, Is.SameAs(firstPrevious));
+                Assert.That(secondCurrent, Is.SameAs(firstCurrent));
+                Assert.That(firstHasValidData, Is.False);
+                Assert.That(secondHasValidData, Is.False);
             }
             finally
             {
@@ -64,7 +82,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void GetOrCreateHistoryTarget_RecreatesHandle_WhenDescriptorChanges()
+        public void AcquireHistoryTextures_RecreatesHandles_WhenDescriptorChanges()
         {
             using var cameraScope = new CameraScope();
             var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
@@ -86,12 +104,31 @@ namespace VividRP.Editor.Tests
                     Name = "HistoryA",
                 };
 
-                var first = RenderGraphHistoryRegistry.GetOrCreateHistoryTarget(cameraScope.Camera, graphAsset, 0, firstDescriptor);
-                var second = RenderGraphHistoryRegistry.GetOrCreateHistoryTarget(cameraScope.Camera, graphAsset, 0, secondDescriptor);
+                var firstFound = RenderGraphHistoryRegistry.AcquireHistoryTextures(
+                    cameraScope.Camera,
+                    graphAsset,
+                    0,
+                    firstDescriptor,
+                    out var firstPrevious,
+                    out var firstCurrent,
+                    out _);
+                var secondFound = RenderGraphHistoryRegistry.AcquireHistoryTextures(
+                    cameraScope.Camera,
+                    graphAsset,
+                    0,
+                    secondDescriptor,
+                    out var secondPrevious,
+                    out var secondCurrent,
+                    out _);
 
-                Assert.That(first, Is.Not.Null);
-                Assert.That(second, Is.Not.Null);
-                Assert.That(second, Is.Not.SameAs(first));
+                Assert.That(firstFound, Is.True);
+                Assert.That(secondFound, Is.True);
+                Assert.That(firstPrevious, Is.Not.Null);
+                Assert.That(firstCurrent, Is.Not.Null);
+                Assert.That(secondPrevious, Is.Not.Null);
+                Assert.That(secondCurrent, Is.Not.Null);
+                Assert.That(secondPrevious, Is.Not.SameAs(firstPrevious));
+                Assert.That(secondCurrent, Is.Not.SameAs(firstCurrent));
             }
             finally
             {
@@ -100,7 +137,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void MarkHistoryValid_UpdatesValidityState()
+        public void CommitHistory_SwapsBuffers_AndUpdatesValidityState()
         {
             using var cameraScope = new CameraScope();
             var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
@@ -115,13 +152,34 @@ namespace VividRP.Editor.Tests
                     Name = "HistoryA",
                 };
 
-                RenderGraphHistoryRegistry.GetOrCreateHistoryTarget(cameraScope.Camera, graphAsset, 0, descriptor);
-                RenderGraphHistoryRegistry.MarkHistoryValid(cameraScope.Camera, graphAsset, 0);
+                var found = RenderGraphHistoryRegistry.AcquireHistoryTextures(
+                    cameraScope.Camera,
+                    graphAsset,
+                    0,
+                    descriptor,
+                    out var previousHandle,
+                    out var currentHandle,
+                    out var hasValidData);
 
-                var found = RenderGraphHistoryRegistry.TryGetHistoryTarget(cameraScope.Camera, graphAsset, 0, out _, out var hasValidData);
+                Assert.That(found, Is.True);
+                Assert.That(previousHandle, Is.Not.Null);
+                Assert.That(currentHandle, Is.Not.Null);
+                Assert.That(hasValidData, Is.False);
+
+                RenderGraphHistoryRegistry.CommitHistory(cameraScope.Camera, graphAsset, 0);
+
+                found = RenderGraphHistoryRegistry.TryGetHistoryTextures(
+                    cameraScope.Camera,
+                    graphAsset,
+                    0,
+                    out var committedPreviousHandle,
+                    out var committedCurrentHandle,
+                    out hasValidData);
 
                 Assert.That(found, Is.True);
                 Assert.That(hasValidData, Is.True);
+                Assert.That(committedPreviousHandle, Is.SameAs(currentHandle));
+                Assert.That(committedCurrentHandle, Is.SameAs(previousHandle));
             }
             finally
             {
@@ -152,7 +210,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void AllocHistoryTextureForPass_ReturnsValidity_AndResetsWhenDescriptorChanges()
+        public void CommitFrame_AdvancesTextureHistory_ForPassScopedHistory()
         {
             using var cameraScope = new CameraScope();
             var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
@@ -163,7 +221,7 @@ namespace VividRP.Editor.Tests
 
             try
             {
-                PassRecorder.InitializeContext(default, cameraScope.Camera, default);
+                SetCurrentCamera(cameraScope.Camera);
                 Compile(graphAsset);
 
                 var pass = GetCompiledPass<TextureHistoryAllocationPass>();
@@ -177,10 +235,33 @@ namespace VividRP.Editor.Tests
                 var hasValidHistory = pass.AllocHistoryTexture(TextureHistoryAllocationPass.HistoryKey, previous, current, current.desc);
                 Assert.That(hasValidHistory, Is.False);
 
-                RenderGraphHistoryRegistry.MarkHistoryValid(cameraScope.Camera, graphAsset, historyKey);
+                var found = RenderGraphHistoryRegistry.TryGetHistoryTextures(
+                    cameraScope.Camera,
+                    graphAsset,
+                    historyKey,
+                    out var firstPreviousHandle,
+                    out var firstCurrentHandle,
+                    out var hasValidData);
+                Assert.That(found, Is.True);
+                Assert.That(hasValidData, Is.False);
+                Assert.That(firstPreviousHandle, Is.Not.Null);
+                Assert.That(firstCurrentHandle, Is.Not.Null);
+
+                PassRecorder.CommitFrame(graphAsset);
 
                 hasValidHistory = pass.AllocHistoryTexture(TextureHistoryAllocationPass.HistoryKey, previous, current, current.desc);
                 Assert.That(hasValidHistory, Is.True);
+                found = RenderGraphHistoryRegistry.TryGetHistoryTextures(
+                    cameraScope.Camera,
+                    graphAsset,
+                    historyKey,
+                    out var secondPreviousHandle,
+                    out var secondCurrentHandle,
+                    out hasValidData);
+                Assert.That(found, Is.True);
+                Assert.That(hasValidData, Is.True);
+                Assert.That(secondPreviousHandle, Is.SameAs(firstCurrentHandle));
+                Assert.That(secondCurrentHandle, Is.SameAs(firstPreviousHandle));
 
                 var resizedDescriptor = current.desc.Clone();
                 resizedDescriptor.Width = 128;
@@ -196,7 +277,66 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void AllocHistoryBufferForPass_SwapsBuffersAcrossFrames_AndClearsOnDispose()
+        public void AbortFrame_DoesNotAdvanceTextureHistory()
+        {
+            using var cameraScope = new CameraScope();
+            var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
+            graphAsset.Passes.Add(new RenderGraphPassDefinition
+            {
+                PassType = GetPassTypeName<TextureHistoryAllocationPass>(),
+            });
+
+            try
+            {
+                SetCurrentCamera(cameraScope.Camera);
+                Compile(graphAsset);
+
+                var pass = GetCompiledPass<TextureHistoryAllocationPass>();
+                Assert.That(pass, Is.Not.Null);
+
+                var previous = GetTextureField(pass, TextureHistoryAllocationPass.PreviousFieldName);
+                var current = GetTextureField(pass, TextureHistoryAllocationPass.CurrentFieldName);
+                var historyKey = PassRecorder.BuildPassHistoryKey(pass, TextureHistoryAllocationPass.HistoryKey);
+                Assert.That(historyKey, Is.Not.Null);
+
+                var hasValidHistory = pass.AllocHistoryTexture(TextureHistoryAllocationPass.HistoryKey, previous, current, current.desc);
+                Assert.That(hasValidHistory, Is.False);
+
+                var found = RenderGraphHistoryRegistry.TryGetHistoryTextures(
+                    cameraScope.Camera,
+                    graphAsset,
+                    historyKey,
+                    out var firstPreviousHandle,
+                    out var firstCurrentHandle,
+                    out var hasValidData);
+                Assert.That(found, Is.True);
+                Assert.That(hasValidData, Is.False);
+
+                PassRecorder.AbortFrame();
+
+                hasValidHistory = pass.AllocHistoryTexture(TextureHistoryAllocationPass.HistoryKey, previous, current, current.desc);
+                Assert.That(hasValidHistory, Is.False);
+                found = RenderGraphHistoryRegistry.TryGetHistoryTextures(
+                    cameraScope.Camera,
+                    graphAsset,
+                    historyKey,
+                    out var secondPreviousHandle,
+                    out var secondCurrentHandle,
+                    out hasValidData);
+                Assert.That(found, Is.True);
+                Assert.That(hasValidData, Is.False);
+                Assert.That(secondPreviousHandle, Is.SameAs(firstPreviousHandle));
+                Assert.That(secondCurrentHandle, Is.SameAs(firstCurrentHandle));
+            }
+            finally
+            {
+                PassRecorder.Dispose();
+                Object.DestroyImmediate(graphAsset);
+            }
+        }
+
+        [Test]
+        public void CommitFrame_AdvancesBufferHistory_AndClearsOnDispose()
         {
             using var cameraScope = new CameraScope();
             var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
@@ -207,7 +347,7 @@ namespace VividRP.Editor.Tests
 
             try
             {
-                PassRecorder.InitializeContext(default, cameraScope.Camera, default);
+                SetCurrentCamera(cameraScope.Camera);
                 Compile(graphAsset);
 
                 var pass = GetCompiledPass<BufferHistoryAllocationPass>();
@@ -227,7 +367,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(firstCurrentBuffer, Is.Not.Null);
                 Assert.That(firstCurrentBuffer, Is.Not.SameAs(firstPreviousBuffer));
 
-                RenderGraphBufferHistoryRegistry.FinalizeFrame(cameraScope.Camera, graphAsset, historyKey);
+                PassRecorder.CommitFrame(graphAsset);
 
                 hasValidHistory = pass.AllocHistoryBuffer(BufferHistoryAllocationPass.HistoryKey, previous, current, current.desc);
                 Assert.That(hasValidHistory, Is.True);
@@ -258,6 +398,16 @@ namespace VividRP.Editor.Tests
             var method = typeof(PassRecorder).GetMethod("Compile", BindingFlags.NonPublic | BindingFlags.Static);
             Assert.That(method, Is.Not.Null);
             method.Invoke(null, new object[] { graphAsset });
+        }
+
+        private static void SetCurrentCamera(Camera camera)
+        {
+            var frameDataField = typeof(PassRecorder).GetField("s_FrameData", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(frameDataField, Is.Not.Null);
+
+            var frameData = (ContextContainer)frameDataField.GetValue(null);
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.camera = camera;
         }
 
         private static TPass GetCompiledPass<TPass>() where TPass : class, IRenderPass

@@ -8,11 +8,14 @@ namespace VividRP.Runtime
 {
     internal static class RenderGraphHistoryRegistry
     {
+        private const int HistoryBufferId = 0;
+
         private sealed class HistoryEntry
         {
-            public RTHandle Handle;
+            public BufferedRTHandleSystem Storage;
             public HistoryTargetSettings Settings;
             public bool HasValidData;
+            public bool NeedsClearCurrent;
         }
 
         private struct HistoryTargetSettings
@@ -43,10 +46,77 @@ namespace VividRP.Runtime
         {
             foreach (var entry in s_HistoryTextures.Values)
             {
-                entry?.Handle?.Release();
+                entry?.Storage?.Dispose();
             }
 
             s_HistoryTextures.Clear();
+        }
+
+        internal static bool AcquireHistoryTextures(
+            Camera camera,
+            RenderGraphData graphAsset,
+            int historyIndex,
+            RenderGraphTextureDesc descriptor,
+            out RTHandle previousHandle,
+            out RTHandle currentHandle,
+            out bool hasValidData,
+            CommandBuffer cmd = null)
+        {
+            return AcquireHistoryTextures(
+                camera,
+                graphAsset,
+                historyIndex.ToString(),
+                descriptor,
+                out previousHandle,
+                out currentHandle,
+                out hasValidData,
+                cmd);
+        }
+
+        internal static bool AcquireHistoryTextures(
+            Camera camera,
+            RenderGraphData graphAsset,
+            string historyKey,
+            RenderGraphTextureDesc descriptor,
+            out RTHandle previousHandle,
+            out RTHandle currentHandle,
+            out bool hasValidData,
+            CommandBuffer cmd = null)
+        {
+            previousHandle = null;
+            currentHandle = null;
+            hasValidData = false;
+
+            if (camera == null || graphAsset == null || string.IsNullOrEmpty(historyKey))
+                return false;
+
+            var settings = CreateSettings(descriptor, historyKey);
+            var entry = GetOrCreateEntry(BuildScopedKey(camera, graphAsset, historyKey));
+            if (entry.Storage == null || !SettingsMatch(entry.Settings, settings))
+            {
+                entry.Storage?.Dispose();
+                entry.Storage = CreateStorage(settings);
+                entry.Settings = settings;
+                entry.HasValidData = false;
+                entry.NeedsClearCurrent = true;
+            }
+
+            previousHandle = entry.Storage.GetFrameRT(HistoryBufferId, 1);
+            currentHandle = entry.Storage.GetFrameRT(HistoryBufferId, 0);
+            hasValidData = entry.HasValidData && previousHandle != null;
+
+            if ((entry.NeedsClearCurrent || (descriptor != null && descriptor.ClearBuffer))
+                && currentHandle != null
+                && cmd != null)
+            {
+                var clearFlag = descriptor != null && descriptor.DepthBufferBits != DepthBits.None
+                    ? ClearFlag.DepthStencil
+                    : ClearFlag.Color;
+                CoreUtils.SetRenderTarget(cmd, currentHandle, clearFlag, descriptor?.ClearColor ?? Color.clear);
+                entry.NeedsClearCurrent = false;
+            }
+
+            return previousHandle != null || currentHandle != null;
         }
 
         internal static RTHandle GetOrCreateHistoryTarget(
@@ -56,12 +126,16 @@ namespace VividRP.Runtime
             RenderGraphTextureDesc descriptor,
             CommandBuffer cmd = null)
         {
-            return GetOrCreateHistoryTarget(
+            AcquireHistoryTextures(
                 camera,
                 graphAsset,
                 historyIndex.ToString(),
                 descriptor,
+                out _,
+                out var currentHandle,
+                out _,
                 cmd);
+            return currentHandle;
         }
 
         internal static RTHandle GetOrCreateHistoryTarget(
@@ -71,49 +145,16 @@ namespace VividRP.Runtime
             RenderGraphTextureDesc descriptor,
             CommandBuffer cmd = null)
         {
-            if (camera == null || graphAsset == null || string.IsNullOrEmpty(historyKey))
-                return null;
-
-            var settings = CreateSettings(descriptor, historyKey);
-            var entry = GetOrCreateEntry(BuildScopedKey(camera, graphAsset, historyKey));
-            var createdOrChanged = false;
-            if (entry.Handle == null || !SettingsMatch(entry.Settings, settings))
-            {
-                entry.Handle?.Release();
-                entry.Handle = RTHandles.Alloc(
-                    Mathf.Max(1, settings.Width),
-                    Mathf.Max(1, settings.Height),
-                    slices: settings.Slices,
-                    depthBufferBits: settings.DepthBits,
-                    colorFormat: settings.ColorFormat,
-                    filterMode: settings.FilterMode,
-                    wrapMode: settings.WrapMode,
-                    dimension: settings.Dimension,
-                    enableRandomWrite: settings.EnableRandomWrite,
-                    useMipMap: settings.UseMipMap,
-                    autoGenerateMips: settings.AutoGenerateMips,
-                    isShadowMap: false,
-                    anisoLevel: settings.AnisoLevel,
-                    mipMapBias: settings.MipMapBias,
-                    msaaSamples: settings.MsaaSamples,
-                    bindTextureMS: settings.BindTextureMS,
-                    useDynamicScale: settings.UseDynamicScale,
-                    useDynamicScaleExplicit: settings.UseDynamicScaleExplicit,
-                    name: settings.Name);
-                entry.Settings = settings;
-                entry.HasValidData = false;
-                createdOrChanged = true;
-            }
-
-            if (createdOrChanged && cmd != null)
-            {
-                var clearFlag = descriptor != null && descriptor.DepthBufferBits != DepthBits.None
-                    ? ClearFlag.DepthStencil
-                    : ClearFlag.Color;
-                CoreUtils.SetRenderTarget(cmd, entry.Handle, clearFlag, descriptor?.ClearColor ?? Color.clear);
-            }
-
-            return entry.Handle;
+            AcquireHistoryTextures(
+                camera,
+                graphAsset,
+                historyKey,
+                descriptor,
+                out _,
+                out var currentHandle,
+                out _,
+                cmd);
+            return currentHandle;
         }
 
         internal static bool TryGetHistoryTarget(
@@ -146,9 +187,49 @@ namespace VividRP.Runtime
             if (!s_HistoryTextures.TryGetValue(BuildScopedKey(camera, graphAsset, historyKey), out var entry) || entry == null)
                 return false;
 
-            handle = entry.Handle;
+            handle = entry.Storage?.GetFrameRT(HistoryBufferId, 0);
             hasValidData = entry.HasValidData;
             return handle != null;
+        }
+
+        internal static bool TryGetHistoryTextures(
+            Camera camera,
+            RenderGraphData graphAsset,
+            int historyIndex,
+            out RTHandle previousHandle,
+            out RTHandle currentHandle,
+            out bool hasValidData)
+        {
+            return TryGetHistoryTextures(
+                camera,
+                graphAsset,
+                historyIndex.ToString(),
+                out previousHandle,
+                out currentHandle,
+                out hasValidData);
+        }
+
+        internal static bool TryGetHistoryTextures(
+            Camera camera,
+            RenderGraphData graphAsset,
+            string historyKey,
+            out RTHandle previousHandle,
+            out RTHandle currentHandle,
+            out bool hasValidData)
+        {
+            previousHandle = null;
+            currentHandle = null;
+            hasValidData = false;
+            if (camera == null || graphAsset == null || string.IsNullOrEmpty(historyKey))
+                return false;
+
+            if (!s_HistoryTextures.TryGetValue(BuildScopedKey(camera, graphAsset, historyKey), out var entry) || entry == null)
+                return false;
+
+            previousHandle = entry.Storage?.GetFrameRT(HistoryBufferId, 1);
+            currentHandle = entry.Storage?.GetFrameRT(HistoryBufferId, 0);
+            hasValidData = entry.HasValidData;
+            return previousHandle != null || currentHandle != null;
         }
 
         internal static void MarkHistoryValid(Camera camera, RenderGraphData graphAsset, int historyIndex, bool valid = true)
@@ -171,6 +252,27 @@ namespace VividRP.Runtime
             entry.HasValidData = valid;
         }
 
+        internal static void CommitHistory(Camera camera, RenderGraphData graphAsset, int historyIndex, bool valid = true)
+        {
+            CommitHistory(camera, graphAsset, historyIndex.ToString(), valid);
+        }
+
+        internal static void CommitHistory(Camera camera, RenderGraphData graphAsset, string historyKey, bool valid = true)
+        {
+            if (camera == null || graphAsset == null || string.IsNullOrEmpty(historyKey))
+                return;
+
+            if (!s_HistoryTextures.TryGetValue(BuildScopedKey(camera, graphAsset, historyKey), out var entry)
+                || entry == null
+                || entry.Storage == null)
+            {
+                return;
+            }
+
+            entry.Storage.SwapAndSetReferenceSize(entry.Settings.Width, entry.Settings.Height);
+            entry.HasValidData = valid;
+        }
+
         private static HistoryEntry GetOrCreateEntry(string key)
         {
             if (!s_HistoryTextures.TryGetValue(key, out var entry) || entry == null)
@@ -180,6 +282,35 @@ namespace VividRP.Runtime
             }
 
             return entry;
+        }
+
+        private static BufferedRTHandleSystem CreateStorage(HistoryTargetSettings settings)
+        {
+            var storage = new BufferedRTHandleSystem();
+            storage.AllocBuffer(
+                HistoryBufferId,
+                (system, frameIndex) => system.Alloc(
+                    width: Mathf.Max(1, settings.Width),
+                    height: Mathf.Max(1, settings.Height),
+                    slices: settings.Slices,
+                    depthBufferBits: settings.DepthBits,
+                    colorFormat: settings.ColorFormat,
+                    filterMode: settings.FilterMode,
+                    wrapMode: settings.WrapMode,
+                    dimension: settings.Dimension,
+                    enableRandomWrite: settings.EnableRandomWrite,
+                    useMipMap: settings.UseMipMap,
+                    autoGenerateMips: settings.AutoGenerateMips,
+                    isShadowMap: false,
+                    anisoLevel: settings.AnisoLevel,
+                    mipMapBias: settings.MipMapBias,
+                    msaaSamples: settings.MsaaSamples,
+                    bindTextureMS: settings.BindTextureMS,
+                    useDynamicScale: settings.UseDynamicScale,
+                    useDynamicScaleExplicit: settings.UseDynamicScaleExplicit,
+                    name: $"{settings.Name}[{frameIndex}]"),
+                2);
+            return storage;
         }
 
         private static HistoryTargetSettings CreateSettings(RenderGraphTextureDesc descriptor, string historyKey)

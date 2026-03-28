@@ -12,10 +12,13 @@ namespace VividRP.Runtime
 {
     public static partial class PassRecorder
     {
-        private sealed class CodeManagedTextureHistoryRequest
+        private sealed class TextureHistoryFrameBinding
         {
             public string Key;
+            public RenderGraphTexture PreviousTexture;
             public RenderGraphTexture CurrentTexture;
+            public RTHandle PreviousHandle;
+            public RTHandle CurrentHandle;
             public RenderGraphTextureDesc Descriptor;
         }
 
@@ -34,8 +37,9 @@ namespace VividRP.Runtime
         private static RenderGraphTexture[] s_HistoryCurrentTextures = Array.Empty<RenderGraphTexture>();
         private static readonly Dictionary<RenderGraphTexture, RTHandle> s_ImportedRTHandles = new();
         private static readonly Dictionary<IRenderPass, List<ImportedPassTexture>> s_PassImportedHandles = new();
-        private static readonly Dictionary<string, CodeManagedTextureHistoryRequest> s_CodeManagedTextureHistoryRequests = new(StringComparer.Ordinal);
+        private static readonly Dictionary<string, TextureHistoryFrameBinding> s_TextureHistoryFrameBindings = new(StringComparer.Ordinal);
         private static readonly Dictionary<string, CodeManagedBufferHistoryRequest> s_CodeManagedBufferHistoryRequests = new(StringComparer.Ordinal);
+        private static readonly HashSet<RenderGraphTexture> s_HistoryImportedTextures = new();
         private static readonly HashSet<RenderGraphBuffer> s_CodeManagedHistoryImportedBuffers = new();
         private static RenderGraph s_CurrentRenderGraph;
 
@@ -117,6 +121,7 @@ namespace VividRP.Runtime
         internal static void PrepareFrame(RenderGraphData graphAsset, CommandBuffer cmdBuffer)
         {
             EnsureCompiled(graphAsset);
+            ClearHistoryImportedHandles();
             ClearCodeManagedHistoryFrameState();
 
             // Advance temporal state and set all shader globals before any pass executes.
@@ -219,29 +224,57 @@ namespace VividRP.Runtime
                 current.desc = CloneTextureDescriptor(descriptor);
             }
 
-            var target = RenderGraphHistoryRegistry.GetOrCreateHistoryTarget(camera, graphAsset, historyKey, descriptor);
-            var hasValidHistory = RenderGraphHistoryRegistry.TryGetHistoryTarget(
+            var hasHistoryTextures = RenderGraphHistoryRegistry.AcquireHistoryTextures(
                 camera,
                 graphAsset,
                 historyKey,
-                out _,
-                out var hasValidData)
-                && hasValidData;
+                descriptor,
+                out var previousHandle,
+                out var currentHandle,
+                out var hasValidData);
 
-            if (previous != null && target != null)
-                ImportTexture(previous, target);
+            RegisterTextureHistoryBinding(
+                historyKey,
+                previous,
+                current,
+                previousHandle,
+                currentHandle,
+                descriptor);
 
-            if (current != null)
+            return hasHistoryTextures && hasValidData;
+        }
+
+        internal static void CommitFrame(RenderGraphData graphAsset)
+        {
+            CommitTextureHistories(graphAsset);
+            FinalizeCodeManagedBufferHistories(graphAsset);
+            ClearHistoryImportedHandles();
+            ClearCodeManagedHistoryFrameState();
+        }
+
+        private static void RegisterTextureHistoryBinding(
+            string historyKey,
+            RenderGraphTexture previousTexture,
+            RenderGraphTexture currentTexture,
+            RTHandle previousHandle,
+            RTHandle currentHandle,
+            RenderGraphTextureDesc descriptor)
+        {
+            if (string.IsNullOrEmpty(historyKey))
+                return;
+
+            if (previousTexture == null && currentTexture == null)
+                return;
+
+            s_TextureHistoryFrameBindings[historyKey] = new TextureHistoryFrameBinding
             {
-                s_CodeManagedTextureHistoryRequests[historyKey] = new CodeManagedTextureHistoryRequest
-                {
-                    Key = historyKey,
-                    CurrentTexture = current,
-                    Descriptor = CloneTextureDescriptor(descriptor),
-                };
-            }
-
-            return hasValidHistory;
+                Key = historyKey,
+                PreviousTexture = previousTexture,
+                CurrentTexture = currentTexture,
+                PreviousHandle = previousHandle,
+                CurrentHandle = currentHandle,
+                Descriptor = CloneTextureDescriptor(descriptor),
+            };
         }
 
         internal static bool AllocHistoryBufferForPass(
@@ -365,15 +398,13 @@ namespace VividRP.Runtime
 
         private static void ClearHistoryImportedHandles()
         {
-            foreach (var texture in s_HistoryPreviousTextures)
+            foreach (var texture in s_HistoryImportedTextures)
             {
                 texture?.ClearImportedHandle();
             }
 
-            foreach (var texture in s_HistoryCurrentTextures)
-            {
-                texture?.ClearImportedHandle();
-            }
+            s_HistoryImportedTextures.Clear();
+            s_TextureHistoryFrameBindings.Clear();
         }
 
         private static void ClearCodeManagedHistoryFrameState()
@@ -384,7 +415,6 @@ namespace VividRP.Runtime
             }
 
             s_CodeManagedHistoryImportedBuffers.Clear();
-            s_CodeManagedTextureHistoryRequests.Clear();
             s_CodeManagedBufferHistoryRequests.Clear();
         }
 
@@ -802,7 +832,7 @@ namespace VividRP.Runtime
 
         private static void PrepareHistoryTargets(RenderGraphData graphAsset, CommandBuffer cmdBuffer)
         {
-            if (cmdBuffer == null || graphAsset?.HistoryTextureDescriptors == null || graphAsset.HistoryTextureDescriptors.Count == 0)
+            if (graphAsset?.HistoryTextureDescriptors == null || graphAsset.HistoryTextureDescriptors.Count == 0)
                 return;
 
             var camera = s_FrameData.GetOrCreate<VividCameraData>().camera;
@@ -811,66 +841,72 @@ namespace VividRP.Runtime
 
             for (var i = 0; i < graphAsset.HistoryTextureDescriptors.Count; i++)
             {
-                RenderGraphHistoryRegistry.GetOrCreateHistoryTarget(camera, graphAsset, i, graphAsset.HistoryTextureDescriptors[i], cmdBuffer);
-            }
-        }
+                var descriptor = graphAsset.HistoryTextureDescriptors[i];
+                var previousTexture = i < s_HistoryPreviousTextures.Length ? s_HistoryPreviousTextures[i] : null;
+                var currentTexture = i < s_HistoryCurrentTextures.Length ? s_HistoryCurrentTextures[i] : null;
+                if (previousTexture == null && currentTexture == null)
+                    continue;
 
-        private static void PrepareFrameHistoryTextures(RenderGraph renderGraph, RenderGraphData graphAsset)
-        {
-            if (renderGraph == null)
-                return;
+                if (previousTexture != null)
+                    previousTexture.desc = CloneTextureDescriptor(descriptor) ?? new RenderGraphTextureDesc();
 
-            ClearHistoryImportedHandles();
+                if (currentTexture != null)
+                    currentTexture.desc = CloneTextureDescriptor(descriptor) ?? new RenderGraphTextureDesc();
 
-            if (graphAsset?.HistoryTextureDescriptors == null || graphAsset.HistoryTextureDescriptors.Count == 0)
-                return;
-
-            var camera = s_FrameData.GetOrCreate<VividCameraData>().camera;
-            if (camera == null)
-                return;
-
-            for (var i = 0; i < graphAsset.HistoryTextureDescriptors.Count && i < s_HistoryPreviousTextures.Length; i++)
-            {
-                if (!RenderGraphHistoryRegistry.TryGetHistoryTarget(camera, graphAsset, i, out var target, out _)
-                    || target == null)
+                if (!RenderGraphHistoryRegistry.AcquireHistoryTextures(
+                        camera,
+                        graphAsset,
+                        i,
+                        descriptor,
+                        out var previousHandle,
+                        out var currentHandle,
+                        out _,
+                        cmdBuffer))
                 {
                     continue;
                 }
 
-                s_HistoryPreviousTextures[i].SetImportedHandle(renderGraph.ImportTexture(target));
+                RegisterTextureHistoryBinding(
+                    i.ToString(),
+                    previousTexture,
+                    currentTexture,
+                    previousHandle,
+                    currentHandle,
+                    descriptor);
             }
         }
 
-        private static void RecordHistoryUpdatePasses(RenderGraph renderGraph, RenderGraphData graphAsset)
+        private static void PreparePendingHistoryTextureImports(RenderGraph renderGraph)
         {
-            if (renderGraph == null || graphAsset?.HistoryTextureDescriptors == null || graphAsset.HistoryTextureDescriptors.Count == 0)
+            if (renderGraph == null || s_TextureHistoryFrameBindings.Count == 0)
                 return;
 
-            var camera = s_FrameData.GetOrCreate<VividCameraData>().camera;
-            if (camera == null)
-                return;
+            var importedHandles = new Dictionary<RTHandle, TextureHandle>();
 
-            for (var i = 0; i < graphAsset.HistoryTextureDescriptors.Count && i < s_HistoryCurrentTextures.Length; i++)
+            foreach (var binding in s_TextureHistoryFrameBindings.Values)
             {
-                var currentTexture = s_HistoryCurrentTextures[i];
-                if (currentTexture == null || !currentTexture.innerHandle.IsValid() || !ShouldPersistHistoryTexture(currentTexture))
-                    continue;
-
-                var target = RenderGraphHistoryRegistry.GetOrCreateHistoryTarget(camera, graphAsset, i, graphAsset.HistoryTextureDescriptors[i]);
-                if (target == null)
-                    continue;
-
-                var destination = renderGraph.ImportTexture(target);
-                if (!destination.IsValid() || !renderGraph.CanAddCopyPass(currentTexture.innerHandle, destination))
-                    continue;
-
-                var historyName = graphAsset.HistoryTextureDescriptors[i]?.Name;
-                if (string.IsNullOrEmpty(historyName))
-                    historyName = $"History_{i}";
-
-                renderGraph.AddCopyPass(currentTexture.innerHandle, destination, $"{historyName} Persist");
-                RenderGraphHistoryRegistry.MarkHistoryValid(camera, graphAsset, i);
+                ImportHistoryTexture(renderGraph, binding?.PreviousTexture, binding?.PreviousHandle, importedHandles);
+                ImportHistoryTexture(renderGraph, binding?.CurrentTexture, binding?.CurrentHandle, importedHandles);
             }
+        }
+
+        private static void ImportHistoryTexture(
+            RenderGraph renderGraph,
+            RenderGraphTexture texture,
+            RTHandle rtHandle,
+            IDictionary<RTHandle, TextureHandle> importedHandles)
+        {
+            if (renderGraph == null || texture == null || rtHandle == null)
+                return;
+
+            if (!importedHandles.TryGetValue(rtHandle, out var importedHandle))
+            {
+                importedHandle = renderGraph.ImportTexture(rtHandle);
+                importedHandles.Add(rtHandle, importedHandle);
+            }
+
+            texture.SetImportedHandle(importedHandle);
+            s_HistoryImportedTextures.Add(texture);
         }
 
         private static bool ShouldPersistHistoryTexture(RenderGraphTexture texture)
@@ -890,43 +926,24 @@ namespace VividRP.Runtime
             return false;
         }
 
-        private static void RecordCodeManagedTextureHistoryUpdatePasses(RenderGraph renderGraph, RenderGraphData graphAsset)
+        private static void CommitTextureHistories(RenderGraphData graphAsset)
         {
-            if (renderGraph == null || graphAsset == null || s_CodeManagedTextureHistoryRequests.Count == 0)
+            if (graphAsset == null || s_TextureHistoryFrameBindings.Count == 0)
                 return;
 
             var camera = s_FrameData.GetOrCreate<VividCameraData>().camera;
             if (camera == null)
                 return;
 
-            foreach (var request in s_CodeManagedTextureHistoryRequests.Values)
+            foreach (var binding in s_TextureHistoryFrameBindings.Values)
             {
-                var currentTexture = request?.CurrentTexture;
-                if (currentTexture == null
-                    || !currentTexture.innerHandle.IsValid()
-                    || !ShouldPersistHistoryTexture(currentTexture))
+                var currentTexture = binding?.CurrentTexture;
+                if (currentTexture == null || !ShouldPersistHistoryTexture(currentTexture))
                 {
                     continue;
                 }
 
-                var target = RenderGraphHistoryRegistry.GetOrCreateHistoryTarget(
-                    camera,
-                    graphAsset,
-                    request.Key,
-                    request.Descriptor);
-                if (target == null)
-                    continue;
-
-                var destination = renderGraph.ImportTexture(target);
-                if (!destination.IsValid() || !renderGraph.CanAddCopyPass(currentTexture.innerHandle, destination))
-                    continue;
-
-                var historyName = request.Descriptor?.Name;
-                if (string.IsNullOrEmpty(historyName))
-                    historyName = request.Key;
-
-                renderGraph.AddCopyPass(currentTexture.innerHandle, destination, $"{historyName} Persist");
-                RenderGraphHistoryRegistry.MarkHistoryValid(camera, graphAsset, request.Key);
+                RenderGraphHistoryRegistry.CommitHistory(camera, graphAsset, binding.Key);
             }
         }
 
@@ -1053,7 +1070,6 @@ namespace VividRP.Runtime
             bool enableAsyncCompute = true)
         {
             EnsureCompiled(graphAsset);
-            PrepareFrameHistoryTextures(renderGraph, graphAsset);
 
             s_CurrentRenderGraph = renderGraph;
             BlueNoise.Instance?.ImportResources(renderGraph);
@@ -1063,6 +1079,7 @@ namespace VividRP.Runtime
                 pass.Prepare(s_FrameData);
             }
 
+            PreparePendingHistoryTextureImports(renderGraph);
             s_CurrentRenderGraph = null;
 
             var textureCache = new Dictionary<RenderGraphTexture, TextureHandle>();
@@ -1124,10 +1141,6 @@ namespace VividRP.Runtime
                         RecordTexturePreviewPasses(renderGraph, unsafePass, resources, passDefinition);
                 }
             }
-
-            RecordHistoryUpdatePasses(renderGraph, graphAsset);
-            RecordCodeManagedTextureHistoryUpdatePasses(renderGraph, graphAsset);
-            FinalizeCodeManagedBufferHistories(graphAsset);
         }
 
         private static PassResource GetCurrentPassResources(IRenderPass pass)

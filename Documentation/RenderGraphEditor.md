@@ -33,6 +33,8 @@
 - 该模式不会生成输入/输出端口，也不会显示 override 选项
 - 推荐用于时序累计这类完全由 `Prepare()` 代码管理的 history 资源；共享给其他 Pass 的 history 仍然继续使用图上的 history node
 - `IRenderPass` 现在提供 `AllocHistoryTexture(...)` / `AllocHistoryBuffer(...)`，可以在 `Prepare()` 中直接申请 pass-scoped history 资源
+- 纹理 history 运行时由 `BufferedRTHandleSystem` 做双缓冲物理存储，但对 Pass 暴露的仍是 `RenderGraphTexture`
+- `PassRecorder` 会在录制阶段自动把 history 逻辑资源导入 RenderGraph，并在图执行成功后提交 history；不再依赖图尾的显式 copy 更新
 
 ## 使用方式（最小闭环）
 

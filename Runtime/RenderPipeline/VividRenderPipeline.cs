@@ -122,6 +122,8 @@ namespace VividRP.Runtime
                     return;
                 }
 
+                PassRecorder.CommitFrame(graphAsset);
+
                 if (m_Asset is { EnableGPUDriven: true, EnableGPUDrivenDebugOverlay: true })
                 {
                     context.SetupCameraProperties(camera);

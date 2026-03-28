@@ -6,8 +6,10 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using VividRP.Editor.RenderGraph.Generated;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
+using ClusterDebugPass = VividRP.Runtime.RenderPass.Core.ClusterDebugPass;
 
 namespace VividRP.Editor.Tests
 {

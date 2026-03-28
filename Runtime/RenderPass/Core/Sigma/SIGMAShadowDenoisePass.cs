@@ -54,7 +54,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
         private RenderGraphTexture m_HistoryLengthTexture;
 
-        // Current-frame write outputs (transient; system copies to history store after frame)
+        // Current-frame write outputs (persistent history buffers imported when requested)
         [RenderGraphResource(Name = "SIGMA_HistoryShadowCurrent",
             Access = AccessFlags.ReadWrite,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
@@ -239,6 +239,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             var cameraPos   = new Vector3(cameraPos4.x, cameraPos4.y, cameraPos4.z);
             var sigmaSettings = ResolveSettings(VividVolumeManagerUtility.GetRayTracingSettingsVolume());
             m_MaxStabilizedFrameNum = sigmaSettings.MaxStabilizedFrameNum;
+            bool useTemporalStabilization = m_MaxStabilizedFrameNum > 0;
 
             // History allocation (code-managed)
             var shadowDesc = m_HistoryShadowTexture?.desc ?? m_DenoisedShadowTexture?.desc;
@@ -252,16 +253,16 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             bool hasShadowHistory = PassRecorder.AllocHistoryTextureForPass(
                 this, "HistoryShadow",
                 previous: m_HistoryShadowTexture,
-                current:  m_HistoryShadowCurrent,
+                current:  useTemporalStabilization ? m_HistoryShadowCurrent : null,
                 desc:     shadowDesc);
 
             bool hasLengthHistory = PassRecorder.AllocHistoryTextureForPass(
                 this, "HistoryLength",
                 previous: m_HistoryLengthTexture,
-                current:  m_HistoryLengthCurrent,
+                current:  useTemporalStabilization ? m_HistoryLengthCurrent : null,
                 desc:     lengthDesc);
 
-            m_HasValidHistory = hasShadowHistory && hasLengthHistory;
+            m_HasValidHistory = useTemporalStabilization && hasShadowHistory && hasLengthHistory;
 
             Matrix4x4 previousWorldToView = m_HasValidHistory ? m_PrevWorldToView : worldToView;
             Matrix4x4 previousViewToClip = m_HasValidHistory ? m_PrevViewToClip : viewToClip;

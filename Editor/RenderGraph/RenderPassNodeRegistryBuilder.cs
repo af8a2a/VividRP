@@ -59,6 +59,16 @@ namespace VividRP.Editor.RenderGraph
             IEnumerable<RenderPassNodeRegistration> existingRegistrations = null,
             bool includeTestAssemblies = false)
         {
+            var availablePassTypes = passTypes
+                .Where(type => IsAutoRegistrablePassType(type, includeTestAssemblies))
+                .OrderBy(type => type.FullName, StringComparer.Ordinal)
+                .ThenBy(type => type.Assembly.GetName().Name, StringComparer.Ordinal)
+                .ToArray();
+            var availablePassTypeNames = new HashSet<string>(
+                availablePassTypes
+                    .Select(BuildTypeName)
+                    .Where(typeName => !string.IsNullOrEmpty(typeName)),
+                StringComparer.Ordinal);
             var registrations = new Dictionary<string, RenderPassNodeRegistration>(StringComparer.Ordinal);
             var usedClassNames = new HashSet<string>(StringComparer.Ordinal);
 
@@ -72,6 +82,9 @@ namespace VividRP.Editor.RenderGraph
                         continue;
                     }
 
+                    if (!availablePassTypeNames.Contains(existingRegistration.PassTypeName))
+                        continue;
+
                     if (!usedClassNames.Add(existingRegistration.NodeClassName))
                         continue;
 
@@ -79,10 +92,7 @@ namespace VividRP.Editor.RenderGraph
                 }
             }
 
-            foreach (var passType in passTypes
-                         .Where(type => IsAutoRegistrablePassType(type, includeTestAssemblies))
-                         .OrderBy(type => type.FullName, StringComparer.Ordinal)
-                         .ThenBy(type => type.Assembly.GetName().Name, StringComparer.Ordinal))
+            foreach (var passType in availablePassTypes)
             {
                 var passTypeName = BuildTypeName(passType);
                 if (string.IsNullOrEmpty(passTypeName) || registrations.ContainsKey(passTypeName))

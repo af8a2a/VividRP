@@ -112,7 +112,9 @@ namespace VividRP.Runtime
         private bool GetRenderIntoTexture()
         {
             var currentCamera = camera;
-            return m_RenderIntoTexture || (currentCamera != null && currentCamera.targetTexture != null);
+            return m_RenderIntoTexture
+                || (currentCamera != null && currentCamera.targetTexture != null)
+                || (currentCamera != null && currentCamera.cameraType == CameraType.SceneView);
         }
         
         

@@ -11,6 +11,8 @@ RWTexture2D<float> _ShadowClassifyMask;
 
 float4 _LightDirectionWS;
 float _NormalFacingThreshold;
+int _OutputWidth;
+int _OutputHeight;
 
 bool IsSkyPixel(float deviceDepth)
 {
@@ -20,7 +22,7 @@ bool IsSkyPixel(float deviceDepth)
 [numthreads(8, 8, 1)]
 void ShadowClassify(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
-    if (dispatchThreadID.x >= (uint)_ScreenSize.x || dispatchThreadID.y >= (uint)_ScreenSize.y)
+    if (dispatchThreadID.x >= (uint)_OutputWidth || dispatchThreadID.y >= (uint)_OutputHeight)
         return;
 
     uint2 pixelCoord = dispatchThreadID.xy;
@@ -48,9 +50,9 @@ void ShadowClassify(uint3 dispatchThreadID : SV_DispatchThreadID)
     // Pixels near depth edges are more likely to be in penumbra
     float depthCenter = deviceDepth;
     float depthLeft  = _DepthTexture.Load(int3(max(pixelCoord.x - 1, 0), pixelCoord.y, 0));
-    float depthRight = _DepthTexture.Load(int3(min(pixelCoord.x + 1, (uint)_ScreenSize.x - 1), pixelCoord.y, 0));
+    float depthRight = _DepthTexture.Load(int3(min(pixelCoord.x + 1, (uint)_OutputWidth - 1), pixelCoord.y, 0));
     float depthUp    = _DepthTexture.Load(int3(pixelCoord.x, max(pixelCoord.y - 1, 0), 0));
-    float depthDown  = _DepthTexture.Load(int3(pixelCoord.x, min(pixelCoord.y + 1, (uint)_ScreenSize.y - 1), 0));
+    float depthDown  = _DepthTexture.Load(int3(pixelCoord.x, min(pixelCoord.y + 1, (uint)_OutputHeight - 1), 0));
 
     float maxDepthDiff = max(
         max(abs(depthCenter - depthLeft), abs(depthCenter - depthRight)),

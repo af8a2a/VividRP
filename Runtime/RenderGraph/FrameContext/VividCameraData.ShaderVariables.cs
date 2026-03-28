@@ -63,7 +63,7 @@ namespace VividRP.Runtime
             var invViewMatrix = GetInverseViewMatrix();
             var cameraProjection = GetProjectionMatrix();
             var cameraInvProjection = GetInverseProjectionMatrix();
-            var glstateMatrixProjection = GetGPUProjectionMatrix();
+            var glstateMatrixProjection = GetGPUProjectionMatrix(true);
             var matrixInvP = glstateMatrixProjection.inverse;
             var matrixVP = glstateMatrixProjection * viewMatrix;
             var matrixInvVP = matrixVP.inverse;

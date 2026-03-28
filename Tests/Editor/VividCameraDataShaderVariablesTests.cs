@@ -53,7 +53,7 @@ namespace VividRP.Editor.Tests
             temporalData.Update(cameraData);
 
             var shaderVariables = cameraData.BuildShaderVariables(temporalData);
-            var expectedGpuProjectionMatrix = GL.GetGPUProjectionMatrix(jitteredProjectionMatrix, false);
+            var expectedGpuProjectionMatrix = GL.GetGPUProjectionMatrix(jitteredProjectionMatrix, true);
             var expectedMotionVectorGpuProjectionMatrix = GL.GetGPUProjectionMatrix(nonJitteredProjectionMatrix, true);
             var expectedViewMatrix = camera.worldToCameraMatrix;
 
@@ -174,6 +174,43 @@ namespace VividRP.Editor.Tests
 
             Assert.That((camera.depthTextureMode & DepthTextureMode.Depth) != 0, Is.True);
             Assert.That((camera.depthTextureMode & DepthTextureMode.MotionVectors) != 0, Is.True);
+        }
+
+        [Test]
+        public void FrameContextSystem_UsesExplicitShaderVariablesGlobalConstantBuffer()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "FrameContextSystem.cs"));
+
+            Assert.That(source, Does.Contain("var shaderVariablesGlobal = ShaderVariablesGlobal.Create(sv, temporalData);"));
+            Assert.That(source, Does.Contain("ConstantBuffer.PushGlobal(cmd, shaderVariablesGlobal, ShaderVariablesGlobal.ConstantBufferShaderId);"));
+            Assert.That(source, Does.Not.Contain("cmd.SetGlobalMatrix("));
+            Assert.That(source, Does.Not.Contain("cmd.SetGlobalVector("));
+        }
+
+        [Test]
+        public void UnityInput_RedirectsLegacyAccessors_ToExplicitShaderVariablesGlobalBuffer()
+        {
+            var unityInputSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "UnityInput.hlsl"));
+            var shaderVariablesGlobalSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "ShaderVariablesGlobal.hlsl"));
+            var inputSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "Input.hlsl"));
+
+            Assert.That(unityInputSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/ShaderVariablesGlobal.hlsl\""));
+            Assert.That(shaderVariablesGlobalSource, Does.Contain("GLOBAL_CBUFFER_START(ShaderVariablesGlobal, b0)"));
+            Assert.That(shaderVariablesGlobalSource, Does.Contain("#define unity_MatrixInvVP _VividMatrixInvVP"));
+            Assert.That(shaderVariablesGlobalSource, Does.Contain("#define _WorldSpaceCameraPos _VividWorldSpaceCameraPos.xyz"));
+            Assert.That(shaderVariablesGlobalSource, Does.Contain("#define _GlobalMipBias _VividGlobalMipBias.xy"));
+            Assert.That(shaderVariablesGlobalSource, Does.Contain("#define _ScaledScreenParams _VividScaledScreenParams"));
+            Assert.That(inputSource, Does.Not.Contain("float2 _GlobalMipBias;"));
+            Assert.That(inputSource, Does.Not.Contain("float4 _ScaledScreenParams;"));
+        }
+
+        [Test]
+        public void InitializeContext_UsesRenderToTextureConvention_ForStoredCameraMatrices()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.Execution.cs"));
+
+            Assert.That(source, Does.Contain("additionalCameraData.UpdateCameraMatrices(true);"));
+            Assert.That(source, Does.Not.Contain("additionalCameraData.UpdateCameraMatrices(camera.targetTexture != null);"));
         }
 
         [Test]

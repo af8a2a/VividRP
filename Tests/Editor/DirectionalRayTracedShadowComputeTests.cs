@@ -3,6 +3,7 @@ using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
 {
@@ -20,12 +21,32 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("Texture2D<float4> _GBuffer1;"));
             Assert.That(source, Does.Contain("RWTexture2D<float> _DirectionalShadowTexture;"));
             Assert.That(source, Does.Contain("float4x4 _InvViewProjectionMatrix;"));
+            Assert.That(source, Does.Contain("int _OutputWidth;"));
+            Assert.That(source, Does.Contain("int _OutputHeight;"));
             Assert.That(source, Does.Contain("DecodeVividNormalOct"));
-            Assert.That(source, Does.Contain("ComputeWorldSpacePosition"));
+            Assert.That(source, Does.Contain("ComputeWorldSpacePosition(uv, deviceDepth, _InvViewProjectionMatrix);"));
+            Assert.That(source, Does.Contain("dispatchThreadID.x >= (uint)_OutputWidth"));
+            Assert.That(source, Does.Contain("dispatchThreadID.y >= (uint)_OutputHeight"));
+            Assert.That(source, Does.Contain("float2(_OutputWidth, _OutputHeight)"));
             Assert.That(source, Does.Not.Contain("UNITY_MATRIX_I_VP"));
+            Assert.That(source, Does.Not.Contain("_ScreenSize"));
             Assert.That(source, Does.Contain("query.TraceRayInline("));
-            Assert.That(source, Does.Contain("while (query.Proceed())"));
-            Assert.That(source, Does.Contain("query.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 0.0 : 1.0;"));
+            Assert.That(source, Does.Contain("query.Proceed();"));
+            Assert.That(source, Does.Contain("PackPenumbra(shadowHitDist, _TanSunAngularRadius)"));
+        }
+
+        [Test]
+        public void ShadowClassifyCompute_UsesExplicitOutputDimensions()
+        {
+            var source = File.ReadAllText(GetShadowClassifyComputeShaderSourcePath());
+
+            Assert.That(source, Does.Contain("int _OutputWidth;"));
+            Assert.That(source, Does.Contain("int _OutputHeight;"));
+            Assert.That(source, Does.Contain("dispatchThreadID.x >= (uint)_OutputWidth"));
+            Assert.That(source, Does.Contain("dispatchThreadID.y >= (uint)_OutputHeight"));
+            Assert.That(source, Does.Contain("min(pixelCoord.x + 1, (uint)_OutputWidth - 1)"));
+            Assert.That(source, Does.Contain("min(pixelCoord.y + 1, (uint)_OutputHeight - 1)"));
+            Assert.That(source, Does.Not.Contain("_ScreenSize"));
         }
 
         [Test]
@@ -59,6 +80,14 @@ namespace VividRP.Editor.Tests
         private static string GetComputeShaderSourcePath()
         {
             var shaderPath = GetPackageFilePath("Shaders", "Core", "Private", "DirectionalRayTracedShadow.compute");
+
+            Assert.That(File.Exists(shaderPath), Is.True, $"Expected compute shader source at '{shaderPath}'.");
+            return shaderPath;
+        }
+
+        private static string GetShadowClassifyComputeShaderSourcePath()
+        {
+            var shaderPath = GetPackageFilePath("Shaders", "Core", "Private", "ShadowClassify.compute");
 
             Assert.That(File.Exists(shaderPath), Is.True, $"Expected compute shader source at '{shaderPath}'.");
             return shaderPath;

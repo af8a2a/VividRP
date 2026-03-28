@@ -25,21 +25,22 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.AccelerationStructures[0].Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[]
             {
-                "DebugTexture",
                 "Depth",
                 "DirectionalShadowTexture",
-                "GBuffer1"
+                "GBuffer1",
+                "ShadowClassifyMask"
             }));
             Assert.That(textureEntries.Single(entry => entry.Name == "Depth").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(textureEntries.Single(entry => entry.Name == "GBuffer1").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(textureEntries.Single(entry => entry.Name == "DirectionalShadowTexture").Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(textureEntries.Single(entry => entry.Name == "ShadowClassifyMask").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(
                 textureEntries.Single(entry => entry.Name == "DirectionalShadowTexture").Texture.desc.ColorFormat,
                 Is.EqualTo(GraphicsFormat.R16_SFloat));
         }
 
         [Test]
-        public void Prepare_UsesCameraSizeAndKeepsWhiteOutputConfiguration()
+        public void Prepare_UsesCameraSizeAndKeepsRawShadowOutputConfiguration()
         {
             var pass = new DirectionalRayTracedShadowPass();
             var frameData = new ContextContainer();
@@ -54,7 +55,7 @@ namespace VividRP.Editor.Tests
             Assert.That(outputTexture.desc.Width, Is.EqualTo(960));
             Assert.That(outputTexture.desc.Height, Is.EqualTo(540));
             Assert.That(outputTexture.desc.EnableRandomWrite, Is.True);
-            Assert.That(outputTexture.desc.ClearColor, Is.EqualTo(Color.white));
+            Assert.That(outputTexture.desc.ClearColor, Is.EqualTo(new Color(65504f, 0f, 0f, 0f)));
             Assert.That(outputTexture.desc.FilterMode, Is.EqualTo(FilterMode.Point));
         }
 

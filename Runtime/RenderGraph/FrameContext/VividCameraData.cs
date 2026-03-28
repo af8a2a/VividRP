@@ -97,7 +97,7 @@ namespace VividRP.Runtime
             if (additionalData != null)
                 return additionalData.GetGPUProjectionMatrix(viewIndex);
 
-            return GL.GetGPUProjectionMatrix(GetProjectionMatrix(viewIndex), camera.targetTexture);
+            return GL.GetGPUProjectionMatrix(GetProjectionMatrix(viewIndex), IsRenderingToTexture());
         }
 
         public Matrix4x4 GetGPUProjectionMatrix(bool renderIntoTexture, int viewIndex = 0)
@@ -108,12 +108,12 @@ namespace VividRP.Runtime
             return GL.GetGPUProjectionMatrix(GetProjectionMatrix(viewIndex), renderIntoTexture);
         }
 
-        public Matrix4x4 GetGPUProjectionMatrixNoJitter(int viewIndex = 0,bool renderIntoTexture = true)
+        public Matrix4x4 GetGPUProjectionMatrixNoJitter(int viewIndex = 0)
         {
             if (additionalData != null)
                 return additionalData.GetGPUProjectionMatrixNoJitter(viewIndex);
 
-            return GL.GetGPUProjectionMatrix(GetProjectionMatrixNoJitter(viewIndex), camera.targetTexture);
+            return GL.GetGPUProjectionMatrix(GetProjectionMatrixNoJitter(viewIndex), IsRenderingToTexture());
         }
 
         public Matrix4x4 GetGPUProjectionMatrixNoJitter(bool renderIntoTexture, int viewIndex = 0)
@@ -122,6 +122,13 @@ namespace VividRP.Runtime
                 return additionalData.GetGPUProjectionMatrixNoJitter(renderIntoTexture, viewIndex);
 
             return GL.GetGPUProjectionMatrix(GetProjectionMatrixNoJitter(viewIndex), renderIntoTexture);
+        }
+
+        // SceneView cameras render into a RenderTexture internally even when camera.targetTexture is null,
+        // so they require the same Y-flip as explicit render-to-texture targets.
+        private bool IsRenderingToTexture()
+        {
+            return camera != null && (camera.targetTexture != null || camera.cameraType == CameraType.SceneView);
         }
 
         public Matrix4x4 GetGPUViewProjectionMatrix(int viewIndex = 0)

@@ -42,6 +42,18 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void BuildRegistrations_RemovesExistingRegistration_WhenPassNoLongerExists()
+        {
+            var existingRegistration = new RenderPassNodeRegistration("SavedFullScreenPassNode", FullScreenPassTypeName);
+
+            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(
+                Array.Empty<Type>(),
+                new[] { existingRegistration });
+
+            Assert.That(registrations, Is.Empty);
+        }
+
+        [Test]
         public void BuildRegistrations_GeneratesDistinctNodeNames_WhenPassNamesCollide()
         {
             var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(

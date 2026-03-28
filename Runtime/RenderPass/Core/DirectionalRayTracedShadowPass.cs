@@ -110,7 +110,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SceneAccelerationStructure = CreateSceneAccelerationStructure();
             m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
             m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.R16G16_SFloat);
-            m_DirectionalShadowTexture = RenderGraphTexture.CreateOutput("DirectionalShadowTexture", GraphicsFormat.R8G8B8A8_UNorm);
+            m_DirectionalShadowTexture = RenderGraphTexture.CreateOutput("DirectionalShadowTexture", GraphicsFormat.R16_SFloat);
             m_DirectionalShadowTexture.desc.ClearBuffer = true;
             m_DirectionalShadowTexture.desc.ClearColor = RawShadowClearColor;
             m_DirectionalShadowTexture.desc.FilterMode = FilterMode.Point;
@@ -265,6 +265,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 nativeCmd.SetComputeVectorParam(m_DirectionalRayTracedShadowCompute, SunBasisYId, m_SunBasisY);
                 nativeCmd.SetComputeFloatParam(m_DirectionalRayTracedShadowCompute, TanSunAngularRadiusId, m_TanSunAngularRadius);
                 nativeCmd.SetComputeIntParam(m_DirectionalRayTracedShadowCompute, FrameIndexId, m_FrameIndex);
+                nativeCmd.SetComputeIntParam(m_DirectionalRayTracedShadowCompute, OutputWidthId, m_DirectionalShadowTexture.desc.Width);
+                nativeCmd.SetComputeIntParam(m_DirectionalRayTracedShadowCompute, OutputHeightId, m_DirectionalShadowTexture.desc.Height);
                 nativeCmd.SetComputeMatrixParam(
                     m_DirectionalRayTracedShadowCompute,
                     InvViewProjectionMatrixId,

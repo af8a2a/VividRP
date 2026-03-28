@@ -86,9 +86,6 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/DirectionalRayTracedShadow")]
         public ComputeShader DirectionalRayTracedShadowCompute;
 
-        [ResourcePath("Shaders/Core/Private/DirectionalRayTracedShadowDenoise")]
-        public ComputeShader DirectionalRayTracedShadowDenoiseCompute;
-
         [ResourcePath("Shaders/Core/Private/ShadowClassify")]
         public ComputeShader ShadowClassifyCompute;
 

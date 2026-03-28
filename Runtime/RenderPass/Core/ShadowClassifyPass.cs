@@ -16,6 +16,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ShadowClassifyMaskId = Shader.PropertyToID("_ShadowClassifyMask");
         private static readonly int LightDirectionWSId = Shader.PropertyToID("_LightDirectionWS");
         private static readonly int NormalFacingThresholdId = Shader.PropertyToID("_NormalFacingThreshold");
+        private static readonly int OutputWidthId = Shader.PropertyToID("_OutputWidth");
+        private static readonly int OutputHeightId = Shader.PropertyToID("_OutputHeight");
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
@@ -102,6 +104,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
             cmd.SetComputeVectorParam(m_ClassifyCompute, LightDirectionWSId, m_LightDirectionWS);
             cmd.SetComputeFloatParam(m_ClassifyCompute, NormalFacingThresholdId, DefaultNormalFacingThreshold);
+            cmd.SetComputeIntParam(m_ClassifyCompute, OutputWidthId, m_ShadowClassifyMask.desc.Width);
+            cmd.SetComputeIntParam(m_ClassifyCompute, OutputHeightId, m_ShadowClassifyMask.desc.Height);
 
             cmd.DispatchCompute(m_ClassifyCompute, m_Kernel,
                 m_DispatchGroupCountX, m_DispatchGroupCountY, 1);

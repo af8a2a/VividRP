@@ -4,14 +4,7 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/UnityInput.hlsl"
 
-// x = Mip Bias
-// y = 2.0 ^ [Mip Bias]
-float2 _GlobalMipBias;
-
-
-#define _InvCameraViewProj unity_MatrixInvVP
-
-float4 _ScaledScreenParams;
+#define _InvCameraViewProj UNITY_MATRIX_I_VP
 
 #define UNITY_MATRIX_M     unity_ObjectToWorld
 #define UNITY_MATRIX_I_M   unity_WorldToObject

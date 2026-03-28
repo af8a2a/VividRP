@@ -53,7 +53,7 @@ namespace VividRP.Runtime
             if (additionalCameraData == null && camera.cameraType == CameraType.Game)
                 additionalCameraData = camera.GetVividAdditionalCameraData();
             if (additionalCameraData != null)
-                additionalCameraData.UpdateCameraMatrices(camera.targetTexture != null);
+                additionalCameraData.UpdateCameraMatrices(true);
 
             cameraData.camera = camera;
             cameraData.additionalData = additionalCameraData;

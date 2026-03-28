@@ -285,8 +285,16 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 ConstantBuffer.Push(cmd, m_Constants, m_ClassifyTiles, SIGMA_ClassifyTilesConstantsId);
                 cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gIn_ViewZ,    m_DepthTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gIn_Penumbra, m_RawShadowTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gOut_Tiles,   debugTexture);
+                cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gOut_Tiles,   m_TileTexture.innerHandle);
                 cmd.DispatchCompute(m_ClassifyTiles, kernel, tileW, tileH, 1);
+
+                if (debugTexture != null)
+                {
+                    cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gIn_ViewZ,    m_DepthTexture.innerHandle);
+                    cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gIn_Penumbra, m_RawShadowTexture.innerHandle);
+                    cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gOut_Tiles,   debugTexture);
+                    cmd.DispatchCompute(m_ClassifyTiles, kernel, tileW, tileH, 1);
+                }
 
                 // Stage 2: SmoothTiles
                 int smoothTileW = CoreUtils.DivRoundUp(tileW, 16);
@@ -350,7 +358,11 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             }
         }
 
-        public override void Dispose() { }
+        public override void Dispose()
+        {
+            debugTexture?.Release();
+            debugTexture = null;
+        }
 
         private bool CanExecute()
         {

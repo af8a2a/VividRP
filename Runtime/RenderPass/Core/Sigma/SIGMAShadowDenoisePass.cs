@@ -139,7 +139,6 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
         private const float DefaultPlaneDistSensitivity  = 0.02f;
         private const uint  DefaultMaxStabilizedFrameNum = 5;
-        private RTHandle debugTexture;
 
         public SIGMAShadowDenoisePass()
         {
@@ -250,13 +249,6 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 current:  m_HistoryLengthCurrent,
                 desc:     lengthDesc);
 
-            var desc = new RenderTextureDescriptor(tileW, tileH)
-            {
-                graphicsFormat = GraphicsFormat.R8G8B8A8_UNorm,
-                enableRandomWrite = true
-            };
-            RenderingUtils.ReAllocateHandleIfNeeded(ref debugTexture, desc, name: "NRD-SIGMA TileTexture");
-
             m_HasValidHistory = hasShadowHistory && hasLengthHistory;
 
             // Store for next frame
@@ -287,15 +279,6 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gIn_Penumbra, m_RawShadowTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gOut_Tiles,   m_TileTexture.innerHandle);
                 cmd.DispatchCompute(m_ClassifyTiles, kernel, tileW, tileH, 1);
-
-                if (debugTexture != null)
-                {
-                    cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gIn_ViewZ,    m_DepthTexture.innerHandle);
-                    cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gIn_Penumbra, m_RawShadowTexture.innerHandle);
-                    cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gOut_Tiles,   debugTexture);
-                    cmd.DispatchCompute(m_ClassifyTiles, kernel, tileW, tileH, 1);
-                }
-
 
                 // Stage 2: SmoothTiles
                 int smoothTileW = CoreUtils.DivRoundUp(tileW, 16);
@@ -361,8 +344,6 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
         public override void Dispose()
         {
-            debugTexture?.Release();
-            debugTexture = null;
         }
 
         private bool CanExecute()

@@ -6,6 +6,8 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     internal struct SigmaSharedConstants
     {
+        private const float Epsilon = 1e-6f;
+
         public Matrix4x4 gWorldToView;
         public Matrix4x4 gViewToClip;
         public Matrix4x4 gWorldToClipPrev;
@@ -45,6 +47,22 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
         public uint gFrameIndex;
         public uint gIsRectChanged;
 
+        private readonly struct ProjectionData
+        {
+            public ProjectionData(bool isLeftHanded, bool isOrthographic, Vector4 frustum, float projectY)
+            {
+                IsLeftHanded = isLeftHanded;
+                IsOrthographic = isOrthographic;
+                Frustum = frustum;
+                ProjectY = projectY;
+            }
+
+            public bool IsLeftHanded { get; }
+            public bool IsOrthographic { get; }
+            public Vector4 Frustum { get; }
+            public float ProjectY { get; }
+        }
+
         public static SigmaSharedConstants Compute(
             Matrix4x4 worldToView,
             Matrix4x4 viewToClip,
@@ -63,46 +81,68 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
         {
             var constants = new SigmaSharedConstants();
 
-            constants.gWorldToView = worldToView;
-            constants.gViewToClip = viewToClip;
-            constants.gWorldToClipPrev = viewToClipPrev * worldToViewPrev;
-            constants.gWorldToViewPrev = worldToViewPrev;
+            var currentProjection = DecomposeProjection(viewToClip, isOrtho);
+            var previousProjection = DecomposeProjection(viewToClipPrev, isOrtho);
 
-            // Frustum params from projection matrix
-            // For perspective: proj[0][0] = 1/tanHalfFovX, proj[1][1] = 1/tanHalfFovY
-            float tanHalfFovX = 1.0f / viewToClip[0, 0];
-            float tanHalfFovY = 1.0f / viewToClip[1, 1];
-            constants.gFrustum = new Vector4(tanHalfFovX, tanHalfFovY, 1.0f / tanHalfFovX, 1.0f / tanHalfFovY);
+            var viewToClipLh = viewToClip;
+            var viewToClipPrevLh = viewToClipPrev;
+            var worldToViewLh = worldToView;
+            var worldToViewPrevLh = worldToViewPrev;
 
-            float tanHalfFovXPrev = 1.0f / viewToClipPrev[0, 0];
-            float tanHalfFovYPrev = 1.0f / viewToClipPrev[1, 1];
-            constants.gFrustumPrev = new Vector4(tanHalfFovXPrev, tanHalfFovYPrev, 1.0f / tanHalfFovXPrev, 1.0f / tanHalfFovYPrev);
+            if (!currentProjection.IsLeftHanded)
+            {
+                viewToClipLh = ConvertProjectionToLeftHanded(viewToClipLh);
+                viewToClipPrevLh = ConvertProjectionToLeftHanded(viewToClipPrevLh);
+                worldToViewLh = ConvertWorldToViewToLeftHanded(worldToViewLh);
+                worldToViewPrevLh = ConvertWorldToViewToLeftHanded(worldToViewPrevLh);
+            }
 
-            // Unproject: pixel size in world units at viewZ=1
-            constants.gUnproject = isOrtho ? 1.0f : 1.0f / (0.5f * height * viewToClip[1, 1]);
+            currentProjection = DecomposeProjection(viewToClipLh, isOrtho);
+            previousProjection = DecomposeProjection(viewToClipPrevLh, isOrtho);
 
-            // Rotator: frame-dependent rotation for sampling pattern
-            float angle = 2.0f * Mathf.PI * SequenceHelpers.Halton(frameIndex + 1, 2);
-            float ca = Mathf.Cos(angle);
-            float sa = Mathf.Sin(angle);
-            constants.gRotator = new Vector4(ca, sa, -sa, ca);
+            var viewToWorldLh = worldToViewLh.inverse;
+            var viewToWorldPrevLh = worldToViewPrevLh.inverse;
 
-            float anglePost = 2.0f * Mathf.PI * SequenceHelpers.Halton(frameIndex + 1, 3);
-            float caPost = Mathf.Cos(anglePost);
-            float saPost = Mathf.Sin(anglePost);
-            constants.gRotatorPost = new Vector4(caPost, saPost, -saPost, caPost);
+            var viewTranslation = GetTranslation(viewToWorldLh);
+            var prevViewTranslation = GetTranslation(viewToWorldPrevLh);
+            var translationDelta = prevViewTranslation - viewTranslation;
+
+            viewToWorldLh = SetTranslation(viewToWorldLh, Vector3.zero);
+            worldToViewLh = viewToWorldLh.inverse;
+
+            viewToWorldPrevLh = SetTranslation(viewToWorldPrevLh, translationDelta);
+            worldToViewPrevLh = viewToWorldPrevLh.inverse;
+
+            constants.gWorldToView = worldToViewLh;
+            constants.gViewToClip = viewToClipLh;
+            constants.gWorldToClipPrev = viewToClipPrevLh * worldToViewPrevLh;
+            constants.gWorldToViewPrev = worldToViewPrevLh;
+            constants.gFrustum = currentProjection.Frustum;
+            constants.gFrustumPrev = previousProjection.Frustum;
+            constants.gUnproject = 1.0f / (0.5f * height * Mathf.Max(currentProjection.ProjectY, Epsilon));
+
+            float angle = SequenceHelpers.Weyl1D(0.0f, (int)(frameIndex * 2u)) * Mathf.Deg2Rad * 90.0f;
+            float angleBayer = SequenceHelpers.Bayer4x4(frameIndex * 2u) * Mathf.Deg2Rad * 360.0f;
+            constants.gRotator = SequenceHelpers.CombineRotators(
+                SequenceHelpers.GetRotator(angle),
+                SequenceHelpers.GetRotator(angleBayer));
+
+            float anglePost = SequenceHelpers.Weyl1D(0.0f, (int)(frameIndex * 2u + 1u)) * Mathf.Deg2Rad * 90.0f;
+            float anglePostBayer = SequenceHelpers.Bayer4x4(frameIndex * 2u + 1u) * Mathf.Deg2Rad * 360.0f;
+            constants.gRotatorPost = SequenceHelpers.CombineRotators(
+                SequenceHelpers.GetRotator(anglePost),
+                SequenceHelpers.GetRotator(anglePostBayer));
 
             // View vector (for ortho mode)
-            var viewForward = new Vector3(worldToView[2, 0], worldToView[2, 1], worldToView[2, 2]).normalized;
-            constants.gViewVectorWorld = new Vector4(viewForward.x, viewForward.y, viewForward.z, 0f);
+            var viewDirectionWorld = -GetColumn(viewToWorldLh, 2).normalized;
+            constants.gViewVectorWorld = new Vector4(viewDirectionWorld.x, viewDirectionWorld.y, viewDirectionWorld.z, 0f);
 
             // Light direction in view space
-            var lightDirView = worldToView.MultiplyVector(lightDirectionWS).normalized;
+            var lightDirView = worldToViewLh.MultiplyVector(lightDirectionWS).normalized;
             constants.gLightDirectionView = new Vector4(lightDirView.x, lightDirView.y, lightDirView.z, 0f);
 
             // Camera delta
-            var delta = cameraPosition - cameraPositionPrev;
-            constants.gCameraDelta = new Vector4(delta.x, delta.y, delta.z, 0f);
+            constants.gCameraDelta = new Vector4(translationDelta.x, translationDelta.y, translationDelta.z, 0f);
 
             // Motion vector scale (screen-space MV in pixels)
             constants.gMvScale = new Vector4(1f, 1f, 0f, 0f);
@@ -128,7 +168,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             constants.gTilesSizeMinusOneX = tileW - 1;
             constants.gTilesSizeMinusOneY = tileH - 1;
 
-            constants.gOrthoMode = isOrtho ? 1f : 0f;
+            constants.gOrthoMode = currentProjection.IsOrthographic ? -1f : 0f;
             constants.gDenoisingRange = denoisingRange;
             constants.gPlaneDistSensitivity = planeDistSensitivity;
             constants.gStabilizationStrength = stabilizationStrength;
@@ -141,22 +181,172 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
             return constants;
         }
+
+        private static ProjectionData DecomposeProjection(Matrix4x4 projection, bool isOrthographicHint)
+        {
+            var planes = new Vector4[6];
+            bool isReversedZ = MvpToPlanes(projection, planes);
+            bool isOrthographic = isOrthographicHint || IsOrthographicProjection(projection);
+
+            float x0;
+            float x1;
+            float y0;
+            float y1;
+
+            if (isOrthographic)
+            {
+                x0 = -planes[0].w;
+                x1 = planes[1].w;
+                y0 = -planes[2].w;
+                y1 = planes[3].w;
+
+                if (projection[1, 1] < 0.0f)
+                    Swap(ref y0, ref y1);
+            }
+            else
+            {
+                x0 = planes[0].z / planes[0].x;
+                x1 = planes[1].z / planes[1].x;
+                y0 = planes[2].z / planes[2].y;
+                y1 = planes[3].z / planes[3].y;
+            }
+
+            float nearZ = -planes[4].w;
+            Vector4 clip = projection * new Vector4(0.0f, 0.0f, nearZ, 1.0f);
+            Vector3 column2 = isOrthographic
+                ? GetColumn(projection, 2) * (isReversedZ ? -1.0f : 1.0f)
+                : new Vector3(0.0f, 0.0f, clip.w > 0.0f ? 1.0f : -1.0f);
+
+            bool compare = Vector3.Dot(
+                Vector3.Cross(GetColumn(projection, 0), GetColumn(projection, 1)),
+                column2) > 0.0f;
+
+            bool isLeftHanded = projection[0, 0] > 0.0f ? compare : !compare;
+            float projectY = Mathf.Abs(2.0f / Mathf.Max(y1 - y0, Epsilon));
+            Vector4 frustum = new Vector4(-x0, -y1, x0 - x1, y1 - y0);
+
+            return new ProjectionData(isLeftHanded, isOrthographic, frustum, projectY);
+        }
+
+        internal static Matrix4x4 ConvertProjectionToLeftHanded(Matrix4x4 viewToClip)
+        {
+            for (int row = 0; row < 4; row++)
+                viewToClip[row, 2] = -viewToClip[row, 2];
+
+            return viewToClip;
+        }
+
+        internal static Matrix4x4 ConvertWorldToViewToLeftHanded(Matrix4x4 worldToView)
+        {
+            for (int column = 0; column < 4; column++)
+                worldToView[2, column] = -worldToView[2, column];
+
+            return worldToView;
+        }
+
+        private static bool MvpToPlanes(Matrix4x4 matrix, Vector4[] planes)
+        {
+            Vector4 left = NormalizePlane(matrix.GetRow(3) + matrix.GetRow(0));
+            Vector4 right = NormalizePlane(matrix.GetRow(3) - matrix.GetRow(0));
+            Vector4 bottom = NormalizePlane(matrix.GetRow(3) + matrix.GetRow(1));
+            Vector4 top = NormalizePlane(matrix.GetRow(3) - matrix.GetRow(1));
+            Vector4 far = NormalizePlane(matrix.GetRow(3) - matrix.GetRow(2));
+            Vector4 near = NormalizePlane(matrix.GetRow(2));
+
+            bool isReversedZ = Mathf.Abs(near.w) > Mathf.Abs(far.w);
+            if (isReversedZ)
+                Swap(ref near, ref far);
+
+            if (GetLengthSquared(far) < Epsilon * Epsilon)
+                far = new Vector4(-near.x, -near.y, -near.z, far.w);
+
+            planes[0] = left;
+            planes[1] = right;
+            planes[2] = bottom;
+            planes[3] = top;
+            planes[4] = near;
+            planes[5] = far;
+
+            return isReversedZ;
+        }
+
+        private static bool IsOrthographicProjection(Matrix4x4 projection)
+        {
+            return Mathf.Abs(projection[3, 3] - 1.0f) <= 1e-5f;
+        }
+
+        private static Vector4 NormalizePlane(Vector4 plane)
+        {
+            float length = Mathf.Sqrt(GetLengthSquared(plane));
+            return length > Epsilon ? plane / length : plane;
+        }
+
+        private static float GetLengthSquared(Vector4 vector)
+        {
+            return vector.x * vector.x + vector.y * vector.y + vector.z * vector.z;
+        }
+
+        private static Vector3 GetTranslation(Matrix4x4 matrix)
+        {
+            Vector4 column = matrix.GetColumn(3);
+            return new Vector3(column.x, column.y, column.z);
+        }
+
+        private static Vector3 GetColumn(Matrix4x4 matrix, int index)
+        {
+            Vector4 column = matrix.GetColumn(index);
+            return new Vector3(column.x, column.y, column.z);
+        }
+
+        private static Matrix4x4 SetTranslation(Matrix4x4 matrix, Vector3 translation)
+        {
+            matrix.SetColumn(3, new Vector4(translation.x, translation.y, translation.z, 1.0f));
+            return matrix;
+        }
+
+        private static void Swap(ref Vector4 left, ref Vector4 right)
+        {
+            (left, right) = (right, left);
+        }
+
+        private static void Swap(ref float left, ref float right)
+        {
+            (left, right) = (right, left);
+        }
     }
 
     internal static class SequenceHelpers
     {
-        public static float Halton(uint index, int baseVal)
+        public static Vector4 GetRotator(float angle)
         {
-            float result = 0f;
-            float f = 1f / baseVal;
-            uint i = index;
-            while (i > 0)
-            {
-                result += f * (i % (uint)baseVal);
-                i /= (uint)baseVal;
-                f /= baseVal;
-            }
-            return result;
+            float ca = Mathf.Cos(angle);
+            float sa = Mathf.Sin(angle);
+            return new Vector4(ca, sa, -sa, ca);
+        }
+
+        public static Vector4 CombineRotators(Vector4 first, Vector4 second)
+        {
+            return new Vector4(
+                first.x * second.x + first.z * second.y,
+                first.y * second.x + first.w * second.y,
+                first.x * second.z + first.z * second.w,
+                first.y * second.z + first.w * second.w);
+        }
+
+        public static float Bayer4x4(uint frameIndex)
+        {
+            const uint sampleX = 0u;
+            const uint sampleY = 0u;
+            uint sampleOffset = frameIndex;
+            uint a = 2068378560u * (1u - (sampleX >> 1)) + 1500172770u * (sampleX >> 1);
+            uint b = (sampleY + ((sampleX & 1u) << 2)) << 2;
+            return (((a >> (int)b) + sampleOffset) & 0xFu) / 16.0f;
+        }
+
+        public static float Weyl1D(float p, int n)
+        {
+            const float invPow2_24 = 1.0f / 16777216.0f;
+            return Mathf.Repeat(p + n * 10368889.0f * invPow2_24, 1.0f);
         }
     }
 }

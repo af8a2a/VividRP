@@ -139,8 +139,8 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
         private const float DefaultPlaneDistSensitivity  = 0.02f;
         private const uint  DefaultMaxStabilizedFrameNum = 5;
-
         private RTHandle debugTexture;
+
         public SIGMAShadowDenoisePass()
         {
             profilingSampler = new ProfilingSampler(nameof(SIGMAShadowDenoisePass));
@@ -210,9 +210,10 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 lightDir = lightData.mainDirectionalLight.directionWS.normalized;
 
             var camera     = cameraData.camera;
-            var worldToView = camera.worldToCameraMatrix;
+            var worldToView = cameraData.GetViewMatrix();
             var viewToClip  = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true);
-            var cameraPos   = camera.transform.position;
+            var cameraPos4  = cameraData.GetInverseViewMatrix().GetColumn(3);
+            var cameraPos   = new Vector3(cameraPos4.x, cameraPos4.y, cameraPos4.z);
 
             m_Constants = SigmaSharedConstants.Compute(
                 worldToView, viewToClip,
@@ -225,7 +226,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 (uint)Time.frameCount,
                 camera.farClipPlane,
                 DefaultPlaneDistSensitivity,
-                DefaultMaxStabilizedFrameNum / 7f,
+                DefaultMaxStabilizedFrameNum / (1.0f + DefaultMaxStabilizedFrameNum),
                 camera.orthographic);
 
             // History allocation (code-managed)
@@ -249,14 +250,13 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 current:  m_HistoryLengthCurrent,
                 desc:     lengthDesc);
 
-
             var desc = new RenderTextureDescriptor(tileW, tileH)
             {
                 graphicsFormat = GraphicsFormat.R8G8B8A8_UNorm,
                 enableRandomWrite = true
             };
             RenderingUtils.ReAllocateHandleIfNeeded(ref debugTexture, desc, name: "NRD-SIGMA TileTexture");
-            
+
             m_HasValidHistory = hasShadowHistory && hasLengthHistory;
 
             // Store for next frame
@@ -279,7 +279,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 int tileW   = CoreUtils.DivRoundUp(m_Width,  16);
                 int tileH   = CoreUtils.DivRoundUp(m_Height, 16);
                 int dispatchX = CoreUtils.DivRoundUp(m_Width,  8);
-                int dispatchY = CoreUtils.DivRoundUp(m_Height, 8);
+                int dispatchY = CoreUtils.DivRoundUp(m_Height, 16);
 
                 // Stage 1: ClassifyTiles
                 ConstantBuffer.Push(cmd, m_Constants, m_ClassifyTiles, SIGMA_ClassifyTilesConstantsId);
@@ -295,6 +295,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                     cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gOut_Tiles,   debugTexture);
                     cmd.DispatchCompute(m_ClassifyTiles, kernel, tileW, tileH, 1);
                 }
+
 
                 // Stage 2: SmoothTiles
                 int smoothTileW = CoreUtils.DivRoundUp(tileW, 16);

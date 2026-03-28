@@ -663,11 +663,10 @@ float4 NRD_FrontEnd_UnpackNormalAndRoughness( float4 p, out float materialID )
 
         materialID = p.w * 3.0;
     #elif( NRD_NORMAL_ENCODING == 5 )
-        // VividRP: GBuffer1 is RG16_SFloat storing oct-encoded normal in p.xy ([-1,+1])
-        // roughness is not stored in GBuffer1; use 1.0 (diffuse) as placeholder
-        r.xyz = float3( UnpackNormalOctQuadEncode( p.xy ) );
-        r.w   = 1.0;
-        materialID = 0.0;
+        half2 octNormalWS = p.xy * 2.0 - 1.0;
+        r.xyz = float3( UnpackNormalOctQuadEncode( octNormalWS ) );
+        r.w = p.z;
+        materialID = round( saturate( p.w ) * 3.0 );
     #else
         #if( NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_RGBA8_UNORM || NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_RGBA16_UNORM )
         half2 remappedOctNormalWS = half2(Unpack888ToFloat2(p.xyz)); // values between [ 0, +1]
@@ -717,6 +716,9 @@ float4 NRD_FrontEnd_PackNormalAndRoughness( float3 N, float roughness, float mat
     #if( NRD_NORMAL_ENCODING == NRD_NORMAL_ENCODING_R10G10B10A2_UNORM )
         p.xyz = _NRD_EncodeNormalRoughness101010( N, roughness );
         p.w = saturate( materialID / 3.0 );
+    #elif( NRD_NORMAL_ENCODING == 5 )
+        float2 octNormalWS = PackNormalOctQuadEncode( _NRD_SafeNormalize( N ) );
+        p = float4( octNormalWS * 0.5 + 0.5, roughness, saturate( materialID / 3.0 ) );
     #else
         // Best fit ( optional )
         N /= max( abs( N.x ), max( abs( N.y ), abs( N.z ) ) );

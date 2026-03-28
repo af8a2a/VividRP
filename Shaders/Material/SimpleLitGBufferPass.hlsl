@@ -68,6 +68,7 @@ VividGBufferSurfaceData BuildSimpleLitSurfaceData(Varyings input)
     surfaceData.metallic = _Metallic;
     surfaceData.ambientOcclusion = _Occlusion;
     surfaceData.customData = _CustomData;
+    surfaceData.customData1 = 0.0;
     surfaceData.materialId = GetMaterialId();
     surfaceData.emissive = _EmissiveColor.rgb;
     return surfaceData;

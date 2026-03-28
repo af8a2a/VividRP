@@ -167,6 +167,7 @@ VividGBufferSurfaceData BuildStandardLitSurfaceData(Varyings input)
     surfaceData.linearRoughness = (1.0 - metallicSmoothness.y) * (1.0 - metallicSmoothness.y);
     surfaceData.metallic = metallicSmoothness.x;
     surfaceData.ambientOcclusion = SampleAmbientOcclusion(input.uv);
+    surfaceData.customData1 = 0.0;
 
 #if defined(_CLEARCOAT)
     float clearCoatMask = saturate(_ClearCoatMask);

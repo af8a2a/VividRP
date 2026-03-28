@@ -316,6 +316,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 surfaceData.metallic = triangleData.materialData.Metallic;
                 surfaceData.ambientOcclusion = 1.0f;
                 surfaceData.customData = 0.0f;
+                surfaceData.customData1 = 0.0f;
                 surfaceData.materialId = VIVID_GBUFFER_MATERIAL_STANDARD;
                 surfaceData.emissive = max(triangleData.materialData.Emission.rgb, 0.0f);
                 return surfaceData;

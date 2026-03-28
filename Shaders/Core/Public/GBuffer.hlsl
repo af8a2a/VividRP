@@ -8,12 +8,13 @@
 #define VIVID_GBUFFER_MATERIAL_FABRIC    1u
 #define VIVID_GBUFFER_MATERIAL_CLEARCOAT 2u
 #define VIVID_GBUFFER_MAX_MATERIAL_ID    255u
+#define VIVID_GBUFFER_MAX_NRD_MATERIAL_ID 3u
 
 // GBuffer layout:
-// RT0 (RGBA8_UNORM)          : BaseColor.rgb + MaterialId.a
-// RT1 (RG16_SFLOAT)          : Octahedral Normal.xy
-// RT2 (RGBA8_UNORM)          : LinearRoughness.r + Metallic.g + AO.b + CustomData.a
-// RT3 (R11G11B10_UFLOAT)     : Emissive.rgb
+// RT0 (RGBA8_UNORM)              : BaseColor.rgb + MaterialId.a
+// RT1 (A2B10G10R10_UNORM)        : Octahedral Normal.xy + LinearRoughness.b + NRDMaterialId.a
+// RT2 (RGBA8_UNORM)              : Metallic.r + AO.g + MaterialData0.b + MaterialData1.a
+// RT3 (R11G11B10_UFLOAT)         : Emissive.rgb
 
 struct VividGBufferSurfaceData
 {
@@ -23,6 +24,7 @@ struct VividGBufferSurfaceData
     float metallic;
     float ambientOcclusion;
     float customData;
+    float customData1;
     uint materialId;
     float3 emissive;
 };
@@ -46,14 +48,25 @@ uint DecodeVividMaterialId(float encodedMaterialId)
     return (uint)min(round(saturate(encodedMaterialId) * 255.0), 255.0);
 }
 
-float2 EncodeVividNormalOct(float3 normalWS)
+float2 EncodeVividNormalOctRaw(float3 normalWS)
 {
     return PackNormalOctQuadEncode(normalize(normalWS));
 }
 
-float3 DecodeVividNormalOct(float2 encodedNormal)
+float3 DecodeVividNormalOctRaw(float2 encodedNormal)
 {
     return normalize(UnpackNormalOctQuadEncode(encodedNormal));
+}
+
+float2 EncodeVividNormalOct(float3 normalWS)
+{
+    return EncodeVividNormalOctRaw(normalWS) * 0.5 + 0.5;
+}
+
+float3 DecodeVividNormalOct(float2 encodedNormal)
+{
+    float2 remappedNormal = saturate(encodedNormal) * 2.0 - 1.0;
+    return DecodeVividNormalOctRaw(remappedNormal);
 }
 
 float SanitizeLinearRoughness(float linearRoughness)
@@ -76,6 +89,22 @@ float SanitizeCustomData(float customData)
     return saturate(customData);
 }
 
+float SanitizeCustomData1(float customData1)
+{
+    return saturate(customData1);
+}
+
+float EncodeVividNrdMaterialId(uint materialId)
+{
+    uint clampedMaterialId = min(materialId, VIVID_GBUFFER_MAX_NRD_MATERIAL_ID);
+    return clampedMaterialId * (1.0 / 3.0);
+}
+
+uint DecodeVividNrdMaterialId(float encodedMaterialId)
+{
+    return (uint)min(round(saturate(encodedMaterialId) * 3.0), 3.0);
+}
+
 VividGBufferSurfaceData SanitizeVividGBufferSurfaceData(VividGBufferSurfaceData surfaceData)
 {
     surfaceData.baseColor = saturate(surfaceData.baseColor);
@@ -84,6 +113,7 @@ VividGBufferSurfaceData SanitizeVividGBufferSurfaceData(VividGBufferSurfaceData 
     surfaceData.metallic = SanitizeMetallic(surfaceData.metallic);
     surfaceData.ambientOcclusion = SanitizeAmbientOcclusion(surfaceData.ambientOcclusion);
     surfaceData.customData = SanitizeCustomData(surfaceData.customData);
+    surfaceData.customData1 = SanitizeCustomData1(surfaceData.customData1);
     surfaceData.materialId = min(surfaceData.materialId, VIVID_GBUFFER_MAX_MATERIAL_ID);
     surfaceData.emissive = max(surfaceData.emissive, 0.0);
     return surfaceData;
@@ -95,12 +125,15 @@ VividGBufferFragmentOutput PackVividGBufferSurfaceData(VividGBufferSurfaceData s
 
     VividGBufferFragmentOutput output;
     output.rt0 = float4(surfaceData.baseColor, EncodeVividMaterialId(surfaceData.materialId));
-    output.rt1 = float4(EncodeVividNormalOct(surfaceData.normalWS), 0.0, 0.0);
-    output.rt2 = float4(
+    output.rt1 = float4(
+        EncodeVividNormalOct(surfaceData.normalWS),
         surfaceData.linearRoughness,
+        EncodeVividNrdMaterialId(surfaceData.materialId));
+    output.rt2 = float4(
         surfaceData.metallic,
         surfaceData.ambientOcclusion,
-        surfaceData.customData);
+        surfaceData.customData,
+        surfaceData.customData1);
     output.rt3 = float4(surfaceData.emissive, 0.0);
     return output;
 }
@@ -111,10 +144,11 @@ VividGBufferSurfaceData UnpackVividGBufferSurfaceData(float4 rt0, float4 rt1, fl
     surfaceData.baseColor = saturate(rt0.rgb);
     surfaceData.materialId = DecodeVividMaterialId(rt0.a);
     surfaceData.normalWS = DecodeVividNormalOct(rt1.xy);
-    surfaceData.linearRoughness = SanitizeLinearRoughness(rt2.r);
-    surfaceData.metallic = SanitizeMetallic(rt2.g);
-    surfaceData.ambientOcclusion = SanitizeAmbientOcclusion(rt2.b);
-    surfaceData.customData = SanitizeCustomData(rt2.a);
+    surfaceData.linearRoughness = SanitizeLinearRoughness(rt1.z);
+    surfaceData.metallic = SanitizeMetallic(rt2.r);
+    surfaceData.ambientOcclusion = SanitizeAmbientOcclusion(rt2.g);
+    surfaceData.customData = SanitizeCustomData(rt2.b);
+    surfaceData.customData1 = SanitizeCustomData1(rt2.a);
     surfaceData.emissive = max(rt3.rgb, 0.0);
     return surfaceData;
 }

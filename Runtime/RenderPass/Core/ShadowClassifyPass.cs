@@ -40,7 +40,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             profilingSampler = new ProfilingSampler(nameof(ShadowClassifyPass));
             m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
-            m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.R16G16_SFloat);
+            m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
             m_ShadowClassifyMask = RenderGraphTexture.CreateOutput("ShadowClassifyMask", GraphicsFormat.R8_UNorm);
             m_ShadowClassifyMask.desc.ClearBuffer = true;
             m_ShadowClassifyMask.desc.ClearColor = Color.clear;

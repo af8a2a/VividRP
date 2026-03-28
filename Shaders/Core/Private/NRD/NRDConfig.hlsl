@@ -1,5 +1,5 @@
 ﻿// This file is auto-generated during project deployment. Do not modify!
-// VividRP: encoding 5 = RG16_SFloat oct-normal (custom VividRP path)
+// VividRP: encoding 5 = A2B10G10R10_UNORM storing oct-normal.xy + linear roughness + NRD material ID
 #define NRD_NORMAL_ENCODING 5
 #define NRD_ROUGHNESS_ENCODING 1
 #define NRD_SUPPORTS_CHECKERBOARD 1

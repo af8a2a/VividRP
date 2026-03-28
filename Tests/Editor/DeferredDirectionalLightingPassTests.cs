@@ -96,6 +96,11 @@ namespace VividRP.Editor.Tests
             Assert.That(outputTexture.desc.ClearBuffer, Is.True);
             Assert.That(outputTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
 
+            var gbuffer1Texture = GetFieldValue<RenderGraphTexture>(pass, "m_GBuffer1");
+            var gbuffer2Texture = GetFieldValue<RenderGraphTexture>(pass, "m_GBuffer2");
+            Assert.That(gbuffer1Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.A2B10G10R10_UNormPack32));
+            Assert.That(gbuffer2Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
+
             var skyCubemap = GetFieldValue<RenderGraphTexture>(pass, "m_SkyIBLCubemap");
             Assert.That(skyCubemap.desc.Dimension, Is.EqualTo(TextureDimension.Cube));
         }

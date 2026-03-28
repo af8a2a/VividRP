@@ -26,6 +26,14 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SIGMAShadowDenoisePass_UsesPackedNormalRoughnessGBufferInput()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
+
+            Assert.That(source, Does.Contain("RenderGraphTexture.CreateInput(\"GBuffer1\",      GraphicsFormat.A2B10G10R10_UNormPack32);"));
+        }
+
+        [Test]
         public void LegacyDirectionalRayTracedShadowTemporalDenoiseResource_IsRemoved()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "Utility", "PipelineResource", "VividResources.cs"));

@@ -32,6 +32,9 @@ namespace VividRP.Editor.Tests
             }));
             Assert.That(textureEntries.Single(entry => entry.Name == "Depth").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(textureEntries.Single(entry => entry.Name == "GBuffer1").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(
+                textureEntries.Single(entry => entry.Name == "GBuffer1").Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.A2B10G10R10_UNormPack32));
             Assert.That(textureEntries.Single(entry => entry.Name == "DirectionalShadowTexture").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(textureEntries.Single(entry => entry.Name == "ShadowClassifyMask").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(

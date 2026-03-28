@@ -149,7 +149,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
             m_RawShadowTexture     = RenderGraphTexture.CreateInput("RawShadow",     GraphicsFormat.R16_SFloat);
             m_DepthTexture         = RenderGraphTexture.CreateInput("LinearDepth",   GraphicsFormat.R32_SFloat);
-            m_GBuffer1             = RenderGraphTexture.CreateInput("GBuffer1",      GraphicsFormat.R16G16_SFloat);
+            m_GBuffer1             = RenderGraphTexture.CreateInput("GBuffer1",      GraphicsFormat.A2B10G10R10_UNormPack32);
             m_MotionVectorTexture  = RenderGraphTexture.CreateInput("MotionVectors", GraphicsFormat.R16G16_SFloat);
             m_HistoryShadowTexture  = RenderGraphTexture.CreateInput("HistoryShadow", GraphicsFormat.R8_UNorm);
             m_HistoryLengthTexture  = RenderGraphTexture.CreateInput("HistoryLength", GraphicsFormat.R32_UInt);

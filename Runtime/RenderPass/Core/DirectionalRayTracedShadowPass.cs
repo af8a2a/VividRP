@@ -109,7 +109,7 @@ namespace VividRP.Runtime.RenderPass.Core
             profilingSampler = new ProfilingSampler(nameof(DirectionalRayTracedShadowPass));
             m_SceneAccelerationStructure = CreateSceneAccelerationStructure();
             m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
-            m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.R16G16_SFloat);
+            m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
             m_DirectionalShadowTexture = RenderGraphTexture.CreateOutput("DirectionalShadowTexture", GraphicsFormat.R16_SFloat);
             m_DirectionalShadowTexture.desc.ClearBuffer = true;
             m_DirectionalShadowTexture.desc.ClearColor = RawShadowClearColor;

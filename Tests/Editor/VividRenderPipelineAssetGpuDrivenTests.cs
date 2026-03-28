@@ -50,5 +50,21 @@ namespace VividRP.Editor.Tests
                 Object.DestroyImmediate(asset);
             }
         }
+
+        [Test]
+        public void Asset_DefaultShader_IsStandardLit()
+        {
+            var asset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+
+            try
+            {
+                Assert.That(asset.defaultShader, Is.Not.Null);
+                Assert.That(asset.defaultShader.name, Is.EqualTo("VividRP/Material/StandardLit"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
     }
 }

@@ -79,7 +79,8 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
         // Smoothed tile output  (float2, tile resolution)
         [RenderGraphResource(Name = "SIGMA_SmoothTiles",
-            Access = AccessFlags.ReadWrite)]
+            Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
         private RenderGraphTexture m_SmoothTileTexture;
 
         // Intermediate penumbra after pre-blur  (R16_SFloat, full resolution)
@@ -117,6 +118,13 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             Access = AccessFlags.ReadWrite,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
         private RenderGraphTexture m_TransientHistoryLength;
+        
+        
+        // Intermediate shadow after post-blur  (R8_UNorm, full resolution)
+        [RenderGraphResource(Name = "ShadowDebug",
+            Access = AccessFlags.ReadWrite)]
+        private RenderGraphTexture m_Debug;
+
 
         // --- compute shaders ---
         private ComputeShader m_ClassifyTiles;
@@ -176,14 +184,17 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
             m_DenoisedShadowTexture = CreatePassOwnedTexture("DenoisedShadow",           1, 1, GraphicsFormat.R8_UNorm);
 
-            m_TileTexture             = CreatePassOwnedTexture("SIGMA_Tiles",                  tileW, tileH, GraphicsFormat.R16G16B16A16_SFloat);
-            m_SmoothTileTexture       = CreatePassOwnedTexture("SIGMA_SmoothTiles",            tileW, tileH, GraphicsFormat.R16G16_SFloat);
+            m_TileTexture             = CreatePassOwnedTexture("SIGMA_Tiles",                  tileW, tileH, GraphicsFormat.R8G8B8A8_UNorm);
+            m_SmoothTileTexture       = CreatePassOwnedTexture("SIGMA_SmoothTiles",            tileW, tileH, GraphicsFormat.R8G8B8A8_UNorm);
             m_TransientPenumbra       = CreatePassOwnedTexture("SIGMA_Penumbra",               1, 1, GraphicsFormat.R16_SFloat);
             m_TransientShadow         = CreatePassOwnedTexture("SIGMA_Shadow",                 1, 1, GraphicsFormat.R8_UNorm);
             m_TransientPenumbra2      = CreatePassOwnedTexture("SIGMA_Penumbra2",              1, 1, GraphicsFormat.R16_SFloat);
             m_TransientShadow2        = CreatePassOwnedTexture("SIGMA_Shadow2",                1, 1, GraphicsFormat.R8_UNorm);
-            m_TransientHistory        = CreatePassOwnedTexture("SIGMA_TransientHistory",       1, 1, GraphicsFormat.R8_UNorm);
-            m_TransientHistoryLength  = CreatePassOwnedTexture("SIGMA_TransientHistoryLength", 1, 1, GraphicsFormat.R32_UInt);
+            m_TransientHistory        = CreatePassOwnedTexture("SIGMA_TransientHistory",       1, 1, GraphicsFormat.R8_UNorm, clearBuffer: true);
+            m_TransientHistoryLength  = CreatePassOwnedTexture("SIGMA_TransientHistoryLength", 1, 1, GraphicsFormat.R32_UInt, clearBuffer: true);
+            
+            m_Debug  = CreatePassOwnedTexture("ShadowDebug", 1, 1, GraphicsFormat.R16_SFloat);
+
         }
 
         public override void Create()
@@ -220,6 +231,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             ResizePassOwned(m_DenoisedShadowTexture,  m_Width, m_Height);
             ResizePassOwned(m_HistoryShadowCurrent,   m_Width, m_Height);
             ResizePassOwned(m_HistoryLengthCurrent,   m_Width, m_Height);
+            ResizePassOwned(m_Debug,   m_Width, m_Height);      
 
             // Light direction
             var lightData = frameData.GetOrCreate<VividLightData>();
@@ -329,10 +341,13 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gIn_Penumbra,          m_RawShadowTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gOut_Penumbra,         m_TransientPenumbra.innerHandle);
                 cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gOut_Shadow_Translucency, m_TransientShadow.innerHandle);
+                cmd.SetComputeTextureParam(m_ShadowBlur, kernel,"_DebugTexture", m_Debug.innerHandle);
+
+                
                 cmd.DispatchCompute(m_ShadowBlur, kernel, dispatchX, dispatchY, 1);
 
                 // Stage 5: PostBlur
-                bool useTemporalStabilization = m_HasValidHistory && m_MaxStabilizedFrameNum > 0;
+                bool useTemporalStabilization = m_MaxStabilizedFrameNum > 0;
                 ConstantBuffer.Push(cmd, m_Constants, m_ShadowPostBlur, SIGMA_BlurConstantsId);
                 cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_ViewZ,            m_DepthTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_Normal_Roughness, m_GBuffer1.innerHandle);
@@ -342,6 +357,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gOut_Penumbra,        m_TransientPenumbra2.innerHandle);
                 cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gOut_Shadow_Translucency,
                     useTemporalStabilization ? m_TransientShadow2.innerHandle : m_DenoisedShadowTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel,"_DebugTexture", m_Debug.innerHandle);
                 cmd.DispatchCompute(m_ShadowPostBlur, kernel, dispatchX, dispatchY, 1);
 
                 // Stage 6: TemporalStabilization
@@ -416,7 +432,12 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             tex.desc.ClearBuffer        = false;
         }
 
-        private static RenderGraphTexture CreatePassOwnedTexture(string name, int width, int height, GraphicsFormat format)
+        private static RenderGraphTexture CreatePassOwnedTexture(
+            string name,
+            int width,
+            int height,
+            GraphicsFormat format,
+            bool clearBuffer = false)
         {
             var tex = new RenderGraphTexture
             {
@@ -424,7 +445,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             };
             tex.desc.Name              = name;
             tex.desc.EnableRandomWrite = true;
-            tex.desc.ClearBuffer       = false;
+            tex.desc.ClearBuffer       = clearBuffer;
             tex.desc.AnisoLevel = 1;
             return tex;
         }

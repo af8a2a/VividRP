@@ -193,6 +193,11 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_DEPTHMODE_LINEAR01"));
             Assert.That(shaderSource, Does.Contain("lerp(sourceColor, debugColor, saturate(_DebugOpacity))"));
             Assert.That(shaderSource, Does.Contain("motion * 0.5 + 0.5"));
+            Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_MOTION_VECTOR_ARROW_SPACING"));
+            Assert.That(shaderSource, Does.Contain("OverlayMotionVectorArrows"));
+            Assert.That(shaderSource, Does.Contain("DistanceToSegment"));
+            Assert.That(shaderSource, Does.Contain("ResolveMotionVectorCellCenterUv"));
+            Assert.That(shaderSource, Does.Contain("SampleDebugTextureRaw(cellCenterUv).xy"));
             Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_VISUALIZATION_VISIBILITY_BUFFER"));
             Assert.That(shaderSource, Does.Contain("UnpackVisibilityBufferValue"));
             Assert.That(shaderSource, Does.Contain("IsPackedVisibilityBufferValueValid"));

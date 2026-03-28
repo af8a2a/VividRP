@@ -6,6 +6,8 @@ namespace VividRP.Runtime
     [CreateAssetMenu(menuName = "VividRP/Vivid Render Pipeline")]
     public class VividRenderPipelineAsset : RenderPipelineAsset<VividRenderPipeline>
     {
+        private const string DefaultShaderName = "VividRP/Material/StandardLit";
+
         public RenderGraphData RenderGraphAsset;
 
         [SerializeField]
@@ -43,6 +45,8 @@ namespace VividRP.Runtime
             get => m_EnableGPUDrivenDebugOverlay;
             set => m_EnableGPUDrivenDebugOverlay = value;
         }
+
+        public override Shader defaultShader => Shader.Find(DefaultShaderName);
 
         protected override UnityEngine.Rendering.RenderPipeline CreatePipeline()
         {

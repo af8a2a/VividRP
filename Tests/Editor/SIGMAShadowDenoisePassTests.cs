@@ -68,6 +68,28 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SIGMAShadowDenoisePass_RunsTemporalBootstrap_WhenSigmaHistoryIsConfigured()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
+
+            Assert.That(source, Does.Contain("bool useTemporalStabilization = m_MaxStabilizedFrameNum > 0;"));
+            Assert.That(source, Does.Not.Contain("bool useTemporalStabilization = m_HasValidHistory && m_MaxStabilizedFrameNum > 0;"));
+        }
+
+        [Test]
+        public void SIGMAShadowDenoisePass_ClearsTransientHistoryTextures_ForTemporalBootstrap()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
+
+            Assert.That(
+                source,
+                Does.Contain("CreatePassOwnedTexture(\"SIGMA_TransientHistory\",       1, 1, GraphicsFormat.R8_UNorm, clearBuffer: true);"));
+            Assert.That(
+                source,
+                Does.Contain("CreatePassOwnedTexture(\"SIGMA_TransientHistoryLength\", 1, 1, GraphicsFormat.R32_UInt, clearBuffer: true);"));
+        }
+
+        [Test]
         public void SIGMAShadowDenoisePass_DoesNotKeepLegacyDebugTileTexture()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));

@@ -32,6 +32,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Not.Contain("_ScreenSize"));
             Assert.That(source, Does.Contain("query.TraceRayInline("));
             Assert.That(source, Does.Contain("query.Proceed();"));
+            Assert.That(source, Does.Contain("float PackFullyLitPenumbra(float tanSunAngularRadius)"));
+            Assert.That(source, Does.Contain("_DirectionalShadowTexture[pixelCoord] = PackFullyLitPenumbra(_TanSunAngularRadius);"));
+            Assert.That(source, Does.Not.Contain("_DirectionalShadowTexture[pixelCoord] = 0.0;"));
             Assert.That(source, Does.Contain("PackPenumbra(shadowHitDist, _TanSunAngularRadius)"));
         }
 

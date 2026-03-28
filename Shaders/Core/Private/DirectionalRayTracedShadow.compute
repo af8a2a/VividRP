@@ -51,6 +51,11 @@ float PackPenumbra(float distanceToOccluder, float tanSunAngularRadius)
     return distanceToOccluder >= HALF_MAX ? HALF_MAX : min(penumbraRadius, 32768.0);
 }
 
+float PackFullyLitPenumbra(float tanSunAngularRadius)
+{
+    return PackPenumbra(HALF_MAX, tanSunAngularRadius);
+}
+
 [numthreads(8, 8, 1)]
 void DirectionalRayTracedShadow(uint3 dispatchThreadID : SV_DispatchThreadID)
 {
@@ -61,15 +66,16 @@ void DirectionalRayTracedShadow(uint3 dispatchThreadID : SV_DispatchThreadID)
     float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
     if (IsSkyPixel(deviceDepth))
     {
-        _DirectionalShadowTexture[pixelCoord] = HALF_MAX;
+        _DirectionalShadowTexture[pixelCoord] = PackFullyLitPenumbra(_TanSunAngularRadius);
         return;
     }
 
 #ifdef SHADOW_CLASSIFY_ENABLED
-    // Skip pixels classified as not needing ray tracing (backfacing, etc.)
+    // Skip pixels classified as not needing ray tracing (backfacing, etc.).
+    // The raw shadow encoding uses HALF_MAX for "fully lit / no occluder".
     if (_ShadowClassifyMask.Load(int3(pixelCoord, 0)) < 0.5)
     {
-        _DirectionalShadowTexture[pixelCoord] = 0.0;
+        _DirectionalShadowTexture[pixelCoord] = PackFullyLitPenumbra(_TanSunAngularRadius);
         return;
     }
 #endif

@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
@@ -20,6 +21,7 @@ namespace VividRP.Editor.Tests
         [TearDown]
         public void TearDown()
         {
+            PassRecorder.Dispose();
             Object.DestroyImmediate(m_GameObject);
         }
 
@@ -119,6 +121,60 @@ namespace VividRP.Editor.Tests
             AssertMatrixAreEqual(GL.GetGPUProjectionMatrix(camera.projectionMatrix, true), additionalData.gpuProjectionMatrix);
             AssertMatrixAreEqual(Matrix4x4.identity, additionalData.jitterMatrix);
             Assert.That(additionalData.jitter, Is.EqualTo(Vector2.zero));
+        }
+
+        [Test]
+        public void UpdateCameraMatrices_FallsBackToCameraParameters_WhenUnityProjectionMatricesAreIdentity()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            camera.aspect = 16.0f / 9.0f;
+            camera.nearClipPlane = 0.03f;
+            camera.farClipPlane = 1000.0f;
+            camera.fieldOfView = 60.0f;
+
+            var additionalData = camera.GetVividAdditionalCameraData();
+            camera.nonJitteredProjectionMatrix = Matrix4x4.identity;
+            camera.projectionMatrix = Matrix4x4.identity;
+
+            additionalData.UpdateCameraMatrices(false);
+
+            var expectedProjectionMatrix = Matrix4x4.Perspective(
+                camera.fieldOfView,
+                camera.aspect,
+                camera.nearClipPlane,
+                camera.farClipPlane);
+
+            AssertMatrixAreEqual(expectedProjectionMatrix, additionalData.nonJitteredProjectionMatrix);
+            AssertMatrixAreEqual(expectedProjectionMatrix, additionalData.projectionMatrix);
+            AssertMatrixAreEqual(GL.GetGPUProjectionMatrix(expectedProjectionMatrix, false), additionalData.gpuProjectionMatrix);
+            AssertMatrixAreEqual(Matrix4x4.identity, additionalData.jitterMatrix);
+            Assert.That(additionalData.jitter, Is.EqualTo(Vector2.zero));
+        }
+
+        [Test]
+        public void InitializeContext_SynchronizesRawProjectionMatrices_WhenTaaIsDisabledAndUnityReturnsIdentity()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            camera.aspect = 16.0f / 9.0f;
+            camera.nearClipPlane = 0.03f;
+            camera.farClipPlane = 1000.0f;
+            camera.fieldOfView = 60.0f;
+            camera.nonJitteredProjectionMatrix = Matrix4x4.identity;
+            camera.projectionMatrix = Matrix4x4.identity;
+
+            var additionalData = camera.GetVividAdditionalCameraData();
+            additionalData.enableTAA = false;
+
+            PassRecorder.InitializeContext(default, camera, default);
+
+            var expectedProjectionMatrix = Matrix4x4.Perspective(
+                camera.fieldOfView,
+                camera.aspect,
+                camera.nearClipPlane,
+                camera.farClipPlane);
+
+            AssertMatrixAreEqual(expectedProjectionMatrix, camera.nonJitteredProjectionMatrix);
+            AssertMatrixAreEqual(expectedProjectionMatrix, camera.projectionMatrix);
         }
 
         [Test]
@@ -254,6 +310,35 @@ namespace VividRP.Editor.Tests
             AssertMatrixAreEqual(
                 GL.GetGPUProjectionMatrix(nonJitteredProjectionMatrix, true),
                 cameraData.GetGPUProjectionMatrixNoJitter(true));
+        }
+
+        [Test]
+        public void MatrixAccessors_FallbackToCameraParameters_WhenUnityProjectionMatricesAreIdentity()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            camera.aspect = 1.7777778f;
+            camera.nearClipPlane = 0.03f;
+            camera.farClipPlane = 1000.0f;
+            camera.fieldOfView = 60.0f;
+            camera.nonJitteredProjectionMatrix = Matrix4x4.identity;
+            camera.projectionMatrix = Matrix4x4.identity;
+
+            var cameraData = new VividCameraData
+            {
+                camera = camera,
+            };
+
+            var expectedProjectionMatrix = Matrix4x4.Perspective(
+                camera.fieldOfView,
+                camera.aspect,
+                camera.nearClipPlane,
+                camera.farClipPlane);
+
+            AssertMatrixAreEqual(expectedProjectionMatrix, cameraData.nonJitteredProjectionMatrix);
+            AssertMatrixAreEqual(expectedProjectionMatrix, cameraData.projectionMatrix);
+            AssertMatrixAreEqual(GL.GetGPUProjectionMatrix(expectedProjectionMatrix, false), cameraData.gpuProjectionMatrix);
+            AssertMatrixAreEqual(Matrix4x4.identity, cameraData.jitterMatrix);
+            Assert.That(cameraData.jitter, Is.EqualTo(Vector2.zero));
         }
 
         private static void AssertMatrixAreEqual(Matrix4x4 expected, Matrix4x4 actual)

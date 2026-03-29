@@ -32,7 +32,7 @@ namespace VividRP.Runtime
 
             // 3. Build and set all shader globals in one place
             var shaderVariables = cameraData.BuildShaderVariables(temporalData);
-            SetShaderGlobals(cmd, shaderVariables, temporalData);
+            SetShaderGlobals(cmd, cameraData, shaderVariables, temporalData);
         }
 
         public static CameraTemporalData GetOrCreate(Camera camera)
@@ -46,12 +46,18 @@ namespace VividRP.Runtime
         public static void Clear()
         {
             s_Instance.Dispose();
+#if VIVIDRP_DEBUG
+            CameraShaderVariablesGlobalComparisonLogger.Reset();
+#endif
         }
 
-        private static void SetShaderGlobals(CommandBuffer cmd, VividCameraData.ShaderVariables sv,
+        private static void SetShaderGlobals(CommandBuffer cmd, VividCameraData cameraData, VividCameraData.ShaderVariables sv,
             CameraTemporalData temporalData)
         {
             var shaderVariablesGlobal = ShaderVariablesGlobal.Create(sv, temporalData);
+#if VIVIDRP_DEBUG
+            CameraShaderVariablesGlobalComparisonLogger.CaptureAndCompare(cameraData, shaderVariablesGlobal);
+#endif
             ConstantBuffer.PushGlobal(cmd, shaderVariablesGlobal, ShaderVariablesGlobal.ConstantBufferShaderId);
 
             cmd.SetGlobalVectorArray(CameraWorldClipPlanesId, sv.cameraWorldClipPlanes);

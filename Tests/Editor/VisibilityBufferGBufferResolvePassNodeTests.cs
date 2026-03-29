@@ -11,7 +11,6 @@ namespace VividRP.Editor.Tests
     public sealed class VisibilityBufferGBufferResolvePassNodeTests
     {
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private class AutoRegisteredVisibilityBufferGBufferResolvePassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(VisibilityBufferGBufferResolvePass).AssemblyQualifiedName;
@@ -23,7 +22,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class AutoRegisteredVisibilityBufferGBufferResolvePassOverrideNode : AutoRegisteredVisibilityBufferGBufferResolvePassNode
         {
             protected override bool GetPassOwnedResourceOverrideEnabled(
@@ -40,14 +38,12 @@ namespace VividRP.Editor.Tests
         }
 
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class AutoRegisteredGBufferPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(GBufferPass).AssemblyQualifiedName;
         }
 
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class AutoRegisteredDeferredLightingPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(DeferredLightingPass).AssemblyQualifiedName;
@@ -61,7 +57,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 var node = new AutoRegisteredVisibilityBufferGBufferResolvePassNode();
-                graph.AddNode(node);
+                RenderGraphTestUtility.AddTestNode(graph, node);
 
                 Assert.That(node.GetInputPortByName("m_VisibilityBuffer"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_DepthTexture"), Is.Not.Null);
@@ -95,7 +91,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 var node = new AutoRegisteredVisibilityBufferGBufferResolvePassOverrideNode();
-                graph.AddNode(node);
+                RenderGraphTestUtility.AddTestNode(graph, node);
 
                 Assert.That(node.GetInputPortByName("m_GBuffer0_In"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer1_In"), Is.Not.Null);
@@ -124,9 +120,9 @@ namespace VividRP.Editor.Tests
                 var resolveNode = new AutoRegisteredVisibilityBufferGBufferResolvePassOverrideNode();
                 var deferredNode = new AutoRegisteredDeferredLightingPassNode();
 
-                graph.AddNode(deferredNode);
-                graph.AddNode(resolveNode);
-                graph.AddNode(gbufferNode);
+                RenderGraphTestUtility.AddTestNode(graph, deferredNode);
+                RenderGraphTestUtility.AddTestNode(graph, resolveNode);
+                RenderGraphTestUtility.AddTestNode(graph, gbufferNode);
 
                 graph.Connect(
                     gbufferNode.GetOutputPortByName("m_GBuffer0"),

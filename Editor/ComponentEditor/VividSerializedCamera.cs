@@ -19,6 +19,12 @@ namespace VividRP.Editor
         public SerializedProperty volumeLayerMask { get; }
         public SerializedProperty clearDepth { get; }
         public SerializedProperty antialiasing { get; }
+        public SerializedProperty enableTAA { get; }
+        public SerializedProperty taaJitterSpread { get; }
+        public SerializedProperty taaSampleCount { get; }
+        public SerializedProperty taaBaseBlendFactor { get; }
+        public SerializedProperty taaMotionWeightDecay { get; }
+        public SerializedProperty taaAntiFlickerIntensity { get; }
 
         internal SerializedProperty renderType { get; }
         internal VividAdditionalCameraData[] camerasAdditionalData { get; }
@@ -53,6 +59,12 @@ namespace VividRP.Editor
             volumeLayerMask = serializedAdditionalDataObject.FindProperty("m_VolumeLayerMask");
             stopNaNs = serializedAdditionalDataObject.FindProperty("m_StopNaNs");
             dithering = serializedAdditionalDataObject.FindProperty("m_Dithering");
+            enableTAA = serializedAdditionalDataObject.FindProperty("m_EnableTAA");
+            taaJitterSpread = serializedAdditionalDataObject.FindProperty("m_TAAJitterSpread");
+            taaSampleCount = serializedAdditionalDataObject.FindProperty("m_TAASampleCount");
+            taaBaseBlendFactor = serializedAdditionalDataObject.FindProperty("m_TAABaseBlendFactor");
+            taaMotionWeightDecay = serializedAdditionalDataObject.FindProperty("m_TAAMotionWeightDecay");
+            taaAntiFlickerIntensity = serializedAdditionalDataObject.FindProperty("m_TAAAntiFlickerIntensity");
         }
 
         public void Update()

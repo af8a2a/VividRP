@@ -18,6 +18,13 @@ namespace VividRP.Editor
         private static readonly GUIContent s_StopNaNsLabel = EditorGUIUtility.TrTextContent("Stop NaNs");
         private static readonly GUIContent s_DitheringLabel = EditorGUIUtility.TrTextContent("Dithering");
         private static readonly GUIContent s_VolumeLayerMaskLabel = EditorGUIUtility.TrTextContent("Volume Layer Mask");
+        private static readonly GUIContent s_TAALabel = EditorGUIUtility.TrTextContent("Temporal Anti-Aliasing");
+        private static readonly GUIContent s_EnableTAALabel = EditorGUIUtility.TrTextContent("Enable");
+        private static readonly GUIContent s_TAAJitterSpreadLabel = EditorGUIUtility.TrTextContent("Jitter Spread");
+        private static readonly GUIContent s_TAASampleCountLabel = EditorGUIUtility.TrTextContent("Sample Count");
+        private static readonly GUIContent s_TAABaseBlendFactorLabel = EditorGUIUtility.TrTextContent("Base Blend");
+        private static readonly GUIContent s_TAAMotionWeightDecayLabel = EditorGUIUtility.TrTextContent("Motion Decay");
+        private static readonly GUIContent s_TAAAntiFlickerIntensityLabel = EditorGUIUtility.TrTextContent("Anti-Flicker");
 
         private CameraEditor.Settings m_Settings;
         private VividSerializedCamera m_SerializedCamera;
@@ -100,6 +107,20 @@ namespace VividRP.Editor
                 EditorGUILayout.PropertyField(m_SerializedCamera.stopNaNs, s_StopNaNsLabel);
                 EditorGUILayout.PropertyField(m_SerializedCamera.dithering, s_DitheringLabel);
                 EditorGUILayout.PropertyField(m_SerializedCamera.volumeLayerMask, s_VolumeLayerMaskLabel);
+
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField(s_TAALabel, EditorStyles.boldLabel);
+                EditorGUILayout.PropertyField(m_SerializedCamera.enableTAA, s_EnableTAALabel);
+
+                using (new EditorGUI.DisabledScope(!m_SerializedCamera.enableTAA.hasMultipleDifferentValues
+                                                   && !m_SerializedCamera.enableTAA.boolValue))
+                {
+                    EditorGUILayout.PropertyField(m_SerializedCamera.taaJitterSpread, s_TAAJitterSpreadLabel);
+                    EditorGUILayout.PropertyField(m_SerializedCamera.taaSampleCount, s_TAASampleCountLabel);
+                    EditorGUILayout.PropertyField(m_SerializedCamera.taaBaseBlendFactor, s_TAABaseBlendFactorLabel);
+                    EditorGUILayout.PropertyField(m_SerializedCamera.taaMotionWeightDecay, s_TAAMotionWeightDecayLabel);
+                    EditorGUILayout.PropertyField(m_SerializedCamera.taaAntiFlickerIntensity, s_TAAAntiFlickerIntensityLabel);
+                }
             }
         }
 

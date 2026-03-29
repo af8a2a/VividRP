@@ -18,7 +18,7 @@ namespace VividRP.Editor.Tests
     public class RenderGraphSubSystemGraphTests
     {
         [Test]
-        public void GraphAttributes_EnableSubgraphs_OnRootGraphOnly()
+        public void GraphAttributes_ReserveAssetExtension_ForRootGraphOnly()
         {
             var rootGraphAttribute = typeof(RenderGraphEditorGraph).GetCustomAttribute<GraphAttribute>();
             var subSystemGraphAttribute = typeof(RenderGraphSubSystemGraph).GetCustomAttribute<GraphAttribute>();
@@ -27,6 +27,7 @@ namespace VividRP.Editor.Tests
             Assert.That(subSystemGraphAttribute, Is.Not.Null);
             Assert.That((rootGraphAttribute.Options & GraphOptions.SupportsSubgraphs) != 0, Is.True);
             Assert.That((subSystemGraphAttribute.Options & GraphOptions.SupportsSubgraphs) != 0, Is.False);
+            Assert.That(subSystemGraphAttribute.Extension, Is.Not.EqualTo(rootGraphAttribute.Extension));
         }
     }
 
@@ -41,8 +42,8 @@ namespace VividRP.Editor.Tests
             {
                 var producerNode = new TextureProducerPassNode();
                 var consumerNode = new TextureConsumerPassNode();
-                graph.AddNode(producerNode);
-                graph.AddNode(consumerNode);
+                RenderGraphTestUtility.AddTestNode(graph, producerNode);
+                RenderGraphTestUtility.AddTestNode(graph, consumerNode);
 
                 var subgraphNode = CreateSubSystem(graph, out var subSystemGraph);
                 var inputVariable = subSystemGraph.CreateVariable(
@@ -59,7 +60,7 @@ namespace VividRP.Editor.Tests
                 var inputVariableNode = subSystemGraph.AddVariableNode(inputVariable, new Vector2(50f, 50f));
                 var outputVariableNode = subSystemGraph.AddVariableNode(outputVariable, new Vector2(350f, 50f));
                 var innerPassNode = new TexturePassthroughPassNode();
-                subSystemGraph.AddNode(innerPassNode);
+                RenderGraphTestUtility.AddTestNode(subSystemGraph, innerPassNode);
 
                 Assert.That(graph.Connect(
                     producerNode.GetOutputPortByName(TextureProducerPass.OutputFieldName),
@@ -112,7 +113,7 @@ namespace VividRP.Editor.Tests
                 var rootTextureNode = new TextureResourceNodeData();
                 var consumerNode = new TextureConsumerPassNode();
                 graph.AddNode(rootTextureNode);
-                graph.AddNode(consumerNode);
+                RenderGraphTestUtility.AddTestNode(graph, consumerNode);
 
                 var subgraphNode = CreateSubSystem(graph, out var subSystemGraph);
                 var inputVariable = subSystemGraph.CreateVariable(
@@ -129,7 +130,7 @@ namespace VividRP.Editor.Tests
                 var inputVariableNode = subSystemGraph.AddVariableNode(inputVariable, new Vector2(50f, 50f));
                 var outputVariableNode = subSystemGraph.AddVariableNode(outputVariable, new Vector2(350f, 50f));
                 var innerPassNode = new TexturePassthroughPassNode();
-                subSystemGraph.AddNode(innerPassNode);
+                RenderGraphTestUtility.AddTestNode(subSystemGraph, innerPassNode);
 
                 Assert.That(graph.Connect(
                     rootTextureNode.GetOutputPortByName(TextureResourceNodeData.OutputPortName),
@@ -189,7 +190,7 @@ namespace VividRP.Editor.Tests
                 subSystemGraph.AddNode(renderListNode);
                 subSystemGraph.AddNode(accelerationStructureNode);
                 subSystemGraph.AddNode(historyNode);
-                subSystemGraph.AddNode(consumerNode);
+                RenderGraphTestUtility.AddTestNode(subSystemGraph, consumerNode);
 
                 Assert.That(subSystemGraph.Connect(
                     textureNode.GetOutputPortByName(TextureResourceNodeData.OutputPortName),
@@ -239,7 +240,7 @@ namespace VividRP.Editor.Tests
 
                 var producerNode = new TextureProducerPassNode();
                 var previewNode = new PreviewNodeData();
-                subSystemGraph.AddNode(producerNode);
+                RenderGraphTestUtility.AddTestNode(subSystemGraph, producerNode);
                 subSystemGraph.AddNode(previewNode);
 
                 Assert.That(subSystemGraph.Connect(
@@ -297,7 +298,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(subgraphNode, Is.Not.Null);
 
                 var nestedSubgraph = new NestedSubSystemStubNode();
-                subSystemGraph.AddNode(nestedSubgraph);
+                RenderGraphTestUtility.AddTestNode(subSystemGraph, nestedSubgraph);
 
                 var sink = new TestErrorsAndWarnings();
                 var logger = CreateLogger(sink);
@@ -324,8 +325,8 @@ namespace VividRP.Editor.Tests
             {
                 var producerNode = new TextureProducerPassNode();
                 var consumerNode = new TextureConsumerPassNode();
-                graph.AddNode(producerNode);
-                graph.AddNode(consumerNode);
+                RenderGraphTestUtility.AddTestNode(graph, producerNode);
+                RenderGraphTestUtility.AddTestNode(graph, consumerNode);
 
                 var subgraphNode = CreateSubSystem(graph, out var subSystemGraph);
                 var inputVariable = subSystemGraph.CreateVariable(
@@ -342,7 +343,7 @@ namespace VividRP.Editor.Tests
                 var inputVariableNode = subSystemGraph.AddVariableNode(inputVariable, new Vector2(50f, 50f));
                 var outputVariableNode = subSystemGraph.AddVariableNode(outputVariable, new Vector2(350f, 50f));
                 var innerPassNode = new TexturePassthroughPassNode();
-                subSystemGraph.AddNode(innerPassNode);
+                RenderGraphTestUtility.AddTestNode(subSystemGraph, innerPassNode);
 
                 Assert.That(graph.Connect(
                     producerNode.GetOutputPortByName(TextureProducerPass.OutputFieldName),
@@ -504,35 +505,30 @@ namespace VividRP.Editor.Tests
     }
 
     [Serializable]
-    [UseWithGraph(typeof(RenderGraphEditorGraph), typeof(RenderGraphSubSystemGraph))]
     internal sealed class TextureProducerPassNode : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => typeof(TextureProducerPass).AssemblyQualifiedName;
     }
 
     [Serializable]
-    [UseWithGraph(typeof(RenderGraphEditorGraph), typeof(RenderGraphSubSystemGraph))]
     internal sealed class TexturePassthroughPassNode : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => typeof(TexturePassthroughPass).AssemblyQualifiedName;
     }
 
     [Serializable]
-    [UseWithGraph(typeof(RenderGraphEditorGraph), typeof(RenderGraphSubSystemGraph))]
     internal sealed class TextureConsumerPassNode : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => typeof(TextureConsumerPass).AssemblyQualifiedName;
     }
 
     [Serializable]
-    [UseWithGraph(typeof(RenderGraphEditorGraph), typeof(RenderGraphSubSystemGraph))]
     internal sealed class PrivateResourcesConsumerPassNode : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => typeof(PrivateResourcesConsumerPass).AssemblyQualifiedName;
     }
 
     [Serializable]
-    [UseWithGraph(typeof(RenderGraphSubSystemGraph))]
     internal sealed class NestedSubSystemStubNode : Node, ISubgraphNode
     {
         public Graph GetSubgraph()

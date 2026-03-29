@@ -5,8 +5,9 @@ namespace VividRP.Editor.RenderGraph
 {
     [Serializable]
     [Subgraph(typeof(RenderGraphEditorGraph))]
-    [Graph(RenderGraphEditorGraph.AssetExtension)]
+    [Graph(AssetExtension)]
     internal sealed class RenderGraphSubSystemGraph : RenderGraphEditorGraph
     {
+        internal const string AssetExtension = "vrdgsub";
     }
 }

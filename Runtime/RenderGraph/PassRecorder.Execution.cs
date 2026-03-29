@@ -56,6 +56,9 @@ namespace VividRP.Runtime
             var additionalCameraData = camera.GetComponent<VividAdditionalCameraData>();
             if (additionalCameraData == null && camera.cameraType == CameraType.Game)
                 additionalCameraData = camera.GetVividAdditionalCameraData();
+
+            ApplyTAAJitter(camera, additionalCameraData);
+
             if (additionalCameraData != null)
                 additionalCameraData.UpdateCameraMatrices(true);
 
@@ -73,6 +76,43 @@ namespace VividRP.Runtime
             renderingData.context = context;
             gpuDrivenFrameData.Reset();
             lightData.Update(cullingResults);
+        }
+
+        private static void ApplyTAAJitter(Camera camera, VividAdditionalCameraData additionalCameraData)
+        {
+            if (camera == null)
+                return;
+
+            if (camera.cameraType == CameraType.Preview || camera.cameraType == CameraType.Reflection)
+                return;
+
+            var nonJitteredProj = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+
+            var taaSettings = TAASettings.FromCamera(additionalCameraData);
+            if (!taaSettings.Enabled)
+            {
+                CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                return;
+            }
+
+            var pixelWidth = camera.pixelWidth;
+            var pixelHeight = camera.pixelHeight;
+            if (pixelWidth <= 0 || pixelHeight <= 0)
+            {
+                CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                return;
+            }
+
+            var jitter = HaltonJitter.Get(Time.frameCount, taaSettings.SampleCount);
+            jitter *= taaSettings.JitterSpread;
+
+            var jitterX = jitter.x * 2.0f / pixelWidth;
+            var jitterY = jitter.y * 2.0f / pixelHeight;
+            var jitterMatrix = Matrix4x4.identity;
+            jitterMatrix.m03 = jitterX;
+            jitterMatrix.m13 = jitterY;
+
+            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
         }
 
         internal static void SetGPUDrivenFrameData(

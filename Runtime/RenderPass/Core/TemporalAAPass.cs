@@ -1,0 +1,202 @@
+using UnityEngine;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
+
+namespace VividRP.Runtime.RenderPass.Core
+{
+    public sealed class TemporalAAPass : ComputePass
+    {
+        private static readonly int InputColorId = Shader.PropertyToID("_InputColor");
+        private static readonly int MotionVectorsId = Shader.PropertyToID("_MotionVectors");
+        private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
+        private static readonly int HistoryColorId = Shader.PropertyToID("_HistoryColor");
+        private static readonly int OutputColorId = Shader.PropertyToID("_OutputColor");
+        private static readonly int HistoryColorWriteId = Shader.PropertyToID("_HistoryColorWrite");
+        private static readonly int TAAParamsId = Shader.PropertyToID("_TAAParams");
+        private static readonly int ScreenSizeId = Shader.PropertyToID("_ScreenSize");
+        private static readonly int JitterId = Shader.PropertyToID("_Jitter");
+
+        [RenderGraphResource(Name = "Color", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_ColorInput;
+
+        [RenderGraphResource(Name = "MotionVectors", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_MotionVectors;
+
+        [RenderGraphResource(Name = "CameraDepth", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_DepthTexture;
+
+        [RenderGraphResource(
+            Name = "TAAHistoryColor",
+            Access = AccessFlags.Read,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private RenderGraphTexture m_HistoryColorPrevious;
+
+        [RenderGraphResource(
+            Name = "TAAHistoryColorCurrent",
+            Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private RenderGraphTexture m_HistoryColorCurrent;
+
+        [RenderGraphResource(Name = "TAAOutput", Access = AccessFlags.Write)]
+        private RenderGraphTexture m_OutputTexture;
+
+        private ComputeShader m_ComputeShader;
+        private int m_Kernel = -1;
+        private int m_Width;
+        private int m_Height;
+        private TAASettings m_TAASettings;
+        private bool m_HasValidHistory;
+        private Vector2 m_Jitter;
+        private Vector2 m_PreviousJitter;
+        private bool m_IsFirstFrame;
+
+        public TemporalAAPass()
+        {
+            profilingSampler = new ProfilingSampler(nameof(TemporalAAPass));
+
+            m_ColorInput = RenderGraphTexture.CreateInput("Color", GraphicsFormat.R16G16B16A16_SFloat);
+            m_MotionVectors = RenderGraphTexture.CreateInput("MotionVectors", GraphicsFormat.R16G16_SFloat);
+            m_DepthTexture = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.None, DepthBits.Depth32);
+
+            m_HistoryColorPrevious = RenderGraphTexture.CreateInput("TAAHistoryColor", GraphicsFormat.R16G16B16A16_SFloat);
+            m_HistoryColorCurrent = CreatePassOwnedTexture("TAAHistoryColorCurrent", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
+
+            m_OutputTexture = CreatePassOwnedTexture("TAAOutput", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
+        }
+
+        public override void Create()
+        {
+            var resources = PipelineResourceManager.Get<VividRPCoreResources>();
+            m_ComputeShader = resources?.TemporalAACompute;
+            if (m_ComputeShader != null)
+                m_Kernel = m_ComputeShader.FindKernel("TemporalAA");
+        }
+
+        public override void Prepare(ContextContainer frameData)
+        {
+            var cameraData = frameData.Get<VividCameraData>();
+            var temporalData = frameData.Get<VividTemporalData>();
+
+            m_Width = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
+            m_Height = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
+            if (m_Width <= 0)
+                m_Width = Mathf.Max(1, Screen.width);
+            if (m_Height <= 0)
+                m_Height = Mathf.Max(1, Screen.height);
+
+            m_TAASettings = TAASettings.FromCamera(cameraData.additionalData);
+            m_IsFirstFrame = temporalData != null && temporalData.isFirstFrame;
+            m_Jitter = temporalData != null ? temporalData.jitter : Vector2.zero;
+            m_PreviousJitter = temporalData != null ? temporalData.previousJitter : Vector2.zero;
+
+            ResizePassOwned(m_OutputTexture, m_Width, m_Height);
+            ResizePassOwned(m_HistoryColorCurrent, m_Width, m_Height);
+
+            var historyDesc = m_HistoryColorPrevious?.desc?.Clone()
+                ?? RenderGraphTextureDesc.CreateColorTarget(m_Width, m_Height, GraphicsFormat.R16G16B16A16_SFloat);
+            historyDesc.Width = m_Width;
+            historyDesc.Height = m_Height;
+            historyDesc.EnableRandomWrite = true;
+
+            if (m_TAASettings.Enabled)
+            {
+                m_HasValidHistory = AllocHistoryTexture(
+                    "TAAHistoryColor",
+                    m_HistoryColorPrevious,
+                    m_HistoryColorCurrent,
+                    historyDesc);
+            }
+            else
+            {
+                m_HasValidHistory = false;
+            }
+        }
+
+        public override void Record(ComputeGraphContext context)
+        {
+            if (m_ComputeShader == null || m_Kernel < 0)
+                return;
+
+            if (!m_TAASettings.Enabled)
+                return;
+
+            if (m_ColorInput?.innerHandle.IsValid() != true)
+                return;
+
+            var cmd = context.cmd;
+
+            cmd.SetComputeTextureParam(m_ComputeShader, m_Kernel, InputColorId, m_ColorInput.innerHandle);
+
+            if (m_MotionVectors?.innerHandle.IsValid() == true)
+                cmd.SetComputeTextureParam(m_ComputeShader, m_Kernel, MotionVectorsId, m_MotionVectors.innerHandle);
+
+            if (m_DepthTexture?.innerHandle.IsValid() == true)
+                cmd.SetComputeTextureParam(m_ComputeShader, m_Kernel, DepthTextureId, m_DepthTexture.innerHandle);
+
+            var historyHandle = m_HasValidHistory && !m_IsFirstFrame && m_HistoryColorPrevious?.innerHandle.IsValid() == true
+                ? m_HistoryColorPrevious.innerHandle
+                : m_ColorInput.innerHandle;
+            cmd.SetComputeTextureParam(m_ComputeShader, m_Kernel, HistoryColorId, historyHandle);
+
+            cmd.SetComputeTextureParam(m_ComputeShader, m_Kernel, OutputColorId, m_OutputTexture.innerHandle);
+
+            if (m_HistoryColorCurrent?.innerHandle.IsValid() == true)
+                cmd.SetComputeTextureParam(m_ComputeShader, m_Kernel, HistoryColorWriteId, m_HistoryColorCurrent.innerHandle);
+
+            float hasHistory = m_HasValidHistory && !m_IsFirstFrame ? 1.0f : 0.0f;
+            cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                TAAParamsId,
+                new Vector4(
+                    m_TAASettings.BaseBlendFactor,
+                    m_TAASettings.MotionWeightDecay,
+                    m_TAASettings.AntiFlickerIntensity,
+                    hasHistory));
+            cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                ScreenSizeId,
+                new Vector4(m_Width, m_Height, 1.0f / m_Width, 1.0f / m_Height));
+            cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                JitterId,
+                new Vector4(m_Jitter.x, m_Jitter.y, m_PreviousJitter.x, m_PreviousJitter.y));
+
+            int dispatchX = CoreUtils.DivRoundUp(m_Width, 8);
+            int dispatchY = CoreUtils.DivRoundUp(m_Height, 8);
+            cmd.DispatchCompute(m_ComputeShader, m_Kernel, dispatchX, dispatchY, 1);
+        }
+
+        public override void Dispose()
+        {
+            m_ComputeShader = null;
+            m_Kernel = -1;
+        }
+
+        private static RenderGraphTexture CreatePassOwnedTexture(
+            string name,
+            int width,
+            int height,
+            GraphicsFormat format)
+        {
+            var texture = new RenderGraphTexture
+            {
+                desc = RenderGraphTextureDesc.CreateColorTarget(width, height, format)
+            };
+            texture.desc.Name = name;
+            texture.desc.EnableRandomWrite = true;
+            texture.desc.ClearBuffer = false;
+            return texture;
+        }
+
+        private static void ResizePassOwned(RenderGraphTexture texture, int width, int height)
+        {
+            if (texture?.desc == null)
+                return;
+
+            texture.desc.Width = Mathf.Max(1, width);
+            texture.desc.Height = Mathf.Max(1, height);
+            texture.desc.EnableRandomWrite = true;
+        }
+    }
+}

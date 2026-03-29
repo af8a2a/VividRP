@@ -1,22 +1,106 @@
-SIGMAShadowDenoisePass: native/manual SIGMA const buffer mismatch. Fields=10, Max|Δ|=4.48083. gWorldToView max|Δ|=1.60814 manual=[0.951824, -0.00391992, -0.306619, 0 | 0.167563, 0.844078, 0.509367, 0 | -0.256814, 0.536206, -0.804071, 0 | 0, 0, 0, 1] native=[0.951824, -0.00391994, -0.306619, 0 | 0.167563, 0.844078, 0.509367, 0 | 0.256814, -0.536206, 0.804071, 0 | 0, 0, 0, 1]; gViewToClip max|Δ|=2 manual=[0.892692, 0, 0, 0 | 0, -2.24604, 0, 0 | 0, 0, 3.00407E-05, 0.0300009 | 0, 0, -1, 0] native=[0.892692, 0, 0, 0 | 0, -2.24604, 0, 0 | 0, 0, -3.00407E-05, 0.0300009 | 0, 0, 1, 0]; gWorldToViewPrev max|Δ|=1.60814 manual=[0.951824, -0.00391992, -0.306619, 0 | 0.167563, 0.844078, 0.509367, 0 | -0.256814, 0.536206, -0.804071, 0 | 0, 0, 0, 1] native=[0.951824, -0.00391994, -0.306619, 0 | 0.167563, 0.844078, 0.509367, 0 | 0.256814, -0.536206, 0.804071, 0 | 0, 0, 0, 1]; gRotator max|Δ|=1.91144 manual=(0.999544, 0.0301955, -0.0301955, 0.999544) native=(-0.911898, -0.410417, 0.410417, -0.911898); gViewVectorWorld max|Δ|=1.60814 manual=(0.256814, -0.536206, 0.804071, 0) native=(-0.256814, 0.536206, -0.804071, 0); gLightDirectionView max|Δ|=0.658164 manual=(-0.838233, 0.434822, 0.329082, 0) native=(-0.838233, 0.434822, -0.329082, 0); gFrustum max|Δ|=4.48083 manual=(1.12021, 0.445229, -2.24041, -0.890458) native=(-1.12021, -0.445229, 2.24041, 0.890458); gFrustumPrev max|Δ|=4.48083 manual=(1.12021, 0.445229, -2.24041, -0.890458) native=(-1.12021, -0.445229, 2.24041, 0.890458)
-UnityEngine.Debug:LogWarning (object)
-VividRP.Runtime.RenderPass.Core.Sigma.SIGMAShadowDenoisePass:LogNativePluginComparisonIfNeeded (VividRP.Runtime.RenderPass.Core.Sigma.SigmaSharedConstants&,VividRP.Runtime.RenderPass.Core.Sigma.SigmaSharedConstants&) (at ./Packages/VividRP/Runtime/RenderPass/Core/Sigma/SIGMAShadowDenoisePass.cs:551)
-VividRP.Runtime.RenderPass.Core.Sigma.SIGMAShadowDenoisePass:Prepare (UnityEngine.Rendering.ContextContainer) (at ./Packages/VividRP/Runtime/RenderPass/Core/Sigma/SIGMAShadowDenoisePass.cs:331)
-VividRP.Runtime.PassRecorder:RecordRenderGraph (UnityEngine.Rendering.RenderGraphModule.RenderGraph,UnityEngine.Rendering.ScriptableRenderContext,VividRP.Runtime.RenderGraphData,bool) (at ./Packages/VividRP/Runtime/RenderGraph/PassRecorder.Execution.cs:1063)
-VividRP.Runtime.VividRenderPipeline/<>c__DisplayClass7_0:<RenderCamera>b__0 () (at ./Packages/VividRP/Runtime/RenderPipeline/VividRenderPipeline.cs:115)
-VividRP.Runtime.VividRenderPipeline:TryRecordAndExecuteRenderGraph (UnityEngine.Rendering.RenderGraphModule.RenderGraph,UnityEngine.Rendering.RenderGraphModule.RenderGraphParameters&,System.Action,System.Action) (at ./Packages/VividRP/Runtime/RenderPipeline/VividRenderPipeline.cs:163)
-VividRP.Runtime.VividRenderPipeline:RenderCamera (UnityEngine.Rendering.ScriptableRenderContext,UnityEngine.Camera) (at ./Packages/VividRP/Runtime/RenderPipeline/VividRenderPipeline.cs:112)
-VividRP.Runtime.VividRenderPipeline:Render (UnityEngine.Rendering.ScriptableRenderContext,System.Collections.Generic.List`1<UnityEngine.Camera>) (at ./Packages/VividRP/Runtime/RenderPipeline/VividRenderPipeline.cs:51)
-UnityEditor.GUIView:ProcessEvent (UnityEngine.EntityId,intptr,bool&)
-SIGMAShadowDenoisePass: native/manual SIGMA const buffer mismatch. Fields=11, Max|Δ|=4.48083. gWorldToView max|Δ|=1.60814 manual=[0.951824, -0.00391992, -0.306619, 0 | 0.167563, 0.844078, 0.509367, 0 | -0.256814, 0.536206, -0.804071, 0 | 0, 0, 0, 1] native=[0.951824, -0.00391994, -0.306619, 0 | 0.167563, 0.844078, 0.509367, 0 | 0.256814, -0.536206, 0.804071, 0 | 0, 0, 0, 1]; gViewToClip max|Δ|=2 manual=[0.892692, 0, 0, 0 | 0, -2.24604, 0, 0 | 0, 0, 3.00407E-05, 0.0300009 | 0, 0, -1, 0] native=[0.892692, 0, 0, 0 | 0, -2.24604, 0, 0 | 0, 0, -3.00407E-05, 0.0300009 | 0, 0, 1, 0]; gWorldToViewPrev max|Δ|=1.60814 manual=[0.951824, -0.00391992, -0.306619, 0 | 0.167563, 0.844078, 0.509367, 0 | -0.256814, 0.536206, -0.804071, 0 | 0, 0, 0, 1] native=[0.951824, -0.00391994, -0.306619, 0 | 0.167563, 0.844078, 0.509367, 0 | 0.256814, -0.536206, 0.804071, 0 | 0, 0, 0, 1]; gRotator max|Δ|=0.703047 manual=(-0.697484, 0.716601, -0.716601, -0.697484) native=(-0.999908, 0.0135537, -0.0135537, -0.999908); gRotatorPost max|Δ|=1.42062 manual=(-0.534998, 0.844854, -0.844854, -0.534998) native=(0.817612, -0.575769, 0.575769, 0.817612); gViewVectorWorld max|Δ|=1.60814 manual=(0.256814, -0.536206, 0.804071, 0) native=(-0.256814, 0.536206, -0.804071, 0); gLightDirectionView max|Δ|=0.658164 manual=(-0.838233, 0.434822, 0.329082, 0) native=(-0.838233, 0.434822, -0.329082, 0); gFrustum max|Δ|=4.48083 manual=(1.12021, 0.445229, -2.24041, -0.890458) native=(-1.12021, -0.445229, 2.24041, 0.890458)
-UnityEngine.Debug:LogWarning (object)
+[VividRP][CameraGlobalsMismatch] SceneView='SceneCamera' Game='Camera'
+Scene raw: rect=(x:0.00, y:0.00, width:1565.00, height:727.00) actual=1565x727 pixel=1565x727 scaled=1565x727 near=0.0300 far=1000.0000 fov=60.0000 aspect=2.152682 ortho=False orthoSize=5.0000 targetTexture=True renderIntoTexture=True
+Game raw:  rect=(x:0.00, y:0.00, width:1920.00, height:1080.00) actual=1920x1080 pixel=1920x1080 scaled=1920x1080 near=0.0300 far=1000.0000 fov=60.0000 aspect=1.777778 ortho=False orthoSize=5.0000 targetTexture=False renderIntoTexture=False
+Scene source: additionalData=False rawProjIdentity=False rawNonJitteredIdentity=False effectiveProjIdentity=False effectiveNonJitteredIdentity=False rawVsEffectiveProjMaxDiff=0.000000
+Game source:  additionalData=True rawProjIdentity=True rawNonJitteredIdentity=True effectiveProjIdentity=False effectiveNonJitteredIdentity=False rawVsEffectiveProjMaxDiff=2.000060
+Scene rawCamera.projectionMatrix:
+0.8046	0.0000	-0.0005	0.0000
+0.0000	1.7321	-0.0002	0.0000
+0.0000	0.0000	-1.0001	-0.0600
+0.0000	0.0000	-1.0000	0.0000
 
+Scene rawCamera.nonJitteredProjectionMatrix:
+0.8046	0.0000	0.0000	0.0000
+0.0000	1.7321	0.0000	0.0000
+0.0000	0.0000	-1.0001	-0.0600
+0.0000	0.0000	-1.0000	0.0000
 
-VividRP.Runtime.RenderPass.Core.Sigma.SIGMAShadowDenoisePass:LogNativePluginComparisonIfNeeded (VividRP.Runtime.RenderPass.Core.Sigma.SigmaSharedConstants&,VividRP.Runtime.RenderPass.Core.Sigma.SigmaSharedConstants&) (at ./Packages/VividRP/Runtime/RenderPass/Core/Sigma/SIGMAShadowDenoisePass.cs:551)
-VividRP.Runtime.RenderPass.Core.Sigma.SIGMAShadowDenoisePass:Prepare (UnityEngine.Rendering.ContextContainer) (at ./Packages/VividRP/Runtime/RenderPass/Core/Sigma/SIGMAShadowDenoisePass.cs:331)
-VividRP.Runtime.PassRecorder:RecordRenderGraph (UnityEngine.Rendering.RenderGraphModule.RenderGraph,UnityEngine.Rendering.ScriptableRenderContext,VividRP.Runtime.RenderGraphData,bool) (at ./Packages/VividRP/Runtime/RenderGraph/PassRecorder.Execution.cs:1063)
-VividRP.Runtime.VividRenderPipeline/<>c__DisplayClass7_0:<RenderCamera>b__0 () (at ./Packages/VividRP/Runtime/RenderPipeline/VividRenderPipeline.cs:115)
-VividRP.Runtime.VividRenderPipeline:TryRecordAndExecuteRenderGraph (UnityEngine.Rendering.RenderGraphModule.RenderGraph,UnityEngine.Rendering.RenderGraphModule.RenderGraphParameters&,System.Action,System.Action) (at ./Packages/VividRP/Runtime/RenderPipeline/VividRenderPipeline.cs:163)
-VividRP.Runtime.VividRenderPipeline:RenderCamera (UnityEngine.Rendering.ScriptableRenderContext,UnityEngine.Camera) (at ./Packages/VividRP/Runtime/RenderPipeline/VividRenderPipeline.cs:112)
+Scene effectiveProjectionMatrix:
+0.8046	0.0000	-0.0005	0.0000
+0.0000	1.7321	-0.0002	0.0000
+0.0000	0.0000	-1.0001	-0.0600
+0.0000	0.0000	-1.0000	0.0000
+
+Scene effectiveNonJitteredProjectionMatrix:
+0.8046	0.0000	0.0000	0.0000
+0.0000	1.7321	0.0000	0.0000
+0.0000	0.0000	-1.0001	-0.0600
+0.0000	0.0000	-1.0000	0.0000
+
+Game rawCamera.projectionMatrix:
+1.0000	0.0000	0.0000	0.0000
+0.0000	1.0000	0.0000	0.0000
+0.0000	0.0000	1.0000	0.0000
+0.0000	0.0000	0.0000	1.0000
+
+Game rawCamera.nonJitteredProjectionMatrix:
+1.0000	0.0000	0.0000	0.0000
+0.0000	1.0000	0.0000	0.0000
+0.0000	0.0000	1.0000	0.0000
+0.0000	0.0000	0.0000	1.0000
+
+Game effectiveProjectionMatrix:
+0.9743	0.0000	0.0000	0.0000
+0.0000	1.7321	0.0000	0.0000
+0.0000	0.0000	-1.0001	-0.0600
+0.0000	0.0000	-1.0000	0.0000
+
+Game effectiveNonJitteredProjectionMatrix:
+0.9743	0.0000	0.0000	0.0000
+0.0000	1.7321	0.0000	0.0000
+0.0000	0.0000	-1.0001	-0.0600
+0.0000	0.0000	-1.0000	0.0000
+
+Differing camera-related globals:
+- pixelRect: scene=(x:0.00, y:0.00, width:1565.00, height:727.00) game=(x:0.00, y:0.00, width:1920.00, height:1080.00) maxAbsDiff=355.000000
+- actualSize: scene=1565x727 game=1920x1080 maxAbsDiff=355.000000
+- cameraPixelSize: scene=1565x727 game=1920x1080 maxAbsDiff=355.000000
+- scaledPixelSize: scene=1565x727 game=1920x1080 maxAbsDiff=355.000000
+- aspect: scene=2.152682 game=1.777778 maxAbsDiff=0.374905
+- _VividScreenParams: scene=(1565.0000, 727.0000, 1.0006, 1.0014) game=(1920.0000, 1080.0000, 1.0005, 1.0009) maxAbsDiff=355.000000
+- _VividGlstateMatrixProjection: scene=0.8046	0.0000	-0.0005	0.0000
+0.0000	-1.7321	0.0002	0.0000
+0.0000	0.0000	0.0000	0.0300
+0.0000	0.0000	-1.0000	0.0000
+ game=0.9743	0.0000	0.0000	0.0000
+0.0000	-1.7321	0.0000	0.0000
+0.0000	0.0000	0.0000	0.0300
+0.0000	0.0000	-1.0000	0.0000
+ maxAbsDiff=0.169677
+- _VividViewProjMatrix: scene=0.0476	-0.0114	-0.8031	1.3137
+-1.5426	-0.7836	-0.0803	7.2108
+0.0000	0.0000	0.0000	0.0297
+0.4510	-0.8917	0.0387	9.1473
+ game=0.0573	-0.0132	-0.9725	1.5855
+-1.5425	-0.7837	-0.0803	7.2122
+0.0000	0.0000	0.0000	0.0297
+0.4510	-0.8917	0.0387	9.1473
+ maxAbsDiff=0.271741
+- _VividNonJitteredViewProjMatrix: scene=0.0473	-0.0109	-0.8031	1.3094
+-1.5425	-0.7837	-0.0803	7.2122
+0.0000	0.0000	0.0000	0.0297
+0.4510	-0.8917	0.0387	9.1473
+ game=0.0573	-0.0132	-0.9725	1.5855
+-1.5425	-0.7837	-0.0803	7.2122
+0.0000	0.0000	0.0000	0.0297
+0.4510	-0.8917	0.0387	9.1473
+ maxAbsDiff=0.276124
+- _VividInvViewProjMatrix: scene=0.0731	-0.5142	-17.1047	0.4504
+-0.0169	-0.2612	335.4103	-0.8816
+-1.2406	-0.0268	48.7652	0.0408
+0.0000	0.0000	33.3323	0.0010
+ game=0.0604	-0.5142	-17.1049	0.4505
+-0.0140	-0.2612	335.4107	-0.8816
+-1.0245	-0.0268	48.7653	0.0402
+0.0000	0.0000	33.3323	0.0010
+ maxAbsDiff=0.216056
+- ... 3 more differing fields omitted
+
+UnityEngine.Debug:LogWarning (object,UnityEngine.Object)
+VividRP.Runtime.CameraShaderVariablesGlobalComparisonLogger:CaptureAndCompare (VividRP.Runtime.VividCameraData,VividRP.Runtime.ShaderVariablesGlobal) (at ./Packages/VividRP/Runtime/RenderGraph/FrameContext/CameraShaderVariablesGlobalComparisonLogger.cs:152)
+VividRP.Runtime.FrameContextSystem:SetShaderGlobals (UnityEngine.Rendering.CommandBuffer,VividRP.Runtime.VividCameraData,VividRP.Runtime.VividCameraData/ShaderVariables,VividRP.Runtime.CameraTemporalData) (at ./Packages/VividRP/Runtime/RenderGraph/FrameContext/FrameContextSystem.cs:56)
+VividRP.Runtime.FrameContextSystem:Update (UnityEngine.Rendering.ContextContainer,UnityEngine.Rendering.CommandBuffer) (at ./Packages/VividRP/Runtime/RenderGraph/FrameContext/FrameContextSystem.cs:35)
+VividRP.Runtime.PassRecorder:PrepareFrame (VividRP.Runtime.RenderGraphData,UnityEngine.Rendering.CommandBuffer) (at ./Packages/VividRP/Runtime/RenderGraph/PassRecorder.Execution.cs:163)
+VividRP.Runtime.VividRenderPipeline:RenderCamera (UnityEngine.Rendering.ScriptableRenderContext,UnityEngine.Camera) (at ./Packages/VividRP/Runtime/RenderPipeline/VividRenderPipeline.cs:97)
 VividRP.Runtime.VividRenderPipeline:Render (UnityEngine.Rendering.ScriptableRenderContext,System.Collections.Generic.List`1<UnityEngine.Camera>) (at ./Packages/VividRP/Runtime/RenderPipeline/VividRenderPipeline.cs:51)
 UnityEditor.GUIView:ProcessEvent (UnityEngine.EntityId,intptr,bool&)

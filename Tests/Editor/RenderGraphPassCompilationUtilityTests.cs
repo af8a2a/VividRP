@@ -383,28 +383,24 @@ namespace VividRP.Editor.Tests
     public class RenderGraphCompilerTests
     {
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class DrawObjectPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(DrawObjectPass).AssemblyQualifiedName;
         }
 
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class FinalBlitPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(FinalBlitPass).AssemblyQualifiedName;
         }
 
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class RTASBuildPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(RTASBuildPass).AssemblyQualifiedName;
         }
 
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class RayTracingConsumerPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(RayTracingConsumerPass).AssemblyQualifiedName;
@@ -420,8 +416,8 @@ namespace VividRP.Editor.Tests
                 var finalBlitNode = new FinalBlitPassNode();
                 var drawObjectNode = new DrawObjectPassNode();
 
-                graph.AddNode(finalBlitNode);
-                graph.AddNode(drawObjectNode);
+                RenderGraphTestUtility.AddTestNode(graph, finalBlitNode);
+                RenderGraphTestUtility.AddTestNode(graph, drawObjectNode);
                 graph.Connect(
                     drawObjectNode.GetOutputPortByName("m_ColorTarget"),
                     finalBlitNode.GetInputPortByName("source"));
@@ -473,8 +469,8 @@ namespace VividRP.Editor.Tests
                 var consumerNode = new RayTracingConsumerPassNode();
                 var buildNode = new RTASBuildPassNode();
 
-                graph.AddNode(consumerNode);
-                graph.AddNode(buildNode);
+                RenderGraphTestUtility.AddTestNode(graph, consumerNode);
+                RenderGraphTestUtility.AddTestNode(graph, buildNode);
                 graph.Connect(
                     buildNode.GetOutputPortByName("m_SceneAccelerationStructure"),
                     consumerNode.GetInputPortByName("m_SceneAccelerationStructure"));

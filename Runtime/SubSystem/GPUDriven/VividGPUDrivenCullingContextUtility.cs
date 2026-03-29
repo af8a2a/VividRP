@@ -22,9 +22,10 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             Matrix4x4 viewMatrix = camera.worldToCameraMatrix;
-            Matrix4x4 gpuProjectionMatrix = GL.GetGPUProjectionMatrix(camera.projectionMatrix, true);
+            Matrix4x4 projectionMatrix = camera.projectionMatrix;
+            Matrix4x4 gpuProjectionMatrix = GL.GetGPUProjectionMatrix(projectionMatrix, true);
             Matrix4x4 gpuViewProjectionMatrix = gpuProjectionMatrix * viewMatrix;
-            Matrix4x4 cullingViewProjectionMatrix = camera.projectionMatrix * viewMatrix;
+            Matrix4x4 cullingViewProjectionMatrix = projectionMatrix * viewMatrix;
             Plane[] frustumPlanes = GeometryUtility.CalculateFrustumPlanes(cullingViewProjectionMatrix);
 
             Transform cameraTransform = camera.transform;

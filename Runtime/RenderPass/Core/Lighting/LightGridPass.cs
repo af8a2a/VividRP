@@ -505,7 +505,7 @@ namespace VividRP.Runtime
         {
             var aspect = m_LightingHeight > 0 ? m_LightingWidth / (float)m_LightingHeight : 1.0f;
             var projection = camera != null
-                ? camera.projectionMatrix
+                ? CameraProjectionMatrixUtility.GetProjectionMatrix(camera)
                 : Matrix4x4.Perspective(60.0f, aspect, m_ClusterNearClip, m_ClusterFarClip);
             var lightListProjection = projection * s_FlipMatrixLhsRhs;
             var screenToPixel = Matrix4x4.identity;

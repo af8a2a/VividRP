@@ -10,7 +10,6 @@ namespace VividRP.Editor.Tests
     public class RTASInstanceDebugPassNodeTests
     {
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class AutoRegisteredRTASInstanceDebugPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(RTASInstanceDebugPass).AssemblyQualifiedName;
@@ -27,14 +26,12 @@ namespace VividRP.Editor.Tests
         }
 
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class AutoRegisteredRTASBuildPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(RTASBuildPass).AssemblyQualifiedName;
         }
 
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class AutoRegisteredFinalBlitPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(FinalBlitPass).AssemblyQualifiedName;
@@ -48,7 +45,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 var node = new AutoRegisteredRTASInstanceDebugPassNode();
-                graph.AddNode(node);
+                RenderGraphTestUtility.AddTestNode(graph, node);
 
                 Assert.That(node.GetInputPortByName("m_SceneAccelerationStructure"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_SceneAccelerationStructure"), Is.Null);
@@ -73,7 +70,7 @@ namespace VividRP.Editor.Tests
             {
                 var node = new AutoRegisteredRTASInstanceDebugPassNode();
 
-                graph.AddNode(node);
+                RenderGraphTestUtility.AddTestNode(graph, node);
 
                 var result = RenderGraphCompiler.Compile(graph);
 
@@ -101,9 +98,9 @@ namespace VividRP.Editor.Tests
                 var debugNode = new AutoRegisteredRTASInstanceDebugPassNode();
                 var blitNode = new AutoRegisteredFinalBlitPassNode();
 
-                graph.AddNode(blitNode);
-                graph.AddNode(debugNode);
-                graph.AddNode(buildNode);
+                RenderGraphTestUtility.AddTestNode(graph, blitNode);
+                RenderGraphTestUtility.AddTestNode(graph, debugNode);
+                RenderGraphTestUtility.AddTestNode(graph, buildNode);
 
                 graph.Connect(
                     buildNode.GetOutputPortByName("m_SceneAccelerationStructure"),

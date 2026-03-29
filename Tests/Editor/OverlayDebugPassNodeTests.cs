@@ -10,7 +10,6 @@ namespace VividRP.Editor.Tests
     public sealed class OverlayDebugPassNodeTests
     {
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class AutoRegisteredOverlayDebugPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(OverlayDebugPass).AssemblyQualifiedName;
@@ -54,7 +53,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 var node = new AutoRegisteredOverlayDebugPassNode();
-                graph.AddNode(node);
+                RenderGraphTestUtility.AddTestNode(graph, node);
 
                 Assert.That(node.GetInputPortByName("m_SourceTexture"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_DebugTexture"), Is.Not.Null);
@@ -86,7 +85,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 var node = new AutoRegisteredOverlayDebugPassNode();
-                graph.AddNode(node);
+                RenderGraphTestUtility.AddTestNode(graph, node);
 
                 var result = RenderGraphCompiler.Compile(graph);
 

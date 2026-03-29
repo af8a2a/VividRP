@@ -45,6 +45,25 @@ namespace VividRP.Runtime
         [SerializeField]
         private bool m_Dithering;
 
+        [Header("Temporal Anti-Aliasing")]
+        [SerializeField]
+        private bool m_EnableTAA;
+
+        [SerializeField, Range(0.2f, 2.0f)]
+        private float m_TAAJitterSpread = 1.0f;
+
+        [SerializeField, Range(4, 64)]
+        private int m_TAASampleCount = 8;
+
+        [SerializeField, Range(0.0f, 0.99f)]
+        private float m_TAABaseBlendFactor = 0.95f;
+
+        [SerializeField, Range(0.5f, 6.0f)]
+        private float m_TAAMotionWeightDecay = 3.0f;
+
+        [SerializeField, Range(0.0f, 1.0f)]
+        private float m_TAAAntiFlickerIntensity = 0.5f;
+
         private Matrix4x4 m_ViewMatrix = Matrix4x4.identity;
         private Matrix4x4 m_ProjectionMatrix = Matrix4x4.identity;
         private Matrix4x4 m_JitterMatrix = Matrix4x4.identity;
@@ -63,8 +82,9 @@ namespace VividRP.Runtime
                 return;
             }
 
-            var nonJitteredProjectionMatrix = currentCamera.nonJitteredProjectionMatrix;
-            var jitterMatrix = currentCamera.projectionMatrix * nonJitteredProjectionMatrix.inverse;
+            var nonJitteredProjectionMatrix = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(currentCamera);
+            var projectionMatrix = CameraProjectionMatrixUtility.GetProjectionMatrix(currentCamera);
+            var jitterMatrix = projectionMatrix * nonJitteredProjectionMatrix.inverse;
             var jitter = new Vector2(jitterMatrix.m03, jitterMatrix.m13);
             SetViewProjectionAndJitterMatrix(
                 currentCamera.worldToCameraMatrix,
@@ -153,6 +173,42 @@ namespace VividRP.Runtime
         {
             get => m_Dithering;
             set => m_Dithering = value;
+        }
+
+        public bool enableTAA
+        {
+            get => m_EnableTAA;
+            set => m_EnableTAA = value;
+        }
+
+        public float taaJitterSpread
+        {
+            get => m_TAAJitterSpread;
+            set => m_TAAJitterSpread = Mathf.Clamp(value, 0.2f, 2.0f);
+        }
+
+        public int taaSampleCount
+        {
+            get => m_TAASampleCount;
+            set => m_TAASampleCount = Mathf.Clamp(value, 4, 64);
+        }
+
+        public float taaBaseBlendFactor
+        {
+            get => m_TAABaseBlendFactor;
+            set => m_TAABaseBlendFactor = Mathf.Clamp(value, 0.0f, 0.99f);
+        }
+
+        public float taaMotionWeightDecay
+        {
+            get => m_TAAMotionWeightDecay;
+            set => m_TAAMotionWeightDecay = Mathf.Clamp(value, 0.5f, 6.0f);
+        }
+
+        public float taaAntiFlickerIntensity
+        {
+            get => m_TAAAntiFlickerIntensity;
+            set => m_TAAAntiFlickerIntensity = Mathf.Clamp01(value);
         }
 
         private void OnValidate()

@@ -26,6 +26,7 @@ namespace VividRP.Runtime
 
             VividVolumeManagerUtility.Initialize();
             PipelineResourceManager.Initialize();
+            SkyManager.Initialize();
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             Blitter.Initialize(resources.CoreBlitShader, resources.CoreBlitColorAndDepthShader);
             BlueNoise.Initialize();
@@ -209,6 +210,7 @@ namespace VividRP.Runtime
         {
             VividGPUDrivenSystem.Shutdown();
             PassRecorder.Dispose();
+            SkyManager.Deinitialize();
             VividVolumeManagerUtility.Deinitialize();
 
             m_RenderGraph?.Cleanup();

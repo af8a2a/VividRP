@@ -52,6 +52,38 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Prepare_CachesSkyDataFromFrameContext_WhenSkyDataIsAvailable()
+        {
+            var pass = new HDRISkyPass();
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            var skyData = frameData.GetOrCreate<VividSkyData>();
+            var cubemap = new Cubemap(4, TextureFormat.RGBA32, false);
+
+            try
+            {
+                cameraData.actualWidth = 320;
+                cameraData.actualHeight = 180;
+                skyData.activeSkyType = SkyType.HDRI;
+                skyData.specularCubemap = cubemap;
+                skyData.tint = Color.red;
+                skyData.exposure = 2.0f;
+                skyData.rotation = 45.0f;
+
+                pass.Prepare(frameData);
+
+                Assert.That(GetFieldValue<Cubemap>(pass, "m_Cubemap"), Is.SameAs(cubemap));
+                Assert.That(GetFieldValue<Color>(pass, "m_Tint"), Is.EqualTo(Color.red));
+                Assert.That(GetFieldValue<float>(pass, "m_Exposure"), Is.EqualTo(2.0f));
+                Assert.That(GetFieldValue<float>(pass, "m_Rotation"), Is.EqualTo(45.0f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(cubemap);
+            }
+        }
+
+        [Test]
         public void BuildSkyParam_UsesHdrpCompatibleLayout_WhenVolumeSettingsAreApplied()
         {
             var skyParam = HDRISkyPass.BuildSkyParam(2.5f, 45f);
@@ -102,6 +134,13 @@ namespace VividRP.Editor.Tests
             Assert.That(texture, Is.Not.Null);
             Assert.That(texture.desc.Width, Is.EqualTo(expectedWidth));
             Assert.That(texture.desc.Height, Is.EqualTo(expectedHeight));
+        }
+
+        private static T GetFieldValue<T>(HDRISkyPass pass, string fieldName)
+        {
+            var field = typeof(HDRISkyPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null);
+            return (T)field.GetValue(pass);
         }
     }
 }

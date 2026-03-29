@@ -213,6 +213,38 @@ namespace VividRP.Editor.Tests
             Assert.That(GetFieldValue<int>(pass, "m_ClusterSliceCount"), Is.EqualTo(64));
         }
 
+        [Test]
+        public void Prepare_UsesSkyDataFromFrameContext_WhenSkySystemPopulatesIt()
+        {
+            var pass = new DeferredLightingPass();
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            var skyData = frameData.GetOrCreate<VividSkyData>();
+            var cubemap = new Cubemap(4, TextureFormat.RGBA32, false);
+
+            try
+            {
+                cameraData.actualWidth = 256;
+                cameraData.actualHeight = 144;
+                skyData.activeSkyType = SkyType.HDRI;
+                skyData.specularCubemap = cubemap;
+                skyData.tint = Color.cyan;
+                skyData.exposure = 1.75f;
+                skyData.rotation = 30.0f;
+
+                pass.Prepare(frameData);
+
+                Assert.That(GetFieldValue<Color>(pass, "m_SkyIBLTint"), Is.EqualTo(Color.cyan));
+                Assert.That(
+                    GetFieldValue<Vector4>(pass, "m_SkyIBLParams"),
+                    Is.EqualTo(DeferredLightingPass.BuildSkyIblParams(cubemap, 1.75f, 30.0f)));
+            }
+            finally
+            {
+                Object.DestroyImmediate(cubemap);
+            }
+        }
+
 
         private static void AssertTextureSize(DeferredLightingPass pass, string fieldName, int expectedWidth, int expectedHeight)
         {

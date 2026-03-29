@@ -269,7 +269,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ColorTexture.Resize(width, height);
             PrepareClusteredLightingParameters(frameData);
             PreparePreIntegratedFGDResources();
-            PrepareSkyIblState();
+            PrepareSkyIblState(frameData.GetOrCreate<VividSkyData>());
         }
 
         public override void Record(UnsafeGraphContext context)
@@ -609,19 +609,18 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
-        private void PrepareSkyIblState()
+        private void PrepareSkyIblState(VividSkyData skyData)
         {
-            var skySettings = VolumeManager.instance.stack?.GetComponent<HDRISkyVolume>();
-            var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            var skyCubemap = skySettings?.GetSkyCubemapOrDefault()
-                             ?? resources?.DefaultHDRISkyCubemap
-                             ?? m_FallbackSkyIBLCubemap;
+            var hasActiveSky = skyData != null && skyData.activeSkyType != SkyType.None;
+            var skyCubemap = hasActiveSky
+                ? skyData.specularCubemap ?? m_FallbackSkyIBLCubemap
+                : m_FallbackSkyIBLCubemap;
 
             EnsureSkyIblCubemapImported(skyCubemap);
 
-            m_SkyIBLTint = skySettings?.tint.value ?? Color.white;
-            var skyExposure = skySettings?.exposure.value ?? 1f;
-            var skyRotation = skySettings?.rotation.value ?? 0f;
+            m_SkyIBLTint = hasActiveSky ? skyData.tint : Color.white;
+            var skyExposure = hasActiveSky ? skyData.exposure : 1.0f;
+            var skyRotation = hasActiveSky ? skyData.rotation : 0.0f;
             m_SkyIBLParams = BuildSkyIblParams(skyCubemap, skyExposure, skyRotation);
         }
 

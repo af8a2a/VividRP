@@ -21,7 +21,7 @@ namespace VividRP.Runtime
 
         internal static Cubemap GetDefaultSkyCubemap()
         {
-            return PipelineResourceManager.Get<VividRPCoreResources>().DefaultHDRISkyCubemap;
+            return PipelineResourceManager.Get<VividRPCoreResources>()?.DefaultHDRISkyCubemap;
         }
 
         public Cubemap GetSkyCubemapOrDefault()

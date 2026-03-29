@@ -49,6 +49,13 @@ GLOBAL_CBUFFER_START(ShaderVariablesGlobal, b0)
     float4 _VividFogParams;
     float4 _VividFogColor;
     float4 _VividShadowColor;
+    float4 _VividSHAr;
+    float4 _VividSHAg;
+    float4 _VividSHAb;
+    float4 _VividSHBr;
+    float4 _VividSHBg;
+    float4 _VividSHBb;
+    float4 _VividSHC;
 CBUFFER_END
 
 #define _Time _VividTime
@@ -98,5 +105,4 @@ CBUFFER_END
 #define unity_FogParams _VividFogParams
 #define unity_FogColor _VividFogColor
 #define unity_ShadowColor _VividShadowColor
-
 #endif

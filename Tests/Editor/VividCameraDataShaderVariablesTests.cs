@@ -182,7 +182,9 @@ namespace VividRP.Editor.Tests
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "FrameContextSystem.cs"));
             var loggerSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "CameraShaderVariablesGlobalComparisonLogger.cs"));
 
-            Assert.That(source, Does.Contain("var shaderVariablesGlobal = ShaderVariablesGlobal.Create(sv, temporalData);"));
+            Assert.That(source, Does.Contain("SkyManager.Update(frameData);"));
+            Assert.That(source, Does.Contain("var skyData = frameData.GetOrCreate<VividSkyData>();"));
+            Assert.That(source, Does.Contain("var shaderVariablesGlobal = ShaderVariablesGlobal.Create(sv, temporalData, skyData);"));
             Assert.That(source, Does.Contain("#if VIVIDRP_DEBUG"));
             Assert.That(source, Does.Contain("CameraShaderVariablesGlobalComparisonLogger.CaptureAndCompare(cameraData, shaderVariablesGlobal);"));
             Assert.That(source, Does.Contain("ConstantBuffer.PushGlobal(cmd, shaderVariablesGlobal, ShaderVariablesGlobal.ConstantBufferShaderId);"));
@@ -309,6 +311,8 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderVariablesGlobalSource, Does.Contain("#define _WorldSpaceCameraPos _VividWorldSpaceCameraPos.xyz"));
             Assert.That(shaderVariablesGlobalSource, Does.Contain("#define _GlobalMipBias _VividGlobalMipBias.xy"));
             Assert.That(shaderVariablesGlobalSource, Does.Contain("#define _ScaledScreenParams _VividScaledScreenParams"));
+            Assert.That(unityInputSource, Does.Contain("#define unity_SHAr _VividSHAr"));
+            Assert.That(unityInputSource, Does.Contain("#define unity_SHC _VividSHC"));
             Assert.That(inputSource, Does.Not.Contain("float2 _GlobalMipBias;"));
             Assert.That(inputSource, Does.Not.Contain("float4 _ScaledScreenParams;"));
         }

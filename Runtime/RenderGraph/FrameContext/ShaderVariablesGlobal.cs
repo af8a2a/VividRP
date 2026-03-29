@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
@@ -55,15 +56,42 @@ namespace VividRP.Runtime
         public Vector4 _VividFogParams;
         public Vector4 _VividFogColor;
         public Vector4 _VividShadowColor;
+        public Vector4 _VividSHAr;
+        public Vector4 _VividSHAg;
+        public Vector4 _VividSHAb;
+        public Vector4 _VividSHBr;
+        public Vector4 _VividSHBg;
+        public Vector4 _VividSHBb;
+        public Vector4 _VividSHC;
 
         public static ShaderVariablesGlobal Create(
             VividCameraData.ShaderVariables shaderVariables,
             CameraTemporalData temporalData)
         {
+            return Create(shaderVariables, temporalData, null);
+        }
+
+        public static ShaderVariablesGlobal Create(
+            VividCameraData.ShaderVariables shaderVariables,
+            CameraTemporalData temporalData,
+            VividSkyData skyData)
+        {
             var currentTime = Time.timeSinceLevelLoad;
             var deltaTime = Mathf.Max(Time.deltaTime, 1e-6f);
             var smoothDeltaTime = Mathf.Max(Time.smoothDeltaTime > 0.0f ? Time.smoothDeltaTime : deltaTime, 1e-6f);
             var previousTime = currentTime - deltaTime;
+            var ambientProbe = skyData != null && skyData.hasDiffuseSH
+                ? skyData.diffuseSH
+                : RenderSettings.ambientProbe;
+            PackSphericalHarmonics(
+                ambientProbe,
+                out var shAr,
+                out var shAg,
+                out var shAb,
+                out var shBr,
+                out var shBg,
+                out var shBb,
+                out var shC);
 
             return new ShaderVariablesGlobal
             {
@@ -120,6 +148,13 @@ namespace VividRP.Runtime
                 _VividFogParams = CreateFogParams(),
                 _VividFogColor = ToVector4(RenderSettings.fogColor),
                 _VividShadowColor = ToVector4(RenderSettings.subtractiveShadowColor),
+                _VividSHAr = shAr,
+                _VividSHAg = shAg,
+                _VividSHAb = shAb,
+                _VividSHBr = shBr,
+                _VividSHBg = shBg,
+                _VividSHBb = shBb,
+                _VividSHC = shC,
             };
         }
 
@@ -174,6 +209,27 @@ namespace VividRP.Runtime
         private static Vector4 ToVector4(Color color)
         {
             return new Vector4(color.r, color.g, color.b, color.a);
+        }
+
+        private static void PackSphericalHarmonics(
+            SphericalHarmonicsL2 sh,
+            out Vector4 shAr,
+            out Vector4 shAg,
+            out Vector4 shAb,
+            out Vector4 shBr,
+            out Vector4 shBg,
+            out Vector4 shBb,
+            out Vector4 shC)
+        {
+            shAr = new Vector4(sh[0, 3], sh[0, 1], sh[0, 2], sh[0, 0] - sh[0, 6]);
+            shAg = new Vector4(sh[1, 3], sh[1, 1], sh[1, 2], sh[1, 0] - sh[1, 6]);
+            shAb = new Vector4(sh[2, 3], sh[2, 1], sh[2, 2], sh[2, 0] - sh[2, 6]);
+
+            shBr = new Vector4(sh[0, 4], sh[0, 5], sh[0, 6] * 3.0f, sh[0, 7]);
+            shBg = new Vector4(sh[1, 4], sh[1, 5], sh[1, 6] * 3.0f, sh[1, 7]);
+            shBb = new Vector4(sh[2, 4], sh[2, 5], sh[2, 6] * 3.0f, sh[2, 7]);
+
+            shC = new Vector4(sh[0, 8], sh[1, 8], sh[2, 8], 1.0f);
         }
     }
 }

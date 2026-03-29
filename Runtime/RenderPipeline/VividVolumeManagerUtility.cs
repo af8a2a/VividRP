@@ -52,6 +52,16 @@ namespace VividRP.Runtime
             return VolumeManager.instance.stack?.GetComponent<HDRISkyVolume>();
         }
 
+        internal static SkySettingsVolume GetSkySettingsVolume()
+        {
+            return VolumeManager.instance.stack?.GetComponent<SkySettingsVolume>();
+        }
+
+        internal static PhysicallyBasedSkyVolume GetPhysicallyBasedSkyVolume()
+        {
+            return VolumeManager.instance.stack?.GetComponent<PhysicallyBasedSkyVolume>();
+        }
+
         internal static SliderDebugVolume GetSliderDebugVolume()
         {
             return VolumeManager.instance.stack?.GetComponent<SliderDebugVolume>();

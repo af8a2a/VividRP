@@ -10,8 +10,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SkyCubemapId = Shader.PropertyToID("_SkyCubemap");
         private static readonly int SkyTintId = Shader.PropertyToID("_SkyTint");
         private static readonly int SkyParamId = Shader.PropertyToID("_SkyParam");
-        private static readonly int DepthTextureID = Shader.PropertyToID("_DepthTexture");
-
         private Material m_Material;
 
         [RenderGraphResource(Name = "Color", Access = AccessFlags.ReadWrite, AttachmentIndex = 0)]
@@ -21,6 +19,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_DepthTexture;
 
         private Matrix4x4 m_PixelCoordToViewDirMatrix;
+        private Cubemap m_Cubemap;
+        private Color m_Tint = Color.white;
+        private float m_Exposure = 1.0f;
+        private float m_Rotation;
 
         public HDRISkyPass()
         {
@@ -37,7 +39,12 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             var cameraData = frameData.Get<VividCameraData>();
+            var skyData = frameData.GetOrCreate<VividSkyData>();
             m_PixelCoordToViewDirMatrix = cameraData.GetPixelCoordToViewDirWSMatrix();
+            m_Cubemap = skyData.specularCubemap;
+            m_Tint = skyData.tint;
+            m_Exposure = skyData.exposure;
+            m_Rotation = skyData.rotation;
 
             var width = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
             var height = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
@@ -54,23 +61,14 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Record(RasterGraphContext context)
         {
-            var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
-            var skySettings = VolumeManager.instance.stack?.GetComponent<HDRISkyVolume>();
-            var cubemap = skySettings?.GetSkyCubemapOrDefault();
-            var tint = skySettings?.tint.value ?? Color.white;
-            var exposure = skySettings?.exposure.value ?? 1f;
-            var rotation = skySettings?.rotation.value ?? 0f;
-
-            if (cubemap != null)
-            {
-                mpb.SetTexture(SkyCubemapId, cubemap);
-            }
-            mpb.SetColor(SkyTintId, tint);
-            mpb.SetVector(SkyParamId, BuildSkyParam(exposure, rotation));
-            mpb.SetMatrix("_PixelCoordToViewDirWS", m_PixelCoordToViewDirMatrix);
-
-            if (!m_Material)
+            if (!m_Material || m_Cubemap == null)
                 return;
+
+            var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
+            mpb.SetTexture(SkyCubemapId, m_Cubemap);
+            mpb.SetColor(SkyTintId, m_Tint);
+            mpb.SetVector(SkyParamId, BuildSkyParam(m_Exposure, m_Rotation));
+            mpb.SetMatrix("_PixelCoordToViewDirWS", m_PixelCoordToViewDirMatrix);
 
             CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);
         }

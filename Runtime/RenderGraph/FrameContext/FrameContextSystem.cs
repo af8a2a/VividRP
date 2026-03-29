@@ -30,9 +30,12 @@ namespace VividRP.Runtime
             vividTemporalData.previousJitter = temporalData.PreviousJitter;
             vividTemporalData.isFirstFrame = temporalData.IsFirstFrame;
 
+            SkyManager.Update(frameData);
+
             // 3. Build and set all shader globals in one place
             var shaderVariables = cameraData.BuildShaderVariables(temporalData);
-            SetShaderGlobals(cmd, cameraData, shaderVariables, temporalData);
+            var skyData = frameData.GetOrCreate<VividSkyData>();
+            SetShaderGlobals(cmd, cameraData, shaderVariables, temporalData, skyData);
         }
 
         public static CameraTemporalData GetOrCreate(Camera camera)
@@ -51,10 +54,14 @@ namespace VividRP.Runtime
 #endif
         }
 
-        private static void SetShaderGlobals(CommandBuffer cmd, VividCameraData cameraData, VividCameraData.ShaderVariables sv,
-            CameraTemporalData temporalData)
+        private static void SetShaderGlobals(
+            CommandBuffer cmd,
+            VividCameraData cameraData,
+            VividCameraData.ShaderVariables sv,
+            CameraTemporalData temporalData,
+            VividSkyData skyData)
         {
-            var shaderVariablesGlobal = ShaderVariablesGlobal.Create(sv, temporalData);
+            var shaderVariablesGlobal = ShaderVariablesGlobal.Create(sv, temporalData, skyData);
 #if VIVIDRP_DEBUG
             CameraShaderVariablesGlobalComparisonLogger.CaptureAndCompare(cameraData, shaderVariablesGlobal);
 #endif

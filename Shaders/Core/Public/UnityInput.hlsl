@@ -63,6 +63,14 @@ CBUFFER_END
 static const uint unity_RendererUserValue = asuint(unity_RenderingLayer.y);
 #endif
 
+#define unity_SHAr _VividSHAr
+#define unity_SHAg _VividSHAg
+#define unity_SHAb _VividSHAb
+#define unity_SHBr _VividSHBr
+#define unity_SHBg _VividSHBg
+#define unity_SHBb _VividSHBb
+#define unity_SHC _VividSHC
+
 uint unity_RendererUserValuesPropertyEntry;
 
 #if defined(UNITY_STEREO_MULTIVIEW_ENABLED) && defined(SHADER_STAGE_VERTEX)

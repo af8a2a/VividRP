@@ -31,6 +31,7 @@ namespace VividRP.Editor.Tests
                 "GBuffer1",
                 "GBuffer2",
                 "GBuffer3",
+                "GBuffer4",
                 "PreIntegratedFGD_CharlieAndFabric",
                 "PreIntegratedFGD_GGXDisneyDiffuse",
                 "SkyIBLCubemap"
@@ -79,6 +80,7 @@ namespace VividRP.Editor.Tests
             AssertTextureSize(pass, "m_GBuffer1", 511, 257);
             AssertTextureSize(pass, "m_GBuffer2", 511, 257);
             AssertTextureSize(pass, "m_GBuffer3", 511, 257);
+            AssertTextureSize(pass, "m_GBuffer4", 511, 257);
             AssertTextureSize(pass, "m_DepthTexture", 511, 257);
             AssertTextureSize(pass, "m_ColorTexture", 511, 257);
             AssertTextureSize(pass, "m_PreIntegratedFGDGGXDisneyDiffuseTexture", 64, 64);

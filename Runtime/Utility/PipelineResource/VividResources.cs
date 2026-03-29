@@ -92,6 +92,9 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/GenerateViewZ")]
         public ComputeShader GenerateViewZCompute;
 
+        [ResourcePath("Shaders/Core/Private/TemporalAA")]
+        public ComputeShader TemporalAACompute;
+
         [ResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_ClassifyTiles")]
         public ComputeShader SIGMAClassifyTilesCompute;
 

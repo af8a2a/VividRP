@@ -159,6 +159,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class TemporalAAPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.TemporalAAPass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class TileDebugPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.TileDebugPass, VividRP.Runtime";

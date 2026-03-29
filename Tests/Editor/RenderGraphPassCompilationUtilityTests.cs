@@ -8,6 +8,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
+using VividRP.Runtime.RenderPass.Core.Sigma;
 
 namespace VividRP.Editor.Tests
 {
@@ -383,31 +384,39 @@ namespace VividRP.Editor.Tests
     public class RenderGraphCompilerTests
     {
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class DrawObjectPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(DrawObjectPass).AssemblyQualifiedName;
         }
 
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class FinalBlitPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(FinalBlitPass).AssemblyQualifiedName;
         }
 
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class RTASBuildPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(RTASBuildPass).AssemblyQualifiedName;
         }
 
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class RayTracingConsumerPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(RayTracingConsumerPass).AssemblyQualifiedName;
+        }
+
+        [Serializable]
+        private sealed class DirectionalRayTracedShadowPassNode : RenderPassNodeData
+        {
+            protected override string RegisteredPassTypeName => typeof(DirectionalRayTracedShadowPass).AssemblyQualifiedName;
+        }
+
+        [Serializable]
+        private sealed class SIGMAShadowDenoisePassNode : RenderPassNodeData
+        {
+            protected override string RegisteredPassTypeName => typeof(SIGMAShadowDenoisePass).AssemblyQualifiedName;
         }
 
         [Test]
@@ -420,8 +429,8 @@ namespace VividRP.Editor.Tests
                 var finalBlitNode = new FinalBlitPassNode();
                 var drawObjectNode = new DrawObjectPassNode();
 
-                graph.AddNode(finalBlitNode);
-                graph.AddNode(drawObjectNode);
+                RenderGraphTestUtility.AddTestNode(graph, finalBlitNode);
+                RenderGraphTestUtility.AddTestNode(graph, drawObjectNode);
                 graph.Connect(
                     drawObjectNode.GetOutputPortByName("m_ColorTarget"),
                     finalBlitNode.GetInputPortByName("source"));
@@ -464,6 +473,54 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Compile_CullsUnusedPasses_WhenOutputsAreNotConsumed()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var drawObjectNode = new DrawObjectPassNode();
+                RenderGraphTestUtility.AddTestNode(graph, drawObjectNode);
+
+                var result = RenderGraphCompiler.Compile(graph);
+
+                Assert.That(result.ExecutionOrder, Is.Empty);
+                Assert.That(result.Passes, Is.Empty);
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void Compile_CullsShadowChain_WhenDenoisedShadowIsUnused()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var shadowPassNode = new DirectionalRayTracedShadowPassNode();
+                var sigmaPassNode = new SIGMAShadowDenoisePassNode();
+
+                RenderGraphTestUtility.AddTestNode(graph, shadowPassNode);
+                RenderGraphTestUtility.AddTestNode(graph, sigmaPassNode);
+                graph.Connect(
+                    shadowPassNode.GetOutputPortByName("m_DirectionalShadowTexture"),
+                    sigmaPassNode.GetInputPortByName("m_RawShadowTexture"));
+
+                var result = RenderGraphCompiler.Compile(graph);
+
+                Assert.That(result.ExecutionOrder, Is.Empty);
+                Assert.That(result.Passes, Is.Empty);
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
         public void Compile_OrdersPassesByAccelerationStructureDependencies_WhenPassFieldInputsAreConnected()
         {
             var graph = RenderGraphTestUtility.CreateGraph();
@@ -473,8 +530,8 @@ namespace VividRP.Editor.Tests
                 var consumerNode = new RayTracingConsumerPassNode();
                 var buildNode = new RTASBuildPassNode();
 
-                graph.AddNode(consumerNode);
-                graph.AddNode(buildNode);
+                RenderGraphTestUtility.AddTestNode(graph, consumerNode);
+                RenderGraphTestUtility.AddTestNode(graph, buildNode);
                 graph.Connect(
                     buildNode.GetOutputPortByName("m_SceneAccelerationStructure"),
                     consumerNode.GetInputPortByName("m_SceneAccelerationStructure"));

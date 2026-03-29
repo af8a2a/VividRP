@@ -9,7 +9,6 @@ namespace VividRP.Editor.Tests
     public class MotionVectorPassNodeTests
     {
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class AutoRegisteredMotionVectorPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(MotionVectorPass).AssemblyQualifiedName;
@@ -23,7 +22,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 var node = new AutoRegisteredMotionVectorPassNode();
-                graph.AddNode(node);
+                RenderGraphTestUtility.AddTestNode(graph, node);
 
                 Assert.That(node.GetInputPortByName("m_RenderList"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_FallbackRenderList"), Is.Not.Null);
@@ -46,7 +45,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 var node = new AutoRegisteredMotionVectorPassNode();
-                graph.AddNode(node);
+                RenderGraphTestUtility.AddTestNode(graph, node);
 
                 Assert.That(node.HasAsyncComputeOption(), Is.False);
             }

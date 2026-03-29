@@ -9,6 +9,7 @@ TEXTURE2D_X(_GBuffer0);
 TEXTURE2D_X(_GBuffer1);
 TEXTURE2D_X(_GBuffer2);
 TEXTURE2D_X(_GBuffer3);
+TEXTURE2D_X(_GBuffer4);
 TEXTURE2D_X_FLOAT(_DepthTexture);
 
 float4 _MainLightDirection;
@@ -83,7 +84,8 @@ VividGBufferSurfaceData LoadVividGBuffer(uint2 pixelCoord)
     float4 rt1 = LOAD_TEXTURE2D_X(_GBuffer1, pixelCoord);
     float4 rt2 = LOAD_TEXTURE2D_X(_GBuffer2, pixelCoord);
     float4 rt3 = LOAD_TEXTURE2D_X(_GBuffer3, pixelCoord);
-    return UnpackVividGBufferSurfaceData(rt0, rt1, rt2, rt3);
+    float4 rt4 = LOAD_TEXTURE2D_X(_GBuffer4, pixelCoord);
+    return UnpackVividGBufferSurfaceData(rt0, rt1, rt2, rt3, rt4);
 }
 
 float3 EvaluateSimpleDeferredLighting(VividGBufferSurfaceData surfaceData, float3 positionWS)
@@ -94,7 +96,7 @@ float3 EvaluateSimpleDeferredLighting(VividGBufferSurfaceData surfaceData, float
     float3 indirectLighting = EvaluateIndirectLighting(surfaceData, bsdfData, viewDirectionWS);
     float3 directLighting = float3(0.0, 0.0, 0.0);
 
-    if (!VividHasSkyIBL())
+    if (!VividHasSkyIBL() && surfaceData.hasBakedGI < 0.5)
         indirectLighting += diffuseColor * _AmbientColor.rgb * surfaceData.ambientOcclusion;
 
     if (!HasDirectionalLights())

@@ -39,6 +39,13 @@ namespace VividRP.Runtime.RenderPass.Core
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_GBuffer3;
 
+        [RenderGraphResource(
+            Name = "GBuffer4",
+            Access = AccessFlags.Write,
+            AttachmentIndex = 4,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_GBuffer4;
+
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.ReadWrite, IsDepthAttachment = true)]
         private RenderGraphTexture m_GBufferDepth;
 
@@ -48,12 +55,14 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 desc = RenderGraphRenderListDesc.CreateOpaque("VividGBuffer")
             };
+            m_RenderList.desc.RendererConfiguration = PerObjectData.Lightmaps;
 
             m_GBuffer0 = RenderGraphTexture.CreateColorTarget("GBuffer0", GraphicsFormat.R8G8B8A8_UNorm);
             m_GBuffer1 = RenderGraphTexture.CreateColorTarget("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
             m_GBuffer2 = RenderGraphTexture.CreateColorTarget("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
             m_GBuffer3 = RenderGraphTexture.CreateColorTarget("GBuffer3", GraphicsFormat.B10G11R11_UFloatPack32);
             m_GBuffer3.desc.EnableRandomWrite = true;
+            m_GBuffer4 = RenderGraphTexture.CreateColorTarget("GBuffer4", GraphicsFormat.R16G16B16A16_SFloat);
             m_GBufferDepth = RenderGraphTexture.CreateDepthTarget("GBufferDepth");
         }
 
@@ -77,6 +86,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer1.Resize(width, height);
             m_GBuffer2.Resize(width, height);
             m_GBuffer3.Resize(width, height);
+            m_GBuffer4.Resize(width, height);
             m_GBufferDepth.Resize(width, height);
         }
 

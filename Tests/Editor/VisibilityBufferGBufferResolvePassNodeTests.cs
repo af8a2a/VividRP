@@ -11,7 +11,6 @@ namespace VividRP.Editor.Tests
     public sealed class VisibilityBufferGBufferResolvePassNodeTests
     {
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private class AutoRegisteredVisibilityBufferGBufferResolvePassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(VisibilityBufferGBufferResolvePass).AssemblyQualifiedName;
@@ -23,7 +22,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class AutoRegisteredVisibilityBufferGBufferResolvePassOverrideNode : AutoRegisteredVisibilityBufferGBufferResolvePassNode
         {
             protected override bool GetPassOwnedResourceOverrideEnabled(
@@ -34,20 +32,19 @@ namespace VividRP.Editor.Tests
                        && (field.Name == "m_GBuffer0"
                            || field.Name == "m_GBuffer1"
                            || field.Name == "m_GBuffer2"
-                           || field.Name == "m_GBuffer3")
+                           || field.Name == "m_GBuffer3"
+                           || field.Name == "m_GBuffer4")
                        || base.GetPassOwnedResourceOverrideEnabled(field, attr);
             }
         }
 
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class AutoRegisteredGBufferPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(GBufferPass).AssemblyQualifiedName;
         }
 
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class AutoRegisteredDeferredLightingPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(DeferredLightingPass).AssemblyQualifiedName;
@@ -61,7 +58,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 var node = new AutoRegisteredVisibilityBufferGBufferResolvePassNode();
-                graph.AddNode(node);
+                RenderGraphTestUtility.AddTestNode(graph, node);
 
                 Assert.That(node.GetInputPortByName("m_VisibilityBuffer"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_DepthTexture"), Is.Not.Null);
@@ -70,16 +67,19 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.HasOverrideOption("m_GBuffer1"), Is.True);
                 Assert.That(node.HasOverrideOption("m_GBuffer2"), Is.True);
                 Assert.That(node.HasOverrideOption("m_GBuffer3"), Is.True);
+                Assert.That(node.HasOverrideOption("m_GBuffer4"), Is.True);
 
                 Assert.That(node.GetInputPortByName("m_GBuffer0_In"), Is.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer1_In"), Is.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer2_In"), Is.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer3_In"), Is.Null);
+                Assert.That(node.GetInputPortByName("m_GBuffer4_In"), Is.Null);
 
                 Assert.That(node.GetOutputPortByName("m_GBuffer0_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer1_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer2_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer3_Out"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_GBuffer4_Out"), Is.Not.Null);
             }
             finally
             {
@@ -95,17 +95,19 @@ namespace VividRP.Editor.Tests
             try
             {
                 var node = new AutoRegisteredVisibilityBufferGBufferResolvePassOverrideNode();
-                graph.AddNode(node);
+                RenderGraphTestUtility.AddTestNode(graph, node);
 
                 Assert.That(node.GetInputPortByName("m_GBuffer0_In"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer1_In"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer2_In"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer3_In"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_GBuffer4_In"), Is.Not.Null);
 
                 Assert.That(node.GetOutputPortByName("m_GBuffer0_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer1_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer2_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer3_Out"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_GBuffer4_Out"), Is.Not.Null);
             }
             finally
             {
@@ -124,9 +126,9 @@ namespace VividRP.Editor.Tests
                 var resolveNode = new AutoRegisteredVisibilityBufferGBufferResolvePassOverrideNode();
                 var deferredNode = new AutoRegisteredDeferredLightingPassNode();
 
-                graph.AddNode(deferredNode);
-                graph.AddNode(resolveNode);
-                graph.AddNode(gbufferNode);
+                RenderGraphTestUtility.AddTestNode(graph, deferredNode);
+                RenderGraphTestUtility.AddTestNode(graph, resolveNode);
+                RenderGraphTestUtility.AddTestNode(graph, gbufferNode);
 
                 graph.Connect(
                     gbufferNode.GetOutputPortByName("m_GBuffer0"),
@@ -140,6 +142,9 @@ namespace VividRP.Editor.Tests
                 graph.Connect(
                     gbufferNode.GetOutputPortByName("m_GBuffer3"),
                     resolveNode.GetInputPortByName("m_GBuffer3_In"));
+                graph.Connect(
+                    gbufferNode.GetOutputPortByName("m_GBuffer4"),
+                    resolveNode.GetInputPortByName("m_GBuffer4_In"));
 
                 graph.Connect(
                     resolveNode.GetOutputPortByName("m_GBuffer0_Out"),
@@ -153,6 +158,9 @@ namespace VividRP.Editor.Tests
                 graph.Connect(
                     resolveNode.GetOutputPortByName("m_GBuffer3_Out"),
                     deferredNode.GetInputPortByName("m_GBuffer3"));
+                graph.Connect(
+                    resolveNode.GetOutputPortByName("m_GBuffer4_Out"),
+                    deferredNode.GetInputPortByName("m_GBuffer4"));
 
                 var result = RenderGraphCompiler.Compile(graph);
 

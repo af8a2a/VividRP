@@ -12,7 +12,6 @@ namespace VividRP.Editor.Tests
     public class RTASBuildPassNodeTests
     {
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class AutoRegisteredRTASBuildPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(RTASBuildPass).AssemblyQualifiedName;
@@ -24,7 +23,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class AutoRegisteredRayTracingConsumerPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(RayTracingConsumerPass).AssemblyQualifiedName;
@@ -38,7 +36,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 var node = new AutoRegisteredRTASBuildPassNode();
-                graph.AddNode(node);
+                RenderGraphTestUtility.AddTestNode(graph, node);
 
                 Assert.That(node.GetOutputPortByName("m_SceneAccelerationStructure"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_SceneAccelerationStructure_In"), Is.Null);
@@ -58,7 +56,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 var node = new AutoRegisteredRayTracingConsumerPassNode();
-                graph.AddNode(node);
+                RenderGraphTestUtility.AddTestNode(graph, node);
 
                 Assert.That(node.GetInputPortByName("m_SceneAccelerationStructure"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_SceneAccelerationStructure"), Is.Null);

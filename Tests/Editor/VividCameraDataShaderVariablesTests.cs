@@ -180,11 +180,120 @@ namespace VividRP.Editor.Tests
         public void FrameContextSystem_UsesExplicitShaderVariablesGlobalConstantBuffer()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "FrameContextSystem.cs"));
+            var loggerSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "CameraShaderVariablesGlobalComparisonLogger.cs"));
 
             Assert.That(source, Does.Contain("var shaderVariablesGlobal = ShaderVariablesGlobal.Create(sv, temporalData);"));
+            Assert.That(source, Does.Contain("#if VIVIDRP_DEBUG"));
+            Assert.That(source, Does.Contain("CameraShaderVariablesGlobalComparisonLogger.CaptureAndCompare(cameraData, shaderVariablesGlobal);"));
             Assert.That(source, Does.Contain("ConstantBuffer.PushGlobal(cmd, shaderVariablesGlobal, ShaderVariablesGlobal.ConstantBufferShaderId);"));
+            Assert.That(loggerSource, Does.Contain("[Conditional(\"VIVIDRP_DEBUG\")]"));
             Assert.That(source, Does.Not.Contain("cmd.SetGlobalMatrix("));
             Assert.That(source, Does.Not.Contain("cmd.SetGlobalVector("));
+        }
+
+        [Test]
+        public void CameraShaderVariablesGlobalComparisonLogger_DoesNotReport_WhenSnapshotsMatch()
+        {
+            var globals = new ShaderVariablesGlobal
+            {
+                _VividProjectionParams = new Vector4(1.0f, 0.3f, 1000.0f, 0.001f),
+                _VividScreenParams = new Vector4(1920.0f, 1080.0f, 1.0f + (1.0f / 1920.0f), 1.0f + (1.0f / 1080.0f)),
+                _VividZBufferParams = new Vector4(3332.3333f, 1.0f, 3.3323f, 0.001f),
+                _VividWorldToCamera = Matrix4x4.Translate(new Vector3(1.0f, 2.0f, 3.0f)),
+                _VividCameraToWorld = Matrix4x4.Translate(new Vector3(-1.0f, -2.0f, -3.0f)),
+                _VividGlstateMatrixProjection = Matrix4x4.Perspective(60.0f, 16.0f / 9.0f, 0.3f, 1000.0f),
+                _VividViewProjMatrix = Matrix4x4.identity,
+                _VividNonJitteredViewProjMatrix = Matrix4x4.identity,
+                _VividInvViewProjMatrix = Matrix4x4.identity,
+                _VividScreenSize = new Vector4(1920.0f, 1080.0f, 1.0f / 1920.0f, 1.0f / 1080.0f),
+                _VividScaledScreenParams = new Vector4(1920.0f, 1080.0f, 1.0f + (1.0f / 1920.0f), 1.0f + (1.0f / 1080.0f)),
+            };
+
+            var sceneSnapshot = CreateComparisonSnapshot(CameraType.SceneView, "SceneView", globals);
+            var gameSnapshot = CreateComparisonSnapshot(CameraType.Game, "Main Camera", globals);
+
+            var hasDifferences = CameraShaderVariablesGlobalComparisonLogger.TryBuildDifferenceReport(sceneSnapshot, gameSnapshot,
+                out var report, out var signature);
+
+            Assert.That(hasDifferences, Is.False);
+            Assert.That(report, Is.Null);
+            Assert.That(signature, Is.Null);
+        }
+
+        [Test]
+        public void CameraShaderVariablesGlobalComparisonLogger_ReportsProjectionMismatch_WhenProjectionGlobalsDiffer()
+        {
+            var sceneGlobals = new ShaderVariablesGlobal
+            {
+                _VividProjectionParams = new Vector4(-1.0f, 0.3f, 1000.0f, 0.001f),
+                _VividGlstateMatrixProjection = Matrix4x4.Scale(new Vector3(1.0f, -1.0f, 1.0f)),
+                _VividViewProjMatrix = Matrix4x4.Scale(new Vector3(1.0f, -1.0f, 1.0f)),
+                _VividNonJitteredViewProjMatrix = Matrix4x4.Scale(new Vector3(1.0f, -1.0f, 1.0f)),
+                _VividInvViewProjMatrix = Matrix4x4.Scale(new Vector3(1.0f, -1.0f, 1.0f)),
+                _VividScreenSize = new Vector4(1920.0f, 1080.0f, 1.0f / 1920.0f, 1.0f / 1080.0f),
+                _VividScaledScreenParams = new Vector4(1920.0f, 1080.0f, 1.0f + (1.0f / 1920.0f), 1.0f + (1.0f / 1080.0f)),
+            };
+            var gameGlobals = sceneGlobals;
+            gameGlobals._VividProjectionParams = new Vector4(1.0f, 0.3f, 1000.0f, 0.001f);
+            gameGlobals._VividGlstateMatrixProjection = Matrix4x4.identity;
+            gameGlobals._VividViewProjMatrix = Matrix4x4.identity;
+            gameGlobals._VividNonJitteredViewProjMatrix = Matrix4x4.identity;
+            gameGlobals._VividInvViewProjMatrix = Matrix4x4.identity;
+
+            var sceneSnapshot = CreateComparisonSnapshot(CameraType.SceneView, "SceneView", sceneGlobals);
+            var gameSnapshot = CreateComparisonSnapshot(CameraType.Game, "Main Camera", gameGlobals);
+
+            var hasDifferences = CameraShaderVariablesGlobalComparisonLogger.TryBuildDifferenceReport(sceneSnapshot, gameSnapshot,
+                out var report, out var signature);
+
+            Assert.That(hasDifferences, Is.True);
+            Assert.That(report, Does.Contain("_VividProjectionParams"));
+            Assert.That(report, Does.Contain("_VividGlstateMatrixProjection"));
+            Assert.That(report, Does.Contain("Game rawCamera.projectionMatrix"));
+            Assert.That(report, Does.Contain("Game effectiveProjectionMatrix"));
+            Assert.That(report, Does.Contain("renderIntoTexture=True"));
+            Assert.That(report, Does.Contain("renderIntoTexture=False"));
+            Assert.That(report, Does.Not.Contain("- pixelRect:"));
+            Assert.That(report, Does.Not.Contain("_VividScreenParams:"));
+            Assert.That(report, Does.Not.Contain("_VividScreenSize:"));
+            Assert.That(report, Does.Not.Contain("_VividScaledScreenParams:"));
+            Assert.That(signature, Does.Contain("_VividProjectionParams"));
+        }
+
+        [Test]
+        public void CameraShaderVariablesGlobalComparisonLogger_DoesNotReport_WhenOnlyViewportMetricsDiffer()
+        {
+            var sceneGlobals = new ShaderVariablesGlobal
+            {
+                _VividScreenParams = new Vector4(1565.0f, 727.0f, 1.0f + (1.0f / 1565.0f), 1.0f + (1.0f / 727.0f)),
+                _VividScreenSize = new Vector4(1565.0f, 727.0f, 1.0f / 1565.0f, 1.0f / 727.0f),
+                _VividScaledScreenParams = new Vector4(1565.0f, 727.0f, 1.0f + (1.0f / 1565.0f), 1.0f + (1.0f / 727.0f)),
+            };
+            var gameGlobals = new ShaderVariablesGlobal
+            {
+                _VividScreenParams = new Vector4(1920.0f, 1080.0f, 1.0f + (1.0f / 1920.0f), 1.0f + (1.0f / 1080.0f)),
+                _VividScreenSize = new Vector4(1920.0f, 1080.0f, 1.0f / 1920.0f, 1.0f / 1080.0f),
+                _VividScaledScreenParams = new Vector4(1920.0f, 1080.0f, 1.0f + (1.0f / 1920.0f), 1.0f + (1.0f / 1080.0f)),
+            };
+
+            var sceneSnapshot = CreateComparisonSnapshot(CameraType.SceneView, "SceneView", sceneGlobals);
+            sceneSnapshot.pixelRect = new Rect(0.0f, 0.0f, 1565.0f, 727.0f);
+            sceneSnapshot.actualWidth = 1565;
+            sceneSnapshot.actualHeight = 727;
+            sceneSnapshot.pixelWidth = 1565;
+            sceneSnapshot.pixelHeight = 727;
+            sceneSnapshot.scaledPixelWidth = 1565;
+            sceneSnapshot.scaledPixelHeight = 727;
+            sceneSnapshot.aspect = 1565.0f / 727.0f;
+
+            var gameSnapshot = CreateComparisonSnapshot(CameraType.Game, "Main Camera", gameGlobals);
+
+            var hasDifferences = CameraShaderVariablesGlobalComparisonLogger.TryBuildDifferenceReport(sceneSnapshot, gameSnapshot,
+                out var report, out var signature);
+
+            Assert.That(hasDifferences, Is.False);
+            Assert.That(report, Is.Null);
+            Assert.That(signature, Is.Null);
         }
 
         [Test]
@@ -268,6 +377,38 @@ namespace VividRP.Editor.Tests
             }
 
             return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
+        }
+
+        private static CameraShaderVariablesGlobalComparisonLogger.Snapshot CreateComparisonSnapshot(CameraType cameraType,
+            string cameraName, ShaderVariablesGlobal globals)
+        {
+            return new CameraShaderVariablesGlobalComparisonLogger.Snapshot
+            {
+                cameraName = cameraName,
+                cameraType = cameraType,
+                captureTime = 1.0f,
+                pixelRect = new Rect(0.0f, 0.0f, 1920.0f, 1080.0f),
+                actualWidth = 1920,
+                actualHeight = 1080,
+                pixelWidth = 1920,
+                pixelHeight = 1080,
+                scaledPixelWidth = 1920,
+                scaledPixelHeight = 1080,
+                nearClipPlane = 0.3f,
+                farClipPlane = 1000.0f,
+                fieldOfView = 60.0f,
+                aspect = 16.0f / 9.0f,
+                orthographic = false,
+                orthographicSize = 0.0f,
+                hasTargetTexture = false,
+                renderIntoTexture = cameraType == CameraType.SceneView,
+                hasAdditionalData = cameraType == CameraType.Game,
+                rawCameraProjectionMatrix = globals._VividGlstateMatrixProjection,
+                rawCameraNonJitteredProjectionMatrix = globals._VividGlstateMatrixProjection,
+                effectiveProjectionMatrix = globals._VividGlstateMatrixProjection,
+                effectiveNonJitteredProjectionMatrix = globals._VividGlstateMatrixProjection,
+                shaderVariablesGlobal = globals,
+            };
         }
     }
 }

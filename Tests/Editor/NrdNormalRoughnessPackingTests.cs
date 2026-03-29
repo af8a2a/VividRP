@@ -30,6 +30,17 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void GBufferLayout_PacksBakedGiAndValidityIntoGBuffer4()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "GBuffer.hlsl"));
+
+            Assert.That(source, Does.Contain("RT4 (RGBA16_SFLOAT)            : BakedGI.rgb + HasBakedGI.a"));
+            Assert.That(source, Does.Contain("output.rt4 = float4(surfaceData.bakedGI, surfaceData.hasBakedGI);"));
+            Assert.That(source, Does.Contain("surfaceData.bakedGI = max(rt4.rgb, 0.0);"));
+            Assert.That(source, Does.Contain("surfaceData.hasBakedGI = saturate(rt4.a);"));
+        }
+
+        [Test]
         public void NrdCustomEncoding_DecodesPackedOctNormalRoughnessAndMaterialId()
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "NRD", "NRD.hlsl"));

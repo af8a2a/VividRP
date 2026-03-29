@@ -66,6 +66,24 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Compile_DoesNotCreateFallbackPass_WhenAuthoredGraphHasNoPasses()
+        {
+            var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
+
+            try
+            {
+                Compile(graphAsset);
+
+                var passes = GetCompiledPasses();
+                Assert.That(passes, Is.Empty);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(graphAsset);
+            }
+        }
+
+        [Test]
         public void Compile_SharesCtorOwnedResource_WithDownstreamPassFieldBinding()
         {
             var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();

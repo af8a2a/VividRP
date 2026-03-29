@@ -11,28 +11,24 @@ namespace VividRP.Editor.Tests
     public sealed class DirectionalRayTracedShadowPassNodeTests
     {
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class AutoRegisteredRTASBuildPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(RTASBuildPass).AssemblyQualifiedName;
         }
 
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class AutoRegisteredDirectionalRayTracedShadowPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(DirectionalRayTracedShadowPass).AssemblyQualifiedName;
         }
 
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private class AutoRegisteredDeferredLightingPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(DeferredLightingPass).AssemblyQualifiedName;
         }
 
         [Serializable]
-        [UseWithGraph(typeof(RenderGraphEditorGraph))]
         private sealed class AutoRegisteredDeferredLightingPassShadowOverrideNode : AutoRegisteredDeferredLightingPassNode
         {
             protected override bool GetPassOwnedResourceOverrideEnabled(
@@ -52,7 +48,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 var node = new AutoRegisteredDirectionalRayTracedShadowPassNode();
-                graph.AddNode(node);
+                RenderGraphTestUtility.AddTestNode(graph, node);
 
                 Assert.That(node.GetInputPortByName("m_SceneAccelerationStructure"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_DepthTexture"), Is.Not.Null);
@@ -77,9 +73,9 @@ namespace VividRP.Editor.Tests
                 var shadowNode = new AutoRegisteredDirectionalRayTracedShadowPassNode();
                 var deferredNode = new AutoRegisteredDeferredLightingPassShadowOverrideNode();
 
-                graph.AddNode(deferredNode);
-                graph.AddNode(shadowNode);
-                graph.AddNode(buildNode);
+                RenderGraphTestUtility.AddTestNode(graph, deferredNode);
+                RenderGraphTestUtility.AddTestNode(graph, shadowNode);
+                RenderGraphTestUtility.AddTestNode(graph, buildNode);
 
                 graph.Connect(
                     buildNode.GetOutputPortByName("m_SceneAccelerationStructure"),

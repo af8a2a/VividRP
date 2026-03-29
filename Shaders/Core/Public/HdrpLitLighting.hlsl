@@ -9,6 +9,7 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/AmbientProbe.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/BSDF.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
 
 static const float3 kVividDielectricF0 = float3(0.04, 0.04, 0.04);
@@ -303,6 +304,13 @@ float3 EvaluateVividFabricDirectLight(
     return (diffuseColor * diffuse + specular) * clampedNdotL;
 }
 
+float3 EvaluateVividBakedDiffuseLighting(VividGBufferSurfaceData surfaceData)
+{
+    return surfaceData.hasBakedGI > 0.5
+        ? surfaceData.bakedGI
+        : SampleSH(surfaceData.normalWS);
+}
+
 float3 EvaluateVividHdrpLitIndirectLight(
     VividGBufferSurfaceData surfaceData,
     VividLitBSDFData bsdfData,
@@ -310,7 +318,7 @@ float3 EvaluateVividHdrpLitIndirectLight(
     float3 viewDirectionWS)
 {
     float clampedNdotV = saturate(VividClampNdotV(preLightData.NdotV));
-    float3 diffuseLighting = SampleSH(surfaceData.normalWS) * bsdfData.diffuseColor * preLightData.diffuseFGD;
+    float3 diffuseLighting = EvaluateVividBakedDiffuseLighting(surfaceData) * bsdfData.diffuseColor * preLightData.diffuseFGD;
     float3 dominantDirectionWS = GetSpecularDominantDir(
         surfaceData.normalWS,
         preLightData.iblR,
@@ -372,7 +380,7 @@ float3 EvaluateVividFabricIndirectLight(
         diffuseFGD,
         reflectivity);
 
-    float3 diffuseLighting = SampleSH(surfaceData.normalWS) * diffuseColor * diffuseFGD;
+    float3 diffuseLighting = EvaluateVividBakedDiffuseLighting(surfaceData) * diffuseColor * diffuseFGD;
     float3 reflectionVectorWS = VividGetReflectionVector(viewDirectionWS, surfaceData.normalWS);
     float3 dominantDirectionWS = GetSpecularDominantDir(
         surfaceData.normalWS,

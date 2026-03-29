@@ -56,6 +56,9 @@ namespace VividRP.Runtime
             var additionalCameraData = camera.GetComponent<VividAdditionalCameraData>();
             if (additionalCameraData == null && camera.cameraType == CameraType.Game)
                 additionalCameraData = camera.GetVividAdditionalCameraData();
+
+            ApplyTAAJitter(camera, additionalCameraData);
+
             if (additionalCameraData != null)
                 additionalCameraData.UpdateCameraMatrices(true);
 
@@ -73,6 +76,43 @@ namespace VividRP.Runtime
             renderingData.context = context;
             gpuDrivenFrameData.Reset();
             lightData.Update(cullingResults);
+        }
+
+        private static void ApplyTAAJitter(Camera camera, VividAdditionalCameraData additionalCameraData)
+        {
+            if (camera == null)
+                return;
+
+            if (camera.cameraType == CameraType.Preview || camera.cameraType == CameraType.Reflection)
+                return;
+
+            var nonJitteredProj = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+
+            var taaSettings = TAASettings.FromCamera(additionalCameraData);
+            if (!taaSettings.Enabled)
+            {
+                CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                return;
+            }
+
+            var pixelWidth = camera.pixelWidth;
+            var pixelHeight = camera.pixelHeight;
+            if (pixelWidth <= 0 || pixelHeight <= 0)
+            {
+                CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                return;
+            }
+
+            var jitter = HaltonJitter.Get(Time.frameCount, taaSettings.SampleCount);
+            jitter *= taaSettings.JitterSpread;
+
+            var jitterX = jitter.x * 2.0f / pixelWidth;
+            var jitterY = jitter.y * 2.0f / pixelHeight;
+            var jitterMatrix = Matrix4x4.identity;
+            jitterMatrix.m03 = jitterX;
+            jitterMatrix.m13 = jitterY;
+
+            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
         }
 
         internal static void SetGPUDrivenFrameData(
@@ -433,7 +473,7 @@ namespace VividRP.Runtime
         {
             Dispose();
 
-            if (graphAsset == null || graphAsset.Passes == null || graphAsset.Passes.Count == 0)
+            if (graphAsset == null)
             {
                 // Fallback graph (keeps the pipeline running without an authored asset).
                 var fallbackPass = new FullScreenPass();
@@ -442,17 +482,18 @@ namespace VividRP.Runtime
             }
             else
             {
+                var passDefinitions = graphAsset.Passes ?? new List<RenderGraphPassDefinition>();
                 var textures = CreateRuntimeTextures(graphAsset);
                 CreateRuntimeHistoryTextures(graphAsset, out s_HistoryPreviousTextures, out s_HistoryCurrentTextures);
                 var buffers = CreateRuntimeBuffers(graphAsset);
                 var renderLists = CreateRuntimeRenderLists(graphAsset);
                 var accelerationStructures = CreateRuntimeAccelerationStructures(graphAsset);
-                var indexedPasses = new IRenderPass[graphAsset.Passes.Count];
-                var indexedPassTypes = new Type[graphAsset.Passes.Count];
+                var indexedPasses = new IRenderPass[passDefinitions.Count];
+                var indexedPassTypes = new Type[passDefinitions.Count];
 
-                for (var passIndex = 0; passIndex < graphAsset.Passes.Count; passIndex++)
+                for (var passIndex = 0; passIndex < passDefinitions.Count; passIndex++)
                 {
-                    var passDef = graphAsset.Passes[passIndex];
+                    var passDef = passDefinitions[passIndex];
                     if (string.IsNullOrEmpty(passDef?.PassType))
                         continue;
 
@@ -504,7 +545,7 @@ namespace VividRP.Runtime
                     s_RenderPasses.Add(pass);
                 }
 
-                for (var passIndex = 0; passIndex < graphAsset.Passes.Count; passIndex++)
+                for (var passIndex = 0; passIndex < passDefinitions.Count; passIndex++)
                 {
                     var pass = indexedPasses[passIndex];
                     var passType = indexedPassTypes[passIndex];
@@ -515,7 +556,7 @@ namespace VividRP.Runtime
                         passIndex,
                         pass,
                         passType,
-                        graphAsset.Passes,
+                        passDefinitions,
                         indexedPasses,
                         indexedPassTypes);
                 }

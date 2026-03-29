@@ -1,10 +1,11 @@
 #define HAMMERSLEY_USE_CB
+#pragma use_dxc
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GlobalSamplers.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/SphericalHarmonics.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Hammersley.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Sampling.hlsl"
-
 #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 #pragma kernel AmbientProbeConvolution
 
@@ -56,7 +57,7 @@ void AmbientProbeConvolution(uint dispatchThreadId : SV_DispatchThreadID)
     float omegaS = rcp(sampleCount) * rcp(pdf);
     float mipLevel = 0.5 * log2(omegaS * invOmegaP);
 
-    float3 value = SAMPLE_TEXTURECUBE_LOD(_AmbientProbeInputCubemap, s_linear_clamp_sampler, n, mipLevel).rgb;
+    float3 value = SAMPLE_TEXTURECUBE_LOD(_AmbientProbeInputCubemap, sampler_LinearClamp, n, mipLevel).rgb;
     value *= _SkyConvolutionTint.rgb * _SkyExposure;
 
     float outputSHCoeffs[SH_COEFF_COUNT];

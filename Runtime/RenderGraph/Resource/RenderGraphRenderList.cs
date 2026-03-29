@@ -23,7 +23,6 @@ namespace VividRP.Runtime
         private static readonly string[] s_DefaultShaderTagNames =
         {
             ForwardShaderTagName,
-            DefaultUnlitShaderTagName,
         };
 
         public string[] ShaderTagNames = (string[])s_DefaultShaderTagNames.Clone();

@@ -18,7 +18,7 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "RenderList", Access = AccessFlags.Read)]
         private RenderGraphRenderList m_RenderList;
 
-        [RenderGraphResource(Name = "Color", Access = AccessFlags.Write, AttachmentIndex = 0)]
+        [RenderGraphResource(Name = "Color", Access = AccessFlags.ReadWrite, AttachmentIndex = 0)]
         private RenderGraphTexture m_ColorTarget;
 
         [RenderGraphResource(Name = "Color", Access = AccessFlags.Write, AttachmentIndex = 1)]

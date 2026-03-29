@@ -1,6 +1,8 @@
+using System.Reflection;
 using System.IO;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core.Sigma;
 
@@ -92,6 +94,48 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ResizePassOwned_PreservesExistingClearBufferState()
+        {
+            var texture = new RenderGraphTexture
+            {
+                desc = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R8_UNorm)
+            };
+            texture.desc.ClearBuffer = true;
+
+            var resizeMethod = typeof(SIGMAShadowDenoisePass).GetMethod(
+                "ResizePassOwned",
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            Assert.That(resizeMethod, Is.Not.Null);
+
+            resizeMethod.Invoke(null, new object[] { texture, 64, 32 });
+
+            Assert.That(texture.desc.Width, Is.EqualTo(64));
+            Assert.That(texture.desc.Height, Is.EqualTo(32));
+            Assert.That(texture.desc.ClearBuffer, Is.True);
+        }
+
+        [Test]
+        public void Constructor_ConfiguresDeterministicClears_ForShadowOutputs()
+        {
+            var pass = new SIGMAShadowDenoisePass();
+
+            var denoisedShadowTexture = GetTextureField(pass, "m_DenoisedShadowTexture");
+            var transientPenumbra = GetTextureField(pass, "m_TransientPenumbra");
+            var transientShadow = GetTextureField(pass, "m_TransientShadow");
+            var transientHistoryLength = GetTextureField(pass, "m_TransientHistoryLength");
+
+            Assert.That(denoisedShadowTexture.desc.ClearBuffer, Is.True);
+            Assert.That(denoisedShadowTexture.desc.ClearColor, Is.EqualTo(Color.white));
+            Assert.That(transientPenumbra.desc.ClearBuffer, Is.True);
+            Assert.That(transientPenumbra.desc.ClearColor, Is.EqualTo(Color.clear));
+            Assert.That(transientShadow.desc.ClearBuffer, Is.True);
+            Assert.That(transientShadow.desc.ClearColor, Is.EqualTo(Color.white));
+            Assert.That(transientHistoryLength.desc.ClearBuffer, Is.True);
+            Assert.That(transientHistoryLength.desc.ClearColor, Is.EqualTo(Color.clear));
+        }
+
+        [Test]
         public void SIGMAShadowDenoisePass_DoesNotKeepLegacyDebugTileTexture()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
@@ -105,6 +149,15 @@ namespace VividRP.Editor.Tests
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
 
             Assert.That(source, Does.Contain("RenderGraphTexture.CreateInput(\"GBuffer1\",      GraphicsFormat.A2B10G10R10_UNormPack32);"));
+        }
+
+        [Test]
+        public void SIGMAShadowDenoisePass_ClearsCurrentHistoryTargets_BeforeTemporalStabilization()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
+
+            Assert.That(source, Does.Contain("ClearTexture(cmd, m_HistoryShadowCurrent, Color.white);"));
+            Assert.That(source, Does.Contain("ClearTexture(cmd, m_HistoryLengthCurrent, Color.clear);"));
         }
 
         [Test]
@@ -132,6 +185,13 @@ namespace VividRP.Editor.Tests
             }
 
             return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
+        }
+
+        private static RenderGraphTexture GetTextureField(SIGMAShadowDenoisePass pass, string fieldName)
+        {
+            var field = typeof(SIGMAShadowDenoisePass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null);
+            return (RenderGraphTexture)field.GetValue(pass);
         }
     }
 }

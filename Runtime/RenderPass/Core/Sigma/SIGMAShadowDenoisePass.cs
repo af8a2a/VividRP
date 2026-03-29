@@ -188,7 +188,14 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             m_TransientShadow2        = CreatePassOwnedTexture("SIGMA_Shadow2",                1, 1, GraphicsFormat.R8_UNorm);
             m_TransientHistory        = CreatePassOwnedTexture("SIGMA_TransientHistory",       1, 1, GraphicsFormat.R8_UNorm, clearBuffer: true);
             m_TransientHistoryLength  = CreatePassOwnedTexture("SIGMA_TransientHistoryLength", 1, 1, GraphicsFormat.R32_UInt, clearBuffer: true);
-            
+
+            ConfigurePassOwnedClear(m_DenoisedShadowTexture, Color.white);
+            ConfigurePassOwnedClear(m_TransientPenumbra, Color.clear);
+            ConfigurePassOwnedClear(m_TransientShadow, Color.white);
+            ConfigurePassOwnedClear(m_TransientPenumbra2, Color.clear);
+            ConfigurePassOwnedClear(m_TransientShadow2, Color.white);
+            ConfigurePassOwnedClear(m_TransientHistory, Color.white);
+            ConfigurePassOwnedClear(m_TransientHistoryLength, Color.clear);
         }
 
         public override void Create()
@@ -307,6 +314,13 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 int tileH   = CoreUtils.DivRoundUp(m_Height, 16);
                 int dispatchX = CoreUtils.DivRoundUp(m_Width,  8);
                 int dispatchY = CoreUtils.DivRoundUp(m_Height, 16);
+                bool useTemporalStabilization = m_MaxStabilizedFrameNum > 0;
+
+                if (useTemporalStabilization)
+                {
+                    ClearTexture(cmd, m_HistoryShadowCurrent, Color.white);
+                    ClearTexture(cmd, m_HistoryLengthCurrent, Color.clear);
+                }
 
                 // Stage 1: ClassifyTiles
                 ConstantBuffer.Push(cmd, m_Constants, m_ClassifyTiles, SIGMA_ClassifyTilesConstantsId);
@@ -348,7 +362,6 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 cmd.DispatchCompute(m_ShadowBlur, kernel, dispatchX, dispatchY, 1);
 
                 // Stage 5: PostBlur
-                bool useTemporalStabilization = m_MaxStabilizedFrameNum > 0;
                 ConstantBuffer.Push(cmd, m_Constants, m_ShadowPostBlur, SIGMA_BlurConstantsId);
                 cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_ViewZ,            m_DepthTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_Normal_Roughness, m_GBuffer1.innerHandle);
@@ -426,13 +439,33 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 && m_DenoisedShadowTexture?.innerHandle.IsValid() == true;
         }
 
+        private static void ConfigurePassOwnedClear(RenderGraphTexture tex, Color clearColor)
+        {
+            if (tex?.desc == null)
+                return;
+
+            tex.desc.ClearBuffer = true;
+            tex.desc.ClearColor = clearColor;
+        }
+
+        private static void ClearTexture(CommandBuffer cmd, RenderGraphTexture texture, Color clearColor)
+        {
+            if (cmd == null || texture?.innerHandle.IsValid() != true)
+                return;
+
+            cmd.SetRenderTarget(texture);
+            cmd.ClearRenderTarget(false, true, clearColor);
+        }
+
         private static void ResizePassOwned(RenderGraphTexture tex, int width, int height)
         {
             if (tex?.desc == null) return;
+            // Preserve bootstrap clears for pass-owned history buffers across resizes.
+            bool clearBuffer = tex.desc.ClearBuffer;
             tex.desc.Width              = width;
             tex.desc.Height             = height;
             tex.desc.EnableRandomWrite  = true;
-            tex.desc.ClearBuffer        = false;
+            tex.desc.ClearBuffer        = clearBuffer;
         }
 
         private static RenderGraphTexture CreatePassOwnedTexture(

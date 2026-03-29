@@ -30,7 +30,7 @@ namespace VividRP.Runtime
             vividTemporalData.previousJitter = temporalData.PreviousJitter;
             vividTemporalData.isFirstFrame = temporalData.IsFirstFrame;
 
-            SkyManager.Update(frameData);
+            SkyManager.Update(frameData, cmd);
 
             // 3. Build and set all shader globals in one place
             var shaderVariables = cameraData.BuildShaderVariables(temporalData);

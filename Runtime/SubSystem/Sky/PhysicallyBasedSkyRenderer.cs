@@ -65,12 +65,8 @@ namespace VividRP.Runtime
             skyData.tint = Color.white;
             skyData.exposure = volume.exposure.value;
             skyData.rotation = 0.0f;
-            skyData.hasDiffuseSH = SkyDiffuseSHUtility.TryProjectCubemapToSH(
-                m_RuntimeSkyCubemap,
-                Color.white,
-                1.0f,
-                0.0f,
-                out skyData.diffuseSH);
+            skyData.hasDiffuseSH = false;
+            skyData.diffuseSH = default;
         }
 
         public void Dispose()

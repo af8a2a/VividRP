@@ -8,6 +8,7 @@ namespace VividRP.Runtime
     {
         private static readonly Dictionary<SkyType, ISkyRenderer> s_Renderers = new();
         private static readonly VividSkyData s_CachedSkyData = new();
+        private static readonly SkyAmbientProbeConvolution s_AmbientProbeConvolution = new();
 
         private static bool s_Initialized;
         private static bool s_UpdateRequested;
@@ -21,6 +22,7 @@ namespace VividRP.Runtime
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             RegisterRenderer(new HDRISkyRenderer(), resources);
             RegisterRenderer(new PhysicallyBasedSkyRenderer(), resources);
+            s_AmbientProbeConvolution.Build(resources);
             s_CachedSkyData.Reset();
             s_LastUpdateTime = float.NegativeInfinity;
             s_UpdateRequested = false;
@@ -32,6 +34,7 @@ namespace VividRP.Runtime
             foreach (var renderer in s_Renderers.Values)
                 renderer.Dispose();
 
+            s_AmbientProbeConvolution.Cleanup();
             s_Renderers.Clear();
             s_CachedSkyData.Reset();
             s_LastUpdateTime = float.NegativeInfinity;
@@ -44,7 +47,7 @@ namespace VividRP.Runtime
             s_UpdateRequested = true;
         }
 
-        internal static void Update(ContextContainer frameData)
+        internal static void Update(ContextContainer frameData, CommandBuffer cmd)
         {
             if (frameData == null)
                 return;
@@ -74,18 +77,17 @@ namespace VividRP.Runtime
                 frameData.GetOrCreate<VividLightData>());
             var skyHash = renderer.GetSkyHash(context);
 
-            if (!NeedsUpdate(activeSkyType, skySettings, skyHash))
+            if (NeedsUpdate(activeSkyType, skySettings, skyHash))
             {
-                skyData.CopyFrom(s_CachedSkyData);
-                return;
+                s_CachedSkyData.Reset();
+                renderer.Update(context, s_CachedSkyData);
+                s_CachedSkyData.activeSkyType = activeSkyType;
+                s_CachedSkyData.skyHash = skyHash;
+                s_LastUpdateTime = Time.realtimeSinceStartup;
+                s_UpdateRequested = false;
             }
 
-            s_CachedSkyData.Reset();
-            renderer.Update(context, s_CachedSkyData);
-            s_CachedSkyData.activeSkyType = activeSkyType;
-            s_CachedSkyData.skyHash = skyHash;
-            s_LastUpdateTime = Time.realtimeSinceStartup;
-            s_UpdateRequested = false;
+            UpdateDiffuseAmbientProbe(cmd, s_CachedSkyData);
 
             skyData.CopyFrom(s_CachedSkyData);
         }
@@ -114,6 +116,50 @@ namespace VividRP.Runtime
         {
             renderer.Build(resources);
             s_Renderers[renderer.Type] = renderer;
+        }
+
+        private static void UpdateDiffuseAmbientProbe(CommandBuffer cmd, VividSkyData skyData)
+        {
+            if (skyData == null || skyData.specularCubemap == null)
+            {
+                if (skyData != null)
+                {
+                    skyData.hasDiffuseSH = false;
+                    skyData.diffuseSH = default;
+                }
+
+                return;
+            }
+
+            if (s_AmbientProbeConvolution.IsSupported)
+            {
+                s_AmbientProbeConvolution.RequestUpdate(
+                    cmd,
+                    skyData.specularCubemap,
+                    skyData.tint,
+                    skyData.exposure,
+                    skyData.rotation,
+                    skyData.skyHash);
+
+                if (s_AmbientProbeConvolution.TryGetReadyProbe(skyData.skyHash, out var currentProbe)
+                    || s_AmbientProbeConvolution.TryGetLastReadyProbe(out currentProbe))
+                {
+                    skyData.hasDiffuseSH = true;
+                    skyData.diffuseSH = currentProbe;
+                    return;
+                }
+
+                skyData.hasDiffuseSH = false;
+                skyData.diffuseSH = default;
+                return;
+            }
+
+            skyData.hasDiffuseSH = SkyDiffuseSHUtility.TryProjectCubemapToSH(
+                skyData.specularCubemap,
+                skyData.tint,
+                skyData.exposure,
+                skyData.rotation,
+                out skyData.diffuseSH);
         }
     }
 }

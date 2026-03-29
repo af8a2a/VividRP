@@ -182,7 +182,7 @@ namespace VividRP.Editor.Tests
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "FrameContextSystem.cs"));
             var loggerSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "CameraShaderVariablesGlobalComparisonLogger.cs"));
 
-            Assert.That(source, Does.Contain("SkyManager.Update(frameData);"));
+            Assert.That(source, Does.Contain("SkyManager.Update(frameData, cmd);"));
             Assert.That(source, Does.Contain("var skyData = frameData.GetOrCreate<VividSkyData>();"));
             Assert.That(source, Does.Contain("var shaderVariablesGlobal = ShaderVariablesGlobal.Create(sv, temporalData, skyData);"));
             Assert.That(source, Does.Contain("#if VIVIDRP_DEBUG"));

@@ -32,7 +32,8 @@ namespace VividRP.Editor.Tests
                        && (field.Name == "m_GBuffer0"
                            || field.Name == "m_GBuffer1"
                            || field.Name == "m_GBuffer2"
-                           || field.Name == "m_GBuffer3")
+                           || field.Name == "m_GBuffer3"
+                           || field.Name == "m_GBuffer4")
                        || base.GetPassOwnedResourceOverrideEnabled(field, attr);
             }
         }
@@ -66,16 +67,19 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.HasOverrideOption("m_GBuffer1"), Is.True);
                 Assert.That(node.HasOverrideOption("m_GBuffer2"), Is.True);
                 Assert.That(node.HasOverrideOption("m_GBuffer3"), Is.True);
+                Assert.That(node.HasOverrideOption("m_GBuffer4"), Is.True);
 
                 Assert.That(node.GetInputPortByName("m_GBuffer0_In"), Is.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer1_In"), Is.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer2_In"), Is.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer3_In"), Is.Null);
+                Assert.That(node.GetInputPortByName("m_GBuffer4_In"), Is.Null);
 
                 Assert.That(node.GetOutputPortByName("m_GBuffer0_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer1_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer2_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer3_Out"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_GBuffer4_Out"), Is.Not.Null);
             }
             finally
             {
@@ -97,11 +101,13 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.GetInputPortByName("m_GBuffer1_In"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer2_In"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_GBuffer3_In"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_GBuffer4_In"), Is.Not.Null);
 
                 Assert.That(node.GetOutputPortByName("m_GBuffer0_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer1_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer2_Out"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_GBuffer3_Out"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_GBuffer4_Out"), Is.Not.Null);
             }
             finally
             {
@@ -136,6 +142,9 @@ namespace VividRP.Editor.Tests
                 graph.Connect(
                     gbufferNode.GetOutputPortByName("m_GBuffer3"),
                     resolveNode.GetInputPortByName("m_GBuffer3_In"));
+                graph.Connect(
+                    gbufferNode.GetOutputPortByName("m_GBuffer4"),
+                    resolveNode.GetInputPortByName("m_GBuffer4_In"));
 
                 graph.Connect(
                     resolveNode.GetOutputPortByName("m_GBuffer0_Out"),
@@ -149,6 +158,9 @@ namespace VividRP.Editor.Tests
                 graph.Connect(
                     resolveNode.GetOutputPortByName("m_GBuffer3_Out"),
                     deferredNode.GetInputPortByName("m_GBuffer3"));
+                graph.Connect(
+                    resolveNode.GetOutputPortByName("m_GBuffer4_Out"),
+                    deferredNode.GetInputPortByName("m_GBuffer4"));
 
                 var result = RenderGraphCompiler.Compile(graph);
 

@@ -63,6 +63,8 @@ Shader "VividRP/Material/StandardLit"
             HLSLPROGRAM
                 #pragma target 4.5
                 #pragma multi_compile_instancing
+                #pragma multi_compile _ LIGHTMAP_ON
+                #pragma multi_compile _ DIRLIGHTMAP_COMBINED
                 #pragma shader_feature_local_fragment _ALPHATEST_ON
                 #pragma shader_feature_local_fragment _OPACITYMAP
                 #pragma shader_feature_local_fragment _NORMALMAP
@@ -92,6 +94,8 @@ Shader "VividRP/Material/StandardLit"
             HLSLPROGRAM
                 #pragma target 4.5
                 #pragma multi_compile_instancing
+                #pragma multi_compile _ LIGHTMAP_ON
+                #pragma multi_compile _ DIRLIGHTMAP_COMBINED
                 #pragma shader_feature_local_fragment _ALPHATEST_ON
                 #pragma shader_feature_local_fragment _OPACITYMAP
                 #pragma shader_feature_local_fragment _NORMALMAP
@@ -121,6 +125,8 @@ Shader "VividRP/Material/StandardLit"
             HLSLPROGRAM
                 #pragma target 4.5
                 #pragma multi_compile_instancing
+                #pragma multi_compile _ LIGHTMAP_ON
+                #pragma multi_compile _ DIRLIGHTMAP_COMBINED
                 #pragma shader_feature_local_fragment _ALPHATEST_ON
                 #pragma shader_feature_local_fragment _OPACITYMAP
                 #pragma shader_feature_local_fragment _NORMALMAP

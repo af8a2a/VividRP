@@ -22,6 +22,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int GBuffer1Id = Shader.PropertyToID("_GBuffer1");
         private static readonly int GBuffer2Id = Shader.PropertyToID("_GBuffer2");
         private static readonly int GBuffer3Id = Shader.PropertyToID("_GBuffer3");
+        private static readonly int GBuffer4Id = Shader.PropertyToID("_GBuffer4");
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
         private static readonly int DirectionalShadowTextureId = Shader.PropertyToID("_DirectionalShadowTexture");
         private static readonly int LightingTextureId = Shader.PropertyToID("_LightingTexture");
@@ -67,6 +68,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(Name = "GBuffer3", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer3;
+
+        [RenderGraphResource(Name = "GBuffer4", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_GBuffer4;
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
@@ -160,6 +164,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_ClusterLog2SliceCount = LightGridPass.ClusterLog2SliceCount;
         private bool m_SupportsClusteredPunctualLights;
         private bool m_IsLogBaseBufferEnabled;
+        private readonly RenderGraphTexture m_LocalGBuffer4;
         private readonly RenderGraphTexture m_LocalDirectionalShadowTexture;
         private readonly RenderGraphBuffer m_LocalDirectionalLightBuffer;
         private readonly RenderGraphBuffer m_LocalPunctualLightBuffer;
@@ -187,6 +192,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
             m_GBuffer2 = RenderGraphTexture.CreateInput("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
             m_GBuffer3 = RenderGraphTexture.CreateInput("GBuffer3", GraphicsFormat.B10G11R11_UFloatPack32);
+            m_LocalGBuffer4 = RenderGraphTexture.CreateColorTarget("GBuffer4", GraphicsFormat.R16G16B16A16_SFloat);
+            m_GBuffer4 = m_LocalGBuffer4;
             m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
             m_LocalDirectionalShadowTexture = RenderGraphTexture.CreateColorTarget("DirectionalShadowTexture", GraphicsFormat.R16_SFloat);
             m_LocalDirectionalShadowTexture.desc.ClearBuffer = true;
@@ -257,6 +264,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer1.Resize(width, height);
             m_GBuffer2.Resize(width, height);
             m_GBuffer3.Resize(width, height);
+            m_GBuffer4.Resize(width, height);
             m_DepthTexture.Resize(width, height);
             m_ColorTexture.Resize(width, height);
             PrepareClusteredLightingParameters(frameData);
@@ -336,6 +344,20 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer2Id, m_GBuffer2.innerHandle);
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer3Id, m_GBuffer3.innerHandle);
+            if (ReferenceEquals(m_GBuffer4, m_LocalGBuffer4)
+                || m_GBuffer4 == null
+                || !m_GBuffer4.innerHandle.IsValid())
+            {
+                cmd.SetComputeTextureParam(
+                    m_DeferredLitCompute,
+                    kernel,
+                    GBuffer4Id,
+                    Texture2D.blackTexture);
+            }
+            else
+            {
+                cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer4Id, m_GBuffer4.innerHandle);
+            }
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, DepthTextureId, m_DepthTexture.innerHandle);
             if (ReferenceEquals(m_DirectionalShadowTexture, m_LocalDirectionalShadowTexture)
                 || m_DirectionalShadowTexture == null

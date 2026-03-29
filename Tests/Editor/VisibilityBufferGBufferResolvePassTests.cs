@@ -25,8 +25,9 @@ namespace VividRP.Editor.Tests
             var gbuffer1Entry = resources.Textures.Single(entry => entry.Name == "GBuffer1");
             var gbuffer2Entry = resources.Textures.Single(entry => entry.Name == "GBuffer2");
             var gbuffer3Entry = resources.Textures.Single(entry => entry.Name == "GBuffer3");
+            var gbuffer4Entry = resources.Textures.Single(entry => entry.Name == "GBuffer4");
 
-            Assert.That(resources.Textures, Has.Length.EqualTo(6));
+            Assert.That(resources.Textures, Has.Length.EqualTo(7));
             Assert.That(visibilityEntry.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(visibilityEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32G32_UInt));
             Assert.That(depthEntry.Access, Is.EqualTo(AccessFlags.Read));
@@ -43,6 +44,9 @@ namespace VividRP.Editor.Tests
             Assert.That(gbuffer3Entry.Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(gbuffer3Entry.AttachmentIndex, Is.EqualTo(3));
             Assert.That(gbuffer3Entry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.B10G11R11_UFloatPack32));
+            Assert.That(gbuffer4Entry.Access, Is.EqualTo(AccessFlags.ReadWrite));
+            Assert.That(gbuffer4Entry.AttachmentIndex, Is.EqualTo(4));
+            Assert.That(gbuffer4Entry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
         }
 
         [Test]
@@ -105,6 +109,7 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("m_DepthTexture"));
             Assert.That(passSource, Does.Contain("m_GBuffer0"));
             Assert.That(passSource, Does.Contain("m_GBuffer3"));
+            Assert.That(passSource, Does.Contain("m_GBuffer4"));
         }
 
         [Test]
@@ -122,6 +127,7 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("GetBindlessTexture2D("));
             Assert.That(shaderSource, Does.Contain("NormalsIndex"));
             Assert.That(shaderSource, Does.Contain("ComputeDoubleSidedNormalFlipSign("));
+            Assert.That(shaderSource, Does.Contain("surfaceData.bakedGI = 0.0f;"));
             Assert.That(shaderSource, Does.Contain("discard;"));
         }
 

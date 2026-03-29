@@ -10,6 +10,7 @@ TEXTURE2D_X(_GBuffer0);
 TEXTURE2D_X(_GBuffer1);
 TEXTURE2D_X(_GBuffer2);
 TEXTURE2D_X(_GBuffer3);
+TEXTURE2D_X(_GBuffer4);
 TEXTURE2D_X_FLOAT(_DepthTexture);
 
 StructuredBuffer<uint> _MaterialPixelIndices;
@@ -51,7 +52,8 @@ VividGBufferSurfaceData LoadVividGBuffer(uint2 pixelCoord)
     float4 rt1 = LOAD_TEXTURE2D_X(_GBuffer1, pixelCoord);
     float4 rt2 = LOAD_TEXTURE2D_X(_GBuffer2, pixelCoord);
     float4 rt3 = LOAD_TEXTURE2D_X(_GBuffer3, pixelCoord);
-    return UnpackVividGBufferSurfaceData(rt0, rt1, rt2, rt3);
+    float4 rt4 = LOAD_TEXTURE2D_X(_GBuffer4, pixelCoord);
+    return UnpackVividGBufferSurfaceData(rt0, rt1, rt2, rt3, rt4);
 }
 
 float3 EvaluateDeferredDirectionalLighting(VividGBufferSurfaceData surfaceData, uint2 pixelCoord, float3 positionWS)

@@ -1,6 +1,7 @@
 #ifndef VIVIDRP_STANDARD_LIT_GBUFFER_PASS_INCLUDED
 #define VIVIDRP_STANDARD_LIT_GBUFFER_PASS_INCLUDED
 
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BakedGI.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
 
@@ -41,6 +42,7 @@ struct Attributes
     float3 normalOS : NORMAL;
     float4 tangentOS : TANGENT;
     float2 uv : TEXCOORD0;
+    float2 uv1 : TEXCOORD1;
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
@@ -50,6 +52,7 @@ struct Varyings
     float3 normalWS : TEXCOORD0;
     float4 tangentWS : TEXCOORD1;
     float2 uv : TEXCOORD2;
+    float2 lightmapUV : TEXCOORD3;
     UNITY_VERTEX_INPUT_INSTANCE_ID
     UNITY_VERTEX_OUTPUT_STEREO
 };
@@ -75,6 +78,7 @@ Varyings Vert(Attributes input)
     output.normalWS = TransformObjectToWorldNormal(input.normalOS);
     output.tangentWS = float4(TransformObjectToWorldDir(input.tangentOS.xyz), input.tangentOS.w);
     output.uv = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
+    output.lightmapUV = TransformVividLightmapUV(input.uv1);
     return output;
 }
 
@@ -179,6 +183,8 @@ VividGBufferSurfaceData BuildStandardLitSurfaceData(Varyings input)
 #endif
 
     surfaceData.emissive = SampleEmission(input.uv);
+    surfaceData.bakedGI = SampleVividBakedGI(input.lightmapUV, surfaceData.normalWS);
+    surfaceData.hasBakedGI = HasVividBakedGI();
     return surfaceData;
 }
 

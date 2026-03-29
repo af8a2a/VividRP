@@ -319,6 +319,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 surfaceData.customData1 = 0.0f;
                 surfaceData.materialId = VIVID_GBUFFER_MATERIAL_STANDARD;
                 surfaceData.emissive = max(triangleData.materialData.Emission.rgb, 0.0f);
+                surfaceData.bakedGI = 0.0f;
+                surfaceData.hasBakedGI = 0.0f;
                 return surfaceData;
             }
 

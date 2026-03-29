@@ -28,6 +28,7 @@ namespace VividRP.Editor.Tests
             Assert.That(node.GetOutputPortByName("m_GBuffer1"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_GBuffer2"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_GBuffer3"), Is.Not.Null);
+            Assert.That(node.GetOutputPortByName("m_GBuffer4"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_GBufferDepth"), Is.Not.Null);
         }
 
@@ -40,11 +41,13 @@ namespace VividRP.Editor.Tests
             Assert.That(node.HasOverrideOption("m_GBuffer1"), Is.True);
             Assert.That(node.HasOverrideOption("m_GBuffer2"), Is.True);
             Assert.That(node.HasOverrideOption("m_GBuffer3"), Is.True);
+            Assert.That(node.HasOverrideOption("m_GBuffer4"), Is.True);
 
             Assert.That(node.GetInputPortByName("m_GBuffer0_In"), Is.Null);
             Assert.That(node.GetInputPortByName("m_GBuffer1_In"), Is.Null);
             Assert.That(node.GetInputPortByName("m_GBuffer2_In"), Is.Null);
             Assert.That(node.GetInputPortByName("m_GBuffer3_In"), Is.Null);
+            Assert.That(node.GetInputPortByName("m_GBuffer4_In"), Is.Null);
         }
     }
 }

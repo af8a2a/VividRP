@@ -43,6 +43,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private ComputeShader m_ComputeShader;
         private int m_Kernel = -1;
+        private int m_CopyKernel = -1;
         private int m_Width;
         private int m_Height;
         private TAASettings m_TAASettings;
@@ -70,7 +71,10 @@ namespace VividRP.Runtime.RenderPass.Core
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             m_ComputeShader = resources?.TemporalAACompute;
             if (m_ComputeShader != null)
+            {
                 m_Kernel = m_ComputeShader.FindKernel("TemporalAA");
+                m_CopyKernel = m_ComputeShader.FindKernel("CopyColor");
+            }
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -115,15 +119,37 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Record(ComputeGraphContext context)
         {
-            if (m_ComputeShader == null || m_Kernel < 0)
-                return;
-
-            if (!m_TAASettings.Enabled)
+            if (m_ComputeShader == null)
                 return;
 
             if (m_ColorInput?.innerHandle.IsValid() != true)
                 return;
 
+            if (!m_TAASettings.Enabled || m_Kernel < 0)
+            {
+                RecordPassthrough(context);
+                return;
+            }
+
+            RecordTAA(context);
+        }
+
+        private void RecordPassthrough(ComputeGraphContext context)
+        {
+            if (m_CopyKernel < 0)
+                return;
+
+            var cmd = context.cmd;
+            cmd.SetComputeTextureParam(m_ComputeShader, m_CopyKernel, InputColorId, m_ColorInput.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_CopyKernel, OutputColorId, m_OutputTexture.innerHandle);
+
+            int dispatchX = CoreUtils.DivRoundUp(m_Width, 8);
+            int dispatchY = CoreUtils.DivRoundUp(m_Height, 8);
+            cmd.DispatchCompute(m_ComputeShader, m_CopyKernel, dispatchX, dispatchY, 1);
+        }
+
+        private void RecordTAA(ComputeGraphContext context)
+        {
             var cmd = context.cmd;
 
             cmd.SetComputeTextureParam(m_ComputeShader, m_Kernel, InputColorId, m_ColorInput.innerHandle);
@@ -171,6 +197,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_ComputeShader = null;
             m_Kernel = -1;
+            m_CopyKernel = -1;
         }
 
         private static RenderGraphTexture CreatePassOwnedTexture(

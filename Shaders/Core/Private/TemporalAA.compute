@@ -1,4 +1,5 @@
 #pragma kernel TemporalAA
+#pragma kernel CopyColor
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 
@@ -133,4 +134,14 @@ void TemporalAA(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     _OutputColor[pixelCoord] = float4(result, 1.0);
     _HistoryColorWrite[pixelCoord] = float4(result, 1.0);
+}
+
+[numthreads(8, 8, 1)]
+void CopyColor(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int2 pixelCoord = int2(dispatchThreadId.xy);
+    if (any(pixelCoord >= int2(_ScreenSize.xy)))
+        return;
+
+    _OutputColor[pixelCoord] = _InputColor[pixelCoord];
 }

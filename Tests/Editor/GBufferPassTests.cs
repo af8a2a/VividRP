@@ -12,7 +12,7 @@ namespace VividRP.Editor.Tests
     public class GBufferPassTests
     {
         [Test]
-        public void Initialize_RegistersFourColorAttachmentsAndDepth_WhenPassIsCreated()
+        public void Initialize_RegistersFiveColorAttachmentsAndDepth_WhenPassIsCreated()
         {
             IRenderPass renderPass = new GBufferPass();
 
@@ -24,17 +24,19 @@ namespace VividRP.Editor.Tests
             var depthEntry = resources.Textures.Single(entry => entry.IsDepthAttachment);
 
             Assert.That(resources.RenderLists, Has.Length.EqualTo(1));
-            Assert.That(resources.Textures, Has.Length.EqualTo(5));
+            Assert.That(resources.Textures, Has.Length.EqualTo(6));
             Assert.That(resources.RenderLists[0].RenderList.desc.ShaderTagNames, Is.EqualTo(new[] { "VividGBuffer" }));
+            Assert.That(resources.RenderLists[0].RenderList.desc.RendererConfiguration, Is.EqualTo(PerObjectData.Lightmaps));
 
-            Assert.That(colorEntries, Has.Length.EqualTo(4));
-            Assert.That(colorEntries.Select(entry => entry.AttachmentIndex), Is.EqualTo(new[] { 0, 1, 2, 3 }));
-            Assert.That(colorEntries.Select(entry => entry.Name), Is.EqualTo(new[] { "GBuffer0", "GBuffer1", "GBuffer2", "GBuffer3" }));
+            Assert.That(colorEntries, Has.Length.EqualTo(5));
+            Assert.That(colorEntries.Select(entry => entry.AttachmentIndex), Is.EqualTo(new[] { 0, 1, 2, 3, 4 }));
+            Assert.That(colorEntries.Select(entry => entry.Name), Is.EqualTo(new[] { "GBuffer0", "GBuffer1", "GBuffer2", "GBuffer3", "GBuffer4" }));
 
             Assert.That(colorEntries[0].Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
             Assert.That(colorEntries[1].Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.A2B10G10R10_UNormPack32));
             Assert.That(colorEntries[2].Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
             Assert.That(colorEntries[3].Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.B10G11R11_UFloatPack32));
+            Assert.That(colorEntries[4].Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
             Assert.That(depthEntry.Texture.desc.DepthBufferBits, Is.EqualTo(DepthBits.Depth32));
         }
 
@@ -53,6 +55,7 @@ namespace VividRP.Editor.Tests
             AssertTextureSize(pass, "m_GBuffer1", 960, 540);
             AssertTextureSize(pass, "m_GBuffer2", 960, 540);
             AssertTextureSize(pass, "m_GBuffer3", 960, 540);
+            AssertTextureSize(pass, "m_GBuffer4", 960, 540);
             AssertTextureSize(pass, "m_GBufferDepth", 960, 540);
         }
 

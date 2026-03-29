@@ -48,10 +48,18 @@ namespace VividRP.Runtime.RenderPass.Core
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_GBuffer3;
 
+        [RenderGraphResource(
+            Name = "GBuffer4",
+            Access = AccessFlags.ReadWrite,
+            AttachmentIndex = 4,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_GBuffer4;
+
         private readonly RenderGraphTexture m_DefaultGBuffer0;
         private readonly RenderGraphTexture m_DefaultGBuffer1;
         private readonly RenderGraphTexture m_DefaultGBuffer2;
         private readonly RenderGraphTexture m_DefaultGBuffer3;
+        private readonly RenderGraphTexture m_DefaultGBuffer4;
         private Material m_Material;
 
         public VisibilityBufferGBufferResolvePass()
@@ -69,11 +77,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer2 = RenderGraphTexture.CreateColorTarget("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
             m_GBuffer3 = RenderGraphTexture.CreateColorTarget("GBuffer3", GraphicsFormat.B10G11R11_UFloatPack32);
             m_GBuffer3.desc.EnableRandomWrite = true;
+            m_GBuffer4 = RenderGraphTexture.CreateColorTarget("GBuffer4", GraphicsFormat.R16G16B16A16_SFloat);
 
             m_DefaultGBuffer0 = m_GBuffer0;
             m_DefaultGBuffer1 = m_GBuffer1;
             m_DefaultGBuffer2 = m_GBuffer2;
             m_DefaultGBuffer3 = m_GBuffer3;
+            m_DefaultGBuffer4 = m_GBuffer4;
         }
 
         public override void Create()
@@ -109,7 +119,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigurePassOwnedTarget(m_GBuffer1, m_DefaultGBuffer1, width, height, GraphicsFormat.A2B10G10R10_UNormPack32, false, "GBuffer1");
             ConfigurePassOwnedTarget(m_GBuffer2, m_DefaultGBuffer2, width, height, GraphicsFormat.R8G8B8A8_UNorm, false, "GBuffer2");
             ConfigurePassOwnedTarget(m_GBuffer3, m_DefaultGBuffer3, width, height, GraphicsFormat.B10G11R11_UFloatPack32, true, "GBuffer3");
-            
+            ConfigurePassOwnedTarget(m_GBuffer4, m_DefaultGBuffer4, width, height, GraphicsFormat.R16G16B16A16_SFloat, false, "GBuffer4");
         }
 
         public override void Record(RasterGraphContext context)
@@ -119,7 +129,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 || !m_GBuffer0.innerHandle.IsValid()
                 || !m_GBuffer1.innerHandle.IsValid()
                 || !m_GBuffer2.innerHandle.IsValid()
-                || !m_GBuffer3.innerHandle.IsValid())
+                || !m_GBuffer3.innerHandle.IsValid()
+                || !m_GBuffer4.innerHandle.IsValid())
             {
                 return;
             }

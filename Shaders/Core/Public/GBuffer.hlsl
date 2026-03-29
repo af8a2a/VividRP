@@ -15,6 +15,7 @@
 // RT1 (A2B10G10R10_UNORM)        : Octahedral Normal.xy + LinearRoughness.b + NRDMaterialId.a
 // RT2 (RGBA8_UNORM)              : Metallic.r + AO.g + MaterialData0.b + MaterialData1.a
 // RT3 (R11G11B10_UFLOAT)         : Emissive.rgb
+// RT4 (RGBA16_SFLOAT)            : BakedGI.rgb + HasBakedGI.a
 
 struct VividGBufferSurfaceData
 {
@@ -27,6 +28,8 @@ struct VividGBufferSurfaceData
     float customData1;
     uint materialId;
     float3 emissive;
+    float3 bakedGI;
+    float hasBakedGI;
 };
 
 struct VividGBufferFragmentOutput
@@ -35,6 +38,7 @@ struct VividGBufferFragmentOutput
     float4 rt1 : SV_Target1;
     float4 rt2 : SV_Target2;
     float4 rt3 : SV_Target3;
+    float4 rt4 : SV_Target4;
 };
 
 float EncodeVividMaterialId(uint materialId)
@@ -116,6 +120,8 @@ VividGBufferSurfaceData SanitizeVividGBufferSurfaceData(VividGBufferSurfaceData 
     surfaceData.customData1 = SanitizeCustomData1(surfaceData.customData1);
     surfaceData.materialId = min(surfaceData.materialId, VIVID_GBUFFER_MAX_MATERIAL_ID);
     surfaceData.emissive = max(surfaceData.emissive, 0.0);
+    surfaceData.bakedGI = max(surfaceData.bakedGI, 0.0);
+    surfaceData.hasBakedGI = saturate(surfaceData.hasBakedGI);
     return surfaceData;
 }
 
@@ -135,10 +141,11 @@ VividGBufferFragmentOutput PackVividGBufferSurfaceData(VividGBufferSurfaceData s
         surfaceData.customData,
         surfaceData.customData1);
     output.rt3 = float4(surfaceData.emissive, 0.0);
+    output.rt4 = float4(surfaceData.bakedGI, surfaceData.hasBakedGI);
     return output;
 }
 
-VividGBufferSurfaceData UnpackVividGBufferSurfaceData(float4 rt0, float4 rt1, float4 rt2, float4 rt3)
+VividGBufferSurfaceData UnpackVividGBufferSurfaceData(float4 rt0, float4 rt1, float4 rt2, float4 rt3, float4 rt4)
 {
     VividGBufferSurfaceData surfaceData;
     surfaceData.baseColor = saturate(rt0.rgb);
@@ -150,6 +157,8 @@ VividGBufferSurfaceData UnpackVividGBufferSurfaceData(float4 rt0, float4 rt1, fl
     surfaceData.customData = SanitizeCustomData(rt2.b);
     surfaceData.customData1 = SanitizeCustomData1(rt2.a);
     surfaceData.emissive = max(rt3.rgb, 0.0);
+    surfaceData.bakedGI = max(rt4.rgb, 0.0);
+    surfaceData.hasBakedGI = saturate(rt4.a);
     return surfaceData;
 }
 

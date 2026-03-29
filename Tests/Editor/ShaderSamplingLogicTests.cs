@@ -33,6 +33,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("LOAD_TEXTURE2D_X(_GBuffer1, pixelCoord)"));
             Assert.That(source, Does.Contain("LOAD_TEXTURE2D_X(_GBuffer2, pixelCoord)"));
             Assert.That(source, Does.Contain("LOAD_TEXTURE2D_X(_GBuffer3, pixelCoord)"));
+            Assert.That(source, Does.Contain("LOAD_TEXTURE2D_X(_GBuffer4, pixelCoord)"));
             Assert.That(source, Does.Contain("LOAD_TEXTURE2D_X(_DepthTexture, pixelCoord).r"));
             Assert.That(source, Does.Not.Contain("SAMPLE_TEXTURE2D_X(_GBuffer0"));
             Assert.That(source, Does.Not.Contain("SAMPLE_TEXTURE2D_X(_DepthTexture"));

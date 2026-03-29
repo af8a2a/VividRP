@@ -8,6 +8,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
+using VividRP.Runtime.RenderPass.Core.Sigma;
 
 namespace VividRP.Editor.Tests
 {
@@ -406,6 +407,18 @@ namespace VividRP.Editor.Tests
             protected override string RegisteredPassTypeName => typeof(RayTracingConsumerPass).AssemblyQualifiedName;
         }
 
+        [Serializable]
+        private sealed class DirectionalRayTracedShadowPassNode : RenderPassNodeData
+        {
+            protected override string RegisteredPassTypeName => typeof(DirectionalRayTracedShadowPass).AssemblyQualifiedName;
+        }
+
+        [Serializable]
+        private sealed class SIGMAShadowDenoisePassNode : RenderPassNodeData
+        {
+            protected override string RegisteredPassTypeName => typeof(SIGMAShadowDenoisePass).AssemblyQualifiedName;
+        }
+
         [Test]
         public void Compile_OrdersPassesByExecutionDependencies_WhenPassFieldInputsAreConnected()
         {
@@ -448,6 +461,54 @@ namespace VividRP.Editor.Tests
 
             try
             {
+                var result = RenderGraphCompiler.Compile(graph);
+
+                Assert.That(result.ExecutionOrder, Is.Empty);
+                Assert.That(result.Passes, Is.Empty);
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void Compile_CullsUnusedPasses_WhenOutputsAreNotConsumed()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var drawObjectNode = new DrawObjectPassNode();
+                RenderGraphTestUtility.AddTestNode(graph, drawObjectNode);
+
+                var result = RenderGraphCompiler.Compile(graph);
+
+                Assert.That(result.ExecutionOrder, Is.Empty);
+                Assert.That(result.Passes, Is.Empty);
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void Compile_CullsShadowChain_WhenDenoisedShadowIsUnused()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var shadowPassNode = new DirectionalRayTracedShadowPassNode();
+                var sigmaPassNode = new SIGMAShadowDenoisePassNode();
+
+                RenderGraphTestUtility.AddTestNode(graph, shadowPassNode);
+                RenderGraphTestUtility.AddTestNode(graph, sigmaPassNode);
+                graph.Connect(
+                    shadowPassNode.GetOutputPortByName("m_DirectionalShadowTexture"),
+                    sigmaPassNode.GetInputPortByName("m_RawShadowTexture"));
+
                 var result = RenderGraphCompiler.Compile(graph);
 
                 Assert.That(result.ExecutionOrder, Is.Empty);

@@ -473,7 +473,7 @@ namespace VividRP.Runtime
         {
             Dispose();
 
-            if (graphAsset == null || graphAsset.Passes == null || graphAsset.Passes.Count == 0)
+            if (graphAsset == null)
             {
                 // Fallback graph (keeps the pipeline running without an authored asset).
                 var fallbackPass = new FullScreenPass();
@@ -482,17 +482,18 @@ namespace VividRP.Runtime
             }
             else
             {
+                var passDefinitions = graphAsset.Passes ?? new List<RenderGraphPassDefinition>();
                 var textures = CreateRuntimeTextures(graphAsset);
                 CreateRuntimeHistoryTextures(graphAsset, out s_HistoryPreviousTextures, out s_HistoryCurrentTextures);
                 var buffers = CreateRuntimeBuffers(graphAsset);
                 var renderLists = CreateRuntimeRenderLists(graphAsset);
                 var accelerationStructures = CreateRuntimeAccelerationStructures(graphAsset);
-                var indexedPasses = new IRenderPass[graphAsset.Passes.Count];
-                var indexedPassTypes = new Type[graphAsset.Passes.Count];
+                var indexedPasses = new IRenderPass[passDefinitions.Count];
+                var indexedPassTypes = new Type[passDefinitions.Count];
 
-                for (var passIndex = 0; passIndex < graphAsset.Passes.Count; passIndex++)
+                for (var passIndex = 0; passIndex < passDefinitions.Count; passIndex++)
                 {
-                    var passDef = graphAsset.Passes[passIndex];
+                    var passDef = passDefinitions[passIndex];
                     if (string.IsNullOrEmpty(passDef?.PassType))
                         continue;
 
@@ -544,7 +545,7 @@ namespace VividRP.Runtime
                     s_RenderPasses.Add(pass);
                 }
 
-                for (var passIndex = 0; passIndex < graphAsset.Passes.Count; passIndex++)
+                for (var passIndex = 0; passIndex < passDefinitions.Count; passIndex++)
                 {
                     var pass = indexedPasses[passIndex];
                     var passType = indexedPassTypes[passIndex];
@@ -555,7 +556,7 @@ namespace VividRP.Runtime
                         passIndex,
                         pass,
                         passType,
-                        graphAsset.Passes,
+                        passDefinitions,
                         indexedPasses,
                         indexedPassTypes);
                 }

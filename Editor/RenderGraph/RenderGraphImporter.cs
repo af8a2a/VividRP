@@ -380,11 +380,19 @@ namespace VividRP.Editor.RenderGraph
             PopulatePreviewTextureFields(flattenedGraph, compiledPassDefinitions, passNodeToIndex);
 
             var orderedIndices = RenderGraphPassCompilationUtility.GetOrderedPassIndices(compiledPassDefinitions);
-            result.Passes.AddRange(RenderGraphPassCompilationUtility.OrderPassDefinitions(compiledPassDefinitions, orderedIndices));
+            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(
+                compiledPassDefinitions,
+                includePreviewConsumers: true);
+            var livePassIndexSet = new HashSet<int>(livePassIndices);
+            var culledOrderedIndices = orderedIndices.FindAll(index => livePassIndexSet.Contains(index));
 
-            for (var compiledIndex = 0; compiledIndex < orderedIndices.Count; compiledIndex++)
+            result.Passes.AddRange(RenderGraphPassCompilationUtility.OrderPassDefinitions(
+                compiledPassDefinitions,
+                culledOrderedIndices));
+
+            for (var compiledIndex = 0; compiledIndex < culledOrderedIndices.Count; compiledIndex++)
             {
-                var originalIndex = orderedIndices[compiledIndex];
+                var originalIndex = culledOrderedIndices[compiledIndex];
                 if (originalIndex < 0 || originalIndex >= passNodes.Count)
                     continue;
 

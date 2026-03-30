@@ -10,8 +10,8 @@ namespace VividRP.Runtime
         private const int ViewSampleCount = 12;
         private const int LightSampleCount = 6;
         private const float ObserverHeight = 2.0f;
-        private const float SunAngularDiameterDegrees = 0.53f;
-        private const float SunIlluminanceScale = 20.0f;
+        internal const float SunAngularDiameterDegrees = 0.53f;
+        internal const float SunIlluminanceScale = 20.0f;
 
         private Cubemap m_RuntimeSkyCubemap;
         private int m_RuntimeSkyHash;
@@ -206,7 +206,7 @@ namespace VividRP.Runtime
                 1.0f);
         }
 
-        private static Vector3 ResolveSunDirection(in SkyRendererContext context)
+        internal static Vector3 ResolveSunDirection(in SkyRendererContext context)
         {
             if (context.lightData != null && context.lightData.hasMainDirectionalLight)
                 return context.lightData.mainDirectionalLight.directionWS.normalized;
@@ -217,7 +217,7 @@ namespace VividRP.Runtime
             return Vector3.up;
         }
 
-        private static Color ResolveSunColor(in SkyRendererContext context)
+        internal static Color ResolveSunColor(in SkyRendererContext context)
         {
             if (context.lightData != null && context.lightData.hasMainDirectionalLight)
             {
@@ -231,7 +231,7 @@ namespace VividRP.Runtime
             return Color.white;
         }
 
-        private static Vector3 ResolveCameraPosition(in SkyRendererContext context, float planetRadius)
+        internal static Vector3 ResolveCameraPosition(in SkyRendererContext context, float planetRadius)
         {
             var camera = context.cameraData?.camera;
             if (camera == null)

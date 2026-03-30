@@ -71,6 +71,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: 050cc193933fca74a87ed5fc32a98f21, type: 3}
   - ResourceName: Shaders/Core/Private/OverlayDebug
     ResourceObject: {fileID: 4800000, guid: e395d09a0901a0f41ab15bd086c17efd, type: 3}
+  - ResourceName: Shaders/Core/Private/PhysicallyBasedSky
+    ResourceObject: {fileID: 4800000, guid: b3c91ed48e4997345a128588bd90704e, type: 3}
   - ResourceName: Shaders/Core/Private/PreIntegratedFGD_CharlieFabricLambert
     ResourceObject: {fileID: 4800000, guid: f9ea26c818e16a04fa0b6f8d7ae1a662, type: 3}
   - ResourceName: Shaders/Core/Private/PreIntegratedFGD_GGXDisneyDiffuse

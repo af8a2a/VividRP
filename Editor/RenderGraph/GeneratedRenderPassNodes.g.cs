@@ -117,6 +117,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class PhysicallyBasedSkyPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.PhysicallyBasedSkyPass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class PreDepthPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.PreDepthPass, VividRP.Runtime";

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
 {
@@ -9,6 +10,7 @@ namespace VividRP.Runtime
         private static readonly Dictionary<SkyType, ISkyRenderer> s_Renderers = new();
         private static readonly VividSkyData s_CachedSkyData = new();
         private static readonly SkyAmbientProbeConvolution s_AmbientProbeConvolution = new();
+        private static readonly SkySpecularCache s_SpecularCache = new();
 
         private static bool s_Initialized;
         private static bool s_UpdateRequested;
@@ -35,6 +37,7 @@ namespace VividRP.Runtime
                 renderer.Dispose();
 
             s_AmbientProbeConvolution.Cleanup();
+            s_SpecularCache.Dispose();
             s_Renderers.Clear();
             s_CachedSkyData.Reset();
             s_LastUpdateTime = float.NegativeInfinity;
@@ -88,9 +91,31 @@ namespace VividRP.Runtime
                 s_CachedSkyData.Reset();
             }
 
+            UpdateSpecularCubemap(s_CachedSkyData);
             UpdateDiffuseAmbientProbe(cmd, s_CachedSkyData);
 
             skyData.CopyFrom(s_CachedSkyData);
+        }
+
+        internal static RTHandle GetSpecularCubemapHandle()
+        {
+            if (!s_Initialized)
+                Initialize();
+
+            return s_SpecularCache.Cubemap;
+        }
+
+        internal static void ImportSpecularCubemap(RenderGraphTexture texture, VividSkyData skyData = null)
+        {
+            if (texture == null || !PassRecorder.IsPassTextureImportActive)
+                return;
+
+            if (skyData != null)
+                UpdateSpecularCubemap(skyData);
+
+            var handle = GetSpecularCubemapHandle();
+            if (handle != null)
+                PassRecorder.ImportTexture(texture, handle);
         }
 
         private static bool NeedsUpdate(SkyType skyType, SkySettingsVolume skySettings, int skyHash)
@@ -117,6 +142,13 @@ namespace VividRP.Runtime
         {
             renderer.Build(resources);
             s_Renderers[renderer.Type] = renderer;
+        }
+
+        private static void UpdateSpecularCubemap(VividSkyData skyData)
+        {
+            s_SpecularCache.Update(
+                skyData?.specularCubemap,
+                skyData?.skyHash ?? 0);
         }
 
         private static void UpdateDiffuseAmbientProbe(CommandBuffer cmd, VividSkyData skyData)

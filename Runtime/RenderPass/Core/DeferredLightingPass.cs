@@ -7,12 +7,6 @@ namespace VividRP.Runtime.RenderPass.Core
 {
     public class DeferredLightingPass : UnsafePass
     {
-        private struct ImportedSkyCubemapState
-        {
-            public Cubemap Source;
-            public RTHandle Handle;
-        }
-
         private const int ClearThreadGroupSizeX = 8;
         private const int ClearThreadGroupSizeY = 8;
         private const string ClearDeferredLitKernelName = "ClearDeferredLit";
@@ -174,8 +168,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_LocalPreIntegratedFGDGGXDisneyDiffuseTexture;
         private readonly RenderGraphTexture m_LocalPreIntegratedFGDCharlieAndFabricTexture;
         private VividPreIntegratedFGDTextures m_FallbackPreIntegratedFGDTextures;
-        private ImportedSkyCubemapState m_SkyIBLCubemapState;
-        private Cubemap m_FallbackSkyIBLCubemap;
         private Color m_SkyIBLTint = Color.white;
         private Vector4 m_SkyIBLParams;
 
@@ -231,7 +223,6 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Create()
         {
             m_DeferredLitCompute = PipelineResourceManager.Get<VividRPCoreResources>()?.DeferredLitCompute;
-            m_FallbackSkyIBLCubemap = CreateFallbackSkyIBLCubemap();
 
             if (m_DeferredLitCompute == null)
             {
@@ -302,14 +293,6 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_FallbackPreIntegratedFGDTextures?.Dispose();
             m_FallbackPreIntegratedFGDTextures = null;
-
-            ReleaseSkyIblCubemapState();
-
-            if (m_FallbackSkyIBLCubemap != null)
-            {
-                CoreUtils.Destroy(m_FallbackSkyIBLCubemap);
-                m_FallbackSkyIBLCubemap = null;
-            }
 
             m_DeferredLitCompute = null;
             m_ClearDeferredLitKernel = -1;
@@ -612,55 +595,14 @@ namespace VividRP.Runtime.RenderPass.Core
         private void PrepareSkyIblState(VividSkyData skyData)
         {
             var hasActiveSky = skyData != null && skyData.activeSkyType != SkyType.None;
-            var skyCubemap = hasActiveSky
-                ? skyData.specularCubemap ?? m_FallbackSkyIBLCubemap
-                : m_FallbackSkyIBLCubemap;
+            var skyCubemap = hasActiveSky ? skyData.specularCubemap : null;
 
-            EnsureSkyIblCubemapImported(skyCubemap);
+            SkyManager.ImportSpecularCubemap(m_SkyIBLCubemap, skyData);
 
             m_SkyIBLTint = hasActiveSky ? skyData.tint : Color.white;
             var skyExposure = hasActiveSky ? skyData.exposure : 1.0f;
             var skyRotation = hasActiveSky ? skyData.rotation : 0.0f;
             m_SkyIBLParams = BuildSkyIblParams(skyCubemap, skyExposure, skyRotation);
-        }
-
-        private void EnsureSkyIblCubemapImported(Cubemap skyCubemap)
-        {
-            if (m_SkyIBLCubemapState.Handle == null || m_SkyIBLCubemapState.Source != skyCubemap)
-            {
-                m_SkyIBLCubemapState.Handle?.Release();
-                m_SkyIBLCubemapState.Handle = skyCubemap != null ? RTHandles.Alloc(skyCubemap) : null;
-                m_SkyIBLCubemapState.Source = skyCubemap;
-            }
-
-            m_SkyIBLCubemap?.ClearImportedHandle();
-
-            if (PassRecorder.IsPassTextureImportActive && m_SkyIBLCubemapState.Handle != null)
-                PassRecorder.ImportTexture(m_SkyIBLCubemap, m_SkyIBLCubemapState.Handle);
-        }
-
-        private void ReleaseSkyIblCubemapState()
-        {
-            m_SkyIBLCubemapState.Handle?.Release();
-            m_SkyIBLCubemapState.Handle = null;
-            m_SkyIBLCubemapState.Source = null;
-            m_SkyIBLCubemap?.ClearImportedHandle();
-        }
-
-        private static Cubemap CreateFallbackSkyIBLCubemap()
-        {
-            var cubemap = new Cubemap(1, TextureFormat.RGBA32, false);
-            var colors = new[] { Color.black };
-            cubemap.SetPixels(colors, CubemapFace.PositiveX);
-            cubemap.SetPixels(colors, CubemapFace.NegativeX);
-            cubemap.SetPixels(colors, CubemapFace.PositiveY);
-            cubemap.SetPixels(colors, CubemapFace.NegativeY);
-            cubemap.SetPixels(colors, CubemapFace.PositiveZ);
-            cubemap.SetPixels(colors, CubemapFace.NegativeZ);
-            cubemap.Apply(false, true);
-            cubemap.name = "FallbackSkyIBLCubemap";
-            cubemap.hideFlags = HideFlags.HideAndDontSave;
-            return cubemap;
         }
     }
 }

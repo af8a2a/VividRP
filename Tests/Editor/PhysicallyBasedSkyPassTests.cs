@@ -15,17 +15,18 @@ namespace VividRP.Editor.Tests
     public class PhysicallyBasedSkyPassTests
     {
         [Test]
-        public void Initialize_RegistersDepthInputAndColorOutput_WhenPassIsCreated()
+        public void Initialize_RegistersDepthInputColorOutputAndSkyViewLut_WhenPassIsCreated()
         {
             IRenderPass renderPass = new PhysicallyBasedSkyPass();
 
             var resources = renderPass.Initialize();
             var textureEntries = resources.Textures.OrderBy(entry => entry.Name).ToArray();
 
-            Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[] { "Color", "Depth" }));
+            Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[] { "Color", "Depth", "SkyViewLUT" }));
 
             var colorEntry = textureEntries.Single(entry => entry.Name == "Color");
             var depthEntry = textureEntries.Single(entry => entry.Name == "Depth");
+            var skyViewEntry = textureEntries.Single(entry => entry.Name == "SkyViewLUT");
 
             Assert.That(colorEntry.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(colorEntry.AttachmentIndex, Is.EqualTo(0));
@@ -35,6 +36,9 @@ namespace VividRP.Editor.Tests
             Assert.That(depthEntry.AttachmentIndex, Is.EqualTo(-1));
             Assert.That(depthEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32_SFloat));
             Assert.That(depthEntry.Texture.desc.DepthBufferBits, Is.EqualTo(DepthBits.None));
+
+            Assert.That(skyViewEntry.Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(skyViewEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
         }
 
         [Test]
@@ -70,40 +74,38 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Source_UsesShaderFallbackAndCachesAtmosphereParameters()
+        public void Source_UsesShaderFallbackAndBindsSkyViewLut()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PhysicallyBasedSkyPass.cs"));
 
             Assert.That(source, Does.Contain("internal const string PhysicallyBasedSkyShaderName = \"Hidden/VividRP/PhysicallyBasedSky\";"));
             Assert.That(source, Does.Contain("shader ??= Shader.Find(PhysicallyBasedSkyShaderName);"));
-            Assert.That(source, Does.Contain("skyData.activeSkyType == SkyType.PhysicallyBased"));
-            Assert.That(source, Does.Contain("PhysicallyBasedSkyRenderer.ResolveCameraPosition(context, volume.planetRadius.value)"));
-            Assert.That(source, Does.Contain("PhysicallyBasedSkyRenderer.ResolveSunDirection(context)"));
-            Assert.That(source, Does.Contain("PhysicallyBasedSkyRenderer.ResolveSunColor(context)"));
-            Assert.That(source, Does.Contain("m_SkyPlanetParams = new Vector4("));
-            Assert.That(source, Does.Contain("m_SkyAirScattering = ToVector4(volume.GetAirScatteringCoefficient());"));
-            Assert.That(source, Does.Contain("m_SkyAerosolExtinction = new Vector4("));
-            Assert.That(source, Does.Contain("mpb.SetVector(SkyPlanetParamsId, m_SkyPlanetParams);"));
+            Assert.That(source, Does.Contain("m_SkyViewLUT = RenderGraphTexture.CreateInput(\"SkyViewLUT\", GraphicsFormat.R16G16B16A16_SFloat);"));
+            Assert.That(source, Does.Contain("m_IsActive = PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters);"));
+            Assert.That(source, Does.Contain("var skyViewTexture = m_SkyViewLUT != null"));
+            Assert.That(source, Does.Contain("mpb.SetTexture(SkyViewLutId, skyViewTexture ?? Texture2D.blackTexture);"));
+            Assert.That(source, Does.Contain("mpb.SetFloat(SkyUseLutId, skyViewTexture != null ? 1.0f : 0.0f);"));
+            Assert.That(source, Does.Contain("mpb.SetVector(SkyPlanetParamsId, m_Parameters.skyPlanetParams);"));
             Assert.That(source, Does.Contain("CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);"));
         }
 
         [Test]
-        public void Shader_Source_ImplementsAtmosphereFullscreenScattering()
+        public void Shader_Source_UsesSkyViewLutWithRaymarchFallback()
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "PhysicallyBasedSky.shader"));
 
             Assert.That(source, Does.Contain("Shader \"Hidden/VividRP/PhysicallyBasedSky\""));
             Assert.That(source, Does.Contain("Name \"PhysicallyBasedSky\""));
             Assert.That(source, Does.Contain("ZTest LEqual"));
+            Assert.That(source, Does.Contain("TEXTURE2D(_SkyViewLUT);"));
+            Assert.That(source, Does.Contain("float _SkyUseLUT;"));
+            Assert.That(source, Does.Contain("EncodeSkyViewUv"));
+            Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D(_SkyViewLUT, sampler_SkyViewLUT"));
             Assert.That(source, Does.Contain("VIEW_SAMPLE_COUNT = 12"));
             Assert.That(source, Does.Contain("LIGHT_SAMPLE_COUNT = 6"));
             Assert.That(source, Does.Contain("GetSkyViewDirWS"));
-            Assert.That(source, Does.Contain("ComputeOpticalDepthToSun"));
             Assert.That(source, Does.Contain("EvaluateSky"));
-            Assert.That(source, Does.Contain("_SkySunDirection"));
-            Assert.That(source, Does.Contain("_SkySunColor"));
-            Assert.That(source, Does.Contain("_SkyPlanetParams"));
-            Assert.That(source, Does.Contain("_SkyOzoneParams"));
+            Assert.That(source, Does.Contain("_SkyUseLUT > 0.5f"));
         }
 
         private static void AssertTextureSize(PhysicallyBasedSkyPass pass, string fieldName, int expectedWidth, int expectedHeight)

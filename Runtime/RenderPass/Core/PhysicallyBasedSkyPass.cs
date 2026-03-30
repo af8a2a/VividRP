@@ -10,6 +10,8 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const string PhysicallyBasedSkyShaderName = "Hidden/VividRP/PhysicallyBasedSky";
 
         private static readonly int PixelCoordToViewDirWSId = Shader.PropertyToID("_PixelCoordToViewDirWS");
+        private static readonly int SkyViewLutId = Shader.PropertyToID("_SkyViewLUT");
+        private static readonly int SkyUseLutId = Shader.PropertyToID("_SkyUseLUT");
         private static readonly int SkyCameraPositionPsId = Shader.PropertyToID("_SkyCameraPositionPS");
         private static readonly int SkySunDirectionId = Shader.PropertyToID("_SkySunDirection");
         private static readonly int SkySunColorId = Shader.PropertyToID("_SkySunColor");
@@ -28,25 +30,18 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.ReadWrite, IsDepthAttachment = true)]
         private RenderGraphTexture m_DepthTexture;
 
+        [RenderGraphResource(Name = "SkyViewLUT", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_SkyViewLUT;
+
         private Material m_Material;
         private bool m_IsActive;
-        private Matrix4x4 m_PixelCoordToViewDirMatrix = Matrix4x4.identity;
-        private Vector4 m_SkyCameraPositionPS;
-        private Vector4 m_SkySunDirection;
-        private Vector4 m_SkySunColor;
-        private Vector4 m_SkyPlanetParams;
-        private Vector4 m_SkyAirScattering;
-        private Vector4 m_SkyAirExtinction;
-        private Vector4 m_SkyAerosolScattering;
-        private Vector4 m_SkyAerosolExtinction;
-        private Vector4 m_SkyOzoneExtinction;
-        private Vector4 m_SkyOzoneParams;
-        private Vector4 m_SkyGroundTint;
+        private PhysicallyBasedSkyShaderParameters m_Parameters;
 
         public PhysicallyBasedSkyPass()
         {
             m_ColorTarget = RenderGraphTexture.CreateInput("SkyColor", GraphicsFormat.R8G8B8A8_SRGB);
             m_DepthTexture = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.None, DepthBits.Depth32);
+            m_SkyViewLUT = RenderGraphTexture.CreateInput("SkyViewLUT", GraphicsFormat.R16G16B16A16_SFloat);
         }
 
         public override void Create()
@@ -67,80 +62,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             var cameraData = frameData.GetOrCreate<VividCameraData>();
-            var skyData = frameData.GetOrCreate<VividSkyData>();
-            var lightData = frameData.GetOrCreate<VividLightData>();
-            var volume = VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume();
-            var context = new SkyRendererContext(cameraData, lightData);
-
-            m_IsActive = skyData.activeSkyType == SkyType.PhysicallyBased
-                && volume != null
-                && volume.IsActive();
-
-            m_PixelCoordToViewDirMatrix = cameraData.camera != null
-                ? cameraData.GetPixelCoordToViewDirWSMatrix()
-                : Matrix4x4.identity;
-
-            if (m_IsActive)
-            {
-                var planetRadius = Mathf.Max(volume.planetRadius.value, 1000.0f);
-                var atmosphereRadius = Mathf.Max(volume.GetAtmosphereRadius(), planetRadius + 1.0f);
-                var cameraPosition = PhysicallyBasedSkyRenderer.ResolveCameraPosition(context, volume.planetRadius.value);
-                var sunDirection = PhysicallyBasedSkyRenderer.ResolveSunDirection(context);
-                var sunColor = PhysicallyBasedSkyRenderer.ResolveSunColor(context);
-                var aerosolExtinction = volume.GetAerosolExtinctionCoefficient();
-                var sunAngularRadius = Mathf.Deg2Rad
-                                       * PhysicallyBasedSkyRenderer.SunAngularDiameterDegrees
-                                       * Mathf.Max(volume.sunDiskSize.value, 0.01f)
-                                       * 0.5f;
-                var aerosolScattering = volume.GetAerosolScatteringCoefficient();
-                var ozoneExtinction = volume.GetOzoneExtinctionCoefficient();
-
-                m_SkyCameraPositionPS = new Vector4(cameraPosition.x, cameraPosition.y, cameraPosition.z, 1.0f);
-                m_SkySunDirection = new Vector4(sunDirection.x, sunDirection.y, sunDirection.z, 0.0f);
-                m_SkySunColor = ToVector4(sunColor.linear * PhysicallyBasedSkyRenderer.SunIlluminanceScale);
-                m_SkyPlanetParams = new Vector4(
-                    planetRadius,
-                    atmosphereRadius,
-                    Mathf.Max(volume.exposure.value, 0.0f),
-                    volume.renderSunDisk.value ? 1.0f : 0.0f);
-                m_SkyAirScattering = ToVector4(volume.GetAirScatteringCoefficient());
-                m_SkyAirExtinction = ToVector4(volume.GetAirExtinctionCoefficient());
-                m_SkyAerosolScattering = new Vector4(
-                    aerosolScattering.x,
-                    aerosolScattering.y,
-                    aerosolScattering.z,
-                    volume.GetAerosolScaleHeight());
-                m_SkyAerosolExtinction = new Vector4(
-                    aerosolExtinction,
-                    aerosolExtinction,
-                    aerosolExtinction,
-                    Mathf.Clamp(volume.aerosolAnisotropy.value, -0.95f, 0.95f));
-                m_SkyOzoneExtinction = new Vector4(
-                    ozoneExtinction.x,
-                    ozoneExtinction.y,
-                    ozoneExtinction.z,
-                    volume.ozoneMinimumAltitude.value);
-                m_SkyOzoneParams = new Vector4(
-                    volume.ozoneLayerWidth.value,
-                    volume.GetAirScaleHeight(),
-                    sunAngularRadius,
-                    volume.GetAerosolScaleHeight());
-                m_SkyGroundTint = ToVector4(volume.groundTint.value.linear);
-            }
-            else
-            {
-                m_SkyCameraPositionPS = Vector4.zero;
-                m_SkySunDirection = new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
-                m_SkySunColor = Vector4.zero;
-                m_SkyPlanetParams = Vector4.zero;
-                m_SkyAirScattering = Vector4.zero;
-                m_SkyAirExtinction = Vector4.zero;
-                m_SkyAerosolScattering = Vector4.zero;
-                m_SkyAerosolExtinction = Vector4.zero;
-                m_SkyOzoneExtinction = Vector4.zero;
-                m_SkyOzoneParams = Vector4.zero;
-                m_SkyGroundTint = Vector4.zero;
-            }
+            m_IsActive = PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters);
 
             var width = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
             var height = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
@@ -160,19 +82,24 @@ namespace VividRP.Runtime.RenderPass.Core
             if (!m_IsActive || m_Material == null)
                 return;
 
+            var skyViewTexture = m_SkyViewLUT != null
+                ? ResolveTexture(m_SkyViewLUT.innerHandle)
+                : null;
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
-            mpb.SetMatrix(PixelCoordToViewDirWSId, m_PixelCoordToViewDirMatrix);
-            mpb.SetVector(SkyCameraPositionPsId, m_SkyCameraPositionPS);
-            mpb.SetVector(SkySunDirectionId, m_SkySunDirection);
-            mpb.SetVector(SkySunColorId, m_SkySunColor);
-            mpb.SetVector(SkyPlanetParamsId, m_SkyPlanetParams);
-            mpb.SetVector(SkyAirScatteringId, m_SkyAirScattering);
-            mpb.SetVector(SkyAirExtinctionId, m_SkyAirExtinction);
-            mpb.SetVector(SkyAerosolScatteringId, m_SkyAerosolScattering);
-            mpb.SetVector(SkyAerosolExtinctionId, m_SkyAerosolExtinction);
-            mpb.SetVector(SkyOzoneExtinctionId, m_SkyOzoneExtinction);
-            mpb.SetVector(SkyOzoneParamsId, m_SkyOzoneParams);
-            mpb.SetVector(SkyGroundTintId, m_SkyGroundTint);
+            mpb.SetMatrix(PixelCoordToViewDirWSId, m_Parameters.pixelCoordToViewDirWS);
+            mpb.SetTexture(SkyViewLutId, skyViewTexture ?? Texture2D.blackTexture);
+            mpb.SetFloat(SkyUseLutId, skyViewTexture != null ? 1.0f : 0.0f);
+            mpb.SetVector(SkyCameraPositionPsId, m_Parameters.skyCameraPositionPS);
+            mpb.SetVector(SkySunDirectionId, m_Parameters.skySunDirection);
+            mpb.SetVector(SkySunColorId, m_Parameters.skySunColor);
+            mpb.SetVector(SkyPlanetParamsId, m_Parameters.skyPlanetParams);
+            mpb.SetVector(SkyAirScatteringId, m_Parameters.skyAirScattering);
+            mpb.SetVector(SkyAirExtinctionId, m_Parameters.skyAirExtinction);
+            mpb.SetVector(SkyAerosolScatteringId, m_Parameters.skyAerosolScattering);
+            mpb.SetVector(SkyAerosolExtinctionId, m_Parameters.skyAerosolExtinction);
+            mpb.SetVector(SkyOzoneExtinctionId, m_Parameters.skyOzoneExtinction);
+            mpb.SetVector(SkyOzoneParamsId, m_Parameters.skyOzoneParams);
+            mpb.SetVector(SkyGroundTintId, m_Parameters.skyGroundTint);
 
             CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);
         }
@@ -186,14 +113,15 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
-        private static Vector4 ToVector4(Vector3 value)
+        private static Texture ResolveTexture(RTHandle handle)
         {
-            return new Vector4(value.x, value.y, value.z, 0.0f);
-        }
+            if (handle == null)
+                return null;
 
-        private static Vector4 ToVector4(Color value)
-        {
-            return new Vector4(value.r, value.g, value.b, value.a);
+            if (handle.rt != null)
+                return handle.rt;
+
+            return handle.externalTexture;
         }
     }
 }

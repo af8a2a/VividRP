@@ -2,35 +2,37 @@ using System;
 using System.IO;
 using NUnit.Framework;
 using VividRP.Editor.RenderGraph;
-using RuntimePhysicallyBasedSkyPass = VividRP.Runtime.RenderPass.Core.PhysicallyBasedSkyPass;
+using RuntimeAerialPerspectivePass = VividRP.Runtime.RenderPass.Core.AerialPerspectivePass;
 
 namespace VividRP.Editor.Tests
 {
-    public class PhysicallyBasedSkyPassNodeTests
+    public class AerialPerspectivePassNodeTests
     {
         [Serializable]
-        private sealed class AutoRegisteredPhysicallyBasedSkyPassNode : RenderPassNodeData
+        private sealed class AutoRegisteredAerialPerspectivePassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(RuntimePhysicallyBasedSkyPass).AssemblyQualifiedName;
+            protected override string RegisteredPassTypeName => typeof(RuntimeAerialPerspectivePass).AssemblyQualifiedName;
         }
 
         [Test]
-        public void PhysicallyBasedSkyPassNode_DefinesDepthSkyViewInputsAndColorOutputPorts()
+        public void AerialPerspectivePassNode_DefinesExpectedInputAndOutputPorts()
         {
-            var node = new AutoRegisteredPhysicallyBasedSkyPassNode();
+            var node = new AutoRegisteredAerialPerspectivePassNode();
 
+            Assert.That(node.GetInputPortByName("m_ColorInput"), Is.Not.Null);
             Assert.That(node.GetInputPortByName("m_DepthTexture"), Is.Not.Null);
-            Assert.That(node.GetInputPortByName("m_SkyViewLUT"), Is.Not.Null);
-            Assert.That(node.GetOutputPortByName("m_ColorTarget"), Is.Not.Null);
+            Assert.That(node.GetInputPortByName("m_TransmittanceLUT"), Is.Not.Null);
+            Assert.That(node.GetInputPortByName("m_MultiScatteringLUT"), Is.Not.Null);
+            Assert.That(node.GetOutputPortByName("m_OutputTexture"), Is.Not.Null);
         }
 
         [Test]
-        public void GeneratedNodeRegistry_RegistersPhysicallyBasedSkyPass()
+        public void GeneratedNodeRegistry_RegistersAerialPerspectivePass()
         {
             var source = File.ReadAllText(GetPackageFilePath("Editor", "RenderGraph", "GeneratedRenderPassNodes.g.cs"));
 
-            Assert.That(source, Does.Contain("internal sealed class PhysicallyBasedSkyPass : RenderPassNodeData"));
-            Assert.That(source, Does.Contain("VividRP.Runtime.RenderPass.Core.PhysicallyBasedSkyPass, VividRP.Runtime"));
+            Assert.That(source, Does.Contain("internal sealed class AerialPerspectivePass : RenderPassNodeData"));
+            Assert.That(source, Does.Contain("VividRP.Runtime.RenderPass.Core.AerialPerspectivePass, VividRP.Runtime"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

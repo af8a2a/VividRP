@@ -28,6 +28,9 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
             static const float BLOCKED_OPTICAL_DEPTH = 100000.0f;
 
             float4x4 _PixelCoordToViewDirWS;
+            TEXTURE2D(_SkyViewLUT);
+            SAMPLER(sampler_SkyViewLUT);
+            float _SkyUseLUT;
             float4 _SkyCameraPositionPS;
             float4 _SkySunDirection;
             float4 _SkySunColor;
@@ -67,6 +70,12 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
             {
                 float4 viewDirWS = mul(float4(positionCS.xy, 1.0f, 1.0f), _PixelCoordToViewDirWS);
                 return normalize(viewDirWS.xyz);
+            }
+
+            float2 EncodeSkyViewUv(float3 directionWS)
+            {
+                float azimuth = atan2(directionWS.z, directionWS.x);
+                return float2(frac(azimuth / (2.0f * PI) + 1.0f), saturate(directionWS.y * 0.5f + 0.5f));
             }
 
             bool IntersectAtmosphere(float3 origin, float3 direction, float atmosphereRadius, out float entryDistance, out float exitDistance)
@@ -314,7 +323,10 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
             float4 Frag(Varyings input) : SV_Target
             {
                 float3 viewDirWS = -GetSkyViewDirWS(input.positionCS.xy);
-                return float4(EvaluateSky(viewDirWS), 1.0f);
+                float3 skyColor = _SkyUseLUT > 0.5f
+                    ? SAMPLE_TEXTURE2D(_SkyViewLUT, sampler_SkyViewLUT, EncodeSkyViewUv(normalize(viewDirWS))).rgb
+                    : EvaluateSky(viewDirWS);
+                return float4(skyColor, 1.0f);
             }
             ENDHLSL
         }

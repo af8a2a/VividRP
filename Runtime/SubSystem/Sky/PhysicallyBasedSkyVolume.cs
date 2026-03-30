@@ -53,6 +53,12 @@ namespace VividRP.Runtime
         public BoolParameter renderSunDisk = new(true);
         public MinFloatParameter sunDiskSize = new(1.0f, 0.0f);
 
+        [Header("Height Fog")]
+        public BoolParameter enableHeightFog = new(false);
+        public FloatParameter fogBaseHeight = new(0.0f);
+        public MinFloatParameter fogDensity = new(0.01f, 0.0f);
+        public MinFloatParameter fogMaxDistance = new(5000.0f, 0.0f);
+
         public bool IsActive()
         {
             return airMaximumAltitude.value > 0.0f
@@ -82,8 +88,19 @@ namespace VividRP.Runtime
                 hash = hash * 23 + exposure.GetHashCode();
                 hash = hash * 23 + renderSunDisk.GetHashCode();
                 hash = hash * 23 + sunDiskSize.GetHashCode();
+                hash = hash * 23 + enableHeightFog.GetHashCode();
+                hash = hash * 23 + fogBaseHeight.GetHashCode();
+                hash = hash * 23 + fogDensity.GetHashCode();
+                hash = hash * 23 + fogMaxDistance.GetHashCode();
                 return hash;
             }
+        }
+
+        internal bool IsHeightFogActive()
+        {
+            return enableHeightFog.value
+                && fogDensity.value > 0.0f
+                && fogMaxDistance.value > 0.0f;
         }
 
         internal float GetAirScaleHeight()

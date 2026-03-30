@@ -2,35 +2,35 @@ using System;
 using System.IO;
 using NUnit.Framework;
 using VividRP.Editor.RenderGraph;
-using RuntimePhysicallyBasedSkyPass = VividRP.Runtime.RenderPass.Core.PhysicallyBasedSkyPass;
+using RuntimeAtmosphereLUTPass = VividRP.Runtime.RenderPass.Core.AtmosphereLUTPass;
 
 namespace VividRP.Editor.Tests
 {
-    public class PhysicallyBasedSkyPassNodeTests
+    public class AtmosphereLUTPassNodeTests
     {
         [Serializable]
-        private sealed class AutoRegisteredPhysicallyBasedSkyPassNode : RenderPassNodeData
+        private sealed class AutoRegisteredAtmosphereLUTPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(RuntimePhysicallyBasedSkyPass).AssemblyQualifiedName;
+            protected override string RegisteredPassTypeName => typeof(RuntimeAtmosphereLUTPass).AssemblyQualifiedName;
         }
 
         [Test]
-        public void PhysicallyBasedSkyPassNode_DefinesDepthSkyViewInputsAndColorOutputPorts()
+        public void AtmosphereLUTPassNode_DefinesLutOutputPorts()
         {
-            var node = new AutoRegisteredPhysicallyBasedSkyPassNode();
+            var node = new AutoRegisteredAtmosphereLUTPassNode();
 
-            Assert.That(node.GetInputPortByName("m_DepthTexture"), Is.Not.Null);
-            Assert.That(node.GetInputPortByName("m_SkyViewLUT"), Is.Not.Null);
-            Assert.That(node.GetOutputPortByName("m_ColorTarget"), Is.Not.Null);
+            Assert.That(node.GetOutputPortByName("m_TransmittanceLUT"), Is.Not.Null);
+            Assert.That(node.GetOutputPortByName("m_MultiScatteringLUT"), Is.Not.Null);
+            Assert.That(node.GetOutputPortByName("m_SkyViewLUT"), Is.Not.Null);
         }
 
         [Test]
-        public void GeneratedNodeRegistry_RegistersPhysicallyBasedSkyPass()
+        public void GeneratedNodeRegistry_RegistersAtmosphereLUTPass()
         {
             var source = File.ReadAllText(GetPackageFilePath("Editor", "RenderGraph", "GeneratedRenderPassNodes.g.cs"));
 
-            Assert.That(source, Does.Contain("internal sealed class PhysicallyBasedSkyPass : RenderPassNodeData"));
-            Assert.That(source, Does.Contain("VividRP.Runtime.RenderPass.Core.PhysicallyBasedSkyPass, VividRP.Runtime"));
+            Assert.That(source, Does.Contain("internal sealed class AtmosphereLUTPass : RenderPassNodeData"));
+            Assert.That(source, Does.Contain("VividRP.Runtime.RenderPass.Core.AtmosphereLUTPass, VividRP.Runtime"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

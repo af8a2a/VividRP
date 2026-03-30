@@ -13,6 +13,10 @@ MonoBehaviour:
   m_Name: PipelineResources
   m_EditorClassIdentifier: VividRP.Runtime::VividRP.Runtime.PipelineResourcesContainer
   m_Entries:
+  - ResourceName: Shaders/Core/Private/AerialPerspective
+    ResourceObject: {fileID: 4800000, guid: d29b21a8e739f684287b1783ef02244f, type: 3}
+  - ResourceName: Shaders/Core/Private/AtmosphereLUT.compute
+    ResourceObject: {fileID: 7200000, guid: 753b23d34984ac04c88258e198f605df, type: 3}
   - ResourceName: Shaders/Core/Private/Blit
     ResourceObject: {fileID: 4800000, guid: 88588a6fde9a5844db576cbc17606db2, type: 3}
   - ResourceName: Shaders/Core/Private/CameraMotionVectors

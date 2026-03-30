@@ -29,6 +29,12 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/PhysicallyBasedSky")]
         public Shader PhysicallyBasedSkyShader;
 
+        [ResourcePath("Shaders/Core/Private/AtmosphereLUT.compute")]
+        public ComputeShader AtmosphereLUTCompute;
+
+        [ResourcePath("Shaders/Core/Private/AerialPerspective")]
+        public Shader AerialPerspectiveShader;
+
         [ResourcePath("Shaders/Core/Private/Sky/AmbientProbeConvolution.compute")]
         public ComputeShader SkyAmbientProbeConvolutionCompute;
 

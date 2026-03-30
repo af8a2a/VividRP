@@ -49,5 +49,43 @@ namespace VividRP.Editor.Tests
                 Object.DestroyImmediate(volume);
             }
         }
+
+        [Test]
+        public void IsHeightFogActive_ReturnsTrue_WhenEnabledWithPositiveDensityAndDistance()
+        {
+            var volume = ScriptableObject.CreateInstance<PhysicallyBasedSkyVolume>();
+
+            try
+            {
+                volume.enableHeightFog.value = true;
+                volume.fogDensity.value = 0.05f;
+                volume.fogMaxDistance.value = 1500.0f;
+
+                Assert.That(volume.IsHeightFogActive(), Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(volume);
+            }
+        }
+
+        [Test]
+        public void GetHashCode_Changes_WhenFogSettingsChange()
+        {
+            var volume = ScriptableObject.CreateInstance<PhysicallyBasedSkyVolume>();
+
+            try
+            {
+                var initialHash = volume.GetHashCode();
+                volume.enableHeightFog.value = true;
+                volume.fogDensity.value = 0.125f;
+
+                Assert.That(volume.GetHashCode(), Is.Not.EqualTo(initialHash));
+            }
+            finally
+            {
+                Object.DestroyImmediate(volume);
+            }
+        }
     }
 }

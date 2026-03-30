@@ -12,10 +12,11 @@ namespace VividRP.Editor.Tests
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "SkyAmbientVisualization.shader"));
 
             Assert.That(source, Does.Contain("Shader \"VividRP/Material/SkyAmbientVisualization\""));
+            Assert.That(source, Does.Contain("#pragma target 4.5"));
             Assert.That(source, Does.Contain("Name \"VividForward\""));
-            Assert.That(source, Does.Contain("Tags { \"LightMode\" = \"VividForward\" }"));
-            Assert.That(source, Does.Contain("#include \"Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl\""));
-            Assert.That(source, Does.Contain("float3 ambientLighting = max(SampleSH(normalWS), 0.0);"));
+            Assert.That(source, Does.Contain("\"LightMode\" = \"VividForward\""));
+            Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/BakedGI.hlsl\""));
+            Assert.That(source, Does.Contain("float3 ambientLighting = max(VividSampleAmbientProbe(normalWS), 0.0);"));
             Assert.That(source, Does.Contain("output.normalWS = TransformObjectToWorldNormal(input.normalOS);"));
         }
 

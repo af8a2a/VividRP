@@ -40,7 +40,7 @@ namespace VividRP.Runtime
                 ResolveSunColor(context));
         }
 
-        public void Update(in SkyRendererContext context, VividSkyData skyData)
+        public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd)
         {
             if (skyData == null)
                 return;

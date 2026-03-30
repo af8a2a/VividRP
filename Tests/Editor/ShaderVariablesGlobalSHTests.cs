@@ -55,6 +55,34 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void Create_UsesZeroAmbientProbe_WhenSkyDataExistsWithoutDiffuseSH()
+        {
+            var originalAmbientProbe = RenderSettings.ambientProbe;
+            var sh = new SphericalHarmonicsL2();
+            PopulateChannel(ref sh, 0, 2.0f);
+            PopulateChannel(ref sh, 1, 12.0f);
+            PopulateChannel(ref sh, 2, 22.0f);
+
+            try
+            {
+                RenderSettings.ambientProbe = sh;
+                var globals = ShaderVariablesGlobal.Create(default, null, new VividSkyData());
+
+                Assert.That(globals._VividSHAr, Is.EqualTo(Vector4.zero));
+                Assert.That(globals._VividSHAg, Is.EqualTo(Vector4.zero));
+                Assert.That(globals._VividSHAb, Is.EqualTo(Vector4.zero));
+                Assert.That(globals._VividSHBr, Is.EqualTo(Vector4.zero));
+                Assert.That(globals._VividSHBg, Is.EqualTo(Vector4.zero));
+                Assert.That(globals._VividSHBb, Is.EqualTo(Vector4.zero));
+                Assert.That(globals._VividSHC, Is.EqualTo(new Vector4(0.0f, 0.0f, 0.0f, 1.0f)));
+            }
+            finally
+            {
+                RenderSettings.ambientProbe = originalAmbientProbe;
+            }
+        }
+
         private static void PopulateChannel(ref SphericalHarmonicsL2 sh, int channel, float startValue)
         {
             for (var coefficient = 0; coefficient < 9; coefficient++)

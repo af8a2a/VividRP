@@ -9,19 +9,17 @@ namespace VividRP.Editor.Tests
     public class SkyAmbientProbeConvolutionTests
     {
         [Test]
-        public void TryPopulateProbeFromCoefficients_MapsReadbackLayoutIntoSphericalHarmonics()
+        public void SkyAmbientProbeConvolution_UsesPersistentGpuBufferWithoutAsyncReadback()
         {
-            var coefficients = new float[27];
-            for (var index = 0; index < coefficients.Length; index++)
-                coefficients[index] = index + 0.5f;
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyAmbientProbeConvolution.cs"));
 
-            var converted = SkyAmbientProbeConvolution.TryPopulateProbeFromCoefficients(coefficients, out var probe);
-
-            Assert.That(converted, Is.True);
-            Assert.That(probe[0, 0], Is.EqualTo(0.5f));
-            Assert.That(probe[0, 8], Is.EqualTo(8.5f));
-            Assert.That(probe[1, 0], Is.EqualTo(9.5f));
-            Assert.That(probe[2, 8], Is.EqualTo(26.5f));
+            Assert.That(source, Does.Contain("internal void BindGlobalBuffer(CommandBuffer cmd, bool useDefault = false)"));
+            Assert.That(source, Does.Contain("useDefault || m_AmbientProbeBuffer == null ? m_DefaultAmbientProbeBuffer : m_AmbientProbeBuffer"));
+            Assert.That(source, Does.Not.Contain("RequestAsyncReadback"));
+            Assert.That(source, Does.Not.Contain("AsyncGPUReadbackRequest"));
+            Assert.That(source, Does.Not.Contain("supportsAsyncGPUReadback"));
+            Assert.That(source, Does.Not.Contain("UploadProbe("));
+            Assert.That(source, Does.Not.Contain("RenderSettings.ambientProbe"));
         }
 
         [Test]
@@ -38,15 +36,26 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void AmbientProbeConvolutionCompute_DeclaresKernelAndSkyParameters()
+        public void AmbientProbeConvolutionCompute_DeclaresKernelAndPackedGpuOutputBuffer()
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "AmbientProbeConvolution.compute"));
 
             Assert.That(source, Does.Contain("#pragma kernel AmbientProbeConvolution"));
             Assert.That(source, Does.Contain("TEXTURECUBE(_AmbientProbeInputCubemap);"));
-            Assert.That(source, Does.Contain("RWStructuredBuffer<float> _AmbientProbeOutputBuffer;"));
+            Assert.That(source, Does.Contain("RWStructuredBuffer<float4> _AmbientProbeOutputBuffer;"));
             Assert.That(source, Does.Contain("float4 _SkyConvolutionTint;"));
             Assert.That(source, Does.Contain("float4 _SkyConvolutionParams;"));
+            Assert.That(source, Does.Contain("PackSH(_AmbientProbeOutputBuffer, outputSHCoeffs);"));
+        }
+
+        [Test]
+        public void BakedGI_SamplesPackedAmbientProbeFromStructuredBuffer()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "BakedGI.hlsl"));
+
+            Assert.That(source, Does.Contain("StructuredBuffer<float4> _VividAmbientProbeData;"));
+            Assert.That(source, Does.Contain("float3 VividSampleAmbientProbe(float3 normalWS)"));
+            Assert.That(source, Does.Contain("return SampleSH9(_VividAmbientProbeData, normalizedNormalWS);"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

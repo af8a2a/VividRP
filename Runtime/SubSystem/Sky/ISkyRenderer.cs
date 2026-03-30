@@ -1,4 +1,5 @@
 using System;
+using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
@@ -12,6 +13,6 @@ namespace VividRP.Runtime
 
         void Build(VividRPCoreResources resources);
 
-        void Update(in SkyRendererContext context, VividSkyData skyData);
+        void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd);
     }
 }

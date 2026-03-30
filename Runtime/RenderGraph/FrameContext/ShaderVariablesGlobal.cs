@@ -80,9 +80,11 @@ namespace VividRP.Runtime
             var deltaTime = Mathf.Max(Time.deltaTime, 1e-6f);
             var smoothDeltaTime = Mathf.Max(Time.smoothDeltaTime > 0.0f ? Time.smoothDeltaTime : deltaTime, 1e-6f);
             var previousTime = currentTime - deltaTime;
-            var ambientProbe = skyData != null && skyData.hasDiffuseSH
-                ? skyData.diffuseSH
-                : RenderSettings.ambientProbe;
+            var ambientProbe = skyData == null
+                ? RenderSettings.ambientProbe
+                : skyData.hasDiffuseSH
+                    ? skyData.diffuseSH
+                    : default;
             PackSphericalHarmonics(
                 ambientProbe,
                 out var shAr,

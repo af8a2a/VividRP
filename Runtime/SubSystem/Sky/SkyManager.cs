@@ -20,7 +20,7 @@ namespace VividRP.Runtime
                 return;
 
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            RegisterRenderer(new HDRISkyRenderer(), resources);
+            RegisterRenderer(new HDRISkyRenderer(s_AmbientProbeConvolution), resources);
             RegisterRenderer(new PhysicallyBasedSkyRenderer(), resources);
             s_AmbientProbeConvolution.Build(resources);
             s_CachedSkyData.Reset();
@@ -60,31 +60,32 @@ namespace VividRP.Runtime
 
             var skySettings = VividVolumeManagerUtility.GetSkySettingsVolume();
             var activeSkyType = skySettings?.skyType.value ?? SkyType.HDRI;
-            if (activeSkyType == SkyType.None)
+            var hasActiveSky =
+                s_Renderers.TryGetValue(activeSkyType, out var renderer)
+                && activeSkyType != SkyType.None
+                && renderer != null
+                && renderer.IsActive();
+
+            if (hasActiveSky)
             {
-                s_CachedSkyData.Reset();
-                return;
+                var context = new SkyRendererContext(
+                    frameData.GetOrCreate<VividCameraData>(),
+                    frameData.GetOrCreate<VividLightData>());
+                var skyHash = renderer.GetSkyHash(context);
+
+                if (NeedsUpdate(activeSkyType, skySettings, skyHash))
+                {
+                    s_CachedSkyData.Reset();
+                    renderer.Update(context, s_CachedSkyData, cmd);
+                    s_CachedSkyData.activeSkyType = activeSkyType;
+                    s_CachedSkyData.skyHash = skyHash;
+                    s_LastUpdateTime = Time.realtimeSinceStartup;
+                    s_UpdateRequested = false;
+                }
             }
-
-            if (!s_Renderers.TryGetValue(activeSkyType, out var renderer) || renderer == null || !renderer.IsActive())
+            else
             {
                 s_CachedSkyData.Reset();
-                return;
-            }
-
-            var context = new SkyRendererContext(
-                frameData.GetOrCreate<VividCameraData>(),
-                frameData.GetOrCreate<VividLightData>());
-            var skyHash = renderer.GetSkyHash(context);
-
-            if (NeedsUpdate(activeSkyType, skySettings, skyHash))
-            {
-                s_CachedSkyData.Reset();
-                renderer.Update(context, s_CachedSkyData);
-                s_CachedSkyData.activeSkyType = activeSkyType;
-                s_CachedSkyData.skyHash = skyHash;
-                s_LastUpdateTime = Time.realtimeSinceStartup;
-                s_UpdateRequested = false;
             }
 
             UpdateDiffuseAmbientProbe(cmd, s_CachedSkyData);
@@ -120,46 +121,33 @@ namespace VividRP.Runtime
 
         private static void UpdateDiffuseAmbientProbe(CommandBuffer cmd, VividSkyData skyData)
         {
-            if (skyData == null || skyData.specularCubemap == null)
+            if (skyData != null && skyData.specularCubemap != null)
             {
-                if (skyData != null)
-                {
-                    skyData.hasDiffuseSH = false;
-                    skyData.diffuseSH = default;
-                }
-
-                return;
-            }
-
-            if (s_AmbientProbeConvolution.IsSupported)
-            {
-                s_AmbientProbeConvolution.RequestUpdate(
-                    cmd,
-                    skyData.specularCubemap,
-                    skyData.tint,
-                    skyData.exposure,
-                    skyData.rotation,
-                    skyData.skyHash);
-
-                if (s_AmbientProbeConvolution.TryGetReadyProbe(skyData.skyHash, out var currentProbe)
-                    || s_AmbientProbeConvolution.TryGetLastReadyProbe(out currentProbe))
-                {
-                    skyData.hasDiffuseSH = true;
-                    skyData.diffuseSH = currentProbe;
-                    return;
-                }
-
                 skyData.hasDiffuseSH = false;
                 skyData.diffuseSH = default;
+
+                if (skyData.activeSkyType != SkyType.HDRI && s_AmbientProbeConvolution.IsSupported)
+                {
+                    s_AmbientProbeConvolution.RequestUpdate(
+                        cmd,
+                        skyData.specularCubemap,
+                        skyData.tint,
+                        skyData.exposure,
+                        skyData.rotation,
+                        skyData.skyHash);
+                }
+
+                s_AmbientProbeConvolution.BindGlobalBuffer(cmd);
                 return;
             }
 
-            skyData.hasDiffuseSH = SkyDiffuseSHUtility.TryProjectCubemapToSH(
-                skyData.specularCubemap,
-                skyData.tint,
-                skyData.exposure,
-                skyData.rotation,
-                out skyData.diffuseSH);
+            if (skyData != null)
+            {
+                skyData.hasDiffuseSH = false;
+                skyData.diffuseSH = default;
+            }
+
+            s_AmbientProbeConvolution.BindGlobalBuffer(cmd, true);
         }
     }
 }

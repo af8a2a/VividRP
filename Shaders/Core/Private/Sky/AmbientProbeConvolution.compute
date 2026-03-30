@@ -10,7 +10,7 @@
 #pragma kernel AmbientProbeConvolution
 
 TEXTURECUBE(_AmbientProbeInputCubemap);
-RWStructuredBuffer<float> _AmbientProbeOutputBuffer;
+RWStructuredBuffer<float4> _AmbientProbeOutputBuffer;
 
 float4 _SkyConvolutionTint;
 float4 _SkyConvolutionParams;
@@ -148,7 +148,9 @@ void AmbientProbeConvolution(uint dispatchThreadId : SV_DispatchThreadID)
     [unroll]
     for (uint coeff = 0; coeff < SH_COEFF_COUNT; ++coeff)
     {
-        float encodedSH = outputSHCoeffs[coeff] * kSHBasisCoef[coeff % 9] * weight;
-        _AmbientProbeOutputBuffer[coeff] = encodedSH * kClampedCosineCoefs[coeff % 9] * kSHBasisCoef[coeff % 9];
+        outputSHCoeffs[coeff] *= kSHBasisCoef[coeff % 9] * weight;
+        outputSHCoeffs[coeff] *= kClampedCosineCoefs[coeff % 9] * kSHBasisCoef[coeff % 9];
     }
+
+    PackSH(_AmbientProbeOutputBuffer, outputSHCoeffs);
 }

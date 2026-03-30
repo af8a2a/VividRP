@@ -1,12 +1,12 @@
 #ifndef VIVIDRP_HDRP_LIT_LIGHTING_INCLUDED
 #define VIVIDRP_HDRP_LIT_LIGHTING_INCLUDED
 
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BakedGI.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/PreIntegratedFGD.hlsl"
 
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/AmbientProbe.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/BSDF.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
@@ -308,7 +308,7 @@ float3 EvaluateVividBakedDiffuseLighting(VividGBufferSurfaceData surfaceData)
 {
     return surfaceData.hasBakedGI > 0.5
         ? surfaceData.bakedGI
-        : SampleSH(surfaceData.normalWS);
+        : VividSampleAmbientProbe(surfaceData.normalWS);
 }
 
 float3 EvaluateVividHdrpLitIndirectLight(

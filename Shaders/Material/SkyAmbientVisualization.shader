@@ -18,12 +18,11 @@ Shader "VividRP/Material/SkyAmbientVisualization"
         }
 
         HLSLINCLUDE
-        #pragma target 2.0
+        #pragma target 4.5
         #pragma multi_compile_instancing
 
         #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-        #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/AmbientProbe.hlsl"
-        #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
+        #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BakedGI.hlsl"
 
         CBUFFER_START(UnityPerMaterial)
             float4 _Tint;
@@ -65,7 +64,7 @@ Shader "VividRP/Material/SkyAmbientVisualization"
             UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
             float3 normalWS = SafeNormalize(input.normalWS);
-            float3 ambientLighting = max(SampleSH(normalWS), 0.0);
+            float3 ambientLighting = max(VividSampleAmbientProbe(normalWS), 0.0);
             ambientLighting *= _Tint.rgb * _Intensity;
             ambientLighting = pow(max(ambientLighting, 0.0), rcp(max(_DisplayGamma, 1e-4)));
             return half4(ambientLighting, 1.0);

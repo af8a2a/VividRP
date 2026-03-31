@@ -97,7 +97,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("ResolveCameraPosition(context, volume.planetRadius.value)"));
             Assert.That(source, Does.Contain("ResolveSunDirection(context)"));
             Assert.That(source, Does.Contain("ResolveSunColor(context)"));
-            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_AtmosphereLutCompute, m_SkyCubemapKernel, SkyCubemapOutputId, m_RuntimeSkyCubemap);"));
+            Assert.That(source, Does.Contain("m_RuntimeSkyCubemapFaces"));
+            Assert.That(source, Does.Contain("dimension = TextureDimension.Tex2DArray"));
+            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_AtmosphereLutCompute, m_SkyCubemapKernel, SkyCubemapOutputId, m_RuntimeSkyCubemapFaces);"));
+            Assert.That(source, Does.Contain("cmd.CopyTexture(m_RuntimeSkyCubemapFaces, face, 0, m_RuntimeSkyCubemap, face, 0);"));
             Assert.That(source, Does.Contain("cmd.DispatchCompute("));
             Assert.That(source, Does.Contain("cmd.GenerateMips(m_RuntimeSkyCubemap);"));
             Assert.That(source, Does.Not.Contain("TryProjectCubemapToSH("));

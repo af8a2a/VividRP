@@ -31,6 +31,7 @@ namespace VividRP.Runtime
         private ComputeShader m_AtmosphereLutCompute;
         private int m_SkyCubemapKernel = -1;
         private RenderTexture m_RuntimeSkyCubemap;
+        private RenderTexture m_RuntimeSkyCubemapFaces;
         private int m_RuntimeSkyHash;
 
         public SkyType Type => SkyType.PhysicallyBased;
@@ -92,6 +93,13 @@ namespace VividRP.Runtime
 
         public void Dispose()
         {
+            if (m_RuntimeSkyCubemapFaces != null)
+            {
+                m_RuntimeSkyCubemapFaces.Release();
+                CoreUtils.Destroy(m_RuntimeSkyCubemapFaces);
+                m_RuntimeSkyCubemapFaces = null;
+            }
+
             if (m_RuntimeSkyCubemap != null)
             {
                 m_RuntimeSkyCubemap.Release();
@@ -151,42 +159,64 @@ namespace VividRP.Runtime
 
         private void EnsureRuntimeCubemap()
         {
-            if (m_RuntimeSkyCubemap != null)
+            if (m_RuntimeSkyCubemap == null)
+            {
+                m_RuntimeSkyCubemap = new RenderTexture(CubemapResolution, CubemapResolution, 0)
+                {
+                    name = "VividPhysicallyBasedSky",
+                    hideFlags = HideFlags.HideAndDontSave,
+                    dimension = TextureDimension.Cube,
+                    volumeDepth = 6,
+                    graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat,
+                    useMipMap = true,
+                    autoGenerateMips = false,
+                    filterMode = FilterMode.Trilinear,
+                    wrapMode = TextureWrapMode.Clamp
+                };
+                m_RuntimeSkyCubemap.Create();
+            }
+
+            if (m_RuntimeSkyCubemapFaces != null)
                 return;
 
-            m_RuntimeSkyCubemap = new RenderTexture(CubemapResolution, CubemapResolution, 0)
+            m_RuntimeSkyCubemapFaces = new RenderTexture(CubemapResolution, CubemapResolution, 0)
             {
-                name = "VividPhysicallyBasedSky",
+                name = "VividPhysicallyBasedSkyFaces",
                 hideFlags = HideFlags.HideAndDontSave,
-                dimension = TextureDimension.Cube,
+                dimension = TextureDimension.Tex2DArray,
                 volumeDepth = 6,
                 graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat,
                 enableRandomWrite = true,
-                useMipMap = true,
+                useMipMap = false,
                 autoGenerateMips = false,
-                filterMode = FilterMode.Trilinear,
+                filterMode = FilterMode.Point,
                 wrapMode = TextureWrapMode.Clamp
             };
-            m_RuntimeSkyCubemap.Create();
+            m_RuntimeSkyCubemapFaces.Create();
         }
 
         private void RebuildRuntimeCubemap(PhysicallyBasedSkyVolume volume, in SkyRendererContext context, CommandBuffer cmd)
         {
             if (cmd == null
                 || m_RuntimeSkyCubemap == null
+                || m_RuntimeSkyCubemapFaces == null
                 || !PhysicallyBasedSkyShaderParameterBuilder.TryBuild(volume, context, out var parameters))
             {
                 return;
             }
 
             BindCommonParameters(cmd, parameters);
-            cmd.SetComputeTextureParam(m_AtmosphereLutCompute, m_SkyCubemapKernel, SkyCubemapOutputId, m_RuntimeSkyCubemap);
+            cmd.SetComputeTextureParam(m_AtmosphereLutCompute, m_SkyCubemapKernel, SkyCubemapOutputId, m_RuntimeSkyCubemapFaces);
             cmd.DispatchCompute(
                 m_AtmosphereLutCompute,
                 m_SkyCubemapKernel,
                 CoreUtils.DivRoundUp(CubemapResolution, 8),
                 CoreUtils.DivRoundUp(CubemapResolution, 8),
                 6);
+
+            for (var face = 0; face < 6; face++)
+                cmd.CopyTexture(m_RuntimeSkyCubemapFaces, face, 0, m_RuntimeSkyCubemap, face, 0);
+
             cmd.GenerateMips(m_RuntimeSkyCubemap);
         }
 

@@ -6,7 +6,7 @@ namespace VividRP.Runtime
     internal sealed class SkySpecularCache : System.IDisposable
     {
         private RTHandle m_CachedCubemapHandle;
-        private Cubemap m_CachedSource;
+        private Texture m_CachedSource;
         private Cubemap m_FallbackCubemap;
         private RTHandle m_FallbackCubemapHandle;
         private int m_CachedSkyHash;
@@ -32,7 +32,7 @@ namespace VividRP.Runtime
 
         internal int SkyHash => m_CachedSkyHash;
 
-        internal void Update(Cubemap source, int skyHash)
+        internal void Update(Texture source, int skyHash)
         {
             if (source == null)
             {

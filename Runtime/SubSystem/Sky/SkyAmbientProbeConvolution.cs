@@ -60,7 +60,7 @@ namespace VividRP.Runtime
 
         internal void RequestUpdate(
             CommandBuffer cmd,
-            Cubemap sourceCubemap,
+            Texture sourceCubemap,
             Color tint,
             float exposure,
             float rotation,

@@ -19,7 +19,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_DepthTexture;
 
         private Matrix4x4 m_PixelCoordToViewDirMatrix;
-        private Cubemap m_Cubemap;
+        private Texture m_Cubemap;
         private Color m_Tint = Color.white;
         private float m_Exposure = 1.0f;
         private float m_Rotation;

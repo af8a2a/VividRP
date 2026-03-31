@@ -72,7 +72,7 @@ namespace VividRP.Editor.Tests
 
                 pass.Prepare(frameData);
 
-                Assert.That(GetFieldValue<Cubemap>(pass, "m_Cubemap"), Is.SameAs(cubemap));
+                Assert.That(GetFieldValue<Texture>(pass, "m_Cubemap"), Is.SameAs(cubemap));
                 Assert.That(GetFieldValue<Color>(pass, "m_Tint"), Is.EqualTo(Color.red));
                 Assert.That(GetFieldValue<float>(pass, "m_Exposure"), Is.EqualTo(2.0f));
                 Assert.That(GetFieldValue<float>(pass, "m_Rotation"), Is.EqualTo(45.0f));

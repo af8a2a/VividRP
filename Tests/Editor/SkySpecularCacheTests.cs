@@ -1,6 +1,7 @@
 using System.IO;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using VividRP.Runtime;
 
@@ -55,6 +56,37 @@ namespace VividRP.Editor.Tests
             {
                 cache.Dispose();
                 Object.DestroyImmediate(cubemap);
+            }
+        }
+
+        [Test]
+        public void Update_AllocatesRTHandle_WhenSourceIsRuntimeCubemapTexture()
+        {
+            var cache = new SkySpecularCache();
+            var runtimeCubemap = new RenderTexture(8, 8, 0)
+            {
+                dimension = TextureDimension.Cube,
+                volumeDepth = 6,
+                graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat,
+                useMipMap = true,
+                autoGenerateMips = false,
+                enableRandomWrite = true
+            };
+
+            try
+            {
+                runtimeCubemap.Create();
+                cache.Update(runtimeCubemap, 29);
+
+                Assert.That(cache.IsValid, Is.True);
+                Assert.That(cache.Cubemap, Is.Not.Null);
+                Assert.That(cache.SkyHash, Is.EqualTo(29));
+            }
+            finally
+            {
+                cache.Dispose();
+                runtimeCubemap.Release();
+                Object.DestroyImmediate(runtimeCubemap);
             }
         }
 

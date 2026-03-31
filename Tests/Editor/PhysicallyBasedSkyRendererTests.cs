@@ -80,12 +80,14 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Source_UsesRuntimeCubemapUpdateAndClearsCpuShProjection()
+        public void Source_UsesGpuRuntimeCubemapUpdateAndClearsCpuProjectionLoop()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSkyRenderer.cs"));
 
+            Assert.That(source, Does.Contain("m_AtmosphereLutCompute = resources?.AtmosphereLUTCompute;"));
+            Assert.That(source, Does.Contain("m_SkyCubemapKernel = m_AtmosphereLutCompute != null"));
             Assert.That(source, Does.Contain("EnsureRuntimeCubemap();"));
-            Assert.That(source, Does.Contain("RebuildRuntimeCubemap(volume, context);"));
+            Assert.That(source, Does.Contain("RebuildRuntimeCubemap(volume, context, cmd);"));
             Assert.That(source, Does.Contain("skyData.activeSkyType = SkyType.PhysicallyBased;"));
             Assert.That(source, Does.Contain("skyData.specularCubemap = m_RuntimeSkyCubemap;"));
             Assert.That(source, Does.Contain("skyData.exposure = volume.exposure.value;"));
@@ -95,7 +97,23 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("ResolveCameraPosition(context, volume.planetRadius.value)"));
             Assert.That(source, Does.Contain("ResolveSunDirection(context)"));
             Assert.That(source, Does.Contain("ResolveSunColor(context)"));
+            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_AtmosphereLutCompute, m_SkyCubemapKernel, SkyCubemapOutputId, m_RuntimeSkyCubemap);"));
+            Assert.That(source, Does.Contain("cmd.DispatchCompute("));
+            Assert.That(source, Does.Contain("cmd.GenerateMips(m_RuntimeSkyCubemap);"));
             Assert.That(source, Does.Not.Contain("TryProjectCubemapToSH("));
+            Assert.That(source, Does.Not.Contain("SetPixels("));
+        }
+
+        [Test]
+        public void AtmosphereLutCompute_DeclaresSkyCubemapKernelForRuntimeSky()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AtmosphereLUT.compute"));
+
+            Assert.That(source, Does.Contain("#pragma kernel SkyCubemap"));
+            Assert.That(source, Does.Contain("RWTexture2DArray<float4> _SkyCubemapOutput;"));
+            Assert.That(source, Does.Contain("SkyOpticalDepth ComputeOpticalDepthToSun("));
+            Assert.That(source, Does.Contain("float3 EvaluateSkyCubemap(float3 directionWS)"));
+            Assert.That(source, Does.Contain("void SkyCubemap(uint3 tid : SV_DispatchThreadID)"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

@@ -314,7 +314,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_IsLogBaseBufferEnabled = false;
         }
 
-        internal static Vector4 BuildSkyIblParams(Cubemap skyCubemap, float exposure, float rotation)
+        internal static Vector4 BuildSkyIblParams(Texture skyCubemap, float exposure, float rotation)
         {
             var maxMip = skyCubemap != null ? Mathf.Max(0, skyCubemap.mipmapCount - 1) : 0f;
             var enabled = skyCubemap != null ? 1f : 0f;

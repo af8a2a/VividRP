@@ -30,10 +30,22 @@ namespace VividRP.Runtime
                 return false;
             }
 
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            var skyData = frameData.GetOrCreate<VividSkyData>();
+            var lightData = frameData.GetOrCreate<VividLightData>();
+
+            if (skyData == null || skyData.activeSkyType != SkyType.PhysicallyBased)
+            {
+                parameters = default;
+                return false;
+            }
+
             return TryBuild(
-                frameData.GetOrCreate<VividCameraData>(),
-                frameData.GetOrCreate<VividSkyData>(),
-                frameData.GetOrCreate<VividLightData>(),
+                VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume(),
+                new SkyRendererContext(cameraData, lightData),
+                cameraData?.camera != null
+                    ? cameraData.GetPixelCoordToViewDirWSMatrix()
+                    : Matrix4x4.identity,
                 out parameters);
         }
 
@@ -43,21 +55,45 @@ namespace VividRP.Runtime
             VividLightData lightData,
             out PhysicallyBasedSkyShaderParameters parameters)
         {
-            parameters = default;
-            parameters.pixelCoordToViewDirWS = cameraData?.camera != null
-                ? cameraData.GetPixelCoordToViewDirWSMatrix()
-                : Matrix4x4.identity;
-
-            var volume = VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume();
             if (skyData == null
                 || skyData.activeSkyType != SkyType.PhysicallyBased
-                || volume == null
-                || !volume.IsActive())
+                || VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume() == null)
+            {
+                parameters = default;
+                return false;
+            }
+
+            return TryBuild(
+                VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume(),
+                new SkyRendererContext(cameraData, lightData),
+                cameraData?.camera != null
+                    ? cameraData.GetPixelCoordToViewDirWSMatrix()
+                    : Matrix4x4.identity,
+                out parameters);
+        }
+
+        internal static bool TryBuild(
+            PhysicallyBasedSkyVolume volume,
+            in SkyRendererContext context,
+            out PhysicallyBasedSkyShaderParameters parameters)
+        {
+            return TryBuild(volume, context, Matrix4x4.identity, out parameters);
+        }
+
+        private static bool TryBuild(
+            PhysicallyBasedSkyVolume volume,
+            in SkyRendererContext context,
+            Matrix4x4 pixelCoordToViewDirWS,
+            out PhysicallyBasedSkyShaderParameters parameters)
+        {
+            parameters = default;
+            parameters.pixelCoordToViewDirWS = pixelCoordToViewDirWS;
+
+            if (volume == null || !volume.IsActive())
             {
                 return false;
             }
 
-            var context = new SkyRendererContext(cameraData, lightData);
             var planetRadius = Mathf.Max(volume.planetRadius.value, 1000.0f);
             var atmosphereRadius = Mathf.Max(volume.GetAtmosphereRadius(), planetRadius + 1.0f);
             var cameraPosition = PhysicallyBasedSkyRenderer.ResolveCameraPosition(context, volume.planetRadius.value);

@@ -348,6 +348,60 @@ namespace VividRP.Editor
     }
 
     [CanEditMultipleObjects]
+    [CustomEditor(typeof(AutoExposure))]
+    internal sealed class AutoExposureEditor : VolumeComponentEditor
+    {
+        private SerializedDataParameter m_Enabled;
+        private SerializedDataParameter m_LowPercent;
+        private SerializedDataParameter m_HighPercent;
+        private SerializedDataParameter m_MinBrightness;
+        private SerializedDataParameter m_MaxBrightness;
+        private SerializedDataParameter m_SpeedUp;
+        private SerializedDataParameter m_SpeedDown;
+        private SerializedDataParameter m_ExposureCompensation;
+        private SerializedDataParameter m_HistogramLogMin;
+        private SerializedDataParameter m_HistogramLogMax;
+        private SerializedDataParameter m_MeterMask;
+
+        public override bool hasAdditionalProperties => true;
+
+        public override void OnEnable()
+        {
+            var o = new PropertyFetcher<AutoExposure>(serializedObject);
+            m_Enabled = Unpack(o.Find(x => x.enabled));
+            m_LowPercent = Unpack(o.Find(x => x.lowPercent));
+            m_HighPercent = Unpack(o.Find(x => x.highPercent));
+            m_MinBrightness = Unpack(o.Find(x => x.minBrightness));
+            m_MaxBrightness = Unpack(o.Find(x => x.maxBrightness));
+            m_SpeedUp = Unpack(o.Find(x => x.speedUp));
+            m_SpeedDown = Unpack(o.Find(x => x.speedDown));
+            m_ExposureCompensation = Unpack(o.Find(x => x.exposureCompensation));
+            m_HistogramLogMin = Unpack(o.Find(x => x.histogramLogMin));
+            m_HistogramLogMax = Unpack(o.Find(x => x.histogramLogMax));
+            m_MeterMask = Unpack(o.Find(x => x.meterMask));
+        }
+
+        public override void OnInspectorGUI()
+        {
+            PropertyField(m_Enabled, EditorGUIUtility.TrTextContent("Enable"));
+
+            using (new EditorGUI.DisabledScope(!m_Enabled.value.boolValue))
+            {
+                PropertyField(m_LowPercent);
+                PropertyField(m_HighPercent);
+                PropertyField(m_MinBrightness);
+                PropertyField(m_MaxBrightness);
+                PropertyField(m_SpeedUp);
+                PropertyField(m_SpeedDown);
+                PropertyField(m_ExposureCompensation);
+                PropertyField(m_HistogramLogMin);
+                PropertyField(m_HistogramLogMax);
+                PropertyField(m_MeterMask, EditorGUIUtility.TrTextContent("Meter Mask"));
+            }
+        }
+    }
+
+    [CanEditMultipleObjects]
     [CustomEditor(typeof(ChannelMixer))]
     internal sealed class ChannelMixerEditor : VolumeComponentEditor
     {

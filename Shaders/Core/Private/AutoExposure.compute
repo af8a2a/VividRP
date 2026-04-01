@@ -1,0 +1,162 @@
+#pragma kernel ClearHistogram
+#pragma kernel BuildHistogram
+#pragma kernel ResolveExposure
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+
+#define HISTOGRAM_SIZE 64
+#define HISTOGRAM_THREAD_GROUP_SIZE_X 8
+#define HISTOGRAM_THREAD_GROUP_SIZE_Y 8
+#define HISTOGRAM_WEIGHT_SCALE 64
+
+Texture2D<float4> _InputColor;
+Texture2D<float4> _AutoExposureMeterMask;
+SamplerState sampler_AutoExposureMeterMask;
+
+StructuredBuffer<float4> _PreviousExposureBuffer;
+RWStructuredBuffer<uint> _HistogramBuffer;
+RWStructuredBuffer<float4> _CurrentExposureBuffer;
+
+float4 _AutoExposureParams0;
+float4 _AutoExposureParams1;
+float4 _AutoExposureParams2;
+float4 _AutoExposureParams3;
+float4 _AutoExposureScreenSize;
+
+static const float3 kLuminanceWeights = float3(0.2126, 0.7152, 0.0722);
+static const float kMiddleGrey = 0.18f;
+static const float kEpsilon = 1e-4f;
+
+float GetHistogramPositionFromLogLuminance(float logLuminance)
+{
+    return logLuminance * _AutoExposureParams2.x + _AutoExposureParams2.y;
+}
+
+float GetLogLuminanceFromHistogramPosition(float histogramPosition)
+{
+    return (histogramPosition - _AutoExposureParams2.y) / max(_AutoExposureParams2.x, kEpsilon);
+}
+
+float ExponentialAdaption(float current, float target, float frameTime, float adaptationSpeed, float slopeModifier)
+{
+    const float factor = 1.0f - exp2(-frameTime * adaptationSpeed);
+    return current + (target - current) * factor * slopeModifier;
+}
+
+float LinearAdaption(float current, float target, float frameTime, float adaptationSpeed)
+{
+    const float offset = frameTime * adaptationSpeed;
+    return current < target ? min(target, current + offset) : max(target, current - offset);
+}
+
+float ComputeAdaptedExposure(float oldExposure, float targetExposure)
+{
+    const float logTargetExposure = log2(max(targetExposure, kEpsilon));
+    const float logOldExposure = log2(max(oldExposure, kEpsilon));
+    const float logDiff = logTargetExposure - logOldExposure;
+
+    const float adaptationSpeed = logDiff > 0.0f ? _AutoExposureParams1.x : _AutoExposureParams1.y;
+    const float slopeModifier = logDiff > 0.0f ? _AutoExposureParams3.x : _AutoExposureParams3.y;
+    const float absLogDiff = abs(logDiff);
+
+    const float exponential = ExponentialAdaption(logOldExposure, logTargetExposure, _AutoExposureParams1.w, adaptationSpeed, slopeModifier);
+    const float Linear = LinearAdaption(logOldExposure, logTargetExposure, _AutoExposureParams1.w, adaptationSpeed);
+    const float adaptedLogExposure = absLogDiff > _AutoExposureParams3.z ? Linear : exponential;
+    const float adaptedExposure = exp2(adaptedLogExposure);
+
+    return lerp(adaptedExposure, targetExposure, _AutoExposureParams2.w);
+}
+
+[numthreads(HISTOGRAM_SIZE, 1, 1)]
+void ClearHistogram(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x >= HISTOGRAM_SIZE)
+        return;
+
+    _HistogramBuffer[dispatchThreadId.x] = 0;
+}
+
+[numthreads(HISTOGRAM_THREAD_GROUP_SIZE_X, HISTOGRAM_THREAD_GROUP_SIZE_Y, 1)]
+void BuildHistogram(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    const uint width = (uint)_AutoExposureScreenSize.x;
+    const uint height = (uint)_AutoExposureScreenSize.y;
+    if (dispatchThreadId.x >= width || dispatchThreadId.y >= height)
+        return;
+
+    const float3 color = _InputColor.Load(int3(dispatchThreadId.xy, 0)).rgb;
+    const float luminance = max(dot(color, kLuminanceWeights), _AutoExposureParams2.z);
+    const float logLuminance = log2(luminance);
+    const float histogramPosition = saturate(GetHistogramPositionFromLogLuminance(logLuminance));
+    const uint bucket = min((uint)(histogramPosition * (HISTOGRAM_SIZE - 1) + 0.5f), (uint)(HISTOGRAM_SIZE - 1));
+
+    const float2 uv = (dispatchThreadId.xy + 0.5f) * _AutoExposureScreenSize.zw;
+    const float meterMask = saturate(_AutoExposureMeterMask.SampleLevel(sampler_AutoExposureMeterMask, uv, 0).r);
+    const uint weight = (uint)round(meterMask * HISTOGRAM_WEIGHT_SCALE);
+
+    if (weight > 0)
+        InterlockedAdd(_HistogramBuffer[bucket], weight);
+}
+
+[numthreads(1, 1, 1)]
+void ResolveExposure(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    float histogramSum = 0.0f;
+
+    [unroll]
+    for (uint bucketIndex = 0; bucketIndex < HISTOGRAM_SIZE; ++bucketIndex)
+        histogramSum += (float)_HistogramBuffer[bucketIndex];
+
+    if (histogramSum <= kEpsilon)
+    {
+        _CurrentExposureBuffer[0] = _PreviousExposureBuffer[0];
+        return;
+    }
+
+    float minFractionSum = histogramSum * _AutoExposureParams0.x;
+    float maxFractionSum = histogramSum * _AutoExposureParams0.y;
+    float2 sumWithoutOutliers = 0.0f;
+
+    [unroll]
+    for (uint bucketIndex = 0; bucketIndex < HISTOGRAM_SIZE; ++bucketIndex)
+    {
+        float localValue = (float)_HistogramBuffer[bucketIndex];
+
+        const float subtractedLow = min(localValue, minFractionSum);
+        localValue -= subtractedLow;
+        minFractionSum -= subtractedLow;
+        maxFractionSum -= subtractedLow;
+
+        localValue = min(localValue, maxFractionSum);
+        maxFractionSum -= localValue;
+
+        const float logLuminanceAtBucket = GetLogLuminanceFromHistogramPosition((float)bucketIndex / (float)(HISTOGRAM_SIZE - 1));
+        sumWithoutOutliers += float2(logLuminanceAtBucket, 1.0f) * localValue;
+    }
+
+    const float averageLogLuminance = sumWithoutOutliers.x / max(sumWithoutOutliers.y, kEpsilon);
+    const float averageSceneLuminance = exp2(averageLogLuminance);
+    const float targetAverageLuminance = clamp(
+        averageSceneLuminance,
+        _AutoExposureParams0.z,
+        _AutoExposureParams0.w);
+
+    const float targetExposure = targetAverageLuminance / kMiddleGrey;
+    const float middleGreyExposureCompensation = _AutoExposureParams1.z;
+    const float oldExposureScale = _PreviousExposureBuffer[0].x;
+    const float oldExposure = middleGreyExposureCompensation / max(oldExposureScale, kEpsilon);
+    const float estimatedExposure = ComputeAdaptedExposure(oldExposure, targetExposure);
+    const float smoothedExposure = clamp(
+        estimatedExposure,
+        _AutoExposureParams0.z / kMiddleGrey,
+        _AutoExposureParams0.w / kMiddleGrey);
+
+    const float smoothedExposureScale = middleGreyExposureCompensation / max(smoothedExposure, kEpsilon);
+    const float targetExposureScale = middleGreyExposureCompensation / max(targetExposure, kEpsilon);
+
+    _CurrentExposureBuffer[0] = float4(
+        smoothedExposureScale,
+        targetExposureScale,
+        averageSceneLuminance,
+        middleGreyExposureCompensation);
+}

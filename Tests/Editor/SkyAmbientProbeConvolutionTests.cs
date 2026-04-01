@@ -41,11 +41,16 @@ namespace VividRP.Editor.Tests
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "AmbientProbeConvolution.compute"));
 
             Assert.That(source, Does.Contain("#pragma kernel AmbientProbeConvolution"));
+            Assert.That(source, Does.Contain("#pragma kernel SkySpecularPrefilter"));
             Assert.That(source, Does.Contain("TEXTURECUBE(_AmbientProbeInputCubemap);"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<float4> _AmbientProbeOutputBuffer;"));
+            Assert.That(source, Does.Contain("TEXTURECUBE(_SkySpecularSourceCubemap);"));
+            Assert.That(source, Does.Contain("RWTexture2DArray<float4> _SkySpecularMipOutput;"));
             Assert.That(source, Does.Contain("float4 _SkyConvolutionTint;"));
             Assert.That(source, Does.Contain("float4 _SkyConvolutionParams;"));
             Assert.That(source, Does.Contain("PackSH(_AmbientProbeOutputBuffer, outputSHCoeffs);"));
+            Assert.That(source, Does.Contain("float3 IntegrateSkySpecularGGX"));
+            Assert.That(source, Does.Contain("void SkySpecularPrefilter(uint3 tid : SV_DispatchThreadID)"));
         }
 
         [Test]

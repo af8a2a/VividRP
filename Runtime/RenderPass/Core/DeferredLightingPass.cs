@@ -316,9 +316,17 @@ namespace VividRP.Runtime.RenderPass.Core
 
         internal static Vector4 BuildSkyIblParams(Texture skyCubemap, float exposure, float rotation)
         {
-            var maxMip = skyCubemap != null ? Mathf.Max(0, skyCubemap.mipmapCount - 1) : 0f;
-            var enabled = skyCubemap != null ? 1f : 0f;
-            return new Vector4(Mathf.Max(0f, exposure), -rotation, maxMip, enabled);
+            var maxMip = skyCubemap != null ? Mathf.Max(0, skyCubemap.mipmapCount - 1) : 0;
+            return BuildSkyIblParams(maxMip, exposure, rotation, skyCubemap != null);
+        }
+
+        internal static Vector4 BuildSkyIblParams(int maxMip, float exposure, float rotation, bool enabled)
+        {
+            return new Vector4(
+                Mathf.Max(0f, exposure),
+                -rotation,
+                Mathf.Max(0, maxMip),
+                enabled ? 1f : 0f);
         }
 
         private void BindSharedParameters(UnsafeCommandBuffer cmd, int kernel)
@@ -595,14 +603,14 @@ namespace VividRP.Runtime.RenderPass.Core
         private void PrepareSkyIblState(VividSkyData skyData)
         {
             var hasActiveSky = skyData != null && skyData.activeSkyType != SkyType.None;
-            var skyCubemap = hasActiveSky ? skyData.specularCubemap : null;
+            var skyMaxMip = hasActiveSky ? SkyManager.GetSpecularCubemapMaxMip(skyData) : 0;
 
             SkyManager.ImportSpecularCubemap(m_SkyIBLCubemap, skyData);
 
             m_SkyIBLTint = hasActiveSky ? skyData.tint : Color.white;
             var skyExposure = hasActiveSky ? skyData.exposure : 1.0f;
             var skyRotation = hasActiveSky ? skyData.rotation : 0.0f;
-            m_SkyIBLParams = BuildSkyIblParams(skyCubemap, skyExposure, skyRotation);
+            m_SkyIBLParams = BuildSkyIblParams(skyMaxMip, skyExposure, skyRotation, hasActiveSky);
         }
     }
 }

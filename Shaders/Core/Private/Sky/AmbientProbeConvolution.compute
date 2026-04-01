@@ -3,17 +3,22 @@
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GlobalSamplers.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/SphericalHarmonics.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Hammersley.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Sampling.hlsl"
 #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 #pragma kernel AmbientProbeConvolution
+#pragma kernel SkySpecularPrefilter
 
 TEXTURECUBE(_AmbientProbeInputCubemap);
 RWStructuredBuffer<float4> _AmbientProbeOutputBuffer;
+TEXTURECUBE(_SkySpecularSourceCubemap);
+RWTexture2DArray<float4> _SkySpecularMipOutput;
 
 float4 _SkyConvolutionTint;
 float4 _SkyConvolutionParams;
+float4 _SkySpecularMipParams;
 
 #define _SkyExposure _SkyConvolutionParams.x
 #define _SkyRotation _SkyConvolutionParams.y
@@ -38,6 +43,86 @@ float3 RotateAroundYAxis(float3 directionWS, float rotationDegrees)
         c * directionWS.x - s * directionWS.z,
         directionWS.y,
         s * directionWS.x + c * directionWS.z);
+}
+
+float3 GetCubemapDirection(uint faceIndex, float2 uv)
+{
+    float u = uv.x * 2.0f - 1.0f;
+    float v = uv.y * 2.0f - 1.0f;
+
+    float3 directionWS = float3(0.0f, 0.0f, 1.0f);
+    switch (faceIndex)
+    {
+        case 0:
+            directionWS = float3(1.0f, -v, -u);
+            break;
+        case 1:
+            directionWS = float3(-1.0f, -v, u);
+            break;
+        case 2:
+            directionWS = float3(u, 1.0f, v);
+            break;
+        case 3:
+            directionWS = float3(u, -1.0f, -v);
+            break;
+        case 4:
+            directionWS = float3(u, -v, 1.0f);
+            break;
+        case 5:
+            directionWS = float3(-u, -v, -1.0f);
+            break;
+    }
+
+    return normalize(directionWS);
+}
+
+float3 IntegrateSkySpecularGGX(float3 normalWS, uint mipLevel, uint maxMipLevel)
+{
+    if (mipLevel == 0)
+        return SAMPLE_TEXTURECUBE_LOD(_SkySpecularSourceCubemap, sampler_LinearClamp, normalWS, 0.0f).rgb;
+
+    float sourceWidth;
+    float sourceHeight;
+    _SkySpecularSourceCubemap.GetDimensions(sourceWidth, sourceHeight);
+    real invOmegaP = (6.0 * sourceWidth * sourceHeight) / FOUR_PI;
+    real scaledMipLevel = maxMipLevel > 0 ? ((real)mipLevel * UNITY_SPECCUBE_LOD_STEPS) / (real)maxMipLevel : 0.0;
+    real perceptualRoughness = MipmapLevelToPerceptualRoughness(scaledMipLevel);
+    real roughness = PerceptualRoughnessToRoughness(perceptualRoughness);
+    uint runtimeFilterMip = (uint)clamp(ceil(scaledMipLevel), 1.0, (real)UNITY_SPECCUBE_LOD_STEPS);
+    uint sampleCount = max(GetIBLRuntimeFilterSampleCount(runtimeFilterMip), 1u);
+
+    real3x3 localToWorld = GetLocalFrame(normalWS);
+    real3 viewDirectionWS = normalWS;
+    real NdotV = 1.0;
+    real partLambdaV = GetSmithJointGGXPartLambdaV(NdotV, roughness);
+    float3 accumulatedLighting = 0.0;
+    float accumulatedWeight = 0.0;
+
+    for (uint sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex)
+    {
+        real2 sampleUv = Fibonacci2d(sampleIndex, sampleCount);
+        real3 lightDirectionWS;
+        real NdotL;
+        real NdotH;
+        real VdotH;
+        SampleGGXDir(sampleUv, viewDirectionWS, localToWorld, roughness, lightDirectionWS, NdotL, NdotH, VdotH, true);
+
+        if (NdotL <= 0.0)
+            continue;
+
+        real pdf = max(0.25 * D_GGX(NdotH, roughness), REAL_EPS);
+        real omegaS = rcp(sampleCount) * rcp(pdf);
+        real sampleMipLevel = 0.5 * log2(max(omegaS * invOmegaP, REAL_EPS)) + roughness;
+        real3 sampleValue = SAMPLE_TEXTURECUBE_LOD(_SkySpecularSourceCubemap, sampler_LinearClamp, lightDirectionWS, sampleMipLevel).rgb;
+        real visibility = V_SmithJointGGX(NdotL, NdotV, roughness, partLambdaV) * NdotL * NdotV;
+
+        accumulatedLighting += visibility * sampleValue;
+        accumulatedWeight += visibility;
+    }
+
+    return accumulatedWeight > REAL_EPS
+        ? accumulatedLighting / accumulatedWeight
+        : SAMPLE_TEXTURECUBE_LOD(_SkySpecularSourceCubemap, sampler_LinearClamp, normalWS, 0.0f).rgb;
 }
 
 [numthreads(SAMPLE_COUNT, 1, 1)]
@@ -153,4 +238,21 @@ void AmbientProbeConvolution(uint dispatchThreadId : SV_DispatchThreadID)
     }
 
     PackSH(_AmbientProbeOutputBuffer, outputSHCoeffs);
+}
+
+[numthreads(8, 8, 1)]
+void SkySpecularPrefilter(uint3 tid : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    uint elements;
+    _SkySpecularMipOutput.GetDimensions(width, height, elements);
+    if (tid.x >= width || tid.y >= height || tid.z >= min(elements, 6u))
+        return;
+
+    uint mipLevel = (uint)_SkySpecularMipParams.x;
+    uint maxMipLevel = max((uint)_SkySpecularMipParams.y, 1u);
+    float2 uv = (tid.xy + 0.5f) / float2(width, height);
+    float3 directionWS = GetCubemapDirection(tid.z, uv);
+    _SkySpecularMipOutput[tid] = float4(IntegrateSkySpecularGGX(directionWS, mipLevel, maxMipLevel), 1.0f);
 }

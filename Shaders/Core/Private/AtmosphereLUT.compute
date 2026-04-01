@@ -330,19 +330,6 @@ float3 EvaluateSkyView(float3 directionWS)
         skyColor += _SkyGroundTint.rgb * groundLightingFactor * groundTransmittance;
     }
 
-    if (_SkyPlanetParams.w > 0.5f)
-    {
-        float sunAngularRadius = _SkyOzoneParams.z;
-        float sunCosThreshold = cos(sunAngularRadius);
-        float sunDot = clamp(dot(normalizedDirection, sunDirection), -1.0f, 1.0f);
-        float sunEdge = saturate((sunDot - (sunCosThreshold - 0.0025f)) / 0.0025f);
-        if (sunEdge > 0.0f)
-        {
-            float3 sunDiskTransmittance = SampleTransmittanceLut(cameraHeight, sunAtCamera, planetRadius, atmosphereRadius);
-            skyColor += _SkySunColor.rgb * sunDiskTransmittance * smoothstep(0.0f, 1.0f, sunEdge) * 2.0f;
-        }
-    }
-
     return SanitizeSkyRadiance(skyColor * max(_SkyPlanetParams.z, 0.0f));
 }
 

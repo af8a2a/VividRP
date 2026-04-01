@@ -143,7 +143,7 @@ namespace VividRP.Editor.Tests
                     BoundProxyClusterProjectionUtility.CreateParameters(camera, 320, 180, 32, 24, 64);
                 BoundProxyWorldData worldData = BoundProxyUtility.CreateWorldData(
                     null,
-                    BoundProxyFeature.DdgiVolume,
+                    BoundProxyFeature.DDGIVolume,
                     new BoundProxyShape
                     {
                         shape = BoundProxyShapeType.Sphere,

@@ -36,7 +36,7 @@ namespace VividRP.Editor.Tests
             {
                 using var tracker = new BoundProxySceneTracker<TestBoundProxyProvider>();
                 var provider = providerObject.AddComponent<TestBoundProxyProvider>();
-                provider.SetFeature(BoundProxyFeature.DdgiVolume);
+                provider.SetFeature(BoundProxyFeature.DDGIVolume);
                 provider.SetShape(new BoundProxyShape
                 {
                     shape = BoundProxyShapeType.Sphere,
@@ -52,7 +52,7 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(tracker.TrackedProviderCount, Is.EqualTo(1));
                 Assert.That(results.Count, Is.EqualTo(1));
-                Assert.That(results[0].feature, Is.EqualTo(BoundProxyFeature.DdgiVolume));
+                Assert.That(results[0].feature, Is.EqualTo(BoundProxyFeature.DDGIVolume));
                 Assert.That(results[0].entityId, Is.EqualTo(provider.transform.GetEntityId()));
                 Assert.That(tracker.TryGetWorldData(provider.transform.GetEntityId(), out BoundProxyWorldData worldData), Is.True);
                 Assert.That(worldData.sphereRadius, Is.EqualTo(2.0f));

@@ -4,6 +4,6 @@ namespace VividRP.Runtime
     {
         Decal,
         LocalVolumetricFog,
-        DdgiVolume,
+        DDGIVolume,
     }
 }

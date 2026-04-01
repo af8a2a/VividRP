@@ -8,6 +8,7 @@ namespace VividRP.Editor
     internal static class BoundProxyEditorUtility
     {
         private static readonly Color GizmoColor = new(0.23f, 0.73f, 0.67f, 0.08f);
+        private static readonly Color CenterHandleColor = new(0.98f, 0.92f, 0.44f, 1.0f);
         private static readonly Color[] BoxHandleColors =
         {
             new Color(0.95f, 0.48f, 0.34f, 1.0f),
@@ -103,7 +104,7 @@ namespace VividRP.Editor
             SerializedBoundProxyShape serializedShape,
             Transform ownerTransform,
             string undoLabel = "Edit Bound Proxy",
-            bool allowCenterHandle = true)
+            bool allowCenterHandle = false)
         {
             if (serializedObject == null || serializedShape == null || ownerTransform == null)
             {
@@ -122,11 +123,19 @@ namespace VividRP.Editor
                 if (allowCenterHandle)
                 {
                     EditorGUI.BeginChangeCheck();
-                    Vector3 movedCenter = Handles.PositionHandle(newCenter, Quaternion.identity);
-                    if (EditorGUI.EndChangeCheck())
+                    float handleSize = HandleUtility.GetHandleSize(newCenter) * 0.08f;
+                    using (new Handles.DrawingScope(CenterHandleColor))
                     {
-                        newCenter = movedCenter;
-                        hasChanges = true;
+                        Vector3 movedCenter = Handles.FreeMoveHandle(
+                            newCenter,
+                            handleSize,
+                            Vector3.zero,
+                            Handles.DotHandleCap);
+                        if (EditorGUI.EndChangeCheck())
+                        {
+                            newCenter = movedCenter;
+                            hasChanges = true;
+                        }
                     }
                 }
 
@@ -134,6 +143,8 @@ namespace VividRP.Editor
                 {
                     ShapeSphere.center = newCenter;
                     ShapeSphere.radius = newRadius;
+                    ShapeSphere.baseColor = GizmoColor;
+                    ShapeSphere.DrawHull(true);
 
                     EditorGUI.BeginChangeCheck();
                     ShapeSphere.DrawHandle();
@@ -148,6 +159,8 @@ namespace VividRP.Editor
                 {
                     ShapeBox.center = newCenter;
                     ShapeBox.size = newSize;
+                    ShapeBox.SetBaseColor(GizmoColor);
+                    ShapeBox.DrawHull(true);
                     ShapeBox.monoHandle = false;
 
                     EditorGUI.BeginChangeCheck();

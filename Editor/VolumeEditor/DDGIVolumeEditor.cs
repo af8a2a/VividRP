@@ -50,7 +50,7 @@ namespace VividRP.Editor
 
         private void OnSceneGUI()
         {
-            if (target is not DDGIVolume ddgiVolume || m_SerializedBoundProxy == null)
+            if (target is not DDGIVolume ddgiVolume)
             {
                 return;
             }
@@ -65,13 +65,20 @@ namespace VividRP.Editor
                     applyOwnerRotation: false);
             }
 
-            BoundProxyEditorUtility.DrawSceneHandles(
-                serializedObject,
-                m_SerializedBoundProxy,
-                ddgiVolume.transform,
-                "Edit DDGI Volume Bound Proxy",
-                allowCenterHandle: false,
-                applyOwnerRotation: false);
+            if (!BoundProxyEditorUtility.TryDrawSceneHandles(
+                    ddgiVolume.BoundProxyShape,
+                    ddgiVolume.transform,
+                    out BoundProxyShape updatedShape,
+                    allowCenterHandle: false,
+                    applyOwnerRotation: false))
+            {
+                return;
+            }
+
+            Undo.RecordObject(ddgiVolume, "Edit DDGI Volume Bound Proxy");
+            ddgiVolume.SetBoundProxyShape(updatedShape);
+            PrefabUtility.RecordPrefabInstancePropertyModifications(ddgiVolume);
+            EditorUtility.SetDirty(ddgiVolume);
         }
 
         [DrawGizmo(GizmoType.Selected | GizmoType.NonSelected | GizmoType.InSelectionHierarchy | GizmoType.Pickable)]

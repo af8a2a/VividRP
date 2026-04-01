@@ -51,6 +51,13 @@ namespace VividRP.Runtime
             m_BoundProxy = CreateDefaultBoundProxy();
         }
 
+        internal void SetBoundProxyShape(BoundProxyShape shape)
+        {
+            shape.Sanitize();
+            shape.center = Vector3.zero;
+            m_BoundProxy = shape;
+        }
+
         private void OnValidate()
         {
             m_BoundProxy.Sanitize();

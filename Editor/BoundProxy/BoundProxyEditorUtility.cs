@@ -125,6 +125,38 @@ namespace VividRP.Editor
 
             serializedObject.Update();
             BoundProxyShape currentShape = GetShapeValue(serializedShape);
+            if (!TryDrawSceneHandles(
+                    currentShape,
+                    ownerTransform,
+                    out BoundProxyShape updatedShape,
+                    allowCenterHandle,
+                    applyOwnerRotation))
+            {
+                return;
+            }
+
+            serializedObject.Update();
+            Undo.RecordObjects(serializedObject.targetObjects, undoLabel);
+            serializedShape.center.vector3Value = updatedShape.center;
+            serializedShape.size.vector3Value = updatedShape.size;
+            serializedShape.radius.floatValue = updatedShape.radius;
+            serializedObject.ApplyModifiedProperties();
+        }
+
+        internal static bool TryDrawSceneHandles(
+            BoundProxyShape currentShape,
+            Transform ownerTransform,
+            out BoundProxyShape updatedShape,
+            bool allowCenterHandle = false,
+            bool applyOwnerRotation = true)
+        {
+            updatedShape = currentShape;
+            if (ownerTransform == null)
+            {
+                return false;
+            }
+
+            currentShape.Sanitize();
             Vector3 newCenter = currentShape.center;
             Vector3 newSize = currentShape.GetSanitizedSize();
             float newRadius = currentShape.GetSanitizedRadius();
@@ -163,7 +195,11 @@ namespace VividRP.Editor
                     ShapeSphere.DrawHandle();
                     if (EditorGUI.EndChangeCheck())
                     {
-                        newCenter = ShapeSphere.center;
+                        if (allowCenterHandle)
+                        {
+                            newCenter = ShapeSphere.center;
+                        }
+
                         newRadius = Mathf.Max(ShapeSphere.radius, 0.0f);
                         hasChanges = true;
                     }
@@ -180,7 +216,11 @@ namespace VividRP.Editor
                     ShapeBox.DrawHandle();
                     if (EditorGUI.EndChangeCheck())
                     {
-                        newCenter = ShapeBox.center;
+                        if (allowCenterHandle)
+                        {
+                            newCenter = ShapeBox.center;
+                        }
+
                         newSize = SanitizeSize(ShapeBox.size);
                         hasChanges = true;
                     }
@@ -189,14 +229,18 @@ namespace VividRP.Editor
 
             if (!hasChanges)
             {
-                return;
+                return false;
             }
 
-            Undo.RecordObjects(serializedObject.targetObjects, undoLabel);
-            serializedShape.center.vector3Value = newCenter;
-            serializedShape.size.vector3Value = newSize;
-            serializedShape.radius.floatValue = newRadius;
-            serializedObject.ApplyModifiedProperties();
+            updatedShape = new BoundProxyShape
+            {
+                shape = currentShape.shape,
+                center = newCenter,
+                size = newSize,
+                radius = newRadius,
+            };
+            updatedShape.Sanitize();
+            return true;
         }
 
         private static BoundProxyShapeType GetShapeType(SerializedBoundProxyShape serializedShape)

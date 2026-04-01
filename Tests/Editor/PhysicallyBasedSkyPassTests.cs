@@ -104,6 +104,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("VIEW_SAMPLE_COUNT = 12"));
             Assert.That(source, Does.Contain("LIGHT_SAMPLE_COUNT = 6"));
             Assert.That(source, Does.Contain("GetSkyViewDirWS"));
+            Assert.That(source, Does.Contain("float3 SanitizeSkyRadiance(float3 color)"));
             Assert.That(source, Does.Contain("EvaluateSky"));
             Assert.That(source, Does.Contain("_SkyUseLUT > 0.5f"));
         }

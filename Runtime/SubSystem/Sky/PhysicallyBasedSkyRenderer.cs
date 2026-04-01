@@ -85,7 +85,7 @@ namespace VividRP.Runtime
             skyData.activeSkyType = SkyType.PhysicallyBased;
             skyData.specularCubemap = m_RuntimeSkyCubemap;
             skyData.tint = Color.white;
-            skyData.exposure = volume.exposure.value;
+            skyData.exposure = volume.GetPostExposureMultiplier();
             skyData.rotation = 0.0f;
             skyData.hasDiffuseSH = false;
             skyData.diffuseSH = default;

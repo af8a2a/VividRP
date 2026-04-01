@@ -26,6 +26,7 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
             static const int VIEW_SAMPLE_COUNT = 12;
             static const int LIGHT_SAMPLE_COUNT = 6;
             static const float BLOCKED_OPTICAL_DEPTH = 100000.0f;
+            static const float MAX_SKY_RADIANCE = 60000.0f;
 
             float4x4 _PixelCoordToViewDirWS;
             TEXTURE2D(_SkyViewLUT);
@@ -130,6 +131,14 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
                 float3 opticalDepthOzone)
             {
                 return exp(-(airExtinction * opticalDepthAir + aerosolExtinction * opticalDepthAerosol + opticalDepthOzone));
+            }
+
+            float3 SanitizeSkyRadiance(float3 color)
+            {
+                if (any(isnan(color)) || any(isinf(color)))
+                    return 0.0f;
+
+                return clamp(max(color, 0.0f), 0.0f, MAX_SKY_RADIANCE);
             }
 
             void ComputeOpticalDepthToSun(
@@ -317,7 +326,7 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
                     }
                 }
 
-                return max(skyColor * max(_SkyPlanetParams.z, 0.0f), 0.0f);
+                return SanitizeSkyRadiance(skyColor * max(_SkyPlanetParams.z, 0.0f));
             }
 
             float4 Frag(Varyings input) : SV_Target

@@ -22,6 +22,8 @@ namespace VividRP.Runtime
 
     internal static class PhysicallyBasedSkyShaderParameterBuilder
     {
+        private const float MaxSkyRadiance = 60000.0f;
+
         internal static bool TryBuild(ContextContainer frameData, out PhysicallyBasedSkyShaderParameters parameters)
         {
             if (frameData == null)
@@ -106,14 +108,19 @@ namespace VividRP.Runtime
                                    * 0.5f;
             var aerosolScattering = volume.GetAerosolScatteringCoefficient();
             var ozoneExtinction = volume.GetOzoneExtinctionCoefficient();
+            // Push exposure reductions into the source radiance so very bright sun values do not overflow the sky integration path.
+            var preExposure = volume.GetPreExposureMultiplier();
+            var postExposure = volume.GetPostExposureMultiplier();
+            var exposedSunColor = ClampRadiance(ToVector3(sunColor.linear) * (PhysicallyBasedSkyRenderer.SunIlluminanceScale * preExposure));
+            var exposedGroundTint = ClampRadiance(ToVector3(volume.groundTint.value.linear) * preExposure);
 
             parameters.skyCameraPositionPS = new Vector4(cameraPosition.x, cameraPosition.y, cameraPosition.z, 1.0f);
             parameters.skySunDirection = new Vector4(sunDirection.x, sunDirection.y, sunDirection.z, 0.0f);
-            parameters.skySunColor = ToVector4(sunColor.linear * PhysicallyBasedSkyRenderer.SunIlluminanceScale);
+            parameters.skySunColor = ToVector4(exposedSunColor);
             parameters.skyPlanetParams = new Vector4(
                 planetRadius,
                 atmosphereRadius,
-                Mathf.Max(volume.exposure.value, 0.0f),
+                postExposure,
                 volume.renderSunDisk.value ? 1.0f : 0.0f);
             parameters.skyAirScattering = ToVector4(volume.GetAirScatteringCoefficient());
             parameters.skyAirExtinction = ToVector4(volume.GetAirExtinctionCoefficient());
@@ -137,13 +144,26 @@ namespace VividRP.Runtime
                 volume.GetAirScaleHeight(),
                 sunAngularRadius,
                 volume.GetAerosolScaleHeight());
-            parameters.skyGroundTint = ToVector4(volume.groundTint.value.linear);
+            parameters.skyGroundTint = ToVector4(exposedGroundTint);
             parameters.skyFogParams = new Vector4(
                 volume.IsHeightFogActive() ? 1.0f : 0.0f,
                 volume.fogBaseHeight.value,
                 Mathf.Max(volume.fogDensity.value, 0.0f),
                 Mathf.Max(volume.fogMaxDistance.value, 0.0f));
             return true;
+        }
+
+        private static Vector3 ClampRadiance(Vector3 value)
+        {
+            return new Vector3(
+                Mathf.Clamp(value.x, 0.0f, MaxSkyRadiance),
+                Mathf.Clamp(value.y, 0.0f, MaxSkyRadiance),
+                Mathf.Clamp(value.z, 0.0f, MaxSkyRadiance));
+        }
+
+        private static Vector3 ToVector3(Color value)
+        {
+            return new Vector3(value.r, value.g, value.b);
         }
 
         private static Vector4 ToVector4(Vector3 value)

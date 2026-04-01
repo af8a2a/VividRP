@@ -9,6 +9,7 @@
 static const int TRANSMITTANCE_SAMPLE_COUNT = 16;
 static const int SKY_VIEW_SAMPLE_COUNT = 12;
 static const int SKY_CUBEMAP_LIGHT_SAMPLE_COUNT = 6;
+static const float MAX_SKY_RADIANCE = 60000.0f;
 
 float4 _SkyCameraPositionPS;
 float4 _SkySunDirection;
@@ -77,6 +78,14 @@ float EvaluateOzoneDensity(float height, float minimumAltitude, float layerWidth
 float3 EvaluateTransmittance(float3 airExtinction, float3 aerosolExtinction, float opticalDepthAir, float opticalDepthAerosol, float3 opticalDepthOzone)
 {
     return exp(-(airExtinction * opticalDepthAir + aerosolExtinction * opticalDepthAerosol + opticalDepthOzone));
+}
+
+float3 SanitizeSkyRadiance(float3 color)
+{
+    if (any(isnan(color)) || any(isinf(color)))
+        return 0.0f;
+
+    return clamp(max(color, 0.0f), 0.0f, MAX_SKY_RADIANCE);
 }
 
 float2 EncodeTransmittanceUv(float height, float mu, float planetRadius, float atmosphereRadius)
@@ -334,7 +343,7 @@ float3 EvaluateSkyView(float3 directionWS)
         }
     }
 
-    return max(skyColor * max(_SkyPlanetParams.z, 0.0f), 0.0f);
+    return SanitizeSkyRadiance(skyColor * max(_SkyPlanetParams.z, 0.0f));
 }
 
 float3 EvaluateSkyCubemap(float3 directionWS)
@@ -462,7 +471,7 @@ float3 EvaluateSkyCubemap(float3 directionWS)
         }
     }
 
-    return max(skyColor, 0.0f);
+    return SanitizeSkyRadiance(skyColor);
 }
 
 [numthreads(8, 8, 1)]
@@ -554,7 +563,7 @@ void MultiScatteringLUT(uint3 tid : SV_DispatchThreadID)
     float3 atmosphericBounce = (_SkyAirScattering.rgb + _SkyAerosolScattering.rgb) * (1000.0f + sampleHeight * 0.05f);
     float3 multiScattering = (1.0f - transmittance) * (ambientBounce + atmosphericBounce + _SkySunColor.rgb * 0.015f);
 
-    _MultiScatteringLUTOutput[tid.xy] = float4(max(multiScattering, 0.0f), 1.0f);
+    _MultiScatteringLUTOutput[tid.xy] = float4(SanitizeSkyRadiance(multiScattering), 1.0f);
 }
 
 [numthreads(8, 8, 1)]

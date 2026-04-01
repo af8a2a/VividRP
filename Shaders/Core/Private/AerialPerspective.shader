@@ -37,6 +37,7 @@ Shader "Hidden/VividRP/AerialPerspective"
             float4 _SkySunColor;
             float4 _SkyPlanetParams;
             float4 _SkyFogParams;
+            static const float MAX_SKY_RADIANCE = 60000.0f;
 
             struct Attributes
             {
@@ -81,6 +82,14 @@ Shader "Hidden/VividRP/AerialPerspective"
                 return SAMPLE_TEXTURE2D(_MultiScatteringLUT, sampler_MultiScatteringLUT, uv).rgb;
             }
 
+            float3 SanitizeSkyRadiance(float3 color)
+            {
+                if (any(isnan(color)) || any(isinf(color)))
+                    return 0.0f;
+
+                return clamp(max(color, 0.0f), 0.0f, MAX_SKY_RADIANCE);
+            }
+
             float4 Frag(Varyings input) : SV_Target
             {
                 float4 source = SAMPLE_TEXTURE2D_X(_InputColor, sampler_InputColor, input.uv);
@@ -110,7 +119,9 @@ Shader "Hidden/VividRP/AerialPerspective"
                 float3 sceneTransmittance = lerp(float3(1.0f, 1.0f, 1.0f), lutTransmittance, fogFactor);
 
                 float sunCos = dot(normalize(_SkyCameraPositionPS.xyz), normalize(_SkySunDirection.xyz));
-                float3 fogColor = SampleMultiScatteringLut(cameraHeight, sunCos, planetRadius, atmosphereRadius) + _SkySunColor.rgb * 0.01f;
+                float3 fogColor = (SampleMultiScatteringLut(cameraHeight, sunCos, planetRadius, atmosphereRadius) + _SkySunColor.rgb * 0.01f)
+                    * max(_SkyPlanetParams.z, 0.0f);
+                fogColor = SanitizeSkyRadiance(fogColor);
                 float3 shadedColor = source.rgb * sceneTransmittance + fogColor * (1.0f - sceneTransmittance);
                 return float4(shadedColor, source.a);
             }

@@ -94,6 +94,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("ComputeWorldSpacePosition"));
             Assert.That(source, Does.Contain("SampleTransmittanceLut"));
             Assert.That(source, Does.Contain("SampleMultiScatteringLut"));
+            Assert.That(source, Does.Contain("float3 SanitizeSkyRadiance(float3 color)"));
+            Assert.That(source, Does.Contain("* max(_SkyPlanetParams.z, 0.0f);"));
             Assert.That(source, Does.Contain("if (_SkyFogParams.x <= 0.5f)"));
         }
 

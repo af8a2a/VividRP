@@ -103,6 +103,18 @@ namespace VividRP.Runtime
                 && fogMaxDistance.value > 0.0f;
         }
 
+        internal float GetPreExposureMultiplier()
+        {
+            return Mathf.Min(Mathf.Max(exposure.value, 0.0f), 1.0f);
+        }
+
+        internal float GetPostExposureMultiplier()
+        {
+            var totalExposure = Mathf.Max(exposure.value, 0.0f);
+            var preExposure = GetPreExposureMultiplier();
+            return preExposure > 0.0f ? totalExposure / preExposure : 0.0f;
+        }
+
         internal float GetAirScaleHeight()
         {
             return type.value == PhysicallyBasedSkyModel.Custom

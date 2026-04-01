@@ -15,6 +15,12 @@ namespace VividRP.Runtime
                 return false;
             }
 
+            if (provider is IBoundProxyWorldDataProvider customWorldDataProvider
+                && customWorldDataProvider.TryCreateBoundProxyWorldData(out worldData))
+            {
+                return true;
+            }
+
             Transform boundTransform = provider.BoundProxyTransform;
             if (boundTransform == null)
             {

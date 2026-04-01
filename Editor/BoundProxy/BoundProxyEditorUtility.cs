@@ -75,13 +75,24 @@ namespace VividRP.Editor
 
         internal static void DrawGizmo(Transform ownerTransform, BoundProxyShape shape, bool filled, Color? baseColor = null)
         {
+            DrawGizmo(ownerTransform, shape, filled, baseColor, applyOwnerRotation: true);
+        }
+
+        internal static void DrawGizmo(
+            Transform ownerTransform,
+            BoundProxyShape shape,
+            bool filled,
+            Color? baseColor,
+            bool applyOwnerRotation)
+        {
             if (ownerTransform == null)
             {
                 return;
             }
 
             shape.Sanitize();
-            using (new Handles.DrawingScope(Matrix4x4.TRS(ownerTransform.position, ownerTransform.rotation, Vector3.one)))
+            Quaternion rotation = applyOwnerRotation ? ownerTransform.rotation : Quaternion.identity;
+            using (new Handles.DrawingScope(Matrix4x4.TRS(ownerTransform.position, rotation, Vector3.one)))
             {
                 if (shape.shape == BoundProxyShapeType.Sphere)
                 {
@@ -104,7 +115,8 @@ namespace VividRP.Editor
             SerializedBoundProxyShape serializedShape,
             Transform ownerTransform,
             string undoLabel = "Edit Bound Proxy",
-            bool allowCenterHandle = false)
+            bool allowCenterHandle = false,
+            bool applyOwnerRotation = true)
         {
             if (serializedObject == null || serializedShape == null || ownerTransform == null)
             {
@@ -118,7 +130,8 @@ namespace VividRP.Editor
             float newRadius = currentShape.GetSanitizedRadius();
             bool hasChanges = false;
 
-            using (new Handles.DrawingScope(Matrix4x4.TRS(ownerTransform.position, ownerTransform.rotation, Vector3.one)))
+            Quaternion rotation = applyOwnerRotation ? ownerTransform.rotation : Quaternion.identity;
+            using (new Handles.DrawingScope(Matrix4x4.TRS(ownerTransform.position, rotation, Vector3.one)))
             {
                 if (allowCenterHandle)
                 {

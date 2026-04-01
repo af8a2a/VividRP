@@ -7,7 +7,8 @@
         "VividRP.Runtime.GPUDriven",
         "GUID:df380645f10b7bc4b97d4f5eb6303d95",
         "Unity.GraphToolkit.Editor",
-        "Unity.GraphToolkit.Common.Editor"
+        "Unity.GraphToolkit.Common.Editor",
+        "Unity.Burst"
     ],
     "includePlatforms": [
         "Editor"

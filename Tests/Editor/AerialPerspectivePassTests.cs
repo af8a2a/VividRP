@@ -97,6 +97,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("float3 SanitizeSkyRadiance(float3 color)"));
             Assert.That(source, Does.Contain("* max(_SkyPlanetParams.z, 0.0f);"));
             Assert.That(source, Does.Contain("if (_SkyFogParams.x <= 0.5f)"));
+            Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl\""));
+            Assert.That(source, Does.Contain("fogColor = VividApplyPreExposure(SanitizeSkyRadiance(fogColor));"));
         }
 
         private static T GetFieldValue<T>(AerialPerspectivePass pass, string fieldName)

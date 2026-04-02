@@ -3,6 +3,7 @@
 #pragma enable_d3d11_debug_symbols
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #define CLASSIFY_TILE_SIZE 8
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/TileClassification.hlsl"
@@ -119,7 +120,7 @@ void ClearDeferredLit(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (dispatchThreadId.x >= _LightingWidth || dispatchThreadId.y >= _LightingHeight)
         return;
 
-    float3 emissive = max(_GBuffer3.Load(int3(dispatchThreadId.xy, 0)).rgb, 0.0);
+    float3 emissive = VividApplyPreExposure(max(_GBuffer3.Load(int3(dispatchThreadId.xy, 0)).rgb, 0.0));
     _LightingTexture[dispatchThreadId.xy] = float4(emissive, 1.0);
 }
 
@@ -145,7 +146,7 @@ void DeferredLit(
 
     float2 uv = (float2(pixelCoord) + 0.5) / float2(_LightingWidth, _LightingHeight);
     float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, UNITY_MATRIX_I_VP);
-    float3 lighting = EvaluateDeferredLitLighting(surfaceData, pixelCoord, positionWS);
+    float3 lighting = VividApplyPreExposure(EvaluateDeferredLitLighting(surfaceData, pixelCoord, positionWS));
 
     float4 currentLighting = _LightingTexture[pixelCoord];
     _LightingTexture[pixelCoord] = float4(currentLighting.rgb + lighting, currentLighting.a);

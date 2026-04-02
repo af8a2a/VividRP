@@ -28,6 +28,7 @@ Shader "Hidden/VividRP/FinalBlit"
             float4 _BlitScaleBias;
             float4 _VividColorGradingParams;
             StructuredBuffer<float4> _VividAutoExposureBuffer;
+            StructuredBuffer<float4> _VividAutoExposurePreExposureBuffer;
             float4 _VividAutoExposureParams;
 
             #if defined(_FILM_GRAIN)
@@ -75,8 +76,9 @@ Shader "Hidden/VividRP/FinalBlit"
             float4 Frag(Varyings input) : SV_Target
             {
                 float4 color = SAMPLE_TEXTURE2D(_BlitTexture, sampler_BlitTexture, input.uv);
+                float oneOverPreExposure = rcp(max(_VividAutoExposurePreExposureBuffer[0].x, 1e-4));
                 float exposureScale = _VividAutoExposureParams.x > 0.5
-                    ? _VividAutoExposureBuffer[0].x * _VividAutoExposureParams.y
+                    ? _VividAutoExposureBuffer[0].x * oneOverPreExposure
                     : 1.0;
                 float3 postProcessed = color.rgb * _VividColorGradingParams.w * exposureScale;
 

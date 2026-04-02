@@ -22,6 +22,7 @@ Shader "VividRP/Material/SkyAmbientVisualization"
         #pragma multi_compile_instancing
 
         #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+        #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
         #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BakedGI.hlsl"
 
         CBUFFER_START(UnityPerMaterial)
@@ -67,7 +68,7 @@ Shader "VividRP/Material/SkyAmbientVisualization"
             float3 ambientLighting = max(VividSampleAmbientProbe(normalWS), 0.0);
             ambientLighting *= _Tint.rgb * _Intensity;
             ambientLighting = pow(max(ambientLighting, 0.0), rcp(max(_DisplayGamma, 1e-4)));
-            return half4(ambientLighting, 1.0);
+            return half4(VividApplyPreExposure(ambientLighting), 1.0);
         }
         ENDHLSL
 

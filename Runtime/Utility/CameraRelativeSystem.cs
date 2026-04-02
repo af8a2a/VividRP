@@ -83,6 +83,17 @@ namespace VividRP.Runtime
             return state;
         }
 
+        public bool TryGetBase(Camera camera, out TState state)
+        {
+            if (camera == null)
+            {
+                state = null;
+                return false;
+            }
+
+            return m_CameraStates.TryGetValue(camera, out state);
+        }
+
         /// <summary>
         /// 虚方法：提供给子类的初始化 Hook
         /// </summary>

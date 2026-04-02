@@ -84,7 +84,8 @@ void BuildHistogram(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (dispatchThreadId.x >= width || dispatchThreadId.y >= height)
         return;
 
-    const float3 color = _InputColor.Load(int3(dispatchThreadId.xy, 0)).rgb;
+    const float preExposure = max(_PreviousExposureBuffer[0].x, kEpsilon);
+    const float3 color = _InputColor.Load(int3(dispatchThreadId.xy, 0)).rgb / preExposure;
     const float luminance = max(dot(color, kLuminanceWeights), _AutoExposureParams2.z);
     const float logLuminance = log2(luminance);
     const float histogramPosition = saturate(GetHistogramPositionFromLogLuminance(logLuminance));

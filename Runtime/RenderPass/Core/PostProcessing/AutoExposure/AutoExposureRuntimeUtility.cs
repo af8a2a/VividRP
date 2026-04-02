@@ -50,6 +50,186 @@ namespace VividRP.Runtime
         }
     }
 
+    internal sealed class VividExposureData : ContextItem
+    {
+        public AutoExposureSettingsData settings;
+        public GraphicsBuffer defaultExposureBuffer;
+        public GraphicsBuffer previousExposureBuffer;
+        public GraphicsBuffer currentExposureBuffer;
+        public GraphicsBuffer preExposureBuffer;
+        public bool autoExposureEnabled;
+        public bool hasValidHistory;
+
+        public override void Reset()
+        {
+            settings = AutoExposureSettingsData.CreateDefault();
+            defaultExposureBuffer = null;
+            previousExposureBuffer = null;
+            currentExposureBuffer = null;
+            preExposureBuffer = null;
+            autoExposureEnabled = false;
+            hasValidHistory = false;
+        }
+    }
+
+    internal sealed class AutoExposureHistoryState : CameraRelativeState
+    {
+        public GraphicsBuffer previousExposureBuffer;
+        public GraphicsBuffer currentExposureBuffer;
+        public bool hasValidHistory;
+        public bool wasEnabledLastFrame;
+
+        public void SwapBuffers()
+        {
+            (previousExposureBuffer, currentExposureBuffer) = (currentExposureBuffer, previousExposureBuffer);
+        }
+
+        public override void Dispose()
+        {
+            previousExposureBuffer?.Dispose();
+            previousExposureBuffer = null;
+
+            currentExposureBuffer?.Dispose();
+            currentExposureBuffer = null;
+
+            hasValidHistory = false;
+            wasEnabledLastFrame = false;
+        }
+    }
+
+    internal sealed class AutoExposureHistorySystem : CameraRelativeSystem<AutoExposureHistoryState>
+    {
+    }
+
+    internal static class AutoExposureRuntimeManager
+    {
+        private const int AutoExposureVectorStride = sizeof(float) * 4;
+
+        private static readonly int AutoExposurePreExposureBufferId = Shader.PropertyToID("_VividAutoExposurePreExposureBuffer");
+        private static readonly AutoExposureHistorySystem s_HistorySystem = new();
+
+        private static GraphicsBuffer s_DefaultExposureBuffer;
+
+        internal static void PrepareFrame(ContextContainer frameData, CommandBuffer cmd)
+        {
+            var exposureData = frameData.GetOrCreate<VividExposureData>();
+            var cameraData = frameData.Get<VividCameraData>();
+            var temporalData = frameData.GetOrCreate<VividTemporalData>();
+            var camera = cameraData?.camera;
+            var postProcessingAllowed = camera != null && CoreUtils.ArePostProcessesEnabled(camera);
+            var resources = PipelineResourceManager.Get<VividRPCoreResources>();
+            var hasAutoExposureCompute = resources?.AutoExposureCompute != null;
+
+            EnsureDefaultExposureBuffer();
+            s_HistorySystem.PurgeDestroyedCameras();
+
+            var settings = postProcessingAllowed
+                ? AutoExposureSettingsResolver.Resolve(temporalData != null && temporalData.isFirstFrame)
+                : AutoExposureSettingsData.CreateDefault();
+
+            var autoExposureEnabled = postProcessingAllowed
+                && settings.enabled
+                && camera != null
+                && hasAutoExposureCompute;
+
+            AutoExposureHistoryState state = null;
+            if (autoExposureEnabled)
+            {
+                state = s_HistorySystem.GetOrCreateBase(camera);
+                EnsureAutoExposureHistoryState(state);
+
+                if (!state.wasEnabledLastFrame)
+                {
+                    state.hasValidHistory = false;
+                    settings.forceTarget = 1f;
+                }
+            }
+            else if (s_HistorySystem.TryGetBase(camera, out state))
+            {
+                state.hasValidHistory = false;
+                state.wasEnabledLastFrame = false;
+            }
+
+            var defaultExposureBuffer = s_DefaultExposureBuffer;
+            var hasValidHistory = autoExposureEnabled && state != null && state.hasValidHistory;
+            var previousExposureBuffer = autoExposureEnabled && state?.previousExposureBuffer != null
+                ? state.previousExposureBuffer
+                : defaultExposureBuffer;
+            var currentExposureBuffer = autoExposureEnabled && state?.currentExposureBuffer != null
+                ? state.currentExposureBuffer
+                : defaultExposureBuffer;
+            var preExposureBuffer = hasValidHistory && state?.previousExposureBuffer != null
+                ? state.previousExposureBuffer
+                : defaultExposureBuffer;
+
+            exposureData.settings = settings;
+            exposureData.defaultExposureBuffer = defaultExposureBuffer;
+            exposureData.previousExposureBuffer = previousExposureBuffer;
+            exposureData.currentExposureBuffer = currentExposureBuffer;
+            exposureData.preExposureBuffer = preExposureBuffer;
+            exposureData.autoExposureEnabled = autoExposureEnabled;
+            exposureData.hasValidHistory = hasValidHistory;
+
+            if (cmd != null && preExposureBuffer != null)
+                cmd.SetGlobalBuffer(AutoExposurePreExposureBufferId, preExposureBuffer);
+        }
+
+        internal static void CommitFrame(Camera camera)
+        {
+            if (!s_HistorySystem.TryGetBase(camera, out var state) || state == null)
+                return;
+
+            state.SwapBuffers();
+            state.hasValidHistory = true;
+            state.wasEnabledLastFrame = true;
+        }
+
+        internal static void Clear()
+        {
+            s_HistorySystem.Dispose();
+            s_DefaultExposureBuffer?.Dispose();
+            s_DefaultExposureBuffer = null;
+        }
+
+        private static void EnsureDefaultExposureBuffer()
+        {
+            if (s_DefaultExposureBuffer != null
+                && s_DefaultExposureBuffer.count == 1
+                && s_DefaultExposureBuffer.stride == AutoExposureVectorStride)
+            {
+                return;
+            }
+
+            s_DefaultExposureBuffer?.Dispose();
+            s_DefaultExposureBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                1,
+                AutoExposureVectorStride);
+            s_DefaultExposureBuffer.name = "VividRP Auto Exposure Default";
+            s_DefaultExposureBuffer.SetData(new[] { new Vector4(1f, 1f, AutoExposureSettingsResolver.MiddleGrey, 1f) });
+        }
+
+        private static void EnsureAutoExposureHistoryState(AutoExposureHistoryState state)
+        {
+            if (state == null)
+                return;
+
+            EnsureAutoExposureBuffer(ref state.previousExposureBuffer, "VividRP Auto Exposure Previous");
+            EnsureAutoExposureBuffer(ref state.currentExposureBuffer, "VividRP Auto Exposure Current");
+        }
+
+        private static void EnsureAutoExposureBuffer(ref GraphicsBuffer buffer, string name)
+        {
+            if (buffer != null && buffer.count == 1 && buffer.stride == AutoExposureVectorStride)
+                return;
+
+            buffer?.Dispose();
+            buffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, AutoExposureVectorStride);
+            buffer.name = name;
+            buffer.SetData(new[] { new Vector4(1f, 1f, AutoExposureSettingsResolver.MiddleGrey, 1f) });
+        }
+    }
+
     internal static class AutoExposureSettingsResolver
     {
         internal const float MiddleGrey = 0.18f;

@@ -2,6 +2,7 @@
 #define VIVIDRP_DEFERRED_DIRECTIONAL_LIGHTING_INDIRECT_PASS_INCLUDED
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/HdrpLitLighting.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl"
@@ -119,7 +120,7 @@ float4 Frag(Varyings input) : SV_Target
     VividGBufferSurfaceData surfaceData = LoadVividGBuffer(input.pixelCoord);
     float3 positionWS = ComputeWorldSpacePosition(input.uv, deviceDepth, UNITY_MATRIX_I_VP);
     float3 lighting = EvaluateDeferredDirectionalLighting(surfaceData, input.pixelCoord, positionWS);
-    return float4(lighting, 1.0);
+    return float4(VividApplyPreExposure(lighting), 1.0);
 }
 
 #endif

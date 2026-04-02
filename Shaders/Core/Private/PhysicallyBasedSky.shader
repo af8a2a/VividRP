@@ -21,6 +21,7 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
             #pragma fragment Frag
 
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 
             static const int VIEW_SAMPLE_COUNT = 12;
@@ -351,7 +352,7 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
                     ? SAMPLE_TEXTURE2D(_SkyViewLUT, sampler_SkyViewLUT, EncodeSkyViewUv(normalize(viewDirWS))).rgb
                     : EvaluateSky(viewDirWS);
                 skyColor += EvaluateSunDisk(viewDirWS);
-                return float4(SanitizeSkyRadiance(skyColor), 1.0f);
+                return float4(VividApplyPreExposure(SanitizeSkyRadiance(skyColor)), 1.0f);
             }
             ENDHLSL
         }

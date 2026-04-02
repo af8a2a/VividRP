@@ -1,5 +1,6 @@
 using System.Linq;
 using System.Reflection;
+using System.IO;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -124,6 +125,16 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void Shader_Source_AppliesPreExposureBeforeWritingSkyColor()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "HDRISky.shader"));
+
+            Assert.That(source, Does.Contain("Shader \"Hidden/VividRP/HDRISky\""));
+            Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl\""));
+            Assert.That(source, Does.Contain("skyColor = VividApplyPreExposure(skyColor * _SkyTint.rgb * exp2(_SkyParam.x) * _SkyParam.y);"));
+        }
+
         private static void AssertTextureSize(HDRISkyPass pass, string fieldName, int expectedWidth, int expectedHeight)
         {
             var field = typeof(HDRISkyPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
@@ -141,6 +152,25 @@ namespace VividRP.Editor.Tests
             var field = typeof(HDRISkyPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.That(field, Is.Not.Null);
             return (T)field.GetValue(pass);
+        }
+
+        private static string GetPackageFilePath(params string[] relativeParts)
+        {
+            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            var packageRoots = new[]
+            {
+                Path.Combine(projectRoot, "Packages", "VividRP"),
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
+            };
+
+            foreach (var packageRoot in packageRoots)
+            {
+                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
+                if (File.Exists(fullPath))
+                    return fullPath;
+            }
+
+            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 }

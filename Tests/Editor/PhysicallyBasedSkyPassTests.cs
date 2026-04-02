@@ -110,6 +110,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("skyColor += EvaluateSunDisk(viewDirWS);"));
             Assert.That(source, Does.Contain("EvaluateSky"));
             Assert.That(source, Does.Contain("_SkyUseLUT > 0.5f"));
+            Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl\""));
+            Assert.That(source, Does.Contain("return float4(VividApplyPreExposure(SanitizeSkyRadiance(skyColor)), 1.0f);"));
         }
 
         private static void AssertTextureSize(PhysicallyBasedSkyPass pass, string fieldName, int expectedWidth, int expectedHeight)

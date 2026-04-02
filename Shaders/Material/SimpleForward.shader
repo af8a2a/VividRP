@@ -17,10 +17,11 @@ Shader "VividRP/Material/SimpleForward"
         }
 
         HLSLINCLUDE
-            #pragma target 2.0
+            #pragma target 3.5
             #pragma multi_compile_instancing
 
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
@@ -65,7 +66,9 @@ Shader "VividRP/Material/SimpleForward"
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
                 half4 baseMap = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv);
-                return baseMap * _BaseColor;
+                half4 surfaceColor = baseMap * _BaseColor;
+                surfaceColor.rgb = VividApplyPreExposure(surfaceColor.rgb);
+                return surfaceColor;
             }
         ENDHLSL
 

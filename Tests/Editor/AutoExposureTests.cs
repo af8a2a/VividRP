@@ -72,12 +72,17 @@ namespace VividRP.Editor.Tests
         public void AutoExposureShader_DeclaresHistogramAndExposureKernels()
         {
             var shaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AutoExposure.compute"));
+            var helperSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "AutoExposure.hlsl"));
 
             Assert.That(shaderSource, Does.Contain("#pragma kernel ClearHistogram"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel BuildHistogram"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel ResolveExposure"));
             Assert.That(shaderSource, Does.Contain("RWStructuredBuffer<uint> _HistogramBuffer;"));
             Assert.That(shaderSource, Does.Contain("RWStructuredBuffer<float4> _CurrentExposureBuffer;"));
+            Assert.That(shaderSource, Does.Contain("const float preExposure = max(_PreviousExposureBuffer[0].x, kEpsilon);"));
+            Assert.That(shaderSource, Does.Contain("_InputColor.Load(int3(dispatchThreadId.xy, 0)).rgb / preExposure"));
+            Assert.That(helperSource, Does.Contain("StructuredBuffer<float4> _VividAutoExposurePreExposureBuffer;"));
+            Assert.That(helperSource, Does.Contain("float3 VividApplyPreExposure(float3 color)"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

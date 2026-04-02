@@ -21,6 +21,7 @@ Shader "Hidden/VividRP/AerialPerspective"
             #pragma fragment Frag
 
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 
             TEXTURE2D_X(_InputColor);
@@ -121,7 +122,7 @@ Shader "Hidden/VividRP/AerialPerspective"
                 float sunCos = dot(normalize(_SkyCameraPositionPS.xyz), normalize(_SkySunDirection.xyz));
                 float3 fogColor = (SampleMultiScatteringLut(cameraHeight, sunCos, planetRadius, atmosphereRadius) + _SkySunColor.rgb * 0.01f)
                     * max(_SkyPlanetParams.z, 0.0f);
-                fogColor = SanitizeSkyRadiance(fogColor);
+                fogColor = VividApplyPreExposure(SanitizeSkyRadiance(fogColor));
                 float3 shadedColor = source.rgb * sceneTransmittance + fogColor * (1.0f - sceneTransmittance);
                 return float4(shadedColor, source.a);
             }

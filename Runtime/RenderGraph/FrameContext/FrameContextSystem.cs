@@ -31,6 +31,7 @@ namespace VividRP.Runtime
             vividTemporalData.isFirstFrame = temporalData.IsFirstFrame;
 
             SkyManager.Update(frameData, cmd);
+            AutoExposureRuntimeManager.PrepareFrame(frameData, cmd);
 
             // 3. Build and set all shader globals in one place
             var shaderVariables = cameraData.BuildShaderVariables(temporalData);
@@ -49,6 +50,7 @@ namespace VividRP.Runtime
         public static void Clear()
         {
             s_Instance.Dispose();
+            AutoExposureRuntimeManager.Clear();
 #if VIVIDRP_DEBUG
             CameraShaderVariablesGlobalComparisonLogger.Reset();
 #endif

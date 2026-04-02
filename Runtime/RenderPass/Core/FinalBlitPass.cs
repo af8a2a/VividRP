@@ -9,7 +9,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int AutoExposureHistogramBucketCount = 64;
         private const int AutoExposureHistogramThreadGroupSizeX = 8;
         private const int AutoExposureHistogramThreadGroupSizeY = 8;
-        private const int AutoExposureVectorStride = sizeof(float) * 4;
         private const string ClearHistogramKernelName = "ClearHistogram";
         private const string BuildHistogramKernelName = "BuildHistogram";
         private const string ResolveExposureKernelName = "ResolveExposure";
@@ -17,6 +16,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ColorGradingLutId = Shader.PropertyToID("_VividColorGradingLut");
         private static readonly int ColorGradingParamsId = Shader.PropertyToID("_VividColorGradingParams");
         private static readonly int AutoExposureBufferId = Shader.PropertyToID("_VividAutoExposureBuffer");
+        private static readonly int AutoExposurePreExposureBufferId = Shader.PropertyToID("_VividAutoExposurePreExposureBuffer");
         private static readonly int AutoExposureMaterialParamsId = Shader.PropertyToID("_VividAutoExposureParams");
         private static readonly int FilmGrainTextureId = Shader.PropertyToID("_VividFilmGrainTexture");
         private static readonly int FilmGrainParamsId = Shader.PropertyToID("_VividFilmGrainParams");
@@ -40,10 +40,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private Material m_Material;
         private ComputeShader m_AutoExposureCompute;
-        private readonly AutoExposureHistorySystem m_AutoExposureHistorySystem = new();
         private ColorGradingSettingsData m_ColorGradingSettings;
         private AutoExposureSettingsData m_AutoExposureSettings;
         private FilmGrainSettingsData m_FilmGrainSettings;
+        private VividExposureData m_ExposureData;
         private RenderTargetIdentifier m_CameraBackBufferTarget;
         private TextureUVOrigin m_CameraBackBufferTextureUVOrigin;
         private bool m_ShouldSetViewport;
@@ -56,14 +56,14 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_ResolveExposureKernel = -1;
         private Rect m_Viewport;
         private int m_FrameCount;
+        private Camera m_Camera;
         private GraphicsBuffer m_AutoExposureHistogramBuffer;
-        private GraphicsBuffer m_DefaultAutoExposureBuffer;
-        private AutoExposureHistoryState m_AutoExposureHistoryState;
 
         public override void Prepare(ContextContainer frameData)
         {
             var cameraData = frameData.Get<VividCameraData>();
             var camera = cameraData.camera;
+            m_Camera = camera;
             var hasTargetTexture = camera != null && camera.targetTexture != null;
             var cameraType = camera != null ? camera.cameraType : CameraType.Game;
 
@@ -78,33 +78,25 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ColorGradingSettings = m_PostProcessingAllowed
                 ? ColorGradingSettingsResolver.Resolve()
                 : ColorGradingSettingsData.CreateDefault();
-            var temporalData = frameData.GetOrCreate<VividTemporalData>();
-            m_AutoExposureSettings = m_PostProcessingAllowed
-                ? AutoExposureSettingsResolver.Resolve(temporalData != null && temporalData.isFirstFrame)
-                : AutoExposureSettingsData.CreateDefault();
             m_FilmGrainSettings = m_PostProcessingAllowed
                 ? FilmGrainSettingsResolver.Resolve()
                 : FilmGrainSettingsData.CreateDefault();
+            m_ExposureData = frameData.Get<VividExposureData>();
+            m_AutoExposureSettings = m_ExposureData != null
+                ? m_ExposureData.settings
+                : AutoExposureSettingsData.CreateDefault();
 
             m_FrameCount = Time.frameCount;
             m_AutoExposureWidth = ResolveAutoExposureDimension(m_Viewport.width, cameraData.actualWidth, cameraData.pixelWidth, Screen.width);
             m_AutoExposureHeight = ResolveAutoExposureDimension(m_Viewport.height, cameraData.actualHeight, cameraData.pixelHeight, Screen.height);
-            m_AutoExposureHistoryState = null;
-            m_AutoExposureHistorySystem.PurgeDestroyedCameras();
 
             m_EnableAutoExposure = m_PostProcessingAllowed
-                && m_AutoExposureSettings.enabled
-                && camera != null
+                && m_ExposureData != null
+                && m_ExposureData.autoExposureEnabled
                 && m_AutoExposureCompute != null
                 && m_ClearHistogramKernel >= 0
                 && m_BuildHistogramKernel >= 0
                 && m_ResolveExposureKernel >= 0;
-
-            if (m_EnableAutoExposure)
-            {
-                m_AutoExposureHistoryState = m_AutoExposureHistorySystem.GetOrCreateBase(camera);
-                EnsureAutoExposureHistoryState(m_AutoExposureHistoryState);
-            }
         }
 
         public override void Create()
@@ -121,7 +113,6 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             EnsureAutoExposureHistogramBuffer();
-            EnsureDefaultAutoExposureBuffer();
         }
 
         public override void Record(UnsafeGraphContext context)
@@ -143,22 +134,28 @@ namespace VividRP.Runtime.RenderPass.Core
                 scale.y = sourceHandle.rtHandleProperties.rtHandleScale.y;
             }
 
-            var autoExposureBuffer = m_DefaultAutoExposureBuffer;
-            var autoExposureComputed = false;
-            if (m_EnableAutoExposure
-                && m_AutoExposureHistoryState != null
-                && ExecuteAutoExposure(cmd))
+            var defaultExposureBuffer = m_ExposureData?.defaultExposureBuffer;
+            var preExposureBuffer = m_ExposureData?.preExposureBuffer ?? defaultExposureBuffer;
+            var autoExposureBuffer = m_ExposureData != null && m_ExposureData.hasValidHistory
+                ? m_ExposureData.previousExposureBuffer ?? defaultExposureBuffer
+                : defaultExposureBuffer;
+            var autoExposureUpdated = false;
+
+            if (m_EnableAutoExposure && ExecuteAutoExposure(cmd))
             {
-                autoExposureBuffer = m_AutoExposureHistoryState.currentExposureBuffer;
-                autoExposureComputed = autoExposureBuffer != null;
+                autoExposureBuffer = m_ExposureData.currentExposureBuffer;
+                autoExposureUpdated = autoExposureBuffer != null;
             }
 
             if (autoExposureBuffer != null)
                 m_Material.SetBuffer(AutoExposureBufferId, autoExposureBuffer);
 
+            if (preExposureBuffer != null)
+                m_Material.SetBuffer(AutoExposurePreExposureBufferId, preExposureBuffer);
+
             m_Material.SetVector(
                 AutoExposureMaterialParamsId,
-                new Vector4(autoExposureComputed ? 1f : 0f, 1f, 0f, 0f));
+                new Vector4(m_ExposureData != null && m_ExposureData.autoExposureEnabled ? 1f : 0f, 0f, 0f, 0f));
 
             var useColorGradingLut = m_PostProcessingAllowed
                 && m_ColorGradingSettings.RequiresLut
@@ -216,11 +213,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
             Blitter.BlitTexture(unsafeCmd, sourceHandle, scaleBias, m_Material, 0);
 
-            if (autoExposureComputed && m_AutoExposureHistoryState != null)
-            {
-                m_AutoExposureHistoryState.SwapBuffers();
-                m_AutoExposureHistoryState.hasValidHistory = true;
-            }
+            if (autoExposureUpdated)
+                AutoExposureRuntimeManager.CommitFrame(m_Camera);
         }
 
         public override void Dispose()
@@ -233,11 +227,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_AutoExposureHistogramBuffer?.Dispose();
             m_AutoExposureHistogramBuffer = null;
-
-            m_DefaultAutoExposureBuffer?.Dispose();
-            m_DefaultAutoExposureBuffer = null;
-
-            m_AutoExposureHistorySystem.Dispose();
             m_AutoExposureCompute = null;
             m_ClearHistogramKernel = -1;
             m_BuildHistogramKernel = -1;
@@ -289,8 +278,8 @@ namespace VividRP.Runtime.RenderPass.Core
             if (cmd == null
                 || m_AutoExposureCompute == null
                 || m_AutoExposureHistogramBuffer == null
-                || m_DefaultAutoExposureBuffer == null
-                || m_AutoExposureHistoryState?.currentExposureBuffer == null)
+                || m_ExposureData?.defaultExposureBuffer == null
+                || m_ExposureData.currentExposureBuffer == null)
             {
                 return false;
             }
@@ -298,9 +287,9 @@ namespace VividRP.Runtime.RenderPass.Core
             var meterMask = m_AutoExposureSettings.meterMask != null
                 ? m_AutoExposureSettings.meterMask
                 : Texture2D.whiteTexture;
-            var previousExposureBuffer = m_AutoExposureHistoryState.hasValidHistory
-                ? m_AutoExposureHistoryState.previousExposureBuffer
-                : m_DefaultAutoExposureBuffer;
+            var previousExposureBuffer = m_ExposureData.hasValidHistory
+                ? m_ExposureData.previousExposureBuffer
+                : m_ExposureData.defaultExposureBuffer;
 
             if (previousExposureBuffer == null || source?.innerHandle.IsValid() != true)
                 return false;
@@ -313,6 +302,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_AutoExposureCompute, m_BuildHistogramKernel, AutoExposureInputTextureId, source.innerHandle);
             cmd.SetComputeTextureParam(m_AutoExposureCompute, m_BuildHistogramKernel, AutoExposureMeterMaskId, meterMask);
             cmd.SetComputeBufferParam(m_AutoExposureCompute, m_BuildHistogramKernel, AutoExposureHistogramBufferId, m_AutoExposureHistogramBuffer);
+            cmd.SetComputeBufferParam(m_AutoExposureCompute, m_BuildHistogramKernel, AutoExposurePreviousBufferId, previousExposureBuffer);
             cmd.DispatchCompute(
                 m_AutoExposureCompute,
                 m_BuildHistogramKernel,
@@ -323,7 +313,7 @@ namespace VividRP.Runtime.RenderPass.Core
             BindAutoExposureParameters(cmd, m_ResolveExposureKernel);
             cmd.SetComputeBufferParam(m_AutoExposureCompute, m_ResolveExposureKernel, AutoExposureHistogramBufferId, m_AutoExposureHistogramBuffer);
             cmd.SetComputeBufferParam(m_AutoExposureCompute, m_ResolveExposureKernel, AutoExposurePreviousBufferId, previousExposureBuffer);
-            cmd.SetComputeBufferParam(m_AutoExposureCompute, m_ResolveExposureKernel, AutoExposureCurrentBufferId, m_AutoExposureHistoryState.currentExposureBuffer);
+            cmd.SetComputeBufferParam(m_AutoExposureCompute, m_ResolveExposureKernel, AutoExposureCurrentBufferId, m_ExposureData.currentExposureBuffer);
             cmd.DispatchCompute(m_AutoExposureCompute, m_ResolveExposureKernel, 1, 1, 1);
             return true;
         }
@@ -392,44 +382,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_AutoExposureHistogramBuffer.name = "VividRP Auto Exposure Histogram";
         }
 
-        private void EnsureDefaultAutoExposureBuffer()
-        {
-            if (m_DefaultAutoExposureBuffer != null
-                && m_DefaultAutoExposureBuffer.count == 1
-                && m_DefaultAutoExposureBuffer.stride == AutoExposureVectorStride)
-            {
-                return;
-            }
-
-            m_DefaultAutoExposureBuffer?.Dispose();
-            m_DefaultAutoExposureBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                1,
-                AutoExposureVectorStride);
-            m_DefaultAutoExposureBuffer.name = "VividRP Auto Exposure Default";
-            m_DefaultAutoExposureBuffer.SetData(new[] { new Vector4(1f, 1f, AutoExposureSettingsResolver.MiddleGrey, 1f) });
-        }
-
-        private static void EnsureAutoExposureHistoryState(AutoExposureHistoryState state)
-        {
-            if (state == null)
-                return;
-
-            EnsureAutoExposureBuffer(ref state.previousExposureBuffer, "VividRP Auto Exposure Previous");
-            EnsureAutoExposureBuffer(ref state.currentExposureBuffer, "VividRP Auto Exposure Current");
-        }
-
-        private static void EnsureAutoExposureBuffer(ref GraphicsBuffer buffer, string name)
-        {
-            if (buffer != null && buffer.count == 1 && buffer.stride == AutoExposureVectorStride)
-                return;
-
-            buffer?.Dispose();
-            buffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, AutoExposureVectorStride);
-            buffer.name = name;
-            buffer.SetData(new[] { new Vector4(1f, 1f, AutoExposureSettingsResolver.MiddleGrey, 1f) });
-        }
-
         private static int ResolveAutoExposureDimension(float viewportDimension, int preferredDimension, int fallbackDimension, int screenDimension)
         {
             var roundedViewport = Mathf.RoundToInt(viewportDimension);
@@ -454,32 +406,6 @@ namespace VividRP.Runtime.RenderPass.Core
             return yFlip
                 ? new Vector4(scale.x, -scale.y, 0f, scale.y)
                 : new Vector4(scale.x, scale.y, 0f, 0f);
-        }
-
-        private sealed class AutoExposureHistoryState : CameraRelativeState
-        {
-            public GraphicsBuffer previousExposureBuffer;
-            public GraphicsBuffer currentExposureBuffer;
-            public bool hasValidHistory;
-
-            public void SwapBuffers()
-            {
-                (previousExposureBuffer, currentExposureBuffer) = (currentExposureBuffer, previousExposureBuffer);
-            }
-
-            public override void Dispose()
-            {
-                previousExposureBuffer?.Dispose();
-                previousExposureBuffer = null;
-
-                currentExposureBuffer?.Dispose();
-                currentExposureBuffer = null;
-                hasValidHistory = false;
-            }
-        }
-
-        private sealed class AutoExposureHistorySystem : CameraRelativeSystem<AutoExposureHistoryState>
-        {
         }
     }
 }

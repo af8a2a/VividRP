@@ -29,6 +29,7 @@ Shader "Hidden/VividRP/HDRISky"
             #pragma fragment Frag
 
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 
             TEXTURE2D_X_FLOAT(_DepthTexture);
@@ -97,7 +98,7 @@ Shader "Hidden/VividRP/HDRISky"
                 float3 dir = RotateAroundYAxis(-viewDirWS, _SkyParam.z);
 
                 float3 skyColor = SAMPLE_TEXTURECUBE(_SkyCubemap, sampler_SkyCubemap, dir).rgb;
-                skyColor *= _SkyTint.rgb * exp2(_SkyParam.x) * _SkyParam.y;
+                skyColor = VividApplyPreExposure(skyColor * _SkyTint.rgb * exp2(_SkyParam.x) * _SkyParam.y);
                 return float4(skyColor, 1.0);
             }
             ENDHLSL

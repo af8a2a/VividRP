@@ -1,6 +1,7 @@
 #ifndef VIVIDRP_SIMPLE_DEFERRED_LIT_PASS_INCLUDED
 #define VIVIDRP_SIMPLE_DEFERRED_LIT_PASS_INCLUDED
 
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/HdrpLitLighting.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
@@ -134,7 +135,7 @@ float4 Frag(Varyings input) : SV_Target
     VividGBufferSurfaceData surfaceData = LoadVividGBuffer(pixelCoord);
     float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, _InvViewProjMatrix);
     float3 lighting = EvaluateSimpleDeferredLighting(surfaceData, positionWS);
-    return float4(lighting, 1.0);
+    return float4(VividApplyPreExposure(lighting), 1.0);
 }
 
 #endif

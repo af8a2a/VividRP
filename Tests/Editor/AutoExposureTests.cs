@@ -30,6 +30,20 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void AutoExposure_IsActiveInManualMode_WhenEnabledWithoutHistogramConstraints()
+        {
+            var autoExposure = new AutoExposure();
+            autoExposure.enabled.value = true;
+            autoExposure.mode.value = AutoExposureMode.Manual;
+            autoExposure.minBrightness.value = 2f;
+            autoExposure.maxBrightness.value = 1f;
+            autoExposure.speedUp.value = 0f;
+            autoExposure.speedDown.value = 0f;
+
+            Assert.That(autoExposure.IsActive(), Is.True);
+        }
+
+        [Test]
         public void BuildHistogramScaleBias_PacksLogRangeIntoShaderSpace()
         {
             var result = AutoExposureSettingsResolver.BuildHistogramScaleBias(-10f, 6f);
@@ -73,6 +87,7 @@ namespace VividRP.Editor.Tests
         {
             var shaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AutoExposure.compute"));
             var helperSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "AutoExposure.hlsl"));
+            var runtimeSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureRuntimeUtility.cs"));
 
             Assert.That(shaderSource, Does.Contain("#pragma kernel ClearHistogram"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel BuildHistogram"));
@@ -83,6 +98,8 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("_InputColor.Load(int3(dispatchThreadId.xy, 0)).rgb / preExposure"));
             Assert.That(helperSource, Does.Contain("StructuredBuffer<float4> _VividAutoExposurePreExposureBuffer;"));
             Assert.That(helperSource, Does.Contain("float3 VividApplyPreExposure(float3 color)"));
+            Assert.That(runtimeSource, Does.Contain("settings.mode == AutoExposureMode.Manual"));
+            Assert.That(runtimeSource, Does.Contain("WriteExposureBuffer(state.currentExposureBuffer, settings.fixedExposureScale, 1f, 1f);"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

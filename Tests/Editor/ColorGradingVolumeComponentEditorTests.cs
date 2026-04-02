@@ -219,8 +219,10 @@ namespace VividRP.Editor.Tests
                 var flags = BindingFlags.Instance | BindingFlags.NonPublic;
 
                 Assert.That(editorType.GetField("m_Enabled", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_Mode", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_LowPercent", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_HighPercent", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_ExposureCompensation", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_MeterMask", flags)?.GetValue(editor), Is.Not.Null);
             }
             finally

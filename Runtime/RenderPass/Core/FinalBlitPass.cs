@@ -48,6 +48,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private TextureUVOrigin m_CameraBackBufferTextureUVOrigin;
         private bool m_ShouldSetViewport;
         private bool m_PostProcessingAllowed;
+        private bool m_EnableExposure;
         private bool m_EnableAutoExposure;
         private int m_AutoExposureWidth;
         private int m_AutoExposureHeight;
@@ -97,6 +98,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_ClearHistogramKernel >= 0
                 && m_BuildHistogramKernel >= 0
                 && m_ResolveExposureKernel >= 0;
+            m_EnableExposure = m_PostProcessingAllowed
+                && m_ExposureData != null
+                && m_ExposureData.exposureEnabled;
         }
 
         public override void Create()
@@ -136,15 +140,27 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var defaultExposureBuffer = m_ExposureData?.defaultExposureBuffer;
             var preExposureBuffer = m_ExposureData?.preExposureBuffer ?? defaultExposureBuffer;
-            var autoExposureBuffer = m_ExposureData != null && m_ExposureData.hasValidHistory
-                ? m_ExposureData.previousExposureBuffer ?? defaultExposureBuffer
-                : defaultExposureBuffer;
-            var autoExposureUpdated = false;
+            var autoExposureBuffer = defaultExposureBuffer;
+            var exposureUpdated = false;
+
+            if (m_EnableExposure)
+            {
+                autoExposureBuffer = m_AutoExposureSettings.mode == AutoExposureMode.Manual
+                    ? m_ExposureData.currentExposureBuffer ?? m_ExposureData.previousExposureBuffer ?? defaultExposureBuffer
+                    : m_ExposureData.hasValidHistory
+                        ? m_ExposureData.previousExposureBuffer ?? defaultExposureBuffer
+                        : defaultExposureBuffer;
+            }
 
             if (m_EnableAutoExposure && ExecuteAutoExposure(cmd))
             {
                 autoExposureBuffer = m_ExposureData.currentExposureBuffer;
-                autoExposureUpdated = autoExposureBuffer != null;
+                exposureUpdated = autoExposureBuffer != null;
+            }
+            else if (m_EnableExposure && m_AutoExposureSettings.mode == AutoExposureMode.Manual)
+            {
+                autoExposureBuffer = m_ExposureData.currentExposureBuffer ?? autoExposureBuffer;
+                exposureUpdated = autoExposureBuffer != null;
             }
 
             if (autoExposureBuffer != null)
@@ -155,7 +171,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_Material.SetVector(
                 AutoExposureMaterialParamsId,
-                new Vector4(m_ExposureData != null && m_ExposureData.autoExposureEnabled ? 1f : 0f, 0f, 0f, 0f));
+                new Vector4(m_EnableExposure ? 1f : 0f, 0f, 0f, 0f));
 
             var useColorGradingLut = m_PostProcessingAllowed
                 && m_ColorGradingSettings.RequiresLut
@@ -213,7 +229,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             Blitter.BlitTexture(unsafeCmd, sourceHandle, scaleBias, m_Material, 0);
 
-            if (autoExposureUpdated)
+            if (exposureUpdated)
                 AutoExposureRuntimeManager.CommitFrame(m_Camera);
         }
 

@@ -4,12 +4,30 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
+    public enum AutoExposureMode
+    {
+        Histogram,
+        Manual,
+    }
+
+    [Serializable]
+    public sealed class AutoExposureModeParameter : VolumeParameter<AutoExposureMode>
+    {
+        public AutoExposureModeParameter(AutoExposureMode value, bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
+
     [Serializable]
     [VolumeComponentMenu("Post-processing/Auto Exposure")]
     public sealed class AutoExposure : VolumeComponent, IPostProcessComponent
     {
         [Tooltip("Enables histogram-based automatic exposure.")]
         public BoolParameter enabled = new(false);
+
+        [Tooltip("Histogram computes exposure from scene luminance. Manual uses a fixed exposure value.")]
+        public AutoExposureModeParameter mode = new(AutoExposureMode.Histogram);
 
         [Tooltip("Lower histogram percentile retained when estimating the scene luminance.")]
         public ClampedFloatParameter lowPercent = new(80f, 1f, 99f);
@@ -29,7 +47,7 @@ namespace VividRP.Runtime
         [Tooltip("Adaptation speed in f-stops per second when moving toward a darker exposure.")]
         public MinFloatParameter speedDown = new(1f, 0.02f);
 
-        [Tooltip("Exposure compensation in EV stops applied on top of the automatic exposure result.")]
+        [Tooltip("Exposure compensation in EV stops. In Manual mode this becomes the fixed exposure value.")]
         public FloatParameter exposureCompensation = new(0f);
 
         [AdditionalProperty]
@@ -54,8 +72,13 @@ namespace VividRP.Runtime
 
         public bool IsActive()
         {
-            return enabled.value
-                && maxBrightness.value >= minBrightness.value
+            if (!enabled.value)
+                return false;
+
+            if (mode.value == AutoExposureMode.Manual)
+                return true;
+
+            return maxBrightness.value >= minBrightness.value
                 && speedUp.value > 0f
                 && speedDown.value > 0f;
         }

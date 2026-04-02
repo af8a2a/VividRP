@@ -6,11 +6,13 @@ namespace VividRP.Runtime
     internal struct AutoExposureSettingsData
     {
         public bool enabled;
+        public AutoExposureMode mode;
         public float exposureLowPercent;
         public float exposureHighPercent;
         public float minAverageLuminance;
         public float maxAverageLuminance;
         public float exposureCompensation;
+        public float fixedExposureScale;
         public float deltaTime;
         public float exposureSpeedUp;
         public float exposureSpeedDown;
@@ -30,11 +32,13 @@ namespace VividRP.Runtime
             return new AutoExposureSettingsData
             {
                 enabled = false,
+                mode = AutoExposureMode.Histogram,
                 exposureLowPercent = 0.8f,
                 exposureHighPercent = 0.95f,
                 minAverageLuminance = AutoExposureSettingsResolver.MiddleGrey,
                 maxAverageLuminance = AutoExposureSettingsResolver.MiddleGrey,
                 exposureCompensation = 1f,
+                fixedExposureScale = 1f,
                 deltaTime = 1f / 60f,
                 exposureSpeedUp = 1f,
                 exposureSpeedDown = 1f,
@@ -57,6 +61,7 @@ namespace VividRP.Runtime
         public GraphicsBuffer previousExposureBuffer;
         public GraphicsBuffer currentExposureBuffer;
         public GraphicsBuffer preExposureBuffer;
+        public bool exposureEnabled;
         public bool autoExposureEnabled;
         public bool hasValidHistory;
 
@@ -67,6 +72,7 @@ namespace VividRP.Runtime
             previousExposureBuffer = null;
             currentExposureBuffer = null;
             preExposureBuffer = null;
+            exposureEnabled = false;
             autoExposureEnabled = false;
             hasValidHistory = false;
         }
@@ -107,6 +113,7 @@ namespace VividRP.Runtime
 
         private static readonly int AutoExposurePreExposureBufferId = Shader.PropertyToID("_VividAutoExposurePreExposureBuffer");
         private static readonly AutoExposureHistorySystem s_HistorySystem = new();
+        private static readonly Vector4[] s_ExposureBufferData = new Vector4[1];
 
         private static GraphicsBuffer s_DefaultExposureBuffer;
 
@@ -127,13 +134,16 @@ namespace VividRP.Runtime
                 ? AutoExposureSettingsResolver.Resolve(temporalData != null && temporalData.isFirstFrame)
                 : AutoExposureSettingsData.CreateDefault();
 
-            var autoExposureEnabled = postProcessingAllowed
+            var exposureEnabled = postProcessingAllowed
                 && settings.enabled
                 && camera != null
+                && (settings.mode == AutoExposureMode.Manual || hasAutoExposureCompute);
+            var autoExposureEnabled = exposureEnabled
+                && settings.mode == AutoExposureMode.Histogram
                 && hasAutoExposureCompute;
 
             AutoExposureHistoryState state = null;
-            if (autoExposureEnabled)
+            if (exposureEnabled)
             {
                 state = s_HistorySystem.GetOrCreateBase(camera);
                 EnsureAutoExposureHistoryState(state);
@@ -143,6 +153,9 @@ namespace VividRP.Runtime
                     state.hasValidHistory = false;
                     settings.forceTarget = 1f;
                 }
+
+                if (settings.mode == AutoExposureMode.Manual && state.currentExposureBuffer != null)
+                    WriteExposureBuffer(state.currentExposureBuffer, settings.fixedExposureScale, 1f, 1f);
             }
             else if (s_HistorySystem.TryGetBase(camera, out state))
             {
@@ -151,11 +164,11 @@ namespace VividRP.Runtime
             }
 
             var defaultExposureBuffer = s_DefaultExposureBuffer;
-            var hasValidHistory = autoExposureEnabled && state != null && state.hasValidHistory;
-            var previousExposureBuffer = autoExposureEnabled && state?.previousExposureBuffer != null
+            var hasValidHistory = exposureEnabled && state != null && state.hasValidHistory;
+            var previousExposureBuffer = exposureEnabled && state?.previousExposureBuffer != null
                 ? state.previousExposureBuffer
                 : defaultExposureBuffer;
-            var currentExposureBuffer = autoExposureEnabled && state?.currentExposureBuffer != null
+            var currentExposureBuffer = exposureEnabled && state?.currentExposureBuffer != null
                 ? state.currentExposureBuffer
                 : defaultExposureBuffer;
             var preExposureBuffer = hasValidHistory && state?.previousExposureBuffer != null
@@ -167,6 +180,7 @@ namespace VividRP.Runtime
             exposureData.previousExposureBuffer = previousExposureBuffer;
             exposureData.currentExposureBuffer = currentExposureBuffer;
             exposureData.preExposureBuffer = preExposureBuffer;
+            exposureData.exposureEnabled = exposureEnabled;
             exposureData.autoExposureEnabled = autoExposureEnabled;
             exposureData.hasValidHistory = hasValidHistory;
 
@@ -206,7 +220,7 @@ namespace VividRP.Runtime
                 1,
                 AutoExposureVectorStride);
             s_DefaultExposureBuffer.name = "VividRP Auto Exposure Default";
-            s_DefaultExposureBuffer.SetData(new[] { new Vector4(1f, 1f, AutoExposureSettingsResolver.MiddleGrey, 1f) });
+            WriteExposureBuffer(s_DefaultExposureBuffer, 1f, AutoExposureSettingsResolver.MiddleGrey, 1f);
         }
 
         private static void EnsureAutoExposureHistoryState(AutoExposureHistoryState state)
@@ -226,7 +240,16 @@ namespace VividRP.Runtime
             buffer?.Dispose();
             buffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, AutoExposureVectorStride);
             buffer.name = name;
-            buffer.SetData(new[] { new Vector4(1f, 1f, AutoExposureSettingsResolver.MiddleGrey, 1f) });
+            WriteExposureBuffer(buffer, 1f, AutoExposureSettingsResolver.MiddleGrey, 1f);
+        }
+
+        private static void WriteExposureBuffer(GraphicsBuffer buffer, float exposureScale, float averageSceneLuminance, float middleGreyCompensation)
+        {
+            if (buffer == null)
+                return;
+
+            s_ExposureBufferData[0] = new Vector4(exposureScale, exposureScale, averageSceneLuminance, middleGreyCompensation);
+            buffer.SetData(s_ExposureBufferData);
         }
     }
 
@@ -250,6 +273,18 @@ namespace VividRP.Runtime
             if (autoExposure == null)
                 return settings;
 
+            settings.mode = autoExposure.mode.value;
+            settings.exposureCompensation = ResolveExposureCompensation(autoExposure.exposureCompensation.value);
+            settings.fixedExposureScale = settings.exposureCompensation;
+            settings.meterMask = autoExposure.meterMask.value;
+
+            if (settings.mode == AutoExposureMode.Manual)
+            {
+                settings.enabled = autoExposure.enabled.value;
+                settings.forceTarget = 1f;
+                return settings;
+            }
+
             var exposureHighPercent = Mathf.Clamp(autoExposure.highPercent.value, 1f, 99f) * PercentToScale;
             var exposureLowPercent = Mathf.Min(
                 Mathf.Clamp(autoExposure.lowPercent.value, 1f, 99f) * PercentToScale,
@@ -269,7 +304,6 @@ namespace VividRP.Runtime
             settings.exposureHighPercent = exposureHighPercent;
             settings.minAverageLuminance = minWhitePointLuminance * MiddleGrey;
             settings.maxAverageLuminance = maxWhitePointLuminance * MiddleGrey;
-            settings.exposureCompensation = ResolveExposureCompensation(autoExposure.exposureCompensation.value);
             settings.deltaTime = Mathf.Max(Time.deltaTime, 1e-6f);
             settings.exposureSpeedUp = Mathf.Max(autoExposure.speedUp.value, MinSpeed);
             settings.exposureSpeedDown = Mathf.Max(autoExposure.speedDown.value, MinSpeed);
@@ -280,7 +314,6 @@ namespace VividRP.Runtime
             settings.exponentialDownM = ComputeExponentialTransitionMultiplier(settings.exposureSpeedDown, DefaultStartDistance);
             settings.startDistance = DefaultStartDistance;
             settings.forceTarget = isFirstFrame || !validRange || !validSpeeds ? 1f : 0f;
-            settings.meterMask = autoExposure.meterMask.value;
             return settings;
         }
 

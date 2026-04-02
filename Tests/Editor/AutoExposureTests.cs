@@ -30,6 +30,23 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void AutoExposure_IsActive_WhenHistogramEV100OverridesProduceValidRange()
+        {
+            var autoExposure = new AutoExposure();
+            autoExposure.enabled.value = true;
+            autoExposure.minBrightness.value = 2f;
+            autoExposure.maxBrightness.value = 1f;
+            autoExposure.minEV100.overrideState = true;
+            autoExposure.maxEV100.overrideState = true;
+            autoExposure.minEV100.value = -5.058894f;
+            autoExposure.maxEV100.value = 1f;
+            autoExposure.speedUp.value = 3f;
+            autoExposure.speedDown.value = 1f;
+
+            Assert.That(autoExposure.IsActive(), Is.True);
+        }
+
+        [Test]
         public void AutoExposure_IsActiveInManualMode_WhenEnabledWithoutHistogramConstraints()
         {
             var autoExposure = new AutoExposure();
@@ -58,6 +75,106 @@ namespace VividRP.Editor.Tests
             var result = AutoExposureSettingsResolver.ResolveExposureCompensation(2f);
 
             Assert.That(result, Is.EqualTo(4f).Within(1e-5f));
+        }
+
+        [Test]
+        public void ResolveWhitePointLuminanceFromEV100_ConvertsStopsToWhitePoint()
+        {
+            var result = AutoExposureSettingsResolver.ResolveWhitePointLuminanceFromEV100(2f);
+
+            Assert.That(result, Is.EqualTo(4f).Within(1e-5f));
+        }
+
+        [Test]
+        public void ResolveHistogramWhitePointLuminance_UsesEV100Override_WhenEnabled()
+        {
+            var result = AutoExposureSettingsResolver.ResolveHistogramWhitePointLuminance(0.03f, 2f, true);
+
+            Assert.That(result, Is.EqualTo(4f).Within(1e-5f));
+        }
+
+        [Test]
+        public void ResolveHistogramWhitePointLuminance_FallsBackToLegacyBrightness_WhenOverrideDisabled()
+        {
+            var result = AutoExposureSettingsResolver.ResolveHistogramWhitePointLuminance(0.03f, 2f, false);
+
+            Assert.That(result, Is.EqualTo(0.03f).Within(1e-5f));
+        }
+
+        [Test]
+        public void ResolveManualExposureScale_CombinesManualEVAndExposureCompensation()
+        {
+            var result = AutoExposureSettingsResolver.ResolveManualExposureScale(2f, 4f);
+
+            Assert.That(result, Is.EqualTo(1f).Within(1e-5f));
+        }
+
+        [Test]
+        public void ResolvePhysicalCameraEV100_ComputesExpectedExposureValue()
+        {
+            var cameraObject = new GameObject("Physical Camera EV100 Test");
+
+            try
+            {
+                var camera = cameraObject.AddComponent<Camera>();
+                camera.aperture = 4f;
+                camera.shutterSpeed = 1f / 125f;
+                camera.iso = 200;
+
+                var result = AutoExposureSettingsResolver.ResolvePhysicalCameraEV100(camera);
+                var expected = Mathf.Log((4f * 4f) / (1f / 125f) * 100f / 200f, 2f);
+
+                Assert.That(result, Is.EqualTo(expected).Within(1e-5f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void ResolveManualEV100_UsesPhysicalCameraExposure_WhenEnabled()
+        {
+            var cameraObject = new GameObject("Manual EV100 Physical Camera Test");
+
+            try
+            {
+                var camera = cameraObject.AddComponent<Camera>();
+                camera.aperture = 2.8f;
+                camera.shutterSpeed = 1f / 60f;
+                camera.iso = 100;
+
+                var result = AutoExposureSettingsResolver.ResolveManualEV100(camera, -3f, true);
+                var expected = AutoExposureSettingsResolver.ResolvePhysicalCameraEV100(camera);
+
+                Assert.That(result, Is.EqualTo(expected).Within(1e-5f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void ResolveManualEV100_ReturnsManualValue_WhenPhysicalCameraExposureIsDisabled()
+        {
+            var cameraObject = new GameObject("Manual EV100 Fallback Test");
+
+            try
+            {
+                var camera = cameraObject.AddComponent<Camera>();
+                camera.aperture = 2.8f;
+                camera.shutterSpeed = 1f / 60f;
+                camera.iso = 100;
+
+                var result = AutoExposureSettingsResolver.ResolveManualEV100(camera, -3f, false);
+
+                Assert.That(result, Is.EqualTo(-3f).Within(1e-5f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
         }
 
         [Test]
@@ -99,7 +216,14 @@ namespace VividRP.Editor.Tests
             Assert.That(helperSource, Does.Contain("StructuredBuffer<float4> _VividAutoExposurePreExposureBuffer;"));
             Assert.That(helperSource, Does.Contain("float3 VividApplyPreExposure(float3 color)"));
             Assert.That(runtimeSource, Does.Contain("settings.mode == AutoExposureMode.Manual"));
-            Assert.That(runtimeSource, Does.Contain("WriteExposureBuffer(state.currentExposureBuffer, settings.fixedExposureScale, 1f, 1f);"));
+            Assert.That(runtimeSource, Does.Contain("settings.applyPhysicalCameraExposure = autoExposure.applyPhysicalCameraExposure.value;"));
+            Assert.That(runtimeSource, Does.Contain("settings.manualEV100 = ResolveManualEV100("));
+            Assert.That(runtimeSource, Does.Contain("ResolveHistogramWhitePointLuminance("));
+            Assert.That(runtimeSource, Does.Contain("autoExposure.minEV100.overrideState"));
+            Assert.That(runtimeSource, Does.Contain("autoExposure.maxEV100.overrideState"));
+            Assert.That(runtimeSource, Does.Contain("ColorUtils.ComputeEV100(aperture, shutterSpeed, iso)"));
+            Assert.That(runtimeSource, Does.Contain("ResolveManualExposureScale(settings.manualEV100, settings.exposureCompensation)"));
+            Assert.That(runtimeSource, Does.Contain("ResolveAverageSceneLuminanceFromEV100(settings.manualEV100)"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

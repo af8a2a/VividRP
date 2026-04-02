@@ -357,8 +357,12 @@ namespace VividRP.Editor
         private SerializedDataParameter m_HighPercent;
         private SerializedDataParameter m_MinBrightness;
         private SerializedDataParameter m_MaxBrightness;
+        private SerializedDataParameter m_MinEV100;
+        private SerializedDataParameter m_MaxEV100;
         private SerializedDataParameter m_SpeedUp;
         private SerializedDataParameter m_SpeedDown;
+        private SerializedDataParameter m_ManualEV100;
+        private SerializedDataParameter m_ApplyPhysicalCameraExposure;
         private SerializedDataParameter m_ExposureCompensation;
         private SerializedDataParameter m_HistogramLogMin;
         private SerializedDataParameter m_HistogramLogMax;
@@ -375,8 +379,12 @@ namespace VividRP.Editor
             m_HighPercent = Unpack(o.Find(x => x.highPercent));
             m_MinBrightness = Unpack(o.Find(x => x.minBrightness));
             m_MaxBrightness = Unpack(o.Find(x => x.maxBrightness));
+            m_MinEV100 = Unpack(o.Find(x => x.minEV100));
+            m_MaxEV100 = Unpack(o.Find(x => x.maxEV100));
             m_SpeedUp = Unpack(o.Find(x => x.speedUp));
             m_SpeedDown = Unpack(o.Find(x => x.speedDown));
+            m_ManualEV100 = Unpack(o.Find(x => x.manualEV100));
+            m_ApplyPhysicalCameraExposure = Unpack(o.Find(x => x.applyPhysicalCameraExposure));
             m_ExposureCompensation = Unpack(o.Find(x => x.exposureCompensation));
             m_HistogramLogMin = Unpack(o.Find(x => x.histogramLogMin));
             m_HistogramLogMax = Unpack(o.Find(x => x.histogramLogMax));
@@ -394,14 +402,18 @@ namespace VividRP.Editor
                 var mode = (AutoExposureMode)m_Mode.value.intValue;
                 if (mode == AutoExposureMode.Manual)
                 {
-                    PropertyField(m_ExposureCompensation, EditorGUIUtility.TrTextContent("Manual Exposure"));
+                    PropertyField(m_ApplyPhysicalCameraExposure, EditorGUIUtility.TrTextContent("Apply Physical Camera Exposure"));
+                    if (!m_ApplyPhysicalCameraExposure.value.boolValue)
+                        PropertyField(m_ManualEV100, EditorGUIUtility.TrTextContent("Manual EV100"));
+
+                    PropertyField(m_ExposureCompensation);
                 }
                 else
                 {
                     PropertyField(m_LowPercent);
                     PropertyField(m_HighPercent);
-                    PropertyField(m_MinBrightness);
-                    PropertyField(m_MaxBrightness);
+                    PropertyField(m_MinEV100, EditorGUIUtility.TrTextContent("Min EV100"));
+                    PropertyField(m_MaxEV100, EditorGUIUtility.TrTextContent("Max EV100"));
                     PropertyField(m_SpeedUp);
                     PropertyField(m_SpeedDown);
                     PropertyField(m_ExposureCompensation);

@@ -26,7 +26,7 @@ namespace VividRP.Runtime
         [Tooltip("Enables histogram-based automatic exposure.")]
         public BoolParameter enabled = new(false);
 
-        [Tooltip("Histogram computes exposure from scene luminance. Manual uses a fixed exposure value.")]
+        [Tooltip("Histogram computes exposure from scene luminance. Manual uses a fixed EV100 value.")]
         public AutoExposureModeParameter mode = new(AutoExposureMode.Histogram);
 
         [Tooltip("Lower histogram percentile retained when estimating the scene luminance.")]
@@ -41,13 +41,25 @@ namespace VividRP.Runtime
         [Tooltip("Maximum average scene luminance allowed during exposure adaptation.")]
         public MinFloatParameter maxBrightness = new(2f, 0f);
 
+        [Tooltip("Minimum white point EV100 allowed during histogram adaptation. Overrides Min Brightness when enabled.")]
+        public FloatParameter minEV100 = new(-5.058894f);
+
+        [Tooltip("Maximum white point EV100 allowed during histogram adaptation. Overrides Max Brightness when enabled.")]
+        public FloatParameter maxEV100 = new(1f);
+
         [Tooltip("Adaptation speed in f-stops per second when moving toward a brighter exposure.")]
         public MinFloatParameter speedUp = new(3f, 0.02f);
 
         [Tooltip("Adaptation speed in f-stops per second when moving toward a darker exposure.")]
         public MinFloatParameter speedDown = new(1f, 0.02f);
 
-        [Tooltip("Exposure compensation in EV stops. In Manual mode this becomes the fixed exposure value.")]
+        [Tooltip("Fixed manual exposure in EV100 stops.")]
+        public FloatParameter manualEV100 = new(0f);
+
+        [Tooltip("Uses the camera aperture, shutter speed, and ISO to derive Manual EV100. Only affects Manual mode.")]
+        public BoolParameter applyPhysicalCameraExposure = new(false);
+
+        [Tooltip("Exposure compensation in EV stops applied on top of the resolved exposure result.")]
         public FloatParameter exposureCompensation = new(0f);
 
         [AdditionalProperty]
@@ -78,7 +90,16 @@ namespace VividRP.Runtime
             if (mode.value == AutoExposureMode.Manual)
                 return true;
 
-            return maxBrightness.value >= minBrightness.value
+            var minWhitePointLuminance = AutoExposureSettingsResolver.ResolveHistogramWhitePointLuminance(
+                minBrightness.value,
+                minEV100.value,
+                minEV100.overrideState);
+            var maxWhitePointLuminance = AutoExposureSettingsResolver.ResolveHistogramWhitePointLuminance(
+                maxBrightness.value,
+                maxEV100.value,
+                maxEV100.overrideState);
+
+            return maxWhitePointLuminance >= minWhitePointLuminance
                 && speedUp.value > 0f
                 && speedDown.value > 0f;
         }

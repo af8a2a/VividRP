@@ -172,6 +172,7 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("resources.AutoExposureCompute"));
             Assert.That(passSource, Does.Contain("m_EnableExposure"));
             Assert.That(passSource, Does.Contain("m_AutoExposureSettings.mode == AutoExposureMode.Manual"));
+            Assert.That(passSource, Does.Contain("m_ExposureData.currentExposureBuffer ?? m_ExposureData.previousExposureBuffer ?? defaultExposureBuffer"));
             Assert.That(passSource, Does.Contain("AutoExposureRuntimeManager.CommitFrame(m_Camera);"));
             Assert.That(passSource, Does.Not.Contain("resources.BlitShader"));
         }

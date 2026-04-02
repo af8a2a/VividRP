@@ -11,6 +11,9 @@ namespace VividRP.Runtime
         public float exposureHighPercent;
         public float minAverageLuminance;
         public float maxAverageLuminance;
+        public bool applyPhysicalCameraExposure;
+        public float manualEV100;
+        public float manualAverageSceneLuminance;
         public float exposureCompensation;
         public float fixedExposureScale;
         public float deltaTime;
@@ -37,6 +40,9 @@ namespace VividRP.Runtime
                 exposureHighPercent = 0.95f,
                 minAverageLuminance = AutoExposureSettingsResolver.MiddleGrey,
                 maxAverageLuminance = AutoExposureSettingsResolver.MiddleGrey,
+                applyPhysicalCameraExposure = false,
+                manualEV100 = 0f,
+                manualAverageSceneLuminance = AutoExposureSettingsResolver.MiddleGrey,
                 exposureCompensation = 1f,
                 fixedExposureScale = 1f,
                 deltaTime = 1f / 60f,
@@ -131,7 +137,7 @@ namespace VividRP.Runtime
             s_HistorySystem.PurgeDestroyedCameras();
 
             var settings = postProcessingAllowed
-                ? AutoExposureSettingsResolver.Resolve(temporalData != null && temporalData.isFirstFrame)
+                ? AutoExposureSettingsResolver.Resolve(camera, temporalData != null && temporalData.isFirstFrame)
                 : AutoExposureSettingsData.CreateDefault();
 
             var exposureEnabled = postProcessingAllowed
@@ -155,7 +161,13 @@ namespace VividRP.Runtime
                 }
 
                 if (settings.mode == AutoExposureMode.Manual && state.currentExposureBuffer != null)
-                    WriteExposureBuffer(state.currentExposureBuffer, settings.fixedExposureScale, 1f, 1f);
+                {
+                    WriteExposureBuffer(
+                        state.currentExposureBuffer,
+                        settings.fixedExposureScale,
+                        settings.manualAverageSceneLuminance,
+                        settings.exposureCompensation);
+                }
             }
             else if (s_HistorySystem.TryGetBase(camera, out state))
             {
@@ -262,7 +274,7 @@ namespace VividRP.Runtime
         private const float MinSpeed = 0.001f;
         private const float FrameTimeEpsilon = 1f / 60f;
 
-        internal static AutoExposureSettingsData Resolve(bool isFirstFrame)
+        internal static AutoExposureSettingsData Resolve(Camera camera, bool isFirstFrame)
         {
             var settings = AutoExposureSettingsData.CreateDefault();
             var stack = VolumeManager.instance.stack;
@@ -274,8 +286,14 @@ namespace VividRP.Runtime
                 return settings;
 
             settings.mode = autoExposure.mode.value;
+            settings.applyPhysicalCameraExposure = autoExposure.applyPhysicalCameraExposure.value;
+            settings.manualEV100 = ResolveManualEV100(
+                camera,
+                autoExposure.manualEV100.value,
+                settings.applyPhysicalCameraExposure);
             settings.exposureCompensation = ResolveExposureCompensation(autoExposure.exposureCompensation.value);
-            settings.fixedExposureScale = settings.exposureCompensation;
+            settings.manualAverageSceneLuminance = ResolveAverageSceneLuminanceFromEV100(settings.manualEV100);
+            settings.fixedExposureScale = ResolveManualExposureScale(settings.manualEV100, settings.exposureCompensation);
             settings.meterMask = autoExposure.meterMask.value;
 
             if (settings.mode == AutoExposureMode.Manual)
@@ -290,8 +308,15 @@ namespace VividRP.Runtime
                 Mathf.Clamp(autoExposure.lowPercent.value, 1f, 99f) * PercentToScale,
                 exposureHighPercent);
 
-            var minWhitePointLuminance = Mathf.Max(0f, autoExposure.minBrightness.value);
-            var maxWhitePointLuminance = Mathf.Max(minWhitePointLuminance, autoExposure.maxBrightness.value);
+            var minWhitePointLuminance = ResolveHistogramWhitePointLuminance(
+                autoExposure.minBrightness.value,
+                autoExposure.minEV100.value,
+                autoExposure.minEV100.overrideState);
+            var maxWhitePointLuminance = ResolveHistogramWhitePointLuminance(
+                autoExposure.maxBrightness.value,
+                autoExposure.maxEV100.value,
+                autoExposure.maxEV100.overrideState);
+            maxWhitePointLuminance = Mathf.Max(minWhitePointLuminance, maxWhitePointLuminance);
 
             var histogramScaleBias = BuildHistogramScaleBias(
                 autoExposure.histogramLogMin.value,
@@ -320,6 +345,48 @@ namespace VividRP.Runtime
         internal static float ResolveExposureCompensation(float compensationStops)
         {
             return Mathf.Pow(2f, compensationStops);
+        }
+
+        internal static float ResolveManualEV100(Camera camera, float manualEV100, bool applyPhysicalCameraExposure)
+        {
+            if (!applyPhysicalCameraExposure)
+                return manualEV100;
+
+            return ResolvePhysicalCameraEV100(camera);
+        }
+
+        internal static float ResolvePhysicalCameraEV100(Camera camera)
+        {
+            if (camera == null)
+                return 0f;
+
+            var aperture = Mathf.Max(camera.aperture, 1e-4f);
+            var shutterSpeed = Mathf.Max(camera.shutterSpeed, 1e-6f);
+            var iso = Mathf.Max((float)camera.iso, 1f);
+            return ColorUtils.ComputeEV100(aperture, shutterSpeed, iso);
+        }
+
+        internal static float ResolveWhitePointLuminanceFromEV100(float manualEV100)
+        {
+            return Mathf.Pow(2f, manualEV100);
+        }
+
+        internal static float ResolveHistogramWhitePointLuminance(float legacyBrightness, float ev100, bool useEV100)
+        {
+            return useEV100
+                ? ResolveWhitePointLuminanceFromEV100(ev100)
+                : Mathf.Max(0f, legacyBrightness);
+        }
+
+        internal static float ResolveAverageSceneLuminanceFromEV100(float manualEV100)
+        {
+            return ResolveWhitePointLuminanceFromEV100(manualEV100) * MiddleGrey;
+        }
+
+        internal static float ResolveManualExposureScale(float manualEV100, float exposureCompensation)
+        {
+            var whitePointLuminance = ResolveWhitePointLuminanceFromEV100(manualEV100);
+            return exposureCompensation / Mathf.Max(whitePointLuminance, 1e-6f);
         }
 
         internal static Vector2 BuildHistogramScaleBias(float histogramLogMin, float histogramLogMax)

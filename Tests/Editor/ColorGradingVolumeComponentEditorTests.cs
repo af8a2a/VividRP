@@ -222,6 +222,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(editorType.GetField("m_Mode", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_LowPercent", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_HighPercent", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_MinEV100", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_MaxEV100", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_ManualEV100", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_ApplyPhysicalCameraExposure", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ExposureCompensation", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_MeterMask", flags)?.GetValue(editor), Is.Not.Null);
             }

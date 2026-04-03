@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using UnityEngine;
+using System.Reflection;
 using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
@@ -70,34 +71,25 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void GetExposureMultipliers_SplitsExposureToKeepSourceStageStable_WhenExposureIsBelowOne()
+        public void ExposureField_IsHidden_BecauseAutoExposureOwnsSkyBrightness()
         {
-            var volume = ScriptableObject.CreateInstance<PhysicallyBasedSkyVolume>();
+            var field = typeof(PhysicallyBasedSkyVolume).GetField(nameof(PhysicallyBasedSkyVolume.exposure));
 
-            try
-            {
-                volume.exposure.value = 0.25f;
-
-                Assert.That(volume.GetPreExposureMultiplier(), Is.EqualTo(0.25f));
-                Assert.That(volume.GetPostExposureMultiplier(), Is.EqualTo(1.0f));
-            }
-            finally
-            {
-                Object.DestroyImmediate(volume);
-            }
+            Assert.That(field, Is.Not.Null);
+            Assert.That(field.GetCustomAttribute<HideInInspector>(), Is.Not.Null);
         }
 
         [Test]
-        public void GetExposureMultipliers_KeepsBrighteningInPostStage_WhenExposureExceedsOne()
+        public void GetHashCode_DoesNotChange_WhenDeprecatedExposureChanges()
         {
             var volume = ScriptableObject.CreateInstance<PhysicallyBasedSkyVolume>();
 
             try
             {
+                var initialHash = volume.GetHashCode();
                 volume.exposure.value = 4.0f;
 
-                Assert.That(volume.GetPreExposureMultiplier(), Is.EqualTo(1.0f));
-                Assert.That(volume.GetPostExposureMultiplier(), Is.EqualTo(4.0f));
+                Assert.That(volume.GetHashCode(), Is.EqualTo(initialHash));
             }
             finally
             {

@@ -23,7 +23,8 @@ float4 _AutoExposureParams2;
 float4 _AutoExposureParams3;
 float4 _AutoExposureScreenSize;
 
-static const float3 kLuminanceWeights = float3(0.2126, 0.7152, 0.0722);
+// Matches UE's default r.AutoExposure.LuminanceMethod=0 (uniform luminance).
+static const float3 kLuminanceWeights = float3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0);
 static const float kMiddleGrey = 0.18f;
 static const float kEpsilon = 1e-4f;
 

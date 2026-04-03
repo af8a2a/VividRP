@@ -31,7 +31,7 @@ namespace VividRP.Runtime
             return HashCode.Combine(
                 cubemap != null ? cubemap.GetEntityId() : EntityId.None,
                 sky?.tint.value ?? Color.white,
-                sky?.exposure.value ?? 1.0f,
+                sky?.exposure.value ?? 0.0f,
                 sky?.rotation.value ?? 0.0f);
         }
 
@@ -52,7 +52,7 @@ namespace VividRP.Runtime
             skyData.activeSkyType = SkyType.HDRI;
             skyData.specularCubemap = cubemap;
             skyData.tint = sky?.tint.value ?? Color.white;
-            skyData.exposure = sky?.exposure.value ?? 1.0f;
+            skyData.exposure = sky?.exposure.value ?? 0.0f;
             skyData.rotation = sky?.rotation.value ?? 0.0f;
             skyData.skyHash = skyHash;
             skyData.hasDiffuseSH = false;

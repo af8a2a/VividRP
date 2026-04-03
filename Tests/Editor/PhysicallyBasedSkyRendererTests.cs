@@ -91,7 +91,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("RebuildRuntimeCubemap(volume, context, cmd);"));
             Assert.That(source, Does.Contain("skyData.activeSkyType = SkyType.PhysicallyBased;"));
             Assert.That(source, Does.Contain("skyData.specularCubemap = m_RuntimeSkyCubemap;"));
-            Assert.That(source, Does.Contain("skyData.exposure = volume.GetPostExposureMultiplier();"));
+            Assert.That(source, Does.Contain("skyData.exposure = 0.0f;"));
             Assert.That(source, Does.Contain("skyData.hasDiffuseSH = false;"));
             Assert.That(source, Does.Contain("skyData.diffuseSH = default;"));
             Assert.That(source, Does.Contain("return HashCode.Combine("));
@@ -106,10 +106,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("cmd.GenerateMips(m_RuntimeSkyCubemap);"));
             Assert.That(source, Does.Not.Contain("TryProjectCubemapToSH("));
             Assert.That(source, Does.Not.Contain("SetPixels("));
-            Assert.That(parametersSource, Does.Contain("var preExposure = volume.GetPreExposureMultiplier();"));
-            Assert.That(parametersSource, Does.Contain("var postExposure = volume.GetPostExposureMultiplier();"));
+            Assert.That(parametersSource, Does.Not.Contain("GetPreExposureMultiplier("));
+            Assert.That(parametersSource, Does.Not.Contain("GetPostExposureMultiplier("));
             Assert.That(parametersSource, Does.Contain("parameters.skyPlanetParams = new Vector4("));
-            Assert.That(parametersSource, Does.Contain("postExposure,"));
+            Assert.That(parametersSource, Does.Contain("1.0f,"));
             Assert.That(parametersSource, Does.Contain("parameters.skySunColor = ToVector4(exposedSunColor);"));
             Assert.That(parametersSource, Does.Contain("parameters.skyGroundTint = ToVector4(exposedGroundTint);"));
         }

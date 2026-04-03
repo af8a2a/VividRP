@@ -108,11 +108,8 @@ namespace VividRP.Runtime
                                    * 0.5f;
             var aerosolScattering = volume.GetAerosolScatteringCoefficient();
             var ozoneExtinction = volume.GetOzoneExtinctionCoefficient();
-            // Push exposure reductions into the source radiance so very bright sun values do not overflow the sky integration path.
-            var preExposure = volume.GetPreExposureMultiplier();
-            var postExposure = volume.GetPostExposureMultiplier();
-            var exposedSunColor = ClampRadiance(ToVector3(sunColor.linear) * (PhysicallyBasedSkyRenderer.SunIlluminanceScale * preExposure));
-            var exposedGroundTint = ClampRadiance(ToVector3(volume.groundTint.value.linear) * preExposure);
+            var exposedSunColor = ClampRadiance(ToVector3(sunColor.linear) * PhysicallyBasedSkyRenderer.SunIlluminanceScale);
+            var exposedGroundTint = ClampRadiance(ToVector3(volume.groundTint.value.linear));
 
             parameters.skyCameraPositionPS = new Vector4(cameraPosition.x, cameraPosition.y, cameraPosition.z, 1.0f);
             parameters.skySunDirection = new Vector4(sunDirection.x, sunDirection.y, sunDirection.z, 0.0f);
@@ -120,7 +117,7 @@ namespace VividRP.Runtime
             parameters.skyPlanetParams = new Vector4(
                 planetRadius,
                 atmosphereRadius,
-                postExposure,
+                1.0f,
                 volume.renderSunDisk.value ? 1.0f : 0.0f);
             parameters.skyAirScattering = ToVector4(volume.GetAirScatteringCoefficient());
             parameters.skyAirExtinction = ToVector4(volume.GetAirExtinctionCoefficient());

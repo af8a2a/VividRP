@@ -21,7 +21,7 @@ namespace VividRP.Runtime
             diffuseSH = default;
             specularCubemap = null;
             tint = Color.white;
-            exposure = 1.0f;
+            exposure = 0.0f;
             rotation = 0.0f;
             skyHash = 0;
         }

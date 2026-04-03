@@ -323,7 +323,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal static Vector4 BuildSkyIblParams(int maxMip, float exposure, float rotation, bool enabled)
         {
             return new Vector4(
-                Mathf.Max(0f, exposure),
+                VividRP.Runtime.HDRISkyVolume.ResolveExposureMultiplier(exposure),
                 -rotation,
                 Mathf.Max(0, maxMip),
                 enabled ? 1f : 0f);

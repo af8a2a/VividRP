@@ -89,10 +89,18 @@ namespace VividRP.Editor.Tests
         {
             var skyParam = HDRISkyPass.BuildSkyParam(2.5f, 45f);
 
-            Assert.That(skyParam.x, Is.EqualTo(0f));
-            Assert.That(skyParam.y, Is.EqualTo(2.5f));
+            Assert.That(skyParam.x, Is.EqualTo(2.5f));
+            Assert.That(skyParam.y, Is.EqualTo(1f));
             Assert.That(skyParam.z, Is.EqualTo(-45f));
             Assert.That(skyParam.w, Is.EqualTo(0f));
+        }
+
+        [Test]
+        public void HdriSkyExposure_UsesEvStopMultiplierSoZeroRemainsNeutral()
+        {
+            Assert.That(HDRISkyVolume.ResolveExposureMultiplier(0f), Is.EqualTo(1f).Within(1e-5f));
+            Assert.That(HDRISkyVolume.ResolveExposureMultiplier(1f), Is.EqualTo(2f).Within(1e-5f));
+            Assert.That(HDRISkyVolume.ResolveExposureMultiplier(-1f), Is.EqualTo(0.5f).Within(1e-5f));
         }
 
         [Test]
@@ -118,6 +126,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(HDRISkyVolume.GetDefaultSkyCubemap(), Is.Not.Null);
                 Assert.That(component.skyCubemap.value, Is.SameAs(HDRISkyVolume.GetDefaultSkyCubemap()));
                 Assert.That(component.HasSkyCubemap(), Is.True);
+                Assert.That(component.exposure.value, Is.EqualTo(0f));
             }
             finally
             {
@@ -129,10 +138,15 @@ namespace VividRP.Editor.Tests
         public void Shader_Source_AppliesPreExposureBeforeWritingSkyColor()
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "HDRISky.shader"));
+            var passSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "HDRISkyPass.cs"));
 
             Assert.That(source, Does.Contain("Shader \"Hidden/VividRP/HDRISky\""));
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl\""));
             Assert.That(source, Does.Contain("skyColor = VividApplyPreExposure(skyColor * _SkyTint.rgb * exp2(_SkyParam.x) * _SkyParam.y);"));
+            Assert.That(passSource, Does.Contain("AutoExposurePreExposureBufferId"));
+            Assert.That(passSource, Does.Contain("m_ExposureData?.preExposureBuffer"));
+            Assert.That(passSource, Does.Contain("m_Material.SetBuffer(AutoExposurePreExposureBufferId, preExposureBuffer);"));
+            Assert.That(passSource, Does.Contain("EnsureDefaultPreExposureBuffer();"));
         }
 
         private static void AssertTextureSize(HDRISkyPass pass, string fieldName, int expectedWidth, int expectedHeight)

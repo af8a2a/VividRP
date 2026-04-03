@@ -23,10 +23,10 @@ namespace VividRP.Runtime
     [VolumeComponentMenu("Post-processing/Auto Exposure")]
     public sealed class AutoExposure : VolumeComponent, IPostProcessComponent
     {
-        [Tooltip("Enables histogram-based automatic exposure.")]
+        [Tooltip("Enables automatic exposure metering.")]
         public BoolParameter enabled = new(false);
 
-        [Tooltip("Histogram computes exposure from scene luminance. Manual uses a fixed EV100 value.")]
+        [Tooltip("Selects the exposure metering mode.")]
         public AutoExposureModeParameter mode = new(AutoExposureMode.Histogram);
 
         [Tooltip("Lower histogram percentile retained when estimating the scene luminance.")]
@@ -35,16 +35,16 @@ namespace VividRP.Runtime
         [Tooltip("Upper histogram percentile retained when estimating the scene luminance.")]
         public ClampedFloatParameter highPercent = new(95f, 1f, 99f);
 
-        [Tooltip("Minimum average scene luminance allowed during exposure adaptation.")]
+        [Tooltip("Legacy brightness clamp kept for backwards compatibility with older serialized assets.")]
         public MinFloatParameter minBrightness = new(0.03f, 0f);
 
-        [Tooltip("Maximum average scene luminance allowed during exposure adaptation.")]
+        [Tooltip("Legacy brightness clamp kept for backwards compatibility with older serialized assets.")]
         public MinFloatParameter maxBrightness = new(2f, 0f);
 
-        [Tooltip("Minimum white point EV100 allowed during histogram adaptation. Overrides Min Brightness when enabled.")]
+        [Tooltip("Minimum EV100 allowed during histogram adaptation, matching Unreal's extended luminance range workflow.")]
         public FloatParameter minEV100 = new(-5.058894f);
 
-        [Tooltip("Maximum white point EV100 allowed during histogram adaptation. Overrides Max Brightness when enabled.")]
+        [Tooltip("Maximum EV100 allowed during histogram adaptation, matching Unreal's extended luminance range workflow.")]
         public FloatParameter maxEV100 = new(1f);
 
         [Tooltip("Adaptation speed in f-stops per second when moving toward a brighter exposure.")]
@@ -63,11 +63,11 @@ namespace VividRP.Runtime
         public FloatParameter exposureCompensation = new(0f);
 
         [AdditionalProperty]
-        [Tooltip("Minimum histogram range in log2 luminance.")]
+        [Tooltip("Minimum histogram EV100 range, matching Unreal's Histogram Min EV100 control.")]
         public FloatParameter histogramLogMin = new(-10f);
 
         [AdditionalProperty]
-        [Tooltip("Maximum histogram range in log2 luminance.")]
+        [Tooltip("Maximum histogram EV100 range, matching Unreal's Histogram Max EV100 control.")]
         public FloatParameter histogramLogMax = new(6f);
 
         [AdditionalProperty]
@@ -90,14 +90,8 @@ namespace VividRP.Runtime
             if (mode.value == AutoExposureMode.Manual)
                 return true;
 
-            var minWhitePointLuminance = AutoExposureSettingsResolver.ResolveHistogramWhitePointLuminance(
-                minBrightness.value,
-                minEV100.value,
-                minEV100.overrideState);
-            var maxWhitePointLuminance = AutoExposureSettingsResolver.ResolveHistogramWhitePointLuminance(
-                maxBrightness.value,
-                maxEV100.value,
-                maxEV100.overrideState);
+            var minWhitePointLuminance = AutoExposureSettingsResolver.ResolveWhitePointLuminanceFromEV100(minEV100.value);
+            var maxWhitePointLuminance = AutoExposureSettingsResolver.ResolveWhitePointLuminanceFromEV100(maxEV100.value);
 
             return maxWhitePointLuminance >= minWhitePointLuminance
                 && speedUp.value > 0f

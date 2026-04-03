@@ -10,7 +10,8 @@ namespace VividRP.Runtime
     {
         public NoInterpCubemapParameter skyCubemap = new(null);
         public ColorParameter tint = new(Color.white, true, true, true);
-        public MinFloatParameter exposure = new(1f, 0f);
+        [Tooltip("Exposure compensation in EV stops. 0 keeps the source HDRI intensity unchanged, 1 is 2x brighter, -1 is 2x darker.")]
+        public FloatParameter exposure = new(0f);
         public ClampedFloatParameter rotation = new(0f, -180f, 180f);
 
         protected override void OnEnable()
@@ -32,6 +33,11 @@ namespace VividRP.Runtime
         public bool HasSkyCubemap()
         {
             return GetSkyCubemapOrDefault() != null;
+        }
+
+        internal static float ResolveExposureMultiplier(float exposureStops)
+        {
+            return Mathf.Pow(2f, exposureStops);
         }
 
         private void EnsureDefaultSkyCubemapAssigned()

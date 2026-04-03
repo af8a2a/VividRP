@@ -30,7 +30,8 @@ namespace VividRP.Runtime
 
         public static AutoExposureSettingsData CreateDefault()
         {
-            var histogramScaleBias = AutoExposureSettingsResolver.BuildHistogramScaleBias(-10f, 6f);
+            var histogramScaleBias = AutoExposureSettingsResolver.BuildHistogramScaleBiasFromEV100(-10f, 6f);
+            var histogramLogRange = AutoExposureSettingsResolver.ResolveHistogramLogRangeFromEV100(-10f, 6f);
 
             return new AutoExposureSettingsData
             {
@@ -50,7 +51,7 @@ namespace VividRP.Runtime
                 exposureSpeedDown = 1f,
                 histogramScale = histogramScaleBias.x,
                 histogramBias = histogramScaleBias.y,
-                luminanceMin = Mathf.Pow(2f, -10f),
+                luminanceMin = Mathf.Pow(2f, histogramLogRange.x),
                 exponentialUpM = 1f,
                 exponentialDownM = 1f,
                 startDistance = AutoExposureSettingsResolver.DefaultStartDistance,
@@ -269,7 +270,9 @@ namespace VividRP.Runtime
     {
         internal const float MiddleGrey = 0.18f;
         internal const float DefaultStartDistance = 1.5f;
+        internal const float DefaultLensAttenuation = 0.78f;
 
+        private const float IsoSaturationSpeedConstant = 0.78f;
         private const float PercentToScale = 0.01f;
         private const float MinSpeed = 0.001f;
         private const float FrameTimeEpsilon = 1f / 60f;
@@ -308,20 +311,15 @@ namespace VividRP.Runtime
                 Mathf.Clamp(autoExposure.lowPercent.value, 1f, 99f) * PercentToScale,
                 exposureHighPercent);
 
-            var minWhitePointLuminance = ResolveHistogramWhitePointLuminance(
-                autoExposure.minBrightness.value,
-                autoExposure.minEV100.value,
-                autoExposure.minEV100.overrideState);
-            var maxWhitePointLuminance = ResolveHistogramWhitePointLuminance(
-                autoExposure.maxBrightness.value,
-                autoExposure.maxEV100.value,
-                autoExposure.maxEV100.overrideState);
+            var minWhitePointLuminance = ResolveWhitePointLuminanceFromEV100(autoExposure.minEV100.value);
+            var maxWhitePointLuminance = ResolveWhitePointLuminanceFromEV100(autoExposure.maxEV100.value);
             maxWhitePointLuminance = Mathf.Max(minWhitePointLuminance, maxWhitePointLuminance);
 
-            var histogramScaleBias = BuildHistogramScaleBias(
+            var histogramLogRange = ResolveHistogramLogRangeFromEV100(
                 autoExposure.histogramLogMin.value,
                 autoExposure.histogramLogMax.value);
-            var validRange = maxWhitePointLuminance > minWhitePointLuminance;
+            var histogramScaleBias = BuildHistogramScaleBias(histogramLogRange.x, histogramLogRange.y);
+            var validRange = autoExposure.minEV100.value < autoExposure.maxEV100.value;
             var validSpeeds = autoExposure.speedUp.value > 0f && autoExposure.speedDown.value > 0f;
 
             settings.enabled = autoExposure.IsActive();
@@ -334,7 +332,7 @@ namespace VividRP.Runtime
             settings.exposureSpeedDown = Mathf.Max(autoExposure.speedDown.value, MinSpeed);
             settings.histogramScale = histogramScaleBias.x;
             settings.histogramBias = histogramScaleBias.y;
-            settings.luminanceMin = Mathf.Pow(2f, Mathf.Min(autoExposure.histogramLogMin.value, autoExposure.histogramLogMax.value - 1e-4f));
+            settings.luminanceMin = Mathf.Pow(2f, histogramLogRange.x);
             settings.exponentialUpM = ComputeExponentialTransitionMultiplier(settings.exposureSpeedUp, DefaultStartDistance);
             settings.exponentialDownM = ComputeExponentialTransitionMultiplier(settings.exposureSpeedDown, DefaultStartDistance);
             settings.startDistance = DefaultStartDistance;
@@ -366,27 +364,45 @@ namespace VividRP.Runtime
             return ColorUtils.ComputeEV100(aperture, shutterSpeed, iso);
         }
 
-        internal static float ResolveWhitePointLuminanceFromEV100(float manualEV100)
+        internal static float ResolveLuminanceMaxFromLensAttenuation(float lensAttenuation = DefaultLensAttenuation)
         {
-            return Mathf.Pow(2f, manualEV100);
+            return IsoSaturationSpeedConstant / Mathf.Max(lensAttenuation, 0.01f);
         }
 
-        internal static float ResolveHistogramWhitePointLuminance(float legacyBrightness, float ev100, bool useEV100)
+        internal static float ResolveWhitePointLuminanceFromEV100(float ev100)
         {
-            return useEV100
-                ? ResolveWhitePointLuminanceFromEV100(ev100)
-                : Mathf.Max(0f, legacyBrightness);
+            return ResolveLuminanceMaxFromLensAttenuation() * Mathf.Pow(2f, ev100);
         }
 
-        internal static float ResolveAverageSceneLuminanceFromEV100(float manualEV100)
+        internal static float ResolveLog2LuminanceFromEV100(float ev100)
         {
-            return ResolveWhitePointLuminanceFromEV100(manualEV100) * MiddleGrey;
+            return ev100 + Mathf.Log(ResolveLuminanceMaxFromLensAttenuation(), 2f);
         }
 
-        internal static float ResolveManualExposureScale(float manualEV100, float exposureCompensation)
+        internal static Vector2 ResolveHistogramLogRangeFromEV100(float histogramMinEV100, float histogramMaxEV100)
         {
-            var whitePointLuminance = ResolveWhitePointLuminanceFromEV100(manualEV100);
+            var histogramLogMax = ResolveLog2LuminanceFromEV100(histogramMaxEV100);
+            var histogramLogMin = Mathf.Min(
+                ResolveLog2LuminanceFromEV100(histogramMinEV100),
+                histogramLogMax - 1f);
+            return new Vector2(histogramLogMin, histogramLogMax);
+        }
+
+        internal static float ResolveAverageSceneLuminanceFromEV100(float ev100)
+        {
+            return ResolveWhitePointLuminanceFromEV100(ev100) * MiddleGrey;
+        }
+
+        internal static float ResolveManualExposureScale(float ev100, float exposureCompensation)
+        {
+            var whitePointLuminance = ResolveWhitePointLuminanceFromEV100(ev100);
             return exposureCompensation / Mathf.Max(whitePointLuminance, 1e-6f);
+        }
+
+        internal static Vector2 BuildHistogramScaleBiasFromEV100(float histogramMinEV100, float histogramMaxEV100)
+        {
+            var histogramLogRange = ResolveHistogramLogRangeFromEV100(histogramMinEV100, histogramMaxEV100);
+            return BuildHistogramScaleBias(histogramLogRange.x, histogramLogRange.y);
         }
 
         internal static Vector2 BuildHistogramScaleBias(float histogramLogMin, float histogramLogMax)

@@ -7,9 +7,13 @@ namespace VividRP.Runtime.RenderPass.Core
 {
     public class HDRISkyPass : RasterPass
     {
+        private const int AutoExposureVectorStride = sizeof(float) * 4;
+
         private static readonly int SkyCubemapId = Shader.PropertyToID("_SkyCubemap");
         private static readonly int SkyTintId = Shader.PropertyToID("_SkyTint");
         private static readonly int SkyParamId = Shader.PropertyToID("_SkyParam");
+        private static readonly int AutoExposurePreExposureBufferId = Shader.PropertyToID("_VividAutoExposurePreExposureBuffer");
+        private static readonly Vector4[] s_DefaultPreExposureData = new Vector4[1];
         private Material m_Material;
 
         [RenderGraphResource(Name = "Color", Access = AccessFlags.ReadWrite, AttachmentIndex = 0)]
@@ -21,8 +25,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private Matrix4x4 m_PixelCoordToViewDirMatrix;
         private Texture m_Cubemap;
         private Color m_Tint = Color.white;
-        private float m_Exposure = 1.0f;
+        private float m_Exposure;
         private float m_Rotation;
+        private VividExposureData m_ExposureData;
+        private GraphicsBuffer m_DefaultPreExposureBuffer;
 
         public HDRISkyPass()
         {
@@ -34,12 +40,14 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             m_Material = CoreUtils.CreateEngineMaterial(resources.HDRISkyShader);
+            EnsureDefaultPreExposureBuffer();
         }
 
         public override void Prepare(ContextContainer frameData)
         {
             var cameraData = frameData.Get<VividCameraData>();
             var skyData = frameData.GetOrCreate<VividSkyData>();
+            m_ExposureData = frameData.Get<VividExposureData>();
             m_PixelCoordToViewDirMatrix = cameraData.GetPixelCoordToViewDirWSMatrix();
             m_Cubemap = skyData.specularCubemap;
             m_Tint = skyData.tint;
@@ -64,6 +72,12 @@ namespace VividRP.Runtime.RenderPass.Core
             if (!m_Material || m_Cubemap == null)
                 return;
 
+            var preExposureBuffer = m_ExposureData?.preExposureBuffer
+                ?? m_ExposureData?.defaultExposureBuffer
+                ?? m_DefaultPreExposureBuffer;
+            if (preExposureBuffer != null)
+                m_Material.SetBuffer(AutoExposurePreExposureBufferId, preExposureBuffer);
+
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetTexture(SkyCubemapId, m_Cubemap);
             mpb.SetColor(SkyTintId, m_Tint);
@@ -80,11 +94,33 @@ namespace VividRP.Runtime.RenderPass.Core
                 CoreUtils.Destroy(m_Material);
                 m_Material = null;
             }
+
+            m_DefaultPreExposureBuffer?.Dispose();
+            m_DefaultPreExposureBuffer = null;
         }
 
         internal static Vector4 BuildSkyParam(float exposure, float rotation)
         {
-            return new Vector4(0f, exposure, -rotation, 0f);
+            return new Vector4(exposure, 1f, -rotation, 0f);
+        }
+
+        private void EnsureDefaultPreExposureBuffer()
+        {
+            if (m_DefaultPreExposureBuffer != null
+                && m_DefaultPreExposureBuffer.count == 1
+                && m_DefaultPreExposureBuffer.stride == AutoExposureVectorStride)
+            {
+                return;
+            }
+
+            m_DefaultPreExposureBuffer?.Dispose();
+            m_DefaultPreExposureBuffer = new GraphicsBuffer(
+                GraphicsBuffer.Target.Structured,
+                1,
+                AutoExposureVectorStride);
+            m_DefaultPreExposureBuffer.name = "VividRP HDRI Sky Default PreExposure";
+            s_DefaultPreExposureData[0] = new Vector4(1f, 1f, AutoExposureSettingsResolver.MiddleGrey, 1f);
+            m_DefaultPreExposureBuffer.SetData(s_DefaultPreExposureData);
         }
 
 

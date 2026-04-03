@@ -49,6 +49,7 @@ namespace VividRP.Runtime
         public ColorParameter groundTint = new(new Color(0.12f, 0.10f, 0.09f), false, false, false);
 
         [Header("Rendering")]
+        [HideInInspector]
         public MinFloatParameter exposure = new(1.0f, 0.0f);
         public BoolParameter renderSunDisk = new(true);
         public MinFloatParameter sunDiskSize = new(1.0f, 0.0f);
@@ -85,7 +86,6 @@ namespace VividRP.Runtime
                 hash = hash * 23 + ozoneMinimumAltitude.GetHashCode();
                 hash = hash * 23 + ozoneLayerWidth.GetHashCode();
                 hash = hash * 23 + groundTint.GetHashCode();
-                hash = hash * 23 + exposure.GetHashCode();
                 hash = hash * 23 + renderSunDisk.GetHashCode();
                 hash = hash * 23 + sunDiskSize.GetHashCode();
                 hash = hash * 23 + enableHeightFog.GetHashCode();
@@ -101,18 +101,6 @@ namespace VividRP.Runtime
             return enableHeightFog.value
                 && fogDensity.value > 0.0f
                 && fogMaxDistance.value > 0.0f;
-        }
-
-        internal float GetPreExposureMultiplier()
-        {
-            return Mathf.Min(Mathf.Max(exposure.value, 0.0f), 1.0f);
-        }
-
-        internal float GetPostExposureMultiplier()
-        {
-            var totalExposure = Mathf.Max(exposure.value, 0.0f);
-            var preExposure = GetPreExposureMultiplier();
-            return preExposure > 0.0f ? totalExposure / preExposure : 0.0f;
         }
 
         internal float GetAirScaleHeight()

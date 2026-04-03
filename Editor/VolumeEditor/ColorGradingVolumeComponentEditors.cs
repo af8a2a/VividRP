@@ -355,8 +355,6 @@ namespace VividRP.Editor
         private SerializedDataParameter m_Mode;
         private SerializedDataParameter m_LowPercent;
         private SerializedDataParameter m_HighPercent;
-        private SerializedDataParameter m_MinBrightness;
-        private SerializedDataParameter m_MaxBrightness;
         private SerializedDataParameter m_MinEV100;
         private SerializedDataParameter m_MaxEV100;
         private SerializedDataParameter m_SpeedUp;
@@ -377,8 +375,6 @@ namespace VividRP.Editor
             m_Mode = Unpack(o.Find(x => x.mode));
             m_LowPercent = Unpack(o.Find(x => x.lowPercent));
             m_HighPercent = Unpack(o.Find(x => x.highPercent));
-            m_MinBrightness = Unpack(o.Find(x => x.minBrightness));
-            m_MaxBrightness = Unpack(o.Find(x => x.maxBrightness));
             m_MinEV100 = Unpack(o.Find(x => x.minEV100));
             m_MaxEV100 = Unpack(o.Find(x => x.maxEV100));
             m_SpeedUp = Unpack(o.Find(x => x.speedUp));
@@ -397,7 +393,7 @@ namespace VividRP.Editor
 
             using (new EditorGUI.DisabledScope(!m_Enabled.value.boolValue))
             {
-                PropertyField(m_Mode, EditorGUIUtility.TrTextContent("Mode"));
+                PropertyField(m_Mode, EditorGUIUtility.TrTextContent("Metering Mode"));
 
                 var mode = (AutoExposureMode)m_Mode.value.intValue;
                 if (mode == AutoExposureMode.Manual)
@@ -406,7 +402,7 @@ namespace VividRP.Editor
                     if (!m_ApplyPhysicalCameraExposure.value.boolValue)
                         PropertyField(m_ManualEV100, EditorGUIUtility.TrTextContent("Manual EV100"));
 
-                    PropertyField(m_ExposureCompensation);
+                    PropertyField(m_ExposureCompensation, EditorGUIUtility.TrTextContent("Exposure Compensation"));
                 }
                 else
                 {
@@ -416,10 +412,10 @@ namespace VividRP.Editor
                     PropertyField(m_MaxEV100, EditorGUIUtility.TrTextContent("Max EV100"));
                     PropertyField(m_SpeedUp);
                     PropertyField(m_SpeedDown);
-                    PropertyField(m_ExposureCompensation);
-                    PropertyField(m_HistogramLogMin);
-                    PropertyField(m_HistogramLogMax);
-                    PropertyField(m_MeterMask, EditorGUIUtility.TrTextContent("Meter Mask"));
+                    PropertyField(m_ExposureCompensation, EditorGUIUtility.TrTextContent("Exposure Compensation"));
+                    PropertyField(m_HistogramLogMin, EditorGUIUtility.TrTextContent("Histogram Min EV100"));
+                    PropertyField(m_HistogramLogMax, EditorGUIUtility.TrTextContent("Histogram Max EV100"));
+                    PropertyField(m_MeterMask, EditorGUIUtility.TrTextContent("Exposure Metering Mask"));
                 }
             }
         }

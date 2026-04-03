@@ -21,8 +21,8 @@ namespace VividRP.Editor.Tests
         {
             var autoExposure = new AutoExposure();
             autoExposure.enabled.value = true;
-            autoExposure.minBrightness.value = 0.03f;
-            autoExposure.maxBrightness.value = 2.0f;
+            autoExposure.minEV100.value = -5.058894f;
+            autoExposure.maxEV100.value = 1f;
             autoExposure.speedUp.value = 3f;
             autoExposure.speedDown.value = 1f;
 
@@ -30,14 +30,10 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void AutoExposure_IsActive_WhenHistogramEV100OverridesProduceValidRange()
+        public void AutoExposure_IsActive_WhenHistogramEV100RangeIsValid()
         {
             var autoExposure = new AutoExposure();
             autoExposure.enabled.value = true;
-            autoExposure.minBrightness.value = 2f;
-            autoExposure.maxBrightness.value = 1f;
-            autoExposure.minEV100.overrideState = true;
-            autoExposure.maxEV100.overrideState = true;
             autoExposure.minEV100.value = -5.058894f;
             autoExposure.maxEV100.value = 1f;
             autoExposure.speedUp.value = 3f;
@@ -61,9 +57,26 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void BuildHistogramScaleBias_PacksLogRangeIntoShaderSpace()
+        public void ResolveLuminanceMaxFromLensAttenuation_ReturnsUnrealUnitlessDefault()
         {
-            var result = AutoExposureSettingsResolver.BuildHistogramScaleBias(-10f, 6f);
+            var result = AutoExposureSettingsResolver.ResolveLuminanceMaxFromLensAttenuation();
+
+            Assert.That(result, Is.EqualTo(1f).Within(1e-5f));
+        }
+
+        [Test]
+        public void ResolveHistogramLogRangeFromEV100_ConvertsIntoLog2LuminanceRange()
+        {
+            var result = AutoExposureSettingsResolver.ResolveHistogramLogRangeFromEV100(-10f, 6f);
+
+            Assert.That(result.x, Is.EqualTo(-10f).Within(1e-5f));
+            Assert.That(result.y, Is.EqualTo(6f).Within(1e-5f));
+        }
+
+        [Test]
+        public void BuildHistogramScaleBiasFromEV100_PacksUeRangeIntoShaderSpace()
+        {
+            var result = AutoExposureSettingsResolver.BuildHistogramScaleBiasFromEV100(-10f, 6f);
 
             Assert.That(result.x, Is.EqualTo(1f / 16f).Within(1e-5f));
             Assert.That(result.y, Is.EqualTo(10f / 16f).Within(1e-5f));
@@ -83,22 +96,6 @@ namespace VividRP.Editor.Tests
             var result = AutoExposureSettingsResolver.ResolveWhitePointLuminanceFromEV100(2f);
 
             Assert.That(result, Is.EqualTo(4f).Within(1e-5f));
-        }
-
-        [Test]
-        public void ResolveHistogramWhitePointLuminance_UsesEV100Override_WhenEnabled()
-        {
-            var result = AutoExposureSettingsResolver.ResolveHistogramWhitePointLuminance(0.03f, 2f, true);
-
-            Assert.That(result, Is.EqualTo(4f).Within(1e-5f));
-        }
-
-        [Test]
-        public void ResolveHistogramWhitePointLuminance_FallsBackToLegacyBrightness_WhenOverrideDisabled()
-        {
-            var result = AutoExposureSettingsResolver.ResolveHistogramWhitePointLuminance(0.03f, 2f, false);
-
-            Assert.That(result, Is.EqualTo(0.03f).Within(1e-5f));
         }
 
         [Test]
@@ -211,6 +208,7 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("#pragma kernel ResolveExposure"));
             Assert.That(shaderSource, Does.Contain("RWStructuredBuffer<uint> _HistogramBuffer;"));
             Assert.That(shaderSource, Does.Contain("RWStructuredBuffer<float4> _CurrentExposureBuffer;"));
+            Assert.That(shaderSource, Does.Contain("static const float3 kLuminanceWeights = float3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0);"));
             Assert.That(shaderSource, Does.Contain("const float preExposure = max(_PreviousExposureBuffer[0].x, kEpsilon);"));
             Assert.That(shaderSource, Does.Contain("_InputColor.Load(int3(dispatchThreadId.xy, 0)).rgb / preExposure"));
             Assert.That(helperSource, Does.Contain("StructuredBuffer<float4> _VividAutoExposurePreExposureBuffer;"));
@@ -218,9 +216,10 @@ namespace VividRP.Editor.Tests
             Assert.That(runtimeSource, Does.Contain("settings.mode == AutoExposureMode.Manual"));
             Assert.That(runtimeSource, Does.Contain("settings.applyPhysicalCameraExposure = autoExposure.applyPhysicalCameraExposure.value;"));
             Assert.That(runtimeSource, Does.Contain("settings.manualEV100 = ResolveManualEV100("));
-            Assert.That(runtimeSource, Does.Contain("ResolveHistogramWhitePointLuminance("));
-            Assert.That(runtimeSource, Does.Contain("autoExposure.minEV100.overrideState"));
-            Assert.That(runtimeSource, Does.Contain("autoExposure.maxEV100.overrideState"));
+            Assert.That(runtimeSource, Does.Contain("ResolveWhitePointLuminanceFromEV100(autoExposure.minEV100.value)"));
+            Assert.That(runtimeSource, Does.Contain("ResolveWhitePointLuminanceFromEV100(autoExposure.maxEV100.value)"));
+            Assert.That(runtimeSource, Does.Contain("ResolveHistogramLogRangeFromEV100("));
+            Assert.That(runtimeSource, Does.Contain("BuildHistogramScaleBiasFromEV100("));
             Assert.That(runtimeSource, Does.Contain("ColorUtils.ComputeEV100(aperture, shutterSpeed, iso)"));
             Assert.That(runtimeSource, Does.Contain("ResolveManualExposureScale(settings.manualEV100, settings.exposureCompensation)"));
             Assert.That(runtimeSource, Does.Contain("ResolveAverageSceneLuminanceFromEV100(settings.manualEV100)"));

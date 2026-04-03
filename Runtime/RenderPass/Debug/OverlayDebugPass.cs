@@ -12,6 +12,7 @@ namespace VividRP.Runtime.RenderPass.Core
         Depth = 2,
         MotionVectors = 3,
         VisibilityBuffer = 4,
+        AutoExposure = 5,
     }
 
     public enum OverlayDebugDepthMode
@@ -20,10 +21,16 @@ namespace VividRP.Runtime.RenderPass.Core
         Linear01 = 1,
     }
 
-    public sealed class OverlayDebugPass : RasterPass
+    public sealed class OverlayDebugPass : UnsafePass
     {
         internal const string OverlayDebugShaderName = "Hidden/VividRP/OverlayDebug";
         internal const float MinOverlayViewportFraction = 0.35f;
+        private const int AutoExposureHistogramBucketCount = 64;
+        private const int AutoExposureHistogramThreadGroupSizeX = 8;
+        private const int AutoExposureHistogramThreadGroupSizeY = 8;
+        private const string ClearHistogramKernelName = "ClearHistogram";
+        private const string BuildHistogramKernelName = "BuildHistogram";
+        private const int AutoExposureVectorStride = sizeof(float) * 4;
 
         private static readonly int SourceTextureId = Shader.PropertyToID("_SourceTexture");
         private static readonly int DebugTextureId = Shader.PropertyToID("_DebugTexture");
@@ -40,6 +47,22 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int DepthModeId = Shader.PropertyToID("_DepthMode");
         private static readonly int DebugExposureId = Shader.PropertyToID("_DebugExposure");
         private static readonly int DebugOpacityId = Shader.PropertyToID("_DebugOpacity");
+        private static readonly int AutoExposureDebugHistogramBufferId = Shader.PropertyToID("_AutoExposureHistogramBuffer");
+        private static readonly int AutoExposureDebugCurrentExposureBufferId = Shader.PropertyToID("_AutoExposureCurrentExposureBuffer");
+        private static readonly int AutoExposureDebugStateId = Shader.PropertyToID("_AutoExposureDebugState");
+        private static readonly int AutoExposureDebugHistogramTransformId = Shader.PropertyToID("_AutoExposureHistogramTransform");
+        private static readonly int AutoExposureDebugRangeParamsId = Shader.PropertyToID("_AutoExposureRangeParams");
+        private static readonly int AutoExposureInputTextureId = Shader.PropertyToID("_InputColor");
+        private static readonly int AutoExposureHistogramBufferId = Shader.PropertyToID("_HistogramBuffer");
+        private static readonly int AutoExposurePreviousBufferId = Shader.PropertyToID("_PreviousExposureBuffer");
+        private static readonly int AutoExposureMeterMaskId = Shader.PropertyToID("_AutoExposureMeterMask");
+        private static readonly int AutoExposureParams0Id = Shader.PropertyToID("_AutoExposureParams0");
+        private static readonly int AutoExposureParams1Id = Shader.PropertyToID("_AutoExposureParams1");
+        private static readonly int AutoExposureParams2Id = Shader.PropertyToID("_AutoExposureParams2");
+        private static readonly int AutoExposureParams3Id = Shader.PropertyToID("_AutoExposureParams3");
+        private static readonly int AutoExposureScreenSizeId = Shader.PropertyToID("_AutoExposureScreenSize");
+        private static readonly uint[] s_ZeroHistogramData = new uint[AutoExposureHistogramBucketCount];
+        private static readonly Vector4[] s_FallbackExposureData = new Vector4[1];
 
         [RenderGraphResource(Name = "SourceTexture", Access = AccessFlags.Read)]
         private RenderGraphTexture m_SourceTexture;
@@ -73,6 +96,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private OverlayDebugDepthMode m_DepthMode = OverlayDebugDepthMode.Raw;
 
         private Material m_Material;
+        private MaterialPropertyBlock m_MaterialPropertyBlock;
+        private ComputeShader m_AutoExposureCompute;
+        private int m_ClearHistogramKernel = -1;
+        private int m_BuildHistogramKernel = -1;
         private float m_ResolvedOverlayAmount;
         private int m_ResolvedArraySlice;
         private float m_ResolvedExposure;
@@ -81,6 +108,16 @@ namespace VividRP.Runtime.RenderPass.Core
         private OverlayDebugDepthMode m_ResolvedDepthMode = OverlayDebugDepthMode.Raw;
         private Vector4 m_OverlayRect = new(0.65f, 0.65f, MinOverlayViewportFraction, MinOverlayViewportFraction);
         private Vector4 m_OverlayScreenSize = new(1f, 1f, 1f, 1f);
+        private AutoExposureSettingsData m_AutoExposureSettings;
+        private VividExposureData m_ExposureData;
+        private GraphicsBuffer m_AutoExposureHistogramBuffer;
+        private GraphicsBuffer m_FallbackExposureBuffer;
+        private Vector4 m_AutoExposureDebugState;
+        private Vector4 m_AutoExposureHistogramTransform;
+        private Vector4 m_AutoExposureRangeParams;
+        private int m_AutoExposureWidth = 1;
+        private int m_AutoExposureHeight = 1;
+        private bool m_AutoExposureHistogramAvailable;
 
         internal readonly struct OverlayDebugSettingsData
         {
@@ -158,6 +195,12 @@ namespace VividRP.Runtime.RenderPass.Core
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             var shader = resources?.OverlayDebugShader;
             shader ??= Shader.Find(OverlayDebugShaderName);
+            m_AutoExposureCompute = resources?.AutoExposureCompute;
+            if (m_AutoExposureCompute != null)
+            {
+                m_ClearHistogramKernel = m_AutoExposureCompute.FindKernel(ClearHistogramKernelName);
+                m_BuildHistogramKernel = m_AutoExposureCompute.FindKernel(BuildHistogramKernelName);
+            }
 
             if (shader == null)
             {
@@ -166,6 +209,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             m_Material = CoreUtils.CreateEngineMaterial(shader);
+            EnsureAutoExposureDebugBuffers();
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -212,9 +256,50 @@ namespace VividRP.Runtime.RenderPass.Core
             var textureSliceCount = ResolveTextureSliceCount(m_DebugTexture?.desc, null);
             m_ResolvedArraySlice = ResolveSliceIndex(m_ResolvedArraySlice, textureSliceCount);
             m_ResolvedVisualizationMode = ResolveVisualizationMode(m_ResolvedVisualizationMode, m_DebugTexture?.desc, null);
+
+            m_ExposureData = frameData.Get<VividExposureData>();
+            m_AutoExposureSettings = m_ExposureData != null
+                ? m_ExposureData.settings
+                : AutoExposureSettingsData.CreateDefault();
+            m_AutoExposureWidth = ResolveOutputDimension(
+                descriptor => descriptor.Width,
+                cameraData.actualWidth,
+                cameraData.pixelWidth,
+                Screen.width,
+                m_SourceTexture?.desc);
+            m_AutoExposureHeight = ResolveOutputDimension(
+                descriptor => descriptor.Height,
+                cameraData.actualHeight,
+                cameraData.pixelHeight,
+                Screen.height,
+                m_SourceTexture?.desc);
+
+            var exposureEnabled = m_ExposureData != null && m_ExposureData.exposureEnabled;
+            var histogramMode = m_AutoExposureSettings.mode == AutoExposureMode.Histogram;
+            m_AutoExposureHistogramAvailable = m_ResolvedVisualizationMode == OverlayDebugVisualizationMode.AutoExposure
+                && exposureEnabled
+                && histogramMode
+                && m_AutoExposureCompute != null
+                && m_ClearHistogramKernel >= 0
+                && m_BuildHistogramKernel >= 0;
+            m_AutoExposureDebugState = new Vector4(
+                exposureEnabled ? 1f : 0f,
+                histogramMode ? 1f : 0f,
+                m_AutoExposureHistogramAvailable ? 1f : 0f,
+                m_ExposureData != null && m_ExposureData.hasValidHistory ? 1f : 0f);
+            m_AutoExposureHistogramTransform = new Vector4(
+                m_AutoExposureSettings.histogramScale,
+                m_AutoExposureSettings.histogramBias,
+                m_AutoExposureSettings.luminanceMin,
+                m_AutoExposureSettings.exposureCompensation);
+            m_AutoExposureRangeParams = new Vector4(
+                m_AutoExposureSettings.minAverageLuminance,
+                m_AutoExposureSettings.maxAverageLuminance,
+                m_AutoExposureSettings.exposureLowPercent,
+                m_AutoExposureSettings.exposureHighPercent);
         }
 
-        public override void Record(RasterGraphContext context)
+        public override void Record(UnsafeGraphContext context)
         {
             if (m_Material == null
                 || !m_SourceTexture.innerHandle.IsValid()
@@ -223,6 +308,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
+            var cmd = context.cmd;
+            var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(cmd);
             var sourceTexture = ResolveTexture(m_SourceTexture.innerHandle);
             if (sourceTexture == null)
                 return;
@@ -238,30 +325,44 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ResolvedVisualizationMode,
                 m_DebugTexture?.desc,
                 debugTexture);
+            var usesAutoExposureVisualization = resolvedVisualizationMode == OverlayDebugVisualizationMode.AutoExposure;
             var debugTextureScaleBias = m_DebugTexture != null && m_DebugTexture.innerHandle.IsValid()
                 ? GetScaleBias(m_DebugTexture.innerHandle)
                 : new Vector4(1f, 1f, 0f, 0f);
+            if (usesAutoExposureVisualization)
+                ExecuteAutoExposureDebugHistogram(cmd);
 
-            var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
+            EnsureAutoExposureDebugBuffers();
+            var currentExposureBuffer = ResolveCurrentExposureBuffer();
+            m_Material.SetBuffer(AutoExposureDebugHistogramBufferId, m_AutoExposureHistogramBuffer);
+            m_Material.SetBuffer(AutoExposureDebugCurrentExposureBufferId, currentExposureBuffer);
+
+            m_MaterialPropertyBlock ??= new MaterialPropertyBlock();
+            var mpb = m_MaterialPropertyBlock;
+            mpb.Clear();
             mpb.SetTexture(SourceTextureId, sourceTexture);
             mpb.SetVector(SourceTextureScaleBiasId, GetScaleBias(m_SourceTexture.innerHandle));
             mpb.SetVector(DebugTextureScaleBiasId, debugTextureScaleBias);
             mpb.SetVector(OverlayRectId, m_OverlayRect);
             mpb.SetVector(OverlayScreenSizeId, m_OverlayScreenSize);
-            mpb.SetInt(DebugTextureAvailableId, debugTexture != null ? 1 : 0);
+            mpb.SetInt(DebugTextureAvailableId, debugTexture != null || usesAutoExposureVisualization ? 1 : 0);
             mpb.SetInt(DebugTextureIsArrayId, isDebugTextureArray ? 1 : 0);
             mpb.SetInt(DebugSliceId, resolvedSlice);
             mpb.SetInt(VisualizationModeId, (int)resolvedVisualizationMode);
             mpb.SetInt(DepthModeId, (int)m_ResolvedDepthMode);
             mpb.SetFloat(DebugExposureId, m_ResolvedExposure);
             mpb.SetFloat(DebugOpacityId, m_ResolvedOpacity);
+            mpb.SetVector(AutoExposureDebugStateId, m_AutoExposureDebugState);
+            mpb.SetVector(AutoExposureDebugHistogramTransformId, m_AutoExposureHistogramTransform);
+            mpb.SetVector(AutoExposureDebugRangeParamsId, m_AutoExposureRangeParams);
             mpb.SetTexture(DebugTextureId, debugTexture != null && !isDebugTextureArray ? debugTexture : Texture2D.blackTexture);
             mpb.SetTexture(DebugVisibilityTextureId, debugTexture != null && !isDebugTextureArray ? debugTexture : Texture2D.blackTexture);
 
             if (debugTexture != null && isDebugTextureArray)
                 mpb.SetTexture(DebugTextureArrayId, debugTexture);
 
-            CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);
+            nativeCmd.SetRenderTarget(m_OutputTexture);
+            CoreUtils.DrawFullScreen(nativeCmd, m_Material, mpb, 0);
         }
 
         public override void Dispose()
@@ -271,6 +372,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 CoreUtils.Destroy(m_Material);
                 m_Material = null;
             }
+
+            m_AutoExposureHistogramBuffer?.Dispose();
+            m_AutoExposureHistogramBuffer = null;
+
+            m_FallbackExposureBuffer?.Dispose();
+            m_FallbackExposureBuffer = null;
+            m_MaterialPropertyBlock = null;
+
+            m_AutoExposureCompute = null;
+            m_ClearHistogramKernel = -1;
+            m_BuildHistogramKernel = -1;
         }
 
         internal static OverlayDebugSettingsData ResolveSettings(
@@ -498,6 +610,154 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var scale = handle.rtHandleProperties.rtHandleScale;
             return new Vector4(scale.x, scale.y, 0f, 0f);
+        }
+
+        private void ExecuteAutoExposureDebugHistogram(UnsafeCommandBuffer cmd)
+        {
+            EnsureAutoExposureDebugBuffers();
+            ClearAutoExposureHistogramBuffer(cmd);
+
+            if (!m_AutoExposureHistogramAvailable
+                || cmd == null
+                || m_AutoExposureCompute == null
+                || m_AutoExposureHistogramBuffer == null
+                || !m_SourceTexture.innerHandle.IsValid())
+            {
+                return;
+            }
+
+            var meterMask = m_AutoExposureSettings.meterMask != null
+                ? m_AutoExposureSettings.meterMask
+                : Texture2D.whiteTexture;
+            var previousExposureBuffer = ResolvePreviousExposureBuffer();
+            if (previousExposureBuffer == null)
+                return;
+
+            BindAutoExposureParameters(cmd, m_BuildHistogramKernel);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_BuildHistogramKernel, AutoExposureInputTextureId, m_SourceTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_BuildHistogramKernel, AutoExposureMeterMaskId, meterMask);
+            cmd.SetComputeBufferParam(m_AutoExposureCompute, m_BuildHistogramKernel, AutoExposureHistogramBufferId, m_AutoExposureHistogramBuffer);
+            cmd.SetComputeBufferParam(m_AutoExposureCompute, m_BuildHistogramKernel, AutoExposurePreviousBufferId, previousExposureBuffer);
+            cmd.DispatchCompute(
+                m_AutoExposureCompute,
+                m_BuildHistogramKernel,
+                CoreUtils.DivRoundUp(m_AutoExposureWidth, AutoExposureHistogramThreadGroupSizeX),
+                CoreUtils.DivRoundUp(m_AutoExposureHeight, AutoExposureHistogramThreadGroupSizeY),
+                1);
+        }
+
+        private void BindAutoExposureParameters(UnsafeCommandBuffer cmd, int kernel)
+        {
+            if (cmd == null || kernel < 0 || m_AutoExposureCompute == null)
+                return;
+
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                AutoExposureParams0Id,
+                new Vector4(
+                    m_AutoExposureSettings.exposureLowPercent,
+                    m_AutoExposureSettings.exposureHighPercent,
+                    m_AutoExposureSettings.minAverageLuminance,
+                    m_AutoExposureSettings.maxAverageLuminance));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                AutoExposureParams1Id,
+                new Vector4(
+                    m_AutoExposureSettings.exposureSpeedUp,
+                    m_AutoExposureSettings.exposureSpeedDown,
+                    m_AutoExposureSettings.exposureCompensation,
+                    m_AutoExposureSettings.deltaTime));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                AutoExposureParams2Id,
+                new Vector4(
+                    m_AutoExposureSettings.histogramScale,
+                    m_AutoExposureSettings.histogramBias,
+                    m_AutoExposureSettings.luminanceMin,
+                    m_AutoExposureSettings.forceTarget));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                AutoExposureParams3Id,
+                new Vector4(
+                    m_AutoExposureSettings.exponentialUpM,
+                    m_AutoExposureSettings.exponentialDownM,
+                    m_AutoExposureSettings.startDistance,
+                    0f));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                AutoExposureScreenSizeId,
+                new Vector4(
+                    m_AutoExposureWidth,
+                    m_AutoExposureHeight,
+                    1f / Mathf.Max(1, m_AutoExposureWidth),
+                    1f / Mathf.Max(1, m_AutoExposureHeight)));
+        }
+
+        private void EnsureAutoExposureDebugBuffers()
+        {
+            if (m_AutoExposureHistogramBuffer == null
+                || m_AutoExposureHistogramBuffer.count != AutoExposureHistogramBucketCount
+                || m_AutoExposureHistogramBuffer.stride != sizeof(uint))
+            {
+                m_AutoExposureHistogramBuffer?.Dispose();
+                m_AutoExposureHistogramBuffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured,
+                    AutoExposureHistogramBucketCount,
+                    sizeof(uint));
+                m_AutoExposureHistogramBuffer.name = "VividRP Overlay Auto Exposure Histogram";
+                m_AutoExposureHistogramBuffer.SetData(s_ZeroHistogramData);
+            }
+
+            if (m_FallbackExposureBuffer == null
+                || m_FallbackExposureBuffer.count != 1
+                || m_FallbackExposureBuffer.stride != AutoExposureVectorStride)
+            {
+                m_FallbackExposureBuffer?.Dispose();
+                m_FallbackExposureBuffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured,
+                    1,
+                    AutoExposureVectorStride);
+                m_FallbackExposureBuffer.name = "VividRP Overlay Auto Exposure Fallback";
+                s_FallbackExposureData[0] = new Vector4(1f, 1f, AutoExposureSettingsResolver.MiddleGrey, 1f);
+                m_FallbackExposureBuffer.SetData(s_FallbackExposureData);
+            }
+        }
+
+        private void ClearAutoExposureHistogramBuffer(UnsafeCommandBuffer cmd)
+        {
+            if (m_AutoExposureHistogramBuffer == null)
+                return;
+
+            if (cmd != null
+                && m_AutoExposureCompute != null
+                && m_ClearHistogramKernel >= 0)
+            {
+                BindAutoExposureParameters(cmd, m_ClearHistogramKernel);
+                cmd.SetComputeBufferParam(m_AutoExposureCompute, m_ClearHistogramKernel, AutoExposureHistogramBufferId, m_AutoExposureHistogramBuffer);
+                cmd.DispatchCompute(m_AutoExposureCompute, m_ClearHistogramKernel, 1, 1, 1);
+                return;
+            }
+
+            m_AutoExposureHistogramBuffer.SetData(s_ZeroHistogramData);
+        }
+
+        private GraphicsBuffer ResolveCurrentExposureBuffer()
+        {
+            return m_ExposureData?.currentExposureBuffer
+                   ?? m_ExposureData?.previousExposureBuffer
+                   ?? m_ExposureData?.defaultExposureBuffer
+                   ?? m_FallbackExposureBuffer;
+        }
+
+        private GraphicsBuffer ResolvePreviousExposureBuffer()
+        {
+            if (m_ExposureData == null)
+                return m_FallbackExposureBuffer;
+
+            if (m_ExposureData.hasValidHistory && m_ExposureData.previousExposureBuffer != null)
+                return m_ExposureData.previousExposureBuffer;
+
+            return m_ExposureData.defaultExposureBuffer ?? m_FallbackExposureBuffer;
         }
 
     }

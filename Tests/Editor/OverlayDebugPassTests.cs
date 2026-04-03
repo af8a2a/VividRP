@@ -140,6 +140,20 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ResolveVisualizationMode_PreservesExplicitAutoExposureMode()
+        {
+            var mode = OverlayDebugPass.ResolveVisualizationMode(
+                OverlayDebugVisualizationMode.AutoExposure,
+                new RenderGraphTextureDesc
+                {
+                    ColorFormat = GraphicsFormat.R16G16B16A16_SFloat
+                },
+                null);
+
+            Assert.That(mode, Is.EqualTo(OverlayDebugVisualizationMode.AutoExposure));
+        }
+
+        [Test]
         public void ResolveSliceIndex_ClampsToValidArrayRange()
         {
             Assert.That(OverlayDebugPass.ResolveSliceIndex(5, 4), Is.EqualTo(3));
@@ -184,8 +198,11 @@ namespace VividRP.Editor.Tests
         {
             var shaderSource = File.ReadAllText(GetShaderSourcePath());
 
+            Assert.That(shaderSource, Does.Contain("#pragma target 4.5"));
             Assert.That(shaderSource, Does.Contain("TEXTURE2D_ARRAY(_DebugTextureArray);"));
             Assert.That(shaderSource, Does.Contain("TYPED_TEXTURE2D(float2, _DebugVisibilityTexture);"));
+            Assert.That(shaderSource, Does.Contain("StructuredBuffer<uint> _AutoExposureHistogramBuffer;"));
+            Assert.That(shaderSource, Does.Contain("StructuredBuffer<float4> _AutoExposureCurrentExposureBuffer;"));
             Assert.That(shaderSource, Does.Contain("SAMPLE_TEXTURE2D_ARRAY(_DebugTextureArray"));
             Assert.That(shaderSource, Does.Contain("_OverlayRect"));
             Assert.That(shaderSource, Does.Contain("exp2(_DebugExposure)"));
@@ -199,6 +216,12 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("ResolveMotionVectorCellCenterUv"));
             Assert.That(shaderSource, Does.Contain("SampleDebugTextureRaw(cellCenterUv).xy"));
             Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_VISUALIZATION_VISIBILITY_BUFFER"));
+            Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_VISUALIZATION_AUTO_EXPOSURE"));
+            Assert.That(shaderSource, Does.Contain("EvaluateAutoExposureDebugOverlay"));
+            Assert.That(shaderSource, Does.Contain("SummarizeAutoExposureDebug"));
+            Assert.That(shaderSource, Does.Contain("ResolveAutoExposureHistogramHeight"));
+            Assert.That(shaderSource, Does.Contain("_AutoExposureDebugState"));
+            Assert.That(shaderSource, Does.Contain("_AutoExposureRangeParams"));
             Assert.That(shaderSource, Does.Contain("UnpackVisibilityBufferValue"));
             Assert.That(shaderSource, Does.Contain("IsPackedVisibilityBufferValueValid"));
             Assert.That(shaderSource, Does.Contain("sampler_PointClamp"));

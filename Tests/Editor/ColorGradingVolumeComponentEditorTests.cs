@@ -237,5 +237,35 @@ namespace VividRP.Editor.Tests
                 UnityEngine.Object.DestroyImmediate(component);
             }
         }
+
+        [Test]
+        public void AutoExposureEditor_UsesUnrealStyleExposureLabels()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Editor", "VolumeEditor", "ColorGradingVolumeComponentEditors.cs"));
+
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Metering Mode\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Histogram Min EV100\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Histogram Max EV100\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Exposure Metering Mask\")"));
+        }
+
+        private static string GetPackageFilePath(params string[] relativeParts)
+        {
+            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            var packageRoots = new[]
+            {
+                Path.Combine(projectRoot, "Packages", "VividRP"),
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
+            };
+
+            foreach (var packageRoot in packageRoots)
+            {
+                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
+                if (File.Exists(fullPath))
+                    return fullPath;
+            }
+
+            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
+        }
     }
 }

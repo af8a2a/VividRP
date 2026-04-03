@@ -77,7 +77,10 @@ namespace VividRP.Runtime
             cmd.SetComputeTextureParam(m_ComputeShader, m_Kernel, AmbientProbeInputCubemapId, sourceCubemap);
             cmd.SetComputeBufferParam(m_ComputeShader, m_Kernel, AmbientProbeOutputBufferId, m_AmbientProbeBuffer);
             cmd.SetComputeVectorParam(m_ComputeShader, SkyConvolutionTintId, new Vector4(tint.r, tint.g, tint.b, tint.a));
-            cmd.SetComputeVectorParam(m_ComputeShader, SkyConvolutionParamsId, new Vector4(Mathf.Max(exposure, 0.0f), -rotation, 0.0f, 0.0f));
+            cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                SkyConvolutionParamsId,
+                new Vector4(HDRISkyVolume.ResolveExposureMultiplier(exposure), -rotation, 0.0f, 0.0f));
             Hammersley.BindConstants(cmd, m_ComputeShader);
             cmd.DispatchCompute(m_ComputeShader, m_Kernel, 1, 1, 1);
 

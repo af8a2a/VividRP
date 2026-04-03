@@ -116,11 +116,13 @@ namespace VividRP.Editor.Tests
             var disabledSpotLight = disabledSpotObject.AddComponent<Light>();
 
             pointLight.type = LightType.Point;
+            pointLight.lightUnit = LightUnit.Candela;
             pointLight.color = Color.cyan;
             pointLight.intensity = 3.0f;
             pointLight.range = 8.0f;
 
             spotLight.type = LightType.Spot;
+            spotLight.lightUnit = LightUnit.Candela;
             spotLight.color = Color.yellow;
             spotLight.intensity = 2.0f;
             spotLight.range = 12.0f;

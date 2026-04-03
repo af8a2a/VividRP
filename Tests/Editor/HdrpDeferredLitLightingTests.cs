@@ -29,6 +29,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EvaluateVividLitDirectLight"));
             Assert.That(source, Does.Contain("EvaluateDirectionalLight"));
             Assert.That(source, Does.Contain("EvaluatePunctualLight"));
+            Assert.That(source, Does.Contain("float EvaluatePunctualLightDistanceAttenuation"));
+            Assert.That(source, Does.Contain("float distanceAttenuation = rcp(max(distanceSquared, 1e-6));"));
+            Assert.That(source, Does.Contain("float rangeAttenuation = saturate(1.0 - distanceSquared * punctualLight.inverseRangeSquared);"));
         }
 
         [Test]

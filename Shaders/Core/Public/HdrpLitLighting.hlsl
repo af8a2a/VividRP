@@ -449,8 +449,9 @@ float3 EvaluateDirectionalLight(
 
 float EvaluatePunctualLightDistanceAttenuation(PunctualLightData punctualLight, float distanceSquared)
 {
-    float attenuation = saturate(1.0 - distanceSquared * punctualLight.inverseRangeSquared);
-    return attenuation * attenuation;
+    float distanceAttenuation = rcp(max(distanceSquared, 1e-6));
+    float rangeAttenuation = saturate(1.0 - distanceSquared * punctualLight.inverseRangeSquared);
+    return distanceAttenuation * rangeAttenuation * rangeAttenuation;
 }
 
 float EvaluatePunctualLightSpotAttenuation(PunctualLightData punctualLight, float3 lightDirectionWS)

@@ -175,7 +175,8 @@ namespace VividRP.Runtime
 
         private static VividLightRenderData CreateLightRenderData(Light light, VividAdditionalLightData additionalLightData)
         {
-            var finalColor = light.color.linear * light.intensity;
+            var nativeIntensity = ResolveNativeLightIntensity(light);
+            var finalColor = light.color.linear * nativeIntensity;
             var range = Mathf.Max(light.range, 0.0f);
             var inverseRangeSquared = range > 0.0f ? 1.0f / Mathf.Max(range * range, 1e-6f) : 0.0f;
             var shadowRenderingLayerMask = additionalLightData != null
@@ -189,7 +190,7 @@ namespace VividRP.Runtime
                 positionWS = light.transform.position,
                 range = range,
                 forwardWS = light.transform.forward,
-                intensity = light.intensity,
+                intensity = Mathf.Max(light.intensity, 0.0f),
                 color = new Vector3(finalColor.r, finalColor.g, finalColor.b),
                 shadowStrength = light.shadows != LightShadows.None ? light.shadowStrength : 0.0f,
                 spotAngle = light.spotAngle,
@@ -221,6 +222,24 @@ namespace VividRP.Runtime
                 flags |= VividLightRenderDataFlags.CastShadows;
 
             return flags;
+        }
+
+        private static float ResolveNativeLightIntensity(Light light)
+        {
+            if (light == null)
+                return 0.0f;
+
+            var intensity = Mathf.Max(light.intensity, 0.0f);
+            if (!LightUnitUtils.IsLightUnitSupported(light.type, light.lightUnit))
+                return intensity;
+
+            return Mathf.Max(
+                LightUnitUtils.ConvertIntensity(
+                    light,
+                    intensity,
+                    light.lightUnit,
+                    LightUnitUtils.GetNativeLightUnit(light.type)),
+                0.0f);
         }
 
         internal static bool IsLightDataChanged(Light light, VividAdditionalLightData additionalLightData, in VividLightRenderData trackedLightData)

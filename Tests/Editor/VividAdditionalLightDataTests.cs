@@ -217,6 +217,7 @@ namespace VividRP.Editor.Tests
         {
             var light = m_GameObject.AddComponent<Light>();
             light.type = LightType.Point;
+            light.lightUnit = LightUnit.Candela;
             light.color = Color.red;
             light.intensity = 1.5f;
             light.range = 4.0f;
@@ -253,6 +254,41 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void UpdateLightData_ConvertsPointLightLumenIntoNativeCandelaForTrackedColor()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Point;
+            light.lightUnit = LightUnit.Lumen;
+            light.color = Color.white;
+            light.intensity = 4.0f * Mathf.PI;
+
+            var trackedLightData = VividLightRenderDatabase.instance.UpdateLightData(light, light.GetVividAdditionalLightData());
+
+            Assert.That(trackedLightData.intensity, Is.EqualTo(4.0f * Mathf.PI).Within(0.0001f));
+            Assert.That(trackedLightData.color.x, Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(trackedLightData.color.y, Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(trackedLightData.color.z, Is.EqualTo(1.0f).Within(0.0001f));
+        }
+
+        [Test]
+        public void UpdateLightData_ConvertsSpotLightLumenIntoNativeCandelaForTrackedColor()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Spot;
+            light.lightUnit = LightUnit.Lumen;
+            light.enableSpotReflector = true;
+            light.spotAngle = 60.0f;
+            light.color = Color.white;
+            light.intensity = LightUnitUtils.GetSolidAngleFromSpotLight(light.spotAngle);
+
+            var trackedLightData = VividLightRenderDatabase.instance.UpdateLightData(light, light.GetVividAdditionalLightData());
+
+            Assert.That(trackedLightData.color.x, Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(trackedLightData.color.y, Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(trackedLightData.color.z, Is.EqualTo(1.0f).Within(0.0001f));
+        }
+
+        [Test]
         public void OnDisable_UnregistersTrackedLight_WhenAdditionalLightDataIsDisabled()
         {
             var light = m_GameObject.AddComponent<Light>();
@@ -274,6 +310,7 @@ namespace VividRP.Editor.Tests
         {
             var light = m_GameObject.AddComponent<Light>();
             light.type = LightType.Point;
+            light.lightUnit = LightUnit.Candela;
             light.color = Color.white;
             light.intensity = 1.0f;
 
@@ -299,6 +336,7 @@ namespace VividRP.Editor.Tests
 
             var light = m_GameObject.AddComponent<Light>();
             light.type = LightType.Point;
+            light.lightUnit = LightUnit.Candela;
             light.color = Color.white;
             light.intensity = 1.0f;
             light.range = 4.0f;

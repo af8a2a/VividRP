@@ -175,6 +175,66 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ResolvePhysicalCameraFallback_UsesFixedManualExposure_WhenPhysicalCameraIsEnabled()
+        {
+            var cameraObject = new GameObject("Physical Camera Exposure Fallback Test");
+
+            try
+            {
+                var camera = cameraObject.AddComponent<Camera>();
+                camera.usePhysicalProperties = true;
+                camera.aperture = 4f;
+                camera.shutterSpeed = 1f / 125f;
+                camera.iso = 200;
+
+                var settings = AutoExposureSettingsResolver.ResolvePhysicalCameraFallback(
+                    AutoExposureSettingsData.CreateDefault(),
+                    camera);
+                var expectedEV100 = AutoExposureSettingsResolver.ResolvePhysicalCameraEV100(camera);
+
+                Assert.That(settings.enabled, Is.True);
+                Assert.That(settings.mode, Is.EqualTo(AutoExposureMode.Manual));
+                Assert.That(settings.applyPhysicalCameraExposure, Is.True);
+                Assert.That(settings.manualEV100, Is.EqualTo(expectedEV100).Within(1e-5f));
+                Assert.That(
+                    settings.manualAverageSceneLuminance,
+                    Is.EqualTo(AutoExposureSettingsResolver.ResolveAverageSceneLuminanceFromEV100(expectedEV100)).Within(1e-5f));
+                Assert.That(
+                    settings.fixedExposureScale,
+                    Is.EqualTo(AutoExposureSettingsResolver.ResolveManualExposureScale(expectedEV100, 1f)).Within(1e-5f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void ResolvePhysicalCameraFallback_KeepsExposureDisabled_WhenPhysicalCameraIsDisabled()
+        {
+            var cameraObject = new GameObject("Physical Camera Exposure Disabled Test");
+
+            try
+            {
+                var camera = cameraObject.AddComponent<Camera>();
+                camera.usePhysicalProperties = false;
+
+                var settings = AutoExposureSettingsResolver.ResolvePhysicalCameraFallback(
+                    AutoExposureSettingsData.CreateDefault(),
+                    camera);
+
+                Assert.That(settings.enabled, Is.False);
+                Assert.That(settings.mode, Is.EqualTo(AutoExposureMode.Histogram));
+                Assert.That(settings.applyPhysicalCameraExposure, Is.False);
+                Assert.That(settings.fixedExposureScale, Is.EqualTo(1f).Within(1e-5f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
         public void ComputeExponentialTransitionMultiplier_ReturnsPositiveBlendFactor()
         {
             var result = AutoExposureSettingsResolver.ComputeExponentialTransitionMultiplier(3f, AutoExposureSettingsResolver.DefaultStartDistance);
@@ -216,6 +276,7 @@ namespace VividRP.Editor.Tests
             Assert.That(runtimeSource, Does.Contain("settings.mode == AutoExposureMode.Manual"));
             Assert.That(runtimeSource, Does.Contain("settings.applyPhysicalCameraExposure = autoExposure.applyPhysicalCameraExposure.value;"));
             Assert.That(runtimeSource, Does.Contain("settings.manualEV100 = ResolveManualEV100("));
+            Assert.That(runtimeSource, Does.Contain("settings = AutoExposureSettingsResolver.ResolvePhysicalCameraFallback(settings, camera);"));
             Assert.That(runtimeSource, Does.Contain("ResolveWhitePointLuminanceFromEV100(autoExposure.minEV100.value)"));
             Assert.That(runtimeSource, Does.Contain("ResolveWhitePointLuminanceFromEV100(autoExposure.maxEV100.value)"));
             Assert.That(runtimeSource, Does.Contain("ResolveHistogramLogRangeFromEV100("));
@@ -223,6 +284,9 @@ namespace VividRP.Editor.Tests
             Assert.That(runtimeSource, Does.Contain("ColorUtils.ComputeEV100(aperture, shutterSpeed, iso)"));
             Assert.That(runtimeSource, Does.Contain("ResolveManualExposureScale(settings.manualEV100, settings.exposureCompensation)"));
             Assert.That(runtimeSource, Does.Contain("ResolveAverageSceneLuminanceFromEV100(settings.manualEV100)"));
+            Assert.That(runtimeSource, Does.Contain("internal static AutoExposureSettingsData ResolvePhysicalCameraFallback"));
+            Assert.That(runtimeSource, Does.Contain("var preExposureBuffer = exposureEnabled"));
+            Assert.That(runtimeSource, Does.Contain("? state.currentExposureBuffer"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

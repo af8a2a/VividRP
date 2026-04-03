@@ -140,6 +140,7 @@ namespace VividRP.Runtime
             var settings = postProcessingAllowed
                 ? AutoExposureSettingsResolver.Resolve(camera, temporalData != null && temporalData.isFirstFrame)
                 : AutoExposureSettingsData.CreateDefault();
+            settings = AutoExposureSettingsResolver.ResolvePhysicalCameraFallback(settings, camera);
 
             var exposureEnabled = postProcessingAllowed
                 && settings.enabled
@@ -184,9 +185,13 @@ namespace VividRP.Runtime
             var currentExposureBuffer = exposureEnabled && state?.currentExposureBuffer != null
                 ? state.currentExposureBuffer
                 : defaultExposureBuffer;
-            var preExposureBuffer = hasValidHistory && state?.previousExposureBuffer != null
-                ? state.previousExposureBuffer
-                : defaultExposureBuffer;
+            var preExposureBuffer = exposureEnabled
+                && settings.mode == AutoExposureMode.Manual
+                && state?.currentExposureBuffer != null
+                ? state.currentExposureBuffer
+                : hasValidHistory && state?.previousExposureBuffer != null
+                    ? state.previousExposureBuffer
+                    : defaultExposureBuffer;
 
             exposureData.settings = settings;
             exposureData.defaultExposureBuffer = defaultExposureBuffer;
@@ -343,6 +348,22 @@ namespace VividRP.Runtime
         internal static float ResolveExposureCompensation(float compensationStops)
         {
             return Mathf.Pow(2f, compensationStops);
+        }
+
+        internal static AutoExposureSettingsData ResolvePhysicalCameraFallback(AutoExposureSettingsData settings, Camera camera)
+        {
+            if (settings.enabled || camera == null || !camera.usePhysicalProperties)
+                return settings;
+
+            settings.enabled = true;
+            settings.mode = AutoExposureMode.Manual;
+            settings.applyPhysicalCameraExposure = true;
+            settings.manualEV100 = ResolvePhysicalCameraEV100(camera);
+            settings.exposureCompensation = 1f;
+            settings.manualAverageSceneLuminance = ResolveAverageSceneLuminanceFromEV100(settings.manualEV100);
+            settings.fixedExposureScale = ResolveManualExposureScale(settings.manualEV100, settings.exposureCompensation);
+            settings.forceTarget = 1f;
+            return settings;
         }
 
         internal static float ResolveManualEV100(Camera camera, float manualEV100, bool applyPhysicalCameraExposure)

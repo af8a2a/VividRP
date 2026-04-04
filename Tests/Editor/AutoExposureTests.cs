@@ -93,9 +93,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void ResolveExposureCompensationCurveStops_SamplesCurveAtAverageSceneEV100()
         {
-            var curve = new AnimationCurve(
-                new Keyframe(-2f, -1f),
-                new Keyframe(2f, 1f));
+            var curve = AnimationCurve.Linear(-2f, -1f, 2f, 1f);
 
             var result = AutoExposureSettingsResolver.ResolveExposureCompensationCurveStops(curve, 1f);
 

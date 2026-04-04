@@ -226,16 +226,17 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(editorType.GetField("m_Enabled", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_Mode", flags)?.GetValue(editor), Is.Not.Null);
-                Assert.That(editorType.GetField("m_LowPercent", flags)?.GetValue(editor), Is.Not.Null);
-                Assert.That(editorType.GetField("m_HighPercent", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_Percent", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_MinEV100", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_MaxEV100", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ManualEV100", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ApplyPhysicalCameraExposure", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ExposureCompensation", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_ExposureCompensationCurve", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_HistogramLogRange", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_MeterMask", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_StatsPreviewMaterial", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_HistogramPreviewSamples", flags)?.GetValue(editor), Is.Not.Null);
             }
             finally
             {
@@ -255,9 +256,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Use Physical Camera\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Fixed Exposure\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Compensation\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Compensation Curve\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Weight Texture Mask\")"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Limit Min\")"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Limit Max\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Low Percent\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"High Percent\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Speed Dark to Light\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Speed Light to Dark\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Histogram Percentages\")"));
@@ -268,6 +270,11 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Histogram\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Monitor\")"));
             Assert.That(source, Does.Contain("DrawStatsPreview();"));
+            Assert.That(source, Does.Contain("AutoExposureStatsReadbackBridge.TouchInspectorRequest();"));
+            Assert.That(source, Does.Contain("BuildLiveStatsPreviewData(snapshot)"));
+            Assert.That(source, Does.Contain("SetFloatArray(HistogramSamplesId, m_HistogramPreviewSamples);"));
+            Assert.That(source, Does.Contain("Live GPU ("));
+            Assert.That(source, Does.Contain("Inspector Preview"));
             Assert.That(source, Does.Contain("Shader.Find(\"Hidden/VividRP/Editor/Auto Exposure Stats\")"));
         }
 

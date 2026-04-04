@@ -3,7 +3,7 @@
 #pragma kernel ResolveExposure
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
-
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GlobalSamplers.hlsl"
 #define HISTOGRAM_SIZE 64
 #define HISTOGRAM_THREAD_GROUP_SIZE_X 8
 #define HISTOGRAM_THREAD_GROUP_SIZE_Y 8
@@ -11,6 +11,7 @@
 
 Texture2D<float4> _InputColor;
 Texture2D<float4> _AutoExposureMeterMask;
+Texture2D<float4> _AutoExposureCompensationCurve;
 SamplerState sampler_AutoExposureMeterMask;
 
 StructuredBuffer<float4> _PreviousExposureBuffer;
@@ -21,6 +22,7 @@ float4 _AutoExposureParams0;
 float4 _AutoExposureParams1;
 float4 _AutoExposureParams2;
 float4 _AutoExposureParams3;
+float4 _AutoExposureCurveParams;
 float4 _AutoExposureScreenSize;
 
 // Matches UE's default r.AutoExposure.LuminanceMethod=0 (uniform luminance).
@@ -36,6 +38,21 @@ float GetHistogramPositionFromLogLuminance(float logLuminance)
 float GetLogLuminanceFromHistogramPosition(float histogramPosition)
 {
     return (histogramPosition - _AutoExposureParams2.y) / max(_AutoExposureParams2.x, kEpsilon);
+}
+
+float ResolveAverageSceneEV100FromLuminance(float averageSceneLuminance)
+{
+    return log2(max(averageSceneLuminance / kMiddleGrey, kEpsilon));
+}
+
+float SampleExposureCompensationCurveStops(float averageSceneLuminance)
+{
+    if (_AutoExposureCurveParams.z < 0.5f)
+        return 0.0f;
+
+    const float averageSceneEV100 = ResolveAverageSceneEV100FromLuminance(averageSceneLuminance);
+    const float curveUv = saturate((averageSceneEV100 - _AutoExposureCurveParams.x) * _AutoExposureCurveParams.y);
+    return _AutoExposureCompensationCurve.SampleLevel(sampler_LinearClamp, float2(curveUv, 0.5f), 0.0f).r;
 }
 
 float ExponentialAdaption(float current, float target, float frameTime, float adaptationSpeed, float slopeModifier)
@@ -144,9 +161,11 @@ void ResolveExposure(uint3 dispatchThreadId : SV_DispatchThreadID)
         _AutoExposureParams0.w);
 
     const float targetExposure = targetAverageLuminance / kMiddleGrey;
-    const float middleGreyExposureCompensation = _AutoExposureParams1.z;
+    const float curveCompensationStops = SampleExposureCompensationCurveStops(averageSceneLuminance);
+    const float middleGreyExposureCompensation = _AutoExposureParams1.z * exp2(curveCompensationStops);
     const float oldExposureScale = _PreviousExposureBuffer[0].x;
-    const float oldExposure = middleGreyExposureCompensation / max(oldExposureScale, kEpsilon);
+    const float oldMiddleGreyExposureCompensation = max(_PreviousExposureBuffer[0].w, kEpsilon);
+    const float oldExposure = oldMiddleGreyExposureCompensation / max(oldExposureScale, kEpsilon);
     const float estimatedExposure = ComputeAdaptedExposure(oldExposure, targetExposure);
     const float smoothedExposure = clamp(
         estimatedExposure,

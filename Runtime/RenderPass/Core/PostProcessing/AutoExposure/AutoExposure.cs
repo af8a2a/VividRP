@@ -20,6 +20,20 @@ namespace VividRP.Runtime
     }
 
     [Serializable]
+    public sealed class NoInterpAnimationCurveParameter : VolumeParameter<AnimationCurve>
+    {
+        public NoInterpAnimationCurveParameter(AnimationCurve value, bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+
+        public override void Interp(AnimationCurve from, AnimationCurve to, float t)
+        {
+            value = t > 0f ? to : from;
+        }
+    }
+
+    [Serializable]
     [VolumeComponentMenu("Post-processing/Auto Exposure")]
     public sealed class AutoExposure : VolumeComponent, IPostProcessComponent
     {
@@ -27,6 +41,8 @@ namespace VividRP.Runtime
         private const float DefaultHistogramLogMaxEV100 = 6f;
         private const float HistogramLogRangeLimitMinEV100 = -20f;
         private const float HistogramLogRangeLimitMaxEV100 = 20f;
+        private const float DefaultExposureCompensationCurveMinEV100 = -16f;
+        private const float DefaultExposureCompensationCurveMaxEV100 = 16f;
 
         [Tooltip("Enables automatic exposure metering.")]
         public BoolParameter enabled = new(false);
@@ -66,6 +82,9 @@ namespace VividRP.Runtime
 
         [Tooltip("Exposure compensation in EV stops applied on top of the resolved exposure result.")]
         public FloatParameter exposureCompensation = new(0f);
+
+        [Tooltip("Optional EV100-to-compensation curve in EV stops, matching Unreal's Exposure Compensation Curve.")]
+        public NoInterpAnimationCurveParameter exposureCompensationCurve = new(CreateDefaultExposureCompensationCurve());
 
         [AdditionalProperty]
         [Tooltip("Histogram EV100 range, matching Unreal's Histogram Min/Max EV100 controls.")]
@@ -128,6 +147,10 @@ namespace VividRP.Runtime
             histogramLogMin ??= new FloatParameter(DefaultHistogramLogMinEV100);
             histogramLogMax ??= new FloatParameter(DefaultHistogramLogMaxEV100);
             meterMask ??= new Texture2DParameter(null);
+            exposureCompensationCurve ??= new NoInterpAnimationCurveParameter(CreateDefaultExposureCompensationCurve());
+
+            if (exposureCompensationCurve.value == null)
+                exposureCompensationCurve.value = CreateDefaultExposureCompensationCurve();
         }
 
         private void MigrateLegacyHistogramLogRangeIfNeeded()
@@ -155,6 +178,16 @@ namespace VividRP.Runtime
             histogramLogMax.value = currentRange.y;
             histogramLogMin.overrideState = histogramLogRange.overrideState;
             histogramLogMax.overrideState = histogramLogRange.overrideState;
+        }
+
+        private static AnimationCurve CreateDefaultExposureCompensationCurve()
+        {
+            var curve = new AnimationCurve(
+                new Keyframe(DefaultExposureCompensationCurveMinEV100, 0f),
+                new Keyframe(DefaultExposureCompensationCurveMaxEV100, 0f));
+            curve.preWrapMode = WrapMode.ClampForever;
+            curve.postWrapMode = WrapMode.ClampForever;
+            return curve;
         }
     }
 }

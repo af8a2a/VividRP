@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -14,7 +15,9 @@ namespace VividRP.Runtime
         public bool applyPhysicalCameraExposure;
         public float manualEV100;
         public float manualAverageSceneLuminance;
-        public float exposureCompensation;
+        public float exposureCompensationSettings;
+        public float exposureCompensationCurveStops;
+        public float exposureCompensationAll;
         public float fixedExposureScale;
         public float deltaTime;
         public float exposureSpeedUp;
@@ -26,6 +29,10 @@ namespace VividRP.Runtime
         public float exponentialDownM;
         public float startDistance;
         public float forceTarget;
+        public Texture exposureCompensationCurveTexture;
+        public float exposureCompensationCurveMinEV100;
+        public float exposureCompensationCurveInvRange;
+        public bool exposureCompensationCurveEnabled;
         public Texture meterMask;
 
         public static AutoExposureSettingsData CreateDefault()
@@ -44,7 +51,9 @@ namespace VividRP.Runtime
                 applyPhysicalCameraExposure = false,
                 manualEV100 = 0f,
                 manualAverageSceneLuminance = AutoExposureSettingsResolver.MiddleGrey,
-                exposureCompensation = 1f,
+                exposureCompensationSettings = 1f,
+                exposureCompensationCurveStops = 0f,
+                exposureCompensationAll = 1f,
                 fixedExposureScale = 1f,
                 deltaTime = 1f / 60f,
                 exposureSpeedUp = 1f,
@@ -56,6 +65,10 @@ namespace VividRP.Runtime
                 exponentialDownM = 1f,
                 startDistance = AutoExposureSettingsResolver.DefaultStartDistance,
                 forceTarget = 1f,
+                exposureCompensationCurveTexture = null,
+                exposureCompensationCurveMinEV100 = AutoExposureCompensationCurveUtility.DefaultCurveMinEV100,
+                exposureCompensationCurveInvRange = 1f / AutoExposureCompensationCurveUtility.DefaultCurveRange,
+                exposureCompensationCurveEnabled = false,
                 meterMask = null,
             };
         }
@@ -168,7 +181,7 @@ namespace VividRP.Runtime
                         state.currentExposureBuffer,
                         settings.fixedExposureScale,
                         settings.manualAverageSceneLuminance,
-                        settings.exposureCompensation);
+                        settings.exposureCompensationAll);
                 }
             }
             else if (s_HistorySystem.TryGetBase(camera, out state))
@@ -221,6 +234,7 @@ namespace VividRP.Runtime
             s_HistorySystem.Dispose();
             s_DefaultExposureBuffer?.Dispose();
             s_DefaultExposureBuffer = null;
+            AutoExposureCompensationCurveUtility.Dispose();
         }
 
         private static void EnsureDefaultExposureBuffer()
@@ -299,9 +313,22 @@ namespace VividRP.Runtime
                 camera,
                 autoExposure.manualEV100.value,
                 settings.applyPhysicalCameraExposure);
-            settings.exposureCompensation = ResolveExposureCompensation(autoExposure.exposureCompensation.value);
+            settings.exposureCompensationSettings = ResolveExposureCompensation(autoExposure.exposureCompensation.value);
+            settings.exposureCompensationCurveStops = settings.mode == AutoExposureMode.Manual
+                ? ResolveExposureCompensationCurveStops(
+                    autoExposure.exposureCompensationCurve.value,
+                    settings.manualEV100)
+                : 0f;
+            settings.exposureCompensationAll = ResolveExposureCompensationAll(
+                settings.exposureCompensationSettings,
+                settings.exposureCompensationCurveStops);
             settings.manualAverageSceneLuminance = ResolveAverageSceneLuminanceFromEV100(settings.manualEV100);
-            settings.fixedExposureScale = ResolveManualExposureScale(settings.manualEV100, settings.exposureCompensation);
+            settings.fixedExposureScale = ResolveManualExposureScale(settings.manualEV100, settings.exposureCompensationAll);
+            var curveTextureData = AutoExposureCompensationCurveUtility.Resolve(autoExposure.exposureCompensationCurve.value);
+            settings.exposureCompensationCurveTexture = curveTextureData.texture;
+            settings.exposureCompensationCurveMinEV100 = curveTextureData.minEV100;
+            settings.exposureCompensationCurveInvRange = curveTextureData.invRange;
+            settings.exposureCompensationCurveEnabled = curveTextureData.enabled;
             settings.meterMask = autoExposure.meterMask.value;
 
             if (settings.mode == AutoExposureMode.Manual)
@@ -351,6 +378,19 @@ namespace VividRP.Runtime
             return Mathf.Pow(2f, compensationStops);
         }
 
+        internal static float ResolveExposureCompensationCurveStops(AnimationCurve curve, float averageSceneEV100)
+        {
+            if (!HasExposureCompensationCurve(curve))
+                return 0f;
+
+            return curve.Evaluate(averageSceneEV100);
+        }
+
+        internal static float ResolveExposureCompensationAll(float exposureCompensationSettings, float exposureCompensationCurveStops)
+        {
+            return exposureCompensationSettings * Mathf.Pow(2f, exposureCompensationCurveStops);
+        }
+
         internal static AutoExposureSettingsData ResolvePhysicalCameraFallback(AutoExposureSettingsData settings, Camera camera)
         {
             if (settings.enabled || camera == null || !camera.usePhysicalProperties)
@@ -360,9 +400,11 @@ namespace VividRP.Runtime
             settings.mode = AutoExposureMode.Manual;
             settings.applyPhysicalCameraExposure = true;
             settings.manualEV100 = ResolvePhysicalCameraEV100(camera);
-            settings.exposureCompensation = 1f;
+            settings.exposureCompensationSettings = 1f;
+            settings.exposureCompensationCurveStops = 0f;
+            settings.exposureCompensationAll = 1f;
             settings.manualAverageSceneLuminance = ResolveAverageSceneLuminanceFromEV100(settings.manualEV100);
-            settings.fixedExposureScale = ResolveManualExposureScale(settings.manualEV100, settings.exposureCompensation);
+            settings.fixedExposureScale = ResolveManualExposureScale(settings.manualEV100, settings.exposureCompensationAll);
             settings.forceTarget = 1f;
             return settings;
         }
@@ -415,10 +457,71 @@ namespace VividRP.Runtime
             return ResolveWhitePointLuminanceFromEV100(ev100) * MiddleGrey;
         }
 
+        internal static float ResolveAverageSceneEV100FromLuminance(float averageSceneLuminance)
+        {
+            var luminanceMax = ResolveLuminanceMaxFromLensAttenuation();
+            var normalizedLuminance = averageSceneLuminance / Mathf.Max(MiddleGrey * luminanceMax, 1e-6f);
+            return Mathf.Log(Mathf.Max(normalizedLuminance, 1e-6f), 2f);
+        }
+
         internal static float ResolveManualExposureScale(float ev100, float exposureCompensation)
         {
             var whitePointLuminance = ResolveWhitePointLuminanceFromEV100(ev100);
             return exposureCompensation / Mathf.Max(whitePointLuminance, 1e-6f);
+        }
+
+        internal static bool HasExposureCompensationCurve(AnimationCurve curve)
+        {
+            if (curve == null || curve.length == 0)
+                return false;
+
+            var curveDomain = ResolveExposureCompensationCurveDomain(curve);
+            var keys = curve.keys;
+            for (var keyIndex = 0; keyIndex < keys.Length; keyIndex++)
+            {
+                if (Mathf.Abs(keys[keyIndex].value) > 1e-3f)
+                    return true;
+            }
+
+            const int sampleCount = 17;
+
+            for (var sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++)
+            {
+                var sampleT = sampleCount == 1 ? 0f : sampleIndex / (float)(sampleCount - 1);
+                var ev100 = Mathf.Lerp(curveDomain.x, curveDomain.y, sampleT);
+                if (Mathf.Abs(curve.Evaluate(ev100)) > 1e-3f)
+                    return true;
+            }
+
+            return false;
+        }
+
+        internal static Vector2 ResolveExposureCompensationCurveDomain(AnimationCurve curve)
+        {
+            if (curve == null || curve.length == 0)
+            {
+                return new Vector2(
+                    AutoExposureCompensationCurveUtility.DefaultCurveMinEV100,
+                    AutoExposureCompensationCurveUtility.DefaultCurveMaxEV100);
+            }
+
+            var keys = curve.keys;
+            var minEV100 = keys[0].time;
+            var maxEV100 = keys[0].time;
+
+            for (var keyIndex = 1; keyIndex < keys.Length; keyIndex++)
+            {
+                minEV100 = Mathf.Min(minEV100, keys[keyIndex].time);
+                maxEV100 = Mathf.Max(maxEV100, keys[keyIndex].time);
+            }
+
+            if (Mathf.Abs(maxEV100 - minEV100) < 1e-3f)
+            {
+                minEV100 -= 1f;
+                maxEV100 += 1f;
+            }
+
+            return new Vector2(minEV100, maxEV100);
         }
 
         internal static Vector2 BuildHistogramScaleBiasFromEV100(float histogramMinEV100, float histogramMaxEV100)
@@ -443,6 +546,333 @@ namespace VividRP.Runtime
             var startTime = startDistance / safeSpeed;
             var denominator = (1f - Mathf.Pow(2f, -FrameTimeEpsilon * safeSpeed)) * startTime;
             return denominator > 1e-6f ? FrameTimeEpsilon / denominator : 1f;
+        }
+    }
+
+    internal readonly struct AutoExposureExposureState
+    {
+        public readonly float currentExposureScale;
+        public readonly float targetExposureScale;
+        public readonly float averageSceneLuminance;
+        public readonly float middleGreyCompensation;
+
+        public AutoExposureExposureState(
+            float currentExposureScale,
+            float targetExposureScale,
+            float averageSceneLuminance,
+            float middleGreyCompensation)
+        {
+            this.currentExposureScale = currentExposureScale;
+            this.targetExposureScale = targetExposureScale;
+            this.averageSceneLuminance = averageSceneLuminance;
+            this.middleGreyCompensation = middleGreyCompensation;
+        }
+
+        public Vector4 ToVector4()
+        {
+            return new Vector4(
+                currentExposureScale,
+                targetExposureScale,
+                averageSceneLuminance,
+                middleGreyCompensation);
+        }
+
+        public static AutoExposureExposureState FromVector4(Vector4 value)
+        {
+            return new AutoExposureExposureState(value.x, value.y, value.z, value.w);
+        }
+    }
+
+    internal static class AutoExposureReferenceSolver
+    {
+        internal const int HistogramBinCount = 64;
+
+        private const float Epsilon = 1e-4f;
+
+        internal static bool TryResolveAverageSceneLuminance(
+            IReadOnlyList<uint> histogram,
+            float lowPercent,
+            float highPercent,
+            float histogramScale,
+            float histogramBias,
+            out float averageSceneLuminance)
+        {
+            averageSceneLuminance = AutoExposureSettingsResolver.MiddleGrey;
+            if (histogram == null)
+                return false;
+
+            var histogramSum = 0f;
+            for (var bucketIndex = 0; bucketIndex < HistogramBinCount; bucketIndex++)
+                histogramSum += ResolveHistogramBucketValue(histogram, bucketIndex);
+
+            if (histogramSum <= Epsilon)
+                return false;
+
+            var minFractionSum = histogramSum * lowPercent;
+            var maxFractionSum = histogramSum * highPercent;
+            var weightedLogLuminanceSum = 0f;
+            var weightedSampleCount = 0f;
+
+            for (var bucketIndex = 0; bucketIndex < HistogramBinCount; bucketIndex++)
+            {
+                var localValue = ResolveHistogramBucketValue(histogram, bucketIndex);
+
+                var subtractedLow = Mathf.Min(localValue, minFractionSum);
+                localValue -= subtractedLow;
+                minFractionSum -= subtractedLow;
+                maxFractionSum -= subtractedLow;
+
+                localValue = Mathf.Min(localValue, maxFractionSum);
+                maxFractionSum -= localValue;
+
+                var histogramPosition = bucketIndex / (float)(HistogramBinCount - 1);
+                var logLuminance = ResolveLogLuminanceFromHistogramPosition(histogramPosition, histogramScale, histogramBias);
+                weightedLogLuminanceSum += logLuminance * localValue;
+                weightedSampleCount += localValue;
+            }
+
+            var averageLogLuminance = weightedLogLuminanceSum / Mathf.Max(weightedSampleCount, Epsilon);
+            averageSceneLuminance = Mathf.Pow(2f, averageLogLuminance);
+            return true;
+        }
+
+        internal static AutoExposureExposureState ResolveExposureState(
+            IReadOnlyList<uint> histogram,
+            in AutoExposureSettingsData settings,
+            Vector4 previousExposureState)
+        {
+            var previousState = AutoExposureExposureState.FromVector4(previousExposureState);
+            if (!TryResolveAverageSceneLuminance(
+                    histogram,
+                    settings.exposureLowPercent,
+                    settings.exposureHighPercent,
+                    settings.histogramScale,
+                    settings.histogramBias,
+                    out var averageSceneLuminance))
+            {
+                return previousState;
+            }
+
+            var targetAverageLuminance = Mathf.Clamp(
+                averageSceneLuminance,
+                settings.minAverageLuminance,
+                settings.maxAverageLuminance);
+            var targetExposure = targetAverageLuminance / AutoExposureSettingsResolver.MiddleGrey;
+
+            var curveCompensationStops = SampleExposureCompensationCurveStops(averageSceneLuminance, settings);
+            var middleGreyExposureCompensation = settings.exposureCompensationSettings * Mathf.Pow(2f, curveCompensationStops);
+            var oldExposure = Mathf.Max(previousState.middleGreyCompensation, Epsilon)
+                / Mathf.Max(previousState.currentExposureScale, Epsilon);
+            var estimatedExposure = ComputeAdaptedExposure(oldExposure, targetExposure, settings);
+            var smoothedExposure = Mathf.Clamp(
+                estimatedExposure,
+                settings.minAverageLuminance / AutoExposureSettingsResolver.MiddleGrey,
+                settings.maxAverageLuminance / AutoExposureSettingsResolver.MiddleGrey);
+
+            var smoothedExposureScale = middleGreyExposureCompensation / Mathf.Max(smoothedExposure, Epsilon);
+            var targetExposureScale = middleGreyExposureCompensation / Mathf.Max(targetExposure, Epsilon);
+            return new AutoExposureExposureState(
+                smoothedExposureScale,
+                targetExposureScale,
+                averageSceneLuminance,
+                middleGreyExposureCompensation);
+        }
+
+        private static float ResolveHistogramBucketValue(IReadOnlyList<uint> histogram, int bucketIndex)
+        {
+            if (histogram == null || bucketIndex < 0 || bucketIndex >= histogram.Count)
+                return 0f;
+
+            return histogram[bucketIndex];
+        }
+
+        private static float ResolveLogLuminanceFromHistogramPosition(float histogramPosition, float histogramScale, float histogramBias)
+        {
+            return (histogramPosition - histogramBias) / Mathf.Max(histogramScale, Epsilon);
+        }
+
+        private static float ComputeAdaptedExposure(float oldExposure, float targetExposure, in AutoExposureSettingsData settings)
+        {
+            var logTargetExposure = Mathf.Log(Mathf.Max(targetExposure, Epsilon), 2f);
+            var logOldExposure = Mathf.Log(Mathf.Max(oldExposure, Epsilon), 2f);
+            var logDiff = logTargetExposure - logOldExposure;
+            var adaptationSpeed = logDiff > 0f ? settings.exposureSpeedUp : settings.exposureSpeedDown;
+            var slopeModifier = logDiff > 0f ? settings.exponentialUpM : settings.exponentialDownM;
+            var absLogDiff = Mathf.Abs(logDiff);
+
+            var exponential = ExponentialAdaption(
+                logOldExposure,
+                logTargetExposure,
+                settings.deltaTime,
+                adaptationSpeed,
+                slopeModifier);
+            var linear = LinearAdaption(
+                logOldExposure,
+                logTargetExposure,
+                settings.deltaTime,
+                adaptationSpeed);
+            var adaptedLogExposure = absLogDiff > settings.startDistance ? linear : exponential;
+            var adaptedExposure = Mathf.Pow(2f, adaptedLogExposure);
+            return Mathf.Lerp(adaptedExposure, targetExposure, settings.forceTarget);
+        }
+
+        private static float ExponentialAdaption(float current, float target, float frameTime, float adaptationSpeed, float slopeModifier)
+        {
+            var factor = 1f - Mathf.Pow(2f, -frameTime * adaptationSpeed);
+            return current + (target - current) * factor * slopeModifier;
+        }
+
+        private static float LinearAdaption(float current, float target, float frameTime, float adaptationSpeed)
+        {
+            var offset = frameTime * adaptationSpeed;
+            return current < target
+                ? Mathf.Min(target, current + offset)
+                : Mathf.Max(target, current - offset);
+        }
+
+        private static float SampleExposureCompensationCurveStops(float averageSceneLuminance, in AutoExposureSettingsData settings)
+        {
+            if (!settings.exposureCompensationCurveEnabled
+                || settings.exposureCompensationCurveTexture == null
+                || settings.exposureCompensationCurveTexture is not Texture2D curveTexture)
+            {
+                return 0f;
+            }
+
+            var averageSceneEV100 = AutoExposureSettingsResolver.ResolveAverageSceneEV100FromLuminance(averageSceneLuminance);
+            var curveU = Mathf.Clamp01(
+                (averageSceneEV100 - settings.exposureCompensationCurveMinEV100)
+                * settings.exposureCompensationCurveInvRange);
+            return curveTexture.GetPixelBilinear(curveU, 0.5f).r;
+        }
+    }
+
+    internal readonly struct AutoExposureCompensationCurveTextureData
+    {
+        public readonly Texture texture;
+        public readonly float minEV100;
+        public readonly float invRange;
+        public readonly bool enabled;
+
+        public AutoExposureCompensationCurveTextureData(Texture texture, float minEV100, float invRange, bool enabled)
+        {
+            this.texture = texture;
+            this.minEV100 = minEV100;
+            this.invRange = invRange;
+            this.enabled = enabled;
+        }
+    }
+
+    internal static class AutoExposureCompensationCurveUtility
+    {
+        private const int CurveSampleCount = 256;
+
+        internal const float DefaultCurveMinEV100 = -16f;
+        internal const float DefaultCurveMaxEV100 = 16f;
+        internal const float DefaultCurveRange = DefaultCurveMaxEV100 - DefaultCurveMinEV100;
+
+        private static readonly Color[] s_CurveSamples = new Color[CurveSampleCount];
+
+        private static Texture2D s_CurveTexture;
+        private static int s_CachedCurveHash;
+        private static bool s_HasCachedCurve;
+        private static Vector2 s_CachedCurveDomain = new(DefaultCurveMinEV100, DefaultCurveMaxEV100);
+
+        internal static AutoExposureCompensationCurveTextureData Resolve(AnimationCurve curve)
+        {
+            if (!AutoExposureSettingsResolver.HasExposureCompensationCurve(curve))
+            {
+                return new AutoExposureCompensationCurveTextureData(
+                    Texture2D.blackTexture,
+                    DefaultCurveMinEV100,
+                    1f / DefaultCurveRange,
+                    false);
+            }
+
+            EnsureCurveTexture();
+
+            var curveDomain = AutoExposureSettingsResolver.ResolveExposureCompensationCurveDomain(curve);
+            var curveHash = ComputeCurveHash(curve, curveDomain);
+
+            if (!s_HasCachedCurve || curveHash != s_CachedCurveHash)
+            {
+                RebuildCurveTexture(curve, curveDomain);
+                s_CachedCurveHash = curveHash;
+                s_CachedCurveDomain = curveDomain;
+                s_HasCachedCurve = true;
+            }
+
+            return new AutoExposureCompensationCurveTextureData(
+                s_CurveTexture,
+                s_CachedCurveDomain.x,
+                1f / Mathf.Max(s_CachedCurveDomain.y - s_CachedCurveDomain.x, 1e-4f),
+                true);
+        }
+
+        internal static void Dispose()
+        {
+            CoreUtils.Destroy(s_CurveTexture);
+            s_CurveTexture = null;
+            s_CachedCurveHash = 0;
+            s_HasCachedCurve = false;
+            s_CachedCurveDomain = new Vector2(DefaultCurveMinEV100, DefaultCurveMaxEV100);
+        }
+
+        private static void EnsureCurveTexture()
+        {
+            if (s_CurveTexture != null)
+                return;
+
+            s_CurveTexture = new Texture2D(CurveSampleCount, 1, TextureFormat.RGBAFloat, false, true)
+            {
+                name = "VividRP Auto Exposure Compensation Curve",
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+                hideFlags = HideFlags.HideAndDontSave
+            };
+        }
+
+        private static void RebuildCurveTexture(AnimationCurve curve, Vector2 curveDomain)
+        {
+            for (var sampleIndex = 0; sampleIndex < CurveSampleCount; sampleIndex++)
+            {
+                var sampleT = sampleIndex / (float)(CurveSampleCount - 1);
+                var ev100 = Mathf.Lerp(curveDomain.x, curveDomain.y, sampleT);
+                var curveStops = curve.Evaluate(ev100);
+                s_CurveSamples[sampleIndex] = new Color(curveStops, 0f, 0f, 0f);
+            }
+
+            s_CurveTexture.SetPixels(s_CurveSamples);
+            s_CurveTexture.Apply(false, false);
+        }
+
+        private static int ComputeCurveHash(AnimationCurve curve, Vector2 curveDomain)
+        {
+            unchecked
+            {
+                var hash = 17;
+                hash = hash * 31 + curveDomain.x.GetHashCode();
+                hash = hash * 31 + curveDomain.y.GetHashCode();
+                hash = hash * 31 + curve.preWrapMode.GetHashCode();
+                hash = hash * 31 + curve.postWrapMode.GetHashCode();
+
+                var keys = curve.keys;
+                hash = hash * 31 + keys.Length;
+
+                for (var keyIndex = 0; keyIndex < keys.Length; keyIndex++)
+                {
+                    var key = keys[keyIndex];
+                    hash = hash * 31 + key.time.GetHashCode();
+                    hash = hash * 31 + key.value.GetHashCode();
+                    hash = hash * 31 + key.inTangent.GetHashCode();
+                    hash = hash * 31 + key.outTangent.GetHashCode();
+                    hash = hash * 31 + key.inWeight.GetHashCode();
+                    hash = hash * 31 + key.outWeight.GetHashCode();
+                    hash = hash * 31 + key.weightedMode.GetHashCode();
+                }
+
+                return hash;
+            }
         }
     }
 }

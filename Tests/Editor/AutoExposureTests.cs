@@ -91,6 +91,26 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ResolveExposureCompensationCurveStops_SamplesCurveAtAverageSceneEV100()
+        {
+            var curve = new AnimationCurve(
+                new Keyframe(-2f, -1f),
+                new Keyframe(2f, 1f));
+
+            var result = AutoExposureSettingsResolver.ResolveExposureCompensationCurveStops(curve, 1f);
+
+            Assert.That(result, Is.EqualTo(0.5f).Within(1e-5f));
+        }
+
+        [Test]
+        public void ResolveExposureCompensationAll_MultipliesSettingsAndCurveStops()
+        {
+            var result = AutoExposureSettingsResolver.ResolveExposureCompensationAll(2f, 1f);
+
+            Assert.That(result, Is.EqualTo(4f).Within(1e-5f));
+        }
+
+        [Test]
         public void ResolveWhitePointLuminanceFromEV100_ConvertsStopsToWhitePoint()
         {
             var result = AutoExposureSettingsResolver.ResolveWhitePointLuminanceFromEV100(2f);
@@ -104,6 +124,17 @@ namespace VividRP.Editor.Tests
             var result = AutoExposureSettingsResolver.ResolveManualExposureScale(2f, 4f);
 
             Assert.That(result, Is.EqualTo(1f).Within(1e-5f));
+        }
+
+        [Test]
+        public void ResolveAverageSceneEV100FromLuminance_InvertsAverageSceneLuminanceConversion()
+        {
+            var expectedEV100 = 3f;
+            var averageSceneLuminance = AutoExposureSettingsResolver.ResolveAverageSceneLuminanceFromEV100(expectedEV100);
+
+            var result = AutoExposureSettingsResolver.ResolveAverageSceneEV100FromLuminance(averageSceneLuminance);
+
+            Assert.That(result, Is.EqualTo(expectedEV100).Within(1e-5f));
         }
 
         [Test]
@@ -284,6 +315,127 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void AutoExposureReferenceSolver_ResolvesGoldenAverageSceneLuminanceFromHistogram()
+        {
+            var settings = CreateGoldenHistogramSettings();
+            var histogram = CreateGoldenHistogram();
+
+            var resolved = AutoExposureReferenceSolver.TryResolveAverageSceneLuminance(
+                histogram,
+                settings.exposureLowPercent,
+                settings.exposureHighPercent,
+                settings.histogramScale,
+                settings.histogramBias,
+                out var averageSceneLuminance);
+
+            Assert.That(resolved, Is.True);
+            Assert.That(averageSceneLuminance, Is.EqualTo(0.27300215f).Within(1e-6f));
+        }
+
+        [Test]
+        public void AutoExposureReferenceSolver_ResolvesGoldenFirstFrameExposureState()
+        {
+            var settings = CreateGoldenHistogramSettings();
+            settings.forceTarget = 1f;
+
+            var result = AutoExposureReferenceSolver.ResolveExposureState(
+                CreateGoldenHistogram(),
+                settings,
+                CreateExposureState(1f));
+
+            Assert.That(result.currentExposureScale, Is.EqualTo(0.6593355f).Within(1e-6f));
+            Assert.That(result.targetExposureScale, Is.EqualTo(0.6593355f).Within(1e-6f));
+            Assert.That(result.averageSceneLuminance, Is.EqualTo(0.27300215f).Within(1e-6f));
+            Assert.That(result.middleGreyCompensation, Is.EqualTo(1f).Within(1e-6f));
+        }
+
+        [Test]
+        public void AutoExposureReferenceSolver_ClampsTargetExposureToGoldenMaxAverageLuminance()
+        {
+            var settings = CreateGoldenHistogramSettings();
+            settings.forceTarget = 1f;
+            settings.maxAverageLuminance = 0.2f;
+
+            var result = AutoExposureReferenceSolver.ResolveExposureState(
+                CreateGoldenHistogram(),
+                settings,
+                CreateExposureState(1f));
+
+            Assert.That(result.currentExposureScale, Is.EqualTo(0.9f).Within(1e-6f));
+            Assert.That(result.targetExposureScale, Is.EqualTo(0.9f).Within(1e-6f));
+            Assert.That(result.averageSceneLuminance, Is.EqualTo(0.27300215f).Within(1e-6f));
+            Assert.That(result.middleGreyCompensation, Is.EqualTo(1f).Within(1e-6f));
+        }
+
+        [Test]
+        public void AutoExposureReferenceSolver_ResolvesGoldenBrighteningLinearStep()
+        {
+            var settings = CreateGoldenHistogramSettings();
+            settings.forceTarget = 0f;
+
+            var result = AutoExposureReferenceSolver.ResolveExposureState(
+                CreateGoldenHistogram(),
+                settings,
+                CreateExposureState(8f));
+
+            Assert.That(result.currentExposureScale, Is.EqualTo(7.727491f).Within(1e-5f));
+            Assert.That(result.targetExposureScale, Is.EqualTo(0.6593355f).Within(1e-6f));
+            Assert.That(result.averageSceneLuminance, Is.EqualTo(0.27300215f).Within(1e-6f));
+            Assert.That(result.middleGreyCompensation, Is.EqualTo(1f).Within(1e-6f));
+        }
+
+        [Test]
+        public void AutoExposureReferenceSolver_ResolvesGoldenDarkeningExponentialStep()
+        {
+            var settings = CreateGoldenHistogramSettings();
+            settings.forceTarget = 0f;
+
+            var result = AutoExposureReferenceSolver.ResolveExposureState(
+                CreateGoldenHistogram(),
+                settings,
+                CreateExposureState(0.25f));
+
+            Assert.That(result.currentExposureScale, Is.EqualTo(0.25270838f).Within(1e-6f));
+            Assert.That(result.targetExposureScale, Is.EqualTo(0.6593355f).Within(1e-6f));
+            Assert.That(result.averageSceneLuminance, Is.EqualTo(0.27300215f).Within(1e-6f));
+            Assert.That(result.middleGreyCompensation, Is.EqualTo(1f).Within(1e-6f));
+        }
+
+        [Test]
+        public void AutoExposureReferenceSolver_ResolvesGoldenHistogramCurveCompensation()
+        {
+            var settings = CreateGoldenHistogramSettings();
+            settings.forceTarget = 1f;
+
+            var curve = new AnimationCurve(
+                new Keyframe(-16f, 1f),
+                new Keyframe(16f, 1f));
+
+            try
+            {
+                var curveTextureData = AutoExposureCompensationCurveUtility.Resolve(curve);
+                settings.exposureCompensationCurveTexture = curveTextureData.texture;
+                settings.exposureCompensationCurveMinEV100 = curveTextureData.minEV100;
+                settings.exposureCompensationCurveInvRange = curveTextureData.invRange;
+                settings.exposureCompensationCurveEnabled = curveTextureData.enabled;
+
+                var result = AutoExposureReferenceSolver.ResolveExposureState(
+                    CreateGoldenHistogram(),
+                    settings,
+                    CreateExposureState(1f));
+
+                Assert.That(result.currentExposureScale, Is.EqualTo(1.318671f).Within(1e-5f));
+                Assert.That(result.targetExposureScale, Is.EqualTo(1.318671f).Within(1e-5f));
+                Assert.That(result.averageSceneLuminance, Is.EqualTo(0.27300215f).Within(1e-6f));
+                Assert.That(result.middleGreyCompensation, Is.EqualTo(2f).Within(1e-6f));
+            }
+            finally
+            {
+                AutoExposureCompensationCurveUtility.Dispose();
+            }
+        }
+
+        [Test]
         public void VividRPCoreResources_DeclaresAutoExposureCompute()
         {
             var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.AutoExposureCompute));
@@ -299,18 +451,22 @@ namespace VividRP.Editor.Tests
         [Test]
         public void AutoExposureShader_DeclaresHistogramAndExposureKernels()
         {
+            var autoExposureSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposure.cs"));
             var shaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AutoExposure.compute"));
             var helperSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "AutoExposure.hlsl"));
             var runtimeSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureRuntimeUtility.cs"));
 
+            Assert.That(autoExposureSource, Does.Contain("public NoInterpAnimationCurveParameter exposureCompensationCurve"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel ClearHistogram"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel BuildHistogram"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel ResolveExposure"));
             Assert.That(shaderSource, Does.Contain("RWStructuredBuffer<uint> _HistogramBuffer;"));
             Assert.That(shaderSource, Does.Contain("RWStructuredBuffer<float4> _CurrentExposureBuffer;"));
+            Assert.That(shaderSource, Does.Contain("Texture2D<float4> _AutoExposureCompensationCurve;"));
             Assert.That(shaderSource, Does.Contain("static const float3 kLuminanceWeights = float3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0);"));
             Assert.That(shaderSource, Does.Contain("const float preExposure = max(_PreviousExposureBuffer[0].x, kEpsilon);"));
             Assert.That(shaderSource, Does.Contain("_InputColor.Load(int3(dispatchThreadId.xy, 0)).rgb / preExposure"));
+            Assert.That(shaderSource, Does.Contain("const float oldMiddleGreyExposureCompensation = max(_PreviousExposureBuffer[0].w, kEpsilon);"));
             Assert.That(helperSource, Does.Contain("StructuredBuffer<float4> _VividAutoExposurePreExposureBuffer;"));
             Assert.That(helperSource, Does.Contain("float3 VividApplyPreExposure(float3 color)"));
             Assert.That(runtimeSource, Does.Contain("settings.mode == AutoExposureMode.Manual"));
@@ -323,11 +479,37 @@ namespace VividRP.Editor.Tests
             Assert.That(runtimeSource, Does.Contain("ResolveHistogramLogRangeFromEV100("));
             Assert.That(runtimeSource, Does.Contain("BuildHistogramScaleBiasFromEV100("));
             Assert.That(runtimeSource, Does.Contain("ColorUtils.ComputeEV100(aperture, shutterSpeed, iso)"));
-            Assert.That(runtimeSource, Does.Contain("ResolveManualExposureScale(settings.manualEV100, settings.exposureCompensation)"));
+            Assert.That(runtimeSource, Does.Contain("settings.exposureCompensationSettings = ResolveExposureCompensation(autoExposure.exposureCompensation.value);"));
+            Assert.That(runtimeSource, Does.Contain("ResolveExposureCompensationCurveStops("));
+            Assert.That(runtimeSource, Does.Contain("settings.exposureCompensationAll = ResolveExposureCompensationAll("));
+            Assert.That(runtimeSource, Does.Contain("ResolveManualExposureScale(settings.manualEV100, settings.exposureCompensationAll)"));
+            Assert.That(runtimeSource, Does.Contain("AutoExposureCompensationCurveUtility.Resolve(autoExposure.exposureCompensationCurve.value)"));
             Assert.That(runtimeSource, Does.Contain("ResolveAverageSceneLuminanceFromEV100(settings.manualEV100)"));
             Assert.That(runtimeSource, Does.Contain("internal static AutoExposureSettingsData ResolvePhysicalCameraFallback"));
             Assert.That(runtimeSource, Does.Contain("var preExposureBuffer = exposureEnabled"));
             Assert.That(runtimeSource, Does.Contain("? state.currentExposureBuffer"));
+        }
+
+        [Test]
+        public void AutoExposureEditorOnlyGpuReadbackPath_WiresRuntimeAndEditorStatsMonitor()
+        {
+            var finalBlitSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "FinalBlitPass.cs"));
+            var readbackBridgeSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureStatsReadbackBridge.cs"));
+            var editorSource = File.ReadAllText(GetPackageFilePath("Editor", "VolumeEditor", "AutoExposureEditor.cs"));
+            var statsShaderSource = File.ReadAllText(GetPackageFilePath("Editor", "Shader", "AutoExposureStats.shader"));
+
+            Assert.That(finalBlitSource, Does.Contain("AutoExposureStatsReadbackBridge.Request("));
+            Assert.That(readbackBridgeSource, Does.Contain("Dictionary<Camera, SnapshotState>"));
+            Assert.That(readbackBridgeSource, Does.Contain("internal static void TouchInspectorRequest()"));
+            Assert.That(readbackBridgeSource, Does.Contain("internal static bool TryGetLatestSnapshot(out AutoExposureStatsReadbackSnapshot snapshot)"));
+            Assert.That(readbackBridgeSource, Does.Contain("commandBuffer.RequestAsyncReadback(exposureBuffer"));
+            Assert.That(readbackBridgeSource, Does.Contain("commandBuffer.RequestAsyncReadback(histogramBuffer"));
+            Assert.That(editorSource, Does.Contain("AutoExposureStatsReadbackBridge.TouchInspectorRequest();"));
+            Assert.That(editorSource, Does.Contain("return BuildLiveStatsPreviewData(snapshot);"));
+            Assert.That(editorSource, Does.Contain("SetFloatArray(HistogramSamplesId, m_HistogramPreviewSamples);"));
+            Assert.That(editorSource, Does.Contain("Live GPU ("));
+            Assert.That(editorSource, Does.Contain("Waiting for editor-only GPU readback."));
+            Assert.That(statsShaderSource, Does.Contain("float _HistogramSamples[64];"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)
@@ -347,6 +529,61 @@ namespace VividRP.Editor.Tests
             }
 
             return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
+        }
+
+        private static AutoExposureSettingsData CreateGoldenHistogramSettings()
+        {
+            var settings = AutoExposureSettingsData.CreateDefault();
+            var histogramScaleBias = AutoExposureSettingsResolver.BuildHistogramScaleBiasFromEV100(-10f, 6f);
+            var histogramLogRange = AutoExposureSettingsResolver.ResolveHistogramLogRangeFromEV100(-10f, 6f);
+
+            settings.enabled = true;
+            settings.mode = AutoExposureMode.Histogram;
+            settings.exposureLowPercent = 0.10f;
+            settings.exposureHighPercent = 0.90f;
+            settings.minAverageLuminance = 0.01f;
+            settings.maxAverageLuminance = 10f;
+            settings.exposureCompensationSettings = 1f;
+            settings.exposureCompensationCurveStops = 0f;
+            settings.exposureCompensationAll = 1f;
+            settings.deltaTime = 1f / 60f;
+            settings.exposureSpeedUp = 3f;
+            settings.exposureSpeedDown = 1f;
+            settings.histogramScale = histogramScaleBias.x;
+            settings.histogramBias = histogramScaleBias.y;
+            settings.luminanceMin = Mathf.Pow(2f, histogramLogRange.x);
+            settings.exponentialUpM = AutoExposureSettingsResolver.ComputeExponentialTransitionMultiplier(
+                settings.exposureSpeedUp,
+                AutoExposureSettingsResolver.DefaultStartDistance);
+            settings.exponentialDownM = AutoExposureSettingsResolver.ComputeExponentialTransitionMultiplier(
+                settings.exposureSpeedDown,
+                AutoExposureSettingsResolver.DefaultStartDistance);
+            settings.startDistance = AutoExposureSettingsResolver.DefaultStartDistance;
+            settings.forceTarget = 0f;
+            settings.exposureCompensationCurveTexture = Texture2D.blackTexture;
+            settings.exposureCompensationCurveMinEV100 = AutoExposureCompensationCurveUtility.DefaultCurveMinEV100;
+            settings.exposureCompensationCurveInvRange = 1f / AutoExposureCompensationCurveUtility.DefaultCurveRange;
+            settings.exposureCompensationCurveEnabled = false;
+            return settings;
+        }
+
+        private static uint[] CreateGoldenHistogram()
+        {
+            var histogram = new uint[AutoExposureReferenceSolver.HistogramBinCount];
+            histogram[8] = 10;
+            histogram[24] = 40;
+            histogram[40] = 40;
+            histogram[56] = 10;
+            return histogram;
+        }
+
+        private static Vector4 CreateExposureState(float exposureScale, float middleGreyCompensation = 1f)
+        {
+            return new Vector4(
+                exposureScale,
+                exposureScale,
+                AutoExposureSettingsResolver.MiddleGrey,
+                middleGreyCompensation);
         }
 
         private static void SetMemberValue(object instance, string memberName, object value)

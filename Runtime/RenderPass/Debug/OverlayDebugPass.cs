@@ -291,7 +291,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_AutoExposureSettings.histogramScale,
                 m_AutoExposureSettings.histogramBias,
                 m_AutoExposureSettings.luminanceMin,
-                m_AutoExposureSettings.exposureCompensation);
+                m_AutoExposureSettings.exposureCompensationAll);
             m_AutoExposureRangeParams = new Vector4(
                 m_AutoExposureSettings.minAverageLuminance,
                 m_AutoExposureSettings.maxAverageLuminance,
@@ -665,7 +665,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 new Vector4(
                     m_AutoExposureSettings.exposureSpeedUp,
                     m_AutoExposureSettings.exposureSpeedDown,
-                    m_AutoExposureSettings.exposureCompensation,
+                    m_AutoExposureSettings.exposureCompensationSettings,
                     m_AutoExposureSettings.deltaTime));
             cmd.SetComputeVectorParam(
                 m_AutoExposureCompute,

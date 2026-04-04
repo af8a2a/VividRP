@@ -11,6 +11,7 @@ Shader "Hidden/VividRP/Editor/Auto Exposure Stats"
         float4 _HistogramMarkers; // x: clamp min, y: clamp max, z: average, w: histogram width
         float4 _GaugeMarkers;     // x: current exposure gauge, y: target exposure gauge, z: compensation gauge, w: EV gauge
         float4 _PercentMarkers;   // x: low percent, y: high percent, z: enabled state
+        float _HistogramSamples[64];
 
         float3 ResolvePanelColor(float darkSkin)
         {
@@ -75,14 +76,13 @@ Shader "Hidden/VividRP/Editor/Auto Exposure Stats"
                 * step(saturate((uv.x - rectMin.x) / max(rectMax.x - rectMin.x, 1e-5)), clampedRange.y);
         }
 
-        float SyntheticHistogram(float x)
+        float ResolveHistogramSample(float x)
         {
-            float width = max(_HistogramMarkers.w, 0.08);
-            float center = _HistogramMarkers.z;
-            float primary = exp(-pow((x - center) / width, 2.0) * 2.6);
-            float secondaryCenter = lerp(_HistogramMarkers.x, _HistogramMarkers.y, 0.72);
-            float secondary = exp(-pow((x - secondaryCenter) / max(width * 0.55, 0.05), 2.0) * 2.0);
-            return saturate(primary + secondary * 0.32);
+            float scaledX = saturate(x) * 63.0;
+            int index0 = (int)floor(scaledX);
+            int index1 = min(index0 + 1, 63);
+            float blend = frac(scaledX);
+            return saturate(lerp(_HistogramSamples[index0], _HistogramSamples[index1], blend));
         }
 
         float4 DrawHistogramPreview(v2f_img i, float3 color, float3 panelColor, float3 surfaceColor, float3 gridColor, float3 accentColor, float3 borderColor)
@@ -111,7 +111,7 @@ Shader "Hidden/VividRP/Editor/Auto Exposure Stats"
                 * step(histogramUv.x, clampMax);
             color = lerp(color, accentColor * 0.24 + surfaceColor * 0.76, clampSpan * 0.90);
 
-            float histogramHeight = SyntheticHistogram(histogramUv.x) * 0.82 + 0.04;
+            float histogramHeight = ResolveHistogramSample(histogramUv.x) * 0.82 + 0.04;
             float histogramFill = histogramMask * (1.0 - smoothstep(histogramHeight - 0.015, histogramHeight + 0.015, histogramUv.y));
             float histogramLine = histogramMask * LineMask(histogramUv.y, histogramHeight, 0.012);
             color = lerp(color, accentColor * 0.28 + panelColor * 0.72, histogramFill * 0.68);

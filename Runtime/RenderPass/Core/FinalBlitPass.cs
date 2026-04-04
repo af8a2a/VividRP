@@ -26,10 +26,12 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int AutoExposurePreviousBufferId = Shader.PropertyToID("_PreviousExposureBuffer");
         private static readonly int AutoExposureCurrentBufferId = Shader.PropertyToID("_CurrentExposureBuffer");
         private static readonly int AutoExposureMeterMaskId = Shader.PropertyToID("_AutoExposureMeterMask");
+        private static readonly int AutoExposureCompensationCurveId = Shader.PropertyToID("_AutoExposureCompensationCurve");
         private static readonly int AutoExposureParams0Id = Shader.PropertyToID("_AutoExposureParams0");
         private static readonly int AutoExposureParams1Id = Shader.PropertyToID("_AutoExposureParams1");
         private static readonly int AutoExposureParams2Id = Shader.PropertyToID("_AutoExposureParams2");
         private static readonly int AutoExposureParams3Id = Shader.PropertyToID("_AutoExposureParams3");
+        private static readonly int AutoExposureCurveParamsId = Shader.PropertyToID("_AutoExposureCurveParams");
         private static readonly int AutoExposureScreenSizeId = Shader.PropertyToID("_AutoExposureScreenSize");
 
         [RenderGraphResource(Access = AccessFlags.Read)]
@@ -229,6 +231,18 @@ namespace VividRP.Runtime.RenderPass.Core
 
             Blitter.BlitTexture(unsafeCmd, sourceHandle, scaleBias, m_Material, 0);
 
+#if UNITY_EDITOR
+            AutoExposureStatsReadbackBridge.Request(
+                unsafeCmd,
+                m_Camera,
+                m_AutoExposureSettings,
+                m_EnableExposure,
+                m_EnableAutoExposure,
+                m_ExposureData != null && m_ExposureData.hasValidHistory,
+                m_EnableExposure ? autoExposureBuffer : null,
+                m_EnableAutoExposure ? m_AutoExposureHistogramBuffer : null);
+#endif
+
             if (exposureUpdated)
                 AutoExposureRuntimeManager.CommitFrame(m_Camera);
         }
@@ -353,7 +367,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 new Vector4(
                     m_AutoExposureSettings.exposureSpeedUp,
                     m_AutoExposureSettings.exposureSpeedDown,
-                    m_AutoExposureSettings.exposureCompensation,
+                    m_AutoExposureSettings.exposureCompensationSettings,
                     m_AutoExposureSettings.deltaTime));
             cmd.SetComputeVectorParam(
                 m_AutoExposureCompute,
@@ -373,12 +387,27 @@ namespace VividRP.Runtime.RenderPass.Core
                     0f));
             cmd.SetComputeVectorParam(
                 m_AutoExposureCompute,
+                AutoExposureCurveParamsId,
+                new Vector4(
+                    m_AutoExposureSettings.exposureCompensationCurveMinEV100,
+                    m_AutoExposureSettings.exposureCompensationCurveInvRange,
+                    m_AutoExposureSettings.exposureCompensationCurveEnabled ? 1f : 0f,
+                    0f));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
                 AutoExposureScreenSizeId,
                 new Vector4(
                     m_AutoExposureWidth,
                     m_AutoExposureHeight,
                     1f / Mathf.Max(1, m_AutoExposureWidth),
                     1f / Mathf.Max(1, m_AutoExposureHeight)));
+            cmd.SetComputeTextureParam(
+                m_AutoExposureCompute,
+                kernel,
+                AutoExposureCompensationCurveId,
+                m_AutoExposureSettings.exposureCompensationCurveTexture != null
+                    ? m_AutoExposureSettings.exposureCompensationCurveTexture
+                    : Texture2D.blackTexture);
         }
 
         private void EnsureAutoExposureHistogramBuffer()

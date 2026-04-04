@@ -105,6 +105,12 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void AutoExposureEditor_StatsPreviewShaderIsAvailable()
+        {
+            Assert.That(Shader.Find("Hidden/VividRP/Editor/Auto Exposure Stats"), Is.Not.Null);
+        }
+
+        [Test]
         public void TonemappingEditor_InitializesGranTurismoControls()
         {
             var component = ScriptableObject.CreateInstance<Tonemapping>();
@@ -229,6 +235,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(editorType.GetField("m_ExposureCompensation", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_HistogramLogRange", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_MeterMask", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_StatsPreviewMaterial", flags)?.GetValue(editor), Is.Not.Null);
             }
             finally
             {
@@ -259,6 +266,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Automatic Histogram\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Adaptation\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Histogram\")"));
+            Assert.That(source, Does.Contain("DrawSectionHeader(\"Monitor\")"));
+            Assert.That(source, Does.Contain("DrawStatsPreview();"));
+            Assert.That(source, Does.Contain("Shader.Find(\"Hidden/VividRP/Editor/Auto Exposure Stats\")"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

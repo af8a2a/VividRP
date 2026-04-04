@@ -311,9 +311,9 @@ namespace VividRP.Runtime
                 return settings;
             }
 
-            var exposureHighPercent = Mathf.Clamp(autoExposure.highPercent.value, 1f, 99f) * PercentToScale;
+            var exposureHighPercent = Mathf.Clamp(autoExposure.percent.max, 1f, 99f) * PercentToScale;
             var exposureLowPercent = Mathf.Min(
-                Mathf.Clamp(autoExposure.lowPercent.value, 1f, 99f) * PercentToScale,
+                Mathf.Clamp(autoExposure.percent.min, 1f, 99f) * PercentToScale,
                 exposureHighPercent);
 
             var minWhitePointLuminance = ResolveWhitePointLuminanceFromEV100(autoExposure.minEV100.value);

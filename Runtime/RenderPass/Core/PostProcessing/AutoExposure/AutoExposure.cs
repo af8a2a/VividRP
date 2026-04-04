@@ -35,10 +35,10 @@ namespace VividRP.Runtime
         public AutoExposureModeParameter mode = new(AutoExposureMode.Histogram);
 
         [Tooltip("Lower histogram percentile retained when estimating the scene luminance.")]
-        public ClampedFloatParameter lowPercent = new(80f, 1f, 99f);
+        public FloatRangeParameter percent = new( new Vector2(80f, 95f), 1f, 99f);
 
-        [Tooltip("Upper histogram percentile retained when estimating the scene luminance.")]
-        public ClampedFloatParameter highPercent = new(95f, 1f, 99f);
+        // [Tooltip("Upper histogram percentile retained when estimating the scene luminance.")]
+        // public ClampedFloatParameter highPercent = new(95f, 1f, 99f);
 
         [Tooltip("Legacy brightness clamp kept for backwards compatibility with older serialized assets.")]
         public MinFloatParameter minBrightness = new(0.03f, 0f);

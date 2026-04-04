@@ -1,0 +1,35 @@
+﻿using UnityEditor;
+using UnityEditor.Rendering;
+using UnityEngine;
+
+namespace VividRP.Editor
+{
+    public class LightUnitSliderUIDrawer
+    {
+        static PiecewiseLightUnitSlider k_ExposureSlider;
+
+        static LightUnitSliderUIDrawer()
+        {
+            // Exposure is in EV100, but we load a separate due to the different icon set.
+            k_ExposureSlider = new PiecewiseLightUnitSlider(LightUnitSliderDescriptors.ExposureDescriptor);
+        }
+
+        // Need to cache the serialized object on the slider, to add support for the preset selection context menu (need to apply changes to serialized)
+        // TODO: This slider drawer is getting kind of bloated. Break up the implementation into where it is actually used?
+        public void SetSerializedObject(SerializedObject serializedObject)
+        {
+            k_ExposureSlider.SetSerializedObject(serializedObject);
+        }
+
+        public void DrawExposureSlider(SerializedProperty value, Rect rect)
+        {
+            using (new EditorGUI.IndentLevelScope(-EditorGUI.indentLevel))
+            {
+                float val = value.floatValue;
+                k_ExposureSlider.Draw(rect, value, ref val);
+                if (val != value.floatValue)
+                    value.floatValue = val;
+            }
+        }
+    }
+}

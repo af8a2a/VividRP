@@ -319,10 +319,11 @@ namespace VividRP.Runtime
             var minWhitePointLuminance = ResolveWhitePointLuminanceFromEV100(autoExposure.minEV100.value);
             var maxWhitePointLuminance = ResolveWhitePointLuminanceFromEV100(autoExposure.maxEV100.value);
             maxWhitePointLuminance = Mathf.Max(minWhitePointLuminance, maxWhitePointLuminance);
+            var histogramLogRangeValue = autoExposure.histogramLogRange.value;
 
             var histogramLogRange = ResolveHistogramLogRangeFromEV100(
-                autoExposure.histogramLogMin.value,
-                autoExposure.histogramLogMax.value);
+                histogramLogRangeValue.x,
+                histogramLogRangeValue.y);
             var histogramScaleBias = BuildHistogramScaleBias(histogramLogRange.x, histogramLogRange.y);
             var validRange = autoExposure.minEV100.value < autoExposure.maxEV100.value;
             var validSpeeds = autoExposure.speedUp.value > 0f && autoExposure.speedDown.value > 0f;

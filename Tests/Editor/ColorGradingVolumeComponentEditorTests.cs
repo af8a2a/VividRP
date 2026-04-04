@@ -227,6 +227,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(editorType.GetField("m_ManualEV100", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ApplyPhysicalCameraExposure", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ExposureCompensation", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_HistogramLogRange", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_MeterMask", flags)?.GetValue(editor), Is.Not.Null);
             }
             finally
@@ -239,14 +240,25 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void AutoExposureEditor_UsesUnrealStyleExposureLabels()
+        public void AutoExposureEditor_UsesHdrpStyleExposureLabelsAndSections()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Editor", "VolumeEditor", "ColorGradingVolumeComponentEditors.cs"));
+            var source = File.ReadAllText(GetPackageFilePath("Editor", "VolumeEditor", "AutoExposureEditor.cs"));
 
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Metering Mode\")"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Histogram Min EV100\")"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Histogram Max EV100\")"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Exposure Metering Mask\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Mode\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Use Physical Camera\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Fixed Exposure\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Compensation\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Weight Texture Mask\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Limit Min\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Limit Max\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Speed Dark to Light\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Speed Light to Dark\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Histogram Percentages\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Histogram EV100 Range\")"));
+            Assert.That(source, Does.Contain("DrawSectionHeader(\"Metering\")"));
+            Assert.That(source, Does.Contain("DrawSectionHeader(\"Automatic Histogram\")"));
+            Assert.That(source, Does.Contain("DrawSectionHeader(\"Adaptation\")"));
+            Assert.That(source, Does.Contain("DrawSectionHeader(\"Histogram\")"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

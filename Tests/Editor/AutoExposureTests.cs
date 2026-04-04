@@ -175,6 +175,46 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void AutoExposure_MigratesLegacyHistogramLogRangeValuesIntoFloatRangeParameter()
+        {
+            var autoExposure = ScriptableObject.CreateInstance<AutoExposure>();
+
+            try
+            {
+                var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+                var legacyMinField = typeof(AutoExposure).GetField("histogramLogMin", flags);
+                var legacyMaxField = typeof(AutoExposure).GetField("histogramLogMax", flags);
+                var migrateMethod = typeof(AutoExposure).GetMethod("MigrateLegacyHistogramLogRangeIfNeeded", flags);
+
+                Assert.That(legacyMinField, Is.Not.Null);
+                Assert.That(legacyMaxField, Is.Not.Null);
+                Assert.That(migrateMethod, Is.Not.Null);
+
+                var legacyMin = legacyMinField.GetValue(autoExposure);
+                var legacyMax = legacyMaxField.GetValue(autoExposure);
+
+                Assert.That(legacyMin, Is.Not.Null);
+                Assert.That(legacyMax, Is.Not.Null);
+
+                autoExposure.histogramLogRange.overrideState = false;
+                autoExposure.histogramLogRange.value = new Vector2(-10f, 6f);
+                SetMemberValue(legacyMin, "overrideState", true);
+                SetMemberValue(legacyMin, "value", -8f);
+                SetMemberValue(legacyMax, "value", 12f);
+
+                migrateMethod.Invoke(autoExposure, null);
+
+                Assert.That(autoExposure.histogramLogRange.overrideState, Is.True);
+                Assert.That(autoExposure.histogramLogRange.value.x, Is.EqualTo(-8f).Within(1e-5f));
+                Assert.That(autoExposure.histogramLogRange.value.y, Is.EqualTo(12f).Within(1e-5f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(autoExposure);
+            }
+        }
+
+        [Test]
         public void ResolvePhysicalCameraFallback_UsesFixedManualExposure_WhenPhysicalCameraIsEnabled()
         {
             var cameraObject = new GameObject("Physical Camera Exposure Fallback Test");
@@ -277,6 +317,7 @@ namespace VividRP.Editor.Tests
             Assert.That(runtimeSource, Does.Contain("settings.applyPhysicalCameraExposure = autoExposure.applyPhysicalCameraExposure.value;"));
             Assert.That(runtimeSource, Does.Contain("settings.manualEV100 = ResolveManualEV100("));
             Assert.That(runtimeSource, Does.Contain("settings = AutoExposureSettingsResolver.ResolvePhysicalCameraFallback(settings, camera);"));
+            Assert.That(runtimeSource, Does.Contain("var histogramLogRangeValue = autoExposure.histogramLogRange.value;"));
             Assert.That(runtimeSource, Does.Contain("ResolveWhitePointLuminanceFromEV100(autoExposure.minEV100.value)"));
             Assert.That(runtimeSource, Does.Contain("ResolveWhitePointLuminanceFromEV100(autoExposure.maxEV100.value)"));
             Assert.That(runtimeSource, Does.Contain("ResolveHistogramLogRangeFromEV100("));
@@ -306,6 +347,27 @@ namespace VividRP.Editor.Tests
             }
 
             return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
+        }
+
+        private static void SetMemberValue(object instance, string memberName, object value)
+        {
+            var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            var type = instance.GetType();
+            var field = type.GetField(memberName, flags);
+            if (field != null)
+            {
+                field.SetValue(instance, value);
+                return;
+            }
+
+            var property = type.GetProperty(memberName, flags);
+            if (property != null)
+            {
+                property.SetValue(instance, value);
+                return;
+            }
+
+            Assert.Fail($"Member '{memberName}' was not found on '{type.FullName}'.");
         }
     }
 }

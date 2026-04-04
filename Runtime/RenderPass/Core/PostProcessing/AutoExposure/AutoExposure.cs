@@ -23,6 +23,11 @@ namespace VividRP.Runtime
     [VolumeComponentMenu("Post-processing/Auto Exposure")]
     public sealed class AutoExposure : VolumeComponent, IPostProcessComponent
     {
+        private const float DefaultHistogramLogMinEV100 = -10f;
+        private const float DefaultHistogramLogMaxEV100 = 6f;
+        private const float HistogramLogRangeLimitMinEV100 = -20f;
+        private const float HistogramLogRangeLimitMaxEV100 = 20f;
+
         [Tooltip("Enables automatic exposure metering.")]
         public BoolParameter enabled = new(false);
 
@@ -63,23 +68,39 @@ namespace VividRP.Runtime
         public FloatParameter exposureCompensation = new(0f);
 
         [AdditionalProperty]
-        [Tooltip("Minimum histogram EV100 range, matching Unreal's Histogram Min EV100 control.")]
-        public FloatParameter histogramLogMin = new(-10f);
-
-        [AdditionalProperty]
-        [Tooltip("Maximum histogram EV100 range, matching Unreal's Histogram Max EV100 control.")]
-        public FloatParameter histogramLogMax = new(6f);
+        [Tooltip("Histogram EV100 range, matching Unreal's Histogram Min/Max EV100 controls.")]
+        public FloatRangeParameter histogramLogRange = new(
+            new Vector2(DefaultHistogramLogMinEV100, DefaultHistogramLogMaxEV100),
+            HistogramLogRangeLimitMinEV100,
+            HistogramLogRangeLimitMaxEV100);
 
         [AdditionalProperty]
         [Tooltip("Optional weighting texture used for exposure metering.")]
         public Texture2DParameter meterMask = new(null);
 
+        [SerializeField, HideInInspector]
+        private FloatParameter histogramLogMin = new(DefaultHistogramLogMinEV100);
+
+        [SerializeField, HideInInspector]
+        private FloatParameter histogramLogMax = new(DefaultHistogramLogMaxEV100);
+
         protected override void OnEnable()
         {
+            EnsureParameters();
+            MigrateLegacyHistogramLogRangeIfNeeded();
+            SyncLegacyHistogramLogRangeFields();
+
             if (meterMask == null)
                 meterMask = new Texture2DParameter(null);
 
             base.OnEnable();
+        }
+
+        private void OnValidate()
+        {
+            EnsureParameters();
+            MigrateLegacyHistogramLogRangeIfNeeded();
+            SyncLegacyHistogramLogRangeFields();
         }
 
         public bool IsActive()
@@ -96,6 +117,44 @@ namespace VividRP.Runtime
             return maxWhitePointLuminance >= minWhitePointLuminance
                 && speedUp.value > 0f
                 && speedDown.value > 0f;
+        }
+
+        private void EnsureParameters()
+        {
+            histogramLogRange ??= new FloatRangeParameter(
+                new Vector2(DefaultHistogramLogMinEV100, DefaultHistogramLogMaxEV100),
+                HistogramLogRangeLimitMinEV100,
+                HistogramLogRangeLimitMaxEV100);
+            histogramLogMin ??= new FloatParameter(DefaultHistogramLogMinEV100);
+            histogramLogMax ??= new FloatParameter(DefaultHistogramLogMaxEV100);
+            meterMask ??= new Texture2DParameter(null);
+        }
+
+        private void MigrateLegacyHistogramLogRangeIfNeeded()
+        {
+            var currentRange = histogramLogRange.value;
+            var currentRangeIsDefault = !histogramLogRange.overrideState
+                && Mathf.Approximately(currentRange.x, DefaultHistogramLogMinEV100)
+                && Mathf.Approximately(currentRange.y, DefaultHistogramLogMaxEV100);
+            var legacyRangeHasCustomValue = histogramLogMin.overrideState
+                || histogramLogMax.overrideState
+                || !Mathf.Approximately(histogramLogMin.value, DefaultHistogramLogMinEV100)
+                || !Mathf.Approximately(histogramLogMax.value, DefaultHistogramLogMaxEV100);
+
+            if (!currentRangeIsDefault || !legacyRangeHasCustomValue)
+                return;
+
+            histogramLogRange.value = new Vector2(histogramLogMin.value, histogramLogMax.value);
+            histogramLogRange.overrideState = histogramLogMin.overrideState || histogramLogMax.overrideState;
+        }
+
+        private void SyncLegacyHistogramLogRangeFields()
+        {
+            var currentRange = histogramLogRange.value;
+            histogramLogMin.value = currentRange.x;
+            histogramLogMax.value = currentRange.y;
+            histogramLogMin.overrideState = histogramLogRange.overrideState;
+            histogramLogMax.overrideState = histogramLogRange.overrideState;
         }
     }
 }

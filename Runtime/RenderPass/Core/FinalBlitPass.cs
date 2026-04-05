@@ -16,7 +16,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ColorGradingLutId = Shader.PropertyToID("_VividColorGradingLut");
         private static readonly int ColorGradingParamsId = Shader.PropertyToID("_VividColorGradingParams");
         private static readonly int AutoExposureBufferId = Shader.PropertyToID("_VividAutoExposureBuffer");
-        private static readonly int AutoExposurePreExposureBufferId = Shader.PropertyToID("_VividAutoExposurePreExposureBuffer");
         private static readonly int AutoExposureMaterialParamsId = Shader.PropertyToID("_VividAutoExposureParams");
         private static readonly int FilmGrainTextureId = Shader.PropertyToID("_VividFilmGrainTexture");
         private static readonly int FilmGrainParamsId = Shader.PropertyToID("_VividFilmGrainParams");
@@ -141,7 +140,6 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             var defaultExposureBuffer = m_ExposureData?.defaultExposureBuffer;
-            var preExposureBuffer = m_ExposureData?.preExposureBuffer ?? defaultExposureBuffer;
             var autoExposureBuffer = defaultExposureBuffer;
             var exposureUpdated = false;
 
@@ -167,9 +165,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
             if (autoExposureBuffer != null)
                 m_Material.SetBuffer(AutoExposureBufferId, autoExposureBuffer);
-
-            if (preExposureBuffer != null)
-                m_Material.SetBuffer(AutoExposurePreExposureBufferId, preExposureBuffer);
 
             m_Material.SetVector(
                 AutoExposureMaterialParamsId,

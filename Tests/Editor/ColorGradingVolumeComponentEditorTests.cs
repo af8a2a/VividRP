@@ -235,6 +235,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(editorType.GetField("m_ExposureCompensationCurve", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_HistogramLogRange", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_MeterMask", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_SelectedPreset", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_StatsPreviewMaterial", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_HistogramPreviewSamples", flags)?.GetValue(editor), Is.Not.Null);
             }
@@ -253,6 +254,8 @@ namespace VividRP.Editor.Tests
             var source = File.ReadAllText(GetPackageFilePath("Editor", "VolumeEditor", "AutoExposureEditor.cs"));
 
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Mode\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Preset\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Apply Preset\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Use Physical Camera\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Fixed Exposure\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Compensation\")"));
@@ -264,11 +267,14 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Speed Light to Dark\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Histogram Percentages\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Histogram EV100 Range\")"));
+            Assert.That(source, Does.Contain("DrawSectionHeader(\"Presets\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Metering\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Automatic Histogram\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Adaptation\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Histogram\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Monitor\")"));
+            Assert.That(source, Does.Contain("AutoExposureCommonPresets.Get(m_SelectedPreset)"));
+            Assert.That(source, Does.Contain("ApplySelectedPreset()"));
             Assert.That(source, Does.Contain("DrawStatsPreview();"));
             Assert.That(source, Does.Contain("AutoExposureStatsReadbackBridge.TouchInspectorRequest();"));
             Assert.That(source, Does.Contain("BuildLiveStatsPreviewData(snapshot)"));

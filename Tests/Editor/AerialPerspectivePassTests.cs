@@ -78,6 +78,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("mpb.SetTexture(TransmittanceLutId, transmittanceLut);"));
             Assert.That(source, Does.Contain("mpb.SetTexture(MultiScatteringLutId, multiScatteringLut);"));
             Assert.That(source, Does.Contain("mpb.SetVector(SkyFogParamsId, fogParams);"));
+            Assert.That(source, Does.Not.Contain("SetBuffer("));
+            Assert.That(source, Does.Not.Contain("VividExposureData"));
             Assert.That(source, Does.Contain("CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);"));
         }
 

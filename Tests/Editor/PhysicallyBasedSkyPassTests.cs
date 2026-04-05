@@ -86,6 +86,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("mpb.SetTexture(SkyViewLutId, skyViewTexture ?? Texture2D.blackTexture);"));
             Assert.That(source, Does.Contain("mpb.SetFloat(SkyUseLutId, skyViewTexture != null ? 1.0f : 0.0f);"));
             Assert.That(source, Does.Contain("mpb.SetVector(SkyPlanetParamsId, m_Parameters.skyPlanetParams);"));
+            Assert.That(source, Does.Not.Contain("SetBuffer("));
+            Assert.That(source, Does.Not.Contain("VividExposureData"));
             Assert.That(source, Does.Contain("CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);"));
         }
 

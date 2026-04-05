@@ -1,3 +1,4 @@
+using System;
 using UnityEditor;
 using UnityEditor.Rendering;
 using UnityEngine;
@@ -22,6 +23,8 @@ namespace VividRP.Editor
         private static readonly int HistogramSamplesId = Shader.PropertyToID("_HistogramSamples");
 
         private static readonly GUIContent s_EnableLabel = EditorGUIUtility.TrTextContent("Enable");
+        private static readonly GUIContent s_PresetLabel = EditorGUIUtility.TrTextContent("Preset");
+        private static readonly GUIContent s_ApplyPresetLabel = EditorGUIUtility.TrTextContent("Apply Preset");
         private static readonly GUIContent s_ModeLabel = EditorGUIUtility.TrTextContent("Mode");
         private static readonly GUIContent s_UsePhysicalCameraLabel = EditorGUIUtility.TrTextContent("Use Physical Camera");
         private static readonly GUIContent s_FixedExposureLabel = EditorGUIUtility.TrTextContent("Fixed Exposure");
@@ -36,6 +39,8 @@ namespace VividRP.Editor
         private static readonly GUIContent s_HistogramEv100RangeLabel = EditorGUIUtility.TrTextContent("Histogram EV100 Range");
 
         private static GUIStyle s_StatsValueStyle;
+        private static readonly AutoExposureCommonPreset[] s_PresetValues = (AutoExposureCommonPreset[])Enum.GetValues(typeof(AutoExposureCommonPreset));
+        private static readonly GUIContent[] s_PresetOptions = BuildPresetOptions();
 
         private SerializedDataParameter m_Enabled;
         private SerializedDataParameter m_Mode;
@@ -55,6 +60,7 @@ namespace VividRP.Editor
         private Material m_StatsPreviewMaterial;
         private RenderTexture m_StatsPreviewTexture;
         private readonly float[] m_HistogramPreviewSamples = new float[HistogramBucketCount];
+        private AutoExposureCommonPreset m_SelectedPreset = AutoExposureCommonPreset.HistogramBalanced;
 
         public override bool hasAdditionalProperties => true;
 
@@ -202,6 +208,7 @@ namespace VividRP.Editor
         public override void OnInspectorGUI()
         {
             PropertyField(m_Enabled, s_EnableLabel);
+            DrawPresetControls();
 
             using (new EditorGUI.DisabledScope(!m_Enabled.value.boolValue))
             {
@@ -248,6 +255,26 @@ namespace VividRP.Editor
                 DrawSectionHeader("Monitor");
                 DrawStatsPreview();
             }
+        }
+
+        private void DrawPresetControls()
+        {
+            EditorGUILayout.Space();
+            DrawSectionHeader("Presets");
+
+            var selectedPresetIndex = ResolvePresetIndex(m_SelectedPreset);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                var newPresetIndex = EditorGUILayout.Popup(s_PresetLabel, selectedPresetIndex, s_PresetOptions);
+                if (newPresetIndex >= 0 && newPresetIndex < s_PresetValues.Length)
+                    m_SelectedPreset = s_PresetValues[newPresetIndex];
+
+                if (GUILayout.Button(s_ApplyPresetLabel, GUILayout.MaxWidth(108f)))
+                    ApplySelectedPreset();
+            }
+
+            var preset = AutoExposureCommonPresets.Get(m_SelectedPreset);
+            EditorGUILayout.HelpBox(preset.Description, MessageType.None);
         }
 
         private void DrawHistogramPercentages()
@@ -749,7 +776,7 @@ namespace VividRP.Editor
 
         private static Camera ResolvePreviewCamera()
         {
-            var cameras = Object.FindObjectsByType<Camera>(FindObjectsInactive.Exclude);
+            var cameras = UnityEngine.Object.FindObjectsByType<Camera>(FindObjectsInactive.Exclude);
             Camera fallback = null;
 
             foreach (var camera in cameras)
@@ -818,6 +845,48 @@ namespace VividRP.Editor
         private static void DrawSectionHeader(string title)
         {
             EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
+        }
+
+        private void ApplySelectedPreset()
+        {
+            var preset = AutoExposureCommonPresets.Get(m_SelectedPreset);
+
+            foreach (var targetObject in targets)
+            {
+                if (targetObject is not AutoExposure autoExposure)
+                    continue;
+
+                Undo.RecordObject(autoExposure, $"Apply {preset.Name} Preset");
+                preset.ApplyTo(autoExposure);
+                EditorUtility.SetDirty(autoExposure);
+                AssetDatabase.SaveAssetIfDirty(autoExposure);
+            }
+
+            serializedObject.Update();
+            Repaint();
+        }
+
+        private static int ResolvePresetIndex(AutoExposureCommonPreset preset)
+        {
+            for (var i = 0; i < s_PresetValues.Length; i++)
+            {
+                if (s_PresetValues[i] == preset)
+                    return i;
+            }
+
+            return 0;
+        }
+
+        private static GUIContent[] BuildPresetOptions()
+        {
+            var options = new GUIContent[s_PresetValues.Length];
+            for (var i = 0; i < s_PresetValues.Length; i++)
+            {
+                var preset = AutoExposureCommonPresets.Get(s_PresetValues[i]);
+                options[i] = EditorGUIUtility.TrTextContent(preset.Name, preset.Description);
+            }
+
+            return options;
         }
 
         private void DoExposurePropertyField(SerializedDataParameter exposureProperty)

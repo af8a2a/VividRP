@@ -131,13 +131,12 @@ namespace VividRP.Runtime
     {
         private const int AutoExposureVectorStride = sizeof(float) * 4;
 
-        private static readonly int AutoExposurePreExposureBufferId = Shader.PropertyToID("_VividAutoExposurePreExposureBuffer");
         private static readonly AutoExposureHistorySystem s_HistorySystem = new();
         private static readonly Vector4[] s_ExposureBufferData = new Vector4[1];
 
         private static GraphicsBuffer s_DefaultExposureBuffer;
 
-        internal static void PrepareFrame(ContextContainer frameData, CommandBuffer cmd)
+        internal static void PrepareFrame(ContextContainer frameData)
         {
             var exposureData = frameData.GetOrCreate<VividExposureData>();
             var cameraData = frameData.Get<VividCameraData>();
@@ -215,8 +214,6 @@ namespace VividRP.Runtime
             exposureData.autoExposureEnabled = autoExposureEnabled;
             exposureData.hasValidHistory = hasValidHistory;
 
-            if (cmd != null && preExposureBuffer != null)
-                cmd.SetGlobalBuffer(AutoExposurePreExposureBufferId, preExposureBuffer);
         }
 
         internal static void CommitFrame(Camera camera)
@@ -235,6 +232,12 @@ namespace VividRP.Runtime
             s_DefaultExposureBuffer?.Dispose();
             s_DefaultExposureBuffer = null;
             AutoExposureCompensationCurveUtility.Dispose();
+        }
+
+        internal static GraphicsBuffer GetOrCreateDefaultExposureBuffer()
+        {
+            EnsureDefaultExposureBuffer();
+            return s_DefaultExposureBuffer;
         }
 
         private static void EnsureDefaultExposureBuffer()

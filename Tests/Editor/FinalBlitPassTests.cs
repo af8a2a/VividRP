@@ -153,6 +153,7 @@ namespace VividRP.Editor.Tests
             var finalBlitShaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "FinalBlit.shader"));
             var blitShaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Blit.shader"));
             var passSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "FinalBlitPass.cs"));
+            var frameContextSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "FrameContextSystem.cs"));
 
             Assert.That(finalBlitShaderSource, Does.Contain("Shader \"Hidden/VividRP/FinalBlit\""));
             Assert.That(finalBlitShaderSource, Does.Contain("_VividColorGradingLut"));
@@ -173,6 +174,8 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("m_EnableExposure"));
             Assert.That(passSource, Does.Contain("m_AutoExposureSettings.mode == AutoExposureMode.Manual"));
             Assert.That(passSource, Does.Contain("m_ExposureData.currentExposureBuffer ?? m_ExposureData.previousExposureBuffer ?? defaultExposureBuffer"));
+            Assert.That(passSource, Does.Not.Contain("SetBuffer(AutoExposurePreExposureBufferId"));
+            Assert.That(frameContextSource, Does.Contain("AutoExposureShaderBindings.BindFrameGlobals(cmd, frameData.Get<VividExposureData>());"));
             Assert.That(passSource, Does.Contain("AutoExposureRuntimeManager.CommitFrame(m_Camera);"));
             Assert.That(passSource, Does.Not.Contain("resources.BlitShader"));
         }

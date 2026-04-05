@@ -139,14 +139,17 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "HDRISky.shader"));
             var passSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "HDRISkyPass.cs"));
+            var frameContextSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "FrameContextSystem.cs"));
+            var bindingSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureShaderBindings.cs"));
 
             Assert.That(source, Does.Contain("Shader \"Hidden/VividRP/HDRISky\""));
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl\""));
             Assert.That(source, Does.Contain("skyColor = VividApplyPreExposure(skyColor * _SkyTint.rgb * exp2(_SkyParam.x) * _SkyParam.y);"));
-            Assert.That(passSource, Does.Contain("AutoExposurePreExposureBufferId"));
-            Assert.That(passSource, Does.Contain("m_ExposureData?.preExposureBuffer"));
-            Assert.That(passSource, Does.Contain("m_Material.SetBuffer(AutoExposurePreExposureBufferId, preExposureBuffer);"));
-            Assert.That(passSource, Does.Contain("EnsureDefaultPreExposureBuffer();"));
+            Assert.That(frameContextSource, Does.Contain("AutoExposureShaderBindings.BindFrameGlobals(cmd, frameData.Get<VividExposureData>());"));
+            Assert.That(bindingSource, Does.Contain("cmd.SetGlobalBuffer(PreExposureBufferId, preExposureBuffer);"));
+            Assert.That(bindingSource, Does.Contain("ResolvePreExposureBuffer(VividExposureData exposureData)"));
+            Assert.That(passSource, Does.Not.Contain("SetBuffer("));
+            Assert.That(passSource, Does.Not.Contain("EnsureDefaultPreExposureBuffer"));
         }
 
         private static void AssertTextureSize(HDRISkyPass pass, string fieldName, int expectedWidth, int expectedHeight)

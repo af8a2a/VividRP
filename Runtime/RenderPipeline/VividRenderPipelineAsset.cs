@@ -3,6 +3,12 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
+    public enum AutoExposureImplementationPath
+    {
+        Unreal,
+        HDRP,
+    }
+
     [CreateAssetMenu(menuName = "VividRP/Vivid Render Pipeline")]
     public class VividRenderPipelineAsset : RenderPipelineAsset<VividRenderPipeline>
     {
@@ -21,6 +27,9 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private bool m_EnableSRPBatcher = true;
+
+        [SerializeField]
+        private AutoExposureImplementationPath m_AutoExposureImplementation = AutoExposureImplementationPath.Unreal;
 
         public bool EnableAsyncCompute
         {
@@ -46,7 +55,20 @@ namespace VividRP.Runtime
             set => m_EnableGPUDrivenDebugOverlay = value;
         }
 
+        public AutoExposureImplementationPath AutoExposureImplementation
+        {
+            get => m_AutoExposureImplementation;
+            set => m_AutoExposureImplementation = value;
+        }
+
         public override Shader defaultShader => Shader.Find(DefaultShaderName);
+
+        internal static VividRenderPipelineAsset GetActiveAsset()
+        {
+            return GraphicsSettings.currentRenderPipeline as VividRenderPipelineAsset
+                ?? QualitySettings.renderPipeline as VividRenderPipelineAsset
+                ?? GraphicsSettings.defaultRenderPipeline as VividRenderPipelineAsset;
+        }
 
         protected override UnityEngine.Rendering.RenderPipeline CreatePipeline()
         {

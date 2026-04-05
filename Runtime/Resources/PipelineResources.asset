@@ -17,7 +17,9 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: d29b21a8e739f684287b1783ef02244f, type: 3}
   - ResourceName: Shaders/Core/Private/AtmosphereLUT.compute
     ResourceObject: {fileID: 7200000, guid: 753b23d34984ac04c88258e198f605df, type: 3}
-  - ResourceName: Shaders/Core/Private/AutoExposure
+  - ResourceName: Shaders/Core/Private/AutoExposure/HDRP/Exposure.compute
+    ResourceObject: {fileID: 7200000, guid: 875a6ff948014d828853206e930b6d95, type: 3}
+  - ResourceName: Shaders/Core/Private/AutoExposure/Unreal/AutoExposure.compute
     ResourceObject: {fileID: 7200000, guid: 24e3284073fcc2a49ac03f9f74fdfe80, type: 3}
   - ResourceName: Shaders/Core/Private/Blit
     ResourceObject: {fileID: 4800000, guid: 88588a6fde9a5844db576cbc17606db2, type: 3}
@@ -112,22 +114,22 @@ MonoBehaviour:
   - ResourceName: Texture/Default/DefaultHDRISky.exr
     ResourceObject: {fileID: 8900000, guid: 6ef3a4217fa94c6ab3c3ebef707ef3f1, type: 3}
   - ResourceName: Texture/FilmGrain/Large01.png
-    ResourceObject: {fileID: 0}
+    ResourceObject: {fileID: 2800000, guid: 3f3cb0f4924d7a241b82a9081875f30d, type: 3}
   - ResourceName: Texture/FilmGrain/Large02.png
-    ResourceObject: {fileID: 0}
+    ResourceObject: {fileID: 2800000, guid: a35bdcb2008832646b3c8d2eb11e38a9, type: 3}
   - ResourceName: Texture/FilmGrain/Medium01.png
-    ResourceObject: {fileID: 0}
+    ResourceObject: {fileID: 2800000, guid: 58c1a5135746f854e8841c70a4b588b9, type: 3}
   - ResourceName: Texture/FilmGrain/Medium02.png
-    ResourceObject: {fileID: 0}
+    ResourceObject: {fileID: 2800000, guid: bdc6fb6e37de5824bb06e17ac19a8a1d, type: 3}
   - ResourceName: Texture/FilmGrain/Medium03.png
-    ResourceObject: {fileID: 0}
+    ResourceObject: {fileID: 2800000, guid: e4d8303457ba4854090965d854a7a741, type: 3}
   - ResourceName: Texture/FilmGrain/Medium04.png
-    ResourceObject: {fileID: 0}
+    ResourceObject: {fileID: 2800000, guid: 75e19bf5d3ef41d489aa05586243b58b, type: 3}
   - ResourceName: Texture/FilmGrain/Medium05.png
-    ResourceObject: {fileID: 0}
+    ResourceObject: {fileID: 2800000, guid: 6cafd4bed3e420a45a5702d61df0762c, type: 3}
   - ResourceName: Texture/FilmGrain/Medium06.png
-    ResourceObject: {fileID: 0}
+    ResourceObject: {fileID: 2800000, guid: a187955d1d88a954cb32c3c4e5f0aeda, type: 3}
   - ResourceName: Texture/FilmGrain/Thin01.png
-    ResourceObject: {fileID: 0}
+    ResourceObject: {fileID: 2800000, guid: 284a1ac236869fa4eacf377d73c7dff8, type: 3}
   - ResourceName: Texture/FilmGrain/Thin02.png
-    ResourceObject: {fileID: 0}
+    ResourceObject: {fileID: 2800000, guid: bd74961b009b93145a998ae93a5fc186, type: 3}

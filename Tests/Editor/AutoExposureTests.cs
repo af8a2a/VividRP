@@ -434,30 +434,41 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VividRPCoreResources_DeclaresAutoExposureCompute()
+        [TestCase(nameof(VividRPCoreResources.AutoExposureCompute), "Shaders/Core/Private/AutoExposure/Unreal/AutoExposure.compute")]
+        [TestCase(nameof(VividRPCoreResources.AutoExposureHDRPCompute), "Shaders/Core/Private/AutoExposure/HDRP/Exposure.compute")]
+        public void VividRPCoreResources_DeclaresAutoExposureComputePaths(string fieldName, string expectedPath)
         {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.AutoExposureCompute));
+            var field = typeof(VividRPCoreResources).GetField(fieldName);
 
             Assert.That(field, Is.Not.Null);
 
             var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
 
             Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/AutoExposure"));
+            Assert.That(resourcePath.Path, Is.EqualTo(expectedPath));
         }
 
         [Test]
         public void AutoExposureShader_DeclaresHistogramAndExposureKernels()
         {
             var autoExposureSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposure.cs"));
-            var shaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AutoExposure.compute"));
+            var shaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AutoExposure", "Unreal", "AutoExposure.compute"));
+            var hdrpShaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AutoExposure", "HDRP", "Exposure.compute"));
             var helperSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "AutoExposure.hlsl"));
             var runtimeSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureRuntimeUtility.cs"));
+            var implementationSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureImplementationUtility.cs"));
+            var assetSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPipeline", "VividRenderPipelineAsset.cs"));
+            var resourcesSource = File.ReadAllText(GetPackageFilePath("Runtime", "Utility", "PipelineResource", "VividResources.cs"));
 
             Assert.That(autoExposureSource, Does.Contain("public NoInterpAnimationCurveParameter exposureCompensationCurve"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel ClearHistogram"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel BuildHistogram"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel ResolveExposure"));
+            Assert.That(hdrpShaderSource, Does.Contain("#pragma kernel KPrePass"));
+            Assert.That(hdrpShaderSource, Does.Contain("#pragma kernel KReduction"));
+            Assert.That(hdrpShaderSource, Does.Contain("#pragma kernel KReset"));
+            Assert.That(hdrpShaderSource, Does.Contain("RWStructuredBuffer<float4> _CurrentExposureBuffer;"));
+            Assert.That(hdrpShaderSource, Does.Contain("WriteExposureBuffer("));
             Assert.That(shaderSource, Does.Contain("RWStructuredBuffer<uint> _HistogramBuffer;"));
             Assert.That(shaderSource, Does.Contain("RWStructuredBuffer<float4> _CurrentExposureBuffer;"));
             Assert.That(shaderSource, Does.Contain("Texture2D<float4> _AutoExposureCompensationCurve;"));
@@ -484,8 +495,21 @@ namespace VividRP.Editor.Tests
             Assert.That(runtimeSource, Does.Contain("AutoExposureCompensationCurveUtility.Resolve(autoExposure.exposureCompensationCurve.value)"));
             Assert.That(runtimeSource, Does.Contain("ResolveAverageSceneLuminanceFromEV100(settings.manualEV100)"));
             Assert.That(runtimeSource, Does.Contain("internal static AutoExposureSettingsData ResolvePhysicalCameraFallback"));
+            Assert.That(runtimeSource, Does.Contain("AutoExposureImplementationUtility.ResolveComputeShader("));
+            Assert.That(runtimeSource, Does.Contain("VividRenderPipelineAsset.GetActiveAsset()"));
             Assert.That(runtimeSource, Does.Contain("var preExposureBuffer = exposureEnabled"));
             Assert.That(runtimeSource, Does.Contain("? state.currentExposureBuffer"));
+            Assert.That(runtimeSource, Does.Contain("public RenderTexture previousExposureTexture;"));
+            Assert.That(runtimeSource, Does.Contain("public AutoExposureImplementationPath implementation;"));
+            Assert.That(implementationSource, Does.Contain("AutoExposureImplementationPath.HDRP"));
+            Assert.That(implementationSource, Does.Contain("SupportsUnrealDispatch"));
+            Assert.That(implementationSource, Does.Contain("SupportsHdrpDispatch"));
+            Assert.That(implementationSource, Does.Contain("ResolveHistogramDebugCompute"));
+            Assert.That(implementationSource, Does.Not.Contain("Falling back to the Unreal auto exposure compute."));
+            Assert.That(assetSource, Does.Contain("public enum AutoExposureImplementationPath"));
+            Assert.That(assetSource, Does.Contain("m_AutoExposureImplementation = AutoExposureImplementationPath.Unreal"));
+            Assert.That(resourcesSource, Does.Contain("public ComputeShader AutoExposureHDRPCompute;"));
+            Assert.That(resourcesSource, Does.Contain("ResolveAutoExposureCompute(VividRenderPipelineAsset pipelineAsset)"));
         }
 
         [Test]

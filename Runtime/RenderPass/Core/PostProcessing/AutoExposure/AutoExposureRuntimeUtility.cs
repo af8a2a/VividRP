@@ -77,10 +77,13 @@ namespace VividRP.Runtime
     internal sealed class VividExposureData : ContextItem
     {
         public AutoExposureSettingsData settings;
+        public AutoExposureImplementationPath implementation;
         public GraphicsBuffer defaultExposureBuffer;
         public GraphicsBuffer previousExposureBuffer;
         public GraphicsBuffer currentExposureBuffer;
         public GraphicsBuffer preExposureBuffer;
+        public RenderTexture previousExposureTexture;
+        public RenderTexture currentExposureTexture;
         public bool exposureEnabled;
         public bool autoExposureEnabled;
         public bool hasValidHistory;
@@ -88,10 +91,13 @@ namespace VividRP.Runtime
         public override void Reset()
         {
             settings = AutoExposureSettingsData.CreateDefault();
+            implementation = AutoExposureImplementationPath.Unreal;
             defaultExposureBuffer = null;
             previousExposureBuffer = null;
             currentExposureBuffer = null;
             preExposureBuffer = null;
+            previousExposureTexture = null;
+            currentExposureTexture = null;
             exposureEnabled = false;
             autoExposureEnabled = false;
             hasValidHistory = false;
@@ -102,12 +108,17 @@ namespace VividRP.Runtime
     {
         public GraphicsBuffer previousExposureBuffer;
         public GraphicsBuffer currentExposureBuffer;
+        public RenderTexture previousExposureTexture;
+        public RenderTexture currentExposureTexture;
         public bool hasValidHistory;
         public bool wasEnabledLastFrame;
+        public AutoExposureMode lastMode;
+        public AutoExposureImplementationPath lastImplementation;
 
         public void SwapBuffers()
         {
             (previousExposureBuffer, currentExposureBuffer) = (currentExposureBuffer, previousExposureBuffer);
+            (previousExposureTexture, currentExposureTexture) = (currentExposureTexture, previousExposureTexture);
         }
 
         public override void Dispose()
@@ -118,8 +129,24 @@ namespace VividRP.Runtime
             currentExposureBuffer?.Dispose();
             currentExposureBuffer = null;
 
+            if (previousExposureTexture != null)
+            {
+                previousExposureTexture.Release();
+                CoreUtils.Destroy(previousExposureTexture);
+                previousExposureTexture = null;
+            }
+
+            if (currentExposureTexture != null)
+            {
+                currentExposureTexture.Release();
+                CoreUtils.Destroy(currentExposureTexture);
+                currentExposureTexture = null;
+            }
+
             hasValidHistory = false;
             wasEnabledLastFrame = false;
+            lastMode = AutoExposureMode.Histogram;
+            lastImplementation = AutoExposureImplementationPath.Unreal;
         }
     }
 
@@ -144,7 +171,14 @@ namespace VividRP.Runtime
             var camera = cameraData?.camera;
             var postProcessingAllowed = camera != null && CoreUtils.ArePostProcessesEnabled(camera);
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            var hasAutoExposureCompute = resources?.AutoExposureCompute != null;
+            var pipelineAsset = VividRenderPipelineAsset.GetActiveAsset();
+            var implementation = AutoExposureImplementationUtility.ResolveImplementation(pipelineAsset);
+            var autoExposureCompute = AutoExposureImplementationUtility.ResolveComputeShader(
+                resources,
+                implementation);
+            var hasAutoExposureCompute = implementation == AutoExposureImplementationPath.HDRP
+                ? AutoExposureImplementationUtility.SupportsHdrpDispatch(autoExposureCompute)
+                : AutoExposureImplementationUtility.SupportsUnrealDispatch(autoExposureCompute);
 
             EnsureDefaultExposureBuffer();
             s_HistorySystem.PurgeDestroyedCameras();
@@ -168,7 +202,9 @@ namespace VividRP.Runtime
                 state = s_HistorySystem.GetOrCreateBase(camera);
                 EnsureAutoExposureHistoryState(state);
 
-                if (!state.wasEnabledLastFrame)
+                if (!state.wasEnabledLastFrame
+                    || state.lastMode != settings.mode
+                    || state.lastImplementation != implementation)
                 {
                     state.hasValidHistory = false;
                     settings.forceTarget = 1f;
@@ -182,6 +218,9 @@ namespace VividRP.Runtime
                         settings.manualAverageSceneLuminance,
                         settings.exposureCompensationAll);
                 }
+
+                state.lastMode = settings.mode;
+                state.lastImplementation = implementation;
             }
             else if (s_HistorySystem.TryGetBase(camera, out state))
             {
@@ -204,12 +243,21 @@ namespace VividRP.Runtime
                 : hasValidHistory && state?.previousExposureBuffer != null
                     ? state.previousExposureBuffer
                     : defaultExposureBuffer;
+            var previousExposureTexture = exposureEnabled && state?.previousExposureTexture != null
+                ? state.previousExposureTexture
+                : null;
+            var currentExposureTexture = exposureEnabled && state?.currentExposureTexture != null
+                ? state.currentExposureTexture
+                : null;
 
             exposureData.settings = settings;
+            exposureData.implementation = implementation;
             exposureData.defaultExposureBuffer = defaultExposureBuffer;
             exposureData.previousExposureBuffer = previousExposureBuffer;
             exposureData.currentExposureBuffer = currentExposureBuffer;
             exposureData.preExposureBuffer = preExposureBuffer;
+            exposureData.previousExposureTexture = previousExposureTexture;
+            exposureData.currentExposureTexture = currentExposureTexture;
             exposureData.exposureEnabled = exposureEnabled;
             exposureData.autoExposureEnabled = autoExposureEnabled;
             exposureData.hasValidHistory = hasValidHistory;
@@ -265,6 +313,8 @@ namespace VividRP.Runtime
 
             EnsureAutoExposureBuffer(ref state.previousExposureBuffer, "VividRP Auto Exposure Previous");
             EnsureAutoExposureBuffer(ref state.currentExposureBuffer, "VividRP Auto Exposure Current");
+            EnsureAutoExposureTexture(ref state.previousExposureTexture, "VividRP Auto Exposure Previous Texture");
+            EnsureAutoExposureTexture(ref state.currentExposureTexture, "VividRP Auto Exposure Current Texture");
         }
 
         private static void EnsureAutoExposureBuffer(ref GraphicsBuffer buffer, string name)
@@ -276,6 +326,34 @@ namespace VividRP.Runtime
             buffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, AutoExposureVectorStride);
             buffer.name = name;
             WriteExposureBuffer(buffer, 1f, AutoExposureSettingsResolver.MiddleGrey, 1f);
+        }
+
+        private static void EnsureAutoExposureTexture(ref RenderTexture texture, string name)
+        {
+            if (texture != null
+                && texture.IsCreated()
+                && texture.width == 1
+                && texture.height == 1
+                && texture.enableRandomWrite)
+            {
+                return;
+            }
+
+            if (texture != null)
+            {
+                texture.Release();
+                CoreUtils.Destroy(texture);
+            }
+
+            texture = new RenderTexture(1, 1, 0, RenderTextureFormat.RGFloat, RenderTextureReadWrite.Linear)
+            {
+                name = name,
+                enableRandomWrite = true,
+                filterMode = FilterMode.Point,
+                wrapMode = TextureWrapMode.Clamp,
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            texture.Create();
         }
 
         private static void WriteExposureBuffer(GraphicsBuffer buffer, float exposureScale, float averageSceneLuminance, float middleGreyCompensation)

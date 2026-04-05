@@ -12,6 +12,7 @@ namespace VividRP.Editor.RenderPipeline
     internal sealed class VividRenderPipelineAssetEditor : UnityEditor.Editor
     {
         private static readonly GUIContent s_RenderGraphLabel = EditorGUIUtility.TrTextContent("Render Graph Asset");
+        private static readonly GUIContent s_AutoExposureImplementationLabel = EditorGUIUtility.TrTextContent("Auto Exposure Implementation");
         private static readonly GUIContent s_AsyncComputeLabel = EditorGUIUtility.TrTextContent("Async Compute");
         private static readonly GUIContent s_GpuDrivenLabel = EditorGUIUtility.TrTextContent("GPU Driven");
         private static readonly GUIContent s_GpuDrivenDebugOverlayLabel = EditorGUIUtility.TrTextContent("GPU Driven Debug Overlay");
@@ -46,6 +47,14 @@ namespace VividRP.Editor.RenderPipeline
                 name = "vivid-rp-asset-render-graph-field",
             };
             root.Add(renderGraphField);
+
+            var autoExposureImplementationField = new PropertyField(
+                serializedObject.FindProperty("m_AutoExposureImplementation"),
+                s_AutoExposureImplementationLabel.text)
+            {
+                name = "vivid-rp-asset-auto-exposure-implementation-field",
+            };
+            root.Add(autoExposureImplementationField);
 
             var asyncComputeField = new PropertyField(serializedObject.FindProperty("m_EnableAsyncCompute"), s_AsyncComputeLabel.text)
             {

@@ -13,8 +13,11 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/FinalBlit")]
         public Shader FinalBlitShader;
 
-        [ResourcePath("Shaders/Core/Private/AutoExposure")]
+        [ResourcePath("Shaders/Core/Private/AutoExposure/Unreal/AutoExposure.compute")]
         public ComputeShader AutoExposureCompute;
+
+        [ResourcePath("Shaders/Core/Private/AutoExposure/HDRP/Exposure.compute")]
+        public ComputeShader AutoExposureHDRPCompute;
 
         
         [ResourcePath("Shaders/Core/Private/CoreBlit")]
@@ -173,5 +176,12 @@ namespace VividRP.Runtime
 
         [ResourcePath("Texture/FilmGrain/Large02.png")]
         public Texture2D FilmGrainLarge02;
+
+        public ComputeShader ResolveAutoExposureCompute(VividRenderPipelineAsset pipelineAsset)
+        {
+            return pipelineAsset != null && pipelineAsset.AutoExposureImplementation == AutoExposureImplementationPath.HDRP
+                ? AutoExposureHDRPCompute
+                : AutoExposureCompute;
+        }
     }
 }

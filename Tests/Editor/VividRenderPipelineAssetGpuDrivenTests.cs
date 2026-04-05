@@ -15,6 +15,7 @@ namespace VividRP.Editor.Tests
 
             try
             {
+                Assert.That(asset.AutoExposureImplementation, Is.EqualTo(AutoExposureImplementationPath.Unreal));
                 Assert.That(asset.EnableGPUDriven, Is.False);
                 Assert.That(asset.EnableGPUDrivenDebugOverlay, Is.False);
             }
@@ -32,16 +33,20 @@ namespace VividRP.Editor.Tests
             try
             {
                 var serializedObject = new SerializedObject(asset);
+                var implementationProperty = serializedObject.FindProperty("m_AutoExposureImplementation");
                 var property = serializedObject.FindProperty("m_EnableGPUDriven");
                 var debugOverlayProperty = serializedObject.FindProperty("m_EnableGPUDrivenDebugOverlay");
 
+                Assert.That(implementationProperty, Is.Not.Null);
                 Assert.That(property, Is.Not.Null);
                 Assert.That(debugOverlayProperty, Is.Not.Null);
 
+                implementationProperty.enumValueIndex = (int)AutoExposureImplementationPath.HDRP;
                 property.boolValue = true;
                 debugOverlayProperty.boolValue = true;
                 serializedObject.ApplyModifiedPropertiesWithoutUndo();
 
+                Assert.That(asset.AutoExposureImplementation, Is.EqualTo(AutoExposureImplementationPath.HDRP));
                 Assert.That(asset.EnableGPUDriven, Is.True);
                 Assert.That(asset.EnableGPUDrivenDebugOverlay, Is.True);
             }

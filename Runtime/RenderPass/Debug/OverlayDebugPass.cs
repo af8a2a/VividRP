@@ -195,8 +195,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             var shader = resources?.OverlayDebugShader;
             shader ??= Shader.Find(OverlayDebugShaderName);
-            m_AutoExposureCompute = resources?.AutoExposureCompute;
-            if (m_AutoExposureCompute != null)
+            m_AutoExposureCompute = AutoExposureImplementationUtility.ResolveHistogramDebugCompute(resources);
+            if (AutoExposureImplementationUtility.SupportsUnrealDispatch(m_AutoExposureCompute))
             {
                 m_ClearHistogramKernel = m_AutoExposureCompute.FindKernel(ClearHistogramKernelName);
                 m_BuildHistogramKernel = m_AutoExposureCompute.FindKernel(BuildHistogramKernelName);

@@ -170,7 +170,12 @@ namespace VividRP.Editor.Tests
             Assert.That(blitShaderSource, Does.Not.Contain("ApplyLut3D("));
 
             Assert.That(passSource, Does.Contain("resources.FinalBlitShader"));
-            Assert.That(passSource, Does.Contain("resources.AutoExposureCompute"));
+            Assert.That(passSource, Does.Contain("AutoExposureImplementationUtility.ResolveComputeShader("));
+            Assert.That(passSource, Does.Contain("AutoExposureImplementationPath.HDRP"));
+            Assert.That(passSource, Does.Contain("ExecuteHdrpAutoExposure("));
+            Assert.That(passSource, Does.Contain("BindHdrpAutoExposureParameters("));
+            Assert.That(passSource, Does.Contain("ResolveAutoExposureKernels()"));
+            Assert.That(passSource, Does.Contain("VividRenderPipelineAsset.GetActiveAsset()"));
             Assert.That(passSource, Does.Contain("m_EnableExposure"));
             Assert.That(passSource, Does.Contain("m_AutoExposureSettings.mode == AutoExposureMode.Manual"));
             Assert.That(passSource, Does.Contain("m_ExposureData.currentExposureBuffer ?? m_ExposureData.previousExposureBuffer ?? defaultExposureBuffer"));

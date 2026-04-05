@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
@@ -9,9 +10,15 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int AutoExposureHistogramBucketCount = 64;
         private const int AutoExposureHistogramThreadGroupSizeX = 8;
         private const int AutoExposureHistogramThreadGroupSizeY = 8;
+        private const int HdrpAutoExposurePrePassSize = 1024;
+        private const int HdrpAutoExposureReductionSize = 32;
+        private const int HdrpAutoExposureThreadGroupSize = 8;
         private const string ClearHistogramKernelName = "ClearHistogram";
         private const string BuildHistogramKernelName = "BuildHistogram";
         private const string ResolveExposureKernelName = "ResolveExposure";
+        private const string HdrpPrePassKernelName = "KPrePass";
+        private const string HdrpReductionKernelName = "KReduction";
+        private const string HdrpResetKernelName = "KReset";
 
         private static readonly int ColorGradingLutId = Shader.PropertyToID("_VividColorGradingLut");
         private static readonly int ColorGradingParamsId = Shader.PropertyToID("_VividColorGradingParams");
@@ -32,6 +39,19 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int AutoExposureParams3Id = Shader.PropertyToID("_AutoExposureParams3");
         private static readonly int AutoExposureCurveParamsId = Shader.PropertyToID("_AutoExposureCurveParams");
         private static readonly int AutoExposureScreenSizeId = Shader.PropertyToID("_AutoExposureScreenSize");
+        private static readonly int HdrpSourceTextureId = Shader.PropertyToID("_SourceTexture");
+        private static readonly int HdrpReductionInputTextureId = Shader.PropertyToID("_InputTexture");
+        private static readonly int HdrpPreviousExposureTextureId = Shader.PropertyToID("_PreviousExposureTexture");
+        private static readonly int HdrpOutputTextureId = Shader.PropertyToID("_OutputTexture");
+        private static readonly int HdrpExposureWeightMaskId = Shader.PropertyToID("_ExposureWeightMask");
+        private static readonly int HdrpExposureCurveTextureId = Shader.PropertyToID("_ExposureCurveTexture");
+        private static readonly int HdrpExposureParamsId = Shader.PropertyToID("_ExposureParams");
+        private static readonly int HdrpExposureParams2Id = Shader.PropertyToID("_ExposureParams2");
+        private static readonly int HdrpProceduralMaskParamsId = Shader.PropertyToID("_ProceduralMaskParams");
+        private static readonly int HdrpProceduralMaskParams2Id = Shader.PropertyToID("_ProceduralMaskParams2");
+        private static readonly int HdrpHistogramExposureParamsId = Shader.PropertyToID("_HistogramExposureParams");
+        private static readonly int HdrpAdaptationParamsId = Shader.PropertyToID("_AdaptationParams");
+        private static readonly int HdrpVariantsId = Shader.PropertyToID("_Variants");
 
         [RenderGraphResource(Access = AccessFlags.Read)]
         private RenderGraphTexture source = new();
@@ -41,6 +61,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private Material m_Material;
         private ComputeShader m_AutoExposureCompute;
+        private AutoExposureImplementationPath m_AutoExposureImplementation;
         private ColorGradingSettingsData m_ColorGradingSettings;
         private AutoExposureSettingsData m_AutoExposureSettings;
         private FilmGrainSettingsData m_FilmGrainSettings;
@@ -56,10 +77,15 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_ClearHistogramKernel = -1;
         private int m_BuildHistogramKernel = -1;
         private int m_ResolveExposureKernel = -1;
+        private int m_HdrpPrePassKernel = -1;
+        private int m_HdrpReductionKernel = -1;
+        private int m_HdrpResetKernel = -1;
         private Rect m_Viewport;
         private int m_FrameCount;
         private Camera m_Camera;
         private GraphicsBuffer m_AutoExposureHistogramBuffer;
+        private RenderTexture m_HdrpPrePassTexture;
+        private RenderTexture m_HdrpReductionTexture;
 
         public override void Prepare(ContextContainer frameData)
         {
@@ -91,14 +117,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FrameCount = Time.frameCount;
             m_AutoExposureWidth = ResolveAutoExposureDimension(m_Viewport.width, cameraData.actualWidth, cameraData.pixelWidth, Screen.width);
             m_AutoExposureHeight = ResolveAutoExposureDimension(m_Viewport.height, cameraData.actualHeight, cameraData.pixelHeight, Screen.height);
+            RefreshAutoExposureImplementation();
 
             m_EnableAutoExposure = m_PostProcessingAllowed
                 && m_ExposureData != null
                 && m_ExposureData.autoExposureEnabled
                 && m_AutoExposureCompute != null
-                && m_ClearHistogramKernel >= 0
-                && m_BuildHistogramKernel >= 0
-                && m_ResolveExposureKernel >= 0;
+                && SupportsSelectedAutoExposureImplementation();
             m_EnableExposure = m_PostProcessingAllowed
                 && m_ExposureData != null
                 && m_ExposureData.exposureEnabled;
@@ -109,13 +134,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
 
             m_Material = CoreUtils.CreateEngineMaterial(resources.FinalBlitShader);
-            m_AutoExposureCompute = resources.AutoExposureCompute;
-            if (m_AutoExposureCompute != null)
-            {
-                m_ClearHistogramKernel = m_AutoExposureCompute.FindKernel(ClearHistogramKernelName);
-                m_BuildHistogramKernel = m_AutoExposureCompute.FindKernel(BuildHistogramKernelName);
-                m_ResolveExposureKernel = m_AutoExposureCompute.FindKernel(ResolveExposureKernelName);
-            }
+            RefreshAutoExposureImplementation();
 
             EnsureAutoExposureHistogramBuffer();
         }
@@ -235,7 +254,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_EnableAutoExposure,
                 m_ExposureData != null && m_ExposureData.hasValidHistory,
                 m_EnableExposure ? autoExposureBuffer : null,
-                m_EnableAutoExposure ? m_AutoExposureHistogramBuffer : null);
+                m_EnableAutoExposure && m_AutoExposureImplementation == AutoExposureImplementationPath.Unreal
+                    ? m_AutoExposureHistogramBuffer
+                    : null);
 #endif
 
             if (exposureUpdated)
@@ -252,10 +273,16 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_AutoExposureHistogramBuffer?.Dispose();
             m_AutoExposureHistogramBuffer = null;
+            ReleaseHdrpScratchTexture(ref m_HdrpPrePassTexture);
+            ReleaseHdrpScratchTexture(ref m_HdrpReductionTexture);
             m_AutoExposureCompute = null;
+            m_AutoExposureImplementation = AutoExposureImplementationPath.Unreal;
             m_ClearHistogramKernel = -1;
             m_BuildHistogramKernel = -1;
             m_ResolveExposureKernel = -1;
+            m_HdrpPrePassKernel = -1;
+            m_HdrpReductionKernel = -1;
+            m_HdrpResetKernel = -1;
         }
 
         private static long HashFrame(int frame, int state)
@@ -300,6 +327,13 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private bool ExecuteAutoExposure(UnsafeCommandBuffer cmd)
         {
+            return m_AutoExposureImplementation == AutoExposureImplementationPath.HDRP
+                ? ExecuteHdrpAutoExposure(cmd)
+                : ExecuteUnrealAutoExposure(cmd);
+        }
+
+        private bool ExecuteUnrealAutoExposure(UnsafeCommandBuffer cmd)
+        {
             if (cmd == null
                 || m_AutoExposureCompute == null
                 || m_AutoExposureHistogramBuffer == null
@@ -340,6 +374,77 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeBufferParam(m_AutoExposureCompute, m_ResolveExposureKernel, AutoExposurePreviousBufferId, previousExposureBuffer);
             cmd.SetComputeBufferParam(m_AutoExposureCompute, m_ResolveExposureKernel, AutoExposureCurrentBufferId, m_ExposureData.currentExposureBuffer);
             cmd.DispatchCompute(m_AutoExposureCompute, m_ResolveExposureKernel, 1, 1, 1);
+            return true;
+        }
+
+        private bool ExecuteHdrpAutoExposure(UnsafeCommandBuffer cmd)
+        {
+            if (cmd == null
+                || m_AutoExposureCompute == null
+                || m_ExposureData?.currentExposureBuffer == null
+                || m_ExposureData.previousExposureTexture == null
+                || m_ExposureData.currentExposureTexture == null
+                || source?.innerHandle.IsValid() != true)
+            {
+                return false;
+            }
+
+            EnsureHdrpScratchTextures();
+            if (m_HdrpPrePassTexture == null || m_HdrpReductionTexture == null)
+                return false;
+
+            var meterMask = m_AutoExposureSettings.meterMask != null
+                ? m_AutoExposureSettings.meterMask
+                : Texture2D.whiteTexture;
+            var curveTexture = m_AutoExposureSettings.exposureCompensationCurveTexture != null
+                ? m_AutoExposureSettings.exposureCompensationCurveTexture
+                : Texture2D.blackTexture;
+            var previousExposureTexture = m_ExposureData.previousExposureTexture;
+            var currentExposureTexture = m_ExposureData.currentExposureTexture;
+
+            if (!m_ExposureData.hasValidHistory)
+            {
+                BindHdrpAutoExposureParameters(cmd, m_HdrpResetKernel, 0u);
+                cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpResetKernel, HdrpOutputTextureId, previousExposureTexture);
+                cmd.DispatchCompute(m_AutoExposureCompute, m_HdrpResetKernel, 1, 1, 1);
+            }
+
+            BindHdrpAutoExposureParameters(cmd, m_HdrpPrePassKernel, 0u);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpSourceTextureId, source.innerHandle);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpPreviousExposureTextureId, previousExposureTexture);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpExposureWeightMaskId, meterMask);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpExposureCurveTextureId, curveTexture);
+            cmd.SetComputeBufferParam(m_AutoExposureCompute, m_HdrpPrePassKernel, AutoExposureCurrentBufferId, m_ExposureData.currentExposureBuffer);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpOutputTextureId, m_HdrpPrePassTexture);
+            cmd.DispatchCompute(
+                m_AutoExposureCompute,
+                m_HdrpPrePassKernel,
+                HdrpAutoExposurePrePassSize / HdrpAutoExposureThreadGroupSize,
+                HdrpAutoExposurePrePassSize / HdrpAutoExposureThreadGroupSize,
+                1);
+
+            BindHdrpAutoExposureParameters(cmd, m_HdrpReductionKernel, 0u);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpReductionInputTextureId, m_HdrpPrePassTexture);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpPreviousExposureTextureId, previousExposureTexture);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpExposureWeightMaskId, meterMask);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpExposureCurveTextureId, curveTexture);
+            cmd.SetComputeBufferParam(m_AutoExposureCompute, m_HdrpReductionKernel, AutoExposureCurrentBufferId, m_ExposureData.currentExposureBuffer);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpOutputTextureId, m_HdrpReductionTexture);
+            cmd.DispatchCompute(
+                m_AutoExposureCompute,
+                m_HdrpReductionKernel,
+                HdrpAutoExposureReductionSize,
+                HdrpAutoExposureReductionSize,
+                1);
+
+            BindHdrpAutoExposureParameters(cmd, m_HdrpReductionKernel, 1u);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpReductionInputTextureId, m_HdrpReductionTexture);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpPreviousExposureTextureId, previousExposureTexture);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpExposureWeightMaskId, meterMask);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpExposureCurveTextureId, curveTexture);
+            cmd.SetComputeBufferParam(m_AutoExposureCompute, m_HdrpReductionKernel, AutoExposureCurrentBufferId, m_ExposureData.currentExposureBuffer);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpOutputTextureId, currentExposureTexture);
+            cmd.DispatchCompute(m_AutoExposureCompute, m_HdrpReductionKernel, 1, 1, 1);
             return true;
         }
 
@@ -405,6 +510,126 @@ namespace VividRP.Runtime.RenderPass.Core
                     : Texture2D.blackTexture);
         }
 
+        private void BindHdrpAutoExposureParameters(UnsafeCommandBuffer cmd, int kernel, uint evaluateMode)
+        {
+            if (cmd == null || kernel < 0 || m_AutoExposureCompute == null)
+                return;
+
+            var compensationStops = Mathf.Log(Mathf.Max(m_AutoExposureSettings.exposureCompensationSettings, 1e-6f), 2f);
+            var minExposureEV100 = AutoExposureSettingsResolver.ResolveAverageSceneEV100FromLuminance(m_AutoExposureSettings.minAverageLuminance);
+            var maxExposureEV100 = AutoExposureSettingsResolver.ResolveAverageSceneEV100FromLuminance(m_AutoExposureSettings.maxAverageLuminance);
+            var variants = new Vector4(
+                1f,
+                m_AutoExposureSettings.meterMask != null ? 3f : 0f,
+                m_AutoExposureSettings.forceTarget > 0.5f ? 0f : 1f,
+                evaluateMode);
+
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpExposureParamsId,
+                new Vector4(
+                    compensationStops,
+                    minExposureEV100,
+                    maxExposureEV100,
+                    0f));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpExposureParams2Id,
+                new Vector4(
+                    0f,
+                    0f,
+                    1f,
+                    18f));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpProceduralMaskParamsId,
+                Vector4.zero);
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpProceduralMaskParams2Id,
+                Vector4.zero);
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpHistogramExposureParamsId,
+                new Vector4(
+                    m_AutoExposureSettings.exposureCompensationCurveMinEV100,
+                    m_AutoExposureSettings.exposureCompensationCurveInvRange,
+                    m_AutoExposureSettings.exposureCompensationCurveEnabled ? 1f : 0f,
+                    AutoExposureSettingsResolver.MiddleGrey));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpAdaptationParamsId,
+                new Vector4(
+                    m_AutoExposureSettings.exposureSpeedUp,
+                    m_AutoExposureSettings.exposureSpeedDown,
+                    0f,
+                    0f));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpVariantsId,
+                variants);
+        }
+
+        private bool SupportsSelectedAutoExposureImplementation()
+        {
+            return m_AutoExposureImplementation == AutoExposureImplementationPath.HDRP
+                ? m_HdrpPrePassKernel >= 0 && m_HdrpReductionKernel >= 0 && m_HdrpResetKernel >= 0
+                : m_ClearHistogramKernel >= 0 && m_BuildHistogramKernel >= 0 && m_ResolveExposureKernel >= 0;
+        }
+
+        private void RefreshAutoExposureImplementation()
+        {
+            var resources = PipelineResourceManager.Get<VividRPCoreResources>();
+            var implementation = m_ExposureData != null
+                ? m_ExposureData.implementation
+                : AutoExposureImplementationUtility.ResolveImplementation(VividRenderPipelineAsset.GetActiveAsset());
+            var computeShader = AutoExposureImplementationUtility.ResolveComputeShader(resources, implementation);
+
+            if (m_AutoExposureImplementation == implementation && m_AutoExposureCompute == computeShader)
+                return;
+
+            m_AutoExposureImplementation = implementation;
+            m_AutoExposureCompute = computeShader;
+            ResolveAutoExposureKernels();
+        }
+
+        private void ResolveAutoExposureKernels()
+        {
+            m_ClearHistogramKernel = -1;
+            m_BuildHistogramKernel = -1;
+            m_ResolveExposureKernel = -1;
+            m_HdrpPrePassKernel = -1;
+            m_HdrpReductionKernel = -1;
+            m_HdrpResetKernel = -1;
+
+            if (m_AutoExposureCompute == null)
+                return;
+
+            if (m_AutoExposureImplementation == AutoExposureImplementationPath.HDRP)
+            {
+                if (!AutoExposureImplementationUtility.SupportsHdrpDispatch(m_AutoExposureCompute))
+                {
+                    Debug.LogWarning("[VividRP] HDRP auto exposure is selected, but the HDRP compute shader is missing the required kernels.");
+                    return;
+                }
+
+                m_HdrpPrePassKernel = m_AutoExposureCompute.FindKernel(HdrpPrePassKernelName);
+                m_HdrpReductionKernel = m_AutoExposureCompute.FindKernel(HdrpReductionKernelName);
+                m_HdrpResetKernel = m_AutoExposureCompute.FindKernel(HdrpResetKernelName);
+                return;
+            }
+
+            if (!AutoExposureImplementationUtility.SupportsUnrealDispatch(m_AutoExposureCompute))
+            {
+                Debug.LogWarning("[VividRP] Unreal auto exposure is selected, but the compute shader is missing the required histogram kernels.");
+                return;
+            }
+
+            m_ClearHistogramKernel = m_AutoExposureCompute.FindKernel(ClearHistogramKernelName);
+            m_BuildHistogramKernel = m_AutoExposureCompute.FindKernel(BuildHistogramKernelName);
+            m_ResolveExposureKernel = m_AutoExposureCompute.FindKernel(ResolveExposureKernelName);
+        }
+
         private void EnsureAutoExposureHistogramBuffer()
         {
             if (m_AutoExposureHistogramBuffer != null
@@ -420,6 +645,55 @@ namespace VividRP.Runtime.RenderPass.Core
                 AutoExposureHistogramBucketCount,
                 sizeof(uint));
             m_AutoExposureHistogramBuffer.name = "VividRP Auto Exposure Histogram";
+        }
+
+        private void EnsureHdrpScratchTextures()
+        {
+            EnsureHdrpScratchTexture(
+                ref m_HdrpPrePassTexture,
+                HdrpAutoExposurePrePassSize,
+                HdrpAutoExposurePrePassSize,
+                "VividRP HDRP Auto Exposure PrePass");
+            EnsureHdrpScratchTexture(
+                ref m_HdrpReductionTexture,
+                HdrpAutoExposureReductionSize,
+                HdrpAutoExposureReductionSize,
+                "VividRP HDRP Auto Exposure Reduction");
+        }
+
+        private static void EnsureHdrpScratchTexture(ref RenderTexture texture, int width, int height, string name)
+        {
+            if (texture != null
+                && texture.IsCreated()
+                && texture.width == width
+                && texture.height == height
+                && texture.enableRandomWrite)
+            {
+                return;
+            }
+
+            ReleaseHdrpScratchTexture(ref texture);
+
+            texture = new RenderTexture(width, height, 0)
+            {
+                name = name,
+                graphicsFormat = GraphicsFormat.R32G32_SFloat,
+                enableRandomWrite = true,
+                filterMode = FilterMode.Point,
+                wrapMode = TextureWrapMode.Clamp,
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            texture.Create();
+        }
+
+        private static void ReleaseHdrpScratchTexture(ref RenderTexture texture)
+        {
+            if (texture == null)
+                return;
+
+            texture.Release();
+            CoreUtils.Destroy(texture);
+            texture = null;
         }
 
         private static int ResolveAutoExposureDimension(float viewportDimension, int preferredDimension, int fallbackDimension, int screenDimension)

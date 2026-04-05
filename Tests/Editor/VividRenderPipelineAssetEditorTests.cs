@@ -86,6 +86,7 @@ namespace VividRP.Tests
                 var root = editor.CreateInspectorGUI();
 
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-render-graph-field"), Is.Not.Null);
+                Assert.That(root.Q<PropertyField>("vivid-rp-asset-auto-exposure-implementation-field"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-async-compute-field"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-gpu-driven-field"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-gpu-driven-debug-overlay-field"), Is.Not.Null);
@@ -100,6 +101,7 @@ namespace VividRP.Tests
         [Test]
         public void Asset_DefaultsToAsyncComputeAndSRPBatcherEnabled()
         {
+            Assert.That(m_PipelineAsset.AutoExposureImplementation, Is.EqualTo(AutoExposureImplementationPath.Unreal));
             Assert.That(m_PipelineAsset.EnableAsyncCompute, Is.True);
             Assert.That(m_PipelineAsset.EnableGPUDriven, Is.False);
             Assert.That(m_PipelineAsset.EnableGPUDrivenDebugOverlay, Is.False);

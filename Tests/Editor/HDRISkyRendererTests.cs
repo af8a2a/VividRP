@@ -7,14 +7,21 @@ namespace VividRP.Editor.Tests
     public class HDRISkyRendererTests
     {
         [Test]
-        public void Update_RequestsGpuAmbientProbeConvolutionForHDRI()
+        public void Update_PopulatesAmbientProbeBakeInputsForHDRI()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "HDRISkyRenderer.cs"));
 
             Assert.That(source, Does.Contain("public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd)"));
-            Assert.That(source, Does.Contain("m_AmbientProbeConvolution.RequestUpdate("));
+            Assert.That(source, Does.Contain("m_AmbientProbeBakingPass = m_Material.FindPass(\"HDRISkyBaking\");"));
+            Assert.That(source, Does.Contain("SkyCubemapBakingUtility.RenderSkyToCubemap("));
+            Assert.That(source, Does.Contain("skyData.ambientProbeCubemap = useBakedAmbientProbe ? m_AmbientProbeCubemap : cubemap;"));
+            Assert.That(source, Does.Contain("skyData.ambientProbeTint = useBakedAmbientProbe ? Color.white : skyData.tint;"));
+            Assert.That(source, Does.Contain("skyData.ambientProbeExposure = useBakedAmbientProbe ? 0.0f : skyData.exposure;"));
+            Assert.That(source, Does.Contain("skyData.ambientProbeRotation = useBakedAmbientProbe ? 0.0f : skyData.rotation;"));
+            Assert.That(source, Does.Contain("skyData.ambientProbeHash = skyHash;"));
             Assert.That(source, Does.Contain("skyData.hasDiffuseSH = false;"));
             Assert.That(source, Does.Contain("skyData.diffuseSH = default;"));
+            Assert.That(source, Does.Not.Contain("m_AmbientProbeConvolution.RequestUpdate("));
             Assert.That(source, Does.Not.Contain("TryProjectCubemapToSH("));
         }
 
@@ -23,10 +30,14 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyManager.cs"));
 
-            Assert.That(source, Does.Contain("RegisterRenderer(new HDRISkyRenderer(s_AmbientProbeConvolution), resources);"));
+            Assert.That(source, Does.Contain("RegisterRenderer(new HDRISkyRenderer(), resources);"));
             Assert.That(source, Does.Contain("renderer.Update(context, s_CachedSkyData, cmd);"));
-            Assert.That(source, Does.Contain("skyData.activeSkyType != SkyType.HDRI && s_AmbientProbeConvolution.IsSupported"));
-            Assert.That(source, Does.Contain("s_AmbientProbeConvolution.RequestUpdate("));
+            Assert.That(source, Does.Contain("if (skyData != null && skyData.ambientProbeCubemap != null)"));
+            Assert.That(source, Does.Contain("skyData.ambientProbeCubemap,"));
+            Assert.That(source, Does.Contain("skyData.ambientProbeTint,"));
+            Assert.That(source, Does.Contain("skyData.ambientProbeExposure,"));
+            Assert.That(source, Does.Contain("skyData.ambientProbeRotation,"));
+            Assert.That(source, Does.Contain("skyData.ambientProbeHash);"));
             Assert.That(source, Does.Contain("s_AmbientProbeConvolution.BindGlobalBuffer(cmd, true);"));
             Assert.That(source, Does.Not.Contain("SkyDiffuseSHUtility.TryProjectCubemapToSH("));
             Assert.That(source, Does.Not.Contain("UploadProbe("));

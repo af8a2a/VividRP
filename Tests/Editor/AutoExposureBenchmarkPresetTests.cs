@@ -30,6 +30,62 @@ namespace VividRP.Editor.Tests
         }
 
         [TestCaseSource(typeof(AutoExposureBenchmarkPresets), nameof(AutoExposureBenchmarkPresets.All))]
+        public void AutoExposureBenchmarkPresets_StayWithinVolumeSafeEv100Range(AutoExposurePresetDefinition preset)
+        {
+            Assert.That(
+                preset.MinEV100,
+                Is.InRange(AutoExposureCommonPresets.VolumeSafeMinEV100, AutoExposureCommonPresets.VolumeSafeMaxEV100));
+            Assert.That(
+                preset.MaxEV100,
+                Is.InRange(AutoExposureCommonPresets.VolumeSafeMinEV100, AutoExposureCommonPresets.VolumeSafeMaxEV100));
+            Assert.That(preset.MaxEV100, Is.GreaterThan(preset.MinEV100));
+        }
+
+        [Test]
+        public void HistogramBalanced_UsesUeDefaultPercentWindowAndHdrFriendlyBias()
+        {
+            var preset = AutoExposureCommonPresets.Get(AutoExposureCommonPreset.HistogramBalanced);
+
+            Assert.That(preset.Percent.x, Is.EqualTo(10f).Within(1e-5f));
+            Assert.That(preset.Percent.y, Is.EqualTo(90f).Within(1e-5f));
+            Assert.That(preset.ExposureCompensation, Is.EqualTo(1f).Within(1e-5f));
+        }
+
+        [Test]
+        public void HistogramBalanced_PrefersMidSkyOverBrightOutliers_WhenEvaluatingHdrSkyHistogram()
+        {
+            var balancedSettings = AutoExposureCommonPresets
+                .Get(AutoExposureCommonPreset.HistogramBalanced)
+                .CreateSettingsData(isFirstFrame: true);
+            var aggressiveSettings = balancedSettings;
+            aggressiveSettings.exposureLowPercent = 0.8f;
+            aggressiveSettings.exposureHighPercent = 0.95f;
+
+            var hdrSkyHistogram = new uint[AutoExposureReferenceSolver.HistogramBinCount];
+            hdrSkyHistogram[18] = 720;
+            hdrSkyHistogram[36] = 240;
+            hdrSkyHistogram[63] = 40;
+
+            var previousExposureState = new Vector4(
+                1f,
+                1f,
+                AutoExposureSettingsResolver.MiddleGrey,
+                balancedSettings.exposureCompensationAll);
+
+            var balancedResult = AutoExposureReferenceSolver.ResolveExposureState(
+                hdrSkyHistogram,
+                balancedSettings,
+                previousExposureState);
+            var aggressiveResult = AutoExposureReferenceSolver.ResolveExposureState(
+                hdrSkyHistogram,
+                aggressiveSettings,
+                previousExposureState);
+
+            Assert.That(balancedResult.currentExposureScale, Is.GreaterThan(aggressiveResult.currentExposureScale));
+            Assert.That(balancedResult.averageSceneLuminance, Is.LessThan(aggressiveResult.averageSceneLuminance));
+        }
+
+        [TestCaseSource(typeof(AutoExposureBenchmarkPresets), nameof(AutoExposureBenchmarkPresets.All))]
         public void AutoExposureBenchmarkPresets_CreateVolumeComponent_ProducesActivePreset(AutoExposurePresetDefinition preset)
         {
             var component = preset.CreateVolumeComponent();

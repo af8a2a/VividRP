@@ -95,25 +95,30 @@ namespace VividRP.Editor.Tests
         public void Shader_Source_UsesSkyViewLutWithRaymarchFallback()
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "PhysicallyBasedSky.shader"));
+            var commonSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "PhysicallyBasedSkyCommon.hlsl"));
 
             Assert.That(source, Does.Contain("Shader \"Hidden/VividRP/PhysicallyBasedSky\""));
             Assert.That(source, Does.Contain("Name \"PhysicallyBasedSky\""));
+            Assert.That(source, Does.Contain("Name \"PhysicallyBasedSkyBaking\""));
             Assert.That(source, Does.Contain("ZTest LEqual"));
-            Assert.That(source, Does.Contain("TEXTURE2D(_SkyViewLUT);"));
-            Assert.That(source, Does.Contain("float _SkyUseLUT;"));
-            Assert.That(source, Does.Contain("EncodeSkyViewUv"));
-            Assert.That(source, Does.Contain("frac(azimuth / (2.0f * PI) + 0.5f)"));
-            Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D(_SkyViewLUT, sampler_SkyViewLUT"));
-            Assert.That(source, Does.Contain("VIEW_SAMPLE_COUNT = 12"));
-            Assert.That(source, Does.Contain("LIGHT_SAMPLE_COUNT = 6"));
-            Assert.That(source, Does.Contain("GetSkyViewDirWS"));
-            Assert.That(source, Does.Contain("float3 SanitizeSkyRadiance(float3 color)"));
-            Assert.That(source, Does.Contain("float3 EvaluateSunDisk(float3 directionWS)"));
-            Assert.That(source, Does.Contain("skyColor += EvaluateSunDisk(viewDirWS);"));
-            Assert.That(source, Does.Contain("EvaluateSky"));
-            Assert.That(source, Does.Contain("_SkyUseLUT > 0.5f"));
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl\""));
-            Assert.That(source, Does.Contain("return float4(VividApplyPreExposure(SanitizeSkyRadiance(skyColor)), 1.0f);"));
+            Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Private/Sky/PhysicallyBasedSkyCommon.hlsl\""));
+            Assert.That(source, Does.Contain("return float4(VividApplyPreExposure(EvaluateSkyColor(input.positionCS.xy)), 1.0f);"));
+            Assert.That(source, Does.Contain("float4 FragBaking(Varyings input) : SV_Target"));
+            Assert.That(source, Does.Contain("return float4(EvaluateSkyColor(input.positionCS.xy), 1.0f);"));
+            Assert.That(commonSource, Does.Contain("TEXTURE2D(_SkyViewLUT);"));
+            Assert.That(commonSource, Does.Contain("float _SkyUseLUT;"));
+            Assert.That(commonSource, Does.Contain("EncodeSkyViewUv"));
+            Assert.That(commonSource, Does.Contain("frac(azimuth / (2.0f * PI) + 0.5f)"));
+            Assert.That(commonSource, Does.Contain("SAMPLE_TEXTURE2D(_SkyViewLUT, sampler_SkyViewLUT"));
+            Assert.That(commonSource, Does.Contain("VIEW_SAMPLE_COUNT = 12"));
+            Assert.That(commonSource, Does.Contain("LIGHT_SAMPLE_COUNT = 6"));
+            Assert.That(commonSource, Does.Contain("GetSkyViewDirWS"));
+            Assert.That(commonSource, Does.Contain("float3 SanitizeSkyRadiance(float3 color)"));
+            Assert.That(commonSource, Does.Contain("float3 EvaluateSunDisk(float3 directionWS)"));
+            Assert.That(commonSource, Does.Contain("skyColor += EvaluateSunDisk(viewDirWS);"));
+            Assert.That(commonSource, Does.Contain("EvaluateSky"));
+            Assert.That(commonSource, Does.Contain("_SkyUseLUT > 0.5f"));
         }
 
         private static void AssertTextureSize(PhysicallyBasedSkyPass pass, string fieldName, int expectedWidth, int expectedHeight)

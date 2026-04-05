@@ -62,7 +62,7 @@ namespace VividRP.Runtime
             CommandBuffer cmd,
             Texture sourceCubemap,
             Color tint,
-            float exposure,
+            float exposureStops,
             float rotation,
             int skyHash)
         {
@@ -80,7 +80,7 @@ namespace VividRP.Runtime
             cmd.SetComputeVectorParam(
                 m_ComputeShader,
                 SkyConvolutionParamsId,
-                new Vector4(HDRISkyVolume.ResolveExposureMultiplier(exposure), -rotation, 0.0f, 0.0f));
+                new Vector4(HDRISkyVolume.ResolveExposureMultiplier(exposureStops), -rotation, 0.0f, 0.0f));
             Hammersley.BindConstants(cmd, m_ComputeShader);
             cmd.DispatchCompute(m_ComputeShader, m_Kernel, 1, 1, 1);
 

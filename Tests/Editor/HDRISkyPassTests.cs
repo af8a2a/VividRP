@@ -144,7 +144,11 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("Shader \"Hidden/VividRP/HDRISky\""));
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl\""));
-            Assert.That(source, Does.Contain("skyColor = VividApplyPreExposure(skyColor * _SkyTint.rgb * exp2(_SkyParam.x) * _SkyParam.y);"));
+            Assert.That(source, Does.Contain("float3 EvaluateSkyColor(float2 positionCS)"));
+            Assert.That(source, Does.Contain("return float4(VividApplyPreExposure(EvaluateSkyColor(input.positionCS.xy)), 1.0);"));
+            Assert.That(source, Does.Contain("Name \"HDRISkyBaking\""));
+            Assert.That(source, Does.Contain("float4 FragBaking(Varyings input) : SV_Target"));
+            Assert.That(source, Does.Contain("return float4(EvaluateSkyColor(input.positionCS.xy), 1.0);"));
             Assert.That(frameContextSource, Does.Contain("AutoExposureShaderBindings.BindFrameGlobals(cmd, frameData.Get<VividExposureData>());"));
             Assert.That(bindingSource, Does.Contain("cmd.SetGlobalBuffer(PreExposureBufferId, preExposureBuffer);"));
             Assert.That(bindingSource, Does.Contain("ResolvePreExposureBuffer(VividExposureData exposureData)"));

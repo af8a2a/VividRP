@@ -87,11 +87,18 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("m_AtmosphereLutCompute = resources?.AtmosphereLUTCompute;"));
             Assert.That(source, Does.Contain("m_SkyCubemapKernel = m_AtmosphereLutCompute != null"));
+            Assert.That(source, Does.Contain("m_SkyMaterial = CoreUtils.CreateEngineMaterial(shader);"));
+            Assert.That(source, Does.Contain("m_AmbientProbeBakingPass = m_SkyMaterial.FindPass(\"PhysicallyBasedSkyBaking\");"));
             Assert.That(source, Does.Contain("EnsureRuntimeCubemap();"));
             Assert.That(source, Does.Contain("RebuildRuntimeCubemap(volume, context, cmd);"));
+            Assert.That(source, Does.Contain("EnsureAmbientProbeCubemap();"));
+            Assert.That(source, Does.Contain("RebuildAmbientProbeCubemap(volume, context, cmd);"));
             Assert.That(source, Does.Contain("skyData.activeSkyType = SkyType.PhysicallyBased;"));
             Assert.That(source, Does.Contain("skyData.specularCubemap = m_RuntimeSkyCubemap;"));
             Assert.That(source, Does.Contain("skyData.exposure = 0.0f;"));
+            Assert.That(source, Does.Contain("skyData.ambientProbeCubemap = useBakedAmbientProbe ? m_AmbientProbeCubemap : m_RuntimeSkyCubemap;"));
+            Assert.That(source, Does.Contain("skyData.ambientProbeExposure = 0.0f;"));
+            Assert.That(source, Does.Contain("skyData.ambientProbeHash = hash;"));
             Assert.That(source, Does.Contain("skyData.hasDiffuseSH = false;"));
             Assert.That(source, Does.Contain("skyData.diffuseSH = default;"));
             Assert.That(source, Does.Contain("return HashCode.Combine("));
@@ -99,13 +106,18 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("ResolveSunDirection(context)"));
             Assert.That(source, Does.Contain("ResolveSunColor(context)"));
             Assert.That(source, Does.Contain("m_RuntimeSkyCubemapFaces"));
-            Assert.That(source, Does.Contain("dimension = TextureDimension.Tex2DArray"));
             Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_AtmosphereLutCompute, m_SkyCubemapKernel, SkyCubemapOutputId, m_RuntimeSkyCubemapFaces);"));
             Assert.That(source, Does.Contain("cmd.CopyTexture(m_RuntimeSkyCubemapFaces, face, 0, m_RuntimeSkyCubemap, face, 0);"));
             Assert.That(source, Does.Contain("cmd.DispatchCompute("));
             Assert.That(source, Does.Contain("cmd.GenerateMips(m_RuntimeSkyCubemap);"));
+            Assert.That(source, Does.Contain("properties.SetFloat(SkyUseLutId, 0.0f);"));
+            Assert.That(source, Does.Contain("properties.SetTexture(SkyViewLutId, Texture2D.blackTexture);"));
+            Assert.That(source, Does.Contain("SkyCubemapBakingUtility.RenderSkyToCubemap("));
+            Assert.That(source, Does.Not.Contain("m_AmbientProbeCubemapFaces"));
             Assert.That(source, Does.Not.Contain("TryProjectCubemapToSH("));
             Assert.That(source, Does.Not.Contain("SetPixels("));
+            Assert.That(parametersSource, Does.Contain("internal static bool TryBuildForAmbientProbe("));
+            Assert.That(parametersSource, Does.Contain("Ambient probe baking must stay independent from camera exposure adaptation."));
             Assert.That(parametersSource, Does.Not.Contain("GetPreExposureMultiplier("));
             Assert.That(parametersSource, Does.Not.Contain("GetPostExposureMultiplier("));
             Assert.That(parametersSource, Does.Contain("parameters.skyPlanetParams = new Vector4("));

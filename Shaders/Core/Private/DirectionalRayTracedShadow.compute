@@ -10,6 +10,7 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/RaytracingCommon.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BlueNoise.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/ml.hlsl"
 RaytracingAccelerationStructure _AccelerationStructure;
 Texture2D<float> _DepthTexture;
 Texture2D<float4> _GBuffer1;
@@ -35,13 +36,6 @@ bool IsSkyPixel(float deviceDepth)
     return deviceDepth == UNITY_RAW_FAR_CLIP_VALUE;
 }
 
-float3 SampleSunDirection(float3 lightDir, float3 sunBasisX, float3 sunBasisY, float tanSunAngularRadius, float2 rnd)
-{
-    float r = sqrt(rnd.x);
-    float phi = 6.28318530718 * rnd.y;
-    float2 disk = float2(r * cos(phi), r * sin(phi)) * tanSunAngularRadius;
-    return normalize(lightDir + sunBasisX * disk.x + sunBasisY * disk.y);
-}
 
 // Encode hit distance as penumbra radius for denoiser consumption.
 // Returns HALF_MAX when no occluder is found (fully lit).
@@ -93,7 +87,10 @@ void DirectionalRayTracedShadow(uint3 dispatchThreadID : SV_DispatchThreadID)
         float2 rnd = float2(
             GetBNDSequenceSample(pixelCoord, (uint)_FrameIndex, 0),
             GetBNDSequenceSample(pixelCoord, (uint)_FrameIndex, 1));
-        rayDirection = SampleSunDirection(lightDirectionWS, _SunBasisX.xyz, _SunBasisY.xyz, _TanSunAngularRadius, rnd);
+        rnd = ImportanceSampling::Cosine::GetRay(rnd).xy;
+        rnd *= _TanSunAngularRadius;
+        rayDirection = normalize(_SunBasisX.xyz * rnd.x + _SunBasisY.xyz * rnd.y + lightDirectionWS);
+
     }
     else
     {

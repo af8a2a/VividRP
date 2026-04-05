@@ -48,6 +48,7 @@ namespace VividRP.Runtime
                 cameraData?.camera != null
                     ? cameraData.GetPixelCoordToViewDirWSMatrix()
                     : Matrix4x4.identity,
+                1.0f,
                 out parameters);
         }
 
@@ -71,6 +72,7 @@ namespace VividRP.Runtime
                 cameraData?.camera != null
                     ? cameraData.GetPixelCoordToViewDirWSMatrix()
                     : Matrix4x4.identity,
+                1.0f,
                 out parameters);
         }
 
@@ -79,13 +81,23 @@ namespace VividRP.Runtime
             in SkyRendererContext context,
             out PhysicallyBasedSkyShaderParameters parameters)
         {
-            return TryBuild(volume, context, Matrix4x4.identity, out parameters);
+            return TryBuild(volume, context, Matrix4x4.identity, 1.0f, out parameters);
+        }
+
+        internal static bool TryBuildForAmbientProbe(
+            PhysicallyBasedSkyVolume volume,
+            in SkyRendererContext context,
+            out PhysicallyBasedSkyShaderParameters parameters)
+        {
+            // Ambient probe baking must stay independent from camera exposure adaptation.
+            return TryBuild(volume, context, Matrix4x4.identity, 1.0f, out parameters);
         }
 
         private static bool TryBuild(
             PhysicallyBasedSkyVolume volume,
             in SkyRendererContext context,
             Matrix4x4 pixelCoordToViewDirWS,
+            float skyExposureMultiplier,
             out PhysicallyBasedSkyShaderParameters parameters)
         {
             parameters = default;
@@ -117,7 +129,7 @@ namespace VividRP.Runtime
             parameters.skyPlanetParams = new Vector4(
                 planetRadius,
                 atmosphereRadius,
-                1.0f,
+                Mathf.Max(skyExposureMultiplier, 0.0f),
                 volume.renderSunDisk.value ? 1.0f : 0.0f);
             parameters.skyAirScattering = ToVector4(volume.GetAirScatteringCoefficient());
             parameters.skyAirExtinction = ToVector4(volume.GetAirExtinctionCoefficient());

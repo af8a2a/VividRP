@@ -275,6 +275,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Monitor\")"));
             Assert.That(source, Does.Contain("AutoExposureCommonPresets.Get(m_SelectedPreset)"));
             Assert.That(source, Does.Contain("ApplySelectedPreset()"));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposurePresets.cs")),
+                Does.Contain("public const float VolumeSafeMinEV100 = -5f;"));
             Assert.That(source, Does.Contain("DrawStatsPreview();"));
             Assert.That(source, Does.Contain("AutoExposureStatsReadbackBridge.TouchInspectorRequest();"));
             Assert.That(source, Does.Contain("BuildLiveStatsPreviewData(snapshot)"));

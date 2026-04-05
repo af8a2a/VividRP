@@ -127,6 +127,9 @@ namespace VividRP.Runtime
 
     public static class AutoExposureCommonPresets
     {
+        public const float VolumeSafeMinEV100 = -5f;
+        public const float VolumeSafeMaxEV100 = 15f;
+
         public static IEnumerable<AutoExposurePresetDefinition> All
         {
             get
@@ -167,34 +170,34 @@ namespace VividRP.Runtime
                     return new AutoExposurePresetDefinition(
                         preset,
                         "Histogram Balanced",
-                        "Shipping-aligned histogram baseline with neutral compensation.",
+                        "UE-style 10-90 histogram baseline with a +1 EV HDRI-friendly bias.",
                         AutoExposureMode.Histogram,
-                        new Vector2(80f, 95f),
-                        -5.058894f,
+                        new Vector2(10f, 90f),
+                        VolumeSafeMinEV100,
                         1f,
                         new Vector2(-10f, 6f),
                         3f,
                         1f,
                         0f,
                         false,
-                        0f,
+                        1f,
                         CreateNeutralCurve);
 
                 case AutoExposureCommonPreset.HistogramInteriorExterior:
                     return new AutoExposurePresetDefinition(
                         preset,
                         "Histogram Interior -> Exterior",
-                        "Wide-range histogram preset for fast interior-to-exterior adaptation sweeps.",
+                        "Wide-range histogram preset with a +1 EV lift for outdoor transition readability.",
                         AutoExposureMode.Histogram,
                         new Vector2(70f, 95f),
-                        -8f,
+                        VolumeSafeMinEV100,
                         4f,
                         new Vector2(-12f, 8f),
                         5f,
                         1.5f,
                         0f,
                         false,
-                        0f,
+                        1f,
                         CreateNeutralCurve);
 
                 case AutoExposureCommonPreset.HistogramLowLightCurve:
@@ -204,7 +207,7 @@ namespace VividRP.Runtime
                         "Low-light histogram preset with curve-driven bias for night-scene stress tests.",
                         AutoExposureMode.Histogram,
                         new Vector2(85f, 98f),
-                        -10f,
+                        VolumeSafeMinEV100,
                         0f,
                         new Vector2(-14f, 4f),
                         2.5f,

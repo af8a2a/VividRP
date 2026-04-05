@@ -22,7 +22,7 @@ namespace VividRP.Runtime
                 return;
 
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            RegisterRenderer(new HDRISkyRenderer(s_AmbientProbeConvolution), resources);
+            RegisterRenderer(new HDRISkyRenderer(), resources);
             RegisterRenderer(new PhysicallyBasedSkyRenderer(), resources);
             s_AmbientProbeConvolution.Build(resources);
             s_SpecularCache.Build(resources);
@@ -172,23 +172,24 @@ namespace VividRP.Runtime
 
         private static void UpdateDiffuseAmbientProbe(CommandBuffer cmd, VividSkyData skyData)
         {
-            if (skyData != null && skyData.specularCubemap != null)
+            if (skyData != null && skyData.ambientProbeCubemap != null)
             {
                 skyData.hasDiffuseSH = false;
                 skyData.diffuseSH = default;
+                var useDefaultBuffer = !s_AmbientProbeConvolution.IsSupported;
 
-                if (skyData.activeSkyType != SkyType.HDRI && s_AmbientProbeConvolution.IsSupported)
+                if (!useDefaultBuffer)
                 {
                     s_AmbientProbeConvolution.RequestUpdate(
                         cmd,
-                        skyData.specularCubemap,
-                        skyData.tint,
-                        skyData.exposure,
-                        skyData.rotation,
-                        skyData.skyHash);
+                        skyData.ambientProbeCubemap,
+                        skyData.ambientProbeTint,
+                        skyData.ambientProbeExposure,
+                        skyData.ambientProbeRotation,
+                        skyData.ambientProbeHash);
                 }
 
-                s_AmbientProbeConvolution.BindGlobalBuffer(cmd);
+                s_AmbientProbeConvolution.BindGlobalBuffer(cmd, useDefaultBuffer);
                 return;
             }
 

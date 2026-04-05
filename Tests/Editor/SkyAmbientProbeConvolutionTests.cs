@@ -15,7 +15,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("internal void BindGlobalBuffer(CommandBuffer cmd, bool useDefault = false)"));
             Assert.That(source, Does.Contain("useDefault || m_AmbientProbeBuffer == null ? m_DefaultAmbientProbeBuffer : m_AmbientProbeBuffer"));
-            Assert.That(source, Does.Contain("HDRISkyVolume.ResolveExposureMultiplier(exposure)"));
+            Assert.That(source, Does.Contain("HDRISkyVolume.ResolveExposureMultiplier(exposureStops)"));
             Assert.That(source, Does.Not.Contain("RequestAsyncReadback"));
             Assert.That(source, Does.Not.Contain("AsyncGPUReadbackRequest"));
             Assert.That(source, Does.Not.Contain("supportsAsyncGPUReadback"));

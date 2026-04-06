@@ -458,6 +458,54 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void AutoExposureCurveMapUtility_BakesCurveRemapTextureAndClampRange()
+        {
+            var curve = AnimationCurve.Linear(-4f, -1f, 4f, 2f);
+
+            try
+            {
+                var textureData = AutoExposureCurveMapUtility.Resolve(curve, -2f, 3f);
+                var texture = textureData.texture as Texture2D;
+
+                Assert.That(texture, Is.Not.Null);
+                Assert.That(textureData.minEV100, Is.EqualTo(-4f).Within(1e-5f));
+                Assert.That(textureData.maxEV100, Is.EqualTo(4f).Within(1e-5f));
+
+                var sample = texture.GetPixelBilinear(0.5f, 0.5f);
+                Assert.That(sample.r, Is.EqualTo(0.5f).Within(0.05f));
+                Assert.That(sample.g, Is.EqualTo(-2f).Within(1e-5f));
+                Assert.That(sample.b, Is.EqualTo(3f).Within(1e-5f));
+            }
+            finally
+            {
+                AutoExposureCurveMapUtility.Dispose();
+            }
+        }
+
+        [Test]
+        public void AutoExposureCurveMapUtility_UsesIdentityFallback_WhenCurveIsMissing()
+        {
+            try
+            {
+                var textureData = AutoExposureCurveMapUtility.Resolve(null, -5f, 1f);
+                var texture = textureData.texture as Texture2D;
+
+                Assert.That(texture, Is.Not.Null);
+                Assert.That(textureData.minEV100, Is.EqualTo(AutoExposureCurveMapUtility.DefaultCurveMinEV100).Within(1e-5f));
+                Assert.That(textureData.maxEV100, Is.EqualTo(AutoExposureCurveMapUtility.DefaultCurveMaxEV100).Within(1e-5f));
+
+                var sample = texture.GetPixelBilinear(0.5f, 0.5f);
+                Assert.That(sample.r, Is.EqualTo(0f).Within(0.05f));
+                Assert.That(sample.g, Is.EqualTo(-5f).Within(1e-5f));
+                Assert.That(sample.b, Is.EqualTo(1f).Within(1e-5f));
+            }
+            finally
+            {
+                AutoExposureCurveMapUtility.Dispose();
+            }
+        }
+
+        [Test]
         [TestCase(nameof(VividRPCoreResources.AutoExposureCompute), "Shaders/Core/Private/AutoExposure/Unreal/AutoExposure.compute")]
         [TestCase(nameof(VividRPCoreResources.AutoExposureHDRPCompute), "Shaders/Core/Private/AutoExposure/HDRP/Exposure.compute")]
         public void VividRPCoreResources_DeclaresAutoExposureComputePaths(string fieldName, string expectedPath)
@@ -478,6 +526,7 @@ namespace VividRP.Editor.Tests
             var autoExposureSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposure.cs"));
             var shaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AutoExposure", "Unreal", "AutoExposure.compute"));
             var hdrpShaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AutoExposure", "HDRP", "Exposure.compute"));
+            var hdrpCommonSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AutoExposure", "HDRP", "ExposureCommon.hlsl"));
             var helperSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "AutoExposure.hlsl"));
             var runtimeSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureRuntimeUtility.cs"));
             var implementationSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureImplementationUtility.cs"));
@@ -496,8 +545,12 @@ namespace VividRP.Editor.Tests
             Assert.That(hdrpShaderSource, Does.Contain("#pragma kernel KPrePass"));
             Assert.That(hdrpShaderSource, Does.Contain("#pragma kernel KReduction"));
             Assert.That(hdrpShaderSource, Does.Contain("#pragma kernel KReset"));
+            Assert.That(hdrpShaderSource, Does.Contain("case 2u:"));
+            Assert.That(hdrpShaderSource, Does.Contain("CurveRemap(avgLuminance, minExposure, maxExposure);"));
             Assert.That(hdrpShaderSource, Does.Contain("RWStructuredBuffer<float4> _CurrentExposureBuffer;"));
             Assert.That(hdrpShaderSource, Does.Contain("WriteExposureBuffer("));
+            Assert.That(hdrpCommonSource, Does.Contain("float CurveRemap(float inEV, out float limitMin, out float limitMax)"));
+            Assert.That(hdrpCommonSource, Does.Contain("float3 curveSample = SAMPLE_TEXTURE2D_LOD(_ExposureCurveTexture"));
             Assert.That(shaderSource, Does.Contain("RWStructuredBuffer<uint> _HistogramBuffer;"));
             Assert.That(shaderSource, Does.Contain("RWStructuredBuffer<float4> _CurrentExposureBuffer;"));
             Assert.That(shaderSource, Does.Contain("Texture2D<float4> _AutoExposureCompensationCurve;"));
@@ -527,6 +580,17 @@ namespace VividRP.Editor.Tests
             Assert.That(runtimeSource, Does.Contain("settings.exposureCompensationAll = ResolveExposureCompensationAll("));
             Assert.That(runtimeSource, Does.Contain("ResolveManualExposureScale(settings.manualEV100, settings.exposureCompensationAll)"));
             Assert.That(runtimeSource, Does.Contain("AutoExposureCompensationCurveUtility.Resolve(autoExposure.exposureCompensationCurve.value)"));
+            Assert.That(runtimeSource, Does.Contain("public Texture curveMapTexture;"));
+            Assert.That(runtimeSource, Does.Contain("public float curveMapMinEV100;"));
+            Assert.That(runtimeSource, Does.Contain("public float curveMapMaxEV100;"));
+            Assert.That(runtimeSource, Does.Contain("AutoExposureCurveMapUtility.Resolve("));
+            Assert.That(runtimeSource, Does.Contain("settings.curveMapTexture = curveMapTextureData.texture;"));
+            Assert.That(runtimeSource, Does.Contain("settings.curveMapMinEV100 = curveMapTextureData.minEV100;"));
+            Assert.That(runtimeSource, Does.Contain("settings.curveMapMaxEV100 = curveMapTextureData.maxEV100;"));
+            Assert.That(runtimeSource, Does.Contain("internal readonly struct AutoExposureCurveMapTextureData"));
+            Assert.That(runtimeSource, Does.Contain("internal static class AutoExposureCurveMapUtility"));
+            Assert.That(runtimeSource, Does.Contain("new Color(remappedEV100, resolvedClampMinEV100, resolvedClampMaxEV100, 0f)"));
+            Assert.That(runtimeSource, Does.Contain("AutoExposureCurveMapUtility.Dispose();"));
             Assert.That(runtimeSource, Does.Contain("ResolveAverageSceneLuminanceFromEV100(settings.manualEV100)"));
             Assert.That(runtimeSource, Does.Contain("internal static AutoExposureSettingsData ResolvePhysicalCameraFallback"));
             Assert.That(runtimeSource, Does.Contain("AutoExposureImplementationUtility.ResolveComputeShader("));

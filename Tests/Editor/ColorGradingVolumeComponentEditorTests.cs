@@ -286,7 +286,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Adaptation\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Histogram\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Monitor\")"));
-            Assert.That(source, Does.Contain("Curve Mapping parameters are stored in the volume"));
+            Assert.That(source, Does.Contain("Curve Mapping now uses HDRP-style curve remapping at runtime."));
             Assert.That(source, Does.Contain("Automatic Histogram settings are preserved for the shared editor workflow."));
             Assert.That(source, Does.Contain("AutoExposureCommonPresets.Get(m_SelectedPreset)"));
             Assert.That(source, Does.Contain("ApplySelectedPreset()"));

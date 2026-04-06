@@ -176,6 +176,12 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("ExecuteHdrpManualExposure("));
             Assert.That(passSource, Does.Contain("BindHdrpAutoExposureParameters("));
             Assert.That(passSource, Does.Contain("BindHdrpManualExposureParameters("));
+            Assert.That(passSource, Does.Contain("ResolveHdrpExposureCurveTexture()"));
+            Assert.That(passSource, Does.Contain("AutoExposureExposureModeUtility.UsesCurveRemapping(m_AutoExposureSettings.exposureMode)"));
+            Assert.That(passSource, Does.Contain("BindHdrpAutoExposureParameters(cmd, m_HdrpReductionKernel, evaluateMode);"));
+            Assert.That(passSource, Does.Contain("m_AutoExposureSettings.curveMapMinEV100"));
+            Assert.That(passSource, Does.Contain("m_AutoExposureSettings.curveMapMaxEV100"));
+            Assert.That(passSource, Does.Contain("AutoExposureCurveMapUtility.Resolve("));
             Assert.That(passSource, Does.Contain("ResolveAutoExposureKernels()"));
             Assert.That(passSource, Does.Contain("VividRenderPipelineAsset.GetActiveAsset()"));
             Assert.That(passSource, Does.Contain("HdrpFixedExposureKernelName = \"KFixedExposure\""));

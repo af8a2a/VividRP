@@ -339,7 +339,7 @@ namespace VividRP.Editor
             if (mode == AutoExposureExposureMode.CurveMapping)
             {
                 EditorGUILayout.HelpBox(
-                    "Curve Mapping parameters are stored in the volume and the editor panel matches HDRP, but VividRP currently falls back to automatic exposure while the remap texture path is being ported.",
+                    "Curve Mapping now uses HDRP-style curve remapping at runtime. The curve is baked into a runtime texture, and Limit Min/Max still define the final exposure clamp range.",
                     MessageType.Info);
                 return;
             }

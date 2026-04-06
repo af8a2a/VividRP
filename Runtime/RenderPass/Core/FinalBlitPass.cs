@@ -405,9 +405,10 @@ namespace VividRP.Runtime.RenderPass.Core
             var meterMask = m_AutoExposureSettings.meterMask != null
                 ? m_AutoExposureSettings.meterMask
                 : Texture2D.whiteTexture;
-            var curveTexture = m_AutoExposureSettings.exposureCompensationCurveTexture != null
-                ? m_AutoExposureSettings.exposureCompensationCurveTexture
-                : Texture2D.blackTexture;
+            var curveTexture = ResolveHdrpExposureCurveTexture();
+            var evaluateMode = AutoExposureExposureModeUtility.UsesCurveRemapping(m_AutoExposureSettings.exposureMode)
+                ? 2u
+                : 1u;
             var previousExposureTexture = m_ExposureData.previousExposureTexture;
             var currentExposureTexture = m_ExposureData.currentExposureTexture;
 
@@ -446,7 +447,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 HdrpAutoExposureReductionSize,
                 1);
 
-            BindHdrpAutoExposureParameters(cmd, m_HdrpReductionKernel, 1u);
+            BindHdrpAutoExposureParameters(cmd, m_HdrpReductionKernel, evaluateMode);
             cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpReductionInputTextureId, m_HdrpReductionTexture);
             cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpPreviousExposureTextureId, previousExposureTexture);
             cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpExposureWeightMaskId, meterMask);
@@ -550,6 +551,13 @@ namespace VividRP.Runtime.RenderPass.Core
             var compensationStops = Mathf.Log(Mathf.Max(m_AutoExposureSettings.exposureCompensationSettings, 1e-6f), 2f);
             var minExposureEV100 = AutoExposureSettingsResolver.ResolveAverageSceneEV100FromLuminance(m_AutoExposureSettings.minAverageLuminance);
             var maxExposureEV100 = AutoExposureSettingsResolver.ResolveAverageSceneEV100FromLuminance(m_AutoExposureSettings.maxAverageLuminance);
+            var usesCurveRemapping = AutoExposureExposureModeUtility.UsesCurveRemapping(m_AutoExposureSettings.exposureMode);
+            var curveMinEV100 = usesCurveRemapping
+                ? m_AutoExposureSettings.curveMapMinEV100
+                : 0f;
+            var curveMaxEV100 = usesCurveRemapping
+                ? Mathf.Max(m_AutoExposureSettings.curveMapMaxEV100, curveMinEV100 + 1e-4f)
+                : 0f;
             var meteringMode = ResolveHdrpMeteringMode();
             var variants = new Vector4(
                 1f,
@@ -572,8 +580,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_AutoExposureCompute,
                 HdrpExposureParams2Id,
                 new Vector4(
-                    0f,
-                    0f,
+                    curveMinEV100,
+                    curveMaxEV100,
                     1f,
                     18f));
             cmd.SetComputeVectorParam(
@@ -657,6 +665,24 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_AutoExposureCompute,
                 HdrpVariantsId,
                 new Vector4(1f, 0f, 0f, 0f));
+        }
+
+        private Texture ResolveHdrpExposureCurveTexture()
+        {
+            if (AutoExposureExposureModeUtility.UsesCurveRemapping(m_AutoExposureSettings.exposureMode))
+            {
+                if (m_AutoExposureSettings.curveMapTexture != null)
+                    return m_AutoExposureSettings.curveMapTexture;
+
+                return AutoExposureCurveMapUtility.Resolve(
+                    null,
+                    AutoExposureSettingsResolver.ResolveAverageSceneEV100FromLuminance(m_AutoExposureSettings.minAverageLuminance),
+                    AutoExposureSettingsResolver.ResolveAverageSceneEV100FromLuminance(m_AutoExposureSettings.maxAverageLuminance)).texture;
+            }
+
+            return m_AutoExposureSettings.exposureCompensationCurveTexture != null
+                ? m_AutoExposureSettings.exposureCompensationCurveTexture
+                : Texture2D.blackTexture;
         }
 
         private float ResolveHdrpMeteringMode()

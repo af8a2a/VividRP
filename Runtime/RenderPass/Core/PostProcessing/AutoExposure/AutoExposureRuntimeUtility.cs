@@ -37,6 +37,9 @@ namespace VividRP.Runtime
         public float exposureCompensationCurveInvRange;
         public bool exposureCompensationCurveEnabled;
         public float targetMidGray;
+        public Texture curveMapTexture;
+        public float curveMapMinEV100;
+        public float curveMapMaxEV100;
         public Texture meterMask;
 
         public static AutoExposureSettingsData CreateDefault()
@@ -77,6 +80,9 @@ namespace VividRP.Runtime
                 exposureCompensationCurveInvRange = 1f / AutoExposureCompensationCurveUtility.DefaultCurveRange,
                 exposureCompensationCurveEnabled = false,
                 targetMidGray = AutoExposureSettingsResolver.MiddleGrey,
+                curveMapTexture = null,
+                curveMapMinEV100 = AutoExposureCurveMapUtility.DefaultCurveMinEV100,
+                curveMapMaxEV100 = AutoExposureCurveMapUtility.DefaultCurveMaxEV100,
                 meterMask = null,
             };
         }
@@ -288,6 +294,7 @@ namespace VividRP.Runtime
             s_DefaultExposureBuffer?.Dispose();
             s_DefaultExposureBuffer = null;
             AutoExposureCompensationCurveUtility.Dispose();
+            AutoExposureCurveMapUtility.Dispose();
         }
 
         internal static GraphicsBuffer GetOrCreateDefaultExposureBuffer()
@@ -422,6 +429,13 @@ namespace VividRP.Runtime
             settings.exposureCompensationCurveMinEV100 = curveTextureData.minEV100;
             settings.exposureCompensationCurveInvRange = curveTextureData.invRange;
             settings.exposureCompensationCurveEnabled = curveTextureData.enabled;
+            var curveMapTextureData = AutoExposureCurveMapUtility.Resolve(
+                autoExposure.curveMap.value,
+                autoExposure.minEV100.value,
+                autoExposure.maxEV100.value);
+            settings.curveMapTexture = curveMapTextureData.texture;
+            settings.curveMapMinEV100 = curveMapTextureData.minEV100;
+            settings.curveMapMaxEV100 = curveMapTextureData.maxEV100;
             settings.meterMask = autoExposure.meterMask.value;
 
             if (settings.mode == AutoExposureMode.Manual)
@@ -597,11 +611,30 @@ namespace VividRP.Runtime
 
         internal static Vector2 ResolveExposureCompensationCurveDomain(AnimationCurve curve)
         {
+            return ResolveCurveDomain(
+                curve,
+                AutoExposureCompensationCurveUtility.DefaultCurveMinEV100,
+                AutoExposureCompensationCurveUtility.DefaultCurveMaxEV100);
+        }
+
+        internal static Vector2 ResolveCurveMapDomain(AnimationCurve curve)
+        {
+            return ResolveCurveDomain(
+                curve,
+                AutoExposureCurveMapUtility.DefaultCurveMinEV100,
+                AutoExposureCurveMapUtility.DefaultCurveMaxEV100);
+        }
+
+        private static Vector2 ResolveCurveDomain(
+            AnimationCurve curve,
+            float defaultMinEV100,
+            float defaultMaxEV100)
+        {
             if (curve == null || curve.length == 0)
             {
                 return new Vector2(
-                    AutoExposureCompensationCurveUtility.DefaultCurveMinEV100,
-                    AutoExposureCompensationCurveUtility.DefaultCurveMaxEV100);
+                    defaultMinEV100,
+                    defaultMaxEV100);
             }
 
             var keys = curve.keys;
@@ -862,6 +895,20 @@ namespace VividRP.Runtime
         }
     }
 
+    internal readonly struct AutoExposureCurveMapTextureData
+    {
+        public readonly Texture texture;
+        public readonly float minEV100;
+        public readonly float maxEV100;
+
+        public AutoExposureCurveMapTextureData(Texture texture, float minEV100, float maxEV100)
+        {
+            this.texture = texture;
+            this.minEV100 = minEV100;
+            this.maxEV100 = maxEV100;
+        }
+    }
+
     internal static class AutoExposureCompensationCurveUtility
     {
         private const int CurveSampleCount = 256;
@@ -952,6 +999,137 @@ namespace VividRP.Runtime
                 var hash = 17;
                 hash = hash * 31 + curveDomain.x.GetHashCode();
                 hash = hash * 31 + curveDomain.y.GetHashCode();
+                hash = hash * 31 + curve.preWrapMode.GetHashCode();
+                hash = hash * 31 + curve.postWrapMode.GetHashCode();
+
+                var keys = curve.keys;
+                hash = hash * 31 + keys.Length;
+
+                for (var keyIndex = 0; keyIndex < keys.Length; keyIndex++)
+                {
+                    var key = keys[keyIndex];
+                    hash = hash * 31 + key.time.GetHashCode();
+                    hash = hash * 31 + key.value.GetHashCode();
+                    hash = hash * 31 + key.inTangent.GetHashCode();
+                    hash = hash * 31 + key.outTangent.GetHashCode();
+                    hash = hash * 31 + key.inWeight.GetHashCode();
+                    hash = hash * 31 + key.outWeight.GetHashCode();
+                    hash = hash * 31 + key.weightedMode.GetHashCode();
+                }
+
+                return hash;
+            }
+        }
+    }
+
+    internal static class AutoExposureCurveMapUtility
+    {
+        private const int CurveSampleCount = 256;
+
+        internal const float DefaultCurveMinEV100 = -10f;
+        internal const float DefaultCurveMaxEV100 = 10f;
+
+        private static readonly Color[] s_CurveSamples = new Color[CurveSampleCount];
+
+        private static Texture2D s_CurveTexture;
+        private static int s_CachedCurveHash;
+        private static bool s_HasCachedCurve;
+        private static Vector2 s_CachedCurveDomain = new(DefaultCurveMinEV100, DefaultCurveMaxEV100);
+
+        internal static AutoExposureCurveMapTextureData Resolve(
+            AnimationCurve curve,
+            float clampMinEV100,
+            float clampMaxEV100)
+        {
+            EnsureCurveTexture();
+
+            var curveDomain = AutoExposureSettingsResolver.ResolveCurveMapDomain(curve);
+            var resolvedClampMinEV100 = Mathf.Min(clampMinEV100, clampMaxEV100);
+            var resolvedClampMaxEV100 = Mathf.Max(resolvedClampMinEV100, clampMaxEV100);
+            var curveHash = ComputeCurveHash(
+                curve,
+                curveDomain,
+                resolvedClampMinEV100,
+                resolvedClampMaxEV100);
+
+            if (!s_HasCachedCurve || curveHash != s_CachedCurveHash)
+            {
+                RebuildCurveTexture(
+                    curve,
+                    curveDomain,
+                    resolvedClampMinEV100,
+                    resolvedClampMaxEV100);
+                s_CachedCurveHash = curveHash;
+                s_CachedCurveDomain = curveDomain;
+                s_HasCachedCurve = true;
+            }
+
+            return new AutoExposureCurveMapTextureData(
+                s_CurveTexture,
+                s_CachedCurveDomain.x,
+                s_CachedCurveDomain.y);
+        }
+
+        internal static void Dispose()
+        {
+            CoreUtils.Destroy(s_CurveTexture);
+            s_CurveTexture = null;
+            s_CachedCurveHash = 0;
+            s_HasCachedCurve = false;
+            s_CachedCurveDomain = new Vector2(DefaultCurveMinEV100, DefaultCurveMaxEV100);
+        }
+
+        private static void EnsureCurveTexture()
+        {
+            if (s_CurveTexture != null)
+                return;
+
+            s_CurveTexture = new Texture2D(CurveSampleCount, 1, TextureFormat.RGBAFloat, false, true)
+            {
+                name = "VividRP Auto Exposure Curve Map",
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+                hideFlags = HideFlags.HideAndDontSave
+            };
+        }
+
+        private static void RebuildCurveTexture(
+            AnimationCurve curve,
+            Vector2 curveDomain,
+            float resolvedClampMinEV100,
+            float resolvedClampMaxEV100)
+        {
+            for (var sampleIndex = 0; sampleIndex < CurveSampleCount; sampleIndex++)
+            {
+                var sampleT = sampleIndex / (float)(CurveSampleCount - 1);
+                var ev100 = Mathf.Lerp(curveDomain.x, curveDomain.y, sampleT);
+                var remappedEV100 = curve == null || curve.length == 0
+                    ? ev100
+                    : curve.Evaluate(ev100);
+                s_CurveSamples[sampleIndex] = new Color(remappedEV100, resolvedClampMinEV100, resolvedClampMaxEV100, 0f);
+            }
+
+            s_CurveTexture.SetPixels(s_CurveSamples);
+            s_CurveTexture.Apply(false, false);
+        }
+
+        private static int ComputeCurveHash(
+            AnimationCurve curve,
+            Vector2 curveDomain,
+            float clampMinEV100,
+            float clampMaxEV100)
+        {
+            unchecked
+            {
+                var hash = 17;
+                hash = hash * 31 + curveDomain.x.GetHashCode();
+                hash = hash * 31 + curveDomain.y.GetHashCode();
+                hash = hash * 31 + clampMinEV100.GetHashCode();
+                hash = hash * 31 + clampMaxEV100.GetHashCode();
+
+                if (curve == null || curve.length == 0)
+                    return hash;
+
                 hash = hash * 31 + curve.preWrapMode.GetHashCode();
                 hash = hash * 31 + curve.postWrapMode.GetHashCode();
 

@@ -230,9 +230,13 @@ namespace VividRP.Editor.Tests
                 Assert.That(editorType.GetField("m_MinEV100", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_MaxEV100", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ManualEV100", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_MeteringMode", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_AdaptationMode", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_TargetMidGray", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ApplyPhysicalCameraExposure", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ExposureCompensation", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ExposureCompensationCurve", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_CurveMap", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_HistogramLogRange", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_MeterMask", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_SelectedPreset", flags)?.GetValue(editor), Is.Not.Null);
@@ -256,10 +260,15 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Mode\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Preset\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Apply Preset\")"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Use Physical Camera\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Fixed Exposure\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Limit Min\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Limit Max\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Compensation\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Compensation Curve\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Curve Map\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Metering Mode\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Adaptation Mode\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Target Mid Gray\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Weight Texture Mask\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Low Percent\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"High Percent\")"));
@@ -269,10 +278,16 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Histogram EV100 Range\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Presets\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Metering\")"));
+            Assert.That(source, Does.Contain("DrawSectionHeader(\"Automatic\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Automatic Histogram\")"));
+            Assert.That(source, Does.Contain("DrawSectionHeader(\"Curve Mapping\")"));
+            Assert.That(source, Does.Contain("DrawSectionHeader(\"Fixed\")"));
+            Assert.That(source, Does.Contain("DrawSectionHeader(\"Physical Camera\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Adaptation\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Histogram\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Monitor\")"));
+            Assert.That(source, Does.Contain("Curve Mapping parameters are stored in the volume"));
+            Assert.That(source, Does.Contain("Automatic Histogram settings are preserved for the shared editor workflow."));
             Assert.That(source, Does.Contain("AutoExposureCommonPresets.Get(m_SelectedPreset)"));
             Assert.That(source, Does.Contain("ApplySelectedPreset()"));
             Assert.That(

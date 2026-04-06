@@ -7,7 +7,10 @@ namespace VividRP.Runtime
     internal struct AutoExposureSettingsData
     {
         public bool enabled;
+        public AutoExposureExposureMode exposureMode;
         public AutoExposureMode mode;
+        public AutoExposureMeteringMode meteringMode;
+        public AutoExposureAdaptationMode adaptationMode;
         public float exposureLowPercent;
         public float exposureHighPercent;
         public float minAverageLuminance;
@@ -33,6 +36,7 @@ namespace VividRP.Runtime
         public float exposureCompensationCurveMinEV100;
         public float exposureCompensationCurveInvRange;
         public bool exposureCompensationCurveEnabled;
+        public float targetMidGray;
         public Texture meterMask;
 
         public static AutoExposureSettingsData CreateDefault()
@@ -43,7 +47,10 @@ namespace VividRP.Runtime
             return new AutoExposureSettingsData
             {
                 enabled = false,
+                exposureMode = AutoExposureExposureMode.Automatic,
                 mode = AutoExposureMode.Histogram,
+                meteringMode = AutoExposureMeteringMode.Average,
+                adaptationMode = AutoExposureAdaptationMode.Progressive,
                 exposureLowPercent = 0.8f,
                 exposureHighPercent = 0.95f,
                 minAverageLuminance = AutoExposureSettingsResolver.MiddleGrey,
@@ -69,6 +76,7 @@ namespace VividRP.Runtime
                 exposureCompensationCurveMinEV100 = AutoExposureCompensationCurveUtility.DefaultCurveMinEV100,
                 exposureCompensationCurveInvRange = 1f / AutoExposureCompensationCurveUtility.DefaultCurveRange,
                 exposureCompensationCurveEnabled = false,
+                targetMidGray = AutoExposureSettingsResolver.MiddleGrey,
                 meterMask = null,
             };
         }
@@ -388,12 +396,16 @@ namespace VividRP.Runtime
             if (autoExposure == null)
                 return settings;
 
-            settings.mode = autoExposure.mode.value;
-            settings.applyPhysicalCameraExposure = autoExposure.applyPhysicalCameraExposure.value;
+            settings.exposureMode = autoExposure.ResolveExposureMode();
+            settings.mode = AutoExposureExposureModeUtility.ResolveRuntimeMode(settings.exposureMode);
+            settings.meteringMode = autoExposure.meteringMode.value;
+            settings.adaptationMode = autoExposure.adaptationMode.value;
+            settings.applyPhysicalCameraExposure = AutoExposureExposureModeUtility.UsesPhysicalCamera(settings.exposureMode);
             settings.manualEV100 = ResolveManualEV100(
                 camera,
                 autoExposure.manualEV100.value,
                 settings.applyPhysicalCameraExposure);
+            settings.targetMidGray = autoExposure.targetMidGray.value;
             settings.exposureCompensationSettings = ResolveExposureCompensation(autoExposure.exposureCompensation.value);
             settings.exposureCompensationCurveStops = settings.mode == AutoExposureMode.Manual
                 ? ResolveExposureCompensationCurveStops(
@@ -434,7 +446,9 @@ namespace VividRP.Runtime
                 histogramLogRangeValue.y);
             var histogramScaleBias = BuildHistogramScaleBias(histogramLogRange.x, histogramLogRange.y);
             var validRange = autoExposure.minEV100.value < autoExposure.maxEV100.value;
-            var validSpeeds = autoExposure.speedUp.value > 0f && autoExposure.speedDown.value > 0f;
+            var usesProgressiveAdaptation = settings.adaptationMode == AutoExposureAdaptationMode.Progressive;
+            var validSpeeds = !usesProgressiveAdaptation
+                || (autoExposure.speedUp.value > 0f && autoExposure.speedDown.value > 0f);
 
             settings.enabled = autoExposure.IsActive();
             settings.exposureLowPercent = exposureLowPercent;
@@ -450,7 +464,7 @@ namespace VividRP.Runtime
             settings.exponentialUpM = ComputeExponentialTransitionMultiplier(settings.exposureSpeedUp, DefaultStartDistance);
             settings.exponentialDownM = ComputeExponentialTransitionMultiplier(settings.exposureSpeedDown, DefaultStartDistance);
             settings.startDistance = DefaultStartDistance;
-            settings.forceTarget = isFirstFrame || !validRange || !validSpeeds ? 1f : 0f;
+            settings.forceTarget = !usesProgressiveAdaptation || isFirstFrame || !validRange || !validSpeeds ? 1f : 0f;
             return settings;
         }
 
@@ -478,7 +492,10 @@ namespace VividRP.Runtime
                 return settings;
 
             settings.enabled = true;
+            settings.exposureMode = AutoExposureExposureMode.UsePhysicalCamera;
             settings.mode = AutoExposureMode.Manual;
+            settings.meteringMode = AutoExposureMeteringMode.Average;
+            settings.adaptationMode = AutoExposureAdaptationMode.Fixed;
             settings.applyPhysicalCameraExposure = true;
             settings.manualEV100 = ResolvePhysicalCameraEV100(camera);
             settings.exposureCompensationSettings = 1f;
@@ -486,6 +503,7 @@ namespace VividRP.Runtime
             settings.exposureCompensationAll = 1f;
             settings.manualAverageSceneLuminance = ResolveAverageSceneLuminanceFromEV100(settings.manualEV100);
             settings.fixedExposureScale = ResolveManualExposureScale(settings.manualEV100, settings.exposureCompensationAll);
+            settings.targetMidGray = MiddleGrey;
             settings.forceTarget = 1f;
             return settings;
         }

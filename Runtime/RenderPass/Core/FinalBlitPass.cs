@@ -16,6 +16,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string ClearHistogramKernelName = "ClearHistogram";
         private const string BuildHistogramKernelName = "BuildHistogram";
         private const string ResolveExposureKernelName = "ResolveExposure";
+        private const string HdrpFixedExposureKernelName = "KFixedExposure";
+        private const string HdrpManualCameraExposureKernelName = "KManualCameraExposure";
         private const string HdrpPrePassKernelName = "KPrePass";
         private const string HdrpReductionKernelName = "KReduction";
         private const string HdrpResetKernelName = "KReset";
@@ -77,6 +79,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_ClearHistogramKernel = -1;
         private int m_BuildHistogramKernel = -1;
         private int m_ResolveExposureKernel = -1;
+        private int m_HdrpFixedExposureKernel = -1;
+        private int m_HdrpManualCameraExposureKernel = -1;
         private int m_HdrpPrePassKernel = -1;
         private int m_HdrpReductionKernel = -1;
         private int m_HdrpResetKernel = -1;
@@ -178,6 +182,9 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             else if (m_EnableExposure && m_AutoExposureSettings.mode == AutoExposureMode.Manual)
             {
+                if (m_AutoExposureImplementation == AutoExposureImplementationPath.HDRP)
+                    ExecuteHdrpManualExposure(cmd);
+
                 autoExposureBuffer = m_ExposureData.currentExposureBuffer ?? autoExposureBuffer;
                 exposureUpdated = autoExposureBuffer != null;
             }
@@ -280,6 +287,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ClearHistogramKernel = -1;
             m_BuildHistogramKernel = -1;
             m_ResolveExposureKernel = -1;
+            m_HdrpFixedExposureKernel = -1;
+            m_HdrpManualCameraExposureKernel = -1;
             m_HdrpPrePassKernel = -1;
             m_HdrpReductionKernel = -1;
             m_HdrpResetKernel = -1;
@@ -448,6 +457,29 @@ namespace VividRP.Runtime.RenderPass.Core
             return true;
         }
 
+        private bool ExecuteHdrpManualExposure(UnsafeCommandBuffer cmd)
+        {
+            if (cmd == null
+                || m_AutoExposureCompute == null
+                || m_ExposureData?.currentExposureBuffer == null
+                || m_ExposureData.currentExposureTexture == null)
+            {
+                return false;
+            }
+
+            var kernel = m_AutoExposureSettings.applyPhysicalCameraExposure
+                ? m_HdrpManualCameraExposureKernel
+                : m_HdrpFixedExposureKernel;
+            if (kernel < 0)
+                return false;
+
+            BindHdrpManualExposureParameters(cmd, kernel);
+            cmd.SetComputeBufferParam(m_AutoExposureCompute, kernel, AutoExposureCurrentBufferId, m_ExposureData.currentExposureBuffer);
+            cmd.SetComputeTextureParam(m_AutoExposureCompute, kernel, HdrpOutputTextureId, m_ExposureData.currentExposureTexture);
+            cmd.DispatchCompute(m_AutoExposureCompute, kernel, 1, 1, 1);
+            return true;
+        }
+
         private void BindAutoExposureParameters(UnsafeCommandBuffer cmd, int kernel)
         {
             if (cmd == null || kernel < 0 || m_AutoExposureCompute == null)
@@ -518,10 +550,14 @@ namespace VividRP.Runtime.RenderPass.Core
             var compensationStops = Mathf.Log(Mathf.Max(m_AutoExposureSettings.exposureCompensationSettings, 1e-6f), 2f);
             var minExposureEV100 = AutoExposureSettingsResolver.ResolveAverageSceneEV100FromLuminance(m_AutoExposureSettings.minAverageLuminance);
             var maxExposureEV100 = AutoExposureSettingsResolver.ResolveAverageSceneEV100FromLuminance(m_AutoExposureSettings.maxAverageLuminance);
+            var meteringMode = ResolveHdrpMeteringMode();
             var variants = new Vector4(
                 1f,
-                m_AutoExposureSettings.meterMask != null ? 3f : 0f,
-                m_AutoExposureSettings.forceTarget > 0.5f ? 0f : 1f,
+                meteringMode,
+                m_AutoExposureSettings.adaptationMode == AutoExposureAdaptationMode.Progressive
+                    && m_AutoExposureSettings.forceTarget <= 0.5f
+                        ? 1f
+                        : 0f,
                 evaluateMode);
 
             cmd.SetComputeVectorParam(
@@ -555,7 +591,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_AutoExposureSettings.exposureCompensationCurveMinEV100,
                     m_AutoExposureSettings.exposureCompensationCurveInvRange,
                     m_AutoExposureSettings.exposureCompensationCurveEnabled ? 1f : 0f,
-                    AutoExposureSettingsResolver.MiddleGrey));
+                    m_AutoExposureSettings.targetMidGray));
             cmd.SetComputeVectorParam(
                 m_AutoExposureCompute,
                 HdrpAdaptationParamsId,
@@ -568,6 +604,74 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_AutoExposureCompute,
                 HdrpVariantsId,
                 variants);
+        }
+
+        private void BindHdrpManualExposureParameters(UnsafeCommandBuffer cmd, int kernel)
+        {
+            if (cmd == null || kernel < 0 || m_AutoExposureCompute == null)
+                return;
+
+            var compensationStops = Mathf.Log(Mathf.Max(m_AutoExposureSettings.exposureCompensationAll, 1e-6f), 2f);
+            var camera = m_Camera;
+            var aperture = camera != null ? Mathf.Max(camera.aperture, 1e-4f) : 1f;
+            var shutterSpeed = camera != null ? Mathf.Max(camera.shutterSpeed, 1e-6f) : 1f;
+            var iso = camera != null ? Mathf.Max((float)camera.iso, 1f) : 100f;
+
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpExposureParamsId,
+                new Vector4(
+                    compensationStops,
+                    m_AutoExposureSettings.applyPhysicalCameraExposure ? aperture : m_AutoExposureSettings.manualEV100,
+                    m_AutoExposureSettings.applyPhysicalCameraExposure ? shutterSpeed : 0f,
+                    m_AutoExposureSettings.applyPhysicalCameraExposure ? iso : 0f));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpExposureParams2Id,
+                new Vector4(
+                    0f,
+                    0f,
+                    1f,
+                    18f));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpProceduralMaskParamsId,
+                Vector4.zero);
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpProceduralMaskParams2Id,
+                Vector4.zero);
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpHistogramExposureParamsId,
+                new Vector4(
+                    m_AutoExposureSettings.exposureCompensationCurveMinEV100,
+                    m_AutoExposureSettings.exposureCompensationCurveInvRange,
+                    m_AutoExposureSettings.exposureCompensationCurveEnabled ? 1f : 0f,
+                    m_AutoExposureSettings.targetMidGray));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpAdaptationParamsId,
+                Vector4.zero);
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpVariantsId,
+                new Vector4(1f, 0f, 0f, 0f));
+        }
+
+        private float ResolveHdrpMeteringMode()
+        {
+            switch (m_AutoExposureSettings.meteringMode)
+            {
+                case AutoExposureMeteringMode.Spot:
+                    return 1f;
+                case AutoExposureMeteringMode.CenterWeighted:
+                    return 2f;
+                case AutoExposureMeteringMode.MaskWeighted:
+                    return m_AutoExposureSettings.meterMask != null ? 3f : 0f;
+                default:
+                    return 0f;
+            }
         }
 
         private bool SupportsSelectedAutoExposureImplementation()
@@ -598,6 +702,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ClearHistogramKernel = -1;
             m_BuildHistogramKernel = -1;
             m_ResolveExposureKernel = -1;
+            m_HdrpFixedExposureKernel = -1;
+            m_HdrpManualCameraExposureKernel = -1;
             m_HdrpPrePassKernel = -1;
             m_HdrpReductionKernel = -1;
             m_HdrpResetKernel = -1;
@@ -612,6 +718,12 @@ namespace VividRP.Runtime.RenderPass.Core
                     Debug.LogWarning("[VividRP] HDRP auto exposure is selected, but the HDRP compute shader is missing the required kernels.");
                     return;
                 }
+
+                if (m_AutoExposureCompute.HasKernel(HdrpFixedExposureKernelName))
+                    m_HdrpFixedExposureKernel = m_AutoExposureCompute.FindKernel(HdrpFixedExposureKernelName);
+
+                if (m_AutoExposureCompute.HasKernel(HdrpManualCameraExposureKernelName))
+                    m_HdrpManualCameraExposureKernel = m_AutoExposureCompute.FindKernel(HdrpManualCameraExposureKernelName);
 
                 m_HdrpPrePassKernel = m_AutoExposureCompute.FindKernel(HdrpPrePassKernelName);
                 m_HdrpReductionKernel = m_AutoExposureCompute.FindKernel(HdrpReductionKernelName);

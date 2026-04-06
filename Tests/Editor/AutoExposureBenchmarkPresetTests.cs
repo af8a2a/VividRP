@@ -94,6 +94,14 @@ namespace VividRP.Editor.Tests
             {
                 Assert.That(component.enabled.value, Is.True);
                 Assert.That(component.mode.value, Is.EqualTo(preset.Mode));
+                Assert.That(
+                    component.exposureMode.value,
+                    Is.EqualTo(
+                        preset.Mode == AutoExposureMode.Manual
+                            ? preset.ApplyPhysicalCameraExposure
+                                ? AutoExposureExposureMode.UsePhysicalCamera
+                                : AutoExposureExposureMode.Fixed
+                            : AutoExposureExposureMode.AutomaticHistogram));
                 Assert.That(component.percent.value.x, Is.EqualTo(preset.Percent.x).Within(1e-5f));
                 Assert.That(component.percent.value.y, Is.EqualTo(preset.Percent.y).Within(1e-5f));
                 Assert.That(component.minEV100.value, Is.EqualTo(preset.MinEV100).Within(1e-5f));

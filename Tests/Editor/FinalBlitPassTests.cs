@@ -173,11 +173,17 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("AutoExposureImplementationUtility.ResolveComputeShader("));
             Assert.That(passSource, Does.Contain("AutoExposureImplementationPath.HDRP"));
             Assert.That(passSource, Does.Contain("ExecuteHdrpAutoExposure("));
+            Assert.That(passSource, Does.Contain("ExecuteHdrpManualExposure("));
             Assert.That(passSource, Does.Contain("BindHdrpAutoExposureParameters("));
+            Assert.That(passSource, Does.Contain("BindHdrpManualExposureParameters("));
             Assert.That(passSource, Does.Contain("ResolveAutoExposureKernels()"));
             Assert.That(passSource, Does.Contain("VividRenderPipelineAsset.GetActiveAsset()"));
+            Assert.That(passSource, Does.Contain("HdrpFixedExposureKernelName = \"KFixedExposure\""));
+            Assert.That(passSource, Does.Contain("HdrpManualCameraExposureKernelName = \"KManualCameraExposure\""));
             Assert.That(passSource, Does.Contain("m_EnableExposure"));
             Assert.That(passSource, Does.Contain("m_AutoExposureSettings.mode == AutoExposureMode.Manual"));
+            Assert.That(passSource, Does.Contain("if (m_AutoExposureImplementation == AutoExposureImplementationPath.HDRP)"));
+            Assert.That(passSource, Does.Contain("ExecuteHdrpManualExposure(cmd);"));
             Assert.That(passSource, Does.Contain("m_ExposureData.currentExposureBuffer ?? m_ExposureData.previousExposureBuffer ?? defaultExposureBuffer"));
             Assert.That(passSource, Does.Not.Contain("SetBuffer(AutoExposurePreExposureBufferId"));
             Assert.That(frameContextSource, Does.Contain("AutoExposureShaderBindings.BindFrameGlobals(cmd, frameData.Get<VividExposureData>());"));

@@ -95,6 +95,8 @@ namespace VividRP.Runtime
 
             component.enabled.overrideState = true;
             component.enabled.value = true;
+            component.exposureMode.overrideState = true;
+            component.exposureMode.value = ResolveExposureMode();
             component.mode.overrideState = true;
             component.mode.value = Mode;
             component.percent.overrideState = true;
@@ -122,6 +124,14 @@ namespace VividRP.Runtime
         public override string ToString()
         {
             return Name;
+        }
+
+        private AutoExposureExposureMode ResolveExposureMode()
+        {
+            if (Mode == AutoExposureMode.Manual)
+                return ApplyPhysicalCameraExposure ? AutoExposureExposureMode.UsePhysicalCamera : AutoExposureExposureMode.Fixed;
+
+            return AutoExposureExposureMode.AutomaticHistogram;
         }
     }
 

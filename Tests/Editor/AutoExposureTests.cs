@@ -57,6 +57,30 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ResolveExposureMode_UsesLegacyManualFields_WhenHdrpModeIsStillDefault()
+        {
+            var autoExposure = new AutoExposure();
+            autoExposure.mode.value = AutoExposureMode.Manual;
+            autoExposure.applyPhysicalCameraExposure.value = true;
+            autoExposure.exposureMode.overrideState = false;
+            autoExposure.exposureMode.value = AutoExposureExposureMode.Automatic;
+
+            Assert.That(autoExposure.ResolveExposureMode(), Is.EqualTo(AutoExposureExposureMode.UsePhysicalCamera));
+        }
+
+        [Test]
+        public void AutoExposure_IsActive_WhenFixedAdaptationIgnoresSpeedParameters()
+        {
+            var autoExposure = new AutoExposure();
+            autoExposure.enabled.value = true;
+            autoExposure.adaptationMode.value = AutoExposureAdaptationMode.Fixed;
+            autoExposure.speedUp.value = 0f;
+            autoExposure.speedDown.value = 0f;
+
+            Assert.That(autoExposure.IsActive(), Is.True);
+        }
+
+        [Test]
         public void ResolveLuminanceMaxFromLensAttenuation_ReturnsUnrealUnitlessDefault()
         {
             var result = AutoExposureSettingsResolver.ResolveLuminanceMaxFromLensAttenuation();
@@ -460,6 +484,11 @@ namespace VividRP.Editor.Tests
             var assetSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPipeline", "VividRenderPipelineAsset.cs"));
             var resourcesSource = File.ReadAllText(GetPackageFilePath("Runtime", "Utility", "PipelineResource", "VividResources.cs"));
 
+            Assert.That(autoExposureSource, Does.Contain("public AutoExposureExposureModeParameter exposureMode"));
+            Assert.That(autoExposureSource, Does.Contain("public AutoExposureMeteringModeParameter meteringMode"));
+            Assert.That(autoExposureSource, Does.Contain("public AutoExposureAdaptationModeParameter adaptationMode"));
+            Assert.That(autoExposureSource, Does.Contain("public ClampedFloatParameter targetMidGray"));
+            Assert.That(autoExposureSource, Does.Contain("public NoInterpAnimationCurveParameter curveMap"));
             Assert.That(autoExposureSource, Does.Contain("public NoInterpAnimationCurveParameter exposureCompensationCurve"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel ClearHistogram"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel BuildHistogram"));
@@ -479,7 +508,12 @@ namespace VividRP.Editor.Tests
             Assert.That(helperSource, Does.Contain("StructuredBuffer<float4> _VividAutoExposurePreExposureBuffer;"));
             Assert.That(helperSource, Does.Contain("float3 VividApplyPreExposure(float3 color)"));
             Assert.That(runtimeSource, Does.Contain("settings.mode == AutoExposureMode.Manual"));
-            Assert.That(runtimeSource, Does.Contain("settings.applyPhysicalCameraExposure = autoExposure.applyPhysicalCameraExposure.value;"));
+            Assert.That(runtimeSource, Does.Contain("settings.exposureMode = autoExposure.ResolveExposureMode();"));
+            Assert.That(runtimeSource, Does.Contain("settings.mode = AutoExposureExposureModeUtility.ResolveRuntimeMode(settings.exposureMode);"));
+            Assert.That(runtimeSource, Does.Contain("settings.meteringMode = autoExposure.meteringMode.value;"));
+            Assert.That(runtimeSource, Does.Contain("settings.adaptationMode = autoExposure.adaptationMode.value;"));
+            Assert.That(runtimeSource, Does.Contain("settings.applyPhysicalCameraExposure = AutoExposureExposureModeUtility.UsesPhysicalCamera(settings.exposureMode);"));
+            Assert.That(runtimeSource, Does.Contain("settings.targetMidGray = autoExposure.targetMidGray.value;"));
             Assert.That(runtimeSource, Does.Contain("settings.manualEV100 = ResolveManualEV100("));
             Assert.That(runtimeSource, Does.Contain("settings = AutoExposureSettingsResolver.ResolvePhysicalCameraFallback(settings, camera);"));
             Assert.That(runtimeSource, Does.Contain("var histogramLogRangeValue = autoExposure.histogramLogRange.value;"));

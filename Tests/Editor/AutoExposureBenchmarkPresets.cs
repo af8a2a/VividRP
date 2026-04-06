@@ -33,8 +33,16 @@ namespace VividRP.Editor.Tests
                 preset.ExposureCompensation);
 
             settings.enabled = true;
+            settings.exposureMode = preset.Mode == AutoExposureMode.Manual
+                ? preset.ApplyPhysicalCameraExposure
+                    ? AutoExposureExposureMode.UsePhysicalCamera
+                    : AutoExposureExposureMode.Fixed
+                : AutoExposureExposureMode.AutomaticHistogram;
             settings.mode = preset.Mode;
+            settings.meteringMode = AutoExposureMeteringMode.Average;
+            settings.adaptationMode = AutoExposureAdaptationMode.Progressive;
             settings.applyPhysicalCameraExposure = preset.ApplyPhysicalCameraExposure;
+            settings.targetMidGray = AutoExposureSettingsResolver.MiddleGrey;
             settings.manualEV100 = resolvedManualEV100;
             settings.exposureCompensationSettings = exposureCompensationSettings;
             settings.exposureCompensationCurveStops = preset.Mode == AutoExposureMode.Manual

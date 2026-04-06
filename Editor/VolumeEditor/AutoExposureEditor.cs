@@ -267,7 +267,7 @@ namespace VividRP.Editor
                 case AutoExposureExposureMode.Fixed:
                     EditorGUILayout.Space();
                     DrawSectionHeader("Fixed");
-                    PropertyField(m_ManualEV100, s_FixedExposureLabel);
+                    DoExposurePropertyField(m_ManualEV100, s_FixedExposureLabel);
                     PropertyField(m_ExposureCompensation, s_CompensationLabel);
                     PropertyField(m_ExposureCompensationCurve, s_CompensationCurveLabel);
                     break;

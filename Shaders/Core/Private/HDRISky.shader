@@ -11,11 +11,13 @@ Shader "Hidden/VividRP/HDRISky"
     HLSLINCLUDE
     #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+    #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
 
     TEXTURE2D_X_FLOAT(_DepthTexture);
     SAMPLER(sampler_DepthTexture);
     TEXTURECUBE(_SkyCubemap);
     SAMPLER(sampler_SkyCubemap);
+    float4 _SkyCubemap_HDR;
     float4x4 _PixelCoordToViewDirWS;
     float4 _SkyTint;
     float4 _SkyParam;
@@ -70,7 +72,7 @@ Shader "Hidden/VividRP/HDRISky"
 
         // Reverse it to point into the scene
         float3 dir = RotateAroundYAxis(-viewDirWS, _SkyParam.z);
-        return SAMPLE_TEXTURECUBE(_SkyCubemap, sampler_SkyCubemap, dir).rgb
+        return DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SkyCubemap, sampler_SkyCubemap, dir,0),_SkyCubemap_HDR)
                * _SkyTint.rgb
                * exp2(_SkyParam.x)
                * _SkyParam.y;

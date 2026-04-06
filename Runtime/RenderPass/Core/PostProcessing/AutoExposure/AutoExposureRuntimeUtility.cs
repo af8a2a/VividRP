@@ -412,7 +412,22 @@ namespace VividRP.Runtime
                 camera,
                 autoExposure.manualEV100.value,
                 settings.applyPhysicalCameraExposure);
-            settings.targetMidGray = autoExposure.targetMidGray.value;
+            switch (autoExposure.targetMidGray.value)
+            {
+                case TargetMidGray.Grey125:
+                    ColorUtils.s_LightMeterCalibrationConstant = 12.5f;
+                    break;
+                case TargetMidGray.Grey14:
+                    ColorUtils.s_LightMeterCalibrationConstant = 14.0f;
+                    break;
+                case TargetMidGray.Grey18:
+                    ColorUtils.s_LightMeterCalibrationConstant = 18.0f;
+                    break;
+                default:
+                    ColorUtils.s_LightMeterCalibrationConstant = 12.5f;
+                    break;
+            }
+            settings.targetMidGray = ColorUtils.s_LightMeterCalibrationConstant;
             settings.exposureCompensationSettings = ResolveExposureCompensation(autoExposure.exposureCompensation.value);
             settings.exposureCompensationCurveStops = settings.mode == AutoExposureMode.Manual
                 ? ResolveExposureCompensationCurveStops(

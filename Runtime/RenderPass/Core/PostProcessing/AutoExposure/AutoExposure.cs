@@ -82,6 +82,32 @@ namespace VividRP.Runtime
             value = t > 0f ? to : from;
         }
     }
+    
+    
+    /// <summary>
+    /// The target grey value used by the exposure system. Note this is equivalent of changing the calibration constant K on the used virtual reflected light meter.
+    /// </summary>
+    public enum TargetMidGray
+    {
+        /// <summary>
+        /// Mid Grey 12.5% (reflected light meter K set as 12.5)
+        /// </summary>
+        Grey125,
+
+        /// <summary>
+        /// Mid Grey 14.0% (reflected light meter K set as 14.0)
+        /// </summary>
+        Grey14,
+
+        /// <summary>
+        /// Mid Grey 18.0% (reflected light meter K set as 18.0). Note that this value is outside of the suggested K range by the ISO standard.
+        /// </summary>
+        Grey18
+    }
+    
+    
+    
+
 
     [Serializable]
     [VolumeComponentMenu("Post-processing/Auto Exposure")]
@@ -146,7 +172,7 @@ namespace VividRP.Runtime
         public AutoExposureAdaptationModeParameter adaptationMode = new(AutoExposureAdaptationMode.Progressive);
 
         [Tooltip("Target middle gray value used while tuning HDRP-style exposure settings.")]
-        public ClampedFloatParameter targetMidGray = new(0.18f, 0.01f, 1f);
+        public EnumParameter<TargetMidGray> targetMidGray = new (TargetMidGray.Grey14);
 
         [Tooltip("Curve used for HDRP-style curve remapping mode.")]
         public NoInterpAnimationCurveParameter curveMap = new(CreateDefaultCurveMap());
@@ -221,7 +247,7 @@ namespace VividRP.Runtime
             exposureCompensationCurve ??= new NoInterpAnimationCurveParameter(CreateDefaultExposureCompensationCurve());
             meteringMode ??= new AutoExposureMeteringModeParameter(AutoExposureMeteringMode.Average);
             adaptationMode ??= new AutoExposureAdaptationModeParameter(AutoExposureAdaptationMode.Progressive);
-            targetMidGray ??= new ClampedFloatParameter(0.18f, 0.01f, 1f);
+            targetMidGray ??= new EnumParameter<TargetMidGray>(TargetMidGray.Grey14);
             curveMap ??= new NoInterpAnimationCurveParameter(CreateDefaultCurveMap());
 
             if (exposureCompensationCurve.value == null)

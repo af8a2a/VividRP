@@ -7,11 +7,22 @@ namespace VividRP.Runtime
 {
     internal sealed class HDRISkyRenderer : ISkyRenderer
     {
+        private enum AmbientProbeRebuildReason
+        {
+            None,
+            MissingTexture,
+            ResolutionChanged,
+            ParametersChanged
+        }
+
         private const string HDRISkyShaderName = "Hidden/VividRP/HDRISky";
 
         private static readonly int SkyCubemapId = Shader.PropertyToID("_SkyCubemap");
         private static readonly int SkyTintId = Shader.PropertyToID("_SkyTint");
         private static readonly int SkyParamId = Shader.PropertyToID("_SkyParam");
+        private static readonly ProfilingSampler s_AmbientProbeMissingTextureSampler = new("HDRISkyRenderer.RebuildAmbientProbe (MissingTexture)");
+        private static readonly ProfilingSampler s_AmbientProbeResolutionChangedSampler = new("HDRISkyRenderer.RebuildAmbientProbe (ResolutionChanged)");
+        private static readonly ProfilingSampler s_AmbientProbeParametersChangedSampler = new("HDRISkyRenderer.RebuildAmbientProbe (ParametersChanged)");
 
         private Material m_Material;
         private RenderTexture m_AmbientProbeCubemap;
@@ -70,11 +81,15 @@ namespace VividRP.Runtime
             skyData.exposure = sky?.exposure.value ?? 0.0f;
             skyData.rotation = sky?.rotation.value ?? 0.0f;
             var generatedCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(VividVolumeManagerUtility.GetSkySettingsVolume());
-            if (NeedsAmbientProbeRebuild(skyHash, generatedCubemapResolution) && CanBakeAmbientProbe())
+            var ambientProbeRebuildReason = ResolveAmbientProbeRebuildReason(skyHash, generatedCubemapResolution);
+            if (ambientProbeRebuildReason != AmbientProbeRebuildReason.None && CanBakeAmbientProbe() && cmd != null)
             {
                 EnsureAmbientProbeCubemap(generatedCubemapResolution);
-                if (RebuildAmbientProbeCubemap(cmd, cubemap, skyData.tint, skyData.exposure, skyData.rotation))
-                    m_AmbientProbeSkyHash = skyHash;
+                using (new ProfilingScope(cmd, GetAmbientProbeRebuildSampler(ambientProbeRebuildReason)))
+                {
+                    if (RebuildAmbientProbeCubemap(cmd, cubemap, skyData.tint, skyData.exposure, skyData.rotation))
+                        m_AmbientProbeSkyHash = skyHash;
+                }
             }
 
             var useBakedAmbientProbe = CanBakeAmbientProbe()
@@ -119,9 +134,17 @@ namespace VividRP.Runtime
             return m_Material != null && m_AmbientProbeBakingPass >= 0;
         }
 
-        private bool NeedsAmbientProbeRebuild(int skyHash, int resolution)
+        private AmbientProbeRebuildReason ResolveAmbientProbeRebuildReason(int skyHash, int resolution)
         {
-            return !IsCubemapValid(m_AmbientProbeCubemap, resolution) || m_AmbientProbeSkyHash != skyHash;
+            if (m_AmbientProbeCubemap == null || !m_AmbientProbeCubemap.IsCreated())
+                return AmbientProbeRebuildReason.MissingTexture;
+
+            if (!IsCubemapValid(m_AmbientProbeCubemap, resolution))
+                return AmbientProbeRebuildReason.ResolutionChanged;
+
+            return m_AmbientProbeSkyHash != skyHash
+                ? AmbientProbeRebuildReason.ParametersChanged
+                : AmbientProbeRebuildReason.None;
         }
 
         private void EnsureAmbientProbeCubemap(int resolution)
@@ -183,6 +206,16 @@ namespace VividRP.Runtime
                 properties,
                 m_AmbientProbeBakingPass);
             return true;
+        }
+
+        private static ProfilingSampler GetAmbientProbeRebuildSampler(AmbientProbeRebuildReason reason)
+        {
+            return reason switch
+            {
+                AmbientProbeRebuildReason.ResolutionChanged => s_AmbientProbeResolutionChangedSampler,
+                AmbientProbeRebuildReason.ParametersChanged => s_AmbientProbeParametersChangedSampler,
+                _ => s_AmbientProbeMissingTextureSampler,
+            };
         }
     }
 }

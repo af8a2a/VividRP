@@ -13,10 +13,14 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd)"));
             Assert.That(source, Does.Contain("m_AmbientProbeBakingPass = m_Material.FindPass(\"HDRISkyBaking\");"));
+            Assert.That(source, Does.Contain("HDRISkyRenderer.RebuildAmbientProbe (MissingTexture)"));
+            Assert.That(source, Does.Contain("HDRISkyRenderer.RebuildAmbientProbe (ResolutionChanged)"));
+            Assert.That(source, Does.Contain("HDRISkyRenderer.RebuildAmbientProbe (ParametersChanged)"));
             Assert.That(source, Does.Contain("SkySettingsVolume.GetGeneratedCubemapResolution(skySettings)"));
             Assert.That(source, Does.Contain("var generatedCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(VividVolumeManagerUtility.GetSkySettingsVolume());"));
-            Assert.That(source, Does.Contain("NeedsAmbientProbeRebuild(skyHash, generatedCubemapResolution)"));
+            Assert.That(source, Does.Contain("var ambientProbeRebuildReason = ResolveAmbientProbeRebuildReason(skyHash, generatedCubemapResolution);"));
             Assert.That(source, Does.Contain("EnsureAmbientProbeCubemap(generatedCubemapResolution);"));
+            Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, GetAmbientProbeRebuildSampler(ambientProbeRebuildReason)))"));
             Assert.That(source, Does.Contain("SkyCubemapBakingUtility.RenderSkyToCubemap("));
             Assert.That(source, Does.Contain("skyData.ambientProbeCubemap = useBakedAmbientProbe ? m_AmbientProbeCubemap : cubemap;"));
             Assert.That(source, Does.Contain("skyData.ambientProbeTint = useBakedAmbientProbe ? Color.white : skyData.tint;"));

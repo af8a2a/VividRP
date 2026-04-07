@@ -6,11 +6,26 @@ namespace VividRP.Runtime
 {
     internal sealed class SkySpecularCache : System.IDisposable
     {
+        private enum SpecularPrefilterRebuildReason
+        {
+            None,
+            MissingTexture,
+            SourceChanged,
+            SkyChanged,
+            ResolutionChanged,
+            QualityChanged
+        }
+
         private const string PrefilterKernelName = "SkySpecularPrefilter";
 
         private static readonly int SkySpecularSourceCubemapId = Shader.PropertyToID("_SkySpecularSourceCubemap");
         private static readonly int SkySpecularMipOutputId = Shader.PropertyToID("_SkySpecularMipOutput");
         private static readonly int SkySpecularMipParamsId = Shader.PropertyToID("_SkySpecularMipParams");
+        private static readonly ProfilingSampler s_PrefilterMissingTextureSampler = new("SkySpecularCache.RebuildPrefilter (MissingTexture)");
+        private static readonly ProfilingSampler s_PrefilterSourceChangedSampler = new("SkySpecularCache.RebuildPrefilter (SourceChanged)");
+        private static readonly ProfilingSampler s_PrefilterSkyChangedSampler = new("SkySpecularCache.RebuildPrefilter (SkyChanged)");
+        private static readonly ProfilingSampler s_PrefilterResolutionChangedSampler = new("SkySpecularCache.RebuildPrefilter (ResolutionChanged)");
+        private static readonly ProfilingSampler s_PrefilterQualityChangedSampler = new("SkySpecularCache.RebuildPrefilter (QualityChanged)");
 
         private ComputeShader m_ConvolutionCompute;
         private int m_PrefilterKernel = -1;
@@ -25,6 +40,7 @@ namespace VividRP.Runtime
         private RTHandle m_FallbackCubemapHandle;
         private int m_CachedSkyHash;
         private int m_CachedResolution;
+        private int m_CachedMaxSampleCount;
 
         internal bool IsValid =>
             m_CachedSource != null
@@ -82,13 +98,20 @@ namespace VividRP.Runtime
                 : -1;
         }
 
-        internal void Update(CommandBuffer cmd, Texture source, int skyHash, int requestedResolution)
+        internal void Update(CommandBuffer cmd, Texture source, int skyHash, int requestedResolution, int requestedMaxSampleCount)
         {
             var resolvedResolution = ResolvePrefilterResolution(source, requestedResolution);
+            var resolvedMaxSampleCount = ResolvePrefilterMaxSampleCount(requestedMaxSampleCount);
+            var canPrefilter = CanPrefilter(source) && cmd != null;
+            var hasUsableCachedCubemap = canPrefilter
+                ? m_FilteredCubemapHandle != null
+                : m_FilteredCubemapHandle != null || m_CachedSourceCubemapHandle != null;
+
             if (ReferenceEquals(m_CachedSource, source)
                 && skyHash == m_CachedSkyHash
                 && resolvedResolution == m_CachedResolution
-                && (m_FilteredCubemapHandle != null || m_CachedSourceCubemapHandle != null))
+                && resolvedMaxSampleCount == m_CachedMaxSampleCount
+                && hasUsableCachedCubemap)
                 return;
 
             if (source == null)
@@ -97,8 +120,13 @@ namespace VividRP.Runtime
                 ReleaseFilteredCubemapResources();
                 m_CachedSkyHash = 0;
                 m_CachedResolution = 0;
+                m_CachedMaxSampleCount = 0;
                 return;
             }
+
+            var rebuildReason = canPrefilter
+                ? ResolvePrefilterRebuildReason(source, skyHash, resolvedResolution, resolvedMaxSampleCount)
+                : SpecularPrefilterRebuildReason.None;
 
             if (!ReferenceEquals(m_CachedSource, source))
             {
@@ -107,13 +135,16 @@ namespace VividRP.Runtime
                 m_CachedSource = source;
             }
 
-            if (CanPrefilter(source) && cmd != null)
+            if (canPrefilter)
             {
                 EnsurePrefilterResources(source, resolvedResolution);
 
                 if (m_FilteredCubemap != null && m_FilteredCubemapFaces != null)
                 {
-                    RebuildPrefilteredCubemap(cmd, source);
+                    using (new ProfilingScope(cmd, GetPrefilterRebuildSampler(rebuildReason)))
+                    {
+                        RebuildPrefilteredCubemap(cmd, source, resolvedMaxSampleCount);
+                    }
                     EnsureFilteredCubemapHandle();
                 }
             }
@@ -124,11 +155,12 @@ namespace VividRP.Runtime
 
             m_CachedSkyHash = skyHash;
             m_CachedResolution = resolvedResolution;
+            m_CachedMaxSampleCount = resolvedMaxSampleCount;
         }
 
-        internal void Update(Texture source, int skyHash, int requestedResolution)
+        internal void Update(Texture source, int skyHash, int requestedResolution, int requestedMaxSampleCount)
         {
-            Update(null, source, skyHash, requestedResolution);
+            Update(null, source, skyHash, requestedResolution, requestedMaxSampleCount);
         }
 
         public void Dispose()
@@ -150,6 +182,7 @@ namespace VividRP.Runtime
 
             m_CachedSkyHash = 0;
             m_CachedResolution = 0;
+            m_CachedMaxSampleCount = 0;
         }
 
         private void EnsureFallbackCubemapHandle()
@@ -268,7 +301,7 @@ namespace VividRP.Runtime
                 && SystemInfo.supportsComputeShaders;
         }
 
-        private void RebuildPrefilteredCubemap(CommandBuffer cmd, Texture source)
+        private void RebuildPrefilteredCubemap(CommandBuffer cmd, Texture source, int maxSampleCount)
         {
             if (cmd == null || source == null || m_FilteredCubemap == null || m_FilteredCubemapFaces == null)
                 return;
@@ -283,7 +316,7 @@ namespace VividRP.Runtime
                 cmd.SetComputeVectorParam(
                     m_ConvolutionCompute,
                     SkySpecularMipParamsId,
-                    new Vector4(mip, maxMip, 0.0f, 0.0f));
+                    new Vector4(mip, maxMip, maxSampleCount, 0.0f));
                 cmd.SetComputeTextureParam(
                     m_ConvolutionCompute,
                     m_PrefilterKernel,
@@ -328,6 +361,75 @@ namespace VividRP.Runtime
                 return sourceResolution;
 
             return Mathf.Max(1, Mathf.Min(requestedResolution, sourceResolution));
+        }
+
+        private static int ResolvePrefilterMaxSampleCount(int requestedMaxSampleCount)
+        {
+            return Mathf.Max(0, requestedMaxSampleCount);
+        }
+
+        private SpecularPrefilterRebuildReason ResolvePrefilterRebuildReason(
+            Texture source,
+            int skyHash,
+            int resolvedResolution,
+            int resolvedMaxSampleCount)
+        {
+            if (!HasValidFilteredResources(resolvedResolution))
+                return SpecularPrefilterRebuildReason.MissingTexture;
+
+            if (!ReferenceEquals(m_CachedSource, source))
+                return SpecularPrefilterRebuildReason.SourceChanged;
+
+            if (m_CachedResolution != resolvedResolution)
+                return SpecularPrefilterRebuildReason.ResolutionChanged;
+
+            if (m_CachedMaxSampleCount != resolvedMaxSampleCount)
+                return SpecularPrefilterRebuildReason.QualityChanged;
+
+            return m_CachedSkyHash != skyHash
+                ? SpecularPrefilterRebuildReason.SkyChanged
+                : SpecularPrefilterRebuildReason.None;
+        }
+
+        private bool HasValidFilteredResources(int resolution)
+        {
+            return m_FilteredCubemapHandle != null
+                && IsFilteredCubemapValid(m_FilteredCubemap, resolution)
+                && IsFilteredFaceArrayValid(m_FilteredCubemapFaces, resolution);
+        }
+
+        private static bool IsFilteredCubemapValid(RenderTexture texture, int resolution)
+        {
+            return texture != null
+                && texture.IsCreated()
+                && texture.dimension == TextureDimension.Cube
+                && texture.width == resolution
+                && texture.height == resolution
+                && texture.graphicsFormat == GraphicsFormat.R16G16B16A16_SFloat;
+        }
+
+        private static bool IsFilteredFaceArrayValid(RenderTexture texture, int resolution)
+        {
+            return texture != null
+                && texture.IsCreated()
+                && texture.dimension == TextureDimension.Tex2DArray
+                && texture.width == resolution
+                && texture.height == resolution
+                && texture.volumeDepth == 6
+                && texture.graphicsFormat == GraphicsFormat.R16G16B16A16_SFloat
+                && texture.enableRandomWrite;
+        }
+
+        private static ProfilingSampler GetPrefilterRebuildSampler(SpecularPrefilterRebuildReason reason)
+        {
+            return reason switch
+            {
+                SpecularPrefilterRebuildReason.SourceChanged => s_PrefilterSourceChangedSampler,
+                SpecularPrefilterRebuildReason.SkyChanged => s_PrefilterSkyChangedSampler,
+                SpecularPrefilterRebuildReason.ResolutionChanged => s_PrefilterResolutionChangedSampler,
+                SpecularPrefilterRebuildReason.QualityChanged => s_PrefilterQualityChangedSampler,
+                _ => s_PrefilterMissingTextureSampler,
+            };
         }
     }
 }

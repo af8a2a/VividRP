@@ -16,6 +16,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("internal void BindGlobalBuffer(CommandBuffer cmd, bool useDefault = false)"));
             Assert.That(source, Does.Contain("useDefault || m_AmbientProbeBuffer == null ? m_DefaultAmbientProbeBuffer : m_AmbientProbeBuffer"));
             Assert.That(source, Does.Contain("HDRISkyVolume.ResolveExposureMultiplier(exposureStops)"));
+            Assert.That(source, Does.Contain("SkyAmbientProbeConvolution.Convolve (MissingBuffer)"));
+            Assert.That(source, Does.Contain("SkyAmbientProbeConvolution.Convolve (SkyChanged)"));
+            Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, GetConvolutionSampler(rebuildReason)))"));
             Assert.That(source, Does.Not.Contain("RequestAsyncReadback"));
             Assert.That(source, Does.Not.Contain("AsyncGPUReadbackRequest"));
             Assert.That(source, Does.Not.Contain("supportsAsyncGPUReadback"));
@@ -50,8 +53,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("float4 _SkyConvolutionTint;"));
             Assert.That(source, Does.Contain("float4 _SkyConvolutionParams;"));
             Assert.That(source, Does.Contain("#define _SkyExposure _SkyConvolutionParams.x"));
+            Assert.That(source, Does.Contain("#define _SkySpecularMaxSampleCount ((uint)_SkySpecularMipParams.z)"));
             Assert.That(source, Does.Contain("PackSH(_AmbientProbeOutputBuffer, outputSHCoeffs);"));
             Assert.That(source, Does.Contain("float3 IntegrateSkySpecularGGX"));
+            Assert.That(source, Does.Contain("sampleCount = min(sampleCount, _SkySpecularMaxSampleCount);"));
             Assert.That(source, Does.Contain("void SkySpecularPrefilter(uint3 tid : SV_DispatchThreadID)"));
         }
 

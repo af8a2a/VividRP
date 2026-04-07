@@ -5,6 +5,13 @@ namespace VividRP.Runtime
 {
     internal sealed class SkyAmbientProbeConvolution
     {
+        private enum AmbientProbeConvolutionRebuildReason
+        {
+            None,
+            MissingBuffer,
+            SkyChanged
+        }
+
         private const string KernelName = "AmbientProbeConvolution";
         private const int AmbientProbePackedCoefficientCount = 7;
         private const int AmbientProbePackedCoefficientStride = sizeof(float) * 4;
@@ -14,6 +21,8 @@ namespace VividRP.Runtime
         private static readonly int VividAmbientProbeDataId = Shader.PropertyToID("_VividAmbientProbeData");
         private static readonly int SkyConvolutionTintId = Shader.PropertyToID("_SkyConvolutionTint");
         private static readonly int SkyConvolutionParamsId = Shader.PropertyToID("_SkyConvolutionParams");
+        private static readonly ProfilingSampler s_ConvolutionMissingBufferSampler = new("SkyAmbientProbeConvolution.Convolve (MissingBuffer)");
+        private static readonly ProfilingSampler s_ConvolutionSkyChangedSampler = new("SkyAmbientProbeConvolution.Convolve (SkyChanged)");
         private static readonly Vector4[] s_DefaultAmbientProbeData =
         {
             Vector4.zero,
@@ -69,20 +78,24 @@ namespace VividRP.Runtime
             if (!IsSupported || cmd == null || sourceCubemap == null)
                 return;
 
-            if (m_HasConvolvedSkyHash && m_ConvolvedSkyHash == skyHash)
+            var rebuildReason = ResolveRebuildReason(skyHash);
+            if (rebuildReason == AmbientProbeConvolutionRebuildReason.None)
                 return;
 
             EnsureAmbientProbeBuffer();
 
-            cmd.SetComputeTextureParam(m_ComputeShader, m_Kernel, AmbientProbeInputCubemapId, sourceCubemap);
-            cmd.SetComputeBufferParam(m_ComputeShader, m_Kernel, AmbientProbeOutputBufferId, m_AmbientProbeBuffer);
-            cmd.SetComputeVectorParam(m_ComputeShader, SkyConvolutionTintId, new Vector4(tint.r, tint.g, tint.b, tint.a));
-            cmd.SetComputeVectorParam(
-                m_ComputeShader,
-                SkyConvolutionParamsId,
-                new Vector4(HDRISkyVolume.ResolveExposureMultiplier(exposureStops), -rotation, 0.0f, 0.0f));
-            Hammersley.BindConstants(cmd, m_ComputeShader);
-            cmd.DispatchCompute(m_ComputeShader, m_Kernel, 1, 1, 1);
+            using (new ProfilingScope(cmd, GetConvolutionSampler(rebuildReason)))
+            {
+                cmd.SetComputeTextureParam(m_ComputeShader, m_Kernel, AmbientProbeInputCubemapId, sourceCubemap);
+                cmd.SetComputeBufferParam(m_ComputeShader, m_Kernel, AmbientProbeOutputBufferId, m_AmbientProbeBuffer);
+                cmd.SetComputeVectorParam(m_ComputeShader, SkyConvolutionTintId, new Vector4(tint.r, tint.g, tint.b, tint.a));
+                cmd.SetComputeVectorParam(
+                    m_ComputeShader,
+                    SkyConvolutionParamsId,
+                    new Vector4(HDRISkyVolume.ResolveExposureMultiplier(exposureStops), -rotation, 0.0f, 0.0f));
+                Hammersley.BindConstants(cmd, m_ComputeShader);
+                cmd.DispatchCompute(m_ComputeShader, m_Kernel, 1, 1, 1);
+            }
 
             m_HasConvolvedSkyHash = true;
             m_ConvolvedSkyHash = skyHash;
@@ -120,6 +133,23 @@ namespace VividRP.Runtime
                 AmbientProbePackedCoefficientCount,
                 AmbientProbePackedCoefficientStride);
             m_DefaultAmbientProbeBuffer.SetData(s_DefaultAmbientProbeData);
+        }
+
+        private AmbientProbeConvolutionRebuildReason ResolveRebuildReason(int skyHash)
+        {
+            if (m_AmbientProbeBuffer == null)
+                return AmbientProbeConvolutionRebuildReason.MissingBuffer;
+
+            return m_HasConvolvedSkyHash && m_ConvolvedSkyHash == skyHash
+                ? AmbientProbeConvolutionRebuildReason.None
+                : AmbientProbeConvolutionRebuildReason.SkyChanged;
+        }
+
+        private static ProfilingSampler GetConvolutionSampler(AmbientProbeConvolutionRebuildReason reason)
+        {
+            return reason == AmbientProbeConvolutionRebuildReason.SkyChanged
+                ? s_ConvolutionSkyChangedSampler
+                : s_ConvolutionMissingBufferSampler;
         }
     }
 }

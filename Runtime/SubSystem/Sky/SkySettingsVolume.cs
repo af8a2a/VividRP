@@ -21,6 +21,15 @@ namespace VividRP.Runtime
         Resolution512 = 512
     }
 
+    public enum SkySpecularPrefilterQuality
+    {
+        PlatformDefault = 0,
+        Low = 21,
+        Medium = 34,
+        High = 55,
+        Ultra = 89
+    }
+
     [Serializable]
     [VolumeComponentMenu("VividRP/Sky Settings")]
     public sealed class SkySettingsVolume : VolumeComponent
@@ -30,6 +39,7 @@ namespace VividRP.Runtime
         public MinFloatParameter updatePeriod = new(0.0f, 0.0f);
         public EnumParameter<SkyGeneratedCubemapResolution> generatedCubemapResolution = new(SkyGeneratedCubemapResolution.Resolution64);
         public EnumParameter<SkySpecularPrefilterResolution> specularPrefilterResolution = new(SkySpecularPrefilterResolution.Source);
+        public EnumParameter<SkySpecularPrefilterQuality> specularPrefilterQuality = new(SkySpecularPrefilterQuality.PlatformDefault);
 
         protected override void OnEnable()
         {
@@ -38,6 +48,7 @@ namespace VividRP.Runtime
             updatePeriod ??= new MinFloatParameter(0.0f, 0.0f);
             generatedCubemapResolution ??= new EnumParameter<SkyGeneratedCubemapResolution>(SkyGeneratedCubemapResolution.Resolution64);
             specularPrefilterResolution ??= new EnumParameter<SkySpecularPrefilterResolution>(SkySpecularPrefilterResolution.Source);
+            specularPrefilterQuality ??= new EnumParameter<SkySpecularPrefilterQuality>(SkySpecularPrefilterQuality.PlatformDefault);
             base.OnEnable();
         }
 
@@ -54,6 +65,13 @@ namespace VividRP.Runtime
             return settings?.specularPrefilterResolution != null
                 ? (int)settings.specularPrefilterResolution.value
                 : (int)SkySpecularPrefilterResolution.Source;
+        }
+
+        internal static int GetSpecularPrefilterMaxSampleCount(SkySettingsVolume settings = null)
+        {
+            return settings?.specularPrefilterQuality != null
+                ? Math.Max(0, (int)settings.specularPrefilterQuality.value)
+                : (int)SkySpecularPrefilterQuality.PlatformDefault;
         }
     }
 }

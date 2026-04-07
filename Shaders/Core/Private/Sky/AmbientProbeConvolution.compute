@@ -22,6 +22,7 @@ float4 _SkySpecularMipParams;
 
 #define _SkyExposure _SkyConvolutionParams.x
 #define _SkyRotation _SkyConvolutionParams.y
+#define _SkySpecularMaxSampleCount ((uint)_SkySpecularMipParams.z)
 
 #define SAMPLE_COUNT 256
 #define SH_COEFF_COUNT 27
@@ -90,6 +91,8 @@ float3 IntegrateSkySpecularGGX(float3 normalWS, uint mipLevel, uint maxMipLevel)
     real roughness = PerceptualRoughnessToRoughness(perceptualRoughness);
     uint runtimeFilterMip = (uint)clamp(ceil(scaledMipLevel), 1.0, (real)UNITY_SPECCUBE_LOD_STEPS);
     uint sampleCount = max(GetIBLRuntimeFilterSampleCount(runtimeFilterMip), 1u);
+    if (_SkySpecularMaxSampleCount > 0u)
+        sampleCount = min(sampleCount, _SkySpecularMaxSampleCount);
 
     real3x3 localToWorld = GetLocalFrame(normalWS);
     real3 viewDirectionWS = normalWS;

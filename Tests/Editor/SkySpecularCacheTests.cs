@@ -23,7 +23,7 @@ namespace VividRP.Editor.Tests
 
             try
             {
-                cache.Update(cubemap, 17);
+                cache.Update(cubemap, 17, 0);
 
                 Assert.That(cache.IsValid, Is.True);
                 Assert.That(cache.Cubemap, Is.Not.Null);
@@ -44,10 +44,10 @@ namespace VividRP.Editor.Tests
 
             try
             {
-                cache.Update(cubemap, 23);
+                cache.Update(cubemap, 23, 0);
                 var firstHandle = cache.Cubemap;
 
-                cache.Update(cubemap, 23);
+                cache.Update(cubemap, 23, 0);
 
                 Assert.That(cache.Cubemap, Is.SameAs(firstHandle));
                 Assert.That(cache.SkyHash, Is.EqualTo(23));
@@ -76,7 +76,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 runtimeCubemap.Create();
-                cache.Update(runtimeCubemap, 29);
+                cache.Update(runtimeCubemap, 29, 0);
 
                 Assert.That(cache.IsValid, Is.True);
                 Assert.That(cache.Cubemap, Is.Not.Null);
@@ -97,7 +97,7 @@ namespace VividRP.Editor.Tests
 
             try
             {
-                cache.Update(null, 0);
+                cache.Update(null, 0, 0);
                 var fallbackHandle = cache.Cubemap;
 
                 Assert.That(cache.IsValid, Is.True);
@@ -131,10 +131,16 @@ namespace VividRP.Editor.Tests
             Assert.That(skyManagerSource, Does.Contain("internal static void ImportSpecularCubemap(RenderGraphTexture texture, VividSkyData skyData = null)"));
             Assert.That(skyManagerSource, Does.Contain("UpdateSpecularCubemap(cmd, s_CachedSkyData);"));
             Assert.That(skyManagerSource, Does.Contain("UpdateSpecularCubemap(skyData);"));
+            Assert.That(skyManagerSource, Does.Contain("var specularResolution = GetSpecularPrefilterResolution();"));
+            Assert.That(skyManagerSource, Does.Contain("return SkySettingsVolume.GetSpecularPrefilterResolution(VividVolumeManagerUtility.GetSkySettingsVolume());"));
             Assert.That(cacheSource, Does.Contain("private const string PrefilterKernelName = \"SkySpecularPrefilter\";"));
             Assert.That(cacheSource, Does.Contain("internal bool HasSource(Texture source)"));
             Assert.That(cacheSource, Does.Contain("internal int MaxMipLevel"));
             Assert.That(cacheSource, Does.Contain("m_ConvolutionCompute = resources?.SkyAmbientProbeConvolutionCompute;"));
+            Assert.That(cacheSource, Does.Contain("internal void Update(CommandBuffer cmd, Texture source, int skyHash, int requestedResolution)"));
+            Assert.That(cacheSource, Does.Contain("var resolvedResolution = ResolvePrefilterResolution(source, requestedResolution);"));
+            Assert.That(cacheSource, Does.Contain("&& resolvedResolution == m_CachedResolution"));
+            Assert.That(cacheSource, Does.Contain("EnsurePrefilterResources(source, resolvedResolution);"));
             Assert.That(cacheSource, Does.Contain("m_FilteredCubemap = new RenderTexture(faceSize, faceSize, 0)"));
             Assert.That(cacheSource, Does.Contain("m_FilteredCubemapFaces = new RenderTexture(faceSize, faceSize, 0)"));
             Assert.That(cacheSource, Does.Contain("cmd.SetComputeTextureParam(m_ConvolutionCompute, m_PrefilterKernel, SkySpecularSourceCubemapId, source);"));
@@ -143,6 +149,8 @@ namespace VividRP.Editor.Tests
             Assert.That(cacheSource, Does.Contain("cmd.DispatchCompute("));
             Assert.That(cacheSource, Does.Contain("for (var mip = 0; mip < mipCount; mip++)"));
             Assert.That(cacheSource, Does.Contain("cmd.CopyTexture(m_FilteredCubemapFaces, face, mip, m_FilteredCubemap, face, mip);"));
+            Assert.That(cacheSource, Does.Contain("private static int ResolvePrefilterResolution(Texture source, int requestedResolution)"));
+            Assert.That(cacheSource, Does.Contain("return Mathf.Max(1, Mathf.Min(requestedResolution, sourceResolution));"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

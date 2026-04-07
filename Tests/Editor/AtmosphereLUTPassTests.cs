@@ -73,9 +73,35 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_MultiScatteringKernel = m_ComputeShader.FindKernel(MultiScatteringKernelName);"));
             Assert.That(source, Does.Contain("m_SkyViewKernel = m_ComputeShader.FindKernel(SkyViewKernelName);"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters)"));
+            Assert.That(source, Does.Contain("PassRecorder.ImportTexture(m_TransmittanceLUT, m_CachedTransmittanceHandle);"));
+            Assert.That(source, Does.Contain("PassRecorder.ImportTexture(m_MultiScatteringLUT, m_CachedMultiScatteringHandle);"));
+            Assert.That(source, Does.Contain("PassRecorder.ImportTexture(m_SkyViewLUT, m_CachedSkyViewHandle);"));
+            Assert.That(source, Does.Contain("ComputeTransmittanceHash(m_Parameters)"));
+            Assert.That(source, Does.Contain("ComputeMultiScatteringHash(m_Parameters, transmittanceHash)"));
+            Assert.That(source, Does.Contain("ComputeSkyViewHash(m_Parameters, multiScatteringHash)"));
+            Assert.That(source, Does.Contain("ResolveRebuildReason(m_TransmittanceCacheRecreated, m_CachedTransmittanceHash, transmittanceHash)"));
+            Assert.That(source, Does.Contain("ResolveRebuildReason(m_MultiScatteringCacheRecreated, m_CachedMultiScatteringHash, multiScatteringHash)"));
+            Assert.That(source, Does.Contain("ResolveRebuildReason(m_SkyViewCacheRecreated, m_CachedSkyViewHash, skyViewHash)"));
             Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_TransmittanceKernel, TransmittanceLutOutputId, m_TransmittanceLUT.innerHandle);"));
             Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_MultiScatteringKernel, TransmittanceLutId, m_TransmittanceLUT.innerHandle);"));
             Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, SkyViewLutOutputId, m_SkyViewLUT.innerHandle);"));
+        }
+
+        [Test]
+        public void Source_ProfilesRebuildReasonsAndReleasesPersistentResources()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "AtmosphereLUTPass.cs"));
+
+            Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildTransmittance (MissingTexture)"));
+            Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildTransmittance (ParametersChanged)"));
+            Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildMultiScattering (MissingTexture)"));
+            Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildMultiScattering (ParametersChanged)"));
+            Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildSkyView (MissingTexture)"));
+            Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildSkyView (ParametersChanged)"));
+            Assert.That(source, Does.Contain("ReleaseCachedLutResources();"));
+            Assert.That(source, Does.Contain("ReleaseLutResource(ref m_CachedTransmittanceTexture, ref m_CachedTransmittanceHandle);"));
+            Assert.That(source, Does.Contain("ReleaseLutResource(ref m_CachedMultiScatteringTexture, ref m_CachedMultiScatteringHandle);"));
+            Assert.That(source, Does.Contain("ReleaseLutResource(ref m_CachedSkyViewTexture, ref m_CachedSkyViewHandle);"));
         }
 
         [Test]

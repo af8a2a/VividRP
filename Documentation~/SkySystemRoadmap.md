@@ -31,7 +31,7 @@
 
 ### 当前明确边界
 
-- `SkyDiffuseSHUtility` 已移除 CPU 投影入口，当前 `VividSkyData.hasDiffuseSH` / `diffuseSH` 仍然保留，但运行时实际不产出 CPU SH。
+- `SkyDiffuseSHUtility` 已移除 CPU 投影入口，天空系统当前统一走 GPU-only 漫反射/镜面反射链路，不再保留 `VividSkyData` 中的 CPU SH 兼容字段。
 - 物理天空已经支持基础参数：
   - 地表半径
   - 空气 / 气溶胶 / 臭氧密度
@@ -47,9 +47,10 @@
 
 ### 当前短板
 
-- 还没有自动曝光，当前天空链路仍然依赖临时曝光拆分来避免数值爆炸。
+- 自动曝光基础链路已经落地，但天空系统仍需继续验证“屏幕实时曝光”和“sky baking 固定曝光”是否完全解耦。
 - `skyData.exposure` 目前同时被当作天空强度和 IBL 强度使用，没有和相机曝光解耦。
-- `AtmosphereLUTPass` 当前是“天空激活就计算”，还没有像 HDRP 那样把与场景无关的预计算缓存到“参数变化时才重建”。
+- `AtmosphereLUTPass` 已经拆成按参数 hash 重建的缓存链路，但 `SkyViewLUT` 仍只停留在基础 hash 缓存，尚未进入分层缓存 / 重投影策略。
+- runtime sky cubemap 和 specular prefilter 已支持基础分辨率配置，但还没有更完整的质量档位（采样数、卷积预算、调试统计）。
 - 物理天空还只是 HDRP Physically Based Sky 的一个基础子集。
 - HDRI 天空还只是 HDRP HDRI Sky 的一个基础子集。
 - 还没有云层系统，也没有把云参与天空反射、环境探针和雾的统一调度。
@@ -64,7 +65,7 @@
 | HDRI Sky 能力 | 支持 `Intensity Mode`、`Lux`、失真、Backplate、独立环境更新 | 当前只有 cubemap / tint / exposure / rotation | HDRI 功能仍停留在最小可用集 |
 | Physically Based Sky 能力 | 支持 `Spherical Mode`、`Planet Center Position`、`Sea Level`、`Planet Rotation`、地表纹理/发光、Space 贴图、Artistic Overrides、`Number Of Bounces`、`Include Sun In Baking` | 当前只实现基础散射参数、地面色、太阳盘、简化高度雾 | 物理天空需要从“能用”补到“可控且可维护” |
 | 预计算策略 | 文档明确强调预处理与场景无关，初始化后缓存，参数变化时重建 | LUT 仍是逐帧计算，runtime cubemap 只有 hash 控制 | 需要先做参数缓存，再谈质量升级 |
-| 曝光系统 | 独立的 `Exposure` Volume，支持 `Fixed`、`Automatic`、`Curve Mapping`、`Use Physical Camera` | 没有自动曝光，只存在 Color Adjustments 的 post exposure 和天空内部临时曝光 | 必须优先补齐相机曝光链路 |
+| 曝光系统 | 独立的 `Exposure` Volume，支持 `Fixed`、`Automatic`、`Curve Mapping`、`Use Physical Camera` | 已具备自动曝光与独立 `Exposure` Volume，但天空实时渲染、IBL 与 sky baking 的曝光职责仍需继续收敛 | 下一步重点转为验证和收口曝光职责边界 |
 | 云系统 | 同时提供 `Cloud Layer` 和 `Volumetric Clouds`，可与天空一起使用 | 没有云 | 云应作为独立阶段，不要和基础天空修补混在一起 |
 | 自定义天空扩展 | 有 `SkySettings` / `SkyRenderer` 扩展点，自定义天空会自动出现在 Sky Type 中 | 当前天空类型是硬编码注册 | 需要补扩展接口，但优先级低于曝光和缓存 |
 
@@ -107,22 +108,33 @@
 
 ### 任务
 
-- 为 `AtmosphereLUTPass` 增加基于 sky hash 的缓存键，不再在每帧都重建 LUT。
+- 为 `AtmosphereLUTPass` 增加基于 sky hash 的缓存键，不再在每帧都重建 LUT。（已完成）
 - 把“与场景无关”的大气预计算和“与相机相关”的屏幕绘制分开：
   - `TransmittanceLUT`
   - `MultiScatteringLUT`
-  - 物理天空参数缓存
+  - 物理天空参数缓存（基础版已完成）
 - 评估 `SkyViewLUT` 是否继续保留为逐帧资源，还是改成分层缓存和重投影策略。
-- 给 runtime cubemap 和 specular prefilter 增加质量级别和分辨率配置，不再写死当前尺寸。
+- 给 runtime cubemap 和 specular prefilter 增加质量级别和分辨率配置，不再写死当前尺寸。（基础分辨率配置已完成，质量档位仍待补）
 - 清理 GPU-only 之后仍遗留的 CPU SH 接口：
-  - 明确保留仅用于兼容，还是彻底从 `VividSkyData` 中移除
-  - 清理不再会被置真的 `hasDiffuseSH`
+  - 审查仍依赖 `RenderSettings.ambientProbe` / SH 常量缓冲的调用点，确认只保留“无天空数据”时的兜底语义
+  - 为 GPU-only 路径补更直接的调试与验证手段，而不是再暴露 CPU SH 状态
 
 ### 验收标准
 
 - 静态天空参数下，LUT 不再每帧重建。
 - 天空 hash 改变时，只重建必要资源。
 - Profile 中能明确看到天空预计算成本和触发原因。
+
+### 当前实现进度（2026-04-07）
+
+- 已完成：
+  - `AtmosphereLUTPass` 现在会缓存 `TransmittanceLUT`、`MultiScatteringLUT`、`SkyViewLUT`，并区分 `MissingTexture` / `ParametersChanged` 两类重建原因。
+  - HDRI / Physically Based Sky 的 runtime cubemap 与 ambient probe cubemap 已支持由 `SkySettingsVolume` 统一控制分辨率。
+  - `SkySpecularCache` 已支持独立的 specular prefilter 分辨率，并对 source cubemap 尺寸做上限约束。
+  - `VividSkyData` 与 `ShaderVariablesGlobal` 中的 CPU SH 兼容字段已移除，天空漫反射链路统一收敛到 GPU-only。
+- 仍待完成：
+  - 明确 `SkyViewLUT` 是否升级到 layered cache / reprojection。
+  - 在 cubemap / prefilter 侧补更完整的质量档、profile 标记和验证用例。
 
 ## Phase 2: 补齐环境光照与视觉天空分离
 
@@ -265,9 +277,9 @@
 
 ## 当前阶段建议
 
-- 当前最优先的不是继续补天空参数，而是先完成 `Phase 0` 和 `Phase 1`。
-- 如果自动曝光没有落地，后续 Lux、物理单位和云层接入都会继续建立在不稳定的显示链路上。
-- 如果 LUT 和环境光照缓存仍然是逐帧思路，后续每加一种天空能力，性能和调试成本都会继续上升。
+- 当前最优先的不是继续补天空参数，而是先收尾 `Phase 1`，并把自动曝光与天空烘焙之间的职责边界验证清楚。
+- 如果 sky baking 仍然混入实时曝光，后续 Lux、物理单位和云层接入仍会建立在不稳定的光照基线之上。
+- 如果 LUT 和环境光照缓存没有继续收敛到“按需重建”，后续每加一种天空能力，性能和调试成本都会继续上升。
 
 ## 非目标
 

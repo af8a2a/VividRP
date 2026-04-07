@@ -82,9 +82,7 @@ namespace VividRP.Runtime
             var previousTime = currentTime - deltaTime;
             var ambientProbe = skyData == null
                 ? RenderSettings.ambientProbe
-                : skyData.hasDiffuseSH
-                    ? skyData.diffuseSH
-                    : default;
+                : default;
             PackSphericalHarmonics(
                 ambientProbe,
                 out var shAr,

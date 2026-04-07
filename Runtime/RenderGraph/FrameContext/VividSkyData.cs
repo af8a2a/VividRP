@@ -6,8 +6,6 @@ namespace VividRP.Runtime
     public class VividSkyData : ContextItem
     {
         public SkyType activeSkyType;
-        public bool hasDiffuseSH;
-        public SphericalHarmonicsL2 diffuseSH;
         public Texture specularCubemap;
         public Texture ambientProbeCubemap;
         public Color tint;
@@ -22,8 +20,6 @@ namespace VividRP.Runtime
         public override void Reset()
         {
             activeSkyType = SkyType.None;
-            hasDiffuseSH = false;
-            diffuseSH = default;
             specularCubemap = null;
             ambientProbeCubemap = null;
             tint = Color.white;
@@ -45,8 +41,6 @@ namespace VividRP.Runtime
             }
 
             activeSkyType = other.activeSkyType;
-            hasDiffuseSH = other.hasDiffuseSH;
-            diffuseSH = other.diffuseSH;
             specularCubemap = other.specularCubemap;
             ambientProbeCubemap = other.ambientProbeCubemap;
             tint = other.tint;

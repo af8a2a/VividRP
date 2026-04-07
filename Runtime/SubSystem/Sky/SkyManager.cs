@@ -157,25 +157,27 @@ namespace VividRP.Runtime
 
         private static void UpdateSpecularCubemap(CommandBuffer cmd, VividSkyData skyData)
         {
+            var specularResolution = GetSpecularPrefilterResolution();
             s_SpecularCache.Update(
                 cmd,
                 skyData?.specularCubemap,
-                skyData?.skyHash ?? 0);
+                skyData?.skyHash ?? 0,
+                specularResolution);
         }
 
         private static void UpdateSpecularCubemap(VividSkyData skyData)
         {
+            var specularResolution = GetSpecularPrefilterResolution();
             s_SpecularCache.Update(
                 skyData?.specularCubemap,
-                skyData?.skyHash ?? 0);
+                skyData?.skyHash ?? 0,
+                specularResolution);
         }
 
         private static void UpdateDiffuseAmbientProbe(CommandBuffer cmd, VividSkyData skyData)
         {
             if (skyData != null && skyData.ambientProbeCubemap != null)
             {
-                skyData.hasDiffuseSH = false;
-                skyData.diffuseSH = default;
                 var useDefaultBuffer = !s_AmbientProbeConvolution.IsSupported;
 
                 if (!useDefaultBuffer)
@@ -193,13 +195,12 @@ namespace VividRP.Runtime
                 return;
             }
 
-            if (skyData != null)
-            {
-                skyData.hasDiffuseSH = false;
-                skyData.diffuseSH = default;
-            }
-
             s_AmbientProbeConvolution.BindGlobalBuffer(cmd, true);
+        }
+
+        private static int GetSpecularPrefilterResolution()
+        {
+            return SkySettingsVolume.GetSpecularPrefilterResolution(VividVolumeManagerUtility.GetSkySettingsVolume());
         }
     }
 }

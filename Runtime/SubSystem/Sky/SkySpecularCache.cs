@@ -24,6 +24,7 @@ namespace VividRP.Runtime
         private Cubemap m_FallbackCubemap;
         private RTHandle m_FallbackCubemapHandle;
         private int m_CachedSkyHash;
+        private int m_CachedResolution;
 
         internal bool IsValid =>
             m_CachedSource != null
@@ -81,9 +82,13 @@ namespace VividRP.Runtime
                 : -1;
         }
 
-        internal void Update(CommandBuffer cmd, Texture source, int skyHash)
+        internal void Update(CommandBuffer cmd, Texture source, int skyHash, int requestedResolution)
         {
-            if (ReferenceEquals(m_CachedSource, source) && skyHash == m_CachedSkyHash && (m_FilteredCubemapHandle != null || m_CachedSourceCubemapHandle != null))
+            var resolvedResolution = ResolvePrefilterResolution(source, requestedResolution);
+            if (ReferenceEquals(m_CachedSource, source)
+                && skyHash == m_CachedSkyHash
+                && resolvedResolution == m_CachedResolution
+                && (m_FilteredCubemapHandle != null || m_CachedSourceCubemapHandle != null))
                 return;
 
             if (source == null)
@@ -91,6 +96,7 @@ namespace VividRP.Runtime
                 ReleaseCachedSourceCubemapHandle();
                 ReleaseFilteredCubemapResources();
                 m_CachedSkyHash = 0;
+                m_CachedResolution = 0;
                 return;
             }
 
@@ -103,7 +109,7 @@ namespace VividRP.Runtime
 
             if (CanPrefilter(source) && cmd != null)
             {
-                EnsurePrefilterResources(source);
+                EnsurePrefilterResources(source, resolvedResolution);
 
                 if (m_FilteredCubemap != null && m_FilteredCubemapFaces != null)
                 {
@@ -117,11 +123,12 @@ namespace VividRP.Runtime
             }
 
             m_CachedSkyHash = skyHash;
+            m_CachedResolution = resolvedResolution;
         }
 
-        internal void Update(Texture source, int skyHash)
+        internal void Update(Texture source, int skyHash, int requestedResolution)
         {
-            Update(null, source, skyHash);
+            Update(null, source, skyHash, requestedResolution);
         }
 
         public void Dispose()
@@ -142,6 +149,7 @@ namespace VividRP.Runtime
             }
 
             m_CachedSkyHash = 0;
+            m_CachedResolution = 0;
         }
 
         private void EnsureFallbackCubemapHandle()
@@ -169,9 +177,9 @@ namespace VividRP.Runtime
             m_FilteredCubemapHandle = RTHandles.Alloc(m_FilteredCubemap);
         }
 
-        private void EnsurePrefilterResources(Texture source)
+        private void EnsurePrefilterResources(Texture source, int requestedResolution)
         {
-            var faceSize = Mathf.Max(1, source.width);
+            var faceSize = ResolvePrefilterResolution(source, requestedResolution);
             if (m_FilteredCubemap != null
                 && m_FilteredCubemap.width == faceSize
                 && m_FilteredCubemap.height == faceSize
@@ -308,6 +316,18 @@ namespace VividRP.Runtime
             cubemap.name = "FallbackSkyIBLCubemap";
             cubemap.hideFlags = HideFlags.HideAndDontSave;
             return cubemap;
+        }
+
+        private static int ResolvePrefilterResolution(Texture source, int requestedResolution)
+        {
+            if (source == null)
+                return 0;
+
+            var sourceResolution = Mathf.Max(1, source.width);
+            if (requestedResolution <= 0)
+                return sourceResolution;
+
+            return Mathf.Max(1, Mathf.Min(requestedResolution, sourceResolution));
         }
     }
 }

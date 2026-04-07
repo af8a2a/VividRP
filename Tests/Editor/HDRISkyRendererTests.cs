@@ -13,14 +13,16 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd)"));
             Assert.That(source, Does.Contain("m_AmbientProbeBakingPass = m_Material.FindPass(\"HDRISkyBaking\");"));
+            Assert.That(source, Does.Contain("SkySettingsVolume.GetGeneratedCubemapResolution(skySettings)"));
+            Assert.That(source, Does.Contain("var generatedCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(VividVolumeManagerUtility.GetSkySettingsVolume());"));
+            Assert.That(source, Does.Contain("NeedsAmbientProbeRebuild(skyHash, generatedCubemapResolution)"));
+            Assert.That(source, Does.Contain("EnsureAmbientProbeCubemap(generatedCubemapResolution);"));
             Assert.That(source, Does.Contain("SkyCubemapBakingUtility.RenderSkyToCubemap("));
             Assert.That(source, Does.Contain("skyData.ambientProbeCubemap = useBakedAmbientProbe ? m_AmbientProbeCubemap : cubemap;"));
             Assert.That(source, Does.Contain("skyData.ambientProbeTint = useBakedAmbientProbe ? Color.white : skyData.tint;"));
             Assert.That(source, Does.Contain("skyData.ambientProbeExposure = useBakedAmbientProbe ? 0.0f : skyData.exposure;"));
             Assert.That(source, Does.Contain("skyData.ambientProbeRotation = useBakedAmbientProbe ? 0.0f : skyData.rotation;"));
             Assert.That(source, Does.Contain("skyData.ambientProbeHash = skyHash;"));
-            Assert.That(source, Does.Contain("skyData.hasDiffuseSH = false;"));
-            Assert.That(source, Does.Contain("skyData.diffuseSH = default;"));
             Assert.That(source, Does.Not.Contain("m_AmbientProbeConvolution.RequestUpdate("));
             Assert.That(source, Does.Not.Contain("TryProjectCubemapToSH("));
         }

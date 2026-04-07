@@ -7,6 +7,13 @@ namespace VividRP.Runtime.RenderPass.Core
 {
     public sealed class AtmosphereLUTPass : ComputePass
     {
+        private enum SkyLutRebuildReason
+        {
+            None,
+            MissingTexture,
+            ParametersChanged
+        }
+
         internal const int TransmittanceWidth = 256;
         internal const int TransmittanceHeight = 64;
         internal const int MultiScatteringWidth = 32;
@@ -18,6 +25,16 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string TransmittanceKernelName = "TransmittanceLUT";
         private const string MultiScatteringKernelName = "MultiScatteringLUT";
         private const string SkyViewKernelName = "SkyViewLUT";
+        private const string TransmittanceTextureName = "VividSkyTransmittanceLUT";
+        private const string MultiScatteringTextureName = "VividSkyMultiScatteringLUT";
+        private const string SkyViewTextureName = "VividSkySkyViewLUT";
+
+        private static readonly ProfilingSampler s_TransmittanceMissingTextureSampler = new("AtmosphereLUTPass.RebuildTransmittance (MissingTexture)");
+        private static readonly ProfilingSampler s_TransmittanceParametersChangedSampler = new("AtmosphereLUTPass.RebuildTransmittance (ParametersChanged)");
+        private static readonly ProfilingSampler s_MultiScatteringMissingTextureSampler = new("AtmosphereLUTPass.RebuildMultiScattering (MissingTexture)");
+        private static readonly ProfilingSampler s_MultiScatteringParametersChangedSampler = new("AtmosphereLUTPass.RebuildMultiScattering (ParametersChanged)");
+        private static readonly ProfilingSampler s_SkyViewMissingTextureSampler = new("AtmosphereLUTPass.RebuildSkyView (MissingTexture)");
+        private static readonly ProfilingSampler s_SkyViewParametersChangedSampler = new("AtmosphereLUTPass.RebuildSkyView (ParametersChanged)");
 
         private static readonly int SkyCameraPositionPsId = Shader.PropertyToID("_SkyCameraPositionPS");
         private static readonly int SkySunDirectionId = Shader.PropertyToID("_SkySunDirection");
@@ -51,6 +68,24 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_MultiScatteringKernel = -1;
         private int m_SkyViewKernel = -1;
         private bool m_IsActive;
+        private bool m_ShouldRebuildTransmittance;
+        private bool m_ShouldRebuildMultiScattering;
+        private bool m_ShouldRebuildSkyView;
+        private SkyLutRebuildReason m_TransmittanceRebuildReason;
+        private SkyLutRebuildReason m_MultiScatteringRebuildReason;
+        private SkyLutRebuildReason m_SkyViewRebuildReason;
+        private bool m_TransmittanceCacheRecreated;
+        private bool m_MultiScatteringCacheRecreated;
+        private bool m_SkyViewCacheRecreated;
+        private int m_CachedTransmittanceHash;
+        private int m_CachedMultiScatteringHash;
+        private int m_CachedSkyViewHash;
+        private RTHandle m_CachedTransmittanceHandle;
+        private RTHandle m_CachedMultiScatteringHandle;
+        private RTHandle m_CachedSkyViewHandle;
+        private RenderTexture m_CachedTransmittanceTexture;
+        private RenderTexture m_CachedMultiScatteringTexture;
+        private RenderTexture m_CachedSkyViewTexture;
         private PhysicallyBasedSkyShaderParameters m_Parameters;
 
         public AtmosphereLUTPass()
@@ -84,10 +119,44 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             m_IsActive = PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters);
+            ResetFrameCacheState();
 
             ConfigureLutDescriptor(m_TransmittanceLUT, TransmittanceWidth, TransmittanceHeight);
             ConfigureLutDescriptor(m_MultiScatteringLUT, MultiScatteringWidth, MultiScatteringHeight);
             ConfigureLutDescriptor(m_SkyViewLUT, SkyViewWidth, SkyViewHeight);
+
+            if (!m_IsActive
+                || !PassRecorder.IsPassTextureImportActive
+                || m_ComputeShader == null
+                || m_TransmittanceKernel < 0
+                || m_MultiScatteringKernel < 0
+                || m_SkyViewKernel < 0)
+            {
+                return;
+            }
+
+            EnsureCachedLutResources();
+
+            if (m_CachedTransmittanceHandle != null)
+                PassRecorder.ImportTexture(m_TransmittanceLUT, m_CachedTransmittanceHandle);
+
+            if (m_CachedMultiScatteringHandle != null)
+                PassRecorder.ImportTexture(m_MultiScatteringLUT, m_CachedMultiScatteringHandle);
+
+            if (m_CachedSkyViewHandle != null)
+                PassRecorder.ImportTexture(m_SkyViewLUT, m_CachedSkyViewHandle);
+
+            var transmittanceHash = ComputeTransmittanceHash(m_Parameters);
+            var multiScatteringHash = ComputeMultiScatteringHash(m_Parameters, transmittanceHash);
+            var skyViewHash = ComputeSkyViewHash(m_Parameters, multiScatteringHash);
+
+            m_TransmittanceRebuildReason = ResolveRebuildReason(m_TransmittanceCacheRecreated, m_CachedTransmittanceHash, transmittanceHash);
+            m_MultiScatteringRebuildReason = ResolveRebuildReason(m_MultiScatteringCacheRecreated, m_CachedMultiScatteringHash, multiScatteringHash);
+            m_SkyViewRebuildReason = ResolveRebuildReason(m_SkyViewCacheRecreated, m_CachedSkyViewHash, skyViewHash);
+
+            m_ShouldRebuildTransmittance = m_TransmittanceRebuildReason != SkyLutRebuildReason.None;
+            m_ShouldRebuildMultiScattering = m_MultiScatteringRebuildReason != SkyLutRebuildReason.None;
+            m_ShouldRebuildSkyView = m_SkyViewRebuildReason != SkyLutRebuildReason.None;
         }
 
         public override void Record(ComputeGraphContext context)
@@ -106,35 +175,59 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var cmd = context.cmd;
 
-            BindCommonParameters(cmd);
-            cmd.SetComputeTextureParam(m_ComputeShader, m_TransmittanceKernel, TransmittanceLutOutputId, m_TransmittanceLUT.innerHandle);
-            cmd.DispatchCompute(
-                m_ComputeShader,
-                m_TransmittanceKernel,
-                CoreUtils.DivRoundUp(TransmittanceWidth, 8),
-                CoreUtils.DivRoundUp(TransmittanceHeight, 8),
-                1);
+            if (m_ShouldRebuildTransmittance)
+            {
+                using (new ProfilingScope(cmd, GetTransmittanceRebuildSampler(m_TransmittanceRebuildReason)))
+                {
+                    BindCommonParameters(cmd);
+                    cmd.SetComputeTextureParam(m_ComputeShader, m_TransmittanceKernel, TransmittanceLutOutputId, m_TransmittanceLUT.innerHandle);
+                    cmd.DispatchCompute(
+                        m_ComputeShader,
+                        m_TransmittanceKernel,
+                        CoreUtils.DivRoundUp(TransmittanceWidth, 8),
+                        CoreUtils.DivRoundUp(TransmittanceHeight, 8),
+                        1);
+                }
 
-            BindCommonParameters(cmd);
-            cmd.SetComputeTextureParam(m_ComputeShader, m_MultiScatteringKernel, TransmittanceLutId, m_TransmittanceLUT.innerHandle);
-            cmd.SetComputeTextureParam(m_ComputeShader, m_MultiScatteringKernel, MultiScatteringLutOutputId, m_MultiScatteringLUT.innerHandle);
-            cmd.DispatchCompute(
-                m_ComputeShader,
-                m_MultiScatteringKernel,
-                CoreUtils.DivRoundUp(MultiScatteringWidth, 8),
-                CoreUtils.DivRoundUp(MultiScatteringHeight, 8),
-                1);
+                m_CachedTransmittanceHash = ComputeTransmittanceHash(m_Parameters);
+            }
 
-            BindCommonParameters(cmd);
-            cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, TransmittanceLutId, m_TransmittanceLUT.innerHandle);
-            cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, MultiScatteringLutId, m_MultiScatteringLUT.innerHandle);
-            cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, SkyViewLutOutputId, m_SkyViewLUT.innerHandle);
-            cmd.DispatchCompute(
-                m_ComputeShader,
-                m_SkyViewKernel,
-                CoreUtils.DivRoundUp(SkyViewWidth, 8),
-                CoreUtils.DivRoundUp(SkyViewHeight, 8),
-                1);
+            if (m_ShouldRebuildMultiScattering)
+            {
+                using (new ProfilingScope(cmd, GetMultiScatteringRebuildSampler(m_MultiScatteringRebuildReason)))
+                {
+                    BindCommonParameters(cmd);
+                    cmd.SetComputeTextureParam(m_ComputeShader, m_MultiScatteringKernel, TransmittanceLutId, m_TransmittanceLUT.innerHandle);
+                    cmd.SetComputeTextureParam(m_ComputeShader, m_MultiScatteringKernel, MultiScatteringLutOutputId, m_MultiScatteringLUT.innerHandle);
+                    cmd.DispatchCompute(
+                        m_ComputeShader,
+                        m_MultiScatteringKernel,
+                        CoreUtils.DivRoundUp(MultiScatteringWidth, 8),
+                        CoreUtils.DivRoundUp(MultiScatteringHeight, 8),
+                        1);
+                }
+
+                m_CachedMultiScatteringHash = ComputeMultiScatteringHash(m_Parameters, m_CachedTransmittanceHash);
+            }
+
+            if (m_ShouldRebuildSkyView)
+            {
+                using (new ProfilingScope(cmd, GetSkyViewRebuildSampler(m_SkyViewRebuildReason)))
+                {
+                    BindCommonParameters(cmd);
+                    cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, TransmittanceLutId, m_TransmittanceLUT.innerHandle);
+                    cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, MultiScatteringLutId, m_MultiScatteringLUT.innerHandle);
+                    cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, SkyViewLutOutputId, m_SkyViewLUT.innerHandle);
+                    cmd.DispatchCompute(
+                        m_ComputeShader,
+                        m_SkyViewKernel,
+                        CoreUtils.DivRoundUp(SkyViewWidth, 8),
+                        CoreUtils.DivRoundUp(SkyViewHeight, 8),
+                        1);
+                }
+
+                m_CachedSkyViewHash = ComputeSkyViewHash(m_Parameters, m_CachedMultiScatteringHash);
+            }
         }
 
         public override void Dispose()
@@ -143,6 +236,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_TransmittanceKernel = -1;
             m_MultiScatteringKernel = -1;
             m_SkyViewKernel = -1;
+            ReleaseCachedLutResources();
+            m_TransmittanceLUT?.ClearImportedHandle();
+            m_MultiScatteringLUT?.ClearImportedHandle();
+            m_SkyViewLUT?.ClearImportedHandle();
         }
 
         private void BindCommonParameters(ComputeCommandBuffer cmd)
@@ -179,6 +276,228 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.MipCount = 1;
             texture.desc.EnableRandomWrite = true;
             texture.desc.ClearBuffer = false;
+        }
+
+        private void ResetFrameCacheState()
+        {
+            m_ShouldRebuildTransmittance = false;
+            m_ShouldRebuildMultiScattering = false;
+            m_ShouldRebuildSkyView = false;
+            m_TransmittanceRebuildReason = SkyLutRebuildReason.None;
+            m_MultiScatteringRebuildReason = SkyLutRebuildReason.None;
+            m_SkyViewRebuildReason = SkyLutRebuildReason.None;
+            m_TransmittanceCacheRecreated = false;
+            m_MultiScatteringCacheRecreated = false;
+            m_SkyViewCacheRecreated = false;
+        }
+
+        private void EnsureCachedLutResources()
+        {
+            m_TransmittanceCacheRecreated = EnsureLutResource(
+                ref m_CachedTransmittanceTexture,
+                ref m_CachedTransmittanceHandle,
+                TransmittanceWidth,
+                TransmittanceHeight,
+                TransmittanceTextureName);
+            m_MultiScatteringCacheRecreated = EnsureLutResource(
+                ref m_CachedMultiScatteringTexture,
+                ref m_CachedMultiScatteringHandle,
+                MultiScatteringWidth,
+                MultiScatteringHeight,
+                MultiScatteringTextureName);
+            m_SkyViewCacheRecreated = EnsureLutResource(
+                ref m_CachedSkyViewTexture,
+                ref m_CachedSkyViewHandle,
+                SkyViewWidth,
+                SkyViewHeight,
+                SkyViewTextureName);
+        }
+
+        private bool EnsureLutResource(
+            ref RenderTexture texture,
+            ref RTHandle handle,
+            int width,
+            int height,
+            string name)
+        {
+            if (IsLutResourceValid(texture, handle, width, height))
+                return false;
+
+            if (handle != null)
+            {
+                handle.Release();
+                handle = null;
+            }
+
+            if (texture != null)
+            {
+                texture.Release();
+                CoreUtils.Destroy(texture);
+                texture = null;
+            }
+
+            texture = new RenderTexture(width, height, 0)
+            {
+                name = name,
+                hideFlags = HideFlags.HideAndDontSave,
+                dimension = TextureDimension.Tex2D,
+                volumeDepth = 1,
+                graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat,
+                enableRandomWrite = true,
+                useMipMap = false,
+                autoGenerateMips = false,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp
+            };
+            texture.Create();
+            handle = RTHandles.Alloc(texture);
+            return true;
+        }
+
+        private void ReleaseCachedLutResources()
+        {
+            ReleaseLutResource(ref m_CachedTransmittanceTexture, ref m_CachedTransmittanceHandle);
+            ReleaseLutResource(ref m_CachedMultiScatteringTexture, ref m_CachedMultiScatteringHandle);
+            ReleaseLutResource(ref m_CachedSkyViewTexture, ref m_CachedSkyViewHandle);
+            m_CachedTransmittanceHash = 0;
+            m_CachedMultiScatteringHash = 0;
+            m_CachedSkyViewHash = 0;
+        }
+
+        private static void ReleaseLutResource(ref RenderTexture texture, ref RTHandle handle)
+        {
+            if (handle != null)
+            {
+                handle.Release();
+                handle = null;
+            }
+
+            if (texture == null)
+                return;
+
+            texture.Release();
+            CoreUtils.Destroy(texture);
+            texture = null;
+        }
+
+        private static bool IsLutResourceValid(RenderTexture texture, RTHandle handle, int width, int height)
+        {
+            return texture != null
+                && handle != null
+                && texture.IsCreated()
+                && texture.width == width
+                && texture.height == height
+                && texture.graphicsFormat == GraphicsFormat.R16G16B16A16_SFloat
+                && texture.enableRandomWrite
+                && texture.dimension == TextureDimension.Tex2D;
+        }
+
+        private static SkyLutRebuildReason ResolveRebuildReason(bool cacheRecreated, int cachedHash, int nextHash)
+        {
+            if (cacheRecreated)
+                return SkyLutRebuildReason.MissingTexture;
+
+            return cachedHash != nextHash
+                ? SkyLutRebuildReason.ParametersChanged
+                : SkyLutRebuildReason.None;
+        }
+
+        private static int ComputeTransmittanceHash(PhysicallyBasedSkyShaderParameters parameters)
+        {
+            unchecked
+            {
+                var hash = 17;
+                hash = AppendHash(hash, parameters.skyPlanetParams.x);
+                hash = AppendHash(hash, parameters.skyPlanetParams.y);
+                hash = AppendHash(hash, parameters.skyAirExtinction.x);
+                hash = AppendHash(hash, parameters.skyAirExtinction.y);
+                hash = AppendHash(hash, parameters.skyAirExtinction.z);
+                hash = AppendHash(hash, parameters.skyAerosolExtinction.x);
+                hash = AppendHash(hash, parameters.skyOzoneExtinction.x);
+                hash = AppendHash(hash, parameters.skyOzoneExtinction.y);
+                hash = AppendHash(hash, parameters.skyOzoneExtinction.z);
+                hash = AppendHash(hash, parameters.skyOzoneExtinction.w);
+                hash = AppendHash(hash, parameters.skyOzoneParams.x);
+                hash = AppendHash(hash, parameters.skyOzoneParams.y);
+                hash = AppendHash(hash, parameters.skyOzoneParams.w);
+                return hash;
+            }
+        }
+
+        private static int ComputeMultiScatteringHash(PhysicallyBasedSkyShaderParameters parameters, int transmittanceHash)
+        {
+            unchecked
+            {
+                var hash = 17;
+                hash = AppendHash(hash, transmittanceHash);
+                hash = AppendHash(hash, parameters.skyGroundTint.x);
+                hash = AppendHash(hash, parameters.skyGroundTint.y);
+                hash = AppendHash(hash, parameters.skyGroundTint.z);
+                hash = AppendHash(hash, parameters.skyAirScattering.x);
+                hash = AppendHash(hash, parameters.skyAirScattering.y);
+                hash = AppendHash(hash, parameters.skyAirScattering.z);
+                hash = AppendHash(hash, parameters.skyAerosolScattering.x);
+                hash = AppendHash(hash, parameters.skyAerosolScattering.y);
+                hash = AppendHash(hash, parameters.skyAerosolScattering.z);
+                hash = AppendHash(hash, parameters.skySunColor.x);
+                hash = AppendHash(hash, parameters.skySunColor.y);
+                hash = AppendHash(hash, parameters.skySunColor.z);
+                return hash;
+            }
+        }
+
+        private static int ComputeSkyViewHash(PhysicallyBasedSkyShaderParameters parameters, int multiScatteringHash)
+        {
+            unchecked
+            {
+                var hash = 17;
+                hash = AppendHash(hash, multiScatteringHash);
+                hash = AppendHash(hash, parameters.skyCameraPositionPS.x);
+                hash = AppendHash(hash, parameters.skyCameraPositionPS.y);
+                hash = AppendHash(hash, parameters.skyCameraPositionPS.z);
+                hash = AppendHash(hash, parameters.skySunDirection.x);
+                hash = AppendHash(hash, parameters.skySunDirection.y);
+                hash = AppendHash(hash, parameters.skySunDirection.z);
+                hash = AppendHash(hash, parameters.skyPlanetParams.z);
+                hash = AppendHash(hash, parameters.skyPlanetParams.w);
+                hash = AppendHash(hash, parameters.skyAerosolExtinction.w);
+                hash = AppendHash(hash, parameters.skyOzoneParams.z);
+                return hash;
+            }
+        }
+
+        private static int AppendHash(int hash, int value)
+        {
+            unchecked
+            {
+                return hash * 31 + value;
+            }
+        }
+
+        private static int AppendHash(int hash, float value)
+        {
+            return AppendHash(hash, value.GetHashCode());
+        }
+
+        private static ProfilingSampler GetTransmittanceRebuildSampler(SkyLutRebuildReason reason)
+        {
+            return reason == SkyLutRebuildReason.MissingTexture
+                ? s_TransmittanceMissingTextureSampler
+                : s_TransmittanceParametersChangedSampler;
+        }
+
+        private static ProfilingSampler GetMultiScatteringRebuildSampler(SkyLutRebuildReason reason)
+        {
+            return reason == SkyLutRebuildReason.MissingTexture
+                ? s_MultiScatteringMissingTextureSampler
+                : s_MultiScatteringParametersChangedSampler;
+        }
+
+        private static ProfilingSampler GetSkyViewRebuildSampler(SkyLutRebuildReason reason)
+        {
+            return reason == SkyLutRebuildReason.MissingTexture
+                ? s_SkyViewMissingTextureSampler
+                : s_SkyViewParametersChangedSampler;
         }
     }
 }

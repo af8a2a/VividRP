@@ -92,17 +92,17 @@ namespace VividRP.Runtime
         /// <summary>
         /// Mid Grey 12.5% (reflected light meter K set as 12.5)
         /// </summary>
-        Grey125,
+        [InspectorName("Grey 12.5%")]Grey125,
 
         /// <summary>
         /// Mid Grey 14.0% (reflected light meter K set as 14.0)
         /// </summary>
-        Grey14,
+        [InspectorName("Grey 14.0%")]Grey14,
 
         /// <summary>
         /// Mid Grey 18.0% (reflected light meter K set as 18.0). Note that this value is outside of the suggested K range by the ISO standard.
         /// </summary>
-        Grey18
+        [InspectorName("Grey 18.0%")]Grey18
     }
     
     

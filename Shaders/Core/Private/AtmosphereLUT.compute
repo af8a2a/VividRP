@@ -4,6 +4,7 @@
 #pragma kernel TransmittanceLUT
 #pragma kernel MultiScatteringLUT
 #pragma kernel SkyViewLUT
+#pragma kernel SkyViewLUTSelectHistoryLayer
 #pragma kernel SkyViewLUTStoreHistory
 #pragma kernel SkyCubemap
 
@@ -12,6 +13,7 @@ static const int SKY_VIEW_SAMPLE_COUNT = 12;
 static const int SKY_CUBEMAP_VIEW_SAMPLE_COUNT = 12;
 static const int SKY_CUBEMAP_LIGHT_SAMPLE_COUNT = 6;
 static const float MAX_SKY_RADIANCE = 60000.0f;
+static const uint SKY_VIEW_HISTORY_LAYER_COUNT = 4u;
 
 float4 _SkyCameraPositionPS;
 float4 _SkySunDirection;
@@ -27,7 +29,6 @@ float4 _SkyGroundTint;
 float4 _SkyFogParams;
 int _SkyCubemapViewSampleCount;
 int _SkyCubemapLightSampleCount;
-int _SkyViewHistoryTargetLayer;
 int _SkyViewHistoryHasValidHistory;
 int _SkyViewHistoryDependencyHash;
 int _SkyViewHistoryParameterHash;
@@ -53,8 +54,17 @@ struct SkyViewHistoryMetaEntry
     float4 sunDirection;
 };
 
+struct SkyViewHistorySelectionEntry
+{
+    uint targetLayer;
+    uint sourceLayer;
+    uint hasHistoryResources;
+    uint hasMatchingLayer;
+};
+
 StructuredBuffer<SkyViewHistoryMetaEntry> _SkyViewHistoryMetaPrevious;
 RWStructuredBuffer<SkyViewHistoryMetaEntry> _SkyViewHistoryMetaCurrent;
+RWStructuredBuffer<SkyViewHistorySelectionEntry> _SkyViewHistorySelection;
 
 SkyViewHistoryMetaEntry CreateInvalidSkyViewHistoryMetaEntry()
 {
@@ -66,6 +76,78 @@ SkyViewHistoryMetaEntry CreateInvalidSkyViewHistoryMetaEntry()
     entry.cameraPositionPS = 0.0f;
     entry.sunDirection = 0.0f;
     return entry;
+}
+
+SkyViewHistorySelectionEntry CreateDefaultSkyViewHistorySelectionEntry()
+{
+    SkyViewHistorySelectionEntry entry;
+    entry.targetLayer = 0u;
+    entry.sourceLayer = 0u;
+    entry.hasHistoryResources = 0u;
+    entry.hasMatchingLayer = 0u;
+    return entry;
+}
+
+SkyViewHistorySelectionEntry ResolveSkyViewHistorySelection()
+{
+    SkyViewHistorySelectionEntry selection = CreateDefaultSkyViewHistorySelectionEntry();
+    selection.hasHistoryResources = _SkyViewHistoryHasValidHistory != 0 ? 1u : 0u;
+    if (selection.hasHistoryResources == 0u)
+        return selection;
+
+    int bestLayer = -1;
+    float bestScore = 3.402823466e+38f;
+    int invalidLayer = -1;
+    uint oldestFrame = 0xffffffffu;
+    int oldestLayer = 0;
+    float3 currentCameraPosition = _SkyCameraPositionPS.xyz;
+    float3 currentSunDirection = normalize(_SkySunDirection.xyz);
+
+    [unroll]
+    for (uint layerIndex = 0u; layerIndex < SKY_VIEW_HISTORY_LAYER_COUNT; layerIndex++)
+    {
+        SkyViewHistoryMetaEntry meta = _SkyViewHistoryMetaPrevious[layerIndex];
+        if (meta.lastTouchedFrame < oldestFrame)
+        {
+            oldestFrame = meta.lastTouchedFrame;
+            oldestLayer = (int)layerIndex;
+        }
+
+        if (meta.valid == 0u)
+        {
+            if (invalidLayer < 0)
+                invalidLayer = (int)layerIndex;
+
+            continue;
+        }
+
+        if (meta.dependencyHash != (uint)_SkyViewHistoryDependencyHash)
+            continue;
+
+        float parameterPenalty = meta.parameterHash == (uint)_SkyViewHistoryParameterHash ? 0.0f : 1000000.0f;
+        float cameraDelta = distance(meta.cameraPositionPS.xyz, currentCameraPosition);
+        float sunDot = clamp(dot(normalize(meta.sunDirection.xyz), currentSunDirection), -1.0f, 1.0f);
+        float sunAngleDelta = acos(sunDot);
+        float score = parameterPenalty + cameraDelta + sunAngleDelta * 1000.0f;
+        if (score < bestScore)
+        {
+            bestScore = score;
+            bestLayer = (int)layerIndex;
+        }
+    }
+
+    if (bestLayer >= 0)
+    {
+        selection.targetLayer = (uint)bestLayer;
+        selection.sourceLayer = (uint)bestLayer;
+        selection.hasMatchingLayer = 1u;
+        return selection;
+    }
+
+    selection.targetLayer = invalidLayer >= 0
+        ? (uint)invalidLayer
+        : (uint)oldestLayer;
+    return selection;
 }
 
 bool IntersectAtmosphere(float3 origin, float3 direction, float atmosphereRadius, out float entryDistance, out float exitDistance)
@@ -620,6 +702,15 @@ void SkyViewLUT(uint3 tid : SV_DispatchThreadID)
     _SkyViewLUTOutput[tid.xy] = float4(EvaluateSkyView(directionWS), 1.0f);
 }
 
+[numthreads(1, 1, 1)]
+void SkyViewLUTSelectHistoryLayer(uint3 tid : SV_DispatchThreadID)
+{
+    if (tid.x != 0 || tid.y != 0 || tid.z != 0)
+        return;
+
+    _SkyViewHistorySelection[0] = ResolveSkyViewHistorySelection();
+}
+
 [numthreads(8, 8, 1)]
 void SkyViewLUTStoreHistory(uint3 tid : SV_DispatchThreadID)
 {
@@ -630,9 +721,11 @@ void SkyViewLUTStoreHistory(uint3 tid : SV_DispatchThreadID)
     if (tid.x >= width || tid.y >= height || tid.z >= elements)
         return;
 
+    SkyViewHistorySelectionEntry selection = _SkyViewHistorySelection[0];
+    uint targetLayer = elements > 0u ? min(selection.targetLayer, elements - 1u) : 0u;
     int layerIndex = (int)tid.z;
-    bool isTargetLayer = layerIndex == _SkyViewHistoryTargetLayer;
-    bool hasValidHistory = _SkyViewHistoryHasValidHistory != 0;
+    bool isTargetLayer = tid.z == targetLayer;
+    bool hasValidHistory = selection.hasHistoryResources != 0u;
 
     float4 color = 0.0f;
     if (isTargetLayer)

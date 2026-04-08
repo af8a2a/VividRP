@@ -40,10 +40,12 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferEntries.Select(entry => entry.Name), Is.EqualTo(new[]
             {
                 "SkyViewHistoryMetaCurrent",
-                "SkyViewHistoryMetaPrevious"
+                "SkyViewHistoryMetaPrevious",
+                "SkyViewHistorySelection"
             }));
             Assert.That(bufferEntries.Single(entry => entry.Name == "SkyViewHistoryMetaPrevious").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(bufferEntries.Single(entry => entry.Name == "SkyViewHistoryMetaCurrent").Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(bufferEntries.Single(entry => entry.Name == "SkyViewHistorySelection").Access, Is.EqualTo(AccessFlags.ReadWrite));
         }
 
         [Test]
@@ -66,6 +68,7 @@ namespace VividRP.Editor.Tests
             AssertArrayTexture(pass, "m_SkyViewHistoryLayersCurrent", AtmosphereLUTPass.SkyViewWidth, AtmosphereLUTPass.SkyViewHeight, AtmosphereLUTPass.SkyViewHistoryLayerCount);
             AssertStructuredBuffer(pass, "m_SkyViewHistoryMetaPrevious", AtmosphereLUTPass.SkyViewHistoryLayerCount);
             AssertStructuredBuffer(pass, "m_SkyViewHistoryMetaCurrent", AtmosphereLUTPass.SkyViewHistoryLayerCount);
+            AssertStructuredBuffer(pass, "m_SkyViewHistorySelection", 1);
         }
 
         [Test]
@@ -91,6 +94,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_TransmittanceKernel = m_ComputeShader.FindKernel(TransmittanceKernelName);"));
             Assert.That(source, Does.Contain("m_MultiScatteringKernel = m_ComputeShader.FindKernel(MultiScatteringKernelName);"));
             Assert.That(source, Does.Contain("m_SkyViewKernel = m_ComputeShader.FindKernel(SkyViewKernelName);"));
+            Assert.That(source, Does.Contain("m_SkyViewSelectHistoryKernel = m_ComputeShader.FindKernel(SkyViewSelectHistoryKernelName);"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters)"));
             Assert.That(source, Does.Contain("PassRecorder.ImportTexture(m_TransmittanceLUT, m_CachedTransmittanceHandle);"));
             Assert.That(source, Does.Contain("PassRecorder.ImportTexture(m_MultiScatteringLUT, m_CachedMultiScatteringHandle);"));
@@ -135,6 +139,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("ReleaseLutResource(ref m_CachedSkyViewTexture, ref m_CachedSkyViewHandle);"));
             Assert.That(source, Does.Contain("ConfigureSkyViewHistoryTextureDescriptor(m_SkyViewHistoryLayersPrevious, \"SkyViewHistoryLayersPrevious\");"));
             Assert.That(source, Does.Contain("ConfigureSkyViewHistoryMetaDescriptor(m_SkyViewHistoryMetaPrevious, \"SkyViewHistoryMetaPrevious\");"));
+            Assert.That(source, Does.Contain("ConfigureSkyViewHistorySelectionDescriptor(m_SkyViewHistorySelection, \"SkyViewHistorySelection\");"));
         }
 
         [Test]
@@ -159,24 +164,32 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Source_DeclaresSkyViewLayeredHistoryStorePath()
+        public void Source_DeclaresGpuSideSkyViewHistorySelectionPath()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "AtmosphereLUTPass.cs"));
 
             Assert.That(source, Does.Contain("using System.Runtime.InteropServices;"));
+            Assert.That(source, Does.Contain("private const string SkyViewSelectHistoryKernelName = \"SkyViewLUTSelectHistoryLayer\";"));
             Assert.That(source, Does.Contain("private const string SkyViewStoreHistoryKernelName = \"SkyViewLUTStoreHistory\";"));
             Assert.That(source, Does.Contain("[StructLayout(LayoutKind.Sequential)]"));
-            Assert.That(source, Does.Contain("private struct SkyViewHistoryMetaEntry"));
-            Assert.That(source, Does.Contain("private readonly SkyViewHistoryMetaEntry[] m_SkyViewHistoryMetaEntries = new SkyViewHistoryMetaEntry[SkyViewHistoryLayerCount];"));
+            Assert.That(source, Does.Contain("private struct SkyViewHistorySelectionEntry"));
+            Assert.That(source, Does.Contain("private readonly RenderGraphBuffer m_SkyViewHistorySelection = new();"));
+            Assert.That(source, Does.Contain("m_SkyViewSelectHistoryKernel = m_ComputeShader.FindKernel(SkyViewSelectHistoryKernelName);"));
             Assert.That(source, Does.Contain("m_SkyViewStoreHistoryKernel = m_ComputeShader.FindKernel(SkyViewStoreHistoryKernelName);"));
             Assert.That(source, Does.Contain("m_SkyViewHistoryFrameIndex = unchecked((uint)Time.frameCount);"));
-            Assert.That(source, Does.Contain("m_SkyViewHistoryTargetLayer = ResolveSkyViewHistoryTargetLayer("));
-            Assert.That(source, Does.Contain("m_SkyViewHistoryMetaPrevious?.ImportedGraphicsBuffer == null"));
-            Assert.That(source, Does.Contain("previousMetaBuffer.GetData(m_SkyViewHistoryMetaEntries);"));
+            Assert.That(source, Does.Contain("SelectSkyViewHistoryLayer(cmd);"));
             Assert.That(source, Does.Contain("StoreSkyViewHistory(cmd);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewSelectHistoryKernel, SkyViewHistoryMetaPreviousId, m_SkyViewHistoryMetaPrevious.innerHandle);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewSelectHistoryKernel, SkyViewHistorySelectionId, m_SkyViewHistorySelection.innerHandle);"));
+            Assert.That(source, Does.Contain("cmd.DispatchCompute(m_ComputeShader, m_SkyViewSelectHistoryKernel, 1, 1, 1);"));
             Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewStoreHistoryKernel, SkyViewLutSourceId, m_SkyViewLUT.innerHandle);"));
             Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewStoreHistoryKernel, SkyViewHistoryMetaPreviousId, m_SkyViewHistoryMetaPrevious.innerHandle);"));
             Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewStoreHistoryKernel, SkyViewHistoryMetaCurrentId, m_SkyViewHistoryMetaCurrent.innerHandle);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewStoreHistoryKernel, SkyViewHistorySelectionId, m_SkyViewHistorySelection.innerHandle);"));
+            Assert.That(source, Does.Not.Contain("ImportedGraphicsBuffer"));
+            Assert.That(source, Does.Not.Contain("GetData("));
+            Assert.That(source, Does.Not.Contain("ResolveSkyViewHistoryTargetLayer("));
+            Assert.That(source, Does.Not.Contain("m_SkyViewHistoryTargetLayer"));
             Assert.That(source, Does.Contain("cmd.DispatchCompute("));
             Assert.That(source, Does.Contain("m_SkyViewStoreHistoryKernel,"));
             Assert.That(source, Does.Contain("SkyViewHistoryLayerCount);"));
@@ -208,18 +221,25 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AtmosphereLUT.compute"));
 
+            Assert.That(source, Does.Contain("#pragma kernel SkyViewLUTSelectHistoryLayer"));
             Assert.That(source, Does.Contain("#pragma kernel SkyViewLUTStoreHistory"));
             Assert.That(source, Does.Contain("Texture2D<float4> _SkyViewLUTSource;"));
             Assert.That(source, Does.Contain("Texture2DArray<float4> _SkyViewHistoryLayersPrevious;"));
             Assert.That(source, Does.Contain("RWTexture2DArray<float4> _SkyViewHistoryLayersCurrent;"));
             Assert.That(source, Does.Contain("struct SkyViewHistoryMetaEntry"));
+            Assert.That(source, Does.Contain("struct SkyViewHistorySelectionEntry"));
             Assert.That(source, Does.Contain("StructuredBuffer<SkyViewHistoryMetaEntry> _SkyViewHistoryMetaPrevious;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<SkyViewHistoryMetaEntry> _SkyViewHistoryMetaCurrent;"));
-            Assert.That(source, Does.Contain("int _SkyViewHistoryTargetLayer;"));
+            Assert.That(source, Does.Contain("RWStructuredBuffer<SkyViewHistorySelectionEntry> _SkyViewHistorySelection;"));
             Assert.That(source, Does.Contain("int _SkyViewHistoryFrameIndex;"));
+            Assert.That(source, Does.Contain("SkyViewHistorySelectionEntry ResolveSkyViewHistorySelection()"));
+            Assert.That(source, Does.Contain("void SkyViewLUTSelectHistoryLayer(uint3 tid : SV_DispatchThreadID)"));
+            Assert.That(source, Does.Contain("_SkyViewHistorySelection[0] = ResolveSkyViewHistorySelection();"));
             Assert.That(source, Does.Contain("void SkyViewLUTStoreHistory(uint3 tid : SV_DispatchThreadID)"));
+            Assert.That(source, Does.Contain("SkyViewHistorySelectionEntry selection = _SkyViewHistorySelection[0];"));
             Assert.That(source, Does.Contain("_SkyViewHistoryLayersCurrent[tid] = color;"));
             Assert.That(source, Does.Contain("_SkyViewHistoryMetaCurrent[layerIndex] = meta;"));
+            Assert.That(source, Does.Not.Contain("int _SkyViewHistoryTargetLayer;"));
         }
 
         private static void AssertTexture(AtmosphereLUTPass pass, string fieldName, int expectedWidth, int expectedHeight)

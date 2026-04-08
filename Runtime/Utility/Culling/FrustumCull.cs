@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace VividRP.Runtime
 {
-    [BurstCompile(CompileSynchronously = true, FloatMode = FloatMode.Fast, FloatPrecision = FloatPrecision.Standard)]
+    [BurstCompile(FloatMode = FloatMode.Fast, FloatPrecision = FloatPrecision.Standard)]
     public struct FrustumCullingJob : IJobParallelFor
     {
         [ReadOnly] public NativeArray<float4> FrustumPlanes; // 长度固定为 6
@@ -28,18 +28,17 @@ namespace VividRP.Runtime
                 float3 normal = plane.xyz;
                 float planeDistance = plane.w;
 
-                // 核心数学优化：计算 AABB 在平面法线上的投影半径
-                // 由于使用了 Unity.Mathematics，这里的 math.abs 和 math.dot 会被 Burst 编译为高效的 SIMD 指令
-                float r = math.dot(bounds.Extents, math.abs(normal));
+                // AABB 在平面法线方向的投影半径
+                float r = math.dot(bounds.Extents.xyz, math.abs(normal));
 
-                // 计算 AABB 中心点到平面的有向距离
-                float d = math.dot(normal, bounds.Center) + planeDistance;
+                // AABB 中心点到平面的有向距离
+                float d = math.dot(normal, bounds.Center.xyz) + planeDistance;
 
-                // 如果中心点在平面的负半轴，且距离大于半径，说明整个 AABB 都在平面外（被剔除）
+                // 整个 AABB 位于平面负半空间则剔除
                 if (d < -r)
                 {
                     isVisible = false;
-                    break; // 只要在一个平面外，直接判定不可见
+                    break;
                 }
             }
 

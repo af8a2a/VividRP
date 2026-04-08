@@ -6,11 +6,11 @@ using UnityEngine;
 
 namespace VividRP.Runtime
 {
-    // 16 字节对齐，完美契合 SIMD 寄存器
+    // float4 保证 16 字节对齐，契合 Burst SIMD 寄存器；w 分量不使用（填 0）
     public struct AABB
     {
-        public float3 Center;
-        public float3 Extents; // AABB的半长 (Size / 2)
+        public float4 Center;   // w 不使用
+        public float4 Extents;  // w 不使用；存储 AABB 半长 (Size / 2)
     }
 
     // 可选：如果你想要完全解耦，定义一个通用的 Culling 接口数据
@@ -23,22 +23,18 @@ namespace VividRP.Runtime
 
     public static class CullingUtility
     {
-        public static void ExtractFrustumPlanes(float4x4 viewProjMatrix, ref NativeArray<float4> planes)
+        public static void ExtractFrustumPlanes(float4x4 viewProjMatrix, NativeArray<float4> planes)
         {
-
-            // float4x4 在 Unity.Mathematics 中是按列存储的 (c0, c1, c2, c3)
-            // 左平面
-            planes[0] = NormalizePlane(viewProjMatrix.c3 + viewProjMatrix.c0);
-            // 右平面
-            planes[1] = NormalizePlane(viewProjMatrix.c3 - viewProjMatrix.c0);
-            // 下平面
-            planes[2] = NormalizePlane(viewProjMatrix.c3 + viewProjMatrix.c1);
-            // 上平面
-            planes[3] = NormalizePlane(viewProjMatrix.c3 - viewProjMatrix.c1);
-            // 近平面 (注意：OpenGL/Vulkan 默认深度裁剪是 0~1 或 -1~1，Unity 现代 API 统一处理为对应矩阵)
-            planes[4] = NormalizePlane(viewProjMatrix.c3 + viewProjMatrix.c2);
-            // 远平面
-            planes[5] = NormalizePlane(viewProjMatrix.c3 - viewProjMatrix.c2);
+            // Unity.Mathematics float4x4 是列主序（c0–c3 为列）。
+            // Gribb/Hartmann 算法要求按行访问，因此先转置。
+            float4x4 m = math.transpose(viewProjMatrix);
+            // 转置后 c0-c3 对应原始矩阵的行 0-3
+            planes[0] = NormalizePlane(m.c3 + m.c0);  // 左
+            planes[1] = NormalizePlane(m.c3 - m.c0);  // 右
+            planes[2] = NormalizePlane(m.c3 + m.c1);  // 下
+            planes[3] = NormalizePlane(m.c3 - m.c1);  // 上
+            planes[4] = NormalizePlane(m.c3 + m.c2);  // 近
+            planes[5] = NormalizePlane(m.c3 - m.c2);  // 远
         }
 
         private static float4 NormalizePlane(float4 plane)

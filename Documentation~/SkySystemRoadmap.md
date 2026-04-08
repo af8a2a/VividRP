@@ -50,7 +50,7 @@
 - 自动曝光基础链路已经落地，但天空系统仍需继续验证“屏幕实时曝光”和“sky baking 固定曝光”是否完全解耦。
 - `skyData.exposure` 目前同时被当作天空强度和 IBL 强度使用，没有和相机曝光解耦。
 - `AtmosphereLUTPass` 已经拆成按参数 hash 重建的缓存链路，但 `SkyViewLUT` 仍只停留在基础 hash 缓存。当前屏幕天空仍直接消费 camera-dependent 的 `SkyViewLUT`；在补上 HDRP 那套 distant atmosphere / sky opacity 链路前，不应把它强行改成固定参考点的远景 LUT。
-- runtime sky cubemap 和 specular prefilter 已支持基础分辨率配置；specular prefilter 进一步补上了质量档和 rebuild profiling，但 runtime cubemap 侧仍缺更细的采样质量控制。
+- runtime sky cubemap 和 specular prefilter 已支持基础分辨率配置；specular prefilter 已补上质量档和 rebuild profiling，物理天空 generated cubemap 现在也补上了基于 sample count 的质量档与 rebuild profiling。HDRI 仍直接复用 source cubemap，这部分质量档当前只作用于 generated cubemap 路径。
 - 物理天空还只是 HDRP Physically Based Sky 的一个基础子集。
 - HDRI 天空还只是 HDRP HDRI Sky 的一个基础子集。
 - 还没有云层系统，也没有把云参与天空反射、环境探针和雾的统一调度。
@@ -114,7 +114,7 @@
   - `MultiScatteringLUT`
   - 物理天空参数缓存（基础版已完成）
 - 继续评估 `SkyViewLUT` 是否拆成 HDRP 风格的 distant sky LUT。当前由于缺少配套的 distant atmosphere / sky opacity 链路，屏幕天空仍应保持 camera-dependent 语义。
-- 给 runtime cubemap 和 specular prefilter 增加质量级别和分辨率配置，不再写死当前尺寸。（分辨率配置已完成；specular prefilter 质量档已完成，runtime cubemap 质量档仍待补）
+- 给 runtime cubemap 和 specular prefilter 增加质量级别和分辨率配置，不再写死当前尺寸。（分辨率配置已完成；specular prefilter 与物理天空 runtime cubemap 质量档已完成）
 - 清理 GPU-only 之后仍遗留的 CPU SH 接口：
   - 审查仍依赖 `RenderSettings.ambientProbe` / SH 常量缓冲的调用点，确认只保留“无天空数据”时的兜底语义
   - 为 GPU-only 路径补更直接的调试与验证手段，而不是再暴露 CPU SH 状态
@@ -130,12 +130,12 @@
   - 已完成：
     - `AtmosphereLUTPass` 现在会缓存 `TransmittanceLUT`、`MultiScatteringLUT`、`SkyViewLUT`，并区分 `MissingTexture` / `ParametersChanged` 两类重建原因。
     - HDRI / Physically Based Sky 的 runtime cubemap 与 ambient probe cubemap 已支持由 `SkySettingsVolume` 统一控制分辨率。
+    - 物理天空 generated cubemap 已支持独立的质量档，并对 `MissingTexture` / `ResolutionChanged` / `QualityChanged` / `ParametersChanged` 给出明确 profiling。
     - `SkySpecularCache` 已支持独立的 specular prefilter 分辨率、质量档，并对 source cubemap 尺寸做上限约束。
     - `VividSkyData` 与 `ShaderVariablesGlobal` 中的 CPU SH 兼容字段已移除，天空漫反射链路统一收敛到 GPU-only。
     - LUT / runtime cubemap / ambient probe / specular prefilter 的重建路径现在都带有更明确的 profiling 标记与触发原因。
   - 仍待完成：
     - 明确 `SkyViewLUT` 是否升级到 layered cache / reprojection，或拆成 HDRP 风格的 distant sky LUT。
-    - 为 runtime cubemap 增加更细的采样质量档，而不只是分辨率控制。
     - 在具备独立 distant atmosphere / sky opacity 链路后，再重新评估 HDRP 风格 `SkyViewLUT` 接入方式。
 
 ## Phase 2: 补齐环境光照与视觉天空分离

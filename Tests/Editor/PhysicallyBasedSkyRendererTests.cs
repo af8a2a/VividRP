@@ -91,16 +91,24 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_AmbientProbeBakingPass = m_SkyMaterial.FindPass(\"PhysicallyBasedSkyBaking\");"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (MissingTexture)"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (ResolutionChanged)"));
+            Assert.That(source, Does.Contain("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (QualityChanged)"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (ParametersChanged)"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyRenderer.RebuildAmbientProbe (MissingTexture)"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyRenderer.RebuildAmbientProbe (ResolutionChanged)"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyRenderer.RebuildAmbientProbe (ParametersChanged)"));
             Assert.That(source, Does.Contain("SkySettingsVolume.GetGeneratedCubemapResolution(skySettings)"));
-            Assert.That(source, Does.Contain("var generatedCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(VividVolumeManagerUtility.GetSkySettingsVolume());"));
-            Assert.That(source, Does.Contain("var runtimeCubemapRebuildReason = ResolveRuntimeCubemapRebuildReason(hash, generatedCubemapResolution);"));
+            Assert.That(source, Does.Contain("SkySettingsVolume.GetGeneratedCubemapViewSampleCount(skySettings)"));
+            Assert.That(source, Does.Contain("SkySettingsVolume.GetGeneratedCubemapLightSampleCount(skySettings)"));
+            Assert.That(source, Does.Contain("var generatedCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(skySettings);"));
+            Assert.That(source, Does.Contain("var generatedCubemapViewSampleCount = SkySettingsVolume.GetGeneratedCubemapViewSampleCount(skySettings);"));
+            Assert.That(source, Does.Contain("var generatedCubemapLightSampleCount = SkySettingsVolume.GetGeneratedCubemapLightSampleCount(skySettings);"));
+            Assert.That(source, Does.Contain("var runtimeCubemapRebuildReason = ResolveRuntimeCubemapRebuildReason("));
             Assert.That(source, Does.Contain("EnsureRuntimeCubemap(generatedCubemapResolution);"));
             Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, GetRuntimeCubemapRebuildSampler(runtimeCubemapRebuildReason)))"));
-            Assert.That(source, Does.Contain("RebuildRuntimeCubemap(volume, context, cmd);"));
+            Assert.That(source, Does.Contain("generatedCubemapViewSampleCount,"));
+            Assert.That(source, Does.Contain("generatedCubemapLightSampleCount))"));
+            Assert.That(source, Does.Contain("m_RuntimeSkyViewSampleCount = generatedCubemapViewSampleCount;"));
+            Assert.That(source, Does.Contain("m_RuntimeSkyLightSampleCount = generatedCubemapLightSampleCount;"));
             Assert.That(source, Does.Contain("var ambientProbeRebuildReason = ResolveAmbientProbeCubemapRebuildReason(hash, generatedCubemapResolution);"));
             Assert.That(source, Does.Contain("EnsureAmbientProbeCubemap(generatedCubemapResolution);"));
             Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, GetAmbientProbeRebuildSampler(ambientProbeRebuildReason)))"));
@@ -116,6 +124,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("ResolveSunDirection(context)"));
             Assert.That(source, Does.Contain("ResolveSunColor(context)"));
             Assert.That(source, Does.Contain("m_RuntimeSkyCubemapFaces"));
+            Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_AtmosphereLutCompute, SkyCubemapViewSampleCountId, runtimeCubemapViewSampleCount);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_AtmosphereLutCompute, SkyCubemapLightSampleCountId, runtimeCubemapLightSampleCount);"));
             Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_AtmosphereLutCompute, m_SkyCubemapKernel, SkyCubemapOutputId, m_RuntimeSkyCubemapFaces);"));
             Assert.That(source, Does.Contain("var cubemapResolution = m_RuntimeSkyCubemap.width;"));
             Assert.That(source, Does.Contain("cmd.CopyTexture(m_RuntimeSkyCubemapFaces, face, 0, m_RuntimeSkyCubemap, face, 0);"));
@@ -144,9 +154,21 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("#pragma kernel SkyCubemap"));
             Assert.That(source, Does.Contain("RWTexture2DArray<float4> _SkyCubemapOutput;"));
+            Assert.That(source, Does.Contain("int _SkyCubemapViewSampleCount;"));
+            Assert.That(source, Does.Contain("int _SkyCubemapLightSampleCount;"));
+            Assert.That(source, Does.Contain("int ResolveSkyCubemapViewSampleCount()"));
+            Assert.That(source, Does.Contain("int ResolveSkyCubemapLightSampleCount()"));
+            Assert.That(source, Does.Contain("? _SkyCubemapViewSampleCount"));
+            Assert.That(source, Does.Contain(": SKY_CUBEMAP_VIEW_SAMPLE_COUNT;"));
+            Assert.That(source, Does.Contain("? _SkyCubemapLightSampleCount"));
+            Assert.That(source, Does.Contain(": SKY_CUBEMAP_LIGHT_SAMPLE_COUNT;"));
             Assert.That(source, Does.Contain("SkyOpticalDepth ComputeOpticalDepthToSun("));
             Assert.That(source, Does.Contain("float3 SanitizeSkyRadiance(float3 color)"));
+            Assert.That(source, Does.Contain("float stepLength = rayLength / SKY_VIEW_SAMPLE_COUNT;"));
             Assert.That(source, Does.Contain("float3 EvaluateSkyCubemap(float3 directionWS)"));
+            Assert.That(source, Does.Contain("int viewSampleCount = ResolveSkyCubemapViewSampleCount();"));
+            Assert.That(source, Does.Contain("float stepLength = rayLength / viewSampleCount;"));
+            Assert.That(source, Does.Contain("for (int sampleIndex = 0; sampleIndex < viewSampleCount; sampleIndex++)"));
             Assert.That(source, Does.Contain("void SkyCubemap(uint3 tid : SV_DispatchThreadID)"));
         }
 

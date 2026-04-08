@@ -8,6 +8,7 @@
 
 static const int TRANSMITTANCE_SAMPLE_COUNT = 16;
 static const int SKY_VIEW_SAMPLE_COUNT = 12;
+static const int SKY_CUBEMAP_VIEW_SAMPLE_COUNT = 12;
 static const int SKY_CUBEMAP_LIGHT_SAMPLE_COUNT = 6;
 static const float MAX_SKY_RADIANCE = 60000.0f;
 
@@ -23,6 +24,8 @@ float4 _SkyOzoneExtinction;
 float4 _SkyOzoneParams;
 float4 _SkyGroundTint;
 float4 _SkyFogParams;
+int _SkyCubemapViewSampleCount;
+int _SkyCubemapLightSampleCount;
 
 Texture2D<float4> _TransmittanceLUT;
 Texture2D<float4> _MultiScatteringLUT;
@@ -151,6 +154,20 @@ float3 GetCubemapDirection(uint faceIndex, float2 uv)
     return normalize(directionWS);
 }
 
+int ResolveSkyCubemapViewSampleCount()
+{
+    return _SkyCubemapViewSampleCount > 0
+        ? _SkyCubemapViewSampleCount
+        : SKY_CUBEMAP_VIEW_SAMPLE_COUNT;
+}
+
+int ResolveSkyCubemapLightSampleCount()
+{
+    return _SkyCubemapLightSampleCount > 0
+        ? _SkyCubemapLightSampleCount
+        : SKY_CUBEMAP_LIGHT_SAMPLE_COUNT;
+}
+
 float3 ComputeViewTransmittance(
     float3 origin,
     float3 direction,
@@ -221,13 +238,14 @@ SkyOpticalDepth ComputeOpticalDepthToSun(
         return result;
     }
 
-    float stepLength = atmosphereExit / SKY_CUBEMAP_LIGHT_SAMPLE_COUNT;
+    int lightSampleCount = ResolveSkyCubemapLightSampleCount();
+    float stepLength = atmosphereExit / lightSampleCount;
     float opticalDepthAir = 0.0f;
     float opticalDepthAerosol = 0.0f;
     float3 opticalDepthOzone = float3(0.0f, 0.0f, 0.0f);
 
     [loop]
-    for (int sampleIndex = 0; sampleIndex < SKY_CUBEMAP_LIGHT_SAMPLE_COUNT; sampleIndex++)
+    for (int sampleIndex = 0; sampleIndex < lightSampleCount; sampleIndex++)
     {
         float sampleDistance = (sampleIndex + 0.5f) * stepLength;
         float3 lightSamplePosition = samplePosition + sunDirection * sampleDistance;
@@ -361,7 +379,8 @@ float3 EvaluateSkyCubemap(float3 directionWS)
     if (IntersectGround(cameraPosition, normalizedDirection, planetRadius, groundHit) && groundHit > 0.0f)
         rayLength = min(rayLength, groundHit);
 
-    float stepLength = rayLength / SKY_VIEW_SAMPLE_COUNT;
+    int viewSampleCount = ResolveSkyCubemapViewSampleCount();
+    float stepLength = rayLength / viewSampleCount;
     if (stepLength <= 0.0f)
         return float3(0.0f, 0.0f, 0.0f);
 
@@ -376,7 +395,7 @@ float3 EvaluateSkyCubemap(float3 directionWS)
     float3 inscattered = float3(0.0f, 0.0f, 0.0f);
 
     [loop]
-    for (int sampleIndex = 0; sampleIndex < SKY_VIEW_SAMPLE_COUNT; sampleIndex++)
+    for (int sampleIndex = 0; sampleIndex < viewSampleCount; sampleIndex++)
     {
         float sampleDistance = (sampleIndex + 0.5f) * stepLength;
         float3 samplePosition = cameraPosition + normalizedDirection * sampleDistance;

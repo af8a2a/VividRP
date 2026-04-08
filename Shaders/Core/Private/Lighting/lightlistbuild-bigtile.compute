@@ -8,6 +8,7 @@
 #include "SortingComputeUtils.hlsl"
 #include "LightCullUtils.hlsl"
 #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
+#pragma use_dxc
 
 #pragma multi_compile _ GENERATE_VOLUMETRIC_BIGTILE
 

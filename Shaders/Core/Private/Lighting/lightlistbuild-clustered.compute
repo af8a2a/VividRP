@@ -710,14 +710,17 @@ int CullByExactEdgeTests(uint threadID, int iNrCoarseLights, uint2 viTilLL, uint
     const int nrFrustEdges = bOnlyNeedFrustumSideEdges ? 4 : 8; // max 8 since we never need to test 4 far edges of frustum since they are identical vectors to near edges and plane is placed at vP0 on light hull.
 
     const int totNrEdgePairs = 12*nrFrustEdges;
+
+    uint waveSize = WaveGetLaneCount();
+    uint waveIdx = threadID / waveSize;
+    uint wavesPerGroup = (NR_THREADS + waveSize - 1u) / waveSize;
+
     for(int l=0; l<iNrCoarseLights; l++)
     {
-        if(threadID==0) ldsIsLightInvisible=0;
-
-#if NR_THREADS > PLATFORM_LANE_COUNT
-        GroupMemoryBarrierWithGroupSync();
-#endif
         const int lightCullIndex = GenerateLightCullDataIndex(coarseList[l], g_iNrVisibLights, eyeIndex);
+
+        bool bLightInvisible = false;
+
         UNITY_BRANCH if (_LightVolumeData[lightCullIndex].lightVolume != LIGHTVOLUMETYPE_SPHERE)        // don't bother doing edge tests for sphere lights since these have camera aligned bboxes.
         {
             SFiniteLightBound lgtDat = g_data[lightCullIndex];
@@ -727,6 +730,8 @@ int CullByExactEdgeTests(uint threadID, int iNrCoarseLights, uint2 viTilLL, uint
             const float3 boxZ = -lgtDat.boxAxisZ.xyz;           // flip axis (so it points away from the light direction for a spot-light)
             const float3 center = lgtDat.center.xyz;
             const float2 scaleXY = lgtDat.scaleXY;
+
+            bool threadFoundSep = false;
 
             for(int i=threadID; i<totNrEdgePairs; i+=NR_THREADS)
             {
@@ -763,15 +768,35 @@ int CullByExactEdgeTests(uint threadID, int iNrCoarseLights, uint2 viTilLL, uint
                 }
                 int resf = (positive>0 && negative>0) ? 0 : (positive>0 ? 1 : (negative>0 ? (-1) : 0));
 
-                bool bFoundSepPlane = (resh*resf)<0;
-
-                if(bFoundSepPlane) InterlockedOr(ldsIsLightInvisible, 1);
+                if((resh*resf)<0) threadFoundSep = true;
             }
-        }
+
+            // Wave-level reduce: any lane found a separating plane?
+            bool waveFoundSep = WaveActiveAnyTrue(threadFoundSep);
+
+            // Cross-wave reduce for multi-wave groups.
 #if NR_THREADS > PLATFORM_LANE_COUNT
+            if(WaveIsFirstLane())
+                ldsTilePassList[waveIdx] = waveFoundSep ? 1u : 0u;
+            GroupMemoryBarrierWithGroupSync();
+
+            if(threadID == 0u)
+            {
+                uint anyFound = 0u;
+                for(uint w = 0u; w < wavesPerGroup; w++)
+                    anyFound |= ldsTilePassList[w];
+                bLightInvisible = (anyFound != 0u);
+            }
+#else
+            bLightInvisible = waveFoundSep;
+#endif
+        }
+
+#if NR_THREADS > PLATFORM_LANE_COUNT
+        // Ensure all threads see bLightInvisible before thread 0 may write coarseList.
         GroupMemoryBarrierWithGroupSync();
 #endif
-        if(threadID==0 && ldsIsLightInvisible==0)
+        if(threadID==0 && !bLightInvisible)
         {
             coarseList[lightOffs2++] = coarseList[l];
         }

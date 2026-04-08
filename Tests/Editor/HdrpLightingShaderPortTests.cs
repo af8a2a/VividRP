@@ -127,6 +127,26 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ClusteredLightListGen_ExactEdgeTests_UsesWaveIntrinsicsInsteadOfPerLightBarriers()
+        {
+            var source = File.ReadAllText(GetLightingPath("lightlistbuild-clustered.compute"));
+
+            // Per-thread accumulation into local bool instead of per-edge-pair atomic.
+            Assert.That(source, Does.Contain("bool threadFoundSep = false;"));
+            Assert.That(source, Does.Contain("if((resh*resf)<0) threadFoundSep = true;"));
+
+            // Wave-level reduce replaces InterlockedOr.
+            Assert.That(source, Does.Contain("WaveActiveAnyTrue(threadFoundSep)"));
+
+            // Cross-wave reduce via ldsTilePassList scratch for multi-wave groups.
+            Assert.That(source, Does.Contain("ldsTilePassList[waveIdx] = waveFoundSep ? 1u : 0u;"));
+
+            // Must NOT contain the old per-light InterlockedOr + ldsIsLightInvisible pattern.
+            Assert.That(source, Does.Not.Contain("InterlockedOr(ldsIsLightInvisible, 1)"));
+            Assert.That(source, Does.Not.Contain("ldsIsLightInvisible=0"));
+        }
+
+        [Test]
         public void LightCullUtils_DeclaresStereoAwareIndexHelpers()
         {
             var source = File.ReadAllText(GetLightingPath("LightCullUtils.hlsl"));

@@ -33,10 +33,11 @@ VividRP maintains two clustered light culling implementations:
 
 ### Medium Priority
 
-- [ ] **ExactEdgeTests: wave intrinsics instead of per-light barriers**
+- [x] **ExactEdgeTests: wave intrinsics instead of per-light barriers**
   - Current (`lightlistbuild-clustered.compute:618-688` / `lightlistbuild-bigtile.compute:341-408`): Outer loop iterates lights serially, 2x `GroupMemoryBarrierWithGroupSync` per light. 100 lights = 200 barriers.
   - Target: Use `WaveActiveAnyTrue(bFoundSepPlane)` to replace `InterlockedOr(ldsIsLightInvisible, 1)` + barrier pair. Batch multiple lights where possible.
   - Impact: Dramatically reduces synchronization overhead for edge tests.
+  - Done (clustered): Replaced `InterlockedOr(ldsIsLightInvisible, 1)` + clear/barrier per light with `WaveActiveAnyTrue(threadFoundSep)` + cross-wave reduce via `ldsTilePassList` scratch. Eliminates all per-edge-pair atomics; single-wave groups need 0 barriers per light, multi-wave groups need 2 (same count but no atomic contention). bigtile variant not yet updated.
 
 - [ ] **HiZ-based tile max depth (replace per-pixel depth sampling)**
   - Current (`lightlistbuild-clustered.compute:282-321`, `ENABLE_DEPTH_TEXTURE_BACKPLANE`): 32x32=1024 depth fetches per tile to find max depth for adaptive log base.

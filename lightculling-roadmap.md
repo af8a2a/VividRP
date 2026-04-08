@@ -13,10 +13,11 @@ VividRP maintains two clustered light culling implementations:
 
 ### High Priority
 
-- [ ] **Parallel compaction after spherical intersection tests (clustered)**
+- [x] **Parallel compaction after spherical intersection tests (clustered)**
   - Current (`lightlistbuild-clustered.compute:555-564`): Thread 0 serially compacts `coarseList` after sphere test marks rejected entries as `UINT_MAX`. NR_THREADS-1 threads idle.
   - Target: `WaveActiveBallot` + `WavePrefixCountBits` for parallel stream compaction, or groupshared atomic double-buffer.
   - Impact: Eliminates thread-0 bottleneck for up to 128 coarse entries.
+  - Done: Implemented via `WavePrefixCountBits` / `WaveActiveCountBits` with cross-wave prefix sum through `ldsTilePassList` scratch and in-place compacted write to `coarseList`. Requires `#pragma use_dxc`.
 
 - [ ] **Group-level prefix sum for global allocation (clustered)**
   - Current (`lightlistbuild-clustered.compute:453`): Each thread (=each cluster) does `InterlockedAdd(g_LayeredSingleIdxBuffer[0], iSpaceAvail, start)`.

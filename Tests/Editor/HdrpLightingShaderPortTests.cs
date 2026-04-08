@@ -54,6 +54,33 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ClusteredLightListGen_UsesParallelCompactionInSphericalIntersectionTests()
+        {
+            var source = File.ReadAllText(GetLightingPath("lightlistbuild-clustered.compute"));
+
+            // DXC is required for wave intrinsics.
+            Assert.That(source, Does.Contain("#pragma use_dxc"));
+
+            // Groupshared running count for cross-pass accumulation.
+            Assert.That(source, Does.Contain("groupshared uint convergeLightCount;"));
+
+            // Wave intrinsic compaction primitives.
+            Assert.That(source, Does.Contain("WavePrefixCountBits(isValid)"));
+            Assert.That(source, Does.Contain("WaveActiveCountBits(isValid)"));
+
+            // Cross-wave prefix sum via ldsTilePassList scratch.
+            Assert.That(source, Does.Contain("ldsTilePassList[waveIndex] = waveValidCount;"));
+            Assert.That(source, Does.Contain("ldsTilePassList[wavesPerGroup] = convergeLightCount;"));
+
+            // In-place compacted write back to coarseList.
+            Assert.That(source, Does.Contain("coarseList[passStart + waveOffset + wavePrefixCount] = srcVal;"));
+
+            // Must NOT contain the old serial thread-0 compaction.
+            Assert.That(source, Does.Not.Contain("// to greedy to double buffer coarseList lds"));
+            Assert.That(source, Does.Not.Contain("coarseList[offs++] = coarseList[l];"));
+        }
+
+        [Test]
         public void LightCullUtils_DeclaresStereoAwareIndexHelpers()
         {
             var source = File.ReadAllText(GetLightingPath("LightCullUtils.hlsl"));

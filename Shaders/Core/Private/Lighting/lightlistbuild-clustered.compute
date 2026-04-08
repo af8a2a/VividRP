@@ -9,7 +9,7 @@
 #pragma kernel TileLightListGen_DepthRT_MSAA_Oblique                LIGHTLISTGEN=TileLightListGen_DepthRT_MSAA_Oblique                  ENABLE_DEPTH_TEXTURE_BACKPLANE          MSAA_ENABLED            USE_OBLIQUE_MODE
 #pragma kernel TileLightListGen_DepthRT_SrcBigTile_Oblique          LIGHTLISTGEN=TileLightListGen_DepthRT_SrcBigTile_Oblique            ENABLE_DEPTH_TEXTURE_BACKPLANE          USE_TWO_PASS_TILED_LIGHTING             USE_OBLIQUE_MODE
 #pragma kernel TileLightListGen_DepthRT_MSAA_SrcBigTile_Oblique     LIGHTLISTGEN=TileLightListGen_DepthRT_MSAA_SrcBigTile_Oblique       ENABLE_DEPTH_TEXTURE_BACKPLANE          MSAA_ENABLED        USE_TWO_PASS_TILED_LIGHTING         USE_OBLIQUE_MODE
-
+#pragma use_dxc
 // #pragma enable_d3d11_debug_symbols
 
 #define REQUEST_DISABLE_OPTIMISTIC_SCALAR_ALLOCATION
@@ -118,7 +118,6 @@ groupshared uint lightOffs2;
 #ifdef PERFORM_SPHERICAL_INTERSECTION_TESTS
 groupshared uint lightOffsSph;
 groupshared uint convergeLightCount;
-groupshared uint convergePrefixSums[NR_THREADS];
 #endif
 
 float GetLinearDepth(float2 pixXY, float zDptBufSpace, uint eyeIndex)    // 0 is near 1 is far
@@ -553,67 +552,59 @@ int SphericalIntersectionTests(uint threadID, int iNrCoarseLights, float2 screen
     GroupMemoryBarrierWithGroupSync();
 #endif
 
-    // Parallel compaction: remove UINT_MAX gaps using groupshared prefix sum.
-    // Process ceil(iNrCoarseLights / NR_THREADS) passes, each pass handles
-    // NR_THREADS elements in parallel.
-    if(threadID == 0) convergeLightCount = 0;
+    // Parallel stream compaction via WaveActiveBallot / WavePrefixCountBits (DXC).
+    // Each pass processes NR_THREADS elements.  Compacted writes go in-place to
+    // coarseList: pass N writes at most N*NR_THREADS entries, and pass N+1 reads
+    // starting at (N+1)*NR_THREADS, so writes never overtake unread source data.
+    // ldsTilePassList[0..wavesPerGroup] is used as cross-wave scratch.
+    if(threadID == 0u) convergeLightCount = 0u;
     GroupMemoryBarrierWithGroupSync();
 
-    int nrPasses = (iNrCoarseLights + NR_THREADS - 1) / (int)NR_THREADS;
-    for(int pass = 0; pass < nrPasses; pass++)
+    uint waveSize = WaveGetLaneCount();
+    uint waveIndex = threadID / waveSize;
+    uint wavesPerGroup = (NR_THREADS + waveSize - 1u) / waveSize;
+
+    int nrPasses = (iNrCoarseLights + (int)NR_THREADS - 1) / (int)NR_THREADS;
+    for(int passIdx = 0; passIdx < nrPasses; passIdx++)
     {
-        int idx = pass * (int)NR_THREADS + (int)threadID;
-        uint isValid = (idx < iNrCoarseLights && coarseList[idx] != UINT_MAX) ? 1u : 0u;
+        int srcIdx = passIdx * (int)NR_THREADS + (int)threadID;
+        bool isValid = (srcIdx < iNrCoarseLights && coarseList[srcIdx] != UINT_MAX);
+        uint srcVal = isValid ? coarseList[srcIdx] : 0u;
 
-        // Inclusive prefix sum across the group via groupshared scan.
-        convergePrefixSums[threadID] = isValid;
+        // Intra-wave prefix count.
+        uint wavePrefixCount = WavePrefixCountBits(isValid);
+        uint waveValidCount = WaveActiveCountBits(isValid);
+
+        // Cross-wave exclusive prefix sum via groupshared scratch.
+        if(WaveIsFirstLane())
+            ldsTilePassList[waveIndex] = waveValidCount;
         GroupMemoryBarrierWithGroupSync();
 
-        [unroll]
-        for(uint stride = 1u; stride < NR_THREADS; stride <<= 1u)
+        // Thread 0 scans the few wave counts and stores passStart.
+        if(threadID == 0u)
         {
-            uint val = 0u;
-            if(threadID >= stride)
-                val = convergePrefixSums[threadID - stride];
-            GroupMemoryBarrierWithGroupSync();
-            convergePrefixSums[threadID] += val;
-            GroupMemoryBarrierWithGroupSync();
-        }
-
-        // convergePrefixSums[threadID] is now the inclusive prefix sum.
-        // The exclusive prefix sum (write offset within this pass) is inclusive - isValid.
-        uint passTotal = convergePrefixSums[NR_THREADS - 1u];
-
-        // Allocate a contiguous range in the output from the running count.
-        uint passBase;
-        if(threadID == 0)
-        {
-            passBase = convergeLightCount;
-            convergeLightCount += passTotal;
+            uint acc = 0u;
+            for(uint w = 0u; w < wavesPerGroup; w++)
+            {
+                uint wc = ldsTilePassList[w];
+                ldsTilePassList[w] = acc; // exclusive prefix for wave w
+                acc += wc;
+            }
+            ldsTilePassList[wavesPerGroup] = convergeLightCount; // passStart
+            convergeLightCount += acc;
         }
         GroupMemoryBarrierWithGroupSync();
-        passBase = convergeLightCount - passTotal; // broadcast: all threads derive passBase
 
         if(isValid)
         {
-            uint exclusiveIdx = convergePrefixSums[threadID] - 1u;
-            // Write surviving light to compacted position via clusterIdxs as temp storage
-            // to avoid read-write hazard on coarseList.
-            clusterIdxs[passBase + exclusiveIdx] = coarseList[idx];
+            uint passStart = ldsTilePassList[wavesPerGroup];
+            uint waveOffset = ldsTilePassList[waveIndex];
+            coarseList[passStart + waveOffset + wavePrefixCount] = srcVal;
         }
         GroupMemoryBarrierWithGroupSync();
     }
 
-    // Copy compacted results back to coarseList.
-    uint finalCount = convergeLightCount;
-    for(uint c = threadID; c < finalCount; c += NR_THREADS)
-        coarseList[c] = clusterIdxs[c];
-
-    // Clear any stale entries beyond the compacted range.
-    for(uint c2 = finalCount + threadID; c2 < (uint)iNrCoarseLights; c2 += NR_THREADS)
-        coarseList[c2] = UINT_MAX;
-
-    lightOffsSph = finalCount;
+    lightOffsSph = convergeLightCount;
     GroupMemoryBarrierWithGroupSync();
 
     return (int)lightOffsSph;

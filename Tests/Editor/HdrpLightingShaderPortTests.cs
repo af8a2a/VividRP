@@ -106,6 +106,27 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ClusteredLightListGen_PreComputesClusterCornerVertices()
+        {
+            var source = File.ReadAllText(GetLightingPath("lightlistbuild-clustered.compute"));
+
+            // Cluster corners pre-computed once before the light loop.
+            Assert.That(source, Does.Contain("float4 clusterVerts[8];"));
+            Assert.That(source, Does.Contain("ClusterIdxToZ(i, suggestedBase)"));
+            Assert.That(source, Does.Contain("ClusterIdxToZ(i+1, suggestedBase)"));
+            Assert.That(source, Does.Contain("float4(GetViewPosFromLinDepth( float2(x, y), z, eyeIndex), 1.0)"));
+
+            // CheckIntersection takes pre-computed verts instead of tile coords + depth params.
+            Assert.That(source, Does.Contain("bool CheckIntersection(int l, int k, float4 clusterVerts[8])"));
+            Assert.That(source, Does.Contain("dot(plane, clusterVerts[vi])"));
+
+            // Must NOT contain the old per-light vertex recomputation inside CheckIntersection.
+            Assert.That(source, Does.Not.Contain("float depthAtNearZ = ClusterIdxToZ(k, suggestedBase)"));
+            Assert.That(source, Does.Not.Contain("float3 vP = GetViewPosFromLinDepth"));
+            Assert.That(source, Does.Not.Contain("dot(plane, float4(vP,1.0))"));
+        }
+
+        [Test]
         public void LightCullUtils_DeclaresStereoAwareIndexHelpers()
         {
             var source = File.ReadAllText(GetLightingPath("LightCullUtils.hlsl"));

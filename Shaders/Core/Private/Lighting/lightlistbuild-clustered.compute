@@ -185,7 +185,7 @@ int SphericalIntersectionTests(uint threadID, int iNrCoarseLights, float2 screen
 
 float4 FetchPlane(int l, int p, uint eyeIndex);
 
-bool CheckIntersection(int l, int k, uint2 viTilLL, uint2 viTilUR, float suggestedBase, uint eyeIndex)
+bool CheckIntersection(int l, int k, float4 clusterVerts[8])
 {
     // If this light's screen space depth bounds intersect this cluster...simple cluster test
     unsigned int val = (clusterIdxs[l>>1]>>(16*(l&1)))&0xffff;
@@ -193,24 +193,16 @@ bool CheckIntersection(int l, int k, uint2 viTilLL, uint2 viTilUR, float suggest
     if(bIsHit)
     {
 #ifdef CONV_HULL_TEST_ENABLED
-        float depthAtNearZ = ClusterIdxToZ(k, suggestedBase);
-        float depthAtFarZ = ClusterIdxToZ(k+1, suggestedBase);
-
         for(int p=0; p<6; p++)
         {
             float4 plane = lightPlanes[6*(l&3)+p];
 
             bool bAllInvisib = true;
 
-            for(int i=0; i<8; i++)
+            for(int vi=0; vi<8; vi++)
             {
-                float x = (i&1)==0 ? viTilLL.x : viTilUR.x;
-                float y = (i&2)==0 ? viTilLL.y : viTilUR.y;
-                float z = (i&4)==0 ? depthAtNearZ : depthAtFarZ;
-                float3 vP = GetViewPosFromLinDepth( float2(x, y), z, eyeIndex);
-
-                // Test each corner of the cluster against the light bounding box planes
-                bAllInvisib = bAllInvisib && dot(plane, float4(vP,1.0))>0;
+                // Test each pre-computed corner against the light bounding box plane
+                bAllInvisib = bAllInvisib && dot(plane, clusterVerts[vi])>0;
             }
 
             if(bAllInvisib) bIsHit = false;
@@ -501,6 +493,29 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
     WriteShiftIndex(t, LIGHTCATEGORY_ENV, _EnvLightIndexShift);
     WriteShiftIndex(t, LIGHTCATEGORY_DECAL, _DecalIndexShift);
 
+    // Pre-compute the 8 view-space corner vertices for this thread's cluster.
+    // These are constant across all light iterations, so computing them once
+    // eliminates O(48 * iNrCoarseLights) redundant GetViewPosFromLinDepth calls
+    // (matrix multiply per call) from the inner loop.
+    // Stored as float4(pos, 1.0) so CheckIntersection can dot directly with planes.
+    float4 clusterVerts[8];
+#ifdef CONV_HULL_TEST_ENABLED
+    if(i<nrClusters)
+    {
+        float depthAtNearZ = ClusterIdxToZ(i, suggestedBase);
+        float depthAtFarZ = ClusterIdxToZ(i+1, suggestedBase);
+
+        [unroll]
+        for(int ci=0; ci<8; ci++)
+        {
+            float x = (ci&1)==0 ? viTilLL.x : viTilUR.x;
+            float y = (ci&2)==0 ? viTilLL.y : viTilUR.y;
+            float z = (ci&4)==0 ? depthAtNearZ : depthAtFarZ;
+            clusterVerts[ci] = float4(GetViewPosFromLinDepth( float2(x, y), z, eyeIndex), 1.0);
+        }
+    }
+#endif
+
     uint offs = start;
     for(int ll=0; ll<iNrCoarseLights; ll+=4)
     {
@@ -514,7 +529,7 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
 
         for(int l=ll; l<min(iNrCoarseLights,(ll+4)); l++)
         {
-            if(offs<(start+iSpaceAvail) && i<nrClusters && CheckIntersection(l, i, viTilLL.xy, viTilUR.xy, suggestedBase, eyeIndex) )
+            if(offs<(start+iSpaceAvail) && i<nrClusters && CheckIntersection(l, i, clusterVerts) )
             {
                 const int lightVolIndex = GenerateLightCullDataIndex(coarseList[l], g_iNrVisibLights, eyeIndex);
                 uint lightCategory = _LightVolumeData[lightVolIndex].lightCategory;

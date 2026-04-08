@@ -25,10 +25,11 @@ VividRP maintains two clustered light culling implementations:
   - Impact: Global atomic count reduced from O(nrClusters x numTiles) to O(numTiles).
   - Done: Implemented via `WavePrefixSum` / `WaveActiveSum` with cross-wave scan through `ldsTilePassList` scratch and single `InterlockedAdd(g_LayeredSingleIdxBuffer[0], acc, groupAllocationBase)` per group.
 
-- [ ] **Pre-compute cluster corner vertices for `CheckIntersection`**
+- [x] **Pre-compute cluster corner vertices for `CheckIntersection`**
   - Current (`lightlistbuild-clustered.compute:193-215`): Each `CheckIntersection` call recomputes 8 corner vertices via `GetViewPosFromLinDepth` (involves matrix multiply). 6 planes x 8 corners x numLights = massive redundancy.
   - Target: Compute the 8 corners once per cluster (per thread) before the light loop, store in registers.
   - Impact: Eliminates O(48 x numCoarseLights) matrix multiplications per cluster.
+  - Done: Pre-compute `float4 clusterVerts[8]` (with w=1.0) from `ClusterIdxToZ` + `GetViewPosFromLinDepth` once before the light loop. `CheckIntersection` signature changed to `(int l, int k, float4 clusterVerts[8])`, inner loop reduced to pure `dot(plane, clusterVerts[vi])`.
 
 ### Medium Priority
 

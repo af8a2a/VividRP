@@ -315,6 +315,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_CachedMultiScatteringHash = ComputeMultiScatteringHash(m_Parameters, m_CachedTransmittanceHash);
             }
 
+            SelectSkyViewHistoryLayer(cmd);
+
             if (m_ShouldRebuildSkyView)
             {
                 using (new ProfilingScope(cmd, GetSkyViewRebuildSampler(m_SkyViewRebuildReason)))
@@ -323,6 +325,12 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, TransmittanceLutId, m_TransmittanceLUT.innerHandle);
                     cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, MultiScatteringLutId, m_MultiScatteringLUT.innerHandle);
                     cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, SkyViewLutOutputId, m_SkyViewLUT.innerHandle);
+                    cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, SkyViewHistoryLayersPreviousId, m_SkyViewHistoryLayersPrevious.innerHandle);
+                    cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewKernel, SkyViewHistoryMetaPreviousId, m_SkyViewHistoryMetaPrevious.innerHandle);
+                    cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewKernel, SkyViewHistorySelectionId, m_SkyViewHistorySelection.innerHandle);
+                    cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryHasValidHistoryId, m_HasValidSkyViewHistoryLayers && m_HasValidSkyViewHistoryMeta ? 1 : 0);
+                    cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryDependencyHashId, m_SkyViewHistoryDependencyHash);
+                    cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryParameterHashId, m_SkyViewHistoryParameterHash);
                     cmd.DispatchCompute(
                         m_ComputeShader,
                         m_SkyViewKernel,
@@ -336,7 +344,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_CachedSkyViewCameraHash = ComputeSkyViewCameraHash(m_Parameters);
             }
 
-            SelectSkyViewHistoryLayer(cmd);
             StoreSkyViewHistory(cmd);
         }
 

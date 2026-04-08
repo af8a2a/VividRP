@@ -130,14 +130,14 @@
   - 已完成：
     - `AtmosphereLUTPass` 现在会缓存 `TransmittanceLUT`、`MultiScatteringLUT`、`SkyViewLUT`；其中 `TransmittanceLUT` / `MultiScatteringLUT` 会区分 `MissingTexture` / `ParametersChanged`，`SkyViewLUT` 还会额外区分 `DependenciesChanged` / `CameraChanged`。
     - `SkyViewLUT` 当前仍保持 camera-dependent 语义，但已经把重建触发拆成 `DependenciesChanged` / `ParametersChanged` / `CameraChanged`，便于继续验证缓存方向和成本。
-    - `SkyViewLUT` layered cache / reprojection 已形成设计稿，并已在 `AtmosphereLUTPass` 中接入 hidden history texture/buffer、GPU-side layer selection 与 layer/meta 写回骨架；当前仍未启用实际的 history resolve / reprojection。
+    - `SkyViewLUT` layered cache / reprojection 已形成设计稿，并已在 `AtmosphereLUTPass` 中接入 hidden history texture/buffer、GPU-side layer selection、保守的 history-aware resolve，以及 layer/meta 写回链路。
     - HDRI / Physically Based Sky 的 runtime cubemap 与 ambient probe cubemap 已支持由 `SkySettingsVolume` 统一控制分辨率。
     - 物理天空 generated cubemap 已支持独立的质量档，并对 `MissingTexture` / `ResolutionChanged` / `QualityChanged` / `ParametersChanged` 给出明确 profiling。
     - `SkySpecularCache` 已支持独立的 specular prefilter 分辨率、质量档，并对 source cubemap 尺寸做上限约束。
     - `VividSkyData` 与 `ShaderVariablesGlobal` 中的 CPU SH 兼容字段已移除，天空漫反射链路统一收敛到 GPU-only。
     - LUT / runtime cubemap / ambient probe / specular prefilter 的重建路径现在都带有更明确的 profiling 标记与触发原因。
   - 仍待完成：
-    - 明确 `SkyViewLUT` 是否继续升级到 layered cache / reprojection，或在具备配套链路后拆成 HDRP 风格的 distant sky LUT。
+    - 继续把当前 `SkyViewLUT` history resolve 从“保守 reuse + fallback”补到更完整的 reprojection / confidence 调参与 profiling。
     - 在具备独立 distant atmosphere / sky opacity 链路后，再重新评估 HDRP 风格 `SkyViewLUT` 接入方式。
   - 设计稿：
     - `Documentation~/SkyViewLUTLayeredCacheDesign.md`

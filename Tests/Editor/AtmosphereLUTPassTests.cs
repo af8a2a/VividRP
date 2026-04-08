@@ -112,6 +112,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("ComputeSkyViewDependencyHash(multiScatteringHash)"));
             Assert.That(source, Does.Contain("ComputeSkyViewParametersHash(m_Parameters)"));
             Assert.That(source, Does.Contain("ComputeSkyViewCameraHash(m_Parameters)"));
+            Assert.That(source, Does.Contain("SelectSkyViewHistoryLayer(cmd);"));
             Assert.That(source, Does.Contain("ResolveRebuildReason(m_TransmittanceCacheRecreated, m_CachedTransmittanceHash, transmittanceHash)"));
             Assert.That(source, Does.Contain("ResolveRebuildReason(m_MultiScatteringCacheRecreated, m_CachedMultiScatteringHash, multiScatteringHash)"));
             Assert.That(source, Does.Contain("ResolveSkyViewRebuildReason("));
@@ -182,6 +183,12 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewSelectHistoryKernel, SkyViewHistoryMetaPreviousId, m_SkyViewHistoryMetaPrevious.innerHandle);"));
             Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewSelectHistoryKernel, SkyViewHistorySelectionId, m_SkyViewHistorySelection.innerHandle);"));
             Assert.That(source, Does.Contain("cmd.DispatchCompute(m_ComputeShader, m_SkyViewSelectHistoryKernel, 1, 1, 1);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, SkyViewHistoryLayersPreviousId, m_SkyViewHistoryLayersPrevious.innerHandle);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewKernel, SkyViewHistoryMetaPreviousId, m_SkyViewHistoryMetaPrevious.innerHandle);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewKernel, SkyViewHistorySelectionId, m_SkyViewHistorySelection.innerHandle);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryHasValidHistoryId, m_HasValidSkyViewHistoryLayers && m_HasValidSkyViewHistoryMeta ? 1 : 0);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryDependencyHashId, m_SkyViewHistoryDependencyHash);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryParameterHashId, m_SkyViewHistoryParameterHash);"));
             Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewStoreHistoryKernel, SkyViewLutSourceId, m_SkyViewLUT.innerHandle);"));
             Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewStoreHistoryKernel, SkyViewHistoryMetaPreviousId, m_SkyViewHistoryMetaPrevious.innerHandle);"));
             Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewStoreHistoryKernel, SkyViewHistoryMetaCurrentId, m_SkyViewHistoryMetaCurrent.innerHandle);"));
@@ -233,10 +240,15 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("RWStructuredBuffer<SkyViewHistorySelectionEntry> _SkyViewHistorySelection;"));
             Assert.That(source, Does.Contain("int _SkyViewHistoryFrameIndex;"));
             Assert.That(source, Does.Contain("SkyViewHistorySelectionEntry ResolveSkyViewHistorySelection()"));
+            Assert.That(source, Does.Contain("float ComputeSkyViewHistoryConfidence(float3 directionWS, SkyViewHistoryMetaEntry meta)"));
             Assert.That(source, Does.Contain("void SkyViewLUTSelectHistoryLayer(uint3 tid : SV_DispatchThreadID)"));
             Assert.That(source, Does.Contain("_SkyViewHistorySelection[0] = ResolveSkyViewHistorySelection();"));
             Assert.That(source, Does.Contain("void SkyViewLUTStoreHistory(uint3 tid : SV_DispatchThreadID)"));
             Assert.That(source, Does.Contain("SkyViewHistorySelectionEntry selection = _SkyViewHistorySelection[0];"));
+            Assert.That(source, Does.Contain("bool needsCurrentEvaluation = true;"));
+            Assert.That(source, Does.Contain("if (selection.hasHistoryResources != 0u && selection.hasMatchingLayer != 0u)"));
+            Assert.That(source, Does.Contain("if (confidence >= 0.75f)"));
+            Assert.That(source, Does.Contain("if (needsCurrentEvaluation)"));
             Assert.That(source, Does.Contain("_SkyViewHistoryLayersCurrent[tid] = color;"));
             Assert.That(source, Does.Contain("_SkyViewHistoryMetaCurrent[layerIndex] = meta;"));
             Assert.That(source, Does.Not.Contain("int _SkyViewHistoryTargetLayer;"));

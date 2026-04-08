@@ -150,6 +150,53 @@ SkyViewHistorySelectionEntry ResolveSkyViewHistorySelection()
     return selection;
 }
 
+float ComputeSkyViewHistoryCameraWeight(SkyViewHistoryMetaEntry meta)
+{
+    float atmosphereHeight = max(_SkyPlanetParams.y - _SkyPlanetParams.x, 1.0f);
+    float cameraThreshold = max(atmosphereHeight * 0.005f, 50.0f);
+    float cameraDelta = distance(meta.cameraPositionPS.xyz, _SkyCameraPositionPS.xyz);
+    return saturate(1.0f - cameraDelta / cameraThreshold);
+}
+
+float ComputeSkyViewHistorySunWeight(SkyViewHistoryMetaEntry meta)
+{
+    float sunDot = clamp(dot(normalize(meta.sunDirection.xyz), normalize(_SkySunDirection.xyz)), -1.0f, 1.0f);
+    float sunAngleDelta = acos(sunDot);
+    const float maxSunAngleDelta = 0.035f;
+    return saturate(1.0f - sunAngleDelta / maxSunAngleDelta);
+}
+
+float ComputeSkyViewHistoryHorizonWeight(float3 directionWS)
+{
+    return smoothstep(0.12f, 0.30f, abs(directionWS.y));
+}
+
+float ComputeSkyViewHistoryAerosolWeight()
+{
+    float aerosolOpacity = 1.0f - exp(-max(_SkyAerosolExtinction.x, 0.0f) * max(_SkyOzoneParams.w, 1.0f));
+    float anisotropyPenalty = saturate((abs(_SkyAerosolExtinction.w) - 0.7f) / 0.25f);
+    return saturate(1.0f - aerosolOpacity * 0.75f - anisotropyPenalty * 0.5f);
+}
+
+float ComputeSkyViewHistoryConfidence(float3 directionWS, SkyViewHistoryMetaEntry meta)
+{
+    if (meta.valid == 0u)
+        return 0.0f;
+
+    if (meta.dependencyHash != (uint)_SkyViewHistoryDependencyHash)
+        return 0.0f;
+
+    if (meta.parameterHash != (uint)_SkyViewHistoryParameterHash)
+        return 0.0f;
+
+    float confidence = 1.0f;
+    confidence *= ComputeSkyViewHistoryCameraWeight(meta);
+    confidence *= ComputeSkyViewHistorySunWeight(meta);
+    confidence *= ComputeSkyViewHistoryHorizonWeight(directionWS);
+    confidence *= ComputeSkyViewHistoryAerosolWeight();
+    return saturate(confidence);
+}
+
 bool IntersectAtmosphere(float3 origin, float3 direction, float atmosphereRadius, out float entryDistance, out float exitDistance)
 {
     float b = dot(origin, direction);
@@ -699,7 +746,35 @@ void SkyViewLUT(uint3 tid : SV_DispatchThreadID)
 
     float2 uv = (tid.xy + 0.5f) / float2(width, height);
     float3 directionWS = DecodeSkyViewDirection(uv);
-    _SkyViewLUTOutput[tid.xy] = float4(EvaluateSkyView(directionWS), 1.0f);
+    float3 resolvedSky = 0.0f;
+    bool needsCurrentEvaluation = true;
+    SkyViewHistorySelectionEntry selection = _SkyViewHistorySelection[0];
+    if (selection.hasHistoryResources != 0u && selection.hasMatchingLayer != 0u)
+    {
+        uint sourceLayer = min(selection.sourceLayer, SKY_VIEW_HISTORY_LAYER_COUNT - 1u);
+        SkyViewHistoryMetaEntry historyMeta = _SkyViewHistoryMetaPrevious[sourceLayer];
+        float confidence = ComputeSkyViewHistoryConfidence(directionWS, historyMeta);
+        if (confidence > 0.0f)
+        {
+            float3 historyColor = SanitizeSkyRadiance(_SkyViewHistoryLayersPrevious.Load(int4(tid.xy, sourceLayer, 0)).rgb);
+            if (confidence >= 0.75f)
+            {
+                resolvedSky = historyColor;
+                needsCurrentEvaluation = false;
+            }
+            else
+            {
+                float3 currentSky = EvaluateSkyView(directionWS);
+                resolvedSky = lerp(currentSky, historyColor, confidence);
+                needsCurrentEvaluation = false;
+            }
+        }
+    }
+
+    if (needsCurrentEvaluation)
+        resolvedSky = EvaluateSkyView(directionWS);
+
+    _SkyViewLUTOutput[tid.xy] = float4(SanitizeSkyRadiance(resolvedSky), 1.0f);
 }
 
 [numthreads(1, 1, 1)]

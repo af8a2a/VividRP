@@ -105,6 +105,19 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Source_UsesCameraDependentSkyViewHash()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "AtmosphereLUTPass.cs"));
+
+            Assert.That(source, Does.Contain("hash = AppendHash(hash, parameters.skyCameraPositionPS.x);"));
+            Assert.That(source, Does.Contain("hash = AppendHash(hash, parameters.skyCameraPositionPS.y);"));
+            Assert.That(source, Does.Contain("hash = AppendHash(hash, parameters.skyCameraPositionPS.z);"));
+            Assert.That(source, Does.Contain("hash = AppendHash(hash, parameters.skySunDirection.x);"));
+            Assert.That(source, Does.Contain("hash = AppendHash(hash, parameters.skySunDirection.y);"));
+            Assert.That(source, Does.Contain("hash = AppendHash(hash, parameters.skySunDirection.z);"));
+        }
+
+        [Test]
         public void Shader_Source_DeclaresRequiredKernelsAndSkyViewEvaluation()
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AtmosphereLUT.compute"));
@@ -118,7 +131,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("SampleTransmittanceLut"));
             Assert.That(source, Does.Contain("SampleMultiScatteringLut"));
             Assert.That(source, Does.Contain("float3 SanitizeSkyRadiance(float3 color)"));
-            Assert.That(source, Does.Not.Contain("float3 sunDiskTransmittance = SampleTransmittanceLut(cameraHeight, sunAtCamera, planetRadius, atmosphereRadius);"));
+            Assert.That(source, Does.Contain("float3 DecodeSkyViewDirection(float2 uv)"));
+            Assert.That(source, Does.Contain("float3 cameraPosition = _SkyCameraPositionPS.xyz;"));
+            Assert.That(source, Does.Contain("float3 samplePosition = cameraPosition + normalizedDirection * sampleDistance;"));
+            Assert.That(source, Does.Contain("skyColor += SampleMultiScatteringLut(cameraHeight, sunAtCamera, planetRadius, atmosphereRadius) * 0.5f;"));
             Assert.That(source, Does.Contain("EvaluateSkyView"));
         }
 

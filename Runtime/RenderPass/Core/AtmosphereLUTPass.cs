@@ -459,9 +459,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 hash = AppendHash(hash, parameters.skySunDirection.y);
                 hash = AppendHash(hash, parameters.skySunDirection.z);
                 hash = AppendHash(hash, parameters.skyPlanetParams.z);
-                hash = AppendHash(hash, parameters.skyPlanetParams.w);
                 hash = AppendHash(hash, parameters.skyAerosolExtinction.w);
-                hash = AppendHash(hash, parameters.skyOzoneParams.z);
                 return hash;
             }
         }

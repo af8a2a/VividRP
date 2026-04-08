@@ -11,6 +11,8 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             None,
             MissingTexture,
+            DependenciesChanged,
+            CameraChanged,
             ParametersChanged
         }
 
@@ -34,6 +36,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly ProfilingSampler s_MultiScatteringMissingTextureSampler = new("AtmosphereLUTPass.RebuildMultiScattering (MissingTexture)");
         private static readonly ProfilingSampler s_MultiScatteringParametersChangedSampler = new("AtmosphereLUTPass.RebuildMultiScattering (ParametersChanged)");
         private static readonly ProfilingSampler s_SkyViewMissingTextureSampler = new("AtmosphereLUTPass.RebuildSkyView (MissingTexture)");
+        private static readonly ProfilingSampler s_SkyViewDependenciesChangedSampler = new("AtmosphereLUTPass.RebuildSkyView (DependenciesChanged)");
+        private static readonly ProfilingSampler s_SkyViewCameraChangedSampler = new("AtmosphereLUTPass.RebuildSkyView (CameraChanged)");
         private static readonly ProfilingSampler s_SkyViewParametersChangedSampler = new("AtmosphereLUTPass.RebuildSkyView (ParametersChanged)");
 
         private static readonly int SkyCameraPositionPsId = Shader.PropertyToID("_SkyCameraPositionPS");
@@ -79,7 +83,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_SkyViewCacheRecreated;
         private int m_CachedTransmittanceHash;
         private int m_CachedMultiScatteringHash;
-        private int m_CachedSkyViewHash;
+        private int m_CachedSkyViewDependencyHash;
+        private int m_CachedSkyViewParametersHash;
+        private int m_CachedSkyViewCameraHash;
         private RTHandle m_CachedTransmittanceHandle;
         private RTHandle m_CachedMultiScatteringHandle;
         private RTHandle m_CachedSkyViewHandle;
@@ -148,11 +154,20 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var transmittanceHash = ComputeTransmittanceHash(m_Parameters);
             var multiScatteringHash = ComputeMultiScatteringHash(m_Parameters, transmittanceHash);
-            var skyViewHash = ComputeSkyViewHash(m_Parameters, multiScatteringHash);
+            var skyViewDependencyHash = ComputeSkyViewDependencyHash(multiScatteringHash);
+            var skyViewParametersHash = ComputeSkyViewParametersHash(m_Parameters);
+            var skyViewCameraHash = ComputeSkyViewCameraHash(m_Parameters);
 
             m_TransmittanceRebuildReason = ResolveRebuildReason(m_TransmittanceCacheRecreated, m_CachedTransmittanceHash, transmittanceHash);
             m_MultiScatteringRebuildReason = ResolveRebuildReason(m_MultiScatteringCacheRecreated, m_CachedMultiScatteringHash, multiScatteringHash);
-            m_SkyViewRebuildReason = ResolveRebuildReason(m_SkyViewCacheRecreated, m_CachedSkyViewHash, skyViewHash);
+            m_SkyViewRebuildReason = ResolveSkyViewRebuildReason(
+                m_SkyViewCacheRecreated,
+                m_CachedSkyViewDependencyHash,
+                skyViewDependencyHash,
+                m_CachedSkyViewParametersHash,
+                skyViewParametersHash,
+                m_CachedSkyViewCameraHash,
+                skyViewCameraHash);
 
             m_ShouldRebuildTransmittance = m_TransmittanceRebuildReason != SkyLutRebuildReason.None;
             m_ShouldRebuildMultiScattering = m_MultiScatteringRebuildReason != SkyLutRebuildReason.None;
@@ -226,7 +241,9 @@ namespace VividRP.Runtime.RenderPass.Core
                         1);
                 }
 
-                m_CachedSkyViewHash = ComputeSkyViewHash(m_Parameters, m_CachedMultiScatteringHash);
+                m_CachedSkyViewDependencyHash = ComputeSkyViewDependencyHash(m_CachedMultiScatteringHash);
+                m_CachedSkyViewParametersHash = ComputeSkyViewParametersHash(m_Parameters);
+                m_CachedSkyViewCameraHash = ComputeSkyViewCameraHash(m_Parameters);
             }
         }
 
@@ -361,7 +378,9 @@ namespace VividRP.Runtime.RenderPass.Core
             ReleaseLutResource(ref m_CachedSkyViewTexture, ref m_CachedSkyViewHandle);
             m_CachedTransmittanceHash = 0;
             m_CachedMultiScatteringHash = 0;
-            m_CachedSkyViewHash = 0;
+            m_CachedSkyViewDependencyHash = 0;
+            m_CachedSkyViewParametersHash = 0;
+            m_CachedSkyViewCameraHash = 0;
         }
 
         private static void ReleaseLutResource(ref RenderTexture texture, ref RTHandle handle)
@@ -399,6 +418,29 @@ namespace VividRP.Runtime.RenderPass.Core
 
             return cachedHash != nextHash
                 ? SkyLutRebuildReason.ParametersChanged
+                : SkyLutRebuildReason.None;
+        }
+
+        private static SkyLutRebuildReason ResolveSkyViewRebuildReason(
+            bool cacheRecreated,
+            int cachedDependencyHash,
+            int nextDependencyHash,
+            int cachedParametersHash,
+            int nextParametersHash,
+            int cachedCameraHash,
+            int nextCameraHash)
+        {
+            if (cacheRecreated)
+                return SkyLutRebuildReason.MissingTexture;
+
+            if (cachedDependencyHash != nextDependencyHash)
+                return SkyLutRebuildReason.DependenciesChanged;
+
+            if (cachedParametersHash != nextParametersHash)
+                return SkyLutRebuildReason.ParametersChanged;
+
+            return cachedCameraHash != nextCameraHash
+                ? SkyLutRebuildReason.CameraChanged
                 : SkyLutRebuildReason.None;
         }
 
@@ -446,20 +488,38 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
-        private static int ComputeSkyViewHash(PhysicallyBasedSkyShaderParameters parameters, int multiScatteringHash)
+        private static int ComputeSkyViewDependencyHash(int multiScatteringHash)
         {
             unchecked
             {
                 var hash = 17;
                 hash = AppendHash(hash, multiScatteringHash);
-                hash = AppendHash(hash, parameters.skyCameraPositionPS.x);
-                hash = AppendHash(hash, parameters.skyCameraPositionPS.y);
-                hash = AppendHash(hash, parameters.skyCameraPositionPS.z);
+                return hash;
+            }
+        }
+
+        private static int ComputeSkyViewParametersHash(PhysicallyBasedSkyShaderParameters parameters)
+        {
+            unchecked
+            {
+                var hash = 17;
                 hash = AppendHash(hash, parameters.skySunDirection.x);
                 hash = AppendHash(hash, parameters.skySunDirection.y);
                 hash = AppendHash(hash, parameters.skySunDirection.z);
                 hash = AppendHash(hash, parameters.skyPlanetParams.z);
                 hash = AppendHash(hash, parameters.skyAerosolExtinction.w);
+                return hash;
+            }
+        }
+
+        private static int ComputeSkyViewCameraHash(PhysicallyBasedSkyShaderParameters parameters)
+        {
+            unchecked
+            {
+                var hash = 17;
+                hash = AppendHash(hash, parameters.skyCameraPositionPS.x);
+                hash = AppendHash(hash, parameters.skyCameraPositionPS.y);
+                hash = AppendHash(hash, parameters.skyCameraPositionPS.z);
                 return hash;
             }
         }
@@ -493,9 +553,13 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static ProfilingSampler GetSkyViewRebuildSampler(SkyLutRebuildReason reason)
         {
-            return reason == SkyLutRebuildReason.MissingTexture
-                ? s_SkyViewMissingTextureSampler
-                : s_SkyViewParametersChangedSampler;
+            return reason switch
+            {
+                SkyLutRebuildReason.DependenciesChanged => s_SkyViewDependenciesChangedSampler,
+                SkyLutRebuildReason.CameraChanged => s_SkyViewCameraChangedSampler,
+                SkyLutRebuildReason.ParametersChanged => s_SkyViewParametersChangedSampler,
+                _ => s_SkyViewMissingTextureSampler,
+            };
         }
     }
 }

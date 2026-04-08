@@ -49,7 +49,7 @@
 
 - 自动曝光基础链路已经落地，但天空系统仍需继续验证“屏幕实时曝光”和“sky baking 固定曝光”是否完全解耦。
 - `skyData.exposure` 目前同时被当作天空强度和 IBL 强度使用，没有和相机曝光解耦。
-- `AtmosphereLUTPass` 已经拆成按参数 hash 重建的缓存链路，但 `SkyViewLUT` 仍只停留在基础 hash 缓存。当前屏幕天空仍直接消费 camera-dependent 的 `SkyViewLUT`；在补上 HDRP 那套 distant atmosphere / sky opacity 链路前，不应把它强行改成固定参考点的远景 LUT。
+- `AtmosphereLUTPass` 已经拆成按参数 hash 重建的缓存链路，`SkyViewLUT` 现在也能区分 scattering dependency / sky parameter / camera change 三类触发，但它仍然是 camera-dependent 的基础缓存。当前屏幕天空仍直接消费 camera-dependent 的 `SkyViewLUT`；在补上 HDRP 那套 distant atmosphere / sky opacity 链路前，不应把它强行改成固定参考点的远景 LUT。
 - runtime sky cubemap 和 specular prefilter 已支持基础分辨率配置；specular prefilter 已补上质量档和 rebuild profiling，物理天空 generated cubemap 现在也补上了基于 sample count 的质量档与 rebuild profiling。HDRI 仍直接复用 source cubemap，这部分质量档当前只作用于 generated cubemap 路径。
 - 物理天空还只是 HDRP Physically Based Sky 的一个基础子集。
 - HDRI 天空还只是 HDRP HDRI Sky 的一个基础子集。
@@ -128,14 +128,15 @@
 ### 当前实现进度（2026-04-07）
 
   - 已完成：
-    - `AtmosphereLUTPass` 现在会缓存 `TransmittanceLUT`、`MultiScatteringLUT`、`SkyViewLUT`，并区分 `MissingTexture` / `ParametersChanged` 两类重建原因。
+    - `AtmosphereLUTPass` 现在会缓存 `TransmittanceLUT`、`MultiScatteringLUT`、`SkyViewLUT`；其中 `TransmittanceLUT` / `MultiScatteringLUT` 会区分 `MissingTexture` / `ParametersChanged`，`SkyViewLUT` 还会额外区分 `DependenciesChanged` / `CameraChanged`。
+    - `SkyViewLUT` 当前仍保持 camera-dependent 语义，但已经把重建触发拆成 `DependenciesChanged` / `ParametersChanged` / `CameraChanged`，便于继续验证缓存方向和成本。
     - HDRI / Physically Based Sky 的 runtime cubemap 与 ambient probe cubemap 已支持由 `SkySettingsVolume` 统一控制分辨率。
     - 物理天空 generated cubemap 已支持独立的质量档，并对 `MissingTexture` / `ResolutionChanged` / `QualityChanged` / `ParametersChanged` 给出明确 profiling。
     - `SkySpecularCache` 已支持独立的 specular prefilter 分辨率、质量档，并对 source cubemap 尺寸做上限约束。
     - `VividSkyData` 与 `ShaderVariablesGlobal` 中的 CPU SH 兼容字段已移除，天空漫反射链路统一收敛到 GPU-only。
     - LUT / runtime cubemap / ambient probe / specular prefilter 的重建路径现在都带有更明确的 profiling 标记与触发原因。
   - 仍待完成：
-    - 明确 `SkyViewLUT` 是否升级到 layered cache / reprojection，或拆成 HDRP 风格的 distant sky LUT。
+    - 明确 `SkyViewLUT` 是否继续升级到 layered cache / reprojection，或在具备配套链路后拆成 HDRP 风格的 distant sky LUT。
     - 在具备独立 distant atmosphere / sky opacity 链路后，再重新评估 HDRP 风格 `SkyViewLUT` 接入方式。
 
 ## Phase 2: 补齐环境光照与视觉天空分离

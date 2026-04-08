@@ -78,10 +78,12 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("PassRecorder.ImportTexture(m_SkyViewLUT, m_CachedSkyViewHandle);"));
             Assert.That(source, Does.Contain("ComputeTransmittanceHash(m_Parameters)"));
             Assert.That(source, Does.Contain("ComputeMultiScatteringHash(m_Parameters, transmittanceHash)"));
-            Assert.That(source, Does.Contain("ComputeSkyViewHash(m_Parameters, multiScatteringHash)"));
+            Assert.That(source, Does.Contain("ComputeSkyViewDependencyHash(multiScatteringHash)"));
+            Assert.That(source, Does.Contain("ComputeSkyViewParametersHash(m_Parameters)"));
+            Assert.That(source, Does.Contain("ComputeSkyViewCameraHash(m_Parameters)"));
             Assert.That(source, Does.Contain("ResolveRebuildReason(m_TransmittanceCacheRecreated, m_CachedTransmittanceHash, transmittanceHash)"));
             Assert.That(source, Does.Contain("ResolveRebuildReason(m_MultiScatteringCacheRecreated, m_CachedMultiScatteringHash, multiScatteringHash)"));
-            Assert.That(source, Does.Contain("ResolveRebuildReason(m_SkyViewCacheRecreated, m_CachedSkyViewHash, skyViewHash)"));
+            Assert.That(source, Does.Contain("ResolveSkyViewRebuildReason("));
             Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_TransmittanceKernel, TransmittanceLutOutputId, m_TransmittanceLUT.innerHandle);"));
             Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_MultiScatteringKernel, TransmittanceLutId, m_TransmittanceLUT.innerHandle);"));
             Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, SkyViewLutOutputId, m_SkyViewLUT.innerHandle);"));
@@ -97,6 +99,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildMultiScattering (MissingTexture)"));
             Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildMultiScattering (ParametersChanged)"));
             Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildSkyView (MissingTexture)"));
+            Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildSkyView (DependenciesChanged)"));
+            Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildSkyView (CameraChanged)"));
             Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildSkyView (ParametersChanged)"));
             Assert.That(source, Does.Contain("ReleaseCachedLutResources();"));
             Assert.That(source, Does.Contain("ReleaseLutResource(ref m_CachedTransmittanceTexture, ref m_CachedTransmittanceHandle);"));
@@ -105,10 +109,18 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Source_UsesCameraDependentSkyViewHash()
+        public void Source_SplitsSkyViewHashesBetweenDependenciesParametersAndCamera()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "AtmosphereLUTPass.cs"));
 
+            Assert.That(source, Does.Contain("private int m_CachedSkyViewDependencyHash;"));
+            Assert.That(source, Does.Contain("private int m_CachedSkyViewParametersHash;"));
+            Assert.That(source, Does.Contain("private int m_CachedSkyViewCameraHash;"));
+            Assert.That(source, Does.Contain("return SkyLutRebuildReason.DependenciesChanged;"));
+            Assert.That(source, Does.Contain("return SkyLutRebuildReason.ParametersChanged;"));
+            Assert.That(source, Does.Contain("return cachedCameraHash != nextCameraHash"));
+            Assert.That(source, Does.Contain("? SkyLutRebuildReason.CameraChanged"));
+            Assert.That(source, Does.Contain("hash = AppendHash(hash, multiScatteringHash);"));
             Assert.That(source, Does.Contain("hash = AppendHash(hash, parameters.skyCameraPositionPS.x);"));
             Assert.That(source, Does.Contain("hash = AppendHash(hash, parameters.skyCameraPositionPS.y);"));
             Assert.That(source, Does.Contain("hash = AppendHash(hash, parameters.skyCameraPositionPS.z);"));

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -22,14 +23,19 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const int MultiScatteringHeight = 32;
         internal const int SkyViewWidth = 192;
         internal const int SkyViewHeight = 108;
+        internal const int SkyViewHistoryLayerCount = 4;
 
         private const string ComputePathWarning = "[VividRP] Atmosphere LUT compute shader is missing. Re-sync PipelineResources after Unity imports the new compute asset.";
         private const string TransmittanceKernelName = "TransmittanceLUT";
         private const string MultiScatteringKernelName = "MultiScatteringLUT";
         private const string SkyViewKernelName = "SkyViewLUT";
+        private const string SkyViewStoreHistoryKernelName = "SkyViewLUTStoreHistory";
         private const string TransmittanceTextureName = "VividSkyTransmittanceLUT";
         private const string MultiScatteringTextureName = "VividSkyMultiScatteringLUT";
         private const string SkyViewTextureName = "VividSkySkyViewLUT";
+        private const string SkyViewHistoryTextureKey = "SkyViewHistoryLayers";
+        private const string SkyViewHistoryMetaKey = "SkyViewHistoryMeta";
+        private const int SkyViewHistoryMetaStride = sizeof(uint) * 4 + sizeof(float) * 8;
 
         private static readonly ProfilingSampler s_TransmittanceMissingTextureSampler = new("AtmosphereLUTPass.RebuildTransmittance (MissingTexture)");
         private static readonly ProfilingSampler s_TransmittanceParametersChangedSampler = new("AtmosphereLUTPass.RebuildTransmittance (ParametersChanged)");
@@ -57,6 +63,27 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int TransmittanceLutOutputId = Shader.PropertyToID("_TransmittanceLUTOutput");
         private static readonly int MultiScatteringLutOutputId = Shader.PropertyToID("_MultiScatteringLUTOutput");
         private static readonly int SkyViewLutOutputId = Shader.PropertyToID("_SkyViewLUTOutput");
+        private static readonly int SkyViewLutSourceId = Shader.PropertyToID("_SkyViewLUTSource");
+        private static readonly int SkyViewHistoryLayersPreviousId = Shader.PropertyToID("_SkyViewHistoryLayersPrevious");
+        private static readonly int SkyViewHistoryLayersCurrentId = Shader.PropertyToID("_SkyViewHistoryLayersCurrent");
+        private static readonly int SkyViewHistoryMetaPreviousId = Shader.PropertyToID("_SkyViewHistoryMetaPrevious");
+        private static readonly int SkyViewHistoryMetaCurrentId = Shader.PropertyToID("_SkyViewHistoryMetaCurrent");
+        private static readonly int SkyViewHistoryTargetLayerId = Shader.PropertyToID("_SkyViewHistoryTargetLayer");
+        private static readonly int SkyViewHistoryHasValidHistoryId = Shader.PropertyToID("_SkyViewHistoryHasValidHistory");
+        private static readonly int SkyViewHistoryDependencyHashId = Shader.PropertyToID("_SkyViewHistoryDependencyHash");
+        private static readonly int SkyViewHistoryParameterHashId = Shader.PropertyToID("_SkyViewHistoryParameterHash");
+        private static readonly int SkyViewHistoryFrameIndexId = Shader.PropertyToID("_SkyViewHistoryFrameIndex");
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SkyViewHistoryMetaEntry
+        {
+            public uint valid;
+            public uint dependencyHash;
+            public uint parameterHash;
+            public uint lastTouchedFrame;
+            public Vector4 cameraPositionPS;
+            public Vector4 sunDirection;
+        }
 
         [RenderGraphResource(Name = "TransmittanceLUT", Access = AccessFlags.Write)]
         private RenderGraphTexture m_TransmittanceLUT;
@@ -67,10 +94,35 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "SkyViewLUT", Access = AccessFlags.Write)]
         private RenderGraphTexture m_SkyViewLUT;
 
+        [RenderGraphResource(
+            Name = "SkyViewHistoryLayersPrevious",
+            Access = AccessFlags.Read,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private readonly RenderGraphTexture m_SkyViewHistoryLayersPrevious = new();
+
+        [RenderGraphResource(
+            Name = "SkyViewHistoryLayersCurrent",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private readonly RenderGraphTexture m_SkyViewHistoryLayersCurrent = new();
+
+        [RenderGraphResource(
+            Name = "SkyViewHistoryMetaPrevious",
+            Access = AccessFlags.Read,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private readonly RenderGraphBuffer m_SkyViewHistoryMetaPrevious = new();
+
+        [RenderGraphResource(
+            Name = "SkyViewHistoryMetaCurrent",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        private readonly RenderGraphBuffer m_SkyViewHistoryMetaCurrent = new();
+
         private ComputeShader m_ComputeShader;
         private int m_TransmittanceKernel = -1;
         private int m_MultiScatteringKernel = -1;
         private int m_SkyViewKernel = -1;
+        private int m_SkyViewStoreHistoryKernel = -1;
         private bool m_IsActive;
         private bool m_ShouldRebuildTransmittance;
         private bool m_ShouldRebuildMultiScattering;
@@ -93,6 +145,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderTexture m_CachedMultiScatteringTexture;
         private RenderTexture m_CachedSkyViewTexture;
         private PhysicallyBasedSkyShaderParameters m_Parameters;
+        private bool m_HasValidSkyViewHistoryLayers;
+        private bool m_HasValidSkyViewHistoryMeta;
+        private readonly SkyViewHistoryMetaEntry[] m_SkyViewHistoryMetaEntries = new SkyViewHistoryMetaEntry[SkyViewHistoryLayerCount];
+        private int m_SkyViewHistoryTargetLayer;
+        private int m_SkyViewHistoryDependencyHash;
+        private int m_SkyViewHistoryParameterHash;
+        private uint m_SkyViewHistoryFrameIndex;
 
         public AtmosphereLUTPass()
         {
@@ -105,6 +164,10 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureLutDescriptor(m_TransmittanceLUT, TransmittanceWidth, TransmittanceHeight);
             ConfigureLutDescriptor(m_MultiScatteringLUT, MultiScatteringWidth, MultiScatteringHeight);
             ConfigureLutDescriptor(m_SkyViewLUT, SkyViewWidth, SkyViewHeight);
+            ConfigureSkyViewHistoryTextureDescriptor(m_SkyViewHistoryLayersPrevious, "SkyViewHistoryLayersPrevious");
+            ConfigureSkyViewHistoryTextureDescriptor(m_SkyViewHistoryLayersCurrent, "SkyViewHistoryLayersCurrent");
+            ConfigureSkyViewHistoryMetaDescriptor(m_SkyViewHistoryMetaPrevious, "SkyViewHistoryMetaPrevious");
+            ConfigureSkyViewHistoryMetaDescriptor(m_SkyViewHistoryMetaCurrent, "SkyViewHistoryMetaCurrent");
         }
 
         public override void Create()
@@ -120,6 +183,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_TransmittanceKernel = m_ComputeShader.FindKernel(TransmittanceKernelName);
             m_MultiScatteringKernel = m_ComputeShader.FindKernel(MultiScatteringKernelName);
             m_SkyViewKernel = m_ComputeShader.FindKernel(SkyViewKernelName);
+            m_SkyViewStoreHistoryKernel = m_ComputeShader.FindKernel(SkyViewStoreHistoryKernelName);
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -130,6 +194,10 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureLutDescriptor(m_TransmittanceLUT, TransmittanceWidth, TransmittanceHeight);
             ConfigureLutDescriptor(m_MultiScatteringLUT, MultiScatteringWidth, MultiScatteringHeight);
             ConfigureLutDescriptor(m_SkyViewLUT, SkyViewWidth, SkyViewHeight);
+            ConfigureSkyViewHistoryTextureDescriptor(m_SkyViewHistoryLayersPrevious, "SkyViewHistoryLayersPrevious");
+            ConfigureSkyViewHistoryTextureDescriptor(m_SkyViewHistoryLayersCurrent, "SkyViewHistoryLayersCurrent");
+            ConfigureSkyViewHistoryMetaDescriptor(m_SkyViewHistoryMetaPrevious, "SkyViewHistoryMetaPrevious");
+            ConfigureSkyViewHistoryMetaDescriptor(m_SkyViewHistoryMetaCurrent, "SkyViewHistoryMetaCurrent");
 
             if (!m_IsActive
                 || !PassRecorder.IsPassTextureImportActive
@@ -152,11 +220,30 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_CachedSkyViewHandle != null)
                 PassRecorder.ImportTexture(m_SkyViewLUT, m_CachedSkyViewHandle);
 
+            m_HasValidSkyViewHistoryLayers = AllocHistoryTexture(
+                SkyViewHistoryTextureKey,
+                m_SkyViewHistoryLayersPrevious,
+                m_SkyViewHistoryLayersCurrent,
+                m_SkyViewHistoryLayersCurrent.desc);
+            m_HasValidSkyViewHistoryMeta = AllocHistoryBuffer(
+                SkyViewHistoryMetaKey,
+                m_SkyViewHistoryMetaPrevious,
+                m_SkyViewHistoryMetaCurrent,
+                m_SkyViewHistoryMetaCurrent.desc);
+
             var transmittanceHash = ComputeTransmittanceHash(m_Parameters);
             var multiScatteringHash = ComputeMultiScatteringHash(m_Parameters, transmittanceHash);
             var skyViewDependencyHash = ComputeSkyViewDependencyHash(multiScatteringHash);
             var skyViewParametersHash = ComputeSkyViewParametersHash(m_Parameters);
             var skyViewCameraHash = ComputeSkyViewCameraHash(m_Parameters);
+            m_SkyViewHistoryDependencyHash = skyViewDependencyHash;
+            m_SkyViewHistoryParameterHash = skyViewParametersHash;
+            m_SkyViewHistoryFrameIndex = unchecked((uint)Time.frameCount);
+            m_SkyViewHistoryTargetLayer = ResolveSkyViewHistoryTargetLayer(
+                skyViewDependencyHash,
+                skyViewParametersHash,
+                m_Parameters.skyCameraPositionPS,
+                m_Parameters.skySunDirection);
 
             m_TransmittanceRebuildReason = ResolveRebuildReason(m_TransmittanceCacheRecreated, m_CachedTransmittanceHash, transmittanceHash);
             m_MultiScatteringRebuildReason = ResolveRebuildReason(m_MultiScatteringCacheRecreated, m_CachedMultiScatteringHash, multiScatteringHash);
@@ -245,6 +332,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_CachedSkyViewParametersHash = ComputeSkyViewParametersHash(m_Parameters);
                 m_CachedSkyViewCameraHash = ComputeSkyViewCameraHash(m_Parameters);
             }
+
+            StoreSkyViewHistory(cmd);
         }
 
         public override void Dispose()
@@ -253,10 +342,15 @@ namespace VividRP.Runtime.RenderPass.Core
             m_TransmittanceKernel = -1;
             m_MultiScatteringKernel = -1;
             m_SkyViewKernel = -1;
+            m_SkyViewStoreHistoryKernel = -1;
             ReleaseCachedLutResources();
             m_TransmittanceLUT?.ClearImportedHandle();
             m_MultiScatteringLUT?.ClearImportedHandle();
             m_SkyViewLUT?.ClearImportedHandle();
+            m_SkyViewHistoryLayersPrevious?.ClearImportedHandle();
+            m_SkyViewHistoryLayersCurrent?.ClearImportedHandle();
+            m_SkyViewHistoryMetaPrevious?.ClearImportedBuffer();
+            m_SkyViewHistoryMetaCurrent?.ClearImportedBuffer();
         }
 
         private void BindCommonParameters(ComputeCommandBuffer cmd)
@@ -295,6 +389,39 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.ClearBuffer = false;
         }
 
+        private static void ConfigureSkyViewHistoryTextureDescriptor(RenderGraphTexture texture, string name)
+        {
+            if (texture?.desc == null)
+                return;
+
+            texture.desc.Width = SkyViewWidth;
+            texture.desc.Height = SkyViewHeight;
+            texture.desc.Slices = SkyViewHistoryLayerCount;
+            texture.desc.Dimension = TextureDimension.Tex2DArray;
+            texture.desc.ColorFormat = GraphicsFormat.R16G16B16A16_SFloat;
+            texture.desc.DepthBufferBits = DepthBits.None;
+            texture.desc.FilterMode = FilterMode.Bilinear;
+            texture.desc.WrapMode = TextureWrapMode.Clamp;
+            texture.desc.UseMipMap = false;
+            texture.desc.AutoGenerateMips = false;
+            texture.desc.MipCount = 1;
+            texture.desc.EnableRandomWrite = true;
+            texture.desc.ClearBuffer = false;
+            texture.desc.Name = name;
+        }
+
+        private static void ConfigureSkyViewHistoryMetaDescriptor(RenderGraphBuffer buffer, string name)
+        {
+            if (buffer == null)
+                return;
+
+            buffer.desc ??= new RenderGraphBufferDesc();
+            buffer.desc.Count = SkyViewHistoryLayerCount;
+            buffer.desc.Stride = SkyViewHistoryMetaStride;
+            buffer.desc.Target = GraphicsBuffer.Target.Structured;
+            buffer.desc.Name = name;
+        }
+
         private void ResetFrameCacheState()
         {
             m_ShouldRebuildTransmittance = false;
@@ -306,6 +433,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_TransmittanceCacheRecreated = false;
             m_MultiScatteringCacheRecreated = false;
             m_SkyViewCacheRecreated = false;
+            m_HasValidSkyViewHistoryLayers = false;
+            m_HasValidSkyViewHistoryMeta = false;
+            m_SkyViewHistoryTargetLayer = 0;
+            m_SkyViewHistoryDependencyHash = 0;
+            m_SkyViewHistoryParameterHash = 0;
+            m_SkyViewHistoryFrameIndex = 0u;
         }
 
         private void EnsureCachedLutResources()
@@ -535,6 +668,105 @@ namespace VividRP.Runtime.RenderPass.Core
         private static int AppendHash(int hash, float value)
         {
             return AppendHash(hash, value.GetHashCode());
+        }
+
+        private int ResolveSkyViewHistoryTargetLayer(
+            int dependencyHash,
+            int parameterHash,
+            Vector4 cameraPositionPS,
+            Vector4 sunDirection)
+        {
+            if (!m_HasValidSkyViewHistoryMeta || m_SkyViewHistoryMetaPrevious?.ImportedGraphicsBuffer == null)
+                return 0;
+
+            var previousMetaBuffer = m_SkyViewHistoryMetaPrevious.ImportedGraphicsBuffer;
+            if (previousMetaBuffer.count < SkyViewHistoryLayerCount || previousMetaBuffer.stride != SkyViewHistoryMetaStride)
+                return 0;
+
+            previousMetaBuffer.GetData(m_SkyViewHistoryMetaEntries);
+
+            var bestLayer = -1;
+            var bestScore = float.MaxValue;
+            var invalidLayer = -1;
+            uint oldestFrame = uint.MaxValue;
+            var oldestLayer = 0;
+            var currentCameraPosition = new Vector3(cameraPositionPS.x, cameraPositionPS.y, cameraPositionPS.z);
+            var currentSunDirection = new Vector3(sunDirection.x, sunDirection.y, sunDirection.z).normalized;
+
+            for (var layerIndex = 0; layerIndex < SkyViewHistoryLayerCount; layerIndex++)
+            {
+                var meta = m_SkyViewHistoryMetaEntries[layerIndex];
+                if (meta.lastTouchedFrame < oldestFrame)
+                {
+                    oldestFrame = meta.lastTouchedFrame;
+                    oldestLayer = layerIndex;
+                }
+
+                if (meta.valid == 0u)
+                {
+                    if (invalidLayer < 0)
+                        invalidLayer = layerIndex;
+
+                    continue;
+                }
+
+                if (meta.dependencyHash != unchecked((uint)dependencyHash))
+                    continue;
+
+                var parameterPenalty = meta.parameterHash == unchecked((uint)parameterHash) ? 0.0f : 1000000.0f;
+                var previousCameraPosition = new Vector3(meta.cameraPositionPS.x, meta.cameraPositionPS.y, meta.cameraPositionPS.z);
+                var previousSunDirection = new Vector3(meta.sunDirection.x, meta.sunDirection.y, meta.sunDirection.z).normalized;
+                var cameraDelta = Vector3.Distance(previousCameraPosition, currentCameraPosition);
+                var sunDot = Mathf.Clamp(Vector3.Dot(previousSunDirection, currentSunDirection), -1.0f, 1.0f);
+                var sunAngleDelta = Mathf.Acos(sunDot);
+                var score = parameterPenalty + cameraDelta + sunAngleDelta * 1000.0f;
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    bestLayer = layerIndex;
+                }
+            }
+
+            if (bestLayer >= 0)
+                return bestLayer;
+
+            if (invalidLayer >= 0)
+                return invalidLayer;
+
+            return oldestLayer;
+        }
+
+        private void StoreSkyViewHistory(ComputeCommandBuffer cmd)
+        {
+            if (cmd == null
+                || m_ComputeShader == null
+                || m_SkyViewStoreHistoryKernel < 0
+                || m_SkyViewLUT?.innerHandle.IsValid() != true
+                || m_SkyViewHistoryLayersPrevious?.innerHandle.IsValid() != true
+                || m_SkyViewHistoryLayersCurrent?.innerHandle.IsValid() != true
+                || m_SkyViewHistoryMetaPrevious?.innerHandle.IsValid() != true
+                || m_SkyViewHistoryMetaCurrent?.innerHandle.IsValid() != true)
+            {
+                return;
+            }
+
+            BindCommonParameters(cmd);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewStoreHistoryKernel, SkyViewLutSourceId, m_SkyViewLUT.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewStoreHistoryKernel, SkyViewHistoryLayersPreviousId, m_SkyViewHistoryLayersPrevious.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewStoreHistoryKernel, SkyViewHistoryLayersCurrentId, m_SkyViewHistoryLayersCurrent.innerHandle);
+            cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewStoreHistoryKernel, SkyViewHistoryMetaPreviousId, m_SkyViewHistoryMetaPrevious.innerHandle);
+            cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewStoreHistoryKernel, SkyViewHistoryMetaCurrentId, m_SkyViewHistoryMetaCurrent.innerHandle);
+            cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryTargetLayerId, Mathf.Clamp(m_SkyViewHistoryTargetLayer, 0, SkyViewHistoryLayerCount - 1));
+            cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryHasValidHistoryId, m_HasValidSkyViewHistoryLayers && m_HasValidSkyViewHistoryMeta ? 1 : 0);
+            cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryDependencyHashId, m_SkyViewHistoryDependencyHash);
+            cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryParameterHashId, m_SkyViewHistoryParameterHash);
+            cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryFrameIndexId, unchecked((int)m_SkyViewHistoryFrameIndex));
+            cmd.DispatchCompute(
+                m_ComputeShader,
+                m_SkyViewStoreHistoryKernel,
+                CoreUtils.DivRoundUp(SkyViewWidth, 8),
+                CoreUtils.DivRoundUp(SkyViewHeight, 8),
+                SkyViewHistoryLayerCount);
         }
 
         private static ProfilingSampler GetTransmittanceRebuildSampler(SkyLutRebuildReason reason)

@@ -15,20 +15,35 @@ namespace VividRP.Editor.Tests
     public class AtmosphereLUTPassTests
     {
         [Test]
-        public void Initialize_RegistersThreeWritableLuts()
+        public void Initialize_RegistersLutsAndHiddenSkyViewHistoryResources()
         {
             IRenderPass renderPass = new AtmosphereLUTPass();
 
             var resources = renderPass.Initialize();
             var textureEntries = resources.Textures.OrderBy(entry => entry.Name).ToArray();
+            var bufferEntries = resources.Buffers.OrderBy(entry => entry.Name).ToArray();
 
             Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[]
             {
                 "MultiScatteringLUT",
                 "SkyViewLUT",
+                "SkyViewHistoryLayersCurrent",
+                "SkyViewHistoryLayersPrevious",
                 "TransmittanceLUT"
             }));
-            Assert.That(textureEntries.Select(entry => entry.Access).Distinct(), Is.EqualTo(new[] { AccessFlags.Write }));
+            Assert.That(textureEntries.Single(entry => entry.Name == "TransmittanceLUT").Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(textureEntries.Single(entry => entry.Name == "MultiScatteringLUT").Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(textureEntries.Single(entry => entry.Name == "SkyViewLUT").Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(textureEntries.Single(entry => entry.Name == "SkyViewHistoryLayersPrevious").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(textureEntries.Single(entry => entry.Name == "SkyViewHistoryLayersCurrent").Access, Is.EqualTo(AccessFlags.Write));
+
+            Assert.That(bufferEntries.Select(entry => entry.Name), Is.EqualTo(new[]
+            {
+                "SkyViewHistoryMetaCurrent",
+                "SkyViewHistoryMetaPrevious"
+            }));
+            Assert.That(bufferEntries.Single(entry => entry.Name == "SkyViewHistoryMetaPrevious").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(bufferEntries.Single(entry => entry.Name == "SkyViewHistoryMetaCurrent").Access, Is.EqualTo(AccessFlags.Write));
         }
 
         [Test]
@@ -47,6 +62,10 @@ namespace VividRP.Editor.Tests
             AssertTexture(pass, "m_TransmittanceLUT", AtmosphereLUTPass.TransmittanceWidth, AtmosphereLUTPass.TransmittanceHeight);
             AssertTexture(pass, "m_MultiScatteringLUT", AtmosphereLUTPass.MultiScatteringWidth, AtmosphereLUTPass.MultiScatteringHeight);
             AssertTexture(pass, "m_SkyViewLUT", AtmosphereLUTPass.SkyViewWidth, AtmosphereLUTPass.SkyViewHeight);
+            AssertArrayTexture(pass, "m_SkyViewHistoryLayersPrevious", AtmosphereLUTPass.SkyViewWidth, AtmosphereLUTPass.SkyViewHeight, AtmosphereLUTPass.SkyViewHistoryLayerCount);
+            AssertArrayTexture(pass, "m_SkyViewHistoryLayersCurrent", AtmosphereLUTPass.SkyViewWidth, AtmosphereLUTPass.SkyViewHeight, AtmosphereLUTPass.SkyViewHistoryLayerCount);
+            AssertStructuredBuffer(pass, "m_SkyViewHistoryMetaPrevious", AtmosphereLUTPass.SkyViewHistoryLayerCount);
+            AssertStructuredBuffer(pass, "m_SkyViewHistoryMetaCurrent", AtmosphereLUTPass.SkyViewHistoryLayerCount);
         }
 
         [Test]
@@ -76,6 +95,14 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("PassRecorder.ImportTexture(m_TransmittanceLUT, m_CachedTransmittanceHandle);"));
             Assert.That(source, Does.Contain("PassRecorder.ImportTexture(m_MultiScatteringLUT, m_CachedMultiScatteringHandle);"));
             Assert.That(source, Does.Contain("PassRecorder.ImportTexture(m_SkyViewLUT, m_CachedSkyViewHandle);"));
+            Assert.That(source, Does.Contain("AllocHistoryTexture("));
+            Assert.That(source, Does.Contain("SkyViewHistoryTextureKey,"));
+            Assert.That(source, Does.Contain("m_SkyViewHistoryLayersPrevious,"));
+            Assert.That(source, Does.Contain("m_SkyViewHistoryLayersCurrent,"));
+            Assert.That(source, Does.Contain("AllocHistoryBuffer("));
+            Assert.That(source, Does.Contain("SkyViewHistoryMetaKey,"));
+            Assert.That(source, Does.Contain("m_SkyViewHistoryMetaPrevious,"));
+            Assert.That(source, Does.Contain("m_SkyViewHistoryMetaCurrent,"));
             Assert.That(source, Does.Contain("ComputeTransmittanceHash(m_Parameters)"));
             Assert.That(source, Does.Contain("ComputeMultiScatteringHash(m_Parameters, transmittanceHash)"));
             Assert.That(source, Does.Contain("ComputeSkyViewDependencyHash(multiScatteringHash)"));
@@ -106,6 +133,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("ReleaseLutResource(ref m_CachedTransmittanceTexture, ref m_CachedTransmittanceHandle);"));
             Assert.That(source, Does.Contain("ReleaseLutResource(ref m_CachedMultiScatteringTexture, ref m_CachedMultiScatteringHandle);"));
             Assert.That(source, Does.Contain("ReleaseLutResource(ref m_CachedSkyViewTexture, ref m_CachedSkyViewHandle);"));
+            Assert.That(source, Does.Contain("ConfigureSkyViewHistoryTextureDescriptor(m_SkyViewHistoryLayersPrevious, \"SkyViewHistoryLayersPrevious\");"));
+            Assert.That(source, Does.Contain("ConfigureSkyViewHistoryMetaDescriptor(m_SkyViewHistoryMetaPrevious, \"SkyViewHistoryMetaPrevious\");"));
         }
 
         [Test]
@@ -130,6 +159,30 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Source_DeclaresSkyViewLayeredHistoryStorePath()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "AtmosphereLUTPass.cs"));
+
+            Assert.That(source, Does.Contain("using System.Runtime.InteropServices;"));
+            Assert.That(source, Does.Contain("private const string SkyViewStoreHistoryKernelName = \"SkyViewLUTStoreHistory\";"));
+            Assert.That(source, Does.Contain("[StructLayout(LayoutKind.Sequential)]"));
+            Assert.That(source, Does.Contain("private struct SkyViewHistoryMetaEntry"));
+            Assert.That(source, Does.Contain("private readonly SkyViewHistoryMetaEntry[] m_SkyViewHistoryMetaEntries = new SkyViewHistoryMetaEntry[SkyViewHistoryLayerCount];"));
+            Assert.That(source, Does.Contain("m_SkyViewStoreHistoryKernel = m_ComputeShader.FindKernel(SkyViewStoreHistoryKernelName);"));
+            Assert.That(source, Does.Contain("m_SkyViewHistoryFrameIndex = unchecked((uint)Time.frameCount);"));
+            Assert.That(source, Does.Contain("m_SkyViewHistoryTargetLayer = ResolveSkyViewHistoryTargetLayer("));
+            Assert.That(source, Does.Contain("m_SkyViewHistoryMetaPrevious?.ImportedGraphicsBuffer == null"));
+            Assert.That(source, Does.Contain("previousMetaBuffer.GetData(m_SkyViewHistoryMetaEntries);"));
+            Assert.That(source, Does.Contain("StoreSkyViewHistory(cmd);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewStoreHistoryKernel, SkyViewLutSourceId, m_SkyViewLUT.innerHandle);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewStoreHistoryKernel, SkyViewHistoryMetaPreviousId, m_SkyViewHistoryMetaPrevious.innerHandle);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewStoreHistoryKernel, SkyViewHistoryMetaCurrentId, m_SkyViewHistoryMetaCurrent.innerHandle);"));
+            Assert.That(source, Does.Contain("cmd.DispatchCompute("));
+            Assert.That(source, Does.Contain("m_SkyViewStoreHistoryKernel,"));
+            Assert.That(source, Does.Contain("SkyViewHistoryLayerCount);"));
+        }
+
+        [Test]
         public void Shader_Source_DeclaresRequiredKernelsAndSkyViewEvaluation()
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AtmosphereLUT.compute"));
@@ -150,6 +203,25 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EvaluateSkyView"));
         }
 
+        [Test]
+        public void Shader_Source_DeclaresSkyViewHistoryStoreKernel()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AtmosphereLUT.compute"));
+
+            Assert.That(source, Does.Contain("#pragma kernel SkyViewLUTStoreHistory"));
+            Assert.That(source, Does.Contain("Texture2D<float4> _SkyViewLUTSource;"));
+            Assert.That(source, Does.Contain("Texture2DArray<float4> _SkyViewHistoryLayersPrevious;"));
+            Assert.That(source, Does.Contain("RWTexture2DArray<float4> _SkyViewHistoryLayersCurrent;"));
+            Assert.That(source, Does.Contain("struct SkyViewHistoryMetaEntry"));
+            Assert.That(source, Does.Contain("StructuredBuffer<SkyViewHistoryMetaEntry> _SkyViewHistoryMetaPrevious;"));
+            Assert.That(source, Does.Contain("RWStructuredBuffer<SkyViewHistoryMetaEntry> _SkyViewHistoryMetaCurrent;"));
+            Assert.That(source, Does.Contain("int _SkyViewHistoryTargetLayer;"));
+            Assert.That(source, Does.Contain("int _SkyViewHistoryFrameIndex;"));
+            Assert.That(source, Does.Contain("void SkyViewLUTStoreHistory(uint3 tid : SV_DispatchThreadID)"));
+            Assert.That(source, Does.Contain("_SkyViewHistoryLayersCurrent[tid] = color;"));
+            Assert.That(source, Does.Contain("_SkyViewHistoryMetaCurrent[layerIndex] = meta;"));
+        }
+
         private static void AssertTexture(AtmosphereLUTPass pass, string fieldName, int expectedWidth, int expectedHeight)
         {
             var texture = GetFieldValue<RenderGraphTexture>(pass, fieldName);
@@ -158,6 +230,26 @@ namespace VividRP.Editor.Tests
             Assert.That(texture.desc.Height, Is.EqualTo(expectedHeight));
             Assert.That(texture.desc.EnableRandomWrite, Is.True);
             Assert.That(texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+        }
+
+        private static void AssertArrayTexture(AtmosphereLUTPass pass, string fieldName, int expectedWidth, int expectedHeight, int expectedSlices)
+        {
+            var texture = GetFieldValue<RenderGraphTexture>(pass, fieldName);
+
+            Assert.That(texture.desc.Width, Is.EqualTo(expectedWidth));
+            Assert.That(texture.desc.Height, Is.EqualTo(expectedHeight));
+            Assert.That(texture.desc.Slices, Is.EqualTo(expectedSlices));
+            Assert.That(texture.desc.Dimension, Is.EqualTo(TextureDimension.Tex2DArray));
+            Assert.That(texture.desc.EnableRandomWrite, Is.True);
+            Assert.That(texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+        }
+
+        private static void AssertStructuredBuffer(AtmosphereLUTPass pass, string fieldName, int expectedCount)
+        {
+            var buffer = GetFieldValue<RenderGraphBuffer>(pass, fieldName);
+
+            Assert.That(buffer.desc.Count, Is.EqualTo(expectedCount));
+            Assert.That(buffer.desc.Target, Is.EqualTo(GraphicsBuffer.Target.Structured));
         }
 
         private static T GetFieldValue<T>(AtmosphereLUTPass pass, string fieldName)

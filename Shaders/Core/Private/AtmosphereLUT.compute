@@ -4,6 +4,7 @@
 #pragma kernel TransmittanceLUT
 #pragma kernel MultiScatteringLUT
 #pragma kernel SkyViewLUT
+#pragma kernel SkyViewLUTStoreHistory
 #pragma kernel SkyCubemap
 
 static const int TRANSMITTANCE_SAMPLE_COUNT = 16;
@@ -26,13 +27,46 @@ float4 _SkyGroundTint;
 float4 _SkyFogParams;
 int _SkyCubemapViewSampleCount;
 int _SkyCubemapLightSampleCount;
+int _SkyViewHistoryTargetLayer;
+int _SkyViewHistoryHasValidHistory;
+int _SkyViewHistoryDependencyHash;
+int _SkyViewHistoryParameterHash;
+int _SkyViewHistoryFrameIndex;
 
 Texture2D<float4> _TransmittanceLUT;
 Texture2D<float4> _MultiScatteringLUT;
+Texture2D<float4> _SkyViewLUTSource;
+Texture2DArray<float4> _SkyViewHistoryLayersPrevious;
 RWTexture2D<float4> _TransmittanceLUTOutput;
 RWTexture2D<float4> _MultiScatteringLUTOutput;
 RWTexture2D<float4> _SkyViewLUTOutput;
+RWTexture2DArray<float4> _SkyViewHistoryLayersCurrent;
 RWTexture2DArray<float4> _SkyCubemapOutput;
+
+struct SkyViewHistoryMetaEntry
+{
+    uint valid;
+    uint dependencyHash;
+    uint parameterHash;
+    uint lastTouchedFrame;
+    float4 cameraPositionPS;
+    float4 sunDirection;
+};
+
+StructuredBuffer<SkyViewHistoryMetaEntry> _SkyViewHistoryMetaPrevious;
+RWStructuredBuffer<SkyViewHistoryMetaEntry> _SkyViewHistoryMetaCurrent;
+
+SkyViewHistoryMetaEntry CreateInvalidSkyViewHistoryMetaEntry()
+{
+    SkyViewHistoryMetaEntry entry;
+    entry.valid = 0u;
+    entry.dependencyHash = 0u;
+    entry.parameterHash = 0u;
+    entry.lastTouchedFrame = 0u;
+    entry.cameraPositionPS = 0.0f;
+    entry.sunDirection = 0.0f;
+    return entry;
+}
 
 bool IntersectAtmosphere(float3 origin, float3 direction, float atmosphereRadius, out float entryDistance, out float exitDistance)
 {
@@ -584,6 +618,55 @@ void SkyViewLUT(uint3 tid : SV_DispatchThreadID)
     float2 uv = (tid.xy + 0.5f) / float2(width, height);
     float3 directionWS = DecodeSkyViewDirection(uv);
     _SkyViewLUTOutput[tid.xy] = float4(EvaluateSkyView(directionWS), 1.0f);
+}
+
+[numthreads(8, 8, 1)]
+void SkyViewLUTStoreHistory(uint3 tid : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    uint elements;
+    _SkyViewHistoryLayersCurrent.GetDimensions(width, height, elements);
+    if (tid.x >= width || tid.y >= height || tid.z >= elements)
+        return;
+
+    int layerIndex = (int)tid.z;
+    bool isTargetLayer = layerIndex == _SkyViewHistoryTargetLayer;
+    bool hasValidHistory = _SkyViewHistoryHasValidHistory != 0;
+
+    float4 color = 0.0f;
+    if (isTargetLayer)
+        color = _SkyViewLUTSource.Load(int3(tid.xy, 0));
+    else if (hasValidHistory)
+        color = _SkyViewHistoryLayersPrevious.Load(int4(tid.xy, layerIndex, 0));
+
+    _SkyViewHistoryLayersCurrent[tid] = color;
+
+    if (tid.x != 0 || tid.y != 0)
+        return;
+
+    uint metaCount;
+    uint metaStride;
+    _SkyViewHistoryMetaCurrent.GetDimensions(metaCount, metaStride);
+    if (tid.z >= metaCount)
+        return;
+
+    SkyViewHistoryMetaEntry meta = CreateInvalidSkyViewHistoryMetaEntry();
+    if (isTargetLayer)
+    {
+        meta.valid = 1u;
+        meta.dependencyHash = (uint)_SkyViewHistoryDependencyHash;
+        meta.parameterHash = (uint)_SkyViewHistoryParameterHash;
+        meta.lastTouchedFrame = (uint)_SkyViewHistoryFrameIndex;
+        meta.cameraPositionPS = _SkyCameraPositionPS;
+        meta.sunDirection = float4(normalize(_SkySunDirection.xyz), _SkySunDirection.w);
+    }
+    else if (hasValidHistory)
+    {
+        meta = _SkyViewHistoryMetaPrevious[layerIndex];
+    }
+
+    _SkyViewHistoryMetaCurrent[layerIndex] = meta;
 }
 
 [numthreads(8, 8, 1)]

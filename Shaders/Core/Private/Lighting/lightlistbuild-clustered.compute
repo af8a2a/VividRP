@@ -68,6 +68,7 @@ groupshared unsigned int clusterIdxs[MAX_NR_COARSE_ENTRIES/2];
 groupshared float4 lightPlanes[4*6]; // Each plane is defined by a float4. 6 planes per light, 4 lights (24 planes)
 
 groupshared uint lightOffs;
+groupshared uint groupAllocationBase;
 
 groupshared int categoryListCountScratch[NR_THREADS * LIGHTCATEGORY_COUNT];
 groupshared int shiftIndexScratch[NR_THREADS * LIGHTCATEGORY_COUNT];
@@ -451,7 +452,46 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
         // We have a limit to the number of lights we will track in a cluster (128). This is how much memory we
         // want to allocate out of g_LayeredSingleIdxBuffer.
         iSpaceAvail = min(iSum,MAX_NR_COARSE_ENTRIES);                          // combined storage for both direct lights and reflection
-        InterlockedAdd(g_LayeredSingleIdxBuffer[0], (uint) iSpaceAvail, start);     // alloc list memory
+    }
+
+    // Group-level prefix sum + single global atomic allocation.
+    // Instead of each cluster thread doing InterlockedAdd(g_LayeredSingleIdxBuffer[0]),
+    // compute intra-wave prefix via wave intrinsics, accumulate across waves through
+    // ldsTilePassList scratch, then one global InterlockedAdd per group.
+    {
+        uint myAlloc = (uint)iSpaceAvail;
+
+        // Intra-wave exclusive prefix sum and wave total.
+        uint wavePrefixAlloc = WavePrefixSum(myAlloc);
+        uint waveTotalAlloc = WaveActiveSum(myAlloc);
+
+        uint waveSize = WaveGetLaneCount();
+        uint waveIdx = t / waveSize;
+        uint wavesPerGroup = (NR_THREADS + waveSize - 1u) / waveSize;
+
+        // Each wave leader publishes its total to scratch.
+        if(WaveIsFirstLane())
+            ldsTilePassList[waveIdx] = waveTotalAlloc;
+        GroupMemoryBarrierWithGroupSync();
+
+        // Thread 0 scans wave totals into exclusive prefixes and does the single global alloc.
+        if(t == 0u)
+        {
+            uint acc = 0u;
+            for(uint w = 0u; w < wavesPerGroup; w++)
+            {
+                uint wc = ldsTilePassList[w];
+                ldsTilePassList[w] = acc;
+                acc += wc;
+            }
+            // Single global atomic for the entire group.
+            InterlockedAdd(g_LayeredSingleIdxBuffer[0], acc, groupAllocationBase);
+        }
+        GroupMemoryBarrierWithGroupSync();
+
+        // Each thread derives its start offset.
+        uint waveOffset = ldsTilePassList[waveIdx];
+        start = groupAllocationBase + waveOffset + wavePrefixAlloc;
     }
 
     // All our cull data are in the same list, but at render time envLights are separated so we need to shift the index

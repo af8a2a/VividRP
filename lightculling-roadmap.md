@@ -19,10 +19,11 @@ VividRP maintains two clustered light culling implementations:
   - Impact: Eliminates thread-0 bottleneck for up to 128 coarse entries.
   - Done: Implemented via `WavePrefixCountBits` / `WaveActiveCountBits` with cross-wave prefix sum through `ldsTilePassList` scratch and in-place compacted write to `coarseList`. Requires `#pragma use_dxc`.
 
-- [ ] **Group-level prefix sum for global allocation (clustered)**
+- [x] **Group-level prefix sum for global allocation (clustered)**
   - Current (`lightlistbuild-clustered.compute:453`): Each thread (=each cluster) does `InterlockedAdd(g_LayeredSingleIdxBuffer[0], iSpaceAvail, start)`.
   - Target: `groupshared` prefix sum across nrClusters threads, single group-level `InterlockedAdd`, local offset distribution.
   - Impact: Global atomic count reduced from O(nrClusters x numTiles) to O(numTiles).
+  - Done: Implemented via `WavePrefixSum` / `WaveActiveSum` with cross-wave scan through `ldsTilePassList` scratch and single `InterlockedAdd(g_LayeredSingleIdxBuffer[0], acc, groupAllocationBase)` per group.
 
 - [ ] **Pre-compute cluster corner vertices for `CheckIntersection`**
   - Current (`lightlistbuild-clustered.compute:193-215`): Each `CheckIntersection` call recomputes 8 corner vertices via `GetViewPosFromLinDepth` (involves matrix multiply). 6 planes x 8 corners x numLights = massive redundancy.

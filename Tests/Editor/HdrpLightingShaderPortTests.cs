@@ -81,6 +81,31 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ClusteredLightListGen_UsesGroupLevelPrefixSumForGlobalAllocation()
+        {
+            var source = File.ReadAllText(GetLightingPath("lightlistbuild-clustered.compute"));
+
+            // Groupshared variable for the single group-level allocation base.
+            Assert.That(source, Does.Contain("groupshared uint groupAllocationBase;"));
+
+            // Wave prefix sum for per-cluster allocation sizes.
+            Assert.That(source, Does.Contain("WavePrefixSum(myAlloc)"));
+            Assert.That(source, Does.Contain("WaveActiveSum(myAlloc)"));
+
+            // Cross-wave scan publishes wave totals to ldsTilePassList scratch.
+            Assert.That(source, Does.Contain("ldsTilePassList[waveIdx] = waveTotalAlloc;"));
+
+            // Single global atomic per group instead of per cluster.
+            Assert.That(source, Does.Contain("InterlockedAdd(g_LayeredSingleIdxBuffer[0], acc, groupAllocationBase);"));
+
+            // Each thread derives start from group base + wave offset + wave prefix.
+            Assert.That(source, Does.Contain("start = groupAllocationBase + waveOffset + wavePrefixAlloc;"));
+
+            // Must NOT contain the old per-cluster InterlockedAdd pattern.
+            Assert.That(source, Does.Not.Contain("InterlockedAdd(g_LayeredSingleIdxBuffer[0], (uint) iSpaceAvail, start);"));
+        }
+
+        [Test]
         public void LightCullUtils_DeclaresStereoAwareIndexHelpers()
         {
             var source = File.ReadAllText(GetLightingPath("LightCullUtils.hlsl"));

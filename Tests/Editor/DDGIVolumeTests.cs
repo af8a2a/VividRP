@@ -240,6 +240,148 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void DDGIProfileTable_ReturnsBalancedProfile_WithCorrectTexelSemantics()
+        {
+            DDGIProfile profile = DDGIProfileTable.GetProfile(DDGIProfileId.Balanced);
+
+            Assert.That(profile.Id, Is.EqualTo(DDGIProfileId.Balanced));
+            Assert.That(profile.RaysPerProbe, Is.EqualTo(144));
+            Assert.That(profile.IrradianceTexelCount, Is.EqualTo(8));
+            Assert.That(profile.IrradianceInteriorTexelCount, Is.EqualTo(6));
+            Assert.That(profile.DistanceTexelCount, Is.EqualTo(16));
+            Assert.That(profile.DistanceInteriorTexelCount, Is.EqualTo(14));
+            Assert.That(profile.IrradianceTexelCount - profile.IrradianceInteriorTexelCount, Is.EqualTo(2));
+            Assert.That(profile.DistanceTexelCount - profile.DistanceInteriorTexelCount, Is.EqualTo(2));
+            Assert.That(profile.Hysteresis, Is.EqualTo(0.97f).Within(0.0001f));
+        }
+
+        [Test]
+        public void DDGIVolume_DerivesProbeCounts_FromBoundsAndSpacing()
+        {
+            var volumeObject = new GameObject("DDGI Probe Count Test");
+            var volume = volumeObject.AddComponent<DDGIVolume>();
+
+            try
+            {
+                SerializedObject serializedObject = new SerializedObject(volume);
+                serializedObject.Update();
+                var serializedShape =
+                    new SerializedBoundProxyShape(serializedObject.FindProperty("m_BoundProxy"));
+                SerializedProperty probeSpacingProperty = serializedObject.FindProperty("m_ProbeSpacing");
+
+                serializedShape.shape.intValue = (int)BoundProxyShapeType.Box;
+                serializedShape.size.vector3Value = new Vector3(10.0f, 5.0f, 10.0f);
+                probeSpacingProperty.vector3Value = new Vector3(2.0f, 1.0f, 5.0f);
+                serializedObject.ApplyModifiedPropertiesWithoutUndo();
+                volume.SendMessage("OnValidate");
+
+                Assert.That(volume.ProbeSpacing, Is.EqualTo(new Vector3(2.0f, 1.0f, 5.0f)));
+                Assert.That(volume.ProbeCounts, Is.EqualTo(new Vector3Int(6, 6, 3)));
+            }
+            finally
+            {
+                Object.DestroyImmediate(volumeObject);
+            }
+        }
+
+        [Test]
+        public void DDGIVolume_DerivesCenteredProbePositions_FromBoundsAndSpacing()
+        {
+            var volumeObject = new GameObject("DDGI Probe Position Test");
+            volumeObject.transform.position = new Vector3(10.0f, 1.0f, -4.0f);
+            var volume = volumeObject.AddComponent<DDGIVolume>();
+
+            try
+            {
+                SerializedObject serializedObject = new SerializedObject(volume);
+                serializedObject.Update();
+                var serializedShape =
+                    new SerializedBoundProxyShape(serializedObject.FindProperty("m_BoundProxy"));
+                SerializedProperty probeSpacingProperty = serializedObject.FindProperty("m_ProbeSpacing");
+
+                serializedShape.shape.intValue = (int)BoundProxyShapeType.Box;
+                serializedShape.size.vector3Value = new Vector3(10.0f, 5.0f, 9.0f);
+                probeSpacingProperty.vector3Value = new Vector3(3.0f, 2.0f, 4.0f);
+                serializedObject.ApplyModifiedPropertiesWithoutUndo();
+                volume.SendMessage("OnValidate");
+
+                Assert.That(volume.ProbeCounts, Is.EqualTo(new Vector3Int(4, 3, 3)));
+                AssertVector3(volume.ProbeGridOriginLocalPosition, new Vector3(-4.5f, -2.0f, -4.0f));
+                AssertVector3(volume.GetProbeLocalPosition(new Vector3Int(0, 0, 0)), new Vector3(-4.5f, -2.0f, -4.0f));
+                AssertVector3(volume.GetProbeLocalPosition(new Vector3Int(3, 2, 2)), new Vector3(4.5f, 2.0f, 4.0f));
+                AssertVector3(volume.GetProbeLocalPosition(new Vector3Int(99, -5, 99)), new Vector3(4.5f, -2.0f, 4.0f));
+                AssertVector3(volume.GetProbeWorldPosition(new Vector3Int(3, 2, 2)), new Vector3(14.5f, 3.0f, 0.0f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(volumeObject);
+            }
+        }
+
+        [Test]
+        public void DDGIVolume_RuntimeSupport_IsBoxOnlyInV1()
+        {
+            var volumeObject = new GameObject("DDGI Runtime Support Test");
+            var volume = volumeObject.AddComponent<DDGIVolume>();
+
+            try
+            {
+                SerializedObject serializedObject = new SerializedObject(volume);
+                serializedObject.Update();
+                var serializedShape =
+                    new SerializedBoundProxyShape(serializedObject.FindProperty("m_BoundProxy"));
+
+                serializedShape.shape.intValue = (int)BoundProxyShapeType.Box;
+                serializedObject.ApplyModifiedPropertiesWithoutUndo();
+                volume.SendMessage("OnValidate");
+
+                Assert.That(volume.IsRuntimeSupported, Is.True);
+
+                serializedObject.Update();
+                serializedShape.shape.intValue = (int)BoundProxyShapeType.Sphere;
+                serializedObject.ApplyModifiedPropertiesWithoutUndo();
+                volume.SendMessage("OnValidate");
+
+                Assert.That(volume.IsRuntimeSupported, Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(volumeObject);
+            }
+        }
+
+        [Test]
+        public void DDGIVolume_OnValidate_ClampsProbeParameters_ToValidRanges()
+        {
+            var volumeObject = new GameObject("DDGI Probe Parameter Clamp Test");
+            var volume = volumeObject.AddComponent<DDGIVolume>();
+
+            try
+            {
+                SerializedObject serializedObject = new SerializedObject(volume);
+                serializedObject.Update();
+
+                serializedObject.FindProperty("m_ProbeSpacing").vector3Value = new Vector3(-1.0f, 0.0f, 0.005f);
+                serializedObject.FindProperty("m_ProbeNormalBias").floatValue = -0.5f;
+                serializedObject.FindProperty("m_ProbeViewBias").floatValue = -0.25f;
+                serializedObject.FindProperty("m_ProbeMaxRayDistance").floatValue = -10.0f;
+                serializedObject.ApplyModifiedPropertiesWithoutUndo();
+                volume.SendMessage("OnValidate");
+
+                Assert.That(volume.ProbeSpacing.x, Is.EqualTo(0.01f).Within(0.0001f));
+                Assert.That(volume.ProbeSpacing.y, Is.EqualTo(0.01f).Within(0.0001f));
+                Assert.That(volume.ProbeSpacing.z, Is.EqualTo(0.01f).Within(0.0001f));
+                Assert.That(volume.ProbeNormalBias, Is.EqualTo(0.0f));
+                Assert.That(volume.ProbeViewBias, Is.EqualTo(0.0f));
+                Assert.That(volume.ProbeMaxRayDistance, Is.EqualTo(0.0f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(volumeObject);
+            }
+        }
+
         private static void AssertVector3(Vector3 actual, Vector3 expected, float tolerance = 0.0001f)
         {
             Assert.That(actual.x, Is.EqualTo(expected.x).Within(tolerance));

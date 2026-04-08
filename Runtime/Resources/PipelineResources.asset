@@ -45,6 +45,18 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 946e513ca242c63479056f13e12cadf9, type: 3}
   - ResourceName: Shaders/Core/Private/GenerateViewZ
     ResourceObject: {fileID: 7200000, guid: 8164bbffd46662749a6398ba6b7ba0a5, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/DDGI/Internal/ProbeBlending.compute
+    ResourceObject: {fileID: 7200000, guid: 1348a295e2724bd699afad2df926ebf4, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/DDGI/Internal/ProbeBlendingDistance.compute
+    ResourceObject: {fileID: 0}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/DDGI/Internal/ProbeClassification.compute
+    ResourceObject: {fileID: 7200000, guid: 8cb28673b20543acb4f6fc587e2682e7, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/DDGI/Internal/ProbeRelocation.compute
+    ResourceObject: {fileID: 7200000, guid: 57a5c891ea3f413193c64ceeca6ec1e4, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/DDGI/Internal/ProbeTrace.compute
+    ResourceObject: {fileID: 0}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/DDGI/Internal/Reduction.compute
+    ResourceObject: {fileID: 7200000, guid: 59c254dc9c8049358eb443315a49f9ab, type: 3}
   - ResourceName: Shaders/Core/Private/HDRISky
     ResourceObject: {fileID: 4800000, guid: d41d44af2b5e2ff49b8312d9fe8aab8b, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/ClearLightLists

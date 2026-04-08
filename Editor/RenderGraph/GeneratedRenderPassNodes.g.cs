@@ -39,6 +39,24 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class DDGIProbeBlendPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.DDGIProbeBlendPass, VividRP.Runtime";
+    }
+
+    [Serializable]
+    internal sealed class DDGIProbeTracePass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.DDGIProbeTracePass, VividRP.Runtime";
+    }
+
+    [Serializable]
+    internal sealed class DDGIRTASBuildPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.DDGIRTASBuildPass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class DeferredDirectionalLightingPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.DeferredDirectionalLightingPass, VividRP.Runtime";

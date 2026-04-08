@@ -3,6 +3,7 @@
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
+// #define VIVIDRP_DDGI_ENABLED 1
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/HdrpLitLighting.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl"
 
@@ -58,9 +59,11 @@ VividGBufferSurfaceData LoadVividGBuffer(uint2 pixelCoord)
 
 float3 EvaluateDeferredDirectionalLighting(VividGBufferSurfaceData surfaceData, uint2 pixelCoord, float3 positionWS)
 {
-    float3 viewDirectionWS = GetDeferredViewDirectionWS(positionWS);
+    float3 viewDirectionWS = SafeNormalize(GetDeferredViewDirectionWS(positionWS));
     VividLitBSDFData bsdfData = BuildVividHdrpLitBSDFData(surfaceData);
-    float3 lighting = EvaluateIndirectLighting(surfaceData, bsdfData, viewDirectionWS);
+    VividPreLightData preLightData = InitVividPreLightData(surfaceData, bsdfData, viewDirectionWS);
+    float3 lighting = EvaluateIndirectLighting(surfaceData, bsdfData, preLightData, viewDirectionWS);
+    lighting = ApplyVividDDGIIndirectDiffuse(lighting, surfaceData, bsdfData, preLightData, viewDirectionWS, positionWS);
 
     [loop]
     for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)

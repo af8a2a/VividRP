@@ -13,9 +13,9 @@
 
 #include "../../Common.hlsl"
 #include "../../Platform.hlsl"
-#include "../../host/Defines.h"
-#include "../../host/DDGIRootConstants.h"
-#include "../../host/DDGIVolumeDescGPU.h"
+#include "../../host/Defines.hlsl"
+#include "../../host/DDGIRootConstants.hlsl"
+#include "../../host/DDGIVolumeDescGPU.hlsl"
 
 //------------------------------------------------------------------------
 // Defines

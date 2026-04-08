@@ -9,6 +9,10 @@
 */
 
 // For example usage, see DDGI_[D3D12|VK].cpp::CompileDDGIVolumeShaders() function.
+#define RTXGI_DDGI_BLEND_RADIANCE 0
+#define RTXGI_DDGI_PROBE_NUM_TEXELS 16
+#define RTXGI_DDGI_PROBE_NUM_INTERIOR_TEXELS 14
+
 #pragma kernel DDGIProbeBlendingCS
 // -------- CONFIG FILE ---------------------------------------------------------------------------
 

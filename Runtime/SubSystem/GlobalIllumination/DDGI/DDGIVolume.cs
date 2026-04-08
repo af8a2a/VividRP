@@ -3,6 +3,7 @@ using UnityEngine;
 namespace VividRP.Runtime
 {
     [DisallowMultipleComponent]
+    [ExecuteAlways]
     public class DDGIVolume : MonoBehaviour, IBoundProxyProvider, IBoundProxyWorldDataProvider
     {
         [SerializeField]
@@ -11,6 +12,24 @@ namespace VividRP.Runtime
         [SerializeField]
         [Min(0.0f)]
         private float m_BlendDistance;
+
+        [SerializeField]
+        private DDGIProfileId m_Profile = DDGIProfileId.Balanced;
+
+        [SerializeField]
+        private Vector3 m_ProbeSpacing = new Vector3(2.0f, 2.0f, 2.0f);
+
+        [SerializeField]
+        [Min(0.0f)]
+        private float m_ProbeNormalBias = 0.2f;
+
+        [SerializeField]
+        [Min(0.0f)]
+        private float m_ProbeViewBias = 0.2f;
+
+        [SerializeField]
+        [Min(0.0f)]
+        private float m_ProbeMaxRayDistance = 30.0f;
 
         public BoundProxyFeature BoundProxyFeature => BoundProxyFeature.DDGIVolume;
 
@@ -33,6 +52,22 @@ namespace VividRP.Runtime
 
         public float BlendDistance => Mathf.Max(m_BlendDistance, 0.0f);
 
+        public DDGIProfileId Profile => m_Profile;
+
+        public Vector3 ProbeSpacing => DDGIProfileTable.SanitizeProbeSpacing(m_ProbeSpacing);
+
+        public float ProbeNormalBias => Mathf.Max(m_ProbeNormalBias, 0.0f);
+
+        public float ProbeViewBias => Mathf.Max(m_ProbeViewBias, 0.0f);
+
+        public float ProbeMaxRayDistance => Mathf.Max(m_ProbeMaxRayDistance, 0.0f);
+
+        public Vector3Int ProbeCounts => CalculateProbeCounts(BoundProxyShape.GetLocalBounds().size, ProbeSpacing);
+
+        public Vector3 ProbeGridOriginLocalPosition => CalculateProbeGridOriginLocalPosition(ProbeCounts, ProbeSpacing);
+
+        public bool IsRuntimeSupported => IsBoundProxyActive && BoundProxyShape.shape == BoundProxyShapeType.Box;
+
         public Bounds LocalBounds => BoundProxyShape.GetLocalBounds();
 
         public Bounds BlendInnerLocalBounds => BlendInnerBoundProxyShape.GetLocalBounds();
@@ -44,6 +79,34 @@ namespace VividRP.Runtime
                 TryCreateBoundProxyWorldData(out BoundProxyWorldData worldData);
                 return worldData.worldAabb;
             }
+        }
+
+        public Bounds ExpandedWorldBounds
+        {
+            get
+            {
+                Bounds bounds = WorldBounds;
+                bounds.Expand(ProbeMaxRayDistance * 2.0f);
+                return bounds;
+            }
+        }
+
+        public Vector3 GetProbeLocalPosition(Vector3Int probeCoordinate)
+        {
+            Vector3Int probeCounts = ProbeCounts;
+            Vector3Int clampedCoordinate = ClampProbeCoordinate(probeCoordinate, probeCounts);
+            Vector3 origin = ProbeGridOriginLocalPosition;
+            Vector3 spacing = ProbeSpacing;
+
+            return new Vector3(
+                origin.x + clampedCoordinate.x * spacing.x,
+                origin.y + clampedCoordinate.y * spacing.y,
+                origin.z + clampedCoordinate.z * spacing.z);
+        }
+
+        public Vector3 GetProbeWorldPosition(Vector3Int probeCoordinate)
+        {
+            return transform.position + GetProbeLocalPosition(probeCoordinate);
         }
 
         private void Reset()
@@ -63,6 +126,10 @@ namespace VividRP.Runtime
             m_BoundProxy.Sanitize();
             m_BoundProxy.center = Vector3.zero;
             m_BlendDistance = BlendDistance;
+            m_ProbeSpacing = ProbeSpacing;
+            m_ProbeNormalBias = ProbeNormalBias;
+            m_ProbeViewBias = ProbeViewBias;
+            m_ProbeMaxRayDistance = ProbeMaxRayDistance;
         }
 
         public float EvaluateBlendFactor(Vector3 worldPosition)
@@ -179,6 +246,30 @@ namespace VividRP.Runtime
                 shape = BoundProxyShapeType.Box,
                 size = new Vector3(10.0f, 5.0f, 10.0f),
             };
+        }
+
+        private static Vector3 CalculateProbeGridOriginLocalPosition(Vector3Int probeCounts, Vector3 spacing)
+        {
+            return new Vector3(
+                -(probeCounts.x - 1) * spacing.x * 0.5f,
+                -(probeCounts.y - 1) * spacing.y * 0.5f,
+                -(probeCounts.z - 1) * spacing.z * 0.5f);
+        }
+
+        private static Vector3Int ClampProbeCoordinate(Vector3Int probeCoordinate, Vector3Int probeCounts)
+        {
+            return new Vector3Int(
+                Mathf.Clamp(probeCoordinate.x, 0, Mathf.Max(probeCounts.x - 1, 0)),
+                Mathf.Clamp(probeCoordinate.y, 0, Mathf.Max(probeCounts.y - 1, 0)),
+                Mathf.Clamp(probeCoordinate.z, 0, Mathf.Max(probeCounts.z - 1, 0)));
+        }
+
+        private static Vector3Int CalculateProbeCounts(Vector3 boundsSize, Vector3 spacing)
+        {
+            return new Vector3Int(
+                Mathf.Max(1, Mathf.FloorToInt(boundsSize.x / spacing.x) + 1),
+                Mathf.Max(1, Mathf.FloorToInt(boundsSize.y / spacing.y) + 1),
+                Mathf.Max(1, Mathf.FloorToInt(boundsSize.z / spacing.z) + 1));
         }
     }
 }

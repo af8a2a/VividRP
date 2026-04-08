@@ -94,8 +94,11 @@ namespace VividRP.Runtime
                         gpuDrivenSystem.VisibleMeshletIndirectDrawArgsBuffer);
                 }
 
+                DDGISystem.instance.Update(PassRecorder.GetFrameData());
+
                 var graphAsset = m_Asset.RenderGraphAsset;
                 PassRecorder.PrepareFrame(graphAsset, cmdBuffer);
+                DDGISystem.instance.BindGlobalQueryState(cmdBuffer);
 
                 shouldSubmit = true;
                 context.ExecuteCommandBuffer(cmdBuffer);
@@ -208,6 +211,7 @@ namespace VividRP.Runtime
 
         protected override void Dispose(bool disposing)
         {
+            DDGISystem.Shutdown();
             VividGPUDrivenSystem.Shutdown();
             PassRecorder.Dispose();
             SkyManager.Deinitialize();

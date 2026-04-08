@@ -11,11 +11,6 @@
 #ifndef RTXGI_DDGI_VOLUME_DESC_GPU_H
 #define RTXGI_DDGI_VOLUME_DESC_GPU_H
 
-#ifndef HLSL
-#include <rtxgi/Math.h>
-#include <rtxgi/Types.h>
-using namespace rtxgi;
-#endif
 
 /**
  * Describes the location (i.e. index) of DDGIVolume resources
@@ -126,71 +121,10 @@ struct DDGIVolumeDescGPU
     bool     probeVariabilityEnabled;            // whether probe variability is enabled for this volume
 };
 
-#ifndef HLSL // CPU only
-static inline rtxgi::DDGIVolumeDescGPUPacked PackDDGIVolumeDescGPU(const rtxgi::DDGIVolumeDescGPU input)
-{
-    rtxgi::DDGIVolumeDescGPUPacked output = {};
 
-    output.origin = input.origin;
-    output.probeHysteresis = input.probeHysteresis;
-    output.rotation = input.rotation;
-    output.probeRayRotation = input.probeRayRotation;
-    output.probeMaxRayDistance = input.probeMaxRayDistance;
-    output.probeNormalBias = input.probeNormalBias;
-    output.probeViewBias = input.probeViewBias;
-    output.probeDistanceExponent = input.probeDistanceExponent;
-    output.probeIrradianceEncodingGamma = input.probeIrradianceEncodingGamma;
-    output.probeIrradianceThreshold = input.probeIrradianceThreshold;
-    output.probeBrightnessThreshold = input.probeBrightnessThreshold;
-    output.probeMinFrontfaceDistance = input.probeMinFrontfaceDistance;
-    output.probeSpacing = input.probeSpacing;
-
-    output.packed0  = (uint32_t)input.probeCounts.x;
-    output.packed0 |= (uint32_t)input.probeCounts.y << 10;
-    output.packed0 |= (uint32_t)input.probeCounts.z << 20;
-
-    output.packed1  = (uint32_t)(input.probeRandomRayBackfaceThreshold * 65535);
-    output.packed1 |= (uint32_t)(input.probeFixedRayBackfaceThreshold * 65535) << 16;
-
-    output.packed2  = (uint32_t)input.probeNumRays;
-    output.packed2 |= (uint32_t)input.probeNumIrradianceInteriorTexels << 16;
-    output.packed2 |= (uint32_t)input.probeNumDistanceInteriorTexels << 24;
-
-    // Probe Scroll Offsets
-    output.packed3 = (output.packed3 & ~0x7FFF)     | abs(input.probeScrollOffsets.x);
-    output.packed3 = (output.packed3 & ~0x8000)     | ((input.probeScrollOffsets.x < 0) << 15);
-    output.packed3 = (output.packed3 & ~0x10000)    | abs(input.probeScrollOffsets.y) << 16;
-    output.packed3 = (output.packed3 & ~0x80000000) | ((input.probeScrollOffsets.y < 0) << 31);
-    output.packed4 = (output.packed4 & ~0x7FFF)     | abs(input.probeScrollOffsets.z);
-    output.packed4 = (output.packed4 & ~0x8000)     | ((input.probeScrollOffsets.z < 0) << 15);
-
-    // Feature Bits
-    output.packed4 = (output.packed4 & ~0x10000)    | (input.movementType << 16);
-    output.packed4 = (output.packed4 & ~0xE0000)    | (input.probeRayDataFormat << 17);
-    output.packed4 = (output.packed4 & ~0x700000)   | (input.probeIrradianceFormat << 20);
-    output.packed4 = (output.packed4 & ~0x800000)   | (input.probeRelocationEnabled << 23);
-    output.packed4 = (output.packed4 & ~0x1000000)  | (input.probeClassificationEnabled << 24);
-    output.packed4 = (output.packed4 & ~0x2000000)  | (input.probeVariabilityEnabled << 25);
-    output.packed4 = (output.packed4 & ~0x4000000)  | (input.probeScrollClear[0] << 26);
-    output.packed4 = (output.packed4 & ~0x8000000)  | (input.probeScrollClear[1] << 27);
-    output.packed4 = (output.packed4 & ~0x10000000) | (input.probeScrollClear[2] << 28);
-    output.packed4 = (output.packed4 & ~0x20000000) | (input.probeScrollDirections[0] << 29);
-    output.packed4 = (output.packed4 & ~0x40000000) | (input.probeScrollDirections[1] << 30);
-    output.packed4 = (output.packed4 & ~0x80000000) | (input.probeScrollDirections[2] << 31);
-
-    return output;
-}
-#endif // ifndef HLSL
-
-#ifndef HLSL // CPU
-static inline rtxgi::DDGIVolumeDescGPU UnpackDDGIVolumeDescGPU(const rtxgi::DDGIVolumeDescGPUPacked input)
-{
-    rtxgi::DDGIVolumeDescGPU output;
-#else // GPU
 DDGIVolumeDescGPU UnpackDDGIVolumeDescGPU(DDGIVolumeDescGPUPacked input)
 {
     DDGIVolumeDescGPU output = (DDGIVolumeDescGPU)0;
-#endif // ifndef HLSL
     output.origin = input.origin;
     output.probeHysteresis = input.probeHysteresis;
     output.rotation = input.rotation;

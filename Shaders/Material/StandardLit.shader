@@ -25,7 +25,7 @@ Shader "VividRP/Material/StandardLit"
         [Sub(SurfaceInputs)] _OcclusionStrength("Occlusion Strength", Range(0.0, 1.0)) = 1.0
         [Sub(SurfaceInputs)] _OcclusionMap("Occlusion Map", 2D) = "white" {}
         [Sub(SurfaceInputs)] [HDR] _EmissionColor("Emission Color", Color) = (0, 0, 0, 0)
-        [Sub(SurfaceInputs)] _EmissionMap("Emission Map", 2D) = "white" {}
+        [Sub(SurfaceInputs)] _EmissionMap("Emission Map", 2D) = "black" {}
         [Sub(SurfaceInputs)] _ClearCoatMask("Clear Coat Mask", Range(0.0, 1.0)) = 0.0
         [Sub(SurfaceInputs)] _ClearCoatSmoothness("Clear Coat Smoothness", Range(0.0, 1.0)) = 1.0
 

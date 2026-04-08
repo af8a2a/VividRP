@@ -6,8 +6,10 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #define CLASSIFY_TILE_SIZE 8
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/TileClassification.hlsl"
+#define VIVIDRP_DDGI_ENABLED 1
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/HdrpLitLighting.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl"
+
 
 Texture2D<float4> _GBuffer0;
 Texture2D<float4> _GBuffer1;
@@ -82,6 +84,7 @@ float3 EvaluateDeferredLitLighting(VividGBufferSurfaceData surfaceData, uint2 pi
     VividLitBSDFData bsdfData = BuildVividHdrpLitBSDFData(surfaceData);
     VividPreLightData preLightData = InitVividPreLightData(surfaceData, bsdfData, viewDirectionWS);
     float3 lighting = EvaluateIndirectLighting(surfaceData, bsdfData, preLightData, viewDirectionWS);
+    lighting = ApplyVividDDGIIndirectDiffuse(lighting, surfaceData, bsdfData, preLightData, viewDirectionWS, positionWS);
 
     [loop]
     for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)

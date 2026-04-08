@@ -136,6 +136,15 @@ namespace VividRP.Runtime.RenderPass.Core
             Access = AccessFlags.Read)]
         private RenderGraphTexture m_PreIntegratedFGDCharlieAndFabricTexture;
 
+        [RenderGraphResource(Name = "DDGIProbeIrradiance", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_DDGIProbeIrradiance;
+
+        [RenderGraphResource(Name = "DDGIProbeDistance", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_DDGIProbeDistance;
+
+        [RenderGraphResource(Name = "DDGIProbeData", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_DDGIProbeData;
+
         private ComputeShader m_DeferredLitCompute;
         private int m_ClearDeferredLitKernel = -1;
         private int m_DeferredLitKernel = -1;
@@ -218,6 +227,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LocalPreIntegratedFGDCharlieAndFabricTexture = VividPreIntegratedFGD.CreateTexture("PreIntegratedFGD_CharlieAndFabric");
             m_PreIntegratedFGDGGXDisneyDiffuseTexture = m_LocalPreIntegratedFGDGGXDisneyDiffuseTexture;
             m_PreIntegratedFGDCharlieAndFabricTexture = m_LocalPreIntegratedFGDCharlieAndFabricTexture;
+            m_DDGIProbeIrradiance = CreateDDGITextureInput("DDGIProbeIrradiance", GraphicsFormat.A2B10G10R10_UNormPack32, FilterMode.Bilinear);
+            m_DDGIProbeDistance = CreateDDGITextureInput("DDGIProbeDistance", GraphicsFormat.R16G16_SFloat, FilterMode.Bilinear);
+            m_DDGIProbeData = CreateDDGITextureInput("DDGIProbeData", GraphicsFormat.R16G16B16A16_SFloat, FilterMode.Point);
         }
 
         public override void Create()
@@ -529,6 +541,18 @@ namespace VividRP.Runtime.RenderPass.Core
                     Name = name
                 }
             };
+        }
+
+        private static RenderGraphTexture CreateDDGITextureInput(string name, GraphicsFormat format, FilterMode filterMode)
+        {
+            RenderGraphTexture texture = RenderGraphTexture.CreateInput(name, format);
+            texture.desc.Dimension = TextureDimension.Tex2DArray;
+            texture.desc.Slices = 1;
+            texture.desc.FilterMode = filterMode;
+            texture.desc.WrapMode = TextureWrapMode.Clamp;
+            texture.desc.UseMipMap = false;
+            texture.desc.AutoGenerateMips = false;
+            return texture;
         }
 
         private static RenderGraphBuffer CreateStructuredBuffer(string name, int stride)

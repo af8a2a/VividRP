@@ -98,6 +98,24 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/DirectionalRayTracedShadow")]
         public ComputeShader DirectionalRayTracedShadowCompute;
 
+        [ResourcePath("Shaders/Core/Private/GlobalIllumination/DDGI/Internal/ProbeTrace.compute")]
+        public ComputeShader DDGIProbeTraceCompute;
+
+        [ResourcePath("Shaders/Core/Private/GlobalIllumination/DDGI/Internal/ProbeBlending.compute")]
+        public ComputeShader DDGIProbeBlendIrradianceCompute;
+
+        [ResourcePath("Shaders/Core/Private/GlobalIllumination/DDGI/Internal/ProbeBlendingDistance.compute")]
+        public ComputeShader DDGIProbeBlendDistanceCompute;
+
+        [ResourcePath("Shaders/Core/Private/GlobalIllumination/DDGI/Internal/ProbeRelocation.compute")]
+        public ComputeShader DDGIProbeRelocationCompute;
+
+        [ResourcePath("Shaders/Core/Private/GlobalIllumination/DDGI/Internal/ProbeClassification.compute")]
+        public ComputeShader DDGIProbeClassificationCompute;
+
+        [ResourcePath("Shaders/Core/Private/GlobalIllumination/DDGI/Internal/Reduction.compute")]
+        public ComputeShader DDGIReductionCompute;
+
         [ResourcePath("Shaders/Core/Private/ShadowClassify")]
         public ComputeShader ShadowClassifyCompute;
 

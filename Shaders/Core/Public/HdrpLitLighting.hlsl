@@ -12,6 +12,10 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
 
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/DDGI.hlsl"
+#if defined(VIVIDRP_DDGI_ENABLED)
+#endif
+
 static const float3 kVividDielectricF0 = float3(0.04, 0.04, 0.04);
 static const float kVividClearCoatIor = 1.5;
 static const float kVividClearCoatIeta = 1.0 / kVividClearCoatIor;
@@ -309,6 +313,59 @@ float3 EvaluateVividBakedDiffuseLighting(VividGBufferSurfaceData surfaceData)
     return surfaceData.hasBakedGI > 0.5
         ? surfaceData.bakedGI
         : VividSampleAmbientProbe(surfaceData.normalWS);
+}
+
+float3 EvaluateVividIndirectDiffuseLighting(
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData,
+    VividPreLightData preLightData)
+{
+    float3 diffuseLighting = EvaluateVividBakedDiffuseLighting(surfaceData) * bsdfData.diffuseColor * preLightData.diffuseFGD;
+    if (bsdfData.coatMask > 0.0)
+    {
+        float clampedNdotV = saturate(VividClampNdotV(preLightData.NdotV));
+        float coatIblF = VividF_Schlick(kVividClearCoatF0, 1.0, clampedNdotV) * bsdfData.coatMask;
+        diffuseLighting *= Sq(1.0 - coatIblF);
+    }
+
+    return diffuseLighting * surfaceData.ambientOcclusion;
+}
+
+float3 ApplyVividDDGIIndirectDiffuse(
+    float3 indirectLighting,
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData,
+    VividPreLightData preLightData,
+    float3 viewDirectionWS,
+    float3 positionWS)
+{
+#if defined(VIVIDRP_DDGI_ENABLED)
+    if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+    {
+        return indirectLighting;
+    }
+
+    float blendWeight = VividDDGIGetBlendWeight(positionWS);
+    if (blendWeight <= 0.0f)
+    {
+        return indirectLighting;
+    }
+
+    float3 ddgiIrradiance = VividDDGIGetIrradiance(positionWS, surfaceData.normalWS, viewDirectionWS);
+    float3 ddgiDiffuseLighting = ddgiIrradiance * bsdfData.diffuseColor * preLightData.diffuseFGD;
+    if (bsdfData.coatMask > 0.0)
+    {
+        float clampedNdotV = saturate(VividClampNdotV(preLightData.NdotV));
+        float coatIblF = VividF_Schlick(kVividClearCoatF0, 1.0, clampedNdotV) * bsdfData.coatMask;
+        ddgiDiffuseLighting *= Sq(1.0 - coatIblF);
+    }
+
+    ddgiDiffuseLighting *= surfaceData.ambientOcclusion;
+    float3 bakedDiffuseLighting = EvaluateVividIndirectDiffuseLighting(surfaceData, bsdfData, preLightData);
+    return indirectLighting + ((ddgiDiffuseLighting - bakedDiffuseLighting) * blendWeight);
+#else
+    return indirectLighting;
+#endif
 }
 
 float3 EvaluateVividHdrpLitIndirectLight(

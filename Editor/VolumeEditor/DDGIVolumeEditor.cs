@@ -25,7 +25,7 @@ namespace VividRP.Editor
         private static readonly GUIContent s_ProbeCountsLabel =
             EditorGUIUtility.TrTextContent("Probe Counts");
         private const string ProbePreviewInfo =
-            "Select this DDGI volume in Scene view to preview probe placement with indirect-drawn spheres.";
+            "Select the GameObject that owns this DDGI volume in Scene view to preview probe placement with sphere handles.";
         private const string SphereWarning =
             "Sphere DDGI volumes remain editor-visible in v1, but runtime DDGI registration only supports box volumes.";
 
@@ -108,6 +108,8 @@ namespace VividRP.Editor
             {
                 return;
             }
+
+            DDGIProbePreviewRenderer.DrawSceneViewPreview(ddgiVolume);
 
             if (ddgiVolume.BlendDistance > 0.0f)
             {

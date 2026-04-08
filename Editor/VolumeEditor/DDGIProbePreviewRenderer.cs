@@ -4,131 +4,61 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime;
-using Object = UnityEngine.Object;
 
 namespace VividRP.Editor
 {
-    [InitializeOnLoad]
     internal static class DDGIProbePreviewRenderer
     {
-        private const string PreviewShaderName = "Hidden/VividRP/Editor/DDGIProbePreview";
-        private const int MaxInstancesPerBatch = 1023;
-
-        private static readonly int ProbeColorId = Shader.PropertyToID("_ProbeColor");
-        private static readonly Color ProbeColor = new(0.28f, 0.72f, 1.0f, 0.32f);
+        private static readonly Color ProbeFillColor = new(0.28f, 0.72f, 1.0f, 0.18f);
+        private static readonly Color ProbeOutlineColor = new(0.28f, 0.72f, 1.0f, 0.95f);
         private static readonly Dictionary<EntityId, CachedPreviewData> s_CachedPreviewData = new();
 
-        private static Material s_PreviewMaterial;
-        private static Mesh s_SphereMesh;
-
-        static DDGIProbePreviewRenderer()
+        internal static void DrawSceneViewPreview(DDGIVolume volume)
         {
-            RenderPipelineManager.beginCameraRendering += OnBeginCameraRendering;
-            Selection.selectionChanged += SceneView.RepaintAll;
-            AssemblyReloadEvents.beforeAssemblyReload += DisposeAll;
-            EditorApplication.quitting += DisposeAll;
-        }
-
-        private static void OnBeginCameraRendering(ScriptableRenderContext context, Camera camera)
-        {
-            if (camera == null || camera.cameraType != CameraType.SceneView)
+            if (volume == null || !volume.isActiveAndEnabled)
             {
                 return;
             }
 
-            EnsureSharedResources();
-            if (s_PreviewMaterial == null || s_SphereMesh == null)
-            {
-                CleanupUnusedPreviewData(new HashSet<EntityId>());
-                return;
-            }
-
-            GameObject[] selectedObjects = Selection.gameObjects;
-            HashSet<EntityId> activePreviewIds = new HashSet<EntityId>();
-
-            for (int index = 0; index < selectedObjects.Length; index++)
-            {
-                GameObject selectedObject = selectedObjects[index];
-                DDGIVolume volume = selectedObject != null ? selectedObject.GetComponent<DDGIVolume>() : null;
-                if (volume == null
-                    || !volume.isActiveAndEnabled
-                    || !volume.gameObject.scene.IsValid()
-                    || !volume.gameObject.scene.isLoaded)
-                {
-                    continue;
-                }
-
-                EntityId volumeId = volume.GetEntityId();
-                if (!activePreviewIds.Add(volumeId))
-                {
-                    continue;
-                }
-
-                DrawVolumePreview(volume, camera);
-            }
-
-            CleanupUnusedPreviewData(activePreviewIds);
-        }
-
-        private static void DrawVolumePreview(DDGIVolume volume, Camera camera)
-        {
-            if (volume == null || camera == null)
+            Event currentEvent = Event.current;
+            if (currentEvent == null || currentEvent.type != EventType.Repaint)
             {
                 return;
             }
 
             CachedPreviewData previewData = GetOrCreatePreviewData(volume);
-            if (previewData == null || previewData.InstanceCount <= 0)
+            if (previewData == null || previewData.WorldPositions.Length == 0)
             {
                 return;
             }
 
-            previewData.PropertyBlock.Clear();
-            previewData.PropertyBlock.SetColor(ProbeColorId, ProbeColor);
+            CompareFunction previousZTest = Handles.zTest;
+            Color previousColor = Handles.color;
+            Camera sceneCamera = SceneView.currentDrawingSceneView != null
+                ? SceneView.currentDrawingSceneView.camera
+                : Camera.current;
+            Vector3 outlineNormal = sceneCamera != null ? sceneCamera.transform.forward : Vector3.forward;
+            float probeDiameter = previewData.ProbeRadius * 2.0f;
 
-            Matrix4x4[] matrices = previewData.Matrices;
-            int remaining = previewData.InstanceCount;
-            int offset = 0;
-
-            while (remaining > 0)
+            try
             {
-                int batchCount = Mathf.Min(remaining, MaxInstancesPerBatch);
+                Handles.zTest = CompareFunction.Always;
 
-                if (offset == 0 && batchCount == matrices.Length)
+                for (int index = 0; index < previewData.WorldPositions.Length; index++)
                 {
-                    Graphics.DrawMeshInstanced(
-                        s_SphereMesh,
-                        0,
-                        s_PreviewMaterial,
-                        matrices,
-                        batchCount,
-                        previewData.PropertyBlock,
-                        ShadowCastingMode.Off,
-                        false,
-                        volume.gameObject.layer,
-                        camera,
-                        LightProbeUsage.Off);
-                }
-                else
-                {
-                    Matrix4x4[] batch = new Matrix4x4[batchCount];
-                    Array.Copy(matrices, offset, batch, 0, batchCount);
-                    Graphics.DrawMeshInstanced(
-                        s_SphereMesh,
-                        0,
-                        s_PreviewMaterial,
-                        batch,
-                        batchCount,
-                        previewData.PropertyBlock,
-                        ShadowCastingMode.Off,
-                        false,
-                        volume.gameObject.layer,
-                        camera,
-                        LightProbeUsage.Off);
-                }
+                    Vector3 worldPosition = previewData.WorldPositions[index];
 
-                offset += batchCount;
-                remaining -= batchCount;
+                    Handles.color = ProbeFillColor;
+                    Handles.SphereHandleCap(0, worldPosition, Quaternion.identity, probeDiameter, EventType.Repaint);
+
+                    Handles.color = ProbeOutlineColor;
+                    Handles.DrawWireDisc(worldPosition, outlineNormal, previewData.ProbeRadius);
+                }
+            }
+            finally
+            {
+                Handles.zTest = previousZTest;
+                Handles.color = previousColor;
             }
         }
 
@@ -153,19 +83,19 @@ namespace VividRP.Editor
         private static void RebuildPreviewData(DDGIVolume volume, CachedPreviewData previewData, int previewHash)
         {
             float probeRadius = CalculateProbeRadius(volume);
-            List<Matrix4x4> probeMatrices = BuildProbeMatrices(volume, probeRadius);
+            List<Vector3> worldPositions = BuildProbeWorldPositions(volume);
 
-            previewData.Matrices = probeMatrices.Count > 0 ? probeMatrices.ToArray() : Array.Empty<Matrix4x4>();
-            previewData.InstanceCount = probeMatrices.Count;
+            previewData.WorldPositions = worldPositions.Count > 0 ? worldPositions.ToArray() : Array.Empty<Vector3>();
+            previewData.ProbeRadius = probeRadius;
             previewData.PreviewHash = previewHash;
         }
 
-        private static List<Matrix4x4> BuildProbeMatrices(DDGIVolume volume, float probeRadius)
+        private static List<Vector3> BuildProbeWorldPositions(DDGIVolume volume)
         {
             Vector3Int probeCounts = volume.ProbeCounts;
-            List<Matrix4x4> probeMatrices = new List<Matrix4x4>(probeCounts.x * probeCounts.y * probeCounts.z);
-            Vector3 probeScale = Vector3.one * (probeRadius * 2.0f);
+            List<Vector3> worldPositions = new List<Vector3>(probeCounts.x * probeCounts.y * probeCounts.z);
             BoundProxyShape shape = volume.BoundProxyShape;
+            Vector3 translation = volume.transform.position;
 
             for (int y = 0; y < probeCounts.y; y++)
             {
@@ -180,13 +110,12 @@ namespace VividRP.Editor
                             continue;
                         }
 
-                        Vector3 worldPosition = volume.transform.position + localPosition;
-                        probeMatrices.Add(Matrix4x4.TRS(worldPosition, Quaternion.identity, probeScale));
+                        worldPositions.Add(translation + localPosition);
                     }
                 }
             }
 
-            return probeMatrices;
+            return worldPositions;
         }
 
         private static bool ShouldRenderProbe(BoundProxyShape shape, Vector3 localPosition)
@@ -209,7 +138,7 @@ namespace VividRP.Editor
         {
             Vector3 spacing = volume.ProbeSpacing;
             float minSpacing = Mathf.Min(spacing.x, Mathf.Min(spacing.y, spacing.z));
-            return Mathf.Max(minSpacing * 0.08f, 0.0025f);
+            return Mathf.Max(minSpacing * 0.12f, 0.05f);
         }
 
         private static int ComputePreviewHash(DDGIVolume volume)
@@ -229,86 +158,10 @@ namespace VividRP.Editor
             return hash.ToHashCode();
         }
 
-        private static void EnsureSharedResources()
-        {
-            if (s_PreviewMaterial == null)
-            {
-                Shader shader = Shader.Find(PreviewShaderName);
-                if (shader != null)
-                {
-                    s_PreviewMaterial = new Material(shader)
-                    {
-                        hideFlags = HideFlags.HideAndDontSave,
-                        enableInstancing = true,
-                    };
-                }
-                else
-                {
-                    Debug.LogWarning($"[DDGIProbePreview] Shader not found: {PreviewShaderName}");
-                }
-            }
-
-            s_SphereMesh ??= CreateSphereMesh();
-        }
-
-        private static Mesh CreateSphereMesh()
-        {
-            GameObject primitive = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            try
-            {
-                MeshFilter meshFilter = primitive.GetComponent<MeshFilter>();
-                return meshFilter != null ? meshFilter.sharedMesh : null;
-            }
-            finally
-            {
-                Object.DestroyImmediate(primitive);
-            }
-        }
-
-        private static void CleanupUnusedPreviewData(HashSet<EntityId> activePreviewIds)
-        {
-            List<EntityId> staleIds = null;
-
-            foreach (KeyValuePair<EntityId, CachedPreviewData> pair in s_CachedPreviewData)
-            {
-                if (activePreviewIds.Contains(pair.Key))
-                {
-                    continue;
-                }
-
-                staleIds ??= new List<EntityId>();
-                staleIds.Add(pair.Key);
-            }
-
-            if (staleIds == null)
-            {
-                return;
-            }
-
-            for (int index = 0; index < staleIds.Count; index++)
-            {
-                s_CachedPreviewData.Remove(staleIds[index]);
-            }
-        }
-
-        private static void DisposeAll()
-        {
-            s_CachedPreviewData.Clear();
-
-            if (s_PreviewMaterial != null)
-            {
-                Object.DestroyImmediate(s_PreviewMaterial);
-                s_PreviewMaterial = null;
-            }
-
-            s_SphereMesh = null;
-        }
-
         private sealed class CachedPreviewData
         {
-            public readonly MaterialPropertyBlock PropertyBlock = new MaterialPropertyBlock();
-            public Matrix4x4[] Matrices = Array.Empty<Matrix4x4>();
-            public int InstanceCount;
+            public Vector3[] WorldPositions = Array.Empty<Vector3>();
+            public float ProbeRadius;
             public int PreviewHash;
         }
     }

@@ -7,33 +7,33 @@ namespace VividRP.Editor.Tests
     public sealed class DDGIProbePreviewTests
     {
         [Test]
-        public void DDGIProbePreviewRenderer_UsesInstancedDrawForSelectedVolumes()
+        public void DDGIProbePreviewRenderer_UsesSceneHandlesForSelectedVolumes()
         {
             string source = File.ReadAllText(GetPackageFilePath("Editor", "VolumeEditor", "DDGIProbePreviewRenderer.cs"));
 
-            Assert.That(source, Does.Contain("[InitializeOnLoad]"));
-            Assert.That(source, Does.Contain("Selection.gameObjects"));
-            Assert.That(source, Does.Contain("Graphics.DrawMeshInstanced("));
-            Assert.That(source, Does.Contain("RenderPipelineManager.beginCameraRendering"));
+            Assert.That(source, Does.Contain("DrawSceneViewPreview"));
+            Assert.That(source, Does.Contain("Handles.SphereHandleCap("));
+            Assert.That(source, Does.Contain("Handles.DrawWireDisc("));
+            Assert.That(source, Does.Contain("EventType.Repaint"));
+            Assert.That(source, Does.Contain("CompareFunction.Always"));
         }
 
         [Test]
-        public void DDGIProbePreviewShader_UsesStandardInstancing()
+        public void DDGIProbePreviewShader_RemainsAvailableForFutureShaderBasedPreview()
         {
             string source = File.ReadAllText(GetPackageFilePath("Editor", "Shader", "DDGIProbePreview.shader"));
 
             Assert.That(source, Does.Contain("Shader \"Hidden/VividRP/Editor/DDGIProbePreview\""));
             Assert.That(source, Does.Contain("#pragma multi_compile_instancing"));
-            Assert.That(source, Does.Contain("UNITY_SETUP_INSTANCE_ID(input)"));
-            Assert.That(source, Does.Contain("TransformObjectToWorld(input.positionOS)"));
         }
 
         [Test]
-        public void DDGIVolumeEditor_ExplainsSceneViewProbePreview()
+        public void DDGIVolumeEditor_HooksSceneViewProbePreview()
         {
             string source = File.ReadAllText(GetPackageFilePath("Editor", "VolumeEditor", "DDGIVolumeEditor.cs"));
 
-            Assert.That(source, Does.Contain("Select this DDGI volume in Scene view to preview probe placement with indirect-drawn spheres."));
+            Assert.That(source, Does.Contain("Select the GameObject that owns this DDGI volume in Scene view to preview probe placement with sphere handles."));
+            Assert.That(source, Does.Contain("DDGIProbePreviewRenderer.DrawSceneViewPreview(ddgiVolume);"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

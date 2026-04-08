@@ -117,6 +117,8 @@ groupshared uint lightOffs2;
 
 #ifdef PERFORM_SPHERICAL_INTERSECTION_TESTS
 groupshared uint lightOffsSph;
+groupshared uint convergeLightCount;
+groupshared uint convergePrefixSums[NR_THREADS];
 #endif
 
 float GetLinearDepth(float2 pixXY, float zDptBufSpace, uint eyeIndex)    // 0 is near 1 is far
@@ -551,23 +553,70 @@ int SphericalIntersectionTests(uint threadID, int iNrCoarseLights, float2 screen
     GroupMemoryBarrierWithGroupSync();
 #endif
 
-    // to greedy to double buffer coarseList lds on this so serializing removal of gaps.
-    if(threadID==0)
+    // Parallel compaction: remove UINT_MAX gaps using groupshared prefix sum.
+    // Process ceil(iNrCoarseLights / NR_THREADS) passes, each pass handles
+    // NR_THREADS elements in parallel.
+    if(threadID == 0) convergeLightCount = 0;
+    GroupMemoryBarrierWithGroupSync();
+
+    int nrPasses = (iNrCoarseLights + NR_THREADS - 1) / (int)NR_THREADS;
+    for(int pass = 0; pass < nrPasses; pass++)
     {
-        int offs = 0;
-        for(int l=0; l<iNrCoarseLights; l++)
+        int idx = pass * (int)NR_THREADS + (int)threadID;
+        uint isValid = (idx < iNrCoarseLights && coarseList[idx] != UINT_MAX) ? 1u : 0u;
+
+        // Inclusive prefix sum across the group via groupshared scan.
+        convergePrefixSums[threadID] = isValid;
+        GroupMemoryBarrierWithGroupSync();
+
+        [unroll]
+        for(uint stride = 1u; stride < NR_THREADS; stride <<= 1u)
         {
-            if(coarseList[l]!=UINT_MAX)
-                coarseList[offs++] = coarseList[l];
+            uint val = 0u;
+            if(threadID >= stride)
+                val = convergePrefixSums[threadID - stride];
+            GroupMemoryBarrierWithGroupSync();
+            convergePrefixSums[threadID] += val;
+            GroupMemoryBarrierWithGroupSync();
         }
-        lightOffsSph = offs;
+
+        // convergePrefixSums[threadID] is now the inclusive prefix sum.
+        // The exclusive prefix sum (write offset within this pass) is inclusive - isValid.
+        uint passTotal = convergePrefixSums[NR_THREADS - 1u];
+
+        // Allocate a contiguous range in the output from the running count.
+        uint passBase;
+        if(threadID == 0)
+        {
+            passBase = convergeLightCount;
+            convergeLightCount += passTotal;
+        }
+        GroupMemoryBarrierWithGroupSync();
+        passBase = convergeLightCount - passTotal; // broadcast: all threads derive passBase
+
+        if(isValid)
+        {
+            uint exclusiveIdx = convergePrefixSums[threadID] - 1u;
+            // Write surviving light to compacted position via clusterIdxs as temp storage
+            // to avoid read-write hazard on coarseList.
+            clusterIdxs[passBase + exclusiveIdx] = coarseList[idx];
+        }
+        GroupMemoryBarrierWithGroupSync();
     }
 
-#if NR_THREADS > PLATFORM_LANE_COUNT
-    GroupMemoryBarrierWithGroupSync();
-#endif
+    // Copy compacted results back to coarseList.
+    uint finalCount = convergeLightCount;
+    for(uint c = threadID; c < finalCount; c += NR_THREADS)
+        coarseList[c] = clusterIdxs[c];
 
-    return lightOffsSph;
+    // Clear any stale entries beyond the compacted range.
+    for(uint c2 = finalCount + threadID; c2 < (uint)iNrCoarseLights; c2 += NR_THREADS)
+        coarseList[c2] = UINT_MAX;
+
+    lightOffsSph = finalCount;
+    GroupMemoryBarrierWithGroupSync();
+
+    return (int)lightOffsSph;
 }
 #endif
 

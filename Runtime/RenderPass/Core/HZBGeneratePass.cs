@@ -300,11 +300,17 @@ namespace VividRP.Runtime.RenderPass.Core
             if (cmd == null || computeShader == null || hzbHandle == null)
                 return;
 
-            int clampedMipCount = Mathf.Clamp(mipCount, 1, s_MipTextureIds.Length);
-            for (int mipIndex = 0; mipIndex < clampedMipCount; mipIndex++)
+            for (int shaderMipIndex = 0; shaderMipIndex < s_MipTextureIds.Length; shaderMipIndex++)
             {
-                cmd.SetComputeTextureParam(computeShader, kernelIndex, s_MipTextureIds[mipIndex], hzbHandle, mipIndex);
+                int boundMipIndex = GetBoundMipIndex(shaderMipIndex, mipCount);
+                cmd.SetComputeTextureParam(computeShader, kernelIndex, s_MipTextureIds[shaderMipIndex], hzbHandle, boundMipIndex);
             }
+        }
+
+        private static int GetBoundMipIndex(int shaderMipIndex, int mipCount)
+        {
+            int clampedMipCount = Mathf.Clamp(mipCount, 1, s_MipTextureIds.Length);
+            return Mathf.Clamp(shaderMipIndex, 0, clampedMipCount - 1);
         }
     }
 }

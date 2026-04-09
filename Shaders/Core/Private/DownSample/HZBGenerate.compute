@@ -206,34 +206,44 @@ AH4 SpdLoadH(ASU2 p)
 }
 void SpdStoreH(ASU2 p, AH4 value, AU1 mip)
 {
-    if (mip == 5)
-    {
-        rw_spd_mip6[p] = AF4(value);
-        return;
-    }
-    mip = mip + 1;
     switch (mip)
     {
     case 0:
-        rw_spd_mip0[p] = value;
-        break;
-    case 1:
         rw_spd_mip1[p] = value;
         break;
-    case 2:
+    case 1:
         rw_spd_mip2[p] = value;
         break;
-    case 3:
+    case 2:
         rw_spd_mip3[p] = value;
         break;
-    case 4:
+    case 3:
         rw_spd_mip4[p] = value;
         break;
-    case 5:
+    case 4:
         rw_spd_mip5[p] = value;
         break;
+    case 5:
+        // Mip 6 is the continuation source read back by SpdLoadH.
+        rw_spd_mip6[p] = AF4(value);
+        break;
     case 6:
-        rw_spd_mip6[p] = value;
+        rw_spd_mip7[p] = value;
+        break;
+    case 7:
+        rw_spd_mip8[p] = value;
+        break;
+    case 8:
+        rw_spd_mip9[p] = value;
+        break;
+    case 9:
+        rw_spd_mip10[p] = value;
+        break;
+    case 10:
+        rw_spd_mip11[p] = value;
+        break;
+    case 11:
+        rw_spd_mip12[p] = value;
         break;
     default:
         break;

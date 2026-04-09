@@ -774,7 +774,6 @@ void SpdDownsample(
 
 
     if (mips <= 6) return;
-    #ifndef COMPATIBLE
     if (SpdExitWorkgroup(numWorkGroups, localInvocationIndex, slice)) return;
 
     SpdResetAtomicCounter(slice);
@@ -782,7 +781,6 @@ void SpdDownsample(
     // After mip 6 there is only a single workgroup left that downsamples the remaining up to 64x64 texels.
     SpdDownsampleMips_6_7(x, y, mips);
     SpdDownsampleNextFour(x, y, AU2(0, 0), localInvocationIndex, 8, mips);
-    #endif
 }
 
 void SpdDownsample(

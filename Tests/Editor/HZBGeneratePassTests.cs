@@ -59,7 +59,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(hzbTexture.desc.EnableRandomWrite, Is.True);
                 Assert.That(hzbTexture.desc.FilterMode, Is.EqualTo(FilterMode.Point));
                 Assert.That(hzbTexture.desc.MipCount, Is.EqualTo(11));
-                Assert.That(hzbTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+                Assert.That(hzbTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16_SFloat));
             }
             finally
             {
@@ -87,6 +87,16 @@ namespace VividRP.Editor.Tests
             {
                 pass.Dispose();
             }
+        }
+
+        [Test]
+        public void BindMipFallback_UsesLastAvailableMipView()
+        {
+            Assert.That(GetBoundMipIndex(0, 11), Is.EqualTo(0));
+            Assert.That(GetBoundMipIndex(10, 11), Is.EqualTo(10));
+            Assert.That(GetBoundMipIndex(11, 11), Is.EqualTo(10));
+            Assert.That(GetBoundMipIndex(12, 11), Is.EqualTo(10));
+            Assert.That(GetBoundMipIndex(12, 13), Is.EqualTo(12));
         }
 
         [Test]
@@ -140,6 +150,22 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void HZBGenerateCompute_PackedStore_MapsContinuationMips()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "DownSample", "HZBGenerate.compute"));
+            int start = source.IndexOf("void SpdStoreH(ASU2 p, AH4 value, AU1 mip)", StringComparison.Ordinal);
+            int end = source.IndexOf("AH4 SpdLoadIntermediateH(AU1 x, AU1 y)", start, StringComparison.Ordinal);
+
+            Assert.That(start, Is.GreaterThanOrEqualTo(0));
+            Assert.That(end, Is.GreaterThan(start));
+
+            var storeSource = source.Substring(start, end - start);
+            Assert.That(storeSource, Does.Contain("rw_spd_mip6[p] = AF4(value);"));
+            Assert.That(storeSource, Does.Contain("rw_spd_mip7[p] = value;"));
+            Assert.That(storeSource, Does.Contain("rw_spd_mip12[p] = value;"));
+        }
+
+        [Test]
         public void LightGridPass_RegistersHzbInput()
         {
             IRenderPass renderPass = new LightGridPass();
@@ -154,6 +180,13 @@ namespace VividRP.Editor.Tests
             var field = typeof(HZBGeneratePass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.That(field, Is.Not.Null, $"Field '{fieldName}' not found on HZBGeneratePass");
             return (RenderGraphTexture)field.GetValue(pass);
+        }
+
+        private static int GetBoundMipIndex(int shaderMipIndex, int mipCount)
+        {
+            var method = typeof(HZBGeneratePass).GetMethod("GetBoundMipIndex", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.That(method, Is.Not.Null, "GetBoundMipIndex method not found on HZBGeneratePass");
+            return (int)method.Invoke(null, new object[] { shaderMipIndex, mipCount });
         }
 
         private static string GetPackageFilePath(params string[] parts)

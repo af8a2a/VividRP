@@ -252,6 +252,27 @@ namespace VividRP.Editor.Tests
             AssertResourcePath(nameof(VividRPCoreResources.ClearClusterAtomicIndexCompute), "Shaders/Core/Private/Lighting/lightlistbuild-clearatomic");
         }
 
+        [Test]
+        public void BigTileLightListGen_UsesWaveCompactionInsteadOfBitonicSort()
+        {
+            var source = File.ReadAllText(GetLightingPath("lightlistbuild-bigtile.compute"));
+
+            // Groupshared compaction state declared.
+            Assert.That(source, Does.Contain("groupshared uint bigtileConvergeCount;"));
+            Assert.That(source, Does.Contain("groupshared uint bigtilePassScratch[8];"));
+
+            // Wave intrinsics used for per-pass valid-count accumulation.
+            Assert.That(source, Does.Contain("WavePrefixCountBits(isValid)"));
+            Assert.That(source, Does.Contain("WaveActiveCountBits(isValid)"));
+            Assert.That(source, Does.Contain("WaveIsFirstLane()"));
+
+            // Final compacted count written back to iNrCoarseLights.
+            Assert.That(source, Does.Contain("iNrCoarseLights = (int)bigtileConvergeCount;"));
+
+            // Must NOT contain the old bitonic sort call.
+            Assert.That(source, Does.Not.Contain("SORTLIST(lightsListLDS"));
+        }
+
         private static void AssertLocalIncludes(string fileName, params string[] localIncludes)
         {
             var source = File.ReadAllText(GetLightingPath(fileName));

@@ -51,10 +51,11 @@ VividRP maintains two clustered light culling implementations:
   - Impact: Major iteration reduction for high light density.
   - Done: Depth-sort replaces the old light-index SORTLIST. Before sorting, each valid `coarseList[l]` is encoded as `(minCluster << 12) | lightIdx`; SORTLIST sorts by this key; upper bits are stripped after. `clusterIdxs` is recomputed from the depth-sorted list. Thread 0 builds `zBinEnd[c]` via an O(N+K) scan: first sorted index where `minCluster > c`. Counting loop iterates `[0, zBinEnd[i])` instead of `[0, iNrCoarseLights)`. Fine-cull outer loop runs to `groupMaxBinEnd = zBinEnd[nrClusters-1]`; inner body is gated by per-cluster `fineCullEnd = zBinEnd[i]`. All Z-bin logic is guarded by `#if NR_THREADS > PLATFORM_LANE_COUNT` — single-wave console paths fall back to `iNrCoarseLights`.
 
-- [ ] **Replace bitonic sort with parallel compaction (big tile)**
+- [x] **Replace bitonic sort with parallel compaction (big tile)**
   - Current (`lightlistbuild-bigtile.compute:181` / `SortingComputeUtils.hlsl`): SORTLIST macro runs bitonic sort on `MAX_NR_BIG_TILE_LIGHTS_PLUS_ONE=512` capacity. That is `log2(512)*(log2(512)+1)/2 = 45` barrier rounds regardless of actual light count.
   - Target: If strict ordering is not required (often true), replace with parallel compaction. If ordering is needed, use radix sort or leverage wave-level shuffle for small lists.
   - Impact: Eliminates 45 GroupMemoryBarrier rounds for big tile.
+  - Implemented: Wave-intrinsic in-place stream compaction using `WavePrefixCountBits`/`WaveActiveCountBits`; `bigtileConvergeCount`+`bigtilePassScratch[8]` track cross-wave prefix sums. Cost = `ceil(iNrCoarseLights/NR_THREADS)*4` barriers.
 
 ### Low Priority
 

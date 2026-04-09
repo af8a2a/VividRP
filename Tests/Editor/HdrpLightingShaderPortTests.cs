@@ -147,8 +147,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ClusteredLightListGen_DepthRT_UsesHiZMipReadInsteadOfPerPixelLoop()
-        {
+        public void ClusteredLightListGen_DepthRT_UsesHiZMipReadInsteadOfPerPixelLoop()        {
             var clustered = File.ReadAllText(GetLightingPath("lightlistbuild-clustered.compute"));
             var shaderBase = File.ReadAllText(GetLightingPath("ShaderBase.hlsl"));
 
@@ -170,6 +169,38 @@ namespace VividRP.Editor.Tests
             // Must NOT contain the old non-MSAA per-pixel half-texel-centre constant
             // (fracSampleCoord = float2(0.5,0.5)) — that was only in the removed non-MSAA loop.
             Assert.That(clustered, Does.Not.Contain("fracSampleCoord = float2(0.5,0.5)"));
+        }
+
+        [Test]
+        public void ClusteredLightListGen_ZBinning_DepthSortAndPerClusterRangePruning()
+        {
+            var source = File.ReadAllText(GetLightingPath("lightlistbuild-clustered.compute"));
+
+            // groupshared Z-bin table and group-wide ceiling declared.
+            Assert.That(source, Does.Contain("groupshared uint zBinEnd[MAX_NR_CLUSTER_SLICES];"));
+            Assert.That(source, Does.Contain("groupshared uint groupMaxBinEnd;"));
+
+            // Depth-sort encoding: minCluster packed into coarseList sort key.
+            Assert.That(source, Does.Contain("coarseList[l] = (minC << 12) | (uint)lightIdx;"));
+
+            // Sort-key bits stripped after SORTLIST to restore plain light indices.
+            Assert.That(source, Does.Contain("coarseList[l] &= 0xFFFu;"));
+
+            // Thread 0 serial scan builds zBinEnd and groupMaxBinEnd.
+            Assert.That(source, Does.Contain("zBinEnd[c] = (uint)sl;"));
+            Assert.That(source, Does.Contain("groupMaxBinEnd = (nrClusters > 0) ? zBinEnd[nrClusters - 1] : 0u;"));
+
+            // Counting loop uses per-cluster Z-bin end.
+            Assert.That(source, Does.Contain("const int binEnd = (int)zBinEnd[i];"));
+            Assert.That(source, Does.Contain("for(int l=0; l<binEnd; l++)"));
+
+            // Fine-cull outer loop bounded by groupMaxBinEnd; inner body gated by fineCullEnd.
+            Assert.That(source, Does.Contain("const int cullRange   = (int)groupMaxBinEnd;"));
+            Assert.That(source, Does.Contain("for(int ll=0; ll<cullRange; ll+=4)"));
+            Assert.That(source, Does.Contain("if(l < fineCullEnd && offs<(start+iSpaceAvail)"));
+
+            // Must NOT contain the old unbounded counting loop over all coarse lights.
+            Assert.That(source, Does.Not.Contain("for(int l=0; l<iNrCoarseLights; l++)"));
         }
 
         [Test]

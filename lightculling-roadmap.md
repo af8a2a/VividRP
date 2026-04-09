@@ -45,10 +45,11 @@ VividRP maintains two clustered light culling implementations:
   - Impact: 1024 -> 1-4 texture fetches per tile.
   - Done (non-MSAA): Added `Texture2D g_depth_tex_hiz : register(t5)` to `ShaderBase.hlsl`. Non-MSAA `ENABLE_DEPTH_TEXTURE_BACKPLANE` path replaced with a single `g_depth_tex_hiz.mips[log2TileSize][tileIDX]` read by thread 0, stored into `ldsZMax`, broadcast via `GroupMemoryBarrierWithGroupSync`. MSAA kernels retain the original per-pixel loop. CPU-side must supply the max-depth mip chain for `g_depth_tex_hiz`.
 
-- [ ] **Z-binning pass between big tile and clustered**
+- [x] **Z-binning pass between big tile and clustered**
   - Current: `clusterIdxs` provides per-light depth range (min/max cluster index), but the clustered kernel still iterates all coarse lights per cluster.
   - Target: After big-tile, sort lights by view-space depth per tile, build Z-bin ranges. Clustered kernel uses binary search to iterate only the relevant depth window.
   - Impact: Major iteration reduction for high light density.
+  - Done: Depth-sort replaces the old light-index SORTLIST. Before sorting, each valid `coarseList[l]` is encoded as `(minCluster << 12) | lightIdx`; SORTLIST sorts by this key; upper bits are stripped after. `clusterIdxs` is recomputed from the depth-sorted list. Thread 0 builds `zBinEnd[c]` via an O(N+K) scan: first sorted index where `minCluster > c`. Counting loop iterates `[0, zBinEnd[i])` instead of `[0, iNrCoarseLights)`. Fine-cull outer loop runs to `groupMaxBinEnd = zBinEnd[nrClusters-1]`; inner body is gated by per-cluster `fineCullEnd = zBinEnd[i]`. All Z-bin logic is guarded by `#if NR_THREADS > PLATFORM_LANE_COUNT` — single-wave console paths fall back to `iNrCoarseLights`.
 
 - [ ] **Replace bitonic sort with parallel compaction (big tile)**
   - Current (`lightlistbuild-bigtile.compute:181` / `SortingComputeUtils.hlsl`): SORTLIST macro runs bitonic sort on `MAX_NR_BIG_TILE_LIGHTS_PLUS_ONE=512` capacity. That is `log2(512)*(log2(512)+1)/2 = 45` barrier rounds regardless of actual light count.

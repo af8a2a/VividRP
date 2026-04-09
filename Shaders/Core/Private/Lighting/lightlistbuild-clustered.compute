@@ -70,6 +70,14 @@ groupshared float4 lightPlanes[4*6]; // Each plane is defined by a float4. 6 pla
 groupshared uint lightOffs;
 groupshared uint groupAllocationBase;
 
+// Z-binning: per-cluster upper bound into the depth-sorted coarseList.
+// zBinEnd[c] = first coarseList index where minCluster > c.
+// Counting / fine-cull loops for cluster c iterate [0, zBinEnd[c]) instead of [0, iNrCoarseLights).
+// groupMaxBinEnd = zBinEnd[nrClusters-1] — group-wide outer-loop ceiling.
+#define MAX_NR_CLUSTER_SLICES 64
+groupshared uint zBinEnd[MAX_NR_CLUSTER_SLICES];
+groupshared uint groupMaxBinEnd;
+
 groupshared int categoryListCountScratch[NR_THREADS * LIGHTCATEGORY_COUNT];
 groupshared int shiftIndexScratch[NR_THREADS * LIGHTCATEGORY_COUNT];
 
@@ -422,9 +430,25 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
     iNrCoarseLights = CullByExactEdgeTests(t, iNrCoarseLights, viTilLL.xy, viTilUR.xy, fTileFarPlane, eyeIndex);
 #endif
 
-    // sort lights (gives a more efficient execution in both deferred and tiled forward lighting).
+    // Z-binning depth sort: encode minCluster into bits [12..19] of each coarseList entry.
+    // Light indices are 0..MAX_NR_VISIBLE_LIGHTS-1 (< 4096 = 2^12), so they fit in bits [0..11].
+    // SORTLIST then orders by (minCluster, lightIdx) ascending — coarseList becomes depth-sorted.
+    // This replaces the old light-index sort and enables per-cluster Z-bin range pruning.
 #if NR_THREADS > PLATFORM_LANE_COUNT
+    for(int l=(int) t; l<iNrCoarseLights; l+=NR_THREADS)
+    {
+        const int lightIdx = (int)coarseList[l];
+        const ScreenSpaceBoundsIndices bnd = GenerateScreenSpaceBoundsIndices(lightIdx, g_iNrVisibLights, eyeIndex);
+        const uint minC = (uint)min(255, SnapToClusterIdx(g_vBoundsBuffer[bnd.min].w, suggestedBase));
+        coarseList[l] = (minC << 12) | (uint)lightIdx;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    // Sort by encoded key; SORTLIST pads slots [iNrCoarseLights..N) with UINT_MAX automatically.
     SORTLIST(coarseList, iNrCoarseLights, MAX_NR_COARSE_ENTRIES, t, NR_THREADS);
+    // Strip sort-key bits to restore plain light indices (depth-sorted order preserved).
+    for(int l=(int) t; l<iNrCoarseLights; l+=NR_THREADS)
+        coarseList[l] &= 0xFFFu;
+    GroupMemoryBarrierWithGroupSync();
 #endif
 
     //////////// cell specific code
@@ -449,6 +473,28 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
 
     int nrClusters = (1<<g_iLog2NumClusters);
 
+#if NR_THREADS > PLATFORM_LANE_COUNT
+    // Build Z-bin table: zBinEnd[c] = first depth-sorted index where minCluster > c.
+    // Thread 0 serial scan is O(iNrCoarseLights + nrClusters) — at most 128 + 64 iterations.
+    // zBinEnd is monotonically non-decreasing; groupMaxBinEnd is the last (maximum) entry.
+    if(t == 0u)
+    {
+        int sl = 0;
+        for(int c = 0; c < nrClusters; c++)
+        {
+            while(sl < iNrCoarseLights)
+            {
+                const uint minC = (clusterIdxs[sl >> 1] >> (16u * (uint)(sl & 1))) & 0xFFu;
+                if(minC > (uint)c) break;
+                ++sl;
+            }
+            zBinEnd[c] = (uint)sl;
+        }
+        groupMaxBinEnd = (nrClusters > 0) ? zBinEnd[nrClusters - 1] : 0u;
+    }
+    GroupMemoryBarrierWithGroupSync();
+#endif
+
 
 
     //////////////////////////////////////////////////////////
@@ -459,9 +505,14 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
     int iSum = 0;
     if(i<nrClusters)
     {
-        // Each thread checks it's respective cluster against all coarse lights for intersection.
-        // At the end, 'iSum' represents the number of lights that intersect this cluster!
-        for(int l=0; l<iNrCoarseLights; l++)
+        // Z-bin: only iterate lights whose minCluster <= i (depth range starts at or before this cluster).
+        // CheckIntersectionBasic still checks maxCluster >= i to reject lights that end before this cluster.
+#if NR_THREADS > PLATFORM_LANE_COUNT
+        const int binEnd = (int)zBinEnd[i];
+#else
+        const int binEnd = iNrCoarseLights;
+#endif
+        for(int l=0; l<binEnd; l++)
         {
             iSum += (CheckIntersectionBasic(l, i) ? 1 : 0);
         }
@@ -541,20 +592,31 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
     }
 #endif
 
+    // Fine-cull outer loop is bounded by groupMaxBinEnd: lights beyond it have minCluster > every
+    // cluster in this tile and cannot intersect anything.  Per-cluster fineCullEnd prunes lights
+    // that start beyond cluster i's depth range, skipping the CheckIntersection call entirely.
+#if NR_THREADS > PLATFORM_LANE_COUNT
+    const int fineCullEnd = (i < nrClusters) ? (int)zBinEnd[i] : 0;
+    const int cullRange   = (int)groupMaxBinEnd;
+#else
+    const int fineCullEnd = iNrCoarseLights;
+    const int cullRange   = iNrCoarseLights;
+#endif
+
     uint offs = start;
-    for(int ll=0; ll<iNrCoarseLights; ll+=4)
+    for(int ll=0; ll<cullRange; ll+=4)
     {
         int p = i>>2;
         int m = i&3;
-        if(i<24) lightPlanes[6*m+p] = FetchPlane(min(iNrCoarseLights-1,ll+m), p, eyeIndex);
+        if(i<24) lightPlanes[6*m+p] = FetchPlane(min(cullRange-1,ll+m), p, eyeIndex);
 
 #if NR_THREADS > PLATFORM_LANE_COUNT
         GroupMemoryBarrierWithGroupSync();
 #endif
 
-        for(int l=ll; l<min(iNrCoarseLights,(ll+4)); l++)
+        for(int l=ll; l<min(cullRange,(ll+4)); l++)
         {
-            if(offs<(start+iSpaceAvail) && i<nrClusters && CheckIntersection(l, i, clusterVerts) )
+            if(l < fineCullEnd && offs<(start+iSpaceAvail) && i<nrClusters && CheckIntersection(l, i, clusterVerts) )
             {
                 const int lightVolIndex = GenerateLightCullDataIndex(coarseList[l], g_iNrVisibLights, eyeIndex);
                 uint lightCategory = _LightVolumeData[lightVolIndex].lightCategory;

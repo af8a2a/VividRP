@@ -1,4 +1,4 @@
-Shader "Hidden/HDRP/Sky/PbrSky"
+Shader "Hidden/VividRP/Sky/PbrSky"
 {
     HLSLINCLUDE
 
@@ -11,8 +11,8 @@ Shader "Hidden/HDRP/Sky/PbrSky"
 
     #pragma multi_compile_fragment _ LOCAL_SKY
 
-    #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Sky/PhysicallyBasedSky/PhysicallyBasedSkyRendering.hlsl"
-    #include "Packages/com.unity.render-pipelines.high-definition/Runtime/Sky/PhysicallyBasedSky/PhysicallyBasedSkyEvaluation.hlsl"
+    #include "PhysicallyBasedSkyRendering.hlsl"
+    #include "PhysicallyBasedSkyEvaluation.hlsl"
 
     int _HasGroundAlbedoTexture;    // bool...
     int _HasGroundEmissionTexture;  // bool...
@@ -169,7 +169,7 @@ Shader "Hidden/HDRP/Sky/PbrSky"
     {
         UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
         float4 value = RenderSky(input);
-        value.rgb *= GetCurrentExposureMultiplier(); // Only the full-screen pass is pre-exposed
+        value.rgb *= GetCurrentExposureMultiplier();
         return value;
     }
 
@@ -177,10 +177,10 @@ Shader "Hidden/HDRP/Sky/PbrSky"
 
     SubShader
     {
-        Tags{ "RenderPipeline" = "HDRenderPipeline" }
+        Tags{ "RenderPipeline" = "VividRenderPipeline" }
         Pass
         {
-            Name "PBRSky Cubemap"
+            Name "PhysicallyBasedSkyBaking"
 
             ZWrite Off
             ZTest Always
@@ -194,7 +194,7 @@ Shader "Hidden/HDRP/Sky/PbrSky"
 
         Pass
         {
-            Name "PBRSky"
+            Name "PhysicallyBasedSky"
 
             ZWrite Off
             ZTest LEqual

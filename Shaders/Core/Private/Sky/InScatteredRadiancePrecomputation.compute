@@ -7,9 +7,9 @@
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
-#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightDefinition.cs.hlsl"
-#include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariables.hlsl"
-#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Sky/PhysicallyBasedSky/PhysicallyBasedSkyEvaluation.hlsl"
+#include "LightDefinition.cs.hlsl"
+#include "ShaderVariablesCompat.hlsl"
+#include "PhysicallyBasedSkyEvaluation.hlsl"
 
 #define TABLE_SIZE uint3(PBRSKYCONFIG_IN_SCATTERED_RADIANCE_TABLE_SIZE_X, \
                          PBRSKYCONFIG_IN_SCATTERED_RADIANCE_TABLE_SIZE_Y, \

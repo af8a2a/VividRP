@@ -212,6 +212,22 @@
   - `PlanetRotation` / `SpaceRotation`
   - `horizonTint` / `zenithTint` / `colorSaturation`
   - 仍暂时保留现有 `SkyViewLUT` + raymarch fallback，而不是直接切换到完整 HDRP LUT/atmospheric scattering 新链路
+- 已把复制进包内的 HDRP `PhysicallyBasedSky` shader 链第一批 include 本地化：
+  - `PhysicallyBasedSky.shader`
+  - `PhysicallyBasedSkyRendering.hlsl`
+  - `PhysicallyBasedSkyCommon.hlsl`
+  - `GroundIrradiancePrecomputation.compute`
+  - `InScatteredRadiancePrecomputation.compute`
+- 新增最小兼容层，先让这条 copied HDRP sky shader 链在包内自包含：
+  - `LightDefinition.cs.hlsl`
+  - `ShaderVariablesCompat.hlsl`
+  - `CookieSampling.hlsl`
+  - `AtmosphericScatteringSky.hlsl`
+- 仍待继续：
+  - `SkyLUTGenerator.compute`
+  - `AtmosphericScattering.hlsl`
+  - `OpaqueAtmosphericScattering.shader`
+  - 这些文件还没有完成对 Vivid 灯光 / 阴影 / 雾 / 水体接口的完全适配
 - 仍待继续：
   - 把新的 HDRP 风格屏幕天空 shader 完整接入现有 `SkyViewLUT` / atmospheric scattering 渲染路径
   - 把 `SkyLUTGenerator.compute` / atmospheric scattering 新链路与现有 RenderPass 正式切换对齐

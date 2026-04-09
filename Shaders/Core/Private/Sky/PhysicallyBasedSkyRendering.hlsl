@@ -3,12 +3,12 @@
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
-#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightDefinition.cs.hlsl"
-#include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariables.hlsl"
-#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Sky/PhysicallyBasedSky/PhysicallyBasedSkyCommon.hlsl"
-#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Sky/SkyUtils.hlsl"
-#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/AtmosphericScattering/AtmosphericScattering.hlsl"
-#include "Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightLoop/CookieSampling.hlsl"
+#include "LightDefinition.cs.hlsl"
+#include "ShaderVariablesCompat.hlsl"
+#include "PhysicallyBasedSkyCommon.hlsl"
+#include "SkyUtils.hlsl"
+#include "../AtmosphericScattering/AtmosphericScatteringSky.hlsl"
+#include "CookieSampling.hlsl"
 
 float3 _PBRSkyCameraPosPS;
 int _RenderSunDisk;

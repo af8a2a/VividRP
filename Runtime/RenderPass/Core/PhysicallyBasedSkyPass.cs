@@ -36,6 +36,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private Material m_Material;
         private bool m_IsActive;
         private PhysicallyBasedSkyShaderParameters m_Parameters;
+        private PhysicallyBasedSkyMaterialParameters m_MaterialParameters;
+        private bool m_HasMaterialParameters;
 
         public PhysicallyBasedSkyPass()
         {
@@ -63,6 +65,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             m_IsActive = PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters);
+            m_HasMaterialParameters = PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(frameData, out m_MaterialParameters);
 
             var width = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
             var height = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
@@ -100,6 +103,8 @@ namespace VividRP.Runtime.RenderPass.Core
             mpb.SetVector(SkyOzoneExtinctionId, m_Parameters.skyOzoneExtinction);
             mpb.SetVector(SkyOzoneParamsId, m_Parameters.skyOzoneParams);
             mpb.SetVector(SkyGroundTintId, m_Parameters.skyGroundTint);
+            if (m_HasMaterialParameters)
+                PhysicallyBasedSkyMaterialPropertyBinder.Apply(mpb, m_MaterialParameters, VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume());
 
             CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);
         }

@@ -331,6 +331,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryHasValidHistoryId, m_HasValidSkyViewHistoryLayers && m_HasValidSkyViewHistoryMeta ? 1 : 0);
                     cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryDependencyHashId, m_SkyViewHistoryDependencyHash);
                     cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryParameterHashId, m_SkyViewHistoryParameterHash);
+                    cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryFrameIndexId, unchecked((int)m_SkyViewHistoryFrameIndex));
                     cmd.DispatchCompute(
                         m_ComputeShader,
                         m_SkyViewKernel,
@@ -710,6 +711,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryHasValidHistoryId, m_HasValidSkyViewHistoryLayers && m_HasValidSkyViewHistoryMeta ? 1 : 0);
             cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryDependencyHashId, m_SkyViewHistoryDependencyHash);
             cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryParameterHashId, m_SkyViewHistoryParameterHash);
+            cmd.SetComputeIntParam(m_ComputeShader, SkyViewHistoryFrameIndexId, unchecked((int)m_SkyViewHistoryFrameIndex));
             cmd.DispatchCompute(m_ComputeShader, m_SkyViewSelectHistoryKernel, 1, 1, 1);
         }
 

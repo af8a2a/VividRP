@@ -439,6 +439,8 @@ namespace VividRP.Runtime
             properties.SetVector(SkyOzoneExtinctionId, parameters.skyOzoneExtinction);
             properties.SetVector(SkyOzoneParamsId, parameters.skyOzoneParams);
             properties.SetVector(SkyGroundTintId, parameters.skyGroundTint);
+            if (PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(volume, context, out var materialParameters))
+                PhysicallyBasedSkyMaterialPropertyBinder.Apply(properties, materialParameters, volume);
 
             SkyCubemapBakingUtility.RenderSkyToCubemap(
                 cmd,

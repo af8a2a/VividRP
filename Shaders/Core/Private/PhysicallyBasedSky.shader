@@ -21,7 +21,7 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
             #pragma fragment FragRender
 
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Sky/PhysicallyBasedSkyCommon.hlsl"
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Sky/PhysicallyBasedSkyBridge.hlsl"
 
             float4 FragRender(Varyings input) : SV_Target
             {
@@ -43,7 +43,7 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
             #pragma vertex Vert
             #pragma fragment FragBaking
 
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Sky/PhysicallyBasedSkyCommon.hlsl"
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Sky/PhysicallyBasedSkyBridge.hlsl"
 
             float4 FragBaking(Varyings input) : SV_Target
             {

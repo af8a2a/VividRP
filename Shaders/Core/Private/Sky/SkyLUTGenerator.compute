@@ -1,0 +1,455 @@
+// Ref: A Scalable and Production Ready Sky and Atmosphere Rendering Technique - Hillaire, ESGR 2020
+// https://sebh.github.io/publications/egsr2020.pdf
+
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
+//#pragma enable_d3d11_debug_symbols
+
+#pragma kernel MultiScatteringLUT   OUTPUT_MULTISCATTERING
+#pragma kernel SkyViewLUT
+#pragma kernel AtmosphericScatteringLUTCamera AtmosphericScatteringLUT=AtmosphericScatteringLUTCamera CAMERA_SPACE
+#pragma kernel AtmosphericScatteringLUTWorld  AtmosphericScatteringLUT=AtmosphericScatteringLUTWorld
+#pragma kernel AtmosphericScatteringBlur
+
+#define DIRECTIONAL_SHADOW_ULTRA_LOW  // Different options are too expensive.
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Hammersley.hlsl"
+
+#include "PhysicallyBasedSkyEvaluation.hlsl"
+#include "SkyUtils.hlsl"
+#include "../AtmosphericScattering/AtmosphericScattering.hlsl"
+
+// This is the main function that integrates atmosphere along a ray
+// It is baked in various LUTs by all the kernels below
+
+// O is position in planet space, V is view dir in world space
+void EvaluateAtmosphericColor(float3 O, float3 V, float tExit,
+#ifdef OUTPUT_MULTISCATTERING
+    float3 L, out float3 multiScattering,
+#endif
+    out float3 skyColor, out float3 skyTransmittance)
+{
+    skyColor = 0.0f;
+    skyTransmittance = 1.0f;
+
+#ifdef OUTPUT_MULTISCATTERING
+    multiScattering = 0.0f;
+#endif
+
+    const uint sampleCount = 16;
+
+    for (uint s = 0; s < sampleCount; s++)
+    {
+        float t, dt;
+        GetSample(s, sampleCount, tExit, t, dt);
+
+        const float3 P = O + t * V;
+        const float  r = max(length(P), _PlanetaryRadius);
+        const float3 N = P * rcp(r);
+        const float  height = r - _PlanetaryRadius;
+
+        const float3 sigmaE       = AtmosphereExtinction(height);
+        const float3 scatteringMS = AirScatter(height) + AerosolScatter(height);
+        const float3 transmittanceOverSegment = TransmittanceFromOpticalDepth(sigmaE * dt);
+
+#ifdef OUTPUT_MULTISCATTERING
+        multiScattering += IntegrateOverSegment(scatteringMS, transmittanceOverSegment, skyTransmittance, sigmaE);
+
+        const float3 phaseScatter = scatteringMS * IsotropicPhaseFunction();
+        const float3 S = EvaluateSunColorAttenuation(dot(N, L), r) * phaseScatter;
+        skyColor += IntegrateOverSegment(S, transmittanceOverSegment, skyTransmittance, sigmaE);
+#else
+        for (uint i = 0; i < _CelestialLightCount; i++)
+        {
+            CelestialBodyData light = _CelestialBodyDatas[i];
+            float3 L = -light.forward.xyz;
+
+            const float3 sunTransmittance = EvaluateSunColorAttenuation(dot(N, L), r);
+            const float3 phaseScatter = AirScatter(height) * AirPhase(-dot(L, V)) + AerosolScatter(height) * AerosolPhase(-dot(L, V));
+            const float3 multiScatteredLuminance = EvaluateMultipleScattering(dot(N, L), height);
+
+            float3 S = sunTransmittance * phaseScatter + multiScatteredLuminance * scatteringMS;
+            skyColor += IntegrateOverSegment(light.color * S, transmittanceOverSegment, skyTransmittance, sigmaE);
+        }
+#endif
+
+        skyTransmittance *= transmittanceOverSegment;
+    }
+}
+
+// Multiple-Scattering LUT
+
+#ifdef OUTPUT_MULTISCATTERING
+
+#define SAMPLE_COUNT 64
+
+RW_TEXTURE2D(float3, _MultiScatteringLUT_RW);
+
+groupshared float3 gs_radianceMS[SAMPLE_COUNT];
+groupshared float3 gs_radiance[SAMPLE_COUNT];
+
+float3 RenderPlanet(float3 P, float3 L)
+{
+    float3 N = normalize(P);
+
+    float3 albedo = _GroundAlbedo.xyz;
+    float3 gBrdf = INV_PI * albedo;
+
+    float cosHoriz = ComputeCosineOfHorizonAngle(_PlanetaryRadius);
+    float cosTheta = dot(N, L);
+
+    float3 intensity = 0.0f;
+    if (cosTheta >= cosHoriz)
+    {
+        float3 opticalDepth = ComputeAtmosphericOpticalDepth(_PlanetaryRadius, cosTheta, true);
+        intensity = TransmittanceFromOpticalDepth(opticalDepth);
+    }
+
+    return gBrdf * (saturate(dot(N, L)) * intensity);
+}
+
+void ParallelSum(uint threadIdx, inout float3 radiance, inout float3 radianceMS)
+{
+#ifdef PLATFORM_SUPPORTS_WAVE_INTRINSICS
+    radiance   = float3(WaveActiveSum(radiance.x),   WaveActiveSum(radiance.y),   WaveActiveSum(radiance.z));
+    radianceMS = float3(WaveActiveSum(radianceMS.x), WaveActiveSum(radianceMS.y), WaveActiveSum(radianceMS.z));
+#else
+    gs_radiance[threadIdx]   = radiance;
+    gs_radianceMS[threadIdx] = radianceMS;
+    GroupMemoryBarrierWithGroupSync();
+
+    UNITY_UNROLL
+    for (uint s = SAMPLE_COUNT / 2u; s > 0u; s >>= 1u)
+    {
+        if (threadIdx < s)
+        {
+            gs_radiance[threadIdx]   += gs_radiance[threadIdx + s];
+            gs_radianceMS[threadIdx] += gs_radianceMS[threadIdx + s];
+        }
+
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    radiance   = gs_radiance[0];
+    radianceMS = gs_radianceMS[0];
+#endif
+}
+
+[numthreads(1, 1, SAMPLE_COUNT)]
+void MultiScatteringLUT(uint3 coord : SV_DispatchThreadID)
+{
+    const uint threadIdx = coord.z;
+
+    /// Map thread id to position in planet space + light direction
+
+    float sunZenithCosAngle, radialDistance;
+    UnmapMultipleScattering(coord.xy, sunZenithCosAngle, radialDistance);
+
+    float3 L = float3(0.0, sunZenithCosAngle, SinFromCos(sunZenithCosAngle));
+    float3 O = float3(0.0f, radialDistance, 0.0f);
+
+    float2 U = Hammersley2d(threadIdx, SAMPLE_COUNT);
+    float3 V = SampleSphereUniform(U.x, U.y);
+
+    /// Compute single scattering light in direction V
+
+    float3 N; float r; // These params correspond to the entry point
+    float tEntry = IntersectAtmosphere(O, -V, N, r).x;
+    float tExit  = IntersectAtmosphere(O, -V, N, r).y;
+
+    float cosChi = dot(N, V);
+    float cosHor = ComputeCosineOfHorizonAngle(r);
+
+    bool rayIntersectsAtmosphere = (tEntry >= 0);
+    bool lookAboveHorizon        = (cosChi >= cosHor);
+    bool seeGround               = rayIntersectsAtmosphere && !lookAboveHorizon;
+
+    if (seeGround)
+        tExit = tEntry + IntersectSphere(_PlanetaryRadius, cosChi, r).x;
+
+    float3 multiScattering = 0.0f, skyColor = 0.0f, skyTransmittance = 1.0f;
+    if (tExit > 0.0f)
+        EvaluateAtmosphericColor(O, V, tExit, L, multiScattering, skyColor, skyTransmittance);
+
+    if (seeGround)
+        skyColor += RenderPlanet(O + tExit * V, L) * skyTransmittance;
+
+    const float dS = FOUR_PI * IsotropicPhaseFunction() / SAMPLE_COUNT;
+    float3 radiance = skyColor * dS;
+    float3 radianceMS = multiScattering * dS;
+
+    /// Accumulate light from all directions using LDS
+
+    ParallelSum(threadIdx, radiance, radianceMS);
+    if (threadIdx > 0)
+        return;
+
+    /// Approximate infinite multiple scattering
+
+    const float3 F_ms = 1.0f * rcp(1.0 - radianceMS); // Equation 9
+    const float3 MS   = radiance * F_ms;           // Equation 10
+
+    _MultiScatteringLUT_RW[coord.xy] = MS;
+}
+
+#else
+
+// Sky View LUT
+
+RW_TEXTURE2D(float3, _SkyViewLUT_RW);
+
+[numthreads(8, 8, 1)]
+void SkyViewLUT(uint2 coord : SV_DispatchThreadID)
+{
+    const float3 N = float3(0, 1, 0);
+    const float r = _PlanetaryRadius;
+    const float3 O = r * N;
+
+    float3 V;
+    UnmapSkyView(coord, V);
+
+    float tExit = IntersectSphere(_AtmosphericRadius, dot(N, V), r).y;
+
+    float3 skyColor, skyTransmittance;
+    EvaluateAtmosphericColor(O, V, tExit, skyColor, skyTransmittance);
+
+    _SkyViewLUT_RW[coord] = skyColor / _CelestialLightExposure;
+}
+
+// Atmospheric Scattering LUT
+
+RW_TEXTURE3D(float3, _AtmosphericScatteringLUT_RW);
+
+groupshared float3 gs_data[PBRSKYCONFIG_ATMOSPHERIC_SCATTERING_LUT_DEPTH];
+
+float3 ParallelPrefixProduct(uint threadIdx, float3 transmittance)
+{
+    // For some reason WavePrefixProduct doesn't compile on gamecore
+#if defined(PLATFORM_SUPPORTS_WAVE_INTRINSICS) && !defined(SHADER_API_GAMECORE)
+    return float3(WavePrefixProduct(transmittance.x), WavePrefixProduct(transmittance.y), WavePrefixProduct(transmittance.z));
+#else
+    if (threadIdx == PBRSKYCONFIG_ATMOSPHERIC_SCATTERING_LUT_DEPTH-1) gs_data[0] = 1;
+    else gs_data[threadIdx+1] = transmittance;
+    GroupMemoryBarrierWithGroupSync();
+
+    [unroll]
+    for (uint s = 1u; s < PBRSKYCONFIG_ATMOSPHERIC_SCATTERING_LUT_DEPTH; s <<= 1u)
+    {
+        uint k = s << 1;
+        if (threadIdx % k >= s)
+            gs_data[threadIdx] *= gs_data[(threadIdx & ~(k - 1)) + s - 1];
+
+        GroupMemoryBarrierWithGroupSync();
+    }
+    return gs_data[threadIdx];
+#endif
+}
+
+float3 ParallelPostfixSum(uint threadIdx, float3 radiance)
+{
+#ifdef PLATFORM_SUPPORTS_WAVE_INTRINSICS
+    // for some reason, the sum has to be done per component
+    return float3(WavePrefixSum(radiance.x), WavePrefixSum(radiance.y), WavePrefixSum(radiance.z)) + radiance;
+#else
+    gs_data[threadIdx] = radiance;
+    GroupMemoryBarrierWithGroupSync();
+
+    [unroll]
+    for (uint s = 1u; s < PBRSKYCONFIG_ATMOSPHERIC_SCATTERING_LUT_DEPTH; s <<= 1u)
+    {
+        uint k = s << 1;
+        if (threadIdx % k >= s)
+            gs_data[threadIdx] += gs_data[(threadIdx & ~(k - 1)) + s - 1];
+
+        GroupMemoryBarrierWithGroupSync();
+    }
+    return gs_data[threadIdx];
+#endif
+}
+
+[numthreads(1, 1, PBRSKYCONFIG_ATMOSPHERIC_SCATTERING_LUT_DEPTH)]
+void AtmosphericScatteringLUT(uint2 coord : SV_GroupID, uint s : SV_GroupIndex)
+{
+    const float2 res = float2(PBRSKYCONFIG_ATMOSPHERIC_SCATTERING_LUT_WIDTH, PBRSKYCONFIG_ATMOSPHERIC_SCATTERING_LUT_HEIGHT);
+    const float2 uv = (coord + 0.5) / res;
+
+    float3 V = -GetSkyViewDirWS(uv * _ScreenSize.xy);
+
+    float3 O;
+    float t, dt;
+    UnmapAtmosphericScattering(s, V, O, t, dt);
+
+    float3 skyColor = 0.0f;
+    float3 skyTransmittance = 1.0f;
+
+    // Following is the loop from EvaluateAtmosphericColor, with each iteration evaluated on a thread
+    // Additionally we sample shadow map for more precise occlusion
+
+    float3 P = O + t * V;
+#ifndef CAMERA_SPACE
+    // When ray starts to intersect the planet, don't stop but move the point to the surface
+    // This is important because we bilinear sample the LUT and don't want garbage values anywhere
+    if (length(P) < _PlanetaryRadius)
+    {
+        P = normalize(P) * _PlanetaryRadius;
+        V = normalize(P - O);
+    }
+#endif
+
+    const float  r = max(length(P), _PlanetaryRadius + 1);
+    const float3 N = P * rcp(r);
+    const float  height = r - _PlanetaryRadius;
+
+    const float3 sigmaE         = AtmosphereExtinction(height);
+    const float3 scatteringMS   = AirScatter(height) + AerosolScatter(height);
+    const float3 transmittanceOverSegment = TransmittanceFromOpticalDepth(sigmaE * dt);
+
+    skyTransmittance = ParallelPrefixProduct(s, transmittanceOverSegment);
+
+    float sunShadow = 1.0f;
+    if (_DirectionalShadowIndex >= 0)
+    {
+        DirectionalLightData light = _DirectionalLightDatas[_DirectionalShadowIndex];
+        HDShadowContext shadowContext = InitShadowContext();
+
+        // See GetDirectionalShadowAttenuation, call is inlined for optimization
+        // Find if last cascade is usable, we only use this one as we don't need precise occlusion and it's faster
+        int shadowSplitIndex = _CascadeShadowCount - 1;
+        float4 sphere  = shadowContext.directionalShadowData.sphereCascades[shadowSplitIndex];
+        float3 posWS = P + _PlanetCenterPosition;
+        float3 wposDir = posWS - sphere.xyz;
+        float  distSq  = dot(wposDir, wposDir);
+        if (distSq <= sphere.w)
+        {
+            HDShadowData sd = shadowContext.shadowDatas[light.shadowIndex];
+            LoadDirectionalShadowDatas(sd, shadowContext, light.shadowIndex + shadowSplitIndex);
+
+            float3 posTC = EvalShadow_GetTexcoordsAtlas(sd, _CascadeShadowAtlasSize.zw, posWS + sd.cacheTranslationDelta.xyz, false);
+            sunShadow = DIRECTIONAL_FILTER_ALGORITHM(sd, 0, posTC, _ShadowmapCascadeAtlas, s_linear_clamp_compare_sampler, FIXED_UNIFORM_BIAS);
+        }
+
+        if (_VolumetricCloudsShadowOriginToggle.w == 1.0)
+            sunShadow *= EvaluateVolumetricCloudsShadows(light, posWS);
+    }
+
+
+    for (uint i = 0; i < _CelestialLightCount; i++)
+    {
+        CelestialBodyData light = _CelestialBodyDatas[i];
+        float3 L = -light.forward.xyz;
+
+        float shadow = (light.shadowIndex >= 0) ? sunShadow : 1.0f;
+        const float3 sunTransmittance = shadow * EvaluateSunColorAttenuation(dot(N, L), r);
+        const float3 phaseScatter = AirScatter(height) * AirPhase(-dot(L, V)) + AerosolScatter(height) * AerosolPhase(-dot(L, V));
+        const float3 multiScatteredLuminance = EvaluateMultipleScattering(dot(N, L), height);
+
+        // Compute color
+        float3 S = sunTransmittance * phaseScatter + multiScatteredLuminance * scatteringMS;
+        skyColor += IntegrateOverSegment(light.color * S, transmittanceOverSegment, skyTransmittance, sigmaE);
+    }
+
+    skyColor = ParallelPostfixSum(s, skyColor);
+
+    // Make sure first slice is all black. Looks better for bilinear at close range
+    if (s == 0) skyColor = 0.0f;
+
+    skyColor = Desaturate(skyColor, _ColorSaturation);
+    _AtmosphericScatteringLUT_RW[uint3(coord, s)] = skyColor * _IntensityMultiplier * GetCurrentExposureMultiplier();
+}
+
+// Gaussian blur pass to reduce artefacts due to low resolution buffer
+// We have to use LDS in order to blur the buffer in place
+// To reduce lds size, we store floats as fp16 which forces to handle 4 pixel per thread
+
+#define HALF_RES (PBRSKYCONFIG_ATMOSPHERIC_SCATTERING_LUT_HEIGHT/2)
+
+groupshared uint gs_cacheR[PBRSKYCONFIG_ATMOSPHERIC_SCATTERING_LUT_WIDTH * HALF_RES];
+groupshared uint gs_cacheG[PBRSKYCONFIG_ATMOSPHERIC_SCATTERING_LUT_WIDTH * HALF_RES];
+groupshared uint gs_cacheB[PBRSKYCONFIG_ATMOSPHERIC_SCATTERING_LUT_WIDTH * HALF_RES];
+
+void Store2Pixels(int index, float3 pixel1, float3 pixel2)
+{
+    gs_cacheR[index] = f32tof16(pixel1.r) | f32tof16(pixel2.r) << 16;
+    gs_cacheG[index] = f32tof16(pixel1.g) | f32tof16(pixel2.g) << 16;
+    gs_cacheB[index] = f32tof16(pixel1.b) | f32tof16(pixel2.b) << 16;
+}
+
+void Load2Pixels(int index, out float3 pixel1, out float3 pixel2)
+{
+    uint rr = gs_cacheR[index];
+    uint gg = gs_cacheG[index];
+    uint bb = gs_cacheB[index];
+    pixel1 = float3(f16tof32(rr      ), f16tof32(gg      ), f16tof32(bb      ));
+    pixel2 = float3(f16tof32(rr >> 16), f16tof32(gg >> 16), f16tof32(bb >> 16));
+}
+
+float3 BlurPixels(float3 a, float3 b, float3 c, float3 d, float3 e)
+{
+    return 0.30364122471313626 * c
+         + 0.23647602357935094 * (b + d)
+         + 0.1117033640640809  * (a + e);
+}
+
+[numthreads(HALF_RES, HALF_RES, 1)]
+void AtmosphericScatteringBlur(int3 coord : SV_DispatchThreadID)
+{
+    int3 coordF = int3(coord.xy * 2, coord.z);
+    float3 p00 = _AtmosphericScatteringLUT_RW[coordF + int3(0, 0, 0)];
+    float3 p10 = _AtmosphericScatteringLUT_RW[coordF + int3(1, 0, 0)];
+    float3 p01 = _AtmosphericScatteringLUT_RW[coordF + int3(0, 1, 0)];
+    float3 p11 = _AtmosphericScatteringLUT_RW[coordF + int3(1, 1, 0)];
+
+    int prev, next;
+    int index = coord.x * 2 + (coord.y * PBRSKYCONFIG_ATMOSPHERIC_SCATTERING_LUT_WIDTH);
+    float3 s0, s1, s2, s3;
+
+    Store2Pixels(index + 0, p00, p10);
+    Store2Pixels(index + 1, p01, p11);
+
+    GroupMemoryBarrierWithGroupSync();
+
+    // Horizontal blur
+
+    prev = max(coord.x - 1, 0)            * 2 + coord.y * PBRSKYCONFIG_ATMOSPHERIC_SCATTERING_LUT_WIDTH;
+    next = min(coord.x + 1, HALF_RES - 1) * 2 + coord.y * PBRSKYCONFIG_ATMOSPHERIC_SCATTERING_LUT_WIDTH;
+
+    Load2Pixels(prev + 0, s0, s1);
+    Load2Pixels(next + 0, s2, s3);
+
+    float3 blur00 = BlurPixels(s0, s1, p00, p10, s2);
+    float3 blur10 = BlurPixels(s1, p00, p10, s2, s3);
+
+    Load2Pixels(prev + 1, s0, s1);
+    Load2Pixels(next + 1, s2, s3);
+
+    float3 blur01 = BlurPixels(s0, s1, p01, p11, s2);
+    float3 blur11 = BlurPixels(s1, p01, p11, s2, s3);
+
+    // We are probably missing a barrier here
+
+    Store2Pixels(index + 0, blur00, blur01);
+    Store2Pixels(index + 1, blur10, blur11);
+
+    GroupMemoryBarrierWithGroupSync();
+
+    // Vertical blur
+
+    prev = coord.x * 2 + max(coord.y - 1, 0)            * PBRSKYCONFIG_ATMOSPHERIC_SCATTERING_LUT_WIDTH;
+    next = coord.x * 2 + min(coord.y + 1, HALF_RES - 1) * PBRSKYCONFIG_ATMOSPHERIC_SCATTERING_LUT_WIDTH;
+
+    Load2Pixels(prev + 0, s0, s1);
+    Load2Pixels(next + 0, s2, s3);
+
+    _AtmosphericScatteringLUT_RW[coordF + uint3(0,0,0)] = BlurPixels(s0, s1, blur00, blur01, s2);
+    _AtmosphericScatteringLUT_RW[coordF + uint3(0,1,0)] = BlurPixels(s1, blur00, blur01, s2, s3);
+
+    Load2Pixels(prev + 1, s0, s1);
+    Load2Pixels(next + 1, s2, s3);
+
+    _AtmosphericScatteringLUT_RW[coordF + uint3(1,0,0)] = BlurPixels(s0, s1, blur10, blur11, s2);
+    _AtmosphericScatteringLUT_RW[coordF + uint3(1,1,0)] = BlurPixels(s1, blur10, blur11, s2, s3);
+}
+
+#endif

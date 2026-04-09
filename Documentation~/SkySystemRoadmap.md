@@ -192,6 +192,30 @@
   - 后续评估是否暴露 `Number Of Bounces` 或固定质量档位
 - 审查物理天空和高度雾之间的参数耦合，避免把 sky-only 参数硬塞给 fog pass。
 
+### 当前进度（2026-04-09）
+
+- 已把 HDRP 17.5 `PhysicallyBasedSky.cs` 的核心 Volume 参数集继续移植到 `PhysicallyBasedSkyVolume`：
+  - `atmosphericScattering`
+  - `renderingMode` / `material`
+  - ground / space cubemap 与 multiplier / rotation
+  - `colorSaturation` / `alphaSaturation` / `alphaMultiplier`
+  - `horizonTint` / `zenithTint` / `horizonZenithShift`
+- 已补齐与 HDRP 对齐的辅助逻辑：
+  - `GetMaximumAltitude()`
+  - `GetAirAlbedo()`
+  - `GetOzoneLayerMinimumAltitude()`
+  - `GetOzoneLayerWidth()`
+  - `GetPrecomputationHashCode()`
+- 已开始把这些参数接到材质绑定层，供后续新的 `PhysicallyBasedSky` shader / baking 路径直接消费。
+- 已把当前实际生效的 `Hidden/VividRP/PhysicallyBasedSky` 根 shader 切到桥接实现，开始消费：
+  - ground albedo / emission / space emission
+  - `PlanetRotation` / `SpaceRotation`
+  - `horizonTint` / `zenithTint` / `colorSaturation`
+  - 仍暂时保留现有 `SkyViewLUT` + raymarch fallback，而不是直接切换到完整 HDRP LUT/atmospheric scattering 新链路
+- 仍待继续：
+  - 把新的 HDRP 风格屏幕天空 shader 完整接入现有 `SkyViewLUT` / atmospheric scattering 渲染路径
+  - 把 `SkyLUTGenerator.compute` / atmospheric scattering 新链路与现有 RenderPass 正式切换对齐
+
 ### 验收标准
 
 - 物理天空参数能覆盖“地球默认”、“艺术化天空”、“自定义行星”三类用例。

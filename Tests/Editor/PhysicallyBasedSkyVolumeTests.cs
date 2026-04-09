@@ -52,6 +52,44 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void GetMaximumAltitude_UsesAdvancedAerosolAltitude_WhenModelIsEarthAdvanced()
+        {
+            var volume = ScriptableObject.CreateInstance<PhysicallyBasedSkyVolume>();
+
+            try
+            {
+                volume.type.value = PhysicallyBasedSkyModel.EarthAdvanced;
+                volume.aerosolMaximumAltitude.value = 24000.0f;
+
+                Assert.That(volume.GetMaximumAltitude(), Is.EqualTo(24000.0f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(volume);
+            }
+        }
+
+        [Test]
+        public void GetOzoneLayerHelpers_ReturnEarthDefaults_WhenModelIsNotCustom()
+        {
+            var volume = ScriptableObject.CreateInstance<PhysicallyBasedSkyVolume>();
+
+            try
+            {
+                volume.type.value = PhysicallyBasedSkyModel.EarthAdvanced;
+                volume.ozoneMinimumAltitude.value = 5000.0f;
+                volume.ozoneLayerWidth.value = 7000.0f;
+
+                Assert.That(volume.GetOzoneLayerMinimumAltitude(), Is.EqualTo(20000.0f));
+                Assert.That(volume.GetOzoneLayerWidth(), Is.EqualTo(20000.0f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(volume);
+            }
+        }
+
+        [Test]
         public void IsHeightFogActive_ReturnsTrue_WhenEnabledWithPositiveDensityAndDistance()
         {
             var volume = ScriptableObject.CreateInstance<PhysicallyBasedSkyVolume>();
@@ -63,6 +101,27 @@ namespace VividRP.Editor.Tests
                 volume.fogMaxDistance.value = 1500.0f;
 
                 Assert.That(volume.IsHeightFogActive(), Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(volume);
+            }
+        }
+
+        [Test]
+        public void GetPrecomputationHashCode_DoesNotChange_WhenArtisticOverridesChange()
+        {
+            var volume = ScriptableObject.CreateInstance<PhysicallyBasedSkyVolume>();
+
+            try
+            {
+                var initialHash = volume.GetPrecomputationHashCode();
+                volume.horizonTint.value = Color.red;
+                volume.colorSaturation.value = 0.25f;
+                volume.alphaMultiplier.value = 0.5f;
+                volume.spaceRotation.value = new Vector3(15.0f, 30.0f, 45.0f);
+
+                Assert.That(volume.GetPrecomputationHashCode(), Is.EqualTo(initialHash));
             }
             finally
             {
@@ -107,6 +166,24 @@ namespace VividRP.Editor.Tests
                 var initialHash = volume.GetHashCode();
                 volume.enableHeightFog.value = true;
                 volume.fogDensity.value = 0.125f;
+
+                Assert.That(volume.GetHashCode(), Is.Not.EqualTo(initialHash));
+            }
+            finally
+            {
+                Object.DestroyImmediate(volume);
+            }
+        }
+
+        [Test]
+        public void GetHashCode_Changes_WhenArtisticOverridesChange()
+        {
+            var volume = ScriptableObject.CreateInstance<PhysicallyBasedSkyVolume>();
+
+            try
+            {
+                var initialHash = volume.GetHashCode();
+                volume.horizonTint.value = new Color(0.5f, 0.75f, 1.0f);
 
                 Assert.That(volume.GetHashCode(), Is.Not.EqualTo(initialHash));
             }

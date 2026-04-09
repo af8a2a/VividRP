@@ -133,11 +133,16 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("cmd.GenerateMips(m_RuntimeSkyCubemap);"));
             Assert.That(source, Does.Contain("properties.SetFloat(SkyUseLutId, 0.0f);"));
             Assert.That(source, Does.Contain("properties.SetTexture(SkyViewLutId, Texture2D.blackTexture);"));
+            Assert.That(source, Does.Contain("PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(volume, context, out var materialParameters)"));
+            Assert.That(source, Does.Contain("PhysicallyBasedSkyMaterialPropertyBinder.Apply(properties, materialParameters, volume);"));
             Assert.That(source, Does.Contain("SkyCubemapBakingUtility.RenderSkyToCubemap("));
             Assert.That(source, Does.Not.Contain("m_AmbientProbeCubemapFaces"));
             Assert.That(source, Does.Not.Contain("TryProjectCubemapToSH("));
             Assert.That(source, Does.Not.Contain("SetPixels("));
             Assert.That(parametersSource, Does.Contain("internal static bool TryBuildForAmbientProbe("));
+            Assert.That(parametersSource, Does.Contain("internal static bool TryBuildMaterialParameters("));
+            Assert.That(parametersSource, Does.Contain("internal static class PhysicallyBasedSkyMaterialPropertyBinder"));
+            Assert.That(parametersSource, Does.Contain("properties.SetVector(PlanetCenterRadiusId, parameters.planetCenterRadius);"));
             Assert.That(parametersSource, Does.Contain("Ambient probe baking must stay independent from camera exposure adaptation."));
             Assert.That(parametersSource, Does.Not.Contain("GetPreExposureMultiplier("));
             Assert.That(parametersSource, Does.Not.Contain("GetPostExposureMultiplier("));

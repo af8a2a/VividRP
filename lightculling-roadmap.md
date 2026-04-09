@@ -39,10 +39,11 @@ VividRP maintains two clustered light culling implementations:
   - Impact: Dramatically reduces synchronization overhead for edge tests.
   - Done (clustered): Replaced `InterlockedOr(ldsIsLightInvisible, 1)` + clear/barrier per light with `WaveActiveAnyTrue(threadFoundSep)` + cross-wave reduce via `ldsTilePassList` scratch. Eliminates all per-edge-pair atomics; single-wave groups need 0 barriers per light, multi-wave groups need 2 (same count but no atomic contention). bigtile variant not yet updated.
 
-- [ ] **HiZ-based tile max depth (replace per-pixel depth sampling)**
+- [x] **HiZ-based tile max depth (replace per-pixel depth sampling)**
   - Current (`lightlistbuild-clustered.compute:282-321`, `ENABLE_DEPTH_TEXTURE_BACKPLANE`): 32x32=1024 depth fetches per tile to find max depth for adaptive log base.
-  - Target: Read from hierarchical-Z mip (mip5 = 1 texel for 32x32, or 4 texels from mip4). Or output per-tile max depth from a prior pass.
+  - Target: Read from hierarchical-Z mip (mip5 = 1 texel for 32×32, or 4 texels from mip4). Or output per-tile max depth from a prior pass.
   - Impact: 1024 -> 1-4 texture fetches per tile.
+  - Done (non-MSAA): Added `Texture2D g_depth_tex_hiz : register(t5)` to `ShaderBase.hlsl`. Non-MSAA `ENABLE_DEPTH_TEXTURE_BACKPLANE` path replaced with a single `g_depth_tex_hiz.mips[log2TileSize][tileIDX]` read by thread 0, stored into `ldsZMax`, broadcast via `GroupMemoryBarrierWithGroupSync`. MSAA kernels retain the original per-pixel loop. CPU-side must supply the max-depth mip chain for `g_depth_tex_hiz`.
 
 - [ ] **Z-binning pass between big tile and clustered**
   - Current: `clusterIdxs` provides per-light depth range (min/max cluster index), but the clustered kernel still iterates all coarse lights per cluster.

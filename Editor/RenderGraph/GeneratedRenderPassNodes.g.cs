@@ -111,6 +111,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class HZBGeneratePass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.HZBGeneratePass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class ImportTextureExamplePass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.ImportTextureExamplePass, VividRP.Runtime";

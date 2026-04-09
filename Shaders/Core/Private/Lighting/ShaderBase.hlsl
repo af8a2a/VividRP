@@ -17,6 +17,10 @@
     }
 #else
     Texture2D g_depth_tex;
+    // Max mip-chain of g_depth_tex built on the CPU side (corrected depth, near=0 far=1).
+    // Mip level N has one texel per 2^N x 2^N pixel region, storing the maximum corrected depth.
+    // Used by the HiZ tile-max-depth path to replace per-pixel depth sampling.
+    Texture2D g_depth_tex_hiz : register( t5 );
 
     float FetchDepth(uint2 pixCoord)
     {

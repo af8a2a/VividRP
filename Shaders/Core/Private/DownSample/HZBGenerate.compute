@@ -1,0 +1,293 @@
+﻿// SPDSample
+//
+// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+// when using amd shader intrinscs
+// #include "ags_shader_intrinsics_dx12.h"
+// #pragma enable_d3d11_debug_symbols
+#pragma kernel KCopyDepth
+#pragma kernel KMain
+#pragma use_dxc
+#pragma require Native16Bit
+
+
+#define FFX_WAVE 1
+#define FFX_HALF
+
+#if defined(FFX_HALF)
+#define A_HALF 1
+#endif
+
+#define A_GPU 1
+#define A_HLSL 1
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.core/Runtime/PostProcessing/Shaders/ffx/ffx_a.hlsl"
+
+//--------------------------------------------------------------------------------------
+// Constant Buffer
+//--------------------------------------------------------------------------------------
+cbuffer spdConstants : register(b0)
+{
+    AU1 mips;
+    AU1 numWorkGroups;
+    AU2 workGroupOffset;
+}
+
+//--------------------------------------------------------------------------------------
+// Texture definitions
+//--------------------------------------------------------------------------------------
+Texture2D<float> _InputDepth;
+
+// don't access MIP [6]
+RWTexture2D<float4> rw_spd_mip0;
+RWTexture2D<float4> rw_spd_mip1;
+RWTexture2D<float4> rw_spd_mip2;
+RWTexture2D<float4> rw_spd_mip3;
+RWTexture2D<float4> rw_spd_mip4;
+RWTexture2D<float4> rw_spd_mip5;
+globallycoherent RWTexture2D<float4> rw_spd_mip6;
+RWTexture2D<float4> rw_spd_mip7;
+RWTexture2D<float4> rw_spd_mip8;
+RWTexture2D<float4> rw_spd_mip9;
+RWTexture2D<float4> rw_spd_mip10;
+RWTexture2D<float4> rw_spd_mip11;
+RWTexture2D<float4> rw_spd_mip12;
+
+
+//--------------------------------------------------------------------------------------
+// Buffer definitions - global atomic counter
+//--------------------------------------------------------------------------------------
+struct SpdGlobalAtomicBuffer
+{
+    uint counter[6];
+};
+
+globallycoherent RWStructuredBuffer<SpdGlobalAtomicBuffer> spdGlobalAtomic :register(u0);
+
+
+groupshared AU1 spdCounter;
+
+#ifndef SPD_PACKED_ONLY
+groupshared AF1 spdIntermediateR[16][16];
+groupshared AF1 spdIntermediateG[16][16];
+groupshared AF1 spdIntermediateB[16][16];
+groupshared AF1 spdIntermediateA[16][16];
+
+AF4 SpdLoadSourceImage(AF2 tex)//, AU1 mipLevel = 0)
+{
+    return rw_spd_mip0[tex];
+}
+
+AF4 SpdLoad(ASU2 tex)
+{
+    return rw_spd_mip6[tex];
+}
+
+
+void SpdStore(ASU2 pix, AF4 outValue, AU1 mipLevel = 0)
+{
+    // if (mipLevel == 5)
+    // {
+    //     rw_spd_mip6[pix] = outValue;
+    //     return;
+    // }
+    mipLevel = mipLevel + 1;
+    switch (mipLevel)
+    {
+    case 0:
+        rw_spd_mip0[pix] = outValue;
+        break;
+    case 1:
+        rw_spd_mip1[pix] = outValue;
+        break;
+    case 2:
+        rw_spd_mip2[pix] = outValue;
+        break;
+    case 3:
+        rw_spd_mip3[pix] = outValue;
+        break;
+    case 4:
+        rw_spd_mip4[pix] = outValue;
+        break;
+    case 5:
+        rw_spd_mip5[pix] = outValue;
+        break;
+    case 6:
+        rw_spd_mip6[pix] = outValue;
+        break;
+    case 7:
+        rw_spd_mip7[pix] = outValue;
+        break;
+    case 8:
+        rw_spd_mip8[pix] = outValue;
+        break;
+    case 9:
+        rw_spd_mip9[pix] = outValue;
+        break;
+    case 10:
+        rw_spd_mip10[pix] = outValue;
+        break;
+    case 11:
+        rw_spd_mip11[pix] = outValue;
+        break;
+    case 12:
+        rw_spd_mip12[pix] = outValue;
+        break;
+    default:
+        break;
+    }
+}
+
+void SpdIncreaseAtomicCounter(AU1 slice)
+{
+    InterlockedAdd(spdGlobalAtomic[0].counter[slice], 1, spdCounter);
+}
+
+AU1 SpdGetAtomicCounter()
+{
+    return spdCounter;
+}
+
+void SpdResetAtomicCounter(AU1 slice)
+{
+    spdGlobalAtomic[0].counter[slice] = 0;
+}
+
+AF4 SpdLoadIntermediate(AU1 x, AU1 y)
+{
+    return AF4(
+        spdIntermediateR[x][y],
+        spdIntermediateG[x][y],
+        spdIntermediateB[x][y],
+        spdIntermediateA[x][y]);
+}
+
+void SpdStoreIntermediate(AU1 x, AU1 y, AF4 value)
+{
+    spdIntermediateR[x][y] = value.x;
+    spdIntermediateG[x][y] = value.y;
+    spdIntermediateB[x][y] = value.z;
+    spdIntermediateA[x][y] = value.w;
+}
+
+AF4 SpdReduce4(AF4 v0, AF4 v1, AF4 v2, AF4 v3)
+{
+    return max(max(v0, v1), max(v2, v3));
+}
+#endif
+
+// define fetch and store functions Packed
+#ifdef A_HALF
+groupshared AH2 spdIntermediateRG[16][16];
+groupshared AH2 spdIntermediateBA[16][16];
+
+AH4 SpdLoadSourceImageH(AF2 tex)
+{
+    return AH4(rw_spd_mip0[tex]);
+}
+AH4 SpdLoadH(ASU2 p)
+{
+    return AH4(rw_spd_mip6[p]);
+}
+void SpdStoreH(ASU2 p, AH4 value, AU1 mip)
+{
+    if (mip == 5)
+    {
+        rw_spd_mip6[p] = AF4(value);
+        return;
+    }
+    mip = mip + 1;
+    switch (mip)
+    {
+    case 0:
+        rw_spd_mip0[p] = value;
+        break;
+    case 1:
+        rw_spd_mip1[p] = value;
+        break;
+    case 2:
+        rw_spd_mip2[p] = value;
+        break;
+    case 3:
+        rw_spd_mip3[p] = value;
+        break;
+    case 4:
+        rw_spd_mip4[p] = value;
+        break;
+    case 5:
+        rw_spd_mip5[p] = value;
+        break;
+    case 6:
+        rw_spd_mip6[p] = value;
+        break;
+    default:
+        break;
+    }
+}
+
+AH4 SpdLoadIntermediateH(AU1 x, AU1 y)
+{
+    return AH4(
+    spdIntermediateRG[x][y].x,
+    spdIntermediateRG[x][y].y,
+    spdIntermediateBA[x][y].x,
+    spdIntermediateBA[x][y].y);
+}
+void SpdStoreIntermediateH(AU1 x, AU1 y, AH4 value)
+{
+    spdIntermediateRG[x][y] = value.xy;
+    spdIntermediateBA[x][y] = value.zw;
+}
+AH4 SpdReduce4H(AH4 v0, AH4 v1, AH4 v2, AH4 v3)
+{
+    return max(max(v0, v1), max(v2, v3));
+}
+#endif
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/FidelityFX/ffx_spd.hlsl"
+
+// Main function
+//--------------------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------
+[numthreads(8, 8, 1)]
+void KCopyDepth(uint3 tid : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _InputDepth.GetDimensions(width, height);
+
+    if (tid.x >= width || tid.y >= height)
+        return;
+
+    float depth = _InputDepth[tid.xy];
+
+
+    rw_spd_mip0[tid.xy] = depth.xxxx;
+}
+
+[numthreads(256, 1, 1)]
+void KMain(uint3 WorkGroupId : SV_GroupID, uint LocalThreadIndex : SV_GroupIndex)
+{
+    SpdDownsampleH(
+        AU2(WorkGroupId.xy), 
+        AU1(LocalThreadIndex),  
+        AU1(mips),
+        AU1(numWorkGroups),
+        AU1(WorkGroupId.z),
+        AU2(workGroupOffset));
+}

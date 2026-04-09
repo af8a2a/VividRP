@@ -147,6 +147,32 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ClusteredLightListGen_DepthRT_UsesHiZMipReadInsteadOfPerPixelLoop()
+        {
+            var clustered = File.ReadAllText(GetLightingPath("lightlistbuild-clustered.compute"));
+            var shaderBase = File.ReadAllText(GetLightingPath("ShaderBase.hlsl"));
+
+            // ShaderBase.hlsl must declare the HiZ texture at register t5.
+            Assert.That(shaderBase, Does.Contain("Texture2D g_depth_tex_hiz : register( t5 )"));
+
+            // Non-MSAA path: thread 0 reads one HiZ mip texel instead of looping over pixels.
+            Assert.That(clustered, Does.Contain("const uint hizMip = log2TileSize;"));
+            Assert.That(clustered, Does.Contain("g_depth_tex_hiz.mips[hizMip][tileIDX].x"));
+
+            // The ldsZMax broadcast from thread 0 must still be used.
+            Assert.That(clustered, Does.Contain("ldsZMax = asuint(max(linDistZ, 0.0));"));
+            Assert.That(clustered, Does.Contain("linMaDist = asfloat(ldsZMax);"));
+
+            // MSAA guard: the per-pixel loop must still be present for MSAA kernels.
+            Assert.That(clustered, Does.Contain("#ifdef MSAA_ENABLED"));
+            Assert.That(clustered, Does.Contain("for(int i=0; i<g_iNumSamplesMSAA; i++)"));
+
+            // Must NOT contain the old non-MSAA per-pixel half-texel-centre constant
+            // (fracSampleCoord = float2(0.5,0.5)) — that was only in the removed non-MSAA loop.
+            Assert.That(clustered, Does.Not.Contain("fracSampleCoord = float2(0.5,0.5)"));
+        }
+
+        [Test]
         public void LightCullUtils_DeclaresStereoAwareIndexHelpers()
         {
             var source = File.ReadAllText(GetLightingPath("LightCullUtils.hlsl"));

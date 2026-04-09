@@ -273,19 +273,16 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
     // establish max depth first
     float linMaDist=0.0;
 
+#ifdef MSAA_ENABLED
+    // HiZ mip-read is not well-defined for MSAA depth; fall back to per-pixel sampling.
     for(int idx=t; idx<(TILE_SIZE_CLUSTERED*TILE_SIZE_CLUSTERED); idx+=NR_THREADS)
     {
         uint2 uPixCrd = min( uint2(viTilLL.x+(idx&(TILE_SIZE_CLUSTERED-1)), viTilLL.y+(idx>>log2TileSize)), uint2(g_screenSize.x-1, g_screenSize.y-1) );
 
-#ifdef MSAA_ENABLED
         for(int i=0; i<g_iNumSamplesMSAA; i++)
         {
         const float fDpth = FetchDepthMSAA(uPixCrd, i);
         const float2 fracSampleCoord = g_depth_tex.GetSamplePosition(i).xy;     // this is optimized away when USE_OBLIQUE_MODE is NOT set.
-#else
-        const float fDpth = FetchDepth(uPixCrd);
-        const float2 fracSampleCoord = float2(0.5,0.5);
-#endif
 
         if(fDpth<VIEWPORT_SCALE_Z)      // if not skydome
         {
@@ -298,21 +295,49 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
 
             linMaDist = max(linDistZ, linMaDist);
         }
-#ifdef MSAA_ENABLED
         }
-#endif
     }
 
     linMaDist = max(linMaDist, 0.0);
     InterlockedMax(ldsZMax, asuint(linMaDist) );
 
+#if NR_THREADS > PLATFORM_LANE_COUNT
+    GroupMemoryBarrierWithGroupSync();
+#endif
+    linMaDist = asfloat(ldsZMax);
+#else
+    // HiZ path: read mip level log2(TILE_SIZE_CLUSTERED) = 5 (one texel per 32x32 tile).
+    // g_depth_tex_hiz stores max corrected (non-reversed) depth: near=0, far=1.
+    // Thread 0 reads 1 texel covering the full tile; the result is broadcast via ldsZMax.
+    if(t == 0u)
+    {
+        // Mip 5: tile index maps 1:1 to HiZ texels for 32x32 tiles.
+        const uint hizMip = log2TileSize;                   // == 5 for TILE_SIZE_CLUSTERED=32
+        float hizDepth = g_depth_tex_hiz.mips[hizMip][tileIDX].x;
+
+        if(hizDepth < VIEWPORT_SCALE_Z)    // at least one non-sky pixel in tile
+        {
+            // Tile centre in pixel coords (half-texel offset = 0.5).
+            float2 tileCentrePix = float2(viTilLL) + float2(TILE_SIZE_CLUSTERED, TILE_SIZE_CLUSTERED) * 0.5;
+            float linZ = GetLinearDepth(tileCentrePix, hizDepth, eyeIndex);
+#if USE_LEFT_HAND_CAMERA_SPACE
+            float linDistZ = linZ;
+#else
+            float linDistZ = -linZ;
+#endif
+            ldsZMax = asuint(max(linDistZ, 0.0));
+        }
+        // else ldsZMax stays 0 → falls through to the sky-pixel clamp below.
+    }
 
 #if NR_THREADS > PLATFORM_LANE_COUNT
     GroupMemoryBarrierWithGroupSync();
 #endif
     linMaDist = asfloat(ldsZMax);
+#endif  // MSAA_ENABLED
+
     if(linMaDist<=0.0) linMaDist = g_fFarPlane;      // assume sky pixel
-#endif
+#endif  // ENABLE_DEPTH_TEXTURE_BACKPLANE
 
     // 'Normalized' coordinates of tile, for use with AABB bounds in g_vBoundsBuffer
     float2 vTileLL = float2(viTilLL.x/g_screenSize.x, viTilLL.y/g_screenSize.y);

@@ -59,10 +59,11 @@ VividRP maintains two clustered light culling implementations:
 
 ### Low Priority
 
-- [ ] **`SFiniteLightBound` float4 alignment**
+- [x] **`SFiniteLightBound` float4 alignment**
   - Current (`LightLoop.cs.hlsl:97-106`): Uses `float3` members (12-byte aligned), may cause cross-cache-line reads on some GPUs. `LightVolumeData` already uses `float3+uint` interleave (16-byte).
   - Target: Pack `scaleXY` and `radius` into `w` components of existing `float4` vectors.
   - Impact: Better cache line utilization.
+  - Implemented: `boxAxisX.w = scaleXY`, `boxAxisY.w = radius`. Stride unchanged at 56 bytes. Updated HLSL struct + accessors, C# struct, both C# write sites, and all four shader call sites (bigtile, clustered ×2, scrbound).
 
 - [ ] **Merge ClearAtomic dispatch**
   - Same as VividRP native: single `[1,1,1]` dispatch for zeroing one uint.

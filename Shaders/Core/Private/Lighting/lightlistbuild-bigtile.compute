@@ -344,7 +344,7 @@ void SphericalIntersectionTests(uint threadID, int iNrCoarseLights, float2 scree
         const int boundIndex = GenerateLightCullDataIndex(lightsListLDS[l], g_iNrVisibLights, eyeIndex);
         SFiniteLightBound lgtDat = g_data[boundIndex];
 
-        if( !DoesSphereOverlapTile(V, halfTileSizeAtZDistOne, lgtDat.center.xyz, lgtDat.radius, g_isOrthographic!=0) )
+        if( !DoesSphereOverlapTile(V, halfTileSizeAtZDistOne, lgtDat.center.xyz, lgtDat.boxAxisY.w, g_isOrthographic!=0) )
             lightsListLDS[l]=UINT_MAX;
     }
 
@@ -411,7 +411,7 @@ void CullByExactEdgeTests(uint threadID, int iNrCoarseLights, uint2 viTilLL, uin
             const float3 boxY = lgtDat.boxAxisY.xyz;
             const float3 boxZ = -lgtDat.boxAxisZ.xyz;   // flip axis (so it points away from the light direction for a spot-light)
             const float3 center = lgtDat.center.xyz;
-            const float2 scaleXY = lgtDat.scaleXY;
+            const float2 scaleXY = lgtDat.boxAxisX.w;
 
             for(int i=threadID; i<totNrEdgePairs; i+=NR_THREADS)
             {

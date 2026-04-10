@@ -230,6 +230,43 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SFiniteLightBound_PackedLayout_StrideIs56AndScaleRadiusInWComponents()
+        {
+            // Stride must be unchanged at 56 bytes after packing scaleXY/radius into w.
+            Assert.That(VividLightData.SFiniteLightBound.Stride, Is.EqualTo(56));
+
+            // HLSL struct uses float4 for boxAxisX (w=scaleXY) and boxAxisY (w=radius).
+            var source = File.ReadAllText(GetLightingPath("LightLoop.cs.hlsl"));
+            Assert.That(source, Does.Contain("float4 boxAxisX;   // xyz = axis, w = scaleXY"));
+            Assert.That(source, Does.Contain("float4 boxAxisY;   // xyz = axis, w = radius"));
+            Assert.That(source, Does.Not.Contain("float scaleXY;"));
+            Assert.That(source, Does.Not.Contain("float radius;"));
+
+            // Accessors read from packed w components.
+            Assert.That(source, Does.Contain("return value.boxAxisX.w;"));
+            Assert.That(source, Does.Contain("return value.boxAxisY.w;"));
+
+            // Shader call sites must use packed fields, not loose fields.
+            var bigtile = File.ReadAllText(GetLightingPath("lightlistbuild-bigtile.compute"));
+            Assert.That(bigtile, Does.Contain("lgtDat.boxAxisX.w"));
+            Assert.That(bigtile, Does.Contain("lgtDat.boxAxisY.w"));
+            Assert.That(bigtile, Does.Not.Contain("lgtDat.scaleXY"));
+            Assert.That(bigtile, Does.Not.Contain("lgtDat.radius"));
+
+            var clustered = File.ReadAllText(GetLightingPath("lightlistbuild-clustered.compute"));
+            Assert.That(clustered, Does.Contain("lgtDat.boxAxisX.w"));
+            Assert.That(clustered, Does.Contain("lgtDat.boxAxisY.w"));
+            Assert.That(clustered, Does.Not.Contain("lgtDat.scaleXY"));
+            Assert.That(clustered, Does.Not.Contain("lgtDat.radius"));
+
+            var scrbound = File.ReadAllText(GetLightingPath("scrbound.compute"));
+            Assert.That(scrbound, Does.Contain("cullData.boxAxisX.w"));
+            Assert.That(scrbound, Does.Contain("cullData.boxAxisY.w"));
+            Assert.That(scrbound, Does.Not.Contain("cullData.scaleXY"));
+            Assert.That(scrbound, Does.Not.Contain("cullData.radius"));
+        }
+
+        [Test]
         public void ShaderVariablesLightList_CSharpLayout_MatchesHdrpCBufferPacking()
         {
             var assembly = typeof(LightGridPass).Assembly;

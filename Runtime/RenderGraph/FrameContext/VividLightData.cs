@@ -96,12 +96,10 @@ namespace VividRP.Runtime
         [StructLayout(LayoutKind.Sequential)]
         public struct SFiniteLightBound
         {
-            public Vector3 boxAxisX;
-            public Vector3 boxAxisY;
+            public Vector4 boxAxisX;   // xyz = axis, w = scaleXY
+            public Vector4 boxAxisY;   // xyz = axis, w = radius
             public Vector3 boxAxisZ;
             public Vector3 center;
-            public float scaleXY;
-            public float radius;
 
             internal static int Stride => Marshal.SizeOf<SFiniteLightBound>();
         }
@@ -1769,11 +1767,9 @@ namespace VividRP.Runtime
                     viewSpaceCullData.positionVS.x + rangeVector.x,
                     viewSpaceCullData.positionVS.y + rangeVector.y,
                     viewSpaceCullData.positionVS.z + rangeVector.z);
-                lightBound.boxAxisX = new Vector3(axisX.x * squeezeScale * range, axisX.y * squeezeScale * range, axisX.z * squeezeScale * range);
-                lightBound.boxAxisY = new Vector3(axisY.x * squeezeScale * range, axisY.y * squeezeScale * range, axisY.z * squeezeScale * range);
+                lightBound.boxAxisX = new Vector4(axisX.x * squeezeScale * range, axisX.y * squeezeScale * range, axisX.z * squeezeScale * range, 0.01f);
+                lightBound.boxAxisY = new Vector4(axisY.x * squeezeScale * range, axisY.y * squeezeScale * range, axisY.z * squeezeScale * range, math.max(radius, halfRange));
                 lightBound.boxAxisZ = new Vector3(rangeVector.x, rangeVector.y, rangeVector.z);
-                lightBound.scaleXY = 0.01f;
-                lightBound.radius = math.max(radius, halfRange);
 
                 lightVolumeData.lightVolume = HdrpLightVolumeTypeCone;
                 lightVolumeData.lightAxisX = new Vector3(axisX.x, axisX.y, axisX.z);
@@ -1790,11 +1786,9 @@ namespace VividRP.Runtime
             var pointCenter = new Vector3(viewSpaceCullData.positionVS.x, viewSpaceCullData.positionVS.y, viewSpaceCullData.positionVS.z);
 
             lightBound.center = pointCenter;
-            lightBound.boxAxisX = pointAxisX * range;
-            lightBound.boxAxisY = pointAxisY * range;
+            lightBound.boxAxisX = new Vector4(pointAxisX.x * range, pointAxisX.y * range, pointAxisX.z * range, 1.0f);
+            lightBound.boxAxisY = new Vector4(pointAxisY.x * range, pointAxisY.y * range, pointAxisY.z * range, range);
             lightBound.boxAxisZ = pointAxisZ * range;
-            lightBound.scaleXY = 1.0f;
-            lightBound.radius = range;
 
             lightVolumeData.lightVolume = HdrpLightVolumeTypeSphere;
             lightVolumeData.lightAxisX = pointAxisX;

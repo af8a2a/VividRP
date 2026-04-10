@@ -660,8 +660,8 @@ float4 FetchPlane(int l, int p, uint eyeIndex)
     const float3 boxY = lgtDat.boxAxisY.xyz;
     const float3 boxZ = -lgtDat.boxAxisZ.xyz;           // flip axis (so it points away from the light direction for a spot-light)
     const float3 center = lgtDat.center.xyz;
-    const float radius = lgtDat.radius;
-    const float2 scaleXY = lgtDat.scaleXY;
+    const float radius = lgtDat.boxAxisY.w;
+    const float2 scaleXY = lgtDat.boxAxisX.w;
 
     return GetHullPlaneEq(boxX, boxY, boxZ, center, scaleXY, p);
 }
@@ -686,7 +686,7 @@ int SphericalIntersectionTests(uint threadID, int iNrCoarseLights, float2 screen
         const int lightBoundIndex = GenerateLightCullDataIndex(coarseList[l], g_iNrVisibLights, eyeIndex);
         SFiniteLightBound lgtDat = g_data[lightBoundIndex];
 
-        if( !DoesSphereOverlapTile(V, halfTileSizeAtZDistOne, lgtDat.center.xyz, lgtDat.radius, g_isOrthographic!=0) )
+        if( !DoesSphereOverlapTile(V, halfTileSizeAtZDistOne, lgtDat.center.xyz, lgtDat.boxAxisY.w, g_isOrthographic!=0) )
             coarseList[l]=UINT_MAX;
     }
 
@@ -816,7 +816,7 @@ int CullByExactEdgeTests(uint threadID, int iNrCoarseLights, uint2 viTilLL, uint
             const float3 boxY = lgtDat.boxAxisY.xyz;
             const float3 boxZ = -lgtDat.boxAxisZ.xyz;           // flip axis (so it points away from the light direction for a spot-light)
             const float3 center = lgtDat.center.xyz;
-            const float2 scaleXY = lgtDat.scaleXY;
+            const float2 scaleXY = lgtDat.boxAxisX.w;
 
             bool threadFoundSep = false;
 

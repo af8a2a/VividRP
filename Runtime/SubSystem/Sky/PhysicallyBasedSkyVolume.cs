@@ -19,7 +19,7 @@ namespace VividRP.Runtime
     
 
     [Serializable]
-    [VolumeComponentMenu("VividRP/Physically Based Sky")]
+    [VolumeComponentMenu("Sky/Physically Based Sky")]
     public sealed class PhysicallyBasedSkyVolume : VolumeComponent
     {
         private const float DefaultEarthRadius = 6.3781f * 1000000.0f;
@@ -28,65 +28,132 @@ namespace VividRP.Runtime
         private const float DefaultAirScatteringR = 5.8f / 1000000.0f;
         private const float DefaultAirScatteringG = 13.5f / 1000000.0f;
         private const float DefaultAirScatteringB = 33.1f / 1000000.0f;
+        private static readonly float DefaultAerosolMaximumAltitude = LayerDepthFromScaleHeight(DefaultAerosolScaleHeight);
+        private const float DefaultOzoneMinimumAltitude = 20.0f * 1000.0f;
+        private const float DefaultOzoneLayerWidth = 20.0f * 1000.0f;
 
-        public EnumParameter<PhysicallyBasedSkyModel> type = new(PhysicallyBasedSkyModel.EarthSimple);
+        [Tooltip("Indicates a preset VividRP uses to simplify the Inspector.")]
+        public EnumParameter<PhysicallyBasedSkyModel> type = new(PhysicallyBasedSkyModel.EarthAdvanced);
+
+        [Tooltip("Enables atmospheric attenuation on objects when viewed from a distance.")]
         public BoolParameter atmosphericScattering = new(true);
 
         [Header("Material")]
+        [Tooltip("Indicates whether VividRP should use the default shader parameters or a custom material for planet and space rendering.")]
         public EnumParameter<PhysicallyBasedSkyRenderingMode> renderingMode = new(PhysicallyBasedSkyRenderingMode.Default);
+
+        [Tooltip("The custom material used to render the sky when Material mode is selected.")]
         public MaterialParameter material = new(null);
 
         [Header("Planet")]
+        [Tooltip("Sets the planet radius in meters. VividRP uses this value directly when building atmospheric planet data.")]
         public MinFloatParameter planetRadius = new(DefaultEarthRadius, 1000.0f);
 
         [Header("Air")]
+        [Tooltip("Sets the depth, in meters, of the atmospheric layer composed of air particles.")]
         public MinFloatParameter airMaximumAltitude = new(LayerDepthFromScaleHeight(DefaultAirScaleHeight), 0.0f);
+
+        [Tooltip("Controls the red channel opacity of air at the zenith.")]
         public ClampedFloatParameter airDensityR = new(ZenithOpacityFromExtinctionAndScaleHeight(DefaultAirScatteringR, DefaultAirScaleHeight), 0.0f, 1.0f);
+
+        [Tooltip("Controls the green channel opacity of air at the zenith.")]
         public ClampedFloatParameter airDensityG = new(ZenithOpacityFromExtinctionAndScaleHeight(DefaultAirScatteringG, DefaultAirScaleHeight), 0.0f, 1.0f);
+
+        [Tooltip("Controls the blue channel opacity of air at the zenith.")]
         public ClampedFloatParameter airDensityB = new(ZenithOpacityFromExtinctionAndScaleHeight(DefaultAirScatteringB, DefaultAirScaleHeight), 0.0f, 1.0f);
+
+        [Tooltip("Specifies the tint applied to air scattering albedo.")]
         public ColorParameter airTint = new(Color.white, false, false, true);
 
         [Header("Aerosol")]
-        public MinFloatParameter aerosolMaximumAltitude = new(LayerDepthFromScaleHeight(DefaultAerosolScaleHeight), 0.0f);
+        [Tooltip("Sets the depth, in meters, of the atmospheric layer composed of aerosol particles.")]
+        public MinFloatParameter aerosolMaximumAltitude = new(DefaultAerosolMaximumAltitude, 0.0f);
+
+        [Tooltip("Controls the opacity of aerosols at the zenith.")]
         public ClampedFloatParameter aerosolDensity = new(ZenithOpacityFromExtinctionAndScaleHeight(10.0f / 1000000.0f, DefaultAerosolScaleHeight), 0.0f, 1.0f);
+
+        [Tooltip("Specifies the tint applied to aerosol scattering albedo.")]
         public ColorParameter aerosolTint = new(new Color(0.9f, 0.9f, 0.9f), false, false, true);
+
+        [Tooltip("Controls the aerosol scattering anisotropy. Positive values bias forward scattering.")]
         public ClampedFloatParameter aerosolAnisotropy = new(0.8f, -1.0f, 1.0f);
 
         [Header("Ozone")]
+        [Tooltip("Controls the ozone density in the atmosphere.")]
         public ClampedFloatParameter ozoneDensityDimmer = new(1.0f, 0.0f, 1.0f);
-        public MinFloatParameter ozoneMinimumAltitude = new(20000.0f, 0.0f);
-        public MinFloatParameter ozoneLayerWidth = new(20000.0f, 0.0f);
+
+        [Tooltip("Controls the minimum altitude of the ozone layer in meters.")]
+        public MinFloatParameter ozoneMinimumAltitude = new(DefaultOzoneMinimumAltitude, 0.0f);
+
+        [Tooltip("Controls the width of the ozone layer in meters.")]
+        public MinFloatParameter ozoneLayerWidth = new(DefaultOzoneLayerWidth, 0.0f);
 
         [Header("Ground")]
+        [Tooltip("Specifies a color used to tint the planet surface.")]
         public ColorParameter groundTint = new(new Color(0.12f, 0.10f, 0.09f), false, false, false);
+
+        [Tooltip("Specifies a cubemap that represents the planet surface.")]
         public CubemapParameter groundColorTexture = new(null);
+
+        [Tooltip("Specifies a cubemap that represents emissive areas on the planet surface.")]
         public CubemapParameter groundEmissionTexture = new(null);
+
+        [Tooltip("Sets the multiplier applied to the ground emission cubemap.")]
         public MinFloatParameter groundEmissionMultiplier = new(1.0f, 0.0f);
+
+        [Tooltip("Sets the orientation of the planet surface cubemaps.")]
         public Vector3Parameter planetRotation = new(Vector3.zero);
 
         [Header("Space")]
+        [Tooltip("Specifies a cubemap that represents emissive areas of space.")]
         public CubemapParameter spaceEmissionTexture = new(null);
+
+        [Tooltip("Sets the multiplier applied to the space emission cubemap.")]
         public MinFloatParameter spaceEmissionMultiplier = new(1.0f, 0.0f);
+
+        [Tooltip("Sets the orientation of the space cubemap.")]
         public Vector3Parameter spaceRotation = new(Vector3.zero);
 
         [Header("Artistic Overrides")]
+        [Tooltip("Controls the saturation of the sky color.")]
         public ClampedFloatParameter colorSaturation = new(1.0f, 0.0f, 1.0f);
+
+        [Tooltip("Controls the saturation of the sky opacity.")]
         public ClampedFloatParameter alphaSaturation = new(1.0f, 0.0f, 1.0f);
+
+        [Tooltip("Sets the multiplier applied to the sky opacity.")]
         public ClampedFloatParameter alphaMultiplier = new(1.0f, 0.0f, 1.0f);
+
+        [Tooltip("Specifies a tint applied at the horizon.")]
         public ColorParameter horizonTint = new(Color.white, false, false, true);
+
+        [Tooltip("Specifies a tint applied at the zenith.")]
         public ColorParameter zenithTint = new(Color.white, false, false, true);
+
+        [Tooltip("Controls the blend between the horizon tint and zenith tint.")]
         public ClampedFloatParameter horizonZenithShift = new(0.0f, -1.0f, 1.0f);
 
         [Header("Rendering")]
         [HideInInspector]
         public MinFloatParameter exposure = new(1.0f, 0.0f);
+
+        [Tooltip("Enables rendering of the sun disk in the physically based sky shader path.")]
         public BoolParameter renderSunDisk = new(true);
+
+        [Tooltip("Scales the rendered sun disk size.")]
         public MinFloatParameter sunDiskSize = new(1.0f, 0.0f);
 
         [Header("Height Fog")]
+        [Tooltip("Enables VividRP's additional height fog contribution on top of the physically based sky.")]
         public BoolParameter enableHeightFog = new(false);
+
+        [Tooltip("Sets the world-space base height of the height fog layer.")]
         public FloatParameter fogBaseHeight = new(0.0f);
+
+        [Tooltip("Controls the density of the additional height fog layer.")]
         public MinFloatParameter fogDensity = new(0.01f, 0.0f);
+
+        [Tooltip("Limits how far the additional height fog contributes.")]
         public MinFloatParameter fogMaxDistance = new(5000.0f, 0.0f);
 
         public bool IsActive()
@@ -148,7 +215,7 @@ namespace VividRP.Runtime
                 return Mathf.Max(airMaximumAltitude.value, aerosolMaximumAltitude.value);
 
             var aerosolMaxAltitude = type.value == PhysicallyBasedSkyModel.EarthSimple
-                ? LayerDepthFromScaleHeight(DefaultAerosolScaleHeight)
+                ? DefaultAerosolMaximumAltitude
                 : aerosolMaximumAltitude.value;
             return Mathf.Max(LayerDepthFromScaleHeight(DefaultAirScaleHeight), aerosolMaxAltitude);
         }
@@ -216,14 +283,14 @@ namespace VividRP.Runtime
         {
             return type.value == PhysicallyBasedSkyModel.Custom
                 ? ozoneLayerWidth.value
-                : 20000.0f;
+                : DefaultOzoneLayerWidth;
         }
 
         internal float GetOzoneLayerMinimumAltitude()
         {
             return type.value == PhysicallyBasedSkyModel.Custom
                 ? ozoneMinimumAltitude.value
-                : 20000.0f;
+                : DefaultOzoneMinimumAltitude;
         }
 
         internal int GetPrecomputationHashCode()

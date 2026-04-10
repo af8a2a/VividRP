@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using UnityEngine;
+using System.IO;
 using System.Reflection;
 using VividRP.Runtime;
 
@@ -7,6 +8,52 @@ namespace VividRP.Editor.Tests
 {
     public class PhysicallyBasedSkyVolumeTests
     {
+        [Test]
+        public void Constructor_UsesHdrpAlignedDefaultModel()
+        {
+            var volume = ScriptableObject.CreateInstance<PhysicallyBasedSkyVolume>();
+
+            try
+            {
+                Assert.That(volume.type.value, Is.EqualTo(PhysicallyBasedSkyModel.EarthAdvanced));
+            }
+            finally
+            {
+                Object.DestroyImmediate(volume);
+            }
+        }
+
+        [Test]
+        public void Source_UsesHdrpAlignedMenuAndEarthConstants()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSkyVolume.cs"));
+
+            Assert.That(source, Does.Contain("[VolumeComponentMenu(\"Sky/Physically Based Sky\")]"));
+            Assert.That(source, Does.Contain("public EnumParameter<PhysicallyBasedSkyModel> type = new(PhysicallyBasedSkyModel.EarthAdvanced);"));
+            Assert.That(source, Does.Contain("private static readonly float DefaultAerosolMaximumAltitude = LayerDepthFromScaleHeight(DefaultAerosolScaleHeight);"));
+            Assert.That(source, Does.Contain("private const float DefaultOzoneMinimumAltitude = 20.0f * 1000.0f;"));
+            Assert.That(source, Does.Contain("private const float DefaultOzoneLayerWidth = 20.0f * 1000.0f;"));
+            Assert.That(source, Does.Contain(": DefaultOzoneLayerWidth;"));
+            Assert.That(source, Does.Contain(": DefaultOzoneMinimumAltitude;"));
+        }
+
+        [Test]
+        public void SharedFields_UseHdrpStyleTooltips()
+        {
+            AssertFieldHasTooltip(nameof(PhysicallyBasedSkyVolume.type));
+            AssertFieldHasTooltip(nameof(PhysicallyBasedSkyVolume.atmosphericScattering));
+            AssertFieldHasTooltip(nameof(PhysicallyBasedSkyVolume.renderingMode));
+            AssertFieldHasTooltip(nameof(PhysicallyBasedSkyVolume.material));
+            AssertFieldHasTooltip(nameof(PhysicallyBasedSkyVolume.airDensityR));
+            AssertFieldHasTooltip(nameof(PhysicallyBasedSkyVolume.aerosolDensity));
+            AssertFieldHasTooltip(nameof(PhysicallyBasedSkyVolume.ozoneDensityDimmer));
+            AssertFieldHasTooltip(nameof(PhysicallyBasedSkyVolume.groundTint));
+            AssertFieldHasTooltip(nameof(PhysicallyBasedSkyVolume.horizonTint));
+            AssertFieldHasTooltip(nameof(PhysicallyBasedSkyVolume.planetRadius));
+            AssertFieldHasTooltip(nameof(PhysicallyBasedSkyVolume.renderSunDisk));
+            AssertFieldHasTooltip(nameof(PhysicallyBasedSkyVolume.enableHeightFog));
+        }
+
         [Test]
         public void IsActive_ReturnsTrue_WhenAtmosphereContainsScattering()
         {
@@ -191,6 +238,33 @@ namespace VividRP.Editor.Tests
             {
                 Object.DestroyImmediate(volume);
             }
+        }
+
+        private static string GetPackageFilePath(params string[] relativeParts)
+        {
+            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            var packageRoots = new[]
+            {
+                Path.Combine(projectRoot, "Packages", "VividRP"),
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
+            };
+
+            foreach (var packageRoot in packageRoots)
+            {
+                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
+                if (File.Exists(fullPath))
+                    return fullPath;
+            }
+
+            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
+        }
+
+        private static void AssertFieldHasTooltip(string fieldName)
+        {
+            var field = typeof(PhysicallyBasedSkyVolume).GetField(fieldName);
+
+            Assert.That(field, Is.Not.Null, $"Expected field '{fieldName}' to exist.");
+            Assert.That(field!.GetCustomAttribute<TooltipAttribute>(), Is.Not.Null, $"Expected field '{fieldName}' to expose a Tooltip attribute.");
         }
     }
 }

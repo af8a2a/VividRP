@@ -65,7 +65,7 @@ RWStructuredBuffer<float> g_logBaseBuffer : register( u3 );             // don't
 groupshared unsigned int ldsTilePassList[MAX_NR_VISIBLE_LIGHTS/32];
 groupshared unsigned int coarseList[MAX_NR_COARSE_ENTRIES];
 groupshared unsigned int clusterIdxs[MAX_NR_COARSE_ENTRIES/2];
-groupshared float4 lightPlanes[4*6]; // Each plane is defined by a float4. 6 planes per light, 4 lights (24 planes)
+groupshared float4 lightPlanes[8*6]; // Each plane is defined by a float4. 6 planes per light, 8 lights (48 planes)
 
 groupshared uint lightOffs;
 groupshared uint groupAllocationBase;
@@ -203,7 +203,7 @@ bool CheckIntersection(int l, int k, float4 clusterVerts[8])
 #ifdef CONV_HULL_TEST_ENABLED
         for(int p=0; p<6; p++)
         {
-            float4 plane = lightPlanes[6*(l&3)+p];
+            float4 plane = lightPlanes[6*(l&7)+p];
 
             bool bAllInvisib = true;
 
@@ -604,17 +604,23 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
 #endif
 
     uint offs = start;
-    for(int ll=0; ll<cullRange; ll+=4)
+    for(int ll=0; ll<cullRange; ll+=8)
     {
-        int p = i>>2;
-        int m = i&3;
-        if(i<24) lightPlanes[6*m+p] = FetchPlane(min(cullRange-1,ll+m), p, eyeIndex);
+        // Cooperatively fetch 8 lights x 6 planes = 48 float4 entries.
+        // NR_THREADS >= 48: single round, threads [0..47] each load one plane.
+        // NR_THREADS < 48 (e.g. 32 on Switch): two rounds to cover all 48 entries.
+        for(uint fetchIdx = t; fetchIdx < 48u; fetchIdx += NR_THREADS)
+        {
+            uint m = fetchIdx / 6u;   // light slot within batch [0..7]
+            uint p = fetchIdx - m*6u; // plane index [0..5]
+            lightPlanes[6*m+p] = FetchPlane(min(cullRange-1, ll+(int)m), (int)p, eyeIndex);
+        }
 
 #if NR_THREADS > PLATFORM_LANE_COUNT
         GroupMemoryBarrierWithGroupSync();
 #endif
 
-        for(int l=ll; l<min(cullRange,(ll+4)); l++)
+        for(int l=ll; l<min(cullRange,(ll+8)); l++)
         {
             if(l < fineCullEnd && offs<(start+iSpaceAvail) && i<nrClusters && CheckIntersection(l, i, clusterVerts) )
             {

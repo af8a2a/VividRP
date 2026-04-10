@@ -76,10 +76,11 @@ VividRP maintains two clustered light culling implementations:
   - Impact: Only matters when volumetric fog is enabled.
   - Done: Replaced bucket-based serial thread-0 compaction+write with wave-intrinsic parallel compaction (`WavePrefixCountBits`/`WaveActiveCountBits` + cross-wave prefix sum via `bigtilePassScratch`) filtering by `LightAffectVolumetric`, followed by parallel packed 16-bit write matching the non-volumetric path. Eliminated `volumetricLightCounts[NR_THREADS]` groupshared array.
 
-- [ ] **Increase convex hull plane batch size**
+- [x] **Increase convex hull plane batch size**
   - Current (`lightlistbuild-clustered.compute:464-468`): Processes 4 lights per batch, loads 6 planes x 4 lights = 24 `float4` into `groupshared lightPlanes`. Only 24 of NR_THREADS threads participate in fetch.
   - Target: Increase to 6 or 8 lights per batch (36 or 48 groupshared float4). Better utilization of threads during fetch phase and fewer outer loop iterations.
   - Impact: Modest; reduces barrier count in the main light loop.
+  - Done: Increased to 8 lights per batch (48 `float4`). Cooperative fetch via `for(fetchIdx = t; fetchIdx < 48; fetchIdx += NR_THREADS)` with `m = fetchIdx/6, p = fetchIdx%6` — covers all 48 entries in one round for NR_THREADS=64 (75% utilization, up from 37.5%) and two rounds for NR_THREADS=32. `CheckIntersection` indexes batch slot as `l&7`. Outer loop step doubled from 4 to 8, halving barrier count. +384 bytes groupshared (768 vs 384).
 
 ---
 

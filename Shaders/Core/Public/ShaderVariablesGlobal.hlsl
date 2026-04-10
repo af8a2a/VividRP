@@ -49,6 +49,8 @@ GLOBAL_CBUFFER_START(ShaderVariablesGlobal, b0)
     float4 _VividFogParams;
     float4 _VividFogColor;
     float4 _VividShadowColor;
+    float4 _VividPlanetCenterRadius;
+    float4 _VividPlanetUpAltitude;
     float4 _VividSHAr;
     float4 _VividSHAg;
     float4 _VividSHAb;
@@ -105,4 +107,6 @@ CBUFFER_END
 #define unity_FogParams _VividFogParams
 #define unity_FogColor _VividFogColor
 #define unity_ShadowColor _VividShadowColor
+#define _PlanetCenterRadius _VividPlanetCenterRadius
+#define _PlanetUpAltitude _VividPlanetUpAltitude
 #endif

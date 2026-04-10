@@ -312,6 +312,10 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderVariablesGlobalSource, Does.Contain("#define unity_MatrixInvVP _VividMatrixInvVP"));
             Assert.That(shaderVariablesGlobalSource, Does.Contain("#define _WorldSpaceCameraPos _VividWorldSpaceCameraPos.xyz"));
             Assert.That(shaderVariablesGlobalSource, Does.Contain("#define _GlobalMipBias _VividGlobalMipBias.xy"));
+            Assert.That(shaderVariablesGlobalSource, Does.Contain("float4 _VividPlanetCenterRadius;"));
+            Assert.That(shaderVariablesGlobalSource, Does.Contain("float4 _VividPlanetUpAltitude;"));
+            Assert.That(shaderVariablesGlobalSource, Does.Contain("#define _PlanetCenterRadius _VividPlanetCenterRadius"));
+            Assert.That(shaderVariablesGlobalSource, Does.Contain("#define _PlanetUpAltitude _VividPlanetUpAltitude"));
             Assert.That(shaderVariablesGlobalSource, Does.Contain("#define _ScaledScreenParams _VividScaledScreenParams"));
             Assert.That(unityInputSource, Does.Contain("#define unity_SHAr _VividSHAr"));
             Assert.That(unityInputSource, Does.Contain("#define unity_SHC _VividSHC"));

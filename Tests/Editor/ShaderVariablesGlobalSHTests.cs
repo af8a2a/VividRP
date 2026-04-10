@@ -19,6 +19,11 @@ namespace VividRP.Editor.Tests
             Assert.That(globalsSource, Does.Contain("var ambientProbe = skyData == null"));
             Assert.That(globalsSource, Does.Not.Contain("skyData.hasDiffuseSH"));
             Assert.That(globalsSource, Does.Not.Contain("skyData.diffuseSH"));
+            Assert.That(globalsSource, Does.Contain("public Vector4 _VividPlanetCenterRadius;"));
+            Assert.That(globalsSource, Does.Contain("public Vector4 _VividPlanetUpAltitude;"));
+            Assert.That(globalsSource, Does.Contain("ResolvePlanetData("));
+            Assert.That(globalsSource, Does.Contain("_VividPlanetCenterRadius = planetCenterRadius,"));
+            Assert.That(globalsSource, Does.Contain("_VividPlanetUpAltitude = planetUpAltitude,"));
         }
 
         [Test]
@@ -70,6 +75,22 @@ namespace VividRP.Editor.Tests
             {
                 RenderSettings.ambientProbe = originalAmbientProbe;
             }
+        }
+
+        [Test]
+        public void Create_PopulatesPlanetGlobals_ForPhysicallyBasedSkyCompatibility()
+        {
+            var globals = ShaderVariablesGlobal.Create(
+                new VividCameraData.ShaderVariables
+                {
+                    worldSpaceCameraPos = new Vector4(0.0f, 10.0f, 0.0f, 1.0f)
+                },
+                null,
+                null);
+
+            Assert.That(globals._VividPlanetCenterRadius.w, Is.GreaterThanOrEqualTo(1000.0f));
+            Assert.That(globals._VividPlanetUpAltitude.y, Is.GreaterThan(0.0f));
+            Assert.That(globals._VividPlanetUpAltitude.w, Is.GreaterThanOrEqualTo(1.0f));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

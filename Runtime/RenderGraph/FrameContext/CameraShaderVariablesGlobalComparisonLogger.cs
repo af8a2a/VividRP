@@ -188,6 +188,10 @@ namespace VividRP.Runtime
                 ScalarTolerance, details, signatureBuilder, ref differenceCount, ref omittedDifferenceCount);
             AppendVectorDifference("_VividRTHandleScale", sceneGlobal._VividRTHandleScale, gameGlobal._VividRTHandleScale,
                 ScalarTolerance, details, signatureBuilder, ref differenceCount, ref omittedDifferenceCount);
+            AppendVectorDifference("_VividPlanetCenterRadius", sceneGlobal._VividPlanetCenterRadius, gameGlobal._VividPlanetCenterRadius,
+                ScalarTolerance, details, signatureBuilder, ref differenceCount, ref omittedDifferenceCount);
+            AppendVectorDifference("_VividPlanetUpAltitude", sceneGlobal._VividPlanetUpAltitude, gameGlobal._VividPlanetUpAltitude,
+                ScalarTolerance, details, signatureBuilder, ref differenceCount, ref omittedDifferenceCount);
             AppendMatrixDifference("_VividWorldToCamera", sceneGlobal._VividWorldToCamera, gameGlobal._VividWorldToCamera,
                 ScalarTolerance, details, signatureBuilder, ref differenceCount, ref omittedDifferenceCount);
             AppendMatrixDifference("_VividCameraToWorld", sceneGlobal._VividCameraToWorld, gameGlobal._VividCameraToWorld,

@@ -56,6 +56,8 @@ namespace VividRP.Runtime
         public Vector4 _VividFogParams;
         public Vector4 _VividFogColor;
         public Vector4 _VividShadowColor;
+        public Vector4 _VividPlanetCenterRadius;
+        public Vector4 _VividPlanetUpAltitude;
         public Vector4 _VividSHAr;
         public Vector4 _VividSHAg;
         public Vector4 _VividSHAb;
@@ -92,6 +94,10 @@ namespace VividRP.Runtime
                 out var shBg,
                 out var shBb,
                 out var shC);
+            ResolvePlanetData(
+                shaderVariables.worldSpaceCameraPos,
+                out var planetCenterRadius,
+                out var planetUpAltitude);
 
             return new ShaderVariablesGlobal
             {
@@ -148,6 +154,8 @@ namespace VividRP.Runtime
                 _VividFogParams = CreateFogParams(),
                 _VividFogColor = ToVector4(RenderSettings.fogColor),
                 _VividShadowColor = ToVector4(RenderSettings.subtractiveShadowColor),
+                _VividPlanetCenterRadius = planetCenterRadius,
+                _VividPlanetUpAltitude = planetUpAltitude,
                 _VividSHAr = shAr,
                 _VividSHAg = shAg,
                 _VividSHAb = shAb,
@@ -209,6 +217,34 @@ namespace VividRP.Runtime
         private static Vector4 ToVector4(Color color)
         {
             return new Vector4(color.r, color.g, color.b, color.a);
+        }
+
+        private static void ResolvePlanetData(
+            Vector4 worldSpaceCameraPos,
+            out Vector4 planetCenterRadius,
+            out Vector4 planetUpAltitude)
+        {
+            var volume = VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume();
+            var planetRadius = Mathf.Max(volume?.planetRadius.value ?? 6378100.0f, 1000.0f);
+            var planetCenter = new Vector3(0.0f, -planetRadius, 0.0f);
+            var cameraPosition = new Vector3(worldSpaceCameraPos.x, worldSpaceCameraPos.y, worldSpaceCameraPos.z);
+            var cameraToPlanetCenter = cameraPosition - planetCenter;
+
+            if (cameraToPlanetCenter.sqrMagnitude <= 1e-6f)
+                cameraToPlanetCenter = Vector3.up * (planetRadius + 1.0f);
+
+            var radialDistance = cameraToPlanetCenter.magnitude;
+            if (radialDistance < planetRadius + 1.0f)
+            {
+                cameraToPlanetCenter = cameraToPlanetCenter.normalized * (planetRadius + 1.0f);
+                radialDistance = cameraToPlanetCenter.magnitude;
+            }
+
+            var planetUp = cameraToPlanetCenter / radialDistance;
+            var cameraAltitude = radialDistance - planetRadius;
+
+            planetCenterRadius = new Vector4(planetCenter.x, planetCenter.y, planetCenter.z, planetRadius);
+            planetUpAltitude = new Vector4(planetUp.x, planetUp.y, planetUp.z, cameraAltitude);
         }
 
         private static void PackSphericalHarmonics(

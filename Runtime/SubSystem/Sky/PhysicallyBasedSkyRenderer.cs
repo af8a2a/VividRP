@@ -33,6 +33,7 @@ namespace VividRP.Runtime
         private static readonly int SkyOzoneExtinctionId = Shader.PropertyToID("_SkyOzoneExtinction");
         private static readonly int SkyOzoneParamsId = Shader.PropertyToID("_SkyOzoneParams");
         private static readonly int SkyGroundTintId = Shader.PropertyToID("_SkyGroundTint");
+        private static readonly int CelestialBodyDatasId = Shader.PropertyToID("_CelestialBodyDatas");
         private static readonly ProfilingSampler s_RuntimeCubemapMissingTextureSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (MissingTexture)");
         private static readonly ProfilingSampler s_RuntimeCubemapResolutionChangedSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (ResolutionChanged)");
         private static readonly ProfilingSampler s_RuntimeCubemapQualityChangedSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (QualityChanged)");
@@ -53,6 +54,7 @@ namespace VividRP.Runtime
         private int m_AmbientProbeSkyHash;
         private bool m_HasPendingSkyViewLutRebake;
         private int m_PendingSkyViewLutHash;
+        private readonly PhysicallyBasedSkyCelestialBodyBuffer m_CelestialBodyBuffer = new();
 
         public SkyType Type => SkyType.PhysicallyBased;
 
@@ -85,8 +87,7 @@ namespace VividRP.Runtime
                 SkySettingsVolume.GetGeneratedCubemapResolution(skySettings),
                 generatedCubemapViewSampleCount,
                 ResolveCameraPosition(context, volume.planetRadius.value),
-                ResolveSunDirection(context),
-                ResolveSunColor(context));
+                PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialLightHash(context));
         }
 
         public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd)
@@ -181,6 +182,7 @@ namespace VividRP.Runtime
             m_AmbientProbeSkyHash = 0;
             m_HasPendingSkyViewLutRebake = false;
             m_PendingSkyViewLutHash = 0;
+            m_CelestialBodyBuffer.Dispose();
         }
 
         internal static Vector3 ResolveSunDirection(in SkyRendererContext context)
@@ -384,7 +386,7 @@ namespace VividRP.Runtime
 
             var hasMaterialParameters = PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(volume, context, out var materialParameters);
             var skyViewLutHash = hasMaterialParameters
-                ? AtmosphereLUTPass.ComputeSkyViewLutHash(parameters, materialParameters)
+                ? AtmosphereLUTPass.ComputeSkyViewLutHash(parameters, materialParameters, context)
                 : 0;
             var useSkyViewLut = AtmosphereLUTPass.TryGetCachedSkyViewLut(skyViewLutHash, out var skyViewLut) &&
                                 hasMaterialParameters;
@@ -417,6 +419,8 @@ namespace VividRP.Runtime
             properties.SetVector(SkyOzoneExtinctionId, parameters.skyOzoneExtinction);
             properties.SetVector(SkyOzoneParamsId, parameters.skyOzoneParams);
             properties.SetVector(SkyGroundTintId, parameters.skyGroundTint);
+            m_CelestialBodyBuffer.Update(context);
+            m_SkyMaterial.SetBuffer(CelestialBodyDatasId, m_CelestialBodyBuffer.Buffer);
             if (hasMaterialParameters)
                 PhysicallyBasedSkyMaterialPropertyBinder.Apply(properties, materialParameters, volume);
 

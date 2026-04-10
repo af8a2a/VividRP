@@ -45,9 +45,16 @@ namespace VividRP.Editor.Tests
             var evaluationSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "PhysicallyBasedSkyEvaluation.hlsl"));
             var ambientProbeConvolutionSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "AmbientProbeConvolution.compute"));
             var skyLutSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "SkyLUTGenerator.compute"));
+            var celestialBodySource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "CelestialBodyData.hlsl"));
             var compatSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "ShaderVariablesCompat.hlsl"));
 
             Assert.That(commonSource, Does.Contain("Packages/com.af8a2a.vividrp/Shaders/Core/Public/ShaderVariablesGlobal.hlsl"));
+            Assert.That(commonSource, Does.Contain("#define _PlanetCenterPosition _PlanetCenterRadius.xyz // camera relative"));
+            Assert.That(commonSource, Does.Contain("#define _GroundAlbedo _GroundAlbedo_PlanetRadius.xyz"));
+            Assert.That(commonSource, Does.Contain("#define _PlanetUp _PlanetUpAltitude.xyz"));
+            Assert.That(commonSource, Does.Contain("#define _CameraAltitude _PlanetUpAltitude.w"));
+            Assert.That(commonSource, Does.Contain("#ifndef _PlanetaryRadius"));
+            Assert.That(commonSource, Does.Contain("#define _PlanetaryRadius _PlanetCenterRadius.w"));
             Assert.That(commonSource, Does.Not.Contain("Packages/com.unity.render-pipelines.high-definition"));
 
             Assert.That(evaluationSource, Does.Contain("#include \"PhysicallyBasedSkyCommon.hlsl\""));
@@ -58,14 +65,20 @@ namespace VividRP.Editor.Tests
             Assert.That(ambientProbeConvolutionSource, Does.Contain("Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"));
             Assert.That(ambientProbeConvolutionSource, Does.Not.Contain("Packages/com.unity.render-pipelines.high-definition"));
 
+            Assert.That(celestialBodySource, Does.Contain("struct CelestialBodyData"));
+            Assert.That(celestialBodySource, Does.Contain("StructuredBuffer<CelestialBodyData> _CelestialBodyDatas;"));
+            Assert.That(celestialBodySource, Does.Not.Contain("Packages/com.unity.render-pipelines.high-definition"));
+
             Assert.That(skyLutSource, Does.Contain("#include \"ShaderVariablesCompat.hlsl\""));
+            Assert.That(skyLutSource, Does.Contain("#include \"CelestialBodyData.hlsl\""));
             Assert.That(skyLutSource, Does.Contain("#include \"PhysicallyBasedSkyEvaluation.hlsl\""));
             Assert.That(skyLutSource, Does.Not.Contain("../AtmosphericScattering/AtmosphericScattering.hlsl"));
-            Assert.That(skyLutSource, Does.Contain("float3 GetPrimarySunDirection()"));
-            Assert.That(skyLutSource, Does.Contain("float3 GetPrimarySunColor()"));
-            Assert.That(skyLutSource, Does.Contain("float EvaluatePrimarySunShadow(float3 positionPS)"));
-            Assert.That(skyLutSource, Does.Contain("return 1.0f;"));
-            Assert.That(skyLutSource, Does.Not.Contain("_CelestialBodyDatas"));
+            Assert.That(skyLutSource, Does.Contain("for (uint i = 0; i < _CelestialLightCount; i++)"));
+            Assert.That(skyLutSource, Does.Contain("CelestialBodyData light = _CelestialBodyDatas[i];"));
+            Assert.That(skyLutSource, Does.Contain("float3 L = -light.forward.xyz;"));
+            Assert.That(skyLutSource, Does.Not.Contain("GetPrimarySunDirection()"));
+            Assert.That(skyLutSource, Does.Not.Contain("GetPrimarySunColor()"));
+            Assert.That(skyLutSource, Does.Not.Contain("EvaluatePrimarySunShadow(float3 positionPS)"));
             Assert.That(skyLutSource, Does.Not.Contain("_DirectionalLightDatas"));
             Assert.That(skyLutSource, Does.Not.Contain("HDShadowContext"));
             Assert.That(skyLutSource, Does.Not.Contain("EvaluateVolumetricCloudsShadows"));

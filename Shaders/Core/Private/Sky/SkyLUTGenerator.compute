@@ -18,26 +18,12 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Hammersley.hlsl"
 
 #include "ShaderVariablesCompat.hlsl"
+#include "CelestialBodyData.hlsl"
 #include "PhysicallyBasedSkyEvaluation.hlsl"
 #include "SkyUtils.hlsl"
 
 // This is the main function that integrates atmosphere along a ray
 // It is baked in various LUTs by all the kernels below
-
-float3 GetPrimarySunDirection()
-{
-    return normalize(_SkySunDirection.xyz);
-}
-
-float3 GetPrimarySunColor()
-{
-    return _SkySunColor.rgb;
-}
-
-float EvaluatePrimarySunShadow(float3 positionPS)
-{
-    return 1.0f;
-}
 
 // O is position in planet space, V is view dir in world space
 void EvaluateAtmosphericColor(float3 O, float3 V, float tExit,
@@ -76,14 +62,18 @@ void EvaluateAtmosphericColor(float3 O, float3 V, float tExit,
         const float3 S = EvaluateSunColorAttenuation(dot(N, L), r) * phaseScatter;
         skyColor += IntegrateOverSegment(S, transmittanceOverSegment, skyTransmittance, sigmaE);
 #else
-        const float3 L = GetPrimarySunDirection();
-        const float3 sunColor = GetPrimarySunColor();
-        const float3 sunTransmittance = EvaluateSunColorAttenuation(dot(N, L), r);
-        const float3 phaseScatter = AirScatter(height) * AirPhase(-dot(L, V)) + AerosolScatter(height) * AerosolPhase(-dot(L, V));
-        const float3 multiScatteredLuminance = EvaluateMultipleScattering(dot(N, L), height);
+        for (uint i = 0; i < _CelestialLightCount; i++)
+        {
+            CelestialBodyData light = _CelestialBodyDatas[i];
+            float3 L = -light.forward.xyz;
 
-        float3 S = sunTransmittance * phaseScatter + multiScatteredLuminance * scatteringMS;
-        skyColor += IntegrateOverSegment(sunColor * S, transmittanceOverSegment, skyTransmittance, sigmaE);
+            const float3 sunTransmittance = EvaluateSunColorAttenuation(dot(N, L), r);
+            const float3 phaseScatter = AirScatter(height) * AirPhase(-dot(L, V)) + AerosolScatter(height) * AerosolPhase(-dot(L, V));
+            const float3 multiScatteredLuminance = EvaluateMultipleScattering(dot(N, L), height);
+
+            float3 S = sunTransmittance * phaseScatter + multiScatteredLuminance * scatteringMS;
+            skyColor += IntegrateOverSegment(light.color * S, transmittanceOverSegment, skyTransmittance, sigmaE);
+        }
 #endif
 
         skyTransmittance *= transmittanceOverSegment;
@@ -319,15 +309,18 @@ void AtmosphericScatteringLUT(uint2 coord : SV_GroupID, uint s : SV_GroupIndex)
 
     skyTransmittance = ParallelPrefixProduct(s, transmittanceOverSegment);
 
-    const float3 L = GetPrimarySunDirection();
-    const float3 sunColor = GetPrimarySunColor();
-    const float shadow = EvaluatePrimarySunShadow(P);
-    const float3 sunTransmittance = shadow * EvaluateSunColorAttenuation(dot(N, L), r);
-    const float3 phaseScatter = AirScatter(height) * AirPhase(-dot(L, V)) + AerosolScatter(height) * AerosolPhase(-dot(L, V));
-    const float3 multiScatteredLuminance = EvaluateMultipleScattering(dot(N, L), height);
+    for (uint i = 0; i < _CelestialLightCount; i++)
+    {
+        CelestialBodyData light = _CelestialBodyDatas[i];
+        float3 L = -light.forward.xyz;
 
-    float3 S = sunTransmittance * phaseScatter + multiScatteredLuminance * scatteringMS;
-    skyColor += IntegrateOverSegment(sunColor * S, transmittanceOverSegment, skyTransmittance, sigmaE);
+        const float3 sunTransmittance = EvaluateSunColorAttenuation(dot(N, L), r);
+        const float3 phaseScatter = AirScatter(height) * AirPhase(-dot(L, V)) + AerosolScatter(height) * AerosolPhase(-dot(L, V));
+        const float3 multiScatteredLuminance = EvaluateMultipleScattering(dot(N, L), height);
+
+        float3 S = sunTransmittance * phaseScatter + multiScatteredLuminance * scatteringMS;
+        skyColor += IntegrateOverSegment(light.color * S, transmittanceOverSegment, skyTransmittance, sigmaE);
+    }
 
     skyColor = ParallelPostfixSum(s, skyColor);
 

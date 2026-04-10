@@ -23,6 +23,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SkyOzoneExtinctionId = Shader.PropertyToID("_SkyOzoneExtinction");
         private static readonly int SkyOzoneParamsId = Shader.PropertyToID("_SkyOzoneParams");
         private static readonly int SkyGroundTintId = Shader.PropertyToID("_SkyGroundTint");
+        private static readonly int CelestialBodyDatasId = Shader.PropertyToID("_CelestialBodyDatas");
 
         [RenderGraphResource(Name = "Color", Access = AccessFlags.ReadWrite, AttachmentIndex = 0)]
         private RenderGraphTexture m_ColorTarget;
@@ -38,6 +39,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private PhysicallyBasedSkyShaderParameters m_Parameters;
         private PhysicallyBasedSkyMaterialParameters m_MaterialParameters;
         private bool m_HasMaterialParameters;
+        private readonly PhysicallyBasedSkyCelestialBodyBuffer m_CelestialBodyBuffer = new();
 
         public PhysicallyBasedSkyPass()
         {
@@ -64,8 +66,12 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             var cameraData = frameData.GetOrCreate<VividCameraData>();
+            var lightData = frameData.GetOrCreate<VividLightData>();
+            var skyContext = new SkyRendererContext(cameraData, lightData);
             m_IsActive = PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters);
             m_HasMaterialParameters = PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(frameData, out m_MaterialParameters);
+            if (m_IsActive)
+                m_CelestialBodyBuffer.Update(skyContext);
 
             var width = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
             var height = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
@@ -84,6 +90,8 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             if (!m_IsActive || m_Material == null)
                 return;
+
+            m_Material.SetBuffer(CelestialBodyDatasId, m_CelestialBodyBuffer.Buffer);
 
             var skyViewTexture = m_SkyViewLUT != null
                 ? ResolveTexture(m_SkyViewLUT.innerHandle)
@@ -111,6 +119,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Dispose()
         {
+            m_CelestialBodyBuffer.Dispose();
             if (m_Material != null)
             {
                 CoreUtils.Destroy(m_Material);

@@ -2,6 +2,9 @@
 #define VIVIDRP_PHYSICALLY_BASED_SKY_BRIDGE_INCLUDED
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Sky/CelestialBodyData.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Sky/PhysicallyBasedSkyEvaluation.hlsl"
 
 static const int VIEW_SAMPLE_COUNT = 12;
@@ -144,9 +147,10 @@ float3 SanitizeSkyRadiance(float3 color)
 
 float3 SampleGroundAlbedo(float3 groundNormal)
 {
+    
     float3 albedo = GetGroundAlbedoTint();
     if (_HasGroundAlbedoTexture != 0)
-        albedo *= SAMPLE_TEXTURECUBE(_GroundAlbedoTexture, s_trilinear_clamp_sampler, mul(groundNormal, (float3x3)_PlanetRotation)).rgb;
+        albedo *= SAMPLE_TEXTURECUBE(_GroundAlbedoTexture, sampler_TrilinearClamp, mul(groundNormal, (float3x3)_PlanetRotation)).rgb;
     return albedo;
 }
 
@@ -155,7 +159,7 @@ float3 SampleGroundEmission(float3 groundNormal)
     if (_HasGroundEmissionTexture == 0)
         return 0.0f;
 
-    return SAMPLE_TEXTURECUBE(_GroundEmissionTexture, s_trilinear_clamp_sampler, mul(groundNormal, (float3x3)_PlanetRotation)).rgb * _GroundEmissionMultiplier;
+    return SAMPLE_TEXTURECUBE(_GroundEmissionTexture, sampler_TrilinearClamp, mul(groundNormal, (float3x3)_PlanetRotation)).rgb * _GroundEmissionMultiplier;
 }
 
 float3 SampleSpaceEmission(float3 viewDirection)
@@ -163,7 +167,7 @@ float3 SampleSpaceEmission(float3 viewDirection)
     if (_HasSpaceEmissionTexture == 0)
         return 0.0f;
 
-    return SAMPLE_TEXTURECUBE(_SpaceEmissionTexture, s_trilinear_clamp_sampler, mul(viewDirection, (float3x3)_SpaceRotation)).rgb * _SpaceEmissionMultiplier;
+    return SAMPLE_TEXTURECUBE(_SpaceEmissionTexture, sampler_TrilinearClamp, mul(viewDirection, (float3x3)_SpaceRotation)).rgb * _SpaceEmissionMultiplier;
 }
 
 int GetViewSampleCount()
@@ -196,31 +200,66 @@ void ApplyArtisticOverrides(float3 viewDirection, inout float3 skyColor)
     AtmosphereArtisticOverride(cosHor, cosChi, skyColor, skyOpacity);
 }
 
-float EvaluateSunDiskMask(float3 directionWS, float3 sunDirection)
+float ComputeMoonPhase(CelestialBodyData moon, float3 viewDirectionWS)
+{
+    float3 moonCenter = -moon.forward.xyz * moon.distanceFromCamera;
+    float radialDistance = moon.distanceFromCamera;
+    float rcpRadialDistance = rcp(radialDistance);
+    float2 t = IntersectSphere(moon.radius, dot(-moon.forward.xyz, viewDirectionWS), radialDistance, rcpRadialDistance);
+    float3 N = normalize(t.x * viewDirectionWS - moonCenter);
+
+    return saturate(-dot(N, moon.sunDirection));
+}
+
+float ComputeEarthshine(CelestialBodyData moon)
+{
+    float sinPhase = sqrt(max(1.0f - dot(moon.sunDirection, moon.forward), 0.0f)) * INV_SQRT2;
+    float earthshine = 1.0f - sinPhase * sqrt(sinPhase);
+
+    return earthshine * moon.earthshine;
+}
+
+float3 RenderSunDisk(float3 viewDirectionWS)
 {
     if (!GetRenderSunDiskEnabled())
         return 0.0f;
 
-    float sunAngularRadius = max(_SkyOzoneParams.z, 1e-5f);
-    float sunDot = clamp(dot(normalize(directionWS), sunDirection), -1.0f, 1.0f);
-    float sunCosThreshold = cos(sunAngularRadius);
-    float edgeSoftness = max(fwidth(sunDot) * 2.0f, 1e-4f);
-    return smoothstep(sunCosThreshold - edgeSoftness, sunCosThreshold + edgeSoftness, sunDot);
-}
+    float3 radiance = 0.0f;
+    float closestDistance = FLT_INF;
 
-float3 EvaluateSunDisk(float3 directionWS)
-{
-    float3 sunDirection = normalize(_SkySunDirection.xyz);
-    float sunMask = EvaluateSunDiskMask(directionWS, sunDirection);
-    if (sunMask <= 0.0f)
-        return 0.0f;
+    for (uint i = 0; i < _CelestialBodyCount; i++)
+    {
+        CelestialBodyData light = _CelestialBodyDatas[i];
+        if (asint(light.angularRadius) == 0)
+            continue;
 
-    float3 cameraPosition = _SkyCameraPositionPS.xyz;
-    float radialDistance = max(length(cameraPosition), GetPlanetRadius());
-    float cosTheta = dot(cameraPosition, sunDirection) * rcp(radialDistance);
-    float3 sunTransmittance = EvaluateSunColorAttenuation(cosTheta, radialDistance);
+        float lightDistance = light.distanceFromCamera;
+        float3 L = -light.forward.xyz;
+        float lightDotView = dot(L, viewDirectionWS);
 
-    return SanitizeSkyRadiance(_SkySunColor.rgb * sunTransmittance * sunMask * 2.0f);
+        if (lightDotView >= light.flareCosInner && lightDistance < closestDistance)
+        {
+            closestDistance = lightDistance;
+            float3 color = light.surfaceColor;
+
+            if (light.type != 0)
+                color *= ComputeMoonPhase(light, viewDirectionWS) * INV_PI + ComputeEarthshine(light);
+
+            radiance = color;
+        }
+        else if (light.flareSize > 0.0f && lightDotView >= light.flareCosOuter)
+        {
+            float radius = acos(lightDotView);
+            float flareRadius = max(0.0f, radius - light.angularRadius);
+            float weight = saturate(1.0f - flareRadius * rcp(light.flareSize));
+
+            float3 color = light.flareColor;
+            color *= SafePositivePow(weight, light.flareFalloff);
+            radiance += color;
+        }
+    }
+
+    return SanitizeSkyRadiance(radiance);
 }
 
 void EvaluateAtmosphericFallback(float3 viewDirWS, float rayLength, out float3 skyColor, out float3 skyTransmittance)
@@ -234,9 +273,6 @@ void EvaluateAtmosphericFallback(float3 viewDirWS, float rayLength, out float3 s
         return;
 
     float3 cameraPosition = _SkyCameraPositionPS.xyz;
-    float3 sunDirection = normalize(_SkySunDirection.xyz);
-    float airPhase = AirPhase(-dot(sunDirection, viewDirWS));
-    float aerosolPhase = AerosolPhase(-dot(sunDirection, viewDirWS));
 
     [loop]
     for (int sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++)
@@ -247,10 +283,19 @@ void EvaluateAtmosphericFallback(float3 viewDirWS, float rayLength, out float3 s
         float height = max(radialDistance - _PlanetaryRadius, 0.0f);
         float3 sigmaE = AtmosphereExtinction(height);
         float3 transmittanceOverSegment = TransmittanceFromOpticalDepth(sigmaE * stepLength);
-        float cosTheta = dot(samplePosition, sunDirection) * rcp(radialDistance);
-        float3 sunTransmittance = EvaluateSunColorAttenuation(cosTheta, radialDistance);
-        float3 phaseScatter = AirScatter(height) * airPhase + AerosolScatter(height) * aerosolPhase;
-        float3 scattering = _SkySunColor.rgb * sunTransmittance * phaseScatter;
+        float3 scattering = 0.0f;
+
+        for (uint lightIndex = 0; lightIndex < _CelestialLightCount; lightIndex++)
+        {
+            CelestialBodyData light = _CelestialBodyDatas[lightIndex];
+            float3 L = -light.forward.xyz;
+            float airPhase = AirPhase(-dot(L, viewDirWS));
+            float aerosolPhase = AerosolPhase(-dot(L, viewDirWS));
+            float cosTheta = dot(samplePosition, L) * rcp(radialDistance);
+            float3 sunTransmittance = EvaluateSunColorAttenuation(cosTheta, radialDistance);
+            float3 phaseScatter = AirScatter(height) * airPhase + AerosolScatter(height) * aerosolPhase;
+            scattering += light.color.rgb * sunTransmittance * phaseScatter;
+        }
 
         skyColor += IntegrateOverSegment(scattering, transmittanceOverSegment, skyTransmittance, sigmaE);
         skyTransmittance *= transmittanceOverSegment;
@@ -261,14 +306,20 @@ float3 EvaluateGroundColor(float3 groundPoint, float3 viewTransmittance)
 {
     float3 groundNormal = normalize(groundPoint);
     float3 groundColor = SampleGroundEmission(groundNormal);
-    float3 sunDirection = normalize(_SkySunDirection.xyz);
     float3 elevatedGroundPoint = groundPoint + groundNormal;
     float radialDistance = max(length(elevatedGroundPoint), GetPlanetRadius());
-    float cosTheta = dot(elevatedGroundPoint, sunDirection) * rcp(radialDistance);
-    float3 sunTransmittance = EvaluateSunColorAttenuation(cosTheta, radialDistance);
-    float ndotl = saturate(dot(groundNormal, sunDirection));
+    float3 groundAlbedo = SampleGroundAlbedo(groundNormal);
 
-    groundColor += SampleGroundAlbedo(groundNormal) * INV_PI * ndotl * sunTransmittance * _SkySunColor.rgb;
+    for (uint lightIndex = 0; lightIndex < _CelestialLightCount; lightIndex++)
+    {
+        CelestialBodyData light = _CelestialBodyDatas[lightIndex];
+        float3 L = -light.forward.xyz;
+        float cosTheta = dot(elevatedGroundPoint, L) * rcp(radialDistance);
+        float3 sunTransmittance = EvaluateSunColorAttenuation(cosTheta, radialDistance);
+        float ndotl = saturate(dot(groundNormal, L));
+        groundColor += groundAlbedo * INV_PI * ndotl * sunTransmittance * light.color.rgb;
+    }
+
     return SanitizeSkyRadiance(groundColor * viewTransmittance);
 }
 
@@ -287,6 +338,7 @@ float3 EvaluateSky(float3 directionWS)
         float3 skyOpacity = 0.0f;
 
         EvaluateDistantAtmosphere(viewDirWS, skyColor, skyOpacity);
+        skyColor += RenderSunDisk(viewDirWS) * (1.0f - skyOpacity);
         skyColor += EvaluateSpaceColor(viewDirWS, 1.0f - skyOpacity);
         return SanitizeSkyRadiance(skyColor);
     }
@@ -295,7 +347,11 @@ float3 EvaluateSky(float3 directionWS)
     float atmosphereEntry;
     float atmosphereExit;
     if (!IntersectAtmosphereRay(cameraPosition, viewDirWS, GetAtmosphereRadius(), atmosphereEntry, atmosphereExit))
-        return EvaluateSpaceColor(viewDirWS, 1.0f.xxx);
+    {
+        float3 skyColor = EvaluateSpaceColor(viewDirWS, 1.0f.xxx);
+        skyColor += RenderSunDisk(viewDirWS);
+        return SanitizeSkyRadiance(skyColor);
+    }
 
     float rayLength = atmosphereExit;
     float groundDistance;
@@ -315,6 +371,7 @@ float3 EvaluateSky(float3 directionWS)
     }
     else
     {
+        skyColor += RenderSunDisk(viewDirWS) * viewTransmittance;
         skyColor += EvaluateSpaceColor(viewDirWS, viewTransmittance);
     }
 
@@ -324,9 +381,7 @@ float3 EvaluateSky(float3 directionWS)
 float3 EvaluateSkyColor(float2 positionCS)
 {
     float3 viewDirWS = -GetSkyViewDirWS(positionCS);
-    float3 skyColor = EvaluateSky(viewDirWS);
-    skyColor += EvaluateSunDisk(viewDirWS);
-    return SanitizeSkyRadiance(skyColor);
+    return SanitizeSkyRadiance(EvaluateSky(viewDirWS));
 }
 
 #endif

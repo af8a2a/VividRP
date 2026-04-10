@@ -115,8 +115,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("skyData.ambientProbeHash = hash;"));
             Assert.That(source, Does.Contain("return HashCode.Combine("));
             Assert.That(source, Does.Contain("ResolveCameraPosition(context, volume.planetRadius.value)"));
-            Assert.That(source, Does.Contain("ResolveSunDirection(context)"));
-            Assert.That(source, Does.Contain("ResolveSunColor(context)"));
+            Assert.That(source, Does.Contain("PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialLightHash(context)"));
             Assert.That(source, Does.Contain("private bool CanBakeSky()"));
             Assert.That(source, Does.Contain("return m_SkyMaterial != null && m_SkyBakingPass >= 0;"));
             Assert.That(source, Does.Contain("TryBuildSkyBakingProperties(volume, context, runtimeCubemapViewSampleCount, out var properties)"));
@@ -128,7 +127,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Not.Contain("cmd.DispatchCompute("));
             Assert.That(source, Does.Not.Contain("cmd.CopyTexture(m_RuntimeSkyCubemapFaces"));
             Assert.That(source, Does.Contain("var skyViewLutHash = hasMaterialParameters"));
-            Assert.That(source, Does.Contain("AtmosphereLUTPass.ComputeSkyViewLutHash(parameters, materialParameters)"));
+            Assert.That(source, Does.Contain("AtmosphereLUTPass.ComputeSkyViewLutHash(parameters, materialParameters, context)"));
             Assert.That(source, Does.Contain("AtmosphereLUTPass.TryGetCachedSkyViewLut(skyViewLutHash, out var skyViewLut)"));
             Assert.That(source, Does.Contain("properties.SetFloat(SkyUseLutId, useSkyViewLut ? 1.0f : 0.0f);"));
             Assert.That(source, Does.Contain("properties.SetTexture(SkyViewLutId, useSkyViewLut ? skyViewLut : Texture2D.blackTexture);"));
@@ -136,6 +135,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("return PipelineResourceManager.Get<VividRPCoreResources>()?.AtmosphereLUTCompute != null;"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyShaderParameterBuilder.TryBuildForSkyBaking(volume, context, out var parameters)"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(volume, context, out var materialParameters)"));
+            Assert.That(source, Does.Contain("private static readonly int CelestialBodyDatasId = Shader.PropertyToID(\"_CelestialBodyDatas\");"));
+            Assert.That(source, Does.Contain("m_CelestialBodyBuffer.Update(context);"));
+            Assert.That(source, Does.Contain("m_SkyMaterial.SetBuffer(CelestialBodyDatasId, m_CelestialBodyBuffer.Buffer);"));
+            Assert.That(source, Does.Contain("m_CelestialBodyBuffer.Dispose();"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyMaterialPropertyBinder.Apply(properties, materialParameters, volume);"));
             Assert.That(source, Does.Not.Contain("m_AmbientProbeCubemapFaces"));
             Assert.That(source, Does.Not.Contain("TryProjectCubemapToSH("));

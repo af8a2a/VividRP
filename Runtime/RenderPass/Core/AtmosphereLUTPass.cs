@@ -43,6 +43,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int MultiScatteringLutRwId = Shader.PropertyToID("_MultiScatteringLUT_RW");
         private static readonly int SkyViewLutRwId = Shader.PropertyToID("_SkyViewLUT_RW");
         private static readonly int AtmosphericScatteringLutRwId = Shader.PropertyToID("_AtmosphericScatteringLUT_RW");
+        private static readonly int CelestialBodyDatasId = Shader.PropertyToID("_CelestialBodyDatas");
 
         [RenderGraphResource(Name = "MultiScatteringLUT", Access = AccessFlags.Write)]
         private RenderGraphTexture m_MultiScatteringLUT;
@@ -80,6 +81,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private RTHandle m_CachedAtmosphericScatteringHandle;
         private PhysicallyBasedSkyShaderParameters m_Parameters;
         private PhysicallyBasedSkyMaterialParameters m_MaterialParameters;
+        private readonly PhysicallyBasedSkyCelestialBodyBuffer m_CelestialBodyBuffer = new();
 
         public AtmosphereLUTPass()
         {
@@ -116,8 +118,13 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
+            var cameraData = frameData?.GetOrCreate<VividCameraData>();
+            var lightData = frameData?.GetOrCreate<VividLightData>();
+            var skyContext = new SkyRendererContext(cameraData, lightData);
+
             m_IsActive = PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters);
             m_HasMaterialParameters = PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(frameData, out m_MaterialParameters);
+            m_CelestialBodyBuffer.Update(skyContext);
             ResetFrameState();
 
             Configure2DLutDescriptor(m_MultiScatteringLUT, MultiScatteringWidth, MultiScatteringHeight);
@@ -153,7 +160,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 PassRecorder.ImportTexture(m_AtmosphericScatteringLUT, m_CachedAtmosphericScatteringHandle);
 
             m_NextMultiScatteringHash = ComputeMultiScatteringHash(m_MaterialParameters);
-            m_NextSkyViewHash = ComputeSkyViewHash(m_Parameters, m_MaterialParameters, m_NextMultiScatteringHash);
+            m_NextSkyViewHash = ComputeSkyViewHash(
+                m_Parameters,
+                m_MaterialParameters,
+                m_NextMultiScatteringHash,
+                m_CelestialBodyBuffer.CelestialLightHash);
 
             m_MultiScatteringRebuildReason = ResolveRebuildReason(
                 m_MultiScatteringCacheRecreated,
@@ -209,6 +220,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     BindCommonParameters(cmd);
                     cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, MultiScatteringLutId, m_MultiScatteringLUT.innerHandle);
                     cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, SkyViewLutRwId, m_SkyViewLUT.innerHandle);
+                    cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewKernel, CelestialBodyDatasId, m_CelestialBodyBuffer.Buffer);
                     cmd.DispatchCompute(
                         m_ComputeShader,
                         m_SkyViewKernel,
@@ -238,6 +250,11 @@ namespace VividRP.Runtime.RenderPass.Core
                         m_AtmosphericScatteringCameraKernel,
                         AtmosphericScatteringLutRwId,
                         m_AtmosphericScatteringLUT.innerHandle);
+                    cmd.SetComputeBufferParam(
+                        m_ComputeShader,
+                        m_AtmosphericScatteringCameraKernel,
+                        CelestialBodyDatasId,
+                        m_CelestialBodyBuffer.Buffer);
                     cmd.DispatchCompute(
                         m_ComputeShader,
                         m_AtmosphericScatteringCameraKernel,
@@ -270,6 +287,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SkyViewKernel = -1;
             m_AtmosphericScatteringCameraKernel = -1;
             m_AtmosphericScatteringBlurKernel = -1;
+            m_CelestialBodyBuffer.Dispose();
             ReleaseCachedLutResources();
             m_MultiScatteringLUT?.ClearImportedHandle();
             m_SkyViewLUT?.ClearImportedHandle();
@@ -278,10 +296,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         internal static int ComputeSkyViewLutHash(
             PhysicallyBasedSkyShaderParameters skyParameters,
-            PhysicallyBasedSkyMaterialParameters materialParameters)
+            PhysicallyBasedSkyMaterialParameters materialParameters,
+            in SkyRendererContext context)
         {
             var multiScatteringHash = ComputeMultiScatteringHash(materialParameters);
-            return ComputeSkyViewHash(skyParameters, materialParameters, multiScatteringHash);
+            var celestialLightHash = PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialLightHash(context);
+            return ComputeSkyViewHash(skyParameters, materialParameters, multiScatteringHash, celestialLightHash);
         }
 
         internal static bool TryGetCachedSkyViewLut(int skyViewHash, out Texture skyViewTexture)
@@ -560,12 +580,14 @@ namespace VividRP.Runtime.RenderPass.Core
         private static int ComputeSkyViewHash(
             PhysicallyBasedSkyShaderParameters skyParameters,
             PhysicallyBasedSkyMaterialParameters materialParameters,
-            int multiScatteringHash)
+            int multiScatteringHash,
+            int celestialLightHash)
         {
             unchecked
             {
                 var hash = 17;
                 hash = AppendHash(hash, multiScatteringHash);
+                hash = AppendHash(hash, celestialLightHash);
                 hash = AppendHash(hash, skyParameters.skySunDirection);
                 hash = AppendHash(hash, skyParameters.skySunColor);
                 hash = AppendHash(hash, materialParameters.celestialLightExposure);

@@ -108,7 +108,7 @@ float3 MapAtmosphericScattering(float2 positionNDC, float t, float cosChi)
 
 void UnmapAtmosphericScattering(uint s, inout float3 V, out float3 O, out float t, out float dt)
 {
-    O = GetCameraPositionWS() - _PlanetCenterPosition;
+    O = _VividWorldSpaceCameraPos - _PlanetCenterPosition;
 
 #ifdef CAMERA_SPACE
     V.y = max(V.y, 0.0f); // we can't see below the horizon
@@ -153,7 +153,7 @@ void EvaluateCameraAtmosphericScattering(float3 V, float2 positionNDC, float tFr
 {
     skyColor = skyOpacity = 0.0f;
 
-    float3 O = GetCameraPositionWS() - _PlanetCenterPosition;
+    float3 O = _WorldSpaceCameraPos - _PlanetCenterPosition;
     float3 N = _PlanetUp;
     float r = _PlanetaryRadius + _CameraAltitude;
 

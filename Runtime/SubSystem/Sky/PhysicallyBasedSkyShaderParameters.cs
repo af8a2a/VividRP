@@ -248,8 +248,6 @@ namespace VividRP.Runtime
             var ozoneLayerWidth = Mathf.Max(volume.GetOzoneLayerWidth(), 1.0f);
             var atmosphericRadius = planetRadius + atmosphericDepth;
             var exponentialInterpolation = ComputeExponentialInterpolationParams(volume.horizonZenithShift.value);
-            var sunDirection = PhysicallyBasedSkyRenderer.ResolveSunDirection(context);
-            var sunColor = PhysicallyBasedSkyRenderer.ResolveSunColor(context);
             var worldCameraPosition = context.cameraData?.camera != null
                 ? context.cameraData.camera.transform.position
                 : Vector3.zero;
@@ -267,7 +265,7 @@ namespace VividRP.Runtime
 
             var planetUp = cameraToPlanetCenter / radialDistance;
             var altitude = radialDistance - planetRadius;
-            var lightExposure = ResolveCelestialLightExposure(sunDirection, sunColor);
+            var lightExposure = ResolveCelestialLightExposure(context);
             var pbrSkyCameraPosition = PhysicallyBasedSkyRenderer.ResolveCameraPosition(context, planetRadius);
 
             parameters.pbrSkyCameraPositionPS = new Vector4(
@@ -318,7 +316,7 @@ namespace VividRP.Runtime
             parameters.horizonZenithShiftPower = exponentialInterpolation.x;
             parameters.horizonZenithShiftScale = exponentialInterpolation.y;
             parameters.celestialLightCount = ResolveCelestialLightCount(context);
-            parameters.celestialBodyCount = parameters.celestialLightCount;
+            parameters.celestialBodyCount = PhysicallyBasedSkyCelestialBodyUtility.ResolveCelestialBodyCount(context);
             parameters.atmosphericDepth = atmosphericDepth;
             parameters.rcpAtmosphericDepth = 1.0f / atmosphericDepth;
             parameters.celestialLightExposure = lightExposure;
@@ -368,13 +366,12 @@ namespace VividRP.Runtime
 
         private static int ResolveCelestialLightCount(in SkyRendererContext context)
         {
-            return context.lightData != null && context.lightData.hasMainDirectionalLight ? 1 : 0;
+            return PhysicallyBasedSkyCelestialBodyUtility.ResolveCelestialLightCount(context);
         }
 
-        private static float ResolveCelestialLightExposure(Vector3 sunDirection, Color sunColor)
+        private static float ResolveCelestialLightExposure(in SkyRendererContext context)
         {
-            var maxChannel = Mathf.Max(Mathf.Max(sunColor.r, sunColor.g), Mathf.Max(sunColor.b, 1.0f));
-            return Mathf.Max(maxChannel * Mathf.Max(-sunDirection.y, 0.0f), 1.0f);
+            return Mathf.Max(PhysicallyBasedSkyCelestialBodyUtility.ResolveCelestialLightExposure(context), 1.0f);
         }
     }
 

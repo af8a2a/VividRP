@@ -21,6 +21,26 @@ namespace VividRP.Editor
         private static readonly GUIContent s_RayTracedShadowRayBiasLabel = EditorGUIUtility.TrTextContent("Ray Bias");
         private static readonly GUIContent s_RayTracedShadowDistantRayBiasLabel = EditorGUIUtility.TrTextContent("Distant Ray Bias");
         private static readonly GUIContent s_RayTracedShadowSunAngularDiameterLabel = EditorGUIUtility.TrTextContent("Sun Angular Diameter (Unused in MVP)");
+        private static readonly GUIContent s_PhysicallyBasedSkyLabel = EditorGUIUtility.TrTextContent("Physically Based Sky");
+        private static readonly GUIContent s_InteractsWithSkyLabel = EditorGUIUtility.TrTextContent("Interacts With Sky");
+        private static readonly GUIContent s_AngularDiameterLabel = EditorGUIUtility.TrTextContent("Angular Diameter");
+        private static readonly GUIContent s_DiameterMultiplierModeLabel = EditorGUIUtility.TrTextContent("Use Diameter Multiplier");
+        private static readonly GUIContent s_DiameterMultiplierLabel = EditorGUIUtility.TrTextContent("Diameter Multiplier");
+        private static readonly GUIContent s_DiameterOverrideLabel = EditorGUIUtility.TrTextContent("Diameter Override");
+        private static readonly GUIContent s_ShadingSourceLabel = EditorGUIUtility.TrTextContent("Shading Source");
+        private static readonly GUIContent s_SunLightOverrideLabel = EditorGUIUtility.TrTextContent("Sun Light Override");
+        private static readonly GUIContent s_SunColorLabel = EditorGUIUtility.TrTextContent("Sun Color");
+        private static readonly GUIContent s_SunIntensityLabel = EditorGUIUtility.TrTextContent("Sun Intensity");
+        private static readonly GUIContent s_MoonPhaseLabel = EditorGUIUtility.TrTextContent("Moon Phase");
+        private static readonly GUIContent s_MoonPhaseRotationLabel = EditorGUIUtility.TrTextContent("Moon Phase Rotation");
+        private static readonly GUIContent s_EarthshineLabel = EditorGUIUtility.TrTextContent("Earthshine");
+        private static readonly GUIContent s_FlareSizeLabel = EditorGUIUtility.TrTextContent("Flare Size");
+        private static readonly GUIContent s_FlareTintLabel = EditorGUIUtility.TrTextContent("Flare Tint");
+        private static readonly GUIContent s_FlareFalloffLabel = EditorGUIUtility.TrTextContent("Flare Falloff");
+        private static readonly GUIContent s_FlareMultiplierLabel = EditorGUIUtility.TrTextContent("Flare Multiplier");
+        private static readonly GUIContent s_SurfaceTextureLabel = EditorGUIUtility.TrTextContent("Surface Texture");
+        private static readonly GUIContent s_SurfaceTintLabel = EditorGUIUtility.TrTextContent("Surface Tint");
+        private static readonly GUIContent s_DistanceLabel = EditorGUIUtility.TrTextContent("Distance");
 
         private VividSerializedLight m_SerializedLight;
 
@@ -154,6 +174,8 @@ namespace VividRP.Editor
                 }
             }
 
+            DrawPhysicallyBasedSkyInspector();
+
             if (!ShouldShowDirectionalRayTracedShadowControls(m_SerializedLight))
                 return;
 
@@ -193,6 +215,85 @@ namespace VividRP.Editor
             return serializedLight?.enableRayTracedShadow != null
                 && (serializedLight.enableRayTracedShadow.hasMultipleDifferentValues
                     || serializedLight.enableRayTracedShadow.boolValue);
+        }
+
+        private void DrawPhysicallyBasedSkyInspector()
+        {
+            if (!ShouldShowDirectionalPhysicallyBasedSkyControls(m_SerializedLight))
+                return;
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField(s_PhysicallyBasedSkyLabel, EditorStyles.boldLabel);
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                EditorGUILayout.PropertyField(m_SerializedLight.interactsWithSky, s_InteractsWithSkyLabel);
+
+                using (new EditorGUI.DisabledScope(
+                           !m_SerializedLight.interactsWithSky.hasMultipleDifferentValues
+                           && !m_SerializedLight.interactsWithSky.boolValue))
+                {
+                    EditorGUILayout.PropertyField(m_SerializedLight.angularDiameter, s_AngularDiameterLabel);
+                    EditorGUILayout.PropertyField(m_SerializedLight.diameterMultiplierMode, s_DiameterMultiplierModeLabel);
+
+                    if (m_SerializedLight.diameterMultiplierMode.hasMultipleDifferentValues
+                        || m_SerializedLight.diameterMultiplierMode.boolValue)
+                    {
+                        EditorGUILayout.PropertyField(m_SerializedLight.diameterMultiplier, s_DiameterMultiplierLabel);
+                    }
+                    else
+                    {
+                        EditorGUILayout.PropertyField(m_SerializedLight.diameterOverride, s_DiameterOverrideLabel);
+                    }
+
+                    EditorGUILayout.PropertyField(m_SerializedLight.distance, s_DistanceLabel);
+                    EditorGUILayout.PropertyField(m_SerializedLight.celestialBodyShadingSource, s_ShadingSourceLabel);
+
+                    if (m_SerializedLight.celestialBodyShadingSource.hasMultipleDifferentValues)
+                    {
+                        EditorGUILayout.PropertyField(m_SerializedLight.sunLightOverride, s_SunLightOverrideLabel);
+                        EditorGUILayout.PropertyField(m_SerializedLight.sunColor, s_SunColorLabel);
+                        EditorGUILayout.PropertyField(m_SerializedLight.sunIntensity, s_SunIntensityLabel);
+                        EditorGUILayout.PropertyField(m_SerializedLight.moonPhase, s_MoonPhaseLabel);
+                        EditorGUILayout.PropertyField(m_SerializedLight.moonPhaseRotation, s_MoonPhaseRotationLabel);
+                    }
+                    else
+                    {
+                        var shadingSource = (VividAdditionalLightData.CelestialBodyShadingSource)
+                            m_SerializedLight.celestialBodyShadingSource.enumValueIndex;
+
+                        switch (shadingSource)
+                        {
+                            case VividAdditionalLightData.CelestialBodyShadingSource.ReflectSunLight:
+                                EditorGUILayout.PropertyField(m_SerializedLight.sunLightOverride, s_SunLightOverrideLabel);
+                                break;
+                            case VividAdditionalLightData.CelestialBodyShadingSource.Manual:
+                                EditorGUILayout.PropertyField(m_SerializedLight.sunColor, s_SunColorLabel);
+                                EditorGUILayout.PropertyField(m_SerializedLight.sunIntensity, s_SunIntensityLabel);
+                                EditorGUILayout.PropertyField(m_SerializedLight.moonPhase, s_MoonPhaseLabel);
+                                EditorGUILayout.PropertyField(m_SerializedLight.moonPhaseRotation, s_MoonPhaseRotationLabel);
+                                break;
+                        }
+                    }
+
+                    EditorGUILayout.PropertyField(m_SerializedLight.surfaceTexture, s_SurfaceTextureLabel);
+                    EditorGUILayout.PropertyField(m_SerializedLight.surfaceTint, s_SurfaceTintLabel);
+                    EditorGUILayout.PropertyField(m_SerializedLight.earthshine, s_EarthshineLabel);
+                    EditorGUILayout.PropertyField(m_SerializedLight.flareSize, s_FlareSizeLabel);
+                    EditorGUILayout.PropertyField(m_SerializedLight.flareTint, s_FlareTintLabel);
+                    EditorGUILayout.PropertyField(m_SerializedLight.flareFalloff, s_FlareFalloffLabel);
+                    EditorGUILayout.PropertyField(m_SerializedLight.flareMultiplier, s_FlareMultiplierLabel);
+                }
+            }
+        }
+
+        internal static bool ShouldShowDirectionalPhysicallyBasedSkyControls(VividSerializedLight serializedLight)
+        {
+            return serializedLight != null
+                && serializedLight.settings != null
+                && !serializedLight.settings.lightType.hasMultipleDifferentValues
+                && serializedLight.settings.light != null
+                && serializedLight.settings.light.type == LightType.Directional;
         }
 
         private void NormalizeSelectedLightIntensityUnits()

@@ -15,11 +15,12 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PhysicallyBasedSkyPassNode_DefinesDepthSkyViewInputsAndColorOutputPorts()
+        public void PhysicallyBasedSkyPassNode_DefinesDepthShadowSkyViewInputsAndColorOutputPorts()
         {
             var node = new AutoRegisteredPhysicallyBasedSkyPassNode();
 
             Assert.That(node.GetInputPortByName("m_DepthTexture"), Is.Not.Null);
+            Assert.That(node.GetInputPortByName("m_DirectionalShadowTexture"), Is.Not.Null);
             Assert.That(node.GetInputPortByName("m_SkyViewLUT"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_ColorTarget"), Is.Not.Null);
         }

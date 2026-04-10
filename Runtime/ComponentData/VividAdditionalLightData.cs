@@ -297,10 +297,20 @@ namespace VividRP.Runtime
     [ExecuteAlways]
     public class VividAdditionalLightData : MonoBehaviour, IAdditionalData
     {
+        public enum CelestialBodyShadingSource
+        {
+            Emission = 0,
+            ReflectSunLight = 1,
+            Manual = 2,
+        }
+
         internal const float DefaultRayTracedShadowRayLength = 1000f;
         internal const float DefaultRayTracedShadowRayBias = 0.001f;
         internal const float DefaultRayTracedShadowDistantRayBias = 0.001f;
         internal const float DefaultRayTracedShadowSunAngularDiameter = 0.533f;
+        internal const float DefaultCelestialBodyAngularDiameter = 0.5f;
+        internal const float DefaultCelestialBodyDistance = 149597870700.0f;
+        internal const float DefaultManualSunIntensity = 130000.0f;
 
         [SerializeField]
         private bool m_UsePipelineSettings = true;
@@ -325,6 +335,63 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private float m_RayTracedShadowSunAngularDiameter = DefaultRayTracedShadowSunAngularDiameter;
+
+        [SerializeField]
+        private bool m_InteractsWithSky = true;
+
+        [SerializeField]
+        private float m_AngularDiameter = DefaultCelestialBodyAngularDiameter;
+
+        [SerializeField]
+        private bool m_DiameterMultiplierMode;
+
+        [SerializeField]
+        private float m_DiameterMultiplier = 1.0f;
+
+        [SerializeField]
+        private float m_DiameterOverride = DefaultCelestialBodyAngularDiameter;
+
+        [SerializeField]
+        private CelestialBodyShadingSource m_CelestialBodyShadingSource = CelestialBodyShadingSource.Emission;
+
+        [SerializeField]
+        private Light m_SunLightOverride;
+
+        [SerializeField]
+        private Color m_SunColor = Color.white;
+
+        [SerializeField]
+        private float m_SunIntensity = DefaultManualSunIntensity;
+
+        [SerializeField]
+        private float m_MoonPhase = 0.2f;
+
+        [SerializeField]
+        private float m_MoonPhaseRotation;
+
+        [SerializeField]
+        private float m_Earthshine = 1.0f;
+
+        [SerializeField]
+        private float m_FlareSize = 2.0f;
+
+        [SerializeField]
+        private Color m_FlareTint = Color.white;
+
+        [SerializeField]
+        private float m_FlareFalloff = 4.0f;
+
+        [SerializeField]
+        private float m_FlareMultiplier = 1.0f;
+
+        [SerializeField]
+        private Texture m_SurfaceTexture;
+
+        [SerializeField]
+        private Color m_SurfaceTint = Color.white;
+
+        [SerializeField]
+        private float m_Distance = DefaultCelestialBodyDistance;
 
         [NonSerialized]
         private bool m_Animated;
@@ -441,6 +508,180 @@ namespace VividRP.Runtime
                 DefaultRayTracedShadowSunAngularDiameter);
         }
 
+        public bool interactsWithSky
+        {
+            get => m_InteractsWithSky && light != null && light.type == LightType.Directional;
+            set
+            {
+                if (m_InteractsWithSky == value)
+                    return;
+
+                m_InteractsWithSky = value;
+                NotifyLightDataChanged();
+            }
+        }
+
+        public float angularDiameter
+        {
+            get => m_AngularDiameter;
+            set => SetNonNegativeFloat(ref m_AngularDiameter, value, DefaultCelestialBodyAngularDiameter);
+        }
+
+        public bool diameterMultiplierMode
+        {
+            get => m_DiameterMultiplierMode;
+            set
+            {
+                if (m_DiameterMultiplierMode == value)
+                    return;
+
+                m_DiameterMultiplierMode = value;
+                NotifyLightDataChanged();
+            }
+        }
+
+        public float diameterMultiplier
+        {
+            get => m_DiameterMultiplier;
+            set => SetNonNegativeFloat(ref m_DiameterMultiplier, value, 1.0f);
+        }
+
+        public float diameterOverride
+        {
+            get => m_DiameterOverride;
+            set => SetNonNegativeFloat(ref m_DiameterOverride, value, DefaultCelestialBodyAngularDiameter);
+        }
+
+        public CelestialBodyShadingSource celestialBodyShadingSource
+        {
+            get => m_CelestialBodyShadingSource;
+            set
+            {
+                if (m_CelestialBodyShadingSource == value)
+                    return;
+
+                m_CelestialBodyShadingSource = value;
+                NotifyLightDataChanged();
+            }
+        }
+
+        public Light sunLightOverride
+        {
+            get => m_SunLightOverride;
+            set
+            {
+                if (m_SunLightOverride == value)
+                    return;
+
+                m_SunLightOverride = value;
+                NotifyLightDataChanged();
+            }
+        }
+
+        public Color sunColor
+        {
+            get => m_SunColor;
+            set
+            {
+                if (m_SunColor == value)
+                    return;
+
+                m_SunColor = value;
+                NotifyLightDataChanged();
+            }
+        }
+
+        public float sunIntensity
+        {
+            get => m_SunIntensity;
+            set => SetNonNegativeFloat(ref m_SunIntensity, value, DefaultManualSunIntensity);
+        }
+
+        public float moonPhase
+        {
+            get => m_MoonPhase;
+            set => SetClampedFloat(ref m_MoonPhase, value, 0.0f, 1.0f, 0.2f);
+        }
+
+        public float moonPhaseRotation
+        {
+            get => m_MoonPhaseRotation;
+            set => SetWrappedAngle(ref m_MoonPhaseRotation, value);
+        }
+
+        public float earthshine
+        {
+            get => m_Earthshine;
+            set => SetNonNegativeFloat(ref m_Earthshine, value, 1.0f);
+        }
+
+        public float flareSize
+        {
+            get => m_FlareSize;
+            set => SetClampedFloat(ref m_FlareSize, value, 0.0f, 90.0f, 2.0f);
+        }
+
+        public Color flareTint
+        {
+            get => m_FlareTint;
+            set
+            {
+                if (m_FlareTint == value)
+                    return;
+
+                m_FlareTint = value;
+                NotifyLightDataChanged();
+            }
+        }
+
+        public float flareFalloff
+        {
+            get => m_FlareFalloff;
+            set => SetNonNegativeFloat(ref m_FlareFalloff, value, 4.0f);
+        }
+
+        public float flareMultiplier
+        {
+            get => m_FlareMultiplier;
+            set => SetClampedFloat(ref m_FlareMultiplier, value, 0.0f, 1.0f, 1.0f);
+        }
+
+        public Texture surfaceTexture
+        {
+            get => m_SurfaceTexture;
+            set
+            {
+                if (m_SurfaceTexture == value)
+                    return;
+
+                m_SurfaceTexture = value;
+                NotifyLightDataChanged();
+            }
+        }
+
+        public Color surfaceTint
+        {
+            get => m_SurfaceTint;
+            set
+            {
+                if (m_SurfaceTint == value)
+                    return;
+
+                m_SurfaceTint = value;
+                NotifyLightDataChanged();
+            }
+        }
+
+        public float distance
+        {
+            get => m_Distance;
+            set => SetNonNegativeFloat(ref m_Distance, value, DefaultCelestialBodyDistance);
+        }
+
+        internal float resolvedAngularDiameter => m_DiameterMultiplierMode
+            ? m_DiameterMultiplier * m_AngularDiameter
+            : m_DiameterOverride;
+
         internal bool supportsRayTracedShadow => light != null && light.type == LightType.Directional;
 
         internal bool isRayTracedShadowActive => isActiveAndEnabled && supportsRayTracedShadow && m_EnableRayTracedShadow;
@@ -494,6 +735,7 @@ namespace VividRP.Runtime
         {
             m_Light = light;
             ConstrainRayTracedShadowSettings();
+            ConstrainCelestialBodySettings();
             RefreshAnimatedState();
             VividLightRenderDatabase.instance.UpdateLightData(m_Light, this);
         }
@@ -506,6 +748,36 @@ namespace VividRP.Runtime
         private void SetRayTracedShadowFloat(ref float field, float value, float defaultValue)
         {
             var sanitizedValue = SanitizeRayTracedShadowFloat(value, defaultValue);
+            if (Mathf.Approximately(field, sanitizedValue))
+                return;
+
+            field = sanitizedValue;
+            NotifyLightDataChanged();
+        }
+
+        private void SetNonNegativeFloat(ref float field, float value, float defaultValue)
+        {
+            var sanitizedValue = SanitizeNonNegativeFloat(value, defaultValue);
+            if (Mathf.Approximately(field, sanitizedValue))
+                return;
+
+            field = sanitizedValue;
+            NotifyLightDataChanged();
+        }
+
+        private void SetClampedFloat(ref float field, float value, float min, float max, float defaultValue)
+        {
+            var sanitizedValue = SanitizeClampedFloat(value, min, max, defaultValue);
+            if (Mathf.Approximately(field, sanitizedValue))
+                return;
+
+            field = sanitizedValue;
+            NotifyLightDataChanged();
+        }
+
+        private void SetWrappedAngle(ref float field, float value)
+        {
+            var sanitizedValue = SanitizeWrappedAngle(value);
             if (Mathf.Approximately(field, sanitizedValue))
                 return;
 
@@ -529,12 +801,51 @@ namespace VividRP.Runtime
                 DefaultRayTracedShadowSunAngularDiameter);
         }
 
+        private void ConstrainCelestialBodySettings()
+        {
+            m_AngularDiameter = SanitizeNonNegativeFloat(m_AngularDiameter, DefaultCelestialBodyAngularDiameter);
+            m_DiameterMultiplier = SanitizeNonNegativeFloat(m_DiameterMultiplier, 1.0f);
+            m_DiameterOverride = SanitizeNonNegativeFloat(m_DiameterOverride, DefaultCelestialBodyAngularDiameter);
+            m_SunIntensity = SanitizeNonNegativeFloat(m_SunIntensity, DefaultManualSunIntensity);
+            m_MoonPhase = SanitizeClampedFloat(m_MoonPhase, 0.0f, 1.0f, 0.2f);
+            m_MoonPhaseRotation = SanitizeWrappedAngle(m_MoonPhaseRotation);
+            m_Earthshine = SanitizeNonNegativeFloat(m_Earthshine, 1.0f);
+            m_FlareSize = SanitizeClampedFloat(m_FlareSize, 0.0f, 90.0f, 2.0f);
+            m_FlareFalloff = SanitizeNonNegativeFloat(m_FlareFalloff, 4.0f);
+            m_FlareMultiplier = SanitizeClampedFloat(m_FlareMultiplier, 0.0f, 1.0f, 1.0f);
+            m_Distance = SanitizeNonNegativeFloat(m_Distance, DefaultCelestialBodyDistance);
+        }
+
         private static float SanitizeRayTracedShadowFloat(float value, float defaultValue)
         {
             if (float.IsNaN(value) || float.IsInfinity(value))
                 return defaultValue;
 
             return Mathf.Max(0f, value);
+        }
+
+        private static float SanitizeNonNegativeFloat(float value, float defaultValue)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                return defaultValue;
+
+            return Mathf.Max(0.0f, value);
+        }
+
+        private static float SanitizeClampedFloat(float value, float min, float max, float defaultValue)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                return defaultValue;
+
+            return Mathf.Clamp(value, min, max);
+        }
+
+        private static float SanitizeWrappedAngle(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                return 0.0f;
+
+            return Mathf.Repeat(value, 360.0f);
         }
     }
 }

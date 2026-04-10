@@ -66,6 +66,7 @@ namespace VividRP.Editor.Tests
             Assert.That(ambientProbeConvolutionSource, Does.Not.Contain("Packages/com.unity.render-pipelines.high-definition"));
 
             Assert.That(celestialBodySource, Does.Contain("struct CelestialBodyData"));
+            Assert.That(celestialBodySource, Does.Contain("uint surfaceTextureIndex;"));
             Assert.That(celestialBodySource, Does.Contain("StructuredBuffer<CelestialBodyData> _CelestialBodyDatas;"));
             Assert.That(celestialBodySource, Does.Not.Contain("Packages/com.unity.render-pipelines.high-definition"));
 

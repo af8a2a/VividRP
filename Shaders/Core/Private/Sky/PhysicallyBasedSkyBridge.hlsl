@@ -37,6 +37,7 @@ float4x4 _SpaceRotation;
 TEXTURECUBE(_GroundAlbedoTexture);
 TEXTURECUBE(_GroundEmissionTexture);
 TEXTURECUBE(_SpaceEmissionTexture);
+TEXTURE2D(_DirectionalShadowTexture);
 
 struct Attributes
 {
@@ -219,7 +220,43 @@ float ComputeEarthshine(CelestialBodyData moon)
     return earthshine * moon.earthshine;
 }
 
-float3 RenderSunDisk(float3 viewDirectionWS)
+bool CanSampleCelestialSurfaceTexture(CelestialBodyData light)
+{
+#if defined(VIVIDRP_SKY_BINDLESS_SURFACE_TEXTURES)
+    return light.surfaceTextureScaleOffset.x > 0.0f && light.surfaceTextureIndex != 0xffffffffu;
+#else
+    return false;
+#endif
+}
+
+float3 SampleCelestialSurfaceTexture(CelestialBodyData light, float3 viewDirectionWS)
+{
+#if defined(VIVIDRP_SKY_BINDLESS_SURFACE_TEXTURES)
+    float2 projection = float2(dot(viewDirectionWS, light.right), dot(viewDirectionWS, light.up));
+    float2 angles = float2(FastASin(projection.x), FastASin(-projection.y));
+    float2 uv = saturate(angles * rcp(max(light.angularRadius, 1e-6f)) * 0.5f + 0.5f);
+    Texture2D surfaceTexture = GetBindlessTexture2D(NonUniformResourceIndex(light.surfaceTextureIndex));
+    return SAMPLE_TEXTURE2D(surfaceTexture, sampler_LinearClamp, uv).rgb;
+#else
+    return 1.0f.xxx;
+#endif
+}
+
+bool IsSkyBakingPass()
+{
+    return _SkyBakingViewSampleCount > 0;
+}
+
+float SampleDirectionalShadow(float2 positionCS)
+{
+    if (IsSkyBakingPass())
+        return 1.0f;
+
+    float2 uv = (floor(positionCS) + 0.5f) * _ScreenSize.zw;
+    return saturate(SAMPLE_TEXTURE2D_LOD(_DirectionalShadowTexture, sampler_PointClamp, saturate(uv), 0).x);
+}
+
+float3 RenderSunDisk(float3 viewDirectionWS, float2 positionCS)
 {
     if (!GetRenderSunDiskEnabled())
         return 0.0f;
@@ -244,6 +281,12 @@ float3 RenderSunDisk(float3 viewDirectionWS)
 
             if (light.type != 0)
                 color *= ComputeMoonPhase(light, viewDirectionWS) * INV_PI + ComputeEarthshine(light);
+
+            if (CanSampleCelestialSurfaceTexture(light))
+                color *= SampleCelestialSurfaceTexture(light, viewDirectionWS);
+
+            if (light.shadowIndex >= 0)
+                color *= SampleDirectionalShadow(positionCS);
 
             radiance = color;
         }
@@ -328,7 +371,7 @@ float3 EvaluateSpaceColor(float3 viewDirection, float3 viewTransmittance)
     return SanitizeSkyRadiance(SampleSpaceEmission(viewDirection) * viewTransmittance);
 }
 
-float3 EvaluateSky(float3 directionWS)
+float3 EvaluateSky(float3 directionWS, float2 positionCS)
 {
     float3 viewDirWS = normalize(directionWS);
 
@@ -338,7 +381,7 @@ float3 EvaluateSky(float3 directionWS)
         float3 skyOpacity = 0.0f;
 
         EvaluateDistantAtmosphere(viewDirWS, skyColor, skyOpacity);
-        skyColor += RenderSunDisk(viewDirWS) * (1.0f - skyOpacity);
+        skyColor += RenderSunDisk(viewDirWS, positionCS) * (1.0f - skyOpacity);
         skyColor += EvaluateSpaceColor(viewDirWS, 1.0f - skyOpacity);
         return SanitizeSkyRadiance(skyColor);
     }
@@ -349,7 +392,7 @@ float3 EvaluateSky(float3 directionWS)
     if (!IntersectAtmosphereRay(cameraPosition, viewDirWS, GetAtmosphereRadius(), atmosphereEntry, atmosphereExit))
     {
         float3 skyColor = EvaluateSpaceColor(viewDirWS, 1.0f.xxx);
-        skyColor += RenderSunDisk(viewDirWS);
+        skyColor += RenderSunDisk(viewDirWS, positionCS);
         return SanitizeSkyRadiance(skyColor);
     }
 
@@ -371,7 +414,7 @@ float3 EvaluateSky(float3 directionWS)
     }
     else
     {
-        skyColor += RenderSunDisk(viewDirWS) * viewTransmittance;
+        skyColor += RenderSunDisk(viewDirWS, positionCS) * viewTransmittance;
         skyColor += EvaluateSpaceColor(viewDirWS, viewTransmittance);
     }
 
@@ -381,7 +424,7 @@ float3 EvaluateSky(float3 directionWS)
 float3 EvaluateSkyColor(float2 positionCS)
 {
     float3 viewDirWS = -GetSkyViewDirWS(positionCS);
-    return SanitizeSkyRadiance(EvaluateSky(viewDirWS));
+    return SanitizeSkyRadiance(EvaluateSky(viewDirWS, positionCS));
 }
 
 #endif

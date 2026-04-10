@@ -21,6 +21,7 @@ namespace VividRP.Runtime
 
         private static readonly int SkyViewLutId = Shader.PropertyToID("_SkyViewLUT");
         private static readonly int SkyUseLutId = Shader.PropertyToID("_SkyUseLUT");
+        private static readonly int DirectionalShadowTextureId = Shader.PropertyToID("_DirectionalShadowTexture");
         private static readonly int SkyBakingViewSampleCountId = Shader.PropertyToID("_SkyBakingViewSampleCount");
         private static readonly int SkyCameraPositionPsId = Shader.PropertyToID("_SkyCameraPositionPS");
         private static readonly int SkySunDirectionId = Shader.PropertyToID("_SkySunDirection");
@@ -87,7 +88,7 @@ namespace VividRP.Runtime
                 SkySettingsVolume.GetGeneratedCubemapResolution(skySettings),
                 generatedCubemapViewSampleCount,
                 ResolveCameraPosition(context, volume.planetRadius.value),
-                PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialLightHash(context));
+                PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialBodyHash(context));
         }
 
         public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd)
@@ -407,6 +408,7 @@ namespace VividRP.Runtime
             properties = new MaterialPropertyBlock();
             properties.SetFloat(SkyUseLutId, useSkyViewLut ? 1.0f : 0.0f);
             properties.SetTexture(SkyViewLutId, useSkyViewLut ? skyViewLut : Texture2D.blackTexture);
+            properties.SetTexture(DirectionalShadowTextureId, Texture2D.whiteTexture);
             properties.SetInt(SkyBakingViewSampleCountId, Mathf.Max(viewSampleCount, 1));
             properties.SetVector(SkyCameraPositionPsId, parameters.skyCameraPositionPS);
             properties.SetVector(SkySunDirectionId, parameters.skySunDirection);

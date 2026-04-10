@@ -12,6 +12,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int PixelCoordToViewDirWSId = Shader.PropertyToID("_PixelCoordToViewDirWS");
         private static readonly int SkyViewLutId = Shader.PropertyToID("_SkyViewLUT");
         private static readonly int SkyUseLutId = Shader.PropertyToID("_SkyUseLUT");
+        private static readonly int DirectionalShadowTextureId = Shader.PropertyToID("_DirectionalShadowTexture");
         private static readonly int SkyCameraPositionPsId = Shader.PropertyToID("_SkyCameraPositionPS");
         private static readonly int SkySunDirectionId = Shader.PropertyToID("_SkySunDirection");
         private static readonly int SkySunColorId = Shader.PropertyToID("_SkySunColor");
@@ -34,6 +35,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "SkyViewLUT", Access = AccessFlags.Read)]
         private RenderGraphTexture m_SkyViewLUT;
 
+        [RenderGraphResource(Name = "DirectionalShadowTexture", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_DirectionalShadowTexture;
+
         private Material m_Material;
         private bool m_IsActive;
         private PhysicallyBasedSkyShaderParameters m_Parameters;
@@ -46,6 +50,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ColorTarget = RenderGraphTexture.CreateInput("SkyColor", GraphicsFormat.R8G8B8A8_SRGB);
             m_DepthTexture = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.None, DepthBits.Depth32);
             m_SkyViewLUT = RenderGraphTexture.CreateInput("SkyViewLUT", GraphicsFormat.R16G16B16A16_SFloat);
+            m_DirectionalShadowTexture = RenderGraphTexture.CreateInput("DirectionalShadowTexture", GraphicsFormat.R16_SFloat);
         }
 
         public override void Create()
@@ -96,10 +101,14 @@ namespace VividRP.Runtime.RenderPass.Core
             var skyViewTexture = m_SkyViewLUT != null
                 ? ResolveTexture(m_SkyViewLUT.innerHandle)
                 : null;
+            var directionalShadowTexture = m_DirectionalShadowTexture != null
+                ? ResolveTexture(m_DirectionalShadowTexture.innerHandle)
+                : null;
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetMatrix(PixelCoordToViewDirWSId, m_Parameters.pixelCoordToViewDirWS);
             mpb.SetTexture(SkyViewLutId, skyViewTexture ?? Texture2D.blackTexture);
             mpb.SetFloat(SkyUseLutId, skyViewTexture != null ? 1.0f : 0.0f);
+            mpb.SetTexture(DirectionalShadowTextureId, directionalShadowTexture ?? Texture2D.whiteTexture);
             mpb.SetVector(SkyCameraPositionPsId, m_Parameters.skyCameraPositionPS);
             mpb.SetVector(SkySunDirectionId, m_Parameters.skySunDirection);
             mpb.SetVector(SkySunColorId, m_Parameters.skySunColor);

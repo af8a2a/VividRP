@@ -115,7 +115,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("skyData.ambientProbeHash = hash;"));
             Assert.That(source, Does.Contain("return HashCode.Combine("));
             Assert.That(source, Does.Contain("ResolveCameraPosition(context, volume.planetRadius.value)"));
-            Assert.That(source, Does.Contain("PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialLightHash(context)"));
+            Assert.That(source, Does.Contain("PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialBodyHash(context)"));
             Assert.That(source, Does.Contain("private bool CanBakeSky()"));
             Assert.That(source, Does.Contain("return m_SkyMaterial != null && m_SkyBakingPass >= 0;"));
             Assert.That(source, Does.Contain("TryBuildSkyBakingProperties(volume, context, runtimeCubemapViewSampleCount, out var properties)"));
@@ -136,8 +136,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("PhysicallyBasedSkyShaderParameterBuilder.TryBuildForSkyBaking(volume, context, out var parameters)"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(volume, context, out var materialParameters)"));
             Assert.That(source, Does.Contain("private static readonly int CelestialBodyDatasId = Shader.PropertyToID(\"_CelestialBodyDatas\");"));
+            Assert.That(source, Does.Contain("private static readonly int DirectionalShadowTextureId = Shader.PropertyToID(\"_DirectionalShadowTexture\");"));
             Assert.That(source, Does.Contain("m_CelestialBodyBuffer.Update(context);"));
             Assert.That(source, Does.Contain("m_SkyMaterial.SetBuffer(CelestialBodyDatasId, m_CelestialBodyBuffer.Buffer);"));
+            Assert.That(source, Does.Contain("properties.SetTexture(DirectionalShadowTextureId, Texture2D.whiteTexture);"));
             Assert.That(source, Does.Contain("m_CelestialBodyBuffer.Dispose();"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyMaterialPropertyBinder.Apply(properties, materialParameters, volume);"));
             Assert.That(source, Does.Not.Contain("m_AmbientProbeCubemapFaces"));

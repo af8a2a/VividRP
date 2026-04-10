@@ -30,7 +30,8 @@ struct CelestialBodyData
     float3 flareColor;
     float flareFalloff;
 
-    float3 padding;
+    uint surfaceTextureIndex;
+    float2 padding;
     int shadowIndex;
 };
 

@@ -57,6 +57,25 @@ namespace VividRP.Editor.Tests
             Assert.That(serializedLight.rayTracedShadowRayBias, Is.Not.Null);
             Assert.That(serializedLight.rayTracedShadowDistantRayBias, Is.Not.Null);
             Assert.That(serializedLight.rayTracedShadowSunAngularDiameter, Is.Not.Null);
+            Assert.That(serializedLight.interactsWithSky, Is.Not.Null);
+            Assert.That(serializedLight.angularDiameter, Is.Not.Null);
+            Assert.That(serializedLight.diameterMultiplierMode, Is.Not.Null);
+            Assert.That(serializedLight.diameterMultiplier, Is.Not.Null);
+            Assert.That(serializedLight.diameterOverride, Is.Not.Null);
+            Assert.That(serializedLight.celestialBodyShadingSource, Is.Not.Null);
+            Assert.That(serializedLight.sunLightOverride, Is.Not.Null);
+            Assert.That(serializedLight.sunColor, Is.Not.Null);
+            Assert.That(serializedLight.sunIntensity, Is.Not.Null);
+            Assert.That(serializedLight.moonPhase, Is.Not.Null);
+            Assert.That(serializedLight.moonPhaseRotation, Is.Not.Null);
+            Assert.That(serializedLight.earthshine, Is.Not.Null);
+            Assert.That(serializedLight.flareSize, Is.Not.Null);
+            Assert.That(serializedLight.flareTint, Is.Not.Null);
+            Assert.That(serializedLight.flareFalloff, Is.Not.Null);
+            Assert.That(serializedLight.flareMultiplier, Is.Not.Null);
+            Assert.That(serializedLight.surfaceTexture, Is.Not.Null);
+            Assert.That(serializedLight.surfaceTint, Is.Not.Null);
+            Assert.That(serializedLight.distance, Is.Not.Null);
         }
 
         [Test]
@@ -170,6 +189,45 @@ namespace VividRP.Editor.Tests
             Assert.That(additionalData.rayTracedShadowSunAngularDiameter, Is.EqualTo(1.2f));
             Assert.That(additionalData.supportsRayTracedShadow, Is.False);
             Assert.That(additionalData.isRayTracedShadowActive, Is.False);
+        }
+
+        [Test]
+        public void CelestialBodySettings_DefaultToExpectedValues_OnDirectionalLights()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+
+            var additionalData = light.GetVividAdditionalLightData();
+
+            Assert.That(additionalData.interactsWithSky, Is.True);
+            Assert.That(
+                additionalData.angularDiameter,
+                Is.EqualTo(VividAdditionalLightData.DefaultCelestialBodyAngularDiameter));
+            Assert.That(additionalData.diameterMultiplierMode, Is.False);
+            Assert.That(additionalData.diameterMultiplier, Is.EqualTo(1.0f));
+            Assert.That(
+                additionalData.diameterOverride,
+                Is.EqualTo(VividAdditionalLightData.DefaultCelestialBodyAngularDiameter));
+            Assert.That(
+                additionalData.celestialBodyShadingSource,
+                Is.EqualTo(VividAdditionalLightData.CelestialBodyShadingSource.Emission));
+            Assert.That(additionalData.sunLightOverride, Is.Null);
+            Assert.That(additionalData.sunColor, Is.EqualTo(Color.white));
+            Assert.That(
+                additionalData.sunIntensity,
+                Is.EqualTo(VividAdditionalLightData.DefaultManualSunIntensity));
+            Assert.That(additionalData.moonPhase, Is.EqualTo(0.2f));
+            Assert.That(additionalData.moonPhaseRotation, Is.EqualTo(0.0f));
+            Assert.That(additionalData.earthshine, Is.EqualTo(1.0f));
+            Assert.That(additionalData.flareSize, Is.EqualTo(2.0f));
+            Assert.That(additionalData.flareTint, Is.EqualTo(Color.white));
+            Assert.That(additionalData.flareFalloff, Is.EqualTo(4.0f));
+            Assert.That(additionalData.flareMultiplier, Is.EqualTo(1.0f));
+            Assert.That(additionalData.surfaceTexture, Is.Null);
+            Assert.That(additionalData.surfaceTint, Is.EqualTo(Color.white));
+            Assert.That(
+                additionalData.distance,
+                Is.EqualTo(VividAdditionalLightData.DefaultCelestialBodyDistance));
         }
 
         [Test]

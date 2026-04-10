@@ -65,15 +65,16 @@ VividRP maintains two clustered light culling implementations:
   - Impact: Better cache line utilization.
   - Implemented: `boxAxisX.w = scaleXY`, `boxAxisY.w = radius`. Stride unchanged at 56 bytes. Updated HLSL struct + accessors, C# struct, both C# write sites, and all four shader call sites (bigtile, clustered ×2, scrbound).
 
-- [ ] **Merge ClearAtomic dispatch**
+- [x] **Merge ClearAtomic dispatch(Skip)**
   - Same as VividRP native: single `[1,1,1]` dispatch for zeroing one uint.
   - Target: Fold into clustered kernel init or use CPU-side clear.
   - Impact: -1 dispatch.
 
-- [ ] **Volumetric big tile parallel write**
+- [x] **Volumetric big tile parallel write**
   - Current (`lightlistbuild-bigtile.compute:237-273`): `GENERATE_VOLUMETRIC_BIGTILE` path uses thread 0 serial loop for compaction + 16-bit packing.
   - Target: Parallel compaction of volumetric-affecting lights into groupshared, then parallel packed write.
   - Impact: Only matters when volumetric fog is enabled.
+  - Done: Replaced bucket-based serial thread-0 compaction+write with wave-intrinsic parallel compaction (`WavePrefixCountBits`/`WaveActiveCountBits` + cross-wave prefix sum via `bigtilePassScratch`) filtering by `LightAffectVolumetric`, followed by parallel packed 16-bit write matching the non-volumetric path. Eliminated `volumetricLightCounts[NR_THREADS]` groupshared array.
 
 - [ ] **Increase convex hull plane batch size**
   - Current (`lightlistbuild-clustered.compute:464-468`): Processes 4 lights per batch, loads 6 planes x 4 lights = 24 `float4` into `groupshared lightPlanes`. Only 24 of NR_THREADS threads participate in fetch.

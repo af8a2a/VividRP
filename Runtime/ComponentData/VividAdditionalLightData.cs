@@ -339,16 +339,16 @@ namespace VividRP.Runtime
         [SerializeField]
         private bool m_InteractsWithSky = true;
 
-        [SerializeField]
+        [SerializeField, Range(0.0f, 90.0f)]
         private float m_AngularDiameter = DefaultCelestialBodyAngularDiameter;
 
         [SerializeField]
         private bool m_DiameterMultiplierMode;
 
-        [SerializeField]
+        [SerializeField, Min(0.0f)]
         private float m_DiameterMultiplier = 1.0f;
 
-        [SerializeField]
+        [SerializeField, Min(0.0f)]
         private float m_DiameterOverride = DefaultCelestialBodyAngularDiameter;
 
         [SerializeField]
@@ -360,28 +360,28 @@ namespace VividRP.Runtime
         [SerializeField]
         private Color m_SunColor = Color.white;
 
-        [SerializeField]
+        [SerializeField, Min(0.0f)]
         private float m_SunIntensity = DefaultManualSunIntensity;
 
-        [SerializeField]
+        [SerializeField, Range(0.0f, 1.0f)]
         private float m_MoonPhase = 0.2f;
 
-        [SerializeField]
+        [SerializeField, Range(0.0f, 360.0f)]
         private float m_MoonPhaseRotation;
 
-        [SerializeField]
+        [SerializeField, Min(0.0f)]
         private float m_Earthshine = 1.0f;
 
-        [SerializeField]
+        [SerializeField, Range(0.0f, 90.0f)]
         private float m_FlareSize = 2.0f;
 
         [SerializeField]
         private Color m_FlareTint = Color.white;
 
-        [SerializeField]
+        [SerializeField, Min(0.0f)]
         private float m_FlareFalloff = 4.0f;
 
-        [SerializeField]
+        [SerializeField, Range(0.0f, 1.0f)]
         private float m_FlareMultiplier = 1.0f;
 
         [SerializeField]
@@ -390,7 +390,7 @@ namespace VividRP.Runtime
         [SerializeField]
         private Color m_SurfaceTint = Color.white;
 
-        [SerializeField]
+        [SerializeField, Min(0.0f)]
         private float m_Distance = DefaultCelestialBodyDistance;
 
         [NonSerialized]
@@ -524,7 +524,7 @@ namespace VividRP.Runtime
         public float angularDiameter
         {
             get => m_AngularDiameter;
-            set => SetNonNegativeFloat(ref m_AngularDiameter, value, DefaultCelestialBodyAngularDiameter);
+            set => SetClampedFloat(ref m_AngularDiameter, value, 0.0f, 90.0f, DefaultCelestialBodyAngularDiameter);
         }
 
         public bool diameterMultiplierMode
@@ -803,7 +803,7 @@ namespace VividRP.Runtime
 
         private void ConstrainCelestialBodySettings()
         {
-            m_AngularDiameter = SanitizeNonNegativeFloat(m_AngularDiameter, DefaultCelestialBodyAngularDiameter);
+            m_AngularDiameter = SanitizeClampedFloat(m_AngularDiameter, 0.0f, 90.0f, DefaultCelestialBodyAngularDiameter);
             m_DiameterMultiplier = SanitizeNonNegativeFloat(m_DiameterMultiplier, 1.0f);
             m_DiameterOverride = SanitizeNonNegativeFloat(m_DiameterOverride, DefaultCelestialBodyAngularDiameter);
             m_SunIntensity = SanitizeNonNegativeFloat(m_SunIntensity, DefaultManualSunIntensity);

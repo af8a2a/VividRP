@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Reflection;
 using NUnit.Framework;
@@ -231,6 +232,18 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CelestialBodySettings_ClampAngularDiameterToHdrpRange()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+
+            var additionalData = light.GetVividAdditionalLightData();
+            additionalData.angularDiameter = 120.0f;
+
+            Assert.That(additionalData.angularDiameter, Is.EqualTo(90.0f));
+        }
+
+        [Test]
         public void VividLightEditor_ShowsDirectionalRayTracedShadowControls_OnlyForDirectionalLights()
         {
             var directionalLight = m_GameObject.AddComponent<Light>();
@@ -268,6 +281,59 @@ namespace VividRP.Editor.Tests
             {
                 Object.DestroyImmediate(pointLightObject);
             }
+        }
+
+        [Test]
+        public void VividLightEditor_ShowsDirectionalCelestialBodyControls_OnlyForDirectionalLights()
+        {
+            var directionalLight = m_GameObject.AddComponent<Light>();
+            directionalLight.type = LightType.Directional;
+
+            var serializedDirectionalLight = new VividSerializedLight(new SerializedObject(directionalLight));
+
+            Assert.That(
+                VividLightEditor.ShouldShowDirectionalPhysicallyBasedSkyControls(serializedDirectionalLight),
+                Is.True);
+
+            var pointLightObject = new GameObject("Vivid Point Light Celestial Test");
+
+            try
+            {
+                var pointLight = pointLightObject.AddComponent<Light>();
+                pointLight.type = LightType.Point;
+
+                var serializedPointLight = new VividSerializedLight(new SerializedObject(pointLight));
+
+                Assert.That(
+                    VividLightEditor.ShouldShowDirectionalPhysicallyBasedSkyControls(serializedPointLight),
+                    Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(pointLightObject);
+            }
+        }
+
+        [Test]
+        public void VividLightEditor_UsesHdrpStyleCelestialBodyPanel()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Editor", "ComponentEditor", "VividLightEditor.cs"));
+
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Celestial Body\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Affect Physically Based Sky\""));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Angular Diameter Multiplier\""));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Shading\""));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Phase\""));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Phase Rotation\""));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Surface Color\""));
+            Assert.That(source, Does.Contain("private static readonly string[] s_DiameterModeNames = { \"Multiply\", \"Override\" };"));
+            Assert.That(source, Does.Contain("EditorGUILayout.PropertyField(m_SerializedLight.angularDiameter, s_AngularDiameterLabel);"));
+            Assert.That(source, Does.Contain("DrawCelestialBodyAngularDiameterField();"));
+            Assert.That(source, Does.Contain("DrawCelestialBodySurfaceColorField();"));
+            Assert.That(source, Does.Contain("The Celestial Body cannot receive lighting from itself."));
+            Assert.That(source, Does.Contain("The Sun Light needs to be a directional light."));
+            Assert.That(source, Does.Contain("EditorGUILayout.PropertyField(m_SerializedLight.flareFalloff, s_FlareFalloffLabel);"));
+            Assert.That(source, Does.Contain("EditorGUILayout.PropertyField(m_SerializedLight.flareTint, s_FlareTintLabel);"));
         }
 
         [Test]
@@ -420,6 +486,25 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(s_LateUpdateMethod, Is.Not.Null);
             s_LateUpdateMethod.Invoke(additionalData, null);
+        }
+
+        private static string GetPackageFilePath(params string[] relativeParts)
+        {
+            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            var packageRoots = new[]
+            {
+                Path.Combine(projectRoot, "Packages", "VividRP"),
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
+            };
+
+            foreach (var packageRoot in packageRoots)
+            {
+                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
+                if (File.Exists(fullPath))
+                    return fullPath;
+            }
+
+            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 }

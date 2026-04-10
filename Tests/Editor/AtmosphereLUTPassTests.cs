@@ -26,8 +26,7 @@ namespace VividRP.Editor.Tests
             {
                 "AtmosphericScatteringLUT",
                 "MultiScatteringLUT",
-                "SkyViewLUT",
-                "TransmittanceLUT"
+                "SkyViewLUT"
             }));
             Assert.That(textureEntries.Select(entry => entry.Access).Distinct(), Is.EqualTo(new[] { AccessFlags.Write }));
             Assert.That(resources.Buffers, Is.Empty);
@@ -46,7 +45,6 @@ namespace VividRP.Editor.Tests
 
             pass.Prepare(new ContextContainer());
 
-            AssertTexture(pass, "m_TransmittanceLUT", AtmosphereLUTPass.TransmittanceWidth, AtmosphereLUTPass.TransmittanceHeight);
             AssertTexture(pass, "m_MultiScatteringLUT", AtmosphereLUTPass.MultiScatteringWidth, AtmosphereLUTPass.MultiScatteringHeight);
             AssertTexture(pass, "m_SkyViewLUT", AtmosphereLUTPass.SkyViewWidth, AtmosphereLUTPass.SkyViewHeight);
             AssertVolumeTexture(
@@ -84,20 +82,24 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters)"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(frameData, out m_MaterialParameters)"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyComputeParameterBinder.Apply(cmd, m_ComputeShader, m_Parameters, m_MaterialParameters);"));
-            Assert.That(source, Does.Contain("PassRecorder.ImportTexture(m_TransmittanceLUT, m_CompatibilityTransmittanceHandle);"));
             Assert.That(source, Does.Contain("PassRecorder.ImportTexture(m_MultiScatteringLUT, m_CachedMultiScatteringHandle);"));
             Assert.That(source, Does.Contain("PassRecorder.ImportTexture(m_SkyViewLUT, m_CachedSkyViewHandle);"));
             Assert.That(source, Does.Contain("PassRecorder.ImportTexture(m_AtmosphericScatteringLUT, m_CachedAtmosphericScatteringHandle);"));
             Assert.That(source, Does.Contain("ComputeMultiScatteringHash(m_MaterialParameters)"));
             Assert.That(source, Does.Contain("ComputeSkyViewHash(m_Parameters, m_MaterialParameters, m_NextMultiScatteringHash)"));
+            Assert.That(source, Does.Contain("internal static int ComputeSkyViewLutHash("));
+            Assert.That(source, Does.Contain("internal static bool TryGetCachedSkyViewLut(int skyViewHash, out Texture skyViewTexture)"));
             Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_MultiScatteringKernel, MultiScatteringLutRwId, m_MultiScatteringLUT.innerHandle);"));
             Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, MultiScatteringLutId, m_MultiScatteringLUT.innerHandle);"));
             Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, SkyViewLutRwId, m_SkyViewLUT.innerHandle);"));
+            Assert.That(source, Does.Contain("PublishCachedSkyViewLut();"));
             Assert.That(source, Does.Contain("cmd.SetComputeTextureParam("));
             Assert.That(source, Does.Contain("m_AtmosphericScatteringCameraKernel,"));
             Assert.That(source, Does.Contain("AtmosphericScatteringLutRwId,"));
             Assert.That(source, Does.Contain("m_AtmosphericScatteringLUT.innerHandle);"));
             Assert.That(source, Does.Not.Contain("TransmittanceKernelName"));
+            Assert.That(source, Does.Not.Contain("TransmittanceWidth"));
+            Assert.That(source, Does.Not.Contain("m_CompatibilityTransmittanceTexture"));
             Assert.That(source, Does.Not.Contain("SkyViewLUTSelectHistoryLayer"));
             Assert.That(source, Does.Not.Contain("SkyViewLUTStoreHistory"));
             Assert.That(source, Does.Not.Contain("SkyViewHistory"));
@@ -113,23 +115,24 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildSkyView (MissingTexture)"));
             Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildSkyView (ParametersChanged)"));
             Assert.That(source, Does.Contain("AtmosphereLUTPass.RenderAtmosphericScatteringLUT"));
-            Assert.That(source, Does.Contain("ReleaseCompatibilityTransmittanceResource();"));
             Assert.That(source, Does.Contain("ReleaseCachedLutResources();"));
+            Assert.That(source, Does.Contain("UnpublishCachedSkyViewLut();"));
             Assert.That(source, Does.Contain("ReleaseLutResource(ref m_CachedMultiScatteringTexture, ref m_CachedMultiScatteringHandle);"));
             Assert.That(source, Does.Contain("ReleaseLutResource(ref m_CachedSkyViewTexture, ref m_CachedSkyViewHandle);"));
             Assert.That(source, Does.Contain("ReleaseLutResource(ref m_CachedAtmosphericScatteringTexture, ref m_CachedAtmosphericScatteringHandle);"));
+            Assert.That(source, Does.Not.Contain("ReleaseCompatibilityTransmittanceResource();"));
         }
 
         [Test]
-        public void Source_UsesCompatibilityTransmittanceFallbackUntilAerialPerspectiveMigrates()
+        public void Source_RemovesCompatibilityTransmittanceFallback()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "AtmosphereLUTPass.cs"));
 
-            Assert.That(source, Does.Contain("m_CompatibilityTransmittanceTexture = new RenderTexture(1, 1, 0)"));
-            Assert.That(source, Does.Contain("graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat"));
-            Assert.That(source, Does.Contain("GL.Clear(false, true, Color.black);"));
-            Assert.That(source, Does.Contain("m_CompatibilityTransmittanceHandle = RTHandles.Alloc(m_CompatibilityTransmittanceTexture);"));
-            Assert.That(source, Does.Contain("Configure2DLutDescriptor(m_TransmittanceLUT, TransmittanceWidth, TransmittanceHeight);"));
+            Assert.That(source, Does.Not.Contain("m_CompatibilityTransmittanceTexture"));
+            Assert.That(source, Does.Not.Contain("m_CompatibilityTransmittanceHandle"));
+            Assert.That(source, Does.Not.Contain("TransmittanceWidth"));
+            Assert.That(source, Does.Not.Contain("TransmittanceHeight"));
+            Assert.That(source, Does.Not.Contain("TransmittanceLUT"));
         }
 
         [Test]

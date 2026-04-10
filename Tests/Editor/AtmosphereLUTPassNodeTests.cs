@@ -20,7 +20,6 @@ namespace VividRP.Editor.Tests
             var node = new AutoRegisteredAtmosphereLUTPassNode();
 
             Assert.That(node.GetOutputPortByName("m_AtmosphericScatteringLUT"), Is.Not.Null);
-            Assert.That(node.GetOutputPortByName("m_TransmittanceLUT"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_MultiScatteringLUT"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_SkyViewLUT"), Is.Not.Null);
         }

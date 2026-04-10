@@ -122,13 +122,21 @@ namespace VividRP.Runtime
             return TryBuild(volume, context, Matrix4x4.identity, 1.0f, out parameters);
         }
 
+        internal static bool TryBuildForSkyBaking(
+            PhysicallyBasedSkyVolume volume,
+            in SkyRendererContext context,
+            out PhysicallyBasedSkyShaderParameters parameters)
+        {
+            // Sky baking must stay independent from camera exposure adaptation.
+            return TryBuild(volume, context, Matrix4x4.identity, 1.0f, out parameters);
+        }
+
         internal static bool TryBuildForAmbientProbe(
             PhysicallyBasedSkyVolume volume,
             in SkyRendererContext context,
             out PhysicallyBasedSkyShaderParameters parameters)
         {
-            // Ambient probe baking must stay independent from camera exposure adaptation.
-            return TryBuild(volume, context, Matrix4x4.identity, 1.0f, out parameters);
+            return TryBuildForSkyBaking(volume, context, out parameters);
         }
 
         private static bool TryBuild(

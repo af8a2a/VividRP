@@ -11,12 +11,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static readonly int InputColorId = Shader.PropertyToID("_InputColor");
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
-        private static readonly int TransmittanceLutId = Shader.PropertyToID("_TransmittanceLUT");
-        private static readonly int MultiScatteringLutId = Shader.PropertyToID("_MultiScatteringLUT");
-        private static readonly int SkyCameraPositionPsId = Shader.PropertyToID("_SkyCameraPositionPS");
-        private static readonly int SkySunDirectionId = Shader.PropertyToID("_SkySunDirection");
-        private static readonly int SkySunColorId = Shader.PropertyToID("_SkySunColor");
-        private static readonly int SkyPlanetParamsId = Shader.PropertyToID("_SkyPlanetParams");
+        private static readonly int AtmosphericScatteringLutId = Shader.PropertyToID("_AtmosphericScatteringLUT");
+        private static readonly int PixelCoordToViewDirWSId = Shader.PropertyToID("_PixelCoordToViewDirWS");
         private static readonly int SkyFogParamsId = Shader.PropertyToID("_SkyFogParams");
 
         [RenderGraphResource(Name = "Color", Access = AccessFlags.Read)]
@@ -25,11 +21,8 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "CameraDepth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
 
-        [RenderGraphResource(Name = "TransmittanceLUT", Access = AccessFlags.Read)]
-        private RenderGraphTexture m_TransmittanceLUT;
-
-        [RenderGraphResource(Name = "MultiScatteringLUT", Access = AccessFlags.Read)]
-        private RenderGraphTexture m_MultiScatteringLUT;
+        [RenderGraphResource(Name = "AtmosphericScatteringLUT", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_AtmosphericScatteringLUT;
 
         [RenderGraphResource(
             Name = "OutputColor",
@@ -40,7 +33,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private Material m_Material;
         private bool m_IsActive;
+        private bool m_HasMaterialParameters;
         private PhysicallyBasedSkyShaderParameters m_Parameters;
+        private PhysicallyBasedSkyMaterialParameters m_MaterialParameters;
+        private Texture3D m_FallbackAtmosphericScatteringLut;
 
         public AerialPerspectivePass()
         {
@@ -48,10 +44,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_ColorInput = RenderGraphTexture.CreateInput("Color", GraphicsFormat.R16G16B16A16_SFloat);
             m_DepthTexture = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.None, DepthBits.Depth32);
-            m_TransmittanceLUT = RenderGraphTexture.CreateInput("TransmittanceLUT", GraphicsFormat.R16G16B16A16_SFloat);
-            m_MultiScatteringLUT = RenderGraphTexture.CreateInput("MultiScatteringLUT", GraphicsFormat.R16G16B16A16_SFloat);
+            m_AtmosphericScatteringLUT = RenderGraphTexture.CreateInput("AtmosphericScatteringLUT", GraphicsFormat.R16G16B16A16_SFloat);
             m_OutputTexture = RenderGraphTexture.CreateColorTarget("OutputColor", GraphicsFormat.R16G16B16A16_SFloat);
             m_OutputTexture.desc.ClearBuffer = false;
+            ConfigureAtmosphericScatteringDescriptor(m_AtmosphericScatteringLUT);
         }
 
         public override void Create()
@@ -67,12 +63,14 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             m_Material = CoreUtils.CreateEngineMaterial(shader);
+            EnsureFallbackAtmosphericScatteringLut();
         }
 
         public override void Prepare(ContextContainer frameData)
         {
             m_IsActive = PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters)
                 && m_Parameters.skyFogParams.x > 0.5f;
+            m_HasMaterialParameters = PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(frameData, out m_MaterialParameters);
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             var width = ResolveOutputDimension(
@@ -104,26 +102,28 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             var depthTexture = ResolveTexture(m_DepthTexture.innerHandle) ?? Texture2D.whiteTexture;
-            var transmittanceLut = ResolveTexture(m_TransmittanceLUT.innerHandle) ?? Texture2D.blackTexture;
-            var multiScatteringLut = ResolveTexture(m_MultiScatteringLUT.innerHandle) ?? Texture2D.blackTexture;
-            var hasValidTransmittanceLut = HasValidTransmittanceLut(transmittanceLut);
+            var atmosphericScatteringLut = ResolveTexture(m_AtmosphericScatteringLUT.innerHandle);
+            var hasValidAtmosphericScatteringLut = HasValidAtmosphericScatteringLut(atmosphericScatteringLut);
+            if (!hasValidAtmosphericScatteringLut)
+                EnsureFallbackAtmosphericScatteringLut();
+
             var fogParams = m_IsActive
                             && depthTexture != Texture2D.whiteTexture
-                            && hasValidTransmittanceLut
-                            && multiScatteringLut != Texture2D.blackTexture
+                            && m_HasMaterialParameters
+                            && hasValidAtmosphericScatteringLut
                 ? m_Parameters.skyFogParams
                 : Vector4.zero;
 
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetTexture(InputColorId, inputColor);
             mpb.SetTexture(DepthTextureId, depthTexture);
-            mpb.SetTexture(TransmittanceLutId, transmittanceLut);
-            mpb.SetTexture(MultiScatteringLutId, multiScatteringLut);
-            mpb.SetVector(SkyCameraPositionPsId, m_Parameters.skyCameraPositionPS);
-            mpb.SetVector(SkySunDirectionId, m_Parameters.skySunDirection);
-            mpb.SetVector(SkySunColorId, m_Parameters.skySunColor);
-            mpb.SetVector(SkyPlanetParamsId, m_Parameters.skyPlanetParams);
+            mpb.SetTexture(
+                AtmosphericScatteringLutId,
+                hasValidAtmosphericScatteringLut ? atmosphericScatteringLut : m_FallbackAtmosphericScatteringLut);
+            mpb.SetMatrix(PixelCoordToViewDirWSId, m_IsActive ? m_Parameters.pixelCoordToViewDirWS : Matrix4x4.identity);
             mpb.SetVector(SkyFogParamsId, fogParams);
+            if (m_HasMaterialParameters)
+                PhysicallyBasedSkyMaterialPropertyBinder.Apply(mpb, m_MaterialParameters, VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume());
 
             CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);
         }
@@ -134,6 +134,12 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 CoreUtils.Destroy(m_Material);
                 m_Material = null;
+            }
+
+            if (m_FallbackAtmosphericScatteringLut != null)
+            {
+                CoreUtils.Destroy(m_FallbackAtmosphericScatteringLut);
+                m_FallbackAtmosphericScatteringLut = null;
             }
         }
 
@@ -162,6 +168,36 @@ namespace VividRP.Runtime.RenderPass.Core
             m_OutputTexture.desc.UseDynamicScale = sourceDescriptor?.UseDynamicScale ?? false;
             m_OutputTexture.desc.UseDynamicScaleExplicit = sourceDescriptor?.UseDynamicScaleExplicit ?? false;
             m_OutputTexture.desc.ScaleFactor = sourceDescriptor?.ScaleFactor ?? Vector2.one;
+        }
+
+        private static void ConfigureAtmosphericScatteringDescriptor(RenderGraphTexture texture)
+        {
+            if (texture?.desc == null)
+                return;
+
+            texture.desc.Dimension = TextureDimension.Tex3D;
+            texture.desc.Slices = AtmosphereLUTPass.AtmosphericScatteringDepth;
+            texture.desc.FilterMode = FilterMode.Bilinear;
+            texture.desc.WrapMode = TextureWrapMode.Clamp;
+            texture.desc.UseMipMap = false;
+            texture.desc.AutoGenerateMips = false;
+            texture.desc.MipCount = 1;
+        }
+
+        private void EnsureFallbackAtmosphericScatteringLut()
+        {
+            if (m_FallbackAtmosphericScatteringLut != null)
+                return;
+
+            m_FallbackAtmosphericScatteringLut = new Texture3D(1, 1, 1, TextureFormat.RGBAHalf, false)
+            {
+                name = "VividFallbackAtmosphericScatteringLUT",
+                hideFlags = HideFlags.HideAndDontSave,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp
+            };
+            m_FallbackAtmosphericScatteringLut.SetPixels(new[] { Color.black });
+            m_FallbackAtmosphericScatteringLut.Apply(false, true);
         }
 
         private static int ResolveOutputDimension(
@@ -204,12 +240,20 @@ namespace VividRP.Runtime.RenderPass.Core
             return handle.externalTexture;
         }
 
-        private static bool HasValidTransmittanceLut(Texture texture)
+        private static bool HasValidAtmosphericScatteringLut(Texture texture)
         {
-            return texture != null
-                && texture != Texture2D.blackTexture
-                && texture.width > AtmosphereLUTPass.TransmittanceWidth
-                && texture.height > AtmosphereLUTPass.TransmittanceHeight;
+            if (texture == null
+                || texture.dimension != TextureDimension.Tex3D
+                || texture.width <= 1
+                || texture.height <= 1)
+            {
+                return false;
+            }
+
+            if (texture is RenderTexture renderTexture)
+                return renderTexture.volumeDepth > 1;
+
+            return texture is Texture3D texture3D && texture3D.depth > 1;
         }
     }
 }

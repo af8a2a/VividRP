@@ -24,11 +24,10 @@ namespace VividRP.Editor.Tests
 
             Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[]
             {
+                "AtmosphericScatteringLUT",
                 "CameraDepth",
                 "Color",
-                "MultiScatteringLUT",
-                "OutputColor",
-                "TransmittanceLUT"
+                "OutputColor"
             }));
             Assert.That(textureEntries.Single(entry => entry.Name == "OutputColor").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(
@@ -63,47 +62,53 @@ namespace VividRP.Editor.Tests
             var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
 
             Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/AerialPerspective"));
+            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/AtmosphericScattering/OpaqueAtmosphericScattering"));
         }
 
         [Test]
-        public void Source_UsesShaderFallbackAndFogParamsFromSkyBuilder()
+        public void Source_UsesShaderFallbackAndAtmosphericScatteringLutBindings()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "AerialPerspectivePass.cs"));
 
             Assert.That(source, Does.Contain("internal const string AerialPerspectiveShaderName = \"Hidden/VividRP/AerialPerspective\";"));
             Assert.That(source, Does.Contain("shader ??= Shader.Find(AerialPerspectiveShaderName);"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters)"));
+            Assert.That(source, Does.Contain("PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(frameData, out m_MaterialParameters)"));
             Assert.That(source, Does.Contain("m_Parameters.skyFogParams.x > 0.5f"));
-            Assert.That(source, Does.Contain("var hasValidTransmittanceLut = HasValidTransmittanceLut(transmittanceLut);"));
-            Assert.That(source, Does.Contain("mpb.SetTexture(TransmittanceLutId, transmittanceLut);"));
-            Assert.That(source, Does.Contain("mpb.SetTexture(MultiScatteringLutId, multiScatteringLut);"));
+            Assert.That(source, Does.Contain("m_AtmosphericScatteringLUT = RenderGraphTexture.CreateInput(\"AtmosphericScatteringLUT\", GraphicsFormat.R16G16B16A16_SFloat);"));
+            Assert.That(source, Does.Contain("texture.desc.Dimension = TextureDimension.Tex3D;"));
+            Assert.That(source, Does.Contain("var hasValidAtmosphericScatteringLut = HasValidAtmosphericScatteringLut(atmosphericScatteringLut);"));
+            Assert.That(source, Does.Contain("mpb.SetTexture("));
+            Assert.That(source, Does.Contain("AtmosphericScatteringLutId,"));
+            Assert.That(source, Does.Contain("hasValidAtmosphericScatteringLut ? atmosphericScatteringLut : m_FallbackAtmosphericScatteringLut);"));
+            Assert.That(source, Does.Contain("mpb.SetMatrix(PixelCoordToViewDirWSId, m_IsActive ? m_Parameters.pixelCoordToViewDirWS : Matrix4x4.identity);"));
             Assert.That(source, Does.Contain("mpb.SetVector(SkyFogParamsId, fogParams);"));
-            Assert.That(source, Does.Contain("texture.width > AtmosphereLUTPass.TransmittanceWidth"));
-            Assert.That(source, Does.Contain("texture.height > AtmosphereLUTPass.TransmittanceHeight"));
+            Assert.That(source, Does.Contain("PhysicallyBasedSkyMaterialPropertyBinder.Apply(mpb, m_MaterialParameters, VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume());"));
+            Assert.That(source, Does.Contain("texture.dimension != TextureDimension.Tex3D"));
             Assert.That(source, Does.Not.Contain("SetBuffer("));
             Assert.That(source, Does.Not.Contain("VividExposureData"));
             Assert.That(source, Does.Contain("CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);"));
         }
 
         [Test]
-        public void Shader_Source_UsesDepthAndAtmosphereLuts()
+        public void Shader_Source_UsesAtmosphericScatteringLut()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AerialPerspective.shader"));
+            var shaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AtmosphericScattering", "OpaqueAtmosphericScattering.shader"));
+            var hlslSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AtmosphericScattering", "AtmosphericScattering.hlsl"));
 
-            Assert.That(source, Does.Contain("Shader \"Hidden/VividRP/AerialPerspective\""));
-            Assert.That(source, Does.Contain("TEXTURE2D_X(_InputColor);"));
-            Assert.That(source, Does.Contain("TEXTURE2D_X_FLOAT(_DepthTexture);"));
-            Assert.That(source, Does.Contain("TEXTURE2D(_TransmittanceLUT);"));
-            Assert.That(source, Does.Contain("TEXTURE2D(_MultiScatteringLUT);"));
-            Assert.That(source, Does.Contain("ComputeWorldSpacePosition"));
-            Assert.That(source, Does.Contain("SampleTransmittanceLut"));
-            Assert.That(source, Does.Contain("SampleMultiScatteringLut"));
-            Assert.That(source, Does.Contain("float3 SanitizeSkyRadiance(float3 color)"));
-            Assert.That(source, Does.Contain("* max(_SkyPlanetParams.z, 0.0f);"));
-            Assert.That(source, Does.Contain("if (_SkyFogParams.x <= 0.5f)"));
-            Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl\""));
-            Assert.That(source, Does.Contain("fogColor = VividApplyPreExposure(SanitizeSkyRadiance(fogColor));"));
+            Assert.That(shaderSource, Does.Contain("Shader \"Hidden/VividRP/AerialPerspective\""));
+            Assert.That(shaderSource, Does.Contain("Name \"OpaqueAtmosphericScattering\""));
+            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Private/AtmosphericScattering/AtmosphericScattering.hlsl\""));
+            Assert.That(hlslSource, Does.Contain("TEXTURE2D_X(_InputColor);"));
+            Assert.That(hlslSource, Does.Contain("TEXTURE2D_X_FLOAT(_DepthTexture);"));
+            Assert.That(hlslSource, Does.Contain("EvaluateCameraAtmosphericScattering(viewDirectionWS, positionNDC, tFrag, fogColor, fogOpacity);"));
+            Assert.That(hlslSource, Does.Contain("ComputeWorldSpacePosition(positionNDC, deviceDepth, UNITY_MATRIX_I_VP);"));
+            Assert.That(hlslSource, Does.Contain("float3 SanitizeSkyRadiance(float3 color)"));
+            Assert.That(hlslSource, Does.Contain("if (_SkyFogParams.x <= 0.5f)"));
+            Assert.That(hlslSource, Does.Contain("if (_SkyFogParams.w > 0.0f)"));
+            Assert.That(hlslSource, Does.Contain("float3 composedColor = fogColor + (1.0f - fogOpacity) * inputColor.rgb;"));
+            Assert.That(hlslSource, Does.Not.Contain("_TransmittanceLUT"));
+            Assert.That(hlslSource, Does.Not.Contain("_MultiScatteringLUT"));
         }
 
         private static T GetFieldValue<T>(AerialPerspectivePass pass, string fieldName)

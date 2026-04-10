@@ -12,6 +12,17 @@
 
 #pragma multi_compile _ GENERATE_VOLUMETRIC_BIGTILE
 
+// Wave intrinsics audit — compile-time verification.
+// This kernel requires SM6.0 wave intrinsics unconditionally:
+//   WavePrefixCountBits, WaveActiveCountBits, WaveGetLaneCount, WaveIsFirstLane
+// DXC compiler (via #pragma use_dxc) guarantees these on all target renderers
+// (d3d11/SM6, playstation, xboxone, xboxseries, vulkan/SPIR-V, metal, switch, switch2).
+// Console platforms additionally define PLATFORM_LANE_COUNT (32 on Switch/Switch2)
+// which controls NR_THREADS and single-wave vs multi-wave synchronization paths.
+#if !defined(UNITY_COMPILER_DXC)
+    #error "lightlistbuild-bigtile.compute requires DXC (#pragma use_dxc). Wave intrinsics will not compile without it."
+#endif
+
 #define EXACT_EDGE_TESTS
 #define PERFORM_SPHERICAL_INTERSECTION_TESTS
 

@@ -75,9 +75,12 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("shader ??= Shader.Find(AerialPerspectiveShaderName);"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters)"));
             Assert.That(source, Does.Contain("m_Parameters.skyFogParams.x > 0.5f"));
+            Assert.That(source, Does.Contain("var hasValidTransmittanceLut = HasValidTransmittanceLut(transmittanceLut);"));
             Assert.That(source, Does.Contain("mpb.SetTexture(TransmittanceLutId, transmittanceLut);"));
             Assert.That(source, Does.Contain("mpb.SetTexture(MultiScatteringLutId, multiScatteringLut);"));
             Assert.That(source, Does.Contain("mpb.SetVector(SkyFogParamsId, fogParams);"));
+            Assert.That(source, Does.Contain("texture.width > AtmosphereLUTPass.TransmittanceWidth"));
+            Assert.That(source, Does.Contain("texture.height > AtmosphereLUTPass.TransmittanceHeight"));
             Assert.That(source, Does.Not.Contain("SetBuffer("));
             Assert.That(source, Does.Not.Contain("VividExposureData"));
             Assert.That(source, Does.Contain("CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);"));

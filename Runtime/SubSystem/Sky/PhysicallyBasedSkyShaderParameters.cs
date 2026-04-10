@@ -370,6 +370,91 @@ namespace VividRP.Runtime
         }
     }
 
+    internal static class PhysicallyBasedSkyComputeParameterBinder
+    {
+        private static readonly int PixelCoordToViewDirWSId = Shader.PropertyToID("_PixelCoordToViewDirWS");
+        private static readonly int SkySunDirectionId = Shader.PropertyToID("_SkySunDirection");
+        private static readonly int SkySunColorId = Shader.PropertyToID("_SkySunColor");
+        private static readonly int PlanetCenterRadiusId = Shader.PropertyToID("_PlanetCenterRadius");
+        private static readonly int PlanetUpAltitudeId = Shader.PropertyToID("_PlanetUpAltitude");
+        private static readonly int AtmosphericRadiusId = Shader.PropertyToID("_AtmosphericRadius");
+        private static readonly int AerosolAnisotropyId = Shader.PropertyToID("_AerosolAnisotropy");
+        private static readonly int AerosolPhasePartConstantId = Shader.PropertyToID("_AerosolPhasePartConstant");
+        private static readonly int AerosolSeaLevelExtinctionId = Shader.PropertyToID("_AerosolSeaLevelExtinction");
+        private static readonly int AirDensityFalloffId = Shader.PropertyToID("_AirDensityFalloff");
+        private static readonly int AirScaleHeightId = Shader.PropertyToID("_AirScaleHeight");
+        private static readonly int AerosolDensityFalloffId = Shader.PropertyToID("_AerosolDensityFalloff");
+        private static readonly int AerosolScaleHeightId = Shader.PropertyToID("_AerosolScaleHeight");
+        private static readonly int OzoneScaleOffsetId = Shader.PropertyToID("_OzoneScaleOffset");
+        private static readonly int OzoneLayerStartId = Shader.PropertyToID("_OzoneLayerStart");
+        private static readonly int OzoneLayerEndId = Shader.PropertyToID("_OzoneLayerEnd");
+        private static readonly int AirSeaLevelExtinctionId = Shader.PropertyToID("_AirSeaLevelExtinction");
+        private static readonly int AirSeaLevelScatteringId = Shader.PropertyToID("_AirSeaLevelScattering");
+        private static readonly int AerosolSeaLevelScatteringId = Shader.PropertyToID("_AerosolSeaLevelScattering");
+        private static readonly int OzoneSeaLevelExtinctionId = Shader.PropertyToID("_OzoneSeaLevelExtinction");
+        private static readonly int GroundAlbedoPlanetRadiusId = Shader.PropertyToID("_GroundAlbedo_PlanetRadius");
+        private static readonly int HorizonTintId = Shader.PropertyToID("_HorizonTint");
+        private static readonly int ZenithTintId = Shader.PropertyToID("_ZenithTint");
+        private static readonly int IntensityMultiplierId = Shader.PropertyToID("_IntensityMultiplier");
+        private static readonly int ColorSaturationId = Shader.PropertyToID("_ColorSaturation");
+        private static readonly int AlphaSaturationId = Shader.PropertyToID("_AlphaSaturation");
+        private static readonly int AlphaMultiplierId = Shader.PropertyToID("_AlphaMultiplier");
+        private static readonly int HorizonZenithShiftPowerId = Shader.PropertyToID("_HorizonZenithShiftPower");
+        private static readonly int HorizonZenithShiftScaleId = Shader.PropertyToID("_HorizonZenithShiftScale");
+        private static readonly int CelestialLightCountId = Shader.PropertyToID("_CelestialLightCount");
+        private static readonly int CelestialBodyCountId = Shader.PropertyToID("_CelestialBodyCount");
+        private static readonly int AtmosphericDepthId = Shader.PropertyToID("_AtmosphericDepth");
+        private static readonly int RcpAtmosphericDepthId = Shader.PropertyToID("_RcpAtmosphericDepth");
+        private static readonly int CelestialLightExposureId = Shader.PropertyToID("_CelestialLightExposure");
+        private static readonly int VolumetricCloudsBottomAltitudeId = Shader.PropertyToID("_VolumetricCloudsBottomAltitude");
+
+        internal static void Apply(
+            ComputeCommandBuffer commandBuffer,
+            ComputeShader computeShader,
+            in PhysicallyBasedSkyShaderParameters skyParameters,
+            in PhysicallyBasedSkyMaterialParameters materialParameters)
+        {
+            if (commandBuffer == null || computeShader == null)
+                return;
+
+            commandBuffer.SetComputeMatrixParam(computeShader, PixelCoordToViewDirWSId, skyParameters.pixelCoordToViewDirWS);
+            commandBuffer.SetComputeVectorParam(computeShader, SkySunDirectionId, skyParameters.skySunDirection);
+            commandBuffer.SetComputeVectorParam(computeShader, SkySunColorId, skyParameters.skySunColor);
+            commandBuffer.SetComputeVectorParam(computeShader, PlanetCenterRadiusId, materialParameters.planetCenterRadius);
+            commandBuffer.SetComputeVectorParam(computeShader, PlanetUpAltitudeId, materialParameters.planetUpAltitude);
+            commandBuffer.SetComputeFloatParam(computeShader, AtmosphericRadiusId, materialParameters.atmosphericRadius);
+            commandBuffer.SetComputeFloatParam(computeShader, AerosolAnisotropyId, materialParameters.aerosolAnisotropy);
+            commandBuffer.SetComputeFloatParam(computeShader, AerosolPhasePartConstantId, materialParameters.aerosolPhasePartConstant);
+            commandBuffer.SetComputeFloatParam(computeShader, AerosolSeaLevelExtinctionId, materialParameters.aerosolSeaLevelExtinction);
+            commandBuffer.SetComputeFloatParam(computeShader, AirDensityFalloffId, materialParameters.airDensityFalloff);
+            commandBuffer.SetComputeFloatParam(computeShader, AirScaleHeightId, materialParameters.airScaleHeight);
+            commandBuffer.SetComputeFloatParam(computeShader, AerosolDensityFalloffId, materialParameters.aerosolDensityFalloff);
+            commandBuffer.SetComputeFloatParam(computeShader, AerosolScaleHeightId, materialParameters.aerosolScaleHeight);
+            commandBuffer.SetComputeVectorParam(computeShader, OzoneScaleOffsetId, materialParameters.ozoneScaleOffset);
+            commandBuffer.SetComputeFloatParam(computeShader, OzoneLayerStartId, materialParameters.ozoneLayerStart);
+            commandBuffer.SetComputeFloatParam(computeShader, OzoneLayerEndId, materialParameters.ozoneLayerEnd);
+            commandBuffer.SetComputeVectorParam(computeShader, AirSeaLevelExtinctionId, materialParameters.airSeaLevelExtinction);
+            commandBuffer.SetComputeVectorParam(computeShader, AirSeaLevelScatteringId, materialParameters.airSeaLevelScattering);
+            commandBuffer.SetComputeVectorParam(computeShader, AerosolSeaLevelScatteringId, materialParameters.aerosolSeaLevelScattering);
+            commandBuffer.SetComputeVectorParam(computeShader, OzoneSeaLevelExtinctionId, materialParameters.ozoneSeaLevelExtinction);
+            commandBuffer.SetComputeVectorParam(computeShader, GroundAlbedoPlanetRadiusId, materialParameters.groundAlbedoPlanetRadius);
+            commandBuffer.SetComputeVectorParam(computeShader, HorizonTintId, materialParameters.horizonTint);
+            commandBuffer.SetComputeVectorParam(computeShader, ZenithTintId, materialParameters.zenithTint);
+            commandBuffer.SetComputeFloatParam(computeShader, IntensityMultiplierId, materialParameters.intensityMultiplier);
+            commandBuffer.SetComputeFloatParam(computeShader, ColorSaturationId, materialParameters.colorSaturation);
+            commandBuffer.SetComputeFloatParam(computeShader, AlphaSaturationId, materialParameters.alphaSaturation);
+            commandBuffer.SetComputeFloatParam(computeShader, AlphaMultiplierId, materialParameters.alphaMultiplier);
+            commandBuffer.SetComputeFloatParam(computeShader, HorizonZenithShiftPowerId, materialParameters.horizonZenithShiftPower);
+            commandBuffer.SetComputeFloatParam(computeShader, HorizonZenithShiftScaleId, materialParameters.horizonZenithShiftScale);
+            commandBuffer.SetComputeIntParam(computeShader, CelestialLightCountId, materialParameters.celestialLightCount);
+            commandBuffer.SetComputeIntParam(computeShader, CelestialBodyCountId, materialParameters.celestialBodyCount);
+            commandBuffer.SetComputeFloatParam(computeShader, AtmosphericDepthId, materialParameters.atmosphericDepth);
+            commandBuffer.SetComputeFloatParam(computeShader, RcpAtmosphericDepthId, materialParameters.rcpAtmosphericDepth);
+            commandBuffer.SetComputeFloatParam(computeShader, CelestialLightExposureId, materialParameters.celestialLightExposure);
+            commandBuffer.SetComputeFloatParam(computeShader, VolumetricCloudsBottomAltitudeId, materialParameters.volumetricCloudsBottomAltitude);
+        }
+    }
+
     internal static class PhysicallyBasedSkyMaterialPropertyBinder
     {
         private static readonly int PBRSkyCameraPosPsId = Shader.PropertyToID("_PBRSkyCameraPosPS");

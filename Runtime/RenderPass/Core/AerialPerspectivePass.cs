@@ -106,9 +106,10 @@ namespace VividRP.Runtime.RenderPass.Core
             var depthTexture = ResolveTexture(m_DepthTexture.innerHandle) ?? Texture2D.whiteTexture;
             var transmittanceLut = ResolveTexture(m_TransmittanceLUT.innerHandle) ?? Texture2D.blackTexture;
             var multiScatteringLut = ResolveTexture(m_MultiScatteringLUT.innerHandle) ?? Texture2D.blackTexture;
+            var hasValidTransmittanceLut = HasValidTransmittanceLut(transmittanceLut);
             var fogParams = m_IsActive
                             && depthTexture != Texture2D.whiteTexture
-                            && transmittanceLut != Texture2D.blackTexture
+                            && hasValidTransmittanceLut
                             && multiScatteringLut != Texture2D.blackTexture
                 ? m_Parameters.skyFogParams
                 : Vector4.zero;
@@ -201,6 +202,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 return handle.rt;
 
             return handle.externalTexture;
+        }
+
+        private static bool HasValidTransmittanceLut(Texture texture)
+        {
+            return texture != null
+                && texture != Texture2D.blackTexture
+                && texture.width > AtmosphereLUTPass.TransmittanceWidth
+                && texture.height > AtmosphereLUTPass.TransmittanceHeight;
         }
     }
 }

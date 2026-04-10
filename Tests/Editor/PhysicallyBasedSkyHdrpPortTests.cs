@@ -41,6 +41,7 @@ namespace VividRP.Editor.Tests
             var groundSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "GroundIrradiancePrecomputation.compute"));
             var inscatterSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "InScatteredRadiancePrecomputation.compute"));
             var ambientProbeConvolutionSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "AmbientProbeConvolution.compute"));
+            var skyLutSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "SkyLUTGenerator.compute"));
             var compatSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "ShaderVariablesCompat.hlsl"));
             var lightDefinitionSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "LightDefinition.cs.hlsl"));
             var cookieSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "CookieSampling.hlsl"));
@@ -55,6 +56,17 @@ namespace VividRP.Editor.Tests
 
             Assert.That(ambientProbeConvolutionSource, Does.Contain("Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"));
             Assert.That(ambientProbeConvolutionSource, Does.Not.Contain("Packages/com.unity.render-pipelines.high-definition"));
+
+            Assert.That(skyLutSource, Does.Contain("#include \"ShaderVariablesCompat.hlsl\""));
+            Assert.That(skyLutSource, Does.Not.Contain("../AtmosphericScattering/AtmosphericScattering.hlsl"));
+            Assert.That(skyLutSource, Does.Contain("float3 GetPrimarySunDirection()"));
+            Assert.That(skyLutSource, Does.Contain("float3 GetPrimarySunColor()"));
+            Assert.That(skyLutSource, Does.Contain("float EvaluatePrimarySunShadow(float3 positionPS)"));
+            Assert.That(skyLutSource, Does.Contain("return 1.0f;"));
+            Assert.That(skyLutSource, Does.Not.Contain("_CelestialBodyDatas"));
+            Assert.That(skyLutSource, Does.Not.Contain("_DirectionalLightDatas"));
+            Assert.That(skyLutSource, Does.Not.Contain("HDShadowContext"));
+            Assert.That(skyLutSource, Does.Not.Contain("EvaluateVolumetricCloudsShadows"));
 
             Assert.That(compatSource, Does.Contain("float GetCurrentExposureMultiplier()"));
             Assert.That(compatSource, Does.Contain("return VividGetPreExposure();"));

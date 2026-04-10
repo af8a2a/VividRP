@@ -17,7 +17,7 @@
   - `HDRISkyVolume` / `HDRISkyRenderer`
   - `PhysicallyBasedSkyVolume` / `PhysicallyBasedSkyRenderer`
 - 物理大气天空已经具备基础散射链路：
-  - `AtmosphereLUTPass` 生成 `TransmittanceLUT`、`MultiScatteringLUT`、`SkyViewLUT`
+  - `AtmosphereLUTPass` 现已切到 HDRP 风格 `SkyLUTGenerator.compute`，输出兼容占位 `TransmittanceLUT`、`MultiScatteringLUT`、`SkyViewLUT`、`AtmosphericScatteringLUT`
   - `PhysicallyBasedSkyPass` 用 LUT 绘制屏幕天空
   - `PhysicallyBasedSkyRenderer` 用 compute 生成运行时天空 cubemap
   - `AerialPerspectivePass` 负责高度雾 / aerial perspective 合成
@@ -49,7 +49,7 @@
 
 - 自动曝光基础链路已经落地，但天空系统仍需继续验证“屏幕实时曝光”和“sky baking 固定曝光”是否完全解耦。
 - `skyData.exposure` 目前同时被当作天空强度和 IBL 强度使用，没有和相机曝光解耦。
-- `AtmosphereLUTPass` 已经拆成按参数 hash 重建的缓存链路，`SkyViewLUT` 现在也能区分 scattering dependency / sky parameter / camera change 三类触发，但它仍然是 camera-dependent 的基础缓存。当前屏幕天空仍直接消费 camera-dependent 的 `SkyViewLUT`；在补上 HDRP 那套 distant atmosphere / sky opacity 链路前，不应把它强行改成固定参考点的远景 LUT。
+- `AtmosphereLUTPass` 现已改成围绕 HDRP `SkyLUTGenerator.compute` 的混合缓存链路：`MultiScatteringLUT` / `SkyViewLUT` 按参数缓存，`AtmosphericScatteringLUT` 保持 camera-dependent 的逐帧生成；旧 `TransmittanceLUT` 目前只保留兼容占位，`AerialPerspectivePass` 仍待切到新的 3D atmospheric scattering LUT。
 - runtime sky cubemap 和 specular prefilter 已支持基础分辨率配置；specular prefilter 已补上质量档和 rebuild profiling，物理天空 generated cubemap 现在也补上了基于 sample count 的质量档与 rebuild profiling。HDRI 仍直接复用 source cubemap，这部分质量档当前只作用于 generated cubemap 路径。
 - 物理天空还只是 HDRP Physically Based Sky 的一个基础子集。
 - HDRI 天空还只是 HDRP HDRI Sky 的一个基础子集。
@@ -128,16 +128,16 @@
 ### 当前实现进度（2026-04-07）
 
   - 已完成：
-    - `AtmosphereLUTPass` 现在会缓存 `TransmittanceLUT`、`MultiScatteringLUT`、`SkyViewLUT`；其中 `TransmittanceLUT` / `MultiScatteringLUT` 会区分 `MissingTexture` / `ParametersChanged`，`SkyViewLUT` 还会额外区分 `DependenciesChanged` / `CameraChanged`。
-    - `SkyViewLUT` 当前仍保持 camera-dependent 语义，但已经把重建触发拆成 `DependenciesChanged` / `ParametersChanged` / `CameraChanged`，便于继续验证缓存方向和成本。
-    - `SkyViewLUT` layered cache / reprojection 已形成设计稿，并已在 `AtmosphereLUTPass` 中接入 hidden history texture/buffer、GPU-side layer selection、保守的 history-aware resolve，以及 layer/meta 写回链路。
+    - `AtmosphereLUTPass` 已切到 HDRP `SkyLUTGenerator.compute`，当前会缓存 `MultiScatteringLUT` / `SkyViewLUT`，并输出新的 `AtmosphericScatteringLUT` 3D 纹理。
+    - 旧 `TransmittanceLUT` 目前仅保留兼容占位，用来避免旧 `AerialPerspectivePass` 在 RenderGraph 上读到未定义纹理。
+    - `AtmosphericScatteringLUT` 已开始按 HDRP camera-space kernel 逐帧生成，但屏幕雾合成仍待正式切换到这条新链路。
     - HDRI / Physically Based Sky 的 runtime cubemap 与 ambient probe cubemap 已支持由 `SkySettingsVolume` 统一控制分辨率。
     - 物理天空 generated cubemap 已支持独立的质量档，并对 `MissingTexture` / `ResolutionChanged` / `QualityChanged` / `ParametersChanged` 给出明确 profiling。
     - `SkySpecularCache` 已支持独立的 specular prefilter 分辨率、质量档，并对 source cubemap 尺寸做上限约束。
     - `VividSkyData` 与 `ShaderVariablesGlobal` 中的 CPU SH 兼容字段已移除，天空漫反射链路统一收敛到 GPU-only。
     - LUT / runtime cubemap / ambient probe / specular prefilter 的重建路径现在都带有更明确的 profiling 标记与触发原因。
   - 仍待完成：
-    - 继续把当前 `SkyViewLUT` history resolve 从“保守 reuse + fallback”补到更完整的 reprojection / confidence 调参与 profiling。
+    - 把 `AerialPerspectivePass` / `OpaqueAtmosphericScattering` 正式切到 `AtmosphericScatteringLUT` 新链路，移除 `TransmittanceLUT` 兼容占位。
     - 在具备独立 distant atmosphere / sky opacity 链路后，再重新评估 HDRP 风格 `SkyViewLUT` 接入方式。
   - 设计稿：
     - `Documentation~/SkyViewLUTLayeredCacheDesign.md`
@@ -223,14 +223,21 @@
   - `ShaderVariablesCompat.hlsl`
   - `CookieSampling.hlsl`
   - `AtmosphericScatteringSky.hlsl`
+- `SkyLUTGenerator.compute` 已开始改为直接消费 Vivid 当前已绑定的参数：
+  - 使用 `_SkySunDirection` / `_SkySunColor`
+  - 使用 `ShaderVariablesCompat.hlsl` 提供的曝光接口
+  - 暂时去掉 HDRP 的 `CelestialBodyData` / cascade shadow / volumetric cloud shadow 依赖
+- `AtmosphereLUTPass` 已开始正式消费这条 `SkyLUTGenerator.compute`：
+  - `MultiScatteringLUT` / `SkyViewLUT` 已切换到新 kernel
+  - `AtmosphericScatteringLUTCamera` / `AtmosphericScatteringBlur` 已接入 RenderPass
+  - 旧 `SkyViewLUT` history kernel 路径已移除
 - 仍待继续：
-  - `SkyLUTGenerator.compute`
   - `AtmosphericScattering.hlsl`
   - `OpaqueAtmosphericScattering.shader`
   - 这些文件还没有完成对 Vivid 灯光 / 阴影 / 雾 / 水体接口的完全适配
 - 仍待继续：
-  - 把新的 HDRP 风格屏幕天空 shader 完整接入现有 `SkyViewLUT` / atmospheric scattering 渲染路径
-  - 把 `SkyLUTGenerator.compute` / atmospheric scattering 新链路与现有 RenderPass 正式切换对齐
+  - 把新的 HDRP 风格屏幕雾 / aerial perspective 正式切到 `AtmosphericScatteringLUT`
+  - 补齐 runtime sky cubemap 生成与新 HDRP LUT 链路之间的关系
 
 ### 验收标准
 

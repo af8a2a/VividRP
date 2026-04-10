@@ -15,8 +15,6 @@ MonoBehaviour:
   m_Entries:
   - ResourceName: Shaders/Core/Private/AerialPerspective
     ResourceObject: {fileID: 0}
-  - ResourceName: Shaders/Core/Private/AtmosphereLUT.compute
-    ResourceObject: {fileID: 0}
   - ResourceName: Shaders/Core/Private/AutoExposure/HDRP/Exposure.compute
     ResourceObject: {fileID: 7200000, guid: 875a6ff948014d828853206e930b6d95, type: 3}
   - ResourceName: Shaders/Core/Private/AutoExposure/Unreal/AutoExposure.compute
@@ -91,6 +89,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 3a6fdd688e96b924dbaf2f1c27e7b53d, type: 3}
   - ResourceName: Shaders/Core/Private/Sky/AmbientProbeConvolution.compute
     ResourceObject: {fileID: 7200000, guid: 210a064f204d0cd46adea12cca4bd30d, type: 3}
+  - ResourceName: Shaders/Core/Private/Sky/SkyLUTGenerator.compute
+    ResourceObject: {fileID: 7200000, guid: cd6ae8fe1afb47eba654a15718311401, type: 3}
   - ResourceName: Shaders/Core/Private/SliderDebug
     ResourceObject: {fileID: 4800000, guid: 985a5b1e96340614fb6346ff8c3108ad, type: 3}
   - ResourceName: Shaders/Core/Private/TemporalAA

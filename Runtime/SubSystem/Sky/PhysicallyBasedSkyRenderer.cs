@@ -65,7 +65,7 @@ namespace VividRP.Runtime
         public void Build(VividRPCoreResources resources)
         {
             m_AtmosphereLutCompute = resources?.AtmosphereLUTCompute;
-            m_SkyCubemapKernel = m_AtmosphereLutCompute != null
+            m_SkyCubemapKernel = m_AtmosphereLutCompute != null && m_AtmosphereLutCompute.HasKernel(SkyCubemapKernelName)
                 ? m_AtmosphereLutCompute.FindKernel(SkyCubemapKernelName)
                 : -1;
 

@@ -86,7 +86,7 @@ namespace VividRP.Editor.Tests
             var parametersSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSkyShaderParameters.cs"));
 
             Assert.That(source, Does.Contain("m_AtmosphereLutCompute = resources?.AtmosphereLUTCompute;"));
-            Assert.That(source, Does.Contain("m_SkyCubemapKernel = m_AtmosphereLutCompute != null"));
+            Assert.That(source, Does.Contain("m_SkyCubemapKernel = m_AtmosphereLutCompute != null && m_AtmosphereLutCompute.HasKernel(SkyCubemapKernelName)"));
             Assert.That(source, Does.Contain("m_SkyMaterial = CoreUtils.CreateEngineMaterial(shader);"));
             Assert.That(source, Does.Contain("m_AmbientProbeBakingPass = m_SkyMaterial.FindPass(\"PhysicallyBasedSkyBaking\");"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (MissingTexture)"));
@@ -150,31 +150,18 @@ namespace VividRP.Editor.Tests
             Assert.That(parametersSource, Does.Contain("1.0f,"));
             Assert.That(parametersSource, Does.Contain("parameters.skySunColor = ToVector4(exposedSunColor);"));
             Assert.That(parametersSource, Does.Contain("parameters.skyGroundTint = ToVector4(exposedGroundTint);"));
+            Assert.That(parametersSource, Does.Contain("internal static class PhysicallyBasedSkyComputeParameterBinder"));
+            Assert.That(parametersSource, Does.Contain("commandBuffer.SetComputeMatrixParam(computeShader, PixelCoordToViewDirWSId, skyParameters.pixelCoordToViewDirWS);"));
         }
 
         [Test]
-        public void AtmosphereLutCompute_DeclaresSkyCubemapKernelForRuntimeSky()
+        public void Source_GuardsRuntimeCubemapAgainstMissingSkyCubemapKernel()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AtmosphereLUT.compute"));
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSkyRenderer.cs"));
 
-            Assert.That(source, Does.Contain("#pragma kernel SkyCubemap"));
-            Assert.That(source, Does.Contain("RWTexture2DArray<float4> _SkyCubemapOutput;"));
-            Assert.That(source, Does.Contain("int _SkyCubemapViewSampleCount;"));
-            Assert.That(source, Does.Contain("int _SkyCubemapLightSampleCount;"));
-            Assert.That(source, Does.Contain("int ResolveSkyCubemapViewSampleCount()"));
-            Assert.That(source, Does.Contain("int ResolveSkyCubemapLightSampleCount()"));
-            Assert.That(source, Does.Contain("? _SkyCubemapViewSampleCount"));
-            Assert.That(source, Does.Contain(": SKY_CUBEMAP_VIEW_SAMPLE_COUNT;"));
-            Assert.That(source, Does.Contain("? _SkyCubemapLightSampleCount"));
-            Assert.That(source, Does.Contain(": SKY_CUBEMAP_LIGHT_SAMPLE_COUNT;"));
-            Assert.That(source, Does.Contain("SkyOpticalDepth ComputeOpticalDepthToSun("));
-            Assert.That(source, Does.Contain("float3 SanitizeSkyRadiance(float3 color)"));
-            Assert.That(source, Does.Contain("float stepLength = rayLength / SKY_VIEW_SAMPLE_COUNT;"));
-            Assert.That(source, Does.Contain("float3 EvaluateSkyCubemap(float3 directionWS)"));
-            Assert.That(source, Does.Contain("int viewSampleCount = ResolveSkyCubemapViewSampleCount();"));
-            Assert.That(source, Does.Contain("float stepLength = rayLength / viewSampleCount;"));
-            Assert.That(source, Does.Contain("for (int sampleIndex = 0; sampleIndex < viewSampleCount; sampleIndex++)"));
-            Assert.That(source, Does.Contain("void SkyCubemap(uint3 tid : SV_DispatchThreadID)"));
+            Assert.That(source, Does.Contain("m_AtmosphereLutCompute != null && m_AtmosphereLutCompute.HasKernel(SkyCubemapKernelName)"));
+            Assert.That(source, Does.Contain("return m_AtmosphereLutCompute != null"));
+            Assert.That(source, Does.Contain("&& m_SkyCubemapKernel >= 0"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

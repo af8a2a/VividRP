@@ -98,7 +98,7 @@ void KERNEL_NAME(uint dispatchThreadId : SV_DispatchThreadID)
 
 #if defined(NO_MIPS)
     // Sample once per thread
-    float4 value = SAMPLE_TEXTURECUBE_LOD(_AmbientProbeInputCubemap, s_linear_clamp_sampler, n, 0);
+    float4 value = SAMPLE_TEXTURECUBE_LOD(_AmbientProbeInputCubemap, sampler_LinearClamp, n, 0);
 #else
     // Grab the cubemap size
     float2 cubeSize;
@@ -117,7 +117,7 @@ void KERNEL_NAME(uint dispatchThreadId : SV_DispatchThreadID)
     float mipLevel = 0.5 * log2(omegaS * invOmegaP);
 
     // Sample once per thread
-    float4 value = SAMPLE_TEXTURECUBE_LOD(_AmbientProbeInputCubemap, s_linear_clamp_sampler, n, mipLevel);
+    float4 value = SAMPLE_TEXTURECUBE_LOD(_AmbientProbeInputCubemap, sampler_LinearClamp, n, mipLevel);
 #endif
 
     float outputSHCoeffs[SH_COEFF_COUNT];

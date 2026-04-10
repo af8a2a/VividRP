@@ -13,6 +13,12 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyAmbientProbeConvolution.cs"));
 
+            Assert.That(source, Does.Contain("private const string DiffuseKernelName = \"AmbientProbeConvolutionDiffuse\";"));
+            Assert.That(source, Does.Contain("private const string LegacyKernelName = \"AmbientProbeConvolution\";"));
+            Assert.That(source, Does.Contain("m_Kernel = FindKernel();"));
+            Assert.That(source, Does.Contain("if (m_ComputeShader.HasKernel(DiffuseKernelName))"));
+            Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_Kernel, DiffuseAmbientProbeOutputBufferId, m_AmbientProbeBuffer);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_Kernel, ScratchBufferId, m_AmbientProbeScratchBuffer);"));
             Assert.That(source, Does.Contain("internal void BindGlobalBuffer(CommandBuffer cmd, bool useDefault = false)"));
             Assert.That(source, Does.Contain("useDefault || m_AmbientProbeBuffer == null ? m_DefaultAmbientProbeBuffer : m_AmbientProbeBuffer"));
             Assert.That(source, Does.Contain("HDRISkyVolume.ResolveExposureMultiplier(exposureStops)"));
@@ -44,20 +50,18 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "AmbientProbeConvolution.compute"));
 
-            Assert.That(source, Does.Contain("#pragma kernel AmbientProbeConvolution"));
-            Assert.That(source, Does.Contain("#pragma kernel SkySpecularPrefilter"));
+            Assert.That(source, Does.Contain("#pragma kernel AmbientProbeConvolutionDiffuse"));
+            Assert.That(source, Does.Contain("#pragma kernel AmbientProbeConvolutionVolumetric"));
+            Assert.That(source, Does.Contain("#pragma kernel AmbientProbeConvolutionDiffuseVolumetric"));
+            Assert.That(source, Does.Contain("#pragma kernel AmbientProbeConvolutionClouds"));
             Assert.That(source, Does.Contain("TEXTURECUBE(_AmbientProbeInputCubemap);"));
-            Assert.That(source, Does.Contain("RWStructuredBuffer<float4> _AmbientProbeOutputBuffer;"));
-            Assert.That(source, Does.Contain("TEXTURECUBE(_SkySpecularSourceCubemap);"));
-            Assert.That(source, Does.Contain("RWTexture2DArray<float4> _SkySpecularMipOutput;"));
-            Assert.That(source, Does.Contain("float4 _SkyConvolutionTint;"));
-            Assert.That(source, Does.Contain("float4 _SkyConvolutionParams;"));
-            Assert.That(source, Does.Contain("#define _SkyExposure _SkyConvolutionParams.x"));
-            Assert.That(source, Does.Contain("#define _SkySpecularMaxSampleCount ((uint)_SkySpecularMipParams.z)"));
-            Assert.That(source, Does.Contain("PackSH(_AmbientProbeOutputBuffer, outputSHCoeffs);"));
-            Assert.That(source, Does.Contain("float3 IntegrateSkySpecularGGX"));
-            Assert.That(source, Does.Contain("sampleCount = min(sampleCount, _SkySpecularMaxSampleCount);"));
-            Assert.That(source, Does.Contain("void SkySpecularPrefilter(uint3 tid : SV_DispatchThreadID)"));
+            Assert.That(source, Does.Contain("RWStructuredBuffer<float> _AmbientProbeOutputBuffer;"));
+            Assert.That(source, Does.Contain("RWStructuredBuffer<float4> _DiffuseAmbientProbeOutputBuffer;"));
+            Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _ScratchBuffer;"));
+            Assert.That(source, Does.Contain("uniform float4 _FogParameters;"));
+            Assert.That(source, Does.Contain("PackSHFromScratchBuffer(_DiffuseAmbientProbeOutputBuffer);"));
+            Assert.That(source, Does.Contain("void KERNEL_NAME(uint dispatchThreadId : SV_DispatchThreadID)"));
+            Assert.That(source, Does.Not.Contain("#pragma kernel SkySpecularPrefilter"));
         }
 
         [Test]

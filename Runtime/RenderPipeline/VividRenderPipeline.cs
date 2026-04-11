@@ -26,7 +26,6 @@ namespace VividRP.Runtime
 
             VividVolumeManagerUtility.Initialize();
             PipelineResourceManager.Initialize();
-            Hammersley.Initialize();
             SkyManager.Initialize();
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             Blitter.Initialize(resources.CoreBlitShader, resources.CoreBlitColorAndDepthShader);
@@ -50,17 +49,7 @@ namespace VividRP.Runtime
             }
 
             foreach (var camera in cameras)
-            {
-                // Emit scene/game view UI. The main game camera UI is always rendered, so this needs to be handled only for different camera types
-                if (camera.cameraType == CameraType.Reflection || camera.cameraType == CameraType.Preview)
-                    ScriptableRenderContext.EmitGeometryForCamera(camera);
-#if UNITY_EDITOR
-                else if (camera.cameraType==CameraType.SceneView)
-                    ScriptableRenderContext.EmitWorldGeometryForSceneView(camera);
-#endif
-
                 RenderCamera(context, camera);
-            }
             m_RenderGraph.EndFrame();
         }
 
@@ -104,6 +93,7 @@ namespace VividRP.Runtime
                         gpuDrivenSystem.VisibleMeshletRenderRequestsBuffer,
                         gpuDrivenSystem.VisibleMeshletIndirectDrawArgsBuffer);
                 }
+
 
                 var graphAsset = m_Asset.RenderGraphAsset;
                 PassRecorder.PrepareFrame(graphAsset, cmdBuffer);

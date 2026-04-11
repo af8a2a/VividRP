@@ -26,7 +26,6 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
             static const int VIEW_SAMPLE_COUNT = 12;
             static const int LIGHT_SAMPLE_COUNT = 6;
             static const float BLOCKED_OPTICAL_DEPTH = 100000.0f;
-            static const float MAX_SKY_RADIANCE = 60000.0f;
 
             float4x4 _PixelCoordToViewDirWS;
             TEXTURE2D(_SkyViewLUT);
@@ -76,7 +75,7 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
             float2 EncodeSkyViewUv(float3 directionWS)
             {
                 float azimuth = atan2(directionWS.z, directionWS.x);
-                return float2(frac(azimuth / (2.0f * PI) + 0.5f), saturate(directionWS.y * 0.5f + 0.5f));
+                return float2(frac(azimuth / (2.0f * PI) + 1.0f), saturate(directionWS.y * 0.5f + 0.5f));
             }
 
             bool IntersectAtmosphere(float3 origin, float3 direction, float atmosphereRadius, out float entryDistance, out float exitDistance)
@@ -131,14 +130,6 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
                 float3 opticalDepthOzone)
             {
                 return exp(-(airExtinction * opticalDepthAir + aerosolExtinction * opticalDepthAerosol + opticalDepthOzone));
-            }
-
-            float3 SanitizeSkyRadiance(float3 color)
-            {
-                if (any(isnan(color)) || any(isinf(color)))
-                    return 0.0f;
-
-                return clamp(max(color, 0.0f), 0.0f, MAX_SKY_RADIANCE);
             }
 
             void ComputeOpticalDepthToSun(
@@ -212,35 +203,6 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
                     opticalDepthAir,
                     opticalDepthAerosol,
                     opticalDepthOzone);
-            }
-
-            float EvaluateSunDiskMask(float3 directionWS, float3 sunDirection)
-            {
-                if (_SkyPlanetParams.w <= 0.5f)
-                    return 0.0f;
-
-                float sunAngularRadius = max(_SkyOzoneParams.z, 1e-5f);
-                float sunDot = clamp(dot(normalize(directionWS), sunDirection), -1.0f, 1.0f);
-                float sunCosThreshold = cos(sunAngularRadius);
-                float edgeSoftness = max(fwidth(sunDot) * 2.0f, 1e-4f);
-                return smoothstep(sunCosThreshold - edgeSoftness, sunCosThreshold + edgeSoftness, sunDot);
-            }
-
-            float3 EvaluateSunDisk(float3 directionWS)
-            {
-                float3 sunDirection = normalize(_SkySunDirection.xyz);
-                float sunMask = EvaluateSunDiskMask(directionWS, sunDirection);
-                if (sunMask <= 0.0f)
-                    return 0.0f;
-
-                float planetRadius = max(_SkyPlanetParams.x, 1000.0f);
-                float atmosphereRadius = max(_SkyPlanetParams.y, planetRadius + 1.0f);
-                float3 sunTransmittance = ComputeSunDiskTransmittance(
-                    _SkyCameraPositionPS.xyz,
-                    sunDirection,
-                    planetRadius,
-                    atmosphereRadius);
-                return SanitizeSkyRadiance(_SkySunColor.rgb * sunTransmittance * sunMask * 2.0f);
             }
 
             float3 EvaluateSky(float3 directionWS)
@@ -341,7 +303,21 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
                     skyColor += groundLighting * groundTransmittance;
                 }
 
-                return SanitizeSkyRadiance(skyColor * max(_SkyPlanetParams.z, 0.0f));
+                if (_SkyPlanetParams.w > 0.5f)
+                {
+                    float sunAngularRadius = _SkyOzoneParams.z;
+                    float sunCosThreshold = cos(sunAngularRadius);
+                    float sunDot = clamp(dot(normalizedDirection, sunDirection), -1.0f, 1.0f);
+                    float sunEdge = saturate((sunDot - (sunCosThreshold - 0.0025f)) / 0.0025f);
+
+                    if (sunEdge > 0.0f)
+                    {
+                        float3 sunTransmittance = ComputeSunDiskTransmittance(cameraPosition, sunDirection, planetRadius, atmosphereRadius);
+                        skyColor += sunColor * sunTransmittance * smoothstep(0.0f, 1.0f, sunEdge) * 2.0f;
+                    }
+                }
+
+                return max(skyColor * max(_SkyPlanetParams.z, 0.0f), 0.0f);
             }
 
             float4 Frag(Varyings input) : SV_Target
@@ -350,8 +326,7 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
                 float3 skyColor = _SkyUseLUT > 0.5f
                     ? SAMPLE_TEXTURE2D(_SkyViewLUT, sampler_SkyViewLUT, EncodeSkyViewUv(normalize(viewDirWS))).rgb
                     : EvaluateSky(viewDirWS);
-                skyColor += EvaluateSunDisk(viewDirWS);
-                return float4(SanitizeSkyRadiance(skyColor), 1.0f);
+                return float4(skyColor, 1.0f);
             }
             ENDHLSL
         }

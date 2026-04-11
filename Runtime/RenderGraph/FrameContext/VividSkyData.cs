@@ -8,7 +8,7 @@ namespace VividRP.Runtime
         public SkyType activeSkyType;
         public bool hasDiffuseSH;
         public SphericalHarmonicsL2 diffuseSH;
-        public Texture specularCubemap;
+        public Cubemap specularCubemap;
         public Color tint;
         public float exposure;
         public float rotation;

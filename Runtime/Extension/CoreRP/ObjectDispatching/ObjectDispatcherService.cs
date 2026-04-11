@@ -11,7 +11,7 @@ using Object = UnityEngine.Object;
 
 namespace VividRP.Runtime.GPUDriven.ObjectDispatching
 {
-    internal sealed class ObjectDispatcherService : IDisposable
+    public sealed class ObjectDispatcherService : IDisposable
     {
         [Flags]
         public enum TypeTrackingFlags
@@ -70,7 +70,7 @@ namespace VividRP.Runtime.GPUDriven.ObjectDispatching
             }
         }
 
-        public static void RegisterObjectTracker(ObjectTracker tracker)
+        internal static void RegisterObjectTracker(ObjectTracker tracker)
         {
             if (tracker == null)
             {
@@ -81,7 +81,7 @@ namespace VividRP.Runtime.GPUDriven.ObjectDispatching
             s_Instance.RegisterTracker(tracker);
         }
 
-        public static void UnregisterObjectTracker(ObjectTracker tracker)
+        internal static void UnregisterObjectTracker(ObjectTracker tracker)
         {
             if (tracker == null || s_Instance == null)
             {

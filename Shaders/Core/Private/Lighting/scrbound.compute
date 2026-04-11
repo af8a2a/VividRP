@@ -560,9 +560,9 @@ void main(uint threadID : SV_GroupIndex, uint3 groupID : SV_GroupID)
     const float3 rbpX  = cullData.boxAxisX.xyz; // Pre-scaled
     const float3 rbpY  = cullData.boxAxisY.xyz; // Pre-scaled
     const float3 rbpZ  = cullData.boxAxisZ.xyz; // Pre-scaled
-    const float scale  = cullData.scaleXY;      // scale.x = scale.y
+    const float scale  = cullData.boxAxisX.w;   // scale.x = scale.y
     // Bounding sphere.
-    const float radius = cullData.radius;
+    const float radius = cullData.boxAxisY.w;
 
 #ifndef PLATFORM_SUPPORTS_WAVE_INTRINSICS
     // (0) Initialize the TGSM.

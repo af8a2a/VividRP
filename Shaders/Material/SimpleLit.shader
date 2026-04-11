@@ -43,7 +43,7 @@ Shader "VividRP/Material/SimpleLit"
                 #pragma vertex Vert
                 #pragma fragment FragPreDepth
 
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/SimpleLitGBufferPass.hlsl"
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/SimpleLitGBufferPass.hlsl"
             ENDHLSL
         }
 
@@ -65,7 +65,7 @@ Shader "VividRP/Material/SimpleLit"
                 #pragma vertex Vert
                 #pragma fragment FragGBuffer
 
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/SimpleLitGBufferPass.hlsl"
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/SimpleLitGBufferPass.hlsl"
             ENDHLSL
         }
 
@@ -87,7 +87,7 @@ Shader "VividRP/Material/SimpleLit"
                 #pragma vertex Vert
                 #pragma fragment FragDebug
 
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/SimpleLitGBufferPass.hlsl"
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/SimpleLitGBufferPass.hlsl"
             ENDHLSL
         }
     }

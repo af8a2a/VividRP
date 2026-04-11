@@ -100,14 +100,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("TEXTURE2D(_SkyViewLUT);"));
             Assert.That(source, Does.Contain("float _SkyUseLUT;"));
             Assert.That(source, Does.Contain("EncodeSkyViewUv"));
-            Assert.That(source, Does.Contain("frac(azimuth / (2.0f * PI) + 0.5f)"));
             Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D(_SkyViewLUT, sampler_SkyViewLUT"));
             Assert.That(source, Does.Contain("VIEW_SAMPLE_COUNT = 12"));
             Assert.That(source, Does.Contain("LIGHT_SAMPLE_COUNT = 6"));
             Assert.That(source, Does.Contain("GetSkyViewDirWS"));
-            Assert.That(source, Does.Contain("float3 SanitizeSkyRadiance(float3 color)"));
-            Assert.That(source, Does.Contain("float3 EvaluateSunDisk(float3 directionWS)"));
-            Assert.That(source, Does.Contain("skyColor += EvaluateSunDisk(viewDirWS);"));
             Assert.That(source, Does.Contain("EvaluateSky"));
             Assert.That(source, Does.Contain("_SkyUseLUT > 0.5f"));
         }

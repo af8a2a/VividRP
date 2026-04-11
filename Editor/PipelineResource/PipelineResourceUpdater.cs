@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Reflection;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 using VividRP.Runtime;
+using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
 
 namespace VividRP.Editor
 {
@@ -27,6 +29,7 @@ namespace VividRP.Editor
             {
                 if (path.EndsWith(".shader", StringComparison.OrdinalIgnoreCase) ||
                     path.EndsWith(".shadergraph", StringComparison.OrdinalIgnoreCase) ||
+                    path.EndsWith(".raytrace", StringComparison.OrdinalIgnoreCase) ||
                     path.EndsWith(".compute", StringComparison.OrdinalIgnoreCase) ||
                     path.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
                     path.EndsWith(".tga", StringComparison.OrdinalIgnoreCase) ||
@@ -161,6 +164,8 @@ namespace VividRP.Editor
         {
             if (fieldType == typeof(Shader))
                 return new[] { ".shader", ".shadergraph" };
+            if (fieldType == typeof(RayTracingShader))
+                return new[] { ".raytrace" };
             if (fieldType == typeof(ComputeShader))
                 return new[] { ".compute" };
             if (fieldType == typeof(Texture2D))

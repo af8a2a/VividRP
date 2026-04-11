@@ -157,8 +157,6 @@ namespace VividRP.Editor.Tests
             Assert.That(finalBlitShaderSource, Does.Contain("Shader \"Hidden/VividRP/FinalBlit\""));
             Assert.That(finalBlitShaderSource, Does.Contain("_VividColorGradingLut"));
             Assert.That(finalBlitShaderSource, Does.Contain("_VividColorGradingParams"));
-            Assert.That(finalBlitShaderSource, Does.Contain("_VividAutoExposureBuffer"));
-            Assert.That(finalBlitShaderSource, Does.Contain("_VividAutoExposureParams"));
             Assert.That(finalBlitShaderSource, Does.Contain("ApplyLut3D("));
 
             Assert.That(blitShaderSource, Does.Contain("Shader \"Hidden/VividRP/Blit\""));
@@ -167,7 +165,6 @@ namespace VividRP.Editor.Tests
             Assert.That(blitShaderSource, Does.Not.Contain("ApplyLut3D("));
 
             Assert.That(passSource, Does.Contain("resources.FinalBlitShader"));
-            Assert.That(passSource, Does.Contain("resources.AutoExposureCompute"));
             Assert.That(passSource, Does.Not.Contain("resources.BlitShader"));
         }
 

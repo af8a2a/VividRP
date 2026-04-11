@@ -12,7 +12,6 @@ namespace VividRP.Editor.Tests
     {
         [TestCase(typeof(WhiteBalance), "WhiteBalanceEditor")]
         [TestCase(typeof(ColorAdjustments), "ColorAdjustmentsEditor")]
-        [TestCase(typeof(AutoExposure), "AutoExposureEditor")]
         [TestCase(typeof(ChannelMixer), "ChannelMixerEditor")]
         [TestCase(typeof(SplitToning), "SplitToningEditor")]
         [TestCase(typeof(LiftGammaGain), "LiftGammaGainEditor")]
@@ -42,7 +41,6 @@ namespace VividRP.Editor.Tests
 
         [TestCase(typeof(WhiteBalance))]
         [TestCase(typeof(ColorAdjustments))]
-        [TestCase(typeof(AutoExposure))]
         [TestCase(typeof(ChannelMixer))]
         [TestCase(typeof(SplitToning))]
         [TestCase(typeof(LiftGammaGain))]
@@ -193,35 +191,6 @@ namespace VividRP.Editor.Tests
 
                 var variants = material.GetVector("_Variants");
                 Assert.That(variants.z, Is.EqualTo(3f));
-            }
-            finally
-            {
-                if (editor != null)
-                    UnityEngine.Object.DestroyImmediate(editor);
-
-                UnityEngine.Object.DestroyImmediate(component);
-            }
-        }
-
-        [Test]
-        public void AutoExposureEditor_InitializesCoreControls()
-        {
-            var component = ScriptableObject.CreateInstance<AutoExposure>();
-            UnityEditor.Editor editor = null;
-
-            try
-            {
-                editor = UnityEditor.Editor.CreateEditor(component);
-
-                Assert.That(editor, Is.Not.Null);
-
-                var editorType = editor.GetType();
-                var flags = BindingFlags.Instance | BindingFlags.NonPublic;
-
-                Assert.That(editorType.GetField("m_Enabled", flags)?.GetValue(editor), Is.Not.Null);
-                Assert.That(editorType.GetField("m_LowPercent", flags)?.GetValue(editor), Is.Not.Null);
-                Assert.That(editorType.GetField("m_HighPercent", flags)?.GetValue(editor), Is.Not.Null);
-                Assert.That(editorType.GetField("m_MeterMask", flags)?.GetValue(editor), Is.Not.Null);
             }
             finally
             {

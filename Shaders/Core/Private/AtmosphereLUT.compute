@@ -4,12 +4,9 @@
 #pragma kernel TransmittanceLUT
 #pragma kernel MultiScatteringLUT
 #pragma kernel SkyViewLUT
-#pragma kernel SkyCubemap
 
 static const int TRANSMITTANCE_SAMPLE_COUNT = 16;
 static const int SKY_VIEW_SAMPLE_COUNT = 12;
-static const int SKY_CUBEMAP_LIGHT_SAMPLE_COUNT = 6;
-static const float MAX_SKY_RADIANCE = 60000.0f;
 
 float4 _SkyCameraPositionPS;
 float4 _SkySunDirection;
@@ -29,7 +26,6 @@ Texture2D<float4> _MultiScatteringLUT;
 RWTexture2D<float4> _TransmittanceLUTOutput;
 RWTexture2D<float4> _MultiScatteringLUTOutput;
 RWTexture2D<float4> _SkyViewLUTOutput;
-RWTexture2DArray<float4> _SkyCubemapOutput;
 
 bool IntersectAtmosphere(float3 origin, float3 direction, float atmosphereRadius, out float entryDistance, out float exitDistance)
 {
@@ -80,14 +76,6 @@ float3 EvaluateTransmittance(float3 airExtinction, float3 aerosolExtinction, flo
     return exp(-(airExtinction * opticalDepthAir + aerosolExtinction * opticalDepthAerosol + opticalDepthOzone));
 }
 
-float3 SanitizeSkyRadiance(float3 color)
-{
-    if (any(isnan(color)) || any(isinf(color)))
-        return 0.0f;
-
-    return clamp(max(color, 0.0f), 0.0f, MAX_SKY_RADIANCE);
-}
-
 float2 EncodeTransmittanceUv(float height, float mu, float planetRadius, float atmosphereRadius)
 {
     float atmosphereHeight = max(atmosphereRadius - planetRadius, 1.0f);
@@ -118,37 +106,6 @@ float3 DecodeSkyViewDirection(float2 uv)
     float y = uv.y * 2.0f - 1.0f;
     float radial = sqrt(saturate(1.0f - y * y));
     return normalize(float3(cos(azimuth) * radial, y, sin(azimuth) * radial));
-}
-
-float3 GetCubemapDirection(uint faceIndex, float2 uv)
-{
-    float u = uv.x * 2.0f - 1.0f;
-    float v = uv.y * 2.0f - 1.0f;
-
-    float3 directionWS = float3(0.0f, 0.0f, 1.0f);
-    switch (faceIndex)
-    {
-        case 0:
-            directionWS = float3(1.0f, -v, -u);
-            break;
-        case 1:
-            directionWS = float3(-1.0f, -v, u);
-            break;
-        case 2:
-            directionWS = float3(u, 1.0f, v);
-            break;
-        case 3:
-            directionWS = float3(u, -1.0f, -v);
-            break;
-        case 4:
-            directionWS = float3(u, -v, 1.0f);
-            break;
-        case 5:
-            directionWS = float3(-u, -v, -1.0f);
-            break;
-    }
-
-    return normalize(directionWS);
 }
 
 float3 ComputeViewTransmittance(
@@ -182,66 +139,6 @@ float3 ComputeViewTransmittance(
     }
 
     return EvaluateTransmittance(_SkyAirExtinction.rgb, _SkyAerosolExtinction.rgb, opticalDepthAir, opticalDepthAerosol, opticalDepthOzone);
-}
-
-struct SkyOpticalDepth
-{
-    float air;
-    float aerosol;
-    float3 ozone;
-};
-
-SkyOpticalDepth ComputeOpticalDepthToSun(
-    float3 samplePosition,
-    float3 sunDirection,
-    float planetRadius,
-    float atmosphereRadius,
-    float airScaleHeight,
-    float aerosolScaleHeight,
-    float ozoneMinimumAltitude,
-    float ozoneLayerWidth)
-{
-    SkyOpticalDepth result;
-    result.air = 0.0f;
-    result.aerosol = 0.0f;
-    result.ozone = float3(0.0f, 0.0f, 0.0f);
-
-    float atmosphereEntry;
-    float atmosphereExit;
-    if (!IntersectAtmosphere(samplePosition, sunDirection, atmosphereRadius, atmosphereEntry, atmosphereExit))
-        return result;
-
-    float groundHit;
-    if (IntersectGround(samplePosition, sunDirection, planetRadius, groundHit) && groundHit > 0.0f && groundHit < atmosphereExit)
-    {
-        const float blockedDepth = 100000.0f;
-        result.air = blockedDepth;
-        result.aerosol = blockedDepth;
-        result.ozone = float3(blockedDepth, blockedDepth, blockedDepth);
-        return result;
-    }
-
-    float stepLength = atmosphereExit / SKY_CUBEMAP_LIGHT_SAMPLE_COUNT;
-    float opticalDepthAir = 0.0f;
-    float opticalDepthAerosol = 0.0f;
-    float3 opticalDepthOzone = float3(0.0f, 0.0f, 0.0f);
-
-    [loop]
-    for (int sampleIndex = 0; sampleIndex < SKY_CUBEMAP_LIGHT_SAMPLE_COUNT; sampleIndex++)
-    {
-        float sampleDistance = (sampleIndex + 0.5f) * stepLength;
-        float3 lightSamplePosition = samplePosition + sunDirection * sampleDistance;
-        float height = max(length(lightSamplePosition) - planetRadius, 0.0f);
-
-        opticalDepthAir += exp(-height / airScaleHeight) * stepLength;
-        opticalDepthAerosol += exp(-height / aerosolScaleHeight) * stepLength;
-        opticalDepthOzone += _SkyOzoneExtinction.rgb * (EvaluateOzoneDensity(height, ozoneMinimumAltitude, ozoneLayerWidth) * stepLength);
-    }
-
-    result.air = opticalDepthAir;
-    result.aerosol = opticalDepthAerosol;
-    result.ozone = opticalDepthOzone;
-    return result;
 }
 
 float3 EvaluateSkyView(float3 directionWS)
@@ -330,135 +227,20 @@ float3 EvaluateSkyView(float3 directionWS)
         skyColor += _SkyGroundTint.rgb * groundLightingFactor * groundTransmittance;
     }
 
-    return SanitizeSkyRadiance(skyColor * max(_SkyPlanetParams.z, 0.0f));
-}
-
-float3 EvaluateSkyCubemap(float3 directionWS)
-{
-    float3 normalizedDirection = normalize(directionWS);
-    float3 cameraPosition = _SkyCameraPositionPS.xyz;
-    float3 sunDirection = normalize(_SkySunDirection.xyz);
-    float3 sunColor = _SkySunColor.rgb;
-    float planetRadius = max(_SkyPlanetParams.x, 1000.0f);
-    float atmosphereRadius = max(_SkyPlanetParams.y, planetRadius + 1.0f);
-    float airScaleHeight = max(_SkyOzoneParams.y, 1.0f);
-    float aerosolScaleHeight = max(_SkyOzoneParams.w, 1.0f);
-    float ozoneMinimumAltitude = _SkyOzoneExtinction.w;
-    float ozoneLayerWidth = _SkyOzoneParams.x;
-    float3 airScattering = _SkyAirScattering.rgb;
-    float3 airExtinction = _SkyAirExtinction.rgb;
-    float3 aerosolScattering = _SkyAerosolScattering.rgb;
-    float3 aerosolExtinction = _SkyAerosolExtinction.rgb;
-    float g = clamp(_SkyAerosolExtinction.w, -0.95f, 0.95f);
-
-    float atmosphereEntry;
-    float atmosphereExit;
-    if (!IntersectAtmosphere(cameraPosition, normalizedDirection, atmosphereRadius, atmosphereEntry, atmosphereExit))
-        return float3(0.0f, 0.0f, 0.0f);
-
-    float rayLength = atmosphereExit;
-    float groundHit;
-    if (IntersectGround(cameraPosition, normalizedDirection, planetRadius, groundHit) && groundHit > 0.0f)
-        rayLength = min(rayLength, groundHit);
-
-    float stepLength = rayLength / SKY_VIEW_SAMPLE_COUNT;
-    if (stepLength <= 0.0f)
-        return float3(0.0f, 0.0f, 0.0f);
-
-    float opticalDepthAir = 0.0f;
-    float opticalDepthAerosol = 0.0f;
-    float3 opticalDepthOzone = float3(0.0f, 0.0f, 0.0f);
-    float mu = clamp(dot(normalizedDirection, sunDirection), -1.0f, 1.0f);
-    float phaseRayleigh = 3.0f / (16.0f * PI) * (1.0f + mu * mu);
-    float phaseMieNumerator = 3.0f / (8.0f * PI) * (1.0f - g * g) * (1.0f + mu * mu);
-    float phaseMieDenominator = (2.0f + g * g) * pow(max(1.0f + g * g - 2.0f * g * mu, 1e-3f), 1.5f);
-    float phaseMie = phaseMieNumerator / max(phaseMieDenominator, 1e-3f);
-    float3 inscattered = float3(0.0f, 0.0f, 0.0f);
-
-    [loop]
-    for (int sampleIndex = 0; sampleIndex < SKY_VIEW_SAMPLE_COUNT; sampleIndex++)
-    {
-        float sampleDistance = (sampleIndex + 0.5f) * stepLength;
-        float3 samplePosition = cameraPosition + normalizedDirection * sampleDistance;
-        float height = max(length(samplePosition) - planetRadius, 0.0f);
-        float localAirDensity = exp(-height / airScaleHeight);
-        float localAerosolDensity = exp(-height / aerosolScaleHeight);
-        float localOzoneDensity = EvaluateOzoneDensity(height, ozoneMinimumAltitude, ozoneLayerWidth);
-
-        opticalDepthAir += localAirDensity * stepLength;
-        opticalDepthAerosol += localAerosolDensity * stepLength;
-        opticalDepthOzone += _SkyOzoneExtinction.rgb * (localOzoneDensity * stepLength);
-
-        SkyOpticalDepth sunOpticalDepth = ComputeOpticalDepthToSun(
-            samplePosition,
-            sunDirection,
-            planetRadius,
-            atmosphereRadius,
-            airScaleHeight,
-            aerosolScaleHeight,
-            ozoneMinimumAltitude,
-            ozoneLayerWidth);
-
-        float3 viewTransmittance = EvaluateTransmittance(
-            airExtinction,
-            aerosolExtinction,
-            opticalDepthAir,
-            opticalDepthAerosol,
-            opticalDepthOzone);
-        float3 sunTransmittance = EvaluateTransmittance(
-            airExtinction,
-            aerosolExtinction,
-            sunOpticalDepth.air,
-            sunOpticalDepth.aerosol,
-            sunOpticalDepth.ozone);
-        float3 scattering =
-            airScattering * (localAirDensity * phaseRayleigh)
-            + aerosolScattering * (localAerosolDensity * phaseMie);
-        float3 attenuation = viewTransmittance * sunTransmittance;
-        inscattered += attenuation * scattering * stepLength;
-    }
-
-    float3 skyColor = inscattered * sunColor;
-
-    if (rayLength < atmosphereExit)
-    {
-        float3 groundTransmittance = EvaluateTransmittance(
-            airExtinction,
-            aerosolExtinction,
-            opticalDepthAir,
-            opticalDepthAerosol,
-            opticalDepthOzone);
-        float3 groundLighting = _SkyGroundTint.rgb * max(0.15f, sunDirection.y * 0.5f + 0.5f);
-        skyColor += groundLighting * groundTransmittance;
-    }
-
     if (_SkyPlanetParams.w > 0.5f)
     {
         float sunAngularRadius = _SkyOzoneParams.z;
         float sunCosThreshold = cos(sunAngularRadius);
-        float sunEdge = saturate((dot(normalizedDirection, sunDirection) - (sunCosThreshold - 0.0025f)) / 0.0025f);
+        float sunDot = clamp(dot(normalizedDirection, sunDirection), -1.0f, 1.0f);
+        float sunEdge = saturate((sunDot - (sunCosThreshold - 0.0025f)) / 0.0025f);
         if (sunEdge > 0.0f)
         {
-            SkyOpticalDepth sunDiskOpticalDepth = ComputeOpticalDepthToSun(
-                cameraPosition,
-                sunDirection,
-                planetRadius,
-                atmosphereRadius,
-                airScaleHeight,
-                aerosolScaleHeight,
-                ozoneMinimumAltitude,
-                ozoneLayerWidth);
-            float3 sunDiskTransmittance = EvaluateTransmittance(
-                airExtinction,
-                aerosolExtinction,
-                sunDiskOpticalDepth.air,
-                sunDiskOpticalDepth.aerosol,
-                sunDiskOpticalDepth.ozone);
-            skyColor += sunColor * sunDiskTransmittance * smoothstep(0.0f, 1.0f, sunEdge) * 2.0f;
+            float3 sunDiskTransmittance = SampleTransmittanceLut(cameraHeight, sunAtCamera, planetRadius, atmosphereRadius);
+            skyColor += _SkySunColor.rgb * sunDiskTransmittance * smoothstep(0.0f, 1.0f, sunEdge) * 2.0f;
         }
     }
 
-    return SanitizeSkyRadiance(skyColor);
+    return max(skyColor * max(_SkyPlanetParams.z, 0.0f), 0.0f);
 }
 
 [numthreads(8, 8, 1)]
@@ -550,7 +332,7 @@ void MultiScatteringLUT(uint3 tid : SV_DispatchThreadID)
     float3 atmosphericBounce = (_SkyAirScattering.rgb + _SkyAerosolScattering.rgb) * (1000.0f + sampleHeight * 0.05f);
     float3 multiScattering = (1.0f - transmittance) * (ambientBounce + atmosphericBounce + _SkySunColor.rgb * 0.015f);
 
-    _MultiScatteringLUTOutput[tid.xy] = float4(SanitizeSkyRadiance(multiScattering), 1.0f);
+    _MultiScatteringLUTOutput[tid.xy] = float4(max(multiScattering, 0.0f), 1.0f);
 }
 
 [numthreads(8, 8, 1)]
@@ -565,19 +347,4 @@ void SkyViewLUT(uint3 tid : SV_DispatchThreadID)
     float2 uv = (tid.xy + 0.5f) / float2(width, height);
     float3 directionWS = DecodeSkyViewDirection(uv);
     _SkyViewLUTOutput[tid.xy] = float4(EvaluateSkyView(directionWS), 1.0f);
-}
-
-[numthreads(8, 8, 1)]
-void SkyCubemap(uint3 tid : SV_DispatchThreadID)
-{
-    uint width;
-    uint height;
-    uint elements;
-    _SkyCubemapOutput.GetDimensions(width, height, elements);
-    if (tid.x >= width || tid.y >= height || tid.z >= min(elements, 6u))
-        return;
-
-    float2 uv = (tid.xy + 0.5f) / float2(width, height);
-    float3 directionWS = GetCubemapDirection(tid.z, uv);
-    _SkyCubemapOutput[tid] = float4(EvaluateSkyCubemap(directionWS), 1.0f);
 }

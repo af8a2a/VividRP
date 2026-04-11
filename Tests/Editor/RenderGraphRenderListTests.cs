@@ -116,7 +116,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(shaderSource, Does.Contain($"Name \"{MotionVectorPass.MotionVectorsShaderTagName}\""));
             Assert.That(shaderSource, Does.Contain($"\"LightMode\" = \"{MotionVectorPass.MotionVectorsShaderTagName}\""));
-            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Material/StandardLitMotionVectorPass.hlsl\""));
+            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitMotionVectorPass.hlsl\""));
         }
 
         [Test]
@@ -129,6 +129,7 @@ namespace VividRP.Editor.Tests
                 "com.af8a2a.vividrp",
                 "Shaders",
                 "Material",
+                "ShaderPass",
                 "StandardLitGBufferPass.hlsl"));
             var motionVectorPath = Path.GetFullPath(Path.Combine(
                 Application.dataPath,
@@ -137,6 +138,7 @@ namespace VividRP.Editor.Tests
                 "com.af8a2a.vividrp",
                 "Shaders",
                 "Material",
+                "ShaderPass",
                 "StandardLitMotionVectorPass.hlsl"));
 
             Assert.That(File.Exists(gBufferPath), Is.True, $"Expected shader source at '{gBufferPath}'.");

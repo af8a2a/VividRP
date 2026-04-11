@@ -80,51 +80,22 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Source_UsesGpuRuntimeCubemapUpdateAndClearsCpuProjectionLoop()
+        public void Source_UsesRuntimeCubemapUpdateAndClearsCpuShProjection()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSkyRenderer.cs"));
-            var parametersSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSkyShaderParameters.cs"));
 
-            Assert.That(source, Does.Contain("m_AtmosphereLutCompute = resources?.AtmosphereLUTCompute;"));
-            Assert.That(source, Does.Contain("m_SkyCubemapKernel = m_AtmosphereLutCompute != null"));
             Assert.That(source, Does.Contain("EnsureRuntimeCubemap();"));
-            Assert.That(source, Does.Contain("RebuildRuntimeCubemap(volume, context, cmd);"));
+            Assert.That(source, Does.Contain("RebuildRuntimeCubemap(volume, context);"));
             Assert.That(source, Does.Contain("skyData.activeSkyType = SkyType.PhysicallyBased;"));
             Assert.That(source, Does.Contain("skyData.specularCubemap = m_RuntimeSkyCubemap;"));
-            Assert.That(source, Does.Contain("skyData.exposure = volume.GetPostExposureMultiplier();"));
+            Assert.That(source, Does.Contain("skyData.exposure = volume.exposure.value;"));
             Assert.That(source, Does.Contain("skyData.hasDiffuseSH = false;"));
             Assert.That(source, Does.Contain("skyData.diffuseSH = default;"));
             Assert.That(source, Does.Contain("return HashCode.Combine("));
             Assert.That(source, Does.Contain("ResolveCameraPosition(context, volume.planetRadius.value)"));
             Assert.That(source, Does.Contain("ResolveSunDirection(context)"));
             Assert.That(source, Does.Contain("ResolveSunColor(context)"));
-            Assert.That(source, Does.Contain("m_RuntimeSkyCubemapFaces"));
-            Assert.That(source, Does.Contain("dimension = TextureDimension.Tex2DArray"));
-            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_AtmosphereLutCompute, m_SkyCubemapKernel, SkyCubemapOutputId, m_RuntimeSkyCubemapFaces);"));
-            Assert.That(source, Does.Contain("cmd.CopyTexture(m_RuntimeSkyCubemapFaces, face, 0, m_RuntimeSkyCubemap, face, 0);"));
-            Assert.That(source, Does.Contain("cmd.DispatchCompute("));
-            Assert.That(source, Does.Contain("cmd.GenerateMips(m_RuntimeSkyCubemap);"));
             Assert.That(source, Does.Not.Contain("TryProjectCubemapToSH("));
-            Assert.That(source, Does.Not.Contain("SetPixels("));
-            Assert.That(parametersSource, Does.Contain("var preExposure = volume.GetPreExposureMultiplier();"));
-            Assert.That(parametersSource, Does.Contain("var postExposure = volume.GetPostExposureMultiplier();"));
-            Assert.That(parametersSource, Does.Contain("parameters.skyPlanetParams = new Vector4("));
-            Assert.That(parametersSource, Does.Contain("postExposure,"));
-            Assert.That(parametersSource, Does.Contain("parameters.skySunColor = ToVector4(exposedSunColor);"));
-            Assert.That(parametersSource, Does.Contain("parameters.skyGroundTint = ToVector4(exposedGroundTint);"));
-        }
-
-        [Test]
-        public void AtmosphereLutCompute_DeclaresSkyCubemapKernelForRuntimeSky()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AtmosphereLUT.compute"));
-
-            Assert.That(source, Does.Contain("#pragma kernel SkyCubemap"));
-            Assert.That(source, Does.Contain("RWTexture2DArray<float4> _SkyCubemapOutput;"));
-            Assert.That(source, Does.Contain("SkyOpticalDepth ComputeOpticalDepthToSun("));
-            Assert.That(source, Does.Contain("float3 SanitizeSkyRadiance(float3 color)"));
-            Assert.That(source, Does.Contain("float3 EvaluateSkyCubemap(float3 directionWS)"));
-            Assert.That(source, Does.Contain("void SkyCubemap(uint3 tid : SV_DispatchThreadID)"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

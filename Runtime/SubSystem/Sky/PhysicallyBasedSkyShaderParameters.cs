@@ -22,8 +22,6 @@ namespace VividRP.Runtime
 
     internal static class PhysicallyBasedSkyShaderParameterBuilder
     {
-        private const float MaxSkyRadiance = 60000.0f;
-
         internal static bool TryBuild(ContextContainer frameData, out PhysicallyBasedSkyShaderParameters parameters)
         {
             if (frameData == null)
@@ -32,22 +30,10 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            var cameraData = frameData.GetOrCreate<VividCameraData>();
-            var skyData = frameData.GetOrCreate<VividSkyData>();
-            var lightData = frameData.GetOrCreate<VividLightData>();
-
-            if (skyData == null || skyData.activeSkyType != SkyType.PhysicallyBased)
-            {
-                parameters = default;
-                return false;
-            }
-
             return TryBuild(
-                VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume(),
-                new SkyRendererContext(cameraData, lightData),
-                cameraData?.camera != null
-                    ? cameraData.GetPixelCoordToViewDirWSMatrix()
-                    : Matrix4x4.identity,
+                frameData.GetOrCreate<VividCameraData>(),
+                frameData.GetOrCreate<VividSkyData>(),
+                frameData.GetOrCreate<VividLightData>(),
                 out parameters);
         }
 
@@ -57,45 +43,21 @@ namespace VividRP.Runtime
             VividLightData lightData,
             out PhysicallyBasedSkyShaderParameters parameters)
         {
+            parameters = default;
+            parameters.pixelCoordToViewDirWS = cameraData?.camera != null
+                ? cameraData.GetPixelCoordToViewDirWSMatrix()
+                : Matrix4x4.identity;
+
+            var volume = VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume();
             if (skyData == null
                 || skyData.activeSkyType != SkyType.PhysicallyBased
-                || VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume() == null)
-            {
-                parameters = default;
-                return false;
-            }
-
-            return TryBuild(
-                VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume(),
-                new SkyRendererContext(cameraData, lightData),
-                cameraData?.camera != null
-                    ? cameraData.GetPixelCoordToViewDirWSMatrix()
-                    : Matrix4x4.identity,
-                out parameters);
-        }
-
-        internal static bool TryBuild(
-            PhysicallyBasedSkyVolume volume,
-            in SkyRendererContext context,
-            out PhysicallyBasedSkyShaderParameters parameters)
-        {
-            return TryBuild(volume, context, Matrix4x4.identity, out parameters);
-        }
-
-        private static bool TryBuild(
-            PhysicallyBasedSkyVolume volume,
-            in SkyRendererContext context,
-            Matrix4x4 pixelCoordToViewDirWS,
-            out PhysicallyBasedSkyShaderParameters parameters)
-        {
-            parameters = default;
-            parameters.pixelCoordToViewDirWS = pixelCoordToViewDirWS;
-
-            if (volume == null || !volume.IsActive())
+                || volume == null
+                || !volume.IsActive())
             {
                 return false;
             }
 
+            var context = new SkyRendererContext(cameraData, lightData);
             var planetRadius = Mathf.Max(volume.planetRadius.value, 1000.0f);
             var atmosphereRadius = Mathf.Max(volume.GetAtmosphereRadius(), planetRadius + 1.0f);
             var cameraPosition = PhysicallyBasedSkyRenderer.ResolveCameraPosition(context, volume.planetRadius.value);
@@ -108,19 +70,14 @@ namespace VividRP.Runtime
                                    * 0.5f;
             var aerosolScattering = volume.GetAerosolScatteringCoefficient();
             var ozoneExtinction = volume.GetOzoneExtinctionCoefficient();
-            // Push exposure reductions into the source radiance so very bright sun values do not overflow the sky integration path.
-            var preExposure = volume.GetPreExposureMultiplier();
-            var postExposure = volume.GetPostExposureMultiplier();
-            var exposedSunColor = ClampRadiance(ToVector3(sunColor.linear) * (PhysicallyBasedSkyRenderer.SunIlluminanceScale * preExposure));
-            var exposedGroundTint = ClampRadiance(ToVector3(volume.groundTint.value.linear) * preExposure);
 
             parameters.skyCameraPositionPS = new Vector4(cameraPosition.x, cameraPosition.y, cameraPosition.z, 1.0f);
             parameters.skySunDirection = new Vector4(sunDirection.x, sunDirection.y, sunDirection.z, 0.0f);
-            parameters.skySunColor = ToVector4(exposedSunColor);
+            parameters.skySunColor = ToVector4(sunColor.linear * PhysicallyBasedSkyRenderer.SunIlluminanceScale);
             parameters.skyPlanetParams = new Vector4(
                 planetRadius,
                 atmosphereRadius,
-                postExposure,
+                Mathf.Max(volume.exposure.value, 0.0f),
                 volume.renderSunDisk.value ? 1.0f : 0.0f);
             parameters.skyAirScattering = ToVector4(volume.GetAirScatteringCoefficient());
             parameters.skyAirExtinction = ToVector4(volume.GetAirExtinctionCoefficient());
@@ -144,26 +101,13 @@ namespace VividRP.Runtime
                 volume.GetAirScaleHeight(),
                 sunAngularRadius,
                 volume.GetAerosolScaleHeight());
-            parameters.skyGroundTint = ToVector4(exposedGroundTint);
+            parameters.skyGroundTint = ToVector4(volume.groundTint.value.linear);
             parameters.skyFogParams = new Vector4(
                 volume.IsHeightFogActive() ? 1.0f : 0.0f,
                 volume.fogBaseHeight.value,
                 Mathf.Max(volume.fogDensity.value, 0.0f),
                 Mathf.Max(volume.fogMaxDistance.value, 0.0f));
             return true;
-        }
-
-        private static Vector3 ClampRadiance(Vector3 value)
-        {
-            return new Vector3(
-                Mathf.Clamp(value.x, 0.0f, MaxSkyRadiance),
-                Mathf.Clamp(value.y, 0.0f, MaxSkyRadiance),
-                Mathf.Clamp(value.z, 0.0f, MaxSkyRadiance));
-        }
-
-        private static Vector3 ToVector3(Color value)
-        {
-            return new Vector3(value.r, value.g, value.b);
         }
 
         private static Vector4 ToVector4(Vector3 value)

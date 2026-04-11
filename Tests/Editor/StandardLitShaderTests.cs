@@ -27,6 +27,20 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void StandardLitShader_DeclaresIndirectDxrPass_ForIndirectDiffuseHitShaders()
+        {
+            string shaderSource = File.ReadAllText(GetShaderSourcePath());
+
+            Assert.That(shaderSource, Does.Contain("Name \"IndirectDXR\""));
+            Assert.That(shaderSource, Does.Contain("\"LightMode\" = \"IndirectDXR\""));
+            Assert.That(shaderSource, Does.Contain("#pragma raytracing surface_shader"));
+            Assert.That(shaderSource, Does.Contain("#pragma shader_feature_local_raytracing _ALPHATEST_ON"));
+            Assert.That(shaderSource, Does.Contain("#define VIVIDRP_INDIRECT_DIFFUSE_CLOSEST_HIT_NAME StandardLitIndirectDiffuseClosestHit"));
+            Assert.That(shaderSource, Does.Contain("#define VIVIDRP_INDIRECT_DIFFUSE_ANY_HIT_NAME StandardLitIndirectDiffuseAnyHit"));
+            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/IndirectDiffuse.hlsl\""));
+        }
+
+        [Test]
         public void StandardLitShader_DeclaresUrpCompatibleCoreProperties()
         {
             string shaderSource = File.ReadAllText(GetShaderSourcePath());

@@ -9,8 +9,22 @@
 #pragma kernel TileLightListGen_DepthRT_MSAA_Oblique                LIGHTLISTGEN=TileLightListGen_DepthRT_MSAA_Oblique                  ENABLE_DEPTH_TEXTURE_BACKPLANE          MSAA_ENABLED            USE_OBLIQUE_MODE
 #pragma kernel TileLightListGen_DepthRT_SrcBigTile_Oblique          LIGHTLISTGEN=TileLightListGen_DepthRT_SrcBigTile_Oblique            ENABLE_DEPTH_TEXTURE_BACKPLANE          USE_TWO_PASS_TILED_LIGHTING             USE_OBLIQUE_MODE
 #pragma kernel TileLightListGen_DepthRT_MSAA_SrcBigTile_Oblique     LIGHTLISTGEN=TileLightListGen_DepthRT_MSAA_SrcBigTile_Oblique       ENABLE_DEPTH_TEXTURE_BACKPLANE          MSAA_ENABLED        USE_TWO_PASS_TILED_LIGHTING         USE_OBLIQUE_MODE
-
+#pragma use_dxc
 // #pragma enable_d3d11_debug_symbols
+
+// Wave intrinsics audit — compile-time verification.
+// This kernel requires SM6.0 wave intrinsics unconditionally:
+//   WavePrefixCountBits, WaveActiveCountBits, WavePrefixSum, WaveActiveSum,
+//   WaveActiveAnyTrue, WaveGetLaneCount, WaveIsFirstLane
+// DXC compiler (via #pragma use_dxc) guarantees these on all target renderers
+// (d3d11/SM6, playstation, xboxone, xboxseries, vulkan/SPIR-V, metal, switch, switch2).
+// Console platforms additionally define PLATFORM_LANE_COUNT (32 on Switch/Switch2)
+// which controls NR_THREADS and single-wave vs multi-wave synchronization paths.
+// The #if NR_THREADS > PLATFORM_LANE_COUNT guards control multi-wave barriers/LDS
+// coordination, NOT wave intrinsic availability — intrinsics are used in all paths.
+#if !defined(UNITY_COMPILER_DXC)
+    #error "lightlistbuild-clustered.compute requires DXC (#pragma use_dxc). Wave intrinsics will not compile without it."
+#endif
 
 #define REQUEST_DISABLE_OPTIMISTIC_SCALAR_ALLOCATION
 
@@ -65,9 +79,18 @@ RWStructuredBuffer<float> g_logBaseBuffer : register( u3 );             // don't
 groupshared unsigned int ldsTilePassList[MAX_NR_VISIBLE_LIGHTS/32];
 groupshared unsigned int coarseList[MAX_NR_COARSE_ENTRIES];
 groupshared unsigned int clusterIdxs[MAX_NR_COARSE_ENTRIES/2];
-groupshared float4 lightPlanes[4*6]; // Each plane is defined by a float4. 6 planes per light, 4 lights (24 planes)
+groupshared float4 lightPlanes[8*6]; // Each plane is defined by a float4. 6 planes per light, 8 lights (48 planes)
 
 groupshared uint lightOffs;
+groupshared uint groupAllocationBase;
+
+// Z-binning: per-cluster upper bound into the depth-sorted coarseList.
+// zBinEnd[c] = first coarseList index where minCluster > c.
+// Counting / fine-cull loops for cluster c iterate [0, zBinEnd[c]) instead of [0, iNrCoarseLights).
+// groupMaxBinEnd = zBinEnd[nrClusters-1] — group-wide outer-loop ceiling.
+#define MAX_NR_CLUSTER_SLICES 64
+groupshared uint zBinEnd[MAX_NR_CLUSTER_SLICES];
+groupshared uint groupMaxBinEnd;
 
 groupshared int categoryListCountScratch[NR_THREADS * LIGHTCATEGORY_COUNT];
 groupshared int shiftIndexScratch[NR_THREADS * LIGHTCATEGORY_COUNT];
@@ -117,6 +140,7 @@ groupshared uint lightOffs2;
 
 #ifdef PERFORM_SPHERICAL_INTERSECTION_TESTS
 groupshared uint lightOffsSph;
+groupshared uint convergeLightCount;
 #endif
 
 float GetLinearDepth(float2 pixXY, float zDptBufSpace, uint eyeIndex)    // 0 is near 1 is far
@@ -183,7 +207,7 @@ int SphericalIntersectionTests(uint threadID, int iNrCoarseLights, float2 screen
 
 float4 FetchPlane(int l, int p, uint eyeIndex);
 
-bool CheckIntersection(int l, int k, uint2 viTilLL, uint2 viTilUR, float suggestedBase, uint eyeIndex)
+bool CheckIntersection(int l, int k, float4 clusterVerts[8])
 {
     // If this light's screen space depth bounds intersect this cluster...simple cluster test
     unsigned int val = (clusterIdxs[l>>1]>>(16*(l&1)))&0xffff;
@@ -191,24 +215,16 @@ bool CheckIntersection(int l, int k, uint2 viTilLL, uint2 viTilUR, float suggest
     if(bIsHit)
     {
 #ifdef CONV_HULL_TEST_ENABLED
-        float depthAtNearZ = ClusterIdxToZ(k, suggestedBase);
-        float depthAtFarZ = ClusterIdxToZ(k+1, suggestedBase);
-
         for(int p=0; p<6; p++)
         {
-            float4 plane = lightPlanes[6*(l&3)+p];
+            float4 plane = lightPlanes[6*(l&7)+p];
 
             bool bAllInvisib = true;
 
-            for(int i=0; i<8; i++)
+            for(int vi=0; vi<8; vi++)
             {
-                float x = (i&1)==0 ? viTilLL.x : viTilUR.x;
-                float y = (i&2)==0 ? viTilLL.y : viTilUR.y;
-                float z = (i&4)==0 ? depthAtNearZ : depthAtFarZ;
-                float3 vP = GetViewPosFromLinDepth( float2(x, y), z, eyeIndex);
-
-                // Test each corner of the cluster against the light bounding box planes
-                bAllInvisib = bAllInvisib && dot(plane, float4(vP,1.0))>0;
+                // Test each pre-computed corner against the light bounding box plane
+                bAllInvisib = bAllInvisib && dot(plane, clusterVerts[vi])>0;
             }
 
             if(bAllInvisib) bIsHit = false;
@@ -279,19 +295,16 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
     // establish max depth first
     float linMaDist=0.0;
 
+#ifdef MSAA_ENABLED
+    // HiZ mip-read is not well-defined for MSAA depth; fall back to per-pixel sampling.
     for(int idx=t; idx<(TILE_SIZE_CLUSTERED*TILE_SIZE_CLUSTERED); idx+=NR_THREADS)
     {
         uint2 uPixCrd = min( uint2(viTilLL.x+(idx&(TILE_SIZE_CLUSTERED-1)), viTilLL.y+(idx>>log2TileSize)), uint2(g_screenSize.x-1, g_screenSize.y-1) );
 
-#ifdef MSAA_ENABLED
         for(int i=0; i<g_iNumSamplesMSAA; i++)
         {
         const float fDpth = FetchDepthMSAA(uPixCrd, i);
         const float2 fracSampleCoord = g_depth_tex.GetSamplePosition(i).xy;     // this is optimized away when USE_OBLIQUE_MODE is NOT set.
-#else
-        const float fDpth = FetchDepth(uPixCrd);
-        const float2 fracSampleCoord = float2(0.5,0.5);
-#endif
 
         if(fDpth<VIEWPORT_SCALE_Z)      // if not skydome
         {
@@ -304,21 +317,49 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
 
             linMaDist = max(linDistZ, linMaDist);
         }
-#ifdef MSAA_ENABLED
         }
-#endif
     }
 
     linMaDist = max(linMaDist, 0.0);
     InterlockedMax(ldsZMax, asuint(linMaDist) );
 
+#if NR_THREADS > PLATFORM_LANE_COUNT
+    GroupMemoryBarrierWithGroupSync();
+#endif
+    linMaDist = asfloat(ldsZMax);
+#else
+    // HiZ path: read mip level log2(TILE_SIZE_CLUSTERED) = 5 (one texel per 32x32 tile).
+    // g_depth_tex_hiz stores max corrected (non-reversed) depth: near=0, far=1.
+    // Thread 0 reads 1 texel covering the full tile; the result is broadcast via ldsZMax.
+    if(t == 0u)
+    {
+        // Mip 5: tile index maps 1:1 to HiZ texels for 32x32 tiles.
+        const uint hizMip = log2TileSize;                   // == 5 for TILE_SIZE_CLUSTERED=32
+        float hizDepth = g_depth_tex_hiz.mips[hizMip][tileIDX].x;
+
+        if(hizDepth < VIEWPORT_SCALE_Z)    // at least one non-sky pixel in tile
+        {
+            // Tile centre in pixel coords (half-texel offset = 0.5).
+            float2 tileCentrePix = float2(viTilLL) + float2(TILE_SIZE_CLUSTERED, TILE_SIZE_CLUSTERED) * 0.5;
+            float linZ = GetLinearDepth(tileCentrePix, hizDepth, eyeIndex);
+#if USE_LEFT_HAND_CAMERA_SPACE
+            float linDistZ = linZ;
+#else
+            float linDistZ = -linZ;
+#endif
+            ldsZMax = asuint(max(linDistZ, 0.0));
+        }
+        // else ldsZMax stays 0 → falls through to the sky-pixel clamp below.
+    }
 
 #if NR_THREADS > PLATFORM_LANE_COUNT
     GroupMemoryBarrierWithGroupSync();
 #endif
     linMaDist = asfloat(ldsZMax);
+#endif  // MSAA_ENABLED
+
     if(linMaDist<=0.0) linMaDist = g_fFarPlane;      // assume sky pixel
-#endif
+#endif  // ENABLE_DEPTH_TEXTURE_BACKPLANE
 
     // 'Normalized' coordinates of tile, for use with AABB bounds in g_vBoundsBuffer
     float2 vTileLL = float2(viTilLL.x/g_screenSize.x, viTilLL.y/g_screenSize.y);
@@ -403,9 +444,25 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
     iNrCoarseLights = CullByExactEdgeTests(t, iNrCoarseLights, viTilLL.xy, viTilUR.xy, fTileFarPlane, eyeIndex);
 #endif
 
-    // sort lights (gives a more efficient execution in both deferred and tiled forward lighting).
+    // Z-binning depth sort: encode minCluster into bits [12..19] of each coarseList entry.
+    // Light indices are 0..MAX_NR_VISIBLE_LIGHTS-1 (< 4096 = 2^12), so they fit in bits [0..11].
+    // SORTLIST then orders by (minCluster, lightIdx) ascending — coarseList becomes depth-sorted.
+    // This replaces the old light-index sort and enables per-cluster Z-bin range pruning.
 #if NR_THREADS > PLATFORM_LANE_COUNT
+    for(int l=(int) t; l<iNrCoarseLights; l+=NR_THREADS)
+    {
+        const int lightIdx = (int)coarseList[l];
+        const ScreenSpaceBoundsIndices bnd = GenerateScreenSpaceBoundsIndices(lightIdx, g_iNrVisibLights, eyeIndex);
+        const uint minC = (uint)min(255, SnapToClusterIdx(g_vBoundsBuffer[bnd.min].w, suggestedBase));
+        coarseList[l] = (minC << 12) | (uint)lightIdx;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    // Sort by encoded key; SORTLIST pads slots [iNrCoarseLights..N) with UINT_MAX automatically.
     SORTLIST(coarseList, iNrCoarseLights, MAX_NR_COARSE_ENTRIES, t, NR_THREADS);
+    // Strip sort-key bits to restore plain light indices (depth-sorted order preserved).
+    for(int l=(int) t; l<iNrCoarseLights; l+=NR_THREADS)
+        coarseList[l] &= 0xFFFu;
+    GroupMemoryBarrierWithGroupSync();
 #endif
 
     //////////// cell specific code
@@ -430,6 +487,28 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
 
     int nrClusters = (1<<g_iLog2NumClusters);
 
+#if NR_THREADS > PLATFORM_LANE_COUNT
+    // Build Z-bin table: zBinEnd[c] = first depth-sorted index where minCluster > c.
+    // Thread 0 serial scan is O(iNrCoarseLights + nrClusters) — at most 128 + 64 iterations.
+    // zBinEnd is monotonically non-decreasing; groupMaxBinEnd is the last (maximum) entry.
+    if(t == 0u)
+    {
+        int sl = 0;
+        for(int c = 0; c < nrClusters; c++)
+        {
+            while(sl < iNrCoarseLights)
+            {
+                const uint minC = (clusterIdxs[sl >> 1] >> (16u * (uint)(sl & 1))) & 0xFFu;
+                if(minC > (uint)c) break;
+                ++sl;
+            }
+            zBinEnd[c] = (uint)sl;
+        }
+        groupMaxBinEnd = (nrClusters > 0) ? zBinEnd[nrClusters - 1] : 0u;
+    }
+    GroupMemoryBarrierWithGroupSync();
+#endif
+
 
 
     //////////////////////////////////////////////////////////
@@ -440,9 +519,14 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
     int iSum = 0;
     if(i<nrClusters)
     {
-        // Each thread checks it's respective cluster against all coarse lights for intersection.
-        // At the end, 'iSum' represents the number of lights that intersect this cluster!
-        for(int l=0; l<iNrCoarseLights; l++)
+        // Z-bin: only iterate lights whose minCluster <= i (depth range starts at or before this cluster).
+        // CheckIntersectionBasic still checks maxCluster >= i to reject lights that end before this cluster.
+#if NR_THREADS > PLATFORM_LANE_COUNT
+        const int binEnd = (int)zBinEnd[i];
+#else
+        const int binEnd = iNrCoarseLights;
+#endif
+        for(int l=0; l<binEnd; l++)
         {
             iSum += (CheckIntersectionBasic(l, i) ? 1 : 0);
         }
@@ -450,7 +534,46 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
         // We have a limit to the number of lights we will track in a cluster (128). This is how much memory we
         // want to allocate out of g_LayeredSingleIdxBuffer.
         iSpaceAvail = min(iSum,MAX_NR_COARSE_ENTRIES);                          // combined storage for both direct lights and reflection
-        InterlockedAdd(g_LayeredSingleIdxBuffer[0], (uint) iSpaceAvail, start);     // alloc list memory
+    }
+
+    // Group-level prefix sum + single global atomic allocation.
+    // Instead of each cluster thread doing InterlockedAdd(g_LayeredSingleIdxBuffer[0]),
+    // compute intra-wave prefix via wave intrinsics, accumulate across waves through
+    // ldsTilePassList scratch, then one global InterlockedAdd per group.
+    {
+        uint myAlloc = (uint)iSpaceAvail;
+
+        // Intra-wave exclusive prefix sum and wave total.
+        uint wavePrefixAlloc = WavePrefixSum(myAlloc);
+        uint waveTotalAlloc = WaveActiveSum(myAlloc);
+
+        uint waveSize = WaveGetLaneCount();
+        uint waveIdx = t / waveSize;
+        uint wavesPerGroup = (NR_THREADS + waveSize - 1u) / waveSize;
+
+        // Each wave leader publishes its total to scratch.
+        if(WaveIsFirstLane())
+            ldsTilePassList[waveIdx] = waveTotalAlloc;
+        GroupMemoryBarrierWithGroupSync();
+
+        // Thread 0 scans wave totals into exclusive prefixes and does the single global alloc.
+        if(t == 0u)
+        {
+            uint acc = 0u;
+            for(uint w = 0u; w < wavesPerGroup; w++)
+            {
+                uint wc = ldsTilePassList[w];
+                ldsTilePassList[w] = acc;
+                acc += wc;
+            }
+            // Single global atomic for the entire group.
+            InterlockedAdd(g_LayeredSingleIdxBuffer[0], acc, groupAllocationBase);
+        }
+        GroupMemoryBarrierWithGroupSync();
+
+        // Each thread derives its start offset.
+        uint waveOffset = ldsTilePassList[waveIdx];
+        start = groupAllocationBase + waveOffset + wavePrefixAlloc;
     }
 
     // All our cull data are in the same list, but at render time envLights are separated so we need to shift the index
@@ -460,20 +583,60 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
     WriteShiftIndex(t, LIGHTCATEGORY_ENV, _EnvLightIndexShift);
     WriteShiftIndex(t, LIGHTCATEGORY_DECAL, _DecalIndexShift);
 
-    uint offs = start;
-    for(int ll=0; ll<iNrCoarseLights; ll+=4)
+    // Pre-compute the 8 view-space corner vertices for this thread's cluster.
+    // These are constant across all light iterations, so computing them once
+    // eliminates O(48 * iNrCoarseLights) redundant GetViewPosFromLinDepth calls
+    // (matrix multiply per call) from the inner loop.
+    // Stored as float4(pos, 1.0) so CheckIntersection can dot directly with planes.
+    float4 clusterVerts[8];
+#ifdef CONV_HULL_TEST_ENABLED
+    if(i<nrClusters)
     {
-        int p = i>>2;
-        int m = i&3;
-        if(i<24) lightPlanes[6*m+p] = FetchPlane(min(iNrCoarseLights-1,ll+m), p, eyeIndex);
+        float depthAtNearZ = ClusterIdxToZ(i, suggestedBase);
+        float depthAtFarZ = ClusterIdxToZ(i+1, suggestedBase);
+
+        [unroll]
+        for(int ci=0; ci<8; ci++)
+        {
+            float x = (ci&1)==0 ? viTilLL.x : viTilUR.x;
+            float y = (ci&2)==0 ? viTilLL.y : viTilUR.y;
+            float z = (ci&4)==0 ? depthAtNearZ : depthAtFarZ;
+            clusterVerts[ci] = float4(GetViewPosFromLinDepth( float2(x, y), z, eyeIndex), 1.0);
+        }
+    }
+#endif
+
+    // Fine-cull outer loop is bounded by groupMaxBinEnd: lights beyond it have minCluster > every
+    // cluster in this tile and cannot intersect anything.  Per-cluster fineCullEnd prunes lights
+    // that start beyond cluster i's depth range, skipping the CheckIntersection call entirely.
+#if NR_THREADS > PLATFORM_LANE_COUNT
+    const int fineCullEnd = (i < nrClusters) ? (int)zBinEnd[i] : 0;
+    const int cullRange   = (int)groupMaxBinEnd;
+#else
+    const int fineCullEnd = iNrCoarseLights;
+    const int cullRange   = iNrCoarseLights;
+#endif
+
+    uint offs = start;
+    for(int ll=0; ll<cullRange; ll+=8)
+    {
+        // Cooperatively fetch 8 lights x 6 planes = 48 float4 entries.
+        // NR_THREADS >= 48: single round, threads [0..47] each load one plane.
+        // NR_THREADS < 48 (e.g. 32 on Switch): two rounds to cover all 48 entries.
+        for(uint fetchIdx = t; fetchIdx < 48u; fetchIdx += NR_THREADS)
+        {
+            uint m = fetchIdx / 6u;   // light slot within batch [0..7]
+            uint p = fetchIdx - m*6u; // plane index [0..5]
+            lightPlanes[6*m+p] = FetchPlane(min(cullRange-1, ll+(int)m), (int)p, eyeIndex);
+        }
 
 #if NR_THREADS > PLATFORM_LANE_COUNT
         GroupMemoryBarrierWithGroupSync();
 #endif
 
-        for(int l=ll; l<min(iNrCoarseLights,(ll+4)); l++)
+        for(int l=ll; l<min(cullRange,(ll+8)); l++)
         {
-            if(offs<(start+iSpaceAvail) && i<nrClusters && CheckIntersection(l, i, viTilLL.xy, viTilUR.xy, suggestedBase, eyeIndex) )
+            if(l < fineCullEnd && offs<(start+iSpaceAvail) && i<nrClusters && CheckIntersection(l, i, clusterVerts) )
             {
                 const int lightVolIndex = GenerateLightCullDataIndex(coarseList[l], g_iNrVisibLights, eyeIndex);
                 uint lightCategory = _LightVolumeData[lightVolIndex].lightCategory;
@@ -517,8 +680,8 @@ float4 FetchPlane(int l, int p, uint eyeIndex)
     const float3 boxY = lgtDat.boxAxisY.xyz;
     const float3 boxZ = -lgtDat.boxAxisZ.xyz;           // flip axis (so it points away from the light direction for a spot-light)
     const float3 center = lgtDat.center.xyz;
-    const float radius = lgtDat.radius;
-    const float2 scaleXY = lgtDat.scaleXY;
+    const float radius = lgtDat.boxAxisY.w;
+    const float2 scaleXY = lgtDat.boxAxisX.w;
 
     return GetHullPlaneEq(boxX, boxY, boxZ, center, scaleXY, p);
 }
@@ -543,7 +706,7 @@ int SphericalIntersectionTests(uint threadID, int iNrCoarseLights, float2 screen
         const int lightBoundIndex = GenerateLightCullDataIndex(coarseList[l], g_iNrVisibLights, eyeIndex);
         SFiniteLightBound lgtDat = g_data[lightBoundIndex];
 
-        if( !DoesSphereOverlapTile(V, halfTileSizeAtZDistOne, lgtDat.center.xyz, lgtDat.radius, g_isOrthographic!=0) )
+        if( !DoesSphereOverlapTile(V, halfTileSizeAtZDistOne, lgtDat.center.xyz, lgtDat.boxAxisY.w, g_isOrthographic!=0) )
             coarseList[l]=UINT_MAX;
     }
 
@@ -551,23 +714,62 @@ int SphericalIntersectionTests(uint threadID, int iNrCoarseLights, float2 screen
     GroupMemoryBarrierWithGroupSync();
 #endif
 
-    // to greedy to double buffer coarseList lds on this so serializing removal of gaps.
-    if(threadID==0)
+    // Parallel stream compaction via WaveActiveBallot / WavePrefixCountBits (DXC).
+    // Each pass processes NR_THREADS elements.  Compacted writes go in-place to
+    // coarseList: pass N writes at most N*NR_THREADS entries, and pass N+1 reads
+    // starting at (N+1)*NR_THREADS, so writes never overtake unread source data.
+    // ldsTilePassList[0..wavesPerGroup] is used as cross-wave scratch.
+    if(threadID == 0u) convergeLightCount = 0u;
+    GroupMemoryBarrierWithGroupSync();
+
+    uint waveSize = WaveGetLaneCount();
+    uint waveIndex = threadID / waveSize;
+    uint wavesPerGroup = (NR_THREADS + waveSize - 1u) / waveSize;
+
+    int nrPasses = (iNrCoarseLights + (int)NR_THREADS - 1) / (int)NR_THREADS;
+    for(int passIdx = 0; passIdx < nrPasses; passIdx++)
     {
-        int offs = 0;
-        for(int l=0; l<iNrCoarseLights; l++)
+        int srcIdx = passIdx * (int)NR_THREADS + (int)threadID;
+        bool isValid = (srcIdx < iNrCoarseLights && coarseList[srcIdx] != UINT_MAX);
+        uint srcVal = isValid ? coarseList[srcIdx] : 0u;
+
+        // Intra-wave prefix count.
+        uint wavePrefixCount = WavePrefixCountBits(isValid);
+        uint waveValidCount = WaveActiveCountBits(isValid);
+
+        // Cross-wave exclusive prefix sum via groupshared scratch.
+        if(WaveIsFirstLane())
+            ldsTilePassList[waveIndex] = waveValidCount;
+        GroupMemoryBarrierWithGroupSync();
+
+        // Thread 0 scans the few wave counts and stores passStart.
+        if(threadID == 0u)
         {
-            if(coarseList[l]!=UINT_MAX)
-                coarseList[offs++] = coarseList[l];
+            uint acc = 0u;
+            for(uint w = 0u; w < wavesPerGroup; w++)
+            {
+                uint wc = ldsTilePassList[w];
+                ldsTilePassList[w] = acc; // exclusive prefix for wave w
+                acc += wc;
+            }
+            ldsTilePassList[wavesPerGroup] = convergeLightCount; // passStart
+            convergeLightCount += acc;
         }
-        lightOffsSph = offs;
+        GroupMemoryBarrierWithGroupSync();
+
+        if(isValid)
+        {
+            uint passStart = ldsTilePassList[wavesPerGroup];
+            uint waveOffset = ldsTilePassList[waveIndex];
+            coarseList[passStart + waveOffset + wavePrefixCount] = srcVal;
+        }
+        GroupMemoryBarrierWithGroupSync();
     }
 
-#if NR_THREADS > PLATFORM_LANE_COUNT
+    lightOffsSph = convergeLightCount;
     GroupMemoryBarrierWithGroupSync();
-#endif
 
-    return lightOffsSph;
+    return (int)lightOffsSph;
 }
 #endif
 
@@ -615,14 +817,17 @@ int CullByExactEdgeTests(uint threadID, int iNrCoarseLights, uint2 viTilLL, uint
     const int nrFrustEdges = bOnlyNeedFrustumSideEdges ? 4 : 8; // max 8 since we never need to test 4 far edges of frustum since they are identical vectors to near edges and plane is placed at vP0 on light hull.
 
     const int totNrEdgePairs = 12*nrFrustEdges;
+
+    uint waveSize = WaveGetLaneCount();
+    uint waveIdx = threadID / waveSize;
+    uint wavesPerGroup = (NR_THREADS + waveSize - 1u) / waveSize;
+
     for(int l=0; l<iNrCoarseLights; l++)
     {
-        if(threadID==0) ldsIsLightInvisible=0;
-
-#if NR_THREADS > PLATFORM_LANE_COUNT
-        GroupMemoryBarrierWithGroupSync();
-#endif
         const int lightCullIndex = GenerateLightCullDataIndex(coarseList[l], g_iNrVisibLights, eyeIndex);
+
+        bool bLightInvisible = false;
+
         UNITY_BRANCH if (_LightVolumeData[lightCullIndex].lightVolume != LIGHTVOLUMETYPE_SPHERE)        // don't bother doing edge tests for sphere lights since these have camera aligned bboxes.
         {
             SFiniteLightBound lgtDat = g_data[lightCullIndex];
@@ -631,7 +836,9 @@ int CullByExactEdgeTests(uint threadID, int iNrCoarseLights, uint2 viTilLL, uint
             const float3 boxY = lgtDat.boxAxisY.xyz;
             const float3 boxZ = -lgtDat.boxAxisZ.xyz;           // flip axis (so it points away from the light direction for a spot-light)
             const float3 center = lgtDat.center.xyz;
-            const float2 scaleXY = lgtDat.scaleXY;
+            const float2 scaleXY = lgtDat.boxAxisX.w;
+
+            bool threadFoundSep = false;
 
             for(int i=threadID; i<totNrEdgePairs; i+=NR_THREADS)
             {
@@ -668,15 +875,35 @@ int CullByExactEdgeTests(uint threadID, int iNrCoarseLights, uint2 viTilLL, uint
                 }
                 int resf = (positive>0 && negative>0) ? 0 : (positive>0 ? 1 : (negative>0 ? (-1) : 0));
 
-                bool bFoundSepPlane = (resh*resf)<0;
-
-                if(bFoundSepPlane) InterlockedOr(ldsIsLightInvisible, 1);
+                if((resh*resf)<0) threadFoundSep = true;
             }
-        }
+
+            // Wave-level reduce: any lane found a separating plane?
+            bool waveFoundSep = WaveActiveAnyTrue(threadFoundSep);
+
+            // Cross-wave reduce for multi-wave groups.
 #if NR_THREADS > PLATFORM_LANE_COUNT
+            if(WaveIsFirstLane())
+                ldsTilePassList[waveIdx] = waveFoundSep ? 1u : 0u;
+            GroupMemoryBarrierWithGroupSync();
+
+            if(threadID == 0u)
+            {
+                uint anyFound = 0u;
+                for(uint w = 0u; w < wavesPerGroup; w++)
+                    anyFound |= ldsTilePassList[w];
+                bLightInvisible = (anyFound != 0u);
+            }
+#else
+            bLightInvisible = waveFoundSep;
+#endif
+        }
+
+#if NR_THREADS > PLATFORM_LANE_COUNT
+        // Ensure all threads see bLightInvisible before thread 0 may write coarseList.
         GroupMemoryBarrierWithGroupSync();
 #endif
-        if(threadID==0 && ldsIsLightInvisible==0)
+        if(threadID==0 && !bLightInvisible)
         {
             coarseList[lightOffs2++] = coarseList[l];
         }

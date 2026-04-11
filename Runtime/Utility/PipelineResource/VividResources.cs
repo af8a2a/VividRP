@@ -13,9 +13,6 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/FinalBlit")]
         public Shader FinalBlitShader;
 
-        [ResourcePath("Shaders/Core/Private/AutoExposure")]
-        public ComputeShader AutoExposureCompute;
-
         
         [ResourcePath("Shaders/Core/Private/CoreBlit")]
         public Shader CoreBlitShader;
@@ -106,6 +103,9 @@ namespace VividRP.Runtime
 
         [ResourcePath("Shaders/Core/Private/GenerateViewZ")]
         public ComputeShader GenerateViewZCompute;
+
+        [ResourcePath("Shaders/Core/Private/DownSample/HZBGenerate")]
+        public ComputeShader HZBGenerateCompute;
 
         [ResourcePath("Shaders/Core/Private/TemporalAA")]
         public ComputeShader TemporalAACompute;

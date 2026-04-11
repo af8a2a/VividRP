@@ -25,7 +25,7 @@ Shader "VividRP/Material/StandardLit"
         [Sub(SurfaceInputs)] _OcclusionStrength("Occlusion Strength", Range(0.0, 1.0)) = 1.0
         [Sub(SurfaceInputs)] _OcclusionMap("Occlusion Map", 2D) = "white" {}
         [Sub(SurfaceInputs)] [HDR] _EmissionColor("Emission Color", Color) = (0, 0, 0, 0)
-        [Sub(SurfaceInputs)] _EmissionMap("Emission Map", 2D) = "white" {}
+        [Sub(SurfaceInputs)] _EmissionMap("Emission Map", 2D) = "black" {}
         [Sub(SurfaceInputs)] _ClearCoatMask("Clear Coat Mask", Range(0.0, 1.0)) = 0.0
         [Sub(SurfaceInputs)] _ClearCoatSmoothness("Clear Coat Smoothness", Range(0.0, 1.0)) = 1.0
 
@@ -77,7 +77,7 @@ Shader "VividRP/Material/StandardLit"
                 #pragma vertex Vert
                 #pragma fragment FragPreDepth
 
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLitGBufferPass.hlsl"
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitGBufferPass.hlsl"
             ENDHLSL
         }
 
@@ -108,7 +108,7 @@ Shader "VividRP/Material/StandardLit"
                 #pragma vertex Vert
                 #pragma fragment FragGBuffer
 
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLitGBufferPass.hlsl"
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitGBufferPass.hlsl"
             ENDHLSL
         }
 
@@ -139,7 +139,7 @@ Shader "VividRP/Material/StandardLit"
                 #pragma vertex Vert
                 #pragma fragment FragDebug
 
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLitGBufferPass.hlsl"
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitGBufferPass.hlsl"
             ENDHLSL
         }
 
@@ -161,7 +161,31 @@ Shader "VividRP/Material/StandardLit"
                 #pragma vertex Vert
                 #pragma fragment Frag
 
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLitMotionVectorPass.hlsl"
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitMotionVectorPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "IndirectDXR"
+            Tags { "LightMode" = "IndirectDXR" }
+
+            HLSLPROGRAM
+                #pragma only_renderers d3d11 xboxseries ps5 switch2
+                #pragma raytracing surface_shader
+                #pragma shader_feature_local_raytracing _ALPHATEST_ON
+                #pragma shader_feature_local_raytracing _OPACITYMAP
+                #pragma shader_feature_local_raytracing _NORMALMAP
+                #pragma shader_feature_local_raytracing _METALLICSPECGLOSSMAP
+                #pragma shader_feature_local_raytracing _ROUGHNESSMAP
+                #pragma shader_feature_local_raytracing _OCCLUSIONMAP
+                #pragma shader_feature_local_raytracing _EMISSION
+                #pragma shader_feature_local_raytracing _CLEARCOAT
+                #pragma shader_feature_local_raytracing _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+
+                #define VIVIDRP_INDIRECT_DIFFUSE_CLOSEST_HIT_NAME StandardLitIndirectDiffuseClosestHit
+                #define VIVIDRP_INDIRECT_DIFFUSE_ANY_HIT_NAME StandardLitIndirectDiffuseAnyHit
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/IndirectDiffuse.hlsl"
             ENDHLSL
         }
     }

@@ -70,42 +70,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void GetExposureMultipliers_SplitsExposureToKeepSourceStageStable_WhenExposureIsBelowOne()
-        {
-            var volume = ScriptableObject.CreateInstance<PhysicallyBasedSkyVolume>();
-
-            try
-            {
-                volume.exposure.value = 0.25f;
-
-                Assert.That(volume.GetPreExposureMultiplier(), Is.EqualTo(0.25f));
-                Assert.That(volume.GetPostExposureMultiplier(), Is.EqualTo(1.0f));
-            }
-            finally
-            {
-                Object.DestroyImmediate(volume);
-            }
-        }
-
-        [Test]
-        public void GetExposureMultipliers_KeepsBrighteningInPostStage_WhenExposureExceedsOne()
-        {
-            var volume = ScriptableObject.CreateInstance<PhysicallyBasedSkyVolume>();
-
-            try
-            {
-                volume.exposure.value = 4.0f;
-
-                Assert.That(volume.GetPreExposureMultiplier(), Is.EqualTo(1.0f));
-                Assert.That(volume.GetPostExposureMultiplier(), Is.EqualTo(4.0f));
-            }
-            finally
-            {
-                Object.DestroyImmediate(volume);
-            }
-        }
-
-        [Test]
         public void GetHashCode_Changes_WhenFogSettingsChange()
         {
             var volume = ScriptableObject.CreateInstance<PhysicallyBasedSkyVolume>();

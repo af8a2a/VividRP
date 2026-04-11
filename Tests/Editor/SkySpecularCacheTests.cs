@@ -1,7 +1,6 @@
 using System.IO;
 using NUnit.Framework;
 using UnityEngine;
-using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using VividRP.Runtime;
 
@@ -60,37 +59,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Update_AllocatesRTHandle_WhenSourceIsRuntimeCubemapTexture()
-        {
-            var cache = new SkySpecularCache();
-            var runtimeCubemap = new RenderTexture(8, 8, 0)
-            {
-                dimension = TextureDimension.Cube,
-                volumeDepth = 6,
-                graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat,
-                useMipMap = true,
-                autoGenerateMips = false,
-                enableRandomWrite = true
-            };
-
-            try
-            {
-                runtimeCubemap.Create();
-                cache.Update(runtimeCubemap, 29);
-
-                Assert.That(cache.IsValid, Is.True);
-                Assert.That(cache.Cubemap, Is.Not.Null);
-                Assert.That(cache.SkyHash, Is.EqualTo(29));
-            }
-            finally
-            {
-                cache.Dispose();
-                runtimeCubemap.Release();
-                Object.DestroyImmediate(runtimeCubemap);
-            }
-        }
-
-        [Test]
         public void Update_UsesFallbackHandle_WhenSourceIsNull()
         {
             var cache = new SkySpecularCache();
@@ -115,34 +83,17 @@ namespace VividRP.Editor.Tests
         {
             var deferredSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "DeferredLightingPass.cs"));
             var skyManagerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyManager.cs"));
-            var cacheSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkySpecularCache.cs"));
 
             Assert.That(deferredSource, Does.Contain("SkyManager.ImportSpecularCubemap(m_SkyIBLCubemap, skyData);"));
             Assert.That(deferredSource, Does.Not.Contain("ImportedSkyCubemapState"));
             Assert.That(deferredSource, Does.Not.Contain("EnsureSkyIblCubemapImported("));
             Assert.That(deferredSource, Does.Not.Contain("ReleaseSkyIblCubemapState("));
             Assert.That(deferredSource, Does.Not.Contain("CreateFallbackSkyIBLCubemap("));
-            Assert.That(deferredSource, Does.Contain("SkyManager.GetSpecularCubemapMaxMip(skyData)"));
 
             Assert.That(skyManagerSource, Does.Contain("private static readonly SkySpecularCache s_SpecularCache = new();"));
-            Assert.That(skyManagerSource, Does.Contain("s_SpecularCache.Build(resources);"));
             Assert.That(skyManagerSource, Does.Contain("internal static RTHandle GetSpecularCubemapHandle()"));
-            Assert.That(skyManagerSource, Does.Contain("internal static int GetSpecularCubemapMaxMip(VividSkyData skyData = null)"));
             Assert.That(skyManagerSource, Does.Contain("internal static void ImportSpecularCubemap(RenderGraphTexture texture, VividSkyData skyData = null)"));
-            Assert.That(skyManagerSource, Does.Contain("UpdateSpecularCubemap(cmd, s_CachedSkyData);"));
-            Assert.That(skyManagerSource, Does.Contain("UpdateSpecularCubemap(skyData);"));
-            Assert.That(cacheSource, Does.Contain("private const string PrefilterKernelName = \"SkySpecularPrefilter\";"));
-            Assert.That(cacheSource, Does.Contain("internal bool HasSource(Texture source)"));
-            Assert.That(cacheSource, Does.Contain("internal int MaxMipLevel"));
-            Assert.That(cacheSource, Does.Contain("m_ConvolutionCompute = resources?.SkyAmbientProbeConvolutionCompute;"));
-            Assert.That(cacheSource, Does.Contain("m_FilteredCubemap = new RenderTexture(faceSize, faceSize, 0)"));
-            Assert.That(cacheSource, Does.Contain("m_FilteredCubemapFaces = new RenderTexture(faceSize, faceSize, 0)"));
-            Assert.That(cacheSource, Does.Contain("cmd.SetComputeTextureParam(m_ConvolutionCompute, m_PrefilterKernel, SkySpecularSourceCubemapId, source);"));
-            Assert.That(cacheSource, Does.Contain("cmd.SetComputeTextureParam("));
-            Assert.That(cacheSource, Does.Contain("SkySpecularMipOutputId"));
-            Assert.That(cacheSource, Does.Contain("cmd.DispatchCompute("));
-            Assert.That(cacheSource, Does.Contain("for (var mip = 0; mip < mipCount; mip++)"));
-            Assert.That(cacheSource, Does.Contain("cmd.CopyTexture(m_FilteredCubemapFaces, face, mip, m_FilteredCubemap, face, mip);"));
+            Assert.That(skyManagerSource, Does.Contain("UpdateSpecularCubemap(s_CachedSkyData);"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

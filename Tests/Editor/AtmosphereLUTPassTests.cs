@@ -91,8 +91,6 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SkyViewLUTOutput;"));
             Assert.That(source, Does.Contain("SampleTransmittanceLut"));
             Assert.That(source, Does.Contain("SampleMultiScatteringLut"));
-            Assert.That(source, Does.Contain("float3 SanitizeSkyRadiance(float3 color)"));
-            Assert.That(source, Does.Not.Contain("float3 sunDiskTransmittance = SampleTransmittanceLut(cameraHeight, sunAtCamera, planetRadius, atmosphereRadius);"));
             Assert.That(source, Does.Contain("EvaluateSkyView"));
         }
 

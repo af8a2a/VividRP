@@ -27,8 +27,6 @@ Shader "Hidden/VividRP/FinalBlit"
             SAMPLER(sampler_VividColorGradingLut);
             float4 _BlitScaleBias;
             float4 _VividColorGradingParams;
-            StructuredBuffer<float4> _VividAutoExposureBuffer;
-            float4 _VividAutoExposureParams;
 
             #if defined(_FILM_GRAIN)
             TEXTURE2D(_VividFilmGrainTexture);
@@ -75,10 +73,7 @@ Shader "Hidden/VividRP/FinalBlit"
             float4 Frag(Varyings input) : SV_Target
             {
                 float4 color = SAMPLE_TEXTURE2D(_BlitTexture, sampler_BlitTexture, input.uv);
-                float exposureScale = _VividAutoExposureParams.x > 0.5
-                    ? _VividAutoExposureBuffer[0].x * _VividAutoExposureParams.y
-                    : 1.0;
-                float3 postProcessed = color.rgb * _VividColorGradingParams.w * exposureScale;
+                float3 postProcessed = color.rgb * _VividColorGradingParams.w;
 
                 if (_VividColorGradingParams.z > 0.5)
                 {

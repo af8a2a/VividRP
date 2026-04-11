@@ -256,53 +256,60 @@ float SampleDirectionalShadow(float2 positionCS)
     return saturate(SAMPLE_TEXTURE2D_LOD(_DirectionalShadowTexture, sampler_PointClamp, saturate(uv), 0).x);
 }
 
-float3 RenderSunDisk(float3 viewDirectionWS, float2 positionCS)
+float3 RenderSunDisk(inout float tFrag, float tExit, float3 V)
 {
-    if (!GetRenderSunDiskEnabled())
-        return 0.0f;
+    float3 radiance = 0;
 
-    float3 radiance = 0.0f;
-    float closestDistance = FLT_INF;
-
+    // Intersect and shade emissive celestial bodies.
+    // Unfortunately, they don't write depth.
     for (uint i = 0; i < _CelestialBodyCount; i++)
     {
         CelestialBodyData light = _CelestialBodyDatas[i];
-        if (asint(light.angularRadius) == 0)
-            continue;
 
-        float lightDistance = light.distanceFromCamera;
-        float3 L = -light.forward.xyz;
-        float lightDotView = dot(L, viewDirectionWS);
+        // Celestial body must be outside the atmosphere (request from Pierre D).
+        float lightDist = max(light.distanceFromCamera, tExit);
 
-        if (lightDotView >= light.flareCosInner && lightDistance < closestDistance)
+        if (asint(light.angularRadius) != 0 && lightDist < tFrag)
         {
-            closestDistance = lightDistance;
-            float3 color = light.surfaceColor;
+            // We may be able to see the celestial body.
+            float3 L = -light.forward.xyz;
 
-            if (light.type != 0)
-                color *= ComputeMoonPhase(light, viewDirectionWS) * INV_PI + ComputeEarthshine(light);
+            float LdotV    = -dot(L, V);
+            float radInner = light.angularRadius;
 
-            if (CanSampleCelestialSurfaceTexture(light))
-                color *= SampleCelestialSurfaceTexture(light, viewDirectionWS);
+            if (LdotV >= light.flareCosInner) // Sun disk.
+            {
+                tFrag = lightDist;
+                float3 color = light.surfaceColor;
 
-            if (light.shadowIndex >= 0)
-                color *= SampleDirectionalShadow(positionCS);
+                if (light.type != 0)
+                    color *= ComputeMoonPhase(light, V) * INV_PI + ComputeEarthshine(light); // Lambertian BRDF
 
-            radiance = color;
-        }
-        else if (light.flareSize > 0.0f && lightDotView >= light.flareCosOuter)
-        {
-            float radius = acos(lightDotView);
-            float flareRadius = max(0.0f, radius - light.angularRadius);
-            float weight = saturate(1.0f - flareRadius * rcp(light.flareSize));
+                //todo:
+                // if (light.surfaceTextureScaleOffset.x > 0)
+                // {
+                //     float2 proj   = float2(dot(V, light.right), dot(V, light.up));
+                //     float2 angles = float2(FastASin(proj.x), FastASin(-proj.y));
+                //     float2 uv = angles * rcp(radInner) * 0.5 + 0.5;
+                //     color *= SampleCookie2D(uv, light.surfaceTextureScaleOffset);
+                // }
 
-            float3 color = light.flareColor;
-            color *= SafePositivePow(weight, light.flareFalloff);
-            radiance += color;
+                radiance = color;
+            }
+            else if (LdotV >= light.flareCosOuter) // Flare region.
+            {
+                float rad = acos(LdotV);
+                float r   = max(0, rad - radInner);
+                float w   = saturate(1 - r * rcp(light.flareSize));
+
+                float3 color = light.flareColor;
+                color *= SafePositivePow(w, light.flareFalloff);
+                radiance += color;
+            }
         }
     }
 
-    return SanitizeSkyRadiance(radiance);
+    return radiance;
 }
 
 void EvaluateAtmosphericFallback(float3 viewDirWS, float rayLength, out float3 skyColor, out float3 skyTransmittance)
@@ -373,52 +380,112 @@ float3 EvaluateSpaceColor(float3 viewDirection, float3 viewTransmittance)
 
 float3 EvaluateSky(float3 directionWS, float2 positionCS)
 {
-    float3 viewDirWS = normalize(directionWS);
+        const float R = _PlanetaryRadius;
+        const float3 V = GetSkyViewDirWS(positionCS);
+        const bool renderSunDisk = _RenderSunDisk != 0;
+        float3 N; float r; // These params correspond to the entry point
 
-    if (_SkyUseLUT > 0.5f && IsViewAboveHorizon(viewDirWS))
-    {
-        float3 skyColor = 0.0f;
-        float3 skyOpacity = 0.0f;
+    #ifdef LOCAL_SKY
+        const float3 O = _PBRSkyCameraPosPS;
 
-        EvaluateDistantAtmosphere(viewDirWS, skyColor, skyOpacity);
-        skyColor += RenderSunDisk(viewDirWS, positionCS) * (1.0f - skyOpacity);
-        skyColor += EvaluateSpaceColor(viewDirWS, 1.0f - skyOpacity);
-        return SanitizeSkyRadiance(skyColor);
-    }
+        float tEntry = IntersectAtmosphere(O, V, N, r).x;
+        float tExit  = IntersectAtmosphere(O, V, N, r).y;
 
-    float3 cameraPosition = _SkyCameraPositionPS.xyz;
-    float atmosphereEntry;
-    float atmosphereExit;
-    if (!IntersectAtmosphereRay(cameraPosition, viewDirWS, GetAtmosphereRadius(), atmosphereEntry, atmosphereExit))
-    {
-        float3 skyColor = EvaluateSpaceColor(viewDirWS, 1.0f.xxx);
-        skyColor += RenderSunDisk(viewDirWS, positionCS);
-        return SanitizeSkyRadiance(skyColor);
-    }
+        float cosChi = -dot(N, V);
+        float cosHor = ComputeCosineOfHorizonAngle(r);
+    #else
+        N = float3(0, 1, 0);
+        r = _PlanetaryRadius;
+        float cosChi = -dot(N, V);
+        float cosHor = 0.0f;
+        const float3 O = N * r;
 
-    float rayLength = atmosphereExit;
-    float groundDistance;
-    bool hitGround = IntersectGroundRay(cameraPosition, viewDirWS, GetPlanetRadius(), groundDistance) && groundDistance > 0.0f;
-    if (hitGround)
-        rayLength = min(rayLength, groundDistance);
+        float tEntry = 0.0f;
+        float tExit  = IntersectSphere(_AtmosphericRadius, -dot(N, V), r).y;
+    #endif
 
-    float3 skyColor;
-    float3 viewTransmittance;
-    EvaluateAtmosphericFallback(viewDirWS, rayLength, skyColor, viewTransmittance);
-    ApplyArtisticOverrides(viewDirWS, skyColor);
+        bool rayIntersectsAtmosphere = (tEntry >= 0);
+        bool lookAboveHorizon        = (cosChi >= cosHor);
 
-    if (hitGround)
-    {
-        float3 groundPoint = cameraPosition + viewDirWS * rayLength;
-        skyColor += EvaluateGroundColor(groundPoint, viewTransmittance);
-    }
-    else
-    {
-        skyColor += RenderSunDisk(viewDirWS, positionCS) * viewTransmittance;
-        skyColor += EvaluateSpaceColor(viewDirWS, viewTransmittance);
-    }
+        float  tFrag    = FLT_INF;
+        float3 radiance = 0;
 
-    return SanitizeSkyRadiance(skyColor * GetSkyExposureMultiplier());
+        if (renderSunDisk)
+            radiance = RenderSunDisk(tFrag, tExit, V);
+
+        if (rayIntersectsAtmosphere && !lookAboveHorizon) // See the ground?
+        {
+            float tGround = tEntry + IntersectSphere(R, cosChi, r).x;
+
+            if (tGround < tFrag)
+            {
+                // Closest so far.
+                // Make it negative to communicate to EvaluatePbrAtmosphere that we intersected the ground.
+                tFrag = -tGround;
+
+                radiance = 0;
+
+                float3 gP = O + tGround * -V;
+                float3 gN = normalize(gP);
+
+                if (_HasGroundEmissionTexture)
+                {
+                    float4 ts = SAMPLE_TEXTURECUBE(_GroundEmissionTexture, sampler_TrilinearClamp, mul(gN, (float3x3)_PlanetRotation));
+                    radiance += _GroundEmissionMultiplier * ts.rgb;
+                }
+
+                float3 albedo = _GroundAlbedo.xyz;
+
+                if (_HasGroundAlbedoTexture)
+                {
+                    albedo *= SAMPLE_TEXTURECUBE(_GroundAlbedoTexture,sampler_TrilinearClamp , mul(gN, (float3x3)_PlanetRotation)).rgb;
+                }
+
+                float3 gBrdf = INV_PI * albedo;
+
+                // Shade the ground.
+                for (uint i = 0; i < _CelestialLightCount; i++)
+                {
+                    CelestialBodyData light = _CelestialBodyDatas[i];
+
+                    float3 L          = -light.forward.xyz;
+                    float3 intensity  = light.color.rgb;
+
+                #ifdef LOCAL_SKY
+                    intensity *= SampleGroundIrradianceTexture(dot(gN, L));
+                #else
+                    float3 opticalDepth = ComputeAtmosphericOpticalDepth(r, dot(N, L), true);
+                    intensity *= TransmittanceFromOpticalDepth(opticalDepth) * saturate(dot(N, L));
+                #endif
+
+                    radiance += gBrdf * intensity;
+                }
+            }
+        }
+        else if (tFrag == FLT_INF) // See the stars?
+        {
+            if (_HasSpaceEmissionTexture)
+            {
+                // V points towards the camera.
+                float4 ts = SAMPLE_TEXTURECUBE(_SpaceEmissionTexture, sampler_TrilinearClamp, mul(-V, (float3x3)_SpaceRotation));
+                radiance += _SpaceEmissionMultiplier * ts.rgb;
+            }
+        }
+
+        float3 skyColor = 0, skyOpacity = 0;
+
+        #ifdef LOCAL_SKY
+        if (rayIntersectsAtmosphere)
+            EvaluatePbrAtmosphere(_PBRSkyCameraPosPS, V, tFrag, renderSunDisk, skyColor, skyOpacity);
+        #else
+        if (lookAboveHorizon)
+            EvaluateDistantAtmosphere(-V, skyColor, skyOpacity);
+        #endif
+
+        skyColor += radiance * (1 - skyOpacity);
+        skyColor *= _IntensityMultiplier;
+
+        return float4(skyColor, 1.0);
 }
 
 float3 EvaluateSkyColor(float2 positionCS)

@@ -77,8 +77,6 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: 050cc193933fca74a87ed5fc32a98f21, type: 3}
   - ResourceName: Shaders/Core/Private/OverlayDebug
     ResourceObject: {fileID: 4800000, guid: e395d09a0901a0f41ab15bd086c17efd, type: 3}
-  - ResourceName: Shaders/Core/Private/PhysicallyBasedSky
-    ResourceObject: {fileID: 4800000, guid: b3c91ed48e4997345a128588bd90704e, type: 3}
   - ResourceName: Shaders/Core/Private/PreIntegratedFGD_CharlieFabricLambert
     ResourceObject: {fileID: 4800000, guid: f9ea26c818e16a04fa0b6f8d7ae1a662, type: 3}
   - ResourceName: Shaders/Core/Private/PreIntegratedFGD_GGXDisneyDiffuse
@@ -89,6 +87,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 3a6fdd688e96b924dbaf2f1c27e7b53d, type: 3}
   - ResourceName: Shaders/Core/Private/Sky/AmbientProbeConvolution.compute
     ResourceObject: {fileID: 7200000, guid: 210a064f204d0cd46adea12cca4bd30d, type: 3}
+  - ResourceName: Shaders/Core/Private/Sky/PhysicallyBasedSky
+    ResourceObject: {fileID: 4800000, guid: b3c91ed48e4997345a128588bd90704e, type: 3}
   - ResourceName: Shaders/Core/Private/Sky/SkyLUTGenerator.compute
     ResourceObject: {fileID: 7200000, guid: cd6ae8fe1afb47eba654a15718311401, type: 3}
   - ResourceName: Shaders/Core/Private/SliderDebug

@@ -32,7 +32,7 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/HDRISky")]
         public Shader HDRISkyShader;
 
-        [ResourcePath("Shaders/Core/Private/PhysicallyBasedSky")]
+        [ResourcePath("Shaders/Core/Private/Sky/PhysicallyBasedSky")]
         public Shader PhysicallyBasedSkyShader;
 
         [ResourcePath("Shaders/Core/Private/Sky/SkyLUTGenerator.compute")]

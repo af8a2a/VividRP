@@ -62,7 +62,7 @@ namespace VividRP.Runtime
                 SkySettingsVolume.GetGeneratedCubemapResolution(skySettings));
         }
 
-        public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd, bool forceRebuild = false)
+        public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd, int skyHash, bool forceRebuild)
         {
             if (skyData == null)
                 return;
@@ -75,7 +75,6 @@ namespace VividRP.Runtime
                 return;
             }
 
-            var skyHash = GetSkyHash(context);
             skyData.activeSkyType = SkyType.HDRI;
             skyData.specularCubemap = cubemap;
             skyData.tint = sky?.tint.value ?? Color.white;

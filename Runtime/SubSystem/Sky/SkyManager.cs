@@ -15,7 +15,6 @@ namespace VividRP.Runtime
 
         private static bool s_Initialized;
         private static bool s_UpdateRequested;
-        private static bool s_ForceRebuild;
         private static float s_LastUpdateTime;
 
 #if UNITY_EDITOR
@@ -36,7 +35,6 @@ namespace VividRP.Runtime
             s_CachedSkyData.Reset();
             s_LastUpdateTime = float.NegativeInfinity;
             s_UpdateRequested = false;
-            s_ForceRebuild = false;
             s_Initialized = true;
 
             FrameContextSystem.SubsystemPreRender -= Update;
@@ -54,9 +52,8 @@ namespace VividRP.Runtime
             s_CachedSkyData.Reset();
             s_LastUpdateTime = float.NegativeInfinity;
             s_UpdateRequested = false;
-            s_ForceRebuild = false;
             s_Initialized = false;
-            
+
             FrameContextSystem.SubsystemPreRender -= Update;
         }
 
@@ -84,6 +81,7 @@ namespace VividRP.Runtime
                 && renderer != null
                 && renderer.IsActive();
 
+            var forceRebuild = false;
             if (hasActiveSky)
             {
                 var context = new SkyRendererContext(
@@ -91,11 +89,10 @@ namespace VividRP.Runtime
                     frameData.GetOrCreate<VividLightData>());
                 var skyHash = renderer.GetSkyHash(context);
 
-                if (NeedsUpdate(activeSkyType, skySettings, skyHash, out var forceRebuild))
+                if (NeedsUpdate(activeSkyType, skySettings, skyHash, out forceRebuild))
                 {
-                    s_ForceRebuild = forceRebuild;
                     s_CachedSkyData.Reset();
-                    renderer.Update(context, s_CachedSkyData, cmd, forceRebuild);
+                    renderer.Update(context, s_CachedSkyData, cmd, skyHash, forceRebuild);
                     s_CachedSkyData.activeSkyType = activeSkyType;
                     s_CachedSkyData.skyHash = skyHash;
                     s_LastUpdateTime = Time.realtimeSinceStartup;
@@ -108,8 +105,7 @@ namespace VividRP.Runtime
             }
 
             UpdateSpecularCubemap(cmd, s_CachedSkyData);
-            UpdateDiffuseAmbientProbe(cmd, s_CachedSkyData);
-            s_ForceRebuild = false;
+            UpdateDiffuseAmbientProbe(cmd, s_CachedSkyData, forceRebuild);
 
             skyData.CopyFrom(s_CachedSkyData);
         }
@@ -196,7 +192,7 @@ namespace VividRP.Runtime
             s_SpecularCache.Update(skyData?.specularCubemap, skyData?.skyHash ?? 0);
         }
 
-        private static void UpdateDiffuseAmbientProbe(CommandBuffer cmd, VividSkyData skyData)
+        private static void UpdateDiffuseAmbientProbe(CommandBuffer cmd, VividSkyData skyData, bool forceRebuild)
         {
             if (skyData != null && skyData.ambientProbeCubemap != null)
             {
@@ -211,7 +207,7 @@ namespace VividRP.Runtime
                         skyData.ambientProbeExposure,
                         skyData.ambientProbeRotation,
                         skyData.ambientProbeHash,
-                        s_ForceRebuild);
+                        forceRebuild);
                 }
 
                 s_AmbientProbeConvolution.BindGlobalBuffer(cmd, useDefaultBuffer);

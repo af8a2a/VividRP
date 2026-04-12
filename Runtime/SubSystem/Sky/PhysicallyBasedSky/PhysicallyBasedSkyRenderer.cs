@@ -127,7 +127,7 @@ namespace VividRP.Runtime
                 PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialBodyHash(context));
         }
 
-        public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd, bool forceRebuild = false)
+        public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd, int skyHash, bool forceRebuild)
         {
             if (skyData == null)
                 return;
@@ -139,12 +139,11 @@ namespace VividRP.Runtime
                 return;
             }
 
-            var hash = GetSkyHash(context);
             var skySettings = VividVolumeManagerUtility.GetSkySettingsVolume();
             var generatedCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(skySettings);
             var generatedCubemapViewSampleCount = SkySettingsVolume.GetGeneratedCubemapViewSampleCount(skySettings);
             var runtimeCubemapRebuildReason = ResolveRuntimeCubemapRebuildReason(
-                hash,
+                skyHash,
                 generatedCubemapResolution,
                 generatedCubemapViewSampleCount);
             if (forceRebuild && runtimeCubemapRebuildReason == SkyRebuildReason.None)
@@ -160,13 +159,13 @@ namespace VividRP.Runtime
                         cmd,
                         generatedCubemapViewSampleCount))
                     {
-                        m_RuntimeSkyHash = hash;
+                        m_RuntimeSkyHash = skyHash;
                         m_RuntimeSkyViewSampleCount = generatedCubemapViewSampleCount;
                     }
                 }
             }
 
-            var ambientProbeRebuildReason = ResolveAmbientProbeCubemapRebuildReason(hash, generatedCubemapResolution);
+            var ambientProbeRebuildReason = ResolveAmbientProbeCubemapRebuildReason(skyHash, generatedCubemapResolution);
             if (forceRebuild && ambientProbeRebuildReason == SkyRebuildReason.None)
                 ambientProbeRebuildReason = SkyRebuildReason.ParametersChanged;
             if (ambientProbeRebuildReason != SkyRebuildReason.None && CanBakeAmbientProbe() && cmd != null)
@@ -175,13 +174,13 @@ namespace VividRP.Runtime
                 using (new ProfilingScope(cmd, GetAmbientProbeRebuildSampler(ambientProbeRebuildReason)))
                 {
                     if (RebuildAmbientProbeCubemap(volume, context, cmd, generatedCubemapViewSampleCount))
-                        m_AmbientProbeSkyHash = hash;
+                        m_AmbientProbeSkyHash = skyHash;
                 }
             }
 
             var useBakedAmbientProbe = CanBakeAmbientProbe()
                 && m_AmbientProbeCubemap != null
-                && m_AmbientProbeSkyHash == hash;
+                && m_AmbientProbeSkyHash == skyHash;
 
             skyData.activeSkyType = SkyType.PhysicallyBased;
             skyData.specularCubemap = m_RuntimeSkyCubemap;
@@ -192,7 +191,7 @@ namespace VividRP.Runtime
             skyData.ambientProbeTint = Color.white;
             skyData.ambientProbeExposure = 0.0f;
             skyData.ambientProbeRotation = 0.0f;
-            skyData.ambientProbeHash = hash;
+            skyData.ambientProbeHash = skyHash;
         }
 
         public void Dispose()

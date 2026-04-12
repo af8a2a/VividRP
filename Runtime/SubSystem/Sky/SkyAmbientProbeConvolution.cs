@@ -5,13 +5,6 @@ namespace VividRP.Runtime
 {
     internal sealed class SkyAmbientProbeConvolution
     {
-        private enum AmbientProbeConvolutionRebuildReason
-        {
-            None,
-            MissingBuffer,
-            SkyChanged
-        }
-
         private const string DiffuseKernelName = "AmbientProbeConvolutionDiffuse";
         private const string LegacyKernelName = "AmbientProbeConvolution";
         private const int AmbientProbeCoefficientCount = 27;
@@ -27,8 +20,7 @@ namespace VividRP.Runtime
         private static readonly int VividAmbientProbeDataId = Shader.PropertyToID("_VividAmbientProbeData");
         private static readonly int SkyConvolutionTintId = Shader.PropertyToID("_SkyConvolutionTint");
         private static readonly int SkyConvolutionParamsId = Shader.PropertyToID("_SkyConvolutionParams");
-        private static readonly ProfilingSampler s_ConvolutionMissingBufferSampler = new("SkyAmbientProbeConvolution.Convolve (MissingBuffer)");
-        private static readonly ProfilingSampler s_ConvolutionSkyChangedSampler = new("SkyAmbientProbeConvolution.Convolve (SkyChanged)");
+        private static readonly ProfilingSampler s_ConvolutionSampler = new("SkyAmbientProbeConvolution.Convolve");
         private static readonly Vector4[] s_DefaultAmbientProbeData =
         {
             Vector4.zero,
@@ -47,7 +39,6 @@ namespace VividRP.Runtime
         private GraphicsBuffer m_AmbientProbeCoefficientBuffer;
         private GraphicsBuffer m_AmbientProbeScratchBuffer;
         private GraphicsBuffer m_DefaultAmbientProbeBuffer;
-        private bool m_HasConvolvedSkyHash;
         private int m_ConvolvedSkyHash;
 
         internal bool IsSupported =>
@@ -77,7 +68,6 @@ namespace VividRP.Runtime
             m_ComputeShader = null;
             m_Kernel = -1;
             m_UsesHdrpDiffuseKernel = false;
-            m_HasConvolvedSkyHash = false;
             m_ConvolvedSkyHash = 0;
         }
 
@@ -93,15 +83,16 @@ namespace VividRP.Runtime
             if (!IsSupported || cmd == null || sourceCubemap == null)
                 return;
 
-            var rebuildReason = ResolveRebuildReason(skyHash);
-            if (forceRebuild && rebuildReason == AmbientProbeConvolutionRebuildReason.None)
-                rebuildReason = AmbientProbeConvolutionRebuildReason.SkyChanged;
-            if (rebuildReason == AmbientProbeConvolutionRebuildReason.None)
+            var needsRebuild = forceRebuild
+                || !HasValidBuffers()
+                || m_ConvolvedSkyHash != skyHash;
+
+            if (!needsRebuild)
                 return;
 
             EnsureAmbientProbeBuffers();
 
-            using (new ProfilingScope(cmd, GetConvolutionSampler(rebuildReason)))
+            using (new ProfilingScope(cmd, s_ConvolutionSampler))
             {
                 cmd.SetComputeTextureParam(m_ComputeShader, m_Kernel, AmbientProbeInputCubemapId, sourceCubemap);
                 if (m_UsesHdrpDiffuseKernel)
@@ -124,7 +115,6 @@ namespace VividRP.Runtime
                 cmd.DispatchCompute(m_ComputeShader, m_Kernel, 1, 1, 1);
             }
 
-            m_HasConvolvedSkyHash = true;
             m_ConvolvedSkyHash = skyHash;
         }
 
@@ -137,6 +127,15 @@ namespace VividRP.Runtime
             cmd.SetGlobalBuffer(
                 VividAmbientProbeDataId,
                 useDefault || m_AmbientProbeBuffer == null ? m_DefaultAmbientProbeBuffer : m_AmbientProbeBuffer);
+        }
+
+        private bool HasValidBuffers()
+        {
+            if (m_AmbientProbeBuffer == null)
+                return false;
+
+            return !m_UsesHdrpDiffuseKernel
+                || (m_AmbientProbeCoefficientBuffer != null && m_AmbientProbeScratchBuffer != null);
         }
 
         private void EnsureAmbientProbeBuffers()
@@ -164,20 +163,6 @@ namespace VividRP.Runtime
                 AmbientProbePackedCoefficientCount,
                 AmbientProbePackedCoefficientStride);
             m_DefaultAmbientProbeBuffer.SetData(s_DefaultAmbientProbeData);
-        }
-
-        private AmbientProbeConvolutionRebuildReason ResolveRebuildReason(int skyHash)
-        {
-            if (m_AmbientProbeBuffer == null
-                || (m_UsesHdrpDiffuseKernel
-                    && (m_AmbientProbeCoefficientBuffer == null || m_AmbientProbeScratchBuffer == null)))
-            {
-                return AmbientProbeConvolutionRebuildReason.MissingBuffer;
-            }
-
-            return m_HasConvolvedSkyHash && m_ConvolvedSkyHash == skyHash
-                ? AmbientProbeConvolutionRebuildReason.None
-                : AmbientProbeConvolutionRebuildReason.SkyChanged;
         }
 
         private int FindKernel()
@@ -218,13 +203,6 @@ namespace VividRP.Runtime
                     AmbientProbeCoefficientCount,
                     AmbientProbeScratchStride);
             }
-        }
-
-        private static ProfilingSampler GetConvolutionSampler(AmbientProbeConvolutionRebuildReason reason)
-        {
-            return reason == AmbientProbeConvolutionRebuildReason.SkyChanged
-                ? s_ConvolutionSkyChangedSampler
-                : s_ConvolutionMissingBufferSampler;
         }
     }
 }

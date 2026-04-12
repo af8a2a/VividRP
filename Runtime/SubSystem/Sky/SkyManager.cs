@@ -196,25 +196,17 @@ namespace VividRP.Runtime
         {
             if (skyData != null && skyData.ambientProbeCubemap != null)
             {
-                var useDefaultBuffer = !s_AmbientProbeConvolution.IsSupported;
-
-                if (!useDefaultBuffer)
-                {
-                    s_AmbientProbeConvolution.RequestUpdate(
-                        cmd,
-                        skyData.ambientProbeCubemap,
-                        skyData.ambientProbeTint,
-                        skyData.ambientProbeExposure,
-                        skyData.ambientProbeRotation,
-                        skyData.ambientProbeHash,
-                        forceRebuild);
-                }
-
-                s_AmbientProbeConvolution.BindGlobalBuffer(cmd, useDefaultBuffer);
-                return;
+                s_AmbientProbeConvolution.RequestUpdate(
+                    cmd,
+                    skyData.ambientProbeCubemap,
+                    skyData.ambientProbeTint,
+                    skyData.ambientProbeExposure,
+                    skyData.ambientProbeRotation,
+                    skyData.ambientProbeHash,
+                    forceRebuild);
             }
 
-            s_AmbientProbeConvolution.BindGlobalBuffer(cmd, true);
+            s_AmbientProbeConvolution.BindGlobalBuffer(cmd);
         }
     }
 }

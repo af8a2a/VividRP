@@ -9,7 +9,6 @@ namespace VividRP.Runtime
     public sealed class HDRISkyVolume : VolumeComponent
     {
         public NoInterpCubemapParameter skyCubemap = new(null);
-        public ColorParameter tint = new(Color.white, true, true, true);
         /// <summary>Exposure of the sky.</summary>
         [Tooltip("Sets the exposure of the sky in EV.")]
         public FloatParameter exposure = new FloatParameter(0.0f);

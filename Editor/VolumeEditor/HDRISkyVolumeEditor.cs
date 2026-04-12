@@ -35,7 +35,6 @@ namespace VividRP.Editor
         };
 
         private SerializedDataParameter m_SkyCubemap;
-        private SerializedDataParameter m_Tint;
         private SerializedDataParameter m_SkyIntensityMode;
         private SerializedDataParameter m_Exposure;
         private SerializedDataParameter m_Multiplier;
@@ -47,7 +46,6 @@ namespace VividRP.Editor
         {
             var fetcher = new PropertyFetcher<HDRISkyVolume>(serializedObject);
             m_SkyCubemap = Unpack(fetcher.Find(x => x.skyCubemap));
-            m_Tint = Unpack(fetcher.Find(x => x.tint));
             m_SkyIntensityMode = Unpack(fetcher.Find(x => x.skyIntensityMode));
             m_Exposure = Unpack(fetcher.Find(x => x.exposure));
             m_Multiplier = Unpack(fetcher.Find(x => x.multiplier));
@@ -59,8 +57,6 @@ namespace VividRP.Editor
         public override void OnInspectorGUI()
         {
             PropertyField(m_SkyCubemap);
-            PropertyField(m_Tint);
-
             DrawIntensityMode();
 
             PropertyField(m_Rotation, s_RotationLabel);

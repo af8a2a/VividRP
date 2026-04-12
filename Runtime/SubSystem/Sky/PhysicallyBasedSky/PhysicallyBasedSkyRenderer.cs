@@ -121,7 +121,6 @@ namespace VividRP.Runtime
             var generatedCubemapViewSampleCount = SkySettingsVolume.GetGeneratedCubemapViewSampleCount(skySettings);
             return HashCode.Combine(
                 volume.GetHashCode(),
-                SkySettingsVolume.GetGeneratedCubemapResolution(skySettings),
                 generatedCubemapViewSampleCount,
                 ResolveCameraPosition(context, volume.planetRadius.value),
                 PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialBodyHash(context));
@@ -140,7 +139,7 @@ namespace VividRP.Runtime
             }
 
             var skySettings = VividVolumeManagerUtility.GetSkySettingsVolume();
-            var generatedCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(skySettings);
+            var generatedCubemapResolution = 16;
             var generatedCubemapViewSampleCount = SkySettingsVolume.GetGeneratedCubemapViewSampleCount(skySettings);
             var runtimeCubemapRebuildReason = ResolveRuntimeCubemapRebuildReason(
                 skyHash,

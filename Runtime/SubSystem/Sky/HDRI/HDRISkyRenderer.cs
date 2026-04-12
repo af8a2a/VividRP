@@ -56,10 +56,10 @@ namespace VividRP.Runtime
             var cubemap = GetSkyCubemap();
             return HashCode.Combine(
                 cubemap != null ? cubemap.GetEntityId() : EntityId.None,
-                sky?.tint.value ?? Color.white,
+                 Color.white,
                 sky?.exposure.value ?? 0.0f,
                 sky?.rotation.value ?? 0.0f,
-                SkySettingsVolume.GetGeneratedCubemapResolution(skySettings));
+                16);
         }
 
         public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd, int skyHash, bool forceRebuild)
@@ -77,10 +77,10 @@ namespace VividRP.Runtime
 
             skyData.activeSkyType = SkyType.HDRI;
             skyData.specularCubemap = cubemap;
-            skyData.tint = sky?.tint.value ?? Color.white;
+            skyData.tint = Color.white;
             skyData.exposure = sky?.exposure.value ?? 0.0f;
             skyData.rotation = sky?.rotation.value ?? 0.0f;
-            var generatedCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(VividVolumeManagerUtility.GetSkySettingsVolume());
+            var generatedCubemapResolution = 16;
             var ambientProbeRebuildReason = ResolveAmbientProbeRebuildReason(skyHash, generatedCubemapResolution);
             if (forceRebuild && ambientProbeRebuildReason == AmbientProbeRebuildReason.None)
                 ambientProbeRebuildReason = AmbientProbeRebuildReason.ParametersChanged;

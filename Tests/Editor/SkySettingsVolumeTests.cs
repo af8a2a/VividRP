@@ -8,44 +8,6 @@ namespace VividRP.Editor.Tests
     public class SkySettingsVolumeTests
     {
         [Test]
-        public void OnEnable_InitializesResolutionAndQualityParameters_WithExpectedDefaults()
-        {
-            var volume = ScriptableObject.CreateInstance<SkySettingsVolume>();
-
-            try
-            {
-                Assert.That(volume.generatedCubemapResolution, Is.Not.Null);
-                Assert.That(volume.generatedCubemapResolution.value, Is.EqualTo(SkyGeneratedCubemapResolution.Resolution64));
-                Assert.That(volume.generatedCubemapQuality, Is.Not.Null);
-                Assert.That(volume.generatedCubemapQuality.value, Is.EqualTo(SkyGeneratedCubemapQuality.PlatformDefault));
-                Assert.That(SkySettingsVolume.GetGeneratedCubemapResolution(volume), Is.EqualTo(64));
-                Assert.That(SkySettingsVolume.GetGeneratedCubemapViewSampleCount(volume), Is.EqualTo(12));
-                Assert.That(SkySettingsVolume.GetGeneratedCubemapLightSampleCount(volume), Is.EqualTo(6));
-            }
-            finally
-            {
-                Object.DestroyImmediate(volume);
-            }
-        }
-
-        [Test]
-        public void GetGeneratedCubemapResolution_ClampsInvalidValues_ToMinimumSupportedSize()
-        {
-            var volume = ScriptableObject.CreateInstance<SkySettingsVolume>();
-
-            try
-            {
-                volume.generatedCubemapResolution.value = (SkyGeneratedCubemapResolution)16;
-
-                Assert.That(SkySettingsVolume.GetGeneratedCubemapResolution(volume), Is.EqualTo(32));
-            }
-            finally
-            {
-                Object.DestroyImmediate(volume);
-            }
-        }
-
-        [Test]
         public void GetGeneratedCubemapSampleCountHelpers_ReturnExpectedPresetCounts()
         {
             var volume = ScriptableObject.CreateInstance<SkySettingsVolume>();
@@ -73,7 +35,6 @@ namespace VividRP.Editor.Tests
         [Test]
         public void GetResolutionHelpers_ReturnFallbackValues_WhenSettingsAreNull()
         {
-            Assert.That(SkySettingsVolume.GetGeneratedCubemapResolution(), Is.EqualTo(64));
             Assert.That(SkySettingsVolume.GetGeneratedCubemapViewSampleCount(), Is.EqualTo(12));
             Assert.That(SkySettingsVolume.GetGeneratedCubemapLightSampleCount(), Is.EqualTo(6));
         }

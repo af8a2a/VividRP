@@ -31,7 +31,9 @@ namespace VividRP.Runtime
             Dispose();
 
             var shader = resources?.SkyGGXConvolutionShader;
+            #if UNITY_EDITOR
             shader ??= Shader.Find(GGXConvolutionShaderName);
+            #endif
             if (shader != null)
                 m_ConvolutionMaterial = CoreUtils.CreateEngineMaterial(shader);
 

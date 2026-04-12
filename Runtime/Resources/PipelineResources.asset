@@ -35,6 +35,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 4aee2e660114dc34381676fa542650e2, type: 3}
   - ResourceName: Shaders/Core/Private/DirectionalRayTracedShadow
     ResourceObject: {fileID: 7200000, guid: e18c323ebbcd75c45b1c45b7c0bb07b4, type: 3}
+  - ResourceName: Shaders/Core/Private/DownSample/HZBGenerate
+    ResourceObject: {fileID: 7200000, guid: 38a58f73a6734f28bea3e9ab4047a2ba, type: 3}
   - ResourceName: Shaders/Core/Private/FinalBlit
     ResourceObject: {fileID: 4800000, guid: 164ed41d2ffc5c042a908c9741e4b9c7, type: 3}
   - ResourceName: Shaders/Core/Private/GPUDriven/FixupVisibleMeshletIndirectDrawArgs

@@ -74,8 +74,6 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Material/MaterialClassification")]
         public ComputeShader MaterialClassificationCompute;
 
-        [ResourcePath("Shaders/Material/ClusteredLightCull")]
-        public ComputeShader ClusteredLightCullCompute;
 
         [ResourcePath("Shaders/Core/Private/Lighting/scrbound")]
         public ComputeShader BuildScreenAABBCompute;
@@ -95,16 +93,14 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Material/DeferredLit")]
         public ComputeShader DeferredLitCompute;
 
-        [ResourcePath("Shaders/Material/DeferredDirectionalLightingIndirect")]
-        public Shader DeferredDirectionalLightingIndirectShader;
 
-        [ResourcePath("Shaders/Core/Private/ClusterDebug")]
+        [ResourcePath("Shaders/Core/Private/Debug/ClusterDebug")]
         public Shader ClusterDebugShader;
 
-        [ResourcePath("Shaders/Core/Private/SliderDebug")]
+        [ResourcePath("Shaders/Core/Private/Debug/SliderDebug")]
         public Shader SliderDebugShader;
 
-        [ResourcePath("Shaders/Core/Private/OverlayDebug")]
+        [ResourcePath("Shaders/Core/Private/Debug/OverlayDebug")]
         public Shader OverlayDebugShader;
 
         [ResourcePath("Shaders/Core/Private/Debug/ExposureDebug")]

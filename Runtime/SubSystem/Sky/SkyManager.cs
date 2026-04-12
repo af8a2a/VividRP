@@ -37,7 +37,6 @@ namespace VividRP.Runtime
             s_UpdateRequested = false;
             s_Initialized = true;
 
-            FrameContextSystem.SubsystemPreRender -= Update;
             FrameContextSystem.SubsystemPreRender += Update;
         }
 
@@ -194,7 +193,8 @@ namespace VividRP.Runtime
 
         private static void UpdateDiffuseAmbientProbe(CommandBuffer cmd, VividSkyData skyData, bool forceRebuild)
         {
-            if (skyData != null && skyData.ambientProbeCubemap != null)
+            var useDefaultAmbientProbe = skyData == null || skyData.ambientProbeCubemap == null;
+            if (!useDefaultAmbientProbe)
             {
                 s_AmbientProbeConvolution.RequestUpdate(
                     cmd,
@@ -203,7 +203,7 @@ namespace VividRP.Runtime
                     forceRebuild);
             }
 
-            s_AmbientProbeConvolution.BindGlobalBuffer(cmd);
+            s_AmbientProbeConvolution.BindGlobalBuffer(cmd, useDefaultAmbientProbe);
         }
     }
 }

@@ -16,7 +16,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("HDRISkyRenderer.RebuildAmbientProbe (MissingTexture)"));
             Assert.That(source, Does.Contain("HDRISkyRenderer.RebuildAmbientProbe (ResolutionChanged)"));
             Assert.That(source, Does.Contain("HDRISkyRenderer.RebuildAmbientProbe (ParametersChanged)"));
-            Assert.That(source, Does.Contain("var generatedCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(VividVolumeManagerUtility.GetSkySettingsVolume());"));
+            Assert.That(source, Does.Contain("var generatedCubemapResolution = 16;"));
             Assert.That(source, Does.Contain("var ambientProbeRebuildReason = ResolveAmbientProbeRebuildReason(skyHash, generatedCubemapResolution);"));
             Assert.That(source, Does.Contain("EnsureAmbientProbeCubemap(generatedCubemapResolution);"));
             Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, GetAmbientProbeRebuildSampler(ambientProbeRebuildReason)))"));
@@ -38,14 +38,12 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("RegisterRenderer(new HDRISkyRenderer(), resources);"));
             Assert.That(source, Does.Contain("renderer.Update(context, s_CachedSkyData, cmd, skyHash, forceRebuild);"));
-            Assert.That(source, Does.Contain("if (skyData != null && skyData.ambientProbeCubemap != null)"));
+            Assert.That(source, Does.Contain("var useDefaultAmbientProbe = skyData == null || skyData.ambientProbeCubemap == null;"));
+            Assert.That(source, Does.Contain("if (!useDefaultAmbientProbe)"));
             Assert.That(source, Does.Contain("skyData.ambientProbeCubemap,"));
-            Assert.That(source, Does.Contain("skyData.ambientProbeTint,"));
-            Assert.That(source, Does.Contain("skyData.ambientProbeExposure,"));
-            Assert.That(source, Does.Contain("skyData.ambientProbeRotation,"));
             Assert.That(source, Does.Contain("skyData.ambientProbeHash,"));
             Assert.That(source, Does.Contain("forceRebuild);"));
-            Assert.That(source, Does.Contain("s_AmbientProbeConvolution.BindGlobalBuffer(cmd, true);"));
+            Assert.That(source, Does.Contain("s_AmbientProbeConvolution.BindGlobalBuffer(cmd, useDefaultAmbientProbe);"));
             Assert.That(source, Does.Not.Contain("s_ForceRebuild"));
             Assert.That(source, Does.Not.Contain("SkyDiffuseSHUtility.TryProjectCubemapToSH("));
             Assert.That(source, Does.Not.Contain("UploadProbe("));

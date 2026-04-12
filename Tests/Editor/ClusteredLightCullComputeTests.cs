@@ -47,19 +47,6 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("InterlockedAdd(_ClusterLightListStats[VIVID_CLUSTER_LIGHT_LIST_STAT_DROPPED_LIGHT_COUNT], droppedLightCount);"));
         }
 
-        [Test]
-        public void VividRPCoreResources_DeclaresClusteredLightCullCompute()
-        {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.ClusteredLightCullCompute));
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Material/ClusteredLightCull"));
-        }
-
         private static string GetComputeShaderSourcePath()
         {
             var shaderPath = Path.GetFullPath(Path.Combine(

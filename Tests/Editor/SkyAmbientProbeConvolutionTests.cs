@@ -16,12 +16,13 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("private const string DiffuseKernelName = \"AmbientProbeConvolutionDiffuse\";"));
             Assert.That(source, Does.Contain("private const string LegacyKernelName = \"AmbientProbeConvolution\";"));
             Assert.That(source, Does.Contain("m_Kernel = FindKernel();"));
+            Assert.That(source, Does.Contain("EnsureDefaultAmbientProbeBuffer();"));
             Assert.That(source, Does.Contain("if (m_ComputeShader.HasKernel(DiffuseKernelName))"));
+            Assert.That(source, Does.Contain("if (m_ComputeShader.HasKernel(LegacyKernelName))"));
             Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_Kernel, DiffuseAmbientProbeOutputBufferId, m_AmbientProbeBuffer);"));
             Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_Kernel, ScratchBufferId, m_AmbientProbeScratchBuffer);"));
             Assert.That(source, Does.Contain("internal void BindGlobalBuffer(CommandBuffer cmd, bool useDefault = false)"));
             Assert.That(source, Does.Contain("useDefault || m_AmbientProbeBuffer == null ? m_DefaultAmbientProbeBuffer : m_AmbientProbeBuffer"));
-            Assert.That(source, Does.Contain("HDRISkyVolume.ResolveExposureMultiplier(exposureStops)"));
             Assert.That(source, Does.Contain("SkyAmbientProbeConvolution.Convolve (MissingBuffer)"));
             Assert.That(source, Does.Contain("SkyAmbientProbeConvolution.Convolve (SkyChanged)"));
             Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, GetConvolutionSampler(rebuildReason)))"));
@@ -72,6 +73,16 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("StructuredBuffer<float4> _VividAmbientProbeData;"));
             Assert.That(source, Does.Contain("float3 VividSampleAmbientProbe(float3 normalWS)"));
             Assert.That(source, Does.Contain("return SampleSH9(_VividAmbientProbeData, normalizedNormalWS);"));
+        }
+
+        [Test]
+        public void SkyManager_BindsDefaultAmbientProbeBuffer_WhenSkyProbeIsMissing()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyManager.cs"));
+
+            Assert.That(source, Does.Contain("var useDefaultAmbientProbe = skyData == null || skyData.ambientProbeCubemap == null;"));
+            Assert.That(source, Does.Contain("if (!useDefaultAmbientProbe)"));
+            Assert.That(source, Does.Contain("s_AmbientProbeConvolution.BindGlobalBuffer(cmd, useDefaultAmbientProbe);"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

@@ -33,19 +33,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VividRPCoreResources_DeclaresDeferredDirectionalLightingIndirectShader()
-        {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.DeferredDirectionalLightingIndirectShader));
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Material/DeferredDirectionalLightingIndirect"));
-        }
-
-        [Test]
         public void DeferredLightingPass_UsesUnsafeComputeDispatchAndBindsClusteredLightDataDirectly()
         {
             var passSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "DeferredLightingPass.cs"));

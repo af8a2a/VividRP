@@ -12,12 +12,12 @@ using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
 
 namespace VividRP.Editor.Tests
 {
-    public class AerialPerspectivePassTests
+    public class AtmosphericScatteringPassTests
     {
         [Test]
         public void Initialize_RegistersColorDepthAndLutInputsPlusOutput()
         {
-            IRenderPass renderPass = new AerialPerspectivePass();
+            IRenderPass renderPass = new AtmosphericScatteringPass();
 
             var resources = renderPass.Initialize();
             var textureEntries = resources.Textures.OrderBy(entry => entry.Name).ToArray();
@@ -38,7 +38,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void Prepare_ConfiguresOutputToCameraDimensions_WhenSourceUsesPlaceholderSize()
         {
-            var pass = new AerialPerspectivePass();
+            var pass = new AtmosphericScatteringPass();
             var frameData = new ContextContainer();
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             cameraData.actualWidth = 800;
@@ -55,7 +55,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void AerialPerspectivePass_InheritsFromUnsafePass()
         {
-            Assert.That(typeof(UnsafePass).IsAssignableFrom(typeof(AerialPerspectivePass)), Is.True);
+            Assert.That(typeof(UnsafePass).IsAssignableFrom(typeof(AtmosphericScatteringPass)), Is.True);
         }
 
         [Test]
@@ -130,9 +130,9 @@ namespace VividRP.Editor.Tests
             Assert.That(hlslSource, Does.Not.Contain("_MultiScatteringLUT"));
         }
 
-        private static T GetFieldValue<T>(AerialPerspectivePass pass, string fieldName)
+        private static T GetFieldValue<T>(AtmosphericScatteringPass pass, string fieldName)
         {
-            var field = typeof(AerialPerspectivePass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            var field = typeof(AtmosphericScatteringPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
 
             Assert.That(field, Is.Not.Null);
             return (T)field.GetValue(pass);

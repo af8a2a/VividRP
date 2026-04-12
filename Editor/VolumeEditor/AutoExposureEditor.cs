@@ -347,7 +347,7 @@ namespace VividRP.Editor
             if (mode == AutoExposureExposureMode.AutomaticHistogram)
             {
                 EditorGUILayout.HelpBox(
-                    "Automatic Histogram settings are preserved for the shared editor workflow. HDRP's current VividRP runtime path still uses average metering, while the histogram window is consumed by the Unreal implementation path.",
+                    "Automatic Histogram now runs through a dedicated HDRP histogram path. It no longer falls back to Unreal auto exposure or dispatches HDRP's KPrePass/KReduction average-luminance chain.",
                     MessageType.Info);
             }
         }

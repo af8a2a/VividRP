@@ -5,7 +5,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public sealed class AerialPerspectivePass : UnsafePass
+    public sealed class AtmosphericScatteringPass : UnsafePass
     {
         internal const string OpaqueAtmosphericScatteringPassName = "Opaque Atmospheric Scattering";
         internal const string OpaqueAtmosphericScatteringShaderName = "Hidden/VividRP/OpaqueAtmosphericScattering";
@@ -39,7 +39,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private PhysicallyBasedSkyMaterialParameters m_MaterialParameters;
         private Texture3D m_FallbackAtmosphericScatteringLut;
 
-        public AerialPerspectivePass()
+        public AtmosphericScatteringPass()
         {
             profilingSampler = new ProfilingSampler(OpaqueAtmosphericScatteringPassName);
 
@@ -59,7 +59,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             if (shader == null)
             {
-                Debug.LogWarning($"[VividRP] Could not find shader '{OpaqueAtmosphericScatteringShaderName}' for {nameof(AerialPerspectivePass)}.");
+                Debug.LogWarning($"[VividRP] Could not find shader '{OpaqueAtmosphericScatteringShaderName}' for {nameof(AtmosphericScatteringPass)}.");
                 return;
             }
 

@@ -536,19 +536,26 @@ namespace VividRP.Editor.Tests
             Assert.That(autoExposureSource, Does.Contain("public AutoExposureExposureModeParameter exposureMode"));
             Assert.That(autoExposureSource, Does.Contain("public AutoExposureMeteringModeParameter meteringMode"));
             Assert.That(autoExposureSource, Does.Contain("public AutoExposureAdaptationModeParameter adaptationMode"));
-            Assert.That(autoExposureSource, Does.Contain("public ClampedFloatParameter targetMidGray"));
+            Assert.That(autoExposureSource, Does.Contain("public EnumParameter<TargetMidGray> targetMidGray"));
             Assert.That(autoExposureSource, Does.Contain("public NoInterpAnimationCurveParameter curveMap"));
             Assert.That(autoExposureSource, Does.Contain("public NoInterpAnimationCurveParameter exposureCompensationCurve"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel ClearHistogram"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel BuildHistogram"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel ResolveExposure"));
+            Assert.That(hdrpShaderSource, Does.Contain("#pragma kernel KHistogramClear"));
+            Assert.That(hdrpShaderSource, Does.Contain("#pragma kernel KHistogramGen"));
+            Assert.That(hdrpShaderSource, Does.Contain("#pragma kernel KHistogramReduce"));
             Assert.That(hdrpShaderSource, Does.Contain("#pragma kernel KPrePass"));
             Assert.That(hdrpShaderSource, Does.Contain("#pragma kernel KReduction"));
             Assert.That(hdrpShaderSource, Does.Contain("#pragma kernel KReset"));
             Assert.That(hdrpShaderSource, Does.Contain("case 2u:"));
             Assert.That(hdrpShaderSource, Does.Contain("CurveRemap(avgLuminance, minExposure, maxExposure);"));
+            Assert.That(hdrpShaderSource, Does.Contain("void KHistogramGen("));
+            Assert.That(hdrpShaderSource, Does.Contain("void KHistogramReduce("));
             Assert.That(hdrpShaderSource, Does.Contain("RWStructuredBuffer<float4> _CurrentExposureBuffer;"));
             Assert.That(hdrpShaderSource, Does.Contain("WriteExposureBuffer("));
+            Assert.That(hdrpCommonSource, Does.Contain("RWStructuredBuffer<uint> _HistogramBuffer;"));
+            Assert.That(hdrpCommonSource, Does.Contain("float4 _HistogramRangeParams;"));
             Assert.That(hdrpCommonSource, Does.Contain("float CurveRemap(float inEV, out float limitMin, out float limitMax)"));
             Assert.That(hdrpCommonSource, Does.Contain("float3 curveSample = SAMPLE_TEXTURE2D_LOD(_ExposureCurveTexture"));
             Assert.That(shaderSource, Does.Contain("RWStructuredBuffer<uint> _HistogramBuffer;"));
@@ -566,7 +573,7 @@ namespace VividRP.Editor.Tests
             Assert.That(runtimeSource, Does.Contain("settings.meteringMode = autoExposure.meteringMode.value;"));
             Assert.That(runtimeSource, Does.Contain("settings.adaptationMode = autoExposure.adaptationMode.value;"));
             Assert.That(runtimeSource, Does.Contain("settings.applyPhysicalCameraExposure = AutoExposureExposureModeUtility.UsesPhysicalCamera(settings.exposureMode);"));
-            Assert.That(runtimeSource, Does.Contain("settings.targetMidGray = autoExposure.targetMidGray.value;"));
+            Assert.That(runtimeSource, Does.Contain("settings.targetMidGray = ColorUtils.s_LightMeterCalibrationConstant;"));
             Assert.That(runtimeSource, Does.Contain("settings.manualEV100 = ResolveManualEV100("));
             Assert.That(runtimeSource, Does.Contain("settings = AutoExposureSettingsResolver.ResolvePhysicalCameraFallback(settings, camera);"));
             Assert.That(runtimeSource, Does.Contain("var histogramLogRangeValue = autoExposure.histogramLogRange.value;"));
@@ -600,8 +607,11 @@ namespace VividRP.Editor.Tests
             Assert.That(runtimeSource, Does.Contain("public RenderTexture previousExposureTexture;"));
             Assert.That(runtimeSource, Does.Contain("public AutoExposureImplementationPath implementation;"));
             Assert.That(implementationSource, Does.Contain("AutoExposureImplementationPath.HDRP"));
+            Assert.That(implementationSource, Does.Contain("SupportsDispatch("));
             Assert.That(implementationSource, Does.Contain("SupportsUnrealDispatch"));
             Assert.That(implementationSource, Does.Contain("SupportsHdrpDispatch"));
+            Assert.That(implementationSource, Does.Contain("SupportsHdrpPrePassDispatch"));
+            Assert.That(implementationSource, Does.Contain("SupportsHdrpHistogramDispatch"));
             Assert.That(implementationSource, Does.Contain("ResolveHistogramDebugCompute"));
             Assert.That(implementationSource, Does.Not.Contain("Falling back to the Unreal auto exposure compute."));
             Assert.That(assetSource, Does.Contain("public enum AutoExposureImplementationPath"));
@@ -613,12 +623,16 @@ namespace VividRP.Editor.Tests
         [Test]
         public void AutoExposureEditorOnlyGpuReadbackPath_WiresRuntimeAndEditorStatsMonitor()
         {
-            var finalBlitSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "FinalBlitPass.cs"));
+            var autoExposurePassSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "AutoExposurePass.cs"));
             var readbackBridgeSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureStatsReadbackBridge.cs"));
             var editorSource = File.ReadAllText(GetPackageFilePath("Editor", "VolumeEditor", "AutoExposureEditor.cs"));
             var statsShaderSource = File.ReadAllText(GetPackageFilePath("Editor", "Shader", "AutoExposureStats.shader"));
 
-            Assert.That(finalBlitSource, Does.Contain("AutoExposureStatsReadbackBridge.Request("));
+            Assert.That(autoExposurePassSource, Does.Contain("AutoExposureStatsReadbackBridge.Request("));
+            Assert.That(autoExposurePassSource, Does.Contain("UsesHistogramBufferAutoExposureExecution()"));
+            Assert.That(autoExposurePassSource, Does.Contain("ExecuteHdrpHistogramAutoExposure("));
+            Assert.That(autoExposurePassSource, Does.Contain("m_HistogramAutoExposureCompute"));
+            Assert.That(autoExposurePassSource, Does.Contain("BindAutoExposureParameters(cmd, histogramCompute, m_ClearHistogramKernel);"));
             Assert.That(readbackBridgeSource, Does.Contain("Dictionary<Camera, SnapshotState>"));
             Assert.That(readbackBridgeSource, Does.Contain("internal static void TouchInspectorRequest()"));
             Assert.That(readbackBridgeSource, Does.Contain("internal static bool TryGetLatestSnapshot(out AutoExposureStatsReadbackSnapshot snapshot)"));

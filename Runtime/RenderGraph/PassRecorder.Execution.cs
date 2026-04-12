@@ -44,6 +44,7 @@ namespace VividRP.Runtime
         private static RenderGraph s_CurrentRenderGraph;
 
         private static RenderGraphData s_CurrentGraphAsset;
+        private static List<RenderGraphPassDefinition> s_RuntimePassDefinitions = new();
         private static long s_CurrentImportVersion;
         private static bool s_IsCompiled;
 
@@ -154,6 +155,7 @@ namespace VividRP.Runtime
             FrameContextSystem.Clear();
             VividRayTracingAccelerationStructureStatsRegistry.Clear();
             s_CurrentGraphAsset = null;
+            s_RuntimePassDefinitions.Clear();
             s_CurrentImportVersion = 0;
             s_IsCompiled = false;
         }
@@ -1129,7 +1131,7 @@ namespace VividRP.Runtime
             var accelerationStructureCache = new Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle>();
             var shouldRecordPreviews = RenderGraphPreviewRegistry.IsAvailable;
 
-            var passDefinitions = graphAsset?.Passes;
+            var passDefinitions = s_RuntimePassDefinitions;
             for (var passIndex = 0; passIndex < s_RenderPasses.Count; passIndex++)
             {
                 var pass = s_RenderPasses[passIndex];

@@ -10,13 +10,17 @@
 TEXTURE2D(_ExposureWeightMask);
 TEXTURE2D_X(_SourceTexture);
 TEXTURE2D(_PreviousExposureTexture);
+StructuredBuffer<float4> _PreviousExposureBuffer;
 RW_TEXTURE2D(float2, _OutputTexture);
 TEXTURE2D(_ExposureCurveTexture);
+RWStructuredBuffer<uint> _HistogramBuffer;
 RWStructuredBuffer<float4> _CurrentExposureBuffer;
 
 CBUFFER_START(cb)
 float4 _ExposureParams;
 float4 _ExposureParams2;
+float4 _HistogramRangeParams;
+float4 _AutoExposureScreenSize;
 float4 _ProceduralMaskParams;
 float4 _ProceduralMaskParams2;
 float4 _HistogramExposureParams;
@@ -37,6 +41,12 @@ CBUFFER_END
 #define ParamCurveMax                   _ExposureParams2.y
 #define LensImperfectionExposureScale   _ExposureParams2.z
 #define MeterCalibrationConstant        _ExposureParams2.w
+#define ParamHistogramScale             _HistogramRangeParams.x
+#define ParamHistogramBias              _HistogramRangeParams.y
+#define ParamHistogramLowPercent        _HistogramRangeParams.z
+#define ParamHistogramHighPercent       _HistogramRangeParams.w
+#define ParamScreenSize                 _AutoExposureScreenSize.xy
+#define ParamInvScreenSize              _AutoExposureScreenSize.zw
 #define ParamSourceBuffer               _Variants.x
 #define ParamMeteringMode               _Variants.y
 #define ParamAdaptationMode             _Variants.z
@@ -55,6 +65,16 @@ CBUFFER_END
 float GetPreviousExposureEV100()
 {
     return _PreviousExposureTexture[uint2(0u, 0u)].y;
+}
+
+float GetHistogramPositionFromLogLuminance(float logLuminance)
+{
+    return logLuminance * ParamHistogramScale + ParamHistogramBias;
+}
+
+float GetLogLuminanceFromHistogramPosition(float histogramPosition)
+{
+    return (histogramPosition - ParamHistogramBias) / max(ParamHistogramScale, 1e-4);
 }
 
 float ConvertAvgEV100ToAvgLuminance(float averageSceneEV100, float calibrationConstant)

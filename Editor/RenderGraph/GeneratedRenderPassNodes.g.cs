@@ -3,15 +3,21 @@ using System;
 namespace VividRP.Editor.RenderGraph.Generated
 {
     [Serializable]
-    internal sealed class AerialPerspectivePass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.AerialPerspectivePass, VividRP.Runtime";
-    }
-
-    [Serializable]
     internal sealed class AtmosphereLUTPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.AtmosphereLUTPass, VividRP.Runtime";
+    }
+
+    [Serializable]
+    internal sealed class AtmosphericScatteringPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.AtmosphericScatteringPass, VividRP.Runtime";
+    }
+
+    [Serializable]
+    internal sealed class AutoExposurePass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.AutoExposurePass, VividRP.Runtime";
     }
 
     [Serializable]

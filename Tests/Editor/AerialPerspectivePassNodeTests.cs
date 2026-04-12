@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using NUnit.Framework;
 using VividRP.Editor.RenderGraph;
-using RuntimeAerialPerspectivePass = VividRP.Runtime.RenderPass.Core.AerialPerspectivePass;
+using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
 {
@@ -11,7 +11,7 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class AutoRegisteredAerialPerspectivePassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(RuntimeAerialPerspectivePass).AssemblyQualifiedName;
+            protected override string RegisteredPassTypeName => typeof(AtmosphericScatteringPass).AssemblyQualifiedName;
         }
 
         [Test]

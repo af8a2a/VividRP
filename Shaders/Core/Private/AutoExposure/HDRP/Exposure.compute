@@ -4,12 +4,17 @@
 
 #pragma kernel KFixedExposure
 #pragma kernel KManualCameraExposure
+#pragma kernel KHistogramClear
+#pragma kernel KHistogramGen
+#pragma kernel KHistogramReduce
 #pragma kernel KPrePass
 #pragma kernel KReduction
 #pragma kernel KReset
 
 TEXTURE2D(_InputTexture);
 
+#define HISTOGRAM_BINS 64
+#define HISTOGRAM_WEIGHT_SCALE 64
 #define PREPASS_TEX_SIZE 1024.0
 #define PREPASS_TEX_HALF_SIZE 512.0
 //#pragma enable_d3d11_debug_symbols
@@ -31,6 +36,131 @@ void KFixedExposure(uint2 dispatchThreadId : SV_DispatchThreadID)
         exposureScale,
         ConvertAvgEV100ToAvgLuminance(targetEV100, MeterCalibrationConstant),
         exp2(compensationStops));
+}
+
+//
+// Histogram clear
+//
+[numthreads(HISTOGRAM_BINS,1,1)]
+void KHistogramClear(uint2 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x >= HISTOGRAM_BINS)
+        return;
+
+    _HistogramBuffer[dispatchThreadId.x] = 0u;
+}
+
+//
+// Histogram generation
+//
+[numthreads(8,8,1)]
+void KHistogramGen(uint2 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 sourceSize = uint2((uint)ParamScreenSize.x, (uint)ParamScreenSize.y);
+    if (dispatchThreadId.x >= sourceSize.x || dispatchThreadId.y >= sourceSize.y)
+        return;
+
+    float2 uv = (float2(dispatchThreadId) + 0.5) * ParamInvScreenSize;
+    float luma = SampleLuminance(uv);
+    float weight = WeightSample(dispatchThreadId, float2(sourceSize), luma);
+    if (weight <= 0.0)
+        return;
+
+    float logLuma = log2(max(luma, 1e-4));
+    float histogramPosition = saturate(GetHistogramPositionFromLogLuminance(logLuma));
+    uint bucket = min((uint)(histogramPosition * (HISTOGRAM_BINS - 1) + 0.5), (uint)(HISTOGRAM_BINS - 1));
+    uint weightedCount = max(1u, (uint)round(weight * HISTOGRAM_WEIGHT_SCALE));
+    InterlockedAdd(_HistogramBuffer[bucket], weightedCount);
+}
+
+//
+// Histogram reduction & evaluation
+//
+[numthreads(1,1,1)]
+void KHistogramReduce(uint2 dispatchThreadId : SV_DispatchThreadID)
+{
+    float histogramSum = 0.0;
+
+    [unroll]
+    for (uint bucketIndex = 0u; bucketIndex < HISTOGRAM_BINS; ++bucketIndex)
+        histogramSum += (float)_HistogramBuffer[bucketIndex];
+
+    if (histogramSum <= 1e-4)
+    {
+        float4 previousExposureState = _PreviousExposureBuffer[0];
+        _OutputTexture[dispatchThreadId] = _PreviousExposureTexture[uint2(0u, 0u)].xy;
+        WriteExposureBuffer(
+            previousExposureState.x,
+            previousExposureState.y,
+            previousExposureState.z,
+            previousExposureState.w);
+        return;
+    }
+
+    float minFractionSum = histogramSum * ParamHistogramLowPercent;
+    float maxFractionSum = histogramSum * ParamHistogramHighPercent;
+    float weightedLogLuminanceSum = 0.0;
+    float weightedSampleCount = 0.0;
+
+    [unroll]
+    for (uint bucketIndex = 0u; bucketIndex < HISTOGRAM_BINS; ++bucketIndex)
+    {
+        float localValue = (float)_HistogramBuffer[bucketIndex];
+
+        float subtractedLow = min(localValue, minFractionSum);
+        localValue -= subtractedLow;
+        minFractionSum -= subtractedLow;
+        maxFractionSum -= subtractedLow;
+
+        localValue = min(localValue, maxFractionSum);
+        maxFractionSum -= localValue;
+
+        float logLuminance = GetLogLuminanceFromHistogramPosition(bucketIndex / (float)(HISTOGRAM_BINS - 1));
+        weightedLogLuminanceSum += logLuminance * localValue;
+        weightedSampleCount += localValue;
+    }
+
+    float averageLogLuminance = weightedLogLuminanceSum / max(weightedSampleCount, 1e-4);
+    float averageSceneLuminance = exp2(averageLogLuminance);
+    float averageSceneEV100 = ComputeEV100FromAvgLuminance(max(averageSceneLuminance, 1e-4), MeterCalibrationConstant);
+
+    UNITY_BRANCH
+    switch (ParamEvaluateMode)
+    {
+        case 2u:
+        {
+            float minExposure = ParamExposureLimitMin;
+            float maxExposure = ParamExposureLimitMax;
+            float targetExposure = clamp(CurveRemap(averageSceneEV100, minExposure, maxExposure) - ParamExposureCompensation, minExposure, maxExposure);
+            float exposure = AdaptExposure(targetExposure);
+            exposure = clamp(exposure, minExposure, maxExposure);
+            float currentExposureScale = ConvertEV100ToExposure(exposure, LensImperfectionExposureScale);
+            float targetExposureScale = ConvertEV100ToExposure(targetExposure, LensImperfectionExposureScale);
+            _OutputTexture[dispatchThreadId] = float2(currentExposureScale, exposure);
+            WriteExposureBuffer(
+                currentExposureScale,
+                targetExposureScale,
+                averageSceneLuminance,
+                exp2(ParamExposureCompensation));
+            break;
+        }
+        default:
+        {
+            float compensationStops = ParamExposureCompensation + SampleVividExposureCompensationCurveStops(averageSceneEV100);
+            float targetExposure = clamp(averageSceneEV100 - compensationStops, ParamExposureLimitMin, ParamExposureLimitMax);
+            float exposure = AdaptExposure(targetExposure);
+            exposure = clamp(exposure, ParamExposureLimitMin, ParamExposureLimitMax);
+            float currentExposureScale = ConvertEV100ToExposure(exposure, LensImperfectionExposureScale);
+            float targetExposureScale = ConvertEV100ToExposure(targetExposure, LensImperfectionExposureScale);
+            _OutputTexture[dispatchThreadId] = float2(currentExposureScale, exposure);
+            WriteExposureBuffer(
+                currentExposureScale,
+                targetExposureScale,
+                ConvertAvgEV100ToAvgLuminance(averageSceneEV100, MeterCalibrationConstant),
+                exp2(compensationStops));
+            break;
+        }
+    }
 }
 
 //
@@ -172,10 +302,17 @@ void KReduction(uint2 groupId : SV_GroupID, uint2 groupThreadId : SV_GroupThread
                 // Curve remapping
                 float minExposure = ParamExposureLimitMin;
                 float maxExposure = ParamExposureLimitMax;
-                float exposure = CurveRemap(avgLuminance, minExposure, maxExposure);
-                exposure = AdaptExposure(exposure - ParamExposureCompensation);
+                float targetExposure = clamp(CurveRemap(avgLuminance, minExposure, maxExposure) - ParamExposureCompensation, minExposure, maxExposure);
+                float exposure = AdaptExposure(targetExposure);
                 exposure = clamp(exposure, minExposure, maxExposure);
-                _OutputTexture[groupId.xy] = float2(ConvertEV100ToExposure(exposure, LensImperfectionExposureScale), exposure);
+                float currentExposureScale = ConvertEV100ToExposure(exposure, LensImperfectionExposureScale);
+                float targetExposureScale = ConvertEV100ToExposure(targetExposure, LensImperfectionExposureScale);
+                _OutputTexture[groupId.xy] = float2(currentExposureScale, exposure);
+                WriteExposureBuffer(
+                    currentExposureScale,
+                    targetExposureScale,
+                    ConvertAvgEV100ToAvgLuminance(avgLuminance, MeterCalibrationConstant),
+                    exp2(ParamExposureCompensation));
                 break;
             }
             default:

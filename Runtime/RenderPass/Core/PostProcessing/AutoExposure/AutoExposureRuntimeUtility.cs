@@ -95,6 +95,7 @@ namespace VividRP.Runtime
         public GraphicsBuffer defaultExposureBuffer;
         public GraphicsBuffer previousExposureBuffer;
         public GraphicsBuffer currentExposureBuffer;
+        public GraphicsBuffer frameExposureBuffer;
         public GraphicsBuffer preExposureBuffer;
         public RenderTexture previousExposureTexture;
         public RenderTexture currentExposureTexture;
@@ -109,6 +110,7 @@ namespace VividRP.Runtime
             defaultExposureBuffer = null;
             previousExposureBuffer = null;
             currentExposureBuffer = null;
+            frameExposureBuffer = null;
             preExposureBuffer = null;
             previousExposureTexture = null;
             currentExposureTexture = null;
@@ -190,9 +192,6 @@ namespace VividRP.Runtime
             var autoExposureCompute = AutoExposureImplementationUtility.ResolveComputeShader(
                 resources,
                 implementation);
-            var hasAutoExposureCompute = implementation == AutoExposureImplementationPath.HDRP
-                ? AutoExposureImplementationUtility.SupportsHdrpDispatch(autoExposureCompute)
-                : AutoExposureImplementationUtility.SupportsUnrealDispatch(autoExposureCompute);
 
             EnsureDefaultExposureBuffer();
             s_HistorySystem.PurgeDestroyedCameras();
@@ -201,6 +200,10 @@ namespace VividRP.Runtime
                 ? AutoExposureSettingsResolver.Resolve(camera, temporalData != null && temporalData.isFirstFrame)
                 : AutoExposureSettingsData.CreateDefault();
             settings = AutoExposureSettingsResolver.ResolvePhysicalCameraFallback(settings, camera);
+            var hasAutoExposureCompute = AutoExposureImplementationUtility.SupportsDispatch(
+                autoExposureCompute,
+                implementation,
+                settings.exposureMode);
 
             var exposureEnabled = postProcessingAllowed
                 && settings.enabled
@@ -250,6 +253,13 @@ namespace VividRP.Runtime
             var currentExposureBuffer = exposureEnabled && state?.currentExposureBuffer != null
                 ? state.currentExposureBuffer
                 : defaultExposureBuffer;
+            var frameExposureBuffer = exposureEnabled
+                ? settings.mode == AutoExposureMode.Manual
+                    ? currentExposureBuffer ?? previousExposureBuffer ?? defaultExposureBuffer
+                    : hasValidHistory
+                        ? previousExposureBuffer ?? defaultExposureBuffer
+                        : defaultExposureBuffer
+                : defaultExposureBuffer;
             var preExposureBuffer = exposureEnabled
                 && settings.mode == AutoExposureMode.Manual
                 && state?.currentExposureBuffer != null
@@ -269,6 +279,7 @@ namespace VividRP.Runtime
             exposureData.defaultExposureBuffer = defaultExposureBuffer;
             exposureData.previousExposureBuffer = previousExposureBuffer;
             exposureData.currentExposureBuffer = currentExposureBuffer;
+            exposureData.frameExposureBuffer = frameExposureBuffer;
             exposureData.preExposureBuffer = preExposureBuffer;
             exposureData.previousExposureTexture = previousExposureTexture;
             exposureData.currentExposureTexture = currentExposureTexture;

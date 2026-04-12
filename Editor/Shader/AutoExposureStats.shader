@@ -4,239 +4,580 @@ Shader "Hidden/VividRP/Editor/Auto Exposure Stats"
 
         #include "UnityCG.cginc"
         #pragma editor_sync_compilation
-        #pragma target 3.5
+        #pragma target 4.5
+
+        #define VIVID_EXPOSURE_EPSILON 1e-4
+        #define VIVID_EXPOSURE_HISTOGRAM_BINS 64
+        #define VIVID_SMALL_FONT_WIDTH 5
+        #define VIVID_SMALL_FONT_HEIGHT 7
+        #define VIVID_SMALL_FONT_SPACING 6
 
         float4 _PreviewState;     // x: disabled alpha, y: manual mode, z: dark skin
         float4 _StatusFlags;      // x: active, y: apply physical camera, z: has physical camera preview, w: meter mask assigned
         float4 _HistogramMarkers; // x: clamp min, y: clamp max, z: average, w: histogram width
         float4 _GaugeMarkers;     // x: current exposure gauge, y: target exposure gauge, z: compensation gauge, w: EV gauge
         float4 _PercentMarkers;   // x: low percent, y: high percent, z: enabled state
+        float4 _HistogramLabelRange;     // x: min EV100 label, y: max EV100 label, z/w: source histogram EV100 range
+        float4 _HistogramExposureValues; // x: current exposure EV100, y: target exposure EV100, z: exposure compensation, w: scene EV100
+        float4 _HistogramPercentileBins; // x: low percentile bin, y: high percentile bin, z: live histogram, w: live stats
         float _HistogramSamples[64];
+
+        struct ExposureStatsSummary
+        {
+            float histogramMax;
+            float lowPercentileBin;
+            float highPercentileBin;
+            float currentExposureEV100;
+            float targetExposureEV100;
+            float exposureCompensationStops;
+            float averageSceneEV100;
+        };
+
+        float2 ResolveScreenSize()
+        {
+            return max(_ScreenParams.xy, float2(1.0, 1.0));
+        }
+
+        float2 ResolveInvScreenSize()
+        {
+            return rcp(ResolveScreenSize());
+        }
 
         float3 ResolvePanelColor(float darkSkin)
         {
-            return darkSkin > 0.5 ? float3(0.07, 0.08, 0.10) : float3(0.77, 0.79, 0.82);
+            return darkSkin > 0.5 ? float3(0.025, 0.027, 0.032) : float3(0.095, 0.102, 0.115);
         }
 
-        float3 ResolveSurfaceColor(float darkSkin)
+        float3 ResolveFrameColor(float darkSkin)
         {
-            return darkSkin > 0.5 ? float3(0.12, 0.13, 0.16) : float3(0.86, 0.88, 0.91);
+            return darkSkin > 0.5 ? float3(0.125, 0.125, 0.125) : float3(0.155, 0.160, 0.170);
         }
 
-        float3 ResolveGridColor(float darkSkin)
+        float3 ResolveTextColor(float darkSkin)
         {
-            return darkSkin > 0.5 ? float3(0.19, 0.21, 0.24) : float3(0.70, 0.73, 0.77);
+            return darkSkin > 0.5 ? float3(0.55, 0.55, 0.55) : float3(0.72, 0.72, 0.72);
         }
 
-        float3 ResolveBorderColor(float darkSkin)
+        float LineMask(float value, float center, float halfWidth)
         {
-            return darkSkin > 0.5 ? float3(0.92, 0.94, 0.97) : float3(0.18, 0.20, 0.24);
+            return 1.0 - smoothstep(halfWidth, halfWidth + 0.0025, abs(value - center));
         }
 
-        float3 ResolveAccentColor()
+        float SampleHistogramBin(uint binIndex)
         {
-            if (_StatusFlags.x < 0.5)
-                return float3(0.92, 0.30, 0.26);
-
-            if (_PreviewState.y > 0.5)
-                return _StatusFlags.y > 0.5 ? float3(0.22, 0.84, 1.00) : float3(0.34, 0.56, 1.00);
-
-            return float3(0.22, 0.92, 0.52);
+            int clampedIndex = min(max((int)binIndex, 0), VIVID_EXPOSURE_HISTOGRAM_BINS - 1);
+            return saturate(_HistogramSamples[clampedIndex]);
         }
 
-        float RectMask(float2 uv, float2 rectMin, float2 rectMax)
+        bool SampleMiniGlyphRows(
+            int2 localCoord,
+            uint row0,
+            uint row1,
+            uint row2,
+            uint row3,
+            uint row4,
+            uint row5,
+            uint row6)
         {
-            return step(rectMin.x, uv.x)
-                * step(rectMin.y, uv.y)
-                * step(uv.x, rectMax.x)
-                * step(uv.y, rectMax.y);
+            if (localCoord.x < 0
+                || localCoord.y < 0
+                || localCoord.x >= VIVID_SMALL_FONT_WIDTH
+                || localCoord.y >= VIVID_SMALL_FONT_HEIGHT)
+            {
+                return false;
+            }
+
+            uint bits = 0u;
+            switch (localCoord.y)
+            {
+                case 0: bits = row0; break;
+                case 1: bits = row1; break;
+                case 2: bits = row2; break;
+                case 3: bits = row3; break;
+                case 4: bits = row4; break;
+                case 5: bits = row5; break;
+                default: bits = row6; break;
+            }
+
+            return ((bits >> (VIVID_SMALL_FONT_WIDTH - 1 - localCoord.x)) & 1u) != 0u;
         }
 
-        float LineMask(float value, float center, float thickness)
+        bool SampleMiniGlyph(int2 localCoord, uint ascii)
         {
-            return 1.0 - smoothstep(thickness, thickness + 0.004, abs(value - center));
+            switch (ascii)
+            {
+                case ' ' : return false;
+                case '.' : return SampleMiniGlyphRows(localCoord, 0, 0, 0, 0, 0, 6, 6);
+                case ':' : return SampleMiniGlyphRows(localCoord, 0, 4, 4, 0, 4, 4, 0);
+                case '-' : return SampleMiniGlyphRows(localCoord, 0, 0, 0, 31, 0, 0, 0);
+                case '0' : return SampleMiniGlyphRows(localCoord, 14, 17, 19, 21, 25, 17, 14);
+                case '1' : return SampleMiniGlyphRows(localCoord, 4, 12, 4, 4, 4, 4, 14);
+                case '2' : return SampleMiniGlyphRows(localCoord, 14, 17, 1, 2, 4, 8, 31);
+                case '3' : return SampleMiniGlyphRows(localCoord, 30, 1, 1, 14, 1, 1, 30);
+                case '4' : return SampleMiniGlyphRows(localCoord, 2, 6, 10, 18, 31, 2, 2);
+                case '5' : return SampleMiniGlyphRows(localCoord, 31, 16, 30, 1, 1, 17, 14);
+                case '6' : return SampleMiniGlyphRows(localCoord, 6, 8, 16, 30, 17, 17, 14);
+                case '7' : return SampleMiniGlyphRows(localCoord, 31, 1, 2, 4, 8, 8, 8);
+                case '8' : return SampleMiniGlyphRows(localCoord, 14, 17, 17, 14, 17, 17, 14);
+                case '9' : return SampleMiniGlyphRows(localCoord, 14, 17, 17, 15, 1, 2, 28);
+                case 'A' : return SampleMiniGlyphRows(localCoord, 14, 17, 17, 31, 17, 17, 17);
+                case 'C' : return SampleMiniGlyphRows(localCoord, 14, 17, 16, 16, 16, 17, 14);
+                case 'E' : return SampleMiniGlyphRows(localCoord, 31, 16, 16, 30, 16, 16, 31);
+                case 'N' : return SampleMiniGlyphRows(localCoord, 17, 25, 21, 19, 17, 17, 17);
+                case 'T' : return SampleMiniGlyphRows(localCoord, 31, 4, 4, 4, 4, 4, 4);
+                case 'V' : return SampleMiniGlyphRows(localCoord, 17, 17, 17, 17, 17, 10, 4);
+                case 'X' : return SampleMiniGlyphRows(localCoord, 17, 17, 10, 4, 10, 17, 17);
+                case 'a' : return SampleMiniGlyphRows(localCoord, 0, 0, 14, 1, 15, 17, 15);
+                case 'c' : return SampleMiniGlyphRows(localCoord, 0, 0, 14, 16, 16, 17, 14);
+                case 'e' : return SampleMiniGlyphRows(localCoord, 0, 0, 14, 17, 31, 16, 14);
+                case 'g' : return SampleMiniGlyphRows(localCoord, 0, 0, 15, 17, 15, 1, 14);
+                case 'h' : return SampleMiniGlyphRows(localCoord, 16, 16, 22, 25, 17, 17, 17);
+                case 'i' : return SampleMiniGlyphRows(localCoord, 4, 0, 12, 4, 4, 4, 14);
+                case 'm' : return SampleMiniGlyphRows(localCoord, 0, 0, 26, 21, 21, 21, 21);
+                case 'n' : return SampleMiniGlyphRows(localCoord, 0, 0, 22, 25, 17, 17, 17);
+                case 'o' : return SampleMiniGlyphRows(localCoord, 0, 0, 14, 17, 17, 17, 14);
+                case 'p' : return SampleMiniGlyphRows(localCoord, 0, 0, 30, 17, 30, 16, 16);
+                case 'r' : return SampleMiniGlyphRows(localCoord, 0, 0, 22, 25, 16, 16, 16);
+                case 's' : return SampleMiniGlyphRows(localCoord, 0, 0, 15, 16, 14, 1, 30);
+                case 't' : return SampleMiniGlyphRows(localCoord, 4, 4, 31, 4, 4, 5, 2);
+                case 'u' : return SampleMiniGlyphRows(localCoord, 0, 0, 17, 17, 17, 19, 13);
+                case 'x' : return SampleMiniGlyphRows(localCoord, 0, 0, 17, 10, 4, 10, 17);
+                default: return false;
+            }
         }
 
-        float FrameMask(float2 uv, float2 rectMin, float2 rectMax, float thickness)
+        void DrawMiniCharacterInternal(uint ascii, float3 fontColor, uint2 currentPixelCoord, inout uint2 cursor, inout float3 color, bool flipVertical)
         {
-            float horizontal = max(LineMask(uv.x, rectMin.x, thickness), LineMask(uv.x, rectMax.x, thickness))
-                * step(rectMin.y, uv.y)
-                * step(uv.y, rectMax.y);
-            float vertical = max(LineMask(uv.y, rectMin.y, thickness), LineMask(uv.y, rectMax.y, thickness))
-                * step(rectMin.x, uv.x)
-                * step(uv.x, rectMax.x);
-            return max(horizontal, vertical);
+            int2 localCoord = int2(currentPixelCoord) - int2(cursor);
+            if (flipVertical)
+                localCoord.y = VIVID_SMALL_FONT_HEIGHT - 1 - localCoord.y;
+
+            if (SampleMiniGlyph(localCoord, ascii))
+                color = fontColor;
+
+            cursor.x += VIVID_SMALL_FONT_SPACING;
         }
 
-        float SpanMask(float2 uv, float2 rectMin, float2 rectMax, float start, float end)
+        void DrawMiniCharacter(uint ascii, float3 fontColor, uint2 currentPixelCoord, inout uint2 cursor, inout float3 color)
         {
-            float2 clampedRange = float2(min(start, end), max(start, end));
-            return RectMask(uv, rectMin, rectMax)
-                * step(clampedRange.x, saturate((uv.x - rectMin.x) / max(rectMax.x - rectMin.x, 1e-5)))
-                * step(saturate((uv.x - rectMin.x) / max(rectMax.x - rectMin.x, 1e-5)), clampedRange.y);
+            DrawMiniCharacterInternal(ascii, fontColor, currentPixelCoord, cursor, color, false);
         }
 
-        float ResolveHistogramSample(float x)
+        void DrawMiniCharacterFlippedY(uint ascii, float3 fontColor, uint2 currentPixelCoord, inout uint2 cursor, inout float3 color)
         {
-            float scaledX = saturate(x) * 63.0;
-            int index0 = (int)floor(scaledX);
-            int index1 = min(index0 + 1, 63);
-            float blend = frac(scaledX);
-            return saturate(lerp(_HistogramSamples[index0], _HistogramSamples[index1], blend));
+            DrawMiniCharacterInternal(ascii, fontColor, currentPixelCoord, cursor, color, true);
         }
 
-        float4 DrawHistogramPreview(v2f_img i, float3 color, float3 panelColor, float3 surfaceColor, float3 gridColor, float3 accentColor, float3 borderColor)
+        uint Pow10(uint digitCount)
         {
-            float2 histogramMin = float2(0.08, 0.24);
-            float2 histogramMax = float2(0.92, 0.74);
-            float histogramMask = RectMask(i.uv, histogramMin, histogramMax);
-            float2 histogramUv = saturate((i.uv - histogramMin) / max(histogramMax - histogramMin, float2(1e-5, 1e-5)));
-
-            float percentMask = RectMask(i.uv, float2(0.08, 0.08), float2(0.92, 0.15));
-            float2 percentUv = saturate((i.uv - float2(0.08, 0.08)) / float2(0.84, 0.07));
-            float gaugeMask = RectMask(i.uv, float2(0.08, 0.16), float2(0.92, 0.21));
-            float2 gaugeUv = saturate((i.uv - float2(0.08, 0.16)) / float2(0.84, 0.05));
-
-            float gridMask = histogramMask * max(
-                max(LineMask(histogramUv.x, 0.25, 0.003), LineMask(histogramUv.x, 0.50, 0.003)),
-                max(
-                    max(LineMask(histogramUv.x, 0.75, 0.003), LineMask(histogramUv.y, 0.25, 0.003)),
-                    max(LineMask(histogramUv.y, 0.50, 0.003), LineMask(histogramUv.y, 0.75, 0.003))));
-            color = lerp(color, gridColor, gridMask * 0.45);
-
-            float clampMin = min(_HistogramMarkers.x, _HistogramMarkers.y);
-            float clampMax = max(_HistogramMarkers.x, _HistogramMarkers.y);
-            float clampSpan = histogramMask
-                * step(clampMin, histogramUv.x)
-                * step(histogramUv.x, clampMax);
-            color = lerp(color, accentColor * 0.24 + surfaceColor * 0.76, clampSpan * 0.90);
-
-            float histogramHeight = ResolveHistogramSample(histogramUv.x) * 0.82 + 0.04;
-            float histogramFill = histogramMask * (1.0 - smoothstep(histogramHeight - 0.015, histogramHeight + 0.015, histogramUv.y));
-            float histogramLine = histogramMask * LineMask(histogramUv.y, histogramHeight, 0.012);
-            color = lerp(color, accentColor * 0.28 + panelColor * 0.72, histogramFill * 0.68);
-            color = lerp(color, accentColor, histogramLine * 0.92);
-
-            float minLine = histogramMask * LineMask(histogramUv.x, clampMin, 0.006);
-            float maxLine = histogramMask * LineMask(histogramUv.x, clampMax, 0.006);
-            float averageLine = histogramMask * LineMask(histogramUv.x, _HistogramMarkers.z, 0.008);
-            color = lerp(color, float3(0.80, 0.85, 0.90), minLine * 0.95);
-            color = lerp(color, float3(0.98, 0.98, 0.98), maxLine * 0.95);
-            color = lerp(color, float3(0.22, 0.84, 1.00), averageLine * 0.95);
-
-            color = lerp(color, surfaceColor * 0.85, percentMask * 0.95);
-            float percentSpan = percentMask
-                * step(_PercentMarkers.x, percentUv.x)
-                * step(percentUv.x, _PercentMarkers.y);
-            float percentMid = percentMask * LineMask(percentUv.x, 0.5, 0.005);
-            float lowPercentLine = percentMask * LineMask(percentUv.x, _PercentMarkers.x, 0.008);
-            float highPercentLine = percentMask * LineMask(percentUv.x, _PercentMarkers.y, 0.008);
-            color = lerp(color, accentColor * 0.40 + surfaceColor * 0.60, percentSpan * 0.85);
-            color = lerp(color, borderColor, percentMid * 0.65);
-            color = lerp(color, float3(1.00, 0.84, 0.26), lowPercentLine * 0.95);
-            color = lerp(color, float3(1.00, 0.44, 0.28), highPercentLine * 0.95);
-
-            color = lerp(color, surfaceColor * 0.82, gaugeMask * 0.96);
-            float gaugeNeutral = gaugeMask * LineMask(gaugeUv.x, 0.5, 0.005);
-            float currentSpan = SpanMask(i.uv, float2(0.08, 0.16), float2(0.92, 0.21), 0.5, _GaugeMarkers.x);
-            float targetLine = gaugeMask * LineMask(gaugeUv.x, _GaugeMarkers.y, 0.010);
-            float currentLine = gaugeMask * LineMask(gaugeUv.x, _GaugeMarkers.x, 0.010);
-            color = lerp(color, borderColor, gaugeNeutral * 0.75);
-            color = lerp(color, float3(0.22, 0.84, 1.00), currentSpan * 0.50);
-            color = lerp(color, float3(1.00, 0.78, 0.28), targetLine * 0.90);
-            color = lerp(color, float3(0.26, 0.92, 1.00), currentLine * 0.95);
-
-            float histogramFrame = FrameMask(i.uv, histogramMin, histogramMax, 0.004);
-            float percentFrame = FrameMask(i.uv, float2(0.08, 0.08), float2(0.92, 0.15), 0.004);
-            float gaugeFrame = FrameMask(i.uv, float2(0.08, 0.16), float2(0.92, 0.21), 0.004);
-            color = lerp(color, borderColor, max(histogramFrame, max(percentFrame, gaugeFrame)) * 0.85);
-            return float4(color, 1.0);
+            switch (digitCount)
+            {
+                case 0u: return 1u;
+                case 1u: return 10u;
+                case 2u: return 100u;
+                case 3u: return 1000u;
+                case 4u: return 10000u;
+                case 5u: return 100000u;
+                default: return 1000000u;
+            }
         }
 
-        float4 DrawManualPreview(v2f_img i, float3 color, float3 panelColor, float3 surfaceColor, float3 accentColor, float3 borderColor)
+        void DrawMiniUnsignedInteger(uint value, float3 fontColor, uint2 currentPixelCoord, inout uint2 cursor, inout float3 color)
         {
-            float2 exposureMin = float2(0.08, 0.55);
-            float2 exposureMax = float2(0.92, 0.67);
-            float2 compMin = float2(0.08, 0.31);
-            float2 compMax = float2(0.92, 0.43);
-            float2 evMin = float2(0.08, 0.07);
-            float2 evMax = float2(0.92, 0.19);
+            uint divisor = 1u;
+            while (value / divisor >= 10u && divisor < 100000000u)
+                divisor *= 10u;
 
-            float exposureMask = RectMask(i.uv, exposureMin, exposureMax);
-            float2 exposureUv = saturate((i.uv - exposureMin) / max(exposureMax - exposureMin, float2(1e-5, 1e-5)));
-            float compMask = RectMask(i.uv, compMin, compMax);
-            float2 compUv = saturate((i.uv - compMin) / max(compMax - compMin, float2(1e-5, 1e-5)));
-            float evMask = RectMask(i.uv, evMin, evMax);
-            float2 evUv = saturate((i.uv - evMin) / max(evMax - evMin, float2(1e-5, 1e-5)));
-
-            color = lerp(color, surfaceColor * 0.92, exposureMask * 0.96);
-            color = lerp(color, surfaceColor * 0.92, compMask * 0.96);
-            color = lerp(color, surfaceColor * 0.92, evMask * 0.96);
-
-            float exposureNeutral = exposureMask * LineMask(exposureUv.x, 0.5, 0.005);
-            float compNeutral = compMask * LineMask(compUv.x, 0.5, 0.005);
-            float evNeutral = evMask * LineMask(evUv.x, 0.5, 0.005);
-            color = lerp(color, borderColor, max(exposureNeutral, max(compNeutral, evNeutral)) * 0.75);
-
-            float exposureSpan = SpanMask(i.uv, exposureMin, exposureMax, 0.5, _GaugeMarkers.x);
-            float exposureMarker = exposureMask * LineMask(exposureUv.x, _GaugeMarkers.x, 0.012);
-            color = lerp(color, accentColor * 0.42 + panelColor * 0.58, exposureSpan * 0.88);
-            color = lerp(color, accentColor, exposureMarker * 0.96);
-
-            float compSpan = SpanMask(i.uv, compMin, compMax, 0.5, _GaugeMarkers.z);
-            float compMarker = compMask * LineMask(compUv.x, _GaugeMarkers.z, 0.012);
-            color = lerp(color, float3(1.00, 0.72, 0.25), compSpan * 0.42);
-            color = lerp(color, float3(1.00, 0.82, 0.32), compMarker * 0.94);
-
-            float evSpan = SpanMask(i.uv, evMin, evMax, 0.5, _GaugeMarkers.w);
-            float evMarker = evMask * LineMask(evUv.x, _GaugeMarkers.w, 0.012);
-            color = lerp(color, float3(0.70, 0.56, 1.00), evSpan * 0.42);
-            color = lerp(color, float3(0.84, 0.68, 1.00), evMarker * 0.94);
-
-            float exposureFrame = FrameMask(i.uv, exposureMin, exposureMax, 0.004);
-            float compFrame = FrameMask(i.uv, compMin, compMax, 0.004);
-            float evFrame = FrameMask(i.uv, evMin, evMax, 0.004);
-            color = lerp(color, borderColor, max(exposureFrame, max(compFrame, evFrame)) * 0.85);
-            return float4(color, 1.0);
+            [loop]
+            while (divisor > 0u)
+            {
+                uint digit = (value / divisor) % 10u;
+                DrawMiniCharacter('0' + digit, fontColor, currentPixelCoord, cursor, color);
+                divisor /= 10u;
+            }
         }
 
-        float4 Frag(v2f_img i) : SV_Target
+        void DrawMiniFixedDigits(uint value, uint digitCount, float3 fontColor, uint2 currentPixelCoord, inout uint2 cursor, inout float3 color)
+        {
+            uint divisor = Pow10(max(digitCount, 1u) - 1u);
+
+            [loop]
+            for (uint index = 0u; index < max(digitCount, 1u); ++index)
+            {
+                uint digit = divisor > 0u ? (value / divisor) % 10u : 0u;
+                DrawMiniCharacter('0' + digit, fontColor, currentPixelCoord, cursor, color);
+                divisor = max(divisor / 10u, 0u);
+            }
+        }
+
+        void DrawMiniFloatExplicitPrecision(float value, float3 fontColor, uint2 currentPixelCoord, uint digitCount, inout uint2 cursor, inout float3 color)
+        {
+            if (value != value)
+            {
+                DrawMiniCharacter('N', fontColor, currentPixelCoord, cursor, color);
+                DrawMiniCharacter('a', fontColor, currentPixelCoord, cursor, color);
+                DrawMiniCharacter('N', fontColor, currentPixelCoord, cursor, color);
+                return;
+            }
+
+            float absValue = abs(value);
+            if (value < 0.0)
+                DrawMiniCharacter('-', fontColor, currentPixelCoord, cursor, color);
+
+            DrawMiniUnsignedInteger((uint)absValue, fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('.', fontColor, currentPixelCoord, cursor, color);
+
+            uint multiplier = Pow10(digitCount);
+            uint fracValue = (uint)(frac(absValue) * multiplier);
+            DrawMiniFixedDigits(fracValue, digitCount, fontColor, currentPixelCoord, cursor, color);
+        }
+
+        void DrawMiniUnsignedIntegerFlippedY(uint value, float3 fontColor, uint2 currentPixelCoord, inout uint2 cursor, inout float3 color)
+        {
+            uint divisor = 1u;
+            while (value / divisor >= 10u && divisor < 100000000u)
+                divisor *= 10u;
+
+            [loop]
+            while (divisor > 0u)
+            {
+                uint digit = (value / divisor) % 10u;
+                DrawMiniCharacterFlippedY('0' + digit, fontColor, currentPixelCoord, cursor, color);
+                divisor /= 10u;
+            }
+        }
+
+        void DrawMiniFixedDigitsFlippedY(uint value, uint digitCount, float3 fontColor, uint2 currentPixelCoord, inout uint2 cursor, inout float3 color)
+        {
+            uint divisor = Pow10(max(digitCount, 1u) - 1u);
+
+            [loop]
+            for (uint index = 0u; index < max(digitCount, 1u); ++index)
+            {
+                uint digit = divisor > 0u ? (value / divisor) % 10u : 0u;
+                DrawMiniCharacterFlippedY('0' + digit, fontColor, currentPixelCoord, cursor, color);
+                divisor = max(divisor / 10u, 0u);
+            }
+        }
+
+        void DrawMiniFloatExplicitPrecisionFlippedY(float value, float3 fontColor, uint2 currentPixelCoord, uint digitCount, inout uint2 cursor, inout float3 color)
+        {
+            if (value != value)
+            {
+                DrawMiniCharacterFlippedY('N', fontColor, currentPixelCoord, cursor, color);
+                DrawMiniCharacterFlippedY('a', fontColor, currentPixelCoord, cursor, color);
+                DrawMiniCharacterFlippedY('N', fontColor, currentPixelCoord, cursor, color);
+                return;
+            }
+
+            float absValue = abs(value);
+            if (value < 0.0)
+                DrawMiniCharacterFlippedY('-', fontColor, currentPixelCoord, cursor, color);
+
+            DrawMiniUnsignedIntegerFlippedY((uint)absValue, fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacterFlippedY('.', fontColor, currentPixelCoord, cursor, color);
+
+            uint multiplier = Pow10(digitCount);
+            uint fracValue = (uint)(frac(absValue) * multiplier);
+            DrawMiniFixedDigitsFlippedY(fracValue, digitCount, fontColor, currentPixelCoord, cursor, color);
+        }
+
+        void DrawLiteralCurrentExposure(uint2 currentPixelCoord, uint2 position, float3 fontColor, inout float3 color)
+        {
+            uint2 cursor = position;
+            DrawMiniCharacter('C', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('u', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('r', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('r', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('e', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('n', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('t', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter(' ', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('E', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('x', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('p', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('o', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('s', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('u', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('r', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('e', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter(':', fontColor, currentPixelCoord, cursor, color);
+        }
+
+        void DrawLiteralTargetExposure(uint2 currentPixelCoord, uint2 position, float3 fontColor, inout float3 color)
+        {
+            uint2 cursor = position;
+            DrawMiniCharacter('T', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('a', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('r', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('g', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('e', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('t', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter(' ', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('E', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('x', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('p', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('o', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('s', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('u', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('r', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('e', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter(':', fontColor, currentPixelCoord, cursor, color);
+        }
+
+        void DrawLiteralExposureCompensation(uint2 currentPixelCoord, uint2 position, float3 fontColor, inout float3 color)
+        {
+            uint2 cursor = position;
+            DrawMiniCharacter('E', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('x', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('p', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('o', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('s', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('u', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('r', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('e', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter(' ', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('C', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('o', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('m', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('p', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('e', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('n', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('s', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('a', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('t', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('i', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('o', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter('n', fontColor, currentPixelCoord, cursor, color);
+            DrawMiniCharacter(':', fontColor, currentPixelCoord, cursor, color);
+        }
+
+        float2 GetHistogramLabelRange(float currentExposureEV100)
+        {
+            float minEV100 = _HistogramLabelRange.x;
+            float maxEV100 = max(_HistogramLabelRange.y, minEV100 + VIVID_EXPOSURE_EPSILON);
+            return float2(minEV100, maxEV100);
+        }
+
+        float EvToUVLocation(float ev100, float currentExposureEV100)
+        {
+            float2 labelRange = GetHistogramLabelRange(currentExposureEV100);
+            return saturate((ev100 - labelRange.x) / max(labelRange.y - labelRange.x, VIVID_EXPOSURE_EPSILON));
+        }
+
+        ExposureStatsSummary SummarizeExposureStats()
+        {
+            ExposureStatsSummary summary;
+            summary.histogramMax = 0.0;
+            summary.lowPercentileBin = clamp(_HistogramPercentileBins.x, 0.0, (float)(VIVID_EXPOSURE_HISTOGRAM_BINS - 1));
+            summary.highPercentileBin = clamp(max(_HistogramPercentileBins.y, summary.lowPercentileBin), 0.0, (float)(VIVID_EXPOSURE_HISTOGRAM_BINS - 1));
+            summary.currentExposureEV100 = _HistogramExposureValues.x;
+            summary.targetExposureEV100 = _HistogramExposureValues.y;
+            summary.exposureCompensationStops = _HistogramExposureValues.z;
+            summary.averageSceneEV100 = _HistogramExposureValues.w;
+
+            [unroll]
+            for (uint bucketIndex = 0u; bucketIndex < VIVID_EXPOSURE_HISTOGRAM_BINS; ++bucketIndex)
+                summary.histogramMax = max(summary.histogramMax, SampleHistogramBin(bucketIndex));
+
+            return summary;
+        }
+
+        float GetHistogramInfo(
+            float coordOnX,
+            float maxHistogramValue,
+            float labelBarHeight,
+            float frameHeight,
+            float currentExposureEV100,
+            out uint binIndex,
+            out bool isEdgeOfBin)
+        {
+            float barSize = ResolveScreenSize().x / VIVID_EXPOSURE_HISTOGRAM_BINS;
+            float bin = coordOnX / max(barSize, 1.0);
+            float locationWithinBin = barSize * frac(bin);
+            binIndex = (uint)clamp(floor(bin), 0.0, (float)(VIVID_EXPOSURE_HISTOGRAM_BINS - 1));
+            isEdgeOfBin = barSize > 2.0 && (locationWithinBin < 1.0 || locationWithinBin > (barSize - 1.0));
+
+            float histogramValue = SampleHistogramBin(binIndex);
+            histogramValue /= max(maxHistogramValue, VIVID_EXPOSURE_EPSILON);
+            histogramValue *= 0.95 * (frameHeight - labelBarHeight);
+            histogramValue += labelBarHeight;
+            return histogramValue;
+        }
+
+        void GetHistogramLabel(float labelCount, float labelIndex, float currentExposureEV100, out uint2 labelLocation, out float labelValue)
+        {
+            float2 screenSize = ResolveScreenSize();
+            int minLabelLocationX = (int)(VIVID_SMALL_FONT_SPACING * 0.25);
+            int maxLabelLocationX = (int)screenSize.x - (VIVID_SMALL_FONT_SPACING * 6);
+            float2 labelRange = GetHistogramLabelRange(currentExposureEV100);
+            float t = rcp(labelCount) * (labelIndex - 0.25);
+            labelLocation = uint2((uint)lerp(minLabelLocationX, maxLabelLocationX, t), 0u);
+            labelValue = lerp(labelRange.x, labelRange.y, t);
+        }
+
+        void DrawTriangleIndicator(float2 pixelCoord, float labelBarHeight, float uvXLocation, float widthNdc, float3 color, inout float3 outputColor)
+        {
+            float arrowStart = labelBarHeight * 0.4;
+            float heightInIndicator = saturate((pixelCoord.y - arrowStart) / max(labelBarHeight - arrowStart, VIVID_EXPOSURE_EPSILON));
+            float indicatorWidth = 1.0 - heightInIndicator;
+            float screenWidth = ResolveScreenSize().x;
+            float minScreenPos = (uvXLocation - widthNdc * indicatorWidth * 0.5) * screenWidth;
+            float maxScreenPos = (uvXLocation + widthNdc * indicatorWidth * 0.5) * screenWidth;
+
+            if (pixelCoord.x > minScreenPos && pixelCoord.x < maxScreenPos && pixelCoord.y >= arrowStart)
+            {
+                outputColor = color;
+            }
+            else if (pixelCoord.x > (minScreenPos - 2.0)
+                && pixelCoord.x < (maxScreenPos + 2.0)
+                && pixelCoord.y > (arrowStart - 2.0))
+            {
+                outputColor = 0.0;
+            }
+        }
+
+        bool DrawEmptyFrame(float2 uv, float3 frameColor, float frameAlpha, float frameHeight, float labelBarHeight, inout float3 outputColor)
+        {
+            float2 borderSize = 2.0 * ResolveInvScreenSize();
+            if (uv.y > frameHeight)
+                return false;
+
+            if (uv.x < borderSize.x || uv.x > (1.0 - borderSize.x))
+            {
+                outputColor = 0.0;
+                return false;
+            }
+
+            if (uv.y > frameHeight - borderSize.y)
+            {
+                outputColor = 0.0;
+                return false;
+            }
+
+            outputColor = lerp(outputColor, frameColor, frameAlpha);
+            if (uv.y < labelBarHeight)
+                outputColor *= 0.075;
+
+            return true;
+        }
+
+        void DrawHistogramFrame(
+            float2 uv,
+            uint2 pixelCoord,
+            float frameHeight,
+            float3 backgroundColor,
+            float backgroundAlpha,
+            ExposureStatsSummary summary,
+            inout float3 outputColor)
+        {
+            float labelBarHeight = (VIVID_SMALL_FONT_HEIGHT + 4.0) / ResolveScreenSize().y;
+
+            if (!DrawEmptyFrame(uv, backgroundColor, backgroundAlpha, frameHeight, labelBarHeight, outputColor))
+                return;
+
+            bool isEdgeOfBin = false;
+            uint binIndex = 0u;
+            float histogramValue = GetHistogramInfo(pixelCoord.x, summary.histogramMax, labelBarHeight, frameHeight, summary.currentExposureEV100, binIndex, isEdgeOfBin);
+
+            if (uv.y < histogramValue && uv.y > labelBarHeight)
+            {
+                isEdgeOfBin = isEdgeOfBin || (uv.y > histogramValue - ResolveInvScreenSize().y);
+                if (binIndex < (uint)max(summary.lowPercentileBin, 0.0))
+                {
+                    outputColor = float3(0.0, 0.0, 1.0);
+                }
+                else if (binIndex >= (uint)max(summary.highPercentileBin, 0.0))
+                {
+                    outputColor = float3(1.0, 0.0, 0.0);
+                }
+                else
+                {
+                    outputColor = 1.0;
+                }
+
+                if (isEdgeOfBin)
+                    outputColor = 0.0;
+            }
+
+            const int labelCount = 12;
+            [loop]
+            for (int labelIndex = 0; labelIndex <= labelCount; ++labelIndex)
+            {
+                uint2 labelLocation;
+                float labelValue;
+                GetHistogramLabel((float)labelCount, labelIndex, summary.currentExposureEV100, labelLocation, labelValue);
+                DrawMiniFloatExplicitPrecisionFlippedY(labelValue, 1.0, pixelCoord, 1u, labelLocation, outputColor);
+            }
+
+            float currentMarker = EvToUVLocation(summary.currentExposureEV100, summary.currentExposureEV100);
+            float targetMarker = EvToUVLocation(summary.targetExposureEV100, summary.currentExposureEV100);
+            float labelBarHeightScreen = labelBarHeight * ResolveScreenSize().y;
+            if (uv.y < labelBarHeight)
+            {
+                DrawTriangleIndicator(float2(pixelCoord), labelBarHeightScreen, targetMarker, 0.007, float3(0.9, 0.75, 0.1), outputColor);
+                DrawTriangleIndicator(float2(pixelCoord), labelBarHeightScreen, currentMarker, 0.007, float3(0.15, 0.15, 0.1), outputColor);
+            }
+        }
+
+        void DrawHistogramText(
+            uint2 pixelCoord,
+            float frameHeight,
+            float3 textColor,
+            ExposureStatsSummary summary,
+            inout float3 outputColor)
+        {
+            float screenHeight = ResolveScreenSize().y;
+            uint2 currentTextLocation = uint2(
+                (uint)(VIVID_SMALL_FONT_SPACING * 0.5),
+                (uint)(VIVID_SMALL_FONT_SPACING * 0.5 + frameHeight * screenHeight));
+            DrawLiteralCurrentExposure(pixelCoord, currentTextLocation, textColor, outputColor);
+            currentTextLocation.x += VIVID_SMALL_FONT_SPACING * 17;
+            DrawMiniFloatExplicitPrecision(summary.currentExposureEV100, textColor, pixelCoord, 3u, currentTextLocation, outputColor);
+
+            currentTextLocation = uint2(
+                (uint)(VIVID_SMALL_FONT_SPACING * 0.5),
+                (uint)(VIVID_SMALL_FONT_SPACING * 0.5 + frameHeight * screenHeight + VIVID_SMALL_FONT_HEIGHT + 2));
+            DrawLiteralTargetExposure(pixelCoord, currentTextLocation, textColor, outputColor);
+            currentTextLocation.x += VIVID_SMALL_FONT_SPACING * 16;
+            DrawMiniFloatExplicitPrecision(summary.targetExposureEV100, textColor, pixelCoord, 3u, currentTextLocation, outputColor);
+
+            currentTextLocation = uint2(
+                (uint)(VIVID_SMALL_FONT_SPACING * 0.5),
+                (uint)(VIVID_SMALL_FONT_SPACING * 0.5 + frameHeight * screenHeight + (VIVID_SMALL_FONT_HEIGHT + 2) * 2));
+            DrawLiteralExposureCompensation(pixelCoord, currentTextLocation, textColor, outputColor);
+            currentTextLocation.x += VIVID_SMALL_FONT_SPACING * 22;
+            DrawMiniFloatExplicitPrecision(summary.exposureCompensationStops, textColor, pixelCoord, 3u, currentTextLocation, outputColor);
+        }
+
+        float4 Frag(v2f_img input) : SV_Target
         {
             float darkSkin = _PreviewState.z;
             float alpha = _PreviewState.x;
-            float3 panelColor = ResolvePanelColor(darkSkin);
-            float3 surfaceColor = ResolveSurfaceColor(darkSkin);
-            float3 gridColor = ResolveGridColor(darkSkin);
-            float3 borderColor = ResolveBorderColor(darkSkin);
-            float3 accentColor = ResolveAccentColor();
-            float3 color = panelColor;
+            uint2 pixelCoord = uint2(input.pos.xy);
+            float3 outputColor = ResolvePanelColor(darkSkin);
+            float3 frameColor = ResolveFrameColor(darkSkin);
+            float3 textColor = ResolveTextColor(darkSkin);
+            ExposureStatsSummary summary = SummarizeExposureStats();
+            float histogramFrameHeight = 0.48;
 
-            float headerMask = RectMask(i.uv, float2(0.04, 0.90), float2(0.96, 0.97));
-            color = lerp(color, accentColor * 0.72 + surfaceColor * 0.28, headerMask * 0.95);
+            DrawHistogramFrame(
+                input.uv,
+                pixelCoord,
+                histogramFrameHeight,
+                frameColor,
+                0.88,
+                summary,
+                outputColor);
 
-            float statusYMin = 0.80;
-            float statusYMax = 0.87;
-            float cellWidth = 0.18;
-            float gap = 0.03;
-            float activeCell = RectMask(i.uv, float2(0.08, statusYMin), float2(0.08 + cellWidth, statusYMax));
-            float modeCell = RectMask(i.uv, float2(0.08 + cellWidth + gap, statusYMin), float2(0.08 + (cellWidth * 2.0) + gap, statusYMax));
-            float physicalCell = RectMask(i.uv, float2(0.08 + (cellWidth + gap) * 2.0, statusYMin), float2(0.08 + (cellWidth * 3.0) + (gap * 2.0), statusYMax));
-            float maskCell = RectMask(i.uv, float2(0.08 + (cellWidth + gap) * 3.0, statusYMin), float2(0.08 + (cellWidth * 4.0) + (gap * 3.0), statusYMax));
+            DrawHistogramText(
+                pixelCoord,
+                histogramFrameHeight,
+                textColor,
+                summary,
+                outputColor);
 
-            color = lerp(color, lerp(surfaceColor, float3(0.24, 0.86, 0.48), _StatusFlags.x), activeCell * 0.95);
-            color = lerp(color, _PreviewState.y > 0.5 ? float3(0.34, 0.56, 1.00) : float3(0.22, 0.92, 0.52), modeCell * 0.95);
-            color = lerp(color, lerp(surfaceColor, float3(0.22, 0.84, 1.00), _StatusFlags.z), physicalCell * 0.95);
-            color = lerp(color, lerp(surfaceColor, float3(1.00, 0.72, 0.25), _StatusFlags.w), maskCell * 0.95);
-
-            if (_PreviewState.y > 0.5)
-                color = DrawManualPreview(i, color, panelColor, surfaceColor, accentColor, borderColor).rgb;
-            else
-                color = DrawHistogramPreview(i, color, panelColor, surfaceColor, gridColor, accentColor, borderColor).rgb;
-
-            float outerFrame = FrameMask(i.uv, float2(0.04, 0.04), float2(0.96, 0.97), 0.003);
-            color = lerp(color, borderColor, outerFrame * 0.82);
-
-            return float4(color * alpha, 1.0);
+            return float4(saturate(outputColor * alpha), 1.0);
         }
 
     ENDCG

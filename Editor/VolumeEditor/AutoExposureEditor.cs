@@ -20,6 +20,9 @@ namespace VividRP.Editor
         private static readonly int HistogramMarkersId = Shader.PropertyToID("_HistogramMarkers");
         private static readonly int GaugeMarkersId = Shader.PropertyToID("_GaugeMarkers");
         private static readonly int PercentMarkersId = Shader.PropertyToID("_PercentMarkers");
+        private static readonly int HistogramLabelRangeId = Shader.PropertyToID("_HistogramLabelRange");
+        private static readonly int HistogramExposureValuesId = Shader.PropertyToID("_HistogramExposureValues");
+        private static readonly int HistogramPercentileBinsId = Shader.PropertyToID("_HistogramPercentileBins");
         private static readonly int HistogramSamplesId = Shader.PropertyToID("_HistogramSamples");
 
         private static readonly GUIContent s_EnableLabel = EditorGUIUtility.TrTextContent("Enable");
@@ -108,6 +111,10 @@ namespace VividRP.Editor
             public readonly float clampMaxPosition;
             public readonly float averagePosition;
             public readonly float histogramWidth;
+            public readonly float currentExposureEV100;
+            public readonly float targetExposureEV100;
+            public readonly float lowPercentileBin;
+            public readonly float highPercentileBin;
             public readonly float currentGaugePosition;
             public readonly float targetGaugePosition;
             public readonly float compensationGaugePosition;
@@ -142,6 +149,10 @@ namespace VividRP.Editor
                 float clampMaxPosition,
                 float averagePosition,
                 float histogramWidth,
+                float currentExposureEV100,
+                float targetExposureEV100,
+                float lowPercentileBin,
+                float highPercentileBin,
                 float currentGaugePosition,
                 float targetGaugePosition,
                 float compensationGaugePosition,
@@ -175,6 +186,10 @@ namespace VividRP.Editor
                 this.clampMaxPosition = clampMaxPosition;
                 this.averagePosition = averagePosition;
                 this.histogramWidth = histogramWidth;
+                this.currentExposureEV100 = currentExposureEV100;
+                this.targetExposureEV100 = targetExposureEV100;
+                this.lowPercentileBin = lowPercentileBin;
+                this.highPercentileBin = highPercentileBin;
                 this.currentGaugePosition = currentGaugePosition;
                 this.targetGaugePosition = targetGaugePosition;
                 this.compensationGaugePosition = compensationGaugePosition;
@@ -381,7 +396,7 @@ namespace VividRP.Editor
                 return;
             }
 
-            var previewHeight = AutoExposureExposureModeUtility.UsesManualSettings(previewData.mode) ? 104f : 122f;
+            const float previewHeight = 132f;
             m_StatsPreviewRect = GUILayoutUtility.GetRect(128f, previewHeight);
             m_StatsPreviewRect.xMin += EditorGUI.indentLevel * 15f;
 
@@ -471,6 +486,9 @@ namespace VividRP.Editor
             var histogramWidth = Mathf.Max(Mathf.Abs(clampMaxPosition - clampMinPosition), 0.12f);
 
             PopulateHistogramSamplesFromSnapshot(snapshot, averagePosition, histogramWidth);
+            var percentileBins = snapshot.hasHistogram && snapshot.histogram != null && snapshot.histogram.Length > 0
+                ? ResolveHistogramPercentileBins(snapshot.histogram, lowPercent, highPercent)
+                : ResolveHistogramPercentileBins(m_HistogramPreviewSamples, lowPercent, highPercent);
 
             return new AutoExposureStatsPreviewData(
                 true,
@@ -499,6 +517,10 @@ namespace VividRP.Editor
                 clampMaxPosition,
                 averagePosition,
                 histogramWidth,
+                ResolveExposureEV100FromScale(currentExposureScale),
+                ResolveExposureEV100FromScale(targetExposureScale),
+                percentileBins.x,
+                percentileBins.y,
                 ResolveExposureGaugePosition(currentExposureScale),
                 ResolveExposureGaugePosition(targetExposureScale),
                 ResolveCompensationGaugePosition(compensationAllStops),
@@ -573,6 +595,7 @@ namespace VividRP.Editor
             var histogramWidth = Mathf.Max(Mathf.Abs(clampMaxPosition - clampMinPosition), 0.12f);
 
             PopulateFallbackHistogramSamples(averagePosition, histogramWidth, clampMinPosition, clampMaxPosition);
+            var percentileBins = ResolveHistogramPercentileBins(m_HistogramPreviewSamples, lowPercent, highPercent);
 
             return new AutoExposureStatsPreviewData(
                 false,
@@ -601,6 +624,10 @@ namespace VividRP.Editor
                 clampMaxPosition,
                 averagePosition,
                 histogramWidth,
+                ResolveExposureEV100FromScale(resolvedExposureScale),
+                ResolveExposureEV100FromScale(resolvedExposureScale),
+                percentileBins.x,
+                percentileBins.y,
                 ResolveExposureGaugePosition(resolvedExposureScale),
                 ResolveExposureGaugePosition(resolvedExposureScale),
                 ResolveCompensationGaugePosition(compensationAllStops),
@@ -656,6 +683,89 @@ namespace VividRP.Editor
             }
         }
 
+        private static Vector2 ResolveHistogramPercentileBins(
+            uint[] histogramSamples,
+            float lowPercent,
+            float highPercent)
+        {
+            if (histogramSamples == null || histogramSamples.Length == 0)
+                return new Vector2(0f, HistogramBucketCount - 1);
+
+            double histogramSum = 0;
+            var histogramCount = Mathf.Min(histogramSamples.Length, HistogramBucketCount);
+            for (var i = 0; i < histogramCount; i++)
+                histogramSum += histogramSamples[i];
+
+            if (histogramSum <= 0)
+                return new Vector2(0f, HistogramBucketCount - 1);
+
+            return ResolveHistogramPercentileBins(
+                index => histogramSamples[index],
+                histogramCount,
+                histogramSum,
+                lowPercent,
+                highPercent);
+        }
+
+        private static Vector2 ResolveHistogramPercentileBins(
+            float[] histogramSamples,
+            float lowPercent,
+            float highPercent)
+        {
+            if (histogramSamples == null || histogramSamples.Length == 0)
+                return new Vector2(0f, HistogramBucketCount - 1);
+
+            double histogramSum = 0;
+            var histogramCount = Mathf.Min(histogramSamples.Length, HistogramBucketCount);
+            for (var i = 0; i < histogramCount; i++)
+                histogramSum += Mathf.Max(histogramSamples[i], 0f);
+
+            if (histogramSum <= 0)
+                return new Vector2(0f, HistogramBucketCount - 1);
+
+            return ResolveHistogramPercentileBins(
+                index => Mathf.Max(histogramSamples[index], 0f),
+                histogramCount,
+                histogramSum,
+                lowPercent,
+                highPercent);
+        }
+
+        private static Vector2 ResolveHistogramPercentileBins(
+            Func<int, double> readSample,
+            int histogramCount,
+            double histogramSum,
+            float lowPercent,
+            float highPercent)
+        {
+            var lowThreshold = histogramSum * Mathf.Clamp01(lowPercent);
+            var highThreshold = histogramSum * Mathf.Clamp01(Mathf.Max(lowPercent, highPercent));
+            var lowBin = 0;
+            var highBin = Mathf.Max(histogramCount - 1, 0);
+            var foundLow = false;
+            var foundHigh = false;
+            double cumulative = 0;
+
+            for (var i = 0; i < histogramCount; i++)
+            {
+                cumulative += readSample(i);
+
+                if (!foundLow && cumulative >= lowThreshold)
+                {
+                    lowBin = i;
+                    foundLow = true;
+                }
+
+                if (!foundHigh && cumulative >= highThreshold)
+                {
+                    highBin = i;
+                    foundHigh = true;
+                }
+            }
+
+            return new Vector2(lowBin, Mathf.Max(lowBin, highBin));
+        }
+
         private static Vector2 ResolveHistogramEv100RangeFromSettings(AutoExposureSettingsData settings)
         {
             var histogramScale = Mathf.Max(settings.histogramScale, 1e-4f);
@@ -673,6 +783,11 @@ namespace VividRP.Editor
         private static float ResolveCompensationStops(float compensationLinear)
         {
             return Mathf.Log(Mathf.Max(compensationLinear, 1e-4f), 2f);
+        }
+
+        private static float ResolveExposureEV100FromScale(float exposureScale)
+        {
+            return -Mathf.Log(Mathf.Max(exposureScale, 1e-4f), 2f);
         }
 
         private void ConfigureStatsPreview(AutoExposureStatsPreviewData previewData)
@@ -715,6 +830,27 @@ namespace VividRP.Editor
                     previewData.highPercent,
                     previewData.enabled ? 1f : 0f,
                     0f));
+            m_StatsPreviewMaterial.SetVector(
+                HistogramLabelRangeId,
+                new Vector4(
+                    previewData.minEV100,
+                    Mathf.Max(previewData.maxEV100, previewData.minEV100 + 1e-4f),
+                    previewData.histogramEV100Range.x,
+                    previewData.histogramEV100Range.y));
+            m_StatsPreviewMaterial.SetVector(
+                HistogramExposureValuesId,
+                new Vector4(
+                    previewData.currentExposureEV100,
+                    previewData.targetExposureEV100,
+                    previewData.exposureCompensationAllStops,
+                    previewData.resolvedEV100));
+            m_StatsPreviewMaterial.SetVector(
+                HistogramPercentileBinsId,
+                new Vector4(
+                    previewData.lowPercentileBin,
+                    previewData.highPercentileBin,
+                    previewData.hasLiveHistogram ? 1f : 0f,
+                    previewData.usingLiveStats ? 1f : 0f));
             m_StatsPreviewMaterial.SetFloatArray(HistogramSamplesId, m_HistogramPreviewSamples);
         }
 

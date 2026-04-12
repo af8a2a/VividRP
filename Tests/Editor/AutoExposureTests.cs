@@ -648,10 +648,24 @@ namespace VividRP.Editor.Tests
             Assert.That(editorSource, Does.Contain("snapshot.hasPreExposureState"));
             Assert.That(editorSource, Does.Contain("\"Pre Buffer.x\""));
             Assert.That(editorSource, Does.Contain("resolvedPreExposure"));
+            Assert.That(editorSource, Does.Contain("ResolveExposureEV100FromScale"));
+            Assert.That(editorSource, Does.Contain("ResolveHistogramPercentileBins"));
+            Assert.That(editorSource, Does.Contain("HistogramLabelRangeId"));
+            Assert.That(editorSource, Does.Contain("HistogramExposureValuesId"));
+            Assert.That(editorSource, Does.Contain("HistogramPercentileBinsId"));
             Assert.That(editorSource, Does.Contain("SetFloatArray(HistogramSamplesId, m_HistogramPreviewSamples);"));
             Assert.That(editorSource, Does.Contain("Live GPU ("));
             Assert.That(editorSource, Does.Contain("Waiting for editor-only GPU readback."));
             Assert.That(statsShaderSource, Does.Contain("float _HistogramSamples[64];"));
+            Assert.That(statsShaderSource, Does.Contain("ExposureStatsSummary SummarizeExposureStats()"));
+            Assert.That(statsShaderSource, Does.Contain("GetHistogramLabelRange("));
+            Assert.That(statsShaderSource, Does.Contain("GetHistogramInfo("));
+            Assert.That(statsShaderSource, Does.Contain("DrawHistogramFrame("));
+            Assert.That(statsShaderSource, Does.Contain("DrawMiniCharacterFlippedY("));
+            Assert.That(statsShaderSource, Does.Contain("DrawMiniFloatExplicitPrecisionFlippedY("));
+            Assert.That(statsShaderSource, Does.Contain("DrawLiteralCurrentExposure("));
+            Assert.That(statsShaderSource, Does.Contain("DrawLiteralTargetExposure("));
+            Assert.That(statsShaderSource, Does.Contain("DrawLiteralExposureCompensation("));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

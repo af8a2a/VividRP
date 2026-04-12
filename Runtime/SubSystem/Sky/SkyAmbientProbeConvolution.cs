@@ -1,3 +1,5 @@
+using Unity.Collections;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -17,8 +19,6 @@ namespace VividRP.Runtime
         private static readonly int DiffuseAmbientProbeOutputBufferId = Shader.PropertyToID("_DiffuseAmbientProbeOutputBuffer");
         private static readonly int ScratchBufferId = Shader.PropertyToID("_ScratchBuffer");
         private static readonly int VividAmbientProbeDataId = Shader.PropertyToID("_VividAmbientProbeData");
-        private static readonly int SkyConvolutionTintId = Shader.PropertyToID("_SkyConvolutionTint");
-        private static readonly int SkyConvolutionParamsId = Shader.PropertyToID("_SkyConvolutionParams");
         private static readonly ProfilingSampler s_ConvolutionSampler = new("SkyAmbientProbeConvolution.Convolve");
 
         private ComputeShader m_ComputeShader;
@@ -59,9 +59,6 @@ namespace VividRP.Runtime
         internal void RequestUpdate(
             CommandBuffer cmd,
             Texture sourceCubemap,
-            Color tint,
-            float exposureStops,
-            float rotation,
             int skyHash,
             bool forceRebuild = false)
         {
@@ -91,11 +88,6 @@ namespace VividRP.Runtime
                     cmd.SetComputeBufferParam(m_ComputeShader, m_Kernel, AmbientProbeOutputBufferId, m_AmbientProbeBuffer);
                 }
 
-                cmd.SetComputeVectorParam(m_ComputeShader, SkyConvolutionTintId, new Vector4(tint.r, tint.g, tint.b, tint.a));
-                cmd.SetComputeVectorParam(
-                    m_ComputeShader,
-                    SkyConvolutionParamsId,
-                    new Vector4(HDRISkyVolume.ResolveExposureMultiplier(exposureStops), -rotation, 0.0f, 0.0f));
                 Hammersley.BindConstants(cmd, m_ComputeShader);
                 cmd.DispatchCompute(m_ComputeShader, m_Kernel, 1, 1, 1);
             }

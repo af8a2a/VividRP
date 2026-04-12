@@ -199,9 +199,6 @@ namespace VividRP.Runtime
                 s_AmbientProbeConvolution.RequestUpdate(
                     cmd,
                     skyData.ambientProbeCubemap,
-                    skyData.ambientProbeTint,
-                    skyData.ambientProbeExposure,
-                    skyData.ambientProbeRotation,
                     skyData.ambientProbeHash,
                     forceRebuild);
             }

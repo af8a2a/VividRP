@@ -9,7 +9,6 @@ namespace VividRP.Runtime
 
         private const int MaxConvolutionMipLevel = 6;
         private const float GoldenRatio = 1.618033988749895f;
-        private const float CubemapVerticalFieldOfViewRadians = 0.5f * Mathf.PI;
         private const int GgxConvolutionPassIndex = 0;
         private const int CopyMipZeroPassIndex = 1;
 
@@ -166,20 +165,6 @@ namespace VividRP.Runtime
             return new Color(localL.x, localL.y, localL.z, omegaS);
         }
 
-        private static Matrix4x4 ComputePixelCoordToViewDirWSMatrix(CubemapFace face, int faceSize)
-        {
-            var screenSize = new Vector4(faceSize, faceSize, 1.0f / faceSize, 1.0f / faceSize);
-            var worldToViewMatrix = Matrix4x4.LookAt(Vector3.zero, GetFaceForward(face), GetFaceUp(face));
-            worldToViewMatrix *= Matrix4x4.Scale(new Vector3(1.0f, 1.0f, -1.0f));
-
-            return CoreUtils.ComputePixelCoordToWorldSpaceViewDirectionMatrix(
-                CubemapVerticalFieldOfViewRadians,
-                Vector2.zero,
-                screenSize,
-                worldToViewMatrix,
-                true);
-        }
-
         private static uint GetIBLRuntimeFilterSampleCount(int mipLevel)
         {
             return mipLevel switch
@@ -275,30 +260,6 @@ namespace VividRP.Runtime
             return source is not RenderTexture renderTexture || renderTexture.IsCreated();
         }
 
-        private static Vector3 GetFaceForward(CubemapFace face)
-        {
-            return face switch
-            {
-                CubemapFace.PositiveX => Vector3.right,
-                CubemapFace.NegativeX => Vector3.left,
-                CubemapFace.PositiveY => Vector3.up,
-                CubemapFace.NegativeY => Vector3.down,
-                CubemapFace.PositiveZ => Vector3.forward,
-                CubemapFace.NegativeZ => Vector3.back,
-                _ => Vector3.forward,
-            };
-        }
-
-        private static Vector3 GetFaceUp(CubemapFace face)
-        {
-            return face switch
-            {
-                CubemapFace.PositiveY => Vector3.forward,
-                CubemapFace.NegativeY => Vector3.back,
-                _ => Vector3.up,
-            };
-        }
-
         private void RenderCubemapLevel(CommandBuffer cmd, Texture source, RenderTexture target, int mipLevel, int passIndex)
         {
             var faceSize = Mathf.Max(1, source.width >> mipLevel);
@@ -309,7 +270,7 @@ namespace VividRP.Runtime
                 var face = SkyDiffuseSHUtility.ValidCubemapFaces[faceIndex];
                 m_PropertyBlock.SetMatrix(
                     PixelCoordToViewDirWSId,
-                    ComputePixelCoordToViewDirWSMatrix(face, faceSize));
+                    SkyCubemapBakingUtility.GetCubemapFacePixelCoordToViewDirWSMatrix(face, faceSize));
                 cmd.SetRenderTarget(target, mipLevel, face);
                 cmd.SetViewport(new Rect(0.0f, 0.0f, faceSize, faceSize));
                 CoreUtils.DrawFullScreen(cmd, m_ConvolutionMaterial, m_PropertyBlock, passIndex);

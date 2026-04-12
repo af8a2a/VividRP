@@ -6,9 +6,10 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/SphericalHarmonics.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Hammersley.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Sampling.hlsl"
+#pragma use_dxc
 
 #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
-
+#define PLATFORM_SUPPORTS_WAVE_INTRINSICS
 // Regular ambient probe convolution
 // Always use mips and output separate diffuse buffer.
 // Volumetric output as an option

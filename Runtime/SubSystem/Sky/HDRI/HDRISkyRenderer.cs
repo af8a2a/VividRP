@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using VividRP.Runtime.RenderPass.Core;
 
@@ -166,8 +167,7 @@ namespace VividRP.Runtime
                 name = "VividHDRISkyAmbientProbe",
                 hideFlags = HideFlags.HideAndDontSave,
                 dimension = TextureDimension.Cube,
-                volumeDepth = 6,
-                graphicsFormat = UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat,
+                graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat,
                 useMipMap = true,
                 autoGenerateMips = false,
                 filterMode = FilterMode.Trilinear,
@@ -183,7 +183,7 @@ namespace VividRP.Runtime
                 && texture.dimension == TextureDimension.Cube
                 && texture.width == resolution
                 && texture.height == resolution
-                && texture.graphicsFormat == UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat;
+                && texture.graphicsFormat == GraphicsFormat.R16G16B16A16_SFloat;
         }
 
         private bool RebuildAmbientProbeCubemap(CommandBuffer cmd, Cubemap cubemap, Color tint, float exposure, float rotation)

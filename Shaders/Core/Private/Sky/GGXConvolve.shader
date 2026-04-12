@@ -21,7 +21,7 @@ Shader "Hidden/VividRP/Sky/GGXConvolve"
             #pragma vertex Vert
             #pragma fragment Frag
 
-            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
 
             TEXTURECUBE(_MainTex);
@@ -87,7 +87,7 @@ Shader "Hidden/VividRP/Sky/GGXConvolve"
             #pragma vertex Vert
             #pragma fragment Frag
 
-            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
 
             TEXTURECUBE(_MainTex);

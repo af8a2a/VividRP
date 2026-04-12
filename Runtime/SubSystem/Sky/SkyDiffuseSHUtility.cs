@@ -38,6 +38,21 @@ namespace VividRP.Runtime
     internal static class SkyCubemapBakingUtility
     {
         private static readonly int PixelCoordToViewDirWSId = Shader.PropertyToID("_PixelCoordToViewDirWS");
+        private const float CubemapVerticalFieldOfViewRadians = 0.5f * Mathf.PI;
+
+        internal static Matrix4x4 GetCubemapFacePixelCoordToViewDirWSMatrix(CubemapFace cubemapFace, int resolution)
+        {
+            var screenSize = new Vector4(resolution, resolution, 1.0f / resolution, 1.0f / resolution);
+            var lookAt = Matrix4x4.LookAt(Vector3.zero, GetFaceForward(cubemapFace), GetFaceUp(cubemapFace));
+            var worldToView = lookAt * Matrix4x4.Scale(new Vector3(1.0f, 1.0f, -1.0f));
+
+            return CoreUtils.ComputePixelCoordToWorldSpaceViewDirectionMatrix(
+                CubemapVerticalFieldOfViewRadians,
+                Vector2.zero,
+                screenSize,
+                worldToView,
+                true);
+        }
 
         internal static void RenderSkyToCubemap(
             CommandBuffer cmd,
@@ -55,13 +70,12 @@ namespace VividRP.Runtime
                 return;
             }
 
-            var gpuProjectionMatrix = GL.GetGPUProjectionMatrix(Matrix4x4.Perspective(90.0f, 1.0f, 0.1f, 1.0f), true);
-
             for (var faceIndex = 0; faceIndex < SkyDiffuseSHUtility.ValidCubemapFaces.Length; faceIndex++)
             {
                 var cubemapFace = SkyDiffuseSHUtility.ValidCubemapFaces[faceIndex];
-                var viewMatrix = Matrix4x4.LookAt(Vector3.zero, GetFaceForward(cubemapFace), GetFaceUp(cubemapFace));
-                propertyBlock.SetMatrix(PixelCoordToViewDirWSId, (gpuProjectionMatrix * viewMatrix).inverse);
+                propertyBlock.SetMatrix(
+                    PixelCoordToViewDirWSId,
+                    GetCubemapFacePixelCoordToViewDirWSMatrix(cubemapFace, targetCubemap.width));
 
                 cmd.SetRenderTarget(targetCubemap, 0, cubemapFace);
                 cmd.SetViewport(new Rect(0.0f, 0.0f, targetCubemap.width, targetCubemap.height));
@@ -89,8 +103,8 @@ namespace VividRP.Runtime
         {
             return cubemapFace switch
             {
-                CubemapFace.PositiveY => Vector3.forward,
-                CubemapFace.NegativeY => Vector3.back,
+                CubemapFace.PositiveY => Vector3.back,
+                CubemapFace.NegativeY => Vector3.forward,
                 _ => Vector3.up,
             };
         }

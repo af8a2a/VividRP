@@ -298,6 +298,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("BuildLiveStatsPreviewData(snapshot)"));
             Assert.That(source, Does.Contain("SetFloatArray(HistogramSamplesId, m_HistogramPreviewSamples);"));
             Assert.That(source, Does.Contain("Live GPU ("));
+            Assert.That(source, Does.Contain("\"Pre Buffer.x\""));
+            Assert.That(source, Does.Contain("resolvedPreExposure"));
             Assert.That(source, Does.Contain("Inspector Preview"));
             Assert.That(source, Does.Contain("Shader.Find(\"Hidden/VividRP/Editor/Auto Exposure Stats\")"));
         }

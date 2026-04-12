@@ -13,11 +13,13 @@ namespace VividRP.Runtime
         public readonly int frameIndex;
         public readonly AutoExposureSettingsData settings;
         public readonly Vector4 exposureState;
+        public readonly Vector4 preExposureState;
         public readonly uint[] histogram;
         public readonly bool exposureEnabled;
         public readonly bool autoExposureEnabled;
         public readonly bool hasValidHistory;
         public readonly bool hasExposureState;
+        public readonly bool hasPreExposureState;
         public readonly bool hasHistogram;
 
         public AutoExposureStatsReadbackSnapshot(
@@ -26,11 +28,13 @@ namespace VividRP.Runtime
             int frameIndex,
             AutoExposureSettingsData settings,
             Vector4 exposureState,
+            Vector4 preExposureState,
             uint[] histogram,
             bool exposureEnabled,
             bool autoExposureEnabled,
             bool hasValidHistory,
             bool hasExposureState,
+            bool hasPreExposureState,
             bool hasHistogram)
         {
             this.camera = camera;
@@ -38,11 +42,13 @@ namespace VividRP.Runtime
             this.frameIndex = frameIndex;
             this.settings = settings;
             this.exposureState = exposureState;
+            this.preExposureState = preExposureState;
             this.histogram = histogram;
             this.exposureEnabled = exposureEnabled;
             this.autoExposureEnabled = autoExposureEnabled;
             this.hasValidHistory = hasValidHistory;
             this.hasExposureState = hasExposureState;
+            this.hasPreExposureState = hasPreExposureState;
             this.hasHistogram = hasHistogram;
         }
     }
@@ -65,12 +71,15 @@ namespace VividRP.Runtime
             public string cameraName = string.Empty;
             public AutoExposureSettingsData settings = AutoExposureSettingsData.CreateDefault();
             public Vector4 exposureState = s_DefaultExposureState;
+            public Vector4 preExposureState = s_DefaultExposureState;
             public bool exposureEnabled;
             public bool autoExposureEnabled;
             public bool hasValidHistory;
             public bool hasExposureState;
+            public bool hasPreExposureState;
             public bool hasHistogram;
             public bool exposurePending;
+            public bool preExposurePending;
             public bool histogramPending;
             public int frameIndex;
             public float lastTouchedTime = float.NegativeInfinity;
@@ -117,11 +126,13 @@ namespace VividRP.Runtime
                 latestState.frameIndex,
                 latestState.settings,
                 latestState.exposureState,
+                latestState.preExposureState,
                 latestState.histogram,
                 latestState.exposureEnabled,
                 latestState.autoExposureEnabled,
                 latestState.hasValidHistory,
                 latestState.hasExposureState,
+                latestState.hasPreExposureState,
                 latestState.hasHistogram);
             return true;
         }
@@ -134,6 +145,7 @@ namespace VividRP.Runtime
             bool autoExposureEnabled,
             bool hasValidHistory,
             GraphicsBuffer exposureBuffer,
+            GraphicsBuffer preExposureBuffer,
             GraphicsBuffer histogramBuffer)
         {
             if (!IsInspectorRequestActive() || commandBuffer == null || camera == null)
@@ -151,8 +163,10 @@ namespace VividRP.Runtime
             if (!exposureEnabled)
             {
                 state.hasExposureState = false;
+                state.hasPreExposureState = false;
                 state.hasHistogram = false;
                 state.exposurePending = false;
+                state.preExposurePending = false;
                 state.histogramPending = false;
                 Array.Clear(state.histogram, 0, state.histogram.Length);
                 return;
@@ -162,6 +176,17 @@ namespace VividRP.Runtime
             {
                 state.exposurePending = true;
                 commandBuffer.RequestAsyncReadback(exposureBuffer, request => HandleExposureReadback(camera, request));
+            }
+
+            if (preExposureBuffer != null && !state.preExposurePending)
+            {
+                state.preExposurePending = true;
+                commandBuffer.RequestAsyncReadback(preExposureBuffer, request => HandlePreExposureReadback(camera, request));
+            }
+            else if (preExposureBuffer == null)
+            {
+                state.hasPreExposureState = false;
+                state.preExposurePending = false;
             }
 
             if (autoExposureEnabled && histogramBuffer != null)
@@ -216,6 +241,30 @@ namespace VividRP.Runtime
 
             state.exposureState = data[0];
             state.hasExposureState = true;
+            state.lastCompletedTime = Time.realtimeSinceStartup;
+        }
+
+        private static void HandlePreExposureReadback(Camera camera, AsyncGPUReadbackRequest request)
+        {
+            if (!s_Snapshots.TryGetValue(camera, out var state) || state == null)
+                return;
+
+            state.preExposurePending = false;
+            if (request.hasError)
+            {
+                state.hasPreExposureState = false;
+                return;
+            }
+
+            var data = request.GetData<Vector4>();
+            if (data.Length < 1)
+            {
+                state.hasPreExposureState = false;
+                return;
+            }
+
+            state.preExposureState = data[0];
+            state.hasPreExposureState = true;
             state.lastCompletedTime = Time.realtimeSinceStartup;
         }
 

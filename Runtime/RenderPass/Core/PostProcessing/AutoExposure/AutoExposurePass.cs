@@ -139,6 +139,9 @@ namespace VividRP.Runtime.RenderPass
                 m_ExposureData.frameExposureBuffer = exposureBuffer;
 
 #if UNITY_EDITOR
+            var preExposureBuffer = m_EnableExposure
+                ? AutoExposureShaderBindings.ResolvePreExposureBuffer(m_ExposureData)
+                : null;
             AutoExposureStatsReadbackBridge.Request(
                 cmd,
                 m_Camera,
@@ -147,6 +150,7 @@ namespace VividRP.Runtime.RenderPass
                 m_EnableAutoExposure,
                 m_ExposureData != null && m_ExposureData.hasValidHistory,
                 m_EnableExposure ? exposureBuffer : null,
+                preExposureBuffer,
                 m_EnableAutoExposure && UsesHistogramBufferAutoExposureExecution()
                     ? m_AutoExposureHistogramBuffer
                     : null);

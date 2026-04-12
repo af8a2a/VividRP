@@ -100,6 +100,7 @@ namespace VividRP.Editor
             public readonly float resolvedAverageLuminance;
             public readonly float resolvedExposureScale;
             public readonly float targetExposureScale;
+            public readonly float resolvedPreExposure;
             public readonly float exposureCompensationSettingsStops;
             public readonly float exposureCompensationCurveStops;
             public readonly float exposureCompensationAllStops;
@@ -133,6 +134,7 @@ namespace VividRP.Editor
                 float resolvedAverageLuminance,
                 float resolvedExposureScale,
                 float targetExposureScale,
+                float resolvedPreExposure,
                 float exposureCompensationSettingsStops,
                 float exposureCompensationCurveStops,
                 float exposureCompensationAllStops,
@@ -165,6 +167,7 @@ namespace VividRP.Editor
                 this.resolvedAverageLuminance = resolvedAverageLuminance;
                 this.resolvedExposureScale = resolvedExposureScale;
                 this.targetExposureScale = targetExposureScale;
+                this.resolvedPreExposure = resolvedPreExposure;
                 this.exposureCompensationSettingsStops = exposureCompensationSettingsStops;
                 this.exposureCompensationCurveStops = exposureCompensationCurveStops;
                 this.exposureCompensationAllStops = exposureCompensationAllStops;
@@ -441,6 +444,11 @@ namespace VividRP.Editor
             var resolvedEV100 = ResolveEv100FromAverageSceneLuminance(resolvedAverageLuminance);
             var currentExposureScale = Mathf.Max(exposureState.x, 1e-4f);
             var targetExposureScale = Mathf.Max(exposureState.y, 1e-4f);
+            var resolvedPreExposure = Mathf.Max(
+                snapshot.hasPreExposureState
+                    ? snapshot.preExposureState.x
+                    : exposureState.x,
+                1e-4f);
             var compensationSettingsStops = ResolveCompensationStops(settings.exposureCompensationSettings);
             var compensationAllStops = ResolveCompensationStops(Mathf.Max(exposureState.w, 1e-4f));
             var compensationCurveStops = compensationAllStops - compensationSettingsStops;
@@ -483,6 +491,7 @@ namespace VividRP.Editor
                 resolvedAverageLuminance,
                 currentExposureScale,
                 targetExposureScale,
+                resolvedPreExposure,
                 compensationSettingsStops,
                 compensationCurveStops,
                 compensationAllStops,
@@ -544,6 +553,7 @@ namespace VividRP.Editor
                 compensationSettingsLinear,
                 compensationCurveStops);
             var resolvedExposureScale = AutoExposureSettingsResolver.ResolveManualExposureScale(resolvedEV100, compensationAllLinear);
+            var resolvedPreExposure = resolvedExposureScale;
 
             var clampMinPosition = ResolveHistogramPositionFromLuminance(
                 minAverageLuminance,
@@ -583,6 +593,7 @@ namespace VividRP.Editor
                 resolvedAverageLuminance,
                 resolvedExposureScale,
                 resolvedExposureScale,
+                resolvedPreExposure,
                 compensationSettingsStops,
                 compensationCurveStops,
                 compensationAllStops,
@@ -746,18 +757,21 @@ namespace VividRP.Editor
                         "Exposure Scale",
                         $"{previewData.resolvedExposureScale:0.###} -> {previewData.targetExposureScale:0.###}");
                     DrawMetricRow(
+                        "Pre Buffer.x",
+                        $"{previewData.resolvedPreExposure:0.###}",
                         "Comp Settings",
-                        $"{previewData.exposureCompensationSettingsStops:+0.##;-0.##;0} EV",
-                        "Comp Curve",
-                        $"{previewData.exposureCompensationCurveStops:+0.##;-0.##;0} EV");
+                        $"{previewData.exposureCompensationSettingsStops:+0.##;-0.##;0} EV");
                     DrawMetricRow(
+                        "Comp Curve",
+                        $"{previewData.exposureCompensationCurveStops:+0.##;-0.##;0} EV",
                         "Comp All",
-                        $"{previewData.exposureCompensationAllStops:+0.##;-0.##;0} EV",
-                        "History",
-                        previewData.hasValidHistory ? "Buffered" : previewData.usingLiveStats ? "Warmup" : "Preview");
+                        $"{previewData.exposureCompensationAllStops:+0.##;-0.##;0} EV");
                     DrawMetricRow(
                         "Meter Mask",
                         previewData.meterMaskAssigned ? "Assigned" : "None",
+                        "History",
+                        previewData.hasValidHistory ? "Buffered" : previewData.usingLiveStats ? "Warmup" : "Preview");
+                    DrawMetricRow(
                         previewData.usingLiveStats ? "Camera" : "Preview EV100",
                         previewData.usingLiveStats
                             ? (string.IsNullOrEmpty(previewData.previewCameraName) ? "None" : previewData.previewCameraName)
@@ -776,23 +790,26 @@ namespace VividRP.Editor
                         "Exposure Scale",
                         $"{previewData.resolvedExposureScale:0.###}");
                     DrawMetricRow(
+                        "Pre Buffer.x",
+                        $"{previewData.resolvedPreExposure:0.###}",
                         "Average Luminance",
-                        $"{previewData.resolvedAverageLuminance:0.###}",
+                        $"{previewData.resolvedAverageLuminance:0.###}");
+                    DrawMetricRow(
                         "Meter Mask",
-                        previewData.meterMaskAssigned ? "Assigned" : "None");
-                    DrawMetricRow(
+                        previewData.meterMaskAssigned ? "Assigned" : "None",
                         "Comp Settings",
-                        $"{previewData.exposureCompensationSettingsStops:+0.##;-0.##;0} EV",
+                        $"{previewData.exposureCompensationSettingsStops:+0.##;-0.##;0} EV");
+                    DrawMetricRow(
                         "Comp Curve",
-                        $"{previewData.exposureCompensationCurveStops:+0.##;-0.##;0} EV");
-                    DrawMetricRow(
+                        $"{previewData.exposureCompensationCurveStops:+0.##;-0.##;0} EV",
                         "Comp All",
-                        $"{previewData.exposureCompensationAllStops:+0.##;-0.##;0} EV",
-                        "History",
-                        previewData.hasValidHistory ? "Buffered" : previewData.usingLiveStats ? "Warmup" : "Preview");
+                        $"{previewData.exposureCompensationAllStops:+0.##;-0.##;0} EV");
                     DrawMetricRow(
+                        "History",
+                        previewData.hasValidHistory ? "Buffered" : previewData.usingLiveStats ? "Warmup" : "Preview",
                         "Physical Camera",
-                        ResolvePhysicalPreviewLabel(previewData),
+                        ResolvePhysicalPreviewLabel(previewData));
+                    DrawMetricRow(
                         previewData.usingLiveStats ? "Live Camera" : "Preview Camera",
                         string.IsNullOrEmpty(previewData.previewCameraName) ? "None" : previewData.previewCameraName);
                 }
@@ -822,6 +839,15 @@ namespace VividRP.Editor
                 DrawMetric(leftLabel, leftValue);
                 GUILayout.Space(10f);
                 DrawMetric(rightLabel, rightValue);
+            }
+        }
+
+        private static void DrawMetricRow(string label, string value)
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                DrawMetric(label, value);
+                GUILayout.FlexibleSpace();
             }
         }
 

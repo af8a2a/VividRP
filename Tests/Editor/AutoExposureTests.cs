@@ -637,9 +637,17 @@ namespace VividRP.Editor.Tests
             Assert.That(readbackBridgeSource, Does.Contain("internal static void TouchInspectorRequest()"));
             Assert.That(readbackBridgeSource, Does.Contain("internal static bool TryGetLatestSnapshot(out AutoExposureStatsReadbackSnapshot snapshot)"));
             Assert.That(readbackBridgeSource, Does.Contain("commandBuffer.RequestAsyncReadback(exposureBuffer"));
+            Assert.That(readbackBridgeSource, Does.Contain("commandBuffer.RequestAsyncReadback(preExposureBuffer"));
+            Assert.That(readbackBridgeSource, Does.Contain("HandlePreExposureReadback"));
+            Assert.That(readbackBridgeSource, Does.Contain("public readonly Vector4 preExposureState;"));
+            Assert.That(readbackBridgeSource, Does.Contain("public readonly bool hasPreExposureState;"));
             Assert.That(readbackBridgeSource, Does.Contain("commandBuffer.RequestAsyncReadback(histogramBuffer"));
+            Assert.That(autoExposurePassSource, Does.Contain("AutoExposureShaderBindings.ResolvePreExposureBuffer(m_ExposureData)"));
             Assert.That(editorSource, Does.Contain("AutoExposureStatsReadbackBridge.TouchInspectorRequest();"));
             Assert.That(editorSource, Does.Contain("return BuildLiveStatsPreviewData(snapshot);"));
+            Assert.That(editorSource, Does.Contain("snapshot.hasPreExposureState"));
+            Assert.That(editorSource, Does.Contain("\"Pre Buffer.x\""));
+            Assert.That(editorSource, Does.Contain("resolvedPreExposure"));
             Assert.That(editorSource, Does.Contain("SetFloatArray(HistogramSamplesId, m_HistogramPreviewSamples);"));
             Assert.That(editorSource, Does.Contain("Live GPU ("));
             Assert.That(editorSource, Does.Contain("Waiting for editor-only GPU readback."));

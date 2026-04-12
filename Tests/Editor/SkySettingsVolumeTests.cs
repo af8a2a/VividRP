@@ -18,15 +18,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(volume.generatedCubemapResolution.value, Is.EqualTo(SkyGeneratedCubemapResolution.Resolution64));
                 Assert.That(volume.generatedCubemapQuality, Is.Not.Null);
                 Assert.That(volume.generatedCubemapQuality.value, Is.EqualTo(SkyGeneratedCubemapQuality.PlatformDefault));
-                Assert.That(volume.specularPrefilterResolution, Is.Not.Null);
-                Assert.That(volume.specularPrefilterResolution.value, Is.EqualTo(SkySpecularPrefilterResolution.Source));
-                Assert.That(volume.specularPrefilterQuality, Is.Not.Null);
-                Assert.That(volume.specularPrefilterQuality.value, Is.EqualTo(SkySpecularPrefilterQuality.PlatformDefault));
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapResolution(volume), Is.EqualTo(64));
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapViewSampleCount(volume), Is.EqualTo(12));
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapLightSampleCount(volume), Is.EqualTo(6));
-                Assert.That(SkySettingsVolume.GetSpecularPrefilterResolution(volume), Is.EqualTo(0));
-                Assert.That(SkySettingsVolume.GetSpecularPrefilterMaxSampleCount(volume), Is.EqualTo(0));
             }
             finally
             {
@@ -82,8 +76,6 @@ namespace VividRP.Editor.Tests
             Assert.That(SkySettingsVolume.GetGeneratedCubemapResolution(), Is.EqualTo(64));
             Assert.That(SkySettingsVolume.GetGeneratedCubemapViewSampleCount(), Is.EqualTo(12));
             Assert.That(SkySettingsVolume.GetGeneratedCubemapLightSampleCount(), Is.EqualTo(6));
-            Assert.That(SkySettingsVolume.GetSpecularPrefilterResolution(), Is.EqualTo(0));
-            Assert.That(SkySettingsVolume.GetSpecularPrefilterMaxSampleCount(), Is.EqualTo(0));
         }
 
         [Test]
@@ -93,12 +85,9 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("generatedCubemapResolution ??= new EnumParameter<SkyGeneratedCubemapResolution>(SkyGeneratedCubemapResolution.Resolution64);"));
             Assert.That(source, Does.Contain("generatedCubemapQuality ??= new EnumParameter<SkyGeneratedCubemapQuality>(SkyGeneratedCubemapQuality.PlatformDefault);"));
-            Assert.That(source, Does.Contain("specularPrefilterResolution ??= new EnumParameter<SkySpecularPrefilterResolution>(SkySpecularPrefilterResolution.Source);"));
-            Assert.That(source, Does.Contain("specularPrefilterQuality ??= new EnumParameter<SkySpecularPrefilterQuality>(SkySpecularPrefilterQuality.PlatformDefault);"));
             Assert.That(source, Does.Contain("return Math.Max(32, resolution);"));
             Assert.That(source, Does.Contain("internal static int GetGeneratedCubemapViewSampleCount(SkySettingsVolume settings = null)"));
             Assert.That(source, Does.Contain("internal static int GetGeneratedCubemapLightSampleCount(SkySettingsVolume settings = null)"));
-            Assert.That(source, Does.Contain("internal static int GetSpecularPrefilterMaxSampleCount(SkySettingsVolume settings = null)"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

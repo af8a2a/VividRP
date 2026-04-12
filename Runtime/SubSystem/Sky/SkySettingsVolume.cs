@@ -20,25 +20,6 @@ namespace VividRP.Runtime
         Ultra = 4
     }
 
-    public enum SkySpecularPrefilterResolution
-    {
-        Source = 0,
-        Resolution32 = 32,
-        Resolution64 = 64,
-        Resolution128 = 128,
-        Resolution256 = 256,
-        Resolution512 = 512
-    }
-
-    public enum SkySpecularPrefilterQuality
-    {
-        PlatformDefault = 0,
-        Low = 21,
-        Medium = 34,
-        High = 55,
-        Ultra = 89
-    }
-
     [Serializable]
     [VolumeComponentMenu("VividRP/Sky Settings")]
     public sealed class SkySettingsVolume : VolumeComponent
@@ -48,8 +29,6 @@ namespace VividRP.Runtime
         public MinFloatParameter updatePeriod = new(0.0f, 0.0f);
         public EnumParameter<SkyGeneratedCubemapResolution> generatedCubemapResolution = new(SkyGeneratedCubemapResolution.Resolution64);
         public EnumParameter<SkyGeneratedCubemapQuality> generatedCubemapQuality = new(SkyGeneratedCubemapQuality.PlatformDefault);
-        public EnumParameter<SkySpecularPrefilterResolution> specularPrefilterResolution = new(SkySpecularPrefilterResolution.Source);
-        public EnumParameter<SkySpecularPrefilterQuality> specularPrefilterQuality = new(SkySpecularPrefilterQuality.PlatformDefault);
 
         protected override void OnEnable()
         {
@@ -58,8 +37,6 @@ namespace VividRP.Runtime
             updatePeriod ??= new MinFloatParameter(0.0f, 0.0f);
             generatedCubemapResolution ??= new EnumParameter<SkyGeneratedCubemapResolution>(SkyGeneratedCubemapResolution.Resolution64);
             generatedCubemapQuality ??= new EnumParameter<SkyGeneratedCubemapQuality>(SkyGeneratedCubemapQuality.PlatformDefault);
-            specularPrefilterResolution ??= new EnumParameter<SkySpecularPrefilterResolution>(SkySpecularPrefilterResolution.Source);
-            specularPrefilterQuality ??= new EnumParameter<SkySpecularPrefilterQuality>(SkySpecularPrefilterQuality.PlatformDefault);
             base.OnEnable();
         }
 
@@ -93,20 +70,6 @@ namespace VividRP.Runtime
                 SkyGeneratedCubemapQuality.Ultra => 12,
                 _ => 6
             };
-        }
-
-        internal static int GetSpecularPrefilterResolution(SkySettingsVolume settings = null)
-        {
-            return settings?.specularPrefilterResolution != null
-                ? (int)settings.specularPrefilterResolution.value
-                : (int)SkySpecularPrefilterResolution.Source;
-        }
-
-        internal static int GetSpecularPrefilterMaxSampleCount(SkySettingsVolume settings = null)
-        {
-            return settings?.specularPrefilterQuality != null
-                ? Math.Max(0, (int)settings.specularPrefilterQuality.value)
-                : (int)SkySpecularPrefilterQuality.PlatformDefault;
         }
     }
 }

@@ -11,15 +11,15 @@ namespace VividRP.Editor.Tests
         {
             var standardLitShader = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "StandardLit.shader"));
             var simpleLitShader = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "SimpleLit.shader"));
-            var standardLitPass = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "StandardLitGBufferPass.hlsl"));
-            var simpleLitPass = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "SimpleLitGBufferPass.hlsl"));
+            var standardLitPass = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "StandardLitGBufferPass.hlsl"));
+            var simpleLitPass = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "SimpleLitGBufferPass.hlsl"));
             var bakedGiSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "BakedGI.hlsl"));
 
             Assert.That(standardLitShader, Does.Contain("#pragma multi_compile _ LIGHTMAP_ON"));
             Assert.That(standardLitShader, Does.Contain("#pragma multi_compile _ DIRLIGHTMAP_COMBINED"));
             Assert.That(simpleLitShader, Does.Contain("#pragma multi_compile _ LIGHTMAP_ON"));
             Assert.That(simpleLitShader, Does.Contain("#pragma multi_compile _ DIRLIGHTMAP_COMBINED"));
-            Assert.That(standardLitPass, Does.Contain("SampleVividBakedGI(input.lightmapUV, surfaceData.normalWS)"));
+            Assert.That(standardLitPass, Does.Contain("SampleStandardLitBakedGI(input.lightmapUV, surfaceData.normalWS)"));
             Assert.That(simpleLitPass, Does.Contain("SampleVividBakedGI(input.lightmapUV, surfaceData.normalWS)"));
             Assert.That(bakedGiSource, Does.Contain("SampleSingleLightmap("));
             Assert.That(bakedGiSource, Does.Contain("SampleDirectionalLightmap("));

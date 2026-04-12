@@ -94,14 +94,13 @@ struct LightVolumeData
 
 // Generated from UnityEngine.Rendering.HighDefinition.SFiniteLightBound
 // PackingRules = Exact
+// boxAxisX.w = scaleXY, boxAxisY.w = radius (packed for 16-byte alignment)
 struct SFiniteLightBound
 {
-    float3 boxAxisX;
-    float3 boxAxisY;
+    float4 boxAxisX;   // xyz = axis, w = scaleXY
+    float4 boxAxisY;   // xyz = axis, w = radius
     float3 boxAxisZ;
     float3 center;
-    float scaleXY;
-    float radius;
 };
 
 // Generated from UnityEngine.Rendering.HighDefinition.ShaderVariablesLightList
@@ -177,11 +176,11 @@ int GetAffectVolumetric(LightVolumeData value)
 //
 float3 GetBoxAxisX(SFiniteLightBound value)
 {
-    return value.boxAxisX;
+    return value.boxAxisX.xyz;
 }
 float3 GetBoxAxisY(SFiniteLightBound value)
 {
-    return value.boxAxisY;
+    return value.boxAxisY.xyz;
 }
 float3 GetBoxAxisZ(SFiniteLightBound value)
 {
@@ -193,11 +192,11 @@ float3 GetCenter(SFiniteLightBound value)
 }
 float GetScaleXY(SFiniteLightBound value)
 {
-    return value.scaleXY;
+    return value.boxAxisX.w;
 }
 float GetRadius(SFiniteLightBound value)
 {
-    return value.radius;
+    return value.boxAxisY.w;
 }
 
 #endif

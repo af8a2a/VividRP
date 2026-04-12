@@ -38,6 +38,7 @@ namespace VividRP.Runtime
         private static readonly int LightListToClearId = Shader.PropertyToID("_LightListToClear");
         private static readonly int LightListEntriesAndOffsetId = Shader.PropertyToID("_LightListEntriesAndOffset");
         private static readonly int DepthTextureId = Shader.PropertyToID("g_depth_tex");
+        private static readonly int HzbDepthTextureId = Shader.PropertyToID("g_depth_tex_hiz");
         private static readonly int ClusterScaleId = Shader.PropertyToID("g_fClustScale");
         private static readonly int ClusterBaseId = Shader.PropertyToID("g_fClustBase");
         private static readonly int NearPlaneId = Shader.PropertyToID("g_fNearPlane");
@@ -54,6 +55,9 @@ namespace VividRP.Runtime
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
+
+        [RenderGraphResource(Name = "HZB", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_HzbDepthTexture;
 
         [RenderGraphResource(
             Name = "DirectionalLights",
@@ -149,6 +153,7 @@ namespace VividRP.Runtime
         {
             profilingSampler = new ProfilingSampler(nameof(LightGridPass));
             m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
+            m_HzbDepthTexture = RenderGraphTexture.CreateInput("HZB", GraphicsFormat.R16G16B16A16_SFloat);
             m_DirectionalLightBuffer = CreateStructuredBuffer("DirectionalLights", 1, VividLightData.DirectionalLightData.Stride);
             m_PunctualLightBuffer = CreateStructuredBuffer("PunctualLights", 1, VividLightData.PunctualLightData.Stride);
             m_FiniteLightBoundBuffer = CreateStructuredBuffer("FiniteLightBounds", 1, VividLightData.SFiniteLightBound.Stride);
@@ -296,18 +301,20 @@ namespace VividRP.Runtime
             using (new ProfilingScope(context.cmd, profilingSampler))
             {
                 var hasDepthTexture = m_DepthTexture != null && m_DepthTexture.innerHandle.IsValid();
+                var hasHzbTexture = HasUsableHzbTexture();
+                var canUseDepthBackplane = hasDepthTexture && hasHzbTexture;
                 var canBuildClusteredLights = m_SupportsClusteredPunctualLights
-                    && ((hasDepthTexture && m_BuildPerVoxelLightListDepthKernel >= 0)
+                    && ((canUseDepthBackplane && m_BuildPerVoxelLightListDepthKernel >= 0)
                         || m_BuildPerVoxelLightListNoDepthKernel >= 0);
 
                 if (!canBuildClusteredLights)
                     return;
 
                 DispatchClearLightLists(context.cmd);
-                DispatchScreenSpaceAabb(context.cmd,hasDepthTexture);
-                DispatchBigTilePrepass(context.cmd,hasDepthTexture);
+                DispatchScreenSpaceAabb(context.cmd, canUseDepthBackplane);
+                DispatchBigTilePrepass(context.cmd, canUseDepthBackplane);
                 DispatchClearClusterAtomicIndex(context.cmd);
-                DispatchClusteredLightList(context.cmd, hasDepthTexture);
+                DispatchClusteredLightList(context.cmd, canUseDepthBackplane);
             }
         }
 
@@ -439,6 +446,7 @@ namespace VividRP.Runtime
             {
                 cmd.SetComputeBufferParam(m_BuildPerVoxelLightListCompute, kernel, LogBaseBufferId, m_LogBaseBuffer.innerHandle);
                 cmd.SetComputeTextureParam(m_BuildPerVoxelLightListCompute, kernel, DepthTextureId, m_DepthTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_BuildPerVoxelLightListCompute, kernel, HzbDepthTextureId, m_HzbDepthTexture.innerHandle);
             }
 
             cmd.DispatchCompute(
@@ -550,7 +558,7 @@ namespace VividRP.Runtime
             clusteredLightingData.clusterBase = ClusterLogBase;
             clusteredLightingData.clusterLog2SliceCount = ClusterLog2SliceCount;
             clusteredLightingData.supportsClusteredPunctualLights = m_SupportsClusteredPunctualLights;
-            clusteredLightingData.isLogBaseBufferEnabled = m_SupportsClusteredPunctualLights;
+            clusteredLightingData.isLogBaseBufferEnabled = m_SupportsClusteredPunctualLights && HasUsableHzbDescriptor();
         }
 
         private bool CanBuildClusteredPunctualLights()
@@ -566,6 +574,18 @@ namespace VividRP.Runtime
                 && m_BuildScreenAabbKernel >= 0
                 && m_BuildPerBigTileLightListKernel >= 0
                 && (m_BuildPerVoxelLightListDepthKernel >= 0 || m_BuildPerVoxelLightListNoDepthKernel >= 0);
+        }
+
+        private bool HasUsableHzbDescriptor()
+        {
+            return m_HzbDepthTexture?.desc != null
+                && m_HzbDepthTexture.desc.UseMipMap
+                && m_HzbDepthTexture.desc.MipCount > 1;
+        }
+
+        private bool HasUsableHzbTexture()
+        {
+            return m_HzbDepthTexture?.innerHandle.IsValid() == true && HasUsableHzbDescriptor();
         }
 
         private void EnsureImportedBuffers()

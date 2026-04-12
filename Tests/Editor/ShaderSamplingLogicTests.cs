@@ -9,7 +9,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void StandardLitGBufferPass_UsesKeywordGuards_ForOptionalTextureSampling()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "StandardLitGBufferPass.hlsl"));
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "StandardLitGBufferPass.hlsl"));
 
             Assert.That(source, Does.Contain("#if defined(_ALPHATEST_ON)"));
             Assert.That(source, Does.Contain("#if defined(_OPACITYMAP)"));

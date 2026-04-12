@@ -18,7 +18,7 @@ MonoBehaviour:
   - ResourceName: Shaders/Core/Private/AutoExposure/HDRP/Exposure.compute
     ResourceObject: {fileID: 7200000, guid: 875a6ff948014d828853206e930b6d95, type: 3}
   - ResourceName: Shaders/Core/Private/AutoExposure/Unreal/AutoExposure.compute
-    ResourceObject: {fileID: 7200000, guid: 24e3284073fcc2a49ac03f9f74fdfe80, type: 3}
+    ResourceObject: {fileID: 7200000, guid: 42f3d055f6e68f94784c895cccbe859c, type: 3}
   - ResourceName: Shaders/Core/Private/Blit
     ResourceObject: {fileID: 4800000, guid: 88588a6fde9a5844db576cbc17606db2, type: 3}
   - ResourceName: Shaders/Core/Private/CameraMotionVectors
@@ -102,9 +102,9 @@ MonoBehaviour:
   - ResourceName: Shaders/FullScreenUV
     ResourceObject: {fileID: 4800000, guid: d59dc5dd19265494ca5c586c2e4ce4fe, type: 3}
   - ResourceName: Shaders/Material/ClusteredLightCull
-    ResourceObject: {fileID: 7200000, guid: d870db9c6ea94164483da15047a37447, type: 3}
+    ResourceObject: {fileID: 0}
   - ResourceName: Shaders/Material/DeferredDirectionalLightingIndirect
-    ResourceObject: {fileID: 4800000, guid: 59711c22d2f68f34891f33885bc15471, type: 3}
+    ResourceObject: {fileID: 0}
   - ResourceName: Shaders/Material/DeferredLit
     ResourceObject: {fileID: 7200000, guid: 4c43bc7556866e04b985dc155321bc61, type: 3}
   - ResourceName: Shaders/Material/MaterialClassification

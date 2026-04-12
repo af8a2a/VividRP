@@ -125,6 +125,11 @@ namespace VividRP.Runtime
             gpuDrivenFrameData.visibleMeshletIndirectDrawArgsBuffer = visibleMeshletIndirectDrawArgsBuffer;
         }
 
+        internal static ContextContainer GetFrameData()
+        {
+            return s_FrameData;
+        }
+
         public static void Dispose()
         {
             foreach (var pass in s_RenderPasses)

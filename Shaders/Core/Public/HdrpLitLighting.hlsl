@@ -12,6 +12,7 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
 
+
 static const float3 kVividDielectricF0 = float3(0.04, 0.04, 0.04);
 static const float kVividClearCoatIor = 1.5;
 static const float kVividClearCoatIeta = 1.0 / kVividClearCoatIor;
@@ -310,6 +311,23 @@ float3 EvaluateVividBakedDiffuseLighting(VividGBufferSurfaceData surfaceData)
         ? surfaceData.bakedGI
         : VividSampleAmbientProbe(surfaceData.normalWS);
 }
+
+float3 EvaluateVividIndirectDiffuseLighting(
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData,
+    VividPreLightData preLightData)
+{
+    float3 diffuseLighting = EvaluateVividBakedDiffuseLighting(surfaceData) * bsdfData.diffuseColor * preLightData.diffuseFGD;
+    if (bsdfData.coatMask > 0.0)
+    {
+        float clampedNdotV = saturate(VividClampNdotV(preLightData.NdotV));
+        float coatIblF = VividF_Schlick(kVividClearCoatF0, 1.0, clampedNdotV) * bsdfData.coatMask;
+        diffuseLighting *= Sq(1.0 - coatIblF);
+    }
+
+    return diffuseLighting * surfaceData.ambientOcclusion;
+}
+
 
 float3 EvaluateVividHdrpLitIndirectLight(
     VividGBufferSurfaceData surfaceData,

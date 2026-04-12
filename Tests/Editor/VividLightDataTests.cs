@@ -501,6 +501,49 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CreatePunctualLightScreenSpaceBoundsParameters_MatchesBoundProxyProjectionParameters()
+        {
+            var cameraObject = new GameObject("Bound Proxy Shared Projection Camera");
+            var camera = cameraObject.AddComponent<Camera>();
+
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 1000.0f;
+            camera.fieldOfView = 60.0f;
+
+            try
+            {
+                var punctualParameters =
+                    VividLightData.CreatePunctualLightScreenSpaceBoundsParameters(camera, 320, 180, 32, 24, 64);
+                var sharedParameters =
+                    BoundProxyClusterProjectionUtility.CreateParameters(camera, 320, 180, 32, 24, 64);
+
+                AssertMatrix4x4(punctualParameters.worldToViewMatrix, sharedParameters.worldToViewMatrix);
+                Assert.That(punctualParameters.screenWidth, Is.EqualTo(sharedParameters.screenWidth));
+                Assert.That(punctualParameters.screenHeight, Is.EqualTo(sharedParameters.screenHeight));
+                Assert.That(punctualParameters.tileSize, Is.EqualTo(sharedParameters.tileSize));
+                Assert.That(punctualParameters.tileCountX, Is.EqualTo(sharedParameters.tileCountX));
+                Assert.That(punctualParameters.tileCountY, Is.EqualTo(sharedParameters.tileCountY));
+                Assert.That(punctualParameters.bigTileSize, Is.EqualTo(sharedParameters.bigTileSize));
+                Assert.That(punctualParameters.bigTileCountX, Is.EqualTo(sharedParameters.bigTileCountX));
+                Assert.That(punctualParameters.bigTileCountY, Is.EqualTo(sharedParameters.bigTileCountY));
+                Assert.That(punctualParameters.sliceCount, Is.EqualTo(sharedParameters.sliceCount));
+                Assert.That(punctualParameters.nearClip, Is.EqualTo(sharedParameters.nearClip).Within(0.0001f));
+                Assert.That(punctualParameters.farClip, Is.EqualTo(sharedParameters.farClip).Within(0.0001f));
+                Assert.That(punctualParameters.logDepthScale, Is.EqualTo(sharedParameters.logDepthScale).Within(0.0001f));
+                Assert.That(punctualParameters.linearDepthScale, Is.EqualTo(sharedParameters.linearDepthScale).Within(0.0001f));
+                Assert.That(punctualParameters.tanHalfFovX, Is.EqualTo(sharedParameters.tanHalfFovX).Within(0.0001f));
+                Assert.That(punctualParameters.tanHalfFovY, Is.EqualTo(sharedParameters.tanHalfFovY).Within(0.0001f));
+                Assert.That(punctualParameters.orthoHalfWidth, Is.EqualTo(sharedParameters.orthoHalfWidth).Within(0.0001f));
+                Assert.That(punctualParameters.orthoHalfHeight, Is.EqualTo(sharedParameters.orthoHalfHeight).Within(0.0001f));
+                Assert.That(punctualParameters.isOrthographic, Is.EqualTo(sharedParameters.isOrthographic));
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
         public void UpdatePunctualLightClusteredCullData_ComputesBigTileBoundsAndTightCapacityEstimate()
         {
             var cameraObject = new GameObject("Clustered Big Tile Camera");
@@ -1025,6 +1068,17 @@ namespace VividRP.Editor.Tests
             object boxedVisibleLight = visibleLight;
             field.SetValue(boxedVisibleLight, value);
             visibleLight = (VisibleLight)boxedVisibleLight;
+        }
+
+        private static void AssertMatrix4x4(Matrix4x4 actual, Matrix4x4 expected, float tolerance = 0.0001f)
+        {
+            for (var row = 0; row < 4; row++)
+            {
+                for (var column = 0; column < 4; column++)
+                {
+                    Assert.That(actual[row, column], Is.EqualTo(expected[row, column]).Within(tolerance));
+                }
+            }
         }
     }
 }

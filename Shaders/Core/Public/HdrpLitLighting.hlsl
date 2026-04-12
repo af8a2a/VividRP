@@ -329,7 +329,7 @@ float3 EvaluateVividIndirectDiffuseLighting(
 }
 
 
-float3 EvaluateVividHdrpLitIndirectLight(
+float3 EvaluateVividHDRPLitIndirectLight(
     VividGBufferSurfaceData surfaceData,
     VividLitBSDFData bsdfData,
     VividPreLightData preLightData,
@@ -359,7 +359,6 @@ float3 EvaluateVividHdrpLitIndirectLight(
             clampedNdotV);
         specularLighting += VividSampleSkyIBL(coatDominantDirectionWS, coatPerceptualRoughness) * coatIblF;
     }
-
     return (diffuseLighting + specularLighting) * surfaceData.ambientOcclusion;
 }
 
@@ -370,7 +369,7 @@ float3 EvaluateVividHdrpLitIndirectLight(
 {
     float3 normalizedViewDirectionWS = SafeNormalize(viewDirectionWS);
     VividPreLightData preLightData = InitVividPreLightData(surfaceData, bsdfData, normalizedViewDirectionWS);
-    return EvaluateVividHdrpLitIndirectLight(surfaceData, bsdfData, preLightData, normalizedViewDirectionWS);
+    return EvaluateVividHDRPLitIndirectLight(surfaceData, bsdfData, preLightData, normalizedViewDirectionWS);
 }
 
 float3 EvaluateVividFabricIndirectLight(
@@ -417,7 +416,7 @@ float3 EvaluateIndirectLighting(
 {
     return surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC
         ? EvaluateVividFabricIndirectLight(surfaceData, viewDirectionWS)
-        : EvaluateVividHdrpLitIndirectLight(surfaceData, bsdfData, preLightData, viewDirectionWS);
+        : EvaluateVividHDRPLitIndirectLight(surfaceData, bsdfData, preLightData, viewDirectionWS);
 }
 
 float3 EvaluateIndirectLighting(

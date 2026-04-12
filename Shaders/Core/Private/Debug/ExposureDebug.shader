@@ -240,6 +240,7 @@ Shader "Hidden/VividRP/Debug/Exposure"
         void DrawMiniCharacter(uint ascii, float3 fontColor, uint2 currentPixelCoord, inout uint2 cursor, inout float3 color)
         {
             int2 localCoord = int2(currentPixelCoord) - int2(cursor);
+            localCoord.y = VIVID_SMALL_FONT_HEIGHT - 1 - localCoord.y;
             if (SampleMiniGlyph(localCoord, ascii))
                 color = fontColor;
 

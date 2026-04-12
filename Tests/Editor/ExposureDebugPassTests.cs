@@ -125,6 +125,7 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("DrawLiteralCurrentExposure("));
             Assert.That(shaderSource, Does.Contain("DrawLiteralTargetExposure("));
             Assert.That(shaderSource, Does.Contain("DrawLiteralExposureCompensation("));
+            Assert.That(shaderSource, Does.Contain("localCoord.y = VIVID_SMALL_FONT_HEIGHT - 1 - localCoord.y;"));
             Assert.That(shaderSource, Does.Contain("FragSceneEV100"));
             Assert.That(shaderSource, Does.Contain("FragMetering"));
             Assert.That(shaderSource, Does.Contain("FragHistogram"));

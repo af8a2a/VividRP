@@ -84,6 +84,7 @@ float3 EvaluateDeferredLitLighting(VividGBufferSurfaceData surfaceData, uint2 pi
     VividLitBSDFData bsdfData = BuildVividHDRPLitBSDFData(surfaceData);
     VividPreLightData preLightData = InitVividPreLightData(surfaceData, bsdfData, viewDirectionWS);
     float3 lighting = EvaluateIndirectLighting(surfaceData, bsdfData, preLightData, viewDirectionWS);
+    return lighting;
 
     [loop]
     for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)

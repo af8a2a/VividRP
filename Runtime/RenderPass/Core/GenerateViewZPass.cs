@@ -44,6 +44,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             m_Width  = cameraData.actualWidth;
             m_Height = cameraData.actualHeight;
+            m_LinearDepthTexture.desc.ClearBuffer = false;
             m_LinearDepthTexture.Resize(m_Width, m_Height);
             if (m_LinearDepthTexture.desc != null)
                 m_LinearDepthTexture.desc.EnableRandomWrite = true;

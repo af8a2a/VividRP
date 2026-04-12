@@ -140,17 +140,31 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ResolveVisualizationMode_PreservesExplicitAutoExposureMode()
+        public void ResolveVisualizationMode_PreservesExplicitMotionVectorMode()
         {
             var mode = OverlayDebugPass.ResolveVisualizationMode(
-                OverlayDebugVisualizationMode.AutoExposure,
+                OverlayDebugVisualizationMode.MotionVectors,
                 new RenderGraphTextureDesc
                 {
                     ColorFormat = GraphicsFormat.R16G16B16A16_SFloat
                 },
                 null);
 
-            Assert.That(mode, Is.EqualTo(OverlayDebugVisualizationMode.AutoExposure));
+            Assert.That(mode, Is.EqualTo(OverlayDebugVisualizationMode.MotionVectors));
+        }
+
+        [Test]
+        public void ResolveVisualizationMode_PreservesExplicitColorMode()
+        {
+            var mode = OverlayDebugPass.ResolveVisualizationMode(
+                OverlayDebugVisualizationMode.Color,
+                new RenderGraphTextureDesc
+                {
+                    ColorFormat = GraphicsFormat.R16G16B16A16_SFloat
+                },
+                null);
+
+            Assert.That(mode, Is.EqualTo(OverlayDebugVisualizationMode.Color));
         }
 
         [Test]
@@ -201,8 +215,6 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("#pragma target 4.5"));
             Assert.That(shaderSource, Does.Contain("TEXTURE2D_ARRAY(_DebugTextureArray);"));
             Assert.That(shaderSource, Does.Contain("TYPED_TEXTURE2D(float2, _DebugVisibilityTexture);"));
-            Assert.That(shaderSource, Does.Contain("StructuredBuffer<uint> _AutoExposureHistogramBuffer;"));
-            Assert.That(shaderSource, Does.Contain("StructuredBuffer<float4> _AutoExposureCurrentExposureBuffer;"));
             Assert.That(shaderSource, Does.Contain("SAMPLE_TEXTURE2D_ARRAY(_DebugTextureArray"));
             Assert.That(shaderSource, Does.Contain("_OverlayRect"));
             Assert.That(shaderSource, Does.Contain("exp2(_DebugExposure)"));
@@ -216,15 +228,11 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("ResolveMotionVectorCellCenterUv"));
             Assert.That(shaderSource, Does.Contain("SampleDebugTextureRaw(cellCenterUv).xy"));
             Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_VISUALIZATION_VISIBILITY_BUFFER"));
-            Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_VISUALIZATION_AUTO_EXPOSURE"));
-            Assert.That(shaderSource, Does.Contain("EvaluateAutoExposureDebugOverlay"));
-            Assert.That(shaderSource, Does.Contain("SummarizeAutoExposureDebug"));
-            Assert.That(shaderSource, Does.Contain("ResolveAutoExposureHistogramHeight"));
-            Assert.That(shaderSource, Does.Contain("_AutoExposureDebugState"));
-            Assert.That(shaderSource, Does.Contain("_AutoExposureRangeParams"));
             Assert.That(shaderSource, Does.Contain("UnpackVisibilityBufferValue"));
             Assert.That(shaderSource, Does.Contain("IsPackedVisibilityBufferValueValid"));
             Assert.That(shaderSource, Does.Contain("sampler_PointClamp"));
+            Assert.That(shaderSource, Does.Not.Contain("_AutoExposureHistogramBuffer"));
+            Assert.That(shaderSource, Does.Not.Contain("EvaluateAutoExposure"));
         }
 
         private static RenderGraphTexture GetTextureField(OverlayDebugPass pass, string fieldName)
@@ -256,6 +264,7 @@ namespace VividRP.Editor.Tests
                 "Shaders",
                 "Core",
                 "Private",
+                "Debug",
                 "OverlayDebug.shader"));
 
             Assert.That(File.Exists(shaderPath), Is.True, $"Expected shader source at '{shaderPath}'.");

@@ -158,7 +158,7 @@ float3 VividSampleSkyIBL(float3 directionWS, float perceptualRoughness)
     return envLighting * _VividSkyIBLTint.rgb * _VividSkyIBLParams.x;
 }
 
-VividLitBSDFData BuildVividHdrpLitBSDFData(VividGBufferSurfaceData surfaceData)
+VividLitBSDFData BuildVividHDRPLitBSDFData(VividGBufferSurfaceData surfaceData)
 {
     VividLitBSDFData bsdfData = (VividLitBSDFData)0;
     bsdfData.diffuseColor = surfaceData.baseColor * (1.0 - surfaceData.metallic);

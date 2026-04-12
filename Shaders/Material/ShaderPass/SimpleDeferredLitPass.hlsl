@@ -92,7 +92,7 @@ VividGBufferSurfaceData LoadVividGBuffer(uint2 pixelCoord)
 float3 EvaluateSimpleDeferredLighting(VividGBufferSurfaceData surfaceData, float3 positionWS)
 {
     float3 viewDirectionWS = SafeNormalize(GetDeferredViewDirectionWS(positionWS));
-    VividLitBSDFData bsdfData = BuildVividHdrpLitBSDFData(surfaceData);
+    VividLitBSDFData bsdfData = BuildVividHDRPLitBSDFData(surfaceData);
     float3 diffuseColor = surfaceData.baseColor * (1.0 - surfaceData.metallic);
     float3 indirectLighting = EvaluateIndirectLighting(surfaceData, bsdfData, viewDirectionWS);
     float3 directLighting = float3(0.0, 0.0, 0.0);

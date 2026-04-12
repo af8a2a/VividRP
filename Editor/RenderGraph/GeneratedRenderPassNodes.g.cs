@@ -69,6 +69,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class ExposureDebugPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.ExposureDebugPass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class FinalBlitPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.FinalBlitPass, VividRP.Runtime";

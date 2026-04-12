@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using UnityEditor;
 using UnityEngine;
 
 namespace VividRP.Runtime
@@ -12,6 +13,11 @@ namespace VividRP.Runtime
         private static readonly Dictionary<string, UnityEngine.Object> s_ResourceLookup = new(StringComparer.Ordinal);
         private static bool s_Initialized;
 
+        #if UNITY_EDITOR
+        [InitializeOnLoadMethod]
+        #else
+        [RuntimeInitializeOnLoadMethod]
+        #endif
         public static void Initialize()
         {
             if (s_Initialized)

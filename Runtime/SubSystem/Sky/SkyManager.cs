@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -16,6 +17,11 @@ namespace VividRP.Runtime
         private static bool s_UpdateRequested;
         private static float s_LastUpdateTime;
 
+#if UNITY_EDITOR
+        [InitializeOnLoadMethod]
+#else
+        [RuntimeInitializeOnLoadMethod]
+#endif
         internal static void Initialize()
         {
             if (s_Initialized)
@@ -30,6 +36,9 @@ namespace VividRP.Runtime
             s_LastUpdateTime = float.NegativeInfinity;
             s_UpdateRequested = false;
             s_Initialized = true;
+
+            FrameContextSystem.SubsystemPreRender -= Update;
+            FrameContextSystem.SubsystemPreRender += Update;
         }
 
         internal static void Deinitialize()
@@ -44,6 +53,8 @@ namespace VividRP.Runtime
             s_LastUpdateTime = float.NegativeInfinity;
             s_UpdateRequested = false;
             s_Initialized = false;
+            
+            FrameContextSystem.SubsystemPreRender -= Update;
         }
 
         internal static void RequestUpdate()

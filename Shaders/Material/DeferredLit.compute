@@ -81,7 +81,7 @@ float SampleDirectionalShadow(uint2 pixelCoord)
 float3 EvaluateDeferredLitLighting(VividGBufferSurfaceData surfaceData, uint2 pixelCoord, float3 positionWS)
 {
     float3 viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(positionWS));
-    VividLitBSDFData bsdfData = BuildVividHdrpLitBSDFData(surfaceData);
+    VividLitBSDFData bsdfData = BuildVividHDRPLitBSDFData(surfaceData);
     VividPreLightData preLightData = InitVividPreLightData(surfaceData, bsdfData, viewDirectionWS);
     float3 lighting = EvaluateIndirectLighting(surfaceData, bsdfData, preLightData, viewDirectionWS);
 
@@ -145,10 +145,9 @@ void DeferredLit(
     if (surfaceData.materialId > VIVID_GBUFFER_MATERIAL_CLEARCOAT)
         return;
 
-    float2 uv = (float2(pixelCoord) + 0.5) / float2(_LightingWidth, _LightingHeight);
+    float2 uv = (float2(pixelCoord) + 0.5) * _ScreenSize.zw;
     float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, UNITY_MATRIX_I_VP);
     float3 lighting = VividApplyPreExposure(EvaluateDeferredLitLighting(surfaceData, pixelCoord, positionWS));
-
     float4 currentLighting = _LightingTexture[pixelCoord];
     _LightingTexture[pixelCoord] = float4(currentLighting.rgb + lighting, currentLighting.a);
 }

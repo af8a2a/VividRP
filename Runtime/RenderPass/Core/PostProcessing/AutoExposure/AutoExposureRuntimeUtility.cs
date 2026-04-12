@@ -97,6 +97,7 @@ namespace VividRP.Runtime
         public GraphicsBuffer currentExposureBuffer;
         public GraphicsBuffer frameExposureBuffer;
         public GraphicsBuffer preExposureBuffer;
+        public GraphicsBuffer histogramBuffer;
         public RenderTexture previousExposureTexture;
         public RenderTexture currentExposureTexture;
         public bool exposureEnabled;
@@ -112,6 +113,7 @@ namespace VividRP.Runtime
             currentExposureBuffer = null;
             frameExposureBuffer = null;
             preExposureBuffer = null;
+            histogramBuffer = null;
             previousExposureTexture = null;
             currentExposureTexture = null;
             exposureEnabled = false;

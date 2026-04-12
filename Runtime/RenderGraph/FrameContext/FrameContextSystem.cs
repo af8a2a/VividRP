@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -6,7 +7,10 @@ namespace VividRP.Runtime
     internal sealed class FrameContextSystem : CameraRelativeSystem<CameraTemporalData>
     {
         private static readonly FrameContextSystem s_Instance = new();
+        public static event Action<ContextContainer, CommandBuffer> SubsystemPreRender;
+        public static event Action<ContextContainer, CommandBuffer> SubsystemDispose;
 
+            
         private static readonly int CameraWorldClipPlanesId = Shader.PropertyToID("unity_CameraWorldClipPlanes");
         private static readonly int FrustumPlanesId = Shader.PropertyToID("_FrustumPlanes");
 
@@ -30,7 +34,10 @@ namespace VividRP.Runtime
             vividTemporalData.previousJitter = temporalData.PreviousJitter;
             vividTemporalData.isFirstFrame = temporalData.IsFirstFrame;
 
-            SkyManager.Update(frameData, cmd);
+            
+            SubsystemPreRender?.Invoke(frameData, cmd);
+            
+            // SkyManager.Update(frameData, cmd);
             AutoExposureRuntimeManager.PrepareFrame(frameData);
             AutoExposureShaderBindings.BindFrameGlobals(cmd, frameData.Get<VividExposureData>());
 

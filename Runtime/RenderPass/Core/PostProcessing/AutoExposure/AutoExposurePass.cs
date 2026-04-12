@@ -136,7 +136,12 @@ namespace VividRP.Runtime.RenderPass
             }
 
             if (m_ExposureData != null)
+            {
                 m_ExposureData.frameExposureBuffer = exposureBuffer;
+                m_ExposureData.histogramBuffer = m_EnableAutoExposure && UsesHistogramBufferAutoExposureExecution()
+                    ? m_AutoExposureHistogramBuffer
+                    : null;
+            }
 
 #if UNITY_EDITOR
             var preExposureBuffer = m_EnableExposure

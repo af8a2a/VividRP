@@ -166,6 +166,7 @@ namespace VividRP.Runtime
         public RenderGraphTexture()
         {
             desc = new RenderGraphTextureDesc();
+            innerHandle = TextureHandle.nullHandle;
         }
 
         internal TextureHandle innerHandle;
@@ -258,6 +259,8 @@ namespace VividRP.Runtime
             desc.Width = width;
             desc.Height = height;
         }
+
+        public bool IsValid() => innerHandle.IsValid();
 
         public static implicit operator TextureHandle(RenderGraphTexture rt)
         {

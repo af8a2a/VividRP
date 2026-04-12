@@ -25,8 +25,8 @@ namespace VividRP.Runtime
             ApplySRPBatcherSetting(asset);
 
             VividVolumeManagerUtility.Initialize();
-            PipelineResourceManager.Initialize();
-            SkyManager.Initialize();
+            // PipelineResourceManager.Initialize();
+            // SkyManager.Initialize();
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             Blitter.Initialize(resources.CoreBlitShader, resources.CoreBlitColorAndDepthShader);
             BlueNoise.Initialize();

@@ -104,6 +104,9 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/OverlayDebug")]
         public Shader OverlayDebugShader;
 
+        [ResourcePath("Shaders/Core/Private/Debug/ExposureDebug")]
+        public Shader ExposureDebugShader;
+
         [ResourcePath("Shaders/Core/Private/Debug/RTASInstanceDebug")]
         public ComputeShader RTASInstanceDebugCompute;
 

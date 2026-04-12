@@ -108,6 +108,7 @@ namespace VividRP.Runtime
         public RenderGraphBuffer()
         {
             desc = new RenderGraphBufferDesc();
+            innerHandle = BufferHandle.nullHandle;
         }
 
         internal GraphicsBuffer ImportedGraphicsBuffer => m_ImportedGraphicsBuffer;
@@ -125,6 +126,8 @@ namespace VividRP.Runtime
             m_ImportedGraphicsBuffer = null;
             innerHandle = default;
         }
+
+        public bool IsValid() => innerHandle.IsValid();
 
         public static implicit operator BufferHandle(RenderGraphBuffer buffer)
         {

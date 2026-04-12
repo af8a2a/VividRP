@@ -58,8 +58,7 @@ namespace VividRP.Runtime
 
     ///  2. 派生具体系统
     /// <typeparam name="TState"></typeparam>
-    public class CameraRelativeSystem<TState> : IDisposable
-        where TState : CameraRelativeState, new() // 约束：必须是 State 且可无参实例化
+    public class CameraRelativeSystem<TState> : IDisposable where TState : CameraRelativeState, new() // 约束：必须是 State 且可无参实例化
     {
         // protected 允许子类在必要时遍历所有状态
         protected Dictionary<Camera, TState> m_CameraStates = new();

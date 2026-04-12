@@ -31,6 +31,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: fb20577e3a98eaa40bd738cd3008ce12, type: 3}
   - ResourceName: Shaders/Core/Private/CoreBlitColorAndDepth
     ResourceObject: {fileID: 4800000, guid: 7a938306786128241b2810fe10cd3f55, type: 3}
+  - ResourceName: Shaders/Core/Private/Debug/ExposureDebug
+    ResourceObject: {fileID: 4800000, guid: 076c46a560b442749bd5ba6c731dcf7c, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/RTASInstanceDebug
     ResourceObject: {fileID: 7200000, guid: 4aee2e660114dc34381676fa542650e2, type: 3}
   - ResourceName: Shaders/Core/Private/DirectionalRayTracedShadow

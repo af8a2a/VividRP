@@ -4,7 +4,7 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
-#include "../Sky/ShaderVariablesCompat.hlsl"
+
 #include "../Sky/PhysicallyBasedSkyEvaluation.hlsl"
 #include "../Sky/SkyUtils.hlsl"
 
@@ -68,7 +68,7 @@ float4 FragOpaqueAtmosphericScattering(Varyings input) : SV_Target
     if (any(isnan(positionWS)) || any(isinf(positionWS)))
         return inputColor;
 
-    float tFrag = distance(positionWS, GetCameraPositionWS());
+    float tFrag = distance(positionWS, _WorldSpaceCameraPos);
     if (isnan(tFrag) || isinf(tFrag) || tFrag <= 1e-4f)
         return inputColor;
 

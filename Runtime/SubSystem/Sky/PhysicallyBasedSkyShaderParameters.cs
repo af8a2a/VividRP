@@ -458,6 +458,52 @@ namespace VividRP.Runtime
             commandBuffer.SetComputeFloatParam(computeShader, CelestialLightExposureId, materialParameters.celestialLightExposure);
             commandBuffer.SetComputeFloatParam(computeShader, VolumetricCloudsBottomAltitudeId, materialParameters.volumetricCloudsBottomAltitude);
         }
+
+        internal static void Apply(
+            CommandBuffer commandBuffer,
+            ComputeShader computeShader,
+            in PhysicallyBasedSkyShaderParameters skyParameters,
+            in PhysicallyBasedSkyMaterialParameters materialParameters)
+        {
+            if (commandBuffer == null || computeShader == null)
+                return;
+
+            commandBuffer.SetComputeMatrixParam(computeShader, PixelCoordToViewDirWSId, skyParameters.pixelCoordToViewDirWS);
+            commandBuffer.SetComputeVectorParam(computeShader, SkySunDirectionId, skyParameters.skySunDirection);
+            commandBuffer.SetComputeVectorParam(computeShader, SkySunColorId, skyParameters.skySunColor);
+            commandBuffer.SetComputeVectorParam(computeShader, PlanetCenterRadiusId, materialParameters.planetCenterRadius);
+            commandBuffer.SetComputeVectorParam(computeShader, PlanetUpAltitudeId, materialParameters.planetUpAltitude);
+            commandBuffer.SetComputeFloatParam(computeShader, AtmosphericRadiusId, materialParameters.atmosphericRadius);
+            commandBuffer.SetComputeFloatParam(computeShader, AerosolAnisotropyId, materialParameters.aerosolAnisotropy);
+            commandBuffer.SetComputeFloatParam(computeShader, AerosolPhasePartConstantId, materialParameters.aerosolPhasePartConstant);
+            commandBuffer.SetComputeFloatParam(computeShader, AerosolSeaLevelExtinctionId, materialParameters.aerosolSeaLevelExtinction);
+            commandBuffer.SetComputeFloatParam(computeShader, AirDensityFalloffId, materialParameters.airDensityFalloff);
+            commandBuffer.SetComputeFloatParam(computeShader, AirScaleHeightId, materialParameters.airScaleHeight);
+            commandBuffer.SetComputeFloatParam(computeShader, AerosolDensityFalloffId, materialParameters.aerosolDensityFalloff);
+            commandBuffer.SetComputeFloatParam(computeShader, AerosolScaleHeightId, materialParameters.aerosolScaleHeight);
+            commandBuffer.SetComputeVectorParam(computeShader, OzoneScaleOffsetId, materialParameters.ozoneScaleOffset);
+            commandBuffer.SetComputeFloatParam(computeShader, OzoneLayerStartId, materialParameters.ozoneLayerStart);
+            commandBuffer.SetComputeFloatParam(computeShader, OzoneLayerEndId, materialParameters.ozoneLayerEnd);
+            commandBuffer.SetComputeVectorParam(computeShader, AirSeaLevelExtinctionId, materialParameters.airSeaLevelExtinction);
+            commandBuffer.SetComputeVectorParam(computeShader, AirSeaLevelScatteringId, materialParameters.airSeaLevelScattering);
+            commandBuffer.SetComputeVectorParam(computeShader, AerosolSeaLevelScatteringId, materialParameters.aerosolSeaLevelScattering);
+            commandBuffer.SetComputeVectorParam(computeShader, OzoneSeaLevelExtinctionId, materialParameters.ozoneSeaLevelExtinction);
+            commandBuffer.SetComputeVectorParam(computeShader, GroundAlbedoPlanetRadiusId, materialParameters.groundAlbedoPlanetRadius);
+            commandBuffer.SetComputeVectorParam(computeShader, HorizonTintId, materialParameters.horizonTint);
+            commandBuffer.SetComputeVectorParam(computeShader, ZenithTintId, materialParameters.zenithTint);
+            commandBuffer.SetComputeFloatParam(computeShader, IntensityMultiplierId, materialParameters.intensityMultiplier);
+            commandBuffer.SetComputeFloatParam(computeShader, ColorSaturationId, materialParameters.colorSaturation);
+            commandBuffer.SetComputeFloatParam(computeShader, AlphaSaturationId, materialParameters.alphaSaturation);
+            commandBuffer.SetComputeFloatParam(computeShader, AlphaMultiplierId, materialParameters.alphaMultiplier);
+            commandBuffer.SetComputeFloatParam(computeShader, HorizonZenithShiftPowerId, materialParameters.horizonZenithShiftPower);
+            commandBuffer.SetComputeFloatParam(computeShader, HorizonZenithShiftScaleId, materialParameters.horizonZenithShiftScale);
+            commandBuffer.SetComputeIntParam(computeShader, CelestialLightCountId, materialParameters.celestialLightCount);
+            commandBuffer.SetComputeIntParam(computeShader, CelestialBodyCountId, materialParameters.celestialBodyCount);
+            commandBuffer.SetComputeFloatParam(computeShader, AtmosphericDepthId, materialParameters.atmosphericDepth);
+            commandBuffer.SetComputeFloatParam(computeShader, RcpAtmosphericDepthId, materialParameters.rcpAtmosphericDepth);
+            commandBuffer.SetComputeFloatParam(computeShader, CelestialLightExposureId, materialParameters.celestialLightExposure);
+            commandBuffer.SetComputeFloatParam(computeShader, VolumetricCloudsBottomAltitudeId, materialParameters.volumetricCloudsBottomAltitude);
+        }
     }
 
     internal static class PhysicallyBasedSkyMaterialPropertyBinder

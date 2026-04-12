@@ -71,7 +71,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void Source_UsesSkyLutGeneratorAndHdrpStyleBindings()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "AtmosphereLUTPass.cs"));
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "AtmosphereLUTPass.cs"));
 
             Assert.That(source, Does.Contain("public sealed class AtmosphereLUTPass : ComputePass"));
             Assert.That(source, Does.Contain("m_ComputeShader = resources?.AtmosphereLUTCompute;"));
@@ -117,7 +117,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void Source_ProfilesRebuildsAndReleasesPersistentResources()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "AtmosphereLUTPass.cs"));
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "AtmosphereLUTPass.cs"));
 
             Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildMultiScattering (MissingTexture)"));
             Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildMultiScattering (ParametersChanged)"));
@@ -135,7 +135,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void Source_RemovesCompatibilityTransmittanceFallback()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "AtmosphereLUTPass.cs"));
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "AtmosphereLUTPass.cs"));
 
             Assert.That(source, Does.Not.Contain("m_CompatibilityTransmittanceTexture"));
             Assert.That(source, Does.Not.Contain("m_CompatibilityTransmittanceHandle"));

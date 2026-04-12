@@ -1,0 +1,69 @@
+// #pragma enable_d3d11_debug_symbols
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
+
+#pragma kernel main
+
+#define _PlanetaryRadius _GroundAlbedo_PlanetRadius.w
+
+#include "PhysicallyBasedSkyCommon.hlsl"
+
+#define TABLE_SIZE uint(PBRSKYCONFIG_GROUND_IRRADIANCE_TABLE_SIZE)
+
+RW_TEXTURE2D(float3, _GroundIrradianceTable);
+
+[numthreads(64, 1, 1)]
+void main(uint dispatchThreadId : SV_DispatchThreadID)
+{
+    const float scale = rcp(TABLE_SIZE);
+    const float bias = 0.5 * scale;
+
+    uint2 tableCoord = uint2(dispatchThreadId, 0);
+    float uv = tableCoord.x * scale + bias;
+    float NdotL = UnmapCosineOfZenithAngle(uv.x);
+
+    float3 groundIrradiance = 0.0f;
+
+    if (NdotL > 0.0f)
+    {
+        float3 opticalDepth = ComputeAtmosphericOpticalDepth(_PlanetaryRadius, NdotL, true);
+        float3 transmittance = TransmittanceFromOpticalDepth(opticalDepth);
+        groundIrradiance = transmittance * NdotL;
+    }
+
+    const int numVolumeSamples = 89;
+
+    for (int sampleIndex = 0; sampleIndex < numVolumeSamples; sampleIndex++)
+    {
+        float2 fibonacci = Fibonacci2d(sampleIndex, numVolumeSamples);
+        float3 L = SampleHemisphereCosine(fibonacci.x, fibonacci.y);
+
+        float cosChi = L.z;
+        float NdotV = -cosChi;
+        float phiL = TWO_PI * fibonacci.y;
+
+        TexCoord4D texCoord = ConvertPositionAndOrientationToTexCoords(0.0f, NdotV, NdotL, phiL);
+
+        float3 radiance = 0.0f;
+        float LdotV = SphericalDot(NdotV, 0.0f, NdotL, phiL);
+
+        radiance += lerp(
+            SAMPLE_TEXTURE3D_LOD(_AirSingleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w0), 0).rgb,
+            SAMPLE_TEXTURE3D_LOD(_AirSingleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w1), 0).rgb,
+            texCoord.a) * AirPhase(LdotV);
+
+        radiance += lerp(
+            SAMPLE_TEXTURE3D_LOD(_AerosolSingleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w0), 0).rgb,
+            SAMPLE_TEXTURE3D_LOD(_AerosolSingleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w1), 0).rgb,
+            texCoord.a) * AerosolPhase(LdotV);
+
+        radiance += lerp(
+            SAMPLE_TEXTURE3D_LOD(_MultipleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w0), 0).rgb,
+            SAMPLE_TEXTURE3D_LOD(_MultipleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w1), 0).rgb,
+            texCoord.a) * MS_EXPOSURE_INV;
+
+        float weight = PI * rcp(numVolumeSamples);
+        groundIrradiance += weight * radiance;
+    }
+
+    _GroundIrradianceTable[tableCoord] = groundIrradiance;
+}

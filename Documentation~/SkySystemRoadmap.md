@@ -49,7 +49,7 @@
 
 - 自动曝光基础链路已经落地，但天空系统仍需继续验证“屏幕实时曝光”和“sky baking 固定曝光”是否完全解耦。
 - `skyData.exposure` 目前同时被当作天空强度和 IBL 强度使用，没有和相机曝光解耦。
-- `AtmosphereLUTPass` 现已改成围绕 HDRP `SkyLUTGenerator.compute` 的混合缓存链路：`MultiScatteringLUT` / `SkyViewLUT` 按参数缓存，`AtmosphericScatteringLUT` 保持 camera-dependent 的逐帧生成；旧 `TransmittanceLUT` 目前只保留兼容占位，`AerialPerspectivePass` 仍待切到新的 3D atmospheric scattering LUT。
+- `AtmosphereLUTPass` 现已改成围绕 HDRP `SkyLUTGenerator.compute` 的混合缓存链路：`MultiScatteringLUT` / `SkyViewLUT` 按参数缓存，`AtmosphericScatteringLUT` 保持 camera-dependent 的逐帧生成；旧 `TransmittanceLUT` 兼容层已移除，`AerialPerspectivePass` 也已切到 `OpaqueAtmosphericScattering` + `AtmosphericScatteringLUT` 的统一评估路径。
 - runtime sky cubemap 和 specular prefilter 已支持基础分辨率配置；specular prefilter 已补上质量档和 rebuild profiling，物理天空 generated cubemap 现在也补上了基于 sample count 的质量档与 rebuild profiling。HDRI 仍直接复用 source cubemap，这部分质量档当前只作用于 generated cubemap 路径。
 - 物理天空还只是 HDRP Physically Based Sky 的一个基础子集。
 - HDRI 天空还只是 HDRP HDRI Sky 的一个基础子集。
@@ -238,12 +238,13 @@
   - `MultiScatteringLUT` / `SkyViewLUT` 已切换到新 kernel
   - `AtmosphericScatteringLUTCamera` / `AtmosphericScatteringBlur` 已接入 RenderPass
   - 旧 `SkyViewLUT` history kernel 路径已移除
-- 仍待继续：
+- 已完成：
   - `AtmosphericScattering.hlsl`
   - `OpaqueAtmosphericScattering.shader`
-  - 这些文件还没有完成对 Vivid 灯光 / 阴影 / 雾 / 水体接口的完全适配
+  - `AerialPerspectivePass` 已按 HDRP `RenderOpaqueAtmosphericScattering` 的形态切到独立 opaque atmospheric scattering render pass
+  - 屏幕雾 / opaque atmospheric scattering 已正式切到 `AtmosphericScatteringLUT`，并改为通过 HDRP 风格的统一评估入口取样
 - 仍待继续：
-  - 把新的 HDRP 风格屏幕雾 / aerial perspective 正式切到 `AtmosphericScatteringLUT`
+  - 这些文件还没有完成对 Vivid 灯光 / 阴影 / 雾 / 水体接口的完全适配
 
 ### 验收标准
 

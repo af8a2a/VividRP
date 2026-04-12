@@ -19,6 +19,7 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
             #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragRender
+            #pragma multi_compile_fragment _ LOCAL_SKY
 
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
             #if defined(SHADER_API_D3D12)
@@ -46,6 +47,7 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
             #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment FragBaking
+            #pragma multi_compile_fragment _ LOCAL_SKY
 
             #if defined(SHADER_API_D3D12)
             #define VIVIDRP_SKY_BINDLESS_SURFACE_TEXTURES 1

@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.CompilerServices;
 using NUnit.Framework;
 using UnityEditor;
@@ -313,6 +314,28 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void GetPixelCoordToViewDirWSMatrix_Source_UsesCameraRenderTargetConvention()
+        {
+            var cameraDataExtensionSource = File.ReadAllText(
+                GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "VividCameraData.Extension.cs"));
+            var additionalCameraDataExtensionSource = File.ReadAllText(
+                GetPackageFilePath("Runtime", "ComponentData", "VividAdditionalCameraData.Extension.cs"));
+            var shaderVariablesSource = File.ReadAllText(
+                GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "VividCameraData.ShaderVariables.cs"));
+            var temporalDataSource = File.ReadAllText(
+                GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "CameraTemporalData.cs"));
+
+            Assert.That(cameraDataExtensionSource, Does.Contain("var gpuProj = GetGPUProjectionMatrix();"));
+            Assert.That(cameraDataExtensionSource, Does.Not.Contain("var gpuProj = GetGPUProjectionMatrix(true);"));
+            Assert.That(additionalCameraDataExtensionSource, Does.Contain("var gpuProj = GetGPUProjectionMatrix();"));
+            Assert.That(additionalCameraDataExtensionSource, Does.Not.Contain("var gpuProj = GetGPUProjectionMatrix(true);"));
+            Assert.That(shaderVariablesSource, Does.Contain("var glstateMatrixProjection = GetGPUProjectionMatrix();"));
+            Assert.That(shaderVariablesSource, Does.Not.Contain("var glstateMatrixProjection = GetGPUProjectionMatrix(true);"));
+            Assert.That(temporalDataSource, Does.Contain("var gpuProjNoJitter = cameraData.GetGPUProjectionMatrixNoJitter();"));
+            Assert.That(temporalDataSource, Does.Not.Contain("var gpuProjNoJitter = cameraData.GetGPUProjectionMatrixNoJitter(true);"));
+        }
+
+        [Test]
         public void MatrixAccessors_FallbackToCameraParameters_WhenUnityProjectionMatricesAreIdentity()
         {
             var camera = m_GameObject.AddComponent<Camera>();
@@ -350,6 +373,25 @@ namespace VividRP.Editor.Tests
                     Assert.That(actual[row, column], Is.EqualTo(expected[row, column]).Within(0.00001f));
                 }
             }
+        }
+
+        private static string GetPackageFilePath(params string[] relativeParts)
+        {
+            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            var packageRoots = new[]
+            {
+                Path.Combine(projectRoot, "Packages", "VividRP"),
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
+            };
+
+            foreach (var packageRoot in packageRoots)
+            {
+                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
+                if (File.Exists(fullPath))
+                    return fullPath;
+            }
+
+            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 }

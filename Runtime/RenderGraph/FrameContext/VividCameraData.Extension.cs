@@ -7,7 +7,7 @@ namespace VividRP.Runtime
     {
         public Matrix4x4 GetPixelCoordToViewDirWSMatrix()
         {
-            var gpuProj = GetGPUProjectionMatrix(true);
+            var gpuProj = GetGPUProjectionMatrix();
             var gpuProjAspect = CoreUtils.ProjectionMatrixAspect(gpuProj);
 
             var screenSize = new Vector4(camera.scaledPixelWidth, camera.scaledPixelHeight,

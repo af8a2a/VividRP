@@ -5,9 +5,10 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public sealed class AerialPerspectivePass : RasterPass
+    public sealed class AerialPerspectivePass : UnsafePass
     {
-        internal const string AerialPerspectiveShaderName = "Hidden/VividRP/AerialPerspective";
+        internal const string OpaqueAtmosphericScatteringPassName = "Opaque Atmospheric Scattering";
+        internal const string OpaqueAtmosphericScatteringShaderName = "Hidden/VividRP/OpaqueAtmosphericScattering";
 
         private static readonly int InputColorId = Shader.PropertyToID("_InputColor");
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
@@ -40,12 +41,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public AerialPerspectivePass()
         {
-            profilingSampler = new ProfilingSampler(nameof(AerialPerspectivePass));
+            profilingSampler = new ProfilingSampler(OpaqueAtmosphericScatteringPassName);
 
             m_ColorInput = RenderGraphTexture.CreateInput("Color", GraphicsFormat.R16G16B16A16_SFloat);
             m_DepthTexture = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.None, DepthBits.Depth32);
             m_AtmosphericScatteringLUT = RenderGraphTexture.CreateInput("AtmosphericScatteringLUT", GraphicsFormat.R16G16B16A16_SFloat);
-            m_OutputTexture = RenderGraphTexture.CreateColorTarget("OutputColor", GraphicsFormat.R16G16B16A16_SFloat);
+            m_OutputTexture = RenderGraphTexture.CreateOutput("OutputColor", GraphicsFormat.R16G16B16A16_SFloat);
             m_OutputTexture.desc.ClearBuffer = false;
             ConfigureAtmosphericScatteringDescriptor(m_AtmosphericScatteringLUT);
         }
@@ -54,11 +55,11 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             var shader = resources?.AerialPerspectiveShader;
-            shader ??= Shader.Find(AerialPerspectiveShaderName);
+            shader ??= Shader.Find(OpaqueAtmosphericScatteringShaderName);
 
             if (shader == null)
             {
-                Debug.LogWarning($"[VividRP] Could not find shader '{AerialPerspectiveShaderName}' for {nameof(AerialPerspectivePass)}.");
+                Debug.LogWarning($"[VividRP] Could not find shader '{OpaqueAtmosphericScatteringShaderName}' for {nameof(AerialPerspectivePass)}.");
                 return;
             }
 
@@ -88,7 +89,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureOutputTexture(width, height, m_ColorInput?.desc);
         }
 
-        public override void Record(RasterGraphContext context)
+        public override void Record(UnsafeGraphContext context)
         {
             if (m_Material == null
                 || m_ColorInput?.innerHandle.IsValid() != true
@@ -125,7 +126,9 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_HasMaterialParameters)
                 PhysicallyBasedSkyMaterialPropertyBinder.Apply(mpb, m_MaterialParameters, VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume());
 
-            CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);
+            var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
+            nativeCmd.SetRenderTarget(m_OutputTexture);
+            CoreUtils.DrawFullScreen(nativeCmd, m_Material, mpb, 0);
         }
 
         public override void Dispose()

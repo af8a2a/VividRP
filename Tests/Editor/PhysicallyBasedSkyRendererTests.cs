@@ -142,6 +142,14 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("properties.SetTexture(DirectionalShadowTextureId, Texture2D.whiteTexture);"));
             Assert.That(source, Does.Contain("m_CelestialBodyBuffer.Dispose();"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyMaterialPropertyBinder.Apply(properties, materialParameters, volume);"));
+            Assert.That(source, Does.Contain("GroundIrradiancePrecomputationCompute"));
+            Assert.That(source, Does.Contain("InScatteredRadiancePrecomputationCompute"));
+            Assert.That(source, Does.Contain("EnsureLocalSkyPrecomputation("));
+            Assert.That(source, Does.Contain("CoreUtils.SetKeyword(m_SkyMaterial, \"LOCAL_SKY\", useLocalSkyPrecomputation);"));
+            Assert.That(source, Does.Contain("properties.SetTexture(GroundIrradianceTextureId, m_GroundIrradianceTable);"));
+            Assert.That(source, Does.Contain("properties.SetTexture(AirSingleScatteringTextureId, m_AirSingleScatteringTable);"));
+            Assert.That(source, Does.Contain("properties.SetTexture(AerosolSingleScatteringTextureId, m_AerosolSingleScatteringTable);"));
+            Assert.That(source, Does.Contain("properties.SetTexture(MultipleScatteringTextureId, m_MultipleScatteringTable);"));
             Assert.That(source, Does.Not.Contain("m_AmbientProbeCubemapFaces"));
             Assert.That(source, Does.Not.Contain("TryProjectCubemapToSH("));
             Assert.That(source, Does.Not.Contain("SetPixels("));
@@ -159,6 +167,8 @@ namespace VividRP.Editor.Tests
             Assert.That(parametersSource, Does.Contain("parameters.skyGroundTint = ToVector4(exposedGroundTint);"));
             Assert.That(parametersSource, Does.Contain("internal static class PhysicallyBasedSkyComputeParameterBinder"));
             Assert.That(parametersSource, Does.Contain("commandBuffer.SetComputeMatrixParam(computeShader, PixelCoordToViewDirWSId, skyParameters.pixelCoordToViewDirWS);"));
+            Assert.That(parametersSource, Does.Contain("internal static void Apply("));
+            Assert.That(parametersSource, Does.Contain("CommandBuffer commandBuffer,"));
         }
 
         [Test]

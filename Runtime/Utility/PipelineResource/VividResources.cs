@@ -29,7 +29,7 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/FullScreenUV")]
         public Shader FullScreenUVShader;
 
-        [ResourcePath("Shaders/Core/Private/HDRISky")]
+        [ResourcePath("Shaders/Core/Private/Sky/HDRISky")]
         public Shader HDRISkyShader;
 
         [ResourcePath("Shaders/Core/Private/Sky/PhysicallyBasedSky")]
@@ -37,6 +37,12 @@ namespace VividRP.Runtime
 
         [ResourcePath("Shaders/Core/Private/Sky/SkyLUTGenerator.compute")]
         public ComputeShader AtmosphereLUTCompute;
+
+        [ResourcePath("Shaders/Core/Private/Sky/GroundIrradiancePrecomputation.compute")]
+        public ComputeShader GroundIrradiancePrecomputationCompute;
+
+        [ResourcePath("Shaders/Core/Private/Sky/InScatteredRadiancePrecomputation.compute")]
+        public ComputeShader InScatteredRadiancePrecomputationCompute;
 
         [ResourcePath("Shaders/Core/Private/AtmosphericScattering/OpaqueAtmosphericScattering")]
         public Shader AerialPerspectiveShader;
@@ -98,7 +104,7 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/OverlayDebug")]
         public Shader OverlayDebugShader;
 
-        [ResourcePath("Shaders/Core/Private/RTASInstanceDebug")]
+        [ResourcePath("Shaders/Core/Private/Debug/RTASInstanceDebug")]
         public ComputeShader RTASInstanceDebugCompute;
 
         [ResourcePath("Shaders/Core/Private/DirectionalRayTracedShadow")]

@@ -1,0 +1,96 @@
+// #pragma enable_d3d11_debug_symbols
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
+
+#pragma kernel main
+
+#define _PlanetaryRadius _GroundAlbedo_PlanetRadius.w
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
+#include "PhysicallyBasedSkyEvaluation.hlsl"
+
+#define TABLE_SIZE uint3(PBRSKYCONFIG_IN_SCATTERED_RADIANCE_TABLE_SIZE_X, \
+                         PBRSKYCONFIG_IN_SCATTERED_RADIANCE_TABLE_SIZE_Y, \
+                         PBRSKYCONFIG_IN_SCATTERED_RADIANCE_TABLE_SIZE_Z)
+
+RW_TEXTURE3D(float3, _AirSingleScatteringTable);
+RW_TEXTURE3D(float3, _AerosolSingleScatteringTable);
+RW_TEXTURE3D(float3, _MultipleScatteringTable);
+
+[numthreads(4, 4, 4)]
+void main(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    const float A = _AtmosphericRadius;
+    const float R = _PlanetaryRadius;
+
+    const uint zTexSize = PBRSKYCONFIG_IN_SCATTERED_RADIANCE_TABLE_SIZE_Z;
+    const uint zTexCnt = PBRSKYCONFIG_IN_SCATTERED_RADIANCE_TABLE_SIZE_W;
+
+    const float3 scale = rcp(float3(TABLE_SIZE.xy, 1.0f));
+    const float3 bias = float3(0.5f * scale.xy, 0.0f);
+
+    uint3 tableCoord = dispatchThreadId;
+    uint texId = tableCoord.z / zTexSize;
+    uint texCoord = tableCoord.z & (zTexSize - 1);
+
+    float3 uvw = tableCoord * scale + bias;
+
+    float cosChi = UnmapAerialPerspective(uvw.xy).x;
+    float height = UnmapAerialPerspective(uvw.xy).y;
+    float phiL = PI * saturate(texCoord * rcp(zTexSize - 1));
+    float NdotL = UnmapCosineOfZenithAngle(saturate(texId * rcp(zTexCnt - 1)));
+
+    float NdotV = -cosChi;
+    float r = height + R;
+    float cosHor = ComputeCosineOfHorizonAngle(r);
+
+    bool lookAboveHorizon = (cosChi >= cosHor);
+
+    float3 N = float3(0.0f, 0.0f, 1.0f);
+    float3 V = SphericalToCartesian(0.0f, NdotV);
+    float3 L = SphericalToCartesian(phiL, NdotL);
+
+    float3 O = r * N;
+    float tMax = lookAboveHorizon
+        ? IntersectSphere(A, cosChi, r).y
+        : IntersectSphere(R, cosChi, r).x;
+
+    float3 airTableEntry = 0.0f;
+    float3 aerosolTableEntry = 0.0f;
+    float3 msTableEntry = 0.0f;
+    float3 transmittance = 1.0f;
+
+    const int numSamples = 16;
+
+    for (int sampleIndex = 0; sampleIndex < numSamples; sampleIndex++)
+    {
+        float t, dt;
+        GetSample(sampleIndex, numSamples, tMax, t, dt);
+
+        float3 P = O + t * -V;
+
+        r = max(length(P), R);
+        height = r - R;
+        NdotV = dot(normalize(P), V);
+        NdotL = dot(normalize(P), L);
+
+        const float3 sigmaE = AtmosphereExtinction(height);
+        const float3 transmittanceOverSegment = TransmittanceFromOpticalDepth(sigmaE * dt);
+
+        float3 sunTransmittance = EvaluateSunColorAttenuation(NdotL, r);
+        float3 airTerm = sunTransmittance * AirScatter(height);
+        float3 aerosolTerm = sunTransmittance * AerosolScatter(height);
+        float3 scatteringMS = AirScatter(height) + AerosolScatter(height);
+        float3 msTerm = EvaluateMultipleScattering(NdotL, height) * scatteringMS;
+
+        airTableEntry += IntegrateOverSegment(airTerm, transmittanceOverSegment, transmittance, sigmaE);
+        aerosolTableEntry += IntegrateOverSegment(aerosolTerm, transmittanceOverSegment, transmittance, sigmaE);
+        msTableEntry += IntegrateOverSegment(msTerm, transmittanceOverSegment, transmittance, sigmaE);
+
+        transmittance *= transmittanceOverSegment;
+    }
+
+    _AirSingleScatteringTable[tableCoord] = airTableEntry;
+    _AerosolSingleScatteringTable[tableCoord] = aerosolTableEntry;
+    _MultipleScatteringTable[tableCoord] = msTableEntry * MS_EXPOSURE;
+}

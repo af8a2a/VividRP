@@ -138,7 +138,7 @@ namespace VividRP.Editor.Tests
         public void Shader_Source_AppliesPreExposureBeforeWritingSkyColor()
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "HDRISky.shader"));
-            var passSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "HDRISkyPass.cs"));
+            var passSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "HDRISkyPass.cs"));
             var frameContextSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "FrameContextSystem.cs"));
             var bindingSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureShaderBindings.cs"));
 

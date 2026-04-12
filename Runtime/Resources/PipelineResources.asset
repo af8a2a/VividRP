@@ -24,13 +24,15 @@ MonoBehaviour:
   - ResourceName: Shaders/Core/Private/CameraMotionVectors
     ResourceObject: {fileID: 4800000, guid: 6a169e932f9bd824ca065335bba5eb55, type: 3}
   - ResourceName: Shaders/Core/Private/ClusterDebug
-    ResourceObject: {fileID: 4800000, guid: 6f6db95f8fa24fb4a9eb1b9e36203f75, type: 3}
+    ResourceObject: {fileID: 0}
   - ResourceName: Shaders/Core/Private/CopyDepth
     ResourceObject: {fileID: 4800000, guid: d1e81e551800135429c7550ad3907c25, type: 3}
   - ResourceName: Shaders/Core/Private/CoreBlit
     ResourceObject: {fileID: 4800000, guid: fb20577e3a98eaa40bd738cd3008ce12, type: 3}
   - ResourceName: Shaders/Core/Private/CoreBlitColorAndDepth
     ResourceObject: {fileID: 4800000, guid: 7a938306786128241b2810fe10cd3f55, type: 3}
+  - ResourceName: Shaders/Core/Private/Debug/RTASInstanceDebug
+    ResourceObject: {fileID: 7200000, guid: 4aee2e660114dc34381676fa542650e2, type: 3}
   - ResourceName: Shaders/Core/Private/DirectionalRayTracedShadow
     ResourceObject: {fileID: 7200000, guid: e18c323ebbcd75c45b1c45b7c0bb07b4, type: 3}
   - ResourceName: Shaders/Core/Private/FinalBlit
@@ -47,8 +49,6 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 946e513ca242c63479056f13e12cadf9, type: 3}
   - ResourceName: Shaders/Core/Private/GenerateViewZ
     ResourceObject: {fileID: 7200000, guid: 8164bbffd46662749a6398ba6b7ba0a5, type: 3}
-  - ResourceName: Shaders/Core/Private/HDRISky
-    ResourceObject: {fileID: 4800000, guid: d41d44af2b5e2ff49b8312d9fe8aab8b, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/ClearLightLists
     ResourceObject: {fileID: 7200000, guid: cda67af71d0450540a483ad6d6c490e5, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/lightlistbuild-bigtile
@@ -76,23 +76,27 @@ MonoBehaviour:
   - ResourceName: Shaders/Core/Private/ObjectMotionVectorFallback
     ResourceObject: {fileID: 4800000, guid: 050cc193933fca74a87ed5fc32a98f21, type: 3}
   - ResourceName: Shaders/Core/Private/OverlayDebug
-    ResourceObject: {fileID: 4800000, guid: e395d09a0901a0f41ab15bd086c17efd, type: 3}
+    ResourceObject: {fileID: 0}
   - ResourceName: Shaders/Core/Private/PreIntegratedFGD_CharlieFabricLambert
     ResourceObject: {fileID: 4800000, guid: f9ea26c818e16a04fa0b6f8d7ae1a662, type: 3}
   - ResourceName: Shaders/Core/Private/PreIntegratedFGD_GGXDisneyDiffuse
     ResourceObject: {fileID: 4800000, guid: 18a8ea50c3082fb4bba4e2e27578983f, type: 3}
-  - ResourceName: Shaders/Core/Private/RTASInstanceDebug
-    ResourceObject: {fileID: 7200000, guid: 4aee2e660114dc34381676fa542650e2, type: 3}
   - ResourceName: Shaders/Core/Private/ShadowClassify
     ResourceObject: {fileID: 7200000, guid: 3a6fdd688e96b924dbaf2f1c27e7b53d, type: 3}
   - ResourceName: Shaders/Core/Private/Sky/AmbientProbeConvolution.compute
     ResourceObject: {fileID: 7200000, guid: 210a064f204d0cd46adea12cca4bd30d, type: 3}
+  - ResourceName: Shaders/Core/Private/Sky/GroundIrradiancePrecomputation.compute
+    ResourceObject: {fileID: 7200000, guid: 9228f19e36a74363b852c85f72969c36, type: 3}
+  - ResourceName: Shaders/Core/Private/Sky/HDRISky
+    ResourceObject: {fileID: 4800000, guid: d41d44af2b5e2ff49b8312d9fe8aab8b, type: 3}
+  - ResourceName: Shaders/Core/Private/Sky/InScatteredRadiancePrecomputation.compute
+    ResourceObject: {fileID: 7200000, guid: 09127303f3130454d824a32194f37410, type: 3}
   - ResourceName: Shaders/Core/Private/Sky/PhysicallyBasedSky
     ResourceObject: {fileID: 4800000, guid: b3c91ed48e4997345a128588bd90704e, type: 3}
   - ResourceName: Shaders/Core/Private/Sky/SkyLUTGenerator.compute
     ResourceObject: {fileID: 7200000, guid: cd6ae8fe1afb47eba654a15718311401, type: 3}
   - ResourceName: Shaders/Core/Private/SliderDebug
-    ResourceObject: {fileID: 4800000, guid: 985a5b1e96340614fb6346ff8c3108ad, type: 3}
+    ResourceObject: {fileID: 0}
   - ResourceName: Shaders/Core/Private/TemporalAA
     ResourceObject: {fileID: 7200000, guid: e30d483061855394891ca96699b7d9ba, type: 3}
   - ResourceName: Shaders/FullScreenUV

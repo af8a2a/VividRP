@@ -80,7 +80,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void Source_UsesShaderFallbackAndBindsSkyViewLut()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PhysicallyBasedSkyPass.cs"));
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "PhysicallyBasedSkyPass.cs"));
 
             Assert.That(source, Does.Contain("internal const string PhysicallyBasedSkyShaderName = \"Hidden/VividRP/PhysicallyBasedSky\";"));
             Assert.That(source, Does.Contain("shader ??= Shader.Find(PhysicallyBasedSkyShaderName);"));
@@ -114,6 +114,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("Shader \"Hidden/VividRP/PhysicallyBasedSky\""));
             Assert.That(source, Does.Contain("Name \"PhysicallyBasedSky\""));
             Assert.That(source, Does.Contain("Name \"PhysicallyBasedSkyBaking\""));
+            Assert.That(source, Does.Contain("#pragma multi_compile_fragment _ LOCAL_SKY"));
             Assert.That(source, Does.Contain("ZTest LEqual"));
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl\""));
             Assert.That(source, Does.Contain("#include_with_pragmas \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/Bindless.hlsl\""));

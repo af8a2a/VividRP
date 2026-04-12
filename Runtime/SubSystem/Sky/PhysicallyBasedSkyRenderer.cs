@@ -35,6 +35,16 @@ namespace VividRP.Runtime
         private static readonly int SkyOzoneParamsId = Shader.PropertyToID("_SkyOzoneParams");
         private static readonly int SkyGroundTintId = Shader.PropertyToID("_SkyGroundTint");
         private static readonly int CelestialBodyDatasId = Shader.PropertyToID("_CelestialBodyDatas");
+        private static readonly int MultiScatteringLutId = Shader.PropertyToID("_MultiScatteringLUT");
+        private static readonly int MultiScatteringLutRwId = Shader.PropertyToID("_MultiScatteringLUT_RW");
+        private static readonly int GroundIrradianceTableId = Shader.PropertyToID("_GroundIrradianceTable");
+        private static readonly int AirSingleScatteringTableId = Shader.PropertyToID("_AirSingleScatteringTable");
+        private static readonly int AerosolSingleScatteringTableId = Shader.PropertyToID("_AerosolSingleScatteringTable");
+        private static readonly int MultipleScatteringTableId = Shader.PropertyToID("_MultipleScatteringTable");
+        private static readonly int GroundIrradianceTextureId = Shader.PropertyToID("_GroundIrradianceTexture");
+        private static readonly int AirSingleScatteringTextureId = Shader.PropertyToID("_AirSingleScatteringTexture");
+        private static readonly int AerosolSingleScatteringTextureId = Shader.PropertyToID("_AerosolSingleScatteringTexture");
+        private static readonly int MultipleScatteringTextureId = Shader.PropertyToID("_MultipleScatteringTexture");
         private static readonly ProfilingSampler s_RuntimeCubemapMissingTextureSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (MissingTexture)");
         private static readonly ProfilingSampler s_RuntimeCubemapResolutionChangedSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (ResolutionChanged)");
         private static readonly ProfilingSampler s_RuntimeCubemapQualityChangedSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (QualityChanged)");
@@ -45,11 +55,27 @@ namespace VividRP.Runtime
 
         internal const float SunAngularDiameterDegrees = 0.53f;
         internal const float SunIlluminanceScale = 20.0f;
+        private const int GroundIrradianceTableSize = 256;
+        private const int InScatteredRadianceTableSizeX = 128;
+        private const int InScatteredRadianceTableSizeY = 32;
+        private const int InScatteredRadianceTableSizeZ = 16;
+        private const int InScatteredRadianceTableSizeW = 64;
 
         private Material m_SkyMaterial;
         private int m_SkyBakingPass = -1;
+        private ComputeShader m_GroundIrradiancePrecomputationCompute;
+        private ComputeShader m_InScatteredRadiancePrecomputationCompute;
+        private ComputeShader m_AtmosphereLutCompute;
+        private int m_GroundIrradiancePrecomputationKernel = -1;
+        private int m_InScatteredRadiancePrecomputationKernel = -1;
+        private int m_MultiScatteringKernel = -1;
         private RenderTexture m_RuntimeSkyCubemap;
         private RenderTexture m_AmbientProbeCubemap;
+        private RenderTexture m_GroundIrradianceTable;
+        private RenderTexture m_AirSingleScatteringTable;
+        private RenderTexture m_AerosolSingleScatteringTable;
+        private RenderTexture m_MultipleScatteringTable;
+        private RenderTexture m_MultiScatteringLut;
         private int m_RuntimeSkyHash;
         private int m_RuntimeSkyViewSampleCount;
         private int m_AmbientProbeSkyHash;
@@ -63,11 +89,21 @@ namespace VividRP.Runtime
         {
             var shader = resources?.PhysicallyBasedSkyShader;
             shader ??= Shader.Find(PhysicallyBasedSkyPass.PhysicallyBasedSkyShaderName);
+            m_AtmosphereLutCompute = resources?.AtmosphereLUTCompute;
+            m_GroundIrradiancePrecomputationCompute = resources?.GroundIrradiancePrecomputationCompute;
+            m_InScatteredRadiancePrecomputationCompute = resources?.InScatteredRadiancePrecomputationCompute;
             if (shader != null)
             {
                 m_SkyMaterial = CoreUtils.CreateEngineMaterial(shader);
                 m_SkyBakingPass = m_SkyMaterial.FindPass("PhysicallyBasedSkyBaking");
             }
+
+            if (m_AtmosphereLutCompute != null && m_AtmosphereLutCompute.HasKernel("MultiScatteringLUT"))
+                m_MultiScatteringKernel = m_AtmosphereLutCompute.FindKernel("MultiScatteringLUT");
+            if (m_GroundIrradiancePrecomputationCompute != null && m_GroundIrradiancePrecomputationCompute.HasKernel("main"))
+                m_GroundIrradiancePrecomputationKernel = m_GroundIrradiancePrecomputationCompute.FindKernel("main");
+            if (m_InScatteredRadiancePrecomputationCompute != null && m_InScatteredRadiancePrecomputationCompute.HasKernel("main"))
+                m_InScatteredRadiancePrecomputationKernel = m_InScatteredRadiancePrecomputationCompute.FindKernel("main");
         }
 
         public bool IsActive()
@@ -171,6 +207,8 @@ namespace VividRP.Runtime
                 m_AmbientProbeCubemap = null;
             }
 
+            ReleaseLocalSkyPrecomputationResources();
+
             if (m_SkyMaterial != null)
             {
                 CoreUtils.Destroy(m_SkyMaterial);
@@ -178,6 +216,12 @@ namespace VividRP.Runtime
             }
 
             m_SkyBakingPass = -1;
+            m_GroundIrradiancePrecomputationCompute = null;
+            m_InScatteredRadiancePrecomputationCompute = null;
+            m_AtmosphereLutCompute = null;
+            m_GroundIrradiancePrecomputationKernel = -1;
+            m_InScatteredRadiancePrecomputationKernel = -1;
+            m_MultiScatteringKernel = -1;
             m_RuntimeSkyHash = 0;
             m_RuntimeSkyViewSampleCount = 0;
             m_AmbientProbeSkyHash = 0;
@@ -336,7 +380,7 @@ namespace VividRP.Runtime
         {
             if (cmd == null
                 || m_RuntimeSkyCubemap == null
-                || !TryBuildSkyBakingProperties(volume, context, runtimeCubemapViewSampleCount, out var properties))
+                || !TryBuildSkyBakingProperties(volume, context, cmd, runtimeCubemapViewSampleCount, out var properties))
             {
                 return false;
             }
@@ -358,7 +402,7 @@ namespace VividRP.Runtime
         {
             if (cmd == null
                 || m_AmbientProbeCubemap == null
-                || !TryBuildSkyBakingProperties(volume, context, viewSampleCount, out var properties))
+                || !TryBuildSkyBakingProperties(volume, context, cmd, viewSampleCount, out var properties))
             {
                 return false;
             }
@@ -375,6 +419,7 @@ namespace VividRP.Runtime
         private bool TryBuildSkyBakingProperties(
             PhysicallyBasedSkyVolume volume,
             in SkyRendererContext context,
+            CommandBuffer cmd,
             int viewSampleCount,
             out MaterialPropertyBlock properties)
         {
@@ -423,6 +468,16 @@ namespace VividRP.Runtime
             properties.SetVector(SkyGroundTintId, parameters.skyGroundTint);
             m_CelestialBodyBuffer.Update(context);
             m_SkyMaterial.SetBuffer(CelestialBodyDatasId, m_CelestialBodyBuffer.Buffer);
+            var useLocalSkyPrecomputation = hasMaterialParameters
+                && EnsureLocalSkyPrecomputation(volume, context, cmd, parameters, materialParameters);
+            CoreUtils.SetKeyword(m_SkyMaterial, "LOCAL_SKY", useLocalSkyPrecomputation);
+            if (useLocalSkyPrecomputation)
+            {
+                properties.SetTexture(GroundIrradianceTextureId, m_GroundIrradianceTable);
+                properties.SetTexture(AirSingleScatteringTextureId, m_AirSingleScatteringTable);
+                properties.SetTexture(AerosolSingleScatteringTextureId, m_AerosolSingleScatteringTable);
+                properties.SetTexture(MultipleScatteringTextureId, m_MultipleScatteringTable);
+            }
             if (hasMaterialParameters)
                 PhysicallyBasedSkyMaterialPropertyBinder.Apply(properties, materialParameters, volume);
 
@@ -432,6 +487,136 @@ namespace VividRP.Runtime
         private static bool CanUseSkyViewLut()
         {
             return PipelineResourceManager.Get<VividRPCoreResources>()?.AtmosphereLUTCompute != null;
+        }
+
+        private bool EnsureLocalSkyPrecomputation(
+            PhysicallyBasedSkyVolume volume,
+            in SkyRendererContext context,
+            CommandBuffer cmd,
+            in PhysicallyBasedSkyShaderParameters skyParameters,
+            in PhysicallyBasedSkyMaterialParameters materialParameters)
+        {
+            if (cmd == null
+                || m_AtmosphereLutCompute == null
+                || m_GroundIrradiancePrecomputationCompute == null
+                || m_InScatteredRadiancePrecomputationCompute == null
+                || m_MultiScatteringKernel < 0
+                || m_GroundIrradiancePrecomputationKernel < 0
+                || m_InScatteredRadiancePrecomputationKernel < 0)
+            {
+                return false;
+            }
+
+            EnsureLocalSkyPrecomputationResources();
+            PhysicallyBasedSkyComputeParameterBinder.Apply(cmd, m_AtmosphereLutCompute, skyParameters, materialParameters);
+            PhysicallyBasedSkyComputeParameterBinder.Apply(cmd, m_GroundIrradiancePrecomputationCompute, skyParameters, materialParameters);
+            PhysicallyBasedSkyComputeParameterBinder.Apply(cmd, m_InScatteredRadiancePrecomputationCompute, skyParameters, materialParameters);
+
+            cmd.SetComputeTextureParam(m_AtmosphereLutCompute, m_MultiScatteringKernel, MultiScatteringLutRwId, m_MultiScatteringLut);
+            cmd.DispatchCompute(m_AtmosphereLutCompute, m_MultiScatteringKernel, AtmosphereLUTPass.MultiScatteringWidth, AtmosphereLUTPass.MultiScatteringHeight, 1);
+
+            cmd.SetComputeTextureParam(m_InScatteredRadiancePrecomputationCompute, m_InScatteredRadiancePrecomputationKernel, MultiScatteringLutId, m_MultiScatteringLut);
+            cmd.SetComputeTextureParam(m_InScatteredRadiancePrecomputationCompute, m_InScatteredRadiancePrecomputationKernel, AirSingleScatteringTableId, m_AirSingleScatteringTable);
+            cmd.SetComputeTextureParam(m_InScatteredRadiancePrecomputationCompute, m_InScatteredRadiancePrecomputationKernel, AerosolSingleScatteringTableId, m_AerosolSingleScatteringTable);
+            cmd.SetComputeTextureParam(m_InScatteredRadiancePrecomputationCompute, m_InScatteredRadiancePrecomputationKernel, MultipleScatteringTableId, m_MultipleScatteringTable);
+            cmd.DispatchCompute(
+                m_InScatteredRadiancePrecomputationCompute,
+                m_InScatteredRadiancePrecomputationKernel,
+                InScatteredRadianceTableSizeX / 4,
+                InScatteredRadianceTableSizeY / 4,
+                InScatteredRadianceTableSizeZ / 4 * InScatteredRadianceTableSizeW);
+
+            cmd.SetComputeTextureParam(m_GroundIrradiancePrecomputationCompute, m_GroundIrradiancePrecomputationKernel, GroundIrradianceTableId, m_GroundIrradianceTable);
+            cmd.SetComputeTextureParam(m_GroundIrradiancePrecomputationCompute, m_GroundIrradiancePrecomputationKernel, AirSingleScatteringTextureId, m_AirSingleScatteringTable);
+            cmd.SetComputeTextureParam(m_GroundIrradiancePrecomputationCompute, m_GroundIrradiancePrecomputationKernel, AerosolSingleScatteringTextureId, m_AerosolSingleScatteringTable);
+            cmd.SetComputeTextureParam(m_GroundIrradiancePrecomputationCompute, m_GroundIrradiancePrecomputationKernel, MultipleScatteringTextureId, m_MultipleScatteringTable);
+            cmd.DispatchCompute(m_GroundIrradiancePrecomputationCompute, m_GroundIrradiancePrecomputationKernel, GroundIrradianceTableSize / 64, 1, 1);
+            return true;
+        }
+
+        private void EnsureLocalSkyPrecomputationResources()
+        {
+            Ensure2DRenderTexture(ref m_MultiScatteringLut, AtmosphereLUTPass.MultiScatteringWidth, AtmosphereLUTPass.MultiScatteringHeight, "VividPbrSky_MultiScatteringLUT");
+            Ensure2DRenderTexture(ref m_GroundIrradianceTable, GroundIrradianceTableSize, 1, "VividPbrSky_GroundIrradiance");
+            Ensure3DRenderTexture(ref m_AirSingleScatteringTable, InScatteredRadianceTableSizeX, InScatteredRadianceTableSizeY, InScatteredRadianceTableSizeZ * InScatteredRadianceTableSizeW, "VividPbrSky_AirSingleScattering");
+            Ensure3DRenderTexture(ref m_AerosolSingleScatteringTable, InScatteredRadianceTableSizeX, InScatteredRadianceTableSizeY, InScatteredRadianceTableSizeZ * InScatteredRadianceTableSizeW, "VividPbrSky_AerosolSingleScattering");
+            Ensure3DRenderTexture(ref m_MultipleScatteringTable, InScatteredRadianceTableSizeX, InScatteredRadianceTableSizeY, InScatteredRadianceTableSizeZ * InScatteredRadianceTableSizeW, "VividPbrSky_MultipleScattering");
+        }
+
+        private void ReleaseLocalSkyPrecomputationResources()
+        {
+            ReleaseRenderTexture(ref m_GroundIrradianceTable);
+            ReleaseRenderTexture(ref m_AirSingleScatteringTable);
+            ReleaseRenderTexture(ref m_AerosolSingleScatteringTable);
+            ReleaseRenderTexture(ref m_MultipleScatteringTable);
+            ReleaseRenderTexture(ref m_MultiScatteringLut);
+        }
+
+        private static void Ensure2DRenderTexture(ref RenderTexture texture, int width, int height, string name)
+        {
+            if (texture != null
+                && texture.IsCreated()
+                && texture.dimension == TextureDimension.Tex2D
+                && texture.width == width
+                && texture.height == height)
+            {
+                return;
+            }
+
+            ReleaseRenderTexture(ref texture);
+            texture = new RenderTexture(width, height, 0)
+            {
+                name = name,
+                hideFlags = HideFlags.HideAndDontSave,
+                dimension = TextureDimension.Tex2D,
+                volumeDepth = 1,
+                graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat,
+                enableRandomWrite = true,
+                useMipMap = false,
+                autoGenerateMips = false,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp
+            };
+            texture.Create();
+        }
+
+        private static void Ensure3DRenderTexture(ref RenderTexture texture, int width, int height, int depth, string name)
+        {
+            if (texture != null
+                && texture.IsCreated()
+                && texture.dimension == TextureDimension.Tex3D
+                && texture.width == width
+                && texture.height == height
+                && texture.volumeDepth == depth)
+            {
+                return;
+            }
+
+            ReleaseRenderTexture(ref texture);
+            texture = new RenderTexture(width, height, 0)
+            {
+                name = name,
+                hideFlags = HideFlags.HideAndDontSave,
+                dimension = TextureDimension.Tex3D,
+                volumeDepth = depth,
+                graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat,
+                enableRandomWrite = true,
+                useMipMap = false,
+                autoGenerateMips = false,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp
+            };
+            texture.Create();
+        }
+
+        private static void ReleaseRenderTexture(ref RenderTexture texture)
+        {
+            if (texture == null)
+                return;
+
+            texture.Release();
+            CoreUtils.Destroy(texture);
+            texture = null;
         }
 
         private static bool IsCubemapValid(RenderTexture texture, int resolution)

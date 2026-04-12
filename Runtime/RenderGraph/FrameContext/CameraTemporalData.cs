@@ -33,7 +33,7 @@ namespace VividRP.Runtime
             var frameIndex = ResolveFrameIndex(cameraData);
             var aspectRatio = ResolveAspectRatio(cameraData);
 
-            var gpuProjNoJitter = cameraData.GetGPUProjectionMatrixNoJitter(true);
+            var gpuProjNoJitter = cameraData.GetGPUProjectionMatrixNoJitter();
             var view = cameraData.GetViewMatrix();
             var currentVP = gpuProjNoJitter * view;
             var currentJitter = cameraData.GetJitter();

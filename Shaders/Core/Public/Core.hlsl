@@ -39,6 +39,10 @@
 #define GATHER_BLUE_TEXTURE2D_X(textureName, samplerName, coord2)       GATHER_BLUE_TEXTURE2D(textureName, samplerName, coord2)
 #define GATHER_ALPHA_TEXTURE2D_X(textureName, samplerName, coord2)      GATHER_ALPHA_TEXTURE2D(textureName, samplerName, coord2)
 
+#define RW_TEXTURE2D(type, textureName)          RWTexture2D<type> textureName
+#define RW_TEXTURE2D_ARRAY(type, textureName)    RWTexture2DArray<type> textureName
+#define RW_TEXTURE3D(type, textureName)          RWTexture3D<type> textureName
+
 ///
 /// Texture Sampling Macro Overrides for Scaling
 ///

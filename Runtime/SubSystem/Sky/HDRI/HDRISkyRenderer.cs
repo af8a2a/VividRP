@@ -199,7 +199,10 @@ namespace VividRP.Runtime
             var properties = new MaterialPropertyBlock();
             properties.SetTexture(SkyCubemapId, cubemap);
             properties.SetColor(SkyTintId, tint);
-            properties.SetVector(SkyParamId, HDRISkyPass.BuildSkyParam(exposure, rotation));
+            
+            float intensity, phi;
+            HDRISkyPass.GetParameters(out intensity, out phi);
+            properties.SetVector(SkyParamId, new Vector4(intensity, 0.0f, Mathf.Cos(phi), Mathf.Sin(phi)));
 
             SkyCubemapBakingUtility.RenderSkyToCubemap(
                 cmd,

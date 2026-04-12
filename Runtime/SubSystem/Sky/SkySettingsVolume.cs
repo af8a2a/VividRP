@@ -19,6 +19,20 @@ namespace VividRP.Runtime
         High = 3,
         Ultra = 4
     }
+    /// <summary>
+    /// Sky Intensity Mode.
+    /// </summary>
+    public enum SkyIntensityMode
+    {
+        /// <summary>Intensity is expressed as an exposure.</summary>
+        Exposure,
+        /// <summary>Intensity is expressed in lux.</summary>
+        Lux,
+        /// <summary>Intensity is expressed as a multiplier.</summary>
+        Multiplier,
+    }
+
+
 
     [Serializable]
     [VolumeComponentMenu("VividRP/Sky Settings")]

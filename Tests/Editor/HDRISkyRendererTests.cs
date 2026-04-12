@@ -43,7 +43,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("skyData.ambientProbeTint,"));
             Assert.That(source, Does.Contain("skyData.ambientProbeExposure,"));
             Assert.That(source, Does.Contain("skyData.ambientProbeRotation,"));
-            Assert.That(source, Does.Contain("skyData.ambientProbeHash);"));
+            Assert.That(source, Does.Contain("skyData.ambientProbeHash,"));
+            Assert.That(source, Does.Contain("s_ForceRebuild);"));
             Assert.That(source, Does.Contain("s_AmbientProbeConvolution.BindGlobalBuffer(cmd, true);"));
             Assert.That(source, Does.Not.Contain("SkyDiffuseSHUtility.TryProjectCubemapToSH("));
             Assert.That(source, Does.Not.Contain("UploadProbe("));

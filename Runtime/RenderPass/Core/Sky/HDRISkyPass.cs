@@ -10,6 +10,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SkyCubemapId = Shader.PropertyToID("_SkyCubemap");
         private static readonly int SkyTintId = Shader.PropertyToID("_SkyTint");
         private static readonly int SkyParamId = Shader.PropertyToID("_SkyParam");
+        private static readonly int PixelCoordToViewDirWSId = Shader.PropertyToID("_PixelCoordToViewDirWS");
         private Material m_Material;
 
         [RenderGraphResource(Name = "Color", Access = AccessFlags.ReadWrite, AttachmentIndex = 0)]
@@ -65,10 +66,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
+            
+            float intensity, phi;
+            GetParameters(out intensity, out phi);
+
             mpb.SetTexture(SkyCubemapId, m_Cubemap);
             mpb.SetColor(SkyTintId, m_Tint);
-            mpb.SetVector(SkyParamId, BuildSkyParam(m_Exposure, m_Rotation));
-            mpb.SetMatrix("_PixelCoordToViewDirWS", m_PixelCoordToViewDirMatrix);
+            mpb.SetVector(SkyParamId, new Vector4(intensity, 0.0f, Mathf.Cos(phi), Mathf.Sin(phi)));
+            mpb.SetMatrix(PixelCoordToViewDirWSId, m_PixelCoordToViewDirMatrix);
 
             CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);
         }
@@ -82,9 +87,14 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
-        internal static Vector4 BuildSkyParam(float exposure, float rotation)
+        
+        internal static void GetParameters(out float intensity, out float phi)//, out float backplatePhi)
         {
-            return new Vector4(exposure, 1f, -rotation, 0f);
+            var hdriSky = VividVolumeManagerUtility.GetHDRISkyVolume();
+            intensity = hdriSky.GetIntensityFromSettings();
+            phi = -Mathf.Deg2Rad * hdriSky.rotation.value; // -rotation to match Legacy...
+            // backplatePhi = phi - Mathf.Deg2Rad * hdriSky.plateRotation.value;
         }
+
     }
 }

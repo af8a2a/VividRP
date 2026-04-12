@@ -12,15 +12,19 @@ Shader "Hidden/VividRP/HDRISky"
     #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
-
+    #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Sky/SkyUtils.hlsl"
     TEXTURE2D_X_FLOAT(_DepthTexture);
     SAMPLER(sampler_DepthTexture);
     TEXTURECUBE(_SkyCubemap);
     SAMPLER(sampler_SkyCubemap);
     float4 _SkyCubemap_HDR;
-    float4x4 _PixelCoordToViewDirWS;
     float4 _SkyTint;
     float4 _SkyParam;
+    
+    #define _Intensity          _SkyParam.x
+    #define _CosPhi             _SkyParam.z
+    #define _SinPhi             _SkyParam.w
+    #define _CosSinPhi          _SkyParam.zw
 
     struct Attributes
     {
@@ -46,37 +50,63 @@ Shader "Hidden/VividRP/HDRISky"
         return output;
     }
 
-    float3 RotateAroundYAxis(float3 directionWS, float rotationDegrees)
-    {
-        float rotationRadians = radians(rotationDegrees);
-        float s;
-        float c;
-        sincos(rotationRadians, s, c);
 
-        return float3(
-            c * directionWS.x - s * directionWS.z,
-            directionWS.y,
-            s * directionWS.x + c * directionWS.z);
+    float3 GetSkyColor(float3 dir)
+    {
+        #if defined(DISTORTION_PROCEDURAL) || defined(DISTORTION_FLOWMAP)
+        if (dir.y >= 0 || !_UpperHemisphere)
+        {
+            float2 alpha = frac(float2(_ScrollFactor, _ScrollFactor + 0.5)) - 0.5;
+
+        #ifdef DISTORTION_FLOWMAP
+        float3 tangent = normalize(cross(dir, float3(0.0, 1.0, 0.0)));
+        float3 bitangent = cross(tangent, dir);
+
+        float3 windDir = RotationUp(dir, _ScrollDirection);
+        float2 flow = SAMPLE_TEXTURE2D_LOD(_Flowmap, sampler_Flowmap, GetLatLongCoords(windDir, _UpperHemisphere), 0).rg * 2.0 - 1.0;
+
+        float3 dd = flow.x * tangent + flow.y * bitangent;
+        #else
+        float3 windDir = float3(_ScrollDirection.x, 0.0f, _ScrollDirection.y);
+        float3 dd = windDir * sin(dir.y * PI * 0.5);
+        #endif
+
+        // Sample twice
+        float3 color1 = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_Cubemap, sampler_Cubemap, dir + alpha.x * dd, 0), _Cubemap_HDR);
+        float3 color2 = DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_Cubemap, sampler_Cubemap, dir + alpha.y * dd, 0), _Cubemap_HDR);
+
+        // Blend color samples
+        return lerp(color1, color2, abs(2.0 * alpha.x));
+        }
+        else
+        #endif
+
+        return DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SkyCubemap, sampler_SkyCubemap, dir, 0), _SkyCubemap_HDR);
     }
 
-    // Generates a world-space view direction for sky and atmospheric effects
-    float3 GetSkyViewDirWS(float2 positionCS)
+
+    float4 GetColorWithRotation(float3 dir, float exposure, float2 cos_sin)
     {
-        float4 viewDirWS = mul(float4(positionCS.xy, 1.0f, 1.0f), _PixelCoordToViewDirWS);
-        return normalize(viewDirWS.xyz);
+        dir = RotationUp(dir, cos_sin);
+
+        float3 skyColor = GetSkyColor(dir)*_Intensity*exposure;
+        skyColor = ClampToFloat16Max(skyColor);
+
+        return float4(skyColor, 1.0);
     }
 
-    float3 EvaluateSkyColor(float2 positionCS)
+
+    float4 RenderSky(Varyings input, float exposure)
     {
-        float3 viewDirWS = GetSkyViewDirWS(positionCS);
+        float3 viewDirWS = GetSkyViewDirWS(input.positionCS.xy);
 
         // Reverse it to point into the scene
-        float3 dir = RotateAroundYAxis(-viewDirWS, _SkyParam.z);
-        return DecodeHDREnvironment(SAMPLE_TEXTURECUBE_LOD(_SkyCubemap, sampler_SkyCubemap, dir,0),_SkyCubemap_HDR)
-               * _SkyTint.rgb
-               * exp2(_SkyParam.x)
-               * _SkyParam.y;
+        float3 dir = -viewDirWS;
+
+        return GetColorWithRotation(dir, exposure, _CosSinPhi);
     }
+    
+    
     ENDHLSL
 
     SubShader
@@ -102,7 +132,7 @@ Shader "Hidden/VividRP/HDRISky"
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
             float4 FragRender(Varyings input) : SV_Target
             {
-                return float4(VividApplyPreExposure(EvaluateSkyColor(input.positionCS.xy)), 1.0);
+                return float4(RenderSky(input,VividGetPreExposure()));
             }
             ENDHLSL
         }
@@ -122,7 +152,7 @@ Shader "Hidden/VividRP/HDRISky"
 
             float4 FragBaking(Varyings input) : SV_Target
             {
-                return float4(EvaluateSkyColor(input.positionCS.xy), 1.0);
+                return float4(RenderSky(input, 1));
             }
             ENDHLSL
         }

@@ -84,16 +84,6 @@ namespace VividRP.Editor.Tests
             }
         }
 
-        [Test]
-        public void BuildSkyParam_UsesHdrpCompatibleLayout_WhenVolumeSettingsAreApplied()
-        {
-            var skyParam = HDRISkyPass.BuildSkyParam(2.5f, 45f);
-
-            Assert.That(skyParam.x, Is.EqualTo(2.5f));
-            Assert.That(skyParam.y, Is.EqualTo(1f));
-            Assert.That(skyParam.z, Is.EqualTo(-45f));
-            Assert.That(skyParam.w, Is.EqualTo(0f));
-        }
 
         [Test]
         public void HdriSkyExposure_UsesEvStopMultiplierSoZeroRemainsNeutral()

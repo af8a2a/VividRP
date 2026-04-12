@@ -87,12 +87,15 @@ namespace VividRP.Runtime
             Color tint,
             float exposureStops,
             float rotation,
-            int skyHash)
+            int skyHash,
+            bool forceRebuild = false)
         {
             if (!IsSupported || cmd == null || sourceCubemap == null)
                 return;
 
             var rebuildReason = ResolveRebuildReason(skyHash);
+            if (forceRebuild && rebuildReason == AmbientProbeConvolutionRebuildReason.None)
+                rebuildReason = AmbientProbeConvolutionRebuildReason.SkyChanged;
             if (rebuildReason == AmbientProbeConvolutionRebuildReason.None)
                 return;
 

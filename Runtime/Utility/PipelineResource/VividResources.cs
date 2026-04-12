@@ -50,6 +50,9 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/Sky/AmbientProbeConvolution.compute")]
         public ComputeShader SkyAmbientProbeConvolutionCompute;
 
+        [ResourcePath("Shaders/Core/Private/Sky/GGXConvolve")]
+        public Shader SkyGGXConvolutionShader;
+
         [ResourcePath("Texture/Default/DefaultHDRISky.exr")]
         public Cubemap DefaultHDRISkyCubemap;
 

@@ -89,6 +89,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 3a6fdd688e96b924dbaf2f1c27e7b53d, type: 3}
   - ResourceName: Shaders/Core/Private/Sky/AmbientProbeConvolution.compute
     ResourceObject: {fileID: 7200000, guid: 210a064f204d0cd46adea12cca4bd30d, type: 3}
+  - ResourceName: Shaders/Core/Private/Sky/GGXConvolve
+    ResourceObject: {fileID: 4800000, guid: 889e870c9813b074ab5d7dc9d9104dc8, type: 3}
   - ResourceName: Shaders/Core/Private/Sky/GroundIrradiancePrecomputation.compute
     ResourceObject: {fileID: 7200000, guid: 9228f19e36a74363b852c85f72969c36, type: 3}
   - ResourceName: Shaders/Core/Private/Sky/HDRISky

@@ -127,7 +127,7 @@ namespace VividRP.Runtime
                 PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialBodyHash(context));
         }
 
-        public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd)
+        public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd, bool forceRebuild = false)
         {
             if (skyData == null)
                 return;
@@ -147,6 +147,8 @@ namespace VividRP.Runtime
                 hash,
                 generatedCubemapResolution,
                 generatedCubemapViewSampleCount);
+            if (forceRebuild && runtimeCubemapRebuildReason == SkyRebuildReason.None)
+                runtimeCubemapRebuildReason = SkyRebuildReason.ParametersChanged;
             if (runtimeCubemapRebuildReason != SkyRebuildReason.None && CanRebuildRuntimeCubemap() && cmd != null)
             {
                 EnsureRuntimeCubemap(generatedCubemapResolution);
@@ -165,6 +167,8 @@ namespace VividRP.Runtime
             }
 
             var ambientProbeRebuildReason = ResolveAmbientProbeCubemapRebuildReason(hash, generatedCubemapResolution);
+            if (forceRebuild && ambientProbeRebuildReason == SkyRebuildReason.None)
+                ambientProbeRebuildReason = SkyRebuildReason.ParametersChanged;
             if (ambientProbeRebuildReason != SkyRebuildReason.None && CanBakeAmbientProbe() && cmd != null)
             {
                 EnsureAmbientProbeCubemap(generatedCubemapResolution);

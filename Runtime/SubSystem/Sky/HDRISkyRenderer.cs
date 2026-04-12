@@ -61,7 +61,7 @@ namespace VividRP.Runtime
                 SkySettingsVolume.GetGeneratedCubemapResolution(skySettings));
         }
 
-        public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd)
+        public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd, bool forceRebuild = false)
         {
             if (skyData == null)
                 return;
@@ -82,6 +82,8 @@ namespace VividRP.Runtime
             skyData.rotation = sky?.rotation.value ?? 0.0f;
             var generatedCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(VividVolumeManagerUtility.GetSkySettingsVolume());
             var ambientProbeRebuildReason = ResolveAmbientProbeRebuildReason(skyHash, generatedCubemapResolution);
+            if (forceRebuild && ambientProbeRebuildReason == AmbientProbeRebuildReason.None)
+                ambientProbeRebuildReason = AmbientProbeRebuildReason.ParametersChanged;
             if (ambientProbeRebuildReason != AmbientProbeRebuildReason.None && CanBakeAmbientProbe() && cmd != null)
             {
                 EnsureAmbientProbeCubemap(generatedCubemapResolution);

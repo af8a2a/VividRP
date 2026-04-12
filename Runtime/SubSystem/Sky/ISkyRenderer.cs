@@ -13,6 +13,6 @@ namespace VividRP.Runtime
 
         void Build(VividRPCoreResources resources);
 
-        void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd);
+        void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd, bool forceRebuild = false);
     }
 }

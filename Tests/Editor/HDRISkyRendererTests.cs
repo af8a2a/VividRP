@@ -11,7 +11,7 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "HDRISkyRenderer.cs"));
 
-            Assert.That(source, Does.Contain("public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd)"));
+            Assert.That(source, Does.Contain("public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd, bool forceRebuild = false)"));
             Assert.That(source, Does.Contain("m_AmbientProbeBakingPass = m_Material.FindPass(\"HDRISkyBaking\");"));
             Assert.That(source, Does.Contain("HDRISkyRenderer.RebuildAmbientProbe (MissingTexture)"));
             Assert.That(source, Does.Contain("HDRISkyRenderer.RebuildAmbientProbe (ResolutionChanged)"));
@@ -37,7 +37,7 @@ namespace VividRP.Editor.Tests
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyManager.cs"));
 
             Assert.That(source, Does.Contain("RegisterRenderer(new HDRISkyRenderer(), resources);"));
-            Assert.That(source, Does.Contain("renderer.Update(context, s_CachedSkyData, cmd);"));
+            Assert.That(source, Does.Contain("renderer.Update(context, s_CachedSkyData, cmd, forceRebuild);"));
             Assert.That(source, Does.Contain("if (skyData != null && skyData.ambientProbeCubemap != null)"));
             Assert.That(source, Does.Contain("skyData.ambientProbeCubemap,"));
             Assert.That(source, Does.Contain("skyData.ambientProbeTint,"));

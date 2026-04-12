@@ -88,10 +88,10 @@ namespace VividRP.Runtime
                     frameData.GetOrCreate<VividLightData>());
                 var skyHash = renderer.GetSkyHash(context);
 
-                if (NeedsUpdate(activeSkyType, skySettings, skyHash))
+                if (NeedsUpdate(activeSkyType, skySettings, skyHash, out var forceRebuild))
                 {
                     s_CachedSkyData.Reset();
-                    renderer.Update(context, s_CachedSkyData, cmd);
+                    renderer.Update(context, s_CachedSkyData, cmd, forceRebuild);
                     s_CachedSkyData.activeSkyType = activeSkyType;
                     s_CachedSkyData.skyHash = skyHash;
                     s_LastUpdateTime = Time.realtimeSinceStartup;
@@ -140,24 +140,39 @@ namespace VividRP.Runtime
                 PassRecorder.ImportTexture(texture, handle);
         }
 
-        private static bool NeedsUpdate(SkyType skyType, SkySettingsVolume skySettings, int skyHash)
+        private static bool NeedsUpdate(SkyType skyType, SkySettingsVolume skySettings, int skyHash, out bool forceRebuild)
         {
+            forceRebuild = false;
+
             if (s_CachedSkyData.activeSkyType != skyType || s_CachedSkyData.specularCubemap == null)
                 return true;
 
             if (s_UpdateRequested)
+            {
+                forceRebuild = true;
                 return true;
+            }
 
             var updateMode = skySettings?.updateMode.value ?? SkyUpdateMode.OnChanged;
             var updatePeriod = skySettings?.updatePeriod.value ?? 0.0f;
             var elapsedTime = Time.realtimeSinceStartup - s_LastUpdateTime;
 
-            return updateMode switch
+            switch (updateMode)
             {
-                SkyUpdateMode.OnDemand => false,
-                SkyUpdateMode.Realtime => skyHash != s_CachedSkyData.skyHash || updatePeriod <= 0.0f || elapsedTime >= updatePeriod,
-                _ => skyHash != s_CachedSkyData.skyHash,
-            };
+                case SkyUpdateMode.OnDemand:
+                    return false;
+                case SkyUpdateMode.Realtime:
+                    if (skyHash != s_CachedSkyData.skyHash)
+                        return true;
+                    if (updatePeriod <= 0.0f || elapsedTime >= updatePeriod)
+                    {
+                        forceRebuild = true;
+                        return true;
+                    }
+                    return false;
+                default:
+                    return skyHash != s_CachedSkyData.skyHash;
+            }
         }
 
         private static void RegisterRenderer(ISkyRenderer renderer, VividRPCoreResources resources)

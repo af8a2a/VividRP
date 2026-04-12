@@ -65,7 +65,6 @@ namespace VividRP.Runtime
 
                 cmd.SetRenderTarget(targetCubemap, 0, cubemapFace);
                 cmd.SetViewport(new Rect(0.0f, 0.0f, targetCubemap.width, targetCubemap.height));
-                cmd.ClearRenderTarget(false, true, Color.clear);
                 CoreUtils.DrawFullScreen(cmd, material, propertyBlock, passIndex);
             }
 

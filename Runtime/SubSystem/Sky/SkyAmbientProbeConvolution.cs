@@ -5,6 +5,8 @@ namespace VividRP.Runtime
 {
     internal sealed class SkyAmbientProbeConvolution
     {
+        private const bool EnableAmbientProbeDebugReadback = true;
+
         private enum AmbientProbeConvolutionRebuildReason
         {
             None,
@@ -47,6 +49,8 @@ namespace VividRP.Runtime
         private GraphicsBuffer m_DefaultAmbientProbeBuffer;
         private bool m_HasConvolvedSkyHash;
         private int m_ConvolvedSkyHash;
+        private bool m_DebugReadbackPending;
+        private int m_DebugReadbackSkyHash;
 
         internal bool IsSupported =>
             m_ComputeShader != null
@@ -77,6 +81,8 @@ namespace VividRP.Runtime
             m_UsesHdrpDiffuseKernel = false;
             m_HasConvolvedSkyHash = false;
             m_ConvolvedSkyHash = 0;
+            m_DebugReadbackPending = false;
+            m_DebugReadbackSkyHash = int.MinValue;
         }
 
         internal void RequestUpdate(
@@ -124,9 +130,10 @@ namespace VividRP.Runtime
                 return;
 
             EnsureDefaultAmbientProbeBuffer();
+            var activeBuffer = useDefault || m_AmbientProbeBuffer == null ? m_DefaultAmbientProbeBuffer : m_AmbientProbeBuffer;
             cmd.SetGlobalBuffer(
                 VividAmbientProbeDataId,
-                useDefault || m_AmbientProbeBuffer == null ? m_DefaultAmbientProbeBuffer : m_AmbientProbeBuffer);
+                activeBuffer);
         }
 
         private bool HasValidBuffers()

@@ -30,6 +30,7 @@ namespace VividRP.Runtime
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             Blitter.Initialize(resources.CoreBlitShader, resources.CoreBlitColorAndDepthShader);
             BlueNoise.Initialize();
+            Hammersley.Initialize();
             m_GPUDrivenDebugOverlayRenderer = new VividGPUDrivenDebugOverlayRenderer(resources.GPUDrivenMeshletDebugShader);
 
             m_RenderGraph = new RenderGraph(RenderGraphName);

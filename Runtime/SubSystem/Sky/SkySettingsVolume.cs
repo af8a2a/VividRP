@@ -69,5 +69,17 @@ namespace VividRP.Runtime
                 _ => 6
             };
         }
+
+        internal static int GetGeneratedCubemapResolution(SkySettingsVolume settings = null)
+        {
+            var quality = settings?.generatedCubemapQuality?.value ?? SkyGeneratedCubemapQuality.PlatformDefault;
+            return quality switch
+            {
+                SkyGeneratedCubemapQuality.Low => 16,
+                SkyGeneratedCubemapQuality.High => 64,
+                SkyGeneratedCubemapQuality.Ultra => 128,
+                _ => 32
+            };
+        }
     }
 }

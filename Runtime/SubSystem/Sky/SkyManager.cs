@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -23,7 +22,7 @@ namespace VividRP.Runtime
         private static int s_PendingSkyUpdateVersion = -1;
 
 #if UNITY_EDITOR
-        [InitializeOnLoadMethod]
+        [UnityEditor.InitializeOnLoadMethod]
 #else
         [RuntimeInitializeOnLoadMethod]
 #endif

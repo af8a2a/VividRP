@@ -36,9 +36,6 @@ namespace VividRP.Runtime
             vividTemporalData.isFirstFrame = temporalData.IsFirstFrame;
 
             
-            SubsystemPreRender?.Invoke(frameData, cmd);
-            
-            // SkyManager.Update(frameData, cmd);
             AutoExposureRuntimeManager.PrepareFrame(frameData);
             AutoExposureShaderBindings.BindFrameGlobals(cmd, frameData.Get<VividExposureData>());
 
@@ -46,6 +43,7 @@ namespace VividRP.Runtime
             var shaderVariables = cameraData.BuildShaderVariables(temporalData);
             var skyData = frameData.GetOrCreate<VividSkyData>();
             SetShaderGlobals(cmd, cameraData, shaderVariables, temporalData, skyData);
+            SubsystemPreRender?.Invoke(frameData, cmd);
         }
 
         public static CameraTemporalData GetOrCreate(Camera camera)

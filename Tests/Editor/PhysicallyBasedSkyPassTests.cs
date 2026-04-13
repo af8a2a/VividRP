@@ -12,7 +12,7 @@ using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
 
 namespace VividRP.Editor.Tests
 {
-    public class PhysicallyBasedSkyPassTests
+    public class SkyInjectionPassTests
     {
         [Test]
         public void SkyInjectionPass_RegistersDepthShadowSkyViewInputsWithColorOutput_WhenPassIsCreated()
@@ -27,12 +27,6 @@ namespace VividRP.Editor.Tests
             Assert.That(textureEntries.Single(entry => entry.Name == "Depth").Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(textureEntries.Single(entry => entry.Name == "DirectionalShadowTexture").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(textureEntries.Single(entry => entry.Name == "SkyViewLUT").Access, Is.EqualTo(AccessFlags.Read));
-        }
-
-        [Test]
-        public void LegacyPhysicallyBasedSkyPass_InheritsSkyInjectionPass()
-        {
-            Assert.That(typeof(PhysicallyBasedSkyPass).BaseType, Is.EqualTo(typeof(SkyInjectionPass)));
         }
 
         [Test]
@@ -52,14 +46,19 @@ namespace VividRP.Editor.Tests
         public void Source_UsesSkyInjectionPassForRendererDrivenSkyDrawing()
         {
             var injectionPassSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "SkyInjectionPass.cs"));
-            var legacyPassSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "PhysicallyBasedSkyPass.cs"));
+            var registrySource = File.ReadAllText(GetPackageFilePath("Editor", "RenderGraph", "GeneratedRenderPassNodes.g.cs"));
             var rendererSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSky", "PhysicallyBasedSkyRenderer.cs"));
+            var renderGraphSource = File.ReadAllText(GetProjectFilePath("Assets", "Vivid Render Graph.vrdg"));
 
             Assert.That(injectionPassSource, Does.Contain("m_SkyViewLUT = RenderGraphTexture.CreateInput(\"SkyViewLUT\", GraphicsFormat.R16G16B16A16_SFloat);"));
             Assert.That(injectionPassSource, Does.Contain("m_DirectionalShadowTexture = RenderGraphTexture.CreateInput(\"DirectionalShadowTexture\", GraphicsFormat.R16_SFloat);"));
             Assert.That(injectionPassSource, Does.Contain("SkyManager.PrepareSkyInjection("));
             Assert.That(injectionPassSource, Does.Contain("SkyManager.RenderSkyInjection(cmd);"));
-            Assert.That(legacyPassSource, Does.Contain("public class PhysicallyBasedSkyPass : SkyInjectionPass"));
+            Assert.That(registrySource, Does.Contain("internal sealed class SkyInjectionPass : RenderPassNodeData"));
+            Assert.That(registrySource, Does.Not.Contain("internal sealed class PhysicallyBasedSkyPass : RenderPassNodeData"));
+            Assert.That(renderGraphSource, Does.Contain("type: {class: SkyInjectionPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}"));
+            Assert.That(renderGraphSource, Does.Not.Contain("PhysicallyBasedSkyPass"));
+            Assert.That(renderGraphSource, Does.Not.Contain("HDRISkyPass"));
 
             Assert.That(rendererSource, Does.Contain("private const string PhysicallyBasedSkyShaderName = \"Hidden/VividRP/PhysicallyBasedSky\";"));
             Assert.That(rendererSource, Does.Contain("public void PrepareSkyRendering("));
@@ -105,6 +104,12 @@ namespace VividRP.Editor.Tests
             }
 
             return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
+        }
+
+        private static string GetProjectFilePath(params string[] relativeParts)
+        {
+            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            return Path.Combine(projectRoot, Path.Combine(relativeParts));
         }
     }
 }

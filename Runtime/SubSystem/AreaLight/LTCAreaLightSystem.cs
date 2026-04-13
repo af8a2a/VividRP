@@ -1,4 +1,5 @@
-﻿using NUnit.Framework;
+﻿using System;
+using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -93,8 +94,8 @@ namespace VividRP.Runtime
         internal static void Deinitialize()
         {
             s_Initialized = false;
-
-            FrameContextSystem.SubsystemPreRender -= Update;
+           CoreUtils.Destroy(m_LtcData);
+           FrameContextSystem.SubsystemPreRender -= Update;
         }
     }
 }

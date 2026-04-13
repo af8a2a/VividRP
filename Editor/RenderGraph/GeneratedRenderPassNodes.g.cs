@@ -117,12 +117,6 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
-    internal sealed class LTCAreaLightPreparePass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.LTCAreaLightPreparePass, VividRP.Runtime";
-    }
-
-    [Serializable]
     internal sealed class LightGridGlobalPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.LightGridGlobalPass, VividRP.Runtime";
@@ -186,6 +180,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class ShadowClassifyPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.ShadowClassifyPass, VividRP.Runtime";
+    }
+
+    [Serializable]
+    internal sealed class SkyInjectionPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.SkyInjectionPass, VividRP.Runtime";
     }
 
     [Serializable]

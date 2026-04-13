@@ -2,7 +2,6 @@ using System;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
-using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Runtime
 {
@@ -21,6 +20,7 @@ namespace VividRP.Runtime
         private static readonly int SkyCubemapId = Shader.PropertyToID("_SkyCubemap");
         private static readonly int SkyTintId = Shader.PropertyToID("_SkyTint");
         private static readonly int SkyParamId = Shader.PropertyToID("_SkyParam");
+        private static readonly int PixelCoordToViewDirWSId = Shader.PropertyToID("_PixelCoordToViewDirWS");
         private static readonly ProfilingSampler s_AmbientProbeMissingTextureSampler = new("HDRISkyRenderer.RebuildAmbientProbe (MissingTexture)");
         private static readonly ProfilingSampler s_AmbientProbeResolutionChangedSampler = new("HDRISkyRenderer.RebuildAmbientProbe (ResolutionChanged)");
         private static readonly ProfilingSampler s_AmbientProbeParametersChangedSampler = new("HDRISkyRenderer.RebuildAmbientProbe (ParametersChanged)");
@@ -29,6 +29,15 @@ namespace VividRP.Runtime
         private RenderTexture m_AmbientProbeCubemap;
         private int m_AmbientProbeBakingPass = -1;
         private int m_AmbientProbeSkyHash;
+        private RenderGraphTexture m_ColorTarget;
+        private RenderGraphTexture m_DepthTexture;
+        private Matrix4x4 m_PixelCoordToViewDirMatrix;
+        private Texture m_RenderCubemap;
+        private Color m_RenderTint = Color.white;
+        private float m_RenderExposure;
+        private float m_RenderRotation;
+        private Rect m_RenderViewport;
+        private bool m_ShouldRenderSky;
 
         public SkyType Type => SkyType.HDRI;
 
@@ -106,6 +115,60 @@ namespace VividRP.Runtime
             skyData.ambientProbeHash = skyHash;
         }
 
+        public void PrepareSkyRendering(
+            in SkyRendererContext context,
+            VividSkyData skyData,
+            RenderGraphTexture colorTarget,
+            RenderGraphTexture depthTexture,
+            RenderGraphTexture skyViewLut,
+            RenderGraphTexture directionalShadowTexture)
+        {
+            m_ColorTarget = colorTarget;
+            m_DepthTexture = depthTexture;
+            m_PixelCoordToViewDirMatrix = context.cameraData?.GetPixelCoordToViewDirWSMatrix() ?? Matrix4x4.identity;
+            m_RenderViewport = ResolveRenderViewport(context.cameraData, colorTarget);
+            m_ShouldRenderSky = m_Material != null
+                                && skyData != null
+                                && skyData.activeSkyType == SkyType.HDRI
+                                && skyData.specularCubemap != null;
+
+            if (!m_ShouldRenderSky)
+            {
+                m_RenderCubemap = null;
+                return;
+            }
+
+            m_RenderCubemap = skyData.specularCubemap;
+            m_RenderTint = skyData.tint;
+            m_RenderExposure = skyData.exposure;
+            m_RenderRotation = skyData.rotation;
+        }
+
+        public void RenderSky(CommandBuffer cmd)
+        {
+            if (!m_ShouldRenderSky
+                || cmd == null
+                || m_ColorTarget == null
+                || m_DepthTexture == null
+                || !m_ColorTarget.innerHandle.IsValid()
+                || !m_DepthTexture.innerHandle.IsValid())
+            {
+                return;
+            }
+
+            cmd.SetRenderTarget(m_ColorTarget, m_DepthTexture);
+            cmd.SetViewport(m_RenderViewport);
+
+            var properties = new MaterialPropertyBlock();
+            GetSkyParameters(m_RenderExposure, m_RenderRotation, out var intensity, out var phi);
+            properties.SetTexture(SkyCubemapId, m_RenderCubemap);
+            properties.SetColor(SkyTintId, m_RenderTint);
+            properties.SetVector(SkyParamId, new Vector4(intensity, 0.0f, Mathf.Cos(phi), Mathf.Sin(phi)));
+            properties.SetMatrix(PixelCoordToViewDirWSId, m_PixelCoordToViewDirMatrix);
+
+            CoreUtils.DrawFullScreen(cmd, m_Material, properties, 0);
+        }
+
         public void Dispose()
         {
             if (m_AmbientProbeCubemap != null)
@@ -123,6 +186,14 @@ namespace VividRP.Runtime
 
             m_AmbientProbeBakingPass = -1;
             m_AmbientProbeSkyHash = 0;
+            m_ColorTarget = null;
+            m_DepthTexture = null;
+            m_RenderCubemap = null;
+            m_RenderTint = Color.white;
+            m_RenderExposure = 0.0f;
+            m_RenderRotation = 0.0f;
+            m_RenderViewport = default;
+            m_ShouldRenderSky = false;
         }
 
         private static Cubemap GetSkyCubemap()
@@ -198,9 +269,8 @@ namespace VividRP.Runtime
             var properties = new MaterialPropertyBlock();
             properties.SetTexture(SkyCubemapId, cubemap);
             properties.SetColor(SkyTintId, tint);
-            
-            float intensity, phi;
-            HDRISkyPass.GetParameters(out intensity, out phi);
+
+            GetSkyParameters(exposure, rotation, out var intensity, out var phi);
             properties.SetVector(SkyParamId, new Vector4(intensity, 0.0f, Mathf.Cos(phi), Mathf.Sin(phi)));
 
             SkyCubemapBakingUtility.RenderSkyToCubemap(
@@ -220,6 +290,35 @@ namespace VividRP.Runtime
                 AmbientProbeRebuildReason.ParametersChanged => s_AmbientProbeParametersChangedSampler,
                 _ => s_AmbientProbeMissingTextureSampler,
             };
+        }
+
+        private static Rect ResolveRenderViewport(VividCameraData cameraData, RenderGraphTexture colorTarget)
+        {
+            var width = colorTarget?.desc?.Width ?? 0;
+            var height = colorTarget?.desc?.Height ?? 0;
+
+            if (width <= 0)
+                width = cameraData?.actualWidth > 0 ? cameraData.actualWidth : cameraData?.pixelWidth ?? 0;
+
+            if (height <= 0)
+                height = cameraData?.actualHeight > 0 ? cameraData.actualHeight : cameraData?.pixelHeight ?? 0;
+
+            if (width <= 0)
+                width = Mathf.Max(1, Screen.width);
+
+            if (height <= 0)
+                height = Mathf.Max(1, Screen.height);
+
+            return new Rect(0.0f, 0.0f, width, height);
+        }
+
+        private static void GetSkyParameters(float exposure, float rotation, out float intensity, out float phi)
+        {
+            var hdriSky = VividVolumeManagerUtility.GetHDRISkyVolume();
+            intensity = hdriSky != null
+                ? hdriSky.GetIntensityFromSettings()
+                : HDRISkyVolume.ResolveExposureMultiplier(exposure);
+            phi = -Mathf.Deg2Rad * rotation;
         }
     }
 }

@@ -1,11 +1,7 @@
-using System.Linq;
-using System.Reflection;
 using System.IO;
+using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
-using UnityEngine.Experimental.Rendering;
-using UnityEngine.Rendering;
-using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
@@ -15,75 +11,10 @@ namespace VividRP.Editor.Tests
     public class HDRISkyPassTests
     {
         [Test]
-        public void Initialize_RegistersDepthInputAndColorOutput_WhenPassIsCreated()
+        public void LegacyHDRISkyPass_InheritsSkyInjectionPass()
         {
-            IRenderPass renderPass = new HDRISkyPass();
-
-            var resources = renderPass.Initialize();
-            var textureEntries = resources.Textures.OrderBy(entry => entry.Name).ToArray();
-
-            Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[] { "Color", "Depth" }));
-
-            var colorEntry = textureEntries.Single(entry => entry.Name == "Color");
-            var depthEntry = textureEntries.Single(entry => entry.Name == "Depth");
-
-            Assert.That(colorEntry.Access, Is.EqualTo(AccessFlags.Write));
-            Assert.That(colorEntry.AttachmentIndex, Is.EqualTo(0));
-            Assert.That(colorEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_SRGB));
-
-            Assert.That(depthEntry.Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(depthEntry.AttachmentIndex, Is.EqualTo(-1));
-            Assert.That(depthEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32_SFloat));
-            Assert.That(depthEntry.Texture.desc.DepthBufferBits, Is.EqualTo(DepthBits.None));
+            Assert.That(typeof(HDRISkyPass).BaseType, Is.EqualTo(typeof(SkyInjectionPass)));
         }
-
-        [Test]
-        public void Prepare_ResizesColorAndDepthTexturesToCameraSize_WhenCameraDimensionsAreAvailable()
-        {
-            var pass = new HDRISkyPass();
-            var frameData = new ContextContainer();
-            var cameraData = frameData.GetOrCreate<VividCameraData>();
-            cameraData.actualWidth = 640;
-            cameraData.actualHeight = 360;
-
-            pass.Prepare(frameData);
-
-            AssertTextureSize(pass, "m_ColorTarget", 640, 360);
-            AssertTextureSize(pass, "m_DepthTexture", 640, 360);
-        }
-
-        [Test]
-        public void Prepare_CachesSkyDataFromFrameContext_WhenSkyDataIsAvailable()
-        {
-            var pass = new HDRISkyPass();
-            var frameData = new ContextContainer();
-            var cameraData = frameData.GetOrCreate<VividCameraData>();
-            var skyData = frameData.GetOrCreate<VividSkyData>();
-            var cubemap = new Cubemap(4, TextureFormat.RGBA32, false);
-
-            try
-            {
-                cameraData.actualWidth = 320;
-                cameraData.actualHeight = 180;
-                skyData.activeSkyType = SkyType.HDRI;
-                skyData.specularCubemap = cubemap;
-                skyData.tint = Color.red;
-                skyData.exposure = 2.0f;
-                skyData.rotation = 45.0f;
-
-                pass.Prepare(frameData);
-
-                Assert.That(GetFieldValue<Cubemap>(pass, "m_Cubemap"), Is.SameAs(cubemap));
-                Assert.That(GetFieldValue<Color>(pass, "m_Tint"), Is.EqualTo(Color.red));
-                Assert.That(GetFieldValue<float>(pass, "m_Exposure"), Is.EqualTo(2.0f));
-                Assert.That(GetFieldValue<float>(pass, "m_Rotation"), Is.EqualTo(45.0f));
-            }
-            finally
-            {
-                Object.DestroyImmediate(cubemap);
-            }
-        }
-
 
         [Test]
         public void HdriSkyExposure_UsesEvStopMultiplierSoZeroRemainsNeutral()
@@ -125,44 +56,34 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Shader_Source_AppliesPreExposureBeforeWritingSkyColor()
+        public void SkyInjection_DelegatesHdriDrawingToRenderer()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "HDRISky.shader"));
-            var passSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "HDRISkyPass.cs"));
+            var shaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "HDRISky.shader"));
+            var injectionPassSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "SkyInjectionPass.cs"));
+            var legacyPassSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "HDRISkyPass.cs"));
+            var rendererSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "HDRI", "HDRISkyRenderer.cs"));
             var frameContextSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "FrameContextSystem.cs"));
             var bindingSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureShaderBindings.cs"));
 
-            Assert.That(source, Does.Contain("Shader \"Hidden/VividRP/HDRISky\""));
-            Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl\""));
-            Assert.That(source, Does.Contain("float3 EvaluateSkyColor(float2 positionCS)"));
-            Assert.That(source, Does.Contain("return float4(VividApplyPreExposure(EvaluateSkyColor(input.positionCS.xy)), 1.0);"));
-            Assert.That(source, Does.Contain("Name \"HDRISkyBaking\""));
-            Assert.That(source, Does.Contain("float4 FragBaking(Varyings input) : SV_Target"));
-            Assert.That(source, Does.Contain("return float4(EvaluateSkyColor(input.positionCS.xy), 1.0);"));
+            Assert.That(shaderSource, Does.Contain("Shader \"Hidden/VividRP/HDRISky\""));
+            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl\""));
+            Assert.That(shaderSource, Does.Contain("return float4(VividApplyPreExposure(EvaluateSkyColor(input.positionCS.xy)), 1.0);"));
+            Assert.That(shaderSource, Does.Contain("Name \"HDRISkyBaking\""));
+            Assert.That(shaderSource, Does.Contain("return float4(EvaluateSkyColor(input.positionCS.xy), 1.0);"));
+
+            Assert.That(injectionPassSource, Does.Contain("public class SkyInjectionPass : UnsafePass"));
+            Assert.That(injectionPassSource, Does.Contain("SkyManager.PrepareSkyInjection("));
+            Assert.That(injectionPassSource, Does.Contain("SkyManager.RenderSkyInjection(cmd);"));
+            Assert.That(legacyPassSource, Does.Contain("public class HDRISkyPass : SkyInjectionPass"));
+
+            Assert.That(rendererSource, Does.Contain("public void PrepareSkyRendering("));
+            Assert.That(rendererSource, Does.Contain("public void RenderSky(CommandBuffer cmd)"));
+            Assert.That(rendererSource, Does.Contain("cmd.SetRenderTarget(m_ColorTarget, m_DepthTexture);"));
+            Assert.That(rendererSource, Does.Contain("CoreUtils.DrawFullScreen(cmd, m_Material, properties, 0);"));
+            Assert.That(rendererSource, Does.Not.Contain("HDRISkyPass.GetParameters("));
+
             Assert.That(frameContextSource, Does.Contain("AutoExposureShaderBindings.BindFrameGlobals(cmd, frameData.Get<VividExposureData>());"));
             Assert.That(bindingSource, Does.Contain("cmd.SetGlobalBuffer(PreExposureBufferId, preExposureBuffer);"));
-            Assert.That(bindingSource, Does.Contain("ResolvePreExposureBuffer(VividExposureData exposureData)"));
-            Assert.That(passSource, Does.Not.Contain("SetBuffer("));
-            Assert.That(passSource, Does.Not.Contain("EnsureDefaultPreExposureBuffer"));
-        }
-
-        private static void AssertTextureSize(HDRISkyPass pass, string fieldName, int expectedWidth, int expectedHeight)
-        {
-            var field = typeof(HDRISkyPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
-
-            Assert.That(field, Is.Not.Null);
-
-            var texture = (RenderGraphTexture)field.GetValue(pass);
-            Assert.That(texture, Is.Not.Null);
-            Assert.That(texture.desc.Width, Is.EqualTo(expectedWidth));
-            Assert.That(texture.desc.Height, Is.EqualTo(expectedHeight));
-        }
-
-        private static T GetFieldValue<T>(HDRISkyPass pass, string fieldName)
-        {
-            var field = typeof(HDRISkyPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.That(field, Is.Not.Null);
-            return (T)field.GetValue(pass);
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

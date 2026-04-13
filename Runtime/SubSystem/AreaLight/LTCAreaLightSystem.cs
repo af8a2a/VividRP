@@ -1,8 +1,8 @@
-﻿using UnityEngine;
-using UnityEngine.Assertions;
+﻿using NUnit.Framework;
+using UnityEditor;
+using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
-using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
 {
@@ -31,29 +31,25 @@ namespace VividRP.Runtime
     }
 
 
-    public class LTCAreaLightPreparePass : UnsafePass
+    public static class LTCAreaLightSystem
     {
-        Texture2DArray m_LtcData;
+        static Texture2DArray m_LtcData;
 
-        internal const int k_LtcLUTResolution = 64;
+        const int k_LtcLUTResolution = 64;
+        static bool s_Initialized;
 
-        public override void Create()
+#if UNITY_EDITOR
+        [InitializeOnLoadMethod]
+#else
+        [RuntimeInitializeOnLoadMethod]
+#endif
+        internal static void Initialize()
         {
             BuildLTCData();
+            FrameContextSystem.SubsystemPreRender += Update;
         }
 
-        public override void Dispose()
-        {
-            CoreUtils.Destroy(m_LtcData);
-        }
-        
-        
-
-        public override void Prepare(ContextContainer frameData)
-        {
-        }
-
-        private void BuildLTCData()
+        static void BuildLTCData()
         {
             m_LtcData = new Texture2DArray(k_LtcLUTResolution, k_LtcLUTResolution, (int)LTCLightingModel.Count,
                 GraphicsFormat.R16G16B16A16_SFloat,
@@ -66,8 +62,9 @@ namespace VividRP.Runtime
                     GraphicsFormat.R16G16B16A16_SFloat,
                     depth: (int)LTCLightingModel.Count, dim: TextureDimension.Tex2DArray, name: "LTC_LUT")
             };
-
+#if UNITY_EDITOR
             Assert.IsTrue(m_LtcData);
+#endif
             m_LtcData.SetPixelData(LTCAreaLightData.s_LtcMatrixData_BRDF_GGX, 0, (int)LTCLightingModel.GGX);
             m_LtcData.SetPixelData(LTCAreaLightData.s_LtcMatrixData_BRDF_Disney, 0,
                 (int)LTCLightingModel.DisneyDiffuse);
@@ -79,11 +76,25 @@ namespace VividRP.Runtime
             m_LtcData.SetPixelData(LTCAreaLightData.s_LtcMatrixData_BRDF_Ward, 0, (int)LTCLightingModel.Ward);
             m_LtcData.SetPixelData(LTCAreaLightData.s_LtcMatrixData_BRDF_OrenNayar, 0, (int)LTCLightingModel.OrenNayar);
             m_LtcData.Apply();
+
+            s_Initialized = true;
         }
 
-        public override void Record(UnsafeGraphContext context)
+
+        internal static void Update(ContextContainer frameData, CommandBuffer cmd)
         {
-            context.cmd.SetGlobalTexture("_LtcData", m_LtcData);
+            if (!s_Initialized)
+                Initialize();
+
+            cmd.SetGlobalTexture("_LtcData", m_LtcData);
+        }
+
+
+        internal static void Deinitialize()
+        {
+            s_Initialized = false;
+
+            FrameContextSystem.SubsystemPreRender -= Update;
         }
     }
 }

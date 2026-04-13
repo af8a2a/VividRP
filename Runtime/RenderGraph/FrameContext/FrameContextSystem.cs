@@ -23,6 +23,7 @@ namespace VividRP.Runtime
 
             // 1. Advance temporal state
             temporalData.Update(cameraData);
+            RTHandles.SetReferenceSize(cameraData.actualWidth, cameraData.actualHeight);
 
             // 2. Populate ContextItem for passes
             var vividTemporalData = frameData.GetOrCreate<VividTemporalData>();

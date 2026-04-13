@@ -16,6 +16,11 @@ namespace VividRP.Runtime
         private static bool s_Initialized;
         private static bool s_UpdateRequested;
         private static float s_LastUpdateTime;
+        private static ISkyRenderer s_ActiveRenderer;
+        private static ISkyRenderer s_PendingSkyRenderer;
+        private static Camera s_PendingSkyCamera;
+        private static int s_SkyUpdateVersion;
+        private static int s_PendingSkyUpdateVersion = -1;
 
 #if UNITY_EDITOR
         [InitializeOnLoadMethod]
@@ -35,6 +40,11 @@ namespace VividRP.Runtime
             s_CachedSkyData.Reset();
             s_LastUpdateTime = float.NegativeInfinity;
             s_UpdateRequested = false;
+            s_ActiveRenderer = null;
+            s_PendingSkyRenderer = null;
+            s_PendingSkyCamera = null;
+            s_SkyUpdateVersion = 0;
+            s_PendingSkyUpdateVersion = -1;
             s_Initialized = true;
 
             FrameContextSystem.SubsystemPreRender += Update;
@@ -51,6 +61,11 @@ namespace VividRP.Runtime
             s_CachedSkyData.Reset();
             s_LastUpdateTime = float.NegativeInfinity;
             s_UpdateRequested = false;
+            s_ActiveRenderer = null;
+            s_PendingSkyRenderer = null;
+            s_PendingSkyCamera = null;
+            s_SkyUpdateVersion = 0;
+            s_PendingSkyUpdateVersion = -1;
             s_Initialized = false;
 
             FrameContextSystem.SubsystemPreRender -= Update;
@@ -69,6 +84,11 @@ namespace VividRP.Runtime
             if (!s_Initialized)
                 Initialize();
 
+            s_SkyUpdateVersion++;
+            s_PendingSkyRenderer = null;
+            s_PendingSkyCamera = null;
+            s_PendingSkyUpdateVersion = -1;
+
             var skyData = frameData.GetOrCreate<VividSkyData>();
             skyData.Reset();
 
@@ -79,6 +99,7 @@ namespace VividRP.Runtime
                 && activeSkyType != SkyType.None
                 && renderer != null
                 && renderer.IsActive();
+            s_ActiveRenderer = hasActiveSky ? renderer : null;
 
             var forceRebuild = false;
             if (hasActiveSky)
@@ -107,6 +128,59 @@ namespace VividRP.Runtime
             UpdateDiffuseAmbientProbe(cmd, s_CachedSkyData, forceRebuild);
 
             skyData.CopyFrom(s_CachedSkyData);
+        }
+
+        internal static bool PrepareSkyInjection(
+            ContextContainer frameData,
+            RenderGraphTexture colorTarget,
+            RenderGraphTexture depthTexture,
+            RenderGraphTexture skyViewLut,
+            RenderGraphTexture directionalShadowTexture)
+        {
+            if (frameData == null)
+                return false;
+
+            if (!s_Initialized)
+                Initialize();
+
+            if (s_ActiveRenderer == null)
+                return false;
+
+            var skyData = frameData.GetOrCreate<VividSkyData>();
+            if (skyData.activeSkyType == SkyType.None)
+                return false;
+
+            var context = new SkyRendererContext(
+                frameData.GetOrCreate<VividCameraData>(),
+                frameData.GetOrCreate<VividLightData>());
+            var camera = context.cameraData?.camera;
+            if (ReferenceEquals(s_PendingSkyCamera, camera)
+                && s_PendingSkyUpdateVersion == s_SkyUpdateVersion)
+            {
+                return false;
+            }
+
+            s_ActiveRenderer.PrepareSkyRendering(
+                context,
+                skyData,
+                colorTarget,
+                depthTexture,
+                skyViewLut,
+                directionalShadowTexture);
+
+            s_PendingSkyRenderer = s_ActiveRenderer;
+            s_PendingSkyCamera = camera;
+            s_PendingSkyUpdateVersion = s_SkyUpdateVersion;
+            return true;
+        }
+
+        internal static void RenderSkyInjection(CommandBuffer cmd)
+        {
+            if (cmd == null || s_PendingSkyRenderer == null)
+                return;
+
+            s_PendingSkyRenderer.RenderSky(cmd);
+            s_PendingSkyRenderer = null;
         }
 
         internal static RTHandle GetSpecularCubemapHandle()

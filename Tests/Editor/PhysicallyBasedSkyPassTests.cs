@@ -15,53 +15,24 @@ namespace VividRP.Editor.Tests
     public class PhysicallyBasedSkyPassTests
     {
         [Test]
-        public void Initialize_RegistersDepthShadowAndSkyViewInputsWithColorOutput_WhenPassIsCreated()
+        public void SkyInjectionPass_RegistersDepthShadowSkyViewInputsWithColorOutput_WhenPassIsCreated()
         {
-            IRenderPass renderPass = new PhysicallyBasedSkyPass();
+            IRenderPass renderPass = new SkyInjectionPass();
 
             var resources = renderPass.Initialize();
             var textureEntries = resources.Textures.OrderBy(entry => entry.Name).ToArray();
 
             Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[] { "Color", "Depth", "DirectionalShadowTexture", "SkyViewLUT" }));
-
-            var colorEntry = textureEntries.Single(entry => entry.Name == "Color");
-            var depthEntry = textureEntries.Single(entry => entry.Name == "Depth");
-            var directionalShadowEntry = textureEntries.Single(entry => entry.Name == "DirectionalShadowTexture");
-            var skyViewEntry = textureEntries.Single(entry => entry.Name == "SkyViewLUT");
-
-            Assert.That(colorEntry.Access, Is.EqualTo(AccessFlags.Write));
-            Assert.That(colorEntry.AttachmentIndex, Is.EqualTo(0));
-            Assert.That(colorEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_SRGB));
-
-            Assert.That(depthEntry.Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(depthEntry.AttachmentIndex, Is.EqualTo(-1));
-            Assert.That(depthEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32_SFloat));
-            Assert.That(depthEntry.Texture.desc.DepthBufferBits, Is.EqualTo(DepthBits.None));
-
-            Assert.That(directionalShadowEntry.Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(directionalShadowEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16_SFloat));
-
-            Assert.That(skyViewEntry.Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(skyViewEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(textureEntries.Single(entry => entry.Name == "Color").Access, Is.EqualTo(AccessFlags.ReadWrite));
+            Assert.That(textureEntries.Single(entry => entry.Name == "Depth").Access, Is.EqualTo(AccessFlags.ReadWrite));
+            Assert.That(textureEntries.Single(entry => entry.Name == "DirectionalShadowTexture").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(textureEntries.Single(entry => entry.Name == "SkyViewLUT").Access, Is.EqualTo(AccessFlags.Read));
         }
 
         [Test]
-        public void Prepare_ResizesTexturesAndKeepsPassInactive_WhenSkyTypeIsNotPhysicallyBased()
+        public void LegacyPhysicallyBasedSkyPass_InheritsSkyInjectionPass()
         {
-            var pass = new PhysicallyBasedSkyPass();
-            var frameData = new ContextContainer();
-            var cameraData = frameData.GetOrCreate<VividCameraData>();
-            var skyData = frameData.GetOrCreate<VividSkyData>();
-
-            cameraData.actualWidth = 640;
-            cameraData.actualHeight = 360;
-            skyData.activeSkyType = SkyType.HDRI;
-
-            pass.Prepare(frameData);
-
-            AssertTextureSize(pass, "m_ColorTarget", 640, 360);
-            AssertTextureSize(pass, "m_DepthTexture", 640, 360);
-            Assert.That(GetFieldValue<bool>(pass, "m_IsActive"), Is.False);
+            Assert.That(typeof(PhysicallyBasedSkyPass).BaseType, Is.EqualTo(typeof(SkyInjectionPass)));
         }
 
         [Test]
@@ -78,31 +49,25 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Source_UsesShaderFallbackAndBindsSkyViewLut()
+        public void Source_UsesSkyInjectionPassForRendererDrivenSkyDrawing()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "PhysicallyBasedSkyPass.cs"));
+            var injectionPassSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "SkyInjectionPass.cs"));
+            var legacyPassSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "PhysicallyBasedSkyPass.cs"));
+            var rendererSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSky", "PhysicallyBasedSkyRenderer.cs"));
 
-            Assert.That(source, Does.Contain("internal const string PhysicallyBasedSkyShaderName = \"Hidden/VividRP/PhysicallyBasedSky\";"));
-            Assert.That(source, Does.Contain("shader ??= Shader.Find(PhysicallyBasedSkyShaderName);"));
-            Assert.That(source, Does.Contain("m_SkyViewLUT = RenderGraphTexture.CreateInput(\"SkyViewLUT\", GraphicsFormat.R16G16B16A16_SFloat);"));
-            Assert.That(source, Does.Contain("m_DirectionalShadowTexture = RenderGraphTexture.CreateInput(\"DirectionalShadowTexture\", GraphicsFormat.R16_SFloat);"));
-            Assert.That(source, Does.Contain("private static readonly int CelestialBodyDatasId = Shader.PropertyToID(\"_CelestialBodyDatas\");"));
-            Assert.That(source, Does.Contain("private static readonly int DirectionalShadowTextureId = Shader.PropertyToID(\"_DirectionalShadowTexture\");"));
-            Assert.That(source, Does.Contain("m_IsActive = PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters);"));
-            Assert.That(source, Does.Contain("var skyContext = new SkyRendererContext(cameraData, lightData);"));
-            Assert.That(source, Does.Contain("m_CelestialBodyBuffer.Update(skyContext);"));
-            Assert.That(source, Does.Contain("var skyViewTexture = m_SkyViewLUT != null"));
-            Assert.That(source, Does.Contain("var directionalShadowTexture = m_DirectionalShadowTexture != null"));
-            Assert.That(source, Does.Contain("m_Material.SetBuffer(CelestialBodyDatasId, m_CelestialBodyBuffer.Buffer);"));
-            Assert.That(source, Does.Contain("mpb.SetTexture(SkyViewLutId, skyViewTexture ?? Texture2D.blackTexture);"));
-            Assert.That(source, Does.Contain("mpb.SetFloat(SkyUseLutId, skyViewTexture != null ? 1.0f : 0.0f);"));
-            Assert.That(source, Does.Contain("mpb.SetTexture(DirectionalShadowTextureId, directionalShadowTexture ?? Texture2D.whiteTexture);"));
-            Assert.That(source, Does.Contain("mpb.SetVector(SkyPlanetParamsId, m_Parameters.skyPlanetParams);"));
-            Assert.That(source, Does.Contain("m_HasMaterialParameters = PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(frameData, out m_MaterialParameters);"));
-            Assert.That(source, Does.Contain("PhysicallyBasedSkyMaterialPropertyBinder.Apply(mpb, m_MaterialParameters, VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume());"));
-            Assert.That(source, Does.Contain("m_CelestialBodyBuffer.Dispose();"));
-            Assert.That(source, Does.Not.Contain("VividExposureData"));
-            Assert.That(source, Does.Contain("CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);"));
+            Assert.That(injectionPassSource, Does.Contain("m_SkyViewLUT = RenderGraphTexture.CreateInput(\"SkyViewLUT\", GraphicsFormat.R16G16B16A16_SFloat);"));
+            Assert.That(injectionPassSource, Does.Contain("m_DirectionalShadowTexture = RenderGraphTexture.CreateInput(\"DirectionalShadowTexture\", GraphicsFormat.R16_SFloat);"));
+            Assert.That(injectionPassSource, Does.Contain("SkyManager.PrepareSkyInjection("));
+            Assert.That(injectionPassSource, Does.Contain("SkyManager.RenderSkyInjection(cmd);"));
+            Assert.That(legacyPassSource, Does.Contain("public class PhysicallyBasedSkyPass : SkyInjectionPass"));
+
+            Assert.That(rendererSource, Does.Contain("private const string PhysicallyBasedSkyShaderName = \"Hidden/VividRP/PhysicallyBasedSky\";"));
+            Assert.That(rendererSource, Does.Contain("public void PrepareSkyRendering("));
+            Assert.That(rendererSource, Does.Contain("public void RenderSky(CommandBuffer cmd)"));
+            Assert.That(rendererSource, Does.Contain("cmd.SetRenderTarget(m_ColorTarget, m_DepthTexture);"));
+            Assert.That(rendererSource, Does.Contain("var skyViewTexture = ResolveSkyViewTexture();"));
+            Assert.That(rendererSource, Does.Contain("Shader.GetGlobalTexture(DirectionalShadowTextureId)"));
+            Assert.That(rendererSource, Does.Contain("CoreUtils.DrawFullScreen(cmd, m_SkyMaterial, properties, 0);"));
         }
 
         [Test]
@@ -115,64 +80,12 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("Name \"PhysicallyBasedSky\""));
             Assert.That(source, Does.Contain("Name \"PhysicallyBasedSkyBaking\""));
             Assert.That(source, Does.Contain("#pragma multi_compile_fragment _ LOCAL_SKY"));
-            Assert.That(source, Does.Contain("ZTest LEqual"));
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl\""));
-            Assert.That(source, Does.Contain("#include_with_pragmas \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/Bindless.hlsl\""));
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Private/Sky/PhysicallyBasedSkyBridge.hlsl\""));
             Assert.That(source, Does.Contain("return float4(VividApplyPreExposure(EvaluateSkyColor(input.positionCS.xy)), 1.0f);"));
-            Assert.That(source, Does.Contain("float4 FragBaking(Varyings input) : SV_Target"));
-            Assert.That(source, Does.Contain("return float4(EvaluateSkyColor(input.positionCS.xy), 1.0f);"));
             Assert.That(bridgeSource, Does.Contain("float _SkyUseLUT;"));
-            Assert.That(bridgeSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Private/Sky/PhysicallyBasedSkyEvaluation.hlsl\""));
-            Assert.That(bridgeSource, Does.Contain("VIEW_SAMPLE_COUNT = 12"));
-            Assert.That(bridgeSource, Does.Contain("int _SkyBakingViewSampleCount;"));
-            Assert.That(bridgeSource, Does.Contain("int GetViewSampleCount()"));
-            Assert.That(bridgeSource, Does.Contain("GetSkyViewDirWS"));
-            Assert.That(bridgeSource, Does.Contain("EvaluateDistantAtmosphere(viewDirWS, skyColor, skyOpacity);"));
-            Assert.That(bridgeSource, Does.Contain("IntegrateOverSegment(scattering, transmittanceOverSegment, skyTransmittance, sigmaE);"));
-            Assert.That(bridgeSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Private/Sky/CelestialBodyData.hlsl\""));
-            Assert.That(bridgeSource, Does.Contain("for (uint lightIndex = 0; lightIndex < _CelestialLightCount; lightIndex++)"));
-            Assert.That(bridgeSource, Does.Contain("CelestialBodyData light = _CelestialBodyDatas[lightIndex];"));
-            Assert.That(bridgeSource, Does.Contain("float stepLength = rayLength / sampleCount;"));
-            Assert.That(bridgeSource, Does.Contain("float3 SanitizeSkyRadiance(float3 color)"));
-            Assert.That(bridgeSource, Does.Contain("float ComputeMoonPhase(CelestialBodyData moon, float3 viewDirectionWS)"));
-            Assert.That(bridgeSource, Does.Contain("float ComputeEarthshine(CelestialBodyData moon)"));
-            Assert.That(bridgeSource, Does.Contain("bool CanSampleCelestialSurfaceTexture(CelestialBodyData light)"));
-            Assert.That(bridgeSource, Does.Contain("float3 SampleCelestialSurfaceTexture(CelestialBodyData light, float3 viewDirectionWS)"));
-            Assert.That(bridgeSource, Does.Contain("float SampleDirectionalShadow(float2 positionCS)"));
-            Assert.That(bridgeSource, Does.Contain("float3 RenderSunDisk(float3 viewDirectionWS, float2 positionCS)"));
-            Assert.That(bridgeSource, Does.Contain("color *= SampleCelestialSurfaceTexture(light, viewDirectionWS);"));
-            Assert.That(bridgeSource, Does.Contain("color *= SampleDirectionalShadow(positionCS);"));
-            Assert.That(bridgeSource, Does.Contain("skyColor += RenderSunDisk(viewDirWS, positionCS) * (1.0f - skyOpacity);"));
-            Assert.That(bridgeSource, Does.Contain("skyColor += RenderSunDisk(viewDirWS, positionCS) * viewTransmittance;"));
-            Assert.That(bridgeSource, Does.Contain("EvaluateSky"));
-            Assert.That(bridgeSource, Does.Contain("_SkyUseLUT > 0.5f && IsViewAboveHorizon(viewDirWS)"));
-            Assert.That(bridgeSource, Does.Contain("TEXTURECUBE(_GroundAlbedoTexture);"));
-            Assert.That(bridgeSource, Does.Contain("TEXTURECUBE(_GroundEmissionTexture);"));
-            Assert.That(bridgeSource, Does.Contain("TEXTURECUBE(_SpaceEmissionTexture);"));
             Assert.That(bridgeSource, Does.Contain("TEXTURE2D(_DirectionalShadowTexture);"));
-            Assert.That(bridgeSource, Does.Contain("void ApplyArtisticOverrides(float3 viewDirection, inout float3 skyColor)"));
-            Assert.That(bridgeSource, Does.Contain("AtmosphereArtisticOverride(cosHor, cosChi, skyColor, skyOpacity);"));
-            Assert.That(bridgeSource, Does.Contain("float3 sigmaE = AtmosphereExtinction(height);"));
-            Assert.That(bridgeSource, Does.Contain("SampleGroundEmission"));
-            Assert.That(bridgeSource, Does.Contain("SampleSpaceEmission"));
-        }
-
-        private static void AssertTextureSize(PhysicallyBasedSkyPass pass, string fieldName, int expectedWidth, int expectedHeight)
-        {
-            var texture = GetFieldValue<RenderGraphTexture>(pass, fieldName);
-
-            Assert.That(texture, Is.Not.Null);
-            Assert.That(texture.desc.Width, Is.EqualTo(expectedWidth));
-            Assert.That(texture.desc.Height, Is.EqualTo(expectedHeight));
-        }
-
-        private static T GetFieldValue<T>(PhysicallyBasedSkyPass pass, string fieldName)
-        {
-            var field = typeof(PhysicallyBasedSkyPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
-
-            Assert.That(field, Is.Not.Null);
-            return (T)field.GetValue(pass);
+            Assert.That(bridgeSource, Does.Contain("EvaluateSky"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

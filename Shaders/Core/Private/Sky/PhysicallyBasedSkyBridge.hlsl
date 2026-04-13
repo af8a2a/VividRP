@@ -601,7 +601,7 @@ float3 EvaluateSky(float3 directionWS, float2 positionCS)
 
         #ifdef LOCAL_SKY
         if (rayIntersectsAtmosphere)
-            EvaluatePbrAtmosphere(_PBRSkyCameraPosPS, V, tFrag, renderSunDisk, skyColor, skyOpacity);
+            EvaluatePbrAtmosphere(_WorldSpaceCameraPos, V, tFrag, renderSunDisk, skyColor, skyOpacity);
         #else
         if (lookAboveHorizon)
             EvaluateDistantAtmosphere(-V, skyColor, skyOpacity);

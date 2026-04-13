@@ -31,6 +31,7 @@ namespace VividRP.Runtime
             Blitter.Initialize(resources.CoreBlitShader, resources.CoreBlitColorAndDepthShader);
             BlueNoise.Initialize();
             Hammersley.Initialize();
+            RTHandles.Initialize(Screen.width, Screen.height);
             m_GPUDrivenDebugOverlayRenderer = new VividGPUDrivenDebugOverlayRenderer(resources.GPUDrivenMeshletDebugShader);
 
             m_RenderGraph = new RenderGraph(RenderGraphName);
@@ -213,6 +214,7 @@ namespace VividRP.Runtime
             VividGPUDrivenSystem.Shutdown();
             PassRecorder.Dispose();
             SkyManager.Deinitialize();
+            LTCAreaLightSystem.Deinitialize();
             VividVolumeManagerUtility.Deinitialize();
 
             m_RenderGraph?.Cleanup();

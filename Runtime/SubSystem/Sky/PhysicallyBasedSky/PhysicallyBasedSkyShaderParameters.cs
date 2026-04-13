@@ -131,6 +131,21 @@ namespace VividRP.Runtime
             return TryBuild(volume, context, Matrix4x4.identity, 1.0f, out parameters);
         }
 
+        internal static bool TryBuildForCamera(
+            PhysicallyBasedSkyVolume volume,
+            in SkyRendererContext context,
+            out PhysicallyBasedSkyShaderParameters parameters)
+        {
+            return TryBuild(
+                volume,
+                context,
+                context.cameraData?.camera != null
+                    ? context.cameraData.GetPixelCoordToViewDirWSMatrix()
+                    : Matrix4x4.identity,
+                1.0f,
+                out parameters);
+        }
+
         internal static bool TryBuildForAmbientProbe(
             PhysicallyBasedSkyVolume volume,
             in SkyRendererContext context,

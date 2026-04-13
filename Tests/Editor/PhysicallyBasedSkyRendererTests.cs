@@ -94,9 +94,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("Shader.GetGlobalTexture(DirectionalShadowTextureId)"));
             Assert.That(source, Does.Contain("cmd.SetRenderTarget(m_ColorTarget, m_DepthTexture);"));
             Assert.That(source, Does.Contain("CoreUtils.DrawFullScreen(cmd, m_SkyMaterial, properties, 0);"));
-            Assert.That(source, Does.Contain("SkyManager.RequestUpdate();"));
-            Assert.That(source, Does.Contain("AtmosphereLUTPass.ComputeSkyViewLutHash(m_RenderParameters, m_RenderMaterialParameters, m_RenderContext)"));
-            Assert.That(source, Does.Contain("AtmosphereLUTPass.TryGetCachedSkyViewLut(skyViewHash, out skyViewTexture)"));
+            Assert.That(source, Does.Contain("PhysicallyBasedSkyAtmosphereLutCache.ComputeSkyViewLutHash(m_RenderParameters, m_RenderMaterialParameters, m_RenderContext)"));
+            Assert.That(source, Does.Contain("SkyManager.TryGetSkyViewLut(skyViewHash, out skyViewTexture)"));
             Assert.That(source, Does.Contain("SkyCubemapBakingUtility.RenderSkyToCubemap("));
             Assert.That(source, Does.Contain("EnsureLocalSkyPrecomputation("));
 

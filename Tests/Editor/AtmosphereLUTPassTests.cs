@@ -10,12 +10,13 @@ using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
 
+#pragma warning disable CS0618
 namespace VividRP.Editor.Tests
 {
     public class AtmosphereLUTPassTests
     {
         [Test]
-        public void Initialize_RegistersSkyLutOutputsWithoutLegacyHistoryResources()
+        public void Initialize_RegistersSkyLutOutputs_WhenPassIsCreated()
         {
             IRenderPass renderPass = new AtmosphereLUTPass();
 
@@ -33,7 +34,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void AtmosphereLUTPass_InheritsFromComputePass()
+        public void AtmosphereLUTPass_RemainsComputePassCompatibilityWrapper()
         {
             Assert.That(typeof(ComputePass).IsAssignableFrom(typeof(AtmosphereLUTPass)), Is.True);
         }
@@ -45,14 +46,22 @@ namespace VividRP.Editor.Tests
 
             pass.Prepare(new ContextContainer());
 
-            AssertTexture(pass, "m_MultiScatteringLUT", AtmosphereLUTPass.MultiScatteringWidth, AtmosphereLUTPass.MultiScatteringHeight);
-            AssertTexture(pass, "m_SkyViewLUT", AtmosphereLUTPass.SkyViewWidth, AtmosphereLUTPass.SkyViewHeight);
+            AssertTexture(
+                pass,
+                "m_MultiScatteringLUT",
+                PhysicallyBasedSkyAtmosphereLutCache.MultiScatteringWidth,
+                PhysicallyBasedSkyAtmosphereLutCache.MultiScatteringHeight);
+            AssertTexture(
+                pass,
+                "m_SkyViewLUT",
+                PhysicallyBasedSkyAtmosphereLutCache.SkyViewWidth,
+                PhysicallyBasedSkyAtmosphereLutCache.SkyViewHeight);
             AssertVolumeTexture(
                 pass,
                 "m_AtmosphericScatteringLUT",
-                AtmosphereLUTPass.AtmosphericScatteringWidth,
-                AtmosphereLUTPass.AtmosphericScatteringHeight,
-                AtmosphereLUTPass.AtmosphericScatteringDepth);
+                PhysicallyBasedSkyAtmosphereLutCache.AtmosphericScatteringWidth,
+                PhysicallyBasedSkyAtmosphereLutCache.AtmosphericScatteringHeight,
+                PhysicallyBasedSkyAtmosphereLutCache.AtmosphericScatteringDepth);
         }
 
         [Test]
@@ -69,79 +78,33 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Source_UsesSkyLutGeneratorAndHdrpStyleBindings()
+        public void Source_MovesAtmosphereLutUpdatesIntoSkyManagerAndUsesImportOnlyPassWrapper()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "AtmosphereLUTPass.cs"));
+            var passSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "AtmosphereLUTPass.cs"));
+            var cacheSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSky", "PhysicallyBasedSkyAtmosphereLutCache.cs"));
+            var managerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyManager.cs"));
 
-            Assert.That(source, Does.Contain("public sealed class AtmosphereLUTPass : ComputePass"));
-            Assert.That(source, Does.Contain("m_ComputeShader = resources?.AtmosphereLUTCompute;"));
-            Assert.That(source, Does.Contain("m_MultiScatteringKernel = FindKernel(MultiScatteringKernelName);"));
-            Assert.That(source, Does.Contain("m_SkyViewKernel = FindKernel(SkyViewKernelName);"));
-            Assert.That(source, Does.Contain("m_AtmosphericScatteringCameraKernel = FindKernel(AtmosphericScatteringCameraKernelName);"));
-            Assert.That(source, Does.Contain("m_AtmosphericScatteringBlurKernel = FindKernel(AtmosphericScatteringBlurKernelName);"));
-            Assert.That(source, Does.Contain("PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters)"));
-            Assert.That(source, Does.Contain("PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(frameData, out m_MaterialParameters)"));
-            Assert.That(source, Does.Contain("var skyContext = new SkyRendererContext(cameraData, lightData);"));
-            Assert.That(source, Does.Contain("m_CelestialBodyBuffer.Update(skyContext);"));
-            Assert.That(source, Does.Contain("PhysicallyBasedSkyComputeParameterBinder.Apply(cmd, m_ComputeShader, m_Parameters, m_MaterialParameters);"));
-            Assert.That(source, Does.Contain("PassRecorder.ImportTexture(m_MultiScatteringLUT, m_CachedMultiScatteringHandle);"));
-            Assert.That(source, Does.Contain("PassRecorder.ImportTexture(m_SkyViewLUT, m_CachedSkyViewHandle);"));
-            Assert.That(source, Does.Contain("PassRecorder.ImportTexture(m_AtmosphericScatteringLUT, m_CachedAtmosphericScatteringHandle);"));
-            Assert.That(source, Does.Contain("ComputeMultiScatteringHash(m_MaterialParameters)"));
-            Assert.That(source, Does.Contain("ComputeSkyViewHash("));
-            Assert.That(source, Does.Contain("m_CelestialBodyBuffer.CelestialLightHash"));
-            Assert.That(source, Does.Contain("internal static int ComputeSkyViewLutHash("));
-            Assert.That(source, Does.Contain("in SkyRendererContext context)"));
-            Assert.That(source, Does.Contain("var celestialLightHash = PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialLightHash(context);"));
-            Assert.That(source, Does.Contain("internal static bool TryGetCachedSkyViewLut(int skyViewHash, out Texture skyViewTexture)"));
-            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_MultiScatteringKernel, MultiScatteringLutRwId, m_MultiScatteringLUT.innerHandle);"));
-            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, MultiScatteringLutId, m_MultiScatteringLUT.innerHandle);"));
-            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SkyViewKernel, SkyViewLutRwId, m_SkyViewLUT.innerHandle);"));
-            Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_SkyViewKernel, CelestialBodyDatasId, m_CelestialBodyBuffer.Buffer);"));
-            Assert.That(source, Does.Contain("PublishCachedSkyViewLut();"));
-            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam("));
-            Assert.That(source, Does.Contain("m_AtmosphericScatteringCameraKernel,"));
-            Assert.That(source, Does.Contain("AtmosphericScatteringLutRwId,"));
-            Assert.That(source, Does.Contain("m_AtmosphericScatteringLUT.innerHandle);"));
-            Assert.That(source, Does.Contain("cmd.SetComputeBufferParam("));
-            Assert.That(source, Does.Contain("CelestialBodyDatasId,"));
-            Assert.That(source, Does.Contain("m_CelestialBodyBuffer.Buffer);"));
-            Assert.That(source, Does.Not.Contain("TransmittanceKernelName"));
-            Assert.That(source, Does.Not.Contain("TransmittanceWidth"));
-            Assert.That(source, Does.Not.Contain("m_CompatibilityTransmittanceTexture"));
-            Assert.That(source, Does.Not.Contain("SkyViewLUTSelectHistoryLayer"));
-            Assert.That(source, Does.Not.Contain("SkyViewLUTStoreHistory"));
-            Assert.That(source, Does.Not.Contain("SkyViewHistory"));
-        }
+            Assert.That(passSource, Does.Contain("[System.Obsolete(\"AtmosphereLUTPass is deprecated. Atmosphere LUTs are updated by SkyManager.Update().\")]"));
+            Assert.That(passSource, Does.Contain("SkyManager.ImportMultiScatteringLut(m_MultiScatteringLUT);"));
+            Assert.That(passSource, Does.Contain("SkyManager.ImportSkyViewLut(m_SkyViewLUT);"));
+            Assert.That(passSource, Does.Contain("SkyManager.ImportAtmosphericScatteringLut(m_AtmosphericScatteringLUT);"));
+            Assert.That(passSource, Does.Not.Contain("cmd.DispatchCompute("));
 
-        [Test]
-        public void Source_ProfilesRebuildsAndReleasesPersistentResources()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "AtmosphereLUTPass.cs"));
+            Assert.That(managerSource, Does.Contain("private static readonly PhysicallyBasedSkyAtmosphereLutCache s_PhysicallyBasedSkyAtmosphereLutCache = new();"));
+            Assert.That(managerSource, Does.Contain("s_PhysicallyBasedSkyAtmosphereLutCache.Build(resources);"));
+            Assert.That(managerSource, Does.Contain("s_PhysicallyBasedSkyAtmosphereLutCache.Update(context, cmd);"));
+            Assert.That(managerSource, Does.Contain("internal static void ImportSkyViewLut(RenderGraphTexture texture)"));
+            Assert.That(managerSource, Does.Contain("internal static void ImportAtmosphericScatteringLut(RenderGraphTexture texture)"));
+            Assert.That(managerSource, Does.Contain("internal static bool TryGetSkyViewLut(int skyViewHash, out Texture skyViewTexture)"));
 
-            Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildMultiScattering (MissingTexture)"));
-            Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildMultiScattering (ParametersChanged)"));
-            Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildSkyView (MissingTexture)"));
-            Assert.That(source, Does.Contain("AtmosphereLUTPass.RebuildSkyView (ParametersChanged)"));
-            Assert.That(source, Does.Contain("AtmosphereLUTPass.RenderAtmosphericScatteringLUT"));
-            Assert.That(source, Does.Contain("ReleaseCachedLutResources();"));
-            Assert.That(source, Does.Contain("UnpublishCachedSkyViewLut();"));
-            Assert.That(source, Does.Contain("ReleaseLutResource(ref m_CachedMultiScatteringTexture, ref m_CachedMultiScatteringHandle);"));
-            Assert.That(source, Does.Contain("ReleaseLutResource(ref m_CachedSkyViewTexture, ref m_CachedSkyViewHandle);"));
-            Assert.That(source, Does.Contain("ReleaseLutResource(ref m_CachedAtmosphericScatteringTexture, ref m_CachedAtmosphericScatteringHandle);"));
-            Assert.That(source, Does.Not.Contain("ReleaseCompatibilityTransmittanceResource();"));
-        }
-
-        [Test]
-        public void Source_RemovesCompatibilityTransmittanceFallback()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "AtmosphereLUTPass.cs"));
-
-            Assert.That(source, Does.Not.Contain("m_CompatibilityTransmittanceTexture"));
-            Assert.That(source, Does.Not.Contain("m_CompatibilityTransmittanceHandle"));
-            Assert.That(source, Does.Not.Contain("TransmittanceWidth"));
-            Assert.That(source, Does.Not.Contain("TransmittanceHeight"));
-            Assert.That(source, Does.Not.Contain("TransmittanceLUT"));
+            Assert.That(cacheSource, Does.Contain("internal sealed class PhysicallyBasedSkyAtmosphereLutCache : IDisposable"));
+            Assert.That(cacheSource, Does.Contain("PhysicallyBasedSkyShaderParameterBuilder.TryBuildForCamera(volume, context, out m_Parameters)"));
+            Assert.That(cacheSource, Does.Contain("PhysicallyBasedSkyComputeParameterBinder.Apply(cmd, m_ComputeShader, m_Parameters, m_MaterialParameters);"));
+            Assert.That(cacheSource, Does.Contain("cmd.SetComputeTextureParam("));
+            Assert.That(cacheSource, Does.Contain("m_CachedSkyViewTexture"));
+            Assert.That(cacheSource, Does.Contain("m_CachedAtmosphericScatteringTexture"));
+            Assert.That(cacheSource, Does.Contain("internal static int ComputeSkyViewLutHash("));
+            Assert.That(cacheSource, Does.Contain("internal bool TryGetSkyViewLut(int skyViewHash, out Texture skyViewTexture)"));
         }
 
         [Test]
@@ -160,9 +123,6 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("RW_TEXTURE3D(float3, _AtmosphericScatteringLUT_RW);"));
             Assert.That(source, Does.Contain("for (uint i = 0; i < _CelestialLightCount; i++)"));
             Assert.That(source, Does.Contain("CelestialBodyData light = _CelestialBodyDatas[i];"));
-            Assert.That(source, Does.Not.Contain("#pragma kernel TransmittanceLUT"));
-            Assert.That(source, Does.Not.Contain("SkyViewLUTSelectHistoryLayer"));
-            Assert.That(source, Does.Not.Contain("SkyViewLUTStoreHistory"));
         }
 
         private static void AssertTexture(AtmosphereLUTPass pass, string fieldName, int expectedWidth, int expectedHeight)
@@ -221,3 +181,4 @@ namespace VividRP.Editor.Tests
         }
     }
 }
+#pragma warning restore CS0618

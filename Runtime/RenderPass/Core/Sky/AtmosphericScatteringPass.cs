@@ -179,7 +179,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             texture.desc.Dimension = TextureDimension.Tex3D;
-            texture.desc.Slices = AtmosphereLUTPass.AtmosphericScatteringDepth;
+            texture.desc.Slices = PhysicallyBasedSkyAtmosphereLutCache.AtmosphericScatteringDepth;
             texture.desc.FilterMode = FilterMode.Bilinear;
             texture.desc.WrapMode = TextureWrapMode.Clamp;
             texture.desc.UseMipMap = false;

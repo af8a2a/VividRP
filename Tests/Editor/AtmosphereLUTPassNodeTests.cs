@@ -4,6 +4,7 @@ using NUnit.Framework;
 using VividRP.Editor.RenderGraph;
 using RuntimeAtmosphereLUTPass = VividRP.Runtime.RenderPass.Core.AtmosphereLUTPass;
 
+#pragma warning disable CS0618
 namespace VividRP.Editor.Tests
 {
     public class AtmosphereLUTPassNodeTests
@@ -53,3 +54,4 @@ namespace VividRP.Editor.Tests
         }
     }
 }
+#pragma warning restore CS0618

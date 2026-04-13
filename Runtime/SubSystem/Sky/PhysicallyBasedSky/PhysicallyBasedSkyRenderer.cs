@@ -2,7 +2,6 @@ using System;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
-using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Runtime
 {
@@ -81,8 +80,6 @@ namespace VividRP.Runtime
         private int m_RuntimeSkyHash;
         private int m_RuntimeSkyViewSampleCount;
         private int m_AmbientProbeSkyHash;
-        private bool m_HasPendingSkyViewLutRebake;
-        private int m_PendingSkyViewLutHash;
         private RenderGraphTexture m_ColorTarget;
         private RenderGraphTexture m_DepthTexture;
         private RenderGraphTexture m_SkyViewLut;
@@ -325,8 +322,6 @@ namespace VividRP.Runtime
             m_RuntimeSkyHash = 0;
             m_RuntimeSkyViewSampleCount = 0;
             m_AmbientProbeSkyHash = 0;
-            m_HasPendingSkyViewLutRebake = false;
-            m_PendingSkyViewLutHash = 0;
             m_ColorTarget = null;
             m_DepthTexture = null;
             m_SkyViewLut = null;
@@ -543,23 +538,9 @@ namespace VividRP.Runtime
 
             var hasMaterialParameters = PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(volume, context, out var materialParameters);
             var skyViewLutHash = hasMaterialParameters
-                ? AtmosphereLUTPass.ComputeSkyViewLutHash(parameters, materialParameters, context)
+                ? PhysicallyBasedSkyAtmosphereLutCache.ComputeSkyViewLutHash(parameters, materialParameters, context)
                 : 0;
-            var useSkyViewLut = AtmosphereLUTPass.TryGetCachedSkyViewLut(skyViewLutHash, out var skyViewLut) &&
-                                hasMaterialParameters;
-            if (useSkyViewLut)
-            {
-                m_HasPendingSkyViewLutRebake = false;
-                m_PendingSkyViewLutHash = 0;
-            }
-            else if (hasMaterialParameters
-                     && CanUseSkyViewLut()
-                     && (!m_HasPendingSkyViewLutRebake || m_PendingSkyViewLutHash != skyViewLutHash))
-            {
-                SkyManager.RequestUpdate();
-                m_HasPendingSkyViewLutRebake = true;
-                m_PendingSkyViewLutHash = skyViewLutHash;
-            }
+            var useSkyViewLut = SkyManager.TryGetSkyViewLut(skyViewLutHash, out var skyViewLut) && hasMaterialParameters;
 
             properties = new MaterialPropertyBlock();
             properties.SetFloat(SkyUseLutId, useSkyViewLut ? 1.0f : 0.0f);
@@ -596,11 +577,6 @@ namespace VividRP.Runtime
             return true;
         }
 
-        private static bool CanUseSkyViewLut()
-        {
-            return PipelineResourceManager.Get<VividRPCoreResources>()?.AtmosphereLUTCompute != null;
-        }
-
         private bool EnsureLocalSkyPrecomputation(
             PhysicallyBasedSkyVolume volume,
             in SkyRendererContext context,
@@ -625,7 +601,12 @@ namespace VividRP.Runtime
             PhysicallyBasedSkyComputeParameterBinder.Apply(cmd, m_InScatteredRadiancePrecomputationCompute, skyParameters, materialParameters);
 
             cmd.SetComputeTextureParam(m_AtmosphereLutCompute, m_MultiScatteringKernel, MultiScatteringLutRwId, m_MultiScatteringLut);
-            cmd.DispatchCompute(m_AtmosphereLutCompute, m_MultiScatteringKernel, AtmosphereLUTPass.MultiScatteringWidth, AtmosphereLUTPass.MultiScatteringHeight, 1);
+            cmd.DispatchCompute(
+                m_AtmosphereLutCompute,
+                m_MultiScatteringKernel,
+                PhysicallyBasedSkyAtmosphereLutCache.MultiScatteringWidth,
+                PhysicallyBasedSkyAtmosphereLutCache.MultiScatteringHeight,
+                1);
 
             cmd.SetComputeTextureParam(m_InScatteredRadiancePrecomputationCompute, m_InScatteredRadiancePrecomputationKernel, MultiScatteringLutId, m_MultiScatteringLut);
             cmd.SetComputeTextureParam(m_InScatteredRadiancePrecomputationCompute, m_InScatteredRadiancePrecomputationKernel, AirSingleScatteringTableId,
@@ -651,7 +632,11 @@ namespace VividRP.Runtime
 
         private void EnsureLocalSkyPrecomputationResources()
         {
-            Ensure2DRenderTexture(ref m_MultiScatteringLut, AtmosphereLUTPass.MultiScatteringWidth, AtmosphereLUTPass.MultiScatteringHeight, "VividPbrSky_MultiScatteringLUT");
+            Ensure2DRenderTexture(
+                ref m_MultiScatteringLut,
+                PhysicallyBasedSkyAtmosphereLutCache.MultiScatteringWidth,
+                PhysicallyBasedSkyAtmosphereLutCache.MultiScatteringHeight,
+                "VividPbrSky_MultiScatteringLUT");
             Ensure2DRenderTexture(ref m_GroundIrradianceTable, GroundIrradianceTableSize, 1, "VividPbrSky_GroundIrradiance");
             Ensure3DRenderTexture(ref m_AirSingleScatteringTable, InScatteredRadianceTableSizeX, InScatteredRadianceTableSizeY,
                 InScatteredRadianceTableSizeZ * InScatteredRadianceTableSizeW, "VividPbrSky_AirSingleScattering");
@@ -774,8 +759,8 @@ namespace VividRP.Runtime
             if (skyViewTexture != null || !m_HasRenderMaterialParameters)
                 return skyViewTexture;
 
-            var skyViewHash = AtmosphereLUTPass.ComputeSkyViewLutHash(m_RenderParameters, m_RenderMaterialParameters, m_RenderContext);
-            return AtmosphereLUTPass.TryGetCachedSkyViewLut(skyViewHash, out skyViewTexture)
+            var skyViewHash = PhysicallyBasedSkyAtmosphereLutCache.ComputeSkyViewLutHash(m_RenderParameters, m_RenderMaterialParameters, m_RenderContext);
+            return SkyManager.TryGetSkyViewLut(skyViewHash, out skyViewTexture)
                 ? skyViewTexture
                 : null;
         }

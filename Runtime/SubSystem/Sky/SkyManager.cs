@@ -10,6 +10,7 @@ namespace VividRP.Runtime
         private static readonly Dictionary<SkyType, ISkyRenderer> s_Renderers = new();
         private static readonly VividSkyData s_CachedSkyData = new();
         private static readonly SkyAmbientProbeConvolution s_AmbientProbeConvolution = new();
+        private static readonly PhysicallyBasedSkyAtmosphereLutCache s_PhysicallyBasedSkyAtmosphereLutCache = new();
         private static readonly SkySpecularCache s_SpecularCache = new();
 
         private static bool s_Initialized;
@@ -35,6 +36,7 @@ namespace VividRP.Runtime
             RegisterRenderer(new HDRISkyRenderer(), resources);
             RegisterRenderer(new PhysicallyBasedSkyRenderer(), resources);
             s_AmbientProbeConvolution.Build(resources);
+            s_PhysicallyBasedSkyAtmosphereLutCache.Build(resources);
             s_SpecularCache.Build(resources);
             s_CachedSkyData.Reset();
             s_LastUpdateTime = float.NegativeInfinity;
@@ -55,6 +57,7 @@ namespace VividRP.Runtime
                 renderer.Dispose();
 
             s_AmbientProbeConvolution.Cleanup();
+            s_PhysicallyBasedSkyAtmosphereLutCache.Dispose();
             s_SpecularCache.Dispose();
             s_Renderers.Clear();
             s_CachedSkyData.Reset();
@@ -100,12 +103,15 @@ namespace VividRP.Runtime
                 && renderer.IsActive();
             s_ActiveRenderer = hasActiveSky ? renderer : null;
 
+            var context = new SkyRendererContext(
+                frameData.GetOrCreate<VividCameraData>(),
+                frameData.GetOrCreate<VividLightData>());
+            if (activeSkyType == SkyType.PhysicallyBased)
+                s_PhysicallyBasedSkyAtmosphereLutCache.Update(context, cmd);
+
             var forceRebuild = false;
             if (hasActiveSky)
             {
-                var context = new SkyRendererContext(
-                    frameData.GetOrCreate<VividCameraData>(),
-                    frameData.GetOrCreate<VividLightData>());
                 var skyHash = renderer.GetSkyHash(context);
 
                 if (NeedsUpdate(activeSkyType, skySettings, skyHash, out forceRebuild))
@@ -213,6 +219,29 @@ namespace VividRP.Runtime
                 PassRecorder.ImportTexture(texture, handle);
         }
 
+        internal static void ImportMultiScatteringLut(RenderGraphTexture texture)
+        {
+            ImportAtmosphereLutTexture(texture, s_PhysicallyBasedSkyAtmosphereLutCache.MultiScatteringHandle);
+        }
+
+        internal static void ImportSkyViewLut(RenderGraphTexture texture)
+        {
+            ImportAtmosphereLutTexture(texture, s_PhysicallyBasedSkyAtmosphereLutCache.SkyViewHandle);
+        }
+
+        internal static void ImportAtmosphericScatteringLut(RenderGraphTexture texture)
+        {
+            ImportAtmosphereLutTexture(texture, s_PhysicallyBasedSkyAtmosphereLutCache.AtmosphericScatteringHandle);
+        }
+
+        internal static bool TryGetSkyViewLut(int skyViewHash, out Texture skyViewTexture)
+        {
+            if (!s_Initialized)
+                Initialize();
+
+            return s_PhysicallyBasedSkyAtmosphereLutCache.TryGetSkyViewLut(skyViewHash, out skyViewTexture);
+        }
+
         private static bool NeedsUpdate(SkyType skyType, SkySettingsVolume skySettings, int skyHash, out bool forceRebuild)
         {
             forceRebuild = false;
@@ -277,6 +306,14 @@ namespace VividRP.Runtime
             }
 
             s_AmbientProbeConvolution.BindGlobalBuffer(cmd, useDefaultAmbientProbe);
+        }
+
+        private static void ImportAtmosphereLutTexture(RenderGraphTexture texture, RTHandle handle)
+        {
+            if (texture == null || handle == null || !PassRecorder.IsPassTextureImportActive)
+                return;
+
+            PassRecorder.ImportTexture(texture, handle);
         }
     }
 }

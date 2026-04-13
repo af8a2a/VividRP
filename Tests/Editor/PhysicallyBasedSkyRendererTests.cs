@@ -115,6 +115,19 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("private Texture ResolveSkyViewTexture()"));
         }
 
+        [Test]
+        public void Source_ReusesRuntimeCubemapBeforeRebuildingAmbientProbe()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSky", "PhysicallyBasedSkyRenderer.cs"));
+
+            Assert.That(source, Does.Contain("private bool TryCopyRuntimeCubemapToAmbientProbe("));
+            Assert.That(source, Does.Contain("cmd.CopyTexture(m_RuntimeSkyCubemap, m_AmbientProbeCubemap);"));
+            Assert.That(source, Does.Contain("if (TryCopyRuntimeCubemapToAmbientProbe("));
+            Assert.That(source, Does.Contain("|| RebuildAmbientProbeCubemap(volume, context, cmd, generatedCubemapViewSampleCount))"));
+            Assert.That(source, Does.Contain("|| m_RuntimeSkyHash != skyHash"));
+            Assert.That(source, Does.Contain("|| m_RuntimeSkyViewSampleCount != viewSampleCount)"));
+        }
+
         private static string GetPackageFilePath(params string[] relativeParts)
         {
             var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));

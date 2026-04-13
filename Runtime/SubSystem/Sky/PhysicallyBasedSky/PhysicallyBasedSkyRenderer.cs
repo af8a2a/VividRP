@@ -187,8 +187,15 @@ namespace VividRP.Runtime
                 EnsureAmbientProbeCubemap(generatedCubemapResolution);
                 using (new ProfilingScope(cmd, GetAmbientProbeRebuildSampler(ambientProbeRebuildReason)))
                 {
-                    if (RebuildAmbientProbeCubemap(volume, context, cmd, generatedCubemapViewSampleCount))
+                    if (TryCopyRuntimeCubemapToAmbientProbe(
+                            cmd,
+                            skyHash,
+                            generatedCubemapResolution,
+                            generatedCubemapViewSampleCount)
+                        || RebuildAmbientProbeCubemap(volume, context, cmd, generatedCubemapViewSampleCount))
+                    {
                         m_AmbientProbeSkyHash = hash;
+                    }
                 }
             }
 
@@ -519,6 +526,25 @@ namespace VividRP.Runtime
                 m_SkyMaterial,
                 properties,
                 m_SkyBakingPass);
+            return true;
+        }
+
+        private bool TryCopyRuntimeCubemapToAmbientProbe(
+            CommandBuffer cmd,
+            int skyHash,
+            int resolution,
+            int viewSampleCount)
+        {
+            if (cmd == null
+                || !IsCubemapValid(m_RuntimeSkyCubemap, resolution)
+                || !IsCubemapValid(m_AmbientProbeCubemap, resolution)
+                || m_RuntimeSkyHash != skyHash
+                || m_RuntimeSkyViewSampleCount != viewSampleCount)
+            {
+                return false;
+            }
+
+            cmd.CopyTexture(m_RuntimeSkyCubemap, m_AmbientProbeCubemap);
             return true;
         }
 

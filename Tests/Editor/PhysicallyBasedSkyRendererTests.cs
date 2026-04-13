@@ -149,6 +149,17 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("private bool HasLocalSkyPrecomputationTextures()"));
         }
 
+        [Test]
+        public void Source_UsesPlanetRelativeCameraPositionForRealtimeLocalSkyShader()
+        {
+            var shaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "PhysicallyBasedSkyBridge.hlsl"));
+
+            Assert.That(shaderSource, Does.Contain("const float3 O = _SkyCameraPositionPS.xyz;"));
+            Assert.That(shaderSource, Does.Contain("EvaluatePbrAtmosphere(_SkyCameraPositionPS.xyz, V, tFrag, renderSunDisk, skyColor, skyOpacity);"));
+            Assert.That(shaderSource, Does.Not.Contain("const float3 O = _WorldSpaceCameraPos;"));
+            Assert.That(shaderSource, Does.Not.Contain("EvaluatePbrAtmosphere(_WorldSpaceCameraPos, V, tFrag, renderSunDisk, skyColor, skyOpacity);"));
+        }
+
         private static string GetPackageFilePath(params string[] relativeParts)
         {
             var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));

@@ -511,7 +511,7 @@ float3 EvaluateSky(float3 directionWS, float2 positionCS)
         float3 N; float r; // These params correspond to the entry point
 
     #ifdef LOCAL_SKY
-        const float3 O = _WorldSpaceCameraPos;
+        const float3 O = _SkyCameraPositionPS.xyz;
 
         float tEntry = IntersectAtmosphere(O, V, N, r).x;
         float tExit  = IntersectAtmosphere(O, V, N, r).y;
@@ -601,7 +601,7 @@ float3 EvaluateSky(float3 directionWS, float2 positionCS)
 
         #ifdef LOCAL_SKY
         if (rayIntersectsAtmosphere)
-            EvaluatePbrAtmosphere(_WorldSpaceCameraPos, V, tFrag, renderSunDisk, skyColor, skyOpacity);
+            EvaluatePbrAtmosphere(_SkyCameraPositionPS.xyz, V, tFrag, renderSunDisk, skyColor, skyOpacity);
         #else
         if (lookAboveHorizon)
             EvaluateDistantAtmosphere(-V, skyColor, skyOpacity);

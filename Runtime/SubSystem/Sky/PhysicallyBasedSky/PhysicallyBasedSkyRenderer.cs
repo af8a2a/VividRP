@@ -80,6 +80,8 @@ namespace VividRP.Runtime
         private int m_RuntimeSkyHash;
         private int m_RuntimeSkyViewSampleCount;
         private int m_AmbientProbeSkyHash;
+        private int m_LocalSkyPrecomputationHash;
+        private bool m_HasLocalSkyPrecomputation;
         private RenderGraphTexture m_ColorTarget;
         private RenderGraphTexture m_DepthTexture;
         private RenderGraphTexture m_SkyViewLut;
@@ -292,6 +294,17 @@ namespace VividRP.Runtime
             if (m_HasRenderMaterialParameters)
                 PhysicallyBasedSkyMaterialPropertyBinder.Apply(properties, m_RenderMaterialParameters, m_RenderVolume);
 
+            var useLocalSkyPrecomputation = m_HasRenderMaterialParameters
+                                            && TryPrepareLocalSkyPrecomputation(
+                                                m_RenderVolume,
+                                                m_RenderContext,
+                                                cmd,
+                                                m_RenderParameters,
+                                                m_RenderMaterialParameters);
+            CoreUtils.SetKeyword(m_SkyMaterial, "LOCAL_SKY", useLocalSkyPrecomputation);
+            if (useLocalSkyPrecomputation)
+                ApplyLocalSkyPrecomputationTextures(properties);
+
             CoreUtils.DrawFullScreen(cmd, m_SkyMaterial, properties, 0);
         }
 
@@ -329,6 +342,8 @@ namespace VividRP.Runtime
             m_RuntimeSkyHash = 0;
             m_RuntimeSkyViewSampleCount = 0;
             m_AmbientProbeSkyHash = 0;
+            m_LocalSkyPrecomputationHash = 0;
+            m_HasLocalSkyPrecomputation = false;
             m_ColorTarget = null;
             m_DepthTexture = null;
             m_SkyViewLut = null;
@@ -587,20 +602,55 @@ namespace VividRP.Runtime
             m_CelestialBodyBuffer.Update(context);
             m_SkyMaterial.SetBuffer(CelestialBodyDatasId, m_CelestialBodyBuffer.Buffer);
             var useLocalSkyPrecomputation = hasMaterialParameters
-                                            && EnsureLocalSkyPrecomputation(volume, context, cmd, parameters, materialParameters);
+                                            && TryPrepareLocalSkyPrecomputation(volume, context, cmd, parameters, materialParameters);
             CoreUtils.SetKeyword(m_SkyMaterial, "LOCAL_SKY", useLocalSkyPrecomputation);
             if (useLocalSkyPrecomputation)
-            {
-                properties.SetTexture(GroundIrradianceTextureId, m_GroundIrradianceTable);
-                properties.SetTexture(AirSingleScatteringTextureId, m_AirSingleScatteringTable);
-                properties.SetTexture(AerosolSingleScatteringTextureId, m_AerosolSingleScatteringTable);
-                properties.SetTexture(MultipleScatteringTextureId, m_MultipleScatteringTable);
-            }
+                ApplyLocalSkyPrecomputationTextures(properties);
 
             if (hasMaterialParameters)
                 PhysicallyBasedSkyMaterialPropertyBinder.Apply(properties, materialParameters, volume);
 
             return true;
+        }
+
+        private bool TryPrepareLocalSkyPrecomputation(
+            PhysicallyBasedSkyVolume volume,
+            in SkyRendererContext context,
+            CommandBuffer cmd,
+            in PhysicallyBasedSkyShaderParameters skyParameters,
+            in PhysicallyBasedSkyMaterialParameters materialParameters)
+        {
+            if (volume == null
+                || cmd == null)
+            {
+                return false;
+            }
+
+            var localSkyPrecomputationHash = ComputeLocalSkyPrecomputationHash(skyParameters, materialParameters);
+            if (m_HasLocalSkyPrecomputation
+                && m_LocalSkyPrecomputationHash == localSkyPrecomputationHash
+                && HasLocalSkyPrecomputationTextures())
+            {
+                return true;
+            }
+
+            if (!EnsureLocalSkyPrecomputation(volume, context, cmd, skyParameters, materialParameters))
+                return false;
+
+            m_LocalSkyPrecomputationHash = localSkyPrecomputationHash;
+            m_HasLocalSkyPrecomputation = true;
+            return true;
+        }
+
+        private void ApplyLocalSkyPrecomputationTextures(MaterialPropertyBlock properties)
+        {
+            if (properties == null)
+                return;
+
+            properties.SetTexture(GroundIrradianceTextureId, m_GroundIrradianceTable);
+            properties.SetTexture(AirSingleScatteringTextureId, m_AirSingleScatteringTable);
+            properties.SetTexture(AerosolSingleScatteringTextureId, m_AerosolSingleScatteringTable);
+            properties.SetTexture(MultipleScatteringTextureId, m_MultipleScatteringTable);
         }
 
         private bool EnsureLocalSkyPrecomputation(
@@ -656,6 +706,15 @@ namespace VividRP.Runtime
             return true;
         }
 
+        private bool HasLocalSkyPrecomputationTextures()
+        {
+            return IsTextureCreated(m_GroundIrradianceTable)
+                   && IsTextureCreated(m_AirSingleScatteringTable)
+                   && IsTextureCreated(m_AerosolSingleScatteringTable)
+                   && IsTextureCreated(m_MultipleScatteringTable)
+                   && IsTextureCreated(m_MultiScatteringLut);
+        }
+
         private void EnsureLocalSkyPrecomputationResources()
         {
             Ensure2DRenderTexture(
@@ -679,6 +738,79 @@ namespace VividRP.Runtime
             ReleaseRenderTexture(ref m_AerosolSingleScatteringTable);
             ReleaseRenderTexture(ref m_MultipleScatteringTable);
             ReleaseRenderTexture(ref m_MultiScatteringLut);
+            m_HasLocalSkyPrecomputation = false;
+            m_LocalSkyPrecomputationHash = 0;
+        }
+
+        private static int ComputeLocalSkyPrecomputationHash(
+            in PhysicallyBasedSkyShaderParameters skyParameters,
+            in PhysicallyBasedSkyMaterialParameters materialParameters)
+        {
+            unchecked
+            {
+                var hash = 17;
+                hash = AppendHash(hash, skyParameters.skySunDirection);
+                hash = AppendHash(hash, skyParameters.skySunColor);
+                hash = AppendHash(hash, materialParameters.planetCenterRadius);
+                hash = AppendHash(hash, materialParameters.planetUpAltitude);
+                hash = AppendHash(hash, materialParameters.airSeaLevelExtinction);
+                hash = AppendHash(hash, materialParameters.airSeaLevelScattering);
+                hash = AppendHash(hash, materialParameters.aerosolSeaLevelScattering);
+                hash = AppendHash(hash, materialParameters.ozoneSeaLevelExtinction);
+                hash = AppendHash(hash, materialParameters.groundAlbedoPlanetRadius);
+                hash = AppendHash(hash, materialParameters.horizonTint);
+                hash = AppendHash(hash, materialParameters.zenithTint);
+                hash = AppendHash(hash, materialParameters.atmosphericRadius);
+                hash = AppendHash(hash, materialParameters.aerosolAnisotropy);
+                hash = AppendHash(hash, materialParameters.aerosolPhasePartConstant);
+                hash = AppendHash(hash, materialParameters.aerosolSeaLevelExtinction);
+                hash = AppendHash(hash, materialParameters.airDensityFalloff);
+                hash = AppendHash(hash, materialParameters.airScaleHeight);
+                hash = AppendHash(hash, materialParameters.aerosolDensityFalloff);
+                hash = AppendHash(hash, materialParameters.aerosolScaleHeight);
+                hash = AppendHash(hash, materialParameters.ozoneScaleOffset);
+                hash = AppendHash(hash, materialParameters.ozoneLayerStart);
+                hash = AppendHash(hash, materialParameters.ozoneLayerEnd);
+                hash = AppendHash(hash, materialParameters.intensityMultiplier);
+                hash = AppendHash(hash, materialParameters.colorSaturation);
+                hash = AppendHash(hash, materialParameters.alphaSaturation);
+                hash = AppendHash(hash, materialParameters.alphaMultiplier);
+                hash = AppendHash(hash, materialParameters.horizonZenithShiftPower);
+                hash = AppendHash(hash, materialParameters.horizonZenithShiftScale);
+                hash = AppendHash(hash, materialParameters.celestialLightCount);
+                hash = AppendHash(hash, materialParameters.celestialBodyCount);
+                hash = AppendHash(hash, materialParameters.atmosphericDepth);
+                hash = AppendHash(hash, materialParameters.rcpAtmosphericDepth);
+                hash = AppendHash(hash, materialParameters.celestialLightExposure);
+                hash = AppendHash(hash, materialParameters.volumetricCloudsBottomAltitude);
+                hash = AppendHash(hash, materialParameters.renderSunDisk);
+                return hash;
+            }
+        }
+
+        private static int AppendHash(int hash, int value)
+        {
+            unchecked
+            {
+                return hash * 31 + value;
+            }
+        }
+
+        private static int AppendHash(int hash, float value)
+        {
+            return AppendHash(hash, value.GetHashCode());
+        }
+
+        private static int AppendHash(int hash, Vector4 value)
+        {
+            unchecked
+            {
+                hash = AppendHash(hash, value.x);
+                hash = AppendHash(hash, value.y);
+                hash = AppendHash(hash, value.z);
+                hash = AppendHash(hash, value.w);
+                return hash;
+            }
         }
 
         private static void Ensure2DRenderTexture(ref RenderTexture texture, int width, int height, string name)
@@ -746,6 +878,11 @@ namespace VividRP.Runtime
             texture.Release();
             CoreUtils.Destroy(texture);
             texture = null;
+        }
+
+        private static bool IsTextureCreated(RenderTexture texture)
+        {
+            return texture != null && texture.IsCreated();
         }
 
         private static bool IsCubemapValid(RenderTexture texture, int resolution)

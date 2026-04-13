@@ -94,6 +94,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("Shader.GetGlobalTexture(DirectionalShadowTextureId)"));
             Assert.That(source, Does.Contain("cmd.SetRenderTarget(m_ColorTarget, m_DepthTexture);"));
             Assert.That(source, Does.Contain("CoreUtils.DrawFullScreen(cmd, m_SkyMaterial, properties, 0);"));
+            Assert.That(source, Does.Contain("TryPrepareLocalSkyPrecomputation("));
+            Assert.That(source, Does.Contain("ApplyLocalSkyPrecomputationTextures(properties);"));
+            Assert.That(source, Does.Contain("CoreUtils.SetKeyword(m_SkyMaterial, \"LOCAL_SKY\", useLocalSkyPrecomputation);"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyAtmosphereLutCache.ComputeSkyViewLutHash(m_RenderParameters, m_RenderMaterialParameters, m_RenderContext)"));
             Assert.That(source, Does.Contain("SkyManager.TryGetSkyViewLut(skyViewHash, out skyViewTexture)"));
             Assert.That(source, Does.Contain("SkyCubemapBakingUtility.RenderSkyToCubemap("));
@@ -126,6 +129,24 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("|| RebuildAmbientProbeCubemap(volume, context, cmd, generatedCubemapViewSampleCount))"));
             Assert.That(source, Does.Contain("|| m_RuntimeSkyHash != skyHash"));
             Assert.That(source, Does.Contain("|| m_RuntimeSkyViewSampleCount != viewSampleCount)"));
+        }
+
+        [Test]
+        public void Source_BindsRealtimeLocalSkyTexturesThroughRendererCache()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSky", "PhysicallyBasedSkyRenderer.cs"));
+
+            Assert.That(source, Does.Contain("private int m_LocalSkyPrecomputationHash;"));
+            Assert.That(source, Does.Contain("private bool m_HasLocalSkyPrecomputation;"));
+            Assert.That(source, Does.Contain("private bool TryPrepareLocalSkyPrecomputation("));
+            Assert.That(source, Does.Contain("&& m_LocalSkyPrecomputationHash == localSkyPrecomputationHash"));
+            Assert.That(source, Does.Contain("&& HasLocalSkyPrecomputationTextures()"));
+            Assert.That(source, Does.Contain("private void ApplyLocalSkyPrecomputationTextures(MaterialPropertyBlock properties)"));
+            Assert.That(source, Does.Contain("properties.SetTexture(GroundIrradianceTextureId, m_GroundIrradianceTable);"));
+            Assert.That(source, Does.Contain("properties.SetTexture(AirSingleScatteringTextureId, m_AirSingleScatteringTable);"));
+            Assert.That(source, Does.Contain("properties.SetTexture(AerosolSingleScatteringTextureId, m_AerosolSingleScatteringTable);"));
+            Assert.That(source, Does.Contain("properties.SetTexture(MultipleScatteringTextureId, m_MultipleScatteringTable);"));
+            Assert.That(source, Does.Contain("private bool HasLocalSkyPrecomputationTextures()"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

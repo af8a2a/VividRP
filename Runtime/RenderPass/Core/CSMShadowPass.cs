@@ -20,6 +20,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_DepthBias;
         private Matrix4x4 m_CameraViewMatrix = Matrix4x4.identity;
         private Matrix4x4 m_CameraProjMatrix = Matrix4x4.identity;
+        private ShaderVariablesGlobal m_CameraShaderGlobals;
 
         private readonly Matrix4x4[] m_ViewMatrices = new Matrix4x4[VividShadowData.MaxCascadeCount];
         private readonly Matrix4x4[] m_ProjMatrices = new Matrix4x4[VividShadowData.MaxCascadeCount];
@@ -56,6 +57,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DepthBias = 0.0f;
             m_CameraViewMatrix = Matrix4x4.identity;
             m_CameraProjMatrix = Matrix4x4.identity;
+            m_CameraShaderGlobals = default;
 
             var shadowData = frameData.GetOrCreate<VividShadowData>();
             shadowData.Reset();
@@ -80,10 +82,13 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var renderingData = frameData.GetOrCreate<VividRenderingData>();
             var cameraData = frameData.GetOrCreate<VividCameraData>();
+            var temporalData = FrameContextSystem.GetOrCreate(cameraData.camera);
+            var skyData = frameData.GetOrCreate<VividSkyData>();
             m_CullingResults = renderingData.cullingResults;
             m_RenderContext = renderingData.context;
             m_CameraViewMatrix = cameraData.GetViewMatrix();
             m_CameraProjMatrix = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true);
+            m_CameraShaderGlobals = ShaderVariablesGlobal.Create(cameraData.BuildShaderVariables(temporalData), temporalData, skyData);
             m_MainLightVisibleIndex = lightData.mainLightIndex;
 
             m_CascadeCount = Mathf.Clamp(csmSettings.cascadeCount.value, 1, VividShadowData.MaxCascadeCount);
@@ -182,10 +187,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 {
                     int offsetX = (cascadeIndex % AtlasGridSize) * m_CascadeResolution;
                     int offsetY = (cascadeIndex / AtlasGridSize) * m_CascadeResolution;
+                    var gpuProjMatrix = GL.GetGPUProjectionMatrix(m_ProjMatrices[cascadeIndex], true);
+                    var cascadeShaderGlobals = BuildCascadeShaderGlobals(cascadeIndex, gpuProjMatrix);
 
                     nativeCmd.SetViewport(new Rect(offsetX, offsetY, m_CascadeResolution, m_CascadeResolution));
                     nativeCmd.EnableScissorRect(new Rect(offsetX, offsetY, m_CascadeResolution, m_CascadeResolution));
-                    nativeCmd.SetViewProjectionMatrices(m_ViewMatrices[cascadeIndex], m_ProjMatrices[cascadeIndex]);
+                    nativeCmd.SetViewProjectionMatrices(m_ViewMatrices[cascadeIndex], gpuProjMatrix);
+                    ConstantBuffer.PushGlobal(nativeCmd, cascadeShaderGlobals, ShaderVariablesGlobal.ConstantBufferShaderId);
 
                     var settings = m_ShadowDrawSettings[cascadeIndex];
                     var rendererList = m_RenderContext.CreateShadowRendererList(ref settings);
@@ -194,8 +202,46 @@ namespace VividRP.Runtime.RenderPass.Core
 
                 nativeCmd.SetGlobalDepthBias(0.0f, 0.0f);
                 nativeCmd.DisableScissorRect();
+                ConstantBuffer.PushGlobal(nativeCmd, m_CameraShaderGlobals, ShaderVariablesGlobal.ConstantBufferShaderId);
                 nativeCmd.SetViewProjectionMatrices(m_CameraViewMatrix, m_CameraProjMatrix);
             }
+        }
+
+        // Shadow caster shaders read Vivid's redirected global matrices rather than Unity's transient view/projection state.
+        private ShaderVariablesGlobal BuildCascadeShaderGlobals(int cascadeIndex, Matrix4x4 gpuProjMatrix)
+        {
+            var viewMatrix = m_ViewMatrices[cascadeIndex];
+            var projMatrix = m_ProjMatrices[cascadeIndex];
+            var invViewMatrix = viewMatrix.inverse;
+            var invProjMatrix = projMatrix.inverse;
+            var gpuInvProjMatrix = gpuProjMatrix.inverse;
+            var viewProjMatrix = gpuProjMatrix * viewMatrix;
+            var invViewProjMatrix = viewProjMatrix.inverse;
+
+            var shadowGlobals = m_CameraShaderGlobals;
+            shadowGlobals._VividWorldSpaceCameraPos = invViewMatrix.GetColumn(3);
+            shadowGlobals._VividCameraProjection = projMatrix;
+            shadowGlobals._VividCameraInvProjection = invProjMatrix;
+            shadowGlobals._VividWorldToCamera = viewMatrix;
+            shadowGlobals._VividCameraToWorld = invViewMatrix;
+            shadowGlobals._VividGlstateMatrixProjection = gpuProjMatrix;
+            shadowGlobals._VividMatrixV = viewMatrix;
+            shadowGlobals._VividMatrixInvV = invViewMatrix;
+            shadowGlobals._VividMatrixInvP = gpuInvProjMatrix;
+            shadowGlobals._VividMatrixVP = viewProjMatrix;
+            shadowGlobals._VividMatrixInvVP = invViewProjMatrix;
+            shadowGlobals._VividPrevViewProjMatrix = viewProjMatrix;
+            shadowGlobals._VividNonJitteredViewProjMatrix = viewProjMatrix;
+            shadowGlobals._VividViewProjMatrix = viewProjMatrix;
+            shadowGlobals._VividViewMatrix = viewMatrix;
+            shadowGlobals._VividProjMatrix = gpuProjMatrix;
+            shadowGlobals._VividInvViewProjMatrix = invViewProjMatrix;
+            shadowGlobals._VividInvViewMatrix = invViewMatrix;
+            shadowGlobals._VividInvProjMatrix = gpuInvProjMatrix;
+            shadowGlobals._VividPrevViewMatrix = viewMatrix;
+            shadowGlobals._VividPrevProjMatrix = gpuProjMatrix;
+            shadowGlobals._VividJitterParams = Vector4.zero;
+            return shadowGlobals;
         }
 
         public override void Dispose()
@@ -206,6 +252,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DepthBias = 0.0f;
             m_CameraViewMatrix = Matrix4x4.identity;
             m_CameraProjMatrix = Matrix4x4.identity;
+            m_CameraShaderGlobals = default;
         }
     }
 }

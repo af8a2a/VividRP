@@ -6,32 +6,32 @@ using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
 {
-    public class AerialPerspectivePassNodeTests
+    public class AtmosphericScatteringPassNodeTests
     {
         [Serializable]
-        private sealed class AutoRegisteredAerialPerspectivePassNode : RenderPassNodeData
+        private sealed class AutoRegisteredAtmosphericScatteringPassNode : RenderPassNodeData
         {
             protected override string RegisteredPassTypeName => typeof(AtmosphericScatteringPass).AssemblyQualifiedName;
         }
 
         [Test]
-        public void AerialPerspectivePassNode_DefinesExpectedInputAndOutputPorts()
+        public void AtmosphericScatteringPassNode_DefinesExpectedInputAndOutputPorts()
         {
-            var node = new AutoRegisteredAerialPerspectivePassNode();
+            var node = new AutoRegisteredAtmosphericScatteringPassNode();
 
             Assert.That(node.GetInputPortByName("m_ColorInput"), Is.Not.Null);
             Assert.That(node.GetInputPortByName("m_DepthTexture"), Is.Not.Null);
-            Assert.That(node.GetInputPortByName("m_AtmosphericScatteringLUT"), Is.Not.Null);
+            Assert.That(node.GetInputPortByName("m_AtmosphericScatteringLUT"), Is.Null);
             Assert.That(node.GetOutputPortByName("m_OutputTexture"), Is.Not.Null);
         }
 
         [Test]
-        public void GeneratedNodeRegistry_RegistersAerialPerspectivePass()
+        public void GeneratedNodeRegistry_RegistersAtmosphericScatteringPass()
         {
             var source = File.ReadAllText(GetPackageFilePath("Editor", "RenderGraph", "GeneratedRenderPassNodes.g.cs"));
 
-            Assert.That(source, Does.Contain("internal sealed class AerialPerspectivePass : RenderPassNodeData"));
-            Assert.That(source, Does.Contain("VividRP.Runtime.RenderPass.Core.AerialPerspectivePass, VividRP.Runtime"));
+            Assert.That(source, Does.Contain("internal sealed class AtmosphericScatteringPass : RenderPassNodeData"));
+            Assert.That(source, Does.Contain("VividRP.Runtime.RenderPass.Core.AtmosphericScatteringPass, VividRP.Runtime"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

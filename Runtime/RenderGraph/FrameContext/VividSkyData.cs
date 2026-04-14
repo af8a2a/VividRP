@@ -8,6 +8,7 @@ namespace VividRP.Runtime
         public SkyType activeSkyType;
         public Texture specularCubemap;
         public Texture ambientProbeCubemap;
+        internal RTHandle atmosphericScatteringLutHandle;
         public Color tint;
         public Color ambientProbeTint;
         public float exposure;
@@ -22,6 +23,7 @@ namespace VividRP.Runtime
             activeSkyType = SkyType.None;
             specularCubemap = null;
             ambientProbeCubemap = null;
+            atmosphericScatteringLutHandle = null;
             tint = Color.white;
             ambientProbeTint = Color.white;
             exposure = 0.0f;
@@ -43,6 +45,7 @@ namespace VividRP.Runtime
             activeSkyType = other.activeSkyType;
             specularCubemap = other.specularCubemap;
             ambientProbeCubemap = other.ambientProbeCubemap;
+            atmosphericScatteringLutHandle = other.atmosphericScatteringLutHandle;
             tint = other.tint;
             ambientProbeTint = other.ambientProbeTint;
             exposure = other.exposure;

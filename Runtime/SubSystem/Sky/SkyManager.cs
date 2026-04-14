@@ -129,6 +129,14 @@ namespace VividRP.Runtime
                 s_CachedSkyData.Reset();
             }
 
+            s_CachedSkyData.atmosphericScatteringLutHandle =
+                activeSkyType == SkyType.PhysicallyBased
+                && s_PhysicallyBasedSkyAtmosphereLutCache.AtmosphericScatteringHandle != null
+                && s_PhysicallyBasedSkyAtmosphereLutCache.AtmosphericScatteringHandle.rt != null
+                && s_PhysicallyBasedSkyAtmosphereLutCache.AtmosphericScatteringHandle.rt.IsCreated()
+                    ? s_PhysicallyBasedSkyAtmosphereLutCache.AtmosphericScatteringHandle
+                    : null;
+
             UpdateSpecularCubemap(cmd, s_CachedSkyData);
             UpdateDiffuseAmbientProbe(cmd, s_CachedSkyData, forceRebuild);
 
@@ -222,11 +230,6 @@ namespace VividRP.Runtime
         internal static void ImportSkyViewLut(RenderGraphTexture texture)
         {
             ImportAtmosphereLutTexture(texture, s_PhysicallyBasedSkyAtmosphereLutCache.SkyViewHandle);
-        }
-
-        internal static void ImportAtmosphericScatteringLut(RenderGraphTexture texture)
-        {
-            ImportAtmosphereLutTexture(texture, s_PhysicallyBasedSkyAtmosphereLutCache.AtmosphericScatteringHandle);
         }
 
         internal static bool TryGetSkyViewLut(int skyViewHash, out Texture skyViewTexture)

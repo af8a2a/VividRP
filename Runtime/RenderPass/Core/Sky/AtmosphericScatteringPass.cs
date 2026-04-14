@@ -22,9 +22,6 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "CameraDepth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
 
-        [RenderGraphResource(Name = "AtmosphericScatteringLUT", Access = AccessFlags.Read)]
-        private RenderGraphTexture m_AtmosphericScatteringLUT;
-
         [RenderGraphResource(
             Name = "OutputColor",
             Access = AccessFlags.Write,
@@ -38,6 +35,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private PhysicallyBasedSkyShaderParameters m_Parameters;
         private PhysicallyBasedSkyMaterialParameters m_MaterialParameters;
         private Texture3D m_FallbackAtmosphericScatteringLut;
+        private RTHandle m_AtmosphericScatteringLutHandle;
 
         public AtmosphericScatteringPass()
         {
@@ -45,10 +43,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_ColorInput = RenderGraphTexture.CreateInput("Color", GraphicsFormat.R16G16B16A16_SFloat);
             m_DepthTexture = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.None, DepthBits.Depth32);
-            m_AtmosphericScatteringLUT = RenderGraphTexture.CreateInput("AtmosphericScatteringLUT", GraphicsFormat.R16G16B16A16_SFloat);
             m_OutputTexture = RenderGraphTexture.CreateOutput("OutputColor", GraphicsFormat.R16G16B16A16_SFloat);
             m_OutputTexture.desc.ClearBuffer = false;
-            ConfigureAtmosphericScatteringDescriptor(m_AtmosphericScatteringLUT);
         }
 
         public override void Create()
@@ -74,7 +70,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_IsActive = PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters)
                 && m_Parameters.skyFogParams.x > 0.5f;
             m_HasMaterialParameters = PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(frameData, out m_MaterialParameters);
-            SkyManager.ImportAtmosphericScatteringLut(m_AtmosphericScatteringLUT);
+            var skyData = frameData?.GetOrCreate<VividSkyData>();
+            m_AtmosphericScatteringLutHandle = skyData?.atmosphericScatteringLutHandle;
+            if (m_AtmosphericScatteringLutHandle != null)
+                PassRecorder.ImportTextureForPass(this, m_AtmosphericScatteringLutHandle);
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             var width = ResolveOutputDimension(
@@ -106,7 +105,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             var depthTexture = ResolveTexture(m_DepthTexture.innerHandle) ?? Texture2D.whiteTexture;
-            var atmosphericScatteringLut = ResolveTexture(m_AtmosphericScatteringLUT.innerHandle);
+            var atmosphericScatteringLut = ResolveTexture(m_AtmosphericScatteringLutHandle);
             var hasValidAtmosphericScatteringLut = HasValidAtmosphericScatteringLut(atmosphericScatteringLut);
             if (!hasValidAtmosphericScatteringLut)
                 EnsureFallbackAtmosphericScatteringLut();
@@ -174,20 +173,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_OutputTexture.desc.UseDynamicScale = sourceDescriptor?.UseDynamicScale ?? false;
             m_OutputTexture.desc.UseDynamicScaleExplicit = sourceDescriptor?.UseDynamicScaleExplicit ?? false;
             m_OutputTexture.desc.ScaleFactor = sourceDescriptor?.ScaleFactor ?? Vector2.one;
-        }
-
-        private static void ConfigureAtmosphericScatteringDescriptor(RenderGraphTexture texture)
-        {
-            if (texture?.desc == null)
-                return;
-
-            texture.desc.Dimension = TextureDimension.Tex3D;
-            texture.desc.Slices = PhysicallyBasedSkyAtmosphereLutCache.AtmosphericScatteringDepth;
-            texture.desc.FilterMode = FilterMode.Bilinear;
-            texture.desc.WrapMode = TextureWrapMode.Clamp;
-            texture.desc.UseMipMap = false;
-            texture.desc.AutoGenerateMips = false;
-            texture.desc.MipCount = 1;
         }
 
         private void EnsureFallbackAtmosphericScatteringLut()

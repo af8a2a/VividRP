@@ -140,6 +140,8 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
         private Matrix4x4  m_PrevWorldToView = Matrix4x4.identity;
         private Matrix4x4  m_PrevViewToClip  = Matrix4x4.identity;
         private bool m_HasValidHistory;
+        private bool m_HistoryInvalidated;
+        private bool m_UseRawShadowPassthrough;
         private uint m_MaxStabilizedFrameNum;
 
         internal readonly struct ResolvedSigmaSettings
@@ -178,7 +180,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             m_HistoryShadowCurrent  = CreatePassOwnedTexture("SIGMA_HistoryShadowCurrent", 1, 1, GraphicsFormat.R8_UNorm);
             m_HistoryLengthCurrent  = CreatePassOwnedTexture("SIGMA_HistoryLengthCurrent", 1, 1, GraphicsFormat.R32_UInt);
 
-            m_DenoisedShadowTexture = CreatePassOwnedTexture("DenoisedShadow",           1, 1, GraphicsFormat.R8_UNorm);
+            m_DenoisedShadowTexture = CreatePassOwnedTexture("DenoisedShadow",           1, 1, GraphicsFormat.R16_SFloat);
 
             m_TileTexture             = CreatePassOwnedTexture("SIGMA_Tiles",                  tileW, tileH, GraphicsFormat.R8G8B8A8_UNorm);
             m_SmoothTileTexture       = CreatePassOwnedTexture("SIGMA_SmoothTiles",            tileW, tileH, GraphicsFormat.R8G8B8A8_UNorm);
@@ -233,6 +235,9 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             ResizePassOwned(m_HistoryShadowCurrent,   m_Width, m_Height);
             ResizePassOwned(m_HistoryLengthCurrent,   m_Width, m_Height);
 
+            var shadowData = frameData.GetOrCreate<VividShadowData>();
+            m_UseRawShadowPassthrough = shadowData.isCSMActive;
+
             // Light direction
             var lightData = frameData.GetOrCreate<VividLightData>();
             var lightDir  = Vector3.up;
@@ -246,7 +251,15 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             var cameraPos   = new Vector3(cameraPos4.x, cameraPos4.y, cameraPos4.z);
             var sigmaSettings = ResolveSettings(VividVolumeManagerUtility.GetRayTracingSettingsVolume());
             m_MaxStabilizedFrameNum = sigmaSettings.MaxStabilizedFrameNum;
-            bool useTemporalStabilization = m_MaxStabilizedFrameNum > 0;
+            bool useTemporalStabilization = !m_UseRawShadowPassthrough && m_MaxStabilizedFrameNum > 0;
+
+            if (m_UseRawShadowPassthrough)
+            {
+                m_HasValidHistory = false;
+                m_MaxStabilizedFrameNum = 0;
+                m_HistoryInvalidated = true;
+                return;
+            }
 
             // History allocation (code-managed)
             var shadowDesc = m_HistoryShadowTexture?.desc ?? m_DenoisedShadowTexture?.desc;
@@ -269,7 +282,11 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 current:  useTemporalStabilization ? m_HistoryLengthCurrent : null,
                 desc:     lengthDesc);
 
-            m_HasValidHistory = useTemporalStabilization && hasShadowHistory && hasLengthHistory;
+            var hadHistoryInvalidation = m_HistoryInvalidated;
+            m_HasValidHistory = useTemporalStabilization
+                && !hadHistoryInvalidation
+                && hasShadowHistory
+                && hasLengthHistory;
 
             Matrix4x4 previousWorldToView = m_HasValidHistory ? m_PrevWorldToView : worldToView;
             Matrix4x4 previousViewToClip = m_HasValidHistory ? m_PrevViewToClip : viewToClip;
@@ -299,13 +316,25 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             m_PrevCameraPosition = cameraPos;
             m_PrevWidth          = m_Width;
             m_PrevHeight         = m_Height;
+            m_HistoryInvalidated = !useTemporalStabilization;
         }
 
         public override void Record(UnsafeGraphContext context)
         {
-            var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
-            using (new ProfilingScope(cmd, profilingSampler))
+            var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
+            using (new ProfilingScope(nativeCmd, profilingSampler))
             {
+                if (m_UseRawShadowPassthrough)
+                {
+                    if (m_RawShadowTexture?.innerHandle.IsValid() == true
+                        && m_DenoisedShadowTexture?.innerHandle.IsValid() == true)
+                    {
+                        nativeCmd.CopyTexture(m_RawShadowTexture, m_DenoisedShadowTexture);
+                    }
+
+                    return;
+                }
+
                 if (!CanExecute())
                     return;
 
@@ -314,86 +343,88 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                 int tileH   = CoreUtils.DivRoundUp(m_Height, 16);
                 int dispatchX = CoreUtils.DivRoundUp(m_Width,  8);
                 int dispatchY = CoreUtils.DivRoundUp(m_Height, 16);
-                bool useTemporalStabilization = m_MaxStabilizedFrameNum > 0;
+                bool useTemporalStabilization = !m_UseRawShadowPassthrough && m_MaxStabilizedFrameNum > 0;
 
                 if (useTemporalStabilization)
                 {
-                    ClearTexture(cmd, m_HistoryShadowCurrent, Color.white);
-                    ClearTexture(cmd, m_HistoryLengthCurrent, Color.clear);
+                    ClearTexture(nativeCmd, m_HistoryShadowCurrent, Color.white);
+                    ClearTexture(nativeCmd, m_HistoryLengthCurrent, Color.clear);
                 }
 
                 // Stage 1: ClassifyTiles
-                ConstantBuffer.Push(cmd, m_Constants, m_ClassifyTiles, SIGMA_ClassifyTilesConstantsId);
-                cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gIn_ViewZ,    m_DepthTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gIn_Penumbra, m_RawShadowTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gOut_Tiles,   m_TileTexture.innerHandle);
-                cmd.DispatchCompute(m_ClassifyTiles, kernel, tileW, tileH, 1);
+                ConstantBuffer.Push(nativeCmd, m_Constants, m_ClassifyTiles, SIGMA_ClassifyTilesConstantsId);
+                nativeCmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gIn_ViewZ,    m_DepthTexture.innerHandle);
+                nativeCmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gIn_Penumbra, m_RawShadowTexture.innerHandle);
+                nativeCmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gOut_Tiles,   m_TileTexture.innerHandle);
+                nativeCmd.DispatchCompute(m_ClassifyTiles, kernel, tileW, tileH, 1);
 
                 // Stage 2: SmoothTiles
                 int smoothTileW = CoreUtils.DivRoundUp(tileW, 16);
                 int smoothTileH = CoreUtils.DivRoundUp(tileH, 16);
-                ConstantBuffer.Push(cmd, m_Constants, m_SmoothTiles, SIGMA_SmoothTilesConstantsId);
-                cmd.SetComputeTextureParam(m_SmoothTiles, kernel, gIn_Tiles,  m_TileTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_SmoothTiles, kernel, gOut_Tiles, m_SmoothTileTexture.innerHandle);
-                cmd.DispatchCompute(m_SmoothTiles, kernel, smoothTileW, smoothTileH, 1);
+                ConstantBuffer.Push(nativeCmd, m_Constants, m_SmoothTiles, SIGMA_SmoothTilesConstantsId);
+                nativeCmd.SetComputeTextureParam(m_SmoothTiles, kernel, gIn_Tiles,  m_TileTexture.innerHandle);
+                nativeCmd.SetComputeTextureParam(m_SmoothTiles, kernel, gOut_Tiles, m_SmoothTileTexture.innerHandle);
+                nativeCmd.DispatchCompute(m_SmoothTiles, kernel, smoothTileW, smoothTileH, 1);
 
                 // Stage 3: ShadowCopy (history → transient)
                 if (m_HasValidHistory)
                 {
-                    ConstantBuffer.Push(cmd, m_Constants, m_ShadowCopy, SIGMA_CopyConstantsId);
-                    cmd.SetComputeTextureParam(m_ShadowCopy, kernel, gIn_Tiles,        m_SmoothTileTexture.innerHandle);
-                    cmd.SetComputeTextureParam(m_ShadowCopy, kernel, gIn_History,      m_HistoryShadowTexture.innerHandle);
-                    cmd.SetComputeTextureParam(m_ShadowCopy, kernel, gIn_HistoryLength, m_HistoryLengthTexture.innerHandle);
-                    cmd.SetComputeTextureParam(m_ShadowCopy, kernel, gOut_History,      m_TransientHistory.innerHandle);
-                    cmd.SetComputeTextureParam(m_ShadowCopy, kernel, gOut_HistoryLength, m_TransientHistoryLength.innerHandle);
-                    cmd.DispatchCompute(m_ShadowCopy, kernel, dispatchX, dispatchY, 1);
+                    ConstantBuffer.Push(nativeCmd, m_Constants, m_ShadowCopy, SIGMA_CopyConstantsId);
+                    nativeCmd.SetComputeTextureParam(m_ShadowCopy, kernel, gIn_Tiles,        m_SmoothTileTexture.innerHandle);
+                    nativeCmd.SetComputeTextureParam(m_ShadowCopy, kernel, gIn_History,      m_HistoryShadowTexture.innerHandle);
+                    nativeCmd.SetComputeTextureParam(m_ShadowCopy, kernel, gIn_HistoryLength, m_HistoryLengthTexture.innerHandle);
+                    nativeCmd.SetComputeTextureParam(m_ShadowCopy, kernel, gOut_History,      m_TransientHistory.innerHandle);
+                    nativeCmd.SetComputeTextureParam(m_ShadowCopy, kernel, gOut_HistoryLength, m_TransientHistoryLength.innerHandle);
+                    nativeCmd.DispatchCompute(m_ShadowCopy, kernel, dispatchX, dispatchY, 1);
                 }
 
                 // Stage 4: PreBlur
-                ConstantBuffer.Push(cmd, m_Constants, m_ShadowBlur, SIGMA_BlurConstantsId);
-                cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gIn_ViewZ,             m_DepthTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gIn_Normal_Roughness,  m_GBuffer1.innerHandle);
-                cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gIn_Tiles,             m_SmoothTileTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gIn_Penumbra,          m_RawShadowTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gOut_Penumbra,         m_TransientPenumbra.innerHandle);
-                cmd.SetComputeTextureParam(m_ShadowBlur, kernel, gOut_Shadow_Translucency, m_TransientShadow.innerHandle);
-
-                
-                cmd.DispatchCompute(m_ShadowBlur, kernel, dispatchX, dispatchY, 1);
+                ConstantBuffer.Push(nativeCmd, m_Constants, m_ShadowBlur, SIGMA_BlurConstantsId);
+                nativeCmd.SetComputeTextureParam(m_ShadowBlur, kernel, gIn_ViewZ,             m_DepthTexture.innerHandle);
+                nativeCmd.SetComputeTextureParam(m_ShadowBlur, kernel, gIn_Normal_Roughness,  m_GBuffer1.innerHandle);
+                nativeCmd.SetComputeTextureParam(m_ShadowBlur, kernel, gIn_Tiles,             m_SmoothTileTexture.innerHandle);
+                nativeCmd.SetComputeTextureParam(m_ShadowBlur, kernel, gIn_Penumbra,          m_RawShadowTexture.innerHandle);
+                nativeCmd.SetComputeTextureParam(m_ShadowBlur, kernel, gOut_Penumbra,         m_TransientPenumbra.innerHandle);
+                nativeCmd.SetComputeTextureParam(m_ShadowBlur, kernel, gOut_Shadow_Translucency, m_TransientShadow.innerHandle);
+                nativeCmd.DispatchCompute(m_ShadowBlur, kernel, dispatchX, dispatchY, 1);
 
                 // Stage 5: PostBlur
-                ConstantBuffer.Push(cmd, m_Constants, m_ShadowPostBlur, SIGMA_BlurConstantsId);
-                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_ViewZ,            m_DepthTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_Normal_Roughness, m_GBuffer1.innerHandle);
-                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_Tiles,            m_SmoothTileTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_Penumbra,         m_TransientPenumbra.innerHandle);
-                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_Shadow_Translucency, m_TransientShadow.innerHandle);
-                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gOut_Penumbra,        m_TransientPenumbra2.innerHandle);
-                cmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gOut_Shadow_Translucency,
+                ConstantBuffer.Push(nativeCmd, m_Constants, m_ShadowPostBlur, SIGMA_BlurConstantsId);
+                nativeCmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_ViewZ,            m_DepthTexture.innerHandle);
+                nativeCmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_Normal_Roughness, m_GBuffer1.innerHandle);
+                nativeCmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_Tiles,            m_SmoothTileTexture.innerHandle);
+                nativeCmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_Penumbra,         m_TransientPenumbra.innerHandle);
+                nativeCmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gIn_Shadow_Translucency, m_TransientShadow.innerHandle);
+                nativeCmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gOut_Penumbra,        m_TransientPenumbra2.innerHandle);
+                nativeCmd.SetComputeTextureParam(m_ShadowPostBlur, kernel, gOut_Shadow_Translucency,
                     useTemporalStabilization ? m_TransientShadow2.innerHandle : m_DenoisedShadowTexture.innerHandle);
-                cmd.DispatchCompute(m_ShadowPostBlur, kernel, dispatchX, dispatchY, 1);
+                nativeCmd.DispatchCompute(m_ShadowPostBlur, kernel, dispatchX, dispatchY, 1);
 
                 // Stage 6: TemporalStabilization
                 if (useTemporalStabilization)
                 {
-                    ConstantBuffer.Push(cmd, m_Constants, m_ShadowTemporalStabilization, SIGMA_TemporalStabilizationConstantsId);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_ViewZ,             m_DepthTexture.innerHandle);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_Mv,                m_MotionVectorTexture.innerHandle);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_Penumbra,          m_TransientPenumbra2.innerHandle);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_Shadow_Translucency, m_TransientShadow2.innerHandle);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_History,           m_TransientHistory.innerHandle);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_HistoryLength,     m_TransientHistoryLength.innerHandle);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_Tiles,             m_SmoothTileTexture.innerHandle);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gOut_Shadow_Translucency, m_DenoisedShadowTexture.innerHandle);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gOut_HistoryLength,    m_HistoryLengthCurrent.innerHandle);
-                    cmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gOut_History,          m_HistoryShadowCurrent.innerHandle);
-                    cmd.DispatchCompute(m_ShadowTemporalStabilization, kernel, dispatchX, dispatchY, 1);
+                    ConstantBuffer.Push(nativeCmd, m_Constants, m_ShadowTemporalStabilization, SIGMA_TemporalStabilizationConstantsId);
+                    nativeCmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_ViewZ,             m_DepthTexture.innerHandle);
+                    nativeCmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_Mv,                m_MotionVectorTexture.innerHandle);
+                    nativeCmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_Penumbra,          m_TransientPenumbra2.innerHandle);
+                    nativeCmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_Shadow_Translucency, m_TransientShadow2.innerHandle);
+                    nativeCmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_History,           m_TransientHistory.innerHandle);
+                    nativeCmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_HistoryLength,     m_TransientHistoryLength.innerHandle);
+                    nativeCmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gIn_Tiles,             m_SmoothTileTexture.innerHandle);
+                    nativeCmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gOut_Shadow_Translucency, m_DenoisedShadowTexture.innerHandle);
+                    nativeCmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gOut_HistoryLength,    m_HistoryLengthCurrent.innerHandle);
+                    nativeCmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gOut_History,          m_HistoryShadowCurrent.innerHandle);
+                    nativeCmd.DispatchCompute(m_ShadowTemporalStabilization, kernel, dispatchX, dispatchY, 1);
                 }
             }
         }
 
         public override void Dispose()
         {
+            m_HasValidHistory = false;
+            m_HistoryInvalidated = false;
+            m_UseRawShadowPassthrough = false;
+            m_MaxStabilizedFrameNum = 0;
         }
 
         internal static ResolvedSigmaSettings ResolveSettings(RayTracingSettingsVolume volume)

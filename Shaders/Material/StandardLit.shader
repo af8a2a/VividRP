@@ -83,6 +83,28 @@ Shader "VividRP/Material/StandardLit"
 
         Pass
         {
+            Name "ShadowCaster"
+            Tags { "LightMode" = "ShadowCaster" }
+
+            ZWrite On
+            ZTest LEqual
+            Cull [_Cull]
+            ColorMask 0
+
+            HLSLPROGRAM
+                #pragma target 4.5
+                #pragma multi_compile_instancing
+                #pragma shader_feature_local_fragment _ALPHATEST_ON
+                #pragma shader_feature_local_fragment _OPACITYMAP
+                #pragma vertex Vert
+                #pragma fragment Frag
+
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitShadowCasterPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
             Name "VividGBuffer"
             Tags { "LightMode" = "VividGBuffer" }
 

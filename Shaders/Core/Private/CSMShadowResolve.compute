@@ -1,0 +1,155 @@
+#pragma kernel CSMShadowResolve
+#pragma enable_d3d11_debug_symbols
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
+
+Texture2D<float>  _DepthTexture;
+Texture2D<float4> _GBuffer1;
+Texture2D<float>  _CSMShadowAtlas;
+RWTexture2D<float> _DirectionalShadowTexture;
+
+SamplerComparisonState sampler_CSMShadowAtlas;
+
+float4x4 _CSMViewProjMatrices[4];
+float4   _CSMCascadeSpheres[4];
+float4   _CSMAtlasScaleOffsets[4];
+int      _CSMCascadeCount;
+float    _CSMMaxShadowDistance;
+float    _CSMDepthBias;
+float    _CSMNormalBias;
+float4x4 _CSMInvViewProjMatrix;
+int      _CSMOutputWidth;
+int      _CSMOutputHeight;
+float3   _CSMLightDirectionWS;
+int      _CSMAtlasResolution;
+
+bool IsSkyPixel(float deviceDepth)
+{
+    return deviceDepth == UNITY_RAW_FAR_CLIP_VALUE;
+}
+
+float3 ReconstructWorldPosition(uint2 pixelCoord, float deviceDepth)
+{
+    float2 uv = (float2(pixelCoord) + 0.5) / float2(_CSMOutputWidth, _CSMOutputHeight);
+    return ComputeWorldSpacePosition(uv, deviceDepth, _CSMInvViewProjMatrix);
+}
+
+int SelectCascade(float3 positionWS, out float distFromSphere)
+{
+    distFromSphere = 1.0;
+    for (int i = 0; i < _CSMCascadeCount; i++)
+    {
+        float4 sphere = _CSMCascadeSpheres[i];
+        float3 delta = positionWS - sphere.xyz;
+        float distSq = dot(delta, delta);
+        if (distSq < sphere.w) // sphere.w = radiusSq
+        {
+            distFromSphere = distSq / sphere.w;
+            return i;
+        }
+    }
+    return -1;
+}
+
+float3 TransformWorldToShadowCoord(float3 positionWS, int cascadeIndex)
+{
+    float4 shadowCoord = mul(_CSMViewProjMatrices[cascadeIndex], float4(positionWS, 1.0));
+    // Orthographic: no perspective divide needed, but normalize to [0,1]
+    shadowCoord.xyz = shadowCoord.xyz * 0.5 + 0.5;
+    // Flip Y for texture sampling if needed (platform dependent, Unity handles this)
+    return shadowCoord.xyz;
+}
+
+float2 RemapToAtlasUV(float2 shadowUV, int cascadeIndex)
+{
+    float4 scaleOffset = _CSMAtlasScaleOffsets[cascadeIndex];
+    return shadowUV * scaleOffset.xy + scaleOffset.zw;
+}
+
+// 3x3 tent PCF filter
+float SampleShadowPCF3x3(float2 atlasUV, float depth)
+{
+    float shadow = 0.0;
+    float2 texelSize = 1.0 / float2(_CSMAtlasResolution, _CSMAtlasResolution);
+
+    // Simple 3x3 PCF with hardware comparison
+    [unroll]
+    for (int y = -1; y <= 1; y++)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; x++)
+        {
+            float2 offset = float2(x, y) * texelSize;
+            shadow += _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, atlasUV + offset, depth);
+        }
+    }
+    return shadow / 9.0;
+}
+
+// Simple hard shadow (no PCF)
+float SampleShadowHard(float2 atlasUV, float depth)
+{
+    return _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, atlasUV, depth);
+}
+
+[numthreads(8, 8, 1)]
+void CSMShadowResolve(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    if (dispatchThreadID.x >= (uint)_CSMOutputWidth || dispatchThreadID.y >= (uint)_CSMOutputHeight)
+        return;
+
+    uint2 pixelCoord = dispatchThreadID.xy;
+    float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
+
+    // Sky pixels are fully lit
+    if (IsSkyPixel(deviceDepth))
+    {
+        _DirectionalShadowTexture[pixelCoord] = 1.0;
+        return;
+    }
+
+    float3 positionWS = ReconstructWorldPosition(pixelCoord, deviceDepth);
+
+    // Cascade selection
+    float distFromSphere;
+    int cascadeIndex = SelectCascade(positionWS, distFromSphere);
+
+    if (cascadeIndex < 0)
+    {
+        // Beyond all cascades — fully lit
+        _DirectionalShadowTexture[pixelCoord] = 1.0;
+        return;
+    }
+
+    // Normal bias
+    float4 gbuffer1 = _GBuffer1.Load(int3(pixelCoord, 0));
+    float3 normalWS = DecodeVividNormalOct(gbuffer1.xy);
+    float3 biasedPositionWS = positionWS + normalWS * _CSMNormalBias * 0.01;
+
+    // Transform to shadow space
+    float3 shadowCoord = TransformWorldToShadowCoord(biasedPositionWS, cascadeIndex);
+
+    // Apply depth bias
+    shadowCoord.z -= _CSMDepthBias * 0.001;
+
+    // Remap to atlas UV
+    float2 atlasUV = RemapToAtlasUV(shadowCoord.xy, cascadeIndex);
+
+    // Sample shadow with PCF
+    float shadow = SampleShadowPCF3x3(atlasUV, shadowCoord.z);
+
+    // Distance fade
+    float distanceFade = 1.0;
+    float3 cameraToPixel = positionWS - _WorldSpaceCameraPos;
+    float pixelDistance = length(cameraToPixel);
+    float fadeStart = _CSMMaxShadowDistance * 0.8;
+    if (pixelDistance > fadeStart)
+    {
+        distanceFade = 1.0 - saturate((pixelDistance - fadeStart) / (_CSMMaxShadowDistance - fadeStart));
+    }
+
+    shadow = lerp(1.0, shadow, distanceFade);
+
+    _DirectionalShadowTexture[pixelCoord] = shadow;
+}

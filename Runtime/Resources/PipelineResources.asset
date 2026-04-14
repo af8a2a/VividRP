@@ -21,6 +21,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 42f3d055f6e68f94784c895cccbe859c, type: 3}
   - ResourceName: Shaders/Core/Private/Blit
     ResourceObject: {fileID: 4800000, guid: 88588a6fde9a5844db576cbc17606db2, type: 3}
+  - ResourceName: Shaders/Core/Private/CSMShadowResolve
+    ResourceObject: {fileID: 7200000, guid: 46a3b53f4378e9044ac12b6bedeb99d5, type: 3}
   - ResourceName: Shaders/Core/Private/CameraMotionVectors
     ResourceObject: {fileID: 4800000, guid: 6a169e932f9bd824ca065335bba5eb55, type: 3}
   - ResourceName: Shaders/Core/Private/CopyDepth

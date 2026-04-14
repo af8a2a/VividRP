@@ -115,6 +115,9 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/ShadowClassify")]
         public ComputeShader ShadowClassifyCompute;
 
+        [ResourcePath("Shaders/Core/Private/CSMShadowResolve")]
+        public ComputeShader CSMShadowResolveCompute;
+
         [ResourcePath("Shaders/Core/Private/GenerateViewZ")]
         public ComputeShader GenerateViewZCompute;
 

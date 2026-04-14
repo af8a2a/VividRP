@@ -11,6 +11,8 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPassSourcePath());
 
+            Assert.That(source, Does.Contain("BatchCullingProjectionType.Orthographic"));
+            Assert.That(source, Does.Contain("settings.splitIndex = i;"));
             Assert.That(source, Does.Contain("var gpuProjMatrix = GL.GetGPUProjectionMatrix(m_ProjMatrices[cascadeIndex], true);"));
             Assert.That(source, Does.Contain("var cascadeShaderGlobals = BuildCascadeShaderGlobals(cascadeIndex, gpuProjMatrix);"));
             Assert.That(source, Does.Contain("nativeCmd.SetViewProjectionMatrices(m_ViewMatrices[cascadeIndex], gpuProjMatrix);"));

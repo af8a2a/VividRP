@@ -98,6 +98,7 @@ Shader "VividRP/Material/StandardLit"
                 #pragma shader_feature_local_fragment _OPACITYMAP
                 #pragma vertex Vert
                 #pragma fragment Frag
+                #pragma enable_d3d11_debug_symbols
 
                 #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitShadowCasterPass.hlsl"
             ENDHLSL

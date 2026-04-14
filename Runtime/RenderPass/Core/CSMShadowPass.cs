@@ -135,10 +135,15 @@ namespace VividRP.Runtime.RenderPass.Core
             // Configure ShadowDrawingSettings per cascade
             for (int i = 0; i < m_CascadeCount; i++)
             {
-                m_ShadowDrawSettings[i] = new ShadowDrawingSettings(m_CullingResults, m_MainLightVisibleIndex);
-                m_ShadowDrawSettings[i].splitData = m_SplitData[i];
-                m_ShadowDrawSettings[i].useRenderingLayerMaskTest = false;
-                m_ShadowDrawSettings[i].objectsFilter = ShadowObjectsFilter.AllObjects;
+                var settings = new ShadowDrawingSettings(
+                    m_CullingResults,
+                    m_MainLightVisibleIndex,
+                    BatchCullingProjectionType.Orthographic);
+                settings.splitIndex = i;
+                settings.splitData = m_SplitData[i];
+                settings.useRenderingLayerMaskTest = false;
+                settings.objectsFilter = ShadowObjectsFilter.AllObjects;
+                m_ShadowDrawSettings[i] = settings;
             }
 
             // Populate VividShadowData for downstream passes.

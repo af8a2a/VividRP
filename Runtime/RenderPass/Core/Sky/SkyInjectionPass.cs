@@ -44,6 +44,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var cameraData = frameData?.GetOrCreate<VividCameraData>();
             ConfigureRenderTargets(cameraData);
+            SkyManager.ImportSkyViewLut(m_SkyViewLUT);
 
             m_ShouldInject = SkyManager.PrepareSkyInjection(
                 frameData,

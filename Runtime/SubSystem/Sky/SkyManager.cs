@@ -219,11 +219,6 @@ namespace VividRP.Runtime
                 PassRecorder.ImportTexture(texture, handle);
         }
 
-        internal static void ImportMultiScatteringLut(RenderGraphTexture texture)
-        {
-            ImportAtmosphereLutTexture(texture, s_PhysicallyBasedSkyAtmosphereLutCache.MultiScatteringHandle);
-        }
-
         internal static void ImportSkyViewLut(RenderGraphTexture texture)
         {
             ImportAtmosphereLutTexture(texture, s_PhysicallyBasedSkyAtmosphereLutCache.SkyViewHandle);

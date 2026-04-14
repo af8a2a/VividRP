@@ -3,12 +3,6 @@ using System;
 namespace VividRP.Editor.RenderGraph.Generated
 {
     [Serializable]
-    internal sealed class AtmosphereLUTPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.AtmosphereLUTPass, VividRP.Runtime";
-    }
-
-    [Serializable]
     internal sealed class AtmosphericScatteringPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.AtmosphericScatteringPass, VividRP.Runtime";

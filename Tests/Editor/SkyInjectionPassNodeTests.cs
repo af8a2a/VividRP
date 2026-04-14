@@ -32,6 +32,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("internal sealed class SkyInjectionPass : RenderPassNodeData"));
             Assert.That(source, Does.Contain("VividRP.Runtime.RenderPass.Core.SkyInjectionPass, VividRP.Runtime"));
+            Assert.That(source, Does.Not.Contain("VividRP.Runtime.RenderPass.Core.AtmosphereLUTPass, VividRP.Runtime"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

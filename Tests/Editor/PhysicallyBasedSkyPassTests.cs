@@ -52,11 +52,14 @@ namespace VividRP.Editor.Tests
 
             Assert.That(injectionPassSource, Does.Contain("m_SkyViewLUT = RenderGraphTexture.CreateInput(\"SkyViewLUT\", GraphicsFormat.R16G16B16A16_SFloat);"));
             Assert.That(injectionPassSource, Does.Contain("m_DirectionalShadowTexture = RenderGraphTexture.CreateInput(\"DirectionalShadowTexture\", GraphicsFormat.R16_SFloat);"));
+            Assert.That(injectionPassSource, Does.Contain("SkyManager.ImportSkyViewLut(m_SkyViewLUT);"));
             Assert.That(injectionPassSource, Does.Contain("SkyManager.PrepareSkyInjection("));
             Assert.That(injectionPassSource, Does.Contain("SkyManager.RenderSkyInjection(cmd);"));
             Assert.That(registrySource, Does.Contain("internal sealed class SkyInjectionPass : RenderPassNodeData"));
+            Assert.That(registrySource, Does.Not.Contain("internal sealed class AtmosphereLUTPass : RenderPassNodeData"));
             Assert.That(registrySource, Does.Not.Contain("internal sealed class PhysicallyBasedSkyPass : RenderPassNodeData"));
             Assert.That(renderGraphSource, Does.Contain("type: {class: SkyInjectionPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}"));
+            Assert.That(renderGraphSource, Does.Not.Contain("type: {class: AtmosphereLUTPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}"));
             Assert.That(renderGraphSource, Does.Not.Contain("PhysicallyBasedSkyPass"));
             Assert.That(renderGraphSource, Does.Not.Contain("HDRISkyPass"));
 

@@ -53,6 +53,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Create()
         {
+            SkyManager.Initialize();
+
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             var shader = resources?.AerialPerspectiveShader;
             shader ??= Shader.Find(OpaqueAtmosphericScatteringShaderName);
@@ -72,6 +74,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_IsActive = PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters)
                 && m_Parameters.skyFogParams.x > 0.5f;
             m_HasMaterialParameters = PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(frameData, out m_MaterialParameters);
+            SkyManager.ImportAtmosphericScatteringLut(m_AtmosphericScatteringLUT);
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             var width = ResolveOutputDimension(

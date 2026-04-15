@@ -17,7 +17,8 @@ namespace VividRP.Editor
         private static readonly GUIContent s_UsePipelineSettingsLabel = EditorGUIUtility.TrTextContent("Use Pipeline Settings");
         private static readonly GUIContent s_CustomShadowLayersLabel = EditorGUIUtility.TrTextContent("Custom Shadow Layers");
         private static readonly GUIContent s_ShadowRenderingLayersLabel = EditorGUIUtility.TrTextContent("Shadow Rendering Layers");
-        private static readonly GUIContent s_CSMShadowBiasLabel = EditorGUIUtility.TrTextContent("CSM Shadow Bias");
+        private static readonly GUIContent s_CSMShadowLabel = EditorGUIUtility.TrTextContent("CSM Shadow");
+        private static readonly GUIContent s_ShadowAtlasResolutionLabel = EditorGUIUtility.TrTextContent("Atlas Resolution", "Fixed resolution used for the full 2x2 CSM atlas rendered by this directional light.");
         private static readonly GUIContent s_DepthBiasLabel = EditorGUIUtility.TrTextContent("Depth Bias", "Constant depth bias applied while rendering cascaded shadow maps for this directional light.");
         private static readonly GUIContent s_NormalBiasLabel = EditorGUIUtility.TrTextContent("Normal Bias", "Normal-based bias applied while rendering and resolving cascaded shadow maps for this directional light.");
         private static readonly GUIContent s_SlopeBiasLabel = EditorGUIUtility.TrTextContent("Slope-Scale Depth Bias", "Slope-scale depth bias applied while rasterizing cascaded shadow maps for this directional light.");
@@ -47,6 +48,21 @@ namespace VividRP.Editor
         private static readonly GUIContent s_SurfaceTintLabel = EditorGUIUtility.TrTextContent("Tint");
         private static readonly GUIContent s_DistanceLabel = EditorGUIUtility.TrTextContent("Distance", "Distance from the camera (in meters) to the emissive celestial body represented by the light. This value is only used for sorting.");
         private static readonly string[] s_DiameterModeNames = { "Multiply", "Override" };
+        private static readonly GUIContent[] s_ShadowAtlasResolutionOptionLabels =
+        {
+            EditorGUIUtility.TrTextContent("1024"),
+            EditorGUIUtility.TrTextContent("2048"),
+            EditorGUIUtility.TrTextContent("4096"),
+            EditorGUIUtility.TrTextContent("8192")
+        };
+
+        private static readonly int[] s_ShadowAtlasResolutionOptionValues =
+        {
+            1024,
+            2048,
+            4096,
+            8192
+        };
 
         private const int DiameterModePopupWidth = 70;
 
@@ -221,14 +237,33 @@ namespace VividRP.Editor
                 return;
 
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField(s_CSMShadowBiasLabel, EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(s_CSMShadowLabel, EditorStyles.boldLabel);
 
             using (new EditorGUI.IndentLevelScope())
             {
+                DrawDirectionalShadowAtlasResolutionField();
                 EditorGUILayout.Slider(m_SerializedLight.depthBias, 0.0f, 10.0f, s_DepthBiasLabel);
                 EditorGUILayout.Slider(m_SerializedLight.normalBias, 0.0f, 10.0f, s_NormalBiasLabel);
                 EditorGUILayout.Slider(m_SerializedLight.slopeBias, 0.0f, 5.0f, s_SlopeBiasLabel);
             }
+        }
+
+        private void DrawDirectionalShadowAtlasResolutionField()
+        {
+            var property = m_SerializedLight.shadowAtlasResolution;
+            var oldMixedValue = EditorGUI.showMixedValue;
+            EditorGUI.showMixedValue = property.hasMultipleDifferentValues;
+
+            EditorGUI.BeginChangeCheck();
+            var resolution = EditorGUILayout.IntPopup(
+                s_ShadowAtlasResolutionLabel,
+                property.intValue,
+                s_ShadowAtlasResolutionOptionLabels,
+                s_ShadowAtlasResolutionOptionValues);
+            if (EditorGUI.EndChangeCheck())
+                property.intValue = resolution;
+
+            EditorGUI.showMixedValue = oldMixedValue;
         }
 
         internal static bool ShouldShowDirectionalShadowBiasControls(VividSerializedLight serializedLight)

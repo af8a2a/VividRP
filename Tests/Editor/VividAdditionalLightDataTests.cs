@@ -58,6 +58,7 @@ namespace VividRP.Editor.Tests
             Assert.That(serializedLight.rayTracedShadowRayBias, Is.Not.Null);
             Assert.That(serializedLight.rayTracedShadowDistantRayBias, Is.Not.Null);
             Assert.That(serializedLight.rayTracedShadowSunAngularDiameter, Is.Not.Null);
+            Assert.That(serializedLight.shadowAtlasResolution, Is.Not.Null);
             Assert.That(serializedLight.depthBias, Is.Not.Null);
             Assert.That(serializedLight.normalBias, Is.Not.Null);
             Assert.That(serializedLight.slopeBias, Is.Not.Null);
@@ -203,6 +204,12 @@ namespace VividRP.Editor.Tests
 
             var additionalData = light.GetVividAdditionalLightData();
 
+            Assert.That(
+                additionalData.shadowAtlasResolution,
+                Is.EqualTo(VividAdditionalLightData.CSMShadowAtlasResolution.Resolution4096));
+            Assert.That(
+                additionalData.resolvedShadowAtlasResolution,
+                Is.EqualTo(VividAdditionalLightData.DefaultShadowAtlasResolution));
             Assert.That(additionalData.depthBias, Is.EqualTo(VividAdditionalLightData.DefaultShadowDepthBias));
             Assert.That(additionalData.normalBias, Is.EqualTo(VividAdditionalLightData.DefaultShadowNormalBias));
             Assert.That(additionalData.slopeBias, Is.EqualTo(VividAdditionalLightData.DefaultShadowSlopeBias));
@@ -219,6 +226,14 @@ namespace VividRP.Editor.Tests
             additionalData.normalBias = -1.0f;
             additionalData.slopeBias = 99.0f;
 
+            additionalData.shadowAtlasResolution = (VividAdditionalLightData.CSMShadowAtlasResolution)12345;
+
+            Assert.That(
+                additionalData.shadowAtlasResolution,
+                Is.EqualTo(VividAdditionalLightData.CSMShadowAtlasResolution.Resolution4096));
+            Assert.That(
+                additionalData.resolvedShadowAtlasResolution,
+                Is.EqualTo(VividAdditionalLightData.DefaultShadowAtlasResolution));
             Assert.That(additionalData.depthBias, Is.EqualTo(VividAdditionalLightData.MaxShadowDepthBias));
             Assert.That(additionalData.normalBias, Is.EqualTo(0.0f));
             Assert.That(additionalData.slopeBias, Is.EqualTo(VividAdditionalLightData.MaxShadowSlopeBias));
@@ -404,7 +419,11 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Editor", "ComponentEditor", "VividLightEditor.cs"));
 
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"CSM Shadow Bias\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"CSM Shadow\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Atlas Resolution\""));
+            Assert.That(source, Does.Contain("private static readonly GUIContent[] s_ShadowAtlasResolutionOptionLabels ="));
+            Assert.That(source, Does.Contain("EditorGUILayout.IntPopup("));
+            Assert.That(source, Does.Contain("m_SerializedLight.shadowAtlasResolution"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Depth Bias\""));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Normal Bias\""));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Slope-Scale Depth Bias\""));

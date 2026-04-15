@@ -51,7 +51,6 @@ namespace VividRP.Editor.Tests
                 Assert.That(editorType.GetField("m_CascadeSplit1", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_CascadeSplit2", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_CascadeSplit3", flags)?.GetValue(editor), Is.Not.Null);
-                Assert.That(editorType.GetField("m_ShadowResolution", flags)?.GetValue(editor), Is.Not.Null);
             }
             finally
             {
@@ -76,8 +75,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("using (var scope = new OverridablePropertyScope(parameter, title, this))"));
             Assert.That(source, Does.Contain("GUILayout.Label(\"Cascade splits\""));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Directional Light\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Atlas\")"));
-            Assert.That(source, Does.Contain("Depth Bias, Normal Bias, and Slope-Scale Depth Bias are configured on the shadow-casting directional light."));
+            Assert.That(source, Does.Contain("DrawSectionHeader(\"Per Light\")"));
+            Assert.That(source, Does.Contain("Atlas Resolution, Depth Bias, Normal Bias, and Slope-Scale Depth Bias are configured on the shadow-casting directional light."));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

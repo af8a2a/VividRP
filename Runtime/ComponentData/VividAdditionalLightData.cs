@@ -297,6 +297,14 @@ namespace VividRP.Runtime
     [ExecuteAlways]
     public class VividAdditionalLightData : MonoBehaviour, IAdditionalData
     {
+        public enum CSMShadowAtlasResolution
+        {
+            Resolution1024 = 1024,
+            Resolution2048 = 2048,
+            Resolution4096 = 4096,
+            Resolution8192 = 8192,
+        }
+
         public enum CelestialBodyShadingSource
         {
             Emission = 0,
@@ -308,6 +316,7 @@ namespace VividRP.Runtime
         internal const float DefaultRayTracedShadowRayBias = 0.001f;
         internal const float DefaultRayTracedShadowDistantRayBias = 0.001f;
         internal const float DefaultRayTracedShadowSunAngularDiameter = 0.533f;
+        internal const int DefaultShadowAtlasResolution = 4096;
         internal const float DefaultShadowDepthBias = 1.0f;
         internal const float DefaultShadowNormalBias = 1.0f;
         internal const float DefaultShadowSlopeBias = 2.5f;
@@ -341,6 +350,9 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private float m_RayTracedShadowSunAngularDiameter = DefaultRayTracedShadowSunAngularDiameter;
+
+        [SerializeField]
+        private CSMShadowAtlasResolution m_ShadowAtlasResolution = CSMShadowAtlasResolution.Resolution4096;
 
         [SerializeField]
         private float m_DepthBias = DefaultShadowDepthBias;
@@ -522,6 +534,22 @@ namespace VividRP.Runtime
                 value,
                 DefaultRayTracedShadowSunAngularDiameter);
         }
+
+        public CSMShadowAtlasResolution shadowAtlasResolution
+        {
+            get => m_ShadowAtlasResolution;
+            set
+            {
+                var sanitizedValue = SanitizeShadowAtlasResolution(value);
+                if (m_ShadowAtlasResolution == sanitizedValue)
+                    return;
+
+                m_ShadowAtlasResolution = sanitizedValue;
+                NotifyLightDataChanged();
+            }
+        }
+
+        internal int resolvedShadowAtlasResolution => (int)SanitizeShadowAtlasResolution(m_ShadowAtlasResolution);
 
         public float depthBias
         {
@@ -852,6 +880,7 @@ namespace VividRP.Runtime
 
         private void ConstrainShadowBiasSettings()
         {
+            m_ShadowAtlasResolution = SanitizeShadowAtlasResolution(m_ShadowAtlasResolution);
             m_DepthBias = SanitizeClampedFloat(
                 m_DepthBias,
                 0.0f,
@@ -867,6 +896,18 @@ namespace VividRP.Runtime
                 0.0f,
                 MaxShadowSlopeBias,
                 DefaultShadowSlopeBias);
+        }
+
+        private static CSMShadowAtlasResolution SanitizeShadowAtlasResolution(CSMShadowAtlasResolution value)
+        {
+            return value switch
+            {
+                CSMShadowAtlasResolution.Resolution1024 => CSMShadowAtlasResolution.Resolution1024,
+                CSMShadowAtlasResolution.Resolution2048 => CSMShadowAtlasResolution.Resolution2048,
+                CSMShadowAtlasResolution.Resolution4096 => CSMShadowAtlasResolution.Resolution4096,
+                CSMShadowAtlasResolution.Resolution8192 => CSMShadowAtlasResolution.Resolution8192,
+                _ => (CSMShadowAtlasResolution)DefaultShadowAtlasResolution
+            };
         }
 
         private void ConstrainCelestialBodySettings()

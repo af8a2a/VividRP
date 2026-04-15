@@ -22,8 +22,10 @@ namespace VividRP.Runtime
         public ClampedFloatParameter cascadeSplit1 = new(0.067f, 0f, 1f);
         public ClampedFloatParameter cascadeSplit2 = new(0.2f, 0f, 1f);
         public ClampedFloatParameter cascadeSplit3 = new(0.467f, 0f, 1f);
-        public ClampedIntParameter shadowResolution = new(DefaultShadowResolution, MinShadowResolution, MaxShadowResolution);
         // Legacy serialized fields kept only to avoid breaking existing volume assets.
+        [HideInInspector]
+        public ClampedIntParameter shadowResolution = new(DefaultShadowResolution, MinShadowResolution, MaxShadowResolution);
+
         [HideInInspector]
         public ClampedFloatParameter depthBias = new(DefaultDepthBias, 0f, 10f);
 

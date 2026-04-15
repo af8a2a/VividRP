@@ -15,6 +15,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("BatchCullingProjectionType.Orthographic"));
             Assert.That(source, Does.Contain("settings.splitIndex = i;"));
             Assert.That(source, Does.Contain("TryResolveMainDirectionalLight(lightData, out var light, out var additionalLightData)"));
+            Assert.That(source, Does.Contain("m_AtlasResolution = Mathf.Max(AtlasGridSize, additionalLightData.resolvedShadowAtlasResolution);"));
+            Assert.That(source, Does.Contain("m_CascadeResolution = Mathf.Max(1, m_AtlasResolution / AtlasGridSize);"));
             Assert.That(source, Does.Contain("m_DepthBias = Mathf.Max(0.0f, additionalLightData.depthBias);"));
             Assert.That(source, Does.Contain("m_NormalBias = Mathf.Max(0.0f, additionalLightData.normalBias);"));
             Assert.That(source, Does.Contain("m_SlopeScaleDepthBias = Mathf.Max(0.0f, additionalLightData.slopeBias);"));

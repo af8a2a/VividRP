@@ -100,8 +100,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_MainLightVisibleIndex = lightData.mainLightIndex;
 
             m_CascadeCount = Mathf.Clamp(csmSettings.cascadeCount.value, 1, VividShadowData.MaxCascadeCount);
-            m_CascadeResolution = Mathf.Max(1, csmSettings.shadowResolution.value);
-            m_AtlasResolution = m_CascadeResolution * AtlasGridSize;
+            m_AtlasResolution = Mathf.Max(AtlasGridSize, additionalLightData.resolvedShadowAtlasResolution);
+            m_CascadeResolution = Mathf.Max(1, m_AtlasResolution / AtlasGridSize);
             m_DepthBias = Mathf.Max(0.0f, additionalLightData.depthBias);
             m_NormalBias = Mathf.Max(0.0f, additionalLightData.normalBias);
             m_SlopeScaleDepthBias = Mathf.Max(0.0f, additionalLightData.slopeBias);

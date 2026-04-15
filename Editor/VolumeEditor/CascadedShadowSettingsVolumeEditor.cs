@@ -23,9 +23,6 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Working Unit", "Controls whether cascade splits are edited in meters or as a percentage of Max Distance.");
         private static readonly GUIContent s_CascadeCountLabel =
             EditorGUIUtility.TrTextContent("Cascade Count", "Number of directional shadow cascades.");
-        private static readonly GUIContent s_ShadowResolutionLabel =
-            EditorGUIUtility.TrTextContent("Shadow Resolution", "Per-cascade resolution used to build the CSM atlas.");
-
         private readonly GUIContent[] m_SplitLabels =
         {
             EditorGUIUtility.TrTextContent("Split 1"),
@@ -46,7 +43,6 @@ namespace VividRP.Editor
         private SerializedDataParameter m_CascadeSplit1;
         private SerializedDataParameter m_CascadeSplit2;
         private SerializedDataParameter m_CascadeSplit3;
-        private SerializedDataParameter m_ShadowResolution;
 
         private EditorPrefBoolFlags<WorkingUnit> m_WorkingUnitState;
 
@@ -65,7 +61,6 @@ namespace VividRP.Editor
             m_CascadeSplit1 = Unpack(fetcher.Find(x => x.cascadeSplit1));
             m_CascadeSplit2 = Unpack(fetcher.Find(x => x.cascadeSplit2));
             m_CascadeSplit3 = Unpack(fetcher.Find(x => x.cascadeSplit3));
-            m_ShadowResolution = Unpack(fetcher.Find(x => x.shadowResolution));
         }
 
         public override void OnInspectorGUI()
@@ -91,10 +86,9 @@ namespace VividRP.Editor
 
             DrawCascadePreview();
 
-            DrawSectionHeader("Atlas");
-            PropertyField(m_ShadowResolution, s_ShadowResolutionLabel);
+            DrawSectionHeader("Per Light");
             EditorGUILayout.HelpBox(
-                "Depth Bias, Normal Bias, and Slope-Scale Depth Bias are configured on the shadow-casting directional light.",
+                "Atlas Resolution, Depth Bias, Normal Bias, and Slope-Scale Depth Bias are configured on the shadow-casting directional light.",
                 MessageType.Info);
         }
 

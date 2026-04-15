@@ -34,7 +34,8 @@ namespace VividRP.Runtime
         [Header("Clear")] public bool ClearBuffer = false;
         public Color ClearColor = Color.clear;
 
-        [Header("Flags")] public bool EnableRandomWrite = false;
+        [Header("Flags")] public bool IsShadowMap = false;
+        public bool EnableRandomWrite = false;
         public bool BindTextureMS = false;
         public bool UseDynamicScale = false;
         public bool UseDynamicScaleExplicit = false;
@@ -70,6 +71,7 @@ namespace VividRP.Runtime
                 autoGenerateMips = AutoGenerateMips,
                 clearBuffer = ClearBuffer,
                 clearColor = ClearColor,
+                isShadowMap = IsShadowMap,
                 enableRandomWrite = EnableRandomWrite,
                 bindTextureMS = BindTextureMS,
                 useDynamicScale = UseDynamicScale,
@@ -113,6 +115,7 @@ namespace VividRP.Runtime
                 AutoGenerateMips = desc.autoGenerateMips,
                 ClearBuffer = desc.clearBuffer,
                 ClearColor = desc.clearColor,
+                IsShadowMap = desc.isShadowMap,
                 EnableRandomWrite = desc.enableRandomWrite,
                 BindTextureMS = desc.bindTextureMS,
                 UseDynamicScale = desc.useDynamicScale,

@@ -9,8 +9,6 @@ Texture2D<float4> _GBuffer1;
 Texture2D<float>  _CSMShadowAtlas;
 RWTexture2D<float> _DirectionalShadowTexture;
 
-SamplerComparisonState sampler_CSMShadowAtlas;
-
 float4x4 _CSMViewProjMatrices[4];
 float4   _CSMCascadeSpheres[4];
 float4   _CSMAtlasScaleOffsets[4];
@@ -54,11 +52,7 @@ int SelectCascade(float3 positionWS, out float distFromSphere)
 
 float3 TransformWorldToShadowCoord(float3 positionWS, int cascadeIndex)
 {
-    float4 shadowCoord = mul(_CSMViewProjMatrices[cascadeIndex], float4(positionWS, 1.0));
-    // Orthographic: no perspective divide needed, but normalize to [0,1]
-    shadowCoord.xyz = shadowCoord.xyz * 0.5 + 0.5;
-    // Flip Y for texture sampling if needed (platform dependent, Unity handles this)
-    return shadowCoord.xyz;
+    return mul(_CSMViewProjMatrices[cascadeIndex], float4(positionWS, 1.0)).xyz;
 }
 
 float2 RemapToAtlasUV(float2 shadowUV, int cascadeIndex)
@@ -67,30 +61,58 @@ float2 RemapToAtlasUV(float2 shadowUV, int cascadeIndex)
     return shadowUV * scaleOffset.xy + scaleOffset.zw;
 }
 
-// 3x3 tent PCF filter
+float CompareShadowDepth(float receiverDepth, float shadowMapDepth)
+{
+#if UNITY_REVERSED_Z
+    return receiverDepth >= shadowMapDepth ? 1.0 : 0.0;
+#else
+    return receiverDepth <= shadowMapDepth ? 1.0 : 0.0;
+#endif
+}
+
+int2 ClampAtlasTexel(int2 sampleTexel)
+{
+    return clamp(sampleTexel, int2(0, 0), int2(_CSMAtlasResolution - 1, _CSMAtlasResolution - 1));
+}
+
+float LoadShadowDepth(int2 sampleTexel)
+{
+    sampleTexel = ClampAtlasTexel(sampleTexel);
+    return _CSMShadowAtlas.Load(int3(sampleTexel, 0));
+}
+
+// 3x3 point-PCF filter
 float SampleShadowPCF3x3(float2 atlasUV, float depth)
 {
     float shadow = 0.0;
-    float2 texelSize = 1.0 / float2(_CSMAtlasResolution, _CSMAtlasResolution);
+    int2 centerTexel = int2(atlasUV * (float)_CSMAtlasResolution);
 
-    // Simple 3x3 PCF with hardware comparison
     [unroll]
     for (int y = -1; y <= 1; y++)
     {
         [unroll]
         for (int x = -1; x <= 1; x++)
         {
-            float2 offset = float2(x, y) * texelSize;
-            shadow += _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, atlasUV + offset, depth);
+            int2 sampleTexel = centerTexel + int2(x, y);
+            float shadowMapDepth = LoadShadowDepth(sampleTexel);
+            shadow += CompareShadowDepth(depth, shadowMapDepth);
         }
     }
     return shadow / 9.0;
 }
 
-// Simple hard shadow (no PCF)
-float SampleShadowHard(float2 atlasUV, float depth)
+bool IsWithinShadowMapBounds(float3 shadowCoord)
 {
-    return _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, atlasUV, depth);
+    return all(shadowCoord >= 0.0) && all(shadowCoord <= 1.0);
+}
+
+float ApplyShadowDepthBias(float shadowDepth)
+{
+#if UNITY_REVERSED_Z
+    return shadowDepth + _CSMDepthBias * 0.0001;
+#else
+    return shadowDepth - _CSMDepthBias * 0.0001;
+#endif
 }
 
 [numthreads(8, 8, 1)]
@@ -131,7 +153,13 @@ void CSMShadowResolve(uint3 dispatchThreadID : SV_DispatchThreadID)
     float3 shadowCoord = TransformWorldToShadowCoord(biasedPositionWS, cascadeIndex);
 
     // Apply depth bias
-    shadowCoord.z -= _CSMDepthBias * 0.001;
+    shadowCoord.z = ApplyShadowDepthBias(shadowCoord.z);
+
+    if (!IsWithinShadowMapBounds(shadowCoord))
+    {
+        _DirectionalShadowTexture[pixelCoord] = 1.0;
+        return;
+    }
 
     // Remap to atlas UV
     float2 atlasUV = RemapToAtlasUV(shadowCoord.xy, cascadeIndex);

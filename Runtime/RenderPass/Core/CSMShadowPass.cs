@@ -39,6 +39,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ShadowAtlas.desc.Name = "CSMShadowAtlas";
             m_ShadowAtlas.desc.ClearBuffer = true;
             m_ShadowAtlas.desc.ClearColor = Color.black;
+            m_ShadowAtlas.desc.IsShadowMap = true;
             m_ShadowAtlas.desc.FilterMode = FilterMode.Bilinear;
             m_ShadowAtlas.desc.WrapMode = TextureWrapMode.Clamp;
         }
@@ -155,7 +156,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 {
                     shadowData.viewMatrices[i] = m_ViewMatrices[i];
                     shadowData.projMatrices[i] = m_ProjMatrices[i];
-                    shadowData.viewProjMatrices[i] = m_ProjMatrices[i] * m_ViewMatrices[i];
+                    shadowData.viewProjMatrices[i] = BuildWorldToShadowMatrix(m_ProjMatrices[i], m_ViewMatrices[i]);
                     shadowData.cascadeSpheres[i] = m_CascadeSpheres[i];
                 }
                 else
@@ -239,6 +240,27 @@ namespace VividRP.Runtime.RenderPass.Core
             shadowGlobals._VividPrevProjMatrix = gpuProjMatrix;
             shadowGlobals._VividJitterParams = Vector4.zero;
             return shadowGlobals;
+        }
+
+        private static Matrix4x4 BuildWorldToShadowMatrix(Matrix4x4 projMatrix, Matrix4x4 viewMatrix)
+        {
+            if (SystemInfo.usesReversedZBuffer)
+            {
+                projMatrix.m20 = -projMatrix.m20;
+                projMatrix.m21 = -projMatrix.m21;
+                projMatrix.m22 = -projMatrix.m22;
+                projMatrix.m23 = -projMatrix.m23;
+            }
+
+            var worldToShadow = projMatrix * viewMatrix;
+            var textureScaleAndBias = Matrix4x4.identity;
+            textureScaleAndBias.m00 = 0.5f;
+            textureScaleAndBias.m11 = 0.5f;
+            textureScaleAndBias.m22 = 0.5f;
+            textureScaleAndBias.m03 = 0.5f;
+            textureScaleAndBias.m13 = 0.5f;
+            textureScaleAndBias.m23 = 0.5f;
+            return textureScaleAndBias * worldToShadow;
         }
 
         public override void Dispose()

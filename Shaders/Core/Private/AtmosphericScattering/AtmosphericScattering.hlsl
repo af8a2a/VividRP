@@ -49,39 +49,60 @@ bool IsFarDepth(float deviceDepth)
     return abs(deviceDepth - UNITY_RAW_FAR_CLIP_VALUE) <= 1e-5f;
 }
 
+float3 GetViewForwardDir()
+{
+    float4x4 viewMatrix = UNITY_MATRIX_V;
+    return -viewMatrix[2].xyz;
+}
+
+float ResolveMaxFogDistance()
+{
+    return max(_SkyFogParams.w, 0.0f);
+}
+
+float ComputeAtmosphericScatteringDistance(float3 V, float linearDepth, bool isSky)
+{
+    float maxFogDistance = ResolveMaxFogDistance();
+    if (isSky)
+        return maxFogDistance;
+
+    float viewForwardDot = dot(-V, GetViewForwardDir());
+    if (isnan(viewForwardDot) || isinf(viewForwardDot) || viewForwardDot <= 1e-5f)
+        return -1.0f;
+
+    float tFrag = linearDepth * rcp(viewForwardDot);
+    if (maxFogDistance > 0.0f)
+        tFrag = min(tFrag, maxFogDistance);
+
+    return tFrag;
+}
+
 float4 FragOpaqueAtmosphericScattering(Varyings input) : SV_Target
 {
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
-
-    int2 pixelCoord = int2(input.positionCS.xy);
+    float2 positionSS = input.positionCS.xy;
+    int2 pixelCoord = int2(positionSS);
     float4 inputColor = LOAD_TEXTURE2D_X(_InputColor, pixelCoord);
 
     if (_SkyFogParams.x <= 0.5f)
         return inputColor;
 
     float deviceDepth = LOAD_TEXTURE2D_X(_DepthTexture, pixelCoord).r;
-    if (IsFarDepth(deviceDepth))
+    bool isSky = IsFarDepth(deviceDepth);
+    float2 positionNDC = positionSS * _ScreenSize.zw;
+    float3 V = GetSkyViewDirWS(positionSS);
+    float linearDepth = LinearEyeDepth(deviceDepth, _ZBufferParams);
+
+    if (!isSky && (isnan(linearDepth) || isinf(linearDepth) || linearDepth <= 1e-4f))
         return inputColor;
 
-    float2 positionNDC = saturate(input.positionCS.xy * _ScreenSize.zw);
-    float3 positionWS = ComputeWorldSpacePosition(positionNDC, deviceDepth, UNITY_MATRIX_I_VP);
-    if (any(isnan(positionWS)) || any(isinf(positionWS)))
-        return inputColor;
-
-    float tFrag = distance(positionWS, _WorldSpaceCameraPos);
+    float tFrag = ComputeAtmosphericScatteringDistance(V, linearDepth, isSky);
     if (isnan(tFrag) || isinf(tFrag) || tFrag <= 1e-4f)
         return inputColor;
 
-    if (_SkyFogParams.w > 0.0f)
-        tFrag = min(tFrag, _SkyFogParams.w);
-
-    if (tFrag <= 1e-4f)
-        return inputColor;
-
-    float3 viewDirectionWS = -GetSkyViewDirWS(input.positionCS.xy);
     float3 fogColor;
     float3 fogOpacity;
-    EvaluateCameraAtmosphericScattering(viewDirectionWS, positionNDC, tFrag, fogColor, fogOpacity);
+    EvaluateCameraAtmosphericScattering(-V, positionNDC, tFrag, fogColor, fogOpacity);
 
     fogColor = SanitizeSkyRadiance(fogColor);
     fogOpacity = saturate(fogOpacity);

@@ -527,6 +527,7 @@ namespace VividRP.Editor.Tests
             var shaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AutoExposure", "Unreal", "AutoExposure.compute"));
             var hdrpShaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AutoExposure", "HDRP", "Exposure.compute"));
             var hdrpCommonSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AutoExposure", "HDRP", "ExposureCommon.hlsl"));
+            var hdrpPassSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposurePass.HDRP.cs"));
             var helperSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "AutoExposure.hlsl"));
             var runtimeSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureRuntimeUtility.cs"));
             var implementationSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureImplementationUtility.cs"));
@@ -558,6 +559,8 @@ namespace VividRP.Editor.Tests
             Assert.That(hdrpCommonSource, Does.Contain("float4 _HistogramRangeParams;"));
             Assert.That(hdrpCommonSource, Does.Contain("float CurveRemap(float inEV, out float limitMin, out float limitMax)"));
             Assert.That(hdrpCommonSource, Does.Contain("float3 curveSample = SAMPLE_TEXTURE2D_LOD(_ExposureCurveTexture"));
+            Assert.That(hdrpPassSource, Does.Contain("ColorUtils.lensImperfectionExposureScale"));
+            Assert.That(hdrpPassSource, Does.Contain("cmd.SetComputeIntParams("));
             Assert.That(shaderSource, Does.Contain("RWStructuredBuffer<uint> _HistogramBuffer;"));
             Assert.That(shaderSource, Does.Contain("RWStructuredBuffer<float4> _CurrentExposureBuffer;"));
             Assert.That(shaderSource, Does.Contain("Texture2D<float4> _AutoExposureCompensationCurve;"));

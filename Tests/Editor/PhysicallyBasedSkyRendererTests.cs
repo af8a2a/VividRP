@@ -86,10 +86,16 @@ namespace VividRP.Editor.Tests
             var parametersSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSky", "PhysicallyBasedSkyShaderParameters.cs"));
 
             Assert.That(source, Does.Contain("private const string PhysicallyBasedSkyShaderName = \"Hidden/VividRP/PhysicallyBasedSky\";"));
+            Assert.That(source, Does.Contain("private readonly PhysicallyBasedSkyAtmosphereLutCache m_AtmosphereLutCache = new();"));
+            Assert.That(source, Does.Contain("m_AtmosphereLutCache.Build(resources);"));
             Assert.That(source, Does.Contain("m_SkyMaterial = CoreUtils.CreateEngineMaterial(shader);"));
             Assert.That(source, Does.Contain("m_SkyBakingPass = m_SkyMaterial.FindPass(\"PhysicallyBasedSkyBaking\");"));
+            Assert.That(source, Does.Contain("public void UpdateFrameResources(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd)"));
+            Assert.That(source, Does.Contain("m_AtmosphereLutCache.Update(context, cmd);"));
+            Assert.That(source, Does.Contain("ApplyAtmosphereLutHandle(skyData);"));
             Assert.That(source, Does.Contain("public void PrepareSkyRendering("));
             Assert.That(source, Does.Contain("public void RenderSky(CommandBuffer cmd)"));
+            Assert.That(source, Does.Contain("ImportSkyViewLutForPass(skyViewLut);"));
             Assert.That(source, Does.Contain("var skyViewTexture = ResolveSkyViewTexture();"));
             Assert.That(source, Does.Contain("Shader.GetGlobalTexture(DirectionalShadowTextureId)"));
             Assert.That(source, Does.Contain("cmd.SetRenderTarget(m_ColorTarget, m_DepthTexture);"));
@@ -98,13 +104,15 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("ApplyLocalSkyPrecomputationTextures(properties);"));
             Assert.That(source, Does.Contain("CoreUtils.SetKeyword(m_SkyMaterial, \"LOCAL_SKY\", useLocalSkyPrecomputation);"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyAtmosphereLutCache.ComputeSkyViewLutHash(m_RenderParameters, m_RenderMaterialParameters, m_RenderContext)"));
-            Assert.That(source, Does.Contain("SkyManager.TryGetSkyViewLut(skyViewHash, out skyViewTexture)"));
+            Assert.That(source, Does.Contain("m_AtmosphereLutCache.TryGetSkyViewLut(skyViewHash, out skyViewTexture)"));
             Assert.That(source, Does.Contain("SkyCubemapBakingUtility.RenderSkyToCubemap("));
             Assert.That(source, Does.Contain("EnsureLocalSkyPrecomputation("));
 
             Assert.That(parametersSource, Does.Contain("internal static bool TryBuildForSkyBaking("));
             Assert.That(parametersSource, Does.Contain("internal static bool TryBuildForAmbientProbe("));
             Assert.That(parametersSource, Does.Contain("internal static bool TryBuildMaterialParameters("));
+            Assert.That(parametersSource, Does.Contain("volume.atmosphericScattering.value ? 1.0f : 0.0f"));
+            Assert.That(parametersSource, Does.Not.Contain("volume.IsHeightFogActive() ? 1.0f : 0.0f"));
         }
 
         [Test]
@@ -138,6 +146,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("private int m_LocalSkyPrecomputationHash;"));
             Assert.That(source, Does.Contain("private bool m_HasLocalSkyPrecomputation;"));
+            Assert.That(source, Does.Contain("private void ApplyAtmosphereLutHandle(VividSkyData skyData)"));
             Assert.That(source, Does.Contain("private bool TryPrepareLocalSkyPrecomputation("));
             Assert.That(source, Does.Contain("&& m_LocalSkyPrecomputationHash == localSkyPrecomputationHash"));
             Assert.That(source, Does.Contain("&& HasLocalSkyPrecomputationTextures()"));
@@ -147,17 +156,19 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("properties.SetTexture(AerosolSingleScatteringTextureId, m_AerosolSingleScatteringTable);"));
             Assert.That(source, Does.Contain("properties.SetTexture(MultipleScatteringTextureId, m_MultipleScatteringTable);"));
             Assert.That(source, Does.Contain("private bool HasLocalSkyPrecomputationTextures()"));
+            Assert.That(source, Does.Contain("private void ImportSkyViewLutForPass(RenderGraphTexture skyViewLut)"));
+            Assert.That(source, Does.Contain("PassRecorder.ImportTexture(skyViewLut, handle);"));
         }
 
         [Test]
         public void Source_UsesPlanetRelativeCameraPositionForRealtimeLocalSkyShader()
         {
-            var shaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "PhysicallyBasedSkyBridge.hlsl"));
+            var shaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "PhysicallyBasedSky.shader"));
 
-            Assert.That(shaderSource, Does.Contain("const float3 O = _SkyCameraPositionPS.xyz;"));
-            Assert.That(shaderSource, Does.Contain("EvaluatePbrAtmosphere(_SkyCameraPositionPS.xyz, V, tFrag, renderSunDisk, skyColor, skyOpacity);"));
-            Assert.That(shaderSource, Does.Not.Contain("const float3 O = _WorldSpaceCameraPos;"));
-            Assert.That(shaderSource, Does.Not.Contain("EvaluatePbrAtmosphere(_WorldSpaceCameraPos, V, tFrag, renderSunDisk, skyColor, skyOpacity);"));
+            Assert.That(shaderSource, Does.Contain("const float3 O = _PBRSkyCameraPosPS;"));
+            Assert.That(shaderSource, Does.Contain("EvaluatePbrAtmosphere(_PBRSkyCameraPosPS, V, tFrag, renderSunDisk, skyColor, skyOpacity);"));
+            Assert.That(shaderSource, Does.Not.Contain("const float3 O = _SkyCameraPositionPS.xyz;"));
+            Assert.That(shaderSource, Does.Not.Contain("EvaluatePbrAtmosphere(_SkyCameraPositionPS.xyz, V, tFrag, renderSunDisk, skyColor, skyOpacity);"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

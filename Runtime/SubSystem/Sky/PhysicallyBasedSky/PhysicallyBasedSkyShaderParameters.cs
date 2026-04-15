@@ -218,7 +218,7 @@ namespace VividRP.Runtime
                 volume.GetAerosolScaleHeight());
             parameters.skyGroundTint = ToVector4(exposedGroundTint);
             parameters.skyFogParams = new Vector4(
-                volume.IsHeightFogActive() ? 1.0f : 0.0f,
+                volume.atmosphericScattering.value ? 1.0f : 0.0f,
                 volume.fogBaseHeight.value,
                 Mathf.Max(volume.fogDensity.value, 0.0f),
                 Mathf.Max(volume.fogMaxDistance.value, 0.0f));

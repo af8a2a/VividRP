@@ -5,6 +5,7 @@
 - 以 HDRP 天空系统为参考，优先补齐会直接影响画面稳定性、光照一致性、工作流和可扩展性的能力。
 - 不追求逐项复刻 HDRP；只引入对 VividRP 当前架构和项目目标有明确收益的功能。
 - CPU 天空卷积不再进入路线图。天空漫反射和镜面反射卷积统一维持 GPU-only，实现上不再恢复 CPU SH 投影路径。
+- PBRSky 当前相对 HDRP 的 workaround / 兼容层 / 偏差清单见 `Documentation~/PhysicallyBasedSkyHdrpGapInventory.md`。
 
 ## 当前实现现状
 

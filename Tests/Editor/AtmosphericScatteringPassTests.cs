@@ -52,6 +52,15 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Initialize_ConfiguresCameraDepthInputForPointSampling()
+        {
+            var pass = new AtmosphericScatteringPass();
+            var depthTexture = GetFieldValue<RenderGraphTexture>(pass, "m_DepthTexture");
+
+            Assert.That(depthTexture.desc.FilterMode, Is.EqualTo(FilterMode.Point));
+        }
+
+        [Test]
         public void AtmosphericScatteringPass_InheritsFromUnsafePass()
         {
             Assert.That(typeof(UnsafePass).IsAssignableFrom(typeof(AtmosphericScatteringPass)), Is.True);
@@ -90,7 +99,11 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_OutputTexture = RenderGraphTexture.CreateOutput(\"OutputColor\", GraphicsFormat.R16G16B16A16_SFloat);"));
             Assert.That(source, Does.Contain("var atmosphericScatteringLut = ResolveTexture(m_AtmosphericScatteringLutHandle);"));
             Assert.That(source, Does.Contain("var hasValidAtmosphericScatteringLut = HasValidAtmosphericScatteringLut(atmosphericScatteringLut);"));
+            Assert.That(source, Does.Contain("m_DepthTexture.desc.FilterMode = FilterMode.Point;"));
+            Assert.That(source, Does.Contain("var hasUsableDepthTexture = HasUsableDepthTexture(depthTexture);"));
             Assert.That(source, Does.Contain("mpb.SetTexture("));
+            Assert.That(source, Does.Contain("SetDepthTexture(mpb, depthTexture);"));
+            Assert.That(source, Does.Contain("properties.SetTexture(DepthTextureId, renderTexture, RenderTextureSubElement.Depth);"));
             Assert.That(source, Does.Contain("AtmosphericScatteringLutId,"));
             Assert.That(source, Does.Contain("hasValidAtmosphericScatteringLut ? atmosphericScatteringLut : m_FallbackAtmosphericScatteringLut);"));
             Assert.That(source, Does.Contain("mpb.SetMatrix(PixelCoordToViewDirWSId, m_IsActive ? m_Parameters.pixelCoordToViewDirWS : Matrix4x4.identity);"));
@@ -119,17 +132,25 @@ namespace VividRP.Editor.Tests
             Assert.That(hlslSource, Does.Contain("TEXTURE2D_X(_InputColor);"));
             Assert.That(hlslSource, Does.Contain("TEXTURE2D_X_FLOAT(_DepthTexture);"));
             Assert.That(hlslSource, Does.Contain("float4 _SkyFogParams;"));
+            Assert.That(hlslSource, Does.Contain("float3 GetViewForwardDir()"));
+            Assert.That(hlslSource, Does.Contain("float ComputeAtmosphericScatteringDistance(float3 V, float linearDepth, bool isSky)"));
             Assert.That(hlslSource, Does.Contain("float4 FragOpaqueAtmosphericScattering(Varyings input) : SV_Target"));
-            Assert.That(hlslSource, Does.Contain("float2 positionNDC = saturate(input.positionCS.xy * _ScreenSize.zw);"));
-            Assert.That(hlslSource, Does.Contain("float3 positionWS = ComputeWorldSpacePosition(positionNDC, deviceDepth, UNITY_MATRIX_I_VP);"));
-            Assert.That(hlslSource, Does.Contain("float3 viewDirectionWS = -GetSkyViewDirWS(input.positionCS.xy);"));
-            Assert.That(hlslSource, Does.Contain("EvaluateCameraAtmosphericScattering(viewDirectionWS, positionNDC, tFrag, fogColor, fogOpacity);"));
+            Assert.That(hlslSource, Does.Contain("float2 positionSS = input.positionCS.xy;"));
+            Assert.That(hlslSource, Does.Contain("bool isSky = IsFarDepth(deviceDepth);"));
+            Assert.That(hlslSource, Does.Contain("float2 positionNDC = positionSS * _ScreenSize.zw;"));
+            Assert.That(hlslSource, Does.Contain("float3 V = GetSkyViewDirWS(positionSS);"));
+            Assert.That(hlslSource, Does.Contain("float linearDepth = LinearEyeDepth(deviceDepth, _ZBufferParams);"));
+            Assert.That(hlslSource, Does.Contain("float viewForwardDot = dot(-V, GetViewForwardDir());"));
+            Assert.That(hlslSource, Does.Contain("float tFrag = isSky ? maxFogDistance : linearDepth * rcp(viewForwardDot);"));
+            Assert.That(hlslSource, Does.Contain("EvaluateCameraAtmosphericScattering(-V, positionNDC, tFrag, fogColor, fogOpacity);"));
             Assert.That(hlslSource, Does.Contain("float3 SanitizeSkyRadiance(float3 color)"));
             Assert.That(hlslSource, Does.Contain("if (_SkyFogParams.x <= 0.5f)"));
-            Assert.That(hlslSource, Does.Contain("if (_SkyFogParams.w > 0.0f)"));
             Assert.That(hlslSource, Does.Contain("float3 composedColor = fogColor + (1.0f - fogOpacity) * inputColor.rgb;"));
             Assert.That(hlslSource, Does.Not.Contain("struct OpaqueAtmosphericScatteringPositionInputs"));
             Assert.That(hlslSource, Does.Not.Contain("bool EvaluateAtmosphericScattering("));
+            Assert.That(hlslSource, Does.Not.Contain("float3 positionWS = ComputeWorldSpacePosition(positionNDC, deviceDepth, UNITY_MATRIX_I_VP);"));
+            Assert.That(hlslSource, Does.Not.Contain("float tFrag = distance(positionWS, _WorldSpaceCameraPos);"));
+            Assert.That(hlslSource, Does.Not.Contain("if (IsFarDepth(deviceDepth))"));
         }
 
         private static T GetFieldValue<T>(AtmosphericScatteringPass pass, string fieldName)

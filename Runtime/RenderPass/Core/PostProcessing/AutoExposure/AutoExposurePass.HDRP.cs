@@ -227,14 +227,10 @@ namespace VividRP.Runtime.RenderPass
                 ? Mathf.Max(m_AutoExposureSettings.curveMapMaxEV100, curveMinEV100 + 1e-4f)
                 : 0f;
             var meteringMode = ResolveHDRPMeteringMode();
-            var variants = new Vector4(
-                1f,
-                meteringMode,
-                m_AutoExposureSettings.adaptationMode == AutoExposureAdaptationMode.Progressive
-                && m_AutoExposureSettings.forceTarget <= 0.5f
-                    ? 1f
-                    : 0f,
-                evaluateMode);
+            var adaptationMode = m_AutoExposureSettings.adaptationMode == AutoExposureAdaptationMode.Progressive
+                                 && m_AutoExposureSettings.forceTarget <= 0.5f
+                ? 1
+                : 0;
 
             cmd.SetComputeVectorParam(
                 m_AutoExposureCompute,
@@ -250,7 +246,7 @@ namespace VividRP.Runtime.RenderPass
                 new Vector4(
                     curveMinEV100,
                     curveMaxEV100,
-                    1f,
+                    ColorUtils.lensImperfectionExposureScale,
                     m_AutoExposureSettings.targetMidGray));
             cmd.SetComputeVectorParam(
                 m_AutoExposureCompute,
@@ -292,10 +288,13 @@ namespace VividRP.Runtime.RenderPass
                     m_AutoExposureSettings.exposureSpeedDown,
                     0f,
                     0f));
-            cmd.SetComputeVectorParam(
+            cmd.SetComputeIntParams(
                 m_AutoExposureCompute,
                 HdrpVariantsId,
-                variants);
+                1,
+                meteringMode,
+                adaptationMode,
+                (int)evaluateMode);
         }
 
         private void BindHDRPManualExposureParameters(CommandBuffer cmd, int kernel)
@@ -323,7 +322,7 @@ namespace VividRP.Runtime.RenderPass
                 new Vector4(
                     0f,
                     0f,
-                    1f,
+                    ColorUtils.lensImperfectionExposureScale,
                     m_AutoExposureSettings.targetMidGray));
             cmd.SetComputeVectorParam(
                 m_AutoExposureCompute,
@@ -345,10 +344,13 @@ namespace VividRP.Runtime.RenderPass
                 m_AutoExposureCompute,
                 HdrpAdaptationParamsId,
                 Vector4.zero);
-            cmd.SetComputeVectorParam(
+            cmd.SetComputeIntParams(
                 m_AutoExposureCompute,
                 HdrpVariantsId,
-                new Vector4(1f, 0f, 0f, 0f));
+                1,
+                0,
+                0,
+                0);
         }
 
         private Texture ResolveHDRPExposureCurveTexture()
@@ -371,18 +373,18 @@ namespace VividRP.Runtime.RenderPass
                 : Texture2D.blackTexture;
         }
 
-        private float ResolveHDRPMeteringMode()
+        private int ResolveHDRPMeteringMode()
         {
             switch (m_AutoExposureSettings.meteringMode)
             {
                 case AutoExposureMeteringMode.Spot:
-                    return 1f;
+                    return 1;
                 case AutoExposureMeteringMode.CenterWeighted:
-                    return 2f;
+                    return 2;
                 case AutoExposureMeteringMode.MaskWeighted:
-                    return m_AutoExposureSettings.meterMask != null ? 3f : 0f;
+                    return m_AutoExposureSettings.meterMask != null ? 3 : 0;
                 default:
-                    return 0f;
+                    return 0;
             }
         }
 

@@ -43,6 +43,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_ColorInput = RenderGraphTexture.CreateInput("Color", GraphicsFormat.R16G16B16A16_SFloat);
             m_DepthTexture = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.None, DepthBits.Depth32);
+            m_DepthTexture.desc.FilterMode = FilterMode.Point;
             m_OutputTexture = RenderGraphTexture.CreateOutput("OutputColor", GraphicsFormat.R16G16B16A16_SFloat);
             m_OutputTexture.desc.ClearBuffer = false;
         }
@@ -110,8 +111,10 @@ namespace VividRP.Runtime.RenderPass.Core
             if (!hasValidAtmosphericScatteringLut)
                 EnsureFallbackAtmosphericScatteringLut();
 
+            var hasUsableDepthTexture = HasUsableDepthTexture(depthTexture);
+
             var fogParams = m_IsActive
-                            && depthTexture != Texture2D.whiteTexture
+                            && hasUsableDepthTexture
                             && m_HasMaterialParameters
                             && hasValidAtmosphericScatteringLut
                 ? m_Parameters.skyFogParams
@@ -119,7 +122,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetTexture(InputColorId, inputColor);
-            mpb.SetTexture(DepthTextureId, depthTexture);
+            SetDepthTexture(mpb, depthTexture);
             mpb.SetTexture(
                 AtmosphericScatteringLutId,
                 hasValidAtmosphericScatteringLut ? atmosphericScatteringLut : m_FallbackAtmosphericScatteringLut);
@@ -229,6 +232,28 @@ namespace VividRP.Runtime.RenderPass.Core
                 return handle.rt;
 
             return handle.externalTexture;
+        }
+
+        private static void SetDepthTexture(MaterialPropertyBlock properties, Texture texture)
+        {
+            if (properties == null)
+                return;
+
+            if (texture is RenderTexture renderTexture
+                && (renderTexture.depth > 0
+                    || renderTexture.depthStencilFormat != GraphicsFormat.None))
+            {
+                properties.SetTexture(DepthTextureId, renderTexture, RenderTextureSubElement.Depth);
+                return;
+            }
+
+            properties.SetTexture(DepthTextureId, texture);
+        }
+
+        private static bool HasUsableDepthTexture(Texture texture)
+        {
+            return texture != null
+                && texture != Texture2D.whiteTexture;
         }
 
         private static bool HasValidAtmosphericScatteringLut(Texture texture)

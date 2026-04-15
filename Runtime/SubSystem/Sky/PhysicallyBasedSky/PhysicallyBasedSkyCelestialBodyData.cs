@@ -182,7 +182,8 @@ namespace VividRP.Runtime
                     ref celestialBodyCount,
                     ref celestialLightExposure,
                     ref celestialLightHash,
-                    ref celestialBodyHash))
+                    ref celestialBodyHash)
+                && celestialLightCount > 0)
             {
                 return celestialLightHash;
             }
@@ -239,7 +240,8 @@ namespace VividRP.Runtime
             if (!visibleLights.IsCreated || visibleLights.Length == 0)
                 return false;
 
-            var hasDirectionalLights = false;
+            var initialCelestialLightCount = celestialLightCount;
+            var initialCelestialBodyCount = celestialBodyCount;
 
             for (var lightIndex = 0; lightIndex < visibleLights.Length && celestialBodyCount < MaxCelestialBodies; lightIndex++)
             {
@@ -247,7 +249,6 @@ namespace VividRP.Runtime
                 if (light == null || light.type != LightType.Directional)
                     continue;
 
-                hasDirectionalLights = true;
                 TryAppendDirectionalLight(
                     light,
                     includeEmissiveLights: true,
@@ -278,7 +279,8 @@ namespace VividRP.Runtime
                     ref celestialBodyHash);
             }
 
-            return hasDirectionalLights;
+            return celestialLightCount > initialCelestialLightCount
+                   || celestialBodyCount > initialCelestialBodyCount;
         }
 
         private static bool TryBuildFromSceneLights(
@@ -308,7 +310,8 @@ namespace VividRP.Runtime
                 return lhs.GetEntityId().CompareTo(rhs.GetEntityId());
             });
 
-            var hasDirectionalLights = false;
+            var initialCelestialLightCount = celestialLightCount;
+            var initialCelestialBodyCount = celestialBodyCount;
 
             for (var lightIndex = 0; lightIndex < lights.Length && celestialBodyCount < MaxCelestialBodies; lightIndex++)
             {
@@ -316,7 +319,6 @@ namespace VividRP.Runtime
                 if (light == null || light.type != LightType.Directional)
                     continue;
 
-                hasDirectionalLights = true;
                 TryAppendDirectionalLight(
                     light,
                     includeEmissiveLights: true,
@@ -347,7 +349,8 @@ namespace VividRP.Runtime
                     ref celestialBodyHash);
             }
 
-            return hasDirectionalLights;
+            return celestialLightCount > initialCelestialLightCount
+                   || celestialBodyCount > initialCelestialBodyCount;
         }
 
         private static int BuildFallbackApproximateCelestialBodies(

@@ -23,18 +23,6 @@ namespace VividRP.Runtime
         private static readonly int SkyUseLutId = Shader.PropertyToID("_SkyUseLUT");
         private static readonly int DirectionalShadowTextureId = Shader.PropertyToID("_DirectionalShadowTexture");
         private static readonly int PixelCoordToViewDirWSId = Shader.PropertyToID("_PixelCoordToViewDirWS");
-        private static readonly int SkyBakingViewSampleCountId = Shader.PropertyToID("_SkyBakingViewSampleCount");
-        private static readonly int SkyCameraPositionPsId = Shader.PropertyToID("_SkyCameraPositionPS");
-        private static readonly int SkySunDirectionId = Shader.PropertyToID("_SkySunDirection");
-        private static readonly int SkySunColorId = Shader.PropertyToID("_SkySunColor");
-        private static readonly int SkyPlanetParamsId = Shader.PropertyToID("_SkyPlanetParams");
-        private static readonly int SkyAirScatteringId = Shader.PropertyToID("_SkyAirScattering");
-        private static readonly int SkyAirExtinctionId = Shader.PropertyToID("_SkyAirExtinction");
-        private static readonly int SkyAerosolScatteringId = Shader.PropertyToID("_SkyAerosolScattering");
-        private static readonly int SkyAerosolExtinctionId = Shader.PropertyToID("_SkyAerosolExtinction");
-        private static readonly int SkyOzoneExtinctionId = Shader.PropertyToID("_SkyOzoneExtinction");
-        private static readonly int SkyOzoneParamsId = Shader.PropertyToID("_SkyOzoneParams");
-        private static readonly int SkyGroundTintId = Shader.PropertyToID("_SkyGroundTint");
         private static readonly int CelestialBodyDatasId = Shader.PropertyToID("_CelestialBodyDatas");
         private static readonly int MultiScatteringLutId = Shader.PropertyToID("_MultiScatteringLUT");
         private static readonly int MultiScatteringLutRwId = Shader.PropertyToID("_MultiScatteringLUT_RW");
@@ -93,6 +81,7 @@ namespace VividRP.Runtime
         private PhysicallyBasedSkyShaderParameters m_RenderParameters;
         private PhysicallyBasedSkyMaterialParameters m_RenderMaterialParameters;
         private bool m_HasRenderMaterialParameters;
+        private readonly PhysicallyBasedSkyAtmosphereLutCache m_AtmosphereLutCache = new();
         private readonly PhysicallyBasedSkyCelestialBodyBuffer m_CelestialBodyBuffer = new();
 
         public SkyType Type => SkyType.PhysicallyBased;
@@ -104,6 +93,7 @@ namespace VividRP.Runtime
             m_AtmosphereLutCompute = resources?.AtmosphereLUTCompute;
             m_GroundIrradiancePrecomputationCompute = resources?.GroundIrradiancePrecomputationCompute;
             m_InScatteredRadiancePrecomputationCompute = resources?.InScatteredRadiancePrecomputationCompute;
+            m_AtmosphereLutCache.Build(resources);
             if (shader != null)
             {
                 m_SkyMaterial = CoreUtils.CreateEngineMaterial(shader);
@@ -136,6 +126,12 @@ namespace VividRP.Runtime
                 generatedCubemapViewSampleCount,
                 ResolveCameraPosition(context, volume.planetRadius.value),
                 PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialBodyHash(context));
+        }
+
+        public void UpdateFrameResources(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd)
+        {
+            m_AtmosphereLutCache.Update(context, cmd);
+            ApplyAtmosphereLutHandle(skyData);
         }
 
         public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd, int skyHash, bool forceRebuild)
@@ -215,6 +211,7 @@ namespace VividRP.Runtime
             skyData.ambientProbeExposure = 0.0f;
             skyData.ambientProbeRotation = 0.0f;
             skyData.ambientProbeHash = hash;
+            ApplyAtmosphereLutHandle(skyData);
         }
 
         public void PrepareSkyRendering(
@@ -232,6 +229,7 @@ namespace VividRP.Runtime
             m_RenderContext = context;
             m_RenderVolume = VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume();
             m_RenderViewport = ResolveRenderViewport(context.cameraData, colorTarget);
+            ImportSkyViewLutForPass(skyViewLut);
             m_HasRenderMaterialParameters = false;
             m_ShouldRenderSky = m_SkyMaterial != null
                                 && skyData != null
@@ -280,17 +278,6 @@ namespace VividRP.Runtime
             properties.SetTexture(SkyViewLutId, skyViewTexture ?? Texture2D.blackTexture);
             properties.SetFloat(SkyUseLutId, skyViewTexture != null ? 1.0f : 0.0f);
             properties.SetTexture(DirectionalShadowTextureId, directionalShadowTexture ?? Texture2D.whiteTexture);
-            properties.SetVector(SkyCameraPositionPsId, m_RenderParameters.skyCameraPositionPS);
-            properties.SetVector(SkySunDirectionId, m_RenderParameters.skySunDirection);
-            properties.SetVector(SkySunColorId, m_RenderParameters.skySunColor);
-            properties.SetVector(SkyPlanetParamsId, m_RenderParameters.skyPlanetParams);
-            properties.SetVector(SkyAirScatteringId, m_RenderParameters.skyAirScattering);
-            properties.SetVector(SkyAirExtinctionId, m_RenderParameters.skyAirExtinction);
-            properties.SetVector(SkyAerosolScatteringId, m_RenderParameters.skyAerosolScattering);
-            properties.SetVector(SkyAerosolExtinctionId, m_RenderParameters.skyAerosolExtinction);
-            properties.SetVector(SkyOzoneExtinctionId, m_RenderParameters.skyOzoneExtinction);
-            properties.SetVector(SkyOzoneParamsId, m_RenderParameters.skyOzoneParams);
-            properties.SetVector(SkyGroundTintId, m_RenderParameters.skyGroundTint);
             if (m_HasRenderMaterialParameters)
                 PhysicallyBasedSkyMaterialPropertyBinder.Apply(properties, m_RenderMaterialParameters, m_RenderVolume);
 
@@ -355,6 +342,7 @@ namespace VividRP.Runtime
             m_RenderParameters = default;
             m_RenderMaterialParameters = default;
             m_HasRenderMaterialParameters = false;
+            m_AtmosphereLutCache.Dispose();
             m_CelestialBodyBuffer.Dispose();
         }
 
@@ -581,24 +569,12 @@ namespace VividRP.Runtime
             var skyViewLutHash = hasMaterialParameters
                 ? PhysicallyBasedSkyAtmosphereLutCache.ComputeSkyViewLutHash(parameters, materialParameters, context)
                 : 0;
-            var useSkyViewLut = SkyManager.TryGetSkyViewLut(skyViewLutHash, out var skyViewLut) && hasMaterialParameters;
+            var useSkyViewLut = m_AtmosphereLutCache.TryGetSkyViewLut(skyViewLutHash, out var skyViewLut) && hasMaterialParameters;
 
             properties = new MaterialPropertyBlock();
             properties.SetFloat(SkyUseLutId, useSkyViewLut ? 1.0f : 0.0f);
             properties.SetTexture(SkyViewLutId, useSkyViewLut ? skyViewLut : Texture2D.blackTexture);
             properties.SetTexture(DirectionalShadowTextureId, Texture2D.whiteTexture);
-            properties.SetInt(SkyBakingViewSampleCountId, Mathf.Max(viewSampleCount, 1));
-            properties.SetVector(SkyCameraPositionPsId, parameters.skyCameraPositionPS);
-            properties.SetVector(SkySunDirectionId, parameters.skySunDirection);
-            properties.SetVector(SkySunColorId, parameters.skySunColor);
-            properties.SetVector(SkyPlanetParamsId, parameters.skyPlanetParams);
-            properties.SetVector(SkyAirScatteringId, parameters.skyAirScattering);
-            properties.SetVector(SkyAirExtinctionId, parameters.skyAirExtinction);
-            properties.SetVector(SkyAerosolScatteringId, parameters.skyAerosolScattering);
-            properties.SetVector(SkyAerosolExtinctionId, parameters.skyAerosolExtinction);
-            properties.SetVector(SkyOzoneExtinctionId, parameters.skyOzoneExtinction);
-            properties.SetVector(SkyOzoneParamsId, parameters.skyOzoneParams);
-            properties.SetVector(SkyGroundTintId, parameters.skyGroundTint);
             m_CelestialBodyBuffer.Update(context);
             m_SkyMaterial.SetBuffer(CelestialBodyDatasId, m_CelestialBodyBuffer.Buffer);
             var useLocalSkyPrecomputation = hasMaterialParameters
@@ -923,9 +899,35 @@ namespace VividRP.Runtime
                 return skyViewTexture;
 
             var skyViewHash = PhysicallyBasedSkyAtmosphereLutCache.ComputeSkyViewLutHash(m_RenderParameters, m_RenderMaterialParameters, m_RenderContext);
-            return SkyManager.TryGetSkyViewLut(skyViewHash, out skyViewTexture)
+            return m_AtmosphereLutCache.TryGetSkyViewLut(skyViewHash, out skyViewTexture)
                 ? skyViewTexture
                 : null;
+        }
+
+        private void ApplyAtmosphereLutHandle(VividSkyData skyData)
+        {
+            if (skyData == null)
+                return;
+
+            var atmosphericScatteringHandle = m_AtmosphereLutCache.AtmosphericScatteringHandle;
+            skyData.atmosphericScatteringLutHandle =
+                atmosphericScatteringHandle != null
+                && atmosphericScatteringHandle.rt != null
+                && atmosphericScatteringHandle.rt.IsCreated()
+                    ? atmosphericScatteringHandle
+                    : null;
+        }
+
+        private void ImportSkyViewLutForPass(RenderGraphTexture skyViewLut)
+        {
+            if (skyViewLut == null || !PassRecorder.IsPassTextureImportActive)
+                return;
+
+            var handle = m_AtmosphereLutCache.SkyViewHandle;
+            if (handle == null || handle.rt == null || !handle.rt.IsCreated())
+                return;
+
+            PassRecorder.ImportTexture(skyViewLut, handle);
         }
 
         private static Texture ResolveTexture(RenderGraphTexture texture)

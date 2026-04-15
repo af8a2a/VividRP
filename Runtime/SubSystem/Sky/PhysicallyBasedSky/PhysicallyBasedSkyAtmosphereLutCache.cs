@@ -100,6 +100,13 @@ namespace VividRP.Runtime
             m_IsActive = PhysicallyBasedSkyShaderParameterBuilder.TryBuildForCamera(volume, context, out m_Parameters);
             m_HasMaterialParameters = PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(volume, context, out m_MaterialParameters);
             m_CelestialBodyBuffer.Update(context);
+            if (m_HasMaterialParameters)
+            {
+                m_MaterialParameters.celestialLightCount = m_CelestialBodyBuffer.CelestialLightCount;
+                m_MaterialParameters.celestialBodyCount = m_CelestialBodyBuffer.CelestialBodyCount;
+                m_MaterialParameters.celestialLightExposure = Mathf.Max(m_CelestialBodyBuffer.CelestialLightExposure, 1.0f);
+            }
+
             ResetFrameState();
 
             if (!m_IsActive

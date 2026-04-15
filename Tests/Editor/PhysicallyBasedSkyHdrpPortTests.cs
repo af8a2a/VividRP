@@ -22,30 +22,26 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PhysicallyBasedSkyEntryShader_UsesSingleTopLevelPath()
+        public void PhysicallyBasedSkyEntryShader_UsesHdrpStyleSplitIncludes()
         {
-            var topLevelShaderPath = GetPackageFilePath("Shaders", "Core", "Private", "PhysicallyBasedSky.shader");
-            var topLevelShaderDirectory = Path.GetDirectoryName(topLevelShaderPath);
-            Assert.That(topLevelShaderDirectory, Is.Not.Null);
-            var legacyShaderPath = Path.Combine(
-                topLevelShaderDirectory,
-                "Sky",
-                "PhysicallyBasedSky.shader");
-            var shaderSource = File.ReadAllText(topLevelShaderPath);
+            var shaderPath = GetPackageFilePath("Shaders", "Core", "Private", "Sky", "PhysicallyBasedSky.shader");
+            var shaderSource = File.ReadAllText(shaderPath);
 
-            Assert.That(File.Exists(topLevelShaderPath), Is.True);
-            Assert.That(File.Exists(legacyShaderPath), Is.False);
+            Assert.That(File.Exists(shaderPath), Is.True);
             Assert.That(shaderSource, Does.Contain("Shader \"Hidden/VividRP/PhysicallyBasedSky\""));
+            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Private/Sky/PhysicallyBasedSkyRendering.hlsl\""));
+            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Private/Sky/PhysicallyBasedSkyEvaluation.hlsl\""));
             Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Private/Sky/PhysicallyBasedSkyBridge.hlsl\""));
             Assert.That(shaderSource, Does.Contain("Name \"PhysicallyBasedSkyBaking\""));
             Assert.That(shaderSource, Does.Contain("Name \"PhysicallyBasedSky\""));
+            Assert.That(shaderSource, Does.Contain("float4 RenderSky(Varyings input)"));
             Assert.That(shaderSource, Does.Not.Contain("Packages/com.unity.render-pipelines.high-definition"));
         }
 
         [Test]
         public void RetiredHdrpFullscreenRenderChain_KeepsOnlyExpectedLegacyFilesRemoved()
         {
-            Assert.That(File.Exists(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "PhysicallyBasedSkyRendering.hlsl")), Is.False);
+            Assert.That(File.Exists(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "PhysicallyBasedSkyRendering.hlsl")), Is.True);
             Assert.That(File.Exists(GetPackageFilePath("Shaders", "Core", "Private", "AtmosphericScattering", "AtmosphericScatteringSky.hlsl")), Is.False);
             Assert.That(File.Exists(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "GroundIrradiancePrecomputation.compute")), Is.True);
             Assert.That(File.Exists(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "InScatteredRadiancePrecomputation.compute")), Is.True);
@@ -57,7 +53,9 @@ namespace VividRP.Editor.Tests
         public void ActiveHdrpSkySupportFiles_UseLocalIncludes()
         {
             var commonSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "PhysicallyBasedSkyCommon.hlsl"));
+            var renderingSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "PhysicallyBasedSkyRendering.hlsl"));
             var evaluationSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "PhysicallyBasedSkyEvaluation.hlsl"));
+            var bridgeSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "PhysicallyBasedSkyBridge.hlsl"));
             var ambientProbeConvolutionSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "AmbientProbeConvolution.compute"));
             var skyLutSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "SkyLUTGenerator.compute"));
             var groundIrradianceSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "GroundIrradiancePrecomputation.compute"));
@@ -74,10 +72,20 @@ namespace VividRP.Editor.Tests
             Assert.That(commonSource, Does.Contain("#define _PlanetaryRadius _PlanetCenterRadius.w"));
             Assert.That(commonSource, Does.Not.Contain("Packages/com.unity.render-pipelines.high-definition"));
 
+            Assert.That(renderingSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl\""));
+            Assert.That(renderingSource, Does.Contain("#include \"SkyUtils.hlsl\""));
+            Assert.That(renderingSource, Does.Contain("float3 RenderSunDisk(inout float tFrag, float tExit, float3 V)"));
+            Assert.That(renderingSource, Does.Not.Contain("Packages/com.unity.render-pipelines.high-definition"));
+
             Assert.That(evaluationSource, Does.Contain("#include \"PhysicallyBasedSkyCommon.hlsl\""));
             Assert.That(evaluationSource, Does.Contain("void EvaluateDistantAtmosphere("));
             Assert.That(evaluationSource, Does.Contain("void EvaluateCameraAtmosphericScattering("));
             Assert.That(evaluationSource, Does.Not.Contain("Packages/com.unity.render-pipelines.high-definition"));
+
+            Assert.That(bridgeSource, Does.Contain("float _SkyUseLUT;"));
+            Assert.That(bridgeSource, Does.Contain("void EvaluateDistantAtmosphereWithLut("));
+            Assert.That(bridgeSource, Does.Not.Contain("EvaluateAtmosphericFallback"));
+            Assert.That(bridgeSource, Does.Not.Contain("float3 EvaluateSky("));
 
             Assert.That(ambientProbeConvolutionSource, Does.Contain("Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"));
             Assert.That(ambientProbeConvolutionSource, Does.Not.Contain("Packages/com.unity.render-pipelines.high-definition"));

@@ -7,12 +7,14 @@ namespace VividRP.Runtime.RenderPass
 {
     public sealed partial class AutoExposurePass : UnsafePass
     {
-        private const int AutoExposureHistogramBucketCount = 64;
+        private const int UnrealAutoExposureHistogramBucketCount = 64;
+        private const int HdrpAutoExposureHistogramBucketCount = 128;
         private const int AutoExposureHistogramThreadGroupSizeX = 8;
         private const int AutoExposureHistogramThreadGroupSizeY = 8;
         private const int HdrpAutoExposurePrePassSize = 1024;
         private const int HdrpAutoExposureReductionSize = 32;
-        private const int HdrpAutoExposureThreadGroupSize = 8;
+        private const int HdrpHistogramThreadGroupSizeX = 16;
+        private const int HdrpHistogramThreadGroupSizeY = 8;
         private const string ClearHistogramKernelName = "ClearHistogram";
         private const string BuildHistogramKernelName = "BuildHistogram";
         private const string ResolveExposureKernelName = "ResolveExposure";
@@ -99,6 +101,7 @@ namespace VividRP.Runtime.RenderPass
                 Screen.height);
 
             RefreshAutoExposureImplementation();
+            EnsureAutoExposureHistogramBuffer();
 
             m_EnableAutoExposure = m_PostProcessingAllowed
                 && m_ExposureData != null
@@ -291,7 +294,6 @@ namespace VividRP.Runtime.RenderPass
         private bool SupportsHdrpHistogramAutoExposurePath()
         {
             return m_AutoExposureCompute != null
-                && m_HdrpHistogramClearKernel >= 0
                 && m_HdrpHistogramGenKernel >= 0
                 && m_HdrpHistogramReduceKernel >= 0
                 && m_HdrpResetKernel >= 0;
@@ -400,8 +402,9 @@ namespace VividRP.Runtime.RenderPass
 
         private void EnsureAutoExposureHistogramBuffer()
         {
+            var histogramBucketCount = ResolveActiveAutoExposureHistogramBucketCount();
             if (m_AutoExposureHistogramBuffer != null
-                && m_AutoExposureHistogramBuffer.count == AutoExposureHistogramBucketCount
+                && m_AutoExposureHistogramBuffer.count == histogramBucketCount
                 && m_AutoExposureHistogramBuffer.stride == sizeof(uint))
             {
                 return;
@@ -410,9 +413,16 @@ namespace VividRP.Runtime.RenderPass
             m_AutoExposureHistogramBuffer?.Dispose();
             m_AutoExposureHistogramBuffer = new GraphicsBuffer(
                 GraphicsBuffer.Target.Structured,
-                AutoExposureHistogramBucketCount,
+                histogramBucketCount,
                 sizeof(uint));
             m_AutoExposureHistogramBuffer.name = "VividRP Auto Exposure Histogram";
+        }
+
+        private int ResolveActiveAutoExposureHistogramBucketCount()
+        {
+            return m_AutoExposureImplementation == AutoExposureImplementationPath.HDRP
+                ? HdrpAutoExposureHistogramBucketCount
+                : UnrealAutoExposureHistogramBucketCount;
         }
 
         private void EnsureHdrpScratchTextures()

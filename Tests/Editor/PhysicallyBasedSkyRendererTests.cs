@@ -195,6 +195,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_AtmosphereLutCache.TryGetSkyViewLut(skyViewHash, out skyViewTexture)"));
             Assert.That(source, Does.Contain("SkyCubemapBakingUtility.RenderSkyToCubemap("));
             Assert.That(source, Does.Contain("EnsureLocalSkyPrecomputation("));
+            Assert.That(source, Does.Contain("var includeSunInBaking = SkySettingsVolume.GetIncludeSunInBaking(skySettings);"));
+            Assert.That(source, Does.Contain("SkySettingsVolume.GetIncludeSunInBaking(skySettings),"));
+            Assert.That(source, Does.Contain("materialParameters.renderSunDisk = includeSunInBaking && volume.renderSunDisk.value ? 1 : 0;"));
 
             Assert.That(parametersSource, Does.Contain("internal static bool TryBuildForSkyBaking("));
             Assert.That(parametersSource, Does.Contain("internal static bool TryBuildForAmbientProbe("));

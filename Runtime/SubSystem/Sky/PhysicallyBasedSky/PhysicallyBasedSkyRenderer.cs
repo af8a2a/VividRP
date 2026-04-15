@@ -121,10 +121,12 @@ namespace VividRP.Runtime
 
             var generatedCubemapViewSampleCount = SkySettingsVolume.GetGeneratedCubemapViewSampleCount(skySettings);
             var planet = ResolvePlanet(context, volume, skySettings);
+            var includeSunInBaking = SkySettingsVolume.GetIncludeSunInBaking(skySettings);
             return HashCode.Combine(
                 volume.GetHashCode(),
                 generatedCubemapViewSampleCount,
                 planet.ComputeHashCode(),
+                includeSunInBaking,
                 ResolveCameraPosition(context, volume.planetRadius.value),
                 PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialBodyHash(context));
         }
@@ -177,6 +179,7 @@ namespace VividRP.Runtime
                 volume.GetHashCode(),
                 generatedCubemapViewSampleCount,
                 ResolvePlanet(context, volume, skySettings).ComputeHashCode(),
+                SkySettingsVolume.GetIncludeSunInBaking(skySettings),
                 PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialBodyHash(context));
 
             var ambientProbeRebuildReason = ResolveAmbientProbeCubemapRebuildReason(hash, generatedCubemapResolution);
@@ -567,6 +570,7 @@ namespace VividRP.Runtime
                 ? PhysicallyBasedSkyAtmosphereLutCache.ComputeSkyViewLutHash(parameters, materialParameters, context)
                 : 0;
             var useSkyViewLut = m_AtmosphereLutCache.TryGetSkyViewLut(skyViewLutHash, out var skyViewLut) && hasMaterialParameters;
+            var includeSunInBaking = SkySettingsVolume.GetIncludeSunInBaking(VividVolumeManagerUtility.GetSkySettingsVolume());
 
             properties = new MaterialPropertyBlock();
             properties.SetFloat(SkyUseLutId, useSkyViewLut ? 1.0f : 0.0f);
@@ -582,7 +586,10 @@ namespace VividRP.Runtime
                 ApplyLocalSkyPrecomputationTextures(properties);
 
             if (hasMaterialParameters)
+            {
+                materialParameters.renderSunDisk = includeSunInBaking && volume.renderSunDisk.value ? 1 : 0;
                 PhysicallyBasedSkyMaterialPropertyBinder.Apply(properties, materialParameters, volume);
+            }
 
             return true;
         }

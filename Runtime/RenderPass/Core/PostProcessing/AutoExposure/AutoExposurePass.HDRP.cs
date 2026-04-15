@@ -6,6 +6,8 @@ namespace VividRP.Runtime.RenderPass
 {
     partial class AutoExposurePass
     {
+        private static readonly uint[] s_EmptyHdrpHistogramData = new uint[HdrpAutoExposureHistogramBucketCount];
+
         private int m_HdrpFixedExposureKernel = -1;
         private int m_HdrpManualCameraExposureKernel = -1;
         private int m_HdrpHistogramClearKernel = -1;
@@ -44,24 +46,20 @@ namespace VividRP.Runtime.RenderPass
             var currentExposureTexture = m_ExposureData.currentExposureTexture;
             var evaluateMode = AutoExposureExposureModeUtility.UsesCurveRemapping(m_AutoExposureSettings.exposureMode)
                 ? 2u
-                : 1u;
+                : 0u;
 
             if (previousExposureBuffer == null)
                 return false;
 
             if (!m_ExposureData.hasValidHistory)
             {
-                BindHDRPAutoExposureParameters(cmd, m_HdrpResetKernel, 0u);
                 cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpResetKernel, HdrpOutputTextureId, previousExposureTexture);
                 cmd.DispatchCompute(m_AutoExposureCompute, m_HdrpResetKernel, 1, 1, 1);
             }
 
-            BindHDRPAutoExposureParameters(cmd, m_HdrpHistogramClearKernel, 0u);
-            cmd.SetComputeBufferParam(m_AutoExposureCompute, m_HdrpHistogramClearKernel, AutoExposureHistogramBufferId,
-                m_AutoExposureHistogramBuffer);
-            cmd.DispatchCompute(m_AutoExposureCompute, m_HdrpHistogramClearKernel, 1, 1, 1);
+            cmd.SetBufferData(m_AutoExposureHistogramBuffer, s_EmptyHdrpHistogramData);
 
-            BindHDRPAutoExposureParameters(cmd, m_HdrpHistogramGenKernel, 0u);
+            BindHDRPHistogramGenerationParameters(cmd);
             cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpHistogramGenKernel, HdrpSourceTextureId,
                 source.innerHandle);
             cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpHistogramGenKernel, HdrpPreviousExposureTextureId,
@@ -73,11 +71,11 @@ namespace VividRP.Runtime.RenderPass
             cmd.DispatchCompute(
                 m_AutoExposureCompute,
                 m_HdrpHistogramGenKernel,
-                CoreUtils.DivRoundUp(m_AutoExposureWidth, HdrpAutoExposureThreadGroupSize),
-                CoreUtils.DivRoundUp(m_AutoExposureHeight, HdrpAutoExposureThreadGroupSize),
+                CoreUtils.DivRoundUp(Mathf.Max(1, m_AutoExposureWidth / 2), HdrpHistogramThreadGroupSizeX),
+                CoreUtils.DivRoundUp(Mathf.Max(1, m_AutoExposureHeight / 2), HdrpHistogramThreadGroupSizeY),
                 1);
 
-            BindHDRPAutoExposureParameters(cmd, m_HdrpHistogramReduceKernel, evaluateMode);
+            BindHDRPHistogramReductionParameters(cmd, evaluateMode);
             cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpHistogramReduceKernel,
                 HdrpPreviousExposureTextureId, previousExposureTexture);
             cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpHistogramReduceKernel, HdrpExposureCurveTextureId, curveTexture);
@@ -86,6 +84,7 @@ namespace VividRP.Runtime.RenderPass
             cmd.SetComputeBufferParam(m_AutoExposureCompute, m_HdrpHistogramReduceKernel, AutoExposureCurrentBufferId, m_ExposureData.currentExposureBuffer);
             cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpHistogramReduceKernel, HdrpOutputTextureId, currentExposureTexture);
             cmd.DispatchCompute(m_AutoExposureCompute, m_HdrpHistogramReduceKernel, 1, 1, 1);
+            cmd.SetGlobalTexture(HdrpPreviousExposureTextureId, currentExposureTexture);
             return true;
         }
 
@@ -210,27 +209,15 @@ namespace VividRP.Runtime.RenderPass
             if (cmd == null || kernel < 0 || m_AutoExposureCompute == null)
                 return;
 
-            var compensationStops =
-                Mathf.Log(Mathf.Max(m_AutoExposureSettings.exposureCompensationSettings, 1e-6f), 2f);
-            var minExposureEV100 =
-                AutoExposureSettingsResolver.ResolveAverageSceneEV100FromLuminance(m_AutoExposureSettings
-                    .minAverageLuminance);
-            var maxExposureEV100 =
-                AutoExposureSettingsResolver.ResolveAverageSceneEV100FromLuminance(m_AutoExposureSettings
-                    .maxAverageLuminance);
-            var usesCurveRemapping =
-                AutoExposureExposureModeUtility.UsesCurveRemapping(m_AutoExposureSettings.exposureMode);
-            var curveMinEV100 = usesCurveRemapping
-                ? m_AutoExposureSettings.curveMapMinEV100
-                : 0f;
-            var curveMaxEV100 = usesCurveRemapping
-                ? Mathf.Max(m_AutoExposureSettings.curveMapMaxEV100, curveMinEV100 + 1e-4f)
-                : 0f;
-            var meteringMode = ResolveHDRPMeteringMode();
-            var adaptationMode = m_AutoExposureSettings.adaptationMode == AutoExposureAdaptationMode.Progressive
-                                 && m_AutoExposureSettings.forceTarget <= 0.5f
-                ? 1
-                : 0;
+            ResolveHDRPAutoExposureContext(
+                out var compensationStops,
+                out var minExposureEV100,
+                out var maxExposureEV100,
+                out var curveMinEV100,
+                out var curveMaxEV100,
+                out var histogramScaleBias,
+                out var meteringMode,
+                out var adaptationMode);
 
             cmd.SetComputeVectorParam(
                 m_AutoExposureCompute,
@@ -252,8 +239,8 @@ namespace VividRP.Runtime.RenderPass
                 m_AutoExposureCompute,
                 HdrpHistogramRangeParamsId,
                 new Vector4(
-                    m_AutoExposureSettings.histogramScale,
-                    m_AutoExposureSettings.histogramBias,
+                    histogramScaleBias.x,
+                    histogramScaleBias.y,
                     m_AutoExposureSettings.exposureLowPercent,
                     m_AutoExposureSettings.exposureHighPercent));
             cmd.SetComputeVectorParam(
@@ -284,8 +271,128 @@ namespace VividRP.Runtime.RenderPass
                 m_AutoExposureCompute,
                 HdrpAdaptationParamsId,
                 new Vector4(
-                    m_AutoExposureSettings.exposureSpeedUp,
                     m_AutoExposureSettings.exposureSpeedDown,
+                    m_AutoExposureSettings.exposureSpeedUp,
+                    0f,
+                    0f));
+            cmd.SetComputeIntParams(
+                m_AutoExposureCompute,
+                HdrpVariantsId,
+                1,
+                meteringMode,
+                adaptationMode,
+                (int)evaluateMode);
+        }
+
+        private void BindHDRPHistogramGenerationParameters(CommandBuffer cmd)
+        {
+            if (cmd == null || m_AutoExposureCompute == null)
+                return;
+
+            ResolveHDRPAutoExposureContext(
+                out _,
+                out _,
+                out _,
+                out _,
+                out _,
+                out var histogramScaleBias,
+                out var meteringMode,
+                out var adaptationMode);
+
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpExposureParams2Id,
+                new Vector4(
+                    0f,
+                    0f,
+                    ColorUtils.lensImperfectionExposureScale,
+                    m_AutoExposureSettings.targetMidGray));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpHistogramRangeParamsId,
+                new Vector4(
+                    histogramScaleBias.x,
+                    histogramScaleBias.y,
+                    m_AutoExposureSettings.exposureLowPercent,
+                    m_AutoExposureSettings.exposureHighPercent));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                AutoExposureScreenSizeId,
+                new Vector4(
+                    m_AutoExposureWidth,
+                    m_AutoExposureHeight,
+                    1f / Mathf.Max(1, m_AutoExposureWidth),
+                    1f / Mathf.Max(1, m_AutoExposureHeight)));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpProceduralMaskParamsId,
+                Vector4.zero);
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpProceduralMaskParams2Id,
+                Vector4.zero);
+            cmd.SetComputeIntParams(
+                m_AutoExposureCompute,
+                HdrpVariantsId,
+                1,
+                meteringMode,
+                adaptationMode,
+                0);
+        }
+
+        private void BindHDRPHistogramReductionParameters(CommandBuffer cmd, uint evaluateMode)
+        {
+            if (cmd == null || m_AutoExposureCompute == null)
+                return;
+
+            ResolveHDRPAutoExposureContext(
+                out var compensationStops,
+                out var minExposureEV100,
+                out var maxExposureEV100,
+                out var curveMinEV100,
+                out var curveMaxEV100,
+                out var histogramScaleBias,
+                out var meteringMode,
+                out var adaptationMode);
+
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpExposureParamsId,
+                new Vector4(
+                    compensationStops,
+                    minExposureEV100,
+                    maxExposureEV100,
+                    0f));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpExposureParams2Id,
+                new Vector4(
+                    curveMinEV100,
+                    curveMaxEV100,
+                    ColorUtils.lensImperfectionExposureScale,
+                    m_AutoExposureSettings.targetMidGray));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpHistogramRangeParamsId,
+                new Vector4(
+                    histogramScaleBias.x,
+                    histogramScaleBias.y,
+                    m_AutoExposureSettings.exposureLowPercent,
+                    m_AutoExposureSettings.exposureHighPercent));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpHistogramExposureParamsId,
+                new Vector4(
+                    m_AutoExposureSettings.exposureCompensationCurveMinEV100,
+                    m_AutoExposureSettings.exposureCompensationCurveInvRange,
+                    m_AutoExposureSettings.exposureCompensationCurveEnabled ? 1f : 0f,
+                    m_AutoExposureSettings.targetMidGray));
+            cmd.SetComputeVectorParam(
+                m_AutoExposureCompute,
+                HdrpAdaptationParamsId,
+                new Vector4(
+                    m_AutoExposureSettings.exposureSpeedDown,
+                    m_AutoExposureSettings.exposureSpeedUp,
                     0f,
                     0f));
             cmd.SetComputeIntParams(
@@ -386,6 +493,44 @@ namespace VividRP.Runtime.RenderPass
                 default:
                     return 0;
             }
+        }
+
+        private void ResolveHDRPAutoExposureContext(
+            out float compensationStops,
+            out float minExposureEV100,
+            out float maxExposureEV100,
+            out float curveMinEV100,
+            out float curveMaxEV100,
+            out Vector2 histogramScaleBias,
+            out int meteringMode,
+            out int adaptationMode)
+        {
+            compensationStops = Mathf.Log(Mathf.Max(m_AutoExposureSettings.exposureCompensationSettings, 1e-6f), 2f);
+            minExposureEV100 = AutoExposureSettingsResolver.ResolveAverageSceneEV100FromLuminance(
+                m_AutoExposureSettings.minAverageLuminance);
+            maxExposureEV100 = AutoExposureSettingsResolver.ResolveAverageSceneEV100FromLuminance(
+                m_AutoExposureSettings.maxAverageLuminance);
+
+            var usesCurveRemapping = AutoExposureExposureModeUtility.UsesCurveRemapping(m_AutoExposureSettings.exposureMode);
+            curveMinEV100 = usesCurveRemapping ? m_AutoExposureSettings.curveMapMinEV100 : 0f;
+            curveMaxEV100 = usesCurveRemapping
+                ? Mathf.Max(m_AutoExposureSettings.curveMapMaxEV100, curveMinEV100 + 1e-4f)
+                : 0f;
+            histogramScaleBias = ResolveHDRPHistogramScaleBias(minExposureEV100, maxExposureEV100);
+            meteringMode = ResolveHDRPMeteringMode();
+            adaptationMode = m_AutoExposureSettings.adaptationMode == AutoExposureAdaptationMode.Progressive
+                             && m_AutoExposureSettings.forceTarget <= 0.5f
+                ? 1
+                : 0;
+        }
+
+        private static Vector2 ResolveHDRPHistogramScaleBias(float minExposureEV100, float maxExposureEV100)
+        {
+            var resolvedMaxExposureEV100 = Mathf.Max(maxExposureEV100, minExposureEV100 + 1e-4f);
+            var exposureRange = Mathf.Max(resolvedMaxExposureEV100 - minExposureEV100, 1e-4f);
+            var histogramScale = 1f / exposureRange;
+            var histogramBias = -minExposureEV100 * histogramScale;
+            return new Vector2(histogramScale, histogramBias);
         }
 
         private static void EnsureHDRPScratchTexture(ref RenderTexture texture, int width, int height, string name)

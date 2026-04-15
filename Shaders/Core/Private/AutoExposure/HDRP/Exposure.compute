@@ -1,3 +1,8 @@
+#define HISTOGRAM_BINS 128
+#define HISTOGRAM_WEIGHT_SCALE 2048
+#define PREPASS_TEX_SIZE 1024.0
+#define PREPASS_TEX_HALF_SIZE 512.0
+
 #include "ExposureCommon.hlsl"
 
 #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
@@ -12,11 +17,6 @@
 #pragma kernel KReset
 
 TEXTURE2D(_InputTexture);
-
-#define HISTOGRAM_BINS 64
-#define HISTOGRAM_WEIGHT_SCALE 64
-#define PREPASS_TEX_SIZE 1024.0
-#define PREPASS_TEX_HALF_SIZE 512.0
 //#pragma enable_d3d11_debug_symbols
 
 //
@@ -53,22 +53,21 @@ void KHistogramClear(uint2 dispatchThreadId : SV_DispatchThreadID)
 //
 // Histogram generation
 //
-[numthreads(8,8,1)]
+[numthreads(16,8,1)]
 void KHistogramGen(uint2 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 sourceSize = uint2((uint)ParamScreenSize.x, (uint)ParamScreenSize.y);
-    if (dispatchThreadId.x >= sourceSize.x || dispatchThreadId.y >= sourceSize.y)
+    uint2 fullResCoords = dispatchThreadId << 1u;
+    if (fullResCoords.x >= sourceSize.x || fullResCoords.y >= sourceSize.y)
         return;
 
-    float2 uv = (float2(dispatchThreadId) + 0.5) * ParamInvScreenSize;
+    float2 uv = (float2(fullResCoords) + 0.5) * ParamInvScreenSize;
     float luma = SampleLuminance(uv);
-    float weight = WeightSample(dispatchThreadId, float2(sourceSize), luma);
+    float weight = WeightSample(fullResCoords, float2(sourceSize), luma);
     if (weight <= 0.0)
         return;
 
-    float logLuma = log2(max(luma, 1e-4));
-    float histogramPosition = saturate(GetHistogramPositionFromLogLuminance(logLuma));
-    uint bucket = min((uint)(histogramPosition * (HISTOGRAM_BINS - 1) + 0.5), (uint)(HISTOGRAM_BINS - 1));
+    uint bucket = GetHistogramBinLocation(luma);
     uint weightedCount = max(1u, (uint)round(weight * HISTOGRAM_WEIGHT_SCALE));
     InterlockedAdd(_HistogramBuffer[bucket], weightedCount);
 }
@@ -76,19 +75,23 @@ void KHistogramGen(uint2 dispatchThreadId : SV_DispatchThreadID)
 //
 // Histogram reduction & evaluation
 //
-[numthreads(1,1,1)]
-void KHistogramReduce(uint2 dispatchThreadId : SV_DispatchThreadID)
+[numthreads(HISTOGRAM_BINS,1,1)]
+void KHistogramReduce(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
+    if (dispatchThreadId.x != 0u)
+        return;
+
+    uint2 outputCoords = uint2(0u, 0u);
     float histogramSum = 0.0;
 
     [unroll]
-    for (uint bucketIndex = 0u; bucketIndex < HISTOGRAM_BINS; ++bucketIndex)
-        histogramSum += (float)_HistogramBuffer[bucketIndex];
+    for (uint sumBucketIndex = 0u; sumBucketIndex < HISTOGRAM_BINS; ++sumBucketIndex)
+        histogramSum += (float)_HistogramBuffer[sumBucketIndex];
 
     if (histogramSum <= 1e-4)
     {
         float4 previousExposureState = _PreviousExposureBuffer[0];
-        _OutputTexture[dispatchThreadId] = _PreviousExposureTexture[uint2(0u, 0u)].xy;
+        _OutputTexture[outputCoords] = _PreviousExposureTexture[uint2(0u, 0u)].xy;
         WriteExposureBuffer(
             previousExposureState.x,
             previousExposureState.y,
@@ -99,13 +102,13 @@ void KHistogramReduce(uint2 dispatchThreadId : SV_DispatchThreadID)
 
     float minFractionSum = histogramSum * ParamHistogramLowPercent;
     float maxFractionSum = histogramSum * ParamHistogramHighPercent;
-    float weightedLogLuminanceSum = 0.0;
+    float weightedEVSum = 0.0;
     float weightedSampleCount = 0.0;
 
     [unroll]
-    for (uint bucketIndex = 0u; bucketIndex < HISTOGRAM_BINS; ++bucketIndex)
+    for (uint reduceBucketIndex = 0u; reduceBucketIndex < HISTOGRAM_BINS; ++reduceBucketIndex)
     {
-        float localValue = (float)_HistogramBuffer[bucketIndex];
+        float localValue = (float)_HistogramBuffer[reduceBucketIndex];
 
         float subtractedLow = min(localValue, minFractionSum);
         localValue -= subtractedLow;
@@ -115,14 +118,13 @@ void KHistogramReduce(uint2 dispatchThreadId : SV_DispatchThreadID)
         localValue = min(localValue, maxFractionSum);
         maxFractionSum -= localValue;
 
-        float logLuminance = GetLogLuminanceFromHistogramPosition(bucketIndex / (float)(HISTOGRAM_BINS - 1));
-        weightedLogLuminanceSum += logLuminance * localValue;
+        float binEV100 = BinLocationToEV(reduceBucketIndex);
+        weightedEVSum += binEV100 * localValue;
         weightedSampleCount += localValue;
     }
 
-    float averageLogLuminance = weightedLogLuminanceSum / max(weightedSampleCount, 1e-4);
-    float averageSceneLuminance = exp2(averageLogLuminance);
-    float averageSceneEV100 = ComputeEV100FromAvgLuminance(max(averageSceneLuminance, 1e-4), MeterCalibrationConstant);
+    float averageSceneEV100 = weightedEVSum / max(weightedSampleCount, 1e-4);
+    float averageSceneLuminance = ConvertAvgEV100ToAvgLuminance(averageSceneEV100, MeterCalibrationConstant);
 
     UNITY_BRANCH
     switch (ParamEvaluateMode)
@@ -136,7 +138,7 @@ void KHistogramReduce(uint2 dispatchThreadId : SV_DispatchThreadID)
             exposure = clamp(exposure, minExposure, maxExposure);
             float currentExposureScale = ConvertEV100ToExposure(exposure, LensImperfectionExposureScale);
             float targetExposureScale = ConvertEV100ToExposure(targetExposure, LensImperfectionExposureScale);
-            _OutputTexture[dispatchThreadId] = float2(currentExposureScale, exposure);
+            _OutputTexture[outputCoords] = float2(currentExposureScale, exposure);
             WriteExposureBuffer(
                 currentExposureScale,
                 targetExposureScale,
@@ -152,7 +154,7 @@ void KHistogramReduce(uint2 dispatchThreadId : SV_DispatchThreadID)
             exposure = clamp(exposure, ParamExposureLimitMin, ParamExposureLimitMax);
             float currentExposureScale = ConvertEV100ToExposure(exposure, LensImperfectionExposureScale);
             float targetExposureScale = ConvertEV100ToExposure(targetExposure, LensImperfectionExposureScale);
-            _OutputTexture[dispatchThreadId] = float2(currentExposureScale, exposure);
+            _OutputTexture[outputCoords] = float2(currentExposureScale, exposure);
             WriteExposureBuffer(
                 currentExposureScale,
                 targetExposureScale,

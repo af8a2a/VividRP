@@ -67,14 +67,23 @@ float GetPreviousExposureEV100()
     return _PreviousExposureTexture[uint2(0u, 0u)].y;
 }
 
-float GetHistogramPositionFromLogLuminance(float logLuminance)
+float GetFractionWithinHistogram(float averageLuminance)
 {
-    return logLuminance * ParamHistogramScale + ParamHistogramBias;
+    return ComputeEV100FromAvgLuminance(max(averageLuminance, 1e-4), MeterCalibrationConstant)
+        * ParamHistogramScale
+        + ParamHistogramBias;
 }
 
-float GetLogLuminanceFromHistogramPosition(float histogramPosition)
+uint GetHistogramBinLocation(float averageLuminance)
 {
-    return (histogramPosition - ParamHistogramBias) / max(ParamHistogramScale, 1e-4);
+    return min(
+        (uint)(saturate(GetFractionWithinHistogram(averageLuminance)) * (HISTOGRAM_BINS - 1)),
+        (uint)(HISTOGRAM_BINS - 1));
+}
+
+float BinLocationToEV(uint binIdx)
+{
+    return (binIdx * rcp(float(HISTOGRAM_BINS - 1)) - ParamHistogramBias) / max(ParamHistogramScale, 1e-4);
 }
 
 float ConvertAvgEV100ToAvgLuminance(float averageSceneEV100, float calibrationConstant)

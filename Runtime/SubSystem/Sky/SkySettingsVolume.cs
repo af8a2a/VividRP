@@ -48,6 +48,8 @@ namespace VividRP.Runtime
         public EnumParameter<SkyType> skyType = new(SkyType.HDRI);
         public EnumParameter<SkyUpdateMode> updateMode = new(SkyUpdateMode.OnChanged);
         public MinFloatParameter updatePeriod = new(0.0f, 0.0f);
+        [Tooltip("When enabled, VividRP uses the Sun Disk in baked lighting.")]
+        public BoolParameter includeSunInBaking = new(false);
         public EnumParameter<SkyGeneratedCubemapQuality> generatedCubemapQuality = new(SkyGeneratedCubemapQuality.PlatformDefault);
         public EnumParameter<RenderingSpace> renderingSpace = new(RenderingSpace.World);
         [AdditionalProperty]
@@ -60,6 +62,7 @@ namespace VividRP.Runtime
             skyType ??= new EnumParameter<SkyType>(SkyType.HDRI);
             updateMode ??= new EnumParameter<SkyUpdateMode>(SkyUpdateMode.OnChanged);
             updatePeriod ??= new MinFloatParameter(0.0f, 0.0f);
+            includeSunInBaking ??= new BoolParameter(false);
             generatedCubemapQuality ??= new EnumParameter<SkyGeneratedCubemapQuality>(SkyGeneratedCubemapQuality.PlatformDefault);
             renderingSpace ??= new EnumParameter<RenderingSpace>(RenderingSpace.World);
             centerMode ??= new EnumParameter<PlanetMode>(PlanetMode.Automatic);
@@ -75,6 +78,11 @@ namespace VividRP.Runtime
         internal static PlanetMode GetPlanetCenterMode(SkySettingsVolume settings = null)
         {
             return settings?.centerMode?.value ?? PlanetMode.Automatic;
+        }
+
+        internal static bool GetIncludeSunInBaking(SkySettingsVolume settings = null)
+        {
+            return settings?.includeSunInBaking?.value ?? false;
         }
 
         internal static Vector3 GetPlanetCenter(SkySettingsVolume settings = null, float planetRadius = DefaultEarthRadius)

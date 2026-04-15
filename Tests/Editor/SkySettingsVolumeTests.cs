@@ -41,6 +41,26 @@ namespace VividRP.Editor.Tests
             Assert.That(SkySettingsVolume.GetGeneratedCubemapViewSampleCount(), Is.EqualTo(12));
             Assert.That(SkySettingsVolume.GetGeneratedCubemapLightSampleCount(), Is.EqualTo(6));
             Assert.That(SkySettingsVolume.GetGeneratedCubemapResolution(), Is.EqualTo(32));
+            Assert.That(SkySettingsVolume.GetIncludeSunInBaking(), Is.False);
+        }
+
+        [Test]
+        public void GetIncludeSunInBaking_ReturnsConfiguredValue()
+        {
+            var volume = ScriptableObject.CreateInstance<SkySettingsVolume>();
+
+            try
+            {
+                Assert.That(SkySettingsVolume.GetIncludeSunInBaking(volume), Is.False);
+
+                volume.includeSunInBaking.value = true;
+
+                Assert.That(SkySettingsVolume.GetIncludeSunInBaking(volume), Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(volume);
+            }
         }
 
         [Test]
@@ -48,10 +68,12 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkySettingsVolume.cs"));
 
+            Assert.That(source, Does.Contain("includeSunInBaking ??= new BoolParameter(false);"));
             Assert.That(source, Does.Contain("generatedCubemapQuality ??= new EnumParameter<SkyGeneratedCubemapQuality>(SkyGeneratedCubemapQuality.PlatformDefault);"));
             Assert.That(source, Does.Contain("renderingSpace ??= new EnumParameter<RenderingSpace>(RenderingSpace.World);"));
             Assert.That(source, Does.Contain("centerMode ??= new EnumParameter<PlanetMode>(PlanetMode.Automatic);"));
             Assert.That(source, Does.Contain("planetCenter ??= new Vector3Parameter(new Vector3(0.0f, -DefaultEarthRadius, 0.0f));"));
+            Assert.That(source, Does.Contain("internal static bool GetIncludeSunInBaking(SkySettingsVolume settings = null)"));
             Assert.That(source, Does.Contain("internal readonly struct SkyPlanet"));
         }
 

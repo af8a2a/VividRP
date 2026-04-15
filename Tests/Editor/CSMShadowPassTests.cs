@@ -14,11 +14,17 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_ShadowAtlas.desc.IsShadowMap = true;"));
             Assert.That(source, Does.Contain("BatchCullingProjectionType.Orthographic"));
             Assert.That(source, Does.Contain("settings.splitIndex = i;"));
+            Assert.That(source, Does.Contain("m_ShadowCasterBiases[i] = ComputeShadowCasterBias(mainVisibleLight, m_ProjMatrices[i], m_CascadeResolution, m_DepthBias, m_NormalBias);"));
             Assert.That(source, Does.Contain("var gpuProjMatrix = GL.GetGPUProjectionMatrix(m_ProjMatrices[cascadeIndex], true);"));
             Assert.That(source, Does.Contain("var cascadeShaderGlobals = BuildCascadeShaderGlobals(cascadeIndex, gpuProjMatrix);"));
             Assert.That(source, Does.Contain("ConstantBuffer.PushGlobal(nativeCmd, cascadeShaderGlobals, ShaderVariablesGlobal.ConstantBufferShaderId);"));
+            Assert.That(source, Does.Contain("nativeCmd.SetGlobalDepthBias(1.0f, 2.5f);"));
+            Assert.That(source, Does.Contain("nativeCmd.SetGlobalVector(ShadowBiasId, m_ShadowCasterBiases[cascadeIndex]);"));
+            Assert.That(source, Does.Contain("nativeCmd.SetGlobalVector(LightDirectionId, m_ShadowLightDirection);"));
+            Assert.That(source, Does.Contain("nativeCmd.SetGlobalVector(LightPositionId, m_ShadowLightPosition);"));
             Assert.That(source, Does.Contain("shadowData.viewProjMatrices[i] = BuildWorldToShadowMatrix(m_ProjMatrices[i], m_ViewMatrices[i]);"));
             Assert.That(source, Does.Contain("private static Matrix4x4 BuildWorldToShadowMatrix(Matrix4x4 projMatrix, Matrix4x4 viewMatrix)"));
+            Assert.That(source, Does.Contain("private static Vector4 ComputeShadowCasterBias("));
             Assert.That(source, Does.Contain("textureScaleAndBias.m22 = 0.5f;"));
             Assert.That(source, Does.Contain("shadowGlobals._VividMatrixVP = viewProjMatrix;"));
             Assert.That(source, Does.Contain("shadowGlobals._VividWorldToCamera = viewMatrix;"));

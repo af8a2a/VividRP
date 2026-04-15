@@ -18,24 +18,23 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void CSMShadowResolveCompute_UsesExplicitDepthCompareAndTreatsOutOfBoundsShadowCoordsAsFullyLit()
+        public void CSMShadowResolveCompute_UsesHardwareComparisonAndCascadeScaledReceiverBias()
         {
             var source = File.ReadAllText(GetComputeShaderSourcePath());
 
-            Assert.That(source, Does.Contain("#if UNITY_REVERSED_Z"));
-            Assert.That(source, Does.Not.Contain("SamplerComparisonState sampler_CSMShadowAtlas;"));
+            Assert.That(source, Does.Contain("SamplerComparisonState sampler_CSMShadowAtlas;"));
             Assert.That(source, Does.Contain("return mul(_CSMViewProjMatrices[cascadeIndex], float4(positionWS, 1.0)).xyz;"));
-            Assert.That(source, Does.Contain("float CompareShadowDepth(float receiverDepth, float shadowMapDepth)"));
-            Assert.That(source, Does.Contain("return receiverDepth >= shadowMapDepth ? 1.0 : 0.0;"));
-            Assert.That(source, Does.Contain("return receiverDepth <= shadowMapDepth ? 1.0 : 0.0;"));
-            Assert.That(source, Does.Contain("float shadowMapDepth = LoadShadowDepth(sampleTexel);"));
-            Assert.That(source, Does.Contain("return _CSMShadowAtlas.Load(int3(sampleTexel, 0));"));
+            Assert.That(source, Does.Contain("float GetCascadeWorldTexelSize(int cascadeIndex)"));
+            Assert.That(source, Does.Contain("return (2.0 * cascadeRadius) / max((float)_CSMCascadeResolution, 1.0);"));
+            Assert.That(source, Does.Contain("float SampleShadowPCF3x3(float2 atlasUV, float depth, int cascadeIndex)"));
+            Assert.That(source, Does.Contain("float2 sampleUV = clamp(atlasUV + float2(x, y) * texelSize, cascadeMinUV, cascadeMaxUV);"));
+            Assert.That(source, Does.Contain("_CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, sampleUV, depth);"));
+            Assert.That(source, Does.Not.Contain("_CSMShadowAtlas.Load(int3(sampleTexel, 0));"));
             Assert.That(source, Does.Contain("bool IsWithinShadowMapBounds(float3 shadowCoord)"));
-            Assert.That(source, Does.Contain("float ApplyShadowDepthBias(float shadowDepth)"));
-            Assert.That(source, Does.Contain("return shadowDepth + _CSMDepthBias * 0.0001;"));
-            Assert.That(source, Does.Contain("return shadowDepth - _CSMDepthBias * 0.0001;"));
-            Assert.That(source, Does.Contain("shadowCoord.z = ApplyShadowDepthBias(shadowCoord.z);"));
+            Assert.That(source, Does.Contain("float receiverNormalBias = _CSMNormalBias * GetCascadeWorldTexelSize(cascadeIndex);"));
+            Assert.That(source, Does.Not.Contain("shadowCoord.z = ApplyShadowDepthBias(shadowCoord.z);"));
             Assert.That(source, Does.Contain("if (!IsWithinShadowMapBounds(shadowCoord))"));
+            Assert.That(source, Does.Contain("float shadow = SampleShadowPCF3x3(atlasUV, shadowCoord.z, cascadeIndex);"));
             Assert.That(source, Does.Contain("_DirectionalShadowTexture[pixelCoord] = 1.0;"));
         }
 

@@ -27,6 +27,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int CSMOutputHeightId = Shader.PropertyToID("_CSMOutputHeight");
         private static readonly int CSMLightDirectionWSId = Shader.PropertyToID("_CSMLightDirectionWS");
         private static readonly int CSMAtlasResolutionId = Shader.PropertyToID("_CSMAtlasResolution");
+        private static readonly int CSMCascadeResolutionId = Shader.PropertyToID("_CSMCascadeResolution");
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
@@ -57,6 +58,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_DepthBias;
         private float m_NormalBias;
         private int m_AtlasResolution;
+        private int m_CascadeResolution;
 
         public CSMShadowResolvePass()
         {
@@ -111,6 +113,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DepthBias = shadowData.depthBias;
             m_NormalBias = shadowData.normalBias;
             m_AtlasResolution = shadowData.atlasResolution;
+            m_CascadeResolution = shadowData.cascadeResolution;
 
             for (int i = 0; i < VividShadowData.MaxCascadeCount; i++)
             {
@@ -157,6 +160,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_ResolveCompute, CSMOutputHeightId, m_DirectionalShadowTexture.desc.Height);
             cmd.SetComputeVectorParam(m_ResolveCompute, CSMLightDirectionWSId, m_LightDirectionWS);
             cmd.SetComputeIntParam(m_ResolveCompute, CSMAtlasResolutionId, m_AtlasResolution);
+            cmd.SetComputeIntParam(m_ResolveCompute, CSMCascadeResolutionId, m_CascadeResolution);
 
             cmd.DispatchCompute(m_ResolveCompute, m_Kernel,
                 m_DispatchGroupCountX, m_DispatchGroupCountY, 1);

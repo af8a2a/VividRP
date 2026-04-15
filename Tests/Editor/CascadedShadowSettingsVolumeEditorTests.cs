@@ -52,8 +52,6 @@ namespace VividRP.Editor.Tests
                 Assert.That(editorType.GetField("m_CascadeSplit2", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_CascadeSplit3", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ShadowResolution", flags)?.GetValue(editor), Is.Not.Null);
-                Assert.That(editorType.GetField("m_DepthBias", flags)?.GetValue(editor), Is.Not.Null);
-                Assert.That(editorType.GetField("m_NormalBias", flags)?.GetValue(editor), Is.Not.Null);
             }
             finally
             {
@@ -79,7 +77,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("GUILayout.Label(\"Cascade splits\""));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Directional Light\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Atlas\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Bias\")"));
+            Assert.That(source, Does.Contain("Depth Bias, Normal Bias, and Slope-Scale Depth Bias are configured on the shadow-casting directional light."));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

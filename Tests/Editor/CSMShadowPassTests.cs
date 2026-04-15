@@ -14,11 +14,15 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_ShadowAtlas.desc.IsShadowMap = true;"));
             Assert.That(source, Does.Contain("BatchCullingProjectionType.Orthographic"));
             Assert.That(source, Does.Contain("settings.splitIndex = i;"));
+            Assert.That(source, Does.Contain("TryResolveMainDirectionalLight(lightData, out var light, out var additionalLightData)"));
+            Assert.That(source, Does.Contain("m_DepthBias = Mathf.Max(0.0f, additionalLightData.depthBias);"));
+            Assert.That(source, Does.Contain("m_NormalBias = Mathf.Max(0.0f, additionalLightData.normalBias);"));
+            Assert.That(source, Does.Contain("m_SlopeScaleDepthBias = Mathf.Max(0.0f, additionalLightData.slopeBias);"));
             Assert.That(source, Does.Contain("m_ShadowCasterBiases[i] = ComputeShadowCasterBias(mainVisibleLight, m_ProjMatrices[i], m_CascadeResolution, m_DepthBias, m_NormalBias);"));
             Assert.That(source, Does.Contain("var gpuProjMatrix = GL.GetGPUProjectionMatrix(m_ProjMatrices[cascadeIndex], true);"));
             Assert.That(source, Does.Contain("var cascadeShaderGlobals = BuildCascadeShaderGlobals(cascadeIndex, gpuProjMatrix);"));
             Assert.That(source, Does.Contain("ConstantBuffer.PushGlobal(nativeCmd, cascadeShaderGlobals, ShaderVariablesGlobal.ConstantBufferShaderId);"));
-            Assert.That(source, Does.Contain("nativeCmd.SetGlobalDepthBias(1.0f, 2.5f);"));
+            Assert.That(source, Does.Contain("nativeCmd.SetGlobalDepthBias(1.0f, m_SlopeScaleDepthBias);"));
             Assert.That(source, Does.Contain("nativeCmd.SetGlobalVector(ShadowBiasId, m_ShadowCasterBiases[cascadeIndex]);"));
             Assert.That(source, Does.Contain("nativeCmd.SetGlobalVector(LightDirectionId, m_ShadowLightDirection);"));
             Assert.That(source, Does.Contain("nativeCmd.SetGlobalVector(LightPositionId, m_ShadowLightPosition);"));

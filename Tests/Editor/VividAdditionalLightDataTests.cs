@@ -58,6 +58,9 @@ namespace VividRP.Editor.Tests
             Assert.That(serializedLight.rayTracedShadowRayBias, Is.Not.Null);
             Assert.That(serializedLight.rayTracedShadowDistantRayBias, Is.Not.Null);
             Assert.That(serializedLight.rayTracedShadowSunAngularDiameter, Is.Not.Null);
+            Assert.That(serializedLight.depthBias, Is.Not.Null);
+            Assert.That(serializedLight.normalBias, Is.Not.Null);
+            Assert.That(serializedLight.slopeBias, Is.Not.Null);
             Assert.That(serializedLight.interactsWithSky, Is.Not.Null);
             Assert.That(serializedLight.angularDiameter, Is.Not.Null);
             Assert.That(serializedLight.diameterMultiplierMode, Is.Not.Null);
@@ -193,6 +196,35 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ShadowBiasSettings_DefaultToExpectedValues_OnDirectionalLights()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+
+            var additionalData = light.GetVividAdditionalLightData();
+
+            Assert.That(additionalData.depthBias, Is.EqualTo(VividAdditionalLightData.DefaultShadowDepthBias));
+            Assert.That(additionalData.normalBias, Is.EqualTo(VividAdditionalLightData.DefaultShadowNormalBias));
+            Assert.That(additionalData.slopeBias, Is.EqualTo(VividAdditionalLightData.DefaultShadowSlopeBias));
+        }
+
+        [Test]
+        public void ShadowBiasSettings_ClampToExpectedRanges()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+
+            var additionalData = light.GetVividAdditionalLightData();
+            additionalData.depthBias = 99.0f;
+            additionalData.normalBias = -1.0f;
+            additionalData.slopeBias = 99.0f;
+
+            Assert.That(additionalData.depthBias, Is.EqualTo(VividAdditionalLightData.MaxShadowDepthBias));
+            Assert.That(additionalData.normalBias, Is.EqualTo(0.0f));
+            Assert.That(additionalData.slopeBias, Is.EqualTo(VividAdditionalLightData.MaxShadowSlopeBias));
+        }
+
+        [Test]
         public void CelestialBodySettings_DefaultToExpectedValues_OnDirectionalLights()
         {
             var light = m_GameObject.AddComponent<Light>();
@@ -315,6 +347,37 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void VividLightEditor_ShowsDirectionalShadowBiasControls_OnlyForDirectionalLights()
+        {
+            var directionalLight = m_GameObject.AddComponent<Light>();
+            directionalLight.type = LightType.Directional;
+
+            var serializedDirectionalLight = new VividSerializedLight(new SerializedObject(directionalLight));
+
+            Assert.That(
+                VividLightEditor.ShouldShowDirectionalShadowBiasControls(serializedDirectionalLight),
+                Is.True);
+
+            var pointLightObject = new GameObject("Vivid Point Light Shadow Bias Test");
+
+            try
+            {
+                var pointLight = pointLightObject.AddComponent<Light>();
+                pointLight.type = LightType.Point;
+
+                var serializedPointLight = new VividSerializedLight(new SerializedObject(pointLight));
+
+                Assert.That(
+                    VividLightEditor.ShouldShowDirectionalShadowBiasControls(serializedPointLight),
+                    Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(pointLightObject);
+            }
+        }
+
+        [Test]
         public void VividLightEditor_UsesHdrpStyleCelestialBodyPanel()
         {
             var source = File.ReadAllText(GetPackageFilePath("Editor", "ComponentEditor", "VividLightEditor.cs"));
@@ -334,6 +397,20 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("The Sun Light needs to be a directional light."));
             Assert.That(source, Does.Contain("EditorGUILayout.PropertyField(m_SerializedLight.flareFalloff, s_FlareFalloffLabel);"));
             Assert.That(source, Does.Contain("EditorGUILayout.PropertyField(m_SerializedLight.flareTint, s_FlareTintLabel);"));
+        }
+
+        [Test]
+        public void VividLightEditor_UsesDirectionalShadowBiasPanel()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Editor", "ComponentEditor", "VividLightEditor.cs"));
+
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"CSM Shadow Bias\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Depth Bias\""));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Normal Bias\""));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Slope-Scale Depth Bias\""));
+            Assert.That(source, Does.Contain("EditorGUILayout.Slider(m_SerializedLight.depthBias, 0.0f, 10.0f, s_DepthBiasLabel);"));
+            Assert.That(source, Does.Contain("EditorGUILayout.Slider(m_SerializedLight.normalBias, 0.0f, 10.0f, s_NormalBiasLabel);"));
+            Assert.That(source, Does.Contain("EditorGUILayout.Slider(m_SerializedLight.slopeBias, 0.0f, 5.0f, s_SlopeBiasLabel);"));
         }
 
         [Test]

@@ -308,6 +308,12 @@ namespace VividRP.Runtime
         internal const float DefaultRayTracedShadowRayBias = 0.001f;
         internal const float DefaultRayTracedShadowDistantRayBias = 0.001f;
         internal const float DefaultRayTracedShadowSunAngularDiameter = 0.533f;
+        internal const float DefaultShadowDepthBias = 1.0f;
+        internal const float DefaultShadowNormalBias = 1.0f;
+        internal const float DefaultShadowSlopeBias = 2.5f;
+        internal const float MaxShadowDepthBias = 10.0f;
+        internal const float MaxShadowNormalBias = 10.0f;
+        internal const float MaxShadowSlopeBias = 5.0f;
         internal const float DefaultCelestialBodyAngularDiameter = 0.5f;
         internal const float DefaultCelestialBodyDistance = 149597870700.0f;
         internal const float DefaultManualSunIntensity = 130000.0f;
@@ -335,6 +341,15 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private float m_RayTracedShadowSunAngularDiameter = DefaultRayTracedShadowSunAngularDiameter;
+
+        [SerializeField]
+        private float m_DepthBias = DefaultShadowDepthBias;
+
+        [SerializeField]
+        private float m_NormalBias = DefaultShadowNormalBias;
+
+        [SerializeField]
+        private float m_SlopeBias = DefaultShadowSlopeBias;
 
         [SerializeField]
         private bool m_InteractsWithSky = true;
@@ -506,6 +521,39 @@ namespace VividRP.Runtime
                 ref m_RayTracedShadowSunAngularDiameter,
                 value,
                 DefaultRayTracedShadowSunAngularDiameter);
+        }
+
+        public float depthBias
+        {
+            get => m_DepthBias;
+            set => SetClampedFloat(
+                ref m_DepthBias,
+                value,
+                0.0f,
+                MaxShadowDepthBias,
+                DefaultShadowDepthBias);
+        }
+
+        public float normalBias
+        {
+            get => m_NormalBias;
+            set => SetClampedFloat(
+                ref m_NormalBias,
+                value,
+                0.0f,
+                MaxShadowNormalBias,
+                DefaultShadowNormalBias);
+        }
+
+        public float slopeBias
+        {
+            get => m_SlopeBias;
+            set => SetClampedFloat(
+                ref m_SlopeBias,
+                value,
+                0.0f,
+                MaxShadowSlopeBias,
+                DefaultShadowSlopeBias);
         }
 
         public bool interactsWithSky
@@ -735,6 +783,7 @@ namespace VividRP.Runtime
         {
             m_Light = light;
             ConstrainRayTracedShadowSettings();
+            ConstrainShadowBiasSettings();
             ConstrainCelestialBodySettings();
             RefreshAnimatedState();
             VividLightRenderDatabase.instance.UpdateLightData(m_Light, this);
@@ -799,6 +848,25 @@ namespace VividRP.Runtime
             m_RayTracedShadowSunAngularDiameter = SanitizeRayTracedShadowFloat(
                 m_RayTracedShadowSunAngularDiameter,
                 DefaultRayTracedShadowSunAngularDiameter);
+        }
+
+        private void ConstrainShadowBiasSettings()
+        {
+            m_DepthBias = SanitizeClampedFloat(
+                m_DepthBias,
+                0.0f,
+                MaxShadowDepthBias,
+                DefaultShadowDepthBias);
+            m_NormalBias = SanitizeClampedFloat(
+                m_NormalBias,
+                0.0f,
+                MaxShadowNormalBias,
+                DefaultShadowNormalBias);
+            m_SlopeBias = SanitizeClampedFloat(
+                m_SlopeBias,
+                0.0f,
+                MaxShadowSlopeBias,
+                DefaultShadowSlopeBias);
         }
 
         private void ConstrainCelestialBodySettings()

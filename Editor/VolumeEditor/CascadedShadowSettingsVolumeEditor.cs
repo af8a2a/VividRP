@@ -25,10 +25,6 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Cascade Count", "Number of directional shadow cascades.");
         private static readonly GUIContent s_ShadowResolutionLabel =
             EditorGUIUtility.TrTextContent("Shadow Resolution", "Per-cascade resolution used to build the CSM atlas.");
-        private static readonly GUIContent s_DepthBiasLabel =
-            EditorGUIUtility.TrTextContent("Depth Bias", "Constant depth bias applied while rendering the shadow atlas.");
-        private static readonly GUIContent s_NormalBiasLabel =
-            EditorGUIUtility.TrTextContent("Normal Bias", "Normal-based receiver bias applied during shadow resolve.");
 
         private readonly GUIContent[] m_SplitLabels =
         {
@@ -51,8 +47,6 @@ namespace VividRP.Editor
         private SerializedDataParameter m_CascadeSplit2;
         private SerializedDataParameter m_CascadeSplit3;
         private SerializedDataParameter m_ShadowResolution;
-        private SerializedDataParameter m_DepthBias;
-        private SerializedDataParameter m_NormalBias;
 
         private EditorPrefBoolFlags<WorkingUnit> m_WorkingUnitState;
 
@@ -72,8 +66,6 @@ namespace VividRP.Editor
             m_CascadeSplit2 = Unpack(fetcher.Find(x => x.cascadeSplit2));
             m_CascadeSplit3 = Unpack(fetcher.Find(x => x.cascadeSplit3));
             m_ShadowResolution = Unpack(fetcher.Find(x => x.shadowResolution));
-            m_DepthBias = Unpack(fetcher.Find(x => x.depthBias));
-            m_NormalBias = Unpack(fetcher.Find(x => x.normalBias));
         }
 
         public override void OnInspectorGUI()
@@ -101,10 +93,9 @@ namespace VividRP.Editor
 
             DrawSectionHeader("Atlas");
             PropertyField(m_ShadowResolution, s_ShadowResolutionLabel);
-
-            DrawSectionHeader("Bias");
-            PropertyField(m_DepthBias, s_DepthBiasLabel);
-            PropertyField(m_NormalBias, s_NormalBiasLabel);
+            EditorGUILayout.HelpBox(
+                "Depth Bias, Normal Bias, and Slope-Scale Depth Bias are configured on the shadow-casting directional light.",
+                MessageType.Info);
         }
 
         private void DrawWorkingUnitField()

@@ -19,6 +19,9 @@ namespace VividRP.Editor
         internal SerializedProperty rayTracedShadowRayBias { get; }
         internal SerializedProperty rayTracedShadowDistantRayBias { get; }
         internal SerializedProperty rayTracedShadowSunAngularDiameter { get; }
+        internal SerializedProperty depthBias { get; }
+        internal SerializedProperty normalBias { get; }
+        internal SerializedProperty slopeBias { get; }
         internal SerializedProperty interactsWithSky { get; }
         internal SerializedProperty angularDiameter { get; }
         internal SerializedProperty diameterMultiplierMode { get; }
@@ -70,6 +73,9 @@ namespace VividRP.Editor
             rayTracedShadowRayBias = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowRayBias");
             rayTracedShadowDistantRayBias = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowDistantRayBias");
             rayTracedShadowSunAngularDiameter = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowSunAngularDiameter");
+            depthBias = serializedAdditionalDataObject.FindProperty("m_DepthBias");
+            normalBias = serializedAdditionalDataObject.FindProperty("m_NormalBias");
+            slopeBias = serializedAdditionalDataObject.FindProperty("m_SlopeBias");
             interactsWithSky = serializedAdditionalDataObject.FindProperty("m_InteractsWithSky");
             angularDiameter = serializedAdditionalDataObject.FindProperty("m_AngularDiameter");
             diameterMultiplierMode = serializedAdditionalDataObject.FindProperty("m_DiameterMultiplierMode");

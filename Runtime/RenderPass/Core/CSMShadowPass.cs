@@ -22,6 +22,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_MainLightVisibleIndex = -1;
         private float m_DepthBias;
         private float m_NormalBias;
+        private float m_SlopeScaleDepthBias;
         private ShaderVariablesGlobal m_CameraShaderGlobals;
         private Vector4 m_ShadowLightDirection;
         private Vector4 m_ShadowLightPosition;
@@ -62,6 +63,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_MainLightVisibleIndex = -1;
             m_DepthBias = 0.0f;
             m_NormalBias = 0.0f;
+            m_SlopeScaleDepthBias = 0.0f;
             m_CameraShaderGlobals = default;
             m_ShadowLightDirection = Vector4.zero;
             m_ShadowLightPosition = Vector4.zero;
@@ -78,8 +80,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 || !lightData.hasVisibleLights
                 || lightData.mainLightIndex < 0
                 || lightData.mainLightIndex >= lightData.visibleLights.Length
-                || !DirectionalRayTracedShadowPass.TryResolveMainDirectionalLight(lightData, out var light, out _)
+                || !DirectionalRayTracedShadowPass.TryResolveMainDirectionalLight(lightData, out var light, out var additionalLightData)
                 || light == null
+                || additionalLightData == null
                 || !light.enabled
                 || !light.gameObject.activeInHierarchy
                 || light.shadows == LightShadows.None)
@@ -99,8 +102,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CascadeCount = Mathf.Clamp(csmSettings.cascadeCount.value, 1, VividShadowData.MaxCascadeCount);
             m_CascadeResolution = Mathf.Max(1, csmSettings.shadowResolution.value);
             m_AtlasResolution = m_CascadeResolution * AtlasGridSize;
-            m_DepthBias = Mathf.Max(0.0f, csmSettings.depthBias.value);
-            m_NormalBias = Mathf.Max(0.0f, csmSettings.normalBias.value);
+            m_DepthBias = Mathf.Max(0.0f, additionalLightData.depthBias);
+            m_NormalBias = Mathf.Max(0.0f, additionalLightData.normalBias);
+            m_SlopeScaleDepthBias = Mathf.Max(0.0f, additionalLightData.slopeBias);
             var mainVisibleLight = lightData.mainVisibleLight;
             var lightDirection = -mainVisibleLight.localToWorldMatrix.GetColumn(2);
             var lightPosition = mainVisibleLight.localToWorldMatrix.GetColumn(3);
@@ -198,7 +202,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
                 nativeCmd.SetRenderTarget(m_ShadowAtlas.innerHandle,RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
                 nativeCmd.ClearRenderTarget(true, false, Color.clear);
-                nativeCmd.SetGlobalDepthBias(1.0f, 2.5f);
+                nativeCmd.SetGlobalDepthBias(1.0f, m_SlopeScaleDepthBias);
 
                 for (int cascadeIndex = 0; cascadeIndex < m_CascadeCount; cascadeIndex++)
                 {
@@ -309,6 +313,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CascadeCount = 0;
             m_DepthBias = 0.0f;
             m_NormalBias = 0.0f;
+            m_SlopeScaleDepthBias = 0.0f;
             m_CameraShaderGlobals = default;
             m_ShadowLightDirection = Vector4.zero;
             m_ShadowLightPosition = Vector4.zero;

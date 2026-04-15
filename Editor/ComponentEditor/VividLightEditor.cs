@@ -17,6 +17,10 @@ namespace VividRP.Editor
         private static readonly GUIContent s_UsePipelineSettingsLabel = EditorGUIUtility.TrTextContent("Use Pipeline Settings");
         private static readonly GUIContent s_CustomShadowLayersLabel = EditorGUIUtility.TrTextContent("Custom Shadow Layers");
         private static readonly GUIContent s_ShadowRenderingLayersLabel = EditorGUIUtility.TrTextContent("Shadow Rendering Layers");
+        private static readonly GUIContent s_CSMShadowBiasLabel = EditorGUIUtility.TrTextContent("CSM Shadow Bias");
+        private static readonly GUIContent s_DepthBiasLabel = EditorGUIUtility.TrTextContent("Depth Bias", "Constant depth bias applied while rendering cascaded shadow maps for this directional light.");
+        private static readonly GUIContent s_NormalBiasLabel = EditorGUIUtility.TrTextContent("Normal Bias", "Normal-based bias applied while rendering and resolving cascaded shadow maps for this directional light.");
+        private static readonly GUIContent s_SlopeBiasLabel = EditorGUIUtility.TrTextContent("Slope-Scale Depth Bias", "Slope-scale depth bias applied while rasterizing cascaded shadow maps for this directional light.");
         private static readonly GUIContent s_RayTracedShadowLabel = EditorGUIUtility.TrTextContent("Ray Traced Shadow");
         private static readonly GUIContent s_EnableRayTracedShadowLabel = EditorGUIUtility.TrTextContent("Enable");
         private static readonly GUIContent s_RayTracedShadowRayLengthLabel = EditorGUIUtility.TrTextContent("Ray Length");
@@ -165,6 +169,7 @@ namespace VividRP.Editor
             }
 
             settings.DrawRuntimeShadow();
+            DrawDirectionalShadowBiasInspector();
         }
 
         private void DrawVividInspector()
@@ -208,6 +213,31 @@ namespace VividRP.Editor
                     "Current hard-shadow MVP stores Sun Angular Diameter for a future soft-shadow path and does not sample it yet.",
                     MessageType.Info);
             }
+        }
+
+        private void DrawDirectionalShadowBiasInspector()
+        {
+            if (!ShouldShowDirectionalShadowBiasControls(m_SerializedLight))
+                return;
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField(s_CSMShadowBiasLabel, EditorStyles.boldLabel);
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                EditorGUILayout.Slider(m_SerializedLight.depthBias, 0.0f, 10.0f, s_DepthBiasLabel);
+                EditorGUILayout.Slider(m_SerializedLight.normalBias, 0.0f, 10.0f, s_NormalBiasLabel);
+                EditorGUILayout.Slider(m_SerializedLight.slopeBias, 0.0f, 5.0f, s_SlopeBiasLabel);
+            }
+        }
+
+        internal static bool ShouldShowDirectionalShadowBiasControls(VividSerializedLight serializedLight)
+        {
+            return serializedLight != null
+                && serializedLight.settings != null
+                && !serializedLight.settings.lightType.hasMultipleDifferentValues
+                && serializedLight.settings.light != null
+                && serializedLight.settings.light.type == LightType.Directional;
         }
 
         internal static bool ShouldShowDirectionalRayTracedShadowControls(VividSerializedLight serializedLight)

@@ -64,12 +64,14 @@ namespace VividRP.Runtime
 
             try
             {
+                VividVolumeManagerUtility.Update(camera);
+
                 if (!camera.TryGetCullingParameters(out var cullingParameters))
                     return;
 
+                ApplyShadowDistanceOverride(camera, ref cullingParameters);
                 var cullingResults = context.Cull(ref cullingParameters);
                 context.SetupCameraProperties(camera);
-                VividVolumeManagerUtility.Update(camera);
 
                 cmdBuffer = CommandBufferPool.Get("VividRP");
 
@@ -150,6 +152,19 @@ namespace VividRP.Runtime
 
                 EndCameraRendering(context, camera);
             }
+        }
+
+        private static void ApplyShadowDistanceOverride(Camera camera, ref ScriptableCullingParameters cullingParameters)
+        {
+            if (camera == null)
+                return;
+
+            var shadowDistance = Mathf.Min(cullingParameters.shadowDistance, camera.farClipPlane);
+            var csmSettings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
+            if (csmSettings != null && csmSettings.IsActive())
+                shadowDistance = Mathf.Min(shadowDistance, csmSettings.maxShadowDistance.value);
+
+            cullingParameters.shadowDistance = Mathf.Max(0.0f, shadowDistance);
         }
 
         internal static bool TryRecordAndExecuteRenderGraph(

@@ -15,12 +15,12 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("settings.splitIndex = i;"));
             Assert.That(source, Does.Contain("var gpuProjMatrix = GL.GetGPUProjectionMatrix(m_ProjMatrices[cascadeIndex], true);"));
             Assert.That(source, Does.Contain("var cascadeShaderGlobals = BuildCascadeShaderGlobals(cascadeIndex, gpuProjMatrix);"));
-            Assert.That(source, Does.Contain("nativeCmd.SetViewProjectionMatrices(m_ViewMatrices[cascadeIndex], gpuProjMatrix);"));
             Assert.That(source, Does.Contain("ConstantBuffer.PushGlobal(nativeCmd, cascadeShaderGlobals, ShaderVariablesGlobal.ConstantBufferShaderId);"));
             Assert.That(source, Does.Contain("shadowGlobals._VividMatrixVP = viewProjMatrix;"));
             Assert.That(source, Does.Contain("shadowGlobals._VividWorldToCamera = viewMatrix;"));
             Assert.That(source, Does.Contain("shadowGlobals._VividGlstateMatrixProjection = gpuProjMatrix;"));
             Assert.That(source, Does.Contain("ConstantBuffer.PushGlobal(nativeCmd, m_CameraShaderGlobals, ShaderVariablesGlobal.ConstantBufferShaderId);"));
+            Assert.That(source, Does.Not.Contain("SetViewProjectionMatrices("));
         }
 
         private static string GetPassSourcePath()

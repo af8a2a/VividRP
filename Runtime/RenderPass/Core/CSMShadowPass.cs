@@ -18,8 +18,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_CascadeResolution;
         private int m_MainLightVisibleIndex = -1;
         private float m_DepthBias;
-        private Matrix4x4 m_CameraViewMatrix = Matrix4x4.identity;
-        private Matrix4x4 m_CameraProjMatrix = Matrix4x4.identity;
         private ShaderVariablesGlobal m_CameraShaderGlobals;
 
         private readonly Matrix4x4[] m_ViewMatrices = new Matrix4x4[VividShadowData.MaxCascadeCount];
@@ -55,8 +53,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CascadeCount = 0;
             m_MainLightVisibleIndex = -1;
             m_DepthBias = 0.0f;
-            m_CameraViewMatrix = Matrix4x4.identity;
-            m_CameraProjMatrix = Matrix4x4.identity;
             m_CameraShaderGlobals = default;
 
             var shadowData = frameData.GetOrCreate<VividShadowData>();
@@ -86,8 +82,6 @@ namespace VividRP.Runtime.RenderPass.Core
             var skyData = frameData.GetOrCreate<VividSkyData>();
             m_CullingResults = renderingData.cullingResults;
             m_RenderContext = renderingData.context;
-            m_CameraViewMatrix = cameraData.GetViewMatrix();
-            m_CameraProjMatrix = cameraData.GetGPUProjectionMatrix(renderIntoTexture: true);
             m_CameraShaderGlobals = ShaderVariablesGlobal.Create(cameraData.BuildShaderVariables(temporalData), temporalData, skyData);
             m_MainLightVisibleIndex = lightData.mainLightIndex;
 
@@ -197,7 +191,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
                     nativeCmd.SetViewport(new Rect(offsetX, offsetY, m_CascadeResolution, m_CascadeResolution));
                     nativeCmd.EnableScissorRect(new Rect(offsetX, offsetY, m_CascadeResolution, m_CascadeResolution));
-                    nativeCmd.SetViewProjectionMatrices(m_ViewMatrices[cascadeIndex], gpuProjMatrix);
                     ConstantBuffer.PushGlobal(nativeCmd, cascadeShaderGlobals, ShaderVariablesGlobal.ConstantBufferShaderId);
 
                     var settings = m_ShadowDrawSettings[cascadeIndex];
@@ -208,7 +201,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 nativeCmd.SetGlobalDepthBias(0.0f, 0.0f);
                 nativeCmd.DisableScissorRect();
                 ConstantBuffer.PushGlobal(nativeCmd, m_CameraShaderGlobals, ShaderVariablesGlobal.ConstantBufferShaderId);
-                nativeCmd.SetViewProjectionMatrices(m_CameraViewMatrix, m_CameraProjMatrix);
             }
         }
 
@@ -255,8 +247,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_MainLightVisibleIndex = -1;
             m_CascadeCount = 0;
             m_DepthBias = 0.0f;
-            m_CameraViewMatrix = Matrix4x4.identity;
-            m_CameraProjMatrix = Matrix4x4.identity;
             m_CameraShaderGlobals = default;
         }
     }

@@ -102,30 +102,37 @@
 - `Runtime/ComponentData/VividAdditionalLightData.cs`
 - HDRP 对照：`Runtime/Sky/PhysicallyBasedSky/PhysicallyBasedSkyRenderer.cs`
 
-## 4. 行星坐标模型仍是 MVP 简化版
+## 4. 行星坐标模型已收回到共享 runtime planet state
 
 ### 当前状态
 
 - HDRP 通过 `hdCamera.planet.center`、`hdCamera.planet.radius`、`hdCamera.planet.renderingSpace` 驱动行星坐标与渲染空间。
-- VividRP 当前仍然假设一个固定的 planet center / up 关系。
+- VividRP 现在也改成通过共享的 `SkyPlanet` runtime state 统一解算：
+  - `SkySettingsVolume.renderingSpace`
+  - `SkySettingsVolume.centerMode`
+  - `SkySettingsVolume.planetCenter`
+  - `PhysicallyBasedSkyVolume.planetRadius`
+- `ShaderVariablesGlobal`、`PhysicallyBasedSkyShaderParameters`、`PhysicallyBasedSkyRenderer.ResolveCameraPosition(...)` 现在消费的是同一套 planet 数据，而不是各自重新假设 `world Y up`。
 
-### 当前 workaround / 偏差
+### 当前剩余偏差
 
-- `PhysicallyBasedSkyShaderParameters` 里仍然把 `planetCenter` 固定构造成 `(0, -planetRadius, 0)`。
-- `PhysicallyBasedSkyRenderer.ResolveCameraPosition(...)` 当前通过 `worldPosition.y + planetRadius` 近似把相机搬到 planet space。
-- 这意味着当前实现更接近“以世界 Y 轴为 planet up 的地球式场景”，还没有真正对齐 HDRP 的任意行星中心 / rendering space 语义。
+- HDRP 把 planet 数据缓存到 `hdCamera.planet`；VividRP 目前仍是在需要时从 active volumes 解析 `SkyPlanet`，还没有单独的相机级缓存对象。
+- HDRP 的 `planet.radius` 属于 `VisualEnvironment`；VividRP 当前仍把半径保留在 `PhysicallyBasedSkyVolume`，`SkySettingsVolume` 只承载 `renderingSpace` 与 center 语义。
 
 ### 风险信号
 
-- 相机高度、地平线、太阳高度角在移动场景中心或未来支持 planet center 之后出现异常。
-- 屏幕天空正确，但 local sky precompute、opaque atmospheric scattering 或 cubemap baking 坐标不一致。
+- 后续如果云层、体积雾或其他行星相关系统开始消费 planet 数据，必须复用 `SkyPlanet`，不能再各自手推 `(0, -R, 0)`。
+- 如果未来把 `planetRadius` 从 `PhysicallyBasedSkyVolume` 挪到共享环境 volume，需要同步审查 sky hash、local sky precompute hash 与 baking 路径。
 
 ### 关键文件
 
+- `Runtime/SubSystem/Sky/SkySettingsVolume.cs`
+- `Runtime/RenderGraph/FrameContext/ShaderVariablesGlobal.cs`
 - `Runtime/SubSystem/Sky/PhysicallyBasedSky/PhysicallyBasedSkyShaderParameters.cs`
 - `Runtime/SubSystem/Sky/PhysicallyBasedSky/PhysicallyBasedSkyRenderer.cs`
 - HDRP 对照：
-  - `Runtime/Sky/PhysicallyBasedSky/PhysicallyBasedSky.cs`
+  - `Runtime/RenderPipeline/Camera/HDCamera.cs`
+  - `Runtime/Sky/VisualEnvironment.cs`
   - `Runtime/Sky/PhysicallyBasedSky/PhysicallyBasedSkyRenderer.cs`
 
 ## 5. 曝光接口已替换成 Vivid 自己的链路

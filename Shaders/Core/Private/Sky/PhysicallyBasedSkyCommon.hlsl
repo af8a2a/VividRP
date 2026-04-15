@@ -20,7 +20,7 @@ TEXTURE3D(_MultipleScatteringTexture);
     SAMPLER(s_linear_clamp_sampler);
 #endif
 
-#define _PlanetCenterPosition _PlanetCenterRadius.xyz // camera relative
+#define _PlanetCenterPosition _PlanetCenterRadius.xyz // world space in Vivid
 #define _GroundAlbedo _GroundAlbedo_PlanetRadius.xyz
 #define _PlanetUp _PlanetUpAltitude.xyz
 #define _CameraAltitude _PlanetUpAltitude.w

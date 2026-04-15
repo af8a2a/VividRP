@@ -1,6 +1,7 @@
 using System.IO;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Rendering;
 using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
@@ -80,6 +81,91 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ResolveCameraPosition_AnchorsPlanetToCamera_WhenRenderingInCameraSpace()
+        {
+            var profile = ScriptableObject.CreateInstance<VolumeProfile>();
+            var cameraGameObject = new GameObject("PhysicallyBasedSkyCameraSpaceCamera");
+            var camera = cameraGameObject.AddComponent<Camera>();
+            var cameraData = new VividCameraData
+            {
+                camera = camera
+            };
+
+            try
+            {
+                var settings = profile.Add<SkySettingsVolume>(false);
+                settings.renderingSpace.value = RenderingSpace.Camera;
+                var volume = profile.Add<PhysicallyBasedSkyVolume>(false);
+                volume.planetRadius.value = 1000.0f;
+
+                if (VolumeManager.instance.isInitialized)
+                    VolumeManager.instance.Deinitialize();
+
+                camera.transform.position = new Vector3(10.0f, 20.0f, 30.0f);
+                VolumeManager.instance.Initialize(profile);
+                VolumeManager.instance.Update(camera.transform, ~0);
+
+                var cameraPosition = PhysicallyBasedSkyRenderer.ResolveCameraPosition(
+                    new SkyRendererContext(cameraData, new VividLightData()),
+                    volume.planetRadius.value);
+
+                Assert.That(cameraPosition, Is.EqualTo(new Vector3(0.0f, 1001.0f, 0.0f)));
+            }
+            finally
+            {
+                if (VolumeManager.instance.isInitialized)
+                    VolumeManager.instance.Deinitialize();
+
+                Object.DestroyImmediate(profile);
+                Object.DestroyImmediate(cameraGameObject);
+            }
+        }
+
+        [Test]
+        public void ResolveCameraPosition_UsesManualPlanetCenter_WhenConfigured()
+        {
+            var profile = ScriptableObject.CreateInstance<VolumeProfile>();
+            var cameraGameObject = new GameObject("PhysicallyBasedSkyManualCenterCamera");
+            var camera = cameraGameObject.AddComponent<Camera>();
+            var cameraData = new VividCameraData
+            {
+                camera = camera
+            };
+
+            try
+            {
+                var settings = profile.Add<SkySettingsVolume>(false);
+                settings.renderingSpace.value = RenderingSpace.World;
+                settings.centerMode.value = PlanetMode.Manual;
+                settings.planetCenter.value = new Vector3(100.0f, -900.0f, 50.0f);
+
+                var volume = profile.Add<PhysicallyBasedSkyVolume>(false);
+                volume.planetRadius.value = 1000.0f;
+
+                if (VolumeManager.instance.isInitialized)
+                    VolumeManager.instance.Deinitialize();
+
+                camera.transform.position = new Vector3(100.0f, 120.0f, 50.0f);
+                VolumeManager.instance.Initialize(profile);
+                VolumeManager.instance.Update(camera.transform, ~0);
+
+                var cameraPosition = PhysicallyBasedSkyRenderer.ResolveCameraPosition(
+                    new SkyRendererContext(cameraData, new VividLightData()),
+                    volume.planetRadius.value);
+
+                Assert.That(cameraPosition, Is.EqualTo(new Vector3(0.0f, 1020.0f, 0.0f)));
+            }
+            finally
+            {
+                if (VolumeManager.instance.isInitialized)
+                    VolumeManager.instance.Deinitialize();
+
+                Object.DestroyImmediate(profile);
+                Object.DestroyImmediate(cameraGameObject);
+            }
+        }
+
+        [Test]
         public void Source_UnifiesEnvironmentBakingAndRendererDrivenSkyInjection()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSky", "PhysicallyBasedSkyRenderer.cs"));
@@ -103,6 +189,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("TryPrepareLocalSkyPrecomputation("));
             Assert.That(source, Does.Contain("ApplyLocalSkyPrecomputationTextures(properties);"));
             Assert.That(source, Does.Contain("CoreUtils.SetKeyword(m_SkyMaterial, \"LOCAL_SKY\", useLocalSkyPrecomputation);"));
+            Assert.That(source, Does.Contain("&& UsesWorldSpacePrecomputation(m_RenderMaterialParameters)"));
+            Assert.That(source, Does.Contain("&& UsesWorldSpacePrecomputation(materialParameters)"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyAtmosphereLutCache.ComputeSkyViewLutHash(m_RenderParameters, m_RenderMaterialParameters, m_RenderContext)"));
             Assert.That(source, Does.Contain("m_AtmosphereLutCache.TryGetSkyViewLut(skyViewHash, out skyViewTexture)"));
             Assert.That(source, Does.Contain("SkyCubemapBakingUtility.RenderSkyToCubemap("));
@@ -111,6 +199,8 @@ namespace VividRP.Editor.Tests
             Assert.That(parametersSource, Does.Contain("internal static bool TryBuildForSkyBaking("));
             Assert.That(parametersSource, Does.Contain("internal static bool TryBuildForAmbientProbe("));
             Assert.That(parametersSource, Does.Contain("internal static bool TryBuildMaterialParameters("));
+            Assert.That(parametersSource, Does.Contain("var planet = SkyPlanet.Resolve("));
+            Assert.That(parametersSource, Does.Contain("parameters.renderingSpace = planet.renderingSpace == RenderingSpace.World ? 1 : 0;"));
             Assert.That(parametersSource, Does.Contain("volume.atmosphericScattering.value ? 1.0f : 0.0f"));
             Assert.That(parametersSource, Does.Not.Contain("volume.IsHeightFogActive() ? 1.0f : 0.0f"));
         }

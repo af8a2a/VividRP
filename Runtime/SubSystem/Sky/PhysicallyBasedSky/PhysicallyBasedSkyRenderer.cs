@@ -16,7 +16,6 @@ namespace VividRP.Runtime
             ParametersChanged
         }
 
-        private const float ObserverHeight = 2.0f;
         private const string PhysicallyBasedSkyShaderName = "Hidden/VividRP/PhysicallyBasedSky";
 
         private static readonly int SkyViewLutId = Shader.PropertyToID("_SkyViewLUT");
@@ -121,9 +120,11 @@ namespace VividRP.Runtime
                 return 0;
 
             var generatedCubemapViewSampleCount = SkySettingsVolume.GetGeneratedCubemapViewSampleCount(skySettings);
+            var planet = ResolvePlanet(context, volume, skySettings);
             return HashCode.Combine(
                 volume.GetHashCode(),
                 generatedCubemapViewSampleCount,
+                planet.ComputeHashCode(),
                 ResolveCameraPosition(context, volume.planetRadius.value),
                 PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialBodyHash(context));
         }
@@ -175,6 +176,7 @@ namespace VividRP.Runtime
             var hash = HashCode.Combine(
                 volume.GetHashCode(),
                 generatedCubemapViewSampleCount,
+                ResolvePlanet(context, volume, skySettings).ComputeHashCode(),
                 PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialBodyHash(context));
 
             var ambientProbeRebuildReason = ResolveAmbientProbeCubemapRebuildReason(hash, generatedCubemapResolution);
@@ -282,6 +284,7 @@ namespace VividRP.Runtime
                 PhysicallyBasedSkyMaterialPropertyBinder.Apply(properties, m_RenderMaterialParameters, m_RenderVolume);
 
             var useLocalSkyPrecomputation = m_HasRenderMaterialParameters
+                                            && UsesWorldSpacePrecomputation(m_RenderMaterialParameters)
                                             && TryPrepareLocalSkyPrecomputation(
                                                 m_RenderVolume,
                                                 m_RenderContext,
@@ -373,15 +376,9 @@ namespace VividRP.Runtime
 
         internal static Vector3 ResolveCameraPosition(in SkyRendererContext context, float planetRadius)
         {
-            var camera = context.cameraData?.camera;
-            if (camera == null)
-                return new Vector3(0.0f, planetRadius + ObserverHeight, 0.0f);
-
-            var worldPosition = camera.transform.position;
-            return new Vector3(
-                worldPosition.x,
-                Mathf.Max(worldPosition.y + planetRadius, planetRadius + 0.1f),
-                worldPosition.z);
+            var worldCameraPosition = ResolveWorldCameraPosition(context);
+            var planet = SkyPlanet.Resolve(planetRadius, VividVolumeManagerUtility.GetSkySettingsVolume(), worldCameraPosition);
+            return planet.GetCameraPositionPS(worldCameraPosition);
         }
 
         private bool CanRebuildRuntimeCubemap()
@@ -578,6 +575,7 @@ namespace VividRP.Runtime
             m_CelestialBodyBuffer.Update(context);
             m_SkyMaterial.SetBuffer(CelestialBodyDatasId, m_CelestialBodyBuffer.Buffer);
             var useLocalSkyPrecomputation = hasMaterialParameters
+                                            && UsesWorldSpacePrecomputation(materialParameters)
                                             && TryPrepareLocalSkyPrecomputation(volume, context, cmd, parameters, materialParameters);
             CoreUtils.SetKeyword(m_SkyMaterial, "LOCAL_SKY", useLocalSkyPrecomputation);
             if (useLocalSkyPrecomputation)
@@ -760,8 +758,28 @@ namespace VividRP.Runtime
                 hash = AppendHash(hash, materialParameters.celestialLightExposure);
                 hash = AppendHash(hash, materialParameters.volumetricCloudsBottomAltitude);
                 hash = AppendHash(hash, materialParameters.renderSunDisk);
+                hash = AppendHash(hash, materialParameters.renderingSpace);
                 return hash;
             }
+        }
+
+        private static SkyPlanet ResolvePlanet(
+            in SkyRendererContext context,
+            PhysicallyBasedSkyVolume volume,
+            SkySettingsVolume skySettings)
+        {
+            return SkyPlanet.Resolve(volume, skySettings, ResolveWorldCameraPosition(context));
+        }
+
+        private static Vector3 ResolveWorldCameraPosition(in SkyRendererContext context)
+        {
+            var camera = context.cameraData?.camera;
+            return camera != null ? camera.transform.position : Vector3.zero;
+        }
+
+        private static bool UsesWorldSpacePrecomputation(in PhysicallyBasedSkyMaterialParameters materialParameters)
+        {
+            return materialParameters.renderingSpace != 0;
         }
 
         private static int AppendHash(int hash, int value)

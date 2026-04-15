@@ -225,26 +225,11 @@ namespace VividRP.Runtime
             out Vector4 planetUpAltitude)
         {
             var volume = VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume();
-            var planetRadius = Mathf.Max(volume?.planetRadius.value ?? 6378100.0f, 1000.0f);
-            var planetCenter = new Vector3(0.0f, -planetRadius, 0.0f);
             var cameraPosition = new Vector3(worldSpaceCameraPos.x, worldSpaceCameraPos.y, worldSpaceCameraPos.z);
-            var cameraToPlanetCenter = cameraPosition - planetCenter;
+            var planet = SkyPlanet.Resolve(volume, VividVolumeManagerUtility.GetSkySettingsVolume(), cameraPosition);
 
-            if (cameraToPlanetCenter.sqrMagnitude <= 1e-6f)
-                cameraToPlanetCenter = Vector3.up * (planetRadius + 1.0f);
-
-            var radialDistance = cameraToPlanetCenter.magnitude;
-            if (radialDistance < planetRadius + 1.0f)
-            {
-                cameraToPlanetCenter = cameraToPlanetCenter.normalized * (planetRadius + 1.0f);
-                radialDistance = cameraToPlanetCenter.magnitude;
-            }
-
-            var planetUp = cameraToPlanetCenter / radialDistance;
-            var cameraAltitude = radialDistance - planetRadius;
-
-            planetCenterRadius = new Vector4(planetCenter.x, planetCenter.y, planetCenter.z, planetRadius);
-            planetUpAltitude = new Vector4(planetUp.x, planetUp.y, planetUp.z, cameraAltitude);
+            planetCenterRadius = planet.GetPlanetCenterRadius();
+            planetUpAltitude = planet.GetPlanetUpAltitude(cameraPosition);
         }
 
         private static void PackSphericalHarmonics(

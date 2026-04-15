@@ -56,6 +56,7 @@ namespace VividRP.Runtime
         internal float celestialLightExposure;
         internal float volumetricCloudsBottomAltitude;
         internal int renderSunDisk;
+        internal int renderingSpace;
     }
 
     internal static class PhysicallyBasedSkyShaderParameterBuilder
@@ -171,7 +172,9 @@ namespace VividRP.Runtime
 
             var planetRadius = Mathf.Max(volume.planetRadius.value, 1000.0f);
             var atmosphereRadius = Mathf.Max(volume.GetAtmosphereRadius(), planetRadius + 1.0f);
-            var cameraPosition = PhysicallyBasedSkyRenderer.ResolveCameraPosition(context, volume.planetRadius.value);
+            var worldCameraPosition = ResolveWorldCameraPosition(context);
+            var planet = SkyPlanet.Resolve(volume, VividVolumeManagerUtility.GetSkySettingsVolume(), worldCameraPosition);
+            var cameraPosition = planet.GetCameraPositionPS(worldCameraPosition);
             var sunDirection = PhysicallyBasedSkyRenderer.ResolveSunDirection(context);
             var sunColor = PhysicallyBasedSkyRenderer.ResolveSunColor(context);
             var aerosolExtinction = volume.GetAerosolExtinctionCoefficient();
@@ -263,41 +266,19 @@ namespace VividRP.Runtime
             var ozoneLayerWidth = Mathf.Max(volume.GetOzoneLayerWidth(), 1.0f);
             var atmosphericRadius = planetRadius + atmosphericDepth;
             var exponentialInterpolation = ComputeExponentialInterpolationParams(volume.horizonZenithShift.value);
-            var worldCameraPosition = context.cameraData?.camera != null
-                ? context.cameraData.camera.transform.position
-                : Vector3.zero;
-            var planetCenter = new Vector3(0.0f, -planetRadius, 0.0f);
-            var cameraToPlanetCenter = worldCameraPosition - planetCenter;
-            if (cameraToPlanetCenter.sqrMagnitude <= 1e-6f)
-                cameraToPlanetCenter = Vector3.up * (planetRadius + 1.0f);
-
-            var radialDistance = cameraToPlanetCenter.magnitude;
-            if (radialDistance < planetRadius + 1.0f)
-            {
-                cameraToPlanetCenter = cameraToPlanetCenter.normalized * (planetRadius + 1.0f);
-                radialDistance = cameraToPlanetCenter.magnitude;
-            }
-
-            var planetUp = cameraToPlanetCenter / radialDistance;
-            var altitude = radialDistance - planetRadius;
+            var worldCameraPosition = ResolveWorldCameraPosition(context);
+            var planet = SkyPlanet.Resolve(volume, VividVolumeManagerUtility.GetSkySettingsVolume(), worldCameraPosition);
+            var planetUpAltitude = planet.GetPlanetUpAltitude(worldCameraPosition);
             var lightExposure = ResolveCelestialLightExposure(context);
-            var pbrSkyCameraPosition = PhysicallyBasedSkyRenderer.ResolveCameraPosition(context, planetRadius);
+            var pbrSkyCameraPosition = planet.GetCameraPositionPS(worldCameraPosition);
 
             parameters.pbrSkyCameraPositionPS = new Vector4(
                 pbrSkyCameraPosition.x,
                 pbrSkyCameraPosition.y,
                 pbrSkyCameraPosition.z,
                 1.0f);
-            parameters.planetCenterRadius = new Vector4(
-                planetCenter.x,
-                planetCenter.y,
-                planetCenter.z,
-                planetRadius);
-            parameters.planetUpAltitude = new Vector4(
-                planetUp.x,
-                planetUp.y,
-                planetUp.z,
-                altitude);
+            parameters.planetCenterRadius = planet.GetPlanetCenterRadius();
+            parameters.planetUpAltitude = planetUpAltitude;
             parameters.airSeaLevelExtinction = ToVector4(volume.GetAirExtinctionCoefficient());
             parameters.airSeaLevelScattering = ToVector4(volume.GetAirScatteringCoefficient());
             parameters.aerosolSeaLevelScattering = ToVector4(volume.GetAerosolScatteringCoefficient());
@@ -337,6 +318,7 @@ namespace VividRP.Runtime
             parameters.celestialLightExposure = lightExposure;
             parameters.volumetricCloudsBottomAltitude = 0.0f;
             parameters.renderSunDisk = volume.renderSunDisk.value ? 1 : 0;
+            parameters.renderingSpace = planet.renderingSpace == RenderingSpace.World ? 1 : 0;
             return true;
         }
 
@@ -351,6 +333,13 @@ namespace VividRP.Runtime
         private static Vector3 ToVector3(Color value)
         {
             return new Vector3(value.r, value.g, value.b);
+        }
+
+        private static Vector3 ResolveWorldCameraPosition(in SkyRendererContext context)
+        {
+            return context.cameraData?.camera != null
+                ? context.cameraData.camera.transform.position
+                : Vector3.zero;
         }
 
         private static Vector4 ToVector4(Vector3 value)

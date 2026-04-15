@@ -22,6 +22,7 @@ namespace VividRP.Editor.Tests
             Assert.That(globalsSource, Does.Contain("public Vector4 _VividPlanetCenterRadius;"));
             Assert.That(globalsSource, Does.Contain("public Vector4 _VividPlanetUpAltitude;"));
             Assert.That(globalsSource, Does.Contain("ResolvePlanetData("));
+            Assert.That(globalsSource, Does.Contain("var planet = SkyPlanet.Resolve("));
             Assert.That(globalsSource, Does.Contain("_VividPlanetCenterRadius = planetCenterRadius,"));
             Assert.That(globalsSource, Does.Contain("_VividPlanetUpAltitude = planetUpAltitude,"));
         }
@@ -91,6 +92,51 @@ namespace VividRP.Editor.Tests
             Assert.That(globals._VividPlanetCenterRadius.w, Is.GreaterThanOrEqualTo(1000.0f));
             Assert.That(globals._VividPlanetUpAltitude.y, Is.GreaterThan(0.0f));
             Assert.That(globals._VividPlanetUpAltitude.w, Is.GreaterThanOrEqualTo(1.0f));
+        }
+
+        [Test]
+        public void Create_UsesManualPlanetCenterFromActiveSkySettings()
+        {
+            var profile = ScriptableObject.CreateInstance<VolumeProfile>();
+            var cameraObject = new GameObject("Shader Globals Planet Camera");
+            var camera = cameraObject.AddComponent<Camera>();
+
+            try
+            {
+                var settings = profile.Add<SkySettingsVolume>(false);
+                settings.renderingSpace.value = RenderingSpace.World;
+                settings.centerMode.value = PlanetMode.Manual;
+                settings.planetCenter.value = new Vector3(100.0f, -900.0f, 50.0f);
+
+                var skyVolume = profile.Add<PhysicallyBasedSkyVolume>(false);
+                skyVolume.planetRadius.value = 1000.0f;
+
+                if (VolumeManager.instance.isInitialized)
+                    VolumeManager.instance.Deinitialize();
+
+                camera.transform.position = new Vector3(100.0f, 120.0f, 50.0f);
+                VolumeManager.instance.Initialize(profile);
+                VolumeManager.instance.Update(camera.transform, ~0);
+
+                var globals = ShaderVariablesGlobal.Create(
+                    new VividCameraData.ShaderVariables
+                    {
+                        worldSpaceCameraPos = new Vector4(100.0f, 120.0f, 50.0f, 1.0f)
+                    },
+                    null,
+                    null);
+
+                Assert.That(globals._VividPlanetCenterRadius, Is.EqualTo(new Vector4(100.0f, -900.0f, 50.0f, 1000.0f)));
+                Assert.That(globals._VividPlanetUpAltitude, Is.EqualTo(new Vector4(0.0f, 1.0f, 0.0f, 20.0f)));
+            }
+            finally
+            {
+                if (VolumeManager.instance.isInitialized)
+                    VolumeManager.instance.Deinitialize();
+
+                Object.DestroyImmediate(cameraObject);
+                Object.DestroyImmediate(profile);
+            }
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

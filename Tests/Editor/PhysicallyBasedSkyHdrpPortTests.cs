@@ -64,7 +64,7 @@ namespace VividRP.Editor.Tests
             var compatSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Sky", "ShaderVariablesCompat.hlsl"));
 
             Assert.That(commonSource, Does.Contain("Packages/com.af8a2a.vividrp/Shaders/Core/Public/ShaderVariablesGlobal.hlsl"));
-            Assert.That(commonSource, Does.Contain("#define _PlanetCenterPosition _PlanetCenterRadius.xyz // camera relative"));
+            Assert.That(commonSource, Does.Contain("#define _PlanetCenterPosition _PlanetCenterRadius.xyz // world space in Vivid"));
             Assert.That(commonSource, Does.Contain("#define _GroundAlbedo _GroundAlbedo_PlanetRadius.xyz"));
             Assert.That(commonSource, Does.Contain("#define _PlanetUp _PlanetUpAltitude.xyz"));
             Assert.That(commonSource, Does.Contain("#define _CameraAltitude _PlanetUpAltitude.w"));

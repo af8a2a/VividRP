@@ -485,6 +485,7 @@ namespace VividRP.Runtime
                 hash = AppendHash(hash, skyParameters.skySunDirection);
                 hash = AppendHash(hash, skyParameters.skySunColor);
                 hash = AppendHash(hash, materialParameters.celestialLightExposure);
+                hash = AppendHash(hash, materialParameters.renderingSpace);
                 return hash;
             }
         }

@@ -20,6 +20,7 @@ namespace VividRP.Runtime
         public readonly Matrix4x4[] viewProjMatrices = new Matrix4x4[MaxCascadeCount];
         public readonly Vector4[] cascadeSpheres = new Vector4[MaxCascadeCount];
         public readonly Vector4[] cascadeAtlasScaleOffsets = new Vector4[MaxCascadeCount];
+        public readonly float[] cascadeWorldTexelSizes = new float[MaxCascadeCount];
 
         public override void Reset()
         {
@@ -38,6 +39,7 @@ namespace VividRP.Runtime
                 viewProjMatrices[i] = Matrix4x4.identity;
                 cascadeSpheres[i] = Vector4.zero;
                 cascadeAtlasScaleOffsets[i] = Vector4.zero;
+                cascadeWorldTexelSizes[i] = 0f;
             }
         }
 

@@ -20,6 +20,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_DepthBias = Mathf.Max(0.0f, additionalLightData.depthBias);"));
             Assert.That(source, Does.Contain("m_NormalBias = Mathf.Max(0.0f, additionalLightData.normalBias);"));
             Assert.That(source, Does.Contain("m_SlopeScaleDepthBias = Mathf.Max(0.0f, additionalLightData.slopeBias);"));
+            Assert.That(source, Does.Contain("m_CascadeWorldTexelSizes[i] = ComputeCascadeWorldTexelSize(m_ProjMatrices[i], m_CascadeResolution);"));
             Assert.That(source, Does.Contain("m_ShadowCasterBiases[i] = ComputeShadowCasterBias(mainVisibleLight, m_ProjMatrices[i], m_CascadeResolution, m_DepthBias, m_NormalBias);"));
             Assert.That(source, Does.Contain("var gpuProjMatrix = GL.GetGPUProjectionMatrix(m_ProjMatrices[cascadeIndex], true);"));
             Assert.That(source, Does.Contain("var cascadeShaderGlobals = BuildCascadeShaderGlobals(cascadeIndex, gpuProjMatrix);"));
@@ -29,8 +30,11 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("nativeCmd.SetGlobalVector(LightDirectionId, m_ShadowLightDirection);"));
             Assert.That(source, Does.Contain("nativeCmd.SetGlobalVector(LightPositionId, m_ShadowLightPosition);"));
             Assert.That(source, Does.Contain("shadowData.viewProjMatrices[i] = BuildWorldToShadowMatrix(m_ProjMatrices[i], m_ViewMatrices[i]);"));
+            Assert.That(source, Does.Contain("shadowData.cascadeWorldTexelSizes[i] = m_CascadeWorldTexelSizes[i];"));
             Assert.That(source, Does.Contain("private static Matrix4x4 BuildWorldToShadowMatrix(Matrix4x4 projMatrix, Matrix4x4 viewMatrix)"));
             Assert.That(source, Does.Contain("private static Vector4 ComputeShadowCasterBias("));
+            Assert.That(source, Does.Contain("private static float ComputeCascadeWorldTexelSize(Matrix4x4 lightProjectionMatrix, float shadowResolution)"));
+            Assert.That(source, Does.Contain("return texelSize * Mathf.Sqrt(2.0f);"));
             Assert.That(source, Does.Contain("textureScaleAndBias.m22 = 0.5f;"));
             Assert.That(source, Does.Contain("shadowGlobals._VividMatrixVP = viewProjMatrix;"));
             Assert.That(source, Does.Contain("shadowGlobals._VividWorldToCamera = viewMatrix;"));

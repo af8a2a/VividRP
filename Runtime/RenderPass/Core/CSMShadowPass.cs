@@ -30,6 +30,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly Matrix4x4[] m_ViewMatrices = new Matrix4x4[VividShadowData.MaxCascadeCount];
         private readonly Matrix4x4[] m_ProjMatrices = new Matrix4x4[VividShadowData.MaxCascadeCount];
         private readonly Vector4[] m_CascadeSpheres = new Vector4[VividShadowData.MaxCascadeCount];
+        private readonly float[] m_CascadeWorldTexelSizes = new float[VividShadowData.MaxCascadeCount];
         private readonly Vector4[] m_ShadowCasterBiases = new Vector4[VividShadowData.MaxCascadeCount];
         private readonly ShadowSplitData[] m_SplitData = new ShadowSplitData[VividShadowData.MaxCascadeCount];
         private readonly ShadowDrawingSettings[] m_ShadowDrawSettings = new ShadowDrawingSettings[VividShadowData.MaxCascadeCount];
@@ -136,6 +137,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 var sphere = m_SplitData[i].cullingSphere;
                 // Store radius squared in w for GPU sphere test
                 m_CascadeSpheres[i] = new Vector4(sphere.x, sphere.y, sphere.z, sphere.w * sphere.w);
+                m_CascadeWorldTexelSizes[i] = ComputeCascadeWorldTexelSize(m_ProjMatrices[i], m_CascadeResolution);
                 m_ShadowCasterBiases[i] = ComputeShadowCasterBias(mainVisibleLight, m_ProjMatrices[i], m_CascadeResolution, m_DepthBias, m_NormalBias);
             }
 
@@ -179,6 +181,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     shadowData.projMatrices[i] = m_ProjMatrices[i];
                     shadowData.viewProjMatrices[i] = BuildWorldToShadowMatrix(m_ProjMatrices[i], m_ViewMatrices[i]);
                     shadowData.cascadeSpheres[i] = m_CascadeSpheres[i];
+                    shadowData.cascadeWorldTexelSizes[i] = m_CascadeWorldTexelSizes[i];
                 }
                 else
                 {
@@ -186,6 +189,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     shadowData.projMatrices[i] = Matrix4x4.identity;
                     shadowData.viewProjMatrices[i] = Matrix4x4.identity;
                     shadowData.cascadeSpheres[i] = Vector4.zero;
+                    shadowData.cascadeWorldTexelSizes[i] = 0.0f;
                 }
             }
 
@@ -294,9 +298,7 @@ namespace VividRP.Runtime.RenderPass.Core
             float depthBias,
             float normalBias)
         {
-            float projectionScale = Mathf.Max(Mathf.Abs(lightProjectionMatrix.m00), 1e-6f);
-            float frustumSize = 2.0f / projectionScale;
-            float texelSize = frustumSize / Mathf.Max(shadowResolution, 1.0f);
+            float texelSize = ComputeCascadeWorldTexelSize(lightProjectionMatrix, shadowResolution);
             float kernelRadius = shadowLight.light != null && shadowLight.light.shadows == LightShadows.Soft ? 1.5f : 1.0f;
 
             return new Vector4(
@@ -304,6 +306,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 -normalBias * texelSize * kernelRadius,
                 (float)shadowLight.lightType,
                 0.0f);
+        }
+
+        private static float ComputeCascadeWorldTexelSize(Matrix4x4 lightProjectionMatrix, float shadowResolution)
+        {
+            float projectionScale = Mathf.Max(Mathf.Abs(lightProjectionMatrix.m00), 1e-6f);
+            float frustumSize = 2.0f / projectionScale;
+            float texelSize = frustumSize / Mathf.Max(shadowResolution, 1.0f);
+            return texelSize * Mathf.Sqrt(2.0f);
         }
 
         public override void Dispose()

@@ -63,6 +63,14 @@ namespace VividRP.Editor.Tests
             Assert.That(serializedLight.depthBias, Is.Not.Null);
             Assert.That(serializedLight.normalBias, Is.Not.Null);
             Assert.That(serializedLight.slopeBias, Is.Not.Null);
+            Assert.That(serializedLight.dirLightPCSSBlockerSampleCount, Is.Not.Null);
+            Assert.That(serializedLight.dirLightPCSSFilterSampleCount, Is.Not.Null);
+            Assert.That(serializedLight.dirLightPCSSMaxPenumbraSize, Is.Not.Null);
+            Assert.That(serializedLight.dirLightPCSSMaxSamplingDistance, Is.Not.Null);
+            Assert.That(serializedLight.dirLightPCSSMinFilterSizeTexels, Is.Not.Null);
+            Assert.That(serializedLight.dirLightPCSSMinFilterMaxAngularDiameter, Is.Not.Null);
+            Assert.That(serializedLight.dirLightPCSSBlockerSearchAngularDiameter, Is.Not.Null);
+            Assert.That(serializedLight.dirLightPCSSBlockerSamplingClumpExponent, Is.Not.Null);
             Assert.That(serializedLight.interactsWithSky, Is.Not.Null);
             Assert.That(serializedLight.angularDiameter, Is.Not.Null);
             Assert.That(serializedLight.diameterMultiplierMode, Is.Not.Null);
@@ -217,6 +225,30 @@ namespace VividRP.Editor.Tests
             Assert.That(additionalData.depthBias, Is.EqualTo(VividAdditionalLightData.DefaultShadowDepthBias));
             Assert.That(additionalData.normalBias, Is.EqualTo(VividAdditionalLightData.DefaultShadowNormalBias));
             Assert.That(additionalData.slopeBias, Is.EqualTo(VividAdditionalLightData.DefaultShadowSlopeBias));
+            Assert.That(
+                additionalData.dirLightPCSSBlockerSampleCount,
+                Is.EqualTo(VividAdditionalLightData.DefaultDirLightPCSSBlockerSampleCount));
+            Assert.That(
+                additionalData.dirLightPCSSFilterSampleCount,
+                Is.EqualTo(VividAdditionalLightData.DefaultDirLightPCSSFilterSampleCount));
+            Assert.That(
+                additionalData.dirLightPCSSMaxPenumbraSize,
+                Is.EqualTo(VividAdditionalLightData.DefaultDirLightPCSSMaxPenumbraSize));
+            Assert.That(
+                additionalData.dirLightPCSSMaxSamplingDistance,
+                Is.EqualTo(VividAdditionalLightData.DefaultDirLightPCSSMaxSamplingDistance));
+            Assert.That(
+                additionalData.dirLightPCSSMinFilterSizeTexels,
+                Is.EqualTo(VividAdditionalLightData.DefaultDirLightPCSSMinFilterSizeTexels));
+            Assert.That(
+                additionalData.dirLightPCSSMinFilterMaxAngularDiameter,
+                Is.EqualTo(VividAdditionalLightData.DefaultDirLightPCSSMinFilterMaxAngularDiameter));
+            Assert.That(
+                additionalData.dirLightPCSSBlockerSearchAngularDiameter,
+                Is.EqualTo(VividAdditionalLightData.DefaultDirLightPCSSBlockerSearchAngularDiameter));
+            Assert.That(
+                additionalData.dirLightPCSSBlockerSamplingClumpExponent,
+                Is.EqualTo(VividAdditionalLightData.DefaultDirLightPCSSBlockerSamplingClumpExponent));
         }
 
         [Test]
@@ -229,6 +261,14 @@ namespace VividRP.Editor.Tests
             additionalData.depthBias = 99.0f;
             additionalData.normalBias = -1.0f;
             additionalData.slopeBias = 99.0f;
+            additionalData.dirLightPCSSBlockerSampleCount = 999;
+            additionalData.dirLightPCSSFilterSampleCount = 0;
+            additionalData.dirLightPCSSMaxPenumbraSize = -1.0f;
+            additionalData.dirLightPCSSMaxSamplingDistance = -1.0f;
+            additionalData.dirLightPCSSMinFilterSizeTexels = -1.0f;
+            additionalData.dirLightPCSSMinFilterMaxAngularDiameter = -1.0f;
+            additionalData.dirLightPCSSBlockerSearchAngularDiameter = -1.0f;
+            additionalData.dirLightPCSSBlockerSamplingClumpExponent = 999.0f;
 
             additionalData.shadowAtlasResolution = (VividAdditionalLightData.CSMShadowAtlasResolution)12345;
             additionalData.screenSpaceShadowQuality = (VividAdditionalLightData.CSMScreenSpaceShadowQuality)12345;
@@ -245,6 +285,16 @@ namespace VividRP.Editor.Tests
             Assert.That(additionalData.depthBias, Is.EqualTo(VividAdditionalLightData.MaxShadowDepthBias));
             Assert.That(additionalData.normalBias, Is.EqualTo(0.0f));
             Assert.That(additionalData.slopeBias, Is.EqualTo(VividAdditionalLightData.MaxShadowSlopeBias));
+            Assert.That(additionalData.dirLightPCSSBlockerSampleCount, Is.EqualTo(VividAdditionalLightData.MaxPCSSSampleCount));
+            Assert.That(additionalData.dirLightPCSSFilterSampleCount, Is.EqualTo(VividAdditionalLightData.MinPCSSSampleCount));
+            Assert.That(additionalData.dirLightPCSSMaxPenumbraSize, Is.EqualTo(0.0f));
+            Assert.That(additionalData.dirLightPCSSMaxSamplingDistance, Is.EqualTo(0.0f));
+            Assert.That(additionalData.dirLightPCSSMinFilterSizeTexels, Is.EqualTo(0.0f));
+            Assert.That(additionalData.dirLightPCSSMinFilterMaxAngularDiameter, Is.EqualTo(0.0f));
+            Assert.That(additionalData.dirLightPCSSBlockerSearchAngularDiameter, Is.EqualTo(0.0f));
+            Assert.That(
+                additionalData.dirLightPCSSBlockerSamplingClumpExponent,
+                Is.EqualTo(VividAdditionalLightData.MaxDirLightPCSSBlockerSamplingClumpExponent));
         }
 
         [Test]
@@ -401,6 +451,46 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void VividLightEditor_ShowsDirectionalPCSSControls_OnlyForDirectionalLightsUsingVeryHighQuality()
+        {
+            var directionalLight = m_GameObject.AddComponent<Light>();
+            directionalLight.type = LightType.Directional;
+
+            var serializedDirectionalLight = new VividSerializedLight(new SerializedObject(directionalLight));
+
+            Assert.That(
+                VividLightEditor.ShouldShowDirectionalPCSSControls(serializedDirectionalLight),
+                Is.False);
+
+            serializedDirectionalLight.screenSpaceShadowQuality.intValue =
+                (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh;
+
+            Assert.That(
+                VividLightEditor.ShouldShowDirectionalPCSSControls(serializedDirectionalLight),
+                Is.True);
+
+            var pointLightObject = new GameObject("Vivid Point Light PCSS Test");
+
+            try
+            {
+                var pointLight = pointLightObject.AddComponent<Light>();
+                pointLight.type = LightType.Point;
+
+                var serializedPointLight = new VividSerializedLight(new SerializedObject(pointLight));
+                serializedPointLight.screenSpaceShadowQuality.intValue =
+                    (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh;
+
+                Assert.That(
+                    VividLightEditor.ShouldShowDirectionalPCSSControls(serializedPointLight),
+                    Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(pointLightObject);
+            }
+        }
+
+        [Test]
         public void VividLightEditor_UsesHdrpStyleCelestialBodyPanel()
         {
             var source = File.ReadAllText(GetPackageFilePath("Editor", "ComponentEditor", "VividLightEditor.cs"));
@@ -440,6 +530,16 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("private static readonly GUIContent[] s_ShadowAtlasResolutionOptionLabels ="));
             Assert.That(source, Does.Contain("EditorGUILayout.IntPopup("));
             Assert.That(source, Does.Contain("m_SerializedLight.shadowAtlasResolution"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"PCSS\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Max Penumbra Size\""));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Max Sampling Distance\""));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Min Filter\""));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Blocker Search Angular Diameter\""));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Blocker Sample Count\""));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Filter Sample Count\""));
+            Assert.That(source, Does.Contain("DrawDirectionalPCSSFields();"));
+            Assert.That(source, Does.Contain("m_SerializedLight.dirLightPCSSMaxPenumbraSize"));
+            Assert.That(source, Does.Contain("m_SerializedLight.dirLightPCSSFilterSampleCount"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Depth Bias\""));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Normal Bias\""));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Slope-Scale Depth Bias\""));

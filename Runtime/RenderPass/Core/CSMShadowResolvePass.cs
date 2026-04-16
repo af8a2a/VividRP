@@ -30,6 +30,15 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int CSMCascadeResolutionId = Shader.PropertyToID("_CSMCascadeResolution");
         private static readonly int CSMShadowQualityId = Shader.PropertyToID("_CSMShadowQuality");
         private static readonly int CSMLightAngularDiameterId = Shader.PropertyToID("_CSMLightAngularDiameter");
+        private static readonly int CSMFrameIndexId = Shader.PropertyToID("_CSMFrameIndex");
+        private static readonly int CSMPCSSBlockerSampleCountId = Shader.PropertyToID("_CSMPCSSBlockerSampleCount");
+        private static readonly int CSMPCSSFilterSampleCountId = Shader.PropertyToID("_CSMPCSSFilterSampleCount");
+        private static readonly int CSMPCSSMaxPenumbraSizeId = Shader.PropertyToID("_CSMPCSSMaxPenumbraSize");
+        private static readonly int CSMPCSSMaxSamplingDistanceId = Shader.PropertyToID("_CSMPCSSMaxSamplingDistance");
+        private static readonly int CSMPCSSMinFilterSizeTexelsId = Shader.PropertyToID("_CSMPCSSMinFilterSizeTexels");
+        private static readonly int CSMPCSSMinFilterMaxAngularDiameterId = Shader.PropertyToID("_CSMPCSSMinFilterMaxAngularDiameter");
+        private static readonly int CSMPCSSBlockerSearchAngularDiameterId = Shader.PropertyToID("_CSMPCSSBlockerSearchAngularDiameter");
+        private static readonly int CSMPCSSBlockerSamplingClumpExponentId = Shader.PropertyToID("_CSMPCSSBlockerSamplingClumpExponent");
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
@@ -63,6 +72,15 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_CascadeResolution;
         private int m_ShadowQuality = (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low;
         private float m_LightAngularDiameter = VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
+        private int m_FrameIndex;
+        private int m_PCSSBlockerSampleCount = VividAdditionalLightData.DefaultDirLightPCSSBlockerSampleCount;
+        private int m_PCSSFilterSampleCount = VividAdditionalLightData.DefaultDirLightPCSSFilterSampleCount;
+        private float m_PCSSMaxPenumbraSize = VividAdditionalLightData.DefaultDirLightPCSSMaxPenumbraSize;
+        private float m_PCSSMaxSamplingDistance = VividAdditionalLightData.DefaultDirLightPCSSMaxSamplingDistance;
+        private float m_PCSSMinFilterSizeTexels = VividAdditionalLightData.DefaultDirLightPCSSMinFilterSizeTexels;
+        private float m_PCSSMinFilterMaxAngularDiameter = VividAdditionalLightData.DefaultDirLightPCSSMinFilterMaxAngularDiameter;
+        private float m_PCSSBlockerSearchAngularDiameter = VividAdditionalLightData.DefaultDirLightPCSSBlockerSearchAngularDiameter;
+        private float m_PCSSBlockerSamplingClumpExponent = VividAdditionalLightData.DefaultDirLightPCSSBlockerSamplingClumpExponent;
 
         public CSMShadowResolvePass()
         {
@@ -99,6 +117,15 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LightDirectionWS = Vector4.zero;
             m_ShadowQuality = (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low;
             m_LightAngularDiameter = VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
+            m_FrameIndex = 0;
+            m_PCSSBlockerSampleCount = VividAdditionalLightData.DefaultDirLightPCSSBlockerSampleCount;
+            m_PCSSFilterSampleCount = VividAdditionalLightData.DefaultDirLightPCSSFilterSampleCount;
+            m_PCSSMaxPenumbraSize = VividAdditionalLightData.DefaultDirLightPCSSMaxPenumbraSize;
+            m_PCSSMaxSamplingDistance = VividAdditionalLightData.DefaultDirLightPCSSMaxSamplingDistance;
+            m_PCSSMinFilterSizeTexels = VividAdditionalLightData.DefaultDirLightPCSSMinFilterSizeTexels;
+            m_PCSSMinFilterMaxAngularDiameter = VividAdditionalLightData.DefaultDirLightPCSSMinFilterMaxAngularDiameter;
+            m_PCSSBlockerSearchAngularDiameter = VividAdditionalLightData.DefaultDirLightPCSSBlockerSearchAngularDiameter;
+            m_PCSSBlockerSamplingClumpExponent = VividAdditionalLightData.DefaultDirLightPCSSBlockerSamplingClumpExponent;
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             var width = cameraData.actualWidth;
@@ -121,6 +148,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_NormalBias = shadowData.normalBias;
             m_AtlasResolution = shadowData.atlasResolution;
             m_CascadeResolution = shadowData.cascadeResolution;
+            m_FrameIndex = Time.frameCount;
 
             for (int i = 0; i < VividShadowData.MaxCascadeCount; i++)
             {
@@ -140,6 +168,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 {
                     m_ShadowQuality = (int)additionalLightData.screenSpaceShadowQuality;
                     m_LightAngularDiameter = Mathf.Max(additionalLightData.resolvedAngularDiameter, 0.0f);
+                    m_PCSSBlockerSampleCount = additionalLightData.dirLightPCSSBlockerSampleCount;
+                    m_PCSSFilterSampleCount = additionalLightData.dirLightPCSSFilterSampleCount;
+                    m_PCSSMaxPenumbraSize = additionalLightData.dirLightPCSSMaxPenumbraSize;
+                    m_PCSSMaxSamplingDistance = additionalLightData.dirLightPCSSMaxSamplingDistance;
+                    m_PCSSMinFilterSizeTexels = additionalLightData.dirLightPCSSMinFilterSizeTexels;
+                    m_PCSSMinFilterMaxAngularDiameter = additionalLightData.dirLightPCSSMinFilterMaxAngularDiameter;
+                    m_PCSSBlockerSearchAngularDiameter = additionalLightData.dirLightPCSSBlockerSearchAngularDiameter;
+                    m_PCSSBlockerSamplingClumpExponent = additionalLightData.dirLightPCSSBlockerSamplingClumpExponent;
                 }
             }
         }
@@ -177,6 +213,15 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_ResolveCompute, CSMCascadeResolutionId, m_CascadeResolution);
             cmd.SetComputeIntParam(m_ResolveCompute, CSMShadowQualityId, m_ShadowQuality);
             cmd.SetComputeFloatParam(m_ResolveCompute, CSMLightAngularDiameterId, m_LightAngularDiameter);
+            cmd.SetComputeIntParam(m_ResolveCompute, CSMFrameIndexId, m_FrameIndex);
+            cmd.SetComputeIntParam(m_ResolveCompute, CSMPCSSBlockerSampleCountId, m_PCSSBlockerSampleCount);
+            cmd.SetComputeIntParam(m_ResolveCompute, CSMPCSSFilterSampleCountId, m_PCSSFilterSampleCount);
+            cmd.SetComputeFloatParam(m_ResolveCompute, CSMPCSSMaxPenumbraSizeId, m_PCSSMaxPenumbraSize);
+            cmd.SetComputeFloatParam(m_ResolveCompute, CSMPCSSMaxSamplingDistanceId, m_PCSSMaxSamplingDistance);
+            cmd.SetComputeFloatParam(m_ResolveCompute, CSMPCSSMinFilterSizeTexelsId, m_PCSSMinFilterSizeTexels);
+            cmd.SetComputeFloatParam(m_ResolveCompute, CSMPCSSMinFilterMaxAngularDiameterId, m_PCSSMinFilterMaxAngularDiameter);
+            cmd.SetComputeFloatParam(m_ResolveCompute, CSMPCSSBlockerSearchAngularDiameterId, m_PCSSBlockerSearchAngularDiameter);
+            cmd.SetComputeFloatParam(m_ResolveCompute, CSMPCSSBlockerSamplingClumpExponentId, m_PCSSBlockerSamplingClumpExponent);
 
             cmd.DispatchCompute(m_ResolveCompute, m_Kernel,
                 m_DispatchGroupCountX, m_DispatchGroupCountY, 1);
@@ -189,6 +234,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_IsActive = false;
             m_DispatchGroupCountX = 1;
             m_DispatchGroupCountY = 1;
+            m_FrameIndex = 0;
         }
     }
 }

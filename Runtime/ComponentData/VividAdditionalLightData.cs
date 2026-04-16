@@ -332,6 +332,18 @@ namespace VividRP.Runtime
         internal const float MaxShadowDepthBias = 10.0f;
         internal const float MaxShadowNormalBias = 10.0f;
         internal const float MaxShadowSlopeBias = 5.0f;
+        internal const int MinPCSSSampleCount = 1;
+        internal const int MaxPCSSSampleCount = 64;
+        internal const int DefaultDirLightPCSSBlockerSampleCount = 24;
+        internal const int DefaultDirLightPCSSFilterSampleCount = 32;
+        internal const float DefaultDirLightPCSSMaxPenumbraSize = 0.56f;
+        internal const float DefaultDirLightPCSSMaxSamplingDistance = 0.5f;
+        internal const float DefaultDirLightPCSSMinFilterSizeTexels = 1.5f;
+        internal const float DefaultDirLightPCSSMinFilterMaxAngularDiameter = 10.0f;
+        internal const float DefaultDirLightPCSSBlockerSearchAngularDiameter = 12.0f;
+        internal const float MinDirLightPCSSBlockerSamplingClumpExponent = 1.0f;
+        internal const float MaxDirLightPCSSBlockerSamplingClumpExponent = 6.0f;
+        internal const float DefaultDirLightPCSSBlockerSamplingClumpExponent = 2.0f;
         internal const float DefaultCelestialBodyAngularDiameter = 0.5f;
         internal const float DefaultCelestialBodyDistance = 149597870700.0f;
         internal const float DefaultManualSunIntensity = 130000.0f;
@@ -374,6 +386,30 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private float m_SlopeBias = DefaultShadowSlopeBias;
+
+        [SerializeField, Range(MinPCSSSampleCount, MaxPCSSSampleCount)]
+        private int m_DirLightPCSSBlockerSampleCount = DefaultDirLightPCSSBlockerSampleCount;
+
+        [SerializeField, Range(MinPCSSSampleCount, MaxPCSSSampleCount)]
+        private int m_DirLightPCSSFilterSampleCount = DefaultDirLightPCSSFilterSampleCount;
+
+        [SerializeField]
+        private float m_DirLightPCSSMaxPenumbraSize = DefaultDirLightPCSSMaxPenumbraSize;
+
+        [SerializeField]
+        private float m_DirLightPCSSMaxSamplingDistance = DefaultDirLightPCSSMaxSamplingDistance;
+
+        [SerializeField]
+        private float m_DirLightPCSSMinFilterSizeTexels = DefaultDirLightPCSSMinFilterSizeTexels;
+
+        [SerializeField]
+        private float m_DirLightPCSSMinFilterMaxAngularDiameter = DefaultDirLightPCSSMinFilterMaxAngularDiameter;
+
+        [SerializeField]
+        private float m_DirLightPCSSBlockerSearchAngularDiameter = DefaultDirLightPCSSBlockerSearchAngularDiameter;
+
+        [SerializeField, Range(MinDirLightPCSSBlockerSamplingClumpExponent, MaxDirLightPCSSBlockerSamplingClumpExponent)]
+        private float m_DirLightPCSSBlockerSamplingClumpExponent = DefaultDirLightPCSSBlockerSamplingClumpExponent;
 
         [SerializeField]
         private bool m_InteractsWithSky = true;
@@ -608,6 +644,84 @@ namespace VividRP.Runtime
                 0.0f,
                 MaxShadowSlopeBias,
                 DefaultShadowSlopeBias);
+        }
+
+        public int dirLightPCSSBlockerSampleCount
+        {
+            get => m_DirLightPCSSBlockerSampleCount;
+            set => SetClampedInt(
+                ref m_DirLightPCSSBlockerSampleCount,
+                value,
+                MinPCSSSampleCount,
+                MaxPCSSSampleCount,
+                DefaultDirLightPCSSBlockerSampleCount);
+        }
+
+        public int dirLightPCSSFilterSampleCount
+        {
+            get => m_DirLightPCSSFilterSampleCount;
+            set => SetClampedInt(
+                ref m_DirLightPCSSFilterSampleCount,
+                value,
+                MinPCSSSampleCount,
+                MaxPCSSSampleCount,
+                DefaultDirLightPCSSFilterSampleCount);
+        }
+
+        public float dirLightPCSSMaxPenumbraSize
+        {
+            get => m_DirLightPCSSMaxPenumbraSize;
+            set => SetNonNegativeFloat(
+                ref m_DirLightPCSSMaxPenumbraSize,
+                value,
+                DefaultDirLightPCSSMaxPenumbraSize);
+        }
+
+        public float dirLightPCSSMaxSamplingDistance
+        {
+            get => m_DirLightPCSSMaxSamplingDistance;
+            set => SetNonNegativeFloat(
+                ref m_DirLightPCSSMaxSamplingDistance,
+                value,
+                DefaultDirLightPCSSMaxSamplingDistance);
+        }
+
+        public float dirLightPCSSMinFilterSizeTexels
+        {
+            get => m_DirLightPCSSMinFilterSizeTexels;
+            set => SetNonNegativeFloat(
+                ref m_DirLightPCSSMinFilterSizeTexels,
+                value,
+                DefaultDirLightPCSSMinFilterSizeTexels);
+        }
+
+        public float dirLightPCSSMinFilterMaxAngularDiameter
+        {
+            get => m_DirLightPCSSMinFilterMaxAngularDiameter;
+            set => SetNonNegativeFloat(
+                ref m_DirLightPCSSMinFilterMaxAngularDiameter,
+                value,
+                DefaultDirLightPCSSMinFilterMaxAngularDiameter);
+        }
+
+        public float dirLightPCSSBlockerSearchAngularDiameter
+        {
+            get => m_DirLightPCSSBlockerSearchAngularDiameter;
+            set => SetNonNegativeFloat(
+                ref m_DirLightPCSSBlockerSearchAngularDiameter,
+                value,
+                DefaultDirLightPCSSBlockerSearchAngularDiameter);
+        }
+
+        public float dirLightPCSSBlockerSamplingClumpExponent
+        {
+            get => m_DirLightPCSSBlockerSamplingClumpExponent;
+            set => SetClampedFloat(
+                ref m_DirLightPCSSBlockerSamplingClumpExponent,
+                value,
+                MinDirLightPCSSBlockerSamplingClumpExponent,
+                MaxDirLightPCSSBlockerSamplingClumpExponent,
+                DefaultDirLightPCSSBlockerSamplingClumpExponent);
         }
 
         public bool interactsWithSky
@@ -878,6 +992,16 @@ namespace VividRP.Runtime
             NotifyLightDataChanged();
         }
 
+        private void SetClampedInt(ref int field, int value, int min, int max, int defaultValue)
+        {
+            var sanitizedValue = SanitizeClampedInt(value, min, max, defaultValue);
+            if (field == sanitizedValue)
+                return;
+
+            field = sanitizedValue;
+            NotifyLightDataChanged();
+        }
+
         private void SetWrappedAngle(ref float field, float value)
         {
             var sanitizedValue = SanitizeWrappedAngle(value);
@@ -923,6 +1047,36 @@ namespace VividRP.Runtime
                 0.0f,
                 MaxShadowSlopeBias,
                 DefaultShadowSlopeBias);
+            m_DirLightPCSSBlockerSampleCount = SanitizeClampedInt(
+                m_DirLightPCSSBlockerSampleCount,
+                MinPCSSSampleCount,
+                MaxPCSSSampleCount,
+                DefaultDirLightPCSSBlockerSampleCount);
+            m_DirLightPCSSFilterSampleCount = SanitizeClampedInt(
+                m_DirLightPCSSFilterSampleCount,
+                MinPCSSSampleCount,
+                MaxPCSSSampleCount,
+                DefaultDirLightPCSSFilterSampleCount);
+            m_DirLightPCSSMaxPenumbraSize = SanitizeNonNegativeFloat(
+                m_DirLightPCSSMaxPenumbraSize,
+                DefaultDirLightPCSSMaxPenumbraSize);
+            m_DirLightPCSSMaxSamplingDistance = SanitizeNonNegativeFloat(
+                m_DirLightPCSSMaxSamplingDistance,
+                DefaultDirLightPCSSMaxSamplingDistance);
+            m_DirLightPCSSMinFilterSizeTexels = SanitizeNonNegativeFloat(
+                m_DirLightPCSSMinFilterSizeTexels,
+                DefaultDirLightPCSSMinFilterSizeTexels);
+            m_DirLightPCSSMinFilterMaxAngularDiameter = SanitizeNonNegativeFloat(
+                m_DirLightPCSSMinFilterMaxAngularDiameter,
+                DefaultDirLightPCSSMinFilterMaxAngularDiameter);
+            m_DirLightPCSSBlockerSearchAngularDiameter = SanitizeNonNegativeFloat(
+                m_DirLightPCSSBlockerSearchAngularDiameter,
+                DefaultDirLightPCSSBlockerSearchAngularDiameter);
+            m_DirLightPCSSBlockerSamplingClumpExponent = SanitizeClampedFloat(
+                m_DirLightPCSSBlockerSamplingClumpExponent,
+                MinDirLightPCSSBlockerSamplingClumpExponent,
+                MaxDirLightPCSSBlockerSamplingClumpExponent,
+                DefaultDirLightPCSSBlockerSamplingClumpExponent);
         }
 
         private static CSMScreenSpaceShadowQuality SanitizeScreenSpaceShadowQuality(CSMScreenSpaceShadowQuality value)
@@ -983,6 +1137,14 @@ namespace VividRP.Runtime
         private static float SanitizeClampedFloat(float value, float min, float max, float defaultValue)
         {
             if (float.IsNaN(value) || float.IsInfinity(value))
+                return defaultValue;
+
+            return Mathf.Clamp(value, min, max);
+        }
+
+        private static int SanitizeClampedInt(int value, int min, int max, int defaultValue)
+        {
+            if (value == int.MinValue || value == int.MaxValue)
                 return defaultValue;
 
             return Mathf.Clamp(value, min, max);

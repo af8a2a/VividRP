@@ -25,22 +25,24 @@ int      _CSMAtlasResolution;
 int      _CSMCascadeResolution;
 int      _CSMShadowQuality;
 float    _CSMLightAngularDiameter;
+int      _CSMFrameIndex;
+int      _CSMPCSSBlockerSampleCount;
+int      _CSMPCSSFilterSampleCount;
+float    _CSMPCSSMaxPenumbraSize;
+float    _CSMPCSSMaxSamplingDistance;
+float    _CSMPCSSMinFilterSizeTexels;
+float    _CSMPCSSMinFilterMaxAngularDiameter;
+float    _CSMPCSSBlockerSearchAngularDiameter;
+float    _CSMPCSSBlockerSamplingClumpExponent;
 
 static const int kCSMShadowQualityLow = 0;
 static const int kCSMShadowQualityMedium = 1;
 static const int kCSMShadowQualityHigh = 2;
 static const int kCSMShadowQualityVeryHigh = 3;
-static const int kPCSSBlockerSampleCount = 24;
-static const int kPCSSFilterSampleCount = 32;
+static const int kPCSSMaxSampleCount = 64;
 static const float kPCSSGoldenAngle = 2.39996323;
 static const float kPCSSTwoPi = 6.28318531;
 static const float kDegreesToRadians = 0.01745329251;
-static const float kPCSSMaxPenumbraSizeWorld = 0.56;
-static const float kPCSSMaxSamplingDistanceWorld = 0.5;
-static const float kPCSSMinFilterSizeTexels = 1.5;
-static const float kPCSSMinFilterMaxAngularDiameter = 10.0;
-static const float kPCSSBlockerSearchAngularDiameter = 12.0;
-static const float kPCSSBlockerSamplingClumpExponent = 1.0;
 
 bool IsSkyPixel(float deviceDepth)
 {
@@ -141,6 +143,15 @@ float2 ClampShadowAtlasUV(float2 atlasUV, int cascadeIndex)
     return clamp(atlasUV, cascadeMinUV, cascadeMaxUV);
 }
 
+bool IsWithinCascadeAtlasBounds(float2 atlasUV, int cascadeIndex)
+{
+    float2 cascadeMinUV;
+    float2 cascadeMaxUV;
+    float2 texelSize;
+    GetCascadeAtlasBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
+    return all(atlasUV >= cascadeMinUV) && all(atlasUV <= cascadeMaxUV);
+}
+
 int2 AtlasUVToTexelCoord(float2 atlasUV)
 {
     return int2(saturate(atlasUV) * (_CSMAtlasResolution - 1));
@@ -184,9 +195,28 @@ float SampleShadowPCF7x7(float2 atlasUV, float depth, int cascadeIndex)
     return SampleShadowPCFKernel(atlasUV, depth, cascadeIndex, 3);
 }
 
-float InterleavedGradientNoise(float2 pixelCoord)
+// float InterleavedGradientNoise(float2 pixelCoord, int frameIndex)
+// {
+//     const float3 magic = float3(0.06711056, 0.00583715, 52.9829189);
+//     float2 frameMagicScale = float2(2.083, 4.867);
+//     pixelCoord += frameIndex * frameMagicScale;
+//     return frac(magic.z * frac(dot(pixelCoord, magic.xy)));
+// }
+
+int GetPCSSBlockerSampleCount()
 {
-    return frac(52.9829189 * frac(dot(pixelCoord, float2(0.06711056, 0.00583715))));
+    return clamp(_CSMPCSSBlockerSampleCount, 1, kPCSSMaxSampleCount);
+}
+
+int GetPCSSFilterSampleCount()
+{
+    return clamp(_CSMPCSSFilterSampleCount, 1, kPCSSMaxSampleCount);
+}
+
+float GetPCSSBlockerClumpExponent()
+{
+    // Match HDRP's user-facing remap where 1..6 maps to an effective 0.5..3.0 range.
+    return max(0.5 * _CSMPCSSBlockerSamplingClumpExponent, 0.5);
 }
 
 float2 SampleVogelDiskClumped(int sampleIndex, int sampleCount, float angleOffset, float clumpExponent, out float sampleDistNorm)
@@ -225,18 +255,23 @@ bool FindAverageBlockerDepth(
     float depthOffsetDirection = GetShadowDepthOffsetDirection();
     float blockerSearchRadiusTexels = blockerSearchRadiusWorld / max(worldTexelSize, 1e-6);
     float2 texelSize = 1.0 / float2(_CSMAtlasResolution, _CSMAtlasResolution);
+    int blockerSampleCount = GetPCSSBlockerSampleCount();
+    float blockerClumpExponent = GetPCSSBlockerClumpExponent();
 
     [loop]
-    for (int sampleIndex = 0; sampleIndex < kPCSSBlockerSampleCount; sampleIndex++)
+    for (int sampleIndex = 0; sampleIndex < blockerSampleCount; sampleIndex++)
     {
         float sampleDistNorm;
         float2 diskSample = SampleVogelDiskClumped(
             sampleIndex,
-            kPCSSBlockerSampleCount,
+            blockerSampleCount,
             rotationAngle,
-            kPCSSBlockerSamplingClumpExponent,
+            blockerClumpExponent,
             sampleDistNorm);
-        float2 sampleUV = ClampShadowAtlasUV(atlasUV + diskSample * (blockerSearchRadiusTexels * texelSize), cascadeIndex);
+        float2 sampleUV = atlasUV + diskSample * (blockerSearchRadiusTexels * texelSize);
+        if (!IsWithinCascadeAtlasBounds(sampleUV, cascadeIndex))
+            continue;
+
         float radialOffsetWorld = blockerSearchRadiusWorld * sampleDistNorm;
         float radial2DepthScale = radialOffsetWorld < minFilterRadiusWorld
             ? minFilterRadial2DepthScale
@@ -271,17 +306,17 @@ float SampleShadowPCSS(float2 atlasUV, float receiverDepth, int cascadeIndex, ui
     if (worldTexelSize <= 1e-6 || depthToWorldScale <= 1e-5)
         return SampleShadowPCF7x7(atlasUV, receiverDepth, cascadeIndex);
 
-    float blockerSearchAngularDiameter = max(kPCSSBlockerSearchAngularDiameter, _CSMLightAngularDiameter);
+    float blockerSearchAngularDiameter = max(_CSMPCSSBlockerSearchAngularDiameter, _CSMLightAngularDiameter);
     float halfBlockerSearchAngularDiameterTangent = tan(0.5 * blockerSearchAngularDiameter * kDegreesToRadians);
-    float minFilterAngularDiameter = max(blockerSearchAngularDiameter, kPCSSMinFilterMaxAngularDiameter);
+    float minFilterAngularDiameter = max(blockerSearchAngularDiameter, _CSMPCSSMinFilterMaxAngularDiameter);
     float halfMinFilterAngularDiameterTangent = tan(0.5 * max(minFilterAngularDiameter, _CSMLightAngularDiameter) * kDegreesToRadians);
-    float minFilterRadiusWorld = kPCSSMinFilterSizeTexels * worldTexelSize;
-    float maxBlockerDistanceWorld = kPCSSMaxPenumbraSizeWorld / max(2.0 * halfLightAngularDiameterTangent, 1e-5);
+    float minFilterRadiusWorld = _CSMPCSSMinFilterSizeTexels * worldTexelSize;
+    float maxBlockerDistanceWorld = _CSMPCSSMaxPenumbraSize / max(2.0 * halfLightAngularDiameterTangent, 1e-5);
     float blockerRadial2DepthScale = 1.0 / max(halfBlockerSearchAngularDiameterTangent * depthToWorldScale, 1e-5);
     float minFilterRadial2DepthScale = 1.0 / max(halfMinFilterAngularDiameterTangent * depthToWorldScale, 1e-5);
     float receiverDistanceWorld = min(GetReceiverDistanceToLight(receiverDepth, depthToWorldScale), maxBlockerDistanceWorld);
     float blockerSearchRadiusWorld = max(receiverDistanceWorld * halfLightAngularDiameterTangent, minFilterRadiusWorld);
-    float noise = InterleavedGradientNoise(pixelCoord);
+    float noise = InterleavedGradientNoise(float2(pixelCoord) + 0.5, _CSMFrameIndex);
     float rotationAngle = noise * kPCSSTwoPi;
     float averageBlockerDepth;
     bool blockerFound = FindAverageBlockerDepth(
@@ -303,23 +338,29 @@ float SampleShadowPCSS(float2 atlasUV, float receiverDepth, int cascadeIndex, ui
     float filterRadiusWorld = blockerDistanceWorld * halfLightAngularDiameterTangent;
     float samplingFilterRadiusWorld = max(filterRadiusWorld, minFilterRadiusWorld);
     float filterRadiusTexels = samplingFilterRadiusWorld / worldTexelSize;
-    float maxPCSSOffsetShadow = min(kPCSSMaxSamplingDistanceWorld, blockerDistanceWorld * 0.25) / depthToWorldScale;
+    float maxPCSSOffsetShadow = min(_CSMPCSSMaxSamplingDistance, blockerDistanceWorld * 0.25) / depthToWorldScale;
     float2 texelSize = 1.0 / float2(_CSMAtlasResolution, _CSMAtlasResolution);
     float depthOffsetDirection = GetShadowDepthOffsetDirection();
     float shadow = 0.0;
+    float validSampleCount = 0.0;
+    int filterSampleCount = GetPCSSFilterSampleCount();
 
     [loop]
-    for (int sampleIndex = 0; sampleIndex < kPCSSFilterSampleCount; sampleIndex++)
+    for (int sampleIndex = 0; sampleIndex < filterSampleCount; sampleIndex++)
     {
         float sampleDistNorm;
-        float2 diskSample = SampleVogelDiskUniform(sampleIndex, kPCSSFilterSampleCount, rotationAngle, sampleDistNorm);
-        float2 sampleUV = ClampShadowAtlasUV(atlasUV + diskSample * (filterRadiusTexels * texelSize), cascadeIndex);
+        float2 diskSample = SampleVogelDiskUniform(sampleIndex, filterSampleCount, rotationAngle, sampleDistNorm);
+        float2 sampleUV = atlasUV + diskSample * (filterRadiusTexels * texelSize);
+        if (!IsWithinCascadeAtlasBounds(sampleUV, cascadeIndex))
+            continue;
+
         float zOffset = filterRadiusWorld * sampleDistNorm * minFilterRadial2DepthScale;
         float coordz = receiverDepth + depthOffsetDirection * min(zOffset, maxPCSSOffsetShadow);
         shadow += _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, sampleUV, coordz);
+        validSampleCount += 1.0;
     }
 
-    return shadow / kPCSSFilterSampleCount;
+    return validSampleCount > 0.0 ? shadow / validSampleCount : 1.0;
 }
 
 float EvaluateShadow(float2 atlasUV, float receiverDepth, int cascadeIndex, uint2 pixelCoord)

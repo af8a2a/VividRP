@@ -88,7 +88,7 @@ namespace VividRP.Editor
 
             DrawSectionHeader("Per Light");
             EditorGUILayout.HelpBox(
-                "Atlas Resolution, Depth Bias, Normal Bias, and Slope-Scale Depth Bias are configured on the shadow-casting directional light.",
+                "Screen Space Quality, Atlas Resolution, Depth Bias, Normal Bias, and Slope-Scale Depth Bias are configured on the shadow-casting directional light.",
                 MessageType.Info);
         }
 

@@ -19,6 +19,7 @@ namespace VividRP.Editor
         internal SerializedProperty rayTracedShadowRayBias { get; }
         internal SerializedProperty rayTracedShadowDistantRayBias { get; }
         internal SerializedProperty rayTracedShadowSunAngularDiameter { get; }
+        internal SerializedProperty screenSpaceShadowQuality { get; }
         internal SerializedProperty shadowAtlasResolution { get; }
         internal SerializedProperty depthBias { get; }
         internal SerializedProperty normalBias { get; }
@@ -74,6 +75,7 @@ namespace VividRP.Editor
             rayTracedShadowRayBias = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowRayBias");
             rayTracedShadowDistantRayBias = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowDistantRayBias");
             rayTracedShadowSunAngularDiameter = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowSunAngularDiameter");
+            screenSpaceShadowQuality = serializedAdditionalDataObject.FindProperty("m_ScreenSpaceShadowQuality");
             shadowAtlasResolution = serializedAdditionalDataObject.FindProperty("m_ShadowAtlasResolution");
             depthBias = serializedAdditionalDataObject.FindProperty("m_DepthBias");
             normalBias = serializedAdditionalDataObject.FindProperty("m_NormalBias");

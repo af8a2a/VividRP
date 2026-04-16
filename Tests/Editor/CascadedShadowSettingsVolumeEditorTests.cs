@@ -76,7 +76,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("GUILayout.Label(\"Cascade splits\""));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Directional Light\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Per Light\")"));
-            Assert.That(source, Does.Contain("Atlas Resolution, Depth Bias, Normal Bias, and Slope-Scale Depth Bias are configured on the shadow-casting directional light."));
+            Assert.That(source, Does.Contain("Screen Space Quality, Atlas Resolution, Depth Bias, Normal Bias, and Slope-Scale Depth Bias are configured on the shadow-casting directional light."));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

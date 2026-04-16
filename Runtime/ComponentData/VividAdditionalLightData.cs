@@ -297,6 +297,14 @@ namespace VividRP.Runtime
     [ExecuteAlways]
     public class VividAdditionalLightData : MonoBehaviour, IAdditionalData
     {
+        public enum CSMScreenSpaceShadowQuality
+        {
+            Low = 0,
+            Medium = 1,
+            High = 2,
+            VeryHigh = 3,
+        }
+
         public enum CSMShadowAtlasResolution
         {
             Resolution1024 = 1024,
@@ -317,6 +325,7 @@ namespace VividRP.Runtime
         internal const float DefaultRayTracedShadowDistantRayBias = 0.001f;
         internal const float DefaultRayTracedShadowSunAngularDiameter = 0.533f;
         internal const int DefaultShadowAtlasResolution = 4096;
+        internal const CSMScreenSpaceShadowQuality DefaultScreenSpaceShadowQuality = CSMScreenSpaceShadowQuality.Low;
         internal const float DefaultShadowDepthBias = 1.0f;
         internal const float DefaultShadowNormalBias = 1.0f;
         internal const float DefaultShadowSlopeBias = 2.5f;
@@ -350,6 +359,9 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private float m_RayTracedShadowSunAngularDiameter = DefaultRayTracedShadowSunAngularDiameter;
+
+        [SerializeField]
+        private CSMScreenSpaceShadowQuality m_ScreenSpaceShadowQuality = DefaultScreenSpaceShadowQuality;
 
         [SerializeField]
         private CSMShadowAtlasResolution m_ShadowAtlasResolution = CSMShadowAtlasResolution.Resolution4096;
@@ -535,9 +547,23 @@ namespace VividRP.Runtime
                 DefaultRayTracedShadowSunAngularDiameter);
         }
 
+        public CSMScreenSpaceShadowQuality screenSpaceShadowQuality
+        {
+            get => SanitizeScreenSpaceShadowQuality(m_ScreenSpaceShadowQuality);
+            set
+            {
+                var sanitizedValue = SanitizeScreenSpaceShadowQuality(value);
+                if (m_ScreenSpaceShadowQuality == sanitizedValue)
+                    return;
+
+                m_ScreenSpaceShadowQuality = sanitizedValue;
+                NotifyLightDataChanged();
+            }
+        }
+
         public CSMShadowAtlasResolution shadowAtlasResolution
         {
-            get => m_ShadowAtlasResolution;
+            get => SanitizeShadowAtlasResolution(m_ShadowAtlasResolution);
             set
             {
                 var sanitizedValue = SanitizeShadowAtlasResolution(value);
@@ -880,6 +906,7 @@ namespace VividRP.Runtime
 
         private void ConstrainShadowBiasSettings()
         {
+            m_ScreenSpaceShadowQuality = SanitizeScreenSpaceShadowQuality(m_ScreenSpaceShadowQuality);
             m_ShadowAtlasResolution = SanitizeShadowAtlasResolution(m_ShadowAtlasResolution);
             m_DepthBias = SanitizeClampedFloat(
                 m_DepthBias,
@@ -896,6 +923,18 @@ namespace VividRP.Runtime
                 0.0f,
                 MaxShadowSlopeBias,
                 DefaultShadowSlopeBias);
+        }
+
+        private static CSMScreenSpaceShadowQuality SanitizeScreenSpaceShadowQuality(CSMScreenSpaceShadowQuality value)
+        {
+            return value switch
+            {
+                CSMScreenSpaceShadowQuality.Low => CSMScreenSpaceShadowQuality.Low,
+                CSMScreenSpaceShadowQuality.Medium => CSMScreenSpaceShadowQuality.Medium,
+                CSMScreenSpaceShadowQuality.High => CSMScreenSpaceShadowQuality.High,
+                CSMScreenSpaceShadowQuality.VeryHigh => CSMScreenSpaceShadowQuality.VeryHigh,
+                _ => DefaultScreenSpaceShadowQuality
+            };
         }
 
         private static CSMShadowAtlasResolution SanitizeShadowAtlasResolution(CSMShadowAtlasResolution value)

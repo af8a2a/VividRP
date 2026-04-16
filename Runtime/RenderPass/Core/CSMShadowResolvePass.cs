@@ -28,6 +28,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int CSMLightDirectionWSId = Shader.PropertyToID("_CSMLightDirectionWS");
         private static readonly int CSMAtlasResolutionId = Shader.PropertyToID("_CSMAtlasResolution");
         private static readonly int CSMCascadeResolutionId = Shader.PropertyToID("_CSMCascadeResolution");
+        private static readonly int CSMShadowQualityId = Shader.PropertyToID("_CSMShadowQuality");
+        private static readonly int CSMLightAngularDiameterId = Shader.PropertyToID("_CSMLightAngularDiameter");
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
@@ -59,6 +61,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_NormalBias;
         private int m_AtlasResolution;
         private int m_CascadeResolution;
+        private int m_ShadowQuality = (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low;
+        private float m_LightAngularDiameter = VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
 
         public CSMShadowResolvePass()
         {
@@ -92,6 +96,9 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             m_IsActive = false;
+            m_LightDirectionWS = Vector4.zero;
+            m_ShadowQuality = (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low;
+            m_LightAngularDiameter = VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             var width = cameraData.actualWidth;
@@ -127,6 +134,13 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 var dir = lightData.mainDirectionalLight.directionWS;
                 m_LightDirectionWS = new Vector4(dir.x, dir.y, dir.z, 0f);
+
+                if (DirectionalRayTracedShadowPass.TryResolveMainDirectionalLight(lightData, out _, out var additionalLightData)
+                    && additionalLightData != null)
+                {
+                    m_ShadowQuality = (int)additionalLightData.screenSpaceShadowQuality;
+                    m_LightAngularDiameter = Mathf.Max(additionalLightData.resolvedAngularDiameter, 0.0f);
+                }
             }
         }
 
@@ -161,6 +175,8 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeVectorParam(m_ResolveCompute, CSMLightDirectionWSId, m_LightDirectionWS);
             cmd.SetComputeIntParam(m_ResolveCompute, CSMAtlasResolutionId, m_AtlasResolution);
             cmd.SetComputeIntParam(m_ResolveCompute, CSMCascadeResolutionId, m_CascadeResolution);
+            cmd.SetComputeIntParam(m_ResolveCompute, CSMShadowQualityId, m_ShadowQuality);
+            cmd.SetComputeFloatParam(m_ResolveCompute, CSMLightAngularDiameterId, m_LightAngularDiameter);
 
             cmd.DispatchCompute(m_ResolveCompute, m_Kernel,
                 m_DispatchGroupCountX, m_DispatchGroupCountY, 1);

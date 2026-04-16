@@ -18,6 +18,7 @@ namespace VividRP.Editor
         private static readonly GUIContent s_CustomShadowLayersLabel = EditorGUIUtility.TrTextContent("Custom Shadow Layers");
         private static readonly GUIContent s_ShadowRenderingLayersLabel = EditorGUIUtility.TrTextContent("Shadow Rendering Layers");
         private static readonly GUIContent s_CSMShadowLabel = EditorGUIUtility.TrTextContent("CSM Shadow");
+        private static readonly GUIContent s_ScreenSpaceShadowQualityLabel = EditorGUIUtility.TrTextContent("Screen Space Quality", "Quality tier used by the screen-space CSM resolve for this directional light.");
         private static readonly GUIContent s_ShadowAtlasResolutionLabel = EditorGUIUtility.TrTextContent("Atlas Resolution", "Fixed resolution used for the full 2x2 CSM atlas rendered by this directional light.");
         private static readonly GUIContent s_DepthBiasLabel = EditorGUIUtility.TrTextContent("Depth Bias", "Constant depth bias applied while rendering cascaded shadow maps for this directional light.");
         private static readonly GUIContent s_NormalBiasLabel = EditorGUIUtility.TrTextContent("Normal Bias", "Normal-based bias applied while rendering and resolving cascaded shadow maps for this directional light.");
@@ -48,6 +49,21 @@ namespace VividRP.Editor
         private static readonly GUIContent s_SurfaceTintLabel = EditorGUIUtility.TrTextContent("Tint");
         private static readonly GUIContent s_DistanceLabel = EditorGUIUtility.TrTextContent("Distance", "Distance from the camera (in meters) to the emissive celestial body represented by the light. This value is only used for sorting.");
         private static readonly string[] s_DiameterModeNames = { "Multiply", "Override" };
+        private static readonly GUIContent[] s_ScreenSpaceShadowQualityOptionLabels =
+        {
+            EditorGUIUtility.TrTextContent("Low (PCF 3x3)"),
+            EditorGUIUtility.TrTextContent("Medium (PCF 5x5)"),
+            EditorGUIUtility.TrTextContent("High (PCF 7x7)"),
+            EditorGUIUtility.TrTextContent("Very High (PCSS)")
+        };
+
+        private static readonly int[] s_ScreenSpaceShadowQualityOptionValues =
+        {
+            (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low,
+            (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Medium,
+            (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.High,
+            (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh
+        };
         private static readonly GUIContent[] s_ShadowAtlasResolutionOptionLabels =
         {
             EditorGUIUtility.TrTextContent("1024"),
@@ -241,11 +257,30 @@ namespace VividRP.Editor
 
             using (new EditorGUI.IndentLevelScope())
             {
+                DrawDirectionalScreenSpaceShadowQualityField();
                 DrawDirectionalShadowAtlasResolutionField();
                 EditorGUILayout.Slider(m_SerializedLight.depthBias, 0.0f, 10.0f, s_DepthBiasLabel);
                 EditorGUILayout.Slider(m_SerializedLight.normalBias, 0.0f, 10.0f, s_NormalBiasLabel);
                 EditorGUILayout.Slider(m_SerializedLight.slopeBias, 0.0f, 5.0f, s_SlopeBiasLabel);
             }
+        }
+
+        private void DrawDirectionalScreenSpaceShadowQualityField()
+        {
+            var property = m_SerializedLight.screenSpaceShadowQuality;
+            var oldMixedValue = EditorGUI.showMixedValue;
+            EditorGUI.showMixedValue = property.hasMultipleDifferentValues;
+
+            EditorGUI.BeginChangeCheck();
+            var quality = EditorGUILayout.IntPopup(
+                s_ScreenSpaceShadowQualityLabel,
+                property.intValue,
+                s_ScreenSpaceShadowQualityOptionLabels,
+                s_ScreenSpaceShadowQualityOptionValues);
+            if (EditorGUI.EndChangeCheck())
+                property.intValue = quality;
+
+            EditorGUI.showMixedValue = oldMixedValue;
         }
 
         private void DrawDirectionalShadowAtlasResolutionField()

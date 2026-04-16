@@ -58,6 +58,7 @@ namespace VividRP.Editor.Tests
             Assert.That(serializedLight.rayTracedShadowRayBias, Is.Not.Null);
             Assert.That(serializedLight.rayTracedShadowDistantRayBias, Is.Not.Null);
             Assert.That(serializedLight.rayTracedShadowSunAngularDiameter, Is.Not.Null);
+            Assert.That(serializedLight.screenSpaceShadowQuality, Is.Not.Null);
             Assert.That(serializedLight.shadowAtlasResolution, Is.Not.Null);
             Assert.That(serializedLight.depthBias, Is.Not.Null);
             Assert.That(serializedLight.normalBias, Is.Not.Null);
@@ -205,6 +206,9 @@ namespace VividRP.Editor.Tests
             var additionalData = light.GetVividAdditionalLightData();
 
             Assert.That(
+                additionalData.screenSpaceShadowQuality,
+                Is.EqualTo(VividAdditionalLightData.DefaultScreenSpaceShadowQuality));
+            Assert.That(
                 additionalData.shadowAtlasResolution,
                 Is.EqualTo(VividAdditionalLightData.CSMShadowAtlasResolution.Resolution4096));
             Assert.That(
@@ -227,7 +231,11 @@ namespace VividRP.Editor.Tests
             additionalData.slopeBias = 99.0f;
 
             additionalData.shadowAtlasResolution = (VividAdditionalLightData.CSMShadowAtlasResolution)12345;
+            additionalData.screenSpaceShadowQuality = (VividAdditionalLightData.CSMScreenSpaceShadowQuality)12345;
 
+            Assert.That(
+                additionalData.screenSpaceShadowQuality,
+                Is.EqualTo(VividAdditionalLightData.DefaultScreenSpaceShadowQuality));
             Assert.That(
                 additionalData.shadowAtlasResolution,
                 Is.EqualTo(VividAdditionalLightData.CSMShadowAtlasResolution.Resolution4096));
@@ -420,6 +428,14 @@ namespace VividRP.Editor.Tests
             var source = File.ReadAllText(GetPackageFilePath("Editor", "ComponentEditor", "VividLightEditor.cs"));
 
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"CSM Shadow\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Screen Space Quality\""));
+            Assert.That(source, Does.Contain("private static readonly GUIContent[] s_ScreenSpaceShadowQualityOptionLabels ="));
+            Assert.That(source, Does.Contain("Low (PCF 3x3)"));
+            Assert.That(source, Does.Contain("Medium (PCF 5x5)"));
+            Assert.That(source, Does.Contain("High (PCF 7x7)"));
+            Assert.That(source, Does.Contain("Very High (PCSS)"));
+            Assert.That(source, Does.Contain("DrawDirectionalScreenSpaceShadowQualityField();"));
+            Assert.That(source, Does.Contain("m_SerializedLight.screenSpaceShadowQuality"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Atlas Resolution\""));
             Assert.That(source, Does.Contain("private static readonly GUIContent[] s_ShadowAtlasResolutionOptionLabels ="));
             Assert.That(source, Does.Contain("EditorGUILayout.IntPopup("));

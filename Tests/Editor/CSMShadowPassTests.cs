@@ -20,6 +20,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_DepthBias = Mathf.Max(0.0f, additionalLightData.depthBias);"));
             Assert.That(source, Does.Contain("m_NormalBias = Mathf.Max(0.0f, additionalLightData.normalBias);"));
             Assert.That(source, Does.Contain("m_SlopeScaleDepthBias = Mathf.Max(0.0f, additionalLightData.slopeBias);"));
+            Assert.That(source, Does.Contain("m_SplitData[i].shadowCascadeBlendCullingFactor = 1.0f;"));
             Assert.That(source, Does.Contain("m_CascadeWorldTexelSizes[i] = ComputeCascadeWorldTexelSize(m_ProjMatrices[i], m_CascadeResolution);"));
             Assert.That(source, Does.Contain("m_ShadowCasterBiases[i] = ComputeShadowCasterBias(mainVisibleLight, m_ProjMatrices[i], m_CascadeResolution, m_DepthBias, m_NormalBias);"));
             Assert.That(source, Does.Contain("var gpuProjMatrix = GL.GetGPUProjectionMatrix(m_ProjMatrices[cascadeIndex], true);"));

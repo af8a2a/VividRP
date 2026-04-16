@@ -134,6 +134,9 @@ namespace VividRP.Runtime.RenderPass.Core
                     break;
                 }
 
+                // Match Unity's cascade overlap so resolve-side blending sees valid occluders in both cascades.
+                m_SplitData[i].shadowCascadeBlendCullingFactor = 1.0f;
+
                 var sphere = m_SplitData[i].cullingSphere;
                 // Store radius squared in w for GPU sphere test
                 m_CascadeSpheres[i] = new Vector4(sphere.x, sphere.y, sphere.z, sphere.w * sphere.w);

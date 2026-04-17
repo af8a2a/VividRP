@@ -34,7 +34,7 @@ namespace VividRP.Runtime
         private Matrix4x4 m_PixelCoordToViewDirMatrix;
         private Texture m_RenderCubemap;
         private Color m_RenderTint = Color.white;
-        private float m_RenderExposure;
+        private float m_RenderIntensityMultiplier = 1.0f;
         private float m_RenderRotation;
         private Rect m_RenderViewport;
         private bool m_ShouldRenderSky;
@@ -61,12 +61,12 @@ namespace VividRP.Runtime
         public int GetSkyHash(in SkyRendererContext context)
         {
             var sky = VividVolumeManagerUtility.GetHDRISkyVolume();
-            var skySettings = VividVolumeManagerUtility.GetSkySettingsVolume();
             var cubemap = GetSkyCubemap();
+            var intensityMultiplier = ResolveSkyIntensityMultiplier(sky);
             return HashCode.Combine(
                 cubemap != null ? cubemap.GetEntityId() : EntityId.None,
-                 Color.white,
-                sky?.exposure.value ?? 0.0f,
+                Color.white,
+                intensityMultiplier,
                 sky?.rotation.value ?? 0.0f,
                 16);
         }
@@ -90,11 +90,13 @@ namespace VividRP.Runtime
                 return;
             }
 
+            var intensityMultiplier = ResolveSkyIntensityMultiplier(sky);
+            var rotation = sky?.rotation.value ?? 0.0f;
             skyData.activeSkyType = SkyType.HDRI;
             skyData.specularCubemap = cubemap;
             skyData.tint = Color.white;
-            skyData.exposure = sky?.exposure.value ?? 0.0f;
-            skyData.rotation = sky?.rotation.value ?? 0.0f;
+            skyData.exposure = intensityMultiplier;
+            skyData.rotation = rotation;
             var generatedCubemapResolution = 16;
             var ambientProbeRebuildReason = ResolveAmbientProbeRebuildReason(skyHash, generatedCubemapResolution);
             if (forceRebuild && ambientProbeRebuildReason == AmbientProbeRebuildReason.None)
@@ -115,7 +117,7 @@ namespace VividRP.Runtime
 
             skyData.ambientProbeCubemap = useBakedAmbientProbe ? m_AmbientProbeCubemap : cubemap;
             skyData.ambientProbeTint = useBakedAmbientProbe ? Color.white : skyData.tint;
-            skyData.ambientProbeExposure = useBakedAmbientProbe ? 0.0f : skyData.exposure;
+            skyData.ambientProbeExposure = useBakedAmbientProbe ? 1.0f : skyData.exposure;
             skyData.ambientProbeRotation = useBakedAmbientProbe ? 0.0f : skyData.rotation;
             skyData.skyHash = skyHash;
             skyData.ambientProbeHash = skyHash;
@@ -146,7 +148,7 @@ namespace VividRP.Runtime
 
             m_RenderCubemap = skyData.specularCubemap;
             m_RenderTint = skyData.tint;
-            m_RenderExposure = skyData.exposure;
+            m_RenderIntensityMultiplier = skyData.exposure;
             m_RenderRotation = skyData.rotation;
         }
 
@@ -166,7 +168,7 @@ namespace VividRP.Runtime
             cmd.SetViewport(m_RenderViewport);
 
             var properties = new MaterialPropertyBlock();
-            GetSkyParameters(m_RenderExposure, m_RenderRotation, out var intensity, out var phi);
+            GetSkyParameters(m_RenderIntensityMultiplier, m_RenderRotation, out var intensity, out var phi);
             properties.SetTexture(SkyCubemapId, m_RenderCubemap);
             properties.SetColor(SkyTintId, m_RenderTint);
             properties.SetVector(SkyParamId, new Vector4(intensity, 0.0f, Mathf.Cos(phi), Mathf.Sin(phi)));
@@ -196,7 +198,7 @@ namespace VividRP.Runtime
             m_DepthTexture = null;
             m_RenderCubemap = null;
             m_RenderTint = Color.white;
-            m_RenderExposure = 0.0f;
+            m_RenderIntensityMultiplier = 1.0f;
             m_RenderRotation = 0.0f;
             m_RenderViewport = default;
             m_ShouldRenderSky = false;
@@ -262,7 +264,7 @@ namespace VividRP.Runtime
                 && texture.graphicsFormat == GraphicsFormat.R16G16B16A16_SFloat;
         }
 
-        private bool RebuildAmbientProbeCubemap(CommandBuffer cmd, Cubemap cubemap, Color tint, float exposure, float rotation)
+        private bool RebuildAmbientProbeCubemap(CommandBuffer cmd, Cubemap cubemap, Color tint, float intensityMultiplier, float rotation)
         {
             if (cmd == null
                 || cubemap == null
@@ -276,7 +278,7 @@ namespace VividRP.Runtime
             properties.SetTexture(SkyCubemapId, cubemap);
             properties.SetColor(SkyTintId, tint);
 
-            GetSkyParameters(exposure, rotation, out var intensity, out var phi);
+            GetSkyParameters(intensityMultiplier, rotation, out var intensity, out var phi);
             properties.SetVector(SkyParamId, new Vector4(intensity, 0.0f, Mathf.Cos(phi), Mathf.Sin(phi)));
 
             SkyCubemapBakingUtility.RenderSkyToCubemap(
@@ -318,12 +320,14 @@ namespace VividRP.Runtime
             return new Rect(0.0f, 0.0f, width, height);
         }
 
-        private static void GetSkyParameters(float exposure, float rotation, out float intensity, out float phi)
+        private static float ResolveSkyIntensityMultiplier(HDRISkyVolume sky)
         {
-            var hdriSky = VividVolumeManagerUtility.GetHDRISkyVolume();
-            intensity = hdriSky != null
-                ? hdriSky.GetIntensityFromSettings()
-                : HDRISkyVolume.ResolveExposureMultiplier(exposure);
+            return sky != null ? sky.GetIntensityFromSettings() : 1.0f;
+        }
+
+        private static void GetSkyParameters(float intensityMultiplier, float rotation, out float intensity, out float phi)
+        {
+            intensity = Mathf.Max(intensityMultiplier, 0.0f);
             phi = -Mathf.Deg2Rad * rotation;
         }
     }

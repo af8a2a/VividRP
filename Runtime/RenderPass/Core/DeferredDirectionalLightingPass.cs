@@ -9,9 +9,9 @@ namespace VividRP.Runtime.RenderPass.Core
         {
         }
 
-        internal static new Vector4 BuildSkyIblParams(Cubemap skyCubemap, float exposure, float rotation)
+        internal static new Vector4 BuildSkyIblParams(Cubemap skyCubemap, float intensityMultiplier, float rotation)
         {
-            return DeferredLightingPass.BuildSkyIblParams(skyCubemap, exposure, rotation);
+            return DeferredLightingPass.BuildSkyIblParams(skyCubemap, intensityMultiplier, rotation);
         }
     }
 }

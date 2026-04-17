@@ -33,6 +33,8 @@ namespace VividRP.Runtime
         protected override void OnEnable()
         {
             EnsureDefaultSkyCubemapAssigned();
+            if (upperHemisphereLuxValue != null && skyCubemap != null)
+                upperHemisphereLuxValue.overrideState = skyCubemap.overrideState;
             base.OnEnable();
         }
 
@@ -74,22 +76,12 @@ namespace VividRP.Runtime
         /// <returns>The sky intensity.</returns>
         public float GetIntensityFromSettings()
         {
-            float skyIntensity = 1.0f;
-            switch (skyIntensityMode.value)
-            {
-                case SkyIntensityMode.Exposure:
-                    // Note: Here we use EV100 of sky as a multiplier, so it is the opposite of when use with a Camera
-                    // because for sky/light, higher EV mean brighter, but for camera higher EV mean darker scene
-                    skyIntensity *= ColorUtils.ConvertEV100ToExposure(-exposure.value);
-                    break;
-                case SkyIntensityMode.Multiplier:
-                    skyIntensity *= multiplier.value;
-                    break;
-                case SkyIntensityMode.Lux:
-                    skyIntensity *= desiredLuxValue.value / Mathf.Max(upperHemisphereLuxValue.value, 1e-5f);
-                    break;
-            }
-            return skyIntensity;
+            return SkyIntensityUtility.GetIntensityFromSettings(
+                skyIntensityMode.value,
+                exposure.value,
+                multiplier.value,
+                upperHemisphereLuxValue.value,
+                desiredLuxValue.value);
         }
 
     }

@@ -25,6 +25,8 @@ namespace VividRP.Editor
 
         private static readonly GUIContent s_MaterialLabel =
             EditorGUIUtility.TrTextContent("Material", "Sets a custom material that is reserved for HDRP-style physically based sky authoring.");
+        private static readonly GUIContent s_ExposureCompensationLabel =
+            EditorGUIUtility.TrTextContent("Exposure Compensation", "Sets the exposure compensation of the sky in EV.");
 
         private SerializedDataParameter m_Type;
         private SerializedDataParameter m_AtmosphericScattering;
@@ -54,6 +56,7 @@ namespace VividRP.Editor
         private SerializedDataParameter m_ColorSaturation;
         private SerializedDataParameter m_AlphaSaturation;
         private SerializedDataParameter m_AlphaMultiplier;
+        private SerializedDataParameter m_Exposure;
         private SerializedDataParameter m_HorizonTint;
         private SerializedDataParameter m_ZenithTint;
         private SerializedDataParameter m_HorizonZenithShift;
@@ -92,6 +95,7 @@ namespace VividRP.Editor
             m_OzoneDensityDimmer = Unpack(fetcher.Find(x => x.ozoneDensityDimmer));
             m_OzoneMinimumAltitude = Unpack(fetcher.Find(x => x.ozoneMinimumAltitude));
             m_OzoneLayerWidth = Unpack(fetcher.Find(x => x.ozoneLayerWidth));
+            m_Exposure = Unpack(fetcher.Find(x => x.exposure));
             m_ColorSaturation = Unpack(fetcher.Find(x => x.colorSaturation));
             m_AlphaSaturation = Unpack(fetcher.Find(x => x.alphaSaturation));
             m_AlphaMultiplier = Unpack(fetcher.Find(x => x.alphaMultiplier));
@@ -185,6 +189,9 @@ namespace VividRP.Editor
             PropertyField(m_HorizonTint);
             PropertyField(m_HorizonZenithShift);
             PropertyField(m_ZenithTint);
+
+            DrawSectionHeader("Sky");
+            PropertyField(m_Exposure, s_ExposureCompensationLabel);
 
             DrawSectionHeader("Vivid Extensions");
             PropertyField(m_RenderSunDisk);

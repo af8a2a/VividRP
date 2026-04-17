@@ -16,7 +16,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("HDRISkyRenderer.RebuildAmbientProbe (MissingTexture)"));
             Assert.That(source, Does.Contain("EnsureAmbientProbeCubemap(generatedCubemapResolution);"));
             Assert.That(source, Does.Contain("SkyCubemapBakingUtility.RenderSkyToCubemap("));
+            Assert.That(source, Does.Contain("var intensityMultiplier = ResolveSkyIntensityMultiplier(sky);"));
+            Assert.That(source, Does.Contain("skyData.exposure = intensityMultiplier;"));
             Assert.That(source, Does.Contain("skyData.ambientProbeCubemap = useBakedAmbientProbe ? m_AmbientProbeCubemap : cubemap;"));
+            Assert.That(source, Does.Contain("skyData.ambientProbeExposure = useBakedAmbientProbe ? 1.0f : skyData.exposure;"));
             Assert.That(source, Does.Contain("skyData.ambientProbeHash = skyHash;"));
         }
 
@@ -33,7 +36,11 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("cmd.SetRenderTarget(m_ColorTarget, m_DepthTexture);"));
             Assert.That(source, Does.Contain("properties.SetMatrix(PixelCoordToViewDirWSId, m_PixelCoordToViewDirMatrix);"));
             Assert.That(source, Does.Contain("CoreUtils.DrawFullScreen(cmd, m_Material, properties, 0);"));
-            Assert.That(source, Does.Contain("private static void GetSkyParameters(float exposure, float rotation, out float intensity, out float phi)"));
+            Assert.That(source, Does.Contain("m_RenderIntensityMultiplier = skyData.exposure;"));
+            Assert.That(source, Does.Contain("GetSkyParameters(m_RenderIntensityMultiplier, m_RenderRotation, out var intensity, out var phi);"));
+            Assert.That(source, Does.Contain("private static float ResolveSkyIntensityMultiplier(HDRISkyVolume sky)"));
+            Assert.That(source, Does.Contain("return sky != null ? sky.GetIntensityFromSettings() : 1.0f;"));
+            Assert.That(source, Does.Contain("private static void GetSkyParameters(float intensityMultiplier, float rotation, out float intensity, out float phi)"));
             Assert.That(source, Does.Not.Contain("HDRISkyPass.GetParameters("));
         }
 

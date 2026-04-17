@@ -135,24 +135,31 @@
   - `Runtime/Sky/VisualEnvironment.cs`
   - `Runtime/Sky/PhysicallyBasedSky/PhysicallyBasedSkyRenderer.cs`
 
-## 5. 曝光接口已替换成 Vivid 自己的链路
+## 5. 曝光接口仍保留 Vivid 的 pre-exposure 链路
 
 ### 当前状态
 
 - HDRP fullscreen sky pass 使用 `GetCurrentExposureMultiplier()`。
-- VividRP 当前统一通过 `AutoExposure.hlsl` 的 `VividGetPreExposure()` / `VividApplyPreExposure(...)` 接入自身曝光链路。
+- VividRP fullscreen sky / atmospheric scattering 仍统一通过 `AutoExposure.hlsl` 的 `VividGetPreExposure()` / `VividApplyPreExposure(...)` 接入自身曝光链路。
+- `SkySettingsVolume` 现在不再承载 sky intensity 参数；具体 sky volume 自己负责额外曝光：
+  - `HDRISkyVolume` 继续负责 `skyIntensityMode` / `exposure` / `multiplier` / `desiredLuxValue`
+  - `PhysicallyBasedSkyVolume` 负责自身的 `exposure`
+- `DeferredLightingPass.BuildSkyIblParams(...)` 现在直接消费“实际 intensity multiplier”，不再把 `skyData.exposure` 当成 EV100 再做一次 `pow(2, x)`。
 
 ### 当前 workaround / 偏差
 
 - fullscreen sky 在 `Shaders/Core/Private/Sky/PhysicallyBasedSky.shader` 里做 pre-exposure。
 - `SkyLUTGenerator.compute` 在写入 `_AtmosphericScatteringLUT_RW` 时直接乘了 `VividGetPreExposure()`。
-- 这条链路是正确的 Vivid 集成方向，但它并不是 HDRP 原始的 shader variables / exposure helper 接口，因此回归排查时要同时看 sky shader 和 LUT compute。
+- `VividSkyData.exposure` 这个字段名仍然是历史命名；当前它更接近“IBL 采样时需要额外应用的强度 multiplier”，而不是 HDRP 意义上的 exposure EV。
+- `SkySettingsVolume` 的 inspector 现在更接近 `VisualEnvironmentEditor`，但具体 sky volume 还没有收敛成 HDRP 那种统一的 `SkySettingsEditor` 继承链；HDRI 和 PBRSky 仍各自维护自己的曝光 UI。
+- PBRSky 当前只有 per-volume `exposure`，还没有像 HDRP `SkySettings` 那样完整支持 `Multiplier` / `Lux` 模式。
+- 这条链路是正确的 Vivid 集成方向，但它并不是 HDRP 原始的 shader variables / exposure helper 接口，因此回归排查时要同时看 sky shader、LUT compute、以及 IBL 参数构造。
 
 ### 风险信号
 
 - 只在开启自动曝光时天空或大气散射异常。
 - fullscreen sky 和 atmospheric scattering pass 的亮度不一致。
-- cubemap baking 看起来正常，但屏幕天空过亮 / 过暗。
+- cubemap baking 看起来正常，但屏幕天空、specular IBL、ambient probe 三者亮度不一致。
 
 ### 关键文件
 

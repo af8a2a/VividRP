@@ -1,6 +1,7 @@
 using System.IO;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Rendering;
 using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
@@ -64,15 +65,39 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SkyIntensityUtility_UsesHdrpAlignedIntensityModes()
+        {
+            Assert.That(
+                SkyIntensityUtility.GetIntensityFromSettings(SkyIntensityMode.Exposure, 2.0f, 3.0f, 10.0f, 500.0f),
+                Is.EqualTo(ColorUtils.ConvertEV100ToExposure(-2.0f)).Within(1e-6f));
+            Assert.That(
+                SkyIntensityUtility.GetIntensityFromSettings(SkyIntensityMode.Multiplier, 2.0f, 3.0f, 10.0f, 500.0f),
+                Is.EqualTo(3.0f));
+            Assert.That(
+                SkyIntensityUtility.GetIntensityFromSettings(SkyIntensityMode.Lux, 2.0f, 3.0f, 10.0f, 500.0f),
+                Is.EqualTo(50.0f));
+        }
+
+        [Test]
         public void Source_ReinitializesPlanetAndQualityParameters_ForLegacyProfiles()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkySettingsVolume.cs"));
 
+            Assert.That(source, Does.Contain("internal static class SkyIntensityUtility"));
+            Assert.That(source, Does.Contain("internal static float GetExposureMultiplier(float exposureValue)"));
+            Assert.That(source, Does.Contain("internal static float GetIntensityFromSettings("));
+            Assert.That(source, Does.Not.Contain("public SkyIntensityParameter skyIntensityMode = new(SkyIntensityMode.Exposure);"));
+            Assert.That(source, Does.Not.Contain("public FloatParameter exposure = new(0.0f);"));
+            Assert.That(source, Does.Not.Contain("public MinFloatParameter multiplier = new(1.0f, 0.0f);"));
+            Assert.That(source, Does.Not.Contain("public FloatParameter desiredLuxValue = new(20000.0f);"));
             Assert.That(source, Does.Contain("includeSunInBaking ??= new BoolParameter(false);"));
             Assert.That(source, Does.Contain("generatedCubemapQuality ??= new EnumParameter<SkyGeneratedCubemapQuality>(SkyGeneratedCubemapQuality.PlatformDefault);"));
             Assert.That(source, Does.Contain("renderingSpace ??= new EnumParameter<RenderingSpace>(RenderingSpace.World);"));
             Assert.That(source, Does.Contain("centerMode ??= new EnumParameter<PlanetMode>(PlanetMode.Automatic);"));
             Assert.That(source, Does.Contain("planetCenter ??= new Vector3Parameter(new Vector3(0.0f, -DefaultEarthRadius, 0.0f));"));
+            Assert.That(source, Does.Not.Contain("internal static bool HasIntensityOverride(SkySettingsVolume settings = null)"));
+            Assert.That(source, Does.Not.Contain("internal static int GetIntensityHashCode(SkySettingsVolume settings = null)"));
+            Assert.That(source, Does.Not.Contain("internal static float GetIntensityFromSettings(SkySettingsVolume settings = null)"));
             Assert.That(source, Does.Contain("internal static bool GetIncludeSunInBaking(SkySettingsVolume settings = null)"));
             Assert.That(source, Does.Contain("internal readonly struct SkyPlanet"));
         }

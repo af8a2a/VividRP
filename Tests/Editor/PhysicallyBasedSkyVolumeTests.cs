@@ -33,6 +33,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("private static readonly float DefaultAerosolMaximumAltitude = LayerDepthFromScaleHeight(DefaultAerosolScaleHeight);"));
             Assert.That(source, Does.Contain("private const float DefaultOzoneMinimumAltitude = 20.0f * 1000.0f;"));
             Assert.That(source, Does.Contain("private const float DefaultOzoneLayerWidth = 20.0f * 1000.0f;"));
+            Assert.That(source, Does.Contain("public FloatParameter exposure = new(0.0f);"));
+            Assert.That(source, Does.Contain("protected override void OnEnable()"));
+            Assert.That(source, Does.Contain("private bool m_ExposureDefaultsMigrated;"));
+            Assert.That(source, Does.Contain("return SkyIntensityUtility.GetExposureMultiplier(exposure.value);"));
             Assert.That(source, Does.Contain(": DefaultOzoneLayerWidth;"));
             Assert.That(source, Does.Contain(": DefaultOzoneMinimumAltitude;"));
         }
@@ -50,6 +54,7 @@ namespace VividRP.Editor.Tests
             AssertFieldHasTooltip(nameof(PhysicallyBasedSkyVolume.groundTint));
             AssertFieldHasTooltip(nameof(PhysicallyBasedSkyVolume.horizonTint));
             AssertFieldHasTooltip(nameof(PhysicallyBasedSkyVolume.planetRadius));
+            AssertFieldHasTooltip(nameof(PhysicallyBasedSkyVolume.exposure));
             AssertFieldHasTooltip(nameof(PhysicallyBasedSkyVolume.renderSunDisk));
             AssertFieldHasTooltip(nameof(PhysicallyBasedSkyVolume.enableHeightFog));
         }
@@ -177,16 +182,16 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ExposureField_IsHidden_BecauseAutoExposureOwnsSkyBrightness()
+        public void ExposureField_IsVisible_BecauseConcreteSkyVolumesOwnExposureControls()
         {
             var field = typeof(PhysicallyBasedSkyVolume).GetField(nameof(PhysicallyBasedSkyVolume.exposure));
 
             Assert.That(field, Is.Not.Null);
-            Assert.That(field.GetCustomAttribute<HideInInspector>(), Is.Not.Null);
+            Assert.That(field.GetCustomAttribute<HideInInspector>(), Is.Null);
         }
 
         [Test]
-        public void GetHashCode_DoesNotChange_WhenDeprecatedExposureChanges()
+        public void GetHashCode_Changes_WhenExposureChanges()
         {
             var volume = ScriptableObject.CreateInstance<PhysicallyBasedSkyVolume>();
 
@@ -195,7 +200,7 @@ namespace VividRP.Editor.Tests
                 var initialHash = volume.GetHashCode();
                 volume.exposure.value = 4.0f;
 
-                Assert.That(volume.GetHashCode(), Is.EqualTo(initialHash));
+                Assert.That(volume.GetHashCode(), Is.Not.EqualTo(initialHash));
             }
             finally
             {

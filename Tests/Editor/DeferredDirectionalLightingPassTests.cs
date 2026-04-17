@@ -238,7 +238,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     GetFieldValue<Vector4>(pass, "m_SkyIBLParams"),
                     Is.EqualTo(DeferredLightingPass.BuildSkyIblParams(cubemap, 1.75f, 30.0f)));
-                Assert.That(GetFieldValue<Vector4>(pass, "m_SkyIBLParams").x, Is.EqualTo(Mathf.Pow(2f, 1.75f)).Within(1e-5f));
+                Assert.That(GetFieldValue<Vector4>(pass, "m_SkyIBLParams").x, Is.EqualTo(1.75f).Within(1e-5f));
             }
             finally
             {

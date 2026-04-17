@@ -49,7 +49,7 @@
 ### 当前短板
 
 - 自动曝光基础链路已经落地，但天空系统仍需继续验证“屏幕实时曝光”和“sky baking 固定曝光”是否完全解耦。
-- `skyData.exposure` 目前同时被当作天空强度和 IBL 强度使用，没有和相机曝光解耦。
+- `skyData.exposure` 已不再承担相机曝光语义；当前更接近“IBL 采样时需要额外应用的强度 multiplier”，但字段命名仍是历史遗留。
 - `AtmosphereLUTPass` 现已改成围绕 HDRP `SkyLUTGenerator.compute` 的混合缓存链路：`MultiScatteringLUT` / `SkyViewLUT` 按参数缓存，`AtmosphericScatteringLUT` 保持 camera-dependent 的逐帧生成；旧 `TransmittanceLUT` 兼容层已移除，`AerialPerspectivePass` 也已切到 `OpaqueAtmosphericScattering` + `AtmosphericScatteringLUT` 的统一评估路径。
 - runtime sky cubemap 和 specular prefilter 已支持基础分辨率配置；specular prefilter 已补上质量档和 rebuild profiling，物理天空 generated cubemap 现在也补上了基于 sample count 的质量档与 rebuild profiling。HDRI 仍直接复用 source cubemap，这部分质量档当前只作用于 generated cubemap 路径。
 - 物理天空还只是 HDRP Physically Based Sky 的一个基础子集。
@@ -91,7 +91,7 @@
   - 先用 log luminance histogram 或降采样 average luminance
   - 输出统一的 `cameraExposureMultiplier` 或 EV100
 - 解耦当前数据模型：
-  - `skyData.exposure` 不再同时承担天空强度和相机曝光语义
+  - `skyData.exposure` / `ambientProbeExposure` 最终应重命名到更准确的 IBL multiplier 语义
   - 天空渲染、IBL 强度、最终曝光分别拥有独立字段
 - 保留当前物理天空 pre/post exposure 逻辑作为过渡保护层，等自动曝光稳定后再决定是否收缩或移除。
 

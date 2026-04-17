@@ -87,7 +87,7 @@ namespace VividRP.Runtime
                 cameraData?.camera != null
                     ? cameraData.GetPixelCoordToViewDirWSMatrix()
                     : Matrix4x4.identity,
-                1.0f,
+                ResolveSkyIntensityMultiplier(VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume()),
                 out parameters);
         }
 
@@ -111,7 +111,7 @@ namespace VividRP.Runtime
                 cameraData?.camera != null
                     ? cameraData.GetPixelCoordToViewDirWSMatrix()
                     : Matrix4x4.identity,
-                1.0f,
+                ResolveSkyIntensityMultiplier(VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume()),
                 out parameters);
         }
 
@@ -120,7 +120,7 @@ namespace VividRP.Runtime
             in SkyRendererContext context,
             out PhysicallyBasedSkyShaderParameters parameters)
         {
-            return TryBuild(volume, context, Matrix4x4.identity, 1.0f, out parameters);
+            return TryBuild(volume, context, Matrix4x4.identity, ResolveSkyIntensityMultiplier(volume), out parameters);
         }
 
         internal static bool TryBuildForSkyBaking(
@@ -129,7 +129,7 @@ namespace VividRP.Runtime
             out PhysicallyBasedSkyShaderParameters parameters)
         {
             // Sky baking must stay independent from camera exposure adaptation.
-            return TryBuild(volume, context, Matrix4x4.identity, 1.0f, out parameters);
+            return TryBuild(volume, context, Matrix4x4.identity, ResolveSkyIntensityMultiplier(volume), out parameters);
         }
 
         internal static bool TryBuildForCamera(
@@ -143,7 +143,7 @@ namespace VividRP.Runtime
                 context.cameraData?.camera != null
                     ? context.cameraData.GetPixelCoordToViewDirWSMatrix()
                     : Matrix4x4.identity,
-                1.0f,
+                ResolveSkyIntensityMultiplier(volume),
                 out parameters);
         }
 
@@ -159,7 +159,7 @@ namespace VividRP.Runtime
             PhysicallyBasedSkyVolume volume,
             in SkyRendererContext context,
             Matrix4x4 pixelCoordToViewDirWS,
-            float skyExposureMultiplier,
+            float skyIntensityMultiplier,
             out PhysicallyBasedSkyShaderParameters parameters)
         {
             parameters = default;
@@ -195,7 +195,7 @@ namespace VividRP.Runtime
             parameters.skyPlanetParams = new Vector4(
                 planetRadius,
                 atmosphereRadius,
-                Mathf.Max(skyExposureMultiplier, 0.0f),
+                Mathf.Max(skyIntensityMultiplier, 0.0f),
                 volume.renderSunDisk.value ? 1.0f : 0.0f);
             parameters.skyAirScattering = ToVector4(volume.GetAirScatteringCoefficient());
             parameters.skyAirExtinction = ToVector4(volume.GetAirExtinctionCoefficient());
@@ -267,7 +267,8 @@ namespace VividRP.Runtime
             var atmosphericRadius = planetRadius + atmosphericDepth;
             var exponentialInterpolation = ComputeExponentialInterpolationParams(volume.horizonZenithShift.value);
             var worldCameraPosition = ResolveWorldCameraPosition(context);
-            var planet = SkyPlanet.Resolve(volume, VividVolumeManagerUtility.GetSkySettingsVolume(), worldCameraPosition);
+            var skySettings = VividVolumeManagerUtility.GetSkySettingsVolume();
+            var planet = SkyPlanet.Resolve(volume, skySettings, worldCameraPosition);
             var planetUpAltitude = planet.GetPlanetUpAltitude(worldCameraPosition);
             var lightExposure = ResolveCelestialLightExposure(context);
             var pbrSkyCameraPosition = planet.GetCameraPositionPS(worldCameraPosition);
@@ -305,7 +306,7 @@ namespace VividRP.Runtime
             parameters.aerosolScaleHeight = aerosolScaleHeight;
             parameters.ozoneLayerStart = planetRadius + ozoneLayerMinimumAltitude;
             parameters.ozoneLayerEnd = planetRadius + ozoneLayerMinimumAltitude + ozoneLayerWidth;
-            parameters.intensityMultiplier = 1.0f;
+            parameters.intensityMultiplier = volume.GetIntensityMultiplier();
             parameters.colorSaturation = volume.colorSaturation.value;
             parameters.alphaSaturation = volume.alphaSaturation.value;
             parameters.alphaMultiplier = volume.alphaMultiplier.value;
@@ -356,6 +357,11 @@ namespace VividRP.Runtime
         {
             var g = anisotropy;
             return (3.0f / (8.0f * Mathf.PI)) * (1.0f - g * g) / (2.0f + g * g);
+        }
+
+        private static float ResolveSkyIntensityMultiplier(PhysicallyBasedSkyVolume volume)
+        {
+            return volume != null ? volume.GetIntensityMultiplier() : 1.0f;
         }
 
         private static Vector2 ComputeExponentialInterpolationParams(float k)

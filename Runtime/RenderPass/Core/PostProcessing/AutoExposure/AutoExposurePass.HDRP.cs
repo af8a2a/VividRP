@@ -90,91 +90,91 @@ namespace VividRP.Runtime.RenderPass
 
         private bool ExecuteHDRPAutoExposure(CommandBuffer cmd)
         {
-            if (cmd == null
-                || m_AutoExposureCompute == null
-                || m_ExposureData?.currentExposureBuffer == null
-                || m_ExposureData.previousExposureTexture == null
-                || m_ExposureData.currentExposureTexture == null
-                || source?.innerHandle.IsValid() != true)
-            {
-                return false;
-            }
-
-            EnsureHdrpScratchTextures();
-            if (m_HDRPPrePassTexture == null || m_HDRPReductionTexture == null)
-                return false;
-
-            var meterMask = m_AutoExposureSettings.meterMask != null
-                ? m_AutoExposureSettings.meterMask
-                : Texture2D.whiteTexture;
-            var curveTexture = ResolveHDRPExposureCurveTexture();
-            var evaluateMode = AutoExposureExposureModeUtility.UsesCurveRemapping(m_AutoExposureSettings.exposureMode)
-                ? 2u
-                : 1u;
-            var previousExposureTexture = m_ExposureData.previousExposureTexture;
-            var currentExposureTexture = m_ExposureData.currentExposureTexture;
-
-            if (!m_ExposureData.hasValidHistory)
-            {
-                BindHDRPAutoExposureParameters(cmd, m_HdrpResetKernel, 0u);
-                cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpResetKernel, HdrpOutputTextureId,
-                    previousExposureTexture);
-                cmd.DispatchCompute(m_AutoExposureCompute, m_HdrpResetKernel, 1, 1, 1);
-            }
-
-            BindHDRPAutoExposureParameters(cmd, m_HdrpPrePassKernel, 0u);
-            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpSourceTextureId,
-                source.innerHandle);
-            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpPreviousExposureTextureId,
-                previousExposureTexture);
-            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpExposureWeightMaskId, meterMask);
-            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpExposureCurveTextureId,
-                curveTexture);
-            cmd.SetComputeBufferParam(m_AutoExposureCompute, m_HdrpPrePassKernel, AutoExposureCurrentBufferId,
-                m_ExposureData.currentExposureBuffer);
-            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpOutputTextureId,
-                m_HDRPPrePassTexture);
-            cmd.DispatchCompute(
-                m_AutoExposureCompute,
-                m_HdrpPrePassKernel,
-                HdrpAutoExposurePrePassSize / HdrpAutoExposureThreadGroupSize,
-                HdrpAutoExposurePrePassSize / HdrpAutoExposureThreadGroupSize,
-                1);
-
-            BindHDRPAutoExposureParameters(cmd, m_HdrpReductionKernel, 0u);
-            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpReductionInputTextureId,
-                m_HDRPPrePassTexture);
-            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpPreviousExposureTextureId,
-                previousExposureTexture);
-            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpExposureWeightMaskId,
-                meterMask);
-            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpExposureCurveTextureId,
-                curveTexture);
-            cmd.SetComputeBufferParam(m_AutoExposureCompute, m_HdrpReductionKernel, AutoExposureCurrentBufferId,
-                m_ExposureData.currentExposureBuffer);
-            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpOutputTextureId,
-                m_HDRPReductionTexture);
-            cmd.DispatchCompute(
-                m_AutoExposureCompute,
-                m_HdrpReductionKernel,
-                HdrpAutoExposureReductionSize,
-                HdrpAutoExposureReductionSize,
-                1);
-
-            BindHDRPAutoExposureParameters(cmd, m_HdrpReductionKernel, evaluateMode);
-            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpReductionInputTextureId,
-                m_HDRPReductionTexture);
-            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpPreviousExposureTextureId,
-                previousExposureTexture);
-            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpExposureWeightMaskId,
-                meterMask);
-            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpExposureCurveTextureId,
-                curveTexture);
-            cmd.SetComputeBufferParam(m_AutoExposureCompute, m_HdrpReductionKernel, AutoExposureCurrentBufferId,
-                m_ExposureData.currentExposureBuffer);
-            cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpOutputTextureId,
-                currentExposureTexture);
-            cmd.DispatchCompute(m_AutoExposureCompute, m_HdrpReductionKernel, 1, 1, 1);
+            // if (cmd == null
+            //     || m_AutoExposureCompute == null
+            //     || m_ExposureData?.currentExposureBuffer == null
+            //     || m_ExposureData.previousExposureTexture == null
+            //     || m_ExposureData.currentExposureTexture == null
+            //     || source?.innerHandle.IsValid() != true)
+            // {
+            //     return false;
+            // }
+            //
+            // EnsureHdrpScratchTextures();
+            // if (m_HDRPPrePassTexture == null || m_HDRPReductionTexture == null)
+            //     return false;
+            //
+            // var meterMask = m_AutoExposureSettings.meterMask != null
+            //     ? m_AutoExposureSettings.meterMask
+            //     : Texture2D.whiteTexture;
+            // var curveTexture = ResolveHDRPExposureCurveTexture();
+            // var evaluateMode = AutoExposureExposureModeUtility.UsesCurveRemapping(m_AutoExposureSettings.exposureMode)
+            //     ? 2u
+            //     : 1u;
+            // var previousExposureTexture = m_ExposureData.previousExposureTexture;
+            // var currentExposureTexture = m_ExposureData.currentExposureTexture;
+            //
+            // if (!m_ExposureData.hasValidHistory)
+            // {
+            //     BindHDRPAutoExposureParameters(cmd, m_HdrpResetKernel, 0u);
+            //     cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpResetKernel, HdrpOutputTextureId,
+            //         previousExposureTexture);
+            //     cmd.DispatchCompute(m_AutoExposureCompute, m_HdrpResetKernel, 1, 1, 1);
+            // }
+            //
+            // BindHDRPAutoExposureParameters(cmd, m_HdrpPrePassKernel, 0u);
+            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpSourceTextureId,
+            //     source.innerHandle);
+            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpPreviousExposureTextureId,
+            //     previousExposureTexture);
+            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpExposureWeightMaskId, meterMask);
+            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpExposureCurveTextureId,
+            //     curveTexture);
+            // cmd.SetComputeBufferParam(m_AutoExposureCompute, m_HdrpPrePassKernel, AutoExposureCurrentBufferId,
+            //     m_ExposureData.currentExposureBuffer);
+            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpPrePassKernel, HdrpOutputTextureId,
+            //     m_HDRPPrePassTexture);
+            // cmd.DispatchCompute(
+            //     m_AutoExposureCompute,
+            //     m_HdrpPrePassKernel,
+            //     HdrpAutoExposurePrePassSize / HdrpAutoExposureThreadGroupSize,
+            //     HdrpAutoExposurePrePassSize / HdrpAutoExposureThreadGroupSize,
+            //     1);
+            //
+            // BindHDRPAutoExposureParameters(cmd, m_HdrpReductionKernel, 0u);
+            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpReductionInputTextureId,
+            //     m_HDRPPrePassTexture);
+            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpPreviousExposureTextureId,
+            //     previousExposureTexture);
+            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpExposureWeightMaskId,
+            //     meterMask);
+            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpExposureCurveTextureId,
+            //     curveTexture);
+            // cmd.SetComputeBufferParam(m_AutoExposureCompute, m_HdrpReductionKernel, AutoExposureCurrentBufferId,
+            //     m_ExposureData.currentExposureBuffer);
+            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpOutputTextureId,
+            //     m_HDRPReductionTexture);
+            // cmd.DispatchCompute(
+            //     m_AutoExposureCompute,
+            //     m_HdrpReductionKernel,
+            //     HdrpAutoExposureReductionSize,
+            //     HdrpAutoExposureReductionSize,
+            //     1);
+            //
+            // BindHDRPAutoExposureParameters(cmd, m_HdrpReductionKernel, evaluateMode);
+            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpReductionInputTextureId,
+            //     m_HDRPReductionTexture);
+            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpPreviousExposureTextureId,
+            //     previousExposureTexture);
+            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpExposureWeightMaskId,
+            //     meterMask);
+            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpExposureCurveTextureId,
+            //     curveTexture);
+            // cmd.SetComputeBufferParam(m_AutoExposureCompute, m_HdrpReductionKernel, AutoExposureCurrentBufferId,
+            //     m_ExposureData.currentExposureBuffer);
+            // cmd.SetComputeTextureParam(m_AutoExposureCompute, m_HdrpReductionKernel, HdrpOutputTextureId,
+            //     currentExposureTexture);
+            // cmd.DispatchCompute(m_AutoExposureCompute, m_HdrpReductionKernel, 1, 1, 1);
             return true;
         }
 

@@ -26,8 +26,8 @@ namespace VividRP.Runtime
             atmosphericScatteringLutHandle = null;
             tint = Color.white;
             ambientProbeTint = Color.white;
-            exposure = 0.0f;
-            ambientProbeExposure = 0.0f;
+            exposure = 1.0f;
+            ambientProbeExposure = 1.0f;
             rotation = 0.0f;
             ambientProbeRotation = 0.0f;
             skyHash = 0;

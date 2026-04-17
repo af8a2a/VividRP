@@ -134,8 +134,8 @@ namespace VividRP.Runtime
         public ClampedFloatParameter horizonZenithShift = new(0.0f, -1.0f, 1.0f);
 
         [Header("Rendering")]
-        [HideInInspector]
-        public MinFloatParameter exposure = new(1.0f, 0.0f);
+        [Tooltip("Sets the exposure compensation of the sky in EV.")]
+        public FloatParameter exposure = new(0.0f);
 
         [Tooltip("Enables rendering of the sun disk in the physically based sky shader path.")]
         public BoolParameter renderSunDisk = new(true);
@@ -156,10 +156,32 @@ namespace VividRP.Runtime
         [Tooltip("Limits how far the additional height fog contributes.")]
         public MinFloatParameter fogMaxDistance = new(5000.0f, 0.0f);
 
+        [SerializeField, HideInInspector]
+        private bool m_ExposureDefaultsMigrated;
+
+        protected override void OnEnable()
+        {
+            exposure ??= new FloatParameter(0.0f);
+            if (!m_ExposureDefaultsMigrated)
+            {
+                if (!exposure.overrideState && Mathf.Approximately(exposure.value, 1.0f))
+                    exposure.value = 0.0f;
+
+                m_ExposureDefaultsMigrated = true;
+            }
+
+            base.OnEnable();
+        }
+
         public bool IsActive()
         {
             return airMaximumAltitude.value > 0.0f
                 && (airDensityR.value > 0.0f || airDensityG.value > 0.0f || airDensityB.value > 0.0f || aerosolDensity.value > 0.0f);
+        }
+
+        internal float GetIntensityMultiplier()
+        {
+            return SkyIntensityUtility.GetExposureMultiplier(exposure.value);
         }
 
         public override int GetHashCode()
@@ -185,6 +207,7 @@ namespace VividRP.Runtime
                 hash = hash * 23 + horizonTint.GetHashCode();
                 hash = hash * 23 + zenithTint.GetHashCode();
                 hash = hash * 23 + horizonZenithShift.GetHashCode();
+                hash = hash * 23 + exposure.GetHashCode();
                 hash = hash * 23 + renderSunDisk.GetHashCode();
                 hash = hash * 23 + sunDiskSize.GetHashCode();
                 hash = hash * 23 + enableHeightFog.GetHashCode();

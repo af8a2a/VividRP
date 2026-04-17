@@ -37,7 +37,46 @@ namespace VividRP.Runtime
         Multiplier,
     }
 
+    [Serializable]
+    public sealed class SkyIntensityParameter : VolumeParameter<SkyIntensityMode>
+    {
+        public SkyIntensityParameter(SkyIntensityMode value, bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
 
+    internal static class SkyIntensityUtility
+    {
+        internal static float GetExposureMultiplier(float exposureValue)
+        {
+            return ColorUtils.ConvertEV100ToExposure(-exposureValue);
+        }
+
+        internal static float GetIntensityFromSettings(
+            SkyIntensityMode intensityMode,
+            float exposureValue,
+            float multiplierValue,
+            float upperHemisphereLux,
+            float desiredLux)
+        {
+            var skyIntensity = 1.0f;
+            switch (intensityMode)
+            {
+                case SkyIntensityMode.Exposure:
+                    skyIntensity *= GetExposureMultiplier(exposureValue);
+                    break;
+                case SkyIntensityMode.Multiplier:
+                    skyIntensity *= multiplierValue;
+                    break;
+                case SkyIntensityMode.Lux:
+                    skyIntensity *= desiredLux / Mathf.Max(upperHemisphereLux, 1e-5f);
+                    break;
+            }
+
+            return skyIntensity;
+        }
+    }
 
     [Serializable]
     [VolumeComponentMenu("VividRP/Sky Settings")]

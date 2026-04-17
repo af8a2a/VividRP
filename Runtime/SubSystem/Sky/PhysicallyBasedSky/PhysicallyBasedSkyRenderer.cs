@@ -122,11 +122,13 @@ namespace VividRP.Runtime
             var generatedCubemapViewSampleCount = SkySettingsVolume.GetGeneratedCubemapViewSampleCount(skySettings);
             var planet = ResolvePlanet(context, volume, skySettings);
             var includeSunInBaking = SkySettingsVolume.GetIncludeSunInBaking(skySettings);
+            var intensityMultiplier = volume.GetIntensityMultiplier();
             return HashCode.Combine(
                 volume.GetHashCode(),
                 generatedCubemapViewSampleCount,
                 planet.ComputeHashCode(),
                 includeSunInBaking,
+                intensityMultiplier,
                 ResolveCameraPosition(context, volume.planetRadius.value),
                 PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialBodyHash(context));
         }
@@ -152,6 +154,7 @@ namespace VividRP.Runtime
             var skySettings = VividVolumeManagerUtility.GetSkySettingsVolume();
             var generatedCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(skySettings);
             var generatedCubemapViewSampleCount = SkySettingsVolume.GetGeneratedCubemapViewSampleCount(skySettings);
+            var intensityMultiplier = volume.GetIntensityMultiplier();
             var runtimeCubemapRebuildReason = ResolveRuntimeCubemapRebuildReason(
                 skyHash,
                 generatedCubemapResolution,
@@ -180,6 +183,7 @@ namespace VividRP.Runtime
                 generatedCubemapViewSampleCount,
                 ResolvePlanet(context, volume, skySettings).ComputeHashCode(),
                 SkySettingsVolume.GetIncludeSunInBaking(skySettings),
+                intensityMultiplier,
                 PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialBodyHash(context));
 
             var ambientProbeRebuildReason = ResolveAmbientProbeCubemapRebuildReason(hash, generatedCubemapResolution);
@@ -209,11 +213,11 @@ namespace VividRP.Runtime
             skyData.activeSkyType = SkyType.PhysicallyBased;
             skyData.specularCubemap = m_RuntimeSkyCubemap;
             skyData.tint = Color.white;
-            skyData.exposure = 0.0f;
+            skyData.exposure = 1.0f;
             skyData.rotation = 0.0f;
             skyData.ambientProbeCubemap = useBakedAmbientProbe ? m_AmbientProbeCubemap : m_RuntimeSkyCubemap;
             skyData.ambientProbeTint = Color.white;
-            skyData.ambientProbeExposure = 0.0f;
+            skyData.ambientProbeExposure = 1.0f;
             skyData.ambientProbeRotation = 0.0f;
             skyData.ambientProbeHash = hash;
             ApplyAtmosphereLutHandle(skyData);

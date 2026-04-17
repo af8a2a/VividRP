@@ -55,6 +55,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(editorType.GetField("m_AirMaximumAltitude", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_AerosolDensity", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_OzoneDensityDimmer", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_Exposure", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ColorSaturation", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_RenderSunDisk", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_EnableHeightFog", flags)?.GetValue(editor), Is.Not.Null);
@@ -89,8 +90,11 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Aerosols\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Ozone\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Artistic Overrides\")"));
+            Assert.That(source, Does.Contain("DrawSectionHeader(\"Sky\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Vivid Extensions\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Height Fog\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Exposure Compensation\""));
+            Assert.That(source, Does.Contain("PropertyField(m_Exposure, s_ExposureCompensationLabel);"));
             Assert.That(source, Does.Contain("DrawModelTypeField();"));
             Assert.That(source, Does.Contain("EditorGUI.IntPopup"));
             Assert.That(source, Does.Contain("using (new EditorGUI.IndentLevelScope())"));

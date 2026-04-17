@@ -196,13 +196,19 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("SkyCubemapBakingUtility.RenderSkyToCubemap("));
             Assert.That(source, Does.Contain("EnsureLocalSkyPrecomputation("));
             Assert.That(source, Does.Contain("var includeSunInBaking = SkySettingsVolume.GetIncludeSunInBaking(skySettings);"));
+            Assert.That(source, Does.Contain("var intensityMultiplier = volume.GetIntensityMultiplier();"));
             Assert.That(source, Does.Contain("SkySettingsVolume.GetIncludeSunInBaking(skySettings),"));
+            Assert.That(source, Does.Contain("intensityMultiplier,"));
             Assert.That(source, Does.Contain("materialParameters.renderSunDisk = includeSunInBaking && volume.renderSunDisk.value ? 1 : 0;"));
 
             Assert.That(parametersSource, Does.Contain("internal static bool TryBuildForSkyBaking("));
             Assert.That(parametersSource, Does.Contain("internal static bool TryBuildForAmbientProbe("));
             Assert.That(parametersSource, Does.Contain("internal static bool TryBuildMaterialParameters("));
+            Assert.That(parametersSource, Does.Contain("private static float ResolveSkyIntensityMultiplier(PhysicallyBasedSkyVolume volume)"));
+            Assert.That(parametersSource, Does.Contain("ResolveSkyIntensityMultiplier(volume)"));
+            Assert.That(parametersSource, Does.Contain("var skySettings = VividVolumeManagerUtility.GetSkySettingsVolume();"));
             Assert.That(parametersSource, Does.Contain("var planet = SkyPlanet.Resolve("));
+            Assert.That(parametersSource, Does.Contain("parameters.intensityMultiplier = volume.GetIntensityMultiplier();"));
             Assert.That(parametersSource, Does.Contain("parameters.renderingSpace = planet.renderingSpace == RenderingSpace.World ? 1 : 0;"));
             Assert.That(parametersSource, Does.Contain("volume.atmosphericScattering.value ? 1.0f : 0.0f"));
             Assert.That(parametersSource, Does.Not.Contain("volume.IsHeightFogActive() ? 1.0f : 0.0f"));

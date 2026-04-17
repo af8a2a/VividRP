@@ -51,6 +51,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(editorType.GetField("m_CascadeSplit1", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_CascadeSplit2", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_CascadeSplit3", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_CascadeBorder1", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_CascadeBorder2", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_CascadeBorder3", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_CascadeBorder4", flags)?.GetValue(editor), Is.Not.Null);
             }
             finally
             {
@@ -71,9 +75,12 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EditorPrefBoolFlags<WorkingUnit>"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Working Unit\""));
             Assert.That(source, Does.Contain("DrawCascadeSplitField(splitParameters, i, activeSplitCount);"));
+            Assert.That(source, Does.Contain("DrawCascadeBorderField(borderParameters, splitParameters, i, GetCascadeCount());"));
             Assert.That(source, Does.Contain("ShadowCascadeGUI.DrawCascades(ref cascades, useMetric, baseMetric);"));
             Assert.That(source, Does.Contain("using (var scope = new OverridablePropertyScope(parameter, title, this))"));
             Assert.That(source, Does.Contain("GUILayout.Label(\"Cascade splits\""));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Border 1\")"));
+            Assert.That(source, Does.Contain("borderSize = borderParameters[i].value.floatValue"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Directional Light\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Per Light\")"));
             Assert.That(source, Does.Contain("When Screen Space Quality is set to Very High (PCSS), blocker and filter tuning also lives on that light."));

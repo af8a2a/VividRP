@@ -29,12 +29,20 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Split 2"),
             EditorGUIUtility.TrTextContent("Split 3")
         };
+        private readonly GUIContent[] m_BorderLabels =
+        {
+            EditorGUIUtility.TrTextContent("Border 1"),
+            EditorGUIUtility.TrTextContent("Border 2"),
+            EditorGUIUtility.TrTextContent("Border 3"),
+            EditorGUIUtility.TrTextContent("Border 4")
+        };
 
         private readonly string[] m_CascadeOrder =
         {
             "first",
             "second",
-            "third"
+            "third",
+            "fourth"
         };
 
         private SerializedDataParameter m_EnableCSM;
@@ -43,6 +51,10 @@ namespace VividRP.Editor
         private SerializedDataParameter m_CascadeSplit1;
         private SerializedDataParameter m_CascadeSplit2;
         private SerializedDataParameter m_CascadeSplit3;
+        private SerializedDataParameter m_CascadeBorder1;
+        private SerializedDataParameter m_CascadeBorder2;
+        private SerializedDataParameter m_CascadeBorder3;
+        private SerializedDataParameter m_CascadeBorder4;
 
         private EditorPrefBoolFlags<WorkingUnit> m_WorkingUnitState;
 
@@ -61,6 +73,10 @@ namespace VividRP.Editor
             m_CascadeSplit1 = Unpack(fetcher.Find(x => x.cascadeSplit1));
             m_CascadeSplit2 = Unpack(fetcher.Find(x => x.cascadeSplit2));
             m_CascadeSplit3 = Unpack(fetcher.Find(x => x.cascadeSplit3));
+            m_CascadeBorder1 = Unpack(fetcher.Find(x => x.cascadeBorder1));
+            m_CascadeBorder2 = Unpack(fetcher.Find(x => x.cascadeBorder2));
+            m_CascadeBorder3 = Unpack(fetcher.Find(x => x.cascadeBorder3));
+            m_CascadeBorder4 = Unpack(fetcher.Find(x => x.cascadeBorder4));
         }
 
         public override void OnInspectorGUI()
@@ -79,9 +95,14 @@ namespace VividRP.Editor
             using (new EditorGUI.IndentLevelScope())
             {
                 var splitParameters = GetCascadeSplitParameters();
+                var borderParameters = GetCascadeBorderParameters();
                 var activeSplitCount = Mathf.Max(0, GetCascadeCount() - 1);
                 for (var i = 0; i < activeSplitCount; i++)
                     DrawCascadeSplitField(splitParameters, i, activeSplitCount);
+
+                EditorGUILayout.Space();
+                for (var i = 0; i < GetCascadeCount(); i++)
+                    DrawCascadeBorderField(borderParameters, splitParameters, i, GetCascadeCount());
             }
 
             DrawCascadePreview();
@@ -140,6 +161,39 @@ namespace VividRP.Editor
             }
         }
 
+        private void DrawCascadeBorderField(
+            SerializedDataParameter[] borderParameters,
+            SerializedDataParameter[] splitParameters,
+            int borderIndex,
+            int cascadeCount)
+        {
+            var parameter = borderParameters[borderIndex];
+            var label = m_BorderLabels[borderIndex];
+            var title = EditorGUIUtility.TrTextContent(label.text, BuildBorderTooltip(borderIndex, cascadeCount));
+
+            using (var scope = new OverridablePropertyScope(parameter, title, this))
+            {
+                if (!scope.displayed)
+                    return;
+
+                var maxDisplayValue = GetBorderDisplayMaximum(splitParameters, borderIndex, cascadeCount);
+                var currentDisplayValue = parameter.value.floatValue * maxDisplayValue;
+
+                var oldMixedValue = EditorGUI.showMixedValue;
+                EditorGUI.showMixedValue = parameter.value.hasMultipleDifferentValues;
+
+                var rect = EditorGUILayout.GetControlRect();
+                EditorGUI.BeginProperty(rect, title, parameter.value);
+                EditorGUI.BeginChangeCheck();
+                var displayValue = EditorGUI.Slider(rect, title, currentDisplayValue, 0.0f, maxDisplayValue);
+                if (EditorGUI.EndChangeCheck())
+                    parameter.value.floatValue = Mathf.Clamp01(displayValue / Mathf.Max(maxDisplayValue, 1e-5f));
+                EditorGUI.EndProperty();
+
+                EditorGUI.showMixedValue = oldMixedValue;
+            }
+        }
+
         private void DrawCascadePreview()
         {
             if (m_CascadeCount.value.hasMultipleDifferentValues || m_MaxShadowDistance.value.hasMultipleDifferentValues)
@@ -160,6 +214,7 @@ namespace VividRP.Editor
         {
             var cascades = new ShadowCascadeGUI.Cascade[cascadeCount];
             var splitParameters = GetCascadeSplitParameters();
+            var borderParameters = GetCascadeBorderParameters();
 
             float lastCascadePartitionSplit = 0.0f;
             for (var i = 0; i < cascadeCount - 1; ++i)
@@ -169,11 +224,13 @@ namespace VividRP.Editor
                     size = i == 0
                         ? splitParameters[i].value.floatValue
                         : splitParameters[i].value.floatValue - lastCascadePartitionSplit,
-                    borderSize = 0.0f,
+                    borderSize = borderParameters[i].value.floatValue,
                     cascadeHandleState = splitParameters[i].overrideState.boolValue
                         ? ShadowCascadeGUI.HandleState.Enabled
                         : ShadowCascadeGUI.HandleState.Disabled,
-                    borderHandleState = ShadowCascadeGUI.HandleState.Hidden,
+                    borderHandleState = borderParameters[i].overrideState.boolValue
+                        ? ShadowCascadeGUI.HandleState.Enabled
+                        : ShadowCascadeGUI.HandleState.Disabled,
                 };
 
                 lastCascadePartitionSplit = splitParameters[i].value.floatValue;
@@ -183,9 +240,11 @@ namespace VividRP.Editor
             cascades[lastCascade] = new ShadowCascadeGUI.Cascade
             {
                 size = lastCascade == 0 ? 1.0f : 1.0f - splitParameters[lastCascade - 1].value.floatValue,
-                borderSize = 0.0f,
+                borderSize = borderParameters[lastCascade].value.floatValue,
                 cascadeHandleState = ShadowCascadeGUI.HandleState.Hidden,
-                borderHandleState = ShadowCascadeGUI.HandleState.Hidden,
+                borderHandleState = borderParameters[lastCascade].overrideState.boolValue
+                    ? ShadowCascadeGUI.HandleState.Enabled
+                    : ShadowCascadeGUI.HandleState.Disabled,
             };
 
             EditorGUI.BeginChangeCheck();
@@ -198,6 +257,9 @@ namespace VividRP.Editor
                     accumulatedSplit += cascades[i].size;
                     splitParameters[i].value.floatValue = Mathf.Clamp01(accumulatedSplit);
                 }
+
+                for (var i = 0; i < cascadeCount; ++i)
+                    borderParameters[i].value.floatValue = Mathf.Clamp01(cascades[i].borderSize);
 
                 NormalizeCascadeSplitOrdering();
             }
@@ -235,12 +297,44 @@ namespace VividRP.Editor
             };
         }
 
+        private SerializedDataParameter[] GetCascadeBorderParameters()
+        {
+            return new[]
+            {
+                m_CascadeBorder1,
+                m_CascadeBorder2,
+                m_CascadeBorder3,
+                m_CascadeBorder4
+            };
+        }
+
         private string BuildSplitTooltip(int splitIndex)
         {
             var useMetric = m_WorkingUnitState.value == WorkingUnit.Metric;
             return useMetric
                 ? $"Distance from the camera (in meters) to the {m_CascadeOrder[splitIndex]} cascade split."
                 : $"Distance from the camera (as a percentage of Max Distance) to the {m_CascadeOrder[splitIndex]} cascade split.";
+        }
+
+        private string BuildBorderTooltip(int borderIndex, int cascadeCount)
+        {
+            var useMetric = m_WorkingUnitState.value == WorkingUnit.Metric;
+            var cascadeName = borderIndex == cascadeCount - 1 ? "last" : m_CascadeOrder[borderIndex];
+            return useMetric
+                ? $"Border size at the end of the {cascadeName} cascade (in meters)."
+                : $"Border size at the end of the {cascadeName} cascade (as a percentage of that cascade range).";
+        }
+
+        private float GetBorderDisplayMaximum(SerializedDataParameter[] splitParameters, int borderIndex, int cascadeCount)
+        {
+            if (m_WorkingUnitState.value != WorkingUnit.Metric)
+                return 100.0f;
+
+            float previousSplit = borderIndex == 0 ? 0.0f : splitParameters[borderIndex - 1].value.floatValue;
+            float nextSplit = borderIndex < cascadeCount - 1
+                ? splitParameters[borderIndex].value.floatValue
+                : 1.0f;
+            return Mathf.Max((nextSplit - previousSplit) * GetMaxShadowDistance(), 1e-5f);
         }
 
         private static void DrawSectionHeader(string title)

@@ -21,6 +21,7 @@ namespace VividRP.Runtime
         public readonly Vector4[] cascadeSpheres = new Vector4[MaxCascadeCount];
         public readonly Vector4[] cascadeAtlasScaleOffsets = new Vector4[MaxCascadeCount];
         public readonly float[] cascadeWorldTexelSizes = new float[MaxCascadeCount];
+        public readonly float[] cascadeBorders = new float[MaxCascadeCount];
 
         public override void Reset()
         {
@@ -40,6 +41,7 @@ namespace VividRP.Runtime
                 cascadeSpheres[i] = Vector4.zero;
                 cascadeAtlasScaleOffsets[i] = Vector4.zero;
                 cascadeWorldTexelSizes[i] = 0f;
+                cascadeBorders[i] = 0f;
             }
         }
 

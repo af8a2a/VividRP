@@ -17,6 +17,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("private static readonly int CSMPCSSBlockerSampleCountId = Shader.PropertyToID(\"_CSMPCSSBlockerSampleCount\");"));
             Assert.That(source, Does.Contain("private static readonly int CSMPCSSFilterSampleCountId = Shader.PropertyToID(\"_CSMPCSSFilterSampleCount\");"));
             Assert.That(source, Does.Contain("private static readonly int CSMPCSSMaxPenumbraSizeId = Shader.PropertyToID(\"_CSMPCSSMaxPenumbraSize\");"));
+            Assert.That(source, Does.Contain("private static readonly int CSMCascadeBordersId = Shader.PropertyToID(\"_CSMCascadeBorders\");"));
             Assert.That(source, Does.Contain("private static readonly int CSMCascadeWorldTexelSizesId = Shader.PropertyToID(\"_CSMCascadeWorldTexelSizes\");"));
             Assert.That(source, Does.Contain("m_ShadowQuality = (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low;"));
             Assert.That(source, Does.Contain("CoreUtils.DivRoundUp(width, ThreadGroupSizeX);"));
@@ -27,10 +28,12 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_PCSSFilterSampleCount = additionalLightData.dirLightPCSSFilterSampleCount;"));
             Assert.That(source, Does.Contain("m_PCSSMaxPenumbraSize = additionalLightData.dirLightPCSSMaxPenumbraSize;"));
             Assert.That(source, Does.Contain("m_CascadeWorldTexelSizes[i] = shadowData.cascadeWorldTexelSizes[i];"));
+            Assert.That(source, Does.Contain("m_CascadeBorders[i] = shadowData.cascadeBorders[i];"));
             Assert.That(source, Does.Contain("m_FrameIndex = Time.frameCount;"));
             Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_ResolveCompute, CSMShadowQualityId, m_ShadowQuality);"));
             Assert.That(source, Does.Contain("cmd.SetComputeFloatParam(m_ResolveCompute, CSMLightAngularDiameterId, m_LightAngularDiameter);"));
             Assert.That(source, Does.Contain("cmd.SetComputeVectorParam(m_ResolveCompute, CSMCascadeWorldTexelSizesId, m_CascadeWorldTexelSizes);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeVectorParam(m_ResolveCompute, CSMCascadeBordersId, m_CascadeBorders);"));
             Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_ResolveCompute, CSMFrameIndexId, m_FrameIndex);"));
             Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_ResolveCompute, CSMPCSSBlockerSampleCountId, m_PCSSBlockerSampleCount);"));
             Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_ResolveCompute, CSMPCSSFilterSampleCountId, m_PCSSFilterSampleCount);"));

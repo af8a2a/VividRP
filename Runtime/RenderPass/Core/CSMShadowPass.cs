@@ -31,6 +31,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly Matrix4x4[] m_ProjMatrices = new Matrix4x4[VividShadowData.MaxCascadeCount];
         private readonly Vector4[] m_CascadeSpheres = new Vector4[VividShadowData.MaxCascadeCount];
         private readonly float[] m_CascadeWorldTexelSizes = new float[VividShadowData.MaxCascadeCount];
+        private readonly float[] m_CascadeBorders = new float[VividShadowData.MaxCascadeCount];
         private readonly Vector4[] m_ShadowCasterBiases = new Vector4[VividShadowData.MaxCascadeCount];
         private readonly ShadowSplitData[] m_SplitData = new ShadowSplitData[VividShadowData.MaxCascadeCount];
         private readonly ShadowDrawingSettings[] m_ShadowDrawSettings = new ShadowDrawingSettings[VividShadowData.MaxCascadeCount];
@@ -113,6 +114,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ShadowLightPosition = new Vector4(lightPosition.x, lightPosition.y, lightPosition.z, 1.0f);
 
             var splitRatios = csmSettings.GetCascadeSplitRatios();
+            var cascadeBorders = csmSettings.GetCascadeBorderRatios();
 
             bool allCascadesValid = true;
             for (int i = 0; i < m_CascadeCount; i++)
@@ -141,6 +143,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 // Store radius squared in w for GPU sphere test
                 m_CascadeSpheres[i] = new Vector4(sphere.x, sphere.y, sphere.z, sphere.w * sphere.w);
                 m_CascadeWorldTexelSizes[i] = ComputeCascadeWorldTexelSize(m_ProjMatrices[i], m_CascadeResolution);
+                m_CascadeBorders[i] = cascadeBorders[i];
                 m_ShadowCasterBiases[i] = ComputeShadowCasterBias(mainVisibleLight, m_ProjMatrices[i], m_CascadeResolution, m_DepthBias, m_NormalBias);
             }
 
@@ -185,6 +188,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     shadowData.viewProjMatrices[i] = BuildWorldToShadowMatrix(m_ProjMatrices[i], m_ViewMatrices[i]);
                     shadowData.cascadeSpheres[i] = m_CascadeSpheres[i];
                     shadowData.cascadeWorldTexelSizes[i] = m_CascadeWorldTexelSizes[i];
+                    shadowData.cascadeBorders[i] = m_CascadeBorders[i];
                 }
                 else
                 {
@@ -193,6 +197,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     shadowData.viewProjMatrices[i] = Matrix4x4.identity;
                     shadowData.cascadeSpheres[i] = Vector4.zero;
                     shadowData.cascadeWorldTexelSizes[i] = 0.0f;
+                    shadowData.cascadeBorders[i] = 0.0f;
                 }
             }
 

@@ -24,6 +24,7 @@ float3   _CSMLightDirectionWS;
 int      _CSMAtlasResolution;
 int      _CSMCascadeResolution;
 float4   _CSMCascadeWorldTexelSizes;
+float4   _CSMCascadeBorders;
 int      _CSMShadowQuality;
 float    _CSMLightAngularDiameter;
 int      _CSMFrameIndex;
@@ -44,8 +45,6 @@ static const int kPCSSMaxSampleCount = 64;
 static const float kPCSSGoldenAngle = 2.39996323;
 static const float kPCSSTwoPi = 6.28318531;
 static const float kDegreesToRadians = 0.01745329251;
-static const float kCSMDefaultCascadeBorder = 0.2;
-
 bool IsSkyPixel(float deviceDepth)
 {
     return deviceDepth == UNITY_RAW_FAR_CLIP_VALUE;
@@ -213,7 +212,7 @@ float3 GetWorldSpaceViewDirCSM(float3 positionWS)
 
 float GetCascadeBorder(int cascadeIndex)
 {
-    return cascadeIndex >= 0 && cascadeIndex < _CSMCascadeCount ? kCSMDefaultCascadeBorder : 0.0;
+    return cascadeIndex >= 0 && cascadeIndex < _CSMCascadeCount ? max(_CSMCascadeBorders[cascadeIndex], 0.0) : 0.0;
 }
 
 float ComputeCascadeBlendAlpha(float3 positionWS, int cascadeIndex, float relDistance)

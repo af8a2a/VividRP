@@ -29,6 +29,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("int      _CSMPCSSBlockerSampleCount;"));
             Assert.That(source, Does.Contain("int      _CSMPCSSFilterSampleCount;"));
             Assert.That(source, Does.Contain("float4   _CSMCascadeWorldTexelSizes;"));
+            Assert.That(source, Does.Contain("float4   _CSMCascadeBorders;"));
             Assert.That(source, Does.Contain("return mul(_CSMViewProjMatrices[cascadeIndex], float4(positionWS, 1.0)).xyz;"));
             Assert.That(source, Does.Contain("float GetCascadeWorldTexelSize(int cascadeIndex)"));
             Assert.That(source, Does.Contain("return max(_CSMCascadeWorldTexelSizes[cascadeIndex], 0.0);"));
@@ -41,6 +42,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("float SampleShadowPCSS(float2 atlasUV, float receiverDepth, int cascadeIndex, uint2 pixelCoord)"));
             Assert.That(source, Does.Contain("float InterleavedGradientNoise(float2 pixelCoord, int frameIndex)"));
             Assert.That(source, Does.Contain("float ComputeCascadeBlendAlpha(float3 positionWS, int cascadeIndex, float relDistance)"));
+            Assert.That(source, Does.Contain("return cascadeIndex >= 0 && cascadeIndex < _CSMCascadeCount ? max(_CSMCascadeBorders[cascadeIndex], 0.0) : 0.0;"));
             Assert.That(source, Does.Contain("float3 ClampShadowCoordToShadowMap(float3 shadowCoord)"));
             Assert.That(source, Does.Contain("bool IsWithinCascadeBlendSamplingBounds(float3 shadowCoord)"));
             Assert.That(source, Does.Contain("bool TryGetBiasedShadowCoord(float3 positionWS, float3 normalWS, int cascadeIndex, out float3 shadowCoord)"));

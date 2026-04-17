@@ -29,6 +29,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int CSMAtlasResolutionId = Shader.PropertyToID("_CSMAtlasResolution");
         private static readonly int CSMCascadeResolutionId = Shader.PropertyToID("_CSMCascadeResolution");
         private static readonly int CSMCascadeWorldTexelSizesId = Shader.PropertyToID("_CSMCascadeWorldTexelSizes");
+        private static readonly int CSMCascadeBordersId = Shader.PropertyToID("_CSMCascadeBorders");
         private static readonly int CSMShadowQualityId = Shader.PropertyToID("_CSMShadowQuality");
         private static readonly int CSMLightAngularDiameterId = Shader.PropertyToID("_CSMLightAngularDiameter");
         private static readonly int CSMFrameIndexId = Shader.PropertyToID("_CSMFrameIndex");
@@ -66,6 +67,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly Vector4[] m_CascadeSpheres = new Vector4[VividShadowData.MaxCascadeCount];
         private readonly Vector4[] m_AtlasScaleOffsets = new Vector4[VividShadowData.MaxCascadeCount];
         private Vector4 m_CascadeWorldTexelSizes = Vector4.zero;
+        private Vector4 m_CascadeBorders = Vector4.zero;
         private int m_CascadeCount;
         private float m_MaxShadowDistance;
         private float m_DepthBias;
@@ -121,6 +123,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LightAngularDiameter = VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
             m_FrameIndex = 0;
             m_CascadeWorldTexelSizes = Vector4.zero;
+            m_CascadeBorders = Vector4.zero;
             m_PCSSBlockerSampleCount = VividAdditionalLightData.DefaultDirLightPCSSBlockerSampleCount;
             m_PCSSFilterSampleCount = VividAdditionalLightData.DefaultDirLightPCSSFilterSampleCount;
             m_PCSSMaxPenumbraSize = VividAdditionalLightData.DefaultDirLightPCSSMaxPenumbraSize;
@@ -152,6 +155,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_AtlasResolution = shadowData.atlasResolution;
             m_CascadeResolution = shadowData.cascadeResolution;
             m_CascadeWorldTexelSizes = Vector4.zero;
+            m_CascadeBorders = Vector4.zero;
             m_FrameIndex = Time.frameCount;
 
             for (int i = 0; i < VividShadowData.MaxCascadeCount; i++)
@@ -160,6 +164,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_CascadeSpheres[i] = shadowData.cascadeSpheres[i];
                 m_AtlasScaleOffsets[i] = shadowData.cascadeAtlasScaleOffsets[i];
                 m_CascadeWorldTexelSizes[i] = shadowData.cascadeWorldTexelSizes[i];
+                m_CascadeBorders[i] = shadowData.cascadeBorders[i];
             }
 
             var lightData = frameData.GetOrCreate<VividLightData>();
@@ -217,6 +222,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_ResolveCompute, CSMAtlasResolutionId, m_AtlasResolution);
             cmd.SetComputeIntParam(m_ResolveCompute, CSMCascadeResolutionId, m_CascadeResolution);
             cmd.SetComputeVectorParam(m_ResolveCompute, CSMCascadeWorldTexelSizesId, m_CascadeWorldTexelSizes);
+            cmd.SetComputeVectorParam(m_ResolveCompute, CSMCascadeBordersId, m_CascadeBorders);
             cmd.SetComputeIntParam(m_ResolveCompute, CSMShadowQualityId, m_ShadowQuality);
             cmd.SetComputeFloatParam(m_ResolveCompute, CSMLightAngularDiameterId, m_LightAngularDiameter);
             cmd.SetComputeIntParam(m_ResolveCompute, CSMFrameIndexId, m_FrameIndex);
@@ -242,6 +248,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DispatchGroupCountY = 1;
             m_FrameIndex = 0;
             m_CascadeWorldTexelSizes = Vector4.zero;
+            m_CascadeBorders = Vector4.zero;
         }
     }
 }

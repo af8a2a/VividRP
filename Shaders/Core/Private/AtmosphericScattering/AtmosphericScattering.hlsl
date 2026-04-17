@@ -5,6 +5,8 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 
+#include "AtmosphericScattering.cs.hlsl"
+#include "ShaderVariablesAtmosphericScattering.hlsl"
 #include "../Sky/PhysicallyBasedSkyEvaluation.hlsl"
 #include "../Sky/SkyUtils.hlsl"
 
@@ -53,6 +55,50 @@ float3 GetViewForwardDir()
 {
     float4x4 viewMatrix = UNITY_MATRIX_V;
     return -viewMatrix[2].xyz;
+}
+
+float3 RotateSkyDirectionAroundYAxis(float3 directionWS, float rotationDegrees)
+{
+    float rotationRadians = radians(rotationDegrees);
+    float s = 0.0f;
+    float c = 1.0f;
+    sincos(rotationRadians, s, c);
+
+    return float3(
+        c * directionWS.x - s * directionWS.z,
+        directionWS.y,
+        s * directionWS.x + c * directionWS.z);
+}
+
+bool HasSkyTexture()
+{
+    return _SkyTextureEnabled > 0.5f;
+}
+
+float ComputeMipFogLevel(float fragDist)
+{
+    float fogRange = max(_MipFogFar - _MipFogNear, 1e-4f);
+    return (1.0f - saturate((fragDist - _MipFogNear) / fogRange)) * max(_SkyTextureMaxMip, 0.0f);
+}
+
+float3 SampleSkyTexture(float3 directionWS, float mipLevel)
+{
+    float3 rotatedDirectionWS = RotateSkyDirectionAroundYAxis(directionWS, _SkyTextureRotation);
+    float3 skyRadiance = SAMPLE_TEXTURECUBE_LOD(_SkyTexture, sampler_SkyTexture, rotatedDirectionWS, mipLevel).rgb;
+    return skyRadiance * _SkyTextureTint.rgb * _SkyTextureExposure;
+}
+
+float3 GetFogColor(float3 V, float fragDist)
+{
+    float3 color = _FogColor.rgb;
+
+    if (_FogColorMode == FOGCOLORMODE_SKY_COLOR && HasSkyTexture())
+    {
+        float mipLevel = ComputeMipFogLevel(fragDist);
+        color *= SampleSkyTexture(-V, mipLevel);
+    }
+
+    return color;
 }
 
 float ResolveMaxFogDistance()
@@ -106,6 +152,8 @@ float4 FragOpaqueAtmosphericScattering(Varyings input) : SV_Target
 
     fogColor = SanitizeSkyRadiance(fogColor);
     fogOpacity = saturate(fogOpacity);
+    if (_FogColorMode == FOGCOLORMODE_SKY_COLOR && HasSkyTexture())
+        fogColor = lerp(fogColor, SanitizeSkyRadiance(GetFogColor(V, tFrag)), fogOpacity);
 
     float3 composedColor = fogColor + (1.0f - fogOpacity) * inputColor.rgb;
     return float4(composedColor, inputColor.a);

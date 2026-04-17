@@ -1,7 +1,11 @@
-#include "Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariablesGlobal.hlsl"
+TEXTURECUBE(_SkyTexture);
+SAMPLER(sampler_SkyTexture);
 
-GLOBAL_TEXTURECUBE_ARRAY(_SkyTexture, RAY_TRACING_SKY_TEXTURE_REGISTER);
-GLOBAL_RESOURCE(StructuredBuffer<float4>, _AmbientProbeData, RAY_TRACING_AMBIENT_PROBE_DATA_REGISTER);
+float4 _MipFogParameters;
+float4 _FogColor;
+float _FogColorMode;
+float4 _SkyTextureTint;
+float4 _SkyTextureParams;
 
 #define AMBIENT_PROBE_BUFFER 1
 
@@ -9,4 +13,7 @@ GLOBAL_RESOURCE(StructuredBuffer<float4>, _AmbientProbeData, RAY_TRACING_AMBIENT
 #define _MipFogFar          _MipFogParameters.y
 #define _MipFogMaxMip       _MipFogParameters.z
 
-#define _FogColor           _FogColor
+#define _SkyTextureExposure _SkyTextureParams.x
+#define _SkyTextureRotation _SkyTextureParams.y
+#define _SkyTextureMaxMip   _SkyTextureParams.z
+#define _SkyTextureEnabled  _SkyTextureParams.w

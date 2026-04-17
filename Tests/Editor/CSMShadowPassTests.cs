@@ -21,7 +21,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_NormalBias = Mathf.Max(0.0f, additionalLightData.normalBias);"));
             Assert.That(source, Does.Contain("m_SlopeScaleDepthBias = Mathf.Max(0.0f, additionalLightData.slopeBias);"));
             Assert.That(source, Does.Contain("var cascadeBorders = csmSettings.GetCascadeBorderRatios();"));
-            Assert.That(source, Does.Contain("m_SplitData[i].shadowCascadeBlendCullingFactor = 1.0f;"));
+            Assert.That(source, Does.Contain("private const float CascadeBlendCullingFactor = 0.6f;"));
+            Assert.That(source, Does.Contain("m_SplitData[i].shadowCascadeBlendCullingFactor = CascadeBlendCullingFactor;"));
+            Assert.That(source, Does.Contain("StabilizeCascadeProjection(ref m_ProjMatrices[i], m_ViewMatrices[i], m_CascadeResolution);"));
             Assert.That(source, Does.Contain("m_CascadeWorldTexelSizes[i] = ComputeCascadeWorldTexelSize(m_ProjMatrices[i], m_CascadeResolution);"));
             Assert.That(source, Does.Contain("m_CascadeBorders[i] = cascadeBorders[i];"));
             Assert.That(source, Does.Contain("m_ShadowCasterBiases[i] = ComputeShadowCasterBias(mainVisibleLight, m_ProjMatrices[i], m_CascadeResolution, m_DepthBias, m_NormalBias);"));
@@ -37,9 +39,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("shadowData.cascadeWorldTexelSizes[i] = m_CascadeWorldTexelSizes[i];"));
             Assert.That(source, Does.Contain("shadowData.cascadeBorders[i] = m_CascadeBorders[i];"));
             Assert.That(source, Does.Contain("private static Matrix4x4 BuildWorldToShadowMatrix(Matrix4x4 projMatrix, Matrix4x4 viewMatrix)"));
-            Assert.That(source, Does.Contain("private static Vector4 ComputeShadowCasterBias("));
+            Assert.That(source, Does.Contain("private static void StabilizeCascadeProjection(ref Matrix4x4 projMatrix, Matrix4x4 viewMatrix, float cascadeResolution)"));
+            Assert.That(source, Does.Contain("projMatrix.m03 -= offsetX;"));
             Assert.That(source, Does.Contain("private static float ComputeCascadeWorldTexelSize(Matrix4x4 lightProjectionMatrix, float shadowResolution)"));
-            Assert.That(source, Does.Contain("return texelSize * Mathf.Sqrt(2.0f);"));
             Assert.That(source, Does.Contain("textureScaleAndBias.m22 = 0.5f;"));
             Assert.That(source, Does.Contain("shadowGlobals._VividMatrixVP = viewProjMatrix;"));
             Assert.That(source, Does.Contain("shadowGlobals._VividWorldToCamera = viewMatrix;"));

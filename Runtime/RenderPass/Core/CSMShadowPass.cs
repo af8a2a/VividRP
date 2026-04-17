@@ -8,6 +8,7 @@ namespace VividRP.Runtime.RenderPass.Core
     public sealed class CSMShadowPass : UnsafePass
     {
         private const int AtlasGridSize = 2; // 2x2 grid for up to 4 cascades
+        private const float CascadeBlendCullingFactor = 0.6f;
         private static readonly int ShadowBiasId = Shader.PropertyToID("_ShadowBias");
         private static readonly int LightDirectionId = Shader.PropertyToID("_LightDirection");
         private static readonly int LightPositionId = Shader.PropertyToID("_LightPosition");
@@ -136,8 +137,11 @@ namespace VividRP.Runtime.RenderPass.Core
                     break;
                 }
 
-                // Match Unity's cascade overlap so resolve-side blending sees valid occluders in both cascades.
-                m_SplitData[i].shadowCascadeBlendCullingFactor = 1.0f;
+                // Match HDRP/Unity's directional cascade overlap.
+                // Higher values cull more casters, which causes blend regions to lose moving occluders.
+                m_SplitData[i].shadowCascadeBlendCullingFactor = CascadeBlendCullingFactor;
+
+                StabilizeCascadeProjection(ref m_ProjMatrices[i], m_ViewMatrices[i], m_CascadeResolution);
 
                 var sphere = m_SplitData[i].cullingSphere;
                 // Store radius squared in w for GPU sphere test
@@ -318,6 +322,24 @@ namespace VividRP.Runtime.RenderPass.Core
                 -normalBias * texelSize * kernelRadius,
                 (float)shadowLight.lightType,
                 0.0f);
+        }
+
+        private static void StabilizeCascadeProjection(ref Matrix4x4 projMatrix, Matrix4x4 viewMatrix, float cascadeResolution)
+        {
+            if (cascadeResolution <= 0.0f)
+                return;
+
+            // Transform world origin into clip space to get a stable reference point.
+            Vector4 originClip = projMatrix * viewMatrix * new Vector4(0.0f, 0.0f, 0.0f, 1.0f);
+
+            // Each texel spans 2/resolution in clip space (NDC range is -1..1).
+            float texelSizeClip = 2.0f / cascadeResolution;
+
+            float offsetX = originClip.x % texelSizeClip;
+            float offsetY = originClip.y % texelSizeClip;
+
+            projMatrix.m03 -= offsetX;
+            projMatrix.m13 -= offsetY;
         }
 
         private static float ComputeCascadeWorldTexelSize(Matrix4x4 lightProjectionMatrix, float shadowResolution)

@@ -180,19 +180,98 @@ float SampleShadowPCFKernel(float2 atlasUV, float depth, int cascadeIndex, int k
     return shadow / (kernelWidth * kernelWidth);
 }
 
+// Optimized tent-filter PCF: places bilinear taps between texels so hardware
+// comparison filtering produces smooth gradients instead of hard 0/1 per tap.
+
 float SampleShadowPCF3x3(float2 atlasUV, float depth, int cascadeIndex)
 {
-    return SampleShadowPCFKernel(atlasUV, depth, cascadeIndex, 1);
+    float2 cascadeMinUV, cascadeMaxUV, texelSize;
+    GetCascadeAtlasBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
+
+    float2 texCoord = atlasUV / texelSize + 0.5;
+    float2 texCoordFloor = floor(texCoord);
+    float2 s = texCoord - texCoordFloor;
+    float2 base = (texCoordFloor - 0.5) * texelSize;
+
+    float uw0 = 3.0 - 2.0 * s.x;
+    float uw1 = 1.0 + 2.0 * s.x;
+    float vw0 = 3.0 - 2.0 * s.y;
+    float vw1 = 1.0 + 2.0 * s.y;
+
+    float u0 = (2.0 - s.x) / uw0 - 1.0;
+    float u1 = s.x / uw1 + 1.0;
+    float v0 = (2.0 - s.y) / vw0 - 1.0;
+    float v1 = s.y / vw1 + 1.0;
+
+    float shadow = 0.0;
+    shadow += uw0 * vw0 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u0, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw1 * vw0 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u1, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw0 * vw1 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u0, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw1 * vw1 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u1, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+
+    return shadow / 16.0;
 }
 
 float SampleShadowPCF5x5(float2 atlasUV, float depth, int cascadeIndex)
 {
-    return SampleShadowPCFKernel(atlasUV, depth, cascadeIndex, 2);
+    float2 cascadeMinUV, cascadeMaxUV, texelSize;
+    GetCascadeAtlasBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
+
+    float2 texCoord = atlasUV / texelSize + 0.5;
+    float2 texCoordFloor = floor(texCoord);
+    float2 s = texCoord - texCoordFloor;
+    float2 base = (texCoordFloor - 0.5) * texelSize;
+
+    float uw0 = 4.0 - 3.0 * s.x;
+    float uw1 = 7.0;
+    float uw2 = 1.0 + 3.0 * s.x;
+    float vw0 = 4.0 - 3.0 * s.y;
+    float vw1 = 7.0;
+    float vw2 = 1.0 + 3.0 * s.y;
+
+    float u0 = (3.0 - 2.0 * s.x) / uw0 - 2.0;
+    float u1 = (3.0 + s.x) / uw1;
+    float u2 = s.x / uw2 + 2.0;
+    float v0 = (3.0 - 2.0 * s.y) / vw0 - 2.0;
+    float v1 = (3.0 + s.y) / vw1;
+    float v2 = s.y / vw2 + 2.0;
+
+    float shadow = 0.0;
+    shadow += uw0 * vw0 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u0, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw1 * vw0 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u1, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw2 * vw0 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u2, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw0 * vw1 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u0, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw1 * vw1 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u1, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw2 * vw1 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u2, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw0 * vw2 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u0, v2) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw1 * vw2 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u1, v2) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw2 * vw2 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u2, v2) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+
+    return shadow / 144.0;
 }
 
 float SampleShadowPCF7x7(float2 atlasUV, float depth, int cascadeIndex)
 {
-    return SampleShadowPCFKernel(atlasUV, depth, cascadeIndex, 3);
+    float2 cascadeMinUV, cascadeMaxUV, texelSize;
+    GetCascadeAtlasBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
+
+    // 7x7 box filter using 4x4 bilinear taps placed between texels.
+    // Each tap covers a 2x2 area, 4x4 taps cover the 8x8 neighborhood.
+    float shadow = 0.0;
+
+    [unroll]
+    for (int j = 0; j < 4; j++)
+    {
+        [unroll]
+        for (int i = 0; i < 4; i++)
+        {
+            float2 offset = float2(i * 2.0 - 3.0, j * 2.0 - 3.0) * texelSize;
+            float2 sampleUV = clamp(atlasUV + offset, cascadeMinUV, cascadeMaxUV);
+            shadow += _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, sampleUV, depth);
+        }
+    }
+
+    return shadow / 16.0;
 }
 
 
@@ -204,21 +283,10 @@ float GetCascadeBorder(int cascadeIndex)
 float ComputeCascadeBlendAlpha(float3 positionWS, int cascadeIndex, float relDistance)
 {
     float border = GetCascadeBorder(cascadeIndex);
-    float alpha = border <= 0.0 ? 0.0 : saturate((relDistance - (1.0 - border)) / border);
-    if (alpha <= 0.0)
+    if (border <= 0.0)
         return 0.0;
 
-    float4 sphere = _CSMCascadeSpheres[cascadeIndex];
-    float3 wposDir = positionWS - sphere.xyz;
-    float distSq = dot(wposDir, wposDir);
-    if (distSq <= 1e-8)
-        return alpha;
-
-    wposDir *= rsqrt(distSq);
-    float3 viewDir = GetWorldSpaceViewDir(positionWS);
-    float cascDot = dot(viewDir, wposDir);
-    float lerpSharpness = 8.0 + 512.0 * smoothstep(1.0, 0.7, border);
-    return lerp(alpha, 0.0, saturate(cascDot * lerpSharpness));
+    return saturate((relDistance - (1.0 - border)) / border);
 }
 
 int GetPCSSBlockerSampleCount()
@@ -424,6 +492,14 @@ bool TryGetBiasedShadowCoord(float3 positionWS, float3 normalWS, int cascadeInde
     return true;
 }
 
+float2 ComputeShadowUVJitter(uint2 pixelCoord, int cascadeIndex)
+{
+    float noise = InterleavedGradientNoise(float2(pixelCoord) + 0.5, _CSMFrameIndex);
+    float angle = noise * kPCSSTwoPi;
+    float texelSize = 1.0 / max((float)_CSMAtlasResolution, 1.0);
+    return float2(cos(angle), sin(angle)) * (texelSize * 0.5);
+}
+
 bool TryEvaluateCascadeShadow(float3 positionWS, float3 normalWS, int cascadeIndex, uint2 pixelCoord, out float shadow)
 {
     shadow = 1.0;
@@ -434,6 +510,7 @@ bool TryEvaluateCascadeShadow(float3 positionWS, float3 normalWS, int cascadeInd
 
     shadowCoord = ClampShadowCoordToShadowMap(shadowCoord);
     float2 atlasUV = RemapToAtlasUV(shadowCoord.xy, cascadeIndex);
+    atlasUV += ComputeShadowUVJitter(pixelCoord, cascadeIndex);
     atlasUV = ClampShadowAtlasUV(atlasUV, cascadeIndex);
     shadow = EvaluateShadow(atlasUV, shadowCoord.z, cascadeIndex, pixelCoord);
     return true;
@@ -451,6 +528,7 @@ bool TryEvaluateCascadeBlendShadow(float3 positionWS, float3 normalWS, int casca
 
     shadowCoord = ClampShadowCoordToShadowMap(shadowCoord);
     float2 atlasUV = RemapToAtlasUV(shadowCoord.xy, cascadeIndex);
+    atlasUV += ComputeShadowUVJitter(pixelCoord, cascadeIndex);
     atlasUV = ClampShadowAtlasUV(atlasUV, cascadeIndex);
     shadow = EvaluateShadow(atlasUV, shadowCoord.z, cascadeIndex, pixelCoord);
     return true;

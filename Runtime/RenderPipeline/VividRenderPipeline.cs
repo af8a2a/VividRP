@@ -150,6 +150,7 @@ namespace VividRP.Runtime
                 if (shouldSubmit)
                     context.Submit();
 
+
                 EndCameraRendering(context, camera);
             }
         }

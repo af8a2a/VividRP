@@ -35,32 +35,6 @@ float3 GetCameraPositionWS()
     return _WorldSpaceCameraPos;
 }
 
-float3 GetCurrentViewPosition()
-{
-    return GetCameraPositionWS();
-}
-
-bool IsPerspectiveProjection()
-{
-    return unity_OrthoParams.w == 0;
-}
-
-float3 GetViewForwardDir()
-{
-    float4x4 viewMat = GetWorldToViewMatrix();
-    float3 viewForwardDir = -viewMat[2].xyz;
-    return viewForwardDir;
-}
-
-float3 GetWorldSpaceViewDir(float3 positionWS)
-{
-    float3 viewDirectionWS = -GetViewForwardDir();
-
-    if (IsPerspectiveProjection())
-        viewDirectionWS = GetCurrentViewPosition() - positionWS;
-
-    return viewDirectionWS;
-}
 
 VividGBufferSurfaceData LoadVividGBuffer(uint2 pixelCoord)
 {

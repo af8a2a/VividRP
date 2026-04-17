@@ -1,6 +1,6 @@
 #pragma kernel CSMShadowResolve
 #pragma enable_d3d11_debug_symbols
-
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 
@@ -195,20 +195,6 @@ float SampleShadowPCF7x7(float2 atlasUV, float depth, int cascadeIndex)
     return SampleShadowPCFKernel(atlasUV, depth, cascadeIndex, 3);
 }
 
-// float InterleavedGradientNoise(float2 pixelCoord, int frameIndex)
-// {
-//     const float3 magic = float3(0.06711056, 0.00583715, 52.9829189);
-//     float2 frameMagicScale = float2(2.083, 4.867);
-//     pixelCoord += frameIndex * frameMagicScale;
-//     return frac(magic.z * frac(dot(pixelCoord, magic.xy)));
-// }
-
-float3 GetWorldSpaceViewDirCSM(float3 positionWS)
-{
-    float3 viewDir = _WorldSpaceCameraPos.xyz - positionWS;
-    float viewDirLengthSq = dot(viewDir, viewDir);
-    return viewDirLengthSq > 1e-8 ? viewDir * rsqrt(viewDirLengthSq) : float3(0.0, 0.0, 1.0);
-}
 
 float GetCascadeBorder(int cascadeIndex)
 {
@@ -229,7 +215,7 @@ float ComputeCascadeBlendAlpha(float3 positionWS, int cascadeIndex, float relDis
         return alpha;
 
     wposDir *= rsqrt(distSq);
-    float3 viewDir = GetWorldSpaceViewDirCSM(positionWS);
+    float3 viewDir = GetWorldSpaceViewDir(positionWS);
     float cascDot = dot(viewDir, wposDir);
     float lerpSharpness = 8.0 + 512.0 * smoothstep(1.0, 0.7, border);
     return lerp(alpha, 0.0, saturate(cascDot * lerpSharpness));

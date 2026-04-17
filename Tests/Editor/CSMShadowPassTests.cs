@@ -25,6 +25,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_ShadowCasterBiases[i] = ComputeShadowCasterBias(mainVisibleLight, m_ProjMatrices[i], m_CascadeResolution, m_DepthBias, m_NormalBias);"));
             Assert.That(source, Does.Contain("var gpuProjMatrix = GL.GetGPUProjectionMatrix(m_ProjMatrices[cascadeIndex], true);"));
             Assert.That(source, Does.Contain("var cascadeShaderGlobals = BuildCascadeShaderGlobals(cascadeIndex, gpuProjMatrix);"));
+            Assert.That(source, Does.Contain("nativeCmd.SetViewProjectionMatrices(m_ViewMatrices[cascadeIndex], m_ProjMatrices[cascadeIndex]);"));
             Assert.That(source, Does.Contain("ConstantBuffer.PushGlobal(nativeCmd, cascadeShaderGlobals, ShaderVariablesGlobal.ConstantBufferShaderId);"));
             Assert.That(source, Does.Contain("nativeCmd.SetGlobalDepthBias(1.0f, m_SlopeScaleDepthBias);"));
             Assert.That(source, Does.Contain("nativeCmd.SetGlobalVector(ShadowBiasId, m_ShadowCasterBiases[cascadeIndex]);"));
@@ -40,8 +41,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("shadowGlobals._VividMatrixVP = viewProjMatrix;"));
             Assert.That(source, Does.Contain("shadowGlobals._VividWorldToCamera = viewMatrix;"));
             Assert.That(source, Does.Contain("shadowGlobals._VividGlstateMatrixProjection = gpuProjMatrix;"));
+            Assert.That(source, Does.Contain("nativeCmd.SetViewProjectionMatrices("));
+            Assert.That(source, Does.Contain("m_CameraShaderGlobals._VividWorldToCamera,"));
+            Assert.That(source, Does.Contain("m_CameraShaderGlobals._VividCameraProjection);"));
             Assert.That(source, Does.Contain("ConstantBuffer.PushGlobal(nativeCmd, m_CameraShaderGlobals, ShaderVariablesGlobal.ConstantBufferShaderId);"));
-            Assert.That(source, Does.Not.Contain("SetViewProjectionMatrices("));
         }
 
         private static string GetPassSourcePath()

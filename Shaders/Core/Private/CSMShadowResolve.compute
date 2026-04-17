@@ -344,7 +344,8 @@ float SampleShadowPCSS(float2 atlasUV, float receiverDepth, int cascadeIndex, ui
     float minFilterAngularDiameter = max(blockerSearchAngularDiameter, _CSMPCSSMinFilterMaxAngularDiameter);
     float halfMinFilterAngularDiameterTangent = tan(0.5 * max(minFilterAngularDiameter, _CSMLightAngularDiameter) * kDegreesToRadians);
     float minFilterRadiusWorld = _CSMPCSSMinFilterSizeTexels * worldTexelSize;
-    float maxBlockerDistanceWorld = _CSMPCSSMaxPenumbraSize / max(2.0 * halfLightAngularDiameterTangent, 1e-5);
+    float maxPenumbraRadiusWorld = max(0.5 * _CSMPCSSMaxPenumbraSize, 0.0);
+    float maxBlockerDistanceWorld = maxPenumbraRadiusWorld / max(halfLightAngularDiameterTangent, 1e-5);
     float blockerRadial2DepthScale = 1.0 / max(halfBlockerSearchAngularDiameterTangent * depthToWorldScale, 1e-5);
     float minFilterRadial2DepthScale = 1.0 / max(halfMinFilterAngularDiameterTangent * depthToWorldScale, 1e-5);
     float receiverDistanceWorld = min(GetReceiverDistanceToLight(receiverDepth, depthToWorldScale), maxBlockerDistanceWorld);
@@ -368,7 +369,7 @@ float SampleShadowPCSS(float2 atlasUV, float receiverDepth, int cascadeIndex, ui
         return 1.0;
 
     float blockerDistanceWorld = min(abs(averageBlockerDepth - receiverDepth) * depthToWorldScale * 0.9, maxBlockerDistanceWorld);
-    float filterRadiusWorld = blockerDistanceWorld * halfLightAngularDiameterTangent;
+    float filterRadiusWorld = min(blockerDistanceWorld * halfLightAngularDiameterTangent, maxPenumbraRadiusWorld);
     float samplingFilterRadiusWorld = max(filterRadiusWorld, minFilterRadiusWorld);
     float filterRadiusTexels = samplingFilterRadiusWorld / worldTexelSize;
     float maxPCSSOffsetShadow = min(_CSMPCSSMaxSamplingDistance, blockerDistanceWorld * 0.25) / depthToWorldScale;
@@ -413,9 +414,16 @@ float EvaluateShadow(float2 atlasUV, float receiverDepth, int cascadeIndex, uint
     }
 }
 
-bool IsWithinShadowMapBounds(float3 shadowCoord)
+float3 ClampShadowCoordToShadowMap(float3 shadowCoord)
 {
-    return all(shadowCoord >= 0.0) && all(shadowCoord <= 1.0);
+    shadowCoord.xy = saturate(shadowCoord.xy);
+    return shadowCoord;
+}
+
+bool IsWithinCascadeBlendSamplingBounds(float3 shadowCoord)
+{
+    float halfTexel = 0.5 / max((float)_CSMCascadeResolution, 1.0);
+    return all(shadowCoord.xy >= halfTexel) && all(shadowCoord.xy <= (1.0 - halfTexel));
 }
 
 bool TryGetBiasedShadowCoord(float3 positionWS, float3 normalWS, int cascadeIndex, out float3 shadowCoord)
@@ -428,7 +436,7 @@ bool TryGetBiasedShadowCoord(float3 positionWS, float3 normalWS, int cascadeInde
     float receiverNormalBias = _CSMNormalBias * GetCascadeWorldTexelSize(cascadeIndex);
     float3 biasedPositionWS = positionWS + normalWS * receiverNormalBias;
     shadowCoord = TransformWorldToShadowCoord(biasedPositionWS, cascadeIndex);
-    return IsWithinShadowMapBounds(shadowCoord);
+    return true;
 }
 
 bool TryEvaluateCascadeShadow(float3 positionWS, float3 normalWS, int cascadeIndex, uint2 pixelCoord, out float shadow)
@@ -439,7 +447,26 @@ bool TryEvaluateCascadeShadow(float3 positionWS, float3 normalWS, int cascadeInd
     if (!TryGetBiasedShadowCoord(positionWS, normalWS, cascadeIndex, shadowCoord))
         return false;
 
+    shadowCoord = ClampShadowCoordToShadowMap(shadowCoord);
     float2 atlasUV = RemapToAtlasUV(shadowCoord.xy, cascadeIndex);
+    atlasUV = ClampShadowAtlasUV(atlasUV, cascadeIndex);
+    shadow = EvaluateShadow(atlasUV, shadowCoord.z, cascadeIndex, pixelCoord);
+    return true;
+}
+
+bool TryEvaluateCascadeBlendShadow(float3 positionWS, float3 normalWS, int cascadeIndex, uint2 pixelCoord, out float shadow)
+{
+    shadow = 1.0;
+    float3 shadowCoord;
+    if (!TryGetBiasedShadowCoord(positionWS, normalWS, cascadeIndex, shadowCoord))
+        return false;
+
+    if (!IsWithinCascadeBlendSamplingBounds(shadowCoord))
+        return false;
+
+    shadowCoord = ClampShadowCoordToShadowMap(shadowCoord);
+    float2 atlasUV = RemapToAtlasUV(shadowCoord.xy, cascadeIndex);
+    atlasUV = ClampShadowAtlasUV(atlasUV, cascadeIndex);
     shadow = EvaluateShadow(atlasUV, shadowCoord.z, cascadeIndex, pixelCoord);
     return true;
 }
@@ -482,7 +509,6 @@ void CSMShadowResolve(uint3 dispatchThreadID : SV_DispatchThreadID)
         _DirectionalShadowTexture[pixelCoord] = 1.0;
         return;
     }
-
     float shadow = shadowCurrent;
     float cascadeBlendAlpha = ComputeCascadeBlendAlpha(positionWS, cascadeIndex, relDistance);
     if (cascadeBlendAlpha > 0.0)
@@ -492,9 +518,8 @@ void CSMShadowResolve(uint3 dispatchThreadID : SV_DispatchThreadID)
         if (nextCascadeIndex < _CSMCascadeCount)
         {
             shadowNext = shadowCurrent;
-
             float nextCascadeShadow;
-            if (TryEvaluateCascadeShadow(positionWS, normalWS, nextCascadeIndex, pixelCoord, nextCascadeShadow))
+            if (TryEvaluateCascadeBlendShadow(positionWS, normalWS, nextCascadeIndex, pixelCoord, nextCascadeShadow))
                 shadowNext = nextCascadeShadow;
         }
 

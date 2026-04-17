@@ -220,6 +220,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
                     nativeCmd.SetViewport(new Rect(offsetX, offsetY, m_CascadeResolution, m_CascadeResolution));
                     nativeCmd.EnableScissorRect(new Rect(offsetX, offsetY, m_CascadeResolution, m_CascadeResolution));
+                    nativeCmd.SetViewProjectionMatrices(m_ViewMatrices[cascadeIndex], m_ProjMatrices[cascadeIndex]);
                     ConstantBuffer.PushGlobal(nativeCmd, cascadeShaderGlobals, ShaderVariablesGlobal.ConstantBufferShaderId);
                     nativeCmd.SetGlobalVector(ShadowBiasId, m_ShadowCasterBiases[cascadeIndex]);
                     nativeCmd.SetGlobalVector(LightDirectionId, m_ShadowLightDirection);
@@ -232,6 +233,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
                 nativeCmd.SetGlobalDepthBias(0.0f, 0.0f);
                 nativeCmd.DisableScissorRect();
+                nativeCmd.SetViewProjectionMatrices(
+                    m_CameraShaderGlobals._VividWorldToCamera,
+                    m_CameraShaderGlobals._VividCameraProjection);
                 ConstantBuffer.PushGlobal(nativeCmd, m_CameraShaderGlobals, ShaderVariablesGlobal.ConstantBufferShaderId);
             }
         }

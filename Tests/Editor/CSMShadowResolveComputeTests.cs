@@ -41,8 +41,11 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("float SampleShadowPCSS(float2 atlasUV, float receiverDepth, int cascadeIndex, uint2 pixelCoord)"));
             Assert.That(source, Does.Contain("float InterleavedGradientNoise(float2 pixelCoord, int frameIndex)"));
             Assert.That(source, Does.Contain("float ComputeCascadeBlendAlpha(float3 positionWS, int cascadeIndex, float relDistance)"));
+            Assert.That(source, Does.Contain("float3 ClampShadowCoordToShadowMap(float3 shadowCoord)"));
+            Assert.That(source, Does.Contain("bool IsWithinCascadeBlendSamplingBounds(float3 shadowCoord)"));
             Assert.That(source, Does.Contain("bool TryGetBiasedShadowCoord(float3 positionWS, float3 normalWS, int cascadeIndex, out float3 shadowCoord)"));
             Assert.That(source, Does.Contain("bool TryEvaluateCascadeShadow(float3 positionWS, float3 normalWS, int cascadeIndex, uint2 pixelCoord, out float shadow)"));
+            Assert.That(source, Does.Contain("bool TryEvaluateCascadeBlendShadow(float3 positionWS, float3 normalWS, int cascadeIndex, uint2 pixelCoord, out float shadow)"));
             Assert.That(source, Does.Contain("int GetPCSSBlockerSampleCount()"));
             Assert.That(source, Does.Contain("int GetPCSSFilterSampleCount()"));
             Assert.That(source, Does.Contain("SampleVogelDiskClumped"));
@@ -52,10 +55,15 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("_CSMShadowAtlas.Load(int3(AtlasUVToTexelCoord(sampleUV), 0));"));
             Assert.That(source, Does.Contain("if (IsShadowMapDepthCloser(sampleDepth, coordz))"));
             Assert.That(source, Does.Contain("if (!IsWithinCascadeAtlasBounds(sampleUV, cascadeIndex))"));
+            Assert.That(source, Does.Contain("float maxPenumbraRadiusWorld = max(0.5 * _CSMPCSSMaxPenumbraSize, 0.0);"));
+            Assert.That(source, Does.Contain("float maxBlockerDistanceWorld = maxPenumbraRadiusWorld / max(halfLightAngularDiameterTangent, 1e-5);"));
             Assert.That(source, Does.Contain("float blockerDistanceWorld = min(abs(averageBlockerDepth - receiverDepth) * depthToWorldScale * 0.9, maxBlockerDistanceWorld);"));
-            Assert.That(source, Does.Contain("bool IsWithinShadowMapBounds(float3 shadowCoord)"));
+            Assert.That(source, Does.Contain("float filterRadiusWorld = min(blockerDistanceWorld * halfLightAngularDiameterTangent, maxPenumbraRadiusWorld);"));
+            Assert.That(source, Does.Contain("shadowCoord.xy = saturate(shadowCoord.xy);"));
+            Assert.That(source, Does.Contain("float halfTexel = 0.5 / max((float)_CSMCascadeResolution, 1.0);"));
             Assert.That(source, Does.Contain("float receiverNormalBias = _CSMNormalBias * GetCascadeWorldTexelSize(cascadeIndex);"));
-            Assert.That(source, Does.Not.Contain("shadowCoord.z = ApplyShadowDepthBias(shadowCoord.z);"));
+            Assert.That(source, Does.Contain("shadowCoord = TransformWorldToShadowCoord(biasedPositionWS, cascadeIndex);"));
+            Assert.That(source, Does.Contain("atlasUV = ClampShadowAtlasUV(atlasUV, cascadeIndex);"));
             Assert.That(source, Does.Contain("float blockerSearchAngularDiameter = max(_CSMPCSSBlockerSearchAngularDiameter, _CSMLightAngularDiameter);"));
             Assert.That(source, Does.Contain("float noise = InterleavedGradientNoise(float2(pixelCoord) + 0.5, _CSMFrameIndex);"));
             Assert.That(source, Does.Contain("return validSampleCount > 0.0 ? shadow / validSampleCount : 1.0;"));
@@ -66,6 +74,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("case kCSMShadowQualityVeryHigh:"));
             Assert.That(source, Does.Contain("float cascadeBlendAlpha = ComputeCascadeBlendAlpha(positionWS, cascadeIndex, relDistance);"));
             Assert.That(source, Does.Contain("shadow = lerp(shadowCurrent, shadowNext, cascadeBlendAlpha);"));
+            Assert.That(source, Does.Contain("if (!IsWithinCascadeBlendSamplingBounds(shadowCoord))"));
+            Assert.That(source, Does.Contain("if (TryEvaluateCascadeBlendShadow(positionWS, normalWS, nextCascadeIndex, pixelCoord, nextCascadeShadow))"));
             Assert.That(source, Does.Contain("_DirectionalShadowTexture[pixelCoord] = 1.0;"));
         }
 

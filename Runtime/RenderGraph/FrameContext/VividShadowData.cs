@@ -48,10 +48,7 @@ namespace VividRP.Runtime
         /// </summary>
         public void ComputeAtlasLayout()
         {
-            // 2x2 grid: each cascade occupies a quarter of the atlas
-            // Scale is 0.5 for both x and y
-            // Offsets: C0=(0,0), C1=(0.5,0), C2=(0,0.5), C3=(0.5,0.5)
-            float scale = 0.5f;
+            float scale = atlasResolution > 0 ? (float)cascadeResolution / atlasResolution : 0f;
             for (int i = 0; i < MaxCascadeCount; i++)
             {
                 if (i < cascadeCount)

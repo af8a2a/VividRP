@@ -245,6 +245,10 @@ namespace VividRP.Runtime
     {
     }
 
+    public interface IRenderGizmoPrePostProcessBoundaryPass
+    {
+    }
+
     internal static class RenderGraphPassExecutionUtility
     {
         internal static bool SupportsAsyncCompute(Type passType)

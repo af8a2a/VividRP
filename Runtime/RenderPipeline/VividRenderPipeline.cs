@@ -70,6 +70,7 @@ namespace VividRP.Runtime
                 if (!camera.TryGetCullingParameters(out var cullingParameters))
                     return;
 
+                EmitGeometryForCamera(camera);
                 ApplyShadowDistanceOverride(camera, ref cullingParameters);
                 var cullingResults = context.Cull(ref cullingParameters);
                 context.SetupCameraProperties(camera);
@@ -139,6 +140,8 @@ namespace VividRP.Runtime
                 }
 
                 context.ExecuteCommandBuffer(cmdBuffer);
+                cmdBuffer.Clear();
+                RenderSubmittedGizmos(context, camera, graphAsset);
             }
             finally
             {
@@ -224,6 +227,50 @@ namespace VividRP.Runtime
 
             gpuDrivenSystem.ForcedMeshLODNodeDepth = settings.forcedMeshLODNodeDepth;
             gpuDrivenSystem.MeshLODErrorThreshold = settings.meshLODErrorThreshold;
+        }
+
+        internal static bool ShouldEmitWorldGeometry(CameraType cameraType)
+        {
+            return cameraType == CameraType.SceneView;
+        }
+
+        internal static bool CanRenderGizmos(CameraType cameraType)
+        {
+            return cameraType == CameraType.Game || cameraType == CameraType.SceneView;
+        }
+
+        internal static bool CanRenderGizmos(Camera camera)
+        {
+            return camera != null && CanRenderGizmos(camera.cameraType);
+        }
+
+        private static void EmitGeometryForCamera(Camera camera)
+        {
+#if UNITY_EDITOR
+            if (camera == null)
+                return;
+
+            if (ShouldEmitWorldGeometry(camera.cameraType))
+                ScriptableRenderContext.EmitWorldGeometryForSceneView(camera);
+#endif
+        }
+
+        private static void RenderSubmittedGizmos(
+            ScriptableRenderContext context,
+            Camera camera,
+            RenderGraphData graphAsset)
+        {
+#if UNITY_EDITOR
+            if (!CanRenderGizmos(camera) || !UnityEditor.Handles.ShouldRenderGizmos())
+                return;
+
+            context.SetupCameraProperties(camera);
+
+            if (PassRecorder.ShouldRenderPreImageEffectGizmosOutsideRenderGraph(graphAsset))
+                context.DrawGizmos(camera, GizmoSubset.PreImageEffects);
+
+            context.DrawGizmos(camera, GizmoSubset.PostImageEffects);
+#endif
         }
 
         protected override void Dispose(bool disposing)

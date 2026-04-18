@@ -47,6 +47,18 @@ namespace VividRP.Runtime
         private static List<RenderGraphPassDefinition> s_RuntimePassDefinitions = new();
         private static long s_CurrentImportVersion;
         private static bool s_IsCompiled;
+        private static bool s_RenderedPreImageEffectGizmosInGraph;
+
+#if UNITY_EDITOR
+        private sealed class RenderGizmosPassData
+        {
+            public RendererListHandle GizmoRendererList;
+            public Texture ExposureTexture;
+            public TextureHandle Color;
+            public TextureHandle Depth;
+            public bool HasDepth;
+        }
+#endif
 
         internal static void InitializeContext(ScriptableRenderContext context, Camera camera, CullingResults cullingResults)
         {
@@ -170,6 +182,7 @@ namespace VividRP.Runtime
             EnsureCompiled(graphAsset);
             ClearHistoryImportedHandles();
             ClearCodeManagedHistoryFrameState();
+            s_RenderedPreImageEffectGizmosInGraph = false;
 
             // Advance temporal state and set all shader globals before any pass executes.
             FrameContextSystem.Update(s_FrameData, cmdBuffer);
@@ -183,6 +196,7 @@ namespace VividRP.Runtime
             ClearImportedTextures();
             ClearHistoryImportedHandles();
             ClearCodeManagedHistoryFrameState();
+            s_RenderedPreImageEffectGizmosInGraph = false;
         }
 
         /// <summary>
@@ -297,6 +311,40 @@ namespace VividRP.Runtime
             FinalizeCodeManagedBufferHistories(graphAsset);
             ClearHistoryImportedHandles();
             ClearCodeManagedHistoryFrameState();
+        }
+
+        internal static bool HasRenderGizmoPrePostProcessBoundary(RenderGraphData graphAsset)
+        {
+            EnsureCompiled(graphAsset);
+            return HasRenderGizmoPrePostProcessBoundary(s_RenderPasses);
+        }
+
+        internal static bool HasRenderGizmoPrePostProcessBoundary(IReadOnlyList<IRenderPass> renderPasses)
+        {
+            if (renderPasses == null)
+                return false;
+
+            foreach (var renderPass in renderPasses)
+            {
+                if (renderPass is IRenderGizmoPrePostProcessBoundaryPass)
+                    return true;
+            }
+
+            return false;
+        }
+
+        internal static bool ShouldRenderPreImageEffectGizmosOutsideRenderGraph(RenderGraphData graphAsset)
+        {
+            return ShouldRenderPreImageEffectGizmosOutsideRenderGraph(
+                HasRenderGizmoPrePostProcessBoundary(graphAsset),
+                s_RenderedPreImageEffectGizmosInGraph);
+        }
+
+        internal static bool ShouldRenderPreImageEffectGizmosOutsideRenderGraph(
+            bool hasRenderGizmoPrePostProcessBoundary,
+            bool renderedPreImageEffectGizmosInGraph)
+        {
+            return !hasRenderGizmoPrePostProcessBoundary || !renderedPreImageEffectGizmosInGraph;
         }
 
         private static void RegisterTextureHistoryBinding(
@@ -1112,6 +1160,114 @@ namespace VividRP.Runtime
                 && !GraphicsFormatUtility.IsDepthFormat(sourceInfo.format);
         }
 
+#if UNITY_EDITOR
+        private static void RecordRenderGizmosPass(
+            RenderGraph renderGraph,
+            GizmoSubset gizmoSubset,
+            RenderGraphTexture colorTexture,
+            RenderGraphTexture depthTexture,
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache)
+        {
+            var camera = s_FrameData.GetOrCreate<VividCameraData>().camera;
+            if (renderGraph == null || !VividRenderPipeline.CanRenderGizmos(camera) || colorTexture == null)
+                return;
+
+            if (!UnityEditor.Handles.ShouldRenderGizmos())
+                return;
+
+            using var builder = renderGraph.AddUnsafePass<RenderGizmosPassData>(
+                gizmoSubset == GizmoSubset.PreImageEffects ? "PrePostprocessGizmos" : "Gizmos",
+                out var passData);
+
+            passData.Color = GetOrCreateTextureHandle(renderGraph, colorTexture, textureCache);
+            passData.HasDepth = depthTexture != null;
+            if (passData.HasDepth)
+                passData.Depth = GetOrCreateTextureHandle(renderGraph, depthTexture, textureCache);
+            passData.GizmoRendererList = renderGraph.CreateGizmoRendererList(camera, gizmoSubset);
+            passData.ExposureTexture = GetGizmoExposureTexture();
+
+            builder.UseTexture(passData.Color, AccessFlags.Write);
+            if (passData.HasDepth)
+                builder.UseTexture(passData.Depth, AccessFlags.ReadWrite);
+            builder.UseRendererList(passData.GizmoRendererList);
+            builder.AllowPassCulling(false);
+            builder.SetRenderFunc<RenderGizmosPassData>(static (data, context) =>
+            {
+                Gizmos.exposure = data.ExposureTexture;
+                if (data.HasDepth)
+                    context.cmd.SetRenderTarget(data.Color, data.Depth);
+                else
+                    context.cmd.SetRenderTarget(data.Color);
+                context.cmd.DrawRendererList(data.GizmoRendererList);
+            });
+        }
+
+        private static Texture GetGizmoExposureTexture()
+        {
+            var exposureData = s_FrameData.Get<VividExposureData>();
+            return exposureData.currentExposureTexture;
+        }
+
+        private static bool TryGetPreImageEffectGizmoTargets(
+            int boundaryPassIndex,
+            PassResource boundaryResources,
+            out RenderGraphTexture colorTexture,
+            out RenderGraphTexture depthTexture)
+        {
+            colorTexture = GetPreImageEffectGizmoColorTexture(boundaryResources);
+            depthTexture = GetPreImageEffectGizmoDepthTexture(boundaryPassIndex);
+            return colorTexture != null;
+        }
+
+        private static RenderGraphTexture GetPreImageEffectGizmoColorTexture(PassResource boundaryResources)
+        {
+            if (boundaryResources?.Textures == null)
+                return null;
+
+            foreach (var entry in boundaryResources.Textures)
+            {
+                if (entry?.Texture == null || entry.IsDepthAttachment)
+                    continue;
+
+                if (string.Equals(entry.Name, "source", StringComparison.OrdinalIgnoreCase))
+                    return entry.Texture;
+            }
+
+            foreach (var entry in boundaryResources.Textures)
+            {
+                if (entry?.Texture == null || entry.IsDepthAttachment)
+                    continue;
+
+                return entry.Texture;
+            }
+
+            return null;
+        }
+
+        private static RenderGraphTexture GetPreImageEffectGizmoDepthTexture(int boundaryPassIndex)
+        {
+            for (var passIndex = boundaryPassIndex - 1; passIndex >= 0; passIndex--)
+            {
+                var resources = GetCurrentPassResources(s_RenderPasses[passIndex]);
+                if (resources?.Textures == null)
+                    continue;
+
+                foreach (var entry in resources.Textures)
+                {
+                    if (entry?.Texture == null || !entry.IsDepthAttachment)
+                        continue;
+
+                    if (entry.Texture.desc != null && entry.Texture.desc.DepthBufferBits == DepthBits.None)
+                        continue;
+
+                    return entry.Texture;
+                }
+            }
+
+            return null;
+        }
+#endif
+
         public static void RecordRenderGraph(
             RenderGraph renderGraph,
             ScriptableRenderContext context,
@@ -1136,11 +1292,33 @@ namespace VividRP.Runtime
             var renderListCache = new Dictionary<RenderGraphRenderList, RendererListHandle>();
             var accelerationStructureCache = new Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle>();
             var shouldRecordPreviews = RenderGraphPreviewRegistry.IsAvailable;
+            var recordedPreImageEffectGizmos = false;
 
             var passDefinitions = s_RuntimePassDefinitions;
             for (var passIndex = 0; passIndex < s_RenderPasses.Count; passIndex++)
             {
                 var pass = s_RenderPasses[passIndex];
+#if UNITY_EDITOR
+                if (!recordedPreImageEffectGizmos && pass is IRenderGizmoPrePostProcessBoundaryPass)
+                {
+                    var boundaryResources = GetCurrentPassResources(pass);
+                    if (TryGetPreImageEffectGizmoTargets(
+                            passIndex,
+                            boundaryResources,
+                            out var gizmoColorTexture,
+                            out var gizmoDepthTexture))
+                    {
+                        RecordRenderGizmosPass(
+                            renderGraph,
+                            GizmoSubset.PreImageEffects,
+                            gizmoColorTexture,
+                            gizmoDepthTexture,
+                            textureCache);
+                        s_RenderedPreImageEffectGizmosInGraph = true;
+                    }
+                    recordedPreImageEffectGizmos = true;
+                }
+#endif
                 var resources = GetCurrentPassResources(pass);
                 var passDefinition = passDefinitions != null && passIndex < passDefinitions.Count
                     ? passDefinitions[passIndex]

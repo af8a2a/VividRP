@@ -1,6 +1,6 @@
+#pragma use_dxc
 #pragma kernel ClearDeferredLit
 #pragma kernel DeferredLit
-#pragma enable_d3d11_debug_symbols
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
@@ -52,25 +52,49 @@ float SampleDirectionalShadow(uint2 pixelCoord)
     return _DirectionalShadowTexture.SampleLevel(sampler_PointClamp, uv, 0).x;
 }
 
-float3 EvaluateDeferredLitLighting(VividGBufferSurfaceData surfaceData, uint2 pixelCoord, float3 positionWS)
+float EvaluateDeferredDirectionalShadowAttenuation(
+    uint2 pixelCoord,
+    uint lightIndex,
+    DirectionalLightData directionalLight)
+{
+    if ((int)lightIndex != _MainDirectionalLightIndex)
+        return 1.0;
+
+    float directionalShadow = saturate(SampleDirectionalShadow(pixelCoord));
+    return lerp(1.0, directionalShadow, saturate(directionalLight.shadowStrength));
+}
+
+VividLightLoopOutput EvaluateDeferredLitLightLoop(
+    VividGBufferSurfaceData surfaceData,
+    uint2 pixelCoord,
+    float3 positionWS)
 {
     float3 viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(positionWS));
     VividLitBSDFData bsdfData = BuildVividHDRPLitBSDFData(surfaceData);
-    VividPreLightData preLightData = InitVividPreLightData(surfaceData, bsdfData, viewDirectionWS);
-    float3 lighting = EvaluateIndirectLighting(surfaceData, bsdfData, preLightData, viewDirectionWS);
+    VividPreLightData preLightData = GetVividPreLightData(viewDirectionWS, surfaceData, bsdfData);
+    VividAggregateLighting aggregateLighting = (VividAggregateLighting)0;
+
+    AccumulateIndirectLighting(
+        EvaluateBSDF_Env(viewDirectionWS, preLightData, surfaceData, bsdfData),
+        aggregateLighting);
 
     [loop]
     for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)
     {
         DirectionalLightData directionalLight = GetDirectionalLight(lightIndex);
-        float shadowTerm = 1.0;
-        if ((int)lightIndex == _MainDirectionalLightIndex)
-        {
-            float directionalShadow = saturate(SampleDirectionalShadow(pixelCoord));
-            shadowTerm = lerp(1.0, directionalShadow, saturate(directionalLight.shadowStrength));
-        }
-
-        lighting += EvaluateDirectional(surfaceData, bsdfData, preLightData, viewDirectionWS, directionalLight) * shadowTerm;
+        float shadowAttenuation = EvaluateDeferredDirectionalShadowAttenuation(
+            pixelCoord,
+            lightIndex,
+            directionalLight);
+        AccumulateDirectLighting(
+            EvaluateBSDF_Directional(
+                surfaceData,
+                bsdfData,
+                preLightData,
+                viewDirectionWS,
+                directionalLight,
+                shadowAttenuation),
+            aggregateLighting);
     }
 
     if (HasPunctualLights())
@@ -82,11 +106,27 @@ float3 EvaluateDeferredLitLighting(VividGBufferSurfaceData surfaceData, uint2 pi
         for (uint localLightIndex = 0; localLightIndex < punctualLightCount; localLightIndex++)
         {
             PunctualLightData punctualLight = VividLightingLoop::LoadPunctualLight(lightLoop, localLightIndex);
-            lighting += EvaluatePunctualLight(surfaceData, bsdfData, preLightData, positionWS, viewDirectionWS, punctualLight);
+            AccumulateDirectLighting(
+                EvaluateBSDF_Punctual(
+                    surfaceData,
+                    bsdfData,
+                    preLightData,
+                    positionWS,
+                    viewDirectionWS,
+                    punctualLight),
+                aggregateLighting);
         }
     }
 
-    return lighting;
+    VividLightLoopOutput lightLoopOutput = (VividLightLoopOutput)0;
+    PostEvaluateBSDF(surfaceData, bsdfData, preLightData, aggregateLighting, lightLoopOutput);
+    return lightLoopOutput;
+}
+
+float3 EvaluateDeferredLitLighting(VividGBufferSurfaceData surfaceData, uint2 pixelCoord, float3 positionWS)
+{
+    VividLightLoopOutput lightLoopOutput = EvaluateDeferredLitLightLoop(surfaceData, pixelCoord, positionWS);
+    return CombineVividLightLoopOutput(lightLoopOutput);
 }
 
 [numthreads(8, 8, 1)]

@@ -26,7 +26,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void SimpleDeferredLitPass_UsesLoadBasedSampling_ForGBufferAndDepth()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "SimpleDeferredLitPass.hlsl"));
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "SimpleDeferredLitPass.hlsl"));
 
             Assert.That(source, Does.Contain("uint2 pixelCoord = GetPixelCoord(input);"));
             Assert.That(source, Does.Contain("LOAD_TEXTURE2D_X(_GBuffer0, pixelCoord)"));
@@ -41,15 +41,22 @@ namespace VividRP.Editor.Tests
 
         private static string GetPackageFilePath(params string[] relativeParts)
         {
-            var fullPath = Path.GetFullPath(Path.Combine(
-                Application.dataPath,
-                "..",
-                "Packages",
-                "com.af8a2a.vividrp",
-                Path.Combine(relativeParts)));
+            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            string[] packageRoots =
+            {
+                Path.Combine(projectRoot, "Packages", "VividRP"),
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
+            };
 
-            Assert.That(File.Exists(fullPath), Is.True, $"Expected source file at '{fullPath}'.");
-            return fullPath;
+            foreach (var packageRoot in packageRoots)
+            {
+                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
+                if (File.Exists(fullPath))
+                    return fullPath;
+            }
+
+            Assert.Fail($"Expected source file under '{packageRoots[0]}' or '{packageRoots[1]}'.");
+            return null;
         }
     }
 }

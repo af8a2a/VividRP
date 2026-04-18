@@ -16,19 +16,28 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("#include \"Packages/com.unity.render-pipelines.core/ShaderLibrary/BSDF.hlsl\""));
             Assert.That(source, Does.Contain("#include \"Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl\""));
-            Assert.That(source, Does.Contain("VividDisneyDiffuse"));
-            Assert.That(source, Does.Contain("VividDV_SmithJointGGX"));
-            Assert.That(source, Does.Contain("VividD_Charlie"));
             Assert.That(source, Does.Contain("return DisneyDiffuse("));
             Assert.That(source, Does.Contain("return DV_SmithJointGGX("));
             Assert.That(source, Does.Contain("return D_Charlie("));
+            Assert.That(source, Does.Contain("struct VividCBSDF"));
+            Assert.That(source, Does.Contain("struct VividDirectLighting"));
+            Assert.That(source, Does.Contain("struct VividIndirectLighting"));
+            Assert.That(source, Does.Contain("struct VividAggregateLighting"));
+            Assert.That(source, Does.Contain("struct VividLightLoopOutput"));
             Assert.That(source, Does.Contain("struct VividPreLightData"));
+            Assert.That(source, Does.Contain("GetVividPreLightData("));
             Assert.That(source, Does.Contain("InitVividPreLightData("));
+            Assert.That(source, Does.Contain("EvaluateBSDF("));
+            Assert.That(source, Does.Contain("EvaluateBSDF_Directional("));
+            Assert.That(source, Does.Contain("EvaluateBSDF_Punctual("));
             Assert.That(source, Does.Contain("EvaluateDirectional("));
-            Assert.That(source, Does.Contain("BuildVividHdrpLitBSDFData"));
+            Assert.That(source, Does.Contain("BuildVividHDRPLitBSDFData"));
             Assert.That(source, Does.Contain("EvaluateVividLitDirectLight"));
             Assert.That(source, Does.Contain("EvaluateDirectionalLight"));
             Assert.That(source, Does.Contain("EvaluatePunctualLight"));
+            Assert.That(source, Does.Contain("AccumulateDirectLighting("));
+            Assert.That(source, Does.Contain("FinalizeVividSpecularLighting("));
+            Assert.That(source, Does.Contain("surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC"));
             Assert.That(source, Does.Contain("float EvaluatePunctualLightDistanceAttenuation"));
             Assert.That(source, Does.Contain("float distanceAttenuation = rcp(max(distanceSquared, 1e-6));"));
             Assert.That(source, Does.Contain("float rangeAttenuation = saturate(1.0 - distanceSquared * punctualLight.inverseRangeSquared);"));
@@ -41,12 +50,16 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/PreIntegratedFGD.hlsl\""));
             Assert.That(source, Does.Contain("_VividSkyIBLCubemap"));
-            Assert.That(source, Does.Contain("return ClampRoughnessForAnalyticalLights(roughness);"));
-            Assert.That(source, Does.Contain("return RoughnessToVariance(roughness);"));
+            Assert.That(source, Does.Contain("bsdfData.roughness =  ClampRoughnessForAnalyticalLights(surfaceData.linearRoughness);"));
+            Assert.That(source, Does.Contain("float sigma = RoughnessToVariance(bsdfData.roughness);"));
             Assert.That(source, Does.Contain("return Luminance(color);"));
+            Assert.That(source, Does.Contain("EvaluateBSDF_Env("));
+            Assert.That(source, Does.Contain("ApplyVividSpecularEnergyCompensation("));
             Assert.That(source, Does.Contain("EvaluateVividHdrpLitIndirectLight"));
             Assert.That(source, Does.Contain("EvaluateVividFabricIndirectLight"));
             Assert.That(source, Does.Contain("EvaluateIndirectLighting"));
+            Assert.That(source, Does.Contain("AccumulateIndirectLighting("));
+            Assert.That(source, Does.Contain("PostEvaluateBSDF("));
             Assert.That(source, Does.Contain("GetSpecularDominantDir"));
         }
 
@@ -107,7 +120,7 @@ namespace VividRP.Editor.Tests
         public void DeferredLightingPasses_UseSharedHdrpLitLightingInclude()
         {
             Assert.That(
-                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "SimpleDeferredLitPass.hlsl")),
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "SimpleDeferredLitPass.hlsl")),
                 Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/HdrpLitLighting.hlsl\""));
 
             Assert.That(
@@ -120,17 +133,35 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void DeferredLightingShaders_EvaluateSharedIndirectLighting()
+        public void DeferredLightingShaders_UseSharedHdrpStyleLightingEvaluation()
         {
             Assert.That(
-                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "SimpleDeferredLitPass.hlsl")),
-                Does.Contain("EvaluateIndirectLighting"));
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "SimpleDeferredLitPass.hlsl")),
+                Does.Contain("EvaluateBSDF_Env("));
             Assert.That(
                 File.ReadAllText(GetPackageFilePath("Shaders", "Material", "DeferredDirectionalLightingIndirectPass.hlsl")),
-                Does.Contain("EvaluateIndirectLighting"));
+                Does.Contain("EvaluateBSDF_Env("));
             Assert.That(
                 File.ReadAllText(GetPackageFilePath("Shaders", "Material", "DeferredLit.compute")),
-                Does.Contain("EvaluateIndirectLighting"));
+                Does.Contain("EvaluateBSDF_Env("));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "SimpleDeferredLitPass.hlsl")),
+                Does.Contain("AccumulateDirectLighting("));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "DeferredDirectionalLightingIndirectPass.hlsl")),
+                Does.Contain("AccumulateDirectLighting("));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "DeferredLit.compute")),
+                Does.Contain("AccumulateDirectLighting("));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "SimpleDeferredLitPass.hlsl")),
+                Does.Contain("PostEvaluateBSDF("));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "DeferredDirectionalLightingIndirectPass.hlsl")),
+                Does.Contain("PostEvaluateBSDF("));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "DeferredLit.compute")),
+                Does.Contain("PostEvaluateBSDF("));
         }
 
         [Test]

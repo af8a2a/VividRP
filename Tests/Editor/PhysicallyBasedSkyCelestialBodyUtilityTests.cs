@@ -287,7 +287,7 @@ namespace VividRP.Editor.Tests
 
             public void Dispose()
             {
-                Object.DestroyImmediate(profile);
+                UnityEngine.Object.DestroyImmediate(profile);
             }
         }
 

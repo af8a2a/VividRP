@@ -27,8 +27,12 @@ namespace VividRP.Editor.Tests
             Assert.That(hlslSource, Does.Contain("VividLightingLoop::GetPunctualLightCount"));
             Assert.That(hlslSource, Does.Contain("VividLightingLoop::LoadPunctualLight"));
             Assert.That(hlslSource, Does.Contain("EvaluateDeferredDirectionalLighting"));
-            Assert.That(hlslSource, Does.Contain("EvaluateIndirectLighting"));
-            Assert.That(hlslSource, Does.Contain("EvaluatePunctualLight"));
+            Assert.That(hlslSource, Does.Contain("GetVividPreLightData"));
+            Assert.That(hlslSource, Does.Contain("VividAggregateLighting aggregateLighting"));
+            Assert.That(hlslSource, Does.Contain("EvaluateBSDF_Env("));
+            Assert.That(hlslSource, Does.Contain("EvaluateBSDF_Directional("));
+            Assert.That(hlslSource, Does.Contain("EvaluateBSDF_Punctual("));
+            Assert.That(hlslSource, Does.Contain("PostEvaluateBSDF("));
             Assert.That(hlslSource, Does.Contain("ComputeWorldSpacePosition"));
         }
 

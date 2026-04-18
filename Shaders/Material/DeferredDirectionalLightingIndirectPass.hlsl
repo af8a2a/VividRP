@@ -61,13 +61,25 @@ float3 EvaluateDeferredDirectionalLighting(VividGBufferSurfaceData surfaceData, 
 {
     float3 viewDirectionWS = GetDeferredViewDirectionWS(positionWS);
     VividLitBSDFData bsdfData = BuildVividHDRPLitBSDFData(surfaceData);
-    float3 lighting = EvaluateIndirectLighting(surfaceData, bsdfData, viewDirectionWS);
+    VividPreLightData preLightData = GetVividPreLightData(viewDirectionWS, surfaceData, bsdfData);
+    VividAggregateLighting aggregateLighting = (VividAggregateLighting)0;
+
+    AccumulateIndirectLighting(
+        EvaluateBSDF_Env(viewDirectionWS, preLightData, surfaceData, bsdfData),
+        aggregateLighting);
 
     [loop]
     for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)
     {
         DirectionalLightData directionalLight = GetDirectionalLight(lightIndex);
-        lighting += EvaluateDirectionalLight(surfaceData, bsdfData, viewDirectionWS, directionalLight);
+        AccumulateDirectLighting(
+            EvaluateBSDF_Directional(
+                surfaceData,
+                bsdfData,
+                preLightData,
+                viewDirectionWS,
+                directionalLight),
+            aggregateLighting);
     }
 
     if (HasPunctualLights())
@@ -79,11 +91,21 @@ float3 EvaluateDeferredDirectionalLighting(VividGBufferSurfaceData surfaceData, 
         for (uint localLightIndex = 0; localLightIndex < punctualLightCount; localLightIndex++)
         {
             PunctualLightData punctualLight = VividLightingLoop::LoadPunctualLight(lightLoop, localLightIndex);
-            lighting += EvaluatePunctualLight(surfaceData, bsdfData, positionWS, viewDirectionWS, punctualLight);
+            AccumulateDirectLighting(
+                EvaluateBSDF_Punctual(
+                    surfaceData,
+                    bsdfData,
+                    preLightData,
+                    positionWS,
+                    viewDirectionWS,
+                    punctualLight),
+                aggregateLighting);
         }
     }
 
-    return lighting + surfaceData.emissive;
+    VividLightLoopOutput lightLoopOutput = (VividLightLoopOutput)0;
+    PostEvaluateBSDF(surfaceData, bsdfData, preLightData, aggregateLighting, lightLoopOutput);
+    return CombineVividLightLoopOutput(lightLoopOutput);
 }
 
 Varyings Vert(Attributes input)

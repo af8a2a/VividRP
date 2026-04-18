@@ -104,7 +104,7 @@ float3 SampleSkyTexture(float3 directionWS, float mipLevel)
 {
     float3 rotatedDirectionWS = RotateSkyDirectionAroundYAxis(directionWS, _SkyTextureRotation);
     float3 skyRadiance = SAMPLE_TEXTURECUBE_LOD(_SkyTexture, sampler_SkyTexture, rotatedDirectionWS, mipLevel).rgb;
-    return skyRadiance * _SkyTextureTint.rgb * _SkyTextureExposure;
+    return VividApplyPreExposure(skyRadiance * _SkyTextureTint.rgb * _SkyTextureExposure);
 }
 
 float3 GetFogColor(float3 V, float fragDist)

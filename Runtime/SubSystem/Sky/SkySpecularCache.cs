@@ -183,7 +183,6 @@ namespace VividRP.Runtime
                 name = "VividSkySpecularGGX",
                 hideFlags = HideFlags.HideAndDontSave,
                 dimension = TextureDimension.Cube,
-                volumeDepth = 6,
                 graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat,
                 useMipMap = true,
                 autoGenerateMips = false,

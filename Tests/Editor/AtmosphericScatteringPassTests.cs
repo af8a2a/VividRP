@@ -152,6 +152,7 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("#define OPAQUE_FOG_PASS"));
             Assert.That(shaderSource, Does.Contain("#define ATMOSPHERE_NO_AERIAL_PERSPECTIVE"));
             Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Private/AtmosphericScattering/AtmosphericScattering.hlsl\""));
+            Assert.That(hlslSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl\""));
             Assert.That(hlslSource, Does.Contain("#include \"AtmosphericScattering.cs.hlsl\""));
             Assert.That(hlslSource, Does.Contain("#include \"ShaderVariablesAtmosphericScattering.hlsl\""));
             Assert.That(hlslSource, Does.Contain("TEXTURE2D_X(_InputColor);"));
@@ -160,6 +161,7 @@ namespace VividRP.Editor.Tests
             Assert.That(hlslSource, Does.Contain("float3 GetViewForwardDir()"));
             Assert.That(hlslSource, Does.Contain("float3 RotateSkyDirectionAroundYAxis(float3 directionWS, float rotationDegrees)"));
             Assert.That(hlslSource, Does.Contain("float3 SampleSkyTexture(float3 directionWS, float mipLevel)"));
+            Assert.That(hlslSource, Does.Contain("return VividApplyPreExposure(skyRadiance * _SkyTextureTint.rgb * _SkyTextureExposure);"));
             Assert.That(hlslSource, Does.Contain("float3 GetFogColor(float3 V, float fragDist)"));
             Assert.That(hlslSource, Does.Contain("if (_FogColorMode == FOGCOLORMODE_SKY_COLOR && HasSkyTexture())"));
             Assert.That(hlslSource, Does.Contain("float ComputeAtmosphericScatteringDistance(float3 V, float linearDepth, bool isSky)"));

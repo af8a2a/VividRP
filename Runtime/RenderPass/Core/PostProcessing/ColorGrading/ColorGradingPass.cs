@@ -36,7 +36,8 @@ namespace VividRP.Runtime
         public override void Prepare(ContextContainer frameData)
         {
             m_Settings = ColorGradingSettingsResolver.Resolve();
-            m_Curves = VolumeManager.instance.stack?.GetComponent<ColorCurves>();
+            var stack = VolumeManager.instance.stack;
+            m_Curves = stack.GetComponent<ColorCurves>();
 
             colorGradingTex.desc.Width = ColorGradingLutBuilder.LutSize;
             colorGradingTex.desc.Height = ColorGradingLutBuilder.LutSize;

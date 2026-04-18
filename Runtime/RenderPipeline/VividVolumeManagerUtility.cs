@@ -87,6 +87,11 @@ namespace VividRP.Runtime
             return VolumeManager.instance.stack?.GetComponent<RayTracingSettingsVolume>();
         }
 
+        internal static CascadedShadowSettingsVolume GetCascadedShadowSettingsVolume()
+        {
+            return VolumeManager.instance.stack?.GetComponent<CascadedShadowSettingsVolume>();
+        }
+
         internal static GPUDrivenSettingsVolume GetGPUDrivenSettingsVolume()
         {
             return VolumeManager.instance.stack?.GetComponent<GPUDrivenSettingsVolume>();

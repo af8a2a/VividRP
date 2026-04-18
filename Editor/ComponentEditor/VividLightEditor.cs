@@ -17,6 +17,21 @@ namespace VividRP.Editor
         private static readonly GUIContent s_UsePipelineSettingsLabel = EditorGUIUtility.TrTextContent("Use Pipeline Settings");
         private static readonly GUIContent s_CustomShadowLayersLabel = EditorGUIUtility.TrTextContent("Custom Shadow Layers");
         private static readonly GUIContent s_ShadowRenderingLayersLabel = EditorGUIUtility.TrTextContent("Shadow Rendering Layers");
+        private static readonly GUIContent s_CSMShadowLabel = EditorGUIUtility.TrTextContent("CSM Shadow");
+        private static readonly GUIContent s_ScreenSpaceShadowQualityLabel = EditorGUIUtility.TrTextContent("Screen Space Quality", "Quality tier used by the screen-space CSM resolve for this directional light.");
+        private static readonly GUIContent s_ShadowAtlasResolutionLabel = EditorGUIUtility.TrTextContent("Atlas Resolution", "Fixed resolution used for the full 2x2 CSM atlas rendered by this directional light.");
+        private static readonly GUIContent s_DepthBiasLabel = EditorGUIUtility.TrTextContent("Depth Bias", "Constant depth bias applied while rendering cascaded shadow maps for this directional light.");
+        private static readonly GUIContent s_NormalBiasLabel = EditorGUIUtility.TrTextContent("Normal Bias", "Normal-based bias applied while rendering and resolving cascaded shadow maps for this directional light.");
+        private static readonly GUIContent s_SlopeBiasLabel = EditorGUIUtility.TrTextContent("Slope-Scale Depth Bias", "Slope-scale depth bias applied while rasterizing cascaded shadow maps for this directional light.");
+        private static readonly GUIContent s_PCSSSettingsLabel = EditorGUIUtility.TrTextContent("PCSS");
+        private static readonly GUIContent s_DirLightPCSSMaxPenumbraSizeLabel = EditorGUIUtility.TrTextContent("Max Penumbra Size", "Maximum size (in world space) of PCSS shadow penumbra limiting blur filter kernel size, larger kernels may require more samples to avoid quality degradation.");
+        private static readonly GUIContent s_DirLightPCSSMaxSamplingDistanceLabel = EditorGUIUtility.TrTextContent("Max Sampling Distance", "Maximum distance (in world space) from the receiver PCSS shadow sampling occurs, lower to avoid light bleeding but may cause self-shadowing.");
+        private static readonly GUIContent s_DirLightPCSSMinFilterSizeTexelsLabel = EditorGUIUtility.TrTextContent("Min Filter", "Minimum filter size (in shadowmap texels) to avoid aliasing close to the caster.");
+        private static readonly GUIContent s_DirLightPCSSMinFilterMaxAngularDiameterLabel = EditorGUIUtility.TrTextContent("Min Filter Max Angular Diameter", "Maximum angular diameter to reach minimum filter size, lower to avoid self-shadowing but may cause light bleeding.");
+        private static readonly GUIContent s_DirLightPCSSBlockerSearchAngularDiameterLabel = EditorGUIUtility.TrTextContent("Blocker Search Angular Diameter", "Angular diameter to use for blocker search, increase to avoid missing hidden close blockers but it may cause self-shadowing.");
+        private static readonly GUIContent s_DirLightPCSSBlockerSamplingClumpExponentLabel = EditorGUIUtility.TrTextContent("Blocker Sampling Clump Exponent", "Affects how blocker search samples are distributed. Sample distance to center is elevated to this power.");
+        private static readonly GUIContent s_DirLightPCSSBlockerSampleCountLabel = EditorGUIUtility.TrTextContent("Blocker Sample Count", "Controls the number of samples used to determine average blocker distance. Higher values reduce noise at additional cost.");
+        private static readonly GUIContent s_DirLightPCSSFilterSampleCountLabel = EditorGUIUtility.TrTextContent("Filter Sample Count", "Controls the number of samples used to filter the penumbra. Higher values reduce noise at additional cost.");
         private static readonly GUIContent s_RayTracedShadowLabel = EditorGUIUtility.TrTextContent("Ray Traced Shadow");
         private static readonly GUIContent s_EnableRayTracedShadowLabel = EditorGUIUtility.TrTextContent("Enable");
         private static readonly GUIContent s_RayTracedShadowRayLengthLabel = EditorGUIUtility.TrTextContent("Ray Length");
@@ -43,6 +58,36 @@ namespace VividRP.Editor
         private static readonly GUIContent s_SurfaceTintLabel = EditorGUIUtility.TrTextContent("Tint");
         private static readonly GUIContent s_DistanceLabel = EditorGUIUtility.TrTextContent("Distance", "Distance from the camera (in meters) to the emissive celestial body represented by the light. This value is only used for sorting.");
         private static readonly string[] s_DiameterModeNames = { "Multiply", "Override" };
+        private static readonly GUIContent[] s_ScreenSpaceShadowQualityOptionLabels =
+        {
+            EditorGUIUtility.TrTextContent("Low (PCF 3x3)"),
+            EditorGUIUtility.TrTextContent("Medium (PCF 5x5)"),
+            EditorGUIUtility.TrTextContent("High (PCF 7x7)"),
+            EditorGUIUtility.TrTextContent("Very High (PCSS)")
+        };
+
+        private static readonly int[] s_ScreenSpaceShadowQualityOptionValues =
+        {
+            (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low,
+            (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Medium,
+            (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.High,
+            (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh
+        };
+        private static readonly GUIContent[] s_ShadowAtlasResolutionOptionLabels =
+        {
+            EditorGUIUtility.TrTextContent("1024"),
+            EditorGUIUtility.TrTextContent("2048"),
+            EditorGUIUtility.TrTextContent("4096"),
+            EditorGUIUtility.TrTextContent("8192")
+        };
+
+        private static readonly int[] s_ShadowAtlasResolutionOptionValues =
+        {
+            1024,
+            2048,
+            4096,
+            8192
+        };
 
         private const int DiameterModePopupWidth = 70;
 
@@ -165,6 +210,7 @@ namespace VividRP.Editor
             }
 
             settings.DrawRuntimeShadow();
+            DrawDirectionalShadowBiasInspector();
         }
 
         private void DrawVividInspector()
@@ -208,6 +254,99 @@ namespace VividRP.Editor
                     "Current hard-shadow MVP stores Sun Angular Diameter for a future soft-shadow path and does not sample it yet.",
                     MessageType.Info);
             }
+        }
+
+        private void DrawDirectionalShadowBiasInspector()
+        {
+            if (!ShouldShowDirectionalShadowBiasControls(m_SerializedLight))
+                return;
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField(s_CSMShadowLabel, EditorStyles.boldLabel);
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                DrawDirectionalScreenSpaceShadowQualityField();
+                DrawDirectionalPCSSFields();
+                DrawDirectionalShadowAtlasResolutionField();
+                EditorGUILayout.Slider(m_SerializedLight.depthBias, 0.0f, 10.0f, s_DepthBiasLabel);
+                EditorGUILayout.Slider(m_SerializedLight.normalBias, 0.0f, 10.0f, s_NormalBiasLabel);
+                EditorGUILayout.Slider(m_SerializedLight.slopeBias, 0.0f, 5.0f, s_SlopeBiasLabel);
+            }
+        }
+
+        private void DrawDirectionalScreenSpaceShadowQualityField()
+        {
+            var property = m_SerializedLight.screenSpaceShadowQuality;
+            var oldMixedValue = EditorGUI.showMixedValue;
+            EditorGUI.showMixedValue = property.hasMultipleDifferentValues;
+
+            EditorGUI.BeginChangeCheck();
+            var quality = EditorGUILayout.IntPopup(
+                s_ScreenSpaceShadowQualityLabel,
+                property.intValue,
+                s_ScreenSpaceShadowQualityOptionLabels,
+                s_ScreenSpaceShadowQualityOptionValues);
+            if (EditorGUI.EndChangeCheck())
+                property.intValue = quality;
+
+            EditorGUI.showMixedValue = oldMixedValue;
+        }
+
+        private void DrawDirectionalPCSSFields()
+        {
+            if (!ShouldShowDirectionalPCSSControls(m_SerializedLight))
+                return;
+
+            EditorGUILayout.Space(2.0f);
+            EditorGUILayout.LabelField(s_PCSSSettingsLabel, EditorStyles.miniBoldLabel);
+            EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSMaxPenumbraSize, s_DirLightPCSSMaxPenumbraSizeLabel);
+            EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSMaxSamplingDistance, s_DirLightPCSSMaxSamplingDistanceLabel);
+            EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSMinFilterSizeTexels, s_DirLightPCSSMinFilterSizeTexelsLabel);
+            EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSMinFilterMaxAngularDiameter, s_DirLightPCSSMinFilterMaxAngularDiameterLabel);
+            EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSBlockerSearchAngularDiameter, s_DirLightPCSSBlockerSearchAngularDiameterLabel);
+            EditorGUILayout.Slider(
+                m_SerializedLight.dirLightPCSSBlockerSamplingClumpExponent,
+                1.0f,
+                6.0f,
+                s_DirLightPCSSBlockerSamplingClumpExponentLabel);
+            EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSBlockerSampleCount, s_DirLightPCSSBlockerSampleCountLabel);
+            EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSFilterSampleCount, s_DirLightPCSSFilterSampleCountLabel);
+        }
+
+        private void DrawDirectionalShadowAtlasResolutionField()
+        {
+            var property = m_SerializedLight.shadowAtlasResolution;
+            var oldMixedValue = EditorGUI.showMixedValue;
+            EditorGUI.showMixedValue = property.hasMultipleDifferentValues;
+
+            EditorGUI.BeginChangeCheck();
+            var resolution = EditorGUILayout.IntPopup(
+                s_ShadowAtlasResolutionLabel,
+                property.intValue,
+                s_ShadowAtlasResolutionOptionLabels,
+                s_ShadowAtlasResolutionOptionValues);
+            if (EditorGUI.EndChangeCheck())
+                property.intValue = resolution;
+
+            EditorGUI.showMixedValue = oldMixedValue;
+        }
+
+        internal static bool ShouldShowDirectionalPCSSControls(VividSerializedLight serializedLight)
+        {
+            return ShouldShowDirectionalShadowBiasControls(serializedLight)
+                && serializedLight?.screenSpaceShadowQuality != null
+                && (serializedLight.screenSpaceShadowQuality.hasMultipleDifferentValues
+                    || serializedLight.screenSpaceShadowQuality.intValue == (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh);
+        }
+
+        internal static bool ShouldShowDirectionalShadowBiasControls(VividSerializedLight serializedLight)
+        {
+            return serializedLight != null
+                && serializedLight.settings != null
+                && !serializedLight.settings.lightType.hasMultipleDifferentValues
+                && serializedLight.settings.light != null
+                && serializedLight.settings.light.type == LightType.Directional;
         }
 
         internal static bool ShouldShowDirectionalRayTracedShadowControls(VividSerializedLight serializedLight)

@@ -15,6 +15,18 @@ namespace VividRP.Editor.RenderGraph.Generated
     }
 
     [Serializable]
+    internal sealed class CSMShadowPass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.CSMShadowPass, VividRP.Runtime";
+    }
+
+    [Serializable]
+    internal sealed class CSMShadowResolvePass : RenderPassNodeData
+    {
+        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.CSMShadowResolvePass, VividRP.Runtime";
+    }
+
+    [Serializable]
     internal sealed class ClassificationPass : RenderPassNodeData
     {
         protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.ClassificationPass, VividRP.Runtime";

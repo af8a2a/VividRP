@@ -14,7 +14,7 @@ namespace VividRP.Runtime
             ResolutionChanged,
             ParametersChanged
         }
-
+        
         private const string HDRISkyShaderName = "Hidden/VividRP/HDRISky";
 
         private static readonly int SkyCubemapId = Shader.PropertyToID("_SkyCubemap");

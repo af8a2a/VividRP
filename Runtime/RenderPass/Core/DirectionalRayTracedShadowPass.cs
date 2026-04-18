@@ -160,20 +160,23 @@ namespace VividRP.Runtime.RenderPass.Core
                 frameData.GetOrCreate<VividLightData>(),
                 m_SupportsRayTracing,
                 hasSceneAccelerationStructure);
+            var csmSettings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
+            var isCSMActive = csmSettings != null && csmSettings.IsActive();
             m_ShaderVariablesRayTracing =
                 ShaderVariablesRayTracingUtility.Create(frameData.GetOrCreate<VividRayTracingSettingsData>());
 
-            m_ShouldTrace = request.ShouldTrace
+            m_ShouldTrace = !isCSMActive
+                && request.ShouldTrace
                 && m_DirectionalRayTracedShadowCompute != null
                 && m_Kernel >= 0;
-            m_LightDirectionWS = request.ShouldTrace
+            m_LightDirectionWS = m_ShouldTrace
                 ? new Vector4(request.LightDirectionWS.x, request.LightDirectionWS.y, request.LightDirectionWS.z, 0f)
                 : new Vector4(0f, 1f, 0f, 0f);
-            m_RayLength = request.ShouldTrace
+            m_RayLength = m_ShouldTrace
                 ? request.RayLength
                 : VividAdditionalLightData.DefaultRayTracedShadowRayLength;
 
-            if (request.ShouldTrace && !request.UsePipelineSettings)
+            if (m_ShouldTrace && !request.UsePipelineSettings)
             {
                 ShaderVariablesRayTracingUtility.OverrideBiases(
                     ref m_ShaderVariablesRayTracing,
@@ -181,7 +184,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     request.DistantRayBias);
             }
 
-            if (request.ShouldTrace)
+            if (m_ShouldTrace)
             {
                 var dir = request.LightDirectionWS;
                 ComputeSunBasis(dir, out var basisX, out var basisY);

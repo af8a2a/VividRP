@@ -19,6 +19,19 @@ namespace VividRP.Editor
         internal SerializedProperty rayTracedShadowRayBias { get; }
         internal SerializedProperty rayTracedShadowDistantRayBias { get; }
         internal SerializedProperty rayTracedShadowSunAngularDiameter { get; }
+        internal SerializedProperty screenSpaceShadowQuality { get; }
+        internal SerializedProperty shadowAtlasResolution { get; }
+        internal SerializedProperty depthBias { get; }
+        internal SerializedProperty normalBias { get; }
+        internal SerializedProperty slopeBias { get; }
+        internal SerializedProperty dirLightPCSSBlockerSampleCount { get; }
+        internal SerializedProperty dirLightPCSSFilterSampleCount { get; }
+        internal SerializedProperty dirLightPCSSMaxPenumbraSize { get; }
+        internal SerializedProperty dirLightPCSSMaxSamplingDistance { get; }
+        internal SerializedProperty dirLightPCSSMinFilterSizeTexels { get; }
+        internal SerializedProperty dirLightPCSSMinFilterMaxAngularDiameter { get; }
+        internal SerializedProperty dirLightPCSSBlockerSearchAngularDiameter { get; }
+        internal SerializedProperty dirLightPCSSBlockerSamplingClumpExponent { get; }
         internal SerializedProperty interactsWithSky { get; }
         internal SerializedProperty angularDiameter { get; }
         internal SerializedProperty diameterMultiplierMode { get; }
@@ -70,6 +83,19 @@ namespace VividRP.Editor
             rayTracedShadowRayBias = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowRayBias");
             rayTracedShadowDistantRayBias = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowDistantRayBias");
             rayTracedShadowSunAngularDiameter = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowSunAngularDiameter");
+            screenSpaceShadowQuality = serializedAdditionalDataObject.FindProperty("m_ScreenSpaceShadowQuality");
+            shadowAtlasResolution = serializedAdditionalDataObject.FindProperty("m_ShadowAtlasResolution");
+            depthBias = serializedAdditionalDataObject.FindProperty("m_DepthBias");
+            normalBias = serializedAdditionalDataObject.FindProperty("m_NormalBias");
+            slopeBias = serializedAdditionalDataObject.FindProperty("m_SlopeBias");
+            dirLightPCSSBlockerSampleCount = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSBlockerSampleCount");
+            dirLightPCSSFilterSampleCount = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSFilterSampleCount");
+            dirLightPCSSMaxPenumbraSize = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSMaxPenumbraSize");
+            dirLightPCSSMaxSamplingDistance = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSMaxSamplingDistance");
+            dirLightPCSSMinFilterSizeTexels = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSMinFilterSizeTexels");
+            dirLightPCSSMinFilterMaxAngularDiameter = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSMinFilterMaxAngularDiameter");
+            dirLightPCSSBlockerSearchAngularDiameter = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSBlockerSearchAngularDiameter");
+            dirLightPCSSBlockerSamplingClumpExponent = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSBlockerSamplingClumpExponent");
             interactsWithSky = serializedAdditionalDataObject.FindProperty("m_InteractsWithSky");
             angularDiameter = serializedAdditionalDataObject.FindProperty("m_AngularDiameter");
             diameterMultiplierMode = serializedAdditionalDataObject.FindProperty("m_DiameterMultiplierMode");

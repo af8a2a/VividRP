@@ -22,7 +22,7 @@ namespace VividRP.Editor.RenderGraph
             new("Sampling", false, "MsaaSamples", "FilterMode", "WrapMode", "AnisoLevel", "MipMapBias"),
             new("Mip Maps", false, "UseMipMap", "AutoGenerateMips", "MipCount"),
             new("Clear", false, "ClearBuffer", "ClearColor"),
-            new("Flags", false, "EnableRandomWrite", "BindTextureMS", "UseDynamicScale", "UseDynamicScaleExplicit", "ScaleFactor"),
+            new("Flags", false, "IsShadowMap", "EnableRandomWrite", "BindTextureMS", "UseDynamicScale", "UseDynamicScaleExplicit", "ScaleFactor"),
             new("Metadata", false, "Name"),
         };
 

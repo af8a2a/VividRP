@@ -75,7 +75,7 @@ void DirectionalRayTracedShadow(uint3 dispatchThreadID : SV_DispatchThreadID)
 #endif
 
     float2 uv = (float2(pixelCoord) + 0.5) / float2(_OutputWidth, _OutputHeight);
-    float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, UNITY_MATRIX_I_VP);
+    float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, _InvViewProjectionMatrix);
 
     float3 normalWS = DecodeVividNormalOct(_GBuffer1.Load(int3(pixelCoord, 0)).xy);
     float3 lightDirectionWS = SafeNormalize(_LightDirectionWS.xyz);

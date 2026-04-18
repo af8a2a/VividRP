@@ -15,8 +15,8 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
 
-            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gOut_Tiles,   m_TileTexture.innerHandle);"));
-            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_SmoothTiles, kernel, gIn_Tiles,  m_TileTexture.innerHandle);"));
+            Assert.That(source, Does.Contain("nativeCmd.SetComputeTextureParam(m_ClassifyTiles, kernel, gOut_Tiles,   m_TileTexture.innerHandle);"));
+            Assert.That(source, Does.Contain("nativeCmd.SetComputeTextureParam(m_SmoothTiles, kernel, gIn_Tiles,  m_TileTexture.innerHandle);"));
         }
 
         [Test]
@@ -76,8 +76,17 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
 
-            Assert.That(source, Does.Contain("bool useTemporalStabilization = m_MaxStabilizedFrameNum > 0;"));
+            Assert.That(source, Does.Contain("bool useTemporalStabilization = !m_UseRawShadowPassthrough && m_MaxStabilizedFrameNum > 0;"));
             Assert.That(source, Does.Not.Contain("bool useTemporalStabilization = m_HasValidHistory && m_MaxStabilizedFrameNum > 0;"));
+        }
+
+        [Test]
+        public void SIGMAShadowDenoisePass_BypassesDenoiser_WhenCSMResolveAlreadyProducedShadowTerm()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
+
+            Assert.That(source, Does.Contain("m_UseRawShadowPassthrough = shadowData.isCSMActive;"));
+            Assert.That(source, Does.Contain("nativeCmd.CopyTexture(m_RawShadowTexture, m_DenoisedShadowTexture);"));
         }
 
         [Test]
@@ -127,6 +136,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(denoisedShadowTexture.desc.ClearBuffer, Is.True);
             Assert.That(denoisedShadowTexture.desc.ClearColor, Is.EqualTo(Color.white));
+            Assert.That(denoisedShadowTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16_SFloat));
             Assert.That(transientPenumbra.desc.ClearBuffer, Is.True);
             Assert.That(transientPenumbra.desc.ClearColor, Is.EqualTo(Color.clear));
             Assert.That(transientShadow.desc.ClearBuffer, Is.True);
@@ -156,8 +166,8 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sigma", "SIGMAShadowDenoisePass.cs"));
 
-            Assert.That(source, Does.Contain("ClearTexture(cmd, m_HistoryShadowCurrent, Color.white);"));
-            Assert.That(source, Does.Contain("ClearTexture(cmd, m_HistoryLengthCurrent, Color.clear);"));
+            Assert.That(source, Does.Contain("ClearTexture(nativeCmd, m_HistoryShadowCurrent, Color.white);"));
+            Assert.That(source, Does.Contain("ClearTexture(nativeCmd, m_HistoryLengthCurrent, Color.clear);"));
         }
 
         [Test]

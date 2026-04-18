@@ -121,6 +121,7 @@ namespace VividRP.Runtime
         private readonly Matrix4x4[] m_ScreenProjectionMatrices = new Matrix4x4[2];
         private readonly Matrix4x4[] m_InvProjectionMatrices = new Matrix4x4[2];
         private readonly Matrix4x4[] m_ProjectionMatrices = new Matrix4x4[2];
+        private VividLightData.DirectionalLightData[] m_DirectionalLightUploadData = Array.Empty<VividLightData.DirectionalLightData>();
         private ShaderVariablesLightList m_ShaderVariablesLightListCB;
         private int m_DirectionalLightCount;
         private int m_PunctualLightCount;
@@ -212,7 +213,10 @@ namespace VividRP.Runtime
             EnsureImportedBuffers();
 
             if (m_DirectionalLightCount > 0)
-                m_DirectionalLightImportedBuffer.SetData(lightData.directionalLights, 0, 0, m_DirectionalLightCount);
+            {
+                UpdateDirectionalLightUploadData(lightData, camera);
+                m_DirectionalLightImportedBuffer.SetData(m_DirectionalLightUploadData, 0, 0, m_DirectionalLightCount);
+            }
             else
                 m_DirectionalLightImportedBuffer.SetData(s_EmptyDirectionalLights);
 
@@ -353,6 +357,7 @@ namespace VividRP.Runtime
             m_BuildPerBigTileLightListKernel = -1;
             m_BuildPerVoxelLightListDepthKernel = -1;
             m_BuildPerVoxelLightListNoDepthKernel = -1;
+            m_DirectionalLightUploadData = Array.Empty<VividLightData.DirectionalLightData>();
         }
 
         private void DispatchClearLightLists(ComputeCommandBuffer cmd)
@@ -491,6 +496,47 @@ namespace VividRP.Runtime
             m_ShaderVariablesLightListCB.g_iNumSamplesMSAA = 1;
             m_ShaderVariablesLightListCB._EnvLightIndexShift = 0u;
             m_ShaderVariablesLightListCB._DecalIndexShift = 0u;
+        }
+
+        private void UpdateDirectionalLightUploadData(VividLightData lightData, Camera camera)
+        {
+            if (lightData == null)
+                return;
+
+            EnsureDirectionalLightUploadCapacity(m_DirectionalLightCount);
+            Array.Copy(lightData.directionalLights, m_DirectionalLightUploadData, m_DirectionalLightCount);
+
+            if (camera == null
+                || !lightData.hasVisibleLights
+                || !PhysicallyBasedSkyAtmosphericAttenuation.TryCreate(camera, out var attenuationContext))
+            {
+                return;
+            }
+
+            var directionalIndex = 0;
+            for (var visibleLightIndex = 0;
+                 visibleLightIndex < lightData.visibleLights.Length && directionalIndex < m_DirectionalLightCount;
+                 visibleLightIndex++)
+            {
+                var visibleLight = lightData.visibleLights[visibleLightIndex];
+                if (visibleLight.lightType != LightType.Directional)
+                    continue;
+
+                var light = visibleLight.light;
+                if (ShouldDirectionalLightInteractWithSky(light))
+                {
+                    var attenuation = PhysicallyBasedSkyAtmosphericAttenuation.Evaluate(
+                        in attenuationContext,
+                        m_DirectionalLightUploadData[directionalIndex].directionWS);
+                    var color = m_DirectionalLightUploadData[directionalIndex].color;
+                    m_DirectionalLightUploadData[directionalIndex].color = new Vector3(
+                        color.x * attenuation.x,
+                        color.y * attenuation.y,
+                        color.z * attenuation.z);
+                }
+
+                directionalIndex++;
+            }
         }
 
         private void PushShaderVariablesLightList(ComputeCommandBuffer cmd, ComputeShader computeShader)
@@ -667,6 +713,21 @@ namespace VividRP.Runtime
             renderGraphBuffer?.ClearImportedBuffer();
             graphicsBuffer?.Dispose();
             graphicsBuffer = null;
+        }
+
+        private void EnsureDirectionalLightUploadCapacity(int requiredCapacity)
+        {
+            if (requiredCapacity > m_DirectionalLightUploadData.Length)
+                m_DirectionalLightUploadData = new VividLightData.DirectionalLightData[requiredCapacity];
+        }
+
+        private static bool ShouldDirectionalLightInteractWithSky(Light light)
+        {
+            if (light == null || light.type != LightType.Directional)
+                return false;
+
+            return !light.TryGetComponent<VividAdditionalLightData>(out var additionalLightData)
+                   || additionalLightData.interactsWithSky;
         }
 
         private static int ComputeClusteredLightListCapacity(int clusterTileCount)

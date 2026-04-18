@@ -47,75 +47,6 @@ struct VividPreLightData
     float energyCompensation;
 };
 
-float VividClampNdotV(float nDotV)
-{
-    return max(abs(nDotV), 1e-4);
-}
-
-float VividClampRoughnessForAnalyticalLights(float roughness)
-{
-    return ClampRoughnessForAnalyticalLights(roughness);
-}
-
-float VividPerceptualRoughnessToRoughness(float perceptualRoughness)
-{
-    return PerceptualRoughnessToRoughness(perceptualRoughness);
-}
-
-float VividRoughnessToPerceptualRoughness(float roughness)
-{
-    return RoughnessToPerceptualRoughness(roughness);
-}
-
-float VividRoughnessToVariance(float roughness)
-{
-    return RoughnessToVariance(roughness);
-}
-
-float VividVarianceToRoughness(float variance)
-{
-    return VarianceToRoughness(variance);
-}
-
-float VividF_Schlick(float f0, float f90, float u)
-{
-    return F_Schlick(f0, f90, u);
-}
-
-float3 VividF_Schlick(float3 f0, float f90, float u)
-{
-    return F_Schlick(f0, f90, u);
-}
-
-float VividDisneyDiffuse(float nDotV, float nDotL, float lDotV, float perceptualRoughness)
-{
-    return DisneyDiffuse(nDotV, nDotL, lDotV, perceptualRoughness);
-}
-
-float VividGetSmithJointGGXPartLambdaV(float nDotV, float roughness)
-{
-    return GetSmithJointGGXPartLambdaV(nDotV, roughness);
-}
-
-float VividDV_SmithJointGGX(float nDotH, float nDotL, float nDotV, float roughness, float partLambdaV)
-{
-    return DV_SmithJointGGX(nDotH, nDotL, nDotV, roughness, partLambdaV);
-}
-
-float VividD_Charlie(float nDotH, float roughness)
-{
-    return D_Charlie(nDotH, roughness);
-}
-
-float VividV_Ashikhmin(float nDotL, float nDotV)
-{
-    return V_Ashikhmin(nDotL, nDotV);
-}
-
-float VividFabricLambert(float roughness)
-{
-    return FabricLambert(saturate(roughness));
-}
 
 float VividGetLuminance(float3 color)
 {
@@ -165,7 +96,7 @@ VividLitBSDFData BuildVividHDRPLitBSDFData(VividGBufferSurfaceData surfaceData)
     bsdfData.fresnel0 = lerp(kVividDielectricF0, surfaceData.baseColor, surfaceData.metallic);
     bsdfData.fresnel90 = 1.0;
     bsdfData.perceptualRoughness = GetPerceptualRoughnessFromLinearRoughness(surfaceData.linearRoughness);
-    bsdfData.roughness = VividClampRoughnessForAnalyticalLights(surfaceData.linearRoughness);
+    bsdfData.roughness =  ClampRoughnessForAnalyticalLights(surfaceData.linearRoughness);
     bsdfData.coatMask = 0.0;
     bsdfData.coatRoughness = kVividClearCoatRoughness;
 
@@ -177,11 +108,11 @@ VividLitBSDFData BuildVividHDRPLitBSDFData(VividGBufferSurfaceData surfaceData)
         {
             float ieta = lerp(1.0, kVividClearCoatIeta, bsdfData.coatMask);
             float coatRoughnessScale = ieta * ieta;
-            float sigma = VividRoughnessToVariance(bsdfData.roughness);
-            float coatAdjustedRoughness = VividVarianceToRoughness(sigma * coatRoughnessScale);
-            bsdfData.perceptualRoughness = VividRoughnessToPerceptualRoughness(coatAdjustedRoughness);
-            bsdfData.roughness = VividClampRoughnessForAnalyticalLights(
-                VividPerceptualRoughnessToRoughness(bsdfData.perceptualRoughness));
+            float sigma = RoughnessToVariance(bsdfData.roughness);
+            float coatAdjustedRoughness = VarianceToRoughness(sigma * coatRoughnessScale);
+            bsdfData.perceptualRoughness = RoughnessToPerceptualRoughness(coatAdjustedRoughness);
+            bsdfData.roughness = ClampRoughnessForAnalyticalLights(
+                PerceptualRoughnessToRoughness(bsdfData.perceptualRoughness));
         }
     }
 
@@ -198,8 +129,8 @@ VividPreLightData InitVividPreLightData(
 
     preLightData.NdotV = dot(surfaceData.normalWS, viewDirectionWS);
     preLightData.iblPerceptualRoughness = bsdfData.perceptualRoughness;
-    clampedNdotV = saturate(VividClampNdotV(preLightData.NdotV));
-    preLightData.partLambdaV = VividGetSmithJointGGXPartLambdaV(clampedNdotV, bsdfData.roughness);
+    clampedNdotV = saturate( ClampNdotV(preLightData.NdotV));
+    preLightData.partLambdaV =  GetSmithJointGGXPartLambdaV(clampedNdotV, bsdfData.roughness);
 
     GetPreIntegratedFGDGGXAndDisneyDiffuse(
         clampedNdotV,
@@ -226,7 +157,7 @@ float3 EvaluateVividLitDirectLight(
     if (nDotL <= 0.0)
         return float3(0.0, 0.0, 0.0);
 
-    float clampedNdotV = VividClampNdotV(preLightData.NdotV);
+    float clampedNdotV = ClampNdotV(preLightData.NdotV);
     float clampedNdotL = saturate(nDotL);
     float lDotV = 0.0;
     float nDotH = 0.0;
@@ -234,22 +165,22 @@ float3 EvaluateVividLitDirectLight(
     float invLenLV = 0.0;
     GetBSDFAngle(viewDirectionWS, lightDirectionWS, nDotL, preLightData.NdotV, lDotV, nDotH, lDotH, invLenLV);
 
-    float3 fresnel = VividF_Schlick(bsdfData.fresnel0, bsdfData.fresnel90, lDotH);
-    float3 specular = fresnel * VividDV_SmithJointGGX(
+    float3 fresnel = F_Schlick(bsdfData.fresnel0, bsdfData.fresnel90, lDotH);
+    float3 specular = fresnel * DV_SmithJointGGX(
         nDotH,
         clampedNdotL,
         clampedNdotV,
         bsdfData.roughness,
         preLightData.partLambdaV);
-    float diffuse = VividDisneyDiffuse(clampedNdotV, clampedNdotL, lDotV, bsdfData.perceptualRoughness);
+    float diffuse = DisneyDiffuse(clampedNdotV, clampedNdotL, lDotV, bsdfData.perceptualRoughness);
 
     if (bsdfData.coatMask > 0.0)
     {
-        float coatFresnel = VividF_Schlick(kVividClearCoatF0, 1.0, lDotH) * bsdfData.coatMask;
+        float coatFresnel = F_Schlick(kVividClearCoatF0, 1.0, lDotH) * bsdfData.coatMask;
         specular *= Sq(1.0 - coatFresnel);
 
-        float coatPartLambdaV = VividGetSmithJointGGXPartLambdaV(clampedNdotV, bsdfData.coatRoughness);
-        specular += coatFresnel * VividDV_SmithJointGGX(
+        float coatPartLambdaV = GetSmithJointGGXPartLambdaV(clampedNdotV, bsdfData.coatRoughness);
+        specular += coatFresnel * DV_SmithJointGGX(
             nDotH,
             clampedNdotL,
             clampedNdotV,
@@ -291,17 +222,17 @@ float3 EvaluateVividFabricDirectLight(
     if (nDotL <= 0.0)
         return float3(0.0, 0.0, 0.0);
 
-    float clampedNdotV = VividClampNdotV(nDotV);
+    float clampedNdotV = ClampNdotV(nDotV);
     float clampedNdotL = saturate(nDotL);
-    float roughness = VividClampRoughnessForAnalyticalLights(surfaceData.linearRoughness);
+    float roughness =  ClampRoughnessForAnalyticalLights(surfaceData.linearRoughness);
     float fuzzAmount = saturate(surfaceData.customData);
     float3 diffuseColor = surfaceData.baseColor * (1.0 - surfaceData.metallic);
     float3 baseSpecular = lerp(kVividDielectricF0, surfaceData.baseColor, surfaceData.metallic);
     float luminance = VividGetLuminance(surfaceData.baseColor);
     float3 sheenTint = lerp(luminance.xxx, surfaceData.baseColor, 0.35);
     float3 fabricFresnel0 = lerp(baseSpecular, sheenTint, fuzzAmount);
-    float3 specular = fabricFresnel0 * VividD_Charlie(nDotH, roughness) * VividV_Ashikhmin(clampedNdotL, clampedNdotV) * fuzzAmount;
-    float diffuse = VividFabricLambert(roughness);
+    float3 specular = fabricFresnel0 *  D_Charlie(nDotH, roughness) *  V_Ashikhmin(clampedNdotL, clampedNdotV) * fuzzAmount;
+    float diffuse =  FabricLambert(roughness);
     return (diffuseColor * diffuse + specular) * clampedNdotL;
 }
 
@@ -320,8 +251,8 @@ float3 EvaluateVividIndirectDiffuseLighting(
     float3 diffuseLighting = EvaluateVividBakedDiffuseLighting(surfaceData) * bsdfData.diffuseColor * preLightData.diffuseFGD;
     if (bsdfData.coatMask > 0.0)
     {
-        float clampedNdotV = saturate(VividClampNdotV(preLightData.NdotV));
-        float coatIblF = VividF_Schlick(kVividClearCoatF0, 1.0, clampedNdotV) * bsdfData.coatMask;
+        float clampedNdotV = saturate( ClampNdotV(preLightData.NdotV));
+        float coatIblF = F_Schlick(kVividClearCoatF0, 1.0, clampedNdotV) * bsdfData.coatMask;
         diffuseLighting *= Sq(1.0 - coatIblF);
     }
 
@@ -335,7 +266,7 @@ float3 EvaluateVividHDRPLitIndirectLight(
     VividPreLightData preLightData,
     float3 viewDirectionWS)
 {
-    float clampedNdotV = saturate(VividClampNdotV(preLightData.NdotV));
+    float clampedNdotV = saturate( ClampNdotV(preLightData.NdotV));
     float3 diffuseLighting = EvaluateVividBakedDiffuseLighting(surfaceData) * bsdfData.diffuseColor * preLightData.diffuseFGD;
     float3 dominantDirectionWS = GetSpecularDominantDir(
         surfaceData.normalWS,
@@ -346,12 +277,12 @@ float3 EvaluateVividHDRPLitIndirectLight(
 
     if (bsdfData.coatMask > 0.0)
     {
-        float coatIblF = VividF_Schlick(kVividClearCoatF0, 1.0, clampedNdotV) * bsdfData.coatMask;
+        float coatIblF =  F_Schlick(kVividClearCoatF0, 1.0, clampedNdotV) * bsdfData.coatMask;
         float attenuation = Sq(1.0 - coatIblF);
         diffuseLighting *= attenuation;
         specularLighting *= attenuation;
 
-        float coatPerceptualRoughness = VividRoughnessToPerceptualRoughness(bsdfData.coatRoughness);
+        float coatPerceptualRoughness =  RoughnessToPerceptualRoughness(bsdfData.coatRoughness);
         float3 coatDominantDirectionWS = GetSpecularDominantDir(
             surfaceData.normalWS,
             preLightData.iblR,
@@ -377,9 +308,9 @@ float3 EvaluateVividFabricIndirectLight(
     float3 viewDirectionWS)
 {
     float nDotV = dot(surfaceData.normalWS, viewDirectionWS);
-    float clampedNdotV = saturate(VividClampNdotV(nDotV));
-    float roughness = VividClampRoughnessForAnalyticalLights(surfaceData.linearRoughness);
-    float perceptualRoughness = VividRoughnessToPerceptualRoughness(roughness);
+    float clampedNdotV = saturate( ClampNdotV(nDotV));
+    float roughness =  ClampRoughnessForAnalyticalLights(surfaceData.linearRoughness);
+    float perceptualRoughness =  RoughnessToPerceptualRoughness(roughness);
     float fuzzAmount = saturate(surfaceData.customData);
     float3 diffuseColor = surfaceData.baseColor * (1.0 - surfaceData.metallic);
     float3 baseSpecular = lerp(kVividDielectricF0, surfaceData.baseColor, surfaceData.metallic);

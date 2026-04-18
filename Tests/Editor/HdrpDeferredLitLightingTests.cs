@@ -134,6 +134,17 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void LightGridPass_SourceAppliesSkyAttenuationBeforeUploadingDirectionalLights()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Lighting", "LightGridPass.cs"));
+
+            Assert.That(source, Does.Contain("UpdateDirectionalLightUploadData(lightData, camera);"));
+            Assert.That(source, Does.Contain("PhysicallyBasedSkyAtmosphericAttenuation.TryCreate(camera, out var attenuationContext)"));
+            Assert.That(source, Does.Contain("PhysicallyBasedSkyAtmosphericAttenuation.Evaluate("));
+            Assert.That(source, Does.Contain("ShouldDirectionalLightInteractWithSky(light)"));
+        }
+
+        [Test]
         public void VividRPCoreResources_DeclarePreIntegratedFGDShaders()
         {
             AssertResourcePath(

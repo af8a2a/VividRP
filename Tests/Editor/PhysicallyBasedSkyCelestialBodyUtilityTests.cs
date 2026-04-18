@@ -230,6 +230,67 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_MaterialParameters.celestialLightExposure = Mathf.Max(m_CelestialBodyBuffer.CelestialLightExposure, 1.0f);"));
         }
 
+        [Test]
+        public void EvaluateAtmosphericAttenuation_ReturnsAtmosphericTransmittance_WhenSunIsAboveHorizon()
+        {
+            using var scope = new SkyProfileScope();
+            scope.settings.renderingSpace.value = RenderingSpace.Camera;
+
+            var created = PhysicallyBasedSkyAtmosphericAttenuation.TryCreate(
+                scope.volume,
+                scope.settings,
+                Vector3.zero,
+                out var context);
+
+            Assert.That(created, Is.True);
+
+            var attenuation = PhysicallyBasedSkyAtmosphericAttenuation.Evaluate(in context, Vector3.up);
+
+            Assert.That(attenuation.x, Is.GreaterThan(0.0f).And.LessThan(1.0f));
+            Assert.That(attenuation.y, Is.GreaterThan(0.0f).And.LessThan(1.0f));
+            Assert.That(attenuation.z, Is.GreaterThan(0.0f).And.LessThan(1.0f));
+            Assert.That(attenuation.x, Is.GreaterThan(attenuation.y));
+            Assert.That(attenuation.y, Is.GreaterThan(attenuation.z));
+        }
+
+        [Test]
+        public void EvaluateAtmosphericAttenuation_ReturnsZero_WhenSunIsBelowHorizon()
+        {
+            using var scope = new SkyProfileScope();
+            scope.settings.renderingSpace.value = RenderingSpace.Camera;
+
+            var created = PhysicallyBasedSkyAtmosphericAttenuation.TryCreate(
+                scope.volume,
+                scope.settings,
+                Vector3.zero,
+                out var context);
+
+            Assert.That(created, Is.True);
+
+            var attenuation = PhysicallyBasedSkyAtmosphericAttenuation.Evaluate(in context, Vector3.down);
+
+            Assert.That(attenuation, Is.EqualTo(Vector3.zero));
+        }
+
+        private sealed class SkyProfileScope : IDisposable
+        {
+            internal readonly VolumeProfile profile;
+            internal readonly SkySettingsVolume settings;
+            internal readonly PhysicallyBasedSkyVolume volume;
+
+            public SkyProfileScope()
+            {
+                profile = ScriptableObject.CreateInstance<VolumeProfile>();
+                settings = profile.Add<SkySettingsVolume>(false);
+                volume = profile.Add<PhysicallyBasedSkyVolume>(false);
+            }
+
+            public void Dispose()
+            {
+                Object.DestroyImmediate(profile);
+            }
+        }
+
         private static string GetPackageFilePath(params string[] relativeParts)
         {
             var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));

@@ -994,4 +994,313 @@ namespace VividRP.Runtime
             return new Rect(0.0f, 0.0f, width, height);
         }
     }
+
+    internal readonly struct PhysicallyBasedSkyAtmosphericAttenuationContext
+    {
+        internal PhysicallyBasedSkyAtmosphericAttenuationContext(
+            float airScaleHeight,
+            float aerosolScaleHeight,
+            Vector3 airExtinctionCoefficient,
+            float aerosolExtinctionCoefficient,
+            float ozoneMinimumAltitude,
+            float ozoneLayerWidth,
+            Vector3 ozoneExtinctionCoefficient,
+            Vector3 planetCenterWS,
+            float planetRadius,
+            Vector3 cameraPositionWS)
+        {
+            this.airScaleHeight = airScaleHeight;
+            this.aerosolScaleHeight = aerosolScaleHeight;
+            this.airExtinctionCoefficient = airExtinctionCoefficient;
+            this.aerosolExtinctionCoefficient = aerosolExtinctionCoefficient;
+            this.ozoneMinimumAltitude = ozoneMinimumAltitude;
+            this.ozoneLayerWidth = ozoneLayerWidth;
+            this.ozoneExtinctionCoefficient = ozoneExtinctionCoefficient;
+            this.planetCenterWS = planetCenterWS;
+            this.planetRadius = planetRadius;
+            this.cameraPositionWS = cameraPositionWS;
+        }
+
+        internal float airScaleHeight { get; }
+
+        internal float aerosolScaleHeight { get; }
+
+        internal Vector3 airExtinctionCoefficient { get; }
+
+        internal float aerosolExtinctionCoefficient { get; }
+
+        internal float ozoneMinimumAltitude { get; }
+
+        internal float ozoneLayerWidth { get; }
+
+        internal Vector3 ozoneExtinctionCoefficient { get; }
+
+        internal Vector3 planetCenterWS { get; }
+
+        internal float planetRadius { get; }
+
+        internal Vector3 cameraPositionWS { get; }
+    }
+
+    internal static class PhysicallyBasedSkyAtmosphericAttenuation
+    {
+        internal static bool TryCreate(
+            Camera camera,
+            out PhysicallyBasedSkyAtmosphericAttenuationContext context)
+        {
+            return TryCreate(
+                VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume(),
+                VividVolumeManagerUtility.GetSkySettingsVolume(),
+                camera != null ? camera.transform.position : Vector3.zero,
+                out context);
+        }
+
+        internal static bool TryCreate(
+            PhysicallyBasedSkyVolume volume,
+            SkySettingsVolume skySettings,
+            Vector3 cameraPositionWS,
+            out PhysicallyBasedSkyAtmosphericAttenuationContext context)
+        {
+            context = default;
+
+            if (volume == null || !volume.IsActive())
+                return false;
+
+            var planet = SkyPlanet.Resolve(volume, skySettings, cameraPositionWS);
+            context = new PhysicallyBasedSkyAtmosphericAttenuationContext(
+                Mathf.Max(volume.GetAirScaleHeight(), 1.0f),
+                Mathf.Max(volume.GetAerosolScaleHeight(), 1.0f),
+                volume.GetAirExtinctionCoefficient(),
+                volume.GetAerosolExtinctionCoefficient(),
+                Mathf.Max(volume.GetOzoneLayerMinimumAltitude(), 0.0f),
+                Mathf.Max(volume.GetOzoneLayerWidth(), 1.0f),
+                volume.GetOzoneExtinctionCoefficient(),
+                planet.center,
+                planet.radius,
+                cameraPositionWS);
+            return true;
+        }
+
+        internal static Vector3 Evaluate(
+            in PhysicallyBasedSkyAtmosphericAttenuationContext context,
+            Vector3 lightDirectionWS)
+        {
+            if (lightDirectionWS.sqrMagnitude <= 1e-6f)
+                return Vector3.one;
+
+            var directionToLight = lightDirectionWS.normalized;
+            var planetToCamera = context.cameraPositionWS - context.planetCenterWS;
+            var radialDistance = planetToCamera.magnitude;
+            if (radialDistance <= 1e-6f)
+                radialDistance = Mathf.Max(context.planetRadius, 1.0f);
+
+            var cosHoriz = ComputeCosineOfHorizonAngle(radialDistance, context.planetRadius);
+            var cosTheta = Vector3.Dot(planetToCamera, directionToLight) * Rcp(radialDistance);
+            if (cosTheta <= cosHoriz)
+                return Vector3.zero;
+
+            var opticalDepth = ComputeAtmosphericOpticalDepth(
+                context.airScaleHeight,
+                context.aerosolScaleHeight,
+                context.airExtinctionCoefficient,
+                context.aerosolExtinctionCoefficient,
+                context.ozoneMinimumAltitude,
+                context.ozoneLayerWidth,
+                context.ozoneExtinctionCoefficient,
+                context.planetRadius,
+                radialDistance,
+                cosTheta,
+                true);
+
+            return new Vector3(
+                Mathf.Exp(-opticalDepth.x),
+                Mathf.Exp(-opticalDepth.y),
+                Mathf.Exp(-opticalDepth.z));
+        }
+
+        private static float Rcp(float value)
+        {
+            return 1.0f / value;
+        }
+
+        private static float Rsqrt(float value)
+        {
+            return Rcp(Mathf.Sqrt(value));
+        }
+
+        private static float Saturate(float value)
+        {
+            return Mathf.Clamp01(value);
+        }
+
+        private static float ComputeCosineOfHorizonAngle(float radialDistance, float planetRadius)
+        {
+            var sinHorizon = planetRadius * Rcp(radialDistance);
+            return -Mathf.Sqrt(Saturate(1.0f - sinHorizon * sinHorizon));
+        }
+
+        private static float ChapmanUpperApprox(float z, float cosTheta)
+        {
+            var c = cosTheta;
+            var n = 0.761643f * ((1.0f + 2.0f * z) - (c * c * z));
+            var d = c * z + Mathf.Sqrt(z * (1.47721f + 0.273828f * (c * c * z)));
+            return 0.5f * c + n * Rcp(d);
+        }
+
+        private static float ChapmanHorizontal(float z)
+        {
+            var r = Rsqrt(z);
+            var s = z * r;
+            return 0.626657f * (r + 2.0f * s);
+        }
+
+        private static float OzoneDensity(float height, Vector2 ozoneScaleOffset)
+        {
+            return Mathf.Clamp01(1.0f - Mathf.Abs(height * ozoneScaleOffset.x + ozoneScaleOffset.y));
+        }
+
+        private static Vector2 IntersectSphere(float sphereRadius, float cosChi, float radialDistance)
+        {
+            var reciprocalRadialDistance = Rcp(radialDistance);
+            var d = sphereRadius * reciprocalRadialDistance;
+            d = d * d - Saturate(1.0f - cosChi * cosChi);
+            if (d < 0.0f)
+                return new Vector2(d, d);
+
+            var sqrtD = Mathf.Sqrt(d);
+            return radialDistance * new Vector2(-cosChi - sqrtD, -cosChi + sqrtD);
+        }
+
+        private static float ComputeOzoneOpticalDepth(
+            float planetRadius,
+            float radialDistance,
+            float cosTheta,
+            float ozoneMinimumAltitude,
+            float ozoneLayerWidth)
+        {
+            var ozoneOpticalDepth = 0.0f;
+            var innerIntersection = IntersectSphere(
+                planetRadius + ozoneMinimumAltitude,
+                cosTheta,
+                radialDistance);
+            var outerIntersection = IntersectSphere(
+                planetRadius + ozoneMinimumAltitude + ozoneLayerWidth,
+                cosTheta,
+                radialDistance);
+
+            float tEntry;
+            float tEntrySecond;
+            float tExit;
+            float tExitSecond;
+
+            if (innerIntersection.x < 0.0f && innerIntersection.y >= 0.0f)
+            {
+                tEntry = innerIntersection.y;
+                tExitSecond = outerIntersection.y;
+                tEntrySecond = tExit = (tExitSecond - tEntry) * 0.5f;
+            }
+            else
+            {
+                tEntry = Mathf.Max(outerIntersection.x, 0.0f);
+                tExit = innerIntersection.x >= 0.0f ? innerIntersection.x : outerIntersection.y;
+
+                if (innerIntersection.x >= 0.0f)
+                {
+                    tEntrySecond = innerIntersection.y;
+                    tExitSecond = outerIntersection.y;
+                }
+                else
+                {
+                    tExitSecond = tExit;
+                    tEntrySecond = tExit = (tExitSecond - tEntry) * 0.5f;
+                }
+            }
+
+            const float sampleCount = 2.0f;
+            var reciprocalSampleCount = Rcp(sampleCount);
+            var dt = Mathf.Max(tExit - tEntry, 0.0f) * reciprocalSampleCount;
+            var dtSecond = Mathf.Max(tExitSecond - tEntrySecond, 0.0f) * reciprocalSampleCount;
+            var ozoneScaleOffset = new Vector2(
+                2.0f / ozoneLayerWidth,
+                -2.0f * ozoneMinimumAltitude / ozoneLayerWidth - 1.0f);
+
+            for (var sampleIndex = 0; sampleIndex < 2; sampleIndex++)
+            {
+                var sampleT = Mathf.Lerp(tEntry, tExit, (sampleIndex + 0.5f) * reciprocalSampleCount);
+                var secondSampleT = Mathf.Lerp(tEntrySecond, tExitSecond, (sampleIndex + 0.5f) * reciprocalSampleCount);
+                var height = Mathf.Sqrt(radialDistance * radialDistance + sampleT * (2.0f * radialDistance * cosTheta + sampleT)) - planetRadius;
+                var secondHeight = Mathf.Sqrt(radialDistance * radialDistance + secondSampleT * (2.0f * radialDistance * cosTheta + secondSampleT)) - planetRadius;
+
+                ozoneOpticalDepth += OzoneDensity(height, ozoneScaleOffset) * dt;
+                ozoneOpticalDepth += OzoneDensity(secondHeight, ozoneScaleOffset) * dtSecond;
+            }
+
+            return ozoneOpticalDepth * 0.6f;
+        }
+
+        private static Vector3 ComputeAtmosphericOpticalDepth(
+            float airScaleHeight,
+            float aerosolScaleHeight,
+            Vector3 airExtinctionCoefficient,
+            float aerosolExtinctionCoefficient,
+            float ozoneMinimumAltitude,
+            float ozoneLayerWidth,
+            Vector3 ozoneExtinctionCoefficient,
+            float planetRadius,
+            float radialDistance,
+            float cosTheta,
+            bool alwaysAboveHorizon)
+        {
+            var scaleHeights = new Vector2(airScaleHeight, aerosolScaleHeight);
+            var reciprocalScaleHeights = new Vector2(Rcp(scaleHeights.x), Rcp(scaleHeights.y));
+            var z = new Vector2(
+                radialDistance * reciprocalScaleHeights.x,
+                radialDistance * reciprocalScaleHeights.y);
+            var zAtSeaLevel = new Vector2(
+                planetRadius * reciprocalScaleHeights.x,
+                planetRadius * reciprocalScaleHeights.y);
+            var cosHoriz = ComputeCosineOfHorizonAngle(radialDistance, planetRadius);
+            var sinTheta = Mathf.Sqrt(Saturate(1.0f - cosTheta * cosTheta));
+
+            var chapman = new Vector2(
+                ChapmanUpperApprox(z.x, Mathf.Abs(cosTheta)) * Mathf.Exp(zAtSeaLevel.x - z.x),
+                ChapmanUpperApprox(z.y, Mathf.Abs(cosTheta)) * Mathf.Exp(zAtSeaLevel.y - z.y));
+
+            if (!alwaysAboveHorizon && cosTheta < cosHoriz)
+            {
+                var sinGamma = (radialDistance / planetRadius) * sinTheta;
+                var cosGamma = Mathf.Sqrt(Saturate(1.0f - sinGamma * sinGamma));
+                var chapmanAtHorizon = new Vector2(
+                    ChapmanUpperApprox(zAtSeaLevel.x, cosGamma),
+                    ChapmanUpperApprox(zAtSeaLevel.y, cosGamma));
+                chapman -= chapmanAtHorizon;
+            }
+            else if (cosTheta < 0.0f)
+            {
+                var z0 = z * sinTheta;
+                var expTerm = new Vector2(
+                    Mathf.Exp(zAtSeaLevel.x - z0.x),
+                    Mathf.Exp(zAtSeaLevel.y - z0.y));
+                var horizontal = new Vector2(
+                    2.0f * ChapmanHorizontal(z0.x),
+                    2.0f * ChapmanHorizontal(z0.y));
+                chapman = Vector2.Scale(horizontal, expTerm) - chapman;
+            }
+
+            var opticalDepth = Vector2.Scale(chapman, scaleHeights);
+            var ozoneOpticalDepth = alwaysAboveHorizon
+                ? ComputeOzoneOpticalDepth(
+                    planetRadius,
+                    radialDistance,
+                    cosTheta,
+                    ozoneMinimumAltitude,
+                    ozoneLayerWidth)
+                : 0.0f;
+
+            return new Vector3(
+                opticalDepth.x * airExtinctionCoefficient.x + opticalDepth.y * aerosolExtinctionCoefficient + ozoneOpticalDepth * ozoneExtinctionCoefficient.x,
+                opticalDepth.x * airExtinctionCoefficient.y + opticalDepth.y * aerosolExtinctionCoefficient + ozoneOpticalDepth * ozoneExtinctionCoefficient.y,
+                opticalDepth.x * airExtinctionCoefficient.z + opticalDepth.y * aerosolExtinctionCoefficient + ozoneOpticalDepth * ozoneExtinctionCoefficient.z);
+        }
+    }
 }

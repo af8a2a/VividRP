@@ -56,9 +56,6 @@ float4 FragOpaqueAtmosphericScattering(Varyings input) : SV_Target
     int2 pixelCoord = int2(input.positionCS.xy);
     float4 inputColor = LOAD_TEXTURE2D_X(_InputColor, pixelCoord);
 
-    if (_SkyFogParams.x <= 0.5f)
-        return inputColor;
-
     float deviceDepth = LOAD_TEXTURE2D_X(_DepthTexture, pixelCoord).r;
     if (IsFarDepth(deviceDepth))
         return inputColor;
@@ -72,7 +69,7 @@ float4 FragOpaqueAtmosphericScattering(Varyings input) : SV_Target
     if (isnan(tFrag) || isinf(tFrag) || tFrag <= 1e-4f)
         return inputColor;
 
-    if (_SkyFogParams.w > 0.0f)
+    if (_SkyFogParams.x > 0.5f && _SkyFogParams.w > 0.0f)
         tFrag = min(tFrag, _SkyFogParams.w);
 
     if (tFrag <= 1e-4f)

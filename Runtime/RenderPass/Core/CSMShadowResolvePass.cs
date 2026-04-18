@@ -20,7 +20,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int CSMAtlasScaleOffsetsId = Shader.PropertyToID("_CSMAtlasScaleOffsets");
         private static readonly int CSMCascadeCountId = Shader.PropertyToID("_CSMCascadeCount");
         private static readonly int CSMMaxShadowDistanceId = Shader.PropertyToID("_CSMMaxShadowDistance");
-        private static readonly int CSMDepthBiasId = Shader.PropertyToID("_CSMDepthBias");
         private static readonly int CSMNormalBiasId = Shader.PropertyToID("_CSMNormalBias");
         private static readonly int CSMInvViewProjMatrixId = Shader.PropertyToID("_CSMInvViewProjMatrix");
         private static readonly int CSMOutputWidthId = Shader.PropertyToID("_CSMOutputWidth");
@@ -70,7 +69,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector4 m_CascadeBorders = Vector4.zero;
         private int m_CascadeCount;
         private float m_MaxShadowDistance;
-        private float m_DepthBias;
         private float m_NormalBias;
         private int m_AtlasResolution;
         private int m_CascadeResolution;
@@ -150,7 +148,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_CascadeCount = shadowData.cascadeCount;
             m_MaxShadowDistance = shadowData.maxShadowDistance;
-            m_DepthBias = shadowData.depthBias;
             m_NormalBias = shadowData.normalBias;
             m_AtlasResolution = shadowData.atlasResolution;
             m_CascadeResolution = shadowData.cascadeResolution;
@@ -213,7 +210,6 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeVectorArrayParam(m_ResolveCompute, CSMAtlasScaleOffsetsId, m_AtlasScaleOffsets);
             cmd.SetComputeIntParam(m_ResolveCompute, CSMCascadeCountId, m_CascadeCount);
             cmd.SetComputeFloatParam(m_ResolveCompute, CSMMaxShadowDistanceId, m_MaxShadowDistance);
-            cmd.SetComputeFloatParam(m_ResolveCompute, CSMDepthBiasId, m_DepthBias);
             cmd.SetComputeFloatParam(m_ResolveCompute, CSMNormalBiasId, m_NormalBias);
             cmd.SetComputeMatrixParam(m_ResolveCompute, CSMInvViewProjMatrixId, m_InvViewProjMatrix);
             cmd.SetComputeIntParam(m_ResolveCompute, CSMOutputWidthId, m_DirectionalShadowTexture.desc.Width);

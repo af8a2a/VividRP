@@ -74,16 +74,17 @@ namespace VividRP.Editor.Tests
         [Test]
         public void Source_UsesShaderFallbackAndAtmosphericScatteringLutBindings()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "AerialPerspectivePass.cs"));
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "AtmosphericScatteringPass.cs"));
 
-            Assert.That(source, Does.Contain("public sealed class AerialPerspectivePass : UnsafePass"));
+            Assert.That(source, Does.Contain("public sealed class AtmosphericScatteringPass : UnsafePass"));
             Assert.That(source, Does.Contain("internal const string OpaqueAtmosphericScatteringPassName = \"Opaque Atmospheric Scattering\";"));
             Assert.That(source, Does.Contain("internal const string OpaqueAtmosphericScatteringShaderName = \"Hidden/VividRP/OpaqueAtmosphericScattering\";"));
             Assert.That(source, Does.Contain("profilingSampler = new ProfilingSampler(OpaqueAtmosphericScatteringPassName);"));
             Assert.That(source, Does.Contain("shader ??= Shader.Find(OpaqueAtmosphericScatteringShaderName);"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters)"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(frameData, out m_MaterialParameters)"));
-            Assert.That(source, Does.Contain("m_Parameters.skyFogParams.x > 0.5f"));
+            Assert.That(source, Does.Contain("var volume = VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume();"));
+            Assert.That(source, Does.Contain("volume.atmosphericScattering.value"));
             Assert.That(source, Does.Contain("m_AtmosphericScatteringLUT = RenderGraphTexture.CreateInput(\"AtmosphericScatteringLUT\", GraphicsFormat.R16G16B16A16_SFloat);"));
             Assert.That(source, Does.Contain("m_OutputTexture = RenderGraphTexture.CreateOutput(\"OutputColor\", GraphicsFormat.R16G16B16A16_SFloat);"));
             Assert.That(source, Does.Contain("texture.desc.Dimension = TextureDimension.Tex3D;"));
@@ -92,7 +93,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("AtmosphericScatteringLutId,"));
             Assert.That(source, Does.Contain("hasValidAtmosphericScatteringLut ? atmosphericScatteringLut : m_FallbackAtmosphericScatteringLut);"));
             Assert.That(source, Does.Contain("mpb.SetMatrix(PixelCoordToViewDirWSId, m_IsActive ? m_Parameters.pixelCoordToViewDirWS : Matrix4x4.identity);"));
-            Assert.That(source, Does.Contain("mpb.SetVector(SkyFogParamsId, fogParams);"));
+            Assert.That(source, Does.Contain("mpb.SetVector(SkyFogParamsId, skyFogParams);"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyMaterialPropertyBinder.Apply(mpb, m_MaterialParameters, VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume());"));
             Assert.That(source, Does.Contain("texture.dimension != TextureDimension.Tex3D"));
             Assert.That(source, Does.Not.Contain("SetBuffer("));
@@ -108,24 +109,19 @@ namespace VividRP.Editor.Tests
             var shaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AtmosphericScattering", "OpaqueAtmosphericScattering.shader"));
             var hlslSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AtmosphericScattering", "AtmosphericScattering.hlsl"));
 
-            Assert.That(shaderSource, Does.Contain("Shader \"Hidden/VividRP/OpaqueAtmosphericScattering\""));
+            Assert.That(shaderSource, Does.Contain("Shader \"Hidden/VividRP/AerialPerspective\""));
             Assert.That(shaderSource, Does.Contain("Name \"OpaqueAtmosphericScattering\""));
-            Assert.That(shaderSource, Does.Contain("#define OPAQUE_FOG_PASS"));
             Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Private/AtmosphericScattering/AtmosphericScattering.hlsl\""));
             Assert.That(hlslSource, Does.Contain("TEXTURE2D_X(_InputColor);"));
             Assert.That(hlslSource, Does.Contain("TEXTURE2D_X_FLOAT(_DepthTexture);"));
-            Assert.That(hlslSource, Does.Contain("struct OpaqueAtmosphericScatteringPositionInputs"));
-            Assert.That(hlslSource, Does.Contain("bool EvaluateAtmosphericScattering("));
-            Assert.That(hlslSource, Does.Contain("EvaluateCameraAtmosphericScattering(V, posInput.positionNDC, tFrag, color, opacity);"));
-            Assert.That(hlslSource, Does.Contain("if (!EvaluateAtmosphericScattering(posInput, posInput.viewDirectionWS, fogColor, fogOpacity))"));
-            Assert.That(hlslSource, Does.Contain("ComputeWorldSpacePosition(posInput.positionNDC, posInput.deviceDepth, UNITY_MATRIX_I_VP);"));
-            Assert.That(hlslSource, Does.Contain("posInput.viewDirectionWS = GetSkyViewDirWS(input.positionCS.xy);"));
-            Assert.That(hlslSource, Does.Not.Contain("posInput.viewDirectionWS = -GetSkyViewDirWS(input.positionCS.xy);"));
+            Assert.That(hlslSource, Does.Contain("float4 FragOpaqueAtmosphericScattering(Varyings input) : SV_Target"));
+            Assert.That(hlslSource, Does.Contain("float3 positionWS = ComputeWorldSpacePosition(positionNDC, deviceDepth, UNITY_MATRIX_I_VP);"));
+            Assert.That(hlslSource, Does.Contain("float3 viewDirectionWS = -GetSkyViewDirWS(input.positionCS.xy);"));
             Assert.That(hlslSource, Does.Contain("float3 SanitizeSkyRadiance(float3 color)"));
-            Assert.That(hlslSource, Does.Contain("if (_SkyFogParams.x <= 0.5f)"));
-            Assert.That(hlslSource, Does.Contain("if (_SkyFogParams.w > 0.0f)"));
+            Assert.That(hlslSource, Does.Not.Contain("if (_SkyFogParams.x <= 0.5f)"));
+            Assert.That(hlslSource, Does.Contain("if (_SkyFogParams.x > 0.5f && _SkyFogParams.w > 0.0f)"));
             Assert.That(hlslSource, Does.Contain("float3 composedColor = fogColor + (1.0f - fogOpacity) * inputColor.rgb;"));
-            Assert.That(hlslSource, Does.Not.Contain("EvaluateCameraAtmosphericScattering(viewDirectionWS, positionNDC, tFrag, fogColor, fogOpacity);"));
+            Assert.That(hlslSource, Does.Contain("EvaluateCameraAtmosphericScattering(viewDirectionWS, positionNDC, tFrag, fogColor, fogOpacity);"));
             Assert.That(hlslSource, Does.Not.Contain("_TransmittanceLUT"));
             Assert.That(hlslSource, Does.Not.Contain("_MultiScatteringLUT"));
         }

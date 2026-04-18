@@ -19,6 +19,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("private static readonly int CSMPCSSMaxPenumbraSizeId = Shader.PropertyToID(\"_CSMPCSSMaxPenumbraSize\");"));
             Assert.That(source, Does.Contain("private static readonly int CSMCascadeBordersId = Shader.PropertyToID(\"_CSMCascadeBorders\");"));
             Assert.That(source, Does.Contain("private static readonly int CSMCascadeWorldTexelSizesId = Shader.PropertyToID(\"_CSMCascadeWorldTexelSizes\");"));
+            Assert.That(source, Does.Not.Contain("private static readonly int CSMDepthBiasId = Shader.PropertyToID(\"_CSMDepthBias\");"));
             Assert.That(source, Does.Contain("m_ShadowQuality = (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low;"));
             Assert.That(source, Does.Contain("CoreUtils.DivRoundUp(width, ThreadGroupSizeX);"));
             Assert.That(source, Does.Contain("TryResolveMainDirectionalLight(lightData, out _, out var additionalLightData)"));
@@ -34,6 +35,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("cmd.SetComputeFloatParam(m_ResolveCompute, CSMLightAngularDiameterId, m_LightAngularDiameter);"));
             Assert.That(source, Does.Contain("cmd.SetComputeVectorParam(m_ResolveCompute, CSMCascadeWorldTexelSizesId, m_CascadeWorldTexelSizes);"));
             Assert.That(source, Does.Contain("cmd.SetComputeVectorParam(m_ResolveCompute, CSMCascadeBordersId, m_CascadeBorders);"));
+            Assert.That(source, Does.Not.Contain("cmd.SetComputeFloatParam(m_ResolveCompute, CSMDepthBiasId, m_DepthBias);"));
             Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_ResolveCompute, CSMFrameIndexId, m_FrameIndex);"));
             Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_ResolveCompute, CSMPCSSBlockerSampleCountId, m_PCSSBlockerSampleCount);"));
             Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_ResolveCompute, CSMPCSSFilterSampleCountId, m_PCSSFilterSampleCount);"));

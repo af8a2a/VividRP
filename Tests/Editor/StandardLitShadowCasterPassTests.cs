@@ -7,21 +7,21 @@ namespace VividRP.Editor.Tests
     public sealed class StandardLitShadowCasterPassTests
     {
         [Test]
-        public void StandardLitShadowCasterPass_AppliesDepthBiasAndNearClipClampingWithoutNormalOffset()
+        public void StandardLitShadowCasterPass_TransformsDirectlyAndAppliesNearClipClamping()
         {
             var source = File.ReadAllText(GetSourcePath());
 
             Assert.That(source, Does.Contain("float4 _ShadowBias;"));
-            Assert.That(source, Does.Contain("float3 _LightDirection;"));
-            Assert.That(source, Does.Contain("float3 _LightPosition;"));
+            Assert.That(source, Does.Not.Contain("float3 _LightDirection;"));
+            Assert.That(source, Does.Not.Contain("float3 _LightPosition;"));
             Assert.That(source, Does.Contain("float3 normalOS : NORMAL;"));
-            Assert.That(source, Does.Contain("float3 ApplyVividShadowBias(float3 positionWS, float3 lightDirectionWS)"));
+            Assert.That(source, Does.Not.Contain("float3 ApplyVividShadowBias(float3 positionWS, float3 lightDirectionWS)"));
             Assert.That(source, Does.Contain("float4 ApplyVividShadowClamping(float4 positionCS)"));
             Assert.That(source, Does.Contain("float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);"));
             Assert.That(source, Does.Not.Contain("float3 normalWS = TransformObjectToWorldNormal(input.normalOS);"));
             Assert.That(source, Does.Not.Contain("float normalOffsetScale = invNdotL * _ShadowBias.y;"));
-            Assert.That(source, Does.Contain("return positionWS + lightDirectionWS * _ShadowBias.x;"));
-            Assert.That(source, Does.Contain("output.positionCS = TransformWorldToHClip(ApplyVividShadowBias(positionWS, lightDirectionWS));"));
+            Assert.That(source, Does.Not.Contain("return positionWS + lightDirectionWS * _ShadowBias.x;"));
+            Assert.That(source, Does.Contain("output.positionCS = TransformWorldToHClip(positionWS);"));
             Assert.That(source, Does.Contain("output.positionCS = ApplyVividShadowClamping(output.positionCS);"));
         }
 

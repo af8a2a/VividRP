@@ -12,7 +12,6 @@ namespace VividRP.Runtime
         public float maxShadowDistance;
         public int atlasResolution;
         public int cascadeResolution;
-        public float depthBias;
         public float normalBias;
 
         public readonly Matrix4x4[] viewMatrices = new Matrix4x4[MaxCascadeCount];
@@ -30,7 +29,6 @@ namespace VividRP.Runtime
             maxShadowDistance = 0f;
             atlasResolution = 0;
             cascadeResolution = 0;
-            depthBias = 0f;
             normalBias = 0f;
 
             for (int i = 0; i < MaxCascadeCount; i++)

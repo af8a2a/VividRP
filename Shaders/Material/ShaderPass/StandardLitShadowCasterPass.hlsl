@@ -5,8 +5,6 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
 
 float4 _ShadowBias;
-float3 _LightDirection;
-float3 _LightPosition;
 
 CBUFFER_START(UnityPerMaterial)
     float4 _BaseColor;
@@ -45,11 +43,6 @@ struct Varyings
     UNITY_VERTEX_OUTPUT_STEREO
 };
 
-float3 ApplyVividShadowBias(float3 positionWS, float3 lightDirectionWS)
-{
-    return positionWS + lightDirectionWS * _ShadowBias.x;
-}
-
 float4 ApplyVividShadowClamping(float4 positionCS)
 {
 #if UNITY_REVERSED_Z
@@ -70,13 +63,7 @@ Varyings Vert(Attributes input)
     UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
     float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
-#if _CASTING_PUNCTUAL_LIGHT_SHADOW
-    float3 lightDirectionWS = normalize(_LightPosition - positionWS);
-#else
-    float3 lightDirectionWS = _LightDirection;
-#endif
-
-    output.positionCS = TransformWorldToHClip(ApplyVividShadowBias(positionWS, lightDirectionWS));
+    output.positionCS = TransformWorldToHClip(positionWS);
     output.positionCS = ApplyVividShadowClamping(output.positionCS);
     output.uv = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
     return output;

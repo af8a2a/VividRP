@@ -69,8 +69,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
-            m_IsActive = PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters)
-                && m_Parameters.skyFogParams.x > 0.5f;
+            var volume = VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume();
+            m_IsActive = volume != null
+                && volume.atmosphericScattering.value
+                && PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters);
             m_HasMaterialParameters = PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(frameData, out m_MaterialParameters);
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
@@ -108,7 +110,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (!hasValidAtmosphericScatteringLut)
                 EnsureFallbackAtmosphericScatteringLut();
 
-            var fogParams = m_IsActive
+            var skyFogParams = m_IsActive
                             && depthTexture != Texture2D.whiteTexture
                             && m_HasMaterialParameters
                             && hasValidAtmosphericScatteringLut
@@ -122,7 +124,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 AtmosphericScatteringLutId,
                 hasValidAtmosphericScatteringLut ? atmosphericScatteringLut : m_FallbackAtmosphericScatteringLut);
             mpb.SetMatrix(PixelCoordToViewDirWSId, m_IsActive ? m_Parameters.pixelCoordToViewDirWS : Matrix4x4.identity);
-            mpb.SetVector(SkyFogParamsId, fogParams);
+            mpb.SetVector(SkyFogParamsId, skyFogParams);
             if (m_HasMaterialParameters)
                 PhysicallyBasedSkyMaterialPropertyBinder.Apply(mpb, m_MaterialParameters, VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume());
 

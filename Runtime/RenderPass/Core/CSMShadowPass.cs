@@ -10,8 +10,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int AtlasGridSize = 2; // 2x2 grid for up to 4 cascades
         private const float CascadeBlendCullingFactor = 0.6f;
         private static readonly int ShadowBiasId = Shader.PropertyToID("_ShadowBias");
-        private static readonly int LightDirectionId = Shader.PropertyToID("_LightDirection");
-        private static readonly int LightPositionId = Shader.PropertyToID("_LightPosition");
 
         [RenderGraphResource(Name = "CSMShadowAtlas", Access = AccessFlags.Write)]
         private RenderGraphTexture m_ShadowAtlas;
@@ -21,12 +19,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_AtlasResolution;
         private int m_CascadeResolution;
         private int m_MainLightVisibleIndex = -1;
-        private float m_DepthBias;
         private float m_NormalBias;
         private float m_SlopeScaleDepthBias;
         private ShaderVariablesGlobal m_CameraShaderGlobals;
-        private Vector4 m_ShadowLightDirection;
-        private Vector4 m_ShadowLightPosition;
 
         private readonly Matrix4x4[] m_ViewMatrices = new Matrix4x4[VividShadowData.MaxCascadeCount];
         private readonly Matrix4x4[] m_ProjMatrices = new Matrix4x4[VividShadowData.MaxCascadeCount];
@@ -64,12 +59,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_IsActive = false;
             m_CascadeCount = 0;
             m_MainLightVisibleIndex = -1;
-            m_DepthBias = 0.0f;
             m_NormalBias = 0.0f;
             m_SlopeScaleDepthBias = 0.0f;
             m_CameraShaderGlobals = default;
-            m_ShadowLightDirection = Vector4.zero;
-            m_ShadowLightPosition = Vector4.zero;
 
             var shadowData = frameData.GetOrCreate<VividShadowData>();
             shadowData.Reset();
@@ -105,14 +97,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CascadeCount = Mathf.Clamp(csmSettings.cascadeCount.value, 1, VividShadowData.MaxCascadeCount);
             m_AtlasResolution = Mathf.Max(AtlasGridSize, additionalLightData.resolvedShadowAtlasResolution);
             m_CascadeResolution = Mathf.Max(1, m_AtlasResolution / AtlasGridSize);
-            m_DepthBias = Mathf.Max(0.0f, additionalLightData.depthBias);
             m_NormalBias = Mathf.Max(0.0f, additionalLightData.normalBias);
             m_SlopeScaleDepthBias = Mathf.Max(0.0f, additionalLightData.slopeBias);
             var mainVisibleLight = lightData.mainVisibleLight;
-            var lightDirection = -mainVisibleLight.localToWorldMatrix.GetColumn(2);
-            var lightPosition = mainVisibleLight.localToWorldMatrix.GetColumn(3);
-            m_ShadowLightDirection = new Vector4(lightDirection.x, lightDirection.y, lightDirection.z, 0.0f);
-            m_ShadowLightPosition = new Vector4(lightPosition.x, lightPosition.y, lightPosition.z, 1.0f);
 
             var splitRatios = csmSettings.GetCascadeSplitRatios();
             var cascadeBorders = csmSettings.GetCascadeBorderRatios();
@@ -148,7 +135,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_CascadeSpheres[i] = new Vector4(sphere.x, sphere.y, sphere.z, sphere.w * sphere.w);
                 m_CascadeWorldTexelSizes[i] = ComputeCascadeWorldTexelSize(m_ProjMatrices[i], m_CascadeResolution);
                 m_CascadeBorders[i] = cascadeBorders[i];
-                m_ShadowCasterBiases[i] = ComputeShadowCasterBias(mainVisibleLight, m_ProjMatrices[i], m_CascadeResolution, m_DepthBias, m_NormalBias);
+                m_ShadowCasterBiases[i] = BuildShadowCasterState(mainVisibleLight);
             }
 
             if (!allCascadesValid)
@@ -180,7 +167,6 @@ namespace VividRP.Runtime.RenderPass.Core
             shadowData.maxShadowDistance = csmSettings.maxShadowDistance.value;
             shadowData.atlasResolution = m_AtlasResolution;
             shadowData.cascadeResolution = m_CascadeResolution;
-            shadowData.depthBias = m_DepthBias;
             shadowData.normalBias = m_NormalBias;
 
             for (int i = 0; i < VividShadowData.MaxCascadeCount; i++)
@@ -232,8 +218,6 @@ namespace VividRP.Runtime.RenderPass.Core
                     nativeCmd.SetViewProjectionMatrices(m_ViewMatrices[cascadeIndex], m_ProjMatrices[cascadeIndex]);
                     ConstantBuffer.PushGlobal(nativeCmd, cascadeShaderGlobals, ShaderVariablesGlobal.ConstantBufferShaderId);
                     nativeCmd.SetGlobalVector(ShadowBiasId, m_ShadowCasterBiases[cascadeIndex]);
-                    nativeCmd.SetGlobalVector(LightDirectionId, m_ShadowLightDirection);
-                    nativeCmd.SetGlobalVector(LightPositionId, m_ShadowLightPosition);
 
                     var settings = m_ShadowDrawSettings[cascadeIndex];
                     var rendererList = m_RenderContext.CreateShadowRendererList(ref settings);
@@ -307,19 +291,13 @@ namespace VividRP.Runtime.RenderPass.Core
             return textureScaleAndBias * worldToShadow;
         }
 
-        private static Vector4 ComputeShadowCasterBias(
-            in VisibleLight shadowLight,
-            Matrix4x4 lightProjectionMatrix,
-            float shadowResolution,
-            float depthBias,
-            float normalBias)
+        private static Vector4 BuildShadowCasterState(in VisibleLight shadowLight)
         {
-            float texelSize = ComputeCascadeWorldTexelSize(lightProjectionMatrix, shadowResolution);
-            float kernelRadius = shadowLight.light != null && shadowLight.light.shadows == LightShadows.Soft ? 1.5f : 1.0f;
-
+            // Match HDRP's directional shadow path: rely on raster slope-scale depth bias,
+            // receiver normal bias, and a tiny fixed compare bias instead of caster vertex offsets.
             return new Vector4(
-                -depthBias * texelSize * kernelRadius,
-                -normalBias * texelSize * kernelRadius,
+                0.0f,
+                0.0f,
                 (float)shadowLight.lightType,
                 0.0f);
         }
@@ -355,12 +333,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_IsActive = false;
             m_MainLightVisibleIndex = -1;
             m_CascadeCount = 0;
-            m_DepthBias = 0.0f;
             m_NormalBias = 0.0f;
             m_SlopeScaleDepthBias = 0.0f;
             m_CameraShaderGlobals = default;
-            m_ShadowLightDirection = Vector4.zero;
-            m_ShadowLightPosition = Vector4.zero;
         }
     }
 }

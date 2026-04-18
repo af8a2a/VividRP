@@ -15,7 +15,6 @@ float4   _CSMCascadeSpheres[4];
 float4   _CSMAtlasScaleOffsets[4];
 int      _CSMCascadeCount;
 float    _CSMMaxShadowDistance;
-float    _CSMDepthBias;
 float    _CSMNormalBias;
 float4x4 _CSMInvViewProjMatrix;
 int      _CSMOutputWidth;
@@ -45,6 +44,7 @@ static const int kPCSSMaxSampleCount = 64;
 static const float kPCSSGoldenAngle = 2.39996323;
 static const float kPCSSTwoPi = 6.28318531;
 static const float kDegreesToRadians = 0.01745329251;
+static const float kFixedUniformDepthBias = 1.0 / 65536.0;
 bool IsSkyPixel(float deviceDepth)
 {
     return deviceDepth == UNITY_RAW_FAR_CLIP_VALUE;
@@ -115,6 +115,11 @@ float GetShadowDepthOffsetDirection()
 #else
     return -1.0;
 #endif
+}
+
+float ApplyShadowComparisonDepthBias(float shadowDepth)
+{
+    return shadowDepth + kFixedUniformDepthBias;
 }
 
 bool IsShadowMapDepthCloser(float sampleDepth, float compareDepth)
@@ -509,6 +514,7 @@ bool TryEvaluateCascadeShadow(float3 positionWS, float3 normalWS, int cascadeInd
         return false;
 
     shadowCoord = ClampShadowCoordToShadowMap(shadowCoord);
+    shadowCoord.z = ApplyShadowComparisonDepthBias(shadowCoord.z);
     float2 atlasUV = RemapToAtlasUV(shadowCoord.xy, cascadeIndex);
     atlasUV += ComputeShadowUVJitter(pixelCoord, cascadeIndex);
     atlasUV = ClampShadowAtlasUV(atlasUV, cascadeIndex);
@@ -527,6 +533,7 @@ bool TryEvaluateCascadeBlendShadow(float3 positionWS, float3 normalWS, int casca
         return false;
 
     shadowCoord = ClampShadowCoordToShadowMap(shadowCoord);
+    shadowCoord.z = ApplyShadowComparisonDepthBias(shadowCoord.z);
     float2 atlasUV = RemapToAtlasUV(shadowCoord.xy, cascadeIndex);
     atlasUV += ComputeShadowUVJitter(pixelCoord, cascadeIndex);
     atlasUV = ClampShadowAtlasUV(atlasUV, cascadeIndex);

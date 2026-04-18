@@ -30,10 +30,13 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("int      _CSMPCSSFilterSampleCount;"));
             Assert.That(source, Does.Contain("float4   _CSMCascadeWorldTexelSizes;"));
             Assert.That(source, Does.Contain("float4   _CSMCascadeBorders;"));
+            Assert.That(source, Does.Not.Contain("float    _CSMDepthBias;"));
+            Assert.That(source, Does.Contain("static const float kFixedUniformDepthBias = 1.0 / 65536.0;"));
             Assert.That(source, Does.Contain("return mul(_CSMViewProjMatrices[cascadeIndex], float4(positionWS, 1.0)).xyz;"));
             Assert.That(source, Does.Contain("float GetCascadeWorldTexelSize(int cascadeIndex)"));
             Assert.That(source, Does.Contain("return max(_CSMCascadeWorldTexelSizes[cascadeIndex], 0.0);"));
             Assert.That(source, Does.Contain("float GetCascadeDepthToWorldScale(int cascadeIndex)"));
+            Assert.That(source, Does.Contain("float ApplyShadowComparisonDepthBias(float shadowDepth)"));
             Assert.That(source, Does.Contain("bool IsShadowMapDepthCloser(float sampleDepth, float compareDepth)"));
             Assert.That(source, Does.Contain("float SampleShadowPCFKernel(float2 atlasUV, float depth, int cascadeIndex, int kernelRadius)"));
             Assert.That(source, Does.Contain("float SampleShadowPCF3x3(float2 atlasUV, float depth, int cascadeIndex)"));
@@ -65,6 +68,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("float halfTexel = 0.5 / max((float)_CSMCascadeResolution, 1.0);"));
             Assert.That(source, Does.Contain("float receiverNormalBias = _CSMNormalBias * GetCascadeWorldTexelSize(cascadeIndex);"));
             Assert.That(source, Does.Contain("shadowCoord = TransformWorldToShadowCoord(biasedPositionWS, cascadeIndex);"));
+            Assert.That(source, Does.Contain("shadowCoord.z = ApplyShadowComparisonDepthBias(shadowCoord.z);"));
             Assert.That(source, Does.Contain("atlasUV = ClampShadowAtlasUV(atlasUV, cascadeIndex);"));
             Assert.That(source, Does.Contain("float blockerSearchAngularDiameter = max(_CSMPCSSBlockerSearchAngularDiameter, _CSMLightAngularDiameter);"));
             Assert.That(source, Does.Contain("float noise = InterleavedGradientNoise(float2(pixelCoord) + 0.5, _CSMFrameIndex);"));

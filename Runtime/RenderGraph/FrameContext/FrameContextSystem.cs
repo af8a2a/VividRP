@@ -43,6 +43,11 @@ namespace VividRP.Runtime
             var shaderVariables = cameraData.BuildShaderVariables(temporalData);
             var skyData = frameData.GetOrCreate<VividSkyData>();
             SetShaderGlobals(cmd, cameraData, shaderVariables, temporalData, skyData);
+            VividAdaptiveProbeVolumeUtility.UpdatePerCamera(
+                VividRenderPipelineAsset.GetActiveAsset(),
+                cameraData.camera,
+                cmd,
+                cameraData.frameIndex);
             SubsystemPreRender?.Invoke(frameData, cmd);
         }
 

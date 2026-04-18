@@ -96,5 +96,10 @@ namespace VividRP.Runtime
         {
             return VolumeManager.instance.stack?.GetComponent<GPUDrivenSettingsVolume>();
         }
+
+        internal static ProbeVolumesOptions GetProbeVolumesOptions()
+        {
+            return VolumeManager.instance.stack?.GetComponent<ProbeVolumesOptions>();
+        }
     }
 }

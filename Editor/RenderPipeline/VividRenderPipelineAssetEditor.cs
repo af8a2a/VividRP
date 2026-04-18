@@ -20,6 +20,8 @@ namespace VividRP.Editor.RenderPipeline
         private static readonly GUIContent s_GpuDrivenLabel = EditorGUIUtility.TrTextContent("GPU Driven");
         private static readonly GUIContent s_GpuDrivenDebugOverlayLabel = EditorGUIUtility.TrTextContent("GPU Driven Debug Overlay");
         private static readonly GUIContent s_SrpBatcherLabel = EditorGUIUtility.TrTextContent("SRP Batcher");
+        private static readonly GUIContent s_SupportProbeVolumeLabel = EditorGUIUtility.TrTextContent("Adaptive Probe Volumes");
+        private static readonly GUIContent s_ProbeVolumeShBandsLabel = EditorGUIUtility.TrTextContent("APV SH Bands");
         private static readonly string s_DefaultVolumeSharedMessage =
             "Default Volume is stored in VividRP Global Settings and shared by all VividRP pipeline assets.";
         private static readonly string s_DefaultVolumeInactiveMessage =
@@ -94,6 +96,22 @@ namespace VividRP.Editor.RenderPipeline
                 name = "vivid-rp-asset-srp-batcher-field",
             };
             root.Add(srpBatcherField);
+
+            var supportProbeVolumeField = new PropertyField(
+                serializedObject.FindProperty("m_SupportProbeVolume"),
+                s_SupportProbeVolumeLabel.text)
+            {
+                name = "vivid-rp-asset-support-probe-volume-field",
+            };
+            root.Add(supportProbeVolumeField);
+
+            var probeVolumeShBandsField = new PropertyField(
+                serializedObject.FindProperty("m_ProbeVolumeSHBands"),
+                s_ProbeVolumeShBandsLabel.text)
+            {
+                name = "vivid-rp-asset-probe-volume-sh-bands-field",
+            };
+            root.Add(probeVolumeShBandsField);
 
             var sharedInfoHelpBox = new HelpBox(s_DefaultVolumeSharedMessage, HelpBoxMessageType.Info)
             {

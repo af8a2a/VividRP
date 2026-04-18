@@ -17,7 +17,7 @@ namespace VividRP.Runtime
     }
 
     [CreateAssetMenu(menuName = "VividRP/Vivid Render Pipeline")]
-    public class VividRenderPipelineAsset : RenderPipelineAsset<VividRenderPipeline>
+    public class VividRenderPipelineAsset : RenderPipelineAsset<VividRenderPipeline>, IProbeVolumeEnabledRenderPipeline
     {
         private const string DefaultShaderName = "VividRP/Material/StandardLit";
 
@@ -36,6 +36,12 @@ namespace VividRP.Runtime
         private bool m_EnableSRPBatcher = true;
 
         [SerializeField]
+        private bool m_SupportProbeVolume;
+
+        [SerializeField]
+        private ProbeVolumeSHBands m_ProbeVolumeSHBands = ProbeVolumeSHBands.SphericalHarmonicsL2;
+
+        [SerializeField]
         private ColorGradingSpace m_ColorGradingSpace = ColorGradingSpace.sRGB;
 
         [SerializeField]
@@ -51,6 +57,18 @@ namespace VividRP.Runtime
         {
             get => m_EnableSRPBatcher;
             set => m_EnableSRPBatcher = value;
+        }
+
+        public bool SupportProbeVolume
+        {
+            get => m_SupportProbeVolume;
+            set => m_SupportProbeVolume = value;
+        }
+
+        public ProbeVolumeSHBands ProbeVolumeSHBands
+        {
+            get => m_ProbeVolumeSHBands;
+            set => m_ProbeVolumeSHBands = value;
         }
 
         public ColorGradingSpace ColorGradingSpace
@@ -78,6 +96,15 @@ namespace VividRP.Runtime
         }
 
         public override Shader defaultShader => Shader.Find(DefaultShaderName);
+
+        bool IProbeVolumeEnabledRenderPipeline.supportProbeVolume => m_SupportProbeVolume;
+
+        ProbeVolumeSHBands IProbeVolumeEnabledRenderPipeline.maxSHBands => m_ProbeVolumeSHBands;
+
+#pragma warning disable 618
+        ProbeVolumeSceneData IProbeVolumeEnabledRenderPipeline.probeVolumeSceneData =>
+            VividRenderPipelineGlobalSettings.instance?.GetOrCreateAPVSceneData();
+#pragma warning restore 618
 
         internal static VividRenderPipelineAsset GetActiveAsset()
         {

@@ -33,6 +33,7 @@ namespace VividRP.Runtime
             Hammersley.Initialize();
             RTHandles.Initialize(Screen.width, Screen.height);
             m_GPUDrivenDebugOverlayRenderer = new VividGPUDrivenDebugOverlayRenderer(resources.GPUDrivenMeshletDebugShader);
+            VividAdaptiveProbeVolumeUtility.Initialize(asset);
 
             m_RenderGraph = new RenderGraph(RenderGraphName);
         }
@@ -239,6 +240,7 @@ namespace VividRP.Runtime
             BlueNoise.Cleanup();
             Blitter.Cleanup();
             PipelineResourceManager.Cleanup();
+            VividAdaptiveProbeVolumeUtility.Cleanup(m_Asset);
             ReleaseConstantBuffersForShutdown();
 
             var currentPipeline = RenderPipelineManager.currentPipeline;

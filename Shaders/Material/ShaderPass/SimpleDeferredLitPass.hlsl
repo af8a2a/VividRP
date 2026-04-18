@@ -97,10 +97,15 @@ float3 EvaluateSimpleDeferredLighting(VividGBufferSurfaceData surfaceData, float
     VividAggregateLighting aggregateLighting = (VividAggregateLighting)0;
 
     AccumulateIndirectLighting(
-        EvaluateBSDF_Env(viewDirectionWS, preLightData, surfaceData, bsdfData),
+        EvaluateBSDF_Env(positionWS, viewDirectionWS, preLightData, surfaceData, bsdfData),
         aggregateLighting);
 
-    if (!VividHasSkyIBL() && surfaceData.hasBakedGI < 0.5)
+    bool useAmbientFallback = !VividHasSkyIBL() && surfaceData.hasBakedGI < 0.5;
+#if defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2)
+    useAmbientFallback = useAmbientFallback && _EnableProbeVolumes == 0;
+#endif
+
+    if (useAmbientFallback)
         aggregateLighting.indirect.diffuse += _AmbientColor.rgb * surfaceData.ambientOcclusion;
 
     if (!HasDirectionalLights())

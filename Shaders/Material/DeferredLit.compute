@@ -1,6 +1,7 @@
 #pragma use_dxc
 #pragma kernel ClearDeferredLit
 #pragma kernel DeferredLit
+#pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
@@ -75,7 +76,7 @@ VividLightLoopOutput EvaluateDeferredLitLightLoop(
     VividAggregateLighting aggregateLighting = (VividAggregateLighting)0;
 
     AccumulateIndirectLighting(
-        EvaluateBSDF_Env(viewDirectionWS, preLightData, surfaceData, bsdfData),
+        EvaluateBSDF_Env(positionWS, viewDirectionWS, preLightData, surfaceData, bsdfData),
         aggregateLighting);
 
     [loop]

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using UnityEngine;
@@ -11,6 +12,11 @@ namespace VividRP.Runtime
     public class VividRenderPipelineGlobalSettings
         : RenderPipelineGlobalSettings<VividRenderPipelineGlobalSettings, VividRenderPipeline>
     {
+        [SerializeField]
+#pragma warning disable 618
+        private ProbeVolumeSceneData m_APVSceneData;
+#pragma warning restore 618
+
         [SerializeField]
         private RenderPipelineGraphicsSettingsContainer m_Settings = new();
 
@@ -30,7 +36,19 @@ namespace VividRP.Runtime
         public override void Initialize(RenderPipelineGlobalSettings source = null)
         {
             EnsureSettings<VividDefaultVolumeProfileSettings>();
+            EnsureCoreGraphicsSettings("UnityEngine.Rendering.ProbeVolumeGlobalSettings");
         }
+
+#pragma warning disable 618
+        internal ProbeVolumeSceneData GetOrCreateAPVSceneData()
+        {
+            if (m_APVSceneData == null)
+                m_APVSceneData = new ProbeVolumeSceneData(this);
+
+            m_APVSceneData.SetParentObject(this);
+            return m_APVSceneData;
+        }
+#pragma warning restore 618
 
         private void EnsureSettings<T>() where T : class, IRenderPipelineGraphicsSettings, new()
         {
@@ -38,6 +56,22 @@ namespace VividRP.Runtime
                 return;
 
             m_Settings.settingsList.Add(new T());
+        }
+
+        private void EnsureCoreGraphicsSettings(string settingsTypeName)
+        {
+            Type settingsType = typeof(IProbeVolumeEnabledRenderPipeline).Assembly.GetType(settingsTypeName);
+            if (settingsType == null || !typeof(IRenderPipelineGraphicsSettings).IsAssignableFrom(settingsType))
+                return;
+
+            foreach (var settings in m_Settings.settingsList)
+            {
+                if (settingsType.IsInstanceOfType(settings))
+                    return;
+            }
+
+            if (Activator.CreateInstance(settingsType, true) is IRenderPipelineGraphicsSettings settingsInstance)
+                m_Settings.settingsList.Add(settingsInstance);
         }
 
 #if UNITY_EDITOR

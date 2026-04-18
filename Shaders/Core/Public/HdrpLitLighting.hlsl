@@ -1,11 +1,11 @@
 #ifndef VIVIDRP_HDRP_LIT_LIGHTING_INCLUDED
 #define VIVIDRP_HDRP_LIT_LIGHTING_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BakedGI.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/PreIntegratedFGD.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VividProbeVolume.hlsl"
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/BSDF.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl"
@@ -350,6 +350,30 @@ float3 EvaluateVividBakedDiffuseLighting(VividGBufferSurfaceData surfaceData)
         : VividSampleAmbientProbe(surfaceData.normalWS);
 }
 
+float3 EvaluateVividBakedDiffuseLighting(
+    VividGBufferSurfaceData surfaceData,
+    float3 positionWS,
+    float3 viewDirectionWS)
+{
+#if defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2)
+    if (surfaceData.hasBakedGI <= 0.5 && _EnableProbeVolumes != 0)
+    {
+        float3 bakeDiffuseLighting = 0.0;
+        float4 probeOcclusion = 1.0;
+        EvaluateAdaptiveProbeVolume(
+            GetAbsolutePositionWS(positionWS),
+            surfaceData.normalWS,
+            SafeNormalize(viewDirectionWS),
+            0xFFFFFFFFu,
+            bakeDiffuseLighting,
+            probeOcclusion);
+        return bakeDiffuseLighting;
+    }
+#endif
+
+    return EvaluateVividBakedDiffuseLighting(surfaceData);
+}
+
 VividIndirectLighting EvaluateVividLitIndirectBSDF(
     VividGBufferSurfaceData surfaceData,
     VividLitBSDFData bsdfData,
@@ -364,6 +388,44 @@ VividIndirectLighting EvaluateVividLitIndirectBSDF(
         preLightData.iblPerceptualRoughness,
         clampedNdotV);
     lighting.diffuse = EvaluateVividBakedDiffuseLighting(surfaceData) * preLightData.diffuseFGD;
+    lighting.specularReflected = VividSampleSkyIBL(dominantDirectionWS, preLightData.iblPerceptualRoughness) * preLightData.specularFGD;
+
+    if (bsdfData.coatMask > 0.0)
+    {
+        float coatIblF =  F_Schlick(kVividClearCoatF0, 1.0, clampedNdotV) * bsdfData.coatMask;
+        float attenuation = Sq(1.0 - coatIblF);
+        lighting.diffuse *= attenuation;
+        lighting.specularReflected *= attenuation;
+
+        float coatPerceptualRoughness =  RoughnessToPerceptualRoughness(bsdfData.coatRoughness);
+        float3 coatDominantDirectionWS = GetSpecularDominantDir(
+            surfaceData.normalWS,
+            preLightData.iblR,
+            coatPerceptualRoughness,
+            clampedNdotV);
+        lighting.specularReflected += VividSampleSkyIBL(coatDominantDirectionWS, coatPerceptualRoughness) * coatIblF;
+    }
+
+    lighting.diffuse *= surfaceData.ambientOcclusion;
+    lighting.specularReflected *= surfaceData.ambientOcclusion;
+    return lighting;
+}
+
+VividIndirectLighting EvaluateVividLitIndirectBSDF(
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData,
+    VividPreLightData preLightData,
+    float3 viewDirectionWS,
+    float3 positionWS)
+{
+    VividIndirectLighting lighting = (VividIndirectLighting)0;
+    float clampedNdotV = saturate( ClampNdotV(preLightData.NdotV));
+    float3 dominantDirectionWS = GetSpecularDominantDir(
+        surfaceData.normalWS,
+        preLightData.iblR,
+        preLightData.iblPerceptualRoughness,
+        clampedNdotV);
+    lighting.diffuse = EvaluateVividBakedDiffuseLighting(surfaceData, positionWS, viewDirectionWS) * preLightData.diffuseFGD;
     lighting.specularReflected = VividSampleSkyIBL(dominantDirectionWS, preLightData.iblPerceptualRoughness) * preLightData.specularFGD;
 
     if (bsdfData.coatMask > 0.0)
@@ -449,6 +511,46 @@ VividIndirectLighting EvaluateVividFabricIndirectBSDF(
     return lighting;
 }
 
+VividIndirectLighting EvaluateVividFabricIndirectBSDF(
+    VividGBufferSurfaceData surfaceData,
+    float3 viewDirectionWS,
+    float3 positionWS)
+{
+    VividIndirectLighting lighting = (VividIndirectLighting)0;
+
+    float nDotV = dot(surfaceData.normalWS, viewDirectionWS);
+    float clampedNdotV = saturate( ClampNdotV(nDotV));
+    float roughness =  ClampRoughnessForAnalyticalLights(surfaceData.linearRoughness);
+    float perceptualRoughness =  RoughnessToPerceptualRoughness(roughness);
+    float fuzzAmount = saturate(surfaceData.customData);
+    float3 baseSpecular = lerp(kVividDielectricF0, surfaceData.baseColor, surfaceData.metallic);
+    float luminance = VividGetLuminance(surfaceData.baseColor);
+    float3 sheenTint = lerp(luminance.xxx, surfaceData.baseColor, 0.35);
+    float3 fabricFresnel0 = lerp(baseSpecular, sheenTint, fuzzAmount);
+    float3 specularFGD = 0.0;
+    float diffuseFGD = 0.0;
+    float reflectivity = 0.0;
+    GetPreIntegratedFGDCharlieAndFabricLambert(
+        clampedNdotV,
+        perceptualRoughness,
+        fabricFresnel0,
+        specularFGD,
+        diffuseFGD,
+        reflectivity);
+
+    lighting.diffuse = EvaluateVividBakedDiffuseLighting(surfaceData, positionWS, viewDirectionWS) * diffuseFGD;
+    float3 reflectionVectorWS = VividGetReflectionVector(viewDirectionWS, surfaceData.normalWS);
+    float3 dominantDirectionWS = GetSpecularDominantDir(
+        surfaceData.normalWS,
+        reflectionVectorWS,
+        perceptualRoughness,
+        clampedNdotV);
+    lighting.specularReflected = VividSampleSkyIBL(dominantDirectionWS, perceptualRoughness) * specularFGD * fuzzAmount;
+    lighting.diffuse *= surfaceData.ambientOcclusion;
+    lighting.specularReflected *= surfaceData.ambientOcclusion;
+    return lighting;
+}
+
 float3 EvaluateVividFabricIndirectLight(
     VividGBufferSurfaceData surfaceData,
     float3 viewDirectionWS)
@@ -472,6 +574,24 @@ VividIndirectLighting EvaluateBSDF_Env(
         lighting = EvaluateVividFabricIndirectBSDF(surfaceData, normalizedViewDirectionWS);
     else
         lighting = EvaluateVividLitIndirectBSDF(surfaceData, bsdfData, preLightData, normalizedViewDirectionWS);
+
+    return lighting;
+}
+
+VividIndirectLighting EvaluateBSDF_Env(
+    float3 positionWS,
+    float3 viewDirectionWS,
+    VividPreLightData preLightData,
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData)
+{
+    float3 normalizedViewDirectionWS = SafeNormalize(viewDirectionWS);
+    VividIndirectLighting lighting = (VividIndirectLighting)0;
+
+    if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+        lighting = EvaluateVividFabricIndirectBSDF(surfaceData, normalizedViewDirectionWS, positionWS);
+    else
+        lighting = EvaluateVividLitIndirectBSDF(surfaceData, bsdfData, preLightData, normalizedViewDirectionWS, positionWS);
 
     return lighting;
 }

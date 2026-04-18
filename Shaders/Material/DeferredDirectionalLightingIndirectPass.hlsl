@@ -65,7 +65,7 @@ float3 EvaluateDeferredDirectionalLighting(VividGBufferSurfaceData surfaceData, 
     VividAggregateLighting aggregateLighting = (VividAggregateLighting)0;
 
     AccumulateIndirectLighting(
-        EvaluateBSDF_Env(viewDirectionWS, preLightData, surfaceData, bsdfData),
+        EvaluateBSDF_Env(positionWS, viewDirectionWS, preLightData, surfaceData, bsdfData),
         aggregateLighting);
 
     [loop]

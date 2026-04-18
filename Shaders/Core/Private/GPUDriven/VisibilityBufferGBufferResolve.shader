@@ -18,10 +18,12 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             #pragma vertex Vert
             #pragma fragment Frag
             #pragma editor_sync_compilation
+            #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
 
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
             #include_with_pragmas "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/Bindless.hlsl"
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VividProbeVolume.hlsl"
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl"
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/VividBarycentric.hlsl"
@@ -283,6 +285,11 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     vertexNormalWS1,
                     vertexNormalWS2);
                 float3 normalWS = SafeNormalize(barycentricVertexNormalWS.lambda);
+                float3 positionWS = InterpolateWithBarycentricNoDerivatives(
+                    barycentric,
+                    triangleData.positionWS0,
+                    triangleData.positionWS1,
+                    triangleData.positionWS2);
 
                 UNITY_BRANCH
                 if (triangleData.materialData.NormalsIndex != 0xffffffffu)
@@ -319,8 +326,12 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 surfaceData.customData1 = 0.0f;
                 surfaceData.materialId = VIVID_GBUFFER_MATERIAL_STANDARD;
                 surfaceData.emissive = max(triangleData.materialData.Emission.rgb, 0.0f);
-                surfaceData.bakedGI = 0.0f;
-                surfaceData.hasBakedGI = 0.0f;
+                surfaceData.bakedGI = SampleVividProbeVolume(
+                    positionWS,
+                    normalWS,
+                    GetWorldSpaceNormalizeViewDir(positionWS),
+                    0xFFFFFFFFu);
+                surfaceData.hasBakedGI = VividHasProbeVolumeGI() ? 1.0f : 0.0f;
                 return surfaceData;
             }
 

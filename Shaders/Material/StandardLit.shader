@@ -119,6 +119,7 @@ Shader "VividRP/Material/StandardLit"
                 #pragma multi_compile_instancing
                 #pragma multi_compile _ LIGHTMAP_ON
                 #pragma multi_compile _ DIRLIGHTMAP_COMBINED
+                #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
                 #pragma shader_feature_local_fragment _ALPHATEST_ON
                 #pragma shader_feature_local_fragment _OPACITYMAP
                 #pragma shader_feature_local_fragment _NORMALMAP
@@ -196,6 +197,9 @@ Shader "VividRP/Material/StandardLit"
             HLSLPROGRAM
                 #pragma only_renderers d3d11 xboxseries ps5 switch2
                 #pragma raytracing surface_shader
+                #pragma multi_compile _ LIGHTMAP_ON
+                #pragma multi_compile _ DIRLIGHTMAP_COMBINED
+                #pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
                 #pragma shader_feature_local_raytracing _ALPHATEST_ON
                 #pragma shader_feature_local_raytracing _OPACITYMAP
                 #pragma shader_feature_local_raytracing _NORMALMAP

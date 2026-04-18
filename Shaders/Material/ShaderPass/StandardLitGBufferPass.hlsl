@@ -1,7 +1,7 @@
 #ifndef VIVIDRP_STANDARD_LIT_GBUFFER_PASS_INCLUDED
 #define VIVIDRP_STANDARD_LIT_GBUFFER_PASS_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BakedGI.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VividProbeVolume.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
 
@@ -53,6 +53,7 @@ struct Varyings
     float4 tangentWS : TEXCOORD1;
     float2 uv : TEXCOORD2;
     float2 lightmapUV : TEXCOORD3;
+    float3 positionWS : TEXCOORD4;
     UNITY_VERTEX_INPUT_INSTANCE_ID
     UNITY_VERTEX_OUTPUT_STEREO
 };
@@ -75,6 +76,7 @@ Varyings Vert(Attributes input)
     UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
     output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
+    output.positionWS = TransformObjectToWorld(input.positionOS.xyz);
     output.normalWS = TransformObjectToWorldNormal(input.normalOS);
     output.tangentWS = float4(TransformObjectToWorldDir(input.tangentOS.xyz), input.tangentOS.w);
     output.uv = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
@@ -158,14 +160,26 @@ float3 SampleNormalWS(Varyings input)
 #endif
 }
 
-float3 SampleStandardLitBakedGI(float2 lightmapUV, float3 normalWS)
+float3 SampleStandardLitBakedGI(float2 lightmapUV, float3 normalWS, float3 positionWS)
 {
+#if defined(LIGHTMAP_ON)
     return SampleVividBakedGI(lightmapUV, normalWS);
+#else
+    return SampleVividProbeVolume(
+        positionWS,
+        normalWS,
+        GetWorldSpaceNormalizeViewDir(positionWS),
+        GetMeshRenderingLayerMask());
+#endif
 }
 
 float HasStandardLitBakedGI()
 {
-    return HasVividBakedGI();
+#if defined(LIGHTMAP_ON)
+    return 1.0;
+#else
+    return VividHasProbeVolumeGI() ? 1.0 : 0.0;
+#endif
 }
 
 VividGBufferSurfaceData BuildStandardLitSurfaceData(Varyings input)
@@ -193,7 +207,7 @@ VividGBufferSurfaceData BuildStandardLitSurfaceData(Varyings input)
 #endif
 
     surfaceData.emissive = SampleEmission(input.uv);
-    surfaceData.bakedGI = SampleStandardLitBakedGI(input.lightmapUV, surfaceData.normalWS);
+    surfaceData.bakedGI = SampleStandardLitBakedGI(input.lightmapUV, surfaceData.normalWS, input.positionWS);
     surfaceData.hasBakedGI = HasStandardLitBakedGI();
     return surfaceData;
 }

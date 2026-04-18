@@ -127,7 +127,9 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("GetBindlessTexture2D("));
             Assert.That(shaderSource, Does.Contain("NormalsIndex"));
             Assert.That(shaderSource, Does.Contain("ComputeDoubleSidedNormalFlipSign("));
-            Assert.That(shaderSource, Does.Contain("surfaceData.bakedGI = 0.0f;"));
+            Assert.That(shaderSource, Does.Contain("#pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2"));
+            Assert.That(shaderSource, Does.Contain("SampleVividProbeVolume("));
+            Assert.That(shaderSource, Does.Contain("surfaceData.hasBakedGI = VividHasProbeVolumeGI() ? 1.0f : 0.0f;"));
             Assert.That(shaderSource, Does.Contain("discard;"));
         }
 

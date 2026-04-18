@@ -41,6 +41,31 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void StandardLitShader_DeclaresAdaptiveProbeVolumeVariants_ForDeferredAndIndirectDxrPasses()
+        {
+            string shaderSource = File.ReadAllText(GetShaderSourcePath());
+
+            Assert.That(shaderSource, Does.Contain("#pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2"));
+            Assert.That(shaderSource, Does.Contain("#pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2"));
+            Assert.That(shaderSource, Does.Contain("#pragma multi_compile _ LIGHTMAP_ON"));
+            Assert.That(shaderSource, Does.Contain("#pragma multi_compile _ DIRLIGHTMAP_COMBINED"));
+        }
+
+        [Test]
+        public void StandardLitIndirectDiffusePass_SamplesBakedGiOrProbeVolume_ForRayTracingHits()
+        {
+            string source = File.ReadAllText(GetIndirectDiffuseSourcePath());
+
+            Assert.That(source, Does.Contain("#define ATTRIBUTES_NEED_TEXCOORD0"));
+            Assert.That(source, Does.Contain("#define ATTRIBUTES_NEED_TEXCOORD1"));
+            Assert.That(source, Does.Contain("SampleStandardLitIndirectDiffuseBakedGI("));
+            Assert.That(source, Does.Contain("SampleVividBakedGI(geometry.lightmapUV, normalWS)"));
+            Assert.That(source, Does.Contain("SampleVividProbeVolume("));
+            Assert.That(source, Does.Contain("surfaceData.bakedGI = SampleStandardLitIndirectDiffuseBakedGI(geometry, surfaceData.normalWS);"));
+            Assert.That(source, Does.Contain("lightingRadiance += surfaceData.bakedGI * diffuseColor * INV_PI;"));
+        }
+
+        [Test]
         public void StandardLitShader_DeclaresUrpCompatibleCoreProperties()
         {
             string shaderSource = File.ReadAllText(GetShaderSourcePath());
@@ -203,17 +228,31 @@ namespace VividRP.Editor.Tests
 
         private static string GetShaderSourcePath()
         {
-            string shaderPath = Path.GetFullPath(Path.Combine(
-                Application.dataPath,
-                "..",
-                "Packages",
-                "com.af8a2a.vividrp",
-                "Shaders",
-                "Material",
-                "StandardLit.shader"));
+            return GetPackageFilePath("Shaders", "Material", "StandardLit.shader");
+        }
 
-            Assert.That(File.Exists(shaderPath), Is.True, $"Expected shader source at '{shaderPath}'.");
-            return shaderPath;
+        private static string GetIndirectDiffuseSourcePath()
+        {
+            return GetPackageFilePath("Shaders", "Material", "ShaderPass", "IndirectDiffuse.hlsl");
+        }
+
+        private static string GetPackageFilePath(params string[] relativeParts)
+        {
+            string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            string[] packageRoots =
+            {
+                Path.Combine(projectRoot, "Packages", "VividRP"),
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
+            };
+
+            foreach (string packageRoot in packageRoots)
+            {
+                string fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
+                if (File.Exists(fullPath))
+                    return fullPath;
+            }
+
+            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
 
         private sealed class ColorEqualityComparer : IEqualityComparer<Color>

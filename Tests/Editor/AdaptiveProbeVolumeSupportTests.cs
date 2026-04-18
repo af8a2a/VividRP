@@ -59,15 +59,26 @@ namespace VividRP.Editor.Tests
                 GetPackageFilePath("Shaders", "Material", "DeferredDirectionalLightingIndirectPass.hlsl"));
             var simpleDeferredSource = File.ReadAllText(
                 GetPackageFilePath("Shaders", "Material", "ShaderPass", "SimpleDeferredLitPass.hlsl"));
+            var standardLitPassSource = File.ReadAllText(
+                GetPackageFilePath("Shaders", "Material", "ShaderPass", "StandardLitGBufferPass.hlsl"));
+            var indirectDiffuseSource = File.ReadAllText(
+                GetPackageFilePath("Shaders", "Material", "ShaderPass", "IndirectDiffuse.hlsl"));
+            var visibilityBufferResolveSource = File.ReadAllText(
+                GetPackageFilePath("Shaders", "Core", "Private", "GPUDriven", "VisibilityBufferGBufferResolve.shader"));
 
             Assert.That(wrapperSource, Does.Contain("ProbeVolume.hlsl"));
             Assert.That(wrapperSource, Does.Contain("uint _EnableProbeVolumes;"));
+            Assert.That(wrapperSource, Does.Contain("VividHasProbeVolumeGI()"));
+            Assert.That(wrapperSource, Does.Contain("SampleVividProbeVolume("));
             Assert.That(wrapperSource, Does.Contain("EvaluateAmbientProbe(float3 normalWS)"));
-            Assert.That(lightingSource, Does.Contain("EvaluateAdaptiveProbeVolume("));
+            Assert.That(lightingSource, Does.Contain("SampleVividProbeVolume(positionWS, surfaceData.normalWS, viewDirectionWS, 0xFFFFFFFFu)"));
             Assert.That(deferredComputeSource, Does.Contain("#pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2"));
             Assert.That(deferredDirectionalSource, Does.Contain("EvaluateBSDF_Env(positionWS, viewDirectionWS, preLightData, surfaceData, bsdfData)"));
             Assert.That(simpleDeferredSource, Does.Contain("EvaluateBSDF_Env(positionWS, viewDirectionWS, preLightData, surfaceData, bsdfData)"));
             Assert.That(simpleDeferredSource, Does.Contain("useAmbientFallback = useAmbientFallback && _EnableProbeVolumes == 0;"));
+            Assert.That(standardLitPassSource, Does.Contain("SampleVividProbeVolume("));
+            Assert.That(indirectDiffuseSource, Does.Contain("SampleVividProbeVolume("));
+            Assert.That(visibilityBufferResolveSource, Does.Contain("SampleVividProbeVolume("));
         }
 
         [Test]

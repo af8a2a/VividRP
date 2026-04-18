@@ -355,21 +355,8 @@ float3 EvaluateVividBakedDiffuseLighting(
     float3 positionWS,
     float3 viewDirectionWS)
 {
-#if defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2)
-    if (surfaceData.hasBakedGI <= 0.5 && _EnableProbeVolumes != 0)
-    {
-        float3 bakeDiffuseLighting = 0.0;
-        float4 probeOcclusion = 1.0;
-        EvaluateAdaptiveProbeVolume(
-            GetAbsolutePositionWS(positionWS),
-            surfaceData.normalWS,
-            SafeNormalize(viewDirectionWS),
-            0xFFFFFFFFu,
-            bakeDiffuseLighting,
-            probeOcclusion);
-        return bakeDiffuseLighting;
-    }
-#endif
+    if (surfaceData.hasBakedGI <= 0.5 && VividHasProbeVolumeGI())
+        return SampleVividProbeVolume(positionWS, surfaceData.normalWS, viewDirectionWS, 0xFFFFFFFFu);
 
     return EvaluateVividBakedDiffuseLighting(surfaceData);
 }

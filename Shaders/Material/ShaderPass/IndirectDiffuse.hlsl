@@ -4,8 +4,12 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VividProbeVolume.hlsl"
 
 #define ATTRIBUTES_NEED_TEXCOORD0
+#if defined(LIGHTMAP_ON)
+    #define ATTRIBUTES_NEED_TEXCOORD1
+#endif
 #if defined(_NORMALMAP)
     #define ATTRIBUTES_NEED_TANGENT
 #endif
@@ -64,6 +68,7 @@ struct VividIndirectDiffuseHitGeometry
     float3 tangentWS;
     float tangentSign;
     float2 uv;
+    float2 lightmapUV;
     float hitDistance;
     bool isFrontFace;
 };
@@ -205,6 +210,15 @@ float2 VividIndirectDiffuseFetchUV(AttributeData attributeData)
     return VividIndirectDiffuseTransformUV(currentVertex.texCoord0.xy);
 }
 
+float2 VividIndirectDiffuseFetchLightmapUV(IntersectionVertex currentVertex)
+{
+#if defined(LIGHTMAP_ON)
+    return TransformVividLightmapUV(currentVertex.texCoord1.xy);
+#else
+    return 0.0;
+#endif
+}
+
 VividIndirectDiffuseHitGeometry VividIndirectDiffuseBuildHitGeometry(AttributeData attributeData)
 {
     IntersectionVertex currentVertex;
@@ -217,6 +231,7 @@ VividIndirectDiffuseHitGeometry VividIndirectDiffuseBuildHitGeometry(AttributeDa
     geometry.tangentWS = VividIndirectDiffuseTransformDirToWorld(currentVertex.tangentOS.xyz);
     geometry.tangentSign = sign(currentVertex.tangentOS.w);
     geometry.uv = VividIndirectDiffuseTransformUV(currentVertex.texCoord0.xy);
+    geometry.lightmapUV = VividIndirectDiffuseFetchLightmapUV(currentVertex);
     geometry.hitDistance = RayTCurrent();
     geometry.isFrontFace = HitKind() == HIT_KIND_TRIANGLE_FRONT_FACE;
 
@@ -252,6 +267,28 @@ float3 VividIndirectDiffuseSampleNormalWS(VividIndirectDiffuseHitGeometry geomet
     return normalWS;
 }
 
+float3 SampleStandardLitIndirectDiffuseBakedGI(VividIndirectDiffuseHitGeometry geometry, float3 normalWS)
+{
+#if defined(LIGHTMAP_ON)
+    return SampleVividBakedGI(geometry.lightmapUV, normalWS);
+#else
+    return SampleVividProbeVolume(
+        geometry.positionWS,
+        normalWS,
+        GetWorldSpaceNormalizeViewDir(geometry.positionWS),
+        GetMeshRenderingLayerMask());
+#endif
+}
+
+float HasStandardLitIndirectDiffuseBakedGI()
+{
+#if defined(LIGHTMAP_ON)
+    return 1.0;
+#else
+    return VividHasProbeVolumeGI() ? 1.0 : 0.0;
+#endif
+}
+
 VividGBufferSurfaceData BuildStandardLitSurfaceData(VividIndirectDiffuseHitGeometry geometry, out float4 baseSample)
 {
     baseSample = SampleBase(geometry.uv);
@@ -276,8 +313,8 @@ VividGBufferSurfaceData BuildStandardLitSurfaceData(VividIndirectDiffuseHitGeome
 #endif
 
     surfaceData.emissive = SampleEmission(geometry.uv);
-    surfaceData.bakedGI = 0.0;
-    surfaceData.hasBakedGI = 0.0;
+    surfaceData.bakedGI = SampleStandardLitIndirectDiffuseBakedGI(geometry, surfaceData.normalWS);
+    surfaceData.hasBakedGI = HasStandardLitIndirectDiffuseBakedGI();
     return surfaceData;
 }
 
@@ -361,6 +398,11 @@ void VividIndirectDiffuseEvaluateFrontFaceRadiance(
     emissionRadiance = surfaceData.emissive;
     mainDirectionalDirectionWS = float3(0.0, 0.0, 0.0);
     mainDirectionalRadiance = float3(0.0, 0.0, 0.0);
+
+    if (surfaceData.hasBakedGI > 0.5)
+    {
+        lightingRadiance += surfaceData.bakedGI * diffuseColor * INV_PI;
+    }
 
     DirectionalLightData sunLight;
     if (TryGetMainDirectionalLight(sunLight))

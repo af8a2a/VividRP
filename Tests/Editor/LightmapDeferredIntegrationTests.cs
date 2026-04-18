@@ -19,7 +19,8 @@ namespace VividRP.Editor.Tests
             Assert.That(standardLitShader, Does.Contain("#pragma multi_compile _ DIRLIGHTMAP_COMBINED"));
             Assert.That(simpleLitShader, Does.Contain("#pragma multi_compile _ LIGHTMAP_ON"));
             Assert.That(simpleLitShader, Does.Contain("#pragma multi_compile _ DIRLIGHTMAP_COMBINED"));
-            Assert.That(standardLitPass, Does.Contain("SampleStandardLitBakedGI(input.lightmapUV, surfaceData.normalWS)"));
+            Assert.That(standardLitPass, Does.Contain("SampleStandardLitBakedGI(input.lightmapUV, surfaceData.normalWS, input.positionWS)"));
+            Assert.That(standardLitPass, Does.Contain("SampleVividProbeVolume("));
             Assert.That(simpleLitPass, Does.Contain("SampleVividBakedGI(input.lightmapUV, surfaceData.normalWS)"));
             Assert.That(bakedGiSource, Does.Contain("SampleSingleLightmap("));
             Assert.That(bakedGiSource, Does.Contain("SampleDirectionalLightmap("));

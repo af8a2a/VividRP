@@ -333,9 +333,14 @@ VividCBSDF EvaluateBSDF(
     VividGBufferSurfaceData surfaceData,
     VividLitBSDFData bsdfData)
 {
-    return surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC
-        ? EvaluateVividFabricBSDF(surfaceData, viewDirectionWS, lightDirectionWS)
-        : EvaluateVividLitBSDF(surfaceData, bsdfData, preLightData, viewDirectionWS, lightDirectionWS);
+    VividCBSDF cbsdf = (VividCBSDF)0;
+
+    if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+        cbsdf = EvaluateVividFabricBSDF(surfaceData, viewDirectionWS, lightDirectionWS);
+    else
+        cbsdf = EvaluateVividLitBSDF(surfaceData, bsdfData, preLightData, viewDirectionWS, lightDirectionWS);
+
+    return cbsdf;
 }
 
 float3 EvaluateVividBakedDiffuseLighting(VividGBufferSurfaceData surfaceData)
@@ -461,10 +466,14 @@ VividIndirectLighting EvaluateBSDF_Env(
     VividLitBSDFData bsdfData)
 {
     float3 normalizedViewDirectionWS = SafeNormalize(viewDirectionWS);
-    // return EvaluateVividLitIndirectBSDF(surfaceData, bsdfData, preLightData, normalizedViewDirectionWS);
-    return surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC
-        ? EvaluateVividFabricIndirectBSDF(surfaceData, normalizedViewDirectionWS)
-        : EvaluateVividLitIndirectBSDF(surfaceData, bsdfData, preLightData, normalizedViewDirectionWS);
+    VividIndirectLighting lighting = (VividIndirectLighting)0;
+
+    if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+        lighting = EvaluateVividFabricIndirectBSDF(surfaceData, normalizedViewDirectionWS);
+    else
+        lighting = EvaluateVividLitIndirectBSDF(surfaceData, bsdfData, preLightData, normalizedViewDirectionWS);
+
+    return lighting;
 }
 
 float3 EvaluateIndirectLighting(

@@ -32,6 +32,11 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EvaluateBSDF_Punctual("));
             Assert.That(source, Does.Contain("EvaluateDirectional("));
             Assert.That(source, Does.Contain("BuildVividHDRPLitBSDFData"));
+            Assert.That(source, Does.Contain("VividCBSDF cbsdf = (VividCBSDF)0;"));
+            Assert.That(source, Does.Contain("VividIndirectLighting lighting = (VividIndirectLighting)0;"));
+            Assert.That(source, Does.Contain("if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)"));
+            Assert.That(source, Does.Not.Contain("? EvaluateVividFabricBSDF("));
+            Assert.That(source, Does.Not.Contain("? EvaluateVividFabricIndirectBSDF("));
             Assert.That(source, Does.Contain("EvaluateVividLitDirectLight"));
             Assert.That(source, Does.Contain("EvaluateDirectionalLight"));
             Assert.That(source, Does.Contain("EvaluatePunctualLight"));

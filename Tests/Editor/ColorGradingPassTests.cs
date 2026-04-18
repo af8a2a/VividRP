@@ -15,7 +15,7 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class AutoRegisteredColorGradingPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(ColorGradingPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(ColorGradingPass);
 
             internal bool HasOverrideOption(string fieldName)
             {

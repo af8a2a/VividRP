@@ -489,6 +489,7 @@ namespace VividRP.Runtime
             }
             else
             {
+                
                 var passDefinitions = graphAsset.Passes ?? new List<RenderGraphPassDefinition>();
                 var textures = CreateRuntimeTextures(graphAsset);
                 CreateRuntimeHistoryTextures(graphAsset, out s_HistoryPreviousTextures, out s_HistoryCurrentTextures);

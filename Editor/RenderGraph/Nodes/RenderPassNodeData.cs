@@ -31,9 +31,12 @@ namespace VividRP.Editor.RenderGraph
                 && method.GetParameters()[0].ParameterType == typeof(string));
         private static readonly Dictionary<Type, MonoScript> s_passScriptCache = new Dictionary<Type, MonoScript>();
 
-        protected virtual string RegisteredPassTypeName => null;
+        internal bool UsesPassScriptSelection => GetRegisteredPassType() == null;
 
-        internal bool UsesPassScriptSelection => string.IsNullOrEmpty(RegisteredPassTypeName);
+        internal virtual Type GetRegisteredPassType()
+        {
+            return RenderPassNodeRegistry.GetPassType(GetType());
+        }
 
         protected override void OnDefineOptions(IOptionDefinitionContext context)
         {
@@ -189,7 +192,7 @@ namespace VividRP.Editor.RenderGraph
         internal Type GetPassType()
         {
             if (!UsesPassScriptSelection)
-                return ResolveType(RegisteredPassTypeName);
+                return GetRegisteredPassType();
 
             var option = GetNodeOptionByName(PassScriptOptionName);
             if (option == null)
@@ -221,7 +224,14 @@ namespace VividRP.Editor.RenderGraph
 
         internal string GetRegisteredPassTypeName()
         {
-            return RegisteredPassTypeName;
+            var passType = GetRegisteredPassType();
+            if (passType == null)
+                return null;
+
+            var assemblyName = passType.Assembly.GetName().Name;
+            return string.IsNullOrEmpty(assemblyName)
+                ? passType.FullName
+                : $"{passType.FullName}, {assemblyName}";
         }
 
         internal void PopulateFloatParameters(RenderGraphPassDefinition passDefinition)
@@ -312,30 +322,6 @@ namespace VividRP.Editor.RenderGraph
                 GetPassOwnedResourceOverrideEnabled(field, attr));
         }
 
-        private static Type ResolveType(string assemblyQualifiedOrFullName)
-        {
-            if (string.IsNullOrEmpty(assemblyQualifiedOrFullName))
-                return null;
-
-            var type = Type.GetType(assemblyQualifiedOrFullName, throwOnError: false);
-            if (type != null)
-                return type;
-
-            var fullName = assemblyQualifiedOrFullName;
-            var separatorIndex = assemblyQualifiedOrFullName.IndexOf(',');
-            if (separatorIndex >= 0)
-                fullName = assemblyQualifiedOrFullName.Substring(0, separatorIndex);
-
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                type = assembly.GetType(fullName, throwOnError: false);
-                if (type != null)
-                    return type;
-            }
-
-            return null;
-        }
-
         private static bool TryResolvePassScript(Type passType, out MonoScript script)
         {
             script = null;
@@ -365,7 +351,7 @@ namespace VividRP.Editor.RenderGraph
         {
             return UsesPassScriptSelection
                 ? ResolvePassTypeFromOption(PassScriptOptionName)
-                : ResolveType(RegisteredPassTypeName);
+                : GetRegisteredPassType();
         }
 
         protected virtual bool GetPassOwnedResourceOverrideEnabled(FieldInfo field, RenderGraphResource attr)

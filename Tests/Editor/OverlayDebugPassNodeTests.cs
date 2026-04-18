@@ -12,7 +12,7 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class AutoRegisteredOverlayDebugPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(OverlayDebugPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(OverlayDebugPass);
 
             internal bool TryGetOverlayAmount(out float value)
             {

@@ -10,7 +10,7 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class AutoRegisteredSliderDebugPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(SliderDebugPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(SliderDebugPass);
 
             internal bool TryGetSliderValue(out float value)
             {

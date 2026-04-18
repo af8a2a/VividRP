@@ -13,7 +13,7 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private class AutoRegisteredVisibilityBufferGBufferResolvePassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(VisibilityBufferGBufferResolvePass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(VisibilityBufferGBufferResolvePass);
 
             internal bool HasOverrideOption(string fieldName)
             {
@@ -41,13 +41,13 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class AutoRegisteredGBufferPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(GBufferPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(GBufferPass);
         }
 
         [Serializable]
         private sealed class AutoRegisteredDeferredLightingPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(DeferredLightingPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(DeferredLightingPass);
         }
 
         [Test]

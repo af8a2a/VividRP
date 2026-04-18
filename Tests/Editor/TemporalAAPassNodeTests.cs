@@ -11,7 +11,7 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class AutoRegisteredTemporalAAPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(TemporalAAPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(TemporalAAPass);
         }
 
         [Test]

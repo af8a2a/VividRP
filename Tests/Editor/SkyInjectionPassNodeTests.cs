@@ -11,7 +11,7 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class AutoRegisteredSkyInjectionPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(SkyInjectionPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(SkyInjectionPass);
         }
 
         [Test]

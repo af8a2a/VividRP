@@ -386,37 +386,37 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class DrawObjectPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(DrawObjectPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(DrawObjectPass);
         }
 
         [Serializable]
         private sealed class FinalBlitPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(FinalBlitPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(FinalBlitPass);
         }
 
         [Serializable]
         private sealed class RTASBuildPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(RTASBuildPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(RTASBuildPass);
         }
 
         [Serializable]
         private sealed class RayTracingConsumerPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(RayTracingConsumerPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(RayTracingConsumerPass);
         }
 
         [Serializable]
         private sealed class DirectionalRayTracedShadowPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(DirectionalRayTracedShadowPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(DirectionalRayTracedShadowPass);
         }
 
         [Serializable]
         private sealed class SIGMAShadowDenoisePassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(SIGMAShadowDenoisePass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(SIGMAShadowDenoisePass);
         }
 
         [Test]

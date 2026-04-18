@@ -18,7 +18,7 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class AutoRegisteredHZBGeneratePassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(HZBGeneratePass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(HZBGeneratePass);
         }
 
         [Test]

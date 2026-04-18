@@ -13,19 +13,19 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class AutoRegisteredRTASBuildPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(RTASBuildPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(RTASBuildPass);
         }
 
         [Serializable]
         private sealed class AutoRegisteredDirectionalRayTracedShadowPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(DirectionalRayTracedShadowPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(DirectionalRayTracedShadowPass);
         }
 
         [Serializable]
         private class AutoRegisteredDeferredLightingPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(DeferredLightingPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(DeferredLightingPass);
         }
 
         [Serializable]

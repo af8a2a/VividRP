@@ -1,7 +1,6 @@
 using System.IO;
 using System.Text;
 using UnityEditor;
-using VividRP.Editor;
 using VividRP.Runtime;
 
 namespace VividRP.Editor.RenderGraph
@@ -27,13 +26,14 @@ namespace VividRP.Editor.RenderGraph
             var generatedAssetPath = VividPackagePathUtility.GetPreferredAssetPath(GeneratedRelativePath);
             var fullPath = Path.GetFullPath(generatedAssetPath);
             var existingSource = File.Exists(fullPath) ? File.ReadAllText(fullPath) : string.Empty;
-            var existingRegistrations = RenderPassNodeRegistryBuilder.ParseExistingRegistrations(existingSource);
             var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(
-                TypeCache.GetTypesDerivedFrom<IRenderPass>(),
-                existingRegistrations);
+                TypeCache.GetTypesDerivedFrom<IRenderPass>());
             var generatedSource = RenderPassNodeRegistryBuilder.BuildSource(registrations);
             if (string.Equals(existingSource, generatedSource, System.StringComparison.Ordinal))
+            {
+                RenderPassNodeRegistry.Rebuild();
                 return;
+            }
 
             var directory = Path.GetDirectoryName(fullPath);
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))

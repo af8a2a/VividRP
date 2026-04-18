@@ -16,7 +16,7 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class AutoRegisteredFinalBlitPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(FinalBlitPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(FinalBlitPass);
         }
 
         [Test]

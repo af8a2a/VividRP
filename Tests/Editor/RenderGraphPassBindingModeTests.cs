@@ -133,7 +133,7 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class FinalBlitPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(FinalBlitPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(FinalBlitPass);
         }
     }
 
@@ -233,7 +233,7 @@ namespace VividRP.Editor.Tests
     [Serializable]
     internal class PassOwnedTextureProducerNode : RenderPassNodeData
     {
-        protected override string RegisteredPassTypeName => typeof(PassOwnedTextureProducerPass).AssemblyQualifiedName;
+        internal override Type GetRegisteredPassType() => typeof(PassOwnedTextureProducerPass);
 
         internal bool HasOverrideOption(string fieldName)
         {
@@ -256,13 +256,13 @@ namespace VividRP.Editor.Tests
     [Serializable]
     internal sealed class MixedBindingPassNode : RenderPassNodeData
     {
-        protected override string RegisteredPassTypeName => typeof(MixedBindingPass).AssemblyQualifiedName;
+        internal override Type GetRegisteredPassType() => typeof(MixedBindingPass);
     }
 
     [Serializable]
     internal sealed class HiddenHistoryPassNode : RenderPassNodeData
     {
-        protected override string RegisteredPassTypeName => typeof(HiddenHistoryPass).AssemblyQualifiedName;
+        internal override Type GetRegisteredPassType() => typeof(HiddenHistoryPass);
 
         internal bool HasOverrideOption(string fieldName)
         {

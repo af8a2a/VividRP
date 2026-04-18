@@ -12,7 +12,7 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class AutoRegisteredExposureDebugPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(ExposureDebugPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(ExposureDebugPass);
 
             internal bool TryGetDebugExposure(out float value)
             {

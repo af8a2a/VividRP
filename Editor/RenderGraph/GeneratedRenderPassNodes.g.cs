@@ -3,219 +3,111 @@ using System;
 namespace VividRP.Editor.RenderGraph.Generated
 {
     [Serializable]
-    internal sealed class AtmosphericScatteringPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.AtmosphericScatteringPass, VividRP.Runtime";
-    }
+    internal sealed class AtmosphericScatteringPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class AutoExposurePass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.AutoExposurePass, VividRP.Runtime";
-    }
+    internal sealed class AutoExposurePass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class CSMShadowPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.CSMShadowPass, VividRP.Runtime";
-    }
+    internal sealed class CSMShadowPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class CSMShadowResolvePass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.CSMShadowResolvePass, VividRP.Runtime";
-    }
+    internal sealed class CSMShadowResolvePass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class ClassificationPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.ClassificationPass, VividRP.Runtime";
-    }
+    internal sealed class ClassificationPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class ClusterDebugPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.ClusterDebugPass, VividRP.Runtime";
-    }
+    internal sealed class ClusterDebugPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class ColorGradingPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.ColorGradingPass, VividRP.Runtime";
-    }
+    internal sealed class ColorGradingPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class CopyDepthPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.CopyDepthPass, VividRP.Runtime";
-    }
+    internal sealed class CopyDepthPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class DeferredDirectionalLightingPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.DeferredDirectionalLightingPass, VividRP.Runtime";
-    }
+    internal sealed class DeferredDirectionalLightingPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class DeferredLightingPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.DeferredLightingPass, VividRP.Runtime";
-    }
+    internal sealed class DeferredLightingPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class DirectionalRayTracedShadowPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.DirectionalRayTracedShadowPass, VividRP.Runtime";
-    }
+    internal sealed class DirectionalRayTracedShadowPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class DrawObjectPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.DrawObjectPass, VividRP.Runtime";
-    }
+    internal sealed class DrawObjectPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class ExposureDebugPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.ExposureDebugPass, VividRP.Runtime";
-    }
+    internal sealed class ExposureDebugPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class FinalBlitPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.FinalBlitPass, VividRP.Runtime";
-    }
+    internal sealed class FinalBlitPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class FullScreenPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.FullScreenPass, VividRP.Runtime";
-    }
+    internal sealed class FullScreenPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class GBufferPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.GBufferPass, VividRP.Runtime";
-    }
+    internal sealed class GBufferPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class GenerateViewZPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.GenerateViewZPass, VividRP.Runtime";
-    }
+    internal sealed class GenerateViewZPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class HZBGeneratePass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.HZBGeneratePass, VividRP.Runtime";
-    }
+    internal sealed class HZBGeneratePass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class ImportTextureExamplePass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.ImportTextureExamplePass, VividRP.Runtime";
-    }
+    internal sealed class ImportTextureExamplePass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class LightGridGlobalPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.LightGridGlobalPass, VividRP.Runtime";
-    }
+    internal sealed class LightGridGlobalPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class LightGridPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.LightGridPass, VividRP.Runtime";
-    }
+    internal sealed class LightGridPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class MotionVectorPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.MotionVectorPass, VividRP.Runtime";
-    }
+    internal sealed class MotionVectorPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class OverlayDebugPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.OverlayDebugPass, VividRP.Runtime";
-    }
+    internal sealed class OverlayDebugPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class PreDepthPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.PreDepthPass, VividRP.Runtime";
-    }
+    internal sealed class PreDepthPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class PreIntegratedFGDPreparePass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.PreIntegratedFGDPreparePass, VividRP.Runtime";
-    }
+    internal sealed class PreIntegratedFGDPreparePass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class RTASBuildPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.RTASBuildPass, VividRP.Runtime";
-    }
+    internal sealed class RTASBuildPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class RTASInstanceDebugPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.RTASInstanceDebugPass, VividRP.Runtime";
-    }
+    internal sealed class RTASInstanceDebugPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class SIGMAShadowDenoisePass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.Sigma.SIGMAShadowDenoisePass, VividRP.Runtime";
-    }
+    internal sealed class SIGMAShadowDenoisePass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class ShadowClassifyPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.ShadowClassifyPass, VividRP.Runtime";
-    }
+    internal sealed class ShadowClassifyPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class SkyInjectionPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.SkyInjectionPass, VividRP.Runtime";
-    }
+    internal sealed class SkyInjectionPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class SliderDebugPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.SliderDebugPass, VividRP.Runtime";
-    }
+    internal sealed class SliderDebugPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class TemporalAAPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.TemporalAAPass, VividRP.Runtime";
-    }
+    internal sealed class TemporalAAPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class TileDebugPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.TileDebugPass, VividRP.Runtime";
-    }
+    internal sealed class TileDebugPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class VisibilityBufferGBufferResolvePass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.VisibilityBufferGBufferResolvePass, VividRP.Runtime";
-    }
+    internal sealed class VisibilityBufferGBufferResolvePass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class VisibilityBufferPass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.VisibilityBufferPass, VividRP.Runtime";
-    }
+    internal sealed class VisibilityBufferPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class VisibilityBufferResolvePass : RenderPassNodeData
-    {
-        protected override string RegisteredPassTypeName => "VividRP.Runtime.RenderPass.Core.VisibilityBufferResolvePass, VividRP.Runtime";
-    }
+    internal sealed class VisibilityBufferResolvePass : RenderPassNodeData { }
 
 }

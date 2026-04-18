@@ -10,53 +10,45 @@ namespace VividRP.Editor.RenderGraph
 {
     internal readonly struct RenderPassNodeRegistration
     {
-        internal RenderPassNodeRegistration(string nodeClassName, string passTypeName)
+        internal RenderPassNodeRegistration(string nodeClassName, Type passType)
         {
             NodeClassName = nodeClassName;
-            PassTypeName = passTypeName;
+            PassType = passType;
         }
 
         internal string NodeClassName { get; }
 
-        internal string PassTypeName { get; }
+        internal Type PassType { get; }
     }
 
     internal static class RenderPassNodeRegistryBuilder
     {
         internal const string GeneratedNamespace = "VividRP.Editor.RenderGraph.Generated";
 
-        private static readonly Regex s_ExistingRegistrationPattern = new Regex(
-            "internal sealed class\\s+(?<class>[A-Za-z_][A-Za-z0-9_]*)\\s*:\\s*RenderPassNodeData\\s*\\{\\s*protected override string RegisteredPassTypeName => \\\"(?<type>(?:\\\\.|[^\\\"])*)\\\";",
+        private static readonly Regex s_ExistingClassNamePattern = new Regex(
+            @"internal sealed class\s+(?<class>[A-Za-z_][A-Za-z0-9_]*)\s*:\s*RenderPassNodeData",
             RegexOptions.Compiled | RegexOptions.Singleline);
 
-        internal static IReadOnlyList<RenderPassNodeRegistration> ParseExistingRegistrations(string source)
+        internal static IReadOnlyList<string> ParseExistingClassNames(string source)
         {
             if (string.IsNullOrWhiteSpace(source))
-                return Array.Empty<RenderPassNodeRegistration>();
+                return Array.Empty<string>();
 
-            var registrations = new List<RenderPassNodeRegistration>();
-            var seenPassTypes = new HashSet<string>(StringComparer.Ordinal);
-            var seenClassNames = new HashSet<string>(StringComparer.Ordinal);
+            var classNames = new List<string>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
 
-            foreach (Match match in s_ExistingRegistrationPattern.Matches(source))
+            foreach (Match match in s_ExistingClassNamePattern.Matches(source))
             {
-                var nodeClassName = match.Groups["class"].Value;
-                var passTypeName = Regex.Unescape(match.Groups["type"].Value);
-                if (string.IsNullOrEmpty(nodeClassName) || string.IsNullOrEmpty(passTypeName))
-                    continue;
-
-                if (!seenClassNames.Add(nodeClassName) || !seenPassTypes.Add(passTypeName))
-                    continue;
-
-                registrations.Add(new RenderPassNodeRegistration(nodeClassName, passTypeName));
+                var className = match.Groups["class"].Value;
+                if (!string.IsNullOrEmpty(className) && seen.Add(className))
+                    classNames.Add(className);
             }
 
-            return registrations;
+            return classNames;
         }
 
         internal static IReadOnlyList<RenderPassNodeRegistration> BuildRegistrations(
             IEnumerable<Type> passTypes,
-            IEnumerable<RenderPassNodeRegistration> existingRegistrations = null,
             bool includeTestAssemblies = false)
         {
             var availablePassTypes = passTypes
@@ -64,46 +56,18 @@ namespace VividRP.Editor.RenderGraph
                 .OrderBy(type => type.FullName, StringComparer.Ordinal)
                 .ThenBy(type => type.Assembly.GetName().Name, StringComparer.Ordinal)
                 .ToArray();
-            var availablePassTypeNames = new HashSet<string>(
-                availablePassTypes
-                    .Select(BuildTypeName)
-                    .Where(typeName => !string.IsNullOrEmpty(typeName)),
-                StringComparer.Ordinal);
-            var registrations = new Dictionary<string, RenderPassNodeRegistration>(StringComparer.Ordinal);
+
             var usedClassNames = new HashSet<string>(StringComparer.Ordinal);
-
-            if (existingRegistrations != null)
-            {
-                foreach (var existingRegistration in existingRegistrations)
-                {
-                    if (string.IsNullOrEmpty(existingRegistration.NodeClassName) ||
-                        string.IsNullOrEmpty(existingRegistration.PassTypeName))
-                    {
-                        continue;
-                    }
-
-                    if (!availablePassTypeNames.Contains(existingRegistration.PassTypeName))
-                        continue;
-
-                    if (!usedClassNames.Add(existingRegistration.NodeClassName))
-                        continue;
-
-                    registrations[existingRegistration.PassTypeName] = existingRegistration;
-                }
-            }
+            var registrations = new List<RenderPassNodeRegistration>(availablePassTypes.Length);
 
             foreach (var passType in availablePassTypes)
             {
-                var passTypeName = BuildTypeName(passType);
-                if (string.IsNullOrEmpty(passTypeName) || registrations.ContainsKey(passTypeName))
-                    continue;
-
                 var nodeClassName = AllocateNodeClassName(passType, usedClassNames);
-                registrations.Add(passTypeName, new RenderPassNodeRegistration(nodeClassName, passTypeName));
+                registrations.Add(new RenderPassNodeRegistration(nodeClassName, passType));
             }
 
-            return registrations.Values
-                .OrderBy(registration => registration.NodeClassName, StringComparer.Ordinal)
+            return registrations
+                .OrderBy(r => r.NodeClassName, StringComparer.Ordinal)
                 .ToArray();
         }
 
@@ -118,10 +82,7 @@ namespace VividRP.Editor.RenderGraph
             foreach (var registration in registrations.OrderBy(item => item.NodeClassName, StringComparer.Ordinal))
             {
                 builder.AppendLine("    [Serializable]");
-                builder.AppendLine($"    internal sealed class {registration.NodeClassName} : RenderPassNodeData");
-                builder.AppendLine("    {");
-                builder.AppendLine($"        protected override string RegisteredPassTypeName => \"{EscapeStringLiteral(registration.PassTypeName)}\";");
-                builder.AppendLine("    }");
+                builder.AppendLine($"    internal sealed class {registration.NodeClassName} : RenderPassNodeData {{ }}");
                 builder.AppendLine();
             }
 
@@ -129,7 +90,7 @@ namespace VividRP.Editor.RenderGraph
             return builder.ToString();
         }
 
-        private static bool IsAutoRegistrablePassType(Type passType, bool includeTestAssemblies)
+        internal static bool IsAutoRegistrablePassType(Type passType, bool includeTestAssemblies = false)
         {
             if (passType == null || !passType.IsClass || passType.IsAbstract || passType.ContainsGenericParameters)
                 return false;
@@ -147,14 +108,6 @@ namespace VividRP.Editor.RenderGraph
             }
 
             return passType.GetConstructor(BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null) != null;
-        }
-
-        private static string BuildTypeName(Type passType)
-        {
-            var assemblyName = passType.Assembly.GetName().Name;
-            return string.IsNullOrEmpty(assemblyName)
-                ? passType.FullName
-                : $"{passType.FullName}, {assemblyName}";
         }
 
         private static string AllocateNodeClassName(Type passType, HashSet<string> usedClassNames)
@@ -238,11 +191,6 @@ namespace VividRP.Editor.RenderGraph
                 builder.Insert(0, '_');
 
             return builder.ToString();
-        }
-
-        private static string EscapeStringLiteral(string value)
-        {
-            return value.Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
     }
 }

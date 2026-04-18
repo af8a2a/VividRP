@@ -10,45 +10,22 @@ namespace VividRP.Editor.Tests
 {
     public class RenderPassNodeRegistryBuilderTests
     {
-        private const string FullScreenPassTypeName = "VividRP.Runtime.FullScreenPass, VividRP.Runtime";
-
-        [Serializable]
-        private sealed class AutoRegisteredFullScreenPassNode : RenderPassNodeData
-        {
-            protected override string RegisteredPassTypeName => FullScreenPassTypeName;
-        }
-
         [Test]
-        public void GetPassType_ReturnsRegisteredPassType_WhenNodeIsAutoRegistered()
+        public void BuildRegistrations_IncludesAutoRegistrablePassType()
         {
-            var node = new AutoRegisteredFullScreenPassNode();
-
-            Assert.That(node.UsesPassScriptSelection, Is.False);
-            Assert.That(node.GetPassType(), Is.EqualTo(typeof(FullScreenPass)));
-        }
-
-        [Test]
-        public void BuildRegistrations_PreservesExistingClassName_WhenPassAlreadyKnown()
-        {
-            var existingRegistration = new RenderPassNodeRegistration("SavedFullScreenPassNode", FullScreenPassTypeName);
-
             var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(
-                new[] { typeof(FullScreenPass) },
-                new[] { existingRegistration });
+                new[] { typeof(FullScreenPass) });
 
             Assert.That(registrations, Has.Count.EqualTo(1));
-            Assert.That(registrations[0].NodeClassName, Is.EqualTo("SavedFullScreenPassNode"));
-            Assert.That(registrations[0].PassTypeName, Is.EqualTo(FullScreenPassTypeName));
+            Assert.That(registrations[0].NodeClassName, Is.EqualTo("FullScreenPass"));
+            Assert.That(registrations[0].PassType, Is.EqualTo(typeof(FullScreenPass)));
         }
 
         [Test]
-        public void BuildRegistrations_RemovesExistingRegistration_WhenPassNoLongerExists()
+        public void BuildRegistrations_ExcludesAbstractPassTypes()
         {
-            var existingRegistration = new RenderPassNodeRegistration("SavedFullScreenPassNode", FullScreenPassTypeName);
-
             var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(
-                Array.Empty<Type>(),
-                new[] { existingRegistration });
+                new[] { typeof(RasterPass) });
 
             Assert.That(registrations, Is.Empty);
         }
@@ -72,19 +49,27 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void BuildSource_AndParseExistingRegistrations_RoundTripRegistrations()
+        public void BuildSource_AndParseExistingClassNames_RoundTripClassNames()
         {
-            var expected = new[]
-            {
-                new RenderPassNodeRegistration("FullScreenPass", FullScreenPassTypeName),
-                new RenderPassNodeRegistration("SetupPass", "VividRP.Runtime.RenderPass.Core.SetupPass, VividRP.Runtime"),
-            };
+            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(
+                new[] { typeof(FullScreenPass) });
 
-            var source = RenderPassNodeRegistryBuilder.BuildSource(expected);
-            var parsed = RenderPassNodeRegistryBuilder.ParseExistingRegistrations(source);
+            var source = RenderPassNodeRegistryBuilder.BuildSource(registrations);
+            var parsed = RenderPassNodeRegistryBuilder.ParseExistingClassNames(source);
 
-            Assert.That(parsed.Select(item => item.NodeClassName), Is.EqualTo(expected.Select(item => item.NodeClassName)));
-            Assert.That(parsed.Select(item => item.PassTypeName), Is.EqualTo(expected.Select(item => item.PassTypeName)));
+            Assert.That(parsed, Is.EqualTo(registrations.Select(item => item.NodeClassName).ToArray()));
+        }
+
+        [Test]
+        public void BuildSource_GeneratesEmptyMarkerClasses()
+        {
+            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(
+                new[] { typeof(FullScreenPass) });
+
+            var source = RenderPassNodeRegistryBuilder.BuildSource(registrations);
+
+            Assert.That(source, Does.Contain("internal sealed class FullScreenPass : RenderPassNodeData { }"));
+            Assert.That(source, Does.Not.Contain("RegisteredPassTypeName"));
         }
 
         private static class NameCollisionA

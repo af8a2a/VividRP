@@ -507,25 +507,25 @@ namespace VividRP.Editor.Tests
     [Serializable]
     internal sealed class TextureProducerPassNode : RenderPassNodeData
     {
-        protected override string RegisteredPassTypeName => typeof(TextureProducerPass).AssemblyQualifiedName;
+        internal override Type GetRegisteredPassType() => typeof(TextureProducerPass);
     }
 
     [Serializable]
     internal sealed class TexturePassthroughPassNode : RenderPassNodeData
     {
-        protected override string RegisteredPassTypeName => typeof(TexturePassthroughPass).AssemblyQualifiedName;
+        internal override Type GetRegisteredPassType() => typeof(TexturePassthroughPass);
     }
 
     [Serializable]
     internal sealed class TextureConsumerPassNode : RenderPassNodeData
     {
-        protected override string RegisteredPassTypeName => typeof(TextureConsumerPass).AssemblyQualifiedName;
+        internal override Type GetRegisteredPassType() => typeof(TextureConsumerPass);
     }
 
     [Serializable]
     internal sealed class PrivateResourcesConsumerPassNode : RenderPassNodeData
     {
-        protected override string RegisteredPassTypeName => typeof(PrivateResourcesConsumerPass).AssemblyQualifiedName;
+        internal override Type GetRegisteredPassType() => typeof(PrivateResourcesConsumerPass);
     }
 
     [Serializable]

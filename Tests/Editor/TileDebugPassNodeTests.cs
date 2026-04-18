@@ -10,7 +10,7 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class AutoRegisteredTileDebugPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(TileDebugPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(TileDebugPass);
         }
 
         [Test]

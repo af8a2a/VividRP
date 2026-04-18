@@ -11,7 +11,7 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class AutoRegisteredAtmosphericScatteringPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(AtmosphericScatteringPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(AtmosphericScatteringPass);
         }
 
         [Test]

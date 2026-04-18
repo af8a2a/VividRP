@@ -60,11 +60,6 @@ bool IsFarDepth(float deviceDepth)
     return abs(deviceDepth - UNITY_RAW_FAR_CLIP_VALUE) <= 1e-5f;
 }
 
-float3 GetViewForwardDir()
-{
-    float4x4 viewMatrix = UNITY_MATRIX_V;
-    return -viewMatrix[2].xyz;
-}
 
 float3 GetCameraPositionWS()
 {

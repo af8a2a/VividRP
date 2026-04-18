@@ -12,13 +12,12 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class AutoRegisteredFullScreenPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(FullScreenPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(FullScreenPass);
         }
 
         [Serializable]
         private sealed class MissingPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => "Missing.Namespace.RenderPass, Missing.Assembly";
         }
 
         [Test]

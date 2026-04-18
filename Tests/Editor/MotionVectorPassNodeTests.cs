@@ -11,7 +11,7 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class AutoRegisteredMotionVectorPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(MotionVectorPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(MotionVectorPass);
         }
 
         [Test]

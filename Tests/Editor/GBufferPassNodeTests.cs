@@ -10,7 +10,7 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class AutoRegisteredGBufferPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(GBufferPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(GBufferPass);
 
             internal bool HasOverrideOption(string fieldName)
             {

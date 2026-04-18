@@ -10,7 +10,7 @@ namespace VividRP.Editor.Tests
         [Serializable]
         private sealed class AutoRegisteredCopyDepthPassNode : RenderPassNodeData
         {
-            protected override string RegisteredPassTypeName => typeof(CopyDepthPass).AssemblyQualifiedName;
+            internal override Type GetRegisteredPassType() => typeof(CopyDepthPass);
         }
 
         [Test]

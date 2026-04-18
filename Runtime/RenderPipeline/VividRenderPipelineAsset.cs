@@ -3,6 +3,13 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
+    public enum ColorGradingSpace
+    {
+        AcesCg,
+        [InspectorName("sRGB")]
+        sRGB
+    }
+
     public enum AutoExposureImplementationPath
     {
         Unreal,
@@ -29,6 +36,9 @@ namespace VividRP.Runtime
         private bool m_EnableSRPBatcher = true;
 
         [SerializeField]
+        private ColorGradingSpace m_ColorGradingSpace = ColorGradingSpace.sRGB;
+
+        [SerializeField]
         private AutoExposureImplementationPath m_AutoExposureImplementation = AutoExposureImplementationPath.Unreal;
 
         public bool EnableAsyncCompute
@@ -41,6 +51,12 @@ namespace VividRP.Runtime
         {
             get => m_EnableSRPBatcher;
             set => m_EnableSRPBatcher = value;
+        }
+
+        public ColorGradingSpace ColorGradingSpace
+        {
+            get => m_ColorGradingSpace;
+            set => m_ColorGradingSpace = value;
         }
 
         public bool EnableGPUDriven

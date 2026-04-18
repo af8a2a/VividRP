@@ -12,6 +12,9 @@ namespace VividRP.Editor.RenderPipeline
     internal sealed class VividRenderPipelineAssetEditor : UnityEditor.Editor
     {
         private static readonly GUIContent s_RenderGraphLabel = EditorGUIUtility.TrTextContent("Render Graph Asset");
+        private static readonly GUIContent s_ColorGradingSpaceLabel = EditorGUIUtility.TrTextContent(
+            "Color Grading Space",
+            "Set the color space used for color grading. ACES tonemapping always grades in ACEScg; use this to select the grading space for the other tonemappers.");
         private static readonly GUIContent s_AutoExposureImplementationLabel = EditorGUIUtility.TrTextContent("Auto Exposure Implementation");
         private static readonly GUIContent s_AsyncComputeLabel = EditorGUIUtility.TrTextContent("Async Compute");
         private static readonly GUIContent s_GpuDrivenLabel = EditorGUIUtility.TrTextContent("GPU Driven");
@@ -47,6 +50,15 @@ namespace VividRP.Editor.RenderPipeline
                 name = "vivid-rp-asset-render-graph-field",
             };
             root.Add(renderGraphField);
+
+            var colorGradingSpaceField = new PropertyField(
+                serializedObject.FindProperty("m_ColorGradingSpace"),
+                s_ColorGradingSpaceLabel.text)
+            {
+                name = "vivid-rp-asset-color-grading-space-field",
+                tooltip = s_ColorGradingSpaceLabel.tooltip,
+            };
+            root.Add(colorGradingSpaceField);
 
             var autoExposureImplementationField = new PropertyField(
                 serializedObject.FindProperty("m_AutoExposureImplementation"),

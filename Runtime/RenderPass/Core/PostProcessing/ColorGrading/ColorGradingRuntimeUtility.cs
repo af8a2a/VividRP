@@ -18,6 +18,27 @@ namespace VividRP.Runtime
         External
     }
 
+    internal static class ColorGradingSpaceUtility
+    {
+        internal const string GradeInSrgbKeyword = "GRADE_IN_SRGB";
+        internal const string GradeInAcesCgKeyword = "GRADE_IN_ACESCG";
+
+        internal static ColorGradingSpace ResolveColorGradingSpace(VividRenderPipelineAsset pipelineAsset)
+        {
+            return pipelineAsset?.ColorGradingSpace ?? ColorGradingSpace.sRGB;
+        }
+
+        internal static string GetColorGradingSpaceKeyword(ColorGradingSpace colorGradingSpace)
+        {
+            return colorGradingSpace switch
+            {
+                ColorGradingSpace.sRGB => GradeInSrgbKeyword,
+                ColorGradingSpace.AcesCg => GradeInAcesCgKeyword,
+                _ => GradeInSrgbKeyword
+            };
+        }
+    }
+
     internal struct ColorGradingSettingsData
     {
         public bool enableColorGrading;
@@ -425,7 +446,8 @@ namespace VividRP.Runtime
             if (cmd == null || !IsValid || !output.IsValid())
                 return;
 
-            SetKeywords(cmd, settings.tonemappingMode);
+            var colorGradingSpace = ColorGradingSpaceUtility.ResolveColorGradingSpace(VividRenderPipelineAsset.GetActiveAsset());
+            SetKeywords(cmd, settings.tonemappingMode, colorGradingSpace);
             cmd.SetComputeVectorParam(m_Shader, SizeId, new Vector4(LutSize, 1f / (LutSize - 1f), 0f, 0f));
             cmd.SetComputeVectorParam(m_Shader, LogLut3DParamsId, new Vector4(1f / LutSize, LutSize - 1f, settings.externalLutContribution, 0f));
             cmd.SetComputeVectorParam(m_Shader, ColorBalanceId, settings.colorBalance);
@@ -472,7 +494,10 @@ namespace VividRP.Runtime
             cmd.DispatchCompute(m_Shader, m_Kernel, dispatchCount, dispatchCount, dispatchCount);
         }
 
-        private void SetKeywords(CommandBuffer cmd, ColorGradingTonemappingShaderMode tonemappingMode)
+        private void SetKeywords(
+            CommandBuffer cmd,
+            ColorGradingTonemappingShaderMode tonemappingMode,
+            ColorGradingSpace colorGradingSpace)
         {
             SetKeyword(cmd, m_TonemappingNoneKeyword, tonemappingMode == ColorGradingTonemappingShaderMode.None);
             SetKeyword(cmd, m_TonemappingNeutralKeyword, tonemappingMode == ColorGradingTonemappingShaderMode.Neutral);
@@ -483,8 +508,9 @@ namespace VividRP.Runtime
             SetKeyword(cmd, m_TonemappingKhronosPbrKeyword, tonemappingMode == ColorGradingTonemappingShaderMode.KhronosPBR);
             SetKeyword(cmd, m_TonemappingCustomKeyword, tonemappingMode == ColorGradingTonemappingShaderMode.Custom);
             SetKeyword(cmd, m_TonemappingExternalKeyword, tonemappingMode == ColorGradingTonemappingShaderMode.External);
-            SetKeyword(cmd, m_GradeInSrgbKeyword, true);
-            SetKeyword(cmd, m_GradeInAcesCgKeyword, false);
+            var colorGradingSpaceKeyword = ColorGradingSpaceUtility.GetColorGradingSpaceKeyword(colorGradingSpace);
+            SetKeyword(cmd, m_GradeInSrgbKeyword, colorGradingSpaceKeyword == ColorGradingSpaceUtility.GradeInSrgbKeyword);
+            SetKeyword(cmd, m_GradeInAcesCgKeyword, colorGradingSpaceKeyword == ColorGradingSpaceUtility.GradeInAcesCgKeyword);
             SetKeyword(cmd, m_HdrColorspaceConversionKeyword, false);
         }
 

@@ -47,6 +47,22 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ResolveColorGradingSpace_DefaultsToSrgb_WhenPipelineAssetIsNull()
+        {
+            var result = ColorGradingSpaceUtility.ResolveColorGradingSpace(null);
+
+            Assert.That(result, Is.EqualTo(ColorGradingSpace.sRGB));
+        }
+
+        [Test]
+        public void GetColorGradingSpaceKeyword_ReturnsAcesCgKeyword_WhenAcesCgIsSelected()
+        {
+            var result = ColorGradingSpaceUtility.GetColorGradingSpaceKeyword(ColorGradingSpace.AcesCg);
+
+            Assert.That(result, Is.EqualTo("GRADE_IN_ACESCG"));
+        }
+
+        [Test]
         public void Tonemapping_IsInactive_WhenExternalModeHasNoLut()
         {
             var tonemapping = new Tonemapping();

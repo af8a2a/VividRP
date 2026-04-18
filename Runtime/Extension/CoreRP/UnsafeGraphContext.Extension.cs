@@ -2,10 +2,11 @@
 
 namespace UnityEngine.Rendering
 {
-    public class UnsafeGraphContextExtension
+    public static class UnsafeGraphContextExtension
     {
-        
-        
-        // public CommandBuffer nativeCmd=CommandBufferHelpers.GetNativeCommandBuffer()
+        public static CommandBuffer GetNativeCommandBuffer(this UnsafeGraphContext unsafeGraphContext)
+        {
+            return CommandBufferHelpers.GetNativeCommandBuffer(unsafeGraphContext.cmd);
+        }
     }
 }

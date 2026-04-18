@@ -18,43 +18,6 @@ namespace VividRP.Runtime
         External
     }
 
-    internal enum ColorGradingCurveTextureSlot
-    {
-        Master,
-        Red,
-        Green,
-        Blue,
-        HueVsHue,
-        HueVsSat,
-        SatVsSat,
-        LumVsSat
-    }
-
-    internal struct ColorGradingLutTextures
-    {
-        public TextureHandle masterCurve;
-        public TextureHandle redCurve;
-        public TextureHandle greenCurve;
-        public TextureHandle blueCurve;
-        public TextureHandle hueVsHueCurve;
-        public TextureHandle hueVsSatCurve;
-        public TextureHandle satVsSatCurve;
-        public TextureHandle lumVsSatCurve;
-        public TextureHandle externalLut;
-
-        public bool AreCurvesValid()
-        {
-            return masterCurve.IsValid()
-                && redCurve.IsValid()
-                && greenCurve.IsValid()
-                && blueCurve.IsValid()
-                && hueVsHueCurve.IsValid()
-                && hueVsSatCurve.IsValid()
-                && satVsSatCurve.IsValid()
-                && lumVsSatCurve.IsValid();
-        }
-    }
-
     internal struct ColorGradingSettingsData
     {
         public bool enableColorGrading;
@@ -86,14 +49,6 @@ namespace VividRP.Runtime
         public Vector4 midSegmentB;
         public Vector4 shoSegmentA;
         public Vector4 shoSegmentB;
-        public TextureCurve masterCurve;
-        public TextureCurve redCurve;
-        public TextureCurve greenCurve;
-        public TextureCurve blueCurve;
-        public TextureCurve hueVsHueCurve;
-        public TextureCurve hueVsSatCurve;
-        public TextureCurve satVsSatCurve;
-        public TextureCurve lumVsSatCurve;
 
         public bool RequiresLut => enableColorGrading || tonemappingMode != ColorGradingTonemappingShaderMode.None;
 
@@ -145,14 +100,6 @@ namespace VividRP.Runtime
                 midSegmentB = Vector4.zero,
                 shoSegmentA = Vector4.zero,
                 shoSegmentB = Vector4.zero,
-                masterCurve = null,
-                redCurve = null,
-                greenCurve = null,
-                blueCurve = null,
-                hueVsHueCurve = null,
-                hueVsSatCurve = null,
-                satVsSatCurve = null,
-                lumVsSatCurve = null,
             };
         }
     }
@@ -255,14 +202,6 @@ namespace VividRP.Runtime
 
             if (colorCurves != null)
             {
-                settings.masterCurve = colorCurves.master.value;
-                settings.redCurve = colorCurves.red.value;
-                settings.greenCurve = colorCurves.green.value;
-                settings.blueCurve = colorCurves.blue.value;
-                settings.hueVsHueCurve = colorCurves.hueVsHue.value;
-                settings.hueVsSatCurve = colorCurves.hueVsSat.value;
-                settings.satVsSatCurve = colorCurves.satVsSat.value;
-                settings.lumVsSatCurve = colorCurves.lumVsSat.value;
                 settings.enableColorGrading |= colorCurves.IsActive();
             }
 
@@ -448,14 +387,6 @@ namespace VividRP.Runtime
         private readonly LocalKeyword m_GradeInSrgbKeyword;
         private readonly LocalKeyword m_GradeInAcesCgKeyword;
         private readonly LocalKeyword m_HdrColorspaceConversionKeyword;
-        private readonly TextureCurve m_DefaultMasterCurve;
-        private readonly TextureCurve m_DefaultRedCurve;
-        private readonly TextureCurve m_DefaultGreenCurve;
-        private readonly TextureCurve m_DefaultBlueCurve;
-        private readonly TextureCurve m_DefaultHueVsHueCurve;
-        private readonly TextureCurve m_DefaultHueVsSatCurve;
-        private readonly TextureCurve m_DefaultSatVsSatCurve;
-        private readonly TextureCurve m_DefaultLumVsSatCurve;
 
         internal ColorGradingLutBuilder()
         {
@@ -474,28 +405,12 @@ namespace VividRP.Runtime
             m_GradeInSrgbKeyword = CreateKeyword("GRADE_IN_SRGB");
             m_GradeInAcesCgKeyword = CreateKeyword("GRADE_IN_ACESCG");
             m_HdrColorspaceConversionKeyword = CreateKeyword("HDR_COLORSPACE_CONVERSION");
-            m_DefaultMasterCurve = ColorGradingCurvePresets.CreateLinearCurve();
-            m_DefaultRedCurve = ColorGradingCurvePresets.CreateLinearCurve();
-            m_DefaultGreenCurve = ColorGradingCurvePresets.CreateLinearCurve();
-            m_DefaultBlueCurve = ColorGradingCurvePresets.CreateLinearCurve();
-            m_DefaultHueVsHueCurve = ColorGradingCurvePresets.CreateFlatCurve(0.5f, true);
-            m_DefaultHueVsSatCurve = ColorGradingCurvePresets.CreateFlatCurve(0.5f, true);
-            m_DefaultSatVsSatCurve = ColorGradingCurvePresets.CreateFlatCurve(0.5f, false);
-            m_DefaultLumVsSatCurve = ColorGradingCurvePresets.CreateFlatCurve(0.5f, false);
         }
 
         internal bool IsValid => m_Shader != null && m_Kernel >= 0;
 
         public void Dispose()
         {
-            m_DefaultMasterCurve.Release();
-            m_DefaultRedCurve.Release();
-            m_DefaultGreenCurve.Release();
-            m_DefaultBlueCurve.Release();
-            m_DefaultHueVsHueCurve.Release();
-            m_DefaultHueVsSatCurve.Release();
-            m_DefaultSatVsSatCurve.Release();
-            m_DefaultLumVsSatCurve.Release();
         }
 
         private LocalKeyword CreateKeyword(string keywordName)
@@ -505,25 +420,9 @@ namespace VividRP.Runtime
                 : default;
         }
 
-        internal Texture GetCurveTexture(ColorGradingCurveTextureSlot slot, TextureCurve curve)
+        internal void Build(CommandBuffer cmd, in ColorGradingSettingsData settings, ColorCurves curves, Texture externalLut, TextureHandle output)
         {
-            return slot switch
-            {
-                ColorGradingCurveTextureSlot.Master => ResolveCurveTexture(curve, m_DefaultMasterCurve),
-                ColorGradingCurveTextureSlot.Red => ResolveCurveTexture(curve, m_DefaultRedCurve),
-                ColorGradingCurveTextureSlot.Green => ResolveCurveTexture(curve, m_DefaultGreenCurve),
-                ColorGradingCurveTextureSlot.Blue => ResolveCurveTexture(curve, m_DefaultBlueCurve),
-                ColorGradingCurveTextureSlot.HueVsHue => ResolveCurveTexture(curve, m_DefaultHueVsHueCurve),
-                ColorGradingCurveTextureSlot.HueVsSat => ResolveCurveTexture(curve, m_DefaultHueVsSatCurve),
-                ColorGradingCurveTextureSlot.SatVsSat => ResolveCurveTexture(curve, m_DefaultSatVsSatCurve),
-                ColorGradingCurveTextureSlot.LumVsSat => ResolveCurveTexture(curve, m_DefaultLumVsSatCurve),
-                _ => null,
-            };
-        }
-
-        internal void Build(ComputeCommandBuffer cmd, in ColorGradingSettingsData settings, in ColorGradingLutTextures textures, TextureHandle output)
-        {
-            if (cmd == null || !IsValid || !output.IsValid() || !textures.AreCurvesValid())
+            if (cmd == null || !IsValid || !output.IsValid())
                 return;
 
             SetKeywords(cmd, settings.tonemappingMode);
@@ -555,17 +454,17 @@ namespace VividRP.Runtime
             cmd.SetComputeVectorParam(m_Shader, ShoSegmentAId, settings.shoSegmentA);
             cmd.SetComputeVectorParam(m_Shader, ShoSegmentBId, settings.shoSegmentB);
 
-            cmd.SetComputeTextureParam(m_Shader, m_Kernel, CurveMasterId, textures.masterCurve);
-            cmd.SetComputeTextureParam(m_Shader, m_Kernel, CurveRedId, textures.redCurve);
-            cmd.SetComputeTextureParam(m_Shader, m_Kernel, CurveGreenId, textures.greenCurve);
-            cmd.SetComputeTextureParam(m_Shader, m_Kernel, CurveBlueId, textures.blueCurve);
-            cmd.SetComputeTextureParam(m_Shader, m_Kernel, CurveHueVsHueId, textures.hueVsHueCurve);
-            cmd.SetComputeTextureParam(m_Shader, m_Kernel, CurveHueVsSatId, textures.hueVsSatCurve);
-            cmd.SetComputeTextureParam(m_Shader, m_Kernel, CurveSatVsSatId, textures.satVsSatCurve);
-            cmd.SetComputeTextureParam(m_Shader, m_Kernel, CurveLumVsSatId, textures.lumVsSatCurve);
+            cmd.SetComputeTextureParam(m_Shader, m_Kernel, CurveMasterId, curves.master.value.GetTexture());
+            cmd.SetComputeTextureParam(m_Shader, m_Kernel, CurveRedId, curves.red.value.GetTexture());
+            cmd.SetComputeTextureParam(m_Shader, m_Kernel, CurveGreenId, curves.green.value.GetTexture());
+            cmd.SetComputeTextureParam(m_Shader, m_Kernel, CurveBlueId, curves.blue.value.GetTexture());
+            cmd.SetComputeTextureParam(m_Shader, m_Kernel, CurveHueVsHueId, curves.hueVsHue.value.GetTexture());
+            cmd.SetComputeTextureParam(m_Shader, m_Kernel, CurveHueVsSatId, curves.hueVsSat.value.GetTexture());
+            cmd.SetComputeTextureParam(m_Shader, m_Kernel, CurveSatVsSatId, curves.satVsSat.value.GetTexture());
+            cmd.SetComputeTextureParam(m_Shader, m_Kernel, CurveLumVsSatId, curves.lumVsSat.value.GetTexture());
 
-            if (settings.tonemappingMode == ColorGradingTonemappingShaderMode.External && textures.externalLut.IsValid())
-                cmd.SetComputeTextureParam(m_Shader, m_Kernel, LogLut3DId, textures.externalLut);
+            if (settings.tonemappingMode == ColorGradingTonemappingShaderMode.External && externalLut != null)
+                cmd.SetComputeTextureParam(m_Shader, m_Kernel, LogLut3DId, externalLut);
 
             cmd.SetComputeTextureParam(m_Shader, m_Kernel, OutputTextureId, output);
 
@@ -573,7 +472,7 @@ namespace VividRP.Runtime
             cmd.DispatchCompute(m_Shader, m_Kernel, dispatchCount, dispatchCount, dispatchCount);
         }
 
-        private void SetKeywords(ComputeCommandBuffer cmd, ColorGradingTonemappingShaderMode tonemappingMode)
+        private void SetKeywords(CommandBuffer cmd, ColorGradingTonemappingShaderMode tonemappingMode)
         {
             SetKeyword(cmd, m_TonemappingNoneKeyword, tonemappingMode == ColorGradingTonemappingShaderMode.None);
             SetKeyword(cmd, m_TonemappingNeutralKeyword, tonemappingMode == ColorGradingTonemappingShaderMode.Neutral);
@@ -589,17 +488,12 @@ namespace VividRP.Runtime
             SetKeyword(cmd, m_HdrColorspaceConversionKeyword, false);
         }
 
-        private void SetKeyword(ComputeCommandBuffer cmd, LocalKeyword keyword, bool value)
+        private void SetKeyword(CommandBuffer cmd, LocalKeyword keyword, bool value)
         {
             if (!keyword.isValid)
                 return;
 
             cmd.SetKeyword(m_Shader, keyword, value);
-        }
-
-        private static Texture ResolveCurveTexture(TextureCurve curve, TextureCurve fallbackCurve)
-        {
-            return (curve ?? fallbackCurve).GetTexture();
         }
     }
 }

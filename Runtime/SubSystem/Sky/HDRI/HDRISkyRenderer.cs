@@ -73,8 +73,6 @@ namespace VividRP.Runtime
 
         public void UpdateFrameResources(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd)
         {
-            if (skyData != null)
-                skyData.atmosphericScatteringLutHandle = null;
         }
 
         public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd, int skyHash, bool forceRebuild)

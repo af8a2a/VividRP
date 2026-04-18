@@ -9,6 +9,8 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         internal const string OpaqueAtmosphericScatteringPassName = "Opaque Atmospheric Scattering";
         internal const string OpaqueAtmosphericScatteringShaderName = "Hidden/VividRP/OpaqueAtmosphericScattering";
+        private const int DefaultShaderPassIndex = 0;
+        private const int HDRISkyShaderPassIndex = 1;
 
         private static readonly int InputColorId = Shader.PropertyToID("_InputColor");
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
@@ -43,9 +45,11 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_HasMaterialParameters;
         private PhysicallyBasedSkyShaderParameters m_Parameters;
         private PhysicallyBasedSkyMaterialParameters m_MaterialParameters;
+        private Vector4 m_FogParameters;
         private Texture3D m_FallbackAtmosphericScatteringLut;
         private Cubemap m_FallbackSkyTexture;
         private RTHandle m_AtmosphericScatteringLutHandle;
+        private SkyType m_ActiveSkyType;
         private int m_SkyMaxMipLevel;
         private Color m_SkyTint = Color.white;
         private float m_SkyExposure = 1.0f;
@@ -84,12 +88,24 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
-            m_IsActive = PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters)
-                && m_Parameters.skyFogParams.x > 0.5f;
-            m_HasMaterialParameters = PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(frameData, out m_MaterialParameters);
             var skyData = frameData?.GetOrCreate<VividSkyData>();
+            m_ActiveSkyType = skyData?.activeSkyType ?? SkyType.None;
+            if (m_ActiveSkyType == SkyType.HDRI)
+            {
+                m_Parameters = default;
+                m_HasMaterialParameters = false;
+                m_IsActive = TryBuildHDRISkyFogParameters(out m_FogParameters);
+            }
+            else
+            {
+                m_IsActive = PhysicallyBasedSkyShaderParameterBuilder.TryBuild(frameData, out m_Parameters)
+                    && m_Parameters.skyFogParams.x > 0.5f;
+                m_HasMaterialParameters = PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(frameData, out m_MaterialParameters);
+                m_FogParameters = m_Parameters.skyFogParams;
+            }
+
             m_AtmosphericScatteringLutHandle = skyData?.atmosphericScatteringLutHandle;
-            if (m_AtmosphericScatteringLutHandle != null)
+            if (m_ActiveSkyType != SkyType.HDRI && m_AtmosphericScatteringLutHandle != null)
                 PassRecorder.ImportTextureForPass(this, m_AtmosphericScatteringLutHandle);
 
             SkyManager.ImportSpecularCubemap(m_SkyTexture, skyData);
@@ -140,12 +156,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 EnsureFallbackSkyTexture();
 
             var hasUsableDepthTexture = HasUsableDepthTexture(depthTexture);
+            var requiresAtmosphericScatteringLut = m_ActiveSkyType != SkyType.HDRI;
 
             var fogParams = m_IsActive
                             && hasUsableDepthTexture
-                            && m_HasMaterialParameters
-                            && hasValidAtmosphericScatteringLut
-                ? m_Parameters.skyFogParams
+                            && (!requiresAtmosphericScatteringLut
+                                || (m_HasMaterialParameters && hasValidAtmosphericScatteringLut))
+                ? m_FogParameters
                 : Vector4.zero;
 
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
@@ -166,14 +183,18 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_SkyRotation,
                     Mathf.Max(0, m_SkyMaxMipLevel),
                     hasValidSkyTexture ? 1.0f : 0.0f));
-            mpb.SetMatrix(PixelCoordToViewDirWSId, m_IsActive ? m_Parameters.pixelCoordToViewDirWS : Matrix4x4.identity);
+            mpb.SetMatrix(
+                PixelCoordToViewDirWSId,
+                m_IsActive && m_ActiveSkyType != SkyType.HDRI
+                    ? m_Parameters.pixelCoordToViewDirWS
+                    : Matrix4x4.identity);
             mpb.SetVector(SkyFogParamsId, fogParams);
             if (m_HasMaterialParameters)
                 PhysicallyBasedSkyMaterialPropertyBinder.Apply(mpb, m_MaterialParameters, VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume());
 
             var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
             nativeCmd.SetRenderTarget(m_OutputTexture);
-            CoreUtils.DrawFullScreen(nativeCmd, m_Material, mpb, 0);
+            CoreUtils.DrawFullScreen(nativeCmd, m_Material, mpb, ResolveShaderPassIndex());
         }
 
         public override void Dispose()
@@ -269,6 +290,30 @@ namespace VividRP.Runtime.RenderPass.Core
                 Mathf.Max(fogParams.w, 1.0f),
                 1.0f,
                 0.0f);
+        }
+
+        private int ResolveShaderPassIndex()
+        {
+            return m_ActiveSkyType == SkyType.HDRI
+                ? HDRISkyShaderPassIndex
+                : DefaultShaderPassIndex;
+        }
+
+        private static bool TryBuildHDRISkyFogParameters(out Vector4 fogParameters)
+        {
+            var volume = VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume();
+            if (volume == null || !volume.IsHeightFogActive())
+            {
+                fogParameters = Vector4.zero;
+                return false;
+            }
+
+            fogParameters = new Vector4(
+                1.0f,
+                volume.fogBaseHeight.value,
+                Mathf.Max(volume.fogDensity.value, 0.0f),
+                Mathf.Max(volume.fogMaxDistance.value, 0.0f));
+            return true;
         }
 
         private static int ResolveOutputDimension(

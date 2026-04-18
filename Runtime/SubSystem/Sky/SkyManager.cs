@@ -280,6 +280,5 @@ namespace VividRP.Runtime
 
             s_AmbientProbeConvolution.BindGlobalBuffer(cmd, useDefaultAmbientProbe);
         }
-
     }
 }

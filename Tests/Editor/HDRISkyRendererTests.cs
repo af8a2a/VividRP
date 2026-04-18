@@ -12,6 +12,7 @@ namespace VividRP.Editor.Tests
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "HDRI", "HDRISkyRenderer.cs"));
 
             Assert.That(source, Does.Contain("public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd, int skyHash, bool forceRebuild)"));
+            Assert.That(source, Does.Contain("public void UpdateFrameResources(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd)"));
             Assert.That(source, Does.Contain("m_AmbientProbeBakingPass = m_Material.FindPass(\"HDRISkyBaking\");"));
             Assert.That(source, Does.Contain("HDRISkyRenderer.RebuildAmbientProbe (MissingTexture)"));
             Assert.That(source, Does.Contain("EnsureAmbientProbeCubemap(generatedCubemapResolution);"));
@@ -21,6 +22,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("skyData.ambientProbeCubemap = useBakedAmbientProbe ? m_AmbientProbeCubemap : cubemap;"));
             Assert.That(source, Does.Contain("skyData.ambientProbeExposure = useBakedAmbientProbe ? 1.0f : skyData.exposure;"));
             Assert.That(source, Does.Contain("skyData.ambientProbeHash = skyHash;"));
+            Assert.That(source, Does.Not.Contain("skyData.atmosphericScatteringLutHandle = null;"));
         }
 
         [Test]
@@ -57,6 +59,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("s_PendingSkyRenderer.RenderSky(cmd);"));
             Assert.That(source, Does.Contain("var useDefaultAmbientProbe = skyData == null || skyData.ambientProbeCubemap == null;"));
             Assert.That(source, Does.Contain("s_AmbientProbeConvolution.BindGlobalBuffer(cmd, useDefaultAmbientProbe);"));
+            Assert.That(source, Does.Not.Contain("UpdateAtmosphericScatteringResources("));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

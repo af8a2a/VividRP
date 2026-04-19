@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Reflection;
 using NUnit.Framework;
 using Unity.Collections;
@@ -11,43 +10,57 @@ namespace VividRP.Editor.Tests
     public class VividLightDataTests
     {
         [Test]
-        public void UpdateDirectionalLights_CollectsEnabledDirectionalLights_WhenLightsAreProvided()
+        public void UpdateDirectionalLights_SelectsSunLight_WhenVisibleDirectionalSunExists()
         {
             var sunObject = new GameObject("Sun Directional Light");
             var fillObject = new GameObject("Fill Directional Light");
-            var disabledDirectionalObject = new GameObject("Disabled Directional Light");
-            var pointLightObject = new GameObject("Point Light");
+            var pointObject = new GameObject("Point Light");
+            var visibleLights = new NativeArray<VisibleLight>(3, Allocator.Temp);
+            var lightData = new VividLightData();
 
             var sunLight = sunObject.AddComponent<Light>();
             var fillLight = fillObject.AddComponent<Light>();
-            var disabledDirectionalLight = disabledDirectionalObject.AddComponent<Light>();
-            var pointLight = pointLightObject.AddComponent<Light>();
+            var pointLight = pointObject.AddComponent<Light>();
 
             sunLight.type = LightType.Directional;
             sunLight.color = Color.white;
             sunLight.intensity = 2.0f;
             sunLight.shadows = LightShadows.Soft;
             sunLight.shadowStrength = 0.7f;
-            sunObject.transform.forward = Vector3.forward;
+            sunObject.transform.rotation = Quaternion.LookRotation(Vector3.forward, Vector3.up);
 
             fillLight.type = LightType.Directional;
             fillLight.color = Color.red;
             fillLight.intensity = 0.5f;
-            fillObject.transform.forward = Vector3.right;
-
-            disabledDirectionalLight.type = LightType.Directional;
-            disabledDirectionalLight.enabled = false;
+            fillObject.transform.rotation = Quaternion.LookRotation(Vector3.right, Vector3.up);
 
             pointLight.type = LightType.Point;
 
-            var lightData = new VividLightData();
-
             try
             {
-                lightData.UpdateDirectionalLights(new[] { pointLight, sunLight, disabledDirectionalLight, fillLight }, sunLight);
+                visibleLights[0] = CreateVisibleLight(
+                    LightType.Point,
+                    Color.white,
+                    pointObject.transform.localToWorldMatrix,
+                    range: 6.0f,
+                    light: pointLight);
+                visibleLights[1] = CreateVisibleLight(
+                    LightType.Directional,
+                    Color.white,
+                    sunObject.transform.localToWorldMatrix,
+                    light: sunLight);
+                visibleLights[2] = CreateVisibleLight(
+                    LightType.Directional,
+                    Color.red,
+                    fillObject.transform.localToWorldMatrix,
+                    light: fillLight);
+
+                lightData.UpdateDirectionalLights(visibleLights, sunLight);
 
                 Assert.That(lightData.directionalLightCount, Is.EqualTo(2));
                 Assert.That(lightData.hasDirectionalLights, Is.True);
+                Assert.That(lightData.mainLightIndex, Is.EqualTo(1));
+                Assert.That(lightData.mainLightEntityId, Is.EqualTo(sunLight.GetEntityId()));
                 Assert.That(lightData.mainDirectionalLightIndex, Is.EqualTo(0));
                 Assert.That(lightData.mainDirectionalLightEntityId, Is.EqualTo(sunLight.GetEntityId()));
                 AssertDirectionalLight(lightData.directionalLights[0], -sunObject.transform.forward, new Vector3(2.0f, 2.0f, 2.0f), 0.7f, (uint)sunLight.renderingLayerMask);
@@ -55,226 +68,141 @@ namespace VividRP.Editor.Tests
             }
             finally
             {
+                visibleLights.Dispose();
                 Object.DestroyImmediate(sunObject);
                 Object.DestroyImmediate(fillObject);
-                Object.DestroyImmediate(disabledDirectionalObject);
-                Object.DestroyImmediate(pointLightObject);
+                Object.DestroyImmediate(pointObject);
             }
         }
 
         [Test]
         public void UpdateDirectionalLights_SelectsBrightestDirectional_WhenSunLightIsUnavailable()
         {
-            var keyLightObject = new GameObject("Key Directional Light");
-            var fillLightObject = new GameObject("Fill Directional Light");
-            var hiddenSunObject = new GameObject("Sun Directional Light");
+            var hiddenSunObject = new GameObject("Hidden Sun Directional Light");
+            var fillObject = new GameObject("Fill Directional Light");
+            var keyObject = new GameObject("Key Directional Light");
+            var pointObject = new GameObject("Point Light");
+            var visibleLights = new NativeArray<VisibleLight>(3, Allocator.Temp);
+            var lightData = new VividLightData();
 
-            var keyLight = keyLightObject.AddComponent<Light>();
-            var fillLight = fillLightObject.AddComponent<Light>();
             var hiddenSun = hiddenSunObject.AddComponent<Light>();
-
-            keyLight.type = LightType.Directional;
-            keyLight.color = Color.white;
-            keyLight.intensity = 1.5f;
-
-            fillLight.type = LightType.Directional;
-            fillLight.color = Color.blue;
-            fillLight.intensity = 0.5f;
+            var fillLight = fillObject.AddComponent<Light>();
+            var keyLight = keyObject.AddComponent<Light>();
+            var pointLight = pointObject.AddComponent<Light>();
 
             hiddenSun.type = LightType.Directional;
             hiddenSun.enabled = false;
 
-            var lightData = new VividLightData();
+            fillLight.type = LightType.Directional;
+            fillLight.color = Color.blue;
+            fillLight.intensity = 0.5f;
+            fillObject.transform.rotation = Quaternion.LookRotation(Vector3.right, Vector3.up);
+
+            keyLight.type = LightType.Directional;
+            keyLight.color = Color.white;
+            keyLight.intensity = 1.5f;
+            keyObject.transform.rotation = Quaternion.LookRotation(Vector3.forward, Vector3.up);
+
+            pointLight.type = LightType.Point;
 
             try
             {
-                lightData.UpdateDirectionalLights(new[] { fillLight, hiddenSun, keyLight }, hiddenSun);
+                visibleLights[0] = CreateVisibleLight(
+                    LightType.Point,
+                    Color.white,
+                    pointObject.transform.localToWorldMatrix,
+                    range: 4.0f,
+                    light: pointLight);
+                visibleLights[1] = CreateVisibleLight(
+                    LightType.Directional,
+                    Color.blue,
+                    fillObject.transform.localToWorldMatrix,
+                    light: fillLight);
+                visibleLights[2] = CreateVisibleLight(
+                    LightType.Directional,
+                    Color.white,
+                    keyObject.transform.localToWorldMatrix,
+                    light: keyLight);
+
+                lightData.UpdateDirectionalLights(visibleLights, hiddenSun);
 
                 Assert.That(lightData.directionalLightCount, Is.EqualTo(2));
+                Assert.That(lightData.mainLightIndex, Is.EqualTo(2));
+                Assert.That(lightData.mainLightEntityId, Is.EqualTo(keyLight.GetEntityId()));
                 Assert.That(lightData.mainDirectionalLightIndex, Is.EqualTo(1));
                 Assert.That(lightData.mainDirectionalLightEntityId, Is.EqualTo(keyLight.GetEntityId()));
             }
             finally
             {
-                Object.DestroyImmediate(keyLightObject);
-                Object.DestroyImmediate(fillLightObject);
+                visibleLights.Dispose();
                 Object.DestroyImmediate(hiddenSunObject);
+                Object.DestroyImmediate(fillObject);
+                Object.DestroyImmediate(keyObject);
+                Object.DestroyImmediate(pointObject);
             }
         }
 
         [Test]
-        public void UpdatePunctualLights_CollectsEnabledPointAndSpotLights_WhenLightsAreProvided()
+        public void UpdatePunctualLights_CollectsPointAndSpotVisibleLights_WhenNativeArrayIsProvided()
         {
-            var pointObject = new GameObject("Point Light");
-            var spotObject = new GameObject("Spot Light");
-            var directionalObject = new GameObject("Directional Light");
-            var disabledSpotObject = new GameObject("Disabled Spot Light");
-
-            var pointLight = pointObject.AddComponent<Light>();
-            var spotLight = spotObject.AddComponent<Light>();
-            var directionalLight = directionalObject.AddComponent<Light>();
-            var disabledSpotLight = disabledSpotObject.AddComponent<Light>();
-
-            pointLight.type = LightType.Point;
-            pointLight.lightUnit = LightUnit.Candela;
-            pointLight.color = Color.cyan;
-            pointLight.intensity = 3.0f;
-            pointLight.range = 8.0f;
-
-            spotLight.type = LightType.Spot;
-            spotLight.lightUnit = LightUnit.Candela;
-            spotLight.color = Color.yellow;
-            spotLight.intensity = 2.0f;
-            spotLight.range = 12.0f;
-            spotLight.innerSpotAngle = 30.0f;
-            spotLight.spotAngle = 50.0f;
-            spotObject.transform.forward = Vector3.forward;
-
-            directionalLight.type = LightType.Directional;
-
-            disabledSpotLight.type = LightType.Spot;
-            disabledSpotLight.enabled = false;
-
+            var visibleLights = new NativeArray<VisibleLight>(3, Allocator.Temp);
             var lightData = new VividLightData();
 
             try
             {
-                lightData.UpdatePunctualLights(new[] { directionalLight, pointLight, disabledSpotLight, spotLight });
+                visibleLights[0] = CreateVisibleLight(
+                    LightType.Directional,
+                    Color.white,
+                    Matrix4x4.TRS(Vector3.zero, Quaternion.LookRotation(Vector3.forward), Vector3.one));
+                visibleLights[1] = CreateVisibleLight(
+                    LightType.Point,
+                    new Color(0.25f, 0.5f, 0.75f),
+                    Matrix4x4.TRS(new Vector3(1.0f, 2.0f, 3.0f), Quaternion.identity, Vector3.one),
+                    range: 8.0f);
+                visibleLights[2] = CreateVisibleLight(
+                    LightType.Spot,
+                    new Color(0.9f, 0.4f, 0.1f),
+                    Matrix4x4.TRS(new Vector3(-1.0f, 0.5f, 2.0f), Quaternion.LookRotation(Vector3.right), Vector3.one),
+                    range: 12.0f,
+                    spotAngle: 50.0f,
+                    innerSpotAngle: 30.0f);
+
+                lightData.UpdatePunctualLights(visibleLights);
 
                 Assert.That(lightData.punctualLightCount, Is.EqualTo(2));
                 Assert.That(lightData.hasPunctualLights, Is.True);
-                AssertPunctualLight(
-                    lightData.punctualLights[0],
-                    pointObject.transform.position,
-                    new Vector3(0.0f, 3.0f, 3.0f),
-                    pointLight.range,
-                    0u,
-                    pointObject.transform.forward);
-                AssertPunctualLight(
-                    lightData.punctualLights[1],
-                    spotObject.transform.position,
-                    new Vector3(2.0f, 2.0f, 0.0f),
-                    spotLight.range,
-                    1u,
-                    spotObject.transform.forward);
+                AssertPunctualLight(lightData.punctualLights[0], new Vector3(1.0f, 2.0f, 3.0f), new Vector3(0.25f, 0.5f, 0.75f), 8.0f, 0u, Vector3.forward);
+                AssertPunctualLight(lightData.punctualLights[1], new Vector3(-1.0f, 0.5f, 2.0f), new Vector3(0.9f, 0.4f, 0.1f), 12.0f, 1u, Vector3.right);
+                Assert.That(lightData.punctualLights[0].renderingLayerMask, Is.Zero);
                 Assert.That(lightData.punctualLights[0].angleOffset, Is.EqualTo(1.0f).Within(0.0001f));
-                Assert.That(lightData.punctualLights[0].inverseRangeSquared, Is.EqualTo(1.0f / (pointLight.range * pointLight.range)).Within(0.0001f));
                 Assert.That(lightData.punctualLights[1].angleScale, Is.GreaterThan(0.0f));
                 Assert.That(lightData.punctualLights[1].angleOffset, Is.LessThan(0.0f));
                 AssertPunctualLightCullData(
                     lightData.punctualLightCullData[0],
-                    pointObject.transform.position,
-                    pointObject.transform.forward,
-                    pointLight.range,
+                    new Vector3(1.0f, 2.0f, 3.0f),
+                    Vector3.forward,
+                    8.0f,
                     0u,
                     1.0f,
                     0.0f,
-                    pointObject.transform.position,
-                    pointLight.range);
-                GetExpectedSpotCullSphere(
-                    lightData.punctualLights[1],
-                    out var spotCullCenter,
-                    out var spotCullRadius);
+                    new Vector3(1.0f, 2.0f, 3.0f),
+                    8.0f);
+                GetExpectedSpotCullSphere(lightData.punctualLights[1], out var spotCullCenter, out var spotCullRadius);
                 var spotOuterCos = GetSpotOuterCos(lightData.punctualLights[1]);
                 AssertPunctualLightCullData(
                     lightData.punctualLightCullData[1],
-                    spotObject.transform.position,
-                    spotObject.transform.forward,
-                    spotLight.range,
+                    new Vector3(-1.0f, 0.5f, 2.0f),
+                    Vector3.right,
+                    12.0f,
                     1u,
                     spotOuterCos,
-                    spotLight.range * Mathf.Sqrt(Mathf.Max(1.0f / Mathf.Max(spotOuterCos * spotOuterCos, 1e-6f) - 1.0f, 0.0f)),
+                    12.0f * Mathf.Sqrt(Mathf.Max(1.0f / Mathf.Max(spotOuterCos * spotOuterCos, 1e-6f) - 1.0f, 0.0f)),
                     spotCullCenter,
                     spotCullRadius);
             }
             finally
             {
-                Object.DestroyImmediate(pointObject);
-                Object.DestroyImmediate(spotObject);
-                Object.DestroyImmediate(directionalObject);
-                Object.DestroyImmediate(disabledSpotObject);
-            }
-        }
-
-        [Test]
-        public void UpdateAreaLights_CollectsEnabledRectangleAndTubeLights_WhenLightsAreProvided()
-        {
-            var rectangleObject = new GameObject("Rectangle Area Light");
-            var tubeObject = new GameObject("Tube Area Light");
-            var pointObject = new GameObject("Point Light");
-            var disabledRectangleObject = new GameObject("Disabled Rectangle Area Light");
-
-            var rectangleLight = rectangleObject.AddComponent<Light>();
-            var tubeLight = tubeObject.AddComponent<Light>();
-            var pointLight = pointObject.AddComponent<Light>();
-            var disabledRectangleLight = disabledRectangleObject.AddComponent<Light>();
-
-            rectangleLight.type = LightType.Rectangle;
-            rectangleLight.color = Color.white;
-            rectangleLight.intensity = 4.0f;
-            rectangleLight.range = 10.0f;
-            rectangleLight.areaSize = new Vector2(4.0f, 2.0f);
-            rectangleObject.transform.position = new Vector3(1.0f, 2.0f, 3.0f);
-            rectangleObject.transform.rotation = Quaternion.LookRotation(Vector3.forward, Vector3.up);
-
-            tubeLight.type = LightType.Tube;
-            tubeLight.color = Color.cyan;
-            tubeLight.intensity = 3.0f;
-            tubeLight.range = 12.0f;
-            tubeLight.areaSize = new Vector2(3.0f, 1.0f);
-            tubeObject.transform.position = new Vector3(-2.0f, 1.0f, 0.5f);
-            tubeObject.transform.rotation = Quaternion.LookRotation(Vector3.up, Vector3.back);
-
-            pointLight.type = LightType.Point;
-            pointLight.range = 8.0f;
-
-            disabledRectangleLight.type = LightType.Rectangle;
-            disabledRectangleLight.range = 5.0f;
-            disabledRectangleLight.areaSize = new Vector2(2.0f, 1.0f);
-            disabledRectangleLight.enabled = false;
-
-            var lightData = new VividLightData();
-
-            try
-            {
-                var expectedRectangleData = VividLightRenderDatabase.instance.UpdateLightData(rectangleLight);
-                var expectedTubeData = VividLightRenderDatabase.instance.UpdateLightData(tubeLight);
-
-                lightData.UpdateAreaLights(new[] { pointLight, rectangleLight, disabledRectangleLight, tubeLight });
-
-                Assert.That(lightData.areaLightCount, Is.EqualTo(2));
-                Assert.That(lightData.hasAreaLights, Is.True);
-                AssertAreaLight(
-                    lightData.areaLights[0],
-                    rectangleObject.transform.position,
-                    expectedRectangleData.color,
-                    rectangleLight.range,
-                    rectangleObject.transform.forward,
-                    rectangleObject.transform.right,
-                    rectangleObject.transform.up,
-                    rectangleLight.areaSize.x,
-                    rectangleLight.areaSize.y,
-                    1u,
-                    (uint)rectangleLight.renderingLayerMask);
-                AssertAreaLight(
-                    lightData.areaLights[1],
-                    tubeObject.transform.position,
-                    expectedTubeData.color,
-                    tubeLight.range,
-                    tubeObject.transform.forward,
-                    tubeObject.transform.right,
-                    tubeObject.transform.up,
-                    tubeLight.areaSize.x,
-                    0.0f,
-                    0u,
-                    (uint)tubeLight.renderingLayerMask);
-            }
-            finally
-            {
-                Object.DestroyImmediate(rectangleObject);
-                Object.DestroyImmediate(tubeObject);
-                Object.DestroyImmediate(pointObject);
-                Object.DestroyImmediate(disabledRectangleObject);
+                visibleLights.Dispose();
             }
         }
 
@@ -374,685 +302,87 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void UpdateDirectionalLights_CollectsDirectionalVisibleLights_WhenNativeArrayIsProvided()
-        {
-            var visibleLights = new NativeArray<VisibleLight>(3, Allocator.Temp);
-            var lightData = new VividLightData();
-
-            try
-            {
-                visibleLights[0] = CreateVisibleLight(
-                    LightType.Point,
-                    Color.green,
-                    Matrix4x4.TRS(new Vector3(1.0f, 2.0f, 3.0f), Quaternion.identity, Vector3.one),
-                    range: 6.0f);
-                visibleLights[1] = CreateVisibleLight(
-                    LightType.Directional,
-                    new Color(1.5f, 1.0f, 0.5f),
-                    Matrix4x4.TRS(Vector3.zero, Quaternion.LookRotation(Vector3.forward), Vector3.one));
-                visibleLights[2] = CreateVisibleLight(
-                    LightType.Directional,
-                    new Color(0.5f, 0.25f, 0.125f),
-                    Matrix4x4.TRS(Vector3.zero, Quaternion.LookRotation(Vector3.right), Vector3.one));
-
-                lightData.UpdateDirectionalLights(visibleLights, null);
-
-                Assert.That(lightData.directionalLightCount, Is.EqualTo(2));
-                Assert.That(lightData.mainDirectionalLightIndex, Is.EqualTo(0));
-                Assert.That(lightData.mainLightIndex, Is.EqualTo(1));
-                AssertDirectionalLight(lightData.directionalLights[0], -Vector3.forward, new Vector3(1.5f, 1.0f, 0.5f), 0.0f, 0u);
-                AssertDirectionalLight(lightData.directionalLights[1], -Vector3.right, new Vector3(0.5f, 0.25f, 0.125f), 0.0f, 0u);
-            }
-            finally
-            {
-                visibleLights.Dispose();
-            }
-        }
-
-        [Test]
-        public void UpdatePunctualLights_CollectsPointAndSpotVisibleLights_WhenNativeArrayIsProvided()
-        {
-            var visibleLights = new NativeArray<VisibleLight>(3, Allocator.Temp);
-            var lightData = new VividLightData();
-
-            try
-            {
-                visibleLights[0] = CreateVisibleLight(
-                    LightType.Directional,
-                    Color.white,
-                    Matrix4x4.TRS(Vector3.zero, Quaternion.LookRotation(Vector3.forward), Vector3.one));
-                visibleLights[1] = CreateVisibleLight(
-                    LightType.Point,
-                    new Color(0.25f, 0.5f, 0.75f),
-                    Matrix4x4.TRS(new Vector3(1.0f, 2.0f, 3.0f), Quaternion.identity, Vector3.one),
-                    range: 8.0f);
-                visibleLights[2] = CreateVisibleLight(
-                    LightType.Spot,
-                    new Color(0.9f, 0.4f, 0.1f),
-                    Matrix4x4.TRS(new Vector3(-1.0f, 0.5f, 2.0f), Quaternion.LookRotation(Vector3.right), Vector3.one),
-                    range: 12.0f,
-                    spotAngle: 50.0f,
-                    innerSpotAngle: 30.0f);
-
-                lightData.UpdatePunctualLights(visibleLights);
-
-                Assert.That(lightData.punctualLightCount, Is.EqualTo(2));
-                AssertPunctualLight(lightData.punctualLights[0], new Vector3(1.0f, 2.0f, 3.0f), new Vector3(0.25f, 0.5f, 0.75f), 8.0f, 0u, Vector3.forward);
-                AssertPunctualLight(lightData.punctualLights[1], new Vector3(-1.0f, 0.5f, 2.0f), new Vector3(0.9f, 0.4f, 0.1f), 12.0f, 1u, Vector3.right);
-                Assert.That(lightData.punctualLights[0].renderingLayerMask, Is.Zero);
-                Assert.That(lightData.punctualLights[1].angleScale, Is.GreaterThan(0.0f));
-                AssertPunctualLightCullData(
-                    lightData.punctualLightCullData[0],
-                    new Vector3(1.0f, 2.0f, 3.0f),
-                    Vector3.forward,
-                    8.0f,
-                    0u,
-                    1.0f,
-                    0.0f,
-                    new Vector3(1.0f, 2.0f, 3.0f),
-                    8.0f);
-                GetExpectedSpotCullSphere(
-                    lightData.punctualLights[1],
-                    out var spotCullCenter,
-                    out var spotCullRadius);
-                var spotOuterCos = GetSpotOuterCos(lightData.punctualLights[1]);
-                AssertPunctualLightCullData(
-                    lightData.punctualLightCullData[1],
-                    new Vector3(-1.0f, 0.5f, 2.0f),
-                    Vector3.right,
-                    12.0f,
-                    1u,
-                    spotOuterCos,
-                    12.0f * Mathf.Sqrt(Mathf.Max(1.0f / Mathf.Max(spotOuterCos * spotOuterCos, 1e-6f) - 1.0f, 0.0f)),
-                    spotCullCenter,
-                    spotCullRadius);
-            }
-            finally
-            {
-                visibleLights.Dispose();
-            }
-        }
-
-        [Test]
-        public void UpdatePunctualLightScreenSpaceBounds_ComputesViewSpaceCullAndPerspectiveBounds()
-        {
-            var cameraObject = new GameObject("Screen Space Bounds Camera");
-            var camera = cameraObject.AddComponent<Camera>();
-            var lightData = new VividLightData();
-
-            camera.nearClipPlane = 0.3f;
-            camera.farClipPlane = 1000.0f;
-            camera.fieldOfView = 60.0f;
-            camera.transform.position = Vector3.zero;
-            camera.transform.rotation = Quaternion.identity;
-
-            lightData.punctualLightCullData = new[]
-            {
-                new VividLightData.PunctualLightCullData
-                {
-                    positionWS = new Vector3(0.0f, 0.0f, 5.0f),
-                    range = 1.0f,
-                    directionWS = Vector3.forward,
-                    lightType = 0u,
-                    cosOuterAngle = 1.0f,
-                    radiusAtRange = 0.0f,
-                    cullingCenterWS = new Vector3(0.0f, 0.0f, 5.0f),
-                    cullingRadius = 1.0f,
-                }
-            };
-            lightData.punctualLightCount = 1;
-
-            try
-            {
-                var parameters = VividLightData.CreatePunctualLightScreenSpaceBoundsParameters(camera, 320, 180, 32, 24);
-
-                lightData.UpdatePunctualLightClusteredCullData(parameters);
-
-                var viewSpaceCullData = lightData.punctualLightViewSpaceCullData[0];
-                var bounds = lightData.punctualLightScreenSpaceBounds[0];
-                Assert.That(viewSpaceCullData.positionVS.x, Is.EqualTo(0.0f).Within(0.0001f));
-                Assert.That(viewSpaceCullData.positionVS.y, Is.EqualTo(0.0f).Within(0.0001f));
-                Assert.That(viewSpaceCullData.positionVS.z, Is.EqualTo(5.0f).Within(0.0001f));
-                Assert.That(viewSpaceCullData.directionVS.x, Is.EqualTo(0.0f).Within(0.0001f));
-                Assert.That(viewSpaceCullData.directionVS.y, Is.EqualTo(0.0f).Within(0.0001f));
-                Assert.That(viewSpaceCullData.directionVS.z, Is.EqualTo(1.0f).Within(0.0001f));
-                Assert.That(viewSpaceCullData.cullingCenterVS.x, Is.EqualTo(0.0f).Within(0.0001f));
-                Assert.That(viewSpaceCullData.cullingCenterVS.y, Is.EqualTo(0.0f).Within(0.0001f));
-                Assert.That(viewSpaceCullData.cullingCenterVS.z, Is.EqualTo(5.0f).Within(0.0001f));
-                Assert.That(viewSpaceCullData.cullingRadius, Is.EqualTo(1.0f).Within(0.0001f));
-                Assert.That(viewSpaceCullData.lightType, Is.EqualTo(0u));
-                Assert.That(bounds.isValid, Is.EqualTo(1u));
-                Assert.That(bounds.viewSpaceAabbMin.x, Is.EqualTo(-1.0f).Within(0.0001f));
-                Assert.That(bounds.viewSpaceAabbMin.y, Is.EqualTo(-1.0f).Within(0.0001f));
-                Assert.That(bounds.viewSpaceAabbMin.z, Is.EqualTo(4.0f).Within(0.0001f));
-                Assert.That(bounds.viewSpaceAabbMax.x, Is.EqualTo(1.0f).Within(0.0001f));
-                Assert.That(bounds.viewSpaceAabbMax.y, Is.EqualTo(1.0f).Within(0.0001f));
-                Assert.That(bounds.viewSpaceAabbMax.z, Is.EqualTo(6.0f).Within(0.0001f));
-                Assert.That(bounds.clipSpaceAabbMin.x, Is.EqualTo(-0.2436f).Within(0.001f));
-                Assert.That(bounds.clipSpaceAabbMax.x, Is.EqualTo(0.2436f).Within(0.001f));
-                Assert.That(bounds.clipSpaceAabbMin.y, Is.EqualTo(-0.4330f).Within(0.001f));
-                Assert.That(bounds.clipSpaceAabbMax.y, Is.EqualTo(0.4330f).Within(0.001f));
-                Assert.That(bounds.sliceMin, Is.EqualTo(6));
-                Assert.That(bounds.sliceMax, Is.EqualTo(9));
-                Assert.That(bounds.tileMinX, Is.EqualTo(2));
-                Assert.That(bounds.tileMaxX, Is.EqualTo(7));
-                Assert.That(bounds.tileMinY, Is.EqualTo(0));
-                Assert.That(bounds.tileMaxY, Is.EqualTo(5));
-                Assert.That(bounds.bigTileMinX, Is.EqualTo(bounds.tileMinX));
-                Assert.That(bounds.bigTileMaxX, Is.EqualTo(bounds.tileMaxX));
-                Assert.That(bounds.bigTileMinY, Is.EqualTo(bounds.tileMinY));
-                Assert.That(bounds.bigTileMaxY, Is.EqualTo(bounds.tileMaxY));
-            }
-            finally
-            {
-                Object.DestroyImmediate(cameraObject);
-            }
-        }
-
-        [Test]
-        public void UpdatePunctualLightCoarseCullingData_BuildsSliceRangesAndRecords_FromScreenSpaceBounds()
+        public void UpdatePunctualLightClusteredCullData_BuildsSphereBoundsAndVolume_ForPointLight()
         {
             var lightData = new VividLightData
             {
-                punctualLightScreenSpaceBounds = new[]
+                punctualLightCullData = new[]
                 {
-                    new VividLightData.PunctualLightScreenSpaceBounds
+                    new VividLightData.PunctualLightCullData
                     {
-                        sliceMin = 0,
-                        sliceMax = 1,
-                        tileMinX = 1,
-                        tileMaxX = 2,
-                        tileMinY = 3,
-                        tileMaxY = 4,
-                        isValid = 1u,
-                    },
-                    new VividLightData.PunctualLightScreenSpaceBounds
-                    {
-                        isValid = 0u,
-                    },
-                    new VividLightData.PunctualLightScreenSpaceBounds
-                    {
-                        sliceMin = 1,
-                        sliceMax = 2,
-                        tileMinX = 4,
-                        tileMaxX = 5,
-                        tileMinY = 6,
-                        tileMaxY = 7,
-                        isValid = 1u,
+                        positionWS = new Vector3(0.0f, 0.0f, 5.0f),
+                        range = 3.0f,
+                        directionWS = Vector3.forward,
+                        lightType = 0u,
+                        cosOuterAngle = 1.0f,
+                        radiusAtRange = 0.0f,
+                        cullingCenterWS = new Vector3(0.0f, 0.0f, 5.0f),
+                        cullingRadius = 3.0f,
                     }
                 },
-                punctualLightCount = 3,
-            };
-
-            lightData.UpdatePunctualLightCoarseCullingData(4);
-
-            Assert.That(lightData.punctualLightCoarseRangeCount, Is.EqualTo(4));
-            Assert.That(lightData.punctualLightCoarseRecordCount, Is.EqualTo(4));
-            AssertPunctualLightCoarseRange(lightData.punctualLightCoarseRanges[0], 0, 1);
-            AssertPunctualLightCoarseRange(lightData.punctualLightCoarseRanges[1], 1, 2);
-            AssertPunctualLightCoarseRange(lightData.punctualLightCoarseRanges[2], 3, 1);
-            AssertPunctualLightCoarseRange(lightData.punctualLightCoarseRanges[3], 4, 0);
-            AssertPunctualLightCoarseRecord(lightData.punctualLightCoarseRecords[0], 0, 1, 2, 3, 4);
-            AssertPunctualLightCoarseRecord(lightData.punctualLightCoarseRecords[1], 0, 1, 2, 3, 4);
-            AssertPunctualLightCoarseRecord(lightData.punctualLightCoarseRecords[2], 2, 4, 5, 6, 7);
-            AssertPunctualLightCoarseRecord(lightData.punctualLightCoarseRecords[3], 2, 4, 5, 6, 7);
-        }
-
-        [Test]
-        public void UpdatePunctualLightCoarseCullingData_WritesIntoReusableManagedBuffer_WhenRecordCountIsSmallerThanCapacity()
-        {
-            var lightData = new VividLightData
-            {
-                punctualLightScreenSpaceBounds = new[]
-                {
-                    new VividLightData.PunctualLightScreenSpaceBounds
-                    {
-                        sliceMin = 2,
-                        sliceMax = 2,
-                        tileMinX = 8,
-                        tileMaxX = 9,
-                        tileMinY = 10,
-                        tileMaxY = 11,
-                        isValid = 1u,
-                    }
-                },
-                punctualLightCoarseRecords = new VividLightData.PunctualLightCoarseRecord[8],
                 punctualLightCount = 1,
             };
 
-            Assert.DoesNotThrow(() => lightData.UpdatePunctualLightCoarseCullingData(4));
-            Assert.That(lightData.punctualLightCoarseRangeCount, Is.EqualTo(4));
-            Assert.That(lightData.punctualLightCoarseRecordCount, Is.EqualTo(1));
-            AssertPunctualLightCoarseRange(lightData.punctualLightCoarseRanges[0], 0, 0);
-            AssertPunctualLightCoarseRange(lightData.punctualLightCoarseRanges[1], 0, 0);
-            AssertPunctualLightCoarseRange(lightData.punctualLightCoarseRanges[2], 0, 1);
-            AssertPunctualLightCoarseRange(lightData.punctualLightCoarseRanges[3], 1, 0);
-            AssertPunctualLightCoarseRecord(lightData.punctualLightCoarseRecords[0], 0, 8, 9, 10, 11);
+            lightData.UpdatePunctualLightClusteredCullData(Matrix4x4.identity);
+
+            var bound = lightData.punctualLightBounds[0];
+            var volume = lightData.punctualLightVolumeData[0];
+
+            AssertVector3(bound.center, new Vector3(0.0f, 0.0f, 5.0f));
+            AssertVector4(bound.boxAxisX, new Vector4(3.0f, 0.0f, 0.0f, 1.0f));
+            AssertVector4(bound.boxAxisY, new Vector4(0.0f, 3.0f, 0.0f, 3.0f));
+            AssertVector3(bound.boxAxisZ, new Vector3(0.0f, 0.0f, 3.0f));
+            Assert.That(volume.lightVolume, Is.EqualTo(1u));
+            Assert.That(volume.lightCategory, Is.Zero);
+            Assert.That(volume.featureFlags, Is.EqualTo(4096u));
+            Assert.That(volume.radiusSq, Is.EqualTo(9.0f).Within(0.0001f));
+            AssertVector3(volume.lightPos, new Vector3(0.0f, 0.0f, 5.0f));
+            AssertVector3(volume.lightAxisX, Vector3.right);
+            AssertVector3(volume.lightAxisY, Vector3.up);
+            AssertVector3(volume.lightAxisZ, Vector3.forward);
         }
 
         [Test]
-        public void CreatePunctualLightClusteredLightListParameters_ComputesClusterLayoutAndCapacity()
+        public void UpdatePunctualLightClusteredCullData_BuildsConeBoundsAndVolume_ForSpotLight()
         {
-            var cameraObject = new GameObject("Clustered Build Parameters Camera");
-            var camera = cameraObject.AddComponent<Camera>();
-
-            camera.nearClipPlane = 0.3f;
-            camera.farClipPlane = 1000.0f;
-            camera.fieldOfView = 60.0f;
-
-            try
+            var lightData = new VividLightData
             {
-                var parameters = VividLightData.CreatePunctualLightClusteredLightListParameters(
-                    camera,
-                    320,
-                    180,
-                    32,
-                    64,
-                    24,
-                    3,
-                    64);
-
-                Assert.That(parameters.screenWidth, Is.EqualTo(320));
-                Assert.That(parameters.screenHeight, Is.EqualTo(180));
-                Assert.That(parameters.tileSize, Is.EqualTo(32));
-                Assert.That(parameters.tileCountX, Is.EqualTo(10));
-                Assert.That(parameters.tileCountY, Is.EqualTo(6));
-                Assert.That(parameters.sliceCount, Is.EqualTo(24));
-                Assert.That(parameters.clusterCount, Is.EqualTo(1440));
-                Assert.That(parameters.lightIndexCapacity, Is.EqualTo(4320));
-                Assert.That(parameters.bigTileSize, Is.EqualTo(64));
-                Assert.That(parameters.bigTileCountX, Is.EqualTo(5));
-                Assert.That(parameters.bigTileCountY, Is.EqualTo(3));
-                Assert.That(parameters.bigTileCount, Is.EqualTo(15));
-                Assert.That(parameters.bigTileLightIndexCapacity, Is.EqualTo(45));
-                Assert.That(parameters.screenSpaceBoundsParameters.bigTileSize, Is.EqualTo(64));
-                Assert.That(parameters.screenSpaceBoundsParameters.bigTileCountX, Is.EqualTo(5));
-                Assert.That(parameters.screenSpaceBoundsParameters.bigTileCountY, Is.EqualTo(3));
-                Assert.That(parameters.screenSpaceBoundsParameters.tileCountX, Is.EqualTo(10));
-                Assert.That(parameters.screenSpaceBoundsParameters.tileCountY, Is.EqualTo(6));
-            }
-            finally
-            {
-                Object.DestroyImmediate(cameraObject);
-            }
-        }
-
-        [Test]
-        public void CreatePunctualLightScreenSpaceBoundsParameters_MatchesBoundProxyProjectionParameters()
-        {
-            var cameraObject = new GameObject("Bound Proxy Shared Projection Camera");
-            var camera = cameraObject.AddComponent<Camera>();
-
-            camera.nearClipPlane = 0.3f;
-            camera.farClipPlane = 1000.0f;
-            camera.fieldOfView = 60.0f;
-
-            try
-            {
-                var punctualParameters =
-                    VividLightData.CreatePunctualLightScreenSpaceBoundsParameters(camera, 320, 180, 32, 24, 64);
-                var sharedParameters =
-                    BoundProxyClusterProjectionUtility.CreateParameters(camera, 320, 180, 32, 24, 64);
-
-                AssertMatrix4x4(punctualParameters.worldToViewMatrix, sharedParameters.worldToViewMatrix);
-                Assert.That(punctualParameters.screenWidth, Is.EqualTo(sharedParameters.screenWidth));
-                Assert.That(punctualParameters.screenHeight, Is.EqualTo(sharedParameters.screenHeight));
-                Assert.That(punctualParameters.tileSize, Is.EqualTo(sharedParameters.tileSize));
-                Assert.That(punctualParameters.tileCountX, Is.EqualTo(sharedParameters.tileCountX));
-                Assert.That(punctualParameters.tileCountY, Is.EqualTo(sharedParameters.tileCountY));
-                Assert.That(punctualParameters.bigTileSize, Is.EqualTo(sharedParameters.bigTileSize));
-                Assert.That(punctualParameters.bigTileCountX, Is.EqualTo(sharedParameters.bigTileCountX));
-                Assert.That(punctualParameters.bigTileCountY, Is.EqualTo(sharedParameters.bigTileCountY));
-                Assert.That(punctualParameters.sliceCount, Is.EqualTo(sharedParameters.sliceCount));
-                Assert.That(punctualParameters.nearClip, Is.EqualTo(sharedParameters.nearClip).Within(0.0001f));
-                Assert.That(punctualParameters.farClip, Is.EqualTo(sharedParameters.farClip).Within(0.0001f));
-                Assert.That(punctualParameters.logDepthScale, Is.EqualTo(sharedParameters.logDepthScale).Within(0.0001f));
-                Assert.That(punctualParameters.linearDepthScale, Is.EqualTo(sharedParameters.linearDepthScale).Within(0.0001f));
-                Assert.That(punctualParameters.tanHalfFovX, Is.EqualTo(sharedParameters.tanHalfFovX).Within(0.0001f));
-                Assert.That(punctualParameters.tanHalfFovY, Is.EqualTo(sharedParameters.tanHalfFovY).Within(0.0001f));
-                Assert.That(punctualParameters.orthoHalfWidth, Is.EqualTo(sharedParameters.orthoHalfWidth).Within(0.0001f));
-                Assert.That(punctualParameters.orthoHalfHeight, Is.EqualTo(sharedParameters.orthoHalfHeight).Within(0.0001f));
-                Assert.That(punctualParameters.isOrthographic, Is.EqualTo(sharedParameters.isOrthographic));
-            }
-            finally
-            {
-                Object.DestroyImmediate(cameraObject);
-            }
-        }
-
-        [Test]
-        public void UpdatePunctualLightClusteredCullData_ComputesBigTileBoundsAndTightCapacityEstimate()
-        {
-            var cameraObject = new GameObject("Clustered Big Tile Camera");
-            var camera = cameraObject.AddComponent<Camera>();
-            var lightData = new VividLightData();
-
-            camera.nearClipPlane = 0.3f;
-            camera.farClipPlane = 1000.0f;
-            camera.fieldOfView = 60.0f;
-            camera.transform.position = Vector3.zero;
-            camera.transform.rotation = Quaternion.identity;
-
-            lightData.punctualLightCullData = new[]
-            {
-                new VividLightData.PunctualLightCullData
+                punctualLightCullData = new[]
                 {
-                    positionWS = new Vector3(0.0f, 0.0f, 5.0f),
-                    range = 1.0f,
-                    directionWS = Vector3.forward,
-                    lightType = 0u,
-                    cosOuterAngle = 1.0f,
-                    radiusAtRange = 0.0f,
-                    cullingCenterWS = new Vector3(0.0f, 0.0f, 5.0f),
-                    cullingRadius = 1.0f,
-                }
-            };
-            lightData.punctualLightCount = 1;
-
-            try
-            {
-                var parameters = VividLightData.CreatePunctualLightClusteredLightListParameters(
-                    camera,
-                    320,
-                    180,
-                    32,
-                    64,
-                    24,
-                    lightData.punctualLightCount,
-                    64);
-
-                lightData.UpdatePunctualLightClusteredCullData(parameters.screenSpaceBoundsParameters);
-
-                var bounds = lightData.punctualLightScreenSpaceBounds[0];
-                var expectedBigTileCapacity = (bounds.bigTileMaxX - bounds.bigTileMinX + 1)
-                    * (bounds.bigTileMaxY - bounds.bigTileMinY + 1);
-
-                Assert.That(bounds.isValid, Is.EqualTo(1u));
-                Assert.That(bounds.bigTileMinX, Is.GreaterThanOrEqualTo(0));
-                Assert.That(bounds.bigTileMaxX, Is.LessThan(parameters.bigTileCountX));
-                Assert.That(bounds.bigTileMaxX, Is.GreaterThanOrEqualTo(bounds.bigTileMinX));
-                Assert.That(bounds.bigTileMinY, Is.GreaterThanOrEqualTo(0));
-                Assert.That(bounds.bigTileMaxY, Is.LessThan(parameters.bigTileCountY));
-                Assert.That(bounds.bigTileMaxY, Is.GreaterThanOrEqualTo(bounds.bigTileMinY));
-                Assert.That(expectedBigTileCapacity, Is.GreaterThan(0));
-                Assert.That(lightData.GetPunctualLightBigTileLightIndexCapacityEstimate(), Is.EqualTo(expectedBigTileCapacity));
-                Assert.That(lightData.GetPunctualLightBigTileLightIndexCapacityEstimate(), Is.LessThan(parameters.bigTileLightIndexCapacity));
-            }
-            finally
-            {
-                Object.DestroyImmediate(cameraObject);
-            }
-        }
-
-        [Test]
-        public void UpdatePunctualLightClusteredLightListData_BuildsSpotCullBoundsAndCoarseRecords()
-        {
-            var cameraObject = new GameObject("Clustered Spot Camera");
-            var camera = cameraObject.AddComponent<Camera>();
-            var lightData = new VividLightData();
-            var spotDirection = new Vector3(0.2f, 0.0f, 1.0f).normalized;
-
-            camera.nearClipPlane = 0.3f;
-            camera.farClipPlane = 1000.0f;
-            camera.fieldOfView = 60.0f;
-            camera.transform.position = Vector3.zero;
-            camera.transform.rotation = Quaternion.identity;
-
-            lightData.punctualLightCullData = new[]
-            {
-                new VividLightData.PunctualLightCullData
-                {
-                    positionWS = new Vector3(2.0f, 0.0f, 8.0f),
-                    range = 10.0f,
-                    directionWS = spotDirection,
-                    lightType = 1u,
-                    cosOuterAngle = 0.5f,
-                    radiusAtRange = 6.0f,
-                    cullingCenterWS = new Vector3(3.0f, 0.0f, 12.0f),
-                    cullingRadius = 5.0f,
-                }
-            };
-            lightData.punctualLightCount = 1;
-
-            try
-            {
-                var parameters = VividLightData.CreatePunctualLightScreenSpaceBoundsParameters(camera, 320, 180, 32, 24);
-
-                lightData.UpdatePunctualLightClusteredLightListData(parameters);
-
-                var viewSpaceCullData = lightData.punctualLightViewSpaceCullData[0];
-                var bounds = lightData.punctualLightScreenSpaceBounds[0];
-                var expectedRecordCount = bounds.sliceMax - bounds.sliceMin + 1;
-
-                Assert.That(viewSpaceCullData.lightType, Is.EqualTo(1u));
-                Assert.That(viewSpaceCullData.positionVS.x, Is.EqualTo(2.0f).Within(0.0001f));
-                Assert.That(viewSpaceCullData.positionVS.z, Is.EqualTo(8.0f).Within(0.0001f));
-                Assert.That(viewSpaceCullData.directionVS.x, Is.GreaterThan(0.0f));
-                Assert.That(viewSpaceCullData.directionVS.z, Is.GreaterThan(0.9f));
-                Assert.That(viewSpaceCullData.cullingCenterVS.z, Is.EqualTo(12.0f).Within(0.0001f));
-                Assert.That(bounds.isValid, Is.EqualTo(1u));
-                Assert.That(bounds.sliceMin, Is.GreaterThanOrEqualTo(0));
-                Assert.That(bounds.sliceMax, Is.LessThan(parameters.sliceCount));
-                Assert.That(bounds.sliceMax, Is.GreaterThanOrEqualTo(bounds.sliceMin));
-                Assert.That(bounds.tileMinX, Is.GreaterThanOrEqualTo(0));
-                Assert.That(bounds.tileMaxX, Is.LessThan(parameters.tileCountX));
-                Assert.That(bounds.tileMaxX, Is.GreaterThanOrEqualTo(bounds.tileMinX));
-                Assert.That(bounds.tileMinY, Is.GreaterThanOrEqualTo(0));
-                Assert.That(bounds.tileMaxY, Is.LessThan(parameters.tileCountY));
-                Assert.That(bounds.tileMaxY, Is.GreaterThanOrEqualTo(bounds.tileMinY));
-                Assert.That(lightData.punctualLightCoarseRangeCount, Is.EqualTo(parameters.sliceCount));
-                Assert.That(lightData.punctualLightCoarseRecordCount, Is.EqualTo(expectedRecordCount));
-
-                for (var sliceIndex = bounds.sliceMin; sliceIndex <= bounds.sliceMax; sliceIndex++)
-                {
-                    AssertPunctualLightCoarseRange(
-                        lightData.punctualLightCoarseRanges[sliceIndex],
-                        sliceIndex - bounds.sliceMin,
-                        1);
-                }
-
-                for (var recordIndex = 0; recordIndex < expectedRecordCount; recordIndex++)
-                {
-                    AssertPunctualLightCoarseRecord(
-                        lightData.punctualLightCoarseRecords[recordIndex],
-                        0,
-                        bounds.tileMinX,
-                        bounds.tileMaxX,
-                        bounds.tileMinY,
-                        bounds.tileMaxY);
-                }
-            }
-            finally
-            {
-                Object.DestroyImmediate(cameraObject);
-            }
-        }
-
-        [Test]
-        public void UpdatePunctualLightClusteredLightListData_SkipsSpotOutsideView_WhenBuildParametersAreUsed()
-        {
-            var cameraObject = new GameObject("Clustered Invalid Spot Camera");
-            var camera = cameraObject.AddComponent<Camera>();
-            var lightData = new VividLightData();
-
-            camera.nearClipPlane = 0.3f;
-            camera.farClipPlane = 1000.0f;
-            camera.fieldOfView = 60.0f;
-            camera.transform.position = Vector3.zero;
-            camera.transform.rotation = Quaternion.identity;
-
-            lightData.punctualLightCullData = new[]
-            {
-                new VividLightData.PunctualLightCullData
-                {
-                    positionWS = new Vector3(0.0f, 0.0f, -6.0f),
-                    range = 4.0f,
-                    directionWS = Vector3.back,
-                    lightType = 1u,
-                    cosOuterAngle = 0.5f,
-                    radiusAtRange = 2.0f,
-                    cullingCenterWS = new Vector3(0.0f, 0.0f, -8.0f),
-                    cullingRadius = 3.0f,
-                }
-            };
-            lightData.punctualLightCount = 1;
-
-            try
-            {
-                var parameters = VividLightData.CreatePunctualLightClusteredLightListParameters(
-                    camera,
-                    320,
-                    180,
-                    32,
-                    64,
-                    24,
-                    lightData.punctualLightCount,
-                    64);
-                var buildResult = lightData.UpdatePunctualLightClusteredLightListData(parameters);
-                var viewSpaceCullData = lightData.punctualLightViewSpaceCullData[0];
-                var bounds = lightData.punctualLightScreenSpaceBounds[0];
-
-                Assert.That(viewSpaceCullData.positionVS.z, Is.LessThan(0.0f));
-                Assert.That(bounds.isValid, Is.Zero);
-                Assert.That(buildResult.punctualLightCount, Is.EqualTo(1));
-                Assert.That(buildResult.coarseRangeCount, Is.EqualTo(parameters.sliceCount));
-                Assert.That(buildResult.coarseRecordCount, Is.Zero);
-
-                for (var sliceIndex = 0; sliceIndex < parameters.sliceCount; sliceIndex++)
-                    AssertPunctualLightCoarseRange(lightData.punctualLightCoarseRanges[sliceIndex], 0, 0);
-            }
-            finally
-            {
-                Object.DestroyImmediate(cameraObject);
-            }
-        }
-
-        [Test]
-        public void UpdatePunctualLightClusteredLightListData_ClampsTileRangeAndBuildsMultiSliceRecords_WhenPointLightTouchesScreenEdge()
-        {
-            var cameraObject = new GameObject("Clustered Edge Point Camera");
-            var camera = cameraObject.AddComponent<Camera>();
-            var lightData = new VividLightData();
-
-            camera.nearClipPlane = 0.3f;
-            camera.farClipPlane = 1000.0f;
-            camera.fieldOfView = 60.0f;
-            camera.transform.position = Vector3.zero;
-            camera.transform.rotation = Quaternion.identity;
-
-            lightData.punctualLightCullData = new[]
-            {
-                new VividLightData.PunctualLightCullData
-                {
-                    positionWS = new Vector3(5.0f, 0.0f, 6.0f),
-                    range = 3.0f,
-                    directionWS = Vector3.forward,
-                    lightType = 0u,
-                    cosOuterAngle = 1.0f,
-                    radiusAtRange = 0.0f,
-                    cullingCenterWS = new Vector3(5.0f, 0.0f, 6.0f),
-                    cullingRadius = 3.0f,
-                }
-            };
-            lightData.punctualLightCount = 1;
-
-            try
-            {
-                var parameters = VividLightData.CreatePunctualLightClusteredLightListParameters(
-                    camera,
-                    320,
-                    180,
-                    32,
-                    64,
-                    24,
-                    lightData.punctualLightCount,
-                    64);
-                var buildResult = lightData.UpdatePunctualLightClusteredLightListData(parameters);
-                var bounds = lightData.punctualLightScreenSpaceBounds[0];
-                var expectedRecordCount = bounds.sliceMax - bounds.sliceMin + 1;
-
-                Assert.That(bounds.isValid, Is.EqualTo(1u));
-                Assert.That(bounds.clipSpaceAabbMin.x, Is.EqualTo(0.2164f).Within(0.001f));
-                Assert.That(bounds.tileMinX, Is.EqualTo(5));
-                Assert.That(bounds.tileMaxX, Is.EqualTo(parameters.tileCountX - 1));
-                Assert.That(bounds.tileMinX, Is.LessThan(bounds.tileMaxX));
-                Assert.That(bounds.sliceMax, Is.GreaterThan(bounds.sliceMin));
-                Assert.That(buildResult.coarseRangeCount, Is.EqualTo(parameters.sliceCount));
-                Assert.That(buildResult.coarseRecordCount, Is.EqualTo(expectedRecordCount));
-
-                for (var sliceIndex = bounds.sliceMin; sliceIndex <= bounds.sliceMax; sliceIndex++)
-                {
-                    var range = lightData.punctualLightCoarseRanges[sliceIndex];
-                    Assert.That(range.lightCount, Is.EqualTo(1));
-                    Assert.That(range.startIndex, Is.EqualTo(sliceIndex - bounds.sliceMin));
-                    AssertPunctualLightCoarseRecord(
-                        lightData.punctualLightCoarseRecords[range.startIndex],
-                        0,
-                        bounds.tileMinX,
-                        bounds.tileMaxX,
-                        bounds.tileMinY,
-                        bounds.tileMaxY);
-                }
-            }
-            finally
-            {
-                Object.DestroyImmediate(cameraObject);
-            }
-        }
-
-        [Test]
-        public void FindMainLightIndex_ReturnsSunLight_WhenVisibleDirectionalSunExists()
-        {
-            var sunObject = new GameObject("Sun Light Test");
-            var sunLight = sunObject.AddComponent<Light>();
-            sunLight.type = LightType.Directional;
-
-            try
-            {
-                var visibleLights = new List<VividLightData.VisibleLightDescriptor>
-                {
-                    new(EntityId.FromULong(1), LightType.Directional, new Color(0.4f, 0.4f, 0.4f)),
-                    new(sunLight.GetEntityId(), LightType.Directional, Color.black),
-                    new(EntityId.FromULong(3), LightType.Point, Color.white)
-                };
-
-                var mainLightIndex = VividLightData.FindMainLightIndex(visibleLights, sunLight.GetEntityId());
-
-                Assert.That(mainLightIndex, Is.EqualTo(1));
-            }
-            finally
-            {
-                Object.DestroyImmediate(sunObject);
-            }
-        }
-
-        [Test]
-        public void FindMainLightIndex_ReturnsBrightestDirectional_WhenSunIsNotVisible()
-        {
-            var visibleLights = new List<VividLightData.VisibleLightDescriptor>
-            {
-                new(EntityId.FromULong(1), LightType.Point, new Color(2.0f, 2.0f, 2.0f)),
-                new(EntityId.FromULong(2), LightType.Directional, new Color(0.5f, 0.4f, 0.3f)),
-                new(EntityId.FromULong(3), LightType.Directional, new Color(0.8f, 0.7f, 0.6f))
+                    new VividLightData.PunctualLightCullData
+                    {
+                        positionWS = new Vector3(2.0f, 0.0f, 8.0f),
+                        range = 10.0f,
+                        directionWS = Vector3.forward,
+                        lightType = 1u,
+                        cosOuterAngle = 0.5f,
+                        radiusAtRange = 6.0f,
+                        cullingCenterWS = new Vector3(2.0f, 0.0f, 13.0f),
+                        cullingRadius = 5.0f,
+                    }
+                },
+                punctualLightCount = 1,
             };
 
-            var mainLightIndex = VividLightData.FindMainLightIndex(visibleLights, EntityId.FromULong(99));
+            lightData.UpdatePunctualLightClusteredCullData(Matrix4x4.identity);
 
-            Assert.That(mainLightIndex, Is.EqualTo(2));
-        }
+            var bound = lightData.punctualLightBounds[0];
+            var volume = lightData.punctualLightVolumeData[0];
+            var sinOuterAngle = Mathf.Sqrt(0.75f);
+            var tanOuterAngle = sinOuterAngle / 0.5f;
+            var expectedRadius = sinOuterAngle * 10.0f;
 
-        [Test]
-        public void FindMainLightIndex_ReturnsNegativeOne_WhenNoDirectionalLightsAreVisible()
-        {
-            var visibleLights = new List<VividLightData.VisibleLightDescriptor>
-            {
-                new(EntityId.FromULong(1), LightType.Point, Color.white),
-                new(EntityId.FromULong(2), LightType.Spot, Color.gray)
-            };
-
-            var mainLightIndex = VividLightData.FindMainLightIndex(visibleLights, EntityId.None);
-
-            Assert.That(mainLightIndex, Is.EqualTo(-1));
+            AssertVector3(bound.center, new Vector3(2.0f, 0.0f, 13.0f));
+            AssertVector4(bound.boxAxisX, new Vector4(tanOuterAngle * 10.0f, 0.0f, 0.0f, 0.01f), 0.001f);
+            AssertVector4(bound.boxAxisY, new Vector4(0.0f, tanOuterAngle * 10.0f, 0.0f, expectedRadius), 0.001f);
+            AssertVector3(bound.boxAxisZ, new Vector3(0.0f, 0.0f, 5.0f));
+            Assert.That(volume.lightVolume, Is.EqualTo(0u));
+            Assert.That(volume.radiusSq, Is.EqualTo(100.0f).Within(0.0001f));
+            Assert.That(volume.cotan, Is.EqualTo(0.5f / sinOuterAngle).Within(0.001f));
+            AssertVector3(volume.lightPos, new Vector3(2.0f, 0.0f, 8.0f));
+            AssertVector3(volume.lightAxisX, Vector3.right);
+            AssertVector3(volume.lightAxisY, Vector3.up);
+            AssertVector3(volume.lightAxisZ, Vector3.forward);
         }
 
         [Test]
@@ -1068,15 +398,14 @@ namespace VividRP.Editor.Tests
                 lightData.visibleReflectionProbes = visibleReflectionProbes;
                 lightData.mainLightIndex = 2;
                 lightData.mainLightEntityId = EntityId.FromULong(42);
+                lightData.directionalLightCount = 2;
                 lightData.punctualLightCount = 3;
                 lightData.areaLightCount = 1;
+                lightData.mainDirectionalLightIndex = 1;
+                lightData.mainDirectionalLightEntityId = EntityId.FromULong(84);
                 lightData.areaLights = new[] { default(VividLightData.AreaLightData) };
-                lightData.punctualLightViewSpaceCullData = new[] { default(VividLightData.PunctualLightViewSpaceCullData) };
-                lightData.punctualLightScreenSpaceBounds = new[] { default(VividLightData.PunctualLightScreenSpaceBounds) };
-                lightData.punctualLightCoarseRanges = new[] { default(VividLightData.PunctualLightCoarseRange) };
-                lightData.punctualLightCoarseRecords = new[] { default(VividLightData.PunctualLightCoarseRecord) };
-                lightData.punctualLightCoarseRangeCount = 1;
-                lightData.punctualLightCoarseRecordCount = 1;
+                lightData.punctualLightBounds = new[] { default(VividLightData.SFiniteLightBound) };
+                lightData.punctualLightVolumeData = new[] { default(VividLightData.LightVolumeData) };
 
                 lightData.Reset();
 
@@ -1084,15 +413,14 @@ namespace VividRP.Editor.Tests
                 Assert.That(lightData.visibleReflectionProbes.IsCreated, Is.False);
                 Assert.That(lightData.mainLightIndex, Is.EqualTo(-1));
                 Assert.That(lightData.mainLightEntityId, Is.EqualTo(EntityId.None));
+                Assert.That(lightData.directionalLightCount, Is.Zero);
                 Assert.That(lightData.punctualLightCount, Is.Zero);
                 Assert.That(lightData.areaLightCount, Is.Zero);
+                Assert.That(lightData.mainDirectionalLightIndex, Is.EqualTo(-1));
+                Assert.That(lightData.mainDirectionalLightEntityId, Is.EqualTo(EntityId.None));
                 Assert.That(lightData.areaLights, Is.Empty);
-                Assert.That(lightData.punctualLightViewSpaceCullData, Is.Empty);
-                Assert.That(lightData.punctualLightScreenSpaceBounds, Is.Empty);
-                Assert.That(lightData.punctualLightCoarseRanges, Is.Empty);
-                Assert.That(lightData.punctualLightCoarseRecords, Is.Empty);
-                Assert.That(lightData.punctualLightCoarseRangeCount, Is.Zero);
-                Assert.That(lightData.punctualLightCoarseRecordCount, Is.Zero);
+                Assert.That(lightData.punctualLightBounds, Is.Empty);
+                Assert.That(lightData.punctualLightVolumeData, Is.Empty);
             }
             finally
             {
@@ -1108,12 +436,8 @@ namespace VividRP.Editor.Tests
             float expectedShadowStrength,
             uint expectedRenderingLayerMask)
         {
-            Assert.That(actual.directionWS.x, Is.EqualTo(expectedDirection.x).Within(0.0001f));
-            Assert.That(actual.directionWS.y, Is.EqualTo(expectedDirection.y).Within(0.0001f));
-            Assert.That(actual.directionWS.z, Is.EqualTo(expectedDirection.z).Within(0.0001f));
-            Assert.That(actual.color.x, Is.EqualTo(expectedColor.x).Within(0.0001f));
-            Assert.That(actual.color.y, Is.EqualTo(expectedColor.y).Within(0.0001f));
-            Assert.That(actual.color.z, Is.EqualTo(expectedColor.z).Within(0.0001f));
+            AssertVector3(actual.directionWS, expectedDirection);
+            AssertVector3(actual.color, expectedColor);
             Assert.That(actual.shadowStrength, Is.EqualTo(expectedShadowStrength).Within(0.0001f));
             Assert.That(actual.renderingLayerMask, Is.EqualTo(expectedRenderingLayerMask));
         }
@@ -1126,17 +450,11 @@ namespace VividRP.Editor.Tests
             uint expectedType,
             Vector3 expectedDirection)
         {
-            Assert.That(actual.positionWS.x, Is.EqualTo(expectedPosition.x).Within(0.0001f));
-            Assert.That(actual.positionWS.y, Is.EqualTo(expectedPosition.y).Within(0.0001f));
-            Assert.That(actual.positionWS.z, Is.EqualTo(expectedPosition.z).Within(0.0001f));
-            Assert.That(actual.color.x, Is.EqualTo(expectedColor.x).Within(0.0001f));
-            Assert.That(actual.color.y, Is.EqualTo(expectedColor.y).Within(0.0001f));
-            Assert.That(actual.color.z, Is.EqualTo(expectedColor.z).Within(0.0001f));
+            AssertVector3(actual.positionWS, expectedPosition);
+            AssertVector3(actual.color, expectedColor);
             Assert.That(actual.range, Is.EqualTo(expectedRange).Within(0.0001f));
             Assert.That(actual.lightType, Is.EqualTo(expectedType));
-            Assert.That(actual.directionWS.x, Is.EqualTo(expectedDirection.x).Within(0.0001f));
-            Assert.That(actual.directionWS.y, Is.EqualTo(expectedDirection.y).Within(0.0001f));
-            Assert.That(actual.directionWS.z, Is.EqualTo(expectedDirection.z).Within(0.0001f));
+            AssertVector3(actual.directionWS, expectedDirection);
         }
 
         private static void AssertPunctualLightCullData(
@@ -1150,19 +468,13 @@ namespace VividRP.Editor.Tests
             Vector3 expectedCenter,
             float expectedRadius)
         {
-            Assert.That(actual.positionWS.x, Is.EqualTo(expectedPosition.x).Within(0.0001f));
-            Assert.That(actual.positionWS.y, Is.EqualTo(expectedPosition.y).Within(0.0001f));
-            Assert.That(actual.positionWS.z, Is.EqualTo(expectedPosition.z).Within(0.0001f));
-            Assert.That(actual.directionWS.x, Is.EqualTo(expectedDirection.x).Within(0.0001f));
-            Assert.That(actual.directionWS.y, Is.EqualTo(expectedDirection.y).Within(0.0001f));
-            Assert.That(actual.directionWS.z, Is.EqualTo(expectedDirection.z).Within(0.0001f));
+            AssertVector3(actual.positionWS, expectedPosition);
+            AssertVector3(actual.directionWS, expectedDirection);
             Assert.That(actual.range, Is.EqualTo(expectedRange).Within(0.0001f));
             Assert.That(actual.lightType, Is.EqualTo(expectedType));
             Assert.That(actual.cosOuterAngle, Is.EqualTo(expectedCosOuterAngle).Within(0.0001f));
             Assert.That(actual.radiusAtRange, Is.EqualTo(expectedRadiusAtRange).Within(0.0001f));
-            Assert.That(actual.cullingCenterWS.x, Is.EqualTo(expectedCenter.x).Within(0.0001f));
-            Assert.That(actual.cullingCenterWS.y, Is.EqualTo(expectedCenter.y).Within(0.0001f));
-            Assert.That(actual.cullingCenterWS.z, Is.EqualTo(expectedCenter.z).Within(0.0001f));
+            AssertVector3(actual.cullingCenterWS, expectedCenter);
             Assert.That(actual.cullingRadius, Is.EqualTo(expectedRadius).Within(0.0001f));
         }
 
@@ -1179,52 +491,18 @@ namespace VividRP.Editor.Tests
             uint expectedType,
             uint expectedRenderingLayerMask)
         {
-            Assert.That(actual.positionWS.x, Is.EqualTo(expectedPosition.x).Within(0.0001f));
-            Assert.That(actual.positionWS.y, Is.EqualTo(expectedPosition.y).Within(0.0001f));
-            Assert.That(actual.positionWS.z, Is.EqualTo(expectedPosition.z).Within(0.0001f));
-            Assert.That(actual.color.x, Is.EqualTo(expectedColor.x).Within(0.0001f));
-            Assert.That(actual.color.y, Is.EqualTo(expectedColor.y).Within(0.0001f));
-            Assert.That(actual.color.z, Is.EqualTo(expectedColor.z).Within(0.0001f));
+            AssertVector3(actual.positionWS, expectedPosition);
+            AssertVector3(actual.color, expectedColor);
             Assert.That(actual.rangeAttenuationScale, Is.EqualTo(1.0f / (expectedRange * expectedRange)).Within(0.0001f));
             Assert.That(actual.rangeAttenuationBias, Is.EqualTo(1.0f).Within(0.0001f));
-            Assert.That(actual.forwardWS.x, Is.EqualTo(expectedForward.x).Within(0.0001f));
-            Assert.That(actual.forwardWS.y, Is.EqualTo(expectedForward.y).Within(0.0001f));
-            Assert.That(actual.forwardWS.z, Is.EqualTo(expectedForward.z).Within(0.0001f));
-            Assert.That(actual.rightWS.x, Is.EqualTo(expectedRight.x).Within(0.0001f));
-            Assert.That(actual.rightWS.y, Is.EqualTo(expectedRight.y).Within(0.0001f));
-            Assert.That(actual.rightWS.z, Is.EqualTo(expectedRight.z).Within(0.0001f));
-            Assert.That(actual.upWS.x, Is.EqualTo(expectedUp.x).Within(0.0001f));
-            Assert.That(actual.upWS.y, Is.EqualTo(expectedUp.y).Within(0.0001f));
-            Assert.That(actual.upWS.z, Is.EqualTo(expectedUp.z).Within(0.0001f));
+            AssertVector3(actual.forwardWS, expectedForward);
+            AssertVector3(actual.rightWS, expectedRight);
+            AssertVector3(actual.upWS, expectedUp);
             Assert.That(actual.width, Is.EqualTo(expectedWidth).Within(0.0001f));
             Assert.That(actual.height, Is.EqualTo(expectedHeight).Within(0.0001f));
             Assert.That(actual.range, Is.EqualTo(expectedRange).Within(0.0001f));
             Assert.That(actual.lightType, Is.EqualTo(expectedType));
             Assert.That(actual.renderingLayerMask, Is.EqualTo(expectedRenderingLayerMask));
-        }
-
-        private static void AssertPunctualLightCoarseRange(
-            VividLightData.PunctualLightCoarseRange actual,
-            int expectedStartIndex,
-            int expectedLightCount)
-        {
-            Assert.That(actual.startIndex, Is.EqualTo(expectedStartIndex));
-            Assert.That(actual.lightCount, Is.EqualTo(expectedLightCount));
-        }
-
-        private static void AssertPunctualLightCoarseRecord(
-            VividLightData.PunctualLightCoarseRecord actual,
-            int expectedLightIndex,
-            int expectedTileMinX,
-            int expectedTileMaxX,
-            int expectedTileMinY,
-            int expectedTileMaxY)
-        {
-            Assert.That(actual.lightIndex, Is.EqualTo(expectedLightIndex));
-            Assert.That(actual.tileMinX, Is.EqualTo(expectedTileMinX));
-            Assert.That(actual.tileMaxX, Is.EqualTo(expectedTileMaxX));
-            Assert.That(actual.tileMinY, Is.EqualTo(expectedTileMinY));
-            Assert.That(actual.tileMaxY, Is.EqualTo(expectedTileMaxY));
         }
 
         private static float GetSpotOuterCos(VividLightData.PunctualLightData punctualLight)
@@ -1277,9 +555,7 @@ namespace VividRP.Editor.Tests
             SetVisibleLightField(ref visibleLight, "m_EntityId", EntityId.None);
 
             if (light != null)
-            {
                 TrySetVisibleLightField(ref visibleLight, "m_Light", light);
-            }
 
             return visibleLight;
         }
@@ -1306,15 +582,19 @@ namespace VividRP.Editor.Tests
             visibleLight = (VisibleLight)boxedVisibleLight;
         }
 
-        private static void AssertMatrix4x4(Matrix4x4 actual, Matrix4x4 expected, float tolerance = 0.0001f)
+        private static void AssertVector3(Vector3 actual, Vector3 expected, float tolerance = 0.0001f)
         {
-            for (var row = 0; row < 4; row++)
-            {
-                for (var column = 0; column < 4; column++)
-                {
-                    Assert.That(actual[row, column], Is.EqualTo(expected[row, column]).Within(tolerance));
-                }
-            }
+            Assert.That(actual.x, Is.EqualTo(expected.x).Within(tolerance));
+            Assert.That(actual.y, Is.EqualTo(expected.y).Within(tolerance));
+            Assert.That(actual.z, Is.EqualTo(expected.z).Within(tolerance));
+        }
+
+        private static void AssertVector4(Vector4 actual, Vector4 expected, float tolerance = 0.0001f)
+        {
+            Assert.That(actual.x, Is.EqualTo(expected.x).Within(tolerance));
+            Assert.That(actual.y, Is.EqualTo(expected.y).Within(tolerance));
+            Assert.That(actual.z, Is.EqualTo(expected.z).Within(tolerance));
+            Assert.That(actual.w, Is.EqualTo(expected.w).Within(tolerance));
         }
     }
 }

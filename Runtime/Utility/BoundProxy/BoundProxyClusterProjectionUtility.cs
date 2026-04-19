@@ -5,6 +5,22 @@ namespace VividRP.Runtime
 {
     public static class BoundProxyClusterProjectionUtility
     {
+        private static readonly int[] s_BoxEdgeCornerIndices =
+        {
+            0, 1,
+            0, 2,
+            0, 4,
+            1, 3,
+            1, 5,
+            2, 3,
+            2, 6,
+            3, 7,
+            4, 5,
+            4, 6,
+            5, 7,
+            6, 7
+        };
+
         internal readonly struct JobParameters
         {
             public readonly float4x4 worldToViewMatrix;
@@ -217,6 +233,90 @@ namespace VividRP.Runtime
             return bounds;
         }
 
+        internal static ClusteredProxyScreenBounds CreateScreenBoundsFromViewSpaceCorners(
+            float3[] viewSpaceCorners,
+            int cornerCount,
+            in JobParameters parameters)
+        {
+            ClusteredProxyScreenBounds bounds = default;
+
+            if (viewSpaceCorners == null || cornerCount <= 0)
+                return bounds;
+
+            cornerCount = math.min(cornerCount, viewSpaceCorners.Length);
+
+            float3 viewSpaceMin = new float3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
+            float3 viewSpaceMax = new float3(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
+
+            for (int cornerIndex = 0; cornerIndex < cornerCount; cornerIndex++)
+            {
+                float3 corner = viewSpaceCorners[cornerIndex];
+                viewSpaceMin = math.min(viewSpaceMin, corner);
+                viewSpaceMax = math.max(viewSpaceMax, corner);
+            }
+
+            bounds.viewSpaceAabbMin = new Vector3(viewSpaceMin.x, viewSpaceMin.y, viewSpaceMin.z);
+            bounds.viewSpaceAabbMax = new Vector3(viewSpaceMax.x, viewSpaceMax.y, viewSpaceMax.z);
+
+            if (!TryGetSliceRange(viewSpaceMin.z, viewSpaceMax.z, parameters, out int sliceMin, out int sliceMax))
+                return bounds;
+
+            if (!TryGetClipSpaceRectFromViewSpaceCorners(
+                    viewSpaceCorners,
+                    cornerCount,
+                    parameters,
+                    out float2 clipSpaceAabbMin,
+                    out float2 clipSpaceAabbMax))
+            {
+                return bounds;
+            }
+
+            if (!TryConvertClipRectToTileRange(
+                    clipSpaceAabbMin,
+                    clipSpaceAabbMax,
+                    parameters,
+                    out int tileMinX,
+                    out int tileMaxX,
+                    out int tileMinY,
+                    out int tileMaxY))
+            {
+                return bounds;
+            }
+
+            ExpandRange(ref sliceMin, ref sliceMax, 1, parameters.sliceCount);
+            ExpandRange(ref tileMinX, ref tileMaxX, 1, parameters.tileCountX);
+            ExpandRange(ref tileMinY, ref tileMaxY, 1, parameters.tileCountY);
+
+            if (!TryConvertTileRangeToBigTileRange(
+                    tileMinX,
+                    tileMaxX,
+                    tileMinY,
+                    tileMaxY,
+                    parameters,
+                    out int bigTileMinX,
+                    out int bigTileMaxX,
+                    out int bigTileMinY,
+                    out int bigTileMaxY))
+            {
+                return bounds;
+            }
+
+            bounds.clipSpaceAabbMin = new Vector2(clipSpaceAabbMin.x, clipSpaceAabbMin.y);
+            bounds.clipSpaceAabbMax = new Vector2(clipSpaceAabbMax.x, clipSpaceAabbMax.y);
+            bounds.sliceMin = sliceMin;
+            bounds.sliceMax = sliceMax;
+            bounds.tileMinX = tileMinX;
+            bounds.tileMaxX = tileMaxX;
+            bounds.tileMinY = tileMinY;
+            bounds.tileMaxY = tileMaxY;
+            bounds.bigTileMinX = bigTileMinX;
+            bounds.bigTileMaxX = bigTileMaxX;
+            bounds.bigTileMinY = bigTileMinY;
+            bounds.bigTileMaxY = bigTileMaxY;
+            bounds.isValid = 1u;
+            return bounds;
+        }
+
         internal static float3 TransformWorldToPositiveViewSpace(float4x4 worldToViewMatrix, Vector3 worldPosition)
         {
             float4 viewPosition = math.mul(
@@ -347,6 +447,63 @@ namespace VividRP.Runtime
                 viewSpacePoint.y / projectedHalfHeight);
         }
 
+        private static bool TryGetClipSpaceRectFromViewSpaceCorners(
+            float3[] viewSpaceCorners,
+            int cornerCount,
+            in JobParameters parameters,
+            out float2 clipSpaceAabbMin,
+            out float2 clipSpaceAabbMax)
+        {
+            clipSpaceAabbMin = default;
+            clipSpaceAabbMax = default;
+
+            if (viewSpaceCorners == null || cornerCount <= 0)
+                return false;
+
+            float2 projectedMin = new float2(float.PositiveInfinity, float.PositiveInfinity);
+            float2 projectedMax = new float2(float.NegativeInfinity, float.NegativeInfinity);
+            bool hasProjectedPoint = false;
+
+            for (int cornerIndex = 0; cornerIndex < cornerCount; cornerIndex++)
+            {
+                float3 corner = viewSpaceCorners[cornerIndex];
+                if (corner.z < parameters.nearClip || corner.z > parameters.farClip)
+                    continue;
+
+                AccumulateProjectedPoint(corner, parameters, ref projectedMin, ref projectedMax, ref hasProjectedPoint);
+            }
+
+            int edgeCount = math.min(s_BoxEdgeCornerIndices.Length / 2, 12);
+            for (int edgeIndex = 0; edgeIndex < edgeCount; edgeIndex++)
+            {
+                int cornerIndexA = s_BoxEdgeCornerIndices[edgeIndex * 2];
+                int cornerIndexB = s_BoxEdgeCornerIndices[edgeIndex * 2 + 1];
+                if (cornerIndexA >= cornerCount || cornerIndexB >= cornerCount)
+                    continue;
+
+                float3 cornerA = viewSpaceCorners[cornerIndexA];
+                float3 cornerB = viewSpaceCorners[cornerIndexB];
+                AccumulateClippedEdgeIntersections(
+                    cornerA,
+                    cornerB,
+                    parameters,
+                    ref projectedMin,
+                    ref projectedMax,
+                    ref hasProjectedPoint);
+            }
+
+            if (!hasProjectedPoint
+                || !math.all(math.isfinite(projectedMin))
+                || !math.all(math.isfinite(projectedMax)))
+            {
+                return false;
+            }
+
+            clipSpaceAabbMin = projectedMin - 1e-4f;
+            clipSpaceAabbMax = projectedMax + 1e-4f;
+            return true;
+        }
+
         private static int GetSliceIndex(float depth, in JobParameters parameters)
         {
             depth = math.clamp(depth, parameters.nearClip, parameters.farClip);
@@ -360,6 +517,73 @@ namespace VividRP.Runtime
             float logarithmicDepth = math.log2(math.max(depth / math.max(parameters.nearClip, 1e-6f), 1.0f));
             int logarithmicSlice = (int)math.floor(logarithmicDepth * parameters.logDepthScale);
             return math.clamp(logarithmicSlice, 0, parameters.sliceCount - 1);
+        }
+
+        private static void AccumulateClippedEdgeIntersections(
+            float3 cornerA,
+            float3 cornerB,
+            in JobParameters parameters,
+            ref float2 projectedMin,
+            ref float2 projectedMax,
+            ref bool hasProjectedPoint)
+        {
+            AccumulateEdgePlaneIntersection(
+                cornerA,
+                cornerB,
+                parameters.nearClip,
+                parameters,
+                ref projectedMin,
+                ref projectedMax,
+                ref hasProjectedPoint);
+            AccumulateEdgePlaneIntersection(
+                cornerA,
+                cornerB,
+                parameters.farClip,
+                parameters,
+                ref projectedMin,
+                ref projectedMax,
+                ref hasProjectedPoint);
+        }
+
+        private static void AccumulateEdgePlaneIntersection(
+            float3 cornerA,
+            float3 cornerB,
+            float planeDepth,
+            in JobParameters parameters,
+            ref float2 projectedMin,
+            ref float2 projectedMax,
+            ref bool hasProjectedPoint)
+        {
+            float depthA = cornerA.z - planeDepth;
+            float depthB = cornerB.z - planeDepth;
+
+            if ((depthA < 0.0f && depthB < 0.0f) || (depthA > 0.0f && depthB > 0.0f))
+                return;
+
+            float denominator = cornerB.z - cornerA.z;
+            if (math.abs(denominator) <= 1e-6f)
+                return;
+
+            float t = (planeDepth - cornerA.z) / denominator;
+            if (t < 0.0f || t > 1.0f)
+                return;
+
+            float3 intersection = math.lerp(cornerA, cornerB, t);
+            intersection.z = planeDepth;
+            AccumulateProjectedPoint(intersection, parameters, ref projectedMin, ref projectedMax, ref hasProjectedPoint);
+        }
+
+        private static void AccumulateProjectedPoint(
+            float3 viewSpacePoint,
+            in JobParameters parameters,
+            ref float2 projectedMin,
+            ref float2 projectedMax,
+            ref bool hasProjectedPoint)
+        {
+            float2 clipSpacePoint = ProjectViewSpacePointToClipSpace(viewSpacePoint, parameters);
+            projectedMin = math.min(projectedMin, clipSpacePoint);
+            projectedMax = math.max(projectedMax, clipSpacePoint);
+            hasProjectedPoint = true;
         }
 
         private static bool TryConvertClipRectToTileRange(

@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using Unity.Mathematics;
 using UnityEngine;
 using VividRP.Runtime;
 
@@ -208,6 +209,51 @@ namespace VividRP.Editor.Tests
                 Object.DestroyImmediate(cameraObject);
                 Object.DestroyImmediate(firstOwner);
                 Object.DestroyImmediate(secondOwner);
+            }
+        }
+
+        [Test]
+        public void CreateScreenBoundsFromViewSpaceCorners_ReturnsValidBounds_WhenBoxIntersectsNearPlane()
+        {
+            var cameraObject = new GameObject("BoundProxy Clipped Box Camera");
+            var camera = cameraObject.AddComponent<Camera>();
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 1000.0f;
+            camera.fieldOfView = 60.0f;
+
+            try
+            {
+                BoundProxyClusterProjectionParameters parameters =
+                    BoundProxyClusterProjectionUtility.CreateParameters(camera, 320, 180, 32, 24, 64);
+                var jobParameters = new BoundProxyClusterProjectionUtility.JobParameters(parameters);
+                var rotation = quaternion.Euler(math.radians(new float3(25.0f, 65.0f, 0.0f)));
+                var axisX = math.rotate(rotation, new float3(0.55f, 0.0f, 0.0f));
+                var axisY = math.rotate(rotation, new float3(0.0f, 0.25f, 0.0f));
+                var axisZ = math.rotate(rotation, new float3(0.0f, 0.0f, 0.8f));
+                var center = new float3(0.25f, -0.05f, 0.45f);
+                var corners = new float3[8];
+
+                for (var cornerIndex = 0; cornerIndex < corners.Length; cornerIndex++)
+                {
+                    corners[cornerIndex] = center
+                        + (((cornerIndex & 1) == 0) ? -axisX : axisX)
+                        + (((cornerIndex & 2) == 0) ? -axisY : axisY)
+                        + (((cornerIndex & 4) == 0) ? -axisZ : axisZ);
+                }
+
+                var bounds = BoundProxyClusterProjectionUtility.CreateScreenBoundsFromViewSpaceCorners(
+                    corners,
+                    corners.Length,
+                    jobParameters);
+
+                Assert.That(bounds.IsValid, Is.True);
+                Assert.That(bounds.tileMaxX, Is.GreaterThanOrEqualTo(bounds.tileMinX));
+                Assert.That(bounds.tileMaxY, Is.GreaterThanOrEqualTo(bounds.tileMinY));
+                Assert.That(bounds.sliceMax, Is.GreaterThanOrEqualTo(bounds.sliceMin));
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
             }
         }
 

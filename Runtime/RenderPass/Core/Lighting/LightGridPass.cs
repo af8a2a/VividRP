@@ -131,6 +131,7 @@ namespace VividRP.Runtime
         private readonly Matrix4x4[] m_ScreenProjectionMatrices = new Matrix4x4[2];
         private readonly Matrix4x4[] m_InvProjectionMatrices = new Matrix4x4[2];
         private readonly Matrix4x4[] m_ProjectionMatrices = new Matrix4x4[2];
+        private readonly float3[] m_AreaLightViewSpaceCornerScratch = new float3[8];
         private VividLightData.DirectionalLightData[] m_DirectionalLightUploadData = Array.Empty<VividLightData.DirectionalLightData>();
         private ClusteredProxyScreenBounds[] m_AreaLightScreenSpaceBounds = Array.Empty<ClusteredProxyScreenBounds>();
         private uint[] m_LayeredOffsetUploadData = Array.Empty<uint>();
@@ -258,14 +259,10 @@ namespace VividRP.Runtime
 
             if (m_PunctualLightCount > 0)
             {
-                var cullParameters = VividLightData.CreatePunctualLightScreenSpaceBoundsParameters(
-                    camera,
-                    m_LightingWidth,
-                    m_LightingHeight,
-                    ClusterTileSize,
-                    ClusterSliceCount,
-                    ClusterBigTileSize);
-                lightData.UpdatePunctualLightClusteredCullData(cullParameters);
+                var worldToViewMatrix = camera != null
+                    ? camera.worldToCameraMatrix
+                    : Matrix4x4.identity;
+                lightData.UpdatePunctualLightClusteredCullData(worldToViewMatrix);
                 m_PunctualLightImportedBuffer.SetData(lightData.punctualLights, 0, 0, m_PunctualLightCount);
                 m_FiniteLightBoundImportedBuffer.SetData(lightData.punctualLightBounds, 0, 0, m_PunctualLightCount);
                 m_LightVolumeDataImportedBuffer.SetData(lightData.punctualLightVolumeData, 0, 0, m_PunctualLightCount);
@@ -724,7 +721,7 @@ namespace VividRP.Runtime
                 + sliceIndex * m_ClusterTileCountX * m_ClusterTileCountY;
         }
 
-        private static ClusteredProxyScreenBounds CreateAreaLightScreenSpaceBounds(
+        private ClusteredProxyScreenBounds CreateAreaLightScreenSpaceBounds(
             in VividLightData.AreaLightData areaLight,
             in BoundProxyClusterProjectionUtility.JobParameters projectionParameters)
         {
@@ -755,32 +752,27 @@ namespace VividRP.Runtime
                 projectionParameters);
         }
 
-        private static ClusteredProxyScreenBounds CreateOrientedBoxScreenBounds(
+        private ClusteredProxyScreenBounds CreateOrientedBoxScreenBounds(
             Vector3 centerWS,
             Vector3 axisXWS,
             Vector3 axisYWS,
             Vector3 axisZWS,
             in BoundProxyClusterProjectionUtility.JobParameters projectionParameters)
         {
-            var viewSpaceMin = new float3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
-            var viewSpaceMax = new float3(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
-
             for (var cornerIndex = 0; cornerIndex < 8; cornerIndex++)
             {
                 var cornerWS = centerWS
                     + (((cornerIndex & 1) == 0) ? -axisXWS : axisXWS)
                     + (((cornerIndex & 2) == 0) ? -axisYWS : axisYWS)
                     + (((cornerIndex & 4) == 0) ? -axisZWS : axisZWS);
-                var cornerVS = BoundProxyClusterProjectionUtility.TransformWorldToPositiveViewSpace(
+                m_AreaLightViewSpaceCornerScratch[cornerIndex] = BoundProxyClusterProjectionUtility.TransformWorldToPositiveViewSpace(
                     projectionParameters.worldToViewMatrix,
                     cornerWS);
-                viewSpaceMin = math.min(viewSpaceMin, cornerVS);
-                viewSpaceMax = math.max(viewSpaceMax, cornerVS);
             }
 
-            return BoundProxyClusterProjectionUtility.CreateScreenBoundsFromViewSpaceAabb(
-                viewSpaceMin,
-                viewSpaceMax,
+            return BoundProxyClusterProjectionUtility.CreateScreenBoundsFromViewSpaceCorners(
+                m_AreaLightViewSpaceCornerScratch,
+                m_AreaLightViewSpaceCornerScratch.Length,
                 projectionParameters);
         }
 

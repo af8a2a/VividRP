@@ -280,6 +280,7 @@ namespace VividRP.Runtime
         {
             VividGPUDrivenSystem.Shutdown();
             PassRecorder.Dispose();
+            VirtualTextureSystem.Deinitialize();
             SkyManager.Deinitialize();
             LTCAreaLightSystem.Deinitialize();
             VividVolumeManagerUtility.Deinitialize();

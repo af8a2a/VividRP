@@ -18,8 +18,8 @@ namespace VividRP.Editor
         private static readonly GUIContent s_StopNaNsLabel = EditorGUIUtility.TrTextContent("Stop NaNs");
         private static readonly GUIContent s_DitheringLabel = EditorGUIUtility.TrTextContent("Dithering");
         private static readonly GUIContent s_VolumeLayerMaskLabel = EditorGUIUtility.TrTextContent("Volume Layer Mask");
+        private static readonly GUIContent s_AntialiasingLabel = EditorGUIUtility.TrTextContent("Anti-Aliasing");
         private static readonly GUIContent s_TAALabel = EditorGUIUtility.TrTextContent("Temporal Anti-Aliasing");
-        private static readonly GUIContent s_EnableTAALabel = EditorGUIUtility.TrTextContent("Enable");
         private static readonly GUIContent s_TAAJitterSpreadLabel = EditorGUIUtility.TrTextContent("Jitter Spread");
         private static readonly GUIContent s_TAASampleCountLabel = EditorGUIUtility.TrTextContent("Sample Count");
         private static readonly GUIContent s_TAABaseBlendFactorLabel = EditorGUIUtility.TrTextContent("Base Blend");
@@ -107,14 +107,12 @@ namespace VividRP.Editor
                 EditorGUILayout.PropertyField(m_SerializedCamera.stopNaNs, s_StopNaNsLabel);
                 EditorGUILayout.PropertyField(m_SerializedCamera.dithering, s_DitheringLabel);
                 EditorGUILayout.PropertyField(m_SerializedCamera.volumeLayerMask, s_VolumeLayerMaskLabel);
+                EditorGUILayout.PropertyField(m_SerializedCamera.antialiasing, s_AntialiasingLabel);
 
-                EditorGUILayout.Space();
-                EditorGUILayout.LabelField(s_TAALabel, EditorStyles.boldLabel);
-                EditorGUILayout.PropertyField(m_SerializedCamera.enableTAA, s_EnableTAALabel);
-
-                using (new EditorGUI.DisabledScope(!m_SerializedCamera.enableTAA.hasMultipleDifferentValues
-                                                   && !m_SerializedCamera.enableTAA.boolValue))
+                if (ShouldShowTAASettings())
                 {
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField(s_TAALabel, EditorStyles.boldLabel);
                     EditorGUILayout.PropertyField(m_SerializedCamera.taaJitterSpread, s_TAAJitterSpreadLabel);
                     EditorGUILayout.PropertyField(m_SerializedCamera.taaSampleCount, s_TAASampleCountLabel);
                     EditorGUILayout.PropertyField(m_SerializedCamera.taaBaseBlendFactor, s_TAABaseBlendFactorLabel);
@@ -130,6 +128,16 @@ namespace VividRP.Editor
                 return false;
 
             return (VividCameraRenderType)m_SerializedCamera.renderType.enumValueIndex == VividCameraRenderType.Base;
+        }
+
+        private bool ShouldShowTAASettings()
+        {
+            if (m_SerializedCamera.antialiasing == null)
+                return false;
+
+            return m_SerializedCamera.antialiasing.hasMultipleDifferentValues
+                || (VividAntialiasingMode)m_SerializedCamera.antialiasing.enumValueIndex
+                == VividAntialiasingMode.TemporalAntiAliasing;
         }
     }
 

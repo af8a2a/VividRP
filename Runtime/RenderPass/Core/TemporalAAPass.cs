@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -42,7 +43,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_OutputTexture;
 
         private ComputeShader m_ComputeShader;
-        private int m_Kernel = -1;
+        private int m_TaaKernel = -1;
         private int m_CopyKernel = -1;
         private int m_Width;
         private int m_Height;
@@ -59,10 +60,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ColorInput = RenderGraphTexture.CreateInput("Color", GraphicsFormat.R16G16B16A16_SFloat);
             m_MotionVectors = RenderGraphTexture.CreateInput("MotionVectors", GraphicsFormat.R16G16_SFloat);
             m_DepthTexture = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.None, DepthBits.Depth32);
-
             m_HistoryColorPrevious = RenderGraphTexture.CreateInput("TAAHistoryColor", GraphicsFormat.R16G16B16A16_SFloat);
             m_HistoryColorCurrent = CreatePassOwnedTexture("TAAHistoryColorCurrent", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
-
             m_OutputTexture = CreatePassOwnedTexture("TAAOutput", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
         }
 
@@ -70,11 +69,11 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             m_ComputeShader = resources?.TemporalAACompute;
-            if (m_ComputeShader != null)
-            {
-                m_Kernel = m_ComputeShader.FindKernel("TemporalAA");
-                m_CopyKernel = m_ComputeShader.FindKernel("CopyColor");
-            }
+            if (m_ComputeShader == null)
+                return;
+
+            m_TaaKernel = m_ComputeShader.FindKernel("TemporalAA");
+            m_CopyKernel = m_ComputeShader.FindKernel("CopyColor");
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -122,16 +121,25 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_ComputeShader == null)
                 return;
 
-            if (m_ColorInput?.innerHandle.IsValid() != true)
+            if (m_ColorInput?.innerHandle.IsValid() != true || m_OutputTexture?.innerHandle.IsValid() != true)
                 return;
 
-            if (!m_TAASettings.Enabled || m_Kernel < 0)
+            if (m_TAASettings.Enabled && m_TaaKernel >= 0)
+            {
+                RecordTAA(context);
+            }
+            else
             {
                 RecordPassthrough(context);
-                return;
             }
+        }
 
-            RecordTAA(context);
+        public override void Dispose()
+        {
+            m_ComputeShader = null;
+            m_TaaKernel = -1;
+            m_CopyKernel = -1;
+            m_HasValidHistory = false;
         }
 
         private void RecordPassthrough(ComputeGraphContext context)
@@ -142,6 +150,10 @@ namespace VividRP.Runtime.RenderPass.Core
             var cmd = context.cmd;
             cmd.SetComputeTextureParam(m_ComputeShader, m_CopyKernel, InputColorId, m_ColorInput.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_CopyKernel, OutputColorId, m_OutputTexture.innerHandle);
+            cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                ScreenSizeId,
+                new Vector4(m_Width, m_Height, 1.0f / m_Width, 1.0f / m_Height));
 
             int dispatchX = CoreUtils.DivRoundUp(m_Width, 8);
             int dispatchY = CoreUtils.DivRoundUp(m_Height, 8);
@@ -152,23 +164,22 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var cmd = context.cmd;
 
-            cmd.SetComputeTextureParam(m_ComputeShader, m_Kernel, InputColorId, m_ColorInput.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_TaaKernel, InputColorId, m_ColorInput.innerHandle);
 
             if (m_MotionVectors?.innerHandle.IsValid() == true)
-                cmd.SetComputeTextureParam(m_ComputeShader, m_Kernel, MotionVectorsId, m_MotionVectors.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_TaaKernel, MotionVectorsId, m_MotionVectors.innerHandle);
 
             if (m_DepthTexture?.innerHandle.IsValid() == true)
-                cmd.SetComputeTextureParam(m_ComputeShader, m_Kernel, DepthTextureId, m_DepthTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_TaaKernel, DepthTextureId, m_DepthTexture.innerHandle);
 
             var historyHandle = m_HasValidHistory && !m_IsFirstFrame && m_HistoryColorPrevious?.innerHandle.IsValid() == true
                 ? m_HistoryColorPrevious.innerHandle
                 : m_ColorInput.innerHandle;
-            cmd.SetComputeTextureParam(m_ComputeShader, m_Kernel, HistoryColorId, historyHandle);
-
-            cmd.SetComputeTextureParam(m_ComputeShader, m_Kernel, OutputColorId, m_OutputTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_TaaKernel, HistoryColorId, historyHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_TaaKernel, OutputColorId, m_OutputTexture.innerHandle);
 
             if (m_HistoryColorCurrent?.innerHandle.IsValid() == true)
-                cmd.SetComputeTextureParam(m_ComputeShader, m_Kernel, HistoryColorWriteId, m_HistoryColorCurrent.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_TaaKernel, HistoryColorWriteId, m_HistoryColorCurrent.innerHandle);
 
             float hasHistory = m_HasValidHistory && !m_IsFirstFrame ? 1.0f : 0.0f;
             cmd.SetComputeVectorParam(
@@ -190,14 +201,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             int dispatchX = CoreUtils.DivRoundUp(m_Width, 8);
             int dispatchY = CoreUtils.DivRoundUp(m_Height, 8);
-            cmd.DispatchCompute(m_ComputeShader, m_Kernel, dispatchX, dispatchY, 1);
-        }
-
-        public override void Dispose()
-        {
-            m_ComputeShader = null;
-            m_Kernel = -1;
-            m_CopyKernel = -1;
+            cmd.DispatchCompute(m_ComputeShader, m_TaaKernel, dispatchX, dispatchY, 1);
         }
 
         private static RenderGraphTexture CreatePassOwnedTexture(
@@ -213,6 +217,8 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.Name = name;
             texture.desc.EnableRandomWrite = true;
             texture.desc.ClearBuffer = false;
+            texture.desc.FilterMode = FilterMode.Point;
+            texture.desc.WrapMode = TextureWrapMode.Clamp;
             return texture;
         }
 
@@ -224,6 +230,8 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.Width = Mathf.Max(1, width);
             texture.desc.Height = Mathf.Max(1, height);
             texture.desc.EnableRandomWrite = true;
+            texture.desc.WrapMode = TextureWrapMode.Clamp;
         }
     }
+
 }

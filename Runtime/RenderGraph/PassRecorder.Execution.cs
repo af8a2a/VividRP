@@ -7,6 +7,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using UnityEngine.Rendering.RenderGraphModule.Util;
 using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Runtime
 {
@@ -48,6 +49,7 @@ namespace VividRP.Runtime
         private static long s_CurrentImportVersion;
         private static bool s_IsCompiled;
         private static bool s_RenderedPreImageEffectGizmosInGraph;
+        private static CMAA2Pass s_InjectedCmaa2Pass;
 
 #if UNITY_EDITOR
         private sealed class RenderGizmosPassData
@@ -154,6 +156,20 @@ namespace VividRP.Runtime
                 {
                     Debug.LogException(e);
                 }
+            }
+
+            if (s_InjectedCmaa2Pass != null)
+            {
+                try
+                {
+                    s_InjectedCmaa2Pass.Dispose();
+                }
+                catch (Exception e)
+                {
+                    Debug.LogException(e);
+                }
+
+                s_InjectedCmaa2Pass = null;
             }
 
             DisposeAccelerationStructures();
@@ -345,6 +361,65 @@ namespace VividRP.Runtime
             bool renderedPreImageEffectGizmosInGraph)
         {
             return !hasRenderGizmoPrePostProcessBoundary || !renderedPreImageEffectGizmosInGraph;
+        }
+
+        private static bool ShouldInjectCmaa2Pass()
+        {
+            var additionalData = s_FrameData.GetOrCreate<VividCameraData>().additionalData;
+            return additionalData != null && additionalData.antialiasing == VividAntialiasingMode.CMAA2;
+        }
+
+        private static CMAA2Pass GetOrCreateInjectedCmaa2Pass()
+        {
+            if (s_InjectedCmaa2Pass != null)
+                return s_InjectedCmaa2Pass;
+
+            s_InjectedCmaa2Pass = new CMAA2Pass();
+            s_InjectedCmaa2Pass.Create();
+            GetCurrentPassResources(s_InjectedCmaa2Pass);
+            return s_InjectedCmaa2Pass;
+        }
+
+        private static void RecordInjectedCmaa2Pass(
+            RenderGraph renderGraph,
+            CMAA2Pass cmaa2Pass,
+            FinalBlitPass finalBlitPass,
+            bool enableAsyncCompute,
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache,
+            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
+            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
+            Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache)
+        {
+            if (renderGraph == null || cmaa2Pass == null || finalBlitPass == null)
+                return;
+
+            var sourceTexture = finalBlitPass.GetSourceTexture();
+            if (sourceTexture == null || sourceTexture.innerHandle.IsValid() != true)
+                return;
+
+            cmaa2Pass.SetInput(sourceTexture);
+            var cmaa2Resources = GetCurrentPassResources(cmaa2Pass);
+            RecordComputePass(
+                renderGraph,
+                cmaa2Pass,
+                cmaa2Resources,
+                null,
+                enableAsyncCompute,
+                textureCache,
+                bufferCache,
+                renderListCache,
+                accelerationStructureCache,
+                "CMAA2Pass (Injected)");
+            finalBlitPass.SetSourceTexture(cmaa2Pass.GetOutputTexture());
+        }
+
+        private static void RestoreInjectedFinalBlitSources()
+        {
+            foreach (var pass in s_RenderPasses)
+            {
+                if (pass is FinalBlitPass finalBlitPass)
+                    finalBlitPass.RestoreSourceTexture();
+            }
         }
 
         private static void RegisterTextureHistoryBinding(
@@ -1275,6 +1350,10 @@ namespace VividRP.Runtime
             bool enableAsyncCompute = true)
         {
             EnsureCompiled(graphAsset);
+            RestoreInjectedFinalBlitSources();
+            var injectedCmaa2Pass = ShouldInjectCmaa2Pass()
+                ? GetOrCreateInjectedCmaa2Pass()
+                : null;
 
             s_CurrentRenderGraph = renderGraph;
             BlueNoise.Instance?.ImportResources(renderGraph);
@@ -1283,6 +1362,9 @@ namespace VividRP.Runtime
             {
                 pass.Prepare(s_FrameData);
             }
+
+            if (injectedCmaa2Pass != null)
+                injectedCmaa2Pass.Prepare(s_FrameData);
 
             PreparePendingHistoryTextureImports(renderGraph);
             s_CurrentRenderGraph = null;
@@ -1319,6 +1401,19 @@ namespace VividRP.Runtime
                     recordedPreImageEffectGizmos = true;
                 }
 #endif
+                if (injectedCmaa2Pass != null && pass is FinalBlitPass finalBlitPass)
+                {
+                    RecordInjectedCmaa2Pass(
+                        renderGraph,
+                        injectedCmaa2Pass,
+                        finalBlitPass,
+                        enableAsyncCompute,
+                        textureCache,
+                        bufferCache,
+                        renderListCache,
+                        accelerationStructureCache);
+                }
+
                 var resources = GetCurrentPassResources(pass);
                 var passDefinition = passDefinitions != null && passIndex < passDefinitions.Count
                     ? passDefinitions[passIndex]

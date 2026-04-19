@@ -25,15 +25,15 @@ namespace VividRP.Runtime
             AntiFlickerIntensity = antiFlickerIntensity;
         }
 
-        public static TAASettings Default => new(true, 1.0f, 8, 0.95f, 3.0f, 0.5f);
+        public static TAASettings Disabled => new(false, 1.0f, 8, 0.95f, 3.0f, 0.5f);
 
         public static TAASettings FromCamera(VividAdditionalCameraData data)
         {
             if (data == null)
-                return Default;
+                return Disabled;
 
             return new TAASettings(
-                data.enableTAA,
+                data.antialiasing == VividAntialiasingMode.TemporalAntiAliasing,
                 data.taaJitterSpread,
                 data.taaSampleCount,
                 data.taaBaseBlendFactor,

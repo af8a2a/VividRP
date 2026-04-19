@@ -59,6 +59,7 @@ namespace VividRP.Editor
             volumeLayerMask = serializedAdditionalDataObject.FindProperty("m_VolumeLayerMask");
             stopNaNs = serializedAdditionalDataObject.FindProperty("m_StopNaNs");
             dithering = serializedAdditionalDataObject.FindProperty("m_Dithering");
+            antialiasing = serializedAdditionalDataObject.FindProperty("m_Antialiasing");
             enableTAA = serializedAdditionalDataObject.FindProperty("m_EnableTAA");
             taaJitterSpread = serializedAdditionalDataObject.FindProperty("m_TAAJitterSpread");
             taaSampleCount = serializedAdditionalDataObject.FindProperty("m_TAASampleCount");

@@ -10,6 +10,18 @@ namespace VividRP.Runtime
         Overlay,
     }
 
+    public enum VividAntialiasingMode
+    {
+        [InspectorName("No Anti-aliasing")]
+        None,
+
+        [InspectorName("Conservative Morphological Anti-aliasing 2 (CMAA2)")]
+        CMAA2,
+
+        [InspectorName("Temporal Anti-aliasing (TAA)")]
+        TemporalAntiAliasing,
+    }
+
     public static class VividCameraExtensions
     {
         public static VividAdditionalCameraData GetVividAdditionalCameraData(this Camera camera)
@@ -28,7 +40,7 @@ namespace VividRP.Runtime
     [DisallowMultipleComponent]
     [RequireComponent(typeof(Camera))]
     [ExecuteAlways]
-    public partial class VividAdditionalCameraData : MonoBehaviour, IAdditionalData
+    public partial class VividAdditionalCameraData : MonoBehaviour, IAdditionalData, ISerializationCallbackReceiver
     {
         [SerializeField]
         private VividCameraRenderType m_RenderType = VividCameraRenderType.Base;
@@ -45,7 +57,10 @@ namespace VividRP.Runtime
         [SerializeField]
         private bool m_Dithering;
 
-        [Header("Temporal Anti-Aliasing")]
+        [Header("Anti-Aliasing")]
+        [SerializeField]
+        private VividAntialiasingMode m_Antialiasing = VividAntialiasingMode.None;
+
         [SerializeField]
         private bool m_EnableTAA;
 
@@ -175,10 +190,30 @@ namespace VividRP.Runtime
             set => m_Dithering = value;
         }
 
+        public VividAntialiasingMode antialiasing
+        {
+            get => m_Antialiasing;
+            set
+            {
+                m_Antialiasing = value;
+                m_EnableTAA = value == VividAntialiasingMode.TemporalAntiAliasing;
+            }
+        }
+
         public bool enableTAA
         {
-            get => m_EnableTAA;
-            set => m_EnableTAA = value;
+            get => antialiasing == VividAntialiasingMode.TemporalAntiAliasing;
+            set => antialiasing = value
+                ? VividAntialiasingMode.TemporalAntiAliasing
+                : VividAntialiasingMode.None;
+        }
+
+        public bool enableCMAA2
+        {
+            get => antialiasing == VividAntialiasingMode.CMAA2;
+            set => antialiasing = value
+                ? VividAntialiasingMode.CMAA2
+                : VividAntialiasingMode.None;
         }
 
         public float taaJitterSpread
@@ -213,7 +248,25 @@ namespace VividRP.Runtime
 
         private void OnValidate()
         {
+            SynchronizeLegacyAntialiasing();
             m_Camera = camera;
+        }
+
+        void ISerializationCallbackReceiver.OnBeforeSerialize()
+        {
+        }
+
+        void ISerializationCallbackReceiver.OnAfterDeserialize()
+        {
+            SynchronizeLegacyAntialiasing();
+        }
+
+        private void SynchronizeLegacyAntialiasing()
+        {
+            if (m_Antialiasing == VividAntialiasingMode.None && m_EnableTAA)
+                m_Antialiasing = VividAntialiasingMode.TemporalAntiAliasing;
+
+            m_EnableTAA = m_Antialiasing == VividAntialiasingMode.TemporalAntiAliasing;
         }
     }
 }

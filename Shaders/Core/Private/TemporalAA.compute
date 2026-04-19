@@ -1,5 +1,9 @@
 #pragma kernel TemporalAA
 #pragma kernel CopyColor
+#pragma kernel ComputeDispatchArgsCS
+#pragma kernel EdgesColor2x2CS
+#pragma kernel ProcessCandidatesCS
+#pragma kernel DeferredColorApply2x2CS
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 
@@ -145,3 +149,11 @@ void CopyColor(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     _OutputColor[pixelCoord] = _InputColor[pixelCoord];
 }
+
+#define CMAA2_UAV_STORE_TYPED 1
+#define CMAA2_UAV_STORE_CONVERT_TO_SRGB 0
+#define CMAA2_UAV_STORE_TYPED_UNORM_FLOAT 0
+#define CMAA2_SUPPORT_HDR_COLOR_RANGE 1
+#define CMAA2_EDGE_DETECTION_LUMA_PATH 1
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/CMAA2.hlsl"

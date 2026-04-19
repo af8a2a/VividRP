@@ -3,6 +3,7 @@ using System.IO;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Editor.RenderGraph;
@@ -132,6 +133,35 @@ namespace VividRP.Editor.Tests
 
             Assert.That(viewportField, Is.Not.Null);
             Assert.That((Rect)viewportField.GetValue(pass), Is.EqualTo(new Rect(4f, 8f, 320f, 180f)));
+        }
+
+        [Test]
+        public void SetSourceTexture_MarksPassResourceLayoutDirty()
+        {
+            var pass = new FinalBlitPass();
+            var setMethod = typeof(FinalBlitPass).GetMethod("SetSourceTexture", BindingFlags.Instance | BindingFlags.NonPublic);
+            var restoreMethod = typeof(FinalBlitPass).GetMethod("RestoreSourceTexture", BindingFlags.Instance | BindingFlags.NonPublic);
+            var sourceField = typeof(FinalBlitPass).GetField("source", BindingFlags.Instance | BindingFlags.NonPublic);
+            var originalSource = RenderGraphTexture.CreateInput("OriginalSource", GraphicsFormat.R16G16B16A16_SFloat);
+            var injectedSource = RenderGraphTexture.CreateInput("InjectedSource", GraphicsFormat.R16G16B16A16_SFloat);
+
+            Assert.That(setMethod, Is.Not.Null);
+            Assert.That(restoreMethod, Is.Not.Null);
+            Assert.That(sourceField, Is.Not.Null);
+            sourceField.SetValue(pass, originalSource);
+
+            setMethod.Invoke(pass, new object[] { injectedSource });
+
+            Assert.That(pass.IsPassResourceLayoutDirty, Is.True);
+            Assert.That(sourceField.GetValue(pass), Is.SameAs(injectedSource));
+
+            pass.ClearPassResourceLayoutDirty();
+            Assert.That(pass.IsPassResourceLayoutDirty, Is.False);
+
+            restoreMethod.Invoke(pass, Array.Empty<object>());
+
+            Assert.That(pass.IsPassResourceLayoutDirty, Is.True);
+            Assert.That(sourceField.GetValue(pass), Is.SameAs(originalSource));
         }
 
         [Test]

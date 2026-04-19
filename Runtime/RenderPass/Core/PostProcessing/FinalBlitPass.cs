@@ -1,10 +1,11 @@
+using System;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public class FinalBlitPass : UnsafePass, IRenderGizmoPrePostProcessBoundaryPass
+    public class FinalBlitPass : UnsafePass, IRenderGizmoPrePostProcessBoundaryPass, IDynamicPassResourceLayout
     {
         private static readonly int ColorGradingLutId = Shader.PropertyToID("_VividColorGradingLut");
         private static readonly int ColorGradingParamsId = Shader.PropertyToID("_VividColorGradingParams");
@@ -35,6 +36,54 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_EnableExposure;
         private Rect m_Viewport;
         private int m_FrameCount;
+        private bool m_IsPassResourceLayoutDirty;
+        private RenderGraphTexture m_OriginalSource;
+        private bool m_HasSourceTextureOverride;
+
+        public bool IsPassResourceLayoutDirty => m_IsPassResourceLayoutDirty;
+
+        public void ClearPassResourceLayoutDirty()
+        {
+            m_IsPassResourceLayoutDirty = false;
+        }
+
+        internal RenderGraphTexture GetSourceTexture()
+        {
+            return source;
+        }
+
+        internal void SetSourceTexture(RenderGraphTexture sourceTexture)
+        {
+            if (sourceTexture == null)
+                throw new ArgumentNullException(nameof(sourceTexture));
+
+            if (ReferenceEquals(source, sourceTexture))
+                return;
+
+            if (!m_HasSourceTextureOverride)
+            {
+                m_OriginalSource = source;
+            }
+
+            source = sourceTexture;
+            m_HasSourceTextureOverride = true;
+            m_IsPassResourceLayoutDirty = true;
+        }
+
+        internal void RestoreSourceTexture()
+        {
+            if (!m_HasSourceTextureOverride)
+                return;
+
+            if (!ReferenceEquals(source, m_OriginalSource) && m_OriginalSource != null)
+            {
+                source = m_OriginalSource;
+                m_IsPassResourceLayoutDirty = true;
+            }
+
+            m_OriginalSource = null;
+            m_HasSourceTextureOverride = false;
+        }
 
         public override void Prepare(ContextContainer frameData)
         {

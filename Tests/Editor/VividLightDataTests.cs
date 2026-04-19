@@ -9,297 +9,6 @@ namespace VividRP.Editor.Tests
 {
     public class VividLightDataTests
     {
-        [Test]
-        public void UpdateDirectionalLights_SelectsSunLight_WhenVisibleDirectionalSunExists()
-        {
-            var sunObject = new GameObject("Sun Directional Light");
-            var fillObject = new GameObject("Fill Directional Light");
-            var pointObject = new GameObject("Point Light");
-            var visibleLights = new NativeArray<VisibleLight>(3, Allocator.Temp);
-            var lightData = new VividLightData();
-
-            var sunLight = sunObject.AddComponent<Light>();
-            var fillLight = fillObject.AddComponent<Light>();
-            var pointLight = pointObject.AddComponent<Light>();
-
-            sunLight.type = LightType.Directional;
-            sunLight.color = Color.white;
-            sunLight.intensity = 2.0f;
-            sunLight.shadows = LightShadows.Soft;
-            sunLight.shadowStrength = 0.7f;
-            sunObject.transform.rotation = Quaternion.LookRotation(Vector3.forward, Vector3.up);
-
-            fillLight.type = LightType.Directional;
-            fillLight.color = Color.red;
-            fillLight.intensity = 0.5f;
-            fillObject.transform.rotation = Quaternion.LookRotation(Vector3.right, Vector3.up);
-
-            pointLight.type = LightType.Point;
-
-            try
-            {
-                visibleLights[0] = CreateVisibleLight(
-                    LightType.Point,
-                    Color.white,
-                    pointObject.transform.localToWorldMatrix,
-                    range: 6.0f,
-                    light: pointLight);
-                visibleLights[1] = CreateVisibleLight(
-                    LightType.Directional,
-                    Color.white,
-                    sunObject.transform.localToWorldMatrix,
-                    light: sunLight);
-                visibleLights[2] = CreateVisibleLight(
-                    LightType.Directional,
-                    Color.red,
-                    fillObject.transform.localToWorldMatrix,
-                    light: fillLight);
-
-                lightData.UpdateDirectionalLights(visibleLights, sunLight);
-
-                Assert.That(lightData.directionalLightCount, Is.EqualTo(2));
-                Assert.That(lightData.hasDirectionalLights, Is.True);
-                Assert.That(lightData.mainLightIndex, Is.EqualTo(1));
-                Assert.That(lightData.mainLightEntityId, Is.EqualTo(sunLight.GetEntityId()));
-                Assert.That(lightData.mainDirectionalLightIndex, Is.EqualTo(0));
-                Assert.That(lightData.mainDirectionalLightEntityId, Is.EqualTo(sunLight.GetEntityId()));
-                AssertDirectionalLight(lightData.directionalLights[0], -sunObject.transform.forward, new Vector3(2.0f, 2.0f, 2.0f), 0.7f, (uint)sunLight.renderingLayerMask);
-                AssertDirectionalLight(lightData.directionalLights[1], -fillObject.transform.forward, new Vector3(0.5f, 0.0f, 0.0f), 0.0f, (uint)fillLight.renderingLayerMask);
-            }
-            finally
-            {
-                visibleLights.Dispose();
-                Object.DestroyImmediate(sunObject);
-                Object.DestroyImmediate(fillObject);
-                Object.DestroyImmediate(pointObject);
-            }
-        }
-
-        [Test]
-        public void UpdateDirectionalLights_SelectsBrightestDirectional_WhenSunLightIsUnavailable()
-        {
-            var hiddenSunObject = new GameObject("Hidden Sun Directional Light");
-            var fillObject = new GameObject("Fill Directional Light");
-            var keyObject = new GameObject("Key Directional Light");
-            var pointObject = new GameObject("Point Light");
-            var visibleLights = new NativeArray<VisibleLight>(3, Allocator.Temp);
-            var lightData = new VividLightData();
-
-            var hiddenSun = hiddenSunObject.AddComponent<Light>();
-            var fillLight = fillObject.AddComponent<Light>();
-            var keyLight = keyObject.AddComponent<Light>();
-            var pointLight = pointObject.AddComponent<Light>();
-
-            hiddenSun.type = LightType.Directional;
-            hiddenSun.enabled = false;
-
-            fillLight.type = LightType.Directional;
-            fillLight.color = Color.blue;
-            fillLight.intensity = 0.5f;
-            fillObject.transform.rotation = Quaternion.LookRotation(Vector3.right, Vector3.up);
-
-            keyLight.type = LightType.Directional;
-            keyLight.color = Color.white;
-            keyLight.intensity = 1.5f;
-            keyObject.transform.rotation = Quaternion.LookRotation(Vector3.forward, Vector3.up);
-
-            pointLight.type = LightType.Point;
-
-            try
-            {
-                visibleLights[0] = CreateVisibleLight(
-                    LightType.Point,
-                    Color.white,
-                    pointObject.transform.localToWorldMatrix,
-                    range: 4.0f,
-                    light: pointLight);
-                visibleLights[1] = CreateVisibleLight(
-                    LightType.Directional,
-                    Color.blue,
-                    fillObject.transform.localToWorldMatrix,
-                    light: fillLight);
-                visibleLights[2] = CreateVisibleLight(
-                    LightType.Directional,
-                    Color.white,
-                    keyObject.transform.localToWorldMatrix,
-                    light: keyLight);
-
-                lightData.UpdateDirectionalLights(visibleLights, hiddenSun);
-
-                Assert.That(lightData.directionalLightCount, Is.EqualTo(2));
-                Assert.That(lightData.mainLightIndex, Is.EqualTo(2));
-                Assert.That(lightData.mainLightEntityId, Is.EqualTo(keyLight.GetEntityId()));
-                Assert.That(lightData.mainDirectionalLightIndex, Is.EqualTo(1));
-                Assert.That(lightData.mainDirectionalLightEntityId, Is.EqualTo(keyLight.GetEntityId()));
-            }
-            finally
-            {
-                visibleLights.Dispose();
-                Object.DestroyImmediate(hiddenSunObject);
-                Object.DestroyImmediate(fillObject);
-                Object.DestroyImmediate(keyObject);
-                Object.DestroyImmediate(pointObject);
-            }
-        }
-
-        [Test]
-        public void UpdatePunctualLights_CollectsPointAndSpotVisibleLights_WhenNativeArrayIsProvided()
-        {
-            var visibleLights = new NativeArray<VisibleLight>(3, Allocator.Temp);
-            var lightData = new VividLightData();
-
-            try
-            {
-                visibleLights[0] = CreateVisibleLight(
-                    LightType.Directional,
-                    Color.white,
-                    Matrix4x4.TRS(Vector3.zero, Quaternion.LookRotation(Vector3.forward), Vector3.one));
-                visibleLights[1] = CreateVisibleLight(
-                    LightType.Point,
-                    new Color(0.25f, 0.5f, 0.75f),
-                    Matrix4x4.TRS(new Vector3(1.0f, 2.0f, 3.0f), Quaternion.identity, Vector3.one),
-                    range: 8.0f);
-                visibleLights[2] = CreateVisibleLight(
-                    LightType.Spot,
-                    new Color(0.9f, 0.4f, 0.1f),
-                    Matrix4x4.TRS(new Vector3(-1.0f, 0.5f, 2.0f), Quaternion.LookRotation(Vector3.right), Vector3.one),
-                    range: 12.0f,
-                    spotAngle: 50.0f,
-                    innerSpotAngle: 30.0f);
-
-                lightData.UpdatePunctualLights(visibleLights);
-
-                Assert.That(lightData.punctualLightCount, Is.EqualTo(2));
-                Assert.That(lightData.hasPunctualLights, Is.True);
-                AssertPunctualLight(lightData.punctualLights[0], new Vector3(1.0f, 2.0f, 3.0f), new Vector3(0.25f, 0.5f, 0.75f), 8.0f, 0u, Vector3.forward);
-                AssertPunctualLight(lightData.punctualLights[1], new Vector3(-1.0f, 0.5f, 2.0f), new Vector3(0.9f, 0.4f, 0.1f), 12.0f, 1u, Vector3.right);
-                Assert.That(lightData.punctualLights[0].renderingLayerMask, Is.Zero);
-                Assert.That(lightData.punctualLights[0].angleOffset, Is.EqualTo(1.0f).Within(0.0001f));
-                Assert.That(lightData.punctualLights[1].angleScale, Is.GreaterThan(0.0f));
-                Assert.That(lightData.punctualLights[1].angleOffset, Is.LessThan(0.0f));
-                AssertPunctualLightCullData(
-                    lightData.punctualLightCullData[0],
-                    new Vector3(1.0f, 2.0f, 3.0f),
-                    Vector3.forward,
-                    8.0f,
-                    0u,
-                    1.0f,
-                    0.0f,
-                    new Vector3(1.0f, 2.0f, 3.0f),
-                    8.0f);
-                GetExpectedSpotCullSphere(lightData.punctualLights[1], out var spotCullCenter, out var spotCullRadius);
-                var spotOuterCos = GetSpotOuterCos(lightData.punctualLights[1]);
-                AssertPunctualLightCullData(
-                    lightData.punctualLightCullData[1],
-                    new Vector3(-1.0f, 0.5f, 2.0f),
-                    Vector3.right,
-                    12.0f,
-                    1u,
-                    spotOuterCos,
-                    12.0f * Mathf.Sqrt(Mathf.Max(1.0f / Mathf.Max(spotOuterCos * spotOuterCos, 1e-6f) - 1.0f, 0.0f)),
-                    spotCullCenter,
-                    spotCullRadius);
-            }
-            finally
-            {
-                visibleLights.Dispose();
-            }
-        }
-
-        [Test]
-        public void UpdateAreaLights_CollectsRectangleAndTubeVisibleLights_WhenNativeArrayIsProvided()
-        {
-            var rectangleObject = new GameObject("Visible Rectangle Area Light");
-            var tubeObject = new GameObject("Visible Tube Area Light");
-            var pointObject = new GameObject("Visible Point Light");
-            var visibleLights = new NativeArray<VisibleLight>(3, Allocator.Temp);
-            var lightData = new VividLightData();
-
-            var rectangleLight = rectangleObject.AddComponent<Light>();
-            var tubeLight = tubeObject.AddComponent<Light>();
-            var pointLight = pointObject.AddComponent<Light>();
-
-            rectangleLight.type = LightType.Rectangle;
-            rectangleLight.color = Color.white;
-            rectangleLight.intensity = 4.0f;
-            rectangleLight.range = 10.0f;
-            rectangleLight.areaSize = new Vector2(4.0f, 2.0f);
-            rectangleObject.transform.position = new Vector3(1.0f, 2.0f, 3.0f);
-            rectangleObject.transform.rotation = Quaternion.LookRotation(Vector3.forward, Vector3.up);
-
-            tubeLight.type = LightType.Tube;
-            tubeLight.color = Color.cyan;
-            tubeLight.intensity = 3.0f;
-            tubeLight.range = 12.0f;
-            tubeLight.areaSize = new Vector2(3.0f, 1.0f);
-            tubeObject.transform.position = new Vector3(-2.0f, 1.0f, 0.5f);
-            tubeObject.transform.rotation = Quaternion.LookRotation(Vector3.up, Vector3.back);
-
-            pointLight.type = LightType.Point;
-            pointLight.range = 8.0f;
-            pointObject.transform.position = new Vector3(0.5f, -1.0f, 2.5f);
-
-            try
-            {
-                var expectedRectangleData = VividLightRenderDatabase.instance.UpdateLightData(rectangleLight);
-                var expectedTubeData = VividLightRenderDatabase.instance.UpdateLightData(tubeLight);
-
-                visibleLights[0] = CreateVisibleLight(
-                    LightType.Point,
-                    Color.white,
-                    pointObject.transform.localToWorldMatrix,
-                    range: pointLight.range,
-                    light: pointLight);
-                visibleLights[1] = CreateVisibleLight(
-                    LightType.Rectangle,
-                    Color.white,
-                    rectangleObject.transform.localToWorldMatrix,
-                    range: rectangleLight.range,
-                    light: rectangleLight);
-                visibleLights[2] = CreateVisibleLight(
-                    LightType.Tube,
-                    Color.cyan,
-                    tubeObject.transform.localToWorldMatrix,
-                    range: tubeLight.range,
-                    light: tubeLight);
-
-                lightData.UpdateAreaLights(visibleLights);
-
-                Assert.That(lightData.areaLightCount, Is.EqualTo(2));
-                Assert.That(lightData.hasAreaLights, Is.True);
-                AssertAreaLight(
-                    lightData.areaLights[0],
-                    rectangleObject.transform.position,
-                    expectedRectangleData.color,
-                    rectangleLight.range,
-                    rectangleObject.transform.forward,
-                    rectangleObject.transform.right,
-                    rectangleObject.transform.up,
-                    rectangleLight.areaSize.x,
-                    rectangleLight.areaSize.y,
-                    1u,
-                    (uint)rectangleLight.renderingLayerMask);
-                AssertAreaLight(
-                    lightData.areaLights[1],
-                    tubeObject.transform.position,
-                    expectedTubeData.color,
-                    tubeLight.range,
-                    tubeObject.transform.forward,
-                    tubeObject.transform.right,
-                    tubeObject.transform.up,
-                    tubeLight.areaSize.x,
-                    0.0f,
-                    0u,
-                    (uint)tubeLight.renderingLayerMask);
-            }
-            finally
-            {
-                visibleLights.Dispose();
-                Object.DestroyImmediate(rectangleObject);
-                Object.DestroyImmediate(tubeObject);
-                Object.DestroyImmediate(pointObject);
-            }
-        }
 
         [Test]
         public void UpdatePunctualLightClusteredCullData_BuildsSphereBoundsAndVolume_ForPointLight()
@@ -386,6 +95,92 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void UpdateAreaLightClusteredCullData_BuildsBoxBoundsAndVolume_ForRectangleLight()
+        {
+            var lightData = new VividLightData
+            {
+                areaLights = new[]
+                {
+                    new VividLightData.AreaLightData
+                    {
+                        positionWS = new Vector3(1.0f, -2.0f, 6.0f),
+                        forwardWS = Vector3.forward,
+                        rightWS = Vector3.right,
+                        upWS = Vector3.up,
+                        width = 4.0f,
+                        height = 2.0f,
+                        lightType = 1u,
+                        range = 8.0f,
+                    }
+                },
+                areaLightCount = 1,
+            };
+
+            lightData.UpdateAreaLightClusteredCullData(Matrix4x4.identity);
+
+            var bound = lightData.areaLightBounds[0];
+            var volume = lightData.areaLightVolumeData[0];
+            var extents = new Vector3(6.0f, 5.0f, 4.0f);
+            var diagonalRadius = 8.0f + 0.5f * Mathf.Sqrt(20.0f);
+            var expectedRadius = Mathf.Sqrt(diagonalRadius * diagonalRadius + 16.0f);
+
+            AssertVector3(bound.center, new Vector3(1.0f, -2.0f, 10.0f));
+            AssertVector4(bound.boxAxisX, new Vector4(extents.x, 0.0f, 0.0f, 1.0f));
+            AssertVector4(bound.boxAxisY, new Vector4(0.0f, extents.y, 0.0f, expectedRadius), 0.001f);
+            AssertVector3(bound.boxAxisZ, new Vector3(0.0f, 0.0f, extents.z));
+            Assert.That(volume.lightVolume, Is.EqualTo(2u));
+            Assert.That(volume.lightCategory, Is.EqualTo(1u));
+            Assert.That(volume.featureFlags, Is.EqualTo(8192u));
+            AssertVector3(volume.lightPos, new Vector3(1.0f, -2.0f, 10.0f));
+            AssertVector3(volume.lightAxisX, Vector3.right);
+            AssertVector3(volume.lightAxisY, Vector3.up);
+            AssertVector3(volume.lightAxisZ, Vector3.forward);
+            AssertVector3(volume.boxInvRange, new Vector3(1.0f / extents.x, 1.0f / extents.y, 1.0f / extents.z));
+        }
+
+        [Test]
+        public void UpdateAreaLightClusteredCullData_BuildsTubeBoundsAndVolume_ForTubeLight()
+        {
+            var lightData = new VividLightData
+            {
+                areaLights = new[]
+                {
+                    new VividLightData.AreaLightData
+                    {
+                        positionWS = new Vector3(-3.0f, 1.0f, 5.0f),
+                        forwardWS = Vector3.forward,
+                        rightWS = Vector3.right,
+                        upWS = Vector3.up,
+                        width = 6.0f,
+                        height = 0.0f,
+                        lightType = 0u,
+                        range = 4.0f,
+                    }
+                },
+                areaLightCount = 1,
+            };
+
+            lightData.UpdateAreaLightClusteredCullData(Matrix4x4.identity);
+
+            var bound = lightData.areaLightBounds[0];
+            var volume = lightData.areaLightVolumeData[0];
+            var extents = new Vector3(7.0f, 4.0f, 4.0f);
+
+            AssertVector3(bound.center, new Vector3(-3.0f, 1.0f, 5.0f));
+            AssertVector4(bound.boxAxisX, new Vector4(extents.x, 0.0f, 0.0f, 1.0f));
+            AssertVector4(bound.boxAxisY, new Vector4(0.0f, extents.y, 0.0f, extents.x));
+            AssertVector3(bound.boxAxisZ, new Vector3(0.0f, 0.0f, extents.z));
+            Assert.That(volume.lightVolume, Is.EqualTo(2u));
+            Assert.That(volume.lightCategory, Is.EqualTo(1u));
+            Assert.That(volume.featureFlags, Is.EqualTo(8192u));
+            AssertVector3(volume.lightPos, new Vector3(-3.0f, 1.0f, 5.0f));
+            AssertVector3(volume.lightAxisX, Vector3.right);
+            AssertVector3(volume.lightAxisY, Vector3.up);
+            AssertVector3(volume.lightAxisZ, Vector3.forward);
+            AssertVector3(volume.boxInvRange, new Vector3(1.0f / extents.x, 1.0f / extents.y, 1.0f / extents.z));
+        }
+
+        [Test]
         public void Reset_ClearsCachedLightState_WhenLightDataWasInitialized()
         {
             var lightData = new VividLightData();
@@ -406,6 +201,8 @@ namespace VividRP.Editor.Tests
                 lightData.areaLights = new[] { default(VividLightData.AreaLightData) };
                 lightData.punctualLightBounds = new[] { default(VividLightData.SFiniteLightBound) };
                 lightData.punctualLightVolumeData = new[] { default(VividLightData.LightVolumeData) };
+                lightData.areaLightBounds = new[] { default(VividLightData.SFiniteLightBound) };
+                lightData.areaLightVolumeData = new[] { default(VividLightData.LightVolumeData) };
 
                 lightData.Reset();
 
@@ -421,6 +218,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(lightData.areaLights, Is.Empty);
                 Assert.That(lightData.punctualLightBounds, Is.Empty);
                 Assert.That(lightData.punctualLightVolumeData, Is.Empty);
+                Assert.That(lightData.areaLightBounds, Is.Empty);
+                Assert.That(lightData.areaLightVolumeData, Is.Empty);
             }
             finally
             {

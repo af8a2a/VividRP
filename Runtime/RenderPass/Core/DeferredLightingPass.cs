@@ -500,15 +500,22 @@ namespace VividRP.Runtime.RenderPass.Core
             else
                 m_MainDirectionalLightIndex = -1;
 
-            m_SupportsClusteredPunctualLights = clusteredLightingData.supportsClusteredPunctualLights && HasBoundPunctualLightResources();
+            var supportsClusteredFiniteLights = clusteredLightingData.supportsClusteredPunctualLights;
+            m_SupportsClusteredPunctualLights = supportsClusteredFiniteLights
+                && clusteredLightingData.punctualLightCount > 0
+                && HasBoundPunctualLightResources();
             m_PunctualLightCount = m_SupportsClusteredPunctualLights
                 ? Mathf.Max(0, clusteredLightingData.punctualLightCount)
                 : 0;
-            m_SupportsClusteredAreaLights = HasBoundAreaLightResources();
+            m_SupportsClusteredAreaLights = supportsClusteredFiniteLights
+                && clusteredLightingData.areaLightCount > 0
+                && HasBoundAreaLightResources();
             m_AreaLightCount = m_SupportsClusteredAreaLights
                 ? Mathf.Max(0, clusteredLightingData.areaLightCount)
                 : 0;
-            m_IsLogBaseBufferEnabled = m_SupportsClusteredPunctualLights && clusteredLightingData.isLogBaseBufferEnabled;
+            m_IsLogBaseBufferEnabled = supportsClusteredFiniteLights
+                && clusteredLightingData.isLogBaseBufferEnabled
+                && !ReferenceEquals(m_LogBaseBuffer, m_LocalLogBaseBuffer);
         }
 
         private bool HasBoundDirectionalLightBuffer()

@@ -13,6 +13,8 @@ namespace VividRP.Editor.Tests
     {
         private static readonly MethodInfo s_LateUpdateMethod =
             typeof(VividAdditionalLightData).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly MethodInfo s_OnValidateMethod =
+            typeof(VividAdditionalLightData).GetMethod("OnValidate", BindingFlags.Instance | BindingFlags.NonPublic);
 
         private GameObject m_GameObject;
 
@@ -40,6 +42,66 @@ namespace VividRP.Editor.Tests
 
             Assert.That(additionalData, Is.Not.Null);
             Assert.That(light.GetComponent<VividAdditionalLightData>(), Is.SameAs(additionalData));
+        }
+
+        [Test]
+        public void OnValidate_SetsBoundingSphereOverride_ForRectangleAreaLight()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Rectangle;
+            light.range = 4.0f;
+            light.areaSize = new Vector2(2.0f, 6.0f);
+
+            var additionalData = light.GetVividAdditionalLightData();
+
+            Assert.That(s_OnValidateMethod, Is.Not.Null);
+            s_OnValidateMethod.Invoke(additionalData, null);
+
+            Assert.That(light.useBoundingSphereOverride, Is.True);
+            Assert.That(light.boundingSphereOverride.x, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(light.boundingSphereOverride.y, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(light.boundingSphereOverride.z, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(light.boundingSphereOverride.w, Is.EqualTo(4.0f + 0.5f * light.areaSize.magnitude).Within(0.0001f));
+        }
+
+        [Test]
+        public void OnValidate_SetsBoundingSphereOverride_ForTubeAreaLight()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Tube;
+            light.range = 3.0f;
+            light.areaSize = new Vector2(8.0f, 0.0f);
+
+            var additionalData = light.GetVividAdditionalLightData();
+
+            Assert.That(s_OnValidateMethod, Is.Not.Null);
+            s_OnValidateMethod.Invoke(additionalData, null);
+
+            Assert.That(light.useBoundingSphereOverride, Is.True);
+            Assert.That(light.boundingSphereOverride.x, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(light.boundingSphereOverride.y, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(light.boundingSphereOverride.z, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(light.boundingSphereOverride.w, Is.EqualTo(7.0f).Within(0.0001f));
+        }
+
+        [Test]
+        public void OnValidate_ClearsBoundingSphereOverride_WhenLightStopsBeingAreaLight()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Rectangle;
+            light.range = 2.0f;
+            light.areaSize = new Vector2(4.0f, 2.0f);
+
+            var additionalData = light.GetVividAdditionalLightData();
+
+            Assert.That(s_OnValidateMethod, Is.Not.Null);
+            s_OnValidateMethod.Invoke(additionalData, null);
+            Assert.That(light.useBoundingSphereOverride, Is.True);
+
+            light.type = LightType.Point;
+            s_OnValidateMethod.Invoke(additionalData, null);
+
+            Assert.That(light.useBoundingSphereOverride, Is.False);
         }
 
         [Test]

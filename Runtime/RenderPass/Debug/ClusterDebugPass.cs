@@ -336,9 +336,16 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ClusterLog2SliceCount = clusteredLightingData.clusterLog2SliceCount > 0
                 ? clusteredLightingData.clusterLog2SliceCount
                 : LightGridPass.ClusterLog2SliceCount;
-            m_SupportsClusteredPunctualLights = clusteredLightingData.supportsClusteredPunctualLights && HasBoundPunctualLightResources();
-            m_SupportsClusteredAreaLights = HasBoundAreaLightResources();
-            m_IsLogBaseBufferEnabled = m_SupportsClusteredPunctualLights && clusteredLightingData.isLogBaseBufferEnabled;
+            var supportsClusteredFiniteLights = clusteredLightingData.supportsClusteredPunctualLights;
+            m_SupportsClusteredPunctualLights = supportsClusteredFiniteLights
+                && clusteredLightingData.punctualLightCount > 0
+                && HasBoundPunctualLightResources();
+            m_SupportsClusteredAreaLights = supportsClusteredFiniteLights
+                && clusteredLightingData.areaLightCount > 0
+                && HasBoundAreaLightResources();
+            m_IsLogBaseBufferEnabled = supportsClusteredFiniteLights
+                && clusteredLightingData.isLogBaseBufferEnabled
+                && !ReferenceEquals(m_LogBaseBuffer, m_LocalLogBaseBuffer);
         }
 
         private void ApplyClusteredLightingProperties()

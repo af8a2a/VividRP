@@ -159,5 +159,28 @@ namespace VividRP.Runtime
                 punctualLightBounds[index] = lightBound;
             }
         }
+
+        [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
+        private struct BuildAreaLightClusteredCullDataJob : IJobParallelFor
+        {
+            [ReadOnly] public NativeArray<AreaLightData> areaLightData;
+
+            [WriteOnly] public NativeArray<SFiniteLightBound> areaLightBounds;
+
+            [WriteOnly] public NativeArray<LightVolumeData> areaLightVolumeData;
+
+            public float4x4 worldToViewMatrix;
+
+            public void Execute(int index)
+            {
+                BuildAreaLightVolumeDataAndBound(
+                    areaLightData[index],
+                    worldToViewMatrix,
+                    out var lightVolumeData,
+                    out var lightBound);
+                areaLightVolumeData[index] = lightVolumeData;
+                areaLightBounds[index] = lightBound;
+            }
+        }
     }
 }

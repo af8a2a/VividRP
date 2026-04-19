@@ -101,9 +101,16 @@ namespace VividRP.Runtime
             m_ClusterScale = clusteredLightingData.clusterScale;
             m_ClusterBase = clusteredLightingData.clusterBase;
             m_ClusterLog2SliceCount = clusteredLightingData.clusterLog2SliceCount;
-            m_SupportsClusteredPunctualLights = clusteredLightingData.supportsClusteredPunctualLights && HasPunctualLightResources();
-            m_SupportsClusteredAreaLights = HasAreaLightResources();
-            m_IsLogBaseBufferEnabled = m_SupportsClusteredPunctualLights && clusteredLightingData.isLogBaseBufferEnabled;
+            var supportsClusteredFiniteLights = clusteredLightingData.supportsClusteredPunctualLights;
+            m_SupportsClusteredPunctualLights = supportsClusteredFiniteLights
+                && clusteredLightingData.punctualLightCount > 0
+                && HasPunctualLightResources();
+            m_SupportsClusteredAreaLights = supportsClusteredFiniteLights
+                && clusteredLightingData.areaLightCount > 0
+                && HasAreaLightResources();
+            m_IsLogBaseBufferEnabled = supportsClusteredFiniteLights
+                && clusteredLightingData.isLogBaseBufferEnabled
+                && m_LogBaseBuffer?.ImportedGraphicsBuffer != null;
         }
 
         public override void Record(UnsafeGraphContext context)

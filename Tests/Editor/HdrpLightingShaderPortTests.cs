@@ -276,7 +276,17 @@ namespace VividRP.Editor.Tests
             Assert.That(dimensionsType, Is.Not.Null);
             Assert.That(lightListType, Is.Not.Null);
             Assert.That(Marshal.SizeOf(dimensionsType), Is.EqualTo(8));
-            Assert.That(Marshal.SizeOf(lightListType), Is.EqualTo(560));
+            Assert.That(Marshal.SizeOf(lightListType), Is.EqualTo(564));
+        }
+
+        [Test]
+        public void ClusteredLightListGen_AppliesAreaLightIndexShiftForSeparateAreaBuffer()
+        {
+            var lightLoopSource = File.ReadAllText(GetLightingPath("LightLoop.cs.hlsl"));
+            var clusteredSource = File.ReadAllText(GetLightingPath("lightlistbuild-clustered.compute"));
+
+            Assert.That(lightLoopSource, Does.Contain("uint _AreaLightIndexShift;"));
+            Assert.That(clusteredSource, Does.Contain("WriteShiftIndex(t, LIGHTCATEGORY_AREA, _AreaLightIndexShift);"));
         }
 
         [Test]

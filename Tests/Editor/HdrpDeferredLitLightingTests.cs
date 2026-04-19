@@ -198,6 +198,18 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void LightGridPass_SourceUsesCombinedFiniteLightCullingForPunctualAndAreaLights()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Lighting", "LightGridPass.cs"));
+
+            Assert.That(source, Does.Contain("m_FiniteLightCount = m_PunctualLightCount + m_AreaLightCount;"));
+            Assert.That(source, Does.Contain("lightData.UpdateFiniteLightClusteredCullData(worldToViewMatrix);"));
+            Assert.That(source, Does.Contain("UpdateFiniteLightUploadData(lightData);"));
+            Assert.That(source, Does.Not.Contain("UploadAreaLightGridData();"));
+            Assert.That(source, Does.Not.Contain("UpdateAreaLightScreenSpaceBounds(lightData, camera);"));
+        }
+
+        [Test]
         public void VividRPCoreResources_DeclarePreIntegratedFGDShaders()
         {
             AssertResourcePath(

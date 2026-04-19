@@ -114,9 +114,12 @@ namespace VividRP.Runtime
         }
 
         private const uint HdrpLightCategoryPunctual = 0u;
+        private const uint HdrpLightCategoryArea = 1u;
         private const uint HdrpLightFeatureFlagsPunctual = 4096u;
+        private const uint HdrpLightFeatureFlagsArea = 8192u;
         private const uint HdrpLightVolumeTypeCone = 0u;
         private const uint HdrpLightVolumeTypeSphere = 1u;
+        private const uint HdrpLightVolumeTypeBox = 2u;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct VisibleLightRenderDataRecord
@@ -195,6 +198,41 @@ namespace VividRP.Runtime
             }
         }
 
+        private struct AreaLightClusteredCullBuildContext : IDisposable
+        {
+            public NativeArray<AreaLightData> areaLightData;
+            public NativeArray<SFiniteLightBound> areaLightBounds;
+            public NativeArray<LightVolumeData> areaLightVolumeData;
+
+            public AreaLightClusteredCullBuildContext(int areaLightCount)
+            {
+                areaLightData = new NativeArray<AreaLightData>(
+                    areaLightCount,
+                    Allocator.TempJob,
+                    NativeArrayOptions.UninitializedMemory);
+                areaLightBounds = new NativeArray<SFiniteLightBound>(
+                    areaLightCount,
+                    Allocator.TempJob,
+                    NativeArrayOptions.UninitializedMemory);
+                areaLightVolumeData = new NativeArray<LightVolumeData>(
+                    areaLightCount,
+                    Allocator.TempJob,
+                    NativeArrayOptions.UninitializedMemory);
+            }
+
+            public void Dispose()
+            {
+                if (areaLightVolumeData.IsCreated)
+                    areaLightVolumeData.Dispose();
+
+                if (areaLightBounds.IsCreated)
+                    areaLightBounds.Dispose();
+
+                if (areaLightData.IsCreated)
+                    areaLightData.Dispose();
+            }
+        }
+
 
         public NativeArray<VisibleLight> visibleLights;
         public NativeArray<VisibleReflectionProbe> visibleReflectionProbes;
@@ -204,6 +242,8 @@ namespace VividRP.Runtime
         public PunctualLightCullData[] punctualLightCullData = Array.Empty<PunctualLightCullData>();
         public SFiniteLightBound[] punctualLightBounds = Array.Empty<SFiniteLightBound>();
         public LightVolumeData[] punctualLightVolumeData = Array.Empty<LightVolumeData>();
+        public SFiniteLightBound[] areaLightBounds = Array.Empty<SFiniteLightBound>();
+        public LightVolumeData[] areaLightVolumeData = Array.Empty<LightVolumeData>();
         public int mainLightIndex;
         public EntityId mainLightEntityId;
         public int directionalLightCount;
@@ -250,9 +290,20 @@ namespace VividRP.Runtime
                 VisibleLightCollectionMask.Directional | VisibleLightCollectionMask.Punctual | VisibleLightCollectionMask.Area);
         }
 
+        internal void UpdateFiniteLightClusteredCullData(Matrix4x4 worldToViewMatrix)
+        {
+            BuildPunctualLightClusteredCullingData(worldToViewMatrix);
+            BuildAreaLightClusteredCullingData(worldToViewMatrix);
+        }
+
         internal void UpdatePunctualLightClusteredCullData(Matrix4x4 worldToViewMatrix)
         {
             BuildPunctualLightClusteredCullingData(worldToViewMatrix);
+        }
+
+        internal void UpdateAreaLightClusteredCullData(Matrix4x4 worldToViewMatrix)
+        {
+            BuildAreaLightClusteredCullingData(worldToViewMatrix);
         }
 
         private void BuildPunctualLightClusteredCullingData(Matrix4x4 worldToViewMatrix)
@@ -292,6 +343,43 @@ namespace VividRP.Runtime
             }
         }
 
+        private void BuildAreaLightClusteredCullingData(Matrix4x4 worldToViewMatrix)
+        {
+            EnsureAreaLightCapacity(areaLightCount);
+
+            if (areaLightCount <= 0)
+                return;
+
+            using var buildContext = new AreaLightClusteredCullBuildContext(areaLightCount);
+            NativeArray<AreaLightData>.Copy(areaLights, buildContext.areaLightData, areaLightCount);
+            RunAreaLightClusteredCullBuildJob(worldToViewMatrix, buildContext);
+            ApplyAreaLightClusteredCullBuildContext(buildContext);
+        }
+
+        private static void RunAreaLightClusteredCullBuildJob(
+            Matrix4x4 worldToViewMatrix,
+            in AreaLightClusteredCullBuildContext buildContext)
+        {
+            var buildClusteredCullDataJob = new BuildAreaLightClusteredCullDataJob
+            {
+                areaLightData = buildContext.areaLightData,
+                areaLightBounds = buildContext.areaLightBounds,
+                areaLightVolumeData = buildContext.areaLightVolumeData,
+                worldToViewMatrix = worldToViewMatrix,
+            };
+
+            buildClusteredCullDataJob.Schedule(buildContext.areaLightData.Length, 32).Complete();
+        }
+
+        private void ApplyAreaLightClusteredCullBuildContext(in AreaLightClusteredCullBuildContext buildContext)
+        {
+            for (var lightIndex = 0; lightIndex < areaLightCount; lightIndex++)
+            {
+                areaLightBounds[lightIndex] = buildContext.areaLightBounds[lightIndex];
+                areaLightVolumeData[lightIndex] = buildContext.areaLightVolumeData[lightIndex];
+            }
+        }
+
         public override void Reset()
         {
             visibleLights = default;
@@ -306,6 +394,8 @@ namespace VividRP.Runtime
             areaLights = Array.Empty<AreaLightData>();
             punctualLightBounds = Array.Empty<SFiniteLightBound>();
             punctualLightVolumeData = Array.Empty<LightVolumeData>();
+            areaLightBounds = Array.Empty<SFiniteLightBound>();
+            areaLightVolumeData = Array.Empty<LightVolumeData>();
         }
 
         private bool IsValidLightIndex(int lightIndex)
@@ -345,6 +435,12 @@ namespace VividRP.Runtime
         {
             if (requiredCapacity > areaLights.Length)
                 areaLights = new AreaLightData[requiredCapacity];
+
+            if (requiredCapacity > areaLightBounds.Length)
+                areaLightBounds = new SFiniteLightBound[requiredCapacity];
+
+            if (requiredCapacity > areaLightVolumeData.Length)
+                areaLightVolumeData = new LightVolumeData[requiredCapacity];
         }
 
 
@@ -752,6 +848,79 @@ namespace VividRP.Runtime
             lightVolumeData.lightAxisY = pointAxisY;
             lightVolumeData.lightAxisZ = pointAxisZ;
             lightVolumeData.lightPos = pointCenter;
+        }
+
+        private static void BuildAreaLightVolumeDataAndBound(
+            AreaLightData source,
+            float4x4 worldToViewMatrix,
+            out LightVolumeData lightVolumeData,
+            out SFiniteLightBound lightBound)
+        {
+            lightVolumeData = default;
+            lightBound = default;
+
+            var positionVS = BoundProxyClusterProjectionUtility.TransformWorldToPositiveViewSpace(
+                worldToViewMatrix,
+                source.positionWS);
+            var axisXVS = NormalizeDirection(
+                TransformWorldVectorToPositiveViewSpace(worldToViewMatrix, source.rightWS),
+                new float3(1.0f, 0.0f, 0.0f));
+            var axisYVS = NormalizeDirection(
+                TransformWorldVectorToPositiveViewSpace(worldToViewMatrix, source.upWS),
+                new float3(0.0f, 1.0f, 0.0f));
+            var axisZVS = NormalizeDirection(
+                TransformWorldVectorToPositiveViewSpace(worldToViewMatrix, source.forwardWS),
+                new float3(0.0f, 0.0f, 1.0f));
+            var range = math.max(source.range, 1e-4f);
+
+            lightVolumeData.lightCategory = HdrpLightCategoryArea;
+            lightVolumeData.lightVolume = HdrpLightVolumeTypeBox;
+            lightVolumeData.affectVolumetric = 0;
+            lightVolumeData.featureFlags = HdrpLightFeatureFlagsArea;
+            lightVolumeData.lightAxisX = new Vector3(axisXVS.x, axisXVS.y, axisXVS.z);
+            lightVolumeData.lightAxisY = new Vector3(axisYVS.x, axisYVS.y, axisYVS.z);
+            lightVolumeData.lightAxisZ = new Vector3(axisZVS.x, axisZVS.y, axisZVS.z);
+
+            if (source.lightType == 0u)
+            {
+                var dimensions = new float3(
+                    math.max(source.width, 0.0f) + 2.0f * range,
+                    2.0f * range,
+                    2.0f * range);
+                var extents = 0.5f * dimensions;
+
+                lightBound.center = new Vector3(positionVS.x, positionVS.y, positionVS.z);
+                lightBound.boxAxisX = new Vector4(axisXVS.x * extents.x, axisXVS.y * extents.x, axisXVS.z * extents.x, 1.0f);
+                lightBound.boxAxisY = new Vector4(axisYVS.x * extents.y, axisYVS.y * extents.y, axisYVS.z * extents.y, extents.x);
+                lightBound.boxAxisZ = new Vector3(axisZVS.x * extents.z, axisZVS.y * extents.z, axisZVS.z * extents.z);
+
+                lightVolumeData.lightPos = lightBound.center;
+                lightVolumeData.boxInvRange = new Vector3(
+                    1.0f / math.max(extents.x, 1e-4f),
+                    1.0f / math.max(extents.y, 1e-4f),
+                    1.0f / math.max(extents.z, 1e-4f));
+                return;
+            }
+
+            var rectangleDimensions = new float3(
+                math.max(source.width, 0.0f) + 2.0f * range,
+                math.max(source.height, 0.0f) + 2.0f * range,
+                range);
+            var rectangleExtents = 0.5f * rectangleDimensions;
+            var centerVS = positionVS + rectangleExtents.z * axisZVS;
+            var diagonalRadius = range + 0.5f * math.sqrt(source.width * source.width + source.height * source.height);
+            var radius = math.sqrt(diagonalRadius * diagonalRadius + rectangleExtents.z * rectangleExtents.z);
+
+            lightBound.center = new Vector3(centerVS.x, centerVS.y, centerVS.z);
+            lightBound.boxAxisX = new Vector4(axisXVS.x * rectangleExtents.x, axisXVS.y * rectangleExtents.x, axisXVS.z * rectangleExtents.x, 1.0f);
+            lightBound.boxAxisY = new Vector4(axisYVS.x * rectangleExtents.y, axisYVS.y * rectangleExtents.y, axisYVS.z * rectangleExtents.y, radius);
+            lightBound.boxAxisZ = new Vector3(axisZVS.x * rectangleExtents.z, axisZVS.y * rectangleExtents.z, axisZVS.z * rectangleExtents.z);
+
+            lightVolumeData.lightPos = lightBound.center;
+            lightVolumeData.boxInvRange = new Vector3(
+                1.0f / math.max(rectangleExtents.x, 1e-4f),
+                1.0f / math.max(rectangleExtents.y, 1e-4f),
+                1.0f / math.max(rectangleExtents.z, 1e-4f));
         }
 
         private static float3 TransformWorldVectorToPositiveViewSpace(float4x4 worldToViewMatrix, Vector3 worldDirection)

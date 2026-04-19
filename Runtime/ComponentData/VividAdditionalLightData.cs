@@ -937,6 +937,7 @@ namespace VividRP.Runtime
 
         internal void NotifyLightDataChanged()
         {
+            UpdateLightBoundsOverride(light);
             VividLightRenderDatabase.instance.UpdateLightData(light, this);
         }
 
@@ -949,6 +950,7 @@ namespace VividRP.Runtime
         {
             m_Light = light;
             RefreshAnimatedState();
+            UpdateLightBoundsOverride(m_Light);
             VividLightRenderDatabase.instance.RegisterLight(this);
         }
 
@@ -961,6 +963,8 @@ namespace VividRP.Runtime
             if (currentLight == null)
                 return;
 
+            UpdateLightBoundsOverride(currentLight);
+
             if (VividLightRenderDatabase.instance.TryGetLightData(currentLight, out var trackedLightData)
                 && !VividLightRenderDatabase.IsLightDataChanged(currentLight, this, trackedLightData))
             {
@@ -972,11 +976,13 @@ namespace VividRP.Runtime
 
         private void OnDisable()
         {
+            ClearLightBoundsOverride(m_Light != null ? m_Light : light);
             VividLightRenderDatabase.instance.UnregisterLight(m_Light != null ? m_Light : light);
         }
 
         private void OnDestroy()
         {
+            ClearLightBoundsOverride(m_Light);
             VividLightRenderDatabase.instance.UnregisterLight(m_Light);
         }
 
@@ -987,12 +993,74 @@ namespace VividRP.Runtime
             ConstrainShadowBiasSettings();
             ConstrainCelestialBodySettings();
             RefreshAnimatedState();
+            UpdateLightBoundsOverride(m_Light);
             VividLightRenderDatabase.instance.UpdateLightData(m_Light, this);
         }
 
         private void RefreshAnimatedState()
         {
             m_Animated = GetComponent<Animator>() != null;
+        }
+
+        private static void UpdateLightBoundsOverride(Light targetLight)
+        {
+            if (targetLight == null)
+                return;
+
+            switch (targetLight.type)
+            {
+                case LightType.Rectangle:
+                    UpdateRectangleLightBounds(targetLight);
+                    break;
+                case LightType.Tube:
+                    UpdateTubeLightBounds(targetLight);
+                    break;
+                case LightType.Disc:
+                    UpdateDiscLightBounds(targetLight);
+                    break;
+                default:
+                    ClearLightBoundsOverride(targetLight);
+                    break;
+            }
+        }
+
+        private static void UpdateRectangleLightBounds(Light targetLight)
+        {
+            targetLight.useBoundingSphereOverride = true;
+            var diagonal = 0.5f * targetLight.areaSize.magnitude;
+            targetLight.boundingSphereOverride = new Vector4(
+                0.0f,
+                0.0f,
+                0.0f,
+                Mathf.Max(targetLight.range, 0.0f) + diagonal);
+        }
+
+        private static void UpdateDiscLightBounds(Light targetLight)
+        {
+            targetLight.useBoundingSphereOverride = true;
+            targetLight.boundingSphereOverride = new Vector4(
+                0.0f,
+                0.0f,
+                0.0f,
+                Mathf.Max(targetLight.range, 0.0f) + Mathf.Max(targetLight.areaSize.x, 0.0f));
+        }
+
+        private static void UpdateTubeLightBounds(Light targetLight)
+        {
+            targetLight.useBoundingSphereOverride = true;
+            targetLight.boundingSphereOverride = new Vector4(
+                0.0f,
+                0.0f,
+                0.0f,
+                Mathf.Max(targetLight.range, 0.0f) + Mathf.Max(targetLight.areaSize.x, 0.0f) * 0.5f);
+        }
+
+        private static void ClearLightBoundsOverride(Light targetLight)
+        {
+            if (targetLight == null)
+                return;
+
+            targetLight.useBoundingSphereOverride = false;
         }
 
         private void SetRayTracedShadowFloat(ref float field, float value, float defaultValue)

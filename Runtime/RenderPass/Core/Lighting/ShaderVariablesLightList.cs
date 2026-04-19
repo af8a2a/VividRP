@@ -35,5 +35,6 @@ namespace VividRP.Runtime
         public int g_iNumSamplesMSAA;
         public uint _EnvLightIndexShift;
         public uint _DecalIndexShift;
+        public uint _AreaLightIndexShift;
     }
 }

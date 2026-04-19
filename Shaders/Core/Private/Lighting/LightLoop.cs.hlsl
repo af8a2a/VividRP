@@ -118,6 +118,7 @@ CBUFFER_START(ShaderVariablesLightList)
     int g_iNumSamplesMSAA;
     uint _EnvLightIndexShift;
     uint _DecalIndexShift;
+    uint _AreaLightIndexShift;
 CBUFFER_END
 
 //

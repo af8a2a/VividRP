@@ -54,7 +54,10 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("PreparePreIntegratedFGDResources"));
             Assert.That(passSource, Does.Contain("BindIndirectLightingParameters"));
             Assert.That(passSource, Does.Contain("BindLightLoopParameters"));
-            Assert.That(passSource, Does.Contain("PrepareSkyIblState"));
+            Assert.That(passSource, Does.Contain("PrepareSkyTextureState"));
+            Assert.That(passSource, Does.Contain("Shader.PropertyToID(\"_SkyTexture\")"));
+            Assert.That(passSource, Does.Contain("Shader.PropertyToID(\"_SkyTextureTint\")"));
+            Assert.That(passSource, Does.Contain("Shader.PropertyToID(\"_SkyTextureParams\")"));
             Assert.That(passSource, Does.Contain("VividPreIntegratedFGDTextures"));
             Assert.That(passSource, Does.Contain("PassRecorder.ImportTexture"));
             Assert.That(passSource, Does.Contain("DirectionalLightsId"));
@@ -91,6 +94,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(wrapperSource, Does.Contain("class DeferredDirectionalLightingPass : DeferredLightingPass"));
             Assert.That(wrapperSource, Does.Contain("base(nameof(DeferredDirectionalLightingPass))"));
+            Assert.That(wrapperSource, Does.Contain("DeferredLightingPass.BuildSkyTextureParams"));
             Assert.That(wrapperSource, Does.Contain("DeferredLightingPass.BuildSkyIblParams"));
         }
 

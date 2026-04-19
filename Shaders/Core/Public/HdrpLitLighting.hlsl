@@ -21,10 +21,10 @@ static const float kVividClearCoatIeta = 1.0 / kVividClearCoatIor;
 static const float kVividClearCoatF0 = 0.04;
 static const float kVividClearCoatRoughness = 0.01;
 
-TEXTURECUBE(_VividSkyIBLCubemap);
-SAMPLER(sampler_VividSkyIBLCubemap);
-float4 _VividSkyIBLTint;
-float4 _VividSkyIBLParams;
+TEXTURECUBE(_SkyTexture);
+SAMPLER(sampler_SkyTexture);
+float4 _SkyTextureTint;
+float4 _SkyTextureParams;
 
 struct VividLitBSDFData
 {
@@ -90,9 +90,9 @@ float VividGetLuminance(float3 color)
     return Luminance(color);
 }
 
-bool VividHasSkyIBL()
+bool HasSkyTexture()
 {
-    return _VividSkyIBLParams.w > 0.5;
+    return _SkyTextureParams.w > 0.5;
 }
 
 float3 VividRotateAroundYAxis(float3 directionWS, float rotationDegrees)
@@ -113,17 +113,28 @@ float3 VividGetReflectionVector(float3 viewDirectionWS, float3 normalWS)
     return reflect(-viewDirectionWS, normalWS);
 }
 
-float3 VividSampleSkyIBL(float3 directionWS, float perceptualRoughness)
+float3 SampleSkyTexture(float3 directionWS, float mipLevel)
 {
-    if (!VividHasSkyIBL())
+    if (!HasSkyTexture())
         return float3(0.0, 0.0, 0.0);
 
-    uint maxMip = (uint)max(_VividSkyIBLParams.z, 0.0);
-    float mipLevel = PerceptualRoughnessToMipmapLevel(saturate(perceptualRoughness), maxMip);
-    float3 rotatedDirectionWS = VividRotateAroundYAxis(directionWS, _VividSkyIBLParams.y);
+    float skyMipLevel = min(mipLevel, max(_SkyTextureParams.z, 0.0));
+    float3 rotatedDirectionWS = VividRotateAroundYAxis(directionWS, _SkyTextureParams.y);
     float3 envLighting = float3(0.0, 0.0, 0.0);
-    envLighting = SAMPLE_TEXTURECUBE_LOD(_VividSkyIBLCubemap, sampler_VividSkyIBLCubemap, rotatedDirectionWS, mipLevel).rgb;
-    return envLighting * _VividSkyIBLTint.rgb * _VividSkyIBLParams.x;
+    envLighting = SAMPLE_TEXTURECUBE_LOD(_SkyTexture, sampler_SkyTexture, rotatedDirectionWS, skyMipLevel).rgb;
+    return envLighting * _SkyTextureTint.rgb * _SkyTextureParams.x;
+}
+
+bool VividHasSkyIBL()
+{
+    return HasSkyTexture();
+}
+
+float3 VividSampleSkyIBL(float3 directionWS, float perceptualRoughness)
+{
+    uint maxMip = (uint)max(_SkyTextureParams.z, 0.0);
+    float mipLevel = PerceptualRoughnessToMipmapLevel(saturate(perceptualRoughness), maxMip);
+    return SampleSkyTexture(directionWS, mipLevel);
 }
 
 VividLitBSDFData BuildVividHDRPLitBSDFData(VividGBufferSurfaceData surfaceData)

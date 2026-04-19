@@ -23,9 +23,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int LightingWidthId = Shader.PropertyToID("_LightingWidth");
         private static readonly int LightingHeightId = Shader.PropertyToID("_LightingHeight");
         private static readonly int MaterialPixelIndicesId = Shader.PropertyToID("_MaterialPixelIndices");
-        private static readonly int SkyIBLCubemapId = Shader.PropertyToID("_VividSkyIBLCubemap");
-        private static readonly int SkyIBLTintId = Shader.PropertyToID("_VividSkyIBLTint");
-        private static readonly int SkyIBLParamsId = Shader.PropertyToID("_VividSkyIBLParams");
+        private static readonly int SkyTextureId = Shader.PropertyToID("_SkyTexture");
+        private static readonly int SkyTextureTintId = Shader.PropertyToID("_SkyTextureTint");
+        private static readonly int SkyTextureParamsId = Shader.PropertyToID("_SkyTextureParams");
         private static readonly int DirectionalLightsId = Shader.PropertyToID("_DirectionalLights");
         private static readonly int DirectionalLightCountId = Shader.PropertyToID("_DirectionalLightCount");
         private static readonly int MainDirectionalLightIndexId = Shader.PropertyToID("_MainDirectionalLightIndex");
@@ -178,8 +178,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_LocalPreIntegratedFGDGGXDisneyDiffuseTexture;
         private readonly RenderGraphTexture m_LocalPreIntegratedFGDCharlieAndFabricTexture;
         private VividPreIntegratedFGDTextures m_FallbackPreIntegratedFGDTextures;
-        private Color m_SkyIBLTint = Color.white;
-        private Vector4 m_SkyIBLParams;
+        private Color m_SkyTextureTint = Color.white;
+        private Vector4 m_SkyTextureParams;
 
         public DeferredLightingPass()
             : this(nameof(DeferredLightingPass))
@@ -272,7 +272,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ColorTexture.Resize(width, height);
             PrepareClusteredLightingParameters(frameData);
             PreparePreIntegratedFGDResources();
-            PrepareSkyIblState(frameData.GetOrCreate<VividSkyData>());
+            PrepareSkyTextureState(frameData.GetOrCreate<VividSkyData>());
         }
 
         public override void Record(UnsafeGraphContext context)
@@ -328,19 +328,29 @@ namespace VividRP.Runtime.RenderPass.Core
             m_IsLogBaseBufferEnabled = false;
         }
 
-        internal static Vector4 BuildSkyIblParams(Texture skyCubemap, float intensityMultiplier, float rotation)
+        internal static Vector4 BuildSkyTextureParams(Texture skyCubemap, float intensityMultiplier, float rotation)
         {
             var maxMip = skyCubemap != null ? Mathf.Max(0, skyCubemap.mipmapCount - 1) : 0;
-            return BuildSkyIblParams(maxMip, intensityMultiplier, rotation, skyCubemap != null);
+            return BuildSkyTextureParams(maxMip, intensityMultiplier, rotation, skyCubemap != null);
+        }
+
+        internal static Vector4 BuildSkyTextureParams(int maxMip, float intensityMultiplier, float rotation, bool enabled)
+        {
+            return new Vector4(
+                Mathf.Max(intensityMultiplier, 0.0f),
+                rotation,
+                Mathf.Max(0, maxMip),
+                enabled ? 1f : 0f);
+        }
+
+        internal static Vector4 BuildSkyIblParams(Texture skyCubemap, float intensityMultiplier, float rotation)
+        {
+            return BuildSkyTextureParams(skyCubemap, intensityMultiplier, rotation);
         }
 
         internal static Vector4 BuildSkyIblParams(int maxMip, float intensityMultiplier, float rotation, bool enabled)
         {
-            return new Vector4(
-                Mathf.Max(intensityMultiplier, 0.0f),
-                -rotation,
-                Mathf.Max(0, maxMip),
-                enabled ? 1f : 0f);
+            return BuildSkyTextureParams(maxMip, intensityMultiplier, rotation, enabled);
         }
 
         private void BindSharedParameters(UnsafeCommandBuffer cmd, int kernel)
@@ -399,9 +409,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 kernel,
                 VividPreIntegratedFGD.CharlieAndFabricTextureId,
                 m_PreIntegratedFGDCharlieAndFabricTexture.innerHandle);
-            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, SkyIBLCubemapId, m_SkyIBLCubemap.innerHandle);
-            cmd.SetComputeVectorParam(m_DeferredLitCompute, SkyIBLTintId, m_SkyIBLTint);
-            cmd.SetComputeVectorParam(m_DeferredLitCompute, SkyIBLParamsId, m_SkyIBLParams);
+            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, SkyTextureId, m_SkyIBLCubemap.innerHandle);
+            cmd.SetComputeVectorParam(m_DeferredLitCompute, SkyTextureTintId, m_SkyTextureTint);
+            cmd.SetComputeVectorParam(m_DeferredLitCompute, SkyTextureParamsId, m_SkyTextureParams);
         }
 
         private void BindLightLoopParameters(UnsafeCommandBuffer cmd, int kernel)
@@ -638,17 +648,17 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
-        private void PrepareSkyIblState(VividSkyData skyData)
+        private void PrepareSkyTextureState(VividSkyData skyData)
         {
             var hasActiveSky = skyData != null && skyData.activeSkyType != SkyType.None;
             var skyMaxMip = hasActiveSky ? SkyManager.GetSpecularCubemapMaxMip(skyData) : 0;
 
             SkyManager.ImportSpecularCubemap(m_SkyIBLCubemap, skyData);
 
-            m_SkyIBLTint = hasActiveSky ? skyData.tint : Color.white;
+            m_SkyTextureTint = hasActiveSky ? skyData.tint : Color.white;
             var skyIntensityMultiplier = hasActiveSky ? skyData.exposure : 1.0f;
             var skyRotation = hasActiveSky ? skyData.rotation : 0.0f;
-            m_SkyIBLParams = BuildSkyIblParams(skyMaxMip, skyIntensityMultiplier, skyRotation, hasActiveSky);
+            m_SkyTextureParams = BuildSkyTextureParams(skyMaxMip, skyIntensityMultiplier, skyRotation, hasActiveSky);
         }
     }
 }

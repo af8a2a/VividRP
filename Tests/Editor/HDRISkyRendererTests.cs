@@ -51,6 +51,9 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyManager.cs"));
 
+            Assert.That(source, Does.Contain("private static readonly int SkyTextureId = Shader.PropertyToID(\"_SkyTexture\");"));
+            Assert.That(source, Does.Contain("private static readonly int SkyTextureTintId = Shader.PropertyToID(\"_SkyTextureTint\");"));
+            Assert.That(source, Does.Contain("private static readonly int SkyTextureParamsId = Shader.PropertyToID(\"_SkyTextureParams\");"));
             Assert.That(source, Does.Contain("RegisterRenderer(new HDRISkyRenderer(), resources);"));
             Assert.That(source, Does.Contain("renderer.Update(context, s_CachedSkyData, cmd, skyHash, forceRebuild);"));
             Assert.That(source, Does.Contain("internal static bool PrepareSkyInjection("));
@@ -59,6 +62,11 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("s_PendingSkyRenderer.RenderSky(cmd);"));
             Assert.That(source, Does.Contain("var useDefaultAmbientProbe = skyData == null || skyData.ambientProbeCubemap == null;"));
             Assert.That(source, Does.Contain("s_AmbientProbeConvolution.BindGlobalBuffer(cmd, useDefaultAmbientProbe);"));
+            Assert.That(source, Does.Contain("BindGlobalSkyTexture(cmd, s_CachedSkyData);"));
+            Assert.That(source, Does.Contain("private static void BindGlobalSkyTexture(CommandBuffer cmd, VividSkyData skyData)"));
+            Assert.That(source, Does.Contain("cmd.SetGlobalTexture(SkyTextureId, skyTextureHandle);"));
+            Assert.That(source, Does.Contain("cmd.SetGlobalVector(SkyTextureTintId, skyTextureTint);"));
+            Assert.That(source, Does.Contain("cmd.SetGlobalVector(SkyTextureParamsId, skyTextureParams);"));
             Assert.That(source, Does.Not.Contain("UpdateAtmosphericScatteringResources("));
         }
 

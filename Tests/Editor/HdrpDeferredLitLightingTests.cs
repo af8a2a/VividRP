@@ -72,7 +72,11 @@ namespace VividRP.Editor.Tests
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "HdrpLitLighting.hlsl"));
 
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/PreIntegratedFGD.hlsl\""));
-            Assert.That(source, Does.Contain("_VividSkyIBLCubemap"));
+            Assert.That(source, Does.Contain("TEXTURECUBE(_SkyTexture);"));
+            Assert.That(source, Does.Contain("float4 _SkyTextureTint;"));
+            Assert.That(source, Does.Contain("float4 _SkyTextureParams;"));
+            Assert.That(source, Does.Contain("bool HasSkyTexture()"));
+            Assert.That(source, Does.Contain("float3 SampleSkyTexture(float3 directionWS, float mipLevel)"));
             Assert.That(source, Does.Contain("bsdfData.roughness =  ClampRoughnessForAnalyticalLights(surfaceData.linearRoughness);"));
             Assert.That(source, Does.Contain("float sigma = RoughnessToVariance(bsdfData.roughness);"));
             Assert.That(source, Does.Contain("return Luminance(color);"));
@@ -197,6 +201,19 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 File.ReadAllText(GetPackageFilePath("Shaders", "Material", "DeferredLit.compute")),
                 Does.Contain("PostEvaluateBSDF("));
+        }
+
+        [Test]
+        public void DeferredLightingPass_SourceBindsSkyTextureUsingHdrpStyleShaderPropertyNames()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "DeferredLightingPass.cs"));
+
+            Assert.That(source, Does.Contain("Shader.PropertyToID(\"_SkyTexture\")"));
+            Assert.That(source, Does.Contain("Shader.PropertyToID(\"_SkyTextureTint\")"));
+            Assert.That(source, Does.Contain("Shader.PropertyToID(\"_SkyTextureParams\")"));
+            Assert.That(source, Does.Contain("BuildSkyTextureParams("));
+            Assert.That(source, Does.Contain("PrepareSkyTextureState("));
+            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, SkyTextureId, m_SkyIBLCubemap.innerHandle);"));
         }
 
         [Test]

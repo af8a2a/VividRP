@@ -7,6 +7,9 @@ namespace VividRP.Runtime
 {
     internal static class SkyManager
     {
+        private static readonly int SkyTextureId = Shader.PropertyToID("_SkyTexture");
+        private static readonly int SkyTextureTintId = Shader.PropertyToID("_SkyTextureTint");
+        private static readonly int SkyTextureParamsId = Shader.PropertyToID("_SkyTextureParams");
         private static readonly Dictionary<SkyType, ISkyRenderer> s_Renderers = new();
         private static readonly VividSkyData s_CachedSkyData = new();
         private static readonly SkyAmbientProbeConvolution s_AmbientProbeConvolution = new();
@@ -127,6 +130,7 @@ namespace VividRP.Runtime
 
             UpdateSpecularCubemap(cmd, s_CachedSkyData);
             UpdateDiffuseAmbientProbe(cmd, s_CachedSkyData, forceRebuild);
+            BindGlobalSkyTexture(cmd, s_CachedSkyData);
 
             skyData.CopyFrom(s_CachedSkyData);
         }
@@ -279,6 +283,36 @@ namespace VividRP.Runtime
             }
 
             s_AmbientProbeConvolution.BindGlobalBuffer(cmd, useDefaultAmbientProbe);
+        }
+
+        private static void BindGlobalSkyTexture(CommandBuffer cmd, VividSkyData skyData)
+        {
+            if (cmd == null)
+                return;
+
+            var skyTextureHandle = GetSpecularCubemapHandle();
+            if (skyTextureHandle != null)
+                cmd.SetGlobalTexture(SkyTextureId, skyTextureHandle);
+
+            var hasActiveSky = skyData != null && skyData.activeSkyType != SkyType.None;
+            var skyTextureTint = hasActiveSky ? skyData.tint : Color.white;
+            var skyTextureParams = BuildSkyTextureParams(
+                hasActiveSky ? GetSpecularCubemapMaxMip(skyData) : 0,
+                hasActiveSky ? skyData.exposure : 1.0f,
+                hasActiveSky ? skyData.rotation : 0.0f,
+                hasActiveSky);
+
+            cmd.SetGlobalVector(SkyTextureTintId, skyTextureTint);
+            cmd.SetGlobalVector(SkyTextureParamsId, skyTextureParams);
+        }
+
+        private static Vector4 BuildSkyTextureParams(int maxMip, float intensityMultiplier, float rotation, bool enabled)
+        {
+            return new Vector4(
+                Mathf.Max(intensityMultiplier, 0.0f),
+                rotation,
+                Mathf.Max(0, maxMip),
+                enabled ? 1.0f : 0.0f);
         }
     }
 }

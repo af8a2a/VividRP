@@ -265,11 +265,12 @@ namespace VividRP.Editor.Tests
 
                 pass.Prepare(frameData);
 
-                Assert.That(GetFieldValue<Color>(pass, "m_SkyIBLTint"), Is.EqualTo(Color.cyan));
+                Assert.That(GetFieldValue<Color>(pass, "m_SkyTextureTint"), Is.EqualTo(Color.cyan));
                 Assert.That(
-                    GetFieldValue<Vector4>(pass, "m_SkyIBLParams"),
-                    Is.EqualTo(DeferredLightingPass.BuildSkyIblParams(cubemap, 1.75f, 30.0f)));
-                Assert.That(GetFieldValue<Vector4>(pass, "m_SkyIBLParams").x, Is.EqualTo(1.75f).Within(1e-5f));
+                    GetFieldValue<Vector4>(pass, "m_SkyTextureParams"),
+                    Is.EqualTo(DeferredLightingPass.BuildSkyTextureParams(cubemap, 1.75f, 30.0f)));
+                Assert.That(GetFieldValue<Vector4>(pass, "m_SkyTextureParams").x, Is.EqualTo(1.75f).Within(1e-5f));
+                Assert.That(GetFieldValue<Vector4>(pass, "m_SkyTextureParams").y, Is.EqualTo(30.0f).Within(1e-5f));
             }
             finally
             {

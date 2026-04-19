@@ -44,6 +44,8 @@ namespace VividRP.Runtime
 
     public readonly struct VirtualTextureUploadRequest : IEquatable<VirtualTextureUploadRequest>
     {
+        private readonly VTRequest m_Request;
+
         public VirtualTextureUploadRequest(
             int spaceId,
             VirtualTexturePageCoord pageCoord,
@@ -52,34 +54,31 @@ namespace VividRP.Runtime
             int priority,
             int requestFrame)
         {
-            SpaceId = spaceId;
-            PageCoord = pageCoord;
-            PhysicalPageId = physicalPageId;
-            Generation = generation;
-            Priority = priority;
-            RequestFrame = requestFrame;
+            m_Request = new VTRequest(spaceId, pageCoord, physicalPageId, generation, priority, requestFrame);
         }
 
-        public int SpaceId { get; }
+        internal VirtualTextureUploadRequest(in VTRequest request)
+        {
+            m_Request = request;
+        }
 
-        public VirtualTexturePageCoord PageCoord { get; }
+        internal VTRequest Request => m_Request;
 
-        public int PhysicalPageId { get; }
+        public int SpaceId => m_Request.SpaceId;
 
-        public int Generation { get; }
+        public VirtualTexturePageCoord PageCoord => m_Request.PageCoord;
 
-        public int Priority { get; }
+        public int PhysicalPageId => m_Request.PhysicalPageId;
 
-        public int RequestFrame { get; }
+        public int Generation => m_Request.Generation;
+
+        public int Priority => m_Request.Priority;
+
+        public int RequestFrame => m_Request.RequestFrame;
 
         public bool Equals(VirtualTextureUploadRequest other)
         {
-            return SpaceId == other.SpaceId
-                   && PageCoord.Equals(other.PageCoord)
-                   && PhysicalPageId == other.PhysicalPageId
-                   && Generation == other.Generation
-                   && Priority == other.Priority
-                   && RequestFrame == other.RequestFrame;
+            return m_Request.Equals(other.m_Request);
         }
 
         public override bool Equals(object obj)
@@ -89,7 +88,7 @@ namespace VividRP.Runtime
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(SpaceId, PageCoord, PhysicalPageId, Generation, Priority, RequestFrame);
+            return m_Request.GetHashCode();
         }
     }
 
@@ -266,6 +265,8 @@ namespace VividRP.Runtime
 
     internal readonly struct VirtualTextureStats
     {
+        private readonly VTDebugStats m_Stats;
+
         internal VirtualTextureStats(
             int activeSpaceCount,
             int residentPageCount,
@@ -277,50 +278,61 @@ namespace VividRP.Runtime
             int lastReadbackFrame,
             string statusMessage)
         {
-            ActiveSpaceCount = activeSpaceCount;
-            ResidentPageCount = residentPageCount;
-            FreePageCount = freePageCount;
-            PendingUploadCount = pendingUploadCount;
-            EvictionCount = evictionCount;
-            FaultCount = faultCount;
-            DeduplicatedRequestCount = deduplicatedRequestCount;
-            LastReadbackFrame = lastReadbackFrame;
-            StatusMessage = statusMessage;
+            m_Stats = new VTDebugStats(
+                activeSpaceCount,
+                residentPageCount,
+                freePageCount,
+                pendingUploadCount,
+                evictionCount,
+                faultCount,
+                deduplicatedRequestCount,
+                lastReadbackFrame,
+                statusMessage);
         }
 
-        internal int ActiveSpaceCount { get; }
+        internal VirtualTextureStats(in VTDebugStats stats)
+        {
+            m_Stats = stats;
+        }
 
-        internal int ResidentPageCount { get; }
+        internal VTDebugStats Stats => m_Stats;
 
-        internal int FreePageCount { get; }
+        internal int ActiveSpaceCount => m_Stats.ActiveSpaceCount;
 
-        internal int PendingUploadCount { get; }
+        internal int ResidentPageCount => m_Stats.ResidentPageCount;
 
-        internal int EvictionCount { get; }
+        internal int FreePageCount => m_Stats.FreePageCount;
 
-        internal int FaultCount { get; }
+        internal int PendingUploadCount => m_Stats.PendingUploadCount;
 
-        internal int DeduplicatedRequestCount { get; }
+        internal int EvictionCount => m_Stats.EvictionCount;
 
-        internal int LastReadbackFrame { get; }
+        internal int FaultCount => m_Stats.FaultCount;
 
-        internal string StatusMessage { get; }
+        internal int DeduplicatedRequestCount => m_Stats.DeduplicatedRequestCount;
+
+        internal int LastReadbackFrame => m_Stats.LastReadbackFrame;
+
+        internal string StatusMessage => m_Stats.StatusMessage;
     }
 
     internal static class VirtualTextureStatsRegistry
     {
-        private static VirtualTextureStats s_LastStats;
-
-        internal static VirtualTextureStats LastStats => s_LastStats;
+        internal static VirtualTextureStats LastStats => new(VTDebugStatsRegistry.LastStats);
 
         internal static void Report(VirtualTextureStats stats)
         {
-            s_LastStats = stats;
+            VTDebugStatsRegistry.Report(stats.Stats);
+        }
+
+        internal static void Report(in VTDebugStats stats)
+        {
+            VTDebugStatsRegistry.Report(stats);
         }
 
         internal static void Clear()
         {
-            s_LastStats = default;
+            VTDebugStatsRegistry.Clear();
         }
     }
 

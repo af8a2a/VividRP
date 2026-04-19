@@ -11,6 +11,11 @@ namespace VividRP.Editor.Tests
 {
     public sealed class VirtualTextureSystemTests
     {
+        private sealed class TestProducer : VTProducer
+        {
+            public string Name => nameof(TestProducer);
+        }
+
         [TearDown]
         public void TearDown()
         {
@@ -129,6 +134,33 @@ namespace VividRP.Editor.Tests
             Assert.That(stats.EvictionCount, Is.EqualTo(0));
             Assert.That(stats.FaultCount, Is.EqualTo(3));
             Assert.That(stats.DeduplicatedRequestCount, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void RegisterAddressSpace_AssignsProducer_AndExposesVTRequests()
+        {
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(
+                CreateDesc("ProducerBound", cachePageCount: 2, maxUploadsPerFrame: 1),
+                new TestProducer());
+            ulong requestKey = VirtualTextureFeedbackProcessor.EncodeKey(spaceId, new VirtualTexturePageCoord(0, 0, 0));
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(CameraType.Game, requestKey);
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+
+                Assert.That(VirtualTextureSystem.TryGetProducerNameForTesting(spaceId, out string producerName), Is.True);
+                Assert.That(producerName, Is.EqualTo(nameof(TestProducer)));
+                Assert.That(VirtualTextureSystem.TryGetPendingRequests(spaceId, out var requests), Is.True);
+                Assert.That(requests.Count, Is.EqualTo(1));
+                Assert.That(requests[0].SpaceId, Is.EqualTo(spaceId));
+                Assert.That(requests[0].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(0, 0, 0)));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
         }
 
         [Test]

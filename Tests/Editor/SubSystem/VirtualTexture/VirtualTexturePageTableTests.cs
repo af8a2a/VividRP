@@ -36,6 +36,30 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SpaceDesc_ComposesExpectedVTStackDesc()
+        {
+            var stackDesc = new VTStackDesc(
+                pageSize: 128,
+                borderSize: 4,
+                cachePageCount: 16,
+                graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
+                maxUploadsPerFrame: 8,
+                feedbackCapacity: 64);
+            var desc = new VirtualTextureSpaceDesc(
+                "Stacked",
+                virtualPageCountX: 8,
+                virtualPageCountY: 4,
+                mipCount: 3,
+                stackDesc: stackDesc);
+
+            Assert.That(desc.StackDesc, Is.EqualTo(stackDesc));
+            Assert.That(desc.PageSize, Is.EqualTo(stackDesc.PageSize));
+            Assert.That(desc.BorderSize, Is.EqualTo(stackDesc.BorderSize));
+            Assert.That(desc.CachePageCount, Is.EqualTo(stackDesc.CachePageCount));
+            Assert.That(desc.PhysicalPageSize, Is.EqualTo(stackDesc.PhysicalPageSize));
+        }
+
+        [Test]
         public void SpaceUtility_ComputesExpectedMipOffsetsAndFlatIndices()
         {
             int[] mipOffsets = VirtualTextureSpaceUtility.BuildMipOffsets(4, 4, 3);

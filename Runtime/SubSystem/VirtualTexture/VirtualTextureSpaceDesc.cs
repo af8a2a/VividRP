@@ -16,45 +16,51 @@ namespace VividRP.Runtime
             GraphicsFormat graphicsFormat,
             int maxUploadsPerFrame,
             int feedbackCapacity)
+            : this(
+                spaceName,
+                virtualPageCountX,
+                virtualPageCountY,
+                mipCount,
+                new VTStackDesc(
+                    pageSize,
+                    borderSize,
+                    cachePageCount,
+                    graphicsFormat,
+                    maxUploadsPerFrame,
+                    feedbackCapacity))
+        {
+        }
+
+        public VirtualTextureSpaceDesc(
+            string spaceName,
+            int virtualPageCountX,
+            int virtualPageCountY,
+            int mipCount,
+            in VTStackDesc stackDesc)
         {
             if (string.IsNullOrWhiteSpace(spaceName))
                 throw new ArgumentException("Space name must be non-empty.", nameof(spaceName));
-            if (pageSize <= 0)
-                throw new ArgumentOutOfRangeException(nameof(pageSize));
-            if (borderSize < 0)
-                throw new ArgumentOutOfRangeException(nameof(borderSize));
             if (virtualPageCountX <= 0)
                 throw new ArgumentOutOfRangeException(nameof(virtualPageCountX));
             if (virtualPageCountY <= 0)
                 throw new ArgumentOutOfRangeException(nameof(virtualPageCountY));
             if (mipCount <= 0 || mipCount > VirtualTextureFeedbackProcessor.MaxMipCount)
                 throw new ArgumentOutOfRangeException(nameof(mipCount));
-            if (cachePageCount <= 0 || cachePageCount > VirtualTexturePageTableEntry.MaxPhysicalPageCount)
-                throw new ArgumentOutOfRangeException(nameof(cachePageCount));
-            if (graphicsFormat == GraphicsFormat.None)
-                throw new ArgumentException("Graphics format must be valid.", nameof(graphicsFormat));
-            if (maxUploadsPerFrame <= 0)
-                throw new ArgumentOutOfRangeException(nameof(maxUploadsPerFrame));
-            if (feedbackCapacity <= 0)
-                throw new ArgumentOutOfRangeException(nameof(feedbackCapacity));
 
             SpaceName = spaceName;
-            PageSize = pageSize;
-            BorderSize = borderSize;
+            StackDesc = stackDesc;
             VirtualPageCountX = virtualPageCountX;
             VirtualPageCountY = virtualPageCountY;
             MipCount = mipCount;
-            CachePageCount = cachePageCount;
-            GraphicsFormat = graphicsFormat;
-            MaxUploadsPerFrame = maxUploadsPerFrame;
-            FeedbackCapacity = feedbackCapacity;
         }
 
         public string SpaceName { get; }
 
-        public int PageSize { get; }
+        public VTStackDesc StackDesc { get; }
 
-        public int BorderSize { get; }
+        public int PageSize => StackDesc.PageSize;
+
+        public int BorderSize => StackDesc.BorderSize;
 
         public int VirtualPageCountX { get; }
 
@@ -62,28 +68,23 @@ namespace VividRP.Runtime
 
         public int MipCount { get; }
 
-        public int CachePageCount { get; }
+        public int CachePageCount => StackDesc.CachePageCount;
 
-        public GraphicsFormat GraphicsFormat { get; }
+        public GraphicsFormat GraphicsFormat => StackDesc.GraphicsFormat;
 
-        public int MaxUploadsPerFrame { get; }
+        public int MaxUploadsPerFrame => StackDesc.MaxUploadsPerFrame;
 
-        public int FeedbackCapacity { get; }
+        public int FeedbackCapacity => StackDesc.FeedbackCapacity;
 
-        public int PhysicalPageSize => PageSize + BorderSize * 2;
+        public int PhysicalPageSize => StackDesc.PhysicalPageSize;
 
         public bool Equals(VirtualTextureSpaceDesc other)
         {
             return string.Equals(SpaceName, other.SpaceName, StringComparison.Ordinal)
-                   && PageSize == other.PageSize
-                   && BorderSize == other.BorderSize
                    && VirtualPageCountX == other.VirtualPageCountX
                    && VirtualPageCountY == other.VirtualPageCountY
                    && MipCount == other.MipCount
-                   && CachePageCount == other.CachePageCount
-                   && GraphicsFormat == other.GraphicsFormat
-                   && MaxUploadsPerFrame == other.MaxUploadsPerFrame
-                   && FeedbackCapacity == other.FeedbackCapacity;
+                   && StackDesc.Equals(other.StackDesc);
         }
 
         public override bool Equals(object obj)
@@ -95,16 +96,10 @@ namespace VividRP.Runtime
         {
             return HashCode.Combine(
                 SpaceName,
-                PageSize,
-                BorderSize,
                 VirtualPageCountX,
                 VirtualPageCountY,
                 MipCount,
-                HashCode.Combine(CachePageCount,
-                    GraphicsFormat,
-                    MaxUploadsPerFrame,
-                    FeedbackCapacity)
-            );
+                StackDesc);
         }
 
         public override string ToString()

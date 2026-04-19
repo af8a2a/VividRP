@@ -9,6 +9,8 @@
 StructuredBuffer<uint> g_vLayeredLightList;
 StructuredBuffer<uint> g_LayeredOffset;
 StructuredBuffer<float> g_logBaseBuffer;
+uint _ClusteredPunctualLightGridEnabled;
+uint _ClusteredAreaLightGridEnabled;
 int _ClusterTileSize;
 int _ClusterSliceCount;
 int _ClusterTileCountX;
@@ -126,6 +128,11 @@ struct VividClusteredLighting
         return ((lightCategory * numClusters + sliceIndex) * numTilesY + tileCoord.y) * numTilesX + tileCoord.x;
     }
 
+    static VividClusteredLightCell GetEmptyLightCell()
+    {
+        return (VividClusteredLightCell)0;
+    }
+
     static VividClusteredLightCell UnpackLightCell(uint packedOffset)
     {
         VividClusteredLightCell lightCell = (VividClusteredLightCell)0;
@@ -143,12 +150,18 @@ struct VividClusteredLighting
 
     static VividClusteredLightCell LoadPunctualLightCell(uint2 tileCoord, uint sliceIndex)
     {
+        if (_ClusteredPunctualLightGridEnabled == 0u)
+            return GetEmptyLightCell();
+
         uint packedOffset = g_LayeredOffset[GetLayeredOffsetBufferIndex(LIGHTCATEGORY_PUNCTUAL, tileCoord, sliceIndex)];
         return UnpackLightCell(packedOffset);
     }
 
     static VividClusteredLightCell LoadPunctualLightCell(uint2 pixelCoord, float viewDepth)
     {
+        if (_ClusteredPunctualLightGridEnabled == 0u)
+            return GetEmptyLightCell();
+
         uint2 tileCoord = GetTileCoord(pixelCoord);
         uint sliceIndex = GetSliceIndex(pixelCoord, viewDepth);
         return LoadPunctualLightCell(tileCoord, sliceIndex);
@@ -161,12 +174,18 @@ struct VividClusteredLighting
 
     static VividClusteredLightCell LoadAreaLightCell(uint2 tileCoord, uint sliceIndex)
     {
+        if (_ClusteredAreaLightGridEnabled == 0u)
+            return GetEmptyLightCell();
+
         uint packedOffset = g_LayeredOffset[GetLayeredOffsetBufferIndex(LIGHTCATEGORY_AREA, tileCoord, sliceIndex)];
         return UnpackLightCell(packedOffset);
     }
 
     static VividClusteredLightCell LoadAreaLightCell(uint2 pixelCoord, float viewDepth)
     {
+        if (_ClusteredAreaLightGridEnabled == 0u)
+            return GetEmptyLightCell();
+
         uint2 tileCoord = GetTileCoord(pixelCoord);
         uint sliceIndex = GetSliceIndex(pixelCoord, viewDepth);
         return LoadAreaLightCell(tileCoord, sliceIndex);

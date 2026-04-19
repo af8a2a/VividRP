@@ -50,23 +50,11 @@ StructuredBuffer<DirectionalLightData> _DirectionalLights;
 StructuredBuffer<PunctualLightData> _PunctualLights;
 StructuredBuffer<AreaLightData> _AreaLights;
 uint _DirectionalLightCount;
-uint _PunctualLightCount;
-uint _AreaLightCount;
 int _MainDirectionalLightIndex;
 
 bool HasDirectionalLights()
 {
     return _DirectionalLightCount > 0;
-}
-
-bool HasPunctualLights()
-{
-    return _PunctualLightCount > 0;
-}
-
-bool HasAreaLights()
-{
-    return _AreaLightCount > 0;
 }
 
 bool IsDirectionalLightIndexValid(int lightIndex)

@@ -33,11 +33,6 @@ struct VividLightingLoop
         return context.punctualLightCell.count;
     }
 
-    static bool HasPunctualLights(VividLightingLoopContext context)
-    {
-        return GetPunctualLightCount(context) > 0u;
-    }
-
     static uint GetPunctualLightIndex(VividLightingLoopContext context, uint localLightIndex)
     {
         return VividClusteredLighting::LoadLightIndex(context.punctualLightCell, localLightIndex);
@@ -52,11 +47,6 @@ struct VividLightingLoop
     static uint GetAreaLightCount(VividLightingLoopContext context)
     {
         return context.areaLightCell.count;
-    }
-
-    static bool HasAreaLights(VividLightingLoopContext context)
-    {
-        return GetAreaLightCount(context) > 0u;
     }
 
     static uint GetAreaLightIndex(VividLightingLoopContext context, uint localLightIndex)

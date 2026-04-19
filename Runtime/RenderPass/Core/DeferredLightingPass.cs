@@ -30,9 +30,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int DirectionalLightCountId = Shader.PropertyToID("_DirectionalLightCount");
         private static readonly int MainDirectionalLightIndexId = Shader.PropertyToID("_MainDirectionalLightIndex");
         private static readonly int PunctualLightsId = Shader.PropertyToID("_PunctualLights");
-        private static readonly int PunctualLightCountId = Shader.PropertyToID("_PunctualLightCount");
         private static readonly int AreaLightsId = Shader.PropertyToID("_AreaLights");
-        private static readonly int AreaLightCountId = Shader.PropertyToID("_AreaLightCount");
+        private static readonly int ClusteredPunctualLightGridEnabledId = Shader.PropertyToID("_ClusteredPunctualLightGridEnabled");
+        private static readonly int ClusteredAreaLightGridEnabledId = Shader.PropertyToID("_ClusteredAreaLightGridEnabled");
         private static readonly int LayeredLightListId = Shader.PropertyToID("g_vLayeredLightList");
         private static readonly int LayeredOffsetId = Shader.PropertyToID("g_LayeredOffset");
         private static readonly int LogBaseBufferId = Shader.PropertyToID("g_logBaseBuffer");
@@ -408,8 +408,8 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             cmd.SetComputeIntParam(m_DeferredLitCompute, DirectionalLightCountId, m_DirectionalLightCount);
             cmd.SetComputeIntParam(m_DeferredLitCompute, MainDirectionalLightIndexId, m_MainDirectionalLightIndex);
-            cmd.SetComputeIntParam(m_DeferredLitCompute, PunctualLightCountId, m_PunctualLightCount);
-            cmd.SetComputeIntParam(m_DeferredLitCompute, AreaLightCountId, m_AreaLightCount);
+            cmd.SetComputeIntParam(m_DeferredLitCompute, ClusteredPunctualLightGridEnabledId, m_SupportsClusteredPunctualLights ? 1 : 0);
+            cmd.SetComputeIntParam(m_DeferredLitCompute, ClusteredAreaLightGridEnabledId, m_SupportsClusteredAreaLights ? 1 : 0);
             cmd.SetComputeIntParam(m_DeferredLitCompute, ClusterTileSizeId, m_ClusterTileSize);
             cmd.SetComputeIntParam(m_DeferredLitCompute, ClusterSliceCountId, m_ClusterSliceCount);
             cmd.SetComputeIntParam(m_DeferredLitCompute, ClusterTileCountXId, m_ClusterTileCountX);

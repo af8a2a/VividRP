@@ -413,7 +413,7 @@ void VividIndirectDiffuseEvaluateFrontFaceRadiance(
         mainDirectionalRadiance = directionalRadiance * saturate(sunLight.shadowStrength);
     }
 
-    // for (uint lightIndex = 0u; lightIndex < _PunctualLightCount; lightIndex++)
+    // for (uint lightIndex = 0u; lightIndex < punctualLightCount; lightIndex++)
     // {
     //     PunctualLightData punctualLight = _PunctualLights[lightIndex];
     //     float3 lightDirectionWS = float3(0.0, 1.0, 0.0);

@@ -98,42 +98,39 @@ VividLightLoopOutput EvaluateDeferredLitLightLoop(
             aggregateLighting);
     }
 
-    if (HasPunctualLights() || HasAreaLights())
+    VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
+    uint punctualLightCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+
+    [loop]
+    for (uint localLightIndex = 0; localLightIndex < punctualLightCount; localLightIndex++)
     {
-        VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
-        uint punctualLightCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+        PunctualLightData punctualLight = VividLightingLoop::LoadPunctualLight(lightLoop, localLightIndex);
+        AccumulateDirectLighting(
+            EvaluateBSDF_Punctual(
+                surfaceData,
+                bsdfData,
+                preLightData,
+                positionWS,
+                viewDirectionWS,
+            punctualLight),
+            aggregateLighting);
+    }
 
-        [loop]
-        for (uint localLightIndex = 0; localLightIndex < punctualLightCount; localLightIndex++)
-        {
-            PunctualLightData punctualLight = VividLightingLoop::LoadPunctualLight(lightLoop, localLightIndex);
-            AccumulateDirectLighting(
-                EvaluateBSDF_Punctual(
-                    surfaceData,
-                    bsdfData,
-                    preLightData,
-                    positionWS,
-                    viewDirectionWS,
-                punctualLight),
-                aggregateLighting);
-        }
+    uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);
 
-        uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);
-
-        [loop]
-        for (uint localAreaLightIndex = 0; localAreaLightIndex < areaLightCount; localAreaLightIndex++)
-        {
-            AreaLightData areaLight = VividLightingLoop::LoadAreaLight(lightLoop, localAreaLightIndex);
-            AccumulateDirectLighting(
-                EvaluateBSDF_Area(
-                    surfaceData,
-                    bsdfData,
-                    preLightData,
-                    positionWS,
-                    viewDirectionWS,
-                    areaLight),
-                aggregateLighting);
-        }
+    [loop]
+    for (uint localAreaLightIndex = 0; localAreaLightIndex < areaLightCount; localAreaLightIndex++)
+    {
+        AreaLightData areaLight = VividLightingLoop::LoadAreaLight(lightLoop, localAreaLightIndex);
+        AccumulateDirectLighting(
+            EvaluateBSDF_Area(
+                surfaceData,
+                bsdfData,
+                preLightData,
+                positionWS,
+                viewDirectionWS,
+                areaLight),
+            aggregateLighting);
     }
 
     VividLightLoopOutput lightLoopOutput = (VividLightLoopOutput)0;

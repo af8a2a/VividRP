@@ -15,18 +15,25 @@ namespace VividRP.Editor.Tests
 
             Assert.That(lightingSource, Does.Contain("StructuredBuffer<PunctualLightData> _PunctualLights;"));
             Assert.That(lightingSource, Does.Contain("StructuredBuffer<AreaLightData> _AreaLights;"));
+            Assert.That(lightingSource, Does.Not.Contain("_PunctualLightCount"));
+            Assert.That(lightingSource, Does.Not.Contain("_AreaLightCount"));
             Assert.That(lightingSource, Does.Not.Contain("ClusteredLighting.hlsl"));
 
             Assert.That(clusteredLightingSource, Does.Contain("struct VividClusteredLightCell"));
+            Assert.That(clusteredLightingSource, Does.Contain("_ClusteredPunctualLightGridEnabled"));
+            Assert.That(clusteredLightingSource, Does.Contain("_ClusteredAreaLightGridEnabled"));
             Assert.That(clusteredLightingSource, Does.Contain("LoadPunctualLightCell"));
             Assert.That(clusteredLightingSource, Does.Contain("LoadAreaLightCell"));
 
             Assert.That(lightingLoopSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl\""));
             Assert.That(lightingLoopSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/ClusteredLighting.hlsl\""));
             Assert.That(lightingLoopSource, Does.Contain("struct VividLightingLoop"));
+            Assert.That(lightingLoopSource, Does.Contain("GetPunctualLightCount"));
             Assert.That(lightingLoopSource, Does.Contain("LoadPunctualLight"));
             Assert.That(lightingLoopSource, Does.Contain("GetAreaLightCount"));
             Assert.That(lightingLoopSource, Does.Contain("LoadAreaLight"));
+            Assert.That(lightingLoopSource, Does.Not.Contain("HasPunctualLights"));
+            Assert.That(lightingLoopSource, Does.Not.Contain("HasAreaLights"));
         }
 
         private static string GetPublicShaderPath(string fileName)

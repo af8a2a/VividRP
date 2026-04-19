@@ -108,7 +108,10 @@ float3 EvaluateSimpleDeferredLighting(VividGBufferSurfaceData surfaceData, uint2
     if (useAmbientFallback)
         aggregateLighting.indirect.diffuse += _AmbientColor.rgb * surfaceData.ambientOcclusion;
 
-    if (!HasDirectionalLights() && !HasAreaLights())
+    VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
+    uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);
+
+    if (!HasDirectionalLights() && areaLightCount == 0u)
     {
         float3 lightDirectionWS = GetDeferredLightDirectionWS();
         float3 lightColor = GetDeferredLightColor();
@@ -137,25 +140,19 @@ float3 EvaluateSimpleDeferredLighting(VividGBufferSurfaceData surfaceData, uint2
             aggregateLighting);
     }
 
-    if (HasAreaLights())
+    [loop]
+    for (uint localAreaLightIndex = 0; localAreaLightIndex < areaLightCount; localAreaLightIndex++)
     {
-        VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
-        uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);
-
-        [loop]
-        for (uint localAreaLightIndex = 0; localAreaLightIndex < areaLightCount; localAreaLightIndex++)
-        {
-            AreaLightData areaLight = VividLightingLoop::LoadAreaLight(lightLoop, localAreaLightIndex);
-            AccumulateDirectLighting(
-                EvaluateBSDF_Area(
-                    surfaceData,
-                    bsdfData,
-                    preLightData,
-                    positionWS,
-                    viewDirectionWS,
-                    areaLight),
-                aggregateLighting);
-        }
+        AreaLightData areaLight = VividLightingLoop::LoadAreaLight(lightLoop, localAreaLightIndex);
+        AccumulateDirectLighting(
+            EvaluateBSDF_Area(
+                surfaceData,
+                bsdfData,
+                preLightData,
+                positionWS,
+                viewDirectionWS,
+                areaLight),
+            aggregateLighting);
     }
 
     VividLightLoopOutput lightLoopOutput = (VividLightLoopOutput)0;

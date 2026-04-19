@@ -29,8 +29,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/TileClassification.hlsl\""));
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl\""));
             Assert.That(source, Does.Contain("_DirectionalLightCount"));
-            Assert.That(source, Does.Contain("_AreaLightCount"));
-            Assert.That(source, Does.Contain("HasPunctualLights() || HasAreaLights()"));
+            Assert.That(source, Does.Not.Contain("_PunctualLightCount"));
+            Assert.That(source, Does.Not.Contain("_AreaLightCount"));
+            Assert.That(source, Does.Not.Contain("HasPunctualLights()"));
+            Assert.That(source, Does.Not.Contain("HasAreaLights()"));
             Assert.That(source, Does.Contain("VividLightingLoop::Create"));
             Assert.That(source, Does.Contain("VividLightingLoop::GetPunctualLightCount"));
             Assert.That(source, Does.Contain("VividLightingLoop::LoadPunctualLight"));
@@ -63,6 +65,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("float3 emissive = VividApplyPreExposure(max(_GBuffer3.Load(int3(dispatchThreadId.xy, 0)).rgb, 0.0));"));
             Assert.That(source, Does.Contain("_LightingTexture[dispatchThreadId.xy] = float4(emissive, 1.0);"));
             Assert.That(source, Does.Contain("float3 lighting = VividApplyPreExposure(EvaluateDeferredLitLighting(surfaceData, pixelCoord, positionWS));"));
+            Assert.That(source, Does.Contain("uint punctualLightCount = VividLightingLoop::GetPunctualLightCount(lightLoop);"));
+            Assert.That(source, Does.Contain("uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);"));
             Assert.That(source, Does.Not.Contain("_LightingTexture[dispatchThreadId.xy] = float4(0.0, 0.0, 0.0, 1.0);"));
         }
 

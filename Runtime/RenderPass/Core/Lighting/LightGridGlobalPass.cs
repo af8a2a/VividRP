@@ -10,9 +10,9 @@ namespace VividRP.Runtime
         private static readonly int DirectionalLightCountId = Shader.PropertyToID("_DirectionalLightCount");
         private static readonly int MainDirectionalLightIndexId = Shader.PropertyToID("_MainDirectionalLightIndex");
         private static readonly int PunctualLightsId = Shader.PropertyToID("_PunctualLights");
-        private static readonly int PunctualLightCountId = Shader.PropertyToID("_PunctualLightCount");
         private static readonly int AreaLightsId = Shader.PropertyToID("_AreaLights");
-        private static readonly int AreaLightCountId = Shader.PropertyToID("_AreaLightCount");
+        private static readonly int ClusteredPunctualLightGridEnabledId = Shader.PropertyToID("_ClusteredPunctualLightGridEnabled");
+        private static readonly int ClusteredAreaLightGridEnabledId = Shader.PropertyToID("_ClusteredAreaLightGridEnabled");
         private static readonly int LayeredLightListId = Shader.PropertyToID("g_vLayeredLightList");
         private static readonly int LayeredOffsetId = Shader.PropertyToID("g_LayeredOffset");
         private static readonly int LogBaseBufferId = Shader.PropertyToID("g_logBaseBuffer");
@@ -50,8 +50,6 @@ namespace VividRP.Runtime
         [RenderGraphResource(Name = "LogBaseBuffer", Access = AccessFlags.Read)]
         private RenderGraphBuffer m_LogBaseBuffer;
         private int m_DirectionalLightCount;
-        private int m_PunctualLightCount;
-        private int m_AreaLightCount;
         private int m_MainDirectionalLightIndex;
         private int m_ClusterTileSize;
         private int m_ClusterSliceCount;
@@ -92,8 +90,6 @@ namespace VividRP.Runtime
             m_LayeredLightListBuffer = clusteredLightingData.layeredLightList;
             m_LogBaseBuffer = clusteredLightingData.logBaseBuffer;
             m_DirectionalLightCount = clusteredLightingData.directionalLightCount;
-            m_PunctualLightCount = clusteredLightingData.punctualLightCount;
-            m_AreaLightCount = clusteredLightingData.areaLightCount;
             m_MainDirectionalLightIndex = clusteredLightingData.mainDirectionalLightIndex;
             m_ClusterTileSize = clusteredLightingData.clusterTileSize;
             m_ClusterSliceCount = clusteredLightingData.clusterSliceCount;
@@ -105,9 +101,9 @@ namespace VividRP.Runtime
             m_ClusterScale = clusteredLightingData.clusterScale;
             m_ClusterBase = clusteredLightingData.clusterBase;
             m_ClusterLog2SliceCount = clusteredLightingData.clusterLog2SliceCount;
-            m_SupportsClusteredPunctualLights = clusteredLightingData.supportsClusteredPunctualLights;
+            m_SupportsClusteredPunctualLights = clusteredLightingData.supportsClusteredPunctualLights && HasPunctualLightResources();
             m_SupportsClusteredAreaLights = HasAreaLightResources();
-            m_IsLogBaseBufferEnabled = clusteredLightingData.isLogBaseBufferEnabled;
+            m_IsLogBaseBufferEnabled = m_SupportsClusteredPunctualLights && clusteredLightingData.isLogBaseBufferEnabled;
         }
 
         public override void Record(UnsafeGraphContext context)
@@ -117,8 +113,8 @@ namespace VividRP.Runtime
             {
                 cmd.SetGlobalInt(DirectionalLightCountId, m_DirectionalLightCount);
                 cmd.SetGlobalInt(MainDirectionalLightIndexId, m_MainDirectionalLightIndex);
-                cmd.SetGlobalInt(PunctualLightCountId, m_SupportsClusteredPunctualLights ? m_PunctualLightCount : 0);
-                cmd.SetGlobalInt(AreaLightCountId, m_SupportsClusteredAreaLights ? m_AreaLightCount : 0);
+                cmd.SetGlobalInt(ClusteredPunctualLightGridEnabledId, m_SupportsClusteredPunctualLights ? 1 : 0);
+                cmd.SetGlobalInt(ClusteredAreaLightGridEnabledId, m_SupportsClusteredAreaLights ? 1 : 0);
                 cmd.SetGlobalInt(ClusterTileSizeId, m_ClusterTileSize);
                 cmd.SetGlobalInt(ClusterSliceCountId, m_ClusterSliceCount);
                 cmd.SetGlobalInt(ClusterTileCountXId, m_ClusterTileCountX);
@@ -164,8 +160,6 @@ namespace VividRP.Runtime
             m_LayeredLightListBuffer = null;
             m_LogBaseBuffer = null;
             m_DirectionalLightCount = 0;
-            m_PunctualLightCount = 0;
-            m_AreaLightCount = 0;
             m_MainDirectionalLightIndex = -1;
             m_ClusterTileSize = 0;
             m_ClusterSliceCount = 0;
@@ -187,6 +181,14 @@ namespace VividRP.Runtime
             return m_AreaLightBuffer?.ImportedGraphicsBuffer != null
                 && m_LayeredOffsetBuffer?.ImportedGraphicsBuffer != null
                 && m_LayeredLightListBuffer?.ImportedGraphicsBuffer != null;
+        }
+
+        private bool HasPunctualLightResources()
+        {
+            return m_PunctualLightBuffer?.ImportedGraphicsBuffer != null
+                && m_LayeredOffsetBuffer?.ImportedGraphicsBuffer != null
+                && m_LayeredLightListBuffer?.ImportedGraphicsBuffer != null
+                && m_LogBaseBuffer?.ImportedGraphicsBuffer != null;
         }
 
         private static RenderGraphBuffer CreateStructuredBuffer(string name, int stride)

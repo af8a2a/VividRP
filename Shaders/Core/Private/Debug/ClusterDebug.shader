@@ -156,7 +156,7 @@ Shader "Hidden/VividRP/ClusterDebug"
 
             float4 Frag(Varyings input) : SV_Target
             {
-                uint2 viewportSize = uint2(
+                 uint2 viewportSize = uint2(
                     max((uint)_ClusterDebugLightViewportSize.x, 1u),
                     max((uint)_ClusterDebugLightViewportSize.y, 1u));
                 uint2 pixelCoord = min(

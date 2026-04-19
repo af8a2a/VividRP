@@ -1,4 +1,8 @@
-﻿using UnityEngine;
+﻿
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 
@@ -92,7 +96,9 @@ namespace VividRP.Runtime
 
         internal static void Deinitialize()
         {
+#if !UNITY_EDITOR
             FrameContextSystem.SubsystemPreRender -= Update;
+#endif
             CoreUtils.Destroy(m_LtcData);
             m_LtcData = null;
             s_Initialized = false;

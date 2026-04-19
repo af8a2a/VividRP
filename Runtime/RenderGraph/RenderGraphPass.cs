@@ -249,6 +249,15 @@ namespace VividRP.Runtime
     {
     }
 
+    internal interface IPostProcessSourceOverridePass : IDynamicPassResourceLayout
+    {
+        RenderGraphTexture GetSourceTexture();
+
+        void SetSourceTexture(RenderGraphTexture sourceTexture);
+
+        void RestoreSourceTexture();
+    }
+
     internal static class RenderGraphPassExecutionUtility
     {
         internal static bool SupportsAsyncCompute(Type passType)

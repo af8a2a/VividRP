@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -5,7 +6,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
 {
-    public class BloomPass : UnsafePass
+    public class BloomPass : UnsafePass, IPostProcessSourceOverridePass
     {
         private const int k_MaxBloomMipCount = 16;
 
@@ -54,11 +55,63 @@ namespace VividRP.Runtime
         private int m_MipCount;
         private int m_ScreenWidth;
         private int m_ScreenHeight;
+        private bool m_IsPassResourceLayoutDirty;
+        private RenderGraphTexture m_OriginalSource;
+        private bool m_HasSourceTextureOverride;
+
+        public bool IsPassResourceLayoutDirty => m_IsPassResourceLayoutDirty;
 
         public BloomPass()
         {
             profilingSampler = new ProfilingSampler(nameof(BloomPass));
         }
+
+        public void ClearPassResourceLayoutDirty()
+        {
+            m_IsPassResourceLayoutDirty = false;
+        }
+
+        internal RenderGraphTexture GetSourceTexture()
+        {
+            return source;
+        }
+
+        internal void SetSourceTexture(RenderGraphTexture sourceTexture)
+        {
+            if (sourceTexture == null)
+                throw new ArgumentNullException(nameof(sourceTexture));
+
+            if (ReferenceEquals(source, sourceTexture))
+                return;
+
+            if (!m_HasSourceTextureOverride)
+                m_OriginalSource = source;
+
+            source = sourceTexture;
+            m_HasSourceTextureOverride = true;
+            m_IsPassResourceLayoutDirty = true;
+        }
+
+        internal void RestoreSourceTexture()
+        {
+            if (!m_HasSourceTextureOverride)
+                return;
+
+            if (!ReferenceEquals(source, m_OriginalSource) && m_OriginalSource != null)
+            {
+                source = m_OriginalSource;
+                m_IsPassResourceLayoutDirty = true;
+            }
+
+            m_OriginalSource = null;
+            m_HasSourceTextureOverride = false;
+        }
+
+        RenderGraphTexture IPostProcessSourceOverridePass.GetSourceTexture() => GetSourceTexture();
+
+        void IPostProcessSourceOverridePass.SetSourceTexture(RenderGraphTexture sourceTexture) => SetSourceTexture(sourceTexture);
+
+        void IPostProcessSourceOverridePass.RestoreSourceTexture() => RestoreSourceTexture();
 
         public override void Create()
         {

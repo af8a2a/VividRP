@@ -5,7 +5,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public class FinalBlitPass : UnsafePass, IRenderGizmoPrePostProcessBoundaryPass, IDynamicPassResourceLayout
+    public class FinalBlitPass : UnsafePass, IRenderGizmoPrePostProcessBoundaryPass, IPostProcessSourceOverridePass
     {
         private static readonly int ColorGradingLutId = Shader.PropertyToID("_VividColorGradingLut");
         private static readonly int ColorGradingParamsId = Shader.PropertyToID("_VividColorGradingParams");
@@ -84,6 +84,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_OriginalSource = null;
             m_HasSourceTextureOverride = false;
         }
+
+        RenderGraphTexture IPostProcessSourceOverridePass.GetSourceTexture() => GetSourceTexture();
+
+        void IPostProcessSourceOverridePass.SetSourceTexture(RenderGraphTexture sourceTexture) => SetSourceTexture(sourceTexture);
+
+        void IPostProcessSourceOverridePass.RestoreSourceTexture() => RestoreSourceTexture();
 
         public override void Prepare(ContextContainer frameData)
         {

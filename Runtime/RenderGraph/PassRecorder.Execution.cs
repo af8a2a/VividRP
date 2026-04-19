@@ -49,6 +49,7 @@ namespace VividRP.Runtime
         private static long s_CurrentImportVersion;
         private static bool s_IsCompiled;
         private static bool s_RenderedPreImageEffectGizmosInGraph;
+        private static StopNaNPass s_InjectedStopNaNPass;
         private static CMAA2Pass s_InjectedCmaa2Pass;
 
 #if UNITY_EDITOR
@@ -170,6 +171,20 @@ namespace VividRP.Runtime
                 }
 
                 s_InjectedCmaa2Pass = null;
+            }
+
+            if (s_InjectedStopNaNPass != null)
+            {
+                try
+                {
+                    s_InjectedStopNaNPass.Dispose();
+                }
+                catch (Exception e)
+                {
+                    Debug.LogException(e);
+                }
+
+                s_InjectedStopNaNPass = null;
             }
 
             DisposeAccelerationStructures();
@@ -369,6 +384,23 @@ namespace VividRP.Runtime
             return additionalData != null && additionalData.antialiasing == VividAntialiasingMode.CMAA2;
         }
 
+        private static bool ShouldInjectStopNaNPass()
+        {
+            var additionalData = s_FrameData.GetOrCreate<VividCameraData>().additionalData;
+            return additionalData != null && additionalData.stopNaNs;
+        }
+
+        private static StopNaNPass GetOrCreateInjectedStopNaNPass()
+        {
+            if (s_InjectedStopNaNPass != null)
+                return s_InjectedStopNaNPass;
+
+            s_InjectedStopNaNPass = new StopNaNPass();
+            s_InjectedStopNaNPass.Create();
+            GetCurrentPassResources(s_InjectedStopNaNPass);
+            return s_InjectedStopNaNPass;
+        }
+
         private static CMAA2Pass GetOrCreateInjectedCmaa2Pass()
         {
             if (s_InjectedCmaa2Pass != null)
@@ -413,12 +445,40 @@ namespace VividRP.Runtime
             finalBlitPass.SetSourceTexture(cmaa2Pass.GetOutputTexture());
         }
 
-        private static void RestoreInjectedFinalBlitSources()
+        private static void RecordInjectedStopNaNPass(
+            RenderGraph renderGraph,
+            StopNaNPass stopNaNPass,
+            RenderGraphTexture sourceTexture,
+            bool enableAsyncCompute,
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache,
+            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
+            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
+            Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache)
+        {
+            if (renderGraph == null || stopNaNPass == null || sourceTexture == null || sourceTexture.innerHandle.IsValid() != true)
+                return;
+
+            stopNaNPass.SetInput(sourceTexture);
+            var stopNaNResources = GetCurrentPassResources(stopNaNPass);
+            RecordUnsafePass(
+                renderGraph,
+                stopNaNPass,
+                stopNaNResources,
+                null,
+                enableAsyncCompute,
+                textureCache,
+                bufferCache,
+                renderListCache,
+                accelerationStructureCache,
+                "StopNaNPass (Injected)");
+        }
+
+        private static void RestoreInjectedSourceOverrides()
         {
             foreach (var pass in s_RenderPasses)
             {
-                if (pass is FinalBlitPass finalBlitPass)
-                    finalBlitPass.RestoreSourceTexture();
+                if (pass is IPostProcessSourceOverridePass sourceOverridePass)
+                    sourceOverridePass.RestoreSourceTexture();
             }
         }
 
@@ -1350,7 +1410,10 @@ namespace VividRP.Runtime
             bool enableAsyncCompute = true)
         {
             EnsureCompiled(graphAsset);
-            RestoreInjectedFinalBlitSources();
+            RestoreInjectedSourceOverrides();
+            var injectedStopNaNPass = ShouldInjectStopNaNPass()
+                ? GetOrCreateInjectedStopNaNPass()
+                : null;
             var injectedCmaa2Pass = ShouldInjectCmaa2Pass()
                 ? GetOrCreateInjectedCmaa2Pass()
                 : null;
@@ -1362,6 +1425,9 @@ namespace VividRP.Runtime
             {
                 pass.Prepare(s_FrameData);
             }
+
+            if (injectedStopNaNPass != null)
+                injectedStopNaNPass.Prepare(s_FrameData);
 
             if (injectedCmaa2Pass != null)
                 injectedCmaa2Pass.Prepare(s_FrameData);
@@ -1375,6 +1441,8 @@ namespace VividRP.Runtime
             var accelerationStructureCache = new Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle>();
             var shouldRecordPreviews = RenderGraphPreviewRegistry.IsAvailable;
             var recordedPreImageEffectGizmos = false;
+            RenderGraphTexture stopNaNOriginalSource = null;
+            RenderGraphTexture stopNaNSanitizedSource = null;
 
             var passDefinitions = s_RuntimePassDefinitions;
             for (var passIndex = 0; passIndex < s_RenderPasses.Count; passIndex++)
@@ -1401,6 +1469,35 @@ namespace VividRP.Runtime
                     recordedPreImageEffectGizmos = true;
                 }
 #endif
+                if (pass is IPostProcessSourceOverridePass sourceOverridePass)
+                {
+                    var sourceTexture = sourceOverridePass.GetSourceTexture();
+                    if (injectedStopNaNPass != null
+                        && stopNaNSanitizedSource == null
+                        && sourceTexture != null
+                        && sourceTexture.innerHandle.IsValid())
+                    {
+                        RecordInjectedStopNaNPass(
+                            renderGraph,
+                            injectedStopNaNPass,
+                            sourceTexture,
+                            enableAsyncCompute,
+                            textureCache,
+                            bufferCache,
+                            renderListCache,
+                            accelerationStructureCache);
+                        stopNaNOriginalSource = sourceTexture;
+                        stopNaNSanitizedSource = injectedStopNaNPass.GetOutputTexture();
+                    }
+
+                    if (stopNaNOriginalSource != null
+                        && stopNaNSanitizedSource != null
+                        && ReferenceEquals(sourceTexture, stopNaNOriginalSource))
+                    {
+                        sourceOverridePass.SetSourceTexture(stopNaNSanitizedSource);
+                    }
+                }
+
                 if (injectedCmaa2Pass != null && pass is FinalBlitPass finalBlitPass)
                 {
                     RecordInjectedCmaa2Pass(

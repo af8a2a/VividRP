@@ -8,6 +8,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
+using VividRP.Runtime.RenderPass;
 using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
@@ -107,7 +108,7 @@ namespace VividRP.Editor.Tests
 
             var resources = renderPass.Initialize();
 
-            Assert.That(resources.Textures, Has.Length.EqualTo(2));
+            Assert.That(resources.Textures, Has.Length.EqualTo(3));
             Assert.That(resources.Buffers, Is.Empty);
             Assert.That(resources.Textures[0].Name, Is.EqualTo("source"));
             Assert.That(resources.Textures[0].Access, Is.EqualTo(AccessFlags.Read));
@@ -117,6 +118,10 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.Textures[1].Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(resources.Textures[1].AttachmentIndex, Is.EqualTo(-1));
             Assert.That(resources.Textures[1].IsDepthAttachment, Is.False);
+            Assert.That(resources.Textures[2].Name, Is.EqualTo("BloomTexture"));
+            Assert.That(resources.Textures[2].Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(resources.Textures[2].AttachmentIndex, Is.EqualTo(-1));
+            Assert.That(resources.Textures[2].IsDepthAttachment, Is.False);
         }
 
         [Test]
@@ -226,6 +231,79 @@ namespace VividRP.Editor.Tests
             Assert.That(RenderGraphPassExecutionUtility.SupportsAsyncCompute(typeof(FinalBlitPass)), Is.False);
         }
 
+        [Test]
+        public void BlitShader_SupportsStopNaNsKeyword_AndNaNFiltering()
+        {
+            var blitShaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Blit.shader"));
+
+            Assert.That(blitShaderSource, Does.Contain("#pragma multi_compile_local _ _STOP_NANS"));
+            Assert.That(blitShaderSource, Does.Contain("AnyIsNaN(color) || AnyIsInf(color)"));
+            Assert.That(blitShaderSource, Does.Contain("color = 0.0;"));
+        }
+
+        [Test]
+        public void StopNaNPass_RegistersReadOnlyInput_AndWriteOnlyOutput()
+        {
+            IRenderPass renderPass = new StopNaNPass();
+
+            var resources = renderPass.Initialize();
+            var textureEntries = resources.Textures;
+
+            Assert.That(textureEntries, Has.Length.EqualTo(2));
+            Assert.That(textureEntries[0].Name, Is.EqualTo("m_Source"));
+            Assert.That(textureEntries[0].Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(textureEntries[1].Name, Is.EqualTo("StopNaNOutput"));
+            Assert.That(textureEntries[1].Access, Is.EqualTo(AccessFlags.Write));
+        }
+
+        [Test]
+        public void StopNaNPass_SetInput_MarksPassResourceLayoutDirty_AndClonesDescriptor()
+        {
+            var pass = new StopNaNPass();
+            var setMethod = typeof(StopNaNPass).GetMethod("SetInput", BindingFlags.Instance | BindingFlags.NonPublic);
+            var outputMethod = typeof(StopNaNPass).GetMethod("GetOutputTexture", BindingFlags.Instance | BindingFlags.NonPublic);
+            var input = RenderGraphTexture.CreateInput("InjectedSource", GraphicsFormat.B10G11R11_UFloatPack32);
+            input.desc.Width = 320;
+            input.desc.Height = 180;
+            input.desc.UseDynamicScale = true;
+
+            Assert.That(setMethod, Is.Not.Null);
+            Assert.That(outputMethod, Is.Not.Null);
+
+            setMethod.Invoke(pass, new object[] { input });
+
+            var outputTexture = (RenderGraphTexture)outputMethod.Invoke(pass, Array.Empty<object>());
+
+            Assert.That(pass.IsPassResourceLayoutDirty, Is.True);
+            Assert.That(outputTexture.desc.Width, Is.EqualTo(320));
+            Assert.That(outputTexture.desc.Height, Is.EqualTo(180));
+            Assert.That(outputTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.B10G11R11_UFloatPack32));
+            Assert.That(outputTexture.desc.Name, Is.EqualTo("StopNaNOutput"));
+            Assert.That(outputTexture.desc.UseDynamicScale, Is.True);
+        }
+
+        [Test]
+        public void BloomPass_SetSourceTexture_MarksPassResourceLayoutDirty_AndRestoreRecoversOriginalSource()
+        {
+            AssertSourceOverrideBehavior(
+                new BloomPass(),
+                "source",
+                typeof(BloomPass),
+                "SetSourceTexture",
+                "RestoreSourceTexture");
+        }
+
+        [Test]
+        public void AutoExposurePass_SetSourceTexture_MarksPassResourceLayoutDirty_AndRestoreRecoversOriginalSource()
+        {
+            AssertSourceOverrideBehavior(
+                new AutoExposurePass(),
+                "source",
+                typeof(AutoExposurePass),
+                "SetSourceTexture",
+                "RestoreSourceTexture");
+        }
+
         private static string GetPackageFilePath(params string[] relativeParts)
         {
             var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
@@ -243,6 +321,38 @@ namespace VividRP.Editor.Tests
             }
 
             return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
+        }
+
+        private static void AssertSourceOverrideBehavior(
+            IDynamicPassResourceLayout pass,
+            string fieldName,
+            Type passType,
+            string setMethodName,
+            string restoreMethodName)
+        {
+            var setMethod = passType.GetMethod(setMethodName, BindingFlags.Instance | BindingFlags.NonPublic);
+            var restoreMethod = passType.GetMethod(restoreMethodName, BindingFlags.Instance | BindingFlags.NonPublic);
+            var sourceField = passType.GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            var originalSource = RenderGraphTexture.CreateInput("OriginalSource", GraphicsFormat.R16G16B16A16_SFloat);
+            var injectedSource = RenderGraphTexture.CreateInput("InjectedSource", GraphicsFormat.R16G16B16A16_SFloat);
+
+            Assert.That(setMethod, Is.Not.Null);
+            Assert.That(restoreMethod, Is.Not.Null);
+            Assert.That(sourceField, Is.Not.Null);
+            sourceField.SetValue(pass, originalSource);
+
+            setMethod.Invoke(pass, new object[] { injectedSource });
+
+            Assert.That(pass.IsPassResourceLayoutDirty, Is.True);
+            Assert.That(sourceField.GetValue(pass), Is.SameAs(injectedSource));
+
+            pass.ClearPassResourceLayoutDirty();
+            Assert.That(pass.IsPassResourceLayoutDirty, Is.False);
+
+            restoreMethod.Invoke(pass, Array.Empty<object>());
+
+            Assert.That(pass.IsPassResourceLayoutDirty, Is.True);
+            Assert.That(sourceField.GetValue(pass), Is.SameAs(originalSource));
         }
     }
 }

@@ -13,6 +13,9 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/FinalBlit")]
         public Shader FinalBlitShader;
 
+        [ResourcePath("Shaders/Core/Private/PostProcessing/Diffusion")]
+        public Shader DiffusionShader;
+
         [ResourcePath("Shaders/Core/Private/AutoExposure/Unreal/AutoExposure.compute")]
         public ComputeShader AutoExposureCompute;
 

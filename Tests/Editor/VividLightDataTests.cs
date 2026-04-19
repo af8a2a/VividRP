@@ -1198,6 +1198,7 @@ namespace VividRP.Editor.Tests
             Assert.That(actual.upWS.z, Is.EqualTo(expectedUp.z).Within(0.0001f));
             Assert.That(actual.width, Is.EqualTo(expectedWidth).Within(0.0001f));
             Assert.That(actual.height, Is.EqualTo(expectedHeight).Within(0.0001f));
+            Assert.That(actual.range, Is.EqualTo(expectedRange).Within(0.0001f));
             Assert.That(actual.lightType, Is.EqualTo(expectedType));
             Assert.That(actual.renderingLayerMask, Is.EqualTo(expectedRenderingLayerMask));
         }

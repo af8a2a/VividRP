@@ -43,7 +43,8 @@ struct AreaLightData
     float3 upWS;
     float height;
     uint renderingLayerMask;
-    float3 padding;
+    float range;
+    float2 padding;
 };
 
 StructuredBuffer<DirectionalLightData> _DirectionalLights;

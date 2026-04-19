@@ -55,7 +55,8 @@ namespace VividRP.Runtime
             public Vector3 upWS;
             public float height;
             public uint renderingLayerMask;
-            public Vector3 padding;
+            public float range;
+            public Vector2 padding;
 
             internal static int Stride => Marshal.SizeOf<AreaLightData>();
         }
@@ -1386,7 +1387,8 @@ namespace VividRP.Runtime
                 upWS = NormalizeDirection(trackedLightData.upWS, Vector3.up),
                 height = height,
                 renderingLayerMask = trackedLightData.renderingLayerMask,
-                padding = Vector3.zero,
+                range = range,
+                padding = Vector2.zero,
             };
         }
 

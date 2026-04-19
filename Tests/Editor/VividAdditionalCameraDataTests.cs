@@ -459,15 +459,35 @@ namespace VividRP.Editor.Tests
                 var punctualLightIndexCapacity = GetPrivateField<int>(pass, "m_PunctualLightIndexCapacity");
                 var layeredOffsetGraphicsBuffer = GetImportedGraphicsBuffer(clusteredLightingData.layeredOffset);
                 var layeredLightListGraphicsBuffer = GetImportedGraphicsBuffer(clusteredLightingData.layeredLightList);
-                var packedAreaCell = new uint[1];
-                layeredOffsetGraphicsBuffer.GetData(packedAreaCell, 0, clusterCount, 1);
-                UnpackLightCell(packedAreaCell[0], out var areaLightListStart, out var areaLightCount);
+                var packedAreaCells = new uint[clusterCount];
+                layeredOffsetGraphicsBuffer.GetData(packedAreaCells, 0, clusterCount, clusterCount);
+                var populatedAreaClusterCount = 0;
+                var firstAreaLightListStart = 0u;
+                var firstAreaLightCount = 0u;
+                var foundFirstPopulatedCluster = false;
 
-                Assert.That(areaLightCount, Is.EqualTo(1u));
-                Assert.That(areaLightListStart, Is.EqualTo((uint)punctualLightIndexCapacity));
+                for (var clusterIndex = 0; clusterIndex < clusterCount; clusterIndex++)
+                {
+                    UnpackLightCell(packedAreaCells[clusterIndex], out var areaLightListStart, out var areaLightCount);
+                    if (areaLightCount == 0u)
+                        continue;
+
+                    populatedAreaClusterCount++;
+
+                    if (foundFirstPopulatedCluster)
+                        continue;
+
+                    firstAreaLightListStart = areaLightListStart;
+                    firstAreaLightCount = areaLightCount;
+                    foundFirstPopulatedCluster = true;
+                }
+
+                Assert.That(populatedAreaClusterCount, Is.GreaterThan(0));
+                Assert.That(firstAreaLightCount, Is.EqualTo(1u));
+                Assert.That(firstAreaLightListStart, Is.EqualTo((uint)punctualLightIndexCapacity));
 
                 var areaLightIndices = new uint[1];
-                layeredLightListGraphicsBuffer.GetData(areaLightIndices, 0, punctualLightIndexCapacity, 1);
+                layeredLightListGraphicsBuffer.GetData(areaLightIndices, 0, (int)firstAreaLightListStart, 1);
                 Assert.That(areaLightIndices[0], Is.EqualTo(0u));
             }
             finally
@@ -475,6 +495,64 @@ namespace VividRP.Editor.Tests
                 pass.Dispose();
                 Object.DestroyImmediate(sceneOnlyAreaLightObject);
                 Object.DestroyImmediate(visibleAreaLightObject);
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void Prepare_DoesNotBroadcastSmallAreaLights_ToAllClusters()
+        {
+            var cameraObject = new GameObject("Light Grid Camera");
+            var areaLightObject = new GameObject("Small Rectangle Area Light");
+            var pass = new LightGridPass();
+
+            try
+            {
+                var camera = cameraObject.AddComponent<Camera>();
+                camera.transform.position = Vector3.zero;
+                camera.transform.rotation = Quaternion.identity;
+                camera.fieldOfView = 60.0f;
+                camera.aspect = 1.0f;
+                camera.nearClipPlane = 0.1f;
+                camera.farClipPlane = 100.0f;
+
+                var areaLight = areaLightObject.AddComponent<Light>();
+                areaLight.type = LightType.Rectangle;
+                areaLight.range = 1.0f;
+                areaLight.areaSize = new Vector2(0.75f, 0.875f);
+                areaLight.intensity = 2.0f;
+                areaLight.color = Color.white;
+                areaLightObject.transform.position = new Vector3(0.0f, 0.0f, 6.0f);
+
+                var frameData = new ContextContainer();
+                var cameraData = frameData.GetOrCreate<VividCameraData>();
+                cameraData.camera = camera;
+                cameraData.pixelWidth = 256;
+                cameraData.pixelHeight = 256;
+                cameraData.actualWidth = 256;
+                cameraData.actualHeight = 256;
+
+                var lightData = frameData.GetOrCreate<VividLightData>();
+                lightData.UpdateAreaLights(new[] { areaLight });
+
+                pass.Prepare(frameData);
+
+                var clusteredLightingData = frameData.GetOrCreate<VividClusteredLightingData>();
+                var clusterCount = GetPrivateField<int>(pass, "m_ClusterCount");
+                var layeredOffsetGraphicsBuffer = GetImportedGraphicsBuffer(clusteredLightingData.layeredOffset);
+                var packedAreaCells = new uint[clusterCount];
+                layeredOffsetGraphicsBuffer.GetData(packedAreaCells, 0, clusterCount, clusterCount);
+
+                var populatedAreaClusterCount = CountPopulatedAreaClusters(packedAreaCells);
+
+                Assert.That(clusterCount, Is.GreaterThan(1));
+                Assert.That(populatedAreaClusterCount, Is.GreaterThan(0));
+                Assert.That(populatedAreaClusterCount, Is.LessThan(clusterCount));
+            }
+            finally
+            {
+                pass.Dispose();
+                Object.DestroyImmediate(areaLightObject);
                 Object.DestroyImmediate(cameraObject);
             }
         }
@@ -505,6 +583,23 @@ namespace VividRP.Editor.Tests
         {
             offset = packedValue & 67108863u;
             count = (packedValue >> 26) & 63u;
+        }
+
+        private static int CountPopulatedAreaClusters(uint[] packedAreaCells)
+        {
+            if (packedAreaCells == null || packedAreaCells.Length == 0)
+                return 0;
+
+            var populatedClusterCount = 0;
+
+            for (var clusterIndex = 0; clusterIndex < packedAreaCells.Length; clusterIndex++)
+            {
+                UnpackLightCell(packedAreaCells[clusterIndex], out _, out var areaLightCount);
+                if (areaLightCount > 0u)
+                    populatedClusterCount++;
+            }
+
+            return populatedClusterCount;
         }
 
         private static bool ContainsAreaLight(VividLightData lightData, Light light)

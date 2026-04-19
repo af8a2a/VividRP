@@ -1,4 +1,5 @@
 using System;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -23,6 +24,7 @@ namespace VividRP.Runtime
         private const int ClearLightListThreadGroupSize = 64;
         private const int MaxClearLightListDispatchGroups = 65535;
         private const uint HdrpLightCategoryArea = 1u;
+        private const uint VividAreaLightTypeTube = 0u;
         private const int LightClusterPackingOffsetBits = 26;
         private const uint LightClusterPackingCountMask = 63u;
         private const uint LightClusterPackingOffsetMask = 67108863u;
@@ -130,8 +132,11 @@ namespace VividRP.Runtime
         private readonly Matrix4x4[] m_InvProjectionMatrices = new Matrix4x4[2];
         private readonly Matrix4x4[] m_ProjectionMatrices = new Matrix4x4[2];
         private VividLightData.DirectionalLightData[] m_DirectionalLightUploadData = Array.Empty<VividLightData.DirectionalLightData>();
+        private ClusteredProxyScreenBounds[] m_AreaLightScreenSpaceBounds = Array.Empty<ClusteredProxyScreenBounds>();
         private uint[] m_LayeredOffsetUploadData = Array.Empty<uint>();
         private uint[] m_AreaLightListUploadData = Array.Empty<uint>();
+        private int[] m_AreaLightClusterCounts = Array.Empty<int>();
+        private int[] m_AreaLightClusterWriteOffsets = Array.Empty<int>();
         private ShaderVariablesLightList m_ShaderVariablesLightListCB;
         private int m_DirectionalLightCount;
         private int m_PunctualLightCount;
@@ -149,6 +154,7 @@ namespace VividRP.Runtime
         private int m_PunctualLightIndexCapacity;
         private int m_ClusterLightIndexCapacity;
         private int m_AreaLightListStartOffset;
+        private int m_AreaLightListEntryCount;
         private int m_ClusteredAreaLightCount;
         private int m_ClusterBigTileLightIndexCapacity;
         private int m_LayeredOffsetCapacity;
@@ -211,10 +217,11 @@ namespace VividRP.Runtime
             m_ClusterBigTileCount = Mathf.Max(1, m_ClusterBigTileCountX * m_ClusterBigTileCountY * MaxViews);
             m_PunctualLightIndexCapacity = ComputeClusteredLightListCapacity(m_ClusterTileCount * MaxViews);
             m_ClusteredAreaLightCount = Mathf.Min(m_AreaLightCount, (int)LightClusterPackingCountMask);
+            UpdateAreaLightScreenSpaceBounds(lightData, camera);
             m_AreaLightListStartOffset = m_PunctualLightIndexCapacity;
             m_ClusterLightIndexCapacity = ComputeCombinedClusteredLightListCapacity(
                 m_PunctualLightIndexCapacity,
-                m_ClusteredAreaLightCount);
+                m_AreaLightListEntryCount);
             m_ClusterBigTileLightIndexCapacity = ComputeBigTileLightListCapacity(m_ClusterBigTileCount);
             m_LayeredOffsetCapacity = ComputeLayeredOffsetCapacity(m_ClusterCount);
 
@@ -376,6 +383,7 @@ namespace VividRP.Runtime
             m_PunctualLightIndexCapacity = 0;
             m_ClusterLightIndexCapacity = 0;
             m_AreaLightListStartOffset = 0;
+            m_AreaLightListEntryCount = 0;
             m_ClusteredAreaLightCount = 0;
             m_ClusterBigTileLightIndexCapacity = 0;
             m_LayeredOffsetCapacity = 0;
@@ -391,8 +399,11 @@ namespace VividRP.Runtime
             m_BuildPerVoxelLightListDepthKernel = -1;
             m_BuildPerVoxelLightListNoDepthKernel = -1;
             m_DirectionalLightUploadData = Array.Empty<VividLightData.DirectionalLightData>();
+            m_AreaLightScreenSpaceBounds = Array.Empty<ClusteredProxyScreenBounds>();
             m_LayeredOffsetUploadData = Array.Empty<uint>();
             m_AreaLightListUploadData = Array.Empty<uint>();
+            m_AreaLightClusterCounts = Array.Empty<int>();
+            m_AreaLightClusterWriteOffsets = Array.Empty<int>();
         }
 
         private void DispatchClearLightLists(ComputeCommandBuffer cmd)
@@ -581,25 +592,214 @@ namespace VividRP.Runtime
             EnsureLayeredOffsetUploadCapacity(m_LayeredOffsetCapacity);
             Array.Clear(m_LayeredOffsetUploadData, 0, m_LayeredOffsetCapacity);
 
-            if (m_ClusteredAreaLightCount > 0)
+            if (m_ClusteredAreaLightCount > 0 && m_AreaLightListEntryCount > 0)
             {
-                var packedAreaLightCell = PackLightCell((uint)m_AreaLightListStartOffset, (uint)m_ClusteredAreaLightCount);
                 var areaCategoryStart = (int)(HdrpLightCategoryArea * (uint)m_ClusterCount);
-                for (var clusterIndex = 0; clusterIndex < m_ClusterCount; clusterIndex++)
-                    m_LayeredOffsetUploadData[areaCategoryStart + clusterIndex] = packedAreaLightCell;
+                EnsureAreaLightListUploadCapacity(m_AreaLightListEntryCount);
+                EnsureAreaLightClusterScratchCapacity(m_ClusterCount);
+                Array.Clear(m_AreaLightClusterCounts, 0, m_ClusterCount);
+                Array.Clear(m_AreaLightClusterWriteOffsets, 0, m_ClusterCount);
 
-                EnsureAreaLightListUploadCapacity(m_ClusteredAreaLightCount);
                 for (var lightIndex = 0; lightIndex < m_ClusteredAreaLightCount; lightIndex++)
-                    m_AreaLightListUploadData[lightIndex] = (uint)lightIndex;
+                    AccumulateAreaLightClusterCounts(m_AreaLightScreenSpaceBounds[lightIndex]);
 
-                m_LayeredLightListImportedBuffer.SetData(
-                    m_AreaLightListUploadData,
-                    0,
-                    m_AreaLightListStartOffset,
-                    m_ClusteredAreaLightCount);
+                var nextAreaLightOffset = m_AreaLightListStartOffset;
+                for (var clusterIndex = 0; clusterIndex < m_ClusterCount; clusterIndex++)
+                {
+                    var clusterLightCount = m_AreaLightClusterCounts[clusterIndex];
+                    if (clusterLightCount <= 0)
+                        continue;
+
+                    m_LayeredOffsetUploadData[areaCategoryStart + clusterIndex] = PackLightCell(
+                        (uint)nextAreaLightOffset,
+                        (uint)clusterLightCount);
+                    m_AreaLightClusterWriteOffsets[clusterIndex] = nextAreaLightOffset;
+                    nextAreaLightOffset += clusterLightCount;
+                }
+
+                for (var lightIndex = 0; lightIndex < m_ClusteredAreaLightCount; lightIndex++)
+                    WriteAreaLightClusterIndices(lightIndex, m_AreaLightScreenSpaceBounds[lightIndex]);
+
+                var uploadedAreaLightEntryCount = nextAreaLightOffset - m_AreaLightListStartOffset;
+                if (uploadedAreaLightEntryCount > 0)
+                {
+                    m_LayeredLightListImportedBuffer.SetData(
+                        m_AreaLightListUploadData,
+                        0,
+                        m_AreaLightListStartOffset,
+                        uploadedAreaLightEntryCount);
+                }
             }
 
             m_LayeredOffsetImportedBuffer.SetData(m_LayeredOffsetUploadData, 0, 0, m_LayeredOffsetCapacity);
+        }
+
+        private void UpdateAreaLightScreenSpaceBounds(VividLightData lightData, Camera camera)
+        {
+            EnsureAreaLightScreenSpaceBoundsCapacity(m_ClusteredAreaLightCount);
+            m_AreaLightListEntryCount = 0;
+
+            if (lightData == null || m_ClusteredAreaLightCount <= 0)
+                return;
+
+            var projectionParameters = new BoundProxyClusterProjectionUtility.JobParameters(
+                BoundProxyClusterProjectionUtility.CreateParameters(
+                    camera,
+                    m_LightingWidth,
+                    m_LightingHeight,
+                    ClusterTileSize,
+                    ClusterSliceCount,
+                    ClusterBigTileSize));
+            long clusteredEntryCount = 0;
+
+            for (var lightIndex = 0; lightIndex < m_ClusteredAreaLightCount; lightIndex++)
+            {
+                var screenBounds = CreateAreaLightScreenSpaceBounds(lightData.areaLights[lightIndex], projectionParameters);
+                m_AreaLightScreenSpaceBounds[lightIndex] = screenBounds;
+
+                if (!screenBounds.IsValid)
+                    continue;
+
+                clusteredEntryCount += ComputeAreaLightClusterEntryCount(screenBounds);
+                if (clusteredEntryCount >= int.MaxValue)
+                {
+                    clusteredEntryCount = int.MaxValue;
+                    break;
+                }
+            }
+
+            m_AreaLightListEntryCount = Mathf.Max(0, (int)clusteredEntryCount);
+        }
+
+        private void AccumulateAreaLightClusterCounts(in ClusteredProxyScreenBounds screenBounds)
+        {
+            if (!screenBounds.IsValid)
+                return;
+
+            for (var sliceIndex = screenBounds.sliceMin; sliceIndex <= screenBounds.sliceMax; sliceIndex++)
+            {
+                for (var tileY = screenBounds.tileMinY; tileY <= screenBounds.tileMaxY; tileY++)
+                {
+                    for (var tileX = screenBounds.tileMinX; tileX <= screenBounds.tileMaxX; tileX++)
+                    {
+                        var clusterIndex = GetClusterIndex(tileX, tileY, sliceIndex);
+                        if (m_AreaLightClusterCounts[clusterIndex] < (int)LightClusterPackingCountMask)
+                            m_AreaLightClusterCounts[clusterIndex]++;
+                    }
+                }
+            }
+        }
+
+        private void WriteAreaLightClusterIndices(int lightIndex, in ClusteredProxyScreenBounds screenBounds)
+        {
+            if (!screenBounds.IsValid || lightIndex < 0 || lightIndex >= m_ClusteredAreaLightCount)
+                return;
+
+            for (var sliceIndex = screenBounds.sliceMin; sliceIndex <= screenBounds.sliceMax; sliceIndex++)
+            {
+                for (var tileY = screenBounds.tileMinY; tileY <= screenBounds.tileMaxY; tileY++)
+                {
+                    for (var tileX = screenBounds.tileMinX; tileX <= screenBounds.tileMaxX; tileX++)
+                    {
+                        var clusterIndex = GetClusterIndex(tileX, tileY, sliceIndex);
+                        var writeOffset = m_AreaLightClusterWriteOffsets[clusterIndex];
+                        if (writeOffset <= 0)
+                            continue;
+
+                        var uploadIndex = writeOffset - m_AreaLightListStartOffset;
+                        if (uploadIndex < 0 || uploadIndex >= m_AreaLightListUploadData.Length)
+                            continue;
+
+                        m_AreaLightListUploadData[uploadIndex] = (uint)lightIndex;
+                        m_AreaLightClusterWriteOffsets[clusterIndex] = writeOffset + 1;
+                    }
+                }
+            }
+        }
+
+        private int GetClusterIndex(int tileX, int tileY, int sliceIndex)
+        {
+            return tileX
+                + tileY * m_ClusterTileCountX
+                + sliceIndex * m_ClusterTileCountX * m_ClusterTileCountY;
+        }
+
+        private static ClusteredProxyScreenBounds CreateAreaLightScreenSpaceBounds(
+            in VividLightData.AreaLightData areaLight,
+            in BoundProxyClusterProjectionUtility.JobParameters projectionParameters)
+        {
+            var range = GetAreaLightRange(areaLight);
+            var width = Mathf.Max(areaLight.width, 0.0f);
+
+            if (areaLight.lightType == VividAreaLightTypeTube)
+            {
+                var extents = new Vector3(0.5f * (width + 2.0f * range), range, range);
+                return CreateOrientedBoxScreenBounds(
+                    areaLight.positionWS,
+                    areaLight.rightWS * extents.x,
+                    areaLight.upWS * extents.y,
+                    areaLight.forwardWS * extents.z,
+                    projectionParameters);
+            }
+
+            var height = Mathf.Max(areaLight.height, 0.0f);
+            var rectangleExtents = new Vector3(
+                0.5f * (width + 2.0f * range),
+                0.5f * (height + 2.0f * range),
+                0.5f * range);
+            return CreateOrientedBoxScreenBounds(
+                areaLight.positionWS + areaLight.forwardWS * rectangleExtents.z,
+                areaLight.rightWS * rectangleExtents.x,
+                areaLight.upWS * rectangleExtents.y,
+                areaLight.forwardWS * rectangleExtents.z,
+                projectionParameters);
+        }
+
+        private static ClusteredProxyScreenBounds CreateOrientedBoxScreenBounds(
+            Vector3 centerWS,
+            Vector3 axisXWS,
+            Vector3 axisYWS,
+            Vector3 axisZWS,
+            in BoundProxyClusterProjectionUtility.JobParameters projectionParameters)
+        {
+            var viewSpaceMin = new float3(float.PositiveInfinity, float.PositiveInfinity, float.PositiveInfinity);
+            var viewSpaceMax = new float3(float.NegativeInfinity, float.NegativeInfinity, float.NegativeInfinity);
+
+            for (var cornerIndex = 0; cornerIndex < 8; cornerIndex++)
+            {
+                var cornerWS = centerWS
+                    + (((cornerIndex & 1) == 0) ? -axisXWS : axisXWS)
+                    + (((cornerIndex & 2) == 0) ? -axisYWS : axisYWS)
+                    + (((cornerIndex & 4) == 0) ? -axisZWS : axisZWS);
+                var cornerVS = BoundProxyClusterProjectionUtility.TransformWorldToPositiveViewSpace(
+                    projectionParameters.worldToViewMatrix,
+                    cornerWS);
+                viewSpaceMin = math.min(viewSpaceMin, cornerVS);
+                viewSpaceMax = math.max(viewSpaceMax, cornerVS);
+            }
+
+            return BoundProxyClusterProjectionUtility.CreateScreenBoundsFromViewSpaceAabb(
+                viewSpaceMin,
+                viewSpaceMax,
+                projectionParameters);
+        }
+
+        private static int ComputeAreaLightClusterEntryCount(in ClusteredProxyScreenBounds screenBounds)
+        {
+            var tileSpanX = Math.Max(screenBounds.tileMaxX - screenBounds.tileMinX + 1, 0);
+            var tileSpanY = Math.Max(screenBounds.tileMaxY - screenBounds.tileMinY + 1, 0);
+            var sliceSpan = Math.Max(screenBounds.sliceMax - screenBounds.sliceMin + 1, 0);
+            return tileSpanX * tileSpanY * sliceSpan;
+        }
+
+        private static float GetAreaLightRange(in VividLightData.AreaLightData areaLight)
+        {
+            if (areaLight.range > 0.0f)
+                return areaLight.range;
+
+            return areaLight.rangeAttenuationScale > 0.0f
+                ? Mathf.Sqrt(1.0f / areaLight.rangeAttenuationScale)
+                : 0.001f;
         }
 
         private void PushShaderVariablesLightList(ComputeCommandBuffer cmd, ComputeShader computeShader)
@@ -799,6 +999,21 @@ namespace VividRP.Runtime
                 m_AreaLightListUploadData = new uint[requiredCapacity];
         }
 
+        private void EnsureAreaLightScreenSpaceBoundsCapacity(int requiredCapacity)
+        {
+            if (requiredCapacity > m_AreaLightScreenSpaceBounds.Length)
+                m_AreaLightScreenSpaceBounds = new ClusteredProxyScreenBounds[requiredCapacity];
+        }
+
+        private void EnsureAreaLightClusterScratchCapacity(int requiredCapacity)
+        {
+            if (requiredCapacity > m_AreaLightClusterCounts.Length)
+                m_AreaLightClusterCounts = new int[requiredCapacity];
+
+            if (requiredCapacity > m_AreaLightClusterWriteOffsets.Length)
+                m_AreaLightClusterWriteOffsets = new int[requiredCapacity];
+        }
+
         private static bool ShouldDirectionalLightInteractWithSky(Light light)
         {
             if (light == null || light.type != LightType.Directional)
@@ -814,9 +1029,9 @@ namespace VividRP.Runtime
             return ClampToPositiveInt(perTileCapacity * Mathf.Max(clusterTileCount, 1));
         }
 
-        private static int ComputeCombinedClusteredLightListCapacity(int punctualCapacity, int areaLightCount)
+        private static int ComputeCombinedClusteredLightListCapacity(int punctualCapacity, int areaLightEntryCount)
         {
-            return ClampToPositiveInt((long)Mathf.Max(punctualCapacity, 1) + Mathf.Max(areaLightCount, 0));
+            return ClampToPositiveInt((long)Mathf.Max(punctualCapacity, 1) + Mathf.Max(areaLightEntryCount, 0));
         }
 
         private static int ComputeBigTileLightListCapacity(int bigTileCount)

@@ -27,7 +27,8 @@ Shader "Hidden/VividRP/ClusterDebug"
             #define VIVID_TILE_CLUSTER_DEBUG_MATERIAL_FEATURE_VARIANTS 3
             #define VIVID_CLUSTER_DEBUGMODE_VISUALIZE_OPAQUE 0
             #define VIVID_CLUSTER_DEBUGMODE_VISUALIZE_SLICE 1
-            #define VIVID_TILE_CLUSTER_CATEGORY_PUNCTUAL (1u << 0)
+            #define VIVID_TILE_CLUSTER_CATEGORY_PUNCTUAL (1u << LIGHTCATEGORY_PUNCTUAL)
+            #define VIVID_TILE_CLUSTER_CATEGORY_AREA (1u << LIGHTCATEGORY_AREA)
 
             TEXTURE2D(_SourceTexture);
             SAMPLER(sampler_SourceTexture);
@@ -67,11 +68,16 @@ Shader "Hidden/VividRP/ClusterDebug"
                 return output;
             }
 
+            bool IsClusterCategorySelected(uint categoryMask)
+            {
+                return (_ViewTilesFlags & categoryMask) != 0u;
+            }
+
             bool IsClusterDebugEnabled()
             {
                 return _TileClusterDebug == VIVID_TILE_CLUSTER_DEBUG_CLUSTER
-                    && (_ViewTilesFlags & VIVID_TILE_CLUSTER_CATEGORY_PUNCTUAL) != 0u
-                    && _PunctualLightCount > 0u
+                    && ((IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_PUNCTUAL) && _ClusteredPunctualLightGridEnabled != 0u)
+                        || (IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_AREA) && _ClusteredAreaLightGridEnabled != 0u))
                     && _ClusterTileCountX > 0
                     && _ClusterTileCountY > 0
                     && _ClusterSliceCount > 0;
@@ -112,46 +118,30 @@ Shader "Hidden/VividRP/ClusterDebug"
                 return VividClusteredLighting::GetViewDepth(pixelUv, deviceDepth);
             }
 
-            float EvaluatePunctualLightDistanceAttenuationForDebug(PunctualLightData punctualLight, float distanceSquared)
-            {
-                float attenuation = saturate(1.0 - distanceSquared * punctualLight.inverseRangeSquared);
-                return attenuation * attenuation;
-            }
-
-            float EvaluatePunctualLightSpotAttenuationForDebug(PunctualLightData punctualLight, float3 lightDirectionWS)
-            {
-                if (punctualLight.lightType != VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
-                    return 1.0;
-
-                float spotCosine = saturate(dot(punctualLight.directionWS, -lightDirectionWS));
-                float attenuation = saturate(spotCosine * punctualLight.angleScale + punctualLight.angleOffset);
-                return attenuation * attenuation;
-            }
-
-            uint GetBruteForcePunctualLightCount(float3 positionWS)
+            uint GetSelectedClusterLightCount(VividLightingLoopContext lightLoop)
             {
                 uint lightCount = 0u;
 
-                [loop]
-                for (uint lightIndex = 0u; lightIndex < _PunctualLightCount; lightIndex++)
-                {
-                    PunctualLightData punctualLight = GetPunctualLight(lightIndex);
-                    float3 lightVectorWS = punctualLight.positionWS - positionWS;
-                    float distanceSquared = dot(lightVectorWS, lightVectorWS);
+                if (IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_PUNCTUAL))
+                    lightCount += VividLightingLoop::GetPunctualLightCount(lightLoop);
 
-                    if (distanceSquared <= 1e-6)
-                        continue;
-
-                    float inverseDistance = rsqrt(distanceSquared);
-                    float3 lightDirectionWS = lightVectorWS * inverseDistance;
-                    float attenuation = EvaluatePunctualLightDistanceAttenuationForDebug(punctualLight, distanceSquared)
-                        * EvaluatePunctualLightSpotAttenuationForDebug(punctualLight, lightDirectionWS);
-
-                    if (attenuation > 0.0)
-                        lightCount++;
-                }
+                if (IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_AREA))
+                    lightCount += VividLightingLoop::GetAreaLightCount(lightLoop);
 
                 return lightCount;
+            }
+
+            uint GetSelectedClusterCategoryCount()
+            {
+                uint categoryCount = 0u;
+
+                if (IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_PUNCTUAL) && _ClusteredPunctualLightGridEnabled != 0u)
+                    categoryCount++;
+
+                if (IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_AREA) && _ClusteredAreaLightGridEnabled != 0u)
+                    categoryCount++;
+
+                return max(categoryCount, 1u);
             }
 
             float4 Frag(Varyings input) : SV_Target
@@ -178,20 +168,13 @@ Shader "Hidden/VividRP/ClusterDebug"
                     return sourceColor;
 
                 VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, viewDepth);
-                uint lightCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
+                uint lightCount = GetSelectedClusterLightCount(lightLoop);
                 uint sliceIndex = VividClusteredLighting::GetSliceIndex(pixelCoord, viewDepth);
                 float3 sliceTint = EvaluateSliceTint(sliceIndex);
                 uint tileSize = max((uint)_ClusterTileSize, 1u);
                 uint2 tileSize2 = uint2(tileSize, tileSize);
-                uint maxLightCount = max((uint)_ClusterDebugMaxLightCount, 1u);
+                uint maxLightCount = max((uint)_ClusterDebugMaxLightCount * GetSelectedClusterCategoryCount(), 1u);
                 float4 result = sourceColor;
-                uint bruteForceLightCount = 0u;
-
-                if (_ClusterDebugMode == VIVID_CLUSTER_DEBUGMODE_VISUALIZE_OPAQUE)
-                {
-                    float3 positionWS = ComputeWorldSpacePosition(pixelUv, deviceDepth, UNITY_MATRIX_I_VP);
-                    bruteForceLightCount = GetBruteForcePunctualLightCount(positionWS);
-                }
 
                 if (lightCount > 0u)
                 {
@@ -215,9 +198,6 @@ Shader "Hidden/VividRP/ClusterDebug"
 
                 if (border)
                     result = AlphaBlend(result, float4(borderColor, lightCount > 0u ? 0.22 : 0.12));
-
-                if (_ClusterDebugMode == VIVID_CLUSTER_DEBUGMODE_VISUALIZE_OPAQUE && lightCount < bruteForceLightCount)
-                    result = AlphaBlend(result, float4(1.0, 0.1, 0.05, 0.8));
 
                 return result;
             }

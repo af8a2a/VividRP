@@ -129,8 +129,8 @@ namespace VividRP.Editor.Tests
             VirtualTextureStats stats = VirtualTextureStatsRegistry.LastStats;
             Assert.That(stats.ActiveSpaceCount, Is.EqualTo(1));
             Assert.That(stats.PendingUploadCount, Is.EqualTo(1));
-            Assert.That(stats.FreePageCount, Is.EqualTo(3));
-            Assert.That(stats.ResidentPageCount, Is.EqualTo(0));
+            Assert.That(stats.FreePageCount, Is.EqualTo(2));
+            Assert.That(stats.ResidentPageCount, Is.EqualTo(1));
             Assert.That(stats.EvictionCount, Is.EqualTo(0));
             Assert.That(stats.FaultCount, Is.EqualTo(3));
             Assert.That(stats.DeduplicatedRequestCount, Is.EqualTo(2));
@@ -211,8 +211,8 @@ namespace VividRP.Editor.Tests
 
                 VirtualTextureSpaceBinding binding = frameData.Get<VividVirtualTextureFrameData>().Bindings.Single();
                 GraphicsBuffer pageTableBuffer = binding.PageTableBuffer;
-                GraphicsBuffer feedbackRequests = binding.FeedbackRequests;
-                GraphicsBuffer feedbackCounter = binding.FeedbackCounter;
+                ComputeBuffer feedbackRequests = binding.FeedbackRequests;
+                ComputeBuffer feedbackCounter = binding.FeedbackCounter;
                 Texture2DArray physicalCache = binding.PhysicalCache;
 
                 Assert.That(VirtualTextureSystem.IsCameraFeedbackStateCreatedForTesting(camera), Is.True);

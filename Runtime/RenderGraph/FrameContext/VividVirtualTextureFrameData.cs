@@ -18,5 +18,17 @@ namespace VividRP.Runtime
         {
             m_Bindings.Add(binding);
         }
+
+        internal bool TryGetPrimaryBinding(out VirtualTextureSpaceBinding binding)
+        {
+            if (m_Bindings.Count > 0)
+            {
+                binding = m_Bindings[0];
+                return true;
+            }
+
+            binding = default;
+            return false;
+        }
     }
 }

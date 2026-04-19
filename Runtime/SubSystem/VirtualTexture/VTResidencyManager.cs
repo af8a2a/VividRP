@@ -70,6 +70,7 @@ namespace VividRP.Runtime
         }
 
         private readonly VTPageRuntimeState[] m_PageStates;
+        private readonly int[] m_PageMips;
         private readonly VTPhysicalPageSlotState[] m_PhysicalSlots;
         private readonly Stack<int> m_FreePhysicalPages;
         private readonly LinkedList<int> m_LruPhysicalPages = new();
@@ -83,11 +84,14 @@ namespace VividRP.Runtime
         internal VTResidencyManager(
             string spaceName,
             in VirtualTextureSpaceDesc desc,
-            int totalPageCount)
+            int totalPageCount,
+            int[] mipOffsets)
         {
             m_PageStates = new VTPageRuntimeState[totalPageCount];
             for (int pageIndex = 0; pageIndex < m_PageStates.Length; pageIndex++)
                 m_PageStates[pageIndex].PhysicalPageId = -1;
+
+            m_PageMips = BuildPageMipTable(desc, mipOffsets, totalPageCount);
 
             m_PhysicalSlots = new VTPhysicalPageSlotState[desc.CachePageCount];
             for (int slotIndex = 0; slotIndex < m_PhysicalSlots.Length; slotIndex++)
@@ -122,6 +126,67 @@ namespace VividRP.Runtime
         internal Texture2DArray PhysicalCache => m_PhysicalCache;
 
         internal IReadOnlyList<VTRequest> PendingRequests => m_PendingRequests;
+
+        internal bool TryAllocateResidentPage(
+            in VirtualTextureSpaceDesc desc,
+            int[] mipOffsets,
+            int spaceId,
+            in VirtualTexturePageCoord coord,
+            int frameIndex,
+            bool locked,
+            out VTRequest request)
+        {
+            request = default;
+            if (!VirtualTextureSpaceUtility.IsCoordValid(desc, coord))
+                return false;
+
+            int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(desc, mipOffsets, coord);
+            VTPageRuntimeState pageState = m_PageStates[pageIndex];
+            if (pageState.Resident)
+            {
+                request = new VTRequest(
+                    spaceId,
+                    coord,
+                    pageState.PhysicalPageId,
+                    pageState.Generation,
+                    int.MaxValue,
+                    frameIndex);
+                return true;
+            }
+
+            if (pageState.PendingUpload)
+                return false;
+
+            if (!TryAllocatePhysicalPage(
+                    desc,
+                    mipOffsets,
+                    pageIndex,
+                    frameIndex,
+                    out int physicalPageId,
+                    out int generation,
+                    out _))
+            {
+                return false;
+            }
+
+            pageState.PhysicalPageId = physicalPageId;
+            pageState.Generation = generation;
+            pageState.LastAllocationFrame = frameIndex;
+            pageState.PendingUpload = false;
+            pageState.Resident = true;
+            pageState.Locked = locked;
+            m_PageStates[pageIndex] = pageState;
+            m_ResidentPageCount += 1;
+            TouchPhysicalPage(physicalPageId);
+            request = new VTRequest(
+                spaceId,
+                coord,
+                physicalPageId,
+                generation,
+                int.MaxValue,
+                frameIndex);
+            return true;
+        }
 
         internal VTResidencyProcessResult ProcessRequests(
             in VirtualTextureSpaceDesc desc,
@@ -321,17 +386,35 @@ namespace VividRP.Runtime
 
         private int FindEvictionCandidate(int frameIndex)
         {
+            int candidatePhysicalPageId = -1;
+            int candidateMip = int.MaxValue;
+
             LinkedListNode<int> node = m_LruPhysicalPages.First;
             while (node != null)
             {
                 int physicalPageId = node.Value;
-                if (CanEvict(physicalPageId, frameIndex))
-                    return physicalPageId;
+                if (!CanEvict(physicalPageId, frameIndex))
+                {
+                    node = node.Next;
+                    continue;
+                }
+
+                int pageIndex = m_PhysicalSlots[physicalPageId].VirtualPageIndex;
+                int pageMip = pageIndex >= 0 && pageIndex < m_PageMips.Length
+                    ? m_PageMips[pageIndex]
+                    : int.MaxValue;
+                if (candidatePhysicalPageId < 0 || pageMip < candidateMip)
+                {
+                    candidatePhysicalPageId = physicalPageId;
+                    candidateMip = pageMip;
+                    if (candidateMip == 0)
+                        break;
+                }
 
                 node = node.Next;
             }
 
-            return -1;
+            return candidatePhysicalPageId;
         }
 
         private bool CanEvict(int physicalPageId, int frameIndex)
@@ -419,6 +502,25 @@ namespace VividRP.Runtime
                 m_PendingRequests.RemoveAt(requestIndex);
                 return;
             }
+        }
+
+        private static int[] BuildPageMipTable(
+            in VirtualTextureSpaceDesc desc,
+            int[] mipOffsets,
+            int totalPageCount)
+        {
+            var pageMips = new int[totalPageCount];
+            for (int mip = 0; mip < desc.MipCount; mip++)
+            {
+                int mipWidth = VirtualTextureSpaceUtility.GetPageCountX(desc.VirtualPageCountX, mip);
+                int mipHeight = VirtualTextureSpaceUtility.GetPageCountY(desc.VirtualPageCountY, mip);
+                int mipOffset = mipOffsets[mip];
+                int mipPageCount = mipWidth * mipHeight;
+                for (int pageIndex = 0; pageIndex < mipPageCount; pageIndex++)
+                    pageMips[mipOffset + pageIndex] = mip;
+            }
+
+            return pageMips;
         }
     }
 }

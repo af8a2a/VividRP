@@ -220,6 +220,16 @@ namespace VividRP.Runtime
                 PhysicalPageHeight,
             };
         }
+
+        public float[] ToFloatArray()
+        {
+            int[] ints = ToIntArray();
+            var floats = new float[ints.Length];
+            for (int index = 0; index < ints.Length; index++)
+                floats[index] = ints[index];
+
+            return floats;
+        }
     }
 
     internal readonly struct VirtualTextureSpaceBinding
@@ -229,8 +239,8 @@ namespace VividRP.Runtime
             string spaceName,
             GraphicsBuffer pageTableBuffer,
             Texture2DArray physicalCache,
-            GraphicsBuffer feedbackRequests,
-            GraphicsBuffer feedbackCounter,
+            ComputeBuffer feedbackRequests,
+            ComputeBuffer feedbackCounter,
             VirtualTextureSpaceShaderParams shaderParams,
             int[] mipOffsets)
         {
@@ -252,15 +262,17 @@ namespace VividRP.Runtime
 
         public Texture2DArray PhysicalCache { get; }
 
-        public GraphicsBuffer FeedbackRequests { get; }
+        public ComputeBuffer FeedbackRequests { get; }
 
-        public GraphicsBuffer FeedbackCounter { get; }
+        public ComputeBuffer FeedbackCounter { get; }
 
         public VirtualTextureSpaceShaderParams ShaderParams { get; }
 
         public int[] MipOffsets { get; }
 
         public bool HasFeedback => FeedbackRequests != null && FeedbackCounter != null;
+
+        public bool IsValid => PageTableBuffer != null && PhysicalCache != null;
     }
 
     internal readonly struct VirtualTextureStats
@@ -343,8 +355,10 @@ namespace VividRP.Runtime
         public static readonly int _VTPhysicalCache = Shader.PropertyToID(nameof(_VTPhysicalCache));
         public static readonly int _VTFeedbackRequests = Shader.PropertyToID(nameof(_VTFeedbackRequests));
         public static readonly int _VTFeedbackCounter = Shader.PropertyToID(nameof(_VTFeedbackCounter));
+        public static readonly int _VTFeedbackEnabled = Shader.PropertyToID(nameof(_VTFeedbackEnabled));
         public static readonly int _VTSpaceParams = Shader.PropertyToID(nameof(_VTSpaceParams));
         public static readonly int _VTMipOffsets = Shader.PropertyToID(nameof(_VTMipOffsets));
+        public static readonly int _VTDebugMode = Shader.PropertyToID(nameof(_VTDebugMode));
     }
 
     internal static class VirtualTextureSpaceUtility

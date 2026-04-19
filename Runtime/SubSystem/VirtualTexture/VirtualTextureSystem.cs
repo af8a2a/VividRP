@@ -50,6 +50,7 @@ namespace VividRP.Runtime
             s_NextSpaceId = 1;
             s_FallbackFrameIndex = -1;
             s_Initialized = false;
+            VTUploadScheduler.ResetFenceFactory();
             VirtualTextureStatsRegistry.Clear();
         }
 
@@ -107,7 +108,9 @@ namespace VividRP.Runtime
             foreach (VTAddressSpace addressSpace in s_AddressSpaces.Values)
             {
                 if (s_GroupedRequests.TryGetValue(addressSpace.SpaceId, out List<VirtualTextureAggregatedFeedbackRequest> spaceRequests))
-                    evictionCount += addressSpace.ProcessRequests(spaceRequests, frameIndex);
+                    evictionCount += addressSpace.ProcessRequests(spaceRequests, frameIndex, cmd);
+                else
+                    evictionCount += addressSpace.ProcessRequests(null, frameIndex, cmd);
 
                 addressSpace.RefreshPageTableBuffer();
             }
@@ -129,8 +132,8 @@ namespace VividRP.Runtime
 
             foreach (VTAddressSpace addressSpace in s_AddressSpaces.Values)
             {
-                GraphicsBuffer feedbackRequests = null;
-                GraphicsBuffer feedbackCounter = null;
+                ComputeBuffer feedbackRequests = null;
+                ComputeBuffer feedbackCounter = null;
 
                 if (supportsFeedback && cameraFeedbackState != null)
                 {
@@ -281,6 +284,11 @@ namespace VividRP.Runtime
 
             producerName = null;
             return false;
+        }
+
+        internal static void SetUploadFenceFactoryForTesting(IVTUploadFenceFactory fenceFactory)
+        {
+            VTUploadScheduler.SetFenceFactoryForTesting(fenceFactory);
         }
 
         private static void CollectCompletedReadbacks(ref int lastReadbackFrame)

@@ -10,26 +10,28 @@ TEXTURE2D_ARRAY(_VTPhysicalCache);
 SAMPLER(sampler_VTPhysicalCache);
 
 #if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
-RWStructuredBuffer<uint2> _VTFeedbackRequests;
-RWStructuredBuffer<uint> _VTFeedbackCounter;
+RWStructuredBuffer<uint2> _VTFeedbackRequests : register(u1);
+RWStructuredBuffer<uint> _VTFeedbackCounter : register(u2);
 #else
 StructuredBuffer<uint2> _VTFeedbackRequests;
 StructuredBuffer<uint> _VTFeedbackCounter;
 #endif
 
-int _VTSpaceParams[12];
-int _VTMipOffsets[VIVID_VT_MAX_MIPS];
+float _VTSpaceParams[12];
+float _VTMipOffsets[VIVID_VT_MAX_MIPS];
+int _VTDebugMode;
+int _VTFeedbackEnabled;
 
-#define VT_SPACE_ID               _VTSpaceParams[0]
-#define VT_PAGE_SIZE              _VTSpaceParams[1]
-#define VT_BORDER_SIZE            _VTSpaceParams[2]
-#define VT_PHYSICAL_PAGE_SIZE     _VTSpaceParams[3]
-#define VT_VIRTUAL_PAGE_COUNT_X   _VTSpaceParams[4]
-#define VT_VIRTUAL_PAGE_COUNT_Y   _VTSpaceParams[5]
-#define VT_MIP_COUNT              _VTSpaceParams[6]
-#define VT_CACHE_PAGE_COUNT       _VTSpaceParams[7]
-#define VT_FEEDBACK_CAPACITY      _VTSpaceParams[8]
-#define VT_PAGE_TABLE_ENTRY_COUNT _VTSpaceParams[9]
+#define VT_SPACE_ID               ((int)_VTSpaceParams[0])
+#define VT_PAGE_SIZE              ((int)_VTSpaceParams[1])
+#define VT_BORDER_SIZE            ((int)_VTSpaceParams[2])
+#define VT_PHYSICAL_PAGE_SIZE     ((int)_VTSpaceParams[3])
+#define VT_VIRTUAL_PAGE_COUNT_X   ((int)_VTSpaceParams[4])
+#define VT_VIRTUAL_PAGE_COUNT_Y   ((int)_VTSpaceParams[5])
+#define VT_MIP_COUNT              ((int)_VTSpaceParams[6])
+#define VT_CACHE_PAGE_COUNT       ((int)_VTSpaceParams[7])
+#define VT_FEEDBACK_CAPACITY      ((int)_VTSpaceParams[8])
+#define VT_PAGE_TABLE_ENTRY_COUNT ((int)_VTSpaceParams[9])
 
 struct VTResolvedAddress
 {
@@ -62,6 +64,23 @@ uint VTGetFlatPageIndex(uint2 pageCoord, uint mip)
 {
     uint pageCountX = VTGetPageCount((uint)VT_VIRTUAL_PAGE_COUNT_X, mip);
     return (uint)_VTMipOffsets[mip] + pageCoord.y * pageCountX + pageCoord.x;
+}
+
+float VTComputeRequestedMipLevel(float2 virtualUv)
+{
+    float2 virtualTexelCount = float2(
+        max((float)(VT_VIRTUAL_PAGE_COUNT_X * VT_PAGE_SIZE), 1.0),
+        max((float)(VT_VIRTUAL_PAGE_COUNT_Y * VT_PAGE_SIZE), 1.0));
+    float2 dx = ddx(virtualUv * virtualTexelCount);
+    float2 dy = ddy(virtualUv * virtualTexelCount);
+    float rho = max(dot(dx, dx), dot(dy, dy));
+    float requestedMip = 0.5 * log2(max(rho, 1e-8));
+    return clamp(requestedMip, 0.0, (float)max(VT_MIP_COUNT - 1, 0));
+}
+
+uint VTComputeRequestedMip(float2 virtualUv)
+{
+    return (uint)round(VTComputeRequestedMipLevel(virtualUv));
 }
 
 VTResolvedAddress VTResolveAddress(float2 virtualUv, uint requestedMip)
@@ -97,6 +116,15 @@ float3 VTComputePhysicalUVW(float2 virtualUv, VTResolvedAddress resolved)
     return float3(physicalUv, (float)resolved.physicalPageId);
 }
 
+float4 VTSamplePhysicalCache(float2 virtualUv, VTResolvedAddress resolved)
+{
+    if (!resolved.valid)
+        return float4(1.0, 0.0, 1.0, 1.0);
+
+    float3 uvw = VTComputePhysicalUVW(virtualUv, resolved);
+    return SAMPLE_TEXTURE2D_ARRAY(_VTPhysicalCache, sampler_VTPhysicalCache, uvw.xy, uvw.z);
+}
+
 uint2 VTEncodeFeedbackKey(uint2 pageCoord, uint mip)
 {
     uint low = (uint)(VT_SPACE_ID & 0xFFFF) | ((pageCoord.x & 0xFFFFu) << 16u);
@@ -107,6 +135,9 @@ uint2 VTEncodeFeedbackKey(uint2 pageCoord, uint mip)
 void VTWriteFeedback(float2 virtualUv, uint requestedMip)
 {
 #if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
+    if (_VTFeedbackEnabled == 0)
+        return;
+
     uint clampedMip = min(requestedMip, (uint)max(VT_MIP_COUNT - 1, 0));
     uint2 pageCoord = VTGetPageCoord(virtualUv, clampedMip);
     uint requestIndex = 0u;

@@ -77,7 +77,12 @@ namespace VividRP.Editor.Tests
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("Fallback", 4, 4, 3, 4, 4));
 
-            VirtualTextureUploadRequest rootRequest = RequestAndCommit(spaceId, new VirtualTexturePageCoord(0, 0, 2));
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                new VirtualTexturePageCoord(0, 0, 2),
+                out VirtualTexturePageTableEntry rootEntry), Is.True);
+            Assert.That(rootEntry.Resident, Is.True);
+            Assert.That(rootEntry.Locked, Is.True);
 
             Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
                 spaceId,
@@ -85,7 +90,7 @@ namespace VividRP.Editor.Tests
                 out VirtualTexturePageTableEntry rootFallbackEntry), Is.True);
             Assert.That(rootFallbackEntry.Fallback, Is.True);
             Assert.That(rootFallbackEntry.ResolvedMip, Is.EqualTo(2));
-            Assert.That(rootFallbackEntry.PhysicalPageId, Is.EqualTo(rootRequest.PhysicalPageId));
+            Assert.That(rootFallbackEntry.PhysicalPageId, Is.EqualTo(rootEntry.PhysicalPageId));
 
             VirtualTextureUploadRequest childRequest = RequestAndCommit(spaceId, new VirtualTexturePageCoord(1, 1, 1));
 

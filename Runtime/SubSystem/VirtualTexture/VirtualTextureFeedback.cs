@@ -212,8 +212,8 @@ namespace VividRP.Runtime
     {
         private sealed class BufferPairState : IDisposable
         {
-            public GraphicsBuffer RequestsBuffer;
-            public GraphicsBuffer CounterBuffer;
+            public ComputeBuffer RequestsBuffer;
+            public ComputeBuffer CounterBuffer;
             public bool WasWritten;
             public bool ReadbackPending;
             public bool RequestReadbackPending;
@@ -260,8 +260,8 @@ namespace VividRP.Runtime
             Camera camera,
             int feedbackCapacity,
             int frameIndex,
-            out GraphicsBuffer requestBuffer,
-            out GraphicsBuffer counterBuffer,
+            out ComputeBuffer requestBuffer,
+            out ComputeBuffer counterBuffer,
             out string statusMessage)
         {
             requestBuffer = null;
@@ -351,9 +351,9 @@ namespace VividRP.Runtime
             for (int bufferIndex = 0; bufferIndex < m_BufferPairs.Length; bufferIndex++)
             {
                 BufferPairState pair = m_BufferPairs[bufferIndex];
-                pair.RequestsBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, feedbackCapacity, sizeof(ulong));
+                pair.RequestsBuffer = new ComputeBuffer(feedbackCapacity, sizeof(ulong), ComputeBufferType.Structured);
                 pair.RequestsBuffer.name = $"VividVT_{spaceName}_Space{m_SpaceId}_FeedbackRequests_{bufferIndex}";
-                pair.CounterBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(uint));
+                pair.CounterBuffer = new ComputeBuffer(1, sizeof(uint), ComputeBufferType.Structured);
                 pair.CounterBuffer.name = $"VividVT_{spaceName}_Space{m_SpaceId}_FeedbackCounter_{bufferIndex}";
             }
         }

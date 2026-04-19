@@ -159,6 +159,24 @@ struct VividClusteredLighting
         return LoadPunctualLightCell(pixelCoord, GetViewDepthWS(positionWS));
     }
 
+    static VividClusteredLightCell LoadAreaLightCell(uint2 tileCoord, uint sliceIndex)
+    {
+        uint packedOffset = g_LayeredOffset[GetLayeredOffsetBufferIndex(LIGHTCATEGORY_AREA, tileCoord, sliceIndex)];
+        return UnpackLightCell(packedOffset);
+    }
+
+    static VividClusteredLightCell LoadAreaLightCell(uint2 pixelCoord, float viewDepth)
+    {
+        uint2 tileCoord = GetTileCoord(pixelCoord);
+        uint sliceIndex = GetSliceIndex(pixelCoord, viewDepth);
+        return LoadAreaLightCell(tileCoord, sliceIndex);
+    }
+
+    static VividClusteredLightCell LoadAreaLightCell(uint2 pixelCoord, float3 positionWS)
+    {
+        return LoadAreaLightCell(pixelCoord, GetViewDepthWS(positionWS));
+    }
+
     static uint LoadLightIndex(VividClusteredLightCell lightCell, uint localIndex)
     {
         return g_vLayeredLightList[lightCell.offset + localIndex];

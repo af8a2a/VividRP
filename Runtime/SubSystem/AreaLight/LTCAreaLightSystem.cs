@@ -1,7 +1,4 @@
-﻿using System;
-using NUnit.Framework;
-using UnityEditor;
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 
@@ -40,18 +37,24 @@ namespace VividRP.Runtime
         static bool s_Initialized;
 
 #if UNITY_EDITOR
-        [InitializeOnLoadMethod]
+        [UnityEditor.InitializeOnLoadMethod]
 #else
         [RuntimeInitializeOnLoadMethod]
 #endif
         internal static void Initialize()
         {
+            if (s_Initialized)
+                return;
+
             BuildLTCData();
+            FrameContextSystem.SubsystemPreRender -= Update;
             FrameContextSystem.SubsystemPreRender += Update;
+            s_Initialized = true;
         }
 
         static void BuildLTCData()
         {
+            CoreUtils.Destroy(m_LtcData);
             m_LtcData = new Texture2DArray(k_LtcLUTResolution, k_LtcLUTResolution, (int)LTCLightingModel.Count,
                 GraphicsFormat.R16G16B16A16_SFloat,
                 TextureCreationFlags.None)
@@ -63,9 +66,7 @@ namespace VividRP.Runtime
                     GraphicsFormat.R16G16B16A16_SFloat,
                     depth: (int)LTCLightingModel.Count, dim: TextureDimension.Tex2DArray, name: "LTC_LUT")
             };
-#if UNITY_EDITOR
-            Assert.IsTrue(m_LtcData);
-#endif
+            Debug.Assert(m_LtcData != null);
             m_LtcData.SetPixelData(LTCAreaLightData.s_LtcMatrixData_BRDF_GGX, 0, (int)LTCLightingModel.GGX);
             m_LtcData.SetPixelData(LTCAreaLightData.s_LtcMatrixData_BRDF_Disney, 0,
                 (int)LTCLightingModel.DisneyDiffuse);
@@ -77,8 +78,6 @@ namespace VividRP.Runtime
             m_LtcData.SetPixelData(LTCAreaLightData.s_LtcMatrixData_BRDF_Ward, 0, (int)LTCLightingModel.Ward);
             m_LtcData.SetPixelData(LTCAreaLightData.s_LtcMatrixData_BRDF_OrenNayar, 0, (int)LTCLightingModel.OrenNayar);
             m_LtcData.Apply();
-
-            s_Initialized = true;
         }
 
 
@@ -93,9 +92,10 @@ namespace VividRP.Runtime
 
         internal static void Deinitialize()
         {
+            FrameContextSystem.SubsystemPreRender -= Update;
+            CoreUtils.Destroy(m_LtcData);
+            m_LtcData = null;
             s_Initialized = false;
-           CoreUtils.Destroy(m_LtcData);
-           FrameContextSystem.SubsystemPreRender -= Update;
         }
     }
 }

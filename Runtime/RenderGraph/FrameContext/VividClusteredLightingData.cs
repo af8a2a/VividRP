@@ -6,11 +6,13 @@ namespace VividRP.Runtime
     {
         public RenderGraphBuffer directionalLights;
         public RenderGraphBuffer punctualLights;
+        public RenderGraphBuffer areaLights;
         public RenderGraphBuffer layeredOffset;
         public RenderGraphBuffer layeredLightList;
         public RenderGraphBuffer logBaseBuffer;
         public int directionalLightCount;
         public int punctualLightCount;
+        public int areaLightCount;
         public int mainDirectionalLightIndex;
         public int clusterTileSize;
         public int clusterSliceCount;
@@ -29,11 +31,13 @@ namespace VividRP.Runtime
         {
             directionalLights = null;
             punctualLights = null;
+            areaLights = null;
             layeredOffset = null;
             layeredLightList = null;
             logBaseBuffer = null;
             directionalLightCount = 0;
             punctualLightCount = 0;
+            areaLightCount = 0;
             mainDirectionalLightIndex = -1;
             clusterTileSize = 0;
             clusterSliceCount = 0;

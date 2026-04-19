@@ -4,10 +4,12 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/LTCAreaLight.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/PreIntegratedFGD.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VividProbeVolume.hlsl"
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/BSDF.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
@@ -45,6 +47,11 @@ struct VividPreLightData
     float diffuseFGD;
     float reflectivity;
     float energyCompensation;
+    float3x3 orthoBasisViewNormal;
+    float3x3 ltcTransformDiffuse;
+    float3x3 ltcTransformSpecular;
+    float3x3 ltcTransformCoat;
+    float coatIblF;
 };
 
 struct VividCBSDF
@@ -174,6 +181,30 @@ VividPreLightData GetVividPreLightData(
 
     preLightData.energyCompensation = rcp(max(preLightData.reflectivity, 1e-4)) - 1.0;
     preLightData.iblR = VividGetReflectionVector(normalizedViewDirectionWS, surfaceData.normalWS);
+    preLightData.orthoBasisViewNormal = GetOrthoBasisViewNormal(
+        normalizedViewDirectionWS,
+        surfaceData.normalWS,
+        preLightData.NdotV);
+    preLightData.ltcTransformDiffuse = SampleLtcMatrix(
+        bsdfData.perceptualRoughness,
+        clampedNdotV,
+        VIVID_LTC_LIGHTING_MODEL_DISNEY_DIFFUSE);
+    preLightData.ltcTransformSpecular = SampleLtcMatrix(
+        bsdfData.perceptualRoughness,
+        clampedNdotV,
+        VIVID_LTC_LIGHTING_MODEL_GGX);
+    preLightData.ltcTransformCoat = 0.0;
+    preLightData.coatIblF = 0.0;
+
+    if (bsdfData.coatMask > 0.0)
+    {
+        preLightData.coatIblF = F_Schlick(kVividClearCoatF0, 1.0, clampedNdotV) * bsdfData.coatMask;
+        preLightData.ltcTransformCoat = SampleLtcMatrix(
+            RoughnessToPerceptualRoughness(bsdfData.coatRoughness),
+            clampedNdotV,
+            VIVID_LTC_LIGHTING_MODEL_GGX);
+    }
+
     return preLightData;
 }
 
@@ -749,6 +780,134 @@ float3 EvaluatePunctualLight(
     float3 normalizedViewDirectionWS = SafeNormalize(viewDirectionWS);
     VividPreLightData preLightData = GetVividPreLightData(normalizedViewDirectionWS, surfaceData, bsdfData);
     return EvaluatePunctualLight(surfaceData, bsdfData, preLightData, positionWS, normalizedViewDirectionWS, punctualLight);
+}
+
+float EvaluateAreaLightIntensity(AreaLightData areaLight, float3 positionWS)
+{
+    float3 unL = areaLight.positionWS - positionWS;
+    float halfLength = areaLight.width * 0.5;
+    float halfHeight = areaLight.height * 0.5;
+    float intensity = PillowWindowing(
+        unL,
+        areaLight.rightWS,
+        areaLight.upWS,
+        halfLength,
+        halfHeight,
+        areaLight.rangeAttenuationScale,
+        areaLight.rangeAttenuationBias);
+
+    if (areaLight.lightType == VIVID_AREA_LIGHT_TYPE_RECTANGLE
+        && dot(unL, areaLight.forwardWS) >= 0.0)
+    {
+        return 0.0;
+    }
+
+    return intensity;
+}
+
+VividDirectLighting EvaluateBSDF_Area(
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData,
+    VividPreLightData preLightData,
+    float3 positionWS,
+    float3 viewDirectionWS,
+    AreaLightData areaLight)
+{
+    VividDirectLighting lighting = (VividDirectLighting)0;
+    float intensity = EvaluateAreaLightIntensity(areaLight, positionWS);
+
+    if (intensity <= 0.0)
+        return lighting;
+
+    bool isRectLight = areaLight.lightType == VIVID_AREA_LIGHT_TYPE_RECTANGLE;
+    float halfLength = areaLight.width * 0.5;
+    float halfHeight = areaLight.height * 0.5;
+    float3 unL = areaLight.positionWS - positionWS;
+    float3 center = mul(preLightData.orthoBasisViewNormal, unL);
+    float3 right = mul(preLightData.orthoBasisViewNormal, areaLight.rightWS);
+    float3 up = mul(preLightData.orthoBasisViewNormal, areaLight.upWS);
+
+    if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+    {
+        float clampedNdotV = saturate(ClampNdotV(preLightData.NdotV));
+        float roughness = ClampRoughnessForAnalyticalLights(surfaceData.linearRoughness);
+        float perceptualRoughness = RoughnessToPerceptualRoughness(roughness);
+        float fuzzAmount = saturate(surfaceData.customData);
+        float3 baseSpecular = lerp(kVividDielectricF0, surfaceData.baseColor, surfaceData.metallic);
+        float luminance = VividGetLuminance(surfaceData.baseColor);
+        float3 sheenTint = lerp(luminance.xxx, surfaceData.baseColor, 0.35);
+        float3 fabricFresnel0 = lerp(baseSpecular, sheenTint, fuzzAmount);
+        float3 specularFGD = 0.0;
+        float diffuseFGD = 0.0;
+        float reflectivity = 0.0;
+
+        GetPreIntegratedFGDCharlieAndFabricLambert(
+            clampedNdotV,
+            perceptualRoughness,
+            fabricFresnel0,
+            specularFGD,
+            diffuseFGD,
+            reflectivity);
+
+        float4 ltcValue = EvaluateLTC_Area(
+            isRectLight,
+            center,
+            right,
+            up,
+            halfLength,
+            halfHeight,
+            transpose(SampleLtcMatrix(
+                perceptualRoughness,
+                clampedNdotV,
+                VIVID_LTC_LIGHTING_MODEL_CHARLIE)));
+
+        ltcValue.a *= intensity;
+        lighting.diffuse = ltcValue.rgb * ltcValue.a * areaLight.color * diffuseFGD;
+        lighting.specular = ltcValue.rgb * ltcValue.a * areaLight.color * (specularFGD * fuzzAmount);
+        return lighting;
+    }
+
+    float4 diffuseLtcValue = EvaluateLTC_Area(
+        isRectLight,
+        center,
+        right,
+        up,
+        halfLength,
+        halfHeight,
+        transpose(preLightData.ltcTransformDiffuse));
+    diffuseLtcValue.a *= intensity;
+    lighting.diffuse = diffuseLtcValue.rgb * diffuseLtcValue.a * areaLight.color * preLightData.diffuseFGD;
+
+    float4 specularLtcValue = EvaluateLTC_Area(
+        isRectLight,
+        center,
+        right,
+        up,
+        halfLength,
+        halfHeight,
+        transpose(preLightData.ltcTransformSpecular));
+    specularLtcValue.a *= intensity;
+    lighting.specular = specularLtcValue.rgb * specularLtcValue.a * areaLight.color * preLightData.specularFGD;
+
+    if (bsdfData.coatMask > 0.0)
+    {
+        float4 coatLtcValue = EvaluateLTC_Area(
+            isRectLight,
+            center,
+            right,
+            up,
+            halfLength,
+            halfHeight,
+            transpose(preLightData.ltcTransformCoat));
+        coatLtcValue.a *= intensity;
+        lighting.diffuse *= 1.0 - preLightData.coatIblF;
+        lighting.specular = lerp(
+            lighting.specular,
+            coatLtcValue.rgb * coatLtcValue.a * areaLight.color,
+            preLightData.coatIblF);
+    }
+
+    return lighting;
 }
 
 void AccumulateDirectLighting(

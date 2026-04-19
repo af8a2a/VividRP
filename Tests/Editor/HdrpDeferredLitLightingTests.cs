@@ -16,6 +16,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("#include \"Packages/com.unity.render-pipelines.core/ShaderLibrary/BSDF.hlsl\""));
             Assert.That(source, Does.Contain("#include \"Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl\""));
+            Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/LTCAreaLight.hlsl\""));
             Assert.That(source, Does.Contain("return DisneyDiffuse("));
             Assert.That(source, Does.Contain("return DV_SmithJointGGX("));
             Assert.That(source, Does.Contain("return D_Charlie("));
@@ -30,6 +31,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EvaluateBSDF("));
             Assert.That(source, Does.Contain("EvaluateBSDF_Directional("));
             Assert.That(source, Does.Contain("EvaluateBSDF_Punctual("));
+            Assert.That(source, Does.Contain("EvaluateBSDF_Area("));
             Assert.That(source, Does.Contain("EvaluateDirectional("));
             Assert.That(source, Does.Contain("BuildVividHDRPLitBSDFData"));
             Assert.That(source, Does.Contain("VividCBSDF cbsdf = (VividCBSDF)0;"));
@@ -40,12 +42,15 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EvaluateVividLitDirectLight"));
             Assert.That(source, Does.Contain("EvaluateDirectionalLight"));
             Assert.That(source, Does.Contain("EvaluatePunctualLight"));
+            Assert.That(source, Does.Contain("EvaluateAreaLightIntensity("));
             Assert.That(source, Does.Contain("AccumulateDirectLighting("));
             Assert.That(source, Does.Contain("FinalizeVividSpecularLighting("));
             Assert.That(source, Does.Contain("surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC"));
             Assert.That(source, Does.Contain("float EvaluatePunctualLightDistanceAttenuation"));
             Assert.That(source, Does.Contain("float distanceAttenuation = rcp(max(distanceSquared, 1e-6));"));
             Assert.That(source, Does.Contain("float rangeAttenuation = saturate(1.0 - distanceSquared * punctualLight.inverseRangeSquared);"));
+            Assert.That(source, Does.Contain("PillowWindowing("));
+            Assert.That(source, Does.Contain("SampleLtcMatrix("));
         }
 
         [Test]
@@ -78,6 +83,18 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("_PreIntegratedFGD_GGXDisneyDiffuse"));
             Assert.That(source, Does.Contain("_PreIntegratedFGD_CharlieAndFabric"));
             Assert.That(source, Does.Contain("VIVID_FGD_TEXTURE_RESOLUTION 64"));
+        }
+
+        [Test]
+        public void LTCAreaLightInclude_ContainsHdrpInspiredLtcSamplingFunctions()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "LTCAreaLight.hlsl"));
+
+            Assert.That(source, Does.Contain("_LtcData"));
+            Assert.That(source, Does.Contain("SampleLtcMatrix("));
+            Assert.That(source, Does.Contain("EvaluateLTC_Area("));
+            Assert.That(source, Does.Contain("PolygonIrradiance("));
+            Assert.That(source, Does.Contain("ComputeLineWidthFactor("));
         }
 
         [Test]

@@ -42,6 +42,25 @@ namespace VividRP.Runtime
         }
 
         [StructLayout(LayoutKind.Sequential)]
+        public struct AreaLightData
+        {
+            public Vector3 positionWS;
+            public float rangeAttenuationScale;
+            public Vector3 color;
+            public uint lightType;
+            public Vector3 forwardWS;
+            public float rangeAttenuationBias;
+            public Vector3 rightWS;
+            public float width;
+            public Vector3 upWS;
+            public float height;
+            public uint renderingLayerMask;
+            public Vector3 padding;
+
+            internal static int Stride => Marshal.SizeOf<AreaLightData>();
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
         public struct PunctualLightCullData
         {
             public Vector3 positionWS;
@@ -295,6 +314,7 @@ namespace VividRP.Runtime
             None = 0,
             Directional = 1 << 0,
             Punctual = 1 << 1,
+            Area = 1 << 2,
         }
 
         private const uint HdrpLightCategoryPunctual = 0u;
@@ -323,6 +343,12 @@ namespace VividRP.Runtime
         {
             public PunctualLightData lightData;
             public PunctualLightCullData lightCullData;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct AreaLightCandidate
+        {
+            public AreaLightData lightData;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -466,8 +492,10 @@ namespace VividRP.Runtime
 
             public bool collectDirectionalLights;
             public bool collectPunctualLights;
+            public bool collectAreaLights;
             public NativeList<DirectionalLightCandidate> directionalLights;
             public NativeList<PunctualLightCandidate> punctualLights;
+            public NativeList<AreaLightCandidate> areaLights;
 
             public void Execute()
             {
@@ -488,6 +516,13 @@ namespace VividRP.Runtime
                     {
                         punctualLights.AddNoResize(
                             CreatePunctualLightCandidate(
+                                lightRenderData));
+                    }
+
+                    if (collectAreaLights && IsAreaLightSupported(lightRenderData))
+                    {
+                        areaLights.AddNoResize(
+                            CreateAreaLightCandidate(
                                 lightRenderData));
                     }
                 }
@@ -606,6 +641,7 @@ namespace VividRP.Runtime
         public NativeArray<VisibleReflectionProbe> visibleReflectionProbes;
         public DirectionalLightData[] directionalLights = Array.Empty<DirectionalLightData>();
         public PunctualLightData[] punctualLights = Array.Empty<PunctualLightData>();
+        public AreaLightData[] areaLights = Array.Empty<AreaLightData>();
         public PunctualLightCullData[] punctualLightCullData = Array.Empty<PunctualLightCullData>();
         public PunctualLightViewSpaceCullData[] punctualLightViewSpaceCullData = Array.Empty<PunctualLightViewSpaceCullData>();
         public PunctualLightScreenSpaceBounds[] punctualLightScreenSpaceBounds = Array.Empty<PunctualLightScreenSpaceBounds>();
@@ -617,6 +653,7 @@ namespace VividRP.Runtime
         public EntityId mainLightEntityId;
         public int directionalLightCount;
         public int punctualLightCount;
+        public int areaLightCount;
         public int punctualLightCoarseRangeCount;
         public int punctualLightCoarseRecordCount;
         public int mainDirectionalLightIndex;
@@ -631,6 +668,8 @@ namespace VividRP.Runtime
         public bool hasDirectionalLights => directionalLightCount > 0;
 
         public bool hasPunctualLights => punctualLightCount > 0;
+
+        public bool hasAreaLights => areaLightCount > 0;
 
         public bool hasMainDirectionalLight => IsValidDirectionalLightIndex(mainDirectionalLightIndex);
 
@@ -676,7 +715,10 @@ namespace VividRP.Runtime
         {
             visibleLights = cullingResults.visibleLights;
             visibleReflectionProbes = cullingResults.visibleReflectionProbes;
-            UpdateVisibleLightData(visibleLights, RenderSettings.sun, VisibleLightCollectionMask.Directional | VisibleLightCollectionMask.Punctual);
+            UpdateVisibleLightData(
+                visibleLights,
+                RenderSettings.sun,
+                VisibleLightCollectionMask.Directional | VisibleLightCollectionMask.Punctual | VisibleLightCollectionMask.Area);
         }
 
         internal void UpdateDirectionalLights(NativeArray<VisibleLight> visibleLights, Light sunLight)
@@ -760,6 +802,32 @@ namespace VividRP.Runtime
                 punctualLights[punctualLightCount] = punctualLightData;
                 punctualLightCullData[punctualLightCount] = CreatePunctualLightCullData(punctualLightData);
                 punctualLightCount++;
+            }
+        }
+
+        internal void UpdateAreaLights(NativeArray<VisibleLight> visibleLights)
+        {
+            UpdateVisibleLightData(visibleLights, null, VisibleLightCollectionMask.Area);
+        }
+
+        internal void UpdateAreaLights(IReadOnlyList<Light> lights)
+        {
+            EnsureAreaLightCapacity(CountAreaLights(lights));
+
+            areaLightCount = 0;
+
+            if (lights == null || lights.Count == 0)
+                return;
+
+            for (var lightIndex = 0; lightIndex < lights.Count; lightIndex++)
+            {
+                var light = lights[lightIndex];
+                if (!IsAreaLightSupported(light))
+                    continue;
+
+                var trackedLightData = VividLightRenderDatabase.instance.UpdateLightData(light);
+                areaLights[areaLightCount] = CreateAreaLightData(trackedLightData);
+                areaLightCount++;
             }
         }
 
@@ -958,10 +1026,12 @@ namespace VividRP.Runtime
             mainLightEntityId = EntityId.None;
             directionalLightCount = 0;
             punctualLightCount = 0;
+            areaLightCount = 0;
             punctualLightCoarseRangeCount = 0;
             punctualLightCoarseRecordCount = 0;
             mainDirectionalLightIndex = -1;
             mainDirectionalLightEntityId = EntityId.None;
+            areaLights = Array.Empty<AreaLightData>();
             punctualLightViewSpaceCullData = Array.Empty<PunctualLightViewSpaceCullData>();
             punctualLightScreenSpaceBounds = Array.Empty<PunctualLightScreenSpaceBounds>();
             punctualLightBounds = Array.Empty<SFiniteLightBound>();
@@ -1162,6 +1232,12 @@ namespace VividRP.Runtime
                 punctualLightVolumeData = new LightVolumeData[requiredCapacity];
         }
 
+        private void EnsureAreaLightCapacity(int requiredCapacity)
+        {
+            if (requiredCapacity > areaLights.Length)
+                areaLights = new AreaLightData[requiredCapacity];
+        }
+
         private void EnsurePunctualLightCoarseCapacity(int requiredRangeCapacity, int requiredRecordCapacity)
         {
             if (requiredRangeCapacity > punctualLightCoarseRanges.Length)
@@ -1195,6 +1271,21 @@ namespace VividRP.Runtime
             for (var lightIndex = 0; lightIndex < lights.Count; lightIndex++)
             {
                 if (IsPunctualLightSupported(lights[lightIndex]))
+                    count++;
+            }
+
+            return count;
+        }
+
+        private static int CountAreaLights(IReadOnlyList<Light> lights)
+        {
+            if (lights == null || lights.Count == 0)
+                return 0;
+
+            var count = 0;
+            for (var lightIndex = 0; lightIndex < lights.Count; lightIndex++)
+            {
+                if (IsAreaLightSupported(lights[lightIndex]))
                     count++;
             }
 
@@ -1274,6 +1365,31 @@ namespace VividRP.Runtime
             };
         }
 
+        private static AreaLightData CreateAreaLightData(VividLightRenderData trackedLightData)
+        {
+            var range = Mathf.Max(trackedLightData.range, 0.001f);
+            var width = Mathf.Max(trackedLightData.areaSize.x, 0.0f);
+            var height = trackedLightData.lightType == LightType.Tube
+                ? 0.0f
+                : Mathf.Max(trackedLightData.areaSize.y, 0.0f);
+
+            return new AreaLightData
+            {
+                positionWS = trackedLightData.positionWS,
+                rangeAttenuationScale = 1.0f / Mathf.Max(range * range, 1e-6f),
+                color = trackedLightData.color,
+                lightType = GetAreaLightType(trackedLightData.lightType),
+                forwardWS = NormalizeDirection(trackedLightData.forwardWS, Vector3.forward),
+                rangeAttenuationBias = 1.0f,
+                rightWS = NormalizeDirection(trackedLightData.rightWS, Vector3.right),
+                width = width,
+                upWS = NormalizeDirection(trackedLightData.upWS, Vector3.up),
+                height = height,
+                renderingLayerMask = trackedLightData.renderingLayerMask,
+                padding = Vector3.zero,
+            };
+        }
+
         private static PunctualLightCullData CreatePunctualLightCullData(PunctualLightData source)
         {
             GetPunctualLightCullingShapeData(
@@ -1312,6 +1428,7 @@ namespace VividRP.Runtime
         {
             var collectDirectionalLights = (collectionMask & VisibleLightCollectionMask.Directional) != 0;
             var collectPunctualLights = (collectionMask & VisibleLightCollectionMask.Punctual) != 0;
+            var collectAreaLights = (collectionMask & VisibleLightCollectionMask.Area) != 0;
 
             if (collectDirectionalLights)
             {
@@ -1329,6 +1446,9 @@ namespace VividRP.Runtime
                 punctualLightCoarseRecordCount = 0;
             }
 
+            if (collectAreaLights)
+                areaLightCount = 0;
+
             if (!visibleLights.IsCreated || visibleLights.Length == 0)
                 return;
 
@@ -1336,6 +1456,7 @@ namespace VividRP.Runtime
             using var visibleLightRenderDataRecords = new NativeList<VisibleLightRenderDataRecord>(lightCapacity, Allocator.TempJob);
             using var directionalCandidates = new NativeList<DirectionalLightCandidate>(lightCapacity, Allocator.TempJob);
             using var punctualCandidates = new NativeList<PunctualLightCandidate>(lightCapacity, Allocator.TempJob);
+            using var areaCandidates = new NativeList<AreaLightCandidate>(lightCapacity, Allocator.TempJob);
 
             CollectVisibleLightRenderDataRecords(visibleLights, visibleLightRenderDataRecords);
 
@@ -1344,8 +1465,10 @@ namespace VividRP.Runtime
                 visibleLightRenderDataRecords = visibleLightRenderDataRecords.AsArray(),
                 collectDirectionalLights = collectDirectionalLights,
                 collectPunctualLights = collectPunctualLights,
+                collectAreaLights = collectAreaLights,
                 directionalLights = directionalCandidates,
                 punctualLights = punctualCandidates,
+                areaLights = areaCandidates,
             };
 
             buildCandidatesJob.Schedule().Complete();
@@ -1355,6 +1478,9 @@ namespace VividRP.Runtime
 
             if (collectPunctualLights)
                 ApplyPunctualLightCandidates(punctualCandidates);
+
+            if (collectAreaLights)
+                ApplyAreaLightCandidates(areaCandidates);
         }
 
         private void ApplyDirectionalLightCandidates(NativeList<DirectionalLightCandidate> directionalCandidates, Light sunLight)
@@ -1419,6 +1545,16 @@ namespace VividRP.Runtime
             }
         }
 
+        private void ApplyAreaLightCandidates(NativeList<AreaLightCandidate> areaCandidates)
+        {
+            EnsureAreaLightCapacity(areaCandidates.Length);
+
+            areaLightCount = areaCandidates.Length;
+
+            for (var areaIndex = 0; areaIndex < areaLightCount; areaIndex++)
+                areaLights[areaIndex] = areaCandidates[areaIndex].lightData;
+        }
+
         private void CollectVisibleLightRenderDataRecords(
             NativeArray<VisibleLight> visibleLights,
             NativeList<VisibleLightRenderDataRecord> visibleLightRenderDataRecords)
@@ -1457,6 +1593,9 @@ namespace VividRP.Runtime
                 positionWS = new Vector3(localToWorld.m03, localToWorld.m13, localToWorld.m23),
                 range = range,
                 forwardWS = new Vector3(localToWorld.m02, localToWorld.m12, localToWorld.m22),
+                rightWS = NormalizeDirection(new Vector3(localToWorld.m00, localToWorld.m10, localToWorld.m20), Vector3.right),
+                upWS = NormalizeDirection(new Vector3(localToWorld.m01, localToWorld.m11, localToWorld.m21), Vector3.up),
+                areaSize = Vector2.zero,
                 intensity = GetLightIntensity(finalColor),
                 color = new Vector3(finalColor.r, finalColor.g, finalColor.b),
                 shadowStrength = 0.0f,
@@ -1491,6 +1630,14 @@ namespace VividRP.Runtime
             };
         }
 
+        private static AreaLightCandidate CreateAreaLightCandidate(VividLightRenderData trackedLightData)
+        {
+            return new AreaLightCandidate
+            {
+                lightData = CreateAreaLightData(trackedLightData),
+            };
+        }
+
         private static bool IsDirectionalLightSupported(Light light)
         {
             return light != null
@@ -1508,6 +1655,24 @@ namespace VividRP.Runtime
                    && light.range > 0.0f;
         }
 
+        private static bool IsAreaLightSupported(Light light)
+        {
+            if (light == null
+                || !light.enabled
+                || !light.gameObject.activeInHierarchy
+                || light.range <= 0.0f)
+            {
+                return false;
+            }
+
+            return light.type switch
+            {
+                LightType.Rectangle => light.areaSize.x > 0.0f && light.areaSize.y > 0.0f,
+                LightType.Tube => light.areaSize.x > 0.0f,
+                _ => false,
+            };
+        }
+
         private static bool IsPunctualLightSupported(VisibleLight visibleLight)
         {
             return (visibleLight.lightType == LightType.Point || visibleLight.lightType == LightType.Spot)
@@ -1520,9 +1685,27 @@ namespace VividRP.Runtime
                    && trackedLightData.range > 0.0f;
         }
 
+        private static bool IsAreaLightSupported(VividLightRenderData trackedLightData)
+        {
+            return trackedLightData.lightType switch
+            {
+                LightType.Rectangle => trackedLightData.range > 0.0f
+                    && trackedLightData.areaSize.x > 0.0f
+                    && trackedLightData.areaSize.y > 0.0f,
+                LightType.Tube => trackedLightData.range > 0.0f
+                    && trackedLightData.areaSize.x > 0.0f,
+                _ => false,
+            };
+        }
+
         private static uint GetPunctualLightType(LightType lightType)
         {
             return lightType == LightType.Spot ? 1u : 0u;
+        }
+
+        private static uint GetAreaLightType(LightType lightType)
+        {
+            return lightType == LightType.Tube ? 0u : 1u;
         }
 
         private static void GetPunctualLightCullingShapeData(

@@ -1,9 +1,11 @@
 using System.IO;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
@@ -392,6 +394,144 @@ namespace VividRP.Editor.Tests
             }
 
             return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
+        }
+    }
+    public class LightGridPassTests
+    {
+        [Test]
+        public void Prepare_UsesPrecomputedAreaLights_WithoutScanningScene()
+        {
+            var cameraObject = new GameObject("Light Grid Camera");
+            var visibleAreaLightObject = new GameObject("Visible Rectangle Area Light");
+            var sceneOnlyAreaLightObject = new GameObject("Scene-Only Rectangle Area Light");
+            var pass = new LightGridPass();
+
+            try
+            {
+                var camera = cameraObject.AddComponent<Camera>();
+                camera.transform.position = Vector3.zero;
+                camera.transform.rotation = Quaternion.identity;
+                camera.fieldOfView = 60.0f;
+                camera.aspect = 1.0f;
+                camera.nearClipPlane = 0.1f;
+                camera.farClipPlane = 100.0f;
+
+                var visibleAreaLight = visibleAreaLightObject.AddComponent<Light>();
+                visibleAreaLight.type = LightType.Rectangle;
+                visibleAreaLight.range = 12.0f;
+                visibleAreaLight.areaSize = new Vector2(4.0f, 2.0f);
+                visibleAreaLight.intensity = 3.0f;
+                visibleAreaLight.color = Color.white;
+                visibleAreaLightObject.transform.position = new Vector3(0.0f, 0.0f, 6.0f);
+
+                var sceneOnlyAreaLight = sceneOnlyAreaLightObject.AddComponent<Light>();
+                sceneOnlyAreaLight.type = LightType.Rectangle;
+                sceneOnlyAreaLight.range = 12.0f;
+                sceneOnlyAreaLight.areaSize = new Vector2(4.0f, 2.0f);
+                sceneOnlyAreaLight.intensity = 3.0f;
+                sceneOnlyAreaLight.color = Color.white;
+                sceneOnlyAreaLightObject.transform.position = new Vector3(0.5f, 0.0f, 8.0f);
+
+                var frameData = new ContextContainer();
+                var cameraData = frameData.GetOrCreate<VividCameraData>();
+                cameraData.camera = camera;
+                cameraData.pixelWidth = 256;
+                cameraData.pixelHeight = 256;
+                cameraData.actualWidth = 256;
+                cameraData.actualHeight = 256;
+
+                var lightData = frameData.GetOrCreate<VividLightData>();
+                lightData.UpdateAreaLights(new[] { visibleAreaLight });
+
+                pass.Prepare(frameData);
+
+                var clusteredLightingData = frameData.GetOrCreate<VividClusteredLightingData>();
+
+                Assert.That(lightData.hasAreaLights, Is.True);
+                Assert.That(ContainsAreaLight(lightData, visibleAreaLight), Is.True);
+                Assert.That(ContainsAreaLight(lightData, sceneOnlyAreaLight), Is.False);
+                Assert.That(clusteredLightingData.areaLightCount, Is.EqualTo(lightData.areaLightCount));
+                Assert.That(clusteredLightingData.areaLightCount, Is.GreaterThanOrEqualTo(1));
+                Assert.That(clusteredLightingData.areaLights, Is.Not.Null);
+                Assert.That(GetPrivateField<int>(pass, "m_AreaLightCount"), Is.EqualTo(lightData.areaLightCount));
+
+                var clusterCount = GetPrivateField<int>(pass, "m_ClusterCount");
+                var punctualLightIndexCapacity = GetPrivateField<int>(pass, "m_PunctualLightIndexCapacity");
+                var layeredOffsetGraphicsBuffer = GetImportedGraphicsBuffer(clusteredLightingData.layeredOffset);
+                var layeredLightListGraphicsBuffer = GetImportedGraphicsBuffer(clusteredLightingData.layeredLightList);
+                var packedAreaCell = new uint[1];
+                layeredOffsetGraphicsBuffer.GetData(packedAreaCell, 0, clusterCount, 1);
+                UnpackLightCell(packedAreaCell[0], out var areaLightListStart, out var areaLightCount);
+
+                Assert.That(areaLightCount, Is.EqualTo(1u));
+                Assert.That(areaLightListStart, Is.EqualTo((uint)punctualLightIndexCapacity));
+
+                var areaLightIndices = new uint[1];
+                layeredLightListGraphicsBuffer.GetData(areaLightIndices, 0, punctualLightIndexCapacity, 1);
+                Assert.That(areaLightIndices[0], Is.EqualTo(0u));
+            }
+            finally
+            {
+                pass.Dispose();
+                Object.DestroyImmediate(sceneOnlyAreaLightObject);
+                Object.DestroyImmediate(visibleAreaLightObject);
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        private static T GetPrivateField<T>(object instance, string fieldName)
+        {
+            var field = instance.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(field, Is.Not.Null, $"Expected field '{fieldName}' on '{instance.GetType().Name}'.");
+
+            return (T)field.GetValue(instance);
+        }
+
+        private static GraphicsBuffer GetImportedGraphicsBuffer(RenderGraphBuffer buffer)
+        {
+            var importedGraphicsBufferProperty = typeof(RenderGraphBuffer).GetProperty(
+                "ImportedGraphicsBuffer",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(importedGraphicsBufferProperty, Is.Not.Null);
+
+            var importedGraphicsBuffer = (GraphicsBuffer)importedGraphicsBufferProperty.GetValue(buffer);
+            Assert.That(importedGraphicsBuffer, Is.Not.Null);
+            return importedGraphicsBuffer;
+        }
+
+        private static void UnpackLightCell(uint packedValue, out uint offset, out uint count)
+        {
+            offset = packedValue & 67108863u;
+            count = (packedValue >> 26) & 63u;
+        }
+
+        private static bool ContainsAreaLight(VividLightData lightData, Light light)
+        {
+            if (lightData == null || light == null)
+                return false;
+
+            var expectedPosition = light.transform.position;
+            var expectedType = light.type == LightType.Tube ? 0u : 1u;
+
+            for (var lightIndex = 0; lightIndex < lightData.areaLightCount; lightIndex++)
+            {
+                var areaLight = lightData.areaLights[lightIndex];
+                if (Mathf.Abs(areaLight.positionWS.x - expectedPosition.x) > 0.0001f
+                    || Mathf.Abs(areaLight.positionWS.y - expectedPosition.y) > 0.0001f
+                    || Mathf.Abs(areaLight.positionWS.z - expectedPosition.z) > 0.0001f
+                    || Mathf.Abs(areaLight.width - light.areaSize.x) > 0.0001f
+                    || Mathf.Abs(areaLight.height - light.areaSize.y) > 0.0001f
+                    || areaLight.lightType != expectedType)
+                {
+                    continue;
+                }
+
+                return true;
+            }
+
+            return false;
         }
     }
 }

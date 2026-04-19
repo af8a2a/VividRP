@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -43,10 +42,16 @@ namespace VividRP.Runtime
         private int m_DownsampleKernel;
         private int m_UpsampleKernel;
 
-        private RenderTexture[] m_MipDown;
-        private RenderTexture[] m_MipUp;
+        // RTHandle arrays — allocated once, resized on demand, released in Dispose().
+        private readonly RTHandle[] m_MipDownHandles = new RTHandle[k_MaxBloomMipCount];
+        private readonly RTHandle[] m_MipUpHandles   = new RTHandle[k_MaxBloomMipCount];
+
+        // TextureHandles imported each frame in Prepare(); valid only during Record().
+        private readonly TextureHandle[] m_MipDownTH = new TextureHandle[k_MaxBloomMipCount];
+        private readonly TextureHandle[] m_MipUpTH   = new TextureHandle[k_MaxBloomMipCount];
 
         private BloomSettingsData m_Settings;
+        private int m_MipCount;
         private int m_ScreenWidth;
         private int m_ScreenHeight;
 
@@ -66,21 +71,22 @@ namespace VividRP.Runtime
                 m_PrefilterKernel = m_PrefilterCS.FindKernel("KMain");
             if (m_BlurCS != null)
             {
-                m_BlurKernel      = m_BlurCS.FindKernel("KMain");
+                m_BlurKernel       = m_BlurCS.FindKernel("KMain");
                 m_DownsampleKernel = m_BlurCS.FindKernel("KDownsample");
             }
             if (m_UpsampleCS != null)
                 m_UpsampleKernel = m_UpsampleCS.FindKernel("KMain");
-
-            m_MipDown = new RenderTexture[k_MaxBloomMipCount];
-            m_MipUp   = new RenderTexture[k_MaxBloomMipCount];
         }
 
         public override void Dispose()
         {
-            ReleaseMipChain();
-            m_MipDown = null;
-            m_MipUp   = null;
+            for (int i = 0; i < k_MaxBloomMipCount; i++)
+            {
+                m_MipDownHandles[i]?.Release();
+                m_MipDownHandles[i] = null;
+                m_MipUpHandles[i]?.Release();
+                m_MipUpHandles[i] = null;
+            }
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -93,7 +99,6 @@ namespace VividRP.Runtime
             m_ScreenWidth  = ResolveWidth(cameraData);
             m_ScreenHeight = ResolveHeight(cameraData);
 
-            // bloomTexture is a 1x1 placeholder; actual bloom lives in m_MipUp[0] (scratch RT).
             bloomTexture.desc.Width         = 1;
             bloomTexture.desc.Height        = 1;
             bloomTexture.desc.ColorFormat   = GraphicsFormat.R16G16B16A16_SFloat;
@@ -101,15 +106,43 @@ namespace VividRP.Runtime
             bloomTexture.desc.FilterMode    = FilterMode.Bilinear;
             bloomTexture.desc.WrapMode      = TextureWrapMode.Clamp;
             bloomTexture.desc.Name          = "BloomTexture";
+
+            m_MipCount = 0;
+
+            if (!m_Settings.enabled
+                || m_PrefilterCS == null || m_BlurCS == null || m_UpsampleCS == null
+                || m_ScreenWidth <= 0 || m_ScreenHeight <= 0)
+                return;
+
+            float ana    = m_Settings.anamorphic;
+            float scaleW = ana < 0f ? 1f + ana * 0.5f : 1f;
+            float scaleH = ana > 0f ? 1f - ana * 0.5f : 1f;
+            int div      = (int)m_Settings.resolution;
+            int baseW    = Mathf.Max(1, Mathf.FloorToInt(m_ScreenWidth  * scaleW) / div);
+            int baseH    = Mathf.Max(1, Mathf.FloorToInt(m_ScreenHeight * scaleH) / div);
+
+            int maxDim = Mathf.Max(baseW, baseH);
+            m_MipCount = Mathf.Clamp(
+                Mathf.FloorToInt(Mathf.Log(maxDim, 2f)) - 2 - (m_Settings.resolution == BloomResolution.Half ? 0 : 1),
+                1, k_MaxBloomMipCount);
+
+            for (int i = 0; i < m_MipCount; i++)
+            {
+                int mw = Mathf.Max(1, baseW >> i);
+                int mh = Mathf.Max(1, baseH >> i);
+                EnsureMipHandle(ref m_MipDownHandles[i], mw, mh, $"BloomMipDown{i}");
+                EnsureMipHandle(ref m_MipUpHandles[i],   mw, mh, $"BloomMipUp{i}");
+                // Import into RenderGraph so the pass declares read/write access.
+                m_MipDownTH[i] = Import(m_MipDownHandles[i]);
+                m_MipUpTH[i]   = Import(m_MipUpHandles[i]);
+            }
         }
 
         public override void Record(UnsafeGraphContext context)
         {
             var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
 
-            if (!m_Settings.enabled
-                || m_PrefilterCS == null || m_BlurCS == null || m_UpsampleCS == null
-                || source?.innerHandle.IsValid() != true)
+            if (m_MipCount == 0 || source?.innerHandle.IsValid() != true)
             {
                 SetBloomDisabled(cmd);
                 return;
@@ -125,32 +158,7 @@ namespace VividRP.Runtime
         {
             int tw = m_ScreenWidth;
             int th = m_ScreenHeight;
-            if (tw <= 0 || th <= 0) { SetBloomDisabled(cmd); return; }
 
-            // Anamorphic stretch (replaces HDRP camera.anamorphism).
-            float ana = m_Settings.anamorphic;
-            float scaleW = ana < 0f ? 1f + ana * 0.5f : 1f;
-            float scaleH = ana > 0f ? 1f - ana * 0.5f : 1f;
-
-            int div   = (int)m_Settings.resolution;
-            int baseW = Mathf.Max(1, Mathf.FloorToInt(tw * scaleW) / div);
-            int baseH = Mathf.Max(1, Mathf.FloorToInt(th * scaleH) / div);
-
-            int maxDim   = Mathf.Max(baseW, baseH);
-            int mipCount = Mathf.Clamp(
-                Mathf.FloorToInt(Mathf.Log(maxDim, 2f)) - 2 - (m_Settings.resolution == BloomResolution.Half ? 0 : 1),
-                1, k_MaxBloomMipCount);
-
-            // Allocate / reuse scratch mip chain.
-            for (int i = 0; i < mipCount; i++)
-            {
-                int mw = Mathf.Max(1, baseW >> i);
-                int mh = Mathf.Max(1, baseH >> i);
-                EnsureMip(ref m_MipDown[i], mw, mh, $"BloomMipDown{i}");
-                EnsureMip(ref m_MipUp[i],   mw, mh, $"BloomMipUp{i}");
-            }
-
-            // Threshold curve (HDRP PrepareUberBloomParameters).
             float lthresh = Mathf.GammaToLinearSpace(m_Settings.threshold);
             float knee    = lthresh * 0.5f + 1e-5f;
             var threshold = new Vector4(lthresh, lthresh - knee, knee * 2f, 0.25f / knee);
@@ -160,87 +168,64 @@ namespace VividRP.Runtime
 
             // ---- 1. Prefilter: source → mipDown[0] ----
             {
-                int w = m_MipDown[0].width, h = m_MipDown[0].height;
+                int w = m_MipDownHandles[0].rt.width;
+                int h = m_MipDownHandles[0].rt.height;
                 SetKeyword(m_PrefilterCS, "LOW_QUALITY",  !hqPrefilter);
                 SetKeyword(m_PrefilterCS, "HIGH_QUALITY",  hqPrefilter);
-
-                cmd.SetComputeVectorParam(m_PrefilterCS, TexelSizeId,
-                    new Vector4(w, h, 1f / w, 1f / h));
-                cmd.SetComputeVectorParam(m_PrefilterCS, InputTexelSizeId,
-                    new Vector4(tw, th, 1f / tw, 1f / th));
+                cmd.SetComputeVectorParam(m_PrefilterCS, TexelSizeId,      new Vector4(w, h, 1f/w, 1f/h));
+                cmd.SetComputeVectorParam(m_PrefilterCS, InputTexelSizeId, new Vector4(tw, th, 1f/tw, 1f/th));
                 cmd.SetComputeVectorParam(m_PrefilterCS, BloomThresholdId, threshold);
                 cmd.SetComputeTextureParam(m_PrefilterCS, m_PrefilterKernel, InputTextureId,  source.innerHandle);
-                cmd.SetComputeTextureParam(m_PrefilterCS, m_PrefilterKernel, OutputTextureId, m_MipDown[0]);
-                cmd.DispatchCompute(m_PrefilterCS, m_PrefilterKernel,
-                    DivUp(w, 8), DivUp(h, 8), 1);
+                cmd.SetComputeTextureParam(m_PrefilterCS, m_PrefilterKernel, OutputTextureId, m_MipDownTH[0]);
+                cmd.DispatchCompute(m_PrefilterCS, m_PrefilterKernel, DivUp(w, 8), DivUp(h, 8), 1);
             }
 
-            // ---- 2. Downsample chain: mipDown[i] → mipDown[i+1] ----
-            for (int i = 0; i < mipCount - 1; i++)
+            // ---- 2. Downsample chain ----
+            for (int i = 0; i < m_MipCount - 1; i++)
             {
-                var src = m_MipDown[i];
-                var dst = m_MipDown[i + 1];
-                int sw = src.width, sh = src.height;
-                int dw = dst.width, dh = dst.height;
-
-                cmd.SetComputeVectorParam(m_BlurCS, TexelSizeId,
-                    new Vector4(dw, dh, 1f / dw, 1f / dh));
-                cmd.SetComputeVectorParam(m_BlurCS, InputTexelSizeId,
-                    new Vector4(sw, sh, 1f / sw, 1f / sh));
-                cmd.SetComputeTextureParam(m_BlurCS, m_DownsampleKernel, InputTextureId,  src);
-                cmd.SetComputeTextureParam(m_BlurCS, m_DownsampleKernel, OutputTextureId, dst);
-                cmd.DispatchCompute(m_BlurCS, m_DownsampleKernel,
-                    DivUp(dw, 8), DivUp(dh, 8), 1);
+                int sw = m_MipDownHandles[i].rt.width,     sh = m_MipDownHandles[i].rt.height;
+                int dw = m_MipDownHandles[i+1].rt.width,   dh = m_MipDownHandles[i+1].rt.height;
+                cmd.SetComputeVectorParam(m_BlurCS, TexelSizeId,      new Vector4(dw, dh, 1f/dw, 1f/dh));
+                cmd.SetComputeVectorParam(m_BlurCS, InputTexelSizeId, new Vector4(sw, sh, 1f/sw, 1f/sh));
+                cmd.SetComputeTextureParam(m_BlurCS, m_DownsampleKernel, InputTextureId,  m_MipDownTH[i]);
+                cmd.SetComputeTextureParam(m_BlurCS, m_DownsampleKernel, OutputTextureId, m_MipDownTH[i+1]);
+                cmd.DispatchCompute(m_BlurCS, m_DownsampleKernel, DivUp(dw, 8), DivUp(dh, 8), 1);
             }
 
-            // ---- 3. Upsample + scatter: mipDown[last] seeds mipUp[last], then upsample ----
+            // ---- 3. Seed mipUp[last] from mipDown[last] ----
             float scatter = Mathf.Lerp(0.05f, 0.95f, m_Settings.scatter);
-
-            // Seed: copy mipDown[last] into mipUp[last] via blur kernel (no downsample).
             {
-                int last = mipCount - 1;
-                int w = m_MipDown[last].width, h = m_MipDown[last].height;
-                cmd.SetComputeVectorParam(m_BlurCS, TexelSizeId,
-                    new Vector4(w, h, 1f / w, 1f / h));
-                cmd.SetComputeVectorParam(m_BlurCS, InputTexelSizeId,
-                    new Vector4(w, h, 1f / w, 1f / h));
-                cmd.SetComputeTextureParam(m_BlurCS, m_BlurKernel, InputTextureId,  m_MipDown[last]);
-                cmd.SetComputeTextureParam(m_BlurCS, m_BlurKernel, OutputTextureId, m_MipUp[last]);
-                cmd.DispatchCompute(m_BlurCS, m_BlurKernel,
-                    DivUp(w, 8), DivUp(h, 8), 1);
+                int last = m_MipCount - 1;
+                int w = m_MipDownHandles[last].rt.width, h = m_MipDownHandles[last].rt.height;
+                cmd.SetComputeVectorParam(m_BlurCS, TexelSizeId,      new Vector4(w, h, 1f/w, 1f/h));
+                cmd.SetComputeVectorParam(m_BlurCS, InputTexelSizeId, new Vector4(w, h, 1f/w, 1f/h));
+                cmd.SetComputeTextureParam(m_BlurCS, m_BlurKernel, InputTextureId,  m_MipDownTH[last]);
+                cmd.SetComputeTextureParam(m_BlurCS, m_BlurKernel, OutputTextureId, m_MipUpTH[last]);
+                cmd.DispatchCompute(m_BlurCS, m_BlurKernel, DivUp(w, 8), DivUp(h, 8), 1);
             }
 
-            for (int i = mipCount - 2; i >= 0; i--)
+            // ---- 4. Upsample + scatter ----
+            SetKeyword(m_UpsampleCS, "LOW_QUALITY",  !hqFilter);
+            SetKeyword(m_UpsampleCS, "HIGH_QUALITY",  hqFilter);
+            for (int i = m_MipCount - 2; i >= 0; i--)
             {
-                var low  = m_MipUp[i + 1];
-                var high = m_MipDown[i];
-                var dst  = m_MipUp[i];
-                int hw = high.width, hh = high.height;
-                int lw = low.width,  lh = low.height;
-
-                SetKeyword(m_UpsampleCS, "LOW_QUALITY",  !hqFilter);
-                SetKeyword(m_UpsampleCS, "HIGH_QUALITY",  hqFilter);
-
-                cmd.SetComputeVectorParam(m_UpsampleCS, ParamsId,
-                    new Vector4(scatter, 0f, 0f, 0f));
-                cmd.SetComputeVectorParam(m_UpsampleCS, BloomBicubicParamsId,
-                    new Vector4(lw, lh, 1f / lw, 1f / lh));
-                cmd.SetComputeVectorParam(m_UpsampleCS, TexelSizeId,
-                    new Vector4(hw, hh, 1f / hw, 1f / hh));
-                cmd.SetComputeTextureParam(m_UpsampleCS, m_UpsampleKernel, InputLowTextureId,  low);
-                cmd.SetComputeTextureParam(m_UpsampleCS, m_UpsampleKernel, InputHighTextureId, high);
-                cmd.SetComputeTextureParam(m_UpsampleCS, m_UpsampleKernel, OutputTextureId,    dst);
-                cmd.DispatchCompute(m_UpsampleCS, m_UpsampleKernel,
-                    DivUp(hw, 8), DivUp(hh, 8), 1);
+                int hw = m_MipDownHandles[i].rt.width,   hh = m_MipDownHandles[i].rt.height;
+                int lw = m_MipUpHandles[i+1].rt.width,   lh = m_MipUpHandles[i+1].rt.height;
+                cmd.SetComputeVectorParam(m_UpsampleCS, ParamsId,             new Vector4(scatter, 0f, 0f, 0f));
+                cmd.SetComputeVectorParam(m_UpsampleCS, BloomBicubicParamsId, new Vector4(lw, lh, 1f/lw, 1f/lh));
+                cmd.SetComputeVectorParam(m_UpsampleCS, TexelSizeId,          new Vector4(hw, hh, 1f/hw, 1f/hh));
+                cmd.SetComputeTextureParam(m_UpsampleCS, m_UpsampleKernel, InputLowTextureId,  m_MipUpTH[i+1]);
+                cmd.SetComputeTextureParam(m_UpsampleCS, m_UpsampleKernel, InputHighTextureId, m_MipDownTH[i]);
+                cmd.SetComputeTextureParam(m_UpsampleCS, m_UpsampleKernel, OutputTextureId,    m_MipUpTH[i]);
+                cmd.DispatchCompute(m_UpsampleCS, m_UpsampleKernel, DivUp(hw, 8), DivUp(hh, 8), 1);
             }
 
-            // ---- 4. Bind globals for FinalBlitPass ----
-            // intensity: Pow(2, intensity) - 1  (HDRP PrepareUberBloomParameters)
+            // ---- 5. Bind globals for FinalBlitPass ----
             float bloomIntensity = Mathf.Pow(2f, m_Settings.intensity) - 1f;
             bool  hasDirt        = m_Settings.dirtTexture != null && m_Settings.dirtIntensity > 0f;
-            var   tint           = (Vector4)(m_Settings.tint.linear);
+            var   tint           = (Vector4)m_Settings.tint.linear;
 
-            cmd.SetGlobalTexture(VividBloomTextureId, m_MipUp[0]);
+            cmd.SetGlobalTexture(VividBloomTextureId, m_MipUpTH[0]);
             cmd.SetGlobalVector(VividBloomParamsId,
                 new Vector4(bloomIntensity, m_Settings.dirtIntensity, 1f, hasDirt ? 1f : 0f));
             cmd.SetGlobalVector(VividBloomTintId, new Vector4(tint.x, tint.y, tint.z, 1f));
@@ -248,7 +233,6 @@ namespace VividRP.Runtime
             if (hasDirt)
             {
                 cmd.SetGlobalTexture(VividBloomDirtTextureId, m_Settings.dirtTexture);
-                // Aspect-ratio-corrected dirt tiling (HDRP UberPost pattern).
                 float dirtRatio   = (float)m_Settings.dirtTexture.width / m_Settings.dirtTexture.height;
                 float screenRatio = (float)tw / th;
                 Vector4 dirtScale;
@@ -274,40 +258,20 @@ namespace VividRP.Runtime
 
         // -------------------------------------------------------------------------
 
-        private static void EnsureMip(ref RenderTexture rt, int width, int height, string name)
+        private static void EnsureMipHandle(ref RTHandle handle, int width, int height, string name)
         {
-            if (rt != null && rt.IsCreated() && rt.width == width && rt.height == height)
+            if (handle != null && handle.rt != null
+                && handle.rt.width == width && handle.rt.height == height)
                 return;
 
-            ReleaseMipRT(ref rt);
-            rt = new RenderTexture(width, height, 0)
-            {
-                name             = name,
-                graphicsFormat   = GraphicsFormat.R16G16B16A16_SFloat,
-                enableRandomWrite = true,
-                filterMode       = FilterMode.Bilinear,
-                wrapMode         = TextureWrapMode.Clamp,
-                hideFlags        = HideFlags.HideAndDontSave
-            };
-            rt.Create();
-        }
-
-        private static void ReleaseMipRT(ref RenderTexture rt)
-        {
-            if (rt == null) return;
-            rt.Release();
-            CoreUtils.Destroy(rt);
-            rt = null;
-        }
-
-        private void ReleaseMipChain()
-        {
-            if (m_MipDown != null)
-                for (int i = 0; i < m_MipDown.Length; i++)
-                    ReleaseMipRT(ref m_MipDown[i]);
-            if (m_MipUp != null)
-                for (int i = 0; i < m_MipUp.Length; i++)
-                    ReleaseMipRT(ref m_MipUp[i]);
+            handle?.Release();
+            handle = RTHandles.Alloc(
+                width, height,
+                colorFormat: GraphicsFormat.R16G16B16A16_SFloat,
+                enableRandomWrite: true,
+                filterMode: FilterMode.Bilinear,
+                wrapMode: TextureWrapMode.Clamp,
+                name: name);
         }
 
         private static void SetKeyword(ComputeShader cs, string keyword, bool enabled)

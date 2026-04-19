@@ -14,15 +14,19 @@ namespace VividRP.Editor.Tests
             string lightingLoopSource = File.ReadAllText(GetPublicShaderPath("LightingLoop.hlsl"));
 
             Assert.That(lightingSource, Does.Contain("StructuredBuffer<PunctualLightData> _PunctualLights;"));
+            Assert.That(lightingSource, Does.Contain("StructuredBuffer<AreaLightData> _AreaLights;"));
             Assert.That(lightingSource, Does.Not.Contain("ClusteredLighting.hlsl"));
 
             Assert.That(clusteredLightingSource, Does.Contain("struct VividClusteredLightCell"));
             Assert.That(clusteredLightingSource, Does.Contain("LoadPunctualLightCell"));
+            Assert.That(clusteredLightingSource, Does.Contain("LoadAreaLightCell"));
 
             Assert.That(lightingLoopSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl\""));
             Assert.That(lightingLoopSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/ClusteredLighting.hlsl\""));
             Assert.That(lightingLoopSource, Does.Contain("struct VividLightingLoop"));
             Assert.That(lightingLoopSource, Does.Contain("LoadPunctualLight"));
+            Assert.That(lightingLoopSource, Does.Contain("GetAreaLightCount"));
+            Assert.That(lightingLoopSource, Does.Contain("LoadAreaLight"));
         }
 
         private static string GetPublicShaderPath(string fileName)

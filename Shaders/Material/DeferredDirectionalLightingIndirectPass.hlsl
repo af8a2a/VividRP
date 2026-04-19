@@ -82,7 +82,7 @@ float3 EvaluateDeferredDirectionalLighting(VividGBufferSurfaceData surfaceData, 
             aggregateLighting);
     }
 
-    if (HasPunctualLights())
+    if (HasPunctualLights() || HasAreaLights())
     {
         VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
         uint punctualLightCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
@@ -98,7 +98,24 @@ float3 EvaluateDeferredDirectionalLighting(VividGBufferSurfaceData surfaceData, 
                     preLightData,
                     positionWS,
                     viewDirectionWS,
-                    punctualLight),
+                punctualLight),
+                aggregateLighting);
+        }
+
+        uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);
+
+        [loop]
+        for (uint localAreaLightIndex = 0; localAreaLightIndex < areaLightCount; localAreaLightIndex++)
+        {
+            AreaLightData areaLight = VividLightingLoop::LoadAreaLight(lightLoop, localAreaLightIndex);
+            AccumulateDirectLighting(
+                EvaluateBSDF_Area(
+                    surfaceData,
+                    bsdfData,
+                    preLightData,
+                    positionWS,
+                    viewDirectionWS,
+                    areaLight),
                 aggregateLighting);
         }
     }

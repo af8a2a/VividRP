@@ -25,6 +25,9 @@ namespace VividRP.Runtime
         public Vector3 positionWS;
         public float range;
         public Vector3 forwardWS;
+        public Vector3 rightWS;
+        public Vector3 upWS;
+        public Vector2 areaSize;
         public float intensity;
         public Vector3 color;
         public float shadowStrength;
@@ -190,6 +193,9 @@ namespace VividRP.Runtime
                 positionWS = light.transform.position,
                 range = range,
                 forwardWS = light.transform.forward,
+                rightWS = light.transform.right,
+                upWS = light.transform.up,
+                areaSize = ResolveAreaSize(light),
                 intensity = Mathf.Max(light.intensity, 0.0f),
                 color = new Vector3(finalColor.r, finalColor.g, finalColor.b),
                 shadowStrength = light.shadows != LightShadows.None ? light.shadowStrength : 0.0f,
@@ -258,6 +264,9 @@ namespace VividRP.Runtime
                    && Approximately(lhs.positionWS, rhs.positionWS)
                    && Mathf.Approximately(lhs.range, rhs.range)
                    && Approximately(lhs.forwardWS, rhs.forwardWS)
+                   && Approximately(lhs.rightWS, rhs.rightWS)
+                   && Approximately(lhs.upWS, rhs.upWS)
+                   && Approximately(lhs.areaSize, rhs.areaSize)
                    && Mathf.Approximately(lhs.intensity, rhs.intensity)
                    && Approximately(lhs.color, rhs.color)
                    && Mathf.Approximately(lhs.shadowStrength, rhs.shadowStrength)
@@ -274,6 +283,30 @@ namespace VividRP.Runtime
             return Mathf.Approximately(lhs.x, rhs.x)
                    && Mathf.Approximately(lhs.y, rhs.y)
                    && Mathf.Approximately(lhs.z, rhs.z);
+        }
+
+        private static bool Approximately(Vector2 lhs, Vector2 rhs)
+        {
+            return Mathf.Approximately(lhs.x, rhs.x)
+                   && Mathf.Approximately(lhs.y, rhs.y);
+        }
+
+        private static Vector2 ResolveAreaSize(Light light)
+        {
+            if (light == null)
+                return Vector2.zero;
+
+            return light.type switch
+            {
+                LightType.Rectangle => new Vector2(
+                    Mathf.Max(light.areaSize.x, 0.0f),
+                    Mathf.Max(light.areaSize.y, 0.0f)),
+                LightType.Tube => new Vector2(
+                    Mathf.Max(light.areaSize.x, 0.0f),
+                    0.0f),
+                LightType.Disc => Vector2.one * Mathf.Max(light.shapeRadius * 2.0f, 0.0f),
+                _ => Vector2.zero,
+            };
         }
     }
 

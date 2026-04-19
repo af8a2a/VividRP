@@ -5,6 +5,8 @@
 
 #define VIVID_PUNCTUAL_LIGHT_TYPE_POINT 0u
 #define VIVID_PUNCTUAL_LIGHT_TYPE_SPOT  1u
+#define VIVID_AREA_LIGHT_TYPE_TUBE      0u
+#define VIVID_AREA_LIGHT_TYPE_RECTANGLE 1u
 
 struct DirectionalLightData
 {
@@ -28,10 +30,28 @@ struct PunctualLightData
     uint renderingLayerMask;
 };
 
+struct AreaLightData
+{
+    float3 positionWS;
+    float rangeAttenuationScale;
+    float3 color;
+    uint lightType;
+    float3 forwardWS;
+    float rangeAttenuationBias;
+    float3 rightWS;
+    float width;
+    float3 upWS;
+    float height;
+    uint renderingLayerMask;
+    float3 padding;
+};
+
 StructuredBuffer<DirectionalLightData> _DirectionalLights;
 StructuredBuffer<PunctualLightData> _PunctualLights;
+StructuredBuffer<AreaLightData> _AreaLights;
 uint _DirectionalLightCount;
 uint _PunctualLightCount;
+uint _AreaLightCount;
 int _MainDirectionalLightIndex;
 
 bool HasDirectionalLights()
@@ -42,6 +62,11 @@ bool HasDirectionalLights()
 bool HasPunctualLights()
 {
     return _PunctualLightCount > 0;
+}
+
+bool HasAreaLights()
+{
+    return _AreaLightCount > 0;
 }
 
 bool IsDirectionalLightIndexValid(int lightIndex)
@@ -57,6 +82,11 @@ DirectionalLightData GetDirectionalLight(int lightIndex)
 PunctualLightData GetPunctualLight(int lightIndex)
 {
     return _PunctualLights[lightIndex];
+}
+
+AreaLightData GetAreaLight(int lightIndex)
+{
+    return _AreaLights[lightIndex];
 }
 
 DirectionalLightData GetDirectionalLightDefault()

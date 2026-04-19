@@ -7,6 +7,7 @@
 struct VividLightingLoopContext
 {
     VividClusteredLightCell punctualLightCell;
+    VividClusteredLightCell areaLightCell;
 };
 
 struct VividLightingLoop
@@ -15,6 +16,7 @@ struct VividLightingLoop
     {
         VividLightingLoopContext context = (VividLightingLoopContext)0;
         context.punctualLightCell = VividClusteredLighting::LoadPunctualLightCell(pixelCoord, viewDepth);
+        context.areaLightCell = VividClusteredLighting::LoadAreaLightCell(pixelCoord, viewDepth);
         return context;
     }
 
@@ -22,6 +24,7 @@ struct VividLightingLoop
     {
         VividLightingLoopContext context = (VividLightingLoopContext)0;
         context.punctualLightCell = VividClusteredLighting::LoadPunctualLightCell(pixelCoord, positionWS);
+        context.areaLightCell = VividClusteredLighting::LoadAreaLightCell(pixelCoord, positionWS);
         return context;
     }
 
@@ -44,6 +47,27 @@ struct VividLightingLoop
     {
         uint lightIndex = GetPunctualLightIndex(context, localLightIndex);
         return GetPunctualLight(lightIndex);
+    }
+
+    static uint GetAreaLightCount(VividLightingLoopContext context)
+    {
+        return context.areaLightCell.count;
+    }
+
+    static bool HasAreaLights(VividLightingLoopContext context)
+    {
+        return GetAreaLightCount(context) > 0u;
+    }
+
+    static uint GetAreaLightIndex(VividLightingLoopContext context, uint localLightIndex)
+    {
+        return VividClusteredLighting::LoadLightIndex(context.areaLightCell, localLightIndex);
+    }
+
+    static AreaLightData LoadAreaLight(VividLightingLoopContext context, uint localLightIndex)
+    {
+        uint lightIndex = GetAreaLightIndex(context, localLightIndex);
+        return GetAreaLight(lightIndex);
     }
 };
 

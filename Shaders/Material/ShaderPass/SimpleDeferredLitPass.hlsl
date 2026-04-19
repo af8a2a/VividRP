@@ -4,7 +4,7 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/HdrpLitLighting.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl"
 
 TEXTURE2D_X(_GBuffer0);
 TEXTURE2D_X(_GBuffer1);
@@ -89,7 +89,7 @@ VividGBufferSurfaceData LoadVividGBuffer(uint2 pixelCoord)
     return UnpackVividGBufferSurfaceData(rt0, rt1, rt2, rt3, rt4);
 }
 
-float3 EvaluateSimpleDeferredLighting(VividGBufferSurfaceData surfaceData, float3 positionWS)
+float3 EvaluateSimpleDeferredLighting(VividGBufferSurfaceData surfaceData, uint2 pixelCoord, float3 positionWS)
 {
     float3 viewDirectionWS = SafeNormalize(GetDeferredViewDirectionWS(positionWS));
     VividLitBSDFData bsdfData = BuildVividHDRPLitBSDFData(surfaceData);
@@ -108,7 +108,7 @@ float3 EvaluateSimpleDeferredLighting(VividGBufferSurfaceData surfaceData, float
     if (useAmbientFallback)
         aggregateLighting.indirect.diffuse += _AmbientColor.rgb * surfaceData.ambientOcclusion;
 
-    if (!HasDirectionalLights())
+    if (!HasDirectionalLights() && !HasAreaLights())
     {
         float3 lightDirectionWS = GetDeferredLightDirectionWS();
         float3 lightColor = GetDeferredLightColor();
@@ -137,6 +137,27 @@ float3 EvaluateSimpleDeferredLighting(VividGBufferSurfaceData surfaceData, float
             aggregateLighting);
     }
 
+    if (HasAreaLights())
+    {
+        VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
+        uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);
+
+        [loop]
+        for (uint localAreaLightIndex = 0; localAreaLightIndex < areaLightCount; localAreaLightIndex++)
+        {
+            AreaLightData areaLight = VividLightingLoop::LoadAreaLight(lightLoop, localAreaLightIndex);
+            AccumulateDirectLighting(
+                EvaluateBSDF_Area(
+                    surfaceData,
+                    bsdfData,
+                    preLightData,
+                    positionWS,
+                    viewDirectionWS,
+                    areaLight),
+                aggregateLighting);
+        }
+    }
+
     VividLightLoopOutput lightLoopOutput = (VividLightLoopOutput)0;
     PostEvaluateBSDF(surfaceData, bsdfData, preLightData, aggregateLighting, lightLoopOutput);
     return CombineVividLightLoopOutput(lightLoopOutput);
@@ -154,7 +175,7 @@ float4 Frag(Varyings input) : SV_Target
     float2 uv = GetPixelUV(pixelCoord);
     VividGBufferSurfaceData surfaceData = LoadVividGBuffer(pixelCoord);
     float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, _InvViewProjMatrix);
-    float3 lighting = EvaluateSimpleDeferredLighting(surfaceData, positionWS);
+    float3 lighting = EvaluateSimpleDeferredLighting(surfaceData, pixelCoord, positionWS);
     return float4(VividApplyPreExposure(lighting), 1.0);
 }
 

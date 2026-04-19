@@ -197,6 +197,183 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void UpdateAreaLights_CollectsEnabledRectangleAndTubeLights_WhenLightsAreProvided()
+        {
+            var rectangleObject = new GameObject("Rectangle Area Light");
+            var tubeObject = new GameObject("Tube Area Light");
+            var pointObject = new GameObject("Point Light");
+            var disabledRectangleObject = new GameObject("Disabled Rectangle Area Light");
+
+            var rectangleLight = rectangleObject.AddComponent<Light>();
+            var tubeLight = tubeObject.AddComponent<Light>();
+            var pointLight = pointObject.AddComponent<Light>();
+            var disabledRectangleLight = disabledRectangleObject.AddComponent<Light>();
+
+            rectangleLight.type = LightType.Rectangle;
+            rectangleLight.color = Color.white;
+            rectangleLight.intensity = 4.0f;
+            rectangleLight.range = 10.0f;
+            rectangleLight.areaSize = new Vector2(4.0f, 2.0f);
+            rectangleObject.transform.position = new Vector3(1.0f, 2.0f, 3.0f);
+            rectangleObject.transform.rotation = Quaternion.LookRotation(Vector3.forward, Vector3.up);
+
+            tubeLight.type = LightType.Tube;
+            tubeLight.color = Color.cyan;
+            tubeLight.intensity = 3.0f;
+            tubeLight.range = 12.0f;
+            tubeLight.areaSize = new Vector2(3.0f, 1.0f);
+            tubeObject.transform.position = new Vector3(-2.0f, 1.0f, 0.5f);
+            tubeObject.transform.rotation = Quaternion.LookRotation(Vector3.up, Vector3.back);
+
+            pointLight.type = LightType.Point;
+            pointLight.range = 8.0f;
+
+            disabledRectangleLight.type = LightType.Rectangle;
+            disabledRectangleLight.range = 5.0f;
+            disabledRectangleLight.areaSize = new Vector2(2.0f, 1.0f);
+            disabledRectangleLight.enabled = false;
+
+            var lightData = new VividLightData();
+
+            try
+            {
+                var expectedRectangleData = VividLightRenderDatabase.instance.UpdateLightData(rectangleLight);
+                var expectedTubeData = VividLightRenderDatabase.instance.UpdateLightData(tubeLight);
+
+                lightData.UpdateAreaLights(new[] { pointLight, rectangleLight, disabledRectangleLight, tubeLight });
+
+                Assert.That(lightData.areaLightCount, Is.EqualTo(2));
+                Assert.That(lightData.hasAreaLights, Is.True);
+                AssertAreaLight(
+                    lightData.areaLights[0],
+                    rectangleObject.transform.position,
+                    expectedRectangleData.color,
+                    rectangleLight.range,
+                    rectangleObject.transform.forward,
+                    rectangleObject.transform.right,
+                    rectangleObject.transform.up,
+                    rectangleLight.areaSize.x,
+                    rectangleLight.areaSize.y,
+                    1u,
+                    (uint)rectangleLight.renderingLayerMask);
+                AssertAreaLight(
+                    lightData.areaLights[1],
+                    tubeObject.transform.position,
+                    expectedTubeData.color,
+                    tubeLight.range,
+                    tubeObject.transform.forward,
+                    tubeObject.transform.right,
+                    tubeObject.transform.up,
+                    tubeLight.areaSize.x,
+                    0.0f,
+                    0u,
+                    (uint)tubeLight.renderingLayerMask);
+            }
+            finally
+            {
+                Object.DestroyImmediate(rectangleObject);
+                Object.DestroyImmediate(tubeObject);
+                Object.DestroyImmediate(pointObject);
+                Object.DestroyImmediate(disabledRectangleObject);
+            }
+        }
+
+        [Test]
+        public void UpdateAreaLights_CollectsRectangleAndTubeVisibleLights_WhenNativeArrayIsProvided()
+        {
+            var rectangleObject = new GameObject("Visible Rectangle Area Light");
+            var tubeObject = new GameObject("Visible Tube Area Light");
+            var pointObject = new GameObject("Visible Point Light");
+            var visibleLights = new NativeArray<VisibleLight>(3, Allocator.Temp);
+            var lightData = new VividLightData();
+
+            var rectangleLight = rectangleObject.AddComponent<Light>();
+            var tubeLight = tubeObject.AddComponent<Light>();
+            var pointLight = pointObject.AddComponent<Light>();
+
+            rectangleLight.type = LightType.Rectangle;
+            rectangleLight.color = Color.white;
+            rectangleLight.intensity = 4.0f;
+            rectangleLight.range = 10.0f;
+            rectangleLight.areaSize = new Vector2(4.0f, 2.0f);
+            rectangleObject.transform.position = new Vector3(1.0f, 2.0f, 3.0f);
+            rectangleObject.transform.rotation = Quaternion.LookRotation(Vector3.forward, Vector3.up);
+
+            tubeLight.type = LightType.Tube;
+            tubeLight.color = Color.cyan;
+            tubeLight.intensity = 3.0f;
+            tubeLight.range = 12.0f;
+            tubeLight.areaSize = new Vector2(3.0f, 1.0f);
+            tubeObject.transform.position = new Vector3(-2.0f, 1.0f, 0.5f);
+            tubeObject.transform.rotation = Quaternion.LookRotation(Vector3.up, Vector3.back);
+
+            pointLight.type = LightType.Point;
+            pointLight.range = 8.0f;
+            pointObject.transform.position = new Vector3(0.5f, -1.0f, 2.5f);
+
+            try
+            {
+                var expectedRectangleData = VividLightRenderDatabase.instance.UpdateLightData(rectangleLight);
+                var expectedTubeData = VividLightRenderDatabase.instance.UpdateLightData(tubeLight);
+
+                visibleLights[0] = CreateVisibleLight(
+                    LightType.Point,
+                    Color.white,
+                    pointObject.transform.localToWorldMatrix,
+                    range: pointLight.range,
+                    light: pointLight);
+                visibleLights[1] = CreateVisibleLight(
+                    LightType.Rectangle,
+                    Color.white,
+                    rectangleObject.transform.localToWorldMatrix,
+                    range: rectangleLight.range,
+                    light: rectangleLight);
+                visibleLights[2] = CreateVisibleLight(
+                    LightType.Tube,
+                    Color.cyan,
+                    tubeObject.transform.localToWorldMatrix,
+                    range: tubeLight.range,
+                    light: tubeLight);
+
+                lightData.UpdateAreaLights(visibleLights);
+
+                Assert.That(lightData.areaLightCount, Is.EqualTo(2));
+                Assert.That(lightData.hasAreaLights, Is.True);
+                AssertAreaLight(
+                    lightData.areaLights[0],
+                    rectangleObject.transform.position,
+                    expectedRectangleData.color,
+                    rectangleLight.range,
+                    rectangleObject.transform.forward,
+                    rectangleObject.transform.right,
+                    rectangleObject.transform.up,
+                    rectangleLight.areaSize.x,
+                    rectangleLight.areaSize.y,
+                    1u,
+                    (uint)rectangleLight.renderingLayerMask);
+                AssertAreaLight(
+                    lightData.areaLights[1],
+                    tubeObject.transform.position,
+                    expectedTubeData.color,
+                    tubeLight.range,
+                    tubeObject.transform.forward,
+                    tubeObject.transform.right,
+                    tubeObject.transform.up,
+                    tubeLight.areaSize.x,
+                    0.0f,
+                    0u,
+                    (uint)tubeLight.renderingLayerMask);
+            }
+            finally
+            {
+                visibleLights.Dispose();
+                Object.DestroyImmediate(rectangleObject);
+                Object.DestroyImmediate(tubeObject);
+                Object.DestroyImmediate(pointObject);
+            }
+        }
+
+        [Test]
         public void UpdateDirectionalLights_CollectsDirectionalVisibleLights_WhenNativeArrayIsProvided()
         {
             var visibleLights = new NativeArray<VisibleLight>(3, Allocator.Temp);
@@ -892,6 +1069,8 @@ namespace VividRP.Editor.Tests
                 lightData.mainLightIndex = 2;
                 lightData.mainLightEntityId = EntityId.FromULong(42);
                 lightData.punctualLightCount = 3;
+                lightData.areaLightCount = 1;
+                lightData.areaLights = new[] { default(VividLightData.AreaLightData) };
                 lightData.punctualLightViewSpaceCullData = new[] { default(VividLightData.PunctualLightViewSpaceCullData) };
                 lightData.punctualLightScreenSpaceBounds = new[] { default(VividLightData.PunctualLightScreenSpaceBounds) };
                 lightData.punctualLightCoarseRanges = new[] { default(VividLightData.PunctualLightCoarseRange) };
@@ -906,6 +1085,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(lightData.mainLightIndex, Is.EqualTo(-1));
                 Assert.That(lightData.mainLightEntityId, Is.EqualTo(EntityId.None));
                 Assert.That(lightData.punctualLightCount, Is.Zero);
+                Assert.That(lightData.areaLightCount, Is.Zero);
+                Assert.That(lightData.areaLights, Is.Empty);
                 Assert.That(lightData.punctualLightViewSpaceCullData, Is.Empty);
                 Assert.That(lightData.punctualLightScreenSpaceBounds, Is.Empty);
                 Assert.That(lightData.punctualLightCoarseRanges, Is.Empty);
@@ -985,6 +1166,42 @@ namespace VividRP.Editor.Tests
             Assert.That(actual.cullingRadius, Is.EqualTo(expectedRadius).Within(0.0001f));
         }
 
+        private static void AssertAreaLight(
+            VividLightData.AreaLightData actual,
+            Vector3 expectedPosition,
+            Vector3 expectedColor,
+            float expectedRange,
+            Vector3 expectedForward,
+            Vector3 expectedRight,
+            Vector3 expectedUp,
+            float expectedWidth,
+            float expectedHeight,
+            uint expectedType,
+            uint expectedRenderingLayerMask)
+        {
+            Assert.That(actual.positionWS.x, Is.EqualTo(expectedPosition.x).Within(0.0001f));
+            Assert.That(actual.positionWS.y, Is.EqualTo(expectedPosition.y).Within(0.0001f));
+            Assert.That(actual.positionWS.z, Is.EqualTo(expectedPosition.z).Within(0.0001f));
+            Assert.That(actual.color.x, Is.EqualTo(expectedColor.x).Within(0.0001f));
+            Assert.That(actual.color.y, Is.EqualTo(expectedColor.y).Within(0.0001f));
+            Assert.That(actual.color.z, Is.EqualTo(expectedColor.z).Within(0.0001f));
+            Assert.That(actual.rangeAttenuationScale, Is.EqualTo(1.0f / (expectedRange * expectedRange)).Within(0.0001f));
+            Assert.That(actual.rangeAttenuationBias, Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(actual.forwardWS.x, Is.EqualTo(expectedForward.x).Within(0.0001f));
+            Assert.That(actual.forwardWS.y, Is.EqualTo(expectedForward.y).Within(0.0001f));
+            Assert.That(actual.forwardWS.z, Is.EqualTo(expectedForward.z).Within(0.0001f));
+            Assert.That(actual.rightWS.x, Is.EqualTo(expectedRight.x).Within(0.0001f));
+            Assert.That(actual.rightWS.y, Is.EqualTo(expectedRight.y).Within(0.0001f));
+            Assert.That(actual.rightWS.z, Is.EqualTo(expectedRight.z).Within(0.0001f));
+            Assert.That(actual.upWS.x, Is.EqualTo(expectedUp.x).Within(0.0001f));
+            Assert.That(actual.upWS.y, Is.EqualTo(expectedUp.y).Within(0.0001f));
+            Assert.That(actual.upWS.z, Is.EqualTo(expectedUp.z).Within(0.0001f));
+            Assert.That(actual.width, Is.EqualTo(expectedWidth).Within(0.0001f));
+            Assert.That(actual.height, Is.EqualTo(expectedHeight).Within(0.0001f));
+            Assert.That(actual.lightType, Is.EqualTo(expectedType));
+            Assert.That(actual.renderingLayerMask, Is.EqualTo(expectedRenderingLayerMask));
+        }
+
         private static void AssertPunctualLightCoarseRange(
             VividLightData.PunctualLightCoarseRange actual,
             int expectedStartIndex,
@@ -1046,7 +1263,8 @@ namespace VividRP.Editor.Tests
             Matrix4x4 localToWorldMatrix,
             float range = 0.0f,
             float spotAngle = 30.0f,
-            float innerSpotAngle = 30.0f)
+            float innerSpotAngle = 30.0f,
+            Light light = null)
         {
             var visibleLight = default(VisibleLight);
             SetVisibleLightField(ref visibleLight, "m_LightType", lightType);
@@ -1056,6 +1274,12 @@ namespace VividRP.Editor.Tests
             SetVisibleLightField(ref visibleLight, "m_SpotAngle", spotAngle);
             SetVisibleLightField(ref visibleLight, "m_InnerSpotAngle", innerSpotAngle);
             SetVisibleLightField(ref visibleLight, "m_EntityId", EntityId.None);
+
+            if (light != null)
+            {
+                TrySetVisibleLightField(ref visibleLight, "m_Light", light);
+            }
+
             return visibleLight;
         }
 
@@ -1064,6 +1288,17 @@ namespace VividRP.Editor.Tests
             var field = typeof(VisibleLight).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
 
             Assert.That(field, Is.Not.Null, $"Expected VisibleLight to contain field '{fieldName}'.");
+
+            object boxedVisibleLight = visibleLight;
+            field.SetValue(boxedVisibleLight, value);
+            visibleLight = (VisibleLight)boxedVisibleLight;
+        }
+
+        private static void TrySetVisibleLightField<T>(ref VisibleLight visibleLight, string fieldName, T value)
+        {
+            var field = typeof(VisibleLight).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            if (field == null)
+                return;
 
             object boxedVisibleLight = visibleLight;
             field.SetValue(boxedVisibleLight, value);

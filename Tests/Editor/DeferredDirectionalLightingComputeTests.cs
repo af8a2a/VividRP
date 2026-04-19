@@ -29,10 +29,14 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/TileClassification.hlsl\""));
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl\""));
             Assert.That(source, Does.Contain("_DirectionalLightCount"));
-            Assert.That(source, Does.Contain("HasPunctualLights()"));
+            Assert.That(source, Does.Contain("_AreaLightCount"));
+            Assert.That(source, Does.Contain("HasPunctualLights() || HasAreaLights()"));
             Assert.That(source, Does.Contain("VividLightingLoop::Create"));
             Assert.That(source, Does.Contain("VividLightingLoop::GetPunctualLightCount"));
             Assert.That(source, Does.Contain("VividLightingLoop::LoadPunctualLight"));
+            Assert.That(source, Does.Contain("VividLightingLoop::GetAreaLightCount"));
+            Assert.That(source, Does.Contain("VividLightingLoop::LoadAreaLight"));
+            Assert.That(source, Does.Not.Contain("for (uint areaLightIndex = 0; areaLightIndex < _AreaLightCount; areaLightIndex++)"));
             Assert.That(source, Does.Contain("EvaluateDeferredLitLighting"));
             Assert.That(source, Does.Contain("EvaluateDeferredLitLightLoop"));
             Assert.That(source, Does.Contain("GetVividPreLightData"));
@@ -43,6 +47,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EvaluateBSDF_Env("));
             Assert.That(source, Does.Contain("EvaluateBSDF_Directional("));
             Assert.That(source, Does.Contain("EvaluateBSDF_Punctual("));
+            Assert.That(source, Does.Contain("EvaluateBSDF_Area("));
             Assert.That(source, Does.Contain("PostEvaluateBSDF("));
             Assert.That(source, Does.Contain("VividLightLoopOutput lightLoopOutput"));
             Assert.That(source, Does.Contain("SampleDirectionalShadow"));

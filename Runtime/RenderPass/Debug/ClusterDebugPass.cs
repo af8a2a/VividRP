@@ -155,7 +155,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
-            m_ResolvedSettings = ResolveSettings(VividVolumeManagerUtility.GetClusterDebugVolume());
+            m_ResolvedSettings = ResolveSettings(VividRenderingDebugDisplaySettings.Data);
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             var width = ResolveOutputDimension(
@@ -244,14 +244,14 @@ namespace VividRP.Runtime.RenderPass.Core
             m_IsLogBaseBufferEnabled = false;
         }
 
-        internal static ClusterDebugSettingsData ResolveSettings(ClusterDebugVolume volume)
+        internal static ClusterDebugSettingsData ResolveSettings(VividRenderingDebugSettingsData data)
         {
             var tileClusterDebug = TileClusterDebug.None;
             var tileClusterDebugByCategory = TileClusterCategoryDebug.Punctual;
             var clusterDebugMode = ClusterDebugMode.VisualizeOpaque;
             var clusterDebugDistance = 1f;
 
-            if (volume == null || !volume.active)
+            if (data == null)
             {
                 return new ClusterDebugSettingsData(
                     tileClusterDebug,
@@ -260,17 +260,10 @@ namespace VividRP.Runtime.RenderPass.Core
                     clusterDebugDistance);
             }
 
-            if (volume.tileClusterDebug != null && volume.tileClusterDebug.overrideState)
-                tileClusterDebug = volume.tileClusterDebug.value;
-
-            if (volume.tileClusterDebugByCategory != null && volume.tileClusterDebugByCategory.overrideState)
-                tileClusterDebugByCategory = volume.tileClusterDebugByCategory.value;
-
-            if (volume.clusterDebugMode != null && volume.clusterDebugMode.overrideState)
-                clusterDebugMode = volume.clusterDebugMode.value;
-
-            if (volume.clusterDebugDistance != null && volume.clusterDebugDistance.overrideState)
-                clusterDebugDistance = Mathf.Max(0f, volume.clusterDebugDistance.value);
+            tileClusterDebug = data.tileClusterDebug;
+            tileClusterDebugByCategory = data.tileClusterDebugByCategory;
+            clusterDebugMode = data.clusterDebugMode;
+            clusterDebugDistance = Mathf.Max(0f, data.clusterDebugDistance);
 
             return new ClusterDebugSettingsData(
                 tileClusterDebug,

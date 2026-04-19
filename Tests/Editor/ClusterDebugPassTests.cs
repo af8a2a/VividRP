@@ -67,81 +67,65 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ResolveSettings_UsesVolumeOverrides_WhenOverrideStateEnabled()
+        public void ResolveSettings_UsesRenderingDebuggerValues()
         {
-            var volume = ScriptableObject.CreateInstance<ClusterDebugVolume>();
+            var data = new VividRenderingDebugSettingsData
+            {
+                tileClusterDebug = TileClusterDebug.Cluster,
+                tileClusterDebugByCategory = TileClusterCategoryDebug.EnvironmentAndAreaAndPunctual,
+                clusterDebugMode = ClusterDebugMode.VisualizeSlice,
+                clusterDebugDistance = 6f,
+            };
+
+            var settings = ClusterDebugPass.ResolveSettings(data);
+
+            Assert.That(settings.tileClusterDebug, Is.EqualTo(TileClusterDebug.Cluster));
+            Assert.That(settings.tileClusterDebugByCategory, Is.EqualTo(TileClusterCategoryDebug.EnvironmentAndAreaAndPunctual));
+            Assert.That(settings.clusterDebugMode, Is.EqualTo(ClusterDebugMode.VisualizeSlice));
+            Assert.That(settings.clusterDebugDistance, Is.EqualTo(6f));
+        }
+
+        [Test]
+        public void ResolveSettings_UsesDefaults_WhenDebuggerDataIsMissing()
+        {
+            var settings = ClusterDebugPass.ResolveSettings(null);
+
+            Assert.That(settings.tileClusterDebug, Is.EqualTo(TileClusterDebug.None));
+            Assert.That(settings.tileClusterDebugByCategory, Is.EqualTo(TileClusterCategoryDebug.Punctual));
+            Assert.That(settings.clusterDebugMode, Is.EqualTo(ClusterDebugMode.VisualizeOpaque));
+            Assert.That(settings.clusterDebugDistance, Is.EqualTo(1f));
+        }
+
+        [Test]
+        public void Prepare_UsesRenderingDebuggerSettings()
+        {
+            var pass = new ClusterDebugPass();
+            var data = VividRenderingDebugDisplaySettings.Data;
 
             try
             {
-                volume.active = true;
-                volume.tileClusterDebug.overrideState = true;
-                volume.tileClusterDebug.value = TileClusterDebug.Cluster;
-                volume.tileClusterDebugByCategory.overrideState = true;
-                volume.tileClusterDebugByCategory.value = TileClusterCategoryDebug.EnvironmentAndAreaAndPunctual;
-                volume.clusterDebugMode.overrideState = true;
-                volume.clusterDebugMode.value = ClusterDebugMode.VisualizeSlice;
-                volume.clusterDebugDistance.overrideState = true;
-                volume.clusterDebugDistance.value = 6f;
+                data.Reset();
+                data.tileClusterDebug = TileClusterDebug.Cluster;
+                data.tileClusterDebugByCategory = TileClusterCategoryDebug.Environment;
+                data.clusterDebugMode = ClusterDebugMode.VisualizeSlice;
+                data.clusterDebugDistance = 4f;
 
-                var settings = ClusterDebugPass.ResolveSettings(volume);
+                var frameData = new ContextContainer();
+                var cameraData = frameData.GetOrCreate<VividCameraData>();
+                cameraData.actualWidth = 640;
+                cameraData.actualHeight = 360;
+
+                pass.Prepare(frameData);
+                var settings = GetFieldValue<ClusterDebugPass.ClusterDebugSettingsData>(pass, "m_ResolvedSettings");
 
                 Assert.That(settings.tileClusterDebug, Is.EqualTo(TileClusterDebug.Cluster));
-                Assert.That(settings.tileClusterDebugByCategory, Is.EqualTo(TileClusterCategoryDebug.EnvironmentAndAreaAndPunctual));
+                Assert.That(settings.tileClusterDebugByCategory, Is.EqualTo(TileClusterCategoryDebug.Environment));
                 Assert.That(settings.clusterDebugMode, Is.EqualTo(ClusterDebugMode.VisualizeSlice));
-                Assert.That(settings.clusterDebugDistance, Is.EqualTo(6f));
+                Assert.That(settings.clusterDebugDistance, Is.EqualTo(4f));
             }
             finally
             {
-                Object.DestroyImmediate(volume);
-            }
-        }
-
-        [Test]
-        public void ClusterDebugVolume_UsesHdrpLikeDefaults_WhenCreated()
-        {
-            var volume = ScriptableObject.CreateInstance<ClusterDebugVolume>();
-
-            try
-            {
-                Assert.That(volume.tileClusterDebug.value, Is.EqualTo(TileClusterDebug.None));
-                Assert.That(volume.tileClusterDebugByCategory.value, Is.EqualTo(TileClusterCategoryDebug.Punctual));
-                Assert.That(volume.clusterDebugMode.value, Is.EqualTo(ClusterDebugMode.VisualizeOpaque));
-                Assert.That(volume.clusterDebugDistance.value, Is.EqualTo(1f));
-                Assert.That(volume.IsActive(), Is.False);
-            }
-            finally
-            {
-                Object.DestroyImmediate(volume);
-            }
-        }
-
-        [Test]
-        public void GetClusterDebugVolume_ReturnsStackComponent_WhenVolumeManagerIsInitialized()
-        {
-            var profile = ScriptableObject.CreateInstance<VolumeProfile>();
-
-            try
-            {
-                var component = profile.Add<ClusterDebugVolume>(false);
-                component.tileClusterDebug.overrideState = true;
-                component.tileClusterDebug.value = TileClusterDebug.Cluster;
-
-                if (VolumeManager.instance.isInitialized)
-                    VolumeManager.instance.Deinitialize();
-
-                VolumeManager.instance.Initialize(profile);
-
-                var resolvedVolume = VividVolumeManagerUtility.GetClusterDebugVolume();
-
-                Assert.That(resolvedVolume, Is.Not.Null);
-                Assert.That(resolvedVolume.tileClusterDebug.value, Is.EqualTo(TileClusterDebug.Cluster));
-            }
-            finally
-            {
-                if (VolumeManager.instance.isInitialized)
-                    VolumeManager.instance.Deinitialize();
-
-                Object.DestroyImmediate(profile);
+                data.Reset();
             }
         }
 

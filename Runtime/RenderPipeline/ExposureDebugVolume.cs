@@ -14,8 +14,8 @@ namespace VividRP.Runtime
         }
     }
 
+    [Obsolete("ExposureDebugVolume is deprecated. Use the Rendering Debugger instead.")]
     [Serializable]
-    [VolumeComponentMenu("VividRP/Debug/Exposure Debug")]
     public sealed class ExposureDebugVolume : VolumeComponent
     {
         public ExposureDebugModeParameter mode = new(RenderPass.Core.ExposureDebugMode.None);

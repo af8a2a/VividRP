@@ -142,8 +142,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
-            var volume = VividVolumeManagerUtility.GetExposureDebugVolume();
-            m_ResolvedSettings = ResolveSettings(m_DebugExposure, m_Mode, volume);
+            m_ResolvedSettings = ResolveSettings(VividRenderingDebugDisplaySettings.Data);
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             m_Camera = cameraData.camera;
@@ -271,19 +270,16 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ExternalLut = null;
         }
 
-        internal static ExposureDebugSettingsData ResolveSettings(
-            float fallbackDebugExposure,
-            ExposureDebugMode fallbackMode,
-            ExposureDebugVolume volume)
+        internal static ExposureDebugSettingsData ResolveSettings(VividRenderingDebugSettingsData data)
         {
-            var debugExposure = Mathf.Clamp(fallbackDebugExposure, -16f, 16f);
-            var mode = fallbackMode;
+            var debugExposure = 0f;
+            var mode = ExposureDebugMode.None;
             var centerHistogramAroundMiddleGrey = false;
             var showTonemapCurveAlongHistogramView = true;
             var displayMaskOnly = false;
             var displayOnSceneOverlay = true;
 
-            if (volume == null || !volume.active)
+            if (data == null)
             {
                 return new ExposureDebugSettingsData(
                     debugExposure,
@@ -294,23 +290,12 @@ namespace VividRP.Runtime.RenderPass.Core
                     displayOnSceneOverlay);
             }
 
-            if (volume.mode != null && volume.mode.overrideState)
-                mode = volume.mode.value;
-
-            if (volume.debugExposure != null && volume.debugExposure.overrideState)
-                debugExposure = Mathf.Clamp(volume.debugExposure.value, -16f, 16f);
-
-            if (volume.centerHistogramAroundMiddleGrey != null && volume.centerHistogramAroundMiddleGrey.overrideState)
-                centerHistogramAroundMiddleGrey = volume.centerHistogramAroundMiddleGrey.value;
-
-            if (volume.showTonemapCurveAlongHistogramView != null && volume.showTonemapCurveAlongHistogramView.overrideState)
-                showTonemapCurveAlongHistogramView = volume.showTonemapCurveAlongHistogramView.value;
-
-            if (volume.displayMaskOnly != null && volume.displayMaskOnly.overrideState)
-                displayMaskOnly = volume.displayMaskOnly.value;
-
-            if (volume.displayOnSceneOverlay != null && volume.displayOnSceneOverlay.overrideState)
-                displayOnSceneOverlay = volume.displayOnSceneOverlay.value;
+            mode = data.exposureMode;
+            debugExposure = Mathf.Clamp(data.debugExposure, -16f, 16f);
+            centerHistogramAroundMiddleGrey = data.centerHistogramAroundMiddleGrey;
+            showTonemapCurveAlongHistogramView = data.showTonemapCurveAlongHistogramView;
+            displayMaskOnly = data.displayMaskOnly;
+            displayOnSceneOverlay = data.displayOnSceneOverlay;
 
             return new ExposureDebugSettingsData(
                 debugExposure,

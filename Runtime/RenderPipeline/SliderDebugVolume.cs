@@ -3,8 +3,8 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
+    [Obsolete("SliderDebugVolume is deprecated. Use the Rendering Debugger instead.")]
     [Serializable]
-    [VolumeComponentMenu("VividRP/Debug/Slider Debug")]
     public sealed class SliderDebugVolume : VolumeComponent
     {
         public ClampedFloatParameter slider = new(50f, 0f, 100f);

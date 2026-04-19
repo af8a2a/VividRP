@@ -172,14 +172,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
-            var resolvedSettings = ResolveSettings(
-                m_OverlayAmount,
-                m_ArraySlice,
-                m_Exposure,
-                m_Opacity,
-                m_VisualizationMode,
-                m_DepthMode,
-                VividVolumeManagerUtility.GetOverlayDebugVolume());
+            var resolvedSettings = ResolveSettings(VividRenderingDebugDisplaySettings.Data);
 
             m_ResolvedOverlayAmount = resolvedSettings.overlayAmount;
             m_ResolvedArraySlice = resolvedSettings.arraySlice;
@@ -281,44 +274,26 @@ namespace VividRP.Runtime.RenderPass.Core
             m_MaterialPropertyBlock = null;
         }
 
-        internal static OverlayDebugSettingsData ResolveSettings(
-            float fallbackOverlayAmount,
-            float fallbackArraySlice,
-            float fallbackExposure,
-            float fallbackOpacity,
-            OverlayDebugVisualizationMode fallbackVisualizationMode,
-            OverlayDebugDepthMode fallbackDepthMode,
-            OverlayDebugVolume volume)
+        internal static OverlayDebugSettingsData ResolveSettings(VividRenderingDebugSettingsData data)
         {
-            var overlayAmount = Mathf.Clamp01(fallbackOverlayAmount);
-            var arraySlice = Mathf.Max(0, Mathf.RoundToInt(fallbackArraySlice));
-            var exposure = Mathf.Clamp(fallbackExposure, -16f, 16f);
-            var opacity = Mathf.Clamp01(fallbackOpacity);
-            var visualizationMode = fallbackVisualizationMode;
-            var depthMode = fallbackDepthMode;
+            var overlayAmount = 0f;
+            var arraySlice = 0;
+            var exposure = 0f;
+            var opacity = 1f;
+            var visualizationMode = OverlayDebugVisualizationMode.Auto;
+            var depthMode = OverlayDebugDepthMode.Raw;
 
-            if (volume == null || !volume.active)
+            if (data == null)
             {
                 return new OverlayDebugSettingsData(overlayAmount, arraySlice, exposure, opacity, visualizationMode, depthMode);
             }
 
-            if (volume.overlayAmount != null && volume.overlayAmount.overrideState)
-                overlayAmount = Mathf.Clamp01(volume.overlayAmount.value);
-
-            if (volume.arraySlice != null && volume.arraySlice.overrideState)
-                arraySlice = Mathf.Max(0, volume.arraySlice.value);
-
-            if (volume.exposure != null && volume.exposure.overrideState)
-                exposure = Mathf.Clamp(volume.exposure.value, -16f, 16f);
-
-            if (volume.opacity != null && volume.opacity.overrideState)
-                opacity = Mathf.Clamp01(volume.opacity.value);
-
-            if (volume.visualizationMode != null && volume.visualizationMode.overrideState)
-                visualizationMode = volume.visualizationMode.value;
-
-            if (volume.depthMode != null && volume.depthMode.overrideState)
-                depthMode = volume.depthMode.value;
+            overlayAmount = Mathf.Clamp01(data.overlayAmount);
+            arraySlice = Mathf.Max(0, data.arraySlice);
+            exposure = Mathf.Clamp(data.overlayExposure, -16f, 16f);
+            opacity = Mathf.Clamp01(data.overlayOpacity);
+            visualizationMode = data.visualizationMode;
+            depthMode = data.depthMode;
 
             return new OverlayDebugSettingsData(overlayAmount, arraySlice, exposure, opacity, visualizationMode, depthMode);
         }

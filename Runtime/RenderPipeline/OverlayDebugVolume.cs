@@ -25,8 +25,8 @@ namespace VividRP.Runtime
         }
     }
 
+    [Obsolete("OverlayDebugVolume is deprecated. Use the Rendering Debugger instead.")]
     [Serializable]
-    [VolumeComponentMenu("VividRP/Debug/Overlay Debug")]
     public sealed class OverlayDebugVolume : VolumeComponent
     {
         public ClampedFloatParameter overlayAmount = new(0f, 0f, 1f);

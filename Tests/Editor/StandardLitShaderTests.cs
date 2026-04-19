@@ -45,6 +45,7 @@ namespace VividRP.Editor.Tests
         {
             string shaderSource = File.ReadAllText(GetShaderSourcePath());
 
+            Assert.That(shaderSource, Does.Contain("#pragma instancing_options renderinglayer"));
             Assert.That(shaderSource, Does.Contain("#pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2"));
             Assert.That(shaderSource, Does.Contain("#pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2"));
             Assert.That(shaderSource, Does.Contain("#pragma multi_compile _ LIGHTMAP_ON"));

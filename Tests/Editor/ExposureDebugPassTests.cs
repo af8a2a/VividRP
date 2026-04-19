@@ -53,50 +53,32 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ResolveSettings_UsesVolumeOverrides_WhenOverrideStateEnabled()
+        public void ResolveSettings_UsesRenderingDebuggerValues()
         {
-            var volume = ScriptableObject.CreateInstance<ExposureDebugVolume>();
-
-            try
+            var data = new VividRenderingDebugSettingsData
             {
-                volume.mode.overrideState = true;
-                volume.mode.value = ExposureDebugMode.HistogramView;
-                volume.debugExposure.overrideState = true;
-                volume.debugExposure.value = 2f;
-                volume.centerHistogramAroundMiddleGrey.overrideState = true;
-                volume.centerHistogramAroundMiddleGrey.value = true;
-                volume.showTonemapCurveAlongHistogramView.overrideState = true;
-                volume.showTonemapCurveAlongHistogramView.value = false;
-                volume.displayMaskOnly.overrideState = true;
-                volume.displayMaskOnly.value = true;
-                volume.displayOnSceneOverlay.overrideState = true;
-                volume.displayOnSceneOverlay.value = false;
+                exposureMode = ExposureDebugMode.HistogramView,
+                debugExposure = 2f,
+                centerHistogramAroundMiddleGrey = true,
+                showTonemapCurveAlongHistogramView = false,
+                displayMaskOnly = true,
+                displayOnSceneOverlay = false,
+            };
 
-                var settings = ExposureDebugPass.ResolveSettings(
-                    -1f,
-                    ExposureDebugMode.SceneEV100Values,
-                    volume);
+            var settings = ExposureDebugPass.ResolveSettings(data);
 
-                Assert.That(settings.debugExposure, Is.EqualTo(2f));
-                Assert.That(settings.mode, Is.EqualTo(ExposureDebugMode.HistogramView));
-                Assert.That(settings.centerHistogramAroundMiddleGrey, Is.True);
-                Assert.That(settings.showTonemapCurveAlongHistogramView, Is.False);
-                Assert.That(settings.displayMaskOnly, Is.True);
-                Assert.That(settings.displayOnSceneOverlay, Is.False);
-            }
-            finally
-            {
-                Object.DestroyImmediate(volume);
-            }
+            Assert.That(settings.debugExposure, Is.EqualTo(2f));
+            Assert.That(settings.mode, Is.EqualTo(ExposureDebugMode.HistogramView));
+            Assert.That(settings.centerHistogramAroundMiddleGrey, Is.True);
+            Assert.That(settings.showTonemapCurveAlongHistogramView, Is.False);
+            Assert.That(settings.displayMaskOnly, Is.True);
+            Assert.That(settings.displayOnSceneOverlay, Is.False);
         }
 
         [Test]
-        public void ResolveSettings_UsesHdrpStyleDefaults_WhenVolumeMissing()
+        public void ResolveSettings_UsesDefaults_WhenDebuggerDataIsMissing()
         {
-            var settings = ExposureDebugPass.ResolveSettings(
-                0f,
-                ExposureDebugMode.None,
-                null);
+            var settings = ExposureDebugPass.ResolveSettings(null);
 
             Assert.That(settings.debugExposure, Is.EqualTo(0f));
             Assert.That(settings.mode, Is.EqualTo(ExposureDebugMode.None));

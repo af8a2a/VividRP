@@ -56,45 +56,26 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ResolveSettings_UsesVolumeOverrides_WhenOverrideStateEnabled()
+        public void ResolveSettings_UsesRenderingDebuggerValues()
         {
-            var volume = ScriptableObject.CreateInstance<OverlayDebugVolume>();
-
-            try
+            var data = new VividRenderingDebugSettingsData
             {
-                volume.overlayAmount.overrideState = true;
-                volume.overlayAmount.value = 0.75f;
-                volume.arraySlice.overrideState = true;
-                volume.arraySlice.value = 5;
-                volume.exposure.overrideState = true;
-                volume.exposure.value = 2f;
-                volume.opacity.overrideState = true;
-                volume.opacity.value = 0.4f;
-                volume.visualizationMode.overrideState = true;
-                volume.visualizationMode.value = OverlayDebugVisualizationMode.MotionVectors;
-                volume.depthMode.overrideState = true;
-                volume.depthMode.value = OverlayDebugDepthMode.Linear01;
+                overlayAmount = 0.75f,
+                arraySlice = 5,
+                overlayExposure = 2f,
+                overlayOpacity = 0.4f,
+                visualizationMode = OverlayDebugVisualizationMode.MotionVectors,
+                depthMode = OverlayDebugDepthMode.Linear01,
+            };
 
-                var settings = OverlayDebugPass.ResolveSettings(
-                    0.1f,
-                    1f,
-                    -1f,
-                    0.9f,
-                    OverlayDebugVisualizationMode.Color,
-                    OverlayDebugDepthMode.Raw,
-                    volume);
+            var settings = OverlayDebugPass.ResolveSettings(data);
 
-                Assert.That(settings.overlayAmount, Is.EqualTo(0.75f));
-                Assert.That(settings.arraySlice, Is.EqualTo(5));
-                Assert.That(settings.exposure, Is.EqualTo(2f));
-                Assert.That(settings.opacity, Is.EqualTo(0.4f));
-                Assert.That(settings.visualizationMode, Is.EqualTo(OverlayDebugVisualizationMode.MotionVectors));
-                Assert.That(settings.depthMode, Is.EqualTo(OverlayDebugDepthMode.Linear01));
-            }
-            finally
-            {
-                Object.DestroyImmediate(volume);
-            }
+            Assert.That(settings.overlayAmount, Is.EqualTo(0.75f));
+            Assert.That(settings.arraySlice, Is.EqualTo(5));
+            Assert.That(settings.exposure, Is.EqualTo(2f));
+            Assert.That(settings.opacity, Is.EqualTo(0.4f));
+            Assert.That(settings.visualizationMode, Is.EqualTo(OverlayDebugVisualizationMode.MotionVectors));
+            Assert.That(settings.depthMode, Is.EqualTo(OverlayDebugDepthMode.Linear01));
         }
 
         [Test]
@@ -178,33 +159,27 @@ namespace VividRP.Editor.Tests
         [Test]
         public void ResolveSettings_ClampsExposureIntoSupportedRange()
         {
-            var settings = OverlayDebugPass.ResolveSettings(
-                0f,
-                0f,
-                32f,
-                -1f,
-                OverlayDebugVisualizationMode.Auto,
-                OverlayDebugDepthMode.Raw,
-                null);
+            var settings = OverlayDebugPass.ResolveSettings(new VividRenderingDebugSettingsData
+            {
+                overlayExposure = 32f,
+                overlayOpacity = -1f,
+            });
 
             Assert.That(settings.exposure, Is.EqualTo(16f));
             Assert.That(settings.opacity, Is.EqualTo(0f));
         }
 
         [Test]
-        public void ResolveSettings_PreservesFallbackDepthMode_WhenVolumeDoesNotOverrideIt()
+        public void ResolveSettings_UsesDefaults_WhenDebuggerDataIsMissing()
         {
-            var settings = OverlayDebugPass.ResolveSettings(
-                0f,
-                0f,
-                0f,
-                0.25f,
-                OverlayDebugVisualizationMode.Depth,
-                OverlayDebugDepthMode.Linear01,
-                null);
+            var settings = OverlayDebugPass.ResolveSettings(null);
 
-            Assert.That(settings.opacity, Is.EqualTo(0.25f));
-            Assert.That(settings.depthMode, Is.EqualTo(OverlayDebugDepthMode.Linear01));
+            Assert.That(settings.overlayAmount, Is.EqualTo(0f));
+            Assert.That(settings.arraySlice, Is.EqualTo(0));
+            Assert.That(settings.exposure, Is.EqualTo(0f));
+            Assert.That(settings.opacity, Is.EqualTo(1f));
+            Assert.That(settings.visualizationMode, Is.EqualTo(OverlayDebugVisualizationMode.Auto));
+            Assert.That(settings.depthMode, Is.EqualTo(OverlayDebugDepthMode.Raw));
         }
 
         [Test]

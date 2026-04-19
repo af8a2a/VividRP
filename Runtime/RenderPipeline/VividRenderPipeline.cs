@@ -16,6 +16,7 @@ namespace VividRP.Runtime
         private readonly VividRenderPipelineAsset m_Asset;
         private readonly bool m_PreviousUseScriptableRenderPipelineBatching;
         private readonly VividGPUDrivenDebugOverlayRenderer m_GPUDrivenDebugOverlayRenderer;
+        private DebugDisplaySettingsUI m_DebugDisplaySettingsUI;
         private RenderGraph m_RenderGraph;
 
         public VividRenderPipeline(VividRenderPipelineAsset asset)
@@ -36,6 +37,8 @@ namespace VividRP.Runtime
             VividAdaptiveProbeVolumeUtility.Initialize(asset);
 
             m_RenderGraph = new RenderGraph(RenderGraphName);
+            m_DebugDisplaySettingsUI = new DebugDisplaySettingsUI();
+            m_DebugDisplaySettingsUI.RegisterDebug(VividRenderingDebugDisplaySettings.Instance);
         }
 
         protected override void Render(ScriptableRenderContext context, List<Camera> cameras)
@@ -280,6 +283,8 @@ namespace VividRP.Runtime
             SkyManager.Deinitialize();
             LTCAreaLightSystem.Deinitialize();
             VividVolumeManagerUtility.Deinitialize();
+            m_DebugDisplaySettingsUI?.UnregisterDebug();
+            m_DebugDisplaySettingsUI = null;
 
             m_RenderGraph?.Cleanup();
             m_RenderGraph = null;

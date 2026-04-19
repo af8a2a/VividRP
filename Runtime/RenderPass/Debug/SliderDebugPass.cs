@@ -67,7 +67,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             m_Slider = Mathf.Clamp(m_Slider, 0f, 100f);
-            m_ResolvedSlider = ResolveSliderValue(m_Slider, VividVolumeManagerUtility.GetSliderDebugVolume());
+            m_ResolvedSlider = ResolveSliderValue(VividRenderingDebugDisplaySettings.Data);
 
             var cameraData = frameData.Get<VividCameraData>();
             var width = ResolveOutputDimension(
@@ -196,13 +196,12 @@ namespace VividRP.Runtime.RenderPass.Core
             return GraphicsFormat.R8G8B8A8_UNorm;
         }
 
-        internal static float ResolveSliderValue(float fallbackSlider, SliderDebugVolume volume)
+        internal static float ResolveSliderValue(VividRenderingDebugSettingsData data)
         {
-            var slider = Mathf.Clamp(fallbackSlider, 0f, 100f);
-            if (volume == null || !volume.active || volume.slider == null || !volume.slider.overrideState)
-                return slider;
+            if (data == null)
+                return 50f;
 
-            return Mathf.Clamp(volume.slider.value, 0f, 100f);
+            return Mathf.Clamp(data.slider, 0f, 100f);
         }
 
         private static Texture ResolveTexture(RTHandle handle)

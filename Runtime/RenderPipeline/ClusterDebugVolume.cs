@@ -57,8 +57,8 @@ namespace VividRP.Runtime
         }
     }
 
+    [Obsolete("ClusterDebugVolume is deprecated. Use the Rendering Debugger instead.")]
     [Serializable]
-    [VolumeComponentMenu("VividRP/Debug/Cluster Debug")]
     public sealed class ClusterDebugVolume : VolumeComponent
     {
         public TileClusterDebugParameter tileClusterDebug = new(TileClusterDebug.None);

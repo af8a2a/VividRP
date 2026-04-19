@@ -20,9 +20,13 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "ColorGradingTexture", Access = AccessFlags.Read)]
         private RenderGraphTexture colorGradingLut = new();
 
+        [RenderGraphResource(Name = "BloomTexture", Access = AccessFlags.Read)]
+        private RenderGraphTexture bloomTexture = new();
+
         private Material m_Material;
         private ColorGradingSettingsData m_ColorGradingSettings;
         private FilmGrainSettingsData m_FilmGrainSettings;
+        private BloomSettingsData m_BloomSettings;
         private VividExposureData m_ExposureData;
         private RenderTargetIdentifier m_CameraBackBufferTarget;
         private TextureUVOrigin m_CameraBackBufferTextureUVOrigin;
@@ -53,6 +57,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FilmGrainSettings = m_PostProcessingAllowed
                 ? FilmGrainSettingsResolver.Resolve()
                 : FilmGrainSettingsData.CreateDefault();
+            m_BloomSettings = m_PostProcessingAllowed
+                ? BloomSettingsResolver.Resolve()
+                : BloomSettingsData.CreateDefault();
             m_ExposureData = frameData.Get<VividExposureData>();
 
             m_FrameCount = Time.frameCount;
@@ -147,6 +154,23 @@ namespace VividRP.Runtime.RenderPass.Core
             else
             {
                 CoreUtils.SetKeyword(m_Material, "_FILM_GRAIN", false);
+            }
+
+            // Bloom — globals are set by BloomPass; we only need the keyword and dirt uniforms here.
+            if (m_BloomSettings.enabled)
+            {
+                CoreUtils.SetKeyword(m_Material, "_BLOOM", true);
+                CoreUtils.SetKeyword(m_Material, "_BLOOM_HQ", m_BloomSettings.highQualityFiltering);
+                if (m_BloomSettings.dirtTexture != null && m_BloomSettings.dirtIntensity > 0f)
+                    CoreUtils.SetKeyword(m_Material, "_BLOOM_DIRT", true);
+                else
+                    CoreUtils.SetKeyword(m_Material, "_BLOOM_DIRT", false);
+            }
+            else
+            {
+                CoreUtils.SetKeyword(m_Material, "_BLOOM", false);
+                CoreUtils.SetKeyword(m_Material, "_BLOOM_HQ", false);
+                CoreUtils.SetKeyword(m_Material, "_BLOOM_DIRT", false);
             }
 
             var sourceTextureUVOrigin = context.GetTextureUVOrigin(source.innerHandle);

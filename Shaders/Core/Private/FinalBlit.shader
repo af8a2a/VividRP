@@ -16,10 +16,14 @@ Shader "Hidden/VividRP/FinalBlit"
             #pragma vertex Vert
             #pragma fragment Frag
             #pragma multi_compile_local _ _FILM_GRAIN
+            #pragma multi_compile_local _ _BLOOM
+            #pragma multi_compile_local _ _BLOOM_HQ
+            #pragma multi_compile_local _ _BLOOM_DIRT
 
-            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Filtering.hlsl"
 
             TEXTURE2D(_BlitTexture);
             SAMPLER(sampler_BlitTexture);
@@ -31,6 +35,18 @@ Shader "Hidden/VividRP/FinalBlit"
             StructuredBuffer<float4> _VividAutoExposurePreExposureBuffer;
             float4 _VividAutoExposureParams;
 
+            #if defined(_BLOOM)
+            TEXTURE2D(_VividBloomTexture);
+            SAMPLER(sampler_VividBloomTexture);
+            float4 _VividBloomParams;   // x: intensity, y: dirtIntensity, z: bloomEnabled, w: dirtEnabled
+            float4 _VividBloomTint;     // xyz: tint color
+            float4 _VividBloomDirtScale; // xy: scale, zw: offset
+            #if defined(_BLOOM_DIRT)
+            TEXTURE2D(_VividBloomDirtTexture);
+            SAMPLER(sampler_VividBloomDirtTexture);
+            #endif
+            #endif
+
             #if defined(_FILM_GRAIN)
             TEXTURE2D(_VividFilmGrainTexture);
             SAMPLER(sampler_VividFilmGrainTexture);
@@ -38,15 +54,6 @@ Shader "Hidden/VividRP/FinalBlit"
             float4 _VividFilmGrainTexParams; // x: scaleX, y: scaleY, z: offsetX, w: offsetY
             #endif
 
-            float2 DynamicScalingApplyScaleBias(float2 xy, float4 dynamicScalingScaleBias)
-            {
-                return dynamicScalingScaleBias.zw + xy * dynamicScalingScaleBias.xy;
-            }
-
-            float2 DynamicScalingRemoveScaleBias(float2 xy, float4 dynamicScalingScaleBias)
-            {
-                return (xy - dynamicScalingScaleBias.zw) / dynamicScalingScaleBias.xy;
-            }
 
             #define DYNAMIC_SCALING_APPLY_SCALEBIAS(uv)  DynamicScalingApplyScaleBias(uv, _BlitScaleBias)
             #define DYNAMIC_SCALING_REMOVE_SCALEBIAS(uv) DynamicScalingRemoveScaleBias(uv, _BlitScaleBias)
@@ -104,6 +111,33 @@ Shader "Hidden/VividRP/FinalBlit"
                     float response = 1.0 - saturate(lum) * _VividFilmGrainParams.y;
 
                     postProcessed += postProcessed * grain * _VividFilmGrainParams.x * response;
+                }
+                #endif
+
+                #if defined(_BLOOM)
+                {
+                    #if defined(_BLOOM_HQ)
+                    float4 bloomBicubicParams = float4(
+                        _ScreenParams.xy,
+                        1.0 / _ScreenParams.x,
+                        1.0 / _ScreenParams.y);
+                    float2 maxCoord = 1.0 - bloomBicubicParams.zw;
+                    float3 bloom = SampleTexture2DBicubic(
+                        TEXTURE2D_ARGS(_VividBloomTexture, sampler_VividBloomTexture),
+                        input.uv, bloomBicubicParams, maxCoord, 0).xyz;
+                    #else
+                    float3 bloom = SAMPLE_TEXTURE2D(_VividBloomTexture, sampler_VividBloomTexture, input.uv).xyz;
+                    #endif
+
+                    bloom *= _VividBloomTint.xyz * _VividBloomParams.x;
+
+                    #if defined(_BLOOM_DIRT)
+                    float2 dirtUV = input.uv * _VividBloomDirtScale.xy + _VividBloomDirtScale.zw;
+                    float3 dirt = SAMPLE_TEXTURE2D(_VividBloomDirtTexture, sampler_VividBloomDirtTexture, dirtUV).xyz;
+                    bloom += dirt * _VividBloomParams.y;
+                    #endif
+
+                    postProcessed += bloom;
                 }
                 #endif
 

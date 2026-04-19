@@ -1,0 +1,45 @@
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Filtering.hlsl"
+
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+
+#pragma kernel KMain
+
+#pragma multi_compile LOW_QUALITY HIGH_QUALITY
+
+TEXTURE2D(_InputLowTexture);
+TEXTURE2D(_InputHighTexture);
+SAMPLER(sampler_LinearClamp);
+
+RW_TEXTURE2D(float4, _OutputTexture);
+
+CBUFFER_START(cb0)
+    float4 _Params;             // x: scatter, yzw: unused
+    float4 _BloomBicubicParams; // xy: low src size, zw: low src texel size
+    float4 _TexelSize;          // xy: high src size (= output size), zw: high src texel size
+CBUFFER_END
+
+#define Scatter _Params.x
+
+#define GROUP_SIZE 8
+
+[numthreads(GROUP_SIZE, GROUP_SIZE, 1)]
+void KMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    float2 uv = (float2(dispatchThreadId.xy) + 0.5) * _TexelSize.zw;
+    uint2 highCoord = min(dispatchThreadId.xy, uint2(_TexelSize.xy) - 1u);
+    float3 highRes = _InputHighTexture[highCoord].xyz;
+
+#if LOW_QUALITY
+    float3 lowRes = SAMPLE_TEXTURE2D_LOD(_InputLowTexture, sampler_LinearClamp, uv, 0.0).xyz;
+#else
+    float2 maxCoord = 1.0 - _BloomBicubicParams.zw;
+    float3 lowRes = SampleTexture2DBicubic(TEXTURE2D_ARGS(_InputLowTexture, sampler_LinearClamp),
+                                           uv, _BloomBicubicParams, maxCoord, 0).xyz;
+#endif
+
+    float3 output = lerp(highRes, lowRes, Scatter);
+    output *= all(dispatchThreadId.xy <= uint2(_TexelSize.xy));
+
+    _OutputTexture[dispatchThreadId.xy] = float4(output, 1.0);
+}

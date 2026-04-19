@@ -9,6 +9,9 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class AutoExposurePass : RenderPassNodeData { }
 
     [Serializable]
+    internal sealed class BloomPass : RenderPassNodeData { }
+
+    [Serializable]
     internal sealed class CSMShadowPass : RenderPassNodeData { }
 
     [Serializable]

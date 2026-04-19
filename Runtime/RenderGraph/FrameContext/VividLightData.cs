@@ -54,7 +54,8 @@ namespace VividRP.Runtime
             public float height;
             public uint renderingLayerMask;
             public float range;
-            public Vector2 padding;
+            public float cosBarnDoorAngle;
+            public float barnDoorLength;
 
             internal static int Stride => Marshal.SizeOf<AreaLightData>();
         }

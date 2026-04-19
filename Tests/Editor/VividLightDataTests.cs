@@ -9,6 +9,8 @@ namespace VividRP.Editor.Tests
 {
     public class VividLightDataTests
     {
+        private static readonly MethodInfo s_CreateAreaLightDataMethod =
+            typeof(VividLightData).GetMethod("CreateAreaLightData", BindingFlags.Static | BindingFlags.NonPublic);
 
         [Test]
         public void UpdatePunctualLightClusteredCullData_BuildsSphereBoundsAndVolume_ForPointLight()
@@ -228,6 +230,44 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void CreateAreaLightData_PacksBarnDoorParameters_ForRectangleLight()
+        {
+            var trackedLightData = new VividLightRenderData
+            {
+                positionWS = new Vector3(1.0f, 2.0f, 3.0f),
+                range = 6.0f,
+                color = new Vector3(4.0f, 5.0f, 6.0f),
+                lightType = LightType.Rectangle,
+                forwardWS = Vector3.forward,
+                rightWS = Vector3.right,
+                upWS = Vector3.up,
+                areaSize = new Vector2(3.0f, 2.0f),
+                barnDoorAngle = 45.0f,
+                barnDoorLength = 0.35f,
+                renderingLayerMask = 11u,
+            };
+
+            Assert.That(s_CreateAreaLightDataMethod, Is.Not.Null);
+
+            var areaLight = (VividLightData.AreaLightData)s_CreateAreaLightDataMethod.Invoke(null, new object[] { trackedLightData });
+
+            AssertAreaLight(
+                areaLight,
+                trackedLightData.positionWS,
+                trackedLightData.color,
+                trackedLightData.range,
+                trackedLightData.forwardWS,
+                trackedLightData.rightWS,
+                trackedLightData.upWS,
+                trackedLightData.areaSize.x,
+                trackedLightData.areaSize.y,
+                1u,
+                trackedLightData.renderingLayerMask,
+                Mathf.Cos(45.0f * Mathf.Deg2Rad),
+                0.35f);
+        }
+
         private static void AssertDirectionalLight(
             VividLightData.DirectionalLightData actual,
             Vector3 expectedDirection,
@@ -288,7 +328,9 @@ namespace VividRP.Editor.Tests
             float expectedWidth,
             float expectedHeight,
             uint expectedType,
-            uint expectedRenderingLayerMask)
+            uint expectedRenderingLayerMask,
+            float expectedCosBarnDoorAngle = 0.0f,
+            float expectedBarnDoorLength = 0.0f)
         {
             AssertVector3(actual.positionWS, expectedPosition);
             AssertVector3(actual.color, expectedColor);
@@ -302,6 +344,8 @@ namespace VividRP.Editor.Tests
             Assert.That(actual.range, Is.EqualTo(expectedRange).Within(0.0001f));
             Assert.That(actual.lightType, Is.EqualTo(expectedType));
             Assert.That(actual.renderingLayerMask, Is.EqualTo(expectedRenderingLayerMask));
+            Assert.That(actual.cosBarnDoorAngle, Is.EqualTo(expectedCosBarnDoorAngle).Within(0.0001f));
+            Assert.That(actual.barnDoorLength, Is.EqualTo(expectedBarnDoorLength).Within(0.0001f));
         }
 
         private static float GetSpotOuterCos(VividLightData.PunctualLightData punctualLight)

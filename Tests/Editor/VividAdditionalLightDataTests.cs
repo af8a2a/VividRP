@@ -133,6 +133,8 @@ namespace VividRP.Editor.Tests
             Assert.That(serializedLight.dirLightPCSSMinFilterMaxAngularDiameter, Is.Not.Null);
             Assert.That(serializedLight.dirLightPCSSBlockerSearchAngularDiameter, Is.Not.Null);
             Assert.That(serializedLight.dirLightPCSSBlockerSamplingClumpExponent, Is.Not.Null);
+            Assert.That(serializedLight.barnDoorAngle, Is.Not.Null);
+            Assert.That(serializedLight.barnDoorLength, Is.Not.Null);
             Assert.That(serializedLight.interactsWithSky, Is.Not.Null);
             Assert.That(serializedLight.angularDiameter, Is.Not.Null);
             Assert.That(serializedLight.diameterMultiplierMode, Is.Not.Null);
@@ -218,6 +220,25 @@ namespace VividRP.Editor.Tests
             Assert.That(trackedLightData.renderingLayerMask, Is.EqualTo(9u));
             Assert.That((trackedLightData.flags & VividLightRenderDataFlags.UsePipelineSettings) != 0, Is.False);
             Assert.That((trackedLightData.flags & VividLightRenderDataFlags.CustomShadowLayers) != 0, Is.True);
+        }
+
+        [Test]
+        public void AdditionalLightDataPropertySetters_UpdateTrackedLightRenderData_WhenAreaBarnDoorChanges()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Rectangle;
+            light.areaSize = new Vector2(3.0f, 1.5f);
+
+            var additionalData = light.GetVividAdditionalLightData();
+
+            VividLightRenderDatabase.instance.Clear();
+
+            additionalData.barnDoorAngle = 42.0f;
+            additionalData.barnDoorLength = 0.2f;
+
+            Assert.That(VividLightRenderDatabase.instance.TryGetLightData(light, out var trackedLightData), Is.True);
+            Assert.That(trackedLightData.barnDoorAngle, Is.EqualTo(42.0f).Within(0.0001f));
+            Assert.That(trackedLightData.barnDoorLength, Is.EqualTo(0.2f).Within(0.0001f));
         }
 
         [Test]
@@ -399,6 +420,32 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void AreaLightSettings_DefaultToExpectedBarnDoorValues_OnRectangleLights()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Rectangle;
+
+            var additionalData = light.GetVividAdditionalLightData();
+
+            Assert.That(additionalData.barnDoorAngle, Is.EqualTo(VividAdditionalLightData.DefaultBarnDoorAngle));
+            Assert.That(additionalData.barnDoorLength, Is.EqualTo(VividAdditionalLightData.DefaultBarnDoorLength));
+        }
+
+        [Test]
+        public void AreaLightSettings_ClampBarnDoorToHdrpRange()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Rectangle;
+
+            var additionalData = light.GetVividAdditionalLightData();
+            additionalData.barnDoorAngle = 120.0f;
+            additionalData.barnDoorLength = -1.0f;
+
+            Assert.That(additionalData.barnDoorAngle, Is.EqualTo(90.0f));
+            Assert.That(additionalData.barnDoorLength, Is.EqualTo(0.0f));
+        }
+
+        [Test]
         public void CelestialBodySettings_ClampAngularDiameterToHdrpRange()
         {
             var light = m_GameObject.AddComponent<Light>();
@@ -572,6 +619,50 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("The Sun Light needs to be a directional light."));
             Assert.That(source, Does.Contain("EditorGUILayout.PropertyField(m_SerializedLight.flareFalloff, s_FlareFalloffLabel);"));
             Assert.That(source, Does.Contain("EditorGUILayout.PropertyField(m_SerializedLight.flareTint, s_FlareTintLabel);"));
+        }
+
+        [Test]
+        public void VividLightEditor_ShowsAreaBarnDoorControls_OnlyForRectangleLights()
+        {
+            var rectangleLight = m_GameObject.AddComponent<Light>();
+            rectangleLight.type = LightType.Rectangle;
+
+            var serializedRectangleLight = new VividSerializedLight(new SerializedObject(rectangleLight));
+
+            Assert.That(
+                VividLightEditor.ShouldShowAreaBarnDoorControls(serializedRectangleLight),
+                Is.True);
+
+            var tubeLightObject = new GameObject("Vivid Tube Light Barn Door Test");
+
+            try
+            {
+                var tubeLight = tubeLightObject.AddComponent<Light>();
+                tubeLight.type = LightType.Tube;
+
+                var serializedTubeLight = new VividSerializedLight(new SerializedObject(tubeLight));
+
+                Assert.That(
+                    VividLightEditor.ShouldShowAreaBarnDoorControls(serializedTubeLight),
+                    Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(tubeLightObject);
+            }
+        }
+
+        [Test]
+        public void VividLightEditor_UsesHdrpStyleAreaBarnDoorPanel()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Editor", "ComponentEditor", "VividLightEditor.cs"));
+
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Barn Door\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Angle\""));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Length\""));
+            Assert.That(source, Does.Contain("DrawAreaBarnDoorInspector();"));
+            Assert.That(source, Does.Contain("m_SerializedLight.barnDoorAngle"));
+            Assert.That(source, Does.Contain("m_SerializedLight.barnDoorLength"));
         }
 
         [Test]

@@ -48,6 +48,7 @@ namespace VividRP.Runtime
             var height = trackedLightData.lightType == LightType.Tube
                 ? 0.0f
                 : Mathf.Max(trackedLightData.areaSize.y, 0.0f);
+            var barnDoorAngleRadians = Mathf.Deg2Rad * Mathf.Clamp(trackedLightData.barnDoorAngle, 0.0f, 90.0f);
 
             return new AreaLightData
             {
@@ -63,7 +64,8 @@ namespace VividRP.Runtime
                 height = height,
                 renderingLayerMask = trackedLightData.renderingLayerMask,
                 range = range,
-                padding = Vector2.zero,
+                cosBarnDoorAngle = Mathf.Cos(barnDoorAngleRadians),
+                barnDoorLength = Mathf.Max(trackedLightData.barnDoorLength, 0.0f),
             };
         }
 

@@ -32,6 +32,8 @@ namespace VividRP.Editor
         internal SerializedProperty dirLightPCSSMinFilterMaxAngularDiameter { get; }
         internal SerializedProperty dirLightPCSSBlockerSearchAngularDiameter { get; }
         internal SerializedProperty dirLightPCSSBlockerSamplingClumpExponent { get; }
+        internal SerializedProperty barnDoorAngle { get; }
+        internal SerializedProperty barnDoorLength { get; }
         internal SerializedProperty interactsWithSky { get; }
         internal SerializedProperty angularDiameter { get; }
         internal SerializedProperty diameterMultiplierMode { get; }
@@ -96,6 +98,8 @@ namespace VividRP.Editor
             dirLightPCSSMinFilterMaxAngularDiameter = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSMinFilterMaxAngularDiameter");
             dirLightPCSSBlockerSearchAngularDiameter = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSBlockerSearchAngularDiameter");
             dirLightPCSSBlockerSamplingClumpExponent = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSBlockerSamplingClumpExponent");
+            barnDoorAngle = serializedAdditionalDataObject.FindProperty("m_BarnDoorAngle");
+            barnDoorLength = serializedAdditionalDataObject.FindProperty("m_BarnDoorLength");
             interactsWithSky = serializedAdditionalDataObject.FindProperty("m_InteractsWithSky");
             angularDiameter = serializedAdditionalDataObject.FindProperty("m_AngularDiameter");
             diameterMultiplierMode = serializedAdditionalDataObject.FindProperty("m_DiameterMultiplierMode");

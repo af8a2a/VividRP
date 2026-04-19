@@ -38,6 +38,9 @@ namespace VividRP.Editor
         private static readonly GUIContent s_RayTracedShadowRayBiasLabel = EditorGUIUtility.TrTextContent("Ray Bias");
         private static readonly GUIContent s_RayTracedShadowDistantRayBiasLabel = EditorGUIUtility.TrTextContent("Distant Ray Bias");
         private static readonly GUIContent s_RayTracedShadowSunAngularDiameterLabel = EditorGUIUtility.TrTextContent("Sun Angular Diameter (Unused in MVP)");
+        private static readonly GUIContent s_BarnDoorLabel = EditorGUIUtility.TrTextContent("Barn Door");
+        private static readonly GUIContent s_BarnDoorAngleLabel = EditorGUIUtility.TrTextContent("Angle", "Angle in degrees of the rectangular area light barn doors.");
+        private static readonly GUIContent s_BarnDoorLengthLabel = EditorGUIUtility.TrTextContent("Length", "Length of the rectangular area light barn door blades.");
         private static readonly GUIContent s_CelestialBodyLabel = EditorGUIUtility.TrTextContent("Celestial Body");
         private static readonly GUIContent s_InteractsWithSkyLabel = EditorGUIUtility.TrTextContent("Affect Physically Based Sky", "Check this option to make the light and the Physically Based sky affect one another.");
         private static readonly GUIContent s_AngularDiameterLabel = EditorGUIUtility.TrTextContent("Angular Diameter", "Angular diameter of the emissive celestial body represented by the light as seen from the camera (in degrees). Used to render the sun/moon disk and affects the sharpness of shadows.");
@@ -152,6 +155,9 @@ namespace VividRP.Editor
                     EditorGUILayout.PropertyField(m_SerializedLight.angularDiameter, s_AngularDiameterLabel);
                     break;
                 case LightType.Rectangle:
+                    settings.DrawArea();
+                    DrawAreaBarnDoorInspector();
+                    break;
                 case LightType.Disc:
                 case LightType.Tube:
                     settings.DrawArea();
@@ -293,6 +299,17 @@ namespace VividRP.Editor
             EditorGUI.showMixedValue = oldMixedValue;
         }
 
+        private void DrawAreaBarnDoorInspector()
+        {
+            if (!ShouldShowAreaBarnDoorControls(m_SerializedLight))
+                return;
+
+            EditorGUILayout.Space(2.0f);
+            EditorGUILayout.LabelField(s_BarnDoorLabel, EditorStyles.miniBoldLabel);
+            EditorGUILayout.Slider(m_SerializedLight.barnDoorAngle, 0.0f, 90.0f, s_BarnDoorAngleLabel);
+            EditorGUILayout.PropertyField(m_SerializedLight.barnDoorLength, s_BarnDoorLengthLabel);
+        }
+
         private void DrawDirectionalPCSSFields()
         {
             if (!ShouldShowDirectionalPCSSControls(m_SerializedLight))
@@ -338,6 +355,15 @@ namespace VividRP.Editor
                 && serializedLight?.screenSpaceShadowQuality != null
                 && (serializedLight.screenSpaceShadowQuality.hasMultipleDifferentValues
                     || serializedLight.screenSpaceShadowQuality.intValue == (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh);
+        }
+
+        internal static bool ShouldShowAreaBarnDoorControls(VividSerializedLight serializedLight)
+        {
+            return serializedLight != null
+                && serializedLight.settings != null
+                && !serializedLight.settings.lightType.hasMultipleDifferentValues
+                && serializedLight.settings.light != null
+                && serializedLight.settings.light.type == LightType.Rectangle;
         }
 
         internal static bool ShouldShowDirectionalShadowBiasControls(VividSerializedLight serializedLight)

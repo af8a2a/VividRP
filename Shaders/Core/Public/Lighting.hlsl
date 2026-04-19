@@ -44,7 +44,8 @@ struct AreaLightData
     float height;
     uint renderingLayerMask;
     float range;
-    float2 padding;
+    float cosBarnDoorAngle;
+    float barnDoorLength;
 };
 
 StructuredBuffer<DirectionalLightData> _DirectionalLights;

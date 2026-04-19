@@ -43,6 +43,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EvaluateDirectionalLight"));
             Assert.That(source, Does.Contain("EvaluatePunctualLight"));
             Assert.That(source, Does.Contain("EvaluateAreaLightIntensity("));
+            Assert.That(source, Does.Contain("ApplyRectangularAreaLightBarnDoor("));
+            Assert.That(source, Does.Contain("areaLight.cosBarnDoorAngle"));
+            Assert.That(source, Does.Contain("areaLight.barnDoorLength"));
             Assert.That(source, Does.Contain("AccumulateDirectLighting("));
             Assert.That(source, Does.Contain("FinalizeVividSpecularLighting("));
             Assert.That(source, Does.Contain("surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC"));
@@ -51,6 +54,16 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("float rangeAttenuation = saturate(1.0 - distanceSquared * punctualLight.inverseRangeSquared);"));
             Assert.That(source, Does.Contain("PillowWindowing("));
             Assert.That(source, Does.Contain("SampleLtcMatrix("));
+        }
+
+        [Test]
+        public void LightingInclude_PacksAreaBarnDoorParameters()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "Lighting.hlsl"));
+
+            Assert.That(source, Does.Contain("float cosBarnDoorAngle;"));
+            Assert.That(source, Does.Contain("float barnDoorLength;"));
+            Assert.That(source, Does.Not.Contain("float2 padding;"));
         }
 
         [Test]

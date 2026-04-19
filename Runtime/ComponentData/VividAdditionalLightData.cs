@@ -28,6 +28,8 @@ namespace VividRP.Runtime
         public Vector3 rightWS;
         public Vector3 upWS;
         public Vector2 areaSize;
+        public float barnDoorAngle;
+        public float barnDoorLength;
         public float intensity;
         public Vector3 color;
         public float shadowStrength;
@@ -196,6 +198,12 @@ namespace VividRP.Runtime
                 rightWS = light.transform.right,
                 upWS = light.transform.up,
                 areaSize = ResolveAreaSize(light),
+                barnDoorAngle = additionalLightData != null
+                    ? additionalLightData.barnDoorAngle
+                    : VividAdditionalLightData.DefaultBarnDoorAngle,
+                barnDoorLength = additionalLightData != null
+                    ? additionalLightData.barnDoorLength
+                    : VividAdditionalLightData.DefaultBarnDoorLength,
                 intensity = Mathf.Max(light.intensity, 0.0f),
                 color = new Vector3(finalColor.r, finalColor.g, finalColor.b),
                 shadowStrength = light.shadows != LightShadows.None ? light.shadowStrength : 0.0f,
@@ -267,6 +275,8 @@ namespace VividRP.Runtime
                    && Approximately(lhs.rightWS, rhs.rightWS)
                    && Approximately(lhs.upWS, rhs.upWS)
                    && Approximately(lhs.areaSize, rhs.areaSize)
+                   && Mathf.Approximately(lhs.barnDoorAngle, rhs.barnDoorAngle)
+                   && Mathf.Approximately(lhs.barnDoorLength, rhs.barnDoorLength)
                    && Mathf.Approximately(lhs.intensity, rhs.intensity)
                    && Approximately(lhs.color, rhs.color)
                    && Mathf.Approximately(lhs.shadowStrength, rhs.shadowStrength)
@@ -377,6 +387,8 @@ namespace VividRP.Runtime
         internal const float MinDirLightPCSSBlockerSamplingClumpExponent = 1.0f;
         internal const float MaxDirLightPCSSBlockerSamplingClumpExponent = 6.0f;
         internal const float DefaultDirLightPCSSBlockerSamplingClumpExponent = 2.0f;
+        internal const float DefaultBarnDoorAngle = 90.0f;
+        internal const float DefaultBarnDoorLength = 0.05f;
         internal const float DefaultCelestialBodyAngularDiameter = 0.5f;
         internal const float DefaultCelestialBodyDistance = 149597870700.0f;
         internal const float DefaultManualSunIntensity = 130000.0f;
@@ -443,6 +455,12 @@ namespace VividRP.Runtime
 
         [SerializeField, Range(MinDirLightPCSSBlockerSamplingClumpExponent, MaxDirLightPCSSBlockerSamplingClumpExponent)]
         private float m_DirLightPCSSBlockerSamplingClumpExponent = DefaultDirLightPCSSBlockerSamplingClumpExponent;
+
+        [SerializeField, Range(0.0f, 90.0f)]
+        private float m_BarnDoorAngle = DefaultBarnDoorAngle;
+
+        [SerializeField, Min(0.0f)]
+        private float m_BarnDoorLength = DefaultBarnDoorLength;
 
         [SerializeField]
         private bool m_InteractsWithSky = true;
@@ -770,6 +788,18 @@ namespace VividRP.Runtime
             }
         }
 
+        public float barnDoorAngle
+        {
+            get => m_BarnDoorAngle;
+            set => SetClampedFloat(ref m_BarnDoorAngle, value, 0.0f, 90.0f, DefaultBarnDoorAngle);
+        }
+
+        public float barnDoorLength
+        {
+            get => m_BarnDoorLength;
+            set => SetNonNegativeFloat(ref m_BarnDoorLength, value, DefaultBarnDoorLength);
+        }
+
         public float angularDiameter
         {
             get => m_AngularDiameter;
@@ -991,6 +1021,7 @@ namespace VividRP.Runtime
             m_Light = light;
             ConstrainRayTracedShadowSettings();
             ConstrainShadowBiasSettings();
+            ConstrainAreaLightSettings();
             ConstrainCelestialBodySettings();
             RefreshAnimatedState();
             UpdateLightBoundsOverride(m_Light);
@@ -1178,6 +1209,12 @@ namespace VividRP.Runtime
                 MinDirLightPCSSBlockerSamplingClumpExponent,
                 MaxDirLightPCSSBlockerSamplingClumpExponent,
                 DefaultDirLightPCSSBlockerSamplingClumpExponent);
+        }
+
+        private void ConstrainAreaLightSettings()
+        {
+            m_BarnDoorAngle = SanitizeClampedFloat(m_BarnDoorAngle, 0.0f, 90.0f, DefaultBarnDoorAngle);
+            m_BarnDoorLength = SanitizeNonNegativeFloat(m_BarnDoorLength, DefaultBarnDoorLength);
         }
 
         private static CSMScreenSpaceShadowQuality SanitizeScreenSpaceShadowQuality(CSMScreenSpaceShadowQuality value)

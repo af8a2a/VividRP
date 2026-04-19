@@ -903,14 +903,7 @@ namespace VividRP.Runtime
                 return;
             }
 
-            var rectangleDimensions = new float3(
-                math.max(source.width, 0.0f) + 2.0f * range,
-                math.max(source.height, 0.0f) + 2.0f * range,
-                range);
-            var rectangleExtents = 0.5f * rectangleDimensions;
-            var centerVS = positionVS + rectangleExtents.z * axisZVS;
-            var diagonalRadius = range + 0.5f * math.sqrt(source.width * source.width + source.height * source.height);
-            var radius = math.sqrt(diagonalRadius * diagonalRadius + rectangleExtents.z * rectangleExtents.z);
+            GetRectangleAreaLightInfluenceBounds(source, positionVS, axisZVS, range, out var rectangleExtents, out var centerVS, out var radius);
 
             lightBound.center = new Vector3(centerVS.x, centerVS.y, centerVS.z);
             lightBound.boxAxisX = new Vector4(axisXVS.x * rectangleExtents.x, axisXVS.y * rectangleExtents.x, axisXVS.z * rectangleExtents.x, 1.0f);
@@ -922,6 +915,28 @@ namespace VividRP.Runtime
                 1.0f / math.max(rectangleExtents.x, 1e-4f),
                 1.0f / math.max(rectangleExtents.y, 1e-4f),
                 1.0f / math.max(rectangleExtents.z, 1e-4f));
+        }
+
+        // Matches HDRP's rectangle clustered bounds: barn door is a shading-time crop of the source
+        // and does not shrink the conservative one-sided influence volume uploaded to LightGrid.
+        private static void GetRectangleAreaLightInfluenceBounds(
+            AreaLightData source,
+            float3 positionVS,
+            float3 axisZVS,
+            float range,
+            out float3 rectangleExtents,
+            out float3 centerVS,
+            out float radius)
+        {
+            var rectangleDimensions = new float3(
+                math.max(source.width, 0.0f) + 2.0f * range,
+                math.max(source.height, 0.0f) + 2.0f * range,
+                range);
+            rectangleExtents = 0.5f * rectangleDimensions;
+            centerVS = positionVS + rectangleExtents.z * axisZVS;
+
+            var diagonalRadius = range + 0.5f * math.sqrt(source.width * source.width + source.height * source.height);
+            radius = math.sqrt(diagonalRadius * diagonalRadius + rectangleExtents.z * rectangleExtents.z);
         }
 
         private static float3 TransformWorldVectorToPositiveViewSpace(float4x4 worldToViewMatrix, Vector3 worldDirection)

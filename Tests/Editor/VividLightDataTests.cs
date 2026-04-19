@@ -183,6 +183,45 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void UpdateAreaLightClusteredCullData_KeepsRectangleBoundsConservative_WhenBarnDoorIsActive()
+        {
+            var lightData = new VividLightData
+            {
+                areaLights = new[]
+                {
+                    new VividLightData.AreaLightData
+                    {
+                        positionWS = new Vector3(1.0f, -2.0f, 6.0f),
+                        forwardWS = Vector3.forward,
+                        rightWS = Vector3.right,
+                        upWS = Vector3.up,
+                        width = 4.0f,
+                        height = 2.0f,
+                        lightType = 1u,
+                        range = 8.0f,
+                        cosBarnDoorAngle = Mathf.Cos(15.0f * Mathf.Deg2Rad),
+                        barnDoorLength = 3.0f,
+                    }
+                },
+                areaLightCount = 1,
+            };
+
+            lightData.UpdateAreaLightClusteredCullData(Matrix4x4.identity);
+
+            var bound = lightData.areaLightBounds[0];
+            var volume = lightData.areaLightVolumeData[0];
+            var extents = new Vector3(6.0f, 5.0f, 4.0f);
+            var diagonalRadius = 8.0f + 0.5f * Mathf.Sqrt(20.0f);
+            var expectedRadius = Mathf.Sqrt(diagonalRadius * diagonalRadius + 16.0f);
+
+            AssertVector3(bound.center, new Vector3(1.0f, -2.0f, 10.0f));
+            AssertVector4(bound.boxAxisX, new Vector4(extents.x, 0.0f, 0.0f, 1.0f));
+            AssertVector4(bound.boxAxisY, new Vector4(0.0f, extents.y, 0.0f, expectedRadius), 0.001f);
+            AssertVector3(bound.boxAxisZ, new Vector3(0.0f, 0.0f, extents.z));
+            AssertVector3(volume.boxInvRange, new Vector3(1.0f / extents.x, 1.0f / extents.y, 1.0f / extents.z));
+        }
+
+        [Test]
         public void Reset_ClearsCachedLightState_WhenLightDataWasInitialized()
         {
             var lightData = new VividLightData();

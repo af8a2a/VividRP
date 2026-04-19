@@ -1058,12 +1058,19 @@ namespace VividRP.Runtime
         private static void UpdateRectangleLightBounds(Light targetLight)
         {
             targetLight.useBoundingSphereOverride = true;
-            var diagonal = 0.5f * targetLight.areaSize.magnitude;
             targetLight.boundingSphereOverride = new Vector4(
                 0.0f,
                 0.0f,
                 0.0f,
-                Mathf.Max(targetLight.range, 0.0f) + diagonal);
+                GetRectangleLightBoundsRadius(targetLight));
+        }
+
+        // Matches HDRP: barn door only crops the shaded source footprint and should not shrink
+        // the conservative visible-light bounds used to keep rectangle lights in visibleLights.
+        private static float GetRectangleLightBoundsRadius(Light targetLight)
+        {
+            var diagonal = 0.5f * targetLight.areaSize.magnitude;
+            return Mathf.Max(targetLight.range, 0.0f) + diagonal;
         }
 
         private static void UpdateDiscLightBounds(Light targetLight)

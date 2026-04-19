@@ -85,6 +85,25 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void OnValidate_KeepsRectangleBoundingSphereConservative_WhenBarnDoorIsActive()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Rectangle;
+            light.range = 4.0f;
+            light.areaSize = new Vector2(2.0f, 6.0f);
+
+            var additionalData = light.GetVividAdditionalLightData();
+            additionalData.barnDoorAngle = 15.0f;
+            additionalData.barnDoorLength = 3.0f;
+
+            Assert.That(s_OnValidateMethod, Is.Not.Null);
+            s_OnValidateMethod.Invoke(additionalData, null);
+
+            Assert.That(light.useBoundingSphereOverride, Is.True);
+            Assert.That(light.boundingSphereOverride.w, Is.EqualTo(4.0f + 0.5f * light.areaSize.magnitude).Within(0.0001f));
+        }
+
+        [Test]
         public void OnValidate_ClearsBoundingSphereOverride_WhenLightStopsBeingAreaLight()
         {
             var light = m_GameObject.AddComponent<Light>();

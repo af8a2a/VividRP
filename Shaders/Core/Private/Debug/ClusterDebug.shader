@@ -27,8 +27,10 @@ Shader "Hidden/VividRP/ClusterDebug"
             #define VIVID_TILE_CLUSTER_DEBUG_MATERIAL_FEATURE_VARIANTS 3
             #define VIVID_CLUSTER_DEBUGMODE_VISUALIZE_OPAQUE 0
             #define VIVID_CLUSTER_DEBUGMODE_VISUALIZE_SLICE 1
-            #define VIVID_TILE_CLUSTER_CATEGORY_PUNCTUAL (1u << LIGHTCATEGORY_PUNCTUAL)
-            #define VIVID_TILE_CLUSTER_CATEGORY_AREA (1u << LIGHTCATEGORY_AREA)
+            #define VIVID_TILE_CLUSTER_CATEGORY_PUNCTUAL (1u << 0)
+            #define VIVID_TILE_CLUSTER_CATEGORY_AREA (1u << 1)
+            #define VIVID_TILE_CLUSTER_CATEGORY_ENVIRONMENT (1u << 2)
+            #define VIVID_TILE_CLUSTER_CATEGORY_DECAL (1u << 3)
 
             TEXTURE2D(_SourceTexture);
             SAMPLER(sampler_SourceTexture);
@@ -77,7 +79,8 @@ Shader "Hidden/VividRP/ClusterDebug"
             {
                 return _TileClusterDebug == VIVID_TILE_CLUSTER_DEBUG_CLUSTER
                     && ((IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_PUNCTUAL) && _ClusteredPunctualLightGridEnabled != 0u)
-                        || (IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_AREA) && _ClusteredAreaLightGridEnabled != 0u))
+                        || (IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_AREA) && _ClusteredAreaLightGridEnabled != 0u)
+                        || (IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_DECAL) && _ClusteredDecalGridEnabled != 0u))
                     && _ClusterTileCountX > 0
                     && _ClusterTileCountY > 0
                     && _ClusterSliceCount > 0;
@@ -128,6 +131,9 @@ Shader "Hidden/VividRP/ClusterDebug"
                 if (IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_AREA))
                     lightCount += VividLightingLoop::GetAreaLightCount(lightLoop);
 
+                if (IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_DECAL))
+                    lightCount += VividLightingLoop::GetDecalCount(lightLoop);
+
                 return lightCount;
             }
 
@@ -139,6 +145,9 @@ Shader "Hidden/VividRP/ClusterDebug"
                     categoryCount++;
 
                 if (IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_AREA) && _ClusteredAreaLightGridEnabled != 0u)
+                    categoryCount++;
+
+                if (IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_DECAL) && _ClusteredDecalGridEnabled != 0u)
                     categoryCount++;
 
                 return max(categoryCount, 1u);

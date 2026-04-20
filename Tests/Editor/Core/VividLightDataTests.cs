@@ -222,6 +222,44 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void UpdateFiniteLightClusteredCullData_BuildsBoxBoundsAndVolume_ForDecal()
+        {
+            var position = new Vector3(1.0f, -2.0f, 6.0f);
+            var size = new Vector3(4.0f, 2.0f, 6.0f);
+            var lightData = new VividLightData
+            {
+                decalClusterData = new[]
+                {
+                    new VividLightData.DecalClusterData
+                    {
+                        worldToDecal = Matrix4x4.TRS(position, Quaternion.identity, size).inverse,
+                    }
+                },
+                decalCount = 1,
+            };
+
+            lightData.UpdateFiniteLightClusteredCullData(Matrix4x4.identity);
+
+            var bound = lightData.decalBounds[0];
+            var volume = lightData.decalVolumeData[0];
+            var halfExtents = size * 0.5f;
+            var expectedRadius = halfExtents.magnitude;
+
+            AssertVector3(bound.center, position);
+            AssertVector4(bound.boxAxisX, new Vector4(halfExtents.x, 0.0f, 0.0f, 1.0f));
+            AssertVector4(bound.boxAxisY, new Vector4(0.0f, halfExtents.y, 0.0f, expectedRadius), 0.001f);
+            AssertVector3(bound.boxAxisZ, new Vector3(0.0f, 0.0f, halfExtents.z));
+            Assert.That(volume.lightVolume, Is.EqualTo(2u));
+            Assert.That(volume.lightCategory, Is.EqualTo(3u));
+            Assert.That(volume.featureFlags, Is.EqualTo(524288u));
+            AssertVector3(volume.lightPos, position);
+            AssertVector3(volume.lightAxisX, Vector3.right);
+            AssertVector3(volume.lightAxisY, Vector3.up);
+            AssertVector3(volume.lightAxisZ, Vector3.forward);
+            AssertVector3(volume.boxInvRange, new Vector3(1.0f / halfExtents.x, 1.0f / halfExtents.y, 1.0f / halfExtents.z));
+        }
+
+        [Test]
         public void Reset_ClearsCachedLightState_WhenLightDataWasInitialized()
         {
             var lightData = new VividLightData();

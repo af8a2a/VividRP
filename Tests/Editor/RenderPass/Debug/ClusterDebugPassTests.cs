@@ -26,18 +26,20 @@ namespace VividRP.Editor.Tests
             var outputEntry = resources.Textures.Single(entry => entry.Name == "OutputTexture");
             var punctualLightsEntry = resources.Buffers.Single(entry => entry.Name == "PunctualLights");
             var areaLightsEntry = resources.Buffers.Single(entry => entry.Name == "AreaLights");
+            var decalDataEntry = resources.Buffers.Single(entry => entry.Name == "DecalData");
             var layeredOffsetEntry = resources.Buffers.Single(entry => entry.Name == "LayeredOffset");
             var layeredLightListEntry = resources.Buffers.Single(entry => entry.Name == "LayeredLightList");
             var logBaseBufferEntry = resources.Buffers.Single(entry => entry.Name == "LogBaseBuffer");
 
             Assert.That(resources.Textures, Has.Length.EqualTo(3));
-            Assert.That(resources.Buffers, Has.Length.EqualTo(5));
+            Assert.That(resources.Buffers, Has.Length.EqualTo(6));
             Assert.That(sourceEntry.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(depthEntry.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(outputEntry.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(outputEntry.AttachmentIndex, Is.EqualTo(0));
             Assert.That(punctualLightsEntry.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(areaLightsEntry.Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(decalDataEntry.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(layeredOffsetEntry.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(layeredLightListEntry.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(logBaseBufferEntry.Access, Is.EqualTo(AccessFlags.Read));
@@ -72,7 +74,7 @@ namespace VividRP.Editor.Tests
             var data = new VividRenderingDebugSettingsData
             {
                 tileClusterDebug = TileClusterDebug.Cluster,
-                tileClusterDebugByCategory = TileClusterCategoryDebug.EnvironmentAndAreaAndPunctual,
+                tileClusterDebugByCategory = TileClusterCategoryDebug.Punctual | TileClusterCategoryDebug.Area | TileClusterCategoryDebug.Environment | TileClusterCategoryDebug.Decal,
                 clusterDebugMode = ClusterDebugMode.VisualizeSlice,
                 clusterDebugDistance = 6f,
             };
@@ -80,7 +82,7 @@ namespace VividRP.Editor.Tests
             var settings = ClusterDebugPass.ResolveSettings(data);
 
             Assert.That(settings.tileClusterDebug, Is.EqualTo(TileClusterDebug.Cluster));
-            Assert.That(settings.tileClusterDebugByCategory, Is.EqualTo(TileClusterCategoryDebug.EnvironmentAndAreaAndPunctual));
+            Assert.That(settings.tileClusterDebugByCategory, Is.EqualTo(TileClusterCategoryDebug.Punctual | TileClusterCategoryDebug.Area | TileClusterCategoryDebug.Environment | TileClusterCategoryDebug.Decal));
             Assert.That(settings.clusterDebugMode, Is.EqualTo(ClusterDebugMode.VisualizeSlice));
             Assert.That(settings.clusterDebugDistance, Is.EqualTo(6f));
         }
@@ -106,7 +108,7 @@ namespace VividRP.Editor.Tests
             {
                 data.Reset();
                 data.tileClusterDebug = TileClusterDebug.Cluster;
-                data.tileClusterDebugByCategory = TileClusterCategoryDebug.Environment;
+                data.tileClusterDebugByCategory = TileClusterCategoryDebug.Environment | TileClusterCategoryDebug.Decal;
                 data.clusterDebugMode = ClusterDebugMode.VisualizeSlice;
                 data.clusterDebugDistance = 4f;
 
@@ -119,7 +121,7 @@ namespace VividRP.Editor.Tests
                 var settings = GetFieldValue<ClusterDebugPass.ClusterDebugSettingsData>(pass, "m_ResolvedSettings");
 
                 Assert.That(settings.tileClusterDebug, Is.EqualTo(TileClusterDebug.Cluster));
-                Assert.That(settings.tileClusterDebugByCategory, Is.EqualTo(TileClusterCategoryDebug.Environment));
+                Assert.That(settings.tileClusterDebugByCategory, Is.EqualTo(TileClusterCategoryDebug.Environment | TileClusterCategoryDebug.Decal));
                 Assert.That(settings.clusterDebugMode, Is.EqualTo(ClusterDebugMode.VisualizeSlice));
                 Assert.That(settings.clusterDebugDistance, Is.EqualTo(4f));
             }
@@ -141,6 +143,7 @@ namespace VividRP.Editor.Tests
             var clusteredLightingData = frameData.GetOrCreate<VividClusteredLightingData>();
             clusteredLightingData.punctualLights = CreateStructuredBuffer("PunctualLights", VividLightData.PunctualLightData.Stride);
             clusteredLightingData.areaLights = CreateStructuredBuffer("AreaLights", VividLightData.AreaLightData.Stride);
+            clusteredLightingData.decalData = CreateStructuredBuffer("DecalData", VividLightData.DecalClusterData.Stride);
             clusteredLightingData.layeredOffset = CreateStructuredBuffer("LayeredOffset", sizeof(uint));
             clusteredLightingData.layeredLightList = CreateStructuredBuffer("LayeredLightList", sizeof(uint));
             clusteredLightingData.logBaseBuffer = CreateStructuredBuffer("LogBaseBuffer", sizeof(float));
@@ -154,6 +157,7 @@ namespace VividRP.Editor.Tests
             clusteredLightingData.clusterScale = 2.5f;
             clusteredLightingData.clusterBase = 1.17f;
             clusteredLightingData.clusterLog2SliceCount = 5;
+            clusteredLightingData.decalCount = 1;
             clusteredLightingData.supportsClusteredPunctualLights = true;
             clusteredLightingData.isLogBaseBufferEnabled = true;
 
@@ -161,6 +165,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(GetFieldValue<RenderGraphBuffer>(pass, "m_PunctualLightBuffer"), Is.SameAs(clusteredLightingData.punctualLights));
             Assert.That(GetFieldValue<RenderGraphBuffer>(pass, "m_AreaLightBuffer"), Is.SameAs(clusteredLightingData.areaLights));
+            Assert.That(GetFieldValue<RenderGraphBuffer>(pass, "m_DecalDataBuffer"), Is.SameAs(clusteredLightingData.decalData));
             Assert.That(GetFieldValue<RenderGraphBuffer>(pass, "m_LayeredOffsetBuffer"), Is.SameAs(clusteredLightingData.layeredOffset));
             Assert.That(GetFieldValue<RenderGraphBuffer>(pass, "m_LayeredLightListBuffer"), Is.SameAs(clusteredLightingData.layeredLightList));
             Assert.That(GetFieldValue<RenderGraphBuffer>(pass, "m_LogBaseBuffer"), Is.SameAs(clusteredLightingData.logBaseBuffer));
@@ -176,6 +181,7 @@ namespace VividRP.Editor.Tests
             Assert.That(GetFieldValue<int>(pass, "m_ClusterLog2SliceCount"), Is.EqualTo(5));
             Assert.That(GetFieldValue<bool>(pass, "m_SupportsClusteredPunctualLights"), Is.True);
             Assert.That(GetFieldValue<bool>(pass, "m_SupportsClusteredAreaLights"), Is.True);
+            Assert.That(GetFieldValue<bool>(pass, "m_SupportsClusteredDecals"), Is.True);
             Assert.That(GetFieldValue<bool>(pass, "m_IsLogBaseBufferEnabled"), Is.True);
         }
 
@@ -202,8 +208,10 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("OverlayHeatMap("));
             Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetPunctualLightCount"));
             Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetAreaLightCount"));
+            Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetDecalCount"));
             Assert.That(shaderSource, Does.Contain("_ClusteredPunctualLightGridEnabled"));
             Assert.That(shaderSource, Does.Contain("_ClusteredAreaLightGridEnabled"));
+            Assert.That(shaderSource, Does.Contain("_ClusteredDecalGridEnabled"));
             Assert.That(shaderSource, Does.Contain("float2 pixelUv = (float2(pixelCoord) + 0.5) * _ClusterDebugLightViewportSize.zw;"));
             Assert.That(shaderSource, Does.Contain("SAMPLE_TEXTURE2D_LOD(_CameraDepthTexture, sampler_PointClamp, depthUv, 0).r"));
             Assert.That(shaderSource, Does.Not.Contain("_PunctualLightCount"));

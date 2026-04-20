@@ -78,24 +78,11 @@ namespace VividRP.Runtime.SubSystem.Decal
                 return false;
             }
 
-            BoundProxyShape shape = BoundProxyShape;
-            Vector3 boxSize = shape.GetSanitizedSize();
-            float sphereRadius = shape.GetSanitizedRadius();
-            Bounds worldAabb = shape.shape == BoundProxyShapeType.Sphere
-                ? new Bounds(transform.position, Vector3.one * (sphereRadius * 2.0f))
-                : new Bounds(transform.position, boxSize);
-
-            worldData = new BoundProxyWorldData
-            {
-                entityId = transform.GetEntityId(),
-                feature = BoundProxyFeature,
-                shape = shape.shape,
-                worldCenter = transform.position,
-                worldRotation = Quaternion.identity,
-                boxSize = boxSize,
-                sphereRadius = sphereRadius,
-                worldAabb = worldAabb,
-            };
+            worldData = BoundProxyUtility.CreateWorldData(
+                transform,
+                BoundProxyFeature,
+                BoundProxyShape,
+                transform.GetEntityId());
             return true;
         }
     }

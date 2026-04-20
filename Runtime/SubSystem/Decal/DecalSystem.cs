@@ -42,6 +42,12 @@ namespace VividRP.Runtime.SubSystem.Decal
 
         internal static void Register(DecalProjector projector)
         {
+            if (!s_Initialized)
+                Initialize();
+
+            if (projector == null)
+                return;
+
             if (!s_Projectors.Contains(projector))
                 s_Projectors.Add(projector);
         }
@@ -53,14 +59,23 @@ namespace VividRP.Runtime.SubSystem.Decal
 
         private static void Update(ContextContainer frameData, CommandBuffer cmd)
         {
+            if (!s_Initialized)
+                Initialize();
+
             s_ActiveDecals.Clear();
 
             if (s_Projectors.Count == 0)
+            {
+                UpdateLightData(frameData);
                 return;
+            }
 
             Camera camera = GetCamera(frameData);
             if (camera == null)
+            {
+                UpdateLightData(frameData);
                 return;
+            }
 
             // Build culling instances from active projectors
             var validProjectors = new List<DecalProjector>();
@@ -92,6 +107,7 @@ namespace VividRP.Runtime.SubSystem.Decal
             if (instanceCount == 0)
             {
                 instances.Dispose();
+                UpdateLightData(frameData);
                 return;
             }
 
@@ -135,6 +151,37 @@ namespace VividRP.Runtime.SubSystem.Decal
             planes.Dispose();
             instances.Dispose();
             visibleIndices.Dispose();
+
+            UpdateLightData(frameData);
+        }
+
+        private static void UpdateLightData(ContextContainer frameData)
+        {
+            if (frameData == null)
+                return;
+
+            var lightData = frameData.GetOrCreate<VividLightData>();
+            lightData.decalCount = s_ActiveDecals.Count;
+
+            if (lightData.decalCount == 0)
+                return;
+
+            if (lightData.decalClusterData.Length < lightData.decalCount)
+                lightData.decalClusterData = new VividLightData.DecalClusterData[lightData.decalCount];
+
+            for (int i = 0; i < s_ActiveDecals.Count; i++)
+            {
+                DecalData decal = s_ActiveDecals[i];
+                lightData.decalClusterData[i] = new VividLightData.DecalClusterData
+                {
+                    worldToDecal = decal.worldToDecal,
+                    baseColor = decal.baseColor,
+                    baseColorTextureIndex = -1,
+                    normalTextureIndex = -1,
+                    blendDistance = decal.blendDistance,
+                    padding = 0f,
+                };
+            }
         }
 
         private static Camera GetCamera(ContextContainer frameData)

@@ -21,11 +21,7 @@ namespace VividRP.Runtime
     {
         Punctual = 1 << 0,
         Area = 1 << 1,
-        AreaAndPunctual = Area | Punctual,
         Environment = 1 << 2,
-        EnvironmentAndPunctual = Environment | Punctual,
-        EnvironmentAndArea = Environment | Area,
-        EnvironmentAndAreaAndPunctual = Environment | Area | Punctual,
-        Decal = 1 << 3
+        Decal = 1 << 3,
     }
 }

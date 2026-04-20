@@ -105,6 +105,19 @@ namespace VividRP.Runtime
             internal static int Stride => Marshal.SizeOf<LightVolumeData>();
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        public struct DecalClusterData
+        {
+            public Matrix4x4 worldToDecal;
+            public Vector4 baseColor;
+            public int baseColorTextureIndex;
+            public int normalTextureIndex;
+            public float blendDistance;
+            public float padding;
+
+            internal static int Stride => Marshal.SizeOf<DecalClusterData>();
+        }
+
         [Flags]
         private enum VisibleLightCollectionMask
         {
@@ -116,8 +129,10 @@ namespace VividRP.Runtime
 
         private const uint HdrpLightCategoryPunctual = 0u;
         private const uint HdrpLightCategoryArea = 1u;
+        private const uint HdrpLightCategoryDecal = 3u;
         private const uint HdrpLightFeatureFlagsPunctual = 4096u;
         private const uint HdrpLightFeatureFlagsArea = 8192u;
+        private const uint HdrpLightFeatureFlagsDecal = 524288u;
         private const uint HdrpLightVolumeTypeCone = 0u;
         private const uint HdrpLightVolumeTypeSphere = 1u;
         private const uint HdrpLightVolumeTypeBox = 2u;
@@ -245,6 +260,10 @@ namespace VividRP.Runtime
         public LightVolumeData[] punctualLightVolumeData = Array.Empty<LightVolumeData>();
         public SFiniteLightBound[] areaLightBounds = Array.Empty<SFiniteLightBound>();
         public LightVolumeData[] areaLightVolumeData = Array.Empty<LightVolumeData>();
+        public DecalClusterData[] decalClusterData = Array.Empty<DecalClusterData>();
+        public SFiniteLightBound[] decalBounds = Array.Empty<SFiniteLightBound>();
+        public LightVolumeData[] decalVolumeData = Array.Empty<LightVolumeData>();
+        public int decalCount;
         public int mainLightIndex;
         public EntityId mainLightEntityId;
         public int directionalLightCount;
@@ -295,6 +314,7 @@ namespace VividRP.Runtime
         {
             BuildPunctualLightClusteredCullingData(worldToViewMatrix);
             BuildAreaLightClusteredCullingData(worldToViewMatrix);
+            BuildDecalClusteredCullingData(worldToViewMatrix);
         }
 
         internal void UpdatePunctualLightClusteredCullData(Matrix4x4 worldToViewMatrix)
@@ -381,6 +401,76 @@ namespace VividRP.Runtime
             }
         }
 
+        private void BuildDecalClusteredCullingData(Matrix4x4 worldToViewMatrix)
+        {
+            EnsureDecalCapacity(decalCount);
+
+            if (decalCount <= 0)
+                return;
+
+            var viewMatrix = (float4x4)worldToViewMatrix;
+
+            for (int i = 0; i < decalCount; i++)
+            {
+                DecalClusterData decal = decalClusterData[i];
+                Matrix4x4 decalToWorld = decal.worldToDecal.inverse;
+
+                float3 positionWS = new float3(decalToWorld.m03, decalToWorld.m13, decalToWorld.m23);
+                float3 axisXWS = math.normalize(new float3(decalToWorld.m00, decalToWorld.m10, decalToWorld.m20));
+                float3 axisYWS = math.normalize(new float3(decalToWorld.m01, decalToWorld.m11, decalToWorld.m21));
+                float3 axisZWS = math.normalize(new float3(decalToWorld.m02, decalToWorld.m12, decalToWorld.m22));
+                float3 scaleWS = new float3(
+                    math.length(new float3(decalToWorld.m00, decalToWorld.m10, decalToWorld.m20)),
+                    math.length(new float3(decalToWorld.m01, decalToWorld.m11, decalToWorld.m21)),
+                    math.length(new float3(decalToWorld.m02, decalToWorld.m12, decalToWorld.m22)));
+                float3 halfExtents = scaleWS * 0.5f;
+
+                float3 positionVS = math.mul(viewMatrix, new float4(positionWS, 1.0f)).xyz;
+                positionVS.z = -positionVS.z;
+                float3 axisXVS = TransformWorldVectorToPositiveViewSpace(viewMatrix, new Vector3(axisXWS.x, axisXWS.y, axisXWS.z));
+                float3 axisYVS = TransformWorldVectorToPositiveViewSpace(viewMatrix, new Vector3(axisYWS.x, axisYWS.y, axisYWS.z));
+                float3 axisZVS = TransformWorldVectorToPositiveViewSpace(viewMatrix, new Vector3(axisZWS.x, axisZWS.y, axisZWS.z));
+
+                float radius = math.length(halfExtents);
+
+                decalBounds[i] = new SFiniteLightBound
+                {
+                    center = new Vector3(positionVS.x, positionVS.y, positionVS.z),
+                    boxAxisX = new Vector4(axisXVS.x * halfExtents.x, axisXVS.y * halfExtents.x, axisXVS.z * halfExtents.x, 1.0f),
+                    boxAxisY = new Vector4(axisYVS.x * halfExtents.y, axisYVS.y * halfExtents.y, axisYVS.z * halfExtents.y, radius),
+                    boxAxisZ = new Vector3(axisZVS.x * halfExtents.z, axisZVS.y * halfExtents.z, axisZVS.z * halfExtents.z),
+                };
+
+                decalVolumeData[i] = new LightVolumeData
+                {
+                    lightPos = new Vector3(positionVS.x, positionVS.y, positionVS.z),
+                    lightVolume = HdrpLightVolumeTypeBox,
+                    lightAxisX = new Vector3(axisXVS.x, axisXVS.y, axisXVS.z),
+                    lightCategory = HdrpLightCategoryDecal,
+                    lightAxisY = new Vector3(axisYVS.x, axisYVS.y, axisYVS.z),
+                    radiusSq = radius * radius,
+                    lightAxisZ = new Vector3(axisZVS.x, axisZVS.y, axisZVS.z),
+                    cotan = 0.0f,
+                    boxInnerDist = new Vector3(halfExtents.x, halfExtents.y, halfExtents.z),
+                    featureFlags = HdrpLightFeatureFlagsDecal,
+                    boxInvRange = new Vector3(1.0f / math.max(halfExtents.x, 1e-5f), 1.0f / math.max(halfExtents.y, 1e-5f), 1.0f / math.max(halfExtents.z, 1e-5f)),
+                    affectVolumetric = 0,
+                };
+            }
+        }
+
+        private void EnsureDecalCapacity(int requiredCapacity)
+        {
+            if (requiredCapacity > decalClusterData.Length)
+                decalClusterData = new DecalClusterData[requiredCapacity];
+
+            if (requiredCapacity > decalBounds.Length)
+                decalBounds = new SFiniteLightBound[requiredCapacity];
+
+            if (requiredCapacity > decalVolumeData.Length)
+                decalVolumeData = new LightVolumeData[requiredCapacity];
+        }
+
         public override void Reset()
         {
             visibleLights = default;
@@ -397,6 +487,10 @@ namespace VividRP.Runtime
             punctualLightVolumeData = Array.Empty<LightVolumeData>();
             areaLightBounds = Array.Empty<SFiniteLightBound>();
             areaLightVolumeData = Array.Empty<LightVolumeData>();
+            decalClusterData = Array.Empty<DecalClusterData>();
+            decalBounds = Array.Empty<SFiniteLightBound>();
+            decalVolumeData = Array.Empty<LightVolumeData>();
+            decalCount = 0;
         }
 
         private bool IsValidLightIndex(int lightIndex)

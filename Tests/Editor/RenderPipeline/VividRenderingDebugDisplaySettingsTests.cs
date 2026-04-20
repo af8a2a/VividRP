@@ -49,5 +49,21 @@ namespace VividRP.Editor.Tests
                 VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationMode,
                 Is.EqualTo(VirtualTextureVisualizationMode.UsePassSettings));
         }
+
+        [Test]
+        public void TileClusterCategoryDebug_PreservesSupportedFlags()
+        {
+            VividRenderingDebugDisplaySettings.Data.tileClusterDebugByCategory =
+                TileClusterCategoryDebug.Area
+                | TileClusterCategoryDebug.Environment
+                | TileClusterCategoryDebug.Decal;
+
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.tileClusterDebugByCategory,
+                Is.EqualTo(
+                    TileClusterCategoryDebug.Area
+                    | TileClusterCategoryDebug.Environment
+                    | TileClusterCategoryDebug.Decal));
+        }
     }
 }

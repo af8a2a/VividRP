@@ -103,8 +103,8 @@ namespace VividRP.Runtime
 
         internal TileClusterCategoryDebug tileClusterDebugByCategory
         {
-            get => m_TileClusterDebugByCategory;
-            set => m_TileClusterDebugByCategory = value;
+            get => NormalizeTileClusterCategory(m_TileClusterDebugByCategory);
+            set => m_TileClusterDebugByCategory = NormalizeTileClusterCategory(value);
         }
 
         internal ClusterDebugMode clusterDebugMode
@@ -211,7 +211,7 @@ namespace VividRP.Runtime
 
         public bool AreAnySettingsActive =>
             m_TileClusterDebug != TileClusterDebug.None
-            || m_TileClusterDebugByCategory != TileClusterCategoryDebug.Punctual
+            || tileClusterDebugByCategory != TileClusterCategoryDebug.Punctual
             || m_ClusterDebugMode != ClusterDebugMode.VisualizeOpaque
             || !Mathf.Approximately(m_ClusterDebugDistance, 1f)
             || m_ExposureMode != ExposureDebugMode.None
@@ -256,6 +256,19 @@ namespace VividRP.Runtime
             m_Slider = 50f;
             m_VirtualTextureDebugMode = VirtualTextureDebugMode.None;
             m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.UsePassSettings;
+        }
+
+        private static TileClusterCategoryDebug NormalizeTileClusterCategory(TileClusterCategoryDebug value)
+        {
+            const int supportedMask =
+                (int)TileClusterCategoryDebug.Punctual
+                | (int)TileClusterCategoryDebug.Area
+                | (int)TileClusterCategoryDebug.Environment
+                | (int)TileClusterCategoryDebug.Decal;
+            var normalized = (TileClusterCategoryDebug)((int)value & supportedMask);
+            return normalized == 0
+                ? TileClusterCategoryDebug.Punctual
+                : normalized;
         }
 
         private static class Strings

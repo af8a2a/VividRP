@@ -50,6 +50,7 @@ namespace VividRP.Runtime
         private static readonly VividLightData.DirectionalLightData[] s_EmptyDirectionalLights = { default };
         private static readonly VividLightData.PunctualLightData[] s_EmptyPunctualLights = { default };
         private static readonly VividLightData.AreaLightData[] s_EmptyAreaLights = { default };
+        private static readonly VividLightData.DecalClusterData[] s_EmptyDecalData = { default };
         private static readonly VividLightData.SFiniteLightBound[] s_EmptyFiniteLightBounds = { default };
         private static readonly VividLightData.LightVolumeData[] s_EmptyLightVolumeData = { default };
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
@@ -70,6 +71,9 @@ namespace VividRP.Runtime
 
         [RenderGraphResource( Name = "AreaLights",  Access = AccessFlags.Write)]
         private RenderGraphBuffer m_AreaLightBuffer;
+
+        [RenderGraphResource(Name = "DecalData", Access = AccessFlags.Write)]
+        private RenderGraphBuffer m_DecalDataBuffer;
 
         [RenderGraphResource(Name = "FiniteLightBounds", Access = AccessFlags.Write)]
         private RenderGraphBuffer m_FiniteLightBoundBuffer;
@@ -107,6 +111,7 @@ namespace VividRP.Runtime
         private GraphicsBuffer m_DirectionalLightImportedBuffer;
         private GraphicsBuffer m_PunctualLightImportedBuffer;
         private GraphicsBuffer m_AreaLightImportedBuffer;
+        private GraphicsBuffer m_DecalDataImportedBuffer;
         private GraphicsBuffer m_FiniteLightBoundImportedBuffer;
         private GraphicsBuffer m_LightVolumeDataImportedBuffer;
         private GraphicsBuffer m_ScreenSpaceBoundsImportedBuffer;
@@ -132,6 +137,7 @@ namespace VividRP.Runtime
         private int m_DirectionalLightCount;
         private int m_PunctualLightCount;
         private int m_AreaLightCount;
+        private int m_DecalCount;
         private int m_FiniteLightCount;
         private int m_MainDirectionalLightIndex;
         private int m_LightingWidth;
@@ -166,6 +172,7 @@ namespace VividRP.Runtime
             m_DirectionalLightBuffer = CreateStructuredBuffer("DirectionalLights", 1, VividLightData.DirectionalLightData.Stride);
             m_PunctualLightBuffer = CreateStructuredBuffer("PunctualLights", 1, VividLightData.PunctualLightData.Stride);
             m_AreaLightBuffer = CreateStructuredBuffer("AreaLights", 1, VividLightData.AreaLightData.Stride);
+            m_DecalDataBuffer = CreateStructuredBuffer("DecalData", 1, VividLightData.DecalClusterData.Stride);
             m_FiniteLightBoundBuffer = CreateStructuredBuffer("FiniteLightBounds", 1, VividLightData.SFiniteLightBound.Stride);
             m_LightVolumeDataBuffer = CreateStructuredBuffer("LightVolumeData", 1, VividLightData.LightVolumeData.Stride);
             m_ScreenSpaceBoundsBuffer = CreateStructuredBuffer("ScreenSpaceBounds", 1, sizeof(float) * 4);
@@ -185,7 +192,8 @@ namespace VividRP.Runtime
             m_DirectionalLightCount = lightData.directionalLightCount;
             m_PunctualLightCount = lightData.punctualLightCount;
             m_AreaLightCount = lightData.areaLightCount;
-            m_FiniteLightCount = m_PunctualLightCount + m_AreaLightCount;
+            m_DecalCount = lightData.decalCount;
+            m_FiniteLightCount = m_PunctualLightCount + m_AreaLightCount + m_DecalCount;
             m_MainDirectionalLightIndex = lightData.mainDirectionalLightIndex;
             m_LightingWidth = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
             m_LightingHeight = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
@@ -204,7 +212,7 @@ namespace VividRP.Runtime
             m_ClusterBigTileCountX = Mathf.Max(1, Mathf.CeilToInt(m_LightingWidth / (float)ClusterBigTileSize));
             m_ClusterBigTileCountY = Mathf.Max(1, Mathf.CeilToInt(m_LightingHeight / (float)ClusterBigTileSize));
             m_ClusterBigTileCount = Mathf.Max(1, m_ClusterBigTileCountX * m_ClusterBigTileCountY * MaxViews);
-            m_ClusterLightIndexCapacity = ComputeClusteredLightListCapacity(m_ClusterTileCount * MaxViews, 2);
+            m_ClusterLightIndexCapacity = ComputeClusteredLightListCapacity(m_ClusterTileCount * MaxViews, 3);
             m_ClusterBigTileLightIndexCapacity = ComputeBigTileLightListCapacity(m_ClusterBigTileCount);
             m_LayeredOffsetCapacity = ComputeLayeredOffsetCapacity(m_ClusterCount);
 
@@ -214,6 +222,7 @@ namespace VividRP.Runtime
             ResizeStructuredBuffer(m_DirectionalLightBuffer, Mathf.Max(m_DirectionalLightCount, 1), VividLightData.DirectionalLightData.Stride);
             ResizeStructuredBuffer(m_PunctualLightBuffer, Mathf.Max(m_PunctualLightCount, 1), VividLightData.PunctualLightData.Stride);
             ResizeStructuredBuffer(m_AreaLightBuffer, Mathf.Max(m_AreaLightCount, 1), VividLightData.AreaLightData.Stride);
+            ResizeStructuredBuffer(m_DecalDataBuffer, Mathf.Max(m_DecalCount, 1), VividLightData.DecalClusterData.Stride);
             ResizeStructuredBuffer(m_FiniteLightBoundBuffer, Mathf.Max(m_FiniteLightCount, 1), VividLightData.SFiniteLightBound.Stride);
             ResizeStructuredBuffer(m_LightVolumeDataBuffer, Mathf.Max(m_FiniteLightCount, 1), VividLightData.LightVolumeData.Stride);
             ResizeStructuredBuffer(m_ScreenSpaceBoundsBuffer, Mathf.Max(m_FiniteLightCount * 2, 1), sizeof(float) * 4);
@@ -236,6 +245,11 @@ namespace VividRP.Runtime
                 m_AreaLightImportedBuffer.SetData(lightData.areaLights, 0, 0, m_AreaLightCount);
             else
                 m_AreaLightImportedBuffer.SetData(s_EmptyAreaLights);
+
+            if (m_DecalCount > 0)
+                m_DecalDataImportedBuffer.SetData(lightData.decalClusterData, 0, 0, m_DecalCount);
+            else
+                m_DecalDataImportedBuffer.SetData(s_EmptyDecalData);
 
             if (m_FiniteLightCount > 0)
             {
@@ -354,6 +368,7 @@ namespace VividRP.Runtime
             m_DirectionalLightCount = 0;
             m_PunctualLightCount = 0;
             m_AreaLightCount = 0;
+            m_DecalCount = 0;
             m_FiniteLightCount = 0;
             m_MainDirectionalLightIndex = -1;
             m_LightingWidth = 0;
@@ -519,7 +534,7 @@ namespace VividRP.Runtime
             m_ShaderVariablesLightListCB.g_BaseFeatureFlags = 0u;
             m_ShaderVariablesLightListCB.g_iNumSamplesMSAA = 1;
             m_ShaderVariablesLightListCB._EnvLightIndexShift = 0u;
-            m_ShaderVariablesLightListCB._DecalIndexShift = 0u;
+            m_ShaderVariablesLightListCB._DecalIndexShift = (uint)(m_PunctualLightCount + m_AreaLightCount);
             m_ShaderVariablesLightListCB._AreaLightIndexShift = (uint)m_PunctualLightCount;
         }
 
@@ -599,6 +614,23 @@ namespace VividRP.Runtime
                     m_PunctualLightCount,
                     m_AreaLightCount);
             }
+
+            if (m_DecalCount > 0)
+            {
+                int decalOffset = m_PunctualLightCount + m_AreaLightCount;
+                Array.Copy(
+                    lightData.decalBounds,
+                    0,
+                    m_FiniteLightBoundUploadData,
+                    decalOffset,
+                    m_DecalCount);
+                Array.Copy(
+                    lightData.decalVolumeData,
+                    0,
+                    m_LightVolumeDataUploadData,
+                    decalOffset,
+                    m_DecalCount);
+            }
         }
 
         private void PushShaderVariablesLightList(ComputeCommandBuffer cmd, ComputeShader computeShader)
@@ -650,12 +682,14 @@ namespace VividRP.Runtime
             clusteredLightingData.directionalLights = m_DirectionalLightBuffer;
             clusteredLightingData.punctualLights = m_PunctualLightBuffer;
             clusteredLightingData.areaLights = m_AreaLightBuffer;
+            clusteredLightingData.decalData = m_DecalDataBuffer;
             clusteredLightingData.layeredOffset = m_LayeredOffsetBuffer;
             clusteredLightingData.layeredLightList = m_LayeredLightListBuffer;
             clusteredLightingData.logBaseBuffer = m_LogBaseBuffer;
             clusteredLightingData.directionalLightCount = m_DirectionalLightCount;
             clusteredLightingData.punctualLightCount = m_PunctualLightCount;
             clusteredLightingData.areaLightCount = m_AreaLightCount;
+            clusteredLightingData.decalCount = m_DecalCount;
             clusteredLightingData.mainDirectionalLightIndex = m_MainDirectionalLightIndex;
             clusteredLightingData.clusterTileSize = ClusterTileSize;
             clusteredLightingData.clusterSliceCount = ClusterSliceCount;
@@ -703,6 +737,7 @@ namespace VividRP.Runtime
             EnsureImportedBuffer(ref m_DirectionalLightImportedBuffer, m_DirectionalLightBuffer);
             EnsureImportedBuffer(ref m_PunctualLightImportedBuffer, m_PunctualLightBuffer);
             EnsureImportedBuffer(ref m_AreaLightImportedBuffer, m_AreaLightBuffer);
+            EnsureImportedBuffer(ref m_DecalDataImportedBuffer, m_DecalDataBuffer);
             EnsureImportedBuffer(ref m_FiniteLightBoundImportedBuffer, m_FiniteLightBoundBuffer);
             EnsureImportedBuffer(ref m_LightVolumeDataImportedBuffer, m_LightVolumeDataBuffer);
             EnsureImportedBuffer(ref m_ScreenSpaceBoundsImportedBuffer, m_ScreenSpaceBoundsBuffer);
@@ -718,6 +753,7 @@ namespace VividRP.Runtime
             ReleaseImportedBuffer(ref m_DirectionalLightImportedBuffer, m_DirectionalLightBuffer);
             ReleaseImportedBuffer(ref m_PunctualLightImportedBuffer, m_PunctualLightBuffer);
             ReleaseImportedBuffer(ref m_AreaLightImportedBuffer, m_AreaLightBuffer);
+            ReleaseImportedBuffer(ref m_DecalDataImportedBuffer, m_DecalDataBuffer);
             ReleaseImportedBuffer(ref m_FiniteLightBoundImportedBuffer, m_FiniteLightBoundBuffer);
             ReleaseImportedBuffer(ref m_LightVolumeDataImportedBuffer, m_LightVolumeDataBuffer);
             ReleaseImportedBuffer(ref m_ScreenSpaceBoundsImportedBuffer, m_ScreenSpaceBoundsBuffer);

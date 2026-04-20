@@ -9,6 +9,41 @@ namespace VividRP.Runtime.SubSystem.Decal
 
         [SerializeField] [Min(0.0f)] private float m_BlendDistance;
 
+        [Header("Decal Material")]
+        [SerializeField] private Texture2D m_BaseColorTexture;
+        [SerializeField] private Texture2D m_NormalTexture;
+        [SerializeField] private Color m_BaseColor = Color.white;
+
+        public Texture2D BaseColorTexture
+        {
+            get => m_BaseColorTexture;
+            set => m_BaseColorTexture = value;
+        }
+
+        public Texture2D NormalTexture
+        {
+            get => m_NormalTexture;
+            set => m_NormalTexture = value;
+        }
+
+        public Color BaseColor
+        {
+            get => m_BaseColor;
+            set => m_BaseColor = value;
+        }
+
+        public float BlendDistance => m_BlendDistance;
+
+        private void OnEnable()
+        {
+            DecalSystem.Register(this);
+        }
+
+        private void OnDisable()
+        {
+            DecalSystem.Unregister(this);
+        }
+
         public BoundProxyFeature BoundProxyFeature => BoundProxyFeature.Decal;
 
         public bool IsBoundProxyActive => isActiveAndEnabled;

@@ -40,10 +40,14 @@ namespace VividRP.Editor.Tests
         public void Reset_RestoresVirtualTextureDebugDefaults()
         {
             VividRenderingDebugDisplaySettings.Data.virtualTextureDebugMode = VirtualTextureDebugMode.PhysicalPageId;
+            VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationMode = VirtualTextureVisualizationMode.PageTableResidency;
 
             VividRenderingDebugDisplaySettings.Data.Reset();
 
             Assert.That(VividRenderingDebugDisplaySettings.Data.virtualTextureDebugMode, Is.EqualTo(VirtualTextureDebugMode.None));
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationMode,
+                Is.EqualTo(VirtualTextureVisualizationMode.UsePassSettings));
         }
     }
 }

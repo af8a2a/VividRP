@@ -211,6 +211,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Record(UnsafeGraphContext context)
         {
+
             if (m_Material == null
                 || !m_SourceTexture.innerHandle.IsValid()
                 || !m_OutputTexture.innerHandle.IsValid())

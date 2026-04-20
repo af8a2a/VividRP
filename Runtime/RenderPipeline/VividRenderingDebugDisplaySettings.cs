@@ -14,6 +14,14 @@ namespace VividRP.Runtime
         PhysicalPageId = 3,
     }
 
+    public enum VirtualTextureVisualizationMode
+    {
+        UsePassSettings = 0,
+        None = 1,
+        PhysicalCache = 2,
+        PageTableResidency = 3,
+    }
+
     internal sealed class VividRenderingDebugDisplaySettings
         : DebugDisplaySettings<VividRenderingDebugDisplaySettings>
     {
@@ -83,6 +91,9 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private VirtualTextureDebugMode m_VirtualTextureDebugMode = VirtualTextureDebugMode.None;
+
+        [SerializeField]
+        private VirtualTextureVisualizationMode m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.UsePassSettings;
 
         internal TileClusterDebug tileClusterDebug
         {
@@ -192,6 +203,12 @@ namespace VividRP.Runtime
             set => m_VirtualTextureDebugMode = value;
         }
 
+        internal VirtualTextureVisualizationMode virtualTextureVisualizationMode
+        {
+            get => m_VirtualTextureVisualizationMode;
+            set => m_VirtualTextureVisualizationMode = value;
+        }
+
         public bool AreAnySettingsActive =>
             m_TileClusterDebug != TileClusterDebug.None
             || m_TileClusterDebugByCategory != TileClusterCategoryDebug.Punctual
@@ -210,7 +227,8 @@ namespace VividRP.Runtime
             || m_VisualizationMode != OverlayDebugVisualizationMode.Auto
             || m_DepthMode != OverlayDebugDepthMode.Raw
             || !Mathf.Approximately(m_Slider, 50f)
-            || m_VirtualTextureDebugMode != VirtualTextureDebugMode.None;
+            || m_VirtualTextureDebugMode != VirtualTextureDebugMode.None
+            || m_VirtualTextureVisualizationMode != VirtualTextureVisualizationMode.UsePassSettings;
 
         public IDebugDisplaySettingsPanelDisposable CreatePanel()
         {
@@ -237,6 +255,7 @@ namespace VividRP.Runtime
             m_DepthMode = OverlayDebugDepthMode.Raw;
             m_Slider = 50f;
             m_VirtualTextureDebugMode = VirtualTextureDebugMode.None;
+            m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.UsePassSettings;
         }
 
         private static class Strings
@@ -354,6 +373,12 @@ namespace VividRP.Runtime
             {
                 name = "Mode",
                 tooltip = "Select the virtual texture debug visualization mode."
+            };
+
+            public static readonly NameAndTooltip VirtualTextureVisualizationMode = new()
+            {
+                name = "Overlay Mode",
+                tooltip = "Override the virtual texture visualization pass mode, or keep the pass-defined setting."
             };
         }
 
@@ -544,6 +569,10 @@ namespace VividRP.Runtime
                     Strings.VirtualTextureDebugMode,
                     () => data.virtualTextureDebugMode,
                     value => data.virtualTextureDebugMode = value));
+                foldout.children.Add(CreateEnumField(
+                    Strings.VirtualTextureVisualizationMode,
+                    () => data.virtualTextureVisualizationMode,
+                    value => data.virtualTextureVisualizationMode = value));
                 foldout.children.Add(CreateStatsValue("Resident Pages", () => VirtualTextureStatsRegistry.LastStats.ResidentPageCount));
                 foldout.children.Add(CreateStatsValue("Free Pages", () => VirtualTextureStatsRegistry.LastStats.FreePageCount));
                 foldout.children.Add(CreateStatsValue("Pending Uploads", () => VirtualTextureStatsRegistry.LastStats.PendingUploadCount));

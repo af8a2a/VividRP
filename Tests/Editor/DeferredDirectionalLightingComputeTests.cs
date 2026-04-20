@@ -21,6 +21,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("_GBuffer3"));
             Assert.That(source, Does.Contain("_DepthTexture"));
             Assert.That(source, Does.Contain("_DirectionalShadowTexture"));
+            Assert.That(source, Does.Contain("_GTAOTexture"));
             Assert.That(source, Does.Contain("_MaterialPixelIndices"));
             Assert.That(source, Does.Not.Contain("_MaterialDispatchArgs"));
             Assert.That(source, Does.Contain("_LightingTexture"));
@@ -58,6 +59,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("lerp(1.0, directionalShadow, saturate(directionalLight.shadowStrength))"));
             Assert.That(source, Does.Contain("return CombineVividLightLoopOutput(lightLoopOutput);"));
             Assert.That(source, Does.Contain("ComputeWorldSpacePosition"));
+            Assert.That(source, Does.Contain("surfaceData.ambientOcclusion *= saturate(SampleGTAO(pixelCoord));"));
             Assert.That(source, Does.Not.Contain("tileCount ="));
             Assert.That(source, Does.Contain("uint tileListIndex = groupId.x;"));
             Assert.That(source, Does.Contain("UnpackTileCoord"));
@@ -81,6 +83,19 @@ namespace VividRP.Editor.Tests
 
             Assert.That(resourcePath, Is.Not.Null);
             Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Material/DeferredLit"));
+        }
+
+        [Test]
+        public void VividRPCoreResources_DeclaresGTAOCompute()
+        {
+            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.GTAOCompute));
+
+            Assert.That(field, Is.Not.Null);
+
+            var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
+
+            Assert.That(resourcePath, Is.Not.Null);
+            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/GTAO/GTAO.compute"));
         }
 
         private static string GetComputeShaderSourcePath()

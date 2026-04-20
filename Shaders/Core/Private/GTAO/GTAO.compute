@@ -1,0 +1,166 @@
+#pragma use_dxc
+#pragma require Native16Bit
+
+#pragma kernel CSPrefilterDepths16x16
+#pragma kernel CSGTAOLow
+#pragma kernel CSGTAOMedium
+#pragma kernel CSGTAOHigh
+#pragma kernel CSGTAOUltra
+#pragma kernel CSDenoisePass
+#pragma kernel CSDenoiseLastPass
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/ShaderVariablesFunctions.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/GTAO/XeGTAO.hlsl"
+
+cbuffer GTAOConstantBuffer
+{
+    GTAOConstants g_GTAOConsts;
+}
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/GTAO/XeGTAO.hlsl"
+
+
+Texture2D<float> _DepthTexture;
+Texture2D<float4> _GBuffer1;
+Texture2D<lpfloat> _WorkingDepth;
+Texture2D<uint> _SourceAOTerm;
+Texture2D<lpfloat> _SourceEdges;
+
+RWTexture2D<lpfloat> _WorkingDepthMIP0;
+RWTexture2D<lpfloat> _WorkingDepthMIP1;
+RWTexture2D<lpfloat> _WorkingDepthMIP2;
+RWTexture2D<lpfloat> _WorkingDepthMIP3;
+RWTexture2D<lpfloat> _WorkingDepthMIP4;
+RWTexture2D<uint> _WorkingAOTerm;
+RWTexture2D<unorm float> _WorkingEdges;
+RWTexture2D<uint> _DenoiseAOTerm;
+RWTexture2D<unorm float> _GTAOTexture;
+
+lpfloat3 LoadNormal( int2 pos )
+{
+    float3 normalWS = DecodeVividNormalOct( _GBuffer1.Load( int3( pos, 0 ) ).xy );
+
+    float4x4 viewMatrix;
+    float4x4 projMatrix;
+    GetLeftHandedViewSpaceMatrices( viewMatrix, projMatrix );
+
+    return (lpfloat3)normalize( mul( (float3x3)viewMatrix, normalWS ) );
+}
+
+lpfloat2 SpatioTemporalNoise( uint2 pixCoord, uint temporalIndex )
+{
+    uint index = HilbertIndex( pixCoord.x, pixCoord.y );
+    index += 288 * (temporalIndex % 64);
+    return lpfloat2( frac( 0.5 + index * float2( 0.75487766624669276005, 0.5698402909980532659114 ) ) );
+}
+
+[numthreads(8, 8, 1)]
+void CSPrefilterDepths16x16( uint2 dispatchThreadID : SV_DispatchThreadID, uint2 groupThreadID : SV_GroupThreadID )
+{
+    XeGTAO_PrefilterDepths16x16(
+        dispatchThreadID,
+        groupThreadID,
+        g_GTAOConsts,
+        _DepthTexture,
+        sampler_PointClamp,
+        _WorkingDepthMIP0,
+        _WorkingDepthMIP1,
+        _WorkingDepthMIP2,
+        _WorkingDepthMIP3,
+        _WorkingDepthMIP4 );
+}
+
+[numthreads(XE_GTAO_NUMTHREADS_X, XE_GTAO_NUMTHREADS_Y, 1)]
+void CSGTAOLow( uint2 pixCoord : SV_DispatchThreadID )
+{
+    XeGTAO_MainPass(
+        pixCoord,
+        1,
+        2,
+        SpatioTemporalNoise( pixCoord, g_GTAOConsts.NoiseIndex ),
+        LoadNormal( pixCoord ),
+        g_GTAOConsts,
+        _WorkingDepth,
+        sampler_PointClamp,
+        _WorkingAOTerm,
+        _WorkingEdges );
+}
+
+[numthreads(XE_GTAO_NUMTHREADS_X, XE_GTAO_NUMTHREADS_Y, 1)]
+void CSGTAOMedium( uint2 pixCoord : SV_DispatchThreadID )
+{
+    XeGTAO_MainPass(
+        pixCoord,
+        2,
+        2,
+        SpatioTemporalNoise( pixCoord, g_GTAOConsts.NoiseIndex ),
+        LoadNormal( pixCoord ),
+        g_GTAOConsts,
+        _WorkingDepth,
+        sampler_PointClamp,
+        _WorkingAOTerm,
+        _WorkingEdges );
+}
+
+[numthreads(XE_GTAO_NUMTHREADS_X, XE_GTAO_NUMTHREADS_Y, 1)]
+void CSGTAOHigh( uint2 pixCoord : SV_DispatchThreadID )
+{
+    XeGTAO_MainPass(
+        pixCoord,
+        3,
+        3,
+        SpatioTemporalNoise( pixCoord, g_GTAOConsts.NoiseIndex ),
+        LoadNormal( pixCoord ),
+        g_GTAOConsts,
+        _WorkingDepth,
+        sampler_PointClamp,
+        _WorkingAOTerm,
+        _WorkingEdges );
+}
+
+[numthreads(XE_GTAO_NUMTHREADS_X, XE_GTAO_NUMTHREADS_Y, 1)]
+void CSGTAOUltra( uint2 pixCoord : SV_DispatchThreadID )
+{
+    XeGTAO_MainPass(
+        pixCoord,
+        9,
+        3,
+        SpatioTemporalNoise( pixCoord, g_GTAOConsts.NoiseIndex ),
+        LoadNormal( pixCoord ),
+        g_GTAOConsts,
+        _WorkingDepth,
+        sampler_PointClamp,
+        _WorkingAOTerm,
+        _WorkingEdges );
+}
+
+
+[numthreads(XE_GTAO_NUMTHREADS_X, XE_GTAO_NUMTHREADS_Y, 1)]
+void CSDenoisePass( uint2 dispatchThreadID : SV_DispatchThreadID )
+{
+    const uint2 pixCoordBase = dispatchThreadID * uint2( 2, 1 );
+    XeGTAO_Denoise(
+        pixCoordBase,
+        g_GTAOConsts,
+        _SourceAOTerm,
+        _SourceEdges,
+        sampler_PointClamp,
+        _DenoiseAOTerm,
+        false );
+}
+
+[numthreads(XE_GTAO_NUMTHREADS_X, XE_GTAO_NUMTHREADS_Y, 1)]
+void CSDenoiseLastPass( uint2 dispatchThreadID : SV_DispatchThreadID )
+{
+    const uint2 pixCoordBase = dispatchThreadID * uint2( 2, 1 );
+    XeGTAO_Denoise(
+        pixCoordBase,
+        g_GTAOConsts,
+        _SourceAOTerm,
+        _SourceEdges,
+        sampler_PointClamp,
+        _GTAOTexture,
+        true );
+}

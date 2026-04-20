@@ -96,6 +96,9 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Material/DeferredLit")]
         public ComputeShader DeferredLitCompute;
 
+        [ResourcePath("Shaders/Core/Private/GTAO/GTAO.compute")]
+        public ComputeShader GTAOCompute;
+
 
         [ResourcePath("Shaders/Core/Private/Debug/ClusterDebug")]
         public Shader ClusterDebugShader;

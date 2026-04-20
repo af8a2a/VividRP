@@ -32,6 +32,7 @@ namespace VividRP.Editor.Tests
                 "GBuffer2",
                 "GBuffer3",
                 "GBuffer4",
+                "GTAOTexture",
                 "PreIntegratedFGD_CharlieAndFabric",
                 "PreIntegratedFGD_GGXDisneyDiffuse",
                 "SkyIBLCubemap"
@@ -83,6 +84,7 @@ namespace VividRP.Editor.Tests
             AssertTextureSize(pass, "m_GBuffer3", 511, 257);
             AssertTextureSize(pass, "m_GBuffer4", 511, 257);
             AssertTextureSize(pass, "m_DepthTexture", 511, 257);
+            AssertTextureSize(pass, "m_GTAOTexture", 511, 257);
             AssertTextureSize(pass, "m_ColorTexture", 511, 257);
             AssertTextureSize(pass, "m_PreIntegratedFGDGGXDisneyDiffuseTexture", 64, 64);
             AssertTextureSize(pass, "m_PreIntegratedFGDCharlieAndFabricTexture", 64, 64);
@@ -126,6 +128,25 @@ namespace VividRP.Editor.Tests
             Assert.That(directionalShadowTexture, Is.SameAs(localDirectionalShadowTexture));
             Assert.That(directionalShadowTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16_SFloat));
             Assert.That(directionalShadowTexture.desc.ClearColor, Is.EqualTo(Color.white));
+        }
+
+        [Test]
+        public void Prepare_KeepsLocalGTAOFallback_WhenGraphDoesNotBindOne()
+        {
+            var pass = new DeferredLightingPass();
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 256;
+            cameraData.actualHeight = 144;
+
+            pass.Prepare(frameData);
+
+            var localGtaoTexture = GetFieldValue<RenderGraphTexture>(pass, "m_LocalGTAOTexture");
+            var gtaoTexture = GetFieldValue<RenderGraphTexture>(pass, "m_GTAOTexture");
+
+            Assert.That(gtaoTexture, Is.SameAs(localGtaoTexture));
+            Assert.That(gtaoTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8_UNorm));
+            Assert.That(gtaoTexture.desc.ClearColor, Is.EqualTo(Color.white));
         }
 
         [Test]

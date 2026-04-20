@@ -19,6 +19,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int GBuffer4Id = Shader.PropertyToID("_GBuffer4");
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
         private static readonly int DirectionalShadowTextureId = Shader.PropertyToID("_DirectionalShadowTexture");
+        private static readonly int GTAOTextureId = Shader.PropertyToID("_GTAOTexture");
         private static readonly int LightingTextureId = Shader.PropertyToID("_LightingTexture");
         private static readonly int LightingWidthId = Shader.PropertyToID("_LightingWidth");
         private static readonly int LightingHeightId = Shader.PropertyToID("_LightingHeight");
@@ -75,6 +76,9 @@ namespace VividRP.Runtime.RenderPass.Core
             Name = "DirectionalShadowTexture",
             Access = AccessFlags.Read)]
         private RenderGraphTexture m_DirectionalShadowTexture;
+
+        [RenderGraphResource(Name = "GTAOTexture", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_GTAOTexture;
 
         [RenderGraphResource(Name = "Color", Access = AccessFlags.Write, AttachmentIndex = 0)]
         private RenderGraphTexture m_ColorTexture;
@@ -169,6 +173,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_IsLogBaseBufferEnabled;
         private readonly RenderGraphTexture m_LocalGBuffer4;
         private readonly RenderGraphTexture m_LocalDirectionalShadowTexture;
+        private readonly RenderGraphTexture m_LocalGTAOTexture;
         private readonly RenderGraphBuffer m_LocalDirectionalLightBuffer;
         private readonly RenderGraphBuffer m_LocalPunctualLightBuffer;
         private readonly RenderGraphBuffer m_LocalAreaLightBuffer;
@@ -203,6 +208,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LocalDirectionalShadowTexture.desc.FilterMode = FilterMode.Point;
             m_LocalDirectionalShadowTexture.desc.WrapMode = TextureWrapMode.Clamp;
             m_DirectionalShadowTexture = m_LocalDirectionalShadowTexture;
+            m_LocalGTAOTexture = RenderGraphTexture.CreateColorTarget("GTAOTexture", GraphicsFormat.R8_UNorm);
+            m_LocalGTAOTexture.desc.ClearBuffer = true;
+            m_LocalGTAOTexture.desc.ClearColor = Color.white;
+            m_LocalGTAOTexture.desc.FilterMode = FilterMode.Point;
+            m_LocalGTAOTexture.desc.WrapMode = TextureWrapMode.Clamp;
+            m_GTAOTexture = m_LocalGTAOTexture;
             m_ColorTexture = RenderGraphTexture.CreateOutput("Color", GraphicsFormat.R16G16B16A16_SFloat);
             m_ColorTexture.desc.EnableRandomWrite = true;
             m_ColorTexture.desc.ClearBuffer = true;
@@ -269,6 +280,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer3.Resize(width, height);
             m_GBuffer4.Resize(width, height);
             m_DepthTexture.Resize(width, height);
+            m_GTAOTexture.Resize(width, height);
             m_ColorTexture.Resize(width, height);
             PrepareClusteredLightingParameters(frameData);
             PreparePreIntegratedFGDResources();
@@ -391,6 +403,20 @@ namespace VividRP.Runtime.RenderPass.Core
                     kernel,
                     DirectionalShadowTextureId,
                     m_DirectionalShadowTexture.innerHandle);
+            }
+            if (ReferenceEquals(m_GTAOTexture, m_LocalGTAOTexture)
+                || m_GTAOTexture == null
+                || !m_GTAOTexture.innerHandle.IsValid())
+            {
+                cmd.SetComputeTextureParam(
+                    m_DeferredLitCompute,
+                    kernel,
+                    GTAOTextureId,
+                    Texture2D.whiteTexture);
+            }
+            else
+            {
+                cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GTAOTextureId, m_GTAOTexture.innerHandle);
             }
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, LightingTextureId, m_ColorTexture.innerHandle);
             cmd.SetComputeIntParam(m_DeferredLitCompute, LightingWidthId, m_LightingWidth);

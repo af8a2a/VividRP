@@ -19,6 +19,7 @@ Texture2D<float4> _GBuffer3;
 Texture2D<float4> _GBuffer4;
 Texture2D<float> _DepthTexture;
 Texture2D<float> _DirectionalShadowTexture;
+Texture2D<float> _GTAOTexture;
 StructuredBuffer<uint> _MaterialPixelIndices;
 
 RWTexture2D<float4> _LightingTexture;
@@ -51,6 +52,12 @@ float SampleDirectionalShadow(uint2 pixelCoord)
 {
     float2 uv = (float2(pixelCoord) + 0.5) / float2(_LightingWidth, _LightingHeight);
     return _DirectionalShadowTexture.SampleLevel(sampler_PointClamp, uv, 0).x;
+}
+
+float SampleGTAO(uint2 pixelCoord)
+{
+    float2 uv = (float2(pixelCoord) + 0.5) / float2(_LightingWidth, _LightingHeight);
+    return _GTAOTexture.SampleLevel(sampler_PointClamp, uv, 0).x;
 }
 
 float EvaluateDeferredDirectionalShadowAttenuation(
@@ -173,6 +180,8 @@ void DeferredLit(
     VividGBufferSurfaceData surfaceData = LoadVividGBuffer(pixelCoord);
     if (surfaceData.materialId > VIVID_GBUFFER_MATERIAL_CLEARCOAT)
         return;
+
+    surfaceData.ambientOcclusion *= saturate(SampleGTAO(pixelCoord));
 
     float2 uv = (float2(pixelCoord) + 0.5) * _ScreenSize.zw;
     float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, UNITY_MATRIX_I_VP);

@@ -55,6 +55,7 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("BindIndirectLightingParameters"));
             Assert.That(passSource, Does.Contain("BindLightLoopParameters"));
             Assert.That(passSource, Does.Contain("PrepareSkyTextureState"));
+            Assert.That(passSource, Does.Contain("Shader.PropertyToID(\"_GTAOTexture\")"));
             Assert.That(passSource, Does.Contain("Shader.PropertyToID(\"_SkyTexture\")"));
             Assert.That(passSource, Does.Contain("Shader.PropertyToID(\"_SkyTextureTint\")"));
             Assert.That(passSource, Does.Contain("Shader.PropertyToID(\"_SkyTextureParams\")"));
@@ -77,6 +78,7 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("SetLightLoopBuffer(cmd, kernel, LayeredLightListId"));
             Assert.That(passSource, Does.Contain("SetLightLoopBuffer(cmd, kernel, LogBaseBufferId"));
             Assert.That(passSource, Does.Contain("PrepareClusteredLightingParameters"));
+            Assert.That(passSource, Does.Contain("m_LocalGTAOTexture"));
             Assert.That(passSource, Does.Not.Contain("PunctualLightCountId"));
             Assert.That(passSource, Does.Not.Contain("AreaLightCountId"));
             Assert.That(passSource, Does.Not.Contain("LightGridGlobalPass"));

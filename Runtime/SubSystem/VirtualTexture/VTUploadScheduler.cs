@@ -144,10 +144,14 @@ namespace VividRP.Runtime
                 m_Requests[index] = request;
             }
 
-            internal void Submit(IVTUploadFenceHandle fence, int requestCount)
+            internal void SealRequests(int requestCount)
+            {
+                m_RequestCount = Mathf.Clamp(requestCount, 0, Capacity);
+            }
+
+            internal void Submit(IVTUploadFenceHandle fence)
             {
                 m_Fence = fence ?? throw new ArgumentNullException(nameof(fence));
-                m_RequestCount = Mathf.Clamp(requestCount, 0, Capacity);
             }
 
             internal bool IsPassed()
@@ -257,6 +261,7 @@ namespace VividRP.Runtime
             if (requestCount == 0)
                 return false;
 
+            batch.SealRequests(requestCount);
             batch.StagingTexture.Apply(false, false);
             for (int uploadIndex = 0; uploadIndex < requestCount; uploadIndex++)
             {
@@ -264,7 +269,7 @@ namespace VividRP.Runtime
                 cmd.CopyTexture(batch.StagingTexture, uploadIndex, 0, m_PhysicalCache, request.PhysicalPageId, 0);
             }
 
-            batch.Submit(s_FenceFactory.Create(cmd), requestCount);
+            batch.Submit(s_FenceFactory.Create(cmd));
             return true;
         }
 

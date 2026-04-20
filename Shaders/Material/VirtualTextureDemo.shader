@@ -134,7 +134,6 @@ Shader "VividRP/Material/VirtualTextureDemo"
 
                     float4 sampledColor = VTSamplePhysicalCache(input.uv, resolved) * _BaseTint;
                     sampledColor.rgb = ResolveDebugColor(requestedMip, resolved, sampledColor);
-                    sampledColor.rgb = VividApplyPreExposure(sampledColor.rgb);
                     return sampledColor;
                 }
             ENDHLSL

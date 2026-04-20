@@ -18,6 +18,12 @@ namespace VividRP.Runtime
         private static int s_NextSpaceId = 1;
         private static int s_FallbackFrameIndex = -1;
 
+#if UNITY_EDITOR
+        [UnityEditor.InitializeOnLoadMethod]
+#else
+        [RuntimeInitializeOnLoadMethod]
+#endif
+
         internal static void Initialize()
         {
             if (s_Initialized)

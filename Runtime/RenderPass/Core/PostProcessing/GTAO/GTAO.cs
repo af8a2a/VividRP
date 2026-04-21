@@ -5,7 +5,7 @@ using UnityEngine.Rendering;
 namespace VividRP.Runtime
 {
     [Serializable]
-    [VolumeComponentMenu("Post-processing/GTAO")]
+    [VolumeComponentMenu("Post-processing/Ground Truth Ambient Occlusion")]
     public sealed class GTAO : VolumeComponent, IPostProcessComponent
     {
         [Tooltip("Whether GTAO is enabled.")]

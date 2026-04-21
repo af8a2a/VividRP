@@ -1,10 +1,37 @@
 using UnityEngine;
+using System.Reflection;
 
 namespace VividRP.Runtime
 {
     public static class CameraProjectionMatrixUtility
     {
         private const float MatrixTolerance = 0.0001f;
+        private static readonly PropertyInfo s_ProjectionMatrixModeProperty =
+            typeof(Camera).GetProperty("projectionMatrixMode", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+        internal enum CameraProjectionStateMode
+        {
+            Explicit = 0,
+            Implicit = 1,
+            PhysicalPropertiesBased = 2
+        }
+
+        internal readonly struct CameraProjectionState
+        {
+            internal CameraProjectionState(
+                CameraProjectionStateMode mode,
+                Matrix4x4 projectionMatrix,
+                Matrix4x4 nonJitteredProjectionMatrix)
+            {
+                Mode = mode;
+                ProjectionMatrix = projectionMatrix;
+                NonJitteredProjectionMatrix = nonJitteredProjectionMatrix;
+            }
+
+            internal CameraProjectionStateMode Mode { get; }
+            internal Matrix4x4 ProjectionMatrix { get; }
+            internal Matrix4x4 NonJitteredProjectionMatrix { get; }
+        }
 
         public static Matrix4x4 GetProjectionMatrix(Camera camera)
         {
@@ -13,16 +40,19 @@ namespace VividRP.Runtime
                 return Matrix4x4.identity;
             }
 
-            var projectionMatrix = camera.projectionMatrix;
-            if (IsProjectionMatrixUsable(projectionMatrix))
+            if (ResolveEffectiveProjectionStateMode(camera) == CameraProjectionStateMode.Explicit)
             {
-                return projectionMatrix;
-            }
+                var projectionMatrix = camera.projectionMatrix;
+                if (IsProjectionMatrixUsable(projectionMatrix))
+                {
+                    return projectionMatrix;
+                }
 
-            var nonJitteredProjectionMatrix = camera.nonJitteredProjectionMatrix;
-            if (IsProjectionMatrixUsable(nonJitteredProjectionMatrix))
-            {
-                return nonJitteredProjectionMatrix;
+                var nonJitteredProjectionMatrix = camera.nonJitteredProjectionMatrix;
+                if (IsProjectionMatrixUsable(nonJitteredProjectionMatrix))
+                {
+                    return nonJitteredProjectionMatrix;
+                }
             }
 
             return BuildProjectionMatrix(camera);
@@ -35,16 +65,19 @@ namespace VividRP.Runtime
                 return Matrix4x4.identity;
             }
 
-            var nonJitteredProjectionMatrix = camera.nonJitteredProjectionMatrix;
-            if (IsProjectionMatrixUsable(nonJitteredProjectionMatrix))
+            if (ResolveEffectiveProjectionStateMode(camera) == CameraProjectionStateMode.Explicit)
             {
-                return nonJitteredProjectionMatrix;
-            }
+                var nonJitteredProjectionMatrix = camera.nonJitteredProjectionMatrix;
+                if (IsProjectionMatrixUsable(nonJitteredProjectionMatrix))
+                {
+                    return nonJitteredProjectionMatrix;
+                }
 
-            var projectionMatrix = camera.projectionMatrix;
-            if (IsProjectionMatrixUsable(projectionMatrix))
-            {
-                return projectionMatrix;
+                var projectionMatrix = camera.projectionMatrix;
+                if (IsProjectionMatrixUsable(projectionMatrix))
+                {
+                    return projectionMatrix;
+                }
             }
 
             return BuildProjectionMatrix(camera);
@@ -66,6 +99,36 @@ namespace VividRP.Runtime
             camera.projectionMatrix = projectionMatrix;
         }
 
+        internal static CameraProjectionState CaptureProjectionState(Camera camera)
+        {
+            if (camera == null)
+                return default;
+
+            return new CameraProjectionState(
+                ResolveEffectiveProjectionStateMode(camera),
+                camera.projectionMatrix,
+                camera.nonJitteredProjectionMatrix);
+        }
+
+        internal static void RestoreProjectionState(Camera camera, in CameraProjectionState state)
+        {
+            if (camera == null)
+                return;
+
+            switch (state.Mode)
+            {
+                case CameraProjectionStateMode.Explicit:
+                    camera.nonJitteredProjectionMatrix = state.NonJitteredProjectionMatrix;
+                    camera.projectionMatrix = state.ProjectionMatrix;
+                    break;
+                case CameraProjectionStateMode.PhysicalPropertiesBased:
+                case CameraProjectionStateMode.Implicit:
+                default:
+                    camera.ResetProjectionMatrix();
+                    break;
+            }
+        }
+
         private static Matrix4x4 BuildProjectionMatrix(Camera camera)
         {
             var nearClip = Mathf.Max(0.0001f, camera.nearClipPlane);
@@ -79,8 +142,64 @@ namespace VividRP.Runtime
                 return Matrix4x4.Ortho(-halfWidth, halfWidth, -halfHeight, halfHeight, nearClip, farClip);
             }
 
+            if (ResolveProjectionStateMode(camera) == CameraProjectionStateMode.PhysicalPropertiesBased || camera.usePhysicalProperties)
+            {
+                Matrix4x4 projectionMatrix;
+                Camera.CalculateProjectionMatrixFromPhysicalProperties(
+                    out projectionMatrix,
+                    camera.focalLength,
+                    camera.sensorSize,
+                    camera.lensShift,
+                    nearClip,
+                    farClip,
+                    new Camera.GateFitParameters(camera.gateFit, aspect));
+                return projectionMatrix;
+            }
+
             var fieldOfView = Mathf.Clamp(camera.fieldOfView, 0.0001f, 179.0f);
             return Matrix4x4.Perspective(fieldOfView, aspect, nearClip, farClip);
+        }
+
+        private static CameraProjectionStateMode ResolveProjectionStateMode(Camera camera)
+        {
+            if (camera == null)
+                return CameraProjectionStateMode.Implicit;
+
+            if (s_ProjectionMatrixModeProperty?.GetValue(camera) is System.Enum modeEnum
+                && System.Enum.TryParse(modeEnum.ToString(), out CameraProjectionStateMode mode))
+            {
+                return mode;
+            }
+
+            return camera.usePhysicalProperties
+                ? CameraProjectionStateMode.PhysicalPropertiesBased
+                : CameraProjectionStateMode.Implicit;
+        }
+
+        private static CameraProjectionStateMode ResolveEffectiveProjectionStateMode(Camera camera)
+        {
+            var mode = ResolveProjectionStateMode(camera);
+            if (mode != CameraProjectionStateMode.Explicit || camera == null)
+                return mode;
+
+            var expectedProjection = BuildProjectionMatrix(camera);
+            if (IsProjectionMatrixUsable(camera.nonJitteredProjectionMatrix)
+                && MaxAbsDiff(camera.nonJitteredProjectionMatrix, expectedProjection) <= 0.0001f)
+            {
+                return camera.usePhysicalProperties
+                    ? CameraProjectionStateMode.PhysicalPropertiesBased
+                    : CameraProjectionStateMode.Implicit;
+            }
+
+            if (IsProjectionMatrixUsable(camera.projectionMatrix)
+                && MaxAbsDiff(camera.projectionMatrix, expectedProjection) <= 0.0001f)
+            {
+                return camera.usePhysicalProperties
+                    ? CameraProjectionStateMode.PhysicalPropertiesBased
+                    : CameraProjectionStateMode.Implicit;
+            }
+
+            return mode;
         }
 
         private static float ResolveAspect(Camera camera)

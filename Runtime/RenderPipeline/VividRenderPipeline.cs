@@ -65,9 +65,11 @@ namespace VividRP.Runtime
 
             CommandBuffer cmdBuffer = null;
             var shouldSubmit = false;
+            var projectionState = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
 
             try
             {
+                CameraProjectionMatrixUtility.RestoreProjectionState(camera, projectionState);
                 VividVolumeManagerUtility.Update(camera);
 
                 if (!camera.TryGetCullingParameters(out var cullingParameters))
@@ -76,11 +78,11 @@ namespace VividRP.Runtime
                 EmitGeometryForCamera(camera);
                 ApplyShadowDistanceOverride(camera, ref cullingParameters);
                 var cullingResults = context.Cull(ref cullingParameters);
-                context.SetupCameraProperties(camera);
 
                 cmdBuffer = CommandBufferPool.Get("VividRP");
 
                 PassRecorder.InitializeContext(context, camera, cullingResults);
+                context.SetupCameraProperties(camera);
 
                 if (m_Asset != null && m_Asset.EnableGPUDriven)
                 {
@@ -154,9 +156,15 @@ namespace VividRP.Runtime
                     CommandBufferPool.Release(cmdBuffer);
                 }
 
-                if (shouldSubmit)
-                    context.Submit();
-
+                try
+                {
+                    if (shouldSubmit)
+                        context.Submit();
+                }
+                finally
+                {
+                    CameraProjectionMatrixUtility.RestoreProjectionState(camera, projectionState);
+                }
 
                 EndCameraRendering(context, camera);
             }

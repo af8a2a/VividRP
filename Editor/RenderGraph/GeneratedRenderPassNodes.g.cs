@@ -39,6 +39,9 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class DeferredLightingPass : RenderPassNodeData { }
 
     [Serializable]
+    internal sealed class DepthOfFieldPass : RenderPassNodeData { }
+
+    [Serializable]
     internal sealed class DiffusionPass : RenderPassNodeData { }
 
     [Serializable]

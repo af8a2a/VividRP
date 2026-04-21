@@ -19,7 +19,6 @@ cbuffer GTAOConstantBuffer
     GTAOConstants g_GTAOConsts;
 }
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/GTAO/XeGTAO.hlsl"
 
 
 Texture2D<float> _DepthTexture;

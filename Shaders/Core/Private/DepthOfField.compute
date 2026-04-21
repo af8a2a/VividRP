@@ -1,0 +1,577 @@
+#pragma kernel KResampleColor
+#pragma kernel KCopyCoC
+#pragma kernel KCoCPhysical
+#pragma kernel KCoCManual
+#pragma kernel KReprojectCoC
+#pragma kernel KCoCMinMax
+#pragma kernel KMinMaxDilate
+#pragma kernel KComputeSlowTiles
+#pragma kernel KGatherFastTiles
+#pragma kernel KCombineFastTiles
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+
+Texture2D<float4> _InputColorTexture;
+Texture2D<float> _InputLinearDepthTexture;
+Texture2D<float> _InputCoCTexture;
+Texture2D<float> _InputHistoryCoCTexture;
+Texture2D<float2> _MotionVectorsTexture;
+Texture2D<float4> _TileTexture;
+
+RWTexture2D<float4> _OutputColorTexture;
+RWTexture2D<float> _OutputCoCTexture;
+RWTexture2D<float4> _OutputTileTexture;
+
+StructuredBuffer<float2> _VividDoFApertureShapeTable;
+int _VividDoFApertureShapeTableCount;
+
+float4 _VividDoFSourceSize;
+float4 _VividDoFFullResSize;
+float4 _VividDoFCurrentSize;
+float4 _VividDoFTileSize;
+float4 _VividDoFParams0;
+float4 _VividDoFParams1;
+
+static const uint kThreadGroupSize = 8u;
+static const uint kTileSize = 8u;
+static const float kBigCoC = 1200.0;
+
+static const int kFastInFocusTile = 0;
+static const int kSlowInFocusTile = 1;
+static const int kFastDefocusTile = 2;
+
+uint2 GetCurrentSize()
+{
+    return max((uint2)_VividDoFCurrentSize.xy, 1u);
+}
+
+uint2 GetSourceSize()
+{
+    return max((uint2)_VividDoFSourceSize.xy, 1u);
+}
+
+uint2 GetFullResSize()
+{
+    return max((uint2)_VividDoFFullResSize.xy, 1u);
+}
+
+uint2 GetTileCount()
+{
+    return max((uint2)_VividDoFTileSize.xy, 1u);
+}
+
+int2 ClampCoord(int2 coord, int2 size)
+{
+    return clamp(coord, int2(0, 0), max(size - 1, 0));
+}
+
+float2 ClampUv(float2 uv, float2 invSize)
+{
+    float2 border = invSize * 0.5;
+    return clamp(uv, border, 1.0 - border);
+}
+
+float2 GetFullResUv(float2 fullResPosition)
+{
+    return ClampUv((fullResPosition + 0.5) * _VividDoFFullResSize.zw, _VividDoFFullResSize.zw);
+}
+
+float SampleDepthAtFullRes(float2 fullResPosition)
+{
+    int2 fullResSize = (int2)GetFullResSize();
+    int2 coord = ClampCoord((int2)floor(fullResPosition + 0.5), fullResSize);
+    return _InputLinearDepthTexture[coord];
+}
+
+float SampleCoCAtFullRes(float2 fullResPosition)
+{
+    int2 fullResSize = (int2)GetFullResSize();
+    int2 coord = ClampCoord((int2)floor(fullResPosition + 0.5), fullResSize);
+    return _InputCoCTexture[coord];
+}
+
+float4 SampleColorAtFullRes(float2 fullResPosition, bool pointSampling)
+{
+    float2 uv = GetFullResUv(fullResPosition);
+    int2 sourceSize = (int2)GetSourceSize();
+    if (pointSampling)
+    {
+        int2 coord = ClampCoord((int2)floor(uv * _VividDoFSourceSize.xy), sourceSize);
+        return _InputColorTexture[coord];
+    }
+
+    uv = ClampUv(uv, _VividDoFSourceSize.zw);
+    return _InputColorTexture.SampleLevel(sampler_LinearClamp, uv, 0.0);
+}
+
+float4 SampleColorAtUv(float2 uv)
+{
+    uv = ClampUv(uv, _VividDoFSourceSize.zw);
+    return _InputColorTexture.SampleLevel(sampler_LinearClamp, uv, 0.0);
+}
+
+float SampleHistoryCoC(float2 uv)
+{
+    uv = ClampUv(uv, _VividDoFFullResSize.zw);
+    return _InputHistoryCoCTexture.SampleLevel(sampler_LinearClamp, uv, 0.0);
+}
+
+float ComputeManualNearBlend(float linearDepth)
+{
+    if (_VividDoFParams1.z < 0.5)
+        return 1.0;
+
+    float nearEnd = max(_VividDoFParams0.y, 1e-4);
+    return 1.0 - saturate(linearDepth / (nearEnd * nearEnd));
+}
+
+float ComputePhysicalCoC(float linearDepth)
+{
+    if (linearDepth <= 0.0)
+        return 0.0;
+
+    float focusDistance = _VividDoFParams0.x;
+    float physicalMaxCoC = _VividDoFParams0.y;
+    float nearLimit = _VividDoFParams0.z;
+    float farLimit = _VividDoFParams0.w;
+    float coc = (1.0 - focusDistance / max(linearDepth, 1e-4)) * physicalMaxCoC;
+    return clamp(coc, -nearLimit, farLimit);
+}
+
+float ComputeManualCoC(float linearDepth)
+{
+    if (linearDepth <= 0.0)
+        return 0.0;
+
+    float nearStart = _VividDoFParams0.x;
+    float nearEnd = _VividDoFParams0.y;
+    float farStart = _VividDoFParams0.z;
+    float farEnd = _VividDoFParams0.w;
+    float nearLimit = _VividDoFParams1.x;
+    float farLimit = _VividDoFParams1.y;
+
+    float nearRange = nearStart - nearEnd;
+    float farRange = farEnd - farStart;
+    float nearCoC = abs(nearRange) > 1e-4 ? saturate((linearDepth - nearEnd) / nearRange) : step(linearDepth, nearEnd);
+    float farCoC = abs(farRange) > 1e-4 ? saturate((linearDepth - farStart) / farRange) : step(farStart, linearDepth);
+    nearCoC *= ComputeManualNearBlend(linearDepth);
+
+    return farCoC * farLimit - nearCoC * nearLimit;
+}
+
+float4 LoadTileData(float2 fullResPosition)
+{
+    int2 tileCount = (int2)GetTileCount();
+    int2 tileCoord = ClampCoord((int2)floor(fullResPosition / kTileSize), tileCount);
+    return _TileTexture[tileCoord];
+}
+
+float GetTileMinFarRadius(float4 tileData)
+{
+    return tileData.y > 0.0 ? max(tileData.x, 0.0) : 0.0;
+}
+
+float GetTileMaxFarRadius(float4 tileData)
+{
+    return max(tileData.y, 0.0);
+}
+
+float GetTileMinNearRadius(float4 tileData)
+{
+    return tileData.w < 0.0 ? max(-tileData.z, 0.0) : 0.0;
+}
+
+float GetTileMaxNearRadius(float4 tileData)
+{
+    return tileData.w < 0.0 ? max(-tileData.w, 0.0) : 0.0;
+}
+
+int GetTileClass(float4 tileData)
+{
+    float minFarRadius = GetTileMinFarRadius(tileData);
+    float maxFarRadius = GetTileMaxFarRadius(tileData);
+    float minNearRadius = GetTileMinNearRadius(tileData);
+    float maxNearRadius = GetTileMaxNearRadius(tileData);
+
+    float minRadius;
+    if (maxFarRadius > 0.0 && maxNearRadius > 0.0)
+        minRadius = min(minFarRadius, minNearRadius);
+    else
+        minRadius = max(minFarRadius, minNearRadius);
+
+    float maxRadius = max(maxFarRadius, maxNearRadius);
+
+    if (minRadius < 1.0 && maxRadius < 1.0)
+        return kFastInFocusTile;
+
+    if (minRadius > 1.0 && maxRadius > 1.0)
+        return kFastDefocusTile;
+
+    return kSlowInFocusTile;
+}
+
+float ResolveTileGatherRadius(float4 tileData, float centerCoC)
+{
+    float maxFarRadius = GetTileMaxFarRadius(tileData);
+    float maxNearRadius = GetTileMaxNearRadius(tileData);
+    float farRadius = centerCoC > 0.0 ? min(maxFarRadius, 2.0 * abs(centerCoC)) : 0.0;
+    return max(farRadius, maxNearRadius);
+}
+
+int ResolveTileSampleCount(float4 tileData, float centerCoC)
+{
+    int requestedSamples = centerCoC > 0.0 ? (int)round(_VividDoFParams0.y) : (int)round(_VividDoFParams0.x);
+    requestedSamples = max(requestedSamples, 1);
+
+    float gatherRadius = ResolveTileGatherRadius(tileData, centerCoC);
+    if (gatherRadius <= 1e-4)
+        return 1;
+
+    float minFarRadius = GetTileMinFarRadius(tileData);
+    float minNearRadius = GetTileMinNearRadius(tileData);
+    float maxFarRadius = GetTileMaxFarRadius(tileData);
+    float maxNearRadius = GetTileMaxNearRadius(tileData);
+
+    float minRadius;
+    if (maxFarRadius > 0.0 && maxNearRadius > 0.0)
+        minRadius = min(minFarRadius, minNearRadius);
+    else
+        minRadius = max(minFarRadius, minNearRadius);
+
+    float ratio = saturate(minRadius / max(gatherRadius, 1e-4));
+    float adaptiveScale = lerp(_VividDoFParams1.x, _VividDoFParams1.y, ratio);
+    return max(1, (int)ceil(requestedSamples * adaptiveScale));
+}
+
+float GetPhysicalSampleWeight(float cocRadius)
+{
+    float pixelRadius = 0.70710678;
+    float radius = max(pixelRadius, abs(cocRadius));
+    return (pixelRadius * pixelRadius) / max(radius * radius, 1e-4);
+}
+
+float ComputeCoverage(float sampleRadius, float distanceInPixels)
+{
+    float weight = saturate(1.0 - distanceInPixels / max(sampleRadius, 1e-4));
+    return weight * weight;
+}
+
+float2 GetApertureSample(float t)
+{
+    uint count = (uint)max(_VividDoFApertureShapeTableCount, 1);
+    uint index = min((uint)(frac(t) * count), count - 1u);
+    return _VividDoFApertureShapeTable[index];
+}
+
+float Hash12(float2 p)
+{
+    float3 p3 = frac(float3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return frac((p3.x + p3.y) * p3.z);
+}
+
+float3 EvaluatePhysicalBlur(float2 fullResPosition, bool pointSampling)
+{
+    float4 sourceColor = SampleColorAtFullRes(fullResPosition, pointSampling);
+    float centerDepth = SampleDepthAtFullRes(fullResPosition);
+    if (centerDepth <= 0.0)
+        return sourceColor.rgb;
+
+    float centerCoC = SampleCoCAtFullRes(fullResPosition);
+    float centerNearRadius = max(-centerCoC, 0.0);
+    float centerFarRadius = max(centerCoC, 0.0);
+    float4 tileData = LoadTileData(fullResPosition);
+    float nearLimit = max(_VividDoFParams1.z, max(GetTileMaxNearRadius(tileData), 1e-4));
+    float farLimit = max(_VividDoFParams1.w, max(GetTileMaxFarRadius(tileData), 1e-4));
+    float gatherRadius = ResolveTileGatherRadius(tileData, centerCoC);
+    int sampleCount = ResolveTileSampleCount(tileData, centerCoC);
+    if (sampleCount <= 1 || gatherRadius <= 1e-4)
+        return sourceColor.rgb;
+
+    float3 nearAccum = centerNearRadius > 1e-4 ? sourceColor.rgb : 0.0;
+    float3 farAccum = centerFarRadius > 1e-4 ? sourceColor.rgb : 0.0;
+    float nearWeight = centerNearRadius > 1e-4 ? 1.0 : 0.0;
+    float farWeight = centerFarRadius > 1e-4 ? 1.0 : 0.0;
+    float nearCoverage = saturate(centerNearRadius / nearLimit);
+
+    float jitter = Hash12(fullResPosition);
+
+    for (int sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++)
+    {
+        float radius01 = sqrt((sampleIndex + 0.5) / sampleCount);
+        float angle01 = (sampleIndex + jitter) / sampleCount;
+        float2 aperturePoint = GetApertureSample(angle01);
+        float2 samplePosition = fullResPosition + aperturePoint * (gatherRadius * radius01);
+        float distanceInPixels = length(samplePosition - fullResPosition);
+
+        float sampleCoC = SampleCoCAtFullRes(samplePosition);
+        float sampleNearRadius = max(-sampleCoC, 0.0);
+        float sampleFarRadius = max(sampleCoC, 0.0);
+        float3 sampleColor = SampleColorAtFullRes(samplePosition, pointSampling).rgb;
+
+        if (sampleFarRadius > 1e-4)
+        {
+            float farWeightSample = ComputeCoverage(sampleFarRadius, distanceInPixels) * GetPhysicalSampleWeight(sampleFarRadius);
+            if (farWeightSample > 0.0)
+            {
+                farAccum += sampleColor * farWeightSample;
+                farWeight += farWeightSample;
+            }
+        }
+
+        if (sampleNearRadius > 1e-4)
+        {
+            float nearWeightSample = ComputeCoverage(sampleNearRadius, distanceInPixels) * GetPhysicalSampleWeight(sampleNearRadius);
+            if (nearWeightSample > 0.0)
+            {
+                nearAccum += sampleColor * nearWeightSample;
+                nearWeight += nearWeightSample;
+                nearCoverage += nearWeightSample;
+            }
+        }
+    }
+
+    float3 result = sourceColor.rgb;
+
+    if (farWeight > 1e-4)
+    {
+        float farBlend = saturate(max(centerFarRadius, GetTileMaxFarRadius(tileData)) / max(farLimit, 1e-4));
+        float3 farColor = farAccum / farWeight;
+        result = lerp(result, farColor, farBlend);
+    }
+
+    if (nearWeight > 1e-4)
+    {
+        float nearBlendFromCenter = saturate(max(centerNearRadius, GetTileMaxNearRadius(tileData)) / max(nearLimit, 1e-4));
+        float nearBlendFromCoverage = saturate(nearCoverage / max((float)sampleCount, 1.0));
+        float nearAlpha = smoothstep(0.0, 1.0, max(nearBlendFromCenter, nearBlendFromCoverage));
+        float3 nearColor = nearAccum / nearWeight;
+        result = lerp(result, nearColor, nearAlpha);
+    }
+
+    return result;
+}
+
+[numthreads(kThreadGroupSize, kThreadGroupSize, 1)]
+void KResampleColor(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    uint2 currentSize = GetCurrentSize();
+    if (any(pixelCoord >= currentSize))
+        return;
+
+    float2 uv = ClampUv((pixelCoord + 0.5) * _VividDoFCurrentSize.zw, _VividDoFSourceSize.zw);
+    _OutputColorTexture[pixelCoord] = SampleColorAtUv(uv);
+}
+
+[numthreads(kThreadGroupSize, kThreadGroupSize, 1)]
+void KCopyCoC(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    uint2 currentSize = GetCurrentSize();
+    if (any(pixelCoord >= currentSize))
+        return;
+
+    _OutputCoCTexture[pixelCoord] = _InputCoCTexture[pixelCoord];
+}
+
+[numthreads(kThreadGroupSize, kThreadGroupSize, 1)]
+void KCoCPhysical(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    uint2 currentSize = GetCurrentSize();
+    if (any(pixelCoord >= currentSize))
+        return;
+
+    float linearDepth = _InputLinearDepthTexture[pixelCoord];
+    _OutputCoCTexture[pixelCoord] = ComputePhysicalCoC(linearDepth);
+}
+
+[numthreads(kThreadGroupSize, kThreadGroupSize, 1)]
+void KCoCManual(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    uint2 currentSize = GetCurrentSize();
+    if (any(pixelCoord >= currentSize))
+        return;
+
+    float linearDepth = _InputLinearDepthTexture[pixelCoord];
+    _OutputCoCTexture[pixelCoord] = ComputeManualCoC(linearDepth);
+}
+
+[numthreads(kThreadGroupSize, kThreadGroupSize, 1)]
+void KReprojectCoC(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    uint2 currentSize = GetCurrentSize();
+    if (any(pixelCoord >= currentSize))
+        return;
+
+    int2 fullResSize = (int2)GetFullResSize();
+    int2 centerCoord = int2(pixelCoord);
+    float cocCenter = _InputCoCTexture[centerCoord];
+    float cocLeft = _InputCoCTexture[ClampCoord(centerCoord + int2(-1, 0), fullResSize)];
+    float cocRight = _InputCoCTexture[ClampCoord(centerCoord + int2(1, 0), fullResSize)];
+    float cocUp = _InputCoCTexture[ClampCoord(centerCoord + int2(0, -1), fullResSize)];
+    float cocDown = _InputCoCTexture[ClampCoord(centerCoord + int2(0, 1), fullResSize)];
+
+    float3 closest = float3(0.0, 0.0, cocCenter);
+    if (abs(cocLeft) < abs(closest.z))
+        closest = float3(-1.0, 0.0, cocLeft);
+    if (abs(cocRight) < abs(closest.z))
+        closest = float3(1.0, 0.0, cocRight);
+    if (abs(cocUp) < abs(closest.z))
+        closest = float3(0.0, -1.0, cocUp);
+    if (abs(cocDown) < abs(closest.z))
+        closest = float3(0.0, 1.0, cocDown);
+
+    int2 motionCoord = ClampCoord(centerCoord + int2(closest.xy), fullResSize);
+    float2 motionVector = _MotionVectorsTexture[motionCoord];
+    float2 uv = GetFullResUv(pixelCoord);
+    float2 historyUv = uv - motionVector;
+    bool validHistory = all(historyUv >= 0.0) && all(historyUv <= 1.0);
+
+    float historyCoC = validHistory ? SampleHistoryCoC(historyUv) : cocCenter;
+    float cocMin = closest.z;
+    float cocMax = max(max(cocCenter, cocLeft), max(max(cocRight, cocUp), cocDown));
+    historyCoC = clamp(historyCoC, cocMin, cocMax);
+
+    float outputCoC = cocCenter;
+    if (sign(cocCenter) == sign(historyCoC))
+        outputCoC = lerp(cocCenter, historyCoC, saturate(_VividDoFParams0.x));
+
+    _OutputCoCTexture[pixelCoord] = outputCoC;
+}
+
+[numthreads(kThreadGroupSize, kThreadGroupSize, 1)]
+void KCoCMinMax(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 tileCoord = dispatchThreadId.xy;
+    uint2 currentSize = GetCurrentSize();
+    if (any(tileCoord >= currentSize))
+        return;
+
+    float minFarCoC = kBigCoC;
+    float maxFarCoC = 0.0;
+    float minNearCoC = -kBigCoC;
+    float maxNearCoC = 0.0;
+    int2 fullResSize = (int2)GetFullResSize();
+
+    [unroll]
+    for (uint y = 0; y < kTileSize; y++)
+    {
+        [unroll]
+        for (uint x = 0; x < kTileSize; x++)
+        {
+            int2 sampleCoord = ClampCoord((int2)(tileCoord * kTileSize + uint2(x, y)), fullResSize);
+            float coc = _InputCoCTexture[sampleCoord];
+            if (coc >= 0.0)
+            {
+                minFarCoC = min(minFarCoC, coc);
+                maxFarCoC = max(maxFarCoC, coc);
+            }
+            else
+            {
+                minNearCoC = max(minNearCoC, coc);
+                maxNearCoC = min(maxNearCoC, coc);
+            }
+        }
+    }
+
+    if (maxFarCoC <= 0.0)
+        minFarCoC = 0.0;
+    if (maxNearCoC >= 0.0)
+        minNearCoC = 0.0;
+
+    _OutputTileTexture[tileCoord] = float4(minFarCoC, maxFarCoC, minNearCoC, maxNearCoC);
+}
+
+[numthreads(kThreadGroupSize, kThreadGroupSize, 1)]
+void KMinMaxDilate(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 tileCoord = dispatchThreadId.xy;
+    uint2 currentSize = GetCurrentSize();
+    if (any(tileCoord >= currentSize))
+        return;
+
+    int2 tileCount = (int2)GetTileCount();
+    float4 tileInfo = _TileTexture[tileCoord];
+
+    for (int y = -1; y <= 1; y++)
+    {
+        for (int x = -1; x <= 1; x++)
+        {
+            int2 sampleCoord = ClampCoord(int2(tileCoord) + int2(x, y), tileCount);
+            float4 sampleTile = _TileTexture[sampleCoord];
+            tileInfo.x = min(tileInfo.x, sampleTile.x);
+            tileInfo.y = max(tileInfo.y, sampleTile.y);
+            tileInfo.z = max(tileInfo.z, sampleTile.z);
+            tileInfo.w = min(tileInfo.w, sampleTile.w);
+        }
+    }
+
+    _OutputTileTexture[tileCoord] = tileInfo;
+}
+
+[numthreads(kThreadGroupSize, kThreadGroupSize, 1)]
+void KComputeSlowTiles(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    uint2 currentSize = GetCurrentSize();
+    if (any(pixelCoord >= currentSize))
+        return;
+
+    float2 fullResPosition = (float2)pixelCoord;
+    float4 tileData = LoadTileData(fullResPosition);
+    int tileClass = GetTileClass(tileData);
+    bool pointSampling = _VividDoFParams0.w > 0.5;
+    float4 inputColor = SampleColorAtFullRes(fullResPosition, pointSampling);
+
+    if (tileClass == kSlowInFocusTile)
+        _OutputColorTexture[pixelCoord] = float4(EvaluatePhysicalBlur(fullResPosition, pointSampling), inputColor.a);
+    else
+        _OutputColorTexture[pixelCoord] = inputColor;
+}
+
+[numthreads(kThreadGroupSize, kThreadGroupSize, 1)]
+void KGatherFastTiles(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    uint2 currentSize = GetCurrentSize();
+    if (any(pixelCoord >= currentSize))
+        return;
+
+    bool pointSampling = _VividDoFParams0.w > 0.5;
+    float2 uv = ClampUv((pixelCoord + 0.5) * _VividDoFCurrentSize.zw, _VividDoFFullResSize.zw);
+    float2 fullResPosition = uv * _VividDoFFullResSize.xy - 0.5;
+    float4 tileData = LoadTileData(fullResPosition);
+    int tileClass = GetTileClass(tileData);
+    float4 inputColor = SampleColorAtFullRes(fullResPosition, pointSampling);
+
+    if (tileClass == kFastDefocusTile)
+        _OutputColorTexture[pixelCoord] = float4(EvaluatePhysicalBlur(fullResPosition, pointSampling), inputColor.a);
+    else
+        _OutputColorTexture[pixelCoord] = inputColor;
+}
+
+[numthreads(kThreadGroupSize, kThreadGroupSize, 1)]
+void KCombineFastTiles(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    uint2 currentSize = GetCurrentSize();
+    if (any(pixelCoord >= currentSize))
+        return;
+
+    float2 fullResPosition = (float2)pixelCoord;
+    float4 outputColor = _OutputColorTexture[pixelCoord];
+    float4 tileData = LoadTileData(fullResPosition);
+    int tileClass = GetTileClass(tileData);
+
+    if (tileClass == kFastDefocusTile)
+    {
+        float2 uv = GetFullResUv(fullResPosition);
+        outputColor = SampleColorAtUv(uv);
+    }
+
+    _OutputColorTexture[pixelCoord] = outputColor;
+}

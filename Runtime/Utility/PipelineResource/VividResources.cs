@@ -16,6 +16,12 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/PostProcessing/Diffusion")]
         public Shader DiffusionShader;
 
+        [ResourcePath("Shaders/Core/Private/DepthOfField")]
+        public Shader DepthOfFieldShader;
+
+        [ResourcePath("Shaders/Core/Private/DepthOfField.compute")]
+        public ComputeShader DepthOfFieldCompute;
+
         [ResourcePath("Shaders/Core/Private/AutoExposure/Unreal/AutoExposure.compute")]
         public ComputeShader AutoExposureCompute;
 

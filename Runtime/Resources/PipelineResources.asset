@@ -47,6 +47,10 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 4aee2e660114dc34381676fa542650e2, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/SliderDebug
     ResourceObject: {fileID: 4800000, guid: 985a5b1e96340614fb6346ff8c3108ad, type: 3}
+  - ResourceName: Shaders/Core/Private/DepthOfField
+    ResourceObject: {fileID: 4800000, guid: d32a80051143f7f49a03a8a21aade1f6, type: 3}
+  - ResourceName: Shaders/Core/Private/DepthOfField.compute
+    ResourceObject: {fileID: 7200000, guid: 0de418d39a918204d9329539518a3a1a, type: 3}
   - ResourceName: Shaders/Core/Private/DirectionalRayTracedShadow
     ResourceObject: {fileID: 7200000, guid: e18c323ebbcd75c45b1c45b7c0bb07b4, type: 3}
   - ResourceName: Shaders/Core/Private/DownSample/HZBGenerate

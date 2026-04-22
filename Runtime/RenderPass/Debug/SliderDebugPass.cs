@@ -108,8 +108,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            var leftTexture = ResolveTexture(m_LeftTexture.innerHandle);
-            var rightTexture = ResolveTexture(m_RightTexture.innerHandle);
+            var leftTexture = TextureResolveUtility.ResolveTexture(m_LeftTexture.innerHandle);
+            var rightTexture = TextureResolveUtility.ResolveTexture(m_RightTexture.innerHandle);
             if (leftTexture == null || rightTexture == null)
                 return;
 
@@ -214,17 +214,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 return 50f;
 
             return Mathf.Clamp(data.slider, 0f, 100f);
-        }
-
-        private static Texture ResolveTexture(RTHandle handle)
-        {
-            if (handle == null)
-                return null;
-
-            if (handle.rt != null)
-                return handle.rt;
-
-            return handle.externalTexture;
         }
 
         private static bool HasExplicitSize(RenderGraphTextureDesc descriptor)

@@ -227,12 +227,12 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
-            var sourceTexture = ResolveTexture(m_SourceTexture.innerHandle);
+            var sourceTexture = TextureResolveUtility.ResolveTexture(m_SourceTexture.innerHandle);
             if (sourceTexture == null)
                 return;
 
             var debugTexture = m_DebugTexture != null && m_DebugTexture.innerHandle.IsValid()
-                ? ResolveTexture(m_DebugTexture.innerHandle)
+                ? TextureResolveUtility.ResolveTexture(m_DebugTexture.innerHandle)
                 : null;
             var isDebugTextureArray = IsTextureArray(m_DebugTexture?.desc, debugTexture);
             var resolvedSlice = isDebugTextureArray
@@ -452,17 +452,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 return sourceDescriptor.ColorFormat;
 
             return GraphicsFormat.R8G8B8A8_UNorm;
-        }
-
-        private static Texture ResolveTexture(RTHandle handle)
-        {
-            if (handle == null)
-                return null;
-
-            if (handle.rt != null)
-                return handle.rt;
-
-            return handle.externalTexture;
         }
 
         private static bool HasExplicitSize(RenderGraphTextureDesc descriptor)

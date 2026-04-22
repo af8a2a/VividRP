@@ -99,7 +99,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             using (new ProfilingScope(context.cmd, profilingSampler))
             {
-                var sourceTexture = ResolveTexture(m_SourceTexture.innerHandle);
+                var sourceTexture = TextureResolveUtility.ResolveTexture(m_SourceTexture.innerHandle);
                 if (sourceTexture != null)
                 {
                     var copyProperties = context.renderGraphPool.GetTempMaterialPropertyBlock();
@@ -208,17 +208,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 return sourceDescriptor.ColorFormat;
 
             return GraphicsFormat.R8G8B8A8_UNorm;
-        }
-
-        private static Texture ResolveTexture(RTHandle handle)
-        {
-            if (handle == null)
-                return null;
-
-            if (handle.rt != null)
-                return handle.rt;
-
-            return handle.externalTexture;
         }
 
         private static bool HasExplicitSize(RenderGraphTextureDesc descriptor)

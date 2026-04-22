@@ -104,8 +104,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_SkyMaxMipLevel = skyData != null && skyData.activeSkyType != SkyType.None"));
             Assert.That(source, Does.Contain("m_Parameters.skyFogParams.x > 0.5f"));
             Assert.That(source, Does.Contain("m_OutputTexture = RenderGraphTexture.CreateOutput(\"OutputColor\", GraphicsFormat.R16G16B16A16_SFloat);"));
-            Assert.That(source, Does.Contain("var atmosphericScatteringLut = ResolveTexture(m_AtmosphericScatteringLutHandle);"));
-            Assert.That(source, Does.Contain("var skyTexture = ResolveTexture(m_SkyTexture);"));
+            Assert.That(source, Does.Contain("var atmosphericScatteringLut = TextureResolveUtility.ResolveTexture(m_AtmosphericScatteringLutHandle);"));
+            Assert.That(source, Does.Contain("var skyTexture = TextureResolveUtility.ResolveTexture(m_SkyTexture);"));
             Assert.That(source, Does.Contain("var hasValidAtmosphericScatteringLut = HasValidAtmosphericScatteringLut(atmosphericScatteringLut);"));
             Assert.That(source, Does.Contain("var hasValidSkyTexture = HasValidSkyTexture(skyTexture);"));
             Assert.That(source, Does.Contain("m_DepthTexture.desc.FilterMode = FilterMode.Point;"));

@@ -111,11 +111,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            var visibilityTexture = ResolveTexture(m_VisibilityBuffer.innerHandle);
+            var visibilityTexture = TextureResolveUtility.ResolveTexture(m_VisibilityBuffer.innerHandle);
             if (visibilityTexture == null)
                 return;
 
-            var depthTexture = ResolveTexture(m_DepthTexture.innerHandle) ?? Texture2D.whiteTexture;
+            var depthTexture = TextureResolveUtility.ResolveTexture(m_DepthTexture.innerHandle) ?? Texture2D.whiteTexture;
 
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetTexture(VisibilityBufferId, visibilityTexture);
@@ -181,17 +181,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 return resolved;
 
             return CameraDimensionUtility.ResolveCameraDimension(actualCameraDimension, cameraDimension, screenDimension);
-        }
-
-        private static Texture ResolveTexture(RTHandle handle)
-        {
-            if (handle == null)
-                return null;
-
-            if (handle.rt != null)
-                return handle.rt;
-
-            return handle.externalTexture;
         }
 
         private static bool HasExplicitSize(RenderGraphTextureDesc descriptor)

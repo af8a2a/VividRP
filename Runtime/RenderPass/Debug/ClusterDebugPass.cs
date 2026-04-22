@@ -206,11 +206,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            var sourceTexture = ResolveTexture(m_SourceTexture.innerHandle);
+            var sourceTexture = TextureResolveUtility.ResolveTexture(m_SourceTexture.innerHandle);
             if (sourceTexture == null)
                 return;
 
-            var depthTexture = ResolveTexture(m_DepthTexture.innerHandle) ?? Texture2D.whiteTexture;
+            var depthTexture = TextureResolveUtility.ResolveTexture(m_DepthTexture.innerHandle) ?? Texture2D.whiteTexture;
             var tileClusterDebug = m_ResolvedSettings.tileClusterDebug;
 
             if (depthTexture == Texture2D.whiteTexture)
@@ -518,17 +518,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 return sourceDescriptor.ColorFormat;
 
             return GraphicsFormat.R8G8B8A8_UNorm;
-        }
-
-        private static Texture ResolveTexture(RTHandle handle)
-        {
-            if (handle == null)
-                return null;
-
-            if (handle.rt != null)
-                return handle.rt;
-
-            return handle.externalTexture;
         }
 
         private static bool HasExplicitSize(RenderGraphTextureDesc descriptor)

@@ -141,13 +141,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            var inputColor = ResolveTexture(m_ColorInput.innerHandle);
+            var inputColor = TextureResolveUtility.ResolveTexture(m_ColorInput.innerHandle);
             if (inputColor == null)
                 return;
 
-            var depthTexture = ResolveTexture(m_DepthTexture.innerHandle) ?? Texture2D.whiteTexture;
-            var atmosphericScatteringLut = ResolveTexture(m_AtmosphericScatteringLutHandle);
-            var skyTexture = ResolveTexture(m_SkyTexture);
+            var depthTexture = TextureResolveUtility.ResolveTexture(m_DepthTexture.innerHandle) ?? Texture2D.whiteTexture;
+            var atmosphericScatteringLut = TextureResolveUtility.ResolveTexture(m_AtmosphericScatteringLutHandle);
+            var skyTexture = TextureResolveUtility.ResolveTexture(m_SkyTexture);
             var hasValidAtmosphericScatteringLut = HasValidAtmosphericScatteringLut(atmosphericScatteringLut);
             var hasValidSkyTexture = HasValidSkyTexture(skyTexture);
             if (!hasValidAtmosphericScatteringLut)
@@ -343,22 +343,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 return cameraDimension;
 
             return Mathf.Max(1, screenDimension);
-        }
-
-        private static Texture ResolveTexture(RTHandle handle)
-        {
-            if (handle == null)
-                return null;
-
-            if (handle.rt != null)
-                return handle.rt;
-
-            return handle.externalTexture;
-        }
-
-        private static Texture ResolveTexture(RenderGraphTexture texture)
-        {
-            return texture == null ? null : ResolveTexture(texture.innerHandle);
         }
 
         private static void SetDepthTexture(MaterialPropertyBlock properties, Texture texture)

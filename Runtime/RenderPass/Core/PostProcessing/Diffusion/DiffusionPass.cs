@@ -192,7 +192,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
                 else
                 {
-                    m_Material.SetTexture(BlurTextureId, ResolveTexture(m_TempTexture2.innerHandle));
+                    m_Material.SetTexture(BlurTextureId, TextureResolveUtility.ResolveTexture(m_TempTexture2.innerHandle));
                     Blit(unsafeCmd, context, m_DiffusionTexture.innerHandle, outputHandle, FilterPassIndex);
                 }
             }
@@ -232,11 +232,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 TextureScaleBiasUtility.GetScale(sourceHandle),
                 m_Material,
                 materialPassIndex);
-        }
-
-        private static Texture ResolveTexture(RTHandle handle)
-        {
-            return handle?.rt;
         }
 
         private static void ConfigureTexture(

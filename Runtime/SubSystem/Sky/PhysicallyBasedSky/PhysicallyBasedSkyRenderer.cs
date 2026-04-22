@@ -281,7 +281,7 @@ namespace VividRP.Runtime
             m_SkyMaterial.SetBuffer(CelestialBodyDatasId, m_CelestialBodyBuffer.Buffer);
 
             var skyViewTexture = ResolveSkyViewTexture();
-            var directionalShadowTexture = ResolveTexture(m_DirectionalShadowTexture) ?? Shader.GetGlobalTexture(DirectionalShadowTextureId);
+            var directionalShadowTexture = TextureResolveUtility.ResolveTexture(m_DirectionalShadowTexture) ?? Shader.GetGlobalTexture(DirectionalShadowTextureId);
             var properties = new MaterialPropertyBlock();
             properties.SetMatrix(PixelCoordToViewDirWSId, m_RenderParameters.pixelCoordToViewDirWS);
             properties.SetTexture(SkyViewLutId, skyViewTexture ?? Texture2D.blackTexture);
@@ -923,7 +923,7 @@ namespace VividRP.Runtime
 
         private Texture ResolveSkyViewTexture()
         {
-            var skyViewTexture = ResolveTexture(m_SkyViewLut);
+            var skyViewTexture = TextureResolveUtility.ResolveTexture(m_SkyViewLut);
             if (skyViewTexture != null || !m_HasRenderMaterialParameters)
                 return skyViewTexture;
 
@@ -957,21 +957,6 @@ namespace VividRP.Runtime
                 return;
 
             PassRecorder.ImportTexture(skyViewLut, handle);
-        }
-
-        private static Texture ResolveTexture(RenderGraphTexture texture)
-        {
-            if (texture == null)
-                return null;
-
-            RTHandle handle = texture.innerHandle;
-            if (handle == null)
-                return null;
-
-            if (handle.rt != null)
-                return handle.rt;
-
-            return handle.externalTexture;
         }
 
         private static Rect ResolveRenderViewport(VividCameraData cameraData, RenderGraphTexture colorTarget)

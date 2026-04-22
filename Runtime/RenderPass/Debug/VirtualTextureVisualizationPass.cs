@@ -106,7 +106,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_Material == null || !m_OutputTexture.innerHandle.IsValid())
                 return;
 
-            Texture sourceTexture = ResolveTexture(m_SourceTexture?.innerHandle);
+            Texture sourceTexture = TextureResolveUtility.ResolveTexture(m_SourceTexture?.innerHandle);
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetTexture(SourceTextureId, sourceTexture != null ? sourceTexture : Texture2D.blackTexture);
             mpb.SetVector(SourceTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_SourceTexture?.innerHandle));
@@ -238,17 +238,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 return sourceDescriptor.ColorFormat;
 
             return GraphicsFormat.R8G8B8A8_UNorm;
-        }
-
-        private static Texture ResolveTexture(RTHandle handle)
-        {
-            if (handle == null)
-                return null;
-
-            if (handle.rt != null)
-                return handle.rt;
-
-            return handle.externalTexture;
         }
 
         private static bool HasExplicitSize(RenderGraphTextureDesc descriptor)

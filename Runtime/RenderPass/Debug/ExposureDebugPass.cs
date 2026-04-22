@@ -217,7 +217,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
-            var sourceTexture = ResolveTexture(m_SourceTexture.innerHandle);
+            var sourceTexture = TextureResolveUtility.ResolveTexture(m_SourceTexture.innerHandle);
             if (sourceTexture == null)
                 return;
 
@@ -383,17 +383,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 return sourceDescriptor.ColorFormat;
 
             return GraphicsFormat.R8G8B8A8_UNorm;
-        }
-
-        private static Texture ResolveTexture(RTHandle handle)
-        {
-            if (handle == null)
-                return null;
-
-            if (handle.rt != null)
-                return handle.rt;
-
-            return handle.externalTexture;
         }
 
         private static RTHandle ResolveHandle(RenderGraphTexture texture)

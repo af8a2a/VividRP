@@ -98,6 +98,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_SupportsClusteredAreaLights;
         private bool m_SupportsClusteredDecals;
         private bool m_IsLogBaseBufferEnabled;
+        private bool m_ShouldSkipExecution;
 
         internal readonly struct ClusterDebugSettingsData
         {
@@ -167,6 +168,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ResolvedSettings = ResolveSettings(VividRenderingDebugDisplaySettings.Data);
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
+            m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
             var width = ResolveOutputDimension(
                 descriptor => descriptor.Width,
                 cameraData.actualWidth,
@@ -191,6 +193,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Record(RasterPassContext context)
         {
+            if (m_ShouldSkipExecution)
+            {
+                DebugPassCameraUtility.TryPassThrough(context, m_SourceTexture, m_OutputTexture);
+                return;
+            }
+
             if (m_Material == null
                 || !m_SourceTexture.innerHandle.IsValid()
                 || !m_OutputTexture.innerHandle.IsValid())
@@ -253,6 +261,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SupportsClusteredAreaLights = false;
             m_SupportsClusteredDecals = false;
             m_IsLogBaseBufferEnabled = false;
+            m_ShouldSkipExecution = false;
         }
 
         internal static ClusterDebugSettingsData ResolveSettings(VividRenderingDebugSettingsData data)

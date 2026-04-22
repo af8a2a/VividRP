@@ -76,6 +76,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector4 m_MousePixelCoord;
         private Vector4 m_LogLut3DParams;
         private Texture m_ExternalLut;
+        private bool m_ShouldSkipExecution;
 
         internal readonly struct ExposureDebugSettingsData
         {
@@ -145,6 +146,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ResolvedSettings = ResolveSettings(VividRenderingDebugDisplaySettings.Data);
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
+            m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
             m_Camera = cameraData.camera;
             m_ExposureData = frameData.Get<VividExposureData>();
             m_ColorGradingSettings = ColorGradingSettingsResolver.Resolve();
@@ -201,6 +203,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Record(UnsafePassContext context)
         {
+            if (m_ShouldSkipExecution)
+            {
+                DebugPassCameraUtility.TryPassThrough(context, m_SourceTexture, m_OutputTexture);
+                return;
+            }
+
             if (m_Material == null
                 || !m_SourceTexture.innerHandle.IsValid()
                 || !m_OutputTexture.innerHandle.IsValid())
@@ -268,6 +276,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ZeroHistogramBuffer = null;
             m_MaterialPropertyBlock = null;
             m_ExternalLut = null;
+            m_ShouldSkipExecution = false;
         }
 
         internal static ExposureDebugSettingsData ResolveSettings(VividRenderingDebugSettingsData data)

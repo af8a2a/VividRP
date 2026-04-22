@@ -45,6 +45,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private VirtualTextureVisualizationMode m_ResolvedVisualizationMode = VirtualTextureVisualizationMode.PhysicalCache;
         private Vector4 m_OverlayRect = new(0.65f, 0.65f, MinOverlayViewportFraction, MinOverlayViewportFraction);
         private float m_ResolvedOpacity = 1f;
+        private bool m_ShouldSkipExecution;
 
         public VirtualTextureVisualizationPass()
         {
@@ -77,6 +78,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_OverlayRect = ResolveOverlayRect(m_OverlayAmount);
 
             VividCameraData cameraData = frameData?.GetOrCreate<VividCameraData>();
+            m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
             int width = ResolveOutputDimension(
                 descriptor => descriptor.Width,
                 cameraData?.actualWidth ?? 0,
@@ -95,6 +97,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Record(RasterPassContext context)
         {
+            if (m_ShouldSkipExecution)
+            {
+                DebugPassCameraUtility.TryPassThrough(context, m_SourceTexture, m_OutputTexture);
+                return;
+            }
+
             if (m_Material == null || !m_OutputTexture.innerHandle.IsValid())
                 return;
 
@@ -128,6 +136,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             m_VirtualTextureFrameData = null;
+            m_ShouldSkipExecution = false;
         }
 
         internal static VirtualTextureVisualizationMode ResolveVisualizationMode(

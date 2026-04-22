@@ -82,6 +82,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private OverlayDebugDepthMode m_ResolvedDepthMode = OverlayDebugDepthMode.Raw;
         private Vector4 m_OverlayRect = new(0.65f, 0.65f, MinOverlayViewportFraction, MinOverlayViewportFraction);
         private Vector4 m_OverlayScreenSize = new(1f, 1f, 1f, 1f);
+        private bool m_ShouldSkipExecution;
 
         internal readonly struct OverlayDebugSettingsData
         {
@@ -182,6 +183,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ResolvedDepthMode = resolvedSettings.depthMode;
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
+            m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
             var width = ResolveOutputDimension(
                 descriptor => descriptor.Width,
                 cameraData.actualWidth,
@@ -211,6 +213,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Record(UnsafePassContext context)
         {
+            if (m_ShouldSkipExecution)
+            {
+                DebugPassCameraUtility.TryPassThrough(context, m_SourceTexture, m_OutputTexture);
+                return;
+            }
 
             if (m_Material == null
                 || !m_SourceTexture.innerHandle.IsValid()
@@ -273,6 +280,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             m_MaterialPropertyBlock = null;
+            m_ShouldSkipExecution = false;
         }
 
         internal static OverlayDebugSettingsData ResolveSettings(VividRenderingDebugSettingsData data)

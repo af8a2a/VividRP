@@ -33,6 +33,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private Material m_Material;
         private float m_ResolvedSlider = 50f;
+        private bool m_ShouldSkipExecution;
 
         public float Slider
         {
@@ -70,6 +71,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ResolvedSlider = ResolveSliderValue(VividRenderingDebugDisplaySettings.Data);
 
             var cameraData = frameData.Get<VividCameraData>();
+            m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
             var width = ResolveOutputDimension(
                 descriptor => descriptor.Width,
                 cameraData.actualWidth,
@@ -90,6 +92,14 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Record(RasterPassContext context)
         {
+            if (m_ShouldSkipExecution)
+            {
+                if (!DebugPassCameraUtility.TryPassThrough(context, m_RightTexture, m_OutputTexture))
+                    DebugPassCameraUtility.TryPassThrough(context, m_LeftTexture, m_OutputTexture);
+
+                return;
+            }
+
             if (m_Material == null
                 || !m_LeftTexture.innerHandle.IsValid()
                 || !m_RightTexture.innerHandle.IsValid()
@@ -120,6 +130,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 CoreUtils.Destroy(m_Material);
                 m_Material = null;
             }
+
+            m_ShouldSkipExecution = false;
         }
 
         private void ConfigureOutputTexture(int width, int height, RenderGraphTextureDesc sourceDescriptor)

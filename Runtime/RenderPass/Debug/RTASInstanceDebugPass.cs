@@ -45,6 +45,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_DispatchGroupCountY = 1;
         private Vector4 m_CameraPositionWS;
         private Matrix4x4 m_PixelCoordToViewDirWS;
+        private bool m_ShouldSkipExecution;
 
         [SerializeField]
         private RTASInstanceDebugVisualizationMode m_VisualizationMode = RTASInstanceDebugVisualizationMode.InstanceIndex;
@@ -82,6 +83,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             var cameraData = frameData.Get<VividCameraData>();
+            m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
 
             ConfigureOutputTexture(cameraData.actualWidth, cameraData.actualHeight);
 
@@ -104,6 +106,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Record(UnsafePassContext context)
         {
+            if (m_ShouldSkipExecution)
+                return;
+
             if (!m_SupportsRayTracing
                 || m_RTASInstanceDebugCompute == null
                 || m_Kernel < 0
@@ -156,6 +161,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DispatchGroupCountY = 1;
             m_CameraPositionWS = Vector4.zero;
             m_PixelCoordToViewDirWS = Matrix4x4.identity;
+            m_ShouldSkipExecution = false;
         }
 
         private void ConfigureOutputTexture(int width, int height)

@@ -34,6 +34,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private Material m_Material;
         private Vector4 m_TileDebugScreenSize = new(1f, 1f, 1f, 1f);
+        private bool m_ShouldSkipExecution;
 
         public TileDebugPass()
         {
@@ -62,6 +63,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             var cameraData = frameData.GetOrCreate<VividCameraData>();
+            m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
             var width = ResolveOutputDimension(
                 descriptor => descriptor.Width,
                 cameraData.actualWidth,
@@ -85,6 +87,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Record(RasterPassContext context)
         {
+            if (m_ShouldSkipExecution)
+            {
+                DebugPassCameraUtility.TryPassThrough(context, m_SourceTexture, m_OutputTexture);
+                return;
+            }
+
             if (m_Material == null || !m_OutputTexture.innerHandle.IsValid())
                 return;
 
@@ -127,6 +135,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 CoreUtils.Destroy(m_Material);
                 m_Material = null;
             }
+
+            m_ShouldSkipExecution = false;
         }
 
         private void ConfigureOutputTexture(int width, int height, RenderGraphTextureDesc sourceDescriptor)

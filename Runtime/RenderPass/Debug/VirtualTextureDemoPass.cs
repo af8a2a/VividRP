@@ -27,6 +27,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private VividVirtualTextureFrameData m_VirtualTextureFrameData;
         private VirtualTextureDebugMode m_ResolvedDebugMode;
+        private bool m_ShouldSkipExecution;
 
         public VirtualTextureDemoPass()
         {
@@ -54,6 +55,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 : m_DefaultDebugMode;
 
             VividCameraData cameraData = frameData?.GetOrCreate<VividCameraData>();
+            m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
             int width = cameraData != null
                 ? Mathf.Max(1, cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth)
                 : Mathf.Max(1, Screen.width);
@@ -76,6 +78,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Record(UnsafePassContext context)
         {
+            if (m_ShouldSkipExecution)
+                return;
+
             if (m_RenderList == null
                 || !m_RenderList.IsValid
                 || m_VirtualTextureFrameData == null
@@ -108,6 +113,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Dispose()
         {
             m_VirtualTextureFrameData = null;
+            m_ShouldSkipExecution = false;
         }
 
         private void BindSpaceGlobals(CommandBuffer cmd, in VirtualTextureSpaceBinding binding)

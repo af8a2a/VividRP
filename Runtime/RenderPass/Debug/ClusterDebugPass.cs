@@ -21,8 +21,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ClusterDebugMaxLightCountId = Shader.PropertyToID("_ClusterDebugMaxLightCount");
         private static readonly int PunctualLightsId = Shader.PropertyToID("_PunctualLights");
         private static readonly int AreaLightsId = Shader.PropertyToID("_AreaLights");
+        private static readonly int DecalDataId = Shader.PropertyToID("_DecalData");
         private static readonly int ClusteredPunctualLightGridEnabledId = Shader.PropertyToID("_ClusteredPunctualLightGridEnabled");
         private static readonly int ClusteredAreaLightGridEnabledId = Shader.PropertyToID("_ClusteredAreaLightGridEnabled");
+        private static readonly int ClusteredDecalGridEnabledId = Shader.PropertyToID("_ClusteredDecalGridEnabled");
         private static readonly int LayeredLightListId = Shader.PropertyToID("g_vLayeredLightList");
         private static readonly int LayeredOffsetId = Shader.PropertyToID("g_LayeredOffset");
         private static readonly int LogBaseBufferId = Shader.PropertyToID("g_logBaseBuffer");
@@ -61,6 +63,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "AreaLights", Access = AccessFlags.Read)]
         private RenderGraphBuffer m_AreaLightBuffer;
 
+        [RenderGraphResource(Name = "DecalData", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_DecalDataBuffer;
+
         [RenderGraphResource(Name = "LayeredOffset", Access = AccessFlags.Read)]
         private RenderGraphBuffer m_LayeredOffsetBuffer;
 
@@ -74,6 +79,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private ClusterDebugSettingsData m_ResolvedSettings;
         private readonly RenderGraphBuffer m_LocalPunctualLightBuffer;
         private readonly RenderGraphBuffer m_LocalAreaLightBuffer;
+        private readonly RenderGraphBuffer m_LocalDecalDataBuffer;
         private readonly RenderGraphBuffer m_LocalLayeredOffsetBuffer;
         private readonly RenderGraphBuffer m_LocalLayeredLightListBuffer;
         private readonly RenderGraphBuffer m_LocalLogBaseBuffer;
@@ -90,6 +96,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_ClusterLog2SliceCount = LightGridPass.ClusterLog2SliceCount;
         private bool m_SupportsClusteredPunctualLights;
         private bool m_SupportsClusteredAreaLights;
+        private bool m_SupportsClusteredDecals;
         private bool m_IsLogBaseBufferEnabled;
 
         internal readonly struct ClusterDebugSettingsData
@@ -123,11 +130,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_OutputTexture.desc.ClearBuffer = false;
             m_LocalPunctualLightBuffer = CreateStructuredBuffer("PunctualLights", VividLightData.PunctualLightData.Stride);
             m_LocalAreaLightBuffer = CreateStructuredBuffer("AreaLights", VividLightData.AreaLightData.Stride);
+            m_LocalDecalDataBuffer = CreateStructuredBuffer("DecalData", VividLightData.DecalClusterData.Stride);
             m_LocalLayeredOffsetBuffer = CreateStructuredBuffer("LayeredOffset", sizeof(uint));
             m_LocalLayeredLightListBuffer = CreateStructuredBuffer("LayeredLightList", sizeof(uint));
             m_LocalLogBaseBuffer = CreateStructuredBuffer("LogBaseBuffer", sizeof(float));
             m_PunctualLightBuffer = m_LocalPunctualLightBuffer;
             m_AreaLightBuffer = m_LocalAreaLightBuffer;
+            m_DecalDataBuffer = m_LocalDecalDataBuffer;
             m_LayeredOffsetBuffer = m_LocalLayeredOffsetBuffer;
             m_LayeredLightListBuffer = m_LocalLayeredLightListBuffer;
             m_LogBaseBuffer = m_LocalLogBaseBuffer;
@@ -226,6 +235,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_PunctualLightBuffer = m_LocalPunctualLightBuffer;
             m_AreaLightBuffer = m_LocalAreaLightBuffer;
+            m_DecalDataBuffer = m_LocalDecalDataBuffer;
             m_LayeredOffsetBuffer = m_LocalLayeredOffsetBuffer;
             m_LayeredLightListBuffer = m_LocalLayeredLightListBuffer;
             m_LogBaseBuffer = m_LocalLogBaseBuffer;
@@ -241,6 +251,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ClusterLog2SliceCount = LightGridPass.ClusterLog2SliceCount;
             m_SupportsClusteredPunctualLights = false;
             m_SupportsClusteredAreaLights = false;
+            m_SupportsClusteredDecals = false;
             m_IsLogBaseBufferEnabled = false;
         }
 
@@ -283,6 +294,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_PunctualLightBuffer = clusteredLightingData.punctualLights ?? m_LocalPunctualLightBuffer;
             m_AreaLightBuffer = clusteredLightingData.areaLights ?? m_LocalAreaLightBuffer;
+            m_DecalDataBuffer = clusteredLightingData.decalData ?? m_LocalDecalDataBuffer;
             m_LayeredOffsetBuffer = clusteredLightingData.layeredOffset ?? m_LocalLayeredOffsetBuffer;
             m_LayeredLightListBuffer = clusteredLightingData.layeredLightList ?? m_LocalLayeredLightListBuffer;
             m_LogBaseBuffer = clusteredLightingData.logBaseBuffer ?? m_LocalLogBaseBuffer;
@@ -298,6 +310,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ClusterLog2SliceCount = LightGridPass.ClusterLog2SliceCount;
             m_SupportsClusteredPunctualLights = false;
             m_SupportsClusteredAreaLights = false;
+            m_SupportsClusteredDecals = false;
             m_IsLogBaseBufferEnabled = false;
 
             if (!HasClusteredLightingData(clusteredLightingData))
@@ -336,6 +349,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SupportsClusteredAreaLights = supportsClusteredFiniteLights
                 && clusteredLightingData.areaLightCount > 0
                 && HasBoundAreaLightResources();
+            m_SupportsClusteredDecals = supportsClusteredFiniteLights
+                && clusteredLightingData.decalCount > 0
+                && HasBoundDecalResources();
             m_IsLogBaseBufferEnabled = supportsClusteredFiniteLights
                 && clusteredLightingData.isLogBaseBufferEnabled
                 && !ReferenceEquals(m_LogBaseBuffer, m_LocalLogBaseBuffer);
@@ -345,6 +361,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_Material.SetInt(ClusteredPunctualLightGridEnabledId, m_SupportsClusteredPunctualLights ? 1 : 0);
             m_Material.SetInt(ClusteredAreaLightGridEnabledId, m_SupportsClusteredAreaLights ? 1 : 0);
+            m_Material.SetInt(ClusteredDecalGridEnabledId, m_SupportsClusteredDecals ? 1 : 0);
             m_Material.SetInt(ClusterTileSizeId, m_ClusterTileSize);
             m_Material.SetInt(ClusterSliceCountId, m_ClusterSliceCount);
             m_Material.SetInt(ClusterTileCountXId, m_ClusterTileCountX);
@@ -368,6 +385,10 @@ namespace VividRP.Runtime.RenderPass.Core
             var areaLights = m_AreaLightBuffer?.ImportedGraphicsBuffer;
             if (areaLights != null)
                 m_Material.SetBuffer(AreaLightsId, areaLights);
+
+            var decalData = m_DecalDataBuffer?.ImportedGraphicsBuffer;
+            if (decalData != null)
+                m_Material.SetBuffer(DecalDataId, decalData);
 
             var layeredOffset = m_LayeredOffsetBuffer?.ImportedGraphicsBuffer;
             if (layeredOffset != null)
@@ -397,18 +418,27 @@ namespace VividRP.Runtime.RenderPass.Core
                 && !ReferenceEquals(m_LayeredLightListBuffer, m_LocalLayeredLightListBuffer);
         }
 
+        private bool HasBoundDecalResources()
+        {
+            return !ReferenceEquals(m_DecalDataBuffer, m_LocalDecalDataBuffer)
+                && !ReferenceEquals(m_LayeredOffsetBuffer, m_LocalLayeredOffsetBuffer)
+                && !ReferenceEquals(m_LayeredLightListBuffer, m_LocalLayeredLightListBuffer);
+        }
+
         private static bool HasClusteredLightingData(VividClusteredLightingData clusteredLightingData)
         {
             return clusteredLightingData != null
                 && (clusteredLightingData.punctualLights != null
                     || clusteredLightingData.areaLights != null
+                    || clusteredLightingData.decalData != null
                     || clusteredLightingData.layeredOffset != null
                     || clusteredLightingData.layeredLightList != null
                     || clusteredLightingData.logBaseBuffer != null
                     || clusteredLightingData.clusterTileSize > 0
                     || clusteredLightingData.clusterSliceCount > 0
                     || clusteredLightingData.punctualLightCount > 0
-                    || clusteredLightingData.areaLightCount > 0);
+                    || clusteredLightingData.areaLightCount > 0
+                    || clusteredLightingData.decalCount > 0);
         }
 
         private void ConfigureOutputTexture(int width, int height, RenderGraphTextureDesc sourceDescriptor)

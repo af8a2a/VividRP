@@ -6,6 +6,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Bindless;
+using VividRP.Runtime.SubSystem.Decal;
 
 namespace VividRP.Runtime
 {
@@ -288,9 +289,11 @@ namespace VividRP.Runtime
         {
             VividGPUDrivenSystem.Shutdown();
             PassRecorder.Dispose();
+            VirtualTextureSystem.Deinitialize();
             SkyManager.Deinitialize();
             LTCAreaLightSystem.Deinitialize();
             VividVolumeManagerUtility.Deinitialize();
+            DecalSystem.Deinitialize();
             m_DebugDisplaySettingsUI?.UnregisterDebug();
             m_DebugDisplaySettingsUI = null;
 

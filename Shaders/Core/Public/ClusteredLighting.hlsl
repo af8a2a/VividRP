@@ -11,6 +11,7 @@ StructuredBuffer<uint> g_LayeredOffset;
 StructuredBuffer<float> g_logBaseBuffer;
 uint _ClusteredPunctualLightGridEnabled;
 uint _ClusteredAreaLightGridEnabled;
+uint _ClusteredDecalGridEnabled;
 int _ClusterTileSize;
 int _ClusterSliceCount;
 int _ClusterTileCountX;
@@ -194,6 +195,30 @@ struct VividClusteredLighting
     static VividClusteredLightCell LoadAreaLightCell(uint2 pixelCoord, float3 positionWS)
     {
         return LoadAreaLightCell(pixelCoord, GetViewDepthWS(positionWS));
+    }
+
+    static VividClusteredLightCell LoadDecalCell(uint2 tileCoord, uint sliceIndex)
+    {
+        if (_ClusteredDecalGridEnabled == 0u)
+            return GetEmptyLightCell();
+
+        uint packedOffset = g_LayeredOffset[GetLayeredOffsetBufferIndex(LIGHTCATEGORY_DECAL, tileCoord, sliceIndex)];
+        return UnpackLightCell(packedOffset);
+    }
+
+    static VividClusteredLightCell LoadDecalCell(uint2 pixelCoord, float viewDepth)
+    {
+        if (_ClusteredDecalGridEnabled == 0u)
+            return GetEmptyLightCell();
+
+        uint2 tileCoord = GetTileCoord(pixelCoord);
+        uint sliceIndex = GetSliceIndex(pixelCoord, viewDepth);
+        return LoadDecalCell(tileCoord, sliceIndex);
+    }
+
+    static VividClusteredLightCell LoadDecalCell(uint2 pixelCoord, float3 positionWS)
+    {
+        return LoadDecalCell(pixelCoord, GetViewDepthWS(positionWS));
     }
 
     static uint LoadLightIndex(VividClusteredLightCell lightCell, uint localIndex)

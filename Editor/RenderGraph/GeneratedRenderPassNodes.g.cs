@@ -120,6 +120,12 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class TileDebugPass : RenderPassNodeData { }
 
     [Serializable]
+    internal sealed class VirtualTextureDemoPass : RenderPassNodeData { }
+
+    [Serializable]
+    internal sealed class VirtualTextureVisualizationPass : RenderPassNodeData { }
+
+    [Serializable]
     internal sealed class VisibilityBufferGBufferResolvePass : RenderPassNodeData { }
 
     [Serializable]

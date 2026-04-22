@@ -33,6 +33,37 @@ namespace VividRP.Editor.Tests
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Exposure"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Overlay"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Slider"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture"), Is.Not.Null);
+        }
+
+        [Test]
+        public void Reset_RestoresVirtualTextureDebugDefaults()
+        {
+            VividRenderingDebugDisplaySettings.Data.virtualTextureDebugMode = VirtualTextureDebugMode.PhysicalPageId;
+            VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationMode = VirtualTextureVisualizationMode.PageTableResidency;
+
+            VividRenderingDebugDisplaySettings.Data.Reset();
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.virtualTextureDebugMode, Is.EqualTo(VirtualTextureDebugMode.None));
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationMode,
+                Is.EqualTo(VirtualTextureVisualizationMode.UsePassSettings));
+        }
+
+        [Test]
+        public void TileClusterCategoryDebug_PreservesSupportedFlags()
+        {
+            VividRenderingDebugDisplaySettings.Data.tileClusterDebugByCategory =
+                TileClusterCategoryDebug.Area
+                | TileClusterCategoryDebug.Environment
+                | TileClusterCategoryDebug.Decal;
+
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.tileClusterDebugByCategory,
+                Is.EqualTo(
+                    TileClusterCategoryDebug.Area
+                    | TileClusterCategoryDebug.Environment
+                    | TileClusterCategoryDebug.Decal));
         }
     }
 }

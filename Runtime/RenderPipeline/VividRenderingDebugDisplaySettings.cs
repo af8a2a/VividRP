@@ -6,6 +6,22 @@ using NameAndTooltip = UnityEngine.Rendering.DebugUI.Widget.NameAndTooltip;
 
 namespace VividRP.Runtime
 {
+    public enum VirtualTextureDebugMode
+    {
+        None = 0,
+        Residency = 1,
+        MipBias = 2,
+        PhysicalPageId = 3,
+    }
+
+    public enum VirtualTextureVisualizationMode
+    {
+        UsePassSettings = 0,
+        None = 1,
+        PhysicalCache = 2,
+        PageTableResidency = 3,
+    }
+
     internal sealed class VividRenderingDebugDisplaySettings
         : DebugDisplaySettings<VividRenderingDebugDisplaySettings>
     {
@@ -73,6 +89,12 @@ namespace VividRP.Runtime
         [SerializeField]
         private float m_Slider = 50f;
 
+        [SerializeField]
+        private VirtualTextureDebugMode m_VirtualTextureDebugMode = VirtualTextureDebugMode.None;
+
+        [SerializeField]
+        private VirtualTextureVisualizationMode m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.UsePassSettings;
+
         internal TileClusterDebug tileClusterDebug
         {
             get => m_TileClusterDebug;
@@ -81,8 +103,8 @@ namespace VividRP.Runtime
 
         internal TileClusterCategoryDebug tileClusterDebugByCategory
         {
-            get => m_TileClusterDebugByCategory;
-            set => m_TileClusterDebugByCategory = value;
+            get => NormalizeTileClusterCategory(m_TileClusterDebugByCategory);
+            set => m_TileClusterDebugByCategory = NormalizeTileClusterCategory(value);
         }
 
         internal ClusterDebugMode clusterDebugMode
@@ -175,9 +197,21 @@ namespace VividRP.Runtime
             set => m_Slider = value;
         }
 
+        internal VirtualTextureDebugMode virtualTextureDebugMode
+        {
+            get => m_VirtualTextureDebugMode;
+            set => m_VirtualTextureDebugMode = value;
+        }
+
+        internal VirtualTextureVisualizationMode virtualTextureVisualizationMode
+        {
+            get => m_VirtualTextureVisualizationMode;
+            set => m_VirtualTextureVisualizationMode = value;
+        }
+
         public bool AreAnySettingsActive =>
             m_TileClusterDebug != TileClusterDebug.None
-            || m_TileClusterDebugByCategory != TileClusterCategoryDebug.Punctual
+            || tileClusterDebugByCategory != TileClusterCategoryDebug.Punctual
             || m_ClusterDebugMode != ClusterDebugMode.VisualizeOpaque
             || !Mathf.Approximately(m_ClusterDebugDistance, 1f)
             || m_ExposureMode != ExposureDebugMode.None
@@ -192,7 +226,9 @@ namespace VividRP.Runtime
             || !Mathf.Approximately(m_OverlayOpacity, 1f)
             || m_VisualizationMode != OverlayDebugVisualizationMode.Auto
             || m_DepthMode != OverlayDebugDepthMode.Raw
-            || !Mathf.Approximately(m_Slider, 50f);
+            || !Mathf.Approximately(m_Slider, 50f)
+            || m_VirtualTextureDebugMode != VirtualTextureDebugMode.None
+            || m_VirtualTextureVisualizationMode != VirtualTextureVisualizationMode.UsePassSettings;
 
         public IDebugDisplaySettingsPanelDisposable CreatePanel()
         {
@@ -218,6 +254,21 @@ namespace VividRP.Runtime
             m_VisualizationMode = OverlayDebugVisualizationMode.Auto;
             m_DepthMode = OverlayDebugDepthMode.Raw;
             m_Slider = 50f;
+            m_VirtualTextureDebugMode = VirtualTextureDebugMode.None;
+            m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.UsePassSettings;
+        }
+
+        private static TileClusterCategoryDebug NormalizeTileClusterCategory(TileClusterCategoryDebug value)
+        {
+            const int supportedMask =
+                (int)TileClusterCategoryDebug.Punctual
+                | (int)TileClusterCategoryDebug.Area
+                | (int)TileClusterCategoryDebug.Environment
+                | (int)TileClusterCategoryDebug.Decal;
+            var normalized = (TileClusterCategoryDebug)((int)value & supportedMask);
+            return normalized == 0
+                ? TileClusterCategoryDebug.Punctual
+                : normalized;
         }
 
         private static class Strings
@@ -227,6 +278,7 @@ namespace VividRP.Runtime
             public const string ExposureName = "Exposure";
             public const string OverlayName = "Overlay";
             public const string SliderName = "Slider";
+            public const string VirtualTextureName = "Virtual Texture";
 
             public static readonly NameAndTooltip TileClusterDebug = new()
             {
@@ -329,6 +381,18 @@ namespace VividRP.Runtime
                 name = "Slider",
                 tooltip = "Split position for the slider debug pass."
             };
+
+            public static readonly NameAndTooltip VirtualTextureDebugMode = new()
+            {
+                name = "Mode",
+                tooltip = "Select the virtual texture debug visualization mode."
+            };
+
+            public static readonly NameAndTooltip VirtualTextureVisualizationMode = new()
+            {
+                name = "Overlay Mode",
+                tooltip = "Override the virtual texture visualization pass mode, or keep the pass-defined setting."
+            };
         }
 
         [DisplayInfo(name = "Rendering", order = 6)]
@@ -353,6 +417,7 @@ namespace VividRP.Runtime
                 root.children.Add(CreateExposureFoldout(data));
                 root.children.Add(CreateOverlayFoldout(data));
                 root.children.Add(CreateSliderFoldout(data));
+                root.children.Add(CreateVirtualTextureFoldout(data));
                 return root;
             }
 
@@ -505,6 +570,39 @@ namespace VividRP.Runtime
                 return foldout;
             }
 
+            private static DebugUI.Foldout CreateVirtualTextureFoldout(VividRenderingDebugSettingsData data)
+            {
+                var foldout = new DebugUI.Foldout
+                {
+                    displayName = Strings.VirtualTextureName,
+                    opened = true,
+                };
+
+                foldout.children.Add(CreateEnumField(
+                    Strings.VirtualTextureDebugMode,
+                    () => data.virtualTextureDebugMode,
+                    value => data.virtualTextureDebugMode = value));
+                foldout.children.Add(CreateEnumField(
+                    Strings.VirtualTextureVisualizationMode,
+                    () => data.virtualTextureVisualizationMode,
+                    value => data.virtualTextureVisualizationMode = value));
+                foldout.children.Add(CreateStatsValue("Resident Pages", () => VirtualTextureStatsRegistry.LastStats.ResidentPageCount));
+                foldout.children.Add(CreateStatsValue("Free Pages", () => VirtualTextureStatsRegistry.LastStats.FreePageCount));
+                foldout.children.Add(CreateStatsValue("Pending Uploads", () => VirtualTextureStatsRegistry.LastStats.PendingUploadCount));
+                foldout.children.Add(CreateStatsValue("Evictions", () => VirtualTextureStatsRegistry.LastStats.EvictionCount));
+                foldout.children.Add(CreateStatsValue("Faults", () => VirtualTextureStatsRegistry.LastStats.FaultCount));
+                foldout.children.Add(new DebugUI.Value
+                {
+                    displayName = "Status",
+                    getter = () =>
+                    {
+                        string status = VirtualTextureStatsRegistry.LastStats.StatusMessage;
+                        return string.IsNullOrEmpty(status) ? "OK" : status;
+                    },
+                });
+                return foldout;
+            }
+
             private static DebugUI.EnumField CreateEnumField<TEnum>(
                 NameAndTooltip nameAndTooltip,
                 Func<TEnum> getter,
@@ -519,6 +617,15 @@ namespace VividRP.Runtime
                     setter = value => setter((TEnum)Enum.ToObject(typeof(TEnum), value)),
                     getIndex = () => Convert.ToInt32(getter()),
                     setIndex = value => setter((TEnum)Enum.ToObject(typeof(TEnum), value)),
+                };
+            }
+
+            private static DebugUI.Value CreateStatsValue(string displayName, Func<object> getter)
+            {
+                return new DebugUI.Value
+                {
+                    displayName = displayName,
+                    getter = getter,
                 };
             }
         }

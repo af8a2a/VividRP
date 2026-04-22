@@ -172,7 +172,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             m_OutputTexture.Resize(width, height);
-            m_OutputTexture.desc.ColorFormat = ResolveOutputFormat(m_OutputTexture.desc);
+            m_OutputTexture.desc.ColorFormat = RenderGraphTextureDescUtility.ResolveColorFormat(
+                m_OutputTexture.desc,
+                GraphicsFormat.R16G16B16A16_SFloat);
             m_OutputTexture.desc.DepthBufferBits = DepthBits.None;
             m_OutputTexture.desc.MsaaSamples = MSAASamples.None;
             m_OutputTexture.desc.FilterMode = FilterMode.Point;
@@ -186,16 +188,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_OutputTexture.desc.BindTextureMS = false;
             m_OutputTexture.desc.Name = "OutputTexture";
         }
-
-
-        private static GraphicsFormat ResolveOutputFormat(RenderGraphTextureDesc descriptor)
-        {
-            if (descriptor != null && descriptor.ColorFormat != GraphicsFormat.None)
-                return descriptor.ColorFormat;
-
-            return GraphicsFormat.R16G16B16A16_SFloat;
-        }
-
         private static RenderGraphAccelerationStructure CreateSceneAccelerationStructure()
         {
             return new RenderGraphAccelerationStructure

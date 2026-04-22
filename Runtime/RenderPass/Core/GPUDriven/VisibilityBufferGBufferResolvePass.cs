@@ -102,13 +102,13 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             var cameraData = frameData.GetOrCreate<VividCameraData>();
-            var width = ResolveOutputDimension(
+            var width = RenderGraphTextureDescUtility.ResolveMaxExplicitDimension(
                 descriptor => descriptor.Width,
                 cameraData.actualWidth,
                 cameraData.pixelWidth,
                 Screen.width,
                 m_VisibilityBuffer?.desc);
-            var height = ResolveOutputDimension(
+            var height = RenderGraphTextureDescUtility.ResolveMaxExplicitDimension(
                 descriptor => descriptor.Height,
                 cameraData.actualHeight,
                 cameraData.pixelHeight,
@@ -185,30 +185,6 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.EnableRandomWrite = enableRandomWrite;
             texture.desc.BindTextureMS = false;
             texture.desc.Name = name;
-        }
-
-        private static int ResolveOutputDimension(
-            System.Func<RenderGraphTextureDesc, int> selector,
-            int actualCameraDimension,
-            int cameraDimension,
-            int screenDimension,
-            params RenderGraphTextureDesc[] descriptors)
-        {
-            var resolved = 0;
-
-            for (var i = 0; i < descriptors.Length; i++)
-            {
-                var descriptor = descriptors[i];
-                if (!RenderGraphTextureDescUtility.HasExplicitSize(descriptor))
-                    continue;
-
-                resolved = Mathf.Max(resolved, selector(descriptor));
-            }
-
-            if (resolved > 0)
-                return resolved;
-
-            return CameraDimensionUtility.ResolveCameraDimension(actualCameraDimension, cameraDimension, screenDimension);
         }
 
     }

@@ -79,13 +79,13 @@ namespace VividRP.Runtime.RenderPass.Core
 
             VividCameraData cameraData = frameData?.GetOrCreate<VividCameraData>();
             m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
-            int width = ResolveOutputDimension(
+            int width = RenderGraphTextureDescUtility.ResolveMaxExplicitDimension(
                 descriptor => descriptor.Width,
                 cameraData?.actualWidth ?? 0,
                 cameraData?.pixelWidth ?? 0,
                 Screen.width,
                 m_SourceTexture?.desc);
-            int height = ResolveOutputDimension(
+            int height = RenderGraphTextureDescUtility.ResolveMaxExplicitDimension(
                 descriptor => descriptor.Height,
                 cameraData?.actualHeight ?? 0,
                 cameraData?.pixelHeight ?? 0,
@@ -185,7 +185,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_OutputTexture.desc.Width = width;
             m_OutputTexture.desc.Height = height;
-            m_OutputTexture.desc.ColorFormat = ResolveOutputFormat(sourceDescriptor);
+            m_OutputTexture.desc.ColorFormat = RenderGraphTextureDescUtility.ResolveColorFormat(sourceDescriptor);
             m_OutputTexture.desc.DepthBufferBits = DepthBits.None;
             m_OutputTexture.desc.MsaaSamples = MSAASamples.None;
             m_OutputTexture.desc.FilterMode = sourceDescriptor?.FilterMode ?? FilterMode.Bilinear;
@@ -206,38 +206,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_OutputTexture.desc.UseDynamicScale = sourceDescriptor.UseDynamicScale;
             m_OutputTexture.desc.UseDynamicScaleExplicit = sourceDescriptor.UseDynamicScaleExplicit;
             m_OutputTexture.desc.ScaleFactor = sourceDescriptor.ScaleFactor;
-        }
-
-        private static int ResolveOutputDimension(
-            Func<RenderGraphTextureDesc, int> selector,
-            int actualCameraDimension,
-            int cameraDimension,
-            int screenDimension,
-            params RenderGraphTextureDesc[] descriptors)
-        {
-            int resolved = 0;
-
-            for (int descriptorIndex = 0; descriptorIndex < descriptors.Length; descriptorIndex++)
-            {
-                RenderGraphTextureDesc descriptor = descriptors[descriptorIndex];
-                if (!RenderGraphTextureDescUtility.HasExplicitSize(descriptor))
-                    continue;
-
-                resolved = Mathf.Max(resolved, selector(descriptor));
-            }
-
-            if (resolved > 0)
-                return resolved;
-
-            return CameraDimensionUtility.ResolveCameraDimension(actualCameraDimension, cameraDimension, screenDimension);
-        }
-
-        private static GraphicsFormat ResolveOutputFormat(RenderGraphTextureDesc sourceDescriptor)
-        {
-            if (sourceDescriptor != null && sourceDescriptor.ColorFormat != GraphicsFormat.None)
-                return sourceDescriptor.ColorFormat;
-
-            return GraphicsFormat.R8G8B8A8_UNorm;
         }
 
     }

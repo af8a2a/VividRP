@@ -12,6 +12,10 @@ namespace VividRP.Runtime.GPUDriven.Bindless
 
         uint DescriptorCapacity { get; }
 
+        ulong CompletedFrameFenceValue { get; }
+
+        ulong PendingFrameFenceValue { get; }
+
         string UnavailableReason { get; }
 
         uint CreateSRVDescriptorCallCountThisFrame { get; }

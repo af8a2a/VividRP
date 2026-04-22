@@ -376,6 +376,68 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Build_RebuildsMaterialData_WhenBindlessTextureBindingRevisionChanges()
+        {
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+            GPUDrivenMaterialProxy materialProxy = null;
+            Texture2D texture = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("MaterialTextureBindingChangeMesh");
+                material = CreateTestMaterial();
+                texture = new Texture2D(1, 1);
+                meshletCollection = CreateMeshletCollectionAsset(
+                    "MaterialTextureBindingChangeCollection",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[] { CreateVertex(0.0f, 0.0f, 0.0f), CreateVertex(1.0f, 0.0f, 0.0f), CreateVertex(0.0f, 1.0f, 0.0f) },
+                    new byte[] { 0, 1, 2 }
+                );
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                materialProxy.SourceMaterial = material;
+                materialProxy.BaseMap = texture;
+
+                gameObject = CreateMeshletRendererObject("Renderer_MaterialTextureBindingChange", mesh, new[] { material }, out MeshletRenderer meshletRenderer);
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var bindlessTextureContainer = new BindlessTextureContainer(new FakeBindlessTextureDescriptorAllocator(16));
+                EntityId textureId = texture.GetEntityId();
+
+                builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer, out _);
+                Object.DestroyImmediate(texture);
+                texture = null;
+
+                bindlessTextureContainer.MarkTextureDestroyed(textureId);
+                bindlessTextureContainer.PreRender();
+
+                bool staticDataChanged = builder.Build(
+                    sceneData,
+                    VividMeshletRendererDatabase.instance,
+                    bindlessTextureContainer,
+                    out bool materialDataChanged
+                );
+
+                Assert.That(staticDataChanged, Is.False);
+                Assert.That(materialDataChanged, Is.True);
+                Assert.That(sceneData.Materials[0].AlbedoIndex, Is.EqualTo(VividMaterialData.NoTextureIndex));
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, null, material, mesh, meshletCollection, materialProxy, texture);
+            }
+        }
+
+        [Test]
         public void Build_RebuildsStaticMeshletData_WhenTrackedMeshletAssetChanges()
         {
             GameObject gameObject = null;
@@ -954,6 +1016,10 @@ namespace VividRP.Editor.Tests
             public uint DescriptorHeapCount { get; }
             public uint DescriptorStartIndex { get; }
             public uint DescriptorCapacity { get; }
+
+            public ulong CompletedFrameFenceValue => 0ul;
+
+            public ulong PendingFrameFenceValue => 1ul;
 
             public string UnavailableReason => string.Empty;
 

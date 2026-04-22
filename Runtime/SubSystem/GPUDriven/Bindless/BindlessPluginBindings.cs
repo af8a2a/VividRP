@@ -28,6 +28,12 @@ namespace VividRP.Runtime.GPUDriven.Bindless
         [DllImport(DLLName)]
         public static extern uint GetBindlessDescriptorCount();
 
+        [DllImport(DLLName)]
+        public static extern ulong GetCompletedFrameFenceValue();
+
+        [DllImport(DLLName)]
+        public static extern ulong GetPendingFrameFenceValue();
+
         [return: MarshalAs(UnmanagedType.I1)]
         [DllImport(DLLName)]
         public static extern bool CreateSRVDescriptor(IntPtr pTexture, uint index);

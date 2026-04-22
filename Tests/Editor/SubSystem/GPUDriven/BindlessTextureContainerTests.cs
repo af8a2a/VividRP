@@ -102,7 +102,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PreRender_RebindsTrackedDescriptor_WhenPotentialDirtyTextureRangeProvidesNewPointer()
+        public void PreRender_AssignsNewDescriptor_WhenPotentialDirtyTextureRangeProvidesNewPointer()
         {
             var allocator = new FakeBindlessTextureDescriptorAllocator(8);
             using var container = new BindlessTextureContainer(allocator);
@@ -121,8 +121,11 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(created, Is.True);
                 Assert.That(allocator.DescriptorWrites.Count, Is.EqualTo(2));
-                Assert.That(allocator.DescriptorWrites[1].Index, Is.EqualTo(index));
+                Assert.That(allocator.DescriptorWrites[1].Index, Is.Not.EqualTo(index));
+                Assert.That(allocator.DescriptorWrites[1].Index, Is.EqualTo(6u));
                 Assert.That(allocator.DescriptorWrites[1].Texture, Is.SameAs(replacementTexture));
+                Assert.That(container.AllocatedDescriptorCount, Is.EqualTo(2u));
+                Assert.That(container.TextureBindingRevision, Is.EqualTo(1u));
             }
             finally
             {
@@ -133,7 +136,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PreRender_RebindsDestroyedTextureToWhiteTexture_WhenTextureWasTracked()
+        public void PreRender_RetiresTrackedDescriptorAndRemovesMapping_WhenTextureWasDestroyed()
         {
             var allocator = new FakeBindlessTextureDescriptorAllocator(8);
             using var container = new BindlessTextureContainer(allocator);
@@ -149,9 +152,16 @@ namespace VividRP.Editor.Tests
                 container.PreRender();
 
                 Assert.That(created, Is.True);
-                Assert.That(allocator.DescriptorWrites.Count, Is.EqualTo(2));
-                Assert.That(allocator.DescriptorWrites[1].Index, Is.EqualTo(index));
-                Assert.That(allocator.DescriptorWrites[1].Texture, Is.SameAs(Texture2D.whiteTexture));
+                Assert.That(allocator.DescriptorWrites.Count, Is.EqualTo(1));
+                Assert.That(container.RegisteredTextureCount, Is.EqualTo(0));
+                Assert.That(container.AllocatedDescriptorCount, Is.EqualTo(1u));
+                Assert.That(container.TextureBindingRevision, Is.EqualTo(1u));
+                Assert.That(container.TryGetExistingIndex(texture, out _), Is.False);
+
+                allocator.CompletedFrameFenceValue = allocator.PendingFrameFenceValue;
+                container.PreRender();
+
+                Assert.That(container.AllocatedDescriptorCount, Is.EqualTo(0u));
             }
             catch
             {
@@ -161,6 +171,41 @@ namespace VividRP.Editor.Tests
                 }
 
                 throw;
+            }
+        }
+
+        [Test]
+        public void TryGetOrCreateIndex_ReusesRetiredDescriptorAfterFencePasses()
+        {
+            var allocator = new FakeBindlessTextureDescriptorAllocator(8);
+            using var container = new BindlessTextureContainer(allocator);
+            var originalTexture = new Texture2D(1, 1);
+            var replacementTexture = new Texture2D(1, 1);
+            var unrelatedTexture = new Texture2D(1, 1);
+            var changedIds = new NativeArray<EntityId>(1, Allocator.Temp);
+
+            try
+            {
+                var created = container.TryGetOrCreateIndex(originalTexture, out uint originalIndex);
+                changedIds[0] = originalTexture.GetEntityId();
+                container.AddPotentialDirtyTextureRange(changedIds, new List<Object> { replacementTexture });
+                container.PreRender();
+
+                allocator.CompletedFrameFenceValue = allocator.PendingFrameFenceValue;
+
+                var unrelatedCreated = container.TryGetOrCreateIndex(unrelatedTexture, out uint unrelatedIndex);
+
+                Assert.That(created, Is.True);
+                Assert.That(unrelatedCreated, Is.True);
+                Assert.That(originalIndex, Is.EqualTo(7u));
+                Assert.That(unrelatedIndex, Is.EqualTo(originalIndex));
+            }
+            finally
+            {
+                changedIds.Dispose();
+                Object.DestroyImmediate(originalTexture);
+                Object.DestroyImmediate(replacementTexture);
+                Object.DestroyImmediate(unrelatedTexture);
             }
         }
 
@@ -203,6 +248,10 @@ namespace VividRP.Editor.Tests
             public uint DescriptorHeapCount { get; }
             public uint DescriptorStartIndex { get; }
             public uint DescriptorCapacity { get; }
+
+            public ulong CompletedFrameFenceValue { get; set; }
+
+            public ulong PendingFrameFenceValue { get; set; } = 1ul;
 
             public string UnavailableReason { get; set; } = string.Empty;
 

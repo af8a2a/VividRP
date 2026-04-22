@@ -10,6 +10,8 @@ namespace VividRP.Runtime.GPUDriven.Bindless
         private readonly Func<uint> m_GetDescriptorHeapCount;
         private readonly Func<uint> m_GetDescriptorStartIndex;
         private readonly Func<uint> m_GetDescriptorCapacity;
+        private readonly Func<ulong> m_GetCompletedFrameFenceValue;
+        private readonly Func<ulong> m_GetPendingFrameFenceValue;
         private readonly Func<GraphicsDeviceType> m_GetGraphicsDeviceType;
         private readonly Func<Texture> m_GetWhiteTexture;
         private uint m_DescriptorHeapCount;
@@ -25,6 +27,8 @@ namespace VividRP.Runtime.GPUDriven.Bindless
                 BindlessPluginBindings.GetSRVDescriptorHeapCount,
                 BindlessPluginBindings.GetBindlessDescriptorStartIndex,
                 BindlessPluginBindings.GetBindlessDescriptorCount,
+                BindlessPluginBindings.GetCompletedFrameFenceValue,
+                BindlessPluginBindings.GetPendingFrameFenceValue,
                 static (texture, index) => BindlessPluginBindings.CreateSRVDescriptor(texture.GetNativeTexturePtr(), index),
                 static () => SystemInfo.graphicsDeviceType,
                 static () => Texture2D.whiteTexture)
@@ -35,6 +39,8 @@ namespace VividRP.Runtime.GPUDriven.Bindless
             Func<uint> getDescriptorHeapCount,
             Func<uint> getDescriptorStartIndex,
             Func<uint> getDescriptorCapacity,
+            Func<ulong> getCompletedFrameFenceValue,
+            Func<ulong> getPendingFrameFenceValue,
             Func<Texture, uint, bool> createTextureDescriptor,
             Func<GraphicsDeviceType> getGraphicsDeviceType,
             Func<Texture> getWhiteTexture)
@@ -43,6 +49,8 @@ namespace VividRP.Runtime.GPUDriven.Bindless
             m_GetDescriptorHeapCount = getDescriptorHeapCount ?? throw new ArgumentNullException(nameof(getDescriptorHeapCount));
             m_GetDescriptorStartIndex = getDescriptorStartIndex ?? throw new ArgumentNullException(nameof(getDescriptorStartIndex));
             m_GetDescriptorCapacity = getDescriptorCapacity ?? throw new ArgumentNullException(nameof(getDescriptorCapacity));
+            m_GetCompletedFrameFenceValue = getCompletedFrameFenceValue ?? throw new ArgumentNullException(nameof(getCompletedFrameFenceValue));
+            m_GetPendingFrameFenceValue = getPendingFrameFenceValue ?? throw new ArgumentNullException(nameof(getPendingFrameFenceValue));
             m_CreateTextureDescriptor = createTextureDescriptor ?? throw new ArgumentNullException(nameof(createTextureDescriptor));
             m_GetGraphicsDeviceType = getGraphicsDeviceType ?? throw new ArgumentNullException(nameof(getGraphicsDeviceType));
             m_GetWhiteTexture = getWhiteTexture ?? throw new ArgumentNullException(nameof(getWhiteTexture));
@@ -85,6 +93,10 @@ namespace VividRP.Runtime.GPUDriven.Bindless
                 return m_DescriptorCapacity;
             }
         }
+
+        public ulong CompletedFrameFenceValue => GetFrameFenceValue(m_GetCompletedFrameFenceValue);
+
+        public ulong PendingFrameFenceValue => GetFrameFenceValue(m_GetPendingFrameFenceValue);
 
         public string UnavailableReason
         {
@@ -132,6 +144,24 @@ namespace VividRP.Runtime.GPUDriven.Bindless
             {
                 SetPermanentlyUnavailable($"Bindless plugin invocation failed: {exception.GetType().Name}.");
                 return false;
+            }
+        }
+
+        private ulong GetFrameFenceValue(Func<ulong> getFrameFenceValue)
+        {
+            if (!TryInitializeIfNeeded())
+            {
+                return 0ul;
+            }
+
+            try
+            {
+                return getFrameFenceValue();
+            }
+            catch (Exception exception) when (IsNativePluginException(exception))
+            {
+                SetPermanentlyUnavailable($"Bindless plugin invocation failed: {exception.GetType().Name}.");
+                return 0ul;
             }
         }
 

@@ -16,6 +16,8 @@ namespace VividRP.Editor.Tests
                 () => ++heapCountQueryCount == 1 ? 0u : 128u,
                 static () => 112u,
                 static () => 16u,
+                static () => 3ul,
+                static () => 5ul,
                 static (texture, index) => true,
                 static () => GraphicsDeviceType.Direct3D12,
                 static () => Texture2D.whiteTexture);
@@ -35,6 +37,8 @@ namespace VividRP.Editor.Tests
                 static () => 64u,
                 static () => 48u,
                 static () => 16u,
+                static () => 2ul,
+                static () => 4ul,
                 static (texture, index) => false,
                 static () => GraphicsDeviceType.Direct3D12,
                 static () => Texture2D.whiteTexture);
@@ -66,6 +70,8 @@ namespace VividRP.Editor.Tests
                 },
                 static () => 48u,
                 static () => 16u,
+                static () => 0ul,
+                static () => 0ul,
                 static (texture, index) => true,
                 static () => GraphicsDeviceType.Vulkan,
                 static () => Texture2D.whiteTexture);
@@ -83,6 +89,8 @@ namespace VividRP.Editor.Tests
                 static () => 64u,
                 static () => 48u,
                 static () => 16u,
+                static () => 7ul,
+                static () => 9ul,
                 static (texture, index) => true,
                 static () => GraphicsDeviceType.Direct3D12,
                 static () => Texture2D.whiteTexture);
@@ -103,6 +111,23 @@ namespace VividRP.Editor.Tests
             {
                 Object.DestroyImmediate(texture);
             }
+        }
+
+        [Test]
+        public void FrameFenceValues_ReturnQueriedPluginValues_WhenAllocatorIsAvailable()
+        {
+            var allocator = new NativeBindlessTextureDescriptorAllocator(
+                static () => 64u,
+                static () => 48u,
+                static () => 16u,
+                static () => 11ul,
+                static () => 13ul,
+                static (texture, index) => true,
+                static () => GraphicsDeviceType.Direct3D12,
+                static () => Texture2D.whiteTexture);
+
+            Assert.That(allocator.CompletedFrameFenceValue, Is.EqualTo(11ul));
+            Assert.That(allocator.PendingFrameFenceValue, Is.EqualTo(13ul));
         }
     }
 }

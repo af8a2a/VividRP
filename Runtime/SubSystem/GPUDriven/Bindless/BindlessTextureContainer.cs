@@ -13,11 +13,15 @@ namespace VividRP.Runtime.GPUDriven.Bindless
 
         private readonly IBindlessTextureDescriptorAllocator m_Allocator;
         private readonly Dictionary<EntityId, BindlessTextureInfo> m_TextureInfos = new();
+        private readonly Stack<uint> m_FreeDescriptorIndices = new();
         private readonly List<Texture> m_PotentiallyDirtyTextures = new(InitialDirtyTextureCapacity);
         private readonly List<EntityId> m_PotentiallyDirtyTextureIds = new(InitialDirtyTextureCapacity);
         private readonly List<EntityId> m_PotentiallyDestroyedTextureIds = new(InitialDirtyTextureCapacity);
+        private readonly List<RetiredDescriptorSlot> m_RetiredDescriptorSlots = new();
 
         private uint m_AllocatedDescriptorCount;
+        private uint m_LinearAllocatedDescriptorCount;
+        private uint m_TextureBindingRevision;
         private bool m_IsDisposed;
 
         public BindlessTextureContainer()
@@ -42,6 +46,8 @@ namespace VividRP.Runtime.GPUDriven.Bindless
 
         public int RegisteredTextureCount => m_TextureInfos.Count;
 
+        public uint TextureBindingRevision => m_TextureBindingRevision;
+
         public uint CreateSRVDescriptorCallCountThisFrame => m_Allocator.CreateSRVDescriptorCallCountThisFrame;
 
         public string UnavailableReason => m_Allocator.UnavailableReason;
@@ -54,9 +60,14 @@ namespace VividRP.Runtime.GPUDriven.Bindless
             }
 
             m_TextureInfos.Clear();
+            m_FreeDescriptorIndices.Clear();
             m_PotentiallyDirtyTextures.Clear();
             m_PotentiallyDirtyTextureIds.Clear();
             m_PotentiallyDestroyedTextureIds.Clear();
+            m_RetiredDescriptorSlots.Clear();
+            m_AllocatedDescriptorCount = 0;
+            m_LinearAllocatedDescriptorCount = 0;
+            m_TextureBindingRevision = 0;
             m_IsDisposed = true;
         }
 
@@ -97,7 +108,15 @@ namespace VividRP.Runtime.GPUDriven.Bindless
                 return false;
             }
 
-            startIndex = m_Allocator.DescriptorStartIndex + m_Allocator.DescriptorCapacity - (m_AllocatedDescriptorCount + count);
+            uint remainingLinearDescriptorCount = RemainingLinearDescriptorCount();
+            if (count > remainingLinearDescriptorCount)
+            {
+                startIndex = InvalidTextureIndex;
+                return false;
+            }
+
+            startIndex = m_Allocator.DescriptorStartIndex + m_Allocator.DescriptorCapacity - (m_LinearAllocatedDescriptorCount + count);
+            m_LinearAllocatedDescriptorCount += count;
             m_AllocatedDescriptorCount += count;
             return true;
         }
@@ -123,6 +142,7 @@ namespace VividRP.Runtime.GPUDriven.Bindless
         public void PreRender()
         {
             ThrowIfDisposed();
+            RecycleRetiredDescriptorSlots();
             UpdateDirtyTextures();
         }
 
@@ -169,14 +189,13 @@ namespace VividRP.Runtime.GPUDriven.Bindless
                 return false;
             }
 
-            Texture effectiveTexture = GetEffectiveTexture(texture);
-            if (effectiveTexture == null)
+            if (texture == null)
             {
                 index = InvalidTextureIndex;
                 return false;
             }
 
-            IntPtr nativeTexturePtr = effectiveTexture.GetNativeTexturePtr();
+            IntPtr nativeTexturePtr = texture.GetNativeTexturePtr();
             bool hasExistingInfo = m_TextureInfos.TryGetValue(textureId, out BindlessTextureInfo info);
             if (hasExistingInfo)
             {
@@ -185,41 +204,58 @@ namespace VividRP.Runtime.GPUDriven.Bindless
                     index = info.Index;
                     return true;
                 }
-
-                index = info.Index;
-            }
-            else
-            {
-                if (!TryGetNextDescriptorIndex(out index))
-                {
-                    return false;
-                }
             }
 
-            if (!m_Allocator.TryCreateTextureDescriptor(effectiveTexture, index))
+            if (!TryCreateTextureDescriptorAtNextAvailableIndex(texture, out index))
             {
-                index = InvalidTextureIndex;
                 return false;
             }
 
-            if (!hasExistingInfo)
+            if (hasExistingInfo)
             {
-                m_AllocatedDescriptorCount++;
+                RetireDescriptorIndex(info.Index);
+                IncrementTextureBindingRevision();
             }
 
             m_TextureInfos[textureId] = new BindlessTextureInfo(index, nativeTexturePtr);
             return true;
         }
 
-        private bool TryGetNextDescriptorIndex(out uint index)
+        private bool TryCreateTextureDescriptorAtNextAvailableIndex(Texture texture, out uint index)
         {
-            if (!m_Allocator.IsAvailable || m_AllocatedDescriptorCount >= m_Allocator.DescriptorCapacity)
+            RecycleRetiredDescriptorSlots();
+
+            if (m_FreeDescriptorIndices.Count > 0)
+            {
+                uint recycledIndex = m_FreeDescriptorIndices.Peek();
+                if (!m_Allocator.TryCreateTextureDescriptor(texture, recycledIndex))
+                {
+                    index = InvalidTextureIndex;
+                    return false;
+                }
+
+                m_FreeDescriptorIndices.Pop();
+                m_AllocatedDescriptorCount++;
+                index = recycledIndex;
+                return true;
+            }
+
+            if (!m_Allocator.IsAvailable || m_LinearAllocatedDescriptorCount >= m_Allocator.DescriptorCapacity)
             {
                 index = InvalidTextureIndex;
                 return false;
             }
 
-            index = m_Allocator.DescriptorStartIndex + m_Allocator.DescriptorCapacity - 1 - m_AllocatedDescriptorCount;
+            uint newIndex = m_Allocator.DescriptorStartIndex + m_Allocator.DescriptorCapacity - 1 - m_LinearAllocatedDescriptorCount;
+            if (!m_Allocator.TryCreateTextureDescriptor(texture, newIndex))
+            {
+                index = InvalidTextureIndex;
+                return false;
+            }
+
+            m_LinearAllocatedDescriptorCount++;
+            m_AllocatedDescriptorCount++;
+            index = newIndex;
             return true;
         }
 
@@ -257,15 +293,58 @@ namespace VividRP.Runtime.GPUDriven.Bindless
             for (int index = 0; index < m_PotentiallyDestroyedTextureIds.Count; index++)
             {
                 EntityId textureId = m_PotentiallyDestroyedTextureIds[index];
-                if (!m_TextureInfos.TryGetValue(textureId, out _))
+                RetireTrackedTexture(textureId);
+            }
+
+            m_PotentiallyDestroyedTextureIds.Clear();
+        }
+
+        private void RetireTrackedTexture(EntityId textureId)
+        {
+            if (!m_TextureInfos.TryGetValue(textureId, out BindlessTextureInfo info))
+            {
+                return;
+            }
+
+            RetireDescriptorIndex(info.Index);
+            m_TextureInfos.Remove(textureId);
+            IncrementTextureBindingRevision();
+        }
+
+        private void RetireDescriptorIndex(uint index)
+        {
+            ulong retireFenceValue = Math.Max(m_Allocator.PendingFrameFenceValue, m_Allocator.CompletedFrameFenceValue);
+            if (retireFenceValue == 0ul)
+            {
+                retireFenceValue = 1ul;
+            }
+
+            m_RetiredDescriptorSlots.Add(new RetiredDescriptorSlot(index, retireFenceValue));
+        }
+
+        private void RecycleRetiredDescriptorSlots()
+        {
+            if (m_RetiredDescriptorSlots.Count == 0 || !m_Allocator.IsAvailable)
+            {
+                return;
+            }
+
+            ulong completedFrameFenceValue = m_Allocator.CompletedFrameFenceValue;
+            for (int index = m_RetiredDescriptorSlots.Count - 1; index >= 0; index--)
+            {
+                RetiredDescriptorSlot retiredSlot = m_RetiredDescriptorSlots[index];
+                if (completedFrameFenceValue < retiredSlot.RetireFenceValue)
                 {
                     continue;
                 }
 
-                TryGetOrCreateIndex(null, textureId, out _);
+                m_FreeDescriptorIndices.Push(retiredSlot.Index);
+                m_RetiredDescriptorSlots.RemoveAt(index);
+                if (m_AllocatedDescriptorCount > 0)
+                {
+                    m_AllocatedDescriptorCount--;
+                }
             }
-
-            m_PotentiallyDestroyedTextureIds.Clear();
         }
 
         private uint RemainingDescriptorCount()
@@ -273,9 +352,9 @@ namespace VividRP.Runtime.GPUDriven.Bindless
             return m_Allocator.DescriptorCapacity - m_AllocatedDescriptorCount;
         }
 
-        private static Texture GetEffectiveTexture(Texture texture)
+        private uint RemainingLinearDescriptorCount()
         {
-            return texture != null ? texture : Texture2D.whiteTexture;
+            return m_Allocator.DescriptorCapacity - m_LinearAllocatedDescriptorCount;
         }
 
         private static EntityId GetTrackedTextureId(Texture texture)
@@ -307,6 +386,15 @@ namespace VividRP.Runtime.GPUDriven.Bindless
             }
         }
 
+        private void IncrementTextureBindingRevision()
+        {
+            m_TextureBindingRevision++;
+            if (m_TextureBindingRevision == 0)
+            {
+                m_TextureBindingRevision = 1;
+            }
+        }
+
         private readonly struct BindlessTextureInfo
         {
             public BindlessTextureInfo(uint index, IntPtr nativeTexturePtr)
@@ -318,6 +406,19 @@ namespace VividRP.Runtime.GPUDriven.Bindless
             public uint Index { get; }
 
             public IntPtr NativeTexturePtr { get; }
+        }
+
+        private readonly struct RetiredDescriptorSlot
+        {
+            public RetiredDescriptorSlot(uint index, ulong retireFenceValue)
+            {
+                Index = index;
+                RetireFenceValue = retireFenceValue;
+            }
+
+            public uint Index { get; }
+
+            public ulong RetireFenceValue { get; }
         }
     }
 }

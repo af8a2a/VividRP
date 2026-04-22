@@ -87,8 +87,6 @@ namespace VividRP.Editor
             settings.DrawNormalizedViewPort();
             settings.DrawDepth();
             settings.DrawMultiDisplay();
-            settings.DrawTargetEye();
-            settings.DrawVR();
         }
 
         private void DrawVividInspector()

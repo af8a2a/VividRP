@@ -35,6 +35,7 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<VividInstanceData> m_PreviousInstanceData = new();
         private bool m_HasBuiltStaticData;
         private bool m_UsesFallbackMaterials;
+        private uint m_PreviousTextureBindingRevision;
 
         public bool Build(
             VividGPUDrivenSceneData sceneData,
@@ -103,6 +104,11 @@ namespace VividRP.Runtime.GPUDriven
                 materialDataChanged = true;
             }
 
+            if (!materialDataChanged && m_PreviousTextureBindingRevision != bindlessTextureContainer.TextureBindingRevision)
+            {
+                materialDataChanged = true;
+            }
+
             if (staticDataChanged)
             {
                 sceneData.Clear();
@@ -140,6 +146,7 @@ namespace VividRP.Runtime.GPUDriven
             SwapReferencedMeshletAssetIds();
             SwapReferencedMaterialProxyIds();
             m_HasBuiltStaticData = true;
+            m_PreviousTextureBindingRevision = bindlessTextureContainer.TextureBindingRevision;
             return staticDataChanged;
         }
 

@@ -111,6 +111,10 @@ namespace VividRP.Editor.Tests
             public uint DescriptorStartIndex { get; }
             public uint DescriptorCapacity { get; }
 
+            public ulong CompletedFrameFenceValue => 0ul;
+
+            public ulong PendingFrameFenceValue => 1ul;
+
             public string UnavailableReason => string.Empty;
 
             public uint CreateSRVDescriptorCallCountThisFrame { get; private set; }

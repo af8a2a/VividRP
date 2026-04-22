@@ -125,7 +125,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ZeroAtomicCounterBuffer();
         }
 
-        public override void Record(UnsafeGraphContext context)
+        public override void Record(UnsafePassContext context)
         {
             if (!CanExecute())
                 return;

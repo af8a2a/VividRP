@@ -130,7 +130,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Material = CoreUtils.CreateEngineMaterial(resources.FinalBlitShader);
         }
 
-        public override void Record(UnsafeGraphContext context)
+        public override void Record(UnsafePassContext context)
         {
             if (m_Material == null)
                 return;

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -151,7 +151,7 @@ namespace VividRP.Runtime.RenderPass.Core
             PrepareWorkingResources();
         }
 
-        public override void Record(ComputeGraphContext context)
+        public override void Record(ComputePassContext context)
         {
             if (m_ComputeShader == null)
                 return;

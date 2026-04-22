@@ -53,7 +53,7 @@ namespace VividRP.Runtime
             colorGradingTex.desc.Name = "ColorGradingTexture";
         }
 
-        public override void Record(UnsafeGraphContext context)
+        public override void Record(UnsafePassContext context)
         {
             using (new ProfilingScope(context.cmd, profilingSampler))
             {

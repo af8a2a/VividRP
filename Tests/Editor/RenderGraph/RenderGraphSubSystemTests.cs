@@ -370,7 +370,7 @@ namespace VividRP.Editor.Tests
         {
         }
 
-        public override void Record(RasterGraphContext context)
+        public override void Record(RasterPassContext context)
         {
         }
 
@@ -399,7 +399,7 @@ namespace VividRP.Editor.Tests
         {
         }
 
-        public override void Record(RasterGraphContext context)
+        public override void Record(RasterPassContext context)
         {
         }
 
@@ -424,7 +424,7 @@ namespace VividRP.Editor.Tests
         {
         }
 
-        public override void Record(RasterGraphContext context)
+        public override void Record(RasterPassContext context)
         {
         }
 
@@ -465,7 +465,7 @@ namespace VividRP.Editor.Tests
         {
         }
 
-        public override void Record(ComputeGraphContext context)
+        public override void Record(ComputePassContext context)
         {
         }
 

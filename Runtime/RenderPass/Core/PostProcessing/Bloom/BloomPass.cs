@@ -191,7 +191,7 @@ namespace VividRP.Runtime
             }
         }
 
-        public override void Record(UnsafeGraphContext context)
+        public override void Record(UnsafePassContext context)
         {
             var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
 

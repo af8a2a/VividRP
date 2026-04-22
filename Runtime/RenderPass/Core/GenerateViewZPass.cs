@@ -50,7 +50,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_LinearDepthTexture.desc.EnableRandomWrite = true;
         }
 
-        public override void Record(ComputeGraphContext context)
+        public override void Record(ComputePassContext context)
         {
             
             if (m_Shader == null) return;

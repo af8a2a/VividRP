@@ -199,7 +199,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LogLut3DParams = ResolveExternalLutParams(m_ColorGradingSettings.externalLut, m_ColorGradingSettings.externalLutContribution);
         }
 
-        public override void Record(UnsafeGraphContext context)
+        public override void Record(UnsafePassContext context)
         {
             if (m_Material == null
                 || !m_SourceTexture.innerHandle.IsValid()

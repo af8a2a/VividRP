@@ -102,7 +102,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureOutputTexture(width, height);
         }
 
-        public override void Record(RasterGraphContext context)
+        public override void Record(RasterPassContext context)
         {
             if (m_Material == null
                 || !m_VisibilityBuffer.innerHandle.IsValid()

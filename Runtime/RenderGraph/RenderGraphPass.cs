@@ -330,9 +330,9 @@ namespace VividRP.Runtime
 
         /// <summary>
         /// Record rendering commands. Called from within the RenderGraph render func.
-        /// Use the context to access resolved handles by field name.
+        /// Use the context to access resolved handles and frame ContextItem values.
         /// </summary>
-        public abstract void Record(ComputeGraphContext context);
+        public abstract void Record(ComputePassContext context);
 
         public abstract void Dispose();
 
@@ -365,9 +365,9 @@ namespace VividRP.Runtime
 
         /// <summary>
         /// Record rendering commands. Called from within the RenderGraph render func.
-        /// Use the context to access resolved handles by field name.
+        /// Use the context to access resolved handles and frame ContextItem values.
         /// </summary>
-        public abstract void Record(RasterGraphContext context);
+        public abstract void Record(RasterPassContext context);
 
         public abstract void Dispose();
 
@@ -407,9 +407,9 @@ namespace VividRP.Runtime
 
         /// <summary>
         /// Record rendering commands. Called from within the RenderGraph render func.
-        /// Use the context to access resolved handles by field name.
+        /// Use the context to access resolved handles and frame ContextItem values.
         /// </summary>
-        public abstract void Record(UnsafeGraphContext context);
+        public abstract void Record(UnsafePassContext context);
 
         public abstract void Dispose();
 

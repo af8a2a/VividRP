@@ -93,7 +93,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureOutputTexture(width, height, m_SourceTexture?.desc);
         }
 
-        public override void Record(RasterGraphContext context)
+        public override void Record(RasterPassContext context)
         {
             if (m_Material == null || !m_OutputTexture.innerHandle.IsValid())
                 return;

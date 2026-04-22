@@ -90,7 +90,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBufferDepth.Resize(width, height);
         }
 
-        public override void Record(RasterGraphContext context)
+        public override void Record(RasterPassContext context)
         {
             if (m_RenderList == null || !m_RenderList.IsValid)
                 return;

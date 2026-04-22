@@ -116,7 +116,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
-        public override void Record(ComputeGraphContext context)
+        public override void Record(ComputePassContext context)
         {
             if (m_ComputeShader == null)
                 return;

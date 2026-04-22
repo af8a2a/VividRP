@@ -170,7 +170,7 @@ namespace VividRP.Runtime.RenderPass.Core
             VividRayTracingAccelerationStructureStatsRegistry.Report(m_LastStats);
         }
 
-        public override void Record(ComputeGraphContext context)
+        public override void Record(ComputePassContext context)
         {
             if (!m_SupportsRayTracing || m_SceneAccelerationStructure == null)
                 return;

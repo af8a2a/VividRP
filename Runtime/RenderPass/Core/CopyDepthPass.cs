@@ -59,7 +59,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureDepthTextureOutput(width, height);
         }
 
-        public override void Record(RasterGraphContext context)
+        public override void Record(RasterPassContext context)
         {
             if (m_Material == null || !m_DepthAttachment.innerHandle.IsValid() || !m_DepthTexture.innerHandle.IsValid())
                 return;

@@ -132,7 +132,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureOutputTexture(width, height, m_ColorInput?.desc);
         }
 
-        public override void Record(UnsafeGraphContext context)
+        public override void Record(UnsafePassContext context)
         {
             if (m_Material == null
                 || m_ColorInput?.innerHandle.IsValid() != true

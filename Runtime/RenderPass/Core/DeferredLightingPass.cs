@@ -287,7 +287,7 @@ namespace VividRP.Runtime.RenderPass.Core
             PrepareSkyTextureState(frameData.GetOrCreate<VividSkyData>());
         }
 
-        public override void Record(UnsafeGraphContext context)
+        public override void Record(UnsafePassContext context)
         {
             if (m_DeferredLitCompute == null
                 || m_ClearDeferredLitKernel < 0

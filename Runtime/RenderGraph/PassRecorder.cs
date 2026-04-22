@@ -96,7 +96,10 @@ namespace VividRP.Runtime
             if (ShouldEnableAsyncCompute(enableAsyncCompute, pass, passDefinition))
                 builder.EnableAsyncCompute(true);
 
-            builder.SetRenderFunc<ComputePassData>(static (data, ctx) => { data.Pass.Record(ctx); });
+            builder.SetRenderFunc<ComputePassData>(static (data, ctx) =>
+            {
+                data.Pass.Record(new ComputePassContext(ctx, s_FrameData));
+            });
         }
 
         /// <summary>
@@ -131,7 +134,7 @@ namespace VividRP.Runtime
 
             builder.SetRenderFunc<RasterPassData>(static (data, ctx) =>
             {
-                data.Pass.Record(ctx);
+                data.Pass.Record(new RasterPassContext(ctx, s_FrameData));
             });
         }
 
@@ -170,7 +173,10 @@ namespace VividRP.Runtime
             if (ShouldEnableAsyncCompute(enableAsyncCompute, pass, passDefinition))
                 builder.EnableAsyncCompute(true);
 
-            builder.SetRenderFunc<UnsafePassData>(static (data, ctx) => { data.Pass.Record(ctx); });
+            builder.SetRenderFunc<UnsafePassData>(static (data, ctx) =>
+            {
+                data.Pass.Record(new UnsafePassContext(ctx, s_FrameData));
+            });
         }
 
         internal static bool ShouldEnableAsyncCompute(

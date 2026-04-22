@@ -74,7 +74,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
-        public override void Record(UnsafeGraphContext context)
+        public override void Record(UnsafePassContext context)
         {
             if (m_RenderList == null
                 || !m_RenderList.IsValid

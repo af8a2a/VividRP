@@ -202,7 +202,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
-        public override void Record(UnsafeGraphContext context)
+        public override void Record(UnsafePassContext context)
         {
             var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
             using (new ProfilingScope(nativeCmd, profilingSampler))

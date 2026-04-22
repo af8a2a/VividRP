@@ -141,7 +141,7 @@ namespace VividRP.Runtime.RenderPass.Core
             );
         }
 
-        public override void Record(RasterGraphContext context)
+        public override void Record(RasterPassContext context)
         {
             if (m_Materials[0] == null)
                 return;

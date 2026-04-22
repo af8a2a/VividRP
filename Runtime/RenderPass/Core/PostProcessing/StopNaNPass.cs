@@ -83,7 +83,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_OutputTexture.desc.Name = "StopNaNOutput";
         }
 
-        public override void Record(UnsafeGraphContext context)
+        public override void Record(UnsafePassContext context)
         {
             if (m_Material == null)
                 return;

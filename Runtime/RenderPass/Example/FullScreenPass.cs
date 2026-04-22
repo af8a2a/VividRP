@@ -11,7 +11,7 @@ namespace VividRP.Runtime
         [RenderGraphResource(Access = AccessFlags.Write, AttachmentIndex = 0)]
         RenderGraphTexture texture = new RenderGraphTexture();
 
-        public override void Record(RasterGraphContext context)
+        public override void Record(RasterPassContext context)
         {
             var cmd = context.cmd;
             Blitter.BlitTexture(cmd, Vector2.one, material, 0);

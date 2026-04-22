@@ -53,7 +53,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_DirectionalShadowTexture);
         }
 
-        public override void Record(UnsafeGraphContext context)
+        public override void Record(UnsafePassContext context)
         {
             if (!m_ShouldInject)
                 return;

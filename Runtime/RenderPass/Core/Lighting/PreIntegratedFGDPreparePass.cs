@@ -44,7 +44,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 PassRecorder.ImportTexture(m_CharlieAndFabricTexture, m_PreIntegratedFGDTextures.CharlieAndFabricTexture);
         }
 
-        public override void Record(UnsafeGraphContext context)
+        public override void Record(UnsafePassContext context)
         {
         }
 

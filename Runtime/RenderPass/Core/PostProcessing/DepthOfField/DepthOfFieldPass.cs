@@ -272,7 +272,7 @@ namespace VividRP.Runtime
             UpdateApertureShapeBuffer();
         }
 
-        public override void Record(UnsafeGraphContext context)
+        public override void Record(UnsafePassContext context)
         {
             if (source?.innerHandle.IsValid() != true || output?.innerHandle.IsValid() != true)
                 return;

@@ -172,7 +172,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
-        public override void Record(RasterGraphContext context)
+        public override void Record(RasterPassContext context)
         {
             if (m_RenderList == null || !m_RenderList.IsValid)
                 return;

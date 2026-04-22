@@ -80,7 +80,7 @@ namespace VividRP.Editor.Tests
             {
             }
 
-            public override void Record(ComputeGraphContext context)
+            public override void Record(ComputePassContext context)
             {
             }
 

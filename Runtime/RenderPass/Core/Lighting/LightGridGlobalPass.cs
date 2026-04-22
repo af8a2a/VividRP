@@ -113,7 +113,7 @@ namespace VividRP.Runtime
                 && m_LogBaseBuffer?.ImportedGraphicsBuffer != null;
         }
 
-        public override void Record(UnsafeGraphContext context)
+        public override void Record(UnsafePassContext context)
         {
             var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
             using (new ProfilingScope(cmd, profilingSampler))

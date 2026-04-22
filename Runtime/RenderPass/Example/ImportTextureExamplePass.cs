@@ -58,7 +58,7 @@ namespace VividRP.Runtime
             // It returns a TextureHandle that can be used directly in Record()
         }
 
-        public override void Record(RasterGraphContext context)
+        public override void Record(RasterPassContext context)
         {
             // Now you can use the imported TextureHandle member variables directly
             // They are valid TextureHandles that can be passed to RenderGraph APIs

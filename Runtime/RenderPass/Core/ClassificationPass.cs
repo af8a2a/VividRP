@@ -162,7 +162,7 @@ namespace VividRP.Runtime.RenderPass.Core
             EnsureImportedBuffers();
         }
 
-        public override void Record(ComputeGraphContext context)
+        public override void Record(ComputePassContext context)
         {
             if (m_ClassificationCompute == null)
                 return;

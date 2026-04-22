@@ -189,7 +189,7 @@ namespace VividRP.Runtime.RenderPass.Core
             PrepareClusteredLightingParameters(frameData, cameraData, width, height);
         }
 
-        public override void Record(RasterGraphContext context)
+        public override void Record(RasterPassContext context)
         {
             if (m_Material == null
                 || !m_SourceTexture.innerHandle.IsValid()

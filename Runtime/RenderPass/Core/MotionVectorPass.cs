@@ -83,7 +83,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureTargets(cameraData);
         }
 
-        public override void Record(RasterGraphContext context)
+        public override void Record(RasterPassContext context)
         {
             if (m_Camera == null || m_Camera.cameraType == CameraType.Preview)
                 return;

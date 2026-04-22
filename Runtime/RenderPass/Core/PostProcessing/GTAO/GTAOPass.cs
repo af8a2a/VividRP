@@ -177,7 +177,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ConstantBuffer = BuildConstantBuffer(cameraData, m_Width, m_Height, m_Settings);
         }
 
-        public override void Record(UnsafeGraphContext context)
+        public override void Record(UnsafePassContext context)
         {
             var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
             using (new ProfilingScope(cmd, profilingSampler))

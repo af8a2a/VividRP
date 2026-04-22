@@ -166,7 +166,7 @@ namespace VividRP.Runtime.RenderPass
         }
 
 
-        public override void Record(UnsafeGraphContext context)
+        public override void Record(UnsafePassContext context)
         {
             var cmd =CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
             var exposureBuffer = m_ExposureData?.frameExposureBuffer;

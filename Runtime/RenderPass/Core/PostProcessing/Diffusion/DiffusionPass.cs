@@ -157,7 +157,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 0.5f);
         }
 
-        public override void Record(UnsafeGraphContext context)
+        public override void Record(UnsafePassContext context)
         {
 
             var sourceHandle = source.innerHandle;

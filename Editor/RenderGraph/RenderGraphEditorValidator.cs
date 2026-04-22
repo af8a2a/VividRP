@@ -92,7 +92,6 @@ namespace VividRP.Editor.RenderGraph
             ValidateHistoryResourceNodes(graph, reporter, ref summary);
             ValidateSubSystemInterfaceVariables(graph, reporter, ref summary);
 
-            ValidatePreviewNodes(graph, reporter, ref summary);
             ValidateSubgraphNodes(graph, reporter, summarizeChildSubgraphs, ref summary);
 
             return summary;
@@ -360,23 +359,6 @@ namespace VividRP.Editor.RenderGraph
             }
         }
 
-        private static void ValidatePreviewNodes(
-            RenderGraphEditorGraph graph,
-            IRenderGraphValidationReporter reporter,
-            ref ValidationSummary summary)
-        {
-            if (graph == null)
-                return;
-
-            foreach (var previewNode in graph.GetNodes().OfType<PreviewNodeData>())
-            {
-                reporter.LogError(
-                    "Preview Node has been removed from VividRP RenderGraph. Delete this node and use camera-aware debugging tools instead.",
-                    previewNode);
-                summary.ErrorCount++;
-            }
-        }
-
         internal static bool IsAsyncComputeConfigurationValid(System.Type passType, bool enableAsyncCompute)
         {
             return !enableAsyncCompute || RenderGraphPassExecutionUtility.SupportsAsyncCompute(passType);
@@ -428,12 +410,6 @@ namespace VividRP.Editor.RenderGraph
                     continue;
 
                 graph.RemoveNode(passNode);
-                removed++;
-            }
-
-            foreach (var previewNode in graph.GetNodes().OfType<PreviewNodeData>().ToList())
-            {
-                graph.RemoveNode(previewNode);
                 removed++;
             }
 

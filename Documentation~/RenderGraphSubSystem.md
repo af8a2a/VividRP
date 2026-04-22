@@ -18,7 +18,7 @@
 - 仅支持一层 `SubSystem`，不允许嵌套
 - 仅支持显式 I/O，不做自动接口推导
 - 运行时仍然展开为扁平 `RenderGraphData`
-- 支持在 `SubSystem` 内放置 `Pass`、私有资源节点、`History` 节点、`Preview` 节点
+- 支持在 `SubSystem` 内放置 `Pass`、私有资源节点与 `History` 节点
 
 ## 边界类型
 
@@ -61,7 +61,6 @@
 - `RenderListResourceNodeData`
 - `AccelerationStructureResourceNodeData`
 - `HistoryResourceNodeData`
-- `PreviewNodeData`
 
 ### 3. 定义显式输入/输出
 
@@ -123,13 +122,6 @@ Main Pass A
     -> Main Pass B
 ```
 
-## Preview 行为
-
-- `SubSystem` 内部可以正常使用 `PreviewNode`
-- 这些 preview metadata 会参与最终编译结果
-- 但主图 **不能** 直接预览内部私有结果
-- 如果希望主图看到子系统内部某一步结果，必须把该资源显式暴露为 `Output variable`
-
 ## History 资源说明
 
 - `HistoryResourceNodeData` 可以作为 `SubSystem` 内部私有实现存在
@@ -154,7 +146,7 @@ Main Pass A
 
 ### 子系统内部
 
-进入子图后，仍然沿用现有的 pass / resource / history / preview 校验逻辑。
+进入子图后，仍然沿用现有的 pass / resource / history 校验逻辑。
 
 ### 主图层面
 

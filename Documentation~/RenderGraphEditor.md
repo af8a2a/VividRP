@@ -23,7 +23,7 @@
 - `[RenderGraphResource]` 现在支持 `BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable`
 - `[RenderGraphResource]` 现在支持 `BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden`
 - 该模式适合“Pass 在构造函数里创建资源实例，`Prepare()` 每帧修正 descriptor”的固定资源
-- Editor 中该字段默认不显示输入端口，但如果字段可写，仍会保留输出端口给后续 Pass 或 Preview 使用
+- Editor 中该字段默认不显示输入端口，但如果字段可写，仍会保留输出端口给后续 Pass 使用
 - Pass 节点会额外显示一个 `Override <ResourceName>` 选项；打开后重新暴露输入端口，允许用图上的资源节点覆盖
 - 仅建议对已经具备完整默认 descriptor 初始化逻辑的字段启用该模式；如果字段必须依赖外部资源才有意义，继续使用默认的 `External`
 

@@ -228,36 +228,6 @@ namespace VividRP.Editor.Tests
             }
         }
 
-        [Test]
-        public void Compile_CullsPreviewOnlyProducer_ForPreviewNodeInsideSubSystem()
-        {
-            var graph = RenderGraphTestUtility.CreateGraph();
-
-            try
-            {
-                var subgraphNode = CreateSubSystem(graph, out var subSystemGraph);
-                Assert.That(subgraphNode, Is.Not.Null);
-
-                var producerNode = new TextureProducerPassNode();
-                var previewNode = new PreviewNodeData();
-                RenderGraphTestUtility.AddTestNode(subSystemGraph, producerNode);
-                subSystemGraph.AddNode(previewNode);
-
-                Assert.That(subSystemGraph.Connect(
-                    producerNode.GetOutputPortByName(TextureProducerPass.OutputFieldName),
-                    previewNode.GetInputPortByName(PreviewNodeData.TextureInputPortName)),
-                    Is.True);
-
-                var result = RenderGraphCompiler.Compile(graph);
-
-                Assert.That(result.Passes, Is.Empty);
-                Assert.That(result.ExecutionOrder, Is.Empty);
-            }
-            finally
-            {
-                RenderGraphTestUtility.DeleteGraph(graph);
-            }
-        }
     }
 
     public class RenderGraphSubSystemValidatorTests

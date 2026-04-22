@@ -158,12 +158,12 @@ namespace VividRP.Editor.Tests
             cameraData.actualWidth = 640;
             cameraData.actualHeight = 360;
 
-            SetFieldValue(pass, "m_DirectionalLightBuffer", CreateStructuredBuffer("DirectionalLights", VividLightData.DirectionalLightData.Stride));
-            SetFieldValue(pass, "m_PunctualLightBuffer", CreateStructuredBuffer("PunctualLights", VividLightData.PunctualLightData.Stride));
-            SetFieldValue(pass, "m_AreaLightBuffer", CreateStructuredBuffer("AreaLights", VividLightData.AreaLightData.Stride));
-            SetFieldValue(pass, "m_LayeredOffsetBuffer", CreateStructuredBuffer("LayeredOffset", sizeof(uint)));
-            SetFieldValue(pass, "m_LayeredLightListBuffer", CreateStructuredBuffer("LayeredLightList", sizeof(uint)));
-            SetFieldValue(pass, "m_LogBaseBuffer", CreateStructuredBuffer("LogBaseBuffer", sizeof(float)));
+            SetFieldValue(pass, "m_DirectionalLightBuffer", RenderGraphBuffer.CreateStructured("DirectionalLights", VividLightData.DirectionalLightData.Stride));
+            SetFieldValue(pass, "m_PunctualLightBuffer", RenderGraphBuffer.CreateStructured("PunctualLights", VividLightData.PunctualLightData.Stride));
+            SetFieldValue(pass, "m_AreaLightBuffer", RenderGraphBuffer.CreateStructured("AreaLights", VividLightData.AreaLightData.Stride));
+            SetFieldValue(pass, "m_LayeredOffsetBuffer", RenderGraphBuffer.CreateStructured("LayeredOffset", sizeof(uint)));
+            SetFieldValue(pass, "m_LayeredLightListBuffer", RenderGraphBuffer.CreateStructured("LayeredLightList", sizeof(uint)));
+            SetFieldValue(pass, "m_LogBaseBuffer", RenderGraphBuffer.CreateStructured("LogBaseBuffer", sizeof(float)));
 
             var clusteredLightingData = frameData.GetOrCreate<VividClusteredLightingData>();
             clusteredLightingData.directionalLightCount = 3;
@@ -213,7 +213,7 @@ namespace VividRP.Editor.Tests
             cameraData.actualWidth = 320;
             cameraData.actualHeight = 200;
 
-            SetFieldValue(pass, "m_AreaLightBuffer", CreateStructuredBuffer("AreaLights", VividLightData.AreaLightData.Stride));
+            SetFieldValue(pass, "m_AreaLightBuffer", RenderGraphBuffer.CreateStructured("AreaLights", VividLightData.AreaLightData.Stride));
 
             var clusteredLightingData = frameData.GetOrCreate<VividClusteredLightingData>();
             clusteredLightingData.areaLightCount = 4;
@@ -329,18 +329,5 @@ namespace VividRP.Editor.Tests
             return field;
         }
 
-        private static RenderGraphBuffer CreateStructuredBuffer(string name, int stride)
-        {
-            return new RenderGraphBuffer
-            {
-                desc = new RenderGraphBufferDesc
-                {
-                    Count = 1,
-                    Stride = stride,
-                    Target = GraphicsBuffer.Target.Structured,
-                    Name = name
-                }
-            };
-        }
     }
 }

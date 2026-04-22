@@ -105,11 +105,11 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer0 = RenderGraphTexture.CreateInput("GBuffer0", GraphicsFormat.R8G8B8A8_UNorm);
             m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
 
-            m_StandardMaterialIndices = CreateStructuredBuffer("StandardMaterialIndices", 1, sizeof(uint));
-            m_FabricMaterialIndices = CreateStructuredBuffer("FabricMaterialIndices", 1, sizeof(uint));
-            m_ClearCoatMaterialIndices = CreateStructuredBuffer("ClearCoatMaterialIndices", 1, sizeof(uint));
-            m_MaterialTileClasses = CreateStructuredBuffer("MaterialTileClasses", 1, sizeof(uint));
-            m_MaterialClassCounts = CreateStructuredBuffer("MaterialClassCounts", MaterialClassCount, sizeof(uint));
+            m_StandardMaterialIndices = RenderGraphBuffer.CreateStructured("StandardMaterialIndices", 1, sizeof(uint));
+            m_FabricMaterialIndices = RenderGraphBuffer.CreateStructured("FabricMaterialIndices", 1, sizeof(uint));
+            m_ClearCoatMaterialIndices = RenderGraphBuffer.CreateStructured("ClearCoatMaterialIndices", 1, sizeof(uint));
+            m_MaterialTileClasses = RenderGraphBuffer.CreateStructured("MaterialTileClasses", 1, sizeof(uint));
+            m_MaterialClassCounts = RenderGraphBuffer.CreateStructured("MaterialClassCounts", MaterialClassCount, sizeof(uint));
             m_StandardIndirectArgs = CreateIndirectArgsBuffer("StandardIndirectArgs");
             m_FabricIndirectArgs = CreateIndirectArgsBuffer("FabricIndirectArgs");
             m_ClearCoatIndirectArgs = CreateIndirectArgsBuffer("ClearCoatIndirectArgs");
@@ -209,21 +209,6 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_ClassificationCompute, ClassificationHeightId, m_ClassificationHeight);
             cmd.SetComputeIntParam(m_ClassificationCompute, MaterialTileCountId, m_MaterialTileCount);
             cmd.SetComputeIntParam(m_ClassificationCompute, MaterialTileCountXId, m_DispatchGroupCountX);
-        }
-
-
-        private static RenderGraphBuffer CreateStructuredBuffer(string name, int count, int stride)
-        {
-            return new RenderGraphBuffer
-            {
-                desc = new RenderGraphBufferDesc
-                {
-                    Count = count,
-                    Stride = stride,
-                    Target = GraphicsBuffer.Target.Structured,
-                    Name = name
-                }
-            };
         }
 
         private static RenderGraphBuffer CreateIndirectArgsBuffer(string name)

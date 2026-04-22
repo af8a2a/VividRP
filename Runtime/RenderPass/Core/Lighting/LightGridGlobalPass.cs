@@ -68,12 +68,12 @@ namespace VividRP.Runtime
         public LightGridGlobalPass()
         {
             profilingSampler = new ProfilingSampler(nameof(LightGridGlobalPass));
-            m_DirectionalLightBuffer = CreateStructuredBuffer("DirectionalLights", VividLightData.DirectionalLightData.Stride);
-            m_PunctualLightBuffer = CreateStructuredBuffer("PunctualLights", VividLightData.PunctualLightData.Stride);
-            m_AreaLightBuffer = CreateStructuredBuffer("AreaLights", VividLightData.AreaLightData.Stride);
-            m_LayeredOffsetBuffer = CreateStructuredBuffer("LayeredOffset", sizeof(uint));
-            m_LayeredLightListBuffer = CreateStructuredBuffer("LayeredLightList", sizeof(uint));
-            m_LogBaseBuffer = CreateStructuredBuffer("LogBaseBuffer", sizeof(float));
+            m_DirectionalLightBuffer = RenderGraphBuffer.CreateStructured("DirectionalLights", VividLightData.DirectionalLightData.Stride);
+            m_PunctualLightBuffer = RenderGraphBuffer.CreateStructured("PunctualLights", VividLightData.PunctualLightData.Stride);
+            m_AreaLightBuffer = RenderGraphBuffer.CreateStructured("AreaLights", VividLightData.AreaLightData.Stride);
+            m_LayeredOffsetBuffer = RenderGraphBuffer.CreateStructured("LayeredOffset", sizeof(uint));
+            m_LayeredLightListBuffer = RenderGraphBuffer.CreateStructured("LayeredLightList", sizeof(uint));
+            m_LogBaseBuffer = RenderGraphBuffer.CreateStructured("LogBaseBuffer", sizeof(float));
         }
 
         public override void Create()
@@ -196,20 +196,6 @@ namespace VividRP.Runtime
                 && m_LayeredOffsetBuffer?.ImportedGraphicsBuffer != null
                 && m_LayeredLightListBuffer?.ImportedGraphicsBuffer != null
                 && m_LogBaseBuffer?.ImportedGraphicsBuffer != null;
-        }
-
-        private static RenderGraphBuffer CreateStructuredBuffer(string name, int stride)
-        {
-            return new RenderGraphBuffer
-            {
-                desc = new RenderGraphBufferDesc
-                {
-                    Count = 1,
-                    Stride = stride,
-                    Target = GraphicsBuffer.Target.Structured,
-                    Name = name
-                }
-            };
         }
     }
 }

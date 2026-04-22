@@ -219,18 +219,18 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ColorTexture.desc.ClearBuffer = true;
             m_ColorTexture.desc.ClearColor = Color.clear;
             m_SkyIBLCubemap = CreateSkyIBLCubemapTexture("SkyIBLCubemap");
-            m_StandardMaterialIndices = CreateStructuredBuffer("StandardMaterialIndices", sizeof(uint));
-            m_FabricMaterialIndices = CreateStructuredBuffer("FabricMaterialIndices", sizeof(uint));
-            m_ClearCoatMaterialIndices = CreateStructuredBuffer("ClearCoatMaterialIndices", sizeof(uint));
+            m_StandardMaterialIndices = RenderGraphBuffer.CreateStructured("StandardMaterialIndices", sizeof(uint));
+            m_FabricMaterialIndices = RenderGraphBuffer.CreateStructured("FabricMaterialIndices", sizeof(uint));
+            m_ClearCoatMaterialIndices = RenderGraphBuffer.CreateStructured("ClearCoatMaterialIndices", sizeof(uint));
             m_StandardIndirectArgs = CreateIndirectArgsBuffer("StandardIndirectArgs");
             m_FabricIndirectArgs = CreateIndirectArgsBuffer("FabricIndirectArgs");
             m_ClearCoatIndirectArgs = CreateIndirectArgsBuffer("ClearCoatIndirectArgs");
-            m_LocalDirectionalLightBuffer = CreateStructuredBuffer("DirectionalLights", VividLightData.DirectionalLightData.Stride);
-            m_LocalPunctualLightBuffer = CreateStructuredBuffer("PunctualLights", VividLightData.PunctualLightData.Stride);
-            m_LocalAreaLightBuffer = CreateStructuredBuffer("AreaLights", VividLightData.AreaLightData.Stride);
-            m_LocalLayeredOffsetBuffer = CreateStructuredBuffer("LayeredOffset", sizeof(uint));
-            m_LocalLayeredLightListBuffer = CreateStructuredBuffer("LayeredLightList", sizeof(uint));
-            m_LocalLogBaseBuffer = CreateStructuredBuffer("LogBaseBuffer", sizeof(float));
+            m_LocalDirectionalLightBuffer = RenderGraphBuffer.CreateStructured("DirectionalLights", VividLightData.DirectionalLightData.Stride);
+            m_LocalPunctualLightBuffer = RenderGraphBuffer.CreateStructured("PunctualLights", VividLightData.PunctualLightData.Stride);
+            m_LocalAreaLightBuffer = RenderGraphBuffer.CreateStructured("AreaLights", VividLightData.AreaLightData.Stride);
+            m_LocalLayeredOffsetBuffer = RenderGraphBuffer.CreateStructured("LayeredOffset", sizeof(uint));
+            m_LocalLayeredLightListBuffer = RenderGraphBuffer.CreateStructured("LayeredLightList", sizeof(uint));
+            m_LocalLogBaseBuffer = RenderGraphBuffer.CreateStructured("LogBaseBuffer", sizeof(float));
             m_DirectionalLightBuffer = m_LocalDirectionalLightBuffer;
             m_PunctualLightBuffer = m_LocalPunctualLightBuffer;
             m_AreaLightBuffer = m_LocalAreaLightBuffer;
@@ -608,20 +608,6 @@ namespace VividRP.Runtime.RenderPass.Core
                     WrapMode = TextureWrapMode.Clamp,
                     UseMipMap = true,
                     AutoGenerateMips = false,
-                    Name = name
-                }
-            };
-        }
-
-        private static RenderGraphBuffer CreateStructuredBuffer(string name, int stride)
-        {
-            return new RenderGraphBuffer
-            {
-                desc = new RenderGraphBufferDesc
-                {
-                    Count = 1,
-                    Stride = stride,
-                    Target = GraphicsBuffer.Target.Structured,
                     Name = name
                 }
             };

@@ -169,18 +169,18 @@ namespace VividRP.Runtime
             profilingSampler = new ProfilingSampler(nameof(LightGridPass));
             m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
             m_HzbDepthTexture = RenderGraphTexture.CreateInput("HZB", GraphicsFormat.R16G16B16A16_SFloat);
-            m_DirectionalLightBuffer = CreateStructuredBuffer("DirectionalLights", 1, VividLightData.DirectionalLightData.Stride);
-            m_PunctualLightBuffer = CreateStructuredBuffer("PunctualLights", 1, VividLightData.PunctualLightData.Stride);
-            m_AreaLightBuffer = CreateStructuredBuffer("AreaLights", 1, VividLightData.AreaLightData.Stride);
-            m_DecalDataBuffer = CreateStructuredBuffer("DecalData", 1, VividLightData.DecalClusterData.Stride);
-            m_FiniteLightBoundBuffer = CreateStructuredBuffer("FiniteLightBounds", 1, VividLightData.SFiniteLightBound.Stride);
-            m_LightVolumeDataBuffer = CreateStructuredBuffer("LightVolumeData", 1, VividLightData.LightVolumeData.Stride);
-            m_ScreenSpaceBoundsBuffer = CreateStructuredBuffer("ScreenSpaceBounds", 1, sizeof(float) * 4);
-            m_BigTileLightListBuffer = CreateStructuredBuffer("BigTileLightList", 1, sizeof(uint));
-            m_LayeredOffsetBuffer = CreateStructuredBuffer("LayeredOffset", 1, sizeof(uint));
-            m_LayeredLightListBuffer = CreateStructuredBuffer("LayeredLightList", 1, sizeof(uint));
-            m_LayeredLightListCounterBuffer = CreateStructuredBuffer("LayeredLightListCounter", 1, sizeof(uint));
-            m_LogBaseBuffer = CreateStructuredBuffer("LogBaseBuffer", 1, sizeof(float));
+            m_DirectionalLightBuffer = RenderGraphBuffer.CreateStructured("DirectionalLights", 1, VividLightData.DirectionalLightData.Stride);
+            m_PunctualLightBuffer = RenderGraphBuffer.CreateStructured("PunctualLights", 1, VividLightData.PunctualLightData.Stride);
+            m_AreaLightBuffer = RenderGraphBuffer.CreateStructured("AreaLights", 1, VividLightData.AreaLightData.Stride);
+            m_DecalDataBuffer = RenderGraphBuffer.CreateStructured("DecalData", 1, VividLightData.DecalClusterData.Stride);
+            m_FiniteLightBoundBuffer = RenderGraphBuffer.CreateStructured("FiniteLightBounds", 1, VividLightData.SFiniteLightBound.Stride);
+            m_LightVolumeDataBuffer = RenderGraphBuffer.CreateStructured("LightVolumeData", 1, VividLightData.LightVolumeData.Stride);
+            m_ScreenSpaceBoundsBuffer = RenderGraphBuffer.CreateStructured("ScreenSpaceBounds", 1, sizeof(float) * 4);
+            m_BigTileLightListBuffer = RenderGraphBuffer.CreateStructured("BigTileLightList", 1, sizeof(uint));
+            m_LayeredOffsetBuffer = RenderGraphBuffer.CreateStructured("LayeredOffset", 1, sizeof(uint));
+            m_LayeredLightListBuffer = RenderGraphBuffer.CreateStructured("LayeredLightList", 1, sizeof(uint));
+            m_LayeredLightListCounterBuffer = RenderGraphBuffer.CreateStructured("LayeredLightListCounter", 1, sizeof(uint));
+            m_LogBaseBuffer = RenderGraphBuffer.CreateStructured("LogBaseBuffer", 1, sizeof(float));
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -763,21 +763,6 @@ namespace VividRP.Runtime
             ReleaseImportedBuffer(ref m_LayeredLightListCounterImportedBuffer, m_LayeredLightListCounterBuffer);
             ReleaseImportedBuffer(ref m_LogBaseImportedBuffer, m_LogBaseBuffer);
         }
-
-        private static RenderGraphBuffer CreateStructuredBuffer(string name, int count, int stride)
-        {
-            return new RenderGraphBuffer
-            {
-                desc = new RenderGraphBufferDesc
-                {
-                    Count = count,
-                    Stride = stride,
-                    Target = GraphicsBuffer.Target.Structured,
-                    Name = name
-                }
-            };
-        }
-
 
         private static void ResizeStructuredBuffer(RenderGraphBuffer buffer, int count, int stride)
         {

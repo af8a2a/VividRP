@@ -141,12 +141,12 @@ namespace VividRP.Editor.Tests
             cameraData.actualHeight = 360;
 
             var clusteredLightingData = frameData.GetOrCreate<VividClusteredLightingData>();
-            clusteredLightingData.punctualLights = CreateStructuredBuffer("PunctualLights", VividLightData.PunctualLightData.Stride);
-            clusteredLightingData.areaLights = CreateStructuredBuffer("AreaLights", VividLightData.AreaLightData.Stride);
-            clusteredLightingData.decalData = CreateStructuredBuffer("DecalData", VividLightData.DecalClusterData.Stride);
-            clusteredLightingData.layeredOffset = CreateStructuredBuffer("LayeredOffset", sizeof(uint));
-            clusteredLightingData.layeredLightList = CreateStructuredBuffer("LayeredLightList", sizeof(uint));
-            clusteredLightingData.logBaseBuffer = CreateStructuredBuffer("LogBaseBuffer", sizeof(float));
+            clusteredLightingData.punctualLights = RenderGraphBuffer.CreateStructured("PunctualLights", VividLightData.PunctualLightData.Stride);
+            clusteredLightingData.areaLights = RenderGraphBuffer.CreateStructured("AreaLights", VividLightData.AreaLightData.Stride);
+            clusteredLightingData.decalData = RenderGraphBuffer.CreateStructured("DecalData", VividLightData.DecalClusterData.Stride);
+            clusteredLightingData.layeredOffset = RenderGraphBuffer.CreateStructured("LayeredOffset", sizeof(uint));
+            clusteredLightingData.layeredLightList = RenderGraphBuffer.CreateStructured("LayeredLightList", sizeof(uint));
+            clusteredLightingData.logBaseBuffer = RenderGraphBuffer.CreateStructured("LogBaseBuffer", sizeof(float));
             clusteredLightingData.clusterTileSize = 32;
             clusteredLightingData.clusterSliceCount = 32;
             clusteredLightingData.clusterTileCountX = 10;
@@ -231,20 +231,6 @@ namespace VividRP.Editor.Tests
             var texture = GetFieldValue<RenderGraphTexture>(pass, fieldName);
             Assert.That(texture, Is.Not.Null);
             return texture;
-        }
-
-        private static RenderGraphBuffer CreateStructuredBuffer(string name, int stride)
-        {
-            return new RenderGraphBuffer
-            {
-                desc = new RenderGraphBufferDesc
-                {
-                    Count = 1,
-                    Stride = stride,
-                    Target = GraphicsBuffer.Target.Structured,
-                    Name = name
-                }
-            };
         }
 
         private static string GetPassSourcePath()

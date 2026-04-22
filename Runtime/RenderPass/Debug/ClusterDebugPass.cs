@@ -129,12 +129,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DepthTexture.desc.FilterMode = FilterMode.Point;
             m_OutputTexture = RenderGraphTexture.CreateColorTarget("OutputTexture", GraphicsFormat.R8G8B8A8_UNorm);
             m_OutputTexture.desc.ClearBuffer = false;
-            m_LocalPunctualLightBuffer = CreateStructuredBuffer("PunctualLights", VividLightData.PunctualLightData.Stride);
-            m_LocalAreaLightBuffer = CreateStructuredBuffer("AreaLights", VividLightData.AreaLightData.Stride);
-            m_LocalDecalDataBuffer = CreateStructuredBuffer("DecalData", VividLightData.DecalClusterData.Stride);
-            m_LocalLayeredOffsetBuffer = CreateStructuredBuffer("LayeredOffset", sizeof(uint));
-            m_LocalLayeredLightListBuffer = CreateStructuredBuffer("LayeredLightList", sizeof(uint));
-            m_LocalLogBaseBuffer = CreateStructuredBuffer("LogBaseBuffer", sizeof(float));
+            m_LocalPunctualLightBuffer = RenderGraphBuffer.CreateStructured("PunctualLights", VividLightData.PunctualLightData.Stride);
+            m_LocalAreaLightBuffer = RenderGraphBuffer.CreateStructured("AreaLights", VividLightData.AreaLightData.Stride);
+            m_LocalDecalDataBuffer = RenderGraphBuffer.CreateStructured("DecalData", VividLightData.DecalClusterData.Stride);
+            m_LocalLayeredOffsetBuffer = RenderGraphBuffer.CreateStructured("LayeredOffset", sizeof(uint));
+            m_LocalLayeredLightListBuffer = RenderGraphBuffer.CreateStructured("LayeredLightList", sizeof(uint));
+            m_LocalLogBaseBuffer = RenderGraphBuffer.CreateStructured("LogBaseBuffer", sizeof(float));
             m_PunctualLightBuffer = m_LocalPunctualLightBuffer;
             m_AreaLightBuffer = m_LocalAreaLightBuffer;
             m_DecalDataBuffer = m_LocalDecalDataBuffer;
@@ -486,20 +486,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 return m_SourceTexture.desc;
 
             return m_SourceTexture?.desc;
-        }
-
-        private static RenderGraphBuffer CreateStructuredBuffer(string name, int stride)
-        {
-            return new RenderGraphBuffer
-            {
-                desc = new RenderGraphBufferDesc
-                {
-                    Count = 1,
-                    Stride = stride,
-                    Target = GraphicsBuffer.Target.Structured,
-                    Name = name
-                }
-            };
         }
 
     }

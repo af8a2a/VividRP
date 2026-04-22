@@ -92,9 +92,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ColorInput = RenderGraphTexture.CreateInput("Color", GraphicsFormat.R16G16B16A16_SFloat);
             m_CmaaEdgesTexture = CreatePassOwnedTexture("CMAA2Edges", 1, 1, GraphicsFormat.R8_UInt);
             m_CmaaDeferredBlendItemListHeadsTexture = CreatePassOwnedTexture("CMAA2DeferredBlendItemListHeads", 1, 1, GraphicsFormat.R32_UInt);
-            m_CmaaShapeCandidatesBuffer = CreateStructuredBuffer("CMAA2ShapeCandidates", 1, sizeof(uint));
-            m_CmaaDeferredBlendItemListBuffer = CreateStructuredBuffer("CMAA2DeferredBlendItemList", 1, sizeof(uint) * 2);
-            m_CmaaDeferredBlendLocationListBuffer = CreateStructuredBuffer("CMAA2DeferredBlendLocationList", 1, sizeof(uint));
+            m_CmaaShapeCandidatesBuffer = RenderGraphBuffer.CreateStructured("CMAA2ShapeCandidates", 1, sizeof(uint));
+            m_CmaaDeferredBlendItemListBuffer = RenderGraphBuffer.CreateStructured("CMAA2DeferredBlendItemList", 1, sizeof(uint) * 2);
+            m_CmaaDeferredBlendLocationListBuffer = RenderGraphBuffer.CreateStructured("CMAA2DeferredBlendLocationList", 1, sizeof(uint));
             m_CmaaControlBuffer = CreateRawBuffer("CMAA2ControlBuffer", 16);
             m_CmaaExecuteIndirectBuffer = CreateIndirectArgsBuffer("CMAA2ExecuteIndirectBuffer", 4);
             m_OutputTexture = CreatePassOwnedTexture("CMAA2Output", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
@@ -419,20 +419,6 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.Height = Mathf.Max(1, height);
             texture.desc.EnableRandomWrite = true;
             texture.desc.WrapMode = TextureWrapMode.Clamp;
-        }
-
-        private static RenderGraphBuffer CreateStructuredBuffer(string name, int count, int stride)
-        {
-            return new RenderGraphBuffer
-            {
-                desc = new RenderGraphBufferDesc
-                {
-                    Count = count,
-                    Stride = stride,
-                    Target = GraphicsBuffer.Target.Structured,
-                    Name = name
-                }
-            };
         }
 
         private static RenderGraphBuffer CreateRawBuffer(string name, int count)

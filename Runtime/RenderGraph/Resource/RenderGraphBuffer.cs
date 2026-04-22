@@ -111,6 +111,27 @@ namespace VividRP.Runtime
             innerHandle = BufferHandle.nullHandle;
         }
 
+        public static RenderGraphBuffer CreateStructured(string name, int stride)
+        {
+            return CreateStructured(name, 1, stride);
+        }
+
+        public static RenderGraphBuffer CreateStructured(
+            string name,
+            int count,
+            int stride,
+            GraphicsBuffer.Target target = GraphicsBuffer.Target.Structured)
+        {
+            var descriptor = RenderGraphBufferDesc.CreateStructured(count, stride);
+            descriptor.Name = name;
+            descriptor.Target = target;
+
+            return new RenderGraphBuffer
+            {
+                desc = descriptor
+            };
+        }
+
         internal GraphicsBuffer ImportedGraphicsBuffer => m_ImportedGraphicsBuffer;
 
         internal bool HasImportedBuffer => m_ImportedGraphicsBuffer != null;

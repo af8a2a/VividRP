@@ -41,7 +41,7 @@ namespace VividRP.Runtime.RenderPass.Core
             profilingSampler = new ProfilingSampler(nameof(TileDebugPass));
 
             m_SourceTexture = RenderGraphTexture.CreateInput("SourceTexture", GraphicsFormat.R8G8B8A8_UNorm);
-            m_TileIndices = CreateStructuredBuffer("TileIndices");
+            m_TileIndices = RenderGraphBuffer.CreateStructured("TileIndices", sizeof(uint));
             m_IndirectArgs = CreateIndirectArgsBuffer("IndirectArgs");
             m_OutputTexture = RenderGraphTexture.CreateColorTarget("OutputTexture", GraphicsFormat.R8G8B8A8_UNorm);
             m_OutputTexture.desc.ClearBuffer = true;
@@ -176,20 +176,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 return m_SourceTexture.desc;
 
             return m_SourceTexture?.desc;
-        }
-
-        private static RenderGraphBuffer CreateStructuredBuffer(string name)
-        {
-            return new RenderGraphBuffer
-            {
-                desc = new RenderGraphBufferDesc
-                {
-                    Count = 1,
-                    Stride = sizeof(uint),
-                    Target = GraphicsBuffer.Target.Structured,
-                    Name = name
-                }
-            };
         }
 
         private static RenderGraphBuffer CreateIndirectArgsBuffer(string name)

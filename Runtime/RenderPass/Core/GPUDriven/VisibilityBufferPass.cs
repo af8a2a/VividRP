@@ -45,13 +45,13 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             profilingSampler = new ProfilingSampler(nameof(VisibilityBufferPass));
 
-            m_VisibleMeshletRenderRequests = CreateStructuredBuffer(
+            m_VisibleMeshletRenderRequests = RenderGraphBuffer.CreateStructured(
                 "VisibleMeshletRenderRequests",
                 1,
                 sizeof(uint) * 2,
                 GraphicsBuffer.Target.Structured
             );
-            m_VisibleMeshletIndirectArgs = CreateStructuredBuffer(
+            m_VisibleMeshletIndirectArgs = RenderGraphBuffer.CreateStructured(
                 "VisibleMeshletIndirectArgs",
                 4,
                 sizeof(uint),
@@ -239,24 +239,6 @@ namespace VividRP.Runtime.RenderPass.Core
             renderGraphBuffer.desc.Stride = Mathf.Max(1, graphicsBuffer.stride);
             renderGraphBuffer.desc.Target = graphicsBuffer.target;
             renderGraphBuffer.SetImportedBuffer(graphicsBuffer);
-        }
-
-        private static RenderGraphBuffer CreateStructuredBuffer(
-            string name,
-            int count,
-            int stride,
-            GraphicsBuffer.Target target)
-        {
-            return new RenderGraphBuffer
-            {
-                desc = new RenderGraphBufferDesc
-                {
-                    Count = count,
-                    Stride = stride,
-                    Target = target,
-                    Name = name,
-                }
-            };
         }
     }
 }

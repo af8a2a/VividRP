@@ -84,6 +84,110 @@ namespace VividRP.Editor.Tests
             Assert.That(state.Mode, Is.EqualTo(CameraProjectionMatrixUtility.CameraProjectionStateMode.Implicit));
         }
 
+        [Test]
+        public void RestoreProjectionState_ResetsImplicitProjection_WhenExplicitMatrixWasCapturedFromDifferentAspect()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 250.0f;
+            camera.fieldOfView = 50.0f;
+            camera.aspect = 16.0f / 9.0f;
+
+            var sceneAspectProjection = Matrix4x4.Perspective(50.0f, 1.0f, camera.nearClipPlane, camera.farClipPlane);
+            camera.nonJitteredProjectionMatrix = sceneAspectProjection;
+            camera.projectionMatrix = sceneAspectProjection;
+
+            var state = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
+            CameraProjectionMatrixUtility.RestoreProjectionState(camera, state);
+
+            var restoredProjection = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+            var expectedProjection = Matrix4x4.Perspective(50.0f, camera.aspect, camera.nearClipPlane, camera.farClipPlane);
+
+            Assert.That(state.Mode, Is.EqualTo(CameraProjectionMatrixUtility.CameraProjectionStateMode.Implicit));
+            Assert.That(MaxAbsDiff(restoredProjection, expectedProjection), Is.LessThan(0.0001f));
+            Assert.That(MaxAbsDiff(restoredProjection, sceneAspectProjection), Is.GreaterThan(0.01f));
+        }
+
+        [Test]
+        public void RestoreProjectionState_ResetsPhysicalProjection_WhenExplicitMatrixWasCapturedFromDifferentAspect()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 250.0f;
+            camera.usePhysicalProperties = true;
+            camera.focalLength = 50.0f;
+            camera.sensorSize = new Vector2(36.0f, 24.0f);
+            camera.lensShift = new Vector2(0.1f, -0.05f);
+            camera.gateFit = Camera.GateFitMode.Horizontal;
+            camera.aspect = 16.0f / 9.0f;
+
+            Camera.CalculateProjectionMatrixFromPhysicalProperties(
+                out var sceneAspectProjection,
+                camera.focalLength,
+                camera.sensorSize,
+                camera.lensShift,
+                camera.nearClipPlane,
+                camera.farClipPlane,
+                new Camera.GateFitParameters(camera.gateFit, 1.0f));
+
+            Camera.CalculateProjectionMatrixFromPhysicalProperties(
+                out var expectedProjection,
+                camera.focalLength,
+                camera.sensorSize,
+                camera.lensShift,
+                camera.nearClipPlane,
+                camera.farClipPlane,
+                new Camera.GateFitParameters(camera.gateFit, camera.aspect));
+
+            camera.nonJitteredProjectionMatrix = sceneAspectProjection;
+            camera.projectionMatrix = sceneAspectProjection;
+
+            var state = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
+            CameraProjectionMatrixUtility.RestoreProjectionState(camera, state);
+
+            var restoredProjection = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+
+            Assert.That(state.Mode, Is.EqualTo(CameraProjectionMatrixUtility.CameraProjectionStateMode.PhysicalPropertiesBased));
+            Assert.That(MaxAbsDiff(restoredProjection, expectedProjection), Is.LessThan(0.0001f));
+            Assert.That(MaxAbsDiff(restoredProjection, sceneAspectProjection), Is.GreaterThan(0.01f));
+        }
+
+        [Test]
+        public void RestoreProjectionState_KeepsUsePhysicalProperties_WhenCapturedModeIsPhysicalPropertiesBased()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 250.0f;
+            camera.usePhysicalProperties = true;
+            camera.focalLength = 50.0f;
+            camera.sensorSize = new Vector2(36.0f, 24.0f);
+            camera.gateFit = Camera.GateFitMode.Horizontal;
+            camera.aspect = 16.0f / 9.0f;
+
+            Camera.CalculateProjectionMatrixFromPhysicalProperties(
+                out var expectedProjection,
+                camera.focalLength,
+                camera.sensorSize,
+                camera.lensShift,
+                camera.nearClipPlane,
+                camera.farClipPlane,
+                new Camera.GateFitParameters(camera.gateFit, camera.aspect));
+
+            var originalState = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
+            var temporaryProjection = Matrix4x4.Perspective(70.0f, camera.aspect, 0.1f, 50.0f);
+            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, temporaryProjection, temporaryProjection);
+
+            CameraProjectionMatrixUtility.RestoreProjectionState(camera, originalState);
+
+            var restoredState = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
+            var restoredProjection = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+
+            Assert.That(originalState.Mode, Is.EqualTo(CameraProjectionMatrixUtility.CameraProjectionStateMode.PhysicalPropertiesBased));
+            Assert.That(camera.usePhysicalProperties, Is.True);
+            Assert.That(restoredState.Mode, Is.EqualTo(CameraProjectionMatrixUtility.CameraProjectionStateMode.PhysicalPropertiesBased));
+            Assert.That(MaxAbsDiff(restoredProjection, expectedProjection), Is.LessThan(0.0001f));
+        }
+
         private static float MaxAbsDiff(Matrix4x4 lhs, Matrix4x4 rhs)
         {
             var maxDiff = 0.0f;

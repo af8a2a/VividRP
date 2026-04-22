@@ -229,7 +229,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Compile_PreservesPreviewMetadata_ForPreviewNodeInsideSubSystem()
+        public void Compile_CullsPreviewOnlyProducer_ForPreviewNodeInsideSubSystem()
         {
             var graph = RenderGraphTestUtility.CreateGraph();
 
@@ -250,8 +250,8 @@ namespace VividRP.Editor.Tests
 
                 var result = RenderGraphCompiler.Compile(graph);
 
-                Assert.That(result.Passes, Has.Count.EqualTo(1));
-                Assert.That(result.Passes[0].PreviewTextureFields, Is.Not.Empty);
+                Assert.That(result.Passes, Is.Empty);
+                Assert.That(result.ExecutionOrder, Is.Empty);
             }
             finally
             {

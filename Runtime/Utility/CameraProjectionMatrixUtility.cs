@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Reflection;
+using System;
 
 namespace VividRP.Runtime
 {
@@ -122,18 +123,52 @@ namespace VividRP.Runtime
                     camera.projectionMatrix = state.ProjectionMatrix;
                     break;
                 case CameraProjectionStateMode.PhysicalPropertiesBased:
+                    RestorePhysicalPropertiesBasedProjection(camera);
+                    break;
                 case CameraProjectionStateMode.Implicit:
                 default:
-                    camera.ResetProjectionMatrix();
+                    RestoreImplicitProjection(camera);
                     break;
             }
         }
 
         private static Matrix4x4 BuildProjectionMatrix(Camera camera)
         {
+            return BuildProjectionMatrix(camera, ResolveAspect(camera));
+        }
+
+        private static void RestoreImplicitProjection(Camera camera)
+        {
+            if (camera == null)
+                return;
+
+            camera.ResetProjectionMatrix();
+        }
+
+        private static void RestorePhysicalPropertiesBasedProjection(Camera camera)
+        {
+            if (camera == null)
+                return;
+
+            var currentMode = ResolveProjectionStateMode(camera);
+            if (camera.usePhysicalProperties && currentMode == CameraProjectionStateMode.PhysicalPropertiesBased)
+                return;
+
+            // Unity clears usePhysicalProperties when ResetProjectionMatrix() is called on a camera
+            // that currently has an explicit projection. Re-enable the physical mode immediately after.
+            camera.ResetProjectionMatrix();
+            if (!camera.usePhysicalProperties)
+                camera.usePhysicalProperties = true;
+
+            if (ResolveProjectionStateMode(camera) != CameraProjectionStateMode.PhysicalPropertiesBased)
+                TrySetProjectionStateMode(camera, CameraProjectionStateMode.PhysicalPropertiesBased);
+        }
+
+        private static Matrix4x4 BuildProjectionMatrix(Camera camera, float aspect)
+        {
             var nearClip = Mathf.Max(0.0001f, camera.nearClipPlane);
             var farClip = Mathf.Max(nearClip + 0.0001f, camera.farClipPlane);
-            var aspect = ResolveAspect(camera);
+            aspect = Mathf.Max(aspect, 0.0001f);
 
             if (camera.orthographic)
             {
@@ -176,30 +211,89 @@ namespace VividRP.Runtime
                 : CameraProjectionStateMode.Implicit;
         }
 
+        private static bool TrySetProjectionStateMode(Camera camera, CameraProjectionStateMode mode)
+        {
+            if (camera == null || s_ProjectionMatrixModeProperty == null || !s_ProjectionMatrixModeProperty.CanWrite)
+                return false;
+
+            try
+            {
+                var projectionModeValue = Enum.Parse(s_ProjectionMatrixModeProperty.PropertyType, mode.ToString(), ignoreCase: false);
+                s_ProjectionMatrixModeProperty.SetValue(camera, projectionModeValue);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static CameraProjectionStateMode ResolveEffectiveProjectionStateMode(Camera camera)
         {
             var mode = ResolveProjectionStateMode(camera);
             if (mode != CameraProjectionStateMode.Explicit || camera == null)
                 return mode;
 
-            var expectedProjection = BuildProjectionMatrix(camera);
-            if (IsProjectionMatrixUsable(camera.nonJitteredProjectionMatrix)
-                && MaxAbsDiff(camera.nonJitteredProjectionMatrix, expectedProjection) <= 0.0001f)
-            {
-                return camera.usePhysicalProperties
-                    ? CameraProjectionStateMode.PhysicalPropertiesBased
-                    : CameraProjectionStateMode.Implicit;
-            }
-
-            if (IsProjectionMatrixUsable(camera.projectionMatrix)
-                && MaxAbsDiff(camera.projectionMatrix, expectedProjection) <= 0.0001f)
-            {
-                return camera.usePhysicalProperties
-                    ? CameraProjectionStateMode.PhysicalPropertiesBased
-                    : CameraProjectionStateMode.Implicit;
-            }
+            if (TryResolveParameterDrivenProjectionMode(camera, camera.nonJitteredProjectionMatrix, out var resolvedMode)
+                || TryResolveParameterDrivenProjectionMode(camera, camera.projectionMatrix, out resolvedMode))
+                return resolvedMode;
 
             return mode;
+        }
+
+        private static bool TryResolveParameterDrivenProjectionMode(
+            Camera camera,
+            Matrix4x4 projectionMatrix,
+            out CameraProjectionStateMode mode)
+        {
+            mode = CameraProjectionStateMode.Explicit;
+            if (camera == null || !IsProjectionMatrixUsable(projectionMatrix))
+                return false;
+
+            var currentAspect = ResolveAspect(camera);
+            if (ProjectionMatchesCameraParameters(camera, projectionMatrix, currentAspect))
+            {
+                mode = camera.usePhysicalProperties
+                    ? CameraProjectionStateMode.PhysicalPropertiesBased
+                    : CameraProjectionStateMode.Implicit;
+                return true;
+            }
+
+            if (!TryGetProjectionMatrixAspect(projectionMatrix, out var inferredAspect)
+                || Mathf.Abs(inferredAspect - currentAspect) <= MatrixTolerance)
+            {
+                return false;
+            }
+
+            if (!ProjectionMatchesCameraParameters(camera, projectionMatrix, inferredAspect))
+                return false;
+
+            mode = camera.usePhysicalProperties
+                ? CameraProjectionStateMode.PhysicalPropertiesBased
+                : CameraProjectionStateMode.Implicit;
+            return true;
+        }
+
+        private static bool ProjectionMatchesCameraParameters(
+            Camera camera,
+            Matrix4x4 projectionMatrix,
+            float aspect)
+        {
+            var expectedProjection = BuildProjectionMatrix(camera, aspect);
+            return MaxAbsDiff(projectionMatrix, expectedProjection) <= MatrixTolerance;
+        }
+
+        private static bool TryGetProjectionMatrixAspect(Matrix4x4 projectionMatrix, out float aspect)
+        {
+            aspect = 0.0f;
+
+            var m00 = projectionMatrix.m00;
+            var m11 = projectionMatrix.m11;
+            if (Mathf.Abs(m00) <= MatrixTolerance || Mathf.Abs(m11) <= MatrixTolerance)
+                return false;
+
+            aspect = Mathf.Abs(m11 / m00);
+            return float.IsFinite(aspect) && aspect > MatrixTolerance;
         }
 
         private static float ResolveAspect(Camera camera)

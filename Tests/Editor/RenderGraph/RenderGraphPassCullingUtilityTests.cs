@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using NUnit.Framework;
-using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 using VividRP.Runtime.RenderPass.Core.Sigma;
@@ -31,9 +30,7 @@ namespace VividRP.Editor.Tests
                 }
             };
 
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(
-                passDefinitions,
-                includePreviewConsumers: false);
+            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(passDefinitions);
 
             Assert.That(livePassIndices, Is.Empty);
         }
@@ -75,49 +72,9 @@ namespace VividRP.Editor.Tests
                 }
             };
 
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(
-                passDefinitions,
-                includePreviewConsumers: false);
+            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(passDefinitions);
 
             Assert.That(livePassIndices, Is.EqualTo(new[] { 0, 1 }));
-        }
-
-        [Test]
-        public void GetLivePassIndices_PreservesPreviewProducer_WhenPreviewConsumersAreIncluded()
-        {
-            var passDefinitions = new List<RenderGraphPassDefinition>
-            {
-                new()
-                {
-                    PassType = GetPassTypeName<DrawObjectPass>(),
-                    PreviewTextureFields = { "Color" }
-                }
-            };
-
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(
-                passDefinitions,
-                includePreviewConsumers: true);
-
-            Assert.That(livePassIndices, Is.EqualTo(new[] { 0 }));
-        }
-
-        [Test]
-        public void GetLivePassIndices_CullsPreviewProducer_WhenPreviewConsumersAreExcluded()
-        {
-            var passDefinitions = new List<RenderGraphPassDefinition>
-            {
-                new()
-                {
-                    PassType = GetPassTypeName<DrawObjectPass>(),
-                    PreviewTextureFields = { "Color" }
-                }
-            };
-
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(
-                passDefinitions,
-                includePreviewConsumers: false);
-
-            Assert.That(livePassIndices, Is.Empty);
         }
 
         [Test]
@@ -131,9 +88,7 @@ namespace VividRP.Editor.Tests
                 }
             };
 
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(
-                passDefinitions,
-                includePreviewConsumers: false);
+            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(passDefinitions);
 
             Assert.That(livePassIndices, Is.EqualTo(new[] { 0 }));
         }
@@ -149,9 +104,7 @@ namespace VividRP.Editor.Tests
                 }
             };
 
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(
-                passDefinitions,
-                includePreviewConsumers: false);
+            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(passDefinitions);
 
             Assert.That(livePassIndices, Is.EqualTo(new[] { 0 }));
         }
@@ -178,9 +131,7 @@ namespace VividRP.Editor.Tests
                 }
             };
 
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(
-                passDefinitions,
-                includePreviewConsumers: false);
+            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(passDefinitions);
 
             Assert.That(livePassIndices, Is.Empty);
         }
@@ -230,9 +181,7 @@ namespace VividRP.Editor.Tests
                 }
             };
 
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(
-                passDefinitions,
-                includePreviewConsumers: false);
+            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(passDefinitions);
 
             Assert.That(livePassIndices, Is.Empty);
         }
@@ -260,9 +209,7 @@ namespace VividRP.Editor.Tests
                 }
             };
 
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(
-                passDefinitions,
-                includePreviewConsumers: false);
+            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(passDefinitions);
 
             Assert.That(livePassIndices, Is.EqualTo(new[] { 0 }));
         }

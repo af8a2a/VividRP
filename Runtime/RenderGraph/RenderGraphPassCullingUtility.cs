@@ -7,9 +7,7 @@ namespace VividRP.Runtime
 {
     internal static class RenderGraphPassCullingUtility
     {
-        internal static List<int> GetLivePassIndices(
-            IReadOnlyList<RenderGraphPassDefinition> passDefinitions,
-            bool includePreviewConsumers)
+        internal static List<int> GetLivePassIndices(IReadOnlyList<RenderGraphPassDefinition> passDefinitions)
         {
             if (passDefinitions == null || passDefinitions.Count == 0)
                 return new List<int>();
@@ -32,7 +30,7 @@ namespace VividRP.Runtime
             var stack = new Stack<int>();
             for (var i = 0; i < passDefinitions.Count; i++)
             {
-                if (!IsLiveRoot(passDefinitions[i], passTypes[i], includePreviewConsumers))
+                if (!IsLiveRoot(passDefinitions[i], passTypes[i]))
                     continue;
 
                 live[i] = true;
@@ -64,16 +62,8 @@ namespace VividRP.Runtime
 
         private static bool IsLiveRoot(
             RenderGraphPassDefinition passDefinition,
-            Type passType,
-            bool includePreviewConsumers)
+            Type passType)
         {
-            if (includePreviewConsumers
-                && passDefinition?.PreviewTextureFields != null
-                && passDefinition.PreviewTextureFields.Count > 0)
-            {
-                return true;
-            }
-
             if (passType == null)
                 return true;
 

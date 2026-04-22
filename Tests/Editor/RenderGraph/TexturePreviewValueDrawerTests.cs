@@ -1,7 +1,6 @@
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.UIElements;
 using VividRP.Editor.RenderGraph;
 
 namespace VividRP.Editor.Tests
@@ -15,7 +14,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void CreatePropertyGUI_ConstrainsPreviewLayoutWidth()
+        public void CreatePropertyGUI_ShowsRemovedMessage()
         {
             var host = ScriptableObject.CreateInstance<TexturePreviewValueHost>();
 
@@ -25,16 +24,11 @@ namespace VividRP.Editor.Tests
                 var property = serializedObject.FindProperty("m_Preview");
                 var drawer = new TexturePreviewValueDrawer();
 
-                var root = drawer.CreatePropertyGUI(property);
-                var previewContainer = root.Q<VisualElement>("vivid-texture-preview-container");
-                var previewImage = root.Q<Image>("vivid-texture-preview-image");
+                var root = drawer.CreatePropertyGUI(property) as UnityEngine.UIElements.HelpBox;
 
-                Assert.That(root.style.width.value.value, Is.EqualTo(TexturePreviewValueDrawer.PreviewElementWidth));
-                Assert.That(root.style.maxWidth.value.value, Is.EqualTo(TexturePreviewValueDrawer.PreviewElementWidth));
-                Assert.That(previewContainer, Is.Not.Null);
-                Assert.That(previewContainer.style.width.value.value, Is.EqualTo(TexturePreviewValueDrawer.PreviewElementWidth));
-                Assert.That(previewImage, Is.Not.Null);
-                Assert.That(previewImage.style.height.value.value, Is.EqualTo(120f));
+                Assert.That(root, Is.Not.Null);
+                Assert.That(root.text, Is.EqualTo(TexturePreviewValueDrawer.RemovedMessage));
+                Assert.That(root.name, Is.EqualTo("vivid-preview-removed-help"));
             }
             finally
             {

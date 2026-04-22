@@ -199,7 +199,6 @@ namespace VividRP.Runtime
             ClearImportedTextures();
             RenderGraphHistoryRegistry.Clear();
             RenderGraphBufferHistoryRegistry.Clear();
-            RenderGraphPreviewRegistry.Clear();
             FrameContextSystem.Clear();
             VividRayTracingAccelerationStructureStatsRegistry.Clear();
             s_CurrentGraphAsset = null;
@@ -1214,87 +1213,6 @@ namespace VividRP.Runtime
             }
         }
 
-        private static void RecordTexturePreviewPasses(
-            RenderGraph renderGraph,
-            IRenderPass pass,
-            PassResource resources,
-            RenderGraphPassDefinition passDefinition)
-        {
-            if (!RenderGraphPreviewRegistry.IsAvailable
-                || renderGraph == null
-                || pass == null
-                || resources?.Textures == null
-                || resources.Textures.Length == 0)
-                return;
-
-            var passType = pass.GetType();
-            foreach (var entry in resources.Textures)
-            {
-                if (!ShouldRecordTexturePreview(passDefinition, entry))
-                    continue;
-
-                var source = entry.Texture.innerHandle;
-                if (!source.IsValid())
-                    continue;
-
-                var sourceInfo = renderGraph.GetRenderTargetInfo(source);
-                if (!CanPreviewTexture(sourceInfo))
-                    continue;
-
-                var previewFieldName = !string.IsNullOrEmpty(entry.Name)
-                    ? entry.Name
-                    : entry.Field?.Name;
-
-                if (string.IsNullOrEmpty(previewFieldName))
-                    continue;
-
-                var previewTarget = RenderGraphPreviewRegistry.GetOrCreatePreviewTarget(
-                    passType,
-                    previewFieldName,
-                    sourceInfo,
-                    entry.Texture.desc);
-                if (previewTarget == null)
-                    continue;
-
-                var destination = renderGraph.ImportTexture(previewTarget);
-                if (!destination.IsValid() || !renderGraph.CanAddCopyPass(source, destination))
-                    continue;
-
-                renderGraph.AddCopyPass(source, destination, $"{passType.Name}.{previewFieldName} Preview");
-            }
-        }
-
-        internal static bool ShouldRecordTexturePreview(RenderGraphPassDefinition passDefinition, PassResourceEntry entry)
-        {
-            if (!RenderGraphPreviewRegistry.IsAvailable
-                || passDefinition?.PreviewTextureFields == null
-                || passDefinition.PreviewTextureFields.Count == 0
-                || entry?.Texture == null
-                || entry.IsDepthAttachment)
-            {
-                return false;
-            }
-
-            // PreviewTextureFields is the authoritative opt-in — check it regardless of access flags.
-            // Debug export ports add read-only resources to PreviewTextureFields explicitly,
-            // so the Write-only guard is not applied here.
-            var previewKey = entry.Name;
-            if (!string.IsNullOrEmpty(previewKey) && passDefinition.PreviewTextureFields.Contains(previewKey))
-                return true;
-
-            var legacyFieldName = entry.Field?.Name;
-            return !string.IsNullOrEmpty(legacyFieldName)
-                && passDefinition.PreviewTextureFields.Contains(legacyFieldName);
-        }
-
-        private static bool CanPreviewTexture(in RenderTargetInfo sourceInfo)
-        {
-            return sourceInfo.width > 0
-                && sourceInfo.height > 0
-                && sourceInfo.format != GraphicsFormat.None
-                && !GraphicsFormatUtility.IsDepthFormat(sourceInfo.format);
-        }
-
 #if UNITY_EDITOR
         private static void RecordRenderGizmosPass(
             RenderGraph renderGraph,
@@ -1439,7 +1357,6 @@ namespace VividRP.Runtime
             var bufferCache = new Dictionary<RenderGraphBuffer, BufferHandle>();
             var renderListCache = new Dictionary<RenderGraphRenderList, RendererListHandle>();
             var accelerationStructureCache = new Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle>();
-            var shouldRecordPreviews = RenderGraphPreviewRegistry.IsAvailable;
             var recordedPreImageEffectGizmos = false;
             RenderGraphTexture stopNaNOriginalSource = null;
             RenderGraphTexture stopNaNSanitizedSource = null;
@@ -1528,8 +1445,6 @@ namespace VividRP.Runtime
                         bufferCache,
                         renderListCache,
                         accelerationStructureCache);
-                    if (shouldRecordPreviews)
-                        RecordTexturePreviewPasses(renderGraph, computePass, resources, passDefinition);
                 }
                 else if (pass is RasterPass rasterPass)
                 {
@@ -1541,8 +1456,6 @@ namespace VividRP.Runtime
                         bufferCache,
                         renderListCache,
                         accelerationStructureCache);
-                    if (shouldRecordPreviews)
-                        RecordTexturePreviewPasses(renderGraph, rasterPass, resources, passDefinition);
                 }
                 else if (pass is UnsafePass unsafePass)
                 {
@@ -1556,8 +1469,6 @@ namespace VividRP.Runtime
                         bufferCache,
                         renderListCache,
                         accelerationStructureCache);
-                    if (shouldRecordPreviews)
-                        RecordTexturePreviewPasses(renderGraph, unsafePass, resources, passDefinition);
                 }
             }
         }

@@ -377,12 +377,8 @@ namespace VividRP.Editor.RenderGraph
                 compiledPassDefinitions.Add(passDefinition);
             }
 
-            PopulatePreviewTextureFields(flattenedGraph, compiledPassDefinitions, passNodeToIndex);
-
             var orderedIndices = RenderGraphPassCompilationUtility.GetOrderedPassIndices(compiledPassDefinitions);
-            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(
-                compiledPassDefinitions,
-                includePreviewConsumers: true);
+            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(compiledPassDefinitions);
             var livePassIndexSet = new HashSet<int>(livePassIndices);
             var culledOrderedIndices = orderedIndices.FindAll(index => livePassIndexSet.Contains(index));
 
@@ -423,45 +419,6 @@ namespace VividRP.Editor.RenderGraph
         {
             var title = passNode?.Title;
             return string.IsNullOrWhiteSpace(title) ? fallbackName : title;
-        }
-
-        private static void PopulatePreviewTextureFields(
-            RenderGraphFlattenedGraph flattenedGraph,
-            IReadOnlyList<RenderGraphPassDefinition> passDefinitions,
-            IReadOnlyDictionary<RenderPassNodeData, int> passNodeToIndex)
-        {
-            if (flattenedGraph == null || passDefinitions == null || passDefinitions.Count == 0)
-                return;
-
-            foreach (var previewNode in flattenedGraph.PreviewNodes)
-            {
-                var inputPort = previewNode.GetInputPortByName(PreviewNodeData.TextureInputPortName);
-                var connectedPort = RenderGraphSubSystemCompilationUtility.ResolveInputConnection(
-                    flattenedGraph,
-                    previewNode,
-                    inputPort?.FirstConnectedPort);
-                if (connectedPort?.GetNode() is not RenderPassNodeData sourcePassNode)
-                    continue;
-
-                if (!passNodeToIndex.TryGetValue(sourcePassNode, out var sourcePassIndex)
-                    || sourcePassIndex < 0
-                    || sourcePassIndex >= passDefinitions.Count)
-                {
-                    continue;
-                }
-
-                var sourcePreviewKey = GetConnectedPreviewTextureKey(sourcePassNode, sourcePassNode.GetPassType(), connectedPort);
-                if (string.IsNullOrEmpty(sourcePreviewKey))
-                {
-                    continue;
-                }
-
-                var previewTextureFields = passDefinitions[sourcePassIndex]?.PreviewTextureFields;
-                if (previewTextureFields == null || previewTextureFields.Contains(sourcePreviewKey))
-                    continue;
-
-                previewTextureFields.Add(sourcePreviewKey);
-            }
         }
 
         private static bool TryAddHistoryTextureBinding(
@@ -718,37 +675,5 @@ namespace VividRP.Editor.RenderGraph
             return null;
         }
 
-        private static string GetConnectedPreviewTextureKey(
-            RenderPassNodeData passNode,
-            Type passType,
-            IPort connectedPort)
-        {
-            if (passNode == null || passType == null || connectedPort == null)
-                return null;
-
-            foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
-            {
-                if (field.FieldType != typeof(RenderGraphTexture))
-                    continue;
-
-                var attr = field.GetCustomAttribute<RenderGraphResource>();
-
-                var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access, attr.BindingMode);
-                if (!string.IsNullOrEmpty(outputPortName)
-                    && ReferenceEquals(passNode.GetOutputPortByName(outputPortName), connectedPort))
-                {
-                    return RenderGraphPassReflectionUtility.GetPreviewTextureKey(field, attr);
-                }
-
-                var debugPortName = RenderPassPortUtility.GetDebugOutputPortName(field.Name);
-                if (!string.IsNullOrEmpty(debugPortName)
-                    && ReferenceEquals(passNode.GetOutputPortByName(debugPortName), connectedPort))
-                {
-                    return RenderGraphPassReflectionUtility.GetPreviewTextureKey(field, attr);
-                }
-            }
-
-            return null;
-        }
     }
 }

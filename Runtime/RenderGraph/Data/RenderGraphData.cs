@@ -112,7 +112,6 @@ namespace VividRP.Runtime
         public List<RenderGraphPassResourceBinding> ResourceBindings = new();
         public List<RenderGraphPassFloatParameter> FloatParameters = new();
         public List<RenderGraphPassEnumParameter> EnumParameters = new();
-        public List<string> PreviewTextureFields = new();
     }
 
     public sealed class RenderGraphData : ScriptableObject

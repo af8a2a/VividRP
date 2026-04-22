@@ -95,40 +95,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void OrderPassDefinitions_PreservesPreviewTextureFields_WhenPassesAreReordered()
-        {
-            var passDefinitions = new List<RenderGraphPassDefinition>
-            {
-                new()
-                {
-                    PassType = GetPassTypeName<FinalBlitPass>(),
-                    ResourceBindings =
-                    {
-                        new RenderGraphPassResourceBinding
-                        {
-                            FieldName = "source",
-                            ResourceKind = RenderGraphResourceKind.Texture,
-                            SourceKind = RenderGraphPassBindingSourceKind.PassField,
-                            SourcePassIndex = 1,
-                            SourceFieldName = "m_ColorTarget",
-                        }
-                    }
-                },
-                new()
-                {
-                    PassType = GetPassTypeName<DrawObjectPass>(),
-                    PreviewTextureFields = { "Color" }
-                }
-            };
-
-            var ordered = RenderGraphPassCompilationUtility.OrderPassDefinitions(passDefinitions);
-
-            Assert.That(ordered[0].PassType, Is.EqualTo(GetPassTypeName<DrawObjectPass>()));
-            Assert.That(ordered[0].PreviewTextureFields, Is.EquivalentTo(new[] { "Color" }));
-            Assert.That(ordered[1].PreviewTextureFields, Is.Empty);
-        }
-
-        [Test]
         public void OrderPassDefinitions_PreservesFloatParameters_WhenPassesAreReordered()
         {
             var passDefinitions = new List<RenderGraphPassDefinition>

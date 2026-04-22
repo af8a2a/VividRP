@@ -92,8 +92,7 @@ namespace VividRP.Editor.RenderGraph
             ValidateHistoryResourceNodes(graph, reporter, ref summary);
             ValidateSubSystemInterfaceVariables(graph, reporter, ref summary);
 
-            var flattenedGraph = RenderGraphSubSystemCompilationUtility.Flatten(graph);
-            ValidatePreviewNodes(graph, flattenedGraph, reporter, ref summary);
+            ValidatePreviewNodes(graph, reporter, ref summary);
             ValidateSubgraphNodes(graph, reporter, summarizeChildSubgraphs, ref summary);
 
             return summary;
@@ -363,39 +362,18 @@ namespace VividRP.Editor.RenderGraph
 
         private static void ValidatePreviewNodes(
             RenderGraphEditorGraph graph,
-            RenderGraphFlattenedGraph flattenedGraph,
             IRenderGraphValidationReporter reporter,
             ref ValidationSummary summary)
         {
-            if (graph == null || flattenedGraph == null)
+            if (graph == null)
                 return;
 
             foreach (var previewNode in graph.GetNodes().OfType<PreviewNodeData>())
             {
-                previewNode.RefreshPreviewConnectionMetadata();
-
-                var inputPort = previewNode.GetInputPortByName(PreviewNodeData.TextureInputPortName);
-                if (inputPort == null || !inputPort.IsConnected)
-                {
-                    reporter.LogWarning("Preview node is not connected to a texture resource.", previewNode);
-                    summary.WarningCount++;
-                    continue;
-                }
-
-                var connectedPort = RenderGraphSubSystemCompilationUtility.ResolveInputConnection(
-                    flattenedGraph,
-                    previewNode,
-                    inputPort.FirstConnectedPort);
-                var sourceNode = connectedPort?.GetNode();
-                if (sourceNode is TextureResourceNodeData
-                    || sourceNode is HistoryResourceNodeData
-                    || sourceNode is RenderPassNodeData)
-                {
-                    continue;
-                }
-
-                reporter.LogWarning("Preview node only supports texture outputs.", previewNode);
-                summary.WarningCount++;
+                reporter.LogError(
+                    "Preview Node has been removed from VividRP RenderGraph. Delete this node and use camera-aware debugging tools instead.",
+                    previewNode);
+                summary.ErrorCount++;
             }
         }
 
@@ -432,6 +410,15 @@ namespace VividRP.Editor.RenderGraph
             if (graph == null)
                 return 0;
 
+            var removed = TrimGraphRecursive(graph);
+            return removed;
+        }
+
+        private static int TrimGraphRecursive(RenderGraphEditorGraph graph)
+        {
+            if (graph == null)
+                return 0;
+
             var removed = 0;
             var allNodes = graph.GetNodes().ToList();
 
@@ -444,10 +431,16 @@ namespace VividRP.Editor.RenderGraph
                 removed++;
             }
 
+            foreach (var previewNode in graph.GetNodes().OfType<PreviewNodeData>().ToList())
+            {
+                graph.RemoveNode(previewNode);
+                removed++;
+            }
+
             allNodes = graph.GetNodes().ToList();
             foreach (var node in allNodes)
             {
-                if (node is RenderPassNodeData || node is PreviewNodeData)
+                if (node is RenderPassNodeData)
                     continue;
 
                 if (!IsDisconnectedResourceNode(node as Node))
@@ -455,6 +448,12 @@ namespace VividRP.Editor.RenderGraph
 
                 graph.RemoveNode(node);
                 removed++;
+            }
+
+            foreach (var subgraphNode in graph.GetNodes().OfType<ISubgraphNode>())
+            {
+                if (subgraphNode.GetSubgraph() is RenderGraphEditorGraph childGraph)
+                    removed += TrimGraphRecursive(childGraph);
             }
 
             return removed;

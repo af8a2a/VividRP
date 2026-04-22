@@ -1,243 +1,45 @@
 using NUnit.Framework;
-using UnityEngine;
-using UnityEngine.Experimental.Rendering;
-using UnityEngine.Rendering;
-using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
 {
     public class RenderGraphPreviewRegistryTests
     {
-        private sealed class PreviewTestPass : RasterPass
+        [Test]
+        public void IsAvailable_ReturnsFalse_AfterPreviewRemoval()
         {
-            public override void Create()
-            {
-            }
-
-            public override void Prepare(ContextContainer frameData)
-            {
-            }
-
-            public override void Record(RasterGraphContext context)
-            {
-            }
-
-            public override void Dispose()
-            {
-            }
-        }
-
-        private sealed class AnotherPreviewTestPass : RasterPass
-        {
-            public override void Create()
-            {
-            }
-
-            public override void Prepare(ContextContainer frameData)
-            {
-            }
-
-            public override void Record(RasterGraphContext context)
-            {
-            }
-
-            public override void Dispose()
-            {
-            }
-        }
-
-        [OneTimeSetUp]
-        public void OneTimeSetUp()
-        {
-            RTHandles.Initialize(1, 1);
-        }
-
-        [SetUp]
-        public void SetUp()
-        {
-            RenderGraphPreviewRegistry.SetAvailabilityOverrideForTests(null);
-            RenderGraphPreviewRegistry.Clear();
-        }
-
-        [TearDown]
-        public void TearDown()
-        {
-            RenderGraphPreviewRegistry.Clear();
-            RenderGraphPreviewRegistry.SetAvailabilityOverrideForTests(null);
+            Assert.That(RenderGraphPreviewRegistry.IsAvailable, Is.False);
         }
 
         [Test]
-        public void TryGetPreview_ReturnsFalse_WhenPreviewRuntimeIsDisabled()
+        public void TryGetPreview_ReturnsFalse_WhenLegacyCallersAttemptToRegisterPreview()
         {
-            var texture = new Texture2D(4, 4);
+            RenderGraphPreviewRegistry.SetPreview(typeof(RenderGraphPreviewRegistryTests), "Color", null);
 
-            try
-            {
-                RenderGraphPreviewRegistry.SetAvailabilityOverrideForTests(false);
-                RenderGraphPreviewRegistry.SetPreview(typeof(PreviewTestPass), "Color", texture);
+            var found = RenderGraphPreviewRegistry.TryGetPreview(typeof(RenderGraphPreviewRegistryTests), "Color", out var previewTexture);
 
-                var found = RenderGraphPreviewRegistry.TryGetPreview(typeof(PreviewTestPass), "Color", out var previewTexture);
-
-                Assert.That(found, Is.False);
-                Assert.That(previewTexture, Is.Null);
-            }
-            finally
-            {
-                Object.DestroyImmediate(texture);
-            }
+            Assert.That(found, Is.False);
+            Assert.That(previewTexture, Is.Null);
         }
 
         [Test]
-        public void SetPreview_RegistersPreviewTexture_ForPassField()
+        public void TryGetSinglePreview_ReturnsFalse_AfterPreviewRemoval()
         {
-            var texture = new Texture2D(4, 4);
+            var found = RenderGraphPreviewRegistry.TryGetSinglePreview(out _, out _, out _);
 
-            try
-            {
-                RenderGraphPreviewRegistry.SetPreview(typeof(PreviewTestPass), "Color", texture);
-
-                var found = RenderGraphPreviewRegistry.TryGetPreview(typeof(PreviewTestPass), "Color", out var previewTexture);
-
-                Assert.That(found, Is.True);
-                Assert.That(previewTexture, Is.SameAs(texture));
-            }
-            finally
-            {
-                Object.DestroyImmediate(texture);
-            }
+            Assert.That(found, Is.False);
         }
 
         [Test]
-        public void TryGetSinglePreview_ReturnsFalse_WhenMultiplePreviewsExist()
+        public void GetOrCreatePreviewTarget_ReturnsNull_AfterPreviewRemoval()
         {
-            var firstTexture = new Texture2D(4, 4);
-            var secondTexture = new Texture2D(4, 4);
+            var target = RenderGraphPreviewRegistry.GetOrCreatePreviewTarget(
+                typeof(RenderGraphPreviewRegistryTests),
+                "Color",
+                default,
+                null);
 
-            try
-            {
-                RenderGraphPreviewRegistry.SetPreview(typeof(PreviewTestPass), "Color", firstTexture);
-                RenderGraphPreviewRegistry.SetPreview(typeof(AnotherPreviewTestPass), "Color", secondTexture);
-
-                var found = RenderGraphPreviewRegistry.TryGetSinglePreview(out _, out _, out _);
-
-                Assert.That(found, Is.False);
-            }
-            finally
-            {
-                Object.DestroyImmediate(firstTexture);
-                Object.DestroyImmediate(secondTexture);
-            }
-        }
-
-        [Test]
-        public void TryGetSinglePreview_ReturnsSingleRegisteredPreview()
-        {
-            var texture = new Texture2D(4, 4);
-
-            try
-            {
-                RenderGraphPreviewRegistry.SetPreview(typeof(PreviewTestPass), "Color", texture);
-
-                var found = RenderGraphPreviewRegistry.TryGetSinglePreview(out var passType, out var fieldName, out var previewTexture);
-
-                Assert.That(found, Is.True);
-                Assert.That(passType, Is.EqualTo(typeof(PreviewTestPass)));
-                Assert.That(fieldName, Is.EqualTo("Color"));
-                Assert.That(previewTexture, Is.SameAs(texture));
-            }
-            finally
-            {
-                Object.DestroyImmediate(texture);
-            }
-        }
-
-        [Test]
-        public void Clear_RemovesRegisteredPreviewTextures()
-        {
-            var texture = new Texture2D(4, 4);
-
-            try
-            {
-                RenderGraphPreviewRegistry.SetPreview(typeof(PreviewTestPass), "Color", texture);
-                RenderGraphPreviewRegistry.Clear();
-
-                var found = RenderGraphPreviewRegistry.TryGetPreview(typeof(PreviewTestPass), "Color", out _);
-
-                Assert.That(found, Is.False);
-            }
-            finally
-            {
-                Object.DestroyImmediate(texture);
-            }
-        }
-
-        [Test]
-        public void GetOrCreatePreviewTarget_ReusesHandle_WhenSourceShapeMatches()
-        {
-            var sourceInfo = new RenderTargetInfo
-            {
-                width = 64,
-                height = 32,
-                volumeDepth = 1,
-                msaaSamples = 1,
-                format = GraphicsFormat.R8G8B8A8_UNorm,
-                bindMS = false,
-            };
-            var sourceDesc = new RenderGraphTextureDesc
-            {
-                Width = 64,
-                Height = 32,
-                ColorFormat = GraphicsFormat.R8G8B8A8_UNorm,
-                FilterMode = FilterMode.Point,
-                WrapMode = TextureWrapMode.Clamp,
-            };
-
-            var first = RenderGraphPreviewRegistry.GetOrCreatePreviewTarget(typeof(PreviewTestPass), "Color", sourceInfo, sourceDesc);
-            var second = RenderGraphPreviewRegistry.GetOrCreatePreviewTarget(typeof(PreviewTestPass), "Color", sourceInfo, sourceDesc);
-
-            Assert.That(first, Is.Not.Null);
-            Assert.That(second, Is.SameAs(first));
-            Assert.That(RenderGraphPreviewRegistry.TryGetPreview(typeof(PreviewTestPass), "Color", out var previewTexture), Is.True);
-            Assert.That(previewTexture, Is.SameAs(first.rt));
-        }
-
-        [Test]
-        public void GetOrCreatePreviewTarget_RecreatesHandle_WhenSourceShapeChanges()
-        {
-            var sourceDesc = new RenderGraphTextureDesc
-            {
-                Width = 64,
-                Height = 32,
-                ColorFormat = GraphicsFormat.R8G8B8A8_UNorm,
-            };
-            var firstInfo = new RenderTargetInfo
-            {
-                width = 64,
-                height = 32,
-                volumeDepth = 1,
-                msaaSamples = 1,
-                format = GraphicsFormat.R8G8B8A8_UNorm,
-                bindMS = false,
-            };
-            var secondInfo = new RenderTargetInfo
-            {
-                width = 128,
-                height = 64,
-                volumeDepth = 1,
-                msaaSamples = 1,
-                format = GraphicsFormat.R8G8B8A8_UNorm,
-                bindMS = false,
-            };
-
-            var first = RenderGraphPreviewRegistry.GetOrCreatePreviewTarget(typeof(PreviewTestPass), "Color", firstInfo, sourceDesc);
-            var second = RenderGraphPreviewRegistry.GetOrCreatePreviewTarget(typeof(PreviewTestPass), "Color", secondInfo, sourceDesc);
-
-            Assert.That(first, Is.Not.Null);
-            Assert.That(second, Is.Not.Null);
-            Assert.That(second, Is.Not.SameAs(first));
-            Assert.That(RenderGraphPreviewRegistry.TryGetPreview(typeof(PreviewTestPass), "Color", out var previewTexture), Is.True);
-            Assert.That(previewTexture, Is.SameAs(second.rt));
+            Assert.That(target, Is.Null);
         }
     }
 }

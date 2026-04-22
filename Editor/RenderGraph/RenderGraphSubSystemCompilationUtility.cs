@@ -62,7 +62,6 @@ namespace VividRP.Editor.RenderGraph
             {
                 ISubgraphNode => null,
                 IVariableNode => null,
-                PreviewNodeData => null,
                 _ => connectedPort,
             };
         }
@@ -172,7 +171,6 @@ namespace VividRP.Editor.RenderGraph
         internal List<BufferResourceNodeData> BufferNodes { get; } = new();
         internal List<RenderListResourceNodeData> RenderListNodes { get; } = new();
         internal List<AccelerationStructureResourceNodeData> AccelerationStructureNodes { get; } = new();
-        internal List<PreviewNodeData> PreviewNodes { get; } = new();
 
         internal RenderGraphCompilationScope GetScope(INode node)
         {
@@ -232,10 +230,6 @@ namespace VividRP.Editor.RenderGraph
                     case AccelerationStructureResourceNodeData accelerationStructureNode:
                         flattenedGraph.AccelerationStructureNodes.Add(accelerationStructureNode);
                         flattenedGraph.m_NodeScopes[accelerationStructureNode] = scope;
-                        break;
-                    case PreviewNodeData previewNode:
-                        flattenedGraph.PreviewNodes.Add(previewNode);
-                        flattenedGraph.m_NodeScopes[previewNode] = scope;
                         break;
                     case ISubgraphNode subgraphNode when scope.Parent == null && !RenderGraphSubSystemCompilationUtility.IsSubSystemGraph(scope.Graph):
                         if (subgraphNode.GetSubgraph() is RenderGraphEditorGraph childGraph)

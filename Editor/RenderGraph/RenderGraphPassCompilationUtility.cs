@@ -290,9 +290,6 @@ namespace VividRP.Editor.RenderGraph
                 }
             }
 
-            if (source?.PreviewTextureFields != null)
-                clone.PreviewTextureFields.AddRange(source.PreviewTextureFields);
-
             if (source?.ResourceBindings == null)
                 return clone;
 

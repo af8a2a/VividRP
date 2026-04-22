@@ -167,10 +167,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private RenderGraphTextureDesc GetPreferredSourceDescriptor()
         {
-            if (HasExplicitSize(m_LeftTexture?.desc))
+            if (RenderGraphTextureDescUtility.HasExplicitSize(m_LeftTexture?.desc))
                 return m_LeftTexture.desc;
 
-            if (HasExplicitSize(m_RightTexture?.desc))
+            if (RenderGraphTextureDescUtility.HasExplicitSize(m_RightTexture?.desc))
                 return m_RightTexture.desc;
 
             return m_LeftTexture?.desc ?? m_RightTexture?.desc;
@@ -188,7 +188,7 @@ namespace VividRP.Runtime.RenderPass.Core
             for (var i = 0; i < descriptors.Length; i++)
             {
                 var descriptor = descriptors[i];
-                if (!HasExplicitSize(descriptor))
+                if (!RenderGraphTextureDescUtility.HasExplicitSize(descriptor))
                     continue;
 
                 resolved = Mathf.Max(resolved, selector(descriptor));
@@ -214,14 +214,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 return 50f;
 
             return Mathf.Clamp(data.slider, 0f, 100f);
-        }
-
-        private static bool HasExplicitSize(RenderGraphTextureDesc descriptor)
-        {
-            return descriptor != null
-                && descriptor.Width > 0
-                && descriptor.Height > 0
-                && !(descriptor.Width == 1 && descriptor.Height == 1);
         }
 
     }

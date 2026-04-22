@@ -158,7 +158,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private void ConfigureTargets(VividCameraData cameraData)
         {
             var sourceDescriptor = m_CameraDepthTexture?.desc;
-            var hasExplicitSourceSize = HasExplicitSize(sourceDescriptor);
+            var hasExplicitSourceSize = RenderGraphTextureDescUtility.HasExplicitSize(sourceDescriptor);
 
             var width = hasExplicitSourceSize
                 ? Mathf.Max(1, sourceDescriptor.Width)
@@ -223,14 +223,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_MotionVectorDepthTexture.desc.UseDynamicScale = sourceDescriptor.UseDynamicScale;
             m_MotionVectorDepthTexture.desc.UseDynamicScaleExplicit = sourceDescriptor.UseDynamicScaleExplicit;
             m_MotionVectorDepthTexture.desc.ScaleFactor = sourceDescriptor.ScaleFactor;
-        }
-
-        private static bool HasExplicitSize(RenderGraphTextureDesc descriptor)
-        {
-            return descriptor != null
-                && descriptor.Width > 0
-                && descriptor.Height > 0
-                && !(descriptor.Width == 1 && descriptor.Height == 1);
         }
 
     }

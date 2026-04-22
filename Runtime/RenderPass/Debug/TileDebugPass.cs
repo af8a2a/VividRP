@@ -172,7 +172,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private RenderGraphTextureDesc GetPreferredSourceDescriptor()
         {
-            if (HasExplicitSize(m_SourceTexture?.desc))
+            if (RenderGraphTextureDescUtility.HasExplicitSize(m_SourceTexture?.desc))
                 return m_SourceTexture.desc;
 
             return m_SourceTexture?.desc;
@@ -190,7 +190,7 @@ namespace VividRP.Runtime.RenderPass.Core
             for (var i = 0; i < descriptors.Length; i++)
             {
                 var descriptor = descriptors[i];
-                if (!HasExplicitSize(descriptor))
+                if (!RenderGraphTextureDescUtility.HasExplicitSize(descriptor))
                     continue;
 
                 resolved = Mathf.Max(resolved, selector(descriptor));
@@ -208,14 +208,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 return sourceDescriptor.ColorFormat;
 
             return GraphicsFormat.R8G8B8A8_UNorm;
-        }
-
-        private static bool HasExplicitSize(RenderGraphTextureDesc descriptor)
-        {
-            return descriptor != null
-                && descriptor.Width > 0
-                && descriptor.Height > 0
-                && !(descriptor.Width == 1 && descriptor.Height == 1);
         }
 
         private static RenderGraphBuffer CreateStructuredBuffer(string name)

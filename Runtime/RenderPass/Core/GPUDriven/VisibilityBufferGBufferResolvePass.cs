@@ -199,7 +199,7 @@ namespace VividRP.Runtime.RenderPass.Core
             for (var i = 0; i < descriptors.Length; i++)
             {
                 var descriptor = descriptors[i];
-                if (!HasExplicitSize(descriptor))
+                if (!RenderGraphTextureDescUtility.HasExplicitSize(descriptor))
                     continue;
 
                 resolved = Mathf.Max(resolved, selector(descriptor));
@@ -209,14 +209,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 return resolved;
 
             return CameraDimensionUtility.ResolveCameraDimension(actualCameraDimension, cameraDimension, screenDimension);
-        }
-
-        private static bool HasExplicitSize(RenderGraphTextureDesc descriptor)
-        {
-            return descriptor != null
-                && descriptor.Width > 0
-                && descriptor.Height > 0
-                && !(descriptor.Width == 1 && descriptor.Height == 1);
         }
 
     }

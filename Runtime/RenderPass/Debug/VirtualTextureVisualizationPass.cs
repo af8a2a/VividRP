@@ -220,7 +220,7 @@ namespace VividRP.Runtime.RenderPass.Core
             for (int descriptorIndex = 0; descriptorIndex < descriptors.Length; descriptorIndex++)
             {
                 RenderGraphTextureDesc descriptor = descriptors[descriptorIndex];
-                if (!HasExplicitSize(descriptor))
+                if (!RenderGraphTextureDescUtility.HasExplicitSize(descriptor))
                     continue;
 
                 resolved = Mathf.Max(resolved, selector(descriptor));
@@ -238,14 +238,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 return sourceDescriptor.ColorFormat;
 
             return GraphicsFormat.R8G8B8A8_UNorm;
-        }
-
-        private static bool HasExplicitSize(RenderGraphTextureDesc descriptor)
-        {
-            return descriptor != null
-                   && descriptor.Width > 0
-                   && descriptor.Height > 0
-                   && !(descriptor.Width == 1 && descriptor.Height == 1);
         }
 
     }

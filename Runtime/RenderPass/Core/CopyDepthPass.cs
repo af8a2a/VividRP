@@ -42,7 +42,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var cameraData = frameData.Get<VividCameraData>();
             var sourceDescriptor = m_DepthAttachment?.desc;
-            var hasExplicitSourceSize = HasExplicitSize(sourceDescriptor);
+            var hasExplicitSourceSize = RenderGraphTextureDescUtility.HasExplicitSize(sourceDescriptor);
             var width = hasExplicitSourceSize
                 ? Mathf.Max(1, sourceDescriptor.Width)
                 : CameraDimensionUtility.ResolveCameraDimension(cameraData.actualWidth, cameraData.pixelWidth, Screen.width);
@@ -107,14 +107,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DepthTexture.desc.UseDynamicScale = m_DepthAttachment.desc.UseDynamicScale;
             m_DepthTexture.desc.UseDynamicScaleExplicit = m_DepthAttachment.desc.UseDynamicScaleExplicit;
             m_DepthTexture.desc.ScaleFactor = m_DepthAttachment.desc.ScaleFactor;
-        }
-
-        private static bool HasExplicitSize(RenderGraphTextureDesc descriptor)
-        {
-            return descriptor != null
-                && descriptor.Width > 0
-                && descriptor.Height > 0
-                && !(descriptor.Width == 1 && descriptor.Height == 1);
         }
 
     }

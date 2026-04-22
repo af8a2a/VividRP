@@ -326,9 +326,7 @@ namespace VividRP.Runtime.RenderPass.Core
             for (var i = 0; i < descriptors.Length; i++)
             {
                 var descriptor = descriptors[i];
-                if (descriptor == null
-                    || descriptor.Width <= 1
-                    || descriptor.Height <= 1)
+                if (!RenderGraphTextureDescUtility.HasExplicitSize(descriptor))
                 {
                     continue;
                 }

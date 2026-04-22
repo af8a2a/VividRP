@@ -225,19 +225,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             cmd.SetRenderTarget(destinationHandle);
-            
-            var scale = Vector2.one;
-
-            if (sourceHandle.useScaling)
-            {
-                scale.x = sourceHandle.rtHandleProperties.rtHandleScale.x;
-                scale.y = sourceHandle.rtHandleProperties.rtHandleScale.y;
-            }
 
             Blitter.BlitTexture(
                 cmd,
                 sourceHandle,
-                scale,
+                TextureScaleBiasUtility.GetScale(sourceHandle),
                 m_Material,
                 materialPassIndex);
         }

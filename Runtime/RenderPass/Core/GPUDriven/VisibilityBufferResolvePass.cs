@@ -120,8 +120,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetTexture(VisibilityBufferId, visibilityTexture);
             mpb.SetTexture(DepthTextureId, depthTexture);
-            mpb.SetVector(VisibilityBufferScaleBiasId, GetScaleBias(m_VisibilityBuffer.innerHandle));
-            mpb.SetVector(DepthTextureScaleBiasId, GetScaleBias(m_DepthTexture.innerHandle));
+            mpb.SetVector(VisibilityBufferScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_VisibilityBuffer.innerHandle));
+            mpb.SetVector(DepthTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_DepthTexture.innerHandle));
             mpb.SetInt(ResolveDebugModeId, (int)m_ResolvedDebugMode);
             mpb.SetFloat(ResolveExposureId, m_ResolvedExposure);
             mpb.SetFloat(WireframeThicknessId, m_ResolvedWireframeThickness);
@@ -202,13 +202,5 @@ namespace VividRP.Runtime.RenderPass.Core
                 && !(descriptor.Width == 1 && descriptor.Height == 1);
         }
 
-        private static Vector4 GetScaleBias(RTHandle handle)
-        {
-            if (handle == null || !handle.useScaling)
-                return new Vector4(1f, 1f, 0f, 0f);
-
-            var scale = handle.rtHandleProperties.rtHandleScale;
-            return new Vector4(scale.x, scale.y, 0f, 0f);
-        }
     }
 }

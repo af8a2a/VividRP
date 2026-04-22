@@ -117,15 +117,5 @@ namespace VividRP.Runtime.RenderPass.Core
                 && !(descriptor.Width == 1 && descriptor.Height == 1);
         }
 
-        private static Vector4 GetScaleBias(
-            Vector2 scale,
-            TextureUVOrigin sourceTextureUVOrigin,
-            TextureUVOrigin destinationTextureUVOrigin)
-        {
-            var yFlip = sourceTextureUVOrigin != destinationTextureUVOrigin;
-            return yFlip
-                ? new Vector4(scale.x, -scale.y, 0f, scale.y)
-                : new Vector4(scale.x, scale.y, 0f, 0f);
-        }
     }
 }

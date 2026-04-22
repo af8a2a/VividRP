@@ -243,14 +243,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_DebugTexture?.desc,
                 debugTexture);
             var debugTextureScaleBias = m_DebugTexture != null && m_DebugTexture.innerHandle.IsValid()
-                ? GetScaleBias(m_DebugTexture.innerHandle)
+                ? TextureScaleBiasUtility.GetScaleBias(m_DebugTexture.innerHandle)
                 : new Vector4(1f, 1f, 0f, 0f);
 
             m_MaterialPropertyBlock ??= new MaterialPropertyBlock();
             var mpb = m_MaterialPropertyBlock;
             mpb.Clear();
             mpb.SetTexture(SourceTextureId, sourceTexture);
-            mpb.SetVector(SourceTextureScaleBiasId, GetScaleBias(m_SourceTexture.innerHandle));
+            mpb.SetVector(SourceTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_SourceTexture.innerHandle));
             mpb.SetVector(DebugTextureScaleBiasId, debugTextureScaleBias);
             mpb.SetVector(OverlayRectId, m_OverlayRect);
             mpb.SetVector(OverlayScreenSizeId, m_OverlayScreenSize);
@@ -473,13 +473,5 @@ namespace VividRP.Runtime.RenderPass.Core
                 && !(descriptor.Width == 1 && descriptor.Height == 1);
         }
 
-        private static Vector4 GetScaleBias(RTHandle handle)
-        {
-            if (handle == null || !handle.useScaling)
-                return new Vector4(1f, 1f, 0f, 0f);
-
-            var scale = handle.rtHandleProperties.rtHandleScale;
-            return new Vector4(scale.x, scale.y, 0f, 0f);
-        }
     }
 }

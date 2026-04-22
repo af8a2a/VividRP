@@ -38,7 +38,7 @@ namespace VividRP.Runtime.RenderPass.Core
             Blitter.BlitTexture(
                 context.cmd,
                 sourceHandle,
-                GetScaleBias(
+                TextureScaleBiasUtility.GetScaleBias(
                     sourceHandle,
                     context.GetTextureUVOrigin(sourceTexture.innerHandle),
                     context.GetTextureUVOrigin(outputTexture.innerHandle)),
@@ -66,7 +66,7 @@ namespace VividRP.Runtime.RenderPass.Core
             Blitter.BlitTexture(
                 cmd,
                 sourceHandle,
-                GetScaleBias(
+                TextureScaleBiasUtility.GetScaleBias(
                     sourceHandle,
                     context.GetTextureUVOrigin(sourceTexture.innerHandle),
                     context.GetTextureUVOrigin(outputTexture.innerHandle)),
@@ -80,27 +80,5 @@ namespace VividRP.Runtime.RenderPass.Core
             return sourceTexture?.desc?.FilterMode != FilterMode.Point;
         }
 
-        private static Vector4 GetScaleBias(
-            RTHandle handle,
-            TextureUVOrigin sourceTextureUVOrigin,
-            TextureUVOrigin destinationTextureUVOrigin)
-        {
-            var scale = Vector2.one;
-            if (handle == null || !handle.useScaling)
-            {
-                var yFlip = sourceTextureUVOrigin != destinationTextureUVOrigin;
-                return yFlip
-                    ? new Vector4(1f, -1f, 0f, 1f)
-                    : new Vector4(1f, 1f, 0f, 0f);
-            }
-
-            scale.x = handle.rtHandleProperties.rtHandleScale.x;
-            scale.y = handle.rtHandleProperties.rtHandleScale.y;
-
-            var shouldFlipY = sourceTextureUVOrigin != destinationTextureUVOrigin;
-            return shouldFlipY
-                ? new Vector4(scale.x, -scale.y, 0f, scale.y)
-                : new Vector4(scale.x, scale.y, 0f, 0f);
-        }
     }
 }

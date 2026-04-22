@@ -141,14 +141,6 @@ namespace VividRP.Runtime.RenderPass.Core
             if (sourceHandle == null)
                 return;
 
-            var scale = Vector2.one;
-
-            if (sourceHandle.useScaling)
-            {
-                scale.x = sourceHandle.rtHandleProperties.rtHandleScale.x;
-                scale.y = sourceHandle.rtHandleProperties.rtHandleScale.y;
-            }
-
             var defaultExposureBuffer = m_ExposureData?.defaultExposureBuffer;
             var autoExposureBuffer = m_EnableExposure
                 ? m_ExposureData?.frameExposureBuffer ?? defaultExposureBuffer
@@ -229,7 +221,10 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             var sourceTextureUVOrigin = context.GetTextureUVOrigin(source.innerHandle);
-            var scaleBias = GetFinalBlitScaleBias(scale, sourceTextureUVOrigin, m_CameraBackBufferTextureUVOrigin);
+            var scaleBias = TextureScaleBiasUtility.GetScaleBias(
+                sourceHandle,
+                sourceTextureUVOrigin,
+                m_CameraBackBufferTextureUVOrigin);
 
             cmd.SetRenderTarget(m_CameraBackBufferTarget);
             if (m_ShouldSetViewport)
@@ -287,15 +282,5 @@ namespace VividRP.Runtime.RenderPass.Core
             return new Rect(0f, 0f, width, height);
         }
 
-        private static Vector4 GetFinalBlitScaleBias(
-            Vector2 scale,
-            TextureUVOrigin sourceTextureUVOrigin,
-            TextureUVOrigin destinationTextureUVOrigin)
-        {
-            var yFlip = sourceTextureUVOrigin != destinationTextureUVOrigin;
-            return yFlip
-                ? new Vector4(scale.x, -scale.y, 0f, scale.y)
-                : new Vector4(scale.x, scale.y, 0f, 0f);
-        }
     }
 }

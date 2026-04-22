@@ -116,8 +116,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetTexture(LeftTextureId, leftTexture);
             mpb.SetTexture(RightTextureId, rightTexture);
-            mpb.SetVector(LeftTextureScaleBiasId, GetScaleBias(m_LeftTexture.innerHandle));
-            mpb.SetVector(RightTextureScaleBiasId, GetScaleBias(m_RightTexture.innerHandle));
+            mpb.SetVector(LeftTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_LeftTexture.innerHandle));
+            mpb.SetVector(RightTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_RightTexture.innerHandle));
             mpb.SetFloat(SplitId, m_ResolvedSlider * 0.01f);
 
             CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);
@@ -233,15 +233,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 && descriptor.Width > 0
                 && descriptor.Height > 0
                 && !(descriptor.Width == 1 && descriptor.Height == 1);
-        }
-
-        private static Vector4 GetScaleBias(RTHandle handle)
-        {
-            if (handle == null || !handle.useScaling)
-                return new Vector4(1f, 1f, 0f, 0f);
-
-            var scale = handle.rtHandleProperties.rtHandleScale;
-            return new Vector4(scale.x, scale.y, 0f, 0f);
         }
 
     }

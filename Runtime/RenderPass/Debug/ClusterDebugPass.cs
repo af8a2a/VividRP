@@ -221,8 +221,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetTexture(SourceTextureId, sourceTexture);
             mpb.SetTexture(CameraDepthTextureId, depthTexture);
-            mpb.SetVector(SourceTextureScaleBiasId, GetScaleBias(m_SourceTexture.innerHandle));
-            mpb.SetVector(CameraDepthTextureScaleBiasId, GetScaleBias(m_DepthTexture.innerHandle));
+            mpb.SetVector(SourceTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_SourceTexture.innerHandle));
+            mpb.SetVector(CameraDepthTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_DepthTexture.innerHandle));
             mpb.SetInt(TileClusterDebugId, (int)tileClusterDebug);
             mpb.SetInt(ViewTilesFlagsId, (int)m_ResolvedSettings.tileClusterDebugByCategory);
             mpb.SetInt(ClusterDebugModeId, (int)m_ResolvedSettings.clusterDebugMode);
@@ -537,15 +537,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 && descriptor.Width > 0
                 && descriptor.Height > 0
                 && !(descriptor.Width == 1 && descriptor.Height == 1);
-        }
-
-        private static Vector4 GetScaleBias(RTHandle handle)
-        {
-            if (handle == null || !handle.useScaling)
-                return new Vector4(1f, 1f, 0f, 0f);
-
-            var scale = handle.rtHandleProperties.rtHandleScale;
-            return new Vector4(scale.x, scale.y, 0f, 0f);
         }
 
         private static RenderGraphBuffer CreateStructuredBuffer(string name, int stride)

@@ -166,7 +166,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             ConfigureOutputTexture(width, height, GetPreferredSourceDescriptor());
 
-            m_SourceTextureScaleBias = GetScaleBias(ResolveHandle(m_SourceTexture));
+            m_SourceTextureScaleBias = TextureScaleBiasUtility.GetScaleBias(ResolveHandle(m_SourceTexture));
 
             var exposureSettings = m_ExposureData != null
                 ? m_ExposureData.settings
@@ -407,15 +407,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 && descriptor.Width > 0
                 && descriptor.Height > 0
                 && !(descriptor.Width == 1 && descriptor.Height == 1);
-        }
-
-        private static Vector4 GetScaleBias(RTHandle handle)
-        {
-            if (handle == null || !handle.useScaling)
-                return new Vector4(1f, 1f, 0f, 0f);
-
-            var scale = handle.rtHandleProperties.rtHandleScale;
-            return new Vector4(scale.x, scale.y, 0f, 0f);
         }
 
         private void EnsureFallbackHistogramBuffer()

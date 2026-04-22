@@ -109,7 +109,7 @@ namespace VividRP.Runtime.RenderPass.Core
             Texture sourceTexture = ResolveTexture(m_SourceTexture?.innerHandle);
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetTexture(SourceTextureId, sourceTexture != null ? sourceTexture : Texture2D.blackTexture);
-            mpb.SetVector(SourceTextureScaleBiasId, GetScaleBias(m_SourceTexture?.innerHandle));
+            mpb.SetVector(SourceTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_SourceTexture?.innerHandle));
             mpb.SetVector(OverlayRectId, m_OverlayRect);
             mpb.SetFloat(OverlayOpacityId, m_ResolvedOpacity);
             mpb.SetInt(VisualizationModeId, (int)m_ResolvedVisualizationMode);
@@ -259,13 +259,5 @@ namespace VividRP.Runtime.RenderPass.Core
                    && !(descriptor.Width == 1 && descriptor.Height == 1);
         }
 
-        private static Vector4 GetScaleBias(RTHandle handle)
-        {
-            if (handle == null || !handle.useScaling)
-                return new Vector4(1f, 1f, 0f, 0f);
-
-            Vector2 scale = handle.rtHandleProperties.rtHandleScale;
-            return new Vector4(scale.x, scale.y, 0f, 0f);
-        }
     }
 }

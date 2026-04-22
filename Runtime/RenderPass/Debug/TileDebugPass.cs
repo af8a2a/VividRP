@@ -104,7 +104,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 {
                     var copyProperties = context.renderGraphPool.GetTempMaterialPropertyBlock();
                     copyProperties.SetTexture(SourceTextureId, sourceTexture);
-                    copyProperties.SetVector(SourceTextureScaleBiasId, GetScaleBias(m_SourceTexture.innerHandle));
+                    copyProperties.SetVector(SourceTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_SourceTexture.innerHandle));
                     CoreUtils.DrawFullScreen(context.cmd, m_Material, copyProperties, 0);
                 }
 
@@ -227,15 +227,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 && descriptor.Width > 0
                 && descriptor.Height > 0
                 && !(descriptor.Width == 1 && descriptor.Height == 1);
-        }
-
-        private static Vector4 GetScaleBias(RTHandle handle)
-        {
-            if (handle == null || !handle.useScaling)
-                return new Vector4(1f, 1f, 0f, 0f);
-
-            var scale = handle.rtHandleProperties.rtHandleScale;
-            return new Vector4(scale.x, scale.y, 0f, 0f);
         }
 
         private static RenderGraphBuffer CreateStructuredBuffer(string name)

@@ -94,16 +94,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var cmd = context.cmd;
             var unsafeCmd = CommandBufferHelpers.GetNativeCommandBuffer(cmd);
             RTHandle sourceHandle = m_Source.innerHandle;
-            var scale = Vector2.one;
-
-            if (sourceHandle.useScaling)
-            {
-                scale.x = sourceHandle.rtHandleProperties.rtHandleScale.x;
-                scale.y = sourceHandle.rtHandleProperties.rtHandleScale.y;
-            }
-
-            var scaleBias = GetBlitScaleBias(
-                scale,
+            var scaleBias = TextureScaleBiasUtility.GetScaleBias(
+                sourceHandle,
                 context.GetTextureUVOrigin(m_Source.innerHandle),
                 context.GetTextureUVOrigin(m_OutputTexture.innerHandle));
 
@@ -155,15 +147,5 @@ namespace VividRP.Runtime.RenderPass.Core
             return texture;
         }
 
-        private static Vector4 GetBlitScaleBias(
-            Vector2 scale,
-            TextureUVOrigin sourceTextureUVOrigin,
-            TextureUVOrigin destinationTextureUVOrigin)
-        {
-            var yFlip = sourceTextureUVOrigin != destinationTextureUVOrigin;
-            return yFlip
-                ? new Vector4(scale.x, -scale.y, 0f, scale.y)
-                : new Vector4(scale.x, scale.y, 0f, 0f);
-        }
     }
 }

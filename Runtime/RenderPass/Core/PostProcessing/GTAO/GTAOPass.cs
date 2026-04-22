@@ -162,8 +162,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var camera = cameraData?.camera;
             var postProcessingAllowed = camera != null && CoreUtils.ArePostProcessesEnabled(camera);
 
-            m_Width = ResolveDimension(cameraData?.actualWidth ?? 0, cameraData?.pixelWidth ?? 0, Screen.width);
-            m_Height = ResolveDimension(cameraData?.actualHeight ?? 0, cameraData?.pixelHeight ?? 0, Screen.height);
+            m_Width = CameraDimensionUtility.ResolveCameraDimension(cameraData?.actualWidth ?? 0, cameraData?.pixelWidth ?? 0, Screen.width);
+            m_Height = CameraDimensionUtility.ResolveCameraDimension(cameraData?.actualHeight ?? 0, cameraData?.pixelHeight ?? 0, Screen.height);
             m_Settings = postProcessingAllowed ? GTAOSettingsResolver.Resolve() : GTAOSettingsData.CreateDefault();
 
             ResizeTexture(m_DepthTexture, m_Width, m_Height);
@@ -507,15 +507,6 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.ClearColor = clearColor ?? Color.clear;
             texture.desc.MsaaSamples = MSAASamples.None;
             return texture;
-        }
-
-        private static int ResolveDimension(int actual, int fallback, int screen)
-        {
-            if (actual > 0)
-                return actual;
-            if (fallback > 0)
-                return fallback;
-            return Mathf.Max(1, screen);
         }
 
         private static void ClearTexture(CommandBuffer cmd, RenderGraphTexture texture, Color clearColor)

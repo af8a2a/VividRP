@@ -297,11 +297,11 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             if (descriptorDimension > 0)
                 return descriptorDimension;
-            if (actualCameraDimension > 0)
-                return actualCameraDimension;
-            if (cameraDimension > 0)
-                return cameraDimension;
-            return Mathf.Max(1, screenDimension);
+
+            return CameraDimensionUtility.ResolveCameraDimension(
+                actualCameraDimension,
+                cameraDimension,
+                screenDimension);
         }
 
         private static GraphicsFormat ResolveColorFormat(RenderGraphTextureDesc descriptor)

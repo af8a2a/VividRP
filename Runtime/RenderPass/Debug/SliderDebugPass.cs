@@ -197,7 +197,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (resolved > 0)
                 return resolved;
 
-            return ResolveCameraDimension(actualCameraDimension, cameraDimension, screenDimension);
+            return CameraDimensionUtility.ResolveCameraDimension(actualCameraDimension, cameraDimension, screenDimension);
         }
 
         private static GraphicsFormat ResolveOutputFormat(RenderGraphTextureDesc sourceDescriptor)
@@ -233,17 +233,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 && descriptor.Width > 0
                 && descriptor.Height > 0
                 && !(descriptor.Width == 1 && descriptor.Height == 1);
-        }
-
-        private static int ResolveCameraDimension(int actualCameraDimension, int cameraDimension, int screenDimension)
-        {
-            if (actualCameraDimension > 0)
-                return actualCameraDimension;
-
-            if (cameraDimension > 0)
-                return cameraDimension;
-
-            return Mathf.Max(1, screenDimension);
         }
 
         private static Vector4 GetScaleBias(RTHandle handle)

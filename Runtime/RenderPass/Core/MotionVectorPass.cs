@@ -162,10 +162,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var width = hasExplicitSourceSize
                 ? Mathf.Max(1, sourceDescriptor.Width)
-                : ResolveCameraDimension(cameraData.actualWidth, cameraData.pixelWidth, Screen.width);
+                : CameraDimensionUtility.ResolveCameraDimension(cameraData.actualWidth, cameraData.pixelWidth, Screen.width);
             var height = hasExplicitSourceSize
                 ? Mathf.Max(1, sourceDescriptor.Height)
-                : ResolveCameraDimension(cameraData.actualHeight, cameraData.pixelHeight, Screen.height);
+                : CameraDimensionUtility.ResolveCameraDimension(cameraData.actualHeight, cameraData.pixelHeight, Screen.height);
 
             ConfigureMotionVectorTexture(width, height, sourceDescriptor);
             ConfigureDepthTexture(width, height, sourceDescriptor);
@@ -231,17 +231,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 && descriptor.Width > 0
                 && descriptor.Height > 0
                 && !(descriptor.Width == 1 && descriptor.Height == 1);
-        }
-
-        private static int ResolveCameraDimension(int actualCameraDimension, int cameraDimension, int screenDimension)
-        {
-            if (actualCameraDimension > 0)
-                return actualCameraDimension;
-
-            if (cameraDimension > 0)
-                return cameraDimension;
-
-            return Mathf.Max(1, screenDimension);
         }
 
     }

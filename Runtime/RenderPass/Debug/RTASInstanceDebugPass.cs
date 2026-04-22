@@ -84,11 +84,13 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var cameraData = frameData.Get<VividCameraData>();
             m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
+            int width = CameraDimensionUtility.ResolveCameraDimension(cameraData.actualWidth, cameraData.pixelWidth, Screen.width);
+            int height = CameraDimensionUtility.ResolveCameraDimension(cameraData.actualHeight, cameraData.pixelHeight, Screen.height);
 
-            ConfigureOutputTexture(cameraData.actualWidth, cameraData.actualHeight);
+            ConfigureOutputTexture(width, height);
 
-            m_DispatchGroupCountX = CoreUtils.DivRoundUp(cameraData.actualWidth, ThreadGroupSizeX);
-            m_DispatchGroupCountY = CoreUtils.DivRoundUp(cameraData.actualHeight, ThreadGroupSizeY);
+            m_DispatchGroupCountX = CoreUtils.DivRoundUp(width, ThreadGroupSizeX);
+            m_DispatchGroupCountY = CoreUtils.DivRoundUp(height, ThreadGroupSizeY);
 
             var camera = cameraData.camera;
             if (camera != null)
@@ -185,25 +187,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_OutputTexture.desc.Name = "OutputTexture";
         }
 
-
-        private static bool HasExplicitSize(RenderGraphTextureDesc descriptor)
-        {
-            return descriptor != null
-                && descriptor.Width > 0
-                && descriptor.Height > 0
-                && !(descriptor.Width == 1 && descriptor.Height == 1);
-        }
-
-        private static int ResolveCameraDimension(int actualCameraDimension, int cameraDimension, int screenDimension)
-        {
-            if (actualCameraDimension > 0)
-                return actualCameraDimension;
-
-            if (cameraDimension > 0)
-                return cameraDimension;
-
-            return Mathf.Max(1, screenDimension);
-        }
 
         private static GraphicsFormat ResolveOutputFormat(RenderGraphTextureDesc descriptor)
         {

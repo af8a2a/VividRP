@@ -7,9 +7,9 @@
         "Unity.Mathematics",
         "Unity.Collections",
         "Unity.RenderPipelines.GPUDriven.Runtime",
-        "Unity.Burst",
-        "VividRP.Runtime.GPUDriven"
+        "Unity.Burst"
     ],
     "includePlatforms": [],
-    "excludePlatforms": []
+    "excludePlatforms": [],
+    "allowUnsafeCode": true
 }

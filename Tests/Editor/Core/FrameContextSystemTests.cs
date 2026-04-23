@@ -93,6 +93,56 @@ namespace VividRP.Editor.Tests
             Assert.That(temporalData, Is.Not.Null);
             Assert.That(temporalData.nonJitteredViewProjectionMatrix, Is.Not.EqualTo(default(Matrix4x4)));
         }
+
+        [Test]
+        public void ExecutePostRender_InvokesSubsystemPostRenderCallbacks()
+        {
+            var frameData = new ContextContainer();
+            using var cmd = new CommandBuffer();
+            var invoked = false;
+
+            void Handler(ContextContainer context, CommandBuffer commandBuffer)
+            {
+                invoked = ReferenceEquals(context, frameData) && ReferenceEquals(commandBuffer, cmd);
+            }
+
+            try
+            {
+                FrameContextSystem.SubsystemPostRender += Handler;
+
+                FrameContextSystem.ExecutePostRender(frameData, cmd);
+
+                Assert.That(invoked, Is.True);
+            }
+            finally
+            {
+                FrameContextSystem.SubsystemPostRender -= Handler;
+            }
+        }
+
+        [Test]
+        public void Clear_InvokesSubsystemDisposeCallbacks()
+        {
+            var invoked = false;
+
+            void Handler()
+            {
+                invoked = true;
+            }
+
+            try
+            {
+                FrameContextSystem.SubsystemDispose += Handler;
+
+                FrameContextSystem.Clear();
+
+                Assert.That(invoked, Is.True);
+            }
+            finally
+            {
+                FrameContextSystem.SubsystemDispose -= Handler;
+            }
+        }
     }
 
     public class CameraTemporalDataTests

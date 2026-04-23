@@ -8,7 +8,6 @@
         "Unity.GraphToolkit.Editor",
         "Unity.GraphToolkit.Common.Editor",
         "GUID:3eae0364be2026648bf74846acb8a731",
-        "VividRP.Runtime.GPUDriven",
         "Unity.Collections",
         "Unity.Mathematics",
         "Unity.Burst",

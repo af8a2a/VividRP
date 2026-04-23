@@ -8,7 +8,8 @@ namespace VividRP.Runtime
     {
         private static readonly FrameContextSystem s_Instance = new();
         public static event Action<ContextContainer, CommandBuffer> SubsystemPreRender;
-        public static event Action<ContextContainer, CommandBuffer> SubsystemDispose;
+        public static event Action<ContextContainer, CommandBuffer> SubsystemPostRender;
+        public static event Action SubsystemDispose;
 
             
         private static readonly int CameraWorldClipPlanesId = Shader.PropertyToID("unity_CameraWorldClipPlanes");
@@ -49,6 +50,14 @@ namespace VividRP.Runtime
                 cmd,
                 cameraData.frameIndex);
             SubsystemPreRender?.Invoke(frameData, cmd);
+        }
+
+        public static void ExecutePostRender(ContextContainer frameData, CommandBuffer cmd)
+        {
+            if (frameData == null || cmd == null)
+                return;
+
+            SubsystemPostRender?.Invoke(frameData, cmd);
         }
 
         public static CameraTemporalData GetOrCreate(Camera camera)

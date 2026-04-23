@@ -2,6 +2,7 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using VividRP.Runtime;
+using VividRP.Runtime.GPUDriven;
 using Object = UnityEngine.Object;
 
 namespace VividRP.Editor.Tests
@@ -75,6 +76,50 @@ namespace VividRP.Editor.Tests
             {
                 Object.DestroyImmediate(asset);
             }
+        }
+    }
+
+    public class VividGPUDrivenSystemLifecycleTests
+    {
+        [SetUp]
+        public void SetUp()
+        {
+            VividGPUDrivenSystem.Deinitialize();
+            FrameContextSystem.Clear();
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            VividGPUDrivenSystem.Deinitialize();
+            FrameContextSystem.Clear();
+        }
+
+        [Test]
+        public void Deinitialize_DisposesCurrentSingletonInstance()
+        {
+            var system = VividGPUDrivenSystem.instance;
+
+            Assert.That(system, Is.Not.Null);
+            Assert.That(VividGPUDrivenSystem.HasInstance, Is.True);
+
+            VividGPUDrivenSystem.Deinitialize();
+
+            Assert.That(VividGPUDrivenSystem.HasInstance, Is.False);
+        }
+
+        [Test]
+        public void Instance_RecreatesSingleton_AfterDeinitialize()
+        {
+            var first = VividGPUDrivenSystem.instance;
+
+            VividGPUDrivenSystem.Deinitialize();
+
+            var second = VividGPUDrivenSystem.instance;
+
+            Assert.That(second, Is.Not.Null);
+            Assert.That(second, Is.Not.SameAs(first));
+            Assert.That(VividGPUDrivenSystem.HasInstance, Is.True);
         }
     }
 }

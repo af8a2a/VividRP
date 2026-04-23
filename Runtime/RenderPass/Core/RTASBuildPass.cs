@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
@@ -454,22 +455,24 @@ namespace VividRP.Runtime.RenderPass.Core
             Camera camera,
             in ResolvedRayTracingSettings settings)
         {
-            var candidateRendererCount = EstimateCandidateRendererCount(settings.LayerMask, settings.RayTracingModeMask, true);
+            var candidateRendererCount = EstimateCandidateInstanceCount(settings.LayerMask, settings.RayTracingModeMask, true);
             var usedShaderTagFallback = false;
 
             accelerationStructure.ClearInstances();
 
             var cullingConfig = CreateCullingConfig(camera, in settings);
             accelerationStructure.CullInstances(ref cullingConfig);
+            AddMeshletRendererInstances(accelerationStructure, camera, in settings, requireVividRenderPipelineTag: true);
 
             var instanceCount = accelerationStructure.GetInstanceCount();
             if (instanceCount == 0)
             {
                 usedShaderTagFallback = true;
-                candidateRendererCount = EstimateCandidateRendererCount(settings.LayerMask, settings.RayTracingModeMask, false);
+                candidateRendererCount = EstimateCandidateInstanceCount(settings.LayerMask, settings.RayTracingModeMask, false);
                 accelerationStructure.ClearInstances();
                 cullingConfig = CreateCullingConfig(camera, in settings, useRenderPipelineTagFilter: false);
                 accelerationStructure.CullInstances(ref cullingConfig);
+                AddMeshletRendererInstances(accelerationStructure, camera, in settings, requireVividRenderPipelineTag: false);
                 instanceCount = accelerationStructure.GetInstanceCount();
             }
 
@@ -538,7 +541,20 @@ namespace VividRP.Runtime.RenderPass.Core
             return planes;
         }
 
-        private static int EstimateCandidateRendererCount(
+        private static int EstimateCandidateInstanceCount(
+            LayerMask layerMask,
+            RayTracingAccelerationStructure.RayTracingModeMask rayTracingModeMask,
+            bool requireVividRenderPipelineTag)
+        {
+            return CountSceneRendererCandidateInstances(layerMask, rayTracingModeMask, requireVividRenderPipelineTag)
+                + CountMeshletCandidateInstances(
+                    VividMeshletRendererDatabase.instance,
+                    layerMask,
+                    rayTracingModeMask,
+                    requireVividRenderPipelineTag);
+        }
+
+        private static int CountSceneRendererCandidateInstances(
             LayerMask layerMask,
             RayTracingAccelerationStructure.RayTracingModeMask rayTracingModeMask,
             bool requireVividRenderPipelineTag)
@@ -553,6 +569,71 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             return count;
+        }
+
+        internal static int CountMeshletCandidateInstances(
+            VividMeshletRendererDatabase database,
+            LayerMask layerMask,
+            RayTracingAccelerationStructure.RayTracingModeMask rayTracingModeMask,
+            bool requireVividRenderPipelineTag)
+        {
+            if (database == null)
+                return 0;
+
+            var rendererData = database.rendererData;
+            var rendererResources = database.rendererResources;
+            var rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+            var count = 0;
+
+            for (var rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
+            {
+                var meshletRenderData = rendererData[rendererIndex];
+                var meshletResources = rendererResources[rendererIndex];
+
+                if (!IsCandidateMeshletRenderer(meshletRenderData, meshletResources, layerMask, rayTracingModeMask))
+                    continue;
+
+                var subMeshCount = Mathf.Max(0, meshletRenderData.subMeshCount);
+                for (var subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
+                {
+                    if (IsCandidateMeshletSubMesh(meshletResources, subMeshIndex, requireVividRenderPipelineTag))
+                        count++;
+                }
+            }
+
+            return count;
+        }
+
+        internal static bool TryResolveMeshletMaterial(
+            in VividMeshletRendererResources meshletResources,
+            int subMeshIndex,
+            out Material material)
+        {
+            material = null;
+
+            if (subMeshIndex < 0)
+                return false;
+
+            var sharedMaterials = meshletResources.SharedMaterials;
+            if (sharedMaterials != null
+                && subMeshIndex < sharedMaterials.Length
+                && sharedMaterials[subMeshIndex] != null)
+            {
+                material = sharedMaterials[subMeshIndex];
+                return true;
+            }
+
+            var materialProxies = meshletResources.MaterialProxies;
+            if (materialProxies != null
+                && subMeshIndex < materialProxies.Length
+                && materialProxies[subMeshIndex] != null
+                && materialProxies[subMeshIndex].SourceMaterial != null)
+            {
+                material = materialProxies[subMeshIndex].SourceMaterial;
+                return true;
+            }
+
+            return false;
         }
 
         private static bool IsCandidateRenderer(
@@ -581,6 +662,13 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             return renderer is SkinnedMeshRenderer
                 || (renderer is MeshRenderer && renderer.GetComponent<MeshFilter>() != null);
+        }
+
+        internal static RayTracingMode GetMeshletRayTracingMode(VividMeshletRendererFlags flags)
+        {
+            return (flags & VividMeshletRendererFlags.Static) != 0
+                ? RayTracingMode.Static
+                : RayTracingMode.DynamicTransform;
         }
 
         private static bool IsLayerIncluded(int layer, LayerMask layerMask)
@@ -616,15 +704,247 @@ namespace VividRP.Runtime.RenderPass.Core
 
             for (var i = 0; i < materials.Length; i++)
             {
-                var material = materials[i];
-                if (material == null)
-                    continue;
-
-                if (material.GetTag(RenderPipelineShaderTagName, false) == VividRenderPipelineShaderTagValue)
+                if (HasVividRenderPipelineMaterial(materials[i]))
                     return true;
             }
 
             return false;
+        }
+
+        private static bool HasVividRenderPipelineMaterial(Material material)
+        {
+            return material != null
+                && material.GetTag(RenderPipelineShaderTagName, false) == VividRenderPipelineShaderTagValue;
+        }
+
+        private static void AddMeshletRendererInstances(
+            RayTracingAccelerationStructure accelerationStructure,
+            Camera camera,
+            in ResolvedRayTracingSettings settings,
+            bool requireVividRenderPipelineTag)
+        {
+            var database = VividMeshletRendererDatabase.instance;
+            var rendererData = database.rendererData;
+            var rendererResources = database.rendererResources;
+            var rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+            var cullingPlanes = settings.CullingMode == VividRTASCullingMode.ExtendedFrustum
+                ? BuildExtendedFrustumPlanes(camera)
+                : null;
+
+            for (var rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
+            {
+                var meshletRenderData = rendererData[rendererIndex];
+                var meshletResources = rendererResources[rendererIndex];
+
+                if (!IsCandidateMeshletRenderer(meshletRenderData, meshletResources, settings.LayerMask, settings.RayTracingModeMask)
+                    || !PassesMeshletInstanceCulling(camera, in settings, meshletRenderData.worldBounds, cullingPlanes))
+                {
+                    continue;
+                }
+
+                var subMeshCount = Mathf.Max(0, meshletRenderData.subMeshCount);
+                for (var subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
+                {
+                    if (!IsCandidateMeshletSubMesh(meshletResources, subMeshIndex, requireVividRenderPipelineTag)
+                        || !TryResolveMeshletMaterial(meshletResources, subMeshIndex, out var material))
+                    {
+                        continue;
+                    }
+
+                    var config = CreateMeshletInstanceConfig(
+                        meshletRenderData,
+                        meshletResources,
+                        material,
+                        subMeshIndex);
+                    accelerationStructure.AddInstance(in config, meshletRenderData.objectToWorldMatrix, null, 0u);
+                }
+            }
+        }
+
+        private static bool IsCandidateMeshletRenderer(
+            in VividMeshletRendererRenderData meshletRenderData,
+            in VividMeshletRendererResources meshletResources,
+            LayerMask layerMask,
+            RayTracingAccelerationStructure.RayTracingModeMask rayTracingModeMask)
+        {
+            var meshletRenderer = meshletResources.MeshletRenderer;
+            if (meshletRenderer == null
+                || meshletResources.SourceMesh == null
+                || meshletRenderData.subMeshCount <= 0
+                || (meshletRenderData.flags & (VividMeshletRendererFlags.ActiveInHierarchy
+                    | VividMeshletRendererFlags.Enabled
+                    | VividMeshletRendererFlags.Valid))
+                != (VividMeshletRendererFlags.ActiveInHierarchy
+                    | VividMeshletRendererFlags.Enabled
+                    | VividMeshletRendererFlags.Valid))
+            {
+                return false;
+            }
+
+            var targetGameObject = meshletRenderer.gameObject;
+            if (targetGameObject == null
+                || !targetGameObject.scene.IsValid()
+                || !targetGameObject.scene.isLoaded
+                || !IsLayerIncluded(targetGameObject.layer, layerMask)
+                || !MatchesRayTracingModeMask(GetMeshletRayTracingMode(meshletRenderData.flags), rayTracingModeMask)
+                || HasActiveAttachedSourceRenderer(meshletResources))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool IsCandidateMeshletSubMesh(
+            in VividMeshletRendererResources meshletResources,
+            int subMeshIndex,
+            bool requireVividRenderPipelineTag)
+        {
+            return TryResolveMeshletMaterial(meshletResources, subMeshIndex, out var material)
+                && (!requireVividRenderPipelineTag || HasVividRenderPipelineMaterial(material));
+        }
+
+        private static bool HasActiveAttachedSourceRenderer(in VividMeshletRendererResources meshletResources)
+        {
+            var meshletRenderer = meshletResources.MeshletRenderer;
+            var sourceMesh = meshletResources.SourceMesh;
+            if (meshletRenderer == null || sourceMesh == null)
+                return false;
+
+            return IsActiveAttachedSourceRenderer(meshletRenderer.GetComponent<MeshRenderer>(), sourceMesh)
+                || IsActiveAttachedSourceRenderer(meshletRenderer.GetComponent<SkinnedMeshRenderer>(), sourceMesh);
+        }
+
+        private static bool IsActiveAttachedSourceRenderer(Renderer renderer, Mesh sourceMesh)
+        {
+            return renderer != null
+                && renderer.enabled
+                && renderer.gameObject != null
+                && renderer.gameObject.activeInHierarchy
+                && SupportsRayTracingRendererType(renderer)
+                && MeshletRenderer.TryExtractMesh(renderer, out var rendererMesh)
+                && rendererMesh == sourceMesh;
+        }
+
+        private static bool PassesMeshletInstanceCulling(
+            Camera camera,
+            in ResolvedRayTracingSettings settings,
+            in Bounds worldBounds,
+            Plane[] cullingPlanes)
+        {
+            if (camera == null)
+                return true;
+
+            return settings.CullingMode switch
+            {
+                VividRTASCullingMode.Sphere => IntersectsSphere(
+                    worldBounds,
+                    camera.transform.position,
+                    Mathf.Max(0f, settings.CullingDistance)),
+                VividRTASCullingMode.SolidAngle => MeetsSolidAngleThreshold(
+                    worldBounds,
+                    camera.transform.position,
+                    camera.transform.forward,
+                    Mathf.Max(0.01f, settings.MinSolidAngle)),
+                _ => cullingPlanes == null || GeometryUtility.TestPlanesAABB(cullingPlanes, worldBounds),
+            };
+        }
+
+        private static bool IntersectsSphere(Bounds bounds, Vector3 center, float radius)
+        {
+            var closestPoint = bounds.ClosestPoint(center);
+            return (closestPoint - center).sqrMagnitude <= radius * radius;
+        }
+
+        private static bool MeetsSolidAngleThreshold(
+            Bounds bounds,
+            Vector3 cameraPosition,
+            Vector3 cameraForward,
+            float minSolidAngleDegrees)
+        {
+            var toCenter = bounds.center - cameraPosition;
+            var radius = bounds.extents.magnitude;
+            if (Vector3.Dot(cameraForward, toCenter) <= -radius)
+                return false;
+
+            var angularSize = 2f * Mathf.Atan2(radius, Mathf.Max(0.0001f, toCenter.magnitude)) * Mathf.Rad2Deg;
+            return angularSize >= minSolidAngleDegrees;
+        }
+
+        private static RayTracingMeshInstanceConfig CreateMeshletInstanceConfig(
+            in VividMeshletRendererRenderData meshletRenderData,
+            in VividMeshletRendererResources meshletResources,
+            Material material,
+            int subMeshIndex)
+        {
+            var rayTracingMode = GetMeshletRayTracingMode(meshletRenderData.flags);
+            var config = new RayTracingMeshInstanceConfig
+            {
+                enableTriangleCulling = ShouldEnableTriangleCulling(material),
+                frontTriangleCounterClockwise = false,
+                layer = meshletResources.MeshletRenderer.gameObject.layer,
+                lightProbeProxyVolume = null,
+                lightProbeUsage = LightProbeUsage.Off,
+                mask = DefaultInstanceMask,
+                material = material,
+                materialProperties = null,
+                mesh = meshletResources.SourceMesh,
+                meshLod = -1,
+                motionVectorMode = meshletRenderData.motionVectorGenerationMode,
+                renderingLayerMask = meshletRenderData.renderingLayerMask,
+                subMeshFlags = GetSubMeshFlags(material),
+                subMeshIndex = (uint)subMeshIndex,
+            };
+            config.rayTracingMode = rayTracingMode;
+            config.dynamicGeometry = rayTracingMode == RayTracingMode.DynamicGeometry
+                || rayTracingMode == RayTracingMode.DynamicGeometryManualUpdate;
+            return config;
+        }
+
+        private static RayTracingSubMeshFlags GetSubMeshFlags(Material material)
+        {
+            if (IsTransparentMaterial(material))
+                return RayTracingSubMeshFlags.Enabled | RayTracingSubMeshFlags.UniqueAnyHitCalls;
+
+            if (IsAlphaTestedMaterial(material))
+                return RayTracingSubMeshFlags.Enabled;
+
+            return RayTracingSubMeshFlags.Enabled | RayTracingSubMeshFlags.ClosestHitOnly;
+        }
+
+        private static bool ShouldEnableTriangleCulling(Material material)
+        {
+            return !IsDoubleSidedMaterial(material) && GetCullMode(material) != CullMode.Off;
+        }
+
+        private static bool IsDoubleSidedMaterial(Material material)
+        {
+            return material != null
+                && (material.IsKeywordEnabled("_DOUBLESIDED_ON") || GetCullMode(material) == CullMode.Off);
+        }
+
+        private static bool IsAlphaTestedMaterial(Material material)
+        {
+            return material != null && material.IsKeywordEnabled("_ALPHATEST_ON");
+        }
+
+        private static bool IsTransparentMaterial(Material material)
+        {
+            return material != null && material.IsKeywordEnabled("_SURFACE_TYPE_TRANSPARENT");
+        }
+
+        private static CullMode GetCullMode(Material material)
+        {
+            if (material == null)
+                return CullMode.Back;
+
+            if (material.HasProperty("_Cull"))
+                return (CullMode)material.GetInt("_Cull");
+
+            if (material.HasProperty("_CullMode"))
+                return (CullMode)material.GetInt("_CullMode");
+
+            return CullMode.Back;
         }
     }
 }

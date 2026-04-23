@@ -55,6 +55,7 @@ namespace VividRP.Runtime.GPUDriven
             if (s_Initialized)
                 return;
 
+
             FrameContextSystem.SubsystemPreRender -= Update;
             FrameContextSystem.SubsystemPreRender += Update;
             FrameContextSystem.SubsystemPostRender -= RenderDebugOverlay;

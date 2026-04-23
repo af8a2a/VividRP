@@ -1,13 +1,28 @@
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using VividRP.Runtime;
+using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.GPUDriven.Meshlets;
 using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
 {
     public sealed class RTASBuildPassTests
     {
+        [SetUp]
+        public void SetUp()
+        {
+            VividMeshletRendererDatabase.instance.Clear();
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            VividMeshletRendererDatabase.instance.Clear();
+        }
+
         [Test]
         public void ResolveSettings_UsesDescriptorDefaults_WhenVolumeHasNoOverrides()
         {
@@ -190,6 +205,185 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CountMeshletCandidateInstances_CountsPerSubMesh_WhenFallbackFilterIsUsed()
+        {
+            Material firstMaterial = null;
+            Material secondMaterial = null;
+            Mesh mesh = null;
+            GameObject gameObject = null;
+            VividMeshletCollectionAsset firstCollection = null;
+            VividMeshletCollectionAsset secondCollection = null;
+
+            try
+            {
+                mesh = CreateTwoSubMeshMesh("RTAS_MeshletFallback_Mesh");
+                firstMaterial = CreateTestMaterial();
+                secondMaterial = CreateTestMaterial();
+                var meshletRenderer = CreateMeshletRenderer(
+                    "RTAS_MeshletFallback",
+                    mesh,
+                    new[] { firstMaterial, secondMaterial },
+                    out gameObject);
+
+                firstCollection = CreateMeshletCollection(0);
+                secondCollection = CreateMeshletCollection(1);
+                meshletRenderer.SetMeshletCollections(new[] { firstCollection, secondCollection });
+
+                RemoveAttachedSourceRenderer(gameObject);
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                Assert.That(
+                    RTASBuildPass.CountMeshletCandidateInstances(
+                        VividMeshletRendererDatabase.instance,
+                        ~0,
+                        RayTracingAccelerationStructure.RayTracingModeMask.Everything,
+                        true),
+                    Is.Zero);
+                Assert.That(
+                    RTASBuildPass.CountMeshletCandidateInstances(
+                        VividMeshletRendererDatabase.instance,
+                        ~0,
+                        RayTracingAccelerationStructure.RayTracingModeMask.Everything,
+                        false),
+                    Is.EqualTo(2));
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, mesh, firstMaterial, secondMaterial, firstCollection, secondCollection);
+            }
+        }
+
+        [Test]
+        public void CountMeshletCandidateInstances_UsesProxySourceMaterial_WhenSharedMaterialIsMissing()
+        {
+            Material sourceMaterial = null;
+            Mesh mesh = null;
+            GameObject gameObject = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+            GPUDrivenMaterialProxy materialProxy = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("RTAS_MeshletProxyMaterial_Mesh");
+                sourceMaterial = CreateTestMaterial();
+                var meshletRenderer = CreateMeshletRenderer(
+                    "RTAS_MeshletProxyMaterial",
+                    mesh,
+                    new[] { sourceMaterial },
+                    out gameObject);
+
+                meshletCollection = CreateMeshletCollection(0);
+                materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+                materialProxy.SourceMaterial = sourceMaterial;
+
+                meshletRenderer.SetSourceMaterials(new Material[] { null });
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                meshletRenderer.SetMaterialProxies(new[] { materialProxy });
+
+                RemoveAttachedSourceRenderer(gameObject);
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                Assert.That(VividMeshletRendererDatabase.instance.TryGetRendererResources(meshletRenderer, out var resources), Is.True);
+                Assert.That(RTASBuildPass.TryResolveMeshletMaterial(resources, 0, out var resolvedMaterial), Is.True);
+                Assert.That(resolvedMaterial, Is.SameAs(sourceMaterial));
+                Assert.That(
+                    RTASBuildPass.CountMeshletCandidateInstances(
+                        VividMeshletRendererDatabase.instance,
+                        ~0,
+                        RayTracingAccelerationStructure.RayTracingModeMask.Everything,
+                        false),
+                    Is.EqualTo(1));
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, mesh, sourceMaterial, meshletCollection, materialProxy);
+            }
+        }
+
+        [Test]
+        public void CountMeshletCandidateInstances_SkipsMeshletRenderer_WhenAttachedSourceRendererIsStillActive()
+        {
+            Material material = null;
+            Mesh mesh = null;
+            GameObject gameObject = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("RTAS_MeshletDuplicateGuard_Mesh");
+                material = CreateTestMaterial();
+                var meshletRenderer = CreateMeshletRenderer(
+                    "RTAS_MeshletDuplicateGuard",
+                    mesh,
+                    new[] { material },
+                    out gameObject);
+
+                meshletCollection = CreateMeshletCollection(0);
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                Assert.That(
+                    RTASBuildPass.CountMeshletCandidateInstances(
+                        VividMeshletRendererDatabase.instance,
+                        ~0,
+                        RayTracingAccelerationStructure.RayTracingModeMask.Everything,
+                        false),
+                    Is.Zero);
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, mesh, material, meshletCollection);
+            }
+        }
+
+        [Test]
+        public void CountMeshletCandidateInstances_RespectsDynamicTransformMode_ForMeshletRenderer()
+        {
+            Material material = null;
+            Mesh mesh = null;
+            GameObject gameObject = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("RTAS_MeshletDynamicMask_Mesh");
+                material = CreateTestMaterial();
+                var meshletRenderer = CreateMeshletRenderer(
+                    "RTAS_MeshletDynamicMask",
+                    mesh,
+                    new[] { material },
+                    out gameObject);
+
+                meshletCollection = CreateMeshletCollection(0);
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+
+                RemoveAttachedSourceRenderer(gameObject);
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                Assert.That(VividMeshletRendererDatabase.instance.TryGetRendererData(meshletRenderer, out var trackedData), Is.True);
+                Assert.That(RTASBuildPass.GetMeshletRayTracingMode(trackedData.flags), Is.EqualTo(RayTracingMode.DynamicTransform));
+                Assert.That(
+                    RTASBuildPass.CountMeshletCandidateInstances(
+                        VividMeshletRendererDatabase.instance,
+                        ~0,
+                        RayTracingAccelerationStructure.RayTracingModeMask.Static,
+                        false),
+                    Is.Zero);
+                Assert.That(
+                    RTASBuildPass.CountMeshletCandidateInstances(
+                        VividMeshletRendererDatabase.instance,
+                        ~0,
+                        RayTracingAccelerationStructure.RayTracingModeMask.DynamicTransform,
+                        false),
+                    Is.EqualTo(1));
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, mesh, material, meshletCollection);
+            }
+        }
+
+        [Test]
         public void Prepare_WritesResolvedSettingsIntoFrameContext()
         {
             var profile = ScriptableObject.CreateInstance<VolumeProfile>();
@@ -269,6 +463,113 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderVariables._RayTracingRayBias, Is.EqualTo(0.03f));
             Assert.That(shaderVariables._RayTracingDistantRayBias, Is.EqualTo(0.09f));
             Assert.That(shaderVariables._RayTracingMinSolidAngle, Is.EqualTo(3f));
+        }
+
+        private static MeshletRenderer CreateMeshletRenderer(
+            string name,
+            Mesh mesh,
+            Material[] materials,
+            out GameObject gameObject)
+        {
+            gameObject = new GameObject(name);
+            gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+
+            var meshRenderer = gameObject.AddComponent<MeshRenderer>();
+            meshRenderer.sharedMaterials = materials;
+
+            var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
+            meshletRenderer.CaptureSourceFromRenderer(meshRenderer);
+            return meshletRenderer;
+        }
+
+        private static VividMeshletCollectionAsset CreateMeshletCollection(int subMeshIndex)
+        {
+            var meshletCollection = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+            meshletCollection.SourceSubmeshIndex = subMeshIndex;
+            return meshletCollection;
+        }
+
+        private static void RemoveAttachedSourceRenderer(GameObject gameObject)
+        {
+            if (gameObject == null)
+                return;
+
+            var meshRenderer = gameObject.GetComponent<MeshRenderer>();
+            if (meshRenderer != null)
+                Object.DestroyImmediate(meshRenderer);
+
+            var meshFilter = gameObject.GetComponent<MeshFilter>();
+            if (meshFilter != null)
+                Object.DestroyImmediate(meshFilter);
+        }
+
+        private static Material CreateTestMaterial()
+        {
+            var shader = Shader.Find("Hidden/InternalErrorShader");
+            Assert.That(shader, Is.Not.Null);
+            return new Material(shader);
+        }
+
+        private static Mesh CreateSingleSubMeshMesh(string meshName)
+        {
+            var mesh = new Mesh
+            {
+                name = meshName,
+                vertices = new[]
+                {
+                    new Vector3(0f, 0f, 0f),
+                    new Vector3(1f, 0f, 0f),
+                    new Vector3(0f, 1f, 0f),
+                    new Vector3(1f, 1f, 0f),
+                },
+            };
+
+            mesh.SetTriangles(new[] { 0, 2, 1, 1, 2, 3 }, 0, true);
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private static Mesh CreateTwoSubMeshMesh(string meshName)
+        {
+            var mesh = new Mesh
+            {
+                name = meshName,
+                vertices = new[]
+                {
+                    new Vector3(0f, 0f, 0f),
+                    new Vector3(1f, 0f, 0f),
+                    new Vector3(0f, 1f, 0f),
+                    new Vector3(1f, 1f, 0f),
+                    new Vector3(2f, 0f, 0f),
+                    new Vector3(2f, 1f, 0f),
+                },
+                subMeshCount = 2,
+            };
+
+            mesh.SetTriangles(new[] { 0, 2, 1, 1, 2, 3 }, 0, true);
+            mesh.SetTriangles(new[] { 1, 3, 4, 4, 3, 5 }, 1, true);
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private static void DestroyTestObjects(GameObject gameObject, Mesh mesh, params Object[] objects)
+        {
+            if (gameObject != null)
+                Object.DestroyImmediate(gameObject);
+
+            if (mesh != null)
+                Object.DestroyImmediate(mesh);
+
+            if (objects == null)
+                return;
+
+            for (var index = 0; index < objects.Length; index++)
+            {
+                if (objects[index] != null)
+                    Object.DestroyImmediate(objects[index]);
+            }
         }
     }
 }

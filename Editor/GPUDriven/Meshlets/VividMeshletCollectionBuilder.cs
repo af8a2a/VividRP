@@ -187,18 +187,19 @@ namespace VividRP.Editor.GPUDriven.Meshlets
 
             meshletCollection.LeafMeshletCount = mainBuildResults.Meshlets.Length;
             meshletCollection.MeshLODLevelCount = meshLODLevels.Length;
-            meshletCollection.MeshLODLevelNodeCounts = new int[meshLODLevels.Length];
-            meshletCollection.MeshLODNodes = new VividMeshLODNode[totalMeshLODNodes];
-            meshletCollection.Meshlets = new VividMeshlet[totalMeshlets];
-            meshletCollection.VertexBuffer = new VividMeshletVertex[totalVertices];
-            meshletCollection.IndexBuffer = new byte[totalIndices];
+
+            var meshLODLevelNodeCounts = new int[meshLODLevels.Length];
+            var meshLODNodes = new VividMeshLODNode[totalMeshLODNodes];
+            var meshlets = new VividMeshlet[totalMeshlets];
+            var vertexBuffer = new VividMeshletVertex[totalVertices];
+            var indexBuffer = new byte[totalIndices];
 
             var jobHandles = new NativeList<JobHandle>(Allocator.Temp);
 
-            fixed (VividMeshLODNode* pMeshLODNodes = meshletCollection.MeshLODNodes)
-            fixed (VividMeshlet* pDestinationMeshlets = meshletCollection.Meshlets)
-            fixed (VividMeshletVertex* pDestinationVertices = meshletCollection.VertexBuffer)
-            fixed (byte* pIndexBuffer = meshletCollection.IndexBuffer)
+            fixed (VividMeshLODNode* pMeshLODNodes = meshLODNodes)
+            fixed (VividMeshlet* pDestinationMeshlets = meshlets)
+            fixed (VividMeshletVertex* pDestinationVertices = vertexBuffer)
+            fixed (byte* pIndexBuffer = indexBuffer)
             {
                 byte* pPositionData = (byte*) positionData.GetUnsafeReadOnlyPtr();
                 byte* pNormalData = normalData.IsCreated ? (byte*) normalData.GetUnsafeReadOnlyPtr() : null;
@@ -219,7 +220,7 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                         levelMeshLODNodeCount += group.Length;
                     }
 
-                    meshletCollection.MeshLODLevelNodeCounts[levelIndex] = levelMeshLODNodeCount;
+                    meshLODLevelNodeCounts[levelIndex] = levelMeshLODNodeCount;
 
                     foreach (NativeList<int> group in level.Groups)
                     {
@@ -328,6 +329,13 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             }
             jobHandles.Dispose();
 
+            meshletCollection.SetMeshData(
+                meshLODLevelNodeCounts,
+                meshLODNodes,
+                meshlets,
+                vertexBuffer,
+                indexBuffer
+            );
             meshletCollection.MarkChanged();
 
             if (ownsWorkingIndices)

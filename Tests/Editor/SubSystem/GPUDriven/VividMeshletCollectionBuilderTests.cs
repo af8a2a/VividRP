@@ -1,9 +1,11 @@
 using System.IO;
+using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using Object = UnityEngine.Object;
 using VividRP.Editor.GPUDriven.Meshlets;
+using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Meshlets;
 
 namespace VividRP.Editor.Tests
@@ -106,6 +108,100 @@ namespace VividRP.Editor.Tests
                 if (mesh != null)
                 {
                     Object.DestroyImmediate(mesh, true);
+                }
+            }
+        }
+
+        [Test]
+        public void AssetSerialization_RoundTripsMeshletDataThroughBinaryBlob_WhenSavedAndReloaded()
+        {
+            var asset = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+
+            try
+            {
+                asset.SourceMeshName = "SerializedMesh";
+                asset.SourceMeshLocalFileID = 42L;
+                asset.SourceSubmeshIndex = 1;
+                asset.Bounds = new Bounds(new Vector3(1.0f, 2.0f, 3.0f), new Vector3(4.0f, 5.0f, 6.0f));
+                asset.LeafMeshletCount = 1;
+                asset.MeshLODLevelCount = 1;
+                asset.MeshLODLevelNodeCounts = new[] { 1 };
+                asset.MeshLODNodes = new[]
+                {
+                    new VividMeshLODNode
+                    {
+                        MeshletStartIndex = 0,
+                        MeshletCount = 1,
+                        LevelIndex = 0,
+                    },
+                };
+                asset.Meshlets = new[]
+                {
+                    new VividMeshlet
+                    {
+                        VertexOffset = 0,
+                        TriangleOffset = 0,
+                        VertexCount = 3,
+                        TriangleCount = 1,
+                    },
+                };
+                asset.VertexBuffer = new[]
+                {
+                    new VividMeshletVertex
+                    {
+                        Position = new Unity.Mathematics.float4(0.0f, 0.0f, 0.0f, 1.0f),
+                        Normal = new Unity.Mathematics.float4(0.0f, 0.0f, 1.0f, 0.0f),
+                        Tangent = new Unity.Mathematics.float4(1.0f, 0.0f, 0.0f, 1.0f),
+                        UV = new Unity.Mathematics.float4(0.0f, 0.0f, 0.0f, 0.0f),
+                    },
+                    new VividMeshletVertex
+                    {
+                        Position = new Unity.Mathematics.float4(1.0f, 0.0f, 0.0f, 1.0f),
+                        Normal = new Unity.Mathematics.float4(0.0f, 0.0f, 1.0f, 0.0f),
+                        Tangent = new Unity.Mathematics.float4(1.0f, 0.0f, 0.0f, 1.0f),
+                        UV = new Unity.Mathematics.float4(1.0f, 0.0f, 0.0f, 0.0f),
+                    },
+                    new VividMeshletVertex
+                    {
+                        Position = new Unity.Mathematics.float4(0.0f, 1.0f, 0.0f, 1.0f),
+                        Normal = new Unity.Mathematics.float4(0.0f, 0.0f, 1.0f, 0.0f),
+                        Tangent = new Unity.Mathematics.float4(1.0f, 0.0f, 0.0f, 1.0f),
+                        UV = new Unity.Mathematics.float4(0.0f, 1.0f, 0.0f, 0.0f),
+                    },
+                };
+                asset.IndexBuffer = new byte[] { 0, 1, 2 };
+                asset.MarkChanged();
+
+                string assetPath = TempFolder + "/SerializedMeshlets.asset";
+                AssetDatabase.CreateAsset(asset, assetPath);
+                AssetDatabase.SaveAssets();
+                AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
+
+                VividMeshletCollectionAsset reloaded = AssetDatabase.LoadAssetAtPath<VividMeshletCollectionAsset>(assetPath);
+                Assert.That(reloaded, Is.Not.Null);
+                Assert.That(reloaded.SourceMeshName, Is.EqualTo(asset.SourceMeshName));
+                Assert.That(reloaded.SourceMeshLocalFileID, Is.EqualTo(asset.SourceMeshLocalFileID));
+                Assert.That(reloaded.SourceSubmeshIndex, Is.EqualTo(asset.SourceSubmeshIndex));
+                Assert.That(reloaded.LeafMeshletCount, Is.EqualTo(asset.LeafMeshletCount));
+                Assert.That(reloaded.MeshLODLevelCount, Is.EqualTo(asset.MeshLODLevelCount));
+                Assert.That(reloaded.Bounds.center, Is.EqualTo(asset.Bounds.center));
+                Assert.That(reloaded.Bounds.size, Is.EqualTo(asset.Bounds.size));
+                CollectionAssert.AreEqual(asset.MeshLODLevelNodeCounts, reloaded.MeshLODLevelNodeCounts);
+                CollectionAssert.AreEqual(asset.MeshLODNodes, reloaded.MeshLODNodes);
+                CollectionAssert.AreEqual(asset.Meshlets, reloaded.Meshlets);
+                CollectionAssert.AreEqual(asset.VertexBuffer, reloaded.VertexBuffer);
+                CollectionAssert.AreEqual(asset.IndexBuffer, reloaded.IndexBuffer);
+
+                FieldInfo blobField = typeof(VividMeshletCollectionAsset).GetField("m_MeshDataBlob", BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(blobField, Is.Not.Null);
+                var blob = blobField.GetValue(reloaded) as byte[];
+                Assert.That(blob, Is.Not.Null.And.Not.Empty);
+            }
+            finally
+            {
+                if (asset != null)
+                {
+                    Object.DestroyImmediate(asset, true);
                 }
             }
         }

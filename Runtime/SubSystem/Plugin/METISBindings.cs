@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace VividRP.Runtime.GPUDriven.METIS
 {
-    internal static unsafe class METISBindings
+    public static unsafe class METISBindings
     {
         public const int METIS_NOPTIONS = 40;
 

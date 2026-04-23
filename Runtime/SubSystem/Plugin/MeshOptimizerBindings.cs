@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 
 namespace VividRP.Runtime.GPUDriven.MeshOptimizer
 {
-    internal static unsafe class MeshOptimizerBindings
+    public static unsafe class MeshOptimizerBindings
     {
         private const string DllName = "meshoptimizer";
         private const CharSet DllCharSet = CharSet.Auto;

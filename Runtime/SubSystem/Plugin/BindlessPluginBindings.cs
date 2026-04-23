@@ -1,6 +1,8 @@
 using System;
 using System.Runtime.InteropServices;
+#if UNITY_EDITOR
 using UnityEditor;
+#endif
 using UnityEngine;
 
 namespace VividRP.Runtime.GPUDriven.Bindless
@@ -63,7 +65,6 @@ namespace VividRP.Runtime.GPUDriven.Bindless
 #if UNITY_EDITOR
         [InitializeOnLoadMethod]
 #else
-
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
 #endif
         private static void WarmupOnSubsystemRegistration()
@@ -71,7 +72,6 @@ namespace VividRP.Runtime.GPUDriven.Bindless
             EnsureLoaded();
         }
 
-        
 #if UNITY_EDITOR
         [InitializeOnLoadMethod]
 #else

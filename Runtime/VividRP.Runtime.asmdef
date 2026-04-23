@@ -2,6 +2,7 @@
     "name": "VividRP.Runtime",
     "rootNamespace": "VividRP.Runtime",
     "references": [
+        "VividRP.Runtime.Plugin",
         "Unity.RenderPipelines.Core.Runtime",
         "Unity.RenderPipelines.Core.Runtime.Shared",
         "Unity.Mathematics",

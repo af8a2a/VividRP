@@ -80,6 +80,9 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("CalculateFullBarycentric("));
             Assert.That(shaderSource, Does.Contain("PullIndex(result.meshlet"));
             Assert.That(shaderSource, Does.Contain("ScreenCoordsToNDC(input.positionCS)"));
+            Assert.That(shaderSource, Does.Contain("ResolveVisibilityDepth("));
+            Assert.That(shaderSource, Does.Contain("IsVisibilitySampleVisible("));
+            Assert.That(shaderSource, Does.Contain("IsSceneDepthValid("));
         }
 
         private static RenderGraphTexture GetTextureField(VisibilityBufferResolvePass pass, string fieldName)
@@ -100,6 +103,7 @@ namespace VividRP.Editor.Tests
                 "Runtime",
                 "RenderPass",
                 "Core",
+                "GPUDriven",
                 "VisibilityBufferResolvePass.cs"));
 
             Assert.That(File.Exists(passPath), Is.True, $"Expected pass source at '{passPath}'.");

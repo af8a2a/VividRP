@@ -25,6 +25,6 @@ namespace VividRP.Runtime
             RenderGraphTexture skyViewLut,
             RenderGraphTexture directionalShadowTexture);
 
-        void RenderSky(CommandBuffer cmd);
+        void RenderSky(RasterCommandBuffer cmd);
     }
 }

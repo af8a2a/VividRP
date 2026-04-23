@@ -80,6 +80,7 @@ namespace VividRP.Runtime
         private PhysicallyBasedSkyShaderParameters m_RenderParameters;
         private PhysicallyBasedSkyMaterialParameters m_RenderMaterialParameters;
         private bool m_HasRenderMaterialParameters;
+        private bool m_UseLocalSkyPrecomputationForRender;
         private readonly PhysicallyBasedSkyAtmosphereLutCache m_AtmosphereLutCache = new();
         private readonly PhysicallyBasedSkyCelestialBodyBuffer m_CelestialBodyBuffer = new();
 
@@ -137,6 +138,7 @@ namespace VividRP.Runtime
         {
             m_AtmosphereLutCache.Update(context, cmd);
             ApplyAtmosphereLutHandle(skyData);
+            UpdateLocalSkyPrecomputation(context, skyData, cmd);
         }
 
         public void Update(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd, int skyHash, bool forceRebuild)
@@ -240,6 +242,7 @@ namespace VividRP.Runtime
             m_RenderViewport = ResolveRenderViewport(context.cameraData, colorTarget);
             ImportSkyViewLutForPass(skyViewLut);
             m_HasRenderMaterialParameters = false;
+            m_UseLocalSkyPrecomputationForRender = false;
             m_ShouldRenderSky = m_SkyMaterial != null
                                 && skyData != null
                                 && skyData.activeSkyType == SkyType.PhysicallyBased
@@ -259,13 +262,16 @@ namespace VividRP.Runtime
                 m_RenderVolume,
                 context,
                 out m_RenderMaterialParameters);
+            m_UseLocalSkyPrecomputationForRender = m_HasRenderMaterialParameters
+                                                   && HasMatchingLocalSkyPrecomputation(
+                                                       m_RenderParameters,
+                                                       m_RenderMaterialParameters);
             m_CelestialBodyBuffer.Update(context);
         }
 
-        public void RenderSky(CommandBuffer cmd)
+        public void RenderSky(RasterCommandBuffer cmd)
         {
             if (!m_ShouldRenderSky
-                || cmd == null
                 || m_SkyMaterial == null
                 || m_ColorTarget == null
                 || m_DepthTexture == null
@@ -275,7 +281,6 @@ namespace VividRP.Runtime
                 return;
             }
 
-            cmd.SetRenderTarget(m_ColorTarget, m_DepthTexture);
             cmd.SetViewport(m_RenderViewport);
 
             m_SkyMaterial.SetBuffer(CelestialBodyDatasId, m_CelestialBodyBuffer.Buffer);
@@ -290,16 +295,8 @@ namespace VividRP.Runtime
             if (m_HasRenderMaterialParameters)
                 PhysicallyBasedSkyMaterialPropertyBinder.Apply(properties, m_RenderMaterialParameters, m_RenderVolume);
 
-            var useLocalSkyPrecomputation = m_HasRenderMaterialParameters
-                                            && UsesWorldSpacePrecomputation(m_RenderMaterialParameters)
-                                            && TryPrepareLocalSkyPrecomputation(
-                                                m_RenderVolume,
-                                                m_RenderContext,
-                                                cmd,
-                                                m_RenderParameters,
-                                                m_RenderMaterialParameters);
-            CoreUtils.SetKeyword(m_SkyMaterial, "LOCAL_SKY", useLocalSkyPrecomputation);
-            if (useLocalSkyPrecomputation)
+            CoreUtils.SetKeyword(m_SkyMaterial, "LOCAL_SKY", m_UseLocalSkyPrecomputationForRender);
+            if (m_UseLocalSkyPrecomputationForRender)
                 ApplyLocalSkyPrecomputationTextures(properties);
 
             CoreUtils.DrawFullScreen(cmd, m_SkyMaterial, properties, 0);
@@ -352,8 +349,45 @@ namespace VividRP.Runtime
             m_RenderParameters = default;
             m_RenderMaterialParameters = default;
             m_HasRenderMaterialParameters = false;
+            m_UseLocalSkyPrecomputationForRender = false;
             m_AtmosphereLutCache.Dispose();
             m_CelestialBodyBuffer.Dispose();
+        }
+
+        private void UpdateLocalSkyPrecomputation(
+            in SkyRendererContext context,
+            VividSkyData skyData,
+            CommandBuffer cmd)
+        {
+            var volume = VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume();
+            if (volume == null
+                || !volume.IsActive()
+                || skyData == null
+                || skyData.activeSkyType != SkyType.PhysicallyBased
+                || !PhysicallyBasedSkyShaderParameterBuilder.TryBuild(
+                    context.cameraData,
+                    skyData,
+                    context.lightData,
+                    out var skyParameters)
+                || !PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(
+                    volume,
+                    context,
+                    out var materialParameters)
+                || !UsesWorldSpacePrecomputation(materialParameters))
+            {
+                return;
+            }
+
+            TryPrepareLocalSkyPrecomputation(volume, context, cmd, skyParameters, materialParameters);
+        }
+
+        private bool HasMatchingLocalSkyPrecomputation(
+            in PhysicallyBasedSkyShaderParameters skyParameters,
+            in PhysicallyBasedSkyMaterialParameters materialParameters)
+        {
+            return m_HasLocalSkyPrecomputation
+                   && m_LocalSkyPrecomputationHash == ComputeLocalSkyPrecomputationHash(skyParameters, materialParameters)
+                   && HasLocalSkyPrecomputationTextures();
         }
 
         internal static Vector3 ResolveSunDirection(in SkyRendererContext context)

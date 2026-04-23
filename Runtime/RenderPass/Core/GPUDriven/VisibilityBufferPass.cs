@@ -25,7 +25,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(
             Name = "VisibilityBuffer",
-            Access = AccessFlags.Write,
+            Access = AccessFlags.ReadWrite,
             AttachmentIndex = 0,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_VisibilityBuffer;
@@ -33,8 +33,7 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(
             Name = "Depth",
             Access = AccessFlags.ReadWrite,
-            IsDepthAttachment = true,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            IsDepthAttachment = true)]
         private RenderGraphTexture m_Depth;
 
         private readonly RenderGraphTexture m_DefaultVisibilityBuffer;

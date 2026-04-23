@@ -178,6 +178,7 @@ namespace VividRP.Editor.Tests
                 "Runtime",
                 "RenderPass",
                 "Core",
+                "GPUDriven",
                 "VisibilityBufferPass.cs"));
 
             Assert.That(File.Exists(passPath), Is.True, $"Expected pass source at '{passPath}'.");

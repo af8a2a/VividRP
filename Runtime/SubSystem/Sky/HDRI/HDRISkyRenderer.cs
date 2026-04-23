@@ -150,10 +150,9 @@ namespace VividRP.Runtime
             m_RenderRotation = skyData.rotation;
         }
 
-        public void RenderSky(CommandBuffer cmd)
+        public void RenderSky(RasterCommandBuffer cmd)
         {
             if (!m_ShouldRenderSky
-                || cmd == null
                 || m_ColorTarget == null
                 || m_DepthTexture == null
                 || !m_ColorTarget.innerHandle.IsValid()
@@ -162,7 +161,6 @@ namespace VividRP.Runtime
                 return;
             }
 
-            cmd.SetRenderTarget(m_ColorTarget, m_DepthTexture);
             cmd.SetViewport(m_RenderViewport);
 
             var properties = new MaterialPropertyBlock();

@@ -59,6 +59,36 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferResolve"
                 return uv * scaleBias.xy + scaleBias.zw;
             }
 
+            bool IsSceneDepthValid(float sceneDepth)
+            {
+                #if UNITY_REVERSED_Z
+                return sceneDepth > 1e-6f;
+                #else
+                return sceneDepth < 0.999999f;
+                #endif
+            }
+
+            float ResolveVisibilityDepth(
+                const float4 clipPosition0,
+                const float4 clipPosition1,
+                const float4 clipPosition2,
+                const VividBarycentricDerivatives barycentric)
+            {
+                float4 clipPosition = InterpolateWithBarycentricNoDerivatives(
+                    barycentric,
+                    clipPosition0,
+                    clipPosition1,
+                    clipPosition2);
+
+                return saturate(clipPosition.z / max(abs(clipPosition.w), 1e-6f));
+            }
+
+            bool IsVisibilitySampleVisible(float visibilityDepth, float sceneDepth)
+            {
+                float depthTolerance = max(1e-4f, fwidth(visibilityDepth) * 2.0f);
+                return abs(visibilityDepth - sceneDepth) <= depthTolerance;
+            }
+
             Varyings Vert(Attributes input)
             {
                 Varyings output;
@@ -88,8 +118,12 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferResolve"
                 return saturate(0.25 + value * 0.75);
             }
 
-            bool TryLoadVisibilityValue(Varyings input, out VividVisibilityBufferValue visibilityBufferValue)
+            bool TryLoadVisibilityValue(
+                Varyings input,
+                out VividVisibilityBufferValue visibilityBufferValue,
+                out float sceneDepth)
             {
+                sceneDepth = 1.0f;
                 float2 visibilityUv = ApplyScaleBias(input.uv, _VisibilityBufferScaleBias);
                 uint2 packedValue = asuint(SAMPLE_TEXTURE2D_LOD(_VisibilityBuffer, sampler_PointClamp, visibilityUv, 0).xy);
                 if (!IsPackedVisibilityBufferValueValid(packedValue))
@@ -99,8 +133,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferResolve"
                 }
 
                 float2 depthUv = ApplyScaleBias(input.uv, _DepthTextureScaleBias);
-                float depth = SAMPLE_TEXTURE2D_LOD(_DepthTexture, sampler_PointClamp, depthUv, 0).r;
-                if (depth >= 0.999999f)
+                sceneDepth = SAMPLE_TEXTURE2D_LOD(_DepthTexture, sampler_PointClamp, depthUv, 0).r;
+                if (!IsSceneDepthValid(sceneDepth))
                 {
                     visibilityBufferValue = (VividVisibilityBufferValue) 0;
                     return false;
@@ -150,8 +184,28 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferResolve"
 
             float4 Frag(Varyings input) : SV_Target
             {
+                float sceneDepth;
                 VividVisibilityBufferValue visibilityBufferValue;
-                if (!TryLoadVisibilityValue(input, visibilityBufferValue))
+                if (!TryLoadVisibilityValue(input, visibilityBufferValue, sceneDepth))
+                    return 0.0f;
+
+                TriangleData triangleData = LoadTriangleData(visibilityBufferValue);
+
+                float2 pixelNdc = ScreenCoordsToNDC(input.positionCS);
+                VividBarycentricDerivatives barycentric = CalculateFullBarycentric(
+                    triangleData.clipPosition0,
+                    triangleData.clipPosition1,
+                    triangleData.clipPosition2,
+                    pixelNdc,
+                    _ScreenSize.zw
+                );
+
+                float visibilityDepth = ResolveVisibilityDepth(
+                    triangleData.clipPosition0,
+                    triangleData.clipPosition1,
+                    triangleData.clipPosition2,
+                    barycentric);
+                if (!IsVisibilitySampleVisible(visibilityDepth, sceneDepth))
                     return 0.0f;
 
                 float exposureMultiplier = exp2(_ResolveExposure);
@@ -165,17 +219,6 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferResolve"
                 uint triangleID = visibilityBufferValue.IndexID / 3u;
                 if (_ResolveDebugMode == VIVID_VISIBILITY_RESOLVE_DEBUG_TRIANGLE_ID)
                     return float4(HashColor(triangleID) * exposureMultiplier, 1.0f);
-
-                TriangleData triangleData = LoadTriangleData(visibilityBufferValue);
-
-                float2 pixelNdc = ScreenCoordsToNDC(input.positionCS);
-                VividBarycentricDerivatives barycentric = CalculateFullBarycentric(
-                    triangleData.clipPosition0,
-                    triangleData.clipPosition1,
-                    triangleData.clipPosition2,
-                    pixelNdc,
-                    _ScreenSize.zw
-                );
 
                 if (_ResolveDebugMode == VIVID_VISIBILITY_RESOLVE_DEBUG_BARYCENTRIC)
                     return float4(saturate(barycentric.lambda) * exposureMultiplier, 1.0f);

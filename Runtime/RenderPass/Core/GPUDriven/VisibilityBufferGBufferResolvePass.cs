@@ -23,36 +23,31 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(
             Name = "GBuffer0",
             Access = AccessFlags.ReadWrite,
-            AttachmentIndex = 0,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            AttachmentIndex = 0)]
         private RenderGraphTexture m_GBuffer0;
 
         [RenderGraphResource(
             Name = "GBuffer1",
             Access = AccessFlags.ReadWrite,
-            AttachmentIndex = 1,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            AttachmentIndex = 1)]
         private RenderGraphTexture m_GBuffer1;
 
         [RenderGraphResource(
             Name = "GBuffer2",
             Access = AccessFlags.ReadWrite,
-            AttachmentIndex = 2,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            AttachmentIndex = 2)]
         private RenderGraphTexture m_GBuffer2;
 
         [RenderGraphResource(
             Name = "GBuffer3",
             Access = AccessFlags.ReadWrite,
-            AttachmentIndex = 3,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            AttachmentIndex = 3)]
         private RenderGraphTexture m_GBuffer3;
 
         [RenderGraphResource(
             Name = "GBuffer4",
             Access = AccessFlags.ReadWrite,
-            AttachmentIndex = 4,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            AttachmentIndex = 4)]
         private RenderGraphTexture m_GBuffer4;
 
         private readonly RenderGraphTexture m_DefaultGBuffer0;

@@ -131,6 +131,10 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("SampleVividProbeVolume("));
             Assert.That(shaderSource, Does.Contain("surfaceData.hasBakedGI = VividHasProbeVolumeGI() ? 1.0f : 0.0f;"));
             Assert.That(shaderSource, Does.Contain("discard;"));
+            Assert.That(shaderSource, Does.Contain("ResolveVisibilityDepth("));
+            Assert.That(shaderSource, Does.Contain("IsVisibilitySampleVisible("));
+            Assert.That(shaderSource, Does.Contain("IsSceneDepthValid("));
+            Assert.That(shaderSource, Does.Contain("abs(visibilityDepth - sceneDepth)"));
         }
 
         private static RenderGraphTexture GetTextureField(VisibilityBufferGBufferResolvePass pass, string fieldName)
@@ -159,6 +163,7 @@ namespace VividRP.Editor.Tests
                 "Runtime",
                 "RenderPass",
                 "Core",
+                "GPUDriven",
                 "VisibilityBufferGBufferResolvePass.cs"));
 
             Assert.That(File.Exists(passPath), Is.True, $"Expected pass source at '{passPath}'.");

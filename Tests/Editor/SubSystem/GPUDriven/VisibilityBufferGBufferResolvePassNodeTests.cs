@@ -45,6 +45,18 @@ namespace VividRP.Editor.Tests
         }
 
         [Serializable]
+        private sealed class AutoRegisteredPreDepthPassNode : RenderPassNodeData
+        {
+            internal override Type GetRegisteredPassType() => typeof(PreDepthPass);
+        }
+
+        [Serializable]
+        private sealed class AutoRegisteredVisibilityBufferPassNode : RenderPassNodeData
+        {
+            internal override Type GetRegisteredPassType() => typeof(VisibilityBufferPass);
+        }
+
+        [Serializable]
         private sealed class AutoRegisteredDeferredLightingPassNode : RenderPassNodeData
         {
             internal override Type GetRegisteredPassType() => typeof(DeferredLightingPass);
@@ -166,6 +178,87 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(result.ExecutionOrder.Select(pass => pass.PassTypeName), Is.EqualTo(new[]
                 {
+                    nameof(GBufferPass),
+                    nameof(VisibilityBufferGBufferResolvePass),
+                    nameof(DeferredLightingPass),
+                }));
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void Compile_OrdersVisibilityPreDepthGBufferAndResolve_AsHybridDeferredChain()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var deferredNode = new AutoRegisteredDeferredLightingPassNode();
+                var resolveNode = new AutoRegisteredVisibilityBufferGBufferResolvePassOverrideNode();
+                var gbufferNode = new AutoRegisteredGBufferPassNode();
+                var preDepthNode = new AutoRegisteredPreDepthPassNode();
+                var visibilityNode = new AutoRegisteredVisibilityBufferPassNode();
+
+                RenderGraphTestUtility.AddTestNode(graph, deferredNode);
+                RenderGraphTestUtility.AddTestNode(graph, resolveNode);
+                RenderGraphTestUtility.AddTestNode(graph, gbufferNode);
+                RenderGraphTestUtility.AddTestNode(graph, preDepthNode);
+                RenderGraphTestUtility.AddTestNode(graph, visibilityNode);
+
+                graph.Connect(
+                    visibilityNode.GetOutputPortByName("m_Depth_Out"),
+                    preDepthNode.GetInputPortByName("m_DepthAttachment_In"));
+                graph.Connect(
+                    preDepthNode.GetOutputPortByName("m_DepthAttachment_Out"),
+                    gbufferNode.GetInputPortByName("m_GBufferDepth_In"));
+                graph.Connect(
+                    visibilityNode.GetOutputPortByName("m_VisibilityBuffer"),
+                    resolveNode.GetInputPortByName("m_VisibilityBuffer"));
+                graph.Connect(
+                    gbufferNode.GetOutputPortByName("m_GBufferDepth_Out"),
+                    resolveNode.GetInputPortByName("m_DepthTexture"));
+
+                graph.Connect(
+                    gbufferNode.GetOutputPortByName("m_GBuffer0"),
+                    resolveNode.GetInputPortByName("m_GBuffer0_In"));
+                graph.Connect(
+                    gbufferNode.GetOutputPortByName("m_GBuffer1"),
+                    resolveNode.GetInputPortByName("m_GBuffer1_In"));
+                graph.Connect(
+                    gbufferNode.GetOutputPortByName("m_GBuffer2"),
+                    resolveNode.GetInputPortByName("m_GBuffer2_In"));
+                graph.Connect(
+                    gbufferNode.GetOutputPortByName("m_GBuffer3"),
+                    resolveNode.GetInputPortByName("m_GBuffer3_In"));
+                graph.Connect(
+                    gbufferNode.GetOutputPortByName("m_GBuffer4"),
+                    resolveNode.GetInputPortByName("m_GBuffer4_In"));
+
+                graph.Connect(
+                    resolveNode.GetOutputPortByName("m_GBuffer0_Out"),
+                    deferredNode.GetInputPortByName("m_GBuffer0"));
+                graph.Connect(
+                    resolveNode.GetOutputPortByName("m_GBuffer1_Out"),
+                    deferredNode.GetInputPortByName("m_GBuffer1"));
+                graph.Connect(
+                    resolveNode.GetOutputPortByName("m_GBuffer2_Out"),
+                    deferredNode.GetInputPortByName("m_GBuffer2"));
+                graph.Connect(
+                    resolveNode.GetOutputPortByName("m_GBuffer3_Out"),
+                    deferredNode.GetInputPortByName("m_GBuffer3"));
+                graph.Connect(
+                    resolveNode.GetOutputPortByName("m_GBuffer4_Out"),
+                    deferredNode.GetInputPortByName("m_GBuffer4"));
+
+                var result = RenderGraphCompiler.Compile(graph);
+
+                Assert.That(result.ExecutionOrder.Select(pass => pass.PassTypeName), Is.EqualTo(new[]
+                {
+                    nameof(VisibilityBufferPass),
+                    nameof(PreDepthPass),
                     nameof(GBufferPass),
                     nameof(VisibilityBufferGBufferResolvePass),
                     nameof(DeferredLightingPass),

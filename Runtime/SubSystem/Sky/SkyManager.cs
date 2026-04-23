@@ -179,9 +179,9 @@ namespace VividRP.Runtime
             return true;
         }
 
-        internal static void RenderSkyInjection(CommandBuffer cmd)
+        internal static void RenderSkyInjection(RasterCommandBuffer cmd)
         {
-            if (cmd == null || s_PendingSkyRenderer == null)
+            if (s_PendingSkyRenderer == null)
                 return;
 
             s_PendingSkyRenderer.RenderSky(cmd);

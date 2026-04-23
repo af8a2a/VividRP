@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
@@ -138,6 +139,7 @@ namespace VividRP.Runtime
             return m_RenderGraphContext.GetTextureUVOrigin(textureHandle);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public CommandBuffer GetNativeCommandBuffer()
         {
             return CommandBufferHelpers.GetNativeCommandBuffer(m_RenderGraphContext.cmd);

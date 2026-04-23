@@ -5,7 +5,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public class SkyInjectionPass : UnsafePass
+    public class SkyInjectionPass : RasterPass
     {
         [RenderGraphResource(Name = "Color", Access = AccessFlags.ReadWrite, AttachmentIndex = 0)]
         private RenderGraphTexture m_ColorTarget;
@@ -53,12 +53,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_DirectionalShadowTexture);
         }
 
-        public override void Record(UnsafePassContext context)
+        public override void Record(RasterPassContext context)
         {
             if (!m_ShouldInject)
                 return;
 
-            var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
+            var cmd = context.cmd;
             using (new ProfilingScope(cmd, profilingSampler))
             {
                 SkyManager.RenderSkyInjection(cmd);

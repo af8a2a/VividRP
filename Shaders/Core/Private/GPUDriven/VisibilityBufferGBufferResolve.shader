@@ -78,6 +78,15 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 return uv * scaleBias.xy + scaleBias.zw;
             }
 
+            bool IsSceneDepthValid(float sceneDepth)
+            {
+                #if UNITY_REVERSED_Z
+                return sceneDepth > 1e-6f;
+                #else
+                return sceneDepth < 0.999999f;
+                #endif
+            }
+
             Varyings Vert(Attributes input)
             {
                 Varyings output;
@@ -205,8 +214,12 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 return dot(autoNormalWS, viewForwardDirWS) < 0.0f ? -1.0f : 1.0f;
             }
 
-            bool TryLoadVisibilityValue(Varyings input, out VividVisibilityBufferValue visibilityBufferValue)
+            bool TryLoadVisibilityValue(
+                Varyings input,
+                out VividVisibilityBufferValue visibilityBufferValue,
+                out float sceneDepth)
             {
+                sceneDepth = 1.0f;
                 float2 visibilityUv = ApplyScaleBias(input.uv, _VisibilityBufferScaleBias);
                 uint2 packedValue = asuint(SAMPLE_TEXTURE2D_LOD(_VisibilityBuffer, sampler_PointClamp, visibilityUv, 0).xy);
                 if (!IsPackedVisibilityBufferValueValid(packedValue))
@@ -216,8 +229,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 }
 
                 float2 depthUv = ApplyScaleBias(input.uv, _DepthTextureScaleBias);
-                float depth = SAMPLE_TEXTURE2D_LOD(_DepthTexture, sampler_PointClamp, depthUv, 0).r;
-                if (depth >= 0.999999f)
+                sceneDepth = SAMPLE_TEXTURE2D_LOD(_DepthTexture, sampler_PointClamp, depthUv, 0).r;
+                if (!IsSceneDepthValid(sceneDepth))
                 {
                     visibilityBufferValue = (VividVisibilityBufferValue) 0;
                     return false;
@@ -252,6 +265,25 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 result.clipPosition1 = TransformWorldToHClip(result.positionWS1);
                 result.clipPosition2 = TransformWorldToHClip(result.positionWS2);
                 return result;
+            }
+
+            float ResolveVisibilityDepth(
+                const TriangleData triangleData,
+                const VividBarycentricDerivatives barycentric)
+            {
+                float4 clipPosition = InterpolateWithBarycentricNoDerivatives(
+                    barycentric,
+                    triangleData.clipPosition0,
+                    triangleData.clipPosition1,
+                    triangleData.clipPosition2);
+
+                return saturate(clipPosition.z / max(abs(clipPosition.w), 1e-6f));
+            }
+
+            bool IsVisibilitySampleVisible(float visibilityDepth, float sceneDepth)
+            {
+                float depthTolerance = max(1e-4f, fwidth(visibilityDepth) * 2.0f);
+                return abs(visibilityDepth - sceneDepth) <= depthTolerance;
             }
 
             VividGBufferSurfaceData ResolveSurfaceData(
@@ -337,8 +369,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
 
             VividGBufferFragmentOutput Frag(Varyings input)
             {
+                float sceneDepth;
                 VividVisibilityBufferValue visibilityBufferValue;
-                if (!TryLoadVisibilityValue(input, visibilityBufferValue))
+                if (!TryLoadVisibilityValue(input, visibilityBufferValue, sceneDepth))
                 {
                     discard;
                     return (VividGBufferFragmentOutput) 0;
@@ -354,6 +387,13 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     pixelNdc,
                     _ScreenSize.zw
                 );
+
+                float visibilityDepth = ResolveVisibilityDepth(triangleData, barycentric);
+                if (!IsVisibilitySampleVisible(visibilityDepth, sceneDepth))
+                {
+                    discard;
+                    return (VividGBufferFragmentOutput) 0;
+                }
 
                 VividGBufferSurfaceData surfaceData = ResolveSurfaceData(triangleData, barycentric);
                 return PackVividGBufferSurfaceData(surfaceData);

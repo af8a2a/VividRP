@@ -58,7 +58,7 @@ Shader "VividRP/Material/StandardLit"
             ZWrite [_ZWrite]
             ZTest LEqual
             Cull [_Cull]
-            ColorMask 0
+//            ColorMask 0
 
             HLSLPROGRAM
                 #pragma target 4.5

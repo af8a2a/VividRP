@@ -55,25 +55,22 @@ namespace VividRP.Runtime.GPUDriven
             if (s_Initialized)
                 return;
 
-
-            FrameContextSystem.SubsystemPreRender -= Update;
-            FrameContextSystem.SubsystemPreRender += Update;
-            FrameContextSystem.SubsystemPostRender -= RenderDebugOverlay;
-            FrameContextSystem.SubsystemPostRender += RenderDebugOverlay;
-            FrameContextSystem.SubsystemDispose -= Deinitialize;
-            FrameContextSystem.SubsystemDispose += Deinitialize;
+            RegisterFrameContextCallbacks();
             s_Initialized = true;
         }
 
         internal static void Deinitialize()
         {
+#if UNITY_EDITOR
+            RegisterFrameContextCallbacks();
+            s_Initialized = true;
+#else
             if (s_Initialized)
             {
-                FrameContextSystem.SubsystemPreRender -= Update;
-                FrameContextSystem.SubsystemPostRender -= RenderDebugOverlay;
-                FrameContextSystem.SubsystemDispose -= Deinitialize;
+                UnregisterFrameContextCallbacks();
                 s_Initialized = false;
             }
+#endif
 
             DisposeDebugOverlayRenderer();
             Shutdown();
@@ -109,6 +106,23 @@ namespace VividRP.Runtime.GPUDriven
         public GraphicsBuffer VisibleMeshletRenderRequestsBuffer => m_CullingDispatcher.BufferSet.VisibleMeshletRenderRequestsBuffer;
 
         public GraphicsBuffer VisibleMeshletIndirectDrawArgsBuffer => m_CullingDispatcher.BufferSet.VisibleMeshletIndirectDrawArgsBuffer;
+
+        private static void RegisterFrameContextCallbacks()
+        {
+            FrameContextSystem.SubsystemPreRender -= Update;
+            FrameContextSystem.SubsystemPreRender += Update;
+            FrameContextSystem.SubsystemPostRender -= RenderDebugOverlay;
+            FrameContextSystem.SubsystemPostRender += RenderDebugOverlay;
+            FrameContextSystem.SubsystemDispose -= Deinitialize;
+            FrameContextSystem.SubsystemDispose += Deinitialize;
+        }
+
+        private static void UnregisterFrameContextCallbacks()
+        {
+            FrameContextSystem.SubsystemPreRender -= Update;
+            FrameContextSystem.SubsystemPostRender -= RenderDebugOverlay;
+            FrameContextSystem.SubsystemDispose -= Deinitialize;
+        }
 
         public static bool TryGetCurrentVisibleMeshletBuffers(
             out GraphicsBuffer visibleMeshletRenderRequestsBuffer,
@@ -281,11 +295,20 @@ namespace VividRP.Runtime.GPUDriven
         private static void PrepareFrameIfNeeded(int frameIndex)
         {
             int resolvedFrameIndex = frameIndex >= 0 ? frameIndex : Time.frameCount;
-            if (s_PreparedFrameIndex == resolvedFrameIndex)
+            if (!ShouldPrepareFrame(s_PreparedFrameIndex, resolvedFrameIndex, Application.isPlaying))
                 return;
 
             instance.PrepareFrame();
             s_PreparedFrameIndex = resolvedFrameIndex;
+        }
+
+        internal static bool ShouldPrepareFrame(int preparedFrameIndex, int frameIndex, bool isPlaying)
+        {
+#if UNITY_EDITOR
+            if (!isPlaying)
+                return true;
+#endif
+            return preparedFrameIndex != frameIndex;
         }
 
         private static void ApplyResolvedSettings(VividGPUDrivenSystem gpuDrivenSystem)

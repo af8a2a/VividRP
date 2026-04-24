@@ -32,6 +32,7 @@ namespace VividRP.Runtime
             Hammersley.Initialize();
             RTHandles.Initialize(Screen.width, Screen.height);
             VividAdaptiveProbeVolumeUtility.Initialize(asset);
+            VividGPUDrivenSystem.Initialize();
 
             m_RenderGraph = new RenderGraph(RenderGraphName);
             m_DebugDisplaySettingsUI = new DebugDisplaySettingsUI();

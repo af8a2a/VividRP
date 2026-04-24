@@ -1,3 +1,6 @@
+using System;
+using System.Linq;
+using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -120,6 +123,43 @@ namespace VividRP.Editor.Tests
             Assert.That(second, Is.Not.Null);
             Assert.That(second, Is.Not.SameAs(first));
             Assert.That(VividGPUDrivenSystem.HasInstance, Is.True);
+        }
+
+        [Test]
+        public void ShouldPrepareFrame_ReturnsTrue_ForRepeatedEditorFrameIndex()
+        {
+            Assert.That(VividGPUDrivenSystem.ShouldPrepareFrame(12, 12, isPlaying: false), Is.True);
+        }
+
+        [Test]
+        public void ShouldPrepareFrame_ReturnsFalse_ForRepeatedPlayModeFrameIndex()
+        {
+            Assert.That(VividGPUDrivenSystem.ShouldPrepareFrame(12, 12, isPlaying: true), Is.False);
+        }
+
+        [Test]
+        public void FrameContextClear_KeepsGPUDrivenPreRenderCallbackRegistered_InEditor()
+        {
+            VividGPUDrivenSystem.Initialize();
+
+            FrameContextSystem.Clear();
+
+            Assert.That(HasFrameContextSubscriber("SubsystemPreRender", typeof(VividGPUDrivenSystem), "Update"), Is.True);
+        }
+
+        private static bool HasFrameContextSubscriber(string eventName, Type declaringType, string methodName)
+        {
+            FieldInfo eventField = typeof(FrameContextSystem).GetField(
+                eventName,
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            Assert.That(eventField, Is.Not.Null);
+
+            var multicastDelegate = eventField.GetValue(null) as MulticastDelegate;
+            return multicastDelegate != null
+                && multicastDelegate.GetInvocationList().Any(
+                    callback => callback.Method.DeclaringType == declaringType
+                        && callback.Method.Name == methodName);
         }
     }
 }

@@ -384,6 +384,100 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CollectMeshletRendererInstanceBatches_GroupsCompatibleMeshletInstances_ForAddInstances()
+        {
+            Material material = null;
+            Mesh mesh = null;
+            GameObject firstObject = null;
+            GameObject secondObject = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("RTAS_MeshletBatch_Mesh");
+                material = CreateTestMaterial();
+                material.enableInstancing = true;
+
+                var firstRenderer = CreateMeshletRenderer(
+                    "RTAS_MeshletBatch_First",
+                    mesh,
+                    new[] { material },
+                    out firstObject);
+                var secondRenderer = CreateMeshletRenderer(
+                    "RTAS_MeshletBatch_Second",
+                    mesh,
+                    new[] { material },
+                    out secondObject);
+
+                firstObject.transform.position = new Vector3(1f, 2f, 3f);
+                secondObject.transform.position = new Vector3(4f, 5f, 6f);
+
+                meshletCollection = CreateMeshletCollection(0);
+                firstRenderer.SetMeshletCollections(new[] { meshletCollection });
+                secondRenderer.SetMeshletCollections(new[] { meshletCollection });
+
+                RemoveAttachedSourceRenderer(firstObject);
+                RemoveAttachedSourceRenderer(secondObject);
+                VividMeshletRendererDatabase.instance.UpdateRendererData(firstRenderer);
+                VividMeshletRendererDatabase.instance.UpdateRendererData(secondRenderer);
+
+                var settings = CreateDefaultResolvedSettings();
+                var batches = RTASBuildPass.CollectMeshletRendererInstanceBatches(
+                    VividMeshletRendererDatabase.instance,
+                    null,
+                    in settings,
+                    false);
+
+                Assert.That(batches, Has.Count.EqualTo(1));
+                Assert.That(batches[0].Config.mesh, Is.SameAs(mesh));
+                Assert.That(batches[0].Config.material, Is.SameAs(material));
+                Assert.That(batches[0].Config.subMeshIndex, Is.EqualTo(0u));
+                Assert.That(batches[0].ObjectToWorldMatrices, Has.Count.EqualTo(2));
+                Assert.That(batches[0].ObjectToWorldMatrices[0], Is.EqualTo(firstObject.transform.localToWorldMatrix));
+                Assert.That(batches[0].ObjectToWorldMatrices[1], Is.EqualTo(secondObject.transform.localToWorldMatrix));
+                Assert.That(RTASBuildPass.CanUseAddInstances(batches[0].Config.material, batches[0].ObjectToWorldMatrices.Count), Is.True);
+            }
+            finally
+            {
+                if (firstObject != null)
+                    Object.DestroyImmediate(firstObject);
+
+                if (secondObject != null)
+                    Object.DestroyImmediate(secondObject);
+
+                if (mesh != null)
+                    Object.DestroyImmediate(mesh);
+
+                if (material != null)
+                    Object.DestroyImmediate(material);
+
+                if (meshletCollection != null)
+                    Object.DestroyImmediate(meshletCollection);
+            }
+        }
+
+        [Test]
+        public void CanUseAddInstances_RequiresMultipleInstancesAndMaterialInstancing()
+        {
+            var material = CreateTestMaterial();
+
+            try
+            {
+                Assert.That(RTASBuildPass.CanUseAddInstances(material, 2), Is.False);
+                Assert.That(RTASBuildPass.CanUseAddInstances(null, 2), Is.False);
+
+                material.enableInstancing = true;
+
+                Assert.That(RTASBuildPass.CanUseAddInstances(material, 1), Is.False);
+                Assert.That(RTASBuildPass.CanUseAddInstances(material, 2), Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
         public void Prepare_WritesResolvedSettingsIntoFrameContext()
         {
             var profile = ScriptableObject.CreateInstance<VolumeProfile>();
@@ -480,6 +574,24 @@ namespace VividRP.Editor.Tests
             var meshletRenderer = gameObject.AddComponent<MeshletRenderer>();
             meshletRenderer.CaptureSourceFromRenderer(meshRenderer);
             return meshletRenderer;
+        }
+
+        private static RTASBuildPass.ResolvedRayTracingSettings CreateDefaultResolvedSettings()
+        {
+            return new RTASBuildPass.ResolvedRayTracingSettings(
+                VividRTASBuildMode.Automatic,
+                VividRTASCullingMode.ExtendedFrustum,
+                RTASBuildPass.DefaultSphereCullingDistance,
+                RTASBuildPass.DefaultMinSolidAngle,
+                false,
+                false,
+                RTASBuildPass.DefaultRayBias,
+                RTASBuildPass.DefaultDistantRayBias,
+                ~0,
+                RayTracingAccelerationStructure.RayTracingModeMask.Everything,
+                RayTracingAccelerationStructureBuildFlags.None,
+                RayTracingAccelerationStructureBuildFlags.None,
+                false);
         }
 
         private static VividMeshletCollectionAsset CreateMeshletCollection(int subMeshIndex)

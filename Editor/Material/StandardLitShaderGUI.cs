@@ -62,6 +62,7 @@ namespace VividRP.Editor
             SyncKeywords(material);
             SyncRenderQueue(material);
             SyncGlobalIlluminationFlags(material);
+            material.enableInstancing = true;
         }
 
         private static void MigrateLegacyValues(Material material, Shader oldShader)

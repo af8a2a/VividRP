@@ -34,6 +34,7 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("Name \"IndirectDXR\""));
             Assert.That(shaderSource, Does.Contain("\"LightMode\" = \"IndirectDXR\""));
             Assert.That(shaderSource, Does.Contain("#pragma raytracing surface_shader"));
+            Assert.That(shaderSource, Does.Contain("#pragma multi_compile _ INSTANCING_ON"));
             Assert.That(shaderSource, Does.Contain("#pragma shader_feature_local_raytracing _ALPHATEST_ON"));
             Assert.That(shaderSource, Does.Contain("#define VIVIDRP_INDIRECT_DIFFUSE_CLOSEST_HIT_NAME StandardLitIndirectDiffuseClosestHit"));
             Assert.That(shaderSource, Does.Contain("#define VIVIDRP_INDIRECT_DIFFUSE_ANY_HIT_NAME StandardLitIndirectDiffuseAnyHit"));
@@ -205,6 +206,25 @@ namespace VividRP.Editor.Tests
             finally
             {
                 Object.DestroyImmediate(baseMap);
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
+        public void SetupMaterial_EnablesInstancing_ForRayTracingInstanceBatches()
+        {
+            UnityEngine.Material material = CreateMaterial();
+
+            try
+            {
+                material.enableInstancing = false;
+
+                StandardLitMaterialUtility.SetupMaterial(material, null, false);
+
+                Assert.That(material.enableInstancing, Is.True);
+            }
+            finally
+            {
                 Object.DestroyImmediate(material);
             }
         }

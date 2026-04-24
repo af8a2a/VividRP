@@ -202,6 +202,7 @@ Shader "VividRP/Material/StandardLit"
             HLSLPROGRAM
                 #pragma only_renderers d3d11 xboxseries ps5 switch2
                 #pragma raytracing surface_shader
+                #pragma multi_compile _ INSTANCING_ON
                 #pragma multi_compile _ LIGHTMAP_ON
                 #pragma multi_compile _ DIRLIGHTMAP_COMBINED
                 #pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2

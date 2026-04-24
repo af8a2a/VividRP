@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -51,6 +52,129 @@ namespace VividRP.Runtime.RenderPass.Core
             public ulong MemoryBytes { get; }
 
             public bool UsedShaderTagFallback { get; }
+        }
+
+        internal readonly struct MeshletRTASInstanceBatchKey : System.IEquatable<MeshletRTASInstanceBatchKey>
+        {
+            public MeshletRTASInstanceBatchKey(RayTracingMeshInstanceConfig config)
+            {
+                Mesh = config.mesh;
+                SubMeshIndex = config.subMeshIndex;
+                SubMeshFlags = config.subMeshFlags;
+                Material = config.material;
+                MaterialProperties = config.materialProperties;
+                EnableTriangleCulling = config.enableTriangleCulling;
+                FrontTriangleCounterClockwise = config.frontTriangleCounterClockwise;
+                Layer = config.layer;
+                RenderingLayerMask = config.renderingLayerMask;
+                Mask = config.mask;
+                MotionVectorMode = config.motionVectorMode;
+                LightProbeUsage = config.lightProbeUsage;
+                MeshLod = config.meshLod;
+                RayTracingMode = config.rayTracingMode;
+                AccelerationStructureBuildFlags = config.accelerationStructureBuildFlags;
+                AccelerationStructureBuildFlagsOverride = config.accelerationStructureBuildFlagsOverride;
+            }
+
+            public Mesh Mesh { get; }
+
+            public uint SubMeshIndex { get; }
+
+            public RayTracingSubMeshFlags SubMeshFlags { get; }
+
+            public Material Material { get; }
+
+            public MaterialPropertyBlock MaterialProperties { get; }
+
+            public bool EnableTriangleCulling { get; }
+
+            public bool FrontTriangleCounterClockwise { get; }
+
+            public int Layer { get; }
+
+            public uint RenderingLayerMask { get; }
+
+            public uint Mask { get; }
+
+            public MotionVectorGenerationMode MotionVectorMode { get; }
+
+            public LightProbeUsage LightProbeUsage { get; }
+
+            public int MeshLod { get; }
+
+            public RayTracingMode RayTracingMode { get; }
+
+            public RayTracingAccelerationStructureBuildFlags AccelerationStructureBuildFlags { get; }
+
+            public bool AccelerationStructureBuildFlagsOverride { get; }
+
+            public bool Equals(MeshletRTASInstanceBatchKey other)
+            {
+                return Mesh == other.Mesh
+                    && SubMeshIndex == other.SubMeshIndex
+                    && SubMeshFlags == other.SubMeshFlags
+                    && Material == other.Material
+                    && MaterialProperties == other.MaterialProperties
+                    && EnableTriangleCulling == other.EnableTriangleCulling
+                    && FrontTriangleCounterClockwise == other.FrontTriangleCounterClockwise
+                    && Layer == other.Layer
+                    && RenderingLayerMask == other.RenderingLayerMask
+                    && Mask == other.Mask
+                    && MotionVectorMode == other.MotionVectorMode
+                    && LightProbeUsage == other.LightProbeUsage
+                    && MeshLod == other.MeshLod
+                    && RayTracingMode == other.RayTracingMode
+                    && AccelerationStructureBuildFlags == other.AccelerationStructureBuildFlags
+                    && AccelerationStructureBuildFlagsOverride == other.AccelerationStructureBuildFlagsOverride;
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is MeshletRTASInstanceBatchKey other && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    var hash = 17;
+                    hash = hash * 31 + GetObjectHashCode(Mesh);
+                    hash = hash * 31 + SubMeshIndex.GetHashCode();
+                    hash = hash * 31 + SubMeshFlags.GetHashCode();
+                    hash = hash * 31 + GetObjectHashCode(Material);
+                    hash = hash * 31 + (MaterialProperties != null ? MaterialProperties.GetHashCode() : 0);
+                    hash = hash * 31 + EnableTriangleCulling.GetHashCode();
+                    hash = hash * 31 + FrontTriangleCounterClockwise.GetHashCode();
+                    hash = hash * 31 + Layer;
+                    hash = hash * 31 + RenderingLayerMask.GetHashCode();
+                    hash = hash * 31 + Mask.GetHashCode();
+                    hash = hash * 31 + MotionVectorMode.GetHashCode();
+                    hash = hash * 31 + LightProbeUsage.GetHashCode();
+                    hash = hash * 31 + MeshLod;
+                    hash = hash * 31 + RayTracingMode.GetHashCode();
+                    hash = hash * 31 + AccelerationStructureBuildFlags.GetHashCode();
+                    hash = hash * 31 + AccelerationStructureBuildFlagsOverride.GetHashCode();
+                    return hash;
+                }
+            }
+
+            private static int GetObjectHashCode(UnityEngine.Object value)
+            {
+                return value != null ? value.GetHashCode() : 0;
+            }
+        }
+
+        internal sealed class MeshletRTASInstanceBatch
+        {
+            public MeshletRTASInstanceBatch(RayTracingMeshInstanceConfig config)
+            {
+                Config = config;
+                ObjectToWorldMatrices = new List<Matrix4x4>();
+            }
+
+            public RayTracingMeshInstanceConfig Config { get; }
+
+            public List<Matrix4x4> ObjectToWorldMatrices { get; }
         }
 
         internal readonly struct ResolvedRayTracingSettings
@@ -559,7 +683,7 @@ namespace VividRP.Runtime.RenderPass.Core
             RayTracingAccelerationStructure.RayTracingModeMask rayTracingModeMask,
             bool requireVividRenderPipelineTag)
         {
-            var renderers = Object.FindObjectsByType<Renderer>(FindObjectsInactive.Exclude);
+            var renderers = UnityEngine.Object.FindObjectsByType<Renderer>(FindObjectsInactive.Exclude);
             var count = 0;
 
             for (var i = 0; i < renderers.Length; i++)
@@ -723,10 +847,32 @@ namespace VividRP.Runtime.RenderPass.Core
             in ResolvedRayTracingSettings settings,
             bool requireVividRenderPipelineTag)
         {
-            var database = VividMeshletRendererDatabase.instance;
+            var batches = CollectMeshletRendererInstanceBatches(
+                VividMeshletRendererDatabase.instance,
+                camera,
+                in settings,
+                requireVividRenderPipelineTag);
+
+            for (var batchIndex = 0; batchIndex < batches.Count; batchIndex++)
+            {
+                AddMeshletRendererInstanceBatch(accelerationStructure, batches[batchIndex]);
+            }
+        }
+
+        internal static List<MeshletRTASInstanceBatch> CollectMeshletRendererInstanceBatches(
+            VividMeshletRendererDatabase database,
+            Camera camera,
+            in ResolvedRayTracingSettings settings,
+            bool requireVividRenderPipelineTag)
+        {
+            var batches = new List<MeshletRTASInstanceBatch>();
+            if (database == null)
+                return batches;
+
             var rendererData = database.rendererData;
             var rendererResources = database.rendererResources;
             var rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+            var batchLookup = new Dictionary<MeshletRTASInstanceBatchKey, MeshletRTASInstanceBatch>();
             var cullingPlanes = settings.CullingMode == VividRTASCullingMode.ExtendedFrustum
                 ? BuildExtendedFrustumPlanes(camera)
                 : null;
@@ -756,9 +902,45 @@ namespace VividRP.Runtime.RenderPass.Core
                         meshletResources,
                         material,
                         subMeshIndex);
-                    accelerationStructure.AddInstance(in config, meshletRenderData.objectToWorldMatrix, null, 0u);
+                    var batchKey = new MeshletRTASInstanceBatchKey(config);
+                    if (!batchLookup.TryGetValue(batchKey, out var batch))
+                    {
+                        batch = new MeshletRTASInstanceBatch(config);
+                        batchLookup.Add(batchKey, batch);
+                        batches.Add(batch);
+                    }
+
+                    batch.ObjectToWorldMatrices.Add(meshletRenderData.objectToWorldMatrix);
                 }
             }
+
+            return batches;
+        }
+
+        private static void AddMeshletRendererInstanceBatch(
+            RayTracingAccelerationStructure accelerationStructure,
+            MeshletRTASInstanceBatch batch)
+        {
+            if (accelerationStructure == null || batch == null || batch.ObjectToWorldMatrices.Count == 0)
+                return;
+
+            var config = batch.Config;
+            var objectToWorldMatrices = batch.ObjectToWorldMatrices;
+            if (CanUseAddInstances(config.material, objectToWorldMatrices.Count))
+            {
+                accelerationStructure.AddInstances(in config, objectToWorldMatrices, objectToWorldMatrices.Count, 0, 0u);
+                return;
+            }
+
+            for (var instanceIndex = 0; instanceIndex < objectToWorldMatrices.Count; instanceIndex++)
+            {
+                accelerationStructure.AddInstance(in config, objectToWorldMatrices[instanceIndex], null, 0u);
+            }
+        }
+
+        internal static bool CanUseAddInstances(Material material, int instanceCount)
+        {
+            return instanceCount > 1 && material != null && material.enableInstancing;
         }
 
         private static bool IsCandidateMeshletRenderer(

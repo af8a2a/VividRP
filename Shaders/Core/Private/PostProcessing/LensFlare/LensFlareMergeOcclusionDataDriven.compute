@@ -1,0 +1,50 @@
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
+#pragma kernel MainCS
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+
+RW_TEXTURE2D_ARRAY(float, _LensFlareOcclusion);
+
+int _MultipassID;
+
+groupshared float localOcclusion[8][8][2];
+
+[numthreads(8, 8, 2)]
+void MainCS(uint3 dispatchThreadId : SV_DispatchThreadID, uint3 groupThreadID : SV_GroupThreadID)
+{
+    uint threadIdZ;
+
+    if (_MultipassID < 0)
+        threadIdZ = dispatchThreadId.z;
+    else // For Multipass XR
+        threadIdZ = (uint)_MultipassID;
+
+
+    if (_MultipassID < 0 || (_MultipassID >= 0 && dispatchThreadId.z == threadIdZ))
+        localOcclusion[groupThreadID.x][groupThreadID.y][threadIdZ] =
+            _LensFlareOcclusion[uint3(dispatchThreadId.x, dispatchThreadId.y + 1, threadIdZ)].x;
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupThreadID.y < 4 && (_MultipassID < 0 || (_MultipassID >= 0 && dispatchThreadId.z == threadIdZ)))
+        localOcclusion[groupThreadID.x][groupThreadID.y][threadIdZ] =
+            max(localOcclusion[groupThreadID.x][groupThreadID.y][threadIdZ],
+                localOcclusion[groupThreadID.x][groupThreadID.y + 4][threadIdZ]);
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupThreadID.y < 2 && (_MultipassID < 0 || (_MultipassID >= 0 && dispatchThreadId.z == threadIdZ)))
+        localOcclusion[groupThreadID.x][groupThreadID.y][threadIdZ] =
+            max(localOcclusion[groupThreadID.x][groupThreadID.y][threadIdZ],
+                localOcclusion[groupThreadID.x][groupThreadID.y + 2][threadIdZ]);
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupThreadID.y == 0 && (_MultipassID < 0 || (_MultipassID >= 0 && dispatchThreadId.z == threadIdZ)))
+    {
+        _LensFlareOcclusion[uint3(dispatchThreadId.x, 0, threadIdZ)] =
+            max(localOcclusion[groupThreadID.x][0][threadIdZ],
+                localOcclusion[groupThreadID.x][1][threadIdZ]);
+    }
+}

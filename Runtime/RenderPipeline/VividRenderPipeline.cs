@@ -31,6 +31,7 @@ namespace VividRP.Runtime
             BlueNoise.Initialize();
             Hammersley.Initialize();
             RTHandles.Initialize(Screen.width, Screen.height);
+            LensFlareCommonSRP.Initialize();
             VividAdaptiveProbeVolumeUtility.Initialize(asset);
             VividGPUDrivenSystem.Initialize();
 
@@ -248,6 +249,7 @@ namespace VividRP.Runtime
             m_RenderGraph?.Cleanup();
             m_RenderGraph = null;
             BlueNoise.Cleanup();
+            LensFlareCommonSRP.Dispose();
             Blitter.Cleanup();
             PipelineResourceManager.Cleanup();
             VividAdaptiveProbeVolumeUtility.Cleanup(m_Asset);

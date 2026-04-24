@@ -33,6 +33,9 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class CopyDepthPass : RenderPassNodeData { }
 
     [Serializable]
+    internal sealed class DataDrivenLensFlarePass : RenderPassNodeData { }
+
+    [Serializable]
     internal sealed class DeferredDirectionalLightingPass : RenderPassNodeData { }
 
     [Serializable]

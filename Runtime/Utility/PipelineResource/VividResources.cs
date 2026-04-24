@@ -16,6 +16,12 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/PostProcessing/Diffusion")]
         public Shader DiffusionShader;
 
+        [ResourcePath("Shaders/Core/Private/PostProcessing/LensFlare/LensFlareDataDriven")]
+        public Shader LensFlareDataDrivenShader;
+
+        [ResourcePath("Shaders/Core/Private/PostProcessing/LensFlare/LensFlareMergeOcclusionDataDriven.compute")]
+        public ComputeShader LensFlareMergeOcclusionDataDrivenCompute;
+
         [ResourcePath("Shaders/Core/Private/DepthOfField")]
         public Shader DepthOfFieldShader;
 

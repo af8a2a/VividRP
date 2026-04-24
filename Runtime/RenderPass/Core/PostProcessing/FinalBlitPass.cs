@@ -28,6 +28,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private ColorGradingSettingsData m_ColorGradingSettings;
         private FilmGrainSettingsData m_FilmGrainSettings;
         private BloomSettingsData m_BloomSettings;
+        private ScreenSpaceLensFlareSettingsData m_ScreenSpaceLensFlareSettings;
         private VividExposureData m_ExposureData;
         private RenderTargetIdentifier m_CameraBackBufferTarget;
         private TextureUVOrigin m_CameraBackBufferTextureUVOrigin;
@@ -115,6 +116,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_BloomSettings = m_PostProcessingAllowed
                 ? BloomSettingsResolver.Resolve()
                 : BloomSettingsData.CreateDefault();
+            m_ScreenSpaceLensFlareSettings = m_PostProcessingAllowed
+                ? ScreenSpaceLensFlareSettingsResolver.Resolve()
+                : ScreenSpaceLensFlareSettingsData.CreateDefault();
             m_ExposureData = frameData.Get<VividExposureData>();
 
             m_FrameCount = Time.frameCount;
@@ -203,12 +207,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 CoreUtils.SetKeyword(m_Material, "_FILM_GRAIN", false);
             }
 
-            // Bloom — globals are set by BloomPass; we only need the keyword and dirt uniforms here.
-            if (m_BloomSettings.enabled)
+            // Bloom and screen-space lens flare share the BloomTexture contribution.
+            var bloomContributionEnabled = m_BloomSettings.enabled || m_ScreenSpaceLensFlareSettings.enabled;
+            if (bloomContributionEnabled)
             {
                 CoreUtils.SetKeyword(m_Material, "_BLOOM", true);
-                CoreUtils.SetKeyword(m_Material, "_BLOOM_HQ", m_BloomSettings.highQualityFiltering);
-                if (m_BloomSettings.dirtTexture != null && m_BloomSettings.dirtIntensity > 0f)
+                CoreUtils.SetKeyword(m_Material, "_BLOOM_HQ", m_BloomSettings.enabled && m_BloomSettings.highQualityFiltering);
+                if (m_BloomSettings.enabled && m_BloomSettings.dirtTexture != null && m_BloomSettings.dirtIntensity > 0f)
                     CoreUtils.SetKeyword(m_Material, "_BLOOM_DIRT", true);
                 else
                     CoreUtils.SetKeyword(m_Material, "_BLOOM_DIRT", false);

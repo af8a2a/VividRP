@@ -105,6 +105,9 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class SIGMAShadowDenoisePass : RenderPassNodeData { }
 
     [Serializable]
+    internal sealed class ScreenSpaceLensFlarePass : RenderPassNodeData { }
+
+    [Serializable]
     internal sealed class ShadowClassifyPass : RenderPassNodeData { }
 
     [Serializable]

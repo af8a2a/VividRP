@@ -34,6 +34,12 @@ namespace VividRP.Runtime
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture bloomTexture = new();
 
+        [RenderGraphResource(
+            Name = "ScreenSpaceLensFlareBloomMipTexture",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture screenSpaceLensFlareBloomMipTexture = new();
+
         private ComputeShader m_PrefilterCS;
         private ComputeShader m_BlurCS;
         private ComputeShader m_UpsampleCS;
@@ -52,9 +58,13 @@ namespace VividRP.Runtime
         private readonly TextureHandle[] m_MipUpTH   = new TextureHandle[k_MaxBloomMipCount];
 
         private BloomSettingsData m_Settings;
+        private ScreenSpaceLensFlareSettingsData m_ScreenSpaceLensFlareSettings;
         private int m_MipCount;
+        private int m_ScreenSpaceLensFlareBloomMip;
         private int m_ScreenWidth;
         private int m_ScreenHeight;
+        private bool m_ShouldOutputBloomTexture;
+        private bool m_ShouldOutputScreenSpaceLensFlareMip;
         private bool m_IsPassResourceLayoutDirty;
         private RenderGraphTexture m_OriginalSource;
         private bool m_HasSourceTextureOverride;
@@ -148,21 +158,26 @@ namespace VividRP.Runtime
             var camera = cameraData?.camera;
             bool ppAllowed = camera != null && CoreUtils.ArePostProcessesEnabled(camera);
             m_Settings = ppAllowed ? BloomSettingsResolver.Resolve() : BloomSettingsData.CreateDefault();
+            m_ScreenSpaceLensFlareSettings = ppAllowed
+                ? ScreenSpaceLensFlareSettingsResolver.Resolve()
+                : ScreenSpaceLensFlareSettingsData.CreateDefault();
 
             m_ScreenWidth  = ResolveWidth(cameraData);
             m_ScreenHeight = ResolveHeight(cameraData);
 
-            bloomTexture.desc.Width         = 1;
-            bloomTexture.desc.Height        = 1;
-            bloomTexture.desc.ColorFormat   = GraphicsFormat.R16G16B16A16_SFloat;
-            bloomTexture.desc.EnableRandomWrite = true;
-            bloomTexture.desc.FilterMode    = FilterMode.Bilinear;
-            bloomTexture.desc.WrapMode      = TextureWrapMode.Clamp;
-            bloomTexture.desc.Name          = "BloomTexture";
+            ConfigureOutputTexture(bloomTexture, 1, 1, "BloomTexture");
+            ConfigureOutputTexture(
+                screenSpaceLensFlareBloomMipTexture,
+                1,
+                1,
+                "ScreenSpaceLensFlareBloomMipTexture");
 
             m_MipCount = 0;
+            m_ScreenSpaceLensFlareBloomMip = 0;
+            m_ShouldOutputBloomTexture = m_Settings.enabled;
+            m_ShouldOutputScreenSpaceLensFlareMip = m_ScreenSpaceLensFlareSettings.enabled;
 
-            if (!m_Settings.enabled
+            if (!m_Settings.enabled && !m_ScreenSpaceLensFlareSettings.enabled
                 || m_PrefilterCS == null || m_BlurCS == null || m_UpsampleCS == null
                 || m_ScreenWidth <= 0 || m_ScreenHeight <= 0)
                 return;
@@ -178,6 +193,18 @@ namespace VividRP.Runtime
             m_MipCount = Mathf.Clamp(
                 Mathf.FloorToInt(Mathf.Log(maxDim, 2f)) - 2 - (m_Settings.resolution == BloomResolution.Half ? 0 : 1),
                 1, k_MaxBloomMipCount);
+
+            m_ScreenSpaceLensFlareBloomMip = Mathf.Clamp(
+                m_ScreenSpaceLensFlareSettings.bloomMip,
+                0,
+                m_MipCount - 1);
+
+            ConfigureOutputTexture(bloomTexture, baseW, baseH, "BloomTexture");
+            ConfigureOutputTexture(
+                screenSpaceLensFlareBloomMipTexture,
+                Mathf.Max(1, baseW >> m_ScreenSpaceLensFlareBloomMip),
+                Mathf.Max(1, baseH >> m_ScreenSpaceLensFlareBloomMip),
+                "ScreenSpaceLensFlareBloomMipTexture");
 
             for (int i = 0; i < m_MipCount; i++)
             {
@@ -274,11 +301,44 @@ namespace VividRP.Runtime
             }
 
             // ---- 5. Bind globals for FinalBlitPass ----
-            float bloomIntensity = Mathf.Pow(2f, m_Settings.intensity) - 1f;
-            bool  hasDirt        = m_Settings.dirtTexture != null && m_Settings.dirtIntensity > 0f;
-            var   tint           = (Vector4)m_Settings.tint.linear;
+            var bloomOutput = (RTHandle)bloomTexture.innerHandle;
+            var screenSpaceLensFlareMipOutput = (RTHandle)screenSpaceLensFlareBloomMipTexture.innerHandle;
 
-            cmd.SetGlobalTexture(VividBloomTextureId, m_MipUpTH[0]);
+            if (bloomOutput != null)
+            {
+                if (m_ShouldOutputBloomTexture)
+                    Blitter.BlitCameraTexture(cmd, m_MipUpHandles[0], bloomOutput, 0f, true);
+                else
+                    ClearTexture(cmd, bloomOutput);
+            }
+
+            if (screenSpaceLensFlareMipOutput != null)
+            {
+                if (m_ShouldOutputScreenSpaceLensFlareMip)
+                {
+                    Blitter.BlitCameraTexture(
+                        cmd,
+                        m_MipUpHandles[m_ScreenSpaceLensFlareBloomMip],
+                        screenSpaceLensFlareMipOutput,
+                        0f,
+                        true);
+                }
+                else
+                {
+                    ClearTexture(cmd, screenSpaceLensFlareMipOutput);
+                }
+            }
+
+            float bloomIntensity = m_Settings.enabled
+                ? Mathf.Pow(2f, m_Settings.intensity) - 1f
+                : m_ScreenSpaceLensFlareSettings.enabled ? 1f : 0f;
+            bool  hasDirt        = m_Settings.enabled && m_Settings.dirtTexture != null && m_Settings.dirtIntensity > 0f;
+            var   tint           = m_Settings.enabled ? (Vector4)m_Settings.tint.linear : Vector4.one;
+
+            if (bloomOutput != null)
+                cmd.SetGlobalTexture(VividBloomTextureId, bloomOutput);
+            else
+                cmd.SetGlobalTexture(VividBloomTextureId, Texture2D.blackTexture);
             cmd.SetGlobalVector(VividBloomParamsId,
                 new Vector4(bloomIntensity, m_Settings.dirtIntensity, 1f, hasDirt ? 1f : 0f));
             cmd.SetGlobalVector(VividBloomTintId, new Vector4(tint.x, tint.y, tint.z, 1f));
@@ -310,6 +370,28 @@ namespace VividRP.Runtime
         }
 
         // -------------------------------------------------------------------------
+
+        private static void ConfigureOutputTexture(RenderGraphTexture texture, int width, int height, string name)
+        {
+            if (texture?.desc == null)
+                return;
+
+            texture.desc.Width = Mathf.Max(1, width);
+            texture.desc.Height = Mathf.Max(1, height);
+            texture.desc.ColorFormat = GraphicsFormat.R16G16B16A16_SFloat;
+            texture.desc.EnableRandomWrite = true;
+            texture.desc.FilterMode = FilterMode.Bilinear;
+            texture.desc.WrapMode = TextureWrapMode.Clamp;
+            texture.desc.ClearBuffer = true;
+            texture.desc.ClearColor = Color.clear;
+            texture.desc.Name = name;
+        }
+
+        private static void ClearTexture(CommandBuffer cmd, RTHandle texture)
+        {
+            CoreUtils.SetRenderTarget(cmd, texture);
+            cmd.ClearRenderTarget(false, true, Color.clear);
+        }
 
         private static void EnsureMipHandle(ref RTHandle handle, int width, int height, string name)
         {

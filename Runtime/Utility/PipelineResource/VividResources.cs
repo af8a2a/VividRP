@@ -19,6 +19,9 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/PostProcessing/LensFlare/LensFlareDataDriven")]
         public Shader LensFlareDataDrivenShader;
 
+        [ResourcePath("Shaders/Core/Private/PostProcessing/LensFlare/LensFlareScreenSpace")]
+        public Shader LensFlareScreenSpaceShader;
+
         [ResourcePath("Shaders/Core/Private/PostProcessing/LensFlare/LensFlareMergeOcclusionDataDriven.compute")]
         public ComputeShader LensFlareMergeOcclusionDataDrivenCompute;
 

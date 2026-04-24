@@ -103,6 +103,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: 0eba050a954dd4e48bfa93497c742902, type: 3}
   - ResourceName: Shaders/Core/Private/PostProcessing/LensFlare/LensFlareMergeOcclusionDataDriven.compute
     ResourceObject: {fileID: 7200000, guid: 20e46a9f883804d46b2b1f1c49b63733, type: 3}
+  - ResourceName: Shaders/Core/Private/PostProcessing/LensFlare/LensFlareScreenSpace
+    ResourceObject: {fileID: 4800000, guid: 260c3c7cf0c588145a9ca10389a96e95, type: 3}
   - ResourceName: Shaders/Core/Private/PreIntegratedFGD_CharlieFabricLambert
     ResourceObject: {fileID: 4800000, guid: f9ea26c818e16a04fa0b6f8d7ae1a662, type: 3}
   - ResourceName: Shaders/Core/Private/PreIntegratedFGD_GGXDisneyDiffuse

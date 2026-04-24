@@ -24,6 +24,28 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void LightGridPass_HidesInternalBuildBuffers_FromAuthoringPorts()
+        {
+            AssertBindingMode("m_FiniteLightBoundBuffer", RenderGraphResourceBindingMode.PassOwnedHidden);
+            AssertBindingMode("m_LightVolumeDataBuffer", RenderGraphResourceBindingMode.PassOwnedHidden);
+            AssertBindingMode("m_ScreenSpaceBoundsBuffer", RenderGraphResourceBindingMode.PassOwnedHidden);
+            AssertBindingMode("m_BigTileLightListBuffer", RenderGraphResourceBindingMode.PassOwnedHidden);
+            AssertBindingMode("m_LayeredLightListCounterBuffer", RenderGraphResourceBindingMode.PassOwnedHidden);
+        }
+
+        [Test]
+        public void LightGridPass_KeepsLightingConsumerBuffers_VisibleForAuthoringPorts()
+        {
+            AssertBindingMode("m_DirectionalLightBuffer", RenderGraphResourceBindingMode.External);
+            AssertBindingMode("m_PunctualLightBuffer", RenderGraphResourceBindingMode.External);
+            AssertBindingMode("m_AreaLightBuffer", RenderGraphResourceBindingMode.External);
+            AssertBindingMode("m_DecalDataBuffer", RenderGraphResourceBindingMode.External);
+            AssertBindingMode("m_LayeredOffsetBuffer", RenderGraphResourceBindingMode.PassOwnedOverrideable);
+            AssertBindingMode("m_LayeredLightListBuffer", RenderGraphResourceBindingMode.PassOwnedOverrideable);
+            AssertBindingMode("m_LogBaseBuffer", RenderGraphResourceBindingMode.PassOwnedOverrideable);
+        }
+
+        [Test]
         public void Prepare_EnsuresImportedBackingBuffers_ForRenderGraphBufferResources()
         {
             var pass = new LightGridPass();
@@ -70,6 +92,16 @@ namespace VividRP.Editor.Tests
             Assert.That(importedGraphicsBuffer, Is.Not.Null, fieldName);
             Assert.That(importedGraphicsBuffer.count, Is.GreaterThanOrEqualTo(buffer.desc.Count), fieldName);
             Assert.That(importedGraphicsBuffer.stride, Is.EqualTo(buffer.desc.Stride), fieldName);
+        }
+
+        private static void AssertBindingMode(string fieldName, RenderGraphResourceBindingMode expectedBindingMode)
+        {
+            var field = typeof(LightGridPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, fieldName);
+
+            var attr = field.GetCustomAttribute<RenderGraphResource>();
+            Assert.That(attr, Is.Not.Null, fieldName);
+            Assert.That(attr.BindingMode, Is.EqualTo(expectedBindingMode), fieldName);
         }
     }
 }

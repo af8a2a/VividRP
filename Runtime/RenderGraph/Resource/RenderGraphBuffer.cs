@@ -103,6 +103,7 @@ namespace VividRP.Runtime
     {
         public RenderGraphBufferDesc desc;
         private GraphicsBuffer m_ImportedGraphicsBuffer;
+        private bool m_OwnsImportedGraphicsBuffer;
         internal BufferHandle innerHandle;
 
         public RenderGraphBuffer()
@@ -138,14 +139,62 @@ namespace VividRP.Runtime
 
         internal void SetImportedBuffer(GraphicsBuffer graphicsBuffer)
         {
+            if (!ReferenceEquals(m_ImportedGraphicsBuffer, graphicsBuffer))
+                ReleaseOwnedImportedBuffer();
+
             m_ImportedGraphicsBuffer = graphicsBuffer;
+            m_OwnsImportedGraphicsBuffer = false;
             innerHandle = default;
         }
 
         internal void ClearImportedBuffer()
         {
+            ReleaseOwnedImportedBuffer();
             m_ImportedGraphicsBuffer = null;
+            m_OwnsImportedGraphicsBuffer = false;
             innerHandle = default;
+        }
+
+        internal GraphicsBuffer EnsureImportedBuffer()
+        {
+            if (desc == null)
+                return null;
+
+            var requiredCount = Mathf.Max(1, desc.Count);
+            var requiredStride = Mathf.Max(1, desc.Stride);
+            var requiredTarget = desc.Target;
+
+            if (m_ImportedGraphicsBuffer == null
+                || m_ImportedGraphicsBuffer.count < requiredCount
+                || m_ImportedGraphicsBuffer.stride != requiredStride)
+            {
+                ReleaseOwnedImportedBuffer();
+                m_ImportedGraphicsBuffer = new GraphicsBuffer(requiredTarget, requiredCount, requiredStride);
+                m_OwnsImportedGraphicsBuffer = true;
+                innerHandle = default;
+            }
+
+            return m_ImportedGraphicsBuffer;
+        }
+
+        internal void SetData(Array data)
+        {
+            EnsureImportedBuffer()?.SetData(data);
+        }
+
+        internal void SetData(Array data, int managedBufferStartIndex, int graphicsBufferStartIndex, int count)
+        {
+            EnsureImportedBuffer()?.SetData(data, managedBufferStartIndex, graphicsBufferStartIndex, count);
+        }
+
+        private void ReleaseOwnedImportedBuffer()
+        {
+            if (!m_OwnsImportedGraphicsBuffer)
+                return;
+
+            m_ImportedGraphicsBuffer?.Dispose();
+            m_ImportedGraphicsBuffer = null;
+            m_OwnsImportedGraphicsBuffer = false;
         }
 
         public bool IsValid() => innerHandle.IsValid();

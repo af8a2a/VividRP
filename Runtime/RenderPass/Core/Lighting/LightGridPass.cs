@@ -108,18 +108,6 @@ namespace VividRP.Runtime
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphBuffer m_LogBaseBuffer;
 
-        private GraphicsBuffer m_DirectionalLightImportedBuffer;
-        private GraphicsBuffer m_PunctualLightImportedBuffer;
-        private GraphicsBuffer m_AreaLightImportedBuffer;
-        private GraphicsBuffer m_DecalDataImportedBuffer;
-        private GraphicsBuffer m_FiniteLightBoundImportedBuffer;
-        private GraphicsBuffer m_LightVolumeDataImportedBuffer;
-        private GraphicsBuffer m_ScreenSpaceBoundsImportedBuffer;
-        private GraphicsBuffer m_BigTileLightListImportedBuffer;
-        private GraphicsBuffer m_LayeredOffsetImportedBuffer;
-        private GraphicsBuffer m_LayeredLightListImportedBuffer;
-        private GraphicsBuffer m_LayeredLightListCounterImportedBuffer;
-        private GraphicsBuffer m_LogBaseImportedBuffer;
         private ComputeShader m_ClearLightListsCompute;
         private ComputeShader m_ClearClusterAtomicIndexCompute;
         private ComputeShader m_BuildScreenAabbCompute;
@@ -236,20 +224,20 @@ namespace VividRP.Runtime
             if (m_DirectionalLightCount > 0)
             {
                 UpdateDirectionalLightUploadData(lightData, camera);
-                m_DirectionalLightImportedBuffer.SetData(m_DirectionalLightUploadData, 0, 0, m_DirectionalLightCount);
+                m_DirectionalLightBuffer.SetData(m_DirectionalLightUploadData, 0, 0, m_DirectionalLightCount);
             }
             else
-                m_DirectionalLightImportedBuffer.SetData(s_EmptyDirectionalLights);
+                m_DirectionalLightBuffer.SetData(s_EmptyDirectionalLights);
 
             if (m_AreaLightCount > 0)
-                m_AreaLightImportedBuffer.SetData(lightData.areaLights, 0, 0, m_AreaLightCount);
+                m_AreaLightBuffer.SetData(lightData.areaLights, 0, 0, m_AreaLightCount);
             else
-                m_AreaLightImportedBuffer.SetData(s_EmptyAreaLights);
+                m_AreaLightBuffer.SetData(s_EmptyAreaLights);
 
             if (m_DecalCount > 0)
-                m_DecalDataImportedBuffer.SetData(lightData.decalClusterData, 0, 0, m_DecalCount);
+                m_DecalDataBuffer.SetData(lightData.decalClusterData, 0, 0, m_DecalCount);
             else
-                m_DecalDataImportedBuffer.SetData(s_EmptyDecalData);
+                m_DecalDataBuffer.SetData(s_EmptyDecalData);
 
             if (m_FiniteLightCount > 0)
             {
@@ -258,22 +246,22 @@ namespace VividRP.Runtime
                     : Matrix4x4.identity;
                 lightData.UpdateFiniteLightClusteredCullData(worldToViewMatrix);
                 UpdateFiniteLightUploadData(lightData);
-                m_FiniteLightBoundImportedBuffer.SetData(m_FiniteLightBoundUploadData, 0, 0, m_FiniteLightCount);
-                m_LightVolumeDataImportedBuffer.SetData(m_LightVolumeDataUploadData, 0, 0, m_FiniteLightCount);
+                m_FiniteLightBoundBuffer.SetData(m_FiniteLightBoundUploadData, 0, 0, m_FiniteLightCount);
+                m_LightVolumeDataBuffer.SetData(m_LightVolumeDataUploadData, 0, 0, m_FiniteLightCount);
             }
             else
             {
                 EnsureLayeredOffsetUploadCapacity(m_LayeredOffsetCapacity);
                 Array.Clear(m_LayeredOffsetUploadData, 0, m_LayeredOffsetCapacity);
-                m_LayeredOffsetImportedBuffer.SetData(m_LayeredOffsetUploadData, 0, 0, m_LayeredOffsetCapacity);
-                m_FiniteLightBoundImportedBuffer.SetData(s_EmptyFiniteLightBounds);
-                m_LightVolumeDataImportedBuffer.SetData(s_EmptyLightVolumeData);
+                m_LayeredOffsetBuffer.SetData(m_LayeredOffsetUploadData, 0, 0, m_LayeredOffsetCapacity);
+                m_FiniteLightBoundBuffer.SetData(s_EmptyFiniteLightBounds);
+                m_LightVolumeDataBuffer.SetData(s_EmptyLightVolumeData);
             }
 
             if (m_PunctualLightCount > 0)
-                m_PunctualLightImportedBuffer.SetData(lightData.punctualLights, 0, 0, m_PunctualLightCount);
+                m_PunctualLightBuffer.SetData(lightData.punctualLights, 0, 0, m_PunctualLightCount);
             else
-                m_PunctualLightImportedBuffer.SetData(s_EmptyPunctualLights);
+                m_PunctualLightBuffer.SetData(s_EmptyPunctualLights);
 
             m_SupportsClusteredPunctualLights = CanBuildClusteredLights();
             UpdateShaderVariablesLightListConstantBuffer();
@@ -734,34 +722,34 @@ namespace VividRP.Runtime
 
         private void EnsureImportedBuffers()
         {
-            EnsureImportedBuffer(ref m_DirectionalLightImportedBuffer, m_DirectionalLightBuffer);
-            EnsureImportedBuffer(ref m_PunctualLightImportedBuffer, m_PunctualLightBuffer);
-            EnsureImportedBuffer(ref m_AreaLightImportedBuffer, m_AreaLightBuffer);
-            EnsureImportedBuffer(ref m_DecalDataImportedBuffer, m_DecalDataBuffer);
-            EnsureImportedBuffer(ref m_FiniteLightBoundImportedBuffer, m_FiniteLightBoundBuffer);
-            EnsureImportedBuffer(ref m_LightVolumeDataImportedBuffer, m_LightVolumeDataBuffer);
-            EnsureImportedBuffer(ref m_ScreenSpaceBoundsImportedBuffer, m_ScreenSpaceBoundsBuffer);
-            EnsureImportedBuffer(ref m_BigTileLightListImportedBuffer, m_BigTileLightListBuffer);
-            EnsureImportedBuffer(ref m_LayeredOffsetImportedBuffer, m_LayeredOffsetBuffer);
-            EnsureImportedBuffer(ref m_LayeredLightListImportedBuffer, m_LayeredLightListBuffer);
-            EnsureImportedBuffer(ref m_LayeredLightListCounterImportedBuffer, m_LayeredLightListCounterBuffer);
-            EnsureImportedBuffer(ref m_LogBaseImportedBuffer, m_LogBaseBuffer);
+            m_DirectionalLightBuffer?.EnsureImportedBuffer();
+            m_PunctualLightBuffer?.EnsureImportedBuffer();
+            m_AreaLightBuffer?.EnsureImportedBuffer();
+            m_DecalDataBuffer?.EnsureImportedBuffer();
+            m_FiniteLightBoundBuffer?.EnsureImportedBuffer();
+            m_LightVolumeDataBuffer?.EnsureImportedBuffer();
+            m_ScreenSpaceBoundsBuffer?.EnsureImportedBuffer();
+            m_BigTileLightListBuffer?.EnsureImportedBuffer();
+            m_LayeredOffsetBuffer?.EnsureImportedBuffer();
+            m_LayeredLightListBuffer?.EnsureImportedBuffer();
+            m_LayeredLightListCounterBuffer?.EnsureImportedBuffer();
+            m_LogBaseBuffer?.EnsureImportedBuffer();
         }
 
         private void ReleaseImportedBuffers()
         {
-            ReleaseImportedBuffer(ref m_DirectionalLightImportedBuffer, m_DirectionalLightBuffer);
-            ReleaseImportedBuffer(ref m_PunctualLightImportedBuffer, m_PunctualLightBuffer);
-            ReleaseImportedBuffer(ref m_AreaLightImportedBuffer, m_AreaLightBuffer);
-            ReleaseImportedBuffer(ref m_DecalDataImportedBuffer, m_DecalDataBuffer);
-            ReleaseImportedBuffer(ref m_FiniteLightBoundImportedBuffer, m_FiniteLightBoundBuffer);
-            ReleaseImportedBuffer(ref m_LightVolumeDataImportedBuffer, m_LightVolumeDataBuffer);
-            ReleaseImportedBuffer(ref m_ScreenSpaceBoundsImportedBuffer, m_ScreenSpaceBoundsBuffer);
-            ReleaseImportedBuffer(ref m_BigTileLightListImportedBuffer, m_BigTileLightListBuffer);
-            ReleaseImportedBuffer(ref m_LayeredOffsetImportedBuffer, m_LayeredOffsetBuffer);
-            ReleaseImportedBuffer(ref m_LayeredLightListImportedBuffer, m_LayeredLightListBuffer);
-            ReleaseImportedBuffer(ref m_LayeredLightListCounterImportedBuffer, m_LayeredLightListCounterBuffer);
-            ReleaseImportedBuffer(ref m_LogBaseImportedBuffer, m_LogBaseBuffer);
+            m_DirectionalLightBuffer?.ClearImportedBuffer();
+            m_PunctualLightBuffer?.ClearImportedBuffer();
+            m_AreaLightBuffer?.ClearImportedBuffer();
+            m_DecalDataBuffer?.ClearImportedBuffer();
+            m_FiniteLightBoundBuffer?.ClearImportedBuffer();
+            m_LightVolumeDataBuffer?.ClearImportedBuffer();
+            m_ScreenSpaceBoundsBuffer?.ClearImportedBuffer();
+            m_BigTileLightListBuffer?.ClearImportedBuffer();
+            m_LayeredOffsetBuffer?.ClearImportedBuffer();
+            m_LayeredLightListBuffer?.ClearImportedBuffer();
+            m_LayeredLightListCounterBuffer?.ClearImportedBuffer();
+            m_LogBaseBuffer?.ClearImportedBuffer();
         }
 
         private static void ResizeStructuredBuffer(RenderGraphBuffer buffer, int count, int stride)
@@ -772,33 +760,6 @@ namespace VividRP.Runtime
             buffer.desc.Count = Mathf.Max(1, count);
             buffer.desc.Stride = stride;
             buffer.desc.Target = GraphicsBuffer.Target.Structured;
-        }
-
-        private static void EnsureImportedBuffer(ref GraphicsBuffer graphicsBuffer, RenderGraphBuffer renderGraphBuffer)
-        {
-            if (renderGraphBuffer?.desc == null)
-                return;
-
-            var requiredCount = Mathf.Max(1, renderGraphBuffer.desc.Count);
-            var requiredStride = Mathf.Max(1, renderGraphBuffer.desc.Stride);
-            var requiredTarget = renderGraphBuffer.desc.Target;
-
-            if (graphicsBuffer == null
-                || graphicsBuffer.count < requiredCount
-                || graphicsBuffer.stride != requiredStride)
-            {
-                graphicsBuffer?.Dispose();
-                graphicsBuffer = new GraphicsBuffer(requiredTarget, requiredCount, requiredStride);
-            }
-
-            renderGraphBuffer.SetImportedBuffer(graphicsBuffer);
-        }
-
-        private static void ReleaseImportedBuffer(ref GraphicsBuffer graphicsBuffer, RenderGraphBuffer renderGraphBuffer)
-        {
-            renderGraphBuffer?.ClearImportedBuffer();
-            graphicsBuffer?.Dispose();
-            graphicsBuffer = null;
         }
 
         private void EnsureDirectionalLightUploadCapacity(int requiredCapacity)

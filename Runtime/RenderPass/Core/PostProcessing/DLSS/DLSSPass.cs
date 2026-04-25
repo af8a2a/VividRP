@@ -71,7 +71,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 builder.UseTexture(passData.Source, AccessFlags.Read);
                 builder.UseTexture(passData.Depth, AccessFlags.Read);
                 builder.UseTexture(passData.MotionVectors, AccessFlags.Read);
-                builder.UseTexture(passData.Output, AccessFlags.Write);
+                builder.SetRandomAccessAttachment(passData.Output, 0, AccessFlags.WriteAll);
                 builder.AllowPassCulling(false);
                 builder.AllowGlobalStateModification(true);
 

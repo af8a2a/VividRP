@@ -448,7 +448,7 @@ namespace VividRP.Runtime
                     engineType = NVSDK_NGX_EngineType.NVSDK_NGX_ENGINE_TYPE_UNITY,
                     engineVersion = Application.version,
                     applicationDataPath = "",
-                    loggingLevel = NVSDK_NGX_Logging_Level.NVSDK_NGX_LOGGING_LEVEL_VERBOSE
+                    loggingLevel = NVSDK_NGX_Logging_Level.NVSDK_NGX_LOGGING_LEVEL_OFF
                 };
 
                 var result = (NVSDK_NGX_Result)DLSS_Init_with_ProjectID_D3D12(ref initParams);

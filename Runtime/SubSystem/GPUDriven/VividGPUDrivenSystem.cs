@@ -128,7 +128,7 @@ namespace VividRP.Runtime.GPUDriven
             out GraphicsBuffer visibleMeshletRenderRequestsBuffer,
             out GraphicsBuffer visibleMeshletIndirectDrawArgsBuffer)
         {
-            if (s_Instance == null || s_Instance.m_IsDisposed)
+            if (s_Instance == null || s_Instance.m_IsDisposed || !s_Instance.IsAvailable)
             {
                 visibleMeshletRenderRequestsBuffer = null;
                 visibleMeshletIndirectDrawArgsBuffer = null;
@@ -249,7 +249,21 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             VividGPUDrivenSystem gpuDrivenSystem = instance;
+            if (!gpuDrivenSystem.IsAvailable)
+            {
+                gpuDrivenSystem.ReportStats(camera);
+                PassRecorder.SetGPUDrivenFrameData(null, null);
+                return;
+            }
+
             PrepareFrameIfNeeded(cameraData.frameIndex);
+            if (!gpuDrivenSystem.IsAvailable)
+            {
+                gpuDrivenSystem.ReportStats(camera);
+                PassRecorder.SetGPUDrivenFrameData(null, null);
+                return;
+            }
+
             ApplyResolvedSettings(gpuDrivenSystem);
 
             VividRPCoreResources resources = PipelineResourceManager.Get<VividRPCoreResources>();

@@ -39,7 +39,7 @@ namespace VividRP.Runtime.RenderPass.Core
             BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
         private RenderGraphTexture m_HistoryColorCurrent;
 
-        [RenderGraphResource(Name = "TAAOutput", Access = AccessFlags.Write)]
+        [RenderGraphResource(Name = "TAAOutput", Access = AccessFlags.WriteAll)]
         private RenderGraphTexture m_OutputTexture;
 
         private ComputeShader m_ComputeShader;

@@ -20,6 +20,9 @@ namespace VividRP.Runtime
 
         [InspectorName("Temporal Anti-aliasing (TAA)")]
         TemporalAntiAliasing,
+
+        [InspectorName("Spatial-Temporal Post-Processing (STP)")]
+        SpatialTemporalPostProcessing,
     }
 
     public static class VividCameraExtensions
@@ -207,6 +210,18 @@ namespace VividRP.Runtime
                 ? VividAntialiasingMode.TemporalAntiAliasing
                 : VividAntialiasingMode.None;
         }
+
+        public bool enableSTP
+        {
+            get => antialiasing == VividAntialiasingMode.SpatialTemporalPostProcessing;
+            set => antialiasing = value
+                ? VividAntialiasingMode.SpatialTemporalPostProcessing
+                : VividAntialiasingMode.None;
+        }
+
+        public bool usesTemporalAntialiasing =>
+            antialiasing == VividAntialiasingMode.TemporalAntiAliasing
+            || antialiasing == VividAntialiasingMode.SpatialTemporalPostProcessing;
 
         public bool enableCMAA2
         {

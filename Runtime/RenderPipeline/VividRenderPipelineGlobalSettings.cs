@@ -37,6 +37,7 @@ namespace VividRP.Runtime
         {
             EnsureSettings<VividDefaultVolumeProfileSettings>();
             EnsureCoreGraphicsSettings("UnityEngine.Rendering.ProbeVolumeGlobalSettings");
+            EnsureCoreGraphicsSettings("UnityEngine.Rendering.STP+RuntimeResources");
         }
 
 #pragma warning disable 618

@@ -61,7 +61,7 @@ namespace VividRP.Runtime
             var width = ResolveWidth(cameraData);
             var height = ResolveHeight(cameraData);
             m_Viewport = new Rect(0f, 0f, width, height);
-            m_TaaEnabled = TAASettings.FromCamera(cameraData?.additionalData).Enabled;
+            m_TaaEnabled = TAASettings.UsesTemporalAntialiasing(cameraData?.additionalData);
             m_CameraPositionWS = cameraData != null
                 ? cameraData.inverseViewMatrix.GetColumn(3)
                 : Vector3.zero;

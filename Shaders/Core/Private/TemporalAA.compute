@@ -83,7 +83,11 @@ void TemporalAA(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 currentColor = _InputColor[pixelCoord].rgb;
 
     float2 motionVector = _MotionVectors[pixelCoord].xy;
-    float2 historyUV = uv - motionVector;
+    float2 jitterDelta = (_Jitter.zw - _Jitter.xy) * 0.5;
+#if UNITY_UV_STARTS_AT_TOP
+    jitterDelta.y = -jitterDelta.y;
+#endif
+    float2 historyUV = uv - motionVector + jitterDelta;
 
     float3 m1 = 0.0;
     float3 m2 = 0.0;

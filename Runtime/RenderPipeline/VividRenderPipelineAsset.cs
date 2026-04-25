@@ -17,7 +17,7 @@ namespace VividRP.Runtime
     }
 
     [CreateAssetMenu(menuName = "VividRP/Vivid Render Pipeline")]
-    public class VividRenderPipelineAsset : RenderPipelineAsset<VividRenderPipeline>, IProbeVolumeEnabledRenderPipeline
+    public class VividRenderPipelineAsset : RenderPipelineAsset<VividRenderPipeline>, IProbeVolumeEnabledRenderPipeline, ISTPEnabledRenderPipeline
     {
         private const string DefaultShaderName = "VividRP/Material/StandardLit";
 
@@ -100,6 +100,8 @@ namespace VividRP.Runtime
         bool IProbeVolumeEnabledRenderPipeline.supportProbeVolume => m_SupportProbeVolume;
 
         ProbeVolumeSHBands IProbeVolumeEnabledRenderPipeline.maxSHBands => m_ProbeVolumeSHBands;
+
+        bool ISTPEnabledRenderPipeline.isStpUsed => true;
 
 #pragma warning disable 618
         ProbeVolumeSceneData IProbeVolumeEnabledRenderPipeline.probeVolumeSceneData =>

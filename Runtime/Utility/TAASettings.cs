@@ -27,6 +27,16 @@ namespace VividRP.Runtime
 
         public static TAASettings Disabled => new(false, 1.0f, 8, 0.95f, 3.0f, 0.5f);
 
+        public static bool UsesTemporalAntialiasing(VividAdditionalCameraData data)
+        {
+            return data != null && data.usesTemporalAntialiasing;
+        }
+
+        public static bool UsesStp(VividAdditionalCameraData data)
+        {
+            return data != null && data.enableSTP;
+        }
+
         public static TAASettings FromCamera(VividAdditionalCameraData data)
         {
             if (data == null)

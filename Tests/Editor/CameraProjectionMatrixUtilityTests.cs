@@ -85,6 +85,36 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void GetProjectionMatrix_PreservesJitteredExplicitProjectionPair()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            camera.aspect = 16.0f / 9.0f;
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 250.0f;
+            camera.fieldOfView = 50.0f;
+
+            var nonJitteredProjection = Matrix4x4.Perspective(
+                camera.fieldOfView,
+                camera.aspect,
+                camera.nearClipPlane,
+                camera.farClipPlane);
+            var jitterMatrix = Matrix4x4.identity;
+            jitterMatrix.m03 = 0.015625f;
+            jitterMatrix.m13 = -0.03125f;
+            var jitteredProjection = jitterMatrix * nonJitteredProjection;
+
+            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitteredProjection, nonJitteredProjection);
+
+            var state = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
+            var projection = CameraProjectionMatrixUtility.GetProjectionMatrix(camera);
+            var nonJittered = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+
+            Assert.That(state.Mode, Is.EqualTo(CameraProjectionMatrixUtility.CameraProjectionStateMode.Explicit));
+            Assert.That(MaxAbsDiff(projection, jitteredProjection), Is.LessThan(0.0001f));
+            Assert.That(MaxAbsDiff(nonJittered, nonJitteredProjection), Is.LessThan(0.0001f));
+        }
+
+        [Test]
         public void RestoreProjectionState_ResetsImplicitProjection_WhenExplicitMatrixWasCapturedFromDifferentAspect()
         {
             var camera = m_GameObject.AddComponent<Camera>();

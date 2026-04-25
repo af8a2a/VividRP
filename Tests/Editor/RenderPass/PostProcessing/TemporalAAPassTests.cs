@@ -160,6 +160,15 @@ namespace VividRP.Editor.Tests
                 Does.Contain("ResourceObject: {fileID: 7200000, guid: e30d483061855394891ca96699b7d9ba, type: 3}"));
         }
 
+        [Test]
+        public void TemporalAACompute_ReprojectsHistoryWithJitterDelta()
+        {
+            var computeSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "TemporalAA.compute"));
+
+            Assert.That(computeSource, Does.Contain("float2 jitterDelta = (_Jitter.zw - _Jitter.xy) * 0.5;"));
+            Assert.That(computeSource, Does.Contain("float2 historyUV = uv - motionVector + jitterDelta;"));
+        }
+
         private static RenderGraphTexture GetTextureField(TemporalAAPass pass, string fieldName)
         {
             var field = typeof(TemporalAAPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);

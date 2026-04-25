@@ -196,6 +196,29 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Update_ThirdFrame_AdvancesPreviousPreviousViewMatrix()
+        {
+            var data = new CameraTemporalData();
+            var cameraData = CreateCameraData(frameIndex: 0);
+            data.Update(cameraData);
+            var firstViewMatrix = data.ViewMatrix;
+
+            m_Camera.transform.position = new Vector3(2f, 0f, 0f);
+            cameraData.additionalData.UpdateCameraMatrices(false);
+            cameraData.frameIndex = 1;
+            data.Update(cameraData);
+            var secondViewMatrix = data.ViewMatrix;
+
+            m_Camera.transform.position = new Vector3(4f, 0f, 0f);
+            cameraData.additionalData.UpdateCameraMatrices(false);
+            cameraData.frameIndex = 2;
+            data.Update(cameraData);
+
+            Assert.That(data.PreviousViewMatrix, Is.EqualTo(secondViewMatrix));
+            Assert.That(data.PreviousPreviousViewMatrix, Is.EqualTo(firstViewMatrix));
+        }
+
+        [Test]
         public void Update_SameFrame_DoesNotAdvancePrevious()
         {
             var data = new CameraTemporalData();
@@ -263,6 +286,10 @@ namespace VividRP.Editor.Tests
             Assert.That(data.PreviousViewProjection, Is.EqualTo(Matrix4x4.identity));
             Assert.That(data.Jitter, Is.EqualTo(Vector2.zero));
             Assert.That(data.PreviousJitter, Is.EqualTo(Vector2.zero));
+            Assert.That(data.PreviousPreviousViewMatrix, Is.EqualTo(Matrix4x4.identity));
+            Assert.That(data.PreviousPreviousProjectionMatrix, Is.EqualTo(Matrix4x4.identity));
+            Assert.That(data.Width, Is.Zero);
+            Assert.That(data.Height, Is.Zero);
         }
 
         private VividCameraData CreateCameraData(int frameIndex)

@@ -104,6 +104,12 @@ namespace VividRP.Runtime
 
             var nonJitteredProj = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
 
+            if (TAASettings.UsesStp(additionalCameraData))
+            {
+                ApplyStpJitter(camera, nonJitteredProj);
+                return;
+            }
+
             var taaSettings = TAASettings.FromCamera(additionalCameraData);
             if (!taaSettings.Enabled)
             {
@@ -128,6 +134,29 @@ namespace VividRP.Runtime
             jitterMatrix.m03 = jitterX;
             jitterMatrix.m13 = jitterY;
 
+            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
+        }
+
+        private static void ApplyStpJitter(Camera camera, Matrix4x4 nonJitteredProj)
+        {
+            if (!STP.IsSupported())
+            {
+                CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                return;
+            }
+
+            var pixelWidth = camera.pixelWidth;
+            var pixelHeight = camera.pixelHeight;
+            if (pixelWidth <= 0 || pixelHeight <= 0)
+            {
+                CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                return;
+            }
+
+            var jitter = -STP.Jit16(Time.frameCount);
+            var jitterMatrix = Matrix4x4.identity;
+            jitterMatrix.m03 = jitter.x * 2.0f / pixelWidth;
+            jitterMatrix.m13 = jitter.y * 2.0f / pixelHeight;
             CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
         }
 
@@ -389,6 +418,12 @@ namespace VividRP.Runtime
             return additionalData != null && additionalData.stopNaNs;
         }
 
+        private static bool ShouldInjectStpPass()
+        {
+            var additionalData = s_FrameData.GetOrCreate<VividCameraData>().additionalData;
+            return TAASettings.UsesStp(additionalData) && STP.IsSupported();
+        }
+
         private static StopNaNPass GetOrCreateInjectedStopNaNPass()
         {
             if (s_InjectedStopNaNPass != null)
@@ -470,6 +505,205 @@ namespace VividRP.Runtime
                 renderListCache,
                 accelerationStructureCache,
                 "StopNaNPass (Injected)");
+        }
+
+        private static RenderGraphTexture RecordInjectedStpPass(
+            RenderGraph renderGraph,
+            RenderGraphTexture sourceTexture,
+            RenderGraphTexture motionTexture,
+            RenderGraphTexture depthTexture,
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache)
+        {
+            if (renderGraph == null
+                || sourceTexture == null
+                || motionTexture == null
+                || depthTexture == null
+                || sourceTexture.innerHandle.IsValid() != true
+                || motionTexture.innerHandle.IsValid() != true
+                || depthTexture.innerHandle.IsValid() != true)
+            {
+                return null;
+            }
+
+            var cameraData = s_FrameData.Get<VividCameraData>();
+            var camera = cameraData?.camera;
+            if (camera == null)
+                return null;
+
+            var temporalData = FrameContextSystem.GetOrCreate(camera);
+            if (temporalData == null)
+                return null;
+
+            var blueNoiseResources = PipelineResourceManager.Get<BlueNoiseResources>();
+            var noiseTexture = blueNoiseResources?.OwenScrambledSequence;
+            if (noiseTexture == null)
+                return null;
+
+            var currentImageSize = new Vector2Int(
+                CameraDimensionUtility.ResolveCameraDimension(cameraData.actualWidth, cameraData.pixelWidth, Screen.width),
+                CameraDimensionUtility.ResolveCameraDimension(cameraData.actualHeight, cameraData.pixelHeight, Screen.height));
+            var priorImageSize = new Vector2Int(
+                temporalData.PreviousWidth > 0 ? temporalData.PreviousWidth : currentImageSize.x,
+                temporalData.PreviousHeight > 0 ? temporalData.PreviousHeight : currentImageSize.y);
+
+            var historyContext = temporalData.GetOrCreateStpHistoryContext();
+            var historyUpdateInfo = new STP.HistoryUpdateInfo
+            {
+                preUpscaleSize = currentImageSize,
+                postUpscaleSize = currentImageSize,
+                useHwDrs = false,
+                useTexArray = false,
+            };
+            var hasValidHistory = historyContext.Update(ref historyUpdateInfo);
+
+            var perViewConfigs = STP.perViewConfigs;
+            if (perViewConfigs == null || perViewConfigs.Length == 0)
+            {
+                perViewConfigs = new STP.PerViewConfig[1];
+                STP.perViewConfigs = perViewConfigs;
+            }
+
+            perViewConfigs[0] = new STP.PerViewConfig
+            {
+                currentProj = cameraData.GetGPUProjectionMatrixNoJitter(),
+                lastProj = temporalData.PreviousProjectionMatrix,
+                lastLastProj = temporalData.PreviousPreviousProjectionMatrix,
+                currentView = cameraData.GetViewMatrix(),
+                lastView = temporalData.PreviousViewMatrix,
+                lastLastView = temporalData.PreviousPreviousViewMatrix,
+            };
+
+            var outputDescriptor = CreateInjectedStpOutputDescriptor(sourceTexture?.desc, currentImageSize);
+            var outputHandle = renderGraph.CreateTexture(outputDescriptor);
+
+            var config = new STP.Config
+            {
+                noiseTexture = noiseTexture,
+                inputColor = sourceTexture.innerHandle,
+                inputDepth = depthTexture.innerHandle,
+                inputMotion = motionTexture.innerHandle,
+                destination = outputHandle,
+                historyContext = historyContext,
+                enableHwDrs = false,
+                enableTexArray = false,
+                enableMotionScaling = temporalData.DeltaTime > 0f && temporalData.PreviousDeltaTime > 0f,
+                nearPlane = Mathf.Max(camera.nearClipPlane, 0.0001f),
+                farPlane = Mathf.Max(camera.farClipPlane, camera.nearClipPlane + 0.0001f),
+                frameIndex = cameraData.frameIndex,
+                hasValidHistory = hasValidHistory,
+                stencilMask = 0,
+                debugViewIndex = 0,
+                deltaTime = temporalData.DeltaTime,
+                lastDeltaTime = temporalData.PreviousDeltaTime > 0f
+                    ? temporalData.PreviousDeltaTime
+                    : temporalData.DeltaTime,
+                currentImageSize = currentImageSize,
+                priorImageSize = priorImageSize,
+                outputImageSize = currentImageSize,
+                numActiveViews = 1,
+                perViewConfigs = perViewConfigs,
+            };
+
+            var stpOutputHandle = STP.Execute(renderGraph, ref config);
+            var stpOutputTexture = new RenderGraphTexture
+            {
+                desc = outputDescriptor,
+                innerHandle = stpOutputHandle,
+            };
+            textureCache[stpOutputTexture] = stpOutputHandle;
+            return stpOutputTexture;
+        }
+
+        private static RenderGraphTextureDesc CreateInjectedStpOutputDescriptor(
+            RenderGraphTextureDesc sourceDescriptor,
+            Vector2Int imageSize)
+        {
+            var descriptor = CloneTextureDescriptor(sourceDescriptor)
+                ?? RenderGraphTextureDesc.CreateColorTarget(
+                    Mathf.Max(1, imageSize.x),
+                    Mathf.Max(1, imageSize.y),
+                    GraphicsFormat.R16G16B16A16_SFloat);
+
+            var colorFormat = descriptor.ColorFormat != GraphicsFormat.None
+                ? descriptor.ColorFormat
+                : GraphicsFormat.R16G16B16A16_SFloat;
+            if (!SystemInfo.IsFormatSupported(colorFormat, GraphicsFormatUsage.LoadStore))
+                colorFormat = GraphicsFormat.R16G16B16A16_SFloat;
+
+            descriptor.Name = "STPOutput";
+            descriptor.Width = Mathf.Max(1, imageSize.x);
+            descriptor.Height = Mathf.Max(1, imageSize.y);
+            descriptor.ColorFormat = colorFormat;
+            descriptor.DepthBufferBits = DepthBits.None;
+            descriptor.MsaaSamples = MSAASamples.None;
+            descriptor.FilterMode = FilterMode.Bilinear;
+            descriptor.WrapMode = TextureWrapMode.Clamp;
+            descriptor.ClearBuffer = false;
+            descriptor.UseMipMap = false;
+            descriptor.AutoGenerateMips = false;
+            descriptor.MipCount = 1;
+            descriptor.EnableRandomWrite = true;
+            descriptor.BindTextureMS = false;
+            descriptor.Dimension = descriptor.Dimension == TextureDimension.None
+                ? TextureDimension.Tex2D
+                : descriptor.Dimension;
+            descriptor.Slices = Mathf.Max(1, descriptor.Slices);
+            return descriptor;
+        }
+
+        private static RenderGraphTexture GetLatestTextureByName(int boundaryPassIndex, string textureName)
+        {
+            if (string.IsNullOrEmpty(textureName))
+                return null;
+
+            for (var passIndex = boundaryPassIndex - 1; passIndex >= 0; passIndex--)
+            {
+                var resources = GetCurrentPassResources(s_RenderPasses[passIndex]);
+                if (resources?.Textures == null)
+                    continue;
+
+                foreach (var entry in resources.Textures)
+                {
+                    if (entry?.Texture == null)
+                        continue;
+
+                    if (string.Equals(entry.Name, textureName, StringComparison.Ordinal))
+                        return entry.Texture;
+                }
+            }
+
+            return null;
+        }
+
+        private static RenderGraphTexture GetLatestDepthTexture(int boundaryPassIndex)
+        {
+            var depthTexture = GetLatestTextureByName(boundaryPassIndex, "DepthTexture");
+            if (depthTexture != null)
+                return depthTexture;
+
+            depthTexture = GetLatestTextureByName(boundaryPassIndex, "CameraDepth");
+            if (depthTexture != null)
+                return depthTexture;
+
+            for (var passIndex = boundaryPassIndex - 1; passIndex >= 0; passIndex--)
+            {
+                var resources = GetCurrentPassResources(s_RenderPasses[passIndex]);
+                if (resources?.Textures == null)
+                    continue;
+
+                foreach (var entry in resources.Textures)
+                {
+                    if (entry?.Texture == null || !entry.IsDepthAttachment)
+                        continue;
+
+                    if (entry.Texture.desc != null && entry.Texture.desc.DepthBufferBits == DepthBits.None)
+                        continue;
+
+                    return entry.Texture;
+                }
+            }
+
+            return null;
         }
 
         private static void RestoreInjectedSourceOverrides()
@@ -1332,6 +1566,7 @@ namespace VividRP.Runtime
             var injectedStopNaNPass = ShouldInjectStopNaNPass()
                 ? GetOrCreateInjectedStopNaNPass()
                 : null;
+            var injectStpPass = ShouldInjectStpPass();
             var injectedCmaa2Pass = ShouldInjectCmaa2Pass()
                 ? GetOrCreateInjectedCmaa2Pass()
                 : null;
@@ -1360,6 +1595,8 @@ namespace VividRP.Runtime
             var recordedPreImageEffectGizmos = false;
             RenderGraphTexture stopNaNOriginalSource = null;
             RenderGraphTexture stopNaNSanitizedSource = null;
+            RenderGraphTexture stpOriginalSource = null;
+            RenderGraphTexture stpInjectedSource = null;
 
             var passDefinitions = s_RuntimePassDefinitions;
             for (var passIndex = 0; passIndex < s_RenderPasses.Count; passIndex++)
@@ -1389,29 +1626,56 @@ namespace VividRP.Runtime
                 if (pass is IPostProcessSourceOverridePass sourceOverridePass)
                 {
                     var sourceTexture = sourceOverridePass.GetSourceTexture();
+                    var resolvedSourceTexture = sourceTexture;
                     if (injectedStopNaNPass != null
                         && stopNaNSanitizedSource == null
-                        && sourceTexture != null
-                        && sourceTexture.innerHandle.IsValid())
+                        && resolvedSourceTexture != null
+                        && resolvedSourceTexture.innerHandle.IsValid())
                     {
                         RecordInjectedStopNaNPass(
                             renderGraph,
                             injectedStopNaNPass,
-                            sourceTexture,
+                            resolvedSourceTexture,
                             enableAsyncCompute,
                             textureCache,
                             bufferCache,
                             renderListCache,
                             accelerationStructureCache);
-                        stopNaNOriginalSource = sourceTexture;
+                        stopNaNOriginalSource = resolvedSourceTexture;
                         stopNaNSanitizedSource = injectedStopNaNPass.GetOutputTexture();
                     }
 
                     if (stopNaNOriginalSource != null
                         && stopNaNSanitizedSource != null
-                        && ReferenceEquals(sourceTexture, stopNaNOriginalSource))
+                        && ReferenceEquals(resolvedSourceTexture, stopNaNOriginalSource))
                     {
-                        sourceOverridePass.SetSourceTexture(stopNaNSanitizedSource);
+                        resolvedSourceTexture = stopNaNSanitizedSource;
+                    }
+
+                    if (injectStpPass
+                        && stpInjectedSource == null
+                        && resolvedSourceTexture != null
+                        && resolvedSourceTexture.innerHandle.IsValid())
+                    {
+                        stpOriginalSource = resolvedSourceTexture;
+                        stpInjectedSource = RecordInjectedStpPass(
+                            renderGraph,
+                            resolvedSourceTexture,
+                            GetLatestTextureByName(passIndex, "MotionVectors"),
+                            GetLatestDepthTexture(passIndex),
+                            textureCache);
+                    }
+
+                    if (stpOriginalSource != null
+                        && stpInjectedSource != null
+                        && ReferenceEquals(resolvedSourceTexture, stpOriginalSource))
+                    {
+                        resolvedSourceTexture = stpInjectedSource;
+                    }
+
+                    if (!ReferenceEquals(resolvedSourceTexture, sourceTexture) && resolvedSourceTexture != null)
+                    {
+                        sourceOverridePass.SetSourceTexture(resolvedSourceTexture);
                     }
                 }
 

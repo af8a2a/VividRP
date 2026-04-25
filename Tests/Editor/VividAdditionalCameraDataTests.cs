@@ -53,6 +53,26 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void Antialiasing_Setter_TracksStpModeAsTemporalAntialiasing()
+        {
+            var gameObject = new GameObject("VividAdditionalCameraDataTests_STP");
+            var additionalData = gameObject.AddComponent<VividAdditionalCameraData>();
+
+            try
+            {
+                additionalData.antialiasing = VividAntialiasingMode.SpatialTemporalPostProcessing;
+
+                Assert.That(additionalData.enableTAA, Is.False);
+                Assert.That(additionalData.enableSTP, Is.True);
+                Assert.That(additionalData.usesTemporalAntialiasing, Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
+        }
+
         private static void SetPrivateField(object target, string fieldName, object value)
         {
             var field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);

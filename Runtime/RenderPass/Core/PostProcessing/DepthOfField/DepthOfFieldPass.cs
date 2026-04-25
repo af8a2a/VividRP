@@ -101,7 +101,7 @@ namespace VividRP.Runtime
         private int m_CombineFastTilesKernel = -1;
 
         private DepthOfFieldSettingsData m_Settings;
-        private TAASettings m_TAASettings;
+        private bool m_UsesTemporalAntialiasing;
         private Camera m_Camera;
         private GraphicsBuffer m_ApertureShapeBuffer;
         private readonly Vector2[] m_ApertureShapeSamples = new Vector2[ApertureShapeSampleCount];
@@ -227,9 +227,7 @@ namespace VividRP.Runtime
             m_Settings = postProcessingAllowed
                 ? DepthOfFieldSettingsResolver.Resolve()
                 : DepthOfFieldSettingsData.CreateDefault();
-            m_TAASettings = cameraData != null
-                ? TAASettings.FromCamera(cameraData.additionalData)
-                : TAASettings.Disabled;
+            m_UsesTemporalAntialiasing = TAASettings.UsesTemporalAntialiasing(cameraData?.additionalData);
             m_IsFirstFrame = temporalData?.isFirstFrame ?? true;
 
             m_Width = ResolveWidth(cameraData);
@@ -258,7 +256,7 @@ namespace VividRP.Runtime
                 && m_Settings.focusMode != DepthOfFieldMode.Off
                 && (IsNearLayerActive() || IsFarLayerActive());
 
-            if (m_ShouldApply && m_Settings.coCStabilization && m_TAASettings.Enabled)
+            if (m_ShouldApply && m_Settings.coCStabilization && m_UsesTemporalAntialiasing)
             {
                 var historyDesc = CreateHistoryDescriptor();
                 m_HasValidCoCHistory = AllocHistoryTexture(CoCHistoryKey, m_CoCHistoryPrevious, m_CoCHistoryCurrent, historyDesc);
@@ -359,7 +357,7 @@ namespace VividRP.Runtime
         private bool ShouldReprojectCoC()
         {
             return m_Settings.coCStabilization
-                && m_TAASettings.Enabled
+                && m_UsesTemporalAntialiasing
                 && !m_IsFirstFrame
                 && m_HasValidCoCHistory
                 && m_CoCHistoryPrevious?.innerHandle.IsValid() == true

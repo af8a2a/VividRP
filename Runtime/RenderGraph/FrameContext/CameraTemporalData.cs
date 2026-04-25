@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
@@ -15,6 +16,22 @@ namespace VividRP.Runtime
         public Matrix4x4 PreviousProjectionMatrix = Matrix4x4.identity;
         public Matrix4x4 PreviousViewProjection = Matrix4x4.identity;
         public Vector2 PreviousJitter;
+
+        // Two-frame history used by STP's reprojection path
+        public Matrix4x4 PreviousPreviousViewMatrix = Matrix4x4.identity;
+        public Matrix4x4 PreviousPreviousProjectionMatrix = Matrix4x4.identity;
+
+        // Frame dimensions
+        public int Width;
+        public int Height;
+        public int PreviousWidth;
+        public int PreviousHeight;
+
+        // Frame timing
+        public float DeltaTime;
+        public float PreviousDeltaTime;
+
+        public STP.HistoryContext StpHistoryContext;
 
         // Frame tracking
         public int LastFrameIndex = -1;
@@ -37,9 +54,14 @@ namespace VividRP.Runtime
             var view = cameraData.GetViewMatrix();
             var currentVP = gpuProjNoJitter * view;
             var currentJitter = cameraData.GetJitter();
+            var width = ResolveWidth(cameraData);
+            var height = ResolveHeight(cameraData);
+            var deltaTime = Time.deltaTime;
 
             var hasValidHistory = LastFrameIndex >= 0
-                && Mathf.Abs(LastAspectRatio - aspectRatio) < 0.0001f;
+                && Mathf.Abs(LastAspectRatio - aspectRatio) < 0.0001f
+                && Width == width
+                && Height == height;
 
             if (!hasValidHistory)
             {
@@ -48,14 +70,24 @@ namespace VividRP.Runtime
                 PreviousProjectionMatrix = gpuProjNoJitter;
                 PreviousViewProjection = currentVP;
                 PreviousJitter = currentJitter;
+                PreviousPreviousViewMatrix = view;
+                PreviousPreviousProjectionMatrix = gpuProjNoJitter;
+                PreviousWidth = width;
+                PreviousHeight = height;
+                PreviousDeltaTime = deltaTime;
             }
             else if (LastFrameIndex != frameIndex)
             {
                 // New frame — advance history
+                PreviousPreviousViewMatrix = PreviousViewMatrix;
+                PreviousPreviousProjectionMatrix = PreviousProjectionMatrix;
                 PreviousViewMatrix = ViewMatrix;
                 PreviousProjectionMatrix = ProjectionMatrix;
                 PreviousViewProjection = ViewProjection;
                 PreviousJitter = Jitter;
+                PreviousWidth = Width;
+                PreviousHeight = Height;
+                PreviousDeltaTime = DeltaTime;
             }
             // Same frame (e.g. multiple cameras) — previous stays, current updates
 
@@ -63,6 +95,9 @@ namespace VividRP.Runtime
             ProjectionMatrix = gpuProjNoJitter;
             ViewProjection = currentVP;
             Jitter = currentJitter;
+            Width = width;
+            Height = height;
+            DeltaTime = deltaTime;
 
             LastFrameIndex = frameIndex;
             LastAspectRatio = aspectRatio;
@@ -83,8 +118,24 @@ namespace VividRP.Runtime
             PreviousProjectionMatrix = Matrix4x4.identity;
             PreviousViewProjection = Matrix4x4.identity;
             PreviousJitter = Vector2.zero;
+            PreviousPreviousViewMatrix = Matrix4x4.identity;
+            PreviousPreviousProjectionMatrix = Matrix4x4.identity;
+            Width = 0;
+            Height = 0;
+            PreviousWidth = 0;
+            PreviousHeight = 0;
+            DeltaTime = 0f;
+            PreviousDeltaTime = 0f;
             LastFrameIndex = -1;
             LastAspectRatio = -1f;
+            StpHistoryContext?.Dispose();
+            StpHistoryContext = null;
+        }
+
+        public STP.HistoryContext GetOrCreateStpHistoryContext()
+        {
+            StpHistoryContext ??= new STP.HistoryContext();
+            return StpHistoryContext;
         }
 
         private static int ResolveFrameIndex(VividCameraData cameraData)
@@ -110,6 +161,22 @@ namespace VividRP.Runtime
                 return width / (float)height;
 
             return 1f;
+        }
+
+        private static int ResolveWidth(VividCameraData cameraData)
+        {
+            return CameraDimensionUtility.ResolveCameraDimension(
+                cameraData?.actualWidth ?? 0,
+                cameraData?.pixelWidth ?? 0,
+                Screen.width);
+        }
+
+        private static int ResolveHeight(VividCameraData cameraData)
+        {
+            return CameraDimensionUtility.ResolveCameraDimension(
+                cameraData?.actualHeight ?? 0,
+                cameraData?.pixelHeight ?? 0,
+                Screen.height);
         }
     }
 }

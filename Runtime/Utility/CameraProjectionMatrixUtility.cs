@@ -234,11 +234,48 @@ namespace VividRP.Runtime
             if (mode != CameraProjectionStateMode.Explicit || camera == null)
                 return mode;
 
+            if (HasJitteredProjectionPair(camera))
+                return mode;
+
             if (TryResolveParameterDrivenProjectionMode(camera, camera.nonJitteredProjectionMatrix, out var resolvedMode)
                 || TryResolveParameterDrivenProjectionMode(camera, camera.projectionMatrix, out resolvedMode))
                 return resolvedMode;
 
             return mode;
+        }
+
+        private static bool HasJitteredProjectionPair(Camera camera)
+        {
+            if (camera == null)
+                return false;
+
+            var projectionMatrix = camera.projectionMatrix;
+            var nonJitteredProjectionMatrix = camera.nonJitteredProjectionMatrix;
+            if (!IsProjectionMatrixUsable(projectionMatrix)
+                || !IsProjectionMatrixUsable(nonJitteredProjectionMatrix)
+                || MaxAbsDiff(projectionMatrix, nonJitteredProjectionMatrix) <= MatrixTolerance)
+            {
+                return false;
+            }
+
+            return IsJitterMatrix(projectionMatrix * nonJitteredProjectionMatrix.inverse);
+        }
+
+        private static bool IsJitterMatrix(Matrix4x4 matrix)
+        {
+            for (var row = 0; row < 4; row++)
+            {
+                for (var column = 0; column < 4; column++)
+                {
+                    if ((row == 0 || row == 1) && column == 3)
+                        continue;
+
+                    if (Mathf.Abs(matrix[row, column] - Matrix4x4.identity[row, column]) > MatrixTolerance)
+                        return false;
+                }
+            }
+
+            return Mathf.Abs(matrix.m03) > MatrixTolerance || Mathf.Abs(matrix.m13) > MatrixTolerance;
         }
 
         private static bool TryResolveParameterDrivenProjectionMode(

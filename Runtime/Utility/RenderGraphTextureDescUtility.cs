@@ -47,5 +47,35 @@ namespace VividRP.Runtime
 
             return fallbackFormat;
         }
+
+        internal static void Copy(RenderGraphTextureDesc source, RenderGraphTextureDesc destination)
+        {
+            if (source == null || destination == null)
+                return;
+
+            destination.Width = source.Width;
+            destination.Height = source.Height;
+            destination.Slices = source.Slices;
+            destination.Dimension = source.Dimension;
+            destination.ColorFormat = source.ColorFormat;
+            destination.DepthBufferBits = source.DepthBufferBits;
+            destination.MsaaSamples = source.MsaaSamples;
+            destination.FilterMode = source.FilterMode;
+            destination.WrapMode = source.WrapMode;
+            destination.AnisoLevel = source.AnisoLevel;
+            destination.MipMapBias = source.MipMapBias;
+            destination.UseMipMap = source.UseMipMap;
+            destination.AutoGenerateMips = source.AutoGenerateMips;
+            destination.MipCount = source.MipCount;
+            destination.ClearBuffer = source.ClearBuffer;
+            destination.ClearColor = source.ClearColor;
+            destination.IsShadowMap = source.IsShadowMap;
+            destination.EnableRandomWrite = source.EnableRandomWrite;
+            destination.BindTextureMS = source.BindTextureMS;
+            destination.UseDynamicScale = source.UseDynamicScale;
+            destination.UseDynamicScaleExplicit = source.UseDynamicScaleExplicit;
+            destination.ScaleFactor = source.ScaleFactor;
+            destination.Name = source.Name;
+        }
     }
 }

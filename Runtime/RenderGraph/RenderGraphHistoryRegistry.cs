@@ -38,9 +38,41 @@ namespace VividRP.Runtime
             public bool UseDynamicScale;
             public bool UseDynamicScaleExplicit;
             public string Name;
+            public string HistoryKey;
         }
 
-        private static readonly Dictionary<string, HistoryEntry> s_HistoryTextures = new(StringComparer.Ordinal);
+        private readonly struct HistoryScopedKey : IEquatable<HistoryScopedKey>
+        {
+            public HistoryScopedKey(Camera camera, RenderGraphData graphAsset, string historyKey)
+            {
+                CameraId = camera != null ? camera.GetEntityId() : default;
+                GraphAssetId = graphAsset != null ? graphAsset.GetEntityId() : default;
+                HistoryKey = historyKey;
+            }
+
+            private EntityId CameraId { get; }
+            private EntityId GraphAssetId { get; }
+            private string HistoryKey { get; }
+
+            public bool Equals(HistoryScopedKey other)
+            {
+                return CameraId.Equals(other.CameraId)
+                    && GraphAssetId.Equals(other.GraphAssetId)
+                    && string.Equals(HistoryKey, other.HistoryKey, StringComparison.Ordinal);
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is HistoryScopedKey other && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                return HashCode.Combine(CameraId, GraphAssetId, StringComparer.Ordinal.GetHashCode(HistoryKey ?? string.Empty));
+            }
+        }
+
+        private static readonly Dictionary<HistoryScopedKey, HistoryEntry> s_HistoryTextures = new(16);
 
         internal static void Clear()
         {
@@ -273,7 +305,7 @@ namespace VividRP.Runtime
             entry.HasValidData = valid;
         }
 
-        private static HistoryEntry GetOrCreateEntry(string key)
+        private static HistoryEntry GetOrCreateEntry(HistoryScopedKey key)
         {
             if (!s_HistoryTextures.TryGetValue(key, out var entry) || entry == null)
             {
@@ -286,6 +318,9 @@ namespace VividRP.Runtime
 
         private static BufferedRTHandleSystem CreateStorage(HistoryTargetSettings settings)
         {
+            var storageName = string.IsNullOrEmpty(settings.Name)
+                ? $"HistoryTexture_{settings.HistoryKey}"
+                : $"{settings.Name} History";
             var storage = new BufferedRTHandleSystem();
             storage.AllocBuffer(
                 HistoryBufferId,
@@ -308,7 +343,7 @@ namespace VividRP.Runtime
                     bindTextureMS: settings.BindTextureMS,
                     useDynamicScale: settings.UseDynamicScale,
                     useDynamicScaleExplicit: settings.UseDynamicScaleExplicit,
-                    name: $"{settings.Name}[{frameIndex}]"),
+                    name: $"{storageName}[{frameIndex}]"),
                 2);
             return storage;
         }
@@ -334,9 +369,8 @@ namespace VividRP.Runtime
                 BindTextureMS = descriptor?.BindTextureMS ?? false,
                 UseDynamicScale = descriptor?.UseDynamicScale ?? false,
                 UseDynamicScaleExplicit = descriptor?.UseDynamicScaleExplicit ?? false,
-                Name = string.IsNullOrEmpty(descriptor?.Name)
-                    ? $"HistoryTexture_{historyKey}"
-                    : $"{descriptor.Name} History"
+                Name = descriptor?.Name,
+                HistoryKey = historyKey
             };
         }
 
@@ -359,17 +393,18 @@ namespace VividRP.Runtime
                 && left.BindTextureMS == right.BindTextureMS
                 && left.UseDynamicScale == right.UseDynamicScale
                 && left.UseDynamicScaleExplicit == right.UseDynamicScaleExplicit
-                && string.Equals(left.Name, right.Name, StringComparison.Ordinal);
+                && string.Equals(left.Name, right.Name, StringComparison.Ordinal)
+                && string.Equals(left.HistoryKey, right.HistoryKey, StringComparison.Ordinal);
         }
 
-        private static string BuildKey(Camera camera, RenderGraphData graphAsset, int historyIndex)
+        private static HistoryScopedKey BuildKey(Camera camera, RenderGraphData graphAsset, int historyIndex)
         {
             return BuildScopedKey(camera, graphAsset, historyIndex.ToString());
         }
 
-        private static string BuildScopedKey(Camera camera, RenderGraphData graphAsset, string historyKey)
+        private static HistoryScopedKey BuildScopedKey(Camera camera, RenderGraphData graphAsset, string historyKey)
         {
-            return $"{camera.GetEntityId()}|{graphAsset.GetEntityId()}|{historyKey}";
+            return new HistoryScopedKey(camera, graphAsset, historyKey);
         }
     }
 

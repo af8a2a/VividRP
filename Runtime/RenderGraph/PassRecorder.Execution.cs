@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -13,14 +14,54 @@ namespace VividRP.Runtime
 {
     public static partial class PassRecorder
     {
-        private sealed class TextureHistoryFrameBinding
+        private readonly struct TextureHistoryFrameBinding
         {
-            public string Key;
-            public RenderGraphTexture PreviousTexture;
-            public RenderGraphTexture CurrentTexture;
-            public RTHandle PreviousHandle;
-            public RTHandle CurrentHandle;
-            public RenderGraphTextureDesc Descriptor;
+            public TextureHistoryFrameBinding(
+                string key,
+                RenderGraphTexture previousTexture,
+                RenderGraphTexture currentTexture,
+                RTHandle previousHandle,
+                RTHandle currentHandle)
+            {
+                Key = key;
+                PreviousTexture = previousTexture;
+                CurrentTexture = currentTexture;
+                PreviousHandle = previousHandle;
+                CurrentHandle = currentHandle;
+            }
+
+            public string Key { get; }
+            public RenderGraphTexture PreviousTexture { get; }
+            public RenderGraphTexture CurrentTexture { get; }
+            public RTHandle PreviousHandle { get; }
+            public RTHandle CurrentHandle { get; }
+        }
+
+        private readonly struct PassHistoryKeyCacheKey
+        {
+            public PassHistoryKeyCacheKey(IRenderPass pass, string key)
+            {
+                Pass = pass;
+                Key = key;
+            }
+
+            public IRenderPass Pass { get; }
+            public string Key { get; }
+        }
+
+        private sealed class PassHistoryKeyCacheKeyComparer : IEqualityComparer<PassHistoryKeyCacheKey>
+        {
+            public bool Equals(PassHistoryKeyCacheKey x, PassHistoryKeyCacheKey y)
+            {
+                return ReferenceEquals(x.Pass, y.Pass)
+                    && string.Equals(x.Key, y.Key, StringComparison.Ordinal);
+            }
+
+            public int GetHashCode(PassHistoryKeyCacheKey obj)
+            {
+                var passHash = obj.Pass != null ? RuntimeHelpers.GetHashCode(obj.Pass) : 0;
+                return HashCode.Combine(passHash, StringComparer.Ordinal.GetHashCode(obj.Key ?? string.Empty));
+            }
         }
 
         private sealed class CodeManagedBufferHistoryRequest
@@ -34,11 +75,12 @@ namespace VividRP.Runtime
         private static readonly Dictionary<IRenderPass, PassResource> s_PassResources = new();
         private static readonly Dictionary<IRenderPass, int> s_PassIndices = new();
         private static readonly Dictionary<IRenderPass, Dictionary<string, AccessFlags>> s_PassResourceAccessOverrides = new();
+        private static readonly Dictionary<PassHistoryKeyCacheKey, string> s_PassHistoryKeys = new(32, new PassHistoryKeyCacheKeyComparer());
         private static RenderGraphTexture[] s_HistoryPreviousTextures = Array.Empty<RenderGraphTexture>();
         private static RenderGraphTexture[] s_HistoryCurrentTextures = Array.Empty<RenderGraphTexture>();
         private static readonly Dictionary<RenderGraphTexture, RTHandle> s_ImportedRTHandles = new();
         private static readonly Dictionary<IRenderPass, List<ImportedPassTexture>> s_PassImportedHandles = new();
-        private static readonly Dictionary<string, TextureHistoryFrameBinding> s_TextureHistoryFrameBindings = new(StringComparer.Ordinal);
+        private static readonly Dictionary<string, TextureHistoryFrameBinding> s_TextureHistoryFrameBindings = new(16, StringComparer.Ordinal);
         private static readonly Dictionary<string, CodeManagedBufferHistoryRequest> s_CodeManagedBufferHistoryRequests = new(StringComparer.Ordinal);
         private static readonly HashSet<RenderGraphTexture> s_HistoryImportedTextures = new();
         private static readonly HashSet<RenderGraphBuffer> s_CodeManagedHistoryImportedBuffers = new();
@@ -319,6 +361,7 @@ namespace VividRP.Runtime
             s_PassResources.Clear();
             s_PassIndices.Clear();
             s_PassResourceAccessOverrides.Clear();
+            s_PassHistoryKeys.Clear();
             ClearHistoryImportedHandles();
             s_HistoryPreviousTextures = Array.Empty<RenderGraphTexture>();
             s_HistoryCurrentTextures = Array.Empty<RenderGraphTexture>();
@@ -427,22 +470,15 @@ namespace VividRP.Runtime
             if (!TryResolvePassHistoryContext(pass, key, out var historyKey, out var camera, out var graphAsset))
                 return false;
 
-            var descriptor = CloneTextureDescriptor(desc ?? current?.desc ?? previous?.desc);
+            var descriptor = desc ?? current?.desc ?? previous?.desc;
             if (descriptor == null)
             {
                 Debug.LogWarning("[VividRP] Cannot allocate history texture without a descriptor.");
                 return false;
             }
 
-            if (previous != null)
-            {
-                previous.desc = CloneTextureDescriptor(descriptor);
-            }
-
-            if (current != null)
-            {
-                current.desc = CloneTextureDescriptor(descriptor);
-            }
+            AssignTextureDescriptor(previous, descriptor);
+            AssignTextureDescriptor(current, descriptor);
 
             var hasHistoryTextures = RenderGraphHistoryRegistry.AcquireHistoryTextures(
                 camera,
@@ -458,8 +494,7 @@ namespace VividRP.Runtime
                 previous,
                 current,
                 previousHandle,
-                currentHandle,
-                descriptor);
+                currentHandle);
 
             return hasHistoryTextures && hasValidData;
         }
@@ -869,8 +904,7 @@ namespace VividRP.Runtime
             RenderGraphTexture previousTexture,
             RenderGraphTexture currentTexture,
             RTHandle previousHandle,
-            RTHandle currentHandle,
-            RenderGraphTextureDesc descriptor)
+            RTHandle currentHandle)
         {
             if (string.IsNullOrEmpty(historyKey))
                 return;
@@ -878,15 +912,12 @@ namespace VividRP.Runtime
             if (previousTexture == null && currentTexture == null)
                 return;
 
-            s_TextureHistoryFrameBindings[historyKey] = new TextureHistoryFrameBinding
-            {
-                Key = historyKey,
-                PreviousTexture = previousTexture,
-                CurrentTexture = currentTexture,
-                PreviousHandle = previousHandle,
-                CurrentHandle = currentHandle,
-                Descriptor = CloneTextureDescriptor(descriptor),
-            };
+            s_TextureHistoryFrameBindings[historyKey] = new TextureHistoryFrameBinding(
+                historyKey,
+                previousTexture,
+                currentTexture,
+                previousHandle,
+                currentHandle);
         }
 
         internal static bool AllocHistoryBufferForPass(
@@ -954,7 +985,22 @@ namespace VividRP.Runtime
                 s_PassIndices[pass] = passIndex;
             }
 
-            return $"{passIndex}:{key}";
+            var cacheKey = new PassHistoryKeyCacheKey(pass, key);
+            if (s_PassHistoryKeys.TryGetValue(cacheKey, out var historyKey))
+                return historyKey;
+
+            historyKey = $"{passIndex}:{key}";
+            s_PassHistoryKeys[cacheKey] = historyKey;
+            return historyKey;
+        }
+
+        private static void AssignTextureDescriptor(RenderGraphTexture texture, RenderGraphTextureDesc descriptor)
+        {
+            if (texture == null || descriptor == null)
+                return;
+
+            texture.desc ??= new RenderGraphTextureDesc();
+            RenderGraphTextureDescUtility.Copy(descriptor, texture.desc);
         }
 
         private static bool TryResolvePassHistoryContext(
@@ -1462,11 +1508,8 @@ namespace VividRP.Runtime
                 if (previousTexture == null && currentTexture == null)
                     continue;
 
-                if (previousTexture != null)
-                    previousTexture.desc = CloneTextureDescriptor(descriptor) ?? new RenderGraphTextureDesc();
-
-                if (currentTexture != null)
-                    currentTexture.desc = CloneTextureDescriptor(descriptor) ?? new RenderGraphTextureDesc();
+                AssignTextureDescriptor(previousTexture, descriptor);
+                AssignTextureDescriptor(currentTexture, descriptor);
 
                 if (!RenderGraphHistoryRegistry.AcquireHistoryTextures(
                         camera,
@@ -1486,8 +1529,7 @@ namespace VividRP.Runtime
                     previousTexture,
                     currentTexture,
                     previousHandle,
-                    currentHandle,
-                    descriptor);
+                    currentHandle);
             }
         }
 
@@ -1500,8 +1542,8 @@ namespace VividRP.Runtime
 
             foreach (var binding in s_TextureHistoryFrameBindings.Values)
             {
-                ImportHistoryTexture(renderGraph, binding?.PreviousTexture, binding?.PreviousHandle, importedHandles);
-                ImportHistoryTexture(renderGraph, binding?.CurrentTexture, binding?.CurrentHandle, importedHandles);
+                ImportHistoryTexture(renderGraph, binding.PreviousTexture, binding.PreviousHandle, importedHandles);
+                ImportHistoryTexture(renderGraph, binding.CurrentTexture, binding.CurrentHandle, importedHandles);
             }
         }
 
@@ -1552,7 +1594,7 @@ namespace VividRP.Runtime
 
             foreach (var binding in s_TextureHistoryFrameBindings.Values)
             {
-                var currentTexture = binding?.CurrentTexture;
+                var currentTexture = binding.CurrentTexture;
                 if (currentTexture == null || !ShouldPersistHistoryTexture(currentTexture))
                 {
                     continue;

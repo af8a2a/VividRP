@@ -1,4 +1,5 @@
 using System;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -30,6 +31,10 @@ namespace VividRP.Runtime
         private static readonly int Params1Id = Shader.PropertyToID("_VividDoFParams1");
         private static readonly int ApertureShapeTableId = Shader.PropertyToID("_VividDoFApertureShapeTable");
         private static readonly int ApertureShapeTableCountId = Shader.PropertyToID("_VividDoFApertureShapeTableCount");
+        private static readonly ProfilerMarker s_PrepareSettingsMarker = new("VividRP.RenderPass.DepthOfField.Prepare.Settings");
+        private static readonly ProfilerMarker s_PrepareDescriptorsMarker = new("VividRP.RenderPass.DepthOfField.Prepare.Descriptors");
+        private static readonly ProfilerMarker s_PrepareHistoryMarker = new("VividRP.RenderPass.DepthOfField.Prepare.History");
+        private static readonly ProfilerMarker s_PrepareApertureMarker = new("VividRP.RenderPass.DepthOfField.Prepare.Aperture");
 
         [RenderGraphResource(Access = AccessFlags.Read)]
         private RenderGraphTexture source = new();
@@ -103,6 +108,7 @@ namespace VividRP.Runtime
         private DepthOfFieldSettingsData m_Settings;
         private bool m_UsesTemporalAntialiasing;
         private Camera m_Camera;
+        private readonly RenderGraphTextureDesc m_CoCHistoryDescriptor = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16_SFloat);
         private GraphicsBuffer m_ApertureShapeBuffer;
         private readonly Vector2[] m_ApertureShapeSamples = new Vector2[ApertureShapeSampleCount];
         private Vector2 m_LastApertureCurvature;
@@ -219,55 +225,71 @@ namespace VividRP.Runtime
 
         public override void Prepare(ContextContainer frameData)
         {
-            var cameraData = frameData.Get<VividCameraData>();
-            var temporalData = frameData.Get<VividTemporalData>();
-            m_Camera = cameraData?.camera;
-            var postProcessingAllowed = m_Camera != null && CoreUtils.ArePostProcessesEnabled(m_Camera);
+            VividCameraData cameraData;
+            VividTemporalData temporalData;
+            bool postProcessingAllowed;
 
-            m_Settings = postProcessingAllowed
-                ? DepthOfFieldSettingsResolver.Resolve()
-                : DepthOfFieldSettingsData.CreateDefault();
-            m_UsesTemporalAntialiasing = TAASettings.UsesTemporalAntialiasing(cameraData?.additionalData);
-            m_IsFirstFrame = temporalData?.isFirstFrame ?? true;
-
-            m_Width = ResolveWidth(cameraData);
-            m_Height = ResolveHeight(cameraData);
-
-            var computeColorFormat = ResolveComputeColorFormat(source?.desc);
-            m_ResolutionDivisor = Mathf.Max(1, (int)m_Settings.resolution);
-            m_ScaledWidth = Mathf.Max(1, Mathf.CeilToInt(m_Width / (float)m_ResolutionDivisor));
-            m_ScaledHeight = Mathf.Max(1, Mathf.CeilToInt(m_Height / (float)m_ResolutionDivisor));
-            m_TileCountX = Mathf.Max(1, Mathf.CeilToInt(m_Width / (float)TileSize));
-            m_TileCountY = Mathf.Max(1, Mathf.CeilToInt(m_Height / (float)TileSize));
-            m_NearSampleCount = ResolveSampleCount(m_Settings.nearSampleCount);
-            m_FarSampleCount = ResolveSampleCount(m_Settings.farSampleCount);
-
-            UpdateOutputDescriptor(source);
-            ConfigureColorTexture(output, source?.desc, "DepthOfFieldOutput", m_Width, m_Height, computeColorFormat, true, FilterMode.Bilinear, 1f);
-            ConfigureColorTexture(m_ScaledSource, source?.desc, "DepthOfFieldScaledSource", m_ScaledWidth, m_ScaledHeight, computeColorFormat, true, FilterMode.Bilinear, 1f / m_ResolutionDivisor);
-            ConfigureColorTexture(m_ScaledBlur, source?.desc, "DepthOfFieldScaledBlur", m_ScaledWidth, m_ScaledHeight, computeColorFormat, true, FilterMode.Bilinear, 1f / m_ResolutionDivisor);
-            ConfigureColorTexture(m_FullResCoC, null, "DepthOfFieldCoC", m_Width, m_Height, GraphicsFormat.R16_SFloat, true, FilterMode.Point, 1f);
-            ConfigureColorTexture(m_TileMinMaxPing, null, "DepthOfFieldTileMinMaxPing", m_TileCountX, m_TileCountY, GraphicsFormat.R16G16B16A16_SFloat, true, FilterMode.Point, 1f);
-            ConfigureColorTexture(m_TileMinMaxPong, null, "DepthOfFieldTileMinMaxPong", m_TileCountX, m_TileCountY, GraphicsFormat.R16G16B16A16_SFloat, true, FilterMode.Point, 1f);
-
-            m_ShouldApply = postProcessingAllowed
-                && m_Settings.enabled
-                && m_Settings.physicallyBased
-                && m_Settings.focusMode != DepthOfFieldMode.Off
-                && (IsNearLayerActive() || IsFarLayerActive());
-
-            if (m_ShouldApply && m_Settings.coCStabilization && m_UsesTemporalAntialiasing)
+            using (s_PrepareSettingsMarker.Auto())
             {
-                var historyDesc = CreateHistoryDescriptor();
-                m_HasValidCoCHistory = AllocHistoryTexture(CoCHistoryKey, m_CoCHistoryPrevious, m_CoCHistoryCurrent, historyDesc);
-            }
-            else
-            {
-                m_HasValidCoCHistory = false;
+                cameraData = frameData.Get<VividCameraData>();
+                temporalData = frameData.Get<VividTemporalData>();
+                m_Camera = cameraData?.camera;
+                postProcessingAllowed = m_Camera != null && CoreUtils.ArePostProcessesEnabled(m_Camera);
+
+                m_Settings = postProcessingAllowed
+                    ? DepthOfFieldSettingsResolver.Resolve()
+                    : DepthOfFieldSettingsData.CreateDefault();
+                m_UsesTemporalAntialiasing = TAASettings.UsesTemporalAntialiasing(cameraData?.additionalData);
+                m_IsFirstFrame = temporalData?.isFirstFrame ?? true;
             }
 
-            EnsureApertureShapeBuffer();
-            UpdateApertureShapeBuffer();
+            using (s_PrepareDescriptorsMarker.Auto())
+            {
+                m_Width = ResolveWidth(cameraData);
+                m_Height = ResolveHeight(cameraData);
+
+                var computeColorFormat = ResolveComputeColorFormat(source?.desc);
+                m_ResolutionDivisor = Mathf.Max(1, (int)m_Settings.resolution);
+                m_ScaledWidth = Mathf.Max(1, Mathf.CeilToInt(m_Width / (float)m_ResolutionDivisor));
+                m_ScaledHeight = Mathf.Max(1, Mathf.CeilToInt(m_Height / (float)m_ResolutionDivisor));
+                m_TileCountX = Mathf.Max(1, Mathf.CeilToInt(m_Width / (float)TileSize));
+                m_TileCountY = Mathf.Max(1, Mathf.CeilToInt(m_Height / (float)TileSize));
+                m_NearSampleCount = ResolveSampleCount(m_Settings.nearSampleCount);
+                m_FarSampleCount = ResolveSampleCount(m_Settings.farSampleCount);
+
+                UpdateOutputDescriptor(source);
+                ConfigureColorTexture(output, source?.desc, "DepthOfFieldOutput", m_Width, m_Height, computeColorFormat, true, FilterMode.Bilinear, 1f);
+                ConfigureColorTexture(m_ScaledSource, source?.desc, "DepthOfFieldScaledSource", m_ScaledWidth, m_ScaledHeight, computeColorFormat, true, FilterMode.Bilinear, 1f / m_ResolutionDivisor);
+                ConfigureColorTexture(m_ScaledBlur, source?.desc, "DepthOfFieldScaledBlur", m_ScaledWidth, m_ScaledHeight, computeColorFormat, true, FilterMode.Bilinear, 1f / m_ResolutionDivisor);
+                ConfigureColorTexture(m_FullResCoC, null, "DepthOfFieldCoC", m_Width, m_Height, GraphicsFormat.R16_SFloat, true, FilterMode.Point, 1f);
+                ConfigureColorTexture(m_TileMinMaxPing, null, "DepthOfFieldTileMinMaxPing", m_TileCountX, m_TileCountY, GraphicsFormat.R16G16B16A16_SFloat, true, FilterMode.Point, 1f);
+                ConfigureColorTexture(m_TileMinMaxPong, null, "DepthOfFieldTileMinMaxPong", m_TileCountX, m_TileCountY, GraphicsFormat.R16G16B16A16_SFloat, true, FilterMode.Point, 1f);
+            }
+
+            using (s_PrepareHistoryMarker.Auto())
+            {
+                m_ShouldApply = postProcessingAllowed
+                    && m_Settings.enabled
+                    && m_Settings.physicallyBased
+                    && m_Settings.focusMode != DepthOfFieldMode.Off
+                    && (IsNearLayerActive() || IsFarLayerActive());
+
+                if (m_ShouldApply && m_Settings.coCStabilization && m_UsesTemporalAntialiasing)
+                {
+                    var historyDesc = CreateHistoryDescriptor();
+                    m_HasValidCoCHistory = AllocHistoryTexture(CoCHistoryKey, m_CoCHistoryPrevious, m_CoCHistoryCurrent, historyDesc);
+                }
+                else
+                {
+                    m_HasValidCoCHistory = false;
+                }
+            }
+
+            using (s_PrepareApertureMarker.Auto())
+            {
+                EnsureApertureShapeBuffer();
+                UpdateApertureShapeBuffer();
+            }
         }
 
         public override void Record(UnsafePassContext context)
@@ -618,7 +640,7 @@ namespace VividRP.Runtime
             if (sourceDesc == null)
                 return;
 
-            output.desc = sourceDesc.Clone();
+            RenderGraphTextureDescUtility.Copy(sourceDesc, output.desc);
             output.desc.Name = "DepthOfFieldOutput";
             output.desc.ColorFormat = ResolveComputeColorFormat(sourceDesc);
             output.desc.DepthBufferBits = DepthBits.None;
@@ -635,8 +657,10 @@ namespace VividRP.Runtime
 
         private RenderGraphTextureDesc CreateHistoryDescriptor()
         {
-            var desc = m_CoCHistoryPrevious?.desc?.Clone()
-                ?? RenderGraphTextureDesc.CreateColorTarget(m_Width, m_Height, GraphicsFormat.R16_SFloat);
+            var desc = m_CoCHistoryDescriptor;
+            if (m_CoCHistoryPrevious?.desc != null)
+                RenderGraphTextureDescUtility.Copy(m_CoCHistoryPrevious.desc, desc);
+
             desc.Name = "DepthOfFieldCoCHistoryCurrent";
             desc.Width = m_Width;
             desc.Height = m_Height;
@@ -669,7 +693,7 @@ namespace VividRP.Runtime
                 return;
 
             if (sourceDescriptor != null)
-                texture.desc = sourceDescriptor.Clone();
+                RenderGraphTextureDescUtility.Copy(sourceDescriptor, texture.desc);
 
             texture.desc.Name = name;
             texture.desc.Width = Mathf.Max(1, width);

@@ -43,7 +43,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Prepare_ClonesOutputDescriptor_FromSourceTexture()
+        public void Prepare_ConfiguresOutputDescriptor_FromSourceTexture()
         {
             var pass = new DepthOfFieldPass();
             var sourceField = typeof(DepthOfFieldPass).GetField("source", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -94,6 +94,7 @@ namespace VividRP.Editor.Tests
             Assert.That(sourceField, Is.Not.Null);
             Assert.That(outputField, Is.Not.Null);
             sourceField.SetValue(pass, originalSource);
+            var initialOutputDesc = ((RenderGraphTexture)outputField.GetValue(pass)).desc;
 
             setMethod.Invoke(pass, new object[] { injectedSource });
 
@@ -101,6 +102,8 @@ namespace VividRP.Editor.Tests
             Assert.That(sourceField.GetValue(pass), Is.SameAs(injectedSource));
 
             var outputTexture = (RenderGraphTexture)outputField.GetValue(pass);
+            Assert.That(outputTexture.desc, Is.SameAs(initialOutputDesc));
+            Assert.That(outputTexture.desc, Is.Not.SameAs(injectedSource.desc));
             Assert.That(outputTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.B10G11R11_UFloatPack32));
             Assert.That(outputTexture.desc.Width, Is.EqualTo(256));
             Assert.That(outputTexture.desc.Height, Is.EqualTo(128));
@@ -138,6 +141,32 @@ namespace VividRP.Editor.Tests
             Assert.That(pass.IsPassResourceLayoutDirty, Is.True);
             Assert.That(PassResourceReferenceRefreshUtility.TryRefresh(pass, resources), Is.True);
             Assert.That(sourceEntry.Texture, Is.SameAs(injectedSource));
+        }
+
+        [Test]
+        public void CreateHistoryDescriptor_ReusesDescriptorInstance()
+        {
+            var pass = new DepthOfFieldPass();
+            var createHistoryDescriptor = typeof(DepthOfFieldPass).GetMethod("CreateHistoryDescriptor", BindingFlags.Instance | BindingFlags.NonPublic);
+            var widthField = typeof(DepthOfFieldPass).GetField("m_Width", BindingFlags.Instance | BindingFlags.NonPublic);
+            var heightField = typeof(DepthOfFieldPass).GetField("m_Height", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(createHistoryDescriptor, Is.Not.Null);
+            Assert.That(widthField, Is.Not.Null);
+            Assert.That(heightField, Is.Not.Null);
+
+            widthField.SetValue(pass, 640);
+            heightField.SetValue(pass, 360);
+            var firstDescriptor = (RenderGraphTextureDesc)createHistoryDescriptor.Invoke(pass, Array.Empty<object>());
+
+            widthField.SetValue(pass, 1280);
+            heightField.SetValue(pass, 720);
+            var secondDescriptor = (RenderGraphTextureDesc)createHistoryDescriptor.Invoke(pass, Array.Empty<object>());
+
+            Assert.That(secondDescriptor, Is.SameAs(firstDescriptor));
+            Assert.That(secondDescriptor.Width, Is.EqualTo(1280));
+            Assert.That(secondDescriptor.Height, Is.EqualTo(720));
+            Assert.That(secondDescriptor.Name, Is.EqualTo("DepthOfFieldCoCHistoryCurrent"));
         }
 
         [Test]

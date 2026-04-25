@@ -115,6 +115,32 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void RefreshResourceReferences_UpdatesCachedSourceEntry_WhenSourceOverrideChanges()
+        {
+            var pass = new DepthOfFieldPass();
+            var setMethod = typeof(DepthOfFieldPass).GetMethod("SetSourceTexture", BindingFlags.Instance | BindingFlags.NonPublic);
+            var sourceField = typeof(DepthOfFieldPass).GetField("source", BindingFlags.Instance | BindingFlags.NonPublic);
+            var originalSource = RenderGraphTexture.CreateInput("OriginalSource", GraphicsFormat.R16G16B16A16_SFloat);
+            var injectedSource = RenderGraphTexture.CreateInput("InjectedSource", GraphicsFormat.B10G11R11_UFloatPack32);
+
+            Assert.That(setMethod, Is.Not.Null);
+            Assert.That(sourceField, Is.Not.Null);
+            sourceField.SetValue(pass, originalSource);
+
+            var resources = ((IRenderPass)pass).Initialize();
+            var sourceEntry = Array.Find(resources.Textures, texture => texture.Name == "source");
+
+            Assert.That(sourceEntry, Is.Not.Null);
+            Assert.That(sourceEntry.Texture, Is.SameAs(originalSource));
+
+            setMethod.Invoke(pass, new object[] { injectedSource });
+
+            Assert.That(pass.IsPassResourceLayoutDirty, Is.True);
+            Assert.That(PassResourceReferenceRefreshUtility.TryRefresh(pass, resources), Is.True);
+            Assert.That(sourceEntry.Texture, Is.SameAs(injectedSource));
+        }
+
+        [Test]
         public void DepthOfFieldPassNode_ExposesSourceDepthMotionInputs_AndOwnedOutputPort()
         {
             var node = new AutoRegisteredDepthOfFieldPassNode();

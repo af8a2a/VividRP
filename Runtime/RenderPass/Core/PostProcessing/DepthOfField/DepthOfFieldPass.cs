@@ -6,7 +6,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
 {
-    public sealed class DepthOfFieldPass : UnsafePass, IPostProcessSourceOverridePass
+    public sealed class DepthOfFieldPass : UnsafePass, IPostProcessSourceOverridePass, IStablePassResourceLayout
     {
         private const int ThreadGroupSize = 8;
         private const int TileSize = 8;

@@ -1923,7 +1923,21 @@ namespace VividRP.Runtime
             var needsRefresh = pass is IDynamicPassResourceLayout dynamicLayoutPass
                                && dynamicLayoutPass.IsPassResourceLayoutDirty;
 
-            if (!s_PassResources.TryGetValue(pass, out var resources) || needsRefresh)
+            var hasResources = s_PassResources.TryGetValue(pass, out var resources);
+            if (hasResources
+                && needsRefresh
+                && pass is IStablePassResourceLayout
+                && PassResourceReferenceRefreshUtility.TryRefresh(pass, resources))
+            {
+                ApplyResourceAccessOverrides(pass, resources);
+
+                if (pass is IDynamicPassResourceLayout refreshedStableLayoutPass)
+                    refreshedStableLayoutPass.ClearPassResourceLayoutDirty();
+
+                return resources;
+            }
+
+            if (!hasResources || needsRefresh)
             {
                 var markers = RenderPassProfilingUtility.GetMarkers(pass, displayName, ResolvePassIndex(pass));
                 using (markers.Initialize.Auto())

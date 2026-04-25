@@ -232,6 +232,61 @@ namespace VividRP.Runtime
         void ClearPassResourceLayoutDirty();
     }
 
+    /// <summary>
+    /// Marks a dynamic pass whose resource fields stay fixed while their descriptor instances may change.
+    /// </summary>
+    public interface IStablePassResourceLayout : IDynamicPassResourceLayout
+    {
+    }
+
+    internal static class PassResourceReferenceRefreshUtility
+    {
+        internal static bool TryRefresh(object pass, PassResource resources)
+        {
+            if (pass == null || resources == null)
+                return false;
+
+            return TryRefreshEntries(pass, resources.Textures)
+                && TryRefreshEntries(pass, resources.Buffers)
+                && TryRefreshEntries(pass, resources.RenderLists)
+                && TryRefreshEntries(pass, resources.AccelerationStructures);
+        }
+
+        private static bool TryRefreshEntries(object pass, PassResourceEntry[] entries)
+        {
+            if (entries == null)
+                return true;
+
+            for (var i = 0; i < entries.Length; i++)
+            {
+                var entry = entries[i];
+                var field = entry?.Field;
+                if (field == null)
+                    continue;
+
+                var descriptor = field.GetValue(pass);
+                if (descriptor == null || !MatchesResourceType(descriptor, entry.ResourceType))
+                    return false;
+
+                entry.Descriptor = descriptor;
+            }
+
+            return true;
+        }
+
+        private static bool MatchesResourceType(object descriptor, PassResourceType resourceType)
+        {
+            return resourceType switch
+            {
+                PassResourceType.Texture => descriptor is RenderGraphTexture,
+                PassResourceType.Buffer => descriptor is RenderGraphBuffer,
+                PassResourceType.RenderList => descriptor is RenderGraphRenderList,
+                PassResourceType.AccelerationStructure => descriptor is RenderGraphAccelerationStructure,
+                _ => false
+            };
+        }
+    }
+
     public interface IAsyncComputeSupportedPass
     {
     }

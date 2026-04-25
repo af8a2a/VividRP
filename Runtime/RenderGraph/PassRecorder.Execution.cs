@@ -51,6 +51,7 @@ namespace VividRP.Runtime
         private static bool s_RenderedPreImageEffectGizmosInGraph;
         private static StopNaNPass s_InjectedStopNaNPass;
         private static CMAA2Pass s_InjectedCmaa2Pass;
+        private static DLSSPass s_InjectedDlssPass;
 
 #if UNITY_EDITOR
         private sealed class RenderGizmosPassData
@@ -110,6 +111,16 @@ namespace VividRP.Runtime
                 return;
             }
 
+            if (additionalCameraData != null && additionalCameraData.enableDLSS)
+            {
+                if (DLSSExtension.IsSuperResolutionSupported)
+                    ApplyDlssJitter(camera, additionalCameraData, nonJitteredProj);
+                else
+                    CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+
+                return;
+            }
+
             var taaSettings = TAASettings.FromCamera(additionalCameraData);
             if (!taaSettings.Enabled)
             {
@@ -133,6 +144,36 @@ namespace VividRP.Runtime
             var jitterMatrix = Matrix4x4.identity;
             jitterMatrix.m03 = jitterX;
             jitterMatrix.m13 = jitterY;
+
+            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
+        }
+
+        private static void ApplyDlssJitter(
+            Camera camera,
+            VividAdditionalCameraData additionalCameraData,
+            Matrix4x4 nonJitteredProj)
+        {
+            if (camera == null)
+                return;
+
+            var pixelWidth = camera.pixelWidth;
+            var pixelHeight = camera.pixelHeight;
+            if (pixelWidth <= 0 || pixelHeight <= 0)
+            {
+                CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                return;
+            }
+
+            var sampleCount = additionalCameraData != null
+                ? Mathf.Max(4, additionalCameraData.taaSampleCount)
+                : 8;
+            var jitterSpread = additionalCameraData != null
+                ? additionalCameraData.taaJitterSpread
+                : 1.0f;
+            var jitter = HaltonJitter.Get(Time.frameCount, sampleCount) * jitterSpread;
+            var jitterMatrix = Matrix4x4.identity;
+            jitterMatrix.m03 = jitter.x * 2.0f / pixelWidth;
+            jitterMatrix.m13 = jitter.y * 2.0f / pixelHeight;
 
             CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
         }
@@ -214,6 +255,20 @@ namespace VividRP.Runtime
                 }
 
                 s_InjectedStopNaNPass = null;
+            }
+
+            if (s_InjectedDlssPass != null)
+            {
+                try
+                {
+                    s_InjectedDlssPass.Dispose();
+                }
+                catch (Exception e)
+                {
+                    Debug.LogException(e);
+                }
+
+                s_InjectedDlssPass = null;
             }
 
             DisposeAccelerationStructures();
@@ -424,6 +479,14 @@ namespace VividRP.Runtime
             return TAASettings.UsesStp(additionalData) && STP.IsSupported();
         }
 
+        private static bool ShouldInjectDlssPass()
+        {
+            var additionalData = s_FrameData.GetOrCreate<VividCameraData>().additionalData;
+            return additionalData != null
+                && additionalData.enableDLSS
+                && DLSSExtension.IsSuperResolutionSupported;
+        }
+
         private static StopNaNPass GetOrCreateInjectedStopNaNPass()
         {
             if (s_InjectedStopNaNPass != null)
@@ -444,6 +507,11 @@ namespace VividRP.Runtime
             s_InjectedCmaa2Pass.Create();
             GetCurrentPassResources(s_InjectedCmaa2Pass);
             return s_InjectedCmaa2Pass;
+        }
+
+        private static DLSSPass GetOrCreateInjectedDlssPass()
+        {
+            return s_InjectedDlssPass ??= new DLSSPass();
         }
 
         private static void RecordInjectedCmaa2Pass(
@@ -612,6 +680,41 @@ namespace VividRP.Runtime
             };
             textureCache[stpOutputTexture] = stpOutputHandle;
             return stpOutputTexture;
+        }
+
+        private static RenderGraphTexture RecordInjectedDlssPass(
+            RenderGraph renderGraph,
+            DLSSPass dlssPass,
+            RenderGraphTexture sourceTexture,
+            RenderGraphTexture motionTexture,
+            RenderGraphTexture depthTexture,
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache)
+        {
+            if (dlssPass == null
+                || renderGraph == null
+                || sourceTexture == null
+                || motionTexture == null
+                || depthTexture == null
+                || sourceTexture.innerHandle.IsValid() != true
+                || motionTexture.innerHandle.IsValid() != true
+                || depthTexture.innerHandle.IsValid() != true)
+            {
+                return null;
+            }
+
+            var cameraData = s_FrameData.Get<VividCameraData>();
+            var camera = cameraData?.camera;
+            if (camera == null)
+                return null;
+
+            return dlssPass.Record(
+                renderGraph,
+                cameraData,
+                FrameContextSystem.GetOrCreate(camera),
+                sourceTexture,
+                depthTexture,
+                motionTexture,
+                textureCache);
         }
 
         private static RenderGraphTextureDesc CreateInjectedStpOutputDescriptor(
@@ -1566,6 +1669,9 @@ namespace VividRP.Runtime
             var injectedStopNaNPass = ShouldInjectStopNaNPass()
                 ? GetOrCreateInjectedStopNaNPass()
                 : null;
+            var injectedDlssPass = ShouldInjectDlssPass()
+                ? GetOrCreateInjectedDlssPass()
+                : null;
             var injectStpPass = ShouldInjectStpPass();
             var injectedCmaa2Pass = ShouldInjectCmaa2Pass()
                 ? GetOrCreateInjectedCmaa2Pass()
@@ -1595,6 +1701,8 @@ namespace VividRP.Runtime
             var recordedPreImageEffectGizmos = false;
             RenderGraphTexture stopNaNOriginalSource = null;
             RenderGraphTexture stopNaNSanitizedSource = null;
+            RenderGraphTexture dlssOriginalSource = null;
+            RenderGraphTexture dlssInjectedSource = null;
             RenderGraphTexture stpOriginalSource = null;
             RenderGraphTexture stpInjectedSource = null;
 
@@ -1650,6 +1758,28 @@ namespace VividRP.Runtime
                         && ReferenceEquals(resolvedSourceTexture, stopNaNOriginalSource))
                     {
                         resolvedSourceTexture = stopNaNSanitizedSource;
+                    }
+
+                    if (injectedDlssPass != null
+                        && dlssInjectedSource == null
+                        && resolvedSourceTexture != null
+                        && resolvedSourceTexture.innerHandle.IsValid())
+                    {
+                        dlssOriginalSource = resolvedSourceTexture;
+                        dlssInjectedSource = RecordInjectedDlssPass(
+                            renderGraph,
+                            injectedDlssPass,
+                            resolvedSourceTexture,
+                            GetLatestTextureByName(passIndex, "MotionVectors"),
+                            GetLatestDepthTexture(passIndex),
+                            textureCache);
+                    }
+
+                    if (dlssOriginalSource != null
+                        && dlssInjectedSource != null
+                        && ReferenceEquals(resolvedSourceTexture, dlssOriginalSource))
+                    {
+                        resolvedSourceTexture = dlssInjectedSource;
                     }
 
                     if (injectStpPass

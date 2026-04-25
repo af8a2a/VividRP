@@ -34,6 +34,7 @@ namespace VividRP.Runtime
             LensFlareCommonSRP.Initialize();
             VividAdaptiveProbeVolumeUtility.Initialize(asset);
             VividGPUDrivenSystem.Initialize();
+            DLSSExtension.Initialize();
 
             m_RenderGraph = new RenderGraph(RenderGraphName);
             m_DebugDisplaySettingsUI = new DebugDisplaySettingsUI();
@@ -243,6 +244,7 @@ namespace VividRP.Runtime
             VividVolumeManagerUtility.Deinitialize();
             DecalSystem.Deinitialize();
             VividGPUDrivenSystem.Deinitialize();
+            DLSSExtension.Shutdown();
             m_DebugDisplaySettingsUI?.UnregisterDebug();
             m_DebugDisplaySettingsUI = null;
 

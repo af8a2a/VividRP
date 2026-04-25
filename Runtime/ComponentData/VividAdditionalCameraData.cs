@@ -23,6 +23,9 @@ namespace VividRP.Runtime
 
         [InspectorName("Spatial-Temporal Post-Processing (STP)")]
         SpatialTemporalPostProcessing,
+
+        [InspectorName("Deep Learning Super Sampling (DLSS)")]
+        DeepLearningSuperSampling,
     }
 
     public static class VividCameraExtensions
@@ -81,6 +84,9 @@ namespace VividRP.Runtime
 
         [SerializeField, Range(0.0f, 1.0f)]
         private float m_TAAAntiFlickerIntensity = 0.5f;
+
+        [SerializeField]
+        private DLSSQuality m_DLSSQuality = DLSSQuality.Balanced;
 
         private Matrix4x4 m_ViewMatrix = Matrix4x4.identity;
         private Matrix4x4 m_ProjectionMatrix = Matrix4x4.identity;
@@ -219,9 +225,18 @@ namespace VividRP.Runtime
                 : VividAntialiasingMode.None;
         }
 
+        public bool enableDLSS
+        {
+            get => antialiasing == VividAntialiasingMode.DeepLearningSuperSampling;
+            set => antialiasing = value
+                ? VividAntialiasingMode.DeepLearningSuperSampling
+                : VividAntialiasingMode.None;
+        }
+
         public bool usesTemporalAntialiasing =>
             antialiasing == VividAntialiasingMode.TemporalAntiAliasing
-            || antialiasing == VividAntialiasingMode.SpatialTemporalPostProcessing;
+            || antialiasing == VividAntialiasingMode.SpatialTemporalPostProcessing
+            || antialiasing == VividAntialiasingMode.DeepLearningSuperSampling;
 
         public bool enableCMAA2
         {
@@ -259,6 +274,12 @@ namespace VividRP.Runtime
         {
             get => m_TAAAntiFlickerIntensity;
             set => m_TAAAntiFlickerIntensity = Mathf.Clamp01(value);
+        }
+
+        public DLSSQuality dlssQuality
+        {
+            get => m_DLSSQuality;
+            set => m_DLSSQuality = value;
         }
 
         private void OnValidate()

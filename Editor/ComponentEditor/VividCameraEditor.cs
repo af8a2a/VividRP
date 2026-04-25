@@ -25,6 +25,8 @@ namespace VividRP.Editor
         private static readonly GUIContent s_TAABaseBlendFactorLabel = EditorGUIUtility.TrTextContent("Base Blend");
         private static readonly GUIContent s_TAAMotionWeightDecayLabel = EditorGUIUtility.TrTextContent("Motion Decay");
         private static readonly GUIContent s_TAAAntiFlickerIntensityLabel = EditorGUIUtility.TrTextContent("Anti-Flicker");
+        private static readonly GUIContent s_DLSSLabel = EditorGUIUtility.TrTextContent("Deep Learning Super Sampling");
+        private static readonly GUIContent s_DLSSQualityLabel = EditorGUIUtility.TrTextContent("Quality");
 
         private CameraEditor.Settings m_Settings;
         private VividSerializedCamera m_SerializedCamera;
@@ -117,6 +119,13 @@ namespace VividRP.Editor
                     EditorGUILayout.PropertyField(m_SerializedCamera.taaMotionWeightDecay, s_TAAMotionWeightDecayLabel);
                     EditorGUILayout.PropertyField(m_SerializedCamera.taaAntiFlickerIntensity, s_TAAAntiFlickerIntensityLabel);
                 }
+
+                if (ShouldShowDLSSSettings())
+                {
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField(s_DLSSLabel, EditorStyles.boldLabel);
+                    EditorGUILayout.PropertyField(m_SerializedCamera.dlssQuality, s_DLSSQualityLabel);
+                }
             }
         }
 
@@ -136,6 +145,16 @@ namespace VividRP.Editor
             return m_SerializedCamera.antialiasing.hasMultipleDifferentValues
                 || (VividAntialiasingMode)m_SerializedCamera.antialiasing.enumValueIndex
                 == VividAntialiasingMode.TemporalAntiAliasing;
+        }
+
+        private bool ShouldShowDLSSSettings()
+        {
+            if (m_SerializedCamera.antialiasing == null)
+                return false;
+
+            return m_SerializedCamera.antialiasing.hasMultipleDifferentValues
+                || (VividAntialiasingMode)m_SerializedCamera.antialiasing.enumValueIndex
+                == VividAntialiasingMode.DeepLearningSuperSampling;
         }
     }
 

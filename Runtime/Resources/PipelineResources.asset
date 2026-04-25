@@ -37,6 +37,10 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: fb20577e3a98eaa40bd738cd3008ce12, type: 3}
   - ResourceName: Shaders/Core/Private/CoreBlitColorAndDepth
     ResourceObject: {fileID: 4800000, guid: 7a938306786128241b2810fe10cd3f55, type: 3}
+  - ResourceName: Shaders/Core/Private/DLSS/DLSSBiasColorMask
+    ResourceObject: {fileID: 4800000, guid: 991f2e914430a3f4fb2a40bbb1a7d25d, type: 3}
+  - ResourceName: Shaders/Core/Private/DLSS/DLSSRRResourcePrep.compute
+    ResourceObject: {fileID: 7200000, guid: 216bd546f18c48f46b227f8f10684231, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/ClusterDebug
     ResourceObject: {fileID: 4800000, guid: 6f6db95f8fa24fb4a9eb1b9e36203f75, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/ExposureDebug

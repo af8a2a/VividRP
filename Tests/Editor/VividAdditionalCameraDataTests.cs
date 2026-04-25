@@ -73,6 +73,29 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void Antialiasing_Setter_TracksDlssModeAsTemporalAntialiasing()
+        {
+            var gameObject = new GameObject("VividAdditionalCameraDataTests_DLSS");
+            var additionalData = gameObject.AddComponent<VividAdditionalCameraData>();
+
+            try
+            {
+                additionalData.enableDLSS = true;
+                additionalData.dlssQuality = DLSSQuality.MaxQuality;
+
+                Assert.That(additionalData.antialiasing, Is.EqualTo(VividAntialiasingMode.DeepLearningSuperSampling));
+                Assert.That(additionalData.enableDLSS, Is.True);
+                Assert.That(additionalData.enableTAA, Is.False);
+                Assert.That(additionalData.usesTemporalAntialiasing, Is.True);
+                Assert.That(additionalData.dlssQuality, Is.EqualTo(DLSSQuality.MaxQuality));
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
+        }
+
         private static void SetPrivateField(object target, string fieldName, object value)
         {
             var field = target.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);

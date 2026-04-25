@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
+using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime;
@@ -43,6 +44,23 @@ namespace VividRP.Editor.Tests
             AssertBindingMode("m_LayeredOffsetBuffer", RenderGraphResourceBindingMode.PassOwnedOverrideable);
             AssertBindingMode("m_LayeredLightListBuffer", RenderGraphResourceBindingMode.PassOwnedOverrideable);
             AssertBindingMode("m_LogBaseBuffer", RenderGraphResourceBindingMode.PassOwnedOverrideable);
+        }
+
+        [Test]
+        public void LightGridPass_UsesNativeUploadBuffers_ForPrepareUploads()
+        {
+            AssertNativeArrayField("m_DirectionalLightUploadNativeData", typeof(VividLightData.DirectionalLightData));
+            AssertNativeArrayField("m_PunctualLightUploadNativeData", typeof(VividLightData.PunctualLightData));
+            AssertNativeArrayField("m_AreaLightUploadNativeData", typeof(VividLightData.AreaLightData));
+            AssertNativeArrayField("m_DecalDataUploadNativeData", typeof(VividLightData.DecalClusterData));
+            AssertNativeArrayField("m_FiniteLightBoundUploadNativeData", typeof(VividLightData.SFiniteLightBound));
+            AssertNativeArrayField("m_LightVolumeDataUploadNativeData", typeof(VividLightData.LightVolumeData));
+            AssertNativeArrayField("m_LayeredOffsetUploadNativeData", typeof(uint));
+
+            var oldManagedLayeredOffsetField = typeof(LightGridPass).GetField(
+                "m_LayeredOffsetUploadData",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(oldManagedLayeredOffsetField, Is.Null);
         }
 
         [Test]
@@ -92,6 +110,15 @@ namespace VividRP.Editor.Tests
             Assert.That(importedGraphicsBuffer, Is.Not.Null, fieldName);
             Assert.That(importedGraphicsBuffer.count, Is.GreaterThanOrEqualTo(buffer.desc.Count), fieldName);
             Assert.That(importedGraphicsBuffer.stride, Is.EqualTo(buffer.desc.Stride), fieldName);
+        }
+
+        private static void AssertNativeArrayField(string fieldName, Type elementType)
+        {
+            var field = typeof(LightGridPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, fieldName);
+            Assert.That(field.FieldType.IsGenericType, Is.True, fieldName);
+            Assert.That(field.FieldType.GetGenericTypeDefinition(), Is.EqualTo(typeof(NativeArray<>)), fieldName);
+            Assert.That(field.FieldType.GetGenericArguments()[0], Is.EqualTo(elementType), fieldName);
         }
 
         private static void AssertBindingMode(string fieldName, RenderGraphResourceBindingMode expectedBindingMode)

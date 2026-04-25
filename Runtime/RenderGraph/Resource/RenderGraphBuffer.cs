@@ -1,4 +1,5 @@
 using System;
+using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering.RenderGraphModule;
 
@@ -185,6 +186,20 @@ namespace VividRP.Runtime
         internal void SetData(Array data, int managedBufferStartIndex, int graphicsBufferStartIndex, int count)
         {
             EnsureImportedBuffer()?.SetData(data, managedBufferStartIndex, graphicsBufferStartIndex, count);
+        }
+
+        internal void SetData<T>(NativeArray<T> data) where T : struct
+        {
+            EnsureImportedBuffer()?.SetData(data);
+        }
+
+        internal void SetData<T>(
+            NativeArray<T> data,
+            int nativeBufferStartIndex,
+            int graphicsBufferStartIndex,
+            int count) where T : struct
+        {
+            EnsureImportedBuffer()?.SetData(data, nativeBufferStartIndex, graphicsBufferStartIndex, count);
         }
 
         private void ReleaseOwnedImportedBuffer()

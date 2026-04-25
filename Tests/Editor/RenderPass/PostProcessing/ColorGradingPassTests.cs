@@ -60,6 +60,19 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Prepare_CachesResolvedSettingsInFrameData()
+        {
+            var pass = new ColorGradingPass();
+            using var frameData = new ContextContainer();
+
+            pass.Prepare(frameData);
+
+            Assert.That(
+                ColorGradingSettingsResolver.TryGetResolved(frameData, out _, out _),
+                Is.True);
+        }
+
+        [Test]
         public void ColorGradingPass_InheritsFromComputePass()
         {
             Assert.That(typeof(ComputePass).IsAssignableFrom(typeof(ColorGradingPass)), Is.True);

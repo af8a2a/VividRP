@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Rendering;
 using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
@@ -108,6 +109,20 @@ namespace VividRP.Editor.Tests
             var colorCurves = new ColorCurves();
 
             Assert.That(colorCurves.IsActive(), Is.False);
+        }
+
+        [Test]
+        public void Resolve_WithFrameData_CachesSettingsForLaterPasses()
+        {
+            using var frameData = new ContextContainer();
+
+            var settings = ColorGradingSettingsResolver.Resolve(frameData, out var curves);
+
+            Assert.That(
+                ColorGradingSettingsResolver.TryGetResolved(frameData, out var cachedSettings, out var cachedCurves),
+                Is.True);
+            Assert.That(cachedSettings.postExposureLinear, Is.EqualTo(settings.postExposureLinear));
+            Assert.That(cachedCurves, Is.SameAs(curves));
         }
     }
 }

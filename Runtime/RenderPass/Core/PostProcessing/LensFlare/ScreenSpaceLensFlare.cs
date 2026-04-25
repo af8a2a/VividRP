@@ -102,6 +102,31 @@ namespace VividRP.Runtime
 
     internal struct ScreenSpaceLensFlareSettingsData
     {
+        private static readonly ScreenSpaceLensFlareSettingsData s_Default = new()
+        {
+            enabled = false,
+            intensity = 0f,
+            tintColor = Color.white,
+            bloomMip = 1,
+            firstFlareIntensity = 1f,
+            secondaryFlareIntensity = 1f,
+            warpedFlareIntensity = 1f,
+            warpedFlareScale = Vector2.one,
+            samples = 1,
+            sampleDimmer = 0.5f,
+            vignetteEffect = 1f,
+            startingPosition = 1.25f,
+            scale = 1.5f,
+            streaksIntensity = 1f,
+            streaksLength = 0.5f,
+            streaksOrientation = 0f,
+            streaksThreshold = 0.25f,
+            resolution = ScreenSpaceLensFlareResolution.Quarter,
+            spectralLut = null,
+            chromaticAbberationIntensity = 0.5f,
+            chromaticAbberationSampleCount = 3,
+        };
+
         public bool enabled;
         public float intensity;
         public Color tintColor;
@@ -128,30 +153,7 @@ namespace VividRP.Runtime
 
         public static ScreenSpaceLensFlareSettingsData CreateDefault()
         {
-            return new ScreenSpaceLensFlareSettingsData
-            {
-                enabled = false,
-                intensity = 0f,
-                tintColor = Color.white,
-                bloomMip = 1,
-                firstFlareIntensity = 1f,
-                secondaryFlareIntensity = 1f,
-                warpedFlareIntensity = 1f,
-                warpedFlareScale = Vector2.one,
-                samples = 1,
-                sampleDimmer = 0.5f,
-                vignetteEffect = 1f,
-                startingPosition = 1.25f,
-                scale = 1.5f,
-                streaksIntensity = 1f,
-                streaksLength = 0.5f,
-                streaksOrientation = 0f,
-                streaksThreshold = 0.25f,
-                resolution = ScreenSpaceLensFlareResolution.Quarter,
-                spectralLut = null,
-                chromaticAbberationIntensity = 0.5f,
-                chromaticAbberationSampleCount = 3,
-            };
+            return s_Default;
         }
     }
 

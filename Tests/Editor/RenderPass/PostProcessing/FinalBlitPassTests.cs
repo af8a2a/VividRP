@@ -125,6 +125,12 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void FinalBlitPass_UsesStableResourceLayout_ForSourceOverrides()
+        {
+            Assert.That(typeof(IStablePassResourceLayout).IsAssignableFrom(typeof(FinalBlitPass)), Is.True);
+        }
+
+        [Test]
         public void Prepare_CachesViewportFromCameraDimensions()
         {
             var pass = new FinalBlitPass();

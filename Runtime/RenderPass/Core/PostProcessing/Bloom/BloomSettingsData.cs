@@ -5,6 +5,21 @@ namespace VividRP.Runtime
 {
     internal struct BloomSettingsData
     {
+        private static readonly BloomSettingsData s_Default = new()
+        {
+            enabled = false,
+            threshold = 0f,
+            intensity = 0f,
+            scatter = 0.7f,
+            tint = Color.white,
+            dirtTexture = null,
+            dirtIntensity = 0f,
+            anamorphic = 0f,
+            resolution = BloomResolution.Half,
+            highQualityPrefiltering = false,
+            highQualityFiltering = true
+        };
+
         public bool enabled;
         public float threshold;
         public float intensity;
@@ -19,20 +34,7 @@ namespace VividRP.Runtime
 
         public static BloomSettingsData CreateDefault()
         {
-            return new BloomSettingsData
-            {
-                enabled = false,
-                threshold = 0f,
-                intensity = 0f,
-                scatter = 0.7f,
-                tint = Color.white,
-                dirtTexture = null,
-                dirtIntensity = 0f,
-                anamorphic = 0f,
-                resolution = BloomResolution.Half,
-                highQualityPrefiltering = false,
-                highQualityFiltering = true
-            };
+            return s_Default;
         }
     }
 

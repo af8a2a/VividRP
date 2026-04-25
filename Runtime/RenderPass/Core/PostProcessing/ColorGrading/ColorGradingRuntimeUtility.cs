@@ -41,6 +41,8 @@ namespace VividRP.Runtime
 
     internal struct ColorGradingSettingsData
     {
+        private static readonly ColorGradingSettingsData s_Default = CreateDefaultData();
+
         public bool enableColorGrading;
         public float postExposureLinear;
         public ColorGradingTonemappingShaderMode tonemappingMode;
@@ -76,6 +78,11 @@ namespace VividRP.Runtime
         public bool RequiresPostProcessing => RequiresLut || !Mathf.Approximately(postExposureLinear, 1f);
 
         public static ColorGradingSettingsData CreateDefault()
+        {
+            return s_Default;
+        }
+
+        private static ColorGradingSettingsData CreateDefaultData()
         {
             var splitToning = ColorUtils.PrepareSplitToning(
                 new Vector4(0.5f, 0.5f, 0.5f, 1f),
@@ -125,14 +132,70 @@ namespace VividRP.Runtime
         }
     }
 
+    internal sealed class VividColorGradingData : ContextItem
+    {
+        internal bool isResolved;
+        internal ColorGradingSettingsData settings;
+        internal ColorCurves curves;
+
+        public override void Reset()
+        {
+            isResolved = false;
+            settings = ColorGradingSettingsData.CreateDefault();
+            curves = null;
+        }
+    }
+
     internal static class ColorGradingSettingsResolver
     {
         private static readonly HableCurve s_CustomToneCurve = new();
 
         internal static ColorGradingSettingsData Resolve()
         {
+            return ResolveFromStack(VolumeManager.instance.stack, out _);
+        }
+
+        internal static ColorGradingSettingsData Resolve(ContextContainer frameData, out ColorCurves curves)
+        {
+            if (frameData == null)
+                return ResolveFromStack(VolumeManager.instance.stack, out curves);
+
+            var data = frameData.GetOrCreate<VividColorGradingData>();
+            if (!data.isResolved)
+            {
+                data.settings = ResolveFromStack(VolumeManager.instance.stack, out data.curves);
+                data.isResolved = true;
+            }
+
+            curves = data.curves;
+            return data.settings;
+        }
+
+        internal static bool TryGetResolved(
+            ContextContainer frameData,
+            out ColorGradingSettingsData settings,
+            out ColorCurves curves)
+        {
+            if (frameData != null && frameData.Contains<VividColorGradingData>())
+            {
+                var data = frameData.Get<VividColorGradingData>();
+                if (data.isResolved)
+                {
+                    settings = data.settings;
+                    curves = data.curves;
+                    return true;
+                }
+            }
+
+            settings = ColorGradingSettingsData.CreateDefault();
+            curves = null;
+            return false;
+        }
+
+        private static ColorGradingSettingsData ResolveFromStack(VolumeStack stack, out ColorCurves curves)
+        {
             var settings = ColorGradingSettingsData.CreateDefault();
-            var stack = VolumeManager.instance.stack;
+            curves = null;
             if (stack == null)
                 return settings;
 
@@ -142,7 +205,7 @@ namespace VividRP.Runtime
             var splitToning = stack.GetComponent<SplitToning>();
             var liftGammaGain = stack.GetComponent<LiftGammaGain>();
             var shadowsMidtonesHighlights = stack.GetComponent<ShadowsMidtonesHighlights>();
-            var colorCurves = stack.GetComponent<ColorCurves>();
+            curves = stack.GetComponent<ColorCurves>();
             var tonemapping = stack.GetComponent<Tonemapping>();
 
             settings.postExposureLinear = ResolvePostExposure(colorAdjustments);
@@ -221,9 +284,9 @@ namespace VividRP.Runtime
                 settings.enableColorGrading |= shadowsMidtonesHighlights.IsActive();
             }
 
-            if (colorCurves != null)
+            if (curves != null)
             {
-                settings.enableColorGrading |= colorCurves.IsActive();
+                settings.enableColorGrading |= curves.IsActive();
             }
 
             ResolveTonemapping(ref settings, tonemapping);

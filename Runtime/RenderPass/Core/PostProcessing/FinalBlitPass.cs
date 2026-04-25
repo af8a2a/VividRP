@@ -1,11 +1,12 @@
 using System;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public class FinalBlitPass : UnsafePass, IRenderGizmoPrePostProcessBoundaryPass, IPostProcessSourceOverridePass
+    public class FinalBlitPass : UnsafePass, IRenderGizmoPrePostProcessBoundaryPass, IPostProcessSourceOverridePass, IStablePassResourceLayout
     {
         private static readonly int ColorGradingLutId = Shader.PropertyToID("_VividColorGradingLut");
         private static readonly int ColorGradingParamsId = Shader.PropertyToID("_VividColorGradingParams");
@@ -14,6 +15,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int FilmGrainTextureId = Shader.PropertyToID("_VividFilmGrainTexture");
         private static readonly int FilmGrainParamsId = Shader.PropertyToID("_VividFilmGrainParams");
         private static readonly int FilmGrainTexParamsId = Shader.PropertyToID("_VividFilmGrainTexParams");
+        private static readonly ProfilerMarker s_PrepareCameraMarker = new("VividRP.RenderPass.FinalBlit.Prepare.Camera");
+        private static readonly ProfilerMarker s_PrepareSettingsMarker = new("VividRP.RenderPass.FinalBlit.Prepare.Settings");
+        private static readonly ProfilerMarker s_PrepareColorGradingSettingsMarker = new("VividRP.RenderPass.FinalBlit.Prepare.Settings.ColorGrading");
+        private static readonly ProfilerMarker s_PrepareFilmGrainSettingsMarker = new("VividRP.RenderPass.FinalBlit.Prepare.Settings.FilmGrain");
+        private static readonly ProfilerMarker s_PrepareBloomSettingsMarker = new("VividRP.RenderPass.FinalBlit.Prepare.Settings.Bloom");
+        private static readonly ProfilerMarker s_PrepareLensFlareSettingsMarker = new("VividRP.RenderPass.FinalBlit.Prepare.Settings.LensFlare");
+        private static readonly ProfilerMarker s_PrepareExposureMarker = new("VividRP.RenderPass.FinalBlit.Prepare.Exposure");
 
         [RenderGraphResource(Access = AccessFlags.Read)]
         private RenderGraphTexture source = new();
@@ -94,37 +102,77 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
-            var cameraData = frameData.Get<VividCameraData>();
-            var camera = cameraData.camera;
-            var hasTargetTexture = camera != null && camera.targetTexture != null;
-            var cameraType = camera != null ? camera.cameraType : CameraType.Game;
+            Camera camera;
 
-            m_CameraBackBufferTarget = hasTargetTexture
-                ? new RenderTargetIdentifier(camera.targetTexture)
-                : BuiltinRenderTextureType.CameraTarget;
-            m_CameraBackBufferTextureUVOrigin = GetCameraBackBufferTextureUVOrigin(cameraType, hasTargetTexture);
-            m_ShouldSetViewport = ShouldSetViewport(cameraType);
+            using (s_PrepareCameraMarker.Auto())
+            {
+                var cameraData = frameData.Get<VividCameraData>();
+                camera = cameraData.camera;
+                var hasTargetTexture = camera != null && camera.targetTexture != null;
+                var cameraType = camera != null ? camera.cameraType : CameraType.Game;
 
-            m_Viewport = GetViewport(cameraData);
-            m_PostProcessingAllowed = camera != null && CoreUtils.ArePostProcessesEnabled(camera);
-            m_ColorGradingSettings = m_PostProcessingAllowed
-                ? ColorGradingSettingsResolver.Resolve()
-                : ColorGradingSettingsData.CreateDefault();
-            m_FilmGrainSettings = m_PostProcessingAllowed
-                ? FilmGrainSettingsResolver.Resolve()
-                : FilmGrainSettingsData.CreateDefault();
-            m_BloomSettings = m_PostProcessingAllowed
-                ? BloomSettingsResolver.Resolve()
-                : BloomSettingsData.CreateDefault();
-            m_ScreenSpaceLensFlareSettings = m_PostProcessingAllowed
-                ? ScreenSpaceLensFlareSettingsResolver.Resolve()
-                : ScreenSpaceLensFlareSettingsData.CreateDefault();
-            m_ExposureData = frameData.Get<VividExposureData>();
+                m_CameraBackBufferTarget = hasTargetTexture
+                    ? new RenderTargetIdentifier(camera.targetTexture)
+                    : BuiltinRenderTextureType.CameraTarget;
+                m_CameraBackBufferTextureUVOrigin = GetCameraBackBufferTextureUVOrigin(cameraType, hasTargetTexture);
+                m_ShouldSetViewport = ShouldSetViewport(cameraType);
 
-            m_FrameCount = Time.frameCount;
-            m_EnableExposure = m_PostProcessingAllowed
-                && m_ExposureData != null
-                && m_ExposureData.exposureEnabled;
+                m_Viewport = GetViewport(cameraData);
+                m_PostProcessingAllowed = camera != null && CoreUtils.ArePostProcessesEnabled(camera);
+            }
+
+            using (s_PrepareSettingsMarker.Auto())
+            {
+                using (s_PrepareColorGradingSettingsMarker.Auto())
+                {
+                    if (!m_PostProcessingAllowed)
+                    {
+                        m_ColorGradingSettings = ColorGradingSettingsData.CreateDefault();
+                    }
+                    else if (ColorGradingSettingsResolver.TryGetResolved(
+                                 frameData,
+                                 out var colorGradingSettings,
+                                 out _))
+                    {
+                        m_ColorGradingSettings = colorGradingSettings;
+                    }
+                    else
+                    {
+                        m_ColorGradingSettings = ColorGradingSettingsResolver.Resolve(frameData, out _);
+                    }
+                }
+
+                using (s_PrepareFilmGrainSettingsMarker.Auto())
+                {
+                    m_FilmGrainSettings = m_PostProcessingAllowed
+                        ? FilmGrainSettingsResolver.Resolve()
+                        : FilmGrainSettingsData.CreateDefault();
+                }
+
+                using (s_PrepareBloomSettingsMarker.Auto())
+                {
+                    m_BloomSettings = m_PostProcessingAllowed
+                        ? BloomSettingsResolver.Resolve()
+                        : BloomSettingsData.CreateDefault();
+                }
+
+                using (s_PrepareLensFlareSettingsMarker.Auto())
+                {
+                    m_ScreenSpaceLensFlareSettings = m_PostProcessingAllowed
+                        ? ScreenSpaceLensFlareSettingsResolver.Resolve()
+                        : ScreenSpaceLensFlareSettingsData.CreateDefault();
+                }
+            }
+
+            using (s_PrepareExposureMarker.Auto())
+            {
+                m_ExposureData = frameData.Get<VividExposureData>();
+
+                m_FrameCount = Time.frameCount;
+                m_EnableExposure = m_PostProcessingAllowed
+                    && m_ExposureData != null
+                    && m_ExposureData.exposureEnabled;
+            }
         }
 
         public override void Create()

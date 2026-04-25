@@ -5,6 +5,14 @@ namespace VividRP.Runtime
 {
     internal struct FilmGrainSettingsData
     {
+        private static readonly FilmGrainSettingsData s_Default = new()
+        {
+            enabled = false,
+            texture = null,
+            intensity = 0f,
+            response = 0f
+        };
+
         public bool enabled;
         public Texture texture;
         public float intensity;
@@ -12,13 +20,7 @@ namespace VividRP.Runtime
 
         public static FilmGrainSettingsData CreateDefault()
         {
-            return new FilmGrainSettingsData
-            {
-                enabled = false,
-                texture = null,
-                intensity = 0f,
-                response = 0f
-            };
+            return s_Default;
         }
     }
 

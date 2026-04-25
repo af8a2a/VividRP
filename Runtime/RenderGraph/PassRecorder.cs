@@ -49,16 +49,19 @@ namespace VividRP.Runtime
         private class ComputePassData
         {
             public ComputePass Pass;
+            public RenderPassProfilerMarkers Markers;
         }
 
         private class RasterPassData
         {
             public RasterPass Pass;
+            public RenderPassProfilerMarkers Markers;
         }
 
         private class UnsafePassData
         {
             public UnsafePass Pass;
+            public RenderPassProfilerMarkers Markers;
         }
 
         /// <summary>
@@ -77,10 +80,13 @@ namespace VividRP.Runtime
             Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache,
             string passName = null)
         {
+            var markers = RenderPassProfilingUtility.GetMarkers(pass, passName, ResolvePassIndex(pass));
+            using var recordGraphScope = markers.RecordGraph.Auto();
             using var builder = renderGraph.AddComputePass<ComputePassData>(
                 passName ?? pass.GetType().Name, out var passData);
 
             passData.Pass = pass;
+            passData.Markers = markers;
 
             SetupComputeResources(
                 renderGraph,
@@ -98,7 +104,11 @@ namespace VividRP.Runtime
 
             builder.SetRenderFunc<ComputePassData>(static (data, ctx) =>
             {
-                data.Pass.Record(new ComputePassContext(ctx, s_FrameData));
+                using var recordScope = data.Markers.Record.Auto();
+                using (new ProfilingScope(ctx.cmd, data.Markers.CommandSampler))
+                {
+                    data.Pass.Record(new ComputePassContext(ctx, s_FrameData));
+                }
             });
         }
 
@@ -116,10 +126,13 @@ namespace VividRP.Runtime
             Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache,
             string passName = null)
         {
+            var markers = RenderPassProfilingUtility.GetMarkers(pass, passName, ResolvePassIndex(pass));
+            using var recordGraphScope = markers.RecordGraph.Auto();
             using var builder = renderGraph.AddRasterRenderPass<RasterPassData>(
                 passName ?? pass.GetType().Name, out var passData);
 
             passData.Pass = pass;
+            passData.Markers = markers;
 
             SetupRasterResources(
                 renderGraph,
@@ -134,7 +147,11 @@ namespace VividRP.Runtime
 
             builder.SetRenderFunc<RasterPassData>(static (data, ctx) =>
             {
-                data.Pass.Record(new RasterPassContext(ctx, s_FrameData));
+                using var recordScope = data.Markers.Record.Auto();
+                using (new ProfilingScope(ctx.cmd, data.Markers.CommandSampler))
+                {
+                    data.Pass.Record(new RasterPassContext(ctx, s_FrameData));
+                }
             });
         }
 
@@ -154,10 +171,13 @@ namespace VividRP.Runtime
             Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache,
             string passName = null)
         {
+            var markers = RenderPassProfilingUtility.GetMarkers(pass, passName, ResolvePassIndex(pass));
+            using var recordGraphScope = markers.RecordGraph.Auto();
             using var builder = renderGraph.AddUnsafePass<UnsafePassData>(
                 passName ?? pass.GetType().Name, out var passData);
 
             passData.Pass = pass;
+            passData.Markers = markers;
 
             SetupUnsafeResources(
                 renderGraph,
@@ -175,7 +195,12 @@ namespace VividRP.Runtime
 
             builder.SetRenderFunc<UnsafePassData>(static (data, ctx) =>
             {
-                data.Pass.Record(new UnsafePassContext(ctx, s_FrameData));
+                var passContext = new UnsafePassContext(ctx, s_FrameData);
+                using var recordScope = data.Markers.Record.Auto();
+                using (new ProfilingScope(passContext.GetNativeCommandBuffer(), data.Markers.CommandSampler))
+                {
+                    data.Pass.Record(passContext);
+                }
             });
         }
 

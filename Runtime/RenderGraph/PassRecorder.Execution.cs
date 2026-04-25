@@ -215,13 +215,56 @@ namespace VividRP.Runtime
             return s_FrameData;
         }
 
+        private static int ResolvePassIndex(IRenderPass pass)
+        {
+            return pass != null && s_PassIndices.TryGetValue(pass, out var passIndex)
+                ? passIndex
+                : -1;
+        }
+
+        private static void CreateRenderPass(IRenderPass pass, string displayName = null)
+        {
+            if (pass == null)
+                return;
+
+            var markers = RenderPassProfilingUtility.GetMarkers(pass, displayName, ResolvePassIndex(pass));
+            using (markers.Create.Auto())
+            {
+                pass.Create();
+            }
+        }
+
+        private static void PrepareRenderPass(IRenderPass pass, string displayName = null)
+        {
+            if (pass == null)
+                return;
+
+            var markers = RenderPassProfilingUtility.GetMarkers(pass, displayName, ResolvePassIndex(pass));
+            using (markers.Prepare.Auto())
+            {
+                pass.Prepare(s_FrameData);
+            }
+        }
+
+        private static void DisposeRenderPass(IRenderPass pass, string displayName = null)
+        {
+            if (pass == null)
+                return;
+
+            var markers = RenderPassProfilingUtility.GetMarkers(pass, displayName, ResolvePassIndex(pass));
+            using (markers.Dispose.Auto())
+            {
+                pass.Dispose();
+            }
+        }
+
         public static void Dispose()
         {
             foreach (var pass in s_RenderPasses)
             {
                 try
                 {
-                    pass.Dispose();
+                    DisposeRenderPass(pass);
                 }
                 catch (Exception e)
                 {
@@ -233,7 +276,7 @@ namespace VividRP.Runtime
             {
                 try
                 {
-                    s_InjectedCmaa2Pass.Dispose();
+                    DisposeRenderPass(s_InjectedCmaa2Pass, "CMAA2Pass (Injected)");
                 }
                 catch (Exception e)
                 {
@@ -247,7 +290,7 @@ namespace VividRP.Runtime
             {
                 try
                 {
-                    s_InjectedStopNaNPass.Dispose();
+                    DisposeRenderPass(s_InjectedStopNaNPass, "StopNaNPass (Injected)");
                 }
                 catch (Exception e)
                 {
@@ -289,10 +332,12 @@ namespace VividRP.Runtime
             s_RuntimePassDefinitions.Clear();
             s_CurrentImportVersion = 0;
             s_IsCompiled = false;
+            RenderPassProfilingUtility.Clear();
         }
 
         internal static void PrepareFrame(RenderGraphData graphAsset, CommandBuffer cmdBuffer)
         {
+            using var prepareFrameScope = RenderPassProfilingUtility.PrepareFrameMarker.Auto();
             EnsureCompiled(graphAsset);
             ClearHistoryImportedHandles();
             ClearCodeManagedHistoryFrameState();
@@ -493,8 +538,8 @@ namespace VividRP.Runtime
                 return s_InjectedStopNaNPass;
 
             s_InjectedStopNaNPass = new StopNaNPass();
-            s_InjectedStopNaNPass.Create();
-            GetCurrentPassResources(s_InjectedStopNaNPass);
+            CreateRenderPass(s_InjectedStopNaNPass, "StopNaNPass (Injected)");
+            GetCurrentPassResources(s_InjectedStopNaNPass, "StopNaNPass (Injected)");
             return s_InjectedStopNaNPass;
         }
 
@@ -504,8 +549,8 @@ namespace VividRP.Runtime
                 return s_InjectedCmaa2Pass;
 
             s_InjectedCmaa2Pass = new CMAA2Pass();
-            s_InjectedCmaa2Pass.Create();
-            GetCurrentPassResources(s_InjectedCmaa2Pass);
+            CreateRenderPass(s_InjectedCmaa2Pass, "CMAA2Pass (Injected)");
+            GetCurrentPassResources(s_InjectedCmaa2Pass, "CMAA2Pass (Injected)");
             return s_InjectedCmaa2Pass;
         }
 
@@ -532,7 +577,7 @@ namespace VividRP.Runtime
                 return;
 
             cmaa2Pass.SetInput(sourceTexture);
-            var cmaa2Resources = GetCurrentPassResources(cmaa2Pass);
+            var cmaa2Resources = GetCurrentPassResources(cmaa2Pass, "CMAA2Pass (Injected)");
             RecordComputePass(
                 renderGraph,
                 cmaa2Pass,
@@ -561,7 +606,7 @@ namespace VividRP.Runtime
                 return;
 
             stopNaNPass.SetInput(sourceTexture);
-            var stopNaNResources = GetCurrentPassResources(stopNaNPass);
+            var stopNaNResources = GetCurrentPassResources(stopNaNPass, "StopNaNPass (Injected)");
             RecordUnsafePass(
                 renderGraph,
                 stopNaNPass,
@@ -582,6 +627,7 @@ namespace VividRP.Runtime
             RenderGraphTexture depthTexture,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache)
         {
+            using var recordGraphScope = RenderPassProfilingUtility.InjectedStpRecordGraphMarker.Auto();
             if (renderGraph == null
                 || sourceTexture == null
                 || motionTexture == null
@@ -997,6 +1043,7 @@ namespace VividRP.Runtime
 
         private static void Compile(RenderGraphData graphAsset)
         {
+            using var compileScope = RenderPassProfilingUtility.CompileMarker.Auto();
             Dispose();
 
             if (graphAsset == null)
@@ -1091,7 +1138,7 @@ namespace VividRP.Runtime
 
             foreach (var pass in s_RenderPasses)
             {
-                pass.Create();
+                CreateRenderPass(pass);
                 GetCurrentPassResources(pass);
             }
 
@@ -1664,6 +1711,7 @@ namespace VividRP.Runtime
             RenderGraphData graphAsset,
             bool enableAsyncCompute = true)
         {
+            using var recordRenderGraphScope = RenderPassProfilingUtility.RecordRenderGraphMarker.Auto();
             EnsureCompiled(graphAsset);
             RestoreInjectedSourceOverrides();
             var injectedStopNaNPass = ShouldInjectStopNaNPass()
@@ -1680,16 +1728,19 @@ namespace VividRP.Runtime
             s_CurrentRenderGraph = renderGraph;
             BlueNoise.Instance?.ImportResources(renderGraph);
 
-            foreach (var pass in s_RenderPasses)
+            using (RenderPassProfilingUtility.PrepareAllMarker.Auto())
             {
-                pass.Prepare(s_FrameData);
+                foreach (var pass in s_RenderPasses)
+                {
+                    PrepareRenderPass(pass);
+                }
+
+                if (injectedStopNaNPass != null)
+                    PrepareRenderPass(injectedStopNaNPass, "StopNaNPass (Injected)");
+
+                if (injectedCmaa2Pass != null)
+                    PrepareRenderPass(injectedCmaa2Pass, "CMAA2Pass (Injected)");
             }
-
-            if (injectedStopNaNPass != null)
-                injectedStopNaNPass.Prepare(s_FrameData);
-
-            if (injectedCmaa2Pass != null)
-                injectedCmaa2Pass.Prepare(s_FrameData);
 
             PreparePendingHistoryTextureImports(renderGraph);
             s_CurrentRenderGraph = null;
@@ -1867,14 +1918,19 @@ namespace VividRP.Runtime
             }
         }
 
-        private static PassResource GetCurrentPassResources(IRenderPass pass)
+        private static PassResource GetCurrentPassResources(IRenderPass pass, string displayName = null)
         {
             var needsRefresh = pass is IDynamicPassResourceLayout dynamicLayoutPass
                                && dynamicLayoutPass.IsPassResourceLayoutDirty;
 
             if (!s_PassResources.TryGetValue(pass, out var resources) || needsRefresh)
             {
-                resources = pass.Initialize();
+                var markers = RenderPassProfilingUtility.GetMarkers(pass, displayName, ResolvePassIndex(pass));
+                using (markers.Initialize.Auto())
+                {
+                    resources = pass.Initialize();
+                }
+
                 ApplyResourceAccessOverrides(pass, resources);
                 s_PassResources[pass] = resources;
 

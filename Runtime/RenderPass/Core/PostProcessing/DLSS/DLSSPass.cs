@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -11,6 +12,9 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         private const int CameraStateExpirationFrames = 400;
 
+        private static readonly ProfilerMarker s_RecordGraphMarker = new("VividRP.RenderPass.RecordGraph/DLSS Super Resolution (Injected)");
+        private static readonly ProfilerMarker s_RecordMarker = new("VividRP.RenderPass.Record/DLSS Super Resolution (Injected)");
+        private static readonly ProfilerMarker s_DisposeMarker = new("VividRP.RenderPass.Dispose/DLSS Super Resolution (Injected)");
         private static readonly ProfilingSampler s_ProfilingSampler = new("DLSS Super Resolution");
 
         private readonly Dictionary<EntityId, CameraState> m_CameraStates = new();
@@ -27,6 +31,7 @@ namespace VividRP.Runtime.RenderPass.Core
             RenderGraphTexture motionTexture,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache)
         {
+            using var recordGraphScope = s_RecordGraphMarker.Auto();
             if (!IsSupported
                 || renderGraph == null
                 || cameraData?.camera == null
@@ -77,6 +82,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
                 builder.SetRenderFunc(static (PassData data, UnsafeGraphContext context) =>
                 {
+                    using var recordScope = s_RecordMarker.Auto();
                     var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
                     data.State.Execute(cmd, data);
                 });
@@ -93,11 +99,14 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public void Dispose()
         {
-            foreach (var state in m_CameraStates.Values)
-                state.Dispose();
+            using (s_DisposeMarker.Auto())
+            {
+                foreach (var state in m_CameraStates.Values)
+                    state.Dispose();
 
-            m_CameraStates.Clear();
-            m_ExpiredCameraIds.Clear();
+                m_CameraStates.Clear();
+                m_ExpiredCameraIds.Clear();
+            }
         }
 
         private CameraState GetOrCreateCameraState(Camera camera, int frameIndex)

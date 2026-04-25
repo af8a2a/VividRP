@@ -1,5 +1,7 @@
+using System.IO;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEditor.PackageManager;
 using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
@@ -68,6 +70,54 @@ namespace VividRP.Editor.Tests
             Assert.That(data.texture, Is.Null);
             Assert.That(data.intensity, Is.EqualTo(0f));
             Assert.That(data.response, Is.EqualTo(0f));
+        }
+
+        [Test]
+        public void FilmGrainRuntimeUtility_CreateMaterialParams_MatchesHdrpIntensityScale()
+        {
+            var data = new FilmGrainSettingsData
+            {
+                intensity = 0.25f,
+                response = 0.75f
+            };
+
+            var materialParams = FilmGrainRuntimeUtility.CreateMaterialParams(data);
+
+            Assert.That(materialParams.x, Is.EqualTo(1f));
+            Assert.That(materialParams.y, Is.EqualTo(0.75f));
+            Assert.That(materialParams.z, Is.EqualTo(0f));
+            Assert.That(materialParams.w, Is.EqualTo(0f));
+        }
+
+        [Test]
+        public void FinalBlitShader_UsesHdrpFilmGrainSamplingAndResponse()
+        {
+            var packageInfo = PackageInfo.FindForAssembly(typeof(FilmGrain).Assembly);
+            Assert.That(packageInfo, Is.Not.Null);
+
+            var shaderPath = Path.Combine(
+                packageInfo.resolvedPath,
+                "Shaders",
+                "Core",
+                "Private",
+                "FinalBlit.shader");
+            var shaderSource = File.ReadAllText(shaderPath);
+
+            StringAssert.Contains(
+                "SAMPLE_TEXTURE2D(_VividFilmGrainTexture, s_linear_repeat_sampler, grainUV).w",
+                shaderSource);
+            StringAssert.Contains("postProcessed = saturate(postProcessed);", shaderSource);
+            StringAssert.Contains("lum = 1.0 - sqrt(lum);", shaderSource);
+            StringAssert.Contains("lum = lerp(1.0, lum, _VividFilmGrainParams.y);", shaderSource);
+
+            var bloomIndex = shaderSource.IndexOf("postProcessed += bloom;", System.StringComparison.Ordinal);
+            var grainIndex = shaderSource.IndexOf(
+                "SAMPLE_TEXTURE2D(_VividFilmGrainTexture, s_linear_repeat_sampler, grainUV).w",
+                System.StringComparison.Ordinal);
+
+            Assert.That(bloomIndex, Is.GreaterThanOrEqualTo(0));
+            Assert.That(grainIndex, Is.GreaterThanOrEqualTo(0));
+            Assert.That(bloomIndex, Is.LessThan(grainIndex));
         }
     }
 }

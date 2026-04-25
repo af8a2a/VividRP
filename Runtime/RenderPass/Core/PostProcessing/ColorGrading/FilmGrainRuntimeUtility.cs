@@ -22,6 +22,20 @@ namespace VividRP.Runtime
         }
     }
 
+    internal static class FilmGrainRuntimeUtility
+    {
+        internal const float HdrpIntensityMultiplier = 4f;
+
+        internal static Vector4 CreateMaterialParams(FilmGrainSettingsData settings)
+        {
+            return new Vector4(
+                settings.intensity * HdrpIntensityMultiplier,
+                settings.response,
+                0f,
+                0f);
+        }
+    }
+
     internal static class FilmGrainSettingsResolver
     {
         internal static FilmGrainSettingsData Resolve()

@@ -178,19 +178,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_Material.SetTexture(FilmGrainTextureId, m_FilmGrainSettings.texture);
                 m_Material.SetVector(
                     FilmGrainParamsId,
-                    new Vector4(
-                        m_FilmGrainSettings.intensity,
-                        m_FilmGrainSettings.response,
-                        0f,
-                        0f));
+                    FilmGrainRuntimeUtility.CreateMaterialParams(m_FilmGrainSettings));
 
                 var texWidth = (float)m_FilmGrainSettings.texture.width;
                 var texHeight = (float)m_FilmGrainSettings.texture.height;
                 var screenWidth = m_Viewport.width > 0f ? m_Viewport.width : Screen.width;
                 var screenHeight = m_Viewport.height > 0f ? m_Viewport.height : Screen.height;
 
-                var offsetX = (HashFrame(m_FrameCount, 0) % 1024) / 1024f;
-                var offsetY = (HashFrame(m_FrameCount, 1) % 1024) / 1024f;
+                var offsetX = Random01FromFrame(m_FrameCount, 0);
+                var offsetY = Random01FromFrame(m_FrameCount, 1);
 
                 m_Material.SetVector(
                     FilmGrainTexParamsId,
@@ -254,6 +250,11 @@ namespace VividRP.Runtime.RenderPass.Core
             hash = ((hash >> 16) ^ hash) * 45679;
             hash = (hash >> 16) ^ hash;
             return hash & 0x7FFFFFFF;
+        }
+
+        private static float Random01FromFrame(int frame, int state)
+        {
+            return (HashFrame(frame, state) & 0xFFFFFF) / 16777216f;
         }
 
         private static TextureUVOrigin GetCameraBackBufferTextureUVOrigin(CameraType cameraType, bool hasTargetTexture)

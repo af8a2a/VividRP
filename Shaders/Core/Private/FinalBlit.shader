@@ -49,7 +49,6 @@ Shader "Hidden/VividRP/FinalBlit"
 
             #if defined(_FILM_GRAIN)
             TEXTURE2D(_VividFilmGrainTexture);
-            SAMPLER(sampler_VividFilmGrainTexture);
             float4 _VividFilmGrainParams;   // x: intensity, y: response
             float4 _VividFilmGrainTexParams; // x: scaleX, y: scaleY, z: offsetX, w: offsetY
             #endif
@@ -98,22 +97,6 @@ Shader "Hidden/VividRP/FinalBlit"
                         _VividColorGradingParams.xy);
                 }
 
-                #if defined(_FILM_GRAIN)
-                {
-                    float2 grainUV = input.uv * _VividFilmGrainTexParams.xy + _VividFilmGrainTexParams.zw;
-                    float grain = SAMPLE_TEXTURE2D(_VividFilmGrainTexture, sampler_VividFilmGrainTexture, grainUV).r;
-
-                    // Remap from [0, 1] to [-1, 1]
-                    grain = (grain - 0.5) * 2.0;
-
-                    // Luminance-based response: reduce grain in bright areas
-                    float lum = Luminance(postProcessed);
-                    float response = 1.0 - saturate(lum) * _VividFilmGrainParams.y;
-
-                    postProcessed += postProcessed * grain * _VividFilmGrainParams.x * response;
-                }
-                #endif
-
                 #if defined(_BLOOM)
                 {
                     #if defined(_BLOOM_HQ)
@@ -138,6 +121,25 @@ Shader "Hidden/VividRP/FinalBlit"
                     #endif
 
                     postProcessed += bloom;
+                }
+                #endif
+
+                #if defined(_FILM_GRAIN)
+                {
+                    postProcessed = saturate(postProcessed);
+
+                    float2 grainUV = input.uv * _VividFilmGrainTexParams.xy + _VividFilmGrainTexParams.zw;
+                    float grain = SAMPLE_TEXTURE2D(_VividFilmGrainTexture, sampler_LinearRepeat, grainUV).w;
+
+                    // Remap from [0, 1] to [-1, 1]
+                    grain = (grain - 0.5) * 2.0;
+
+                    // Match HDRP's noisiness response curve based on scene luminance.
+                    float lum = Luminance(postProcessed);
+                    lum = 1.0 - sqrt(lum);
+                    lum = lerp(1.0, lum, _VividFilmGrainParams.y);
+
+                    postProcessed += postProcessed * grain * _VividFilmGrainParams.x * lum;
                 }
                 #endif
 

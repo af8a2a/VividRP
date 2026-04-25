@@ -62,6 +62,7 @@ namespace VividRP.Runtime
     {
         // protected 允许子类在必要时遍历所有状态
         protected Dictionary<Camera, TState> m_CameraStates = new();
+        private readonly List<Camera> m_DeadCameras = new();
 
         /// <summary>
         /// 获取或创建相机的专属状态
@@ -120,23 +121,22 @@ namespace VividRP.Runtime
         public void PurgeDestroyedCameras()
         {
             // 收集所有变为 null 的 Camera (Unity 重载了 == 运算符，底层 C++ 对象销毁时会判定为 null)
-            List<Camera> deadCameras = null;
+            m_DeadCameras.Clear();
             foreach (var kvp in m_CameraStates)
             {
                 if (kvp.Key == null)
-                {
-                    deadCameras ??= new List<Camera>();
-                    deadCameras.Add(kvp.Key);
-                }
+                    m_DeadCameras.Add(kvp.Key);
             }
 
-            if (deadCameras != null)
+            if (m_DeadCameras.Count != 0)
             {
-                foreach (var cam in deadCameras)
+                foreach (var cam in m_DeadCameras)
                 {
                     m_CameraStates[cam].Dispose();
                     m_CameraStates.Remove(cam);
                 }
+
+                m_DeadCameras.Clear();
             }
         }
 

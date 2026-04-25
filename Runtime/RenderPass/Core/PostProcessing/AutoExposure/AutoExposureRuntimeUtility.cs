@@ -617,10 +617,9 @@ namespace VividRP.Runtime
                 return false;
 
             var curveDomain = ResolveExposureCompensationCurveDomain(curve);
-            var keys = curve.keys;
-            for (var keyIndex = 0; keyIndex < keys.Length; keyIndex++)
+            for (var keyIndex = 0; keyIndex < curve.length; keyIndex++)
             {
-                if (Mathf.Abs(keys[keyIndex].value) > 1e-3f)
+                if (Mathf.Abs(curve[keyIndex].value) > 1e-3f)
                     return true;
             }
 
@@ -665,14 +664,15 @@ namespace VividRP.Runtime
                     defaultMaxEV100);
             }
 
-            var keys = curve.keys;
-            var minEV100 = keys[0].time;
-            var maxEV100 = keys[0].time;
+            var firstKey = curve[0];
+            var minEV100 = firstKey.time;
+            var maxEV100 = firstKey.time;
 
-            for (var keyIndex = 1; keyIndex < keys.Length; keyIndex++)
+            for (var keyIndex = 1; keyIndex < curve.length; keyIndex++)
             {
-                minEV100 = Mathf.Min(minEV100, keys[keyIndex].time);
-                maxEV100 = Mathf.Max(maxEV100, keys[keyIndex].time);
+                var key = curve[keyIndex];
+                minEV100 = Mathf.Min(minEV100, key.time);
+                maxEV100 = Mathf.Max(maxEV100, key.time);
             }
 
             if (Mathf.Abs(maxEV100 - minEV100) < 1e-3f)
@@ -1030,12 +1030,11 @@ namespace VividRP.Runtime
                 hash = hash * 31 + curve.preWrapMode.GetHashCode();
                 hash = hash * 31 + curve.postWrapMode.GetHashCode();
 
-                var keys = curve.keys;
-                hash = hash * 31 + keys.Length;
+                hash = hash * 31 + curve.length;
 
-                for (var keyIndex = 0; keyIndex < keys.Length; keyIndex++)
+                for (var keyIndex = 0; keyIndex < curve.length; keyIndex++)
                 {
-                    var key = keys[keyIndex];
+                    var key = curve[keyIndex];
                     hash = hash * 31 + key.time.GetHashCode();
                     hash = hash * 31 + key.value.GetHashCode();
                     hash = hash * 31 + key.inTangent.GetHashCode();
@@ -1161,12 +1160,11 @@ namespace VividRP.Runtime
                 hash = hash * 31 + curve.preWrapMode.GetHashCode();
                 hash = hash * 31 + curve.postWrapMode.GetHashCode();
 
-                var keys = curve.keys;
-                hash = hash * 31 + keys.Length;
+                hash = hash * 31 + curve.length;
 
-                for (var keyIndex = 0; keyIndex < keys.Length; keyIndex++)
+                for (var keyIndex = 0; keyIndex < curve.length; keyIndex++)
                 {
-                    var key = keys[keyIndex];
+                    var key = curve[keyIndex];
                     hash = hash * 31 + key.time.GetHashCode();
                     hash = hash * 31 + key.value.GetHashCode();
                     hash = hash * 31 + key.inTangent.GetHashCode();

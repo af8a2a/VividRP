@@ -125,6 +125,36 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void AutoExposureCurveQueries_DoNotAllocate_ForRepeatedCurves()
+        {
+            var compensationCurve = AnimationCurve.Linear(-2f, -1f, 2f, 1f);
+            var curveMap = AnimationCurve.Linear(-4f, -1f, 4f, 2f);
+
+            try
+            {
+                AutoExposureSettingsResolver.ResolveExposureCompensationCurveStops(compensationCurve, 1f);
+                AutoExposureCompensationCurveUtility.Resolve(compensationCurve);
+                AutoExposureCurveMapUtility.Resolve(curveMap, -2f, 3f);
+
+                var allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+                for (var index = 0; index < 32; index++)
+                {
+                    AutoExposureSettingsResolver.ResolveExposureCompensationCurveStops(compensationCurve, 1f);
+                    AutoExposureCompensationCurveUtility.Resolve(compensationCurve);
+                    AutoExposureCurveMapUtility.Resolve(curveMap, -2f, 3f);
+                }
+
+                var allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+                Assert.That(allocatedBytes, Is.Zero);
+            }
+            finally
+            {
+                AutoExposureCompensationCurveUtility.Dispose();
+                AutoExposureCurveMapUtility.Dispose();
+            }
+        }
+
+        [Test]
         public void ResolveExposureCompensationAll_MultipliesSettingsAndCurveStops()
         {
             var result = AutoExposureSettingsResolver.ResolveExposureCompensationAll(2f, 1f);

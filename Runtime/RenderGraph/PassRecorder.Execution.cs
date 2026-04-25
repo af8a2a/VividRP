@@ -367,6 +367,7 @@ namespace VividRP.Runtime
             s_HistoryCurrentTextures = Array.Empty<RenderGraphTexture>();
             ClearCodeManagedHistoryFrameState();
             ClearImportedTextures();
+            s_PassImportedHandles.Clear();
             RenderGraphHistoryRegistry.Clear();
             RenderGraphBufferHistoryRegistry.Clear();
             FrameContextSystem.Clear();
@@ -423,7 +424,7 @@ namespace VividRP.Runtime
 
             if (!s_PassImportedHandles.TryGetValue(pass, out var handles))
             {
-                handles = new List<ImportedPassTexture>();
+                handles = new List<ImportedPassTexture>(32);
                 s_PassImportedHandles[pass] = handles;
             }
 
@@ -1050,7 +1051,8 @@ namespace VividRP.Runtime
             }
 
             s_ImportedRTHandles.Clear();
-            s_PassImportedHandles.Clear();
+            foreach (var handles in s_PassImportedHandles.Values)
+                handles?.Clear();
             s_CurrentRenderGraph = null;
         }
 

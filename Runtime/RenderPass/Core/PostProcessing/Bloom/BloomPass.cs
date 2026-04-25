@@ -1,4 +1,5 @@
 using System;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -6,7 +7,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
 {
-    public class BloomPass : UnsafePass, IPostProcessSourceOverridePass
+    public class BloomPass : UnsafePass, IPostProcessSourceOverridePass, IStablePassResourceLayout
     {
         private const int k_MaxBloomMipCount = 16;
 
@@ -24,6 +25,11 @@ namespace VividRP.Runtime
         private static readonly int VividBloomTintId     = Shader.PropertyToID("_VividBloomTint");
         private static readonly int VividBloomDirtTextureId = Shader.PropertyToID("_VividBloomDirtTexture");
         private static readonly int VividBloomDirtScaleId   = Shader.PropertyToID("_VividBloomDirtScale");
+        private static readonly ProfilerMarker s_PrepareSettingsMarker = new("VividRP.RenderPass.Bloom.Prepare.Settings");
+        private static readonly ProfilerMarker s_PrepareOutputsMarker = new("VividRP.RenderPass.Bloom.Prepare.Outputs");
+        private static readonly ProfilerMarker s_PrepareMipsMarker = new("VividRP.RenderPass.Bloom.Prepare.Mips");
+        private static readonly string[] s_MipDownNames = CreateMipNames("BloomMipDown");
+        private static readonly string[] s_MipUpNames = CreateMipNames("BloomMipUp");
 
         [RenderGraphResource(Access = AccessFlags.Read)]
         private RenderGraphTexture source = new();
@@ -154,67 +160,78 @@ namespace VividRP.Runtime
 
         public override void Prepare(ContextContainer frameData)
         {
-            var cameraData = frameData.Get<VividCameraData>();
-            var camera = cameraData?.camera;
-            bool ppAllowed = camera != null && CoreUtils.ArePostProcessesEnabled(camera);
-            m_Settings = ppAllowed ? BloomSettingsResolver.Resolve() : BloomSettingsData.CreateDefault();
-            m_ScreenSpaceLensFlareSettings = ppAllowed
-                ? ScreenSpaceLensFlareSettingsResolver.Resolve()
-                : ScreenSpaceLensFlareSettingsData.CreateDefault();
+            VividCameraData cameraData;
 
-            m_ScreenWidth  = ResolveWidth(cameraData);
-            m_ScreenHeight = ResolveHeight(cameraData);
+            using (s_PrepareSettingsMarker.Auto())
+            {
+                cameraData = frameData.Get<VividCameraData>();
+                var camera = cameraData?.camera;
+                bool ppAllowed = camera != null && CoreUtils.ArePostProcessesEnabled(camera);
+                m_Settings = ppAllowed ? BloomSettingsResolver.Resolve() : BloomSettingsData.CreateDefault();
+                m_ScreenSpaceLensFlareSettings = ppAllowed
+                    ? ScreenSpaceLensFlareSettingsResolver.Resolve()
+                    : ScreenSpaceLensFlareSettingsData.CreateDefault();
+            }
 
-            ConfigureOutputTexture(bloomTexture, 1, 1, "BloomTexture");
-            ConfigureOutputTexture(
-                screenSpaceLensFlareBloomMipTexture,
-                1,
-                1,
-                "ScreenSpaceLensFlareBloomMipTexture");
+            using (s_PrepareOutputsMarker.Auto())
+            {
+                m_ScreenWidth  = ResolveWidth(cameraData);
+                m_ScreenHeight = ResolveHeight(cameraData);
 
-            m_MipCount = 0;
-            m_ScreenSpaceLensFlareBloomMip = 0;
-            m_ShouldOutputBloomTexture = m_Settings.enabled;
-            m_ShouldOutputScreenSpaceLensFlareMip = m_ScreenSpaceLensFlareSettings.enabled;
+                ConfigureOutputTexture(bloomTexture, 1, 1, "BloomTexture");
+                ConfigureOutputTexture(
+                    screenSpaceLensFlareBloomMipTexture,
+                    1,
+                    1,
+                    "ScreenSpaceLensFlareBloomMipTexture");
+
+                m_MipCount = 0;
+                m_ScreenSpaceLensFlareBloomMip = 0;
+                m_ShouldOutputBloomTexture = m_Settings.enabled;
+                m_ShouldOutputScreenSpaceLensFlareMip = m_ScreenSpaceLensFlareSettings.enabled;
+            }
 
             if (!m_Settings.enabled && !m_ScreenSpaceLensFlareSettings.enabled
                 || m_PrefilterCS == null || m_BlurCS == null || m_UpsampleCS == null
                 || m_ScreenWidth <= 0 || m_ScreenHeight <= 0)
                 return;
 
-            float ana    = m_Settings.anamorphic;
-            float scaleW = ana < 0f ? 1f + ana * 0.5f : 1f;
-            float scaleH = ana > 0f ? 1f - ana * 0.5f : 1f;
-            int div      = (int)m_Settings.resolution;
-            int baseW    = Mathf.Max(1, Mathf.FloorToInt(m_ScreenWidth  * scaleW) / div);
-            int baseH    = Mathf.Max(1, Mathf.FloorToInt(m_ScreenHeight * scaleH) / div);
-
-            int maxDim = Mathf.Max(baseW, baseH);
-            m_MipCount = Mathf.Clamp(
-                Mathf.FloorToInt(Mathf.Log(maxDim, 2f)) - 2 - (m_Settings.resolution == BloomResolution.Half ? 0 : 1),
-                1, k_MaxBloomMipCount);
-
-            m_ScreenSpaceLensFlareBloomMip = Mathf.Clamp(
-                m_ScreenSpaceLensFlareSettings.bloomMip,
-                0,
-                m_MipCount - 1);
-
-            ConfigureOutputTexture(bloomTexture, baseW, baseH, "BloomTexture");
-            ConfigureOutputTexture(
-                screenSpaceLensFlareBloomMipTexture,
-                Mathf.Max(1, baseW >> m_ScreenSpaceLensFlareBloomMip),
-                Mathf.Max(1, baseH >> m_ScreenSpaceLensFlareBloomMip),
-                "ScreenSpaceLensFlareBloomMipTexture");
-
-            for (int i = 0; i < m_MipCount; i++)
+            using (s_PrepareMipsMarker.Auto())
             {
-                int mw = Mathf.Max(1, baseW >> i);
-                int mh = Mathf.Max(1, baseH >> i);
-                EnsureMipHandle(ref m_MipDownHandles[i], mw, mh, $"BloomMipDown{i}");
-                EnsureMipHandle(ref m_MipUpHandles[i],   mw, mh, $"BloomMipUp{i}");
-                // Import into RenderGraph so the pass declares read/write access.
-                m_MipDownTH[i] = Import(m_MipDownHandles[i]);
-                m_MipUpTH[i]   = Import(m_MipUpHandles[i]);
+                float ana    = m_Settings.anamorphic;
+                float scaleW = ana < 0f ? 1f + ana * 0.5f : 1f;
+                float scaleH = ana > 0f ? 1f - ana * 0.5f : 1f;
+                int div      = (int)m_Settings.resolution;
+                int baseW    = Mathf.Max(1, Mathf.FloorToInt(m_ScreenWidth  * scaleW) / div);
+                int baseH    = Mathf.Max(1, Mathf.FloorToInt(m_ScreenHeight * scaleH) / div);
+
+                int maxDim = Mathf.Max(baseW, baseH);
+                m_MipCount = Mathf.Clamp(
+                    Mathf.FloorToInt(Mathf.Log(maxDim, 2f)) - 2 - (m_Settings.resolution == BloomResolution.Half ? 0 : 1),
+                    1, k_MaxBloomMipCount);
+
+                m_ScreenSpaceLensFlareBloomMip = Mathf.Clamp(
+                    m_ScreenSpaceLensFlareSettings.bloomMip,
+                    0,
+                    m_MipCount - 1);
+
+                ConfigureOutputTexture(bloomTexture, baseW, baseH, "BloomTexture");
+                ConfigureOutputTexture(
+                    screenSpaceLensFlareBloomMipTexture,
+                    Mathf.Max(1, baseW >> m_ScreenSpaceLensFlareBloomMip),
+                    Mathf.Max(1, baseH >> m_ScreenSpaceLensFlareBloomMip),
+                    "ScreenSpaceLensFlareBloomMipTexture");
+
+                for (int i = 0; i < m_MipCount; i++)
+                {
+                    int mw = Mathf.Max(1, baseW >> i);
+                    int mh = Mathf.Max(1, baseH >> i);
+                    EnsureMipHandle(ref m_MipDownHandles[i], mw, mh, s_MipDownNames[i]);
+                    EnsureMipHandle(ref m_MipUpHandles[i],   mw, mh, s_MipUpNames[i]);
+                    // Import into RenderGraph so the pass declares read/write access.
+                    m_MipDownTH[i] = Import(m_MipDownHandles[i]);
+                    m_MipUpTH[i]   = Import(m_MipUpHandles[i]);
+                }
             }
         }
 
@@ -407,6 +424,15 @@ namespace VividRP.Runtime
                 filterMode: FilterMode.Bilinear,
                 wrapMode: TextureWrapMode.Clamp,
                 name: name);
+        }
+
+        private static string[] CreateMipNames(string prefix)
+        {
+            var names = new string[k_MaxBloomMipCount];
+            for (int i = 0; i < names.Length; i++)
+                names[i] = $"{prefix}{i}";
+
+            return names;
         }
 
         private static void SetKeyword(ComputeShader cs, string keyword, bool enabled)

@@ -162,6 +162,25 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Prepare_DoesNotAllocate_WhenCameraDataIsStable()
+        {
+            var pass = new GTAOPass();
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 320;
+            cameraData.actualHeight = 180;
+
+            pass.Prepare(frameData);
+
+            var allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+            for (var index = 0; index < 32; index++)
+                pass.Prepare(frameData);
+
+            var allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            Assert.That(allocatedBytes, Is.Zero);
+        }
+
+        [Test]
         public void BuildRegistrations_IncludesGTAOPass()
         {
             var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(new[] { typeof(GTAOPass) });

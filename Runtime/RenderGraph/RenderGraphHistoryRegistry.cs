@@ -73,6 +73,7 @@ namespace VividRP.Runtime
         }
 
         private static readonly Dictionary<HistoryScopedKey, HistoryEntry> s_HistoryTextures = new(16);
+        private static string[] s_HistoryIndexKeys = Array.Empty<string>();
 
         internal static void Clear()
         {
@@ -97,7 +98,7 @@ namespace VividRP.Runtime
             return AcquireHistoryTextures(
                 camera,
                 graphAsset,
-                historyIndex.ToString(),
+                GetHistoryIndexKey(historyIndex),
                 descriptor,
                 out previousHandle,
                 out currentHandle,
@@ -161,7 +162,7 @@ namespace VividRP.Runtime
             AcquireHistoryTextures(
                 camera,
                 graphAsset,
-                historyIndex.ToString(),
+                GetHistoryIndexKey(historyIndex),
                 descriptor,
                 out _,
                 out var currentHandle,
@@ -199,7 +200,7 @@ namespace VividRP.Runtime
             return TryGetHistoryTarget(
                 camera,
                 graphAsset,
-                historyIndex.ToString(),
+                GetHistoryIndexKey(historyIndex),
                 out handle,
                 out hasValidData);
         }
@@ -235,7 +236,7 @@ namespace VividRP.Runtime
             return TryGetHistoryTextures(
                 camera,
                 graphAsset,
-                historyIndex.ToString(),
+                GetHistoryIndexKey(historyIndex),
                 out previousHandle,
                 out currentHandle,
                 out hasValidData);
@@ -269,7 +270,7 @@ namespace VividRP.Runtime
             MarkHistoryValid(
                 camera,
                 graphAsset,
-                historyIndex.ToString(),
+                GetHistoryIndexKey(historyIndex),
                 valid);
         }
 
@@ -286,7 +287,7 @@ namespace VividRP.Runtime
 
         internal static void CommitHistory(Camera camera, RenderGraphData graphAsset, int historyIndex, bool valid = true)
         {
-            CommitHistory(camera, graphAsset, historyIndex.ToString(), valid);
+            CommitHistory(camera, graphAsset, GetHistoryIndexKey(historyIndex), valid);
         }
 
         internal static void CommitHistory(Camera camera, RenderGraphData graphAsset, string historyKey, bool valid = true)
@@ -399,12 +400,29 @@ namespace VividRP.Runtime
 
         private static HistoryScopedKey BuildKey(Camera camera, RenderGraphData graphAsset, int historyIndex)
         {
-            return BuildScopedKey(camera, graphAsset, historyIndex.ToString());
+            return BuildScopedKey(camera, graphAsset, GetHistoryIndexKey(historyIndex));
         }
 
         private static HistoryScopedKey BuildScopedKey(Camera camera, RenderGraphData graphAsset, string historyKey)
         {
             return new HistoryScopedKey(camera, graphAsset, historyKey);
+        }
+
+        internal static string GetHistoryIndexKey(int historyIndex)
+        {
+            if (historyIndex < 0)
+                return historyIndex.ToString();
+
+            if (historyIndex >= s_HistoryIndexKeys.Length)
+            {
+                var newLength = Mathf.Max(1, s_HistoryIndexKeys.Length);
+                while (newLength <= historyIndex)
+                    newLength *= 2;
+
+                Array.Resize(ref s_HistoryIndexKeys, newLength);
+            }
+
+            return s_HistoryIndexKeys[historyIndex] ??= historyIndex.ToString();
         }
     }
 

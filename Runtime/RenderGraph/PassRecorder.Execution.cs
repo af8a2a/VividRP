@@ -1527,7 +1527,7 @@ namespace VividRP.Runtime
                 }
 
                 RegisterTextureHistoryBinding(
-                    i.ToString(),
+                    RenderGraphHistoryRegistry.GetHistoryIndexKey(i),
                     previousTexture,
                     currentTexture,
                     previousHandle,

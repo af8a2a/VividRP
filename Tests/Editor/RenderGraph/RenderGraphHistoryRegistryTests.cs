@@ -210,6 +210,16 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void GetHistoryIndexKey_ReusesCachedString_ForRepeatedIndex()
+        {
+            var firstKey = RenderGraphHistoryRegistry.GetHistoryIndexKey(3);
+            var secondKey = RenderGraphHistoryRegistry.GetHistoryIndexKey(3);
+
+            Assert.That(firstKey, Is.EqualTo("3"));
+            Assert.That(secondKey, Is.SameAs(firstKey));
+        }
+
+        [Test]
         public void CommitFrame_AdvancesTextureHistory_ForPassScopedHistory()
         {
             using var cameraScope = new CameraScope();

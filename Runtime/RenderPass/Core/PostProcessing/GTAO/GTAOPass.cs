@@ -344,8 +344,14 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static ProjectionData DecomposeProjection(Matrix4x4 projection, bool isOrthographicHint)
         {
-            var planes = new Vector4[6];
-            bool isReversedZ = MvpToPlanes(projection, planes);
+            bool isReversedZ = MvpToPlanes(
+                projection,
+                out var leftPlane,
+                out var rightPlane,
+                out var bottomPlane,
+                out var topPlane,
+                out var nearPlane,
+                out var farPlane);
             bool isOrthographic = isOrthographicHint || Mathf.Abs(projection[3, 3] - 1.0f) <= 1e-5f;
 
             float x0;
@@ -355,23 +361,23 @@ namespace VividRP.Runtime.RenderPass.Core
 
             if (isOrthographic)
             {
-                x0 = -planes[0].w;
-                x1 = planes[1].w;
-                y0 = -planes[2].w;
-                y1 = planes[3].w;
+                x0 = -leftPlane.w;
+                x1 = rightPlane.w;
+                y0 = -bottomPlane.w;
+                y1 = topPlane.w;
 
                 if (projection[1, 1] < 0.0f)
                     Swap(ref y0, ref y1);
             }
             else
             {
-                x0 = planes[0].z / planes[0].x;
-                x1 = planes[1].z / planes[1].x;
-                y0 = planes[2].z / planes[2].y;
-                y1 = planes[3].z / planes[3].y;
+                x0 = leftPlane.z / leftPlane.x;
+                x1 = rightPlane.z / rightPlane.x;
+                y0 = bottomPlane.z / bottomPlane.y;
+                y1 = topPlane.z / topPlane.y;
             }
 
-            float nearZ = -planes[4].w;
+            float nearZ = -nearPlane.w;
             Vector4 clip = projection * new Vector4(0.0f, 0.0f, nearZ, 1.0f);
             Vector3 column2 = isOrthographic
                 ? GetColumn(projection, 2) * (isReversedZ ? -1.0f : 1.0f)
@@ -391,14 +397,21 @@ namespace VividRP.Runtime.RenderPass.Core
             return projection;
         }
 
-        private static bool MvpToPlanes(Matrix4x4 matrix, Vector4[] planes)
+        private static bool MvpToPlanes(
+            Matrix4x4 matrix,
+            out Vector4 left,
+            out Vector4 right,
+            out Vector4 bottom,
+            out Vector4 top,
+            out Vector4 near,
+            out Vector4 far)
         {
-            Vector4 left = NormalizePlane(matrix.GetRow(3) + matrix.GetRow(0));
-            Vector4 right = NormalizePlane(matrix.GetRow(3) - matrix.GetRow(0));
-            Vector4 bottom = NormalizePlane(matrix.GetRow(3) + matrix.GetRow(1));
-            Vector4 top = NormalizePlane(matrix.GetRow(3) - matrix.GetRow(1));
-            Vector4 far = NormalizePlane(matrix.GetRow(3) - matrix.GetRow(2));
-            Vector4 near = NormalizePlane(matrix.GetRow(2));
+            left = NormalizePlane(matrix.GetRow(3) + matrix.GetRow(0));
+            right = NormalizePlane(matrix.GetRow(3) - matrix.GetRow(0));
+            bottom = NormalizePlane(matrix.GetRow(3) + matrix.GetRow(1));
+            top = NormalizePlane(matrix.GetRow(3) - matrix.GetRow(1));
+            far = NormalizePlane(matrix.GetRow(3) - matrix.GetRow(2));
+            near = NormalizePlane(matrix.GetRow(2));
 
             bool isReversedZ = Mathf.Abs(near.w) > Mathf.Abs(far.w);
             if (isReversedZ)
@@ -407,12 +420,6 @@ namespace VividRP.Runtime.RenderPass.Core
             if (GetLengthSquared(far) < PlaneEpsilon * PlaneEpsilon)
                 far = new Vector4(-near.x, -near.y, -near.z, far.w);
 
-            planes[0] = left;
-            planes[1] = right;
-            planes[2] = bottom;
-            planes[3] = top;
-            planes[4] = near;
-            planes[5] = far;
             return isReversedZ;
         }
 

@@ -23,6 +23,7 @@ namespace VividRP.Runtime
         private static readonly string[] s_DefaultShaderTagNames =
         {
             ForwardShaderTagName,
+            DefaultUnlitShaderTagName,
         };
 
         public string[] ShaderTagNames = (string[])s_DefaultShaderTagNames.Clone();
@@ -36,6 +37,10 @@ namespace VividRP.Runtime
         public int OverrideMaterialPassIndex;
         public Shader OverrideShader;
         public int OverrideShaderPassIndex;
+
+        private string[] m_CachedShaderTagNames;
+        private ShaderTagId[] m_CachedShaderTagIds;
+        private int m_CachedShaderTagNamesHash;
 
         public RenderGraphRenderListDesc Clone()
         {
@@ -57,11 +62,9 @@ namespace VividRP.Runtime
 
         internal RendererListDesc CreateRendererListDesc(CullingResults cullingResults, Camera camera)
         {
-            var shaderTags = BuildShaderTagIds();
-
-            var desc = shaderTags.Length == 1
-                ? new RendererListDesc(shaderTags[0], cullingResults, camera)
-                : new RendererListDesc(shaderTags, cullingResults, camera);
+            var desc = TryGetSingleShaderTagId(out var singleShaderTag)
+                ? new RendererListDesc(singleShaderTag, cullingResults, camera)
+                : new RendererListDesc(GetShaderTagIds(), cullingResults, camera);
 
             desc.renderQueueRange = ResolveRenderQueueRange(RenderQueueRange);
             desc.sortingCriteria = SortingCriteria;
@@ -100,42 +103,132 @@ namespace VividRP.Runtime
             };
         }
 
-        private ShaderTagId[] BuildShaderTagIds()
+        private bool TryGetSingleShaderTagId(out ShaderTagId shaderTag)
         {
             if (ShaderTagNames == null || ShaderTagNames.Length == 0)
-                return BuildDefaultShaderTagIds();
-
-            var validCount = 0;
-            for (var i = 0; i < ShaderTagNames.Length; i++)
             {
-                if (!string.IsNullOrWhiteSpace(ShaderTagNames[i]))
-                    validCount++;
+                shaderTag = default;
+                return false;
             }
 
-            if (validCount == 0)
-                return BuildDefaultShaderTagIds();
-
-            var shaderTags = new ShaderTagId[validCount];
-            var outputIndex = 0;
+            var validCount = 0;
+            var validShaderTagName = default(string);
             for (var i = 0; i < ShaderTagNames.Length; i++)
             {
                 var shaderTagName = ShaderTagNames[i];
-                if (string.IsNullOrWhiteSpace(shaderTagName))
+                if (!IsValidShaderTagName(shaderTagName))
                     continue;
 
-                shaderTags[outputIndex++] = new ShaderTagId(shaderTagName);
+                validCount++;
+                validShaderTagName ??= shaderTagName;
+                if (validCount > 1)
+                    break;
             }
 
-            return shaderTags;
+            if (validCount == 1)
+            {
+                shaderTag = new ShaderTagId(validShaderTagName);
+                return true;
+            }
+
+            shaderTag = default;
+            return false;
         }
 
-        private static ShaderTagId[] BuildDefaultShaderTagIds()
+        private ShaderTagId[] GetShaderTagIds()
         {
-            return new[]
+            var shaderTagNames = ShaderTagNames;
+            if (shaderTagNames == null || shaderTagNames.Length == 0)
+                shaderTagNames = s_DefaultShaderTagNames;
+
+            var validCount = 0;
+            var hash = 17;
+            for (var i = 0; i < shaderTagNames.Length; i++)
             {
-                new ShaderTagId(ForwardShaderTagName),
-                new ShaderTagId(DefaultUnlitShaderTagName),
-            };
+                var shaderTagName = shaderTagNames[i];
+                if (!IsValidShaderTagName(shaderTagName))
+                    continue;
+
+                validCount++;
+                unchecked
+                {
+                    hash = hash * 31 + StringComparer.Ordinal.GetHashCode(shaderTagName);
+                }
+            }
+
+            if (validCount == 0)
+            {
+                shaderTagNames = s_DefaultShaderTagNames;
+                validCount = s_DefaultShaderTagNames.Length;
+                hash = GetShaderTagNamesHash(s_DefaultShaderTagNames);
+            }
+
+            if (IsShaderTagCacheCurrent(shaderTagNames, validCount, hash))
+                return m_CachedShaderTagIds;
+
+            m_CachedShaderTagNames = new string[validCount];
+            m_CachedShaderTagIds = new ShaderTagId[validCount];
+            m_CachedShaderTagNamesHash = hash;
+
+            var outputIndex = 0;
+            for (var i = 0; i < shaderTagNames.Length; i++)
+            {
+                var shaderTagName = shaderTagNames[i];
+                if (!IsValidShaderTagName(shaderTagName))
+                    continue;
+
+                m_CachedShaderTagNames[outputIndex] = shaderTagName;
+                m_CachedShaderTagIds[outputIndex] = new ShaderTagId(shaderTagName);
+                outputIndex++;
+            }
+
+            return m_CachedShaderTagIds;
+        }
+
+        private bool IsShaderTagCacheCurrent(string[] shaderTagNames, int validCount, int hash)
+        {
+            if (m_CachedShaderTagIds == null
+                || m_CachedShaderTagNames == null
+                || m_CachedShaderTagIds.Length != validCount
+                || m_CachedShaderTagNames.Length != validCount
+                || m_CachedShaderTagNamesHash != hash)
+            {
+                return false;
+            }
+
+            var outputIndex = 0;
+            for (var i = 0; i < shaderTagNames.Length; i++)
+            {
+                var shaderTagName = shaderTagNames[i];
+                if (!IsValidShaderTagName(shaderTagName))
+                    continue;
+
+                if (!string.Equals(m_CachedShaderTagNames[outputIndex], shaderTagName, StringComparison.Ordinal))
+                    return false;
+
+                outputIndex++;
+            }
+
+            return outputIndex == validCount;
+        }
+
+        private static int GetShaderTagNamesHash(string[] shaderTagNames)
+        {
+            var hash = 17;
+            for (var i = 0; i < shaderTagNames.Length; i++)
+            {
+                unchecked
+                {
+                    hash = hash * 31 + StringComparer.Ordinal.GetHashCode(shaderTagNames[i]);
+                }
+            }
+
+            return hash;
+        }
+
+        private static bool IsValidShaderTagName(string shaderTagName)
+        {
+            return !string.IsNullOrWhiteSpace(shaderTagName);
         }
 
         private static RenderQueueRange ResolveRenderQueueRange(RenderGraphRenderQueueRange range)

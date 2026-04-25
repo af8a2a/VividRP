@@ -28,6 +28,8 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "RenderList", Access = AccessFlags.Read)]
         private RenderGraphRenderList m_RenderList;
 
+        [RenderGraphResource(Name = "FallbackRenderList", Access = AccessFlags.Read)]
+        private RenderGraphRenderList m_FallbackRenderList;
 
         [RenderGraphResource(Name = "CameraDepth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_CameraDepthTexture;
@@ -55,6 +57,16 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
             };
 
+            m_FallbackRenderList = new RenderGraphRenderList
+            {
+                desc = new RenderGraphRenderListDesc
+                {
+                    ShaderTagNames = (string[])s_DefaultShaderTagNames.Clone(),
+                    RenderQueueRange = RenderGraphRenderQueueRange.Opaque,
+                    SortingCriteria = SortingCriteria.CommonOpaque,
+                    RendererConfiguration = PerObjectData.MotionVectors,
+                }
+            };
 
             m_CameraDepthTexture = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.None, DepthBits.Depth32);
             m_MotionVectorTexture = RenderGraphTexture.CreateColorTarget("MotionVectors", GraphicsFormat.R16G16_SFloat);
@@ -75,11 +87,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             m_Camera = cameraData.camera;
 
-            if (m_Camera != null)
-            {
-            }
-
-            ConfigureRenderList();
+            ConfigureRenderLists();
             ConfigureTargets(cameraData);
         }
 
@@ -103,6 +111,13 @@ namespace VividRP.Runtime.RenderPass.Core
 
             if (m_RenderList != null && m_RenderList.IsValid)
                 context.cmd.DrawRendererList(m_RenderList);
+
+            if (m_ObjectMotionVectorFallbackShader != null
+                && m_FallbackRenderList != null
+                && m_FallbackRenderList.IsValid)
+            {
+                context.cmd.DrawRendererList(m_FallbackRenderList);
+            }
         }
 
         public override void Dispose()
@@ -138,7 +153,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
-        private void ConfigureRenderList()
+        private void ConfigureRenderLists()
         {
             m_RenderList ??= new RenderGraphRenderList();
             m_RenderList.desc ??= new RenderGraphRenderListDesc();
@@ -153,6 +168,18 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RenderList.desc.OverrideShader = null;
             m_RenderList.desc.OverrideShaderPassIndex = 0;
 
+            m_FallbackRenderList ??= new RenderGraphRenderList();
+            m_FallbackRenderList.desc ??= new RenderGraphRenderListDesc();
+
+            if (m_FallbackRenderList.desc.ShaderTagNames == null || m_FallbackRenderList.desc.ShaderTagNames.Length == 0)
+                m_FallbackRenderList.desc.ShaderTagNames = (string[])s_DefaultShaderTagNames.Clone();
+
+            m_FallbackRenderList.desc.RendererConfiguration |= PerObjectData.MotionVectors;
+            m_FallbackRenderList.desc.ExcludeObjectMotionVectors = false;
+            m_FallbackRenderList.desc.OverrideMaterial = null;
+            m_FallbackRenderList.desc.OverrideMaterialPassIndex = 0;
+            m_FallbackRenderList.desc.OverrideShader = m_ObjectMotionVectorFallbackShader;
+            m_FallbackRenderList.desc.OverrideShaderPassIndex = 0;
         }
 
         private void ConfigureTargets(VividCameraData cameraData)

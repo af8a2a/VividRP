@@ -9,6 +9,7 @@ namespace VividRP.Runtime
         private const float MatrixTolerance = 0.0001f;
         private static readonly PropertyInfo s_ProjectionMatrixModeProperty =
             typeof(Camera).GetProperty("projectionMatrixMode", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        private static readonly object[] s_ProjectionStateModeValues = CreateProjectionStateModeValues();
 
         internal enum CameraProjectionStateMode
         {
@@ -177,7 +178,7 @@ namespace VividRP.Runtime
                 return Matrix4x4.Ortho(-halfWidth, halfWidth, -halfHeight, halfHeight, nearClip, farClip);
             }
 
-            if (ResolveProjectionStateMode(camera) == CameraProjectionStateMode.PhysicalPropertiesBased || camera.usePhysicalProperties)
+            if (camera.usePhysicalProperties)
             {
                 Matrix4x4 projectionMatrix;
                 Camera.CalculateProjectionMatrixFromPhysicalProperties(
@@ -200,8 +201,7 @@ namespace VividRP.Runtime
             if (camera == null)
                 return CameraProjectionStateMode.Implicit;
 
-            if (s_ProjectionMatrixModeProperty?.GetValue(camera) is System.Enum modeEnum
-                && System.Enum.TryParse(modeEnum.ToString(), out CameraProjectionStateMode mode))
+            if (TryGetProjectionStateMode(camera, out var mode))
             {
                 return mode;
             }
@@ -218,7 +218,10 @@ namespace VividRP.Runtime
 
             try
             {
-                var projectionModeValue = Enum.Parse(s_ProjectionMatrixModeProperty.PropertyType, mode.ToString(), ignoreCase: false);
+                var projectionModeValue = GetProjectionStateModeValue(mode);
+                if (projectionModeValue == null)
+                    return false;
+
                 s_ProjectionMatrixModeProperty.SetValue(camera, projectionModeValue);
                 return true;
             }
@@ -230,27 +233,24 @@ namespace VividRP.Runtime
 
         private static CameraProjectionStateMode ResolveEffectiveProjectionStateMode(Camera camera)
         {
-            var mode = ResolveProjectionStateMode(camera);
-            if (mode != CameraProjectionStateMode.Explicit || camera == null)
-                return mode;
+            if (camera == null)
+                return CameraProjectionStateMode.Implicit;
 
-            if (HasJitteredProjectionPair(camera))
-                return mode;
+            var nonJitteredProjectionMatrix = camera.nonJitteredProjectionMatrix;
+            var projectionMatrix = camera.projectionMatrix;
 
-            if (TryResolveParameterDrivenProjectionMode(camera, camera.nonJitteredProjectionMatrix, out var resolvedMode)
-                || TryResolveParameterDrivenProjectionMode(camera, camera.projectionMatrix, out resolvedMode))
+            if (HasJitteredProjectionPair(projectionMatrix, nonJitteredProjectionMatrix))
+                return CameraProjectionStateMode.Explicit;
+
+            if (TryResolveParameterDrivenProjectionMode(camera, nonJitteredProjectionMatrix, out var resolvedMode)
+                || TryResolveParameterDrivenProjectionMode(camera, projectionMatrix, out resolvedMode))
                 return resolvedMode;
 
-            return mode;
+            return CameraProjectionStateMode.Explicit;
         }
 
-        private static bool HasJitteredProjectionPair(Camera camera)
+        private static bool HasJitteredProjectionPair(Matrix4x4 projectionMatrix, Matrix4x4 nonJitteredProjectionMatrix)
         {
-            if (camera == null)
-                return false;
-
-            var projectionMatrix = camera.projectionMatrix;
-            var nonJitteredProjectionMatrix = camera.nonJitteredProjectionMatrix;
             if (!IsProjectionMatrixUsable(projectionMatrix)
                 || !IsProjectionMatrixUsable(nonJitteredProjectionMatrix)
                 || MaxAbsDiff(projectionMatrix, nonJitteredProjectionMatrix) <= MatrixTolerance)
@@ -276,6 +276,70 @@ namespace VividRP.Runtime
             }
 
             return Mathf.Abs(matrix.m03) > MatrixTolerance || Mathf.Abs(matrix.m13) > MatrixTolerance;
+        }
+
+        private static bool TryGetProjectionStateMode(Camera camera, out CameraProjectionStateMode mode)
+        {
+            mode = default;
+
+            if (s_ProjectionMatrixModeProperty == null)
+                return false;
+
+            try
+            {
+                var projectionModeValue = s_ProjectionMatrixModeProperty.GetValue(camera);
+                if (projectionModeValue == null)
+                    return false;
+
+                for (var modeIndex = 0; modeIndex < s_ProjectionStateModeValues.Length; modeIndex++)
+                {
+                    var cachedModeValue = s_ProjectionStateModeValues[modeIndex];
+                    if (cachedModeValue == null || !cachedModeValue.Equals(projectionModeValue))
+                        continue;
+
+                    mode = (CameraProjectionStateMode)modeIndex;
+                    return true;
+                }
+
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static object GetProjectionStateModeValue(CameraProjectionStateMode mode)
+        {
+            var modeIndex = (int)mode;
+            if (modeIndex < 0 || modeIndex >= s_ProjectionStateModeValues.Length)
+                return null;
+
+            return s_ProjectionStateModeValues[modeIndex];
+        }
+
+        private static object[] CreateProjectionStateModeValues()
+        {
+            if (s_ProjectionMatrixModeProperty == null || !s_ProjectionMatrixModeProperty.PropertyType.IsEnum)
+                return Array.Empty<object>();
+
+            var values = new object[3];
+            values[(int)CameraProjectionStateMode.Explicit] = TryCreateProjectionStateModeValue(nameof(CameraProjectionStateMode.Explicit));
+            values[(int)CameraProjectionStateMode.Implicit] = TryCreateProjectionStateModeValue(nameof(CameraProjectionStateMode.Implicit));
+            values[(int)CameraProjectionStateMode.PhysicalPropertiesBased] = TryCreateProjectionStateModeValue(nameof(CameraProjectionStateMode.PhysicalPropertiesBased));
+            return values;
+        }
+
+        private static object TryCreateProjectionStateModeValue(string name)
+        {
+            try
+            {
+                return Enum.Parse(s_ProjectionMatrixModeProperty.PropertyType, name, ignoreCase: false);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static bool TryResolveParameterDrivenProjectionMode(

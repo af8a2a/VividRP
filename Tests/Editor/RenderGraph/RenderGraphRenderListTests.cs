@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEngine;
@@ -75,6 +76,46 @@ namespace VividRP.Editor.Tests
                 RenderGraphRenderListDesc.ForwardShaderTagName,
                 RenderGraphRenderListDesc.DefaultUnlitShaderTagName,
             }));
+        }
+
+        [Test]
+        public void Constructor_DoesNotCreateShaderTagIds_WhenRenderListIsCreated()
+        {
+            var renderList = new RenderGraphRenderList();
+
+            Assert.That(GetCachedShaderTagIds(renderList.desc), Is.Null);
+        }
+
+        [Test]
+        public void CreateRendererListDesc_ReusesShaderTagCache_WhenMultipleTagsAreUnchanged()
+        {
+            var gameObject = new GameObject("RenderListCacheCamera");
+            try
+            {
+                var camera = gameObject.AddComponent<Camera>();
+                var descriptor = new RenderGraphRenderListDesc
+                {
+                    ShaderTagNames = new[]
+                    {
+                        RenderGraphRenderListDesc.ForwardShaderTagName,
+                        RenderGraphRenderListDesc.DefaultUnlitShaderTagName,
+                    }
+                };
+
+                descriptor.CreateRendererListDesc(default, camera);
+                var cachedShaderTags = GetCachedShaderTagIds(descriptor);
+
+                descriptor.CreateRendererListDesc(default, camera);
+                Assert.That(GetCachedShaderTagIds(descriptor), Is.SameAs(cachedShaderTags));
+
+                descriptor.ShaderTagNames[1] = "Changed";
+                descriptor.CreateRendererListDesc(default, camera);
+                Assert.That(GetCachedShaderTagIds(descriptor), Is.Not.SameAs(cachedShaderTags));
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
         }
 
         [Test]
@@ -159,6 +200,16 @@ namespace VividRP.Editor.Tests
 
             Assert.That(match.Success, Is.True, "Expected UnityPerMaterial cbuffer block.");
             return match.Value;
+        }
+
+        private static ShaderTagId[] GetCachedShaderTagIds(RenderGraphRenderListDesc descriptor)
+        {
+            var field = typeof(RenderGraphRenderListDesc).GetField(
+                "m_CachedShaderTagIds",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(field, Is.Not.Null);
+            return (ShaderTagId[])field.GetValue(descriptor);
         }
     }
 }

@@ -1,3 +1,4 @@
+using System;
 using NUnit.Framework;
 using UnityEngine;
 using VividRP.Runtime;
@@ -18,7 +19,7 @@ namespace VividRP.Editor.Tests
         public void TearDown()
         {
             if (m_GameObject != null)
-                Object.DestroyImmediate(m_GameObject);
+                UnityEngine.Object.DestroyImmediate(m_GameObject);
         }
 
         [Test]
@@ -216,6 +217,30 @@ namespace VividRP.Editor.Tests
             Assert.That(camera.usePhysicalProperties, Is.True);
             Assert.That(restoredState.Mode, Is.EqualTo(CameraProjectionMatrixUtility.CameraProjectionStateMode.PhysicalPropertiesBased));
             Assert.That(MaxAbsDiff(restoredProjection, expectedProjection), Is.LessThan(0.0001f));
+        }
+
+        [Test]
+        public void GetProjectionMatrices_DoNotAllocate_ForParameterDrivenCamera()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            camera.aspect = 16.0f / 9.0f;
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 250.0f;
+            camera.fieldOfView = 60.0f;
+
+            CameraProjectionMatrixUtility.GetProjectionMatrix(camera);
+            CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            for (var index = 0; index < 32; index++)
+            {
+                CameraProjectionMatrixUtility.GetProjectionMatrix(camera);
+                CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+            }
+
+            var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+            Assert.That(allocatedBytes, Is.Zero);
         }
 
         private static float MaxAbsDiff(Matrix4x4 lhs, Matrix4x4 rhs)

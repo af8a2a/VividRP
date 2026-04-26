@@ -58,8 +58,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(
             Name = "HZBGlobalAtomic",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
         private RenderGraphBuffer m_GlobalAtomicBuffer;
 
         private ComputeShader m_ComputeShader;

@@ -33,10 +33,10 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void LightGridPass_KeepsCpuUploadedInternalBuffersLegacyHidden()
+        public void LightGridPass_KeepsCpuUploadedInternalBuffersNonTransient()
         {
-            AssertBindingMode("m_FiniteLightBoundBuffer", RenderGraphResourceBindingMode.PassOwnedHidden);
-            AssertBindingMode("m_LightVolumeDataBuffer", RenderGraphResourceBindingMode.PassOwnedHidden);
+            AssertNonTransientResource("m_FiniteLightBoundBuffer");
+            AssertNonTransientResource("m_LightVolumeDataBuffer");
         }
 
         [Test]
@@ -184,6 +184,15 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field.GetCustomAttribute<RenderGraphResource>(), Is.Not.Null, fieldName);
             Assert.That(field.GetCustomAttribute<TransientResourceAttribute>(), Is.Not.Null, fieldName);
+        }
+
+        private static void AssertNonTransientResource(string fieldName)
+        {
+            var field = typeof(LightGridPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, fieldName);
+
+            Assert.That(field.GetCustomAttribute<RenderGraphResource>(), Is.Not.Null, fieldName);
+            Assert.That(field.GetCustomAttribute<TransientResourceAttribute>(), Is.Null, fieldName);
         }
     }
 }

@@ -53,14 +53,12 @@ namespace VividRP.Runtime
 
         [RenderGraphResource(
             Name = "DepthOfFieldCoCHistory",
-            Access = AccessFlags.Read,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.Read)]
         private RenderGraphTexture m_CoCHistoryPrevious;
 
         [RenderGraphResource(
             Name = "DepthOfFieldCoCHistoryCurrent",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_CoCHistoryCurrent;
 
         [RenderGraphResource(

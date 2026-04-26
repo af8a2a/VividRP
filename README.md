@@ -28,7 +28,7 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 - `ScriptedImporter` 在导入时把 `.vrdg` 编译为运行时 `RenderGraphData`
 - Pass 端口由 `[RenderGraphResource]` 字段反射生成
 - 三种 Pass 基类：`RasterPass`（光栅化渲染）、`ComputePass`（Compute Shader 调度）、`UnsafePass`（原生 CommandBuffer 访问）
-- 资源绑定模式：`External`（图外部连接）、`PassOwnedOverrideable`（Pass 创建默认值，可被覆盖）、`PassOwnedHidden`（完全内部，不暴露端口）
+- 资源绑定模式：`External`（图外部连接）、`PassOwnedOverrideable`（Pass 创建默认值，可被覆盖）；Pass 内部临时资源使用 `[TransientResource]`
 - 当前支持 `Texture`、`Buffer`、`RenderList`、`History`、`Preview`、`Acceleration Structure` 节点
 - 支持基于 Graph Toolkit Local Subgraph 的 `SubSystem`
 - 运行时包含 history、preview、frame context 和资源绑定管理

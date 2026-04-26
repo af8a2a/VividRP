@@ -41,16 +41,6 @@ namespace VividRP.Editor.Tests
             Assert.That(node.GetInputPortByName($"{MixedBindingPass.OwnedFieldName}_In"), Is.Null);
             Assert.That(node.GetOutputPortByName(MixedBindingPass.OwnedFieldName), Is.Not.Null);
         }
-
-        [Test]
-        public void LegacyPassOwnedHiddenNode_DoesNotDefinePortsOrOverrideOption()
-        {
-            var node = new HiddenHistoryPassNode();
-
-            Assert.That(node.HasOverrideOption(HiddenHistoryPass.HistoryFieldName), Is.False);
-            Assert.That(node.GetInputPortByName(HiddenHistoryPass.HistoryFieldName), Is.Null);
-            Assert.That(node.GetOutputPortByName(HiddenHistoryPass.HistoryFieldName), Is.Null);
-        }
     }
 
     public class RenderGraphCompilerBindingModeTests
@@ -107,21 +97,6 @@ namespace VividRP.Editor.Tests
             Assert.That(consumerBinding.SourceKind, Is.EqualTo(RenderGraphPassBindingSourceKind.PassField));
             Assert.That(consumerBinding.ConnectionKind, Is.EqualTo(RenderGraphPassBindingConnectionKind.Input));
             Assert.That(consumerBinding.SourceFieldName, Is.EqualTo(PassOwnedTextureProducerPass.ColorFieldName));
-        }
-
-        [Test]
-        public void Compile_DoesNotCreateResourceBinding_WhenLegacyPassOwnedFieldIsHidden()
-        {
-            var graph = new RenderGraphEditorGraph();
-            var node = new HiddenHistoryPassNode();
-
-            graph.AddNode(node);
-
-            var result = RenderGraphCompiler.Compile(graph);
-
-            Assert.That(result.Passes, Has.Count.EqualTo(1));
-            Assert.That(result.Passes[0].PassType, Is.EqualTo(GetPassTypeName<HiddenHistoryPass>()));
-            Assert.That(result.Passes[0].ResourceBindings, Is.Empty);
         }
 
         private static string GetPassTypeName<T>()
@@ -203,33 +178,6 @@ namespace VividRP.Editor.Tests
         }
     }
 
-    public sealed class HiddenHistoryPass : ComputePass
-    {
-        internal const string HistoryFieldName = "m_History";
-
-        [RenderGraphResource(
-            Name = "History",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
-        private RenderGraphTexture m_History = new RenderGraphTexture();
-
-        public override void Create()
-        {
-        }
-
-        public override void Prepare(ContextContainer frameData)
-        {
-        }
-
-        public override void Record(ComputePassContext context)
-        {
-        }
-
-        public override void Dispose()
-        {
-        }
-    }
-
     [Serializable]
     internal class PassOwnedTextureProducerNode : RenderPassNodeData
     {
@@ -257,17 +205,5 @@ namespace VividRP.Editor.Tests
     internal sealed class MixedBindingPassNode : RenderPassNodeData
     {
         internal override Type GetRegisteredPassType() => typeof(MixedBindingPass);
-    }
-
-    [Serializable]
-    internal sealed class HiddenHistoryPassNode : RenderPassNodeData
-    {
-        internal override Type GetRegisteredPassType() => typeof(HiddenHistoryPass);
-
-        internal bool HasOverrideOption(string fieldName)
-        {
-            var option = GetNodeOptionByName(RenderPassPortUtility.GetOverrideOptionName(fieldName));
-            return option != null;
-        }
     }
 }

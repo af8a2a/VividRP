@@ -78,14 +78,12 @@ namespace VividRP.Runtime
 
         [RenderGraphResource(
             Name = "FiniteLightBounds",
-            Access = AccessFlags.Write,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.Write)]
         private RenderGraphBuffer m_FiniteLightBoundBuffer;
 
         [RenderGraphResource(
             Name = "LightVolumeData",
-            Access = AccessFlags.Write,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.Write)]
         private RenderGraphBuffer m_LightVolumeDataBuffer;
 
         [RenderGraphResource(

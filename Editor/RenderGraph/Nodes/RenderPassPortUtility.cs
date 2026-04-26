@@ -97,20 +97,15 @@ namespace VividRP.Editor.RenderGraph
             if (!CanRead(access))
                 return false;
 
-            return bindingMode switch
-            {
-                RenderGraphResourceBindingMode.PassOwnedHidden => false,
-                RenderGraphResourceBindingMode.PassOwnedOverrideable => overrideEnabled,
-                _ => true,
-            };
+            return bindingMode != RenderGraphResourceBindingMode.PassOwnedOverrideable
+                   || overrideEnabled;
         }
 
         internal static bool ShouldDefineOutputPort(
             AccessFlags access,
             RenderGraphResourceBindingMode bindingMode)
         {
-            return bindingMode != RenderGraphResourceBindingMode.PassOwnedHidden
-                && CanWrite(access);
+            return CanWrite(access);
         }
 
         internal static string GetDebugOutputPortName(string fieldName)

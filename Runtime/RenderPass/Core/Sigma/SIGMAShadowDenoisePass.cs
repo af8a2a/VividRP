@@ -45,24 +45,20 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
         // Previous-frame read inputs (imported RTHandle by AllocHistoryTextureForPass)
         [RenderGraphResource(Name = "HistoryShadow",
-            Access = AccessFlags.Read,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.Read)]
         private RenderGraphTexture m_HistoryShadowTexture;
 
         [RenderGraphResource(Name = "HistoryLength",
-            Access = AccessFlags.Read,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.Read)]
         private RenderGraphTexture m_HistoryLengthTexture;
 
         // Current-frame write outputs (persistent history buffers imported when requested)
         [RenderGraphResource(Name = "SIGMA_HistoryShadowCurrent",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_HistoryShadowCurrent;
 
         [RenderGraphResource(Name = "SIGMA_HistoryLengthCurrent",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_HistoryLengthCurrent;
 
         // --- external outputs ---

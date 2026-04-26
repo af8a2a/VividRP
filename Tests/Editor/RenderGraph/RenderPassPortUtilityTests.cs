@@ -69,24 +69,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void GetPortNames_ReturnNull_WhenLegacyPassOwnedHidden()
-        {
-            Assert.That(
-                RenderPassPortUtility.GetInputPortName(
-                    "History",
-                    AccessFlags.ReadWrite,
-                    RenderGraphResourceBindingMode.PassOwnedHidden,
-                    overrideEnabled: false),
-                Is.Null);
-            Assert.That(
-                RenderPassPortUtility.GetOutputPortName(
-                    "History",
-                    AccessFlags.ReadWrite,
-                    RenderGraphResourceBindingMode.PassOwnedHidden),
-                Is.Null);
-        }
-
-        [Test]
         public void ResolveConnectedNode_ReturnsSharedNode_WhenReadWriteUsesSameResource()
         {
             var node = new DummyNode();

@@ -29,14 +29,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(
             Name = "TAAHistoryColor",
-            Access = AccessFlags.Read,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.Read)]
         private RenderGraphTexture m_HistoryColorPrevious;
 
         [RenderGraphResource(
             Name = "TAAHistoryColorCurrent",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_HistoryColorCurrent;
 
         [RenderGraphResource(Name = "TAAOutput", Access = AccessFlags.WriteAll)]

@@ -482,8 +482,7 @@ namespace VividRP.Editor.Tests
 
         [RenderGraphResource(
             Name = "PreviousHistory",
-            Access = AccessFlags.Read,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.Read)]
         private readonly RenderGraphTexture m_Previous = new RenderGraphTexture
         {
             desc = RenderGraphTextureDesc.CreateColorTarget(64, 32, GraphicsFormat.R8G8B8A8_UNorm)
@@ -491,8 +490,7 @@ namespace VividRP.Editor.Tests
 
         [RenderGraphResource(
             Name = "CurrentHistory",
-            Access = AccessFlags.Write,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.Write)]
         private readonly RenderGraphTexture m_Current = new RenderGraphTexture
         {
             desc = RenderGraphTextureDesc.CreateColorTarget(64, 32, GraphicsFormat.R8G8B8A8_UNorm)
@@ -523,8 +521,7 @@ namespace VividRP.Editor.Tests
 
         [RenderGraphResource(
             Name = "PreviousHistory",
-            Access = AccessFlags.Read,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.Read)]
         private readonly RenderGraphBuffer m_Previous = new RenderGraphBuffer
         {
             desc = RenderGraphBufferDesc.CreateStructured(16, sizeof(uint))
@@ -532,8 +529,7 @@ namespace VividRP.Editor.Tests
 
         [RenderGraphResource(
             Name = "CurrentHistory",
-            Access = AccessFlags.Write,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.Write)]
         private readonly RenderGraphBuffer m_Current = new RenderGraphBuffer
         {
             desc = RenderGraphBufferDesc.CreateStructured(16, sizeof(uint))

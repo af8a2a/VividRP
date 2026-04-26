@@ -6,13 +6,7 @@ namespace VividRP.Runtime
     public enum RenderGraphResourceBindingMode
     {
         External,
-        PassOwnedOverrideable,
-
-        /// <summary>
-        /// Legacy hidden non-transient resource path. Use <see cref="TransientResourceAttribute"/> for pass-local scratch resources.
-        /// </summary>
-        [Obsolete("Use [TransientResource] for pass-local scratch resources. PassOwnedHidden is retained only for legacy non-transient internal resources.", false)]
-        PassOwnedHidden
+        PassOwnedOverrideable
     }
 
     [AttributeUsage(AttributeTargets.Field)]

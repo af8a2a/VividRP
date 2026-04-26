@@ -29,20 +29,20 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(
             Name = "DiffusionTexture",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_DiffusionTexture;
 
         [RenderGraphResource(
             Name = "DiffusionTemp1",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_TempTexture1;
 
         [RenderGraphResource(
             Name = "DiffusionTemp2",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_TempTexture2;
 
         [RenderGraphResource(

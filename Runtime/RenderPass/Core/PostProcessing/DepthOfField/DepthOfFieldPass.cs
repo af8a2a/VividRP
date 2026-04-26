@@ -47,8 +47,8 @@ namespace VividRP.Runtime
 
         [RenderGraphResource(
             Name = "DepthOfFieldCoC",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_FullResCoC;
 
         [RenderGraphResource(
@@ -65,26 +65,26 @@ namespace VividRP.Runtime
 
         [RenderGraphResource(
             Name = "DepthOfFieldTileMinMaxPing",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_TileMinMaxPing;
 
         [RenderGraphResource(
             Name = "DepthOfFieldTileMinMaxPong",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_TileMinMaxPong;
 
         [RenderGraphResource(
             Name = "DepthOfFieldScaledSource",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_ScaledSource;
 
         [RenderGraphResource(
             Name = "DepthOfFieldScaledBlur",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_ScaledBlur;
 
         [RenderGraphResource(

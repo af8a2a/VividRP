@@ -73,50 +73,50 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
         // Tile classification output  (float4, tile resolution)
         [RenderGraphResource(Name = "SIGMA_Tiles",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_TileTexture;
 
         // Smoothed tile output  (float2, tile resolution)
         [RenderGraphResource(Name = "SIGMA_SmoothTiles",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_SmoothTileTexture;
 
         // Intermediate penumbra after pre-blur  (R16_SFloat, full resolution)
         [RenderGraphResource(Name = "SIGMA_Penumbra",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_TransientPenumbra;
 
         // Intermediate shadow after pre-blur  (R8_UNorm, full resolution)
         [RenderGraphResource(Name = "SIGMA_Shadow",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_TransientShadow;
 
         // Intermediate penumbra after post-blur  (R16_SFloat, full resolution)
         [RenderGraphResource(Name = "SIGMA_Penumbra2",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_TransientPenumbra2;
 
         // Intermediate shadow after post-blur  (R8_UNorm, full resolution)
         [RenderGraphResource(Name = "SIGMA_Shadow2",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_TransientShadow2;
 
         // Copy of history shadow for this frame  (R8_UNorm, full resolution)
         [RenderGraphResource(Name = "SIGMA_TransientHistory",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_TransientHistory;
 
         // Copy of history length for this frame  (R32_UInt, full resolution)
         [RenderGraphResource(Name = "SIGMA_TransientHistoryLength",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_TransientHistoryLength;
         
         

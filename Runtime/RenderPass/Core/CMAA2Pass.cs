@@ -30,44 +30,44 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(
             Name = "CMAA2Edges",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_CmaaEdgesTexture;
 
         [RenderGraphResource(
             Name = "CMAA2DeferredBlendItemListHeads",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_CmaaDeferredBlendItemListHeadsTexture;
 
         [RenderGraphResource(
             Name = "CMAA2ShapeCandidates",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphBuffer m_CmaaShapeCandidatesBuffer;
 
         [RenderGraphResource(
             Name = "CMAA2DeferredBlendItemList",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphBuffer m_CmaaDeferredBlendItemListBuffer;
 
         [RenderGraphResource(
             Name = "CMAA2DeferredBlendLocationList",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphBuffer m_CmaaDeferredBlendLocationListBuffer;
 
         [RenderGraphResource(
             Name = "CMAA2ControlBuffer",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphBuffer m_CmaaControlBuffer;
 
         [RenderGraphResource(
             Name = "CMAA2ExecuteIndirectBuffer",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphBuffer m_CmaaExecuteIndirectBuffer;
 
         [RenderGraphResource(Name = "CMAA2Output", Access = AccessFlags.Write)]

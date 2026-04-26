@@ -128,6 +128,14 @@ namespace VividRP.Editor.RenderGraph
                     continue;
                 }
 
+                if (attr.BindingMode != RenderGraphResourceBindingMode.External)
+                {
+                    reporter.LogWarning(
+                        $"Transient field '{field.Name}' should not set deprecated {nameof(RenderGraphResource.BindingMode)}. Use {nameof(TransientResourceAttribute)} to hide pass-local scratch resources.",
+                        passNode);
+                    summary.WarningCount++;
+                }
+
                 ValidateTransientLegacyConnections(passNode, field, attr, reporter, ref summary);
             }
         }

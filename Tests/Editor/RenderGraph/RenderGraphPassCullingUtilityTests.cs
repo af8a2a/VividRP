@@ -110,7 +110,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void GetLivePassIndices_CullsPassWithHiddenIntermediateWrites_WhenExternalOutputHasNoConsumer()
+        public void GetLivePassIndices_CullsPassWithTransientIntermediateWrites_WhenExternalOutputHasNoConsumer()
         {
             var passDefinitions = new List<RenderGraphPassDefinition>
             {

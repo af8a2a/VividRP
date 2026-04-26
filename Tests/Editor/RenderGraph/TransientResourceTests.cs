@@ -124,6 +124,27 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Validate_LogsWarning_WhenTransientFieldAlsoSetsBindingMode()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                RenderGraphTestUtility.AddTestNode(graph, new TransientWithBindingModePassNode());
+                var sink = new TestErrorsAndWarnings();
+                var logger = CreateLogger(sink);
+
+                RenderGraphEditorValidator.Validate(graph, logger);
+
+                Assert.That(sink.Warnings.Any(message => message.Contains("should not set deprecated")), Is.True);
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
         public void Validate_LogsError_WhenLegacyPortStillReferencesTransientField()
         {
             var graph = RenderGraphTestUtility.CreateGraph();
@@ -300,16 +321,14 @@ namespace VividRP.Editor.Tests
 
         [RenderGraphResource(
             Name = "ScratchTexture",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private RenderGraphTexture m_ScratchTexture =
             RenderGraphTexture.CreateColorTarget("ScratchTexture", GraphicsFormat.R8G8B8A8_UNorm);
 
         [RenderGraphResource(
             Name = "ScratchBuffer",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+            Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private RenderGraphBuffer m_ScratchBuffer =
             RenderGraphBuffer.CreateStructured("ScratchBuffer", 1, 16);
@@ -317,6 +336,33 @@ namespace VividRP.Editor.Tests
         [RenderGraphResource(Name = "NormalTexture", Access = AccessFlags.Read)]
         private RenderGraphTexture m_NormalTexture =
             RenderGraphTexture.CreateInput("NormalTexture", GraphicsFormat.R8G8B8A8_UNorm);
+
+        public override void Create()
+        {
+        }
+
+        public override void Prepare(ContextContainer frameData)
+        {
+        }
+
+        public override void Record(ComputePassContext context)
+        {
+        }
+
+        public override void Dispose()
+        {
+        }
+    }
+
+    public sealed class TransientWithBindingModePass : ComputePass
+    {
+        [RenderGraphResource(
+            Name = "ScratchTexture",
+            Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        [TransientResource]
+        private RenderGraphTexture m_ScratchTexture =
+            RenderGraphTexture.CreateColorTarget("ScratchTexture", GraphicsFormat.R8G8B8A8_UNorm);
 
         public override void Create()
         {
@@ -470,6 +516,12 @@ namespace VividRP.Editor.Tests
     internal sealed class UnsupportedTransientResourcePassNode : RenderPassNodeData
     {
         internal override Type GetRegisteredPassType() => typeof(UnsupportedTransientResourcePass);
+    }
+
+    [Serializable]
+    internal sealed class TransientWithBindingModePassNode : RenderPassNodeData
+    {
+        internal override Type GetRegisteredPassType() => typeof(TransientWithBindingModePass);
     }
 
     internal sealed class FakeRenderGraphBuilder :

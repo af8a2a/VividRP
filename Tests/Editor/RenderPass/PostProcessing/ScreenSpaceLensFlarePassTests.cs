@@ -21,7 +21,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Initialize_RegistersBloomMipAndHiddenIntermediateResources()
+        public void Initialize_RegistersBloomMipAndTransientIntermediateResources()
         {
             IRenderPass renderPass = new ScreenSpaceLensFlarePass();
 
@@ -43,6 +43,9 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 textureEntries.Single(entry => entry.Name == "ScreenSpaceLensFlareResult").Texture.desc.ColorFormat,
                 Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(textureEntries.Single(entry => entry.Name == "ScreenSpaceLensFlareResult").IsTransient, Is.True);
+            Assert.That(textureEntries.Single(entry => entry.Name == "ScreenSpaceLensFlareStreakTmp").IsTransient, Is.True);
+            Assert.That(textureEntries.Single(entry => entry.Name == "ScreenSpaceLensFlareStreakTmp2").IsTransient, Is.True);
             Assert.That(resources.Buffers, Is.Empty);
             Assert.That(resources.RenderLists, Is.Empty);
         }

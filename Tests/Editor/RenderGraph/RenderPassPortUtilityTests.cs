@@ -69,7 +69,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void GetPortNames_ReturnNull_WhenPassOwnedHidden()
+        public void GetPortNames_ReturnNull_WhenLegacyPassOwnedHidden()
         {
             Assert.That(
                 RenderPassPortUtility.GetInputPortName(

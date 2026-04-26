@@ -43,7 +43,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PassOwnedHiddenNode_DoesNotDefinePortsOrOverrideOption()
+        public void LegacyPassOwnedHiddenNode_DoesNotDefinePortsOrOverrideOption()
         {
             var node = new HiddenHistoryPassNode();
 
@@ -110,7 +110,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Compile_DoesNotCreateResourceBinding_WhenPassOwnedFieldIsHidden()
+        public void Compile_DoesNotCreateResourceBinding_WhenLegacyPassOwnedFieldIsHidden()
         {
             var graph = new RenderGraphEditorGraph();
             var node = new HiddenHistoryPassNode();

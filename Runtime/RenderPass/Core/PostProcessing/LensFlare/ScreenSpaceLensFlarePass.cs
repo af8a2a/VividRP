@@ -15,20 +15,20 @@ namespace VividRP.Runtime
 
         [RenderGraphResource(
             Name = "ScreenSpaceLensFlareResult",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture resultTexture = new();
 
         [RenderGraphResource(
             Name = "ScreenSpaceLensFlareStreakTmp",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture streakTmpTexture = new();
 
         [RenderGraphResource(
             Name = "ScreenSpaceLensFlareStreakTmp2",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture streakTmpTexture2 = new();
 
         private Material m_LensFlareMaterial;

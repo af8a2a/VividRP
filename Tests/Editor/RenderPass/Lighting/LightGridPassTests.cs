@@ -25,13 +25,18 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void LightGridPass_HidesInternalBuildBuffers_FromAuthoringPorts()
+        public void LightGridPass_MarksInternalScratchBuffersTransient()
+        {
+            AssertTransientResource("m_ScreenSpaceBoundsBuffer");
+            AssertTransientResource("m_BigTileLightListBuffer");
+            AssertTransientResource("m_LayeredLightListCounterBuffer");
+        }
+
+        [Test]
+        public void LightGridPass_KeepsCpuUploadedInternalBuffersLegacyHidden()
         {
             AssertBindingMode("m_FiniteLightBoundBuffer", RenderGraphResourceBindingMode.PassOwnedHidden);
             AssertBindingMode("m_LightVolumeDataBuffer", RenderGraphResourceBindingMode.PassOwnedHidden);
-            AssertBindingMode("m_ScreenSpaceBoundsBuffer", RenderGraphResourceBindingMode.PassOwnedHidden);
-            AssertBindingMode("m_BigTileLightListBuffer", RenderGraphResourceBindingMode.PassOwnedHidden);
-            AssertBindingMode("m_LayeredLightListCounterBuffer", RenderGraphResourceBindingMode.PassOwnedHidden);
         }
 
         [Test]
@@ -81,6 +86,7 @@ namespace VividRP.Editor.Tests
                     .GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
                     .Where(field => field.FieldType == typeof(RenderGraphBuffer))
                     .Where(field => field.GetCustomAttribute<RenderGraphResource>() != null)
+                    .Where(field => field.GetCustomAttribute<TransientResourceAttribute>() == null)
                     .ToArray();
 
                 Assert.That(bufferFields, Is.Not.Empty);
@@ -91,6 +97,30 @@ namespace VividRP.Editor.Tests
                     Assert.That(buffer, Is.Not.Null, field.Name);
                     AssertImportedBackingBuffer(buffer, field.Name);
                 }
+            }
+            finally
+            {
+                pass.Dispose();
+            }
+        }
+
+        [Test]
+        public void Prepare_DoesNotCreateImportedBackingBuffers_ForTransientScratchBuffers()
+        {
+            var pass = new LightGridPass();
+
+            try
+            {
+                var frameData = new ContextContainer();
+                var cameraData = frameData.GetOrCreate<VividCameraData>();
+                cameraData.actualWidth = 128;
+                cameraData.actualHeight = 64;
+
+                pass.Prepare(frameData);
+
+                AssertNoImportedBackingBuffer(pass, "m_ScreenSpaceBoundsBuffer");
+                AssertNoImportedBackingBuffer(pass, "m_BigTileLightListBuffer");
+                AssertNoImportedBackingBuffer(pass, "m_LayeredLightListCounterBuffer");
             }
             finally
             {
@@ -112,6 +142,22 @@ namespace VividRP.Editor.Tests
             Assert.That(importedGraphicsBuffer.stride, Is.EqualTo(buffer.desc.Stride), fieldName);
         }
 
+        private static void AssertNoImportedBackingBuffer(LightGridPass pass, string fieldName)
+        {
+            var field = typeof(LightGridPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, fieldName);
+
+            var buffer = (RenderGraphBuffer)field.GetValue(pass);
+            Assert.That(buffer, Is.Not.Null, fieldName);
+
+            var importedGraphicsBufferProperty = typeof(RenderGraphBuffer).GetProperty(
+                "ImportedGraphicsBuffer",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(importedGraphicsBufferProperty, Is.Not.Null);
+            Assert.That(importedGraphicsBufferProperty.GetValue(buffer), Is.Null, fieldName);
+        }
+
         private static void AssertNativeArrayField(string fieldName, Type elementType)
         {
             var field = typeof(LightGridPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
@@ -129,6 +175,15 @@ namespace VividRP.Editor.Tests
             var attr = field.GetCustomAttribute<RenderGraphResource>();
             Assert.That(attr, Is.Not.Null, fieldName);
             Assert.That(attr.BindingMode, Is.EqualTo(expectedBindingMode), fieldName);
+        }
+
+        private static void AssertTransientResource(string fieldName)
+        {
+            var field = typeof(LightGridPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, fieldName);
+
+            Assert.That(field.GetCustomAttribute<RenderGraphResource>(), Is.Not.Null, fieldName);
+            Assert.That(field.GetCustomAttribute<TransientResourceAttribute>(), Is.Not.Null, fieldName);
         }
     }
 }

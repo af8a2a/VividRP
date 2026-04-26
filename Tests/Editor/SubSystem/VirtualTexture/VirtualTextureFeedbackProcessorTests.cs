@@ -53,5 +53,30 @@ namespace VividRP.Editor.Tests
             Assert.That(aggregated[2].HitCount, Is.EqualTo(2));
             Assert.That(aggregated[2].CameraPriority, Is.EqualTo(0));
         }
+
+        [Test]
+        public void Aggregate_WritesIntoReusableOutput_WhenScratchIsProvided()
+        {
+            ulong requestKey = VirtualTextureFeedbackProcessor.EncodeKey(1, new VirtualTexturePageCoord(0, 0, 0));
+            var batches = new List<VirtualTextureFeedbackBatch>
+            {
+                new(CameraType.Game, new[] { requestKey, requestKey }, 2, 9),
+            };
+            var scratch = new VirtualTextureFeedbackProcessor.Scratch();
+            var output = new List<VirtualTextureAggregatedFeedbackRequest>
+            {
+                new(99, new VirtualTexturePageCoord(9, 9, 0), 1, 2),
+            };
+
+            VirtualTextureFeedbackProcessor.Aggregate(batches, scratch, output);
+
+            Assert.That(output.Count, Is.EqualTo(1));
+            Assert.That(output[0].SpaceId, Is.EqualTo(1));
+            Assert.That(output[0].HitCount, Is.EqualTo(2));
+
+            VirtualTextureFeedbackProcessor.Aggregate(null, scratch, output);
+
+            Assert.That(output.Count, Is.EqualTo(0));
+        }
     }
 }

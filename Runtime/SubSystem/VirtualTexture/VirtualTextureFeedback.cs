@@ -55,11 +55,19 @@ namespace VividRP.Runtime
         internal const int MaxMipCount = 16;
         private const int SpaceIdMask = (1 << SpaceIdBitCount) - 1;
         private const int PageCoordMask = (1 << PageCoordBitCount) - 1;
+        private static readonly IComparer<VirtualTextureAggregatedFeedbackRequest> s_RequestComparer = AggregatedRequestComparer.Instance;
 
-        private struct FaultAccumulator
+        internal struct FaultAccumulator
         {
             public int HitCount;
             public int CameraPriority;
+        }
+
+        internal sealed class Scratch
+        {
+            private readonly Dictionary<ulong, FaultAccumulator> m_FaultAccumulators = new();
+
+            internal Dictionary<ulong, FaultAccumulator> FaultAccumulators => m_FaultAccumulators;
         }
 
         internal static ulong EncodeKey(int spaceId, in VirtualTexturePageCoord pageCoord)
@@ -103,11 +111,27 @@ namespace VividRP.Runtime
         internal static List<VirtualTextureAggregatedFeedbackRequest> Aggregate(
             IReadOnlyList<VirtualTextureFeedbackBatch> batches)
         {
-            var faultAccumulators = new Dictionary<ulong, FaultAccumulator>();
             var aggregated = new List<VirtualTextureAggregatedFeedbackRequest>();
+            Aggregate(batches, new Scratch(), aggregated);
+            return aggregated;
+        }
+
+        internal static void Aggregate(
+            IReadOnlyList<VirtualTextureFeedbackBatch> batches,
+            Scratch scratch,
+            List<VirtualTextureAggregatedFeedbackRequest> output)
+        {
+            if (scratch == null)
+                throw new ArgumentNullException(nameof(scratch));
+            if (output == null)
+                throw new ArgumentNullException(nameof(output));
+
+            output.Clear();
+            Dictionary<ulong, FaultAccumulator> faultAccumulators = scratch.FaultAccumulators;
+            faultAccumulators.Clear();
 
             if (batches == null)
-                return aggregated;
+                return;
 
             for (int batchIndex = 0; batchIndex < batches.Count; batchIndex++)
             {
@@ -136,39 +160,57 @@ namespace VividRP.Runtime
             foreach (KeyValuePair<ulong, FaultAccumulator> pair in faultAccumulators)
             {
                 DecodeKey(pair.Key, out int spaceId, out VirtualTexturePageCoord pageCoord);
-                aggregated.Add(new VirtualTextureAggregatedFeedbackRequest(
+                output.Add(new VirtualTextureAggregatedFeedbackRequest(
                     spaceId,
                     pageCoord,
                     pair.Value.HitCount,
                     pair.Value.CameraPriority));
             }
 
-            aggregated.Sort(static (left, right) =>
+            output.Sort(s_RequestComparer);
+        }
+
+        private static int CompareRequests(
+            VirtualTextureAggregatedFeedbackRequest left,
+            VirtualTextureAggregatedFeedbackRequest right)
+        {
+            int mipCompare = left.PageCoord.Mip.CompareTo(right.PageCoord.Mip);
+            if (mipCompare != 0)
+                return mipCompare;
+
+            int hitCompare = right.HitCount.CompareTo(left.HitCount);
+            if (hitCompare != 0)
+                return hitCompare;
+
+            int cameraCompare = left.CameraPriority.CompareTo(right.CameraPriority);
+            if (cameraCompare != 0)
+                return cameraCompare;
+
+            int spaceCompare = left.SpaceId.CompareTo(right.SpaceId);
+            if (spaceCompare != 0)
+                return spaceCompare;
+
+            int yCompare = left.PageCoord.Y.CompareTo(right.PageCoord.Y);
+            if (yCompare != 0)
+                return yCompare;
+
+            return left.PageCoord.X.CompareTo(right.PageCoord.X);
+        }
+
+        private sealed class AggregatedRequestComparer : IComparer<VirtualTextureAggregatedFeedbackRequest>
+        {
+            internal static readonly AggregatedRequestComparer Instance = new();
+
+            private AggregatedRequestComparer()
             {
-                int mipCompare = left.PageCoord.Mip.CompareTo(right.PageCoord.Mip);
-                if (mipCompare != 0)
-                    return mipCompare;
+            }
 
-                int hitCompare = right.HitCount.CompareTo(left.HitCount);
-                if (hitCompare != 0)
-                    return hitCompare;
-
-                int cameraCompare = left.CameraPriority.CompareTo(right.CameraPriority);
-                if (cameraCompare != 0)
-                    return cameraCompare;
-
-                int spaceCompare = left.SpaceId.CompareTo(right.SpaceId);
-                if (spaceCompare != 0)
-                    return spaceCompare;
-
-                int yCompare = left.PageCoord.Y.CompareTo(right.PageCoord.Y);
-                if (yCompare != 0)
-                    return yCompare;
-
-                return left.PageCoord.X.CompareTo(right.PageCoord.X);
-            });
-
-            return aggregated;
+            public int Compare(
+                VirtualTextureAggregatedFeedbackRequest left,
+                VirtualTextureAggregatedFeedbackRequest right)
+            {
+                return CompareRequests(left, right);
+            }
         }
     }
 
@@ -186,7 +228,7 @@ namespace VividRP.Runtime
             return state;
         }
 
-        internal IEnumerable<KeyValuePair<int, VirtualTextureFeedbackBufferState>> EnumerateSpaceStates()
+        internal Dictionary<int, VirtualTextureFeedbackBufferState> EnumerateSpaceStates()
         {
             return m_SpaceStates;
         }
@@ -202,7 +244,7 @@ namespace VividRP.Runtime
 
     internal sealed class VirtualTextureFeedbackCameraSystem : CameraRelativeSystem<VirtualTextureFeedbackCameraState>
     {
-        internal IEnumerable<KeyValuePair<Camera, VirtualTextureFeedbackCameraState>> EnumerateStates()
+        internal Dictionary<Camera, VirtualTextureFeedbackCameraState> EnumerateStates()
         {
             return m_CameraStates;
         }
@@ -212,6 +254,8 @@ namespace VividRP.Runtime
     {
         private sealed class BufferPairState : IDisposable
         {
+            public readonly Action<AsyncGPUReadbackRequest> RequestsReadbackCallback;
+            public readonly Action<AsyncGPUReadbackRequest> CounterReadbackCallback;
             public ComputeBuffer RequestsBuffer;
             public ComputeBuffer CounterBuffer;
             public bool WasWritten;
@@ -223,6 +267,12 @@ namespace VividRP.Runtime
             public int ScheduledFrameIndex = -1;
             public ulong[] CompletedRequests = Array.Empty<ulong>();
             public uint CompletedCount;
+
+            public BufferPairState()
+            {
+                RequestsReadbackCallback = HandleRequestsReadback;
+                CounterReadbackCallback = HandleCounterReadback;
+            }
 
             public void Dispose()
             {
@@ -238,6 +288,61 @@ namespace VividRP.Runtime
                 CompletedRequests = Array.Empty<ulong>();
                 CompletedCount = 0u;
                 ScheduledFrameIndex = -1;
+            }
+
+            private void HandleRequestsReadback(AsyncGPUReadbackRequest request)
+            {
+                RequestReadbackPending = false;
+                if (!request.hasError)
+                {
+                    NativeArray<ulong> data = request.GetData<ulong>();
+                    EnsureCompletedRequestCapacity(data.Length);
+                    data.CopyTo(CompletedRequests);
+                }
+                else
+                {
+                    CompletedRequests = Array.Empty<ulong>();
+                    CompletedCount = 0u;
+                }
+
+                CompleteReadbackIfReady();
+            }
+
+            private void HandleCounterReadback(AsyncGPUReadbackRequest request)
+            {
+                CounterReadbackPending = false;
+                if (!request.hasError)
+                {
+                    NativeArray<uint> data = request.GetData<uint>();
+                    CompletedCount = data.Length > 0 ? data[0] : 0u;
+                }
+                else
+                {
+                    CompletedCount = 0u;
+                }
+
+                CompleteReadbackIfReady();
+            }
+
+            private void EnsureCompletedRequestCapacity(int capacity)
+            {
+                if (capacity <= 0)
+                {
+                    CompletedRequests = Array.Empty<ulong>();
+                    return;
+                }
+
+                if (CompletedRequests.Length != capacity)
+                    CompletedRequests = new ulong[capacity];
+            }
+
+            private void CompleteReadbackIfReady()
+            {
+                if (RequestReadbackPending || CounterReadbackPending)
+                    return;
+
+                ReadbackPending = false;
+                HasCompletedReadback = true;
             }
         }
 
@@ -315,7 +420,6 @@ namespace VividRP.Runtime
                     pair.ScheduledFrameIndex));
                 lastReadbackFrame = Mathf.Max(lastReadbackFrame, pair.ScheduledFrameIndex);
                 pair.HasCompletedReadback = false;
-                pair.CompletedRequests = Array.Empty<ulong>();
                 pair.CompletedCount = 0u;
             }
         }
@@ -368,57 +472,8 @@ namespace VividRP.Runtime
             pair.CounterReadbackPending = true;
             pair.LastCameraType = cameraType;
 
-            AsyncGPUReadback.Request(pair.RequestsBuffer, request => HandleRequestsReadback(pair, request));
-            AsyncGPUReadback.Request(pair.CounterBuffer, request => HandleCounterReadback(pair, request));
-        }
-
-        private static void HandleRequestsReadback(BufferPairState pair, AsyncGPUReadbackRequest request)
-        {
-            if (pair == null)
-                return;
-
-            pair.RequestReadbackPending = false;
-            if (!request.hasError)
-            {
-                NativeArray<ulong> data = request.GetData<ulong>();
-                ulong[] completedRequests = new ulong[data.Length];
-                data.CopyTo(completedRequests);
-                pair.CompletedRequests = completedRequests;
-            }
-            else
-            {
-                pair.CompletedRequests = Array.Empty<ulong>();
-            }
-
-            CompleteReadbackIfReady(pair);
-        }
-
-        private static void HandleCounterReadback(BufferPairState pair, AsyncGPUReadbackRequest request)
-        {
-            if (pair == null)
-                return;
-
-            pair.CounterReadbackPending = false;
-            if (!request.hasError)
-            {
-                NativeArray<uint> data = request.GetData<uint>();
-                pair.CompletedCount = data.Length > 0 ? data[0] : 0u;
-            }
-            else
-            {
-                pair.CompletedCount = 0u;
-            }
-
-            CompleteReadbackIfReady(pair);
-        }
-
-        private static void CompleteReadbackIfReady(BufferPairState pair)
-        {
-            if (pair.RequestReadbackPending || pair.CounterReadbackPending)
-                return;
-
-            pair.ReadbackPending = false;
-            pair.HasCompletedReadback = true;
+            AsyncGPUReadback.Request(pair.RequestsBuffer, pair.RequestsReadbackCallback);
+            AsyncGPUReadback.Request(pair.CounterBuffer, pair.CounterReadbackCallback);
         }
     }
 }

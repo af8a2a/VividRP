@@ -242,6 +242,32 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("VirtualTextureSystem.Deinitialize();"));
         }
 
+        [Test]
+        public void Update_ReusesFeedbackScratchCollectionsAndCommitCallbacks_ToAvoidPreRenderGc()
+        {
+            string systemSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VirtualTextureSystem.cs"));
+            string feedbackSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VirtualTextureFeedback.cs"));
+            string addressSpaceSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VTAddressSpace.cs"));
+            string uploadSchedulerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VTUploadScheduler.cs"));
+
+            Assert.That(systemSource, Does.Contain("private static readonly VirtualTextureFeedbackProcessor.Scratch s_AggregationScratch = new();"));
+            Assert.That(systemSource, Does.Contain("private static readonly List<VirtualTextureAggregatedFeedbackRequest> s_AggregatedRequests = new();"));
+            Assert.That(systemSource, Does.Contain("VirtualTextureFeedbackProcessor.Aggregate(s_CompletedReadbacks, s_AggregationScratch, s_AggregatedRequests);"));
+            Assert.That(systemSource, Does.Contain("ClearGroupedRequests();"));
+            Assert.That(feedbackSource, Does.Contain("internal sealed class Scratch"));
+            Assert.That(feedbackSource, Does.Contain("private static readonly IComparer<VirtualTextureAggregatedFeedbackRequest> s_RequestComparer = AggregatedRequestComparer.Instance;"));
+            Assert.That(feedbackSource, Does.Contain("internal Dictionary<Camera, VirtualTextureFeedbackCameraState> EnumerateStates()"));
+            Assert.That(feedbackSource, Does.Contain("internal Dictionary<int, VirtualTextureFeedbackBufferState> EnumerateSpaceStates()"));
+            Assert.That(feedbackSource, Does.Contain("RequestsReadbackCallback = HandleRequestsReadback;"));
+            Assert.That(feedbackSource, Does.Contain("AsyncGPUReadback.Request(pair.RequestsBuffer, pair.RequestsReadbackCallback);"));
+            Assert.That(feedbackSource, Does.Not.Contain("request => HandleRequestsReadback"));
+            Assert.That(feedbackSource, Does.Not.Contain("new ulong[data.Length]"));
+            Assert.That(addressSpaceSource, Does.Contain("CommitCompletedUploads(this);"));
+            Assert.That(addressSpaceSource, Does.Not.Contain("request => TryCommitRequestInternal"));
+            Assert.That(uploadSchedulerSource, Does.Contain("CommitCompletedUploads(IVTUploadRequestCommitter committer)"));
+            Assert.That(uploadSchedulerSource, Does.Not.Contain("Func<VTRequest"));
+        }
+
         private static ContextContainer CreateFrameData(Camera camera, int frameIndex)
         {
             var frameData = new ContextContainer();

@@ -12,6 +12,8 @@ namespace VividRP.Runtime
         private static readonly VirtualTextureFeedbackCameraSystem s_FeedbackCameraSystem = new();
         private static readonly List<VirtualTextureFeedbackBatch> s_CompletedReadbacks = new();
         private static readonly List<VirtualTextureFeedbackBatch> s_InjectedReadbacks = new();
+        private static readonly VirtualTextureFeedbackProcessor.Scratch s_AggregationScratch = new();
+        private static readonly List<VirtualTextureAggregatedFeedbackRequest> s_AggregatedRequests = new();
         private static readonly Dictionary<int, List<VirtualTextureAggregatedFeedbackRequest>> s_GroupedRequests = new();
 
         private static bool s_Initialized;
@@ -51,6 +53,8 @@ namespace VividRP.Runtime
             s_SpaceIdsByName.Clear();
             s_CompletedReadbacks.Clear();
             s_InjectedReadbacks.Clear();
+            s_AggregatedRequests.Clear();
+            ClearGroupedRequests();
             s_GroupedRequests.Clear();
             s_FeedbackCameraSystem.Dispose();
             s_NextSpaceId = 1;
@@ -112,10 +116,9 @@ namespace VividRP.Runtime
             for (int batchIndex = 0; batchIndex < s_CompletedReadbacks.Count; batchIndex++)
                 faultCount += s_CompletedReadbacks[batchIndex].RequestCount;
 
-            List<VirtualTextureAggregatedFeedbackRequest> aggregatedRequests =
-                VirtualTextureFeedbackProcessor.Aggregate(s_CompletedReadbacks);
-            int deduplicatedRequestCount = aggregatedRequests.Count;
-            GroupRequestsBySpace(aggregatedRequests);
+            VirtualTextureFeedbackProcessor.Aggregate(s_CompletedReadbacks, s_AggregationScratch, s_AggregatedRequests);
+            int deduplicatedRequestCount = s_AggregatedRequests.Count;
+            GroupRequestsBySpace(s_AggregatedRequests);
 
             int frameIndex = ResolveFrameIndex(frameData);
             int evictionCount = 0;
@@ -129,7 +132,8 @@ namespace VividRP.Runtime
                 addressSpace.RefreshPageTableBuffer();
             }
 
-            s_GroupedRequests.Clear();
+            ClearGroupedRequests();
+            s_AggregatedRequests.Clear();
             s_CompletedReadbacks.Clear();
 
             VividCameraData cameraData = TryGetCameraData(frameData);
@@ -326,7 +330,7 @@ namespace VividRP.Runtime
 
         private static void GroupRequestsBySpace(IReadOnlyList<VirtualTextureAggregatedFeedbackRequest> aggregatedRequests)
         {
-            s_GroupedRequests.Clear();
+            ClearGroupedRequests();
             if (aggregatedRequests == null)
                 return;
 
@@ -347,6 +351,12 @@ namespace VividRP.Runtime
 
                 requests.Add(request);
             }
+        }
+
+        private static void ClearGroupedRequests()
+        {
+            foreach (List<VirtualTextureAggregatedFeedbackRequest> requests in s_GroupedRequests.Values)
+                requests.Clear();
         }
 
         private static int ResolveFrameIndex(ContextContainer frameData)

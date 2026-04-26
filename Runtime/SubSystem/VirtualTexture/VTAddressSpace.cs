@@ -5,7 +5,7 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
-    internal sealed class VTAddressSpace : IDisposable
+    internal sealed class VTAddressSpace : IDisposable, IVTUploadRequestCommitter
     {
         private readonly int[] m_MipOffsets;
         private readonly VTResidencyManager m_ResidencyManager;
@@ -53,7 +53,7 @@ namespace VividRP.Runtime
 
         internal int ProcessRequests(IReadOnlyList<VirtualTextureAggregatedFeedbackRequest> requests, int frameIndex, CommandBuffer cmd)
         {
-            bool pageTableChanged = m_UploadScheduler.CommitCompletedUploads(request => TryCommitRequestInternal(request, rebuildPageTable: false));
+            bool pageTableChanged = m_UploadScheduler.CommitCompletedUploads(this);
 
             VTResidencyProcessResult result = m_ResidencyManager.ProcessRequests(
                 Descriptor,
@@ -179,6 +179,11 @@ namespace VividRP.Runtime
                 m_PageTableUpdater.Rebuild(Descriptor, m_MipOffsets, m_ResidencyManager);
 
             return true;
+        }
+
+        bool IVTUploadRequestCommitter.TryCommitUpload(in VTRequest request)
+        {
+            return TryCommitRequestInternal(request, rebuildPageTable: false);
         }
     }
 }

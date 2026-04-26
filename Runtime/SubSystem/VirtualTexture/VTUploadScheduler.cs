@@ -15,6 +15,11 @@ namespace VividRP.Runtime
         IVTUploadFenceHandle Create(CommandBuffer cmd);
     }
 
+    internal interface IVTUploadRequestCommitter
+    {
+        bool TryCommitUpload(in VTRequest request);
+    }
+
     internal static class VTPageUploadUtility
     {
         internal static Texture2DArray CreateStagingTexture(string spaceName, int physicalPageSize, int depth, string suffix)
@@ -210,10 +215,10 @@ namespace VividRP.Runtime
             s_FenceFactory = GraphicsFenceFactory.Instance;
         }
 
-        internal bool CommitCompletedUploads(Func<VTRequest, bool> commitRequest)
+        internal bool CommitCompletedUploads(IVTUploadRequestCommitter committer)
         {
-            if (commitRequest == null)
-                throw new ArgumentNullException(nameof(commitRequest));
+            if (committer == null)
+                throw new ArgumentNullException(nameof(committer));
 
             bool committedAny = false;
             for (int batchIndex = 0; batchIndex < m_Batches.Length; batchIndex++)
@@ -223,7 +228,10 @@ namespace VividRP.Runtime
                     continue;
 
                 for (int requestIndex = 0; requestIndex < batch.RequestCount; requestIndex++)
-                    committedAny |= commitRequest(batch.GetRequest(requestIndex));
+                {
+                    VTRequest request = batch.GetRequest(requestIndex);
+                    committedAny |= committer.TryCommitUpload(request);
+                }
 
                 batch.Reset();
             }

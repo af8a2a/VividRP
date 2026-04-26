@@ -13,7 +13,6 @@ namespace VividRP.Runtime.GPUDriven
         private static VividGPUDrivenDebugOverlayRenderer s_DebugOverlayRenderer;
         private static bool s_Initialized;
         private static int s_PreparedFrameIndex = -1;
-        private static readonly ProfilingSampler s_CullingSampler = new("GPUDrivenCulling");
 
         private readonly VividGPUDrivenBufferSet m_BufferSet;
         private readonly VividGPUDrivenCullingDispatcher m_CullingDispatcher;
@@ -141,26 +140,32 @@ namespace VividRP.Runtime.GPUDriven
             return visibleMeshletRenderRequestsBuffer != null && visibleMeshletIndirectDrawArgsBuffer != null;
         }
 
-        public void PrepareFrame()
+        public void PrepareFrame(bool reportStats = true)
         {
             ThrowIfDisposed();
 
-            BindlessTextureContainer.ResetPerFrameStats();
-            BindlessTextureContainer.PreRender();
-            bool staticDataChanged = m_SceneDataBuilder.Build(
-                SceneData,
-                VividMeshletRendererDatabase.instance,
-                BindlessTextureContainer,
-                out bool materialDataChanged,
-                out bool instanceDataChanged
-            );
-            m_BufferSet.Upload(
-                SceneData,
-                uploadInstanceData: instanceDataChanged,
-                uploadMaterialData: materialDataChanged,
-                uploadStaticData: staticDataChanged
-            );
-            ReportStats(null);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameMarker.Auto())
+            {
+                BindlessTextureContainer.ResetPerFrameStats();
+                BindlessTextureContainer.PreRender();
+                bool staticDataChanged = m_SceneDataBuilder.Build(
+                    SceneData,
+                    VividMeshletRendererDatabase.instance,
+                    BindlessTextureContainer,
+                    out bool materialDataChanged,
+                    out bool instanceDataChanged
+                );
+                m_BufferSet.Upload(
+                    SceneData,
+                    uploadInstanceData: instanceDataChanged,
+                    uploadMaterialData: materialDataChanged,
+                    uploadStaticData: staticDataChanged
+                );
+                if (reportStats)
+                {
+                    ReportStats(null);
+                }
+            }
         }
 
         public void Cull(
@@ -176,7 +181,7 @@ namespace VividRP.Runtime.GPUDriven
         {
             ThrowIfDisposed();
 
-            using (new ProfilingScope(cmd, s_CullingSampler))
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullMarker.Auto())
             {
                 m_CullingDispatcher.Dispatch(
                     cmd,
@@ -243,7 +248,12 @@ namespace VividRP.Runtime.GPUDriven
             if (frameData == null || cmd == null)
                 return;
 
-            VividRenderPipelineAsset asset = VividRenderPipelineAsset.GetActiveAsset();
+            VividRenderPipelineAsset asset;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenResolveAssetMarker.Auto())
+            {
+                asset = VividRenderPipelineAsset.GetActiveAsset();
+            }
+
             if (asset == null || !asset.EnableGPUDriven)
             {
                 PassRecorder.SetGPUDrivenFrameData(null, null);
@@ -252,8 +262,14 @@ namespace VividRP.Runtime.GPUDriven
                 return;
             }
 
-            VividCameraData cameraData = frameData.GetOrCreate<VividCameraData>();
-            Camera camera = cameraData.camera;
+            VividCameraData cameraData;
+            Camera camera;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCameraDataMarker.Auto())
+            {
+                cameraData = frameData.GetOrCreate<VividCameraData>();
+                camera = cameraData.camera;
+            }
+
             if (camera == null)
             {
                 PassRecorder.SetGPUDrivenFrameData(null, null);
@@ -268,7 +284,7 @@ namespace VividRP.Runtime.GPUDriven
                 return;
             }
 
-            PrepareFrameIfNeeded(cameraData.frameIndex);
+            PrepareFrameIfNeeded(gpuDrivenSystem, cameraData.frameIndex, reportStats: false);
             if (!gpuDrivenSystem.IsAvailable)
             {
                 gpuDrivenSystem.ReportStats(camera, cameraData.cameraName);
@@ -276,9 +292,16 @@ namespace VividRP.Runtime.GPUDriven
                 return;
             }
 
-            ApplyResolvedSettings(gpuDrivenSystem);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenApplySettingsMarker.Auto())
+            {
+                ApplyResolvedSettings(gpuDrivenSystem);
+            }
 
-            VividRPCoreResources resources = PipelineResourceManager.Get<VividRPCoreResources>();
+            VividRPCoreResources resources;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenResolveResourcesMarker.Auto())
+            {
+                resources = PipelineResourceManager.Get<VividRPCoreResources>();
+            }
             gpuDrivenSystem.Cull(
                 camera,
                 cmd,
@@ -287,10 +310,17 @@ namespace VividRP.Runtime.GPUDriven
                 resources.GPUMeshletCullingCompute,
                 resources.FixupVisibleMeshletIndirectDrawArgsCompute,
                 cameraName: cameraData.cameraName);
-            gpuDrivenSystem.BindGlobals(cmd);
-            PassRecorder.SetGPUDrivenFrameData(
-                gpuDrivenSystem.VisibleMeshletRenderRequestsBuffer,
-                gpuDrivenSystem.VisibleMeshletIndirectDrawArgsBuffer);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenBindGlobalsMarker.Auto())
+            {
+                gpuDrivenSystem.BindGlobals(cmd);
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenSetFrameDataMarker.Auto())
+            {
+                PassRecorder.SetGPUDrivenFrameData(
+                    gpuDrivenSystem.VisibleMeshletRenderRequestsBuffer,
+                    gpuDrivenSystem.VisibleMeshletIndirectDrawArgsBuffer);
+            }
         }
 
         private static void RenderDebugOverlay(ContextContainer frameData, CommandBuffer cmd)
@@ -319,13 +349,13 @@ namespace VividRP.Runtime.GPUDriven
             overlayRenderer.Draw(cmd, camera, indirectDrawArgsBuffer);
         }
 
-        private static void PrepareFrameIfNeeded(int frameIndex)
+        private static void PrepareFrameIfNeeded(VividGPUDrivenSystem gpuDrivenSystem, int frameIndex, bool reportStats = true)
         {
             int resolvedFrameIndex = frameIndex >= 0 ? frameIndex : Time.frameCount;
             if (!ShouldPrepareFrame(s_PreparedFrameIndex, resolvedFrameIndex, Application.isPlaying))
                 return;
 
-            instance.PrepareFrame();
+            gpuDrivenSystem.PrepareFrame(reportStats);
             s_PreparedFrameIndex = resolvedFrameIndex;
         }
 
@@ -378,36 +408,40 @@ namespace VividRP.Runtime.GPUDriven
 
         private void ReportStats(Camera camera, string cameraName = null)
         {
-            string statusMessage = BindlessTextureContainer.IsAvailable
-                ? string.Empty
-                : BindlessTextureContainer.UnavailableReason;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenReportStatsMarker.Auto())
+            {
+                bool bindlessAvailable = BindlessTextureContainer.IsAvailable;
+                string statusMessage = bindlessAvailable
+                    ? string.Empty
+                    : BindlessTextureContainer.UnavailableReason;
 
-            VividGPUDrivenStatsRegistry.Report(
-                new VividGPUDrivenStats(
-                    true,
-                    statusMessage,
-                    camera != null,
-                    camera != null ? cameraName : null,
-                    camera != null ? camera.cameraType : default,
-                    Time.frameCount,
-                    Time.realtimeSinceStartupAsDouble,
-                    BindlessTextureContainer.IsAvailable,
-                    VividMeshletRendererDatabase.instance.rendererCount,
-                    SceneData.InstanceCount,
-                    SceneData.MaterialCount,
-                    SceneData.MeshLODNodeCount,
-                    SceneData.MeshletCount,
-                    SceneData.VertexCount,
-                    SceneData.IndexCount,
-                    m_CullingDispatcher.BufferSet.MaxMeshletListBuildJobCount,
-                    m_CullingDispatcher.BufferSet.MaxVisibleMeshletRenderRequestCount,
-                    BindlessTextureContainer.DescriptorHeapCount,
-                    BindlessTextureContainer.DescriptorCapacity,
-                    BindlessTextureContainer.AllocatedDescriptorCount,
-                    BindlessTextureContainer.CreateSRVDescriptorCallCountThisFrame,
-                    BindlessTextureContainer.RegisteredTextureCount,
-                    ForcedMeshLODNodeDepth,
-                    MeshLODErrorThreshold));
+                VividGPUDrivenStatsRegistry.Report(
+                    new VividGPUDrivenStats(
+                        true,
+                        statusMessage,
+                        camera != null,
+                        camera != null ? cameraName : null,
+                        camera != null ? camera.cameraType : default,
+                        Time.frameCount,
+                        Time.realtimeSinceStartupAsDouble,
+                        bindlessAvailable,
+                        VividMeshletRendererDatabase.instance.rendererCount,
+                        SceneData.InstanceCount,
+                        SceneData.MaterialCount,
+                        SceneData.MeshLODNodeCount,
+                        SceneData.MeshletCount,
+                        SceneData.VertexCount,
+                        SceneData.IndexCount,
+                        m_CullingDispatcher.BufferSet.MaxMeshletListBuildJobCount,
+                        m_CullingDispatcher.BufferSet.MaxVisibleMeshletRenderRequestCount,
+                        BindlessTextureContainer.DescriptorHeapCount,
+                        BindlessTextureContainer.DescriptorCapacity,
+                        BindlessTextureContainer.AllocatedDescriptorCount,
+                        BindlessTextureContainer.CreateSRVDescriptorCallCountThisFrame,
+                        BindlessTextureContainer.RegisteredTextureCount,
+                        ForcedMeshLODNodeDepth,
+                        MeshLODErrorThreshold));
+            }
         }
     }
 

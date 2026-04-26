@@ -1,3 +1,4 @@
+using System.IO;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -78,6 +79,33 @@ namespace VividRP.Editor.Tests
                     Object.DestroyImmediate(cameraObject);
                 }
             }
+        }
+
+        [Test]
+        public void Reset_UsesNativeUploadArrays_ForNoGcCommandBufferSetBufferData()
+        {
+            string source = File.ReadAllText(
+                GetPackageFilePath("Runtime", "SubSystem", "GPUDriven", "VividGPUDrivenCullingBuffers.cs"));
+
+            Assert.That(source, Does.Contain("NativeArray<IndirectDispatchArgs> m_InitialIndirectDispatchArgsUpload"));
+            Assert.That(source, Does.Contain("NativeArray<uint> m_ZeroUintUpload"));
+            Assert.That(source, Does.Contain("NativeArray<uint> m_ZeroRendererListCountsUpload"));
+            Assert.That(source, Does.Contain("NativeArray<uint> m_ZeroIndirectDrawArgsWordsUpload"));
+            Assert.That(source, Does.Contain("cmd.SetBufferData(MeshletListBuildJobCounterBuffer, m_ZeroUintUpload);"));
+            Assert.That(source, Does.Contain("cmd.SetBufferData(MeshletListBuildIndirectArgsBuffer, m_InitialIndirectDispatchArgsUpload);"));
+            Assert.That(source, Does.Contain("cmd.SetBufferData(VisibleRendererListMeshletCountsBuffer, m_ZeroRendererListCountsUpload);"));
+            Assert.That(source, Does.Contain("cmd.SetBufferData(VisibleMeshletIndirectDrawArgsBuffer, m_ZeroIndirectDrawArgsWordsUpload);"));
+            Assert.That(source, Does.Not.Contain("static readonly uint[] s_Zero"));
+            Assert.That(source, Does.Not.Contain("IndirectDispatchArgs[] s_InitialIndirectDispatchArgs"));
+        }
+
+        private static string GetPackageFilePath(params string[] relativeParts)
+        {
+            var path = Path.Combine("Packages", "VividRP");
+            foreach (var part in relativeParts)
+                path = Path.Combine(path, part);
+
+            return path;
         }
     }
 }

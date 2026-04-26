@@ -107,6 +107,15 @@ namespace VividRP.Editor.Tests
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/LTCAreaLightSystem"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/DecalSystem"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/ResolveAsset"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/CameraData"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/PrepareFrame"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/ApplySettings"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/ResolveResources"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/Cull"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/BindGlobals"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/SetFrameData"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/ReportStats"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VirtualTextureSystem"));
 
@@ -130,6 +139,15 @@ namespace VividRP.Editor.Tests
             Assert.That(ltcAreaLightSource, Does.Contain("PrepareFrameSubsystemLTCAreaLightMarker.Auto()"));
             Assert.That(decalSource, Does.Contain("PrepareFrameSubsystemDecalMarker.Auto()"));
             Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenMarker.Auto()"));
+            Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenResolveAssetMarker.Auto()"));
+            Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenCameraDataMarker.Auto()"));
+            Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenPrepareFrameMarker.Auto()"));
+            Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenApplySettingsMarker.Auto()"));
+            Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenResolveResourcesMarker.Auto()"));
+            Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenCullMarker.Auto()"));
+            Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenBindGlobalsMarker.Auto()"));
+            Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenSetFrameDataMarker.Auto()"));
+            Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenReportStatsMarker.Auto()"));
             Assert.That(skySource, Does.Contain("PrepareFrameSubsystemSkyMarker.Auto()"));
             Assert.That(virtualTextureSource, Does.Contain("PrepareFrameSubsystemVirtualTextureMarker.Auto()"));
         }

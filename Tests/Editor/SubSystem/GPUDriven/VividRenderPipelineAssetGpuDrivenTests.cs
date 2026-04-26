@@ -149,7 +149,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Update_UsesCachedCameraNameAndStaticCullingSampler_ForNoGcStats()
+        public void Update_UsesCachedCameraNameAndAvoidsCommandSamples_ForNoGcStats()
         {
             string systemSource = File.ReadAllText(
                 GetPackageFilePath("Runtime", "SubSystem", "GPUDriven", "VividGPUDrivenSystem.cs"));
@@ -161,12 +161,15 @@ namespace VividRP.Editor.Tests
             Assert.That(cameraDataSource, Does.Contain("internal void SetCamera(Camera value)"));
             Assert.That(cameraDataSource, Does.Contain("cameraName = value != null ? value.name : null;"));
             Assert.That(passRecorderSource, Does.Contain("cameraData.SetCamera(camera);"));
-            Assert.That(systemSource, Does.Contain("private static readonly ProfilingSampler s_CullingSampler = new(\"GPUDrivenCulling\");"));
-            Assert.That(systemSource, Does.Contain("new ProfilingScope(cmd, s_CullingSampler)"));
+            Assert.That(systemSource, Does.Contain("public void PrepareFrame(bool reportStats = true)"));
+            Assert.That(systemSource, Does.Contain("if (reportStats)"));
+            Assert.That(systemSource, Does.Contain("PrepareFrameIfNeeded(gpuDrivenSystem, cameraData.frameIndex, reportStats: false);"));
             Assert.That(systemSource, Does.Contain("ReportStats(camera, cameraData.cameraName);"));
             Assert.That(systemSource, Does.Contain("cameraName: cameraData.cameraName"));
             Assert.That(systemSource, Does.Contain("camera != null ? cameraName : null"));
             Assert.That(systemSource, Does.Not.Contain("camera.name"));
+            Assert.That(systemSource, Does.Not.Contain("s_CullingSampler"));
+            Assert.That(systemSource, Does.Not.Contain("new ProfilingScope(cmd, s_CullingSampler)"));
             Assert.That(systemSource, Does.Not.Contain("BeginSample(\"GPUDrivenCulling\")"));
             Assert.That(systemSource, Does.Not.Contain("EndSample(\"GPUDrivenCulling\")"));
         }

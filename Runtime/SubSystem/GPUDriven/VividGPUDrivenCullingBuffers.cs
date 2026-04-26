@@ -8,22 +8,12 @@ namespace VividRP.Runtime.GPUDriven
 {
     internal sealed class VividGPUDrivenCullingBuffers : IDisposable
     {
-        private static readonly IndirectDispatchArgs[] s_InitialIndirectDispatchArgs =
-        {
-            new()
-            {
-                ThreadGroupsX = 0,
-                ThreadGroupsY = 1,
-                ThreadGroupsZ = 1,
-            },
-        };
-
-        private static readonly uint[] s_ZeroUint = { 0u };
-        private static readonly uint[] s_ZeroRendererListCounts = new uint[(int) VividRendererListID.Count];
-        private static readonly uint[] s_ZeroIndirectDrawArgsWords = new uint[(int) VividRendererListID.Count * 4];
-
         private NativeArray<VividGPUCullingContext> m_CullingContextUpload;
         private NativeArray<VividGPULODSelectionContext> m_LodSelectionContextUpload;
+        private NativeArray<IndirectDispatchArgs> m_InitialIndirectDispatchArgsUpload;
+        private NativeArray<uint> m_ZeroUintUpload;
+        private NativeArray<uint> m_ZeroRendererListCountsUpload;
+        private NativeArray<uint> m_ZeroIndirectDrawArgsWordsUpload;
 
         private GraphicsBuffer m_CullingContextBuffer;
         private GraphicsBuffer m_LodSelectionContextBuffer;
@@ -42,6 +32,22 @@ namespace VividRP.Runtime.GPUDriven
         {
             m_CullingContextUpload = new NativeArray<VividGPUCullingContext>(1, Allocator.Persistent);
             m_LodSelectionContextUpload = new NativeArray<VividGPULODSelectionContext>(1, Allocator.Persistent);
+            m_InitialIndirectDispatchArgsUpload = new NativeArray<IndirectDispatchArgs>(1, Allocator.Persistent);
+            m_InitialIndirectDispatchArgsUpload[0] = new IndirectDispatchArgs
+            {
+                ThreadGroupsX = 0,
+                ThreadGroupsY = 1,
+                ThreadGroupsZ = 1,
+            };
+            m_ZeroUintUpload = new NativeArray<uint>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            m_ZeroRendererListCountsUpload = new NativeArray<uint>(
+                Mathf.Max(1, (int)VividRendererListID.Count),
+                Allocator.Persistent,
+                NativeArrayOptions.ClearMemory);
+            m_ZeroIndirectDrawArgsWordsUpload = new NativeArray<uint>(
+                Mathf.Max(4, (int)VividRendererListID.Count * 4),
+                Allocator.Persistent,
+                NativeArrayOptions.ClearMemory);
         }
 
         public GraphicsBuffer CullingContextBuffer => m_CullingContextBuffer;
@@ -174,12 +180,12 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentNullException(nameof(cmd));
             }
 
-            cmd.SetBufferData(MeshletListBuildJobCounterBuffer, s_ZeroUint);
-            cmd.SetBufferData(MeshletListBuildIndirectArgsBuffer, s_InitialIndirectDispatchArgs);
-            cmd.SetBufferData(GPUMeshletCullingIndirectDispatchArgsBuffer, s_InitialIndirectDispatchArgs);
-            cmd.SetBufferData(VisibleMeshletRenderRequestCounterBuffer, s_ZeroUint);
-            cmd.SetBufferData(VisibleRendererListMeshletCountsBuffer, s_ZeroRendererListCounts);
-            cmd.SetBufferData(VisibleMeshletIndirectDrawArgsBuffer, s_ZeroIndirectDrawArgsWords);
+            cmd.SetBufferData(MeshletListBuildJobCounterBuffer, m_ZeroUintUpload);
+            cmd.SetBufferData(MeshletListBuildIndirectArgsBuffer, m_InitialIndirectDispatchArgsUpload);
+            cmd.SetBufferData(GPUMeshletCullingIndirectDispatchArgsBuffer, m_InitialIndirectDispatchArgsUpload);
+            cmd.SetBufferData(VisibleMeshletRenderRequestCounterBuffer, m_ZeroUintUpload);
+            cmd.SetBufferData(VisibleRendererListMeshletCountsBuffer, m_ZeroRendererListCountsUpload);
+            cmd.SetBufferData(VisibleMeshletIndirectDrawArgsBuffer, m_ZeroIndirectDrawArgsWordsUpload);
         }
 
         public void BindGlobals(CommandBuffer cmd)
@@ -220,14 +226,12 @@ namespace VividRP.Runtime.GPUDriven
             m_VisibleMeshletRenderRequestCounterBuffer?.Dispose();
             m_VisibleRendererListMeshletCountsBuffer?.Dispose();
             m_VisibleMeshletIndirectDrawArgsBuffer?.Dispose();
-            if (m_CullingContextUpload.IsCreated)
-            {
-                m_CullingContextUpload.Dispose();
-            }
-            if (m_LodSelectionContextUpload.IsCreated)
-            {
-                m_LodSelectionContextUpload.Dispose();
-            }
+            DisposeNativeArray(ref m_CullingContextUpload);
+            DisposeNativeArray(ref m_LodSelectionContextUpload);
+            DisposeNativeArray(ref m_InitialIndirectDispatchArgsUpload);
+            DisposeNativeArray(ref m_ZeroUintUpload);
+            DisposeNativeArray(ref m_ZeroRendererListCountsUpload);
+            DisposeNativeArray(ref m_ZeroIndirectDrawArgsWordsUpload);
 
             m_CullingContextBuffer = null;
             m_LodSelectionContextBuffer = null;
@@ -320,6 +324,18 @@ namespace VividRP.Runtime.GPUDriven
             {
                 throw new ObjectDisposedException(nameof(VividGPUDrivenCullingBuffers));
             }
+        }
+
+        private static void DisposeNativeArray<T>(ref NativeArray<T> array)
+            where T : struct
+        {
+            if (!array.IsCreated)
+            {
+                return;
+            }
+
+            array.Dispose();
+            array = default;
         }
     }
 }

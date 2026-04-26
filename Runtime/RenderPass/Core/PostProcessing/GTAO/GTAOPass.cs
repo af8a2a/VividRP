@@ -96,24 +96,26 @@ namespace VividRP.Runtime.RenderPass.Core
             Name = "GTAOWorkingDepth",
             Access = AccessFlags.ReadWrite,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        [TransientResource]
         private RenderGraphTexture m_WorkingDepthTexture;
 
         [RenderGraphResource(
             Name = "GTAOWorkingAOTerm",
             Access = AccessFlags.ReadWrite,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+        [TransientResource]
         private RenderGraphTexture m_WorkingAOTermTexture;
 
         [RenderGraphResource(
             Name = "GTAOWorkingAOTermPong",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_WorkingAOTermPongTexture;
 
         [RenderGraphResource(
             Name = "GTAOWorkingEdges",
-            Access = AccessFlags.ReadWrite,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedHidden)]
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private RenderGraphTexture m_WorkingEdgesTexture;
 
         private ComputeShader m_GTAOCompute;

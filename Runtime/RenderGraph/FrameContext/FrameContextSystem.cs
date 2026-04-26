@@ -74,8 +74,9 @@ namespace VividRP.Runtime
             using (RenderPassProfilingUtility.PrepareFrameContextBuildShaderVariablesMarker.Auto())
             {
                 shaderVariables = cameraData.BuildShaderVariables(temporalData);
-                skyData = frameData.GetOrCreate<VividSkyData>();
             }
+
+            skyData = frameData.GetOrCreate<VividSkyData>();
 
             using (RenderPassProfilingUtility.PrepareFrameContextSetShaderGlobalsMarker.Auto())
             {

@@ -93,6 +93,11 @@ namespace VividRP.Runtime
         public static readonly ProfilerMarker PrepareFrameContextSetShaderGlobalsMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SetShaderGlobals");
         public static readonly ProfilerMarker PrepareFrameContextAdaptiveProbeVolumeMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.AdaptiveProbeVolume");
         public static readonly ProfilerMarker PrepareFrameContextSubsystemPreRenderMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender");
+        public static readonly ProfilerMarker PrepareFrameSubsystemLTCAreaLightMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/LTCAreaLightSystem");
+        public static readonly ProfilerMarker PrepareFrameSubsystemDecalMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/DecalSystem");
+        public static readonly ProfilerMarker PrepareFrameSubsystemGPUDrivenMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem");
+        public static readonly ProfilerMarker PrepareFrameSubsystemSkyMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager");
+        public static readonly ProfilerMarker PrepareFrameSubsystemVirtualTextureMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VirtualTextureSystem");
         public static readonly ProfilerMarker PrepareAllMarker = new("VividRP.RenderPass.PrepareAll");
         public static readonly ProfilerMarker RecordRenderGraphMarker = new("VividRP.RenderPass.RecordRenderGraph");
         public static readonly ProfilerMarker InjectedStpRecordGraphMarker = new("VividRP.RenderPass.RecordGraph/STP (Injected)");

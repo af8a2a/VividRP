@@ -83,6 +83,11 @@ namespace VividRP.Editor.Tests
             var profilingSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "RenderPassProfiling.cs"));
             var passRecorderSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.Execution.cs"));
             var frameContextSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "FrameContextSystem.cs"));
+            var ltcAreaLightSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "AreaLight", "LTCAreaLightSystem.cs"));
+            var decalSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Decal", "DecalSystem.cs"));
+            var gpuDrivenSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "GPUDriven", "VividGPUDrivenSystem.cs"));
+            var skySource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyManager.cs"));
+            var virtualTextureSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VirtualTextureSystem.cs"));
 
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/EnsureCompiled"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/ClearHistoryImports"));
@@ -99,6 +104,11 @@ namespace VividRP.Editor.Tests
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SetShaderGlobals"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.AdaptiveProbeVolume"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/LTCAreaLightSystem"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/DecalSystem"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VirtualTextureSystem"));
 
             Assert.That(passRecorderSource, Does.Contain("PrepareFrameEnsureCompiledMarker.Auto()"));
             Assert.That(passRecorderSource, Does.Contain("PrepareFrameClearHistoryImportsMarker.Auto()"));
@@ -116,6 +126,12 @@ namespace VividRP.Editor.Tests
             Assert.That(frameContextSource, Does.Contain("PrepareFrameContextSetShaderGlobalsMarker.Auto()"));
             Assert.That(frameContextSource, Does.Contain("PrepareFrameContextAdaptiveProbeVolumeMarker.Auto()"));
             Assert.That(frameContextSource, Does.Contain("PrepareFrameContextSubsystemPreRenderMarker.Auto()"));
+
+            Assert.That(ltcAreaLightSource, Does.Contain("PrepareFrameSubsystemLTCAreaLightMarker.Auto()"));
+            Assert.That(decalSource, Does.Contain("PrepareFrameSubsystemDecalMarker.Auto()"));
+            Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenMarker.Auto()"));
+            Assert.That(skySource, Does.Contain("PrepareFrameSubsystemSkyMarker.Auto()"));
+            Assert.That(virtualTextureSource, Does.Contain("PrepareFrameSubsystemVirtualTextureMarker.Auto()"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

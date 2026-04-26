@@ -59,6 +59,14 @@ namespace VividRP.Runtime.SubSystem.Decal
 
         private static void Update(ContextContainer frameData, CommandBuffer cmd)
         {
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemDecalMarker.Auto())
+            {
+                UpdateCore(frameData, cmd);
+            }
+        }
+
+        private static void UpdateCore(ContextContainer frameData, CommandBuffer cmd)
+        {
             if (!s_Initialized)
                 Initialize();
 

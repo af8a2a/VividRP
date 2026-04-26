@@ -80,6 +80,14 @@ namespace VividRP.Runtime
 
         internal static void Update(ContextContainer frameData, CommandBuffer cmd)
         {
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemSkyMarker.Auto())
+            {
+                UpdateCore(frameData, cmd);
+            }
+        }
+
+        private static void UpdateCore(ContextContainer frameData, CommandBuffer cmd)
+        {
             if (frameData == null)
                 return;
 

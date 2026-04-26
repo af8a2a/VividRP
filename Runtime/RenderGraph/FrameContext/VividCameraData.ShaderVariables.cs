@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -6,7 +5,6 @@ namespace VividRP.Runtime
 {
     public partial class VividCameraData
     {
-        private readonly Plane[] m_CameraFrustumPlanes = new Plane[6];
         private readonly Vector4[] m_CameraWorldClipPlanes = new Vector4[6];
         private readonly Vector4[] m_ShaderFrustumPlanes = new Vector4[6];
 
@@ -78,7 +76,7 @@ namespace VividRP.Runtime
                 prevVP = temporalData.PreviousViewProjection;
             }
 
-            UpdateFrustumPlanes(currentCamera);
+            UpdateFrustumPlanes(currentCamera, cameraProjection * viewMatrix);
 
             return new ShaderVariables
             {
@@ -117,21 +115,15 @@ namespace VividRP.Runtime
             };
         }
 
-        private void UpdateFrustumPlanes(Camera currentCamera)
+        private void UpdateFrustumPlanes(Camera currentCamera, Matrix4x4 viewProjectionMatrix)
         {
-            for (var index = 0; index < m_CameraWorldClipPlanes.Length; index++)
+            if (currentCamera == null)
             {
-                m_CameraWorldClipPlanes[index] = Vector4.zero;
-                m_ShaderFrustumPlanes[index] = Vector4.zero;
+                ClearFrustumPlanes();
+                return;
             }
 
-            if (currentCamera == null)
-                return;
-
-            GeometryUtility.CalculateFrustumPlanes(currentCamera, m_CameraFrustumPlanes);
-
-            for (var index = 0; index < m_CameraFrustumPlanes.Length; index++)
-                m_CameraWorldClipPlanes[index] = ConvertPlane(m_CameraFrustumPlanes[index]);
+            CullingUtility.ExtractFrustumPlanes(viewProjectionMatrix, m_CameraWorldClipPlanes);
 
             m_ShaderFrustumPlanes[0] = m_CameraWorldClipPlanes[0];
             m_ShaderFrustumPlanes[1] = m_CameraWorldClipPlanes[1];
@@ -141,9 +133,13 @@ namespace VividRP.Runtime
             m_ShaderFrustumPlanes[5] = m_CameraWorldClipPlanes[5];
         }
 
-        private static Vector4 ConvertPlane(Plane plane)
+        private void ClearFrustumPlanes()
         {
-            return new Vector4(plane.normal.x, plane.normal.y, plane.normal.z, plane.distance);
+            for (var index = 0; index < m_CameraWorldClipPlanes.Length; index++)
+            {
+                m_CameraWorldClipPlanes[index] = Vector4.zero;
+                m_ShaderFrustumPlanes[index] = Vector4.zero;
+            }
         }
 
         private static int ResolveScaledDimension(int preferredDimension, int cameraDimension, int fallbackDimension, int screenDimension)

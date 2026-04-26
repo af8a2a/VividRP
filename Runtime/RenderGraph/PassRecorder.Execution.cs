@@ -129,7 +129,7 @@ namespace VividRP.Runtime
             if (additionalCameraData != null)
                 additionalCameraData.UpdateCameraMatrices(true);
 
-            cameraData.camera = camera;
+            cameraData.SetCamera(camera);
             cameraData.additionalData = additionalCameraData;
             cameraData.renderType = additionalCameraData != null ? additionalCameraData.renderType : VividCameraRenderType.Base;
             cameraData.clearDepth = additionalCameraData == null || additionalCameraData.clearDepth;

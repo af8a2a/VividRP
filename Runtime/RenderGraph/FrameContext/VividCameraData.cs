@@ -15,6 +15,8 @@ namespace VividRP.Runtime
         public int pixelHeight;
         public Rect pixelRect;
         internal int frameIndex = -1;
+        internal string cameraName;
+        private Camera m_CameraNameSource;
 
         public Matrix4x4 viewMatrix => GetViewMatrix();
         public Matrix4x4 inverseViewMatrix => GetInverseViewMatrix();
@@ -26,6 +28,16 @@ namespace VividRP.Runtime
         public Vector2 jitter => GetJitter();
         public Matrix4x4 viewProjectionMatrix => GetViewProjectionMatrix();
         public Matrix4x4 gpuViewProjectionMatrix => GetGPUViewProjectionMatrix();
+
+        internal void SetCamera(Camera value)
+        {
+            camera = value;
+            if (ReferenceEquals(m_CameraNameSource, value))
+                return;
+
+            m_CameraNameSource = value;
+            cameraName = value != null ? value.name : null;
+        }
 
         public Matrix4x4 GetViewMatrix(int viewIndex = 0)
         {
@@ -159,6 +171,8 @@ namespace VividRP.Runtime
             pixelHeight = 0;
             pixelRect = default;
             frameIndex = -1;
+            cameraName = null;
+            m_CameraNameSource = null;
         }
 
         

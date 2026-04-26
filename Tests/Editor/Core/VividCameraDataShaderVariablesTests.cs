@@ -177,15 +177,101 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SetCamera_CachesCameraNameUntilCameraChanges()
+        {
+            var firstCamera = m_GameObject.AddComponent<Camera>();
+            firstCamera.name = "First Camera";
+            var secondCameraObject = new GameObject("Second Camera");
+            var cameraData = new VividCameraData();
+
+            try
+            {
+                var secondCamera = secondCameraObject.AddComponent<Camera>();
+
+                cameraData.SetCamera(firstCamera);
+
+                Assert.That(cameraData.camera, Is.SameAs(firstCamera));
+                Assert.That(cameraData.cameraName, Is.EqualTo("First Camera"));
+
+                firstCamera.name = "Renamed First Camera";
+                cameraData.SetCamera(firstCamera);
+
+                Assert.That(cameraData.cameraName, Is.EqualTo("First Camera"));
+
+                cameraData.SetCamera(secondCamera);
+
+                Assert.That(cameraData.camera, Is.SameAs(secondCamera));
+                Assert.That(cameraData.cameraName, Is.EqualTo("Second Camera"));
+
+                cameraData.Reset();
+
+                Assert.That(cameraData.camera, Is.Null);
+                Assert.That(cameraData.cameraName, Is.Null);
+            }
+            finally
+            {
+                Object.DestroyImmediate(secondCameraObject);
+            }
+        }
+
+        [Test]
+        public void BuildShaderVariables_ExtractsFrustumPlanesMatchingUnityCamera()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            camera.fieldOfView = 53.0f;
+            camera.aspect = 16.0f / 9.0f;
+            camera.nearClipPlane = 0.2f;
+            camera.farClipPlane = 500.0f;
+            camera.transform.position = new Vector3(3.0f, 4.0f, -8.0f);
+            camera.transform.rotation = Quaternion.Euler(11.0f, -22.0f, 4.0f);
+
+            var cameraData = new VividCameraData
+            {
+                camera = camera,
+                actualWidth = 1280,
+                actualHeight = 720,
+            };
+
+            var shaderVariables = cameraData.BuildShaderVariables();
+            var expectedPlanes = GeometryUtility.CalculateFrustumPlanes(camera);
+
+            for (var index = 0; index < expectedPlanes.Length; index++)
+            {
+                var expectedPlane = expectedPlanes[index];
+                var expected = new Vector4(
+                    expectedPlane.normal.x,
+                    expectedPlane.normal.y,
+                    expectedPlane.normal.z,
+                    expectedPlane.distance);
+
+                AssertVectorAreEqual(expected, shaderVariables.cameraWorldClipPlanes[index], 0.0001f);
+            }
+
+            AssertVectorAreEqual(shaderVariables.cameraWorldClipPlanes[3], shaderVariables.frustumPlanes[2]);
+            AssertVectorAreEqual(shaderVariables.cameraWorldClipPlanes[2], shaderVariables.frustumPlanes[3]);
+        }
+
+        [Test]
+        public void BuildShaderVariables_ExtractsFrustumPlanesWithoutGeometryUtilityAllocation()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "VividCameraData.ShaderVariables.cs"));
+
+            Assert.That(source, Does.Contain("UpdateFrustumPlanes(currentCamera, cameraProjection * viewMatrix);"));
+            Assert.That(source, Does.Contain("CullingUtility.ExtractFrustumPlanes(viewProjectionMatrix, m_CameraWorldClipPlanes);"));
+            Assert.That(source, Does.Not.Contain("GeometryUtility.CalculateFrustumPlanes"));
+            Assert.That(source, Does.Not.Contain("new Plane[6]"));
+        }
+
+        [Test]
         public void FrameContextSystem_UsesExplicitShaderVariablesGlobalConstantBuffer()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "FrameContextSystem.cs"));
             var loggerSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "CameraShaderVariablesGlobalComparisonLogger.cs"));
 
-            Assert.That(source, Does.Contain("SkyManager.Update(frameData, cmd);"));
+            Assert.That(source, Does.Contain("SubsystemPreRender?.Invoke(frameData, cmd);"));
             Assert.That(source, Does.Contain("AutoExposureRuntimeManager.PrepareFrame(frameData);"));
             Assert.That(source, Does.Contain("AutoExposureShaderBindings.BindFrameGlobals(cmd, frameData.Get<VividExposureData>());"));
-            Assert.That(source, Does.Contain("var skyData = frameData.GetOrCreate<VividSkyData>();"));
+            Assert.That(source, Does.Contain("skyData = frameData.GetOrCreate<VividSkyData>();"));
             Assert.That(source, Does.Contain("var shaderVariablesGlobal = ShaderVariablesGlobal.Create(sv, temporalData, skyData);"));
             Assert.That(source, Does.Contain("#if VIVIDRP_DEBUG"));
             Assert.That(source, Does.Contain("CameraShaderVariablesGlobalComparisonLogger.CaptureAndCompare(cameraData, shaderVariablesGlobal);"));
@@ -362,12 +448,12 @@ namespace VividRP.Editor.Tests
             }
         }
 
-        private static void AssertVectorAreEqual(Vector4 expected, Vector4 actual)
+        private static void AssertVectorAreEqual(Vector4 expected, Vector4 actual, float tolerance = 0.00001f)
         {
-            Assert.That(actual.x, Is.EqualTo(expected.x).Within(0.00001f));
-            Assert.That(actual.y, Is.EqualTo(expected.y).Within(0.00001f));
-            Assert.That(actual.z, Is.EqualTo(expected.z).Within(0.00001f));
-            Assert.That(actual.w, Is.EqualTo(expected.w).Within(0.00001f));
+            Assert.That(actual.x, Is.EqualTo(expected.x).Within(tolerance));
+            Assert.That(actual.y, Is.EqualTo(expected.y).Within(tolerance));
+            Assert.That(actual.z, Is.EqualTo(expected.z).Within(tolerance));
+            Assert.That(actual.w, Is.EqualTo(expected.w).Within(tolerance));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

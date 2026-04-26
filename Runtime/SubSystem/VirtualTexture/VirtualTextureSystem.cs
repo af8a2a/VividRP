@@ -90,6 +90,14 @@ namespace VividRP.Runtime
 
         internal static void Update(ContextContainer frameData, CommandBuffer cmd)
         {
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureMarker.Auto())
+            {
+                UpdateCore(frameData, cmd);
+            }
+        }
+
+        private static void UpdateCore(ContextContainer frameData, CommandBuffer cmd)
+        {
             if (!s_Initialized)
                 Initialize();
 

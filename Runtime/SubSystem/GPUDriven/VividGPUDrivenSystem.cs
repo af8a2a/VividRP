@@ -13,6 +13,7 @@ namespace VividRP.Runtime.GPUDriven
         private static VividGPUDrivenDebugOverlayRenderer s_DebugOverlayRenderer;
         private static bool s_Initialized;
         private static int s_PreparedFrameIndex = -1;
+        private static readonly ProfilingSampler s_CullingSampler = new("GPUDrivenCulling");
 
         private readonly VividGPUDrivenBufferSet m_BufferSet;
         private readonly VividGPUDrivenCullingDispatcher m_CullingDispatcher;
@@ -169,27 +170,30 @@ namespace VividRP.Runtime.GPUDriven
             ComputeShader meshletListBuildCompute,
             ComputeShader gpuMeshletCullingCompute = null,
             ComputeShader fixupVisibleMeshletIndirectDrawArgsCompute = null,
-            VividInstancePassMask passMask = VividInstancePassMask.Main
+            VividInstancePassMask passMask = VividInstancePassMask.Main,
+            string cameraName = null
         )
         {
             ThrowIfDisposed();
 
-            cmd.BeginSample("GPUDrivenCulling");
-            m_CullingDispatcher.Dispatch(
-                cmd,
-                camera,
-                SceneData,
-                m_BufferSet,
-                gpuInstanceCullingCompute,
-                meshletListBuildCompute,
-                gpuMeshletCullingCompute,
-                fixupVisibleMeshletIndirectDrawArgsCompute,
-                passMask,
-                ForcedMeshLODNodeDepth,
-                MeshLODErrorThreshold
-            );
-            cmd.EndSample("GPUDrivenCulling");
-            ReportStats(camera);
+            using (new ProfilingScope(cmd, s_CullingSampler))
+            {
+                m_CullingDispatcher.Dispatch(
+                    cmd,
+                    camera,
+                    SceneData,
+                    m_BufferSet,
+                    gpuInstanceCullingCompute,
+                    meshletListBuildCompute,
+                    gpuMeshletCullingCompute,
+                    fixupVisibleMeshletIndirectDrawArgsCompute,
+                    passMask,
+                    ForcedMeshLODNodeDepth,
+                    MeshLODErrorThreshold
+                );
+            }
+
+            ReportStats(camera, cameraName);
         }
 
         public void BindGlobals(CommandBuffer cmd)
@@ -225,6 +229,14 @@ namespace VividRP.Runtime.GPUDriven
 
         private static void Update(ContextContainer frameData, CommandBuffer cmd)
         {
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenMarker.Auto())
+            {
+                UpdateCore(frameData, cmd);
+            }
+        }
+
+        private static void UpdateCore(ContextContainer frameData, CommandBuffer cmd)
+        {
             if (!s_Initialized)
                 Initialize();
 
@@ -251,7 +263,7 @@ namespace VividRP.Runtime.GPUDriven
             VividGPUDrivenSystem gpuDrivenSystem = instance;
             if (!gpuDrivenSystem.IsAvailable)
             {
-                gpuDrivenSystem.ReportStats(camera);
+                gpuDrivenSystem.ReportStats(camera, cameraData.cameraName);
                 PassRecorder.SetGPUDrivenFrameData(null, null);
                 return;
             }
@@ -259,7 +271,7 @@ namespace VividRP.Runtime.GPUDriven
             PrepareFrameIfNeeded(cameraData.frameIndex);
             if (!gpuDrivenSystem.IsAvailable)
             {
-                gpuDrivenSystem.ReportStats(camera);
+                gpuDrivenSystem.ReportStats(camera, cameraData.cameraName);
                 PassRecorder.SetGPUDrivenFrameData(null, null);
                 return;
             }
@@ -273,7 +285,8 @@ namespace VividRP.Runtime.GPUDriven
                 resources.GPUInstanceCullingCompute,
                 resources.MeshletListBuildCompute,
                 resources.GPUMeshletCullingCompute,
-                resources.FixupVisibleMeshletIndirectDrawArgsCompute);
+                resources.FixupVisibleMeshletIndirectDrawArgsCompute,
+                cameraName: cameraData.cameraName);
             gpuDrivenSystem.BindGlobals(cmd);
             PassRecorder.SetGPUDrivenFrameData(
                 gpuDrivenSystem.VisibleMeshletRenderRequestsBuffer,
@@ -363,7 +376,7 @@ namespace VividRP.Runtime.GPUDriven
             }
         }
 
-        private void ReportStats(Camera camera)
+        private void ReportStats(Camera camera, string cameraName = null)
         {
             string statusMessage = BindlessTextureContainer.IsAvailable
                 ? string.Empty
@@ -374,7 +387,7 @@ namespace VividRP.Runtime.GPUDriven
                     true,
                     statusMessage,
                     camera != null,
-                    camera != null ? camera.name : null,
+                    camera != null ? cameraName : null,
                     camera != null ? camera.cameraType : default,
                     Time.frameCount,
                     Time.realtimeSinceStartupAsDouble,

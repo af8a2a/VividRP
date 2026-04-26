@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -147,6 +148,29 @@ namespace VividRP.Editor.Tests
             Assert.That(HasFrameContextSubscriber("SubsystemPreRender", typeof(VividGPUDrivenSystem), "Update"), Is.True);
         }
 
+        [Test]
+        public void Update_UsesCachedCameraNameAndStaticCullingSampler_ForNoGcStats()
+        {
+            string systemSource = File.ReadAllText(
+                GetPackageFilePath("Runtime", "SubSystem", "GPUDriven", "VividGPUDrivenSystem.cs"));
+            string cameraDataSource = File.ReadAllText(
+                GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "VividCameraData.cs"));
+            string passRecorderSource = File.ReadAllText(
+                GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.Execution.cs"));
+
+            Assert.That(cameraDataSource, Does.Contain("internal void SetCamera(Camera value)"));
+            Assert.That(cameraDataSource, Does.Contain("cameraName = value != null ? value.name : null;"));
+            Assert.That(passRecorderSource, Does.Contain("cameraData.SetCamera(camera);"));
+            Assert.That(systemSource, Does.Contain("private static readonly ProfilingSampler s_CullingSampler = new(\"GPUDrivenCulling\");"));
+            Assert.That(systemSource, Does.Contain("new ProfilingScope(cmd, s_CullingSampler)"));
+            Assert.That(systemSource, Does.Contain("ReportStats(camera, cameraData.cameraName);"));
+            Assert.That(systemSource, Does.Contain("cameraName: cameraData.cameraName"));
+            Assert.That(systemSource, Does.Contain("camera != null ? cameraName : null"));
+            Assert.That(systemSource, Does.Not.Contain("camera.name"));
+            Assert.That(systemSource, Does.Not.Contain("BeginSample(\"GPUDrivenCulling\")"));
+            Assert.That(systemSource, Does.Not.Contain("EndSample(\"GPUDrivenCulling\")"));
+        }
+
         private static bool HasFrameContextSubscriber(string eventName, Type declaringType, string methodName)
         {
             FieldInfo eventField = typeof(FrameContextSystem).GetField(
@@ -160,6 +184,15 @@ namespace VividRP.Editor.Tests
                 && multicastDelegate.GetInvocationList().Any(
                     callback => callback.Method.DeclaringType == declaringType
                         && callback.Method.Name == methodName);
+        }
+
+        private static string GetPackageFilePath(params string[] relativeParts)
+        {
+            var path = Path.Combine("Packages", "VividRP");
+            foreach (var part in relativeParts)
+                path = Path.Combine(path, part);
+
+            return path;
         }
     }
 }

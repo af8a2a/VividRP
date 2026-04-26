@@ -81,6 +81,8 @@ namespace VividRP.Runtime
         private PhysicallyBasedSkyMaterialParameters m_RenderMaterialParameters;
         private bool m_HasRenderMaterialParameters;
         private bool m_UseLocalSkyPrecomputationForRender;
+        private readonly MaterialPropertyBlock m_RenderPropertyBlock = new();
+        private readonly MaterialPropertyBlock m_SkyBakingPropertyBlock = new();
         private readonly PhysicallyBasedSkyAtmosphereLutCache m_AtmosphereLutCache = new();
         private readonly PhysicallyBasedSkyCelestialBodyBuffer m_CelestialBodyBuffer = new();
 
@@ -287,7 +289,8 @@ namespace VividRP.Runtime
 
             var skyViewTexture = ResolveSkyViewTexture();
             var directionalShadowTexture = TextureResolveUtility.ResolveTexture(m_DirectionalShadowTexture) ?? Shader.GetGlobalTexture(DirectionalShadowTextureId);
-            var properties = new MaterialPropertyBlock();
+            var properties = m_RenderPropertyBlock;
+            properties.Clear();
             properties.SetMatrix(PixelCoordToViewDirWSId, m_RenderParameters.pixelCoordToViewDirWS);
             properties.SetTexture(SkyViewLutId, skyViewTexture ?? Texture2D.blackTexture);
             properties.SetFloat(SkyUseLutId, skyViewTexture != null ? 1.0f : 0.0f);
@@ -610,7 +613,8 @@ namespace VividRP.Runtime
             var useSkyViewLut = m_AtmosphereLutCache.TryGetSkyViewLut(skyViewLutHash, out var skyViewLut) && hasMaterialParameters;
             var includeSunInBaking = SkySettingsVolume.GetIncludeSunInBaking(VividVolumeManagerUtility.GetSkySettingsVolume());
 
-            properties = new MaterialPropertyBlock();
+            properties = m_SkyBakingPropertyBlock;
+            properties.Clear();
             properties.SetFloat(SkyUseLutId, useSkyViewLut ? 1.0f : 0.0f);
             properties.SetTexture(SkyViewLutId, useSkyViewLut ? skyViewLut : Texture2D.blackTexture);
             properties.SetTexture(DirectionalShadowTextureId, Texture2D.whiteTexture);

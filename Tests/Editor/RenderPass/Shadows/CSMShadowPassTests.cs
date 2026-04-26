@@ -14,7 +14,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_ShadowAtlas.desc.IsShadowMap = true;"));
             Assert.That(source, Does.Contain("BatchCullingProjectionType.Orthographic"));
             Assert.That(source, Does.Contain("settings.splitIndex = i;"));
-            Assert.That(source, Does.Contain("TryResolveMainDirectionalLight(lightData, out var light, out var additionalLightData)"));
+            Assert.That(source, Does.Contain("TryResolveVisibleMainDirectionalLight(lightData, out var light, out var additionalLightData)"));
+            Assert.That(source, Does.Not.Contain("DirectionalRayTracedShadowPass.TryResolveMainDirectionalLight(lightData"));
+            Assert.That(source, Does.Not.Contain("FindObjectsByType<Light>"));
             Assert.That(source, Does.Contain("m_AtlasResolution = Mathf.Max(AtlasGridSize, additionalLightData.resolvedShadowAtlasResolution);"));
             Assert.That(source, Does.Contain("m_CascadeResolution = Mathf.Max(1, m_AtlasResolution / AtlasGridSize);"));
             Assert.That(source, Does.Not.Contain("m_DepthBias = Mathf.Max(0.0f, additionalLightData.depthBias);"));
@@ -27,6 +29,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_CascadeWorldTexelSizes[i] = ComputeCascadeWorldTexelSize(m_ProjMatrices[i], m_CascadeResolution);"));
             Assert.That(source, Does.Contain("m_CascadeBorders[i] = cascadeBorders[i];"));
             Assert.That(source, Does.Contain("m_ShadowCasterBiases[i] = BuildShadowCasterState(mainVisibleLight);"));
+            Assert.That(source, Does.Contain("m_CameraShaderGlobals = ResolveCameraShaderGlobals(frameData, cameraData);"));
+            Assert.That(source, Does.Contain("var cameraShaderData = frameData.Get<VividCameraShaderData>();"));
+            Assert.That(source, Does.Not.Contain("m_CameraShaderGlobals = ShaderVariablesGlobal.Create(cameraData.BuildShaderVariables"));
             Assert.That(source, Does.Contain("var gpuProjMatrix = GL.GetGPUProjectionMatrix(m_ProjMatrices[cascadeIndex], true);"));
             Assert.That(source, Does.Contain("var cascadeShaderGlobals = BuildCascadeShaderGlobals(cascadeIndex, gpuProjMatrix);"));
             Assert.That(source, Does.Contain("nativeCmd.SetViewProjectionMatrices(m_ViewMatrices[cascadeIndex], m_ProjMatrices[cascadeIndex]);"));
@@ -49,10 +54,27 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("shadowGlobals._VividMatrixVP = viewProjMatrix;"));
             Assert.That(source, Does.Contain("shadowGlobals._VividWorldToCamera = viewMatrix;"));
             Assert.That(source, Does.Contain("shadowGlobals._VividGlstateMatrixProjection = gpuProjMatrix;"));
+            Assert.That(source, Does.Contain("private static bool TryResolveVisibleMainDirectionalLight("));
+            Assert.That(source, Does.Contain("light = lightData.visibleLights[lightData.mainLightIndex].light;"));
+            Assert.That(source, Does.Contain("!light.GetEntityId().Equals(lightData.mainDirectionalLightEntityId)"));
             Assert.That(source, Does.Contain("nativeCmd.SetViewProjectionMatrices("));
             Assert.That(source, Does.Contain("m_CameraShaderGlobals._VividWorldToCamera,"));
             Assert.That(source, Does.Contain("m_CameraShaderGlobals._VividCameraProjection);"));
             Assert.That(source, Does.Contain("ConstantBuffer.PushGlobal(nativeCmd, m_CameraShaderGlobals, ShaderVariablesGlobal.ConstantBufferShaderId);"));
+        }
+
+        [Test]
+        public void FrameContextSystem_CachesShaderGlobalsForPrepareConsumers()
+        {
+            var source = File.ReadAllText(GetFrameContextSystemSourcePath());
+
+            Assert.That(source, Does.Contain("internal sealed class VividCameraShaderData : ContextItem"));
+            Assert.That(source, Does.Contain("public ShaderVariablesGlobal shaderVariablesGlobal;"));
+            Assert.That(source, Does.Contain("public bool hasShaderVariablesGlobal;"));
+            Assert.That(source, Does.Contain("SetShaderGlobals(cmd, frameData, cameraData, shaderVariables, temporalData, skyData);"));
+            Assert.That(source, Does.Contain("var cameraShaderData = frameData.GetOrCreate<VividCameraShaderData>();"));
+            Assert.That(source, Does.Contain("cameraShaderData.shaderVariablesGlobal = shaderVariablesGlobal;"));
+            Assert.That(source, Does.Contain("cameraShaderData.hasShaderVariablesGlobal = true;"));
         }
 
         private static string GetPassSourcePath()
@@ -61,6 +83,14 @@ namespace VividRP.Editor.Tests
 
             Assert.That(File.Exists(passPath), Is.True, $"Expected pass source at '{passPath}'.");
             return passPath;
+        }
+
+        private static string GetFrameContextSystemSourcePath()
+        {
+            var sourcePath = GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "FrameContextSystem.cs");
+
+            Assert.That(File.Exists(sourcePath), Is.True, $"Expected frame context source at '{sourcePath}'.");
+            return sourcePath;
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

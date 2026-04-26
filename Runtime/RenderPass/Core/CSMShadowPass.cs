@@ -71,11 +71,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             var lightData = frameData.GetOrCreate<VividLightData>();
-            if (!lightData.hasMainDirectionalLight
-                || !lightData.hasVisibleLights
-                || lightData.mainLightIndex < 0
-                || lightData.mainLightIndex >= lightData.visibleLights.Length
-                || !DirectionalRayTracedShadowPass.TryResolveMainDirectionalLight(lightData, out var light, out var additionalLightData)
+            if (!TryResolveVisibleMainDirectionalLight(lightData, out var light, out var additionalLightData)
                 || light == null
                 || additionalLightData == null
                 || !light.enabled
@@ -87,11 +83,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var renderingData = frameData.GetOrCreate<VividRenderingData>();
             var cameraData = frameData.GetOrCreate<VividCameraData>();
-            var temporalData = FrameContextSystem.GetOrCreate(cameraData.camera);
-            var skyData = frameData.GetOrCreate<VividSkyData>();
             m_CullingResults = renderingData.cullingResults;
             m_RenderContext = renderingData.context;
-            m_CameraShaderGlobals = ShaderVariablesGlobal.Create(cameraData.BuildShaderVariables(temporalData), temporalData, skyData);
+            m_CameraShaderGlobals = ResolveCameraShaderGlobals(frameData, cameraData);
             m_MainLightVisibleIndex = lightData.mainLightIndex;
 
             m_CascadeCount = Mathf.Clamp(csmSettings.cascadeCount.value, 1, VividShadowData.MaxCascadeCount);
@@ -268,6 +262,51 @@ namespace VividRP.Runtime.RenderPass.Core
             shadowGlobals._VividPrevProjMatrix = gpuProjMatrix;
             shadowGlobals._VividJitterParams = Vector4.zero;
             return shadowGlobals;
+        }
+
+        private static ShaderVariablesGlobal ResolveCameraShaderGlobals(
+            ContextContainer frameData,
+            VividCameraData cameraData)
+        {
+            var cameraShaderData = frameData.Get<VividCameraShaderData>();
+            if (cameraShaderData != null && cameraShaderData.hasShaderVariablesGlobal)
+                return cameraShaderData.shaderVariablesGlobal;
+
+            if (cameraData == null)
+                return default;
+
+            var temporalData = FrameContextSystem.GetOrCreate(cameraData?.camera);
+            var skyData = frameData.GetOrCreate<VividSkyData>();
+            return ShaderVariablesGlobal.Create(cameraData.BuildShaderVariables(temporalData), temporalData, skyData);
+        }
+
+        private static bool TryResolveVisibleMainDirectionalLight(
+            VividLightData lightData,
+            out Light light,
+            out VividAdditionalLightData additionalLightData)
+        {
+            light = null;
+            additionalLightData = null;
+
+            if (lightData == null
+                || !lightData.hasMainDirectionalLight
+                || !lightData.hasVisibleLights
+                || lightData.mainLightIndex < 0
+                || lightData.mainLightIndex >= lightData.visibleLights.Length)
+            {
+                return false;
+            }
+
+            light = lightData.visibleLights[lightData.mainLightIndex].light;
+            if (light == null
+                || light.type != LightType.Directional
+                || !light.GetEntityId().Equals(lightData.mainDirectionalLightEntityId))
+            {
+                light = null;
+                return false;
+            }
+
+            return light.TryGetComponent(out additionalLightData);
         }
 
         private static Matrix4x4 BuildWorldToShadowMatrix(Matrix4x4 projMatrix, Matrix4x4 viewMatrix)

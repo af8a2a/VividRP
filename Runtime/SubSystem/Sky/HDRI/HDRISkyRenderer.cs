@@ -29,6 +29,8 @@ namespace VividRP.Runtime
         private RenderTexture m_AmbientProbeCubemap;
         private int m_AmbientProbeBakingPass = -1;
         private int m_AmbientProbeSkyHash;
+        private readonly MaterialPropertyBlock m_RenderPropertyBlock = new();
+        private readonly MaterialPropertyBlock m_AmbientProbePropertyBlock = new();
         private RenderGraphTexture m_ColorTarget;
         private RenderGraphTexture m_DepthTexture;
         private Matrix4x4 m_PixelCoordToViewDirMatrix;
@@ -163,7 +165,8 @@ namespace VividRP.Runtime
 
             cmd.SetViewport(m_RenderViewport);
 
-            var properties = new MaterialPropertyBlock();
+            var properties = m_RenderPropertyBlock;
+            properties.Clear();
             GetSkyParameters(m_RenderIntensityMultiplier, m_RenderRotation, out var intensity, out var phi);
             properties.SetTexture(SkyCubemapId, m_RenderCubemap);
             properties.SetColor(SkyTintId, m_RenderTint);
@@ -270,7 +273,8 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            var properties = new MaterialPropertyBlock();
+            var properties = m_AmbientProbePropertyBlock;
+            properties.Clear();
             properties.SetTexture(SkyCubemapId, cubemap);
             properties.SetColor(SkyTintId, tint);
 

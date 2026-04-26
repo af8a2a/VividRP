@@ -180,16 +180,16 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_AtmosphereLutCache.Update(context, cmd);"));
             Assert.That(source, Does.Contain("ApplyAtmosphereLutHandle(skyData);"));
             Assert.That(source, Does.Contain("public void PrepareSkyRendering("));
-            Assert.That(source, Does.Contain("public void RenderSky(CommandBuffer cmd)"));
+            Assert.That(source, Does.Contain("public void RenderSky(RasterCommandBuffer cmd)"));
             Assert.That(source, Does.Contain("ImportSkyViewLutForPass(skyViewLut);"));
             Assert.That(source, Does.Contain("var skyViewTexture = ResolveSkyViewTexture();"));
             Assert.That(source, Does.Contain("Shader.GetGlobalTexture(DirectionalShadowTextureId)"));
-            Assert.That(source, Does.Contain("cmd.SetRenderTarget(m_ColorTarget, m_DepthTexture);"));
+            Assert.That(source, Does.Contain("cmd.SetViewport(m_RenderViewport);"));
             Assert.That(source, Does.Contain("CoreUtils.DrawFullScreen(cmd, m_SkyMaterial, properties, 0);"));
             Assert.That(source, Does.Contain("TryPrepareLocalSkyPrecomputation("));
             Assert.That(source, Does.Contain("ApplyLocalSkyPrecomputationTextures(properties);"));
             Assert.That(source, Does.Contain("CoreUtils.SetKeyword(m_SkyMaterial, \"LOCAL_SKY\", useLocalSkyPrecomputation);"));
-            Assert.That(source, Does.Contain("&& UsesWorldSpacePrecomputation(m_RenderMaterialParameters)"));
+            Assert.That(source, Does.Contain("&& HasMatchingLocalSkyPrecomputation("));
             Assert.That(source, Does.Contain("&& UsesWorldSpacePrecomputation(materialParameters)"));
             Assert.That(source, Does.Contain("PhysicallyBasedSkyAtmosphereLutCache.ComputeSkyViewLutHash(m_RenderParameters, m_RenderMaterialParameters, m_RenderContext)"));
             Assert.That(source, Does.Contain("m_AtmosphereLutCache.TryGetSkyViewLut(skyViewHash, out skyViewTexture)"));
@@ -219,6 +219,17 @@ namespace VividRP.Editor.Tests
             Assert.That(parametersSource, Does.Not.Contain("parameters.celestialLightCount = ResolveCelestialLightCount(context);"));
             Assert.That(parametersSource, Does.Not.Contain("ResolveCelestialLightExposure(context)"));
             Assert.That(parametersSource, Does.Not.Contain("volume.IsHeightFogActive() ? 1.0f : 0.0f"));
+        }
+
+        [Test]
+        public void RenderSky_ReusesMaterialPropertyBlock_ToAvoidRecordGc()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSky", "PhysicallyBasedSkyRenderer.cs"));
+
+            Assert.That(source, Does.Contain("private readonly MaterialPropertyBlock m_RenderPropertyBlock = new();"));
+            Assert.That(source, Does.Contain("var properties = m_RenderPropertyBlock;"));
+            Assert.That(source, Does.Contain("properties.Clear();"));
+            Assert.That(source, Does.Not.Contain("var properties = new MaterialPropertyBlock();"));
         }
 
         [Test]

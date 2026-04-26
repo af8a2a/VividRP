@@ -124,5 +124,18 @@ namespace VividRP.Editor.Tests
             Assert.That(cachedSettings.postExposureLinear, Is.EqualTo(settings.postExposureLinear));
             Assert.That(cachedCurves, Is.SameAs(curves));
         }
+
+        [Test]
+        public void ClearFrameCache_InvalidatesCachedSettings()
+        {
+            using var frameData = new ContextContainer();
+
+            ColorGradingSettingsResolver.Resolve(frameData, out _);
+            Assert.That(ColorGradingSettingsResolver.TryGetResolved(frameData, out _, out _), Is.True);
+
+            ColorGradingSettingsResolver.ClearFrameCache(frameData);
+
+            Assert.That(ColorGradingSettingsResolver.TryGetResolved(frameData, out _, out _), Is.False);
+        }
     }
 }

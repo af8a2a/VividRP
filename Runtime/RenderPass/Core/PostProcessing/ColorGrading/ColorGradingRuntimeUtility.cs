@@ -192,6 +192,14 @@ namespace VividRP.Runtime
             return false;
         }
 
+        internal static void ClearFrameCache(ContextContainer frameData)
+        {
+            if (frameData == null || !frameData.Contains<VividColorGradingData>())
+                return;
+
+            frameData.Get<VividColorGradingData>().Reset();
+        }
+
         private static ColorGradingSettingsData ResolveFromStack(VolumeStack stack, out ColorCurves curves)
         {
             var settings = ColorGradingSettingsData.CreateDefault();

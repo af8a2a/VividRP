@@ -176,6 +176,18 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CommitFrame_RestoresFinalBlitSourceOverride()
+        {
+            AssertPassRecorderRestoresFinalBlitSourceOverride(() => PassRecorder.CommitFrame(null));
+        }
+
+        [Test]
+        public void AbortFrame_RestoresFinalBlitSourceOverride()
+        {
+            AssertPassRecorderRestoresFinalBlitSourceOverride(PassRecorder.AbortFrame);
+        }
+
+        [Test]
         public void VividRPCoreResources_DeclaresFinalBlitShader()
         {
             var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.FinalBlitShader));
@@ -359,6 +371,43 @@ namespace VividRP.Editor.Tests
 
             Assert.That(pass.IsPassResourceLayoutDirty, Is.True);
             Assert.That(sourceField.GetValue(pass), Is.SameAs(originalSource));
+        }
+
+        private static void AssertPassRecorderRestoresFinalBlitSourceOverride(Action restoreAction)
+        {
+            PassRecorder.Dispose();
+
+            var pass = new FinalBlitPass();
+            var setMethod = typeof(FinalBlitPass).GetMethod("SetSourceTexture", BindingFlags.Instance | BindingFlags.NonPublic);
+            var sourceField = typeof(FinalBlitPass).GetField("source", BindingFlags.Instance | BindingFlags.NonPublic);
+            var renderPassesField = typeof(PassRecorder).GetField("s_RenderPasses", BindingFlags.NonPublic | BindingFlags.Static);
+            var originalSource = RenderGraphTexture.CreateInput("OriginalSource", GraphicsFormat.R16G16B16A16_SFloat);
+            var injectedSource = RenderGraphTexture.CreateInput("InjectedSource", GraphicsFormat.R16G16B16A16_SFloat);
+
+            try
+            {
+                Assert.That(setMethod, Is.Not.Null);
+                Assert.That(sourceField, Is.Not.Null);
+                Assert.That(renderPassesField, Is.Not.Null);
+
+                sourceField.SetValue(pass, originalSource);
+                setMethod.Invoke(pass, new object[] { injectedSource });
+
+                var renderPasses = renderPassesField.GetValue(null) as System.Collections.IList;
+                Assert.That(renderPasses, Is.Not.Null);
+                renderPasses.Add(pass);
+
+                pass.ClearPassResourceLayoutDirty();
+
+                restoreAction();
+
+                Assert.That(sourceField.GetValue(pass), Is.SameAs(originalSource));
+                Assert.That(pass.IsPassResourceLayoutDirty, Is.True);
+            }
+            finally
+            {
+                PassRecorder.Dispose();
+            }
         }
     }
 }

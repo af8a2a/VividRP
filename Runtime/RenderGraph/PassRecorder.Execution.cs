@@ -116,6 +116,8 @@ namespace VividRP.Runtime
 
         internal static void InitializeContext(ScriptableRenderContext context, Camera camera, CullingResults cullingResults)
         {
+            ColorGradingSettingsResolver.ClearFrameCache(s_FrameData);
+
             var renderingData = s_FrameData.GetOrCreate<VividRenderingData>();
             var cameraData = s_FrameData.GetOrCreate<VividCameraData>();
             var gpuDrivenFrameData = s_FrameData.GetOrCreate<VividGPUDrivenFrameData>();
@@ -427,6 +429,7 @@ namespace VividRP.Runtime
 
         internal static void AbortFrame()
         {
+            RestoreInjectedSourceOverrides();
             ClearImportedTextures();
             ClearHistoryImportedHandles();
             ClearCodeManagedHistoryFrameState();
@@ -533,6 +536,7 @@ namespace VividRP.Runtime
 
         internal static void CommitFrame(RenderGraphData graphAsset)
         {
+            RestoreInjectedSourceOverrides();
             CommitTextureHistories(graphAsset);
             FinalizeCodeManagedBufferHistories(graphAsset);
             ClearHistoryImportedHandles();

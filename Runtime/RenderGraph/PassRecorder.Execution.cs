@@ -391,16 +391,38 @@ namespace VividRP.Runtime
         internal static void PrepareFrame(RenderGraphData graphAsset, CommandBuffer cmdBuffer)
         {
             using var prepareFrameScope = RenderPassProfilingUtility.PrepareFrameMarker.Auto();
-            EnsureCompiled(graphAsset);
-            ClearHistoryImportedHandles();
-            ClearCodeManagedHistoryFrameState();
+            using (RenderPassProfilingUtility.PrepareFrameEnsureCompiledMarker.Auto())
+            {
+                EnsureCompiled(graphAsset);
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameClearHistoryImportsMarker.Auto())
+            {
+                ClearHistoryImportedHandles();
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameClearCodeManagedHistoryMarker.Auto())
+            {
+                ClearCodeManagedHistoryFrameState();
+            }
+
             s_RenderedPreImageEffectGizmosInGraph = false;
 
             // Advance temporal state and set all shader globals before any pass executes.
-            FrameContextSystem.Update(s_FrameData, cmdBuffer);
+            using (RenderPassProfilingUtility.PrepareFrameContextUpdateMarker.Auto())
+            {
+                FrameContextSystem.Update(s_FrameData, cmdBuffer);
+            }
 
-            PrepareHistoryTargets(graphAsset, cmdBuffer);
-            ClearImportedTextures();
+            using (RenderPassProfilingUtility.PrepareFramePrepareHistoryTargetsMarker.Auto())
+            {
+                PrepareHistoryTargets(graphAsset, cmdBuffer);
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameClearImportedTexturesMarker.Auto())
+            {
+                ClearImportedTextures();
+            }
         }
 
         internal static void AbortFrame()

@@ -78,6 +78,21 @@ namespace VividRP.Runtime
 
         public static readonly ProfilerMarker CompileMarker = new("VividRP.RenderPass.Compile");
         public static readonly ProfilerMarker PrepareFrameMarker = new("VividRP.RenderPass.PrepareFrame");
+        public static readonly ProfilerMarker PrepareFrameEnsureCompiledMarker = new("VividRP.RenderPass.PrepareFrame/EnsureCompiled");
+        public static readonly ProfilerMarker PrepareFrameClearHistoryImportsMarker = new("VividRP.RenderPass.PrepareFrame/ClearHistoryImports");
+        public static readonly ProfilerMarker PrepareFrameClearCodeManagedHistoryMarker = new("VividRP.RenderPass.PrepareFrame/ClearCodeManagedHistory");
+        public static readonly ProfilerMarker PrepareFrameContextUpdateMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.Update");
+        public static readonly ProfilerMarker PrepareFramePrepareHistoryTargetsMarker = new("VividRP.RenderPass.PrepareFrame/PrepareHistoryTargets");
+        public static readonly ProfilerMarker PrepareFrameClearImportedTexturesMarker = new("VividRP.RenderPass.PrepareFrame/ClearImportedTextures");
+        public static readonly ProfilerMarker PrepareFrameContextPurgeDestroyedCamerasMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.PurgeDestroyedCameras");
+        public static readonly ProfilerMarker PrepareFrameContextResolveDataMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.ResolveData");
+        public static readonly ProfilerMarker PrepareFrameContextAdvanceTemporalMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.AdvanceTemporal");
+        public static readonly ProfilerMarker PrepareFrameContextPopulateTemporalMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.PopulateTemporal");
+        public static readonly ProfilerMarker PrepareFrameContextAutoExposureMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.AutoExposure");
+        public static readonly ProfilerMarker PrepareFrameContextBuildShaderVariablesMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.BuildShaderVariables");
+        public static readonly ProfilerMarker PrepareFrameContextSetShaderGlobalsMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SetShaderGlobals");
+        public static readonly ProfilerMarker PrepareFrameContextAdaptiveProbeVolumeMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.AdaptiveProbeVolume");
+        public static readonly ProfilerMarker PrepareFrameContextSubsystemPreRenderMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender");
         public static readonly ProfilerMarker PrepareAllMarker = new("VividRP.RenderPass.PrepareAll");
         public static readonly ProfilerMarker RecordRenderGraphMarker = new("VividRP.RenderPass.RecordRenderGraph");
         public static readonly ProfilerMarker InjectedStpRecordGraphMarker = new("VividRP.RenderPass.RecordGraph/STP (Injected)");

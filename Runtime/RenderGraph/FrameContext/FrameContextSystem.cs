@@ -29,39 +29,72 @@ namespace VividRP.Runtime
 
         public static void Update(ContextContainer frameData, CommandBuffer cmd)
         {
-            s_Instance.PurgeDestroyedCameras();
+            using (RenderPassProfilingUtility.PrepareFrameContextPurgeDestroyedCamerasMarker.Auto())
+            {
+                s_Instance.PurgeDestroyedCameras();
+            }
 
-            var cameraData = frameData.Get<VividCameraData>();
-            var temporalData = GetOrCreate(cameraData.camera);
+            VividCameraData cameraData;
+            CameraTemporalData temporalData;
+            using (RenderPassProfilingUtility.PrepareFrameContextResolveDataMarker.Auto())
+            {
+                cameraData = frameData.Get<VividCameraData>();
+                temporalData = GetOrCreate(cameraData.camera);
+            }
 
             // 1. Advance temporal state
-            temporalData.Update(cameraData);
-            RTHandles.SetReferenceSize(cameraData.actualWidth, cameraData.actualHeight);
+            using (RenderPassProfilingUtility.PrepareFrameContextAdvanceTemporalMarker.Auto())
+            {
+                temporalData.Update(cameraData);
+                RTHandles.SetReferenceSize(cameraData.actualWidth, cameraData.actualHeight);
+            }
 
             // 2. Populate ContextItem for passes
-            var vividTemporalData = frameData.GetOrCreate<VividTemporalData>();
-            vividTemporalData.previousViewProjectionMatrix = temporalData.PreviousViewProjection;
-            vividTemporalData.nonJitteredViewProjectionMatrix = temporalData.ViewProjection;
-            vividTemporalData.previousViewMatrix = temporalData.PreviousViewMatrix;
-            vividTemporalData.previousProjectionMatrix = temporalData.PreviousProjectionMatrix;
-            vividTemporalData.jitter = temporalData.Jitter;
-            vividTemporalData.previousJitter = temporalData.PreviousJitter;
-            vividTemporalData.isFirstFrame = temporalData.IsFirstFrame;
+            using (RenderPassProfilingUtility.PrepareFrameContextPopulateTemporalMarker.Auto())
+            {
+                var vividTemporalData = frameData.GetOrCreate<VividTemporalData>();
+                vividTemporalData.previousViewProjectionMatrix = temporalData.PreviousViewProjection;
+                vividTemporalData.nonJitteredViewProjectionMatrix = temporalData.ViewProjection;
+                vividTemporalData.previousViewMatrix = temporalData.PreviousViewMatrix;
+                vividTemporalData.previousProjectionMatrix = temporalData.PreviousProjectionMatrix;
+                vividTemporalData.jitter = temporalData.Jitter;
+                vividTemporalData.previousJitter = temporalData.PreviousJitter;
+                vividTemporalData.isFirstFrame = temporalData.IsFirstFrame;
+            }
 
-            
-            AutoExposureRuntimeManager.PrepareFrame(frameData);
-            AutoExposureShaderBindings.BindFrameGlobals(cmd, frameData.Get<VividExposureData>());
+            using (RenderPassProfilingUtility.PrepareFrameContextAutoExposureMarker.Auto())
+            {
+                AutoExposureRuntimeManager.PrepareFrame(frameData);
+                AutoExposureShaderBindings.BindFrameGlobals(cmd, frameData.Get<VividExposureData>());
+            }
 
             // 3. Build and set all shader globals in one place
-            var shaderVariables = cameraData.BuildShaderVariables(temporalData);
-            var skyData = frameData.GetOrCreate<VividSkyData>();
-            SetShaderGlobals(cmd, frameData, cameraData, shaderVariables, temporalData, skyData);
-            VividAdaptiveProbeVolumeUtility.UpdatePerCamera(
-                VividRenderPipelineAsset.GetActiveAsset(),
-                cameraData.camera,
-                cmd,
-                cameraData.frameIndex);
-            SubsystemPreRender?.Invoke(frameData, cmd);
+            VividCameraData.ShaderVariables shaderVariables;
+            VividSkyData skyData;
+            using (RenderPassProfilingUtility.PrepareFrameContextBuildShaderVariablesMarker.Auto())
+            {
+                shaderVariables = cameraData.BuildShaderVariables(temporalData);
+                skyData = frameData.GetOrCreate<VividSkyData>();
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameContextSetShaderGlobalsMarker.Auto())
+            {
+                SetShaderGlobals(cmd, frameData, cameraData, shaderVariables, temporalData, skyData);
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameContextAdaptiveProbeVolumeMarker.Auto())
+            {
+                VividAdaptiveProbeVolumeUtility.UpdatePerCamera(
+                    VividRenderPipelineAsset.GetActiveAsset(),
+                    cameraData.camera,
+                    cmd,
+                    cameraData.frameIndex);
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameContextSubsystemPreRenderMarker.Auto())
+            {
+                SubsystemPreRender?.Invoke(frameData, cmd);
+            }
         }
 
         public static void ExecutePostRender(ContextContainer frameData, CommandBuffer cmd)

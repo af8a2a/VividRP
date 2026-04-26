@@ -77,6 +77,47 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Not.Contain("static (data, context)"));
         }
 
+        [Test]
+        public void PrepareFrame_UsesFineGrainedMarkers_ForGcAttribution()
+        {
+            var profilingSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "RenderPassProfiling.cs"));
+            var passRecorderSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.Execution.cs"));
+            var frameContextSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "FrameContextSystem.cs"));
+
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/EnsureCompiled"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/ClearHistoryImports"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/ClearCodeManagedHistory"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.Update"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/PrepareHistoryTargets"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/ClearImportedTextures"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.PurgeDestroyedCameras"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.ResolveData"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.AdvanceTemporal"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.PopulateTemporal"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.AutoExposure"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.BuildShaderVariables"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SetShaderGlobals"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.AdaptiveProbeVolume"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender"));
+
+            Assert.That(passRecorderSource, Does.Contain("PrepareFrameEnsureCompiledMarker.Auto()"));
+            Assert.That(passRecorderSource, Does.Contain("PrepareFrameClearHistoryImportsMarker.Auto()"));
+            Assert.That(passRecorderSource, Does.Contain("PrepareFrameClearCodeManagedHistoryMarker.Auto()"));
+            Assert.That(passRecorderSource, Does.Contain("PrepareFrameContextUpdateMarker.Auto()"));
+            Assert.That(passRecorderSource, Does.Contain("PrepareFramePrepareHistoryTargetsMarker.Auto()"));
+            Assert.That(passRecorderSource, Does.Contain("PrepareFrameClearImportedTexturesMarker.Auto()"));
+
+            Assert.That(frameContextSource, Does.Contain("PrepareFrameContextPurgeDestroyedCamerasMarker.Auto()"));
+            Assert.That(frameContextSource, Does.Contain("PrepareFrameContextResolveDataMarker.Auto()"));
+            Assert.That(frameContextSource, Does.Contain("PrepareFrameContextAdvanceTemporalMarker.Auto()"));
+            Assert.That(frameContextSource, Does.Contain("PrepareFrameContextPopulateTemporalMarker.Auto()"));
+            Assert.That(frameContextSource, Does.Contain("PrepareFrameContextAutoExposureMarker.Auto()"));
+            Assert.That(frameContextSource, Does.Contain("PrepareFrameContextBuildShaderVariablesMarker.Auto()"));
+            Assert.That(frameContextSource, Does.Contain("PrepareFrameContextSetShaderGlobalsMarker.Auto()"));
+            Assert.That(frameContextSource, Does.Contain("PrepareFrameContextAdaptiveProbeVolumeMarker.Auto()"));
+            Assert.That(frameContextSource, Does.Contain("PrepareFrameContextSubsystemPreRenderMarker.Auto()"));
+        }
+
         private static string GetPackageFilePath(params string[] relativeParts)
         {
             var path = Path.Combine("Packages", "VividRP");

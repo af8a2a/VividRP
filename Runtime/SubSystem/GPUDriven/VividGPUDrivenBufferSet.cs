@@ -16,6 +16,11 @@ namespace VividRP.Runtime.GPUDriven
         private GraphicsBuffer m_MeshletsBuffer;
         private GraphicsBuffer m_SharedVertexBuffer;
         private GraphicsBuffer m_SharedIndexBuffer;
+        private VividInstanceData[] m_InstanceUploadData = Array.Empty<VividInstanceData>();
+        private VividMaterialData[] m_MaterialUploadData = Array.Empty<VividMaterialData>();
+        private VividMeshLODNode[] m_MeshLODNodeUploadData = Array.Empty<VividMeshLODNode>();
+        private VividMeshlet[] m_MeshletUploadData = Array.Empty<VividMeshlet>();
+        private VividMeshletVertex[] m_VertexUploadData = Array.Empty<VividMeshletVertex>();
         private byte[] m_PaddedIndexUploadData = Array.Empty<byte>();
         private bool m_IsDisposed;
 
@@ -73,6 +78,7 @@ namespace VividRP.Runtime.GPUDriven
                 UploadStructuredBuffer(
                     ref m_InstanceDataBuffer,
                     sceneData.MutableInstances,
+                    ref m_InstanceUploadData,
                     UnsafeUtility.SizeOf<VividInstanceData>(),
                     "VividGPUDriven_InstanceData"
                 );
@@ -82,6 +88,7 @@ namespace VividRP.Runtime.GPUDriven
                 UploadStructuredBuffer(
                     ref m_MaterialDataBuffer,
                     sceneData.MutableMaterials,
+                    ref m_MaterialUploadData,
                     UnsafeUtility.SizeOf<VividMaterialData>(),
                     "VividGPUDriven_MaterialData"
                 );
@@ -92,18 +99,21 @@ namespace VividRP.Runtime.GPUDriven
                 UploadStructuredBuffer(
                     ref m_MeshLODNodesBuffer,
                     sceneData.MutableMeshLODNodes,
+                    ref m_MeshLODNodeUploadData,
                     UnsafeUtility.SizeOf<VividMeshLODNode>(),
                     "VividGPUDriven_MeshLODNodes"
                 );
                 UploadStructuredBuffer(
                     ref m_MeshletsBuffer,
                     sceneData.MutableMeshlets,
+                    ref m_MeshletUploadData,
                     UnsafeUtility.SizeOf<VividMeshlet>(),
                     "VividGPUDriven_Meshlets"
                 );
                 UploadStructuredBuffer(
                     ref m_SharedVertexBuffer,
                     sceneData.MutableVertices,
+                    ref m_VertexUploadData,
                     UnsafeUtility.SizeOf<VividMeshletVertex>(),
                     "VividGPUDriven_SharedVertices"
                 );
@@ -155,6 +165,11 @@ namespace VividRP.Runtime.GPUDriven
             m_MeshletsBuffer = null;
             m_SharedVertexBuffer = null;
             m_SharedIndexBuffer = null;
+            m_InstanceUploadData = Array.Empty<VividInstanceData>();
+            m_MaterialUploadData = Array.Empty<VividMaterialData>();
+            m_MeshLODNodeUploadData = Array.Empty<VividMeshLODNode>();
+            m_MeshletUploadData = Array.Empty<VividMeshlet>();
+            m_VertexUploadData = Array.Empty<VividMeshletVertex>();
             m_PaddedIndexUploadData = Array.Empty<byte>();
             m_IsDisposed = true;
         }
@@ -186,6 +201,7 @@ namespace VividRP.Runtime.GPUDriven
         private static void UploadStructuredBuffer<T>(
             ref GraphicsBuffer buffer,
             List<T> data,
+            ref T[] uploadData,
             int stride,
             string bufferName
         )
@@ -196,8 +212,20 @@ namespace VividRP.Runtime.GPUDriven
 
             if (data.Count > 0)
             {
-                buffer.SetData(data);
+                EnsureUploadArrayCapacity(ref uploadData, data.Count);
+                data.CopyTo(uploadData, 0);
+                buffer.SetData(uploadData, 0, 0, data.Count);
             }
+        }
+
+        private static void EnsureUploadArrayCapacity<T>(ref T[] uploadData, int count)
+        {
+            if (uploadData.Length >= count)
+            {
+                return;
+            }
+
+            uploadData = new T[count];
         }
 
         private static void EnsureStructuredBuffer(

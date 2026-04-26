@@ -23,6 +23,7 @@ namespace VividRP.Runtime.GPUDriven
         private static readonly int s_AlphaClipPropertyId = Shader.PropertyToID("_AlphaClip");
         private static readonly int s_CutoffPropertyId = Shader.PropertyToID("_Cutoff");
         private static readonly int s_CullPropertyId = Shader.PropertyToID("_Cull");
+        private const string SimpleForwardShaderName = "VividRP/Material/SimpleForward";
 
         private readonly Dictionary<EntityId, int> m_MaterialIndexByObjectId = new();
         private readonly Dictionary<EntityId, MaterialMetadata> m_MaterialMetadataByObjectId = new();
@@ -33,6 +34,9 @@ namespace VividRP.Runtime.GPUDriven
         private readonly HashSet<EntityId> m_CurrentReferencedMaterialProxyIds = new();
         private readonly HashSet<(EntityId entityId, int subMeshIndex)> m_MissingProxyWarningKeys = new();
         private readonly List<VividInstanceData> m_PreviousInstanceData = new();
+        private static readonly Dictionary<Shader, bool> s_SimpleForwardShaderMatchCache = new();
+        private static Shader s_SimpleForwardShader;
+        private static bool s_SimpleForwardShaderResolved;
         private bool m_HasBuiltStaticData;
         private bool m_UsesFallbackMaterials;
         private uint m_PreviousTextureBindingRevision;
@@ -753,13 +757,40 @@ namespace VividRP.Runtime.GPUDriven
 
         private static VividMaterialFlags GetMaterialFlags(Material material)
         {
-            if (material?.shader != null &&
-                string.Equals(material.shader.name, "VividRP/Material/SimpleForward", StringComparison.Ordinal))
+            if (IsSimpleForwardShader(material != null ? material.shader : null))
             {
                 return VividMaterialFlags.Unlit;
             }
 
             return VividMaterialFlags.None;
+        }
+
+        private static bool IsSimpleForwardShader(Shader shader)
+        {
+            if (shader == null)
+            {
+                return false;
+            }
+
+            if (!s_SimpleForwardShaderResolved)
+            {
+                s_SimpleForwardShader = Shader.Find(SimpleForwardShaderName);
+                s_SimpleForwardShaderResolved = true;
+            }
+
+            if (s_SimpleForwardShader != null)
+            {
+                return shader == s_SimpleForwardShader;
+            }
+
+            if (s_SimpleForwardShaderMatchCache.TryGetValue(shader, out bool isSimpleForwardShader))
+            {
+                return isSimpleForwardShader;
+            }
+
+            isSimpleForwardShader = string.Equals(shader.name, SimpleForwardShaderName, StringComparison.Ordinal);
+            s_SimpleForwardShaderMatchCache.Add(shader, isSimpleForwardShader);
+            return isSimpleForwardShader;
         }
 
         private static VividRendererListID GetRendererListId(GPUDrivenMaterialProxy materialProxy)

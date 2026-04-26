@@ -835,6 +835,51 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void PrepareFrame_DoesNotAllocate_WhenFallbackMaterialSceneIsStable()
+        {
+            GameObject gameObject = null;
+            Mesh mesh = null;
+            Material material = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+
+            try
+            {
+                mesh = CreateSingleSubMeshMesh("StablePrepareFrameMesh");
+                material = CreateTestMaterial();
+                meshletCollection = CreateMeshletCollectionAsset(
+                    "StablePrepareFrameCollection",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[] { CreateVertex(0.0f, 0.0f, 0.0f), CreateVertex(1.0f, 0.0f, 0.0f), CreateVertex(0.0f, 1.0f, 0.0f) },
+                    new byte[] { 0, 1, 2 }
+                );
+
+                gameObject = CreateMeshletRendererObject("Renderer_StablePrepareFrame", mesh, new[] { material }, out MeshletRenderer meshletRenderer);
+                meshletRenderer.SetMeshletCollections(new[] { meshletCollection });
+                VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
+
+                using var system = new VividGPUDrivenSystem(new FakeBindlessTextureDescriptorAllocator(16));
+                system.PrepareFrame(reportStats: false);
+                system.PrepareFrame(reportStats: false);
+
+                var allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+                for (int index = 0; index < 32; index++)
+                {
+                    system.PrepareFrame(reportStats: false);
+                }
+
+                var allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+                Assert.That(allocatedBytes, Is.Zero);
+            }
+            finally
+            {
+                DestroyTestObjects(gameObject, null, material, mesh, meshletCollection);
+            }
+        }
+
         private static GameObject CreateMeshletRendererObject(
             string name,
             Mesh mesh,

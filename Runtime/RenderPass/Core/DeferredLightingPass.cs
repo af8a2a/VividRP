@@ -5,7 +5,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public class DeferredLightingPass : UnsafePass
+    public class DeferredLightingPass : ComputePass
     {
         private const int ClearThreadGroupSizeX = 8;
         private const int ClearThreadGroupSizeY = 8;
@@ -256,6 +256,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ClearDeferredLitKernel = m_DeferredLitCompute.FindKernel(ClearDeferredLitKernelName);
             m_DeferredLitKernel = m_DeferredLitCompute.FindKernel(DeferredLitKernelName);
         }
+        
 
         public override void Prepare(ContextContainer frameData)
         {
@@ -287,7 +288,7 @@ namespace VividRP.Runtime.RenderPass.Core
             PrepareSkyTextureState(frameData.GetOrCreate<VividSkyData>());
         }
 
-        public override void Record(UnsafePassContext context)
+        public override void Record(ComputePassContext context)
         {
             if (m_DeferredLitCompute == null
                 || m_ClearDeferredLitKernel < 0
@@ -297,14 +298,14 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             var cmd = context.cmd;
-            var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(cmd);
+            var nativeCmd = context.cmd;
 
             using (new ProfilingScope(nativeCmd, profilingSampler))
             {
-                BindSharedParameters(cmd, m_ClearDeferredLitKernel);
+                BindSharedParameters(context, cmd, m_ClearDeferredLitKernel);
                 cmd.DispatchCompute(m_DeferredLitCompute, m_ClearDeferredLitKernel, m_ClearDispatchGroupCountX, m_ClearDispatchGroupCountY, 1);
 
-                BindSharedParameters(cmd, m_DeferredLitKernel);
+                BindSharedParameters(context, cmd, m_DeferredLitKernel);
                 BindIndirectLightingParameters(cmd, m_DeferredLitKernel);
                 BindLightLoopParameters(cmd, m_DeferredLitKernel);
                 DispatchMaterialClass(cmd, m_StandardMaterialIndices, m_StandardIndirectArgs);
@@ -365,12 +366,13 @@ namespace VividRP.Runtime.RenderPass.Core
             return BuildSkyTextureParams(maxMip, intensityMultiplier, rotation, enabled);
         }
 
-        private void BindSharedParameters(UnsafeCommandBuffer cmd, int kernel)
+        private void BindSharedParameters(ComputePassContext context,ComputeCommandBuffer cmd, int kernel)
         {
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer0Id, m_GBuffer0.innerHandle);
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer2Id, m_GBuffer2.innerHandle);
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GBuffer3Id, m_GBuffer3.innerHandle);
+            var rgDefaultResource = context.renderGraphContext.defaultResources;
             if (ReferenceEquals(m_GBuffer4, m_LocalGBuffer4)
                 || m_GBuffer4 == null
                 || !m_GBuffer4.innerHandle.IsValid())
@@ -379,7 +381,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_DeferredLitCompute,
                     kernel,
                     GBuffer4Id,
-                    Texture2D.blackTexture);
+                    rgDefaultResource.blackTexture);
             }
             else
             {
@@ -394,7 +396,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_DeferredLitCompute,
                     kernel,
                     DirectionalShadowTextureId,
-                    Texture2D.whiteTexture);
+                    rgDefaultResource.whiteTexture);
             }
             else
             {
@@ -412,7 +414,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_DeferredLitCompute,
                     kernel,
                     GTAOTextureId,
-                    Texture2D.whiteTexture);
+                    rgDefaultResource.whiteTexture);
             }
             else
             {
@@ -423,7 +425,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_DeferredLitCompute, LightingHeightId, m_LightingHeight);
         }
 
-        private void BindIndirectLightingParameters(UnsafeCommandBuffer cmd, int kernel)
+        private void BindIndirectLightingParameters(ComputeCommandBuffer cmd, int kernel)
         {
             cmd.SetComputeTextureParam(
                 m_DeferredLitCompute,
@@ -440,7 +442,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeVectorParam(m_DeferredLitCompute, SkyTextureParamsId, m_SkyTextureParams);
         }
 
-        private void BindLightLoopParameters(UnsafeCommandBuffer cmd, int kernel)
+        private void BindLightLoopParameters(ComputeCommandBuffer cmd, int kernel)
         {
             cmd.SetComputeIntParam(m_DeferredLitCompute, DirectionalLightCountId, m_DirectionalLightCount);
             cmd.SetComputeIntParam(m_DeferredLitCompute, MainDirectionalLightIndexId, m_MainDirectionalLightIndex);
@@ -470,7 +472,7 @@ namespace VividRP.Runtime.RenderPass.Core
             SetLightLoopBuffer(cmd, kernel, LogBaseBufferId, m_LogBaseBuffer);
         }
 
-        private void DispatchMaterialClass(UnsafeCommandBuffer cmd, RenderGraphBuffer materialIndices, RenderGraphBuffer materialDispatchArgs)
+        private void DispatchMaterialClass(ComputeCommandBuffer cmd, RenderGraphBuffer materialIndices, RenderGraphBuffer materialDispatchArgs)
         {
             cmd.SetComputeBufferParam(m_DeferredLitCompute, m_DeferredLitKernel, MaterialPixelIndicesId, materialIndices.innerHandle);
             cmd.DispatchCompute(m_DeferredLitCompute, m_DeferredLitKernel, materialDispatchArgs, IndirectArgsOffset);
@@ -585,7 +587,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     || clusteredLightingData.areaLightCount > 0);
         }
 
-        private void SetLightLoopBuffer(UnsafeCommandBuffer cmd, int kernel, int propertyId, RenderGraphBuffer buffer)
+        private void SetLightLoopBuffer(ComputeCommandBuffer cmd, int kernel, int propertyId, RenderGraphBuffer buffer)
         {
             if (buffer == null || !buffer.innerHandle.IsValid())
                 return;

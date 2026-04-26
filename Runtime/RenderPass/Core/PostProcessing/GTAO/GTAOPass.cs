@@ -6,7 +6,9 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public sealed class GTAOPass : UnsafePass
+    //todo:
+    //candidate async compute
+    public sealed class GTAOPass : ComputePass
     {
         private const int DepthMipCount = 5;
         private const int PrefilterTileSize = 16;
@@ -177,12 +179,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ConstantBuffer = BuildConstantBuffer(cameraData, m_Width, m_Height, m_Settings);
         }
 
-        public override void Record(UnsafePassContext context)
+
+        public override void Record(ComputePassContext context)
         {
-            var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
+            var cmd = context.cmd;
             using (new ProfilingScope(cmd, profilingSampler))
             {
-                ClearTexture(cmd, m_GTAOTexture, Color.white);
 
                 if (!CanExecute() || !m_Settings.enabled)
                     return;
@@ -276,7 +278,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_WorkingEdgesTexture?.innerHandle.IsValid() == true;
         }
 
-        private void BindWorkingDepthMips(CommandBuffer cmd)
+        private void BindWorkingDepthMips(ComputeCommandBuffer cmd)
         {
             for (int mipIndex = 0; mipIndex < DepthMipCount; mipIndex++)
                 cmd.SetComputeTextureParam(m_GTAOCompute, m_PrefilterKernel, s_WorkingDepthMipIds[mipIndex], m_WorkingDepthTexture.innerHandle, mipIndex);

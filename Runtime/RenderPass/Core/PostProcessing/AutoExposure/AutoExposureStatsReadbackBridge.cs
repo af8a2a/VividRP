@@ -67,7 +67,11 @@ namespace VividRP.Runtime
         private sealed class SnapshotState
         {
             public readonly uint[] histogram = new uint[HistogramBucketCount];
+            public readonly Action<AsyncGPUReadbackRequest> exposureReadback;
+            public readonly Action<AsyncGPUReadbackRequest> preExposureReadback;
+            public readonly Action<AsyncGPUReadbackRequest> histogramReadback;
 
+            private readonly Camera m_Camera;
             public string cameraName = string.Empty;
             public AutoExposureSettingsData settings = AutoExposureSettingsData.CreateDefault();
             public Vector4 exposureState = s_DefaultExposureState;
@@ -84,6 +88,30 @@ namespace VividRP.Runtime
             public int frameIndex;
             public float lastTouchedTime = float.NegativeInfinity;
             public float lastCompletedTime = float.NegativeInfinity;
+
+            public SnapshotState(Camera camera)
+            {
+                m_Camera = camera;
+                cameraName = camera != null ? camera.name : string.Empty;
+                exposureReadback = OnExposureReadback;
+                preExposureReadback = OnPreExposureReadback;
+                histogramReadback = OnHistogramReadback;
+            }
+
+            private void OnExposureReadback(AsyncGPUReadbackRequest request)
+            {
+                HandleExposureReadback(m_Camera, request);
+            }
+
+            private void OnPreExposureReadback(AsyncGPUReadbackRequest request)
+            {
+                HandlePreExposureReadback(m_Camera, request);
+            }
+
+            private void OnHistogramReadback(AsyncGPUReadbackRequest request)
+            {
+                HandleHistogramReadback(m_Camera, request);
+            }
         }
 
         internal static void TouchInspectorRequest()
@@ -152,7 +180,6 @@ namespace VividRP.Runtime
                 return;
 
             var state = GetOrCreateState(camera);
-            state.cameraName = camera.name;
             state.settings = settings;
             state.exposureEnabled = exposureEnabled;
             state.autoExposureEnabled = autoExposureEnabled;
@@ -175,13 +202,13 @@ namespace VividRP.Runtime
             if (exposureBuffer != null && !state.exposurePending)
             {
                 state.exposurePending = true;
-                commandBuffer.RequestAsyncReadback(exposureBuffer, request => HandleExposureReadback(camera, request));
+                commandBuffer.RequestAsyncReadback(exposureBuffer, state.exposureReadback);
             }
 
             if (preExposureBuffer != null && !state.preExposurePending)
             {
                 state.preExposurePending = true;
-                commandBuffer.RequestAsyncReadback(preExposureBuffer, request => HandlePreExposureReadback(camera, request));
+                commandBuffer.RequestAsyncReadback(preExposureBuffer, state.preExposureReadback);
             }
             else if (preExposureBuffer == null)
             {
@@ -194,7 +221,7 @@ namespace VividRP.Runtime
                 if (!state.histogramPending)
                 {
                     state.histogramPending = true;
-                    commandBuffer.RequestAsyncReadback(histogramBuffer, request => HandleHistogramReadback(camera, request));
+                    commandBuffer.RequestAsyncReadback(histogramBuffer, state.histogramReadback);
                 }
             }
             else
@@ -215,7 +242,7 @@ namespace VividRP.Runtime
             if (s_Snapshots.TryGetValue(camera, out var state) && state != null)
                 return state;
 
-            state = new SnapshotState();
+            state = new SnapshotState(camera);
             s_Snapshots[camera] = state;
             return state;
         }

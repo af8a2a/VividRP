@@ -19,6 +19,7 @@ namespace VividRP.Runtime.RenderPass
         private GraphicsBuffer m_AutoExposureHistogramBuffer;
         private RenderTexture m_HDRPPrePassTexture;
         private RenderTexture m_HDRPReductionTexture;
+        private readonly int[] m_HdrpVariants = new int[4];
 
 
         private bool ExecuteHDRPHistogramAutoExposure(CommandBuffer cmd)
@@ -275,13 +276,7 @@ namespace VividRP.Runtime.RenderPass
                     m_AutoExposureSettings.exposureSpeedUp,
                     0f,
                     0f));
-            cmd.SetComputeIntParams(
-                m_AutoExposureCompute,
-                HdrpVariantsId,
-                1,
-                meteringMode,
-                adaptationMode,
-                (int)evaluateMode);
+            SetHDRPVariants(cmd, meteringMode, adaptationMode, (int)evaluateMode);
         }
 
         private void BindHDRPHistogramGenerationParameters(CommandBuffer cmd)
@@ -331,13 +326,7 @@ namespace VividRP.Runtime.RenderPass
                 m_AutoExposureCompute,
                 HdrpProceduralMaskParams2Id,
                 Vector4.zero);
-            cmd.SetComputeIntParams(
-                m_AutoExposureCompute,
-                HdrpVariantsId,
-                1,
-                meteringMode,
-                adaptationMode,
-                0);
+            SetHDRPVariants(cmd, meteringMode, adaptationMode, 0);
         }
 
         private void BindHDRPHistogramReductionParameters(CommandBuffer cmd, uint evaluateMode)
@@ -395,13 +384,7 @@ namespace VividRP.Runtime.RenderPass
                     m_AutoExposureSettings.exposureSpeedUp,
                     0f,
                     0f));
-            cmd.SetComputeIntParams(
-                m_AutoExposureCompute,
-                HdrpVariantsId,
-                1,
-                meteringMode,
-                adaptationMode,
-                (int)evaluateMode);
+            SetHDRPVariants(cmd, meteringMode, adaptationMode, (int)evaluateMode);
         }
 
         private void BindHDRPManualExposureParameters(CommandBuffer cmd, int kernel)
@@ -451,13 +434,16 @@ namespace VividRP.Runtime.RenderPass
                 m_AutoExposureCompute,
                 HdrpAdaptationParamsId,
                 Vector4.zero);
-            cmd.SetComputeIntParams(
-                m_AutoExposureCompute,
-                HdrpVariantsId,
-                1,
-                0,
-                0,
-                0);
+            SetHDRPVariants(cmd, 0, 0, 0);
+        }
+
+        private void SetHDRPVariants(CommandBuffer cmd, int meteringMode, int adaptationMode, int evaluateMode)
+        {
+            m_HdrpVariants[0] = 1;
+            m_HdrpVariants[1] = meteringMode;
+            m_HdrpVariants[2] = adaptationMode;
+            m_HdrpVariants[3] = evaluateMode;
+            cmd.SetComputeIntParams(m_AutoExposureCompute, HdrpVariantsId, m_HdrpVariants);
         }
 
         private Texture ResolveHDRPExposureCurveTexture()

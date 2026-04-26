@@ -109,6 +109,9 @@ namespace VividRP.Runtime
             public TextureHandle Depth;
             public bool HasDepth;
         }
+
+        private static readonly BaseRenderFunc<RenderGizmosPassData, UnsafeGraphContext> s_RenderGizmosRenderFunc =
+            ExecuteRenderGizmosPass;
 #endif
 
         internal static void InitializeContext(ScriptableRenderContext context, Camera camera, CullingResults cullingResults)
@@ -1680,15 +1683,17 @@ namespace VividRP.Runtime
                 builder.UseTexture(passData.Depth, AccessFlags.ReadWrite);
             builder.UseRendererList(passData.GizmoRendererList);
             builder.AllowPassCulling(false);
-            builder.SetRenderFunc<RenderGizmosPassData>(static (data, context) =>
-            {
-                Gizmos.exposure = data.ExposureTexture;
-                if (data.HasDepth)
-                    context.cmd.SetRenderTarget(data.Color, data.Depth);
-                else
-                    context.cmd.SetRenderTarget(data.Color);
-                context.cmd.DrawRendererList(data.GizmoRendererList);
-            });
+            builder.SetRenderFunc<RenderGizmosPassData>(s_RenderGizmosRenderFunc);
+        }
+
+        private static void ExecuteRenderGizmosPass(RenderGizmosPassData data, UnsafeGraphContext context)
+        {
+            Gizmos.exposure = data.ExposureTexture;
+            if (data.HasDepth)
+                context.cmd.SetRenderTarget(data.Color, data.Depth);
+            else
+                context.cmd.SetRenderTarget(data.Color);
+            context.cmd.DrawRendererList(data.GizmoRendererList);
         }
 
         private static Texture GetGizmoExposureTexture()

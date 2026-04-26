@@ -25,6 +25,30 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void GetMarkers_StoresGraphName_ForRenderGraphPassNameReuse()
+        {
+            var pass = new ProfilingTestPass();
+
+            var markers = RenderPassProfilingUtility.GetMarkers(pass, null, 3);
+
+            Assert.That(markers.GraphName, Is.EqualTo(nameof(ProfilingTestPass)));
+        }
+
+        [Test]
+        public void GetMarkers_DoesNotAllocate_ForCachedDefaultPassLookup()
+        {
+            var pass = new ProfilingTestPass();
+            RenderPassProfilingUtility.GetMarkers(pass, null, 3);
+
+            var before = global::System.GC.GetAllocatedBytesForCurrentThread();
+            for (var i = 0; i < 128; i++)
+                RenderPassProfilingUtility.GetMarkers(pass, null, 3);
+            var after = global::System.GC.GetAllocatedBytesForCurrentThread();
+
+            Assert.That(after - before, Is.Zero);
+        }
+
+        [Test]
         public void GetMarkers_ReturnsSeparateMarkers_WhenDisplayNameDiffers()
         {
             var pass = new ProfilingTestPass();
@@ -38,10 +62,19 @@ namespace VividRP.Editor.Tests
         [Test]
         public void PassRecorder_WrapsRenderPassRecord_WithCpuAndCommandProfiling()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.cs"));
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.cs"))
+                         + File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.Execution.cs"));
 
             Assert.That(source, Does.Contain("data.Markers.Record.Auto()"));
             Assert.That(source, Does.Contain("data.Markers.CommandSampler"));
+            Assert.That(source, Does.Contain("markers.GraphName, out var passData"));
+            Assert.That(source, Does.Not.Contain("passName ?? pass.GetType().Name"));
+            Assert.That(source, Does.Contain("s_ComputeRenderFunc"));
+            Assert.That(source, Does.Contain("s_RasterRenderFunc"));
+            Assert.That(source, Does.Contain("s_UnsafeRenderFunc"));
+            Assert.That(source, Does.Contain("s_RenderGizmosRenderFunc"));
+            Assert.That(source, Does.Not.Contain("static (data, ctx)"));
+            Assert.That(source, Does.Not.Contain("static (data, context)"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

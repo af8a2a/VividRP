@@ -10,11 +10,14 @@ namespace VividRP.Runtime
     {
         private const string MarkerRoot = "VividRP.RenderPass";
 
-        public RenderPassProfilerMarkers(string displayName)
+        public RenderPassProfilerMarkers(string displayName, string graphName)
         {
             displayName = string.IsNullOrWhiteSpace(displayName)
                 ? "Unknown"
                 : displayName;
+            graphName = string.IsNullOrWhiteSpace(graphName)
+                ? displayName
+                : graphName;
 
             Create = new ProfilerMarker($"{MarkerRoot}.Create/{displayName}");
             Initialize = new ProfilerMarker($"{MarkerRoot}.Initialize/{displayName}");
@@ -23,6 +26,7 @@ namespace VividRP.Runtime
             Record = new ProfilerMarker($"{MarkerRoot}.Record/{displayName}");
             Dispose = new ProfilerMarker($"{MarkerRoot}.Dispose/{displayName}");
             CommandSampler = new ProfilingSampler($"{MarkerRoot}.Commands/{displayName}");
+            GraphName = graphName;
         }
 
         public ProfilerMarker Create { get; }
@@ -32,6 +36,7 @@ namespace VividRP.Runtime
         public ProfilerMarker Record { get; }
         public ProfilerMarker Dispose { get; }
         public ProfilingSampler CommandSampler { get; }
+        public string GraphName { get; }
     }
 
     internal static class RenderPassProfilingUtility
@@ -86,8 +91,9 @@ namespace VividRP.Runtime
             if (s_Markers.TryGetValue(key, out var markers))
                 return markers;
 
-            displayName = ResolveDisplayName(pass, displayName, passIndex);
-            markers = new RenderPassProfilerMarkers(displayName);
+            var graphName = ResolveGraphName(pass, displayName);
+            displayName = ResolveDisplayName(graphName, passIndex);
+            markers = new RenderPassProfilerMarkers(displayName, graphName);
             s_Markers[key] = markers;
             return markers;
         }
@@ -97,14 +103,19 @@ namespace VividRP.Runtime
             s_Markers.Clear();
         }
 
-        private static string ResolveDisplayName(IRenderPass pass, string displayName, int passIndex)
+        private static string ResolveGraphName(IRenderPass pass, string displayName)
         {
             if (string.IsNullOrWhiteSpace(displayName))
-                displayName = pass != null ? pass.GetType().Name : "Unknown";
+                return pass != null ? pass.GetType().Name : "Unknown";
 
+            return displayName;
+        }
+
+        private static string ResolveDisplayName(string graphName, int passIndex)
+        {
             return passIndex >= 0
-                ? $"{passIndex}:{displayName}"
-                : displayName;
+                ? $"{passIndex}:{graphName}"
+                : graphName;
         }
     }
 }

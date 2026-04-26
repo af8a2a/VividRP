@@ -64,6 +64,13 @@ namespace VividRP.Runtime
             public RenderPassProfilerMarkers Markers;
         }
 
+        private static readonly BaseRenderFunc<ComputePassData, ComputeGraphContext> s_ComputeRenderFunc =
+            ExecuteComputePass;
+        private static readonly BaseRenderFunc<RasterPassData, RasterGraphContext> s_RasterRenderFunc =
+            ExecuteRasterPass;
+        private static readonly BaseRenderFunc<UnsafePassData, UnsafeGraphContext> s_UnsafeRenderFunc =
+            ExecuteUnsafePass;
+
         /// <summary>
         /// Records a compute pass. Creates resources from PassResource, sets up builder calls,
         /// and wires the render func to call pass.Record().
@@ -83,7 +90,7 @@ namespace VividRP.Runtime
             var markers = RenderPassProfilingUtility.GetMarkers(pass, passName, ResolvePassIndex(pass));
             using var recordGraphScope = markers.RecordGraph.Auto();
             using var builder = renderGraph.AddComputePass<ComputePassData>(
-                passName ?? pass.GetType().Name, out var passData);
+                markers.GraphName, out var passData);
 
             passData.Pass = pass;
             passData.Markers = markers;
@@ -102,14 +109,7 @@ namespace VividRP.Runtime
             if (ShouldEnableAsyncCompute(enableAsyncCompute, pass, passDefinition))
                 builder.EnableAsyncCompute(true);
 
-            builder.SetRenderFunc<ComputePassData>(static (data, ctx) =>
-            {
-                using var recordScope = data.Markers.Record.Auto();
-                using (new ProfilingScope(ctx.cmd, data.Markers.CommandSampler))
-                {
-                    data.Pass.Record(new ComputePassContext(ctx, s_FrameData));
-                }
-            });
+            builder.SetRenderFunc<ComputePassData>(s_ComputeRenderFunc);
         }
 
         /// <summary>
@@ -129,7 +129,7 @@ namespace VividRP.Runtime
             var markers = RenderPassProfilingUtility.GetMarkers(pass, passName, ResolvePassIndex(pass));
             using var recordGraphScope = markers.RecordGraph.Auto();
             using var builder = renderGraph.AddRasterRenderPass<RasterPassData>(
-                passName ?? pass.GetType().Name, out var passData);
+                markers.GraphName, out var passData);
 
             passData.Pass = pass;
             passData.Markers = markers;
@@ -145,14 +145,7 @@ namespace VividRP.Runtime
             SetupImportedTextures(builder, pass);
             ConfigureGlobalStateModification(builder, pass);
 
-            builder.SetRenderFunc<RasterPassData>(static (data, ctx) =>
-            {
-                using var recordScope = data.Markers.Record.Auto();
-                using (new ProfilingScope(ctx.cmd, data.Markers.CommandSampler))
-                {
-                    data.Pass.Record(new RasterPassContext(ctx, s_FrameData));
-                }
-            });
+            builder.SetRenderFunc<RasterPassData>(s_RasterRenderFunc);
         }
 
         /// <summary>
@@ -174,7 +167,7 @@ namespace VividRP.Runtime
             var markers = RenderPassProfilingUtility.GetMarkers(pass, passName, ResolvePassIndex(pass));
             using var recordGraphScope = markers.RecordGraph.Auto();
             using var builder = renderGraph.AddUnsafePass<UnsafePassData>(
-                passName ?? pass.GetType().Name, out var passData);
+                markers.GraphName, out var passData);
 
             passData.Pass = pass;
             passData.Markers = markers;
@@ -193,15 +186,35 @@ namespace VividRP.Runtime
             if (ShouldEnableAsyncCompute(enableAsyncCompute, pass, passDefinition))
                 builder.EnableAsyncCompute(true);
 
-            builder.SetRenderFunc<UnsafePassData>(static (data, ctx) =>
+            builder.SetRenderFunc<UnsafePassData>(s_UnsafeRenderFunc);
+        }
+
+        private static void ExecuteComputePass(ComputePassData data, ComputeGraphContext ctx)
+        {
+            using var recordScope = data.Markers.Record.Auto();
+            using (new ProfilingScope(ctx.cmd, data.Markers.CommandSampler))
             {
-                var passContext = new UnsafePassContext(ctx, s_FrameData);
-                using var recordScope = data.Markers.Record.Auto();
-                using (new ProfilingScope(passContext.GetNativeCommandBuffer(), data.Markers.CommandSampler))
-                {
-                    data.Pass.Record(passContext);
-                }
-            });
+                data.Pass.Record(new ComputePassContext(ctx, s_FrameData));
+            }
+        }
+
+        private static void ExecuteRasterPass(RasterPassData data, RasterGraphContext ctx)
+        {
+            using var recordScope = data.Markers.Record.Auto();
+            using (new ProfilingScope(ctx.cmd, data.Markers.CommandSampler))
+            {
+                data.Pass.Record(new RasterPassContext(ctx, s_FrameData));
+            }
+        }
+
+        private static void ExecuteUnsafePass(UnsafePassData data, UnsafeGraphContext ctx)
+        {
+            var passContext = new UnsafePassContext(ctx, s_FrameData);
+            using var recordScope = data.Markers.Record.Auto();
+            using (new ProfilingScope(passContext.GetNativeCommandBuffer(), data.Markers.CommandSampler))
+            {
+                data.Pass.Record(passContext);
+            }
         }
 
         internal static bool ShouldEnableAsyncCompute(

@@ -48,6 +48,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_Width;
         private int m_Height;
         private TAASettings m_TAASettings;
+        private readonly RenderGraphTextureDesc m_HistoryColorDescriptor =
+            RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16G16B16A16_SFloat);
         private bool m_HasValidHistory;
         private Vector2 m_Jitter;
         private Vector2 m_PreviousJitter;
@@ -96,11 +98,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizePassOwned(m_OutputTexture, m_Width, m_Height);
             ResizePassOwned(m_HistoryColorCurrent, m_Width, m_Height);
 
-            var historyDesc = m_HistoryColorPrevious?.desc?.Clone()
-                ?? RenderGraphTextureDesc.CreateColorTarget(m_Width, m_Height, GraphicsFormat.R16G16B16A16_SFloat);
-            historyDesc.Width = m_Width;
-            historyDesc.Height = m_Height;
-            historyDesc.EnableRandomWrite = true;
+            var historyDesc = CreateHistoryDescriptor();
 
             if (m_TAASettings.Enabled)
             {
@@ -231,6 +229,29 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.Height = Mathf.Max(1, height);
             texture.desc.EnableRandomWrite = true;
             texture.desc.WrapMode = TextureWrapMode.Clamp;
+        }
+
+        private RenderGraphTextureDesc CreateHistoryDescriptor()
+        {
+            var desc = m_HistoryColorDescriptor;
+            if (m_HistoryColorPrevious?.desc != null)
+                RenderGraphTextureDescUtility.Copy(m_HistoryColorPrevious.desc, desc);
+
+            desc.Name = "TAAHistoryColorCurrent";
+            desc.Width = m_Width;
+            desc.Height = m_Height;
+            desc.ColorFormat = GraphicsFormat.R16G16B16A16_SFloat;
+            desc.DepthBufferBits = DepthBits.None;
+            desc.MsaaSamples = MSAASamples.None;
+            desc.ClearBuffer = false;
+            desc.EnableRandomWrite = true;
+            desc.FilterMode = FilterMode.Point;
+            desc.WrapMode = TextureWrapMode.Clamp;
+            desc.UseMipMap = false;
+            desc.AutoGenerateMips = false;
+            desc.MipCount = 1;
+            desc.BindTextureMS = false;
+            return desc;
         }
     }
 

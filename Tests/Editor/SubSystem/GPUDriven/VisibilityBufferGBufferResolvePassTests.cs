@@ -72,6 +72,25 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Prepare_DoesNotAllocate_WhenFrameDataIsStable()
+        {
+            var pass = new VisibilityBufferGBufferResolvePass();
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 1920;
+            cameraData.actualHeight = 1080;
+
+            pass.Prepare(frameData);
+
+            var allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+            for (var index = 0; index < 32; index++)
+                pass.Prepare(frameData);
+
+            var allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            Assert.That(allocatedBytes, Is.Zero);
+        }
+
+        [Test]
         public void Prepare_DoesNotOverwriteOverriddenGBufferDescriptors()
         {
             var pass = new VisibilityBufferGBufferResolvePass();

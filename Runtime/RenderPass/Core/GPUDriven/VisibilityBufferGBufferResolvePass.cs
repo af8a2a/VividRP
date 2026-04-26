@@ -97,18 +97,17 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             var cameraData = frameData.GetOrCreate<VividCameraData>();
-            var width = RenderGraphTextureDescUtility.ResolveMaxExplicitDimension(
-                descriptor => descriptor.Width,
+            var visibilityBufferDescriptor = m_VisibilityBuffer?.desc;
+            var width = ResolveOutputWidth(
                 cameraData.actualWidth,
                 cameraData.pixelWidth,
                 Screen.width,
-                m_VisibilityBuffer?.desc);
-            var height = RenderGraphTextureDescUtility.ResolveMaxExplicitDimension(
-                descriptor => descriptor.Height,
+                visibilityBufferDescriptor);
+            var height = ResolveOutputHeight(
                 cameraData.actualHeight,
                 cameraData.pixelHeight,
                 Screen.height,
-                m_VisibilityBuffer?.desc);
+                visibilityBufferDescriptor);
 
             ConfigurePassOwnedTarget(m_GBuffer0, m_DefaultGBuffer0, width, height, GraphicsFormat.R8G8B8A8_UNorm, false, "GBuffer0");
             ConfigurePassOwnedTarget(m_GBuffer1, m_DefaultGBuffer1, width, height, GraphicsFormat.A2B10G10R10_UNormPack32, false, "GBuffer1");
@@ -180,6 +179,36 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.EnableRandomWrite = enableRandomWrite;
             texture.desc.BindTextureMS = false;
             texture.desc.Name = name;
+        }
+
+        private static int ResolveOutputWidth(
+            int actualCameraDimension,
+            int cameraDimension,
+            int screenDimension,
+            RenderGraphTextureDesc descriptor)
+        {
+            if (RenderGraphTextureDescUtility.HasExplicitSize(descriptor))
+                return Mathf.Max(1, descriptor.Width);
+
+            return CameraDimensionUtility.ResolveCameraDimension(
+                actualCameraDimension,
+                cameraDimension,
+                screenDimension);
+        }
+
+        private static int ResolveOutputHeight(
+            int actualCameraDimension,
+            int cameraDimension,
+            int screenDimension,
+            RenderGraphTextureDesc descriptor)
+        {
+            if (RenderGraphTextureDescUtility.HasExplicitSize(descriptor))
+                return Mathf.Max(1, descriptor.Height);
+
+            return CameraDimensionUtility.ResolveCameraDimension(
+                actualCameraDimension,
+                cameraDimension,
+                screenDimension);
         }
 
     }

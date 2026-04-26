@@ -119,6 +119,55 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CreateHistoryDescriptor_ReusesDescriptorInstance()
+        {
+            var pass = new TemporalAAPass();
+            var createHistoryDescriptor = typeof(TemporalAAPass).GetMethod("CreateHistoryDescriptor", BindingFlags.Instance | BindingFlags.NonPublic);
+            var widthField = typeof(TemporalAAPass).GetField("m_Width", BindingFlags.Instance | BindingFlags.NonPublic);
+            var heightField = typeof(TemporalAAPass).GetField("m_Height", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(createHistoryDescriptor, Is.Not.Null);
+            Assert.That(widthField, Is.Not.Null);
+            Assert.That(heightField, Is.Not.Null);
+
+            widthField.SetValue(pass, 640);
+            heightField.SetValue(pass, 360);
+            var firstDescriptor = (RenderGraphTextureDesc)createHistoryDescriptor.Invoke(pass, global::System.Array.Empty<object>());
+
+            widthField.SetValue(pass, 1280);
+            heightField.SetValue(pass, 720);
+            var secondDescriptor = (RenderGraphTextureDesc)createHistoryDescriptor.Invoke(pass, global::System.Array.Empty<object>());
+
+            Assert.That(secondDescriptor, Is.SameAs(firstDescriptor));
+            Assert.That(secondDescriptor.Width, Is.EqualTo(1280));
+            Assert.That(secondDescriptor.Height, Is.EqualTo(720));
+            Assert.That(secondDescriptor.Name, Is.EqualTo("TAAHistoryColorCurrent"));
+            Assert.That(secondDescriptor.EnableRandomWrite, Is.True);
+        }
+
+        [Test]
+        public void Prepare_DoesNotAllocate_ForRepeatedDisabledTemporalAA()
+        {
+            var pass = new TemporalAAPass();
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 1920;
+            cameraData.actualHeight = 1080;
+            frameData.GetOrCreate<VividTemporalData>();
+
+            pass.Prepare(frameData);
+
+            var allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+            for (var index = 0; index < 32; index++)
+            {
+                pass.Prepare(frameData);
+            }
+
+            var allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            Assert.That(allocatedBytes, Is.Zero);
+        }
+
+        [Test]
         public void Prepare_FallsBackToPixelDimensions_WhenActualDimensionsAreZero()
         {
             var pass = new TemporalAAPass();

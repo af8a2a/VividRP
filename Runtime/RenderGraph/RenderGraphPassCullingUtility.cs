@@ -23,7 +23,7 @@ namespace VividRP.Runtime
             var dependencies = new List<HashSet<int>>(passDefinitions.Count);
             for (var i = 0; i < passDefinitions.Count; i++)
             {
-                dependencies.Add(CollectDependencies(i, passDefinitions, fieldAccessMaps));
+                dependencies.Add(CollectDependencies(i, passDefinitions, passTypes, fieldAccessMaps));
             }
 
             var live = new bool[passDefinitions.Count];
@@ -71,17 +71,24 @@ namespace VividRP.Runtime
                 return true;
 
             var hasWritableResource = false;
+            var hasTransientWritableResource = false;
             foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
             {
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
                 if (attr == null || !CanWrite(attr.Access))
                     continue;
 
+                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                {
+                    hasTransientWritableResource = true;
+                    continue;
+                }
+
                 hasWritableResource = true;
             }
 
             if (!hasWritableResource)
-                return true;
+                return !hasTransientWritableResource;
 
             return HasHistoryCurrentWrite(passDefinition, passType);
         }
@@ -105,6 +112,9 @@ namespace VividRP.Runtime
                 if (attr == null)
                     continue;
 
+                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                    continue;
+
                 var effectiveAccess = RenderGraphPassBindingUtility.ResolveEffectiveAccess(binding, attr.Access);
                 if (CanWrite(effectiveAccess))
                     return true;
@@ -116,6 +126,7 @@ namespace VividRP.Runtime
         private static HashSet<int> CollectDependencies(
             int passIndex,
             IReadOnlyList<RenderGraphPassDefinition> passDefinitions,
+            IReadOnlyList<Type> passTypes,
             IReadOnlyList<Dictionary<string, AccessFlags>> fieldAccessMaps)
         {
             var result = new HashSet<int>();
@@ -130,6 +141,13 @@ namespace VividRP.Runtime
 
                 if (binding.SourceKind == RenderGraphPassBindingSourceKind.PassField)
                 {
+                    var sourcePassType = binding.SourcePassIndex >= 0 && binding.SourcePassIndex < passTypes.Count
+                        ? passTypes[binding.SourcePassIndex]
+                        : null;
+                    var sourceField = RenderGraphPassReflectionUtility.GetInstanceField(sourcePassType, binding.SourceFieldName);
+                    if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(sourceField))
+                        continue;
+
                     if (binding.SourcePassIndex >= 0
                         && binding.SourcePassIndex < passDefinitions.Count
                         && binding.SourcePassIndex != passIndex)
@@ -190,6 +208,9 @@ namespace VividRP.Runtime
 
             foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
             {
+                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                    continue;
+
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
                 result[field.Name] = attr.Access;
             }

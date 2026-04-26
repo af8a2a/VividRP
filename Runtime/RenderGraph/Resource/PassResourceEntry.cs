@@ -54,6 +54,11 @@ namespace VividRP.Runtime
         /// </summary>
         public bool IsDepthAttachment;
 
+        /// <summary>
+        /// True when this entry is a pass-local CoreRP transient resource.
+        /// </summary>
+        public bool IsTransient;
+
         public RenderGraphTexture Texture => Descriptor as RenderGraphTexture;
         public RenderGraphBuffer Buffer => Descriptor as RenderGraphBuffer;
         public RenderGraphRenderList RenderList => Descriptor as RenderGraphRenderList;

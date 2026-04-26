@@ -75,6 +75,9 @@ namespace VividRP.Editor.RenderGraph
 
             foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
             {
+                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                    continue;
+
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
                 var inputPortName = GetInputPortName(field, attr);
                 var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access, attr.BindingMode);
@@ -149,6 +152,9 @@ namespace VividRP.Editor.RenderGraph
             {
                 foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
                 {
+                    if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                        continue;
+
                     var attr = field.GetCustomAttribute<RenderGraphResource>();
 
                     // Only fields without a normal output port need a debug export port.
@@ -315,6 +321,9 @@ namespace VividRP.Editor.RenderGraph
             if (field == null || attr == null)
                 return null;
 
+            if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                return null;
+
             return RenderPassPortUtility.GetInputPortName(
                 field.Name,
                 attr.Access,
@@ -387,6 +396,9 @@ namespace VividRP.Editor.RenderGraph
 
             foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
             {
+                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                    continue;
+
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
                 if (!RenderPassPortUtility.SupportsExternalOverride(attr))
                     continue;
@@ -448,6 +460,9 @@ namespace VividRP.Editor.RenderGraph
             var hasDebugExportableFields = false;
             foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
             {
+                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                    continue;
+
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
                 if (!RenderPassPortUtility.ShouldDefineOutputPort(attr.Access, attr.BindingMode))
                 {

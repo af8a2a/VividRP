@@ -178,6 +178,9 @@ namespace VividRP.Editor.RenderGraph
 
                 foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
                 {
+                    if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                        continue;
+
                     var attr = field.GetCustomAttribute<RenderGraphResource>();
                     var inputPortName = passNode.GetInputPortName(field, attr);
                     var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access, attr.BindingMode);
@@ -659,6 +662,9 @@ namespace VividRP.Editor.RenderGraph
 
             foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
             {
+                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                    continue;
+
                 if (field.FieldType != expectedFieldType)
                     continue;
 

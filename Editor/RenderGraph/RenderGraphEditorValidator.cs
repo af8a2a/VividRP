@@ -85,6 +85,7 @@ namespace VividRP.Editor.RenderGraph
                 }
 
                 ValidateAsyncCompute(passNode, passType, reporter, ref summary);
+                ValidateTransientResourceFields(passNode, passType, reporter, ref summary);
                 ValidateReadWriteBindings(passNode, passType, reporter, ref summary);
                 ValidateHistoryBindings(passNode, passType, reporter, ref summary);
             }
@@ -95,6 +96,40 @@ namespace VividRP.Editor.RenderGraph
             ValidateSubgraphNodes(graph, reporter, summarizeChildSubgraphs, ref summary);
 
             return summary;
+        }
+
+        private static void ValidateTransientResourceFields(
+            RenderPassNodeData passNode,
+            System.Type passType,
+            IRenderGraphValidationReporter reporter,
+            ref ValidationSummary summary)
+        {
+            foreach (var field in RenderGraphPassReflectionUtility.EnumerateInstanceFields(passType))
+            {
+                if (!RenderGraphPassReflectionUtility.HasTransientResourceAttribute(field))
+                    continue;
+
+                var attr = field.GetCustomAttribute<RenderGraphResource>();
+                if (attr == null)
+                {
+                    reporter.LogError(
+                        $"Transient field '{field.Name}' must also be marked with {nameof(RenderGraphResource)}.",
+                        passNode);
+                    summary.ErrorCount++;
+                    continue;
+                }
+
+                if (!RenderGraphPassReflectionUtility.IsSupportedTransientResourceFieldType(field.FieldType))
+                {
+                    reporter.LogError(
+                        $"Transient field '{field.Name}' uses unsupported type '{field.FieldType.FullName}'. Only {nameof(RenderGraphTexture)} and {nameof(RenderGraphBuffer)} are supported.",
+                        passNode);
+                    summary.ErrorCount++;
+                    continue;
+                }
+
+                ValidateTransientLegacyConnections(passNode, field, attr, reporter, ref summary);
+            }
         }
 
         private static void ValidateReadWriteBindings(
@@ -139,6 +174,44 @@ namespace VividRP.Editor.RenderGraph
                     summary.ErrorCount++;
                 }
             }
+        }
+
+        private static void ValidateTransientLegacyConnections(
+            RenderPassNodeData passNode,
+            FieldInfo field,
+            RenderGraphResource attr,
+            IRenderGraphValidationReporter reporter,
+            ref ValidationSummary summary)
+        {
+            foreach (var portName in EnumeratePotentialTransientPortNames(field, attr))
+            {
+                var port = passNode.GetInputPortByName(portName) ?? passNode.GetOutputPortByName(portName);
+                if (port?.IsConnected != true)
+                    continue;
+
+                reporter.LogError(
+                    $"Transient field '{field.Name}' cannot be connected. Remove the legacy binding from this pass node.",
+                    passNode);
+                summary.ErrorCount++;
+                return;
+            }
+        }
+
+        private static IEnumerable<string> EnumeratePotentialTransientPortNames(
+            FieldInfo field,
+            RenderGraphResource attr)
+        {
+            var inputPortName = RenderPassPortUtility.GetInputPortName(field.Name, attr.Access);
+            if (!string.IsNullOrEmpty(inputPortName))
+                yield return inputPortName;
+
+            var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
+            if (!string.IsNullOrEmpty(outputPortName))
+                yield return outputPortName;
+
+            var debugPortName = RenderPassPortUtility.GetDebugOutputPortName(field.Name);
+            if (!string.IsNullOrEmpty(debugPortName))
+                yield return debugPortName;
         }
 
         private static void ValidateAsyncCompute(

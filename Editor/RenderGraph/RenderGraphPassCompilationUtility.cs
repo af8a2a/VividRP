@@ -38,7 +38,7 @@ namespace VividRP.Editor.RenderGraph
             var dependencies = new List<HashSet<int>>(passDefinitions.Count);
             for (var i = 0; i < passDefinitions.Count; i++)
             {
-                dependencies.Add(CollectDependencies(i, passDefinitions, fieldAccessMaps));
+                dependencies.Add(CollectDependencies(i, passDefinitions, passTypes, fieldAccessMaps));
             }
 
             return TopologicalSort(dependencies);
@@ -81,6 +81,7 @@ namespace VividRP.Editor.RenderGraph
         private static HashSet<int> CollectDependencies(
             int passIndex,
             IReadOnlyList<RenderGraphPassDefinition> passDefinitions,
+            IReadOnlyList<Type> passTypes,
             IReadOnlyList<Dictionary<string, AccessFlags>> fieldAccessMaps)
         {
             var result = new HashSet<int>();
@@ -95,6 +96,13 @@ namespace VividRP.Editor.RenderGraph
 
                 if (binding.SourceKind == RenderGraphPassBindingSourceKind.PassField)
                 {
+                    var sourcePassType = binding.SourcePassIndex >= 0 && binding.SourcePassIndex < passTypes.Count
+                        ? passTypes[binding.SourcePassIndex]
+                        : null;
+                    var sourceField = RenderGraphPassReflectionUtility.GetInstanceField(sourcePassType, binding.SourceFieldName);
+                    if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(sourceField))
+                        continue;
+
                     if (binding.SourcePassIndex >= 0 && binding.SourcePassIndex < passDefinitions.Count && binding.SourcePassIndex != passIndex)
                         result.Add(binding.SourcePassIndex);
 
@@ -215,6 +223,9 @@ namespace VividRP.Editor.RenderGraph
 
             foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
             {
+                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                    continue;
+
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
                 result[field.Name] = attr.Access;
             }

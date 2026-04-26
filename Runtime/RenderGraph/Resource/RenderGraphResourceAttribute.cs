@@ -27,4 +27,9 @@ namespace VividRP.Runtime
         /// </summary>
         public bool IsDepthAttachment;
     }
+
+    [AttributeUsage(AttributeTargets.Field)]
+    public sealed class TransientResourceAttribute : Attribute
+    {
+    }
 }

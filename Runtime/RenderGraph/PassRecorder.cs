@@ -306,6 +306,42 @@ namespace VividRP.Runtime
             return handle;
         }
 
+        private static TextureHandle CreateTransientTextureHandle(
+            IBaseRenderGraphBuilder builder,
+            RenderGraphTexture texture)
+        {
+            if (builder == null || texture == null)
+                return default;
+
+            if (s_ImportedRTHandles.ContainsKey(texture) || texture.HasImportedHandle)
+            {
+                Debug.LogWarning(
+                    $"[VividRP] Transient texture '{texture.desc?.Name ?? "<Unnamed>"}' ignores imported texture handles.");
+            }
+
+            var handle = builder.CreateTransientTexture(texture.desc);
+            texture.innerHandle = handle;
+            return handle;
+        }
+
+        private static BufferHandle CreateTransientBufferHandle(
+            IBaseRenderGraphBuilder builder,
+            RenderGraphBuffer buffer)
+        {
+            if (builder == null || buffer == null)
+                return default;
+
+            if (buffer.HasImportedBuffer)
+            {
+                Debug.LogWarning(
+                    $"[VividRP] Transient buffer '{buffer.desc?.Name ?? "<Unnamed>"}' ignores imported graphics buffers.");
+            }
+
+            var handle = builder.CreateTransientBuffer(buffer.desc);
+            buffer.innerHandle = handle;
+            return handle;
+        }
+
         private static RendererListHandle GetOrCreateRenderListHandle(
             RenderGraph renderGraph,
             RenderGraphRenderList renderList,
@@ -429,6 +465,12 @@ namespace VividRP.Runtime
                 var texture = entry.Texture;
                 if (texture == null) continue;
 
+                if (entry.IsTransient)
+                {
+                    CreateTransientTextureHandle(builder, texture);
+                    continue;
+                }
+
                 // Read-only textures are expected to be imported or created externally.
                 // Create a placeholder — the pipeline will replace this with the actual handle.
                 var handle = GetOrCreateTextureHandle(renderGraph, texture, textureCache);
@@ -440,6 +482,12 @@ namespace VividRP.Runtime
             {
                 var buffer = entry.Buffer;
                 if (buffer == null) continue;
+
+                if (entry.IsTransient)
+                {
+                    CreateTransientBufferHandle(builder, buffer);
+                    continue;
+                }
 
                 var handle = GetOrCreateBufferHandle(renderGraph, buffer, bufferCache);
                 buffer.innerHandle = handle;
@@ -469,6 +517,12 @@ namespace VividRP.Runtime
                 var texture = entry.Texture;
                 if (texture == null) continue;
 
+                if (entry.IsTransient)
+                {
+                    CreateTransientTextureHandle(builder, texture);
+                    continue;
+                }
+
                 // Read-only textures are expected to be imported or created externally.
                 // Create a placeholder — the pipeline will replace this with the actual handle.
                 var handle = GetOrCreateTextureHandle(renderGraph, texture, textureCache);
@@ -480,6 +534,12 @@ namespace VividRP.Runtime
             {
                 var buffer = entry.Buffer;
                 if (buffer == null) continue;
+
+                if (entry.IsTransient)
+                {
+                    CreateTransientBufferHandle(builder, buffer);
+                    continue;
+                }
 
                 var handle = GetOrCreateBufferHandle(renderGraph, buffer, bufferCache);
                 buffer.innerHandle = handle;
@@ -510,7 +570,9 @@ namespace VividRP.Runtime
                 var texture = entry.Texture;
                 if (texture == null) continue;
 
-                var handle = GetOrCreateTextureHandle(renderGraph, texture, textureCache);
+                var handle = entry.IsTransient
+                    ? CreateTransientTextureHandle(builder, texture)
+                    : GetOrCreateTextureHandle(renderGraph, texture, textureCache);
                 texture.innerHandle = handle;
 
                 if (entry.IsDepthAttachment)
@@ -523,7 +585,8 @@ namespace VividRP.Runtime
                 }
                 else
                 {
-                    builder.UseTexture(handle, entry.Access);
+                    if (!entry.IsTransient)
+                        builder.UseTexture(handle, entry.Access);
                 }
             }
 
@@ -531,6 +594,12 @@ namespace VividRP.Runtime
             {
                 var buffer = entry.Buffer;
                 if (buffer == null) continue;
+
+                if (entry.IsTransient)
+                {
+                    CreateTransientBufferHandle(builder, buffer);
+                    continue;
+                }
 
                 var handle = GetOrCreateBufferHandle(renderGraph, buffer, bufferCache);
                 buffer.innerHandle = handle;

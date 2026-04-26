@@ -1369,6 +1369,12 @@ namespace VividRP.Runtime
                 if (field == null)
                     continue;
 
+                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                {
+                    LogSkippedTransientResourceBinding(passType, binding.FieldName);
+                    continue;
+                }
+
                 if (binding.SourceKind == RenderGraphPassBindingSourceKind.PassField)
                     continue;
 
@@ -1436,6 +1442,22 @@ namespace VividRP.Runtime
                 if (field == null)
                     continue;
 
+                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
+                {
+                    LogSkippedTransientResourceBinding(passType, binding.FieldName);
+                    continue;
+                }
+
+                var sourcePassType = binding.SourcePassIndex >= 0 && binding.SourcePassIndex < indexedPassTypes.Count
+                    ? indexedPassTypes[binding.SourcePassIndex]
+                    : null;
+                var sourceField = RenderGraphPassReflectionUtility.GetInstanceField(sourcePassType, binding.SourceFieldName);
+                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(sourceField))
+                {
+                    LogSkippedTransientResourceBinding(sourcePassType, binding.SourceFieldName);
+                    continue;
+                }
+
                 var sharedResource = ResolvePassFieldValue(
                     binding.SourcePassIndex,
                     binding.SourceFieldName,
@@ -1469,6 +1491,9 @@ namespace VividRP.Runtime
                 var field = RenderGraphPassReflectionUtility.GetInstanceField(passType, binding.FieldName);
                 var attr = field?.GetCustomAttribute<RenderGraphResource>();
                 if (attr == null)
+                    continue;
+
+                if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
                     continue;
 
                 var effectiveAccess = RenderGraphPassBindingUtility.ResolveEffectiveAccess(binding, attr.Access);
@@ -1506,6 +1531,9 @@ namespace VividRP.Runtime
             if (sourceField == null)
                 return null;
 
+            if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(sourceField))
+                return null;
+
             var sourceValue = sourceField.GetValue(sourcePass);
             var sourcePassDef = passDefinitions[passIndex];
             var sourceBinding = sourcePassDef?.ResourceBindings?.Find(binding => binding != null && binding.FieldName == fieldName);
@@ -1526,6 +1554,12 @@ namespace VividRP.Runtime
             }
 
             return sourceValue;
+        }
+
+        private static void LogSkippedTransientResourceBinding(Type passType, string fieldName)
+        {
+            Debug.LogWarning(
+                $"[VividRP] Skipping legacy RenderGraph binding for transient field '{fieldName}' on '{passType?.FullName ?? "<Unknown Pass>"}'.");
         }
 
         private static void PrepareHistoryTargets(RenderGraphData graphAsset, CommandBuffer cmdBuffer)

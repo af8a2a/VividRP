@@ -94,6 +94,30 @@ namespace VividRP.Runtime
 
             return $"{baseName}{entryNameSuffix}";
         }
+
+        internal static bool HasTransientResourceAttribute(FieldInfo field)
+        {
+            return field?.GetCustomAttribute<TransientResourceAttribute>() != null;
+        }
+
+        internal static bool IsSupportedTransientResourceFieldType(Type fieldType)
+        {
+            return fieldType == typeof(RenderGraphTexture)
+                || fieldType == typeof(RenderGraphBuffer);
+        }
+
+        internal static bool IsDeclaredTransientResourceField(FieldInfo field)
+        {
+            return field != null
+                && field.GetCustomAttribute<RenderGraphResource>() != null
+                && HasTransientResourceAttribute(field);
+        }
+
+        internal static bool IsTransientResourceField(FieldInfo field)
+        {
+            return IsDeclaredTransientResourceField(field)
+                && IsSupportedTransientResourceFieldType(field.FieldType);
+        }
     }
 
     internal static class PassResourceCollector
@@ -110,6 +134,7 @@ namespace VividRP.Runtime
             foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(type))
             {
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
+                var isTransient = RenderGraphPassReflectionUtility.IsTransientResourceField(field);
 
                 var value = field.GetValue(pass);
                 if (value == null)
@@ -125,7 +150,8 @@ namespace VividRP.Runtime
                             PassResourceType.Texture,
                             texture,
                             attr.AttachmentIndex,
-                            attr.IsDepthAttachment));
+                            attr.IsDepthAttachment,
+                            isTransient));
                         break;
                     case IEnumerable<RenderGraphTexture> textureCollection:
                         AddTextureCollectionEntries(textures, field, attr, textureCollection);
@@ -138,7 +164,8 @@ namespace VividRP.Runtime
                             PassResourceType.Buffer,
                             buffer,
                             attr.AttachmentIndex,
-                            attr.IsDepthAttachment));
+                            attr.IsDepthAttachment,
+                            isTransient));
                         break;
                     case RenderGraphRenderList renderList:
                         renderLists.Add(CreateEntry(
@@ -148,7 +175,8 @@ namespace VividRP.Runtime
                             PassResourceType.RenderList,
                             renderList,
                             attr.AttachmentIndex,
-                            attr.IsDepthAttachment));
+                            attr.IsDepthAttachment,
+                            isTransient: false));
                         break;
                     case RenderGraphAccelerationStructure accelerationStructure:
                         accelerationStructures.Add(CreateEntry(
@@ -158,7 +186,8 @@ namespace VividRP.Runtime
                             PassResourceType.AccelerationStructure,
                             accelerationStructure,
                             attr.AttachmentIndex,
-                            attr.IsDepthAttachment));
+                            attr.IsDepthAttachment,
+                            isTransient: false));
                         break;
                 }
             }
@@ -179,7 +208,8 @@ namespace VividRP.Runtime
             PassResourceType resourceType,
             object descriptor,
             int attachmentIndex,
-            bool isDepthAttachment)
+            bool isDepthAttachment,
+            bool isTransient)
         {
             return new PassResourceEntry
             {
@@ -190,6 +220,7 @@ namespace VividRP.Runtime
                 Descriptor = descriptor,
                 AttachmentIndex = attachmentIndex,
                 IsDepthAttachment = isDepthAttachment,
+                IsTransient = isTransient,
             };
         }
 
@@ -217,7 +248,8 @@ namespace VividRP.Runtime
                         PassResourceType.Texture,
                         texture,
                         entryAttachmentIndex,
-                        attr.IsDepthAttachment));
+                        attr.IsDepthAttachment,
+                        isTransient: false));
                 }
 
                 collectionIndex++;

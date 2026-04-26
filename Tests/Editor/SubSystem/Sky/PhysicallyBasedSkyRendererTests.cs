@@ -208,9 +208,16 @@ namespace VividRP.Editor.Tests
             Assert.That(parametersSource, Does.Contain("ResolveSkyIntensityMultiplier(volume)"));
             Assert.That(parametersSource, Does.Contain("var skySettings = VividVolumeManagerUtility.GetSkySettingsVolume();"));
             Assert.That(parametersSource, Does.Contain("var planet = SkyPlanet.Resolve("));
+            Assert.That(parametersSource, Does.Contain("PhysicallyBasedSkyCelestialBodyUtility.BuildCelestialBodyData("));
+            Assert.That(parametersSource, Does.Contain("out var celestialLightCount"));
+            Assert.That(parametersSource, Does.Contain("parameters.celestialLightCount = celestialLightCount;"));
+            Assert.That(parametersSource, Does.Contain("parameters.celestialBodyCount = celestialBodyCount;"));
+            Assert.That(parametersSource, Does.Contain("parameters.celestialLightExposure = Mathf.Max(celestialLightExposure, 1.0f);"));
             Assert.That(parametersSource, Does.Contain("parameters.intensityMultiplier = volume.GetIntensityMultiplier();"));
             Assert.That(parametersSource, Does.Contain("parameters.renderingSpace = planet.renderingSpace == RenderingSpace.World ? 1 : 0;"));
             Assert.That(parametersSource, Does.Contain("volume.atmosphericScattering.value ? 1.0f : 0.0f"));
+            Assert.That(parametersSource, Does.Not.Contain("parameters.celestialLightCount = ResolveCelestialLightCount(context);"));
+            Assert.That(parametersSource, Does.Not.Contain("ResolveCelestialLightExposure(context)"));
             Assert.That(parametersSource, Does.Not.Contain("volume.IsHeightFogActive() ? 1.0f : 0.0f"));
         }
 

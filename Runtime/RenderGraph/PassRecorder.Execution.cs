@@ -84,6 +84,11 @@ namespace VividRP.Runtime
         private static readonly Dictionary<string, CodeManagedBufferHistoryRequest> s_CodeManagedBufferHistoryRequests = new(StringComparer.Ordinal);
         private static readonly HashSet<RenderGraphTexture> s_HistoryImportedTextures = new();
         private static readonly HashSet<RenderGraphBuffer> s_CodeManagedHistoryImportedBuffers = new();
+        private static readonly Dictionary<RTHandle, TextureHandle> s_HistoryTextureImportCache = new(16);
+        private static readonly Dictionary<RenderGraphTexture, TextureHandle> s_RecordGraphTextureCache = new(64);
+        private static readonly Dictionary<RenderGraphBuffer, BufferHandle> s_RecordGraphBufferCache = new(16);
+        private static readonly Dictionary<RenderGraphRenderList, RendererListHandle> s_RecordGraphRenderListCache = new(16);
+        private static readonly Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> s_RecordGraphAccelerationStructureCache = new(8);
         private static RenderGraph s_CurrentRenderGraph;
 
         private static RenderGraphData s_CurrentGraphAsset;
@@ -368,6 +373,7 @@ namespace VividRP.Runtime
             ClearCodeManagedHistoryFrameState();
             ClearImportedTextures();
             s_PassImportedHandles.Clear();
+            ClearRecordGraphResourceCaches();
             RenderGraphHistoryRegistry.Clear();
             RenderGraphBufferHistoryRegistry.Clear();
             FrameContextSystem.Clear();
@@ -1540,13 +1546,15 @@ namespace VividRP.Runtime
             if (renderGraph == null || s_TextureHistoryFrameBindings.Count == 0)
                 return;
 
-            var importedHandles = new Dictionary<RTHandle, TextureHandle>();
+            s_HistoryTextureImportCache.Clear();
 
             foreach (var binding in s_TextureHistoryFrameBindings.Values)
             {
-                ImportHistoryTexture(renderGraph, binding.PreviousTexture, binding.PreviousHandle, importedHandles);
-                ImportHistoryTexture(renderGraph, binding.CurrentTexture, binding.CurrentHandle, importedHandles);
+                ImportHistoryTexture(renderGraph, binding.PreviousTexture, binding.PreviousHandle, s_HistoryTextureImportCache);
+                ImportHistoryTexture(renderGraph, binding.CurrentTexture, binding.CurrentHandle, s_HistoryTextureImportCache);
             }
+
+            s_HistoryTextureImportCache.Clear();
         }
 
         private static void ImportHistoryTexture(
@@ -1789,10 +1797,11 @@ namespace VividRP.Runtime
             PreparePendingHistoryTextureImports(renderGraph);
             s_CurrentRenderGraph = null;
 
-            var textureCache = new Dictionary<RenderGraphTexture, TextureHandle>();
-            var bufferCache = new Dictionary<RenderGraphBuffer, BufferHandle>();
-            var renderListCache = new Dictionary<RenderGraphRenderList, RendererListHandle>();
-            var accelerationStructureCache = new Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle>();
+            ClearRecordGraphResourceCaches();
+            var textureCache = s_RecordGraphTextureCache;
+            var bufferCache = s_RecordGraphBufferCache;
+            var renderListCache = s_RecordGraphRenderListCache;
+            var accelerationStructureCache = s_RecordGraphAccelerationStructureCache;
             var recordedPreImageEffectGizmos = false;
             RenderGraphTexture stopNaNOriginalSource = null;
             RenderGraphTexture stopNaNSanitizedSource = null;
@@ -1960,6 +1969,17 @@ namespace VividRP.Runtime
                         accelerationStructureCache);
                 }
             }
+
+            ClearRecordGraphResourceCaches();
+        }
+
+        private static void ClearRecordGraphResourceCaches()
+        {
+            s_HistoryTextureImportCache.Clear();
+            s_RecordGraphTextureCache.Clear();
+            s_RecordGraphBufferCache.Clear();
+            s_RecordGraphRenderListCache.Clear();
+            s_RecordGraphAccelerationStructureCache.Clear();
         }
 
         private static PassResource GetCurrentPassResources(IRenderPass pass, string displayName = null)

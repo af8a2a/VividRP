@@ -53,6 +53,27 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Prepare_DoesNotAllocate_WhenSkyDataIsStable()
+        {
+            var pass = new AtmosphericScatteringPass();
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            var skyData = frameData.GetOrCreate<VividSkyData>();
+            cameraData.actualWidth = 800;
+            cameraData.actualHeight = 450;
+            skyData.activeSkyType = SkyType.None;
+
+            pass.Prepare(frameData);
+
+            var allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+            for (var index = 0; index < 32; index++)
+                pass.Prepare(frameData);
+
+            var allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            Assert.That(allocatedBytes, Is.Zero);
+        }
+
+        [Test]
         public void Initialize_ConfiguresCameraDepthInputForPointSampling()
         {
             var pass = new AtmosphericScatteringPass();

@@ -117,19 +117,18 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SkyRotation = skyData?.rotation ?? 0.0f;
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
-            var width = ResolveOutputDimension(
-                descriptor => descriptor.Width,
+            var colorInputDescriptor = m_ColorInput?.desc;
+            var width = ResolveOutputWidth(
                 cameraData.actualWidth,
                 cameraData.pixelWidth,
                 Screen.width,
-                m_ColorInput?.desc);
-            var height = ResolveOutputDimension(
-                descriptor => descriptor.Height,
+                colorInputDescriptor);
+            var height = ResolveOutputHeight(
                 cameraData.actualHeight,
                 cameraData.pixelHeight,
                 Screen.height,
-                m_ColorInput?.desc);
-            ConfigureOutputTexture(width, height, m_ColorInput?.desc);
+                colorInputDescriptor);
+            ConfigureOutputTexture(width, height, colorInputDescriptor);
         }
 
         public override void Record(UnsafePassContext context)
@@ -316,31 +315,34 @@ namespace VividRP.Runtime.RenderPass.Core
             return true;
         }
 
-        private static int ResolveOutputDimension(
-            System.Func<RenderGraphTextureDesc, int> selector,
+        private static int ResolveOutputWidth(
             int actualCameraDimension,
             int cameraDimension,
             int screenDimension,
-            params RenderGraphTextureDesc[] descriptors)
+            RenderGraphTextureDesc descriptor)
         {
-            for (var i = 0; i < descriptors.Length; i++)
-            {
-                var descriptor = descriptors[i];
-                if (!RenderGraphTextureDescUtility.HasExplicitSize(descriptor))
-                {
-                    continue;
-                }
+            if (RenderGraphTextureDescUtility.HasExplicitSize(descriptor))
+                return Mathf.Max(1, descriptor.Width);
 
-                return Mathf.Max(1, selector(descriptor));
-            }
+            return CameraDimensionUtility.ResolveCameraDimension(
+                actualCameraDimension,
+                cameraDimension,
+                screenDimension);
+        }
 
-            if (actualCameraDimension > 0)
-                return actualCameraDimension;
+        private static int ResolveOutputHeight(
+            int actualCameraDimension,
+            int cameraDimension,
+            int screenDimension,
+            RenderGraphTextureDesc descriptor)
+        {
+            if (RenderGraphTextureDescUtility.HasExplicitSize(descriptor))
+                return Mathf.Max(1, descriptor.Height);
 
-            if (cameraDimension > 0)
-                return cameraDimension;
-
-            return Mathf.Max(1, screenDimension);
+            return CameraDimensionUtility.ResolveCameraDimension(
+                actualCameraDimension,
+                cameraDimension,
+                screenDimension);
         }
 
         private static void SetDepthTexture(MaterialPropertyBlock properties, Texture texture)

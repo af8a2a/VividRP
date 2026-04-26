@@ -270,7 +270,12 @@ namespace VividRP.Runtime
             var skySettings = VividVolumeManagerUtility.GetSkySettingsVolume();
             var planet = SkyPlanet.Resolve(volume, skySettings, worldCameraPosition);
             var planetUpAltitude = planet.GetPlanetUpAltitude(worldCameraPosition);
-            var lightExposure = ResolveCelestialLightExposure(context);
+            PhysicallyBasedSkyCelestialBodyUtility.BuildCelestialBodyData(
+                context,
+                null,
+                out var celestialLightCount,
+                out var celestialBodyCount,
+                out var celestialLightExposure);
             var pbrSkyCameraPosition = planet.GetCameraPositionPS(worldCameraPosition);
 
             parameters.pbrSkyCameraPositionPS = new Vector4(
@@ -312,11 +317,11 @@ namespace VividRP.Runtime
             parameters.alphaMultiplier = volume.alphaMultiplier.value;
             parameters.horizonZenithShiftPower = exponentialInterpolation.x;
             parameters.horizonZenithShiftScale = exponentialInterpolation.y;
-            parameters.celestialLightCount = ResolveCelestialLightCount(context);
-            parameters.celestialBodyCount = PhysicallyBasedSkyCelestialBodyUtility.ResolveCelestialBodyCount(context);
+            parameters.celestialLightCount = celestialLightCount;
+            parameters.celestialBodyCount = celestialBodyCount;
             parameters.atmosphericDepth = atmosphericDepth;
             parameters.rcpAtmosphericDepth = 1.0f / atmosphericDepth;
-            parameters.celestialLightExposure = lightExposure;
+            parameters.celestialLightExposure = Mathf.Max(celestialLightExposure, 1.0f);
             parameters.volumetricCloudsBottomAltitude = 0.0f;
             parameters.renderSunDisk = volume.renderSunDisk.value ? 1 : 0;
             parameters.renderingSpace = planet.renderingSpace == RenderingSpace.World ? 1 : 0;
@@ -374,15 +379,6 @@ namespace VividRP.Runtime
             return new Vector2(x, y);
         }
 
-        private static int ResolveCelestialLightCount(in SkyRendererContext context)
-        {
-            return PhysicallyBasedSkyCelestialBodyUtility.ResolveCelestialLightCount(context);
-        }
-
-        private static float ResolveCelestialLightExposure(in SkyRendererContext context)
-        {
-            return Mathf.Max(PhysicallyBasedSkyCelestialBodyUtility.ResolveCelestialLightExposure(context), 1.0f);
-        }
     }
 
     internal static class PhysicallyBasedSkyComputeParameterBinder

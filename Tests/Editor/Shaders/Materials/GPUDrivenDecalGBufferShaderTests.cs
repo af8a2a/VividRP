@@ -66,11 +66,25 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SharedDecalGBufferHlsl_UsesBaseColorAlphaAsOpacityMask()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "GPUDrivenDecalGBuffer.hlsl"));
+
+            Assert.That(source, Does.Contain("struct VividDecalBaseColorSample"));
+            Assert.That(source, Does.Contain("result.color = decal.baseColor.rgb * textureSample.rgb;"));
+            Assert.That(source, Does.Contain("result.opacity = saturate(decal.baseColor.a * textureSample.a);"));
+            Assert.That(source, Does.Contain("float decalOpacity = volumeFade * baseColor.opacity;"));
+            Assert.That(source, Does.Contain("surfaceData.baseColor = lerp(surfaceData.baseColor, baseColor.color, decalOpacity);"));
+            Assert.That(source, Does.Contain("if (decalOpacity > 0.0 && decal.normalTextureIndex != VIVID_DECAL_INVALID_TEXTURE_INDEX)"));
+            Assert.That(source, Does.Contain("decalOpacity));"));
+        }
+
+        [Test]
         public void SharedDecalGBufferHlsl_UsesHdrpProjectedPlaneAndExplicitGradients()
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "GPUDrivenDecalGBuffer.hlsl"));
             var fadeStart = source.IndexOf("float ComputeVividDecalVolumeFade", StringComparison.Ordinal);
-            var nextFunctionStart = source.IndexOf("float4 SampleVividDecalBaseColor", StringComparison.Ordinal);
+            var nextFunctionStart = source.IndexOf("VividDecalBaseColorSample SampleVividDecalBaseColor", StringComparison.Ordinal);
 
             Assert.That(fadeStart, Is.GreaterThanOrEqualTo(0));
             Assert.That(nextFunctionStart, Is.GreaterThan(fadeStart));

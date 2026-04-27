@@ -25,6 +25,12 @@ struct VividDecalSampleContext
     float2 uvDdy;
 };
 
+struct VividDecalBaseColorSample
+{
+    float3 color;
+    float opacity;
+};
+
 float3 UnpackVividDecalNormal(float4 packedNormal)
 {
     float3 normalTS;
@@ -68,18 +74,25 @@ float ComputeVividDecalVolumeFade(VividDecalClusterData decal, float3 positionDS
     return blendDistance > 1e-5 ? saturate(edgeFade / blendDistance) : step(0.0, edgeFade);
 }
 
-float4 SampleVividDecalBaseColor(VividDecalClusterData decal, float2 uv, float2 uvDdx, float2 uvDdy)
+VividDecalBaseColorSample SampleVividDecalBaseColor(
+    VividDecalClusterData decal,
+    float2 uv,
+    float2 uvDdx,
+    float2 uvDdy)
 {
-    float4 baseColor = decal.baseColor;
+    VividDecalBaseColorSample result;
+    float4 textureSample = 1.0.xxxx;
 
     UNITY_BRANCH
     if (decal.baseColorTextureIndex != VIVID_DECAL_INVALID_TEXTURE_INDEX)
     {
         Texture2D baseColorTexture = GetBindlessTexture2D(NonUniformResourceIndex(decal.baseColorTextureIndex));
-        baseColor *= SAMPLE_TEXTURE2D_GRAD(baseColorTexture, sampler_LinearClamp, uv, uvDdx, uvDdy);
+        textureSample = SAMPLE_TEXTURE2D_GRAD(baseColorTexture, sampler_LinearClamp, uv, uvDdx, uvDdy);
     }
 
-    return baseColor;
+    result.color = decal.baseColor.rgb * textureSample.rgb;
+    result.opacity = saturate(decal.baseColor.a * textureSample.a);
+    return result;
 }
 
 float3x3 CreateVividDecalTangentToWorld(VividDecalClusterData decal)
@@ -118,17 +131,21 @@ void ApplyVividGPUDrivenDecalsToGBufferSurfaceData(
             continue;
         
         float volumeFade = ComputeVividDecalVolumeFade(decal, sampleContext.positionDS);
-        float4 baseColor = SampleVividDecalBaseColor(decal, sampleContext.uv, sampleContext.uvDdx, sampleContext.uvDdy);
-        float blend = volumeFade * saturate(baseColor.a);
+        VividDecalBaseColorSample baseColor = SampleVividDecalBaseColor(
+            decal,
+            sampleContext.uv,
+            sampleContext.uvDdx,
+            sampleContext.uvDdy);
+        float decalOpacity = volumeFade * baseColor.opacity;
         
-        surfaceData.baseColor = lerp(surfaceData.baseColor, baseColor.rgb, blend);
+        surfaceData.baseColor = lerp(surfaceData.baseColor, baseColor.color, decalOpacity);
         
         UNITY_BRANCH
-        if (blend > 0.0 && decal.normalTextureIndex != VIVID_DECAL_INVALID_TEXTURE_INDEX)
+        if (decalOpacity > 0.0 && decal.normalTextureIndex != VIVID_DECAL_INVALID_TEXTURE_INDEX)
             surfaceData.normalWS = normalize(lerp(
                 surfaceData.normalWS,
                 SampleVividDecalNormalWS(decal, sampleContext.uv, sampleContext.uvDdx, sampleContext.uvDdy),
-                blend));
+                decalOpacity));
     }
 }
 

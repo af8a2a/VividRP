@@ -11,7 +11,11 @@ struct VividDecalClusterData
     float4 baseColor;
     uint baseColorTextureIndex;
     uint normalTextureIndex;
+    uint metallicTextureIndex;
+    uint roughnessTextureIndex;
     float blendDistance;
+    float metallic;
+    float roughness;
     float padding;
 };
 
@@ -111,6 +115,34 @@ float3 SampleVividDecalNormalWS(VividDecalClusterData decal, float2 uv, float2 u
     return normalize(mul(normalTS, CreateVividDecalTangentToWorld(decal)));
 }
 
+float SampleVividDecalMetallic(VividDecalClusterData decal, float2 uv, float2 uvDdx, float2 uvDdy)
+{
+    float metallic = saturate(decal.metallic);
+
+    UNITY_BRANCH
+    if (decal.metallicTextureIndex != VIVID_DECAL_INVALID_TEXTURE_INDEX)
+    {
+        Texture2D metallicTexture = GetBindlessTexture2D(NonUniformResourceIndex(decal.metallicTextureIndex));
+        metallic = saturate(SAMPLE_TEXTURE2D_GRAD(metallicTexture, sampler_LinearClamp, uv, uvDdx, uvDdy).r);
+    }
+
+    return metallic;
+}
+
+float SampleVividDecalPerceptualRoughness(VividDecalClusterData decal, float2 uv, float2 uvDdx, float2 uvDdy)
+{
+    float perceptualRoughness = saturate(decal.roughness);
+
+    UNITY_BRANCH
+    if (decal.roughnessTextureIndex != VIVID_DECAL_INVALID_TEXTURE_INDEX)
+    {
+        Texture2D roughnessTexture = GetBindlessTexture2D(NonUniformResourceIndex(decal.roughnessTextureIndex));
+        perceptualRoughness = saturate(SAMPLE_TEXTURE2D_GRAD(roughnessTexture, sampler_LinearClamp, uv, uvDdx, uvDdy).r);
+    }
+
+    return perceptualRoughness;
+}
+
 void ApplyVividGPUDrivenDecalsToGBufferSurfaceData(
     inout VividGBufferSurfaceData surfaceData,
     float3 positionWS,
@@ -137,11 +169,22 @@ void ApplyVividGPUDrivenDecalsToGBufferSurfaceData(
             sampleContext.uvDdx,
             sampleContext.uvDdy);
         float decalOpacity = volumeFade * baseColor.opacity;
+
+        UNITY_BRANCH
+        if (decalOpacity <= 0.0)
+            continue;
+
+        float surfacePerceptualRoughness = sqrt(saturate(surfaceData.linearRoughness));
+        float decalMetallic = SampleVividDecalMetallic(decal, sampleContext.uv, sampleContext.uvDdx, sampleContext.uvDdy);
+        float decalPerceptualRoughness = SampleVividDecalPerceptualRoughness(decal, sampleContext.uv, sampleContext.uvDdx, sampleContext.uvDdy);
+        float blendedPerceptualRoughness = lerp(surfacePerceptualRoughness, decalPerceptualRoughness, decalOpacity);
         
         surfaceData.baseColor = lerp(surfaceData.baseColor, baseColor.color, decalOpacity);
+        surfaceData.metallic = lerp(surfaceData.metallic, decalMetallic, decalOpacity);
+        surfaceData.linearRoughness = blendedPerceptualRoughness * blendedPerceptualRoughness;
         
         UNITY_BRANCH
-        if (decalOpacity > 0.0 && decal.normalTextureIndex != VIVID_DECAL_INVALID_TEXTURE_INDEX)
+        if (decal.normalTextureIndex != VIVID_DECAL_INVALID_TEXTURE_INDEX)
             surfaceData.normalWS = normalize(lerp(
                 surfaceData.normalWS,
                 SampleVividDecalNormalWS(decal, sampleContext.uv, sampleContext.uvDdx, sampleContext.uvDdy),

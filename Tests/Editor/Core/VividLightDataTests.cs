@@ -13,7 +13,7 @@ namespace VividRP.Editor.Tests
             typeof(VividLightData).GetMethod("CreateAreaLightData", BindingFlags.Static | BindingFlags.NonPublic);
 
         [Test]
-        public void DecalClusterData_UsesUnsignedBindlessTextureIndices()
+        public void DecalClusterData_UsesUnsignedBindlessTextureIndicesAndScalarMaterialInputs()
         {
             Assert.That(
                 typeof(VividLightData.DecalClusterData).GetField(nameof(VividLightData.DecalClusterData.baseColorTextureIndex))?.FieldType,
@@ -21,6 +21,19 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 typeof(VividLightData.DecalClusterData).GetField(nameof(VividLightData.DecalClusterData.normalTextureIndex))?.FieldType,
                 Is.EqualTo(typeof(uint)));
+            Assert.That(
+                typeof(VividLightData.DecalClusterData).GetField(nameof(VividLightData.DecalClusterData.metallicTextureIndex))?.FieldType,
+                Is.EqualTo(typeof(uint)));
+            Assert.That(
+                typeof(VividLightData.DecalClusterData).GetField(nameof(VividLightData.DecalClusterData.roughnessTextureIndex))?.FieldType,
+                Is.EqualTo(typeof(uint)));
+            Assert.That(
+                typeof(VividLightData.DecalClusterData).GetField(nameof(VividLightData.DecalClusterData.metallic))?.FieldType,
+                Is.EqualTo(typeof(float)));
+            Assert.That(
+                typeof(VividLightData.DecalClusterData).GetField(nameof(VividLightData.DecalClusterData.roughness))?.FieldType,
+                Is.EqualTo(typeof(float)));
+            Assert.That(VividLightData.DecalClusterData.Stride % 16, Is.EqualTo(0));
         }
 
         [Test]

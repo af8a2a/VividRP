@@ -149,8 +149,12 @@ namespace VividRP.Runtime.SubSystem.Decal
                     worldToDecal = CreateWorldToDecalMatrix(wd),
                     baseColorTexture = projector.BaseColorTexture,
                     normalTexture = projector.NormalTexture,
+                    metallicTexture = projector.MetallicTexture,
+                    roughnessTexture = projector.RoughnessTexture,
                     baseColor = projector.BaseColor,
                     blendDistance = NormalizeBlendDistance(projector.BlendDistance, wd.boxSize),
+                    metallic = projector.Metallic,
+                    roughness = projector.Roughness,
                 });
             }
 
@@ -205,7 +209,17 @@ namespace VividRP.Runtime.SubSystem.Decal
                     decal.normalTexture,
                     gpuDrivenDecalEnabled,
                     bindlessTextureContainer),
+                metallicTextureIndex = ResolveBindlessTextureIndex(
+                    decal.metallicTexture,
+                    gpuDrivenDecalEnabled,
+                    bindlessTextureContainer),
+                roughnessTextureIndex = ResolveBindlessTextureIndex(
+                    decal.roughnessTexture,
+                    gpuDrivenDecalEnabled,
+                    bindlessTextureContainer),
                 blendDistance = decal.blendDistance,
+                metallic = Mathf.Clamp01(decal.metallic),
+                roughness = Mathf.Clamp01(decal.roughness),
                 padding = 0f,
             };
         }
@@ -254,7 +268,7 @@ namespace VividRP.Runtime.SubSystem.Decal
             bool gpuDrivenDecalEnabled,
             BindlessTextureContainer bindlessTextureContainer)
         {
-            if (!gpuDrivenDecalEnabled || bindlessTextureContainer == null)
+            if (texture == null || !gpuDrivenDecalEnabled || bindlessTextureContainer == null)
                 return BindlessTextureContainer.InvalidTextureIndex;
 
             return bindlessTextureContainer.TryGetOrCreateIndex(texture, out var textureIndex)

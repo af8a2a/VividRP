@@ -47,6 +47,8 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 baseColorTextureIndex = uint.MaxValue,
                 normalTextureIndex = uint.MaxValue,
+                metallicTextureIndex = uint.MaxValue,
+                roughnessTextureIndex = uint.MaxValue,
             }
         };
         private static readonly uint[] s_DefaultUintBufferData = { 0u };

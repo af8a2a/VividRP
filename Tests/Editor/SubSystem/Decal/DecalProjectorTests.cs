@@ -65,12 +65,14 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void CreateDecalClusterData_RegistersBaseAndNormalTextures_WhenBindlessIsAvailable()
+        public void CreateDecalClusterData_RegistersMaterialTextures_WhenBindlessIsAvailable()
         {
             var allocator = new FakeBindlessTextureDescriptorAllocator(8);
             using var container = new BindlessTextureContainer(allocator);
             var baseColorTexture = new Texture2D(1, 1);
             var normalTexture = new Texture2D(1, 1);
+            var metallicTexture = new Texture2D(1, 1);
+            var roughnessTexture = new Texture2D(1, 1);
 
             try
             {
@@ -79,23 +81,35 @@ namespace VividRP.Editor.Tests
                     worldToDecal = Matrix4x4.identity,
                     baseColorTexture = baseColorTexture,
                     normalTexture = normalTexture,
+                    metallicTexture = metallicTexture,
+                    roughnessTexture = roughnessTexture,
                     baseColor = Color.white,
                     blendDistance = 0.25f,
+                    metallic = 0.75f,
+                    roughness = 0.35f,
                 };
 
                 var clusterData = DecalSystem.CreateDecalClusterData(decal, true, container);
 
                 Assert.That(clusterData.baseColorTextureIndex, Is.EqualTo(7u));
                 Assert.That(clusterData.normalTextureIndex, Is.EqualTo(6u));
-                Assert.That(allocator.DescriptorWrites, Has.Count.EqualTo(2));
+                Assert.That(clusterData.metallicTextureIndex, Is.EqualTo(5u));
+                Assert.That(clusterData.roughnessTextureIndex, Is.EqualTo(4u));
+                Assert.That(allocator.DescriptorWrites, Has.Count.EqualTo(4));
                 Assert.That(allocator.DescriptorWrites[0].Texture, Is.SameAs(baseColorTexture));
                 Assert.That(allocator.DescriptorWrites[1].Texture, Is.SameAs(normalTexture));
+                Assert.That(allocator.DescriptorWrites[2].Texture, Is.SameAs(metallicTexture));
+                Assert.That(allocator.DescriptorWrites[3].Texture, Is.SameAs(roughnessTexture));
                 Assert.That(clusterData.blendDistance, Is.EqualTo(0.25f));
+                Assert.That(clusterData.metallic, Is.EqualTo(0.75f));
+                Assert.That(clusterData.roughness, Is.EqualTo(0.35f));
             }
             finally
             {
                 Object.DestroyImmediate(baseColorTexture);
                 Object.DestroyImmediate(normalTexture);
+                Object.DestroyImmediate(metallicTexture);
+                Object.DestroyImmediate(roughnessTexture);
             }
         }
 
@@ -109,6 +123,8 @@ namespace VividRP.Editor.Tests
             using var container = new BindlessTextureContainer(allocator);
             var baseColorTexture = new Texture2D(1, 1);
             var normalTexture = new Texture2D(1, 1);
+            var metallicTexture = new Texture2D(1, 1);
+            var roughnessTexture = new Texture2D(1, 1);
 
             try
             {
@@ -117,20 +133,75 @@ namespace VividRP.Editor.Tests
                     worldToDecal = Matrix4x4.identity,
                     baseColorTexture = baseColorTexture,
                     normalTexture = normalTexture,
+                    metallicTexture = metallicTexture,
+                    roughnessTexture = roughnessTexture,
                     baseColor = Color.white,
                     blendDistance = 0.25f,
+                    metallic = 0.75f,
+                    roughness = 0.35f,
                 };
 
                 var clusterData = DecalSystem.CreateDecalClusterData(decal, true, container);
 
                 Assert.That(clusterData.baseColorTextureIndex, Is.EqualTo(BindlessTextureContainer.InvalidTextureIndex));
                 Assert.That(clusterData.normalTextureIndex, Is.EqualTo(BindlessTextureContainer.InvalidTextureIndex));
+                Assert.That(clusterData.metallicTextureIndex, Is.EqualTo(BindlessTextureContainer.InvalidTextureIndex));
+                Assert.That(clusterData.roughnessTextureIndex, Is.EqualTo(BindlessTextureContainer.InvalidTextureIndex));
+                Assert.That(clusterData.metallic, Is.EqualTo(0.75f));
+                Assert.That(clusterData.roughness, Is.EqualTo(0.35f));
                 Assert.That(allocator.DescriptorWrites, Is.Empty);
             }
             finally
             {
                 Object.DestroyImmediate(baseColorTexture);
                 Object.DestroyImmediate(normalTexture);
+                Object.DestroyImmediate(metallicTexture);
+                Object.DestroyImmediate(roughnessTexture);
+            }
+        }
+
+        [Test]
+        public void CreateDecalClusterData_WritesInvalidTextureIndices_WhenTexturesAreMissing()
+        {
+            var allocator = new FakeBindlessTextureDescriptorAllocator(8);
+            using var container = new BindlessTextureContainer(allocator);
+
+            var decal = new DecalData
+            {
+                worldToDecal = Matrix4x4.identity,
+                baseColor = Color.white,
+                blendDistance = 0.25f,
+                metallic = 0.75f,
+                roughness = 0.35f,
+            };
+
+            var clusterData = DecalSystem.CreateDecalClusterData(decal, true, container);
+
+            Assert.That(clusterData.baseColorTextureIndex, Is.EqualTo(BindlessTextureContainer.InvalidTextureIndex));
+            Assert.That(clusterData.normalTextureIndex, Is.EqualTo(BindlessTextureContainer.InvalidTextureIndex));
+            Assert.That(clusterData.metallicTextureIndex, Is.EqualTo(BindlessTextureContainer.InvalidTextureIndex));
+            Assert.That(clusterData.roughnessTextureIndex, Is.EqualTo(BindlessTextureContainer.InvalidTextureIndex));
+            Assert.That(allocator.DescriptorWrites, Is.Empty);
+        }
+
+        [Test]
+        public void DecalProjector_MetallicAndRoughnessPropertiesClampToUnitRange()
+        {
+            var owner = new GameObject("Decal Material Scalar Test");
+
+            try
+            {
+                var projector = owner.AddComponent<DecalProjector>();
+
+                projector.Metallic = 2.0f;
+                projector.Roughness = -1.0f;
+
+                Assert.That(projector.Metallic, Is.EqualTo(1.0f));
+                Assert.That(projector.Roughness, Is.EqualTo(0.0f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(owner);
             }
         }
 

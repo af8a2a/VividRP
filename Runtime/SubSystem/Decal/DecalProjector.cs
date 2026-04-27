@@ -12,7 +12,11 @@ namespace VividRP.Runtime.SubSystem.Decal
         [Header("Decal Material")]
         [SerializeField] private Texture2D m_BaseColorTexture;
         [SerializeField] private Texture2D m_NormalTexture;
+        [SerializeField] private Texture2D m_MetallicTexture;
+        [SerializeField] private Texture2D m_RoughnessTexture;
         [SerializeField] private Color m_BaseColor = Color.white;
+        [SerializeField] [Range(0.0f, 1.0f)] private float m_Metallic;
+        [SerializeField] [Range(0.0f, 1.0f)] private float m_Roughness = 0.5f;
 
         public Texture2D BaseColorTexture
         {
@@ -26,10 +30,34 @@ namespace VividRP.Runtime.SubSystem.Decal
             set => m_NormalTexture = value;
         }
 
+        public Texture2D MetallicTexture
+        {
+            get => m_MetallicTexture;
+            set => m_MetallicTexture = value;
+        }
+
+        public Texture2D RoughnessTexture
+        {
+            get => m_RoughnessTexture;
+            set => m_RoughnessTexture = value;
+        }
+
         public Color BaseColor
         {
             get => m_BaseColor;
             set => m_BaseColor = value;
+        }
+
+        public float Metallic
+        {
+            get => m_Metallic;
+            set => m_Metallic = Mathf.Clamp01(value);
+        }
+
+        public float Roughness
+        {
+            get => m_Roughness;
+            set => m_Roughness = Mathf.Clamp01(value);
         }
 
         public float BlendDistance => m_BlendDistance;

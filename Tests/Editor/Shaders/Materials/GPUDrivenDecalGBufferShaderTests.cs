@@ -54,15 +54,36 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("StructuredBuffer<VividDecalClusterData> _DecalData;"));
             Assert.That(source, Does.Contain("uint baseColorTextureIndex;"));
             Assert.That(source, Does.Contain("uint normalTextureIndex;"));
+            Assert.That(source, Does.Contain("uint metallicTextureIndex;"));
+            Assert.That(source, Does.Contain("uint roughnessTextureIndex;"));
+            Assert.That(source, Does.Contain("float metallic;"));
+            Assert.That(source, Does.Contain("float roughness;"));
             Assert.That(clusteredLightingSource, Does.Contain("_ClusteredDecalGridEnabled"));
             Assert.That(source, Does.Contain("VividClusteredLighting::LoadDecalCell"));
             Assert.That(source, Does.Contain("VividClusteredLighting::LoadLightIndex"));
             Assert.That(source, Does.Contain("GetBindlessTexture2D(NonUniformResourceIndex(decal.baseColorTextureIndex))"));
             Assert.That(source, Does.Contain("GetBindlessTexture2D(NonUniformResourceIndex(decal.normalTextureIndex))"));
+            Assert.That(source, Does.Contain("GetBindlessTexture2D(NonUniformResourceIndex(decal.metallicTextureIndex))"));
+            Assert.That(source, Does.Contain("GetBindlessTexture2D(NonUniformResourceIndex(decal.roughnessTextureIndex))"));
             Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D_GRAD(baseColorTexture, sampler_LinearClamp, uv, uvDdx, uvDdy)"));
             Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D_GRAD(normalTexture, sampler_LinearClamp, uv, uvDdx, uvDdy)"));
+            Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D_GRAD(metallicTexture, sampler_LinearClamp, uv, uvDdx, uvDdy).r"));
+            Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D_GRAD(roughnessTexture, sampler_LinearClamp, uv, uvDdx, uvDdy).r"));
             Assert.That(source, Does.Contain("surfaceData.baseColor = lerp"));
             Assert.That(source, Does.Contain("surfaceData.normalWS = normalize(lerp"));
+        }
+
+        [Test]
+        public void SharedDecalGBufferHlsl_BlendsMetallicAndRoughnessByDecalOpacity()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "GPUDrivenDecalGBuffer.hlsl"));
+
+            Assert.That(source, Does.Contain("float surfacePerceptualRoughness = sqrt(saturate(surfaceData.linearRoughness));"));
+            Assert.That(source, Does.Contain("float decalMetallic = SampleVividDecalMetallic(decal, sampleContext.uv, sampleContext.uvDdx, sampleContext.uvDdy);"));
+            Assert.That(source, Does.Contain("float decalPerceptualRoughness = SampleVividDecalPerceptualRoughness(decal, sampleContext.uv, sampleContext.uvDdx, sampleContext.uvDdy);"));
+            Assert.That(source, Does.Contain("float blendedPerceptualRoughness = lerp(surfacePerceptualRoughness, decalPerceptualRoughness, decalOpacity);"));
+            Assert.That(source, Does.Contain("surfaceData.metallic = lerp(surfaceData.metallic, decalMetallic, decalOpacity);"));
+            Assert.That(source, Does.Contain("surfaceData.linearRoughness = blendedPerceptualRoughness * blendedPerceptualRoughness;"));
         }
 
         [Test]
@@ -74,8 +95,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("result.color = decal.baseColor.rgb * textureSample.rgb;"));
             Assert.That(source, Does.Contain("result.opacity = saturate(decal.baseColor.a * textureSample.a);"));
             Assert.That(source, Does.Contain("float decalOpacity = volumeFade * baseColor.opacity;"));
+            Assert.That(source, Does.Contain("if (decalOpacity <= 0.0)"));
             Assert.That(source, Does.Contain("surfaceData.baseColor = lerp(surfaceData.baseColor, baseColor.color, decalOpacity);"));
-            Assert.That(source, Does.Contain("if (decalOpacity > 0.0 && decal.normalTextureIndex != VIVID_DECAL_INVALID_TEXTURE_INDEX)"));
+            Assert.That(source, Does.Contain("if (decal.normalTextureIndex != VIVID_DECAL_INVALID_TEXTURE_INDEX)"));
             Assert.That(source, Does.Contain("decalOpacity));"));
         }
 

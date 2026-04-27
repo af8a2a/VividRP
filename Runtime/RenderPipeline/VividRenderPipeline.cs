@@ -244,6 +244,7 @@ namespace VividRP.Runtime
             VividVolumeManagerUtility.Deinitialize();
             DecalSystem.Deinitialize();
             VividGPUDrivenSystem.Deinitialize();
+            VividLocalVolumetricFogManager.Dispose();
             DLSSExtension.Shutdown();
             m_DebugDisplaySettingsUI?.UnregisterDebug();
             m_DebugDisplaySettingsUI = null;

@@ -140,4 +140,13 @@ namespace VividRP.Editor.RenderGraph.Generated
     [Serializable]
     internal sealed class VisibilityBufferResolvePass : RenderPassNodeData { }
 
+    [Serializable]
+    internal sealed class VolumetricDensityPass : RenderPassNodeData { }
+
+    [Serializable]
+    internal sealed class VolumetricFogCompositePass : RenderPassNodeData { }
+
+    [Serializable]
+    internal sealed class VolumetricLightingPass : RenderPassNodeData { }
+
 }

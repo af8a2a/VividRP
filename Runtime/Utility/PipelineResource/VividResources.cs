@@ -71,6 +71,15 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/AtmosphericScattering/OpaqueAtmosphericScattering")]
         public Shader AerialPerspectiveShader;
 
+        [ResourcePath("Shaders/Core/Private/Volumetric/VolumetricDensity.compute")]
+        public ComputeShader VolumetricDensityCompute;
+
+        [ResourcePath("Shaders/Core/Private/Volumetric/VolumetricLighting.compute")]
+        public ComputeShader VolumetricLightingCompute;
+
+        [ResourcePath("Shaders/Core/Private/Volumetric/VolumetricFogComposite")]
+        public Shader VolumetricFogCompositeShader;
+
         [ResourcePath("Shaders/Core/Private/Sky/AmbientProbeConvolution.compute")]
         public ComputeShader SkyAmbientProbeConvolutionCompute;
 

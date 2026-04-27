@@ -1,0 +1,179 @@
+#pragma use_dxc
+#pragma kernel ClearVBufferLighting
+#pragma kernel VolumetricLighting
+#pragma kernel GaussianFilterVBufferLighting
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
+
+Texture2D<float> _CameraDepth;
+Texture2D<float> _DirectionalShadowTexture;
+Texture3D<float4> _VBufferDensity;
+Texture3D<float4> _VBufferLightingInput;
+RWTexture3D<float4> _VBufferLighting;
+RWTexture3D<float4> _VBufferLightingOutput;
+
+float HenyeyGreensteinPhase(float cosTheta, float anisotropy)
+{
+    float g = clamp(anisotropy, -0.95, 0.95);
+    float g2 = g * g;
+    float denominator = max(1.0 + g2 - 2.0 * g * cosTheta, 1e-4);
+    return (1.0 - g2) / (4.0 * PI * denominator * sqrt(denominator));
+}
+
+float SampleDirectionalShadow(uint2 vBufferPixel, uint lightIndex, DirectionalLightData directionalLight)
+{
+    if ((int)lightIndex != _MainDirectionalLightIndex)
+        return 1.0;
+
+    float2 cameraPixel = (float2(vBufferPixel) + 0.5) * _VBufferCameraToVBufferScale;
+    float2 cameraDimensions = _VBufferViewportSize.xy * _VBufferCameraToVBufferScale;
+    float2 uv = cameraPixel / max(cameraDimensions, float2(1.0, 1.0));
+    float shadow = _DirectionalShadowTexture.SampleLevel(sampler_PointClamp, saturate(uv), 0).x;
+    return lerp(1.0, saturate(shadow), saturate(directionalLight.shadowStrength));
+}
+
+float3 EvaluateDirectionalLighting(uint3 voxelCoord, float3 positionWS)
+{
+    float3 lighting = 0.0;
+    float3 viewDirectionWS = SafeNormalize(_WorldSpaceCameraPos - positionWS);
+    uint directionalCount = min(_DirectionalLightCount, 8u);
+
+    [loop]
+    for (uint lightIndex = 0; lightIndex < directionalCount; lightIndex++)
+    {
+        DirectionalLightData light = GetDirectionalLight((int)lightIndex);
+        float3 lightDirectionWS = SafeNormalize(-light.directionWS);
+        float phase = HenyeyGreensteinPhase(dot(lightDirectionWS, viewDirectionWS), _VBufferFogAnisotropy);
+        float shadow = SampleDirectionalShadow(voxelCoord.xy, lightIndex, light);
+        lighting += max(light.color, 0.0) * phase * shadow;
+    }
+
+    return lighting;
+}
+
+float3 EvaluateClusteredPunctualLighting(uint2 vBufferPixel, float3 positionWS)
+{
+    if (_VBufferFogDirectionalOnly > 0.5)
+        return 0.0;
+
+    float2 cameraPixel = (float2(vBufferPixel) + 0.5) * _VBufferCameraToVBufferScale;
+    VividLightingLoopContext lightLoop = VividLightingLoop::Create((uint2)cameraPixel, positionWS);
+    uint lightCount = min(VividLightingLoop::GetPunctualLightCount(lightLoop), 16u);
+    float3 lighting = 0.0;
+
+    [loop]
+    for (uint localLightIndex = 0; localLightIndex < lightCount; localLightIndex++)
+    {
+        PunctualLightData light = VividLightingLoop::LoadPunctualLight(lightLoop, localLightIndex);
+        float3 lightVector = light.positionWS - positionWS;
+        float distanceSq = max(dot(lightVector, lightVector), 1e-4);
+        float distanceToLight = sqrt(distanceSq);
+        float rangeAttenuation = saturate(1.0 - distanceToLight / max(light.range, 1e-4));
+        rangeAttenuation *= rangeAttenuation;
+        lighting += max(light.color, 0.0) * rangeAttenuation / max(distanceSq, 1.0);
+    }
+
+    return lighting;
+}
+
+float3 EvaluateClusteredAreaLighting(uint2 vBufferPixel, float3 positionWS)
+{
+    if (_VBufferFogDirectionalOnly > 0.5)
+        return 0.0;
+
+    float2 cameraPixel = (float2(vBufferPixel) + 0.5) * _VBufferCameraToVBufferScale;
+    VividLightingLoopContext lightLoop = VividLightingLoop::Create((uint2)cameraPixel, positionWS);
+    uint lightCount = min(VividLightingLoop::GetAreaLightCount(lightLoop), 8u);
+    float3 lighting = 0.0;
+
+    [loop]
+    for (uint localLightIndex = 0; localLightIndex < lightCount; localLightIndex++)
+    {
+        AreaLightData light = VividLightingLoop::LoadAreaLight(lightLoop, localLightIndex);
+        float3 lightVector = light.positionWS - positionWS;
+        float distanceSq = max(dot(lightVector, lightVector), 1e-4);
+        float distanceToLight = sqrt(distanceSq);
+        float rangeAttenuation = saturate(1.0 - distanceToLight / max(light.range, 1e-4));
+        rangeAttenuation *= rangeAttenuation;
+        lighting += max(light.color, 0.0) * rangeAttenuation / max(distanceSq, 1.0);
+    }
+
+    return lighting;
+}
+
+float3 EvaluateAmbientLighting()
+{
+    return max(unity_AmbientSky.rgb, 0.0) * _VBufferGlobalProbeDimmer;
+}
+
+[numthreads(8, 8, 4)]
+void ClearVBufferLighting(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (!IsInsideVBuffer(dispatchThreadId))
+        return;
+
+    _VBufferLighting[dispatchThreadId] = float4(0.0, 0.0, 0.0, 1.0);
+}
+
+[numthreads(8, 8, 4)]
+void VolumetricLighting(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (!IsInsideVBuffer(dispatchThreadId))
+        return;
+
+    float4 density = _VBufferDensity.Load(int4(dispatchThreadId, 0));
+    float extinction = density.a;
+    if (extinction <= _VBufferDensityCutoff)
+    {
+        _VBufferLighting[dispatchThreadId] = float4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
+
+    float3 positionWS = GetVBufferVoxelWorldPosition(dispatchThreadId);
+    float3 lighting = EvaluateAmbientLighting();
+    lighting += EvaluateDirectionalLighting(dispatchThreadId, positionWS);
+    lighting += EvaluateClusteredPunctualLighting(dispatchThreadId.xy, positionWS);
+    lighting += EvaluateClusteredAreaLighting(dispatchThreadId.xy, positionWS);
+
+    float sliceLength = GetVBufferSliceLength();
+    float transmittance = exp(-extinction * sliceLength);
+    float3 singleScattering = density.rgb * lighting * (1.0 - transmittance) / max(extinction, 1e-4);
+    _VBufferLighting[dispatchThreadId] = float4(VividApplyPreExposure(max(singleScattering, 0.0)), saturate(transmittance));
+}
+
+float4 LoadLightingClamped(int3 coord)
+{
+    int3 maxCoord = int3((int)_VBufferWidth - 1, (int)_VBufferHeight - 1, (int)_VBufferSliceCount - 1);
+    return _VBufferLightingInput.Load(int4(clamp(coord, int3(0, 0, 0), maxCoord), 0));
+}
+
+[numthreads(8, 8, 4)]
+void GaussianFilterVBufferLighting(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (!IsInsideVBuffer(dispatchThreadId))
+        return;
+
+    int3 baseCoord = (int3)dispatchThreadId;
+    float4 total = 0.0;
+    float weightSum = 0.0;
+
+    [unroll]
+    for (int z = -1; z <= 1; z++)
+    {
+        [unroll]
+        for (int y = -1; y <= 1; y++)
+        {
+            [unroll]
+            for (int x = -1; x <= 1; x++)
+            {
+                float weight = (x == 0 ? 2.0 : 1.0) * (y == 0 ? 2.0 : 1.0) * (z == 0 ? 2.0 : 1.0);
+                total += LoadLightingClamped(baseCoord + int3(x, y, z)) * weight;
+                weightSum += weight;
+            }
+        }
+    }
+
+    _VBufferLightingOutput[dispatchThreadId] = total / max(weightSum, 1e-4);
+}

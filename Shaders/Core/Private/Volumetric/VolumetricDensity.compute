@@ -1,0 +1,161 @@
+#pragma use_dxc
+#pragma kernel ClearVBufferDensity
+#pragma kernel VoxelizeVBufferDensity
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
+
+Texture2D<float> _CameraDepth;
+RWTexture3D<float4> _VBufferDensity;
+Texture3D<float> _LocalVolumetricFogMask0;
+Texture3D<float> _LocalVolumetricFogMask1;
+Texture3D<float> _LocalVolumetricFogMask2;
+Texture3D<float> _LocalVolumetricFogMask3;
+Texture3D<float> _LocalVolumetricFogMask4;
+Texture3D<float> _LocalVolumetricFogMask5;
+Texture3D<float> _LocalVolumetricFogMask6;
+Texture3D<float> _LocalVolumetricFogMask7;
+
+struct VividLocalVolumetricFogEngineData
+{
+    float4 worldToLocalRow0;
+    float4 worldToLocalRow1;
+    float4 worldToLocalRow2;
+    float4 scatteringExtinction;
+    float4 positiveFade;
+    float4 negativeFade;
+    float4 distanceFade;
+    float4 parameters;
+    float4 textureScaleOffset0;
+    float4 textureScaleOffset1;
+};
+
+StructuredBuffer<VividLocalVolumetricFogEngineData> _LocalVolumetricFogs;
+
+float3 TransformWorldToLocal(VividLocalVolumetricFogEngineData fog, float3 positionWS)
+{
+    float4 position = float4(positionWS, 1.0);
+    return float3(
+        dot(fog.worldToLocalRow0, position),
+        dot(fog.worldToLocalRow1, position),
+        dot(fog.worldToLocalRow2, position));
+}
+
+float EvaluateBoundaryFade(float localCoord, float fadePositive, float fadeNegative)
+{
+    float distanceToEdge = localCoord >= 0.0 ? 0.5 - localCoord : localCoord + 0.5;
+    float fadeDistance = localCoord >= 0.0 ? fadePositive : fadeNegative;
+    return fadeDistance > 1e-5 ? saturate(distanceToEdge / fadeDistance) : 1.0;
+}
+
+float SampleLocalFogMask(VividLocalVolumetricFogEngineData fog, float3 localPosition)
+{
+    if (fog.parameters.w <= 0.5 || fog.textureScaleOffset0.w <= 0.5)
+        return 1.0;
+
+    uint maskSlot = (uint)max(fog.textureScaleOffset0.w - 1.0, 0.0);
+    float3 maskUv = saturate((localPosition + 0.5) * max(fog.textureScaleOffset0.xyz, 1e-4) + fog.textureScaleOffset1.xyz);
+
+    switch (maskSlot)
+    {
+        case 0u: return _LocalVolumetricFogMask0.SampleLevel(sampler_LinearClamp, maskUv, 0);
+        case 1u: return _LocalVolumetricFogMask1.SampleLevel(sampler_LinearClamp, maskUv, 0);
+        case 2u: return _LocalVolumetricFogMask2.SampleLevel(sampler_LinearClamp, maskUv, 0);
+        case 3u: return _LocalVolumetricFogMask3.SampleLevel(sampler_LinearClamp, maskUv, 0);
+        case 4u: return _LocalVolumetricFogMask4.SampleLevel(sampler_LinearClamp, maskUv, 0);
+        case 5u: return _LocalVolumetricFogMask5.SampleLevel(sampler_LinearClamp, maskUv, 0);
+        case 6u: return _LocalVolumetricFogMask6.SampleLevel(sampler_LinearClamp, maskUv, 0);
+        case 7u: return _LocalVolumetricFogMask7.SampleLevel(sampler_LinearClamp, maskUv, 0);
+        default: return 1.0;
+    }
+}
+
+float EvaluateLocalFogFalloff(VividLocalVolumetricFogEngineData fog, float3 localPosition, float3 positionWS)
+{
+    if (any(abs(localPosition) > 0.5))
+        return 0.0;
+
+    float fade = EvaluateBoundaryFade(localPosition.x, fog.positiveFade.x, fog.negativeFade.x);
+    fade *= EvaluateBoundaryFade(localPosition.y, fog.positiveFade.y, fog.negativeFade.y);
+    fade *= EvaluateBoundaryFade(localPosition.z, fog.positiveFade.z, fog.negativeFade.z);
+
+    if (fog.distanceFade.w > 0.5)
+    {
+        float distanceToCamera = distance(positionWS, _WorldSpaceCameraPos);
+        float distanceFade = saturate((fog.distanceFade.y - distanceToCamera) * fog.distanceFade.z);
+        fade *= distanceFade;
+    }
+
+    if (fog.parameters.z > 0.5)
+        fade = 1.0 - fade;
+
+    fade *= SampleLocalFogMask(fog, localPosition);
+
+    if (fog.textureScaleOffset1.w > 0.5)
+        fade *= fade;
+
+    return saturate(fade);
+}
+
+void AccumulateLocalFog(float3 positionWS, inout float3 scattering, inout float extinction)
+{
+    uint localFogCount = min((uint)_VBufferLocalFogCount, 64u);
+    [loop]
+    for (uint fogIndex = 0; fogIndex < localFogCount; fogIndex++)
+    {
+        VividLocalVolumetricFogEngineData fog = _LocalVolumetricFogs[fogIndex];
+        float3 localPosition = TransformWorldToLocal(fog, positionWS);
+        float falloff = EvaluateLocalFogFalloff(fog, localPosition, positionWS);
+        if (falloff <= 0.0)
+            continue;
+
+        float3 localScattering = fog.scatteringExtinction.rgb * falloff;
+        float localExtinction = fog.scatteringExtinction.a * falloff;
+        if (fog.parameters.y > 0.5)
+        {
+            scattering = lerp(scattering, localScattering, falloff);
+            extinction = lerp(extinction, localExtinction, falloff);
+        }
+        else
+        {
+            scattering += localScattering;
+            extinction += localExtinction;
+        }
+    }
+}
+
+float EvaluateHeightFog(float3 positionWS)
+{
+    float heightFade = saturate((_VBufferFogMaximumHeight - positionWS.y) * _VBufferFogInvHeightRange);
+    return heightFade;
+}
+
+[numthreads(8, 8, 4)]
+void ClearVBufferDensity(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (!IsInsideVBuffer(dispatchThreadId))
+        return;
+
+    _VBufferDensity[dispatchThreadId] = 0.0;
+}
+
+[numthreads(8, 8, 4)]
+void VoxelizeVBufferDensity(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (!IsInsideVBuffer(dispatchThreadId))
+        return;
+
+    float3 positionWS = GetVBufferVoxelWorldPosition(dispatchThreadId);
+    float heightFog = EvaluateHeightFog(positionWS);
+    float3 scattering = _VBufferFogScattering.rgb * heightFog;
+    float extinction = _VBufferFogScattering.a * heightFog;
+
+    AccumulateLocalFog(positionWS, scattering, extinction);
+
+    if (extinction <= _VBufferDensityCutoff)
+    {
+        _VBufferDensity[dispatchThreadId] = 0.0;
+        return;
+    }
+
+    _VBufferDensity[dispatchThreadId] = float4(max(scattering, 0.0), max(extinction, 0.0));
+}

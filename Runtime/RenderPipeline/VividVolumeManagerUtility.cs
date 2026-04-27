@@ -81,5 +81,10 @@ namespace VividRP.Runtime
         {
             return VolumeManager.instance.stack?.GetComponent<ProbeVolumesOptions>();
         }
+
+        internal static VividVolumetricFogVolume GetVolumetricFogVolume()
+        {
+            return VolumeManager.instance.stack?.GetComponent<VividVolumetricFogVolume>();
+        }
     }
 }

@@ -20,12 +20,12 @@ namespace VividRP.Runtime
     [VolumeComponentMenu("VividRP/Volumetric Fog")]
     public sealed class VividVolumetricFogVolume : VolumeComponent
     {
-        public const float MinScreenResolutionPercentage = 12.5f;
-        public const float DefaultScreenResolutionPercentage = 50.0f;
-        public const float MaxScreenResolutionPercentage = 100.0f;
-        public const int MinVolumeSliceCount = 8;
+        public const float MinScreenResolutionPercentage = 6.25f;
+        public const float DefaultScreenResolutionPercentage = 12.5f;
+        public const float MaxScreenResolutionPercentage = 50.0f;
+        public const int MinVolumeSliceCount = 1;
         public const int DefaultVolumeSliceCount = 64;
-        public const int MaxVolumeSliceCount = 256;
+        public const int MaxVolumeSliceCount = 512;
         public const float DefaultDepthExtent = 64.0f;
         public const float DefaultMeanFreePath = 100.0f;
 
@@ -63,10 +63,10 @@ namespace VividRP.Runtime
             new(VividVolumetricFogControlMode.Balance);
 
         [Tooltip("Normalized VBuffer cost target used by Balance mode.")]
-        public ClampedFloatParameter volumetricFogBudget = new(1.0f, 0.25f, 2.0f);
+        public ClampedFloatParameter volumetricFogBudget = new(0.25f, 0.0f, 1.0f);
 
         [Tooltip("Depth resolution multiplier used by Balance mode.")]
-        public ClampedFloatParameter resolutionDepthRatio = new(1.0f, 0.25f, 4.0f);
+        public ClampedFloatParameter resolutionDepthRatio = new(0.5f, 0.0f, 1.0f);
 
         [Tooltip("Manual VBuffer screen resolution percentage.")]
         public ClampedFloatParameter screenResolutionPercentage =

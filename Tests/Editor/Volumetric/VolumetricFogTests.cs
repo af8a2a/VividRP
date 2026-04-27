@@ -60,18 +60,40 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ComputeVBufferParameters_ClampsDimensionsAndEncodesDepth()
+        public void ResolveQuality_UsesHdrpBalanceFormula_WhenBalance()
+        {
+            var fog = ScriptableObject.CreateInstance<VividVolumetricFogVolume>();
+
+            try
+            {
+                fog.fogControlMode.value = VividVolumetricFogControlMode.Balance;
+                fog.volumetricFogBudget.value = 0.25f;
+                fog.resolutionDepthRatio.value = 0.5f;
+
+                VividVolumetricUtility.ResolveQuality(fog, out var screenPercentage, out var sliceCount);
+
+                Assert.That(screenPercentage, Is.EqualTo(11.71875f).Within(0.0001f));
+                Assert.That(sliceCount, Is.EqualTo(64));
+            }
+            finally
+            {
+                Object.DestroyImmediate(fog);
+            }
+        }
+
+        [Test]
+        public void ComputeVBufferParameters_UsesHdrpDefaultFractionAndEncodesDepth()
         {
             var parameters = VividVolumetricUtility.ComputeVBufferParameters(
                 1920,
                 1080,
-                50.0f,
+                VividVolumetricFogVolume.DefaultScreenResolutionPercentage,
                 64,
                 100.0f,
                 0.5f);
 
-            Assert.That(parameters.ViewportWidth, Is.EqualTo(960));
-            Assert.That(parameters.ViewportHeight, Is.EqualTo(540));
+            Assert.That(parameters.ViewportWidth, Is.EqualTo(240));
+            Assert.That(parameters.ViewportHeight, Is.EqualTo(135));
             Assert.That(parameters.SliceCount, Is.EqualTo(64));
             Assert.That(parameters.DepthDistributionPower, Is.EqualTo(1.5f).Within(0.0001f));
         }
@@ -252,8 +274,8 @@ namespace VividRP.Editor.Tests
             var vBuffer = resources.Textures.Single(entry => entry.Name == "VBufferDensity").Texture;
 
             Assert.That(vBuffer.desc.Dimension, Is.EqualTo(TextureDimension.Tex3D));
-            Assert.That(vBuffer.desc.Width, Is.EqualTo(640));
-            Assert.That(vBuffer.desc.Height, Is.EqualTo(360));
+            Assert.That(vBuffer.desc.Width, Is.EqualTo(160));
+            Assert.That(vBuffer.desc.Height, Is.EqualTo(90));
             Assert.That(vBuffer.desc.Slices, Is.EqualTo(VividVolumetricFogVolume.DefaultVolumeSliceCount));
             Assert.That(vBuffer.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
             Assert.That(vBuffer.desc.EnableRandomWrite, Is.True);
@@ -290,6 +312,10 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("#pragma kernel VolumetricLighting"));
             Assert.That(lightingSource, Does.Contain("#pragma kernel GaussianFilterVBufferLighting"));
             Assert.That(lightingSource, Does.Contain("LightingLoop.hlsl"));
+            Assert.That(lightingSource, Does.Contain("light.affectVolumetric"));
+            Assert.That(lightingSource, Does.Contain("light.volumetricDimmer"));
+            Assert.That(lightingSource, Does.Contain("light.volumetricFadeDistance"));
+            Assert.That(lightingSource, Does.Contain("directionalLight.volumetricShadowDimmer"));
             Assert.That(compositeSource, Does.Contain("Hidden/VividRP/VolumetricFogComposite"));
             Assert.That(compositeSource, Does.Contain("_VBufferLighting"));
         }

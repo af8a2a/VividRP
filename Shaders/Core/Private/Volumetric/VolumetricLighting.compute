@@ -31,7 +31,23 @@ float SampleDirectionalShadow(uint2 vBufferPixel, uint lightIndex, DirectionalLi
     float2 cameraDimensions = _VBufferViewportSize.xy * _VBufferCameraToVBufferScale;
     float2 uv = cameraPixel / max(cameraDimensions, float2(1.0, 1.0));
     float shadow = _DirectionalShadowTexture.SampleLevel(sampler_PointClamp, saturate(uv), 0).x;
-    return lerp(1.0, saturate(shadow), saturate(directionalLight.shadowStrength));
+    float volumetricShadowStrength = saturate(directionalLight.shadowStrength * directionalLight.volumetricShadowDimmer);
+    return lerp(1.0, saturate(shadow), volumetricShadowStrength);
+}
+
+bool LightAffectsVolumetrics(uint affectVolumetric, float volumetricDimmer)
+{
+    return affectVolumetric != 0u && volumetricDimmer > 0.0;
+}
+
+float GetVolumetricLightCameraDistance(float3 lightPositionWS)
+{
+    return distance(_WorldSpaceCameraPos, lightPositionWS);
+}
+
+float EvaluateVolumetricLightFade(float distanceToCamera, float fadeDistance)
+{
+    return fadeDistance > 0.0 ? saturate(1.0 - distanceToCamera / fadeDistance) : 0.0;
 }
 
 float3 EvaluateDirectionalLighting(uint3 voxelCoord, float3 positionWS)
@@ -44,10 +60,13 @@ float3 EvaluateDirectionalLighting(uint3 voxelCoord, float3 positionWS)
     for (uint lightIndex = 0; lightIndex < directionalCount; lightIndex++)
     {
         DirectionalLightData light = GetDirectionalLight((int)lightIndex);
+        if (!LightAffectsVolumetrics(light.affectVolumetric, light.volumetricDimmer))
+            continue;
+
         float3 lightDirectionWS = SafeNormalize(-light.directionWS);
         float phase = HenyeyGreensteinPhase(dot(lightDirectionWS, viewDirectionWS), _VBufferFogAnisotropy);
         float shadow = SampleDirectionalShadow(voxelCoord.xy, lightIndex, light);
-        lighting += max(light.color, 0.0) * phase * shadow;
+        lighting += max(light.color, 0.0) * light.volumetricDimmer * phase * shadow;
     }
 
     return lighting;
@@ -67,12 +86,18 @@ float3 EvaluateClusteredPunctualLighting(uint2 vBufferPixel, float3 positionWS)
     for (uint localLightIndex = 0; localLightIndex < lightCount; localLightIndex++)
     {
         PunctualLightData light = VividLightingLoop::LoadPunctualLight(lightLoop, localLightIndex);
+        if (!LightAffectsVolumetrics(light.affectVolumetric, light.volumetricDimmer))
+            continue;
+
         float3 lightVector = light.positionWS - positionWS;
         float distanceSq = max(dot(lightVector, lightVector), 1e-4);
         float distanceToLight = sqrt(distanceSq);
         float rangeAttenuation = saturate(1.0 - distanceToLight / max(light.range, 1e-4));
         rangeAttenuation *= rangeAttenuation;
-        lighting += max(light.color, 0.0) * rangeAttenuation / max(distanceSq, 1.0);
+        float volumetricFade = EvaluateVolumetricLightFade(
+            GetVolumetricLightCameraDistance(light.positionWS),
+            light.volumetricFadeDistance);
+        lighting += max(light.color, 0.0) * light.volumetricDimmer * volumetricFade * rangeAttenuation / max(distanceSq, 1.0);
     }
 
     return lighting;
@@ -92,12 +117,18 @@ float3 EvaluateClusteredAreaLighting(uint2 vBufferPixel, float3 positionWS)
     for (uint localLightIndex = 0; localLightIndex < lightCount; localLightIndex++)
     {
         AreaLightData light = VividLightingLoop::LoadAreaLight(lightLoop, localLightIndex);
+        if (!LightAffectsVolumetrics(light.affectVolumetric, light.volumetricDimmer))
+            continue;
+
         float3 lightVector = light.positionWS - positionWS;
         float distanceSq = max(dot(lightVector, lightVector), 1e-4);
         float distanceToLight = sqrt(distanceSq);
         float rangeAttenuation = saturate(1.0 - distanceToLight / max(light.range, 1e-4));
         rangeAttenuation *= rangeAttenuation;
-        lighting += max(light.color, 0.0) * rangeAttenuation / max(distanceSq, 1.0);
+        float volumetricFade = EvaluateVolumetricLightFade(
+            GetVolumetricLightCameraDistance(light.positionWS),
+            light.volumetricFadeDistance);
+        lighting += max(light.color, 0.0) * light.volumetricDimmer * volumetricFade * rangeAttenuation / max(distanceSq, 1.0);
     }
 
     return lighting;

@@ -63,6 +63,10 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("float cosBarnDoorAngle;"));
             Assert.That(source, Does.Contain("float barnDoorLength;"));
+            Assert.That(source, Does.Contain("float volumetricDimmer;"));
+            Assert.That(source, Does.Contain("float volumetricShadowDimmer;"));
+            Assert.That(source, Does.Contain("float volumetricFadeDistance;"));
+            Assert.That(source, Does.Contain("uint affectVolumetric;"));
             Assert.That(source, Does.Not.Contain("float2 padding;"));
         }
 

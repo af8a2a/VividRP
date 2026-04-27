@@ -15,6 +15,7 @@ namespace VividRP.Runtime
         Enabled = 1u << 2,
         ActiveInHierarchy = 1u << 3,
         CastShadows = 1u << 4,
+        AffectVolumetric = 1u << 5,
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -30,6 +31,9 @@ namespace VividRP.Runtime
         public Vector2 areaSize;
         public float barnDoorAngle;
         public float barnDoorLength;
+        public float volumetricDimmer;
+        public float volumetricFadeDistance;
+        public float volumetricShadowDimmer;
         public float intensity;
         public Vector3 color;
         public float shadowStrength;
@@ -204,6 +208,15 @@ namespace VividRP.Runtime
                 barnDoorLength = additionalLightData != null
                     ? additionalLightData.barnDoorLength
                     : VividAdditionalLightData.DefaultBarnDoorLength,
+                volumetricDimmer = additionalLightData != null
+                    ? additionalLightData.volumetricDimmer
+                    : VividAdditionalLightData.DefaultVolumetricDimmer,
+                volumetricFadeDistance = additionalLightData != null
+                    ? additionalLightData.volumetricFadeDistance
+                    : VividAdditionalLightData.DefaultVolumetricFadeDistance,
+                volumetricShadowDimmer = additionalLightData != null
+                    ? additionalLightData.volumetricShadowDimmer
+                    : VividAdditionalLightData.DefaultVolumetricShadowDimmer,
                 intensity = Mathf.Max(light.intensity, 0.0f),
                 color = new Vector3(finalColor.r, finalColor.g, finalColor.b),
                 shadowStrength = light.shadows != LightShadows.None ? light.shadowStrength : 0.0f,
@@ -234,6 +247,9 @@ namespace VividRP.Runtime
 
             if (light.shadows != LightShadows.None)
                 flags |= VividLightRenderDataFlags.CastShadows;
+
+            if (additionalLightData == null || additionalLightData.affectsVolumetric)
+                flags |= VividLightRenderDataFlags.AffectVolumetric;
 
             return flags;
         }
@@ -277,6 +293,9 @@ namespace VividRP.Runtime
                    && Approximately(lhs.areaSize, rhs.areaSize)
                    && Mathf.Approximately(lhs.barnDoorAngle, rhs.barnDoorAngle)
                    && Mathf.Approximately(lhs.barnDoorLength, rhs.barnDoorLength)
+                   && Mathf.Approximately(lhs.volumetricDimmer, rhs.volumetricDimmer)
+                   && Mathf.Approximately(lhs.volumetricFadeDistance, rhs.volumetricFadeDistance)
+                   && Mathf.Approximately(lhs.volumetricShadowDimmer, rhs.volumetricShadowDimmer)
                    && Mathf.Approximately(lhs.intensity, rhs.intensity)
                    && Approximately(lhs.color, rhs.color)
                    && Mathf.Approximately(lhs.shadowStrength, rhs.shadowStrength)
@@ -389,6 +408,10 @@ namespace VividRP.Runtime
         internal const float DefaultDirLightPCSSBlockerSamplingClumpExponent = 2.0f;
         internal const float DefaultBarnDoorAngle = 90.0f;
         internal const float DefaultBarnDoorLength = 0.05f;
+        internal const float DefaultVolumetricDimmer = 1.0f;
+        internal const float MaxVolumetricDimmer = 16.0f;
+        internal const float DefaultVolumetricFadeDistance = 10000.0f;
+        internal const float DefaultVolumetricShadowDimmer = 1.0f;
         internal const float DefaultCelestialBodyAngularDiameter = 0.5f;
         internal const float DefaultCelestialBodyDistance = 149597870700.0f;
         internal const float DefaultManualSunIntensity = 130000.0f;
@@ -461,6 +484,18 @@ namespace VividRP.Runtime
 
         [SerializeField, Min(0.0f)]
         private float m_BarnDoorLength = DefaultBarnDoorLength;
+
+        [SerializeField]
+        private bool m_AffectsVolumetric = true;
+
+        [SerializeField, Range(0.0f, MaxVolumetricDimmer)]
+        private float m_VolumetricDimmer = DefaultVolumetricDimmer;
+
+        [SerializeField, Min(0.0f)]
+        private float m_VolumetricFadeDistance = DefaultVolumetricFadeDistance;
+
+        [SerializeField, Range(0.0f, 1.0f)]
+        private float m_VolumetricShadowDimmer = DefaultVolumetricShadowDimmer;
 
         [SerializeField]
         private bool m_InteractsWithSky = true;
@@ -800,6 +835,47 @@ namespace VividRP.Runtime
             set => SetNonNegativeFloat(ref m_BarnDoorLength, value, DefaultBarnDoorLength);
         }
 
+        public bool affectsVolumetric
+        {
+            get => m_AffectsVolumetric;
+            set
+            {
+                if (m_AffectsVolumetric == value)
+                    return;
+
+                m_AffectsVolumetric = value;
+                NotifyLightDataChanged();
+            }
+        }
+
+        public float volumetricDimmer
+        {
+            get => m_AffectsVolumetric ? m_VolumetricDimmer : 0.0f;
+            set => SetClampedFloat(
+                ref m_VolumetricDimmer,
+                value,
+                0.0f,
+                MaxVolumetricDimmer,
+                DefaultVolumetricDimmer);
+        }
+
+        public float volumetricFadeDistance
+        {
+            get => m_VolumetricFadeDistance;
+            set => SetNonNegativeFloat(ref m_VolumetricFadeDistance, value, DefaultVolumetricFadeDistance);
+        }
+
+        public float volumetricShadowDimmer
+        {
+            get => m_AffectsVolumetric ? m_VolumetricShadowDimmer : 0.0f;
+            set => SetClampedFloat(
+                ref m_VolumetricShadowDimmer,
+                value,
+                0.0f,
+                1.0f,
+                DefaultVolumetricShadowDimmer);
+        }
+
         public float angularDiameter
         {
             get => m_AngularDiameter;
@@ -1022,6 +1098,7 @@ namespace VividRP.Runtime
             ConstrainRayTracedShadowSettings();
             ConstrainShadowBiasSettings();
             ConstrainAreaLightSettings();
+            ConstrainVolumetricSettings();
             ConstrainCelestialBodySettings();
             RefreshAnimatedState();
             UpdateLightBoundsOverride(m_Light);
@@ -1222,6 +1299,23 @@ namespace VividRP.Runtime
         {
             m_BarnDoorAngle = SanitizeClampedFloat(m_BarnDoorAngle, 0.0f, 90.0f, DefaultBarnDoorAngle);
             m_BarnDoorLength = SanitizeNonNegativeFloat(m_BarnDoorLength, DefaultBarnDoorLength);
+        }
+
+        private void ConstrainVolumetricSettings()
+        {
+            m_VolumetricDimmer = SanitizeClampedFloat(
+                m_VolumetricDimmer,
+                0.0f,
+                MaxVolumetricDimmer,
+                DefaultVolumetricDimmer);
+            m_VolumetricFadeDistance = SanitizeNonNegativeFloat(
+                m_VolumetricFadeDistance,
+                DefaultVolumetricFadeDistance);
+            m_VolumetricShadowDimmer = SanitizeClampedFloat(
+                m_VolumetricShadowDimmer,
+                0.0f,
+                1.0f,
+                DefaultVolumetricShadowDimmer);
         }
 
         private static CSMScreenSpaceShadowQuality SanitizeScreenSpaceShadowQuality(CSMScreenSpaceShadowQuality value)

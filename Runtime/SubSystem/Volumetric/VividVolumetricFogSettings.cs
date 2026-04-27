@@ -172,15 +172,20 @@ namespace VividRP.Runtime
                 return;
             }
 
-            var budget = Mathf.Max(volume.volumetricFogBudget.value, 0.001f);
-            var depthRatio = Mathf.Max(volume.resolutionDepthRatio.value, 0.001f);
-            var scale = Mathf.Sqrt(budget / depthRatio);
-            screenPercentage = Mathf.Clamp(
-                VividVolumetricFogVolume.DefaultScreenResolutionPercentage * scale,
+            var budget = Mathf.Clamp01(volume.volumetricFogBudget.value);
+            var depthRatio = Mathf.Clamp01(volume.resolutionDepthRatio.value);
+            var maxScreenPercentage =
+                (1.0f - depthRatio)
+                * (VividVolumetricFogVolume.MaxScreenResolutionPercentage - VividVolumetricFogVolume.MinScreenResolutionPercentage)
+                + VividVolumetricFogVolume.MinScreenResolutionPercentage;
+            screenPercentage = Mathf.Lerp(
                 VividVolumetricFogVolume.MinScreenResolutionPercentage,
-                VividVolumetricFogVolume.MaxScreenResolutionPercentage);
+                maxScreenPercentage,
+                budget);
+
+            var maxSliceCount = Mathf.Max(1.0f, depthRatio * VividVolumetricFogVolume.MaxVolumeSliceCount);
             sliceCount = Mathf.Clamp(
-                Mathf.RoundToInt(VividVolumetricFogVolume.DefaultVolumeSliceCount * depthRatio * scale),
+                (int)Mathf.Lerp(1.0f, maxSliceCount, budget),
                 VividVolumetricFogVolume.MinVolumeSliceCount,
                 VividVolumetricFogVolume.MaxVolumeSliceCount);
         }
@@ -198,8 +203,8 @@ namespace VividRP.Runtime
                 VividVolumetricFogVolume.MinScreenResolutionPercentage,
                 VividVolumetricFogVolume.MaxScreenResolutionPercentage);
             var scale = screenPercentage / 100.0f;
-            var viewportWidth = Mathf.Max(1, Mathf.CeilToInt(Mathf.Max(cameraWidth, 1) * scale));
-            var viewportHeight = Mathf.Max(1, Mathf.CeilToInt(Mathf.Max(cameraHeight, 1) * scale));
+            var viewportWidth = Mathf.Max(1, Mathf.RoundToInt(Mathf.Max(cameraWidth, 1) * scale));
+            var viewportHeight = Mathf.Max(1, Mathf.RoundToInt(Mathf.Max(cameraHeight, 1) * scale));
 
             return new VBufferParameters(
                 viewportWidth,

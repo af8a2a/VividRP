@@ -34,6 +34,10 @@ namespace VividRP.Editor
         internal SerializedProperty dirLightPCSSBlockerSamplingClumpExponent { get; }
         internal SerializedProperty barnDoorAngle { get; }
         internal SerializedProperty barnDoorLength { get; }
+        internal SerializedProperty affectsVolumetric { get; }
+        internal SerializedProperty volumetricDimmer { get; }
+        internal SerializedProperty volumetricFadeDistance { get; }
+        internal SerializedProperty volumetricShadowDimmer { get; }
         internal SerializedProperty interactsWithSky { get; }
         internal SerializedProperty angularDiameter { get; }
         internal SerializedProperty diameterMultiplierMode { get; }
@@ -100,6 +104,10 @@ namespace VividRP.Editor
             dirLightPCSSBlockerSamplingClumpExponent = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSBlockerSamplingClumpExponent");
             barnDoorAngle = serializedAdditionalDataObject.FindProperty("m_BarnDoorAngle");
             barnDoorLength = serializedAdditionalDataObject.FindProperty("m_BarnDoorLength");
+            affectsVolumetric = serializedAdditionalDataObject.FindProperty("m_AffectsVolumetric");
+            volumetricDimmer = serializedAdditionalDataObject.FindProperty("m_VolumetricDimmer");
+            volumetricFadeDistance = serializedAdditionalDataObject.FindProperty("m_VolumetricFadeDistance");
+            volumetricShadowDimmer = serializedAdditionalDataObject.FindProperty("m_VolumetricShadowDimmer");
             interactsWithSky = serializedAdditionalDataObject.FindProperty("m_InteractsWithSky");
             angularDiameter = serializedAdditionalDataObject.FindProperty("m_AngularDiameter");
             diameterMultiplierMode = serializedAdditionalDataObject.FindProperty("m_DiameterMultiplierMode");

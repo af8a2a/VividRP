@@ -16,6 +16,10 @@ namespace VividRP.Runtime
                 shadowStrength = trackedLightData.shadowStrength,
                 color = trackedLightData.color,
                 renderingLayerMask = trackedLightData.renderingLayerMask,
+                volumetricDimmer = GetVolumetricDimmer(trackedLightData),
+                volumetricShadowDimmer = GetVolumetricShadowDimmer(trackedLightData),
+                volumetricFadeDistance = GetVolumetricFadeDistance(trackedLightData),
+                affectVolumetric = GetAffectVolumetric(trackedLightData),
             };
         }
 
@@ -38,6 +42,10 @@ namespace VividRP.Runtime
                     : 1.0f / Mathf.Max(range * range, 1e-6f),
                 shadowStrength = trackedLightData.shadowStrength,
                 renderingLayerMask = trackedLightData.renderingLayerMask,
+                volumetricDimmer = GetVolumetricDimmer(trackedLightData),
+                volumetricShadowDimmer = GetVolumetricShadowDimmer(trackedLightData),
+                volumetricFadeDistance = GetVolumetricFadeDistance(trackedLightData),
+                affectVolumetric = GetAffectVolumetric(trackedLightData),
             };
         }
 
@@ -66,6 +74,10 @@ namespace VividRP.Runtime
                 range = range,
                 cosBarnDoorAngle = Mathf.Cos(barnDoorAngleRadians),
                 barnDoorLength = Mathf.Max(trackedLightData.barnDoorLength, 0.0f),
+                volumetricDimmer = GetVolumetricDimmer(trackedLightData),
+                volumetricShadowDimmer = GetVolumetricShadowDimmer(trackedLightData),
+                volumetricFadeDistance = GetVolumetricFadeDistance(trackedLightData),
+                affectVolumetric = GetAffectVolumetric(trackedLightData),
             };
         }
 
@@ -88,7 +100,37 @@ namespace VividRP.Runtime
                 radiusAtRange = radiusAtRange,
                 cullingCenterWS = cullingCenterWS,
                 cullingRadius = cullingRadius,
+                affectVolumetric = source.affectVolumetric != 0u && source.volumetricDimmer > 0.0f ? 1u : 0u,
             };
+        }
+
+        private static uint GetAffectVolumetric(VividLightRenderData trackedLightData)
+        {
+            return (trackedLightData.flags & VividLightRenderDataFlags.AffectVolumetric) != 0 ? 1u : 0u;
+        }
+
+        private static float GetVolumetricDimmer(VividLightRenderData trackedLightData)
+        {
+            if (GetAffectVolumetric(trackedLightData) == 0u)
+                return 0.0f;
+
+            return Mathf.Clamp(
+                trackedLightData.volumetricDimmer,
+                0.0f,
+                VividAdditionalLightData.MaxVolumetricDimmer);
+        }
+
+        private static float GetVolumetricShadowDimmer(VividLightRenderData trackedLightData)
+        {
+            if (GetAffectVolumetric(trackedLightData) == 0u)
+                return 0.0f;
+
+            return Mathf.Clamp01(trackedLightData.volumetricShadowDimmer);
+        }
+
+        private static float GetVolumetricFadeDistance(VividLightRenderData trackedLightData)
+        {
+            return Mathf.Max(trackedLightData.volumetricFadeDistance, 0.0f);
         }
 
 

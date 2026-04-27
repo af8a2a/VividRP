@@ -154,6 +154,10 @@ namespace VividRP.Editor.Tests
             Assert.That(serializedLight.dirLightPCSSBlockerSamplingClumpExponent, Is.Not.Null);
             Assert.That(serializedLight.barnDoorAngle, Is.Not.Null);
             Assert.That(serializedLight.barnDoorLength, Is.Not.Null);
+            Assert.That(serializedLight.affectsVolumetric, Is.Not.Null);
+            Assert.That(serializedLight.volumetricDimmer, Is.Not.Null);
+            Assert.That(serializedLight.volumetricFadeDistance, Is.Not.Null);
+            Assert.That(serializedLight.volumetricShadowDimmer, Is.Not.Null);
             Assert.That(serializedLight.interactsWithSky, Is.Not.Null);
             Assert.That(serializedLight.angularDiameter, Is.Not.Null);
             Assert.That(serializedLight.diameterMultiplierMode, Is.Not.Null);
@@ -258,6 +262,35 @@ namespace VividRP.Editor.Tests
             Assert.That(VividLightRenderDatabase.instance.TryGetLightData(light, out var trackedLightData), Is.True);
             Assert.That(trackedLightData.barnDoorAngle, Is.EqualTo(42.0f).Within(0.0001f));
             Assert.That(trackedLightData.barnDoorLength, Is.EqualTo(0.2f).Within(0.0001f));
+        }
+
+        [Test]
+        public void AdditionalLightDataPropertySetters_UpdateTrackedLightRenderData_WhenVolumetricSettingsChange()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Point;
+
+            var additionalData = light.GetVividAdditionalLightData();
+
+            VividLightRenderDatabase.instance.Clear();
+
+            additionalData.volumetricDimmer = 2.5f;
+            additionalData.volumetricFadeDistance = 250.0f;
+            additionalData.volumetricShadowDimmer = 0.35f;
+
+            Assert.That(VividLightRenderDatabase.instance.TryGetLightData(light, out var trackedLightData), Is.True);
+            Assert.That((trackedLightData.flags & VividLightRenderDataFlags.AffectVolumetric) != 0, Is.True);
+            Assert.That(trackedLightData.volumetricDimmer, Is.EqualTo(2.5f).Within(0.0001f));
+            Assert.That(trackedLightData.volumetricFadeDistance, Is.EqualTo(250.0f).Within(0.0001f));
+            Assert.That(trackedLightData.volumetricShadowDimmer, Is.EqualTo(0.35f).Within(0.0001f));
+
+            additionalData.affectsVolumetric = false;
+
+            Assert.That(VividLightRenderDatabase.instance.TryGetLightData(light, out trackedLightData), Is.True);
+            Assert.That((trackedLightData.flags & VividLightRenderDataFlags.AffectVolumetric) != 0, Is.False);
+            Assert.That(trackedLightData.volumetricDimmer, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(trackedLightData.volumetricShadowDimmer, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(trackedLightData.volumetricFadeDistance, Is.EqualTo(250.0f).Within(0.0001f));
         }
 
         [Test]
@@ -465,6 +498,39 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void VolumetricSettings_DefaultToHdrpStyleValues()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+
+            var additionalData = light.GetVividAdditionalLightData();
+
+            Assert.That(additionalData.affectsVolumetric, Is.True);
+            Assert.That(additionalData.volumetricDimmer, Is.EqualTo(VividAdditionalLightData.DefaultVolumetricDimmer));
+            Assert.That(additionalData.volumetricFadeDistance, Is.EqualTo(VividAdditionalLightData.DefaultVolumetricFadeDistance));
+            Assert.That(additionalData.volumetricShadowDimmer, Is.EqualTo(VividAdditionalLightData.DefaultVolumetricShadowDimmer));
+        }
+
+        [Test]
+        public void VolumetricSettings_ClampToHdrpRanges()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+
+            var additionalData = light.GetVividAdditionalLightData();
+            additionalData.volumetricDimmer = 99.0f;
+            additionalData.volumetricFadeDistance = -1.0f;
+            additionalData.volumetricShadowDimmer = 99.0f;
+
+            Assert.That(additionalData.volumetricDimmer, Is.EqualTo(VividAdditionalLightData.MaxVolumetricDimmer));
+            Assert.That(additionalData.volumetricFadeDistance, Is.EqualTo(0.0f));
+            Assert.That(additionalData.volumetricShadowDimmer, Is.EqualTo(1.0f));
+
+            additionalData.affectsVolumetric = false;
+
+            Assert.That(additionalData.volumetricDimmer, Is.EqualTo(0.0f));
+            Assert.That(additionalData.volumetricShadowDimmer, Is.EqualTo(0.0f));
+        }
+
+        [Test]
         public void CelestialBodySettings_ClampAngularDiameterToHdrpRange()
         {
             var light = m_GameObject.AddComponent<Light>();
@@ -509,6 +575,37 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     VividLightEditor.ShouldShowDirectionalRayTracedShadowControls(serializedPointLight),
                     Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(pointLightObject);
+            }
+        }
+
+        [Test]
+        public void VividLightEditor_ShowsVolumetricFadeDistanceControls_OnlyForLocalLights()
+        {
+            var directionalLight = m_GameObject.AddComponent<Light>();
+            directionalLight.type = LightType.Directional;
+
+            var serializedDirectionalLight = new VividSerializedLight(new SerializedObject(directionalLight));
+
+            Assert.That(
+                VividLightEditor.ShouldShowVolumetricFadeDistanceControls(serializedDirectionalLight),
+                Is.False);
+
+            var pointLightObject = new GameObject("Vivid Point Light Volumetric Test");
+
+            try
+            {
+                var pointLight = pointLightObject.AddComponent<Light>();
+                pointLight.type = LightType.Point;
+
+                var serializedPointLight = new VividSerializedLight(new SerializedObject(pointLight));
+
+                Assert.That(
+                    VividLightEditor.ShouldShowVolumetricFadeDistanceControls(serializedPointLight),
+                    Is.True);
             }
             finally
             {

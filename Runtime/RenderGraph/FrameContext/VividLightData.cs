@@ -18,6 +18,10 @@ namespace VividRP.Runtime
             public float shadowStrength;
             public Vector3 color;
             public uint renderingLayerMask;
+            public float volumetricDimmer;
+            public float volumetricShadowDimmer;
+            public float volumetricFadeDistance;
+            public uint affectVolumetric;
 
             internal static int Stride => Marshal.SizeOf<DirectionalLightData>();
         }
@@ -35,6 +39,10 @@ namespace VividRP.Runtime
             public float inverseRangeSquared;
             public float shadowStrength;
             public uint renderingLayerMask;
+            public float volumetricDimmer;
+            public float volumetricShadowDimmer;
+            public float volumetricFadeDistance;
+            public uint affectVolumetric;
 
             internal static int Stride => Marshal.SizeOf<PunctualLightData>();
         }
@@ -56,6 +64,10 @@ namespace VividRP.Runtime
             public float range;
             public float cosBarnDoorAngle;
             public float barnDoorLength;
+            public float volumetricDimmer;
+            public float volumetricShadowDimmer;
+            public float volumetricFadeDistance;
+            public uint affectVolumetric;
 
             internal static int Stride => Marshal.SizeOf<AreaLightData>();
         }
@@ -71,6 +83,7 @@ namespace VividRP.Runtime
             public float radiusAtRange;
             public Vector3 cullingCenterWS;
             public float cullingRadius;
+            public uint affectVolumetric;
 
             internal static int Stride => Marshal.SizeOf<PunctualLightCullData>();
         }
@@ -713,7 +726,12 @@ namespace VividRP.Runtime
                 inverseRangeSquared = range > 0.0f ? 1.0f / Mathf.Max(range * range, 1e-6f) : 0.0f,
                 renderingLayerMask = 0u,
                 shadowRenderingLayerMask = 0u,
-                flags = VividLightRenderDataFlags.Enabled | VividLightRenderDataFlags.ActiveInHierarchy,
+                volumetricDimmer = VividAdditionalLightData.DefaultVolumetricDimmer,
+                volumetricFadeDistance = VividAdditionalLightData.DefaultVolumetricFadeDistance,
+                volumetricShadowDimmer = VividAdditionalLightData.DefaultVolumetricShadowDimmer,
+                flags = VividLightRenderDataFlags.Enabled
+                    | VividLightRenderDataFlags.ActiveInHierarchy
+                    | VividLightRenderDataFlags.AffectVolumetric,
             };
         }
 
@@ -891,7 +909,7 @@ namespace VividRP.Runtime
             var range = math.max(viewSpaceCullData.range, 1e-4f);
 
             lightVolumeData.lightCategory = HdrpLightCategoryPunctual;
-            lightVolumeData.affectVolumetric = 0;
+            lightVolumeData.affectVolumetric = source.affectVolumetric != 0u ? 1 : 0;
             lightVolumeData.featureFlags = HdrpLightFeatureFlagsPunctual;
             lightVolumeData.radiusSq = range * range;
 
@@ -970,7 +988,7 @@ namespace VividRP.Runtime
 
             lightVolumeData.lightCategory = HdrpLightCategoryArea;
             lightVolumeData.lightVolume = HdrpLightVolumeTypeBox;
-            lightVolumeData.affectVolumetric = 0;
+            lightVolumeData.affectVolumetric = source.affectVolumetric != 0u && source.volumetricDimmer > 0.0f ? 1 : 0;
             lightVolumeData.featureFlags = HdrpLightFeatureFlagsArea;
             lightVolumeData.lightAxisX = new Vector3(axisXVS.x, axisXVS.y, axisXVS.z);
             lightVolumeData.lightAxisY = new Vector3(axisYVS.x, axisYVS.y, axisYVS.z);

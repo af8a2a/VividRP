@@ -11,6 +11,7 @@ namespace VividRP.Runtime.SubSystem.Decal
 {
     internal static class DecalSystem
     {
+        private static readonly Quaternion s_ProjectorToDecalSpaceRotation = Quaternion.Euler(-90.0f, 0.0f, 0.0f);
         private static readonly List<DecalProjector> s_Projectors = new();
         private static readonly List<DecalData> s_ActiveDecals = new();
         private static bool s_Initialized;
@@ -143,14 +144,9 @@ namespace VividRP.Runtime.SubSystem.Decal
                 DecalProjector projector = validProjectors[idx];
                 projector.TryCreateBoundProxyWorldData(out BoundProxyWorldData wd);
 
-                Matrix4x4 worldToDecal = Matrix4x4.TRS(
-                    wd.worldCenter,
-                    wd.worldRotation,
-                    wd.boxSize).inverse;
-
                 s_ActiveDecals.Add(new DecalData
                 {
-                    worldToDecal = worldToDecal,
+                    worldToDecal = CreateWorldToDecalMatrix(wd),
                     baseColorTexture = projector.BaseColorTexture,
                     normalTexture = projector.NormalTexture,
                     baseColor = projector.BaseColor,
@@ -214,6 +210,14 @@ namespace VividRP.Runtime.SubSystem.Decal
             };
         }
 
+        internal static Matrix4x4 CreateWorldToDecalMatrix(in BoundProxyWorldData worldData)
+        {
+            // Match HDRP's decal space: authoring local Z is projection depth, shader samples the XZ plane.
+            Vector3 decalSpaceSize = new(worldData.boxSize.x, worldData.boxSize.z, worldData.boxSize.y);
+            Quaternion decalSpaceRotation = worldData.worldRotation * s_ProjectorToDecalSpaceRotation;
+            return Matrix4x4.TRS(worldData.worldCenter, decalSpaceRotation, decalSpaceSize).inverse;
+        }
+
         internal static float NormalizeBlendDistance(float blendDistance, Vector3 boxSize)
         {
             if (blendDistance <= 0.0f)
@@ -221,7 +225,7 @@ namespace VividRP.Runtime.SubSystem.Decal
 
             var minDimension = Mathf.Min(
                 Mathf.Abs(boxSize.x),
-                Mathf.Min(Mathf.Abs(boxSize.y), Mathf.Abs(boxSize.z)));
+                Mathf.Abs(boxSize.y));
 
             if (minDimension <= 1e-5f)
                 return 0.0f;

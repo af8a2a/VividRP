@@ -59,8 +59,34 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("VividClusteredLighting::LoadLightIndex"));
             Assert.That(source, Does.Contain("GetBindlessTexture2D(NonUniformResourceIndex(decal.baseColorTextureIndex))"));
             Assert.That(source, Does.Contain("GetBindlessTexture2D(NonUniformResourceIndex(decal.normalTextureIndex))"));
+            Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D_GRAD(baseColorTexture, sampler_LinearClamp, uv, uvDdx, uvDdy)"));
+            Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D_GRAD(normalTexture, sampler_LinearClamp, uv, uvDdx, uvDdy)"));
             Assert.That(source, Does.Contain("surfaceData.baseColor = lerp"));
             Assert.That(source, Does.Contain("surfaceData.normalWS = normalize(lerp"));
+        }
+
+        [Test]
+        public void SharedDecalGBufferHlsl_UsesHdrpProjectedPlaneAndExplicitGradients()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "GPUDrivenDecalGBuffer.hlsl"));
+            var fadeStart = source.IndexOf("float ComputeVividDecalVolumeFade", StringComparison.Ordinal);
+            var nextFunctionStart = source.IndexOf("float4 SampleVividDecalBaseColor", StringComparison.Ordinal);
+
+            Assert.That(fadeStart, Is.GreaterThanOrEqualTo(0));
+            Assert.That(nextFunctionStart, Is.GreaterThan(fadeStart));
+
+            var fadeFunction = source.Substring(fadeStart, nextFunctionStart - fadeStart);
+
+            Assert.That(source, Does.Contain("float3 positionWSDdx = ddx(positionWS);"));
+            Assert.That(source, Does.Contain("float3 positionWSDdy = ddy(positionWS);"));
+            Assert.That(source, Does.Contain("sampleContext.uv = positionDS.xz + 0.5;"));
+            Assert.That(source, Does.Contain("sampleContext.uvDdx = positionDSDdx.xz;"));
+            Assert.That(source, Does.Contain("sampleContext.uvDdy = positionDSDdy.xz;"));
+            Assert.That(fadeFunction, Does.Contain("0.5 - abs(positionDS.xz)"));
+            Assert.That(fadeFunction, Does.Contain("min(edgeDistance.x, edgeDistance.y)"));
+            Assert.That(fadeFunction, Does.Contain("clamp(decal.blendDistance, 0.0, 0.5)"));
+            Assert.That(source, Does.Not.Contain("positionDS.xy"));
+            Assert.That(fadeFunction, Does.Not.Contain("edgeDistance.z"));
         }
 
         private static void AssertDecalGBufferPass(string shaderSource)

@@ -17,6 +17,14 @@ struct VividDecalClusterData
 
 StructuredBuffer<VividDecalClusterData> _DecalData;
 
+struct VividDecalSampleContext
+{
+    float3 positionDS;
+    float2 uv;
+    float2 uvDdx;
+    float2 uvDdy;
+};
+
 float3 UnpackVividDecalNormal(float4 packedNormal)
 {
     float3 normalTS;
@@ -25,31 +33,42 @@ float3 UnpackVividDecalNormal(float4 packedNormal)
     return normalTS;
 }
 
-bool TryGetVividDecalUV(VividDecalClusterData decal, float3 positionWS, out float3 positionDS, out float2 uv)
+bool TryCreateVividDecalSampleContext(
+    VividDecalClusterData decal,
+    float3 positionWS,
+    float3 positionWSDdx,
+    float3 positionWSDdy,
+    out VividDecalSampleContext sampleContext)
 {
-    positionDS = mul(decal.worldToDecal, float4(positionWS, 1.0)).xyz;
+    float3 positionDS = mul(decal.worldToDecal, float4(positionWS, 1.0)).xyz;
     float3 edgeDistance = 0.5 - abs(positionDS);
 
     UNITY_BRANCH
     if (any(edgeDistance < 0.0))
     {
-        uv = 0.0.xx;
+        sampleContext = (VividDecalSampleContext)0;
         return false;
     }
 
-    uv = positionDS.xy + 0.5;
+    float3 positionDSDdx = mul(decal.worldToDecal, float4(positionWSDdx, 0.0)).xyz;
+    float3 positionDSDdy = mul(decal.worldToDecal, float4(positionWSDdy, 0.0)).xyz;
+
+    sampleContext.positionDS = positionDS;
+    sampleContext.uv = positionDS.xz + 0.5;
+    sampleContext.uvDdx = positionDSDdx.xz;
+    sampleContext.uvDdy = positionDSDdy.xz;
     return true;
 }
 
 float ComputeVividDecalVolumeFade(VividDecalClusterData decal, float3 positionDS)
 {
-    float3 edgeDistance = 0.5 - abs(positionDS);
-    float edgeFade = min(edgeDistance.x, min(edgeDistance.y, edgeDistance.z));
-    float blendDistance = max(decal.blendDistance, 0.0);
+    float2 edgeDistance = 0.5 - abs(positionDS.xz);
+    float edgeFade = min(edgeDistance.x, edgeDistance.y);
+    float blendDistance = clamp(decal.blendDistance, 0.0, 0.5);
     return blendDistance > 1e-5 ? saturate(edgeFade / blendDistance) : step(0.0, edgeFade);
 }
 
-float4 SampleVividDecalBaseColor(VividDecalClusterData decal, float2 uv)
+float4 SampleVividDecalBaseColor(VividDecalClusterData decal, float2 uv, float2 uvDdx, float2 uvDdy)
 {
     float4 baseColor = decal.baseColor;
 
@@ -57,7 +76,7 @@ float4 SampleVividDecalBaseColor(VividDecalClusterData decal, float2 uv)
     if (decal.baseColorTextureIndex != VIVID_DECAL_INVALID_TEXTURE_INDEX)
     {
         Texture2D baseColorTexture = GetBindlessTexture2D(NonUniformResourceIndex(decal.baseColorTextureIndex));
-        baseColor *= SAMPLE_TEXTURE2D(baseColorTexture, sampler_LinearClamp, uv);
+        baseColor *= SAMPLE_TEXTURE2D_GRAD(baseColorTexture, sampler_LinearClamp, uv, uvDdx, uvDdy);
     }
 
     return baseColor;
@@ -67,15 +86,15 @@ float3x3 CreateVividDecalTangentToWorld(VividDecalClusterData decal)
 {
     float4x4 decalToWorld = Inverse(decal.worldToDecal);
     float3 tangentWS = normalize(mul((float3x3)decalToWorld, float3(1.0, 0.0, 0.0)));
-    float3 bitangentWS = normalize(mul((float3x3)decalToWorld, float3(0.0, 1.0, 0.0)));
-    float3 normalWS = normalize(mul((float3x3)decalToWorld, float3(0.0, 0.0, 1.0)));
+    float3 bitangentWS = normalize(mul((float3x3)decalToWorld, float3(0.0, 0.0, 1.0)));
+    float3 normalWS = normalize(mul((float3x3)decalToWorld, float3(0.0, 1.0, 0.0)));
     return float3x3(tangentWS, bitangentWS, normalWS);
 }
 
-float3 SampleVividDecalNormalWS(VividDecalClusterData decal, float2 uv)
+float3 SampleVividDecalNormalWS(VividDecalClusterData decal, float2 uv, float2 uvDdx, float2 uvDdy)
 {
     Texture2D normalTexture = GetBindlessTexture2D(NonUniformResourceIndex(decal.normalTextureIndex));
-    float3 normalTS = UnpackVividDecalNormal(SAMPLE_TEXTURE2D(normalTexture, sampler_LinearClamp, uv));
+    float3 normalTS = UnpackVividDecalNormal(SAMPLE_TEXTURE2D_GRAD(normalTexture, sampler_LinearClamp, uv, uvDdx, uvDdy));
     return normalize(mul(normalTS, CreateVividDecalTangentToWorld(decal)));
 }
 
@@ -85,6 +104,8 @@ void ApplyVividGPUDrivenDecalsToGBufferSurfaceData(
     uint2 pixelCoord)
 {
     VividClusteredLightCell decalCell = VividClusteredLighting::LoadDecalCell(pixelCoord, positionWS);
+    float3 positionWSDdx = ddx(positionWS);
+    float3 positionWSDdy = ddy(positionWS);
 
     UNITY_LOOP
     for (uint localIndex = 0u; localIndex < decalCell.count; localIndex++)
@@ -92,20 +113,22 @@ void ApplyVividGPUDrivenDecalsToGBufferSurfaceData(
         uint decalIndex = VividClusteredLighting::LoadLightIndex(decalCell, localIndex);
         VividDecalClusterData decal = _DecalData[decalIndex];
         
-        float3 positionDS;
-        float2 uv;
-        if (!TryGetVividDecalUV(decal, positionWS, positionDS, uv))
+        VividDecalSampleContext sampleContext;
+        if (!TryCreateVividDecalSampleContext(decal, positionWS, positionWSDdx, positionWSDdy, sampleContext))
             continue;
         
-        float volumeFade = ComputeVividDecalVolumeFade(decal, positionDS);
-        float4 baseColor = SampleVividDecalBaseColor(decal, uv);
+        float volumeFade = ComputeVividDecalVolumeFade(decal, sampleContext.positionDS);
+        float4 baseColor = SampleVividDecalBaseColor(decal, sampleContext.uv, sampleContext.uvDdx, sampleContext.uvDdy);
         float blend = volumeFade * saturate(baseColor.a);
         
         surfaceData.baseColor = lerp(surfaceData.baseColor, baseColor.rgb, blend);
         
         UNITY_BRANCH
         if (blend > 0.0 && decal.normalTextureIndex != VIVID_DECAL_INVALID_TEXTURE_INDEX)
-            surfaceData.normalWS = normalize(lerp(surfaceData.normalWS, SampleVividDecalNormalWS(decal, uv), blend));
+            surfaceData.normalWS = normalize(lerp(
+                surfaceData.normalWS,
+                SampleVividDecalNormalWS(decal, sampleContext.uv, sampleContext.uvDdx, sampleContext.uvDdy),
+                blend));
     }
 }
 

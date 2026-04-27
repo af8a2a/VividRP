@@ -135,9 +135,28 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void NormalizeBlendDistance_ReturnsBoxRelativeDistanceClampedToHalfExtent()
+        public void CreateWorldToDecalMatrix_UsesHdrpProjectedPlaneConvention()
+        {
+            var worldData = new BoundProxyWorldData
+            {
+                worldCenter = Vector3.zero,
+                worldRotation = Quaternion.identity,
+                boxSize = new Vector3(2.0f, 4.0f, 6.0f),
+            };
+
+            Matrix4x4 worldToDecal = DecalSystem.CreateWorldToDecalMatrix(worldData);
+
+            AssertVector3(worldToDecal.MultiplyPoint3x4(new Vector3(1.0f, 0.0f, 0.0f)), new Vector3(0.5f, 0.0f, 0.0f));
+            AssertVector3(worldToDecal.MultiplyPoint3x4(new Vector3(0.0f, 2.0f, 0.0f)), new Vector3(0.0f, 0.0f, 0.5f));
+            AssertVector3(worldToDecal.MultiplyPoint3x4(new Vector3(0.0f, 0.0f, 3.0f)), new Vector3(0.0f, -0.5f, 0.0f));
+        }
+
+        [Test]
+        public void NormalizeBlendDistance_ReturnsProjectedPlaneRelativeDistanceClampedToHalfExtent()
         {
             Assert.That(DecalSystem.NormalizeBlendDistance(0.5f, new Vector3(4.0f, 2.0f, 8.0f)), Is.EqualTo(0.25f));
+            Assert.That(DecalSystem.NormalizeBlendDistance(0.5f, new Vector3(4.0f, 2.0f, 0.1f)), Is.EqualTo(0.25f));
+            Assert.That(DecalSystem.NormalizeBlendDistance(0.5f, new Vector3(4.0f, 0.1f, 8.0f)), Is.EqualTo(0.5f));
             Assert.That(DecalSystem.NormalizeBlendDistance(10.0f, new Vector3(4.0f, 2.0f, 8.0f)), Is.EqualTo(0.5f));
             Assert.That(DecalSystem.NormalizeBlendDistance(0.5f, Vector3.zero), Is.EqualTo(0.0f));
         }

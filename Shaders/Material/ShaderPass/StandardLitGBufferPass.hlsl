@@ -4,6 +4,9 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VividProbeVolume.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
+#if defined(VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER)
+#include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/GPUDrivenDecalGBuffer.hlsl"
+#endif
 
 CBUFFER_START(UnityPerMaterial)
     float4 _BaseColor;
@@ -217,7 +220,11 @@ VividGBufferFragmentOutput FragGBuffer(Varyings input)
     UNITY_SETUP_INSTANCE_ID(input);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
-    return PackVividGBufferSurfaceData(BuildStandardLitSurfaceData(input));
+    VividGBufferSurfaceData surfaceData = BuildStandardLitSurfaceData(input);
+#if defined(VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER)
+    ApplyVividGPUDrivenDecalsToGBufferSurfaceData(surfaceData, input.positionWS, (uint2)input.positionCS.xy);
+#endif
+    return PackVividGBufferSurfaceData(surfaceData);
 }
 
 half4 FragPreDepth(Varyings input) : SV_Target

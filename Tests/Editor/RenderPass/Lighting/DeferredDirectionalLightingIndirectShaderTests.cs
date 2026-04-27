@@ -113,11 +113,12 @@ namespace VividRP.Editor.Tests
         [Test]
         public void DefaultRenderGraph_UsesDeferredLightingPassAndDirectLightGridConnections()
         {
-            var graphSource = File.ReadAllText(GetAssetFilePath("Assets", "Vivid Render Graph.vrdg"));
+            var graphSource = File.ReadAllText(GetDefaultRenderGraphAssetPath());
 
             Assert.That(graphSource, Does.Contain("type: {class: DeferredLightingPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}"));
             AssertWireExists(graphSource, "m_DirectionalLightBuffer", "DirectionalLights");
             AssertWireExists(graphSource, "m_PunctualLightBuffer", "PunctualLights");
+            AssertWireExists(graphSource, "m_DecalDataBuffer", "DecalData");
             AssertWireExists(graphSource, "m_LayeredOffsetBuffer", "LayeredOffset");
             AssertWireExists(graphSource, "m_LayeredLightListBuffer", "LayeredLightList");
             AssertWireExists(graphSource, "m_LogBaseBuffer", "LogBaseBuffer");
@@ -128,7 +129,7 @@ namespace VividRP.Editor.Tests
             var pattern =
                 $@"m_FromPortReference:\s*[\s\S]*?m_UniqueId: {Regex.Escape(uniqueId)}\s*[\s\S]*?m_Title: {Regex.Escape(title)} \(W\)\s*[\s\S]*?m_ToPortReference:\s*[\s\S]*?m_UniqueId: {Regex.Escape(uniqueId)}\s*[\s\S]*?m_Title: {Regex.Escape(title)} \(R\)";
 
-            Assert.That(graphSource, Does.Match(pattern), $"Expected a LightGrid -> DeferredLighting wire for '{uniqueId}'.");
+            Assert.That(graphSource, Does.Match(pattern), $"Expected a LightGrid consumer wire for '{uniqueId}'.");
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)
@@ -150,10 +151,22 @@ namespace VividRP.Editor.Tests
             return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
 
-        private static string GetAssetFilePath(params string[] relativeParts)
+        private static string GetDefaultRenderGraphAssetPath()
         {
             var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            return Path.Combine(projectRoot, Path.Combine(relativeParts));
+            var candidatePaths = new[]
+            {
+                Path.Combine(projectRoot, "Assets", "Vivid Render Graph.vrdg"),
+                Path.Combine(projectRoot, "Assets", "Hybrid.vrdg"),
+            };
+
+            foreach (var candidatePath in candidatePaths)
+            {
+                if (File.Exists(candidatePath))
+                    return candidatePath;
+            }
+
+            return candidatePaths[0];
         }
     }
 }

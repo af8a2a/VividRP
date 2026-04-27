@@ -1,6 +1,8 @@
 using System;
+using System.Linq;
 using NUnit.Framework;
 using VividRP.Editor.RenderGraph;
+using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
@@ -18,12 +20,22 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Serializable]
+        private sealed class AutoRegisteredLightGridPassNode : RenderPassNodeData
+        {
+            internal override Type GetRegisteredPassType() => typeof(LightGridPass);
+        }
+
         [Test]
         public void GBufferPassNode_DefinesRenderListAndGBufferPorts()
         {
             var node = new AutoRegisteredGBufferPassNode();
 
             Assert.That(node.GetInputPortByName("m_RenderList"), Is.Not.Null);
+            Assert.That(node.GetInputPortByName("m_DecalDataBuffer"), Is.Not.Null);
+            Assert.That(node.GetInputPortByName("m_LayeredOffsetBuffer"), Is.Not.Null);
+            Assert.That(node.GetInputPortByName("m_LayeredLightListBuffer"), Is.Not.Null);
+            Assert.That(node.GetInputPortByName("m_LogBaseBuffer"), Is.Not.Null);
             Assert.That(node.GetInputPortByName("m_GBufferDepth_In"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_GBuffer0"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_GBuffer1"), Is.Not.Null);
@@ -49,6 +61,46 @@ namespace VividRP.Editor.Tests
             Assert.That(node.GetInputPortByName("m_GBuffer2_In"), Is.Null);
             Assert.That(node.GetInputPortByName("m_GBuffer3_In"), Is.Null);
             Assert.That(node.GetInputPortByName("m_GBuffer4_In"), Is.Null);
+        }
+
+        [Test]
+        public void Compile_OrdersLightGridBeforeGBuffer_WhenDecalClusterResourcesAreConnected()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var gbufferNode = new AutoRegisteredGBufferPassNode();
+                var lightGridNode = new AutoRegisteredLightGridPassNode();
+
+                RenderGraphTestUtility.AddTestNode(graph, gbufferNode);
+                RenderGraphTestUtility.AddTestNode(graph, lightGridNode);
+
+                graph.Connect(
+                    lightGridNode.GetOutputPortByName("m_DecalDataBuffer"),
+                    gbufferNode.GetInputPortByName("m_DecalDataBuffer"));
+                graph.Connect(
+                    lightGridNode.GetOutputPortByName("m_LayeredOffsetBuffer"),
+                    gbufferNode.GetInputPortByName("m_LayeredOffsetBuffer"));
+                graph.Connect(
+                    lightGridNode.GetOutputPortByName("m_LayeredLightListBuffer"),
+                    gbufferNode.GetInputPortByName("m_LayeredLightListBuffer"));
+                graph.Connect(
+                    lightGridNode.GetOutputPortByName("m_LogBaseBuffer"),
+                    gbufferNode.GetInputPortByName("m_LogBaseBuffer"));
+
+                var result = RenderGraphCompiler.Compile(graph);
+
+                Assert.That(result.ExecutionOrder.Select(pass => pass.PassTypeName), Is.EqualTo(new[]
+                {
+                    nameof(LightGridPass),
+                    nameof(GBufferPass),
+                }));
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
         }
     }
 }

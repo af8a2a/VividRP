@@ -121,6 +121,7 @@ namespace VividRP.Runtime
             var renderingData = s_FrameData.GetOrCreate<VividRenderingData>();
             var cameraData = s_FrameData.GetOrCreate<VividCameraData>();
             var gpuDrivenFrameData = s_FrameData.GetOrCreate<VividGPUDrivenFrameData>();
+            var gpuDrivenDecalData = s_FrameData.GetOrCreate<VividGPUDrivenDecalData>();
             var lightData = s_FrameData.GetOrCreate<VividLightData>();
             var additionalCameraData = camera.GetComponent<VividAdditionalCameraData>();
             if (additionalCameraData == null && camera.cameraType == CameraType.Game)
@@ -144,6 +145,7 @@ namespace VividRP.Runtime
             renderingData.cullingResults = cullingResults;
             renderingData.context = context;
             gpuDrivenFrameData.Reset();
+            gpuDrivenDecalData.Reset();
             lightData.Update(cullingResults);
         }
 

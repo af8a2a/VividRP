@@ -4,6 +4,9 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BakedGI.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
+#if defined(VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER)
+#include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/GPUDrivenDecalGBuffer.hlsl"
+#endif
 
 CBUFFER_START(UnityPerMaterial)
     float4 _BaseColor;
@@ -34,6 +37,7 @@ struct Varyings
     float3 normalWS : TEXCOORD0;
     float2 uv : TEXCOORD1;
     float2 lightmapUV : TEXCOORD2;
+    float3 positionWS : TEXCOORD3;
     UNITY_VERTEX_INPUT_INSTANCE_ID
     UNITY_VERTEX_OUTPUT_STEREO
 };
@@ -47,6 +51,7 @@ Varyings Vert(Attributes input)
     UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
     output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
+    output.positionWS = TransformObjectToWorld(input.positionOS.xyz);
     output.normalWS = TransformObjectToWorldNormal(input.normalOS);
     output.uv = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
     output.lightmapUV = TransformVividLightmapUV(input.uv1);
@@ -85,7 +90,11 @@ VividGBufferFragmentOutput FragGBuffer(Varyings input)
     UNITY_SETUP_INSTANCE_ID(input);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
-    return PackVividGBufferSurfaceData(BuildSimpleLitSurfaceData(input));
+    VividGBufferSurfaceData surfaceData = BuildSimpleLitSurfaceData(input);
+#if defined(VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER)
+    ApplyVividGPUDrivenDecalsToGBufferSurfaceData(surfaceData, input.positionWS, (uint2)input.positionCS.xy);
+#endif
+    return PackVividGBufferSurfaceData(surfaceData);
 }
 
 half4 FragPreDepth(Varyings input) : SV_Target

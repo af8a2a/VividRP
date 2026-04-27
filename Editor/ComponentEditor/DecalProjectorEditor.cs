@@ -15,7 +15,11 @@ namespace VividRP.Editor
         private SerializedProperty m_BlendDistance;
         private SerializedProperty m_BaseColorTexture;
         private SerializedProperty m_NormalTexture;
+        private SerializedProperty m_MetallicTexture;
+        private SerializedProperty m_RoughnessTexture;
         private SerializedProperty m_BaseColor;
+        private SerializedProperty m_Metallic;
+        private SerializedProperty m_Roughness;
 
         private SerializedBoundProxyShape m_SerializedShape;
 
@@ -25,7 +29,11 @@ namespace VividRP.Editor
             m_BlendDistance = serializedObject.FindProperty("m_BlendDistance");
             m_BaseColorTexture = serializedObject.FindProperty("m_BaseColorTexture");
             m_NormalTexture = serializedObject.FindProperty("m_NormalTexture");
+            m_MetallicTexture = serializedObject.FindProperty("m_MetallicTexture");
+            m_RoughnessTexture = serializedObject.FindProperty("m_RoughnessTexture");
             m_BaseColor = serializedObject.FindProperty("m_BaseColor");
+            m_Metallic = serializedObject.FindProperty("m_Metallic");
+            m_Roughness = serializedObject.FindProperty("m_Roughness");
 
             m_SerializedShape = new SerializedBoundProxyShape(m_BoundProxy);
         }
@@ -43,6 +51,10 @@ namespace VividRP.Editor
             EditorGUILayout.PropertyField(m_BaseColor);
             EditorGUILayout.PropertyField(m_BaseColorTexture);
             EditorGUILayout.PropertyField(m_NormalTexture);
+            EditorGUILayout.PropertyField(m_Metallic);
+            EditorGUILayout.PropertyField(m_MetallicTexture);
+            EditorGUILayout.PropertyField(m_Roughness);
+            EditorGUILayout.PropertyField(m_RoughnessTexture);
 
             serializedObject.ApplyModifiedProperties();
         }

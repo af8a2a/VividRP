@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -98,6 +99,19 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void LightGridPass_SourceUploadsDecalDataAndKeepsDecalCategoryShift()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Lighting", "LightGridPass.cs"));
+            var computeSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Lighting", "lightlistbuild-clustered.compute"));
+
+            Assert.That(source, Does.Contain("m_DecalDataBuffer = RenderGraphBuffer.CreateStructured(\"DecalData\""));
+            Assert.That(source, Does.Contain("UploadManagedArray("));
+            Assert.That(source, Does.Contain("m_DecalDataBuffer,"));
+            Assert.That(source, Does.Contain("m_ShaderVariablesLightListCB._DecalIndexShift = (uint)(m_PunctualLightCount + m_AreaLightCount);"));
+            Assert.That(computeSource, Does.Contain("WriteShiftIndex(t, LIGHTCATEGORY_DECAL, _DecalIndexShift);"));
+        }
+
         private static void AssertImportedBackingBuffer(RenderGraphBuffer buffer, string fieldName)
         {
             var importedGraphicsBufferProperty = typeof(RenderGraphBuffer).GetProperty(
@@ -129,6 +143,25 @@ namespace VividRP.Editor.Tests
             var attr = field.GetCustomAttribute<RenderGraphResource>();
             Assert.That(attr, Is.Not.Null, fieldName);
             Assert.That(attr.BindingMode, Is.EqualTo(expectedBindingMode), fieldName);
+        }
+
+        private static string GetPackageFilePath(params string[] relativeParts)
+        {
+            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            var packageRoots = new[]
+            {
+                Path.Combine(projectRoot, "Packages", "VividRP"),
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
+            };
+
+            foreach (var packageRoot in packageRoots)
+            {
+                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
+                if (File.Exists(fullPath))
+                    return fullPath;
+            }
+
+            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 }

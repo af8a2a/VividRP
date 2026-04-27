@@ -110,8 +110,8 @@ namespace VividRP.Runtime
         {
             public Matrix4x4 worldToDecal;
             public Vector4 baseColor;
-            public int baseColorTextureIndex;
-            public int normalTextureIndex;
+            public uint baseColorTextureIndex;
+            public uint normalTextureIndex;
             public float blendDistance;
             public float padding;
 

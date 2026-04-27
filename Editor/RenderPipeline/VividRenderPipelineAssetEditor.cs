@@ -18,6 +18,9 @@ namespace VividRP.Editor.RenderPipeline
         private static readonly GUIContent s_AutoExposureImplementationLabel = EditorGUIUtility.TrTextContent("Auto Exposure Implementation");
         private static readonly GUIContent s_AsyncComputeLabel = EditorGUIUtility.TrTextContent("Async Compute");
         private static readonly GUIContent s_GpuDrivenLabel = EditorGUIUtility.TrTextContent("GPU Driven");
+        private static readonly GUIContent s_GpuDrivenDecalLabel = EditorGUIUtility.TrTextContent(
+            "GPU Driven Decal",
+            "Experimental. Requires GPU Driven rendering and bindless texture descriptors; silently disables itself when bindless is unavailable.");
         private static readonly GUIContent s_GpuDrivenDebugOverlayLabel = EditorGUIUtility.TrTextContent("GPU Driven Debug Overlay");
         private static readonly GUIContent s_SrpBatcherLabel = EditorGUIUtility.TrTextContent("SRP Batcher");
         private static readonly GUIContent s_SupportProbeVolumeLabel = EditorGUIUtility.TrTextContent("Adaptive Probe Volumes");
@@ -81,6 +84,15 @@ namespace VividRP.Editor.RenderPipeline
                 name = "vivid-rp-asset-gpu-driven-field",
             };
             root.Add(gpuDrivenField);
+
+            var gpuDrivenDecalField = new PropertyField(
+                serializedObject.FindProperty("m_EnableGPUDrivenDecal"),
+                s_GpuDrivenDecalLabel.text)
+            {
+                name = "vivid-rp-asset-gpu-driven-decal-field",
+                tooltip = s_GpuDrivenDecalLabel.tooltip,
+            };
+            root.Add(gpuDrivenDecalField);
 
             var gpuDrivenDebugOverlayField = new PropertyField(
                 serializedObject.FindProperty("m_EnableGPUDrivenDebugOverlay"),

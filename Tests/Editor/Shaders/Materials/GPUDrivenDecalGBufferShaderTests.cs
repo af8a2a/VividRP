@@ -1,0 +1,93 @@
+using System;
+using System.IO;
+using NUnit.Framework;
+using UnityEngine;
+
+namespace VividRP.Editor.Tests
+{
+    public sealed class GPUDrivenDecalGBufferShaderTests
+    {
+        [Test]
+        public void StandardAndSimpleLitShaders_DeclareSeparateGPUDrivenDecalGBufferPasses()
+        {
+            var standardLitSource = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "StandardLit.shader"));
+            var simpleLitSource = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "SimpleLit.shader"));
+
+            AssertDecalGBufferPass(standardLitSource);
+            AssertDecalGBufferPass(simpleLitSource);
+        }
+
+        [Test]
+        public void StandardLitShader_KeepsDefaultGBufferPassFreeOfBindlessDecalRequirements()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "StandardLit.shader"));
+            var defaultPassStart = source.IndexOf("Name \"VividGBuffer\"", StringComparison.Ordinal);
+            var decalPassStart = source.IndexOf("Name \"VividGBufferGPUDrivenDecal\"", StringComparison.Ordinal);
+
+            Assert.That(defaultPassStart, Is.GreaterThanOrEqualTo(0));
+            Assert.That(decalPassStart, Is.GreaterThan(defaultPassStart));
+
+            var defaultGBufferPass = source.Substring(defaultPassStart, decalPassStart - defaultPassStart);
+
+            Assert.That(defaultGBufferPass, Does.Not.Contain("VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER"));
+            Assert.That(defaultGBufferPass, Does.Not.Contain("Bindless.hlsl"));
+        }
+
+        [Test]
+        public void MaterialGBufferPasses_ApplyGPUDrivenDecalsOnlyBehindDecalKeyword()
+        {
+            var standardLitSource = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "StandardLitGBufferPass.hlsl"));
+            var simpleLitSource = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "SimpleLitGBufferPass.hlsl"));
+
+            Assert.That(standardLitSource, Does.Contain("#if defined(VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER)"));
+            Assert.That(standardLitSource, Does.Contain("ApplyVividGPUDrivenDecalsToGBufferSurfaceData(surfaceData, input.positionWS"));
+            Assert.That(simpleLitSource, Does.Contain("#if defined(VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER)"));
+            Assert.That(simpleLitSource, Does.Contain("ApplyVividGPUDrivenDecalsToGBufferSurfaceData(surfaceData, input.positionWS"));
+        }
+
+        [Test]
+        public void SharedDecalGBufferHlsl_UsesClusteredDecalDataAndBindlessBaseNormalSampling()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "GPUDrivenDecalGBuffer.hlsl"));
+            var clusteredLightingSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "ClusteredLighting.hlsl"));
+
+            Assert.That(source, Does.Contain("StructuredBuffer<VividDecalClusterData> _DecalData;"));
+            Assert.That(source, Does.Contain("uint baseColorTextureIndex;"));
+            Assert.That(source, Does.Contain("uint normalTextureIndex;"));
+            Assert.That(clusteredLightingSource, Does.Contain("_ClusteredDecalGridEnabled"));
+            Assert.That(source, Does.Contain("VividClusteredLighting::LoadDecalCell"));
+            Assert.That(source, Does.Contain("VividClusteredLighting::LoadLightIndex"));
+            Assert.That(source, Does.Contain("GetBindlessTexture2D(NonUniformResourceIndex(decal.baseColorTextureIndex))"));
+            Assert.That(source, Does.Contain("GetBindlessTexture2D(NonUniformResourceIndex(decal.normalTextureIndex))"));
+            Assert.That(source, Does.Contain("surfaceData.baseColor = lerp"));
+            Assert.That(source, Does.Contain("surfaceData.normalWS = normalize(lerp"));
+        }
+
+        private static void AssertDecalGBufferPass(string shaderSource)
+        {
+            Assert.That(shaderSource, Does.Contain("Name \"VividGBufferGPUDrivenDecal\""));
+            Assert.That(shaderSource, Does.Contain("\"LightMode\" = \"VividGBufferGPUDrivenDecal\""));
+            Assert.That(shaderSource, Does.Contain("#define VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER 1"));
+            Assert.That(shaderSource, Does.Contain("#include_with_pragmas \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/Bindless.hlsl\""));
+        }
+
+        private static string GetPackageFilePath(params string[] relativeParts)
+        {
+            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            var packageRoots = new[]
+            {
+                Path.Combine(projectRoot, "Packages", "VividRP"),
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
+            };
+
+            foreach (var packageRoot in packageRoots)
+            {
+                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
+                if (File.Exists(fullPath))
+                    return fullPath;
+            }
+
+            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
+        }
+    }
+}

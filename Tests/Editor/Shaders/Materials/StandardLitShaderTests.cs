@@ -23,6 +23,8 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain($"\"LightMode\" = \"{RenderGraphRenderListDesc.PreDepthShaderTagName}\""));
             Assert.That(shaderSource, Does.Contain("Name \"VividGBuffer\""));
             Assert.That(shaderSource, Does.Contain("\"LightMode\" = \"VividGBuffer\""));
+            Assert.That(shaderSource, Does.Contain("Name \"VividGBufferGPUDrivenDecal\""));
+            Assert.That(shaderSource, Does.Contain("\"LightMode\" = \"VividGBufferGPUDrivenDecal\""));
             Assert.That(shaderSource, Does.Contain("Name \"SRPDefaultUnlit\""));
         }
 

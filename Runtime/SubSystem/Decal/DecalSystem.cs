@@ -4,6 +4,8 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
+using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.GPUDriven.Bindless;
 
 namespace VividRP.Runtime.SubSystem.Decal
 {
@@ -152,7 +154,7 @@ namespace VividRP.Runtime.SubSystem.Decal
                     baseColorTexture = projector.BaseColorTexture,
                     normalTexture = projector.NormalTexture,
                     baseColor = projector.BaseColor,
-                    blendDistance = projector.BlendDistance,
+                    blendDistance = NormalizeBlendDistance(projector.BlendDistance, wd.boxSize),
                 });
             }
 
@@ -168,6 +170,10 @@ namespace VividRP.Runtime.SubSystem.Decal
             if (frameData == null)
                 return;
 
+            var gpuDrivenDecalData = frameData.GetOrCreate<VividGPUDrivenDecalData>();
+            var gpuDrivenDecalEnabled = TryResolveGPUDrivenDecalBindlessContainer(out var bindlessTextureContainer);
+            gpuDrivenDecalData.isEnabled = gpuDrivenDecalEnabled;
+
             var lightData = frameData.GetOrCreate<VividLightData>();
             lightData.decalCount = s_ActiveDecals.Count;
 
@@ -179,17 +185,77 @@ namespace VividRP.Runtime.SubSystem.Decal
 
             for (int i = 0; i < s_ActiveDecals.Count; i++)
             {
-                DecalData decal = s_ActiveDecals[i];
-                lightData.decalClusterData[i] = new VividLightData.DecalClusterData
-                {
-                    worldToDecal = decal.worldToDecal,
-                    baseColor = decal.baseColor,
-                    baseColorTextureIndex = -1,
-                    normalTextureIndex = -1,
-                    blendDistance = decal.blendDistance,
-                    padding = 0f,
-                };
+                lightData.decalClusterData[i] = CreateDecalClusterData(
+                    s_ActiveDecals[i],
+                    gpuDrivenDecalEnabled,
+                    bindlessTextureContainer);
             }
+        }
+
+        internal static VividLightData.DecalClusterData CreateDecalClusterData(
+            DecalData decal,
+            bool gpuDrivenDecalEnabled,
+            BindlessTextureContainer bindlessTextureContainer)
+        {
+            return new VividLightData.DecalClusterData
+            {
+                worldToDecal = decal.worldToDecal,
+                baseColor = decal.baseColor,
+                baseColorTextureIndex = ResolveBindlessTextureIndex(
+                    decal.baseColorTexture,
+                    gpuDrivenDecalEnabled,
+                    bindlessTextureContainer),
+                normalTextureIndex = ResolveBindlessTextureIndex(
+                    decal.normalTexture,
+                    gpuDrivenDecalEnabled,
+                    bindlessTextureContainer),
+                blendDistance = decal.blendDistance,
+                padding = 0f,
+            };
+        }
+
+        internal static float NormalizeBlendDistance(float blendDistance, Vector3 boxSize)
+        {
+            if (blendDistance <= 0.0f)
+                return 0.0f;
+
+            var minDimension = Mathf.Min(
+                Mathf.Abs(boxSize.x),
+                Mathf.Min(Mathf.Abs(boxSize.y), Mathf.Abs(boxSize.z)));
+
+            if (minDimension <= 1e-5f)
+                return 0.0f;
+
+            return Mathf.Clamp(blendDistance / minDimension, 0.0f, 0.5f);
+        }
+
+        private static bool TryResolveGPUDrivenDecalBindlessContainer(out BindlessTextureContainer bindlessTextureContainer)
+        {
+            bindlessTextureContainer = null;
+
+            var asset = VividRenderPipelineAsset.GetActiveAsset();
+            if (asset == null || !asset.EnableGPUDriven || !asset.EnableGPUDrivenDecal)
+                return false;
+
+            var gpuDrivenSystem = VividGPUDrivenSystem.instance;
+            if (gpuDrivenSystem == null || !gpuDrivenSystem.IsAvailable)
+                return false;
+
+            bindlessTextureContainer = gpuDrivenSystem.BindlessTextureContainer;
+            return bindlessTextureContainer != null && bindlessTextureContainer.IsAvailable;
+        }
+
+        private static uint ResolveBindlessTextureIndex(
+            Texture texture,
+            bool gpuDrivenDecalEnabled,
+            BindlessTextureContainer bindlessTextureContainer)
+        {
+            if (!gpuDrivenDecalEnabled || bindlessTextureContainer == null)
+                return BindlessTextureContainer.InvalidTextureIndex;
+
+            return bindlessTextureContainer.TryGetOrCreateIndex(texture, out var textureIndex)
+                ? textureIndex
+                : BindlessTextureContainer.InvalidTextureIndex;
         }
 
         private static Camera GetCamera(ContextContainer frameData)

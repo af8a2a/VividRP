@@ -13,6 +13,17 @@ namespace VividRP.Editor.Tests
             typeof(VividLightData).GetMethod("CreateAreaLightData", BindingFlags.Static | BindingFlags.NonPublic);
 
         [Test]
+        public void DecalClusterData_UsesUnsignedBindlessTextureIndices()
+        {
+            Assert.That(
+                typeof(VividLightData.DecalClusterData).GetField(nameof(VividLightData.DecalClusterData.baseColorTextureIndex))?.FieldType,
+                Is.EqualTo(typeof(uint)));
+            Assert.That(
+                typeof(VividLightData.DecalClusterData).GetField(nameof(VividLightData.DecalClusterData.normalTextureIndex))?.FieldType,
+                Is.EqualTo(typeof(uint)));
+        }
+
+        [Test]
         public void UpdatePunctualLightClusteredCullData_BuildsSphereBoundsAndVolume_ForPointLight()
         {
             var lightData = new VividLightData

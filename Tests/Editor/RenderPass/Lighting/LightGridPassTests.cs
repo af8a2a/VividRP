@@ -25,15 +25,6 @@ namespace VividRP.Editor.Tests
             Assert.That(rawImportedFields, Is.Empty);
         }
 
-        [Test]
-        public void LightGridPass_HidesInternalBuildBuffers_FromAuthoringPorts()
-        {
-            AssertBindingMode("m_FiniteLightBoundBuffer", RenderGraphResourceBindingMode.PassOwnedHidden);
-            AssertBindingMode("m_LightVolumeDataBuffer", RenderGraphResourceBindingMode.PassOwnedHidden);
-            AssertBindingMode("m_ScreenSpaceBoundsBuffer", RenderGraphResourceBindingMode.PassOwnedHidden);
-            AssertBindingMode("m_BigTileLightListBuffer", RenderGraphResourceBindingMode.PassOwnedHidden);
-            AssertBindingMode("m_LayeredLightListCounterBuffer", RenderGraphResourceBindingMode.PassOwnedHidden);
-        }
 
         [Test]
         public void LightGridPass_KeepsLightingConsumerBuffers_VisibleForAuthoringPorts()

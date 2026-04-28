@@ -37,6 +37,7 @@ namespace VividRP.Editor.Tests
             AssertNonTransientResource("m_FiniteLightBoundBuffer");
             AssertNonTransientResource("m_LightVolumeDataBuffer");
             AssertNonTransientResource("m_BigTileLightListBuffer");
+            AssertNonTransientResource("m_BigTileVolumetricLightListBuffer");
         }
 
         [Test]
@@ -47,6 +48,7 @@ namespace VividRP.Editor.Tests
             AssertBindingMode("m_AreaLightBuffer", RenderGraphResourceBindingMode.External);
             AssertBindingMode("m_DecalDataBuffer", RenderGraphResourceBindingMode.External);
             AssertBindingMode("m_BigTileLightListBuffer", RenderGraphResourceBindingMode.External);
+            AssertBindingMode("m_BigTileVolumetricLightListBuffer", RenderGraphResourceBindingMode.External);
             AssertBindingMode("m_LayeredOffsetBuffer", RenderGraphResourceBindingMode.PassOwnedOverrideable);
             AssertBindingMode("m_LayeredLightListBuffer", RenderGraphResourceBindingMode.PassOwnedOverrideable);
             AssertBindingMode("m_LogBaseBuffer", RenderGraphResourceBindingMode.PassOwnedOverrideable);

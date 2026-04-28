@@ -87,6 +87,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "BigTileLightList", Access = AccessFlags.Read)]
         private RenderGraphBuffer m_BigTileLightListBuffer;
 
+        [RenderGraphResource(Name = "BigTileVolumetricLightList", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_BigTileVolumetricLightListBuffer;
+
         [RenderGraphResource(Name = "LayeredOffset", Access = AccessFlags.Read)]
         private RenderGraphBuffer m_LayeredOffsetBuffer;
 
@@ -102,6 +105,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphBuffer m_LocalPunctualLightBuffer;
         private readonly RenderGraphBuffer m_LocalAreaLightBuffer;
         private readonly RenderGraphBuffer m_LocalBigTileLightListBuffer;
+        private readonly RenderGraphBuffer m_LocalBigTileVolumetricLightListBuffer;
         private readonly RenderGraphBuffer m_LocalLayeredOffsetBuffer;
         private readonly RenderGraphBuffer m_LocalLayeredLightListBuffer;
         private readonly RenderGraphBuffer m_LocalLogBaseBuffer;
@@ -138,6 +142,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_SupportsClusteredPunctualLights;
         private bool m_SupportsClusteredAreaLights;
         private bool m_IsLogBaseBufferEnabled;
+        private RenderGraphBuffer m_FrameDataBigTileVolumetricLightListBuffer;
 
         public VolumetricLightingPass()
         {
@@ -159,6 +164,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LocalPunctualLightBuffer = RenderGraphBuffer.CreateStructured("PunctualLights", 1, VividLightData.PunctualLightData.Stride);
             m_LocalAreaLightBuffer = RenderGraphBuffer.CreateStructured("AreaLights", 1, VividLightData.AreaLightData.Stride);
             m_LocalBigTileLightListBuffer = RenderGraphBuffer.CreateStructured("BigTileLightList", 1, sizeof(uint));
+            m_LocalBigTileVolumetricLightListBuffer = RenderGraphBuffer.CreateStructured("BigTileVolumetricLightList", 1, sizeof(uint));
             m_LocalLayeredOffsetBuffer = RenderGraphBuffer.CreateStructured("LayeredOffset", 1, sizeof(uint));
             m_LocalLayeredLightListBuffer = RenderGraphBuffer.CreateStructured("LayeredLightList", 1, sizeof(uint));
             m_LocalLogBaseBuffer = RenderGraphBuffer.CreateStructured("LogBaseBuffer", 1, sizeof(float));
@@ -166,6 +172,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PunctualLightBuffer = m_LocalPunctualLightBuffer;
             m_AreaLightBuffer = m_LocalAreaLightBuffer;
             m_BigTileLightListBuffer = m_LocalBigTileLightListBuffer;
+            m_BigTileVolumetricLightListBuffer = m_LocalBigTileVolumetricLightListBuffer;
             m_LayeredOffsetBuffer = m_LocalLayeredOffsetBuffer;
             m_LayeredLightListBuffer = m_LocalLayeredLightListBuffer;
             m_LogBaseBuffer = m_LocalLogBaseBuffer;
@@ -275,6 +282,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_MainDirectionalLightIndex = -1;
             m_FilterDispatchZ = 1;
             m_SupportsVolumetricBigTileLightList = false;
+            m_FrameDataBigTileVolumetricLightListBuffer = null;
         }
 
         private void BindSharedTextures(ComputePassContext context, ComputeCommandBuffer cmd, int kernel, RenderGraphTexture lightingTarget)
@@ -345,7 +353,7 @@ namespace VividRP.Runtime.RenderPass.Core
             SetLightLoopBuffer(cmd, kernel, DirectionalLightsId, m_DirectionalLightBuffer);
             SetLightLoopBuffer(cmd, kernel, PunctualLightsId, m_PunctualLightBuffer);
             SetLightLoopBuffer(cmd, kernel, AreaLightsId, m_AreaLightBuffer);
-            SetLightLoopBuffer(cmd, kernel, BigTileLightListId, m_BigTileLightListBuffer);
+            SetLightLoopBuffer(cmd, kernel, BigTileLightListId, GetBigTileVolumetricLightListBufferForBinding());
             SetLightLoopBuffer(cmd, kernel, LayeredOffsetId, m_LayeredOffsetBuffer);
             SetLightLoopBuffer(cmd, kernel, LayeredLightListId, m_LayeredLightListBuffer);
             SetLightLoopBuffer(cmd, kernel, LogBaseBufferId, m_LogBaseBuffer);
@@ -377,10 +385,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SupportsClusteredPunctualLights = false;
             m_SupportsClusteredAreaLights = false;
             m_IsLogBaseBufferEnabled = false;
+            m_FrameDataBigTileVolumetricLightListBuffer = null;
 
             if (clusteredLightingData == null)
                 return;
 
+            m_FrameDataBigTileVolumetricLightListBuffer = clusteredLightingData.bigTileVolumetricLightList;
             m_MainDirectionalLightIndex = clusteredLightingData.mainDirectionalLightIndex;
             m_ClusterTileSize = clusteredLightingData.clusterTileSize > 0 ? clusteredLightingData.clusterTileSize : m_ClusterTileSize;
             m_ClusterSliceCount = clusteredLightingData.clusterSliceCount > 0 ? clusteredLightingData.clusterSliceCount : m_ClusterSliceCount;
@@ -411,7 +421,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 : 0;
             m_SupportsVolumetricBigTileLightList = supportsClusteredFiniteLights
                 && m_PunctualLightCount > 0
-                && HasBoundBigTileLightListBuffer();
+                && HasBoundBigTileVolumetricLightListBuffer();
             m_SupportsClusteredPunctualLights = supportsClusteredFiniteLights
                 && m_PunctualLightCount > 0
                 && HasBoundPunctualLightResources();
@@ -446,6 +456,26 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool HasBoundBigTileLightListBuffer()
         {
             return !ReferenceEquals(m_BigTileLightListBuffer, m_LocalBigTileLightListBuffer);
+        }
+
+        private bool HasBoundBigTileVolumetricLightListBuffer()
+        {
+            return !ReferenceEquals(m_BigTileVolumetricLightListBuffer, m_LocalBigTileVolumetricLightListBuffer)
+                || m_FrameDataBigTileVolumetricLightListBuffer != null;
+        }
+
+        private RenderGraphBuffer GetBigTileVolumetricLightListBufferForBinding()
+        {
+            if (HasBoundBigTileVolumetricLightListBuffer())
+            {
+                return !ReferenceEquals(m_BigTileVolumetricLightListBuffer, m_LocalBigTileVolumetricLightListBuffer)
+                    ? m_BigTileVolumetricLightListBuffer
+                    : m_FrameDataBigTileVolumetricLightListBuffer;
+            }
+
+            return HasBoundBigTileLightListBuffer()
+                ? m_BigTileLightListBuffer
+                : m_LocalBigTileVolumetricLightListBuffer;
         }
 
         private bool HasBoundPunctualLightBuffer()

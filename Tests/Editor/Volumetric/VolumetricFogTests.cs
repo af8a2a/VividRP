@@ -468,6 +468,7 @@ namespace VividRP.Editor.Tests
                 "PunctualLights",
                 "AreaLights",
                 "BigTileLightList",
+                "BigTileVolumetricLightList",
                 "LayeredOffset",
                 "LayeredLightList",
                 "LogBaseBuffer"
@@ -480,6 +481,7 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferLightingFiltered").Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferLightingFiltered").IsTransient, Is.True);
             Assert.That(resources.Buffers.Single(entry => entry.Name == "BigTileLightList").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(resources.Buffers.Single(entry => entry.Name == "BigTileVolumetricLightList").Access, Is.EqualTo(AccessFlags.Read));
         }
 
         [Test]
@@ -554,6 +556,7 @@ namespace VividRP.Editor.Tests
             var localFogManagerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Volumetric", "VividLocalVolumetricFogManager.cs"));
             var lightingPassSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Volumetric", "VolumetricLightingPass.cs"));
             var lightGridPassSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Lighting", "LightGridPass.cs"));
+            var bigTileLightListSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Lighting", "lightlistbuild-bigtile.compute"));
             var clusteredLightingDataSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "VividClusteredLightingData.cs"));
 
             Assert.That(densitySource, Does.Contain("#pragma kernel ClearVBufferDensity"));
@@ -703,17 +706,31 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingPassSource, Does.Contain("VolumetricUseBigTileLightListId = Shader.PropertyToID(\"_VolumetricUseBigTileLightList\")"));
             Assert.That(lightingPassSource, Does.Contain("NumTileBigTileXId = Shader.PropertyToID(\"_NumTileBigTileX\")"));
             Assert.That(lightingPassSource, Does.Contain("Name = \"BigTileLightList\", Access = AccessFlags.Read"));
-            Assert.That(lightingPassSource, Does.Contain("SetLightLoopBuffer(cmd, kernel, BigTileLightListId, m_BigTileLightListBuffer)"));
+            Assert.That(lightingPassSource, Does.Contain("Name = \"BigTileVolumetricLightList\", Access = AccessFlags.Read"));
+            Assert.That(lightingPassSource, Does.Contain("SetLightLoopBuffer(cmd, kernel, BigTileLightListId, GetBigTileVolumetricLightListBufferForBinding())"));
             Assert.That(lightingPassSource, Does.Contain("cmd.SetComputeIntParam(m_Shader, PunctualLightCountId, m_PunctualLightCount)"));
             Assert.That(lightingPassSource, Does.Contain("cmd.SetComputeIntParam(m_Shader, AreaLightCountId, m_AreaLightCount)"));
             Assert.That(lightingPassSource, Does.Contain("cmd.SetComputeIntParam(m_Shader, VolumetricUseBigTileLightListId"));
             Assert.That(lightingPassSource, Does.Contain("m_PunctualLightCount = HasBoundPunctualLightBuffer()"));
             Assert.That(lightingPassSource, Does.Contain("m_AreaLightCount = HasBoundAreaLightBuffer()"));
             Assert.That(lightingPassSource, Does.Contain("m_SupportsVolumetricBigTileLightList = supportsClusteredFiniteLights"));
+            Assert.That(lightingPassSource, Does.Contain("HasBoundBigTileVolumetricLightListBuffer()"));
+            Assert.That(lightingPassSource, Does.Contain("m_FrameDataBigTileVolumetricLightListBuffer = clusteredLightingData.bigTileVolumetricLightList"));
+            Assert.That(lightingPassSource, Does.Contain("|| m_FrameDataBigTileVolumetricLightListBuffer != null"));
             Assert.That(lightGridPassSource, Does.Contain("Name = \"BigTileLightList\""));
+            Assert.That(lightGridPassSource, Does.Contain("Name = \"BigTileVolumetricLightList\""));
+            Assert.That(lightGridPassSource, Does.Contain("BigTileVolumetricLightListId = Shader.PropertyToID(\"g_vVolumetricLightList\")"));
+            Assert.That(lightGridPassSource, Does.Not.Contain("GENERATE_VOLUMETRIC_BIGTILE"));
+            Assert.That(lightGridPassSource, Does.Not.Contain("SetKeyword"));
             Assert.That(lightGridPassSource, Does.Contain("clusteredLightingData.bigTileLightList = m_BigTileLightListBuffer"));
+            Assert.That(lightGridPassSource, Does.Contain("clusteredLightingData.bigTileVolumetricLightList = m_BigTileVolumetricLightListBuffer"));
             Assert.That(lightGridPassSource, Does.Contain("clusteredLightingData.bigTileCountX = m_ClusterBigTileCountX"));
+            Assert.That(bigTileLightListSource, Does.Contain("RWStructuredBuffer<uint> g_vVolumetricLightList"));
+            Assert.That(bigTileLightListSource, Does.Contain("LightAffectVolumetric"));
+            Assert.That(bigTileLightListSource, Does.Contain("g_vVolumetricLightList[bigTileOffset + i]"));
+            Assert.That(bigTileLightListSource, Does.Not.Contain("GENERATE_VOLUMETRIC_BIGTILE"));
             Assert.That(clusteredLightingDataSource, Does.Contain("public RenderGraphBuffer bigTileLightList"));
+            Assert.That(clusteredLightingDataSource, Does.Contain("public RenderGraphBuffer bigTileVolumetricLightList"));
             Assert.That(clusteredLightingDataSource, Does.Contain("public int bigTileCountX"));
 
             var vBufferSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Volumetric", "VBuffer.hlsl"));

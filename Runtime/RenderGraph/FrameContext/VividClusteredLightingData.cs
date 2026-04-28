@@ -9,6 +9,7 @@ namespace VividRP.Runtime
         public RenderGraphBuffer areaLights;
         public RenderGraphBuffer decalData;
         public RenderGraphBuffer bigTileLightList;
+        public RenderGraphBuffer bigTileVolumetricLightList;
         public RenderGraphBuffer layeredOffset;
         public RenderGraphBuffer layeredLightList;
         public RenderGraphBuffer logBaseBuffer;
@@ -39,6 +40,7 @@ namespace VividRP.Runtime
             areaLights = null;
             decalData = null;
             bigTileLightList = null;
+            bigTileVolumetricLightList = null;
             layeredOffset = null;
             layeredLightList = null;
             logBaseBuffer = null;

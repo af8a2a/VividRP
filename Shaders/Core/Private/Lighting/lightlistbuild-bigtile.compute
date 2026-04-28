@@ -1,4 +1,6 @@
 #pragma kernel BigTileLightListGen
+#pragma use_dxc
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "ShaderConfig.cs.hlsl"
@@ -7,10 +9,6 @@
 #include "LightingConvexHullUtils.hlsl"
 #include "SortingComputeUtils.hlsl"
 #include "LightCullUtils.hlsl"
-#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
-#pragma use_dxc
-
-#pragma multi_compile _ GENERATE_VOLUMETRIC_BIGTILE
 
 // Wave intrinsics audit — compile-time verification.
 // This kernel requires SM6.0 wave intrinsics unconditionally:
@@ -45,10 +43,8 @@ StructuredBuffer<SFiniteLightBound> g_data : register( t3 );
 // output buffer
 RWStructuredBuffer<uint> g_vLightList : register( u0 );     // don't support RWBuffer yet in unity
 
-#if defined(GENERATE_VOLUMETRIC_BIGTILE)
 // Output buffer for volumetric big tiles
 RWStructuredBuffer<uint> g_vVolumetricLightList;
-#endif
 
 
 // 2kB (room for roughly 30 wavefronts)
@@ -267,8 +263,6 @@ void BigTileLightListGen(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_Gro
     }
 
 
-#if defined(GENERATE_VOLUMETRIC_BIGTILE)
-
     // Parallel compaction of volumetric-affecting lights using wave intrinsics.
     // Same pattern as the non-volumetric compaction above; replaces serial thread-0 bucket walk.
     // lightsListLDS already contains the compacted coarse list from the previous pass,
@@ -342,7 +336,6 @@ void BigTileLightListGen(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_Gro
         }
     }
 
-#endif
 }
 
 #ifdef PERFORM_SPHERICAL_INTERSECTION_TESTS

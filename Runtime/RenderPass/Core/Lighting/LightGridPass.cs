@@ -31,6 +31,7 @@ namespace VividRP.Runtime
         private static readonly int ScreenSpaceBoundsId = Shader.PropertyToID("g_vBoundsBuffer");
         private static readonly int PackedBigTileLightListId = Shader.PropertyToID("g_vLightList");
         private static readonly int BigTileLightListId = Shader.PropertyToID("g_vBigTileLightList");
+        private static readonly int BigTileVolumetricLightListId = Shader.PropertyToID("g_vVolumetricLightList");
         private static readonly int LayeredLightListId = Shader.PropertyToID("g_vLayeredLightList");
         private static readonly int LayeredOffsetId = Shader.PropertyToID("g_LayeredOffset");
         private static readonly int LayeredLightListCounterId = Shader.PropertyToID("g_LayeredSingleIdxBuffer");
@@ -96,6 +97,11 @@ namespace VividRP.Runtime
             Name = "BigTileLightList",
             Access = AccessFlags.Write)]
         private RenderGraphBuffer m_BigTileLightListBuffer;
+
+        [RenderGraphResource(
+            Name = "BigTileVolumetricLightList",
+            Access = AccessFlags.Write)]
+        private RenderGraphBuffer m_BigTileVolumetricLightListBuffer;
 
         [RenderGraphResource(
             Name = "LayeredOffset",
@@ -184,6 +190,7 @@ namespace VividRP.Runtime
             m_LightVolumeDataBuffer = RenderGraphBuffer.CreateStructured("LightVolumeData", 1, VividLightData.LightVolumeData.Stride);
             m_ScreenSpaceBoundsBuffer = RenderGraphBuffer.CreateStructured("ScreenSpaceBounds", 1, sizeof(float) * 4);
             m_BigTileLightListBuffer = RenderGraphBuffer.CreateStructured("BigTileLightList", 1, sizeof(uint));
+            m_BigTileVolumetricLightListBuffer = RenderGraphBuffer.CreateStructured("BigTileVolumetricLightList", 1, sizeof(uint));
             m_LayeredOffsetBuffer = RenderGraphBuffer.CreateStructured("LayeredOffset", 1, sizeof(uint));
             m_LayeredLightListBuffer = RenderGraphBuffer.CreateStructured("LayeredLightList", 1, sizeof(uint));
             m_LayeredLightListCounterBuffer = RenderGraphBuffer.CreateStructured("LayeredLightListCounter", 1, sizeof(uint));
@@ -242,6 +249,7 @@ namespace VividRP.Runtime
                 ResizeStructuredBuffer(m_LightVolumeDataBuffer, Mathf.Max(m_FiniteLightCount, 1), VividLightData.LightVolumeData.Stride);
                 ResizeStructuredBuffer(m_ScreenSpaceBoundsBuffer, Mathf.Max(m_FiniteLightCount * 2, 1), sizeof(float) * 4);
                 ResizeStructuredBuffer(m_BigTileLightListBuffer, Mathf.Max(m_ClusterBigTileLightIndexCapacity, 1), sizeof(uint));
+                ResizeStructuredBuffer(m_BigTileVolumetricLightListBuffer, Mathf.Max(m_ClusterBigTileLightIndexCapacity, 1), sizeof(uint));
                 ResizeStructuredBuffer(m_LayeredOffsetBuffer, Mathf.Max(m_LayeredOffsetCapacity, 1), sizeof(uint));
                 ResizeStructuredBuffer(m_LayeredLightListBuffer, Mathf.Max(m_ClusterLightIndexCapacity, 1), sizeof(uint));
                 ResizeStructuredBuffer(m_LayeredLightListCounterBuffer, 1, sizeof(uint));
@@ -395,6 +403,7 @@ namespace VividRP.Runtime
         private void DispatchClearLightLists(ComputeCommandBuffer cmd)
         {
             DispatchClearLightList(cmd, m_BigTileLightListBuffer);
+            DispatchClearLightList(cmd, m_BigTileVolumetricLightListBuffer);
         }
 
         private void DispatchClearLightList(ComputeCommandBuffer cmd, RenderGraphBuffer buffer)
@@ -440,6 +449,11 @@ namespace VividRP.Runtime
             cmd.SetComputeBufferParam(m_BuildPerBigTileLightListCompute, m_BuildPerBigTileLightListKernel, LightVolumeDataId, m_LightVolumeDataBuffer.innerHandle);
             cmd.SetComputeBufferParam(m_BuildPerBigTileLightListCompute, m_BuildPerBigTileLightListKernel, FiniteLightBoundsId, m_FiniteLightBoundBuffer.innerHandle);
             cmd.SetComputeBufferParam(m_BuildPerBigTileLightListCompute, m_BuildPerBigTileLightListKernel, PackedBigTileLightListId, m_BigTileLightListBuffer.innerHandle);
+            cmd.SetComputeBufferParam(
+                m_BuildPerBigTileLightListCompute,
+                m_BuildPerBigTileLightListKernel,
+                BigTileVolumetricLightListId,
+                m_BigTileVolumetricLightListBuffer.innerHandle);
             PushShaderVariablesLightList(cmd, m_BuildPerBigTileLightListCompute);
             cmd.DispatchCompute(
                 m_BuildPerBigTileLightListCompute,
@@ -676,6 +690,7 @@ namespace VividRP.Runtime
             clusteredLightingData.areaLights = m_AreaLightBuffer;
             clusteredLightingData.decalData = m_DecalDataBuffer;
             clusteredLightingData.bigTileLightList = m_BigTileLightListBuffer;
+            clusteredLightingData.bigTileVolumetricLightList = m_BigTileVolumetricLightListBuffer;
             clusteredLightingData.layeredOffset = m_LayeredOffsetBuffer;
             clusteredLightingData.layeredLightList = m_LayeredLightListBuffer;
             clusteredLightingData.logBaseBuffer = m_LogBaseBuffer;
@@ -736,6 +751,7 @@ namespace VividRP.Runtime
             m_FiniteLightBoundBuffer?.EnsureImportedBuffer();
             m_LightVolumeDataBuffer?.EnsureImportedBuffer();
             m_BigTileLightListBuffer?.EnsureImportedBuffer();
+            m_BigTileVolumetricLightListBuffer?.EnsureImportedBuffer();
             m_LayeredOffsetBuffer?.EnsureImportedBuffer();
             m_LayeredLightListBuffer?.EnsureImportedBuffer();
             m_LogBaseBuffer?.EnsureImportedBuffer();
@@ -832,6 +848,7 @@ namespace VividRP.Runtime
             m_FiniteLightBoundBuffer?.ClearImportedBuffer();
             m_LightVolumeDataBuffer?.ClearImportedBuffer();
             m_BigTileLightListBuffer?.ClearImportedBuffer();
+            m_BigTileVolumetricLightListBuffer?.ClearImportedBuffer();
             m_LayeredOffsetBuffer?.ClearImportedBuffer();
             m_LayeredLightListBuffer?.ClearImportedBuffer();
             m_LogBaseBuffer?.ClearImportedBuffer();

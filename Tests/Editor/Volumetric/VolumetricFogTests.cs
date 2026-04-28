@@ -639,17 +639,18 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("light.volumetricDimmer"));
             Assert.That(lightingSource, Does.Contain("light.volumetricFadeDistance"));
             Assert.That(lightingSource, Does.Contain("directionalLight.volumetricShadowDimmer"));
-            Assert.That(lightingSource, Does.Contain("uint _PunctualLightCount"));
             Assert.That(lightingSource, Does.Contain("uint _AreaLightCount"));
             Assert.That(lightingSource, Does.Contain("StructuredBuffer<uint> g_vBigTileLightList"));
             Assert.That(lightingSource, Does.Contain("uint _VolumetricUseBigTileLightList"));
             Assert.That(lightingSource, Does.Contain("uint _NumTileBigTileX"));
             Assert.That(lightingSource, Does.Contain("uint _NumTileBigTileY"));
+            Assert.That(lightingSource, Does.Not.Contain("_PunctualLightCount"));
+            Assert.That(lightingSource, Does.Not.Contain("VBUFFER_MAX_PUNCTUAL_LIGHTS"));
             Assert.That(lightingSource, Does.Contain("GetVolumetricBigTileIndex"));
             Assert.That(lightingSource, Does.Contain("GetBigTileLightCount"));
             Assert.That(lightingSource, Does.Contain("FetchBigTileLightIndex"));
             Assert.That(lightingSource, Does.Contain("FetchBigTileLightIndex(bigTileIndex, lightOffset)"));
-            Assert.That(lightingSource, Does.Contain("if (lightIndex >= _PunctualLightCount)"));
+            Assert.That(lightingSource, Does.Contain("if (_VolumetricUseBigTileLightList == 0u || _NumTileBigTileX == 0u || _NumTileBigTileY == 0u)"));
             Assert.That(lightingSource, Does.Contain("VBUFFER_PUNCTUAL_SAMPLE_COUNT"));
             Assert.That(lightingSource, Does.Contain("EvaluatePunctualLightingIntegral"));
             Assert.That(lightingSource, Does.Contain("ImportanceSamplePunctualLight"));
@@ -700,7 +701,7 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingPassSource, Does.Contain("FilterKernelName = \"FilterVolumetricLighting\""));
             Assert.That(lightingPassSource, Does.Contain("m_FilterDispatchZ = Mathf.Max(m_Settings.VBufferParameters.SliceCount, 1)"));
             Assert.That(lightingPassSource, Does.Contain("cmd.DispatchCompute(m_Shader, m_FilterKernel, m_DispatchX, m_DispatchY, m_FilterDispatchZ)"));
-            Assert.That(lightingPassSource, Does.Contain("PunctualLightCountId = Shader.PropertyToID(\"_PunctualLightCount\")"));
+            Assert.That(lightingPassSource, Does.Not.Contain("PunctualLightCountId = Shader.PropertyToID(\"_PunctualLightCount\")"));
             Assert.That(lightingPassSource, Does.Contain("AreaLightCountId = Shader.PropertyToID(\"_AreaLightCount\")"));
             Assert.That(lightingPassSource, Does.Contain("BigTileLightListId = Shader.PropertyToID(\"g_vBigTileLightList\")"));
             Assert.That(lightingPassSource, Does.Contain("VolumetricUseBigTileLightListId = Shader.PropertyToID(\"_VolumetricUseBigTileLightList\")"));
@@ -708,7 +709,7 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingPassSource, Does.Contain("Name = \"BigTileLightList\", Access = AccessFlags.Read"));
             Assert.That(lightingPassSource, Does.Contain("Name = \"BigTileVolumetricLightList\", Access = AccessFlags.Read"));
             Assert.That(lightingPassSource, Does.Contain("SetLightLoopBuffer(cmd, kernel, BigTileLightListId, GetBigTileVolumetricLightListBufferForBinding())"));
-            Assert.That(lightingPassSource, Does.Contain("cmd.SetComputeIntParam(m_Shader, PunctualLightCountId, m_PunctualLightCount)"));
+            Assert.That(lightingPassSource, Does.Not.Contain("cmd.SetComputeIntParam(m_Shader, PunctualLightCountId"));
             Assert.That(lightingPassSource, Does.Contain("cmd.SetComputeIntParam(m_Shader, AreaLightCountId, m_AreaLightCount)"));
             Assert.That(lightingPassSource, Does.Contain("cmd.SetComputeIntParam(m_Shader, VolumetricUseBigTileLightListId"));
             Assert.That(lightingPassSource, Does.Contain("m_PunctualLightCount = HasBoundPunctualLightBuffer()"));

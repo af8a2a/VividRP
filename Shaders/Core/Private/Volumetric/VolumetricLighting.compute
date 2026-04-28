@@ -17,13 +17,11 @@ RWTexture3D<float4> _VBufferLighting;
 RWTexture3D<float4> _VBufferLightingOutput;
 StructuredBuffer<uint> g_vBigTileLightList;
 float _VBufferMaxZEnabled;
-uint _PunctualLightCount;
 uint _AreaLightCount;
 uint _VolumetricUseBigTileLightList;
 uint _NumTileBigTileX;
 uint _NumTileBigTileY;
 
-#define VBUFFER_MAX_PUNCTUAL_LIGHTS 64u
 #define VBUFFER_PUNCTUAL_SAMPLE_COUNT 1u
 #define VBUFFER_BIG_TILE_SIZE 64u
 #define VBUFFER_MAX_BIG_TILE_LIGHTS_PLUS_ONE 512u
@@ -389,19 +387,17 @@ float3 EvaluatePunctualLightingIntegral(uint3 voxelCoord, uint2 vBufferPixel, fl
     if (_VBufferFogDirectionalOnly > 0.5)
         return 0.0;
 
-    bool useBigTileLightList = _VolumetricUseBigTileLightList != 0u && _NumTileBigTileX > 0u && _NumTileBigTileY > 0u;
-    uint bigTileIndex = useBigTileLightList ? GetVolumetricBigTileIndex(vBufferPixel) : 0u;
-    uint lightCount = useBigTileLightList
-        ? GetBigTileLightCount(bigTileIndex)
-        : min(_PunctualLightCount, VBUFFER_MAX_PUNCTUAL_LIGHTS);
+    if (_VolumetricUseBigTileLightList == 0u || _NumTileBigTileX == 0u || _NumTileBigTileY == 0u)
+        return 0.0;
+
+    uint bigTileIndex = GetVolumetricBigTileIndex(vBufferPixel);
+    uint lightCount = GetBigTileLightCount(bigTileIndex);
     float3 lightingIntegral = 0.0;
 
     [loop]
     for (uint lightOffset = 0; lightOffset < lightCount; lightOffset++)
     {
-        uint lightIndex = useBigTileLightList ? FetchBigTileLightIndex(bigTileIndex, lightOffset) : lightOffset;
-        if (lightIndex >= _PunctualLightCount)
-            continue;
+        uint lightIndex = FetchBigTileLightIndex(bigTileIndex, lightOffset);
 
         PunctualLightData light = GetPunctualLight((int)lightIndex);
         if (!LightAffectsVolumetrics(light.affectVolumetric, light.volumetricDimmer))

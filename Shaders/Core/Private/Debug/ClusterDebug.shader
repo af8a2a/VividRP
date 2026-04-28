@@ -36,15 +36,23 @@ Shader "Hidden/VividRP/ClusterDebug"
             SAMPLER(sampler_SourceTexture);
             TEXTURE2D(_CameraDepthTexture);
             SAMPLER(sampler_CameraDepthTexture);
+            StructuredBuffer<uint> g_vBigTileLightList;
 
             float4 _SourceTextureScaleBias;
             float4 _CameraDepthTextureScaleBias;
             float4 _ClusterDebugLightViewportSize;
             float _ClusterDebugDistance;
             float _ClusterDebugMaxLightCount;
+            uint _BigTileLightListEnabled;
+            uint _PunctualLightCount;
+            uint _AreaLightCount;
+            uint _DecalCount;
+            uint _NumTileBigTileX;
+            uint _NumTileBigTileY;
             uint _ViewTilesFlags;
             int _TileClusterDebug;
             int _ClusterDebugMode;
+            int _BigTileSize;
 
             struct Attributes
             {
@@ -84,6 +92,17 @@ Shader "Hidden/VividRP/ClusterDebug"
                     && _ClusterTileCountX > 0
                     && _ClusterTileCountY > 0
                     && _ClusterSliceCount > 0;
+            }
+
+            bool IsBigTileDebugEnabled()
+            {
+                return _TileClusterDebug == VIVID_TILE_CLUSTER_DEBUG_TILE
+                    && _BigTileLightListEnabled != 0u
+                    && ((IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_PUNCTUAL) && _PunctualLightCount > 0u)
+                        || (IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_AREA) && _AreaLightCount > 0u)
+                        || (IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_DECAL) && _DecalCount > 0u))
+                    && _NumTileBigTileX > 0u
+                    && _NumTileBigTileY > 0u;
             }
 
             bool IsSkyDepth(float deviceDepth)
@@ -137,6 +156,62 @@ Shader "Hidden/VividRP/ClusterDebug"
                 return lightCount;
             }
 
+            uint GetBigTileIndex(uint2 pixelCoord)
+            {
+                uint tileSize = max((uint)_BigTileSize, 1u);
+                uint tileX = min(pixelCoord.x / tileSize, _NumTileBigTileX - 1u);
+                uint tileY = min(pixelCoord.y / tileSize, _NumTileBigTileY - 1u);
+                return tileY * _NumTileBigTileX + tileX;
+            }
+
+            uint GetBigTileLightCount(uint bigTileIndex)
+            {
+                uint baseOffset = (MAX_NR_BIG_TILE_LIGHTS_PLUS_ONE * bigTileIndex) >> 1;
+                return min(g_vBigTileLightList[baseOffset] & 0xffffu, MAX_NR_BIG_TILE_LIGHTS_PLUS_ONE - 1u);
+            }
+
+            uint FetchBigTileLightIndex(uint bigTileIndex, uint lightOffset)
+            {
+                uint baseOffset = (MAX_NR_BIG_TILE_LIGHTS_PLUS_ONE * bigTileIndex) >> 1;
+                uint lightOffsetPlusOne = lightOffset + 1u;
+                uint packedLightIndices = g_vBigTileLightList[baseOffset + (lightOffsetPlusOne >> 1)];
+                return (packedLightIndices >> ((lightOffsetPlusOne & 1u) * 16u)) & 0xffffu;
+            }
+
+            bool IsFiniteLightIndexSelected(uint lightIndex)
+            {
+                uint areaLightStart = _PunctualLightCount;
+                uint decalStart = areaLightStart + _AreaLightCount;
+                uint finiteLightEnd = decalStart + _DecalCount;
+
+                if (lightIndex < areaLightStart)
+                    return IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_PUNCTUAL);
+
+                if (lightIndex < decalStart)
+                    return IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_AREA);
+
+                if (lightIndex < finiteLightEnd)
+                    return IsClusterCategorySelected(VIVID_TILE_CLUSTER_CATEGORY_DECAL);
+
+                return false;
+            }
+
+            uint GetSelectedBigTileLightCount(uint2 pixelCoord)
+            {
+                uint bigTileIndex = GetBigTileIndex(pixelCoord);
+                uint bigTileLightCount = GetBigTileLightCount(bigTileIndex);
+                uint selectedLightCount = 0u;
+
+                [loop]
+                for (uint lightOffset = 0u; lightOffset < bigTileLightCount; lightOffset++)
+                {
+                    uint lightIndex = FetchBigTileLightIndex(bigTileIndex, lightOffset);
+                    selectedLightCount += IsFiniteLightIndexSelected(lightIndex) ? 1u : 0u;
+                }
+
+                return selectedLightCount;
+            }
+
             uint GetSelectedClusterCategoryCount()
             {
                 uint categoryCount = 0u;
@@ -165,9 +240,34 @@ Shader "Hidden/VividRP/ClusterDebug"
                 float2 sourceUv = ApplyScaleBias(pixelUv, _SourceTextureScaleBias);
                 float2 depthUv = ApplyScaleBias(pixelUv, _CameraDepthTextureScaleBias);
                 float4 sourceColor = SAMPLE_TEXTURE2D(_SourceTexture, sampler_SourceTexture, sourceUv);
+                bool bigTileDebugEnabled = IsBigTileDebugEnabled();
+                bool clusterDebugEnabled = IsClusterDebugEnabled();
 
-                if (!IsClusterDebugEnabled())
+                if (!bigTileDebugEnabled && !clusterDebugEnabled)
                     return sourceColor;
+
+                if (bigTileDebugEnabled)
+                {
+                    uint lightCount = GetSelectedBigTileLightCount(pixelCoord);
+                    uint tileSize = max((uint)_BigTileSize, 1u);
+                    uint2 tileSize2 = uint2(tileSize, tileSize);
+                    uint maxLightCount = max((uint)_ClusterDebugMaxLightCount, 1u);
+                    float4 result = sourceColor;
+
+                    if (lightCount > 0u)
+                        result = AlphaBlend(result, OverlayHeatMap(pixelCoord, tileSize2, lightCount, maxLightCount, 0.35));
+
+                    uint2 pixelInTile = pixelCoord % tileSize;
+                    bool border = pixelInTile.x == 0u
+                        || pixelInTile.y == 0u
+                        || pixelInTile.x == tileSize - 1u
+                        || pixelInTile.y == tileSize - 1u;
+
+                    if (border)
+                        result = AlphaBlend(result, float4(1.0, 1.0, 1.0, lightCount > 0u ? 0.22 : 0.12));
+
+                    return result;
+                }
 
                 float deviceDepth = SAMPLE_TEXTURE2D_LOD(_CameraDepthTexture, sampler_PointClamp, depthUv, 0).r;
                 bool isValid;

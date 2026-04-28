@@ -27,7 +27,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int DirectionalLightCountId = Shader.PropertyToID("_DirectionalLightCount");
         private static readonly int MainDirectionalLightIndexId = Shader.PropertyToID("_MainDirectionalLightIndex");
         private static readonly int PunctualLightsId = Shader.PropertyToID("_PunctualLights");
-        private static readonly int PunctualLightCountId = Shader.PropertyToID("_PunctualLightCount");
         private static readonly int AreaLightsId = Shader.PropertyToID("_AreaLights");
         private static readonly int AreaLightCountId = Shader.PropertyToID("_AreaLightCount");
         private static readonly int BigTileLightListId = Shader.PropertyToID("g_vBigTileLightList");
@@ -326,7 +325,6 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             cmd.SetComputeIntParam(m_Shader, DirectionalLightCountId, m_DirectionalLightCount);
             cmd.SetComputeIntParam(m_Shader, MainDirectionalLightIndexId, m_MainDirectionalLightIndex);
-            cmd.SetComputeIntParam(m_Shader, PunctualLightCountId, m_PunctualLightCount);
             cmd.SetComputeIntParam(m_Shader, AreaLightCountId, m_AreaLightCount);
             cmd.SetComputeIntParam(m_Shader, VolumetricUseBigTileLightListId, m_SupportsVolumetricBigTileLightList ? 1 : 0);
             cmd.SetComputeIntParam(m_Shader, ClusteredPunctualLightGridEnabledId, m_SupportsClusteredPunctualLights ? 1 : 0);

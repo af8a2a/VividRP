@@ -2,7 +2,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
+using VividRP.Editor;
 using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven.Bindless;
 using VividRP.Runtime.SubSystem.Decal;
@@ -216,6 +218,43 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("Handles.DrawWireCube"));
             Assert.That(source, Does.Contain("DrawProjectionPlane"));
             Assert.That(source, Does.Contain("Handles.DrawAAPolyLine"));
+        }
+
+        [Test]
+        public void DecalProjectorMenuItems_DefinesGameObjectMenuEntryLikeHdrp()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Editor", "ComponentEditor", "DecalProjectorMenuItems.cs"));
+
+            Assert.That(DecalProjectorMenuItems.CreateDecalProjectorMenuPath, Is.EqualTo("GameObject/Rendering/VividRP Decal Projector"));
+            Assert.That(source, Does.Contain("[MenuItem(CreateDecalProjectorMenuPath"));
+            Assert.That(source, Does.Contain("RotateAround(projector.transform.position, projector.transform.right, 90.0f)"));
+        }
+
+        [Test]
+        public void CreateDecalProjectorGameObject_AddsProjectorSelectsObjectAndParentsToContext()
+        {
+            var parent = new GameObject("Decal Menu Parent");
+            GameObject decalObject = null;
+
+            try
+            {
+                decalObject = DecalProjectorMenuItems.CreateDecalProjectorGameObject(parent);
+
+                Assert.That(decalObject.name, Is.EqualTo("Decal Projector"));
+                Assert.That(decalObject.transform.parent, Is.EqualTo(parent.transform));
+                Assert.That(decalObject.GetComponent<DecalProjector>(), Is.Not.Null);
+                Assert.That(Selection.activeGameObject, Is.EqualTo(decalObject));
+                AssertQuaternion(decalObject.transform.rotation, Quaternion.Euler(90.0f, 0.0f, 0.0f));
+            }
+            finally
+            {
+                Selection.activeGameObject = null;
+
+                if (decalObject != null)
+                    Object.DestroyImmediate(decalObject);
+
+                Object.DestroyImmediate(parent);
+            }
         }
 
         [Test]

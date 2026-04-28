@@ -178,6 +178,36 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void BuildShaderVariables_ClampsDensityCutoffToNonNegative()
+        {
+            var vBuffer = VividVolumetricUtility.ComputeVBufferParameters(
+                1920,
+                1080,
+                VividVolumetricFogVolume.DefaultScreenResolutionPercentage,
+                64,
+                100.0f,
+                0.5f);
+            var settings = new VividVolumetricFogSettings(
+                true,
+                Vector3.one,
+                1.0f,
+                0.0f,
+                50.0f,
+                0.0f,
+                1.0f,
+                100.0f,
+                0.5f,
+                VividVolumetricFogDenoisingMode.None,
+                false,
+                -1.0f,
+                vBuffer);
+
+            var shaderVariables = VividVolumetricUtility.BuildShaderVariables(settings, 1920, 1080, 0);
+
+            Assert.That(shaderVariables._VBufferFogControlParams.z, Is.EqualTo(0.0f).Within(0.0001f));
+        }
+
+        [Test]
         public void LocalVolumetricFog_ConvertToEngineData_EncodesScatteringAndFade()
         {
             var gameObject = new GameObject("Local Volumetric Fog");
@@ -392,15 +422,21 @@ namespace VividRP.Editor.Tests
             Assert.That(densitySource, Does.Contain("ComputeHeightFogMultiplier"));
             Assert.That(densitySource, Does.Contain("exp(-heightAboveBase * rcpScaleHeight)"));
             Assert.That(densitySource, Does.Contain("_VBufferFogRcpScaleHeight"));
+            Assert.That(densitySource, Does.Not.Contain("_VBufferDensityCutoff"));
             Assert.That(densitySource, Does.Not.Contain("extinction <= _VBufferDensityCutoff"));
             Assert.That(lightingSource, Does.Contain("#pragma kernel VolumetricLighting"));
             Assert.That(lightingSource, Does.Contain("#pragma kernel GaussianFilterVBufferLighting"));
             Assert.That(lightingSource, Does.Contain("LightingLoop.hlsl"));
             Assert.That(lightingSource, Does.Contain("[numthreads(8, 8, 1)]"));
             Assert.That(lightingSource, Does.Contain("for (uint slice = 0; slice < sliceCount; slice++)"));
+            Assert.That(lightingSource, Does.Contain("ShouldEvaluateVBufferLighting"));
             Assert.That(lightingSource, Does.Contain("extinction > _VBufferDensityCutoff"));
+            Assert.That(lightingSource, Does.Contain("float3 scattering = max(density.rgb, 0.0)"));
+            Assert.That(lightingSource, Does.Contain("float extinction = max(density.a, 0.0)"));
+            Assert.That(lightingSource, Does.Contain("voxelOpticalDepth = extinction * dt"));
             Assert.That(lightingSource, Does.Contain("TransmittanceIntegralHomogeneousMedium"));
-            Assert.That(lightingSource, Does.Contain("totalRadiance += transmittanceToSlice"));
+            Assert.That(lightingSource, Does.Contain("totalRadiance += transmittanceToSlice * scattering"));
+            Assert.That(lightingSource, Does.Not.Contain("totalRadiance += transmittanceToSlice * density.rgb"));
             Assert.That(lightingSource, Does.Contain("opticalDepth += 0.5 * voxelOpticalDepth"));
             Assert.That(lightingSource, Does.Contain("StoreIntegratedVBufferLighting"));
             Assert.That(lightingSource, Does.Contain("light.affectVolumetric"));

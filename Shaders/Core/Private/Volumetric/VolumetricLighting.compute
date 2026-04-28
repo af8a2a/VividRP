@@ -60,6 +60,11 @@ float TransmittanceIntegralHomogeneousMedium(float extinction, float intervalLen
     return (1.0 - exp(-extinction * intervalLength)) / max(extinction, 1e-4);
 }
 
+bool ShouldEvaluateVBufferLighting(float extinction)
+{
+    return extinction > _VBufferDensityCutoff;
+}
+
 float4 EncodeIntegratedVBufferLighting(float3 totalRadiance, float opticalDepth)
 {
     float transmittance = TransmittanceFromOpticalDepth(opticalDepth);
@@ -228,10 +233,11 @@ void VolumetricLighting(uint3 dispatchThreadId : SV_DispatchThreadID)
             float centerDistance = DecodeLogarithmicDepthGeneralized(e1 - 0.5 * de, _VBufferDepthDecodingParams);
             float3 positionWS = _WorldSpaceCameraPos + rayDirectionWS * centerDistance;
             float4 density = _VBufferDensity.Load(int4(voxelCoord, 0));
-            float extinction = density.a;
+            float3 scattering = max(density.rgb, 0.0);
+            float extinction = max(density.a, 0.0);
             voxelOpticalDepth = extinction * dt;
 
-            if (extinction > _VBufferDensityCutoff)
+            if (ShouldEvaluateVBufferLighting(extinction))
             {
                 float3 lighting = EvaluateAmbientLighting();
                 lighting += EvaluateDirectionalLighting(voxelCoord, positionWS);
@@ -240,7 +246,7 @@ void VolumetricLighting(uint3 dispatchThreadId : SV_DispatchThreadID)
 
                 float transmittanceToSlice = TransmittanceFromOpticalDepth(opticalDepth);
                 float integratedTransmittance = TransmittanceIntegralHomogeneousMedium(extinction, dt);
-                totalRadiance += transmittanceToSlice * density.rgb * lighting * integratedTransmittance;
+                totalRadiance += transmittanceToSlice * scattering * lighting * integratedTransmittance;
             }
         }
 

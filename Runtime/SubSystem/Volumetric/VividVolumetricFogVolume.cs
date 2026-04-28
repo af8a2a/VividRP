@@ -83,7 +83,7 @@ namespace VividRP.Runtime
         [Tooltip("Limits volumetric lighting to directional lights.")]
         public BoolParameter directionalLightsOnly = new(false);
 
-        [Tooltip("Density values below this threshold are skipped by volumetric lighting.")]
+        [Tooltip("Extinction values at or below this threshold skip in-scattered lighting evaluation. Density still contributes transmittance.")]
         public ClampedFloatParameter volumetricLightingDensityCutoff = new(0.00001f, 0.0f, 0.01f);
 
         public bool IsActive()

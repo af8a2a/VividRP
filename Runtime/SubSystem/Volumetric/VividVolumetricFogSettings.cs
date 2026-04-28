@@ -405,7 +405,7 @@ namespace VividRP.Runtime
                 _VBufferFogControlParams = new Vector4(
                     settings.Enabled ? 1.0f : 0.0f,
                     settings.DirectionalLightsOnly ? 1.0f : 0.0f,
-                    settings.DensityCutoff,
+                    ComputeEffectiveDensityCutoff(settings.DensityCutoff),
                     settings.GlobalLightProbeDimmer),
                 _VBufferLocalFogParams = new Vector4(
                     Mathf.Max(localFogCount, 0),
@@ -413,6 +413,11 @@ namespace VividRP.Runtime
                     0.0f,
                     0.0f)
             };
+        }
+
+        internal static float ComputeEffectiveDensityCutoff(float densityCutoff)
+        {
+            return Mathf.Max(densityCutoff, 0.0f);
         }
 
         internal static float ComputeHeightFogScaleHeight(float baseHeight, float maximumHeight)

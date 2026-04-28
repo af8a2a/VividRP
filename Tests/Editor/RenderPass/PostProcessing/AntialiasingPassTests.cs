@@ -105,7 +105,7 @@ namespace VividRP.Editor.Tests
             var outputTexture = GetTextureField(pass, "AntialiasingOutput");
             Assert.That(outputTexture.desc.Width, Is.EqualTo(640));
             Assert.That(outputTexture.desc.Height, Is.EqualTo(360));
-            Assert.That(outputTexture.desc.EnableRandomWrite, Is.True);
+            Assert.That(outputTexture.desc.EnableRandomWrite, Is.False);
         }
 
         [Test]
@@ -232,6 +232,20 @@ namespace VividRP.Editor.Tests
             Assert.That(passRecorderSource, Does.Not.Contain("RecordInjectedDlssPass"));
             Assert.That(passRecorderSource, Does.Contain("pass is IRenderGraphRecordingPass graphRecordingPass"));
             Assert.That(renderGraphPassSource, Does.Contain("public interface IRenderGraphRecordingPass"));
+        }
+
+        [Test]
+        public void SourceFiles_RegisterPassthrough_WhenEffectiveModeIsNone()
+        {
+            var antialiasingPassSource = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "AntialiasingPass.cs"));
+
+            Assert.That(antialiasingPassSource, Does.Contain("if (m_EffectiveMode == VividAntialiasingMode.None)"));
+            Assert.That(antialiasingPassSource, Does.Contain("TryRegisterPassthrough(context)"));
+            Assert.That(antialiasingPassSource, Does.Contain("context.RegisterTextureHandle(AntialiasingOutput, sourceHandle)"));
         }
 
         private static ContextContainer CreateFrameData(

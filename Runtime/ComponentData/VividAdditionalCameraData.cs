@@ -88,6 +88,9 @@ namespace VividRP.Runtime
         [SerializeField]
         private bool m_EnableTAA;
 
+        [SerializeField, HideInInspector]
+        private bool m_LegacyAntialiasingMigrated;
+
         [SerializeField, Range(0.2f, 2.0f)]
         private float m_TAAJitterSpread = 1.0f;
 
@@ -397,9 +400,14 @@ namespace VividRP.Runtime
                 m_Antialiasing = VividAntialiasingMode.None;
 #endif
 
-            if (m_Antialiasing == VividAntialiasingMode.None && m_EnableTAA)
+            if (!m_LegacyAntialiasingMigrated
+                && m_Antialiasing == VividAntialiasingMode.None
+                && m_EnableTAA)
+            {
                 m_Antialiasing = VividAntialiasingMode.TemporalAntiAliasing;
+            }
 
+            m_LegacyAntialiasingMigrated = true;
             m_EnableTAA = m_Antialiasing == VividAntialiasingMode.TemporalAntiAliasing;
         }
     }

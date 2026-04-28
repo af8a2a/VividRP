@@ -42,11 +42,38 @@ namespace VividRP.Editor.Tests
             {
                 SetPrivateField(additionalData, "m_Antialiasing", VividAntialiasingMode.None);
                 SetPrivateField(additionalData, "m_EnableTAA", true);
+                SetPrivateField(additionalData, "m_LegacyAntialiasingMigrated", false);
 
                 ((ISerializationCallbackReceiver)additionalData).OnAfterDeserialize();
 
                 Assert.That(additionalData.antialiasing, Is.EqualTo(VividAntialiasingMode.TemporalAntiAliasing));
                 Assert.That(additionalData.enableTAA, Is.True);
+            }
+            finally
+            {
+                GameObject.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void OnAfterDeserialize_DoesNotRestoreTaaAfterLegacyMigrationCompleted()
+        {
+            var gameObject = new GameObject("VividAdditionalCameraDataTests_NoRestoreTAA");
+            var additionalData = gameObject.AddComponent<VividAdditionalCameraData>();
+
+            try
+            {
+                SetPrivateField(additionalData, "m_Antialiasing", VividAntialiasingMode.None);
+                SetPrivateField(additionalData, "m_EnableTAA", true);
+                SetPrivateField(additionalData, "m_LegacyAntialiasingMigrated", false);
+                ((ISerializationCallbackReceiver)additionalData).OnAfterDeserialize();
+
+                SetPrivateField(additionalData, "m_Antialiasing", VividAntialiasingMode.None);
+                SetPrivateField(additionalData, "m_EnableTAA", true);
+                ((ISerializationCallbackReceiver)additionalData).OnAfterDeserialize();
+
+                Assert.That(additionalData.antialiasing, Is.EqualTo(VividAntialiasingMode.None));
+                Assert.That(additionalData.enableTAA, Is.False);
             }
             finally
             {

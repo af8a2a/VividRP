@@ -151,6 +151,15 @@ namespace VividRP.Runtime.RenderPass.Core
             if (Color?.innerHandle.IsValid() != true)
                 return;
 
+            if (m_EffectiveMode == VividAntialiasingMode.None)
+            {
+                if (TryRegisterPassthrough(context))
+                    return;
+
+                RecordCopyPass(context);
+                return;
+            }
+
             ResolveInputHandle(context, MotionVectors);
             ResolveInputHandle(context, CameraDepth);
 
@@ -179,6 +188,9 @@ namespace VividRP.Runtime.RenderPass.Core
                     break;
 #endif
             }
+
+            if (TryRegisterPassthrough(context))
+                return;
 
             RecordCopyPass(context);
         }
@@ -468,6 +480,35 @@ namespace VividRP.Runtime.RenderPass.Core
                 && !ReferenceEquals(CameraDepth, m_DefaultCameraDepth);
         }
 
+        private bool TryRegisterPassthrough(RenderGraphRecordingContext context)
+        {
+            if (!CanAliasPassthrough())
+                return false;
+
+            var sourceHandle = context.GetOrCreateTextureHandle(Color);
+            if (!sourceHandle.IsValid())
+                return false;
+
+            context.RegisterTextureHandle(AntialiasingOutput, sourceHandle);
+            return true;
+        }
+
+        private bool CanAliasPassthrough()
+        {
+            var sourceDesc = Color?.desc;
+            var outputDesc = AntialiasingOutput?.desc;
+            if (sourceDesc == null || outputDesc == null)
+                return false;
+
+            return sourceDesc.Width == outputDesc.Width
+                && sourceDesc.Height == outputDesc.Height
+                && sourceDesc.Slices == outputDesc.Slices
+                && sourceDesc.Dimension == outputDesc.Dimension
+                && sourceDesc.ColorFormat == outputDesc.ColorFormat
+                && sourceDesc.DepthBufferBits == outputDesc.DepthBufferBits
+                && sourceDesc.MsaaSamples == outputDesc.MsaaSamples;
+        }
+
         private void RecordCopyPass(RenderGraphRecordingContext context)
         {
             if (m_CopyMaterial == null)
@@ -541,6 +582,17 @@ namespace VividRP.Runtime.RenderPass.Core
             var outputDescriptor = sourceDescriptor?.Clone()
                 ?? RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16G16B16A16_SFloat);
             var outputSize = ResolveOutputDimensions(cameraData, antialiasingData);
+
+            if (m_EffectiveMode == VividAntialiasingMode.None)
+            {
+                outputDescriptor.Name = "AntialiasingOutput";
+                outputDescriptor.Width = Mathf.Max(1, outputSize.x);
+                outputDescriptor.Height = Mathf.Max(1, outputSize.y);
+                outputDescriptor.ClearBuffer = false;
+                AntialiasingOutput.desc = outputDescriptor;
+                return;
+            }
+
             var colorFormat = outputDescriptor.ColorFormat != GraphicsFormat.None
                 ? outputDescriptor.ColorFormat
                 : GraphicsFormat.R16G16B16A16_SFloat;

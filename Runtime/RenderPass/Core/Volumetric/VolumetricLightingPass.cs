@@ -177,7 +177,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 : VividVolumetricUtility.ResolveSettings(frameData);
             m_ShaderVariables = volumetricData.VBufferDensity != null
                 ? volumetricData.shaderVariables
-                : VividVolumetricUtility.BuildShaderVariables(m_Settings, m_CameraWidth, m_CameraHeight, 0);
+                : VividVolumetricUtility.BuildShaderVariables(m_Settings, m_CameraWidth, m_CameraHeight, 0, cameraData);
 
             ConfigureCameraDepthTexture(m_CameraWidth, m_CameraHeight);
             VolumetricDensityPass.ConfigureVBufferTexture(m_VBufferDensity, m_Settings.VBufferParameters, "VBufferDensity", clear: false);
@@ -213,7 +213,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 var lightingTarget = m_Settings.GaussianFilteringEnabled ? m_VBufferLightingFiltered : m_VBufferLighting;
                 BindSharedTextures(context, cmd, m_LightingKernel, lightingTarget);
                 BindLightLoopParameters(cmd, m_LightingKernel);
-                cmd.DispatchCompute(m_Shader, m_LightingKernel, m_DispatchX, m_DispatchY, m_DispatchZ);
+                cmd.DispatchCompute(m_Shader, m_LightingKernel, m_DispatchX, m_DispatchY, 1);
 
                 if (m_Settings.GaussianFilteringEnabled)
                 {

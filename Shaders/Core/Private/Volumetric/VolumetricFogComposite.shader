@@ -47,11 +47,6 @@ Shader "Hidden/VividRP/VolumetricFogComposite"
                 return output;
             }
 
-            bool IsFarDepth(float deviceDepth)
-            {
-                return abs(deviceDepth - UNITY_RAW_FAR_CLIP_VALUE) <= 1e-5;
-            }
-
             float4 Frag(Varyings input) : SV_Target
             {
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
@@ -62,10 +57,8 @@ Shader "Hidden/VividRP/VolumetricFogComposite"
                     return color;
 
                 float deviceDepth = _CameraDepth.SampleLevel(sampler_PointClamp, uv, 0);
-                float linearDepth = IsFarDepth(deviceDepth)
-                    ? _VBufferDepthExtent
-                    : LinearEyeDepth(deviceDepth, _ZBufferParams);
-                float3 vBufferUVW = GetVBufferUVW(uv, linearDepth);
+                float linearDistance = GetVBufferLinearDistanceFromDeviceDepth(uv, deviceDepth);
+                float3 vBufferUVW = GetVBufferUVW(uv, linearDistance);
                 float4 lighting = _VBufferLighting.SampleLevel(sampler_LinearClamp, vBufferUVW, 0);
                 return float4(color.rgb * saturate(lighting.a) + lighting.rgb, color.a);
             }

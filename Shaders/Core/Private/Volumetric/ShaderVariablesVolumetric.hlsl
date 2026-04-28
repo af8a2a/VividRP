@@ -2,9 +2,12 @@
 #define VIVIDRP_SHADER_VARIABLES_VOLUMETRIC_INCLUDED
 
 CBUFFER_START(ShaderVariablesVolumetric)
+    float4x4 _VBufferCoordToViewDirWS;
     float4 _VBufferViewportSize;
     float4 _VBufferViewportScale;
     float4 _VBufferDepthEncodingParams;
+    float4 _VBufferDepthDecodingParams;
+    float4 _VBufferGeometryParams;
     float4 _VBufferFogScattering;
     float4 _VBufferFogHeightParams;
     float4 _VBufferFogControlParams;
@@ -17,10 +20,10 @@ CBUFFER_END
 #define _VBufferRcpSliceCount          _VBufferViewportSize.w
 #define _VBufferCameraToVBufferScale   _VBufferViewportScale.xy
 #define _VBufferRcpViewportSize        _VBufferViewportScale.zw
-#define _VBufferDepthExtent            _VBufferDepthEncodingParams.x
-#define _VBufferRcpDepthExtent         _VBufferDepthEncodingParams.y
-#define _VBufferDepthPower             _VBufferDepthEncodingParams.z
-#define _VBufferInvDepthPower          _VBufferDepthEncodingParams.w
+#define _VBufferUnitDepthTexelSpacing  _VBufferGeometryParams.x
+#define _VBufferVoxelSize              _VBufferGeometryParams.y
+#define _VBufferLastSliceDistance      _VBufferGeometryParams.z
+#define _VBufferIsOrthographic         _VBufferGeometryParams.w
 #define _VBufferFogBaseHeight          _VBufferFogHeightParams.x
 #define _VBufferFogMaximumHeight       _VBufferFogHeightParams.y
 #define _VBufferFogInvHeightRange      _VBufferFogHeightParams.z

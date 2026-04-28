@@ -50,6 +50,39 @@ float EvaluateVolumetricLightFade(float distanceToCamera, float fadeDistance)
     return fadeDistance > 0.0 ? saturate(1.0 - distanceToCamera / fadeDistance) : 0.0;
 }
 
+float TransmittanceFromOpticalDepth(float opticalDepth)
+{
+    return exp(-opticalDepth);
+}
+
+float TransmittanceIntegralHomogeneousMedium(float extinction, float intervalLength)
+{
+    return (1.0 - exp(-extinction * intervalLength)) / max(extinction, 1e-4);
+}
+
+float4 EncodeIntegratedVBufferLighting(float3 totalRadiance, float opticalDepth)
+{
+    float transmittance = TransmittanceFromOpticalDepth(opticalDepth);
+    return float4(VividApplyPreExposure(max(totalRadiance, 0.0)), saturate(transmittance));
+}
+
+void StoreIntegratedVBufferLighting(uint3 voxelCoord, float3 totalRadiance, float opticalDepth)
+{
+    _VBufferLighting[voxelCoord] = EncodeIntegratedVBufferLighting(totalRadiance, opticalDepth);
+}
+
+void StoreEmptyVBufferLighting(uint3 voxelCoord)
+{
+    _VBufferLighting[voxelCoord] = float4(0.0, 0.0, 0.0, 1.0);
+}
+
+float GetVBufferOpaqueGeometryDistance(float2 vBufferUV, out bool hasOpaqueGeometry)
+{
+    float deviceDepth = _CameraDepth.SampleLevel(sampler_PointClamp, vBufferUV, 0);
+    hasOpaqueGeometry = !IsVBufferFarDepth(deviceDepth);
+    return GetVBufferLinearDistanceFromDeviceDepth(vBufferUV, deviceDepth);
+}
+
 float3 EvaluateDirectionalLighting(uint3 voxelCoord, float3 positionWS)
 {
     float3 lighting = 0.0;
@@ -80,6 +113,7 @@ float3 EvaluateClusteredPunctualLighting(uint2 vBufferPixel, float3 positionWS)
     float2 cameraPixel = (float2(vBufferPixel) + 0.5) * _VBufferCameraToVBufferScale;
     VividLightingLoopContext lightLoop = VividLightingLoop::Create((uint2)cameraPixel, positionWS);
     uint lightCount = min(VividLightingLoop::GetPunctualLightCount(lightLoop), 16u);
+    float3 viewDirectionWS = SafeNormalize(_WorldSpaceCameraPos - positionWS);
     float3 lighting = 0.0;
 
     [loop]
@@ -92,12 +126,14 @@ float3 EvaluateClusteredPunctualLighting(uint2 vBufferPixel, float3 positionWS)
         float3 lightVector = light.positionWS - positionWS;
         float distanceSq = max(dot(lightVector, lightVector), 1e-4);
         float distanceToLight = sqrt(distanceSq);
+        float3 lightDirectionWS = lightVector / distanceToLight;
+        float phase = HenyeyGreensteinPhase(dot(lightDirectionWS, viewDirectionWS), _VBufferFogAnisotropy);
         float rangeAttenuation = saturate(1.0 - distanceToLight / max(light.range, 1e-4));
         rangeAttenuation *= rangeAttenuation;
         float volumetricFade = EvaluateVolumetricLightFade(
             GetVolumetricLightCameraDistance(light.positionWS),
             light.volumetricFadeDistance);
-        lighting += max(light.color, 0.0) * light.volumetricDimmer * volumetricFade * rangeAttenuation / max(distanceSq, 1.0);
+        lighting += max(light.color, 0.0) * light.volumetricDimmer * volumetricFade * phase * rangeAttenuation / max(distanceSq, 1.0);
     }
 
     return lighting;
@@ -111,6 +147,7 @@ float3 EvaluateClusteredAreaLighting(uint2 vBufferPixel, float3 positionWS)
     float2 cameraPixel = (float2(vBufferPixel) + 0.5) * _VBufferCameraToVBufferScale;
     VividLightingLoopContext lightLoop = VividLightingLoop::Create((uint2)cameraPixel, positionWS);
     uint lightCount = min(VividLightingLoop::GetAreaLightCount(lightLoop), 8u);
+    float3 viewDirectionWS = SafeNormalize(_WorldSpaceCameraPos - positionWS);
     float3 lighting = 0.0;
 
     [loop]
@@ -123,12 +160,14 @@ float3 EvaluateClusteredAreaLighting(uint2 vBufferPixel, float3 positionWS)
         float3 lightVector = light.positionWS - positionWS;
         float distanceSq = max(dot(lightVector, lightVector), 1e-4);
         float distanceToLight = sqrt(distanceSq);
+        float3 lightDirectionWS = lightVector / distanceToLight;
+        float phase = HenyeyGreensteinPhase(dot(lightDirectionWS, viewDirectionWS), _VBufferFogAnisotropy);
         float rangeAttenuation = saturate(1.0 - distanceToLight / max(light.range, 1e-4));
         rangeAttenuation *= rangeAttenuation;
         float volumetricFade = EvaluateVolumetricLightFade(
             GetVolumetricLightCameraDistance(light.positionWS),
             light.volumetricFadeDistance);
-        lighting += max(light.color, 0.0) * light.volumetricDimmer * volumetricFade * rangeAttenuation / max(distanceSq, 1.0);
+        lighting += max(light.color, 0.0) * light.volumetricDimmer * volumetricFade * phase * rangeAttenuation / max(distanceSq, 1.0);
     }
 
     return lighting;
@@ -148,30 +187,68 @@ void ClearVBufferLighting(uint3 dispatchThreadId : SV_DispatchThreadID)
     _VBufferLighting[dispatchThreadId] = float4(0.0, 0.0, 0.0, 1.0);
 }
 
-[numthreads(8, 8, 4)]
+[numthreads(8, 8, 1)]
 void VolumetricLighting(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    if (!IsInsideVBuffer(dispatchThreadId))
+    uint2 vBufferPixel = dispatchThreadId.xy;
+    if (vBufferPixel.x >= (uint)_VBufferWidth || vBufferPixel.y >= (uint)_VBufferHeight)
         return;
 
-    float4 density = _VBufferDensity.Load(int4(dispatchThreadId, 0));
-    float extinction = density.a;
-    if (extinction <= _VBufferDensityCutoff)
+    float2 vBufferUV = (float2(vBufferPixel) + 0.5) * _VBufferRcpViewportSize;
+    float3 rayDirectionWS = GetVBufferRayDirectionWSFromUV(vBufferUV);
+    bool hasOpaqueGeometry;
+    float opaqueGeometryDistance = GetVBufferOpaqueGeometryDistance(vBufferUV, hasOpaqueGeometry);
+
+    float t0 = GetVBufferSliceBoundaryDistance(0.0);
+    float de = _VBufferRcpSliceCount;
+    uint sliceCount = (uint)_VBufferSliceCount;
+    float3 totalRadiance = 0.0;
+    float opticalDepth = 0.0;
+
+    [loop]
+    for (uint slice = 0; slice < sliceCount; slice++)
     {
-        _VBufferLighting[dispatchThreadId] = float4(0.0, 0.0, 0.0, 1.0);
-        return;
+        uint3 voxelCoord = uint3(vBufferPixel, slice);
+        if (hasOpaqueGeometry && opaqueGeometryDistance <= t0)
+        {
+            StoreEmptyVBufferLighting(voxelCoord);
+            continue;
+        }
+
+        float e1 = ((float)slice + 1.0) * de;
+        float t1 = GetVBufferSliceBoundaryDistance((float)slice + 1.0);
+        float tNext = t1;
+        if (hasOpaqueGeometry && opaqueGeometryDistance >= t0 && opaqueGeometryDistance <= t1)
+            t1 = max(t0 * 1.0001, opaqueGeometryDistance);
+
+        float dt = max(t1 - t0, 0.0);
+        float voxelOpticalDepth = 0.0;
+        if (dt > 0.0)
+        {
+            float centerDistance = DecodeLogarithmicDepthGeneralized(e1 - 0.5 * de, _VBufferDepthDecodingParams);
+            float3 positionWS = _WorldSpaceCameraPos + rayDirectionWS * centerDistance;
+            float4 density = _VBufferDensity.Load(int4(voxelCoord, 0));
+            float extinction = density.a;
+            voxelOpticalDepth = extinction * dt;
+
+            if (extinction > _VBufferDensityCutoff)
+            {
+                float3 lighting = EvaluateAmbientLighting();
+                lighting += EvaluateDirectionalLighting(voxelCoord, positionWS);
+                lighting += EvaluateClusteredPunctualLighting(vBufferPixel, positionWS);
+                lighting += EvaluateClusteredAreaLighting(vBufferPixel, positionWS);
+
+                float transmittanceToSlice = TransmittanceFromOpticalDepth(opticalDepth);
+                float integratedTransmittance = TransmittanceIntegralHomogeneousMedium(extinction, dt);
+                totalRadiance += transmittanceToSlice * density.rgb * lighting * integratedTransmittance;
+            }
+        }
+
+        opticalDepth += 0.5 * voxelOpticalDepth;
+        StoreIntegratedVBufferLighting(voxelCoord, totalRadiance, opticalDepth);
+        opticalDepth += 0.5 * voxelOpticalDepth;
+        t0 = tNext;
     }
-
-    float3 positionWS = GetVBufferVoxelWorldPosition(dispatchThreadId);
-    float3 lighting = EvaluateAmbientLighting();
-    lighting += EvaluateDirectionalLighting(dispatchThreadId, positionWS);
-    lighting += EvaluateClusteredPunctualLighting(dispatchThreadId.xy, positionWS);
-    lighting += EvaluateClusteredAreaLighting(dispatchThreadId.xy, positionWS);
-
-    float sliceLength = GetVBufferSliceLength();
-    float transmittance = exp(-extinction * sliceLength);
-    float3 singleScattering = density.rgb * lighting * (1.0 - transmittance) / max(extinction, 1e-4);
-    _VBufferLighting[dispatchThreadId] = float4(VividApplyPreExposure(max(singleScattering, 0.0)), saturate(transmittance));
 }
 
 float4 LoadLightingClamped(int3 coord)

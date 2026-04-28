@@ -82,7 +82,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_Settings,
                 m_CameraWidth,
                 m_CameraHeight,
-                m_LocalFogCount);
+                m_LocalFogCount,
+                cameraData);
 
             ConfigureCameraDepthTexture(m_CameraWidth, m_CameraHeight);
             ConfigureVBufferTexture(m_VBufferDensity, m_Settings.VBufferParameters, "VBufferDensity", clear: true);

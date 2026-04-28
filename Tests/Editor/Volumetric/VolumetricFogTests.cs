@@ -95,7 +95,48 @@ namespace VividRP.Editor.Tests
             Assert.That(parameters.ViewportWidth, Is.EqualTo(240));
             Assert.That(parameters.ViewportHeight, Is.EqualTo(135));
             Assert.That(parameters.SliceCount, Is.EqualTo(64));
-            Assert.That(parameters.DepthDistributionPower, Is.EqualTo(1.5f).Within(0.0001f));
+            Assert.That(parameters.DepthEncodingParams.z, Is.EqualTo(-0.7f).Within(0.0001f));
+            Assert.That(parameters.DepthDecodingParams.x, Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(parameters.DecodeLogarithmicDepth(parameters.EncodeLogarithmicDepth(10.0f)), Is.EqualTo(10.0f).Within(0.0001f));
+            Assert.That(parameters.ComputeSliceLength(63), Is.GreaterThan(parameters.ComputeSliceLength(0)));
+            Assert.That(parameters.LastSliceDistance, Is.GreaterThan(parameters.NearClipPlane));
+            Assert.That(parameters.LastSliceDistance, Is.LessThan(parameters.NearClipPlane + parameters.DepthExtent));
+        }
+
+        [Test]
+        public void BuildShaderVariables_EncodesHdrpVBufferGeometry()
+        {
+            var gameObject = new GameObject("Volumetric Camera");
+            var camera = gameObject.AddComponent<Camera>();
+            camera.fieldOfView = 60.0f;
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 1000.0f;
+            var cameraData = new VividCameraData
+            {
+                camera = camera,
+                actualWidth = 1920,
+                actualHeight = 1080,
+                pixelWidth = 1920,
+                pixelHeight = 1080
+            };
+
+            try
+            {
+                var settings = VividVolumetricFogSettings.Disabled(1920, 1080);
+                var shaderVariables = VividVolumetricUtility.BuildShaderVariables(settings, 1920, 1080, 0, cameraData);
+                var vBuffer = settings.VBufferParameters;
+
+                Assert.That(shaderVariables._VBufferDepthEncodingParams, Is.EqualTo(vBuffer.DepthEncodingParams));
+                Assert.That(shaderVariables._VBufferDepthDecodingParams, Is.EqualTo(vBuffer.DepthDecodingParams));
+                Assert.That(shaderVariables._VBufferGeometryParams.x, Is.EqualTo(vBuffer.UnitDepthTexelSpacing).Within(0.0001f));
+                Assert.That(shaderVariables._VBufferGeometryParams.z, Is.EqualTo(vBuffer.LastSliceDistance).Within(0.0001f));
+                Assert.That(shaderVariables._VBufferGeometryParams.w, Is.EqualTo(0.0f).Within(0.0001f));
+                Assert.That(shaderVariables._VBufferCoordToViewDirWS.m00, Is.Not.EqualTo(0.0f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
         }
 
         [Test]
@@ -304,6 +345,7 @@ namespace VividRP.Editor.Tests
             var densitySource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Volumetric", "VolumetricDensity.compute"));
             var lightingSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Volumetric", "VolumetricLighting.compute"));
             var compositeSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Volumetric", "VolumetricFogComposite.shader"));
+            var lightingPassSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Volumetric", "VolumetricLightingPass.cs"));
 
             Assert.That(densitySource, Does.Contain("#pragma kernel ClearVBufferDensity"));
             Assert.That(densitySource, Does.Contain("#pragma kernel VoxelizeVBufferDensity"));
@@ -312,12 +354,27 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("#pragma kernel VolumetricLighting"));
             Assert.That(lightingSource, Does.Contain("#pragma kernel GaussianFilterVBufferLighting"));
             Assert.That(lightingSource, Does.Contain("LightingLoop.hlsl"));
+            Assert.That(lightingSource, Does.Contain("[numthreads(8, 8, 1)]"));
+            Assert.That(lightingSource, Does.Contain("for (uint slice = 0; slice < sliceCount; slice++)"));
+            Assert.That(lightingSource, Does.Contain("TransmittanceIntegralHomogeneousMedium"));
+            Assert.That(lightingSource, Does.Contain("totalRadiance += transmittanceToSlice"));
+            Assert.That(lightingSource, Does.Contain("opticalDepth += 0.5 * voxelOpticalDepth"));
+            Assert.That(lightingSource, Does.Contain("StoreIntegratedVBufferLighting"));
             Assert.That(lightingSource, Does.Contain("light.affectVolumetric"));
             Assert.That(lightingSource, Does.Contain("light.volumetricDimmer"));
             Assert.That(lightingSource, Does.Contain("light.volumetricFadeDistance"));
             Assert.That(lightingSource, Does.Contain("directionalLight.volumetricShadowDimmer"));
             Assert.That(compositeSource, Does.Contain("Hidden/VividRP/VolumetricFogComposite"));
             Assert.That(compositeSource, Does.Contain("_VBufferLighting"));
+            Assert.That(compositeSource, Does.Contain("GetVBufferLinearDistanceFromDeviceDepth"));
+            Assert.That(lightingPassSource, Does.Contain("cmd.DispatchCompute(m_Shader, m_LightingKernel, m_DispatchX, m_DispatchY, 1)"));
+
+            var vBufferSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Volumetric", "VBuffer.hlsl"));
+            Assert.That(vBufferSource, Does.Contain("DecodeLogarithmicDepthGeneralized"));
+            Assert.That(vBufferSource, Does.Contain("_VBufferCoordToViewDirWS"));
+            Assert.That(vBufferSource, Does.Contain("_VBufferDepthDecodingParams"));
+            Assert.That(vBufferSource, Does.Contain("_VBufferIsOrthographic"));
+            Assert.That(vBufferSource, Does.Contain("IsVBufferFarDepth"));
         }
 
         [Test]

@@ -76,7 +76,7 @@ namespace VividRP.Runtime
         public ClampedIntParameter volumeSliceCount =
             new(DefaultVolumeSliceCount, MinVolumeSliceCount, MaxVolumeSliceCount);
 
-        [Tooltip("Spatial denoising mode for the VBuffer lighting result.")]
+        [Tooltip("Spatial denoising mode for the VBuffer lighting result. Gaussian uses HDRP-style slice-local XY filtering.")]
         public EnumParameter<VividVolumetricFogDenoisingMode> denoisingMode =
             new(VividVolumetricFogDenoisingMode.Gaussian);
 

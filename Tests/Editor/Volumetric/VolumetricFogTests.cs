@@ -425,7 +425,7 @@ namespace VividRP.Editor.Tests
             Assert.That(densitySource, Does.Not.Contain("_VBufferDensityCutoff"));
             Assert.That(densitySource, Does.Not.Contain("extinction <= _VBufferDensityCutoff"));
             Assert.That(lightingSource, Does.Contain("#pragma kernel VolumetricLighting"));
-            Assert.That(lightingSource, Does.Contain("#pragma kernel GaussianFilterVBufferLighting"));
+            Assert.That(lightingSource, Does.Contain("#pragma kernel FilterVolumetricLighting"));
             Assert.That(lightingSource, Does.Contain("LightingLoop.hlsl"));
             Assert.That(lightingSource, Does.Contain("[numthreads(8, 8, 1)]"));
             Assert.That(lightingSource, Does.Contain("for (uint slice = 0; slice < sliceCount; slice++)"));
@@ -443,10 +443,19 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("light.volumetricDimmer"));
             Assert.That(lightingSource, Does.Contain("light.volumetricFadeDistance"));
             Assert.That(lightingSource, Does.Contain("directionalLight.volumetricShadowDimmer"));
+            Assert.That(lightingSource, Does.Contain("#define VBUFFER_FILTER_GAUSSIAN_SIGMA 1.0"));
+            Assert.That(lightingSource, Does.Contain("#define VBUFFER_FILTER_SIZE_1D (VBUFFER_FILTER_GROUP_SIZE_XY + 2)"));
+            Assert.That(lightingSource, Does.Contain("groupshared float4 gs_VBufferFilterCache"));
+            Assert.That(lightingSource, Does.Contain("GroupMemoryBarrierWithGroupSync"));
+            Assert.That(lightingSource, Does.Contain("Gaussian(length(float2(idx, idx2)), VBUFFER_FILTER_GAUSSIAN_SIGMA)"));
+            Assert.That(lightingSource, Does.Not.Contain("for (int z = -1; z <= 1; z++)"));
             Assert.That(compositeSource, Does.Contain("Hidden/VividRP/VolumetricFogComposite"));
             Assert.That(compositeSource, Does.Contain("_VBufferLighting"));
             Assert.That(compositeSource, Does.Contain("GetVBufferLinearDistanceFromDeviceDepth"));
             Assert.That(lightingPassSource, Does.Contain("cmd.DispatchCompute(m_Shader, m_LightingKernel, m_DispatchX, m_DispatchY, 1)"));
+            Assert.That(lightingPassSource, Does.Contain("FilterKernelName = \"FilterVolumetricLighting\""));
+            Assert.That(lightingPassSource, Does.Contain("m_FilterDispatchZ = Mathf.Max(m_Settings.VBufferParameters.SliceCount, 1)"));
+            Assert.That(lightingPassSource, Does.Contain("cmd.DispatchCompute(m_Shader, m_FilterKernel, m_DispatchX, m_DispatchY, m_FilterDispatchZ)"));
 
             var vBufferSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Volumetric", "VBuffer.hlsl"));
             Assert.That(vBufferSource, Does.Contain("DecodeLogarithmicDepthGeneralized"));

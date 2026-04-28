@@ -12,7 +12,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int ThreadGroupSizeZ = 4;
         private const string ClearKernelName = "ClearVBufferLighting";
         private const string LightingKernelName = "VolumetricLighting";
-        private const string FilterKernelName = "GaussianFilterVBufferLighting";
+        private const string FilterKernelName = "FilterVolumetricLighting";
 
         private static readonly int ShaderVariablesVolumetricId = Shader.PropertyToID("ShaderVariablesVolumetric");
         private static readonly int CameraDepthId = Shader.PropertyToID("_CameraDepth");
@@ -97,6 +97,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_DispatchX = 1;
         private int m_DispatchY = 1;
         private int m_DispatchZ = 1;
+        private int m_FilterDispatchZ = 1;
         private int m_CameraWidth = 1;
         private int m_CameraHeight = 1;
         private ShaderVariablesVolumetric m_ShaderVariables;
@@ -186,6 +187,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DispatchX = CoreUtils.DivRoundUp(m_Settings.VBufferParameters.ViewportWidth, ThreadGroupSizeX);
             m_DispatchY = CoreUtils.DivRoundUp(m_Settings.VBufferParameters.ViewportHeight, ThreadGroupSizeY);
             m_DispatchZ = CoreUtils.DivRoundUp(m_Settings.VBufferParameters.SliceCount, ThreadGroupSizeZ);
+            m_FilterDispatchZ = Mathf.Max(m_Settings.VBufferParameters.SliceCount, 1);
             PrepareClusteredLightingParameters(frameData);
 
             volumetricData.settings = m_Settings;
@@ -219,7 +221,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 {
                     cmd.SetComputeTextureParam(m_Shader, m_FilterKernel, VBufferLightingInputId, m_VBufferLightingFiltered.innerHandle);
                     cmd.SetComputeTextureParam(m_Shader, m_FilterKernel, VBufferLightingOutputId, m_VBufferLighting.innerHandle);
-                    cmd.DispatchCompute(m_Shader, m_FilterKernel, m_DispatchX, m_DispatchY, m_DispatchZ);
+                    cmd.DispatchCompute(m_Shader, m_FilterKernel, m_DispatchX, m_DispatchY, m_FilterDispatchZ);
                 }
             }
         }
@@ -232,6 +234,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FilterKernel = -1;
             m_Settings = default;
             m_ShaderVariables = default;
+            m_FilterDispatchZ = 1;
         }
 
         private void BindSharedTextures(ComputePassContext context, ComputeCommandBuffer cmd, int kernel, RenderGraphTexture lightingTarget)

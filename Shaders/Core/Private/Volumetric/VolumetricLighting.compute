@@ -1,7 +1,7 @@
 #pragma use_dxc
 #pragma kernel ClearVBufferLighting
 #pragma kernel VolumetricLighting
-#pragma kernel GaussianFilterVBufferLighting
+#pragma kernel FilterVolumetricLighting
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl"
@@ -13,6 +13,14 @@ Texture3D<float4> _VBufferDensity;
 Texture3D<float4> _VBufferLightingInput;
 RWTexture3D<float4> _VBufferLighting;
 RWTexture3D<float4> _VBufferLightingOutput;
+
+#define VBUFFER_FILTER_GAUSSIAN_SIGMA 1.0
+#define VBUFFER_FILTER_GROUP_SIZE_XY 8
+#define VBUFFER_FILTER_SIZE_1D (VBUFFER_FILTER_GROUP_SIZE_XY + 2)
+#define VBUFFER_FILTER_LDS_SIZE (VBUFFER_FILTER_SIZE_1D * VBUFFER_FILTER_SIZE_1D)
+#define VBUFFER_FILTER_THREAD_COUNT (VBUFFER_FILTER_GROUP_SIZE_XY * VBUFFER_FILTER_GROUP_SIZE_XY)
+
+groupshared float4 gs_VBufferFilterCache[VBUFFER_FILTER_LDS_SIZE];
 
 float HenyeyGreensteinPhase(float cosTheta, float anisotropy)
 {
@@ -263,31 +271,58 @@ float4 LoadLightingClamped(int3 coord)
     return _VBufferLightingInput.Load(int4(clamp(coord, int3(0, 0, 0), maxCoord), 0));
 }
 
-[numthreads(8, 8, 4)]
-void GaussianFilterVBufferLighting(uint3 dispatchThreadId : SV_DispatchThreadID)
+void PrefetchVBufferFilterData(uint sampleID, uint2 groupOrigin, uint sliceIndex)
 {
-    if (!IsInsideVBuffer(dispatchThreadId))
+    int2 originXY = int2(groupOrigin) - 1;
+    int offsetX = (int)(sampleID % VBUFFER_FILTER_SIZE_1D);
+    int offsetY = (int)(sampleID / VBUFFER_FILTER_SIZE_1D);
+    int3 sampleCoord = int3(originXY.x + offsetX, originXY.y + offsetY, (int)sliceIndex);
+    gs_VBufferFilterCache[offsetX + offsetY * VBUFFER_FILTER_SIZE_1D] = LoadLightingClamped(sampleCoord);
+}
+
+float Gaussian(float radius, float sigma)
+{
+    float v = radius / sigma;
+    return exp(-(v * v));
+}
+
+[numthreads(8, 8, 1)]
+void FilterVolumetricLighting(
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint groupIndex : SV_GroupIndex,
+    uint2 groupId : SV_GroupID,
+    uint2 groupThreadId : SV_GroupThreadID)
+{
+    uint currentSlice = dispatchThreadId.z;
+    uint2 groupOrigin = groupId * VBUFFER_FILTER_GROUP_SIZE_XY;
+    uint2 currentCoord = groupOrigin + groupThreadId;
+    uint3 voxelCoord = uint3(currentCoord, currentSlice);
+
+    for (uint sampleID = groupIndex; sampleID < VBUFFER_FILTER_LDS_SIZE; sampleID += VBUFFER_FILTER_THREAD_COUNT)
+        PrefetchVBufferFilterData(sampleID, groupOrigin, currentSlice);
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (!IsInsideVBuffer(voxelCoord))
         return;
 
-    int3 baseCoord = (int3)dispatchThreadId;
-    float4 total = 0.0;
+    float4 value = 0.0;
     float weightSum = 0.0;
 
     [unroll]
-    for (int z = -1; z <= 1; z++)
+    for (int idx = -1; idx <= 1; idx++)
     {
         [unroll]
-        for (int y = -1; y <= 1; y++)
+        for (int idx2 = -1; idx2 <= 1; idx2++)
         {
-            [unroll]
-            for (int x = -1; x <= 1; x++)
-            {
-                float weight = (x == 0 ? 2.0 : 1.0) * (y == 0 ? 2.0 : 1.0) * (z == 0 ? 2.0 : 1.0);
-                total += LoadLightingClamped(baseCoord + int3(x, y, z)) * weight;
-                weightSum += weight;
-            }
+            int2 tapAddress = (int2(groupThreadId) + 1) + int2(idx2, idx);
+            uint ldsTapAddress = (uint)tapAddress.x + (uint)tapAddress.y * VBUFFER_FILTER_SIZE_1D;
+            float weight = Gaussian(length(float2(idx, idx2)), VBUFFER_FILTER_GAUSSIAN_SIGMA);
+
+            value += gs_VBufferFilterCache[ldsTapAddress] * weight;
+            weightSum += weight;
         }
     }
 
-    _VBufferLightingOutput[dispatchThreadId] = total / max(weightSum, 1e-4);
+    _VBufferLightingOutput[voxelCoord] = value / max(weightSum, 1e-4);
 }

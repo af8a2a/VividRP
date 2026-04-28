@@ -137,6 +137,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: bdad49f9827fd4041b290158aa79e8c8, type: 3}
   - ResourceName: Shaders/Core/Private/Volumetric/VolumetricLighting.compute
     ResourceObject: {fileID: 7200000, guid: 1430d0fd6c9d3894ab5afbf525f42f0e, type: 3}
+  - ResourceName: Shaders/Core/Private/Volumetric/VolumetricMaterial.compute
+    ResourceObject: {fileID: 7200000, guid: a4604810fc5635a498b163901d7e1880, type: 3}
   - ResourceName: Shaders/Core/Private/Volumetric/VolumetricMaxZ.compute
     ResourceObject: {fileID: 7200000, guid: 53ce8ec72eeb40040bfc4c2eb70c73f6, type: 3}
   - ResourceName: Shaders/FullScreenUV

@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
@@ -141,6 +142,19 @@ namespace VividRP.Runtime
         private static readonly int FogVolumeFogDistanceId = Shader.PropertyToID("_FogVolumeFogDistanceProperty");
         private static readonly int FogVolumeBlendModeId = Shader.PropertyToID("_FogVolumeBlendMode");
         private static readonly int FogVolumeMaskId = Shader.PropertyToID("_Mask");
+        private static readonly int VolumetricFogGlobalIndexId = Shader.PropertyToID("_VolumetricFogGlobalIndex");
+        private static readonly int VolumetricMaterialDataId = Shader.PropertyToID("_VolumetricMaterialData");
+        private static readonly int VolumetricMaterialObbRightId = Shader.PropertyToID("_VolumetricMaterialObbRight");
+        private static readonly int VolumetricMaterialObbUpId = Shader.PropertyToID("_VolumetricMaterialObbUp");
+        private static readonly int VolumetricMaterialObbExtentsId = Shader.PropertyToID("_VolumetricMaterialObbExtents");
+        private static readonly int VolumetricMaterialObbCenterId = Shader.PropertyToID("_VolumetricMaterialObbCenter");
+        private static readonly int VolumetricMaterialRcpPosFaceFadeId = Shader.PropertyToID("_VolumetricMaterialRcpPosFaceFade");
+        private static readonly int VolumetricMaterialRcpNegFaceFadeId = Shader.PropertyToID("_VolumetricMaterialRcpNegFaceFade");
+        private static readonly int VolumetricMaterialInvertFadeId = Shader.PropertyToID("_VolumetricMaterialInvertFade");
+        private static readonly int VolumetricMaterialRcpDistFadeLenId = Shader.PropertyToID("_VolumetricMaterialRcpDistFadeLen");
+        private static readonly int VolumetricMaterialEndTimesRcpDistFadeLenId = Shader.PropertyToID("_VolumetricMaterialEndTimesRcpDistFadeLen");
+        private static readonly int VolumetricMaterialFalloffModeId = Shader.PropertyToID("_VolumetricMaterialFalloffMode");
+        private const string FogVolumeVoxelizePassName = "FogVolumeVoxelize";
 
         [SerializeField]
         private BoundProxyShape m_BoundProxy = CreateDefaultBoundProxy();
@@ -151,6 +165,8 @@ namespace VividRP.Runtime
         [SerializeField]
         private VividLocalVolumetricFogArtistParameters m_Parameters =
             VividLocalVolumetricFogArtistParameters.CreateDefault();
+
+        private MaterialPropertyBlock m_RenderingProperties;
 
         public VividLocalVolumetricFogArtistParameters parameters
         {
@@ -237,6 +253,91 @@ namespace VividRP.Runtime
         }
 
         internal int priority => m_Parameters.priority;
+
+        internal bool UsesVolumetricMaterialVoxelization()
+        {
+            var parameters = GetEffectiveParameters();
+            return parameters.maskMode == VividLocalVolumetricFogMaskMode.Material
+                && parameters.materialMask != null
+                && parameters.materialMask.FindPass(FogVolumeVoxelizePassName) >= 0;
+        }
+
+        internal VividVolumetricMaterialBounds ConvertToVolumeBounds()
+        {
+            var bounds = ComputeVolumetricMaterialBounds();
+            return bounds;
+        }
+
+        internal void PrepareVolumetricMaterialDrawCall(
+            int globalIndex,
+            GraphicsBuffer materialDataBuffer,
+            GraphicsBuffer indexBuffer,
+            GraphicsBuffer indirectArgsBuffer)
+        {
+            var parameters = GetEffectiveParameters();
+            var material = parameters.materialMask;
+            if (material == null
+                || material.FindPass(FogVolumeVoxelizePassName) < 0
+                || materialDataBuffer == null
+                || !materialDataBuffer.IsValid()
+                || indexBuffer == null
+                || !indexBuffer.IsValid()
+                || indirectArgsBuffer == null
+                || !indirectArgsBuffer.IsValid())
+            {
+                return;
+            }
+
+            m_RenderingProperties ??= new MaterialPropertyBlock();
+            m_RenderingProperties.Clear();
+            m_RenderingProperties.SetInteger(VolumetricFogGlobalIndexId, globalIndex);
+            m_RenderingProperties.SetBuffer(VolumetricMaterialDataId, materialDataBuffer);
+
+            var bounds = ComputeVolumetricMaterialBounds();
+            var extents = new Vector3(bounds.extentX, bounds.extentY, bounds.extentZ);
+            m_RenderingProperties.SetVector(VolumetricMaterialObbRightId, bounds.right);
+            m_RenderingProperties.SetVector(VolumetricMaterialObbUpId, bounds.up);
+            m_RenderingProperties.SetVector(VolumetricMaterialObbExtentsId, extents);
+            m_RenderingProperties.SetVector(VolumetricMaterialObbCenterId, bounds.center);
+
+            var positiveFade = ReciprocalFade(parameters.positiveFade);
+            var negativeFade = ReciprocalFade(parameters.negativeFade);
+            var distanceFade = BuildDistanceFade(parameters);
+            m_RenderingProperties.SetVector(VolumetricMaterialRcpPosFaceFadeId, positiveFade);
+            m_RenderingProperties.SetVector(VolumetricMaterialRcpNegFaceFadeId, negativeFade);
+            m_RenderingProperties.SetInteger(VolumetricMaterialInvertFadeId, parameters.invertFade ? 1 : 0);
+            m_RenderingProperties.SetFloat(VolumetricMaterialRcpDistFadeLenId, distanceFade.x);
+            m_RenderingProperties.SetFloat(VolumetricMaterialEndTimesRcpDistFadeLenId, distanceFade.y);
+            m_RenderingProperties.SetInteger(VolumetricMaterialFalloffModeId, (int)parameters.falloffMode);
+
+            var aabb = CreateWorldAabb(bounds);
+            var renderParams = new RenderParams
+            {
+                layer = gameObject.layer,
+                rendererPriority = parameters.priority,
+                worldBounds = aabb,
+                motionVectorMode = MotionVectorGenerationMode.ForceNoMotion,
+                reflectionProbeUsage = ReflectionProbeUsage.Off,
+                renderingLayerMask = uint.MaxValue,
+                material = material,
+                matProps = m_RenderingProperties,
+                shadowCastingMode = ShadowCastingMode.Off,
+                receiveShadows = false,
+                lightProbeUsage = LightProbeUsage.Off,
+#if UNITY_EDITOR
+                overrideSceneCullingMask = true,
+                sceneCullingMask = gameObject.sceneCullingMask,
+#endif
+            };
+
+            Graphics.RenderPrimitivesIndexedIndirect(
+                renderParams,
+                MeshTopology.Triangles,
+                indexBuffer,
+                indirectArgsBuffer,
+                1,
+                globalIndex);
+        }
 
         internal bool TryGetVolumeMask(out Texture3D volumeMask, out bool alphaOnly)
         {
@@ -410,6 +511,39 @@ namespace VividRP.Runtime
                 Mathf.Max(value.x, minimum.x),
                 Mathf.Max(value.y, minimum.y),
                 Mathf.Max(value.z, minimum.z));
+        }
+
+        private VividVolumetricMaterialBounds ComputeVolumetricMaterialBounds()
+        {
+            BoundProxyShape shape = BoundProxyShape;
+            Vector3 size = GetFogSize(shape);
+            Vector3 center = transform.position + transform.rotation * shape.center;
+            Vector3 right = transform.rotation * Vector3.right;
+            Vector3 up = transform.rotation * Vector3.up;
+            Vector3 extents = size * 0.5f;
+            return VividVolumetricMaterialBounds.Create(
+                right.normalized,
+                up.normalized,
+                center,
+                Max(extents, k_MinimumBoxSize * 0.5f));
+        }
+
+        private static Bounds CreateWorldAabb(in VividVolumetricMaterialBounds bounds)
+        {
+            Vector3 right = bounds.right;
+            Vector3 up = bounds.up;
+            Vector3 forward = Vector3.Cross(up, right).normalized;
+            Vector3 extents =
+                Abs(right * bounds.extentX)
+                + Abs(up * bounds.extentY)
+                + Abs(forward * bounds.extentZ);
+
+            return new Bounds(bounds.center, extents * 2.0f);
+        }
+
+        private static Vector3 Abs(Vector3 value)
+        {
+            return new Vector3(Mathf.Abs(value.x), Mathf.Abs(value.y), Mathf.Abs(value.z));
         }
     }
 }

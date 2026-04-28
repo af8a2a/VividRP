@@ -1,0 +1,225 @@
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
+#pragma use_dxc
+#pragma kernel ClearVolumetricMaterialRenderingParameters
+#pragma kernel ComputeVolumetricMaterialRenderingParameters
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
+
+struct VividVolumetricMaterialBounds
+{
+    float3 right;
+    float extentX;
+    float3 up;
+    float extentY;
+    float3 center;
+    float extentZ;
+};
+
+struct VividVolumetricMaterialRenderingData
+{
+    float4 viewSpaceBounds;
+    uint startSliceIndex;
+    uint sliceCount;
+    uint padding0;
+    uint padding1;
+    float4 obbVertexPositionWS[8];
+};
+
+StructuredBuffer<VividVolumetricMaterialBounds> _VolumeBounds;
+ByteAddressBuffer _VolumetricVisibleGlobalIndicesBuffer;
+
+RWBuffer<uint> _VolumetricGlobalIndirectArgsBuffer;
+RWByteAddressBuffer _VolumetricGlobalIndirectionBuffer;
+RWStructuredBuffer<VividVolumetricMaterialRenderingData> _VolumetricMaterialData;
+
+uint _VolumeCount;
+uint _MaxVolumeCount;
+uint _MaxSliceCount;
+uint _ViewCount;
+
+static const float3 k_CubeVertexMask[8] =
+{
+    float3(0.0, 0.0, 0.0),
+    float3(1.0, 0.0, 0.0),
+    float3(0.0, 1.0, 0.0),
+    float3(1.0, 1.0, 0.0),
+    float3(0.0, 0.0, 1.0),
+    float3(1.0, 0.0, 1.0),
+    float3(0.0, 1.0, 1.0),
+    float3(1.0, 1.0, 1.0)
+};
+
+static const uint k_VertexIndicesMap[8 * 8] =
+{
+    0, 1, 4, 2, 3, 5, 6, 7,
+    1, 5, 3, 0, 4, 7, 2, 6,
+    2, 3, 0, 6, 7, 1, 4, 5,
+    3, 7, 1, 2, 6, 5, 0, 4,
+    4, 0, 5, 6, 2, 1, 7, 3,
+    5, 1, 7, 4, 0, 3, 6, 2,
+    6, 2, 4, 7, 3, 0, 5, 1,
+    7, 6, 5, 3, 2, 4, 1, 0
+};
+
+int DistanceToSlice(float distance)
+{
+    float encodedDepthStep = _VBufferRcpSliceCount;
+    float encodedDepth = EncodeLogarithmicDepthGeneralized(distance, _VBufferDepthEncodingParams);
+    encodedDepth -= encodedDepthStep;
+    encodedDepth /= encodedDepthStep;
+    return int(encodedDepth - 0.5);
+}
+
+float DepthDistance(float3 positionWS)
+{
+    float3 cameraToPosition = positionWS - _WorldSpaceCameraPos;
+    float cameraDistance = length(cameraToPosition);
+    float3 viewDirWS = cameraDistance > 0.0 ? cameraToPosition / cameraDistance : GetViewForwardDir();
+    return cameraDistance * dot(viewDirWS, GetViewForwardDir());
+}
+
+float DistanceToAABB(float3 position, float3 extents)
+{
+    float3 q = abs(position) - extents;
+    return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+}
+
+float DistanceDistanceToOBB(float3 positionWS, VividVolumetricMaterialBounds obb)
+{
+    float3 offset = positionWS - obb.center;
+    float3 right = normalize(obb.right);
+    float3 up = normalize(obb.up);
+    float3 forward = normalize(cross(right, up));
+    float3 axisAlignedPoint = float3(dot(offset, right), dot(offset, up), dot(offset, forward));
+    return DistanceToAABB(axisAlignedPoint, float3(obb.extentX, obb.extentY, obb.extentZ));
+}
+
+float3 ComputeCubeVertexPositionRWS(VividVolumetricMaterialBounds obb, float3 vertexMask)
+{
+    float3 right = normalize(obb.right);
+    float3 up = normalize(obb.up);
+    float3 forward = normalize(cross(right, up));
+    float3 localCorner = vertexMask * 2.0 - 1.0;
+    return obb.center
+        + right * (localCorner.x * obb.extentX)
+        + up * (localCorner.y * obb.extentY)
+        + forward * (localCorner.z * obb.extentZ);
+}
+
+void ComputeCubeVerticesOrder(uint volumeIndex)
+{
+    VividVolumetricMaterialBounds obb = _VolumeBounds[volumeIndex];
+    float bestFrontDot = -1.0;
+    uint frontVertexIndex = 0;
+    float3 cameraForward = GetViewForwardDir();
+
+    for (uint index = 0; index < 8; index++)
+    {
+        float3 vertexNormal = normalize(k_CubeVertexMask[index] * 2.0 - 1.0);
+        float frontDot = dot(vertexNormal, cameraForward);
+        if (frontDot > bestFrontDot)
+        {
+            bestFrontDot = frontDot;
+            frontVertexIndex = index;
+        }
+    }
+
+    uint vertexMapOffset = frontVertexIndex * 8;
+    for (uint index = 0; index < 8; index++)
+    {
+        float3 vertexMask = k_CubeVertexMask[k_VertexIndicesMap[vertexMapOffset + index]];
+        _VolumetricMaterialData[volumeIndex].obbVertexPositionWS[index] =
+            float4(ComputeCubeVertexPositionRWS(obb, vertexMask), 1.0);
+    }
+}
+
+[numthreads(64, 1, 1)]
+void ClearVolumetricMaterialRenderingParameters(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    if (dispatchThreadID.x >= _MaxVolumeCount)
+        return;
+
+    uint volumeIndex = dispatchThreadID.x;
+    uint argsOffset = volumeIndex * 5;
+    _VolumetricGlobalIndirectArgsBuffer[argsOffset + 0] = 0;
+    _VolumetricGlobalIndirectArgsBuffer[argsOffset + 1] = 0;
+    _VolumetricGlobalIndirectArgsBuffer[argsOffset + 2] = 0;
+    _VolumetricGlobalIndirectArgsBuffer[argsOffset + 3] = 0;
+    _VolumetricGlobalIndirectArgsBuffer[argsOffset + 4] = 0;
+}
+
+[numthreads(32, 1, 1)]
+void ComputeVolumetricMaterialRenderingParameters(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    uint viewCount = max(_ViewCount, 1u);
+    uint workCount = _VolumeCount * viewCount;
+    if (dispatchThreadID.x >= workCount || _VolumeCount == 0)
+        return;
+
+    uint volumeIndex = dispatchThreadID.x % _VolumeCount;
+    uint viewIndex = dispatchThreadID.x / _VolumeCount;
+    uint materialDataIndex = volumeIndex + viewIndex * _VolumeCount;
+    uint globalBufferWriteIndex = _VolumetricVisibleGlobalIndicesBuffer.Load(volumeIndex << 2);
+    VividVolumetricMaterialBounds obb = _VolumeBounds[volumeIndex];
+
+#if USE_VERTEX_CUBE_SLICING
+    ComputeCubeVerticesOrder(volumeIndex);
+#endif
+
+    float cameraDistanceToOBB = DistanceDistanceToOBB(_WorldSpaceCameraPos, obb);
+    float2 minPositionVS = 1.0;
+    float2 maxPositionVS = -1.0;
+    if (cameraDistanceToOBB <= 0.0)
+    {
+        minPositionVS = -1.0;
+        maxPositionVS = 1.0;
+    }
+
+    float maxVertexDistance = 0.0;
+    for (uint index = 0; index < 8; index++)
+    {
+        float3 positionWS = ComputeCubeVertexPositionRWS(obb, k_CubeVertexMask[index]);
+        maxVertexDistance = max(maxVertexDistance, length(positionWS - _WorldSpaceCameraPos));
+
+        if (cameraDistanceToOBB > 0.0)
+        {
+            float4 positionCS = TransformWorldToHClip(positionWS);
+            if (positionCS.w <= 0.0)
+            {
+                minPositionVS = -1.0;
+                maxPositionVS = 1.0;
+            }
+            else
+            {
+                float2 positionNDC = positionCS.xy / positionCS.w;
+                minPositionVS = min(minPositionVS, positionNDC);
+                maxPositionVS = max(maxPositionVS, positionNDC);
+            }
+        }
+    }
+
+    minPositionVS = clamp(minPositionVS, -1.0, 1.0);
+    maxPositionVS = clamp(maxPositionVS, -1.0, 1.0);
+
+    float vBufferNearPlane = DecodeLogarithmicDepthGeneralized(0.0, _VBufferDepthDecodingParams);
+    float minBoxDistance = max(vBufferNearPlane, cameraDistanceToOBB);
+    int maxSliceCount = max(int(_MaxSliceCount), 1);
+    int startSliceIndex = clamp(DistanceToSlice(minBoxDistance), 0, maxSliceCount);
+    int stopSliceIndex = DistanceToSlice(maxVertexDistance);
+    uint sliceCount = (uint)clamp(stopSliceIndex - startSliceIndex, 0, maxSliceCount - startSliceIndex);
+
+    uint argsOffset = globalBufferWriteIndex * 5;
+    _VolumetricGlobalIndirectArgsBuffer[argsOffset + 0] = 6;
+    _VolumetricGlobalIndirectArgsBuffer[argsOffset + 1] = sliceCount * viewCount;
+    _VolumetricGlobalIndirectArgsBuffer[argsOffset + 2] = 0;
+    _VolumetricGlobalIndirectArgsBuffer[argsOffset + 3] = 0;
+    _VolumetricGlobalIndirectArgsBuffer[argsOffset + 4] = 0;
+
+    _VolumetricGlobalIndirectionBuffer.Store(globalBufferWriteIndex << 2, volumeIndex);
+
+    _VolumetricMaterialData[materialDataIndex].viewSpaceBounds = float4(minPositionVS, maxPositionVS - minPositionVS);
+    _VolumetricMaterialData[materialDataIndex].startSliceIndex = (uint)startSliceIndex;
+    _VolumetricMaterialData[materialDataIndex].sliceCount = sliceCount;
+    _VolumetricMaterialData[materialDataIndex].padding0 = 0;
+    _VolumetricMaterialData[materialDataIndex].padding1 = 0;
+}

@@ -29,11 +29,11 @@ namespace VividRP.Runtime
 
     internal static class VividAntialiasingRuntimeUtility
     {
-        private static readonly Dictionary<EntityId, VividAntialiasingMode> s_PreviousEffectiveModes = new();
+        private static readonly Dictionary<EntityId, AntialiasingHistoryKey> s_PreviousHistoryKeys = new();
 
         internal static void Clear()
         {
-            s_PreviousEffectiveModes.Clear();
+            s_PreviousHistoryKeys.Clear();
         }
 
         internal static void Resolve(
@@ -54,7 +54,7 @@ namespace VividRP.Runtime
             data.outputSize = outputSize;
             data.renderSize = ResolveRenderSize(outputSize, additionalData, data.effectiveMode);
             data.usesTemporalJitter = UsesTemporalJitter(data.effectiveMode);
-            data.resetHistory = ShouldResetHistory(camera, data.effectiveMode);
+            data.resetHistory = ShouldResetHistory(camera, additionalData, data.effectiveMode, outputSize);
         }
 
         internal static void ApplyJitter(
@@ -71,8 +71,14 @@ namespace VividRP.Runtime
             var nonJitteredProj = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
             var effectiveMode = data != null ? data.effectiveMode : VividAntialiasingMode.None;
 
-            if (additionalData != null && effectiveMode != VividAntialiasingMode.FidelityFXSuperResolution3)
-                additionalData.ResetFsr3JitterData();
+            if (additionalData != null)
+            {
+                if (effectiveMode != VividAntialiasingMode.FidelityFXSuperResolution3)
+                    additionalData.ResetFsr3JitterData();
+
+                if (effectiveMode != VividAntialiasingMode.TemporalSuperResolution)
+                    additionalData.ResetTsrJitterData();
+            }
 
             switch (effectiveMode)
             {
@@ -84,6 +90,9 @@ namespace VividRP.Runtime
                     return;
                 case VividAntialiasingMode.FidelityFXSuperResolution3:
                     ApplyFsr3Jitter(camera, additionalData, data, nonJitteredProj);
+                    return;
+                case VividAntialiasingMode.TemporalSuperResolution:
+                    ApplyTsrJitter(camera, additionalData, data, nonJitteredProj);
                     return;
 #if DLSS_PLUGIN_INTEGRATE
                 case VividAntialiasingMode.DeepLearningSuperSampling:
@@ -116,17 +125,24 @@ namespace VividRP.Runtime
             var width = Mathf.Max(1, outputSize.x);
             var height = Mathf.Max(1, outputSize.y);
 
-            if (effectiveMode != VividAntialiasingMode.FidelityFXSuperResolution3 || additionalData == null)
+            if (additionalData == null)
                 return new Vector2Int(width, height);
 
-            return FSR3UpscalerUtility.ResolveRenderSize(width, height, additionalData.fsr3Quality);
+            if (effectiveMode == VividAntialiasingMode.FidelityFXSuperResolution3)
+                return FSR3UpscalerUtility.ResolveRenderSize(width, height, additionalData.fsr3Quality);
+
+            if (effectiveMode == VividAntialiasingMode.TemporalSuperResolution)
+                return TSRUpscalerUtility.ResolveRenderSize(width, height, additionalData.tsrQuality);
+
+            return new Vector2Int(width, height);
         }
 
         internal static bool UsesTemporalJitter(VividAntialiasingMode mode)
         {
             if (mode == VividAntialiasingMode.TemporalAntiAliasing
                 || mode == VividAntialiasingMode.SpatialTemporalPostProcessing
-                || mode == VividAntialiasingMode.FidelityFXSuperResolution3)
+                || mode == VividAntialiasingMode.FidelityFXSuperResolution3
+                || mode == VividAntialiasingMode.TemporalSuperResolution)
             {
                 return true;
             }
@@ -157,6 +173,10 @@ namespace VividRP.Runtime
                     return FSR3UpscalerPass.IsSupported
                         ? VividAntialiasingMode.FidelityFXSuperResolution3
                         : VividAntialiasingMode.None;
+                case VividAntialiasingMode.TemporalSuperResolution:
+                    return TSRUpscalerPass.IsSupported
+                        ? VividAntialiasingMode.TemporalSuperResolution
+                        : VividAntialiasingMode.None;
 #if DLSS_PLUGIN_INTEGRATE
                 case VividAntialiasingMode.DeepLearningSuperSampling:
                     return DLSSExtension.IsSuperResolutionSupported
@@ -168,17 +188,22 @@ namespace VividRP.Runtime
             }
         }
 
-        private static bool ShouldResetHistory(Camera camera, VividAntialiasingMode effectiveMode)
+        private static bool ShouldResetHistory(
+            Camera camera,
+            VividAdditionalCameraData additionalData,
+            VividAntialiasingMode effectiveMode,
+            Vector2Int outputSize)
         {
             if (camera == null)
                 return effectiveMode != VividAntialiasingMode.None;
 
             var cameraId = camera.GetEntityId();
-            var hasPreviousMode = s_PreviousEffectiveModes.TryGetValue(cameraId, out var previousMode);
-            s_PreviousEffectiveModes[cameraId] = effectiveMode;
+            var historyKey = AntialiasingHistoryKey.Create(effectiveMode, outputSize, additionalData);
+            var hasPreviousKey = s_PreviousHistoryKeys.TryGetValue(cameraId, out var previousKey);
+            s_PreviousHistoryKeys[cameraId] = historyKey;
 
             return effectiveMode != VividAntialiasingMode.None
-                && (!hasPreviousMode || previousMode != effectiveMode);
+                && (!hasPreviousKey || !previousKey.Equals(historyKey));
         }
 
         private static void ApplyTaaJitter(
@@ -241,6 +266,37 @@ namespace VividRP.Runtime
             CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
         }
 
+        private static void ApplyTsrJitter(
+            Camera camera,
+            VividAdditionalCameraData additionalData,
+            VividAntialiasingData data,
+            Matrix4x4 nonJitteredProj)
+        {
+            if (additionalData == null || data == null)
+            {
+                CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                return;
+            }
+
+            var outputSize = data.outputSize;
+            var renderSize = data.renderSize;
+            if (outputSize.x <= 0 || outputSize.y <= 0 || renderSize.x <= 0 || renderSize.y <= 0)
+            {
+                additionalData.ResetTsrJitterData();
+                CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                return;
+            }
+
+            var phaseCount = TSRUpscalerUtility.GetJitterPhaseCount(renderSize.x, outputSize.x);
+            var jitterOffset = TSRUpscalerUtility.GetJitterOffset(Time.frameCount, phaseCount);
+            additionalData.SetTsrJitterData(jitterOffset, phaseCount);
+
+            var jitterMatrix = Matrix4x4.identity;
+            jitterMatrix.m03 = jitterOffset.x * 2.0f / renderSize.x;
+            jitterMatrix.m13 = -jitterOffset.y * 2.0f / renderSize.y;
+            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
+        }
+
         private static void ApplyStpJitter(Camera camera, Matrix4x4 nonJitteredProj)
         {
             var pixelWidth = camera.pixelWidth;
@@ -286,5 +342,66 @@ namespace VividRP.Runtime
             CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
         }
 #endif
+
+        private readonly struct AntialiasingHistoryKey : System.IEquatable<AntialiasingHistoryKey>
+        {
+            private readonly VividAntialiasingMode m_Mode;
+            private readonly Vector2Int m_OutputSize;
+            private readonly VividFsr3QualityMode m_Fsr3Quality;
+            private readonly VividTsrQualityMode m_TsrQuality;
+
+            private AntialiasingHistoryKey(
+                VividAntialiasingMode mode,
+                Vector2Int outputSize,
+                VividFsr3QualityMode fsr3Quality,
+                VividTsrQualityMode tsrQuality)
+            {
+                m_Mode = mode;
+                m_OutputSize = outputSize;
+                m_Fsr3Quality = fsr3Quality;
+                m_TsrQuality = tsrQuality;
+            }
+
+            public static AntialiasingHistoryKey Create(
+                VividAntialiasingMode mode,
+                Vector2Int outputSize,
+                VividAdditionalCameraData additionalData)
+            {
+                return new AntialiasingHistoryKey(
+                    mode,
+                    outputSize,
+                    mode == VividAntialiasingMode.FidelityFXSuperResolution3 && additionalData != null
+                        ? additionalData.fsr3Quality
+                        : VividFsr3QualityMode.Balanced,
+                    mode == VividAntialiasingMode.TemporalSuperResolution && additionalData != null
+                        ? additionalData.tsrQuality
+                        : VividTsrQualityMode.Balanced);
+            }
+
+            public bool Equals(AntialiasingHistoryKey other)
+            {
+                return m_Mode == other.m_Mode
+                    && m_OutputSize == other.m_OutputSize
+                    && m_Fsr3Quality == other.m_Fsr3Quality
+                    && m_TsrQuality == other.m_TsrQuality;
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is AntialiasingHistoryKey other && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    var hashCode = (int)m_Mode;
+                    hashCode = (hashCode * 397) ^ m_OutputSize.GetHashCode();
+                    hashCode = (hashCode * 397) ^ (int)m_Fsr3Quality;
+                    hashCode = (hashCode * 397) ^ (int)m_TsrQuality;
+                    return hashCode;
+                }
+            }
+        }
     }
 }

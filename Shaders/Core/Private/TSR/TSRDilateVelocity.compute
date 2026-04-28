@@ -1,0 +1,45 @@
+#pragma kernel CS
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
+
+Texture2D<float> _InputDepth;
+Texture2D<float2> _InputMotionVectors;
+
+RWTexture2D<float2> _DilatedMotion;
+RWTexture2D<float> _DilatedDepth;
+
+int2 _RenderSize;
+
+[numthreads(8, 8, 1)]
+void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int2 pixelCoord = int2(dispatchThreadId.xy);
+    if (any(pixelCoord >= _RenderSize))
+        return;
+
+    float centerDepth = _InputDepth[pixelCoord];
+    float2 selectedMotion = _InputMotionVectors[pixelCoord];
+    float selectedDepth = centerDepth;
+    float bestMotion = dot(selectedMotion, selectedMotion);
+
+    [unroll]
+    for (int y = -1; y <= 1; y++)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; x++)
+        {
+            int2 sampleCoord = clamp(pixelCoord + int2(x, y), int2(0, 0), _RenderSize - 1);
+            float2 motion = _InputMotionVectors[sampleCoord];
+            float motionLength = dot(motion, motion);
+            if (motionLength > bestMotion)
+            {
+                bestMotion = motionLength;
+                selectedMotion = motion;
+                selectedDepth = _InputDepth[sampleCoord];
+            }
+        }
+    }
+
+    _DilatedMotion[pixelCoord] = selectedMotion;
+    _DilatedDepth[pixelCoord] = selectedDepth;
+}

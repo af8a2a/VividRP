@@ -52,6 +52,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private Material m_CopyMaterial;
         private CMAA2Pass m_Cmaa2Pass;
         private FSR3UpscalerPass m_Fsr3Pass;
+        private TSRUpscalerPass m_TsrPass;
 #if DLSS_PLUGIN_INTEGRATE
         private DLSSPass m_DlssPass;
 #endif
@@ -106,6 +107,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Cmaa2Pass = new CMAA2Pass();
             m_Cmaa2Pass.Create();
             m_Fsr3Pass = new FSR3UpscalerPass();
+            m_TsrPass = new TSRUpscalerPass();
 #if DLSS_PLUGIN_INTEGRATE
             m_DlssPass = new DLSSPass();
 #endif
@@ -181,6 +183,10 @@ namespace VividRP.Runtime.RenderPass.Core
                     if (TryRecordFsr3Pass(context))
                         return;
                     break;
+                case VividAntialiasingMode.TemporalSuperResolution:
+                    if (TryRecordTsrPass(context))
+                        return;
+                    break;
 #if DLSS_PLUGIN_INTEGRATE
                 case VividAntialiasingMode.DeepLearningSuperSampling:
                     if (TryRecordDlssPass(context))
@@ -211,6 +217,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Cmaa2Pass = null;
             m_Fsr3Pass?.Dispose();
             m_Fsr3Pass = null;
+            m_TsrPass?.Dispose();
+            m_TsrPass = null;
 #if DLSS_PLUGIN_INTEGRATE
             m_DlssPass?.Dispose();
             m_DlssPass = null;
@@ -339,6 +347,31 @@ namespace VividRP.Runtime.RenderPass.Core
                 return false;
 
             return m_Fsr3Pass.Record(
+                context.RenderGraph,
+                cameraData,
+                FrameContextSystem.GetOrCreate(camera),
+                Color,
+                CameraDepth,
+                MotionVectors,
+                AntialiasingOutput,
+                context.TextureCache,
+                m_ResetHistory);
+        }
+
+        private bool TryRecordTsrPass(RenderGraphRecordingContext context)
+        {
+            if (m_TsrPass == null)
+                return false;
+
+            if (!HasTemporalInputs())
+                return false;
+
+            var cameraData = context.FrameData.Get<VividCameraData>();
+            var camera = cameraData?.camera;
+            if (camera == null)
+                return false;
+
+            return m_TsrPass.Record(
                 context.RenderGraph,
                 cameraData,
                 FrameContextSystem.GetOrCreate(camera),
@@ -619,8 +652,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private Vector2Int ResolveOutputDimensions(VividCameraData cameraData, VividAntialiasingData antialiasingData)
         {
-            if (m_EffectiveMode == VividAntialiasingMode.FidelityFXSuperResolution3)
+            if (m_EffectiveMode == VividAntialiasingMode.FidelityFXSuperResolution3
+                || m_EffectiveMode == VividAntialiasingMode.TemporalSuperResolution)
+            {
                 return antialiasingData?.outputSize ?? new Vector2Int(m_Width, m_Height);
+            }
 
 #if DLSS_PLUGIN_INTEGRATE
             if (m_EffectiveMode == VividAntialiasingMode.DeepLearningSuperSampling)

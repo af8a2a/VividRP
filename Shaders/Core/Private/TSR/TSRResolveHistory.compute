@@ -1,0 +1,18 @@
+#pragma kernel CS
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
+
+Texture2D<float4> _HistoryColor;
+RWTexture2D<float4> _ResolvedOutput;
+
+int2 _OutputSize;
+
+[numthreads(8, 8, 1)]
+void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int2 pixelCoord = int2(dispatchThreadId.xy);
+    if (any(pixelCoord >= _OutputSize))
+        return;
+
+    _ResolvedOutput[pixelCoord] = _HistoryColor[pixelCoord];
+}

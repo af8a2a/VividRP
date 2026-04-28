@@ -145,6 +145,25 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Prepare_ConfiguresTsrOutputDimensionsFromOutputSize()
+        {
+            var pass = new AntialiasingPass();
+            var frameData = CreateFrameData(
+                1280,
+                720,
+                VividAntialiasingMode.TemporalSuperResolution,
+                new Vector2Int(1129, 636),
+                new Vector2Int(1920, 1080));
+
+            pass.Prepare(frameData);
+
+            var outputTexture = GetTextureField(pass, "AntialiasingOutput");
+            Assert.That(outputTexture.desc.Width, Is.EqualTo(1920));
+            Assert.That(outputTexture.desc.Height, Is.EqualTo(1080));
+            Assert.That(outputTexture.desc.EnableRandomWrite, Is.True);
+        }
+
+        [Test]
         public void Resolver_DisablesTemporalWork_WhenGraphHasNoAntialiasingPass()
         {
             var cameraObject = new GameObject("AA Resolver Test Camera");
@@ -246,6 +265,22 @@ namespace VividRP.Editor.Tests
             Assert.That(antialiasingPassSource, Does.Contain("if (m_EffectiveMode == VividAntialiasingMode.None)"));
             Assert.That(antialiasingPassSource, Does.Contain("TryRegisterPassthrough(context)"));
             Assert.That(antialiasingPassSource, Does.Contain("context.RegisterTextureHandle(AntialiasingOutput, sourceHandle)"));
+        }
+
+        [Test]
+        public void SourceFiles_RecordTsrThroughAntialiasingPassWithTemporalInputs()
+        {
+            var antialiasingPassSource = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "AntialiasingPass.cs"));
+
+            Assert.That(antialiasingPassSource, Does.Contain("TryRecordTsrPass"));
+            Assert.That(antialiasingPassSource, Does.Contain("m_TsrPass.Record"));
+            Assert.That(antialiasingPassSource, Does.Contain("VividAntialiasingMode.TemporalSuperResolution"));
+            Assert.That(antialiasingPassSource, Does.Contain("if (!HasTemporalInputs())"));
+            Assert.That(antialiasingPassSource, Does.Contain("AntialiasingOutput"));
         }
 
         private static ContextContainer CreateFrameData(

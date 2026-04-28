@@ -1,0 +1,61 @@
+#pragma kernel CS
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
+
+Texture2D<float4> _InputColor;
+Texture2D<float> _InputDepth;
+Texture2D<float> _DilatedDepth;
+Texture2D<float2> _DilatedMotion;
+Texture2D<float4> _ReprojectedHistoryColor;
+Texture2D<float2> _ReprojectedHistoryMeta;
+
+RWTexture2D<float4> _AcceptedHistoryColor;
+RWTexture2D<float> _RejectionMask;
+
+int2 _RenderSize;
+int2 _OutputSize;
+float4 _TSRRejectionParams;
+
+[numthreads(8, 8, 1)]
+void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int2 pixelCoord = int2(dispatchThreadId.xy);
+    if (any(pixelCoord >= _OutputSize))
+        return;
+
+    float2 uv = TSR_OutputUV(pixelCoord, _OutputSize);
+    int2 renderCoord = TSR_OutputToRenderCoord(pixelCoord, _OutputSize, _RenderSize);
+
+    float3 currentColor = TSR_SampleCatmullRom(_InputColor, uv, float2(_RenderSize)).rgb;
+    float3 historyColor = _ReprojectedHistoryColor[pixelCoord].rgb;
+    float2 historyMeta = _ReprojectedHistoryMeta[pixelCoord];
+
+    float3 clampMin;
+    float3 clampMax;
+    TSR_NeighborhoodYCoCgBounds(_InputColor, renderCoord, _RenderSize, clampMin, clampMax);
+
+    float3 historyYCoCg = TSR_RGBToYCoCg(historyColor);
+    historyYCoCg = TSR_ClipToAABB(historyYCoCg, clampMin, clampMax);
+    historyColor = max(TSR_YCoCgToRGB(historyYCoCg), 0.0);
+
+    float currentDepth = _InputDepth[renderCoord];
+    float dilatedDepth = _DilatedDepth[renderCoord];
+    float historyDepth = historyMeta.y;
+    float depthDiff = abs(max(currentDepth, dilatedDepth) - historyDepth);
+
+    float2 motion = _DilatedMotion[renderCoord];
+    float motionPixels = length(motion * float2(_RenderSize));
+
+    float3 currentYCoCg = TSR_RGBToYCoCg(currentColor);
+    float lumaDiff = abs(currentYCoCg.x - historyYCoCg.x) / max(max(currentYCoCg.x, historyYCoCg.x), 0.2);
+    float chromaDiff = length(currentYCoCg.yz - historyYCoCg.yz);
+
+    bool accepted = historyMeta.x > 0.5
+        && depthDiff <= _TSRRejectionParams.x
+        && motionPixels <= _TSRRejectionParams.y
+        && lumaDiff <= _TSRRejectionParams.z
+        && chromaDiff <= _TSRRejectionParams.w;
+
+    _AcceptedHistoryColor[pixelCoord] = float4(accepted ? historyColor : currentColor, 1.0);
+    _RejectionMask[pixelCoord] = accepted ? 1.0 : 0.0;
+}

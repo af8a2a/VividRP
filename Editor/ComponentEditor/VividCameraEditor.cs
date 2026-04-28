@@ -39,6 +39,11 @@ namespace VividRP.Editor
         private static readonly GUIContent s_FSR3QualityLabel = EditorGUIUtility.TrTextContent("Quality");
         private static readonly GUIContent s_FSR3SharpeningLabel = EditorGUIUtility.TrTextContent("Sharpening");
         private static readonly GUIContent s_FSR3SharpnessLabel = EditorGUIUtility.TrTextContent("Sharpness");
+        private static readonly GUIContent s_TSRLabel = EditorGUIUtility.TrTextContent("Temporal Super Resolution");
+        private static readonly GUIContent s_TSRQualityLabel = EditorGUIUtility.TrTextContent("Quality");
+        private static readonly GUIContent s_TSRSharpeningLabel = EditorGUIUtility.TrTextContent("Sharpening");
+        private static readonly GUIContent s_TSRSharpnessLabel = EditorGUIUtility.TrTextContent("Sharpness");
+        private static readonly GUIContent s_TSRHistorySampleCountLabel = EditorGUIUtility.TrTextContent("History Samples");
 
         private CameraEditor.Settings m_Settings;
         private VividSerializedCamera m_SerializedCamera;
@@ -162,6 +167,22 @@ namespace VividRP.Editor
                         EditorGUILayout.PropertyField(m_SerializedCamera.fsr3Sharpness, s_FSR3SharpnessLabel);
                     }
                 }
+
+                if (ShouldShowTSRSettings())
+                {
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField(s_TSRLabel, EditorStyles.boldLabel);
+                    EditorGUILayout.PropertyField(m_SerializedCamera.tsrQuality, s_TSRQualityLabel);
+                    EditorGUILayout.PropertyField(m_SerializedCamera.tsrHistorySampleCount, s_TSRHistorySampleCountLabel);
+                    EditorGUILayout.PropertyField(m_SerializedCamera.tsrEnableSharpening, s_TSRSharpeningLabel);
+                    using (new EditorGUI.DisabledScope(
+                               m_SerializedCamera.tsrEnableSharpening != null
+                               && !m_SerializedCamera.tsrEnableSharpening.hasMultipleDifferentValues
+                               && !m_SerializedCamera.tsrEnableSharpening.boolValue))
+                    {
+                        EditorGUILayout.PropertyField(m_SerializedCamera.tsrSharpness, s_TSRSharpnessLabel);
+                    }
+                }
             }
         }
 
@@ -216,6 +237,15 @@ namespace VividRP.Editor
 
             return m_SerializedCamera.antialiasing.hasMultipleDifferentValues
                 || m_SerializedCamera.antialiasing.intValue == (int)VividAntialiasingMode.FidelityFXSuperResolution3;
+        }
+
+        private bool ShouldShowTSRSettings()
+        {
+            if (m_SerializedCamera.antialiasing == null)
+                return false;
+
+            return m_SerializedCamera.antialiasing.hasMultipleDifferentValues
+                || m_SerializedCamera.antialiasing.intValue == (int)VividAntialiasingMode.TemporalSuperResolution;
         }
     }
 

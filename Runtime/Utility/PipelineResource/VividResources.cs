@@ -58,6 +58,24 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/FSR3/FSR3RCAS.compute")]
         public ComputeShader FSR3RCASCompute;
 
+        [ResourcePath("Shaders/Core/Private/TSR/TSRDilateVelocity.compute")]
+        public ComputeShader TSRDilateVelocityCompute;
+
+        [ResourcePath("Shaders/Core/Private/TSR/TSRReprojectHistory.compute")]
+        public ComputeShader TSRReprojectHistoryCompute;
+
+        [ResourcePath("Shaders/Core/Private/TSR/TSRRejectShading.compute")]
+        public ComputeShader TSRRejectShadingCompute;
+
+        [ResourcePath("Shaders/Core/Private/TSR/TSRUpdateHistory.compute")]
+        public ComputeShader TSRUpdateHistoryCompute;
+
+        [ResourcePath("Shaders/Core/Private/TSR/TSRResolveHistory.compute")]
+        public ComputeShader TSRResolveHistoryCompute;
+
+        [ResourcePath("Shaders/Core/Private/TSR/TSRSharpen.compute")]
+        public ComputeShader TSRSharpenCompute;
+
 #if DLSS_PLUGIN_INTEGRATE
         [ResourcePath("Shaders/Core/Private/DLSS/DLSSBiasColorMask")]
         public Shader DLSSBiasColorMaskShader;

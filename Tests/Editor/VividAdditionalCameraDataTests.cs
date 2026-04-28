@@ -108,6 +108,12 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void AntialiasingMode_TsrKeepsExplicitValueSix()
+        {
+            Assert.That((int)VividAntialiasingMode.TemporalSuperResolution, Is.EqualTo(6));
+        }
+
+        [Test]
         public void Antialiasing_Setter_TracksFsr3ModeAsTemporalAntialiasing()
         {
             var gameObject = new GameObject("VividAdditionalCameraDataTests_FSR3");
@@ -146,6 +152,60 @@ namespace VividRP.Editor.Tests
 
                 additionalData.fsr3Sharpness = 2.0f;
                 Assert.That(additionalData.fsr3Sharpness, Is.EqualTo(1.0f));
+            }
+            finally
+            {
+                GameObject.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void Antialiasing_Setter_TracksTsrModeAsTemporalAntialiasing()
+        {
+            var gameObject = new GameObject("VividAdditionalCameraDataTests_TSR");
+            var additionalData = gameObject.AddComponent<VividAdditionalCameraData>();
+
+            try
+            {
+                additionalData.enableTSR = true;
+
+                Assert.That(additionalData.antialiasing, Is.EqualTo(VividAntialiasingMode.TemporalSuperResolution));
+                Assert.That(additionalData.enableTSR, Is.True);
+                Assert.That(additionalData.enableTAA, Is.False);
+                Assert.That(additionalData.enableSTP, Is.False);
+                Assert.That(additionalData.enableFSR3, Is.False);
+                Assert.That(additionalData.usesTemporalAntialiasing, Is.True);
+            }
+            finally
+            {
+                GameObject.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void TsrSettings_DefaultsAndClampRanges()
+        {
+            var gameObject = new GameObject("VividAdditionalCameraDataTests_TSRSettings");
+            var additionalData = gameObject.AddComponent<VividAdditionalCameraData>();
+
+            try
+            {
+                Assert.That(additionalData.tsrQuality, Is.EqualTo(VividTsrQualityMode.Balanced));
+                Assert.That(additionalData.tsrEnableSharpening, Is.True);
+                Assert.That(additionalData.tsrSharpness, Is.EqualTo(0.2f).Within(0.0001f));
+                Assert.That(additionalData.tsrHistorySampleCount, Is.EqualTo(16));
+
+                additionalData.tsrSharpness = -1.0f;
+                Assert.That(additionalData.tsrSharpness, Is.EqualTo(0.0f));
+
+                additionalData.tsrSharpness = 2.0f;
+                Assert.That(additionalData.tsrSharpness, Is.EqualTo(1.0f));
+
+                additionalData.tsrHistorySampleCount = 1;
+                Assert.That(additionalData.tsrHistorySampleCount, Is.EqualTo(8));
+
+                additionalData.tsrHistorySampleCount = 64;
+                Assert.That(additionalData.tsrHistorySampleCount, Is.EqualTo(32));
             }
             finally
             {

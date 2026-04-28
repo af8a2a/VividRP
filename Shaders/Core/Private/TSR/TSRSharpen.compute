@@ -1,0 +1,29 @@
+#pragma kernel CS
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
+
+Texture2D<float4> _SharpenInput;
+RWTexture2D<float4> _OutputColor;
+
+int2 _OutputSize;
+float4 _TSRParams;
+
+[numthreads(8, 8, 1)]
+void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int2 pixelCoord = int2(dispatchThreadId.xy);
+    if (any(pixelCoord >= _OutputSize))
+        return;
+
+    int2 maxCoord = _OutputSize - 1;
+    float3 center = _SharpenInput[pixelCoord].rgb;
+    float3 left = _SharpenInput[int2(max(pixelCoord.x - 1, 0), pixelCoord.y)].rgb;
+    float3 right = _SharpenInput[int2(min(pixelCoord.x + 1, maxCoord.x), pixelCoord.y)].rgb;
+    float3 down = _SharpenInput[int2(pixelCoord.x, max(pixelCoord.y - 1, 0))].rgb;
+    float3 up = _SharpenInput[int2(pixelCoord.x, min(pixelCoord.y + 1, maxCoord.y))].rgb;
+
+    float3 blur = 0.25 * (left + right + down + up);
+    float sharpness = saturate(_TSRParams.z);
+    float3 sharpened = center + (center - blur) * sharpness;
+    _OutputColor[pixelCoord] = float4(max(sharpened, 0.0), 1.0);
+}

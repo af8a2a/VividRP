@@ -1,0 +1,46 @@
+#pragma kernel CS
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
+
+Texture2D<float2> _DilatedMotion;
+Texture2D<float4> _HistoryColor;
+Texture2D<float2> _HistoryMeta;
+
+RWTexture2D<float4> _ReprojectedHistoryColor;
+RWTexture2D<float2> _ReprojectedHistoryMeta;
+
+int2 _RenderSize;
+int2 _OutputSize;
+int2 _PreviousOutputSize;
+float4 _Jitter;
+float4 _TSRParams;
+
+[numthreads(8, 8, 1)]
+void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int2 pixelCoord = int2(dispatchThreadId.xy);
+    if (any(pixelCoord >= _OutputSize))
+        return;
+
+    float2 uv = TSR_OutputUV(pixelCoord, _OutputSize);
+    int2 renderCoord = TSR_OutputToRenderCoord(pixelCoord, _OutputSize, _RenderSize);
+    float2 motion = _DilatedMotion[renderCoord];
+    float2 jitterDelta = (_Jitter.zw - _Jitter.xy) * 0.5;
+#if UNITY_UV_STARTS_AT_TOP
+    jitterDelta.y = -jitterDelta.y;
+#endif
+    float2 historyUV = uv - motion + jitterDelta;
+    bool validHistoryUV = all(historyUV >= 0.0) && all(historyUV <= 1.0);
+    bool hasHistory = _TSRParams.x > 0.5 && validHistoryUV;
+
+    if (!hasHistory)
+    {
+        _ReprojectedHistoryColor[pixelCoord] = 0.0;
+        _ReprojectedHistoryMeta[pixelCoord] = 0.0;
+        return;
+    }
+
+    float2 previousSize = max(float2(_PreviousOutputSize), float2(1.0, 1.0));
+    _ReprojectedHistoryColor[pixelCoord] = TSR_SampleCatmullRom(_HistoryColor, historyUV, previousSize);
+    _ReprojectedHistoryMeta[pixelCoord] = _HistoryMeta.SampleLevel(sampler_LinearClamp, historyUV, 0);
+}

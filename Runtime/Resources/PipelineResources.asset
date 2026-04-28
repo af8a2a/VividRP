@@ -143,6 +143,18 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: b3c91ed48e4997345a128588bd90704e, type: 3}
   - ResourceName: Shaders/Core/Private/Sky/SkyLUTGenerator.compute
     ResourceObject: {fileID: 7200000, guid: cd6ae8fe1afb47eba654a15718311401, type: 3}
+  - ResourceName: Shaders/Core/Private/TSR/TSRDilateVelocity.compute
+    ResourceObject: {fileID: 7200000, guid: 8b0f8d77c3ee99147988386c8768ff02, type: 3}
+  - ResourceName: Shaders/Core/Private/TSR/TSRRejectShading.compute
+    ResourceObject: {fileID: 7200000, guid: ee79d08c6fc4d3a4fa7fc80f932e170c, type: 3}
+  - ResourceName: Shaders/Core/Private/TSR/TSRReprojectHistory.compute
+    ResourceObject: {fileID: 7200000, guid: aafbd25866a132d499f57f3554229b29, type: 3}
+  - ResourceName: Shaders/Core/Private/TSR/TSRResolveHistory.compute
+    ResourceObject: {fileID: 7200000, guid: 4c59a56c24f81314782e5719ea4a7181, type: 3}
+  - ResourceName: Shaders/Core/Private/TSR/TSRSharpen.compute
+    ResourceObject: {fileID: 7200000, guid: b3e9ba8c3f018ed48b87b926617bf143, type: 3}
+  - ResourceName: Shaders/Core/Private/TSR/TSRUpdateHistory.compute
+    ResourceObject: {fileID: 7200000, guid: 428f3d9c861c4de4b90532919bf8a752, type: 3}
   - ResourceName: Shaders/Core/Private/TemporalAA
     ResourceObject: {fileID: 7200000, guid: e30d483061855394891ca96699b7d9ba, type: 3}
   - ResourceName: Shaders/FullScreenUV

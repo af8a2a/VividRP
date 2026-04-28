@@ -31,6 +31,10 @@ namespace VividRP.Editor
         public SerializedProperty fsr3Quality { get; }
         public SerializedProperty fsr3EnableSharpening { get; }
         public SerializedProperty fsr3Sharpness { get; }
+        public SerializedProperty tsrQuality { get; }
+        public SerializedProperty tsrEnableSharpening { get; }
+        public SerializedProperty tsrSharpness { get; }
+        public SerializedProperty tsrHistorySampleCount { get; }
 
         internal SerializedProperty renderType { get; }
         internal VividAdditionalCameraData[] camerasAdditionalData { get; }
@@ -78,6 +82,10 @@ namespace VividRP.Editor
             fsr3Quality = serializedAdditionalDataObject.FindProperty("m_FSR3Quality");
             fsr3EnableSharpening = serializedAdditionalDataObject.FindProperty("m_FSR3EnableSharpening");
             fsr3Sharpness = serializedAdditionalDataObject.FindProperty("m_FSR3Sharpness");
+            tsrQuality = serializedAdditionalDataObject.FindProperty("m_TSRQuality");
+            tsrEnableSharpening = serializedAdditionalDataObject.FindProperty("m_TSREnableSharpening");
+            tsrSharpness = serializedAdditionalDataObject.FindProperty("m_TSRSharpness");
+            tsrHistorySampleCount = serializedAdditionalDataObject.FindProperty("m_TSRHistorySampleCount");
         }
 
         public void Update()

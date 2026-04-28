@@ -1,6 +1,7 @@
-using NUnit.Framework;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
+using NUnit.Framework;
 using UnityEngine;
 using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven.Bindless;
@@ -206,6 +207,18 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void DecalProjectorEditor_SelectedGizmoUsesHdrpStyleLodAndProjectionPlane()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Editor", "ComponentEditor", "DecalProjectorEditor.cs"));
+
+            Assert.That(source, Does.Contain("Gizmos.CalculateLOD"));
+            Assert.That(source, Does.Contain("k_SelectedGizmoMinLod"));
+            Assert.That(source, Does.Contain("Handles.DrawWireCube"));
+            Assert.That(source, Does.Contain("DrawProjectionPlane"));
+            Assert.That(source, Does.Contain("Handles.DrawAAPolyLine"));
+        }
+
+        [Test]
         public void CreateWorldToDecalMatrix_UsesHdrpProjectedPlaneConvention()
         {
             var worldData = new BoundProxyWorldData
@@ -245,6 +258,25 @@ namespace VividRP.Editor.Tests
             Assert.That(actual.y, Is.EqualTo(expected.y).Within(tolerance));
             Assert.That(actual.z, Is.EqualTo(expected.z).Within(tolerance));
             Assert.That(actual.w, Is.EqualTo(expected.w).Within(tolerance));
+        }
+
+        private static string GetPackageFilePath(params string[] relativeParts)
+        {
+            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            var packageRoots = new[]
+            {
+                Path.Combine(projectRoot, "Packages", "VividRP"),
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
+            };
+
+            foreach (var packageRoot in packageRoots)
+            {
+                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
+                if (File.Exists(fullPath))
+                    return fullPath;
+            }
+
+            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
 
         private sealed class FakeBindlessTextureDescriptorAllocator : IBindlessTextureDescriptorAllocator

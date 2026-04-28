@@ -28,6 +28,22 @@ namespace VividRP.Runtime
         [InspectorName("Deep Learning Super Sampling (DLSS)")]
         DeepLearningSuperSampling = 4,
 #endif
+
+        [InspectorName("FidelityFX Super Resolution 3 (FSR3)")]
+        FidelityFXSuperResolution3 = 5,
+    }
+
+    public enum VividFsr3QualityMode
+    {
+        [InspectorName("Native AA")]
+        NativeAA = 0,
+
+        Quality = 1,
+        Balanced = 2,
+        Performance = 3,
+
+        [InspectorName("Ultra Performance")]
+        UltraPerformance = 4,
     }
 
     public static class VividCameraExtensions
@@ -92,10 +108,21 @@ namespace VividRP.Runtime
         private DLSSQuality m_DLSSQuality = DLSSQuality.Balanced;
 #endif
 
+        [SerializeField]
+        private VividFsr3QualityMode m_FSR3Quality = VividFsr3QualityMode.Balanced;
+
+        [SerializeField]
+        private bool m_FSR3EnableSharpening = true;
+
+        [SerializeField, Range(0.0f, 1.0f)]
+        private float m_FSR3Sharpness = 0.2f;
+
         private Matrix4x4 m_ViewMatrix = Matrix4x4.identity;
         private Matrix4x4 m_ProjectionMatrix = Matrix4x4.identity;
         private Matrix4x4 m_JitterMatrix = Matrix4x4.identity;
         private Vector2 m_Jitter;
+        private Vector2 m_FSR3JitterOffset;
+        private int m_FSR3JitterPhaseCount;
         private bool m_RenderIntoTexture;
         private bool m_HasStoredMatrixData;
 
@@ -127,6 +154,7 @@ namespace VividRP.Runtime
             m_ProjectionMatrix = Matrix4x4.identity;
             m_JitterMatrix = Matrix4x4.identity;
             m_Jitter = Vector2.zero;
+            ResetFsr3JitterData();
             m_RenderIntoTexture = false;
             m_HasStoredMatrixData = false;
         }
@@ -229,6 +257,14 @@ namespace VividRP.Runtime
                 : VividAntialiasingMode.None;
         }
 
+        public bool enableFSR3
+        {
+            get => antialiasing == VividAntialiasingMode.FidelityFXSuperResolution3;
+            set => antialiasing = value
+                ? VividAntialiasingMode.FidelityFXSuperResolution3
+                : VividAntialiasingMode.None;
+        }
+
 #if DLSS_PLUGIN_INTEGRATE
         public bool enableDLSS
         {
@@ -244,7 +280,8 @@ namespace VividRP.Runtime
             get
             {
                 if (antialiasing == VividAntialiasingMode.TemporalAntiAliasing
-                    || antialiasing == VividAntialiasingMode.SpatialTemporalPostProcessing)
+                    || antialiasing == VividAntialiasingMode.SpatialTemporalPostProcessing
+                    || antialiasing == VividAntialiasingMode.FidelityFXSuperResolution3)
                 {
                     return true;
                 }
@@ -303,6 +340,40 @@ namespace VividRP.Runtime
             set => m_DLSSQuality = value;
         }
 #endif
+
+        public VividFsr3QualityMode fsr3Quality
+        {
+            get => m_FSR3Quality;
+            set => m_FSR3Quality = value;
+        }
+
+        public bool fsr3EnableSharpening
+        {
+            get => m_FSR3EnableSharpening;
+            set => m_FSR3EnableSharpening = value;
+        }
+
+        public float fsr3Sharpness
+        {
+            get => m_FSR3Sharpness;
+            set => m_FSR3Sharpness = Mathf.Clamp01(value);
+        }
+
+        internal Vector2 fsr3JitterOffset => m_FSR3JitterOffset;
+
+        internal int fsr3JitterPhaseCount => m_FSR3JitterPhaseCount;
+
+        internal void SetFsr3JitterData(Vector2 jitterOffset, int phaseCount)
+        {
+            m_FSR3JitterOffset = jitterOffset;
+            m_FSR3JitterPhaseCount = Mathf.Max(1, phaseCount);
+        }
+
+        internal void ResetFsr3JitterData()
+        {
+            m_FSR3JitterOffset = Vector2.zero;
+            m_FSR3JitterPhaseCount = 0;
+        }
 
         private void OnValidate()
         {

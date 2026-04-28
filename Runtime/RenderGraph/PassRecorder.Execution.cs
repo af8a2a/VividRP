@@ -98,6 +98,7 @@ namespace VividRP.Runtime
         private static bool s_RenderedPreImageEffectGizmosInGraph;
         private static StopNaNPass s_InjectedStopNaNPass;
         private static CMAA2Pass s_InjectedCmaa2Pass;
+        private static FSR3UpscalerPass s_InjectedFsr3Pass;
 #if DLSS_PLUGIN_INTEGRATE
         private static DLSSPass s_InjectedDlssPass;
 #endif
@@ -141,8 +142,9 @@ namespace VividRP.Runtime
             cameraData.pixelWidth = camera.pixelWidth;
             cameraData.pixelHeight = camera.pixelHeight;
             cameraData.pixelRect = camera.pixelRect;
-            cameraData.actualWidth = camera.scaledPixelWidth;
-            cameraData.actualHeight = camera.scaledPixelHeight;
+            var actualSize = ResolveActualCameraSize(camera, additionalCameraData);
+            cameraData.actualWidth = actualSize.x;
+            cameraData.actualHeight = actualSize.y;
             cameraData.frameIndex = Time.frameCount;
             renderingData.cullingResults = cullingResults;
             renderingData.context = context;
@@ -160,6 +162,14 @@ namespace VividRP.Runtime
                 return;
 
             var nonJitteredProj = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+
+            if (additionalCameraData != null && additionalCameraData.enableFSR3)
+            {
+                ApplyFsr3Jitter(camera, additionalCameraData, nonJitteredProj);
+                return;
+            }
+
+            additionalCameraData?.ResetFsr3JitterData();
 
             if (TAASettings.UsesStp(additionalCameraData))
             {
@@ -203,6 +213,55 @@ namespace VividRP.Runtime
             jitterMatrix.m03 = jitterX;
             jitterMatrix.m13 = jitterY;
 
+            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
+        }
+
+        private static Vector2Int ResolveActualCameraSize(Camera camera, VividAdditionalCameraData additionalCameraData)
+        {
+            if (camera == null)
+                return Vector2Int.one;
+
+            var width = camera.scaledPixelWidth > 0 ? camera.scaledPixelWidth : camera.pixelWidth;
+            var height = camera.scaledPixelHeight > 0 ? camera.scaledPixelHeight : camera.pixelHeight;
+            width = Mathf.Max(1, width > 0 ? width : Screen.width);
+            height = Mathf.Max(1, height > 0 ? height : Screen.height);
+
+            if (additionalCameraData == null || !additionalCameraData.enableFSR3)
+                return new Vector2Int(width, height);
+
+            var displayWidth = Mathf.Max(1, camera.pixelWidth > 0 ? camera.pixelWidth : width);
+            var displayHeight = Mathf.Max(1, camera.pixelHeight > 0 ? camera.pixelHeight : height);
+            return FSR3UpscalerUtility.ResolveRenderSize(displayWidth, displayHeight, additionalCameraData.fsr3Quality);
+        }
+
+        private static void ApplyFsr3Jitter(
+            Camera camera,
+            VividAdditionalCameraData additionalCameraData,
+            Matrix4x4 nonJitteredProj)
+        {
+            if (camera == null || additionalCameraData == null)
+                return;
+
+            var displayWidth = camera.pixelWidth;
+            var displayHeight = camera.pixelHeight;
+            if (displayWidth <= 0 || displayHeight <= 0)
+            {
+                additionalCameraData.ResetFsr3JitterData();
+                CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                return;
+            }
+
+            var renderSize = FSR3UpscalerUtility.ResolveRenderSize(
+                displayWidth,
+                displayHeight,
+                additionalCameraData.fsr3Quality);
+            var phaseCount = FSR3UpscalerUtility.GetJitterPhaseCount(renderSize.x, displayWidth);
+            var jitterOffset = FSR3UpscalerUtility.GetJitterOffset(Time.frameCount, phaseCount);
+            additionalCameraData.SetFsr3JitterData(jitterOffset, phaseCount);
+
+            var jitterMatrix = Matrix4x4.identity;
+            jitterMatrix.m03 = jitterOffset.x * 2.0f / renderSize.x;
+            jitterMatrix.m13 = -jitterOffset.y * 2.0f / renderSize.y;
             CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
         }
 
@@ -358,6 +417,20 @@ namespace VividRP.Runtime
                 }
 
                 s_InjectedStopNaNPass = null;
+            }
+
+            if (s_InjectedFsr3Pass != null)
+            {
+                try
+                {
+                    s_InjectedFsr3Pass.Dispose();
+                }
+                catch (Exception e)
+                {
+                    Debug.LogException(e);
+                }
+
+                s_InjectedFsr3Pass = null;
             }
 
 #if DLSS_PLUGIN_INTEGRATE
@@ -605,6 +678,14 @@ namespace VividRP.Runtime
             return TAASettings.UsesStp(additionalData) && STP.IsSupported();
         }
 
+        private static bool ShouldInjectFsr3Pass()
+        {
+            var additionalData = s_FrameData.GetOrCreate<VividCameraData>().additionalData;
+            return additionalData != null
+                && additionalData.enableFSR3
+                && FSR3UpscalerPass.IsSupported;
+        }
+
 #if DLSS_PLUGIN_INTEGRATE
         private static bool ShouldInjectDlssPass()
         {
@@ -643,6 +724,11 @@ namespace VividRP.Runtime
             return s_InjectedDlssPass ??= new DLSSPass();
         }
 #endif
+
+        private static FSR3UpscalerPass GetOrCreateInjectedFsr3Pass()
+        {
+            return s_InjectedFsr3Pass ??= new FSR3UpscalerPass();
+        }
 
         private static void RecordInjectedCmaa2Pass(
             RenderGraph renderGraph,
@@ -849,6 +935,41 @@ namespace VividRP.Runtime
                 textureCache);
         }
 #endif
+
+        private static RenderGraphTexture RecordInjectedFsr3Pass(
+            RenderGraph renderGraph,
+            FSR3UpscalerPass fsr3Pass,
+            RenderGraphTexture sourceTexture,
+            RenderGraphTexture motionTexture,
+            RenderGraphTexture depthTexture,
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache)
+        {
+            if (fsr3Pass == null
+                || renderGraph == null
+                || sourceTexture == null
+                || motionTexture == null
+                || depthTexture == null
+                || sourceTexture.innerHandle.IsValid() != true
+                || motionTexture.innerHandle.IsValid() != true
+                || depthTexture.innerHandle.IsValid() != true)
+            {
+                return null;
+            }
+
+            var cameraData = s_FrameData.Get<VividCameraData>();
+            var camera = cameraData?.camera;
+            if (camera == null)
+                return null;
+
+            return fsr3Pass.Record(
+                renderGraph,
+                cameraData,
+                FrameContextSystem.GetOrCreate(camera),
+                sourceTexture,
+                depthTexture,
+                motionTexture,
+                textureCache);
+        }
 
         private static RenderGraphTextureDesc CreateInjectedStpOutputDescriptor(
             RenderGraphTextureDesc sourceDescriptor,
@@ -1855,6 +1976,9 @@ namespace VividRP.Runtime
                 ? GetOrCreateInjectedDlssPass()
                 : null;
 #endif
+            var injectedFsr3Pass = ShouldInjectFsr3Pass()
+                ? GetOrCreateInjectedFsr3Pass()
+                : null;
             var injectStpPass = ShouldInjectStpPass();
             var injectedCmaa2Pass = ShouldInjectCmaa2Pass()
                 ? GetOrCreateInjectedCmaa2Pass()
@@ -1892,6 +2016,8 @@ namespace VividRP.Runtime
             RenderGraphTexture dlssOriginalSource = null;
             RenderGraphTexture dlssInjectedSource = null;
 #endif
+            RenderGraphTexture fsr3OriginalSource = null;
+            RenderGraphTexture fsr3InjectedSource = null;
             RenderGraphTexture stpOriginalSource = null;
             RenderGraphTexture stpInjectedSource = null;
 
@@ -1972,6 +2098,28 @@ namespace VividRP.Runtime
                         resolvedSourceTexture = dlssInjectedSource;
                     }
 #endif
+
+                    if (injectedFsr3Pass != null
+                        && fsr3InjectedSource == null
+                        && resolvedSourceTexture != null
+                        && resolvedSourceTexture.innerHandle.IsValid())
+                    {
+                        fsr3OriginalSource = resolvedSourceTexture;
+                        fsr3InjectedSource = RecordInjectedFsr3Pass(
+                            renderGraph,
+                            injectedFsr3Pass,
+                            resolvedSourceTexture,
+                            GetLatestTextureByName(passIndex, "MotionVectors"),
+                            GetLatestDepthTexture(passIndex),
+                            textureCache);
+                    }
+
+                    if (fsr3OriginalSource != null
+                        && fsr3InjectedSource != null
+                        && ReferenceEquals(resolvedSourceTexture, fsr3OriginalSource))
+                    {
+                        resolvedSourceTexture = fsr3InjectedSource;
+                    }
 
                     if (injectStpPass
                         && stpInjectedSource == null

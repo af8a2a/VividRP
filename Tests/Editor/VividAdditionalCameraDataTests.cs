@@ -74,6 +74,58 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void AntialiasingMode_Fsr3KeepsExplicitValueFive()
+        {
+            Assert.That((int)VividAntialiasingMode.FidelityFXSuperResolution3, Is.EqualTo(5));
+        }
+
+        [Test]
+        public void Antialiasing_Setter_TracksFsr3ModeAsTemporalAntialiasing()
+        {
+            var gameObject = new GameObject("VividAdditionalCameraDataTests_FSR3");
+            var additionalData = gameObject.AddComponent<VividAdditionalCameraData>();
+
+            try
+            {
+                additionalData.enableFSR3 = true;
+
+                Assert.That(additionalData.antialiasing, Is.EqualTo(VividAntialiasingMode.FidelityFXSuperResolution3));
+                Assert.That(additionalData.enableFSR3, Is.True);
+                Assert.That(additionalData.enableTAA, Is.False);
+                Assert.That(additionalData.enableSTP, Is.False);
+                Assert.That(additionalData.usesTemporalAntialiasing, Is.True);
+            }
+            finally
+            {
+                GameObject.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void Fsr3Settings_DefaultsAndClampsSharpness()
+        {
+            var gameObject = new GameObject("VividAdditionalCameraDataTests_FSR3Settings");
+            var additionalData = gameObject.AddComponent<VividAdditionalCameraData>();
+
+            try
+            {
+                Assert.That(additionalData.fsr3Quality, Is.EqualTo(VividFsr3QualityMode.Balanced));
+                Assert.That(additionalData.fsr3EnableSharpening, Is.True);
+                Assert.That(additionalData.fsr3Sharpness, Is.EqualTo(0.2f).Within(0.0001f));
+
+                additionalData.fsr3Sharpness = -1.0f;
+                Assert.That(additionalData.fsr3Sharpness, Is.EqualTo(0.0f));
+
+                additionalData.fsr3Sharpness = 2.0f;
+                Assert.That(additionalData.fsr3Sharpness, Is.EqualTo(1.0f));
+            }
+            finally
+            {
+                GameObject.DestroyImmediate(gameObject);
+            }
+        }
+
 #if DLSS_PLUGIN_INTEGRATE
         [Test]
         public void Antialiasing_Setter_TracksDlssModeAsTemporalAntialiasing()
@@ -122,6 +174,11 @@ namespace VividRP.Editor.Tests
                 ((ISerializationCallbackReceiver)additionalData).OnAfterDeserialize();
 
                 Assert.That(additionalData.antialiasing, Is.EqualTo(VividAntialiasingMode.None));
+
+                SetPrivateField(additionalData, "m_Antialiasing", VividAntialiasingMode.FidelityFXSuperResolution3);
+                ((ISerializationCallbackReceiver)additionalData).OnAfterDeserialize();
+
+                Assert.That(additionalData.antialiasing, Is.EqualTo(VividAntialiasingMode.FidelityFXSuperResolution3));
             }
             finally
             {

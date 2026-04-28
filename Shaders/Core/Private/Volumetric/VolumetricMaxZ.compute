@@ -1,49 +1,110 @@
 #pragma use_dxc
-#pragma kernel BuildVBufferMaxZ
+#pragma kernel ComputeMaxZ
+#pragma kernel ComputeFinalMask
+#pragma kernel DilateMask
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
 
-Texture2D<float> _CameraDepth;
-RWTexture2D<float> _VBufferMaxZ;
+#define VBUFFER_MAX_Z_GROUP_SIZE 8
+#define VBUFFER_MAX_Z_FAR_DEPTH 1.0e10
 
-float GetMaxZDistanceForCameraPixel(uint2 cameraPixel, float2 cameraSize)
+Texture2D<float> _CameraDepth;
+Texture2D<float> _InputTexture;
+RWTexture2D<float> _OutputTexture;
+
+float4 _SrcOffsetAndLimit;
+float _DilationWidth;
+
+#define _SrcLimit _SrcOffsetAndLimit.xy
+
+groupshared float gs_MaxDepth[VBUFFER_MAX_Z_GROUP_SIZE * VBUFFER_MAX_Z_GROUP_SIZE];
+
+float2 GetVBufferCameraSize()
 {
+    return max(round(_VBufferViewportSize.xy * _VBufferCameraToVBufferScale), float2(1.0, 1.0));
+}
+
+float GetDepthToDownsample(uint2 cameraPixel)
+{
+    float2 cameraSize = GetVBufferCameraSize();
+    if (any(cameraPixel >= (uint2)cameraSize))
+        return -1.0;
+
     float deviceDepth = _CameraDepth.Load(int3(cameraPixel, 0));
     if (IsVBufferFarDepth(deviceDepth))
-        return _VBufferLastSliceDistance;
+        return VBUFFER_MAX_Z_FAR_DEPTH;
 
-    float2 uv = (float2(cameraPixel) + 0.5) / cameraSize;
-    float linearDistance = GetVBufferLinearDistanceFromEyeDepth(uv, LinearEyeDepth(deviceDepth, _ZBufferParams));
-    return min(linearDistance, _VBufferLastSliceDistance);
+    return LinearEyeDepth(deviceDepth, _ZBufferParams);
+}
+
+[numthreads(VBUFFER_MAX_Z_GROUP_SIZE, VBUFFER_MAX_Z_GROUP_SIZE, 1)]
+void ComputeMaxZ(
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint groupIndex : SV_GroupIndex,
+    uint3 groupId : SV_GroupID)
+{
+    gs_MaxDepth[groupIndex] = GetDepthToDownsample(dispatchThreadId.xy);
+    GroupMemoryBarrierWithGroupSync();
+
+    [unroll]
+    for (uint stride = (VBUFFER_MAX_Z_GROUP_SIZE * VBUFFER_MAX_Z_GROUP_SIZE) >> 1; stride > 0; stride >>= 1)
+    {
+        if (groupIndex < stride)
+            gs_MaxDepth[groupIndex] = max(gs_MaxDepth[groupIndex], gs_MaxDepth[groupIndex + stride]);
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    if (groupIndex == 0u)
+        _OutputTexture[groupId.xy] = gs_MaxDepth[0];
+}
+
+float LoadInputMaxZ(uint2 pixel, uint2 limit)
+{
+    uint2 coord = min(pixel, limit - uint2(1u, 1u));
+    return _InputTexture.Load(int3(coord, 0));
 }
 
 [numthreads(8, 8, 1)]
-void BuildVBufferMaxZ(uint3 dispatchThreadId : SV_DispatchThreadID)
+void ComputeFinalMask(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    uint2 vBufferPixel = dispatchThreadId.xy;
-    if (vBufferPixel.x >= (uint)_VBufferWidth || vBufferPixel.y >= (uint)_VBufferHeight)
+    uint2 srcLimit = max((uint2)_SrcLimit, uint2(1u, 1u));
+    uint2 outputLimit = (srcLimit + uint2(1u, 1u)) / uint2(2u, 2u);
+    uint2 outputPixel = dispatchThreadId.xy;
+    if (any(outputPixel >= outputLimit))
         return;
 
-    float2 cameraScale = max(_VBufferCameraToVBufferScale, float2(1e-4, 1e-4));
-    float2 cameraSizeFloat = max(round(_VBufferViewportSize.xy * cameraScale), float2(1.0, 1.0));
-    int2 cameraSize = (int2)cameraSizeFloat;
-    int2 maxCameraPixel = cameraSize - 1;
+    uint2 srcPixelUL = outputPixel << 1;
+    float s0 = LoadInputMaxZ(srcPixelUL + uint2(0u, 0u), srcLimit);
+    float s1 = LoadInputMaxZ(srcPixelUL + uint2(1u, 0u), srcLimit);
+    float s2 = LoadInputMaxZ(srcPixelUL + uint2(0u, 1u), srcLimit);
+    float s3 = LoadInputMaxZ(srcPixelUL + uint2(1u, 1u), srcLimit);
 
-    int2 minPixel = (int2)floor(float2(vBufferPixel) * cameraScale);
-    int2 maxPixelExclusive = (int2)ceil(float2(vBufferPixel + uint2(1u, 1u)) * cameraScale);
-    minPixel = clamp(minPixel, int2(0, 0), maxCameraPixel);
-    maxPixelExclusive = clamp(max(maxPixelExclusive, minPixel + 1), int2(1, 1), cameraSize);
+    _OutputTexture[outputPixel] = max(max(s0, s1), max(s2, s3));
+}
 
-    float maxDistance = 0.0;
+[numthreads(8, 8, 1)]
+void DilateMask(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 srcLimit = max((uint2)_SrcLimit, uint2(1u, 1u));
+    uint2 outputPixel = dispatchThreadId.xy;
+    if (any(outputPixel >= srcLimit))
+        return;
+
+    int dilationWidth = max((int)_DilationWidth, 0);
+    int2 currentCoord = (int2)outputPixel;
+    int2 maxCoord = (int2)srcLimit - int2(1, 1);
+    float dilatedMaxZ = -1.0;
+
     [loop]
-    for (int y = minPixel.y; y < maxPixelExclusive.y; y++)
+    for (int y = -dilationWidth; y <= dilationWidth; y++)
     {
         [loop]
-        for (int x = minPixel.x; x < maxPixelExclusive.x; x++)
+        for (int x = -dilationWidth; x <= dilationWidth; x++)
         {
-            maxDistance = max(maxDistance, GetMaxZDistanceForCameraPixel(uint2(x, y), cameraSizeFloat));
+            int2 tapCoord = clamp(currentCoord + int2(x, y), int2(0, 0), maxCoord);
+            dilatedMaxZ = max(dilatedMaxZ, _InputTexture.Load(int3(tapCoord, 0)));
         }
     }
 
-    _VBufferMaxZ[vBufferPixel] = max(maxDistance, GetVBufferSliceBoundaryDistance(0.0));
+    _OutputTexture[outputPixel] = dilatedMaxZ;
 }

@@ -98,32 +98,45 @@ float GetVBufferOpaqueGeometryDistance(float2 vBufferUV, out bool hasOpaqueGeome
     return GetVBufferLinearDistanceFromDeviceDepth(vBufferUV, deviceDepth);
 }
 
-float LoadVBufferMaxZ(int2 vBufferPixel)
+float LoadVBufferMaxZ(int2 maxZPixel, int2 maxZDimensions)
 {
-    int2 maxCoord = int2((int)_VBufferWidth - 1, (int)_VBufferHeight - 1);
-    int2 coord = clamp(vBufferPixel, int2(0, 0), maxCoord);
+    int2 maxCoord = max(maxZDimensions - 1, int2(0, 0));
+    int2 coord = clamp(maxZPixel, int2(0, 0), maxCoord);
     return _VBufferMaxZ.Load(int3(coord, 0));
 }
 
-float GetVBufferMaxOpaqueGeometryDistance(uint2 vBufferPixel, float fallbackDistance)
+float GetVBufferMaxOpaqueGeometryDistance(float2 vBufferUV, float3 rayDirectionWS, float fallbackDistance)
 {
     if (_VBufferMaxZEnabled <= 0.5)
         return fallbackDistance;
 
-    int dilationRadius = clamp((int)_VBufferMaxZDilationRadius, 0, 2);
-    int2 center = int2(vBufferPixel);
-    float maxDistance = fallbackDistance;
+    uint maxZWidth;
+    uint maxZHeight;
+    _VBufferMaxZ.GetDimensions(maxZWidth, maxZHeight);
+    if (maxZWidth == 0u || maxZHeight == 0u)
+        return fallbackDistance;
 
-    [loop]
-    for (int y = -dilationRadius; y <= dilationRadius; y++)
+    float2 maxZDimensions = float2((float)maxZWidth, (float)maxZHeight);
+    float2 maxZTexelCoord = vBufferUV * maxZDimensions - 0.5;
+    int2 baseCoord = (int2)floor(maxZTexelCoord);
+    int2 dimensions = int2((int)maxZWidth, (int)maxZHeight);
+    float maxLinearEyeDepth = -1.0;
+
+    [unroll]
+    for (int y = 0; y <= 1; y++)
     {
-        [loop]
-        for (int x = -dilationRadius; x <= dilationRadius; x++)
+        [unroll]
+        for (int x = 0; x <= 1; x++)
         {
-            maxDistance = max(maxDistance, LoadVBufferMaxZ(center + int2(x, y)));
+            maxLinearEyeDepth = max(maxLinearEyeDepth, LoadVBufferMaxZ(baseCoord + int2(x, y), dimensions));
         }
     }
 
+    if (maxLinearEyeDepth < 0.0)
+        return fallbackDistance;
+
+    float forwardDistance = _VBufferIsOrthographic > 0.5 ? 1.0 : max(dot(rayDirectionWS, GetViewForwardDir()), 1e-4);
+    float maxDistance = max(maxLinearEyeDepth / forwardDistance, fallbackDistance);
     return clamp(maxDistance, GetVBufferSliceBoundaryDistance(0.0), _VBufferLastSliceDistance);
 }
 
@@ -242,7 +255,7 @@ void VolumetricLighting(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 rayDirectionWS = GetVBufferRayDirectionWSFromUV(vBufferUV);
     bool hasOpaqueGeometry;
     float opaqueGeometryDistance = GetVBufferOpaqueGeometryDistance(vBufferUV, hasOpaqueGeometry);
-    float maxOpaqueGeometryDistance = GetVBufferMaxOpaqueGeometryDistance(vBufferPixel, opaqueGeometryDistance);
+    float maxOpaqueGeometryDistance = GetVBufferMaxOpaqueGeometryDistance(vBufferUV, rayDirectionWS, opaqueGeometryDistance);
     bool hasMaxZ = _VBufferMaxZEnabled > 0.5;
 
     float t0 = GetVBufferSliceBoundaryDistance(0.0);

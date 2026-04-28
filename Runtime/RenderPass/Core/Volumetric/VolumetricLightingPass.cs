@@ -189,7 +189,16 @@ namespace VividRP.Runtime.RenderPass.Core
                 : VividVolumetricUtility.BuildShaderVariables(m_Settings, m_CameraWidth, m_CameraHeight, 0, cameraData);
 
             ConfigureCameraDepthTexture(m_CameraWidth, m_CameraHeight);
-            VolumetricMaxZPass.ConfigureVBufferMaxZTexture(m_VBufferMaxZ, m_Settings.VBufferParameters, "VBufferMaxZ");
+            if (ReferenceEquals(m_VBufferMaxZ, m_LocalVBufferMaxZ))
+            {
+                var localMaxZWidth = Mathf.Max(1, CoreUtils.DivRoundUp(
+                    CoreUtils.DivRoundUp(m_CameraWidth, VolumetricMaxZPass.MaxZTileSize),
+                    VolumetricMaxZPass.FinalMaskDownsample));
+                var localMaxZHeight = Mathf.Max(1, CoreUtils.DivRoundUp(
+                    CoreUtils.DivRoundUp(m_CameraHeight, VolumetricMaxZPass.MaxZTileSize),
+                    VolumetricMaxZPass.FinalMaskDownsample));
+                VolumetricMaxZPass.ConfigureVBufferMaxZTexture(m_VBufferMaxZ, localMaxZWidth, localMaxZHeight, "VBufferMaxZ");
+            }
             VolumetricDensityPass.ConfigureVBufferTexture(m_VBufferDensity, m_Settings.VBufferParameters, "VBufferDensity", clear: false);
             VolumetricDensityPass.ConfigureVBufferTexture(m_VBufferLighting, m_Settings.VBufferParameters, "VBufferLighting", clear: true);
             VolumetricDensityPass.ConfigureVBufferTexture(m_VBufferLightingFiltered, m_Settings.VBufferParameters, "VBufferLightingFiltered", clear: false);

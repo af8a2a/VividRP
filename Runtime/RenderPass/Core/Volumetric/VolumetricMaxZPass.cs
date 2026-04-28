@@ -9,11 +9,18 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         private const int ThreadGroupSizeX = 8;
         private const int ThreadGroupSizeY = 8;
-        private const string BuildKernelName = "BuildVBufferMaxZ";
+        internal const int MaxZTileSize = 8;
+        internal const int FinalMaskDownsample = 2;
+        private const string ComputeMaxZKernelName = "ComputeMaxZ";
+        private const string ComputeFinalMaskKernelName = "ComputeFinalMask";
+        private const string DilateMaskKernelName = "DilateMask";
 
         private static readonly int ShaderVariablesVolumetricId = Shader.PropertyToID("ShaderVariablesVolumetric");
         private static readonly int CameraDepthId = Shader.PropertyToID("_CameraDepth");
-        private static readonly int VBufferMaxZId = Shader.PropertyToID("_VBufferMaxZ");
+        private static readonly int InputTextureId = Shader.PropertyToID("_InputTexture");
+        private static readonly int OutputTextureId = Shader.PropertyToID("_OutputTexture");
+        private static readonly int SrcOffsetAndLimitId = Shader.PropertyToID("_SrcOffsetAndLimit");
+        private static readonly int DilationWidthId = Shader.PropertyToID("_DilationWidth");
 
         [RenderGraphResource(Name = "CameraDepth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_CameraDepth;
@@ -21,10 +28,27 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "VBufferMaxZ", Access = AccessFlags.Write)]
         private RenderGraphTexture m_VBufferMaxZ;
 
+        [RenderGraphResource(Name = "VBufferMaxZ8x", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private RenderGraphTexture m_VBufferMaxZ8x;
+
+        [RenderGraphResource(Name = "VBufferMaxZFinalMask", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private RenderGraphTexture m_VBufferMaxZFinalMask;
+
         private ComputeShader m_Shader;
-        private int m_BuildKernel = -1;
-        private int m_DispatchX = 1;
-        private int m_DispatchY = 1;
+        private int m_ComputeMaxZKernel = -1;
+        private int m_ComputeFinalMaskKernel = -1;
+        private int m_DilateMaskKernel = -1;
+        private int m_MaxZDispatchX = 1;
+        private int m_MaxZDispatchY = 1;
+        private int m_FinalMaskDispatchX = 1;
+        private int m_FinalMaskDispatchY = 1;
+        private int m_MaxZMaskWidth = 1;
+        private int m_MaxZMaskHeight = 1;
+        private int m_FinalMaskWidth = 1;
+        private int m_FinalMaskHeight = 1;
+        private int m_DilationWidth = 1;
         private int m_CameraWidth = 1;
         private int m_CameraHeight = 1;
         private VividVolumetricFogSettings m_Settings;
@@ -36,6 +60,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CameraDepth = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.None, DepthBits.Depth32);
             m_CameraDepth.desc.FilterMode = FilterMode.Point;
             m_VBufferMaxZ = CreateVBufferMaxZTexture("VBufferMaxZ");
+            m_VBufferMaxZ8x = CreateVBufferMaxZTexture("VBufferMaxZ8x");
+            m_VBufferMaxZFinalMask = CreateVBufferMaxZTexture("VBufferMaxZFinalMask");
         }
 
         public override void Create()
@@ -47,7 +73,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            m_BuildKernel = m_Shader.FindKernel(BuildKernelName);
+            m_ComputeMaxZKernel = m_Shader.FindKernel(ComputeMaxZKernelName);
+            m_ComputeFinalMaskKernel = m_Shader.FindKernel(ComputeFinalMaskKernelName);
+            m_DilateMaskKernel = m_Shader.FindKernel(DilateMaskKernelName);
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -71,9 +99,19 @@ namespace VividRP.Runtime.RenderPass.Core
                 : VividVolumetricUtility.BuildShaderVariables(m_Settings, m_CameraWidth, m_CameraHeight, 0, cameraData);
 
             ConfigureCameraDepthTexture(m_CameraWidth, m_CameraHeight);
-            ConfigureVBufferMaxZTexture(m_VBufferMaxZ, m_Settings.VBufferParameters, "VBufferMaxZ");
-            m_DispatchX = CoreUtils.DivRoundUp(m_Settings.VBufferParameters.ViewportWidth, ThreadGroupSizeX);
-            m_DispatchY = CoreUtils.DivRoundUp(m_Settings.VBufferParameters.ViewportHeight, ThreadGroupSizeY);
+            m_MaxZMaskWidth = Mathf.Max(1, CoreUtils.DivRoundUp(m_CameraWidth, MaxZTileSize));
+            m_MaxZMaskHeight = Mathf.Max(1, CoreUtils.DivRoundUp(m_CameraHeight, MaxZTileSize));
+            m_FinalMaskWidth = Mathf.Max(1, CoreUtils.DivRoundUp(m_MaxZMaskWidth, FinalMaskDownsample));
+            m_FinalMaskHeight = Mathf.Max(1, CoreUtils.DivRoundUp(m_MaxZMaskHeight, FinalMaskDownsample));
+            m_DilationWidth = VividVolumetricUtility.ComputeMaxZDilationRadius(m_Settings.VBufferParameters.ScreenPercentage);
+
+            ConfigureVBufferMaxZTexture(m_VBufferMaxZ8x, m_MaxZMaskWidth, m_MaxZMaskHeight, "VBufferMaxZ8x");
+            ConfigureVBufferMaxZTexture(m_VBufferMaxZFinalMask, m_FinalMaskWidth, m_FinalMaskHeight, "VBufferMaxZFinalMask");
+            ConfigureVBufferMaxZTexture(m_VBufferMaxZ, m_FinalMaskWidth, m_FinalMaskHeight, "VBufferMaxZ");
+            m_MaxZDispatchX = m_MaxZMaskWidth;
+            m_MaxZDispatchY = m_MaxZMaskHeight;
+            m_FinalMaskDispatchX = CoreUtils.DivRoundUp(m_FinalMaskWidth, ThreadGroupSizeX);
+            m_FinalMaskDispatchY = CoreUtils.DivRoundUp(m_FinalMaskHeight, ThreadGroupSizeY);
 
             volumetricData.settings = m_Settings;
             volumetricData.shaderVariables = m_ShaderVariables;
@@ -89,16 +127,30 @@ namespace VividRP.Runtime.RenderPass.Core
             using (new ProfilingScope(cmd, profilingSampler))
             {
                 ConstantBuffer.Push(cmd, m_ShaderVariables, m_Shader, ShaderVariablesVolumetricId);
-                cmd.SetComputeTextureParam(m_Shader, m_BuildKernel, CameraDepthId, m_CameraDepth.innerHandle);
-                cmd.SetComputeTextureParam(m_Shader, m_BuildKernel, VBufferMaxZId, m_VBufferMaxZ.innerHandle);
-                cmd.DispatchCompute(m_Shader, m_BuildKernel, m_DispatchX, m_DispatchY, 1);
+
+                cmd.SetComputeTextureParam(m_Shader, m_ComputeMaxZKernel, CameraDepthId, m_CameraDepth.innerHandle);
+                cmd.SetComputeTextureParam(m_Shader, m_ComputeMaxZKernel, OutputTextureId, m_VBufferMaxZ8x.innerHandle);
+                cmd.DispatchCompute(m_Shader, m_ComputeMaxZKernel, m_MaxZDispatchX, m_MaxZDispatchY, 1);
+
+                cmd.SetComputeVectorParam(m_Shader, SrcOffsetAndLimitId, new Vector4(m_MaxZMaskWidth, m_MaxZMaskHeight, 0.0f, 0.0f));
+                cmd.SetComputeTextureParam(m_Shader, m_ComputeFinalMaskKernel, InputTextureId, m_VBufferMaxZ8x.innerHandle);
+                cmd.SetComputeTextureParam(m_Shader, m_ComputeFinalMaskKernel, OutputTextureId, m_VBufferMaxZFinalMask.innerHandle);
+                cmd.DispatchCompute(m_Shader, m_ComputeFinalMaskKernel, m_FinalMaskDispatchX, m_FinalMaskDispatchY, 1);
+
+                cmd.SetComputeFloatParam(m_Shader, DilationWidthId, m_DilationWidth);
+                cmd.SetComputeVectorParam(m_Shader, SrcOffsetAndLimitId, new Vector4(m_FinalMaskWidth, m_FinalMaskHeight, 0.0f, 0.0f));
+                cmd.SetComputeTextureParam(m_Shader, m_DilateMaskKernel, InputTextureId, m_VBufferMaxZFinalMask.innerHandle);
+                cmd.SetComputeTextureParam(m_Shader, m_DilateMaskKernel, OutputTextureId, m_VBufferMaxZ.innerHandle);
+                cmd.DispatchCompute(m_Shader, m_DilateMaskKernel, m_FinalMaskDispatchX, m_FinalMaskDispatchY, 1);
             }
         }
 
         public override void Dispose()
         {
             m_Shader = null;
-            m_BuildKernel = -1;
+            m_ComputeMaxZKernel = -1;
+            m_ComputeFinalMaskKernel = -1;
+            m_DilateMaskKernel = -1;
             m_Settings = default;
             m_ShaderVariables = default;
         }
@@ -131,11 +183,20 @@ namespace VividRP.Runtime.RenderPass.Core
             in VBufferParameters parameters,
             string name)
         {
+            ConfigureVBufferMaxZTexture(texture, parameters.ViewportWidth, parameters.ViewportHeight, name);
+        }
+
+        internal static void ConfigureVBufferMaxZTexture(
+            RenderGraphTexture texture,
+            int width,
+            int height,
+            string name)
+        {
             if (texture?.desc == null)
                 return;
 
-            texture.desc.Width = parameters.ViewportWidth;
-            texture.desc.Height = parameters.ViewportHeight;
+            texture.desc.Width = Mathf.Max(1, width);
+            texture.desc.Height = Mathf.Max(1, height);
             texture.desc.Slices = 1;
             texture.desc.Dimension = TextureDimension.Tex2D;
             texture.desc.ColorFormat = GraphicsFormat.R32_SFloat;
@@ -170,8 +231,12 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool CanExecute()
         {
             return m_Shader != null
-                && m_BuildKernel >= 0
+                && m_ComputeMaxZKernel >= 0
+                && m_ComputeFinalMaskKernel >= 0
+                && m_DilateMaskKernel >= 0
                 && m_VBufferMaxZ?.innerHandle.IsValid() == true
+                && m_VBufferMaxZ8x?.innerHandle.IsValid() == true
+                && m_VBufferMaxZFinalMask?.innerHandle.IsValid() == true
                 && m_CameraDepth?.innerHandle.IsValid() == true;
         }
     }

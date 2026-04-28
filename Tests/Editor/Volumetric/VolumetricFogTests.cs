@@ -403,14 +403,27 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.Textures.Select(entry => entry.Name), Is.EquivalentTo(new[]
             {
                 "CameraDepth",
+                "VBufferMaxZ8x",
+                "VBufferMaxZFinalMask",
                 "VBufferMaxZ"
             }));
             Assert.That(maxZ.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(maxZ.Texture.desc.Dimension, Is.EqualTo(TextureDimension.Tex2D));
-            Assert.That(maxZ.Texture.desc.Width, Is.EqualTo(160));
-            Assert.That(maxZ.Texture.desc.Height, Is.EqualTo(90));
+            Assert.That(maxZ.Texture.desc.Width, Is.EqualTo(80));
+            Assert.That(maxZ.Texture.desc.Height, Is.EqualTo(45));
             Assert.That(maxZ.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32_SFloat));
             Assert.That(maxZ.Texture.desc.EnableRandomWrite, Is.True);
+
+            var maxZ8x = resources.Textures.Single(entry => entry.Name == "VBufferMaxZ8x");
+            var finalMask = resources.Textures.Single(entry => entry.Name == "VBufferMaxZFinalMask");
+            Assert.That(maxZ8x.Access, Is.EqualTo(AccessFlags.ReadWrite));
+            Assert.That(maxZ8x.IsTransient, Is.True);
+            Assert.That(maxZ8x.Texture.desc.Width, Is.EqualTo(160));
+            Assert.That(maxZ8x.Texture.desc.Height, Is.EqualTo(90));
+            Assert.That(finalMask.Access, Is.EqualTo(AccessFlags.ReadWrite));
+            Assert.That(finalMask.IsTransient, Is.True);
+            Assert.That(finalMask.Texture.desc.Width, Is.EqualTo(80));
+            Assert.That(finalMask.Texture.desc.Height, Is.EqualTo(45));
         }
 
         [Test]
@@ -494,17 +507,27 @@ namespace VividRP.Editor.Tests
             Assert.That(densitySource, Does.Contain("_VBufferFogRcpScaleHeight"));
             Assert.That(densitySource, Does.Not.Contain("_VBufferDensityCutoff"));
             Assert.That(densitySource, Does.Not.Contain("extinction <= _VBufferDensityCutoff"));
-            Assert.That(maxZSource, Does.Contain("#pragma kernel BuildVBufferMaxZ"));
-            Assert.That(maxZSource, Does.Contain("RWTexture2D<float> _VBufferMaxZ"));
-            Assert.That(maxZSource, Does.Contain("GetMaxZDistanceForCameraPixel"));
+            Assert.That(maxZSource, Does.Contain("#pragma kernel ComputeMaxZ"));
+            Assert.That(maxZSource, Does.Contain("#pragma kernel ComputeFinalMask"));
+            Assert.That(maxZSource, Does.Contain("#pragma kernel DilateMask"));
+            Assert.That(maxZSource, Does.Contain("Texture2D<float> _InputTexture"));
+            Assert.That(maxZSource, Does.Contain("RWTexture2D<float> _OutputTexture"));
+            Assert.That(maxZSource, Does.Contain("groupshared float gs_MaxDepth"));
+            Assert.That(maxZSource, Does.Contain("_SrcOffsetAndLimit"));
+            Assert.That(maxZSource, Does.Contain("_DilationWidth"));
+            Assert.That(maxZSource, Does.Contain("GetDepthToDownsample"));
             Assert.That(maxZSource, Does.Contain("IsVBufferFarDepth"));
             Assert.That(maxZSource, Does.Contain("LinearEyeDepth(deviceDepth, _ZBufferParams)"));
-            Assert.That(maxZSource, Does.Contain("_VBufferCameraToVBufferScale"));
+            Assert.That(maxZSource, Does.Contain("VBUFFER_MAX_Z_FAR_DEPTH"));
+            Assert.That(maxZSource, Does.Contain("LoadInputMaxZ"));
+            Assert.That(maxZSource, Does.Contain("DilateMask"));
             Assert.That(lightingSource, Does.Contain("#pragma kernel VolumetricLighting"));
             Assert.That(lightingSource, Does.Contain("#pragma kernel FilterVolumetricLighting"));
             Assert.That(lightingSource, Does.Contain("Texture2D<float> _VBufferMaxZ"));
             Assert.That(lightingSource, Does.Contain("float _VBufferMaxZEnabled"));
             Assert.That(lightingSource, Does.Contain("GetVBufferMaxOpaqueGeometryDistance"));
+            Assert.That(lightingSource, Does.Contain("_VBufferMaxZ.GetDimensions"));
+            Assert.That(lightingSource, Does.Contain("float maxDistance = max(maxLinearEyeDepth / forwardDistance, fallbackDistance)"));
             Assert.That(lightingSource, Does.Contain("LightingLoop.hlsl"));
             Assert.That(lightingSource, Does.Contain("[numthreads(8, 8, 1)]"));
             Assert.That(lightingSource, Does.Contain("for (uint slice = 0; slice < sliceCount; slice++)"));
@@ -536,6 +559,8 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingPassSource, Does.Contain("cmd.DispatchCompute(m_Shader, m_LightingKernel, m_DispatchX, m_DispatchY, 1)"));
             Assert.That(lightingPassSource, Does.Contain("VBufferMaxZId = Shader.PropertyToID(\"_VBufferMaxZ\")"));
             Assert.That(lightingPassSource, Does.Contain("VBufferMaxZEnabledId = Shader.PropertyToID(\"_VBufferMaxZEnabled\")"));
+            Assert.That(lightingPassSource, Does.Contain("ReferenceEquals(m_VBufferMaxZ, m_LocalVBufferMaxZ)"));
+            Assert.That(lightingPassSource, Does.Contain("VolumetricMaxZPass.MaxZTileSize"));
             Assert.That(lightingPassSource, Does.Contain("BindVBufferMaxZ(context, cmd, kernel)"));
             Assert.That(lightingPassSource, Does.Contain("FilterKernelName = \"FilterVolumetricLighting\""));
             Assert.That(lightingPassSource, Does.Contain("m_FilterDispatchZ = Mathf.Max(m_Settings.VBufferParameters.SliceCount, 1)"));

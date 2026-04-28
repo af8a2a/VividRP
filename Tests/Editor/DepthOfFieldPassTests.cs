@@ -189,6 +189,48 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Prepare_UsesEffectiveAntialiasingData_ForTemporalHistory()
+        {
+            var gameObject = new GameObject("DepthOfFieldPassTests_AAResolver");
+            var camera = gameObject.AddComponent<Camera>();
+            var additionalData = gameObject.AddComponent<VividAdditionalCameraData>();
+            additionalData.antialiasing = VividAntialiasingMode.TemporalAntiAliasing;
+
+            try
+            {
+                var pass = new DepthOfFieldPass();
+                var usesTemporalField = typeof(DepthOfFieldPass).GetField(
+                    "m_UsesTemporalAntialiasing",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(usesTemporalField, Is.Not.Null);
+
+                var frameData = new ContextContainer();
+                var cameraData = frameData.GetOrCreate<VividCameraData>();
+                cameraData.camera = camera;
+                cameraData.additionalData = additionalData;
+
+                var antialiasingData = frameData.GetOrCreate<VividAntialiasingData>();
+                antialiasingData.effectiveMode = VividAntialiasingMode.None;
+                antialiasingData.usesTemporalJitter = false;
+
+                pass.Prepare(frameData);
+
+                Assert.That((bool)usesTemporalField.GetValue(pass), Is.False);
+
+                antialiasingData.effectiveMode = VividAntialiasingMode.TemporalAntiAliasing;
+                antialiasingData.usesTemporalJitter = true;
+
+                pass.Prepare(frameData);
+
+                Assert.That((bool)usesTemporalField.GetValue(pass), Is.True);
+            }
+            finally
+            {
+                GameObject.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
         public void VividRPCoreResources_DeclaresDepthOfFieldShader_AndCompute()
         {
             var shaderField = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.DepthOfFieldShader));
@@ -226,6 +268,9 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("DispatchCoCMinMax"));
             Assert.That(passSource, Does.Contain("DispatchSlowTiles"));
             Assert.That(passSource, Does.Contain("DispatchCombine"));
+            Assert.That(passSource, Does.Contain("IRenderGraphRecordingPass"));
+            Assert.That(passSource, Does.Contain("TryRegisterPassthrough"));
+            Assert.That(passSource, Does.Contain("context.RegisterTextureHandle(output, sourceHandle)"));
             Assert.That(passSource, Does.Contain("m_ComputeSlowTilesKernel, InputLinearDepthId"));
             Assert.That(passSource, Does.Contain("m_GatherFastTilesKernel, InputLinearDepthId"));
             Assert.That(passSource, Does.Contain("ResolvePhysicalMaxCoC"));

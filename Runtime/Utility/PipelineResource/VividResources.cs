@@ -31,11 +31,13 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/DepthOfField.compute")]
         public ComputeShader DepthOfFieldCompute;
 
+#if DLSS_PLUGIN_INTEGRATE
         [ResourcePath("Shaders/Core/Private/DLSS/DLSSBiasColorMask")]
         public Shader DLSSBiasColorMaskShader;
 
         [ResourcePath("Shaders/Core/Private/DLSS/DLSSRRResourcePrep.compute")]
         public ComputeShader DLSSRRResourcePrepCompute;
+#endif
 
         [ResourcePath("Shaders/Core/Private/AutoExposure/Unreal/AutoExposure.compute")]
         public ComputeShader AutoExposureCompute;

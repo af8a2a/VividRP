@@ -25,8 +25,14 @@ namespace VividRP.Editor
         private static readonly GUIContent s_TAABaseBlendFactorLabel = EditorGUIUtility.TrTextContent("Base Blend");
         private static readonly GUIContent s_TAAMotionWeightDecayLabel = EditorGUIUtility.TrTextContent("Motion Decay");
         private static readonly GUIContent s_TAAAntiFlickerIntensityLabel = EditorGUIUtility.TrTextContent("Anti-Flicker");
+#if !DLSS_PLUGIN_INTEGRATE
+        private const int DlssAntialiasingModeValue = 4;
+        private const string DlssDisabledWarning = "DLSS is not enabled. Define DLSS_PLUGIN_INTEGRATE to expose DLSS camera options.";
+#endif
+#if DLSS_PLUGIN_INTEGRATE
         private static readonly GUIContent s_DLSSLabel = EditorGUIUtility.TrTextContent("Deep Learning Super Sampling");
         private static readonly GUIContent s_DLSSQualityLabel = EditorGUIUtility.TrTextContent("Quality");
+#endif
 
         private CameraEditor.Settings m_Settings;
         private VividSerializedCamera m_SerializedCamera;
@@ -109,6 +115,11 @@ namespace VividRP.Editor
                 EditorGUILayout.PropertyField(m_SerializedCamera.volumeLayerMask, s_VolumeLayerMaskLabel);
                 EditorGUILayout.PropertyField(m_SerializedCamera.antialiasing, s_AntialiasingLabel);
 
+#if !DLSS_PLUGIN_INTEGRATE
+                if (ShouldShowDlssDisabledWarning())
+                    EditorGUILayout.HelpBox(DlssDisabledWarning, MessageType.Warning);
+#endif
+
                 if (ShouldShowTAASettings())
                 {
                     EditorGUILayout.Space();
@@ -120,12 +131,14 @@ namespace VividRP.Editor
                     EditorGUILayout.PropertyField(m_SerializedCamera.taaAntiFlickerIntensity, s_TAAAntiFlickerIntensityLabel);
                 }
 
+#if DLSS_PLUGIN_INTEGRATE
                 if (ShouldShowDLSSSettings())
                 {
                     EditorGUILayout.Space();
                     EditorGUILayout.LabelField(s_DLSSLabel, EditorStyles.boldLabel);
                     EditorGUILayout.PropertyField(m_SerializedCamera.dlssQuality, s_DLSSQualityLabel);
                 }
+#endif
             }
         }
 
@@ -147,6 +160,16 @@ namespace VividRP.Editor
                 == VividAntialiasingMode.TemporalAntiAliasing;
         }
 
+#if !DLSS_PLUGIN_INTEGRATE
+        private bool ShouldShowDlssDisabledWarning()
+        {
+            return m_SerializedCamera.antialiasing != null
+                && !m_SerializedCamera.antialiasing.hasMultipleDifferentValues
+                && m_SerializedCamera.antialiasing.intValue == DlssAntialiasingModeValue;
+        }
+#endif
+
+#if DLSS_PLUGIN_INTEGRATE
         private bool ShouldShowDLSSSettings()
         {
             if (m_SerializedCamera.antialiasing == null)
@@ -156,6 +179,7 @@ namespace VividRP.Editor
                 || (VividAntialiasingMode)m_SerializedCamera.antialiasing.enumValueIndex
                 == VividAntialiasingMode.DeepLearningSuperSampling;
         }
+#endif
     }
 
     [CustomEditor(typeof(VividAdditionalCameraData))]

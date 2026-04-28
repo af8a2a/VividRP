@@ -6,6 +6,7 @@ using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
+#if DLSS_PLUGIN_INTEGRATE
 namespace VividRP.Runtime.RenderPass.Core
 {
     internal sealed class DLSSPass : IDisposable
@@ -264,3 +265,4 @@ namespace VividRP.Runtime.RenderPass.Core
         }
     }
 }
+#endif

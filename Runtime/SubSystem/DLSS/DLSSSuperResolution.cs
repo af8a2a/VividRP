@@ -5,6 +5,8 @@
 // Manages feature lifecycle and execution via CommandBuffer.
 //------------------------------------------------------------------------------
 
+#if DLSS_PLUGIN_INTEGRATE
+
 using System;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -17,7 +19,6 @@ namespace VividRP.Runtime
     /// </summary>
     public class DLSSSuperResolution : IDisposable
     {
-#if DLSS_PLUGIN_INTEGRATE
         private int m_dlssHandle = DLSSExtension.DLSS_INVALID_FEATURE_HANDLE;
         private IntPtr m_dlssParameters = IntPtr.Zero;
         private bool m_initialized = false;
@@ -327,38 +328,6 @@ namespace VividRP.Runtime
         {
             Dispose(false);
         }
-#else
-        public DLSSSuperResolution(
-            NVSDK_NGX_DLSS_Feature_Flags featureFlags = NVSDK_NGX_DLSS_Feature_Flags.None,
-            NVSDK_NGX_PerfQuality_Value qualityValue = NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_Balanced)
-        {
-        }
-
-        public bool IsSupported => false;
-
-        public void SetQuality(NVSDK_NGX_PerfQuality_Value quality) { }
-
-        public void SetFeatureFlags(NVSDK_NGX_DLSS_Feature_Flags flags) { }
-
-        public bool Render(
-            CommandBuffer cmd,
-            RenderTexture colorInput,
-            RenderTexture colorOutput,
-            RenderTexture depth,
-            RenderTexture motionVectors,
-            float jitterX,
-            float jitterY,
-            float mvScaleX,
-            float mvScaleY,
-            bool reset = false,
-            float preExposure = 1.0f,
-            RenderTexture exposureTexture = null,
-            RenderTexture biasColorMask = null)
-        {
-            return false;
-        }
-
-        public void Dispose() { }
-#endif
     }
 }
+#endif

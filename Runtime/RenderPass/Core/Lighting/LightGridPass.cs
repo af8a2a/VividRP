@@ -76,19 +76,15 @@ namespace VividRP.Runtime
         [RenderGraphResource(Name = "DecalData", Access = AccessFlags.Write)]
         private RenderGraphBuffer m_DecalDataBuffer;
 
-        [RenderGraphResource(
-            Name = "FiniteLightBounds",
-            Access = AccessFlags.Write)]
+        [RenderGraphResource( Name = "FiniteLightBounds",Access = AccessFlags.Write)]
+        [TransientResource]
         private RenderGraphBuffer m_FiniteLightBoundBuffer;
 
-        [RenderGraphResource(
-            Name = "LightVolumeData",
-            Access = AccessFlags.Write)]
+        [RenderGraphResource(Name = "LightVolumeData", Access = AccessFlags.Write)]
+        [TransientResource]
         private RenderGraphBuffer m_LightVolumeDataBuffer;
 
-        [RenderGraphResource(
-            Name = "ScreenSpaceBounds",
-            Access = AccessFlags.Write)]
+        [RenderGraphResource(Name = "ScreenSpaceBounds",Access = AccessFlags.Write)]
         [TransientResource]
         private RenderGraphBuffer m_ScreenSpaceBoundsBuffer;
 

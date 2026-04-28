@@ -25,7 +25,9 @@ namespace VividRP.Editor
         public SerializedProperty taaBaseBlendFactor { get; }
         public SerializedProperty taaMotionWeightDecay { get; }
         public SerializedProperty taaAntiFlickerIntensity { get; }
+#if DLSS_PLUGIN_INTEGRATE
         public SerializedProperty dlssQuality { get; }
+#endif
 
         internal SerializedProperty renderType { get; }
         internal VividAdditionalCameraData[] camerasAdditionalData { get; }
@@ -67,7 +69,9 @@ namespace VividRP.Editor
             taaBaseBlendFactor = serializedAdditionalDataObject.FindProperty("m_TAABaseBlendFactor");
             taaMotionWeightDecay = serializedAdditionalDataObject.FindProperty("m_TAAMotionWeightDecay");
             taaAntiFlickerIntensity = serializedAdditionalDataObject.FindProperty("m_TAAAntiFlickerIntensity");
+#if DLSS_PLUGIN_INTEGRATE
             dlssQuality = serializedAdditionalDataObject.FindProperty("m_DLSSQuality");
+#endif
         }
 
         public void Update()

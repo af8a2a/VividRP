@@ -1,3 +1,4 @@
+using System;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
@@ -27,7 +28,7 @@ namespace VividRP.Editor.Tests
             }
             finally
             {
-                Object.DestroyImmediate(gameObject);
+                GameObject.DestroyImmediate(gameObject);
             }
         }
 
@@ -49,7 +50,7 @@ namespace VividRP.Editor.Tests
             }
             finally
             {
-                Object.DestroyImmediate(gameObject);
+                GameObject.DestroyImmediate(gameObject);
             }
         }
 
@@ -69,10 +70,11 @@ namespace VividRP.Editor.Tests
             }
             finally
             {
-                Object.DestroyImmediate(gameObject);
+                GameObject.DestroyImmediate(gameObject);
             }
         }
 
+#if DLSS_PLUGIN_INTEGRATE
         [Test]
         public void Antialiasing_Setter_TracksDlssModeAsTemporalAntialiasing()
         {
@@ -92,9 +94,41 @@ namespace VividRP.Editor.Tests
             }
             finally
             {
-                Object.DestroyImmediate(gameObject);
+                GameObject.DestroyImmediate(gameObject);
             }
         }
+#else
+        [Test]
+        public void DLSSOptions_AreNotExposed_WhenDlssPluginIsNotIntegrated()
+        {
+            Assert.That(Enum.GetNames(typeof(VividAntialiasingMode)), Does.Not.Contain("DeepLearningSuperSampling"));
+            Assert.That(typeof(VividAdditionalCameraData).GetProperty("enableDLSS"), Is.Null);
+            Assert.That(typeof(VividAdditionalCameraData).GetProperty("dlssQuality"), Is.Null);
+            Assert.That(
+                typeof(VividAdditionalCameraData).GetField("m_DLSSQuality", BindingFlags.Instance | BindingFlags.NonPublic),
+                Is.Null);
+
+            var runtimeAssembly = typeof(VividAdditionalCameraData).Assembly;
+            Assert.That(runtimeAssembly.GetType("VividRP.Runtime.DLSSQuality"), Is.Null);
+            Assert.That(runtimeAssembly.GetType("VividRP.Runtime.DLSSExtension"), Is.Null);
+            Assert.That(runtimeAssembly.GetType("VividRP.Runtime.RenderPass.Core.DLSSPass"), Is.Null);
+
+            var gameObject = new GameObject("VividAdditionalCameraDataTests_NoDLSS");
+            var additionalData = gameObject.AddComponent<VividAdditionalCameraData>();
+
+            try
+            {
+                SetPrivateField(additionalData, "m_Antialiasing", (VividAntialiasingMode)4);
+                ((ISerializationCallbackReceiver)additionalData).OnAfterDeserialize();
+
+                Assert.That(additionalData.antialiasing, Is.EqualTo(VividAntialiasingMode.None));
+            }
+            finally
+            {
+                GameObject.DestroyImmediate(gameObject);
+            }
+        }
+#endif
 
         private static void SetPrivateField(object target, string fieldName, object value)
         {

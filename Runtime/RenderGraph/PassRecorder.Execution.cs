@@ -98,7 +98,9 @@ namespace VividRP.Runtime
         private static bool s_RenderedPreImageEffectGizmosInGraph;
         private static StopNaNPass s_InjectedStopNaNPass;
         private static CMAA2Pass s_InjectedCmaa2Pass;
+#if DLSS_PLUGIN_INTEGRATE
         private static DLSSPass s_InjectedDlssPass;
+#endif
 
 #if UNITY_EDITOR
         private sealed class RenderGizmosPassData
@@ -165,6 +167,7 @@ namespace VividRP.Runtime
                 return;
             }
 
+#if DLSS_PLUGIN_INTEGRATE
             if (additionalCameraData != null && additionalCameraData.enableDLSS)
             {
                 if (DLSSExtension.IsSuperResolutionSupported)
@@ -174,6 +177,7 @@ namespace VividRP.Runtime
 
                 return;
             }
+#endif
 
             var taaSettings = TAASettings.FromCamera(additionalCameraData);
             if (!taaSettings.Enabled)
@@ -202,6 +206,7 @@ namespace VividRP.Runtime
             CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
         }
 
+#if DLSS_PLUGIN_INTEGRATE
         private static void ApplyDlssJitter(
             Camera camera,
             VividAdditionalCameraData additionalCameraData,
@@ -231,6 +236,7 @@ namespace VividRP.Runtime
 
             CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
         }
+#endif
 
         private static void ApplyStpJitter(Camera camera, Matrix4x4 nonJitteredProj)
         {
@@ -354,6 +360,7 @@ namespace VividRP.Runtime
                 s_InjectedStopNaNPass = null;
             }
 
+#if DLSS_PLUGIN_INTEGRATE
             if (s_InjectedDlssPass != null)
             {
                 try
@@ -367,6 +374,7 @@ namespace VividRP.Runtime
 
                 s_InjectedDlssPass = null;
             }
+#endif
 
             DisposeAccelerationStructures();
             s_RenderPasses.Clear();
@@ -597,6 +605,7 @@ namespace VividRP.Runtime
             return TAASettings.UsesStp(additionalData) && STP.IsSupported();
         }
 
+#if DLSS_PLUGIN_INTEGRATE
         private static bool ShouldInjectDlssPass()
         {
             var additionalData = s_FrameData.GetOrCreate<VividCameraData>().additionalData;
@@ -604,6 +613,7 @@ namespace VividRP.Runtime
                 && additionalData.enableDLSS
                 && DLSSExtension.IsSuperResolutionSupported;
         }
+#endif
 
         private static StopNaNPass GetOrCreateInjectedStopNaNPass()
         {
@@ -627,10 +637,12 @@ namespace VividRP.Runtime
             return s_InjectedCmaa2Pass;
         }
 
+#if DLSS_PLUGIN_INTEGRATE
         private static DLSSPass GetOrCreateInjectedDlssPass()
         {
             return s_InjectedDlssPass ??= new DLSSPass();
         }
+#endif
 
         private static void RecordInjectedCmaa2Pass(
             RenderGraph renderGraph,
@@ -801,6 +813,7 @@ namespace VividRP.Runtime
             return stpOutputTexture;
         }
 
+#if DLSS_PLUGIN_INTEGRATE
         private static RenderGraphTexture RecordInjectedDlssPass(
             RenderGraph renderGraph,
             DLSSPass dlssPass,
@@ -835,6 +848,7 @@ namespace VividRP.Runtime
                 motionTexture,
                 textureCache);
         }
+#endif
 
         private static RenderGraphTextureDesc CreateInjectedStpOutputDescriptor(
             RenderGraphTextureDesc sourceDescriptor,
@@ -1836,9 +1850,11 @@ namespace VividRP.Runtime
             var injectedStopNaNPass = ShouldInjectStopNaNPass()
                 ? GetOrCreateInjectedStopNaNPass()
                 : null;
+#if DLSS_PLUGIN_INTEGRATE
             var injectedDlssPass = ShouldInjectDlssPass()
                 ? GetOrCreateInjectedDlssPass()
                 : null;
+#endif
             var injectStpPass = ShouldInjectStpPass();
             var injectedCmaa2Pass = ShouldInjectCmaa2Pass()
                 ? GetOrCreateInjectedCmaa2Pass()
@@ -1872,8 +1888,10 @@ namespace VividRP.Runtime
             var recordedPreImageEffectGizmos = false;
             RenderGraphTexture stopNaNOriginalSource = null;
             RenderGraphTexture stopNaNSanitizedSource = null;
+#if DLSS_PLUGIN_INTEGRATE
             RenderGraphTexture dlssOriginalSource = null;
             RenderGraphTexture dlssInjectedSource = null;
+#endif
             RenderGraphTexture stpOriginalSource = null;
             RenderGraphTexture stpInjectedSource = null;
 
@@ -1931,6 +1949,7 @@ namespace VividRP.Runtime
                         resolvedSourceTexture = stopNaNSanitizedSource;
                     }
 
+#if DLSS_PLUGIN_INTEGRATE
                     if (injectedDlssPass != null
                         && dlssInjectedSource == null
                         && resolvedSourceTexture != null
@@ -1952,6 +1971,7 @@ namespace VividRP.Runtime
                     {
                         resolvedSourceTexture = dlssInjectedSource;
                     }
+#endif
 
                     if (injectStpPass
                         && stpInjectedSource == null

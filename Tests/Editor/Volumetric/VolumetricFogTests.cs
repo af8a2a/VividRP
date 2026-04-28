@@ -232,21 +232,46 @@ namespace VividRP.Editor.Tests
                 var parameters = VividLocalVolumetricFogArtistParameters.CreateDefault();
                 parameters.albedo = new Color(0.5f, 0.25f, 0.125f);
                 parameters.meanFreePath = 10.0f;
-                parameters.positiveFade = new Vector3(1.0f, 2.0f, 4.0f);
-                parameters.negativeFade = new Vector3(2.0f, 4.0f, 8.0f);
+                parameters.positiveFade = new Vector3(0.1f, 0.2f, 0.4f);
+                parameters.negativeFade = new Vector3(0.2f, 0.4f, 0.8f);
                 fog.parameters = parameters;
 
                 var data = fog.ConvertToEngineData(null);
 
                 Assert.That(data.scatteringExtinction.w, Is.EqualTo(0.1f).Within(0.0001f));
                 Assert.That(data.scatteringExtinction.x, Is.EqualTo(0.05f).Within(0.0001f));
-                Assert.That(data.positiveFade.x, Is.EqualTo(0.1f).Within(0.0001f));
-                Assert.That(data.negativeFade.z, Is.EqualTo(0.2f).Within(0.0001f));
+                Assert.That(data.positiveFade.x, Is.EqualTo(10.0f).Within(0.0001f));
+                Assert.That(data.negativeFade.z, Is.EqualTo(1.25f).Within(0.0001f));
+                Assert.That(data.distanceFade.x, Is.GreaterThan(0.0f));
+                Assert.That(data.parameters.y, Is.EqualTo((float)VividLocalVolumetricFogBlendingMode.Additive));
             }
             finally
             {
                 Object.DestroyImmediate(gameObject);
             }
+        }
+
+        [Test]
+        public void LocalVolumetricFog_EnumsMatchHdrpBlendOrdering()
+        {
+            Assert.That((int)VividLocalVolumetricFogBlendingMode.Overwrite, Is.EqualTo(0));
+            Assert.That((int)VividLocalVolumetricFogBlendingMode.Additive, Is.EqualTo(1));
+            Assert.That((int)VividLocalVolumetricFogBlendingMode.Multiply, Is.EqualTo(2));
+            Assert.That((int)VividLocalVolumetricFogBlendingMode.Min, Is.EqualTo(3));
+            Assert.That((int)VividLocalVolumetricFogBlendingMode.Max, Is.EqualTo(4));
+        }
+
+        [Test]
+        public void LocalVolumetricFog_DefaultsMatchHdrpArtistParameters()
+        {
+            var parameters = VividLocalVolumetricFogArtistParameters.CreateDefault();
+
+            Assert.That(parameters.blendingMode, Is.EqualTo(VividLocalVolumetricFogBlendingMode.Additive));
+            Assert.That(parameters.maskMode, Is.EqualTo(VividLocalVolumetricFogMaskMode.Texture));
+            Assert.That(parameters.positiveFade, Is.EqualTo(Vector3.one * 0.1f));
+            Assert.That(parameters.negativeFade, Is.EqualTo(Vector3.one * 0.1f));
+            Assert.That(parameters.distanceFadeStart, Is.EqualTo(10000.0f));
+            Assert.That(parameters.distanceFadeEnd, Is.EqualTo(10000.0f));
         }
 
         [Test]
@@ -458,7 +483,12 @@ namespace VividRP.Editor.Tests
             Assert.That(densitySource, Does.Contain("#pragma kernel ClearVBufferDensity"));
             Assert.That(densitySource, Does.Contain("#pragma kernel VoxelizeVBufferDensity"));
             Assert.That(densitySource, Does.Contain("StructuredBuffer<VividLocalVolumetricFogEngineData> _LocalVolumetricFogs"));
-            Assert.That(densitySource, Does.Contain("_LocalVolumetricFogMask0"));
+            Assert.That(densitySource, Does.Contain("Texture3D<float4> _LocalVolumetricFogMask0"));
+            Assert.That(densitySource, Does.Contain("LOCALVOLUMETRICFOGBLENDINGMODE_MULTIPLY"));
+            Assert.That(densitySource, Does.Contain("ComputeVolumeFadeFactor"));
+            Assert.That(densitySource, Does.Contain("ApplyLocalFogBlend"));
+            Assert.That(densitySource, Does.Contain("pow(abs(fade - 1.0), 2.2)"));
+            Assert.That(densitySource, Does.Contain("SelectLocalFogMaskChannel"));
             Assert.That(densitySource, Does.Contain("ComputeHeightFogMultiplier"));
             Assert.That(densitySource, Does.Contain("exp(-heightAboveBase * rcpScaleHeight)"));
             Assert.That(densitySource, Does.Contain("_VBufferFogRcpScaleHeight"));

@@ -79,6 +79,7 @@ namespace VividRP.Editor
             DrawParameter("anisotropy");
             DrawParameter("maskMode");
             DrawParameter("volumeMask");
+            DrawParameter("materialMask");
             DrawParameter("textureScrollingSpeed");
             DrawParameter("textureTiling");
             DrawParameter("textureOffset");

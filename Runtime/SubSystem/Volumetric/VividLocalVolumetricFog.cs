@@ -6,8 +6,11 @@ namespace VividRP.Runtime
 {
     public enum VividLocalVolumetricFogBlendingMode
     {
-        Additive = 0,
-        Overwrite = 1
+        Overwrite = 0,
+        Additive = 1,
+        Multiply = 2,
+        Min = 3,
+        Max = 4
     }
 
     public enum VividLocalVolumetricFogFalloffMode
@@ -18,8 +21,9 @@ namespace VividRP.Runtime
 
     public enum VividLocalVolumetricFogMaskMode
     {
-        None = 0,
-        Texture = 1
+        Texture = 0,
+        Material = 1,
+        None = 2
     }
 
     public enum VividLocalVolumetricFogScaleMode
@@ -31,12 +35,15 @@ namespace VividRP.Runtime
     [Serializable]
     public struct VividLocalVolumetricFogArtistParameters
     {
+        internal const float MinimumFogDistance = 0.05f;
+
         public Color albedo;
-        [Min(0.001f)] public float meanFreePath;
+        [Min(MinimumFogDistance)] public float meanFreePath;
         public VividLocalVolumetricFogBlendingMode blendingMode;
         public int priority;
-        [Range(-0.95f, 0.95f)] public float anisotropy;
+        [Range(-1.0f, 1.0f)] public float anisotropy;
         public Texture3D volumeMask;
+        public Material materialMask;
         public Vector3 textureScrollingSpeed;
         public Vector3 textureTiling;
         [Min(0.0f)] public Vector3 positiveFade;
@@ -60,30 +67,35 @@ namespace VividRP.Runtime
                 priority = 0,
                 anisotropy = 0.0f,
                 volumeMask = null,
+                materialMask = null,
                 textureScrollingSpeed = Vector3.zero,
                 textureTiling = Vector3.one,
-                positiveFade = Vector3.zero,
-                negativeFade = Vector3.zero,
+                positiveFade = Vector3.one * 0.1f,
+                negativeFade = Vector3.one * 0.1f,
                 scaleMode = VividLocalVolumetricFogScaleMode.Transform,
                 size = Vector3.one,
                 invertFade = false,
-                distanceFadeStart = 0.0f,
-                distanceFadeEnd = 0.0f,
+                distanceFadeStart = 10000.0f,
+                distanceFadeEnd = 10000.0f,
                 textureOffset = Vector3.zero,
                 falloffMode = VividLocalVolumetricFogFalloffMode.Linear,
-                maskMode = VividLocalVolumetricFogMaskMode.None
+                maskMode = VividLocalVolumetricFogMaskMode.Texture
             };
         }
 
         public void Validate()
         {
-            meanFreePath = Mathf.Max(meanFreePath, 0.001f);
-            anisotropy = Mathf.Clamp(anisotropy, -0.95f, 0.95f);
+            albedo.r = Mathf.Clamp01(albedo.r);
+            albedo.g = Mathf.Clamp01(albedo.g);
+            albedo.b = Mathf.Clamp01(albedo.b);
+            albedo.a = 1.0f;
+            meanFreePath = Mathf.Max(meanFreePath, MinimumFogDistance);
+            anisotropy = Mathf.Clamp(anisotropy, -1.0f, 1.0f);
             positiveFade = Max(positiveFade, Vector3.zero);
             negativeFade = Max(negativeFade, Vector3.zero);
             size = Max(size, new Vector3(0.001f, 0.001f, 0.001f));
             distanceFadeStart = Mathf.Max(distanceFadeStart, 0.0f);
-            distanceFadeEnd = Mathf.Max(distanceFadeEnd, 0.0f);
+            distanceFadeEnd = Mathf.Max(distanceFadeStart, distanceFadeEnd);
             textureTiling = Max(textureTiling, Vector3.zero);
         }
 
@@ -120,12 +132,21 @@ namespace VividRP.Runtime
 
     [ExecuteAlways]
     [AddComponentMenu("Rendering/VividRP Local Volumetric Fog")]
-    public sealed class VividLocalVolumetricFog : MonoBehaviour, IBoundProxyProvider, IBoundProxyWorldDataProvider
+    public sealed class VividLocalVolumetricFog : MonoBehaviour, IBoundProxyProvider, IBoundProxyWorldDataProvider, ISerializationCallbackReceiver
     {
+        private const int CurrentSerializationVersion = 1;
+        private const int LegacySerializationVersion = 0;
         private static readonly Vector3 k_MinimumBoxSize = new(0.001f, 0.001f, 0.001f);
+        private static readonly int FogVolumeSingleScatteringAlbedoId = Shader.PropertyToID("_FogVolumeSingleScatteringAlbedo");
+        private static readonly int FogVolumeFogDistanceId = Shader.PropertyToID("_FogVolumeFogDistanceProperty");
+        private static readonly int FogVolumeBlendModeId = Shader.PropertyToID("_FogVolumeBlendMode");
+        private static readonly int FogVolumeMaskId = Shader.PropertyToID("_Mask");
 
         [SerializeField]
         private BoundProxyShape m_BoundProxy = CreateDefaultBoundProxy();
+
+        [SerializeField]
+        private int m_SerializationVersion = CurrentSerializationVersion;
 
         [SerializeField]
         private VividLocalVolumetricFogArtistParameters m_Parameters =
@@ -156,17 +177,18 @@ namespace VividRP.Runtime
         public VividLocalVolumetricFogEngineData ConvertToEngineData(Camera camera)
         {
             m_Parameters.Validate();
+            var parameters = GetEffectiveParameters();
             BoundProxyShape shape = BoundProxyShape;
             Vector3 size = GetFogSize(shape);
             Vector3 center = transform.position + transform.rotation * shape.center;
             Matrix4x4 worldToLocal = Matrix4x4.TRS(center, transform.rotation, size).inverse;
-            var extinction = 1.0f / Mathf.Max(m_Parameters.meanFreePath, 0.001f);
-            var scattering = m_Parameters.GetScattering(extinction);
-            var positiveFade = NormalizeFade(m_Parameters.positiveFade, size);
-            var negativeFade = NormalizeFade(m_Parameters.negativeFade, size);
-            var distanceFade = BuildDistanceFade(camera);
-            var animatedTextureOffset = m_Parameters.textureOffset
-                + m_Parameters.textureScrollingSpeed * Time.time;
+            var extinction = 1.0f / Mathf.Max(parameters.meanFreePath, VividLocalVolumetricFogArtistParameters.MinimumFogDistance);
+            var scattering = parameters.GetScattering(extinction);
+            var positiveFade = ReciprocalFade(parameters.positiveFade);
+            var negativeFade = ReciprocalFade(parameters.negativeFade);
+            var distanceFade = BuildDistanceFade(parameters);
+            var animatedTextureOffset = parameters.textureOffset
+                - parameters.textureScrollingSpeed * Time.time;
 
             return new VividLocalVolumetricFogEngineData
             {
@@ -178,20 +200,20 @@ namespace VividRP.Runtime
                 negativeFade = new Vector4(negativeFade.x, negativeFade.y, negativeFade.z, 0.0f),
                 distanceFade = distanceFade,
                 parameters = new Vector4(
-                    m_Parameters.anisotropy,
-                    (float)m_Parameters.blendingMode,
-                    m_Parameters.invertFade ? 1.0f : 0.0f,
+                    parameters.anisotropy,
+                    (float)parameters.blendingMode,
+                    parameters.invertFade ? 1.0f : 0.0f,
                     0.0f),
                 textureScaleOffset0 = new Vector4(
-                    m_Parameters.textureTiling.x,
-                    m_Parameters.textureTiling.y,
-                    m_Parameters.textureTiling.z,
+                    parameters.textureTiling.x,
+                    parameters.textureTiling.y,
+                    parameters.textureTiling.z,
                     0.0f),
                 textureScaleOffset1 = new Vector4(
                     animatedTextureOffset.x,
                     animatedTextureOffset.y,
                     animatedTextureOffset.z,
-                    (float)m_Parameters.falloffMode)
+                    (float)parameters.falloffMode)
             };
         }
 
@@ -216,10 +238,27 @@ namespace VividRP.Runtime
 
         internal int priority => m_Parameters.priority;
 
-        internal bool TryGetVolumeMask(out Texture3D volumeMask)
+        internal bool TryGetVolumeMask(out Texture3D volumeMask, out bool alphaOnly)
         {
-            volumeMask = m_Parameters.volumeMask;
-            return m_Parameters.maskMode == VividLocalVolumetricFogMaskMode.Texture && volumeMask != null;
+            alphaOnly = false;
+            volumeMask = null;
+
+            if (m_Parameters.maskMode == VividLocalVolumetricFogMaskMode.Texture)
+            {
+                volumeMask = m_Parameters.volumeMask;
+            }
+            else if (m_Parameters.maskMode == VividLocalVolumetricFogMaskMode.Material
+                && m_Parameters.materialMask != null
+                && m_Parameters.materialMask.HasProperty(FogVolumeMaskId))
+            {
+                volumeMask = m_Parameters.materialMask.GetTexture(FogVolumeMaskId) as Texture3D;
+            }
+
+            if (volumeMask == null)
+                return false;
+
+            alphaOnly = volumeMask.format == TextureFormat.Alpha8;
+            return true;
         }
 
         private void OnEnable()
@@ -254,6 +293,35 @@ namespace VividRP.Runtime
                 BoundProxyShape,
                 transform.GetEntityId());
             return true;
+        }
+
+        public void OnBeforeSerialize()
+        {
+            m_SerializationVersion = CurrentSerializationVersion;
+        }
+
+        public void OnAfterDeserialize()
+        {
+            if (m_SerializationVersion > LegacySerializationVersion)
+                return;
+
+            var legacyBlendMode = (int)m_Parameters.blendingMode;
+            m_Parameters.blendingMode = legacyBlendMode switch
+            {
+                0 => VividLocalVolumetricFogBlendingMode.Additive,
+                1 => VividLocalVolumetricFogBlendingMode.Overwrite,
+                _ => m_Parameters.blendingMode
+            };
+
+            var legacyMaskMode = (int)m_Parameters.maskMode;
+            m_Parameters.maskMode = legacyMaskMode switch
+            {
+                0 => VividLocalVolumetricFogMaskMode.None,
+                1 => VividLocalVolumetricFogMaskMode.Texture,
+                _ => m_Parameters.maskMode
+            };
+
+            m_SerializationVersion = CurrentSerializationVersion;
         }
 
         private static BoundProxyShape CreateDefaultBoundProxy()
@@ -292,22 +360,48 @@ namespace VividRP.Runtime
             return Max(shape.GetSanitizedSize(), k_MinimumBoxSize);
         }
 
-        private Vector4 BuildDistanceFade(Camera camera)
+        private VividLocalVolumetricFogArtistParameters GetEffectiveParameters()
         {
-            var start = Mathf.Max(m_Parameters.distanceFadeStart, 0.0f);
-            var end = Mathf.Max(m_Parameters.distanceFadeEnd, 0.0f);
-            if (camera == null || end <= start)
-                return Vector4.zero;
+            var parameters = m_Parameters;
+            if (parameters.maskMode != VividLocalVolumetricFogMaskMode.Material || parameters.materialMask == null)
+                return parameters;
 
-            return new Vector4(start, end, 1.0f / Mathf.Max(end - start, 0.0001f), 1.0f);
+            var material = parameters.materialMask;
+            if (material.HasProperty(FogVolumeSingleScatteringAlbedoId))
+                parameters.albedo = material.GetColor(FogVolumeSingleScatteringAlbedoId);
+
+            if (material.HasProperty(FogVolumeFogDistanceId))
+                parameters.meanFreePath = material.GetFloat(FogVolumeFogDistanceId);
+
+            if (material.HasProperty(FogVolumeBlendModeId))
+                parameters.blendingMode = (VividLocalVolumetricFogBlendingMode)Mathf.RoundToInt(material.GetFloat(FogVolumeBlendModeId));
+
+            parameters.Validate();
+            return parameters;
         }
 
-        private static Vector3 NormalizeFade(Vector3 fade, Vector3 size)
+        private static Vector4 BuildDistanceFade(in VividLocalVolumetricFogArtistParameters parameters)
+        {
+            var start = Mathf.Max(parameters.distanceFadeStart, 0.0f);
+            var end = Mathf.Max(start, parameters.distanceFadeEnd);
+            var rcpLength = 1.0f / Mathf.Max(end - start, 0.00001526f);
+
+            return new Vector4(rcpLength, end * rcpLength, start, end);
+        }
+
+        private static Vector3 ReciprocalFade(Vector3 fade)
         {
             return new Vector3(
-                Mathf.Clamp01(fade.x / Mathf.Max(size.x, 0.001f)),
-                Mathf.Clamp01(fade.y / Mathf.Max(size.y, 0.001f)),
-                Mathf.Clamp01(fade.z / Mathf.Max(size.z, 0.001f)));
+                ReciprocalFade(fade.x),
+                ReciprocalFade(fade.y),
+                ReciprocalFade(fade.z));
+        }
+
+        private static float ReciprocalFade(float fade)
+        {
+            return fade > 0.0f
+                ? Mathf.Min(1.0f / fade, float.MaxValue)
+                : float.MaxValue;
         }
 
         private static Vector3 Max(Vector3 value, Vector3 minimum)

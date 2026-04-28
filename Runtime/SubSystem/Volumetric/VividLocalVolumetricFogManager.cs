@@ -12,7 +12,7 @@ namespace VividRP.Runtime
 
         private static readonly List<VividLocalVolumetricFog> s_RegisteredFogs = new();
         private static readonly Comparison<VividLocalVolumetricFog> s_PriorityComparison =
-            (left, right) => left.priority.CompareTo(right.priority);
+            (left, right) => right.priority.CompareTo(left.priority);
         private static VividLocalVolumetricFogEngineData[] s_UploadData =
             new VividLocalVolumetricFogEngineData[MaxVisibleLocalVolumetricFogCount];
         private static readonly Texture3D[] s_VisibleMaskTextures =
@@ -65,11 +65,11 @@ namespace VividRP.Runtime
                     continue;
 
                 var data = fog.ConvertToEngineData(camera);
-                if (fog.TryGetVolumeMask(out var volumeMask)
+                if (fog.TryGetVolumeMask(out var volumeMask, out var alphaOnly)
                     && maskCount < MaxVisibleLocalVolumetricFogMaskCount)
                 {
                     s_VisibleMaskTextures[maskCount] = volumeMask;
-                    data.parameters.w = 1.0f;
+                    data.parameters.w = alphaOnly ? 2.0f : 1.0f;
                     data.textureScaleOffset0.w = maskCount + 1.0f;
                     maskCount++;
                 }

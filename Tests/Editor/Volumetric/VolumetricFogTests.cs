@@ -131,6 +131,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(shaderVariables._VBufferGeometryParams.x, Is.EqualTo(vBuffer.UnitDepthTexelSpacing).Within(0.0001f));
                 Assert.That(shaderVariables._VBufferGeometryParams.z, Is.EqualTo(vBuffer.LastSliceDistance).Within(0.0001f));
                 Assert.That(shaderVariables._VBufferGeometryParams.w, Is.EqualTo(0.0f).Within(0.0001f));
+                Assert.That(shaderVariables._VBufferLocalFogParams.z, Is.EqualTo(1.0f).Within(0.0001f));
                 Assert.That(shaderVariables._VBufferCoordToViewDirWS.m00, Is.Not.EqualTo(0.0f));
             }
             finally
@@ -205,6 +206,14 @@ namespace VividRP.Editor.Tests
             var shaderVariables = VividVolumetricUtility.BuildShaderVariables(settings, 1920, 1080, 0);
 
             Assert.That(shaderVariables._VBufferFogControlParams.z, Is.EqualTo(0.0f).Within(0.0001f));
+        }
+
+        [Test]
+        public void ComputeMaxZDilationRadius_UsesHdrpScreenRatioThresholds()
+        {
+            Assert.That(VividVolumetricUtility.ComputeMaxZDilationRadius(6.25f), Is.EqualTo(2));
+            Assert.That(VividVolumetricUtility.ComputeMaxZDilationRadius(12.5f), Is.EqualTo(1));
+            Assert.That(VividVolumetricUtility.ComputeMaxZDilationRadius(50.0f), Is.EqualTo(0));
         }
 
         [Test]
@@ -337,6 +346,7 @@ namespace VividRP.Editor.Tests
                 "CameraDepth",
                 "DirectionalShadowTexture",
                 "VBufferDensity",
+                "VBufferMaxZ",
                 "VBufferLighting",
                 "VBufferLightingFiltered"
             }));
@@ -349,6 +359,33 @@ namespace VividRP.Editor.Tests
                 "LogBaseBuffer",
                 "PunctualLights"
             }));
+        }
+
+        [Test]
+        public void VolumetricMaxZPass_InitializesDepthAwareResource()
+        {
+            var pass = new VolumetricMaxZPass();
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 1280;
+            cameraData.actualHeight = 720;
+
+            pass.Prepare(frameData);
+
+            var resources = ((IRenderPass)pass).Initialize();
+            var maxZ = resources.Textures.Single(entry => entry.Name == "VBufferMaxZ");
+
+            Assert.That(resources.Textures.Select(entry => entry.Name), Is.EquivalentTo(new[]
+            {
+                "CameraDepth",
+                "VBufferMaxZ"
+            }));
+            Assert.That(maxZ.Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(maxZ.Texture.desc.Dimension, Is.EqualTo(TextureDimension.Tex2D));
+            Assert.That(maxZ.Texture.desc.Width, Is.EqualTo(160));
+            Assert.That(maxZ.Texture.desc.Height, Is.EqualTo(90));
+            Assert.That(maxZ.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32_SFloat));
+            Assert.That(maxZ.Texture.desc.EnableRandomWrite, Is.True);
         }
 
         [Test]
@@ -396,6 +433,7 @@ namespace VividRP.Editor.Tests
             var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(new[]
             {
                 typeof(VolumetricDensityPass),
+                typeof(VolumetricMaxZPass),
                 typeof(VolumetricLightingPass),
                 typeof(VolumetricFogCompositePass)
             });
@@ -403,6 +441,7 @@ namespace VividRP.Editor.Tests
             var nodeNames = registrations.Select(registration => registration.NodeClassName).ToArray();
 
             Assert.That(nodeNames, Does.Contain(nameof(VolumetricDensityPass)));
+            Assert.That(nodeNames, Does.Contain(nameof(VolumetricMaxZPass)));
             Assert.That(nodeNames, Does.Contain(nameof(VolumetricLightingPass)));
             Assert.That(nodeNames, Does.Contain(nameof(VolumetricFogCompositePass)));
         }
@@ -411,6 +450,7 @@ namespace VividRP.Editor.Tests
         public void VolumetricShaderSources_DefineExpectedKernelsAndResources()
         {
             var densitySource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Volumetric", "VolumetricDensity.compute"));
+            var maxZSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Volumetric", "VolumetricMaxZ.compute"));
             var lightingSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Volumetric", "VolumetricLighting.compute"));
             var compositeSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Volumetric", "VolumetricFogComposite.shader"));
             var lightingPassSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Volumetric", "VolumetricLightingPass.cs"));
@@ -424,8 +464,17 @@ namespace VividRP.Editor.Tests
             Assert.That(densitySource, Does.Contain("_VBufferFogRcpScaleHeight"));
             Assert.That(densitySource, Does.Not.Contain("_VBufferDensityCutoff"));
             Assert.That(densitySource, Does.Not.Contain("extinction <= _VBufferDensityCutoff"));
+            Assert.That(maxZSource, Does.Contain("#pragma kernel BuildVBufferMaxZ"));
+            Assert.That(maxZSource, Does.Contain("RWTexture2D<float> _VBufferMaxZ"));
+            Assert.That(maxZSource, Does.Contain("GetMaxZDistanceForCameraPixel"));
+            Assert.That(maxZSource, Does.Contain("IsVBufferFarDepth"));
+            Assert.That(maxZSource, Does.Contain("LinearEyeDepth(deviceDepth, _ZBufferParams)"));
+            Assert.That(maxZSource, Does.Contain("_VBufferCameraToVBufferScale"));
             Assert.That(lightingSource, Does.Contain("#pragma kernel VolumetricLighting"));
             Assert.That(lightingSource, Does.Contain("#pragma kernel FilterVolumetricLighting"));
+            Assert.That(lightingSource, Does.Contain("Texture2D<float> _VBufferMaxZ"));
+            Assert.That(lightingSource, Does.Contain("float _VBufferMaxZEnabled"));
+            Assert.That(lightingSource, Does.Contain("GetVBufferMaxOpaqueGeometryDistance"));
             Assert.That(lightingSource, Does.Contain("LightingLoop.hlsl"));
             Assert.That(lightingSource, Does.Contain("[numthreads(8, 8, 1)]"));
             Assert.That(lightingSource, Does.Contain("for (uint slice = 0; slice < sliceCount; slice++)"));
@@ -449,10 +498,15 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("GroupMemoryBarrierWithGroupSync"));
             Assert.That(lightingSource, Does.Contain("Gaussian(length(float2(idx, idx2)), VBUFFER_FILTER_GAUSSIAN_SIGMA)"));
             Assert.That(lightingSource, Does.Not.Contain("for (int z = -1; z <= 1; z++)"));
+            Assert.That(lightingSource, Does.Contain("if (hasMaxZ && t0 * 0.99 > maxOpaqueGeometryDistance)"));
+            Assert.That(lightingSource, Does.Contain("break;"));
             Assert.That(compositeSource, Does.Contain("Hidden/VividRP/VolumetricFogComposite"));
             Assert.That(compositeSource, Does.Contain("_VBufferLighting"));
             Assert.That(compositeSource, Does.Contain("GetVBufferLinearDistanceFromDeviceDepth"));
             Assert.That(lightingPassSource, Does.Contain("cmd.DispatchCompute(m_Shader, m_LightingKernel, m_DispatchX, m_DispatchY, 1)"));
+            Assert.That(lightingPassSource, Does.Contain("VBufferMaxZId = Shader.PropertyToID(\"_VBufferMaxZ\")"));
+            Assert.That(lightingPassSource, Does.Contain("VBufferMaxZEnabledId = Shader.PropertyToID(\"_VBufferMaxZEnabled\")"));
+            Assert.That(lightingPassSource, Does.Contain("BindVBufferMaxZ(context, cmd, kernel)"));
             Assert.That(lightingPassSource, Does.Contain("FilterKernelName = \"FilterVolumetricLighting\""));
             Assert.That(lightingPassSource, Does.Contain("m_FilterDispatchZ = Mathf.Max(m_Settings.VBufferParameters.SliceCount, 1)"));
             Assert.That(lightingPassSource, Does.Contain("cmd.DispatchCompute(m_Shader, m_FilterKernel, m_DispatchX, m_DispatchY, m_FilterDispatchZ)"));
@@ -463,6 +517,9 @@ namespace VividRP.Editor.Tests
             Assert.That(vBufferSource, Does.Contain("_VBufferDepthDecodingParams"));
             Assert.That(vBufferSource, Does.Contain("_VBufferIsOrthographic"));
             Assert.That(vBufferSource, Does.Contain("IsVBufferFarDepth"));
+
+            var volumetricVariablesSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Volumetric", "ShaderVariablesVolumetric.hlsl"));
+            Assert.That(volumetricVariablesSource, Does.Contain("_VBufferMaxZDilationRadius"));
         }
 
         [Test]
@@ -480,6 +537,8 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(GetResourcePath(nameof(VividRPCoreResources.VolumetricDensityCompute)), Is.EqualTo(
                 "Shaders/Core/Private/Volumetric/VolumetricDensity.compute"));
+            Assert.That(GetResourcePath(nameof(VividRPCoreResources.VolumetricMaxZCompute)), Is.EqualTo(
+                "Shaders/Core/Private/Volumetric/VolumetricMaxZ.compute"));
             Assert.That(GetResourcePath(nameof(VividRPCoreResources.VolumetricLightingCompute)), Is.EqualTo(
                 "Shaders/Core/Private/Volumetric/VolumetricLighting.compute"));
             Assert.That(GetResourcePath(nameof(VividRPCoreResources.VolumetricFogCompositeShader)), Is.EqualTo(

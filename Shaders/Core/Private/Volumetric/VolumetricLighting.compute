@@ -9,10 +9,12 @@
 
 Texture2D<float> _CameraDepth;
 Texture2D<float> _DirectionalShadowTexture;
+Texture2D<float> _VBufferMaxZ;
 Texture3D<float4> _VBufferDensity;
 Texture3D<float4> _VBufferLightingInput;
 RWTexture3D<float4> _VBufferLighting;
 RWTexture3D<float4> _VBufferLightingOutput;
+float _VBufferMaxZEnabled;
 
 #define VBUFFER_FILTER_GAUSSIAN_SIGMA 1.0
 #define VBUFFER_FILTER_GROUP_SIZE_XY 8
@@ -94,6 +96,35 @@ float GetVBufferOpaqueGeometryDistance(float2 vBufferUV, out bool hasOpaqueGeome
     float deviceDepth = _CameraDepth.SampleLevel(sampler_PointClamp, vBufferUV, 0);
     hasOpaqueGeometry = !IsVBufferFarDepth(deviceDepth);
     return GetVBufferLinearDistanceFromDeviceDepth(vBufferUV, deviceDepth);
+}
+
+float LoadVBufferMaxZ(int2 vBufferPixel)
+{
+    int2 maxCoord = int2((int)_VBufferWidth - 1, (int)_VBufferHeight - 1);
+    int2 coord = clamp(vBufferPixel, int2(0, 0), maxCoord);
+    return _VBufferMaxZ.Load(int3(coord, 0));
+}
+
+float GetVBufferMaxOpaqueGeometryDistance(uint2 vBufferPixel, float fallbackDistance)
+{
+    if (_VBufferMaxZEnabled <= 0.5)
+        return fallbackDistance;
+
+    int dilationRadius = clamp((int)_VBufferMaxZDilationRadius, 0, 2);
+    int2 center = int2(vBufferPixel);
+    float maxDistance = fallbackDistance;
+
+    [loop]
+    for (int y = -dilationRadius; y <= dilationRadius; y++)
+    {
+        [loop]
+        for (int x = -dilationRadius; x <= dilationRadius; x++)
+        {
+            maxDistance = max(maxDistance, LoadVBufferMaxZ(center + int2(x, y)));
+        }
+    }
+
+    return clamp(maxDistance, GetVBufferSliceBoundaryDistance(0.0), _VBufferLastSliceDistance);
 }
 
 float3 EvaluateDirectionalLighting(uint3 voxelCoord, float3 positionWS)
@@ -211,6 +242,8 @@ void VolumetricLighting(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 rayDirectionWS = GetVBufferRayDirectionWSFromUV(vBufferUV);
     bool hasOpaqueGeometry;
     float opaqueGeometryDistance = GetVBufferOpaqueGeometryDistance(vBufferUV, hasOpaqueGeometry);
+    float maxOpaqueGeometryDistance = GetVBufferMaxOpaqueGeometryDistance(vBufferPixel, opaqueGeometryDistance);
+    bool hasMaxZ = _VBufferMaxZEnabled > 0.5;
 
     float t0 = GetVBufferSliceBoundaryDistance(0.0);
     float de = _VBufferRcpSliceCount;
@@ -222,7 +255,7 @@ void VolumetricLighting(uint3 dispatchThreadId : SV_DispatchThreadID)
     for (uint slice = 0; slice < sliceCount; slice++)
     {
         uint3 voxelCoord = uint3(vBufferPixel, slice);
-        if (hasOpaqueGeometry && opaqueGeometryDistance <= t0)
+        if (!hasMaxZ && hasOpaqueGeometry && opaqueGeometryDistance <= t0)
         {
             StoreEmptyVBufferLighting(voxelCoord);
             continue;
@@ -261,6 +294,10 @@ void VolumetricLighting(uint3 dispatchThreadId : SV_DispatchThreadID)
         opticalDepth += 0.5 * voxelOpticalDepth;
         StoreIntegratedVBufferLighting(voxelCoord, totalRadiance, opticalDepth);
         opticalDepth += 0.5 * voxelOpticalDepth;
+
+        if (hasMaxZ && t0 * 0.99 > maxOpaqueGeometryDistance)
+            break;
+
         t0 = tNext;
     }
 }

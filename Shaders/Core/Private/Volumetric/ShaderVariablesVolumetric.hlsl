@@ -34,5 +34,6 @@ CBUFFER_END
 #define _VBufferGlobalProbeDimmer      _VBufferFogControlParams.w
 #define _VBufferLocalFogCount          _VBufferLocalFogParams.x
 #define _VBufferGaussianFiltering      _VBufferLocalFogParams.y
+#define _VBufferMaxZDilationRadius     _VBufferLocalFogParams.z
 
 #endif

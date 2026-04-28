@@ -74,6 +74,9 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/Volumetric/VolumetricDensity.compute")]
         public ComputeShader VolumetricDensityCompute;
 
+        [ResourcePath("Shaders/Core/Private/Volumetric/VolumetricMaxZ.compute")]
+        public ComputeShader VolumetricMaxZCompute;
+
         [ResourcePath("Shaders/Core/Private/Volumetric/VolumetricLighting.compute")]
         public ComputeShader VolumetricLightingCompute;
 

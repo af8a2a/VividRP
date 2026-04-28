@@ -410,9 +410,18 @@ namespace VividRP.Runtime
                 _VBufferLocalFogParams = new Vector4(
                     Mathf.Max(localFogCount, 0),
                     settings.GaussianFilteringEnabled ? 1.0f : 0.0f,
-                    0.0f,
+                    ComputeMaxZDilationRadius(vBuffer.ScreenPercentage),
                     0.0f)
             };
+        }
+
+        internal static int ComputeMaxZDilationRadius(float screenPercentage)
+        {
+            var ratio = Mathf.Clamp(screenPercentage, 0.0f, 100.0f) / 100.0f;
+            if (ratio < 0.1f)
+                return 2;
+
+            return ratio < 0.5f ? 1 : 0;
         }
 
         internal static float ComputeEffectiveDensityCutoff(float densityCutoff)

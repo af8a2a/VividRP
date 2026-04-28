@@ -149,4 +149,7 @@ namespace VividRP.Editor.RenderGraph.Generated
     [Serializable]
     internal sealed class VolumetricLightingPass : RenderPassNodeData { }
 
+    [Serializable]
+    internal sealed class VolumetricMaxZPass : RenderPassNodeData { }
+
 }

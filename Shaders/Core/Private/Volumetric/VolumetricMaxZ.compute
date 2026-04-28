@@ -1,0 +1,49 @@
+#pragma use_dxc
+#pragma kernel BuildVBufferMaxZ
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
+
+Texture2D<float> _CameraDepth;
+RWTexture2D<float> _VBufferMaxZ;
+
+float GetMaxZDistanceForCameraPixel(uint2 cameraPixel, float2 cameraSize)
+{
+    float deviceDepth = _CameraDepth.Load(int3(cameraPixel, 0));
+    if (IsVBufferFarDepth(deviceDepth))
+        return _VBufferLastSliceDistance;
+
+    float2 uv = (float2(cameraPixel) + 0.5) / cameraSize;
+    float linearDistance = GetVBufferLinearDistanceFromEyeDepth(uv, LinearEyeDepth(deviceDepth, _ZBufferParams));
+    return min(linearDistance, _VBufferLastSliceDistance);
+}
+
+[numthreads(8, 8, 1)]
+void BuildVBufferMaxZ(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 vBufferPixel = dispatchThreadId.xy;
+    if (vBufferPixel.x >= (uint)_VBufferWidth || vBufferPixel.y >= (uint)_VBufferHeight)
+        return;
+
+    float2 cameraScale = max(_VBufferCameraToVBufferScale, float2(1e-4, 1e-4));
+    float2 cameraSizeFloat = max(round(_VBufferViewportSize.xy * cameraScale), float2(1.0, 1.0));
+    int2 cameraSize = (int2)cameraSizeFloat;
+    int2 maxCameraPixel = cameraSize - 1;
+
+    int2 minPixel = (int2)floor(float2(vBufferPixel) * cameraScale);
+    int2 maxPixelExclusive = (int2)ceil(float2(vBufferPixel + uint2(1u, 1u)) * cameraScale);
+    minPixel = clamp(minPixel, int2(0, 0), maxCameraPixel);
+    maxPixelExclusive = clamp(max(maxPixelExclusive, minPixel + 1), int2(1, 1), cameraSize);
+
+    float maxDistance = 0.0;
+    [loop]
+    for (int y = minPixel.y; y < maxPixelExclusive.y; y++)
+    {
+        [loop]
+        for (int x = minPixel.x; x < maxPixelExclusive.x; x++)
+        {
+            maxDistance = max(maxDistance, GetMaxZDistanceForCameraPixel(uint2(x, y), cameraSizeFloat));
+        }
+    }
+
+    _VBufferMaxZ[vBufferPixel] = max(maxDistance, GetVBufferSliceBoundaryDistance(0.0));
+}

@@ -17,6 +17,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ShaderVariablesVolumetricId = Shader.PropertyToID("ShaderVariablesVolumetric");
         private static readonly int CameraDepthId = Shader.PropertyToID("_CameraDepth");
         private static readonly int DirectionalShadowTextureId = Shader.PropertyToID("_DirectionalShadowTexture");
+        private static readonly int VBufferMaxZId = Shader.PropertyToID("_VBufferMaxZ");
+        private static readonly int VBufferMaxZEnabledId = Shader.PropertyToID("_VBufferMaxZEnabled");
         private static readonly int VBufferDensityId = Shader.PropertyToID("_VBufferDensity");
         private static readonly int VBufferLightingId = Shader.PropertyToID("_VBufferLighting");
         private static readonly int VBufferLightingInputId = Shader.PropertyToID("_VBufferLightingInput");
@@ -54,6 +56,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "DirectionalShadowTexture", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DirectionalShadowTexture;
 
+        [RenderGraphResource(Name = "VBufferMaxZ", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_VBufferMaxZ;
+
         [RenderGraphResource(Name = "VBufferDensity", Access = AccessFlags.Read)]
         private RenderGraphTexture m_VBufferDensity;
 
@@ -83,6 +88,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphBuffer m_LogBaseBuffer;
 
         private readonly RenderGraphTexture m_LocalDirectionalShadowTexture;
+        private readonly RenderGraphTexture m_LocalVBufferMaxZ;
         private readonly RenderGraphBuffer m_LocalDirectionalLightBuffer;
         private readonly RenderGraphBuffer m_LocalPunctualLightBuffer;
         private readonly RenderGraphBuffer m_LocalAreaLightBuffer;
@@ -128,6 +134,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LocalDirectionalShadowTexture.desc.ClearColor = Color.white;
             m_LocalDirectionalShadowTexture.desc.FilterMode = FilterMode.Point;
             m_DirectionalShadowTexture = m_LocalDirectionalShadowTexture;
+            m_LocalVBufferMaxZ = VolumetricMaxZPass.CreateVBufferMaxZTexture("VBufferMaxZ");
+            m_VBufferMaxZ = m_LocalVBufferMaxZ;
             m_VBufferDensity = VolumetricDensityPass.CreateVBufferTexture("VBufferDensity");
             m_VBufferLighting = VolumetricDensityPass.CreateVBufferTexture("VBufferLighting");
             m_VBufferLighting.desc.ClearColor = new Color(0.0f, 0.0f, 0.0f, 1.0f);
@@ -181,6 +189,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 : VividVolumetricUtility.BuildShaderVariables(m_Settings, m_CameraWidth, m_CameraHeight, 0, cameraData);
 
             ConfigureCameraDepthTexture(m_CameraWidth, m_CameraHeight);
+            VolumetricMaxZPass.ConfigureVBufferMaxZTexture(m_VBufferMaxZ, m_Settings.VBufferParameters, "VBufferMaxZ");
             VolumetricDensityPass.ConfigureVBufferTexture(m_VBufferDensity, m_Settings.VBufferParameters, "VBufferDensity", clear: false);
             VolumetricDensityPass.ConfigureVBufferTexture(m_VBufferLighting, m_Settings.VBufferParameters, "VBufferLighting", clear: true);
             VolumetricDensityPass.ConfigureVBufferTexture(m_VBufferLightingFiltered, m_Settings.VBufferParameters, "VBufferLightingFiltered", clear: false);
@@ -240,6 +249,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private void BindSharedTextures(ComputePassContext context, ComputeCommandBuffer cmd, int kernel, RenderGraphTexture lightingTarget)
         {
             cmd.SetComputeTextureParam(m_Shader, kernel, CameraDepthId, m_CameraDepth.innerHandle);
+            BindVBufferMaxZ(context, cmd, kernel);
             cmd.SetComputeTextureParam(m_Shader, kernel, VBufferDensityId, m_VBufferDensity.innerHandle);
             cmd.SetComputeTextureParam(m_Shader, kernel, VBufferLightingId, lightingTarget.innerHandle);
 
@@ -257,6 +267,20 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 cmd.SetComputeTextureParam(m_Shader, kernel, DirectionalShadowTextureId, m_DirectionalShadowTexture.innerHandle);
             }
+        }
+
+        private void BindVBufferMaxZ(ComputePassContext context, ComputeCommandBuffer cmd, int kernel)
+        {
+            var hasVBufferMaxZ = !ReferenceEquals(m_VBufferMaxZ, m_LocalVBufferMaxZ)
+                && m_VBufferMaxZ?.innerHandle.IsValid() == true;
+            cmd.SetComputeFloatParam(m_Shader, VBufferMaxZEnabledId, hasVBufferMaxZ ? 1.0f : 0.0f);
+            cmd.SetComputeTextureParam(
+                m_Shader,
+                kernel,
+                VBufferMaxZId,
+                hasVBufferMaxZ
+                    ? m_VBufferMaxZ.innerHandle
+                    : context.renderGraphContext.defaultResources.blackTexture);
         }
 
         private void BindLightLoopParameters(ComputeCommandBuffer cmd, int kernel)

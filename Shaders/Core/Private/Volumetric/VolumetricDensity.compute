@@ -123,10 +123,18 @@ void AccumulateLocalFog(float3 positionWS, inout float3 scattering, inout float 
     }
 }
 
+float ComputeHeightFogMultiplier(float height, float baseHeight, float rcpScaleHeight)
+{
+    float heightAboveBase = max(height - baseHeight, 0.0);
+    return exp(-heightAboveBase * rcpScaleHeight);
+}
+
 float EvaluateHeightFog(float3 positionWS)
 {
-    float heightFade = saturate((_VBufferFogMaximumHeight - positionWS.y) * _VBufferFogInvHeightRange);
-    return heightFade;
+    return ComputeHeightFogMultiplier(
+        positionWS.y,
+        _VBufferFogBaseHeight,
+        _VBufferFogRcpScaleHeight);
 }
 
 [numthreads(8, 8, 4)]
@@ -150,12 +158,6 @@ void VoxelizeVBufferDensity(uint3 dispatchThreadId : SV_DispatchThreadID)
     float extinction = _VBufferFogScattering.a * heightFog;
 
     AccumulateLocalFog(positionWS, scattering, extinction);
-
-    if (extinction <= _VBufferDensityCutoff)
-    {
-        _VBufferDensity[dispatchThreadId] = 0.0;
-        return;
-    }
 
     _VBufferDensity[dispatchThreadId] = float4(max(scattering, 0.0), max(extinction, 0.0));
 }

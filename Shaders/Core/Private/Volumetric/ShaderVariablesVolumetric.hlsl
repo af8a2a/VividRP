@@ -26,7 +26,7 @@ CBUFFER_END
 #define _VBufferIsOrthographic         _VBufferGeometryParams.w
 #define _VBufferFogBaseHeight          _VBufferFogHeightParams.x
 #define _VBufferFogMaximumHeight       _VBufferFogHeightParams.y
-#define _VBufferFogInvHeightRange      _VBufferFogHeightParams.z
+#define _VBufferFogRcpScaleHeight      _VBufferFogHeightParams.z
 #define _VBufferFogAnisotropy          _VBufferFogHeightParams.w
 #define _VBufferFogEnabled             _VBufferFogControlParams.x
 #define _VBufferFogDirectionalOnly     _VBufferFogControlParams.y

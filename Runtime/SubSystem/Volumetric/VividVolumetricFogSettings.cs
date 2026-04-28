@@ -238,6 +238,8 @@ namespace VividRP.Runtime
 
     internal static class VividVolumetricUtility
     {
+        internal const float HeightFogScaleHeightFromLayerDepth = 0.144765f;
+
         internal static VividVolumetricFogSettings ResolveSettings(ContextContainer frameData)
         {
             var cameraData = frameData?.GetOrCreate<VividCameraData>();
@@ -358,7 +360,7 @@ namespace VividRP.Runtime
             VividCameraData cameraData = null)
         {
             var vBuffer = settings.VBufferParameters;
-            var heightRange = Mathf.Max(settings.MaximumHeight - settings.BaseHeight, 0.01f);
+            var heightFogScaleHeight = ComputeHeightFogScaleHeight(settings.BaseHeight, settings.MaximumHeight);
             var camera = cameraData?.camera;
 
             return new ShaderVariablesVolumetric
@@ -398,7 +400,7 @@ namespace VividRP.Runtime
                 _VBufferFogHeightParams = new Vector4(
                     settings.BaseHeight,
                     settings.MaximumHeight,
-                    1.0f / heightRange,
+                    1.0f / heightFogScaleHeight,
                     settings.Anisotropy),
                 _VBufferFogControlParams = new Vector4(
                     settings.Enabled ? 1.0f : 0.0f,
@@ -411,6 +413,19 @@ namespace VividRP.Runtime
                     0.0f,
                     0.0f)
             };
+        }
+
+        internal static float ComputeHeightFogScaleHeight(float baseHeight, float maximumHeight)
+        {
+            var layerDepth = Mathf.Max(0.01f, maximumHeight - baseHeight);
+            return Mathf.Max(layerDepth * HeightFogScaleHeightFromLayerDepth, 0.0001f);
+        }
+
+        internal static float ComputeHeightFogMultiplier(float height, float baseHeight, float maximumHeight)
+        {
+            var heightAboveBase = Mathf.Max(height - baseHeight, 0.0f);
+            var rcpScaleHeight = 1.0f / ComputeHeightFogScaleHeight(baseHeight, maximumHeight);
+            return Mathf.Exp(-heightAboveBase * rcpScaleHeight);
         }
 
         private static float ResolveNearClipPlane(Camera camera)

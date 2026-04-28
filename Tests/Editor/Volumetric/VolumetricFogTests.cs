@@ -140,6 +140,44 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void BuildShaderVariables_EncodesHdrpHeightFogDensityModel()
+        {
+            var vBuffer = VividVolumetricUtility.ComputeVBufferParameters(
+                1920,
+                1080,
+                VividVolumetricFogVolume.DefaultScreenResolutionPercentage,
+                64,
+                100.0f,
+                0.5f);
+            var settings = new VividVolumetricFogSettings(
+                true,
+                Vector3.one,
+                1.0f,
+                10.0f,
+                60.0f,
+                0.25f,
+                1.0f,
+                100.0f,
+                0.5f,
+                VividVolumetricFogDenoisingMode.None,
+                false,
+                0.0f,
+                vBuffer);
+
+            var shaderVariables = VividVolumetricUtility.BuildShaderVariables(settings, 1920, 1080, 0);
+            var scaleHeight = VividVolumetricUtility.ComputeHeightFogScaleHeight(10.0f, 60.0f);
+
+            Assert.That(scaleHeight, Is.EqualTo(50.0f * VividVolumetricUtility.HeightFogScaleHeightFromLayerDepth).Within(0.0001f));
+            Assert.That(VividVolumetricUtility.ComputeHeightFogMultiplier(5.0f, 10.0f, 60.0f), Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(VividVolumetricUtility.ComputeHeightFogMultiplier(10.0f, 10.0f, 60.0f), Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(VividVolumetricUtility.ComputeHeightFogMultiplier(60.0f, 10.0f, 60.0f), Is.EqualTo(0.001f).Within(0.0001f));
+            Assert.That(shaderVariables._VBufferFogHeightParams.x, Is.EqualTo(10.0f).Within(0.0001f));
+            Assert.That(shaderVariables._VBufferFogHeightParams.y, Is.EqualTo(60.0f).Within(0.0001f));
+            Assert.That(shaderVariables._VBufferFogHeightParams.z, Is.EqualTo(1.0f / scaleHeight).Within(0.0001f));
+            Assert.That(shaderVariables._VBufferFogHeightParams.w, Is.EqualTo(0.25f).Within(0.0001f));
+        }
+
+        [Test]
         public void LocalVolumetricFog_ConvertToEngineData_EncodesScatteringAndFade()
         {
             var gameObject = new GameObject("Local Volumetric Fog");
@@ -351,11 +389,16 @@ namespace VividRP.Editor.Tests
             Assert.That(densitySource, Does.Contain("#pragma kernel VoxelizeVBufferDensity"));
             Assert.That(densitySource, Does.Contain("StructuredBuffer<VividLocalVolumetricFogEngineData> _LocalVolumetricFogs"));
             Assert.That(densitySource, Does.Contain("_LocalVolumetricFogMask0"));
+            Assert.That(densitySource, Does.Contain("ComputeHeightFogMultiplier"));
+            Assert.That(densitySource, Does.Contain("exp(-heightAboveBase * rcpScaleHeight)"));
+            Assert.That(densitySource, Does.Contain("_VBufferFogRcpScaleHeight"));
+            Assert.That(densitySource, Does.Not.Contain("extinction <= _VBufferDensityCutoff"));
             Assert.That(lightingSource, Does.Contain("#pragma kernel VolumetricLighting"));
             Assert.That(lightingSource, Does.Contain("#pragma kernel GaussianFilterVBufferLighting"));
             Assert.That(lightingSource, Does.Contain("LightingLoop.hlsl"));
             Assert.That(lightingSource, Does.Contain("[numthreads(8, 8, 1)]"));
             Assert.That(lightingSource, Does.Contain("for (uint slice = 0; slice < sliceCount; slice++)"));
+            Assert.That(lightingSource, Does.Contain("extinction > _VBufferDensityCutoff"));
             Assert.That(lightingSource, Does.Contain("TransmittanceIntegralHomogeneousMedium"));
             Assert.That(lightingSource, Does.Contain("totalRadiance += transmittanceToSlice"));
             Assert.That(lightingSource, Does.Contain("opticalDepth += 0.5 * voxelOpticalDepth"));

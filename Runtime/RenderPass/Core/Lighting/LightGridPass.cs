@@ -95,7 +95,6 @@ namespace VividRP.Runtime
         [RenderGraphResource(
             Name = "BigTileLightList",
             Access = AccessFlags.Write)]
-        [TransientResource]
         private RenderGraphBuffer m_BigTileLightListBuffer;
 
         [RenderGraphResource(
@@ -676,6 +675,7 @@ namespace VividRP.Runtime
             clusteredLightingData.punctualLights = m_PunctualLightBuffer;
             clusteredLightingData.areaLights = m_AreaLightBuffer;
             clusteredLightingData.decalData = m_DecalDataBuffer;
+            clusteredLightingData.bigTileLightList = m_BigTileLightListBuffer;
             clusteredLightingData.layeredOffset = m_LayeredOffsetBuffer;
             clusteredLightingData.layeredLightList = m_LayeredLightListBuffer;
             clusteredLightingData.logBaseBuffer = m_LogBaseBuffer;
@@ -688,6 +688,8 @@ namespace VividRP.Runtime
             clusteredLightingData.clusterSliceCount = ClusterSliceCount;
             clusteredLightingData.clusterTileCountX = m_ClusterTileCountX;
             clusteredLightingData.clusterTileCountY = m_ClusterTileCountY;
+            clusteredLightingData.bigTileCountX = m_ClusterBigTileCountX;
+            clusteredLightingData.bigTileCountY = m_ClusterBigTileCountY;
             clusteredLightingData.clusterNearClip = m_ClusterNearClip;
             clusteredLightingData.clusterFarClip = m_ClusterFarClip;
             clusteredLightingData.clusterIsOrthographic = m_ClusterIsOrthographic;
@@ -733,6 +735,7 @@ namespace VividRP.Runtime
             m_DecalDataBuffer?.EnsureImportedBuffer();
             m_FiniteLightBoundBuffer?.EnsureImportedBuffer();
             m_LightVolumeDataBuffer?.EnsureImportedBuffer();
+            m_BigTileLightListBuffer?.EnsureImportedBuffer();
             m_LayeredOffsetBuffer?.EnsureImportedBuffer();
             m_LayeredLightListBuffer?.EnsureImportedBuffer();
             m_LogBaseBuffer?.EnsureImportedBuffer();
@@ -828,6 +831,7 @@ namespace VividRP.Runtime
             m_DecalDataBuffer?.ClearImportedBuffer();
             m_FiniteLightBoundBuffer?.ClearImportedBuffer();
             m_LightVolumeDataBuffer?.ClearImportedBuffer();
+            m_BigTileLightListBuffer?.ClearImportedBuffer();
             m_LayeredOffsetBuffer?.ClearImportedBuffer();
             m_LayeredLightListBuffer?.ClearImportedBuffer();
             m_LogBaseBuffer?.ClearImportedBuffer();

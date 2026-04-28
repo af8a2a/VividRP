@@ -6,6 +6,7 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GeometricTools.hlsl"
 
 Texture2D<float> _CameraDepth;
 Texture2D<float> _DirectionalShadowTexture;
@@ -14,8 +15,20 @@ Texture3D<float4> _VBufferDensity;
 Texture3D<float4> _VBufferLightingInput;
 RWTexture3D<float4> _VBufferLighting;
 RWTexture3D<float4> _VBufferLightingOutput;
+StructuredBuffer<uint> g_vBigTileLightList;
 float _VBufferMaxZEnabled;
+uint _PunctualLightCount;
+uint _AreaLightCount;
+uint _VolumetricUseBigTileLightList;
+uint _NumTileBigTileX;
+uint _NumTileBigTileY;
 
+#define VBUFFER_MAX_PUNCTUAL_LIGHTS 64u
+#define VBUFFER_PUNCTUAL_SAMPLE_COUNT 1u
+#define VBUFFER_BIG_TILE_SIZE 64u
+#define VBUFFER_MAX_BIG_TILE_LIGHTS_PLUS_ONE 512u
+#define VBUFFER_MAX_BIG_TILE_LIGHTS (VBUFFER_MAX_BIG_TILE_LIGHTS_PLUS_ONE - 1u)
+#define VBUFFER_MAX_AREA_LIGHTS 8u
 #define VBUFFER_FILTER_GAUSSIAN_SIGMA 1.0
 #define VBUFFER_FILTER_GROUP_SIZE_XY 8
 #define VBUFFER_FILTER_SIZE_1D (VBUFFER_FILTER_GROUP_SIZE_XY + 2)
@@ -24,12 +37,51 @@ float _VBufferMaxZEnabled;
 
 groupshared float4 gs_VBufferFilterCache[VBUFFER_FILTER_LDS_SIZE];
 
-float HenyeyGreensteinPhase(float cosTheta, float anisotropy)
+float CornetteShanksPhasePartConstant(float anisotropy)
 {
     float g = clamp(anisotropy, -0.95, 0.95);
-    float g2 = g * g;
-    float denominator = max(1.0 + g2 - 2.0 * g * cosTheta, 1e-4);
-    return (1.0 - g2) / (4.0 * PI * denominator * sqrt(denominator));
+    return (3.0 / (8.0 * PI)) * (1.0 - g * g) / (2.0 + g * g);
+}
+
+float CornetteShanksPhasePartVarying(float anisotropy, float cosTheta)
+{
+    float g = clamp(anisotropy, -0.95, 0.95);
+    float x = max(1.0 + g * g - 2.0 * g * cosTheta, 1e-4);
+    return (1.0 + cosTheta * cosTheta) * rsqrt(x * x * x);
+}
+
+float CornetteShanksPhase(float anisotropy, float cosTheta)
+{
+    float g = clamp(anisotropy, -0.95, 0.95);
+    if (abs(g) < 1e-4)
+        return INV_FOUR_PI;
+
+    return CornetteShanksPhasePartConstant(g) * CornetteShanksPhasePartVarying(g, cosTheta);
+}
+
+float EvaluateVolumetricPhase(float3 lightDirectionWS, float3 rayDirectionWS)
+{
+    return CornetteShanksPhase(_VBufferFogAnisotropy, dot(SafeNormalize(lightDirectionWS), rayDirectionWS));
+}
+
+uint HashVBufferUint(uint value)
+{
+    value ^= value >> 16;
+    value *= 2246822519u;
+    value ^= value >> 13;
+    value *= 3266489917u;
+    value ^= value >> 16;
+    return value;
+}
+
+float GenerateVBufferRandom(uint3 voxelCoord, uint lightIndex, uint sampleIndex)
+{
+    uint seed = voxelCoord.x * 73856093u
+        ^ voxelCoord.y * 19349663u
+        ^ voxelCoord.z * 83492791u
+        ^ lightIndex * 2654435761u
+        ^ sampleIndex * 1597334677u;
+    return (float)(HashVBufferUint(seed) & 0x00ffffffu) * (1.0 / 16777216.0);
 }
 
 float SampleDirectionalShadow(uint2 vBufferPixel, uint lightIndex, DirectionalLightData directionalLight)
@@ -63,6 +115,11 @@ float EvaluateVolumetricLightFade(float distanceToCamera, float fadeDistance)
 float TransmittanceFromOpticalDepth(float opticalDepth)
 {
     return exp(-opticalDepth);
+}
+
+float TransmittanceHomogeneousMedium(float extinction, float intervalLength)
+{
+    return TransmittanceFromOpticalDepth(extinction * intervalLength);
 }
 
 float TransmittanceIntegralHomogeneousMedium(float extinction, float intervalLength)
@@ -140,10 +197,9 @@ float GetVBufferMaxOpaqueGeometryDistance(float2 vBufferUV, float3 rayDirectionW
     return clamp(maxDistance, GetVBufferSliceBoundaryDistance(0.0), _VBufferLastSliceDistance);
 }
 
-float3 EvaluateDirectionalLighting(uint3 voxelCoord, float3 positionWS)
+float3 EvaluateDirectionalLighting(uint3 voxelCoord, float3 rayDirectionWS)
 {
     float3 lighting = 0.0;
-    float3 viewDirectionWS = SafeNormalize(_WorldSpaceCameraPos - positionWS);
     uint directionalCount = min(_DirectionalLightCount, 8u);
 
     [loop]
@@ -154,7 +210,7 @@ float3 EvaluateDirectionalLighting(uint3 voxelCoord, float3 positionWS)
             continue;
 
         float3 lightDirectionWS = SafeNormalize(-light.directionWS);
-        float phase = HenyeyGreensteinPhase(dot(lightDirectionWS, viewDirectionWS), _VBufferFogAnisotropy);
+        float phase = EvaluateVolumetricPhase(lightDirectionWS, rayDirectionWS);
         float shadow = SampleDirectionalShadow(voxelCoord.xy, lightIndex, light);
         lighting += max(light.color, 0.0) * light.volumetricDimmer * phase * shadow;
     }
@@ -162,49 +218,258 @@ float3 EvaluateDirectionalLighting(uint3 voxelCoord, float3 positionWS)
     return lighting;
 }
 
-float3 EvaluateClusteredPunctualLighting(uint2 vBufferPixel, float3 positionWS)
+float EvaluatePunctualLightDistanceAttenuation(PunctualLightData punctualLight, float distanceSquared)
+{
+    float distanceAttenuation = rcp(max(distanceSquared, 1e-6));
+    float rangeAttenuation = saturate(1.0 - distanceSquared * punctualLight.inverseRangeSquared);
+    return distanceAttenuation * rangeAttenuation * rangeAttenuation;
+}
+
+float EvaluatePunctualLightSpotAttenuation(PunctualLightData punctualLight, float3 lightDirectionWS)
+{
+    float attenuation = 1.0;
+
+    if (punctualLight.lightType == VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
+    {
+        float spotCosine = saturate(dot(punctualLight.directionWS, -lightDirectionWS));
+        attenuation = saturate(spotCosine * punctualLight.angleScale + punctualLight.angleOffset);
+        attenuation *= attenuation;
+    }
+
+    return attenuation;
+}
+
+float3 EvaluatePunctualLightRadiance(PunctualLightData light, float3 positionWS)
+{
+    float3 lightVector = light.positionWS - positionWS;
+    float distanceSquared = max(dot(lightVector, lightVector), 1e-6);
+    float3 lightDirectionWS = lightVector * rsqrt(distanceSquared);
+    float attenuation = EvaluatePunctualLightDistanceAttenuation(light, distanceSquared)
+        * EvaluatePunctualLightSpotAttenuation(light, lightDirectionWS);
+
+    if (attenuation <= 0.0)
+        return 0.0;
+
+    float volumetricFade = EvaluateVolumetricLightFade(
+        GetVolumetricLightCameraDistance(light.positionWS),
+        light.volumetricFadeDistance);
+    return max(light.color, 0.0) * light.volumetricDimmer * volumetricFade * attenuation;
+}
+
+void CreatePerpendicularBasis(float3 forward, out float3 axisX, out float3 axisY)
+{
+    float3 up = abs(forward.y) < 0.999 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
+    axisX = SafeNormalize(cross(up, forward));
+    axisY = cross(forward, axisX);
+}
+
+bool TryGetSpotConeAxes(PunctualLightData light, out float3 coneDirection, out float3 coneAxisX, out float3 coneAxisY)
+{
+    coneDirection = SafeNormalize(light.directionWS);
+    coneAxisX = 0.0;
+    coneAxisY = 0.0;
+
+    if (light.lightType != VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
+        return false;
+
+    float cosOuter = saturate(-light.angleOffset / max(light.angleScale, 1e-6));
+    cosOuter = clamp(cosOuter, 1e-3, 0.999999);
+    float sinOuter = sqrt(max(1.0 - cosOuter * cosOuter, 1e-6));
+    float cotanOuter = cosOuter / sinOuter;
+    float3 axisX;
+    float3 axisY;
+    CreatePerpendicularBasis(coneDirection, axisX, axisY);
+    coneAxisX = axisX * cotanOuter;
+    coneAxisY = axisY * cotanOuter;
+    return true;
+}
+
+bool IntersectRayLightRange(float3 rayOriginWS, float3 rayDirectionWS, PunctualLightData light, float tMin, float tMax, out float tEntr, out float tExit)
+{
+    float2 intersections;
+    bool hit = IntersectRaySphere(rayOriginWS - light.positionWS, rayDirectionWS, max(light.range, 1e-4), intersections);
+    if (!hit)
+    {
+        tEntr = tMin;
+        tExit = tMin;
+        return false;
+    }
+
+    tEntr = max(intersections.x, tMin);
+    tExit = min(intersections.y, tMax);
+    return tEntr < tExit;
+}
+
+bool IntersectRaySpotConeRange(float3 rayOriginWS, float3 rayDirectionWS, PunctualLightData light, float tMin, float tMax, out float tEntr, out float tExit)
+{
+    float3 coneDirection;
+    float3 coneAxisX;
+    float3 coneAxisY;
+    if (!TryGetSpotConeAxes(light, coneDirection, coneAxisX, coneAxisY))
+    {
+        tEntr = tMin;
+        tExit = tMax;
+        return true;
+    }
+
+    return IntersectRayCone(
+        rayOriginWS,
+        rayDirectionWS,
+        light.positionWS,
+        coneDirection,
+        coneAxisX,
+        coneAxisY,
+        tMin,
+        tMax,
+        tEntr,
+        tExit);
+}
+
+void ImportanceSamplePunctualLight(
+    float rndVal,
+    float3 lightPosition,
+    float lightSqRadius,
+    float3 rayOrigin,
+    float3 rayDirection,
+    float tMin,
+    float tMax,
+    out float t,
+    out float sqDist,
+    out float rcpPdf)
+{
+    float3 originToLight = lightPosition - rayOrigin;
+    float originToLightProjDist = dot(originToLight, rayDirection);
+    float originToLightSqDist = dot(originToLight, originToLight);
+    float rayToLightSqDist = originToLightSqDist - originToLightProjDist * originToLightProjDist;
+    float sqD = max(rayToLightSqDist + lightSqRadius, 1e-6);
+    float rcpD = rsqrt(sqD);
+    float d = sqD * rcpD;
+    float a = tMin - originToLightProjDist;
+    float b = tMax - originToLightProjDist;
+    float x = a * rcpD;
+    float y = b * rcpD;
+    float theta0 = atan(x);
+    float theta1 = atan(y);
+    float gamma = max(theta1 - theta0, 1e-4);
+    float tanTheta = tan(theta0 + saturate(rndVal) * gamma);
+    float tRelative = d * tanTheta;
+
+    sqDist = sqD + tRelative * tRelative;
+    rcpPdf = gamma * rcpD * sqDist;
+    t = clamp(originToLightProjDist + tRelative, tMin, tMax);
+    sqDist = max(sqDist - lightSqRadius, 1e-6);
+}
+
+uint GetVolumetricBigTileIndex(uint2 vBufferPixel)
+{
+    uint2 cameraPixel = (uint2)((float2(vBufferPixel) + 0.5) * _VBufferCameraToVBufferScale);
+    uint tileCountX = max(_NumTileBigTileX, 1u);
+    uint tileCountY = max(_NumTileBigTileY, 1u);
+    uint tileX = min(cameraPixel.x / VBUFFER_BIG_TILE_SIZE, tileCountX - 1u);
+    uint tileY = min(cameraPixel.y / VBUFFER_BIG_TILE_SIZE, tileCountY - 1u);
+    return tileY * tileCountX + tileX;
+}
+
+uint GetBigTileLightCount(uint bigTileIndex)
+{
+    uint baseOffset = (VBUFFER_MAX_BIG_TILE_LIGHTS_PLUS_ONE * bigTileIndex) >> 1;
+    return min(g_vBigTileLightList[baseOffset] & 0xffffu, VBUFFER_MAX_BIG_TILE_LIGHTS);
+}
+
+uint FetchBigTileLightIndex(uint bigTileIndex, uint lightOffset)
+{
+    uint baseOffset = (VBUFFER_MAX_BIG_TILE_LIGHTS_PLUS_ONE * bigTileIndex) >> 1;
+    uint lightOffsetPlusOne = lightOffset + 1u;
+    uint packedLightIndices = g_vBigTileLightList[baseOffset + (lightOffsetPlusOne >> 1)];
+    return (packedLightIndices >> ((lightOffsetPlusOne & 1u) * 16u)) & 0xffffu;
+}
+
+float3 EvaluatePunctualLightingIntegral(uint3 voxelCoord, uint2 vBufferPixel, float3 centerPositionWS, float3 rayDirectionWS, float t0, float t1, float extinction)
 {
     if (_VBufferFogDirectionalOnly > 0.5)
         return 0.0;
 
-    float2 cameraPixel = (float2(vBufferPixel) + 0.5) * _VBufferCameraToVBufferScale;
-    VividLightingLoopContext lightLoop = VividLightingLoop::Create((uint2)cameraPixel, positionWS);
-    uint lightCount = min(VividLightingLoop::GetPunctualLightCount(lightLoop), 16u);
-    float3 viewDirectionWS = SafeNormalize(_WorldSpaceCameraPos - positionWS);
-    float3 lighting = 0.0;
+    bool useBigTileLightList = _VolumetricUseBigTileLightList != 0u && _NumTileBigTileX > 0u && _NumTileBigTileY > 0u;
+    uint bigTileIndex = useBigTileLightList ? GetVolumetricBigTileIndex(vBufferPixel) : 0u;
+    uint lightCount = useBigTileLightList
+        ? GetBigTileLightCount(bigTileIndex)
+        : min(_PunctualLightCount, VBUFFER_MAX_PUNCTUAL_LIGHTS);
+    float3 lightingIntegral = 0.0;
 
     [loop]
-    for (uint localLightIndex = 0; localLightIndex < lightCount; localLightIndex++)
+    for (uint lightOffset = 0; lightOffset < lightCount; lightOffset++)
     {
-        PunctualLightData light = VividLightingLoop::LoadPunctualLight(lightLoop, localLightIndex);
+        uint lightIndex = useBigTileLightList ? FetchBigTileLightIndex(bigTileIndex, lightOffset) : lightOffset;
+        if (lightIndex >= _PunctualLightCount)
+            continue;
+
+        PunctualLightData light = GetPunctualLight((int)lightIndex);
         if (!LightAffectsVolumetrics(light.affectVolumetric, light.volumetricDimmer))
             continue;
 
-        float3 lightVector = light.positionWS - positionWS;
-        float distanceSq = max(dot(lightVector, lightVector), 1e-4);
-        float distanceToLight = sqrt(distanceSq);
-        float3 lightDirectionWS = lightVector / distanceToLight;
-        float phase = HenyeyGreensteinPhase(dot(lightDirectionWS, viewDirectionWS), _VBufferFogAnisotropy);
-        float rangeAttenuation = saturate(1.0 - distanceToLight / max(light.range, 1e-4));
-        rangeAttenuation *= rangeAttenuation;
-        float volumetricFade = EvaluateVolumetricLightFade(
-            GetVolumetricLightCameraDistance(light.positionWS),
-            light.volumetricFadeDistance);
-        lighting += max(light.color, 0.0) * light.volumetricDimmer * volumetricFade * phase * rangeAttenuation / max(distanceSq, 1.0);
+        float tEntr;
+        float tExit;
+        bool sampleLight = IntersectRayLightRange(_WorldSpaceCameraPos, rayDirectionWS, light, t0, t1, tEntr, tExit);
+        if (sampleLight && light.lightType == VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
+        {
+            float coneEntry;
+            float coneExit;
+            sampleLight = IntersectRaySpotConeRange(_WorldSpaceCameraPos, rayDirectionWS, light, tEntr, tExit, coneEntry, coneExit);
+            tEntr = max(tEntr, coneEntry);
+            tExit = min(tExit, coneExit);
+        }
+
+        if (!sampleLight || tEntr >= tExit)
+            continue;
+
+        float voxelArcLength = _VBufferUnitDepthTexelSpacing * max(tEntr, 0.0);
+        float lightSqRadius = max(voxelArcLength * voxelArcLength, 1e-4);
+        float3 lightIntegral = 0.0;
+
+        [unroll]
+        for (uint sampleIndex = 0u; sampleIndex < VBUFFER_PUNCTUAL_SAMPLE_COUNT; sampleIndex++)
+        {
+            float rndVal = ((float)sampleIndex + GenerateVBufferRandom(voxelCoord, lightIndex, sampleIndex)) / (float)VBUFFER_PUNCTUAL_SAMPLE_COUNT;
+            float t;
+            float sqDist;
+            float rcpPdf;
+            ImportanceSamplePunctualLight(
+                rndVal,
+                light.positionWS,
+                lightSqRadius,
+                _WorldSpaceCameraPos,
+                rayDirectionWS,
+                tEntr,
+                tExit,
+                t,
+                sqDist,
+                rcpPdf);
+
+            float3 samplePositionWS = _WorldSpaceCameraPos + rayDirectionWS * t;
+            float3 lightRadiance = EvaluatePunctualLightRadiance(light, samplePositionWS);
+            if (max(max(lightRadiance.x, lightRadiance.y), lightRadiance.z) <= 0.0)
+                continue;
+
+            float3 centerToLight = light.positionWS - centerPositionWS;
+            float phase = EvaluateVolumetricPhase(centerToLight, rayDirectionWS);
+            float weight = TransmittanceHomogeneousMedium(extinction, max(t - t0, 0.0)) * rcpPdf;
+            lightIntegral += lightRadiance * phase * weight;
+        }
+
+        lightingIntegral += lightIntegral / (float)VBUFFER_PUNCTUAL_SAMPLE_COUNT;
     }
 
-    return lighting;
+    return lightingIntegral;
 }
 
-float3 EvaluateClusteredAreaLighting(uint2 vBufferPixel, float3 positionWS)
+float3 EvaluateClusteredAreaLighting(uint2 vBufferPixel, float3 positionWS, float3 rayDirectionWS)
 {
     if (_VBufferFogDirectionalOnly > 0.5)
         return 0.0;
 
     float2 cameraPixel = (float2(vBufferPixel) + 0.5) * _VBufferCameraToVBufferScale;
     VividLightingLoopContext lightLoop = VividLightingLoop::Create((uint2)cameraPixel, positionWS);
-    uint lightCount = min(VividLightingLoop::GetAreaLightCount(lightLoop), 8u);
-    float3 viewDirectionWS = SafeNormalize(_WorldSpaceCameraPos - positionWS);
+    uint lightCount = min(min(VividLightingLoop::GetAreaLightCount(lightLoop), _AreaLightCount), VBUFFER_MAX_AREA_LIGHTS);
     float3 lighting = 0.0;
 
     [loop]
@@ -218,7 +483,7 @@ float3 EvaluateClusteredAreaLighting(uint2 vBufferPixel, float3 positionWS)
         float distanceSq = max(dot(lightVector, lightVector), 1e-4);
         float distanceToLight = sqrt(distanceSq);
         float3 lightDirectionWS = lightVector / distanceToLight;
-        float phase = HenyeyGreensteinPhase(dot(lightDirectionWS, viewDirectionWS), _VBufferFogAnisotropy);
+        float phase = EvaluateVolumetricPhase(lightDirectionWS, rayDirectionWS);
         float rangeAttenuation = saturate(1.0 - distanceToLight / max(light.range, 1e-4));
         rangeAttenuation *= rangeAttenuation;
         float volumetricFade = EvaluateVolumetricLightFade(
@@ -294,13 +559,13 @@ void VolumetricLighting(uint3 dispatchThreadId : SV_DispatchThreadID)
             if (ShouldEvaluateVBufferLighting(extinction))
             {
                 float3 lighting = EvaluateAmbientLighting();
-                lighting += EvaluateDirectionalLighting(voxelCoord, positionWS);
-                lighting += EvaluateClusteredPunctualLighting(vBufferPixel, positionWS);
-                lighting += EvaluateClusteredAreaLighting(vBufferPixel, positionWS);
+                lighting += EvaluateDirectionalLighting(voxelCoord, rayDirectionWS);
+                lighting += EvaluateClusteredAreaLighting(vBufferPixel, positionWS, rayDirectionWS);
+                float3 punctualLightingIntegral = EvaluatePunctualLightingIntegral(voxelCoord, vBufferPixel, positionWS, rayDirectionWS, t0, t1, extinction);
 
                 float transmittanceToSlice = TransmittanceFromOpticalDepth(opticalDepth);
                 float integratedTransmittance = TransmittanceIntegralHomogeneousMedium(extinction, dt);
-                totalRadiance += transmittanceToSlice * scattering * lighting * integratedTransmittance;
+                totalRadiance += transmittanceToSlice * scattering * (lighting * integratedTransmittance + punctualLightingIntegral);
             }
         }
 

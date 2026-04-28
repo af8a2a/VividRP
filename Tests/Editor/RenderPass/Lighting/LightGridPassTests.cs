@@ -28,15 +28,15 @@ namespace VividRP.Editor.Tests
         public void LightGridPass_MarksInternalScratchBuffersTransient()
         {
             AssertTransientResource("m_ScreenSpaceBoundsBuffer");
-            AssertTransientResource("m_BigTileLightListBuffer");
             AssertTransientResource("m_LayeredLightListCounterBuffer");
         }
 
         [Test]
-        public void LightGridPass_KeepsCpuUploadedInternalBuffersNonTransient()
+        public void LightGridPass_KeepsExportedInternalBuffersNonTransient()
         {
             AssertNonTransientResource("m_FiniteLightBoundBuffer");
             AssertNonTransientResource("m_LightVolumeDataBuffer");
+            AssertNonTransientResource("m_BigTileLightListBuffer");
         }
 
         [Test]
@@ -46,6 +46,7 @@ namespace VividRP.Editor.Tests
             AssertBindingMode("m_PunctualLightBuffer", RenderGraphResourceBindingMode.External);
             AssertBindingMode("m_AreaLightBuffer", RenderGraphResourceBindingMode.External);
             AssertBindingMode("m_DecalDataBuffer", RenderGraphResourceBindingMode.External);
+            AssertBindingMode("m_BigTileLightListBuffer", RenderGraphResourceBindingMode.External);
             AssertBindingMode("m_LayeredOffsetBuffer", RenderGraphResourceBindingMode.PassOwnedOverrideable);
             AssertBindingMode("m_LayeredLightListBuffer", RenderGraphResourceBindingMode.PassOwnedOverrideable);
             AssertBindingMode("m_LogBaseBuffer", RenderGraphResourceBindingMode.PassOwnedOverrideable);
@@ -119,7 +120,6 @@ namespace VividRP.Editor.Tests
                 pass.Prepare(frameData);
 
                 AssertNoImportedBackingBuffer(pass, "m_ScreenSpaceBoundsBuffer");
-                AssertNoImportedBackingBuffer(pass, "m_BigTileLightListBuffer");
                 AssertNoImportedBackingBuffer(pass, "m_LayeredLightListCounterBuffer");
             }
             finally

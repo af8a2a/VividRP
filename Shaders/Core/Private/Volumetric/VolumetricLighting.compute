@@ -270,32 +270,23 @@ bool TryGetSpotConeAxes(PunctualLightData light, out float3 coneDirection, out f
     if (light.lightType != VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
         return false;
 
-    float cosOuter = saturate(-light.angleOffset / max(light.angleScale, 1e-6));
-    cosOuter = clamp(cosOuter, 1e-3, 0.999999);
-    float sinOuter = sqrt(max(1.0 - cosOuter * cosOuter, 1e-6));
-    float cotanOuter = cosOuter / sinOuter;
-    float3 axisX;
-    float3 axisY;
-    CreatePerpendicularBasis(coneDirection, axisX, axisY);
-    coneAxisX = axisX * cotanOuter;
-    coneAxisY = axisY * cotanOuter;
-    return true;
-}
+    coneAxisX = light.rightWS;
+    coneAxisY = light.upWS;
 
-bool IntersectRayLightRange(float3 rayOriginWS, float3 rayDirectionWS, PunctualLightData light, float tMin, float tMax, out float tEntr, out float tExit)
-{
-    float2 intersections;
-    bool hit = IntersectRaySphere(rayOriginWS - light.positionWS, rayDirectionWS, max(light.range, 1e-4), intersections);
-    if (!hit)
+    if (dot(coneAxisX, coneAxisX) <= 1e-8 || dot(coneAxisY, coneAxisY) <= 1e-8)
     {
-        tEntr = tMin;
-        tExit = tMin;
-        return false;
+        float cosOuter = saturate(-light.angleOffset / max(light.angleScale, 1e-6));
+        cosOuter = clamp(cosOuter, 1e-3, 0.999999);
+        float sinOuter = sqrt(max(1.0 - cosOuter * cosOuter, 1e-6));
+        float cotanOuter = cosOuter / sinOuter;
+        float3 axisX;
+        float3 axisY;
+        CreatePerpendicularBasis(coneDirection, axisX, axisY);
+        coneAxisX = axisX * cotanOuter;
+        coneAxisY = axisY * cotanOuter;
     }
 
-    tEntr = max(intersections.x, tMin);
-    tExit = min(intersections.y, tMax);
-    return tEntr < tExit;
+    return true;
 }
 
 bool IntersectRaySpotConeRange(float3 rayOriginWS, float3 rayDirectionWS, PunctualLightData light, float tMin, float tMax, out float tEntr, out float tExit)
@@ -354,7 +345,7 @@ void ImportanceSamplePunctualLight(
 
     sqDist = sqD + tRelative * tRelative;
     rcpPdf = gamma * rcpD * sqDist;
-    t = clamp(originToLightProjDist + tRelative, tMin, tMax);
+    t = originToLightProjDist + tRelative;
     sqDist = max(sqDist - lightSqRadius, 1e-6);
 }
 
@@ -403,23 +394,23 @@ float3 EvaluatePunctualLightingIntegral(uint3 voxelCoord, uint2 vBufferPixel, fl
         if (!LightAffectsVolumetrics(light.affectVolumetric, light.volumetricDimmer))
             continue;
 
-        float tEntr;
-        float tExit;
-        bool sampleLight = IntersectRayLightRange(_WorldSpaceCameraPos, rayDirectionWS, light, t0, t1, tEntr, tExit);
-        if (sampleLight && light.lightType == VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
+        float tEntr = t0;
+        float tExit = t1;
+        bool sampleLight = true;
+        if (light.lightType == VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
         {
             float coneEntry;
             float coneExit;
-            sampleLight = IntersectRaySpotConeRange(_WorldSpaceCameraPos, rayDirectionWS, light, tEntr, tExit, coneEntry, coneExit);
-            tEntr = max(tEntr, coneEntry);
-            tExit = min(tExit, coneExit);
+            sampleLight = IntersectRaySpotConeRange(_WorldSpaceCameraPos, rayDirectionWS, light, t0, t1, coneEntry, coneExit);
+            tEntr = coneEntry;
+            tExit = coneExit;
         }
 
         if (!sampleLight || tEntr >= tExit)
             continue;
 
         float voxelArcLength = _VBufferUnitDepthTexelSpacing * max(tEntr, 0.0);
-        float lightSqRadius = max(voxelArcLength * voxelArcLength, 1e-4);
+        float lightSqRadius = max(max(light.shapeRadiusSquared, voxelArcLength), 1e-4);
         float3 lightIntegral = 0.0;
 
         [unroll]

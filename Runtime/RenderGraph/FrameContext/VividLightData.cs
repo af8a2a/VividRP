@@ -35,7 +35,10 @@ namespace VividRP.Runtime
             public uint lightType;
             public Vector3 directionWS;
             public float angleScale;
+            public Vector3 rightWS;
             public float angleOffset;
+            public Vector3 upWS;
+            public float shapeRadiusSquared;
             public float inverseRangeSquared;
             public float shadowStrength;
             public uint renderingLayerMask;
@@ -43,6 +46,7 @@ namespace VividRP.Runtime
             public float volumetricShadowDimmer;
             public float volumetricFadeDistance;
             public uint affectVolumetric;
+            public uint padding;
 
             internal static int Stride => Marshal.SizeOf<PunctualLightData>();
         }
@@ -718,6 +722,7 @@ namespace VividRP.Runtime
                 rightWS = NormalizeDirection(new Vector3(localToWorld.m00, localToWorld.m10, localToWorld.m20), Vector3.right),
                 upWS = NormalizeDirection(new Vector3(localToWorld.m01, localToWorld.m11, localToWorld.m21), Vector3.up),
                 areaSize = Vector2.zero,
+                shapeRadius = 0.0f,
                 intensity = GetLightIntensity(finalColor),
                 color = new Vector3(finalColor.r, finalColor.g, finalColor.b),
                 shadowStrength = 0.0f,
@@ -856,14 +861,34 @@ namespace VividRP.Runtime
                 return;
             }
 
-            var innerHalfAngle = Mathf.Clamp(innerSpotAngle * 0.5f, 0.0f, 89.0f) * Mathf.Deg2Rad;
-            var outerHalfAngle = Mathf.Clamp(outerSpotAngle * 0.5f, innerSpotAngle * 0.5f + 0.001f, 89.0f) * Mathf.Deg2Rad;
+            var innerHalfAngleDegrees = Mathf.Clamp(innerSpotAngle * 0.5f, 0.0f, 89.0f);
+            var outerHalfAngleDegrees = GetSpotOuterHalfAngleDegrees(innerHalfAngleDegrees, outerSpotAngle);
+            var innerHalfAngle = innerHalfAngleDegrees * Mathf.Deg2Rad;
+            var outerHalfAngle = outerHalfAngleDegrees * Mathf.Deg2Rad;
             var cosInner = Mathf.Cos(innerHalfAngle);
             var cosOuter = Mathf.Cos(outerHalfAngle);
             var angleRange = Mathf.Max(cosInner - cosOuter, 0.001f);
 
             angleScale = 1.0f / angleRange;
             angleOffset = -cosOuter * angleScale;
+        }
+
+        private static float GetSpotConeAxisScale(LightType lightType, float innerSpotAngle, float outerSpotAngle)
+        {
+            if (lightType != LightType.Spot)
+                return 1.0f;
+
+            var innerHalfAngleDegrees = Mathf.Clamp(innerSpotAngle * 0.5f, 0.0f, 89.0f);
+            var outerHalfAngle = GetSpotOuterHalfAngleDegrees(innerHalfAngleDegrees, outerSpotAngle) * Mathf.Deg2Rad;
+            var cosOuter = Mathf.Clamp01(Mathf.Cos(outerHalfAngle));
+            var sinOuter = Mathf.Sqrt(Mathf.Max(1.0f - cosOuter * cosOuter, 1e-6f));
+            return cosOuter / sinOuter;
+        }
+
+        private static float GetSpotOuterHalfAngleDegrees(float innerHalfAngleDegrees, float outerSpotAngle)
+        {
+            var minOuterHalfAngle = Mathf.Min(innerHalfAngleDegrees + 0.001f, 89.0f);
+            return Mathf.Clamp(outerSpotAngle * 0.5f, minOuterHalfAngle, 89.0f);
         }
 
         private static float GetLightIntensity(Color finalColor)

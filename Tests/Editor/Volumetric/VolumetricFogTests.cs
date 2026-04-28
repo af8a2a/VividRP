@@ -655,10 +655,14 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("EvaluatePunctualLightingIntegral"));
             Assert.That(lightingSource, Does.Contain("ImportanceSamplePunctualLight"));
             Assert.That(lightingSource, Does.Contain("IntersectRayCone"));
-            Assert.That(lightingSource, Does.Contain("IntersectRaySphere"));
+            Assert.That(lightingSource, Does.Not.Contain("IntersectRaySphere"));
             Assert.That(lightingSource, Does.Contain("VIVID_PUNCTUAL_LIGHT_TYPE_SPOT"));
             Assert.That(lightingSource, Does.Contain("angleScale"));
             Assert.That(lightingSource, Does.Contain("angleOffset"));
+            Assert.That(lightingSource, Does.Contain("coneAxisX = light.rightWS"));
+            Assert.That(lightingSource, Does.Contain("coneAxisY = light.upWS"));
+            Assert.That(lightingSource, Does.Contain("float lightSqRadius = max(max(light.shapeRadiusSquared, voxelArcLength), 1e-4)"));
+            Assert.That(lightingSource, Does.Contain("t = originToLightProjDist + tRelative"));
             Assert.That(lightingSource, Does.Contain("float weight = TransmittanceHomogeneousMedium(extinction, max(t - t0, 0.0)) * rcpPdf"));
             Assert.That(lightingSource, Does.Contain("lighting * integratedTransmittance + punctualLightingIntegral"));
             Assert.That(lightingSource, Does.Not.Contain("EvaluateClusteredPunctualLighting"));

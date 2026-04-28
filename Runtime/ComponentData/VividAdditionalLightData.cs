@@ -29,6 +29,7 @@ namespace VividRP.Runtime
         public Vector3 rightWS;
         public Vector3 upWS;
         public Vector2 areaSize;
+        public float shapeRadius;
         public float barnDoorAngle;
         public float barnDoorLength;
         public float volumetricDimmer;
@@ -202,6 +203,7 @@ namespace VividRP.Runtime
                 rightWS = light.transform.right,
                 upWS = light.transform.up,
                 areaSize = ResolveAreaSize(light),
+                shapeRadius = Mathf.Max(light.shapeRadius, 0.0f),
                 barnDoorAngle = additionalLightData != null
                     ? additionalLightData.barnDoorAngle
                     : VividAdditionalLightData.DefaultBarnDoorAngle,
@@ -291,6 +293,7 @@ namespace VividRP.Runtime
                    && Approximately(lhs.rightWS, rhs.rightWS)
                    && Approximately(lhs.upWS, rhs.upWS)
                    && Approximately(lhs.areaSize, rhs.areaSize)
+                   && Mathf.Approximately(lhs.shapeRadius, rhs.shapeRadius)
                    && Mathf.Approximately(lhs.barnDoorAngle, rhs.barnDoorAngle)
                    && Mathf.Approximately(lhs.barnDoorLength, rhs.barnDoorLength)
                    && Mathf.Approximately(lhs.volumetricDimmer, rhs.volumetricDimmer)

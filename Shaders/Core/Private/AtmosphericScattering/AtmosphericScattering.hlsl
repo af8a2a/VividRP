@@ -3,6 +3,7 @@
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/VolumeRendering.hlsl"
@@ -17,8 +18,10 @@
 
 TEXTURE2D_X(_InputColor);
 TEXTURE2D_X_FLOAT(_DepthTexture);
+Texture3D<float4> _VBufferLighting;
 
 float4 _SkyFogParams;
+float _VolumetricEnabled;
 
 static const float MaxSkyRadiance = 60000.0f;
 
@@ -158,6 +161,23 @@ bool TryGetAtmosphericScatteringRay(float3 V, float linearDepth, bool isSky, out
 
     tFrag = ComputeAtmosphericScatteringDistance(V, linearDepth, isSky);
     return !(isnan(tFrag) || isinf(tFrag) || tFrag <= 1e-4f);
+}
+
+float ResolveVBufferLightingDistance(float2 positionNDC, float deviceDepth, bool hasAtmosphericDistance, float atmosphericDistance)
+{
+    return hasAtmosphericDistance
+        ? max(atmosphericDistance, 0.0f)
+        : GetVBufferLinearDistanceFromDeviceDepth(positionNDC, deviceDepth);
+}
+
+float4 CompositeVBufferLighting(float4 inputColor, float2 positionNDC, float linearDistance)
+{
+    if (_VolumetricEnabled <= 0.5f)
+        return inputColor;
+
+    float3 vBufferUVW = GetVBufferUVW(positionNDC, linearDistance);
+    float4 lighting = _VBufferLighting.SampleLevel(sampler_LinearClamp, vBufferUVW, 0);
+    return float4(inputColor.rgb * saturate(lighting.a) + lighting.rgb, inputColor.a);
 }
 
 // All units in meters!
@@ -336,10 +356,6 @@ float4 FragOpaqueAtmosphericScattering(Varyings input) : SV_Target
     float2 positionSS = input.positionCS.xy;
     int2 pixelCoord = int2(positionSS);
     float4 inputColor = LOAD_TEXTURE2D_X(_InputColor, pixelCoord);
-
-    if (_SkyFogParams.x <= 0.5f)
-        return inputColor;
-
     float deviceDepth = LOAD_TEXTURE2D_X(_DepthTexture, pixelCoord).r;
     bool isSky = IsFarDepth(deviceDepth);
     float2 positionNDC = positionSS * _ScreenSize.zw;
@@ -347,8 +363,11 @@ float4 FragOpaqueAtmosphericScattering(Varyings input) : SV_Target
     float linearDepth = LinearEyeDepth(deviceDepth, _ZBufferParams);
 
     float tFrag = 0.0f;
-    if (!TryGetAtmosphericScatteringRay(V, linearDepth, isSky, tFrag))
-        return inputColor;
+    bool hasAtmosphericDistance = _SkyFogParams.x > 0.5f
+        && TryGetAtmosphericScatteringRay(V, linearDepth, isSky, tFrag);
+    float vBufferLightingDistance = ResolveVBufferLightingDistance(positionNDC, deviceDepth, hasAtmosphericDistance, tFrag);
+    if (!hasAtmosphericDistance)
+        return CompositeVBufferLighting(inputColor, positionNDC, vBufferLightingDistance);
 
     float3 fogColor;
     float3 fogOpacity;
@@ -360,7 +379,7 @@ float4 FragOpaqueAtmosphericScattering(Varyings input) : SV_Target
         fogColor = lerp(fogColor, SanitizeSkyRadiance(GetFogColor(V, tFrag)), fogOpacity);
 
     float3 composedColor = fogColor + (1.0f - fogOpacity) * inputColor.rgb;
-    return float4(composedColor, inputColor.a);
+    return CompositeVBufferLighting(float4(composedColor, inputColor.a), positionNDC, vBufferLightingDistance);
 }
 
 float4 FragOpaqueAtmosphericScatteringForHDRISky(Varyings input) : SV_Target
@@ -369,25 +388,25 @@ float4 FragOpaqueAtmosphericScatteringForHDRISky(Varyings input) : SV_Target
     float2 positionSS = input.positionCS.xy;
     int2 pixelCoord = int2(positionSS);
     float4 inputColor = LOAD_TEXTURE2D_X(_InputColor, pixelCoord);
-
-    if (_SkyFogParams.x <= 0.5f)
-        return inputColor;
-
     float deviceDepth = LOAD_TEXTURE2D_X(_DepthTexture, pixelCoord).r;
     bool isSky = IsFarDepth(deviceDepth);
+    float2 positionNDC = positionSS * _ScreenSize.zw;
     float3 V = GetSkyViewDirWS(positionSS);
     float linearDepth = LinearEyeDepth(deviceDepth, _ZBufferParams);
 
     float tFrag = 0.0f;
-    if (!TryGetAtmosphericScatteringRay(V, linearDepth, isSky, tFrag))
-        return inputColor;
+    bool hasAtmosphericDistance = _SkyFogParams.x > 0.5f
+        && TryGetAtmosphericScatteringRay(V, linearDepth, isSky, tFrag);
+    float vBufferLightingDistance = ResolveVBufferLightingDistance(positionNDC, deviceDepth, hasAtmosphericDistance, tFrag);
+    if (!hasAtmosphericDistance)
+        return CompositeVBufferLighting(inputColor, positionNDC, vBufferLightingDistance);
 
     float fogOpacity = ComputeHDRISkyFogOpacity(tFrag);
     float3 volOpacity = fogOpacity.xxx;
     float3 volColor = SanitizeSkyRadiance(GetFogColor(V, tFrag)) * volOpacity;
 
     float3 composedColor = volColor + (1.0f - volOpacity) * inputColor.rgb;
-    return float4(composedColor, inputColor.a);
+    return CompositeVBufferLighting(float4(composedColor, inputColor.a), positionNDC, vBufferLightingDistance);
 }
 
 #endif

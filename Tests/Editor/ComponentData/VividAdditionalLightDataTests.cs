@@ -826,6 +826,7 @@ namespace VividRP.Editor.Tests
             light.color = Color.red;
             light.intensity = 1.5f;
             light.range = 4.0f;
+            light.shapeRadius = 0.1f;
             light.transform.position = new Vector3(1.0f, 2.0f, 3.0f);
 
             var additionalData = light.GetVividAdditionalLightData();
@@ -837,6 +838,7 @@ namespace VividRP.Editor.Tests
             light.color = Color.cyan;
             light.intensity = 3.0f;
             light.range = 8.0f;
+            light.shapeRadius = 0.35f;
             light.transform.position = new Vector3(-2.0f, 1.0f, 0.5f);
             light.transform.forward = Vector3.right;
 
@@ -855,6 +857,7 @@ namespace VividRP.Editor.Tests
             Assert.That(trackedLightData.color.y, Is.EqualTo(3.0f).Within(0.0001f));
             Assert.That(trackedLightData.color.z, Is.EqualTo(3.0f).Within(0.0001f));
             Assert.That(trackedLightData.range, Is.EqualTo(8.0f).Within(0.0001f));
+            Assert.That(trackedLightData.shapeRadius, Is.EqualTo(0.35f).Within(0.0001f));
             Assert.That(trackedLightData.inverseRangeSquared, Is.EqualTo(1.0f / 64.0f).Within(0.0001f));
         }
 

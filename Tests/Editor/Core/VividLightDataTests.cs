@@ -20,7 +20,7 @@ namespace VividRP.Editor.Tests
         public void LightDataStructs_UseExpectedVolumetricStrides()
         {
             Assert.That(VividLightData.DirectionalLightData.Stride, Is.EqualTo(48));
-            Assert.That(VividLightData.PunctualLightData.Stride, Is.EqualTo(80));
+            Assert.That(VividLightData.PunctualLightData.Stride, Is.EqualTo(112));
             Assert.That(VividLightData.AreaLightData.Stride, Is.EqualTo(112));
         }
 
@@ -365,6 +365,9 @@ namespace VividRP.Editor.Tests
                 color = new Vector3(4.0f, 5.0f, 6.0f),
                 lightType = LightType.Point,
                 forwardWS = Vector3.forward,
+                rightWS = Vector3.right,
+                upWS = Vector3.up,
+                shapeRadius = 0.25f,
                 inverseRangeSquared = 1.0f / 36.0f,
                 renderingLayerMask = 7u,
                 volumetricDimmer = 3.0f,
@@ -388,6 +391,41 @@ namespace VividRP.Editor.Tests
             Assert.That(punctualLight.volumetricFadeDistance, Is.EqualTo(500.0f).Within(0.0001f));
             Assert.That(punctualLight.volumetricShadowDimmer, Is.EqualTo(0.25f).Within(0.0001f));
             Assert.That(punctualLight.affectVolumetric, Is.EqualTo(1u));
+            AssertVector3(punctualLight.rightWS, Vector3.right);
+            AssertVector3(punctualLight.upWS, Vector3.up);
+            Assert.That(punctualLight.shapeRadiusSquared, Is.EqualTo(0.0625f).Within(0.0001f));
+        }
+
+        [Test]
+        public void CreatePunctualLightData_PacksHdrpSpotConeAxes_ForVolumetricIntersection()
+        {
+            var trackedLightData = new VividLightRenderData
+            {
+                positionWS = new Vector3(1.0f, 2.0f, 3.0f),
+                range = 10.0f,
+                color = Vector3.one,
+                lightType = LightType.Spot,
+                forwardWS = Vector3.forward,
+                rightWS = Vector3.right,
+                upWS = Vector3.up,
+                spotAngle = 60.0f,
+                innerSpotAngle = 20.0f,
+                shapeRadius = 0.5f,
+                inverseRangeSquared = 0.01f,
+                flags = VividLightRenderDataFlags.AffectVolumetric,
+            };
+
+            Assert.That(s_CreatePunctualLightDataMethod, Is.Not.Null);
+
+            var punctualLight = (VividLightData.PunctualLightData)s_CreatePunctualLightDataMethod.Invoke(null, new object[] { trackedLightData });
+            var outerHalfAngle = 30.0f * Mathf.Deg2Rad;
+            var expectedConeAxisScale = Mathf.Cos(outerHalfAngle) / Mathf.Sin(outerHalfAngle);
+
+            AssertVector3(punctualLight.directionWS, Vector3.forward);
+            AssertVector3(punctualLight.rightWS, Vector3.right * expectedConeAxisScale);
+            AssertVector3(punctualLight.upWS, Vector3.up * expectedConeAxisScale);
+            Assert.That(punctualLight.shapeRadiusSquared, Is.EqualTo(0.25f).Within(0.0001f));
+            Assert.That(punctualLight.lightType, Is.EqualTo(1u));
         }
 
         [Test]

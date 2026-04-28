@@ -28,7 +28,10 @@ struct PunctualLightData
     uint lightType;
     float3 directionWS;
     float angleScale;
+    float3 rightWS;
     float angleOffset;
+    float3 upWS;
+    float shapeRadiusSquared;
     float inverseRangeSquared;
     float shadowStrength;
     uint renderingLayerMask;
@@ -36,6 +39,7 @@ struct PunctualLightData
     float volumetricShadowDimmer;
     float volumetricFadeDistance;
     uint affectVolumetric;
+    uint padding;
 };
 
 struct AreaLightData

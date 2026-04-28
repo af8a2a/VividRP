@@ -27,6 +27,11 @@ namespace VividRP.Runtime
         {
             var range = Mathf.Max(trackedLightData.range, 0.001f);
             GetSpotAngleParameters(trackedLightData.lightType, trackedLightData.innerSpotAngle, trackedLightData.spotAngle, out var angleScale, out var angleOffset);
+            var directionWS = NormalizeDirection(trackedLightData.forwardWS, Vector3.forward);
+            var coneAxisScale = GetSpotConeAxisScale(trackedLightData.lightType, trackedLightData.innerSpotAngle, trackedLightData.spotAngle);
+            var rightWS = NormalizeDirection(trackedLightData.rightWS, Vector3.right) * coneAxisScale;
+            var upWS = NormalizeDirection(trackedLightData.upWS, Vector3.up) * coneAxisScale;
+            var shapeRadius = Mathf.Max(trackedLightData.shapeRadius, 0.0f);
 
             return new PunctualLightData
             {
@@ -34,9 +39,12 @@ namespace VividRP.Runtime
                 range = range,
                 color = trackedLightData.color,
                 lightType = GetPunctualLightType(trackedLightData.lightType),
-                directionWS = trackedLightData.forwardWS,
+                directionWS = directionWS,
                 angleScale = angleScale,
+                rightWS = rightWS,
                 angleOffset = angleOffset,
+                upWS = upWS,
+                shapeRadiusSquared = shapeRadius * shapeRadius,
                 inverseRangeSquared = trackedLightData.inverseRangeSquared > 0.0f
                     ? trackedLightData.inverseRangeSquared
                     : 1.0f / Mathf.Max(range * range, 1e-6f),
@@ -46,6 +54,7 @@ namespace VividRP.Runtime
                 volumetricShadowDimmer = GetVolumetricShadowDimmer(trackedLightData),
                 volumetricFadeDistance = GetVolumetricFadeDistance(trackedLightData),
                 affectVolumetric = GetAffectVolumetric(trackedLightData),
+                padding = 0u,
             };
         }
 

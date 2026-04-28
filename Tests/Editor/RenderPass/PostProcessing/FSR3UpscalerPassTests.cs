@@ -60,25 +60,40 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void SourceFiles_InjectFsr3OnlyForFsr3AntialiasingMode()
+        public void SourceFiles_RecordFsr3ThroughExplicitAntialiasingPass()
         {
             var passRecorderSource = File.ReadAllText(GetPackageFilePath(
                 "Runtime",
                 "RenderGraph",
                 "PassRecorder.Execution.cs"));
+            var antialiasingPassSource = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "AntialiasingPass.cs"));
+            var resolverSource = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "RenderGraph",
+                "FrameContext",
+                "VividAntialiasingData.cs"));
             var cameraEditorSource = File.ReadAllText(GetPackageFilePath(
                 "Editor",
                 "ComponentEditor",
                 "VividCameraEditor.cs"));
 
-            Assert.That(passRecorderSource, Does.Contain("private static bool ShouldInjectFsr3Pass()"));
-            Assert.That(passRecorderSource, Does.Contain("additionalData.enableFSR3"));
-            Assert.That(passRecorderSource, Does.Contain("GetOrCreateInjectedFsr3Pass()"));
-            Assert.That(passRecorderSource, Does.Contain("RecordInjectedFsr3Pass("));
-            Assert.That(passRecorderSource, Does.Contain("ApplyFsr3Jitter("));
-            Assert.That(passRecorderSource, Does.Contain("FSR3UpscalerUtility.ResolveRenderSize"));
+            Assert.That(passRecorderSource, Does.Not.Contain("ShouldInjectFsr3Pass"));
+            Assert.That(passRecorderSource, Does.Not.Contain("GetOrCreateInjectedFsr3Pass"));
+            Assert.That(passRecorderSource, Does.Not.Contain("RecordInjectedFsr3Pass"));
+            Assert.That(passRecorderSource, Does.Contain("pass is IRenderGraphRecordingPass graphRecordingPass"));
+            Assert.That(antialiasingPassSource, Does.Contain("TryRecordFsr3Pass"));
+            Assert.That(antialiasingPassSource, Does.Contain("m_Fsr3Pass.Record"));
+            Assert.That(antialiasingPassSource, Does.Contain("AntialiasingOutput"));
+            Assert.That(antialiasingPassSource, Does.Contain("m_ResetHistory"));
+            Assert.That(resolverSource, Does.Contain("FSR3UpscalerUtility.ResolveRenderSize"));
+            Assert.That(resolverSource, Does.Contain("hasAntialiasingPass"));
             Assert.That(cameraEditorSource, Does.Contain("ShouldShowFSR3Settings()"));
             Assert.That(cameraEditorSource, Does.Contain("m_SerializedCamera.antialiasing.intValue == (int)VividAntialiasingMode.FidelityFXSuperResolution3"));
+            Assert.That(cameraEditorSource, Does.Contain("AntialiasingPass node"));
         }
 
         [Test]

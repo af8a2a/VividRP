@@ -109,7 +109,6 @@ namespace VividRP.Runtime
         public static readonly ProfilerMarker PrepareFrameSubsystemVirtualTextureMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VirtualTextureSystem");
         public static readonly ProfilerMarker PrepareAllMarker = new("VividRP.RenderPass.PrepareAll");
         public static readonly ProfilerMarker RecordRenderGraphMarker = new("VividRP.RenderPass.RecordRenderGraph");
-        public static readonly ProfilerMarker InjectedStpRecordGraphMarker = new("VividRP.RenderPass.RecordGraph/STP (Injected)");
 
         public static RenderPassProfilerMarkers GetMarkers(
             IRenderPass pass,

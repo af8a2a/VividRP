@@ -27,17 +27,23 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void SourceFiles_RegisterAndInjectStp()
+        public void SourceFiles_RegisterAndRecordStpThroughExplicitAntialiasingPass()
         {
             var globalSettingsSource = File.ReadAllText(
                 GetPackageFilePath("Runtime", "RenderPipeline", "VividRenderPipelineGlobalSettings.cs"));
             var passRecorderSource = File.ReadAllText(
                 GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.Execution.cs"));
+            var antialiasingPassSource = File.ReadAllText(
+                GetPackageFilePath("Runtime", "RenderPass", "Core", "AntialiasingPass.cs"));
+            var resolverSource = File.ReadAllText(
+                GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "VividAntialiasingData.cs"));
 
             Assert.That(globalSettingsSource, Does.Contain("UnityEngine.Rendering.STP+RuntimeResources"));
-            Assert.That(passRecorderSource, Does.Contain("private static bool ShouldInjectStpPass()"));
-            Assert.That(passRecorderSource, Does.Contain("STP.Execute(renderGraph, ref config)"));
-            Assert.That(passRecorderSource, Does.Contain("STP.Jit16(Time.frameCount)"));
+            Assert.That(passRecorderSource, Does.Not.Contain("ShouldInjectStpPass"));
+            Assert.That(passRecorderSource, Does.Not.Contain("RecordInjectedStpPass"));
+            Assert.That(antialiasingPassSource, Does.Contain("TryRecordStpPass"));
+            Assert.That(antialiasingPassSource, Does.Contain("STP.Execute(context.RenderGraph, ref config)"));
+            Assert.That(resolverSource, Does.Contain("STP.Jit16(Time.frameCount)"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

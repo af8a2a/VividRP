@@ -126,7 +126,8 @@ namespace VividRP.Runtime.RenderPass.Core
             RenderGraphTexture sourceTexture,
             RenderGraphTexture depthTexture,
             RenderGraphTexture motionTexture,
-            Dictionary<RenderGraphTexture, TextureHandle> textureCache)
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache,
+            bool forceResetHistory = false)
         {
             using var recordGraphScope = s_RecordGraphMarker.Auto();
             if (renderGraph == null
@@ -159,7 +160,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 outputSize,
                 quality,
                 cameraData.frameIndex,
-                temporalData != null && temporalData.IsFirstFrame);
+                forceResetHistory || (temporalData != null && temporalData.IsFirstFrame));
 
             var outputDescriptor = CreateOutputDescriptor(sourceTexture.desc, outputSize);
             var outputHandle = renderGraph.CreateTexture(outputDescriptor);
@@ -284,6 +285,38 @@ namespace VividRP.Runtime.RenderPass.Core
             };
             textureCache[outputTexture] = outputHandle;
             return outputTexture;
+        }
+
+        public bool Record(
+            RenderGraph renderGraph,
+            VividCameraData cameraData,
+            CameraTemporalData temporalData,
+            RenderGraphTexture sourceTexture,
+            RenderGraphTexture depthTexture,
+            RenderGraphTexture motionTexture,
+            RenderGraphTexture outputTexture,
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache,
+            bool forceResetHistory = false)
+        {
+            if (outputTexture == null)
+                return false;
+
+            var recordedOutput = Record(
+                renderGraph,
+                cameraData,
+                temporalData,
+                sourceTexture,
+                depthTexture,
+                motionTexture,
+                textureCache,
+                forceResetHistory);
+            if (recordedOutput == null)
+                return false;
+
+            outputTexture.desc = recordedOutput.desc;
+            outputTexture.innerHandle = recordedOutput.innerHandle;
+            textureCache[outputTexture] = recordedOutput.innerHandle;
+            return true;
         }
 
         public void Dispose()

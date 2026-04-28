@@ -340,6 +340,105 @@ namespace VividRP.Runtime
         void RestoreSourceTexture();
     }
 
+    public interface IRenderGraphRecordingPass
+    {
+        void RecordGraph(RenderGraphRecordingContext context);
+    }
+
+    public sealed class RenderGraphRecordingContext
+    {
+        internal RenderGraphRecordingContext(
+            RenderGraph renderGraph,
+            ContextContainer frameData,
+            RenderGraphPassDefinition passDefinition,
+            bool enableAsyncCompute,
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache,
+            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
+            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
+            Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache)
+        {
+            RenderGraph = renderGraph;
+            FrameData = frameData;
+            PassDefinition = passDefinition;
+            EnableAsyncCompute = enableAsyncCompute;
+            TextureCache = textureCache;
+            BufferCache = bufferCache;
+            RenderListCache = renderListCache;
+            AccelerationStructureCache = accelerationStructureCache;
+        }
+
+        public RenderGraph RenderGraph { get; }
+
+        public ContextContainer FrameData { get; }
+
+        internal RenderGraphPassDefinition PassDefinition { get; }
+
+        internal bool EnableAsyncCompute { get; }
+
+        internal Dictionary<RenderGraphTexture, TextureHandle> TextureCache { get; }
+
+        internal Dictionary<RenderGraphBuffer, BufferHandle> BufferCache { get; }
+
+        internal Dictionary<RenderGraphRenderList, RendererListHandle> RenderListCache { get; }
+
+        internal Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> AccelerationStructureCache { get; }
+
+        internal TextureHandle GetOrCreateTextureHandle(RenderGraphTexture texture)
+        {
+            if (RenderGraph == null || texture == null)
+                return default;
+
+            return PassRecorder.GetOrCreateTextureHandle(RenderGraph, texture, TextureCache);
+        }
+
+        internal void RegisterTextureHandle(RenderGraphTexture texture, TextureHandle handle)
+        {
+            if (texture == null || !handle.IsValid())
+                return;
+
+            texture.innerHandle = handle;
+            TextureCache[texture] = handle;
+        }
+
+        internal void RecordComputePass(
+            ComputePass pass,
+            PassResource resource,
+            RenderGraphPassDefinition passDefinition = null,
+            string passName = null)
+        {
+            PassRecorder.RecordComputePass(
+                RenderGraph,
+                pass,
+                resource,
+                passDefinition,
+                EnableAsyncCompute,
+                TextureCache,
+                BufferCache,
+                RenderListCache,
+                AccelerationStructureCache,
+                passName);
+        }
+
+        internal void RecordUnsafePass(
+            UnsafePass pass,
+            PassResource resource,
+            RenderGraphPassDefinition passDefinition = null,
+            string passName = null)
+        {
+            PassRecorder.RecordUnsafePass(
+                RenderGraph,
+                pass,
+                resource,
+                passDefinition,
+                EnableAsyncCompute,
+                TextureCache,
+                BufferCache,
+                RenderListCache,
+                AccelerationStructureCache,
+                passName);
+        }
+    }
+
     internal static class RenderGraphPassExecutionUtility
     {
         internal static bool SupportsAsyncCompute(Type passType)

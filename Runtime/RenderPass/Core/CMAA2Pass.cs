@@ -122,6 +122,18 @@ namespace VividRP.Runtime.RenderPass.Core
             return m_OutputTexture;
         }
 
+        internal void SetOutput(RenderGraphTexture outputTexture)
+        {
+            if (outputTexture == null)
+                throw new ArgumentNullException(nameof(outputTexture));
+
+            if (ReferenceEquals(m_OutputTexture, outputTexture))
+                return;
+
+            m_OutputTexture = outputTexture;
+            m_IsPassResourceLayoutDirty = true;
+        }
+
         public override void Create()
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();

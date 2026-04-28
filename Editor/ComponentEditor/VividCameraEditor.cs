@@ -19,6 +19,8 @@ namespace VividRP.Editor
         private static readonly GUIContent s_DitheringLabel = EditorGUIUtility.TrTextContent("Dithering");
         private static readonly GUIContent s_VolumeLayerMaskLabel = EditorGUIUtility.TrTextContent("Volume Layer Mask");
         private static readonly GUIContent s_AntialiasingLabel = EditorGUIUtility.TrTextContent("Anti-Aliasing");
+        private const string AntialiasingPassRequiredMessage =
+            "Camera anti-aliasing requires an AntialiasingPass node connected in the active RenderGraph.";
         private static readonly GUIContent s_TAALabel = EditorGUIUtility.TrTextContent("Temporal Anti-Aliasing");
         private static readonly GUIContent s_TAAJitterSpreadLabel = EditorGUIUtility.TrTextContent("Jitter Spread");
         private static readonly GUIContent s_TAASampleCountLabel = EditorGUIUtility.TrTextContent("Sample Count");
@@ -118,6 +120,8 @@ namespace VividRP.Editor
                 EditorGUILayout.PropertyField(m_SerializedCamera.dithering, s_DitheringLabel);
                 EditorGUILayout.PropertyField(m_SerializedCamera.volumeLayerMask, s_VolumeLayerMaskLabel);
                 EditorGUILayout.PropertyField(m_SerializedCamera.antialiasing, s_AntialiasingLabel);
+                if (ShouldShowAntialiasingPassRequiredMessage())
+                    EditorGUILayout.HelpBox(AntialiasingPassRequiredMessage, MessageType.Info);
 
 #if !DLSS_PLUGIN_INTEGRATE
                 if (ShouldShowDlssDisabledWarning())
@@ -176,6 +180,13 @@ namespace VividRP.Editor
 
             return m_SerializedCamera.antialiasing.hasMultipleDifferentValues
                 || m_SerializedCamera.antialiasing.intValue == (int)VividAntialiasingMode.TemporalAntiAliasing;
+        }
+
+        private bool ShouldShowAntialiasingPassRequiredMessage()
+        {
+            return m_SerializedCamera.antialiasing != null
+                && !m_SerializedCamera.antialiasing.hasMultipleDifferentValues
+                && m_SerializedCamera.antialiasing.intValue != (int)VividAntialiasingMode.None;
         }
 
 #if !DLSS_PLUGIN_INTEGRATE

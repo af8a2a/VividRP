@@ -22,9 +22,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string ComputeMaterialKernelName = "ComputeVolumetricMaterialRenderingParameters";
 
         private static readonly int ShaderVariablesVolumetricId = Shader.PropertyToID("ShaderVariablesVolumetric");
-        private static readonly int CameraDepthId = Shader.PropertyToID("_CameraDepth");
         private static readonly int VBufferDensityId = Shader.PropertyToID("_VBufferDensity");
-        private static readonly int LocalVolumetricFogsId = Shader.PropertyToID("_LocalVolumetricFogs");
         private static readonly int VolumeBoundsId = Shader.PropertyToID("_VolumeBounds");
         private static readonly int VolumetricVisibleGlobalIndicesBufferId = Shader.PropertyToID("_VolumetricVisibleGlobalIndicesBuffer");
         private static readonly int VolumetricGlobalIndirectArgsBufferId = Shader.PropertyToID("_VolumetricGlobalIndirectArgsBuffer");
@@ -43,9 +41,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(Name = "FogVolumeVFXRenderList", Access = AccessFlags.Read)]
         private readonly RenderGraphRenderList m_FogVolumeVFXRenderList;
-
-        [RenderGraphResource(Name = "LocalVolumetricFogs", Access = AccessFlags.Read)]
-        private readonly RenderGraphBuffer m_LocalVolumetricFogBuffer;
 
         [RenderGraphResource(Name = "VolumeBounds", Access = AccessFlags.Read)]
         private readonly RenderGraphBuffer m_VolumeBounds;
@@ -100,7 +95,6 @@ namespace VividRP.Runtime.RenderPass.Core
                     ExcludeObjectMotionVectors = false
                 }
             };
-            m_LocalVolumetricFogBuffer = VividLocalVolumetricFogManager.buffer;
             m_VolumeBounds = VividLocalVolumetricFogManager.volumeBoundsBuffer;
             m_VisibleGlobalIndices = VividLocalVolumetricFogManager.visibleGlobalIndicesBuffer;
             m_GlobalIndirectArgs = VividLocalVolumetricFogManager.globalIndirectArgsBuffer;
@@ -170,7 +164,7 @@ namespace VividRP.Runtime.RenderPass.Core
             volumetricData.settings = m_Settings;
             volumetricData.shaderVariables = m_ShaderVariables;
             volumetricData.VBufferDensity = m_VBufferDensity;
-            volumetricData.localVolumetricFogBuffer = m_LocalVolumetricFogBuffer;
+            volumetricData.localVolumetricFogBuffer = null;
             volumetricData.localVolumetricFogCount = m_LocalFogCount;
             volumetricData.enabled = m_Settings.Enabled;
             volumetricData.gaussianFilteringEnabled = m_Settings.GaussianFilteringEnabled;
@@ -189,15 +183,8 @@ namespace VividRP.Runtime.RenderPass.Core
             if (!m_Settings.Enabled)
                 return;
 
-            var localFogBuffer = VividLocalVolumetricFogManager.buffer.ImportedGraphicsBuffer;
-            if (localFogBuffer != null && localFogBuffer.IsValid())
-            {
-                cmd.SetComputeTextureParam(m_DensityShader, m_VoxelizeKernel, CameraDepthId, m_CameraDepth.innerHandle);
-                cmd.SetComputeTextureParam(m_DensityShader, m_VoxelizeKernel, VBufferDensityId, m_VBufferDensity.innerHandle);
-                cmd.SetComputeBufferParam(m_DensityShader, m_VoxelizeKernel, LocalVolumetricFogsId, localFogBuffer);
-                cmd.DispatchCompute(m_DensityShader, m_VoxelizeKernel, m_DispatchX, m_DispatchY, m_DispatchZ);
-            }
-
+            cmd.SetComputeTextureParam(m_DensityShader, m_VoxelizeKernel, VBufferDensityId, m_VBufferDensity.innerHandle);
+            cmd.DispatchCompute(m_DensityShader, m_VoxelizeKernel, m_DispatchX, m_DispatchY, 1);
             RecordFogVolumeAndVFXVoxelization(cmd);
         }
 

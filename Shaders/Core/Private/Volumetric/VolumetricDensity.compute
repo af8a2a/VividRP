@@ -4,208 +4,7 @@
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
 
-Texture2D<float> _CameraDepth;
 RWTexture3D<float4> _VBufferDensity;
-Texture3D<float4> _LocalVolumetricFogMask0;
-Texture3D<float4> _LocalVolumetricFogMask1;
-Texture3D<float4> _LocalVolumetricFogMask2;
-Texture3D<float4> _LocalVolumetricFogMask3;
-Texture3D<float4> _LocalVolumetricFogMask4;
-Texture3D<float4> _LocalVolumetricFogMask5;
-Texture3D<float4> _LocalVolumetricFogMask6;
-Texture3D<float4> _LocalVolumetricFogMask7;
-
-#define LOCALVOLUMETRICFOGBLENDINGMODE_OVERWRITE 0
-#define LOCALVOLUMETRICFOGBLENDINGMODE_ADDITIVE 1
-#define LOCALVOLUMETRICFOGBLENDINGMODE_MULTIPLY 2
-#define LOCALVOLUMETRICFOGBLENDINGMODE_MIN 3
-#define LOCALVOLUMETRICFOGBLENDINGMODE_MAX 4
-#define LOCALVOLUMETRICFOGFALLOFFMODE_EXPONENTIAL 1
-
-struct VividLocalVolumetricFogEngineData
-{
-    float4 worldToLocalRow0;
-    float4 worldToLocalRow1;
-    float4 worldToLocalRow2;
-    float4 scatteringExtinction;
-    float4 positiveFade;
-    float4 negativeFade;
-    float4 distanceFade;
-    float4 parameters;
-    float4 textureScaleOffset0;
-    float4 textureScaleOffset1;
-};
-
-StructuredBuffer<VividLocalVolumetricFogEngineData> _LocalVolumetricFogs;
-
-float3 TransformWorldToLocal(VividLocalVolumetricFogEngineData fog, float3 positionWS)
-{
-    float4 position = float4(positionWS, 1.0);
-    return float3(
-        dot(fog.worldToLocalRow0, position),
-        dot(fog.worldToLocalRow1, position),
-        dot(fog.worldToLocalRow2, position));
-}
-
-float Remap01Vivid(float value, float rcpLength, float startTimesRcpLength)
-{
-    return saturate(value * rcpLength - startTimesRcpLength);
-}
-
-float Remap10Vivid(float value, float rcpLength, float endTimesRcpLength)
-{
-    return saturate(endTimesRcpLength - value * rcpLength);
-}
-
-float ApplyExponentialFadeFactor(float fade, bool exponential, bool multiplyBlendMode)
-{
-    if (exponential)
-    {
-        fade = multiplyBlendMode
-            ? 1.0 - pow(abs(fade - 1.0), 2.2)
-            : pow(fade, 2.2);
-    }
-
-    return fade;
-}
-
-float ComputeVolumeFadeFactor(
-    float3 coordNDC,
-    float distanceToCamera,
-    float3 rcpPosFaceFade,
-    float3 rcpNegFaceFade,
-    bool invertFade,
-    float rcpDistFadeLen,
-    float endTimesRcpDistFadeLen,
-    bool exponentialFalloff,
-    bool multiplyBlendMode)
-{
-    float3 posF = float3(
-        Remap10Vivid(coordNDC.x, rcpPosFaceFade.x, rcpPosFaceFade.x),
-        Remap10Vivid(coordNDC.y, rcpPosFaceFade.y, rcpPosFaceFade.y),
-        Remap10Vivid(coordNDC.z, rcpPosFaceFade.z, rcpPosFaceFade.z));
-    float3 negF = float3(
-        Remap01Vivid(coordNDC.x, rcpNegFaceFade.x, 0.0),
-        Remap01Vivid(coordNDC.y, rcpNegFaceFade.y, 0.0),
-        Remap01Vivid(coordNDC.z, rcpNegFaceFade.z, 0.0));
-    float distanceFade = Remap10Vivid(distanceToCamera, rcpDistFadeLen, endTimesRcpDistFadeLen);
-    float fade = posF.x * posF.y * posF.z * negF.x * negF.y * negF.z;
-
-    fade = ApplyExponentialFadeFactor(fade, exponentialFalloff, multiplyBlendMode);
-    fade = distanceFade * (invertFade ? 1.0 - fade : fade);
-    return saturate(fade);
-}
-
-float SelectLocalFogMaskChannel(float4 maskSample, float maskMode)
-{
-    return maskMode > 1.5 ? maskSample.a : maskSample.r;
-}
-
-float SampleLocalFogMask(VividLocalVolumetricFogEngineData fog, float3 localPosition)
-{
-    float maskMode = fog.parameters.w;
-    if (fog.parameters.w <= 0.5 || fog.textureScaleOffset0.w <= 0.5)
-        return 1.0;
-
-    uint maskSlot = (uint)max(fog.textureScaleOffset0.w - 1.0, 0.0);
-    float3 maskUv = saturate((localPosition + 0.5) * max(fog.textureScaleOffset0.xyz, 1e-4) + fog.textureScaleOffset1.xyz);
-
-    switch (maskSlot)
-    {
-        case 0u: return SelectLocalFogMaskChannel(_LocalVolumetricFogMask0.SampleLevel(sampler_LinearClamp, maskUv, 0), maskMode);
-        case 1u: return SelectLocalFogMaskChannel(_LocalVolumetricFogMask1.SampleLevel(sampler_LinearClamp, maskUv, 0), maskMode);
-        case 2u: return SelectLocalFogMaskChannel(_LocalVolumetricFogMask2.SampleLevel(sampler_LinearClamp, maskUv, 0), maskMode);
-        case 3u: return SelectLocalFogMaskChannel(_LocalVolumetricFogMask3.SampleLevel(sampler_LinearClamp, maskUv, 0), maskMode);
-        case 4u: return SelectLocalFogMaskChannel(_LocalVolumetricFogMask4.SampleLevel(sampler_LinearClamp, maskUv, 0), maskMode);
-        case 5u: return SelectLocalFogMaskChannel(_LocalVolumetricFogMask5.SampleLevel(sampler_LinearClamp, maskUv, 0), maskMode);
-        case 6u: return SelectLocalFogMaskChannel(_LocalVolumetricFogMask6.SampleLevel(sampler_LinearClamp, maskUv, 0), maskMode);
-        case 7u: return SelectLocalFogMaskChannel(_LocalVolumetricFogMask7.SampleLevel(sampler_LinearClamp, maskUv, 0), maskMode);
-        default: return 1.0;
-    }
-}
-
-float EvaluateLocalFogFalloff(VividLocalVolumetricFogEngineData fog, float3 localPosition, float3 positionWS)
-{
-    if (any(abs(localPosition) > 0.5))
-        return 0.0;
-
-    uint blendingMode = (uint)round(fog.parameters.y);
-    bool exponentialFalloff = (uint)round(fog.textureScaleOffset1.w) == LOCALVOLUMETRICFOGFALLOFFMODE_EXPONENTIAL;
-    bool multiplyBlendMode = blendingMode == LOCALVOLUMETRICFOGBLENDINGMODE_MULTIPLY;
-    float3 coordNDC = saturate(localPosition + 0.5);
-    float distanceToCamera = distance(positionWS, _WorldSpaceCameraPos);
-    float fade = ComputeVolumeFadeFactor(
-        coordNDC,
-        distanceToCamera,
-        fog.positiveFade.xyz,
-        fog.negativeFade.xyz,
-        fog.parameters.z > 0.5,
-        fog.distanceFade.x,
-        fog.distanceFade.y,
-        exponentialFalloff,
-        multiplyBlendMode);
-    fade *= SampleLocalFogMask(fog, localPosition);
-
-    return saturate(fade);
-}
-
-void ApplyLocalFogBlend(
-    uint blendingMode,
-    float fade,
-    float3 localScattering,
-    float localExtinction,
-    inout float3 scattering,
-    inout float extinction)
-{
-    if (blendingMode == LOCALVOLUMETRICFOGBLENDINGMODE_OVERWRITE)
-    {
-        scattering = localScattering * fade;
-        extinction = localExtinction * fade;
-    }
-    else if (blendingMode == LOCALVOLUMETRICFOGBLENDINGMODE_MULTIPLY)
-    {
-        scattering *= max(float3(0.0, 0.0, 0.0), lerp(float3(1.0, 1.0, 1.0), localScattering, fade));
-        extinction *= max(0.0, lerp(1.0, localExtinction, fade));
-    }
-    else if (blendingMode == LOCALVOLUMETRICFOGBLENDINGMODE_MIN)
-    {
-        scattering = min(scattering, localScattering * fade);
-        extinction = min(extinction, localExtinction * fade);
-    }
-    else if (blendingMode == LOCALVOLUMETRICFOGBLENDINGMODE_MAX)
-    {
-        scattering = max(scattering, localScattering * fade);
-        extinction = max(extinction, localExtinction * fade);
-    }
-    else
-    {
-        scattering += localScattering * fade;
-        extinction += localExtinction * fade;
-    }
-}
-
-void AccumulateLocalFog(float3 positionWS, inout float3 scattering, inout float extinction)
-{
-    uint localFogCount = min((uint)_VBufferLocalFogCount, 64u);
-    [loop]
-    for (uint fogIndex = 0; fogIndex < localFogCount; fogIndex++)
-    {
-        VividLocalVolumetricFogEngineData fog = _LocalVolumetricFogs[fogIndex];
-        float3 localPosition = TransformWorldToLocal(fog, positionWS);
-        float falloff = EvaluateLocalFogFalloff(fog, localPosition, positionWS);
-        if (falloff <= 0.0)
-            continue;
-
-        uint blendingMode = (uint)round(fog.parameters.y);
-        ApplyLocalFogBlend(
-            blendingMode,
-            falloff,
-            fog.scatteringExtinction.rgb,
-            fog.scatteringExtinction.a,
-            scattering,
-            extinction);
-    }
-}
 
 float ComputeHeightFogMultiplier(float height, float baseHeight, float rcpScaleHeight)
 {
@@ -230,18 +29,22 @@ void ClearVBufferDensity(uint3 dispatchThreadId : SV_DispatchThreadID)
     _VBufferDensity[dispatchThreadId] = 0.0;
 }
 
-[numthreads(8, 8, 4)]
+[numthreads(8, 8, 1)]
 void VoxelizeVBufferDensity(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    if (!IsInsideVBuffer(dispatchThreadId))
+    uint2 voxelCoord = dispatchThreadId.xy;
+    if (voxelCoord.x >= (uint)_VBufferWidth || voxelCoord.y >= (uint)_VBufferHeight)
         return;
 
-    float3 positionWS = GetVBufferVoxelWorldPosition(dispatchThreadId);
-    float heightFog = EvaluateHeightFog(positionWS);
-    float3 scattering = _VBufferFogScattering.rgb * heightFog;
-    float extinction = _VBufferFogScattering.a * heightFog;
+    [loop]
+    for (uint slice = 0; slice < (uint)_VBufferSliceCount; slice++)
+    {
+        uint3 voxelCoord3D = uint3(voxelCoord, slice);
+        float3 positionWS = GetVBufferVoxelWorldPosition(voxelCoord3D);
+        float heightFog = EvaluateHeightFog(positionWS);
+        float3 scattering = _VBufferFogScattering.rgb * heightFog;
+        float extinction = _VBufferFogScattering.a * heightFog;
 
-    AccumulateLocalFog(positionWS, scattering, extinction);
-
-    _VBufferDensity[dispatchThreadId] = float4(max(scattering, 0.0), max(extinction, 0.0));
+        _VBufferDensity[voxelCoord3D] = float4(max(scattering, 0.0), max(extinction, 0.0));
+    }
 }

@@ -142,6 +142,11 @@ namespace VividRP.Runtime
         private static readonly int FogVolumeFogDistanceId = Shader.PropertyToID("_FogVolumeFogDistanceProperty");
         private static readonly int FogVolumeBlendModeId = Shader.PropertyToID("_FogVolumeBlendMode");
         private static readonly int FogVolumeMaskId = Shader.PropertyToID("_Mask");
+        private static readonly int VolumetricMaskId = Shader.PropertyToID("_VolumetricMask");
+        private static readonly int VolumetricMaskModeId = Shader.PropertyToID("_VolumetricMaskMode");
+        private static readonly int VolumetricAlphaOnlyTextureId = Shader.PropertyToID("_VolumetricAlphaOnlyTexture");
+        private static readonly int VolumetricTilingId = Shader.PropertyToID("_VolumetricTiling");
+        private static readonly int VolumetricScrollId = Shader.PropertyToID("_VolumetricScroll");
         private static readonly int VolumetricFogGlobalIndexId = Shader.PropertyToID("_VolumetricFogGlobalIndex");
         private static readonly int VolumetricMaterialDataId = Shader.PropertyToID("_VolumetricMaterialData");
         private static readonly int VolumetricMaterialObbRightId = Shader.PropertyToID("_VolumetricMaterialObbRight");
@@ -253,6 +258,7 @@ namespace VividRP.Runtime
         }
 
         internal int priority => m_Parameters.priority;
+        internal VividLocalVolumetricFogBlendingMode blendingMode => GetEffectiveParameters().blendingMode;
 
         internal bool UsesVolumetricMaterialVoxelization()
         {
@@ -272,12 +278,13 @@ namespace VividRP.Runtime
             int globalIndex,
             GraphicsBuffer materialDataBuffer,
             GraphicsBuffer indexBuffer,
-            GraphicsBuffer indirectArgsBuffer)
+            GraphicsBuffer indirectArgsBuffer,
+            Material defaultVoxelizationMaterial,
+            Texture3D defaultMaskTexture)
         {
             var parameters = GetEffectiveParameters();
-            var material = parameters.materialMask;
+            var material = ResolveVoxelizationMaterial(parameters, defaultVoxelizationMaterial);
             if (material == null
-                || material.FindPass(FogVolumeVoxelizePassName) < 0
                 || materialDataBuffer == null
                 || !materialDataBuffer.IsValid()
                 || indexBuffer == null
@@ -292,6 +299,11 @@ namespace VividRP.Runtime
             m_RenderingProperties.Clear();
             m_RenderingProperties.SetInteger(VolumetricFogGlobalIndexId, globalIndex);
             m_RenderingProperties.SetBuffer(VolumetricMaterialDataId, materialDataBuffer);
+            m_RenderingProperties.SetColor(FogVolumeSingleScatteringAlbedoId, parameters.albedo);
+            m_RenderingProperties.SetFloat(FogVolumeFogDistanceId, parameters.meanFreePath);
+            m_RenderingProperties.SetFloat(FogVolumeBlendModeId, (float)parameters.blendingMode);
+            ConfigureTextureMaskProperties(parameters, defaultMaskTexture);
+            VividLocalVolumetricFogManager.SetupFogVolumeBlendMode(material, parameters.blendingMode);
 
             var bounds = ComputeVolumetricMaterialBounds();
             var extents = new Vector3(bounds.extentX, bounds.extentY, bounds.extentZ);
@@ -339,20 +351,70 @@ namespace VividRP.Runtime
                 globalIndex);
         }
 
+        private static Material ResolveVoxelizationMaterial(
+            in VividLocalVolumetricFogArtistParameters parameters,
+            Material defaultVoxelizationMaterial)
+        {
+            if (parameters.maskMode == VividLocalVolumetricFogMaskMode.Material
+                && parameters.materialMask != null
+                && parameters.materialMask.FindPass(FogVolumeVoxelizePassName) >= 0)
+            {
+                return parameters.materialMask;
+            }
+
+            return defaultVoxelizationMaterial != null
+                && defaultVoxelizationMaterial.FindPass(FogVolumeVoxelizePassName) >= 0
+                ? defaultVoxelizationMaterial
+                : null;
+        }
+
+        private void ConfigureTextureMaskProperties(
+            in VividLocalVolumetricFogArtistParameters parameters,
+            Texture3D defaultMaskTexture)
+        {
+            var maskMode = 0.0f;
+            var alphaOnly = false;
+            var mask = defaultMaskTexture;
+            if (TryGetVolumeMask(parameters, out var volumeMask, out alphaOnly))
+            {
+                mask = volumeMask;
+                maskMode = 1.0f;
+            }
+
+            var animatedTextureOffset = parameters.textureOffset
+                - parameters.textureScrollingSpeed * Time.time;
+
+            if (mask != null)
+                m_RenderingProperties.SetTexture(VolumetricMaskId, mask);
+
+            m_RenderingProperties.SetFloat(VolumetricMaskModeId, maskMode);
+            m_RenderingProperties.SetFloat(VolumetricAlphaOnlyTextureId, alphaOnly ? 1.0f : 0.0f);
+            m_RenderingProperties.SetVector(VolumetricTilingId, parameters.textureTiling);
+            m_RenderingProperties.SetVector(VolumetricScrollId, animatedTextureOffset);
+        }
+
         internal bool TryGetVolumeMask(out Texture3D volumeMask, out bool alphaOnly)
+        {
+            return TryGetVolumeMask(m_Parameters, out volumeMask, out alphaOnly);
+        }
+
+        private static bool TryGetVolumeMask(
+            in VividLocalVolumetricFogArtistParameters parameters,
+            out Texture3D volumeMask,
+            out bool alphaOnly)
         {
             alphaOnly = false;
             volumeMask = null;
 
-            if (m_Parameters.maskMode == VividLocalVolumetricFogMaskMode.Texture)
+            if (parameters.maskMode == VividLocalVolumetricFogMaskMode.Texture)
             {
-                volumeMask = m_Parameters.volumeMask;
+                volumeMask = parameters.volumeMask;
             }
-            else if (m_Parameters.maskMode == VividLocalVolumetricFogMaskMode.Material
-                && m_Parameters.materialMask != null
-                && m_Parameters.materialMask.HasProperty(FogVolumeMaskId))
+            else if (parameters.maskMode == VividLocalVolumetricFogMaskMode.Material
+                && parameters.materialMask != null
+                && parameters.materialMask.HasProperty(FogVolumeMaskId))
             {
-                volumeMask = m_Parameters.materialMask.GetTexture(FogVolumeMaskId) as Texture3D;
+                volumeMask = parameters.materialMask.GetTexture(FogVolumeMaskId) as Texture3D;
             }
 
             if (volumeMask == null)

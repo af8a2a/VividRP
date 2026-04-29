@@ -101,6 +101,11 @@ namespace VividRP.Runtime
             s_RegisteredFogs.Add(fog);
         }
 
+        public static bool Contains(VividLocalVolumetricFog fog)
+        {
+            return fog != null && s_RegisteredFogs.Contains(fog);
+        }
+
         public static void Unregister(VividLocalVolumetricFog fog)
         {
             if (fog == null)

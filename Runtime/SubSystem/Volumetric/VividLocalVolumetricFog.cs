@@ -1,5 +1,9 @@
 using System;
 using System.Runtime.InteropServices;
+#if UNITY_EDITOR
+using UnityEditor;
+using UnityEditor.SceneManagement;
+#endif
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -575,11 +579,24 @@ namespace VividRP.Runtime
             m_Parameters.Validate();
             ValidateBoundProxy();
             VividLocalVolumetricFogManager.Register(this);
+
+#if UNITY_EDITOR
+            SceneVisibilityManager.visibilityChanged -= UpdateLocalVolumetricFogVisibility;
+            SceneVisibilityManager.visibilityChanged += UpdateLocalVolumetricFogVisibility;
+            SceneView.duringSceneGui -= UpdateLocalVolumetricFogVisibilityPrefabStage;
+            SceneView.duringSceneGui += UpdateLocalVolumetricFogVisibilityPrefabStage;
+            UpdateLocalVolumetricFogVisibility();
+#endif
         }
 
         private void OnDisable()
         {
             VividLocalVolumetricFogManager.Unregister(this);
+
+#if UNITY_EDITOR
+            SceneVisibilityManager.visibilityChanged -= UpdateLocalVolumetricFogVisibility;
+            SceneView.duringSceneGui -= UpdateLocalVolumetricFogVisibilityPrefabStage;
+#endif
         }
 
         private void OnValidate()
@@ -587,6 +604,46 @@ namespace VividRP.Runtime
             m_Parameters.Validate();
             ValidateBoundProxy();
         }
+
+#if UNITY_EDITOR
+        private void UpdateLocalVolumetricFogVisibility()
+        {
+            bool isVisible = !SceneVisibilityManager.instance.IsHidden(gameObject);
+            UpdateLocalVolumetricFogVisibility(isVisible);
+        }
+
+        private void UpdateLocalVolumetricFogVisibilityPrefabStage(SceneView sceneView)
+        {
+            var stage = PrefabStageUtility.GetCurrentPrefabStage();
+            if (stage == null)
+                return;
+
+            bool isVisible = true;
+            bool isInPrefabStage = gameObject.scene == stage.scene;
+
+            if (!isInPrefabStage && stage.mode == PrefabStage.Mode.InIsolation)
+                isVisible = false;
+
+            if (!isInPrefabStage && CoreUtils.IsSceneViewPrefabStageContextHidden())
+                isVisible = false;
+
+            UpdateLocalVolumetricFogVisibility(isVisible);
+        }
+
+        internal void UpdateLocalVolumetricFogVisibility(bool isVisible)
+        {
+            if (!isActiveAndEnabled || !isVisible)
+            {
+                if (VividLocalVolumetricFogManager.Contains(this))
+                    VividLocalVolumetricFogManager.Unregister(this);
+
+                return;
+            }
+
+            if (!VividLocalVolumetricFogManager.Contains(this))
+                VividLocalVolumetricFogManager.Register(this);
+        }
+#endif
 
         public bool TryCreateBoundProxyWorldData(out BoundProxyWorldData worldData)
         {

@@ -522,6 +522,36 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("[AddComponentMenu(\"Rendering/Local Volumetric Fog\")]"));
             Assert.That(source, Does.Contain("[Icon(\"Packages/com.unity.render-pipelines.core/Editor/Icons/Processed/LocalVolumetricFog Icon.asset\")]"));
+            Assert.That(source, Does.Contain("SceneVisibilityManager.visibilityChanged"));
+            Assert.That(source, Does.Contain("SceneView.duringSceneGui"));
+            Assert.That(source, Does.Contain("PrefabStageUtility.GetCurrentPrefabStage"));
+            Assert.That(source, Does.Contain("CoreUtils.IsSceneViewPrefabStageContextHidden"));
+            Assert.That(source, Does.Contain("UpdateLocalVolumetricFogVisibility(bool isVisible)"));
+        }
+
+        [Test]
+        public void LocalVolumetricFogManager_VisibilityStateControlsRegistration()
+        {
+            var gameObject = new GameObject("Local Volumetric Fog Visibility");
+            var fog = gameObject.AddComponent<VividLocalVolumetricFog>();
+
+            try
+            {
+                Assert.That(VividLocalVolumetricFogManager.Contains(fog), Is.True);
+
+                fog.UpdateLocalVolumetricFogVisibility(false);
+                Assert.That(VividLocalVolumetricFogManager.Contains(fog), Is.False);
+
+                fog.UpdateLocalVolumetricFogVisibility(true);
+                Assert.That(VividLocalVolumetricFogManager.Contains(fog), Is.True);
+
+                fog.enabled = false;
+                Assert.That(VividLocalVolumetricFogManager.Contains(fog), Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
         }
 
         [Test]

@@ -88,7 +88,7 @@ namespace VividRP.Runtime
                 {
                     scriptableRenderContext = context,
                     commandBuffer = cmdBuffer,
-                    currentFrameIndex = Time.frameCount,
+                    currentFrameIndex = PassRecorder.GetFrameData().Get<VividCameraData>()?.frameIndex ?? Time.frameCount,
                     executionId = camera.GetEntityId(),
                     generateDebugData = camera.cameraType != CameraType.Preview && !camera.isProcessingRenderRequest,
                 };
@@ -109,6 +109,7 @@ namespace VividRP.Runtime
                 PassRecorder.CommitFrame(graphAsset);
                 context.SetupCameraProperties(camera);
                 FrameContextSystem.ExecutePostRender(PassRecorder.GetFrameData(), cmdBuffer);
+                RequestEditorTemporalRepaint();
 
                 context.ExecuteCommandBuffer(cmdBuffer);
                 cmdBuffer.Clear();
@@ -234,6 +235,21 @@ namespace VividRP.Runtime
                 context.DrawGizmos(camera, GizmoSubset.PreImageEffects);
 
             context.DrawGizmos(camera, GizmoSubset.PostImageEffects);
+#endif
+        }
+
+        private static void RequestEditorTemporalRepaint()
+        {
+#if UNITY_EDITOR
+            if (Application.isPlaying)
+                return;
+
+            var antialiasingData = PassRecorder.GetFrameData().Get<VividAntialiasingData>();
+            if (antialiasingData == null || !antialiasingData.usesTemporalJitter)
+                return;
+
+            UnityEditor.EditorApplication.QueuePlayerLoopUpdate();
+            UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
 #endif
         }
 

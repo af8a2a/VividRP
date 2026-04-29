@@ -96,6 +96,7 @@ namespace VividRP.Runtime
         private static bool s_IsCompiled;
         private static bool s_RenderedPreImageEffectGizmosInGraph;
         private static StopNaNPass s_InjectedStopNaNPass;
+        private static int s_EditModeFrameIndex;
 
 #if UNITY_EDITOR
         private sealed class RenderGizmosPassData
@@ -125,6 +126,7 @@ namespace VividRP.Runtime
             var gpuDrivenFrameData = s_FrameData.GetOrCreate<VividGPUDrivenFrameData>();
             var gpuDrivenDecalData = s_FrameData.GetOrCreate<VividGPUDrivenDecalData>();
             var lightData = s_FrameData.GetOrCreate<VividLightData>();
+            var frameIndex = ResolveFrameIndex();
             var additionalCameraData = camera.GetComponent<VividAdditionalCameraData>();
             if (additionalCameraData == null && camera.cameraType == CameraType.Game)
                 additionalCameraData = camera.GetVividAdditionalCameraData();
@@ -134,7 +136,7 @@ namespace VividRP.Runtime
                 additionalCameraData,
                 HasAntialiasingPass(graphAsset),
                 antialiasingData);
-            VividAntialiasingRuntimeUtility.ApplyJitter(camera, additionalCameraData, antialiasingData);
+            VividAntialiasingRuntimeUtility.ApplyJitter(camera, additionalCameraData, antialiasingData, frameIndex);
 
             if (additionalCameraData != null)
                 additionalCameraData.UpdateCameraMatrices(true);
@@ -149,12 +151,28 @@ namespace VividRP.Runtime
             var actualSize = ResolveActualCameraSize(camera, antialiasingData);
             cameraData.actualWidth = actualSize.x;
             cameraData.actualHeight = actualSize.y;
-            cameraData.frameIndex = Time.frameCount;
+            cameraData.frameIndex = frameIndex;
             renderingData.cullingResults = cullingResults;
             renderingData.context = context;
             gpuDrivenFrameData.Reset();
             gpuDrivenDecalData.Reset();
             lightData.Update(cullingResults);
+        }
+
+        private static int ResolveFrameIndex()
+        {
+            if (Application.isPlaying)
+                return Time.frameCount;
+
+            unchecked
+            {
+                s_EditModeFrameIndex++;
+            }
+
+            if (s_EditModeFrameIndex < 0)
+                s_EditModeFrameIndex = 1;
+
+            return s_EditModeFrameIndex;
         }
 
         private static Vector2Int ResolveActualCameraSize(Camera camera, VividAntialiasingData antialiasingData)
@@ -280,6 +298,7 @@ namespace VividRP.Runtime
             VividAntialiasingRuntimeUtility.Clear();
             FrameContextSystem.Clear();
             VividRayTracingAccelerationStructureStatsRegistry.Clear();
+            s_EditModeFrameIndex = 0;
             s_CurrentGraphAsset = null;
             s_RuntimePassDefinitions.Clear();
             s_CurrentImportVersion = 0;

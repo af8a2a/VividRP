@@ -67,6 +67,8 @@ namespace VividRP.Runtime.RenderPass.Core
             RenderGraphTexture depthTexture,
             RenderGraphTexture motionTexture,
             RenderGraphTexture outputTexture,
+            Vector2Int requestedRenderSize,
+            Vector2Int requestedOutputSize,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
             bool forceResetHistory = false)
         {
@@ -85,8 +87,8 @@ namespace VividRP.Runtime.RenderPass.Core
             if (!TryResolveShaderSet(resources, out var shaders))
                 return false;
 
-            var renderSize = ResolveRenderSize(sourceTexture, cameraData);
-            var outputSize = ResolveOutputSize(outputTexture, cameraData, renderSize);
+            var renderSize = ResolveRenderSize(requestedRenderSize, sourceTexture, cameraData);
+            var outputSize = ResolveOutputSize(requestedOutputSize, outputTexture, cameraData, renderSize);
             if (renderSize.x <= 0 || renderSize.y <= 0 || outputSize.x <= 0 || outputSize.y <= 0)
                 return false;
 
@@ -112,6 +114,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var outputDescriptor = CreateOutputDescriptor(sourceTexture.desc, outputSize);
             var outputHandle = renderGraph.CreateTexture(outputDescriptor);
             var handles = cameraState.Import(renderGraph);
+            var currentJitter = ResolveCurrentJitter(cameraData, temporalData);
+            var previousJitter = ResolvePreviousJitter(cameraState, temporalData);
 
             var dilatedMotion = renderGraph.CreateTexture(
                 CreateColorDescriptor("TSR_DilatedMotion", renderSize.x, renderSize.y, GraphicsFormat.R16G16_SFloat));
@@ -155,8 +159,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 passData.RenderSize = renderSize;
                 passData.OutputSize = outputSize;
                 passData.PreviousOutputSize = cameraState.PreviousOutputSize;
-                passData.Jitter = additionalData != null ? additionalData.tsrJitterOffset : Vector2.zero;
-                passData.PreviousJitter = cameraState.PreviousJitter;
+                passData.Jitter = currentJitter;
+                passData.PreviousJitter = previousJitter;
                 passData.HasHistory = !resetHistory;
                 passData.ResetHistory = resetHistory;
                 passData.HistorySampleCount = Mathf.Clamp(historySampleCount, 8, 32);
@@ -192,7 +196,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cameraState.CommitFrame(
                 renderSize,
                 outputSize,
-                additionalData != null ? additionalData.tsrJitterOffset : Vector2.zero);
+                currentJitter);
 
             outputTexture.desc = outputDescriptor;
             outputTexture.innerHandle = outputHandle;
@@ -353,9 +357,30 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static void SetCommonConstants(CommandBuffer cmd, ComputeShader shader, PassData data)
         {
-            cmd.SetComputeIntParams(shader, RenderSizeId, data.RenderSize.x, data.RenderSize.y);
-            cmd.SetComputeIntParams(shader, OutputSizeId, data.OutputSize.x, data.OutputSize.y);
-            cmd.SetComputeIntParams(shader, PreviousOutputSizeId, data.PreviousOutputSize.x, data.PreviousOutputSize.y);
+            cmd.SetComputeVectorParam(
+                shader,
+                RenderSizeId,
+                new Vector4(
+                    data.RenderSize.x,
+                    data.RenderSize.y,
+                    1.0f / Mathf.Max(1, data.RenderSize.x),
+                    1.0f / Mathf.Max(1, data.RenderSize.y)));
+            cmd.SetComputeVectorParam(
+                shader,
+                OutputSizeId,
+                new Vector4(
+                    data.OutputSize.x,
+                    data.OutputSize.y,
+                    1.0f / Mathf.Max(1, data.OutputSize.x),
+                    1.0f / Mathf.Max(1, data.OutputSize.y)));
+            cmd.SetComputeVectorParam(
+                shader,
+                PreviousOutputSizeId,
+                new Vector4(
+                    data.PreviousOutputSize.x,
+                    data.PreviousOutputSize.y,
+                    1.0f / Mathf.Max(1, data.PreviousOutputSize.x),
+                    1.0f / Mathf.Max(1, data.PreviousOutputSize.y)));
             cmd.SetComputeVectorParam(
                 shader,
                 JitterId,
@@ -371,8 +396,14 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeVectorParam(shader, TSRRejectionParamsId, new Vector4(0.003f, 16.0f, 0.28f, 0.35f));
         }
 
-        private static Vector2Int ResolveRenderSize(RenderGraphTexture sourceTexture, VividCameraData cameraData)
+        private static Vector2Int ResolveRenderSize(
+            Vector2Int requestedRenderSize,
+            RenderGraphTexture sourceTexture,
+            VividCameraData cameraData)
         {
+            if (requestedRenderSize.x > 0 && requestedRenderSize.y > 0)
+                return requestedRenderSize;
+
             var descriptor = sourceTexture?.desc;
             if (descriptor != null && descriptor.Width > 0 && descriptor.Height > 0)
                 return new Vector2Int(descriptor.Width, descriptor.Height);
@@ -383,10 +414,14 @@ namespace VividRP.Runtime.RenderPass.Core
         }
 
         private static Vector2Int ResolveOutputSize(
+            Vector2Int requestedOutputSize,
             RenderGraphTexture outputTexture,
             VividCameraData cameraData,
             Vector2Int renderSize)
         {
+            if (requestedOutputSize.x > 0 && requestedOutputSize.y > 0)
+                return requestedOutputSize;
+
             var descriptor = outputTexture?.desc;
             if (descriptor != null && descriptor.Width > 0 && descriptor.Height > 0)
                 return new Vector2Int(descriptor.Width, descriptor.Height);
@@ -457,6 +492,26 @@ namespace VividRP.Runtime.RenderPass.Core
         private static int DivRoundUp(int value, int divisor)
         {
             return (Mathf.Max(1, value) + divisor - 1) / divisor;
+        }
+
+        private static Vector2 ResolveCurrentJitter(VividCameraData cameraData, CameraTemporalData temporalData)
+        {
+            if (temporalData != null)
+                return temporalData.Jitter;
+
+            return cameraData != null
+                ? cameraData.GetJitter()
+                : Vector2.zero;
+        }
+
+        private static Vector2 ResolvePreviousJitter(CameraState cameraState, CameraTemporalData temporalData)
+        {
+            if (temporalData != null)
+                return temporalData.PreviousJitter;
+
+            return cameraState != null
+                ? cameraState.PreviousJitter
+                : Vector2.zero;
         }
 
         internal readonly struct ImportedHandles

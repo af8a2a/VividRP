@@ -43,7 +43,7 @@ namespace VividRP.Editor.Tests
             Assert.That(passRecorderSource, Does.Not.Contain("RecordInjectedStpPass"));
             Assert.That(antialiasingPassSource, Does.Contain("TryRecordStpPass"));
             Assert.That(antialiasingPassSource, Does.Contain("STP.Execute(context.RenderGraph, ref config)"));
-            Assert.That(resolverSource, Does.Contain("STP.Jit16(Time.frameCount)"));
+            Assert.That(resolverSource, Does.Contain("STP.Jit16(ResolveTemporalFrameIndex(frameIndex))"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

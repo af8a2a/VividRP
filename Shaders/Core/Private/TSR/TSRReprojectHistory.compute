@@ -9,21 +9,23 @@ Texture2D<float2> _HistoryMeta;
 RWTexture2D<float4> _ReprojectedHistoryColor;
 RWTexture2D<float2> _ReprojectedHistoryMeta;
 
-int2 _RenderSize;
-int2 _OutputSize;
-int2 _PreviousOutputSize;
+float4 _RenderSize;
+float4 _OutputSize;
+float4 _PreviousOutputSize;
 float4 _Jitter;
 float4 _TSRParams;
 
 [numthreads(8, 8, 1)]
 void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
+    int2 renderSize = int2(_RenderSize.xy);
+    int2 outputSize = int2(_OutputSize.xy);
     int2 pixelCoord = int2(dispatchThreadId.xy);
-    if (any(pixelCoord >= _OutputSize))
+    if (any(pixelCoord >= outputSize))
         return;
 
-    float2 uv = TSR_OutputUV(pixelCoord, _OutputSize);
-    int2 renderCoord = TSR_OutputToRenderCoord(pixelCoord, _OutputSize, _RenderSize);
+    float2 uv = TSR_OutputUV(pixelCoord, outputSize);
+    int2 renderCoord = TSR_OutputToRenderCoord(pixelCoord, outputSize, renderSize);
     float2 motion = _DilatedMotion[renderCoord];
     float2 jitterDelta = (_Jitter.zw - _Jitter.xy) * 0.5;
 #if UNITY_UV_STARTS_AT_TOP
@@ -40,7 +42,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    float2 previousSize = max(float2(_PreviousOutputSize), float2(1.0, 1.0));
+    float2 previousSize = max(_PreviousOutputSize.xy, float2(1.0, 1.0));
     _ReprojectedHistoryColor[pixelCoord] = TSR_SampleCatmullRom(_HistoryColor, historyUV, previousSize);
     _ReprojectedHistoryMeta[pixelCoord] = _HistoryMeta.SampleLevel(sampler_LinearClamp, historyUV, 0);
 }

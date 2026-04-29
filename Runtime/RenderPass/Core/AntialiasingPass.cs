@@ -371,6 +371,10 @@ namespace VividRP.Runtime.RenderPass.Core
             if (camera == null)
                 return false;
 
+            var antialiasingData = context.FrameData.Get<VividAntialiasingData>();
+            var renderSize = antialiasingData?.renderSize ?? new Vector2Int(m_Width, m_Height);
+            var outputSize = antialiasingData?.outputSize ?? ResolveOutputDimensions(cameraData, antialiasingData);
+
             return m_TsrPass.Record(
                 context.RenderGraph,
                 cameraData,
@@ -379,6 +383,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 CameraDepth,
                 MotionVectors,
                 AntialiasingOutput,
+                renderSize,
+                outputSize,
                 context.TextureCache,
                 m_ResetHistory);
         }

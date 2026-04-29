@@ -69,6 +69,8 @@ namespace VividRP.Editor.Tests
             Assert.That(antialiasingPassSource, Does.Contain("TryRecordTsrPass"));
             Assert.That(antialiasingPassSource, Does.Contain("m_TsrPass.Record"));
             Assert.That(antialiasingPassSource, Does.Contain("HasTemporalInputs()"));
+            Assert.That(antialiasingPassSource, Does.Contain("antialiasingData?.renderSize"));
+            Assert.That(antialiasingPassSource, Does.Contain("antialiasingData?.outputSize"));
             Assert.That(resolverSource, Does.Contain("TSRUpscalerPass.IsSupported"));
             Assert.That(resolverSource, Does.Contain("TSRUpscalerUtility.ResolveRenderSize"));
             Assert.That(resolverSource, Does.Contain("ApplyTsrJitter"));
@@ -76,6 +78,50 @@ namespace VividRP.Editor.Tests
             Assert.That(serializedCameraSource, Does.Contain("m_TSRHistorySampleCount"));
             Assert.That(cameraEditorSource, Does.Contain("ShouldShowTSRSettings()"));
             Assert.That(cameraEditorSource, Does.Contain("m_SerializedCamera.antialiasing.intValue == (int)VividAntialiasingMode.TemporalSuperResolution"));
+        }
+
+        [Test]
+        public void SourceFiles_AdvanceTemporalFramesOutsidePlayMode()
+        {
+            var passRecorderSource = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "RenderGraph",
+                "PassRecorder.Execution.cs"));
+            var resolverSource = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "RenderGraph",
+                "FrameContext",
+                "VividAntialiasingData.cs"));
+            var pipelineSource = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "RenderPipeline",
+                "VividRenderPipeline.cs"));
+
+            Assert.That(passRecorderSource, Does.Contain("s_EditModeFrameIndex"));
+            Assert.That(passRecorderSource, Does.Contain("if (Application.isPlaying)"));
+            Assert.That(passRecorderSource, Does.Contain("s_EditModeFrameIndex++"));
+            Assert.That(passRecorderSource, Does.Contain("VividAntialiasingRuntimeUtility.ApplyJitter(camera, additionalCameraData, antialiasingData, frameIndex)"));
+            Assert.That(resolverSource, Does.Contain("ResolveTemporalFrameIndex(frameIndex)"));
+            Assert.That(pipelineSource, Does.Contain("currentFrameIndex = PassRecorder.GetFrameData().Get<VividCameraData>()?.frameIndex"));
+            Assert.That(pipelineSource, Does.Contain("UnityEditor.EditorApplication.QueuePlayerLoopUpdate()"));
+            Assert.That(pipelineSource, Does.Contain("UnityEditorInternal.InternalEditorUtility.RepaintAllViews()"));
+        }
+
+        [Test]
+        public void ShaderFiles_KeepStaticNativeAaEdgesAccumulating()
+        {
+            var rejectSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "TSR",
+                "TSRRejectShading.compute"));
+
+            Assert.That(rejectSource, Does.Contain("hasSignificantMotion"));
+            Assert.That(rejectSource, Does.Contain("depthRejected = hasSignificantMotion"));
+            Assert.That(rejectSource, Does.Contain("colorRejected = hasSignificantMotion"));
+            Assert.That(rejectSource, Does.Contain("&& !depthRejected"));
+            Assert.That(rejectSource, Does.Contain("&& !colorRejected"));
         }
 
         [Test]
@@ -98,6 +144,12 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("GraphicsFormat.R8_UNorm"));
             Assert.That(passSource, Does.Contain("m_HistoryColor"));
             Assert.That(passSource, Does.Contain("m_HistoryMeta"));
+            Assert.That(passSource, Does.Contain("requestedRenderSize"));
+            Assert.That(passSource, Does.Contain("requestedOutputSize"));
+            Assert.That(passSource, Does.Contain("ResolveCurrentJitter(cameraData, temporalData)"));
+            Assert.That(passSource, Does.Contain("ResolvePreviousJitter(cameraState, temporalData)"));
+            Assert.That(passSource, Does.Not.Contain("passData.Jitter = additionalData != null ? additionalData.tsrJitterOffset"));
+            Assert.That(passSource, Does.Contain("new Vector4("));
             Assert.That(passSource, Does.Contain("m_RenderSize != renderSize"));
             Assert.That(passSource, Does.Contain("m_OutputSize != outputSize"));
             Assert.That(passSource, Does.Contain("m_Quality != quality"));

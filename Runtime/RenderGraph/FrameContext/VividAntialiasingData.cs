@@ -60,7 +60,8 @@ namespace VividRP.Runtime
         internal static void ApplyJitter(
             Camera camera,
             VividAdditionalCameraData additionalData,
-            VividAntialiasingData data)
+            VividAntialiasingData data,
+            int frameIndex)
         {
             if (camera == null)
                 return;
@@ -83,20 +84,20 @@ namespace VividRP.Runtime
             switch (effectiveMode)
             {
                 case VividAntialiasingMode.TemporalAntiAliasing:
-                    ApplyTaaJitter(camera, additionalData, nonJitteredProj);
+                    ApplyTaaJitter(camera, additionalData, nonJitteredProj, frameIndex);
                     return;
                 case VividAntialiasingMode.SpatialTemporalPostProcessing:
-                    ApplyStpJitter(camera, nonJitteredProj);
+                    ApplyStpJitter(camera, nonJitteredProj, frameIndex);
                     return;
                 case VividAntialiasingMode.FidelityFXSuperResolution3:
-                    ApplyFsr3Jitter(camera, additionalData, data, nonJitteredProj);
+                    ApplyFsr3Jitter(camera, additionalData, data, nonJitteredProj, frameIndex);
                     return;
                 case VividAntialiasingMode.TemporalSuperResolution:
-                    ApplyTsrJitter(camera, additionalData, data, nonJitteredProj);
+                    ApplyTsrJitter(camera, additionalData, data, nonJitteredProj, frameIndex);
                     return;
 #if DLSS_PLUGIN_INTEGRATE
                 case VividAntialiasingMode.DeepLearningSuperSampling:
-                    ApplyDlssJitter(camera, additionalData, nonJitteredProj);
+                    ApplyDlssJitter(camera, additionalData, nonJitteredProj, frameIndex);
                     return;
 #endif
                 default:
@@ -209,7 +210,8 @@ namespace VividRP.Runtime
         private static void ApplyTaaJitter(
             Camera camera,
             VividAdditionalCameraData additionalData,
-            Matrix4x4 nonJitteredProj)
+            Matrix4x4 nonJitteredProj,
+            int frameIndex)
         {
             var taaSettings = TAASettings.FromCamera(additionalData);
             if (!taaSettings.Enabled)
@@ -226,7 +228,7 @@ namespace VividRP.Runtime
                 return;
             }
 
-            var jitter = HaltonJitter.Get(Time.frameCount, taaSettings.SampleCount);
+            var jitter = HaltonJitter.Get(ResolveTemporalFrameIndex(frameIndex), taaSettings.SampleCount);
             jitter *= taaSettings.JitterSpread;
 
             var jitterMatrix = Matrix4x4.identity;
@@ -239,7 +241,8 @@ namespace VividRP.Runtime
             Camera camera,
             VividAdditionalCameraData additionalData,
             VividAntialiasingData data,
-            Matrix4x4 nonJitteredProj)
+            Matrix4x4 nonJitteredProj,
+            int frameIndex)
         {
             if (additionalData == null || data == null)
             {
@@ -257,7 +260,7 @@ namespace VividRP.Runtime
             }
 
             var phaseCount = FSR3UpscalerUtility.GetJitterPhaseCount(renderSize.x, outputSize.x);
-            var jitterOffset = FSR3UpscalerUtility.GetJitterOffset(Time.frameCount, phaseCount);
+            var jitterOffset = FSR3UpscalerUtility.GetJitterOffset(ResolveTemporalFrameIndex(frameIndex), phaseCount);
             additionalData.SetFsr3JitterData(jitterOffset, phaseCount);
 
             var jitterMatrix = Matrix4x4.identity;
@@ -270,7 +273,8 @@ namespace VividRP.Runtime
             Camera camera,
             VividAdditionalCameraData additionalData,
             VividAntialiasingData data,
-            Matrix4x4 nonJitteredProj)
+            Matrix4x4 nonJitteredProj,
+            int frameIndex)
         {
             if (additionalData == null || data == null)
             {
@@ -288,7 +292,7 @@ namespace VividRP.Runtime
             }
 
             var phaseCount = TSRUpscalerUtility.GetJitterPhaseCount(renderSize.x, outputSize.x);
-            var jitterOffset = TSRUpscalerUtility.GetJitterOffset(Time.frameCount, phaseCount);
+            var jitterOffset = TSRUpscalerUtility.GetJitterOffset(ResolveTemporalFrameIndex(frameIndex), phaseCount);
             additionalData.SetTsrJitterData(jitterOffset, phaseCount);
 
             var jitterMatrix = Matrix4x4.identity;
@@ -297,7 +301,7 @@ namespace VividRP.Runtime
             CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
         }
 
-        private static void ApplyStpJitter(Camera camera, Matrix4x4 nonJitteredProj)
+        private static void ApplyStpJitter(Camera camera, Matrix4x4 nonJitteredProj, int frameIndex)
         {
             var pixelWidth = camera.pixelWidth;
             var pixelHeight = camera.pixelHeight;
@@ -307,7 +311,7 @@ namespace VividRP.Runtime
                 return;
             }
 
-            var jitter = -STP.Jit16(Time.frameCount);
+            var jitter = -STP.Jit16(ResolveTemporalFrameIndex(frameIndex));
             var jitterMatrix = Matrix4x4.identity;
             jitterMatrix.m03 = jitter.x * 2.0f / pixelWidth;
             jitterMatrix.m13 = jitter.y * 2.0f / pixelHeight;
@@ -318,7 +322,8 @@ namespace VividRP.Runtime
         private static void ApplyDlssJitter(
             Camera camera,
             VividAdditionalCameraData additionalData,
-            Matrix4x4 nonJitteredProj)
+            Matrix4x4 nonJitteredProj,
+            int frameIndex)
         {
             var pixelWidth = camera.pixelWidth;
             var pixelHeight = camera.pixelHeight;
@@ -334,7 +339,7 @@ namespace VividRP.Runtime
             var jitterSpread = additionalData != null
                 ? additionalData.taaJitterSpread
                 : 1.0f;
-            var jitter = HaltonJitter.Get(Time.frameCount, sampleCount) * jitterSpread;
+            var jitter = HaltonJitter.Get(ResolveTemporalFrameIndex(frameIndex), sampleCount) * jitterSpread;
             var jitterMatrix = Matrix4x4.identity;
             jitterMatrix.m03 = jitter.x * 2.0f / pixelWidth;
             jitterMatrix.m13 = jitter.y * 2.0f / pixelHeight;
@@ -342,6 +347,11 @@ namespace VividRP.Runtime
             CameraProjectionMatrixUtility.SetProjectionMatrices(camera, jitterMatrix * nonJitteredProj, nonJitteredProj);
         }
 #endif
+
+        private static int ResolveTemporalFrameIndex(int frameIndex)
+        {
+            return frameIndex >= 0 ? frameIndex : Time.frameCount;
+        }
 
         private readonly struct AntialiasingHistoryKey : System.IEquatable<AntialiasingHistoryKey>
         {

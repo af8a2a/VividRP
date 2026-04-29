@@ -479,6 +479,43 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void VividLocalVolumetricFogEditor_BlendVolumeUtility_ComputesUniformAndAdvancedBoxes()
+        {
+            var gameObject = new GameObject("Local Volumetric Fog Blend Tool");
+            var fog = gameObject.AddComponent<VividLocalVolumetricFog>();
+            var shape = new BoundProxyShape
+            {
+                shape = BoundProxyShapeType.Box,
+                center = new Vector3(1.0f, 2.0f, 3.0f),
+                size = new Vector3(10.0f, 20.0f, 40.0f)
+            };
+            SetLocalFogBoundProxy(fog, shape);
+
+            try
+            {
+                var parameters = VividLocalVolumetricFogArtistParameters.CreateDefault();
+                parameters.m_EditorAdvancedFade = false;
+                parameters.m_EditorUniformFade = 2.0f;
+                SetLocalFogRawParameters(fog, parameters);
+
+                AssertVector3(VividLocalVolumetricFogEditor.CenterBlendLocalPosition(fog), shape.center);
+                AssertVector3(VividLocalVolumetricFogEditor.BlendSize(fog), new Vector3(6.0f, 16.0f, 36.0f));
+
+                parameters.m_EditorAdvancedFade = true;
+                parameters.m_EditorPositiveFade = new Vector3(0.1f, 0.2f, 0.25f);
+                parameters.m_EditorNegativeFade = new Vector3(0.3f, 0.1f, 0.25f);
+                SetLocalFogRawParameters(fog, parameters);
+
+                AssertVector3(VividLocalVolumetricFogEditor.CenterBlendLocalPosition(fog), new Vector3(2.0f, 1.0f, 3.0f));
+                AssertVector3(VividLocalVolumetricFogEditor.BlendSize(fog), new Vector3(6.0f, 14.0f, 20.0f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
         public void LocalVolumetricFog_RuntimeAttributesMatchHdrpObject()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Volumetric", "VividLocalVolumetricFog.cs"));
@@ -1047,7 +1084,17 @@ namespace VividRP.Editor.Tests
         {
             var editorSource = File.ReadAllText(GetPackageFilePath("Editor", "ComponentEditor", "VividLocalVolumetricFogEditor.cs"));
 
-            Assert.That(editorSource, Does.Contain("BoundProxyEditorUtility.DrawSceneHandles"));
+            Assert.That(editorSource, Does.Contain("k_EditShape = EditMode.SceneViewEditMode.ReflectionProbeBox"));
+            Assert.That(editorSource, Does.Contain("k_EditBlend = EditMode.SceneViewEditMode.GridBox"));
+            Assert.That(editorSource, Does.Contain("VividLocalVolumetricFogModifyInfluenceVolumeTool"));
+            Assert.That(editorSource, Does.Contain("VividLocalVolumetricFogModifyBaseShapeTool"));
+            Assert.That(editorSource, Does.Contain("[EditorTool(Description, typeof(VividLocalVolumetricFog)"));
+            Assert.That(editorSource, Does.Contain("PreMatCube"));
+            Assert.That(editorSource, Does.Contain("EditCollider"));
+            Assert.That(editorSource, Does.Contain("BoundProxyEditorUtility.TryDrawSceneHandles"));
+            Assert.That(editorSource, Does.Contain("DrawBlendSceneHandle"));
+            Assert.That(editorSource, Does.Contain("CenterBlendLocalPosition"));
+            Assert.That(editorSource, Does.Contain("BlendSize"));
             Assert.That(editorSource, Does.Contain("allowCenterHandle: true"));
             Assert.That(editorSource, Does.Contain("DrawGizmo"));
             Assert.That(editorSource, Does.Contain("Single Scattering Albedo"));

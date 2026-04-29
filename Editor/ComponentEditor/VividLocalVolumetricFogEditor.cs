@@ -1,4 +1,7 @@
 using UnityEditor;
+using UnityEditor.EditorTools;
+using UnityEditor.Rendering;
+using UnityEditorInternal;
 using UnityEngine;
 using VividRP.Runtime;
 
@@ -9,6 +12,24 @@ namespace VividRP.Editor
     internal sealed class VividLocalVolumetricFogEditor : UnityEditor.Editor
     {
         private static readonly Color s_GizmoColor = new(0.23f, 0.73f, 0.67f, 0.08f);
+        private static readonly Color[] s_BaseHandleColors =
+        {
+            new Color(0.95f, 0.48f, 0.34f, 1.0f),
+            new Color(0.31f, 0.78f, 0.41f, 1.0f),
+            new Color(0.28f, 0.58f, 0.96f, 1.0f),
+            new Color(0.95f, 0.48f, 0.34f, 1.0f),
+            new Color(0.31f, 0.78f, 0.41f, 1.0f),
+            new Color(0.28f, 0.58f, 0.96f, 1.0f),
+        };
+        private static readonly Color[] s_BlendHandleColors =
+        {
+            new Color(0.98f, 0.76f, 0.26f, 1.0f),
+            new Color(0.98f, 0.76f, 0.26f, 1.0f),
+            new Color(0.98f, 0.76f, 0.26f, 1.0f),
+            new Color(0.98f, 0.76f, 0.26f, 1.0f),
+            new Color(0.98f, 0.76f, 0.26f, 1.0f),
+            new Color(0.98f, 0.76f, 0.26f, 1.0f),
+        };
         private static readonly GUIContent s_VolumeHeader = EditorGUIUtility.TrTextContent("Volume");
         private static readonly GUIContent s_MaskTextureHeader = EditorGUIUtility.TrTextContent("Mask Texture");
         private static readonly GUIContent s_MaskMaterialHeader = EditorGUIUtility.TrTextContent("Mask Material");
@@ -51,6 +72,12 @@ namespace VividRP.Editor
         private static readonly GUIContent s_MaterialMaskLabel =
             EditorGUIUtility.TrTextContent("Material", "Material used to mask color and density. It must contain a FogVolumeVoxelize pass.");
         private const string InvalidMaterialMessage = "Material not compatible. Please use a material with a FogVolumeVoxelize pass.";
+        internal const EditMode.SceneViewEditMode k_EditShape = EditMode.SceneViewEditMode.ReflectionProbeBox;
+        internal const EditMode.SceneViewEditMode k_EditBlend = EditMode.SceneViewEditMode.GridBox;
+        private const float k_MinimumSize = 0.001f;
+
+        private static HierarchicalBox s_ShapeBox;
+        private static HierarchicalBox s_BlendBox;
 
         private SerializedProperty m_BoundProxy;
         private SerializedProperty m_Parameters;
@@ -80,6 +107,33 @@ namespace VividRP.Editor
         private static bool s_ShowVolume = true;
         private static bool s_ShowMaskTexture = true;
         private static bool s_ShowMaskMaterial = true;
+
+        private static HierarchicalBox ShapeBox
+        {
+            get
+            {
+                if (s_ShapeBox == null || s_ShapeBox.Equals(null))
+                {
+                    s_ShapeBox = new HierarchicalBox(s_GizmoColor, s_BaseHandleColors)
+                    {
+                        monoHandle = false,
+                    };
+                }
+
+                return s_ShapeBox;
+            }
+        }
+
+        private static HierarchicalBox BlendBox
+        {
+            get
+            {
+                if (s_BlendBox == null || s_BlendBox.Equals(null))
+                    s_BlendBox = new HierarchicalBox(s_GizmoColor, s_BlendHandleColors, parent: ShapeBox);
+
+                return s_BlendBox;
+            }
+        }
 
         private void OnEnable()
         {
@@ -145,24 +199,122 @@ namespace VividRP.Editor
             ForceBoxShape(shape);
             so.ApplyModifiedProperties();
 
-            BoundProxyEditorUtility.DrawSceneHandles(
-                so,
-                shape,
-                fog.transform,
-                undoLabel: "Edit Local Volumetric Fog Bounds",
-                allowCenterHandle: true);
+            if (EditMode.editMode == k_EditBlend)
+            {
+                DrawBlendSceneHandle(so, shape, fog);
+                return;
+            }
+
+            DrawBaseShapeSceneHandle(so, shape, fog);
         }
 
         [DrawGizmo(GizmoType.Selected | GizmoType.Active)]
         private static void DrawGizmosSelected(VividLocalVolumetricFog fog, GizmoType gizmoType)
         {
-            BoundProxyEditorUtility.DrawGizmo(fog.transform, fog.BoundProxyShape, filled: true, s_GizmoColor);
+            DrawSelectedVolumeGizmos(fog);
         }
 
         [DrawGizmo(GizmoType.NonSelected | GizmoType.Pickable)]
         private static void DrawGizmosNonSelected(VividLocalVolumetricFog fog, GizmoType gizmoType)
         {
             BoundProxyEditorUtility.DrawGizmo(fog.transform, fog.BoundProxyShape, filled: false, s_GizmoColor * 0.5f);
+        }
+
+        private static void DrawBaseShapeSceneHandle(
+            SerializedObject serializedObject,
+            SerializedBoundProxyShape serializedShape,
+            VividLocalVolumetricFog fog)
+        {
+            serializedObject.Update();
+            BoundProxyShape currentShape = BoundProxyEditorUtility.GetShapeValue(serializedShape);
+            Vector3 previousSize = Max(currentShape.GetSanitizedSize(), k_MinimumSize);
+            if (!BoundProxyEditorUtility.TryDrawSceneHandles(
+                    currentShape,
+                    fog.transform,
+                    out BoundProxyShape updatedShape,
+                    allowCenterHandle: true))
+            {
+                return;
+            }
+
+            serializedObject.Update();
+            Undo.RecordObjects(serializedObject.targetObjects, "Edit Local Volumetric Fog Bounds");
+            serializedShape.center.vector3Value = updatedShape.center;
+            serializedShape.size.vector3Value = updatedShape.size;
+            serializedShape.radius.floatValue = updatedShape.radius;
+
+            SerializedProperty parameters = serializedObject.FindProperty("m_Parameters");
+            ApplySizeChangeToEditorFade(parameters, previousSize, Max(updatedShape.GetSanitizedSize(), k_MinimumSize));
+            ApplySerializedEditorFadeToRuntimeProperties(parameters, Max(updatedShape.GetSanitizedSize(), k_MinimumSize));
+            serializedObject.ApplyModifiedProperties();
+        }
+
+        private static void DrawBlendSceneHandle(
+            SerializedObject serializedObject,
+            SerializedBoundProxyShape serializedShape,
+            VividLocalVolumetricFog fog)
+        {
+            serializedObject.Update();
+            BoundProxyShape shape = BoundProxyEditorUtility.GetShapeValue(serializedShape);
+            Vector3 shapeSize = Max(shape.GetSanitizedSize(), k_MinimumSize);
+            SerializedProperty parameters = serializedObject.FindProperty("m_Parameters");
+            SerializedProperty editorAdvancedFade = FindParameter(parameters, "m_EditorAdvancedFade");
+
+            using (new Handles.DrawingScope(Matrix4x4.TRS(fog.transform.position, fog.transform.rotation, Vector3.one)))
+            {
+                ShapeBox.center = shape.center;
+                ShapeBox.size = shapeSize;
+                ShapeBox.SetBaseColor(s_GizmoColor);
+                ShapeBox.DrawHull(false);
+
+                Color blendColor = fog.parameters.albedo;
+                blendColor.a = 8.0f / 255.0f;
+                BlendBox.baseColor = blendColor;
+                BlendBox.monoHandle = editorAdvancedFade == null || !editorAdvancedFade.boolValue;
+                BlendBox.center = CenterBlendLocalPosition(shape, ReadParameters(parameters));
+                BlendBox.size = BlendSize(shape, ReadParameters(parameters));
+
+                EditorGUI.BeginChangeCheck();
+                BlendBox.DrawHandle();
+                if (!EditorGUI.EndChangeCheck())
+                    return;
+            }
+
+            serializedObject.Update();
+            Undo.RecordObjects(serializedObject.targetObjects, "Edit Local Volumetric Fog Blend");
+            parameters = serializedObject.FindProperty("m_Parameters");
+            editorAdvancedFade = FindParameter(parameters, "m_EditorAdvancedFade");
+
+            if (editorAdvancedFade != null && editorAdvancedFade.boolValue)
+                ApplyAdvancedBlendHandle(parameters, shape, BlendBox.center, BlendBox.size);
+            else
+                ApplyUniformBlendHandle(parameters, shapeSize, BlendBox.size);
+
+            ApplySerializedEditorFadeToRuntimeProperties(parameters, shapeSize);
+            serializedObject.ApplyModifiedProperties();
+        }
+
+        private static void DrawSelectedVolumeGizmos(VividLocalVolumetricFog fog)
+        {
+            if (fog == null || fog.transform == null)
+                return;
+
+            BoundProxyShape shape = fog.BoundProxyShape;
+            Vector3 shapeSize = Max(shape.GetSanitizedSize(), k_MinimumSize);
+            using (new Handles.DrawingScope(Matrix4x4.TRS(fog.transform.position, fog.transform.rotation, Vector3.one)))
+            {
+                Color blendColor = fog.parameters.albedo;
+                blendColor.a = 8.0f / 255.0f;
+                BlendBox.baseColor = blendColor;
+                BlendBox.center = CenterBlendLocalPosition(shape, fog.parameters);
+                BlendBox.size = BlendSize(shape, fog.parameters);
+                BlendBox.DrawHull(EditMode.editMode == k_EditBlend);
+
+                ShapeBox.center = shape.center;
+                ShapeBox.size = shapeSize;
+                ShapeBox.SetBaseColor(s_GizmoColor);
+                ShapeBox.DrawHull(EditMode.editMode == k_EditShape);
+            }
         }
 
         private void DrawPrimarySettings()
@@ -341,6 +493,219 @@ namespace VividRP.Editor
             m_NegativeFade.vector3Value = normalizedFade;
         }
 
+        internal static Vector3 CenterBlendLocalPosition(VividLocalVolumetricFog fog)
+        {
+            if (fog == null)
+                return Vector3.zero;
+
+            return CenterBlendLocalPosition(fog.BoundProxyShape, fog.parameters);
+        }
+
+        internal static Vector3 BlendSize(VividLocalVolumetricFog fog)
+        {
+            if (fog == null)
+                return Vector3.zero;
+
+            return BlendSize(fog.BoundProxyShape, fog.parameters);
+        }
+
+        internal static Vector3 CenterBlendLocalPosition(
+            BoundProxyShape shape,
+            VividLocalVolumetricFogArtistParameters parameters)
+        {
+            shape.Sanitize();
+            Vector3 shapeSize = Max(shape.GetSanitizedSize(), k_MinimumSize);
+            if (!parameters.m_EditorAdvancedFade)
+                return shape.center;
+
+            Vector3 positiveBlend = Scale(parameters.m_EditorPositiveFade, shapeSize);
+            Vector3 negativeBlend = Scale(parameters.m_EditorNegativeFade, shapeSize);
+            return shape.center + (negativeBlend - positiveBlend) * 0.5f;
+        }
+
+        internal static Vector3 BlendSize(
+            BoundProxyShape shape,
+            VividLocalVolumetricFogArtistParameters parameters)
+        {
+            shape.Sanitize();
+            Vector3 shapeSize = Max(shape.GetSanitizedSize(), k_MinimumSize);
+            if (parameters.m_EditorAdvancedFade)
+            {
+                Vector3 normalizedSize = Vector3.one
+                    - parameters.m_EditorPositiveFade
+                    - parameters.m_EditorNegativeFade;
+                return Max(Scale(normalizedSize, shapeSize), 0.0f);
+            }
+
+            return Max(shapeSize - Vector3.one * parameters.m_EditorUniformFade * 2.0f, 0.0f);
+        }
+
+        private static void ApplySizeChangeToEditorFade(
+            SerializedProperty parameters,
+            Vector3 previousSize,
+            Vector3 newSize)
+        {
+            SerializedProperty editorPositiveFade = FindParameter(parameters, "m_EditorPositiveFade");
+            SerializedProperty editorNegativeFade = FindParameter(parameters, "m_EditorNegativeFade");
+            if (editorPositiveFade == null
+                || editorNegativeFade == null
+                || editorPositiveFade.hasMultipleDifferentValues
+                || editorNegativeFade.hasMultipleDifferentValues)
+            {
+                return;
+            }
+
+            previousSize = Max(previousSize, k_MinimumSize);
+            newSize = Max(newSize, k_MinimumSize);
+            Vector3 positiveFade = VividLocalVolumetricFogArtistParameters.RescaleNormalizedFade(
+                editorPositiveFade.vector3Value,
+                previousSize,
+                newSize);
+            Vector3 negativeFade = VividLocalVolumetricFogArtistParameters.RescaleNormalizedFade(
+                editorNegativeFade.vector3Value,
+                previousSize,
+                newSize);
+
+            VividLocalVolumetricFogArtistParameters.ClampCombinedEditorFade(ref positiveFade, ref negativeFade);
+            editorPositiveFade.vector3Value = positiveFade;
+            editorNegativeFade.vector3Value = negativeFade;
+            ClampSerializedUniformEditorFade(parameters, newSize);
+        }
+
+        private static void ApplyAdvancedBlendHandle(
+            SerializedProperty parameters,
+            BoundProxyShape shape,
+            Vector3 blendCenter,
+            Vector3 blendSize)
+        {
+            SerializedProperty editorPositiveFade = FindParameter(parameters, "m_EditorPositiveFade");
+            SerializedProperty editorNegativeFade = FindParameter(parameters, "m_EditorNegativeFade");
+            if (editorPositiveFade == null || editorNegativeFade == null)
+                return;
+
+            shape.Sanitize();
+            Vector3 shapeSize = Max(shape.GetSanitizedSize(), k_MinimumSize);
+            Vector3 centerRelativeToShape = blendCenter - shape.center;
+            Vector3 halfSize = Max(blendSize, 0.0f) * 0.5f;
+            Vector3 positiveHandlePosition = centerRelativeToShape + halfSize;
+            Vector3 negativeHandlePosition = centerRelativeToShape - halfSize;
+
+            Vector3 positiveFade = new(
+                ComputePositiveFade(positiveHandlePosition.x, shapeSize.x),
+                ComputePositiveFade(positiveHandlePosition.y, shapeSize.y),
+                ComputePositiveFade(positiveHandlePosition.z, shapeSize.z));
+            Vector3 negativeFade = new(
+                ComputeNegativeFade(negativeHandlePosition.x, shapeSize.x),
+                ComputeNegativeFade(negativeHandlePosition.y, shapeSize.y),
+                ComputeNegativeFade(negativeHandlePosition.z, shapeSize.z));
+
+            VividLocalVolumetricFogArtistParameters.ClampCombinedEditorFade(ref positiveFade, ref negativeFade);
+            editorPositiveFade.vector3Value = positiveFade;
+            editorNegativeFade.vector3Value = negativeFade;
+        }
+
+        private static void ApplyUniformBlendHandle(
+            SerializedProperty parameters,
+            Vector3 shapeSize,
+            Vector3 blendSize)
+        {
+            SerializedProperty editorUniformFade = FindParameter(parameters, "m_EditorUniformFade");
+            if (editorUniformFade == null)
+                return;
+
+            shapeSize = Max(shapeSize, k_MinimumSize);
+            float uniformFade = (shapeSize.x - Mathf.Max(blendSize.x, 0.0f)) * 0.5f;
+            float maximumBlendDistance = MinComponent(shapeSize) * 0.5f;
+            editorUniformFade.floatValue = Mathf.Clamp(uniformFade, 0.0f, maximumBlendDistance);
+        }
+
+        private static void ApplySerializedEditorFadeToRuntimeProperties(
+            SerializedProperty parameters,
+            Vector3 shapeSize)
+        {
+            SerializedProperty positiveFadeProperty = FindParameter(parameters, "positiveFade");
+            SerializedProperty negativeFadeProperty = FindParameter(parameters, "negativeFade");
+            SerializedProperty editorAdvancedFade = FindParameter(parameters, "m_EditorAdvancedFade");
+            if (positiveFadeProperty == null
+                || negativeFadeProperty == null
+                || editorAdvancedFade == null
+                || editorAdvancedFade.hasMultipleDifferentValues)
+            {
+                return;
+            }
+
+            if (editorAdvancedFade.boolValue)
+            {
+                SerializedProperty editorPositiveFade = FindParameter(parameters, "m_EditorPositiveFade");
+                SerializedProperty editorNegativeFade = FindParameter(parameters, "m_EditorNegativeFade");
+                if (editorPositiveFade == null || editorNegativeFade == null)
+                    return;
+
+                Vector3 positiveFade = editorPositiveFade.vector3Value;
+                Vector3 negativeFade = editorNegativeFade.vector3Value;
+                VividLocalVolumetricFogArtistParameters.ClampCombinedEditorFade(ref positiveFade, ref negativeFade);
+                editorPositiveFade.vector3Value = positiveFade;
+                editorNegativeFade.vector3Value = negativeFade;
+                positiveFadeProperty.vector3Value = positiveFade;
+                negativeFadeProperty.vector3Value = negativeFade;
+                return;
+            }
+
+            SerializedProperty editorUniformFade = FindParameter(parameters, "m_EditorUniformFade");
+            if (editorUniformFade == null)
+                return;
+
+            ClampSerializedUniformEditorFade(parameters, shapeSize);
+            Vector3 normalizedFade = VividLocalVolumetricFogArtistParameters.ComputeNormalizedFadeFromUniform(
+                editorUniformFade.floatValue,
+                Max(shapeSize, k_MinimumSize));
+            positiveFadeProperty.vector3Value = normalizedFade;
+            negativeFadeProperty.vector3Value = normalizedFade;
+        }
+
+        private static void ClampSerializedUniformEditorFade(SerializedProperty parameters, Vector3 shapeSize)
+        {
+            SerializedProperty editorUniformFade = FindParameter(parameters, "m_EditorUniformFade");
+            if (editorUniformFade == null || editorUniformFade.hasMultipleDifferentValues)
+                return;
+
+            shapeSize = Max(shapeSize, k_MinimumSize);
+            editorUniformFade.floatValue = Mathf.Clamp(
+                editorUniformFade.floatValue,
+                0.0f,
+                MinComponent(shapeSize) * 0.5f);
+        }
+
+        private static VividLocalVolumetricFogArtistParameters ReadParameters(SerializedProperty parameters)
+        {
+            var result = VividLocalVolumetricFogArtistParameters.CreateDefault();
+            result.m_EditorUniformFade = FindParameter(parameters, "m_EditorUniformFade")?.floatValue ?? result.m_EditorUniformFade;
+            result.m_EditorPositiveFade = FindParameter(parameters, "m_EditorPositiveFade")?.vector3Value ?? result.m_EditorPositiveFade;
+            result.m_EditorNegativeFade = FindParameter(parameters, "m_EditorNegativeFade")?.vector3Value ?? result.m_EditorNegativeFade;
+            result.m_EditorAdvancedFade = FindParameter(parameters, "m_EditorAdvancedFade")?.boolValue ?? result.m_EditorAdvancedFade;
+            return result;
+        }
+
+        private static SerializedProperty FindParameter(SerializedProperty parameters, string propertyName)
+        {
+            return parameters?.FindPropertyRelative(propertyName);
+        }
+
+        private static Vector3 Scale(Vector3 value, Vector3 scale)
+        {
+            return new Vector3(value.x * scale.x, value.y * scale.y, value.z * scale.z);
+        }
+
+        private static float ComputePositiveFade(float positiveHandlePosition, float size)
+        {
+            return size > k_MinimumSize ? 0.5f - positiveHandlePosition / size : 0.0f;
+        }
+
+        private static float ComputeNegativeFade(float negativeHandlePosition, float size)
+        {
+            return size > k_MinimumSize ? 0.5f + negativeHandlePosition / size : 0.0f;
+        }
+
         private void DrawMaskSettings()
         {
             if (ShouldDrawTextureModeSettings())
@@ -450,6 +815,86 @@ namespace VividRP.Editor
         private static float MinComponent(Vector3 value)
         {
             return Mathf.Min(value.x, value.y, value.z);
+        }
+    }
+
+    internal abstract class VividLocalVolumetricFogEditorToolBase : EditorTool
+    {
+        private readonly string m_Description;
+        private readonly EditMode.SceneViewEditMode m_Mode;
+        private readonly string m_IconName;
+        private GUIContent m_IconContent;
+
+        protected VividLocalVolumetricFogEditorToolBase(
+            string description,
+            EditMode.SceneViewEditMode mode,
+            string iconName)
+        {
+            m_Description = description;
+            m_Mode = mode;
+            m_IconName = iconName;
+        }
+
+        public override GUIContent toolbarIcon => m_IconContent;
+
+        public override void OnWillBeDeactivated()
+        {
+            EditMode.SetEditModeToNone();
+        }
+
+        public override void OnToolGUI(EditorWindow window)
+        {
+            if (EditMode.editMode == m_Mode)
+                return;
+
+            if (!TryGetTargetsBounds(out Bounds bounds))
+                return;
+
+            EditMode.ChangeEditMode(m_Mode, bounds);
+            ToolManager.SetActiveTool(this);
+        }
+
+        private void OnEnable()
+        {
+            m_IconContent = EditorGUIUtility.TrIconContent(m_IconName, m_Description);
+        }
+
+        private bool TryGetTargetsBounds(out Bounds bounds)
+        {
+            bool foundTarget = false;
+            bounds = new Bounds { min = Vector3.positiveInfinity, max = Vector3.negativeInfinity };
+            foreach (UnityEngine.Object targetObject in targets)
+            {
+                if (targetObject is not VividLocalVolumetricFog fog || fog.transform == null)
+                    continue;
+
+                foundTarget = true;
+                bounds.Encapsulate(fog.transform.position);
+            }
+
+            return foundTarget;
+        }
+    }
+
+    [EditorTool(Description, typeof(VividLocalVolumetricFog), toolPriority = (int)VividLocalVolumetricFogEditor.k_EditBlend)]
+    internal sealed class VividLocalVolumetricFogModifyInfluenceVolumeTool : VividLocalVolumetricFogEditorToolBase
+    {
+        private const string Description = "Modify the influence volume";
+
+        public VividLocalVolumetricFogModifyInfluenceVolumeTool()
+            : base(Description, VividLocalVolumetricFogEditor.k_EditBlend, "PreMatCube")
+        {
+        }
+    }
+
+    [EditorTool(Description, typeof(VividLocalVolumetricFog), toolPriority = (int)VividLocalVolumetricFogEditor.k_EditShape)]
+    internal sealed class VividLocalVolumetricFogModifyBaseShapeTool : VividLocalVolumetricFogEditorToolBase
+    {
+        private const string Description = "Modify the base shape";
+
+        public VividLocalVolumetricFogModifyBaseShapeTool()
+            : base(Description, VividLocalVolumetricFogEditor.k_EditShape, "EditCollider")
+        {
         }
     }
 }

@@ -6,6 +6,7 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using VividRP.Editor;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
@@ -408,6 +409,53 @@ namespace VividRP.Editor.Tests
             Assert.That(parameters.negativeFade, Is.EqualTo(Vector3.one * 0.1f));
             Assert.That(parameters.distanceFadeStart, Is.EqualTo(10000.0f));
             Assert.That(parameters.distanceFadeEnd, Is.EqualTo(10000.0f));
+        }
+
+        [Test]
+        public void LocalVolumetricFog_RuntimeAttributesMatchHdrpObject()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Volumetric", "VividLocalVolumetricFog.cs"));
+
+            Assert.That(source, Does.Contain("[AddComponentMenu(\"Rendering/Local Volumetric Fog\")]"));
+            Assert.That(source, Does.Contain("[Icon(\"Packages/com.unity.render-pipelines.core/Editor/Icons/Processed/LocalVolumetricFog Icon.asset\")]"));
+        }
+
+        [Test]
+        public void LocalVolumetricFogMenuItems_DefinesGameObjectMenuEntryLikeHdrp()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Editor", "ComponentEditor", "VividLocalVolumetricFogMenuItems.cs"));
+
+            Assert.That(VividLocalVolumetricFogMenuItems.CreateLocalVolumetricFogMenuPath, Is.EqualTo("GameObject/Rendering/Local Volumetric Fog"));
+            Assert.That(source, Does.Contain("[MenuItem(CreateLocalVolumetricFogMenuPath"));
+            Assert.That(source, Does.Contain("priority = 12"));
+            Assert.That(source, Does.Contain("CreateLocalVolumetricFogGameObject(menuCommand.context as GameObject)"));
+        }
+
+        [Test]
+        public void CreateLocalVolumetricFogGameObject_AddsFogSelectsObjectAndParentsToContext()
+        {
+            var parent = new GameObject("Local Fog Menu Parent");
+            GameObject fogObject = null;
+
+            try
+            {
+                fogObject = VividLocalVolumetricFogMenuItems.CreateLocalVolumetricFogGameObject(parent);
+
+                Assert.That(fogObject.name, Is.EqualTo("Local Volumetric Fog"));
+                Assert.That(fogObject.transform.parent, Is.EqualTo(parent.transform));
+                Assert.That(fogObject.GetComponent<VividLocalVolumetricFog>(), Is.Not.Null);
+                Assert.That(UnityEditor.Selection.activeGameObject, Is.EqualTo(fogObject));
+                AssertVector3(fogObject.GetComponent<VividLocalVolumetricFog>().BoundProxyShape.GetSanitizedSize(), Vector3.one);
+            }
+            finally
+            {
+                UnityEditor.Selection.activeGameObject = null;
+
+                if (fogObject != null)
+                    Object.DestroyImmediate(fogObject);
+
+                Object.DestroyImmediate(parent);
+            }
         }
 
         [Test]
@@ -935,6 +983,14 @@ namespace VividRP.Editor.Tests
             Assert.That(editorSource, Does.Contain("BoundProxyEditorUtility.DrawSceneHandles"));
             Assert.That(editorSource, Does.Contain("allowCenterHandle: true"));
             Assert.That(editorSource, Does.Contain("DrawGizmo"));
+            Assert.That(editorSource, Does.Contain("Single Scattering Albedo"));
+            Assert.That(editorSource, Does.Contain("Fog Distance"));
+            Assert.That(editorSource, Does.Contain("Mask Mode"));
+            Assert.That(editorSource, Does.Contain("Mask Texture"));
+            Assert.That(editorSource, Does.Contain("Mask Material"));
+            Assert.That(editorSource, Does.Contain("DrawMaterialInspector"));
+            Assert.That(editorSource, Does.Contain("FogVolumeVoxelize"));
+            Assert.That(editorSource, Does.Contain("EditorGUILayout.Foldout"));
         }
 
         [Test]

@@ -132,7 +132,8 @@ namespace VividRP.Runtime
     }
 
     [ExecuteAlways]
-    [AddComponentMenu("Rendering/VividRP Local Volumetric Fog")]
+    [AddComponentMenu("Rendering/Local Volumetric Fog")]
+    [Icon("Packages/com.unity.render-pipelines.core/Editor/Icons/Processed/LocalVolumetricFog Icon.asset")]
     public sealed class VividLocalVolumetricFog : MonoBehaviour, IBoundProxyProvider, IBoundProxyWorldDataProvider, ISerializationCallbackReceiver
     {
         private const int CurrentSerializationVersion = 1;

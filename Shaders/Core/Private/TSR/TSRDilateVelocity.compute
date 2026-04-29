@@ -9,6 +9,7 @@ RWTexture2D<float2> _DilatedMotion;
 RWTexture2D<float> _DilatedDepth;
 RWTexture2D<float> _DepthError;
 RWTexture2D<float> _ReprojectionBoundary;
+RWTexture2D<float> _ThinGeometryCoverage;
 
 float4 _RenderSize;
 
@@ -58,9 +59,28 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float depthBoundary = saturate(maxDepthError * 333.3333);
     float motionBoundary = saturate(maxMotionDelta * 0.25);
+    float closestDepthCoverage = 0.0;
+    float coverageDepthTolerance = max(5e-5, maxDepthError * 0.25);
+
+    [unroll]
+    for (int coverageY = -1; coverageY <= 1; coverageY++)
+    {
+        [unroll]
+        for (int coverageX = -1; coverageX <= 1; coverageX++)
+        {
+            int2 sampleCoord = clamp(pixelCoord + int2(coverageX, coverageY), int2(0, 0), renderSize - 1);
+            float sampleDepth = _InputDepth[sampleCoord];
+            closestDepthCoverage += abs(sampleDepth - selectedDepth) <= coverageDepthTolerance ? 1.0 : 0.0;
+        }
+    }
+
+    closestDepthCoverage *= 1.0 / 9.0;
+    float sparseCoverage = saturate((0.5 - closestDepthCoverage) * 3.0);
+    float thinGeometryCoverage = saturate(max(depthBoundary, motionBoundary) * sparseCoverage);
 
     _DilatedMotion[pixelCoord] = selectedMotion;
     _DilatedDepth[pixelCoord] = selectedDepth;
     _DepthError[pixelCoord] = maxDepthError;
     _ReprojectionBoundary[pixelCoord] = max(depthBoundary, motionBoundary);
+    _ThinGeometryCoverage[pixelCoord] = thinGeometryCoverage;
 }

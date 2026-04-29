@@ -154,22 +154,31 @@ namespace VividRP.Editor.Tests
 
             Assert.That(dilateSource, Does.Contain("RWTexture2D<float> _DepthError"));
             Assert.That(dilateSource, Does.Contain("RWTexture2D<float> _ReprojectionBoundary"));
+            Assert.That(dilateSource, Does.Contain("RWTexture2D<float> _ThinGeometryCoverage"));
             Assert.That(dilateSource, Does.Contain("TSR_IsDepthCloser(sampleDepth, selectedDepth)"));
             Assert.That(dilateSource, Does.Contain("maxDepthError"));
             Assert.That(dilateSource, Does.Contain("motionBoundary"));
+            Assert.That(dilateSource, Does.Contain("closestDepthCoverage"));
+            Assert.That(dilateSource, Does.Contain("thinGeometryCoverage"));
             Assert.That(reprojectSource, Does.Contain("Texture2D<float> _ReprojectionBoundary"));
+            Assert.That(reprojectSource, Does.Contain("Texture2D<float> _ThinGeometryCoverage"));
             Assert.That(reprojectSource, Does.Contain("historyConfidence"));
             Assert.That(reprojectSource, Does.Contain("max(localBoundary, uvBoundary)"));
+            Assert.That(reprojectSource, Does.Contain("historyConfidence *= lerp(1.0, 0.55, thinGeometryCoverage)"));
             Assert.That(rejectSource, Does.Contain("Texture2D<float> _DepthError"));
             Assert.That(rejectSource, Does.Contain("depthTolerance = _TSRRejectionParams.x + depthError * 2.0"));
             Assert.That(rejectSource, Does.Contain("motionLimit = lerp"));
             Assert.That(updateSource, Does.Contain("Texture2D<float2> _DilatedMotion"));
+            Assert.That(updateSource, Does.Contain("Texture2D<float> _ThinGeometryCoverage"));
             Assert.That(updateSource, Does.Contain("velocityWeightClamp"));
             Assert.That(updateSource, Does.Contain("boundaryWeightClamp"));
+            Assert.That(updateSource, Does.Contain("thinGeometryWeightClamp"));
+            Assert.That(updateSource, Does.Contain("thinGeometrySampleCount"));
+            Assert.That(updateSource, Does.Contain("weightRelaxation"));
             Assert.That(updateSource, Does.Contain("recoveryRate"));
             Assert.That(updateSource, Does.Contain("rejectionRetention"));
             Assert.That(updateSource, Does.Contain("boundarySampleCount"));
-            Assert.That(updateSource, Does.Contain("historyWeight *= saturate(1.0 - reprojectionBoundary * 0.5)"));
+            Assert.That(updateSource, Does.Contain("historyWeight *= saturate(1.0 - weightRelaxation)"));
         }
 
         [Test]
@@ -220,7 +229,9 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("m_HistoryMeta"));
             Assert.That(passSource, Does.Contain("TSR_DepthError"));
             Assert.That(passSource, Does.Contain("TSR_ReprojectionBoundary"));
+            Assert.That(passSource, Does.Contain("TSR_ThinGeometryCoverage"));
             Assert.That(passSource, Does.Contain("TSR_SpatialAntiAliasedColor"));
+            Assert.That(passSource, Does.Contain("ThinGeometryCoverage"));
             Assert.That(passSource, Does.Contain("SpatialAntiAliasedColor"));
             Assert.That(passSource, Does.Contain("requestedRenderSize"));
             Assert.That(passSource, Does.Contain("requestedOutputSize"));

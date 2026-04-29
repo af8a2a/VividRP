@@ -11,7 +11,7 @@ namespace VividRP.Editor
 {
     public class PipelineResourceUpdater : AssetPostprocessor
     {
-        private const string ContainerRelativePath = "RenderPipelineResources/PipelineResources.asset";
+        private const string ContainerRelativePath = "Runtime/Resources/PipelineResources.asset";
 
         [InitializeOnLoadMethod]
         private static void OnLoad()

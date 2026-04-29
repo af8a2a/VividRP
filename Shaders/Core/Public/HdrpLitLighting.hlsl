@@ -4,6 +4,7 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/PunctualLightCommon.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/LTCAreaLight.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/PreIntegratedFGD.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VividProbeVolume.hlsl"
@@ -712,27 +713,6 @@ float3 EvaluateDirectionalLight(
     return EvaluateDirectional(surfaceData, bsdfData, preLightData, normalizedViewDirectionWS, directionalLight);
 }
 
-float EvaluatePunctualLightDistanceAttenuation(PunctualLightData punctualLight, float distanceSquared)
-{
-    float distanceAttenuation = rcp(max(distanceSquared, 1e-6));
-    float rangeAttenuation = saturate(1.0 - distanceSquared * punctualLight.inverseRangeSquared);
-    return distanceAttenuation * rangeAttenuation * rangeAttenuation;
-}
-
-float EvaluatePunctualLightSpotAttenuation(PunctualLightData punctualLight, float3 lightDirectionWS)
-{
-    float attenuation = 1.0;
-
-    if (punctualLight.lightType == VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
-    {
-        float spotCosine = saturate(dot(punctualLight.directionWS, -lightDirectionWS));
-        attenuation = saturate(spotCosine * punctualLight.angleScale + punctualLight.angleOffset);
-        attenuation *= attenuation;
-    }
-
-    return attenuation;
-}
-
 VividDirectLighting EvaluateBSDF_Punctual(
     VividGBufferSurfaceData surfaceData,
     VividLitBSDFData bsdfData,
@@ -742,21 +722,19 @@ VividDirectLighting EvaluateBSDF_Punctual(
     PunctualLightData punctualLight)
 {
     VividDirectLighting lighting = (VividDirectLighting)0;
-    float3 lightVectorWS = punctualLight.positionWS - positionWS;
-    float distanceSquared = dot(lightVectorWS, lightVectorWS);
+    float3 lightDirectionWS = 0.0;
+    float4 distances = 0.0;
+    GetVividPunctualLightVectors(positionWS, punctualLight, lightDirectionWS, distances);
 
-    if (distanceSquared <= 1e-6)
+    if (distances.y <= 1e-6)
         return lighting;
 
-    float inverseDistance = rsqrt(distanceSquared);
-    float3 lightDirectionWS = lightVectorWS * inverseDistance;
     float nDotL = saturate(dot(surfaceData.normalWS, lightDirectionWS));
 
     if (nDotL <= 0.0)
         return lighting;
 
-    float attenuation = EvaluatePunctualLightDistanceAttenuation(punctualLight, distanceSquared)
-        * EvaluatePunctualLightSpotAttenuation(punctualLight, lightDirectionWS);
+    float attenuation = VividPunctualLightAttenuationWithDistanceModification(punctualLight, distances);
 
     if (attenuation <= 0.0)
         return lighting;

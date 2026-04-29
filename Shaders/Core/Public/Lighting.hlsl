@@ -32,14 +32,14 @@ struct PunctualLightData
     float angleOffset;
     float3 upWS;
     float shapeRadiusSquared;
-    float inverseRangeSquared;
+    float rangeAttenuationScale;
+    float rangeAttenuationBias;
     float shadowStrength;
     uint renderingLayerMask;
     float volumetricDimmer;
     float volumetricShadowDimmer;
     float volumetricFadeDistance;
     uint affectVolumetric;
-    uint padding;
 };
 
 struct AreaLightData

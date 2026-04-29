@@ -858,7 +858,8 @@ namespace VividRP.Editor.Tests
             Assert.That(trackedLightData.color.z, Is.EqualTo(3.0f).Within(0.0001f));
             Assert.That(trackedLightData.range, Is.EqualTo(8.0f).Within(0.0001f));
             Assert.That(trackedLightData.shapeRadius, Is.EqualTo(0.35f).Within(0.0001f));
-            Assert.That(trackedLightData.inverseRangeSquared, Is.EqualTo(1.0f / 64.0f).Within(0.0001f));
+            Assert.That(trackedLightData.rangeAttenuationScale, Is.EqualTo(1.0f / 64.0f).Within(0.0001f));
+            Assert.That(trackedLightData.rangeAttenuationBias, Is.EqualTo(1.0f).Within(0.0001f));
         }
 
         [Test]

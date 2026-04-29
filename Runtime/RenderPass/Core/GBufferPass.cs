@@ -181,6 +181,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer3.Resize(width, height);
             m_GBuffer4.Resize(width, height);
             m_GBufferDepth.Resize(width, height);
+            m_GBufferDepth.desc.ClearBuffer = false;
 
             UpdateRenderListShaderTags(frameData);
             PrepareClusteredDecalParameters(frameData, width, height);

@@ -45,16 +45,18 @@ namespace VividRP.Runtime
                 angleOffset = angleOffset,
                 upWS = upWS,
                 shapeRadiusSquared = shapeRadius * shapeRadius,
-                inverseRangeSquared = trackedLightData.inverseRangeSquared > 0.0f
-                    ? trackedLightData.inverseRangeSquared
+                rangeAttenuationScale = trackedLightData.rangeAttenuationScale > 0.0f
+                    ? trackedLightData.rangeAttenuationScale
                     : 1.0f / Mathf.Max(range * range, 1e-6f),
+                rangeAttenuationBias = trackedLightData.rangeAttenuationBias > 0.0f
+                    ? trackedLightData.rangeAttenuationBias
+                    : 1.0f,
                 shadowStrength = trackedLightData.shadowStrength,
                 renderingLayerMask = trackedLightData.renderingLayerMask,
                 volumetricDimmer = GetVolumetricDimmer(trackedLightData),
                 volumetricShadowDimmer = GetVolumetricShadowDimmer(trackedLightData),
                 volumetricFadeDistance = GetVolumetricFadeDistance(trackedLightData),
                 affectVolumetric = GetAffectVolumetric(trackedLightData),
-                padding = 0u,
             };
         }
 

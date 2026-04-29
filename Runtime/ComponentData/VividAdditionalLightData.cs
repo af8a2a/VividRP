@@ -40,7 +40,8 @@ namespace VividRP.Runtime
         public float shadowStrength;
         public float spotAngle;
         public float innerSpotAngle;
-        public float inverseRangeSquared;
+        public float rangeAttenuationScale;
+        public float rangeAttenuationBias;
         public uint renderingLayerMask;
         public uint shadowRenderingLayerMask;
         public VividLightRenderDataFlags flags;
@@ -188,7 +189,7 @@ namespace VividRP.Runtime
             var nativeIntensity = ResolveNativeLightIntensity(light);
             var finalColor = light.color.linear * nativeIntensity;
             var range = Mathf.Max(light.range, 0.0f);
-            var inverseRangeSquared = range > 0.0f ? 1.0f / Mathf.Max(range * range, 1e-6f) : 0.0f;
+            var rangeAttenuationScale = range > 0.0f ? 1.0f / Mathf.Max(range * range, 1e-6f) : 0.0f;
             var shadowRenderingLayerMask = additionalLightData != null
                 ? additionalLightData.effectiveShadowRenderingLayers
                 : (RenderingLayerMask)light.renderingLayerMask;
@@ -224,7 +225,8 @@ namespace VividRP.Runtime
                 shadowStrength = light.shadows != LightShadows.None ? light.shadowStrength : 0.0f,
                 spotAngle = light.spotAngle,
                 innerSpotAngle = light.innerSpotAngle,
-                inverseRangeSquared = inverseRangeSquared,
+                rangeAttenuationScale = rangeAttenuationScale,
+                rangeAttenuationBias = 1.0f,
                 renderingLayerMask = (uint)light.renderingLayerMask,
                 shadowRenderingLayerMask = (uint)shadowRenderingLayerMask,
                 flags = BuildFlags(light, additionalLightData),
@@ -304,7 +306,8 @@ namespace VividRP.Runtime
                    && Mathf.Approximately(lhs.shadowStrength, rhs.shadowStrength)
                    && Mathf.Approximately(lhs.spotAngle, rhs.spotAngle)
                    && Mathf.Approximately(lhs.innerSpotAngle, rhs.innerSpotAngle)
-                   && Mathf.Approximately(lhs.inverseRangeSquared, rhs.inverseRangeSquared)
+                   && Mathf.Approximately(lhs.rangeAttenuationScale, rhs.rangeAttenuationScale)
+                   && Mathf.Approximately(lhs.rangeAttenuationBias, rhs.rangeAttenuationBias)
                    && lhs.renderingLayerMask == rhs.renderingLayerMask
                    && lhs.shadowRenderingLayerMask == rhs.shadowRenderingLayerMask
                    && lhs.flags == rhs.flags;

@@ -15,6 +15,7 @@
 #endif
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Raytracing/RayTracingCommon.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Raytracing/RaytracingIntersection.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
 
 #ifndef VIVIDRP_INDIRECT_DIFFUSE_DEFINE_RAYTRACING_SHADERS
@@ -336,7 +337,10 @@ float3 VividIndirectDiffuseEvaluateDirectional(
 
 float VividIndirectDiffuseEvaluatePunctualDistanceAttenuation(PunctualLightData punctualLight, float distanceSquared)
 {
-    float attenuation = saturate(1.0 - distanceSquared * punctualLight.inverseRangeSquared);
+    float attenuation = DistanceWindowing(
+        distanceSquared,
+        punctualLight.rangeAttenuationScale,
+        punctualLight.rangeAttenuationBias);
     return attenuation * attenuation;
 }
 

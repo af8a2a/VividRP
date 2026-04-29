@@ -39,14 +39,14 @@ namespace VividRP.Runtime
             public float angleOffset;
             public Vector3 upWS;
             public float shapeRadiusSquared;
-            public float inverseRangeSquared;
+            public float rangeAttenuationScale;
+            public float rangeAttenuationBias;
             public float shadowStrength;
             public uint renderingLayerMask;
             public float volumetricDimmer;
             public float volumetricShadowDimmer;
             public float volumetricFadeDistance;
             public uint affectVolumetric;
-            public uint padding;
 
             internal static int Stride => Marshal.SizeOf<PunctualLightData>();
         }
@@ -732,7 +732,8 @@ namespace VividRP.Runtime
                 shadowStrength = 0.0f,
                 spotAngle = visibleLight.spotAngle,
                 innerSpotAngle = visibleLight.innerSpotAngle,
-                inverseRangeSquared = range > 0.0f ? 1.0f / Mathf.Max(range * range, 1e-6f) : 0.0f,
+                rangeAttenuationScale = range > 0.0f ? 1.0f / Mathf.Max(range * range, 1e-6f) : 0.0f,
+                rangeAttenuationBias = 1.0f,
                 renderingLayerMask = 0u,
                 shadowRenderingLayerMask = 0u,
                 volumetricDimmer = VividAdditionalLightData.DefaultVolumetricDimmer,

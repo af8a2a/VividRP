@@ -74,9 +74,6 @@ namespace VividRP.Runtime
 
                 cmdBuffer = CommandBufferPool.Get("VividRP");
 
-                PassRecorder.InitializeContext(context, camera, cullingResults);
-                context.SetupCameraProperties(camera);
-
                 var graphAsset = m_Asset.RenderGraphAsset;
                 PassRecorder.InitializeContext(context, camera, cullingResults, graphAsset);
                 context.SetupCameraProperties(camera);

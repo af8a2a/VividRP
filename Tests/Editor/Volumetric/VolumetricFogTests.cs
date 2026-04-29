@@ -637,8 +637,7 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("FetchBigTileLightIndex"));
             Assert.That(lightingSource, Does.Contain("FetchBigTileLightIndex(bigTileIndex, lightOffset)"));
             Assert.That(lightingSource, Does.Contain("if (_VolumetricUseBigTileLightList == 0u || _NumTileBigTileX == 0u || _NumTileBigTileY == 0u)"));
-            Assert.That(lightingSource, Does.Contain("VBUFFER_PUNCTUAL_SAMPLE_COUNT"));
-            Assert.That(lightingSource, Does.Contain("EvaluatePunctualLightingIntegral"));
+            Assert.That(lightingSource, Does.Contain("EvaluateVoxelLightingLocal"));
             Assert.That(lightingSource, Does.Contain("ImportanceSamplePunctualLight"));
             Assert.That(lightingSource, Does.Contain("IntersectRayCone"));
             Assert.That(lightingSource, Does.Not.Contain("IntersectRaySphere"));
@@ -650,7 +649,7 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("float lightSqRadius = max(max(light.shapeRadiusSquared, voxelArcLength), 1e-4)"));
             Assert.That(lightingSource, Does.Contain("t = originToLightProjDist + tRelative"));
             Assert.That(lightingSource, Does.Contain("float weight = TransmittanceHomogeneousMedium(extinction, max(t - t0, 0.0)) * rcpPdf"));
-            Assert.That(lightingSource, Does.Contain("lighting * integratedTransmittance + punctualLightingIntegral"));
+            Assert.That(lightingSource, Does.Contain("phaseConstant * aggregate.radianceComplete + probeRadiance"));
             Assert.That(lightingSource, Does.Not.Contain("EvaluateClusteredPunctualLighting"));
             Assert.That(lightingSource, Does.Contain("#define VBUFFER_FILTER_GAUSSIAN_SIGMA 1.0"));
             Assert.That(lightingSource, Does.Contain("#define VBUFFER_FILTER_SIZE_1D (VBUFFER_FILTER_GROUP_SIZE_XY + 2)"));

@@ -5,6 +5,8 @@
 // These map to the low-level NGX types in DLSSExtension.cs
 //------------------------------------------------------------------------------
 
+#if DLSS_PLUGIN_INTEGRATE
+
 using System;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -229,3 +231,4 @@ namespace VividRP.Runtime
         }
     }
 }
+#endif

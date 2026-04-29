@@ -127,9 +127,13 @@ namespace VividRP.Runtime
         {
             public Matrix4x4 worldToDecal;
             public Vector4 baseColor;
-            public int baseColorTextureIndex;
-            public int normalTextureIndex;
+            public uint baseColorTextureIndex;
+            public uint normalTextureIndex;
+            public uint metallicTextureIndex;
+            public uint roughnessTextureIndex;
             public float blendDistance;
+            public float metallic;
+            public float roughness;
             public float padding;
 
             internal static int Stride => Marshal.SizeOf<DecalClusterData>();

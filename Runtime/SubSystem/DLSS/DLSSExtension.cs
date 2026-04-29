@@ -7,6 +7,8 @@
 // Enable with scripting define: DLSS_PLUGIN_INTEGRATE
 //------------------------------------------------------------------------------
 
+#if DLSS_PLUGIN_INTEGRATE
+
 using System;
 using System.Runtime.InteropServices;
 using UnityEngine;
@@ -783,3 +785,4 @@ namespace VividRP.Runtime
         #endregion
     }
 }
+#endif

@@ -9,19 +9,31 @@ namespace VividRP.Editor.Tests
 {
     public class VividLightDataTests
     {
-        private static readonly MethodInfo s_CreateDirectionalLightDataMethod =
-            typeof(VividLightData).GetMethod("CreateDirectionalLightData", BindingFlags.Static | BindingFlags.NonPublic);
-        private static readonly MethodInfo s_CreatePunctualLightDataMethod =
-            typeof(VividLightData).GetMethod("CreatePunctualLightData", BindingFlags.Static | BindingFlags.NonPublic);
         private static readonly MethodInfo s_CreateAreaLightDataMethod =
             typeof(VividLightData).GetMethod("CreateAreaLightData", BindingFlags.Static | BindingFlags.NonPublic);
 
         [Test]
-        public void LightDataStructs_UseExpectedVolumetricStrides()
+        public void DecalClusterData_UsesUnsignedBindlessTextureIndicesAndScalarMaterialInputs()
         {
-            Assert.That(VividLightData.DirectionalLightData.Stride, Is.EqualTo(48));
-            Assert.That(VividLightData.PunctualLightData.Stride, Is.EqualTo(112));
-            Assert.That(VividLightData.AreaLightData.Stride, Is.EqualTo(112));
+            Assert.That(
+                typeof(VividLightData.DecalClusterData).GetField(nameof(VividLightData.DecalClusterData.baseColorTextureIndex))?.FieldType,
+                Is.EqualTo(typeof(uint)));
+            Assert.That(
+                typeof(VividLightData.DecalClusterData).GetField(nameof(VividLightData.DecalClusterData.normalTextureIndex))?.FieldType,
+                Is.EqualTo(typeof(uint)));
+            Assert.That(
+                typeof(VividLightData.DecalClusterData).GetField(nameof(VividLightData.DecalClusterData.metallicTextureIndex))?.FieldType,
+                Is.EqualTo(typeof(uint)));
+            Assert.That(
+                typeof(VividLightData.DecalClusterData).GetField(nameof(VividLightData.DecalClusterData.roughnessTextureIndex))?.FieldType,
+                Is.EqualTo(typeof(uint)));
+            Assert.That(
+                typeof(VividLightData.DecalClusterData).GetField(nameof(VividLightData.DecalClusterData.metallic))?.FieldType,
+                Is.EqualTo(typeof(float)));
+            Assert.That(
+                typeof(VividLightData.DecalClusterData).GetField(nameof(VividLightData.DecalClusterData.roughness))?.FieldType,
+                Is.EqualTo(typeof(float)));
+            Assert.That(VividLightData.DecalClusterData.Stride % 16, Is.EqualTo(0));
         }
 
         [Test]
@@ -41,7 +53,6 @@ namespace VividRP.Editor.Tests
                         radiusAtRange = 0.0f,
                         cullingCenterWS = new Vector3(0.0f, 0.0f, 5.0f),
                         cullingRadius = 3.0f,
-                        affectVolumetric = 1u,
                     }
                 },
                 punctualLightCount = 1,
@@ -59,7 +70,6 @@ namespace VividRP.Editor.Tests
             Assert.That(volume.lightVolume, Is.EqualTo(1u));
             Assert.That(volume.lightCategory, Is.Zero);
             Assert.That(volume.featureFlags, Is.EqualTo(4096u));
-            Assert.That(volume.affectVolumetric, Is.EqualTo(1));
             Assert.That(volume.radiusSq, Is.EqualTo(9.0f).Within(0.0001f));
             AssertVector3(volume.lightPos, new Vector3(0.0f, 0.0f, 5.0f));
             AssertVector3(volume.lightAxisX, Vector3.right);
@@ -127,8 +137,6 @@ namespace VividRP.Editor.Tests
                         height = 2.0f,
                         lightType = 1u,
                         range = 8.0f,
-                        volumetricDimmer = 1.0f,
-                        affectVolumetric = 1u,
                     }
                 },
                 areaLightCount = 1,
@@ -149,7 +157,6 @@ namespace VividRP.Editor.Tests
             Assert.That(volume.lightVolume, Is.EqualTo(2u));
             Assert.That(volume.lightCategory, Is.EqualTo(1u));
             Assert.That(volume.featureFlags, Is.EqualTo(8192u));
-            Assert.That(volume.affectVolumetric, Is.EqualTo(1));
             AssertVector3(volume.lightPos, new Vector3(1.0f, -2.0f, 10.0f));
             AssertVector3(volume.lightAxisX, Vector3.right);
             AssertVector3(volume.lightAxisY, Vector3.up);
@@ -325,110 +332,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void CreateDirectionalLightData_PacksVolumetricParameters()
-        {
-            var trackedLightData = new VividLightRenderData
-            {
-                forwardWS = Vector3.forward,
-                color = new Vector3(1.0f, 2.0f, 3.0f),
-                shadowStrength = 0.75f,
-                renderingLayerMask = 9u,
-                volumetricDimmer = 2.5f,
-                volumetricFadeDistance = 300.0f,
-                volumetricShadowDimmer = 0.4f,
-                flags = VividLightRenderDataFlags.AffectVolumetric,
-            };
-
-            Assert.That(s_CreateDirectionalLightDataMethod, Is.Not.Null);
-
-            var directionalLight = (VividLightData.DirectionalLightData)s_CreateDirectionalLightDataMethod.Invoke(null, new object[] { trackedLightData });
-
-            AssertDirectionalLight(
-                directionalLight,
-                -Vector3.forward,
-                trackedLightData.color,
-                trackedLightData.shadowStrength,
-                trackedLightData.renderingLayerMask);
-            Assert.That(directionalLight.volumetricDimmer, Is.EqualTo(2.5f).Within(0.0001f));
-            Assert.That(directionalLight.volumetricFadeDistance, Is.EqualTo(300.0f).Within(0.0001f));
-            Assert.That(directionalLight.volumetricShadowDimmer, Is.EqualTo(0.4f).Within(0.0001f));
-            Assert.That(directionalLight.affectVolumetric, Is.EqualTo(1u));
-        }
-
-        [Test]
-        public void CreatePunctualLightData_PacksVolumetricParameters()
-        {
-            var trackedLightData = new VividLightRenderData
-            {
-                positionWS = new Vector3(1.0f, 2.0f, 3.0f),
-                range = 6.0f,
-                color = new Vector3(4.0f, 5.0f, 6.0f),
-                lightType = LightType.Point,
-                forwardWS = Vector3.forward,
-                rightWS = Vector3.right,
-                upWS = Vector3.up,
-                shapeRadius = 0.25f,
-                inverseRangeSquared = 1.0f / 36.0f,
-                renderingLayerMask = 7u,
-                volumetricDimmer = 3.0f,
-                volumetricFadeDistance = 500.0f,
-                volumetricShadowDimmer = 0.25f,
-                flags = VividLightRenderDataFlags.AffectVolumetric,
-            };
-
-            Assert.That(s_CreatePunctualLightDataMethod, Is.Not.Null);
-
-            var punctualLight = (VividLightData.PunctualLightData)s_CreatePunctualLightDataMethod.Invoke(null, new object[] { trackedLightData });
-
-            AssertPunctualLight(
-                punctualLight,
-                trackedLightData.positionWS,
-                trackedLightData.color,
-                trackedLightData.range,
-                0u,
-                trackedLightData.forwardWS);
-            Assert.That(punctualLight.volumetricDimmer, Is.EqualTo(3.0f).Within(0.0001f));
-            Assert.That(punctualLight.volumetricFadeDistance, Is.EqualTo(500.0f).Within(0.0001f));
-            Assert.That(punctualLight.volumetricShadowDimmer, Is.EqualTo(0.25f).Within(0.0001f));
-            Assert.That(punctualLight.affectVolumetric, Is.EqualTo(1u));
-            AssertVector3(punctualLight.rightWS, Vector3.right);
-            AssertVector3(punctualLight.upWS, Vector3.up);
-            Assert.That(punctualLight.shapeRadiusSquared, Is.EqualTo(0.0625f).Within(0.0001f));
-        }
-
-        [Test]
-        public void CreatePunctualLightData_PacksHdrpSpotConeAxes_ForVolumetricIntersection()
-        {
-            var trackedLightData = new VividLightRenderData
-            {
-                positionWS = new Vector3(1.0f, 2.0f, 3.0f),
-                range = 10.0f,
-                color = Vector3.one,
-                lightType = LightType.Spot,
-                forwardWS = Vector3.forward,
-                rightWS = Vector3.right,
-                upWS = Vector3.up,
-                spotAngle = 60.0f,
-                innerSpotAngle = 20.0f,
-                shapeRadius = 0.5f,
-                inverseRangeSquared = 0.01f,
-                flags = VividLightRenderDataFlags.AffectVolumetric,
-            };
-
-            Assert.That(s_CreatePunctualLightDataMethod, Is.Not.Null);
-
-            var punctualLight = (VividLightData.PunctualLightData)s_CreatePunctualLightDataMethod.Invoke(null, new object[] { trackedLightData });
-            var outerHalfAngle = 30.0f * Mathf.Deg2Rad;
-            var expectedConeAxisScale = Mathf.Cos(outerHalfAngle) / Mathf.Sin(outerHalfAngle);
-
-            AssertVector3(punctualLight.directionWS, Vector3.forward);
-            AssertVector3(punctualLight.rightWS, Vector3.right * expectedConeAxisScale);
-            AssertVector3(punctualLight.upWS, Vector3.up * expectedConeAxisScale);
-            Assert.That(punctualLight.shapeRadiusSquared, Is.EqualTo(0.25f).Within(0.0001f));
-            Assert.That(punctualLight.lightType, Is.EqualTo(1u));
-        }
-
-        [Test]
         public void CreateAreaLightData_PacksBarnDoorParameters_ForRectangleLight()
         {
             var trackedLightData = new VividLightRenderData
@@ -444,10 +347,6 @@ namespace VividRP.Editor.Tests
                 barnDoorAngle = 45.0f,
                 barnDoorLength = 0.35f,
                 renderingLayerMask = 11u,
-                volumetricDimmer = 4.0f,
-                volumetricFadeDistance = 600.0f,
-                volumetricShadowDimmer = 0.5f,
-                flags = VividLightRenderDataFlags.AffectVolumetric,
             };
 
             Assert.That(s_CreateAreaLightDataMethod, Is.Not.Null);
@@ -468,10 +367,6 @@ namespace VividRP.Editor.Tests
                 trackedLightData.renderingLayerMask,
                 Mathf.Cos(45.0f * Mathf.Deg2Rad),
                 0.35f);
-            Assert.That(areaLight.volumetricDimmer, Is.EqualTo(4.0f).Within(0.0001f));
-            Assert.That(areaLight.volumetricFadeDistance, Is.EqualTo(600.0f).Within(0.0001f));
-            Assert.That(areaLight.volumetricShadowDimmer, Is.EqualTo(0.5f).Within(0.0001f));
-            Assert.That(areaLight.affectVolumetric, Is.EqualTo(1u));
         }
 
         private static void AssertDirectionalLight(

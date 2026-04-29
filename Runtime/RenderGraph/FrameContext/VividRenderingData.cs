@@ -24,4 +24,14 @@ namespace VividRP.Runtime
             visibleMeshletIndirectDrawArgsBuffer = null;
         }
     }
+
+    public sealed class VividGPUDrivenDecalData : ContextItem
+    {
+        public bool isEnabled;
+
+        public override void Reset()
+        {
+            isEnabled = false;
+        }
+    }
 }

@@ -19,14 +19,31 @@ namespace VividRP.Editor
         private static readonly GUIContent s_DitheringLabel = EditorGUIUtility.TrTextContent("Dithering");
         private static readonly GUIContent s_VolumeLayerMaskLabel = EditorGUIUtility.TrTextContent("Volume Layer Mask");
         private static readonly GUIContent s_AntialiasingLabel = EditorGUIUtility.TrTextContent("Anti-Aliasing");
+        private const string AntialiasingPassRequiredMessage =
+            "Camera anti-aliasing requires an AntialiasingPass node connected in the active RenderGraph.";
         private static readonly GUIContent s_TAALabel = EditorGUIUtility.TrTextContent("Temporal Anti-Aliasing");
         private static readonly GUIContent s_TAAJitterSpreadLabel = EditorGUIUtility.TrTextContent("Jitter Spread");
         private static readonly GUIContent s_TAASampleCountLabel = EditorGUIUtility.TrTextContent("Sample Count");
         private static readonly GUIContent s_TAABaseBlendFactorLabel = EditorGUIUtility.TrTextContent("Base Blend");
         private static readonly GUIContent s_TAAMotionWeightDecayLabel = EditorGUIUtility.TrTextContent("Motion Decay");
         private static readonly GUIContent s_TAAAntiFlickerIntensityLabel = EditorGUIUtility.TrTextContent("Anti-Flicker");
+#if !DLSS_PLUGIN_INTEGRATE
+        private const int DlssAntialiasingModeValue = 4;
+        private const string DlssDisabledWarning = "DLSS is not enabled. Define DLSS_PLUGIN_INTEGRATE to expose DLSS camera options.";
+#endif
+#if DLSS_PLUGIN_INTEGRATE
         private static readonly GUIContent s_DLSSLabel = EditorGUIUtility.TrTextContent("Deep Learning Super Sampling");
         private static readonly GUIContent s_DLSSQualityLabel = EditorGUIUtility.TrTextContent("Quality");
+#endif
+        private static readonly GUIContent s_FSR3Label = EditorGUIUtility.TrTextContent("FidelityFX Super Resolution 3");
+        private static readonly GUIContent s_FSR3QualityLabel = EditorGUIUtility.TrTextContent("Quality");
+        private static readonly GUIContent s_FSR3SharpeningLabel = EditorGUIUtility.TrTextContent("Sharpening");
+        private static readonly GUIContent s_FSR3SharpnessLabel = EditorGUIUtility.TrTextContent("Sharpness");
+        private static readonly GUIContent s_TSRLabel = EditorGUIUtility.TrTextContent("Temporal Super Resolution");
+        private static readonly GUIContent s_TSRQualityLabel = EditorGUIUtility.TrTextContent("Quality");
+        private static readonly GUIContent s_TSRSharpeningLabel = EditorGUIUtility.TrTextContent("Sharpening");
+        private static readonly GUIContent s_TSRSharpnessLabel = EditorGUIUtility.TrTextContent("Sharpness");
+        private static readonly GUIContent s_TSRHistorySampleCountLabel = EditorGUIUtility.TrTextContent("History Samples");
 
         private CameraEditor.Settings m_Settings;
         private VividSerializedCamera m_SerializedCamera;
@@ -108,6 +125,13 @@ namespace VividRP.Editor
                 EditorGUILayout.PropertyField(m_SerializedCamera.dithering, s_DitheringLabel);
                 EditorGUILayout.PropertyField(m_SerializedCamera.volumeLayerMask, s_VolumeLayerMaskLabel);
                 EditorGUILayout.PropertyField(m_SerializedCamera.antialiasing, s_AntialiasingLabel);
+                if (ShouldShowAntialiasingPassRequiredMessage())
+                    EditorGUILayout.HelpBox(AntialiasingPassRequiredMessage, MessageType.Info);
+
+#if !DLSS_PLUGIN_INTEGRATE
+                if (ShouldShowDlssDisabledWarning())
+                    EditorGUILayout.HelpBox(DlssDisabledWarning, MessageType.Warning);
+#endif
 
                 if (ShouldShowTAASettings())
                 {
@@ -120,11 +144,44 @@ namespace VividRP.Editor
                     EditorGUILayout.PropertyField(m_SerializedCamera.taaAntiFlickerIntensity, s_TAAAntiFlickerIntensityLabel);
                 }
 
+#if DLSS_PLUGIN_INTEGRATE
                 if (ShouldShowDLSSSettings())
                 {
                     EditorGUILayout.Space();
                     EditorGUILayout.LabelField(s_DLSSLabel, EditorStyles.boldLabel);
                     EditorGUILayout.PropertyField(m_SerializedCamera.dlssQuality, s_DLSSQualityLabel);
+                }
+#endif
+
+                if (ShouldShowFSR3Settings())
+                {
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField(s_FSR3Label, EditorStyles.boldLabel);
+                    EditorGUILayout.PropertyField(m_SerializedCamera.fsr3Quality, s_FSR3QualityLabel);
+                    EditorGUILayout.PropertyField(m_SerializedCamera.fsr3EnableSharpening, s_FSR3SharpeningLabel);
+                    using (new EditorGUI.DisabledScope(
+                               m_SerializedCamera.fsr3EnableSharpening != null
+                               && !m_SerializedCamera.fsr3EnableSharpening.hasMultipleDifferentValues
+                               && !m_SerializedCamera.fsr3EnableSharpening.boolValue))
+                    {
+                        EditorGUILayout.PropertyField(m_SerializedCamera.fsr3Sharpness, s_FSR3SharpnessLabel);
+                    }
+                }
+
+                if (ShouldShowTSRSettings())
+                {
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField(s_TSRLabel, EditorStyles.boldLabel);
+                    EditorGUILayout.PropertyField(m_SerializedCamera.tsrQuality, s_TSRQualityLabel);
+                    EditorGUILayout.PropertyField(m_SerializedCamera.tsrHistorySampleCount, s_TSRHistorySampleCountLabel);
+                    EditorGUILayout.PropertyField(m_SerializedCamera.tsrEnableSharpening, s_TSRSharpeningLabel);
+                    using (new EditorGUI.DisabledScope(
+                               m_SerializedCamera.tsrEnableSharpening != null
+                               && !m_SerializedCamera.tsrEnableSharpening.hasMultipleDifferentValues
+                               && !m_SerializedCamera.tsrEnableSharpening.boolValue))
+                    {
+                        EditorGUILayout.PropertyField(m_SerializedCamera.tsrSharpness, s_TSRSharpnessLabel);
+                    }
                 }
             }
         }
@@ -143,18 +200,52 @@ namespace VividRP.Editor
                 return false;
 
             return m_SerializedCamera.antialiasing.hasMultipleDifferentValues
-                || (VividAntialiasingMode)m_SerializedCamera.antialiasing.enumValueIndex
-                == VividAntialiasingMode.TemporalAntiAliasing;
+                || m_SerializedCamera.antialiasing.intValue == (int)VividAntialiasingMode.TemporalAntiAliasing;
         }
 
+        private bool ShouldShowAntialiasingPassRequiredMessage()
+        {
+            return m_SerializedCamera.antialiasing != null
+                && !m_SerializedCamera.antialiasing.hasMultipleDifferentValues
+                && m_SerializedCamera.antialiasing.intValue != (int)VividAntialiasingMode.None;
+        }
+
+#if !DLSS_PLUGIN_INTEGRATE
+        private bool ShouldShowDlssDisabledWarning()
+        {
+            return m_SerializedCamera.antialiasing != null
+                && !m_SerializedCamera.antialiasing.hasMultipleDifferentValues
+                && m_SerializedCamera.antialiasing.intValue == DlssAntialiasingModeValue;
+        }
+#endif
+
+#if DLSS_PLUGIN_INTEGRATE
         private bool ShouldShowDLSSSettings()
         {
             if (m_SerializedCamera.antialiasing == null)
                 return false;
 
             return m_SerializedCamera.antialiasing.hasMultipleDifferentValues
-                || (VividAntialiasingMode)m_SerializedCamera.antialiasing.enumValueIndex
-                == VividAntialiasingMode.DeepLearningSuperSampling;
+                || m_SerializedCamera.antialiasing.intValue == (int)VividAntialiasingMode.DeepLearningSuperSampling;
+        }
+#endif
+
+        private bool ShouldShowFSR3Settings()
+        {
+            if (m_SerializedCamera.antialiasing == null)
+                return false;
+
+            return m_SerializedCamera.antialiasing.hasMultipleDifferentValues
+                || m_SerializedCamera.antialiasing.intValue == (int)VividAntialiasingMode.FidelityFXSuperResolution3;
+        }
+
+        private bool ShouldShowTSRSettings()
+        {
+            if (m_SerializedCamera.antialiasing == null)
+                return false;
+
+            return m_SerializedCamera.antialiasing.hasMultipleDifferentValues
+                || m_SerializedCamera.antialiasing.intValue == (int)VividAntialiasingMode.TemporalSuperResolution;
         }
     }
 

@@ -1,0 +1,131 @@
+#pragma use_dxc
+#pragma kernel CS
+#pragma multi_compile_local _ VIVID_TSR_WAVE_OPS
+#pragma multi_compile _ UNITY_DEVICE_SUPPORTS_NATIVE_16BIT
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
+
+Texture2D<float4> _CurrentFrameColor;
+Texture2D<float2> _DilatedMotion;
+Texture2D<float> _DilatedDepth;
+Texture2D<float> _ReprojectionBoundary;
+Texture2D<float> _ThinGeometryCoverage;
+Texture2D<float> _LumaInstability;
+Texture2D<float4> _AcceptedHistoryColor;
+Texture2D<float2> _ReprojectedHistoryMeta;
+Texture2D<float4> _ReprojectedResurrectionColor;
+Texture2D<float2> _ReprojectedResurrectionMeta;
+Texture2D<float> _RejectionMask;
+
+RWTexture2D<float4> _UpdatedHistoryColor;
+RWTexture2D<float2> _UpdatedHistoryMeta;
+RWTexture2D<float4> _UpdatedResurrectionColor;
+RWTexture2D<float2> _UpdatedResurrectionMeta;
+
+float4 _RenderSize;
+float4 _OutputSize;
+float4 _TSRParams;
+
+static const float TSR_RESURRECTION_PERSISTENT_FRAMES = 6.0;
+
+[numthreads(8, 8, 1)]
+void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int2 renderSize = int2(_RenderSize.xy);
+    int2 outputSize = int2(_OutputSize.xy);
+    int2 pixelCoord = int2(dispatchThreadId.xy);
+    if (any(pixelCoord >= outputSize))
+        return;
+
+    int2 renderCoord = TSR_OutputToRenderCoord(pixelCoord, outputSize, renderSize);
+
+    float3 currentColor = _CurrentFrameColor[pixelCoord].rgb;
+    float3 historyColor = _AcceptedHistoryColor[pixelCoord].rgb;
+    float previousSampleCount = _ReprojectedHistoryMeta[pixelCoord].x;
+    float3 resurrectionColor = _ReprojectedResurrectionColor[pixelCoord].rgb;
+    float2 resurrectionMeta = _ReprojectedResurrectionMeta[pixelCoord];
+    float accepted = _RejectionMask[pixelCoord] > 0.5 ? 1.0 : 0.0;
+    float reprojectionBoundary = _ReprojectionBoundary[renderCoord];
+    float thinGeometryCoverage = _ThinGeometryCoverage[renderCoord];
+    float lumaInstability = _LumaInstability[renderCoord];
+    float2 motion = _DilatedMotion[renderCoord];
+    float velocityPixels = length(motion * float2(renderSize));
+    float velocityFactor = saturate((velocityPixels - 0.5) * (1.0 / 7.5));
+    float staticMoire = lumaInstability
+        * saturate(1.0 - velocityFactor * 2.0)
+        * saturate(1.0 - reprojectionBoundary * 2.0);
+    float waveStaticMoire = TSR_WaveActiveAverageOrSelf(staticMoire);
+    staticMoire = max(staticMoire, waveStaticMoire * 0.35);
+    float movingMoire = saturate(lumaInstability - staticMoire);
+    float updateInstability = max(max(max(velocityFactor, reprojectionBoundary), thinGeometryCoverage), movingMoire);
+    float waveUpdateInstability = TSR_WaveActiveMaxOrSelf(updateInstability);
+    bool waveHasRejectedNeighbor = TSR_WaveActiveAnyTrueOrSelf(accepted < 0.5);
+    updateInstability = max(updateInstability, waveUpdateInstability * 0.2);
+    updateInstability = max(updateInstability, waveHasRejectedNeighbor ? movingMoire * 0.15 : 0.0);
+
+    float maxSampleCount = max(_TSRParams.y, 1.0);
+    float boundarySampleCount = lerp(maxSampleCount, min(maxSampleCount, 4.0), reprojectionBoundary);
+    float thinGeometrySampleCount = lerp(boundarySampleCount, min(boundarySampleCount, 3.0), thinGeometryCoverage);
+    float antiFlickerSampleCount = lerp(
+        thinGeometrySampleCount,
+        max(thinGeometrySampleCount, min(maxSampleCount, 12.0)),
+        staticMoire);
+    float recoveryRate = lerp(1.0, 0.35, updateInstability);
+    float rejectionRetention = lerp(0.0, 0.35, updateInstability);
+    float rejectedSampleCount = max(1.0, min(previousSampleCount * rejectionRetention, antiFlickerSampleCount));
+    float sampleCount = accepted > 0.5
+        ? min(previousSampleCount + recoveryRate, antiFlickerSampleCount)
+        : rejectedSampleCount;
+    float historyWeight = accepted > 0.5
+        ? saturate(previousSampleCount / max(sampleCount, 1.0))
+        : 0.0;
+    float velocityWeightClamp = lerp(0.96, 0.18, velocityFactor);
+    float boundaryWeightClamp = lerp(0.96, 0.45, reprojectionBoundary);
+    float thinGeometryWeightClamp = lerp(0.96, 0.28, thinGeometryCoverage);
+    float moireWeightFloor = accepted > 0.5 ? staticMoire * 0.45 : 0.0;
+    float weightRelaxation = max(max(reprojectionBoundary * 0.5, thinGeometryCoverage * 0.65), movingMoire * 0.4);
+    historyWeight = min(historyWeight, min(min(velocityWeightClamp, boundaryWeightClamp), thinGeometryWeightClamp));
+    historyWeight = max(historyWeight, moireWeightFloor);
+    historyWeight *= saturate(1.0 - weightRelaxation);
+    float3 result = TSR_BlendColorVALU(currentColor, historyColor, historyWeight);
+
+    float resurrectionFrames = resurrectionMeta.x;
+    float resurrectionDepth = resurrectionMeta.y;
+    float currentDepth = _DilatedDepth[renderCoord];
+    float resurrectionDepthDiff = abs(currentDepth - resurrectionDepth);
+    float3 currentYCoCg = TSR_RGBToYCoCgVALU(currentColor);
+    float3 resurrectionYCoCg = TSR_RGBToYCoCgVALU(resurrectionColor);
+    float resurrectionLumaDiff = abs(currentYCoCg.x - resurrectionYCoCg.x)
+        / max(max(currentYCoCg.x, resurrectionYCoCg.x), 0.2);
+    float resurrectionChromaDiff = length(currentYCoCg.yz - resurrectionYCoCg.yz);
+    float resurrectionDepthTolerance = 0.003 + reprojectionBoundary * 0.012 + thinGeometryCoverage * 0.006;
+    float resurrectionLumaTolerance = 0.22 + lumaInstability * 0.25;
+    float resurrectionChromaTolerance = 0.28 + lumaInstability * 0.2;
+    bool resurrectionValid = accepted < 0.5
+        && resurrectionFrames > 0.5
+        && velocityFactor < 0.9
+        && resurrectionDepthDiff <= resurrectionDepthTolerance
+        && resurrectionLumaDiff <= resurrectionLumaTolerance
+        && resurrectionChromaDiff <= resurrectionChromaTolerance;
+    float resurrectionAgeWeight = saturate(resurrectionFrames / TSR_RESURRECTION_PERSISTENT_FRAMES);
+    float resurrectionWeight = resurrectionValid
+        ? resurrectionAgeWeight * saturate(1.0 - updateInstability * 0.65) * 0.35
+        : 0.0;
+    result = lerp(result, resurrectionColor, resurrectionWeight);
+    sampleCount = max(sampleCount, min(resurrectionFrames, 4.0) * resurrectionWeight);
+
+    float nextResurrectionFrames = accepted > 0.5
+        ? TSR_RESURRECTION_PERSISTENT_FRAMES
+        : max(resurrectionFrames - 1.0, 0.0);
+    float3 nextResurrectionColor = accepted > 0.5 ? result : resurrectionColor;
+    float nextResurrectionDepth = accepted > 0.5 ? currentDepth : resurrectionDepth;
+
+    _UpdatedHistoryColor[pixelCoord] = float4(max(result, 0.0), 1.0);
+    _UpdatedHistoryMeta[pixelCoord] = float2(sampleCount, currentDepth);
+    _UpdatedResurrectionColor[pixelCoord] = nextResurrectionFrames > 0.5
+        ? float4(max(nextResurrectionColor, 0.0), 1.0)
+        : 0.0;
+    _UpdatedResurrectionMeta[pixelCoord] = nextResurrectionFrames > 0.5
+        ? float2(nextResurrectionFrames, nextResurrectionDepth)
+        : 0.0;
+}

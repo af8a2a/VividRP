@@ -71,6 +71,30 @@ Shader "VividRP/Material/SimpleLit"
 
         Pass
         {
+            Name "VividGBufferGPUDrivenDecal"
+            Tags { "LightMode" = "VividGBufferGPUDrivenDecal" }
+
+            Blend One Zero
+            ZWrite On
+            ZTest Equal
+            Cull Back
+
+            HLSLPROGRAM
+                #pragma target 4.5
+                #pragma multi_compile_instancing
+                #pragma multi_compile _ LIGHTMAP_ON
+                #pragma multi_compile _ DIRLIGHTMAP_COMBINED
+                #pragma vertex Vert
+                #pragma fragment FragGBuffer
+
+                #define VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER 1
+                #include_with_pragmas "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/Bindless.hlsl"
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/SimpleLitGBufferPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
             Name "SRPDefaultUnlit"
             Tags { "LightMode" = "SRPDefaultUnlit" }
 

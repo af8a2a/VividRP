@@ -7,16 +7,30 @@ namespace VividRP.Editor.Tests
     public sealed class DLSSPassTests
     {
         [Test]
-        public void SourceFiles_ExposeDlssCameraModeAndInjection()
+        public void SourceFiles_GateDlssCameraModeAndExplicitAntialiasingPassWithIntegrationDefine()
         {
             var cameraDataSource = File.ReadAllText(GetPackageFilePath(
                 "Runtime",
                 "ComponentData",
                 "VividAdditionalCameraData.cs"));
+            var cameraEditorSource = File.ReadAllText(GetPackageFilePath(
+                "Editor",
+                "ComponentEditor",
+                "VividCameraEditor.cs"));
             var passRecorderSource = File.ReadAllText(GetPackageFilePath(
                 "Runtime",
                 "RenderGraph",
                 "PassRecorder.Execution.cs"));
+            var resolverSource = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "RenderGraph",
+                "FrameContext",
+                "VividAntialiasingData.cs"));
+            var antialiasingPassSource = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "AntialiasingPass.cs"));
             var dlssPassSource = File.ReadAllText(GetPackageFilePath(
                 "Runtime",
                 "RenderPass",
@@ -27,11 +41,22 @@ namespace VividRP.Editor.Tests
 
             Assert.That(cameraDataSource, Does.Contain("DeepLearningSuperSampling"));
             Assert.That(cameraDataSource, Does.Contain("DLSSQuality m_DLSSQuality"));
-            Assert.That(passRecorderSource, Does.Contain("if (DLSSExtension.IsSuperResolutionSupported)"));
-            Assert.That(passRecorderSource, Does.Contain("private static bool ShouldInjectDlssPass()"));
-            Assert.That(passRecorderSource, Does.Contain("RecordInjectedDlssPass("));
+            Assert.That(cameraDataSource, Does.Contain("#if DLSS_PLUGIN_INTEGRATE"));
+            Assert.That(cameraEditorSource, Does.Contain("#if !DLSS_PLUGIN_INTEGRATE"));
+            Assert.That(cameraEditorSource, Does.Contain("DLSS is not enabled"));
+            Assert.That(cameraEditorSource, Does.Contain("ShouldShowDlssDisabledWarning()"));
+            Assert.That(cameraEditorSource, Does.Contain("m_SerializedCamera.antialiasing.intValue == DlssAntialiasingModeValue"));
+            Assert.That(passRecorderSource, Does.Not.Contain("ShouldInjectDlssPass"));
+            Assert.That(passRecorderSource, Does.Not.Contain("RecordInjectedDlssPass"));
+            Assert.That(passRecorderSource, Does.Contain("pass is IRenderGraphRecordingPass graphRecordingPass"));
+            Assert.That(resolverSource, Does.Contain("DLSSExtension.IsSuperResolutionSupported"));
+            Assert.That(resolverSource, Does.Contain("#if DLSS_PLUGIN_INTEGRATE"));
+            Assert.That(antialiasingPassSource, Does.Contain("TryRecordDlssPass"));
+            Assert.That(antialiasingPassSource, Does.Contain("m_DlssPass.Record"));
+            Assert.That(antialiasingPassSource, Does.Contain("m_ResetHistory"));
             Assert.That(dlssPassSource, Does.Contain("DLSSSuperResolution"));
             Assert.That(dlssPassSource, Does.Contain("builder.AllowGlobalStateModification(true)"));
+            Assert.That(dlssPassSource, Does.Contain("#if DLSS_PLUGIN_INTEGRATE"));
         }
 
         [Test]
@@ -50,6 +75,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(dlssExtensionSource, Does.Contain("UnityDLSS"));
             Assert.That(dlssExtensionSource, Does.Contain("DLSS_Init_with_ProjectID_D3D12"));
+            Assert.That(dlssExtensionSource, Does.Contain("#if DLSS_PLUGIN_INTEGRATE"));
             Assert.That(resourcesSource, Does.Contain("DLSSBiasColorMaskShader"));
             Assert.That(resourcesSource, Does.Contain("DLSSRRResourcePrepCompute"));
             Assert.That(File.Exists(GetPackageFilePath("Runtime", "SubSystem", "DLSS", "UnityDLSS.dll")), Is.True);

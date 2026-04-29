@@ -7,7 +7,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
 {
-    public sealed class DepthOfFieldPass : UnsafePass, IPostProcessSourceOverridePass, IStablePassResourceLayout
+    public sealed class DepthOfFieldPass : UnsafePass, IPostProcessSourceOverridePass, IRenderGraphRecordingPass, IStablePassResourceLayout
     {
         private const int ThreadGroupSize = 8;
         private const int TileSize = 8;
@@ -231,13 +231,16 @@ namespace VividRP.Runtime
             {
                 cameraData = frameData.Get<VividCameraData>();
                 temporalData = frameData.Get<VividTemporalData>();
+                var antialiasingData = frameData.Get<VividAntialiasingData>();
                 m_Camera = cameraData?.camera;
                 postProcessingAllowed = m_Camera != null && CoreUtils.ArePostProcessesEnabled(m_Camera);
 
                 m_Settings = postProcessingAllowed
                     ? DepthOfFieldSettingsResolver.Resolve()
                     : DepthOfFieldSettingsData.CreateDefault();
-                m_UsesTemporalAntialiasing = TAASettings.UsesTemporalAntialiasing(cameraData?.additionalData);
+                m_UsesTemporalAntialiasing = antialiasingData != null
+                    ? antialiasingData.usesTemporalJitter
+                    : TAASettings.UsesTemporalAntialiasing(cameraData?.additionalData);
                 m_IsFirstFrame = temporalData?.isFirstFrame ?? true;
             }
 
@@ -327,6 +330,27 @@ namespace VividRP.Runtime
             }
         }
 
+        public void RecordGraph(RenderGraphRecordingContext context)
+        {
+            if (context?.RenderGraph == null || source == null)
+                return;
+
+            var sourceHandle = context.GetOrCreateTextureHandle(source);
+            if (sourceHandle.IsValid())
+                source.innerHandle = sourceHandle;
+
+            if (source?.innerHandle.IsValid() != true)
+                return;
+
+            if (!ShouldRecordPhysicalPath() && TryRegisterPassthrough(context, sourceHandle))
+                return;
+
+            context.RecordUnsafePass(
+                this,
+                ((IRenderPass)this).Initialize(),
+                context.PassDefinition);
+        }
+
         public override void Dispose()
         {
             m_ComputeShader = null;
@@ -353,15 +377,20 @@ namespace VividRP.Runtime
 
         private bool CanExecutePhysicalPath()
         {
-            return m_ComputeShader != null
-                && m_ShouldApply
-                && m_ApertureShapeBuffer != null
+            return ShouldRecordPhysicalPath()
                 && linearDepth?.innerHandle.IsValid() == true
                 && m_FullResCoC?.innerHandle.IsValid() == true
                 && m_TileMinMaxPing?.innerHandle.IsValid() == true
                 && m_TileMinMaxPong?.innerHandle.IsValid() == true
                 && m_ScaledSource?.innerHandle.IsValid() == true
-                && m_ScaledBlur?.innerHandle.IsValid() == true
+                && m_ScaledBlur?.innerHandle.IsValid() == true;
+        }
+
+        private bool ShouldRecordPhysicalPath()
+        {
+            return m_ComputeShader != null
+                && m_ShouldApply
+                && m_ApertureShapeBuffer != null
                 && m_ResampleColorKernel >= 0
                 && m_CopyCoCKernel >= 0
                 && m_PhysicalCoCKernel >= 0
@@ -372,6 +401,31 @@ namespace VividRP.Runtime
                 && m_ComputeSlowTilesKernel >= 0
                 && m_GatherFastTilesKernel >= 0
                 && m_CombineFastTilesKernel >= 0;
+        }
+
+        private bool TryRegisterPassthrough(RenderGraphRecordingContext context, TextureHandle sourceHandle)
+        {
+            if (!sourceHandle.IsValid() || !CanAliasPassthrough())
+                return false;
+
+            context.RegisterTextureHandle(output, sourceHandle);
+            return true;
+        }
+
+        private bool CanAliasPassthrough()
+        {
+            var sourceDesc = source?.desc;
+            var outputDesc = output?.desc;
+            if (sourceDesc == null || outputDesc == null)
+                return false;
+
+            return sourceDesc.Width == outputDesc.Width
+                && sourceDesc.Height == outputDesc.Height
+                && sourceDesc.Slices == outputDesc.Slices
+                && sourceDesc.Dimension == outputDesc.Dimension
+                && sourceDesc.ColorFormat == outputDesc.ColorFormat
+                && sourceDesc.DepthBufferBits == outputDesc.DepthBufferBits
+                && sourceDesc.MsaaSamples == outputDesc.MsaaSamples;
         }
 
         private bool ShouldReprojectCoC()

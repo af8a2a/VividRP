@@ -31,6 +31,9 @@ namespace VividRP.Runtime
         private bool m_EnableGPUDriven;
 
         [SerializeField]
+        private bool m_EnableGPUDrivenDecal;
+
+        [SerializeField]
         private bool m_EnableGPUDrivenDebugOverlay;
 
         [SerializeField]
@@ -82,6 +85,12 @@ namespace VividRP.Runtime
         {
             get => m_EnableGPUDriven;
             set => m_EnableGPUDriven = value;
+        }
+
+        public bool EnableGPUDrivenDecal
+        {
+            get => m_EnableGPUDrivenDecal;
+            set => m_EnableGPUDrivenDecal = value;
         }
 
         public bool EnableGPUDrivenDebugOverlay

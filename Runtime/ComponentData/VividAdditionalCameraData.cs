@@ -13,19 +13,53 @@ namespace VividRP.Runtime
     public enum VividAntialiasingMode
     {
         [InspectorName("No Anti-aliasing")]
-        None,
+        None = 0,
 
         [InspectorName("Conservative Morphological Anti-aliasing 2 (CMAA2)")]
-        CMAA2,
+        CMAA2 = 1,
 
         [InspectorName("Temporal Anti-aliasing (TAA)")]
-        TemporalAntiAliasing,
+        TemporalAntiAliasing = 2,
 
         [InspectorName("Spatial-Temporal Post-Processing (STP)")]
-        SpatialTemporalPostProcessing,
+        SpatialTemporalPostProcessing = 3,
 
+#if DLSS_PLUGIN_INTEGRATE
         [InspectorName("Deep Learning Super Sampling (DLSS)")]
-        DeepLearningSuperSampling,
+        DeepLearningSuperSampling = 4,
+#endif
+
+        [InspectorName("FidelityFX Super Resolution 3 (FSR3)")]
+        FidelityFXSuperResolution3 = 5,
+
+        [InspectorName("Temporal Super Resolution (TSR)")]
+        TemporalSuperResolution = 6,
+    }
+
+    public enum VividFsr3QualityMode
+    {
+        [InspectorName("Native AA")]
+        NativeAA = 0,
+
+        Quality = 1,
+        Balanced = 2,
+        Performance = 3,
+
+        [InspectorName("Ultra Performance")]
+        UltraPerformance = 4,
+    }
+
+    public enum VividTsrQualityMode
+    {
+        [InspectorName("Native AA")]
+        NativeAA = 0,
+
+        Quality = 1,
+        Balanced = 2,
+        Performance = 3,
+
+        [InspectorName("Ultra Performance")]
+        UltraPerformance = 4,
     }
 
     public static class VividCameraExtensions
@@ -70,6 +104,9 @@ namespace VividRP.Runtime
         [SerializeField]
         private bool m_EnableTAA;
 
+        [SerializeField, HideInInspector]
+        private bool m_LegacyAntialiasingMigrated;
+
         [SerializeField, Range(0.2f, 2.0f)]
         private float m_TAAJitterSpread = 1.0f;
 
@@ -85,13 +122,40 @@ namespace VividRP.Runtime
         [SerializeField, Range(0.0f, 1.0f)]
         private float m_TAAAntiFlickerIntensity = 0.5f;
 
+#if DLSS_PLUGIN_INTEGRATE
         [SerializeField]
         private DLSSQuality m_DLSSQuality = DLSSQuality.Balanced;
+#endif
+
+        [SerializeField]
+        private VividFsr3QualityMode m_FSR3Quality = VividFsr3QualityMode.Balanced;
+
+        [SerializeField]
+        private bool m_FSR3EnableSharpening = true;
+
+        [SerializeField, Range(0.0f, 1.0f)]
+        private float m_FSR3Sharpness = 0.2f;
+
+        [SerializeField]
+        private VividTsrQualityMode m_TSRQuality = VividTsrQualityMode.Balanced;
+
+        [SerializeField]
+        private bool m_TSREnableSharpening = true;
+
+        [SerializeField, Range(0.0f, 1.0f)]
+        private float m_TSRSharpness = 0.2f;
+
+        [SerializeField, Range(8, 32)]
+        private int m_TSRHistorySampleCount = 16;
 
         private Matrix4x4 m_ViewMatrix = Matrix4x4.identity;
         private Matrix4x4 m_ProjectionMatrix = Matrix4x4.identity;
         private Matrix4x4 m_JitterMatrix = Matrix4x4.identity;
         private Vector2 m_Jitter;
+        private Vector2 m_FSR3JitterOffset;
+        private int m_FSR3JitterPhaseCount;
+        private Vector2 m_TSRJitterOffset;
+        private int m_TSRJitterPhaseCount;
         private bool m_RenderIntoTexture;
         private bool m_HasStoredMatrixData;
 
@@ -123,6 +187,8 @@ namespace VividRP.Runtime
             m_ProjectionMatrix = Matrix4x4.identity;
             m_JitterMatrix = Matrix4x4.identity;
             m_Jitter = Vector2.zero;
+            ResetFsr3JitterData();
+            ResetTsrJitterData();
             m_RenderIntoTexture = false;
             m_HasStoredMatrixData = false;
         }
@@ -225,6 +291,23 @@ namespace VividRP.Runtime
                 : VividAntialiasingMode.None;
         }
 
+        public bool enableFSR3
+        {
+            get => antialiasing == VividAntialiasingMode.FidelityFXSuperResolution3;
+            set => antialiasing = value
+                ? VividAntialiasingMode.FidelityFXSuperResolution3
+                : VividAntialiasingMode.None;
+        }
+
+        public bool enableTSR
+        {
+            get => antialiasing == VividAntialiasingMode.TemporalSuperResolution;
+            set => antialiasing = value
+                ? VividAntialiasingMode.TemporalSuperResolution
+                : VividAntialiasingMode.None;
+        }
+
+#if DLSS_PLUGIN_INTEGRATE
         public bool enableDLSS
         {
             get => antialiasing == VividAntialiasingMode.DeepLearningSuperSampling;
@@ -232,11 +315,28 @@ namespace VividRP.Runtime
                 ? VividAntialiasingMode.DeepLearningSuperSampling
                 : VividAntialiasingMode.None;
         }
+#endif
 
-        public bool usesTemporalAntialiasing =>
-            antialiasing == VividAntialiasingMode.TemporalAntiAliasing
-            || antialiasing == VividAntialiasingMode.SpatialTemporalPostProcessing
-            || antialiasing == VividAntialiasingMode.DeepLearningSuperSampling;
+        public bool usesTemporalAntialiasing
+        {
+            get
+            {
+                if (antialiasing == VividAntialiasingMode.TemporalAntiAliasing
+                    || antialiasing == VividAntialiasingMode.SpatialTemporalPostProcessing
+                    || antialiasing == VividAntialiasingMode.FidelityFXSuperResolution3
+                    || antialiasing == VividAntialiasingMode.TemporalSuperResolution)
+                {
+                    return true;
+                }
+
+#if DLSS_PLUGIN_INTEGRATE
+                if (antialiasing == VividAntialiasingMode.DeepLearningSuperSampling)
+                    return true;
+#endif
+
+                return false;
+            }
+        }
 
         public bool enableCMAA2
         {
@@ -276,14 +376,91 @@ namespace VividRP.Runtime
             set => m_TAAAntiFlickerIntensity = Mathf.Clamp01(value);
         }
 
+#if DLSS_PLUGIN_INTEGRATE
         public DLSSQuality dlssQuality
         {
             get => m_DLSSQuality;
             set => m_DLSSQuality = value;
         }
+#endif
+
+        public VividFsr3QualityMode fsr3Quality
+        {
+            get => m_FSR3Quality;
+            set => m_FSR3Quality = value;
+        }
+
+        public bool fsr3EnableSharpening
+        {
+            get => m_FSR3EnableSharpening;
+            set => m_FSR3EnableSharpening = value;
+        }
+
+        public float fsr3Sharpness
+        {
+            get => m_FSR3Sharpness;
+            set => m_FSR3Sharpness = Mathf.Clamp01(value);
+        }
+
+        public VividTsrQualityMode tsrQuality
+        {
+            get => m_TSRQuality;
+            set => m_TSRQuality = value;
+        }
+
+        public bool tsrEnableSharpening
+        {
+            get => m_TSREnableSharpening;
+            set => m_TSREnableSharpening = value;
+        }
+
+        public float tsrSharpness
+        {
+            get => m_TSRSharpness;
+            set => m_TSRSharpness = Mathf.Clamp01(value);
+        }
+
+        public int tsrHistorySampleCount
+        {
+            get => m_TSRHistorySampleCount;
+            set => m_TSRHistorySampleCount = Mathf.Clamp(value, 8, 32);
+        }
+
+        internal Vector2 fsr3JitterOffset => m_FSR3JitterOffset;
+
+        internal int fsr3JitterPhaseCount => m_FSR3JitterPhaseCount;
+
+        internal void SetFsr3JitterData(Vector2 jitterOffset, int phaseCount)
+        {
+            m_FSR3JitterOffset = jitterOffset;
+            m_FSR3JitterPhaseCount = Mathf.Max(1, phaseCount);
+        }
+
+        internal void ResetFsr3JitterData()
+        {
+            m_FSR3JitterOffset = Vector2.zero;
+            m_FSR3JitterPhaseCount = 0;
+        }
+
+        internal Vector2 tsrJitterOffset => m_TSRJitterOffset;
+
+        internal int tsrJitterPhaseCount => m_TSRJitterPhaseCount;
+
+        internal void SetTsrJitterData(Vector2 jitterOffset, int phaseCount)
+        {
+            m_TSRJitterOffset = jitterOffset;
+            m_TSRJitterPhaseCount = Mathf.Max(1, phaseCount);
+        }
+
+        internal void ResetTsrJitterData()
+        {
+            m_TSRJitterOffset = Vector2.zero;
+            m_TSRJitterPhaseCount = 0;
+        }
 
         private void OnValidate()
         {
+            ClampTsrSettings();
             SynchronizeLegacyAntialiasing();
             m_Camera = camera;
         }
@@ -294,14 +471,31 @@ namespace VividRP.Runtime
 
         void ISerializationCallbackReceiver.OnAfterDeserialize()
         {
+            ClampTsrSettings();
             SynchronizeLegacyAntialiasing();
+        }
+
+        private void ClampTsrSettings()
+        {
+            m_TSRSharpness = Mathf.Clamp01(m_TSRSharpness);
+            m_TSRHistorySampleCount = Mathf.Clamp(m_TSRHistorySampleCount, 8, 32);
         }
 
         private void SynchronizeLegacyAntialiasing()
         {
-            if (m_Antialiasing == VividAntialiasingMode.None && m_EnableTAA)
-                m_Antialiasing = VividAntialiasingMode.TemporalAntiAliasing;
+#if !DLSS_PLUGIN_INTEGRATE
+            if ((int)m_Antialiasing == 4)
+                m_Antialiasing = VividAntialiasingMode.None;
+#endif
 
+            if (!m_LegacyAntialiasingMigrated
+                && m_Antialiasing == VividAntialiasingMode.None
+                && m_EnableTAA)
+            {
+                m_Antialiasing = VividAntialiasingMode.TemporalAntiAliasing;
+            }
+
+            m_LegacyAntialiasingMigrated = true;
             m_EnableTAA = m_Antialiasing == VividAntialiasingMode.TemporalAntiAliasing;
         }
     }

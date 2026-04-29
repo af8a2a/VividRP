@@ -5,6 +5,8 @@
 // Manages DLSS-RR feature lifecycle and execution via CommandBuffer.
 //------------------------------------------------------------------------------
 
+#if DLSS_PLUGIN_INTEGRATE
+
 using System;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -62,7 +64,6 @@ namespace VividRP.Runtime
     /// </summary>
     public class DLSSRayReconstruction : IDisposable
     {
-#if DLSS_PLUGIN_INTEGRATE
         private int m_dlssHandle = DLSSExtension.DLSS_INVALID_FEATURE_HANDLE;
         private IntPtr m_dlssParameters = IntPtr.Zero;
         private bool m_initialized = false;
@@ -496,46 +497,6 @@ namespace VividRP.Runtime
             
             Dispose(false);
         }
-#else
-        public enum DenoiseMode : int { Off = 0, DLUnified = 1 }
-        public enum DepthType : int { Linear = 0, Hardware = 1 }
-        public enum RoughnessMode : int { Unpacked = 0, PackedInNormalsW = 1 }
-
-        public DLSSRayReconstruction(
-            NVSDK_NGX_DLSS_Feature_Flags featureFlags = NVSDK_NGX_DLSS_Feature_Flags.None,
-            NVSDK_NGX_PerfQuality_Value qualityValue = NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_Balanced,
-            DepthType depthType = DepthType.Hardware,
-            RoughnessMode roughnessMode = RoughnessMode.Unpacked)
-        {
-        }
-
-        public bool IsSupported => false;
-
-        public void SetQuality(NVSDK_NGX_PerfQuality_Value quality) { }
-
-        public void SetFeatureFlags(NVSDK_NGX_DLSS_Feature_Flags flags) { }
-
-        public bool Render(
-            CommandBuffer cmd,
-            RenderTexture colorInput,
-            RenderTexture colorOutput,
-            RenderTexture depth,
-            RenderTexture motionVectors,
-            DLSSRRGBuffer gbuffer,
-            DLSSRRRayInputs rayInputs,
-            Matrix4x4 worldToView,
-            Matrix4x4 viewToClip,
-            float jitterX,
-            float jitterY,
-            float mvScaleX,
-            float mvScaleY,
-            bool reset = false,
-            float frameTimeDeltaMs = 0.0f)
-        {
-            return false;
-        }
-
-        public void Dispose() { }
-#endif
     }
 }
+#endif

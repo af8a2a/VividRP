@@ -34,7 +34,9 @@ namespace VividRP.Runtime
             LensFlareCommonSRP.Initialize();
             VividAdaptiveProbeVolumeUtility.Initialize(asset);
             VividGPUDrivenSystem.Initialize();
+#if DLSS_PLUGIN_INTEGRATE
             DLSSExtension.Initialize();
+#endif
 
             m_RenderGraph = new RenderGraph(RenderGraphName);
             m_DebugDisplaySettingsUI = new DebugDisplaySettingsUI();
@@ -76,6 +78,9 @@ namespace VividRP.Runtime
                 context.SetupCameraProperties(camera);
 
                 var graphAsset = m_Asset.RenderGraphAsset;
+                PassRecorder.InitializeContext(context, camera, cullingResults, graphAsset);
+                context.SetupCameraProperties(camera);
+
                 PassRecorder.PrepareFrame(graphAsset, cmdBuffer);
 
                 shouldSubmit = true;
@@ -86,7 +91,7 @@ namespace VividRP.Runtime
                 {
                     scriptableRenderContext = context,
                     commandBuffer = cmdBuffer,
-                    currentFrameIndex = Time.frameCount,
+                    currentFrameIndex = PassRecorder.GetFrameData().Get<VividCameraData>()?.frameIndex ?? Time.frameCount,
                     executionId = camera.GetEntityId(),
                     generateDebugData = camera.cameraType != CameraType.Preview && !camera.isProcessingRenderRequest,
                 };
@@ -107,6 +112,7 @@ namespace VividRP.Runtime
                 PassRecorder.CommitFrame(graphAsset);
                 context.SetupCameraProperties(camera);
                 FrameContextSystem.ExecutePostRender(PassRecorder.GetFrameData(), cmdBuffer);
+                RequestEditorTemporalRepaint();
 
                 context.ExecuteCommandBuffer(cmdBuffer);
                 cmdBuffer.Clear();
@@ -235,6 +241,21 @@ namespace VividRP.Runtime
 #endif
         }
 
+        private static void RequestEditorTemporalRepaint()
+        {
+#if UNITY_EDITOR
+            if (Application.isPlaying)
+                return;
+
+            var antialiasingData = PassRecorder.GetFrameData().Get<VividAntialiasingData>();
+            if (antialiasingData == null || !antialiasingData.usesTemporalJitter)
+                return;
+
+            UnityEditor.EditorApplication.QueuePlayerLoopUpdate();
+            UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+#endif
+        }
+
         protected override void Dispose(bool disposing)
         {
             PassRecorder.Dispose();
@@ -245,7 +266,9 @@ namespace VividRP.Runtime
             DecalSystem.Deinitialize();
             VividGPUDrivenSystem.Deinitialize();
             VividLocalVolumetricFogManager.Dispose();
+#if DLSS_PLUGIN_INTEGRATE
             DLSSExtension.Shutdown();
+#endif
             m_DebugDisplaySettingsUI?.UnregisterDebug();
             m_DebugDisplaySettingsUI = null;
 

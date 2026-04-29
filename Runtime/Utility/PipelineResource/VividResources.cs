@@ -31,11 +31,61 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/DepthOfField.compute")]
         public ComputeShader DepthOfFieldCompute;
 
+        [ResourcePath("Shaders/Core/Private/FSR3/FSR3PrepareInputs.compute")]
+        public ComputeShader FSR3PrepareInputsCompute;
+
+        [ResourcePath("Shaders/Core/Private/FSR3/FSR3LumaPyramid.compute")]
+        public ComputeShader FSR3LumaPyramidCompute;
+
+        [ResourcePath("Shaders/Core/Private/FSR3/FSR3ShadingChangePyramid.compute")]
+        public ComputeShader FSR3ShadingChangePyramidCompute;
+
+        [ResourcePath("Shaders/Core/Private/FSR3/FSR3ShadingChange.compute")]
+        public ComputeShader FSR3ShadingChangeCompute;
+
+        [ResourcePath("Shaders/Core/Private/FSR3/FSR3PrepareReactivity.compute")]
+        public ComputeShader FSR3PrepareReactivityCompute;
+
+        [ResourcePath("Shaders/Core/Private/FSR3/FSR3LumaInstability.compute")]
+        public ComputeShader FSR3LumaInstabilityCompute;
+
+        [ResourcePath("Shaders/Core/Private/FSR3/FSR3Accumulate.compute")]
+        public ComputeShader FSR3AccumulateCompute;
+
+        [ResourcePath("Shaders/Core/Private/FSR3/FSR3AccumulateSharpen.compute")]
+        public ComputeShader FSR3AccumulateSharpenCompute;
+
+        [ResourcePath("Shaders/Core/Private/FSR3/FSR3RCAS.compute")]
+        public ComputeShader FSR3RCASCompute;
+
+        [ResourcePath("Shaders/Core/Private/TSR/TSRDilateVelocity.compute")]
+        public ComputeShader TSRDilateVelocityCompute;
+
+        [ResourcePath("Shaders/Core/Private/TSR/TSRReprojectHistory.compute")]
+        public ComputeShader TSRReprojectHistoryCompute;
+
+        [ResourcePath("Shaders/Core/Private/TSR/TSRRejectShading.compute")]
+        public ComputeShader TSRRejectShadingCompute;
+
+        [ResourcePath("Shaders/Core/Private/TSR/TSRSpatialAntiAliasing.compute")]
+        public ComputeShader TSRSpatialAntiAliasingCompute;
+
+        [ResourcePath("Shaders/Core/Private/TSR/TSRUpdateHistory.compute")]
+        public ComputeShader TSRUpdateHistoryCompute;
+
+        [ResourcePath("Shaders/Core/Private/TSR/TSRResolveHistory.compute")]
+        public ComputeShader TSRResolveHistoryCompute;
+
+        [ResourcePath("Shaders/Core/Private/TSR/TSRSharpen.compute")]
+        public ComputeShader TSRSharpenCompute;
+
+#if DLSS_PLUGIN_INTEGRATE
         [ResourcePath("Shaders/Core/Private/DLSS/DLSSBiasColorMask")]
         public Shader DLSSBiasColorMaskShader;
 
         [ResourcePath("Shaders/Core/Private/DLSS/DLSSRRResourcePrep.compute")]
         public ComputeShader DLSSRRResourcePrepCompute;
+#endif
 
         [ResourcePath("Shaders/Core/Private/AutoExposure/Unreal/AutoExposure.compute")]
         public ComputeShader AutoExposureCompute;

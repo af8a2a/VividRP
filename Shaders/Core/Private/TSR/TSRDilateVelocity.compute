@@ -1,0 +1,160 @@
+#pragma use_dxc
+#pragma kernel CS
+#pragma multi_compile_local _ VIVID_TSR_WAVE_OPS
+#pragma multi_compile _ UNITY_DEVICE_SUPPORTS_NATIVE_16BIT
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
+
+Texture2D<float> _InputDepth;
+Texture2D<float2> _InputMotionVectors;
+Texture2D<float4> _InputColor;
+Texture2D<float4> _HistoryColor;
+
+RWTexture2D<float2> _DilatedMotion;
+RWTexture2D<float> _DilatedDepth;
+RWTexture2D<float> _DepthError;
+RWTexture2D<float> _ReprojectionBoundary;
+RWTexture2D<float> _ThinGeometryCoverage;
+RWTexture2D<float> _LumaInstability;
+
+float4 _RenderSize;
+float4 _OutputSize;
+float4 _PreviousOutputSize;
+float4 _Jitter;
+float4 _TSRParams;
+
+[numthreads(8, 8, 1)]
+void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int2 renderSize = int2(_RenderSize.xy);
+    int2 pixelCoord = int2(dispatchThreadId.xy);
+    if (any(pixelCoord >= renderSize))
+        return;
+
+    float centerDepth = _InputDepth[pixelCoord];
+    float2 centerMotion = _InputMotionVectors[pixelCoord];
+    float2 selectedMotion = centerMotion;
+    float selectedDepth = centerDepth;
+    float selectedMotionLength = dot(selectedMotion, selectedMotion);
+    float maxDepthError = 0.0;
+    float maxMotionDelta = 0.0;
+
+    [unroll]
+    for (int y = -1; y <= 1; y++)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; x++)
+        {
+            int2 sampleCoord = clamp(pixelCoord + int2(x, y), int2(0, 0), renderSize - 1);
+            float sampleDepth = _InputDepth[sampleCoord];
+            float2 motion = _InputMotionVectors[sampleCoord];
+            float motionLength = dot(motion, motion);
+            float depthError = abs(sampleDepth - centerDepth);
+            float motionDelta = length((motion - centerMotion) * float2(renderSize));
+
+            maxDepthError = max(maxDepthError, depthError);
+            maxMotionDelta = max(maxMotionDelta, motionDelta);
+
+            bool closerDepth = TSR_IsDepthCloser(sampleDepth, selectedDepth);
+            bool equalDepthHigherMotion = abs(sampleDepth - selectedDepth) <= 1e-6
+                && motionLength > selectedMotionLength;
+            if (closerDepth || equalDepthHigherMotion)
+            {
+                selectedMotionLength = motionLength;
+                selectedMotion = motion;
+                selectedDepth = sampleDepth;
+            }
+        }
+    }
+
+    float depthBoundary = saturate(maxDepthError * 333.3333);
+    float motionBoundary = saturate(maxMotionDelta * 0.25);
+    float closestDepthCoverage = 0.0;
+    float coverageDepthTolerance = max(5e-5, maxDepthError * 0.25);
+
+    [unroll]
+    for (int coverageY = -1; coverageY <= 1; coverageY++)
+    {
+        [unroll]
+        for (int coverageX = -1; coverageX <= 1; coverageX++)
+        {
+            int2 sampleCoord = clamp(pixelCoord + int2(coverageX, coverageY), int2(0, 0), renderSize - 1);
+            float sampleDepth = _InputDepth[sampleCoord];
+            closestDepthCoverage += abs(sampleDepth - selectedDepth) <= coverageDepthTolerance ? 1.0 : 0.0;
+        }
+    }
+
+    closestDepthCoverage *= 1.0 / 9.0;
+    float sparseCoverage = saturate((0.5 - closestDepthCoverage) * 3.0);
+    float thinGeometryCoverage = saturate(max(depthBoundary, motionBoundary) * sparseCoverage);
+    float reprojectionBoundary = max(depthBoundary, motionBoundary);
+    float waveReprojectionBoundary = TSR_WaveActiveMaxOrSelf(reprojectionBoundary);
+    float waveThinGeometryCoverage = TSR_WaveActiveMaxOrSelf(thinGeometryCoverage);
+    reprojectionBoundary = max(reprojectionBoundary, waveReprojectionBoundary * 0.2);
+    thinGeometryCoverage = max(thinGeometryCoverage, waveThinGeometryCoverage * 0.15);
+
+    float centerLuma = TSR_LumaVALU(_InputColor[pixelCoord].rgb);
+    float lumaMin = centerLuma;
+    float lumaMax = centerLuma;
+    float lumaSum = 0.0;
+    float lumaCross = 0.0;
+    float lumaCorners = 0.0;
+
+    [unroll]
+    for (int lumaY = -1; lumaY <= 1; lumaY++)
+    {
+        [unroll]
+        for (int lumaX = -1; lumaX <= 1; lumaX++)
+        {
+            int2 sampleCoord = clamp(pixelCoord + int2(lumaX, lumaY), int2(0, 0), renderSize - 1);
+            float sampleLuma = TSR_LumaVALU(_InputColor[sampleCoord].rgb);
+            lumaMin = min(lumaMin, sampleLuma);
+            lumaMax = max(lumaMax, sampleLuma);
+            lumaSum += sampleLuma;
+
+            if (abs(lumaX) + abs(lumaY) == 1)
+                lumaCross += sampleLuma;
+            else if (abs(lumaX) == 1 && abs(lumaY) == 1)
+                lumaCorners += sampleLuma;
+        }
+    }
+
+    float lumaMean = lumaSum * (1.0 / 9.0);
+    float lumaScale = max(max(abs(lumaMean), abs(centerLuma)), 0.2);
+    float crossMean = lumaCross * 0.25;
+    float cornerMean = lumaCorners * 0.25;
+    float lumaRange = (lumaMax - lumaMin) / lumaScale;
+    float laplacian = abs(centerLuma * 4.0 - lumaCross) / lumaScale;
+    float checkerEnergy = abs(centerLuma + cornerMean - 2.0 * crossMean) / lumaScale;
+    float spatialMoire = saturate((lumaRange * 0.55 + laplacian * 0.25 + checkerEnergy * 0.8 - 0.08) * 3.0);
+
+    float2 uv = (float2(pixelCoord) + 0.5) / float2(renderSize);
+    float2 jitterDelta = (_Jitter.zw - _Jitter.xy) * 0.5;
+#if UNITY_UV_STARTS_AT_TOP
+    jitterDelta.y = -jitterDelta.y;
+#endif
+    float2 historyUV = uv - selectedMotion + jitterDelta;
+    bool validHistoryUV = all(historyUV >= 0.0) && all(historyUV <= 1.0);
+    bool hasHistory = _TSRParams.x > 0.5 && validHistoryUV;
+    float temporalFlicker = 0.0;
+    if (hasHistory)
+    {
+        float2 previousSize = max(_PreviousOutputSize.xy, float2(1.0, 1.0));
+        float historyLuma = TSR_LumaVALU(TSR_SampleCatmullRom(_HistoryColor, historyUV, previousSize).rgb);
+        float temporalDelta = abs(centerLuma - historyLuma) / max(max(abs(centerLuma), abs(historyLuma)), 0.2);
+        temporalFlicker = saturate((temporalDelta - 0.04) * 4.0);
+    }
+
+    float moireSurfaceWeight = saturate(1.0 - thinGeometryCoverage * 0.25);
+    float lumaInstability = saturate(spatialMoire * (0.35 + temporalFlicker) + temporalFlicker * 0.5);
+    lumaInstability *= moireSurfaceWeight;
+    float waveLumaInstability = TSR_WaveActiveAverageOrSelf(lumaInstability);
+    lumaInstability = max(lumaInstability, waveLumaInstability * 0.35);
+
+    _DilatedMotion[pixelCoord] = selectedMotion;
+    _DilatedDepth[pixelCoord] = selectedDepth;
+    _DepthError[pixelCoord] = maxDepthError;
+    _ReprojectionBoundary[pixelCoord] = reprojectionBoundary;
+    _ThinGeometryCoverage[pixelCoord] = thinGeometryCoverage;
+    _LumaInstability[pixelCoord] = lumaInstability;
+}

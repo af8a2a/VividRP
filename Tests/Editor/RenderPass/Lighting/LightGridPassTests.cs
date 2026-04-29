@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -24,21 +25,6 @@ namespace VividRP.Editor.Tests
             Assert.That(rawImportedFields, Is.Empty);
         }
 
-        [Test]
-        public void LightGridPass_MarksInternalScratchBuffersTransient()
-        {
-            AssertTransientResource("m_ScreenSpaceBoundsBuffer");
-            AssertTransientResource("m_LayeredLightListCounterBuffer");
-        }
-
-        [Test]
-        public void LightGridPass_KeepsExportedInternalBuffersNonTransient()
-        {
-            AssertNonTransientResource("m_FiniteLightBoundBuffer");
-            AssertNonTransientResource("m_LightVolumeDataBuffer");
-            AssertNonTransientResource("m_BigTileLightListBuffer");
-            AssertNonTransientResource("m_BigTileVolumetricLightListBuffer");
-        }
 
         [Test]
         public void LightGridPass_KeepsLightingConsumerBuffers_VisibleForAuthoringPorts()
@@ -89,7 +75,6 @@ namespace VividRP.Editor.Tests
                     .GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
                     .Where(field => field.FieldType == typeof(RenderGraphBuffer))
                     .Where(field => field.GetCustomAttribute<RenderGraphResource>() != null)
-                    .Where(field => field.GetCustomAttribute<TransientResourceAttribute>() == null)
                     .ToArray();
 
                 Assert.That(bufferFields, Is.Not.Empty);
@@ -100,29 +85,6 @@ namespace VividRP.Editor.Tests
                     Assert.That(buffer, Is.Not.Null, field.Name);
                     AssertImportedBackingBuffer(buffer, field.Name);
                 }
-            }
-            finally
-            {
-                pass.Dispose();
-            }
-        }
-
-        [Test]
-        public void Prepare_DoesNotCreateImportedBackingBuffers_ForTransientScratchBuffers()
-        {
-            var pass = new LightGridPass();
-
-            try
-            {
-                var frameData = new ContextContainer();
-                var cameraData = frameData.GetOrCreate<VividCameraData>();
-                cameraData.actualWidth = 128;
-                cameraData.actualHeight = 64;
-
-                pass.Prepare(frameData);
-
-                AssertNoImportedBackingBuffer(pass, "m_ScreenSpaceBoundsBuffer");
-                AssertNoImportedBackingBuffer(pass, "m_LayeredLightListCounterBuffer");
             }
             finally
             {
@@ -144,22 +106,6 @@ namespace VividRP.Editor.Tests
             Assert.That(importedGraphicsBuffer.stride, Is.EqualTo(buffer.desc.Stride), fieldName);
         }
 
-        private static void AssertNoImportedBackingBuffer(LightGridPass pass, string fieldName)
-        {
-            var field = typeof(LightGridPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.That(field, Is.Not.Null, fieldName);
-
-            var buffer = (RenderGraphBuffer)field.GetValue(pass);
-            Assert.That(buffer, Is.Not.Null, fieldName);
-
-            var importedGraphicsBufferProperty = typeof(RenderGraphBuffer).GetProperty(
-                "ImportedGraphicsBuffer",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-
-            Assert.That(importedGraphicsBufferProperty, Is.Not.Null);
-            Assert.That(importedGraphicsBufferProperty.GetValue(buffer), Is.Null, fieldName);
-        }
-
         private static void AssertNativeArrayField(string fieldName, Type elementType)
         {
             var field = typeof(LightGridPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
@@ -179,22 +125,23 @@ namespace VividRP.Editor.Tests
             Assert.That(attr.BindingMode, Is.EqualTo(expectedBindingMode), fieldName);
         }
 
-        private static void AssertTransientResource(string fieldName)
+        private static string GetPackageFilePath(params string[] relativeParts)
         {
-            var field = typeof(LightGridPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.That(field, Is.Not.Null, fieldName);
+            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            var packageRoots = new[]
+            {
+                Path.Combine(projectRoot, "Packages", "VividRP"),
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
+            };
 
-            Assert.That(field.GetCustomAttribute<RenderGraphResource>(), Is.Not.Null, fieldName);
-            Assert.That(field.GetCustomAttribute<TransientResourceAttribute>(), Is.Not.Null, fieldName);
-        }
+            foreach (var packageRoot in packageRoots)
+            {
+                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
+                if (File.Exists(fullPath))
+                    return fullPath;
+            }
 
-        private static void AssertNonTransientResource(string fieldName)
-        {
-            var field = typeof(LightGridPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.That(field, Is.Not.Null, fieldName);
-
-            Assert.That(field.GetCustomAttribute<RenderGraphResource>(), Is.Not.Null, fieldName);
-            Assert.That(field.GetCustomAttribute<TransientResourceAttribute>(), Is.Null, fieldName);
+            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 }

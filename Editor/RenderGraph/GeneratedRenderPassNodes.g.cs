@@ -3,6 +3,9 @@ using System;
 namespace VividRP.Editor.RenderGraph.Generated
 {
     [Serializable]
+    internal sealed class AntialiasingPass : RenderPassNodeData { }
+
+    [Serializable]
     internal sealed class AtmosphericScatteringPass : RenderPassNodeData { }
 
     [Serializable]

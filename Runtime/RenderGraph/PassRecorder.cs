@@ -75,7 +75,7 @@ namespace VividRP.Runtime
         /// Records a compute pass. Creates resources from PassResource, sets up builder calls,
         /// and wires the render func to call pass.Record().
         /// </summary>
-        static void RecordComputePass(
+        internal static void RecordComputePass(
             RenderGraph renderGraph,
             ComputePass pass,
             PassResource resource,
@@ -116,7 +116,7 @@ namespace VividRP.Runtime
         /// Records a raster pass. Creates resources, sets up attachments and builder calls,
         /// and wires the render func to call pass.Record().
         /// </summary>
-        static void RecordRasterPass(
+        internal static void RecordRasterPass(
             RenderGraph renderGraph,
             RasterPass pass,
             PassResource resource,
@@ -152,7 +152,7 @@ namespace VividRP.Runtime
         /// Records an unsafe pass. Creates resources from PassResource, sets up builder calls,
         /// and wires the render func to call pass.Record().
         /// </summary>
-        static void RecordUnsafePass(
+        internal static void RecordUnsafePass(
             RenderGraph renderGraph,
             UnsafePass pass,
             PassResource resource,
@@ -257,7 +257,7 @@ namespace VividRP.Runtime
             builder.AllowGlobalStateModification(true);
         }
 
-        private static TextureHandle GetOrCreateTextureHandle(
+        internal static TextureHandle GetOrCreateTextureHandle(
             RenderGraph renderGraph,
             RenderGraphTexture texture,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache)

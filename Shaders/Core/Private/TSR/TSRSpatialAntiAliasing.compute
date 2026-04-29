@@ -1,6 +1,7 @@
 #pragma use_dxc
 #pragma kernel CS
 #pragma multi_compile_local _ VIVID_TSR_WAVE_OPS
+#pragma multi_compile _ UNITY_DEVICE_SUPPORTS_NATIVE_16BIT
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
 
@@ -19,7 +20,7 @@ float3 LoadInputColor(int2 coord, int2 renderSize)
 
 float TSR_Luma(float3 color)
 {
-    return dot(color, float3(0.25, 0.5, 0.25));
+    return TSR_LumaVALU(color);
 }
 
 [numthreads(8, 8, 1)]

@@ -9,6 +9,20 @@
 #define VIVID_TSR_USE_WAVE_OPS 0
 #endif
 
+#if defined(UNITY_DEVICE_SUPPORTS_NATIVE_16BIT) && defined(UNITY_COMPILER_DXC)
+#define VIVID_TSR_USE_16BIT_VALU 1
+typedef float16_t tsr_valu;
+typedef float16_t2 tsr_valu2;
+typedef float16_t3 tsr_valu3;
+typedef float16_t4 tsr_valu4;
+#else
+#define VIVID_TSR_USE_16BIT_VALU 0
+typedef float tsr_valu;
+typedef float2 tsr_valu2;
+typedef float3 tsr_valu3;
+typedef float4 tsr_valu4;
+#endif
+
 float TSR_WaveActiveMaxOrSelf(float value)
 {
 #if VIVID_TSR_USE_WAVE_OPS
@@ -34,6 +48,56 @@ bool TSR_WaveActiveAnyTrueOrSelf(bool value)
 #else
     return value;
 #endif
+}
+
+tsr_valu3 TSR_ToVALU3(float3 value)
+{
+    return (tsr_valu3)value;
+}
+
+float3 TSR_FromVALU3(tsr_valu3 value)
+{
+    return (float3)value;
+}
+
+float TSR_LumaVALU(float3 rgb)
+{
+    tsr_valu3 color = TSR_ToVALU3(rgb);
+    return (float)dot(color, tsr_valu3(0.25, 0.5, 0.25));
+}
+
+float3 TSR_RGBToYCoCgVALU(float3 rgb)
+{
+    tsr_valu3 color = TSR_ToVALU3(rgb);
+    tsr_valu y = dot(color, tsr_valu3(0.25, 0.5, 0.25));
+    tsr_valu co = dot(color, tsr_valu3(0.5, 0.0, -0.5));
+    tsr_valu cg = dot(color, tsr_valu3(-0.25, 0.5, -0.25));
+    return float3((float)y, (float)co, (float)cg);
+}
+
+float3 TSR_YCoCgToRGBVALU(float3 ycocg)
+{
+    tsr_valu3 color = TSR_ToVALU3(ycocg);
+    tsr_valu y = color.x;
+    tsr_valu co = color.y;
+    tsr_valu cg = color.z;
+    return float3((float)(y + co - cg), (float)(y + cg), (float)(y - co - cg));
+}
+
+float3 TSR_BlendColorVALU(float3 currentColor, float3 historyColor, float historyWeight)
+{
+    tsr_valu3 currentValue = TSR_ToVALU3(currentColor);
+    tsr_valu3 historyValue = TSR_ToVALU3(historyColor);
+    tsr_valu weight = (tsr_valu)saturate(historyWeight);
+    return TSR_FromVALU3(lerp(currentValue, historyValue, weight));
+}
+
+float3 TSR_SharpenColorVALU(float3 centerColor, float3 blurColor, float sharpness)
+{
+    tsr_valu3 centerValue = TSR_ToVALU3(centerColor);
+    tsr_valu3 blurValue = TSR_ToVALU3(blurColor);
+    tsr_valu sharpnessValue = (tsr_valu)saturate(sharpness);
+    return TSR_FromVALU3(centerValue + (centerValue - blurValue) * sharpnessValue);
 }
 
 float3 TSR_RGBToYCoCg(float3 rgb)

@@ -1,6 +1,7 @@
 #pragma use_dxc
 #pragma kernel CS
 #pragma multi_compile_local _ VIVID_TSR_WAVE_OPS
+#pragma multi_compile _ UNITY_DEVICE_SUPPORTS_NATIVE_16BIT
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
 
@@ -27,6 +28,6 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float3 blur = 0.25 * (left + right + down + up);
     float sharpness = saturate(_TSRParams.z);
-    float3 sharpened = center + (center - blur) * sharpness;
+    float3 sharpened = TSR_SharpenColorVALU(center, blur, sharpness);
     _OutputColor[pixelCoord] = float4(max(sharpened, 0.0), 1.0);
 }

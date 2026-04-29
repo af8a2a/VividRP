@@ -329,6 +329,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(source, Does.Contain("#pragma kernel CS"));
                 Assert.That(source, Does.Contain("#pragma use_dxc"));
                 Assert.That(source, Does.Contain("#pragma multi_compile_local _ VIVID_TSR_WAVE_OPS"));
+                Assert.That(source, Does.Contain("#pragma multi_compile _ UNITY_DEVICE_SUPPORTS_NATIVE_16BIT"));
                 Assert.That(source, Does.Contain("TSRCommon.hlsl"));
             }
 
@@ -372,6 +373,61 @@ namespace VividRP.Editor.Tests
             Assert.That(updateSource, Does.Contain("TSR_WaveActiveAverageOrSelf(staticMoire)"));
             Assert.That(updateSource, Does.Contain("TSR_WaveActiveMaxOrSelf(updateInstability)"));
             Assert.That(updateSource, Does.Contain("TSR_WaveActiveAnyTrueOrSelf(accepted < 0.5)"));
+        }
+
+        [Test]
+        public void ShaderFiles_UseOptionalNative16BitValuForColorMath()
+        {
+            var commonSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "TSR",
+                "TSRCommon.hlsl"));
+            var dilateSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "TSR",
+                "TSRDilateVelocity.compute"));
+            var rejectSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "TSR",
+                "TSRRejectShading.compute"));
+            var spatialSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "TSR",
+                "TSRSpatialAntiAliasing.compute"));
+            var updateSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "TSR",
+                "TSRUpdateHistory.compute"));
+            var sharpenSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "TSR",
+                "TSRSharpen.compute"));
+
+            Assert.That(commonSource, Does.Contain("UNITY_DEVICE_SUPPORTS_NATIVE_16BIT"));
+            Assert.That(commonSource, Does.Contain("VIVID_TSR_USE_16BIT_VALU"));
+            Assert.That(commonSource, Does.Contain("typedef float16_t tsr_valu"));
+            Assert.That(commonSource, Does.Contain("TSR_LumaVALU"));
+            Assert.That(commonSource, Does.Contain("TSR_RGBToYCoCgVALU"));
+            Assert.That(commonSource, Does.Contain("TSR_BlendColorVALU"));
+            Assert.That(commonSource, Does.Contain("TSR_SharpenColorVALU"));
+            Assert.That(dilateSource, Does.Contain("TSR_LumaVALU"));
+            Assert.That(rejectSource, Does.Contain("TSR_RGBToYCoCgVALU(currentColor)"));
+            Assert.That(spatialSource, Does.Contain("TSR_LumaVALU(color)"));
+            Assert.That(updateSource, Does.Contain("TSR_BlendColorVALU(currentColor, historyColor, historyWeight)"));
+            Assert.That(updateSource, Does.Contain("TSR_RGBToYCoCgVALU(currentColor)"));
+            Assert.That(sharpenSource, Does.Contain("TSR_SharpenColorVALU(center, blur, sharpness)"));
         }
 
         [Test]

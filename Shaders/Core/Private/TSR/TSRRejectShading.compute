@@ -1,6 +1,7 @@
 #pragma use_dxc
 #pragma kernel CS
 #pragma multi_compile_local _ VIVID_TSR_WAVE_OPS
+#pragma multi_compile _ UNITY_DEVICE_SUPPORTS_NATIVE_16BIT
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
 
@@ -58,9 +59,10 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float motionPixels = length(motion * float2(renderSize));
     bool hasSignificantMotion = motionPixels > 1.0;
 
-    float3 currentYCoCg = TSR_RGBToYCoCg(currentColor);
-    float lumaDiff = abs(currentYCoCg.x - historyYCoCg.x) / max(max(currentYCoCg.x, historyYCoCg.x), 0.2);
-    float chromaDiff = length(currentYCoCg.yz - historyYCoCg.yz);
+    float3 currentYCoCg = TSR_RGBToYCoCgVALU(currentColor);
+    float3 historyYCoCgForDiff = TSR_RGBToYCoCgVALU(historyColor);
+    float lumaDiff = abs(currentYCoCg.x - historyYCoCgForDiff.x) / max(max(currentYCoCg.x, historyYCoCgForDiff.x), 0.2);
+    float chromaDiff = length(currentYCoCg.yz - historyYCoCgForDiff.yz);
     float lumaThreshold = lerp(_TSRRejectionParams.z, _TSRRejectionParams.z * 0.55, reprojectionBoundary);
     lumaThreshold = lerp(lumaThreshold, lumaThreshold * 1.45, lumaInstability);
     float chromaThreshold = lerp(_TSRRejectionParams.w, _TSRRejectionParams.w * 0.65, reprojectionBoundary);

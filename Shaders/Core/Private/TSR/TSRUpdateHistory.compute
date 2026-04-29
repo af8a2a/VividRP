@@ -1,6 +1,7 @@
 #pragma use_dxc
 #pragma kernel CS
 #pragma multi_compile_local _ VIVID_TSR_WAVE_OPS
+#pragma multi_compile _ UNITY_DEVICE_SUPPORTS_NATIVE_16BIT
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
 
@@ -86,14 +87,14 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     historyWeight = min(historyWeight, min(min(velocityWeightClamp, boundaryWeightClamp), thinGeometryWeightClamp));
     historyWeight = max(historyWeight, moireWeightFloor);
     historyWeight *= saturate(1.0 - weightRelaxation);
-    float3 result = lerp(currentColor, historyColor, historyWeight);
+    float3 result = TSR_BlendColorVALU(currentColor, historyColor, historyWeight);
 
     float resurrectionFrames = resurrectionMeta.x;
     float resurrectionDepth = resurrectionMeta.y;
     float currentDepth = _DilatedDepth[renderCoord];
     float resurrectionDepthDiff = abs(currentDepth - resurrectionDepth);
-    float3 currentYCoCg = TSR_RGBToYCoCg(currentColor);
-    float3 resurrectionYCoCg = TSR_RGBToYCoCg(resurrectionColor);
+    float3 currentYCoCg = TSR_RGBToYCoCgVALU(currentColor);
+    float3 resurrectionYCoCg = TSR_RGBToYCoCgVALU(resurrectionColor);
     float resurrectionLumaDiff = abs(currentYCoCg.x - resurrectionYCoCg.x)
         / max(max(currentYCoCg.x, resurrectionYCoCg.x), 0.2);
     float resurrectionChromaDiff = length(currentYCoCg.yz - resurrectionYCoCg.yz);

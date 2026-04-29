@@ -1,6 +1,7 @@
 #pragma use_dxc
 #pragma kernel CS
 #pragma multi_compile_local _ VIVID_TSR_WAVE_OPS
+#pragma multi_compile _ UNITY_DEVICE_SUPPORTS_NATIVE_16BIT
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
 
@@ -92,7 +93,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     reprojectionBoundary = max(reprojectionBoundary, waveReprojectionBoundary * 0.2);
     thinGeometryCoverage = max(thinGeometryCoverage, waveThinGeometryCoverage * 0.15);
 
-    float centerLuma = TSR_RGBToYCoCg(_InputColor[pixelCoord].rgb).x;
+    float centerLuma = TSR_LumaVALU(_InputColor[pixelCoord].rgb);
     float lumaMin = centerLuma;
     float lumaMax = centerLuma;
     float lumaSum = 0.0;
@@ -106,7 +107,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
         for (int lumaX = -1; lumaX <= 1; lumaX++)
         {
             int2 sampleCoord = clamp(pixelCoord + int2(lumaX, lumaY), int2(0, 0), renderSize - 1);
-            float sampleLuma = TSR_RGBToYCoCg(_InputColor[sampleCoord].rgb).x;
+            float sampleLuma = TSR_LumaVALU(_InputColor[sampleCoord].rgb);
             lumaMin = min(lumaMin, sampleLuma);
             lumaMax = max(lumaMax, sampleLuma);
             lumaSum += sampleLuma;
@@ -139,7 +140,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (hasHistory)
     {
         float2 previousSize = max(_PreviousOutputSize.xy, float2(1.0, 1.0));
-        float historyLuma = TSR_RGBToYCoCg(TSR_SampleCatmullRom(_HistoryColor, historyUV, previousSize).rgb).x;
+        float historyLuma = TSR_LumaVALU(TSR_SampleCatmullRom(_HistoryColor, historyUV, previousSize).rgb);
         float temporalDelta = abs(centerLuma - historyLuma) / max(max(abs(centerLuma), abs(historyLuma)), 0.2);
         temporalFlicker = saturate((temporalDelta - 0.04) * 4.0);
     }

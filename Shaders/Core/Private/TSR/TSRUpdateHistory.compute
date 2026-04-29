@@ -7,6 +7,7 @@ Texture2D<float2> _DilatedMotion;
 Texture2D<float> _DilatedDepth;
 Texture2D<float> _ReprojectionBoundary;
 Texture2D<float> _ThinGeometryCoverage;
+Texture2D<float> _LumaInstability;
 Texture2D<float4> _AcceptedHistoryColor;
 Texture2D<float2> _ReprojectedHistoryMeta;
 Texture2D<float> _RejectionMask;
@@ -35,19 +36,28 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float accepted = _RejectionMask[pixelCoord] > 0.5 ? 1.0 : 0.0;
     float reprojectionBoundary = _ReprojectionBoundary[renderCoord];
     float thinGeometryCoverage = _ThinGeometryCoverage[renderCoord];
+    float lumaInstability = _LumaInstability[renderCoord];
     float2 motion = _DilatedMotion[renderCoord];
     float velocityPixels = length(motion * float2(renderSize));
     float velocityFactor = saturate((velocityPixels - 0.5) * (1.0 / 7.5));
-    float updateInstability = max(max(velocityFactor, reprojectionBoundary), thinGeometryCoverage);
+    float staticMoire = lumaInstability
+        * saturate(1.0 - velocityFactor * 2.0)
+        * saturate(1.0 - reprojectionBoundary * 2.0);
+    float movingMoire = saturate(lumaInstability - staticMoire);
+    float updateInstability = max(max(max(velocityFactor, reprojectionBoundary), thinGeometryCoverage), movingMoire);
 
     float maxSampleCount = max(_TSRParams.y, 1.0);
     float boundarySampleCount = lerp(maxSampleCount, min(maxSampleCount, 4.0), reprojectionBoundary);
     float thinGeometrySampleCount = lerp(boundarySampleCount, min(boundarySampleCount, 3.0), thinGeometryCoverage);
+    float antiFlickerSampleCount = lerp(
+        thinGeometrySampleCount,
+        max(thinGeometrySampleCount, min(maxSampleCount, 12.0)),
+        staticMoire);
     float recoveryRate = lerp(1.0, 0.35, updateInstability);
     float rejectionRetention = lerp(0.0, 0.35, updateInstability);
-    float rejectedSampleCount = max(1.0, min(previousSampleCount * rejectionRetention, thinGeometrySampleCount));
+    float rejectedSampleCount = max(1.0, min(previousSampleCount * rejectionRetention, antiFlickerSampleCount));
     float sampleCount = accepted > 0.5
-        ? min(previousSampleCount + recoveryRate, thinGeometrySampleCount)
+        ? min(previousSampleCount + recoveryRate, antiFlickerSampleCount)
         : rejectedSampleCount;
     float historyWeight = accepted > 0.5
         ? saturate(previousSampleCount / max(sampleCount, 1.0))
@@ -55,8 +65,10 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float velocityWeightClamp = lerp(0.96, 0.18, velocityFactor);
     float boundaryWeightClamp = lerp(0.96, 0.45, reprojectionBoundary);
     float thinGeometryWeightClamp = lerp(0.96, 0.28, thinGeometryCoverage);
-    float weightRelaxation = max(reprojectionBoundary * 0.5, thinGeometryCoverage * 0.65);
+    float moireWeightFloor = accepted > 0.5 ? staticMoire * 0.45 : 0.0;
+    float weightRelaxation = max(max(reprojectionBoundary * 0.5, thinGeometryCoverage * 0.65), movingMoire * 0.4);
     historyWeight = min(historyWeight, min(min(velocityWeightClamp, boundaryWeightClamp), thinGeometryWeightClamp));
+    historyWeight = max(historyWeight, moireWeightFloor);
     historyWeight *= saturate(1.0 - weightRelaxation);
     float3 result = lerp(currentColor, historyColor, historyWeight);
 

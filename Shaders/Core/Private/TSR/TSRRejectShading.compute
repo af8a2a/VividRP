@@ -8,6 +8,7 @@ Texture2D<float> _DilatedDepth;
 Texture2D<float2> _DilatedMotion;
 Texture2D<float> _DepthError;
 Texture2D<float> _ReprojectionBoundary;
+Texture2D<float> _LumaInstability;
 Texture2D<float4> _ReprojectedHistoryColor;
 Texture2D<float2> _ReprojectedHistoryMeta;
 
@@ -46,6 +47,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float dilatedDepth = _DilatedDepth[renderCoord];
     float depthError = _DepthError[renderCoord];
     float reprojectionBoundary = _ReprojectionBoundary[renderCoord];
+    float lumaInstability = _LumaInstability[renderCoord];
     float historyDepth = historyMeta.y;
     float depthDiff = min(abs(currentDepth - historyDepth), abs(dilatedDepth - historyDepth));
     float depthTolerance = _TSRRejectionParams.x + depthError * 2.0;
@@ -58,6 +60,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float lumaDiff = abs(currentYCoCg.x - historyYCoCg.x) / max(max(currentYCoCg.x, historyYCoCg.x), 0.2);
     float chromaDiff = length(currentYCoCg.yz - historyYCoCg.yz);
     float lumaThreshold = lerp(_TSRRejectionParams.z, _TSRRejectionParams.z * 0.55, reprojectionBoundary);
+    lumaThreshold = lerp(lumaThreshold, lumaThreshold * 1.45, lumaInstability);
     float chromaThreshold = lerp(_TSRRejectionParams.w, _TSRRejectionParams.w * 0.65, reprojectionBoundary);
     float motionLimit = lerp(_TSRRejectionParams.y, _TSRRejectionParams.y * 0.5, reprojectionBoundary);
     bool depthRejected = hasSignificantMotion && depthDiff > depthTolerance;

@@ -37,6 +37,7 @@ namespace VividRP.Runtime
     public struct VividLocalVolumetricFogArtistParameters
     {
         internal const float MinimumFogDistance = 0.05f;
+        private const float MinimumVolumeSize = 0.00001f;
 
         public Color albedo;
         [Min(MinimumFogDistance)] public float meanFreePath;
@@ -49,6 +50,10 @@ namespace VividRP.Runtime
         public Vector3 textureTiling;
         [Min(0.0f)] public Vector3 positiveFade;
         [Min(0.0f)] public Vector3 negativeFade;
+        [SerializeField] internal float m_EditorUniformFade;
+        [SerializeField] internal Vector3 m_EditorPositiveFade;
+        [SerializeField] internal Vector3 m_EditorNegativeFade;
+        [SerializeField] internal bool m_EditorAdvancedFade;
         public VividLocalVolumetricFogScaleMode scaleMode;
         public Vector3 size;
         public bool invertFade;
@@ -73,6 +78,10 @@ namespace VividRP.Runtime
                 textureTiling = Vector3.one,
                 positiveFade = Vector3.one * 0.1f,
                 negativeFade = Vector3.one * 0.1f,
+                m_EditorUniformFade = 0.1f,
+                m_EditorPositiveFade = Vector3.one * 0.1f,
+                m_EditorNegativeFade = Vector3.one * 0.1f,
+                m_EditorAdvancedFade = false,
                 scaleMode = VividLocalVolumetricFogScaleMode.Transform,
                 size = Vector3.one,
                 invertFade = false,
@@ -103,6 +112,140 @@ namespace VividRP.Runtime
         internal Vector3 GetScattering(float extinction)
         {
             return new Vector3(albedo.r * extinction, albedo.g * extinction, albedo.b * extinction);
+        }
+
+        internal void ApplyEditorFade(Vector3 volumeSize)
+        {
+            volumeSize = Max(volumeSize, Vector3.one * MinimumVolumeSize);
+            m_EditorUniformFade = Mathf.Max(m_EditorUniformFade, 0.0f);
+
+            if (m_EditorAdvancedFade)
+            {
+                m_EditorPositiveFade = Clamp01(m_EditorPositiveFade);
+                m_EditorNegativeFade = Clamp01(m_EditorNegativeFade);
+                ClampCombinedEditorFade(ref m_EditorPositiveFade, ref m_EditorNegativeFade);
+                positiveFade = m_EditorPositiveFade;
+                negativeFade = m_EditorNegativeFade;
+            }
+            else
+            {
+                m_EditorUniformFade = Mathf.Min(m_EditorUniformFade, MinComponent(volumeSize) * 0.5f);
+                positiveFade = negativeFade = ComputeNormalizedFadeFromUniform(m_EditorUniformFade, volumeSize);
+            }
+
+            Validate();
+        }
+
+        internal void InitializeEditorFadeFromRuntime(Vector3 volumeSize)
+        {
+            volumeSize = Max(volumeSize, Vector3.one * MinimumVolumeSize);
+            m_EditorPositiveFade = Max(positiveFade, Vector3.zero);
+            m_EditorNegativeFade = Max(negativeFade, Vector3.zero);
+            ClampCombinedEditorFade(ref m_EditorPositiveFade, ref m_EditorNegativeFade);
+
+            m_EditorUniformFade = ComputeUniformFadeDistance(m_EditorPositiveFade, m_EditorNegativeFade, volumeSize);
+            m_EditorAdvancedFade = !CanRepresentRuntimeFadeAsUniform(
+                m_EditorPositiveFade,
+                m_EditorNegativeFade,
+                volumeSize,
+                m_EditorUniformFade);
+        }
+
+        internal static Vector3 ComputeNormalizedFadeFromUniform(float uniformFade, Vector3 volumeSize)
+        {
+            return new Vector3(
+                volumeSize.x > MinimumVolumeSize ? uniformFade / volumeSize.x : 0.0f,
+                volumeSize.y > MinimumVolumeSize ? uniformFade / volumeSize.y : 0.0f,
+                volumeSize.z > MinimumVolumeSize ? uniformFade / volumeSize.z : 0.0f);
+        }
+
+        internal static Vector3 RescaleNormalizedFade(Vector3 normalizedFade, Vector3 previousSize, Vector3 newSize)
+        {
+            return new Vector3(
+                newSize.x > MinimumVolumeSize ? normalizedFade.x * previousSize.x / newSize.x : 0.0f,
+                newSize.y > MinimumVolumeSize ? normalizedFade.y * previousSize.y / newSize.y : 0.0f,
+                newSize.z > MinimumVolumeSize ? normalizedFade.z * previousSize.z / newSize.z : 0.0f);
+        }
+
+        internal static void ClampCombinedEditorFade(ref Vector3 positiveFade, ref Vector3 negativeFade)
+        {
+            positiveFade = Clamp01(positiveFade);
+            negativeFade = Clamp01(negativeFade);
+
+            ClampCombinedAxis(ref positiveFade.x, ref negativeFade.x);
+            ClampCombinedAxis(ref positiveFade.y, ref negativeFade.y);
+            ClampCombinedAxis(ref positiveFade.z, ref negativeFade.z);
+        }
+
+        private static bool CanRepresentRuntimeFadeAsUniform(
+            Vector3 positiveFade,
+            Vector3 negativeFade,
+            Vector3 volumeSize,
+            float uniformFade)
+        {
+            return Approximately(positiveFade.x * volumeSize.x, uniformFade)
+                && Approximately(positiveFade.y * volumeSize.y, uniformFade)
+                && Approximately(positiveFade.z * volumeSize.z, uniformFade)
+                && Approximately(negativeFade.x * volumeSize.x, uniformFade)
+                && Approximately(negativeFade.y * volumeSize.y, uniformFade)
+                && Approximately(negativeFade.z * volumeSize.z, uniformFade);
+        }
+
+        private static float ComputeUniformFadeDistance(
+            Vector3 positiveFade,
+            Vector3 negativeFade,
+            Vector3 volumeSize)
+        {
+            var distance = Mathf.Min(
+                positiveFade.x * volumeSize.x,
+                positiveFade.y * volumeSize.y,
+                positiveFade.z * volumeSize.z,
+                negativeFade.x * volumeSize.x,
+                negativeFade.y * volumeSize.y,
+                negativeFade.z * volumeSize.z);
+
+            return Mathf.Max(distance, 0.0f);
+        }
+
+        private static void ClampCombinedAxis(ref float positive, ref float negative)
+        {
+            var combined = positive + negative;
+            if (combined <= 1.0f)
+                return;
+
+            var overValue = (combined - 1.0f) * 0.5f;
+            positive -= overValue;
+            negative -= overValue;
+
+            if (positive < 0.0f)
+            {
+                negative += positive;
+                positive = 0.0f;
+            }
+
+            if (negative < 0.0f)
+            {
+                positive += negative;
+                negative = 0.0f;
+            }
+        }
+
+        private static Vector3 Clamp01(Vector3 value)
+        {
+            return new Vector3(
+                Mathf.Clamp01(value.x),
+                Mathf.Clamp01(value.y),
+                Mathf.Clamp01(value.z));
+        }
+
+        private static float MinComponent(Vector3 value)
+        {
+            return Mathf.Min(value.x, value.y, value.z);
+        }
+
+        private static bool Approximately(float a, float b)
+        {
+            return Mathf.Abs(a - b) <= 0.0001f;
         }
 
         private static Vector3 Max(Vector3 value, Vector3 minimum)
@@ -136,8 +279,9 @@ namespace VividRP.Runtime
     [Icon("Packages/com.unity.render-pipelines.core/Editor/Icons/Processed/LocalVolumetricFog Icon.asset")]
     public sealed class VividLocalVolumetricFog : MonoBehaviour, IBoundProxyProvider, IBoundProxyWorldDataProvider, ISerializationCallbackReceiver
     {
-        private const int CurrentSerializationVersion = 1;
+        private const int CurrentSerializationVersion = 2;
         private const int LegacySerializationVersion = 0;
+        private const int EditorFadeSerializationVersion = 2;
         private static readonly Vector3 k_MinimumBoxSize = new(0.001f, 0.001f, 0.001f);
         private static readonly int FogVolumeSingleScatteringAlbedoId = Shader.PropertyToID("_FogVolumeSingleScatteringAlbedo");
         private static readonly int FogVolumeFogDistanceId = Shader.PropertyToID("_FogVolumeFogDistanceProperty");
@@ -181,6 +325,7 @@ namespace VividRP.Runtime
             {
                 m_Parameters = value;
                 m_Parameters.Validate();
+                m_Parameters.InitializeEditorFadeFromRuntime(GetFogSize(BoundProxyShape));
             }
         }
 
@@ -466,24 +611,29 @@ namespace VividRP.Runtime
 
         public void OnAfterDeserialize()
         {
-            if (m_SerializationVersion > LegacySerializationVersion)
-                return;
-
-            var legacyBlendMode = (int)m_Parameters.blendingMode;
-            m_Parameters.blendingMode = legacyBlendMode switch
+            if (m_SerializationVersion <= LegacySerializationVersion)
             {
-                0 => VividLocalVolumetricFogBlendingMode.Additive,
-                1 => VividLocalVolumetricFogBlendingMode.Overwrite,
-                _ => m_Parameters.blendingMode
-            };
+                var legacyBlendMode = (int)m_Parameters.blendingMode;
+                m_Parameters.blendingMode = legacyBlendMode switch
+                {
+                    0 => VividLocalVolumetricFogBlendingMode.Additive,
+                    1 => VividLocalVolumetricFogBlendingMode.Overwrite,
+                    _ => m_Parameters.blendingMode
+                };
 
-            var legacyMaskMode = (int)m_Parameters.maskMode;
-            m_Parameters.maskMode = legacyMaskMode switch
+                var legacyMaskMode = (int)m_Parameters.maskMode;
+                m_Parameters.maskMode = legacyMaskMode switch
+                {
+                    0 => VividLocalVolumetricFogMaskMode.None,
+                    1 => VividLocalVolumetricFogMaskMode.Texture,
+                    _ => m_Parameters.maskMode
+                };
+            }
+
+            if (m_SerializationVersion < EditorFadeSerializationVersion)
             {
-                0 => VividLocalVolumetricFogMaskMode.None,
-                1 => VividLocalVolumetricFogMaskMode.Texture,
-                _ => m_Parameters.maskMode
-            };
+                m_Parameters.InitializeEditorFadeFromRuntime(GetSerializedVolumeSizeForEditorFade());
+            }
 
             m_SerializationVersion = CurrentSerializationVersion;
         }
@@ -517,6 +667,17 @@ namespace VividRP.Runtime
 
             var scale = transform.lossyScale;
             return Max(new Vector3(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z)), k_MinimumBoxSize);
+        }
+
+        private Vector3 GetSerializedVolumeSizeForEditorFade()
+        {
+            BoundProxyShape shape = m_BoundProxy;
+            shape.Sanitize();
+            Vector3 size = shape.GetSanitizedSize();
+            if (size.sqrMagnitude <= 0.0f)
+                size = m_Parameters.size.sqrMagnitude > 0.0f ? m_Parameters.size : Vector3.one;
+
+            return Max(size, k_MinimumBoxSize);
         }
 
         private static Vector3 GetFogSize(BoundProxyShape shape)

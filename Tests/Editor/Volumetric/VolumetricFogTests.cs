@@ -407,8 +407,75 @@ namespace VividRP.Editor.Tests
             Assert.That(parameters.maskMode, Is.EqualTo(VividLocalVolumetricFogMaskMode.Texture));
             Assert.That(parameters.positiveFade, Is.EqualTo(Vector3.one * 0.1f));
             Assert.That(parameters.negativeFade, Is.EqualTo(Vector3.one * 0.1f));
+            Assert.That(parameters.m_EditorUniformFade, Is.EqualTo(0.1f));
+            Assert.That(parameters.m_EditorPositiveFade, Is.EqualTo(Vector3.one * 0.1f));
+            Assert.That(parameters.m_EditorNegativeFade, Is.EqualTo(Vector3.one * 0.1f));
+            Assert.That(parameters.m_EditorAdvancedFade, Is.False);
             Assert.That(parameters.distanceFadeStart, Is.EqualTo(10000.0f));
             Assert.That(parameters.distanceFadeEnd, Is.EqualTo(10000.0f));
+        }
+
+        [Test]
+        public void LocalVolumetricFog_ApplyEditorFade_ConvertsUniformDistanceToNormalizedFaceFade()
+        {
+            var parameters = VividLocalVolumetricFogArtistParameters.CreateDefault();
+            parameters.m_EditorUniformFade = 2.0f;
+            parameters.m_EditorAdvancedFade = false;
+
+            parameters.ApplyEditorFade(new Vector3(10.0f, 20.0f, 40.0f));
+
+            AssertVector3(parameters.positiveFade, new Vector3(0.2f, 0.1f, 0.05f));
+            AssertVector3(parameters.negativeFade, new Vector3(0.2f, 0.1f, 0.05f));
+        }
+
+        [Test]
+        public void LocalVolumetricFog_ApplyEditorFade_UsesAdvancedPerAxisFade()
+        {
+            var parameters = VividLocalVolumetricFogArtistParameters.CreateDefault();
+            parameters.m_EditorAdvancedFade = true;
+            parameters.m_EditorPositiveFade = new Vector3(0.8f, 0.6f, 0.2f);
+            parameters.m_EditorNegativeFade = new Vector3(0.6f, 0.7f, 0.3f);
+
+            parameters.ApplyEditorFade(Vector3.one);
+
+            Assert.That(parameters.positiveFade.x + parameters.negativeFade.x, Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(parameters.positiveFade.y + parameters.negativeFade.y, Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(parameters.positiveFade.z + parameters.negativeFade.z, Is.EqualTo(0.5f).Within(0.0001f));
+            Assert.That(parameters.positiveFade, Is.EqualTo(parameters.m_EditorPositiveFade));
+            Assert.That(parameters.negativeFade, Is.EqualTo(parameters.m_EditorNegativeFade));
+        }
+
+        [Test]
+        public void LocalVolumetricFog_OnAfterDeserialize_InitializesEditorFadeFromVersionOneRuntimeFade()
+        {
+            var gameObject = new GameObject("Local Volumetric Fog Migration");
+            var fog = gameObject.AddComponent<VividLocalVolumetricFog>();
+            SetLocalFogBoundProxy(fog, new BoundProxyShape
+            {
+                shape = BoundProxyShapeType.Box,
+                size = new Vector3(10.0f, 20.0f, 40.0f)
+            });
+
+            try
+            {
+                var parameters = VividLocalVolumetricFogArtistParameters.CreateDefault();
+                parameters.positiveFade = new Vector3(0.2f, 0.1f, 0.05f);
+                parameters.negativeFade = new Vector3(0.2f, 0.1f, 0.05f);
+                SetLocalFogRawParameters(fog, parameters);
+                SetLocalFogSerializationVersion(fog, 1);
+
+                fog.OnAfterDeserialize();
+
+                var migratedParameters = fog.parameters;
+                Assert.That(migratedParameters.m_EditorUniformFade, Is.EqualTo(2.0f).Within(0.0001f));
+                Assert.That(migratedParameters.m_EditorAdvancedFade, Is.False);
+                AssertVector3(migratedParameters.m_EditorPositiveFade, new Vector3(0.2f, 0.1f, 0.05f));
+                AssertVector3(migratedParameters.m_EditorNegativeFade, new Vector3(0.2f, 0.1f, 0.05f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
         }
 
         [Test]
@@ -986,6 +1053,14 @@ namespace VividRP.Editor.Tests
             Assert.That(editorSource, Does.Contain("Single Scattering Albedo"));
             Assert.That(editorSource, Does.Contain("Fog Distance"));
             Assert.That(editorSource, Does.Contain("Mask Mode"));
+            Assert.That(editorSource, Does.Contain("Per Axis Control"));
+            Assert.That(editorSource, Does.Contain("FindParameter(\"m_EditorUniformFade\")"));
+            Assert.That(editorSource, Does.Contain("FindParameter(\"m_EditorPositiveFade\")"));
+            Assert.That(editorSource, Does.Contain("FindParameter(\"m_EditorNegativeFade\")"));
+            Assert.That(editorSource, Does.Contain("FindParameter(\"m_EditorAdvancedFade\")"));
+            Assert.That(editorSource, Does.Contain("ApplyEditorFadeToRuntimeProperties"));
+            Assert.That(editorSource, Does.Not.Contain("DrawProperty(m_PositiveFade, s_PositiveFadeLabel);"));
+            Assert.That(editorSource, Does.Not.Contain("DrawProperty(m_NegativeFade, s_NegativeFadeLabel);"));
             Assert.That(editorSource, Does.Contain("Mask Texture"));
             Assert.That(editorSource, Does.Contain("Mask Material"));
             Assert.That(editorSource, Does.Contain("DrawMaterialInspector"));
@@ -1041,6 +1116,22 @@ namespace VividRP.Editor.Tests
             typeof(VividLocalVolumetricFog)
                 .GetField("m_BoundProxy", BindingFlags.NonPublic | BindingFlags.Instance)
                 ?.SetValue(fog, shape);
+        }
+
+        private static void SetLocalFogRawParameters(
+            VividLocalVolumetricFog fog,
+            VividLocalVolumetricFogArtistParameters parameters)
+        {
+            typeof(VividLocalVolumetricFog)
+                .GetField("m_Parameters", BindingFlags.NonPublic | BindingFlags.Instance)
+                ?.SetValue(fog, parameters);
+        }
+
+        private static void SetLocalFogSerializationVersion(VividLocalVolumetricFog fog, int version)
+        {
+            typeof(VividLocalVolumetricFog)
+                .GetField("m_SerializationVersion", BindingFlags.NonPublic | BindingFlags.Instance)
+                ?.SetValue(fog, version);
         }
 
         private static void AssertVector3(Vector3 actual, Vector3 expected, float tolerance = 0.0001f)

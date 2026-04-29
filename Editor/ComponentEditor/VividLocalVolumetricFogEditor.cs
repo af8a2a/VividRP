@@ -26,6 +26,8 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Size", "Size of the local volumetric fog volume.");
         private static readonly GUIContent s_BlendDistanceLabel =
             EditorGUIUtility.TrTextContent("Blend Distance", "Interior distance from each face where the fog fades in completely.");
+        private static readonly GUIContent s_PerAxisControlLabel =
+            EditorGUIUtility.TrTextContent("Per Axis Control", "When checked, each face can be manipulated separately.");
         private static readonly GUIContent s_PositiveFadeLabel =
             EditorGUIUtility.TrTextContent("Positive Blend", "Blend distance along the positive local X, Y and Z faces.");
         private static readonly GUIContent s_NegativeFadeLabel =
@@ -65,6 +67,10 @@ namespace VividRP.Editor
         private SerializedProperty m_TextureOffset;
         private SerializedProperty m_PositiveFade;
         private SerializedProperty m_NegativeFade;
+        private SerializedProperty m_EditorUniformFade;
+        private SerializedProperty m_EditorPositiveFade;
+        private SerializedProperty m_EditorNegativeFade;
+        private SerializedProperty m_EditorAdvancedFade;
         private SerializedProperty m_InvertFade;
         private SerializedProperty m_DistanceFadeStart;
         private SerializedProperty m_DistanceFadeEnd;
@@ -92,6 +98,10 @@ namespace VividRP.Editor
             m_TextureOffset = FindParameter("textureOffset");
             m_PositiveFade = FindParameter("positiveFade");
             m_NegativeFade = FindParameter("negativeFade");
+            m_EditorUniformFade = FindParameter("m_EditorUniformFade");
+            m_EditorPositiveFade = FindParameter("m_EditorPositiveFade");
+            m_EditorNegativeFade = FindParameter("m_EditorNegativeFade");
+            m_EditorAdvancedFade = FindParameter("m_EditorAdvancedFade");
             m_InvertFade = FindParameter("invertFade");
             m_DistanceFadeStart = FindParameter("distanceFadeStart");
             m_DistanceFadeEnd = FindParameter("distanceFadeEnd");
@@ -179,15 +189,156 @@ namespace VividRP.Editor
             using (new EditorGUI.IndentLevelScope())
             {
                 EditorGUILayout.PropertyField(m_SerializedShape.center);
-                EditorGUILayout.PropertyField(m_SerializedShape.size, s_SizeLabel);
-                DrawProperty(m_PositiveFade, s_PositiveFadeLabel);
-                DrawProperty(m_NegativeFade, s_NegativeFadeLabel);
-                EditorGUILayout.LabelField(s_BlendDistanceLabel, EditorStyles.miniLabel);
+                DrawSizeProperty();
+                DrawBlendDistanceSettings();
                 DrawProperty(m_FalloffMode, s_FalloffModeLabel);
                 DrawProperty(m_InvertFade, s_InvertFadeLabel);
                 DrawProperty(m_DistanceFadeStart, s_DistanceFadeStartLabel);
                 DrawProperty(m_DistanceFadeEnd, s_DistanceFadeEndLabel);
             }
+        }
+
+        private void DrawSizeProperty()
+        {
+            Vector3 previousSize = m_SerializedShape.size.vector3Value;
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.PropertyField(m_SerializedShape.size, s_SizeLabel);
+            if (!EditorGUI.EndChangeCheck())
+                return;
+
+            Vector3 newSize = m_SerializedShape.size.vector3Value;
+            RescaleEditorFadeAfterSizeChange(previousSize, newSize);
+            ClampUniformEditorFade(newSize);
+        }
+
+        private void DrawBlendDistanceSettings()
+        {
+            DrawProperty(m_EditorAdvancedFade, s_PerAxisControlLabel);
+
+            if (m_EditorAdvancedFade != null && m_EditorAdvancedFade.hasMultipleDifferentValues)
+            {
+                using (new EditorGUI.DisabledScope(true))
+                {
+                    EditorGUILayout.LabelField(s_BlendDistanceLabel, EditorGUIUtility.TrTextContent("Multiple values for Per Axis Control"));
+                }
+
+                return;
+            }
+
+            bool advancedFade = m_EditorAdvancedFade != null && m_EditorAdvancedFade.boolValue;
+            if (advancedFade)
+            {
+                EditorGUI.BeginChangeCheck();
+                DrawProperty(m_EditorPositiveFade, s_PositiveFadeLabel);
+                DrawProperty(m_EditorNegativeFade, s_NegativeFadeLabel);
+                if (EditorGUI.EndChangeCheck())
+                    ClampAdvancedEditorFade();
+            }
+            else
+            {
+                EditorGUI.BeginChangeCheck();
+                DrawProperty(m_EditorUniformFade, s_BlendDistanceLabel);
+                if (EditorGUI.EndChangeCheck())
+                    ClampUniformEditorFade(m_SerializedShape.size.vector3Value);
+            }
+
+            ApplyEditorFadeToRuntimeProperties();
+        }
+
+        private void RescaleEditorFadeAfterSizeChange(Vector3 previousSize, Vector3 newSize)
+        {
+            if (m_EditorPositiveFade == null
+                || m_EditorNegativeFade == null
+                || m_EditorPositiveFade.hasMultipleDifferentValues
+                || m_EditorNegativeFade.hasMultipleDifferentValues)
+            {
+                return;
+            }
+
+            previousSize = Max(previousSize, 0.001f);
+            newSize = Max(newSize, 0.001f);
+
+            Vector3 positiveFade = VividLocalVolumetricFogArtistParameters.RescaleNormalizedFade(
+                m_EditorPositiveFade.vector3Value,
+                previousSize,
+                newSize);
+            Vector3 negativeFade = VividLocalVolumetricFogArtistParameters.RescaleNormalizedFade(
+                m_EditorNegativeFade.vector3Value,
+                previousSize,
+                newSize);
+
+            VividLocalVolumetricFogArtistParameters.ClampCombinedEditorFade(ref positiveFade, ref negativeFade);
+            m_EditorPositiveFade.vector3Value = positiveFade;
+            m_EditorNegativeFade.vector3Value = negativeFade;
+        }
+
+        private void ClampAdvancedEditorFade()
+        {
+            if (m_EditorPositiveFade == null
+                || m_EditorNegativeFade == null
+                || m_EditorPositiveFade.hasMultipleDifferentValues
+                || m_EditorNegativeFade.hasMultipleDifferentValues)
+            {
+                return;
+            }
+
+            Vector3 positiveFade = m_EditorPositiveFade.vector3Value;
+            Vector3 negativeFade = m_EditorNegativeFade.vector3Value;
+            VividLocalVolumetricFogArtistParameters.ClampCombinedEditorFade(ref positiveFade, ref negativeFade);
+            m_EditorPositiveFade.vector3Value = positiveFade;
+            m_EditorNegativeFade.vector3Value = negativeFade;
+        }
+
+        private void ClampUniformEditorFade(Vector3 volumeSize)
+        {
+            if (m_EditorUniformFade == null || m_EditorUniformFade.hasMultipleDifferentValues)
+                return;
+
+            volumeSize = Max(volumeSize, 0.001f);
+            float maximumBlendDistance = MinComponent(volumeSize) * 0.5f;
+            m_EditorUniformFade.floatValue = Mathf.Clamp(m_EditorUniformFade.floatValue, 0.0f, maximumBlendDistance);
+        }
+
+        private void ApplyEditorFadeToRuntimeProperties()
+        {
+            if (m_PositiveFade == null
+                || m_NegativeFade == null
+                || m_EditorAdvancedFade == null
+                || m_SerializedShape.size.hasMultipleDifferentValues
+                || m_EditorAdvancedFade.hasMultipleDifferentValues)
+            {
+                return;
+            }
+
+            if (m_EditorAdvancedFade.boolValue)
+            {
+                if (m_EditorPositiveFade == null
+                    || m_EditorNegativeFade == null
+                    || m_EditorPositiveFade.hasMultipleDifferentValues
+                    || m_EditorNegativeFade.hasMultipleDifferentValues)
+                {
+                    return;
+                }
+
+                Vector3 positiveFade = m_EditorPositiveFade.vector3Value;
+                Vector3 negativeFade = m_EditorNegativeFade.vector3Value;
+                VividLocalVolumetricFogArtistParameters.ClampCombinedEditorFade(ref positiveFade, ref negativeFade);
+                m_EditorPositiveFade.vector3Value = positiveFade;
+                m_EditorNegativeFade.vector3Value = negativeFade;
+                m_PositiveFade.vector3Value = positiveFade;
+                m_NegativeFade.vector3Value = negativeFade;
+                return;
+            }
+
+            if (m_EditorUniformFade == null || m_EditorUniformFade.hasMultipleDifferentValues)
+                return;
+
+            ClampUniformEditorFade(m_SerializedShape.size.vector3Value);
+            Vector3 normalizedFade = VividLocalVolumetricFogArtistParameters.ComputeNormalizedFadeFromUniform(
+                m_EditorUniformFade.floatValue,
+                Max(m_SerializedShape.size.vector3Value, 0.001f));
+            m_PositiveFade.vector3Value = normalizedFade;
+            m_NegativeFade.vector3Value = normalizedFade;
         }
 
         private void DrawMaskSettings()
@@ -286,6 +437,19 @@ namespace VividRP.Editor
 
             shape.shape.intValue = (int)BoundProxyShapeType.Box;
             shape.radius.floatValue = 0.0f;
+        }
+
+        private static Vector3 Max(Vector3 value, float minimum)
+        {
+            return new Vector3(
+                Mathf.Max(value.x, minimum),
+                Mathf.Max(value.y, minimum),
+                Mathf.Max(value.z, minimum));
+        }
+
+        private static float MinComponent(Vector3 value)
+        {
+            return Mathf.Min(value.x, value.y, value.z);
         }
     }
 }

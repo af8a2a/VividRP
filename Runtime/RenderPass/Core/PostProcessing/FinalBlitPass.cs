@@ -15,12 +15,18 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int FilmGrainTextureId = Shader.PropertyToID("_VividFilmGrainTexture");
         private static readonly int FilmGrainParamsId = Shader.PropertyToID("_VividFilmGrainParams");
         private static readonly int FilmGrainTexParamsId = Shader.PropertyToID("_VividFilmGrainTexParams");
+        private static readonly int VignetteParams1Id = Shader.PropertyToID("_VividVignetteParams1");
+        private static readonly int VignetteParams2Id = Shader.PropertyToID("_VividVignetteParams2");
+        private static readonly int VignetteColorId = Shader.PropertyToID("_VividVignetteColor");
+        private static readonly int VignetteMaskId = Shader.PropertyToID("_VividVignetteMask");
+        private static readonly int VignetteScreenParamsId = Shader.PropertyToID("_VividVignetteScreenParams");
         private static readonly ProfilerMarker s_PrepareCameraMarker = new("VividRP.RenderPass.FinalBlit.Prepare.Camera");
         private static readonly ProfilerMarker s_PrepareSettingsMarker = new("VividRP.RenderPass.FinalBlit.Prepare.Settings");
         private static readonly ProfilerMarker s_PrepareColorGradingSettingsMarker = new("VividRP.RenderPass.FinalBlit.Prepare.Settings.ColorGrading");
         private static readonly ProfilerMarker s_PrepareFilmGrainSettingsMarker = new("VividRP.RenderPass.FinalBlit.Prepare.Settings.FilmGrain");
         private static readonly ProfilerMarker s_PrepareBloomSettingsMarker = new("VividRP.RenderPass.FinalBlit.Prepare.Settings.Bloom");
         private static readonly ProfilerMarker s_PrepareLensFlareSettingsMarker = new("VividRP.RenderPass.FinalBlit.Prepare.Settings.LensFlare");
+        private static readonly ProfilerMarker s_PrepareVignetteSettingsMarker = new("VividRP.RenderPass.FinalBlit.Prepare.Settings.Vignette");
         private static readonly ProfilerMarker s_PrepareExposureMarker = new("VividRP.RenderPass.FinalBlit.Prepare.Exposure");
 
         [RenderGraphResource(Access = AccessFlags.Read)]
@@ -37,6 +43,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private FilmGrainSettingsData m_FilmGrainSettings;
         private BloomSettingsData m_BloomSettings;
         private ScreenSpaceLensFlareSettingsData m_ScreenSpaceLensFlareSettings;
+        private VignetteSettingsData m_VignetteSettings;
         private VividExposureData m_ExposureData;
         private RenderTargetIdentifier m_CameraBackBufferTarget;
         private TextureUVOrigin m_CameraBackBufferTextureUVOrigin;
@@ -162,6 +169,13 @@ namespace VividRP.Runtime.RenderPass.Core
                         ? ScreenSpaceLensFlareSettingsResolver.Resolve()
                         : ScreenSpaceLensFlareSettingsData.CreateDefault();
                 }
+
+                using (s_PrepareVignetteSettingsMarker.Auto())
+                {
+                    m_VignetteSettings = m_PostProcessingAllowed
+                        ? VignetteSettingsResolver.Resolve()
+                        : VignetteSettingsData.CreateDefault();
+                }
             }
 
             using (s_PrepareExposureMarker.Auto())
@@ -249,6 +263,23 @@ namespace VividRP.Runtime.RenderPass.Core
             else
             {
                 CoreUtils.SetKeyword(m_Material, "_FILM_GRAIN", false);
+            }
+
+            if (m_VignetteSettings.enabled)
+            {
+                m_Material.SetVector(VignetteParams1Id, VignetteRuntimeUtility.CreateParams1(m_VignetteSettings));
+                m_Material.SetVector(VignetteParams2Id, VignetteRuntimeUtility.CreateParams2(m_VignetteSettings));
+                m_Material.SetVector(VignetteColorId, VignetteRuntimeUtility.CreateColor(m_VignetteSettings));
+                m_Material.SetVector(VignetteScreenParamsId, VignetteRuntimeUtility.CreateScreenParams(m_Viewport));
+
+                if (!m_VignetteSettings.IsProcedural)
+                    m_Material.SetTexture(VignetteMaskId, m_VignetteSettings.mask != null ? m_VignetteSettings.mask : Texture2D.blackTexture);
+
+                CoreUtils.SetKeyword(m_Material, "_VIGNETTE", true);
+            }
+            else
+            {
+                CoreUtils.SetKeyword(m_Material, "_VIGNETTE", false);
             }
 
             // Bloom and screen-space lens flare share the BloomTexture contribution.

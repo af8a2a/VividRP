@@ -99,6 +99,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 0c619324688bbfa47bfa6917dfc94ebd, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/scrbound
     ResourceObject: {fileID: 7200000, guid: 301f78bb40574e64586f1c5f50553db9, type: 3}
+  - ResourceName: Shaders/Core/Private/LocalExposure/LocalExposure.compute
+    ResourceObject: {fileID: 7200000, guid: b3e6567bffa5efd4a86485412ba2b312, type: 3}
   - ResourceName: Shaders/Core/Private/LutBuilder3D.compute
     ResourceObject: {fileID: 7200000, guid: ec9fdcaf78354b1aa25c0158100aae1b, type: 3}
   - ResourceName: Shaders/Core/Private/NRD/SIGMA/SIGMA_Copy

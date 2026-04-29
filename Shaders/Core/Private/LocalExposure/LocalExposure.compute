@@ -1,0 +1,296 @@
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
+
+#pragma kernel BuildBilateralGrid
+#pragma kernel SetupLogLuminance
+#pragma kernel BlurLogLuminanceHorizontal
+#pragma kernel BlurLogLuminanceVertical
+#pragma kernel ApplyLocalExposure
+#pragma kernel Copy
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GlobalSamplers.hlsl"
+
+#define LOCAL_EXPOSURE_TILE_SIZE 64
+#define LOCAL_EXPOSURE_GRID_DEPTH 32
+#define LOCAL_EXPOSURE_GROUP_SIZE 8
+#define LOCAL_EXPOSURE_MAX_BLUR_RADIUS 32
+#define LOCAL_EXPOSURE_BILATERAL_WEIGHT_SCALE 256.0
+#define LOCAL_EXPOSURE_LOG_LUMINANCE_SCALE 64.0
+
+Texture2D<float4> _LocalExposureInputTexture;
+Texture2D<float> _LocalExposureLogLuminanceTexture;
+Texture2D<float> _LocalExposureBlurTempTexture;
+Texture2D<float> _LocalExposureBlurredLogLuminanceTexture;
+Texture3D<float2> _LocalExposureBilateralGridTexture;
+Texture2D<float4> _LocalExposureHighlightContrastCurve;
+Texture2D<float4> _LocalExposureShadowContrastCurve;
+
+RWTexture2D<float4> _LocalExposureOutputTexture;
+RWTexture3D<float2> _LocalExposureBilateralGrid;
+RWTexture2D<float> _LocalExposureLogLuminance;
+RWTexture2D<float> _LocalExposureBlurTemp;
+RWTexture2D<float> _LocalExposureBlurredLogLuminance;
+
+StructuredBuffer<float4> _LocalExposureExposureBuffer;
+StructuredBuffer<float4> _LocalExposurePreExposureBuffer;
+
+float4 _LocalExposureParams0;       // x: highlight contrast, y: shadow contrast, z: detail strength, w: blurred luminance blend
+float4 _LocalExposureParams1;       // x: middle grey comp, y: highlight threshold, z: shadow threshold, w: highlight threshold strength
+float4 _LocalExposureParams2;       // x: shadow threshold strength, y: histogram scale, z: histogram bias, w: luminance min
+float4 _LocalExposureScreenSize;    // xy: size, zw: inv size
+float4 _LocalExposureGridParams;    // xy: grid size, zw: grid uv scale
+float4 _LocalExposureBlurParams;    // x: radius, y: sigma
+float4 _LocalExposureHighlightCurveParams; // x: min EV100, y: inv range, z: enabled
+float4 _LocalExposureShadowCurveParams;    // x: min EV100, y: inv range, z: enabled
+
+groupshared uint s_SliceWeights[LOCAL_EXPOSURE_GRID_DEPTH];
+groupshared int s_SliceLogLuminanceSums[LOCAL_EXPOSURE_GRID_DEPTH];
+
+static const float3 kLuminanceWeights = float3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0);
+static const float kMiddleGrey = 0.18;
+static const float kEpsilon = 1e-4;
+
+float GetSafeLuminance(float3 color)
+{
+    return max(dot(max(color, 0.0), kLuminanceWeights), max(_LocalExposureParams2.w, kEpsilon));
+}
+
+float GetLogLuminanceFromColor(float3 color)
+{
+    return log2(GetSafeLuminance(color));
+}
+
+float GetHistogramPositionFromLogLuminance(float logLuminance)
+{
+    return logLuminance * _LocalExposureParams2.y + _LocalExposureParams2.z;
+}
+
+float ResolveAverageSceneEV100(float averageSceneLuminance)
+{
+    return log2(max(averageSceneLuminance / kMiddleGrey, kEpsilon));
+}
+
+float SampleContrastCurve(Texture2D<float4> curveTexture, float4 curveParams, float averageSceneEV100)
+{
+    if (curveParams.z < 0.5)
+        return 1.0;
+
+    float curveUv = saturate((averageSceneEV100 - curveParams.x) * curveParams.y);
+    return max(curveTexture.SampleLevel(sampler_LinearClamp, float2(curveUv, 0.5), 0.0).r, 0.0);
+}
+
+float CalculateThresholdAttenuation(float signedMiddleGreyDistance, float threshold, float strength)
+{
+    float safeThreshold = max(threshold, 0.0);
+    if (safeThreshold <= kEpsilon)
+        return 1.0;
+
+    float edge0 = safeThreshold * (1.0 - saturate(strength));
+    float edge1 = safeThreshold;
+    return saturate((abs(signedMiddleGreyDistance) - edge0) / max(edge1 - edge0, kEpsilon));
+}
+
+float CalculateLocalExposure(
+    float logLuminance,
+    float localAverageLogLuminance,
+    float middleGreyLogLuminance,
+    float averageSceneEV100)
+{
+    float highlightContrast = _LocalExposureParams0.x
+        * SampleContrastCurve(_LocalExposureHighlightContrastCurve, _LocalExposureHighlightCurveParams, averageSceneEV100);
+    float shadowContrast = _LocalExposureParams0.y
+        * SampleContrastCurve(_LocalExposureShadowContrastCurve, _LocalExposureShadowCurveParams, averageSceneEV100);
+
+    float targetContrast = logLuminance > middleGreyLogLuminance ? highlightContrast : shadowContrast;
+    float localExposure = (1.0 - targetContrast) * (middleGreyLogLuminance - localAverageLogLuminance);
+
+    float distanceFromMiddleGrey = logLuminance - middleGreyLogLuminance;
+    float highlightAttenuation = CalculateThresholdAttenuation(
+        max(distanceFromMiddleGrey, 0.0),
+        _LocalExposureParams1.y,
+        _LocalExposureParams1.w);
+    float shadowAttenuation = CalculateThresholdAttenuation(
+        max(-distanceFromMiddleGrey, 0.0),
+        _LocalExposureParams1.z,
+        _LocalExposureParams2.x);
+    float thresholdAttenuation = distanceFromMiddleGrey >= 0.0 ? highlightAttenuation : shadowAttenuation;
+
+    return exp2(localExposure * _LocalExposureParams0.z * thresholdAttenuation);
+}
+
+void AccumulateBilateralSlice(uint slice, float logLuminance, float weight)
+{
+    if (slice >= LOCAL_EXPOSURE_GRID_DEPTH || weight <= 0.0)
+        return;
+
+    uint scaledWeight = (uint)round(weight * LOCAL_EXPOSURE_BILATERAL_WEIGHT_SCALE);
+    int scaledLogLuminance = (int)round(logLuminance * weight * LOCAL_EXPOSURE_LOG_LUMINANCE_SCALE);
+
+    if (scaledWeight == 0)
+        return;
+
+    InterlockedAdd(s_SliceWeights[slice], scaledWeight);
+    InterlockedAdd(s_SliceLogLuminanceSums[slice], scaledLogLuminance);
+}
+
+[numthreads(LOCAL_EXPOSURE_GROUP_SIZE, LOCAL_EXPOSURE_GROUP_SIZE, 1)]
+void BuildBilateralGrid(
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint3 groupThreadId : SV_GroupThreadID,
+    uint3 groupId : SV_GroupID,
+    uint groupIndex : SV_GroupIndex)
+{
+    if (groupIndex < LOCAL_EXPOSURE_GRID_DEPTH)
+    {
+        s_SliceWeights[groupIndex] = 0;
+        s_SliceLogLuminanceSums[groupIndex] = 0;
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    uint2 tileOrigin = groupId.xy * LOCAL_EXPOSURE_TILE_SIZE;
+    const float oneOverPreExposure = rcp(max(_LocalExposurePreExposureBuffer[0].x, kEpsilon));
+
+    [loop]
+    for (uint y = groupThreadId.y; y < LOCAL_EXPOSURE_TILE_SIZE; y += LOCAL_EXPOSURE_GROUP_SIZE)
+    {
+        [loop]
+        for (uint x = groupThreadId.x; x < LOCAL_EXPOSURE_TILE_SIZE; x += LOCAL_EXPOSURE_GROUP_SIZE)
+        {
+            uint2 pixel = tileOrigin + uint2(x, y);
+            if (pixel.x >= (uint)_LocalExposureScreenSize.x || pixel.y >= (uint)_LocalExposureScreenSize.y)
+                continue;
+
+            float3 color = _LocalExposureInputTexture.Load(int3(pixel, 0)).rgb * oneOverPreExposure;
+            float logLuminance = GetLogLuminanceFromColor(color);
+            float slice = saturate(GetHistogramPositionFromLogLuminance(logLuminance)) * (LOCAL_EXPOSURE_GRID_DEPTH - 1);
+            uint slice0 = min((uint)floor(slice), (uint)(LOCAL_EXPOSURE_GRID_DEPTH - 1));
+            uint slice1 = min(slice0 + 1, (uint)(LOCAL_EXPOSURE_GRID_DEPTH - 1));
+            float sliceFraction = saturate(slice - slice0);
+
+            AccumulateBilateralSlice(slice0, logLuminance, 1.0 - sliceFraction);
+            AccumulateBilateralSlice(slice1, logLuminance, sliceFraction);
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupIndex < LOCAL_EXPOSURE_GRID_DEPTH)
+    {
+        float weight = (float)s_SliceWeights[groupIndex] / LOCAL_EXPOSURE_BILATERAL_WEIGHT_SCALE;
+        float logLuminanceSum = (float)s_SliceLogLuminanceSums[groupIndex] / LOCAL_EXPOSURE_LOG_LUMINANCE_SCALE;
+        _LocalExposureBilateralGrid[uint3(groupId.xy, groupIndex)] = float2(logLuminanceSum, weight);
+    }
+}
+
+[numthreads(LOCAL_EXPOSURE_GROUP_SIZE, LOCAL_EXPOSURE_GROUP_SIZE, 1)]
+void SetupLogLuminance(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x >= (uint)_LocalExposureScreenSize.x || dispatchThreadId.y >= (uint)_LocalExposureScreenSize.y)
+        return;
+
+    const float oneOverPreExposure = rcp(max(_LocalExposurePreExposureBuffer[0].x, kEpsilon));
+    float3 color = _LocalExposureInputTexture.Load(int3(dispatchThreadId.xy, 0)).rgb * oneOverPreExposure;
+    _LocalExposureLogLuminance[dispatchThreadId.xy] = GetLogLuminanceFromColor(color);
+}
+
+[numthreads(LOCAL_EXPOSURE_GROUP_SIZE, LOCAL_EXPOSURE_GROUP_SIZE, 1)]
+void BlurLogLuminanceHorizontal(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x >= (uint)_LocalExposureScreenSize.x || dispatchThreadId.y >= (uint)_LocalExposureScreenSize.y)
+        return;
+
+    int radius = min((int)_LocalExposureBlurParams.x, LOCAL_EXPOSURE_MAX_BLUR_RADIUS);
+    float sigma = max(_LocalExposureBlurParams.y, 1.0);
+    float weightedSum = 0.0;
+    float weightSum = 0.0;
+
+    [loop]
+    for (int tap = -LOCAL_EXPOSURE_MAX_BLUR_RADIUS; tap <= LOCAL_EXPOSURE_MAX_BLUR_RADIUS; ++tap)
+    {
+        if (abs(tap) > radius)
+            continue;
+
+        int2 samplePixel = int2(dispatchThreadId.xy) + int2(tap, 0);
+        samplePixel = clamp(samplePixel, int2(0, 0), int2(_LocalExposureScreenSize.xy) - 1);
+        float weight = exp(-0.5 * (tap * tap) / (sigma * sigma));
+        weightedSum += _LocalExposureLogLuminanceTexture.Load(int3(samplePixel, 0)) * weight;
+        weightSum += weight;
+    }
+
+    _LocalExposureBlurTemp[dispatchThreadId.xy] = weightedSum / max(weightSum, kEpsilon);
+}
+
+[numthreads(LOCAL_EXPOSURE_GROUP_SIZE, LOCAL_EXPOSURE_GROUP_SIZE, 1)]
+void BlurLogLuminanceVertical(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x >= (uint)_LocalExposureScreenSize.x || dispatchThreadId.y >= (uint)_LocalExposureScreenSize.y)
+        return;
+
+    int radius = min((int)_LocalExposureBlurParams.x, LOCAL_EXPOSURE_MAX_BLUR_RADIUS);
+    float sigma = max(_LocalExposureBlurParams.y, 1.0);
+    float weightedSum = 0.0;
+    float weightSum = 0.0;
+
+    [loop]
+    for (int tap = -LOCAL_EXPOSURE_MAX_BLUR_RADIUS; tap <= LOCAL_EXPOSURE_MAX_BLUR_RADIUS; ++tap)
+    {
+        if (abs(tap) > radius)
+            continue;
+
+        int2 samplePixel = int2(dispatchThreadId.xy) + int2(0, tap);
+        samplePixel = clamp(samplePixel, int2(0, 0), int2(_LocalExposureScreenSize.xy) - 1);
+        float weight = exp(-0.5 * (tap * tap) / (sigma * sigma));
+        weightedSum += _LocalExposureBlurTempTexture.Load(int3(samplePixel, 0)) * weight;
+        weightSum += weight;
+    }
+
+    _LocalExposureBlurredLogLuminance[dispatchThreadId.xy] = weightedSum / max(weightSum, kEpsilon);
+}
+
+[numthreads(LOCAL_EXPOSURE_GROUP_SIZE, LOCAL_EXPOSURE_GROUP_SIZE, 1)]
+void ApplyLocalExposure(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x >= (uint)_LocalExposureScreenSize.x || dispatchThreadId.y >= (uint)_LocalExposureScreenSize.y)
+        return;
+
+    float4 sourceColor = _LocalExposureInputTexture.Load(int3(dispatchThreadId.xy, 0));
+    const float oneOverPreExposure = rcp(max(_LocalExposurePreExposureBuffer[0].x, kEpsilon));
+    float3 unPreExposedColor = sourceColor.rgb * oneOverPreExposure;
+    float logLuminance = GetLogLuminanceFromColor(unPreExposedColor);
+
+    float2 uv = (dispatchThreadId.xy + 0.5) * _LocalExposureScreenSize.zw;
+    float sliceUv = (saturate(GetHistogramPositionFromLogLuminance(logLuminance)) * (LOCAL_EXPOSURE_GRID_DEPTH - 1) + 0.5)
+        / LOCAL_EXPOSURE_GRID_DEPTH;
+    float3 gridUv = float3(uv * _LocalExposureGridParams.zw, sliceUv);
+    float2 gridAccum = _LocalExposureBilateralGridTexture.SampleLevel(sampler_LinearClamp, gridUv, 0.0);
+    float bilateralLogLuminance = gridAccum.x / max(gridAccum.y, kEpsilon);
+    float blurredLogLuminance = _LocalExposureBlurredLogLuminanceTexture.SampleLevel(sampler_LinearClamp, uv, 0.0).r;
+
+    float localAverageLogLuminance = gridAccum.y > kEpsilon
+        ? lerp(bilateralLogLuminance, blurredLogLuminance, _LocalExposureParams0.w)
+        : blurredLogLuminance;
+
+    float exposureScale = max(_LocalExposureExposureBuffer[0].x, kEpsilon);
+    float averageSceneLuminance = max(_LocalExposureExposureBuffer[0].z, kEpsilon);
+    float middleGreyCompensation = max(_LocalExposureExposureBuffer[0].w * _LocalExposureParams1.x, kEpsilon);
+    float middleGreyLogLuminance = log2(kMiddleGrey * middleGreyCompensation);
+    float averageSceneEV100 = ResolveAverageSceneEV100(averageSceneLuminance);
+
+    float localExposure = CalculateLocalExposure(
+        logLuminance + log2(exposureScale),
+        localAverageLogLuminance + log2(exposureScale),
+        middleGreyLogLuminance,
+        averageSceneEV100);
+
+    _LocalExposureOutputTexture[dispatchThreadId.xy] = float4(sourceColor.rgb * localExposure, sourceColor.a);
+}
+
+[numthreads(LOCAL_EXPOSURE_GROUP_SIZE, LOCAL_EXPOSURE_GROUP_SIZE, 1)]
+void Copy(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (dispatchThreadId.x >= (uint)_LocalExposureScreenSize.x || dispatchThreadId.y >= (uint)_LocalExposureScreenSize.y)
+        return;
+
+    _LocalExposureOutputTexture[dispatchThreadId.xy] = _LocalExposureInputTexture.Load(int3(dispatchThreadId.xy, 0));
+}

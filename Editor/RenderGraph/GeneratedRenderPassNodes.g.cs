@@ -87,6 +87,9 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class LightGridPass : RenderPassNodeData { }
 
     [Serializable]
+    internal sealed class LocalExposurePass : RenderPassNodeData { }
+
+    [Serializable]
     internal sealed class MotionVectorPass : RenderPassNodeData { }
 
     [Serializable]

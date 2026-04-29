@@ -93,6 +93,9 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/AutoExposure/HDRP/Exposure.compute")]
         public ComputeShader AutoExposureHDRPCompute;
 
+        [ResourcePath("Shaders/Core/Private/LocalExposure/LocalExposure.compute")]
+        public ComputeShader LocalExposureCompute;
+
         
         [ResourcePath("Shaders/Core/Private/CoreBlit")]
         public Shader CoreBlitShader;

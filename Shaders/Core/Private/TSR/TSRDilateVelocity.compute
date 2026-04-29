@@ -7,6 +7,8 @@ Texture2D<float2> _InputMotionVectors;
 
 RWTexture2D<float2> _DilatedMotion;
 RWTexture2D<float> _DilatedDepth;
+RWTexture2D<float> _DepthError;
+RWTexture2D<float> _ReprojectionBoundary;
 
 float4 _RenderSize;
 
@@ -19,9 +21,12 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
 
     float centerDepth = _InputDepth[pixelCoord];
-    float2 selectedMotion = _InputMotionVectors[pixelCoord];
+    float2 centerMotion = _InputMotionVectors[pixelCoord];
+    float2 selectedMotion = centerMotion;
     float selectedDepth = centerDepth;
-    float bestMotion = dot(selectedMotion, selectedMotion);
+    float selectedMotionLength = dot(selectedMotion, selectedMotion);
+    float maxDepthError = 0.0;
+    float maxMotionDelta = 0.0;
 
     [unroll]
     for (int y = -1; y <= 1; y++)
@@ -30,17 +35,32 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
         for (int x = -1; x <= 1; x++)
         {
             int2 sampleCoord = clamp(pixelCoord + int2(x, y), int2(0, 0), renderSize - 1);
+            float sampleDepth = _InputDepth[sampleCoord];
             float2 motion = _InputMotionVectors[sampleCoord];
             float motionLength = dot(motion, motion);
-            if (motionLength > bestMotion)
+            float depthError = abs(sampleDepth - centerDepth);
+            float motionDelta = length((motion - centerMotion) * float2(renderSize));
+
+            maxDepthError = max(maxDepthError, depthError);
+            maxMotionDelta = max(maxMotionDelta, motionDelta);
+
+            bool closerDepth = TSR_IsDepthCloser(sampleDepth, selectedDepth);
+            bool equalDepthHigherMotion = abs(sampleDepth - selectedDepth) <= 1e-6
+                && motionLength > selectedMotionLength;
+            if (closerDepth || equalDepthHigherMotion)
             {
-                bestMotion = motionLength;
+                selectedMotionLength = motionLength;
                 selectedMotion = motion;
-                selectedDepth = _InputDepth[sampleCoord];
+                selectedDepth = sampleDepth;
             }
         }
     }
 
+    float depthBoundary = saturate(maxDepthError * 333.3333);
+    float motionBoundary = saturate(maxMotionDelta * 0.25);
+
     _DilatedMotion[pixelCoord] = selectedMotion;
     _DilatedDepth[pixelCoord] = selectedDepth;
+    _DepthError[pixelCoord] = maxDepthError;
+    _ReprojectionBoundary[pixelCoord] = max(depthBoundary, motionBoundary);
 }

@@ -28,6 +28,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int HistoryMetaId = Shader.PropertyToID("_HistoryMeta");
         private static readonly int DilatedMotionId = Shader.PropertyToID("_DilatedMotion");
         private static readonly int DilatedDepthId = Shader.PropertyToID("_DilatedDepth");
+        private static readonly int DepthErrorId = Shader.PropertyToID("_DepthError");
+        private static readonly int ReprojectionBoundaryId = Shader.PropertyToID("_ReprojectionBoundary");
         private static readonly int ReprojectedHistoryColorId = Shader.PropertyToID("_ReprojectedHistoryColor");
         private static readonly int ReprojectedHistoryMetaId = Shader.PropertyToID("_ReprojectedHistoryMeta");
         private static readonly int AcceptedHistoryColorId = Shader.PropertyToID("_AcceptedHistoryColor");
@@ -123,6 +125,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 CreateColorDescriptor("TSR_DilatedMotion", renderSize.x, renderSize.y, GraphicsFormat.R16G16_SFloat));
             var dilatedDepth = renderGraph.CreateTexture(
                 CreateColorDescriptor("TSR_DilatedDepth", renderSize.x, renderSize.y, GraphicsFormat.R32_SFloat));
+            var depthError = renderGraph.CreateTexture(
+                CreateColorDescriptor("TSR_DepthError", renderSize.x, renderSize.y, GraphicsFormat.R16_SFloat));
+            var reprojectionBoundary = renderGraph.CreateTexture(
+                CreateColorDescriptor("TSR_ReprojectionBoundary", renderSize.x, renderSize.y, GraphicsFormat.R8_UNorm));
             var reprojectedHistoryColor = renderGraph.CreateTexture(
                 CreateColorDescriptor("TSR_ReprojectedHistoryColor", outputSize.x, outputSize.y, GraphicsFormat.R16G16B16A16_SFloat));
             var reprojectedHistoryMeta = renderGraph.CreateTexture(
@@ -151,6 +157,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 passData.Output = outputHandle;
                 passData.DilatedMotion = dilatedMotion;
                 passData.DilatedDepth = dilatedDepth;
+                passData.DepthError = depthError;
+                passData.ReprojectionBoundary = reprojectionBoundary;
                 passData.ReprojectedHistoryColor = reprojectedHistoryColor;
                 passData.ReprojectedHistoryMeta = reprojectedHistoryMeta;
                 passData.AcceptedHistoryColor = acceptedHistoryColor;
@@ -178,6 +186,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 builder.UseTexture(passData.Output, AccessFlags.WriteAll);
                 builder.UseTexture(passData.DilatedMotion, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.DilatedDepth, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.DepthError, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.ReprojectionBoundary, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.ReprojectedHistoryColor, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.ReprojectedHistoryMeta, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.AcceptedHistoryColor, AccessFlags.ReadWrite);
@@ -295,6 +305,8 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(shader, kernel, InputMotionVectorsId, data.MotionVectors);
             cmd.SetComputeTextureParam(shader, kernel, DilatedMotionId, data.DilatedMotion);
             cmd.SetComputeTextureParam(shader, kernel, DilatedDepthId, data.DilatedDepth);
+            cmd.SetComputeTextureParam(shader, kernel, DepthErrorId, data.DepthError);
+            cmd.SetComputeTextureParam(shader, kernel, ReprojectionBoundaryId, data.ReprojectionBoundary);
             cmd.DispatchCompute(shader, kernel, DivRoundUp(data.RenderSize.x, KernelThreadGroupSize), DivRoundUp(data.RenderSize.y, KernelThreadGroupSize), 1);
         }
 
@@ -304,6 +316,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var kernel = data.Shaders.ReprojectHistoryKernel;
             SetCommonConstants(cmd, shader, data);
             cmd.SetComputeTextureParam(shader, kernel, DilatedMotionId, data.DilatedMotion);
+            cmd.SetComputeTextureParam(shader, kernel, ReprojectionBoundaryId, data.ReprojectionBoundary);
             cmd.SetComputeTextureParam(shader, kernel, HistoryColorId, data.PreviousHistoryColor);
             cmd.SetComputeTextureParam(shader, kernel, HistoryMetaId, data.PreviousHistoryMeta);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedHistoryColorId, data.ReprojectedHistoryColor);
@@ -320,6 +333,8 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(shader, kernel, InputDepthId, data.Depth);
             cmd.SetComputeTextureParam(shader, kernel, DilatedDepthId, data.DilatedDepth);
             cmd.SetComputeTextureParam(shader, kernel, DilatedMotionId, data.DilatedMotion);
+            cmd.SetComputeTextureParam(shader, kernel, DepthErrorId, data.DepthError);
+            cmd.SetComputeTextureParam(shader, kernel, ReprojectionBoundaryId, data.ReprojectionBoundary);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedHistoryColorId, data.ReprojectedHistoryColor);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedHistoryMetaId, data.ReprojectedHistoryMeta);
             cmd.SetComputeTextureParam(shader, kernel, AcceptedHistoryColorId, data.AcceptedHistoryColor);
@@ -334,6 +349,7 @@ namespace VividRP.Runtime.RenderPass.Core
             SetCommonConstants(cmd, shader, data);
             cmd.SetComputeTextureParam(shader, kernel, CurrentFrameColorId, data.SpatialAntiAliasedColor);
             cmd.SetComputeTextureParam(shader, kernel, DilatedDepthId, data.DilatedDepth);
+            cmd.SetComputeTextureParam(shader, kernel, ReprojectionBoundaryId, data.ReprojectionBoundary);
             cmd.SetComputeTextureParam(shader, kernel, AcceptedHistoryColorId, data.AcceptedHistoryColor);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedHistoryMetaId, data.ReprojectedHistoryMeta);
             cmd.SetComputeTextureParam(shader, kernel, RejectionMaskId, data.RejectionMask);
@@ -622,6 +638,8 @@ namespace VividRP.Runtime.RenderPass.Core
             public TextureHandle Output;
             public TextureHandle DilatedMotion;
             public TextureHandle DilatedDepth;
+            public TextureHandle DepthError;
+            public TextureHandle ReprojectionBoundary;
             public TextureHandle ReprojectedHistoryColor;
             public TextureHandle ReprojectedHistoryMeta;
             public TextureHandle AcceptedHistoryColor;

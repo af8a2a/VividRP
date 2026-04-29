@@ -125,6 +125,49 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ShaderFiles_DilateVelocityUsesDepthAndReprojectionBoundarySignals()
+        {
+            var dilateSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "TSR",
+                "TSRDilateVelocity.compute"));
+            var reprojectSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "TSR",
+                "TSRReprojectHistory.compute"));
+            var rejectSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "TSR",
+                "TSRRejectShading.compute"));
+            var updateSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "TSR",
+                "TSRUpdateHistory.compute"));
+
+            Assert.That(dilateSource, Does.Contain("RWTexture2D<float> _DepthError"));
+            Assert.That(dilateSource, Does.Contain("RWTexture2D<float> _ReprojectionBoundary"));
+            Assert.That(dilateSource, Does.Contain("TSR_IsDepthCloser(sampleDepth, selectedDepth)"));
+            Assert.That(dilateSource, Does.Contain("maxDepthError"));
+            Assert.That(dilateSource, Does.Contain("motionBoundary"));
+            Assert.That(reprojectSource, Does.Contain("Texture2D<float> _ReprojectionBoundary"));
+            Assert.That(reprojectSource, Does.Contain("historyConfidence"));
+            Assert.That(reprojectSource, Does.Contain("max(localBoundary, uvBoundary)"));
+            Assert.That(rejectSource, Does.Contain("Texture2D<float> _DepthError"));
+            Assert.That(rejectSource, Does.Contain("depthTolerance = _TSRRejectionParams.x + depthError * 2.0"));
+            Assert.That(rejectSource, Does.Contain("motionLimit = lerp"));
+            Assert.That(updateSource, Does.Contain("boundarySampleCount"));
+            Assert.That(updateSource, Does.Contain("historyWeight *= saturate(1.0 - reprojectionBoundary * 0.5)"));
+        }
+
+        [Test]
         public void ShaderFiles_SpatialAntiAliasingFiltersRejectedPixelsOnly()
         {
             var spatialSource = File.ReadAllText(GetPackageFilePath(
@@ -165,10 +208,13 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("descriptor.EnableRandomWrite = true"));
             Assert.That(passSource, Does.Contain("GraphicsFormat.R16G16B16A16_SFloat"));
             Assert.That(passSource, Does.Contain("GraphicsFormat.R16G16_SFloat"));
+            Assert.That(passSource, Does.Contain("GraphicsFormat.R16_SFloat"));
             Assert.That(passSource, Does.Contain("GraphicsFormat.R32_SFloat"));
             Assert.That(passSource, Does.Contain("GraphicsFormat.R8_UNorm"));
             Assert.That(passSource, Does.Contain("m_HistoryColor"));
             Assert.That(passSource, Does.Contain("m_HistoryMeta"));
+            Assert.That(passSource, Does.Contain("TSR_DepthError"));
+            Assert.That(passSource, Does.Contain("TSR_ReprojectionBoundary"));
             Assert.That(passSource, Does.Contain("TSR_SpatialAntiAliasedColor"));
             Assert.That(passSource, Does.Contain("SpatialAntiAliasedColor"));
             Assert.That(passSource, Does.Contain("requestedRenderSize"));

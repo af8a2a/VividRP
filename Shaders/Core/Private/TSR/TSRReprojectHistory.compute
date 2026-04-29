@@ -3,6 +3,7 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
 
 Texture2D<float2> _DilatedMotion;
+Texture2D<float> _ReprojectionBoundary;
 Texture2D<float4> _HistoryColor;
 Texture2D<float2> _HistoryMeta;
 
@@ -43,6 +44,12 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     float2 previousSize = max(_PreviousOutputSize.xy, float2(1.0, 1.0));
+    float localBoundary = _ReprojectionBoundary[renderCoord];
+    float2 historyTexelBoundary = min(historyUV, 1.0 - historyUV) * previousSize;
+    float uvBoundary = saturate(1.0 - min(historyTexelBoundary.x, historyTexelBoundary.y));
+    float historyConfidence = saturate(1.0 - max(localBoundary, uvBoundary) * 0.75);
+    float2 historyMeta = _HistoryMeta.SampleLevel(sampler_LinearClamp, historyUV, 0);
+
     _ReprojectedHistoryColor[pixelCoord] = TSR_SampleCatmullRom(_HistoryColor, historyUV, previousSize);
-    _ReprojectedHistoryMeta[pixelCoord] = _HistoryMeta.SampleLevel(sampler_LinearClamp, historyUV, 0);
+    _ReprojectedHistoryMeta[pixelCoord] = float2(historyMeta.x * historyConfidence, historyMeta.y);
 }

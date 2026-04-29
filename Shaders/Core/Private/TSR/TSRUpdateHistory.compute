@@ -4,6 +4,7 @@
 
 Texture2D<float4> _CurrentFrameColor;
 Texture2D<float> _DilatedDepth;
+Texture2D<float> _ReprojectionBoundary;
 Texture2D<float4> _AcceptedHistoryColor;
 Texture2D<float2> _ReprojectedHistoryMeta;
 Texture2D<float> _RejectionMask;
@@ -30,14 +31,17 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 historyColor = _AcceptedHistoryColor[pixelCoord].rgb;
     float previousSampleCount = _ReprojectedHistoryMeta[pixelCoord].x;
     float accepted = _RejectionMask[pixelCoord] > 0.5 ? 1.0 : 0.0;
+    float reprojectionBoundary = _ReprojectionBoundary[renderCoord];
 
     float maxSampleCount = max(_TSRParams.y, 1.0);
+    float boundarySampleCount = lerp(maxSampleCount, min(maxSampleCount, 4.0), reprojectionBoundary);
     float sampleCount = accepted > 0.5
-        ? min(previousSampleCount + 1.0, maxSampleCount)
+        ? min(previousSampleCount + 1.0, boundarySampleCount)
         : 1.0;
     float historyWeight = accepted > 0.5
         ? saturate(previousSampleCount / max(sampleCount, 1.0))
         : 0.0;
+    historyWeight *= saturate(1.0 - reprojectionBoundary * 0.5);
     float3 result = lerp(currentColor, historyColor, historyWeight);
 
     _UpdatedHistoryColor[pixelCoord] = float4(max(result, 0.0), 1.0);

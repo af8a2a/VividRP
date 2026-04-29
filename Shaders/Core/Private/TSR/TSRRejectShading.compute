@@ -6,6 +6,8 @@ Texture2D<float4> _InputColor;
 Texture2D<float> _InputDepth;
 Texture2D<float> _DilatedDepth;
 Texture2D<float2> _DilatedMotion;
+Texture2D<float> _DepthError;
+Texture2D<float> _ReprojectionBoundary;
 Texture2D<float4> _ReprojectedHistoryColor;
 Texture2D<float2> _ReprojectedHistoryMeta;
 
@@ -42,8 +44,11 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float currentDepth = _InputDepth[renderCoord];
     float dilatedDepth = _DilatedDepth[renderCoord];
+    float depthError = _DepthError[renderCoord];
+    float reprojectionBoundary = _ReprojectionBoundary[renderCoord];
     float historyDepth = historyMeta.y;
-    float depthDiff = abs(max(currentDepth, dilatedDepth) - historyDepth);
+    float depthDiff = min(abs(currentDepth - historyDepth), abs(dilatedDepth - historyDepth));
+    float depthTolerance = _TSRRejectionParams.x + depthError * 2.0;
 
     float2 motion = _DilatedMotion[renderCoord];
     float motionPixels = length(motion * float2(renderSize));
@@ -52,12 +57,15 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 currentYCoCg = TSR_RGBToYCoCg(currentColor);
     float lumaDiff = abs(currentYCoCg.x - historyYCoCg.x) / max(max(currentYCoCg.x, historyYCoCg.x), 0.2);
     float chromaDiff = length(currentYCoCg.yz - historyYCoCg.yz);
-    bool depthRejected = hasSignificantMotion && depthDiff > _TSRRejectionParams.x;
+    float lumaThreshold = lerp(_TSRRejectionParams.z, _TSRRejectionParams.z * 0.55, reprojectionBoundary);
+    float chromaThreshold = lerp(_TSRRejectionParams.w, _TSRRejectionParams.w * 0.65, reprojectionBoundary);
+    float motionLimit = lerp(_TSRRejectionParams.y, _TSRRejectionParams.y * 0.5, reprojectionBoundary);
+    bool depthRejected = hasSignificantMotion && depthDiff > depthTolerance;
     bool colorRejected = hasSignificantMotion
-        && (lumaDiff > _TSRRejectionParams.z || chromaDiff > _TSRRejectionParams.w);
+        && (lumaDiff > lumaThreshold || chromaDiff > chromaThreshold);
 
     bool accepted = historyMeta.x > 0.5
-        && motionPixels <= _TSRRejectionParams.y
+        && motionPixels <= motionLimit
         && !depthRejected
         && !colorRejected;
 

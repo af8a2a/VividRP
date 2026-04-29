@@ -19,6 +19,15 @@ float3 TSR_YCoCgToRGB(float3 ycocg)
     return float3(y + co - cg, y + cg, y - co - cg);
 }
 
+bool TSR_IsDepthCloser(float candidateDepth, float bestDepth)
+{
+#if defined(UNITY_REVERSED_Z)
+    return candidateDepth > bestDepth;
+#else
+    return candidateDepth < bestDepth;
+#endif
+}
+
 float3 TSR_ClipToAABB(float3 color, float3 aabbMin, float3 aabbMax)
 {
     float3 center = 0.5 * (aabbMax + aabbMin);

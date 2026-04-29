@@ -9,10 +9,14 @@
 StructuredBuffer<uint> g_vLayeredLightList;
 StructuredBuffer<uint> g_LayeredOffset;
 StructuredBuffer<float> g_logBaseBuffer;
+StructuredBuffer<uint> g_vBigTileLightList;
 uint _ClusteredPunctualLightGridEnabled;
 uint _ClusteredAreaLightGridEnabled;
 uint _ClusteredDecalGridEnabled;
+uint _NumTileBigTileX;
+uint _NumTileBigTileY;
 int _ClusterTileSize;
+int _BigTileSize;
 int _ClusterSliceCount;
 int _ClusterTileCountX;
 int _ClusterTileCountY;
@@ -21,6 +25,12 @@ float _ClusterFarClip;
 int _ClusterIsOrthographic;
 
 struct VividClusteredLightCell
+{
+    uint offset;
+    uint count;
+};
+
+struct VividBigTileLightCell
 {
     uint offset;
     uint count;
@@ -66,6 +76,37 @@ struct VividClusteredLighting
         return uint2(
             min(pixelCoord.x / tileSize, tileCountX - 1u),
             min(pixelCoord.y / tileSize, tileCountY - 1u));
+    }
+
+    static uint GetBigTileSize()
+    {
+        return max((uint)_BigTileSize, 1u);
+    }
+
+    static uint GetBigTileCountX()
+    {
+        return max(_NumTileBigTileX, 1u);
+    }
+
+    static uint GetBigTileCountY()
+    {
+        return max(_NumTileBigTileY, 1u);
+    }
+
+    static uint2 GetBigTileCoord(uint2 pixelCoord)
+    {
+        uint tileSize = GetBigTileSize();
+        uint tileCountX = GetBigTileCountX();
+        uint tileCountY = GetBigTileCountY();
+
+        return uint2(
+            min(pixelCoord.x / tileSize, tileCountX - 1u),
+            min(pixelCoord.y / tileSize, tileCountY - 1u));
+    }
+
+    static uint FlattenBigTileIndex(uint2 tileCoord)
+    {
+        return tileCoord.y * GetBigTileCountX() + tileCoord.x;
     }
 
     static uint GetLogBaseBufferIndex(uint2 tileCoord)
@@ -149,6 +190,21 @@ struct VividClusteredLighting
         return tileCoord.x + tileCoord.y * tileCountX + sliceIndex * tileCountX * tileCountY;
     }
 
+    static VividBigTileLightCell LoadBigTileLightCell(uint bigTileIndex)
+    {
+        VividBigTileLightCell lightCell = (VividBigTileLightCell)0;
+        lightCell.offset = (MAX_NR_BIG_TILE_LIGHTS_PLUS_ONE * bigTileIndex) >> 1;
+        lightCell.count = min(
+            g_vBigTileLightList[lightCell.offset] & 0xffffu,
+            MAX_NR_BIG_TILE_LIGHTS_PLUS_ONE - 1u);
+        return lightCell;
+    }
+
+    static VividBigTileLightCell LoadBigTileLightCell(uint2 pixelCoord)
+    {
+        return LoadBigTileLightCell(FlattenBigTileIndex(GetBigTileCoord(pixelCoord)));
+    }
+
     static VividClusteredLightCell LoadPunctualLightCell(uint2 tileCoord, uint sliceIndex)
     {
         if (_ClusteredPunctualLightGridEnabled == 0u)
@@ -224,6 +280,13 @@ struct VividClusteredLighting
     static uint LoadLightIndex(VividClusteredLightCell lightCell, uint localIndex)
     {
         return g_vLayeredLightList[lightCell.offset + localIndex];
+    }
+
+    static uint LoadBigTileLightIndex(VividBigTileLightCell lightCell, uint localIndex)
+    {
+        uint localIndexPlusOne = localIndex + 1u;
+        uint packedLightIndices = g_vBigTileLightList[lightCell.offset + (localIndexPlusOne >> 1)];
+        return (packedLightIndices >> ((localIndexPlusOne & 1u) * 16u)) & 0xffffu;
     }
 };
 

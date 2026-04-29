@@ -48,6 +48,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int NumTileBigTileXId = Shader.PropertyToID("_NumTileBigTileX");
         private static readonly int NumTileBigTileYId = Shader.PropertyToID("_NumTileBigTileY");
         private static readonly int ClusterTileSizeId = Shader.PropertyToID("_ClusterTileSize");
+        private static readonly int BigTileSizeId = Shader.PropertyToID("_BigTileSize");
         private static readonly int ClusterSliceCountId = Shader.PropertyToID("_ClusterSliceCount");
         private static readonly int ClusterTileCountXId = Shader.PropertyToID("_ClusterTileCountX");
         private static readonly int ClusterTileCountYId = Shader.PropertyToID("_ClusterTileCountY");
@@ -331,6 +332,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_Shader, ClusteredAreaLightGridEnabledId, m_SupportsClusteredAreaLights ? 1 : 0);
             cmd.SetComputeIntParam(m_Shader, ClusteredDecalGridEnabledId, 0);
             cmd.SetComputeIntParam(m_Shader, ClusterTileSizeId, m_ClusterTileSize);
+            cmd.SetComputeIntParam(m_Shader, BigTileSizeId, LightGridPass.ClusterBigTileSize);
             cmd.SetComputeIntParam(m_Shader, ClusterSliceCountId, m_ClusterSliceCount);
             cmd.SetComputeIntParam(m_Shader, ClusterTileCountXId, m_ClusterTileCountX);
             cmd.SetComputeIntParam(m_Shader, ClusterTileCountYId, m_ClusterTileCountY);

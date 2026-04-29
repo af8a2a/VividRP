@@ -14,6 +14,7 @@ namespace VividRP.Runtime
             SkyChanged
         }
 
+        private const string DiffuseVolumetricKernelName = "AmbientProbeConvolutionDiffuseVolumetric";
         private const string DiffuseKernelName = "AmbientProbeConvolutionDiffuse";
         private const string LegacyKernelName = "AmbientProbeConvolution";
         private const int AmbientProbeCoefficientCount = 27;
@@ -25,6 +26,9 @@ namespace VividRP.Runtime
         private static readonly int AmbientProbeInputCubemapId = Shader.PropertyToID("_AmbientProbeInputCubemap");
         private static readonly int AmbientProbeOutputBufferId = Shader.PropertyToID("_AmbientProbeOutputBuffer");
         private static readonly int DiffuseAmbientProbeOutputBufferId = Shader.PropertyToID("_DiffuseAmbientProbeOutputBuffer");
+        private static readonly int VolumetricAmbientProbeOutputBufferId = Shader.PropertyToID("_VolumetricAmbientProbeOutputBuffer");
+        private static readonly int VolumetricAmbientProbeBufferId = Shader.PropertyToID("_VolumetricAmbientProbeBuffer");
+        private static readonly int FogParametersId = Shader.PropertyToID("_FogParameters");
         private static readonly int ScratchBufferId = Shader.PropertyToID("_ScratchBuffer");
         private static readonly int VividAmbientProbeDataId = Shader.PropertyToID("_VividAmbientProbeData");
         private static readonly ProfilingSampler s_ConvolutionMissingBufferSampler = new("SkyAmbientProbeConvolution.Convolve (MissingBuffer)");
@@ -43,10 +47,13 @@ namespace VividRP.Runtime
         private ComputeShader m_ComputeShader;
         private int m_Kernel = -1;
         private bool m_UsesHdrpDiffuseKernel;
+        private bool m_UsesHdrpVolumetricKernel;
         private GraphicsBuffer m_AmbientProbeBuffer;
+        private GraphicsBuffer m_VolumetricAmbientProbeBuffer;
         private GraphicsBuffer m_AmbientProbeCoefficientBuffer;
         private GraphicsBuffer m_AmbientProbeScratchBuffer;
         private GraphicsBuffer m_DefaultAmbientProbeBuffer;
+        private GraphicsBuffer m_DefaultVolumetricAmbientProbeBuffer;
         private bool m_HasConvolvedSkyHash;
         private int m_ConvolvedSkyHash;
         private bool m_DebugReadbackPending;
@@ -70,15 +77,20 @@ namespace VividRP.Runtime
         {
             m_AmbientProbeBuffer?.Release();
             m_AmbientProbeBuffer = null;
+            m_VolumetricAmbientProbeBuffer?.Release();
+            m_VolumetricAmbientProbeBuffer = null;
             m_AmbientProbeCoefficientBuffer?.Release();
             m_AmbientProbeCoefficientBuffer = null;
             m_AmbientProbeScratchBuffer?.Release();
             m_AmbientProbeScratchBuffer = null;
             m_DefaultAmbientProbeBuffer?.Release();
             m_DefaultAmbientProbeBuffer = null;
+            m_DefaultVolumetricAmbientProbeBuffer?.Release();
+            m_DefaultVolumetricAmbientProbeBuffer = null;
             m_ComputeShader = null;
             m_Kernel = -1;
             m_UsesHdrpDiffuseKernel = false;
+            m_UsesHdrpVolumetricKernel = false;
             m_HasConvolvedSkyHash = false;
             m_ConvolvedSkyHash = 0;
             m_DebugReadbackPending = false;
@@ -89,6 +101,7 @@ namespace VividRP.Runtime
             CommandBuffer cmd,
             Texture sourceCubemap,
             int skyHash,
+            Vector4 fogParameters,
             bool forceRebuild = false)
         {
             if (!IsSupported || cmd == null || sourceCubemap == null)
@@ -110,6 +123,12 @@ namespace VividRP.Runtime
                     cmd.SetComputeBufferParam(m_ComputeShader, m_Kernel, AmbientProbeOutputBufferId, m_AmbientProbeCoefficientBuffer);
                     cmd.SetComputeBufferParam(m_ComputeShader, m_Kernel, DiffuseAmbientProbeOutputBufferId, m_AmbientProbeBuffer);
                     cmd.SetComputeBufferParam(m_ComputeShader, m_Kernel, ScratchBufferId, m_AmbientProbeScratchBuffer);
+
+                    if (m_UsesHdrpVolumetricKernel)
+                    {
+                        cmd.SetComputeBufferParam(m_ComputeShader, m_Kernel, VolumetricAmbientProbeOutputBufferId, m_VolumetricAmbientProbeBuffer);
+                        cmd.SetComputeVectorParam(m_ComputeShader, FogParametersId, fogParameters);
+                    }
                 }
                 else
                 {
@@ -131,9 +150,16 @@ namespace VividRP.Runtime
 
             EnsureDefaultAmbientProbeBuffer();
             var activeBuffer = useDefault || m_AmbientProbeBuffer == null ? m_DefaultAmbientProbeBuffer : m_AmbientProbeBuffer;
+            var activeVolumetricBuffer = useDefault || m_VolumetricAmbientProbeBuffer == null
+                ? m_DefaultVolumetricAmbientProbeBuffer
+                : m_VolumetricAmbientProbeBuffer;
             cmd.SetGlobalBuffer(
                 VividAmbientProbeDataId,
                 activeBuffer);
+            cmd.SetGlobalBuffer(
+                VolumetricAmbientProbeBufferId,
+                activeVolumetricBuffer);
+            RequestDebugReadback(cmd, activeBuffer, useDefault);
         }
 
         private bool HasValidBuffers()
@@ -142,7 +168,9 @@ namespace VividRP.Runtime
                 return false;
 
             return !m_UsesHdrpDiffuseKernel
-                || (m_AmbientProbeCoefficientBuffer != null && m_AmbientProbeScratchBuffer != null);
+                || (m_AmbientProbeCoefficientBuffer != null
+                    && m_AmbientProbeScratchBuffer != null
+                    && (!m_UsesHdrpVolumetricKernel || m_VolumetricAmbientProbeBuffer != null));
         }
 
         private void EnsureAmbientProbeBuffers()
@@ -162,21 +190,41 @@ namespace VividRP.Runtime
 
         private void EnsureDefaultAmbientProbeBuffer()
         {
-            if (m_DefaultAmbientProbeBuffer != null)
+            if (m_DefaultAmbientProbeBuffer != null && m_DefaultVolumetricAmbientProbeBuffer != null)
                 return;
 
-            m_DefaultAmbientProbeBuffer = new GraphicsBuffer(
-                GraphicsBuffer.Target.Structured,
-                AmbientProbePackedCoefficientCount,
-                AmbientProbePackedCoefficientStride);
-            m_DefaultAmbientProbeBuffer.SetData(s_DefaultAmbientProbeData);
+            if (m_DefaultAmbientProbeBuffer == null)
+            {
+                m_DefaultAmbientProbeBuffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured,
+                    AmbientProbePackedCoefficientCount,
+                    AmbientProbePackedCoefficientStride);
+                m_DefaultAmbientProbeBuffer.SetData(s_DefaultAmbientProbeData);
+            }
+
+            if (m_DefaultVolumetricAmbientProbeBuffer == null)
+            {
+                m_DefaultVolumetricAmbientProbeBuffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured,
+                    AmbientProbePackedCoefficientCount,
+                    AmbientProbePackedCoefficientStride);
+                m_DefaultVolumetricAmbientProbeBuffer.SetData(s_DefaultAmbientProbeData);
+            }
         }
 
         private int FindKernel()
         {
             m_UsesHdrpDiffuseKernel = false;
+            m_UsesHdrpVolumetricKernel = false;
             if (m_ComputeShader == null)
                 return -1;
+
+            if (m_ComputeShader.HasKernel(DiffuseVolumetricKernelName))
+            {
+                m_UsesHdrpDiffuseKernel = true;
+                m_UsesHdrpVolumetricKernel = true;
+                return m_ComputeShader.FindKernel(DiffuseVolumetricKernelName);
+            }
 
             if (m_ComputeShader.HasKernel(DiffuseKernelName))
             {
@@ -205,6 +253,14 @@ namespace VividRP.Runtime
             if (!m_UsesHdrpDiffuseKernel)
                 return;
 
+            if (m_UsesHdrpVolumetricKernel && m_VolumetricAmbientProbeBuffer == null)
+            {
+                m_VolumetricAmbientProbeBuffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Structured,
+                    AmbientProbePackedCoefficientCount,
+                    AmbientProbePackedCoefficientStride);
+            }
+
             if (m_AmbientProbeCoefficientBuffer == null)
             {
                 m_AmbientProbeCoefficientBuffer = new GraphicsBuffer(
@@ -220,6 +276,39 @@ namespace VividRP.Runtime
                     AmbientProbeCoefficientCount,
                     AmbientProbeScratchStride);
             }
+        }
+
+        private void RequestDebugReadback(CommandBuffer cmd, GraphicsBuffer activeBuffer, bool useDefault)
+        {
+#if UNITY_EDITOR
+            if (!EnableAmbientProbeDebugReadback
+                || cmd == null
+                || activeBuffer == null
+                || m_DebugReadbackPending)
+            {
+                return;
+            }
+
+            var debugSkyHash = useDefault ? int.MinValue : m_ConvolvedSkyHash;
+            if (m_DebugReadbackSkyHash == debugSkyHash)
+                return;
+
+            m_DebugReadbackPending = true;
+            cmd.RequestAsyncReadback(activeBuffer, request => OnDebugReadbackCompleted(request, debugSkyHash));
+#endif
+        }
+
+        private void OnDebugReadbackCompleted(AsyncGPUReadbackRequest request, int skyHash)
+        {
+#if UNITY_EDITOR
+            m_DebugReadbackPending = false;
+            if (request.hasError)
+                return;
+
+            var data = request.GetData<Vector4>();
+            if (data.Length > 0)
+                m_DebugReadbackSkyHash = skyHash;
+#endif
         }
 
         private static ProfilingSampler GetConvolutionSampler(AmbientProbeConvolutionRebuildReason reason)

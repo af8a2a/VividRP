@@ -223,16 +223,21 @@ namespace VividRP.Editor.Tests
 
             Assert.That(shaderSource, Does.Contain("#include \"Packages/com.unity.render-pipelines.core/ShaderLibrary/Debug.hlsl\""));
             Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl\""));
-            Assert.That(shaderSource, Does.Contain("StructuredBuffer<uint> g_vBigTileLightList"));
             Assert.That(shaderSource, Does.Contain("OverlayHeatMap("));
             Assert.That(shaderSource, Does.Contain("IsBigTileDebugEnabled"));
             Assert.That(shaderSource, Does.Contain("GetSelectedBigTileLightCount"));
-            Assert.That(shaderSource, Does.Contain("FetchBigTileLightIndex"));
+            Assert.That(shaderSource, Does.Contain("VividLightingLoop::CreateBigTile"));
+            Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetBigTilePunctualLightCount"));
+            Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetBigTileAreaLightCount"));
+            Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetBigTileDecalCount"));
+            Assert.That(shaderSource, Does.Contain("VividClusteredLighting::GetBigTileSize"));
             Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetPunctualLightCount"));
             Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetAreaLightCount"));
             Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetDecalCount"));
             Assert.That(shaderSource, Does.Contain("_BigTileLightListEnabled"));
             Assert.That(shaderSource, Does.Contain("_NumTileBigTileX"));
+            Assert.That(shaderSource, Does.Not.Contain("StructuredBuffer<uint> g_vBigTileLightList"));
+            Assert.That(shaderSource, Does.Not.Contain("FetchBigTileLightIndex"));
             Assert.That(shaderSource, Does.Contain("_ClusteredPunctualLightGridEnabled"));
             Assert.That(shaderSource, Does.Contain("_ClusteredAreaLightGridEnabled"));
             Assert.That(shaderSource, Does.Contain("_ClusteredDecalGridEnabled"));

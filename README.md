@@ -47,8 +47,7 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 - `DrawObjectPass` — 通用物体绘制，支持最多 8 个颜色目标和动态重配置
 - `MotionVectorPass` — 物体和相机运动矢量渲染
 - `HZBGeneratePass` — SPD 分层深度缓冲（HZB），支持原子计数
-- `CMAA2Pass` — Conservative Morphological Anti-Aliasing 2（Edge Detection → Deferred Blend → Combine）
-- `TemporalAAPass` — 时域抗锯齿（TAA），支持 Halton 抖动、历史混合、运动衰减、抗闪烁
+- `AntialiasingPass` — 统一抗锯齿 Pass，根据 `VividAdditionalCameraData` 配置自动路由到 CMAA2、TAA、FSR3、TSR 或 DLSS
 
 **阴影系统：**
 - `CSMShadowPass` — Cascade Shadow Map 渲染（2x2 Atlas，最多 4 级 Cascade）
@@ -78,6 +77,18 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 - `FinalBlitPass` — 最终 Blit 到相机 Backbuffer（含 Color Grading LUT、自动曝光、Film Grain、Bloom 合成）
 - `StopNaNPass` — 消除颜色缓冲中的 NaN/Inf 像素
 - `FilmGrain`、`Tonemapping`（ACES / Neutral / Custom）等 Volume 组件
+
+**超分辨率 / Upscaling：**
+- `AntialiasingPass` 统一入口，根据相机配置自动选择：
+  - **TSR**（Temporal Super Resolution）— 基于 Unreal Engine TSR 的时域超分辨率，支持空间抗锯齿、速度膨胀与深度感知边缘拒绝、历史钳制与迟滞、薄几何覆盖检测、亮度不稳定性预处理、持久历史复活、可选 Wave Ops 与 16-bit VALU 加速
+  - **FSR3**（AMD FidelityFX Super Resolution 3）— 包含 Reactivity 预处理、Shading Change 检测、Luma Instability、Luma Pyramid、RCAS 锐化
+  - **DLSS**（NVIDIA Deep Learning Super Sampling）— Super Resolution 与 Ray Reconstruction（需 `DLSS_PLUGIN_INTEGRATE` 脚本定义符号）
+
+**Decal 系统：**
+- `DecalSystem` — 基于 DBuffer 的 Decal 渲染系统
+- `DecalProjector` — Decal 投影器组件，支持逐 Decal 的 Base Color、Opacity、Metallic、Roughness 属性
+- HDRP 兼容的 Decal 投影与采样
+- GPU Driven Decal GBuffer 绑定
 
 **调试 Pass：**
 - `ClusterDebugPass` — 簇状光照可视化（Opaque / Slice 模式）
@@ -195,9 +206,8 @@ powershell -ExecutionPolicy Bypass -File .\Packages\VividRP\Setup-Bindless.ps1
 
 legacy README 中提到的大量高级特性目前并不是当前包的已交付状态，至少不应在这个包里被默认认为"已经可用"。当前仓库中尚未看到完整落地或仅保留占位入口的方向包括：
 
-- Super Resolution 栈，例如 `DLSS`、`TAAU`、`FSR*`
 - legacy README 里的大规模 GI / SSR / Path Tracing / ReSTIR 系列能力
-- `Decal`、`Terrain`、`Foliage`、`Volumetric` 等子系统的完整实现
+- `Terrain`、`Foliage`、`Volumetric` 等子系统的完整实现
 - 生产可用的 samples / demo scene 工作流
 
 如果你是在对照旧版 README 寻找某个特性，建议先检查当前源码、`Documentation/` 和 `Tests/Editor/` 是否真的存在对应实现。
@@ -211,6 +221,8 @@ legacy README 中提到的大量高级特性目前并不是当前包的已交付
 - `Runtime/RenderPass/Debug` — 调试 Pass（Cluster / Tile / Exposure / RTAS / VirtualTexture）
 - `Runtime/RenderPass/Example` — 示例 Pass
 - `Runtime/SubSystem/GPUDriven` — GPU Driven、Meshlet、Bindless、Native 集成
+- `Runtime/SubSystem/DLSS` — NVIDIA DLSS Super Resolution 与 Ray Reconstruction
+- `Runtime/SubSystem/Decal` — DBuffer Decal 系统（DecalProjector / DecalData / DecalSystem）
 - `Runtime/ComponentData` — 自定义组件数据（VividAdditionalCameraData / VividAdditionalLightData）
 - `Runtime/Utility` — 运行时工具集（PipelineResource / BoundProxy / Camera Utility / BlueNoise / HaltonJitter）
 - `Runtime/Extension/CoreRP` — Core RP 扩展（UnsafeGraphContext 扩展、ObjectDispatcherService）

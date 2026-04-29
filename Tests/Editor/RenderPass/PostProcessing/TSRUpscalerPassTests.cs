@@ -163,6 +163,11 @@ namespace VividRP.Editor.Tests
             Assert.That(rejectSource, Does.Contain("Texture2D<float> _DepthError"));
             Assert.That(rejectSource, Does.Contain("depthTolerance = _TSRRejectionParams.x + depthError * 2.0"));
             Assert.That(rejectSource, Does.Contain("motionLimit = lerp"));
+            Assert.That(updateSource, Does.Contain("Texture2D<float2> _DilatedMotion"));
+            Assert.That(updateSource, Does.Contain("velocityWeightClamp"));
+            Assert.That(updateSource, Does.Contain("boundaryWeightClamp"));
+            Assert.That(updateSource, Does.Contain("recoveryRate"));
+            Assert.That(updateSource, Does.Contain("rejectionRetention"));
             Assert.That(updateSource, Does.Contain("boundarySampleCount"));
             Assert.That(updateSource, Does.Contain("historyWeight *= saturate(1.0 - reprojectionBoundary * 0.5)"));
         }

@@ -3,6 +3,7 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
 
 Texture2D<float4> _CurrentFrameColor;
+Texture2D<float2> _DilatedMotion;
 Texture2D<float> _DilatedDepth;
 Texture2D<float> _ReprojectionBoundary;
 Texture2D<float4> _AcceptedHistoryColor;
@@ -32,15 +33,25 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float previousSampleCount = _ReprojectedHistoryMeta[pixelCoord].x;
     float accepted = _RejectionMask[pixelCoord] > 0.5 ? 1.0 : 0.0;
     float reprojectionBoundary = _ReprojectionBoundary[renderCoord];
+    float2 motion = _DilatedMotion[renderCoord];
+    float velocityPixels = length(motion * float2(renderSize));
+    float velocityFactor = saturate((velocityPixels - 0.5) * (1.0 / 7.5));
+    float updateInstability = max(velocityFactor, reprojectionBoundary);
 
     float maxSampleCount = max(_TSRParams.y, 1.0);
     float boundarySampleCount = lerp(maxSampleCount, min(maxSampleCount, 4.0), reprojectionBoundary);
+    float recoveryRate = lerp(1.0, 0.35, updateInstability);
+    float rejectionRetention = lerp(0.0, 0.35, updateInstability);
+    float rejectedSampleCount = max(1.0, min(previousSampleCount * rejectionRetention, boundarySampleCount));
     float sampleCount = accepted > 0.5
-        ? min(previousSampleCount + 1.0, boundarySampleCount)
-        : 1.0;
+        ? min(previousSampleCount + recoveryRate, boundarySampleCount)
+        : rejectedSampleCount;
     float historyWeight = accepted > 0.5
         ? saturate(previousSampleCount / max(sampleCount, 1.0))
         : 0.0;
+    float velocityWeightClamp = lerp(0.96, 0.18, velocityFactor);
+    float boundaryWeightClamp = lerp(0.96, 0.45, reprojectionBoundary);
+    historyWeight = min(historyWeight, min(velocityWeightClamp, boundaryWeightClamp));
     historyWeight *= saturate(1.0 - reprojectionBoundary * 0.5);
     float3 result = lerp(currentColor, historyColor, historyWeight);
 

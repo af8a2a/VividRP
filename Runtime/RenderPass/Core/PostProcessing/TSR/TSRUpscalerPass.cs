@@ -34,12 +34,18 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int LumaInstabilityId = Shader.PropertyToID("_LumaInstability");
         private static readonly int ReprojectedHistoryColorId = Shader.PropertyToID("_ReprojectedHistoryColor");
         private static readonly int ReprojectedHistoryMetaId = Shader.PropertyToID("_ReprojectedHistoryMeta");
+        private static readonly int ResurrectionColorId = Shader.PropertyToID("_ResurrectionColor");
+        private static readonly int ResurrectionMetaId = Shader.PropertyToID("_ResurrectionMeta");
+        private static readonly int ReprojectedResurrectionColorId = Shader.PropertyToID("_ReprojectedResurrectionColor");
+        private static readonly int ReprojectedResurrectionMetaId = Shader.PropertyToID("_ReprojectedResurrectionMeta");
         private static readonly int AcceptedHistoryColorId = Shader.PropertyToID("_AcceptedHistoryColor");
         private static readonly int RejectionMaskId = Shader.PropertyToID("_RejectionMask");
         private static readonly int CurrentFrameColorId = Shader.PropertyToID("_CurrentFrameColor");
         private static readonly int SpatialAntiAliasedColorId = Shader.PropertyToID("_SpatialAntiAliasedColor");
         private static readonly int UpdatedHistoryColorId = Shader.PropertyToID("_UpdatedHistoryColor");
         private static readonly int UpdatedHistoryMetaId = Shader.PropertyToID("_UpdatedHistoryMeta");
+        private static readonly int UpdatedResurrectionColorId = Shader.PropertyToID("_UpdatedResurrectionColor");
+        private static readonly int UpdatedResurrectionMetaId = Shader.PropertyToID("_UpdatedResurrectionMeta");
         private static readonly int ResolvedOutputId = Shader.PropertyToID("_ResolvedOutput");
         private static readonly int SharpenInputId = Shader.PropertyToID("_SharpenInput");
         private static readonly int OutputColorId = Shader.PropertyToID("_OutputColor");
@@ -139,6 +145,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 CreateColorDescriptor("TSR_ReprojectedHistoryColor", outputSize.x, outputSize.y, GraphicsFormat.R16G16B16A16_SFloat));
             var reprojectedHistoryMeta = renderGraph.CreateTexture(
                 CreateColorDescriptor("TSR_ReprojectedHistoryMeta", outputSize.x, outputSize.y, GraphicsFormat.R16G16_SFloat));
+            var reprojectedResurrectionColor = renderGraph.CreateTexture(
+                CreateColorDescriptor("TSR_ReprojectedResurrectionColor", outputSize.x, outputSize.y, GraphicsFormat.R16G16B16A16_SFloat));
+            var reprojectedResurrectionMeta = renderGraph.CreateTexture(
+                CreateColorDescriptor("TSR_ReprojectedResurrectionMeta", outputSize.x, outputSize.y, GraphicsFormat.R16G16_SFloat));
             var acceptedHistoryColor = renderGraph.CreateTexture(
                 CreateColorDescriptor("TSR_AcceptedHistoryColor", outputSize.x, outputSize.y, GraphicsFormat.R16G16B16A16_SFloat));
             var rejectionMask = renderGraph.CreateTexture(
@@ -169,6 +179,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 passData.LumaInstability = lumaInstability;
                 passData.ReprojectedHistoryColor = reprojectedHistoryColor;
                 passData.ReprojectedHistoryMeta = reprojectedHistoryMeta;
+                passData.ReprojectedResurrectionColor = reprojectedResurrectionColor;
+                passData.ReprojectedResurrectionMeta = reprojectedResurrectionMeta;
                 passData.AcceptedHistoryColor = acceptedHistoryColor;
                 passData.RejectionMask = rejectionMask;
                 passData.SpatialAntiAliasedColor = spatialAntiAliasedColor;
@@ -176,6 +188,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 passData.CurrentHistoryColor = handles.CurrentHistoryColor;
                 passData.PreviousHistoryMeta = handles.PreviousHistoryMeta;
                 passData.CurrentHistoryMeta = handles.CurrentHistoryMeta;
+                passData.PreviousResurrectionColor = handles.PreviousResurrectionColor;
+                passData.CurrentResurrectionColor = handles.CurrentResurrectionColor;
+                passData.PreviousResurrectionMeta = handles.PreviousResurrectionMeta;
+                passData.CurrentResurrectionMeta = handles.CurrentResurrectionMeta;
                 passData.ResolveOutput = resolveOutput;
                 passData.RenderSize = renderSize;
                 passData.OutputSize = outputSize;
@@ -200,6 +216,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 builder.UseTexture(passData.LumaInstability, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.ReprojectedHistoryColor, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.ReprojectedHistoryMeta, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.ReprojectedResurrectionColor, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.ReprojectedResurrectionMeta, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.AcceptedHistoryColor, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.RejectionMask, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.SpatialAntiAliasedColor, AccessFlags.ReadWrite);
@@ -207,6 +225,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 builder.UseTexture(passData.CurrentHistoryColor, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.PreviousHistoryMeta, AccessFlags.Read);
                 builder.UseTexture(passData.CurrentHistoryMeta, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.PreviousResurrectionColor, AccessFlags.Read);
+                builder.UseTexture(passData.CurrentResurrectionColor, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.PreviousResurrectionMeta, AccessFlags.Read);
+                builder.UseTexture(passData.CurrentResurrectionMeta, AccessFlags.ReadWrite);
                 if (passData.EnableSharpening)
                     builder.UseTexture(passData.ResolveOutput, AccessFlags.WriteAll);
                 builder.AllowPassCulling(false);
@@ -335,8 +357,12 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(shader, kernel, LumaInstabilityId, data.LumaInstability);
             cmd.SetComputeTextureParam(shader, kernel, HistoryColorId, data.PreviousHistoryColor);
             cmd.SetComputeTextureParam(shader, kernel, HistoryMetaId, data.PreviousHistoryMeta);
+            cmd.SetComputeTextureParam(shader, kernel, ResurrectionColorId, data.PreviousResurrectionColor);
+            cmd.SetComputeTextureParam(shader, kernel, ResurrectionMetaId, data.PreviousResurrectionMeta);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedHistoryColorId, data.ReprojectedHistoryColor);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedHistoryMetaId, data.ReprojectedHistoryMeta);
+            cmd.SetComputeTextureParam(shader, kernel, ReprojectedResurrectionColorId, data.ReprojectedResurrectionColor);
+            cmd.SetComputeTextureParam(shader, kernel, ReprojectedResurrectionMetaId, data.ReprojectedResurrectionMeta);
             cmd.DispatchCompute(shader, kernel, DivRoundUp(data.OutputSize.x, KernelThreadGroupSize), DivRoundUp(data.OutputSize.y, KernelThreadGroupSize), 1);
         }
 
@@ -372,9 +398,13 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(shader, kernel, LumaInstabilityId, data.LumaInstability);
             cmd.SetComputeTextureParam(shader, kernel, AcceptedHistoryColorId, data.AcceptedHistoryColor);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedHistoryMetaId, data.ReprojectedHistoryMeta);
+            cmd.SetComputeTextureParam(shader, kernel, ReprojectedResurrectionColorId, data.ReprojectedResurrectionColor);
+            cmd.SetComputeTextureParam(shader, kernel, ReprojectedResurrectionMetaId, data.ReprojectedResurrectionMeta);
             cmd.SetComputeTextureParam(shader, kernel, RejectionMaskId, data.RejectionMask);
             cmd.SetComputeTextureParam(shader, kernel, UpdatedHistoryColorId, data.CurrentHistoryColor);
             cmd.SetComputeTextureParam(shader, kernel, UpdatedHistoryMetaId, data.CurrentHistoryMeta);
+            cmd.SetComputeTextureParam(shader, kernel, UpdatedResurrectionColorId, data.CurrentResurrectionColor);
+            cmd.SetComputeTextureParam(shader, kernel, UpdatedResurrectionMetaId, data.CurrentResurrectionMeta);
             cmd.DispatchCompute(shader, kernel, DivRoundUp(data.OutputSize.x, KernelThreadGroupSize), DivRoundUp(data.OutputSize.y, KernelThreadGroupSize), 1);
         }
 
@@ -574,18 +604,30 @@ namespace VividRP.Runtime.RenderPass.Core
                 TextureHandle previousHistoryColor,
                 TextureHandle currentHistoryColor,
                 TextureHandle previousHistoryMeta,
-                TextureHandle currentHistoryMeta)
+                TextureHandle currentHistoryMeta,
+                TextureHandle previousResurrectionColor,
+                TextureHandle currentResurrectionColor,
+                TextureHandle previousResurrectionMeta,
+                TextureHandle currentResurrectionMeta)
             {
                 PreviousHistoryColor = previousHistoryColor;
                 CurrentHistoryColor = currentHistoryColor;
                 PreviousHistoryMeta = previousHistoryMeta;
                 CurrentHistoryMeta = currentHistoryMeta;
+                PreviousResurrectionColor = previousResurrectionColor;
+                CurrentResurrectionColor = currentResurrectionColor;
+                PreviousResurrectionMeta = previousResurrectionMeta;
+                CurrentResurrectionMeta = currentResurrectionMeta;
             }
 
             public TextureHandle PreviousHistoryColor { get; }
             public TextureHandle CurrentHistoryColor { get; }
             public TextureHandle PreviousHistoryMeta { get; }
             public TextureHandle CurrentHistoryMeta { get; }
+            public TextureHandle PreviousResurrectionColor { get; }
+            public TextureHandle CurrentResurrectionColor { get; }
+            public TextureHandle PreviousResurrectionMeta { get; }
+            public TextureHandle CurrentResurrectionMeta { get; }
         }
 
         private readonly struct ShaderSet
@@ -664,6 +706,8 @@ namespace VividRP.Runtime.RenderPass.Core
             public TextureHandle LumaInstability;
             public TextureHandle ReprojectedHistoryColor;
             public TextureHandle ReprojectedHistoryMeta;
+            public TextureHandle ReprojectedResurrectionColor;
+            public TextureHandle ReprojectedResurrectionMeta;
             public TextureHandle AcceptedHistoryColor;
             public TextureHandle RejectionMask;
             public TextureHandle SpatialAntiAliasedColor;
@@ -671,6 +715,10 @@ namespace VividRP.Runtime.RenderPass.Core
             public TextureHandle CurrentHistoryColor;
             public TextureHandle PreviousHistoryMeta;
             public TextureHandle CurrentHistoryMeta;
+            public TextureHandle PreviousResurrectionColor;
+            public TextureHandle CurrentResurrectionColor;
+            public TextureHandle PreviousResurrectionMeta;
+            public TextureHandle CurrentResurrectionMeta;
             public TextureHandle ResolveOutput;
             public Vector2Int RenderSize;
             public Vector2Int OutputSize;
@@ -688,6 +736,8 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             private readonly RTHandle[] m_HistoryColor = new RTHandle[2];
             private readonly RTHandle[] m_HistoryMeta = new RTHandle[2];
+            private readonly RTHandle[] m_ResurrectionColor = new RTHandle[2];
+            private readonly RTHandle[] m_ResurrectionMeta = new RTHandle[2];
             private int m_ResourceIndex;
             private Vector2Int m_RenderSize;
             private Vector2Int m_OutputSize;
@@ -743,7 +793,11 @@ namespace VividRP.Runtime.RenderPass.Core
                     renderGraph.ImportTexture(m_HistoryColor[readIndex]),
                     renderGraph.ImportTexture(m_HistoryColor[writeIndex]),
                     renderGraph.ImportTexture(m_HistoryMeta[readIndex]),
-                    renderGraph.ImportTexture(m_HistoryMeta[writeIndex]));
+                    renderGraph.ImportTexture(m_HistoryMeta[writeIndex]),
+                    renderGraph.ImportTexture(m_ResurrectionColor[readIndex]),
+                    renderGraph.ImportTexture(m_ResurrectionColor[writeIndex]),
+                    renderGraph.ImportTexture(m_ResurrectionMeta[readIndex]),
+                    renderGraph.ImportTexture(m_ResurrectionMeta[writeIndex]));
             }
 
             public void CommitFrame(Vector2Int renderSize, Vector2Int outputSize, Vector2 jitter)
@@ -763,6 +817,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 {
                     ClearRTHandle(cmd, m_HistoryColor[i], Color.clear);
                     ClearRTHandle(cmd, m_HistoryMeta[i], Color.clear);
+                    ClearRTHandle(cmd, m_ResurrectionColor[i], Color.clear);
+                    ClearRTHandle(cmd, m_ResurrectionMeta[i], Color.clear);
                 }
             }
 
@@ -770,6 +826,8 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 ReleaseArray(m_HistoryColor);
                 ReleaseArray(m_HistoryMeta);
+                ReleaseArray(m_ResurrectionColor);
+                ReleaseArray(m_ResurrectionMeta);
                 m_HasValidHistory = false;
             }
 
@@ -789,6 +847,18 @@ namespace VividRP.Runtime.RenderPass.Core
                         outputSize.y,
                         GraphicsFormat.R16G16_SFloat,
                         $"TSR_HistoryMeta{i + 1}");
+                    EnsureHandle(
+                        ref m_ResurrectionColor[i],
+                        outputSize.x,
+                        outputSize.y,
+                        GraphicsFormat.R16G16B16A16_SFloat,
+                        $"TSR_ResurrectionColor{i + 1}");
+                    EnsureHandle(
+                        ref m_ResurrectionMeta[i],
+                        outputSize.x,
+                        outputSize.y,
+                        GraphicsFormat.R16G16_SFloat,
+                        $"TSR_ResurrectionMeta{i + 1}");
                 }
             }
 

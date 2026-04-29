@@ -8,9 +8,13 @@ Texture2D<float> _ThinGeometryCoverage;
 Texture2D<float> _LumaInstability;
 Texture2D<float4> _HistoryColor;
 Texture2D<float2> _HistoryMeta;
+Texture2D<float4> _ResurrectionColor;
+Texture2D<float2> _ResurrectionMeta;
 
 RWTexture2D<float4> _ReprojectedHistoryColor;
 RWTexture2D<float2> _ReprojectedHistoryMeta;
+RWTexture2D<float4> _ReprojectedResurrectionColor;
+RWTexture2D<float2> _ReprojectedResurrectionMeta;
 
 float4 _RenderSize;
 float4 _OutputSize;
@@ -42,6 +46,8 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         _ReprojectedHistoryColor[pixelCoord] = 0.0;
         _ReprojectedHistoryMeta[pixelCoord] = 0.0;
+        _ReprojectedResurrectionColor[pixelCoord] = 0.0;
+        _ReprojectedResurrectionMeta[pixelCoord] = 0.0;
         return;
     }
 
@@ -55,7 +61,10 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     historyConfidence *= lerp(1.0, 0.55, thinGeometryCoverage);
     historyConfidence *= lerp(1.0, 0.75, lumaInstability * max(localBoundary, thinGeometryCoverage));
     float2 historyMeta = _HistoryMeta.SampleLevel(sampler_LinearClamp, historyUV, 0);
+    float2 resurrectionMeta = _ResurrectionMeta.SampleLevel(sampler_LinearClamp, historyUV, 0);
 
     _ReprojectedHistoryColor[pixelCoord] = TSR_SampleCatmullRom(_HistoryColor, historyUV, previousSize);
     _ReprojectedHistoryMeta[pixelCoord] = float2(historyMeta.x * historyConfidence, historyMeta.y);
+    _ReprojectedResurrectionColor[pixelCoord] = TSR_SampleCatmullRom(_ResurrectionColor, historyUV, previousSize);
+    _ReprojectedResurrectionMeta[pixelCoord] = float2(resurrectionMeta.x * historyConfidence, resurrectionMeta.y);
 }

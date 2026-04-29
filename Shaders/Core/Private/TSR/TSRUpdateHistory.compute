@@ -10,14 +10,20 @@ Texture2D<float> _ThinGeometryCoverage;
 Texture2D<float> _LumaInstability;
 Texture2D<float4> _AcceptedHistoryColor;
 Texture2D<float2> _ReprojectedHistoryMeta;
+Texture2D<float4> _ReprojectedResurrectionColor;
+Texture2D<float2> _ReprojectedResurrectionMeta;
 Texture2D<float> _RejectionMask;
 
 RWTexture2D<float4> _UpdatedHistoryColor;
 RWTexture2D<float2> _UpdatedHistoryMeta;
+RWTexture2D<float4> _UpdatedResurrectionColor;
+RWTexture2D<float2> _UpdatedResurrectionMeta;
 
 float4 _RenderSize;
 float4 _OutputSize;
 float4 _TSRParams;
+
+static const float TSR_RESURRECTION_PERSISTENT_FRAMES = 6.0;
 
 [numthreads(8, 8, 1)]
 void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -33,6 +39,8 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 currentColor = _CurrentFrameColor[pixelCoord].rgb;
     float3 historyColor = _AcceptedHistoryColor[pixelCoord].rgb;
     float previousSampleCount = _ReprojectedHistoryMeta[pixelCoord].x;
+    float3 resurrectionColor = _ReprojectedResurrectionColor[pixelCoord].rgb;
+    float2 resurrectionMeta = _ReprojectedResurrectionMeta[pixelCoord];
     float accepted = _RejectionMask[pixelCoord] > 0.5 ? 1.0 : 0.0;
     float reprojectionBoundary = _ReprojectionBoundary[renderCoord];
     float thinGeometryCoverage = _ThinGeometryCoverage[renderCoord];
@@ -72,6 +80,43 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     historyWeight *= saturate(1.0 - weightRelaxation);
     float3 result = lerp(currentColor, historyColor, historyWeight);
 
+    float resurrectionFrames = resurrectionMeta.x;
+    float resurrectionDepth = resurrectionMeta.y;
+    float currentDepth = _DilatedDepth[renderCoord];
+    float resurrectionDepthDiff = abs(currentDepth - resurrectionDepth);
+    float3 currentYCoCg = TSR_RGBToYCoCg(currentColor);
+    float3 resurrectionYCoCg = TSR_RGBToYCoCg(resurrectionColor);
+    float resurrectionLumaDiff = abs(currentYCoCg.x - resurrectionYCoCg.x)
+        / max(max(currentYCoCg.x, resurrectionYCoCg.x), 0.2);
+    float resurrectionChromaDiff = length(currentYCoCg.yz - resurrectionYCoCg.yz);
+    float resurrectionDepthTolerance = 0.003 + reprojectionBoundary * 0.012 + thinGeometryCoverage * 0.006;
+    float resurrectionLumaTolerance = 0.22 + lumaInstability * 0.25;
+    float resurrectionChromaTolerance = 0.28 + lumaInstability * 0.2;
+    bool resurrectionValid = accepted < 0.5
+        && resurrectionFrames > 0.5
+        && velocityFactor < 0.9
+        && resurrectionDepthDiff <= resurrectionDepthTolerance
+        && resurrectionLumaDiff <= resurrectionLumaTolerance
+        && resurrectionChromaDiff <= resurrectionChromaTolerance;
+    float resurrectionAgeWeight = saturate(resurrectionFrames / TSR_RESURRECTION_PERSISTENT_FRAMES);
+    float resurrectionWeight = resurrectionValid
+        ? resurrectionAgeWeight * saturate(1.0 - updateInstability * 0.65) * 0.35
+        : 0.0;
+    result = lerp(result, resurrectionColor, resurrectionWeight);
+    sampleCount = max(sampleCount, min(resurrectionFrames, 4.0) * resurrectionWeight);
+
+    float nextResurrectionFrames = accepted > 0.5
+        ? TSR_RESURRECTION_PERSISTENT_FRAMES
+        : max(resurrectionFrames - 1.0, 0.0);
+    float3 nextResurrectionColor = accepted > 0.5 ? result : resurrectionColor;
+    float nextResurrectionDepth = accepted > 0.5 ? currentDepth : resurrectionDepth;
+
     _UpdatedHistoryColor[pixelCoord] = float4(max(result, 0.0), 1.0);
-    _UpdatedHistoryMeta[pixelCoord] = float2(sampleCount, _DilatedDepth[renderCoord]);
+    _UpdatedHistoryMeta[pixelCoord] = float2(sampleCount, currentDepth);
+    _UpdatedResurrectionColor[pixelCoord] = nextResurrectionFrames > 0.5
+        ? float4(max(nextResurrectionColor, 0.0), 1.0)
+        : 0.0;
+    _UpdatedResurrectionMeta[pixelCoord] = nextResurrectionFrames > 0.5
+        ? float2(nextResurrectionFrames, nextResurrectionDepth)
+        : 0.0;
 }

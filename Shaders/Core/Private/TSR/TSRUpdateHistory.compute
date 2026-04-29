@@ -1,4 +1,6 @@
+#pragma use_dxc
 #pragma kernel CS
+#pragma multi_compile_local _ VIVID_TSR_WAVE_OPS
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
 
@@ -51,8 +53,14 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float staticMoire = lumaInstability
         * saturate(1.0 - velocityFactor * 2.0)
         * saturate(1.0 - reprojectionBoundary * 2.0);
+    float waveStaticMoire = TSR_WaveActiveAverageOrSelf(staticMoire);
+    staticMoire = max(staticMoire, waveStaticMoire * 0.35);
     float movingMoire = saturate(lumaInstability - staticMoire);
     float updateInstability = max(max(max(velocityFactor, reprojectionBoundary), thinGeometryCoverage), movingMoire);
+    float waveUpdateInstability = TSR_WaveActiveMaxOrSelf(updateInstability);
+    bool waveHasRejectedNeighbor = TSR_WaveActiveAnyTrueOrSelf(accepted < 0.5);
+    updateInstability = max(updateInstability, waveUpdateInstability * 0.2);
+    updateInstability = max(updateInstability, waveHasRejectedNeighbor ? movingMoire * 0.15 : 0.0);
 
     float maxSampleCount = max(_TSRParams.y, 1.0);
     float boundarySampleCount = lerp(maxSampleCount, min(maxSampleCount, 4.0), reprojectionBoundary);

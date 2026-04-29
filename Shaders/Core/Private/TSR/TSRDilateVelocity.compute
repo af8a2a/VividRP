@@ -1,4 +1,6 @@
+#pragma use_dxc
 #pragma kernel CS
+#pragma multi_compile_local _ VIVID_TSR_WAVE_OPS
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
 
@@ -85,6 +87,10 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float sparseCoverage = saturate((0.5 - closestDepthCoverage) * 3.0);
     float thinGeometryCoverage = saturate(max(depthBoundary, motionBoundary) * sparseCoverage);
     float reprojectionBoundary = max(depthBoundary, motionBoundary);
+    float waveReprojectionBoundary = TSR_WaveActiveMaxOrSelf(reprojectionBoundary);
+    float waveThinGeometryCoverage = TSR_WaveActiveMaxOrSelf(thinGeometryCoverage);
+    reprojectionBoundary = max(reprojectionBoundary, waveReprojectionBoundary * 0.2);
+    thinGeometryCoverage = max(thinGeometryCoverage, waveThinGeometryCoverage * 0.15);
 
     float centerLuma = TSR_RGBToYCoCg(_InputColor[pixelCoord].rgb).x;
     float lumaMin = centerLuma;
@@ -141,6 +147,8 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float moireSurfaceWeight = saturate(1.0 - thinGeometryCoverage * 0.25);
     float lumaInstability = saturate(spatialMoire * (0.35 + temporalFlicker) + temporalFlicker * 0.5);
     lumaInstability *= moireSurfaceWeight;
+    float waveLumaInstability = TSR_WaveActiveAverageOrSelf(lumaInstability);
+    lumaInstability = max(lumaInstability, waveLumaInstability * 0.35);
 
     _DilatedMotion[pixelCoord] = selectedMotion;
     _DilatedDepth[pixelCoord] = selectedDepth;

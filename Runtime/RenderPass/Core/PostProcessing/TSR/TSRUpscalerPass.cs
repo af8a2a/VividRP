@@ -12,6 +12,7 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         private const int CameraStateExpirationFrames = 400;
         private const int KernelThreadGroupSize = 8;
+        private const string TsrWaveOpsKeyword = "VIVID_TSR_WAVE_OPS";
 
         private static readonly ProfilerMarker s_RecordGraphMarker =
             new("VividRP.RenderPass.RecordGraph/Temporal Super Resolution (Injected)");
@@ -203,6 +204,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 passData.HistorySampleCount = Mathf.Clamp(historySampleCount, 8, 32);
                 passData.EnableSharpening = enableSharpening;
                 passData.Sharpness = additionalData != null ? additionalData.tsrSharpness : 0.2f;
+                passData.EnableWaveOps = SupportsWaveOps();
 
                 builder.UseTexture(passData.Source, AccessFlags.Read);
                 builder.UseTexture(passData.Depth, AccessFlags.Read);
@@ -441,6 +443,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static void SetCommonConstants(CommandBuffer cmd, ComputeShader shader, PassData data)
         {
+            SetKeyword(cmd, shader, TsrWaveOpsKeyword, data.EnableWaveOps);
             cmd.SetComputeVectorParam(
                 shader,
                 RenderSizeId,
@@ -478,6 +481,30 @@ namespace VividRP.Runtime.RenderPass.Core
                     Mathf.Clamp01(data.Sharpness),
                     data.EnableSharpening ? 1.0f : 0.0f));
             cmd.SetComputeVectorParam(shader, TSRRejectionParamsId, new Vector4(0.003f, 16.0f, 0.28f, 0.35f));
+        }
+
+        private static bool SupportsWaveOps()
+        {
+            if (!SystemInfo.supportsComputeShaders)
+                return false;
+
+            var deviceType = SystemInfo.graphicsDeviceType;
+            return deviceType == GraphicsDeviceType.Direct3D11
+                || deviceType == GraphicsDeviceType.Direct3D12
+                || deviceType == GraphicsDeviceType.Vulkan
+                || deviceType == GraphicsDeviceType.Metal;
+        }
+
+        private static void SetKeyword(CommandBuffer cmd, ComputeShader shader, string keywordName, bool enabled)
+        {
+            if (cmd == null || shader == null)
+                return;
+
+            var keyword = new LocalKeyword(shader, keywordName);
+            if (!keyword.isValid)
+                return;
+
+            cmd.SetKeyword(shader, keyword, enabled);
         }
 
         private static Vector2Int ResolveRenderSize(
@@ -729,6 +756,7 @@ namespace VividRP.Runtime.RenderPass.Core
             public bool ResetHistory;
             public int HistorySampleCount;
             public bool EnableSharpening;
+            public bool EnableWaveOps;
             public float Sharpness;
         }
 

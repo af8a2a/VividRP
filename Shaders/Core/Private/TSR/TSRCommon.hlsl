@@ -3,6 +3,39 @@
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 
+#if defined(VIVID_TSR_WAVE_OPS) && defined(UNITY_COMPILER_DXC)
+#define VIVID_TSR_USE_WAVE_OPS 1
+#else
+#define VIVID_TSR_USE_WAVE_OPS 0
+#endif
+
+float TSR_WaveActiveMaxOrSelf(float value)
+{
+#if VIVID_TSR_USE_WAVE_OPS
+    return WaveActiveMax(value);
+#else
+    return value;
+#endif
+}
+
+float TSR_WaveActiveAverageOrSelf(float value)
+{
+#if VIVID_TSR_USE_WAVE_OPS
+    return WaveActiveSum(value) / max((float)WaveActiveCountBits(true), 1.0);
+#else
+    return value;
+#endif
+}
+
+bool TSR_WaveActiveAnyTrueOrSelf(bool value)
+{
+#if VIVID_TSR_USE_WAVE_OPS
+    return WaveActiveAnyTrue(value);
+#else
+    return value;
+#endif
+}
+
 float3 TSR_RGBToYCoCg(float3 rgb)
 {
     float y = dot(rgb, float3(0.25, 0.5, 0.25));

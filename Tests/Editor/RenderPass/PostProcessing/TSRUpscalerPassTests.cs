@@ -274,6 +274,12 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("m_Quality != quality"));
             Assert.That(passSource, Does.Contain("m_HistorySampleCount != historySampleCount"));
             Assert.That(passSource, Does.Contain("forceResetHistory || (temporalData != null && temporalData.IsFirstFrame)"));
+            Assert.That(passSource, Does.Contain("TsrWaveOpsKeyword"));
+            Assert.That(passSource, Does.Contain("SupportsWaveOps()"));
+            Assert.That(passSource, Does.Contain("GraphicsDeviceType.Direct3D12"));
+            Assert.That(passSource, Does.Contain("GraphicsDeviceType.Vulkan"));
+            Assert.That(passSource, Does.Contain("GraphicsDeviceType.Metal"));
+            Assert.That(passSource, Does.Contain("SetKeyword(cmd, shader, TsrWaveOpsKeyword, data.EnableWaveOps)"));
         }
 
         [Test]
@@ -321,6 +327,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(File.Exists(path), Is.True, $"Expected TSR compute source at '{path}'.");
                 var source = File.ReadAllText(path);
                 Assert.That(source, Does.Contain("#pragma kernel CS"));
+                Assert.That(source, Does.Contain("#pragma use_dxc"));
+                Assert.That(source, Does.Contain("#pragma multi_compile_local _ VIVID_TSR_WAVE_OPS"));
                 Assert.That(source, Does.Contain("TSRCommon.hlsl"));
             }
 
@@ -330,6 +338,40 @@ namespace VividRP.Editor.Tests
                 "Private",
                 "TSR",
                 "TSRCommon.hlsl")), Is.True);
+        }
+
+        [Test]
+        public void ShaderFiles_UseOptionalWaveOpsForTsrStabilitySignals()
+        {
+            var commonSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "TSR",
+                "TSRCommon.hlsl"));
+            var dilateSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "TSR",
+                "TSRDilateVelocity.compute"));
+            var updateSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "TSR",
+                "TSRUpdateHistory.compute"));
+
+            Assert.That(commonSource, Does.Contain("VIVID_TSR_USE_WAVE_OPS"));
+            Assert.That(commonSource, Does.Contain("WaveActiveMax"));
+            Assert.That(commonSource, Does.Contain("WaveActiveSum"));
+            Assert.That(commonSource, Does.Contain("WaveActiveCountBits"));
+            Assert.That(commonSource, Does.Contain("WaveActiveAnyTrue"));
+            Assert.That(dilateSource, Does.Contain("TSR_WaveActiveMaxOrSelf(reprojectionBoundary)"));
+            Assert.That(dilateSource, Does.Contain("TSR_WaveActiveAverageOrSelf(lumaInstability)"));
+            Assert.That(updateSource, Does.Contain("TSR_WaveActiveAverageOrSelf(staticMoire)"));
+            Assert.That(updateSource, Does.Contain("TSR_WaveActiveMaxOrSelf(updateInstability)"));
+            Assert.That(updateSource, Does.Contain("TSR_WaveActiveAnyTrueOrSelf(accepted < 0.5)"));
         }
 
         [Test]

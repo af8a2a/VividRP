@@ -1,4 +1,6 @@
+#pragma use_dxc
 #pragma kernel CS
+#pragma multi_compile_local _ VIVID_TSR_WAVE_OPS
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
 

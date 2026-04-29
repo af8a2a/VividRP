@@ -20,6 +20,7 @@ namespace VividRP.Runtime
     public class VividRenderPipelineAsset : RenderPipelineAsset<VividRenderPipeline>, IProbeVolumeEnabledRenderPipeline, ISTPEnabledRenderPipeline
     {
         private const string DefaultShaderName = "VividRP/Material/StandardLit";
+        private const string DefaultMaterialResourcePath = "DefaultMaterial";
 
         public RenderGraphData RenderGraphAsset;
 
@@ -96,6 +97,8 @@ namespace VividRP.Runtime
         }
 
         public override Shader defaultShader => Shader.Find(DefaultShaderName);
+
+        public override Material defaultMaterial => Resources.Load<Material>(DefaultMaterialResourcePath);
 
         bool IProbeVolumeEnabledRenderPipeline.supportProbeVolume => m_SupportProbeVolume;
 

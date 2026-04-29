@@ -81,6 +81,29 @@ namespace VividRP.Editor.Tests
                 Object.DestroyImmediate(asset);
             }
         }
+
+        [Test]
+        public void Asset_DefaultMaterial_UsesPrecreatedStandardLitMaterial()
+        {
+            var asset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+
+            try
+            {
+                Material expectedMaterial = Resources.Load<Material>("DefaultMaterial");
+                Material material = asset.defaultMaterial;
+
+                Assert.That(expectedMaterial, Is.Not.Null);
+                Assert.That(material, Is.Not.Null);
+                Assert.That(material, Is.SameAs(expectedMaterial));
+                Assert.That(material.name, Is.EqualTo("DefaultMaterial"));
+                Assert.That(material.shader, Is.Not.Null);
+                Assert.That(material.shader.name, Is.EqualTo("VividRP/Material/StandardLit"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
     }
 
     public class VividGPUDrivenSystemLifecycleTests

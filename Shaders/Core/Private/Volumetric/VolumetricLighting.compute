@@ -485,272 +485,109 @@ float3 EvaluateAmbientLighting()
 
 float3 EvaluateVolumetricAmbientProbe(float3 normalWS)
 {
+#if defined(VIVID_USE_VOLUMETRIC_AMBIENT_PROBE_BUFFER)
     return SampleSH9(_VolumetricAmbientProbeBuffer, SafeNormalize(normalWS));
+#else
+    return EvaluateAmbientLighting();
+#endif
 }
 
-void FillVolumetricLightingBuffer(PositionInputs posInput, uint tileIndex, int groupIdx, JitteredRay ray, float tStart)
+void FillVolumetricLightingBuffer(uint2 vBufferPixel, JitteredRay ray, bool hasMaxZ)
 {
-    uint lightCount, lightStart;
-
-#ifdef USE_BIG_TILE_LIGHTLIST
-    // Offset for stereo rendering
-    tileIndex += unity_StereoEyeIndex * _NumTileBigTileX * _NumTileBigTileY;
-
-    GetBigTileLightCountAndStart(tileIndex, lightCount, lightStart);
-
-#else  // USE_BIG_TILE_LIGHTLIST
-
-    lightCount = _PunctualLightCount;
-    lightStart = 0;
-
-#endif // USE_BIG_TILE_LIGHTLIST
-
-    float t0 = max(tStart, DecodeLogarithmicDepthGeneralized(0, _VBufferDistanceDecodingParams));
-    float de = _VBufferRcpSliceCount; // Log-encoded distance between slices
-
-    // The contribution of the ambient probe does not depend on the position,
-    // only on the direction and the length of the interval.
-    // SampleSH9() evaluates the 3-band SH in a given direction.
-    // The probe is already pre-convolved with the phase function.
-    // Note: anisotropic, no jittering.
+    uint sliceCount = (uint)_VBufferSliceCount;
+    float t0 = GetVBufferJitteredRayStartDistance(ray);
+    float de = _VBufferRcpSliceCount;
     float3 probeInScatteredRadiance = EvaluateVolumetricAmbientProbe(ray.centerDirWS);
 
-    float waterDistance = FLT_MIN;
-    #if SUPPORT_WATER_ABSORPTION
-    float2 posSS = posInput.positionNDC.xy * _ScreenSize.xy;
-    bool underWater = posInput.positionWS.y < _UnderWaterUpHeight.w || IsUnderWater(posSS.xy);
-    if (underWater && (GetStencilValue(LOAD_TEXTURE2D_X(_StencilTexture, posInput.positionSS.xy)) & STENCILUSAGE_WATER_SURFACE) != 0)
-    {
-        waterDistance = LinearEyeDepth(LOAD_TEXTURE2D_X(_RefractiveDepthBuffer, posSS).r, _ZBufferParams);
-        waterDistance = waterDistance * rcp(dot(ray.centerDirWS, GetViewForwardDir()));
-    }
-    else
-        waterDistance = underWater ? FLT_MAX : 0.0f;
-    #endif
-
-    float3 totalRadiance = 0;
-    float  opticalDepth  = 0;
+    float3 totalRadiance = 0.0;
+    float opticalDepth = 0.0;
     uint slice = 0;
-    for (; slice < _VBufferSliceCount; slice++)
-    {
-        uint3 voxelCoord = uint3(posInput.positionSS, slice + _VBufferSliceCount * unity_StereoEyeIndex);
 
-        float e1 = slice * de + de; // (slice + 1) / sliceCount
-        float t1 = max(tStart, DecodeLogarithmicDepthGeneralized(e1, _VBufferDistanceDecodingParams));
+    for (; slice < sliceCount; slice++)
+    {
+        uint3 voxelCoord = uint3(vBufferPixel, slice);
+        float e1 = ((float)slice + 1.0) * de;
+        float t1 = max(t0, DecodeLogarithmicDepthGeneralized(e1, _VBufferDepthDecodingParams));
         float tNext = t1;
 
-    #if USE_DEPTH_BUFFER
         bool containsOpaqueGeometry = IsInRange(ray.geomDist, float2(t0, t1));
-
         if (containsOpaqueGeometry)
-        {
-            // Only integrate up to the opaque surface (make the voxel shorter, but not completely flat).
-            // Note that we can NOT completely stop integrating when the ray reaches geometry, since
-            // otherwise we get flickering at geometric discontinuities if reprojection is enabled.
-            // In this case, a temporally stable light leak is better than flickering.
             t1 = max(t0 * 1.0001, ray.geomDist);
-        }
-    #endif
-        float dt = t1 - t0; // Is geometry-aware
-        if(dt <= 0.0)
+
+        float dt = t1 - t0;
+        if (dt <= 0.0)
         {
-            _VBufferLighting[voxelCoord] = 0;
-#ifdef ENABLE_REPROJECTION
-            _VBufferFeedback[voxelCoord] = 0;
-#endif
-            t0 = t1;
+            StoreIntegratedVBufferLighting(voxelCoord, totalRadiance, opticalDepth);
+            t0 = tNext;
             continue;
         }
 
-        // Accurately compute the center of the voxel in the log space. It's important to perform
-        // the inversion exactly, since the accumulated value of the integral is stored at the center.
-        // We will use it for participating media sampling, asymmetric scattering and reprojection.
-        float  t = DecodeLogarithmicDepthGeneralized(e1 - 0.5 * de, _VBufferDistanceDecodingParams);
+        float t = DecodeLogarithmicDepthGeneralized(e1 - 0.5 * de, _VBufferDepthDecodingParams);
         float3 centerWS = ray.originWS + t * ray.centerDirWS;
+        float4 density = _VBufferDensity.Load(int4(voxelCoord, 0));
 
-        // Sample the participating medium at the center of the voxel.
-        // We consider it to be constant along the interval [t0, t1] (within the voxel).
-        float4 density = LOAD_TEXTURE3D(_VBufferDensity, voxelCoord);
-
-        float3 scattering = density.rgb;
-        float  extinction = density.a;
-        float  anisotropy = _GlobalFogAnisotropy;
-
+        float3 scattering = max(density.rgb, 0.0);
+        float extinction = max(density.a, 0.0);
+        float anisotropy = _VBufferFogAnisotropy;
         float voxelOpticalDepth = extinction * dt;
 
-        // When extinction is 0, we can skip the light evaluation as we there be no contribution
-        // We can write the value of previous voxels in the buffer
-        if (extinction > _VolumetricLightingExtinctionCutoff)
+        if (ShouldEvaluateVBufferLighting(extinction))
         {
-            // Perform per-pixel randomization by adding an offset and then sampling uniformly
-            // (in the log space) in a vein similar to Stochastic Universal Sampling:
-            // https://en.wikipedia.org/wiki/Stochastic_universal_sampling
-            float perPixelRandomOffset = GenerateHashedRandomFloat(posInput.positionSS);
+            float perPixelRandomOffset = GenerateVBufferRandom(vBufferPixel);
+            float rndVal = frac(perPixelRandomOffset + GenerateVBufferRandom(voxelCoord, 0u, slice));
 
-        #ifdef ENABLE_REPROJECTION
-            // This is a time-based sequence of 7 equidistant numbers from 1/14 to 13/14.
-            // Each of them is the centroid of the interval of length 2/14.
-            float rndVal = frac(perPixelRandomOffset + _VBufferSampleOffset.z);
-        #else
-            float rndVal = frac(perPixelRandomOffset + 0.5);
-        #endif
+            VoxelLighting aggregate = (VoxelLighting)0;
+            float sampledExtinction = max(extinction, FLT_MIN);
+            VoxelLighting directionalLighting = EvaluateVoxelLightingDirectional(
+                voxelCoord,
+                ray,
+                t0,
+                dt,
+                rndVal,
+                sampledExtinction,
+                anisotropy);
+            aggregate.radianceNoPhase += directionalLighting.radianceNoPhase;
+            aggregate.radianceComplete += directionalLighting.radianceComplete;
 
-            VoxelLighting aggregateLighting;
-            ZERO_INITIALIZE(VoxelLighting, aggregateLighting);
+            VoxelLighting localLighting = EvaluateVoxelLightingLocal(
+                voxelCoord,
+                vBufferPixel,
+                centerWS,
+                ray,
+                t0,
+                t1,
+                dt,
+                rndVal,
+                sampledExtinction,
+                anisotropy);
+            aggregate.radianceNoPhase += localLighting.radianceNoPhase;
+            aggregate.radianceComplete += localLighting.radianceComplete;
 
-            // Prevent division by 0.
-            extinction = max(extinction, FLT_MIN);
+            float transmittanceToSlice = TransmittanceFromOpticalDepth(opticalDepth);
+            float phaseConstant = CornetteShanksPhasePartConstant(clamp(anisotropy, -0.95, 0.95));
+            float3 probeRadiance = probeInScatteredRadiance * TransmittanceIntegralHomogeneousMedium(sampledExtinction, dt);
 
-            if (featureFlags & LIGHTFEATUREFLAGS_DIRECTIONAL)
-            {
-                VoxelLighting lighting = EvaluateVoxelLightingDirectional(context, featureFlags, posInput,
-                                                                          centerWS, ray, t0, t1, dt, rndVal,
-                                                                          extinction, anisotropy, t < waterDistance);
-
-                aggregateLighting.radianceNoPhase  += lighting.radianceNoPhase;
-                aggregateLighting.radianceComplete += lighting.radianceComplete;
-            }
-
-            #ifdef SUPPORT_LOCAL_LIGHTS
-            {
-                VoxelLighting lighting = EvaluateVoxelLightingLocal(context, groupIdx, featureFlags, posInput,
-                                                                    lightCount, lightStart,
-                                                                    centerWS, ray, t0, t1, dt, rndVal,
-                                                                    extinction, anisotropy);
-
-                aggregateLighting.radianceNoPhase  += lighting.radianceNoPhase;
-                aggregateLighting.radianceComplete += lighting.radianceComplete;
-            }
-            #endif
-
-            #if SAMPLE_PROBE_VOLUMES
-            {
-                float3 apvDiffuseGI = EvaluateVoxelDiffuseGI(posInput, ray, t0, dt, rndVal, extinction);
-                aggregateLighting.radianceNoPhase += apvDiffuseGI;
-                aggregateLighting.radianceComplete += apvDiffuseGI;
-
-            }
-            #endif
-
-        #ifdef ENABLE_REPROJECTION
-            // Clamp here to prevent generation of NaNs.
-            float4 voxelValue           = float4(aggregateLighting.radianceNoPhase, extinction * dt);
-            float4 linearizedVoxelValue = LinearizeRGBD(voxelValue);
-            float4 normalizedVoxelValue = linearizedVoxelValue * rcp(dt);
-            float4 normalizedBlendValue = normalizedVoxelValue;
-
-        #if (SHADEROPTIONS_CAMERA_RELATIVE_RENDERING != 0) && defined(USING_STEREO_MATRICES)
-            // With XR single-pass, remove the camera-relative offset for the reprojected sample
-            centerWS -= _WorldSpaceCameraPosViewOffset;
-        #endif
-
-            // Reproject the history at 'centerWS'.
-            float4 reprojValue = SampleVBuffer(TEXTURE3D_ARGS(_VBufferHistory, s_linear_clamp_sampler),
-                                               centerWS,
-                                               _PrevCamPosRWS.xyz,
-                                               UNITY_MATRIX_PREV_VP,
-                                               _VBufferPrevViewportSize,
-                                               _VBufferHistoryViewportScale.xyz,
-                                               _VBufferHistoryViewportLimit.xyz,
-                                               _VBufferPrevDistanceEncodingParams,
-                                               _VBufferPrevDistanceDecodingParams,
-                                               false, false, true) * float4(GetInversePreviousExposureMultiplier().xxx, 1);
-
-            bool reprojSuccess = (_VBufferHistoryIsValid != 0) && (reprojValue.a != 0);
-
-            if (reprojSuccess)
-            {
-                // Perform temporal blending in the log space ("Pixar blend").
-                normalizedBlendValue = lerp(normalizedVoxelValue, reprojValue, ComputeHistoryWeight());
-            }
-
-            // Store the feedback for the voxel.
-            // TODO: dynamic lights (which update their position, rotation, cookie or shadow at runtime)
-            // do not support reprojection and should neither read nor write to the history buffer.
-            // This will cause them to alias, but it is the only way to prevent ghosting.
-            _VBufferFeedback[voxelCoord] = clamp(normalizedBlendValue * float4(GetCurrentExposureMultiplier().xxx, 1), 0, HALF_MAX);
-
-            float4 linearizedBlendValue = normalizedBlendValue * dt;
-            float4 blendValue = DelinearizeRGBD(linearizedBlendValue);
-
-        #ifdef ENABLE_ANISOTROPY
-            // Estimate the influence of the phase function on the results of the current frame.
-            float3 phaseCurrFrame;
-
-            phaseCurrFrame.r = SafeDiv(aggregateLighting.radianceComplete.r, aggregateLighting.radianceNoPhase.r);
-            phaseCurrFrame.g = SafeDiv(aggregateLighting.radianceComplete.g, aggregateLighting.radianceNoPhase.g);
-            phaseCurrFrame.b = SafeDiv(aggregateLighting.radianceComplete.b, aggregateLighting.radianceNoPhase.b);
-
-            // Warning: in general, this does not work!
-            // For a voxel with a single light, 'phaseCurrFrame' is monochromatic, and since
-            // we don't jitter anisotropy, its value does not change from frame to frame
-            // for a static camera/scene. This is fine.
-            // If you have two lights per voxel, we compute:
-            // phaseCurrFrame = (phaseA * lightingA + phaseB * lightingB) / (lightingA + lightingB).
-            // 'phaseA' and 'phaseB' are still (different) constants for a static camera/scene.
-            // 'lightingA' and 'lightingB' are jittered, so they change from frame to frame.
-            // Therefore, 'phaseCurrFrame' becomes temporarily unstable and can cause flickering in practice. :-(
-            blendValue.rgb *= phaseCurrFrame;
-        #endif // ENABLE_ANISOTROPY
-
-        #else // NO REPROJECTION
-
-        #ifdef ENABLE_ANISOTROPY
-            float4 blendValue = float4(aggregateLighting.radianceComplete, extinction * dt);
-        #else
-            float4 blendValue = float4(aggregateLighting.radianceNoPhase,  extinction * dt);
-        #endif // ENABLE_ANISOTROPY
-
-        #endif // ENABLE_REPROJECTION
-
-            // Compute the transmittance from the camera to 't0'.
-            float transmittance = TransmittanceFromOpticalDepth(opticalDepth);
-
-        #ifdef ENABLE_ANISOTROPY
-            float phase = _CornetteShanksConstant;
-        #else
-            float phase = IsotropicPhaseFunction();
-        #endif // ENABLE_ANISOTROPY
-
-            // Integrate the contribution of the probe over the interval.
-            // Integral{a, b}{Transmittance(0, t) * L_s(t) dt} = Transmittance(0, a) * Integral{a, b}{Transmittance(0, t - a) * L_s(t) dt}.
-            float3 probeRadiance = probeInScatteredRadiance * TransmittanceIntegralHomogeneousMedium(extinction, dt);
-
-            // Accumulate radiance along the ray.
-            totalRadiance += transmittance * scattering * (phase * blendValue.rgb + probeRadiance);
+            totalRadiance += transmittanceToSlice * scattering * (phaseConstant * aggregate.radianceComplete + probeRadiance);
         }
 
-        // Compute the optical depth up to the center of the interval.
+        opticalDepth += 0.5 * voxelOpticalDepth;
+        StoreIntegratedVBufferLighting(voxelCoord, totalRadiance, opticalDepth);
         opticalDepth += 0.5 * voxelOpticalDepth;
 
-        // Store the voxel data.
-        // Note: for correct filtering, the data has to be stored in the perceptual space.
-        // This means storing the tone mapped radiance and transmittance instead of optical depth.
-        // See "A Fresh Look at Generalized Sampling", p. 51.
-        // TODO: re-enable tone mapping after implementing pre-exposure.
-        _VBufferLighting[voxelCoord] = max(0, LinearizeRGBD(float4(/*FastTonemap*/(totalRadiance), opticalDepth)) * float4(GetCurrentExposureMultiplier().xxx, 1));
-
-        // Compute the optical depth up to the end of the interval.
-        opticalDepth += 0.5 * voxelOpticalDepth;
-
-        if (t0 * 0.99 > ray.maxDist)
+        if (hasMaxZ && t0 * 0.99 > ray.maxDist)
         {
+            slice++;
             break;
         }
 
         t0 = tNext;
     }
 
-    for (; slice < _VBufferSliceCount; slice++)
+    for (; slice < sliceCount; slice++)
     {
-        uint3 voxelCoord = uint3(posInput.positionSS, slice + _VBufferSliceCount * unity_StereoEyeIndex);
-        _VBufferLighting[voxelCoord] = 0;
-#ifdef ENABLE_REPROJECTION
-        _VBufferFeedback[voxelCoord] = 0;
-#endif
-
+        uint3 voxelCoord = uint3(vBufferPixel, slice);
+        StoreEmptyVBufferLighting(voxelCoord);
     }
-
 }
 
 [numthreads(8, 8, 4)]
@@ -769,93 +606,22 @@ void VolumetricLighting(uint3 dispatchThreadId : SV_DispatchThreadID,
                         uint groupIndex : SV_GroupIndex)
 {
     uint2 groupOffset = groupId * GROUP_SIZE_1D;
-    uint2 voxelCoord  = groupOffset + groupThreadId;
+    uint2 vBufferPixel = groupOffset + groupThreadId;
 
-    // Reminder: our voxels are sphere-capped right frustums (truncated right pyramids).
-    // The curvature of the front and back faces is quite gentle, so we can use
-    // the right frustum approximation (thus the front and the back faces are squares).
-    // Note, that since we still rely on the perspective camera model, pixels at the center
-    // of the screen correspond to larger solid angles than those at the edges.
-    // Basically, sizes of front and back faces depend on the XY coordinate.
-    // https://www.desmos.com/calculator/i3rkesvidk
+    if (vBufferPixel.x >= (uint)_VBufferWidth || vBufferPixel.y >= (uint)_VBufferHeight)
+        return;
 
-    float3 F = GetViewForwardDir();
-    float3 U = GetViewUpDir();
-    float3 R = cross(F, U);
+    float2 sampleOffset = 0.0;
+    JitteredRay ray = BuildVBufferJitteredRay(vBufferPixel, sampleOffset);
+    float2 vBufferUV = GetVBufferSampleUV(vBufferPixel, sampleOffset);
+    bool hasOpaqueGeometry;
+    ray.geomDist = GetVBufferOpaqueGeometryDistanceForRay(vBufferUV, ray, hasOpaqueGeometry);
 
-    float2 centerCoord = voxelCoord + float2(0.5, 0.5);
+    float fallbackDistance = hasOpaqueGeometry ? ray.geomDist : _VBufferLastSliceDistance;
+    bool hasMaxZ = _VBufferMaxZEnabled > 0.5;
+    ray.maxDist = GetVBufferMaxOpaqueGeometryDistance(vBufferUV, ray.jitterDirWS, fallbackDistance);
 
-    // Compute a ray direction s.t. ViewSpace(rayDirWS).z = 1.
-    float3 rayDirWS       = mul(-float4(centerCoord, 1, 1), _VBufferCoordToViewDirWS[unity_StereoEyeIndex]).xyz;
-    float3 rightDirWS     = cross(rayDirWS, U);
-    float  rcpLenRayDir   = rsqrt(dot(rayDirWS, rayDirWS));
-    float  rcpLenRightDir = rsqrt(dot(rightDirWS, rightDirWS));
-
-    JitteredRay ray;
-    ray.originWS    = GetCurrentViewPosition();
-    ray.centerDirWS = rayDirWS * rcpLenRayDir; // Normalize
-
-    float FdotD = dot(F, ray.centerDirWS);
-    float unitDistFaceSize = _VBufferUnitDepthTexelSpacing * FdotD * rcpLenRayDir;
-
-    ray.xDirDerivWS = rightDirWS * (rcpLenRightDir * unitDistFaceSize); // Normalize & rescale
-    ray.yDirDerivWS = cross(ray.xDirDerivWS, ray.centerDirWS); // Will have the length of 'unitDistFaceSize' by construction
-
-
-    #ifdef ENABLE_REPROJECTION
-    float2 sampleOffset = _VBufferSampleOffset.xy;
-    #else
-    float2 sampleOffset = 0;
-    #endif
-
-    ray.jitterDirWS = normalize(ray.centerDirWS + sampleOffset.x * ray.xDirDerivWS
-                                            + sampleOffset.y * ray.yDirDerivWS);
-    float tStart = g_fNearPlane / dot(ray.jitterDirWS, F);
-
-    // We would like to determine the screen pixel (at the full resolution) which
-    // the jittered ray corresponds to. The exact solution can be obtained by intersecting
-    // the ray with the screen plane, e.i. (ViewSpace(jitterDirWS).z = 1). That's a little expensive.
-    // So, as an approximation, we ignore the curvature of the frustum.
-    uint2 pixelCoord = (uint2)((voxelCoord + 0.5 + sampleOffset) * _VBufferVoxelSize);
-
-
-    #ifdef VL_PRESET_OPTIMAL
-    // The entire thread group is within the same light tile.
-    uint2 tileCoord = groupOffset * VBUFFER_VOXEL_SIZE / TILE_SIZE_BIG_TILE;
-    #else
-    // No compile-time optimizations, no scalarization.
-    uint2 tileCoord = pixelCoord / TILE_SIZE_BIG_TILE;
-    #endif
-
-    uint  tileIndex = tileCoord.x + _NumTileBigTileX * tileCoord.y;
-    // This clamp is important as _VBufferVoxelSize can have float value which can cause en overflow (Crash on Vulkan and Metal)
-    tileIndex = min(tileIndex, _NumTileBigTileX * _NumTileBigTileY);
-
-    // Do not jitter 'voxelCoord' else. It's expected to correspond to the center of the voxel.
-    PositionInputs posInput = GetPositionInput(voxelCoord, _VBufferViewportSize.zw, tileCoord);
-    ray.geomDist = FLT_INF;
-    ray.maxDist = FLT_INF;
-
-    float deviceDepth = _CameraDepth[pixelCoord];
-
-    if (deviceDepth > 0) // Skip the skybox
-    {
-        // Convert it to distance along the ray. Doesn't work with tilt shift, etc.
-        float linearDepth = LinearEyeDepth(deviceDepth, _ZBufferParams);
-        ray.geomDist = linearDepth * rcp(dot(ray.jitterDirWS, F));
-
-        float2 UV = posInput.positionNDC * _RTHandleScale.xy;
-
-        // This should really be using a max sampler here. This is a bit overdilating given that it is already dilated.
-        // Better to be safer though.
-        float4 d = GATHER_RED_TEXTURE2D_X(_VBufferMaxZ, sampler_PointClamp, UV) * rcp(dot(ray.jitterDirWS, F));
-        ray.maxDist = max(Max3(d.x, d.y, d.z), d.w);
-    }
-
-
-    float4 value = 0.0;
-    float weightSum = 0.0;
-    FillVolumetricLightingBuffer( posInput, tileIndex, groupIndex, ray, tStart);
+    FillVolumetricLightingBuffer(vBufferPixel, ray, hasMaxZ);
 }
 
 float4 LoadLightingClamped(int3 coord)

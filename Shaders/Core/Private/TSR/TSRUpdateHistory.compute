@@ -2,7 +2,7 @@
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
 
-Texture2D<float4> _InputColor;
+Texture2D<float4> _CurrentFrameColor;
 Texture2D<float> _DilatedDepth;
 Texture2D<float4> _AcceptedHistoryColor;
 Texture2D<float2> _ReprojectedHistoryMeta;
@@ -24,10 +24,9 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (any(pixelCoord >= outputSize))
         return;
 
-    float2 uv = TSR_OutputUV(pixelCoord, outputSize);
     int2 renderCoord = TSR_OutputToRenderCoord(pixelCoord, outputSize, renderSize);
 
-    float3 currentColor = TSR_SampleCatmullRom(_InputColor, uv, float2(renderSize)).rgb;
+    float3 currentColor = _CurrentFrameColor[pixelCoord].rgb;
     float3 historyColor = _AcceptedHistoryColor[pixelCoord].rgb;
     float previousSampleCount = _ReprojectedHistoryMeta[pixelCoord].x;
     float accepted = _RejectionMask[pixelCoord] > 0.5 ? 1.0 : 0.0;

@@ -125,6 +125,31 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ShaderFiles_SpatialAntiAliasingFiltersRejectedPixelsOnly()
+        {
+            var spatialSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "TSR",
+                "TSRSpatialAntiAliasing.compute"));
+            var updateSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "TSR",
+                "TSRUpdateHistory.compute"));
+
+            Assert.That(spatialSource, Does.Contain("Texture2D<float> _RejectionMask"));
+            Assert.That(spatialSource, Does.Contain("bool rejected = _RejectionMask[pixelCoord] <= 0.5"));
+            Assert.That(spatialSource, Does.Contain("if (!rejected)"));
+            Assert.That(spatialSource, Does.Contain("_SpatialAntiAliasedColor[pixelCoord] = current"));
+            Assert.That(spatialSource, Does.Contain("edgeStrength"));
+            Assert.That(updateSource, Does.Contain("Texture2D<float4> _CurrentFrameColor"));
+            Assert.That(updateSource, Does.Contain("float3 currentColor = _CurrentFrameColor[pixelCoord].rgb"));
+        }
+
+        [Test]
         public void SourceFiles_CreateExpectedHistoryAndTransientResources()
         {
             var passSource = File.ReadAllText(GetPackageFilePath(
@@ -144,6 +169,8 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("GraphicsFormat.R8_UNorm"));
             Assert.That(passSource, Does.Contain("m_HistoryColor"));
             Assert.That(passSource, Does.Contain("m_HistoryMeta"));
+            Assert.That(passSource, Does.Contain("TSR_SpatialAntiAliasedColor"));
+            Assert.That(passSource, Does.Contain("SpatialAntiAliasedColor"));
             Assert.That(passSource, Does.Contain("requestedRenderSize"));
             Assert.That(passSource, Does.Contain("requestedOutputSize"));
             Assert.That(passSource, Does.Contain("ResolveCurrentJitter(cameraData, temporalData)"));
@@ -173,6 +200,8 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource.IndexOf("DispatchReprojectHistory", System.StringComparison.Ordinal),
                 Is.LessThan(passSource.IndexOf("DispatchRejectShading", System.StringComparison.Ordinal)));
             Assert.That(passSource.IndexOf("DispatchRejectShading", System.StringComparison.Ordinal),
+                Is.LessThan(passSource.IndexOf("DispatchSpatialAntiAliasing", System.StringComparison.Ordinal)));
+            Assert.That(passSource.IndexOf("DispatchSpatialAntiAliasing", System.StringComparison.Ordinal),
                 Is.LessThan(passSource.IndexOf("DispatchUpdateHistory", System.StringComparison.Ordinal)));
             Assert.That(passSource.IndexOf("DispatchUpdateHistory", System.StringComparison.Ordinal),
                 Is.LessThan(passSource.IndexOf("DispatchResolveHistory", System.StringComparison.Ordinal)));
@@ -188,6 +217,7 @@ namespace VividRP.Editor.Tests
                 "TSRDilateVelocity.compute",
                 "TSRReprojectHistory.compute",
                 "TSRRejectShading.compute",
+                "TSRSpatialAntiAliasing.compute",
                 "TSRUpdateHistory.compute",
                 "TSRResolveHistory.compute",
                 "TSRSharpen.compute",
@@ -222,6 +252,7 @@ namespace VividRP.Editor.Tests
             Assert.That(resourcesSource, Does.Contain("TSRDilateVelocityCompute"));
             Assert.That(resourcesSource, Does.Contain("TSRReprojectHistoryCompute"));
             Assert.That(resourcesSource, Does.Contain("TSRRejectShadingCompute"));
+            Assert.That(resourcesSource, Does.Contain("TSRSpatialAntiAliasingCompute"));
             Assert.That(resourcesSource, Does.Contain("TSRUpdateHistoryCompute"));
             Assert.That(resourcesSource, Does.Contain("TSRResolveHistoryCompute"));
             Assert.That(resourcesSource, Does.Contain("TSRSharpenCompute"));

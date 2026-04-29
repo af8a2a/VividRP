@@ -67,6 +67,9 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/TSR/TSRRejectShading.compute")]
         public ComputeShader TSRRejectShadingCompute;
 
+        [ResourcePath("Shaders/Core/Private/TSR/TSRSpatialAntiAliasing.compute")]
+        public ComputeShader TSRSpatialAntiAliasingCompute;
+
         [ResourcePath("Shaders/Core/Private/TSR/TSRUpdateHistory.compute")]
         public ComputeShader TSRUpdateHistoryCompute;
 

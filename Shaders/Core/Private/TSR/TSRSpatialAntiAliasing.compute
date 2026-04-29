@@ -1,0 +1,70 @@
+#pragma kernel CS
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
+
+Texture2D<float4> _InputColor;
+Texture2D<float> _RejectionMask;
+
+RWTexture2D<float4> _SpatialAntiAliasedColor;
+
+float4 _RenderSize;
+float4 _OutputSize;
+
+float3 LoadInputColor(int2 coord, int2 renderSize)
+{
+    return _InputColor[clamp(coord, int2(0, 0), renderSize - 1)].rgb;
+}
+
+float TSR_Luma(float3 color)
+{
+    return dot(color, float3(0.25, 0.5, 0.25));
+}
+
+[numthreads(8, 8, 1)]
+void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    int2 renderSize = int2(_RenderSize.xy);
+    int2 outputSize = int2(_OutputSize.xy);
+    int2 pixelCoord = int2(dispatchThreadId.xy);
+    if (any(pixelCoord >= outputSize))
+        return;
+
+    float2 uv = TSR_OutputUV(pixelCoord, outputSize);
+    int2 renderCoord = TSR_OutputToRenderCoord(pixelCoord, outputSize, renderSize);
+    float4 current = TSR_SampleCatmullRom(_InputColor, uv, float2(renderSize));
+    bool rejected = _RejectionMask[pixelCoord] <= 0.5;
+
+    if (!rejected)
+    {
+        _SpatialAntiAliasedColor[pixelCoord] = current;
+        return;
+    }
+
+    float3 center = current.rgb;
+    float3 left = LoadInputColor(renderCoord + int2(-1, 0), renderSize);
+    float3 right = LoadInputColor(renderCoord + int2(1, 0), renderSize);
+    float3 down = LoadInputColor(renderCoord + int2(0, -1), renderSize);
+    float3 up = LoadInputColor(renderCoord + int2(0, 1), renderSize);
+    float3 diagonalA = LoadInputColor(renderCoord + int2(-1, -1), renderSize)
+        + LoadInputColor(renderCoord + int2(1, 1), renderSize);
+    float3 diagonalB = LoadInputColor(renderCoord + int2(-1, 1), renderSize)
+        + LoadInputColor(renderCoord + int2(1, -1), renderSize);
+
+    float lumaLeft = TSR_Luma(left);
+    float lumaRight = TSR_Luma(right);
+    float lumaDown = TSR_Luma(down);
+    float lumaUp = TSR_Luma(up);
+    float gradientX = abs(lumaLeft - lumaRight);
+    float gradientY = abs(lumaDown - lumaUp);
+    float maxLuma = max(max(max(lumaLeft, lumaRight), max(lumaDown, lumaUp)), max(TSR_Luma(center), 0.25));
+    float edgeStrength = saturate(max(gradientX, gradientY) / maxLuma * 2.0);
+
+    float3 horizontal = center * 0.5 + (left + right) * 0.25;
+    float3 vertical = center * 0.5 + (down + up) * 0.25;
+    float3 diagonal = center * 0.5 + (diagonalA + diagonalB) * 0.125;
+    float3 alongEdge = gradientX > gradientY ? vertical : horizontal;
+    float3 filtered = lerp(diagonal, alongEdge, saturate(abs(gradientX - gradientY) / max(max(gradientX, gradientY), 1e-4)));
+    float3 result = lerp(center, filtered, edgeStrength * 0.75);
+
+    _SpatialAntiAliasedColor[pixelCoord] = float4(max(result, 0.0), current.a);
+}

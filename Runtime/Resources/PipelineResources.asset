@@ -153,6 +153,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 4c59a56c24f81314782e5719ea4a7181, type: 3}
   - ResourceName: Shaders/Core/Private/TSR/TSRSharpen.compute
     ResourceObject: {fileID: 7200000, guid: b3e9ba8c3f018ed48b87b926617bf143, type: 3}
+  - ResourceName: Shaders/Core/Private/TSR/TSRSpatialAntiAliasing.compute
+    ResourceObject: {fileID: 7200000, guid: 288422230778b4644860abaf450adff6, type: 3}
   - ResourceName: Shaders/Core/Private/TSR/TSRUpdateHistory.compute
     ResourceObject: {fileID: 7200000, guid: 428f3d9c861c4de4b90532919bf8a752, type: 3}
   - ResourceName: Shaders/Core/Private/TemporalAA

@@ -32,6 +32,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ReprojectedHistoryMetaId = Shader.PropertyToID("_ReprojectedHistoryMeta");
         private static readonly int AcceptedHistoryColorId = Shader.PropertyToID("_AcceptedHistoryColor");
         private static readonly int RejectionMaskId = Shader.PropertyToID("_RejectionMask");
+        private static readonly int CurrentFrameColorId = Shader.PropertyToID("_CurrentFrameColor");
+        private static readonly int SpatialAntiAliasedColorId = Shader.PropertyToID("_SpatialAntiAliasedColor");
         private static readonly int UpdatedHistoryColorId = Shader.PropertyToID("_UpdatedHistoryColor");
         private static readonly int UpdatedHistoryMetaId = Shader.PropertyToID("_UpdatedHistoryMeta");
         private static readonly int ResolvedOutputId = Shader.PropertyToID("_ResolvedOutput");
@@ -129,6 +131,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 CreateColorDescriptor("TSR_AcceptedHistoryColor", outputSize.x, outputSize.y, GraphicsFormat.R16G16B16A16_SFloat));
             var rejectionMask = renderGraph.CreateTexture(
                 CreateColorDescriptor("TSR_RejectionMask", outputSize.x, outputSize.y, GraphicsFormat.R8_UNorm));
+            var spatialAntiAliasedColor = renderGraph.CreateTexture(
+                CreateOutputDescriptor(sourceTexture.desc, outputSize, "TSR_SpatialAntiAliasedColor"));
             var enableSharpening = additionalData == null || additionalData.tsrEnableSharpening;
             var resolveOutput = enableSharpening
                 ? renderGraph.CreateTexture(CreateOutputDescriptor(sourceTexture.desc, outputSize, "TSR_PreSharpenOutput"))
@@ -151,6 +155,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 passData.ReprojectedHistoryMeta = reprojectedHistoryMeta;
                 passData.AcceptedHistoryColor = acceptedHistoryColor;
                 passData.RejectionMask = rejectionMask;
+                passData.SpatialAntiAliasedColor = spatialAntiAliasedColor;
                 passData.PreviousHistoryColor = handles.PreviousHistoryColor;
                 passData.CurrentHistoryColor = handles.CurrentHistoryColor;
                 passData.PreviousHistoryMeta = handles.PreviousHistoryMeta;
@@ -177,6 +182,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 builder.UseTexture(passData.ReprojectedHistoryMeta, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.AcceptedHistoryColor, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.RejectionMask, AccessFlags.ReadWrite);
+                builder.UseTexture(passData.SpatialAntiAliasedColor, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.PreviousHistoryColor, AccessFlags.Read);
                 builder.UseTexture(passData.CurrentHistoryColor, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.PreviousHistoryMeta, AccessFlags.Read);
@@ -272,6 +278,7 @@ namespace VividRP.Runtime.RenderPass.Core
             DispatchDilateVelocity(cmd, data);
             DispatchReprojectHistory(cmd, data);
             DispatchRejectShading(cmd, data);
+            DispatchSpatialAntiAliasing(cmd, data);
             DispatchUpdateHistory(cmd, data);
             DispatchResolveHistory(cmd, data);
 
@@ -325,13 +332,24 @@ namespace VividRP.Runtime.RenderPass.Core
             var shader = data.Shaders.UpdateHistory;
             var kernel = data.Shaders.UpdateHistoryKernel;
             SetCommonConstants(cmd, shader, data);
-            cmd.SetComputeTextureParam(shader, kernel, InputColorId, data.Source);
+            cmd.SetComputeTextureParam(shader, kernel, CurrentFrameColorId, data.SpatialAntiAliasedColor);
             cmd.SetComputeTextureParam(shader, kernel, DilatedDepthId, data.DilatedDepth);
             cmd.SetComputeTextureParam(shader, kernel, AcceptedHistoryColorId, data.AcceptedHistoryColor);
             cmd.SetComputeTextureParam(shader, kernel, ReprojectedHistoryMetaId, data.ReprojectedHistoryMeta);
             cmd.SetComputeTextureParam(shader, kernel, RejectionMaskId, data.RejectionMask);
             cmd.SetComputeTextureParam(shader, kernel, UpdatedHistoryColorId, data.CurrentHistoryColor);
             cmd.SetComputeTextureParam(shader, kernel, UpdatedHistoryMetaId, data.CurrentHistoryMeta);
+            cmd.DispatchCompute(shader, kernel, DivRoundUp(data.OutputSize.x, KernelThreadGroupSize), DivRoundUp(data.OutputSize.y, KernelThreadGroupSize), 1);
+        }
+
+        private static void DispatchSpatialAntiAliasing(CommandBuffer cmd, PassData data)
+        {
+            var shader = data.Shaders.SpatialAntiAliasing;
+            var kernel = data.Shaders.SpatialAntiAliasingKernel;
+            SetCommonConstants(cmd, shader, data);
+            cmd.SetComputeTextureParam(shader, kernel, InputColorId, data.Source);
+            cmd.SetComputeTextureParam(shader, kernel, RejectionMaskId, data.RejectionMask);
+            cmd.SetComputeTextureParam(shader, kernel, SpatialAntiAliasedColorId, data.SpatialAntiAliasedColor);
             cmd.DispatchCompute(shader, kernel, DivRoundUp(data.OutputSize.x, KernelThreadGroupSize), DivRoundUp(data.OutputSize.y, KernelThreadGroupSize), 1);
         }
 
@@ -539,12 +557,14 @@ namespace VividRP.Runtime.RenderPass.Core
             public readonly ComputeShader DilateVelocity;
             public readonly ComputeShader ReprojectHistory;
             public readonly ComputeShader RejectShading;
+            public readonly ComputeShader SpatialAntiAliasing;
             public readonly ComputeShader UpdateHistory;
             public readonly ComputeShader ResolveHistory;
             public readonly ComputeShader Sharpen;
             public readonly int DilateVelocityKernel;
             public readonly int ReprojectHistoryKernel;
             public readonly int RejectShadingKernel;
+            public readonly int SpatialAntiAliasingKernel;
             public readonly int UpdateHistoryKernel;
             public readonly int ResolveHistoryKernel;
             public readonly int SharpenKernel;
@@ -554,12 +574,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 DilateVelocity = resources.TSRDilateVelocityCompute;
                 ReprojectHistory = resources.TSRReprojectHistoryCompute;
                 RejectShading = resources.TSRRejectShadingCompute;
+                SpatialAntiAliasing = resources.TSRSpatialAntiAliasingCompute;
                 UpdateHistory = resources.TSRUpdateHistoryCompute;
                 ResolveHistory = resources.TSRResolveHistoryCompute;
                 Sharpen = resources.TSRSharpenCompute;
                 DilateVelocityKernel = FindKernel(DilateVelocity);
                 ReprojectHistoryKernel = FindKernel(ReprojectHistory);
                 RejectShadingKernel = FindKernel(RejectShading);
+                SpatialAntiAliasingKernel = FindKernel(SpatialAntiAliasing);
                 UpdateHistoryKernel = FindKernel(UpdateHistory);
                 ResolveHistoryKernel = FindKernel(ResolveHistory);
                 SharpenKernel = FindKernel(Sharpen);
@@ -569,6 +591,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 DilateVelocity != null && DilateVelocityKernel >= 0
                 && ReprojectHistory != null && ReprojectHistoryKernel >= 0
                 && RejectShading != null && RejectShadingKernel >= 0
+                && SpatialAntiAliasing != null && SpatialAntiAliasingKernel >= 0
                 && UpdateHistory != null && UpdateHistoryKernel >= 0
                 && ResolveHistory != null && ResolveHistoryKernel >= 0
                 && Sharpen != null && SharpenKernel >= 0;
@@ -603,6 +626,7 @@ namespace VividRP.Runtime.RenderPass.Core
             public TextureHandle ReprojectedHistoryMeta;
             public TextureHandle AcceptedHistoryColor;
             public TextureHandle RejectionMask;
+            public TextureHandle SpatialAntiAliasedColor;
             public TextureHandle PreviousHistoryColor;
             public TextureHandle CurrentHistoryColor;
             public TextureHandle PreviousHistoryMeta;

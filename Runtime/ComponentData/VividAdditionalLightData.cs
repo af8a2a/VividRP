@@ -186,7 +186,7 @@ namespace VividRP.Runtime
 
         private static VividLightRenderData CreateLightRenderData(Light light, VividAdditionalLightData additionalLightData)
         {
-            var nativeIntensity = ResolveNativeLightIntensity(light);
+            var nativeIntensity = Mathf.Max(light.intensity, 0.0f);
             var finalColor = light.color.linear * nativeIntensity;
             var range = Mathf.Max(light.range, 0.0f);
             var rangeAttenuationScale = range > 0.0f ? 1.0f / Mathf.Max(range * range, 1e-6f) : 0.0f;
@@ -256,24 +256,6 @@ namespace VividRP.Runtime
                 flags |= VividLightRenderDataFlags.AffectVolumetric;
 
             return flags;
-        }
-
-        private static float ResolveNativeLightIntensity(Light light)
-        {
-            if (light == null)
-                return 0.0f;
-
-            var intensity = Mathf.Max(light.intensity, 0.0f);
-            if (!LightUnitUtils.IsLightUnitSupported(light.type, light.lightUnit))
-                return intensity;
-
-            return Mathf.Max(
-                LightUnitUtils.ConvertIntensity(
-                    light,
-                    intensity,
-                    light.lightUnit,
-                    LightUnitUtils.GetNativeLightUnit(light.type)),
-                0.0f);
         }
 
         internal static bool IsLightDataChanged(Light light, VividAdditionalLightData additionalLightData, in VividLightRenderData trackedLightData)

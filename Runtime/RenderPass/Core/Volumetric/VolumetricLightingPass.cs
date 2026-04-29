@@ -20,9 +20,19 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int VBufferMaxZId = Shader.PropertyToID("_VBufferMaxZ");
         private static readonly int VBufferMaxZEnabledId = Shader.PropertyToID("_VBufferMaxZEnabled");
         private static readonly int VBufferDensityId = Shader.PropertyToID("_VBufferDensity");
+        private static readonly int VBufferHistoryId = Shader.PropertyToID("_VBufferHistory");
+        private static readonly int VBufferFeedbackId = Shader.PropertyToID("_VBufferFeedback");
         private static readonly int VBufferLightingId = Shader.PropertyToID("_VBufferLighting");
         private static readonly int VBufferLightingInputId = Shader.PropertyToID("_VBufferLightingInput");
         private static readonly int VBufferLightingOutputId = Shader.PropertyToID("_VBufferLightingOutput");
+        private static readonly int VBufferHistoryIsValidId = Shader.PropertyToID("_VBufferHistoryIsValid");
+        private static readonly int VBufferSampleOffsetId = Shader.PropertyToID("_VBufferSampleOffset");
+        private static readonly int VBufferPrevViewportSizeId = Shader.PropertyToID("_VBufferPrevViewportSize");
+        private static readonly int VBufferHistoryViewportScaleId = Shader.PropertyToID("_VBufferHistoryViewportScale");
+        private static readonly int VBufferHistoryViewportLimitId = Shader.PropertyToID("_VBufferHistoryViewportLimit");
+        private static readonly int VBufferPrevDepthEncodingParamsId = Shader.PropertyToID("_VBufferPrevDepthEncodingParams");
+        private static readonly int VBufferPrevDepthDecodingParamsId = Shader.PropertyToID("_VBufferPrevDepthDecodingParams");
+        private static readonly int VBufferPrevCameraPositionWSId = Shader.PropertyToID("_VBufferPrevCameraPositionWS");
         private static readonly int DirectionalLightsId = Shader.PropertyToID("_DirectionalLights");
         private static readonly int DirectionalLightCountId = Shader.PropertyToID("_DirectionalLightCount");
         private static readonly int MainDirectionalLightIndexId = Shader.PropertyToID("_MainDirectionalLightIndex");
@@ -74,6 +84,12 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "VBufferLightingFiltered", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private RenderGraphTexture m_VBufferLightingFiltered;
+
+        [RenderGraphResource(Name = "VBufferHistory", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_VBufferHistory;
+
+        [RenderGraphResource(Name = "VBufferFeedback", Access = AccessFlags.ReadWrite)]
+        private RenderGraphTexture m_VBufferFeedback;
 
         [RenderGraphResource(Name = "DirectionalLights", Access = AccessFlags.Read)]
         private RenderGraphBuffer m_DirectionalLightBuffer;
@@ -143,6 +159,14 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_SupportsClusteredAreaLights;
         private bool m_IsLogBaseBufferEnabled;
         private RenderGraphBuffer m_FrameDataBigTileVolumetricLightListBuffer;
+        private readonly RenderGraphTextureDesc m_VBufferHistoryDescriptor = new();
+        private VBufferParameters m_PreviousVBufferParameters;
+        private VBufferParameters m_LastVBufferParameters;
+        private bool m_HasLastVBufferParameters;
+        private bool m_HasValidVBufferHistory;
+        private bool m_IsFirstFrame = true;
+        private Vector3 m_PreviousCameraPositionWS;
+        private Vector4 m_VBufferSampleOffset;
 
         public VolumetricLightingPass()
         {
@@ -160,6 +184,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_VBufferLighting = VolumetricDensityPass.CreateVBufferTexture("VBufferLighting");
             m_VBufferLighting.desc.ClearColor = new Color(0.0f, 0.0f, 0.0f, 1.0f);
             m_VBufferLightingFiltered = VolumetricDensityPass.CreateVBufferTexture("VBufferLightingFiltered");
+            m_VBufferHistory = VolumetricDensityPass.CreateVBufferTexture("VBufferHistory");
+            m_VBufferHistory.desc.ClearBuffer = false;
+            m_VBufferFeedback = VolumetricDensityPass.CreateVBufferTexture("VBufferFeedback");
+            m_VBufferFeedback.desc.ClearBuffer = false;
             m_LocalDirectionalLightBuffer = RenderGraphBuffer.CreateStructured("DirectionalLights", 1, VividLightData.DirectionalLightData.Stride);
             m_LocalPunctualLightBuffer = RenderGraphBuffer.CreateStructured("PunctualLights", 1, VividLightData.PunctualLightData.Stride);
             m_LocalAreaLightBuffer = RenderGraphBuffer.CreateStructured("AreaLights", 1, VividLightData.AreaLightData.Stride);
@@ -211,6 +239,15 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ShaderVariables = volumetricData.VBufferDensity != null
                 ? volumetricData.shaderVariables
                 : VividVolumetricUtility.BuildShaderVariables(m_Settings, m_CameraWidth, m_CameraHeight, 0, cameraData);
+            var temporalData = frameData.Get<VividTemporalData>();
+            m_IsFirstFrame = temporalData == null || temporalData.isFirstFrame;
+            m_PreviousCameraPositionWS = ResolvePreviousCameraPositionWS(cameraData, temporalData);
+            m_PreviousVBufferParameters = m_HasLastVBufferParameters
+                ? m_LastVBufferParameters
+                : m_Settings.VBufferParameters;
+            m_VBufferSampleOffset = m_Settings.TemporalReprojectionEnabled
+                ? ComputeVBufferSampleOffset(ResolveFrameIndex(cameraData))
+                : Vector4.zero;
 
             ConfigureCameraDepthTexture(m_CameraWidth, m_CameraHeight);
             if (ReferenceEquals(m_VBufferMaxZ, m_LocalVBufferMaxZ))
@@ -226,11 +263,14 @@ namespace VividRP.Runtime.RenderPass.Core
             VolumetricDensityPass.ConfigureVBufferTexture(m_VBufferDensity, m_Settings.VBufferParameters, "VBufferDensity", clear: false);
             VolumetricDensityPass.ConfigureVBufferTexture(m_VBufferLighting, m_Settings.VBufferParameters, "VBufferLighting", clear: true);
             VolumetricDensityPass.ConfigureVBufferTexture(m_VBufferLightingFiltered, m_Settings.VBufferParameters, "VBufferLightingFiltered", clear: false);
+            VolumetricDensityPass.ConfigureVBufferTexture(m_VBufferHistory, m_Settings.VBufferParameters, "VBufferHistory", clear: false);
+            VolumetricDensityPass.ConfigureVBufferTexture(m_VBufferFeedback, m_Settings.VBufferParameters, "VBufferFeedback", clear: false);
             m_DispatchX = CoreUtils.DivRoundUp(m_Settings.VBufferParameters.ViewportWidth, ThreadGroupSizeX);
             m_DispatchY = CoreUtils.DivRoundUp(m_Settings.VBufferParameters.ViewportHeight, ThreadGroupSizeY);
             m_DispatchZ = CoreUtils.DivRoundUp(m_Settings.VBufferParameters.SliceCount, ThreadGroupSizeZ);
             m_FilterDispatchZ = Mathf.Max(m_Settings.VBufferParameters.SliceCount, 1);
             PrepareClusteredLightingParameters(frameData);
+            PrepareVBufferHistory();
 
             volumetricData.settings = m_Settings;
             volumetricData.shaderVariables = m_ShaderVariables;
@@ -252,6 +292,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.DispatchCompute(m_Shader, m_ClearKernel, m_DispatchX, m_DispatchY, m_DispatchZ);
 
                 if (!m_Settings.Enabled || m_VBufferDensity?.innerHandle.IsValid() != true)
+                    return;
+                if (m_VBufferFeedback?.innerHandle.IsValid() != true)
                     return;
 
                 var lightingTarget = m_Settings.GaussianFilteringEnabled ? m_VBufferLightingFiltered : m_VBufferLighting;
@@ -283,6 +325,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FilterDispatchZ = 1;
             m_SupportsVolumetricBigTileLightList = false;
             m_FrameDataBigTileVolumetricLightListBuffer = null;
+            m_HasValidVBufferHistory = false;
+            m_HasLastVBufferParameters = false;
+            m_IsFirstFrame = true;
         }
 
         private void BindSharedTextures(ComputePassContext context, ComputeCommandBuffer cmd, int kernel, RenderGraphTexture lightingTarget)
@@ -290,6 +335,8 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_Shader, kernel, CameraDepthId, m_CameraDepth.innerHandle);
             BindVBufferMaxZ(context, cmd, kernel);
             cmd.SetComputeTextureParam(m_Shader, kernel, VBufferDensityId, m_VBufferDensity.innerHandle);
+            BindVBufferHistory(cmd, kernel);
+            cmd.SetComputeTextureParam(m_Shader, kernel, VBufferFeedbackId, m_VBufferFeedback.innerHandle);
             cmd.SetComputeTextureParam(m_Shader, kernel, VBufferLightingId, lightingTarget.innerHandle);
 
             if (ReferenceEquals(m_DirectionalShadowTexture, m_LocalDirectionalShadowTexture)
@@ -306,6 +353,37 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 cmd.SetComputeTextureParam(m_Shader, kernel, DirectionalShadowTextureId, m_DirectionalShadowTexture.innerHandle);
             }
+        }
+
+        private void BindVBufferHistory(ComputeCommandBuffer cmd, int kernel)
+        {
+            var hasValidHistory = m_Settings.TemporalReprojectionEnabled
+                && m_HasValidVBufferHistory
+                && !m_IsFirstFrame;
+            var historyTexture = m_VBufferHistory?.innerHandle.IsValid() == true
+                ? m_VBufferHistory.innerHandle
+                : m_VBufferDensity.innerHandle;
+            var previousParameters = m_PreviousVBufferParameters;
+            var previousViewportSize = new Vector4(
+                previousParameters.ViewportWidth,
+                previousParameters.ViewportHeight,
+                previousParameters.RcpViewportWidth,
+                previousParameters.RcpViewportHeight);
+            var historyViewportScale = ComputeHistoryViewportScale(previousParameters);
+            var historyViewportLimit = ComputeHistoryViewportLimit(previousParameters);
+
+            cmd.SetComputeTextureParam(m_Shader, kernel, VBufferHistoryId, historyTexture);
+            cmd.SetComputeIntParam(m_Shader, VBufferHistoryIsValidId, hasValidHistory ? 1 : 0);
+            cmd.SetComputeVectorParam(m_Shader, VBufferSampleOffsetId, m_VBufferSampleOffset);
+            cmd.SetComputeVectorParam(m_Shader, VBufferPrevViewportSizeId, previousViewportSize);
+            cmd.SetComputeVectorParam(m_Shader, VBufferHistoryViewportScaleId, historyViewportScale);
+            cmd.SetComputeVectorParam(m_Shader, VBufferHistoryViewportLimitId, historyViewportLimit);
+            cmd.SetComputeVectorParam(m_Shader, VBufferPrevDepthEncodingParamsId, previousParameters.DepthEncodingParams);
+            cmd.SetComputeVectorParam(m_Shader, VBufferPrevDepthDecodingParamsId, previousParameters.DepthDecodingParams);
+            cmd.SetComputeVectorParam(
+                m_Shader,
+                VBufferPrevCameraPositionWSId,
+                new Vector4(m_PreviousCameraPositionWS.x, m_PreviousCameraPositionWS.y, m_PreviousCameraPositionWS.z, 1.0f));
         }
 
         private void BindVBufferMaxZ(ComputePassContext context, ComputeCommandBuffer cmd, int kernel)
@@ -357,6 +435,158 @@ namespace VividRP.Runtime.RenderPass.Core
             SetLightLoopBuffer(cmd, kernel, LayeredOffsetId, m_LayeredOffsetBuffer);
             SetLightLoopBuffer(cmd, kernel, LayeredLightListId, m_LayeredLightListBuffer);
             SetLightLoopBuffer(cmd, kernel, LogBaseBufferId, m_LogBaseBuffer);
+        }
+
+        private void PrepareVBufferHistory()
+        {
+            if (!m_Settings.Enabled || !m_Settings.TemporalReprojectionEnabled)
+            {
+                m_HasValidVBufferHistory = false;
+                m_HasLastVBufferParameters = false;
+                return;
+            }
+
+            var hadLastVBufferParameters = m_HasLastVBufferParameters;
+            var registryHasValidHistory = AllocHistoryTexture(
+                "VBufferLighting",
+                m_VBufferHistory,
+                m_VBufferFeedback,
+                CreateVBufferHistoryDescriptor());
+            m_HasValidVBufferHistory = registryHasValidHistory
+                && hadLastVBufferParameters
+                && !m_IsFirstFrame;
+
+            m_LastVBufferParameters = m_Settings.VBufferParameters;
+            m_HasLastVBufferParameters = true;
+        }
+
+        private RenderGraphTextureDesc CreateVBufferHistoryDescriptor()
+        {
+            var desc = m_VBufferHistoryDescriptor;
+            if (m_VBufferFeedback?.desc != null)
+                RenderGraphTextureDescUtility.Copy(m_VBufferFeedback.desc, desc);
+
+            desc.Name = "VBufferFeedback";
+            desc.ColorFormat = GraphicsFormat.R16G16B16A16_SFloat;
+            desc.DepthBufferBits = DepthBits.None;
+            desc.MsaaSamples = MSAASamples.None;
+            desc.Dimension = TextureDimension.Tex3D;
+            desc.ClearBuffer = false;
+            desc.EnableRandomWrite = true;
+            desc.FilterMode = FilterMode.Bilinear;
+            desc.WrapMode = TextureWrapMode.Clamp;
+            desc.UseMipMap = false;
+            desc.AutoGenerateMips = false;
+            desc.MipCount = 1;
+            desc.BindTextureMS = false;
+            return desc;
+        }
+
+        private Vector4 ComputeHistoryViewportScale(in VBufferParameters previousParameters)
+        {
+            var desc = m_VBufferHistory?.desc ?? m_VBufferFeedback?.desc;
+            var bufferWidth = Mathf.Max(desc?.Width ?? previousParameters.ViewportWidth, 1);
+            var bufferHeight = Mathf.Max(desc?.Height ?? previousParameters.ViewportHeight, 1);
+            var bufferSlices = Mathf.Max(desc?.Slices ?? previousParameters.SliceCount, 1);
+            return new Vector4(
+                VividVolumetricUtility.ComputeViewportScale(previousParameters.ViewportWidth, bufferWidth),
+                VividVolumetricUtility.ComputeViewportScale(previousParameters.ViewportHeight, bufferHeight),
+                VividVolumetricUtility.ComputeViewportScale(previousParameters.SliceCount, bufferSlices),
+                0.0f);
+        }
+
+        private Vector4 ComputeHistoryViewportLimit(in VBufferParameters previousParameters)
+        {
+            var desc = m_VBufferHistory?.desc ?? m_VBufferFeedback?.desc;
+            var bufferWidth = Mathf.Max(desc?.Width ?? previousParameters.ViewportWidth, 1);
+            var bufferHeight = Mathf.Max(desc?.Height ?? previousParameters.ViewportHeight, 1);
+            var bufferSlices = Mathf.Max(desc?.Slices ?? previousParameters.SliceCount, 1);
+            return new Vector4(
+                VividVolumetricUtility.ComputeViewportLimit(previousParameters.ViewportWidth, bufferWidth),
+                VividVolumetricUtility.ComputeViewportLimit(previousParameters.ViewportHeight, bufferHeight),
+                VividVolumetricUtility.ComputeViewportLimit(previousParameters.SliceCount, bufferSlices),
+                0.0f);
+        }
+
+        private static Vector3 ResolvePreviousCameraPositionWS(VividCameraData cameraData, VividTemporalData temporalData)
+        {
+            if (temporalData != null && !temporalData.isFirstFrame)
+            {
+                var previousCameraToWorld = temporalData.previousViewMatrix.inverse;
+                var position = previousCameraToWorld.GetColumn(3);
+                return new Vector3(position.x, position.y, position.z);
+            }
+
+            var camera = cameraData?.camera;
+            return camera != null ? camera.transform.position : Vector3.zero;
+        }
+
+        private static int ResolveFrameIndex(VividCameraData cameraData)
+        {
+            return cameraData != null && cameraData.frameIndex >= 0
+                ? cameraData.frameIndex
+                : Time.frameCount;
+        }
+
+        private static Vector4 ComputeVBufferSampleOffset(int frameIndex)
+        {
+            var sampleIndex = frameIndex % 7;
+            if (sampleIndex < 0)
+                sampleIndex += 7;
+
+            const float r = 0.17054068870105444f;
+            var d = 2.0f * r;
+            var s = r * Mathf.Sqrt(3.0f);
+            var sample = Vector2.zero;
+            switch (sampleIndex)
+            {
+                case 1:
+                    sample = new Vector2(-d, 0.0f);
+                    break;
+                case 2:
+                    sample = new Vector2(d, 0.0f);
+                    break;
+                case 3:
+                    sample = new Vector2(-r, -s);
+                    break;
+                case 4:
+                    sample = new Vector2(r, s);
+                    break;
+                case 5:
+                    sample = new Vector2(r, -s);
+                    break;
+                case 6:
+                    sample = new Vector2(-r, s);
+                    break;
+            }
+
+            const float cos15 = 0.9659258262890683f;
+            const float sin15 = 0.25881904510252074f;
+            var rotated = new Vector2(
+                sample.x * cos15 - sample.y * sin15,
+                sample.x * sin15 + sample.y * cos15);
+            return new Vector4(rotated.x, rotated.y, ResolveVBufferZSampleOffset(sampleIndex), frameIndex);
+        }
+
+        private static float ResolveVBufferZSampleOffset(int sampleIndex)
+        {
+            switch (sampleIndex)
+            {
+                case 1:
+                    return 3.0f / 14.0f;
+                case 2:
+                    return 11.0f / 14.0f;
+                case 3:
+                    return 5.0f / 14.0f;
+                case 4:
+                    return 9.0f / 14.0f;
+                case 5:
+                    return 1.0f / 14.0f;
+                case 6:
+                    return 13.0f / 14.0f;
+                default:
+                    return 7.0f / 14.0f;
+            }
         }
 
         private void PrepareClusteredLightingParameters(ContextContainer frameData)

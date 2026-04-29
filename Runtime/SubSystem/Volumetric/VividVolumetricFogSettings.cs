@@ -16,6 +16,7 @@ namespace VividRP.Runtime
             float depthExtent,
             float sliceDistributionUniformity,
             VividVolumetricFogDenoisingMode denoisingMode,
+            bool temporalReprojectionEnabled,
             bool directionalLightsOnly,
             float densityCutoff,
             VBufferParameters vBufferParameters)
@@ -30,6 +31,7 @@ namespace VividRP.Runtime
             DepthExtent = depthExtent;
             SliceDistributionUniformity = sliceDistributionUniformity;
             DenoisingMode = denoisingMode;
+            TemporalReprojectionEnabled = temporalReprojectionEnabled;
             DirectionalLightsOnly = directionalLightsOnly;
             DensityCutoff = densityCutoff;
             VBufferParameters = vBufferParameters;
@@ -45,11 +47,14 @@ namespace VividRP.Runtime
         public float DepthExtent { get; }
         public float SliceDistributionUniformity { get; }
         public VividVolumetricFogDenoisingMode DenoisingMode { get; }
+        public bool TemporalReprojectionEnabled { get; }
         public bool DirectionalLightsOnly { get; }
         public float DensityCutoff { get; }
         public VBufferParameters VBufferParameters { get; }
 
-        public bool GaussianFilteringEnabled => Enabled && DenoisingMode == VividVolumetricFogDenoisingMode.Gaussian;
+        public bool GaussianFilteringEnabled => Enabled
+            && (DenoisingMode == VividVolumetricFogDenoisingMode.Gaussian
+                || DenoisingMode == VividVolumetricFogDenoisingMode.Both);
 
         public static VividVolumetricFogSettings Disabled(int cameraWidth, int cameraHeight)
         {
@@ -72,6 +77,7 @@ namespace VividRP.Runtime
                 VividVolumetricFogVolume.DefaultDepthExtent,
                 0.0f,
                 VividVolumetricFogDenoisingMode.None,
+                false,
                 false,
                 0.0f,
                 vBuffer);
@@ -279,6 +285,7 @@ namespace VividRP.Runtime
                 volume.depthExtent.value,
                 volume.sliceDistributionUniformity.value,
                 volume.denoisingMode.value,
+                UsesTemporalReprojection(volume.denoisingMode.value),
                 volume.directionalLightsOnly.value,
                 volume.volumetricLightingDensityCutoff.value,
                 vBuffer);
@@ -319,6 +326,12 @@ namespace VividRP.Runtime
                 (int)Mathf.Lerp(1.0f, maxSliceCount, budget),
                 VividVolumetricFogVolume.MinVolumeSliceCount,
                 VividVolumetricFogVolume.MaxVolumeSliceCount);
+        }
+
+        internal static bool UsesTemporalReprojection(VividVolumetricFogDenoisingMode denoisingMode)
+        {
+            return denoisingMode == VividVolumetricFogDenoisingMode.Reprojection
+                || denoisingMode == VividVolumetricFogDenoisingMode.Both;
         }
 
         internal static VBufferParameters ComputeVBufferParameters(

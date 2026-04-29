@@ -38,6 +38,134 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void VividVolumetricFogVolume_DefaultsMatchHdrpFogPanel()
+        {
+            var fog = ScriptableObject.CreateInstance<VividVolumetricFogVolume>();
+
+            try
+            {
+                Assert.That(fog.meanFreePath.value, Is.EqualTo(VividVolumetricFogVolume.DefaultMeanFreePath));
+                Assert.That(fog.maximumHeight.value, Is.EqualTo(500.0f));
+                Assert.That(fog.maxFogDistance.value, Is.EqualTo(VividVolumetricFogVolume.DefaultMaxFogDistance));
+                Assert.That(fog.volumetricFog.value, Is.True);
+                Assert.That(fog.globalLightProbeDimmer.value, Is.EqualTo(0.0f));
+                Assert.That(fog.depthExtent.value, Is.EqualTo(VividVolumetricFogVolume.DefaultDepthExtent));
+                Assert.That(fog.denoisingMode.value, Is.EqualTo(VividVolumetricFogDenoisingMode.Both));
+                Assert.That(fog.sliceDistributionUniformity.value, Is.EqualTo(1.0f));
+                Assert.That(fog.volumetricFogBudget.value, Is.EqualTo(VividVolumetricFogVolume.DefaultVolumetricFogBudget));
+                Assert.That(fog.volumetricLightingDensityCutoff.value, Is.EqualTo(0.0f));
+                Assert.That(fog.multipleScatteringIntensity.value, Is.EqualTo(0.0f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(fog);
+            }
+        }
+
+        [Test]
+        public void VividVolumetricFogVolumeEditor_UsesCustomEditor()
+        {
+            var fog = ScriptableObject.CreateInstance<VividVolumetricFogVolume>();
+            UnityEditor.Editor editor = null;
+
+            try
+            {
+                editor = UnityEditor.Editor.CreateEditor(fog);
+
+                Assert.That(editor, Is.Not.Null);
+                Assert.That(editor.GetType().Name, Is.EqualTo("VividVolumetricFogVolumeEditor"));
+            }
+            finally
+            {
+                if (editor != null)
+                    Object.DestroyImmediate(editor);
+
+                Object.DestroyImmediate(fog);
+            }
+        }
+
+        [Test]
+        public void VividVolumetricFogVolumeEditor_OnEnable_InitializesSerializedParameters()
+        {
+            var fog = ScriptableObject.CreateInstance<VividVolumetricFogVolume>();
+            UnityEditor.Editor editor = null;
+
+            try
+            {
+                editor = UnityEditor.Editor.CreateEditor(fog);
+
+                var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+                var editorType = editor.GetType();
+                Assert.That(editorType.GetField("m_Enabled", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_MeanFreePath", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_BaseHeight", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_MaximumHeight", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_MaxFogDistance", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_ColorMode", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_Tint", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_MipFogNear", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_MipFogFar", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_MipFogMaxMip", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_VolumetricFog", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_Albedo", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_GlobalLightProbeDimmer", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_DepthExtent", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_Tier", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_FogControlMode", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_VolumetricFogBudget", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_ScreenResolutionPercentage", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_DenoisingMode", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_DirectionalLightsOnly", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_Anisotropy", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_VolumetricLightingDensityCutoff", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_MultipleScatteringIntensity", flags)?.GetValue(editor), Is.Not.Null);
+            }
+            finally
+            {
+                if (editor != null)
+                    Object.DestroyImmediate(editor);
+
+                Object.DestroyImmediate(fog);
+            }
+        }
+
+        [Test]
+        public void VividVolumetricFogVolumeEditor_SourceUsesHdrpStyleSectionsAndQualityModes()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Editor", "VolumeEditor", "VividVolumetricFogVolumeEditor.cs"));
+
+            Assert.That(source, Does.Contain("[CustomEditor(typeof(VividVolumetricFogVolume))]"));
+            Assert.That(source, Does.Contain("PropertyFetcher<VividVolumetricFogVolume>"));
+            Assert.That(source, Does.Contain("PropertyField(m_Enabled, s_StateLabel);"));
+            Assert.That(source, Does.Not.Contain("DrawStateField"));
+            Assert.That(source, Does.Not.Contain("EditorGUI.IntPopup"));
+            Assert.That(source, Does.Contain("Fog Attenuation Distance"));
+            Assert.That(source, Does.Contain("Max Fog Distance"));
+            Assert.That(source, Does.Contain("Volumetric Fog Distance"));
+            Assert.That(source, Does.Contain("GI Dimmer"));
+            Assert.That(source, Does.Contain("ShouldDisableColorModeSettings"));
+            Assert.That(source, Does.Contain("ShouldDisableVolumetricSettings"));
+            Assert.That(source, Does.Contain("ShouldShowBalanceQualitySettings"));
+            Assert.That(source, Does.Contain("ShouldShowManualQualitySettings"));
+            Assert.That(source, Does.Contain("PropertyField(m_DenoisingMode);"));
+            Assert.That(source, Does.Contain("PropertyField(m_Tier);"));
+            Assert.That(source, Does.Contain("PropertyField(m_MultipleScatteringIntensity);"));
+            Assert.That(source, Does.Contain("Maximum Height is clamped above Base Height at runtime."));
+        }
+
+        [Test]
+        public void VividVolumetricFogDenoisingMode_UsesHdrpPanelOptions()
+        {
+            Assert.That((int)VividVolumetricFogDenoisingMode.None, Is.EqualTo(0));
+            Assert.That((int)VividVolumetricFogDenoisingMode.Gaussian, Is.EqualTo(1));
+            Assert.That((int)VividVolumetricFogDenoisingMode.Reprojection, Is.EqualTo(2));
+            Assert.That((int)VividVolumetricFogDenoisingMode.Both, Is.EqualTo(3));
+            Assert.That(VividVolumetricUtility.UsesTemporalReprojection(VividVolumetricFogDenoisingMode.Reprojection), Is.True);
+            Assert.That(VividVolumetricUtility.UsesTemporalReprojection(VividVolumetricFogDenoisingMode.Both), Is.True);
+            Assert.That(VividVolumetricUtility.UsesTemporalReprojection(VividVolumetricFogDenoisingMode.Gaussian), Is.False);
+        }
+
+        [Test]
         public void ResolveQuality_UsesManualResolutionAndSlices_WhenManual()
         {
             var fog = ScriptableObject.CreateInstance<VividVolumetricFogVolume>();
@@ -167,6 +295,7 @@ namespace VividRP.Editor.Tests
                 100.0f,
                 0.5f,
                 VividVolumetricFogDenoisingMode.None,
+                true,
                 false,
                 0.0f,
                 vBuffer);
@@ -205,6 +334,7 @@ namespace VividRP.Editor.Tests
                 100.0f,
                 0.5f,
                 VividVolumetricFogDenoisingMode.None,
+                true,
                 false,
                 -1.0f,
                 vBuffer);
@@ -466,7 +596,9 @@ namespace VividRP.Editor.Tests
                 "VBufferMaxZ",
                 "VBufferDensity",
                 "VBufferLighting",
-                "VBufferLightingFiltered"
+                "VBufferLightingFiltered",
+                "VBufferHistory",
+                "VBufferFeedback"
             }));
             Assert.That(resources.Buffers.Select(entry => entry.Name), Is.EquivalentTo(new[]
             {
@@ -486,6 +618,8 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferLighting").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferLightingFiltered").Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferLightingFiltered").IsTransient, Is.True);
+            Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferHistory").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferFeedback").Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(resources.Buffers.Single(entry => entry.Name == "BigTileLightList").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(resources.Buffers.Single(entry => entry.Name == "BigTileVolumetricLightList").Access, Is.EqualTo(AccessFlags.Read));
         }
@@ -605,6 +739,10 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("#pragma kernel VolumetricLighting"));
             Assert.That(lightingSource, Does.Contain("#pragma kernel FilterVolumetricLighting"));
             Assert.That(lightingSource, Does.Contain("Texture2D<float> _VBufferMaxZ"));
+            Assert.That(lightingSource, Does.Contain("Texture3D<float4> _VBufferHistory"));
+            Assert.That(lightingSource, Does.Contain("RWTexture3D<float4> _VBufferFeedback"));
+            Assert.That(lightingSource, Does.Contain("uint _VBufferHistoryIsValid"));
+            Assert.That(lightingSource, Does.Contain("float4 _VBufferSampleOffset"));
             Assert.That(lightingSource, Does.Contain("float _VBufferMaxZEnabled"));
             Assert.That(lightingSource, Does.Contain("GetVBufferMaxOpaqueGeometryDistance"));
             Assert.That(lightingSource, Does.Contain("_VBufferMaxZ.GetDimensions"));
@@ -624,6 +762,11 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("ray.yDirDerivWS"));
             Assert.That(lightingSource, Does.Contain("GetVBufferJitteredRayStartDistance"));
             Assert.That(lightingSource, Does.Contain("GetVBufferOpaqueGeometryDistanceForRay"));
+            Assert.That(lightingSource, Does.Contain("ComputeHistoryWeight"));
+            Assert.That(lightingSource, Does.Contain("SampleVBufferHistory"));
+            Assert.That(lightingSource, Does.Contain("mul(_PrevViewProjMatrix, float4(positionWS, 1.0))"));
+            Assert.That(lightingSource, Does.Contain("distance(positionWS, _VBufferPrevCameraPositionWS.xyz)"));
+            Assert.That(lightingSource, Does.Contain("EncodeLogarithmicDepthGeneralized(linearDistance, _VBufferPrevDepthEncodingParams)"));
             Assert.That(lightingSource, Does.Contain("FillVolumetricLightingBuffer"));
             Assert.That(lightingSource, Does.Contain("uint2 groupId : SV_GroupID"));
             Assert.That(lightingSource, Does.Contain("uint2 groupThreadId : SV_GroupThreadID"));
@@ -634,8 +777,14 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("float extinction = max(density.a, 0.0)"));
             Assert.That(lightingSource, Does.Contain("voxelOpticalDepth = extinction * dt"));
             Assert.That(lightingSource, Does.Contain("float perPixelRandomOffset = GenerateVBufferRandom(vBufferPixel)"));
+            Assert.That(lightingSource, Does.Contain("float rndVal = frac(perPixelRandomOffset + _VBufferSampleOffset.z)"));
             Assert.That(lightingSource, Does.Contain("ImportanceSampleHomogeneousMedium(rndVal, extinction, dt"));
             Assert.That(lightingSource, Does.Contain("float3 sampleWS = ray.originWS + t * ray.jitterDirWS"));
+            Assert.That(lightingSource, Does.Contain("LinearizeRGBD(voxelValue)"));
+            Assert.That(lightingSource, Does.Contain("DelinearizeRGBD(normalizedBlendValue * dt)"));
+            Assert.That(lightingSource, Does.Contain("StoreVBufferFeedback(voxelCoord, normalizedBlendValue)"));
+            Assert.That(lightingSource, Does.Contain("normalizedBlendValue = lerp(normalizedVoxelValue, reprojValue, ComputeHistoryWeight())"));
+            Assert.That(lightingSource, Does.Contain("SafeDiv(aggregate.radianceComplete.r, aggregate.radianceNoPhase.r)"));
             Assert.That(lightingSource, Does.Contain("TransmittanceIntegralHomogeneousMedium"));
             Assert.That(lightingSource, Does.Contain("totalRadiance += transmittanceToSlice * scattering"));
             Assert.That(lightingSource, Does.Not.Contain("totalRadiance += transmittanceToSlice * density.rgb"));
@@ -674,7 +823,7 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("float lightSqRadius = max(max(light.shapeRadiusSquared, voxelArcLength), 1e-4)"));
             Assert.That(lightingSource, Does.Contain("t = originToLightProjDist + tRelative"));
             Assert.That(lightingSource, Does.Contain("float weight = TransmittanceHomogeneousMedium(extinction, max(t - t0, 0.0)) * rcpPdf"));
-            Assert.That(lightingSource, Does.Contain("phaseConstant * aggregate.radianceComplete + probeRadiance"));
+            Assert.That(lightingSource, Does.Contain("phaseConstant * lightingRadiance + probeRadiance"));
             Assert.That(lightingSource, Does.Not.Contain("EvaluateClusteredPunctualLighting"));
             Assert.That(lightingSource, Does.Contain("#define VBUFFER_FILTER_GAUSSIAN_SIGMA 1.0"));
             Assert.That(lightingSource, Does.Contain("#define VBUFFER_FILTER_SIZE_1D (VBUFFER_FILTER_GROUP_SIZE_XY + 2)"));
@@ -708,9 +857,20 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingPassSource, Does.Contain("cmd.DispatchCompute(m_Shader, m_LightingKernel, m_DispatchX, m_DispatchY, 1)"));
             Assert.That(lightingPassSource, Does.Contain("VBufferMaxZId = Shader.PropertyToID(\"_VBufferMaxZ\")"));
             Assert.That(lightingPassSource, Does.Contain("VBufferMaxZEnabledId = Shader.PropertyToID(\"_VBufferMaxZEnabled\")"));
+            Assert.That(lightingPassSource, Does.Contain("VBufferHistoryId = Shader.PropertyToID(\"_VBufferHistory\")"));
+            Assert.That(lightingPassSource, Does.Contain("VBufferFeedbackId = Shader.PropertyToID(\"_VBufferFeedback\")"));
+            Assert.That(lightingPassSource, Does.Contain("VBufferHistoryIsValidId = Shader.PropertyToID(\"_VBufferHistoryIsValid\")"));
+            Assert.That(lightingPassSource, Does.Contain("VBufferSampleOffsetId = Shader.PropertyToID(\"_VBufferSampleOffset\")"));
             Assert.That(lightingPassSource, Does.Contain("ReferenceEquals(m_VBufferMaxZ, m_LocalVBufferMaxZ)"));
             Assert.That(lightingPassSource, Does.Contain("VolumetricMaxZPass.MaxZTileSize"));
             Assert.That(lightingPassSource, Does.Contain("BindVBufferMaxZ(context, cmd, kernel)"));
+            Assert.That(lightingPassSource, Does.Contain("Name = \"VBufferHistory\", Access = AccessFlags.Read"));
+            Assert.That(lightingPassSource, Does.Contain("Name = \"VBufferFeedback\", Access = AccessFlags.ReadWrite"));
+            Assert.That(lightingPassSource, Does.Contain("PrepareVBufferHistory"));
+            Assert.That(lightingPassSource, Does.Contain("AllocHistoryTexture("));
+            Assert.That(lightingPassSource, Does.Contain("m_Settings.TemporalReprojectionEnabled"));
+            Assert.That(lightingPassSource, Does.Contain("ComputeVBufferSampleOffset"));
+            Assert.That(lightingPassSource, Does.Contain("ResolvePreviousCameraPositionWS"));
             Assert.That(lightingPassSource, Does.Contain("FilterKernelName = \"FilterVolumetricLighting\""));
             Assert.That(lightingPassSource, Does.Contain("m_FilterDispatchZ = Mathf.Max(m_Settings.VBufferParameters.SliceCount, 1)"));
             Assert.That(lightingPassSource, Does.Contain("cmd.DispatchCompute(m_Shader, m_FilterKernel, m_DispatchX, m_DispatchY, m_FilterDispatchZ)"));

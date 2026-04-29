@@ -189,7 +189,7 @@ namespace VividRP.Editor.Tests
             Assert.That(hlslSource, Does.Contain("#include \"ShaderVariablesAtmosphericScattering.hlsl\""));
             Assert.That(hlslSource, Does.Contain("TEXTURE2D_X(_InputColor);"));
             Assert.That(hlslSource, Does.Contain("TEXTURE2D_X_FLOAT(_DepthTexture);"));
-            Assert.That(hlslSource, Does.Contain("Texture3D<float4> _VBufferLighting;"));
+            Assert.That(hlslSource, Does.Contain("TEXTURE3D(_VBufferLighting);"));
             Assert.That(hlslSource, Does.Contain("float4 _SkyFogParams;"));
             Assert.That(hlslSource, Does.Contain("float _VolumetricEnabled;"));
             Assert.That(hlslSource, Does.Contain("float3 GetViewForwardDir()"));
@@ -214,8 +214,13 @@ namespace VividRP.Editor.Tests
             Assert.That(hlslSource, Does.Contain("bool hasAtmosphericDistance = _SkyFogParams.x > 0.5f"));
             Assert.That(hlslSource, Does.Contain("float vBufferLightingDistance = ResolveVBufferLightingDistance(positionNDC, deviceDepth, hasAtmosphericDistance, tFrag);"));
             Assert.That(hlslSource, Does.Contain("EvaluateAtmosphericScattering(-V, positionNDC, tFrag, fogColor, fogOpacity);"));
-            Assert.That(hlslSource, Does.Contain("float3 vBufferUVW = GetVBufferUVW(positionNDC, linearDistance);"));
-            Assert.That(hlslSource, Does.Contain("float4 lighting = _VBufferLighting.SampleLevel(sampler_LinearClamp, vBufferUVW, 0);"));
+            Assert.That(hlslSource, Does.Contain("bool doBiquadraticReconstruction = _VBufferGaussianFiltering <= 0.5f;"));
+            Assert.That(hlslSource, Does.Contain("float4 lighting = SampleVBuffer("));
+            Assert.That(hlslSource, Does.Contain("TEXTURE3D_ARGS(_VBufferLighting, sampler_LinearClamp),"));
+            Assert.That(hlslSource, Does.Contain("_VBufferLightingViewportScale3,"));
+            Assert.That(hlslSource, Does.Contain("_VBufferLightingViewportLimit3,"));
+            Assert.That(hlslSource, Does.Not.Contain("float3 vBufferUVW = GetVBufferUVW(positionNDC, linearDistance);"));
+            Assert.That(hlslSource, Does.Not.Contain("_VBufferLighting.SampleLevel(sampler_LinearClamp"));
             Assert.That(hlslSource, Does.Contain("return float4(inputColor.rgb * saturate(lighting.a) + lighting.rgb, inputColor.a);"));
             Assert.That(hlslSource, Does.Contain("float3 SanitizeSkyRadiance(float3 color)"));
             Assert.That(hlslSource, Does.Contain("if (!hasAtmosphericDistance)"));

@@ -385,6 +385,16 @@ namespace VividRP.Runtime
                     Mathf.Max(cameraHeight, 1) / (float)Mathf.Max(vBuffer.ViewportHeight, 1),
                     vBuffer.RcpViewportWidth,
                     vBuffer.RcpViewportHeight),
+                _VBufferLightingViewportScale = new Vector4(
+                    ComputeViewportScale(vBuffer.ViewportWidth, vBuffer.ViewportWidth),
+                    ComputeViewportScale(vBuffer.ViewportHeight, vBuffer.ViewportHeight),
+                    ComputeViewportScale(vBuffer.SliceCount, vBuffer.SliceCount),
+                    0.0f),
+                _VBufferLightingViewportLimit = new Vector4(
+                    ComputeViewportLimit(vBuffer.ViewportWidth, vBuffer.ViewportWidth),
+                    ComputeViewportLimit(vBuffer.ViewportHeight, vBuffer.ViewportHeight),
+                    ComputeViewportLimit(vBuffer.SliceCount, vBuffer.SliceCount),
+                    0.0f),
                 _VBufferDepthEncodingParams = vBuffer.DepthEncodingParams,
                 _VBufferDepthDecodingParams = vBuffer.DepthDecodingParams,
                 _VBufferGeometryParams = new Vector4(
@@ -422,6 +432,16 @@ namespace VividRP.Runtime
                 return 2;
 
             return ratio < 0.5f ? 1 : 0;
+        }
+
+        internal static float ComputeViewportScale(int viewportSize, int bufferSize)
+        {
+            return Mathf.Max(viewportSize, 1) / (float)Mathf.Max(bufferSize, 1);
+        }
+
+        internal static float ComputeViewportLimit(int viewportSize, int bufferSize)
+        {
+            return (Mathf.Max(viewportSize, 1) - 0.5f) / Mathf.Max(bufferSize, 1);
         }
 
         internal static float ComputeEffectiveDensityCutoff(float densityCutoff)

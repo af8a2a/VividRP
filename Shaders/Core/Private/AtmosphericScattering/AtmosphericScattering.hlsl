@@ -18,7 +18,7 @@
 
 TEXTURE2D_X(_InputColor);
 TEXTURE2D_X_FLOAT(_DepthTexture);
-Texture3D<float4> _VBufferLighting;
+TEXTURE3D(_VBufferLighting);
 
 float4 _SkyFogParams;
 float _VolumetricEnabled;
@@ -175,8 +175,20 @@ float4 CompositeVBufferLighting(float4 inputColor, float2 positionNDC, float lin
     if (_VolumetricEnabled <= 0.5f)
         return inputColor;
 
-    float3 vBufferUVW = GetVBufferUVW(positionNDC, linearDistance);
-    float4 lighting = _VBufferLighting.SampleLevel(sampler_LinearClamp, vBufferUVW, 0);
+    bool doBiquadraticReconstruction = _VBufferGaussianFiltering <= 0.5f;
+    float4 lighting = SampleVBuffer(
+        TEXTURE3D_ARGS(_VBufferLighting, sampler_LinearClamp),
+        positionNDC,
+        linearDistance,
+        _VBufferViewportSize,
+        _VBufferRcpViewportSize,
+        _VBufferLightingViewportScale3,
+        _VBufferLightingViewportLimit3,
+        _VBufferDepthEncodingParams,
+        _VBufferDepthDecodingParams,
+        true,
+        doBiquadraticReconstruction,
+        false);
     return float4(inputColor.rgb * saturate(lighting.a) + lighting.rgb, inputColor.a);
 }
 

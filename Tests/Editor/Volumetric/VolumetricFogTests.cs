@@ -128,6 +128,12 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(shaderVariables._VBufferDepthEncodingParams, Is.EqualTo(vBuffer.DepthEncodingParams));
                 Assert.That(shaderVariables._VBufferDepthDecodingParams, Is.EqualTo(vBuffer.DepthDecodingParams));
+                Assert.That(shaderVariables._VBufferLightingViewportScale.x, Is.EqualTo(1.0f).Within(0.0001f));
+                Assert.That(shaderVariables._VBufferLightingViewportScale.y, Is.EqualTo(1.0f).Within(0.0001f));
+                Assert.That(shaderVariables._VBufferLightingViewportScale.z, Is.EqualTo(1.0f).Within(0.0001f));
+                Assert.That(shaderVariables._VBufferLightingViewportLimit.x, Is.EqualTo((vBuffer.ViewportWidth - 0.5f) / vBuffer.ViewportWidth).Within(0.0001f));
+                Assert.That(shaderVariables._VBufferLightingViewportLimit.y, Is.EqualTo((vBuffer.ViewportHeight - 0.5f) / vBuffer.ViewportHeight).Within(0.0001f));
+                Assert.That(shaderVariables._VBufferLightingViewportLimit.z, Is.EqualTo((vBuffer.SliceCount - 0.5f) / vBuffer.SliceCount).Within(0.0001f));
                 Assert.That(shaderVariables._VBufferGeometryParams.x, Is.EqualTo(vBuffer.UnitDepthTexelSpacing).Within(0.0001f));
                 Assert.That(shaderVariables._VBufferGeometryParams.z, Is.EqualTo(vBuffer.LastSliceDistance).Within(0.0001f));
                 Assert.That(shaderVariables._VBufferGeometryParams.w, Is.EqualTo(0.0f).Within(0.0001f));
@@ -485,23 +491,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VolumetricFogCompositePass_InitializesCompositePorts()
-        {
-            IRenderPass renderPass = new VolumetricFogCompositePass();
-
-            var resources = renderPass.Initialize();
-
-            Assert.That(resources.Textures.Select(entry => entry.Name), Is.EquivalentTo(new[]
-            {
-                "CameraDepth",
-                "Color",
-                "OutputColor",
-                "VBufferLighting"
-            }));
-            Assert.That(resources.Textures.Single(entry => entry.Name == "OutputColor").Access, Is.EqualTo(AccessFlags.Write));
-        }
-
-        [Test]
         public void VolumetricDensityPass_Prepare_ConfiguresThreeDimensionalVBuffer()
         {
             var pass = new VolumetricDensityPass();
@@ -524,14 +513,13 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void BuildRegistrations_IncludesVolumetricPasses()
+        public void BuildRegistrations_IncludesActiveVolumetricPasses()
         {
             var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(new[]
             {
                 typeof(VolumetricDensityPass),
                 typeof(VolumetricMaxZPass),
-                typeof(VolumetricLightingPass),
-                typeof(VolumetricFogCompositePass)
+                typeof(VolumetricLightingPass)
             });
 
             var nodeNames = registrations.Select(registration => registration.NodeClassName).ToArray();
@@ -539,7 +527,6 @@ namespace VividRP.Editor.Tests
             Assert.That(nodeNames, Does.Contain(nameof(VolumetricDensityPass)));
             Assert.That(nodeNames, Does.Contain(nameof(VolumetricMaxZPass)));
             Assert.That(nodeNames, Does.Contain(nameof(VolumetricLightingPass)));
-            Assert.That(nodeNames, Does.Contain(nameof(VolumetricFogCompositePass)));
         }
 
         [Test]
@@ -550,7 +537,6 @@ namespace VividRP.Editor.Tests
             var materialSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Volumetric", "VolumetricMaterial.compute"));
             var localVoxelizeSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Volumetric", "LocalVolumetricFogVoxelize.shader"));
             var lightingSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Volumetric", "VolumetricLighting.compute"));
-            var compositeSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Volumetric", "VolumetricFogComposite.shader"));
             var densityPassSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Volumetric", "VolumetricDensityPass.cs"));
             var localFogSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Volumetric", "VividLocalVolumetricFog.cs"));
             var localFogManagerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Volumetric", "VividLocalVolumetricFogManager.cs"));
@@ -674,9 +660,8 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Not.Contain("for (int z = -1; z <= 1; z++)"));
             Assert.That(lightingSource, Does.Contain("if (hasMaxZ && t0 * 0.99 > maxOpaqueGeometryDistance)"));
             Assert.That(lightingSource, Does.Contain("break;"));
-            Assert.That(compositeSource, Does.Contain("Hidden/VividRP/VolumetricFogComposite"));
-            Assert.That(compositeSource, Does.Contain("_VBufferLighting"));
-            Assert.That(compositeSource, Does.Contain("GetVBufferLinearDistanceFromDeviceDepth"));
+            Assert.That(File.Exists(GetPackageFilePath("Runtime", "RenderPass", "Core", "Volumetric", "VolumetricFogCompositePass.cs")), Is.False);
+            Assert.That(File.Exists(GetPackageFilePath("Shaders", "Core", "Private", "Volumetric", "VolumetricFogComposite.shader")), Is.False);
             Assert.That(densityPassSource, Does.Contain("UnsafePass, IAllowGlobalStateModificationPass"));
             Assert.That(densityPassSource, Does.Contain("FogVolumeVoxelize"));
             Assert.That(densityPassSource, Does.Contain("VolumetricFogVFX"));
@@ -744,8 +729,15 @@ namespace VividRP.Editor.Tests
             Assert.That(vBufferSource, Does.Contain("_VBufferDepthDecodingParams"));
             Assert.That(vBufferSource, Does.Contain("_VBufferIsOrthographic"));
             Assert.That(vBufferSource, Does.Contain("IsVBufferFarDepth"));
+            Assert.That(vBufferSource, Does.Contain("float4 SampleVBuffer(TEXTURE3D_PARAM(VBuffer, clampSampler)"));
+            Assert.That(vBufferSource, Does.Contain("BiquadraticFilter(1.0 - fc, weights, offsets)"));
+            Assert.That(vBufferSource, Does.Contain("vBufferViewportScale.xy * vBufferRcpViewportSize"));
+            Assert.That(vBufferSource, Does.Contain("_VBufferLightingViewportScale3"));
+            Assert.That(vBufferSource, Does.Contain("_VBufferLightingViewportLimit3"));
 
             var volumetricVariablesSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Volumetric", "ShaderVariablesVolumetric.hlsl"));
+            Assert.That(volumetricVariablesSource, Does.Contain("_VBufferLightingViewportScale"));
+            Assert.That(volumetricVariablesSource, Does.Contain("_VBufferLightingViewportLimit"));
             Assert.That(volumetricVariablesSource, Does.Contain("_VBufferMaxZDilationRadius"));
         }
 
@@ -772,8 +764,6 @@ namespace VividRP.Editor.Tests
                 "Shaders/Core/Private/Volumetric/LocalVolumetricFogVoxelize"));
             Assert.That(GetResourcePath(nameof(VividRPCoreResources.VolumetricLightingCompute)), Is.EqualTo(
                 "Shaders/Core/Private/Volumetric/VolumetricLighting.compute"));
-            Assert.That(GetResourcePath(nameof(VividRPCoreResources.VolumetricFogCompositeShader)), Is.EqualTo(
-                "Shaders/Core/Private/Volumetric/VolumetricFogComposite"));
         }
 
         private static string GetResourcePath(string fieldName)

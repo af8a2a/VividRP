@@ -5,6 +5,8 @@ CBUFFER_START(ShaderVariablesVolumetric)
     float4x4 _VBufferCoordToViewDirWS;
     float4 _VBufferViewportSize;
     float4 _VBufferViewportScale;
+    float4 _VBufferLightingViewportScale;
+    float4 _VBufferLightingViewportLimit;
     float4 _VBufferDepthEncodingParams;
     float4 _VBufferDepthDecodingParams;
     float4 _VBufferGeometryParams;
@@ -20,6 +22,8 @@ CBUFFER_END
 #define _VBufferRcpSliceCount          _VBufferViewportSize.w
 #define _VBufferCameraToVBufferScale   _VBufferViewportScale.xy
 #define _VBufferRcpViewportSize        _VBufferViewportScale.zw
+#define _VBufferLightingViewportScale3 _VBufferLightingViewportScale.xyz
+#define _VBufferLightingViewportLimit3 _VBufferLightingViewportLimit.xyz
 #define _VBufferUnitDepthTexelSpacing  _VBufferGeometryParams.x
 #define _VBufferVoxelSize              _VBufferGeometryParams.y
 #define _VBufferLastSliceDistance      _VBufferGeometryParams.z

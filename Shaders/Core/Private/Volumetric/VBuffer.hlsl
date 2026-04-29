@@ -3,6 +3,7 @@
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/ShaderVariablesVolumetric.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Filtering.hlsl"
 //has been define in Common.hlsl
 // float EncodeLogarithmicDepthGeneralized(float distance, float4 encodingParams)
 // {
@@ -13,6 +14,66 @@
 // {
 //     return decodingParams.x * exp2(encodedDepth * decodingParams.y) + decodingParams.z;
 // }
+
+float4 SampleVBuffer(TEXTURE3D_PARAM(VBuffer, clampSampler),
+                     float2 positionNDC,
+                     float linearDistance,
+                     float4 vBufferViewportSize,
+                     float2 vBufferRcpViewportSize,
+                     float3 vBufferViewportScale,
+                     float3 vBufferViewportLimit,
+                     float4 vBufferDepthEncodingParams,
+                     float4 vBufferDepthDecodingParams,
+                     bool biasLookup,
+                     bool quadraticFilterXY,
+                     bool clampToBorder)
+{
+    float2 uv = positionNDC;
+    float w = EncodeLogarithmicDepthGeneralized(linearDistance, vBufferDepthEncodingParams);
+
+    if (biasLookup)
+        w -= (sqrt(3.0) * 0.5) * _VBufferRcpSliceCount;
+
+    bool coordIsInsideFrustum = true;
+    if (clampToBorder)
+    {
+        float3 positionCS = float3(uv, w) * 2.0 - 1.0;
+        coordIsInsideFrustum = max(max(abs(positionCS.x), abs(positionCS.y)), abs(positionCS.z)) < 1.0;
+    }
+
+    float4 result = 0.0;
+    if (coordIsInsideFrustum)
+    {
+        if (quadraticFilterXY)
+        {
+            float2 xy = uv * vBufferViewportSize.xy;
+            float2 ic = floor(xy);
+            float2 fc = frac(xy);
+
+            float2 weights[2], offsets[2];
+            BiquadraticFilter(1.0 - fc, weights, offsets);
+
+            float2 rcpBufferDim = vBufferViewportScale.xy * vBufferRcpViewportSize;
+            float2 texUv0 = (ic + float2(offsets[0].x, offsets[0].y)) * rcpBufferDim;
+            float2 texUv1 = (ic + float2(offsets[1].x, offsets[0].y)) * rcpBufferDim;
+            float2 texUv2 = (ic + float2(offsets[0].x, offsets[1].y)) * rcpBufferDim;
+            float2 texUv3 = (ic + float2(offsets[1].x, offsets[1].y)) * rcpBufferDim;
+            float texW = w * vBufferViewportScale.z;
+
+            result = (weights[0].x * weights[0].y) * SAMPLE_TEXTURE3D_LOD(VBuffer, clampSampler, min(float3(texUv0, texW), vBufferViewportLimit), 0)
+                   + (weights[1].x * weights[0].y) * SAMPLE_TEXTURE3D_LOD(VBuffer, clampSampler, min(float3(texUv1, texW), vBufferViewportLimit), 0)
+                   + (weights[0].x * weights[1].y) * SAMPLE_TEXTURE3D_LOD(VBuffer, clampSampler, min(float3(texUv2, texW), vBufferViewportLimit), 0)
+                   + (weights[1].x * weights[1].y) * SAMPLE_TEXTURE3D_LOD(VBuffer, clampSampler, min(float3(texUv3, texW), vBufferViewportLimit), 0);
+        }
+        else
+        {
+            float3 texUVW = float3(uv, w) * vBufferViewportScale;
+            result = SAMPLE_TEXTURE3D_LOD(VBuffer, clampSampler, min(texUVW, vBufferViewportLimit), 0);
+        }
+    }
+
+    return result;
+}
 
 float GetVBufferSliceDistance(float sliceCoord)
 {

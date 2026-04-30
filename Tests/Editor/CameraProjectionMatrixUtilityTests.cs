@@ -86,6 +86,107 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CaptureProjectionState_TreatsParameterDrivenExplicitProjectionWithStaleFarClip_AsImplicit()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            camera.aspect = 16.0f / 9.0f;
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 20.0f;
+            camera.fieldOfView = 50.0f;
+
+            var staleProjection = Matrix4x4.Perspective(
+                camera.fieldOfView,
+                camera.aspect,
+                camera.nearClipPlane,
+                camera.farClipPlane);
+            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, staleProjection, staleProjection);
+
+            camera.farClipPlane = 1000.0f;
+
+            var state = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
+            var projection = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+            var expectedProjection = Matrix4x4.Perspective(
+                camera.fieldOfView,
+                camera.aspect,
+                camera.nearClipPlane,
+                camera.farClipPlane);
+
+            Assert.That(state.Mode, Is.EqualTo(CameraProjectionMatrixUtility.CameraProjectionStateMode.Implicit));
+            Assert.That(MaxAbsDiff(projection, expectedProjection), Is.LessThan(0.0001f));
+            Assert.That(MaxAbsDiff(projection, staleProjection), Is.GreaterThan(0.001f));
+        }
+
+        [Test]
+        public void CaptureProjectionState_TreatsParameterDrivenExplicitProjectionWithStaleNearClip_AsImplicit()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            camera.aspect = 16.0f / 9.0f;
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 1000.0f;
+            camera.fieldOfView = 50.0f;
+
+            var staleProjection = Matrix4x4.Perspective(
+                camera.fieldOfView,
+                camera.aspect,
+                camera.nearClipPlane,
+                camera.farClipPlane);
+            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, staleProjection, staleProjection);
+
+            camera.nearClipPlane = 1.0f;
+
+            var state = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
+            var projection = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+            var expectedProjection = Matrix4x4.Perspective(
+                camera.fieldOfView,
+                camera.aspect,
+                camera.nearClipPlane,
+                camera.farClipPlane);
+
+            Assert.That(state.Mode, Is.EqualTo(CameraProjectionMatrixUtility.CameraProjectionStateMode.Implicit));
+            Assert.That(MaxAbsDiff(projection, expectedProjection), Is.LessThan(0.0001f));
+            Assert.That(MaxAbsDiff(projection, staleProjection), Is.GreaterThan(0.001f));
+        }
+
+        [Test]
+        public void ApplyJitter_NonTemporalModeRestoresProjectionAfterFarClipChange()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            var additionalData = m_GameObject.AddComponent<VividAdditionalCameraData>();
+            camera.aspect = 16.0f / 9.0f;
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 20.0f;
+            camera.fieldOfView = 50.0f;
+            additionalData.antialiasing = VividAntialiasingMode.CMAA2;
+
+            var staleProjection = Matrix4x4.Perspective(
+                camera.fieldOfView,
+                camera.aspect,
+                camera.nearClipPlane,
+                camera.farClipPlane);
+            CameraProjectionMatrixUtility.SetProjectionMatrices(camera, staleProjection, staleProjection);
+
+            camera.farClipPlane = 1000.0f;
+            var antialiasingData = new VividAntialiasingData
+            {
+                effectiveMode = VividAntialiasingMode.CMAA2,
+            };
+
+            VividAntialiasingRuntimeUtility.ApplyJitter(camera, additionalData, antialiasingData, 0);
+
+            var state = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
+            var projection = CameraProjectionMatrixUtility.GetNonJitteredProjectionMatrix(camera);
+            var expectedProjection = Matrix4x4.Perspective(
+                camera.fieldOfView,
+                camera.aspect,
+                camera.nearClipPlane,
+                camera.farClipPlane);
+
+            Assert.That(state.Mode, Is.EqualTo(CameraProjectionMatrixUtility.CameraProjectionStateMode.Implicit));
+            Assert.That(MaxAbsDiff(projection, expectedProjection), Is.LessThan(0.0001f));
+            Assert.That(MaxAbsDiff(projection, staleProjection), Is.GreaterThan(0.001f));
+        }
+
+        [Test]
         public void GetProjectionMatrix_PreservesJitteredExplicitProjectionPair()
         {
             var camera = m_GameObject.AddComponent<Camera>();

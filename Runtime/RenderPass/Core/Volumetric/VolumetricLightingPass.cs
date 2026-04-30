@@ -14,6 +14,27 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string LightingKernelName = "VolumetricLighting";
         private const string FilterKernelName = "FilterVolumetricLighting";
 
+        private sealed class VolumetricLightingHistoryState : CameraRelativeState
+        {
+            public VBufferParameters LastVBufferParameters;
+            public bool HasLastVBufferParameters;
+            public bool HasValidVBufferHistory;
+            public int FrameIndex = -1;
+
+            public void ResetHistory()
+            {
+                LastVBufferParameters = default;
+                HasLastVBufferParameters = false;
+                HasValidVBufferHistory = false;
+                FrameIndex = -1;
+            }
+
+            public override void Dispose()
+            {
+                ResetHistory();
+            }
+        }
+
         private static readonly int ShaderVariablesVolumetricId = Shader.PropertyToID("ShaderVariablesVolumetric");
         private static readonly int CameraDepthId = Shader.PropertyToID("_CameraDepth");
         private static readonly int DirectionalShadowTextureId = Shader.PropertyToID("_DirectionalShadowTexture");
@@ -160,6 +181,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_IsLogBaseBufferEnabled;
         private RenderGraphBuffer m_FrameDataBigTileVolumetricLightListBuffer;
         private readonly RenderGraphTextureDesc m_VBufferHistoryDescriptor = new();
+        private readonly CameraRelativeSystem<VolumetricLightingHistoryState> m_HistoryStates = new();
+        private VolumetricLightingHistoryState m_CurrentHistoryState;
         private VBufferParameters m_PreviousVBufferParameters;
         private VBufferParameters m_LastVBufferParameters;
         private bool m_HasLastVBufferParameters;
@@ -240,13 +263,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 ? volumetricData.shaderVariables
                 : VividVolumetricUtility.BuildShaderVariables(m_Settings, m_CameraWidth, m_CameraHeight, 0, cameraData);
             var temporalData = frameData.Get<VividTemporalData>();
+            m_CurrentHistoryState = ResolveHistoryState(cameraData.camera);
+            m_HasLastVBufferParameters = m_CurrentHistoryState?.HasLastVBufferParameters ?? false;
+            m_HasValidVBufferHistory = m_CurrentHistoryState?.HasValidVBufferHistory ?? false;
+            m_LastVBufferParameters = m_CurrentHistoryState?.LastVBufferParameters ?? default;
             m_IsFirstFrame = temporalData == null || temporalData.isFirstFrame;
             m_PreviousCameraPositionWS = ResolvePreviousCameraPositionWS(cameraData, temporalData);
             m_PreviousVBufferParameters = m_HasLastVBufferParameters
                 ? m_LastVBufferParameters
                 : m_Settings.VBufferParameters;
             m_VBufferSampleOffset = m_Settings.TemporalReprojectionEnabled
-                ? ComputeVBufferSampleOffset(ResolveFrameIndex(cameraData))
+                ? ComputeVBufferSampleOffset(ResolveVolumetricFrameIndex(cameraData))
                 : Vector4.zero;
 
             ConfigureCameraDepthTexture(m_CameraWidth, m_CameraHeight);
@@ -328,6 +355,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_HasValidVBufferHistory = false;
             m_HasLastVBufferParameters = false;
             m_IsFirstFrame = true;
+            m_CurrentHistoryState = null;
+            m_HistoryStates.Dispose();
         }
 
         private void BindSharedTextures(ComputePassContext context, ComputeCommandBuffer cmd, int kernel, RenderGraphTexture lightingTarget)
@@ -443,21 +472,84 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 m_HasValidVBufferHistory = false;
                 m_HasLastVBufferParameters = false;
+                m_CurrentHistoryState?.ResetHistory();
                 return;
             }
 
             var hadLastVBufferParameters = m_HasLastVBufferParameters;
+            var historyParametersCompatible = hadLastVBufferParameters
+                && AreVBufferParametersCompatible(m_LastVBufferParameters, m_Settings.VBufferParameters);
             var registryHasValidHistory = AllocHistoryTexture(
                 "VBufferLighting",
                 m_VBufferHistory,
                 m_VBufferFeedback,
                 CreateVBufferHistoryDescriptor());
             m_HasValidVBufferHistory = registryHasValidHistory
-                && hadLastVBufferParameters
+                && historyParametersCompatible
                 && !m_IsFirstFrame;
 
             m_LastVBufferParameters = m_Settings.VBufferParameters;
             m_HasLastVBufferParameters = true;
+            if (m_CurrentHistoryState != null)
+            {
+                m_CurrentHistoryState.LastVBufferParameters = m_LastVBufferParameters;
+                m_CurrentHistoryState.HasLastVBufferParameters = m_HasLastVBufferParameters;
+                m_CurrentHistoryState.HasValidVBufferHistory = m_HasValidVBufferHistory;
+            }
+        }
+
+        internal static bool AreVBufferParametersCompatible(
+            in VBufferParameters previousParameters,
+            in VBufferParameters currentParameters)
+        {
+            return previousParameters.ViewportWidth == currentParameters.ViewportWidth
+                && previousParameters.ViewportHeight == currentParameters.ViewportHeight
+                && previousParameters.SliceCount == currentParameters.SliceCount
+                && Approximately(previousParameters.ScreenPercentage, currentParameters.ScreenPercentage)
+                && Approximately(previousParameters.DepthExtent, currentParameters.DepthExtent)
+                && Approximately(previousParameters.SliceDistributionUniformity, currentParameters.SliceDistributionUniformity)
+                // Raw camera clip planes are intentionally omitted because VBuffer history compatibility
+                // is driven by the actual sampling space below.
+                && Approximately(previousParameters.VerticalFoVRadians, currentParameters.VerticalFoVRadians)
+                && Approximately(previousParameters.LastSliceDistance, currentParameters.LastSliceDistance)
+                && Approximately(previousParameters.UnitDepthTexelSpacing, currentParameters.UnitDepthTexelSpacing)
+                && Approximately(previousParameters.DepthEncodingParams, currentParameters.DepthEncodingParams)
+                && Approximately(previousParameters.DepthDecodingParams, currentParameters.DepthDecodingParams);
+        }
+
+        private static bool Approximately(Vector4 lhs, Vector4 rhs)
+        {
+            return Approximately(lhs.x, rhs.x)
+                && Approximately(lhs.y, rhs.y)
+                && Approximately(lhs.z, rhs.z)
+                && Approximately(lhs.w, rhs.w);
+        }
+
+        private static bool Approximately(float lhs, float rhs)
+        {
+            return Mathf.Abs(lhs - rhs) <= 0.0001f * Mathf.Max(1.0f, Mathf.Max(Mathf.Abs(lhs), Mathf.Abs(rhs)));
+        }
+
+        private VolumetricLightingHistoryState ResolveHistoryState(Camera camera)
+        {
+            m_HistoryStates.PurgeDestroyedCameras();
+            return camera != null ? m_HistoryStates.GetOrCreateBase(camera) : null;
+        }
+
+        private int ResolveVolumetricFrameIndex(VividCameraData cameraData)
+        {
+            if (m_CurrentHistoryState == null)
+                return ResolveFrameIndex(cameraData);
+
+            unchecked
+            {
+                m_CurrentHistoryState.FrameIndex++;
+            }
+
+            if (m_CurrentHistoryState.FrameIndex < 0)
+                m_CurrentHistoryState.FrameIndex = 0;
+
+            return m_CurrentHistoryState.FrameIndex;
         }
 
         private RenderGraphTextureDesc CreateVBufferHistoryDescriptor()

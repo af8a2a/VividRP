@@ -628,8 +628,8 @@ namespace VividRP.Runtime
 
         private void OnValidate()
         {
-            m_Parameters.Validate();
             ValidateBoundProxy();
+            m_Parameters.ApplyEditorFade(GetSerializedVolumeSizeForEditorFade());
         }
 
 #if UNITY_EDITOR
@@ -772,6 +772,7 @@ namespace VividRP.Runtime
         private VividLocalVolumetricFogArtistParameters GetEffectiveParameters()
         {
             var parameters = m_Parameters;
+            parameters.ApplyEditorFade(GetSerializedVolumeSizeForEditorFade());
             if (parameters.maskMode != VividLocalVolumetricFogMaskMode.Material || parameters.materialMask == null)
                 return parameters;
 

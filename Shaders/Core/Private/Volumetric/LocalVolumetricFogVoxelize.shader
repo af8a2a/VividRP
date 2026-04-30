@@ -46,8 +46,9 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
             #pragma vertex Vert
             #pragma fragment Frag
             #pragma multi_compile_fragment _ _ENABLE_VOLUMETRIC_FOG_MASK
-
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/VolumeRendering.hlsl"
 
             #define LOCALVOLUMETRICFOGBLENDINGMODE_OVERWRITE 0
             #define LOCALVOLUMETRICFOGBLENDINGMODE_ADDITIVE 1
@@ -99,9 +100,7 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
             struct VertexToFragment
             {
                 float4 positionCS : SV_POSITION;
-                float3 viewDirectionWS : TEXCOORD0;
-                float3 positionOS : TEXCOORD1;
-                nointerpolation float viewIndex : TEXCOORD2;
+                nointerpolation float viewIndex : TEXCOORD0;
                 nointerpolation uint depthSlice : SV_RenderTargetArrayIndex;
             };
 
@@ -125,55 +124,6 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
                 float3 BaseColor;
                 float Alpha;
             };
-
-            float Remap01Vivid(float value, float rcpLength, float startTimesRcpLength)
-            {
-                return saturate(value * rcpLength - startTimesRcpLength);
-            }
-
-            float Remap10Vivid(float value, float rcpLength, float endTimesRcpLength)
-            {
-                return saturate(endTimesRcpLength - value * rcpLength);
-            }
-
-            float ApplyExponentialFadeFactor(float fade, bool exponential, bool multiplyBlendMode)
-            {
-                if (exponential)
-                {
-                    fade = multiplyBlendMode
-                        ? 1.0 - pow(abs(fade - 1.0), 2.2)
-                        : pow(fade, 2.2);
-                }
-
-                return fade;
-            }
-
-            float ComputeVolumeFadeFactor(
-                float3 coordNDC,
-                float distanceToCamera,
-                float3 rcpPosFaceFade,
-                float3 rcpNegFaceFade,
-                bool invertFade,
-                float rcpDistFadeLen,
-                float endTimesRcpDistFadeLen,
-                bool exponentialFalloff,
-                bool multiplyBlendMode)
-            {
-                float3 posF = float3(
-                    Remap10Vivid(coordNDC.x, rcpPosFaceFade.x, rcpPosFaceFade.x),
-                    Remap10Vivid(coordNDC.y, rcpPosFaceFade.y, rcpPosFaceFade.y),
-                    Remap10Vivid(coordNDC.z, rcpPosFaceFade.z, rcpPosFaceFade.z));
-                float3 negF = float3(
-                    Remap01Vivid(coordNDC.x, rcpNegFaceFade.x, 0.0),
-                    Remap01Vivid(coordNDC.y, rcpNegFaceFade.y, 0.0),
-                    Remap01Vivid(coordNDC.z, rcpNegFaceFade.z, 0.0));
-                float distanceFade = Remap10Vivid(distanceToCamera, rcpDistFadeLen, endTimesRcpDistFadeLen);
-                float fade = posF.x * posF.y * posF.z * negF.x * negF.y * negF.z;
-
-                fade = ApplyExponentialFadeFactor(fade, exponentialFalloff, multiplyBlendMode);
-                fade = distanceFade * (invertFade ? 1.0 - fade : fade);
-                return saturate(fade);
-            }
 
             float VBufferDistanceToSliceIndex(uint sliceIndex)
             {
@@ -210,10 +160,6 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
                 float sliceDepth = VBufferDistanceToSliceIndex(sliceIndex);
                 output.positionCS.z = EyeDepthToLinear(sliceDepth, _ZBufferParams);
                 output.positionCS.w = 1.0;
-
-                float3 positionRWS = ComputeWorldSpacePosition(output.positionCS, UNITY_MATRIX_I_VP);
-                output.viewDirectionWS = GetWorldSpaceViewDir(positionRWS);
-                output.positionOS = mul(UNITY_MATRIX_I_M, float4(positionRWS, 1.0)).xyz;
 
                 return output;
             }
@@ -300,7 +246,8 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
             void Frag(VertexToFragment input, out float4 outColor : SV_Target0)
             {
                 float sliceDistance = VBufferDistanceToSliceIndex(input.depthSlice % (uint)_VBufferSliceCount);
-                float3 rayCenterDirWS = normalize(-input.viewDirectionWS);
+                // Match the VBuffer lighting ray path instead of reconstructing from raw camera near/far projection.
+                float3 rayCenterDirWS = GetVBufferRayDirectionWSFromPixelCoord(input.positionCS.xy);
                 float3 voxelCenterRWS = GetCurrentViewPosition() + sliceDistance * rayCenterDirWS;
 
                 float3x3 obbFrame = float3x3(
@@ -308,7 +255,7 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
                     _VolumetricMaterialObbUp,
                     cross(_VolumetricMaterialObbRight, _VolumetricMaterialObbUp));
                 float3 voxelCenterBS = mul(GetAbsolutePositionWS(voxelCenterRWS - _VolumetricMaterialObbCenter), transpose(obbFrame));
-                float3 voxelCenterCS = voxelCenterBS * rcp(max(_VolumetricMaterialObbExtents, 1e-4));
+                float3 voxelCenterCS = voxelCenterBS * rcp(_VolumetricMaterialObbExtents);
 
                 bool overlap = Max3(abs(voxelCenterCS.x), abs(voxelCenterCS.y), abs(voxelCenterCS.z)) <= 1.0;
                 if (!overlap)
@@ -317,9 +264,9 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
                 FragInputs fragInputs = BuildFragInputs(input, voxelCenterRWS, voxelCenterCS);
                 float3 albedo;
                 float extinction;
-                GetVolumeData(fragInputs, input.viewDirectionWS, albedo, extinction);
+                GetVolumeData(fragInputs, -rayCenterDirWS, albedo, extinction);
 
-                extinction *= rcp(max(_FogVolumeFogDistanceProperty, 0.05));
+                extinction *= ExtinctionFromMeanFreePath(_FogVolumeFogDistanceProperty);
                 albedo *= _FogVolumeSingleScatteringAlbedo.rgb;
                 float3 voxelCenterNDC = saturate(voxelCenterCS * 0.5 + 0.5);
                 float fade = ComputeFadeFactor(voxelCenterNDC, sliceDistance);

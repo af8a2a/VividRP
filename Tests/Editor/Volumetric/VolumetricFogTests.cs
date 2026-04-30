@@ -462,6 +462,41 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void LocalVolumetricFog_ConvertToEngineData_UsesEditorBlendDistanceWhenRuntimeFadeIsStale()
+        {
+            var gameObject = new GameObject("Local Volumetric Fog Editor Fade");
+            var fog = gameObject.AddComponent<VividLocalVolumetricFog>();
+            SetLocalFogBoundProxy(fog, new BoundProxyShape
+            {
+                shape = BoundProxyShapeType.Box,
+                size = new Vector3(10.0f, 20.0f, 40.0f)
+            });
+
+            try
+            {
+                var parameters = VividLocalVolumetricFogArtistParameters.CreateDefault();
+                parameters.m_EditorAdvancedFade = false;
+                parameters.m_EditorUniformFade = 2.0f;
+                parameters.positiveFade = Vector3.one * 0.1f;
+                parameters.negativeFade = Vector3.one * 0.1f;
+                SetLocalFogRawParameters(fog, parameters);
+
+                var data = fog.ConvertToEngineData(null);
+
+                Assert.That(data.positiveFade.x, Is.EqualTo(5.0f).Within(0.0001f));
+                Assert.That(data.positiveFade.y, Is.EqualTo(10.0f).Within(0.0001f));
+                Assert.That(data.positiveFade.z, Is.EqualTo(20.0f).Within(0.0001f));
+                Assert.That(data.negativeFade.x, Is.EqualTo(5.0f).Within(0.0001f));
+                Assert.That(data.negativeFade.y, Is.EqualTo(10.0f).Within(0.0001f));
+                Assert.That(data.negativeFade.z, Is.EqualTo(20.0f).Within(0.0001f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
         public void LocalVolumetricFog_EnumsMatchHdrpBlendOrdering()
         {
             Assert.That((int)VividLocalVolumetricFogBlendingMode.Overwrite, Is.EqualTo(0));
@@ -999,8 +1034,9 @@ namespace VividRP.Editor.Tests
             Assert.That(localVoxelizeSource, Does.Contain("((float)sliceIndex + 0.5) * _VBufferRcpSliceCount + _VBufferRcpSliceCount"));
             Assert.That(localVoxelizeSource, Does.Contain("DecodeLogarithmicDepthGeneralized(encodedDepth, _VBufferDepthDecodingParams)"));
             Assert.That(localVoxelizeSource, Does.Not.Contain("return GetVBufferSliceDistance((float)sliceIndex + 0.5)"));
+            Assert.That(localVoxelizeSource, Does.Contain("VolumeRendering.hlsl"));
             Assert.That(localVoxelizeSource, Does.Contain("ComputeVolumeFadeFactor"));
-            Assert.That(localVoxelizeSource, Does.Contain("pow(abs(fade - 1.0), 2.2)"));
+            Assert.That(localVoxelizeSource, Does.Not.Contain("return saturate(fade)"));
             Assert.That(localVoxelizeSource, Does.Contain("#pragma multi_compile_fragment _ _ENABLE_VOLUMETRIC_FOG_MASK"));
             Assert.That(localVoxelizeSource, Does.Contain("_Mask(\"Mask\", 3D)"));
             Assert.That(localVoxelizeSource, Does.Contain("float3 _ScrollSpeed"));
@@ -1013,11 +1049,12 @@ namespace VividRP.Editor.Tests
             Assert.That(localVoxelizeSource, Does.Contain("SurfaceDescriptionFunction"));
             Assert.That(localVoxelizeSource, Does.Contain("BuildFragInputs"));
             Assert.That(localVoxelizeSource, Does.Contain("GetVolumeData"));
-            Assert.That(localVoxelizeSource, Does.Contain("float3 viewDirectionWS : TEXCOORD0"));
-            Assert.That(localVoxelizeSource, Does.Contain("ComputeWorldSpacePosition(output.positionCS, UNITY_MATRIX_I_VP)"));
-            Assert.That(localVoxelizeSource, Does.Contain("output.viewDirectionWS = GetWorldSpaceViewDir(positionRWS)"));
-            Assert.That(localVoxelizeSource, Does.Contain("float3 rayCenterDirWS = normalize(-input.viewDirectionWS)"));
-            Assert.That(localVoxelizeSource, Does.Not.Contain("GetVBufferRayDirectionWSFromPixelCoord(input.positionCS.xy)"));
+            Assert.That(localVoxelizeSource, Does.Not.Contain("float3 viewDirectionWS : TEXCOORD"));
+            Assert.That(localVoxelizeSource, Does.Not.Contain("ComputeWorldSpacePosition(output.positionCS, UNITY_MATRIX_I_VP)"));
+            Assert.That(localVoxelizeSource, Does.Not.Contain("output.viewDirectionWS = GetWorldSpaceViewDir(positionRWS)"));
+            Assert.That(localVoxelizeSource, Does.Not.Contain("float3 rayCenterDirWS = normalize(-input.viewDirectionWS)"));
+            Assert.That(localVoxelizeSource, Does.Contain("GetVBufferRayDirectionWSFromPixelCoord(input.positionCS.xy)"));
+            Assert.That(localVoxelizeSource, Does.Contain("GetVolumeData(fragInputs, -rayCenterDirWS, albedo, extinction)"));
             Assert.That(localVoxelizeSource, Does.Contain("GetCurrentViewPosition() + sliceDistance * rayCenterDirWS"));
             Assert.That(localVoxelizeSource, Does.Contain("GetAbsolutePositionWS(voxelCenterRWS - _VolumetricMaterialObbCenter)"));
             Assert.That(localVoxelizeSource, Does.Not.Contain("_WorldSpaceCameraPos + sliceDistance * rayCenterDirWS"));
@@ -1025,7 +1062,8 @@ namespace VividRP.Editor.Tests
             Assert.That(localVoxelizeSource, Does.Contain("maskValue = 0.5 > _VolumetricAlphaOnlyTexture ? maskSample : alphaOnlyMask"));
             Assert.That(localVoxelizeSource, Does.Contain("input.uv0.xyz * max(_Tiling, 1e-4) + _ScrollSpeed * input.TimeParameters.x"));
             Assert.That(localVoxelizeSource, Does.Contain("maskValue = 0.5 > _AlphaOnlyTexture ? maskSample : alphaOnlyMask"));
-            Assert.That(localVoxelizeSource, Does.Contain("extinction *= rcp(max(_FogVolumeFogDistanceProperty, 0.05))"));
+            Assert.That(localVoxelizeSource, Does.Contain("extinction *= ExtinctionFromMeanFreePath(_FogVolumeFogDistanceProperty)"));
+            Assert.That(localVoxelizeSource, Does.Not.Contain("outColor=extinction"));
             Assert.That(localVoxelizeSource, Does.Contain("albedo *= _FogVolumeSingleScatteringAlbedo.rgb"));
             Assert.That(localVoxelizeSource, Does.Contain("float fade = ComputeFadeFactor(voxelCenterNDC, sliceDistance)"));
             Assert.That(localVoxelizeSource, Does.Not.Contain("saturate(coordNDC * max(_VolumetricTiling"));
@@ -1181,6 +1219,10 @@ namespace VividRP.Editor.Tests
             Assert.That(densityPassSource, Does.Contain("ViewCountId = Shader.PropertyToID(\"_ViewCount\")"));
             Assert.That(densityPassSource, Does.Contain("SetComputeIntParam(m_VolumetricMaterialShader, ViewCountId, m_ViewCount)"));
             Assert.That(densityPassSource, Does.Contain("CoreUtils.DivRoundUp(m_MaterialFogCount * m_ViewCount, ComputeMaterialThreadGroupSizeX)"));
+            Assert.That(densityPassSource, Does.Contain("InsertVolumetricMaterialComputeToDrawFence(cmd)"));
+            Assert.That(densityPassSource, Does.Contain("CreateGraphicsFence("));
+            Assert.That(densityPassSource, Does.Contain("SynchronisationStageFlags.ComputeProcessing"));
+            Assert.That(densityPassSource, Does.Contain("WaitOnAsyncGraphicsFence(fence, SynchronisationStageFlags.AllGPUOperations)"));
             Assert.That(densityPassSource, Does.Contain("PrepareVisibleFogs(camera, m_Settings.MaxLocalVolumetricFogCount)"));
             Assert.That(densityPassSource, Does.Contain("CoreUtils.SetRenderTarget(cmd, m_VBufferDensity)"));
             Assert.That(densityPassSource, Does.Contain("VividLocalVolumetricFogManager.RecordVolumetricMaterialDrawCalls(cmd)"));
@@ -1221,6 +1263,15 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingPassSource, Does.Contain("Name = \"VBufferFeedback\", Access = AccessFlags.ReadWrite"));
             Assert.That(lightingPassSource, Does.Contain("PrepareVBufferHistory"));
             Assert.That(lightingPassSource, Does.Contain("AllocHistoryTexture("));
+            Assert.That(lightingPassSource, Does.Contain("CameraRelativeSystem<VolumetricLightingHistoryState>"));
+            Assert.That(lightingPassSource, Does.Contain("m_CurrentHistoryState = ResolveHistoryState(cameraData.camera)"));
+            Assert.That(lightingPassSource, Does.Contain("m_CurrentHistoryState?.HasLastVBufferParameters"));
+            Assert.That(lightingPassSource, Does.Contain("m_CurrentHistoryState.LastVBufferParameters = m_LastVBufferParameters"));
+            Assert.That(lightingPassSource, Does.Contain("ResolveVolumetricFrameIndex(cameraData)"));
+            Assert.That(lightingPassSource, Does.Contain("m_CurrentHistoryState.FrameIndex++"));
+            Assert.That(lightingPassSource, Does.Contain("AreVBufferParametersCompatible(m_LastVBufferParameters, m_Settings.VBufferParameters)"));
+            Assert.That(lightingPassSource, Does.Contain("Raw camera clip planes are intentionally omitted"));
+            Assert.That(lightingPassSource, Does.Not.Contain("Approximately(previousParameters.FarClipPlane, currentParameters.FarClipPlane)"));
             Assert.That(lightingPassSource, Does.Contain("m_Settings.TemporalReprojectionEnabled"));
             Assert.That(lightingPassSource, Does.Contain("ComputeVBufferSampleOffset"));
             Assert.That(lightingPassSource, Does.Contain("ResolvePreviousCameraPositionWS"));

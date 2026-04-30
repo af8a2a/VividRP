@@ -101,7 +101,7 @@ namespace VividRP.Runtime
                     return;
 #endif
                 default:
-                    CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                    CameraProjectionMatrixUtility.RestoreNoJitterProjection(camera, nonJitteredProj);
                     return;
             }
         }
@@ -216,7 +216,7 @@ namespace VividRP.Runtime
             var taaSettings = TAASettings.FromCamera(additionalData);
             if (!taaSettings.Enabled)
             {
-                CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                CameraProjectionMatrixUtility.RestoreNoJitterProjection(camera, nonJitteredProj);
                 return;
             }
 
@@ -224,7 +224,7 @@ namespace VividRP.Runtime
             var pixelHeight = camera.pixelHeight;
             if (pixelWidth <= 0 || pixelHeight <= 0)
             {
-                CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                CameraProjectionMatrixUtility.RestoreNoJitterProjection(camera, nonJitteredProj);
                 return;
             }
 
@@ -246,7 +246,7 @@ namespace VividRP.Runtime
         {
             if (additionalData == null || data == null)
             {
-                CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                CameraProjectionMatrixUtility.RestoreNoJitterProjection(camera, nonJitteredProj);
                 return;
             }
 
@@ -255,7 +255,7 @@ namespace VividRP.Runtime
             if (outputSize.x <= 0 || outputSize.y <= 0 || renderSize.x <= 0 || renderSize.y <= 0)
             {
                 additionalData.ResetFsr3JitterData();
-                CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                CameraProjectionMatrixUtility.RestoreNoJitterProjection(camera, nonJitteredProj);
                 return;
             }
 
@@ -278,7 +278,7 @@ namespace VividRP.Runtime
         {
             if (additionalData == null || data == null)
             {
-                CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                CameraProjectionMatrixUtility.RestoreNoJitterProjection(camera, nonJitteredProj);
                 return;
             }
 
@@ -287,7 +287,7 @@ namespace VividRP.Runtime
             if (outputSize.x <= 0 || outputSize.y <= 0 || renderSize.x <= 0 || renderSize.y <= 0)
             {
                 additionalData.ResetTsrJitterData();
-                CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                CameraProjectionMatrixUtility.RestoreNoJitterProjection(camera, nonJitteredProj);
                 return;
             }
 
@@ -307,7 +307,7 @@ namespace VividRP.Runtime
             var pixelHeight = camera.pixelHeight;
             if (pixelWidth <= 0 || pixelHeight <= 0)
             {
-                CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                CameraProjectionMatrixUtility.RestoreNoJitterProjection(camera, nonJitteredProj);
                 return;
             }
 
@@ -329,7 +329,7 @@ namespace VividRP.Runtime
             var pixelHeight = camera.pixelHeight;
             if (pixelWidth <= 0 || pixelHeight <= 0)
             {
-                CameraProjectionMatrixUtility.SetProjectionMatrices(camera, nonJitteredProj, nonJitteredProj);
+                CameraProjectionMatrixUtility.RestoreNoJitterProjection(camera, nonJitteredProj);
                 return;
             }
 

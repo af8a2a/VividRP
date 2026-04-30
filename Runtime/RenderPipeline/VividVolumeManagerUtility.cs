@@ -24,14 +24,37 @@ namespace VividRP.Runtime
             if (additionalCameraData == null && camera.cameraType == CameraType.Game)
                 additionalCameraData = camera.GetVividAdditionalCameraData();
 
-            var volumeLayerMask = additionalCameraData != null
-                ? additionalCameraData.volumeLayerMask
-                : (LayerMask)camera.cullingMask;
-
-            if (additionalCameraData == null && camera.cameraType == CameraType.Preview)
-                volumeLayerMask = s_DefaultVolumeLayerMask;
+            var volumeLayerMask = ResolveVolumeLayerMask(camera, additionalCameraData);
 
             VolumeManager.instance.Update(camera.transform, volumeLayerMask);
+        }
+
+        internal static LayerMask ResolveVolumeLayerMask(
+            Camera camera,
+            VividAdditionalCameraData additionalCameraData = null)
+        {
+            if (additionalCameraData != null)
+                return additionalCameraData.volumeLayerMask;
+
+            if (camera == null)
+                return s_DefaultVolumeLayerMask;
+
+            if (camera.cameraType == CameraType.SceneView)
+            {
+                var mainCamera = Camera.main;
+                if (mainCamera != null
+                    && mainCamera.TryGetComponent<VividAdditionalCameraData>(out var mainCameraData))
+                {
+                    return mainCameraData.volumeLayerMask;
+                }
+
+                return s_DefaultVolumeLayerMask;
+            }
+
+            if (camera.cameraType == CameraType.Preview)
+                return s_DefaultVolumeLayerMask;
+
+            return camera.cullingMask;
         }
 
         internal static void Deinitialize()

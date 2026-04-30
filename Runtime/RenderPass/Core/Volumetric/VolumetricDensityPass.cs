@@ -288,6 +288,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 1,
                 1);
 
+            InsertVolumetricMaterialComputeToDrawFence(cmd);
+
             cmd.SetGlobalBuffer(VolumetricGlobalIndirectionBufferId, indirection);
             cmd.SetGlobalBuffer(VolumetricMaterialDataId, materialData);
             // Bind all VBuffer slices so SV_RenderTargetArrayIndex writes every voxel slice.
@@ -301,6 +303,14 @@ namespace VividRP.Runtime.RenderPass.Core
 
             if (m_FogVolumeVFXRenderList?.IsValid == true)
                 cmd.DrawRendererList(m_FogVolumeVFXRenderList);
+        }
+
+        private static void InsertVolumetricMaterialComputeToDrawFence(CommandBuffer cmd)
+        {
+            var fence = cmd.CreateGraphicsFence(
+                GraphicsFenceType.AsyncQueueSynchronisation,
+                SynchronisationStageFlags.ComputeProcessing);
+            cmd.WaitOnAsyncGraphicsFence(fence, SynchronisationStageFlags.AllGPUOperations);
         }
 
         private void ConfigureCameraDepthTexture(int width, int height)

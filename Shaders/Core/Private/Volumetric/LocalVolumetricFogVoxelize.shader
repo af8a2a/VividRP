@@ -11,6 +11,10 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
         _FogVolumeBlendMode("Blend Mode", Float) = 1
         _FogVolumeSingleScatteringAlbedo("Single Scattering Albedo", Color) = (1, 1, 1, 1)
         _FogVolumeFogDistanceProperty("Fog Distance", Float) = 50
+        [NoScaleOffset]_Mask("Mask", 3D) = "white" {}
+        _ScrollSpeed("Scroll Speed", Vector) = (0, 0, 0, 0)
+        _Tiling("Tiling", Vector) = (1, 1, 1, 0)
+        _AlphaOnlyTexture("Alpha Only Texture", Float) = 0
         _VolumetricMaskMode("Mask Mode", Float) = 0
         _VolumetricAlphaOnlyTexture("Alpha Only Texture", Float) = 0
         _VolumetricMask("Volumetric Mask", 3D) = "white" {}
@@ -41,6 +45,7 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
             #pragma target 4.5
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma multi_compile_fragment _ _ENABLE_VOLUMETRIC_FOG_MASK
 
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
 
@@ -69,6 +74,9 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
             float4 _FogVolumeSingleScatteringAlbedo;
             float _FogVolumeFogDistanceProperty;
             float _FogVolumeBlendMode;
+            float3 _ScrollSpeed;
+            float3 _Tiling;
+            float _AlphaOnlyTexture;
             float3 _VolumetricMaterialObbRight;
             float3 _VolumetricMaterialObbUp;
             float3 _VolumetricMaterialObbExtents;
@@ -83,6 +91,8 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
             float _VolumetricAlphaOnlyTexture;
             float3 _VolumetricTiling;
             float3 _VolumetricScroll;
+            Texture3D<float4> _Mask;
+            SAMPLER(sampler_Mask);
             Texture3D<float4> _VolumetricMask;
             SAMPLER(sampler_VolumetricMask);
 
@@ -246,6 +256,15 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
                     float4 alphaOnlyMask = float4(1.0, 1.0, 1.0, maskSample.a);
                     maskValue = 0.5 > _VolumetricAlphaOnlyTexture ? maskSample : alphaOnlyMask;
                 }
+#if defined(_ENABLE_VOLUMETRIC_FOG_MASK)
+                else
+                {
+                    float3 maskUv = input.uv0.xyz * max(_Tiling, 1e-4) + _ScrollSpeed * input.TimeParameters.x;
+                    float4 maskSample = _Mask.SampleLevel(sampler_Mask, maskUv, 0);
+                    float4 alphaOnlyMask = float4(1.0, 1.0, 1.0, maskSample.a);
+                    maskValue = 0.5 > _AlphaOnlyTexture ? maskSample : alphaOnlyMask;
+                }
+#endif
 
                 surface.BaseColor = maskValue.rgb;
                 surface.Alpha = maskValue.a;
@@ -302,10 +321,8 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
 
                 extinction *= rcp(max(_FogVolumeFogDistanceProperty, 0.05));
                 albedo *= _FogVolumeSingleScatteringAlbedo.rgb;
-
                 float3 voxelCenterNDC = saturate(voxelCenterCS * 0.5 + 0.5);
                 float fade = ComputeFadeFactor(voxelCenterNDC, sliceDistance);
-
                 if ((uint)_FogVolumeBlendMode == LOCALVOLUMETRICFOGBLENDINGMODE_MULTIPLY)
                 {
                     outColor = max(0.0, lerp(float4(1.0, 1.0, 1.0, 1.0), float4(albedo * extinction, extinction), fade.xxxx));

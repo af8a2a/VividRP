@@ -291,6 +291,9 @@ namespace VividRP.Runtime
         private static readonly int FogVolumeFogDistanceId = Shader.PropertyToID("_FogVolumeFogDistanceProperty");
         private static readonly int FogVolumeBlendModeId = Shader.PropertyToID("_FogVolumeBlendMode");
         private static readonly int FogVolumeMaskId = Shader.PropertyToID("_Mask");
+        private static readonly int FogVolumeScrollSpeedId = Shader.PropertyToID("_ScrollSpeed");
+        private static readonly int FogVolumeTilingId = Shader.PropertyToID("_Tiling");
+        private static readonly int FogVolumeAlphaOnlyTextureId = Shader.PropertyToID("_AlphaOnlyTexture");
         private static readonly int VolumetricMaskId = Shader.PropertyToID("_VolumetricMask");
         private static readonly int VolumetricMaskModeId = Shader.PropertyToID("_VolumetricMaskMode");
         private static readonly int VolumetricAlphaOnlyTextureId = Shader.PropertyToID("_VolumetricAlphaOnlyTexture");
@@ -452,10 +455,10 @@ namespace VividRP.Runtime
             m_RenderingProperties.Clear();
             m_RenderingProperties.SetInteger(VolumetricFogGlobalIndexId, globalIndex);
             m_RenderingProperties.SetBuffer(VolumetricMaterialDataId, materialDataBuffer);
-            m_RenderingProperties.SetColor(FogVolumeSingleScatteringAlbedoId, parameters.albedo);
+            m_RenderingProperties.SetColor(FogVolumeSingleScatteringAlbedoId, parameters.albedo.gamma);
             m_RenderingProperties.SetFloat(FogVolumeFogDistanceId, parameters.meanFreePath);
             m_RenderingProperties.SetFloat(FogVolumeBlendModeId, (float)parameters.blendingMode);
-            ConfigureTextureMaskProperties(parameters, defaultMaskTexture);
+            ConfigureTextureMaskProperties(material, parameters, defaultMaskTexture);
             VividLocalVolumetricFogManager.SetupFogVolumeBlendMode(material, parameters.blendingMode);
 
             var bounds = ComputeVolumetricMaterialBounds();
@@ -528,6 +531,7 @@ namespace VividRP.Runtime
         }
 
         private void ConfigureTextureMaskProperties(
+            Material material,
             in VividLocalVolumetricFogArtistParameters parameters,
             Texture3D defaultMaskTexture)
         {
@@ -544,12 +548,26 @@ namespace VividRP.Runtime
                 - parameters.textureScrollingSpeed * Time.time;
 
             if (mask != null)
+            {
+                m_RenderingProperties.SetTexture(FogVolumeMaskId, mask);
                 m_RenderingProperties.SetTexture(VolumetricMaskId, mask);
+            }
 
             m_RenderingProperties.SetFloat(VolumetricMaskModeId, maskMode);
             m_RenderingProperties.SetFloat(VolumetricAlphaOnlyTextureId, alphaOnly ? 1.0f : 0.0f);
+            m_RenderingProperties.SetFloat(FogVolumeAlphaOnlyTextureId, alphaOnly ? 1.0f : 0.0f);
             m_RenderingProperties.SetVector(VolumetricTilingId, parameters.textureTiling);
+            m_RenderingProperties.SetVector(FogVolumeTilingId, parameters.textureTiling);
+            m_RenderingProperties.SetVector(FogVolumeScrollSpeedId, parameters.textureScrollingSpeed);
             m_RenderingProperties.SetVector(VolumetricScrollId, animatedTextureOffset);
+
+            if (material != null && !material.HasProperty(VolumetricMaskModeId))
+            {
+                if (maskMode > 0.5f)
+                    material.EnableKeyword("_ENABLE_VOLUMETRIC_FOG_MASK");
+                else
+                    material.DisableKeyword("_ENABLE_VOLUMETRIC_FOG_MASK");
+            }
         }
 
         internal bool TryGetVolumeMask(out Texture3D volumeMask, out bool alphaOnly)

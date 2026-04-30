@@ -1031,9 +1031,8 @@ namespace VividRP.Editor.Tests
             Assert.That(localVoxelizeSource, Does.Contain("StructuredBuffer<VividVolumetricMaterialRenderingData> _VolumetricMaterialData"));
             Assert.That(localVoxelizeSource, Does.Contain("ByteAddressBuffer _VolumetricGlobalIndirectionBuffer"));
             Assert.That(localVoxelizeSource, Does.Contain("SV_RenderTargetArrayIndex"));
-            Assert.That(localVoxelizeSource, Does.Contain("((float)sliceIndex + 0.5) * _VBufferRcpSliceCount + _VBufferRcpSliceCount"));
-            Assert.That(localVoxelizeSource, Does.Contain("DecodeLogarithmicDepthGeneralized(encodedDepth, _VBufferDepthDecodingParams)"));
-            Assert.That(localVoxelizeSource, Does.Not.Contain("return GetVBufferSliceDistance((float)sliceIndex + 0.5)"));
+            Assert.That(localVoxelizeSource, Does.Contain("return GetVBufferSliceDistance((float)sliceIndex + 0.5)"));
+            Assert.That(localVoxelizeSource, Does.Not.Contain("((float)sliceIndex + 0.5) * _VBufferRcpSliceCount + _VBufferRcpSliceCount"));
             Assert.That(localVoxelizeSource, Does.Contain("VolumeRendering.hlsl"));
             Assert.That(localVoxelizeSource, Does.Contain("ComputeVolumeFadeFactor"));
             Assert.That(localVoxelizeSource, Does.Not.Contain("return saturate(fade)"));
@@ -1092,7 +1091,9 @@ namespace VividRP.Editor.Tests
             Assert.That(materialSource, Does.Contain("RWStructuredBuffer<VividVolumetricMaterialRenderingData> _VolumetricMaterialData"));
             Assert.That(materialSource, Does.Contain("uint _ViewCount"));
             Assert.That(materialSource, Does.Not.Contain("_VolumetricViewCount"));
-            Assert.That(materialSource, Does.Contain("DistanceToSlice"));
+            Assert.That(materialSource, Does.Contain("DistanceToSliceCoord"));
+            Assert.That(materialSource, Does.Contain("DistanceToStartSlice"));
+            Assert.That(materialSource, Does.Contain("DistanceToStopSlice"));
             Assert.That(materialSource, Does.Contain("DepthDistance"));
             Assert.That(materialSource, Does.Contain("GetOBBCenterRWS"));
             Assert.That(materialSource, Does.Contain("GetCameraRelativePositionWS(obb.center)"));
@@ -1149,7 +1150,8 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("voxelOpticalDepth = extinction * dt"));
             Assert.That(lightingSource, Does.Contain("float perPixelRandomOffset = GenerateVBufferRandom(vBufferPixel)"));
             Assert.That(lightingSource, Does.Contain("float rndVal = frac(perPixelRandomOffset + _VBufferSampleOffset.z)"));
-            Assert.That(lightingSource, Does.Contain("ImportanceSampleHomogeneousMedium(rndVal, extinction, dt"));
+            Assert.That(lightingSource, Does.Contain("float weight = TransmittanceIntegralHomogeneousMedium(extinction, dt)"));
+            Assert.That(lightingSource, Does.Not.Contain("ImportanceSampleHomogeneousMedium(rndVal, extinction, dt"));
             Assert.That(lightingSource, Does.Contain("float3 sampleWS = ray.originWS + t * ray.jitterDirWS"));
             Assert.That(lightingSource, Does.Contain("float3 L = SafeNormalize(light.directionWS);"));
             Assert.That(lightingSource, Does.Not.Contain("float3 L = SafeNormalize(-light.directionWS);"));

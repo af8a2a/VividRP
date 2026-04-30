@@ -127,8 +127,7 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
 
             float VBufferDistanceToSliceIndex(uint sliceIndex)
             {
-                float encodedDepth = ((float)sliceIndex + 0.5) * _VBufferRcpSliceCount + _VBufferRcpSliceCount;
-                return DecodeLogarithmicDepthGeneralized(encodedDepth, _VBufferDepthDecodingParams);
+                return GetVBufferSliceDistance((float)sliceIndex + 0.5);
             }
 
             float EyeDepthToLinear(float linearDepth, float4 zBufferParam)

@@ -362,15 +362,12 @@ bool IntersectRaySpotConeRange(float3 rayOriginWS, float3 rayDirectionWS, Punctu
         tExit);
 }
 
-VoxelLighting EvaluateVoxelLightingDirectional(uint3 voxelCoord, JitteredRay ray, float t0, float dt, float rndVal, float extinction, float anisotropy)
+VoxelLighting EvaluateVoxelLightingDirectional(uint3 voxelCoord, JitteredRay ray, float t0, float dt, float extinction, float anisotropy)
 {
     VoxelLighting lighting = (VoxelLighting)0;
     uint directionalCount = min(_DirectionalLightCount, 8u);
-    float tOffset;
-    float weight;
-    ImportanceSampleHomogeneousMedium(rndVal, extinction, dt, tOffset, weight);
-
-    float t = t0 + tOffset;
+    float weight = TransmittanceIntegralHomogeneousMedium(extinction, dt);
+    float t = t0 + 0.5 * dt;
     float3 sampleWS = ray.originWS + t * ray.jitterDirWS;
 
     [loop]
@@ -576,7 +573,6 @@ void FillVolumetricLightingBuffer(uint2 vBufferPixel, JitteredRay ray, bool hasM
                 ray,
                 t0,
                 dt,
-                rndVal,
                 sampledExtinction,
                 anisotropy);
             aggregate.radianceNoPhase += directionalLighting.radianceNoPhase;

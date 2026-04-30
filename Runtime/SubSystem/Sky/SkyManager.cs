@@ -113,7 +113,8 @@ namespace VividRP.Runtime
 
             var context = new SkyRendererContext(
                 frameData.GetOrCreate<VividCameraData>(),
-                frameData.GetOrCreate<VividLightData>());
+                frameData.GetOrCreate<VividLightData>(),
+                frameData.GetOrCreate<VividExposureData>());
 
             var forceRebuild = false;
             if (hasActiveSky)
@@ -165,7 +166,8 @@ namespace VividRP.Runtime
 
             var context = new SkyRendererContext(
                 frameData.GetOrCreate<VividCameraData>(),
-                frameData.GetOrCreate<VividLightData>());
+                frameData.GetOrCreate<VividLightData>(),
+                frameData.GetOrCreate<VividExposureData>());
             var camera = context.cameraData?.camera;
             if (ReferenceEquals(s_PendingSkyCamera, camera)
                 && s_PendingSkyUpdateVersion == s_SkyUpdateVersion)

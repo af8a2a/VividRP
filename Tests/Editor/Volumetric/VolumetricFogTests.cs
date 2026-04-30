@@ -29,7 +29,7 @@ namespace VividRP.Editor.Tests
                 fog.enabled.value = true;
                 Assert.That(fog.IsActive(), Is.True);
 
-                fog.meanFreePath.value = 0.0f;
+                fog.volumetricFog.value = false;
                 Assert.That(fog.IsActive(), Is.False);
             }
             finally
@@ -53,6 +53,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(fog.depthExtent.value, Is.EqualTo(VividVolumetricFogVolume.DefaultDepthExtent));
                 Assert.That(fog.denoisingMode.value, Is.EqualTo(VividVolumetricFogDenoisingMode.Both));
                 Assert.That(fog.sliceDistributionUniformity.value, Is.EqualTo(1.0f));
+                Assert.That(fog.tier.value, Is.EqualTo(VividVolumetricFogQualityTier.Custom));
                 Assert.That(fog.volumetricFogBudget.value, Is.EqualTo(VividVolumetricFogVolume.DefaultVolumetricFogBudget));
                 Assert.That(fog.volumetricLightingDensityCutoff.value, Is.EqualTo(0.0f));
                 Assert.That(fog.multipleScatteringIntensity.value, Is.EqualTo(0.0f));
@@ -114,7 +115,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(editorType.GetField("m_Tier", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_FogControlMode", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_VolumetricFogBudget", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_ResolutionDepthRatio", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ScreenResolutionPercentage", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_VolumeSliceCount", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_DenoisingMode", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_DirectionalLightsOnly", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_Anisotropy", flags)?.GetValue(editor), Is.Not.Null);
@@ -146,8 +149,14 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("GI Dimmer"));
             Assert.That(source, Does.Contain("ShouldDisableColorModeSettings"));
             Assert.That(source, Does.Contain("ShouldDisableVolumetricSettings"));
+            Assert.That(source, Does.Contain("ShouldShowCustomQualitySettings"));
             Assert.That(source, Does.Contain("ShouldShowBalanceQualitySettings"));
             Assert.That(source, Does.Contain("ShouldShowManualQualitySettings"));
+            Assert.That(source, Does.Contain("PropertyField(m_FogControlMode);"));
+            Assert.That(source, Does.Contain("PropertyField(m_VolumetricFogBudget);"));
+            Assert.That(source, Does.Contain("PropertyField(m_ResolutionDepthRatio);"));
+            Assert.That(source, Does.Contain("PropertyField(m_ScreenResolutionPercentage);"));
+            Assert.That(source, Does.Contain("PropertyField(m_VolumeSliceCount);"));
             Assert.That(source, Does.Contain("PropertyField(m_DenoisingMode);"));
             Assert.That(source, Does.Contain("PropertyField(m_Tier);"));
             Assert.That(source, Does.Contain("PropertyField(m_MultipleScatteringIntensity);"));
@@ -173,6 +182,7 @@ namespace VividRP.Editor.Tests
 
             try
             {
+                fog.tier.value = VividVolumetricFogQualityTier.Custom;
                 fog.fogControlMode.value = VividVolumetricFogControlMode.Manual;
                 fog.screenResolutionPercentage.value = 25.0f;
                 fog.volumeSliceCount.value = 32;
@@ -195,6 +205,7 @@ namespace VividRP.Editor.Tests
 
             try
             {
+                fog.tier.value = VividVolumetricFogQualityTier.Custom;
                 fog.fogControlMode.value = VividVolumetricFogControlMode.Balance;
                 fog.volumetricFogBudget.value = 0.25f;
                 fog.resolutionDepthRatio.value = 0.5f;
@@ -207,6 +218,68 @@ namespace VividRP.Editor.Tests
             finally
             {
                 Object.DestroyImmediate(fog);
+            }
+        }
+
+        [Test]
+        public void ResolveQuality_UsesTierPreset_WhenTierIsNotCustom()
+        {
+            var fog = ScriptableObject.CreateInstance<VividVolumetricFogVolume>();
+
+            try
+            {
+                fog.tier.value = VividVolumetricFogQualityTier.Medium;
+                fog.fogControlMode.value = VividVolumetricFogControlMode.Manual;
+                fog.screenResolutionPercentage.value = 50.0f;
+                fog.volumeSliceCount.value = 512;
+
+                VividVolumetricUtility.ResolveQuality(fog, out var screenPercentage, out var sliceCount);
+
+                Assert.That(screenPercentage, Is.EqualTo(VividVolumetricFogVolume.DefaultScreenResolutionPercentage));
+                Assert.That(sliceCount, Is.EqualTo(VividVolumetricFogVolume.DefaultVolumeSliceCount));
+            }
+            finally
+            {
+                Object.DestroyImmediate(fog);
+            }
+        }
+
+        [Test]
+        public void VividRenderPipelineGlobalSettings_ClampsLocalFogCapacity()
+        {
+            var globalSettings = ScriptableObject.CreateInstance<VividRenderPipelineGlobalSettings>();
+
+            try
+            {
+                globalSettings.MaxLocalVolumetricFogCount = 4096;
+
+                Assert.That(globalSettings.MaxLocalVolumetricFogCount, Is.EqualTo(VividLocalVolumetricFogManager.AbsoluteMaxVisibleLocalVolumetricFogCount));
+            }
+            finally
+            {
+                Object.DestroyImmediate(globalSettings);
+            }
+        }
+
+        [Test]
+        public void ResolveMaxLocalVolumetricFogCount_UsesGlobalSettings()
+        {
+            var globalSettings = ScriptableObject.CreateInstance<VividRenderPipelineGlobalSettings>();
+
+            try
+            {
+                globalSettings.MaxLocalVolumetricFogCount = 7;
+
+                Assert.That(
+                    VividVolumetricUtility.ResolveMaxLocalVolumetricFogCount(globalSettings),
+                    Is.EqualTo(7));
+                Assert.That(
+                    VividVolumetricUtility.ResolveMaxLocalVolumetricFogCount(null),
+                    Is.EqualTo(VividLocalVolumetricFogManager.DefaultMaxVisibleLocalVolumetricFogCount));
+            }
+            finally
+            {
+                Object.DestroyImmediate(globalSettings);
             }
         }
 
@@ -551,6 +624,48 @@ namespace VividRP.Editor.Tests
             finally
             {
                 Object.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void LocalVolumetricFogManager_PrepareVisibleFogs_UsesRequestedBufferCapacity()
+        {
+            var fogObjects = new[]
+            {
+                new GameObject("Local Volumetric Fog Capacity 0"),
+                new GameObject("Local Volumetric Fog Capacity 1"),
+                new GameObject("Local Volumetric Fog Capacity 2")
+            };
+
+            try
+            {
+                foreach (var fogObject in fogObjects)
+                    fogObject.AddComponent<VividLocalVolumetricFog>();
+
+                int visibleCount = VividLocalVolumetricFogManager.PrepareVisibleFogs(null, 2);
+
+                Assert.That(visibleCount, Is.EqualTo(2));
+                Assert.That(VividLocalVolumetricFogManager.volumeBoundsBuffer.desc.Count, Is.EqualTo(2));
+                Assert.That(VividLocalVolumetricFogManager.visibleGlobalIndicesBuffer.desc.Count, Is.EqualTo(2));
+                Assert.That(VividLocalVolumetricFogManager.globalIndirectArgsBuffer.desc.Count, Is.EqualTo(2));
+                Assert.That(VividLocalVolumetricFogManager.globalIndirectionBuffer.desc.Count, Is.EqualTo(2));
+                Assert.That(VividLocalVolumetricFogManager.volumetricMaterialDataBuffer.desc.Count, Is.EqualTo(2 * VividLocalVolumetricFogManager.MaxVolumetricMaterialViewCount));
+
+                visibleCount = VividLocalVolumetricFogManager.PrepareVisibleFogs(null, 0);
+
+                Assert.That(visibleCount, Is.EqualTo(0));
+                Assert.That(VividLocalVolumetricFogManager.volumeBoundsBuffer.desc.Count, Is.EqualTo(1));
+                Assert.That(VividLocalVolumetricFogManager.volumetricMaterialDataBuffer.desc.Count, Is.EqualTo(VividLocalVolumetricFogManager.MaxVolumetricMaterialViewCount));
+            }
+            finally
+            {
+                foreach (var fogObject in fogObjects)
+                    Object.DestroyImmediate(fogObject);
+
+                VividLocalVolumetricFogManager.PrepareVisibleFogs(
+                    null,
+                    VividLocalVolumetricFogManager.DefaultMaxVisibleLocalVolumetricFogCount);
+                VividLocalVolumetricFogManager.Dispose();
             }
         }
 
@@ -970,7 +1085,8 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("TransmittanceIntegralHomogeneousMedium"));
             Assert.That(lightingSource, Does.Contain("totalRadiance += transmittanceToSlice * scattering"));
             Assert.That(lightingSource, Does.Not.Contain("totalRadiance += transmittanceToSlice * density.rgb"));
-            Assert.That(lightingSource, Does.Contain("opticalDepth += 0.5 * voxelOpticalDepth"));
+            Assert.That(lightingSource, Does.Contain("opticalDepth += 0.5 * blendOpticalDepth"));
+            Assert.That(lightingSource, Does.Not.Contain("opticalDepth += 0.5 * voxelOpticalDepth"));
             Assert.That(lightingSource, Does.Contain("StoreIntegratedVBufferLighting"));
             Assert.That(lightingSource, Does.Contain("light.affectVolumetric"));
             Assert.That(lightingSource, Does.Contain("light.volumetricDimmer"));
@@ -1003,7 +1119,7 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("coneAxisX = light.rightWS"));
             Assert.That(lightingSource, Does.Contain("coneAxisY = light.upWS"));
             Assert.That(lightingSource, Does.Contain("float lightSqRadius = max(max(light.shapeRadiusSquared, voxelArcLength), 1e-4)"));
-            Assert.That(lightingSource, Does.Contain("t = originToLightProjDist + tRelative"));
+            Assert.That(lightingSource, Does.Contain("float3 samplePosWS = ray.originWS + ray.jitterDirWS * t"));
             Assert.That(lightingSource, Does.Contain("float weight = TransmittanceHomogeneousMedium(extinction, max(t - t0, 0.0)) * rcpPdf"));
             Assert.That(lightingSource, Does.Contain("phaseConstant * lightingRadiance + probeRadiance"));
             Assert.That(lightingSource, Does.Not.Contain("EvaluateClusteredPunctualLighting"));
@@ -1027,6 +1143,7 @@ namespace VividRP.Editor.Tests
             Assert.That(densityPassSource, Does.Contain("ViewCountId = Shader.PropertyToID(\"_ViewCount\")"));
             Assert.That(densityPassSource, Does.Contain("SetComputeIntParam(m_VolumetricMaterialShader, ViewCountId, m_ViewCount)"));
             Assert.That(densityPassSource, Does.Contain("CoreUtils.DivRoundUp(m_MaterialFogCount * m_ViewCount, ComputeMaterialThreadGroupSizeX)"));
+            Assert.That(densityPassSource, Does.Contain("PrepareVisibleFogs(camera, m_Settings.MaxLocalVolumetricFogCount)"));
             Assert.That(densityPassSource, Does.Contain("SetRenderTarget(m_VBufferDensity)"));
             Assert.That(densityPassSource, Does.Not.Contain("LocalVolumetricFogsId"));
             Assert.That(localFogSource, Does.Contain("Graphics.RenderPrimitivesIndexedIndirect"));
@@ -1100,8 +1217,10 @@ namespace VividRP.Editor.Tests
             Assert.That(vBufferSource, Does.Contain("float4 SampleVBuffer(TEXTURE3D_PARAM(VBuffer, clampSampler)"));
             Assert.That(vBufferSource, Does.Contain("BiquadraticFilter(1.0 - fc, weights, offsets)"));
             Assert.That(vBufferSource, Does.Contain("vBufferViewportScale.xy * vBufferRcpViewportSize"));
-            Assert.That(vBufferSource, Does.Contain("_VBufferLightingViewportScale3"));
-            Assert.That(vBufferSource, Does.Contain("_VBufferLightingViewportLimit3"));
+            Assert.That(vBufferSource, Does.Contain("float3 vBufferViewportScale"));
+            Assert.That(vBufferSource, Does.Contain("float3 vBufferViewportLimit"));
+            Assert.That(vBufferSource, Does.Not.Contain("_VBufferLightingViewportScale3"));
+            Assert.That(vBufferSource, Does.Not.Contain("_VBufferLightingViewportLimit3"));
 
             var volumetricVariablesSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Volumetric", "ShaderVariablesVolumetric.hlsl"));
             Assert.That(volumetricVariablesSource, Does.Contain("_VBufferLightingViewportScale"));

@@ -142,7 +142,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_Settings = VividVolumetricUtility.ResolveSettings(frameData);
             m_LocalFogCount = m_Settings.Enabled
-                ? VividLocalVolumetricFogManager.PrepareVisibleFogs(camera)
+                ? VividLocalVolumetricFogManager.PrepareVisibleFogs(camera, m_Settings.MaxLocalVolumetricFogCount)
                 : 0;
             m_MaterialFogCount = m_Settings.Enabled
                 ? VividLocalVolumetricFogManager.materialFogCount

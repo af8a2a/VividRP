@@ -25,6 +25,8 @@ namespace VividRP.Editor.RenderPipeline
         private static readonly GUIContent s_SrpBatcherLabel = EditorGUIUtility.TrTextContent("SRP Batcher");
         private static readonly GUIContent s_SupportProbeVolumeLabel = EditorGUIUtility.TrTextContent("Adaptive Probe Volumes");
         private static readonly GUIContent s_ProbeVolumeShBandsLabel = EditorGUIUtility.TrTextContent("APV SH Bands");
+        private static readonly GUIContent s_MaxLocalVolumetricFogCountLabel =
+            EditorGUIUtility.TrTextContent("Max Local Volumetric Fog Count", "Maximum number of visible Local Volumetric Fog volumes allocated and processed per camera.");
         private static readonly string s_DefaultVolumeSharedMessage =
             "Default Volume is stored in VividRP Global Settings and shared by all VividRP pipeline assets.";
         private static readonly string s_DefaultVolumeInactiveMessage =
@@ -125,6 +127,11 @@ namespace VividRP.Editor.RenderPipeline
             };
             root.Add(probeVolumeShBandsField);
 
+            root.Bind(serializedObject);
+
+            RefreshGlobalSettingsSerializedObject();
+            AddLocalVolumetricFogFoldout(root);
+
             var sharedInfoHelpBox = new HelpBox(s_DefaultVolumeSharedMessage, HelpBoxMessageType.Info)
             {
                 name = "vivid-rp-asset-default-volume-shared-info",
@@ -161,12 +168,55 @@ namespace VividRP.Editor.RenderPipeline
             defaultVolumeFoldout.Add(m_DefaultVolumeEditorContainer);
 
             root.Add(defaultVolumeFoldout);
-            root.Bind(serializedObject);
 
             RefreshDefaultVolumeInspector();
             SubscribeToPipelineCreated();
 
             return root;
+        }
+
+        private void AddLocalVolumetricFogFoldout(VisualElement root)
+        {
+            var foldout = new Foldout
+            {
+                text = "Local Volumetric Fog",
+                value = true,
+                name = "vivid-rp-asset-local-volumetric-fog-foldout",
+            };
+
+            if (m_GlobalSettingsSerializedObject == null)
+            {
+                foldout.Add(new HelpBox("Unable to load the VividRP global settings asset.", HelpBoxMessageType.Warning));
+                root.Add(foldout);
+                return;
+            }
+
+            AddGlobalSettingsProperty(
+                foldout,
+                "m_MaxLocalVolumetricFogCount",
+                s_MaxLocalVolumetricFogCountLabel,
+                "vivid-rp-asset-max-local-volumetric-fog-count-field");
+
+            foldout.Bind(m_GlobalSettingsSerializedObject);
+            root.Add(foldout);
+        }
+
+        private void AddGlobalSettingsProperty(
+            VisualElement root,
+            string propertyName,
+            GUIContent label,
+            string elementName)
+        {
+            var property = m_GlobalSettingsSerializedObject.FindProperty(propertyName);
+            if (property == null)
+                return;
+
+            var field = new PropertyField(property, label.text)
+            {
+                name = elementName,
+                tooltip = label.tooltip,
+            };
+            root.Add(field);
         }
 
         private void OnDefaultVolumeProfileChanged(ChangeEvent<Object> evt)
@@ -232,6 +282,12 @@ namespace VividRP.Editor.RenderPipeline
             RebuildDefaultVolumeProfileEditor(profile);
         }
 
+        private void RefreshGlobalSettingsSerializedObject()
+        {
+            var globalSettings = VividRenderPipelineGlobalSettings.Ensure();
+            m_GlobalSettingsSerializedObject = globalSettings != null ? new SerializedObject(globalSettings) : null;
+        }
+
         private void RebuildDefaultVolumeProfileEditor(VolumeProfile profile)
         {
             DestroyDefaultVolumeProfileEditor();
@@ -259,12 +315,17 @@ namespace VividRP.Editor.RenderPipeline
                 return;
             }
 
-            m_DefaultVolumeProfileEditor = new DefaultVolumeProfileEditor(profile, m_GlobalSettingsSerializedObject);
-            m_DefaultVolumeEditorContainer.Add(m_DefaultVolumeProfileEditor.Create());
+            var profileEditor = new DefaultVolumeProfileEditor(profile, m_GlobalSettingsSerializedObject);
+            var editorElement = profileEditor.Create();
+            m_DefaultVolumeProfileEditor = profileEditor;
+            m_DefaultVolumeEditorContainer.Add(editorElement);
         }
 
         private bool CanShowDetailedVolumeEditor()
         {
+            if (!VolumeManager.instance.isInitialized)
+                return false;
+
             return RenderPipelineManager.currentPipeline is VividRenderPipeline
                 || GraphicsSettings.currentRenderPipelineAssetType == typeof(VividRenderPipelineAsset);
         }

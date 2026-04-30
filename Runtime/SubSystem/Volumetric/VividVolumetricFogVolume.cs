@@ -31,7 +31,8 @@ namespace VividRP.Runtime
         Low = 0,
         Medium = 1,
         High = 2,
-        Ultra = 3
+        Ultra = 3,
+        Custom = 4
     }
 
     [Serializable]
@@ -98,9 +99,9 @@ namespace VividRP.Runtime
         [Tooltip("Blends logarithmic depth slicing toward uniform slicing.")]
         public ClampedFloatParameter sliceDistributionUniformity = new(1.0f, 0.0f, 1.0f);
 
-        [Tooltip("HDRP-style quality tier used for authoring parity. VividRP currently resolves VBuffer quality from Fog Control Mode.")]
+        [Tooltip("HDRP-style quality tier used for authoring parity. Custom exposes explicit VBuffer quality controls.")]
         public EnumParameter<VividVolumetricFogQualityTier> tier =
-            new(VividVolumetricFogQualityTier.High);
+            new(VividVolumetricFogQualityTier.Custom);
 
         [Tooltip("Controls whether VBuffer resolution is budget-driven or set manually.")]
         public EnumParameter<VividVolumetricFogControlMode> fogControlMode =
@@ -139,8 +140,7 @@ namespace VividRP.Runtime
                 && enabled.value
                 && volumetricFog.value
                 && meanFreePath.value > 0.0f
-                && depthExtent.value > 0.0f
-                && volumeSliceCount.value > 0;
+                && depthExtent.value > 0.0f;
         }
 
         internal float GetExtinction()

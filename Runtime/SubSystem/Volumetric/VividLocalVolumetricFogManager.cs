@@ -7,7 +7,9 @@ namespace VividRP.Runtime
 {
     public static class VividLocalVolumetricFogManager
     {
-        public const int MaxVisibleLocalVolumetricFogCount = 64;
+        public const int MinVisibleLocalVolumetricFogCount = 0;
+        public const int DefaultMaxVisibleLocalVolumetricFogCount = 64;
+        public const int AbsoluteMaxVisibleLocalVolumetricFogCount = 1024;
         public const int MaxVolumetricMaterialViewCount = 2;
         private const int IndirectDrawIndexedArgsUIntCount = 5;
         private const int IndirectDrawIndexedArgsStride = IndirectDrawIndexedArgsUIntCount * 4;
@@ -16,12 +18,12 @@ namespace VividRP.Runtime
         private static readonly List<VividLocalVolumetricFog> s_RegisteredFogs = new();
         private static readonly Comparison<VividLocalVolumetricFog> s_PriorityComparison =
             (left, right) => right.priority.CompareTo(left.priority);
-        private static readonly VividVolumetricMaterialBounds[] s_VolumeBoundsData =
-            new VividVolumetricMaterialBounds[MaxVisibleLocalVolumetricFogCount];
-        private static readonly uint[] s_VisibleGlobalIndicesData =
-            new uint[MaxVisibleLocalVolumetricFogCount];
-        private static readonly VividLocalVolumetricFog[] s_VisibleMaterialFogs =
-            new VividLocalVolumetricFog[MaxVisibleLocalVolumetricFogCount];
+        private static VividVolumetricMaterialBounds[] s_VolumeBoundsData =
+            new VividVolumetricMaterialBounds[DefaultMaxVisibleLocalVolumetricFogCount];
+        private static uint[] s_VisibleGlobalIndicesData =
+            new uint[DefaultMaxVisibleLocalVolumetricFogCount];
+        private static VividLocalVolumetricFog[] s_VisibleMaterialFogs =
+            new VividLocalVolumetricFog[DefaultMaxVisibleLocalVolumetricFogCount];
         private static readonly uint[] s_VolumetricMaterialIndexData =
         {
             0, 1, 2,
@@ -34,30 +36,30 @@ namespace VividRP.Runtime
         private static readonly RenderGraphBuffer s_VolumeBoundsBuffer =
             RenderGraphBuffer.CreateStructured(
                 "VolumeBounds",
-                MaxVisibleLocalVolumetricFogCount,
+                DefaultMaxVisibleLocalVolumetricFogCount,
                 VividVolumetricMaterialBounds.Stride);
         private static readonly RenderGraphBuffer s_VisibleGlobalIndicesBuffer =
             RenderGraphBuffer.CreateStructured(
                 "VolumetricVisibleGlobalIndices",
-                MaxVisibleLocalVolumetricFogCount,
+                DefaultMaxVisibleLocalVolumetricFogCount,
                 4,
                 GraphicsBuffer.Target.Raw);
         private static readonly RenderGraphBuffer s_GlobalIndirectArgsBuffer =
             RenderGraphBuffer.CreateStructured(
                 "VolumetricGlobalIndirectArgs",
-                MaxVisibleLocalVolumetricFogCount,
+                DefaultMaxVisibleLocalVolumetricFogCount,
                 IndirectDrawIndexedArgsStride,
                 GraphicsBuffer.Target.IndirectArguments);
         private static readonly RenderGraphBuffer s_GlobalIndirectionBuffer =
             RenderGraphBuffer.CreateStructured(
                 "VolumetricGlobalIndirection",
-                MaxVisibleLocalVolumetricFogCount,
+                DefaultMaxVisibleLocalVolumetricFogCount,
                 4,
                 GraphicsBuffer.Target.Raw);
         private static readonly RenderGraphBuffer s_VolumetricMaterialDataBuffer =
             RenderGraphBuffer.CreateStructured(
                 "VolumetricMaterialData",
-                MaxVisibleLocalVolumetricFogCount * MaxVolumetricMaterialViewCount,
+                DefaultMaxVisibleLocalVolumetricFogCount * MaxVolumetricMaterialViewCount,
                 VividVolumetricMaterialRenderingData.Stride);
         private static Texture3D s_DefaultMaskTexture;
         private static GraphicsBuffer s_VolumetricMaterialIndexBuffer;
@@ -114,8 +116,15 @@ namespace VividRP.Runtime
             s_RegisteredFogs.Remove(fog);
         }
 
-        internal static int PrepareVisibleFogs(Camera camera)
+        public static int ClampVisibleLocalVolumetricFogCount(int count)
         {
+            return Mathf.Clamp(count, MinVisibleLocalVolumetricFogCount, AbsoluteMaxVisibleLocalVolumetricFogCount);
+        }
+
+        internal static int PrepareVisibleFogs(Camera camera, int maxVisibleFogCount)
+        {
+            maxVisibleFogCount = ClampVisibleLocalVolumetricFogCount(maxVisibleFogCount);
+            EnsureVolumetricMaterialStorage(maxVisibleFogCount);
             RemoveDestroyedFogs();
             s_RegisteredFogs.Sort(s_PriorityComparison);
             Array.Clear(s_VisibleMaterialFogs, 0, s_VisibleMaterialFogs.Length);
@@ -132,7 +141,7 @@ namespace VividRP.Runtime
                 if (planes != null && !GeometryUtility.TestPlanesAABB(planes, fog.GetBounds()))
                     continue;
 
-                if (materialCount >= MaxVisibleLocalVolumetricFogCount)
+                if (materialCount >= maxVisibleFogCount)
                     continue;
 
                 s_VolumeBoundsData[materialCount] = fog.ConvertToVolumeBounds();
@@ -142,7 +151,6 @@ namespace VividRP.Runtime
             }
 
             s_MaterialFogCount = materialCount;
-            EnsureVolumetricMaterialBufferDescriptors();
             UploadVolumetricMaterialBuffers(materialCount);
             PrepareVolumetricMaterialDrawCalls(materialCount);
 
@@ -196,40 +204,51 @@ namespace VividRP.Runtime
             s_DefaultMaskTexture.Apply(false, true);
         }
 
-        private static void EnsureVolumetricMaterialBufferDescriptors()
+        private static void EnsureVolumetricMaterialStorage(int maxVisibleFogCount)
         {
+            int bufferCapacity = Mathf.Max(maxVisibleFogCount, 1);
+            EnsureArraySize(ref s_VolumeBoundsData, bufferCapacity);
+            EnsureArraySize(ref s_VisibleGlobalIndicesData, bufferCapacity);
+            EnsureArraySize(ref s_VisibleMaterialFogs, bufferCapacity);
+
             ConfigureBufferDescriptor(
                 s_VolumeBoundsBuffer,
-                MaxVisibleLocalVolumetricFogCount,
+                bufferCapacity,
                 VividVolumetricMaterialBounds.Stride,
                 GraphicsBuffer.Target.Structured,
                 "VolumeBounds");
             ConfigureBufferDescriptor(
                 s_VisibleGlobalIndicesBuffer,
-                MaxVisibleLocalVolumetricFogCount,
+                bufferCapacity,
                 4,
                 GraphicsBuffer.Target.Raw,
                 "VolumetricVisibleGlobalIndices");
             ConfigureBufferDescriptor(
                 s_GlobalIndirectArgsBuffer,
-                MaxVisibleLocalVolumetricFogCount,
+                bufferCapacity,
                 IndirectDrawIndexedArgsStride,
                 GraphicsBuffer.Target.IndirectArguments,
                 "VolumetricGlobalIndirectArgs");
             ConfigureBufferDescriptor(
                 s_GlobalIndirectionBuffer,
-                MaxVisibleLocalVolumetricFogCount,
+                bufferCapacity,
                 4,
                 GraphicsBuffer.Target.Raw,
                 "VolumetricGlobalIndirection");
             ConfigureBufferDescriptor(
                 s_VolumetricMaterialDataBuffer,
-                MaxVisibleLocalVolumetricFogCount * MaxVolumetricMaterialViewCount,
+                bufferCapacity * MaxVolumetricMaterialViewCount,
                 VividVolumetricMaterialRenderingData.Stride,
                 GraphicsBuffer.Target.Structured,
                 "VolumetricMaterialData");
 
             EnsureVolumetricMaterialIndexBuffer();
+        }
+
+        private static void EnsureArraySize<T>(ref T[] array, int size)
+        {
+            if (array == null || array.Length != size)
+                Array.Resize(ref array, size);
         }
 
         private static void ConfigureBufferDescriptor(
@@ -242,6 +261,16 @@ namespace VividRP.Runtime
             if (buffer?.desc == null)
                 return;
 
+            count = Mathf.Max(count, 1);
+            bool descriptorChanged = buffer.desc.Count != count
+                || buffer.desc.Stride != stride
+                || buffer.desc.Target != target
+                || buffer.desc.Name != name;
+
+            if (!descriptorChanged)
+                return;
+
+            buffer.ClearImportedBuffer();
             buffer.desc.Count = count;
             buffer.desc.Stride = stride;
             buffer.desc.Target = target;

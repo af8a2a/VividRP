@@ -106,19 +106,25 @@ namespace VividRP.Editor
                 PropertyField(m_DenoisingMode);
                 PropertyField(m_SliceDistributionUniformity);
                 PropertyField(m_Tier);
-                PropertyField(m_FogControlMode);
-                using (new EditorGUI.IndentLevelScope())
+                if (ShouldShowCustomQualitySettings())
                 {
-                    if (ShouldShowBalanceQualitySettings())
+                    using (new EditorGUI.IndentLevelScope())
                     {
-                        PropertyField(m_VolumetricFogBudget);
-                        PropertyField(m_ResolutionDepthRatio);
-                    }
+                        PropertyField(m_FogControlMode);
+                        using (new EditorGUI.IndentLevelScope())
+                        {
+                            if (ShouldShowBalanceQualitySettings())
+                            {
+                                PropertyField(m_VolumetricFogBudget);
+                                PropertyField(m_ResolutionDepthRatio);
+                            }
 
-                    if (ShouldShowManualQualitySettings())
-                    {
-                        PropertyField(m_ScreenResolutionPercentage);
-                        PropertyField(m_VolumeSliceCount);
+                            if (ShouldShowManualQualitySettings())
+                            {
+                                PropertyField(m_ScreenResolutionPercentage);
+                                PropertyField(m_VolumeSliceCount);
+                            }
+                        }
                     }
                 }
 
@@ -139,6 +145,12 @@ namespace VividRP.Editor
         {
             return !m_VolumetricFog.value.hasMultipleDifferentValues
                 && !m_VolumetricFog.value.boolValue;
+        }
+
+        private bool ShouldShowCustomQualitySettings()
+        {
+            return m_Tier.value.hasMultipleDifferentValues
+                || (VividVolumetricFogQualityTier)m_Tier.value.intValue == VividVolumetricFogQualityTier.Custom;
         }
 
         private bool ShouldShowBalanceQualitySettings()

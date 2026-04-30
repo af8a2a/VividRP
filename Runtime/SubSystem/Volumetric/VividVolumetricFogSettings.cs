@@ -19,7 +19,8 @@ namespace VividRP.Runtime
             bool temporalReprojectionEnabled,
             bool directionalLightsOnly,
             float densityCutoff,
-            VBufferParameters vBufferParameters)
+            VBufferParameters vBufferParameters,
+            int maxLocalVolumetricFogCount = VividLocalVolumetricFogManager.DefaultMaxVisibleLocalVolumetricFogCount)
         {
             Enabled = enabled;
             Scattering = scattering;
@@ -35,6 +36,7 @@ namespace VividRP.Runtime
             DirectionalLightsOnly = directionalLightsOnly;
             DensityCutoff = densityCutoff;
             VBufferParameters = vBufferParameters;
+            MaxLocalVolumetricFogCount = VividLocalVolumetricFogManager.ClampVisibleLocalVolumetricFogCount(maxLocalVolumetricFogCount);
         }
 
         public bool Enabled { get; }
@@ -51,6 +53,7 @@ namespace VividRP.Runtime
         public bool DirectionalLightsOnly { get; }
         public float DensityCutoff { get; }
         public VBufferParameters VBufferParameters { get; }
+        public int MaxLocalVolumetricFogCount { get; }
 
         public bool GaussianFilteringEnabled => Enabled
             && (DenoisingMode == VividVolumetricFogDenoisingMode.Gaussian
@@ -80,7 +83,8 @@ namespace VividRP.Runtime
                 false,
                 false,
                 0.0f,
-                vBuffer);
+                vBuffer,
+                VividLocalVolumetricFogManager.DefaultMaxVisibleLocalVolumetricFogCount);
         }
     }
 
@@ -262,6 +266,7 @@ namespace VividRP.Runtime
             if (volume == null || !volume.IsActive())
                 return VividVolumetricFogSettings.Disabled(cameraWidth, cameraHeight);
 
+            var globalSettings = VividRenderPipelineGlobalSettings.instance;
             ResolveQuality(volume, out var screenPercentage, out var sliceCount);
             var vBuffer = ComputeVBufferParameters(
                 cameraWidth,
@@ -288,7 +293,8 @@ namespace VividRP.Runtime
                 UsesTemporalReprojection(volume.denoisingMode.value),
                 volume.directionalLightsOnly.value,
                 volume.volumetricLightingDensityCutoff.value,
-                vBuffer);
+                vBuffer,
+                ResolveMaxLocalVolumetricFogCount(globalSettings));
         }
 
         internal static void ResolveQuality(
@@ -303,6 +309,12 @@ namespace VividRP.Runtime
                 return;
             }
 
+            if (volume.tier.value != VividVolumetricFogQualityTier.Custom)
+            {
+                ResolveQualityTier(volume.tier.value, out screenPercentage, out sliceCount);
+                return;
+            }
+
             if (volume.fogControlMode.value == VividVolumetricFogControlMode.Manual)
             {
                 screenPercentage = volume.screenResolutionPercentage.value;
@@ -310,8 +322,52 @@ namespace VividRP.Runtime
                 return;
             }
 
-            var budget = Mathf.Clamp01(volume.volumetricFogBudget.value);
-            var depthRatio = Mathf.Clamp01(volume.resolutionDepthRatio.value);
+            ResolveBalanceQuality(
+                volume.volumetricFogBudget.value,
+                volume.resolutionDepthRatio.value,
+                out screenPercentage,
+                out sliceCount);
+        }
+
+        private static void ResolveQualityTier(
+            VividVolumetricFogQualityTier tier,
+            out float screenPercentage,
+            out int sliceCount)
+        {
+            switch (tier)
+            {
+                case VividVolumetricFogQualityTier.Low:
+                    screenPercentage = VividVolumetricFogVolume.MinScreenResolutionPercentage;
+                    sliceCount = 32;
+                    break;
+                case VividVolumetricFogQualityTier.Medium:
+                    screenPercentage = VividVolumetricFogVolume.DefaultScreenResolutionPercentage;
+                    sliceCount = VividVolumetricFogVolume.DefaultVolumeSliceCount;
+                    break;
+                case VividVolumetricFogQualityTier.Ultra:
+                    screenPercentage = VividVolumetricFogVolume.MaxScreenResolutionPercentage;
+                    sliceCount = 256;
+                    break;
+                default:
+                    screenPercentage = 25.0f;
+                    sliceCount = 128;
+                    break;
+            }
+
+            sliceCount = Mathf.Clamp(
+                sliceCount,
+                VividVolumetricFogVolume.MinVolumeSliceCount,
+                VividVolumetricFogVolume.MaxVolumeSliceCount);
+        }
+
+        private static void ResolveBalanceQuality(
+            float volumetricFogBudget,
+            float resolutionDepthRatio,
+            out float screenPercentage,
+            out int sliceCount)
+        {
+            var budget = Mathf.Clamp01(volumetricFogBudget);
+            var depthRatio = Mathf.Clamp01(resolutionDepthRatio);
             var maxScreenPercentage =
                 (1.0f - depthRatio)
                 * (VividVolumetricFogVolume.MaxScreenResolutionPercentage - VividVolumetricFogVolume.MinScreenResolutionPercentage)
@@ -326,6 +382,13 @@ namespace VividRP.Runtime
                 (int)Mathf.Lerp(1.0f, maxSliceCount, budget),
                 VividVolumetricFogVolume.MinVolumeSliceCount,
                 VividVolumetricFogVolume.MaxVolumeSliceCount);
+        }
+
+        internal static int ResolveMaxLocalVolumetricFogCount(VividRenderPipelineGlobalSettings globalSettings)
+        {
+            return globalSettings != null
+                ? globalSettings.MaxLocalVolumetricFogCount
+                : VividLocalVolumetricFogManager.DefaultMaxVisibleLocalVolumetricFogCount;
         }
 
         internal static bool UsesTemporalReprojection(VividVolumetricFogDenoisingMode denoisingMode)

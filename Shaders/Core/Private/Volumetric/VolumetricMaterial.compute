@@ -84,9 +84,14 @@ float DistanceToAABB(float3 position, float3 extents)
     return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
 }
 
-float DistanceDistanceToOBB(float3 positionWS, VividVolumetricMaterialBounds obb)
+float3 GetOBBCenterRWS(VividVolumetricMaterialBounds obb)
 {
-    float3 offset = positionWS - obb.center;
+    return GetCameraRelativePositionWS(obb.center);
+}
+
+float DistanceDistanceToOBB(float3 positionRWS, VividVolumetricMaterialBounds obb)
+{
+    float3 offset = positionRWS - GetOBBCenterRWS(obb);
     float3 right = normalize(obb.right);
     float3 up = normalize(obb.up);
     float3 forward = normalize(cross(right, up));
@@ -100,10 +105,11 @@ float3 ComputeCubeVertexPositionRWS(VividVolumetricMaterialBounds obb, float3 ve
     float3 up = normalize(obb.up);
     float3 forward = normalize(cross(right, up));
     float3 localCorner = vertexMask * 2.0 - 1.0;
-    return obb.center
+    float3 positionWS = obb.center
         + right * (localCorner.x * obb.extentX)
         + up * (localCorner.y * obb.extentY)
         + forward * (localCorner.z * obb.extentZ);
+    return GetCameraRelativePositionWS(positionWS);
 }
 
 void ComputeCubeVerticesOrder(uint volumeIndex)
@@ -166,7 +172,8 @@ void ComputeVolumetricMaterialRenderingParameters(uint3 dispatchThreadID : SV_Di
     ComputeCubeVerticesOrder(volumeIndex);
 #endif
 
-    float cameraDistanceToOBB = DistanceDistanceToOBB(_WorldSpaceCameraPos, obb);
+    float3 cameraPositionRWS = GetCurrentViewPosition();
+    float cameraDistanceToOBB = DistanceDistanceToOBB(cameraPositionRWS, obb);
     float2 minPositionVS = 1.0;
     float2 maxPositionVS = -1.0;
     if (cameraDistanceToOBB <= 0.0)
@@ -178,12 +185,13 @@ void ComputeVolumetricMaterialRenderingParameters(uint3 dispatchThreadID : SV_Di
     float maxVertexDistance = 0.0;
     for (uint index = 0; index < 8; index++)
     {
-        float3 positionWS = ComputeCubeVertexPositionRWS(obb, k_CubeVertexMask[index]);
-        maxVertexDistance = max(maxVertexDistance, length(positionWS - _WorldSpaceCameraPos));
+        float3 positionRWS = ComputeCubeVertexPositionRWS(obb, k_CubeVertexMask[index]);
+        maxVertexDistance = max(maxVertexDistance, length(positionRWS - cameraPositionRWS));
 
         if (cameraDistanceToOBB > 0.0)
         {
-            float4 positionCS = TransformWorldToHClip(positionWS);
+            float3 positionVS = TransformWorldToView(positionRWS);
+            float4 positionCS = TransformWViewToHClip(positionVS);
             if (positionCS.w <= 0.0)
             {
                 minPositionVS = -1.0;

@@ -290,13 +290,17 @@ namespace VividRP.Runtime.RenderPass.Core
 
             cmd.SetGlobalBuffer(VolumetricGlobalIndirectionBufferId, indirection);
             cmd.SetGlobalBuffer(VolumetricMaterialDataId, materialData);
-            cmd.SetRenderTarget(m_VBufferDensity);
+            // Bind all VBuffer slices so SV_RenderTargetArrayIndex writes every voxel slice.
+            CoreUtils.SetRenderTarget(cmd, m_VBufferDensity);
             cmd.SetViewport(new Rect(
                 0.0f,
                 0.0f,
                 m_Settings.VBufferParameters.ViewportWidth,
                 m_Settings.VBufferParameters.ViewportHeight));
-            cmd.DrawRendererList(m_FogVolumeVFXRenderList);
+            VividLocalVolumetricFogManager.RecordVolumetricMaterialDrawCalls(cmd);
+
+            if (m_FogVolumeVFXRenderList?.IsValid == true)
+                cmd.DrawRendererList(m_FogVolumeVFXRenderList);
         }
 
         private void ConfigureCameraDepthTexture(int width, int height)
@@ -327,7 +331,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_ClearMaterialKernel >= 0
                 && m_ComputeMaterialKernel >= 0
                 && SystemInfo.supportsRenderTargetArrayIndexFromVertexShader
-                && m_FogVolumeVFXRenderList?.IsValid == true
                 && VividLocalVolumetricFogManager.globalIndirectArgsGraphicsBuffer != null
                 && VividLocalVolumetricFogManager.globalIndirectArgsGraphicsBuffer.IsValid()
                 && VividLocalVolumetricFogManager.globalIndirectionGraphicsBuffer != null

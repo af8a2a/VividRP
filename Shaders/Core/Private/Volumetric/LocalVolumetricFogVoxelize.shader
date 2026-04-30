@@ -84,13 +84,36 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
             float3 _VolumetricTiling;
             float3 _VolumetricScroll;
             Texture3D<float4> _VolumetricMask;
+            SAMPLER(sampler_VolumetricMask);
 
             struct VertexToFragment
             {
                 float4 positionCS : SV_POSITION;
                 float3 viewDirectionWS : TEXCOORD0;
-                nointerpolation float viewIndex : TEXCOORD1;
+                float3 positionOS : TEXCOORD1;
+                nointerpolation float viewIndex : TEXCOORD2;
                 nointerpolation uint depthSlice : SV_RenderTargetArrayIndex;
+            };
+
+            struct FragInputs
+            {
+                float4 positionSS;
+                float3 positionRWS;
+                float3 positionPredisplacementRWS;
+                uint2 positionPixel;
+                float4 texCoord0;
+            };
+
+            struct SurfaceDescriptionInputs
+            {
+                float4 uv0;
+                float3 TimeParameters;
+            };
+
+            struct SurfaceDescription
+            {
+                float3 BaseColor;
+                float Alpha;
             };
 
             float Remap01Vivid(float value, float rcpLength, float startTimesRcpLength)
@@ -144,7 +167,8 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
 
             float VBufferDistanceToSliceIndex(uint sliceIndex)
             {
-                return GetVBufferSliceDistance((float)sliceIndex + 0.5);
+                float encodedDepth = ((float)sliceIndex + 0.5) * _VBufferRcpSliceCount + _VBufferRcpSliceCount;
+                return DecodeLogarithmicDepthGeneralized(encodedDepth, _VBufferDepthDecodingParams);
             }
 
             float EyeDepthToLinear(float linearDepth, float4 zBufferParam)
@@ -159,13 +183,13 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
                 VertexToFragment output;
 
                 uint materialDataIndex = _VolumetricGlobalIndirectionBuffer.Load(_VolumetricFogGlobalIndex << 2);
-                uint sliceCount = max(_VolumetricMaterialData[materialDataIndex].sliceCount, 1u);
+                uint sliceCount = _VolumetricMaterialData[materialDataIndex].sliceCount;
                 uint viewIndex = instanceId / sliceCount;
                 materialDataIndex += viewIndex * (uint)_VBufferLocalFogCount;
+                output.viewIndex = viewIndex;
 
                 uint sliceStartIndex = _VolumetricMaterialData[materialDataIndex].startSliceIndex;
                 uint sliceIndex = sliceStartIndex + (instanceId % sliceCount);
-                output.viewIndex = viewIndex;
                 output.depthSlice = sliceIndex + viewIndex * (uint)_VBufferSliceCount;
 
                 output.positionCS = GetQuadVertexPosition(vertexId);
@@ -177,45 +201,74 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
                 output.positionCS.z = EyeDepthToLinear(sliceDepth, _ZBufferParams);
                 output.positionCS.w = 1.0;
 
-                float3 rayDirectionWS = GetVBufferRayDirectionWSFromPixelCoord(
-                    (output.positionCS.xy * 0.5 + 0.5) * _VBufferViewportSize.xy);
-                output.viewDirectionWS = -rayDirectionWS;
+                float3 positionRWS = ComputeWorldSpacePosition(output.positionCS, UNITY_MATRIX_I_VP);
+                output.viewDirectionWS = GetWorldSpaceViewDir(positionRWS);
+                output.positionOS = mul(UNITY_MATRIX_I_M, float4(positionRWS, 1.0)).xyz;
 
                 return output;
             }
 
-            float SampleVolumetricMask(float3 coordNDC)
+            FragInputs BuildFragInputs(VertexToFragment input, float3 voxelPositionRWS, float3 voxelClipSpace)
             {
-                if (_VolumetricMaskMode <= 0.5)
-                    return 1.0;
+                FragInputs output;
+                ZERO_INITIALIZE(FragInputs, output);
 
-                float3 maskUv = saturate(coordNDC * max(_VolumetricTiling, 1e-4) + _VolumetricScroll);
-                float4 maskSample = _VolumetricMask.SampleLevel(sampler_LinearClamp, maskUv, 0);
-                return _VolumetricAlphaOnlyTexture > 0.5 ? maskSample.a : maskSample.r;
+                output.positionSS = input.positionCS;
+                output.positionRWS = voxelPositionRWS;
+                output.positionPredisplacementRWS = voxelPositionRWS;
+                output.positionPixel = uint2(input.positionCS.xy);
+                output.texCoord0 = float4(saturate(voxelClipSpace * 0.5 + 0.5), 0.0);
+
+                return output;
             }
 
-            void Frag(VertexToFragment input, out float4 outColor : SV_Target0)
+            SurfaceDescriptionInputs FragInputsToSurfaceDescriptionInputs(FragInputs input)
             {
-                float sliceDistance = VBufferDistanceToSliceIndex(input.depthSlice % (uint)_VBufferSliceCount);
-                float3 rayCenterDirWS = normalize(-input.viewDirectionWS);
-                float3 voxelCenterWS = _WorldSpaceCameraPos + sliceDistance * rayCenterDirWS;
+                SurfaceDescriptionInputs output;
+                ZERO_INITIALIZE(SurfaceDescriptionInputs, output);
 
-                float3x3 obbFrame = float3x3(
-                    normalize(_VolumetricMaterialObbRight),
-                    normalize(_VolumetricMaterialObbUp),
-                    normalize(cross(_VolumetricMaterialObbRight, _VolumetricMaterialObbUp)));
-                float3 voxelCenterBS = mul(voxelCenterWS - _VolumetricMaterialObbCenter, transpose(obbFrame));
-                float3 voxelCenterCS = voxelCenterBS * rcp(max(_VolumetricMaterialObbExtents, 1e-4));
+                output.uv0 = input.texCoord0;
+                output.TimeParameters = _TimeParameters.xyz;
 
-                if (Max3(abs(voxelCenterCS.x), abs(voxelCenterCS.y), abs(voxelCenterCS.z)) > 1.0)
-                    clip(-1);
+                return output;
+            }
 
-                float3 voxelCenterNDC = saturate(voxelCenterCS * 0.5 + 0.5);
+            SurfaceDescription SurfaceDescriptionFunction(SurfaceDescriptionInputs input)
+            {
+                SurfaceDescription surface;
+                ZERO_INITIALIZE(SurfaceDescription, surface);
+
+                float4 maskValue = float4(1.0, 1.0, 1.0, 1.0);
+                if (_VolumetricMaskMode > 0.5)
+                {
+                    float3 maskUv = input.uv0.xyz * max(_VolumetricTiling, 1e-4) + _VolumetricScroll;
+                    float4 maskSample = _VolumetricMask.SampleLevel(sampler_VolumetricMask, maskUv, 0);
+                    float4 alphaOnlyMask = float4(1.0, 1.0, 1.0, maskSample.a);
+                    maskValue = 0.5 > _VolumetricAlphaOnlyTexture ? maskSample : alphaOnlyMask;
+                }
+
+                surface.BaseColor = maskValue.rgb;
+                surface.Alpha = maskValue.a;
+                return surface;
+            }
+
+            void GetVolumeData(FragInputs fragInputs, float3 viewWS, out float3 scatteringColor, out float density)
+            {
+                SurfaceDescriptionInputs surfaceDescriptionInputs = FragInputsToSurfaceDescriptionInputs(fragInputs);
+                SurfaceDescription surfaceDescription = SurfaceDescriptionFunction(surfaceDescriptionInputs);
+
+                scatteringColor = surfaceDescription.BaseColor;
+                density = surfaceDescription.Alpha;
+            }
+
+            float ComputeFadeFactor(float3 coordNDC, float distance)
+            {
                 bool exponential = (uint)_VolumetricMaterialFalloffMode == LOCALVOLUMETRICFOGFALLOFFMODE_EXPONENTIAL;
                 bool multiplyBlendMode = (uint)_FogVolumeBlendMode == LOCALVOLUMETRICFOGBLENDINGMODE_MULTIPLY;
-                float fade = ComputeVolumeFadeFactor(
-                    voxelCenterNDC,
-                    sliceDistance,
+
+                return ComputeVolumeFadeFactor(
+                    coordNDC,
+                    distance,
                     _VolumetricMaterialRcpPosFaceFade,
                     _VolumetricMaterialRcpNegFaceFade,
                     _VolumetricMaterialInvertFade != 0,
@@ -223,19 +276,44 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
                     _VolumetricMaterialEndTimesRcpDistFadeLen,
                     exponential,
                     multiplyBlendMode);
-                fade *= SampleVolumetricMask(voxelCenterNDC);
+            }
 
-                float extinction = rcp(max(_FogVolumeFogDistanceProperty, 0.05));
-                float3 scattering = saturate(_FogVolumeSingleScatteringAlbedo.rgb) * extinction;
+            void Frag(VertexToFragment input, out float4 outColor : SV_Target0)
+            {
+                float sliceDistance = VBufferDistanceToSliceIndex(input.depthSlice % (uint)_VBufferSliceCount);
+                float3 rayCenterDirWS = normalize(-input.viewDirectionWS);
+                float3 voxelCenterRWS = GetCurrentViewPosition() + sliceDistance * rayCenterDirWS;
 
-                if (multiplyBlendMode)
+                float3x3 obbFrame = float3x3(
+                    _VolumetricMaterialObbRight,
+                    _VolumetricMaterialObbUp,
+                    cross(_VolumetricMaterialObbRight, _VolumetricMaterialObbUp));
+                float3 voxelCenterBS = mul(GetAbsolutePositionWS(voxelCenterRWS - _VolumetricMaterialObbCenter), transpose(obbFrame));
+                float3 voxelCenterCS = voxelCenterBS * rcp(max(_VolumetricMaterialObbExtents, 1e-4));
+
+                bool overlap = Max3(abs(voxelCenterCS.x), abs(voxelCenterCS.y), abs(voxelCenterCS.z)) <= 1.0;
+                if (!overlap)
+                    clip(-1);
+
+                FragInputs fragInputs = BuildFragInputs(input, voxelCenterRWS, voxelCenterCS);
+                float3 albedo;
+                float extinction;
+                GetVolumeData(fragInputs, input.viewDirectionWS, albedo, extinction);
+
+                extinction *= rcp(max(_FogVolumeFogDistanceProperty, 0.05));
+                albedo *= _FogVolumeSingleScatteringAlbedo.rgb;
+
+                float3 voxelCenterNDC = saturate(voxelCenterCS * 0.5 + 0.5);
+                float fade = ComputeFadeFactor(voxelCenterNDC, sliceDistance);
+
+                if ((uint)_FogVolumeBlendMode == LOCALVOLUMETRICFOGBLENDINGMODE_MULTIPLY)
                 {
-                    outColor = max(0.0, lerp(float4(1.0, 1.0, 1.0, 1.0), float4(scattering, extinction), float4(fade, fade, fade, fade)));
+                    outColor = max(0.0, lerp(float4(1.0, 1.0, 1.0, 1.0), float4(albedo * extinction, extinction), fade.xxxx));
                 }
                 else
                 {
                     extinction *= fade;
-                    outColor = max(0.0, float4(saturate(scattering * fade), extinction));
+                    outColor = max(0.0, float4(saturate(albedo * extinction), extinction));
                 }
             }
             ENDHLSL

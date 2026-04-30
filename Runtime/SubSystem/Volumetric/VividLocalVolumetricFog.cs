@@ -321,6 +321,9 @@ namespace VividRP.Runtime
             VividLocalVolumetricFogArtistParameters.CreateDefault();
 
         private MaterialPropertyBlock m_RenderingProperties;
+        private Material m_VoxelizationMaterial;
+        private int m_VoxelizationPassIndex = -1;
+        private int m_VolumetricFogGlobalIndex = -1;
 
         public VividLocalVolumetricFogArtistParameters parameters
         {
@@ -427,20 +430,20 @@ namespace VividRP.Runtime
         internal void PrepareVolumetricMaterialDrawCall(
             int globalIndex,
             GraphicsBuffer materialDataBuffer,
-            GraphicsBuffer indexBuffer,
-            GraphicsBuffer indirectArgsBuffer,
             Material defaultVoxelizationMaterial,
             Texture3D defaultMaskTexture)
         {
+            m_VoxelizationMaterial = null;
+            m_VoxelizationPassIndex = -1;
+            m_VolumetricFogGlobalIndex = -1;
+
             var parameters = GetEffectiveParameters();
             var material = ResolveVoxelizationMaterial(parameters, defaultVoxelizationMaterial);
+            var passIndex = material != null ? material.FindPass(FogVolumeVoxelizePassName) : -1;
             if (material == null
+                || passIndex < 0
                 || materialDataBuffer == null
-                || !materialDataBuffer.IsValid()
-                || indexBuffer == null
-                || !indexBuffer.IsValid()
-                || indirectArgsBuffer == null
-                || !indirectArgsBuffer.IsValid())
+                || !materialDataBuffer.IsValid())
             {
                 return;
             }
@@ -472,33 +475,39 @@ namespace VividRP.Runtime
             m_RenderingProperties.SetFloat(VolumetricMaterialEndTimesRcpDistFadeLenId, distanceFade.y);
             m_RenderingProperties.SetInteger(VolumetricMaterialFalloffModeId, (int)parameters.falloffMode);
 
-            var aabb = CreateWorldAabb(bounds);
-            var renderParams = new RenderParams
-            {
-                layer = gameObject.layer,
-                rendererPriority = parameters.priority,
-                worldBounds = aabb,
-                motionVectorMode = MotionVectorGenerationMode.ForceNoMotion,
-                reflectionProbeUsage = ReflectionProbeUsage.Off,
-                renderingLayerMask = uint.MaxValue,
-                material = material,
-                matProps = m_RenderingProperties,
-                shadowCastingMode = ShadowCastingMode.Off,
-                receiveShadows = false,
-                lightProbeUsage = LightProbeUsage.Off,
-#if UNITY_EDITOR
-                overrideSceneCullingMask = true,
-                sceneCullingMask = gameObject.sceneCullingMask,
-#endif
-            };
+            m_VoxelizationMaterial = material;
+            m_VoxelizationPassIndex = passIndex;
+            m_VolumetricFogGlobalIndex = globalIndex;
+        }
 
-            Graphics.RenderPrimitivesIndexedIndirect(
-                renderParams,
-                MeshTopology.Triangles,
+        internal void RecordVolumetricMaterialDrawCall(
+            CommandBuffer cmd,
+            GraphicsBuffer indexBuffer,
+            GraphicsBuffer indirectArgsBuffer,
+            int indirectArgsByteOffset)
+        {
+            if (cmd == null
+                || m_VoxelizationMaterial == null
+                || m_VoxelizationPassIndex < 0
+                || m_VolumetricFogGlobalIndex < 0
+                || m_RenderingProperties == null
+                || indexBuffer == null
+                || !indexBuffer.IsValid()
+                || indirectArgsBuffer == null
+                || !indirectArgsBuffer.IsValid())
+            {
+                return;
+            }
+
+            cmd.DrawProceduralIndirect(
                 indexBuffer,
+                Matrix4x4.identity,
+                m_VoxelizationMaterial,
+                m_VoxelizationPassIndex,
+                MeshTopology.Triangles,
                 indirectArgsBuffer,
-                1,
-                globalIndex);
+                indirectArgsByteOffset,
+                m_RenderingProperties);
         }
 
         private static Material ResolveVoxelizationMaterial(
@@ -809,22 +818,5 @@ namespace VividRP.Runtime
                 Max(extents, k_MinimumBoxSize * 0.5f));
         }
 
-        private static Bounds CreateWorldAabb(in VividVolumetricMaterialBounds bounds)
-        {
-            Vector3 right = bounds.right;
-            Vector3 up = bounds.up;
-            Vector3 forward = Vector3.Cross(up, right).normalized;
-            Vector3 extents =
-                Abs(right * bounds.extentX)
-                + Abs(up * bounds.extentY)
-                + Abs(forward * bounds.extentZ);
-
-            return new Bounds(bounds.center, extents * 2.0f);
-        }
-
-        private static Vector3 Abs(Vector3 value)
-        {
-            return new Vector3(Mathf.Abs(value.x), Mathf.Abs(value.y), Mathf.Abs(value.z));
-        }
     }
 }

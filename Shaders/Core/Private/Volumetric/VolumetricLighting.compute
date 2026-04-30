@@ -380,7 +380,7 @@ VoxelLighting EvaluateVoxelLightingDirectional(uint3 voxelCoord, JitteredRay ray
         if (!LightAffectsVolumetrics(light.affectVolumetric, light.volumetricDimmer))
             continue;
 
-        float3 L = SafeNormalize(-light.directionWS);
+        float3 L = SafeNormalize(light.directionWS);
         float3 lightColor = max(light.color, 0.0) * light.volumetricDimmer;
         float shadow = SampleDirectionalShadow(voxelCoord.xy, i, light, sampleWS);
         lightColor *= shadow;

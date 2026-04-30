@@ -12,7 +12,7 @@ namespace VividRP.Runtime
         public const int AbsoluteMaxVisibleLocalVolumetricFogCount = 1024;
         public const int MaxVolumetricMaterialViewCount = 2;
         private const int IndirectDrawIndexedArgsUIntCount = 5;
-        private const int IndirectDrawIndexedArgsStride = IndirectDrawIndexedArgsUIntCount * 4;
+        private const int IndirectDrawIndexedArgsStride = IndirectDrawIndexedArgsUIntCount * sizeof(uint);
         private const string DefaultVoxelizationShaderName = "Hidden/VividRP/LocalVolumetricFogVoxelize";
 
         private static readonly List<VividLocalVolumetricFog> s_RegisteredFogs = new();
@@ -303,8 +303,7 @@ namespace VividRP.Runtime
         {
             EnsureVolumetricMaterialIndexBuffer();
             var materialDataBuffer = s_VolumetricMaterialDataBuffer.ImportedGraphicsBuffer;
-            var indirectArgsBuffer = s_GlobalIndirectArgsBuffer.ImportedGraphicsBuffer;
-            if (materialDataBuffer == null || indirectArgsBuffer == null || s_VolumetricMaterialIndexBuffer == null)
+            if (materialDataBuffer == null || !materialDataBuffer.IsValid())
                 return;
 
             for (int index = 0; index < materialCount; index++)
@@ -314,10 +313,32 @@ namespace VividRP.Runtime
                 s_VisibleMaterialFogs[index]?.PrepareVolumetricMaterialDrawCall(
                     index,
                     materialDataBuffer,
-                    s_VolumetricMaterialIndexBuffer,
-                    indirectArgsBuffer,
                     defaultMaterial,
                     defaultMaskTexture);
+            }
+        }
+
+        internal static void RecordVolumetricMaterialDrawCalls(CommandBuffer cmd)
+        {
+            if (cmd == null
+                || s_MaterialFogCount <= 0
+                || s_VolumetricMaterialIndexBuffer == null
+                || !s_VolumetricMaterialIndexBuffer.IsValid())
+            {
+                return;
+            }
+
+            var indirectArgsBuffer = s_GlobalIndirectArgsBuffer.ImportedGraphicsBuffer;
+            if (indirectArgsBuffer == null || !indirectArgsBuffer.IsValid())
+                return;
+
+            for (int index = 0; index < s_MaterialFogCount; index++)
+            {
+                s_VisibleMaterialFogs[index]?.RecordVolumetricMaterialDrawCall(
+                    cmd,
+                    s_VolumetricMaterialIndexBuffer,
+                    indirectArgsBuffer,
+                    index * IndirectDrawIndexedArgsStride);
             }
         }
 

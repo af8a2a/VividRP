@@ -16,6 +16,7 @@ Shader "Hidden/VividRP/FinalBlit"
             #pragma vertex Vert
             #pragma fragment Frag
             #pragma multi_compile_local _ _FILM_GRAIN
+            #pragma multi_compile_local _ _VIGNETTE
             #pragma multi_compile_local _ _BLOOM
             #pragma multi_compile_local _ _BLOOM_HQ
             #pragma multi_compile_local _ _BLOOM_DIRT
@@ -34,6 +35,24 @@ Shader "Hidden/VividRP/FinalBlit"
             StructuredBuffer<float4> _VividAutoExposureBuffer;
             StructuredBuffer<float4> _VividAutoExposurePreExposureBuffer;
             float4 _VividAutoExposureParams;
+
+            #if defined(_VIGNETTE)
+            TEXTURE2D(_VividVignetteMask);
+            SAMPLER(sampler_VividVignetteMask);
+            float4 _VividVignetteParams1; // xy: center, z: mode (0 procedural, 1 masked)
+            float4 _VividVignetteParams2; // x: intensity, y: smoothness, z: roundness, w: rounded
+            float4 _VividVignetteColor;   // xyz: color, w: masked opacity
+            float4 _VividVignetteScreenParams;
+
+            #define VividVignetteCenter     _VividVignetteParams1.xy
+            #define VividVignetteMode       _VividVignetteParams1.z
+            #define VividVignetteIntensity  _VividVignetteParams2.x
+            #define VividVignetteSmoothness _VividVignetteParams2.y
+            #define VividVignetteRoundness  _VividVignetteParams2.z
+            #define VividVignetteRounded    _VividVignetteParams2.w
+            #define VividVignetteColor      _VividVignetteColor.xyz
+            #define VividVignetteOpacity    _VividVignetteColor.w
+            #endif
 
             #if defined(_BLOOM)
             TEXTURE2D(_VividBloomTexture);
@@ -66,6 +85,7 @@ Shader "Hidden/VividRP/FinalBlit"
             {
                 float4 positionCS : SV_POSITION;
                 float2 uv         : TEXCOORD0;
+                float2 screenUV   : TEXCOORD1;
             };
 
             Varyings Vert(Attributes input)
@@ -76,6 +96,7 @@ Shader "Hidden/VividRP/FinalBlit"
 
                 output.positionCS = pos;
                 output.uv = DYNAMIC_SCALING_APPLY_SCALEBIAS(uv);
+                output.screenUV = uv;
                 return output;
             }
 
@@ -121,6 +142,26 @@ Shader "Hidden/VividRP/FinalBlit"
                     #endif
 
                     postProcessed += bloom;
+                }
+                #endif
+
+                #if defined(_VIGNETTE)
+                {
+                    if (VividVignetteMode < 0.5)
+                    {
+                        float2 d = abs(input.screenUV - VividVignetteCenter) * VividVignetteIntensity;
+                        d.x *= lerp(1.0, _VividVignetteScreenParams.x / _VividVignetteScreenParams.y, VividVignetteRounded);
+                        d = pow(saturate(d), VividVignetteRoundness);
+                        float vfactor = pow(saturate(1.0 - dot(d, d)), VividVignetteSmoothness);
+                        postProcessed *= lerp(VividVignetteColor, (1.0).xxx, vfactor);
+                    }
+                    else
+                    {
+                        float vfactor = SAMPLE_TEXTURE2D(_VividVignetteMask, sampler_VividVignetteMask, input.screenUV).w;
+                        vfactor = FastSRGBToLinear(vfactor);
+                        float3 newColor = postProcessed * lerp(VividVignetteColor, (1.0).xxx, vfactor);
+                        postProcessed = lerp(postProcessed, newColor, VividVignetteOpacity);
+                    }
                 }
                 #endif
 

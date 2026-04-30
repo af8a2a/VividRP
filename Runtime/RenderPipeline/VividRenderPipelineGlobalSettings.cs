@@ -20,7 +20,17 @@ namespace VividRP.Runtime
         [SerializeField]
         private RenderPipelineGraphicsSettingsContainer m_Settings = new();
 
+        [SerializeField]
+        [Range(VividLocalVolumetricFogManager.MinVisibleLocalVolumetricFogCount, VividLocalVolumetricFogManager.AbsoluteMaxVisibleLocalVolumetricFogCount)]
+        private int m_MaxLocalVolumetricFogCount = VividLocalVolumetricFogManager.DefaultMaxVisibleLocalVolumetricFogCount;
+
         protected override List<IRenderPipelineGraphicsSettings> settingsList => m_Settings.settingsList;
+
+        public int MaxLocalVolumetricFogCount
+        {
+            get => VividLocalVolumetricFogManager.ClampVisibleLocalVolumetricFogCount(m_MaxLocalVolumetricFogCount);
+            set => m_MaxLocalVolumetricFogCount = VividLocalVolumetricFogManager.ClampVisibleLocalVolumetricFogCount(value);
+        }
 
         internal T GetSettings<T>() where T : class, IRenderPipelineGraphicsSettings
         {
@@ -91,5 +101,10 @@ namespace VividRP.Runtime
             return currentInstance;
         }
 #endif
+
+        private void OnValidate()
+        {
+            MaxLocalVolumetricFogCount = m_MaxLocalVolumetricFogCount;
+        }
     }
 }

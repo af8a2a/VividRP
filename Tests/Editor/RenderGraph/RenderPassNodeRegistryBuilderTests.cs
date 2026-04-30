@@ -31,6 +31,18 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void BuildRegistrations_ExcludesObsoletePassTypes()
+        {
+#pragma warning disable CS0618
+            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(
+                new[] { typeof(DeprecatedPass) },
+                includeTestAssemblies: true);
+#pragma warning restore CS0618
+
+            Assert.That(registrations, Is.Empty);
+        }
+
+        [Test]
         public void BuildRegistrations_GeneratesDistinctNodeNames_WhenPassNamesCollide()
         {
             var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(
@@ -91,6 +103,26 @@ namespace VividRP.Editor.Tests
                 public override void Dispose()
                 {
                 }
+            }
+        }
+
+        [Obsolete("Only used to verify deprecated pass filtering.")]
+        public sealed class DeprecatedPass : RasterPass
+        {
+            public override void Create()
+            {
+            }
+
+            public override void Prepare(ContextContainer frameData)
+            {
+            }
+
+            public override void Record(RasterPassContext context)
+            {
+            }
+
+            public override void Dispose()
+            {
             }
         }
 

@@ -13,17 +13,24 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyAmbientProbeConvolution.cs"));
 
+            Assert.That(source, Does.Contain("private const string DiffuseVolumetricKernelName = \"AmbientProbeConvolutionDiffuseVolumetric\";"));
             Assert.That(source, Does.Contain("private const string DiffuseKernelName = \"AmbientProbeConvolutionDiffuse\";"));
             Assert.That(source, Does.Contain("private const string LegacyKernelName = \"AmbientProbeConvolution\";"));
             Assert.That(source, Does.Contain("private const bool EnableAmbientProbeDebugReadback = true;"));
             Assert.That(source, Does.Contain("m_Kernel = FindKernel();"));
             Assert.That(source, Does.Contain("EnsureDefaultAmbientProbeBuffer();"));
+            Assert.That(source, Does.Contain("if (m_ComputeShader.HasKernel(DiffuseVolumetricKernelName))"));
             Assert.That(source, Does.Contain("if (m_ComputeShader.HasKernel(DiffuseKernelName))"));
             Assert.That(source, Does.Contain("if (m_ComputeShader.HasKernel(LegacyKernelName))"));
             Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_Kernel, DiffuseAmbientProbeOutputBufferId, m_AmbientProbeBuffer);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_Kernel, VolumetricAmbientProbeOutputBufferId, m_VolumetricAmbientProbeBuffer);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeVectorParam(m_ComputeShader, FogParametersId, fogParameters);"));
             Assert.That(source, Does.Contain("cmd.SetComputeBufferParam(m_ComputeShader, m_Kernel, ScratchBufferId, m_AmbientProbeScratchBuffer);"));
             Assert.That(source, Does.Contain("internal void BindGlobalBuffer(CommandBuffer cmd, bool useDefault = false)"));
             Assert.That(source, Does.Contain("var activeBuffer = useDefault || m_AmbientProbeBuffer == null ? m_DefaultAmbientProbeBuffer : m_AmbientProbeBuffer;"));
+            Assert.That(source, Does.Contain("var activeVolumetricBuffer = useDefault || m_VolumetricAmbientProbeBuffer == null"));
+            Assert.That(source, Does.Contain("cmd.SetGlobalBuffer("));
+            Assert.That(source, Does.Contain("VolumetricAmbientProbeBufferId"));
             Assert.That(source, Does.Contain("RequestDebugReadback(cmd, activeBuffer, useDefault);"));
             Assert.That(source, Does.Contain("SkyAmbientProbeConvolution.Convolve (MissingBuffer)"));
             Assert.That(source, Does.Contain("SkyAmbientProbeConvolution.Convolve (SkyChanged)"));
@@ -59,10 +66,12 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("#pragma kernel AmbientProbeConvolutionClouds"));
             Assert.That(source, Does.Contain("TEXTURECUBE(_AmbientProbeInputCubemap);"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<float> _AmbientProbeOutputBuffer;"));
+            Assert.That(source, Does.Contain("RWStructuredBuffer<float4> _VolumetricAmbientProbeOutputBuffer;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<float4> _DiffuseAmbientProbeOutputBuffer;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _ScratchBuffer;"));
             Assert.That(source, Does.Contain("uniform float4 _FogParameters;"));
             Assert.That(source, Does.Contain("PackSHFromScratchBuffer(_DiffuseAmbientProbeOutputBuffer);"));
+            Assert.That(source, Does.Contain("PackSHFromScratchBuffer(_VolumetricAmbientProbeOutputBuffer);"));
             Assert.That(source, Does.Contain("void KERNEL_NAME(uint dispatchThreadId : SV_DispatchThreadID)"));
             Assert.That(source, Does.Not.Contain("#define PLATFORM_SUPPORTS_WAVE_INTRINSICS"));
             Assert.That(source, Does.Not.Contain("#pragma use_dxc"));
@@ -96,7 +105,11 @@ namespace VividRP.Editor.Tests
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyManager.cs"));
 
             Assert.That(source, Does.Contain("var useDefaultAmbientProbe = skyData == null || skyData.ambientProbeCubemap == null;"));
+            Assert.That(source, Does.Contain("var fogParameters = BuildVolumetricAmbientProbeFogParameters();"));
+            Assert.That(source, Does.Contain("var ambientProbeHash = BuildVolumetricAmbientProbeHash(skyData?.ambientProbeHash ?? 0, fogParameters);"));
             Assert.That(source, Does.Contain("if (!useDefaultAmbientProbe)"));
+            Assert.That(source, Does.Contain("BuildVolumetricAmbientProbeFogParameters()"));
+            Assert.That(source, Does.Contain("BuildVolumetricAmbientProbeHash(int ambientProbeHash, Vector4 fogParameters)"));
             Assert.That(source, Does.Contain("s_AmbientProbeConvolution.BindGlobalBuffer(cmd, useDefaultAmbientProbe);"));
         }
 
@@ -106,7 +119,8 @@ namespace VividRP.Editor.Tests
             var packageRoots = new[]
             {
                 Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp"),
+                Path.Combine(projectRoot, "Packages", "Custom_URP")
             };
 
             foreach (var packageRoot in packageRoots)

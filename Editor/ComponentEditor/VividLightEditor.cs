@@ -41,6 +41,11 @@ namespace VividRP.Editor
         private static readonly GUIContent s_BarnDoorLabel = EditorGUIUtility.TrTextContent("Barn Door");
         private static readonly GUIContent s_BarnDoorAngleLabel = EditorGUIUtility.TrTextContent("Angle", "Angle in degrees of the rectangular area light barn doors.");
         private static readonly GUIContent s_BarnDoorLengthLabel = EditorGUIUtility.TrTextContent("Length", "Length of the rectangular area light barn door blades.");
+        private static readonly GUIContent s_VolumetricLabel = EditorGUIUtility.TrTextContent("Volumetrics");
+        private static readonly GUIContent s_AffectsVolumetricLabel = EditorGUIUtility.TrTextContent("Affect Volumetric");
+        private static readonly GUIContent s_VolumetricDimmerLabel = EditorGUIUtility.TrTextContent("Dimmer", "Controls how much this light contributes to volumetric fog.");
+        private static readonly GUIContent s_VolumetricFadeDistanceLabel = EditorGUIUtility.TrTextContent("Fade Distance", "Distance from the camera at which this local light stops contributing to volumetric fog.");
+        private static readonly GUIContent s_VolumetricShadowDimmerLabel = EditorGUIUtility.TrTextContent("Shadow Dimmer", "Controls how strongly this light's shadows affect volumetric fog.");
         private static readonly GUIContent s_CelestialBodyLabel = EditorGUIUtility.TrTextContent("Celestial Body");
         private static readonly GUIContent s_InteractsWithSkyLabel = EditorGUIUtility.TrTextContent("Affect Physically Based Sky", "Check this option to make the light and the Physically Based sky affect one another.");
         private static readonly GUIContent s_AngularDiameterLabel = EditorGUIUtility.TrTextContent("Angular Diameter", "Angular diameter of the emissive celestial body represented by the light as seen from the camera (in degrees). Used to render the sun/moon disk and affects the sharpness of shadows.");
@@ -235,6 +240,7 @@ namespace VividRP.Editor
                 }
             }
 
+            DrawVolumetricInspector();
             DrawPhysicallyBasedSkyInspector();
 
             if (!ShouldShowDirectionalRayTracedShadowControls(m_SerializedLight))
@@ -310,6 +316,28 @@ namespace VividRP.Editor
             EditorGUILayout.PropertyField(m_SerializedLight.barnDoorLength, s_BarnDoorLengthLabel);
         }
 
+        private void DrawVolumetricInspector()
+        {
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField(s_VolumetricLabel, EditorStyles.boldLabel);
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                EditorGUILayout.PropertyField(m_SerializedLight.affectsVolumetric, s_AffectsVolumetricLabel);
+
+                using (new EditorGUI.DisabledScope(
+                           !m_SerializedLight.affectsVolumetric.hasMultipleDifferentValues
+                           && !m_SerializedLight.affectsVolumetric.boolValue))
+                {
+                    EditorGUILayout.Slider(m_SerializedLight.volumetricDimmer, 0.0f, 16.0f, s_VolumetricDimmerLabel);
+                    EditorGUILayout.Slider(m_SerializedLight.volumetricShadowDimmer, 0.0f, 1.0f, s_VolumetricShadowDimmerLabel);
+
+                    if (ShouldShowVolumetricFadeDistanceControls(m_SerializedLight))
+                        EditorGUILayout.PropertyField(m_SerializedLight.volumetricFadeDistance, s_VolumetricFadeDistanceLabel);
+                }
+            }
+        }
+
         private void DrawDirectionalPCSSFields()
         {
             if (!ShouldShowDirectionalPCSSControls(m_SerializedLight))
@@ -382,6 +410,15 @@ namespace VividRP.Editor
                 && !serializedLight.settings.lightType.hasMultipleDifferentValues
                 && serializedLight.settings.light != null
                 && serializedLight.settings.light.type == LightType.Directional;
+        }
+
+        internal static bool ShouldShowVolumetricFadeDistanceControls(VividSerializedLight serializedLight)
+        {
+            return serializedLight != null
+                && serializedLight.settings != null
+                && !serializedLight.settings.lightType.hasMultipleDifferentValues
+                && serializedLight.settings.light != null
+                && serializedLight.settings.light.type != LightType.Directional;
         }
 
         internal static bool ShouldExpandDirectionalRayTracedShadowControls(VividSerializedLight serializedLight)

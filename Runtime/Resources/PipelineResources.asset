@@ -161,6 +161,16 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 428f3d9c861c4de4b90532919bf8a752, type: 3}
   - ResourceName: Shaders/Core/Private/TemporalAA
     ResourceObject: {fileID: 7200000, guid: e30d483061855394891ca96699b7d9ba, type: 3}
+  - ResourceName: Shaders/Core/Private/Volumetric/LocalVolumetricFogVoxelize
+    ResourceObject: {fileID: 4800000, guid: 9c6d7eaf1b78d6340b9bfa881a13e069, type: 3}
+  - ResourceName: Shaders/Core/Private/Volumetric/VolumetricDensity.compute
+    ResourceObject: {fileID: 7200000, guid: 3f6a8fc5473c023429fa9a6f5a80a197, type: 3}
+  - ResourceName: Shaders/Core/Private/Volumetric/VolumetricLighting.compute
+    ResourceObject: {fileID: 7200000, guid: 1430d0fd6c9d3894ab5afbf525f42f0e, type: 3}
+  - ResourceName: Shaders/Core/Private/Volumetric/VolumetricMaterial.compute
+    ResourceObject: {fileID: 7200000, guid: a4604810fc5635a498b163901d7e1880, type: 3}
+  - ResourceName: Shaders/Core/Private/Volumetric/VolumetricMaxZ.compute
+    ResourceObject: {fileID: 7200000, guid: 53ce8ec72eeb40040bfc4c2eb70c73f6, type: 3}
   - ResourceName: Shaders/FullScreenUV
     ResourceObject: {fileID: 4800000, guid: d59dc5dd19265494ca5c586c2e4ce4fe, type: 3}
   - ResourceName: Shaders/Material/DeferredLit

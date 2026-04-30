@@ -98,6 +98,9 @@ namespace VividRP.Editor.RenderGraph
             if (!typeof(IRenderPass).IsAssignableFrom(passType))
                 return false;
 
+            if (passType.GetCustomAttribute<ObsoleteAttribute>(inherit: false) != null)
+                return false;
+
             var assemblyName = passType.Assembly.GetName().Name;
             if (!includeTestAssemblies &&
                 !string.IsNullOrEmpty(assemblyName) &&

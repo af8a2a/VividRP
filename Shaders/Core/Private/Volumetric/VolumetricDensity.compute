@@ -1,0 +1,50 @@
+#pragma use_dxc
+#pragma kernel ClearVBufferDensity
+#pragma kernel VoxelizeVBufferDensity
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
+
+RWTexture3D<float4> _VBufferDensity;
+
+float ComputeHeightFogMultiplier(float height, float baseHeight, float rcpScaleHeight)
+{
+    float heightAboveBase = max(height - baseHeight, 0.0);
+    return exp(-heightAboveBase * rcpScaleHeight);
+}
+
+float EvaluateHeightFog(float3 positionWS)
+{
+    return ComputeHeightFogMultiplier(
+        positionWS.y,
+        _VBufferFogBaseHeight,
+        _VBufferFogRcpScaleHeight);
+}
+
+[numthreads(8, 8, 4)]
+void ClearVBufferDensity(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (!IsInsideVBuffer(dispatchThreadId))
+        return;
+
+    _VBufferDensity[dispatchThreadId] = 0.0;
+}
+
+[numthreads(8, 8, 1)]
+void VoxelizeVBufferDensity(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 voxelCoord = dispatchThreadId.xy;
+    if (voxelCoord.x >= (uint)_VBufferWidth || voxelCoord.y >= (uint)_VBufferHeight)
+        return;
+
+    [loop]
+    for (uint slice = 0; slice < (uint)_VBufferSliceCount; slice++)
+    {
+        uint3 voxelCoord3D = uint3(voxelCoord, slice);
+        float3 positionWS = GetVBufferVoxelWorldPosition(voxelCoord3D);
+        float heightFog = EvaluateHeightFog(positionWS);
+        float3 scattering = _VBufferFogScattering.rgb * heightFog;
+        float extinction = _VBufferFogScattering.a * heightFog;
+
+        _VBufferDensity[voxelCoord3D] = float4(max(scattering, 0.0), max(extinction, 0.0));
+    }
+}

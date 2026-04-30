@@ -262,6 +262,7 @@ namespace VividRP.Runtime
             VividVolumeManagerUtility.Deinitialize();
             DecalSystem.Deinitialize();
             VividGPUDrivenSystem.Deinitialize();
+            VividLocalVolumetricFogManager.Dispose();
 #if DLSS_PLUGIN_INTEGRATE
             DLSSExtension.Shutdown();
 #endif

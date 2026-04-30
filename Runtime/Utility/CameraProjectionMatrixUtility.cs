@@ -101,6 +101,20 @@ namespace VividRP.Runtime
             camera.projectionMatrix = projectionMatrix;
         }
 
+        internal static void RestoreNoJitterProjection(Camera camera, Matrix4x4 nonJitteredProjectionMatrix)
+        {
+            if (camera == null)
+                return;
+
+            if (TryResolveParameterDrivenProjectionMode(camera, nonJitteredProjectionMatrix, out var mode))
+            {
+                RestoreParameterDrivenProjection(camera, mode);
+                return;
+            }
+
+            SetProjectionMatrices(camera, nonJitteredProjectionMatrix, nonJitteredProjectionMatrix);
+        }
+
         internal static CameraProjectionState CaptureProjectionState(Camera camera)
         {
             if (camera == null)
@@ -124,13 +138,24 @@ namespace VividRP.Runtime
                     camera.projectionMatrix = state.ProjectionMatrix;
                     break;
                 case CameraProjectionStateMode.PhysicalPropertiesBased:
-                    RestorePhysicalPropertiesBasedProjection(camera);
+                    RestoreParameterDrivenProjection(camera, CameraProjectionStateMode.PhysicalPropertiesBased);
                     break;
                 case CameraProjectionStateMode.Implicit:
                 default:
-                    RestoreImplicitProjection(camera);
+                    RestoreParameterDrivenProjection(camera, CameraProjectionStateMode.Implicit);
                     break;
             }
+        }
+
+        private static void RestoreParameterDrivenProjection(Camera camera, CameraProjectionStateMode mode)
+        {
+            if (mode == CameraProjectionStateMode.PhysicalPropertiesBased)
+            {
+                RestorePhysicalPropertiesBasedProjection(camera);
+                return;
+            }
+
+            RestoreImplicitProjection(camera);
         }
 
         private static Matrix4x4 BuildProjectionMatrix(Camera camera)
@@ -352,7 +377,8 @@ namespace VividRP.Runtime
                 return false;
 
             var currentAspect = ResolveAspect(camera);
-            if (ProjectionMatchesCameraParameters(camera, projectionMatrix, currentAspect))
+            if (ProjectionMatchesCameraParameters(camera, projectionMatrix, currentAspect)
+                || ProjectionMatchesCameraParametersIgnoringDepthMapping(camera, projectionMatrix, currentAspect))
             {
                 mode = camera.usePhysicalProperties
                     ? CameraProjectionStateMode.PhysicalPropertiesBased
@@ -366,7 +392,8 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            if (!ProjectionMatchesCameraParameters(camera, projectionMatrix, inferredAspect))
+            if (!ProjectionMatchesCameraParameters(camera, projectionMatrix, inferredAspect)
+                && !ProjectionMatchesCameraParametersIgnoringDepthMapping(camera, projectionMatrix, inferredAspect))
                 return false;
 
             mode = camera.usePhysicalProperties
@@ -382,6 +409,27 @@ namespace VividRP.Runtime
         {
             var expectedProjection = BuildProjectionMatrix(camera, aspect);
             return MaxAbsDiff(projectionMatrix, expectedProjection) <= MatrixTolerance;
+        }
+
+        private static bool ProjectionMatchesCameraParametersIgnoringDepthMapping(
+            Camera camera,
+            Matrix4x4 projectionMatrix,
+            float aspect)
+        {
+            var expectedProjection = BuildProjectionMatrix(camera, aspect);
+            for (var row = 0; row < 4; row++)
+            {
+                for (var column = 0; column < 4; column++)
+                {
+                    if (row == 2 && (column == 2 || column == 3))
+                        continue;
+
+                    if (Mathf.Abs(projectionMatrix[row, column] - expectedProjection[row, column]) > MatrixTolerance)
+                        return false;
+                }
+            }
+
+            return true;
         }
 
         private static bool TryGetProjectionMatrixAspect(Matrix4x4 projectionMatrix, out float aspect)

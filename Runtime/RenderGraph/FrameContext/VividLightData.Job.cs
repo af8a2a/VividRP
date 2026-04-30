@@ -16,6 +16,10 @@ namespace VividRP.Runtime
                 shadowStrength = trackedLightData.shadowStrength,
                 color = trackedLightData.color,
                 renderingLayerMask = trackedLightData.renderingLayerMask,
+                volumetricDimmer = GetVolumetricDimmer(trackedLightData),
+                volumetricShadowDimmer = GetVolumetricShadowDimmer(trackedLightData),
+                volumetricFadeDistance = GetVolumetricFadeDistance(trackedLightData),
+                affectVolumetric = GetAffectVolumetric(trackedLightData),
             };
         }
 
@@ -23,6 +27,11 @@ namespace VividRP.Runtime
         {
             var range = Mathf.Max(trackedLightData.range, 0.001f);
             GetSpotAngleParameters(trackedLightData.lightType, trackedLightData.innerSpotAngle, trackedLightData.spotAngle, out var angleScale, out var angleOffset);
+            var directionWS = NormalizeDirection(trackedLightData.forwardWS, Vector3.forward);
+            var coneAxisScale = GetSpotConeAxisScale(trackedLightData.lightType, trackedLightData.innerSpotAngle, trackedLightData.spotAngle);
+            var rightWS = NormalizeDirection(trackedLightData.rightWS, Vector3.right) * coneAxisScale;
+            var upWS = NormalizeDirection(trackedLightData.upWS, Vector3.up) * coneAxisScale;
+            var shapeRadius = Mathf.Max(trackedLightData.shapeRadius, 0.0f);
 
             return new PunctualLightData
             {
@@ -30,14 +39,24 @@ namespace VividRP.Runtime
                 range = range,
                 color = trackedLightData.color,
                 lightType = GetPunctualLightType(trackedLightData.lightType),
-                directionWS = trackedLightData.forwardWS,
+                directionWS = directionWS,
                 angleScale = angleScale,
+                rightWS = rightWS,
                 angleOffset = angleOffset,
-                inverseRangeSquared = trackedLightData.inverseRangeSquared > 0.0f
-                    ? trackedLightData.inverseRangeSquared
+                upWS = upWS,
+                shapeRadiusSquared = shapeRadius * shapeRadius,
+                rangeAttenuationScale = trackedLightData.rangeAttenuationScale > 0.0f
+                    ? trackedLightData.rangeAttenuationScale
                     : 1.0f / Mathf.Max(range * range, 1e-6f),
+                rangeAttenuationBias = trackedLightData.rangeAttenuationBias > 0.0f
+                    ? trackedLightData.rangeAttenuationBias
+                    : 1.0f,
                 shadowStrength = trackedLightData.shadowStrength,
                 renderingLayerMask = trackedLightData.renderingLayerMask,
+                volumetricDimmer = GetVolumetricDimmer(trackedLightData),
+                volumetricShadowDimmer = GetVolumetricShadowDimmer(trackedLightData),
+                volumetricFadeDistance = GetVolumetricFadeDistance(trackedLightData),
+                affectVolumetric = GetAffectVolumetric(trackedLightData),
             };
         }
 
@@ -66,6 +85,10 @@ namespace VividRP.Runtime
                 range = range,
                 cosBarnDoorAngle = Mathf.Cos(barnDoorAngleRadians),
                 barnDoorLength = Mathf.Max(trackedLightData.barnDoorLength, 0.0f),
+                volumetricDimmer = GetVolumetricDimmer(trackedLightData),
+                volumetricShadowDimmer = GetVolumetricShadowDimmer(trackedLightData),
+                volumetricFadeDistance = GetVolumetricFadeDistance(trackedLightData),
+                affectVolumetric = GetAffectVolumetric(trackedLightData),
             };
         }
 
@@ -88,7 +111,37 @@ namespace VividRP.Runtime
                 radiusAtRange = radiusAtRange,
                 cullingCenterWS = cullingCenterWS,
                 cullingRadius = cullingRadius,
+                affectVolumetric = source.affectVolumetric != 0u && source.volumetricDimmer > 0.0f ? 1u : 0u,
             };
+        }
+
+        private static uint GetAffectVolumetric(VividLightRenderData trackedLightData)
+        {
+            return (trackedLightData.flags & VividLightRenderDataFlags.AffectVolumetric) != 0 ? 1u : 0u;
+        }
+
+        private static float GetVolumetricDimmer(VividLightRenderData trackedLightData)
+        {
+            if (GetAffectVolumetric(trackedLightData) == 0u)
+                return 0.0f;
+
+            return Mathf.Clamp(
+                trackedLightData.volumetricDimmer,
+                0.0f,
+                VividAdditionalLightData.MaxVolumetricDimmer);
+        }
+
+        private static float GetVolumetricShadowDimmer(VividLightRenderData trackedLightData)
+        {
+            if (GetAffectVolumetric(trackedLightData) == 0u)
+                return 0.0f;
+
+            return Mathf.Clamp01(trackedLightData.volumetricShadowDimmer);
+        }
+
+        private static float GetVolumetricFadeDistance(VividLightRenderData trackedLightData)
+        {
+            return Mathf.Max(trackedLightData.volumetricFadeDistance, 0.0f);
         }
 
 

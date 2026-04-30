@@ -19,9 +19,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             #pragma fragment Frag
             #pragma editor_sync_compilation
             #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
-
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+            #pragma use_dxc 
             #include_with_pragmas "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/Bindless.hlsl"
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VividProbeVolume.hlsl"
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"

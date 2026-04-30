@@ -13,9 +13,11 @@ namespace VividRP.Editor.Tests
         public void HdrpLitLightingInclude_ContainsHdrpInspiredDirectLightingBuildingBlocks()
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "HdrpLitLighting.hlsl"));
+            var punctualSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "PunctualLightCommon.hlsl"));
 
             Assert.That(source, Does.Contain("#include \"Packages/com.unity.render-pipelines.core/ShaderLibrary/BSDF.hlsl\""));
             Assert.That(source, Does.Contain("#include \"Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl\""));
+            Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/PunctualLightCommon.hlsl\""));
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/LTCAreaLight.hlsl\""));
             Assert.That(source, Does.Contain("return DisneyDiffuse("));
             Assert.That(source, Does.Contain("return DV_SmithJointGGX("));
@@ -49,9 +51,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("AccumulateDirectLighting("));
             Assert.That(source, Does.Contain("FinalizeVividSpecularLighting("));
             Assert.That(source, Does.Contain("surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC"));
-            Assert.That(source, Does.Contain("float EvaluatePunctualLightDistanceAttenuation"));
-            Assert.That(source, Does.Contain("float distanceAttenuation = rcp(max(distanceSquared, 1e-6));"));
-            Assert.That(source, Does.Contain("float rangeAttenuation = saturate(1.0 - distanceSquared * punctualLight.inverseRangeSquared);"));
+            Assert.That(punctualSource, Does.Contain("VividPunctualLightAttenuationWithDistanceModification"));
+            Assert.That(punctualSource, Does.Contain("DistanceWindowing("));
+            Assert.That(punctualSource, Does.Contain("punctualLight.rangeAttenuationScale"));
+            Assert.That(punctualSource, Does.Contain("punctualLight.rangeAttenuationBias"));
             Assert.That(source, Does.Contain("PillowWindowing("));
             Assert.That(source, Does.Contain("SampleLtcMatrix("));
         }
@@ -61,8 +64,14 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "Lighting.hlsl"));
 
+            Assert.That(source, Does.Contain("float rangeAttenuationScale;"));
+            Assert.That(source, Does.Contain("float rangeAttenuationBias;"));
             Assert.That(source, Does.Contain("float cosBarnDoorAngle;"));
             Assert.That(source, Does.Contain("float barnDoorLength;"));
+            Assert.That(source, Does.Contain("float volumetricDimmer;"));
+            Assert.That(source, Does.Contain("float volumetricShadowDimmer;"));
+            Assert.That(source, Does.Contain("float volumetricFadeDistance;"));
+            Assert.That(source, Does.Contain("uint affectVolumetric;"));
             Assert.That(source, Does.Not.Contain("float2 padding;"));
         }
 

@@ -8,6 +8,8 @@ namespace VividRP.Runtime
         public RenderGraphBuffer punctualLights;
         public RenderGraphBuffer areaLights;
         public RenderGraphBuffer decalData;
+        public RenderGraphBuffer bigTileLightList;
+        public RenderGraphBuffer bigTileVolumetricLightList;
         public RenderGraphBuffer layeredOffset;
         public RenderGraphBuffer layeredLightList;
         public RenderGraphBuffer logBaseBuffer;
@@ -20,6 +22,8 @@ namespace VividRP.Runtime
         public int clusterSliceCount;
         public int clusterTileCountX;
         public int clusterTileCountY;
+        public int bigTileCountX;
+        public int bigTileCountY;
         public float clusterNearClip;
         public float clusterFarClip;
         public int clusterIsOrthographic;
@@ -35,6 +39,8 @@ namespace VividRP.Runtime
             punctualLights = null;
             areaLights = null;
             decalData = null;
+            bigTileLightList = null;
+            bigTileVolumetricLightList = null;
             layeredOffset = null;
             layeredLightList = null;
             logBaseBuffer = null;
@@ -47,6 +53,8 @@ namespace VividRP.Runtime
             clusterSliceCount = 0;
             clusterTileCountX = 0;
             clusterTileCountY = 0;
+            bigTileCountX = 0;
+            bigTileCountY = 0;
             clusterNearClip = 0.0f;
             clusterFarClip = 0.0f;
             clusterIsOrthographic = 0;

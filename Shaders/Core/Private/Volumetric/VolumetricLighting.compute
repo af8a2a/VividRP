@@ -1,0 +1,744 @@
+#pragma use_dxc
+#pragma kernel ClearVBufferLighting
+#pragma kernel VolumetricLighting
+#pragma kernel FilterVolumetricLighting
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/PunctualLightCommon.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GeometricTools.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/VolumeRendering.hlsl"
+
+Texture2D<float> _CameraDepth;
+Texture2D<float> _DirectionalShadowTexture;
+Texture2D<float> _VBufferMaxZ;
+Texture3D<float4> _VBufferDensity;
+Texture3D<float4> _VBufferHistory;
+Texture3D<float4> _VBufferLightingInput;
+RWTexture3D<float4> _VBufferLighting;
+RWTexture3D<float4> _VBufferFeedback;
+RWTexture3D<float4> _VBufferLightingOutput;
+StructuredBuffer<float4> _VolumetricAmbientProbeBuffer;
+float _VBufferMaxZEnabled;
+uint _VolumetricUseBigTileLightList;
+uint _VBufferHistoryIsValid;
+float4 _VBufferSampleOffset;
+float4 _VBufferPrevViewportSize;
+float4 _VBufferHistoryViewportScale;
+float4 _VBufferHistoryViewportLimit;
+float4 _VBufferPrevDepthEncodingParams;
+float4 _VBufferPrevDepthDecodingParams;
+float4 _VBufferPrevCameraPositionWS;
+
+#define GROUP_SIZE_1D           8
+#define VBUFFER_MAX_AREA_LIGHTS 8u
+#define VBUFFER_FILTER_GAUSSIAN_SIGMA 1.0
+#define VBUFFER_FILTER_GROUP_SIZE_XY 8
+#define VBUFFER_FILTER_SIZE_1D (VBUFFER_FILTER_GROUP_SIZE_XY + 2)
+#define VBUFFER_FILTER_LDS_SIZE (VBUFFER_FILTER_SIZE_1D * VBUFFER_FILTER_SIZE_1D)
+#define VBUFFER_FILTER_THREAD_COUNT (VBUFFER_FILTER_GROUP_SIZE_XY * VBUFFER_FILTER_GROUP_SIZE_XY)
+
+groupshared float4 gs_VBufferFilterCache[VBUFFER_FILTER_LDS_SIZE];
+
+struct VoxelLighting
+{
+    float3 radianceComplete;  // includes CornetteShanksPhasePartVarying
+    float3 radianceNoPhase;   // without phase (for future reprojection)
+};
+
+struct JitteredRay
+{
+    float3 originWS;
+    float3 centerDirWS;
+    float3 jitterDirWS;
+    float3 xDirDerivWS;
+    float3 yDirDerivWS;
+    float geomDist;
+    float maxDist;
+};
+
+uint HashVBufferUint(uint value)
+{
+    value ^= value >> 16;
+    value *= 2246822519u;
+    value ^= value >> 13;
+    value *= 3266489917u;
+    value ^= value >> 16;
+    return value;
+}
+
+float GenerateVBufferRandom(uint3 voxelCoord, uint lightIndex, uint sampleIndex)
+{
+    uint seed = voxelCoord.x * 73856093u
+        ^ voxelCoord.y * 19349663u
+        ^ voxelCoord.z * 83492791u
+        ^ lightIndex * 2654435761u
+        ^ sampleIndex * 1597334677u;
+    return (float)(HashVBufferUint(seed) & 0x00ffffffu) * (1.0 / 16777216.0);
+}
+
+float GenerateVBufferRandom(uint2 pixelCoord)
+{
+    uint seed = pixelCoord.x * 73856093u
+        ^ pixelCoord.y * 19349663u
+        ^ 0x9e3779b9u;
+    return (float)(HashVBufferUint(seed) & 0x00ffffffu) * (1.0 / 16777216.0);
+}
+
+float2 GetVBufferSampleUV(uint2 vBufferPixel, float2 sampleOffset)
+{
+    return (float2(vBufferPixel) + 0.5 + sampleOffset) * _VBufferRcpViewportSize;
+}
+
+uint2 GetVBufferCameraPixel(uint2 vBufferPixel, float2 sampleOffset)
+{
+    return (uint2)((float2(vBufferPixel) + 0.5 + sampleOffset) * _VBufferCameraToVBufferScale);
+}
+
+float SampleDirectionalShadow(uint2 vBufferPixel, uint lightIndex, DirectionalLightData directionalLight, float3 samplePositionWS)
+{
+    if ((int)lightIndex != _MainDirectionalLightIndex)
+        return 1.0;
+
+    float2 cameraPixel = (float2(vBufferPixel) + 0.5) * _VBufferCameraToVBufferScale;
+    float2 cameraDimensions = _VBufferViewportSize.xy * _VBufferCameraToVBufferScale;
+    float2 uv = cameraPixel / max(cameraDimensions, float2(1.0, 1.0));
+    float shadow = _DirectionalShadowTexture.SampleLevel(sampler_PointClamp, saturate(uv), 0).x;
+    float volumetricShadowStrength = saturate(directionalLight.shadowStrength * directionalLight.volumetricShadowDimmer);
+    return lerp(1.0, saturate(shadow), volumetricShadowStrength);
+}
+
+bool LightAffectsVolumetrics(uint affectVolumetric, float volumetricDimmer)
+{
+    return affectVolumetric != 0u && volumetricDimmer > 0.0;
+}
+
+bool IsInRange(float value, float2 range)
+{
+    return clamp(value, range.x, range.y) == value;
+}
+
+float ComputeHistoryWeight()
+{
+    // HDRP accumulates the 7-frame stochastic sequence as a uniform moving average.
+    return 6.0 / 7.0;
+}
+
+float4 SampleVBufferHistory(float3 positionWS)
+{
+    float4 positionCS = mul(_PrevViewProjMatrix, float4(positionWS, 1.0));
+    if (positionCS.w <= 1e-5)
+        return 0.0;
+
+#if UNITY_UV_STARTS_AT_TOP
+    positionCS.y = -positionCS.y;
+#endif
+
+    float2 positionNDC = positionCS.xy * rcp(positionCS.w) * 0.5 + 0.5;
+    float linearDistance = distance(positionWS, _VBufferPrevCameraPositionWS.xyz);
+    float w = EncodeLogarithmicDepthGeneralized(linearDistance, _VBufferPrevDepthEncodingParams);
+    float3 frustumCoord = float3(positionNDC, w) * 2.0 - 1.0;
+
+    if (max(max(abs(frustumCoord.x), abs(frustumCoord.y)), abs(frustumCoord.z)) >= 1.0)
+        return 0.0;
+
+    float3 texUVW = float3(positionNDC, w) * _VBufferHistoryViewportScale.xyz;
+    return _VBufferHistory.SampleLevel(sampler_LinearClamp, min(texUVW, _VBufferHistoryViewportLimit.xyz), 0);
+}
+
+float GetVolumetricLightCameraDistance(float3 lightPositionWS)
+{
+    return distance(_WorldSpaceCameraPos, lightPositionWS);
+}
+
+float EvaluateVolumetricLightFade(float distanceToCamera, float fadeDistance)
+{
+    return fadeDistance > 0.0 ? saturate(1.0 - distanceToCamera / fadeDistance) : 0.0;
+}
+
+bool ShouldEvaluateVBufferLighting(float extinction)
+{
+    return extinction > _VBufferDensityCutoff;
+}
+
+float4 EncodeIntegratedVBufferLighting(float3 totalRadiance, float opticalDepth)
+{
+    float transmittance = TransmittanceFromOpticalDepth(opticalDepth);
+    return float4(VividApplyPreExposure(max(totalRadiance, 0.0)), saturate(transmittance));
+}
+
+void StoreIntegratedVBufferLighting(uint3 voxelCoord, float3 totalRadiance, float opticalDepth)
+{
+    _VBufferLighting[voxelCoord] = EncodeIntegratedVBufferLighting(totalRadiance, opticalDepth);
+}
+
+void StoreEmptyVBufferLighting(uint3 voxelCoord)
+{
+    _VBufferLighting[voxelCoord] = float4(0.0, 0.0, 0.0, 1.0);
+}
+
+void StoreVBufferFeedback(uint3 voxelCoord, float4 value)
+{
+    _VBufferFeedback[voxelCoord] = clamp(value, 0.0, HALF_MAX);
+}
+
+void StoreEmptyVBufferFeedback(uint3 voxelCoord)
+{
+    _VBufferFeedback[voxelCoord] = 0.0;
+}
+
+JitteredRay BuildVBufferJitteredRay(uint2 vBufferPixel, float2 sampleOffset)
+{
+    float3 F = GetViewForwardDir();
+    float3 U = GetViewUpDir();
+    float2 centerCoord = float2(vBufferPixel) + 0.5;
+
+    // Same convention as HDRP: ViewSpace(rayDirWS).z == 1 before normalization.
+    float3 rayDirWS = mul(-float4(centerCoord, 1.0, 1.0), _VBufferCoordToViewDirWS).xyz;
+    float3 rightDirWS = cross(rayDirWS, U);
+    float rcpLenRayDir = rsqrt(max(dot(rayDirWS, rayDirWS), 1e-8));
+    float rcpLenRightDir = rsqrt(max(dot(rightDirWS, rightDirWS), 1e-8));
+
+    JitteredRay ray;
+    ray.originWS = _WorldSpaceCameraPos;
+    ray.centerDirWS = rayDirWS * rcpLenRayDir;
+
+    float FdotD = max(dot(F, ray.centerDirWS), 1e-4);
+    float unitDistFaceSize = _VBufferUnitDepthTexelSpacing * FdotD * rcpLenRayDir;
+    ray.xDirDerivWS = rightDirWS * (rcpLenRightDir * unitDistFaceSize);
+    ray.yDirDerivWS = cross(ray.xDirDerivWS, ray.centerDirWS);
+    ray.jitterDirWS = SafeNormalize(ray.centerDirWS + sampleOffset.x * ray.xDirDerivWS + sampleOffset.y * ray.yDirDerivWS);
+    ray.geomDist = FLT_MAX;
+    ray.maxDist = FLT_MAX;
+    return ray;
+}
+
+float GetVBufferJitteredRayStartDistance(JitteredRay ray)
+{
+    float forwardDistance = _VBufferIsOrthographic > 0.5 ? 1.0 : max(dot(ray.jitterDirWS, GetViewForwardDir()), 1e-4);
+    return max(GetVBufferSliceBoundaryDistance(0.0), g_fNearPlane / forwardDistance);
+}
+
+float GetVBufferLinearDistanceFromEyeDepthForRay(float linearEyeDepth, JitteredRay ray)
+{
+    if (_VBufferIsOrthographic > 0.5)
+        return linearEyeDepth;
+
+    float forwardDistance = max(dot(ray.jitterDirWS, GetViewForwardDir()), 1e-4);
+    return linearEyeDepth / forwardDistance;
+}
+
+float GetVBufferOpaqueGeometryDistanceForRay(float2 vBufferUV, JitteredRay ray, out bool hasOpaqueGeometry)
+{
+    float deviceDepth = _CameraDepth.SampleLevel(sampler_PointClamp, vBufferUV, 0);
+    hasOpaqueGeometry = !IsVBufferFarDepth(deviceDepth);
+
+    return hasOpaqueGeometry
+        ? GetVBufferLinearDistanceFromEyeDepthForRay(LinearEyeDepth(deviceDepth, _ZBufferParams), ray)
+        : _VBufferLastSliceDistance;
+}
+
+float LoadVBufferMaxZ(int2 maxZPixel, int2 maxZDimensions)
+{
+    int2 maxCoord = max(maxZDimensions - 1, int2(0, 0));
+    int2 coord = clamp(maxZPixel, int2(0, 0), maxCoord);
+    return _VBufferMaxZ.Load(int3(coord, 0));
+}
+
+float GetVBufferMaxOpaqueGeometryDistance(float2 vBufferUV, float3 rayDirectionWS, float fallbackDistance)
+{
+    if (_VBufferMaxZEnabled <= 0.5)
+        return fallbackDistance;
+
+    uint maxZWidth;
+    uint maxZHeight;
+    _VBufferMaxZ.GetDimensions(maxZWidth, maxZHeight);
+    if (maxZWidth == 0u || maxZHeight == 0u)
+        return fallbackDistance;
+
+    float2 maxZDimensions = float2((float)maxZWidth, (float)maxZHeight);
+    float2 maxZTexelCoord = vBufferUV * maxZDimensions - 0.5;
+    int2 baseCoord = (int2)floor(maxZTexelCoord);
+    int2 dimensions = int2((int)maxZWidth, (int)maxZHeight);
+    float maxLinearEyeDepth = -1.0;
+
+    [unroll]
+    for (int y = 0; y <= 1; y++)
+    {
+        [unroll]
+        for (int x = 0; x <= 1; x++)
+        {
+            maxLinearEyeDepth = max(maxLinearEyeDepth, LoadVBufferMaxZ(baseCoord + int2(x, y), dimensions));
+        }
+    }
+
+    if (maxLinearEyeDepth < 0.0)
+        return fallbackDistance;
+
+    float forwardDistance = _VBufferIsOrthographic > 0.5 ? 1.0 : max(dot(rayDirectionWS, GetViewForwardDir()), 1e-4);
+    float maxDistance = max(maxLinearEyeDepth / forwardDistance, fallbackDistance);
+    return clamp(maxDistance, GetVBufferSliceBoundaryDistance(0.0), _VBufferLastSliceDistance);
+}
+
+float3 EvaluatePunctualLightRadiance(PunctualLightData light, float3 positionWS)
+{
+    float3 lightDirectionWS = 0.0;
+    float4 distances = 0.0;
+    GetVividPunctualLightVectors(positionWS, light, lightDirectionWS, distances);
+
+    if (distances.y <= 1e-6)
+        return 0.0;
+
+    float attenuation = VividPunctualLightAttenuationWithDistanceModification(light, distances);
+
+    if (attenuation <= 0.0)
+        return 0.0;
+
+    float volumetricFade = EvaluateVolumetricLightFade(
+        GetVolumetricLightCameraDistance(light.positionWS),
+        light.volumetricFadeDistance);
+    return max(light.color, 0.0) * light.volumetricDimmer * volumetricFade * attenuation;
+}
+
+void CreatePerpendicularBasis(float3 forward, out float3 axisX, out float3 axisY)
+{
+    float3 up = abs(forward.y) < 0.999 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
+    axisX = SafeNormalize(cross(up, forward));
+    axisY = cross(forward, axisX);
+}
+
+bool TryGetSpotConeAxes(PunctualLightData light, out float3 coneDirection, out float3 coneAxisX, out float3 coneAxisY)
+{
+    coneDirection = SafeNormalize(light.directionWS);
+    coneAxisX = 0.0;
+    coneAxisY = 0.0;
+
+    if (light.lightType != VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
+        return false;
+
+    coneAxisX = light.rightWS;
+    coneAxisY = light.upWS;
+
+    if (dot(coneAxisX, coneAxisX) <= 1e-8 || dot(coneAxisY, coneAxisY) <= 1e-8)
+    {
+        float cosOuter = saturate(-light.angleOffset / max(light.angleScale, 1e-6));
+        cosOuter = clamp(cosOuter, 1e-3, 0.999999);
+        float sinOuter = sqrt(max(1.0 - cosOuter * cosOuter, 1e-6));
+        float cotanOuter = cosOuter / sinOuter;
+        float3 axisX;
+        float3 axisY;
+        CreatePerpendicularBasis(coneDirection, axisX, axisY);
+        coneAxisX = axisX * cotanOuter;
+        coneAxisY = axisY * cotanOuter;
+    }
+
+    return true;
+}
+
+bool IntersectRaySpotConeRange(float3 rayOriginWS, float3 rayDirectionWS, PunctualLightData light, float tMin, float tMax, out float tEntr, out float tExit)
+{
+    float3 coneDirection;
+    float3 coneAxisX;
+    float3 coneAxisY;
+    if (!TryGetSpotConeAxes(light, coneDirection, coneAxisX, coneAxisY))
+    {
+        tEntr = tMin;
+        tExit = tMax;
+        return true;
+    }
+
+    return IntersectRayCone(
+        rayOriginWS,
+        rayDirectionWS,
+        light.positionWS,
+        coneDirection,
+        coneAxisX,
+        coneAxisY,
+        tMin,
+        tMax,
+        tEntr,
+        tExit);
+}
+
+VoxelLighting EvaluateVoxelLightingDirectional(uint3 voxelCoord, JitteredRay ray, float t0, float dt, float rndVal, float extinction, float anisotropy)
+{
+    VoxelLighting lighting = (VoxelLighting)0;
+    uint directionalCount = min(_DirectionalLightCount, 8u);
+    float tOffset;
+    float weight;
+    ImportanceSampleHomogeneousMedium(rndVal, extinction, dt, tOffset, weight);
+
+    float t = t0 + tOffset;
+    float3 sampleWS = ray.originWS + t * ray.jitterDirWS;
+
+    [loop]
+    for (uint i = 0; i < directionalCount; i++)
+    {
+        DirectionalLightData light = GetDirectionalLight((int)i);
+        if (!LightAffectsVolumetrics(light.affectVolumetric, light.volumetricDimmer))
+            continue;
+
+        float3 L = SafeNormalize(light.directionWS);
+        float3 lightColor = max(light.color, 0.0) * light.volumetricDimmer;
+        float shadow = SampleDirectionalShadow(voxelCoord.xy, i, light, sampleWS);
+        lightColor *= shadow;
+
+        float cosTheta = dot(L, ray.centerDirWS);
+        float g = clamp(anisotropy, -0.95, 0.95);
+        float phaseVarying = CornetteShanksPhasePartVarying(g, cosTheta);
+
+        lighting.radianceNoPhase += weight * lightColor;
+        lighting.radianceComplete += weight * lightColor * phaseVarying;
+    }
+
+    return lighting;
+}
+
+VoxelLighting EvaluateVoxelLightingLocal(uint3 voxelCoord, uint2 vBufferPixel, float3 centerWS, JitteredRay ray, float t0, float t1, float dt, float rndVal, float extinction, float anisotropy)
+{
+    VoxelLighting lighting = (VoxelLighting)0;
+
+    if (_VBufferFogDirectionalOnly > 0.5)
+        return lighting;
+
+    float g = clamp(anisotropy, -0.95, 0.95);
+
+    // Punctual lights via big tile light list
+    bool hasVolumetricBigTileLightList = true;
+    if (_VolumetricUseBigTileLightList == 0u || _NumTileBigTileX == 0u || _NumTileBigTileY == 0u)
+        hasVolumetricBigTileLightList = false;
+
+    if (hasVolumetricBigTileLightList)
+    {
+        uint2 cameraPixel = GetVBufferCameraPixel(vBufferPixel, float2(0.0, 0.0));
+        VividBigTileLightingLoopContext bigTileLoop = VividLightingLoop::CreateBigTile(cameraPixel);
+        uint lightCount = VividLightingLoop::GetBigTileLightCount(bigTileLoop);
+
+        [loop]
+        for (uint lightOffset = 0; lightOffset < lightCount; lightOffset++)
+        {
+            PunctualLightData light = VividLightingLoop::LoadBigTilePunctualLight(bigTileLoop, lightOffset);
+            if (!LightAffectsVolumetrics(light.affectVolumetric, light.volumetricDimmer))
+                continue;
+
+            float tEntr = t0;
+            float tExit = t1;
+            bool sampleLight = true;
+            if (light.lightType == VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
+            {
+                float coneEntry;
+                float coneExit;
+                sampleLight = IntersectRaySpotConeRange(ray.originWS, ray.jitterDirWS, light, t0, t1, coneEntry, coneExit);
+                tEntr = coneEntry;
+                tExit = coneExit;
+            }
+
+            if (!sampleLight || tEntr >= tExit)
+                continue;
+
+            float voxelArcLength = _VBufferUnitDepthTexelSpacing * max(tEntr, 0.0);
+            float lightSqRadius = max(max(light.shapeRadiusSquared, voxelArcLength), 1e-4);
+
+            float t;
+            float sqDist;
+            float rcpPdf;
+            ImportanceSamplePunctualLight(
+                rndVal,
+                light.positionWS,
+                lightSqRadius,
+                ray.originWS,
+                ray.jitterDirWS,
+                tEntr,
+                tExit,
+                t,
+                sqDist,
+                rcpPdf);
+
+            float3 samplePosWS = ray.originWS + ray.jitterDirWS * t;
+            float3 lightRadiance = EvaluatePunctualLightRadiance(light, samplePosWS);
+            if (max(max(lightRadiance.x, lightRadiance.y), lightRadiance.z) <= 0.0)
+                continue;
+
+            float3 centerToLight = light.positionWS - centerWS;
+            float cosTheta = dot(centerToLight, ray.centerDirWS) * rsqrt(dot(centerToLight, centerToLight));
+            float phaseVarying = CornetteShanksPhasePartVarying(g, cosTheta);
+            float weight = TransmittanceHomogeneousMedium(extinction, max(t - t0, 0.0)) * rcpPdf;
+
+            lighting.radianceNoPhase += weight * lightRadiance;
+            lighting.radianceComplete += weight * lightRadiance * phaseVarying;
+        }
+    }
+
+    // Area lights from cluster
+    {
+        float2 cameraPixel = (float2(vBufferPixel) + 0.5) * _VBufferCameraToVBufferScale;
+        VividLightingLoopContext lightLoop = VividLightingLoop::Create((uint2)cameraPixel, centerWS);
+        uint lightCount = min(min(VividLightingLoop::GetAreaLightCount(lightLoop), _AreaLightCount), VBUFFER_MAX_AREA_LIGHTS);
+
+        [loop]
+        for (uint localLightIndex = 0; localLightIndex < lightCount; localLightIndex++)
+        {
+            AreaLightData light = VividLightingLoop::LoadAreaLight(lightLoop, localLightIndex);
+            if (!LightAffectsVolumetrics(light.affectVolumetric, light.volumetricDimmer))
+                continue;
+
+            float3 lightVector = light.positionWS - centerWS;
+            float distanceSq = max(dot(lightVector, lightVector), 1e-4);
+            float distanceToLight = sqrt(distanceSq);
+            float3 lightDirectionWS = lightVector / distanceToLight;
+
+            float cosTheta = dot(lightDirectionWS, ray.centerDirWS);
+            float phaseVarying = CornetteShanksPhasePartVarying(g, cosTheta);
+
+            float rangeAttenuation = saturate(1.0 - distanceToLight / max(light.range, 1e-4));
+            rangeAttenuation *= rangeAttenuation;
+            float volumetricFade = EvaluateVolumetricLightFade(
+                GetVolumetricLightCameraDistance(light.positionWS),
+                light.volumetricFadeDistance);
+
+            float weight = TransmittanceIntegralHomogeneousMedium(extinction, dt);
+            float3 lightRadiance = max(light.color, 0.0) * light.volumetricDimmer * volumetricFade * rangeAttenuation / max(distanceSq, 1.0);
+
+            lighting.radianceNoPhase += weight * lightRadiance;
+            lighting.radianceComplete += weight * lightRadiance * phaseVarying;
+        }
+    }
+
+    return lighting;
+}
+
+float3 EvaluateAmbientLighting()
+{
+    return max(unity_AmbientSky.rgb, 0.0) * _VBufferGlobalProbeDimmer;
+}
+
+float3 EvaluateVolumetricAmbientProbe(float3 normalWS)
+{
+#if defined(VIVID_USE_VOLUMETRIC_AMBIENT_PROBE_BUFFER)
+    return SampleSH9(_VolumetricAmbientProbeBuffer, SafeNormalize(normalWS));
+#else
+    return EvaluateAmbientLighting();
+#endif
+}
+
+void FillVolumetricLightingBuffer(uint2 vBufferPixel, JitteredRay ray, bool hasMaxZ)
+{
+    uint sliceCount = (uint)_VBufferSliceCount;
+    float t0 = GetVBufferJitteredRayStartDistance(ray);
+    float de = _VBufferRcpSliceCount;
+    float3 probeInScatteredRadiance = EvaluateVolumetricAmbientProbe(ray.centerDirWS);
+
+    float3 totalRadiance = 0.0;
+    float opticalDepth = 0.0;
+    uint slice = 0;
+
+    for (; slice < sliceCount; slice++)
+    {
+        uint3 voxelCoord = uint3(vBufferPixel, slice);
+        float e1 = ((float)slice + 1.0) * de;
+        float t1 = max(t0, DecodeLogarithmicDepthGeneralized(e1, _VBufferDepthDecodingParams));
+        float tNext = t1;
+
+        bool containsOpaqueGeometry = IsInRange(ray.geomDist, float2(t0, t1));
+        if (containsOpaqueGeometry)
+            t1 = max(t0 * 1.0001, ray.geomDist);
+
+        float dt = t1 - t0;
+        if (dt <= 0.0)
+        {
+            StoreEmptyVBufferFeedback(voxelCoord);
+            StoreIntegratedVBufferLighting(voxelCoord, totalRadiance, opticalDepth);
+            t0 = tNext;
+            continue;
+        }
+
+        float t = DecodeLogarithmicDepthGeneralized(e1 - 0.5 * de, _VBufferDepthDecodingParams);
+        float3 centerWS = ray.originWS + t * ray.centerDirWS;
+        float4 density = _VBufferDensity.Load(int4(voxelCoord, 0));
+
+        float3 scattering = max(density.rgb, 0.0);
+        float extinction = max(density.a, 0.0);
+        float anisotropy = _VBufferFogAnisotropy;
+        float voxelOpticalDepth = extinction * dt;
+        float blendOpticalDepth = voxelOpticalDepth;
+
+        if (ShouldEvaluateVBufferLighting(extinction))
+        {
+            float perPixelRandomOffset = GenerateVBufferRandom(vBufferPixel);
+            float rndVal = frac(perPixelRandomOffset + _VBufferSampleOffset.z);
+
+            VoxelLighting aggregate = (VoxelLighting)0;
+            float sampledExtinction = max(extinction, FLT_MIN);
+            VoxelLighting directionalLighting = EvaluateVoxelLightingDirectional(
+                voxelCoord,
+                ray,
+                t0,
+                dt,
+                rndVal,
+                sampledExtinction,
+                anisotropy);
+            aggregate.radianceNoPhase += directionalLighting.radianceNoPhase;
+            aggregate.radianceComplete += directionalLighting.radianceComplete;
+
+            VoxelLighting localLighting = EvaluateVoxelLightingLocal(
+                voxelCoord,
+                vBufferPixel,
+                centerWS,
+                ray,
+                t0,
+                t1,
+                dt,
+                rndVal,
+                sampledExtinction,
+                anisotropy);
+            aggregate.radianceNoPhase += localLighting.radianceNoPhase;
+            aggregate.radianceComplete += localLighting.radianceComplete;
+
+            float4 voxelValue = float4(aggregate.radianceNoPhase, sampledExtinction * dt);
+            float4 normalizedVoxelValue = LinearizeRGBD(voxelValue) * rcp(max(dt, FLT_MIN));
+            float4 normalizedBlendValue = normalizedVoxelValue;
+            float4 reprojValue = (_VBufferHistoryIsValid != 0u) ? SampleVBufferHistory(centerWS) : 0.0;
+            bool reprojSuccess = (_VBufferHistoryIsValid != 0u) && (reprojValue.a != 0.0);
+
+            if (reprojSuccess)
+                normalizedBlendValue = lerp(normalizedVoxelValue, reprojValue, ComputeHistoryWeight());
+
+            StoreVBufferFeedback(voxelCoord, normalizedBlendValue);
+
+            float4 blendValue = DelinearizeRGBD(normalizedBlendValue * dt);
+            float3 phaseCurrFrame = float3(
+                SafeDiv(aggregate.radianceComplete.r, aggregate.radianceNoPhase.r),
+                SafeDiv(aggregate.radianceComplete.g, aggregate.radianceNoPhase.g),
+                SafeDiv(aggregate.radianceComplete.b, aggregate.radianceNoPhase.b));
+            float3 lightingRadiance = blendValue.rgb * phaseCurrFrame;
+
+            float transmittanceToSlice = TransmittanceFromOpticalDepth(opticalDepth);
+            float phaseConstant = CornetteShanksPhasePartConstant(clamp(anisotropy, -0.95, 0.95));
+            float3 probeRadiance = probeInScatteredRadiance * TransmittanceIntegralHomogeneousMedium(sampledExtinction, dt);
+
+            totalRadiance += transmittanceToSlice * scattering * (phaseConstant * lightingRadiance + probeRadiance);
+            blendOpticalDepth = blendValue.a;
+        }
+        else
+        {
+            StoreEmptyVBufferFeedback(voxelCoord);
+        }
+
+        opticalDepth += 0.5 * blendOpticalDepth;
+        StoreIntegratedVBufferLighting(voxelCoord, totalRadiance, opticalDepth);
+        opticalDepth += 0.5 * blendOpticalDepth;
+
+        if (hasMaxZ && t0 * 0.99 > ray.maxDist)
+        {
+            slice++;
+            break;
+        }
+
+        t0 = tNext;
+    }
+
+    for (; slice < sliceCount; slice++)
+    {
+        uint3 voxelCoord = uint3(vBufferPixel, slice);
+        StoreEmptyVBufferFeedback(voxelCoord);
+        StoreEmptyVBufferLighting(voxelCoord);
+    }
+}
+
+[numthreads(8, 8, 4)]
+void ClearVBufferLighting(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    if (!IsInsideVBuffer(dispatchThreadId))
+        return;
+
+    _VBufferLighting[dispatchThreadId] = float4(0.0, 0.0, 0.0, 1.0);
+}
+
+[numthreads(8, 8, 1)]
+void VolumetricLighting(uint3 dispatchThreadId : SV_DispatchThreadID,
+                        uint2 groupId : SV_GroupID,
+                        uint2 groupThreadId : SV_GroupThreadID,
+                        uint groupIndex : SV_GroupIndex)
+{
+    uint2 groupOffset = groupId * GROUP_SIZE_1D;
+    uint2 vBufferPixel = groupOffset + groupThreadId;
+
+    if (vBufferPixel.x >= (uint)_VBufferWidth || vBufferPixel.y >= (uint)_VBufferHeight)
+        return;
+
+    float2 sampleOffset = _VBufferSampleOffset.xy;
+    JitteredRay ray = BuildVBufferJitteredRay(vBufferPixel, sampleOffset);
+    float2 vBufferUV = GetVBufferSampleUV(vBufferPixel, sampleOffset);
+    bool hasOpaqueGeometry;
+    ray.geomDist = GetVBufferOpaqueGeometryDistanceForRay(vBufferUV, ray, hasOpaqueGeometry);
+
+    float fallbackDistance = hasOpaqueGeometry ? ray.geomDist : _VBufferLastSliceDistance;
+    bool hasMaxZ = _VBufferMaxZEnabled > 0.5;
+    ray.maxDist = GetVBufferMaxOpaqueGeometryDistance(vBufferUV, ray.jitterDirWS, fallbackDistance);
+
+    FillVolumetricLightingBuffer(vBufferPixel, ray, hasMaxZ);
+}
+
+float4 LoadLightingClamped(int3 coord)
+{
+    int3 maxCoord = int3((int)_VBufferWidth - 1, (int)_VBufferHeight - 1, (int)_VBufferSliceCount - 1);
+    return _VBufferLightingInput.Load(int4(clamp(coord, int3(0, 0, 0), maxCoord), 0));
+}
+
+void PrefetchVBufferFilterData(uint sampleID, uint2 groupOrigin, uint sliceIndex)
+{
+    int2 originXY = int2(groupOrigin) - 1;
+    int offsetX = (int)(sampleID % VBUFFER_FILTER_SIZE_1D);
+    int offsetY = (int)(sampleID / VBUFFER_FILTER_SIZE_1D);
+    int3 sampleCoord = int3(originXY.x + offsetX, originXY.y + offsetY, (int)sliceIndex);
+    gs_VBufferFilterCache[offsetX + offsetY * VBUFFER_FILTER_SIZE_1D] = LoadLightingClamped(sampleCoord);
+}
+
+float Gaussian(float radius, float sigma)
+{
+    float v = radius / sigma;
+    return exp(-(v * v));
+}
+
+[numthreads(GROUP_SIZE_1D, GROUP_SIZE_1D, 1)]
+void FilterVolumetricLighting(
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint groupIndex : SV_GroupIndex,
+    uint2 groupId : SV_GroupID,
+    uint2 groupThreadId : SV_GroupThreadID)
+{
+    uint currentSlice = dispatchThreadId.z;
+    uint2 groupOrigin = groupId * VBUFFER_FILTER_GROUP_SIZE_XY;
+    uint2 currentCoord = groupOrigin + groupThreadId;
+    uint3 voxelCoord = uint3(currentCoord, currentSlice);
+
+    for (uint sampleID = groupIndex; sampleID < VBUFFER_FILTER_LDS_SIZE; sampleID += VBUFFER_FILTER_THREAD_COUNT)
+        PrefetchVBufferFilterData(sampleID, groupOrigin, currentSlice);
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (!IsInsideVBuffer(voxelCoord))
+        return;
+
+    float4 value = 0.0;
+    float weightSum = 0.0;
+
+    [unroll]
+    for (int idx = -1; idx <= 1; idx++)
+    {
+        [unroll]
+        for (int idx2 = -1; idx2 <= 1; idx2++)
+        {
+            int2 tapAddress = (int2(groupThreadId) + 1) + int2(idx2, idx);
+            uint ldsTapAddress = (uint)tapAddress.x + (uint)tapAddress.y * VBUFFER_FILTER_SIZE_1D;
+            float weight = Gaussian(length(float2(idx, idx2)), VBUFFER_FILTER_GAUSSIAN_SIGMA);
+
+            value += gs_VBufferFilterCache[ldsTapAddress] * weight;
+            weightSum += weight;
+        }
+    }
+
+    _VBufferLightingOutput[voxelCoord] = value / max(weightSum, 1e-4);
+}

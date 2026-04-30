@@ -23,6 +23,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int MipFogParametersId = Shader.PropertyToID("_MipFogParameters");
         private static readonly int PixelCoordToViewDirWSId = Shader.PropertyToID("_PixelCoordToViewDirWS");
         private static readonly int SkyFogParamsId = Shader.PropertyToID("_SkyFogParams");
+        private static readonly int VBufferLightingId = Shader.PropertyToID("_VBufferLighting");
+        private static readonly int VolumetricEnabledId = Shader.PropertyToID("_VolumetricEnabled");
+        private static readonly int ShaderVariablesVolumetricId = Shader.PropertyToID("ShaderVariablesVolumetric");
 
         [RenderGraphResource(Name = "Color", Access = AccessFlags.Read)]
         private RenderGraphTexture m_ColorInput;
@@ -32,6 +35,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(Name = "SkyTexture", Access = AccessFlags.Read)]
         private RenderGraphTexture m_SkyTexture;
+
+        [RenderGraphResource(Name = "VBufferLighting", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_VBufferLighting;
 
         [RenderGraphResource(
             Name = "OutputColor",
@@ -47,6 +53,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private PhysicallyBasedSkyMaterialParameters m_MaterialParameters;
         private Vector4 m_FogParameters;
         private Texture3D m_FallbackAtmosphericScatteringLut;
+        private Texture3D m_FallbackVBufferLighting;
         private Cubemap m_FallbackSkyTexture;
         private RTHandle m_AtmosphericScatteringLutHandle;
         private SkyType m_ActiveSkyType;
@@ -54,6 +61,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private Color m_SkyTint = Color.white;
         private float m_SkyExposure = 1.0f;
         private float m_SkyRotation;
+        private bool m_VolumetricEnabled;
+        private ShaderVariablesVolumetric m_ShaderVariablesVolumetric;
 
         public AtmosphericScatteringPass()
         {
@@ -63,6 +72,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DepthTexture = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.None, DepthBits.Depth32);
             m_DepthTexture.desc.FilterMode = FilterMode.Point;
             m_SkyTexture = CreateSkyTexture("SkyTexture");
+            m_VBufferLighting = VolumetricDensityPass.CreateVBufferTexture("VBufferLighting");
+            m_VBufferLighting.desc.ClearColor = new Color(0.0f, 0.0f, 0.0f, 1.0f);
             m_OutputTexture = RenderGraphTexture.CreateOutput("OutputColor", GraphicsFormat.R16G16B16A16_SFloat);
             m_OutputTexture.desc.ClearBuffer = false;
         }
@@ -83,6 +94,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_Material = CoreUtils.CreateEngineMaterial(shader);
             EnsureFallbackAtmosphericScatteringLut();
+            EnsureFallbackVBufferLighting();
             EnsureFallbackSkyTexture();
         }
 
@@ -116,6 +128,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SkyExposure = skyData?.exposure ?? 1.0f;
             m_SkyRotation = skyData?.rotation ?? 0.0f;
 
+            var volumetricData = frameData.GetOrCreate<VividVolumetricData>();
+            m_VolumetricEnabled = volumetricData.enabled;
+            m_ShaderVariablesVolumetric = volumetricData.shaderVariables;
+
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             var colorInputDescriptor = m_ColorInput?.desc;
             var width = ResolveOutputWidth(
@@ -147,12 +163,16 @@ namespace VividRP.Runtime.RenderPass.Core
             var depthTexture = TextureResolveUtility.ResolveTexture(m_DepthTexture.innerHandle) ?? Texture2D.whiteTexture;
             var atmosphericScatteringLut = TextureResolveUtility.ResolveTexture(m_AtmosphericScatteringLutHandle);
             var skyTexture = TextureResolveUtility.ResolveTexture(m_SkyTexture);
+            var vBufferLighting = TextureResolveUtility.ResolveTexture(m_VBufferLighting.innerHandle);
             var hasValidAtmosphericScatteringLut = HasValidAtmosphericScatteringLut(atmosphericScatteringLut);
             var hasValidSkyTexture = HasValidSkyTexture(skyTexture);
+            var hasVBufferLighting = HasValidVBuffer(vBufferLighting);
             if (!hasValidAtmosphericScatteringLut)
                 EnsureFallbackAtmosphericScatteringLut();
             if (!hasValidSkyTexture)
                 EnsureFallbackSkyTexture();
+            if (!hasVBufferLighting)
+                EnsureFallbackVBufferLighting();
 
             var hasUsableDepthTexture = HasUsableDepthTexture(depthTexture);
             var requiresAtmosphericScatteringLut = m_ActiveSkyType != SkyType.HDRI;
@@ -171,6 +191,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 AtmosphericScatteringLutId,
                 hasValidAtmosphericScatteringLut ? atmosphericScatteringLut : m_FallbackAtmosphericScatteringLut);
             mpb.SetTexture(SkyTextureId, hasValidSkyTexture ? skyTexture : m_FallbackSkyTexture);
+            mpb.SetTexture(VBufferLightingId, hasVBufferLighting ? vBufferLighting : m_FallbackVBufferLighting);
+            mpb.SetFloat(VolumetricEnabledId, m_VolumetricEnabled && hasVBufferLighting ? 1.0f : 0.0f);
             mpb.SetColor(FogColorId, Color.white);
             mpb.SetFloat(FogColorModeId, m_IsActive && hasValidSkyTexture ? 1.0f : 0.0f);
             mpb.SetVector(MipFogParametersId, BuildMipFogParameters(fogParams));
@@ -192,6 +214,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 PhysicallyBasedSkyMaterialPropertyBinder.Apply(mpb, m_MaterialParameters, VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume());
 
             var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
+            ConstantBuffer.PushGlobal(nativeCmd, m_ShaderVariablesVolumetric, ShaderVariablesVolumetricId);
             nativeCmd.SetRenderTarget(m_OutputTexture);
             CoreUtils.DrawFullScreen(nativeCmd, m_Material, mpb, ResolveShaderPassIndex());
         }
@@ -208,6 +231,12 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 CoreUtils.Destroy(m_FallbackAtmosphericScatteringLut);
                 m_FallbackAtmosphericScatteringLut = null;
+            }
+
+            if (m_FallbackVBufferLighting != null)
+            {
+                CoreUtils.Destroy(m_FallbackVBufferLighting);
+                m_FallbackVBufferLighting = null;
             }
 
             if (m_FallbackSkyTexture != null)
@@ -258,6 +287,22 @@ namespace VividRP.Runtime.RenderPass.Core
             };
             m_FallbackAtmosphericScatteringLut.SetPixels(new[] { Color.black });
             m_FallbackAtmosphericScatteringLut.Apply(false, true);
+        }
+
+        private void EnsureFallbackVBufferLighting()
+        {
+            if (m_FallbackVBufferLighting != null)
+                return;
+
+            m_FallbackVBufferLighting = new Texture3D(1, 1, 1, TextureFormat.RGBAHalf, false)
+            {
+                name = "VividFallbackVBufferLighting",
+                hideFlags = HideFlags.HideAndDontSave,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp
+            };
+            m_FallbackVBufferLighting.SetPixels(new[] { new Color(0.0f, 0.0f, 0.0f, 1.0f) });
+            m_FallbackVBufferLighting.Apply(false, true);
         }
 
         private void EnsureFallbackSkyTexture()
@@ -394,6 +439,17 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             return texture is not RenderTexture renderTexture || renderTexture.IsCreated();
+        }
+
+        private static bool HasValidVBuffer(Texture texture)
+        {
+            if (texture == null || texture.dimension != TextureDimension.Tex3D)
+                return false;
+
+            if (texture is RenderTexture renderTexture)
+                return renderTexture.IsCreated() && renderTexture.volumeDepth > 1;
+
+            return texture is Texture3D texture3D && texture3D.depth > 1;
         }
 
         private static RenderGraphTexture CreateSkyTexture(string name)

@@ -18,6 +18,10 @@ namespace VividRP.Runtime
             public float shadowStrength;
             public Vector3 color;
             public uint renderingLayerMask;
+            public float volumetricDimmer;
+            public float volumetricShadowDimmer;
+            public float volumetricFadeDistance;
+            public uint affectVolumetric;
 
             internal static int Stride => Marshal.SizeOf<DirectionalLightData>();
         }
@@ -31,10 +35,18 @@ namespace VividRP.Runtime
             public uint lightType;
             public Vector3 directionWS;
             public float angleScale;
+            public Vector3 rightWS;
             public float angleOffset;
-            public float inverseRangeSquared;
+            public Vector3 upWS;
+            public float shapeRadiusSquared;
+            public float rangeAttenuationScale;
+            public float rangeAttenuationBias;
             public float shadowStrength;
             public uint renderingLayerMask;
+            public float volumetricDimmer;
+            public float volumetricShadowDimmer;
+            public float volumetricFadeDistance;
+            public uint affectVolumetric;
 
             internal static int Stride => Marshal.SizeOf<PunctualLightData>();
         }
@@ -56,6 +68,10 @@ namespace VividRP.Runtime
             public float range;
             public float cosBarnDoorAngle;
             public float barnDoorLength;
+            public float volumetricDimmer;
+            public float volumetricShadowDimmer;
+            public float volumetricFadeDistance;
+            public uint affectVolumetric;
 
             internal static int Stride => Marshal.SizeOf<AreaLightData>();
         }
@@ -71,6 +87,7 @@ namespace VividRP.Runtime
             public float radiusAtRange;
             public Vector3 cullingCenterWS;
             public float cullingRadius;
+            public uint affectVolumetric;
 
             internal static int Stride => Marshal.SizeOf<PunctualLightCullData>();
         }
@@ -709,15 +726,22 @@ namespace VividRP.Runtime
                 rightWS = NormalizeDirection(new Vector3(localToWorld.m00, localToWorld.m10, localToWorld.m20), Vector3.right),
                 upWS = NormalizeDirection(new Vector3(localToWorld.m01, localToWorld.m11, localToWorld.m21), Vector3.up),
                 areaSize = Vector2.zero,
+                shapeRadius = 0.0f,
                 intensity = GetLightIntensity(finalColor),
                 color = new Vector3(finalColor.r, finalColor.g, finalColor.b),
                 shadowStrength = 0.0f,
                 spotAngle = visibleLight.spotAngle,
                 innerSpotAngle = visibleLight.innerSpotAngle,
-                inverseRangeSquared = range > 0.0f ? 1.0f / Mathf.Max(range * range, 1e-6f) : 0.0f,
+                rangeAttenuationScale = range > 0.0f ? 1.0f / Mathf.Max(range * range, 1e-6f) : 0.0f,
+                rangeAttenuationBias = 1.0f,
                 renderingLayerMask = 0u,
                 shadowRenderingLayerMask = 0u,
-                flags = VividLightRenderDataFlags.Enabled | VividLightRenderDataFlags.ActiveInHierarchy,
+                volumetricDimmer = VividAdditionalLightData.DefaultVolumetricDimmer,
+                volumetricFadeDistance = VividAdditionalLightData.DefaultVolumetricFadeDistance,
+                volumetricShadowDimmer = VividAdditionalLightData.DefaultVolumetricShadowDimmer,
+                flags = VividLightRenderDataFlags.Enabled
+                    | VividLightRenderDataFlags.ActiveInHierarchy
+                    | VividLightRenderDataFlags.AffectVolumetric,
             };
         }
 
@@ -842,14 +866,34 @@ namespace VividRP.Runtime
                 return;
             }
 
-            var innerHalfAngle = Mathf.Clamp(innerSpotAngle * 0.5f, 0.0f, 89.0f) * Mathf.Deg2Rad;
-            var outerHalfAngle = Mathf.Clamp(outerSpotAngle * 0.5f, innerSpotAngle * 0.5f + 0.001f, 89.0f) * Mathf.Deg2Rad;
+            var innerHalfAngleDegrees = Mathf.Clamp(innerSpotAngle * 0.5f, 0.0f, 89.0f);
+            var outerHalfAngleDegrees = GetSpotOuterHalfAngleDegrees(innerHalfAngleDegrees, outerSpotAngle);
+            var innerHalfAngle = innerHalfAngleDegrees * Mathf.Deg2Rad;
+            var outerHalfAngle = outerHalfAngleDegrees * Mathf.Deg2Rad;
             var cosInner = Mathf.Cos(innerHalfAngle);
             var cosOuter = Mathf.Cos(outerHalfAngle);
             var angleRange = Mathf.Max(cosInner - cosOuter, 0.001f);
 
             angleScale = 1.0f / angleRange;
             angleOffset = -cosOuter * angleScale;
+        }
+
+        private static float GetSpotConeAxisScale(LightType lightType, float innerSpotAngle, float outerSpotAngle)
+        {
+            if (lightType != LightType.Spot)
+                return 1.0f;
+
+            var innerHalfAngleDegrees = Mathf.Clamp(innerSpotAngle * 0.5f, 0.0f, 89.0f);
+            var outerHalfAngle = GetSpotOuterHalfAngleDegrees(innerHalfAngleDegrees, outerSpotAngle) * Mathf.Deg2Rad;
+            var cosOuter = Mathf.Clamp01(Mathf.Cos(outerHalfAngle));
+            var sinOuter = Mathf.Sqrt(Mathf.Max(1.0f - cosOuter * cosOuter, 1e-6f));
+            return cosOuter / sinOuter;
+        }
+
+        private static float GetSpotOuterHalfAngleDegrees(float innerHalfAngleDegrees, float outerSpotAngle)
+        {
+            var minOuterHalfAngle = Mathf.Min(innerHalfAngleDegrees + 0.001f, 89.0f);
+            return Mathf.Clamp(outerSpotAngle * 0.5f, minOuterHalfAngle, 89.0f);
         }
 
         private static float GetLightIntensity(Color finalColor)
@@ -895,7 +939,7 @@ namespace VividRP.Runtime
             var range = math.max(viewSpaceCullData.range, 1e-4f);
 
             lightVolumeData.lightCategory = HdrpLightCategoryPunctual;
-            lightVolumeData.affectVolumetric = 0;
+            lightVolumeData.affectVolumetric = source.affectVolumetric != 0u ? 1 : 0;
             lightVolumeData.featureFlags = HdrpLightFeatureFlagsPunctual;
             lightVolumeData.radiusSq = range * range;
 
@@ -974,7 +1018,7 @@ namespace VividRP.Runtime
 
             lightVolumeData.lightCategory = HdrpLightCategoryArea;
             lightVolumeData.lightVolume = HdrpLightVolumeTypeBox;
-            lightVolumeData.affectVolumetric = 0;
+            lightVolumeData.affectVolumetric = source.affectVolumetric != 0u && source.volumetricDimmer > 0.0f ? 1 : 0;
             lightVolumeData.featureFlags = HdrpLightFeatureFlagsArea;
             lightVolumeData.lightAxisX = new Vector3(axisXVS.x, axisXVS.y, axisXVS.z);
             lightVolumeData.lightAxisY = new Vector3(axisYVS.x, axisYVS.y, axisYVS.z);

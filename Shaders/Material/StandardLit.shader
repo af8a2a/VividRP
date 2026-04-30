@@ -93,8 +93,8 @@ Shader "VividRP/Material/StandardLit"
             ColorMask 0
 
             HLSLPROGRAM
-                #pragma target 4.5
-                #pragma multi_compile_instancing
+                 #pragma use_dxc
+                 #pragma multi_compile_instancing
                 #pragma instancing_options renderinglayer
                 #pragma shader_feature_local_fragment _ALPHATEST_ON
                 #pragma shader_feature_local_fragment _OPACITYMAP

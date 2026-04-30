@@ -24,14 +24,28 @@ namespace VividRP.Editor.Tests
             Assert.That(clusteredLightingSource, Does.Contain("_ClusteredAreaLightGridEnabled"));
             Assert.That(clusteredLightingSource, Does.Contain("LoadPunctualLightCell"));
             Assert.That(clusteredLightingSource, Does.Contain("LoadAreaLightCell"));
+            Assert.That(clusteredLightingSource, Does.Contain("struct VividBigTileLightCell"));
+            Assert.That(clusteredLightingSource, Does.Contain("StructuredBuffer<uint> g_vBigTileLightList"));
+            Assert.That(clusteredLightingSource, Does.Contain("LoadBigTileLightCell"));
+            Assert.That(clusteredLightingSource, Does.Contain("LoadBigTileLightIndex"));
 
             Assert.That(lightingLoopSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl\""));
             Assert.That(lightingLoopSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/ClusteredLighting.hlsl\""));
             Assert.That(lightingLoopSource, Does.Contain("struct VividLightingLoop"));
+            Assert.That(lightingLoopSource, Does.Contain("struct VividBigTileLightingLoopContext"));
             Assert.That(lightingLoopSource, Does.Contain("GetPunctualLightCount"));
             Assert.That(lightingLoopSource, Does.Contain("LoadPunctualLight"));
             Assert.That(lightingLoopSource, Does.Contain("GetAreaLightCount"));
             Assert.That(lightingLoopSource, Does.Contain("LoadAreaLight"));
+            Assert.That(lightingLoopSource, Does.Contain("CreateBigTile"));
+            Assert.That(lightingLoopSource, Does.Contain("GetBigTileLightCount"));
+            Assert.That(lightingLoopSource, Does.Contain("GetBigTileLightIndex"));
+            Assert.That(lightingLoopSource, Does.Contain("LoadBigTilePunctualLight"));
+            Assert.That(lightingLoopSource, Does.Contain("LoadBigTileAreaLight"));
+            Assert.That(lightingLoopSource, Does.Contain("GetBigTileDecalIndex"));
+            Assert.That(lightingLoopSource, Does.Contain("GetBigTilePunctualLightCount"));
+            Assert.That(lightingLoopSource, Does.Contain("GetBigTileAreaLightCount"));
+            Assert.That(lightingLoopSource, Does.Contain("GetBigTileDecalCount"));
             Assert.That(lightingLoopSource, Does.Not.Contain("HasPunctualLights"));
             Assert.That(lightingLoopSource, Does.Not.Contain("HasAreaLights"));
         }

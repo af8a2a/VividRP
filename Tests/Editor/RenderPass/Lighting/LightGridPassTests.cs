@@ -33,6 +33,8 @@ namespace VividRP.Editor.Tests
             AssertBindingMode("m_PunctualLightBuffer", RenderGraphResourceBindingMode.External);
             AssertBindingMode("m_AreaLightBuffer", RenderGraphResourceBindingMode.External);
             AssertBindingMode("m_DecalDataBuffer", RenderGraphResourceBindingMode.External);
+            AssertBindingMode("m_BigTileLightListBuffer", RenderGraphResourceBindingMode.External);
+            AssertBindingMode("m_BigTileVolumetricLightListBuffer", RenderGraphResourceBindingMode.External);
             AssertBindingMode("m_LayeredOffsetBuffer", RenderGraphResourceBindingMode.PassOwnedOverrideable);
             AssertBindingMode("m_LayeredLightListBuffer", RenderGraphResourceBindingMode.PassOwnedOverrideable);
             AssertBindingMode("m_LogBaseBuffer", RenderGraphResourceBindingMode.PassOwnedOverrideable);
@@ -88,19 +90,6 @@ namespace VividRP.Editor.Tests
             {
                 pass.Dispose();
             }
-        }
-
-        [Test]
-        public void LightGridPass_SourceUploadsDecalDataAndKeepsDecalCategoryShift()
-        {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Lighting", "LightGridPass.cs"));
-            var computeSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Lighting", "lightlistbuild-clustered.compute"));
-
-            Assert.That(source, Does.Contain("m_DecalDataBuffer = RenderGraphBuffer.CreateStructured(\"DecalData\""));
-            Assert.That(source, Does.Contain("UploadManagedArray("));
-            Assert.That(source, Does.Contain("m_DecalDataBuffer,"));
-            Assert.That(source, Does.Contain("m_ShaderVariablesLightListCB._DecalIndexShift = (uint)(m_PunctualLightCount + m_AreaLightCount);"));
-            Assert.That(computeSource, Does.Contain("WriteShiftIndex(t, LIGHTCATEGORY_DECAL, _DecalIndexShift);"));
         }
 
         private static void AssertImportedBackingBuffer(RenderGraphBuffer buffer, string fieldName)

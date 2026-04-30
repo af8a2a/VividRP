@@ -21,6 +21,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(node.GetInputPortByName("m_ColorInput"), Is.Not.Null);
             Assert.That(node.GetInputPortByName("m_DepthTexture"), Is.Not.Null);
+            Assert.That(node.GetInputPortByName("m_VBufferLighting"), Is.Not.Null);
             Assert.That(node.GetInputPortByName("m_AtmosphericScatteringLUT"), Is.Null);
             Assert.That(node.GetOutputPortByName("m_OutputTexture"), Is.Not.Null);
         }

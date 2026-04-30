@@ -281,16 +281,45 @@ namespace VividRP.Runtime
         private static void UpdateDiffuseAmbientProbe(CommandBuffer cmd, VividSkyData skyData, bool forceRebuild)
         {
             var useDefaultAmbientProbe = skyData == null || skyData.ambientProbeCubemap == null;
+            var fogParameters = BuildVolumetricAmbientProbeFogParameters();
+            var ambientProbeHash = BuildVolumetricAmbientProbeHash(skyData?.ambientProbeHash ?? 0, fogParameters);
             if (!useDefaultAmbientProbe)
             {
                 s_AmbientProbeConvolution.RequestUpdate(
                     cmd,
                     skyData.ambientProbeCubemap,
-                    skyData.ambientProbeHash,
+                    ambientProbeHash,
+                    fogParameters,
                     forceRebuild);
             }
 
             s_AmbientProbeConvolution.BindGlobalBuffer(cmd, useDefaultAmbientProbe);
+        }
+
+        private static Vector4 BuildVolumetricAmbientProbeFogParameters()
+        {
+            var fog = VividVolumeManagerUtility.GetVolumetricFogVolume();
+            if (fog == null || !fog.IsActive())
+                return Vector4.zero;
+
+            return new Vector4(
+                Mathf.Max(fog.globalLightProbeDimmer.value, 0.0f),
+                Mathf.Clamp(fog.anisotropy.value, -0.95f, 0.95f),
+                0.0f,
+                0.0f);
+        }
+
+        private static int BuildVolumetricAmbientProbeHash(int ambientProbeHash, Vector4 fogParameters)
+        {
+            unchecked
+            {
+                var hash = ambientProbeHash;
+                hash = (hash * 397) ^ fogParameters.x.GetHashCode();
+                hash = (hash * 397) ^ fogParameters.y.GetHashCode();
+                hash = (hash * 397) ^ fogParameters.z.GetHashCode();
+                hash = (hash * 397) ^ fogParameters.w.GetHashCode();
+                return hash;
+            }
         }
 
         private static void BindGlobalSkyTexture(CommandBuffer cmd, VividSkyData skyData)

@@ -14,6 +14,10 @@ struct DirectionalLightData
     float shadowStrength;
     float3 color;
     uint renderingLayerMask;
+    float volumetricDimmer;
+    float volumetricShadowDimmer;
+    float volumetricFadeDistance;
+    uint affectVolumetric;
 };
 
 struct PunctualLightData
@@ -24,10 +28,18 @@ struct PunctualLightData
     uint lightType;
     float3 directionWS;
     float angleScale;
+    float3 rightWS;
     float angleOffset;
-    float inverseRangeSquared;
+    float3 upWS;
+    float shapeRadiusSquared;
+    float rangeAttenuationScale;
+    float rangeAttenuationBias;
     float shadowStrength;
     uint renderingLayerMask;
+    float volumetricDimmer;
+    float volumetricShadowDimmer;
+    float volumetricFadeDistance;
+    uint affectVolumetric;
 };
 
 struct AreaLightData
@@ -46,6 +58,10 @@ struct AreaLightData
     float range;
     float cosBarnDoorAngle;
     float barnDoorLength;
+    float volumetricDimmer;
+    float volumetricShadowDimmer;
+    float volumetricFadeDistance;
+    uint affectVolumetric;
 };
 
 StructuredBuffer<DirectionalLightData> _DirectionalLights;
@@ -86,6 +102,10 @@ DirectionalLightData GetDirectionalLightDefault()
     light.shadowStrength = 0.0;
     light.color = 0.0;
     light.renderingLayerMask = 0u;
+    light.volumetricDimmer = 0.0;
+    light.volumetricShadowDimmer = 0.0;
+    light.volumetricFadeDistance = 0.0;
+    light.affectVolumetric = 0u;
     return light;
 }
 

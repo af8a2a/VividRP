@@ -1150,9 +1150,18 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("voxelOpticalDepth = extinction * dt"));
             Assert.That(lightingSource, Does.Contain("float perPixelRandomOffset = GenerateVBufferRandom(vBufferPixel)"));
             Assert.That(lightingSource, Does.Contain("float rndVal = frac(perPixelRandomOffset + _VBufferSampleOffset.z)"));
-            Assert.That(lightingSource, Does.Contain("float weight = TransmittanceIntegralHomogeneousMedium(extinction, dt)"));
-            Assert.That(lightingSource, Does.Not.Contain("ImportanceSampleHomogeneousMedium(rndVal, extinction, dt"));
+            Assert.That(lightingSource, Does.Contain("ImportanceSampleHomogeneousMedium(rndVal, extinction, dt, tOffset, weight)"));
+            Assert.That(lightingSource, Does.Not.Contain("float weight = TransmittanceIntegralHomogeneousMedium(extinction, dt)"));
             Assert.That(lightingSource, Does.Contain("float3 sampleWS = ray.originWS + t * ray.jitterDirWS"));
+            Assert.That(lightingSource, Does.Contain("float shadow = SampleDirectionalShadow(i, light, sampleWS);"));
+            Assert.That(lightingSource, Does.Not.Contain("SampleDirectionalShadow(voxelCoord.xy"));
+            Assert.That(lightingSource, Does.Not.Contain("_DirectionalShadowTexture.SampleLevel"));
+            Assert.That(lightingSource, Does.Not.Contain("float2 uv = cameraPixel / max(cameraDimensions"));
+            Assert.That(lightingSource, Does.Contain("Compute the exponential moving average over 'n' frames"));
+            Assert.That(lightingSource, Does.Contain("Reminder: our voxels are sphere-capped right frustums"));
+            Assert.That(lightingSource, Does.Contain("Accurately compute the center of the voxel in the log space"));
+            Assert.That(lightingSource, Does.Contain("phaseCurrFrame' becomes temporarily unstable"));
+            Assert.That(lightingSource, Does.Contain("A Fresh Look at Generalized Sampling"));
             Assert.That(lightingSource, Does.Contain("float3 L = SafeNormalize(light.directionWS);"));
             Assert.That(lightingSource, Does.Not.Contain("float3 L = SafeNormalize(-light.directionWS);"));
             Assert.That(lightingSource, Does.Contain("LinearizeRGBD(voxelValue)"));
@@ -1169,7 +1178,6 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("light.affectVolumetric"));
             Assert.That(lightingSource, Does.Contain("light.volumetricDimmer"));
             Assert.That(lightingSource, Does.Contain("light.volumetricFadeDistance"));
-            Assert.That(lightingSource, Does.Contain("directionalLight.volumetricShadowDimmer"));
             Assert.That(lightingSource, Does.Contain("uint _VolumetricUseBigTileLightList"));
             Assert.That(lightingSource, Does.Not.Contain("_PunctualLightCount"));
             Assert.That(clusteredLightingSource, Does.Contain("StructuredBuffer<uint> g_vBigTileLightList"));

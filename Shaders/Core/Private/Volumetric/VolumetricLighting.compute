@@ -97,17 +97,11 @@ uint2 GetVBufferCameraPixel(uint2 vBufferPixel, float2 sampleOffset)
     return (uint2)((float2(vBufferPixel) + 0.5 + sampleOffset) * _VBufferCameraToVBufferScale);
 }
 
-float SampleDirectionalShadow(uint2 vBufferPixel, uint lightIndex, DirectionalLightData directionalLight, float3 samplePositionWS)
+float SampleDirectionalShadow(uint lightIndex, DirectionalLightData directionalLight, float3 samplePositionWS)
 {
-    if ((int)lightIndex != _MainDirectionalLightIndex)
-        return 1.0;
-
-    float2 cameraPixel = (float2(vBufferPixel) + 0.5) * _VBufferCameraToVBufferScale;
-    float2 cameraDimensions = _VBufferViewportSize.xy * _VBufferCameraToVBufferScale;
-    float2 uv = cameraPixel / max(cameraDimensions, float2(1.0, 1.0));
-    float shadow = _DirectionalShadowTexture.SampleLevel(sampler_PointClamp, saturate(uv), 0).x;
-    float volumetricShadowStrength = saturate(directionalLight.shadowStrength * directionalLight.volumetricShadowDimmer);
-    return lerp(1.0, saturate(shadow), volumetricShadowStrength);
+    // Shadow evaluation is intentionally not synchronized with HDRP here. The available
+    // directional shadow texture is screen-space surface data, not a world-space VBuffer sample.
+    return 1.0;
 }
 
 bool LightAffectsVolumetrics(uint affectVolumetric, float volumetricDimmer)
@@ -122,8 +116,25 @@ bool IsInRange(float value, float2 range)
 
 float ComputeHistoryWeight()
 {
-    // HDRP accumulates the 7-frame stochastic sequence as a uniform moving average.
-    return 6.0 / 7.0;
+    // Compute the exponential moving average over 'n' frames:
+    // X = (1 - a) * ValueAtFrame[n] + a * AverageOverPreviousFrames.
+    // We want each sample to be uniformly weighted by (1 / n):
+    // X = (1 / n) * Sum{i from 1 to n}{ValueAtFrame[i]}.
+    // Therefore, we get:
+    // (1 - a) = (1 / n) => a = (1 - 1 / n) = (n - 1) / n,
+    // X = (1 / n) * ValueAtFrame[n] + (1 - 1 / n) * AverageOverPreviousFrames.
+    // Why does it work? We need to make the following assumption:
+    // AverageOverPreviousFrames ≈ AverageOverFrames[n - 1].
+    // AverageOverFrames[n - 1] = (1 / (n - 1)) * Sum{i from 1 to n - 1}{ValueAtFrame[i]}.
+    // This implies that the reprojected (accumulated) value has mostly converged.
+    // X = (1 / n) * ValueAtFrame[n] + ((n - 1) / n) * (1 / (n - 1)) * Sum{i from 1 to n - 1}{ValueAtFrame[i]}.
+    // X = (1 / n) * ValueAtFrame[n] + (1 / n) * Sum{i from 1 to n - 1}{ValueAtFrame[i]}.
+    // X = Sum{i from 1 to n}{ValueAtFrame[i] / n}.
+    float numFrames = 7;
+    float frameWeight = 1.0 / numFrames;
+    float historyWeight = 1.0 - frameWeight;
+
+    return historyWeight;
 }
 
 float4 SampleVBufferHistory(float3 positionWS)
@@ -191,11 +202,18 @@ void StoreEmptyVBufferFeedback(uint3 voxelCoord)
 
 JitteredRay BuildVBufferJitteredRay(uint2 vBufferPixel, float2 sampleOffset)
 {
+    // Reminder: our voxels are sphere-capped right frustums (truncated right pyramids).
+    // The curvature of the front and back faces is quite gentle, so we can use
+    // the right frustum approximation (thus the front and the back faces are squares).
+    // Note, that since we still rely on the perspective camera model, pixels at the center
+    // of the screen correspond to larger solid angles than those at the edges.
+    // Basically, sizes of front and back faces depend on the XY coordinate.
+    // https://www.desmos.com/calculator/i3rkesvidk
     float3 F = GetViewForwardDir();
     float3 U = GetViewUpDir();
     float2 centerCoord = float2(vBufferPixel) + 0.5;
 
-    // Same convention as HDRP: ViewSpace(rayDirWS).z == 1 before normalization.
+    // Compute a ray direction s.t. ViewSpace(rayDirWS).z = 1.
     float3 rayDirWS = mul(-float4(centerCoord, 1.0, 1.0), _VBufferCoordToViewDirWS).xyz;
     float3 rightDirWS = cross(rayDirWS, U);
     float rcpLenRayDir = rsqrt(max(dot(rayDirWS, rayDirWS), 1e-8));
@@ -203,12 +221,12 @@ JitteredRay BuildVBufferJitteredRay(uint2 vBufferPixel, float2 sampleOffset)
 
     JitteredRay ray;
     ray.originWS = _WorldSpaceCameraPos;
-    ray.centerDirWS = rayDirWS * rcpLenRayDir;
+    ray.centerDirWS = rayDirWS * rcpLenRayDir; // Normalize
 
     float FdotD = max(dot(F, ray.centerDirWS), 1e-4);
     float unitDistFaceSize = _VBufferUnitDepthTexelSpacing * FdotD * rcpLenRayDir;
-    ray.xDirDerivWS = rightDirWS * (rcpLenRightDir * unitDistFaceSize);
-    ray.yDirDerivWS = cross(ray.xDirDerivWS, ray.centerDirWS);
+    ray.xDirDerivWS = rightDirWS * (rcpLenRightDir * unitDistFaceSize); // Normalize & rescale
+    ray.yDirDerivWS = cross(ray.xDirDerivWS, ray.centerDirWS); // Will have the length of 'unitDistFaceSize' by construction
     ray.jitterDirWS = SafeNormalize(ray.centerDirWS + sampleOffset.x * ray.xDirDerivWS + sampleOffset.y * ray.yDirDerivWS);
     ray.geomDist = FLT_MAX;
     ray.maxDist = FLT_MAX;
@@ -362,12 +380,16 @@ bool IntersectRaySpotConeRange(float3 rayOriginWS, float3 rayDirectionWS, Punctu
         tExit);
 }
 
-VoxelLighting EvaluateVoxelLightingDirectional(uint3 voxelCoord, JitteredRay ray, float t0, float dt, float extinction, float anisotropy)
+// Computes the light integral (in-scattered radiance) within the voxel.
+// Multiplication by the scattering coefficient and the phase function is performed outside.
+VoxelLighting EvaluateVoxelLightingDirectional(uint3 voxelCoord, JitteredRay ray, float t0, float t1, float dt, float rndVal, float extinction, float anisotropy)
 {
     VoxelLighting lighting = (VoxelLighting)0;
     uint directionalCount = min(_DirectionalLightCount, 8u);
-    float weight = TransmittanceIntegralHomogeneousMedium(extinction, dt);
-    float t = t0 + 0.5 * dt;
+
+    float tOffset, weight;
+    ImportanceSampleHomogeneousMedium(rndVal, extinction, dt, tOffset, weight);
+    float t = t0 + tOffset;
     float3 sampleWS = ray.originWS + t * ray.jitterDirWS;
 
     [loop]
@@ -379,13 +401,26 @@ VoxelLighting EvaluateVoxelLightingDirectional(uint3 voxelCoord, JitteredRay ray
 
         float3 L = SafeNormalize(light.directionWS);
         float3 lightColor = max(light.color, 0.0) * light.volumetricDimmer;
-        float shadow = SampleDirectionalShadow(voxelCoord.xy, i, light, sampleWS);
+        float shadow = SampleDirectionalShadow(i, light, sampleWS);
         lightColor *= shadow;
 
+        // Important:
+        // Ideally, all scattering calculations should use the jittered versions
+        // of the sample position and the ray direction. However, correct reprojection
+        // of asymmetrically scattered lighting (affected by an anisotropic phase
+        // function) is not possible. We work around this issue by reprojecting
+        // lighting not affected by the phase function. This basically removes
+        // the phase function from the temporal integration process. It is a hack.
+        // The downside is that anisotropy no longer benefits from temporal averaging,
+        // and any temporal instability of anisotropy causes causes visible jitter.
+        // In order to stabilize the image, we use the voxel center for all
+        // anisotropy-related calculations.
         float cosTheta = dot(L, ray.centerDirWS);
         float g = clamp(anisotropy, -0.95, 0.95);
         float phaseVarying = CornetteShanksPhasePartVarying(g, cosTheta);
 
+        // Compute the amount of in-scattered radiance.
+        // Note: the 'weight' accounts for transmittance from 't0' to 't'.
         lighting.radianceNoPhase += weight * lightColor;
         lighting.radianceComplete += weight * lightColor * phaseVarying;
     }
@@ -393,6 +428,8 @@ VoxelLighting EvaluateVoxelLightingDirectional(uint3 voxelCoord, JitteredRay ray
     return lighting;
 }
 
+// Computes the light integral (in-scattered radiance) within the voxel.
+// Multiplication by the scattering coefficient and the phase function is performed outside.
 VoxelLighting EvaluateVoxelLightingLocal(uint3 voxelCoord, uint2 vBufferPixel, float3 centerWS, JitteredRay ray, float t0, float t1, float dt, float rndVal, float extinction, float anisotropy)
 {
     VoxelLighting lighting = (VoxelLighting)0;
@@ -407,101 +444,137 @@ VoxelLighting EvaluateVoxelLightingLocal(uint3 voxelCoord, uint2 vBufferPixel, f
     if (_VolumetricUseBigTileLightList == 0u || _NumTileBigTileX == 0u || _NumTileBigTileY == 0u)
         hasVolumetricBigTileLightList = false;
 
-    if (hasVolumetricBigTileLightList)
-    {
-        uint2 cameraPixel = GetVBufferCameraPixel(vBufferPixel, float2(0.0, 0.0));
-        VividBigTileLightingLoopContext bigTileLoop = VividLightingLoop::CreateBigTile(cameraPixel);
-        uint lightCount = VividLightingLoop::GetBigTileLightCount(bigTileLoop);
+    // if (hasVolumetricBigTileLightList)
+    // {
+    //     uint lightOffset = 0;
+    //     uint2 cameraPixel = GetVBufferCameraPixel(vBufferPixel, float2(0.0, 0.0));
+    //     VividBigTileLightingLoopContext bigTileLoop = VividLightingLoop::CreateBigTile(cameraPixel);
+    //     uint lightCount = VividLightingLoop::GetBigTileLightCount(bigTileLoop);
+    //
+    //     [loop]
+    //     for (; lightOffset < lightCount; lightOffset++)
+    //     {
+    //         PunctualLightData light = VividLightingLoop::LoadBigTilePunctualLight(bigTileLoop, lightOffset);
+    //         if (!LightAffectsVolumetrics(light.affectVolumetric, light.volumetricDimmer))
+    //             continue;
+    //
+    //         bool sampleLight = true;
+    //
+    //         float tEntr = t0;
+    //         float tExit = t1;
+    //
+    //         // Perform ray-cone intersection for pyramid and spot lights.
+    //         if (light.lightType == VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
+    //         {
+    //             float coneEntry;
+    //             float coneExit;
+    //             sampleLight = IntersectRaySpotConeRange(ray.originWS, ray.jitterDirWS, light, t0, t1, coneEntry, coneExit);
+    //             tEntr = coneEntry;
+    //             tExit = coneExit;
+    //         }
+    //
+    //         if (!sampleLight || tEntr >= tExit)
+    //             continue;
+    //
+    //         // Is it worth evaluating the light?
+    //         float lightSqRadius = max(light.shapeRadiusSquared, 1e-4);
+    //
+    //         float t;
+    //         float sqDist;
+    //         float rcpPdf;
+    //         ImportanceSamplePunctualLight(
+    //             rndVal,
+    //             light.positionWS,
+    //             lightSqRadius,
+    //             ray.originWS,
+    //             ray.jitterDirWS,
+    //             tEntr,
+    //             tExit,
+    //             t,
+    //             sqDist,
+    //             rcpPdf);
+    //
+    //         float3 samplePosWS = ray.originWS + ray.jitterDirWS * t;
+    //         float3 lightRadiance = EvaluatePunctualLightRadiance(light, samplePosWS);
+    //         if (max(max(lightRadiance.x, lightRadiance.y), lightRadiance.z) <= 0.0)
+    //             continue;
+    //
+    //         // Important:
+    //         // Ideally, all scattering calculations should use the jittered versions
+    //         // of the sample position and the ray direction. However, correct reprojection
+    //         // of asymmetrically scattered lighting (affected by an anisotropic phase
+    //         // function) is not possible. We work around this issue by reprojecting
+    //         // lighting not affected by the phase function. This basically removes
+    //         // the phase function from the temporal integration process. It is a hack.
+    //         // The downside is that anisotropy no longer benefits from temporal averaging,
+    //         // and any temporal instability of anisotropy causes causes visible jitter.
+    //         // In order to stabilize the image, we use the voxel center for all
+    //         // anisotropy-related calculations.
+    //         float3 centerToLight = light.positionWS - centerWS;
+    //         float cosTheta = dot(centerToLight, ray.centerDirWS) * rsqrt(dot(centerToLight, centerToLight));
+    //         float phaseVarying = CornetteShanksPhasePartVarying(g, cosTheta);
+    //
+    //         // Compute transmittance from 't0' to 't'.
+    //         float weight = TransmittanceHomogeneousMedium(extinction, t - t0) * rcpPdf;
+    //
+    //         // Compute the amount of in-scattered radiance.
+    //         lighting.radianceNoPhase += weight * lightRadiance;
+    //         lighting.radianceComplete += weight * lightRadiance * phaseVarying;
+    //     }
+    // }
 
-        [loop]
-        for (uint lightOffset = 0; lightOffset < lightCount; lightOffset++)
-        {
-            PunctualLightData light = VividLightingLoop::LoadBigTilePunctualLight(bigTileLoop, lightOffset);
-            if (!LightAffectsVolumetrics(light.affectVolumetric, light.volumetricDimmer))
-                continue;
-
-            float tEntr = t0;
-            float tExit = t1;
-            bool sampleLight = true;
-            if (light.lightType == VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
-            {
-                float coneEntry;
-                float coneExit;
-                sampleLight = IntersectRaySpotConeRange(ray.originWS, ray.jitterDirWS, light, t0, t1, coneEntry, coneExit);
-                tEntr = coneEntry;
-                tExit = coneExit;
-            }
-
-            if (!sampleLight || tEntr >= tExit)
-                continue;
-
-            float voxelArcLength = _VBufferUnitDepthTexelSpacing * max(tEntr, 0.0);
-            float lightSqRadius = max(max(light.shapeRadiusSquared, voxelArcLength), 1e-4);
-
-            float t;
-            float sqDist;
-            float rcpPdf;
-            ImportanceSamplePunctualLight(
-                rndVal,
-                light.positionWS,
-                lightSqRadius,
-                ray.originWS,
-                ray.jitterDirWS,
-                tEntr,
-                tExit,
-                t,
-                sqDist,
-                rcpPdf);
-
-            float3 samplePosWS = ray.originWS + ray.jitterDirWS * t;
-            float3 lightRadiance = EvaluatePunctualLightRadiance(light, samplePosWS);
-            if (max(max(lightRadiance.x, lightRadiance.y), lightRadiance.z) <= 0.0)
-                continue;
-
-            float3 centerToLight = light.positionWS - centerWS;
-            float cosTheta = dot(centerToLight, ray.centerDirWS) * rsqrt(dot(centerToLight, centerToLight));
-            float phaseVarying = CornetteShanksPhasePartVarying(g, cosTheta);
-            float weight = TransmittanceHomogeneousMedium(extinction, max(t - t0, 0.0)) * rcpPdf;
-
-            lighting.radianceNoPhase += weight * lightRadiance;
-            lighting.radianceComplete += weight * lightRadiance * phaseVarying;
-        }
-    }
-
-    // Area lights from cluster
-    {
-        float2 cameraPixel = (float2(vBufferPixel) + 0.5) * _VBufferCameraToVBufferScale;
-        VividLightingLoopContext lightLoop = VividLightingLoop::Create((uint2)cameraPixel, centerWS);
-        uint lightCount = min(min(VividLightingLoop::GetAreaLightCount(lightLoop), _AreaLightCount), VBUFFER_MAX_AREA_LIGHTS);
-
-        [loop]
-        for (uint localLightIndex = 0; localLightIndex < lightCount; localLightIndex++)
-        {
-            AreaLightData light = VividLightingLoop::LoadAreaLight(lightLoop, localLightIndex);
-            if (!LightAffectsVolumetrics(light.affectVolumetric, light.volumetricDimmer))
-                continue;
-
-            float3 lightVector = light.positionWS - centerWS;
-            float distanceSq = max(dot(lightVector, lightVector), 1e-4);
-            float distanceToLight = sqrt(distanceSq);
-            float3 lightDirectionWS = lightVector / distanceToLight;
-
-            float cosTheta = dot(lightDirectionWS, ray.centerDirWS);
-            float phaseVarying = CornetteShanksPhasePartVarying(g, cosTheta);
-
-            float rangeAttenuation = saturate(1.0 - distanceToLight / max(light.range, 1e-4));
-            rangeAttenuation *= rangeAttenuation;
-            float volumetricFade = EvaluateVolumetricLightFade(
-                GetVolumetricLightCameraDistance(light.positionWS),
-                light.volumetricFadeDistance);
-
-            float weight = TransmittanceIntegralHomogeneousMedium(extinction, dt);
-            float3 lightRadiance = max(light.color, 0.0) * light.volumetricDimmer * volumetricFade * rangeAttenuation / max(distanceSq, 1.0);
-
-            lighting.radianceNoPhase += weight * lightRadiance;
-            lighting.radianceComplete += weight * lightRadiance * phaseVarying;
-        }
-    }
+    // // Area lights from cluster
+    // {
+    //     float2 cameraPixel = (float2(vBufferPixel) + 0.5) * _VBufferCameraToVBufferScale;
+    //     VividLightingLoopContext lightLoop = VividLightingLoop::Create((uint2)cameraPixel, centerWS);
+    //     uint lightCount = min(min(VividLightingLoop::GetAreaLightCount(lightLoop), _AreaLightCount), VBUFFER_MAX_AREA_LIGHTS);
+    //
+    //     [loop]
+    //     for (uint localLightIndex = 0; localLightIndex < lightCount; localLightIndex++)
+    //     {
+    //         AreaLightData light = VividLightingLoop::LoadAreaLight(lightLoop, localLightIndex);
+    //         if (!LightAffectsVolumetrics(light.affectVolumetric, light.volumetricDimmer))
+    //             continue;
+    //
+    //         float tOffset, weight;
+    //         ImportanceSampleHomogeneousMedium(rndVal, extinction, dt, tOffset, weight);
+    //
+    //         float sampleT = t0 + tOffset;
+    //         float3 sampleWS = ray.originWS + sampleT * ray.jitterDirWS;
+    //
+    //         float3 lightVector = light.positionWS - sampleWS;
+    //         float distanceSq = max(dot(lightVector, lightVector), 1e-4);
+    //         float distanceToLight = sqrt(distanceSq);
+    //
+    //         // Important:
+    //         // Ideally, all scattering calculations should use the jittered versions
+    //         // of the sample position and the ray direction. However, correct reprojection
+    //         // of asymmetrically scattered lighting (affected by an anisotropic phase
+    //         // function) is not possible. We work around this issue by reprojecting
+    //         // lighting not affected by the phase function. This basically removes
+    //         // the phase function from the temporal integration process. It is a hack.
+    //         // The downside is that anisotropy no longer benefits from temporal averaging,
+    //         // and any temporal instability of anisotropy causes causes visible jitter.
+    //         // In order to stabilize the image, we use the voxel center for all
+    //         // anisotropy-related calculations.
+    //         float3 centerToLight = light.positionWS - centerWS;
+    //         float cosTheta = dot(centerToLight, ray.centerDirWS) * rsqrt(dot(centerToLight, centerToLight));
+    //         float phaseVarying = CornetteShanksPhasePartVarying(g, cosTheta);
+    //
+    //         float rangeAttenuation = saturate(1.0 - distanceToLight / max(light.range, 1e-4));
+    //         rangeAttenuation *= rangeAttenuation;
+    //         float volumetricFade = EvaluateVolumetricLightFade(
+    //             GetVolumetricLightCameraDistance(light.positionWS),
+    //             light.volumetricFadeDistance);
+    //
+    //         float3 lightRadiance = max(light.color, 0.0) * light.volumetricDimmer * volumetricFade * rangeAttenuation / max(distanceSq, 1.0);
+    //
+    //         // Compute the amount of in-scattered radiance.
+    //         // Note: the 'weight' accounts for transmittance from 't0' to 't'.
+    //         lighting.radianceNoPhase += weight * lightRadiance;
+    //         lighting.radianceComplete += weight * lightRadiance * phaseVarying;
+    //     }
+    // }
 
     return lighting;
 }
@@ -520,11 +593,18 @@ float3 EvaluateVolumetricAmbientProbe(float3 normalWS)
 #endif
 }
 
+// Computes the in-scattered radiance along the ray.
 void FillVolumetricLightingBuffer(uint2 vBufferPixel, JitteredRay ray, bool hasMaxZ)
 {
     uint sliceCount = (uint)_VBufferSliceCount;
     float t0 = GetVBufferJitteredRayStartDistance(ray);
     float de = _VBufferRcpSliceCount;
+
+    // The contribution of the ambient probe does not depend on the position,
+    // only on the direction and the length of the interval.
+    // SampleSH9() evaluates the 3-band SH in a given direction.
+    // The probe is already pre-convolved with the phase function.
+    // Note: anisotropic, no jittering.
     float3 probeInScatteredRadiance = EvaluateVolumetricAmbientProbe(ray.centerDirWS);
 
     float3 totalRadiance = 0.0;
@@ -540,9 +620,15 @@ void FillVolumetricLightingBuffer(uint2 vBufferPixel, JitteredRay ray, bool hasM
 
         bool containsOpaqueGeometry = IsInRange(ray.geomDist, float2(t0, t1));
         if (containsOpaqueGeometry)
+        {
+            // Only integrate up to the opaque surface (make the voxel shorter, but not completely flat).
+            // Note that we can NOT completely stop integrating when the ray reaches geometry, since
+            // otherwise we get flickering at geometric discontinuities if reprojection is enabled.
+            // In this case, a temporally stable light leak is better than flickering.
             t1 = max(t0 * 1.0001, ray.geomDist);
+        }
 
-        float dt = t1 - t0;
+        float dt = t1 - t0; // Is geometry-aware
         if (dt <= 0.0)
         {
             StoreEmptyVBufferFeedback(voxelCoord);
@@ -551,8 +637,14 @@ void FillVolumetricLightingBuffer(uint2 vBufferPixel, JitteredRay ray, bool hasM
             continue;
         }
 
+        // Accurately compute the center of the voxel in the log space. It's important to perform
+        // the inversion exactly, since the accumulated value of the integral is stored at the center.
+        // We will use it for participating media sampling, asymmetric scattering and reprojection.
         float t = DecodeLogarithmicDepthGeneralized(e1 - 0.5 * de, _VBufferDepthDecodingParams);
         float3 centerWS = ray.originWS + t * ray.centerDirWS;
+
+        // Sample the participating medium at the center of the voxel.
+        // We consider it to be constant along the interval [t0, t1] (within the voxel).
         float4 density = _VBufferDensity.Load(int4(voxelCoord, 0));
 
         float3 scattering = max(density.rgb, 0.0);
@@ -563,16 +655,26 @@ void FillVolumetricLightingBuffer(uint2 vBufferPixel, JitteredRay ray, bool hasM
 
         if (ShouldEvaluateVBufferLighting(extinction))
         {
+            // Perform per-pixel randomization by adding an offset and then sampling uniformly
+            // (in the log space) in a vein similar to Stochastic Universal Sampling:
+            // https://en.wikipedia.org/wiki/Stochastic_universal_sampling
             float perPixelRandomOffset = GenerateVBufferRandom(vBufferPixel);
+
+            // This is a time-based sequence of 7 equidistant numbers from 1/14 to 13/14.
+            // Each of them is the centroid of the interval of length 2/14.
             float rndVal = frac(perPixelRandomOffset + _VBufferSampleOffset.z);
 
             VoxelLighting aggregate = (VoxelLighting)0;
+
+            // Prevent division by 0.
             float sampledExtinction = max(extinction, FLT_MIN);
             VoxelLighting directionalLighting = EvaluateVoxelLightingDirectional(
                 voxelCoord,
                 ray,
                 t0,
+                t1,
                 dt,
+                rndVal,
                 sampledExtinction,
                 anisotropy);
             aggregate.radianceNoPhase += directionalLighting.radianceNoPhase;
@@ -592,28 +694,55 @@ void FillVolumetricLightingBuffer(uint2 vBufferPixel, JitteredRay ray, bool hasM
             aggregate.radianceNoPhase += localLighting.radianceNoPhase;
             aggregate.radianceComplete += localLighting.radianceComplete;
 
+            // Clamp here to prevent generation of NaNs.
             float4 voxelValue = float4(aggregate.radianceNoPhase, sampledExtinction * dt);
             float4 normalizedVoxelValue = LinearizeRGBD(voxelValue) * rcp(max(dt, FLT_MIN));
             float4 normalizedBlendValue = normalizedVoxelValue;
+
+            // Reproject the history at 'centerWS'.
             float4 reprojValue = (_VBufferHistoryIsValid != 0u) ? SampleVBufferHistory(centerWS) : 0.0;
             bool reprojSuccess = (_VBufferHistoryIsValid != 0u) && (reprojValue.a != 0.0);
 
             if (reprojSuccess)
+            {
+                // Perform temporal blending in the log space ("Pixar blend").
                 normalizedBlendValue = lerp(normalizedVoxelValue, reprojValue, ComputeHistoryWeight());
+            }
 
+            // Store the feedback for the voxel.
+            // TODO: dynamic lights (which update their position, rotation, cookie or shadow at runtime)
+            // do not support reprojection and should neither read nor write to the history buffer.
+            // This will cause them to alias, but it is the only way to prevent ghosting.
             StoreVBufferFeedback(voxelCoord, normalizedBlendValue);
 
             float4 blendValue = DelinearizeRGBD(normalizedBlendValue * dt);
+
+            // Estimate the influence of the phase function on the results of the current frame.
             float3 phaseCurrFrame = float3(
                 SafeDiv(aggregate.radianceComplete.r, aggregate.radianceNoPhase.r),
                 SafeDiv(aggregate.radianceComplete.g, aggregate.radianceNoPhase.g),
                 SafeDiv(aggregate.radianceComplete.b, aggregate.radianceNoPhase.b));
+
+            // Warning: in general, this does not work!
+            // For a voxel with a single light, 'phaseCurrFrame' is monochromatic, and since
+            // we don't jitter anisotropy, its value does not change from frame to frame
+            // for a static camera/scene. This is fine.
+            // If you have two lights per voxel, we compute:
+            // phaseCurrFrame = (phaseA * lightingA + phaseB * lightingB) / (lightingA + lightingB).
+            // 'phaseA' and 'phaseB' are still (different) constants for a static camera/scene.
+            // 'lightingA' and 'lightingB' are jittered, so they change from frame to frame.
+            // Therefore, 'phaseCurrFrame' becomes temporarily unstable and can cause flickering in practice. :-(
             float3 lightingRadiance = blendValue.rgb * phaseCurrFrame;
 
+            // Compute the transmittance from the camera to 't0'.
             float transmittanceToSlice = TransmittanceFromOpticalDepth(opticalDepth);
             float phaseConstant = CornetteShanksPhasePartConstant(clamp(anisotropy, -0.95, 0.95));
+
+            // Integrate the contribution of the probe over the interval.
+            // Integral{a, b}{Transmittance(0, t) * L_s(t) dt} = Transmittance(0, a) * Integral{a, b}{Transmittance(0, t - a) * L_s(t) dt}.
             float3 probeRadiance = probeInScatteredRadiance * TransmittanceIntegralHomogeneousMedium(sampledExtinction, dt);
 
+            // Accumulate radiance along the ray.
             totalRadiance += transmittanceToSlice * scattering * (phaseConstant * lightingRadiance + probeRadiance);
             blendOpticalDepth = blendValue.a;
         }
@@ -623,7 +752,14 @@ void FillVolumetricLightingBuffer(uint2 vBufferPixel, JitteredRay ray, bool hasM
         }
 
         opticalDepth += 0.5 * blendOpticalDepth;
+
+        // Store the voxel data.
+        // Note: for correct filtering, the data has to be stored in the perceptual space.
+        // This means storing the tone mapped radiance and transmittance instead of optical depth.
+        // See "A Fresh Look at Generalized Sampling", p. 51.
         StoreIntegratedVBufferLighting(voxelCoord, totalRadiance, opticalDepth);
+
+        // Compute the optical depth up to the end of the interval.
         opticalDepth += 0.5 * blendOpticalDepth;
 
         if (hasMaxZ && t0 * 0.99 > ray.maxDist)
@@ -666,6 +802,11 @@ void VolumetricLighting(uint3 dispatchThreadId : SV_DispatchThreadID,
 
     float2 sampleOffset = _VBufferSampleOffset.xy;
     JitteredRay ray = BuildVBufferJitteredRay(vBufferPixel, sampleOffset);
+
+    // We would like to determine the screen pixel (at the full resolution) which
+    // the jittered ray corresponds to. The exact solution can be obtained by intersecting
+    // the ray with the screen plane, e.i. (ViewSpace(jitterDirWS).z = 1). That's a little expensive.
+    // So, as an approximation, we ignore the curvature of the frustum.
     float2 vBufferUV = GetVBufferSampleUV(vBufferPixel, sampleOffset);
     bool hasOpaqueGeometry;
     ray.geomDist = GetVBufferOpaqueGeometryDistanceForRay(vBufferUV, ray, hasOpaqueGeometry);
@@ -674,6 +815,7 @@ void VolumetricLighting(uint3 dispatchThreadId : SV_DispatchThreadID,
     bool hasMaxZ = _VBufferMaxZEnabled > 0.5;
     ray.maxDist = GetVBufferMaxOpaqueGeometryDistance(vBufferUV, ray.jitterDirWS, fallbackDistance);
 
+    // Do not jitter 'vBufferPixel' else. It's expected to correspond to the center of the voxel.
     FillVolumetricLightingBuffer(vBufferPixel, ray, hasMaxZ);
 }
 

@@ -43,8 +43,6 @@ namespace VividRP.Editor
         private static readonly GUIContent s_VividSettingsLabel = EditorGUIUtility.TrTextContent("VividRP");
         private static readonly GUIContent s_ExpandAllLabel = EditorGUIUtility.TrTextContent("Expand All");
         private static readonly GUIContent s_CollapseAllLabel = EditorGUIUtility.TrTextContent("Collapse All");
-        private static readonly GUIContent s_NearClipPlaneLabel = EditorGUIUtility.TrTextContent("Near Clip Plane");
-        private static readonly GUIContent s_FarClipPlaneLabel = EditorGUIUtility.TrTextContent("Far Clip Plane");
         private static readonly GUIContent s_RenderTypeLabel = EditorGUIUtility.TrTextContent("Render Type");
         private static readonly GUIContent s_ClearDepthLabel = EditorGUIUtility.TrTextContent("Clear Depth");
         private static readonly GUIContent s_StopNaNsLabel = EditorGUIUtility.TrTextContent("Stop NaNs");
@@ -102,6 +100,7 @@ namespace VividRP.Editor
         {
             m_SerializedCamera.Update();
 
+            DrawRenderTypeInspector();
             DrawBuiltInCameraInspector();
             DrawVividInspector();
 
@@ -112,6 +111,11 @@ namespace VividRP.Editor
         {
             m_SerializedCamera = new VividSerializedCamera(serializedObject, settings);
             m_SerializedCamera.Refresh();
+        }
+
+        private void DrawRenderTypeInspector()
+        {
+            EditorGUILayout.PropertyField(m_SerializedCamera.renderType, s_RenderTypeLabel);
         }
 
         private void DrawBuiltInCameraInspector()
@@ -131,9 +135,43 @@ namespace VividRP.Editor
 
         private void DrawProjectionInspector()
         {
-            settings.DrawProjection();
-            EditorGUILayout.PropertyField(m_SerializedCamera.nearClippingPlane, s_NearClipPlaneLabel);
-            EditorGUILayout.PropertyField(m_SerializedCamera.farClippingPlane, s_FarClipPlaneLabel);
+            CameraUI.Drawer_Projection(m_SerializedCamera, this);
+            DrawPhysicalCameraInspector();
+        }
+
+        private void DrawPhysicalCameraInspector()
+        {
+            if (!ShouldShowPhysicalCameraSettings())
+                return;
+
+            EditorGUILayout.Space(2.0f);
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                EditorGUILayout.LabelField(CameraUI.PhysicalCamera.Styles.cameraBody, EditorStyles.boldLabel);
+                using (new EditorGUI.IndentLevelScope())
+                {
+                    CameraUI.PhysicalCamera.Drawer_PhysicalCamera_CameraBody_Sensor(m_SerializedCamera, this);
+                    CameraUI.PhysicalCamera.Drawer_PhysicalCamera_CameraBody_ISO(m_SerializedCamera, this);
+                    CameraUI.PhysicalCamera.Drawer_PhysicalCamera_CameraBody_ShutterSpeed(m_SerializedCamera, this);
+                    CameraUI.PhysicalCamera.Drawer_PhysicalCamera_CameraBody_GateFit(m_SerializedCamera, this);
+                }
+
+                EditorGUILayout.LabelField(CameraUI.PhysicalCamera.Styles.lens, EditorStyles.boldLabel);
+                using (new EditorGUI.IndentLevelScope())
+                {
+                    CameraUI.PhysicalCamera.Drawer_PhysicalCamera_Lens_FocalLength(m_SerializedCamera, this);
+                    CameraUI.PhysicalCamera.Drawer_PhysicalCamera_Lens_Shift(m_SerializedCamera, this);
+                    CameraUI.PhysicalCamera.Drawer_PhysicalCamera_Lens_Aperture(m_SerializedCamera, this);
+                    CameraUI.PhysicalCamera.Drawer_PhysicalCamera_FocusDistance(m_SerializedCamera, this);
+                }
+
+                EditorGUILayout.LabelField(CameraUI.PhysicalCamera.Styles.apertureShape, EditorStyles.boldLabel);
+                using (new EditorGUI.IndentLevelScope())
+                {
+                    CameraUI.PhysicalCamera.Drawer_PhysicalCamera_ApertureShape(m_SerializedCamera, this);
+                }
+            }
         }
 
         private void DrawEnvironmentInspector()
@@ -167,8 +205,6 @@ namespace VividRP.Editor
 
             using (new EditorGUI.IndentLevelScope())
             {
-                EditorGUILayout.PropertyField(m_SerializedCamera.renderType, s_RenderTypeLabel);
-
                 using (new EditorGUI.DisabledScope(ShouldDisableClearDepthField()))
                 {
                     EditorGUILayout.PropertyField(m_SerializedCamera.clearDepth, s_ClearDepthLabel);
@@ -282,6 +318,17 @@ namespace VividRP.Editor
                 return false;
 
             return (VividCameraRenderType)m_SerializedCamera.renderType.enumValueIndex == VividCameraRenderType.Base;
+        }
+
+        private bool ShouldShowPhysicalCameraSettings()
+        {
+            if (settings.orthographic.hasMultipleDifferentValues || settings.orthographic.boolValue)
+                return false;
+
+            if (m_SerializedCamera.projectionMatrixMode.hasMultipleDifferentValues)
+                return true;
+
+            return m_SerializedCamera.projectionMatrixMode.intValue == (int)CameraUI.ProjectionMatrixMode.PhysicalPropertiesBased;
         }
 
         private bool ShouldShowTAASettings()

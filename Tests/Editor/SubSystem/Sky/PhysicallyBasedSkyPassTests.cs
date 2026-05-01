@@ -49,6 +49,7 @@ namespace VividRP.Editor.Tests
             var registrySource = File.ReadAllText(GetPackageFilePath("Editor", "RenderGraph", "GeneratedRenderPassNodes.g.cs"));
             var rendererSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSky", "PhysicallyBasedSkyRenderer.cs"));
             var skyManagerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyManager.cs"));
+            var skyRendererContextSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyRendererContext.cs"));
             var renderGraphSource = File.ReadAllText(GetProjectFilePath("Assets", "Vivid Render Graph.vrdg"));
 
             Assert.That(injectionPassSource, Does.Contain("m_SkyViewLUT = RenderGraphTexture.CreateInput(\"SkyViewLUT\", GraphicsFormat.R16G16B16A16_SFloat);"));
@@ -75,10 +76,15 @@ namespace VividRP.Editor.Tests
             Assert.That(rendererSource, Does.Contain("UpdateLocalSkyPrecomputation(context, skyData, cmd);"));
             Assert.That(rendererSource, Does.Contain("var skyViewTexture = ResolveSkyViewTexture();"));
             Assert.That(rendererSource, Does.Contain("Shader.GetGlobalTexture(DirectionalShadowTextureId)"));
+            Assert.That(rendererSource, Does.Contain("AutoExposureShaderBindings.ResolvePreExposureBuffer(m_RenderContext.exposureData)"));
+            Assert.That(rendererSource, Does.Contain("properties.SetBuffer(PreExposureBufferId, preExposureBuffer);"));
             Assert.That(rendererSource, Does.Contain("CoreUtils.DrawFullScreen(cmd, m_SkyMaterial, properties, 0);"));
             Assert.That(skyManagerSource, Does.Not.Contain("private static readonly PhysicallyBasedSkyAtmosphereLutCache"));
             Assert.That(skyManagerSource, Does.Contain("renderer.UpdateFrameResources(context, s_CachedSkyData, cmd);"));
+            Assert.That(skyManagerSource, Does.Contain("frameData.GetOrCreate<VividExposureData>()"));
             Assert.That(skyManagerSource, Does.Not.Contain("s_PhysicallyBasedSkyAtmosphereLutCache.Update(context, cmd);"));
+            Assert.That(skyRendererContextSource, Does.Contain("VividExposureData exposureData = null"));
+            Assert.That(skyRendererContextSource, Does.Contain("internal VividExposureData exposureData { get; }"));
         }
 
         [Test]

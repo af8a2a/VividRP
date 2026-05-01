@@ -61,13 +61,20 @@ static const uint k_VertexIndicesMap[8 * 8] =
     7, 6, 5, 3, 2, 4, 1, 0
 };
 
-int DistanceToSlice(float distance)
+float DistanceToSliceCoord(float distance)
 {
-    float encodedDepthStep = _VBufferRcpSliceCount;
     float encodedDepth = EncodeLogarithmicDepthGeneralized(distance, _VBufferDepthEncodingParams);
-    encodedDepth -= encodedDepthStep;
-    encodedDepth /= encodedDepthStep;
-    return int(encodedDepth - 0.5);
+    return encodedDepth * _VBufferSliceCount;
+}
+
+int DistanceToStartSlice(float distance)
+{
+    return int(floor(DistanceToSliceCoord(distance) - 0.5));
+}
+
+int DistanceToStopSlice(float distance)
+{
+    return int(ceil(DistanceToSliceCoord(distance) - 0.5)) + 1;
 }
 
 float DepthDistance(float3 positionWS)
@@ -212,9 +219,9 @@ void ComputeVolumetricMaterialRenderingParameters(uint3 dispatchThreadID : SV_Di
     float vBufferNearPlane = DecodeLogarithmicDepthGeneralized(0.0, _VBufferDepthDecodingParams);
     float minBoxDistance = max(vBufferNearPlane, cameraDistanceToOBB);
     int maxSliceCount = max(int(_MaxSliceCount), 1);
-    int startSliceIndex = clamp(DistanceToSlice(minBoxDistance), 0, maxSliceCount);
-    int stopSliceIndex = DistanceToSlice(maxVertexDistance);
-    uint sliceCount = (uint)clamp(stopSliceIndex - startSliceIndex, 0, maxSliceCount - startSliceIndex);
+    int startSliceIndex = clamp(DistanceToStartSlice(minBoxDistance), 0, maxSliceCount);
+    int stopSliceIndex = clamp(DistanceToStopSlice(maxVertexDistance), startSliceIndex, maxSliceCount);
+    uint sliceCount = (uint)(stopSliceIndex - startSliceIndex);
 
     uint argsOffset = globalBufferWriteIndex * 5;
     _VolumetricGlobalIndirectArgsBuffer[argsOffset + 0] = 6;

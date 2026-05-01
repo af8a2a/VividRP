@@ -442,6 +442,7 @@ namespace VividRP.Editor.Tests
                 var parameters = VividLocalVolumetricFogArtistParameters.CreateDefault();
                 parameters.albedo = new Color(0.5f, 0.25f, 0.125f);
                 parameters.meanFreePath = 10.0f;
+                parameters.anisotropy = 0.35f;
                 parameters.positiveFade = new Vector3(0.1f, 0.2f, 0.4f);
                 parameters.negativeFade = new Vector3(0.2f, 0.4f, 0.8f);
                 fog.parameters = parameters;
@@ -453,6 +454,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(data.positiveFade.x, Is.EqualTo(10.0f).Within(0.0001f));
                 Assert.That(data.negativeFade.z, Is.EqualTo(1.25f).Within(0.0001f));
                 Assert.That(data.distanceFade.x, Is.GreaterThan(0.0f));
+                Assert.That(data.parameters.x, Is.EqualTo(0.35f).Within(0.0001f));
                 Assert.That(data.parameters.y, Is.EqualTo((float)VividLocalVolumetricFogBlendingMode.Additive));
             }
             finally
@@ -847,7 +849,8 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.Textures.Select(entry => entry.Name), Is.EquivalentTo(new[]
             {
                 "CameraDepth",
-                "VBufferDensity"
+                "VBufferDensity",
+                "VBufferAnisotropy"
             }));
             Assert.That(resources.RenderLists.Select(entry => entry.Name), Is.EquivalentTo(new[]
             {
@@ -863,6 +866,7 @@ namespace VividRP.Editor.Tests
             }));
             Assert.That(resources.Textures.Single(entry => entry.Name == "CameraDepth").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferDensity").Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferAnisotropy").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(resources.RenderLists.Single(entry => entry.Name == "FogVolumeVFXRenderList").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(resources.Buffers.Single(entry => entry.Name == "VolumeBounds").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(resources.Buffers.Single(entry => entry.Name == "VolumetricVisibleGlobalIndices").Access, Is.EqualTo(AccessFlags.Read));
@@ -925,8 +929,10 @@ namespace VividRP.Editor.Tests
             {
                 "CameraDepth",
                 "DirectionalShadowTexture",
+                "CSMShadowAtlas",
                 "VBufferMaxZ",
                 "VBufferDensity",
+                "VBufferAnisotropy",
                 "VBufferLighting",
                 "VBufferLightingFiltered",
                 "VBufferHistory",
@@ -945,8 +951,10 @@ namespace VividRP.Editor.Tests
             }));
             Assert.That(resources.Textures.Single(entry => entry.Name == "CameraDepth").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(resources.Textures.Single(entry => entry.Name == "DirectionalShadowTexture").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "CSMShadowAtlas").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferMaxZ").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferDensity").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferAnisotropy").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferLighting").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferLightingFiltered").Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferLightingFiltered").IsTransient, Is.True);
@@ -969,6 +977,7 @@ namespace VividRP.Editor.Tests
 
             var resources = ((IRenderPass)pass).Initialize();
             var vBuffer = resources.Textures.Single(entry => entry.Name == "VBufferDensity").Texture;
+            var anisotropy = resources.Textures.Single(entry => entry.Name == "VBufferAnisotropy").Texture;
 
             Assert.That(vBuffer.desc.Dimension, Is.EqualTo(TextureDimension.Tex3D));
             Assert.That(vBuffer.desc.Width, Is.EqualTo(160));
@@ -976,6 +985,12 @@ namespace VividRP.Editor.Tests
             Assert.That(vBuffer.desc.Slices, Is.EqualTo(VividVolumetricFogVolume.DefaultVolumeSliceCount));
             Assert.That(vBuffer.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
             Assert.That(vBuffer.desc.EnableRandomWrite, Is.True);
+            Assert.That(anisotropy.desc.Dimension, Is.EqualTo(TextureDimension.Tex3D));
+            Assert.That(anisotropy.desc.Width, Is.EqualTo(160));
+            Assert.That(anisotropy.desc.Height, Is.EqualTo(90));
+            Assert.That(anisotropy.desc.Slices, Is.EqualTo(VividVolumetricFogVolume.DefaultVolumeSliceCount));
+            Assert.That(anisotropy.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16_SFloat));
+            Assert.That(anisotropy.desc.EnableRandomWrite, Is.True);
         }
 
         [Test]
@@ -1015,6 +1030,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(densitySource, Does.Contain("#pragma kernel ClearVBufferDensity"));
             Assert.That(densitySource, Does.Contain("#pragma kernel VoxelizeVBufferDensity"));
+            Assert.That(densitySource, Does.Contain("RWTexture3D<float> _VBufferAnisotropy"));
             Assert.That(densitySource, Does.Contain("[numthreads(8, 8, 1)]"));
             Assert.That(densitySource, Does.Contain("for (uint slice = 0; slice < (uint)_VBufferSliceCount; slice++)"));
             Assert.That(densitySource, Does.Not.Contain("_LocalVolumetricFogs"));
@@ -1023,17 +1039,19 @@ namespace VividRP.Editor.Tests
             Assert.That(densitySource, Does.Contain("ComputeHeightFogMultiplier"));
             Assert.That(densitySource, Does.Contain("exp(-heightAboveBase * rcpScaleHeight)"));
             Assert.That(densitySource, Does.Contain("_VBufferFogRcpScaleHeight"));
+            Assert.That(densitySource, Does.Contain("_VBufferAnisotropy[dispatchThreadId] = 0.0"));
+            Assert.That(densitySource, Does.Contain("_VBufferAnisotropy[voxelCoord3D] = safeExtinction * clamp(_VBufferFogAnisotropy, -0.95, 0.95)"));
             Assert.That(densitySource, Does.Not.Contain("_VBufferDensityCutoff"));
             Assert.That(densitySource, Does.Not.Contain("extinction <= _VBufferDensityCutoff"));
             Assert.That(localVoxelizeSource, Does.Contain("Hidden/VividRP/LocalVolumetricFogVoxelize"));
             Assert.That(localVoxelizeSource, Does.Contain("Tags { \"LightMode\" = \"FogVolumeVoxelize\" }"));
             Assert.That(localVoxelizeSource, Does.Contain("Blend [_FogVolumeSrcColorBlend] [_FogVolumeDstColorBlend]"));
+            Assert.That(localVoxelizeSource, Does.Contain("_FogVolumeAnisotropy(\"Anisotropy\", Float)"));
             Assert.That(localVoxelizeSource, Does.Contain("StructuredBuffer<VividVolumetricMaterialRenderingData> _VolumetricMaterialData"));
             Assert.That(localVoxelizeSource, Does.Contain("ByteAddressBuffer _VolumetricGlobalIndirectionBuffer"));
             Assert.That(localVoxelizeSource, Does.Contain("SV_RenderTargetArrayIndex"));
-            Assert.That(localVoxelizeSource, Does.Contain("((float)sliceIndex + 0.5) * _VBufferRcpSliceCount + _VBufferRcpSliceCount"));
-            Assert.That(localVoxelizeSource, Does.Contain("DecodeLogarithmicDepthGeneralized(encodedDepth, _VBufferDepthDecodingParams)"));
-            Assert.That(localVoxelizeSource, Does.Not.Contain("return GetVBufferSliceDistance((float)sliceIndex + 0.5)"));
+            Assert.That(localVoxelizeSource, Does.Contain("return GetVBufferSliceDistance((float)sliceIndex + 0.5)"));
+            Assert.That(localVoxelizeSource, Does.Not.Contain("((float)sliceIndex + 0.5) * _VBufferRcpSliceCount + _VBufferRcpSliceCount"));
             Assert.That(localVoxelizeSource, Does.Contain("VolumeRendering.hlsl"));
             Assert.That(localVoxelizeSource, Does.Contain("ComputeVolumeFadeFactor"));
             Assert.That(localVoxelizeSource, Does.Not.Contain("return saturate(fade)"));
@@ -1042,6 +1060,7 @@ namespace VividRP.Editor.Tests
             Assert.That(localVoxelizeSource, Does.Contain("float3 _ScrollSpeed"));
             Assert.That(localVoxelizeSource, Does.Contain("float3 _Tiling"));
             Assert.That(localVoxelizeSource, Does.Contain("float _AlphaOnlyTexture"));
+            Assert.That(localVoxelizeSource, Does.Contain("float _FogVolumeAnisotropy"));
             Assert.That(localVoxelizeSource, Does.Contain("_VolumetricMask"));
             Assert.That(localVoxelizeSource, Does.Contain("SAMPLER(sampler_VolumetricMask)"));
             Assert.That(localVoxelizeSource, Does.Contain("SAMPLER(sampler_Mask)"));
@@ -1066,6 +1085,8 @@ namespace VividRP.Editor.Tests
             Assert.That(localVoxelizeSource, Does.Not.Contain("outColor=extinction"));
             Assert.That(localVoxelizeSource, Does.Contain("albedo *= _FogVolumeSingleScatteringAlbedo.rgb"));
             Assert.That(localVoxelizeSource, Does.Contain("float fade = ComputeFadeFactor(voxelCenterNDC, sliceDistance)"));
+            Assert.That(localVoxelizeSource, Does.Contain("out float outAnisotropy : SV_Target1"));
+            Assert.That(localVoxelizeSource, Does.Contain("outAnisotropy = extinction * anisotropy"));
             Assert.That(localVoxelizeSource, Does.Not.Contain("saturate(coordNDC * max(_VolumetricTiling"));
             Assert.That(localVoxelizeSource, Does.Not.Contain("? maskSample.a : maskSample.r"));
             Assert.That(localVoxelizeSource, Does.Contain("LOCALVOLUMETRICFOGBLENDINGMODE_MULTIPLY"));
@@ -1092,7 +1113,9 @@ namespace VividRP.Editor.Tests
             Assert.That(materialSource, Does.Contain("RWStructuredBuffer<VividVolumetricMaterialRenderingData> _VolumetricMaterialData"));
             Assert.That(materialSource, Does.Contain("uint _ViewCount"));
             Assert.That(materialSource, Does.Not.Contain("_VolumetricViewCount"));
-            Assert.That(materialSource, Does.Contain("DistanceToSlice"));
+            Assert.That(materialSource, Does.Contain("DistanceToSliceCoord"));
+            Assert.That(materialSource, Does.Contain("DistanceToStartSlice"));
+            Assert.That(materialSource, Does.Contain("DistanceToStopSlice"));
             Assert.That(materialSource, Does.Contain("DepthDistance"));
             Assert.That(materialSource, Does.Contain("GetOBBCenterRWS"));
             Assert.That(materialSource, Does.Contain("GetCameraRelativePositionWS(obb.center)"));
@@ -1144,13 +1167,29 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("for (; slice < sliceCount; slice++)"));
             Assert.That(lightingSource, Does.Contain("ShouldEvaluateVBufferLighting"));
             Assert.That(lightingSource, Does.Contain("extinction > _VBufferDensityCutoff"));
+            Assert.That(lightingSource, Does.Contain("Texture3D<float> _VBufferAnisotropy"));
             Assert.That(lightingSource, Does.Contain("float3 scattering = max(density.rgb, 0.0)"));
             Assert.That(lightingSource, Does.Contain("float extinction = max(density.a, 0.0)"));
+            Assert.That(lightingSource, Does.Contain("float anisotropyMoment = _VBufferAnisotropy.Load(int4(voxelCoord, 0))"));
+            Assert.That(lightingSource, Does.Contain("float anisotropy = extinction > FLT_MIN ? anisotropyMoment / extinction : _VBufferFogAnisotropy"));
             Assert.That(lightingSource, Does.Contain("voxelOpticalDepth = extinction * dt"));
             Assert.That(lightingSource, Does.Contain("float perPixelRandomOffset = GenerateVBufferRandom(vBufferPixel)"));
             Assert.That(lightingSource, Does.Contain("float rndVal = frac(perPixelRandomOffset + _VBufferSampleOffset.z)"));
-            Assert.That(lightingSource, Does.Contain("ImportanceSampleHomogeneousMedium(rndVal, extinction, dt"));
+            Assert.That(lightingSource, Does.Contain("ImportanceSampleHomogeneousMedium(rndVal, extinction, dt, tOffset, weight)"));
+            Assert.That(lightingSource, Does.Not.Contain("float weight = TransmittanceIntegralHomogeneousMedium(extinction, dt)"));
             Assert.That(lightingSource, Does.Contain("float3 sampleWS = ray.originWS + t * ray.jitterDirWS"));
+            Assert.That(lightingSource, Does.Contain("Texture2D<float> _CSMShadowAtlas"));
+            Assert.That(lightingSource, Does.Contain("SamplerComparisonState sampler_CSMShadowAtlas"));
+            Assert.That(lightingSource, Does.Contain("_CSMShadowAtlas.SampleCmpLevelZero"));
+            Assert.That(lightingSource, Does.Contain("float shadow = SampleDirectionalShadow(voxelCoord.xy, i, light, sampleWS, ray.jitterDirWS);"));
+            Assert.That(lightingSource, Does.Contain("directionalLight.shadowStrength * directionalLight.volumetricShadowDimmer"));
+            Assert.That(lightingSource, Does.Not.Contain("_DirectionalShadowTexture.SampleLevel"));
+            Assert.That(lightingSource, Does.Not.Contain("float2 uv = cameraPixel / max(cameraDimensions"));
+            Assert.That(lightingSource, Does.Contain("Compute the exponential moving average over 'n' frames"));
+            Assert.That(lightingSource, Does.Contain("Reminder: our voxels are sphere-capped right frustums"));
+            Assert.That(lightingSource, Does.Contain("Accurately compute the center of the voxel in the log space"));
+            Assert.That(lightingSource, Does.Contain("phaseCurrFrame' becomes temporarily unstable"));
+            Assert.That(lightingSource, Does.Contain("A Fresh Look at Generalized Sampling"));
             Assert.That(lightingSource, Does.Contain("float3 L = SafeNormalize(light.directionWS);"));
             Assert.That(lightingSource, Does.Not.Contain("float3 L = SafeNormalize(-light.directionWS);"));
             Assert.That(lightingSource, Does.Contain("LinearizeRGBD(voxelValue)"));
@@ -1167,7 +1206,6 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("light.affectVolumetric"));
             Assert.That(lightingSource, Does.Contain("light.volumetricDimmer"));
             Assert.That(lightingSource, Does.Contain("light.volumetricFadeDistance"));
-            Assert.That(lightingSource, Does.Contain("directionalLight.volumetricShadowDimmer"));
             Assert.That(lightingSource, Does.Contain("uint _VolumetricUseBigTileLightList"));
             Assert.That(lightingSource, Does.Not.Contain("_PunctualLightCount"));
             Assert.That(clusteredLightingSource, Does.Contain("StructuredBuffer<uint> g_vBigTileLightList"));
@@ -1194,9 +1232,9 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("angleOffset"));
             Assert.That(lightingSource, Does.Contain("coneAxisX = light.rightWS"));
             Assert.That(lightingSource, Does.Contain("coneAxisY = light.upWS"));
-            Assert.That(lightingSource, Does.Contain("float lightSqRadius = max(max(light.shapeRadiusSquared, voxelArcLength), 1e-4)"));
+            Assert.That(lightingSource, Does.Contain("float lightSqRadius = max(light.shapeRadiusSquared, 1e-4)"));
             Assert.That(lightingSource, Does.Contain("float3 samplePosWS = ray.originWS + ray.jitterDirWS * t"));
-            Assert.That(lightingSource, Does.Contain("float weight = TransmittanceHomogeneousMedium(extinction, max(t - t0, 0.0)) * rcpPdf"));
+            Assert.That(lightingSource, Does.Contain("float weight = TransmittanceHomogeneousMedium(extinction, t - t0) * rcpPdf"));
             Assert.That(lightingSource, Does.Contain("phaseConstant * lightingRadiance + probeRadiance"));
             Assert.That(lightingSource, Does.Not.Contain("EvaluateClusteredPunctualLighting"));
             Assert.That(lightingSource, Does.Contain("#define VBUFFER_FILTER_GAUSSIAN_SIGMA 1.0"));
@@ -1215,6 +1253,8 @@ namespace VividRP.Editor.Tests
             Assert.That(densityPassSource, Does.Contain("VolumetricFogVFXOverdrawDebug"));
             Assert.That(densityPassSource, Does.Contain("RecordFogVolumeAndVFXVoxelization"));
             Assert.That(densityPassSource, Does.Contain("DrawRendererList"));
+            Assert.That(densityPassSource, Does.Contain("VBufferAnisotropyId = Shader.PropertyToID(\"_VBufferAnisotropy\")"));
+            Assert.That(densityPassSource, Does.Contain("Name = \"VBufferAnisotropy\", Access = AccessFlags.Write"));
             Assert.That(densityPassSource, Does.Contain("SetComputeBufferParam(m_VolumetricMaterialShader, m_ComputeMaterialKernel, VolumeBoundsId"));
             Assert.That(densityPassSource, Does.Contain("ViewCountId = Shader.PropertyToID(\"_ViewCount\")"));
             Assert.That(densityPassSource, Does.Contain("SetComputeIntParam(m_VolumetricMaterialShader, ViewCountId, m_ViewCount)"));
@@ -1224,7 +1264,7 @@ namespace VividRP.Editor.Tests
             Assert.That(densityPassSource, Does.Contain("SynchronisationStageFlags.ComputeProcessing"));
             Assert.That(densityPassSource, Does.Contain("WaitOnAsyncGraphicsFence(fence, SynchronisationStageFlags.AllGPUOperations)"));
             Assert.That(densityPassSource, Does.Contain("PrepareVisibleFogs(camera, m_Settings.MaxLocalVolumetricFogCount)"));
-            Assert.That(densityPassSource, Does.Contain("CoreUtils.SetRenderTarget(cmd, m_VBufferDensity)"));
+            Assert.That(densityPassSource, Does.Contain("CoreUtils.SetRenderTarget(cmd, m_VolumetricMaterialTargets"));
             Assert.That(densityPassSource, Does.Contain("VividLocalVolumetricFogManager.RecordVolumetricMaterialDrawCalls(cmd)"));
             Assert.That(densityPassSource, Does.Contain("if (m_FogVolumeVFXRenderList?.IsValid == true)"));
             Assert.That(densityPassSource, Does.Not.Contain("LocalVolumetricFogsId"));
@@ -1235,7 +1275,9 @@ namespace VividRP.Editor.Tests
             Assert.That(localFogSource, Does.Contain("FogVolumeScrollSpeedId = Shader.PropertyToID(\"_ScrollSpeed\")"));
             Assert.That(localFogSource, Does.Contain("FogVolumeTilingId = Shader.PropertyToID(\"_Tiling\")"));
             Assert.That(localFogSource, Does.Contain("FogVolumeAlphaOnlyTextureId = Shader.PropertyToID(\"_AlphaOnlyTexture\")"));
+            Assert.That(localFogSource, Does.Contain("FogVolumeAnisotropyId = Shader.PropertyToID(\"_FogVolumeAnisotropy\")"));
             Assert.That(localFogSource, Does.Contain("parameters.albedo.gamma"));
+            Assert.That(localFogSource, Does.Contain("SetFloat(FogVolumeAnisotropyId, parameters.anisotropy)"));
             Assert.That(localFogSource, Does.Contain("SetTexture(FogVolumeMaskId, mask)"));
             Assert.That(localFogSource, Does.Contain("SetVector(FogVolumeScrollSpeedId, parameters.textureScrollingSpeed)"));
             Assert.That(localFogSource, Does.Contain("!material.HasProperty(VolumetricMaskModeId)"));
@@ -1250,8 +1292,15 @@ namespace VividRP.Editor.Tests
             Assert.That(localFogManagerSource, Does.Contain("index * IndirectDrawIndexedArgsStride"));
             Assert.That(localFogManagerSource, Does.Not.Contain("LocalVolumetricFogs\""));
             Assert.That(lightingPassSource, Does.Contain("cmd.DispatchCompute(m_Shader, m_LightingKernel, m_DispatchX, m_DispatchY, 1)"));
+            Assert.That(lightingPassSource, Does.Contain("CSMShadowAtlasId = Shader.PropertyToID(\"_CSMShadowAtlas\")"));
+            Assert.That(lightingPassSource, Does.Contain("CSMViewProjMatricesId = Shader.PropertyToID(\"_CSMViewProjMatrices\")"));
+            Assert.That(lightingPassSource, Does.Contain("Name = \"CSMShadowAtlas\", Access = AccessFlags.Read"));
+            Assert.That(lightingPassSource, Does.Contain("PrepareDirectionalShadowParameters(frameData)"));
+            Assert.That(lightingPassSource, Does.Contain("BindDirectionalShadowParameters(context, cmd, kernel)"));
             Assert.That(lightingPassSource, Does.Contain("VBufferMaxZId = Shader.PropertyToID(\"_VBufferMaxZ\")"));
             Assert.That(lightingPassSource, Does.Contain("VBufferMaxZEnabledId = Shader.PropertyToID(\"_VBufferMaxZEnabled\")"));
+            Assert.That(lightingPassSource, Does.Contain("VBufferAnisotropyId = Shader.PropertyToID(\"_VBufferAnisotropy\")"));
+            Assert.That(lightingPassSource, Does.Contain("Name = \"VBufferAnisotropy\", Access = AccessFlags.Read"));
             Assert.That(lightingPassSource, Does.Contain("VBufferHistoryId = Shader.PropertyToID(\"_VBufferHistory\")"));
             Assert.That(lightingPassSource, Does.Contain("VBufferFeedbackId = Shader.PropertyToID(\"_VBufferFeedback\")"));
             Assert.That(lightingPassSource, Does.Contain("VBufferHistoryIsValidId = Shader.PropertyToID(\"_VBufferHistoryIsValid\")"));

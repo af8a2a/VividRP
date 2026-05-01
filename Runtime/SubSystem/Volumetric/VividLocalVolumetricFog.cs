@@ -289,6 +289,7 @@ namespace VividRP.Runtime
         private static readonly Vector3 k_MinimumBoxSize = new(0.001f, 0.001f, 0.001f);
         private static readonly int FogVolumeSingleScatteringAlbedoId = Shader.PropertyToID("_FogVolumeSingleScatteringAlbedo");
         private static readonly int FogVolumeFogDistanceId = Shader.PropertyToID("_FogVolumeFogDistanceProperty");
+        private static readonly int FogVolumeAnisotropyId = Shader.PropertyToID("_FogVolumeAnisotropy");
         private static readonly int FogVolumeBlendModeId = Shader.PropertyToID("_FogVolumeBlendMode");
         private static readonly int FogVolumeMaskId = Shader.PropertyToID("_Mask");
         private static readonly int FogVolumeScrollSpeedId = Shader.PropertyToID("_ScrollSpeed");
@@ -457,6 +458,7 @@ namespace VividRP.Runtime
             m_RenderingProperties.SetBuffer(VolumetricMaterialDataId, materialDataBuffer);
             m_RenderingProperties.SetColor(FogVolumeSingleScatteringAlbedoId, parameters.albedo.gamma);
             m_RenderingProperties.SetFloat(FogVolumeFogDistanceId, parameters.meanFreePath);
+            m_RenderingProperties.SetFloat(FogVolumeAnisotropyId, parameters.anisotropy);
             m_RenderingProperties.SetFloat(FogVolumeBlendModeId, (float)parameters.blendingMode);
             ConfigureTextureMaskProperties(material, parameters, defaultMaskTexture);
             VividLocalVolumetricFogManager.SetupFogVolumeBlendMode(material, parameters.blendingMode);
@@ -782,6 +784,9 @@ namespace VividRP.Runtime
 
             if (material.HasProperty(FogVolumeFogDistanceId))
                 parameters.meanFreePath = material.GetFloat(FogVolumeFogDistanceId);
+
+            if (material.HasProperty(FogVolumeAnisotropyId))
+                parameters.anisotropy = material.GetFloat(FogVolumeAnisotropyId);
 
             if (material.HasProperty(FogVolumeBlendModeId))
                 parameters.blendingMode = (VividLocalVolumetricFogBlendingMode)Mathf.RoundToInt(material.GetFloat(FogVolumeBlendModeId));

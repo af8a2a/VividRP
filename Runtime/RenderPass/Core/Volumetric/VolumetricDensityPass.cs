@@ -23,6 +23,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static readonly int ShaderVariablesVolumetricId = Shader.PropertyToID("ShaderVariablesVolumetric");
         private static readonly int VBufferDensityId = Shader.PropertyToID("_VBufferDensity");
+        private static readonly int VBufferAnisotropyId = Shader.PropertyToID("_VBufferAnisotropy");
         private static readonly int VolumeBoundsId = Shader.PropertyToID("_VolumeBounds");
         private static readonly int VolumetricVisibleGlobalIndicesBufferId = Shader.PropertyToID("_VolumetricVisibleGlobalIndicesBuffer");
         private static readonly int VolumetricGlobalIndirectArgsBufferId = Shader.PropertyToID("_VolumetricGlobalIndirectArgsBuffer");
@@ -38,6 +39,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(Name = "VBufferDensity", Access = AccessFlags.Write)]
         private RenderGraphTexture m_VBufferDensity;
+
+        [RenderGraphResource(Name = "VBufferAnisotropy", Access = AccessFlags.Write)]
+        private RenderGraphTexture m_VBufferAnisotropy;
 
         [RenderGraphResource(Name = "FogVolumeVFXRenderList", Access = AccessFlags.Read)]
         private readonly RenderGraphRenderList m_FogVolumeVFXRenderList;
@@ -73,6 +77,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private ShaderVariablesVolumetric m_ShaderVariables;
         private int m_LocalFogCount;
         private int m_MaterialFogCount;
+        private readonly RenderTargetIdentifier[] m_VolumetricMaterialTargets = new RenderTargetIdentifier[2];
 
         public VolumetricDensityPass()
         {
@@ -80,6 +85,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CameraDepth = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.None, DepthBits.Depth32);
             m_CameraDepth.desc.FilterMode = FilterMode.Point;
             m_VBufferDensity = CreateVBufferTexture("VBufferDensity");
+            m_VBufferAnisotropy = CreateVBufferScalarTexture("VBufferAnisotropy");
             m_FogVolumeVFXRenderList = new RenderGraphRenderList
             {
                 desc = new RenderGraphRenderListDesc
@@ -156,6 +162,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             ConfigureCameraDepthTexture(m_CameraWidth, m_CameraHeight);
             ConfigureVBufferTexture(m_VBufferDensity, m_Settings.VBufferParameters, "VBufferDensity", clear: true);
+            ConfigureVBufferScalarTexture(m_VBufferAnisotropy, m_Settings.VBufferParameters, "VBufferAnisotropy", clear: true);
             m_DispatchX = CoreUtils.DivRoundUp(m_Settings.VBufferParameters.ViewportWidth, ThreadGroupSizeX);
             m_DispatchY = CoreUtils.DivRoundUp(m_Settings.VBufferParameters.ViewportHeight, ThreadGroupSizeY);
             m_DispatchZ = CoreUtils.DivRoundUp(m_Settings.VBufferParameters.SliceCount, ThreadGroupSizeZ);
@@ -164,6 +171,7 @@ namespace VividRP.Runtime.RenderPass.Core
             volumetricData.settings = m_Settings;
             volumetricData.shaderVariables = m_ShaderVariables;
             volumetricData.VBufferDensity = m_VBufferDensity;
+            volumetricData.VBufferAnisotropy = m_VBufferAnisotropy;
             volumetricData.localVolumetricFogBuffer = null;
             volumetricData.localVolumetricFogCount = m_LocalFogCount;
             volumetricData.enabled = m_Settings.Enabled;
@@ -178,12 +186,14 @@ namespace VividRP.Runtime.RenderPass.Core
             var cmd = context.GetNativeCommandBuffer();
             ConstantBuffer.PushGlobal(cmd, m_ShaderVariables, ShaderVariablesVolumetricId);
             cmd.SetComputeTextureParam(m_DensityShader, m_ClearKernel, VBufferDensityId, m_VBufferDensity.innerHandle);
+            cmd.SetComputeTextureParam(m_DensityShader, m_ClearKernel, VBufferAnisotropyId, m_VBufferAnisotropy.innerHandle);
             cmd.DispatchCompute(m_DensityShader, m_ClearKernel, m_DispatchX, m_DispatchY, m_DispatchZ);
 
             if (!m_Settings.Enabled)
                 return;
 
             cmd.SetComputeTextureParam(m_DensityShader, m_VoxelizeKernel, VBufferDensityId, m_VBufferDensity.innerHandle);
+            cmd.SetComputeTextureParam(m_DensityShader, m_VoxelizeKernel, VBufferAnisotropyId, m_VBufferAnisotropy.innerHandle);
             cmd.DispatchCompute(m_DensityShader, m_VoxelizeKernel, m_DispatchX, m_DispatchY, 1);
             RecordFogVolumeAndVFXVoxelization(cmd);
         }
@@ -224,6 +234,13 @@ namespace VividRP.Runtime.RenderPass.Core
             };
         }
 
+        internal static RenderGraphTexture CreateVBufferScalarTexture(string name)
+        {
+            var texture = CreateVBufferTexture(name);
+            texture.desc.ColorFormat = GraphicsFormat.R16_SFloat;
+            return texture;
+        }
+
         internal static void ConfigureVBufferTexture(
             RenderGraphTexture texture,
             in VBufferParameters parameters,
@@ -250,6 +267,17 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.EnableRandomWrite = true;
             texture.desc.BindTextureMS = false;
             texture.desc.Name = name;
+        }
+
+        internal static void ConfigureVBufferScalarTexture(
+            RenderGraphTexture texture,
+            in VBufferParameters parameters,
+            string name,
+            bool clear)
+        {
+            ConfigureVBufferTexture(texture, parameters, name, clear);
+            if (texture?.desc != null)
+                texture.desc.ColorFormat = GraphicsFormat.R16_SFloat;
         }
 
         private void RecordFogVolumeAndVFXVoxelization(CommandBuffer cmd)
@@ -293,7 +321,9 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetGlobalBuffer(VolumetricGlobalIndirectionBufferId, indirection);
             cmd.SetGlobalBuffer(VolumetricMaterialDataId, materialData);
             // Bind all VBuffer slices so SV_RenderTargetArrayIndex writes every voxel slice.
-            CoreUtils.SetRenderTarget(cmd, m_VBufferDensity);
+            m_VolumetricMaterialTargets[0] = m_VBufferDensity;
+            m_VolumetricMaterialTargets[1] = m_VBufferAnisotropy;
+            CoreUtils.SetRenderTarget(cmd, m_VolumetricMaterialTargets, BuiltinRenderTextureType.None, ClearFlag.None);
             cmd.SetViewport(new Rect(
                 0.0f,
                 0.0f,
@@ -332,7 +362,8 @@ namespace VividRP.Runtime.RenderPass.Core
             return m_DensityShader != null
                 && m_ClearKernel >= 0
                 && m_VoxelizeKernel >= 0
-                && m_VBufferDensity?.innerHandle.IsValid() == true;
+                && m_VBufferDensity?.innerHandle.IsValid() == true
+                && m_VBufferAnisotropy?.innerHandle.IsValid() == true;
         }
 
         private bool CanExecuteFogVolumeAndVFXVoxelization()
@@ -347,6 +378,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && VividLocalVolumetricFogManager.globalIndirectionGraphicsBuffer.IsValid()
                 && VividLocalVolumetricFogManager.volumetricMaterialDataGraphicsBuffer != null
                 && VividLocalVolumetricFogManager.volumetricMaterialDataGraphicsBuffer.IsValid()
+                && m_VBufferAnisotropy?.innerHandle.IsValid() == true
                 && VividLocalVolumetricFogManager.volumeBoundsGraphicsBuffer != null
                 && VividLocalVolumetricFogManager.volumeBoundsGraphicsBuffer.IsValid()
                 && VividLocalVolumetricFogManager.visibleGlobalIndicesGraphicsBuffer != null

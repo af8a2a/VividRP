@@ -263,6 +263,17 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void GetPixelCoordToViewDirWSMatrix_UsesActualRenderSize_ForSkyRays()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "VividCameraData.Extension.cs"));
+
+            Assert.That(source, Does.Contain("ResolveViewDirectionDimension(actualWidth"));
+            Assert.That(source, Does.Contain("ResolveViewDirectionDimension(actualHeight"));
+            Assert.That(source, Does.Contain("new Vector4(width, height, 1.0f / width, 1.0f / height)"));
+            Assert.That(source, Does.Not.Contain("new Vector4(camera.scaledPixelWidth, camera.scaledPixelHeight"));
+        }
+
+        [Test]
         public void FrameContextSystem_UsesExplicitShaderVariablesGlobalConstantBuffer()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "FrameContextSystem.cs"));

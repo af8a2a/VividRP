@@ -1,4 +1,6 @@
+using System;
 using UnityEditor;
+using UnityEditor.Rendering;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime;
@@ -10,7 +12,37 @@ namespace VividRP.Editor
     [CanEditMultipleObjects]
     public class VividCameraEditor : UnityEditor.Editor
     {
+        [Flags]
+        private enum Expandable
+        {
+            Projection = 1 << 0,
+            Environment = 1 << 1,
+            Output = 1 << 2,
+            Vivid = 1 << 3,
+            TAA = 1 << 4,
+            DLSS = 1 << 5,
+            FSR3 = 1 << 6,
+            TSR = 1 << 7,
+        }
+
+        private const Expandable DefaultExpandedState =
+            Expandable.Projection
+            | Expandable.Environment
+            | Expandable.Output
+            | Expandable.Vivid
+            | Expandable.TAA
+            | Expandable.DLSS
+            | Expandable.FSR3
+            | Expandable.TSR;
+
+        private static ExpandedState<Expandable, VividCameraEditor> s_ExpandedState;
+
+        private static readonly GUIContent s_ProjectionLabel = EditorGUIUtility.TrTextContent("Projection");
+        private static readonly GUIContent s_EnvironmentLabel = EditorGUIUtility.TrTextContent("Environment");
+        private static readonly GUIContent s_OutputLabel = EditorGUIUtility.TrTextContent("Output");
         private static readonly GUIContent s_VividSettingsLabel = EditorGUIUtility.TrTextContent("VividRP");
+        private static readonly GUIContent s_ExpandAllLabel = EditorGUIUtility.TrTextContent("Expand All");
+        private static readonly GUIContent s_CollapseAllLabel = EditorGUIUtility.TrTextContent("Collapse All");
         private static readonly GUIContent s_NearClipPlaneLabel = EditorGUIUtility.TrTextContent("Near Clip Plane");
         private static readonly GUIContent s_FarClipPlaneLabel = EditorGUIUtility.TrTextContent("Far Clip Plane");
         private static readonly GUIContent s_RenderTypeLabel = EditorGUIUtility.TrTextContent("Render Type");
@@ -47,12 +79,15 @@ namespace VividRP.Editor
 
         private CameraEditor.Settings m_Settings;
         private VividSerializedCamera m_SerializedCamera;
+        private static readonly Func<GUIContent, bool, bool, bool> s_DrawSubHeaderFoldout =
+            CoreEditorUtils.DrawSubHeaderFoldout;
 
         private CameraEditor.Settings settings => m_Settings ??= new CameraEditor.Settings(serializedObject);
         private Camera camera => target as Camera;
 
         private void OnEnable()
         {
+            EnsureExpandedState();
             settings.OnEnable();
             RebuildSerializedState();
             Undo.undoRedoPerformed += RebuildSerializedState;
@@ -68,7 +103,6 @@ namespace VividRP.Editor
             m_SerializedCamera.Update();
 
             DrawBuiltInCameraInspector();
-            EditorGUILayout.Space();
             DrawVividInspector();
 
             m_SerializedCamera.Apply();
@@ -85,11 +119,25 @@ namespace VividRP.Editor
             if (camera != null)
                 CameraEditor.Settings.DrawCameraWarnings(camera);
 
+            if (DrawCameraFoldout(Expandable.Projection, s_ProjectionLabel))
+                DrawProjectionInspector();
+
+            if (DrawCameraFoldout(Expandable.Environment, s_EnvironmentLabel))
+                DrawEnvironmentInspector();
+
+            if (DrawCameraFoldout(Expandable.Output, s_OutputLabel))
+                DrawOutputInspector();
+        }
+
+        private void DrawProjectionInspector()
+        {
             settings.DrawProjection();
             EditorGUILayout.PropertyField(m_SerializedCamera.nearClippingPlane, s_NearClipPlaneLabel);
             EditorGUILayout.PropertyField(m_SerializedCamera.farClippingPlane, s_FarClipPlaneLabel);
-            EditorGUILayout.Space();
+        }
 
+        private void DrawEnvironmentInspector()
+        {
             settings.DrawClearFlags();
             if (!settings.clearFlags.hasMultipleDifferentValues
                 && (CameraClearFlags)settings.clearFlags.intValue == CameraClearFlags.SolidColor)
@@ -99,6 +147,10 @@ namespace VividRP.Editor
 
             settings.DrawCullingMask();
             settings.DrawOcclusionCulling();
+        }
+
+        private void DrawOutputInspector()
+        {
             settings.DrawTargetTexture(true);
             settings.DrawHDR();
             settings.DrawMSAA();
@@ -110,7 +162,8 @@ namespace VividRP.Editor
 
         private void DrawVividInspector()
         {
-            EditorGUILayout.LabelField(s_VividSettingsLabel, EditorStyles.boldLabel);
+            if (!DrawCameraFoldout(Expandable.Vivid, s_VividSettingsLabel))
+                return;
 
             using (new EditorGUI.IndentLevelScope())
             {
@@ -133,55 +186,92 @@ namespace VividRP.Editor
                     EditorGUILayout.HelpBox(DlssDisabledWarning, MessageType.Warning);
 #endif
 
-                if (ShouldShowTAASettings())
-                {
-                    EditorGUILayout.Space();
-                    EditorGUILayout.LabelField(s_TAALabel, EditorStyles.boldLabel);
-                    EditorGUILayout.PropertyField(m_SerializedCamera.taaJitterSpread, s_TAAJitterSpreadLabel);
-                    EditorGUILayout.PropertyField(m_SerializedCamera.taaSampleCount, s_TAASampleCountLabel);
-                    EditorGUILayout.PropertyField(m_SerializedCamera.taaBaseBlendFactor, s_TAABaseBlendFactorLabel);
-                    EditorGUILayout.PropertyField(m_SerializedCamera.taaMotionWeightDecay, s_TAAMotionWeightDecayLabel);
-                    EditorGUILayout.PropertyField(m_SerializedCamera.taaAntiFlickerIntensity, s_TAAAntiFlickerIntensityLabel);
-                }
+                DrawTAAInspector();
 
 #if DLSS_PLUGIN_INTEGRATE
-                if (ShouldShowDLSSSettings())
-                {
-                    EditorGUILayout.Space();
-                    EditorGUILayout.LabelField(s_DLSSLabel, EditorStyles.boldLabel);
-                    EditorGUILayout.PropertyField(m_SerializedCamera.dlssQuality, s_DLSSQualityLabel);
-                }
+                DrawDLSSInspector();
 #endif
 
-                if (ShouldShowFSR3Settings())
-                {
-                    EditorGUILayout.Space();
-                    EditorGUILayout.LabelField(s_FSR3Label, EditorStyles.boldLabel);
-                    EditorGUILayout.PropertyField(m_SerializedCamera.fsr3Quality, s_FSR3QualityLabel);
-                    EditorGUILayout.PropertyField(m_SerializedCamera.fsr3EnableSharpening, s_FSR3SharpeningLabel);
-                    using (new EditorGUI.DisabledScope(
-                               m_SerializedCamera.fsr3EnableSharpening != null
-                               && !m_SerializedCamera.fsr3EnableSharpening.hasMultipleDifferentValues
-                               && !m_SerializedCamera.fsr3EnableSharpening.boolValue))
-                    {
-                        EditorGUILayout.PropertyField(m_SerializedCamera.fsr3Sharpness, s_FSR3SharpnessLabel);
-                    }
-                }
+                DrawFSR3Inspector();
+                DrawTSRInspector();
+            }
+        }
 
-                if (ShouldShowTSRSettings())
+        private void DrawTAAInspector()
+        {
+            if (!ShouldShowTAASettings())
+                return;
+
+            if (!DrawCameraSubFoldout(Expandable.TAA, s_TAALabel))
+                return;
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                EditorGUILayout.PropertyField(m_SerializedCamera.taaJitterSpread, s_TAAJitterSpreadLabel);
+                EditorGUILayout.PropertyField(m_SerializedCamera.taaSampleCount, s_TAASampleCountLabel);
+                EditorGUILayout.PropertyField(m_SerializedCamera.taaBaseBlendFactor, s_TAABaseBlendFactorLabel);
+                EditorGUILayout.PropertyField(m_SerializedCamera.taaMotionWeightDecay, s_TAAMotionWeightDecayLabel);
+                EditorGUILayout.PropertyField(m_SerializedCamera.taaAntiFlickerIntensity, s_TAAAntiFlickerIntensityLabel);
+            }
+        }
+
+#if DLSS_PLUGIN_INTEGRATE
+        private void DrawDLSSInspector()
+        {
+            if (!ShouldShowDLSSSettings())
+                return;
+
+            if (!DrawCameraSubFoldout(Expandable.DLSS, s_DLSSLabel))
+                return;
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                EditorGUILayout.PropertyField(m_SerializedCamera.dlssQuality, s_DLSSQualityLabel);
+            }
+        }
+#endif
+
+        private void DrawFSR3Inspector()
+        {
+            if (!ShouldShowFSR3Settings())
+                return;
+
+            if (!DrawCameraSubFoldout(Expandable.FSR3, s_FSR3Label))
+                return;
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                EditorGUILayout.PropertyField(m_SerializedCamera.fsr3Quality, s_FSR3QualityLabel);
+                EditorGUILayout.PropertyField(m_SerializedCamera.fsr3EnableSharpening, s_FSR3SharpeningLabel);
+                using (new EditorGUI.DisabledScope(
+                           m_SerializedCamera.fsr3EnableSharpening != null
+                           && !m_SerializedCamera.fsr3EnableSharpening.hasMultipleDifferentValues
+                           && !m_SerializedCamera.fsr3EnableSharpening.boolValue))
                 {
-                    EditorGUILayout.Space();
-                    EditorGUILayout.LabelField(s_TSRLabel, EditorStyles.boldLabel);
-                    EditorGUILayout.PropertyField(m_SerializedCamera.tsrQuality, s_TSRQualityLabel);
-                    EditorGUILayout.PropertyField(m_SerializedCamera.tsrHistorySampleCount, s_TSRHistorySampleCountLabel);
-                    EditorGUILayout.PropertyField(m_SerializedCamera.tsrEnableSharpening, s_TSRSharpeningLabel);
-                    using (new EditorGUI.DisabledScope(
-                               m_SerializedCamera.tsrEnableSharpening != null
-                               && !m_SerializedCamera.tsrEnableSharpening.hasMultipleDifferentValues
-                               && !m_SerializedCamera.tsrEnableSharpening.boolValue))
-                    {
-                        EditorGUILayout.PropertyField(m_SerializedCamera.tsrSharpness, s_TSRSharpnessLabel);
-                    }
+                    EditorGUILayout.PropertyField(m_SerializedCamera.fsr3Sharpness, s_FSR3SharpnessLabel);
+                }
+            }
+        }
+
+        private void DrawTSRInspector()
+        {
+            if (!ShouldShowTSRSettings())
+                return;
+
+            if (!DrawCameraSubFoldout(Expandable.TSR, s_TSRLabel))
+                return;
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                EditorGUILayout.PropertyField(m_SerializedCamera.tsrQuality, s_TSRQualityLabel);
+                EditorGUILayout.PropertyField(m_SerializedCamera.tsrHistorySampleCount, s_TSRHistorySampleCountLabel);
+                EditorGUILayout.PropertyField(m_SerializedCamera.tsrEnableSharpening, s_TSRSharpeningLabel);
+                using (new EditorGUI.DisabledScope(
+                           m_SerializedCamera.tsrEnableSharpening != null
+                           && !m_SerializedCamera.tsrEnableSharpening.hasMultipleDifferentValues
+                           && !m_SerializedCamera.tsrEnableSharpening.boolValue))
+                {
+                    EditorGUILayout.PropertyField(m_SerializedCamera.tsrSharpness, s_TSRSharpnessLabel);
                 }
             }
         }
@@ -246,6 +336,57 @@ namespace VividRP.Editor
 
             return m_SerializedCamera.antialiasing.hasMultipleDifferentValues
                 || m_SerializedCamera.antialiasing.intValue == (int)VividAntialiasingMode.TemporalSuperResolution;
+        }
+
+        private static bool DrawCameraFoldout(Expandable section, GUIContent label)
+        {
+            EnsureExpandedState();
+            CoreEditorUtils.DrawSplitter();
+            var wasExpanded = s_ExpandedState[section];
+            var isExpanded = CoreEditorUtils.DrawHeaderFoldout(
+                label,
+                wasExpanded,
+                customMenuContextAction: PopulateExpansionMenu);
+
+            if (isExpanded != wasExpanded)
+                s_ExpandedState[section] = isExpanded;
+
+            return isExpanded;
+        }
+
+        private static bool DrawCameraSubFoldout(Expandable section, GUIContent label)
+        {
+            EnsureExpandedState();
+            var wasExpanded = s_ExpandedState[section];
+            var isExpanded = s_DrawSubHeaderFoldout(label, wasExpanded, false);
+
+            if (isExpanded != wasExpanded)
+                s_ExpandedState[section] = isExpanded;
+
+            return isExpanded;
+        }
+
+        private static void PopulateExpansionMenu(GenericMenu menu)
+        {
+            menu.AddItem(s_ExpandAllLabel, false, ExpandAllFoldouts);
+            menu.AddItem(s_CollapseAllLabel, false, CollapseAllFoldouts);
+        }
+
+        private static void EnsureExpandedState()
+        {
+            s_ExpandedState ??= new ExpandedState<Expandable, VividCameraEditor>(DefaultExpandedState, "VividRP");
+        }
+
+        private static void ExpandAllFoldouts()
+        {
+            EnsureExpandedState();
+            s_ExpandedState.ExpandAll();
+        }
+
+        private static void CollapseAllFoldouts()
+        {
+            EnsureExpandedState();
+            s_ExpandedState.CollapseAll();
         }
     }
 

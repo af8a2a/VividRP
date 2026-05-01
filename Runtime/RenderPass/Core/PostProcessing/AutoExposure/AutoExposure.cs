@@ -110,7 +110,7 @@ namespace VividRP.Runtime
 
 
     [Serializable]
-    [VolumeComponentMenu("Post-processing/Auto Exposure")]
+    [VolumeComponentMenu("Post-processing/Exposure")]
     public sealed class AutoExposure : VolumeComponent, IPostProcessComponent
     {
         private const float DefaultHistogramLogMinEV100 = -10f;

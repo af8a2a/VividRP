@@ -13,7 +13,47 @@ namespace VividRP.Editor
     [CanEditMultipleObjects]
     internal sealed class VividLightEditor : LightEditor
     {
+        [Flags]
+        private enum Expandable
+        {
+            General = 1 << 0,
+            Shape = 1 << 1,
+            Emission = 1 << 2,
+            Rendering = 1 << 3,
+            Shadows = 1 << 4,
+            Vivid = 1 << 5,
+            CSMShadow = 1 << 6,
+            PCSS = 1 << 7,
+            BarnDoor = 1 << 8,
+            Volumetric = 1 << 9,
+            CelestialBody = 1 << 10,
+            RayTracedShadow = 1 << 11,
+        }
+
+        private const Expandable DefaultExpandedState =
+            Expandable.General
+            | Expandable.Shape
+            | Expandable.Emission
+            | Expandable.Rendering
+            | Expandable.Shadows
+            | Expandable.Vivid
+            | Expandable.CSMShadow
+            | Expandable.PCSS
+            | Expandable.BarnDoor
+            | Expandable.Volumetric
+            | Expandable.CelestialBody
+            | Expandable.RayTracedShadow;
+
+        private static ExpandedState<Expandable, VividLightEditor> s_ExpandedState;
+
+        private static readonly GUIContent s_GeneralLabel = EditorGUIUtility.TrTextContent("General");
+        private static readonly GUIContent s_ShapeLabel = EditorGUIUtility.TrTextContent("Shape");
+        private static readonly GUIContent s_EmissionLabel = EditorGUIUtility.TrTextContent("Emission");
+        private static readonly GUIContent s_RenderingLabel = EditorGUIUtility.TrTextContent("Rendering");
+        private static readonly GUIContent s_ShadowsLabel = EditorGUIUtility.TrTextContent("Shadows");
         private static readonly GUIContent s_VividSettingsLabel = EditorGUIUtility.TrTextContent("VividRP");
+        private static readonly GUIContent s_ExpandAllLabel = EditorGUIUtility.TrTextContent("Expand All");
+        private static readonly GUIContent s_CollapseAllLabel = EditorGUIUtility.TrTextContent("Collapse All");
         private static readonly GUIContent s_UsePipelineSettingsLabel = EditorGUIUtility.TrTextContent("Use Pipeline Settings");
         private static readonly GUIContent s_CustomShadowLayersLabel = EditorGUIUtility.TrTextContent("Custom Shadow Layers");
         private static readonly GUIContent s_ShadowRenderingLayersLabel = EditorGUIUtility.TrTextContent("Shadow Rendering Layers");
@@ -102,9 +142,12 @@ namespace VividRP.Editor
         private VividSerializedLight m_SerializedLight;
         private static MethodInfo s_TextureMiniThumbnailMethod;
         private static bool s_TextureMiniThumbnailMethodResolved;
+        private static readonly Func<GUIContent, bool, bool, bool> s_DrawSubHeaderFoldout =
+            CoreEditorUtils.DrawSubHeaderFoldout;
 
         protected override void OnEnable()
         {
+            EnsureExpandedState();
             m_SerializedLight = new VividSerializedLight(serializedObject, settings);
             Undo.undoRedoPerformed += RebuildSerializedState;
         }
@@ -130,16 +173,33 @@ namespace VividRP.Editor
 
         private void DrawBuiltInLightInspector()
         {
+            if (DrawLightFoldout(Expandable.General, s_GeneralLabel))
+                DrawGeneralInspector();
+
+            if (DrawLightFoldout(Expandable.Shape, s_ShapeLabel))
+                DrawShapeInspector();
+
+            if (DrawLightFoldout(Expandable.Emission, s_EmissionLabel))
+                DrawEmissionInspector();
+
+            if (DrawLightFoldout(Expandable.Rendering, s_RenderingLabel))
+                DrawRenderingInspector();
+
+            if (DrawLightFoldout(Expandable.Shadows, s_ShadowsLabel))
+                DrawShadowsInspector();
+        }
+
+        private void DrawGeneralInspector()
+        {
             settings.DrawLightType();
             settings.DrawLightmapping();
+        }
+
+        private void DrawEmissionHeaderFields()
+        {
             LightUI.DrawColor(m_SerializedLight, this);
             LightUI.DrawIntensity(m_SerializedLight, this);
             LightUI.DrawIntensityModifiers(m_SerializedLight);
-
-            DrawShapeInspector();
-            DrawEmissionInspector();
-            DrawRenderingInspector();
-            DrawShadowsInspector();
         }
 
         private void DrawShapeInspector()
@@ -172,6 +232,7 @@ namespace VividRP.Editor
 
         private void DrawEmissionInspector()
         {
+            DrawEmissionHeaderFields();
             settings.DrawBounceIntensity();
 
             if (!settings.lightType.hasMultipleDifferentValues && settings.light.type != LightType.Directional)
@@ -226,9 +287,16 @@ namespace VividRP.Editor
 
         private void DrawVividInspector()
         {
-            EditorGUILayout.Space();
-            EditorGUILayout.LabelField(s_VividSettingsLabel, EditorStyles.boldLabel);
+            if (DrawLightFoldout(Expandable.Vivid, s_VividSettingsLabel))
+                DrawVividGeneralInspector();
 
+            DrawVolumetricInspector();
+            DrawPhysicallyBasedSkyInspector();
+            DrawRayTracedShadowInspector();
+        }
+
+        private void DrawVividGeneralInspector()
+        {
             using (new EditorGUI.IndentLevelScope())
             {
                 EditorGUILayout.PropertyField(m_SerializedLight.usePipelineSettings, s_UsePipelineSettingsLabel);
@@ -239,33 +307,6 @@ namespace VividRP.Editor
                     EditorGUILayout.PropertyField(m_SerializedLight.shadowRenderingLayers, s_ShadowRenderingLayersLabel);
                 }
             }
-
-            DrawVolumetricInspector();
-            DrawPhysicallyBasedSkyInspector();
-
-            if (!ShouldShowDirectionalRayTracedShadowControls(m_SerializedLight))
-                return;
-
-            EditorGUILayout.Space();
-            EditorGUILayout.LabelField(s_RayTracedShadowLabel, EditorStyles.boldLabel);
-
-            using (new EditorGUI.IndentLevelScope())
-            {
-                EditorGUILayout.PropertyField(m_SerializedLight.enableRayTracedShadow, s_EnableRayTracedShadowLabel);
-
-                if (!ShouldExpandDirectionalRayTracedShadowControls(m_SerializedLight))
-                    return;
-
-                EditorGUILayout.PropertyField(m_SerializedLight.rayTracedShadowRayLength, s_RayTracedShadowRayLengthLabel);
-                EditorGUILayout.PropertyField(m_SerializedLight.rayTracedShadowRayBias, s_RayTracedShadowRayBiasLabel);
-                EditorGUILayout.PropertyField(m_SerializedLight.rayTracedShadowDistantRayBias, s_RayTracedShadowDistantRayBiasLabel);
-                EditorGUILayout.PropertyField(
-                    m_SerializedLight.rayTracedShadowSunAngularDiameter,
-                    s_RayTracedShadowSunAngularDiameterLabel);
-                EditorGUILayout.HelpBox(
-                    "Current hard-shadow MVP stores Sun Angular Diameter for a future soft-shadow path and does not sample it yet.",
-                    MessageType.Info);
-            }
         }
 
         private void DrawDirectionalShadowBiasInspector()
@@ -273,8 +314,8 @@ namespace VividRP.Editor
             if (!ShouldShowDirectionalShadowBiasControls(m_SerializedLight))
                 return;
 
-            EditorGUILayout.Space();
-            EditorGUILayout.LabelField(s_CSMShadowLabel, EditorStyles.boldLabel);
+            if (!DrawLightSubFoldout(Expandable.CSMShadow, s_CSMShadowLabel))
+                return;
 
             using (new EditorGUI.IndentLevelScope())
             {
@@ -310,16 +351,20 @@ namespace VividRP.Editor
             if (!ShouldShowAreaBarnDoorControls(m_SerializedLight))
                 return;
 
-            EditorGUILayout.Space(2.0f);
-            EditorGUILayout.LabelField(s_BarnDoorLabel, EditorStyles.miniBoldLabel);
-            EditorGUILayout.Slider(m_SerializedLight.barnDoorAngle, 0.0f, 90.0f, s_BarnDoorAngleLabel);
-            EditorGUILayout.PropertyField(m_SerializedLight.barnDoorLength, s_BarnDoorLengthLabel);
+            if (!DrawLightSubFoldout(Expandable.BarnDoor, s_BarnDoorLabel))
+                return;
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                EditorGUILayout.Slider(m_SerializedLight.barnDoorAngle, 0.0f, 90.0f, s_BarnDoorAngleLabel);
+                EditorGUILayout.PropertyField(m_SerializedLight.barnDoorLength, s_BarnDoorLengthLabel);
+            }
         }
 
         private void DrawVolumetricInspector()
         {
-            EditorGUILayout.Space();
-            EditorGUILayout.LabelField(s_VolumetricLabel, EditorStyles.boldLabel);
+            if (!DrawLightFoldout(Expandable.Volumetric, s_VolumetricLabel))
+                return;
 
             using (new EditorGUI.IndentLevelScope())
             {
@@ -343,20 +388,24 @@ namespace VividRP.Editor
             if (!ShouldShowDirectionalPCSSControls(m_SerializedLight))
                 return;
 
-            EditorGUILayout.Space(2.0f);
-            EditorGUILayout.LabelField(s_PCSSSettingsLabel, EditorStyles.miniBoldLabel);
-            EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSMaxPenumbraSize, s_DirLightPCSSMaxPenumbraSizeLabel);
-            EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSMaxSamplingDistance, s_DirLightPCSSMaxSamplingDistanceLabel);
-            EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSMinFilterSizeTexels, s_DirLightPCSSMinFilterSizeTexelsLabel);
-            EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSMinFilterMaxAngularDiameter, s_DirLightPCSSMinFilterMaxAngularDiameterLabel);
-            EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSBlockerSearchAngularDiameter, s_DirLightPCSSBlockerSearchAngularDiameterLabel);
-            EditorGUILayout.Slider(
-                m_SerializedLight.dirLightPCSSBlockerSamplingClumpExponent,
-                1.0f,
-                6.0f,
-                s_DirLightPCSSBlockerSamplingClumpExponentLabel);
-            EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSBlockerSampleCount, s_DirLightPCSSBlockerSampleCountLabel);
-            EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSFilterSampleCount, s_DirLightPCSSFilterSampleCountLabel);
+            if (!DrawLightSubFoldout(Expandable.PCSS, s_PCSSSettingsLabel))
+                return;
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSMaxPenumbraSize, s_DirLightPCSSMaxPenumbraSizeLabel);
+                EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSMaxSamplingDistance, s_DirLightPCSSMaxSamplingDistanceLabel);
+                EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSMinFilterSizeTexels, s_DirLightPCSSMinFilterSizeTexelsLabel);
+                EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSMinFilterMaxAngularDiameter, s_DirLightPCSSMinFilterMaxAngularDiameterLabel);
+                EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSBlockerSearchAngularDiameter, s_DirLightPCSSBlockerSearchAngularDiameterLabel);
+                EditorGUILayout.Slider(
+                    m_SerializedLight.dirLightPCSSBlockerSamplingClumpExponent,
+                    1.0f,
+                    6.0f,
+                    s_DirLightPCSSBlockerSamplingClumpExponentLabel);
+                EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSBlockerSampleCount, s_DirLightPCSSBlockerSampleCountLabel);
+                EditorGUILayout.PropertyField(m_SerializedLight.dirLightPCSSFilterSampleCount, s_DirLightPCSSFilterSampleCountLabel);
+            }
         }
 
         private void DrawDirectionalShadowAtlasResolutionField()
@@ -433,8 +482,8 @@ namespace VividRP.Editor
             if (!ShouldShowDirectionalPhysicallyBasedSkyControls(m_SerializedLight))
                 return;
 
-            EditorGUILayout.Space();
-            EditorGUILayout.LabelField(s_CelestialBodyLabel, EditorStyles.boldLabel);
+            if (!DrawLightFoldout(Expandable.CelestialBody, s_CelestialBodyLabel))
+                return;
 
             using (new EditorGUI.IndentLevelScope())
             {
@@ -594,6 +643,84 @@ namespace VividRP.Editor
                 && !serializedLight.settings.lightType.hasMultipleDifferentValues
                 && serializedLight.settings.light != null
                 && serializedLight.settings.light.type == LightType.Directional;
+        }
+
+        private void DrawRayTracedShadowInspector()
+        {
+            if (!ShouldShowDirectionalRayTracedShadowControls(m_SerializedLight))
+                return;
+
+            if (!DrawLightFoldout(Expandable.RayTracedShadow, s_RayTracedShadowLabel))
+                return;
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                EditorGUILayout.PropertyField(m_SerializedLight.enableRayTracedShadow, s_EnableRayTracedShadowLabel);
+
+                if (!ShouldExpandDirectionalRayTracedShadowControls(m_SerializedLight))
+                    return;
+
+                EditorGUILayout.PropertyField(m_SerializedLight.rayTracedShadowRayLength, s_RayTracedShadowRayLengthLabel);
+                EditorGUILayout.PropertyField(m_SerializedLight.rayTracedShadowRayBias, s_RayTracedShadowRayBiasLabel);
+                EditorGUILayout.PropertyField(m_SerializedLight.rayTracedShadowDistantRayBias, s_RayTracedShadowDistantRayBiasLabel);
+                EditorGUILayout.PropertyField(
+                    m_SerializedLight.rayTracedShadowSunAngularDiameter,
+                    s_RayTracedShadowSunAngularDiameterLabel);
+                EditorGUILayout.HelpBox(
+                    "Current hard-shadow MVP stores Sun Angular Diameter for a future soft-shadow path and does not sample it yet.",
+                    MessageType.Info);
+            }
+        }
+
+        private static bool DrawLightFoldout(Expandable section, GUIContent label)
+        {
+            EnsureExpandedState();
+            CoreEditorUtils.DrawSplitter();
+            var wasExpanded = s_ExpandedState[section];
+            var isExpanded = CoreEditorUtils.DrawHeaderFoldout(
+                label,
+                wasExpanded,
+                customMenuContextAction: PopulateExpansionMenu);
+
+            if (isExpanded != wasExpanded)
+                s_ExpandedState[section] = isExpanded;
+
+            return isExpanded;
+        }
+
+        private static bool DrawLightSubFoldout(Expandable section, GUIContent label)
+        {
+            EnsureExpandedState();
+            var wasExpanded = s_ExpandedState[section];
+            var isExpanded = s_DrawSubHeaderFoldout(label, wasExpanded, false);
+
+            if (isExpanded != wasExpanded)
+                s_ExpandedState[section] = isExpanded;
+
+            return isExpanded;
+        }
+
+        private static void PopulateExpansionMenu(GenericMenu menu)
+        {
+            menu.AddItem(s_ExpandAllLabel, false, ExpandAllFoldouts);
+            menu.AddItem(s_CollapseAllLabel, false, CollapseAllFoldouts);
+        }
+
+        private static void EnsureExpandedState()
+        {
+            s_ExpandedState ??= new ExpandedState<Expandable, VividLightEditor>(DefaultExpandedState, "VividRP");
+        }
+
+        private static void ExpandAllFoldouts()
+        {
+            EnsureExpandedState();
+            s_ExpandedState.ExpandAll();
+        }
+
+        private static void CollapseAllFoldouts()
+        {
+            EnsureExpandedState();
+            s_ExpandedState.CollapseAll();
         }
 
         private void NormalizeSelectedLightIntensityUnits()

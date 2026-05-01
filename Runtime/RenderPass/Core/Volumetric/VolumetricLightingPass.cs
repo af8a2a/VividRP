@@ -38,9 +38,22 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ShaderVariablesVolumetricId = Shader.PropertyToID("ShaderVariablesVolumetric");
         private static readonly int CameraDepthId = Shader.PropertyToID("_CameraDepth");
         private static readonly int DirectionalShadowTextureId = Shader.PropertyToID("_DirectionalShadowTexture");
+        private static readonly int CSMShadowAtlasId = Shader.PropertyToID("_CSMShadowAtlas");
+        private static readonly int CSMViewProjMatricesId = Shader.PropertyToID("_CSMViewProjMatrices");
+        private static readonly int CSMCascadeSpheresId = Shader.PropertyToID("_CSMCascadeSpheres");
+        private static readonly int CSMAtlasScaleOffsetsId = Shader.PropertyToID("_CSMAtlasScaleOffsets");
+        private static readonly int CSMCascadeCountId = Shader.PropertyToID("_CSMCascadeCount");
+        private static readonly int CSMMaxShadowDistanceId = Shader.PropertyToID("_CSMMaxShadowDistance");
+        private static readonly int CSMNormalBiasId = Shader.PropertyToID("_CSMNormalBias");
+        private static readonly int CSMAtlasResolutionId = Shader.PropertyToID("_CSMAtlasResolution");
+        private static readonly int CSMCascadeResolutionId = Shader.PropertyToID("_CSMCascadeResolution");
+        private static readonly int CSMCascadeWorldTexelSizesId = Shader.PropertyToID("_CSMCascadeWorldTexelSizes");
+        private static readonly int CSMCascadeBordersId = Shader.PropertyToID("_CSMCascadeBorders");
+        private static readonly int CSMShadowQualityId = Shader.PropertyToID("_CSMShadowQuality");
         private static readonly int VBufferMaxZId = Shader.PropertyToID("_VBufferMaxZ");
         private static readonly int VBufferMaxZEnabledId = Shader.PropertyToID("_VBufferMaxZEnabled");
         private static readonly int VBufferDensityId = Shader.PropertyToID("_VBufferDensity");
+        private static readonly int VBufferAnisotropyId = Shader.PropertyToID("_VBufferAnisotropy");
         private static readonly int VBufferHistoryId = Shader.PropertyToID("_VBufferHistory");
         private static readonly int VBufferFeedbackId = Shader.PropertyToID("_VBufferFeedback");
         private static readonly int VBufferLightingId = Shader.PropertyToID("_VBufferLighting");
@@ -93,11 +106,17 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "DirectionalShadowTexture", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DirectionalShadowTexture;
 
+        [RenderGraphResource(Name = "CSMShadowAtlas", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_CSMShadowAtlas;
+
         [RenderGraphResource(Name = "VBufferMaxZ", Access = AccessFlags.Read)]
         private RenderGraphTexture m_VBufferMaxZ;
 
         [RenderGraphResource(Name = "VBufferDensity", Access = AccessFlags.Read)]
         private RenderGraphTexture m_VBufferDensity;
+
+        [RenderGraphResource(Name = "VBufferAnisotropy", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_VBufferAnisotropy;
 
         [RenderGraphResource(Name = "VBufferLighting", Access = AccessFlags.Write)]
         private RenderGraphTexture m_VBufferLighting;
@@ -137,6 +156,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphBuffer m_LogBaseBuffer;
 
         private readonly RenderGraphTexture m_LocalDirectionalShadowTexture;
+        private readonly RenderGraphTexture m_LocalCSMShadowAtlas;
         private readonly RenderGraphTexture m_LocalVBufferMaxZ;
         private readonly RenderGraphBuffer m_LocalDirectionalLightBuffer;
         private readonly RenderGraphBuffer m_LocalPunctualLightBuffer;
@@ -190,6 +210,17 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_IsFirstFrame = true;
         private Vector3 m_PreviousCameraPositionWS;
         private Vector4 m_VBufferSampleOffset;
+        private readonly Matrix4x4[] m_CSMViewProjMatrices = new Matrix4x4[VividShadowData.MaxCascadeCount];
+        private readonly Vector4[] m_CSMCascadeSpheres = new Vector4[VividShadowData.MaxCascadeCount];
+        private readonly Vector4[] m_CSMAtlasScaleOffsets = new Vector4[VividShadowData.MaxCascadeCount];
+        private Vector4 m_CSMCascadeWorldTexelSizes = Vector4.zero;
+        private Vector4 m_CSMCascadeBorders = Vector4.zero;
+        private int m_CSMCascadeCount;
+        private float m_CSMMaxShadowDistance;
+        private float m_CSMNormalBias;
+        private int m_CSMAtlasResolution;
+        private int m_CSMCascadeResolution;
+        private int m_CSMShadowQuality = (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low;
 
         public VolumetricLightingPass()
         {
@@ -201,9 +232,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LocalDirectionalShadowTexture.desc.ClearColor = Color.white;
             m_LocalDirectionalShadowTexture.desc.FilterMode = FilterMode.Point;
             m_DirectionalShadowTexture = m_LocalDirectionalShadowTexture;
+            m_LocalCSMShadowAtlas = RenderGraphTexture.CreateInput("CSMShadowAtlas", GraphicsFormat.None, DepthBits.Depth16);
+            m_LocalCSMShadowAtlas.desc.IsShadowMap = true;
+            m_CSMShadowAtlas = m_LocalCSMShadowAtlas;
             m_LocalVBufferMaxZ = VolumetricMaxZPass.CreateVBufferMaxZTexture("VBufferMaxZ");
             m_VBufferMaxZ = m_LocalVBufferMaxZ;
             m_VBufferDensity = VolumetricDensityPass.CreateVBufferTexture("VBufferDensity");
+            m_VBufferAnisotropy = VolumetricDensityPass.CreateVBufferScalarTexture("VBufferAnisotropy");
             m_VBufferLighting = VolumetricDensityPass.CreateVBufferTexture("VBufferLighting");
             m_VBufferLighting.desc.ClearColor = new Color(0.0f, 0.0f, 0.0f, 1.0f);
             m_VBufferLightingFiltered = VolumetricDensityPass.CreateVBufferTexture("VBufferLightingFiltered");
@@ -288,6 +323,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 VolumetricMaxZPass.ConfigureVBufferMaxZTexture(m_VBufferMaxZ, localMaxZWidth, localMaxZHeight, "VBufferMaxZ");
             }
             VolumetricDensityPass.ConfigureVBufferTexture(m_VBufferDensity, m_Settings.VBufferParameters, "VBufferDensity", clear: false);
+            VolumetricDensityPass.ConfigureVBufferScalarTexture(m_VBufferAnisotropy, m_Settings.VBufferParameters, "VBufferAnisotropy", clear: false);
             VolumetricDensityPass.ConfigureVBufferTexture(m_VBufferLighting, m_Settings.VBufferParameters, "VBufferLighting", clear: true);
             VolumetricDensityPass.ConfigureVBufferTexture(m_VBufferLightingFiltered, m_Settings.VBufferParameters, "VBufferLightingFiltered", clear: false);
             VolumetricDensityPass.ConfigureVBufferTexture(m_VBufferHistory, m_Settings.VBufferParameters, "VBufferHistory", clear: false);
@@ -297,6 +333,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DispatchZ = CoreUtils.DivRoundUp(m_Settings.VBufferParameters.SliceCount, ThreadGroupSizeZ);
             m_FilterDispatchZ = Mathf.Max(m_Settings.VBufferParameters.SliceCount, 1);
             PrepareClusteredLightingParameters(frameData);
+            PrepareDirectionalShadowParameters(frameData);
             PrepareVBufferHistory();
 
             volumetricData.settings = m_Settings;
@@ -318,7 +355,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeTextureParam(m_Shader, m_ClearKernel, VBufferLightingId, m_VBufferLighting.innerHandle);
                 cmd.DispatchCompute(m_Shader, m_ClearKernel, m_DispatchX, m_DispatchY, m_DispatchZ);
 
-                if (!m_Settings.Enabled || m_VBufferDensity?.innerHandle.IsValid() != true)
+                if (!m_Settings.Enabled || m_VBufferDensity?.innerHandle.IsValid() != true || m_VBufferAnisotropy?.innerHandle.IsValid() != true)
                     return;
                 if (m_VBufferFeedback?.innerHandle.IsValid() != true)
                     return;
@@ -352,6 +389,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FilterDispatchZ = 1;
             m_SupportsVolumetricBigTileLightList = false;
             m_FrameDataBigTileVolumetricLightListBuffer = null;
+            m_CSMCascadeCount = 0;
+            m_CSMCascadeWorldTexelSizes = Vector4.zero;
+            m_CSMCascadeBorders = Vector4.zero;
             m_HasValidVBufferHistory = false;
             m_HasLastVBufferParameters = false;
             m_IsFirstFrame = true;
@@ -359,11 +399,57 @@ namespace VividRP.Runtime.RenderPass.Core
             m_HistoryStates.Dispose();
         }
 
+        private void PrepareDirectionalShadowParameters(ContextContainer frameData)
+        {
+            m_CSMCascadeCount = 0;
+            m_CSMMaxShadowDistance = 0.0f;
+            m_CSMNormalBias = 0.0f;
+            m_CSMAtlasResolution = 0;
+            m_CSMCascadeResolution = 0;
+            m_CSMCascadeWorldTexelSizes = Vector4.zero;
+            m_CSMCascadeBorders = Vector4.zero;
+            m_CSMShadowQuality = (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low;
+
+            for (int i = 0; i < VividShadowData.MaxCascadeCount; i++)
+            {
+                m_CSMViewProjMatrices[i] = Matrix4x4.identity;
+                m_CSMCascadeSpheres[i] = Vector4.zero;
+                m_CSMAtlasScaleOffsets[i] = Vector4.zero;
+            }
+
+            var shadowData = frameData.GetOrCreate<VividShadowData>();
+            if (!shadowData.isCSMActive)
+                return;
+
+            m_CSMCascadeCount = Mathf.Clamp(shadowData.cascadeCount, 0, VividShadowData.MaxCascadeCount);
+            m_CSMMaxShadowDistance = Mathf.Max(shadowData.maxShadowDistance, 0.0f);
+            m_CSMNormalBias = Mathf.Max(shadowData.normalBias, 0.0f);
+            m_CSMAtlasResolution = Mathf.Max(shadowData.atlasResolution, 1);
+            m_CSMCascadeResolution = Mathf.Max(shadowData.cascadeResolution, 1);
+
+            for (int i = 0; i < VividShadowData.MaxCascadeCount; i++)
+            {
+                m_CSMViewProjMatrices[i] = shadowData.viewProjMatrices[i];
+                m_CSMCascadeSpheres[i] = shadowData.cascadeSpheres[i];
+                m_CSMAtlasScaleOffsets[i] = shadowData.cascadeAtlasScaleOffsets[i];
+                m_CSMCascadeWorldTexelSizes[i] = shadowData.cascadeWorldTexelSizes[i];
+                m_CSMCascadeBorders[i] = shadowData.cascadeBorders[i];
+            }
+
+            var lightData = frameData.GetOrCreate<VividLightData>();
+            if (DirectionalRayTracedShadowPass.TryResolveMainDirectionalLight(lightData, out _, out var additionalLightData)
+                && additionalLightData != null)
+            {
+                m_CSMShadowQuality = (int)additionalLightData.screenSpaceShadowQuality;
+            }
+        }
+
         private void BindSharedTextures(ComputePassContext context, ComputeCommandBuffer cmd, int kernel, RenderGraphTexture lightingTarget)
         {
             cmd.SetComputeTextureParam(m_Shader, kernel, CameraDepthId, m_CameraDepth.innerHandle);
             BindVBufferMaxZ(context, cmd, kernel);
             cmd.SetComputeTextureParam(m_Shader, kernel, VBufferDensityId, m_VBufferDensity.innerHandle);
+            cmd.SetComputeTextureParam(m_Shader, kernel, VBufferAnisotropyId, m_VBufferAnisotropy.innerHandle);
             BindVBufferHistory(cmd, kernel);
             cmd.SetComputeTextureParam(m_Shader, kernel, VBufferFeedbackId, m_VBufferFeedback.innerHandle);
             cmd.SetComputeTextureParam(m_Shader, kernel, VBufferLightingId, lightingTarget.innerHandle);
@@ -382,6 +468,34 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 cmd.SetComputeTextureParam(m_Shader, kernel, DirectionalShadowTextureId, m_DirectionalShadowTexture.innerHandle);
             }
+
+            BindDirectionalShadowParameters(context, cmd, kernel);
+        }
+
+        private void BindDirectionalShadowParameters(ComputePassContext context, ComputeCommandBuffer cmd, int kernel)
+        {
+            var hasCSMShadowAtlas = !ReferenceEquals(m_CSMShadowAtlas, m_LocalCSMShadowAtlas)
+                && m_CSMShadowAtlas?.innerHandle.IsValid() == true
+                && m_CSMCascadeCount > 0;
+
+            cmd.SetComputeTextureParam(
+                m_Shader,
+                kernel,
+                CSMShadowAtlasId,
+                hasCSMShadowAtlas
+                    ? m_CSMShadowAtlas.innerHandle
+                    : context.renderGraphContext.defaultResources.blackTexture);
+            cmd.SetComputeMatrixArrayParam(m_Shader, CSMViewProjMatricesId, m_CSMViewProjMatrices);
+            cmd.SetComputeVectorArrayParam(m_Shader, CSMCascadeSpheresId, m_CSMCascadeSpheres);
+            cmd.SetComputeVectorArrayParam(m_Shader, CSMAtlasScaleOffsetsId, m_CSMAtlasScaleOffsets);
+            cmd.SetComputeIntParam(m_Shader, CSMCascadeCountId, hasCSMShadowAtlas ? m_CSMCascadeCount : 0);
+            cmd.SetComputeFloatParam(m_Shader, CSMMaxShadowDistanceId, m_CSMMaxShadowDistance);
+            cmd.SetComputeFloatParam(m_Shader, CSMNormalBiasId, m_CSMNormalBias);
+            cmd.SetComputeIntParam(m_Shader, CSMAtlasResolutionId, m_CSMAtlasResolution);
+            cmd.SetComputeIntParam(m_Shader, CSMCascadeResolutionId, m_CSMCascadeResolution);
+            cmd.SetComputeVectorParam(m_Shader, CSMCascadeWorldTexelSizesId, m_CSMCascadeWorldTexelSizes);
+            cmd.SetComputeVectorParam(m_Shader, CSMCascadeBordersId, m_CSMCascadeBorders);
+            cmd.SetComputeIntParam(m_Shader, CSMShadowQualityId, m_CSMShadowQuality);
         }
 
         private void BindVBufferHistory(ComputeCommandBuffer cmd, int kernel)

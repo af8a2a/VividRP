@@ -13,14 +13,17 @@
 
 Texture2D<float> _CameraDepth;
 Texture2D<float> _DirectionalShadowTexture;
+Texture2D<float> _CSMShadowAtlas;
 Texture2D<float> _VBufferMaxZ;
 Texture3D<float4> _VBufferDensity;
+Texture3D<float> _VBufferAnisotropy;
 Texture3D<float4> _VBufferHistory;
 Texture3D<float4> _VBufferLightingInput;
 RWTexture3D<float4> _VBufferLighting;
 RWTexture3D<float4> _VBufferFeedback;
 RWTexture3D<float4> _VBufferLightingOutput;
 StructuredBuffer<float4> _VolumetricAmbientProbeBuffer;
+SamplerComparisonState sampler_CSMShadowAtlas;
 float _VBufferMaxZEnabled;
 uint _VolumetricUseBigTileLightList;
 uint _VBufferHistoryIsValid;
@@ -31,6 +34,17 @@ float4 _VBufferHistoryViewportLimit;
 float4 _VBufferPrevDepthEncodingParams;
 float4 _VBufferPrevDepthDecodingParams;
 float4 _VBufferPrevCameraPositionWS;
+float4x4 _CSMViewProjMatrices[4];
+float4 _CSMCascadeSpheres[4];
+float4 _CSMAtlasScaleOffsets[4];
+int _CSMCascadeCount;
+float _CSMMaxShadowDistance;
+float _CSMNormalBias;
+int _CSMAtlasResolution;
+int _CSMCascadeResolution;
+float4 _CSMCascadeWorldTexelSizes;
+float4 _CSMCascadeBorders;
+int _CSMShadowQuality;
 
 #define GROUP_SIZE_1D           8
 #define VBUFFER_MAX_AREA_LIGHTS 8u
@@ -39,6 +53,12 @@ float4 _VBufferPrevCameraPositionWS;
 #define VBUFFER_FILTER_SIZE_1D (VBUFFER_FILTER_GROUP_SIZE_XY + 2)
 #define VBUFFER_FILTER_LDS_SIZE (VBUFFER_FILTER_SIZE_1D * VBUFFER_FILTER_SIZE_1D)
 #define VBUFFER_FILTER_THREAD_COUNT (VBUFFER_FILTER_GROUP_SIZE_XY * VBUFFER_FILTER_GROUP_SIZE_XY)
+
+static const int kCSMShadowQualityLow = 0;
+static const int kCSMShadowQualityMedium = 1;
+static const int kCSMShadowQualityHigh = 2;
+static const int kCSMShadowQualityVeryHigh = 3;
+static const float kFixedUniformDepthBias = 1.0 / 65536.0;
 
 groupshared float4 gs_VBufferFilterCache[VBUFFER_FILTER_LDS_SIZE];
 
@@ -97,11 +117,295 @@ uint2 GetVBufferCameraPixel(uint2 vBufferPixel, float2 sampleOffset)
     return (uint2)((float2(vBufferPixel) + 0.5 + sampleOffset) * _VBufferCameraToVBufferScale);
 }
 
-float SampleDirectionalShadow(uint lightIndex, DirectionalLightData directionalLight, float3 samplePositionWS)
+int SelectCSMCascade(float3 positionWS, out float distFromSphere)
 {
-    // Shadow evaluation is intentionally not synchronized with HDRP here. The available
-    // directional shadow texture is screen-space surface data, not a world-space VBuffer sample.
-    return 1.0;
+    distFromSphere = 1.0;
+
+    for (int i = 0; i < _CSMCascadeCount; i++)
+    {
+        float4 sphere = _CSMCascadeSpheres[i];
+        float3 delta = positionWS - sphere.xyz;
+        float distSq = dot(delta, delta);
+        if (distSq < sphere.w) // sphere.w = radiusSq
+        {
+            distFromSphere = distSq / sphere.w;
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+float3 TransformWorldToShadowCoord(float3 positionWS, int cascadeIndex)
+{
+    return mul(_CSMViewProjMatrices[cascadeIndex], float4(positionWS, 1.0)).xyz;
+}
+
+float2 RemapToAtlasUV(float2 shadowUV, int cascadeIndex)
+{
+    float4 scaleOffset = _CSMAtlasScaleOffsets[cascadeIndex];
+    return shadowUV * scaleOffset.xy + scaleOffset.zw;
+}
+
+float GetCascadeWorldTexelSize(int cascadeIndex)
+{
+    return max(_CSMCascadeWorldTexelSizes[cascadeIndex], 0.0);
+}
+
+float ApplyShadowComparisonDepthBias(float shadowDepth)
+{
+    return shadowDepth + kFixedUniformDepthBias;
+}
+
+void GetCascadeAtlasBounds(int cascadeIndex, out float2 cascadeMinUV, out float2 cascadeMaxUV, out float2 texelSize)
+{
+    texelSize = 1.0 / max((float)_CSMAtlasResolution, 1.0);
+    float4 scaleOffset = _CSMAtlasScaleOffsets[cascadeIndex];
+    cascadeMinUV = scaleOffset.zw + texelSize * 0.5;
+    cascadeMaxUV = scaleOffset.zw + scaleOffset.xy - texelSize * 0.5;
+}
+
+float2 ClampShadowAtlasUV(float2 atlasUV, int cascadeIndex)
+{
+    float2 cascadeMinUV;
+    float2 cascadeMaxUV;
+    float2 texelSize;
+    GetCascadeAtlasBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
+    return clamp(atlasUV, cascadeMinUV, cascadeMaxUV);
+}
+
+float SampleShadowPCF3x3(float2 atlasUV, float depth, int cascadeIndex)
+{
+    float2 cascadeMinUV, cascadeMaxUV, texelSize;
+    GetCascadeAtlasBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
+
+    float2 texCoord = atlasUV / texelSize + 0.5;
+    float2 texCoordFloor = floor(texCoord);
+    float2 s = texCoord - texCoordFloor;
+    float2 base = (texCoordFloor - 0.5) * texelSize;
+
+    float uw0 = 3.0 - 2.0 * s.x;
+    float uw1 = 1.0 + 2.0 * s.x;
+    float vw0 = 3.0 - 2.0 * s.y;
+    float vw1 = 1.0 + 2.0 * s.y;
+
+    float u0 = (2.0 - s.x) / uw0 - 1.0;
+    float u1 = s.x / uw1 + 1.0;
+    float v0 = (2.0 - s.y) / vw0 - 1.0;
+    float v1 = s.y / vw1 + 1.0;
+
+    float shadow = 0.0;
+    shadow += uw0 * vw0 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u0, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw1 * vw0 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u1, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw0 * vw1 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u0, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw1 * vw1 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u1, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+
+    return shadow / 16.0;
+}
+
+float SampleShadowPCF5x5(float2 atlasUV, float depth, int cascadeIndex)
+{
+    float2 cascadeMinUV, cascadeMaxUV, texelSize;
+    GetCascadeAtlasBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
+
+    float2 texCoord = atlasUV / texelSize + 0.5;
+    float2 texCoordFloor = floor(texCoord);
+    float2 s = texCoord - texCoordFloor;
+    float2 base = (texCoordFloor - 0.5) * texelSize;
+
+    float uw0 = 4.0 - 3.0 * s.x;
+    float uw1 = 7.0;
+    float uw2 = 1.0 + 3.0 * s.x;
+    float vw0 = 4.0 - 3.0 * s.y;
+    float vw1 = 7.0;
+    float vw2 = 1.0 + 3.0 * s.y;
+
+    float u0 = (3.0 - 2.0 * s.x) / uw0 - 2.0;
+    float u1 = (3.0 + s.x) / uw1;
+    float u2 = s.x / uw2 + 2.0;
+    float v0 = (3.0 - 2.0 * s.y) / vw0 - 2.0;
+    float v1 = (3.0 + s.y) / vw1;
+    float v2 = s.y / vw2 + 2.0;
+
+    float shadow = 0.0;
+    shadow += uw0 * vw0 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u0, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw1 * vw0 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u1, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw2 * vw0 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u2, v0) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw0 * vw1 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u0, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw1 * vw1 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u1, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw2 * vw1 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u2, v1) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw0 * vw2 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u0, v2) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw1 * vw2 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u1, v2) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+    shadow += uw2 * vw2 * _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, clamp(base + float2(u2, v2) * texelSize, cascadeMinUV, cascadeMaxUV), depth);
+
+    return shadow / 144.0;
+}
+
+float SampleShadowPCF7x7(float2 atlasUV, float depth, int cascadeIndex)
+{
+    float2 cascadeMinUV, cascadeMaxUV, texelSize;
+    GetCascadeAtlasBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
+
+    float shadow = 0.0;
+
+    [unroll]
+    for (int j = 0; j < 4; j++)
+    {
+        [unroll]
+        for (int i = 0; i < 4; i++)
+        {
+            float2 offset = float2(i * 2.0 - 3.0, j * 2.0 - 3.0) * texelSize;
+            float2 sampleUV = clamp(atlasUV + offset, cascadeMinUV, cascadeMaxUV);
+            shadow += _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, sampleUV, depth);
+        }
+    }
+
+    return shadow / 16.0;
+}
+
+float EvaluateCSMShadow(float2 atlasUV, float receiverDepth, int cascadeIndex)
+{
+    switch (_CSMShadowQuality)
+    {
+        case kCSMShadowQualityLow:
+            return SampleShadowPCF3x3(atlasUV, receiverDepth, cascadeIndex);
+        case kCSMShadowQualityMedium:
+            return SampleShadowPCF5x5(atlasUV, receiverDepth, cascadeIndex);
+        case kCSMShadowQualityHigh:
+        case kCSMShadowQualityVeryHigh:
+            return SampleShadowPCF7x7(atlasUV, receiverDepth, cascadeIndex);
+        default:
+            return SampleShadowPCF5x5(atlasUV, receiverDepth, cascadeIndex);
+    }
+}
+
+float3 ClampShadowCoordToShadowMap(float3 shadowCoord)
+{
+    shadowCoord.xy = saturate(shadowCoord.xy);
+    return shadowCoord;
+}
+
+bool IsWithinCascadeBlendSamplingBounds(float3 shadowCoord)
+{
+    float halfTexel = 0.5 / max((float)_CSMCascadeResolution, 1.0);
+    return all(shadowCoord.xy >= halfTexel) && all(shadowCoord.xy <= (1.0 - halfTexel));
+}
+
+bool TryGetBiasedShadowCoord(float3 positionWS, float3 normalWS, int cascadeIndex, out float3 shadowCoord)
+{
+    shadowCoord = 0.0;
+
+    if (cascadeIndex < 0 || cascadeIndex >= _CSMCascadeCount)
+        return false;
+
+    float receiverNormalBias = _CSMNormalBias * GetCascadeWorldTexelSize(cascadeIndex);
+    float3 biasedPositionWS = positionWS + normalWS * receiverNormalBias;
+    shadowCoord = TransformWorldToShadowCoord(biasedPositionWS, cascadeIndex);
+    return true;
+}
+
+bool TryEvaluateCascadeShadow(float3 positionWS, float3 normalWS, int cascadeIndex, out float shadow)
+{
+    shadow = 1.0;
+
+    float3 shadowCoord;
+    if (!TryGetBiasedShadowCoord(positionWS, normalWS, cascadeIndex, shadowCoord))
+        return false;
+
+    shadowCoord = ClampShadowCoordToShadowMap(shadowCoord);
+    shadowCoord.z = ApplyShadowComparisonDepthBias(shadowCoord.z);
+    float2 atlasUV = ClampShadowAtlasUV(RemapToAtlasUV(shadowCoord.xy, cascadeIndex), cascadeIndex);
+    shadow = EvaluateCSMShadow(atlasUV, shadowCoord.z, cascadeIndex);
+    return true;
+}
+
+bool TryEvaluateCascadeBlendShadow(float3 positionWS, float3 normalWS, int cascadeIndex, out float shadow)
+{
+    shadow = 1.0;
+
+    float3 shadowCoord;
+    if (!TryGetBiasedShadowCoord(positionWS, normalWS, cascadeIndex, shadowCoord))
+        return false;
+
+    if (!IsWithinCascadeBlendSamplingBounds(shadowCoord))
+        return false;
+
+    shadowCoord = ClampShadowCoordToShadowMap(shadowCoord);
+    shadowCoord.z = ApplyShadowComparisonDepthBias(shadowCoord.z);
+    float2 atlasUV = ClampShadowAtlasUV(RemapToAtlasUV(shadowCoord.xy, cascadeIndex), cascadeIndex);
+    shadow = EvaluateCSMShadow(atlasUV, shadowCoord.z, cascadeIndex);
+    return true;
+}
+
+float GetCascadeBorder(int cascadeIndex)
+{
+    return cascadeIndex >= 0 && cascadeIndex < _CSMCascadeCount ? max(_CSMCascadeBorders[cascadeIndex], 0.0) : 0.0;
+}
+
+float ComputeCascadeBlendAlpha(int cascadeIndex, float relDistance)
+{
+    float border = GetCascadeBorder(cascadeIndex);
+    if (border <= 0.0)
+        return 0.0;
+
+    return saturate((relDistance - (1.0 - border)) / border);
+}
+
+float EvaluateDirectionalCSMShadow(uint2 vBufferPixel, float3 samplePositionWS, float3 rayDirectionWS)
+{
+    if (_CSMCascadeCount <= 0 || _CSMMaxShadowDistance <= 0.0)
+        return 1.0;
+
+    float relDistance;
+    int cascadeIndex = SelectCSMCascade(samplePositionWS, relDistance);
+    if (cascadeIndex < 0)
+        return 1.0;
+
+    // Our shadows only support normal bias. Volumetrics has no access to the
+    // surface normal, so approximate the bias direction with the view direction.
+    float3 shadowBiasDirectionWS = -SafeNormalize(rayDirectionWS);
+    float shadowCurrent;
+    if (!TryEvaluateCascadeShadow(samplePositionWS, shadowBiasDirectionWS, cascadeIndex, shadowCurrent))
+        return 1.0;
+
+    float shadow = shadowCurrent;
+    float cascadeBlendAlpha = ComputeCascadeBlendAlpha(cascadeIndex, relDistance);
+    if (cascadeBlendAlpha > 0.0)
+    {
+        float shadowNext = shadowCurrent;
+        int nextCascadeIndex = cascadeIndex + 1;
+        if (nextCascadeIndex < _CSMCascadeCount)
+        {
+            float nextCascadeShadow;
+            if (TryEvaluateCascadeBlendShadow(samplePositionWS, shadowBiasDirectionWS, nextCascadeIndex, nextCascadeShadow))
+                shadowNext = nextCascadeShadow;
+        }
+
+        shadow = lerp(shadowCurrent, shadowNext, cascadeBlendAlpha);
+    }
+
+    float pixelDistance = length(samplePositionWS - _WorldSpaceCameraPos);
+    float fadeStart = _CSMMaxShadowDistance * 0.8;
+    if (pixelDistance > fadeStart)
+    {
+        float distanceFade = 1.0 - saturate((pixelDistance - fadeStart) / max(_CSMMaxShadowDistance - fadeStart, 1e-4));
+        shadow = lerp(1.0, shadow, distanceFade);
+    }
+
+    return saturate(shadow);
+}
+
+float SampleDirectionalShadow(uint2 vBufferPixel, uint lightIndex, DirectionalLightData directionalLight, float3 samplePositionWS, float3 rayDirectionWS)
+{
+    if ((int)lightIndex != _MainDirectionalLightIndex)
+        return 1.0;
+
+    float shadowDimmer = saturate(directionalLight.shadowStrength * directionalLight.volumetricShadowDimmer);
+    if (shadowDimmer <= 0.0)
+        return 1.0;
+
+    float shadow = EvaluateDirectionalCSMShadow(vBufferPixel, samplePositionWS, rayDirectionWS);
+    return lerp(1.0, shadow, shadowDimmer);
 }
 
 bool LightAffectsVolumetrics(uint affectVolumetric, float volumetricDimmer)
@@ -401,7 +705,7 @@ VoxelLighting EvaluateVoxelLightingDirectional(uint3 voxelCoord, JitteredRay ray
 
         float3 L = SafeNormalize(light.directionWS);
         float3 lightColor = max(light.color, 0.0) * light.volumetricDimmer;
-        float shadow = SampleDirectionalShadow(i, light, sampleWS);
+        float shadow = SampleDirectionalShadow(voxelCoord.xy, i, light, sampleWS, ray.jitterDirWS);
         lightColor *= shadow;
 
         // Important:
@@ -444,137 +748,137 @@ VoxelLighting EvaluateVoxelLightingLocal(uint3 voxelCoord, uint2 vBufferPixel, f
     if (_VolumetricUseBigTileLightList == 0u || _NumTileBigTileX == 0u || _NumTileBigTileY == 0u)
         hasVolumetricBigTileLightList = false;
 
-    // if (hasVolumetricBigTileLightList)
-    // {
-    //     uint lightOffset = 0;
-    //     uint2 cameraPixel = GetVBufferCameraPixel(vBufferPixel, float2(0.0, 0.0));
-    //     VividBigTileLightingLoopContext bigTileLoop = VividLightingLoop::CreateBigTile(cameraPixel);
-    //     uint lightCount = VividLightingLoop::GetBigTileLightCount(bigTileLoop);
-    //
-    //     [loop]
-    //     for (; lightOffset < lightCount; lightOffset++)
-    //     {
-    //         PunctualLightData light = VividLightingLoop::LoadBigTilePunctualLight(bigTileLoop, lightOffset);
-    //         if (!LightAffectsVolumetrics(light.affectVolumetric, light.volumetricDimmer))
-    //             continue;
-    //
-    //         bool sampleLight = true;
-    //
-    //         float tEntr = t0;
-    //         float tExit = t1;
-    //
-    //         // Perform ray-cone intersection for pyramid and spot lights.
-    //         if (light.lightType == VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
-    //         {
-    //             float coneEntry;
-    //             float coneExit;
-    //             sampleLight = IntersectRaySpotConeRange(ray.originWS, ray.jitterDirWS, light, t0, t1, coneEntry, coneExit);
-    //             tEntr = coneEntry;
-    //             tExit = coneExit;
-    //         }
-    //
-    //         if (!sampleLight || tEntr >= tExit)
-    //             continue;
-    //
-    //         // Is it worth evaluating the light?
-    //         float lightSqRadius = max(light.shapeRadiusSquared, 1e-4);
-    //
-    //         float t;
-    //         float sqDist;
-    //         float rcpPdf;
-    //         ImportanceSamplePunctualLight(
-    //             rndVal,
-    //             light.positionWS,
-    //             lightSqRadius,
-    //             ray.originWS,
-    //             ray.jitterDirWS,
-    //             tEntr,
-    //             tExit,
-    //             t,
-    //             sqDist,
-    //             rcpPdf);
-    //
-    //         float3 samplePosWS = ray.originWS + ray.jitterDirWS * t;
-    //         float3 lightRadiance = EvaluatePunctualLightRadiance(light, samplePosWS);
-    //         if (max(max(lightRadiance.x, lightRadiance.y), lightRadiance.z) <= 0.0)
-    //             continue;
-    //
-    //         // Important:
-    //         // Ideally, all scattering calculations should use the jittered versions
-    //         // of the sample position and the ray direction. However, correct reprojection
-    //         // of asymmetrically scattered lighting (affected by an anisotropic phase
-    //         // function) is not possible. We work around this issue by reprojecting
-    //         // lighting not affected by the phase function. This basically removes
-    //         // the phase function from the temporal integration process. It is a hack.
-    //         // The downside is that anisotropy no longer benefits from temporal averaging,
-    //         // and any temporal instability of anisotropy causes causes visible jitter.
-    //         // In order to stabilize the image, we use the voxel center for all
-    //         // anisotropy-related calculations.
-    //         float3 centerToLight = light.positionWS - centerWS;
-    //         float cosTheta = dot(centerToLight, ray.centerDirWS) * rsqrt(dot(centerToLight, centerToLight));
-    //         float phaseVarying = CornetteShanksPhasePartVarying(g, cosTheta);
-    //
-    //         // Compute transmittance from 't0' to 't'.
-    //         float weight = TransmittanceHomogeneousMedium(extinction, t - t0) * rcpPdf;
-    //
-    //         // Compute the amount of in-scattered radiance.
-    //         lighting.radianceNoPhase += weight * lightRadiance;
-    //         lighting.radianceComplete += weight * lightRadiance * phaseVarying;
-    //     }
-    // }
+    if (hasVolumetricBigTileLightList)
+    {
+        uint lightOffset = 0;
+        uint2 cameraPixel = GetVBufferCameraPixel(vBufferPixel, float2(0.0, 0.0));
+        VividBigTileLightingLoopContext bigTileLoop = VividLightingLoop::CreateBigTile(cameraPixel);
+        uint lightCount = VividLightingLoop::GetBigTileLightCount(bigTileLoop);
 
-    // // Area lights from cluster
-    // {
-    //     float2 cameraPixel = (float2(vBufferPixel) + 0.5) * _VBufferCameraToVBufferScale;
-    //     VividLightingLoopContext lightLoop = VividLightingLoop::Create((uint2)cameraPixel, centerWS);
-    //     uint lightCount = min(min(VividLightingLoop::GetAreaLightCount(lightLoop), _AreaLightCount), VBUFFER_MAX_AREA_LIGHTS);
-    //
-    //     [loop]
-    //     for (uint localLightIndex = 0; localLightIndex < lightCount; localLightIndex++)
-    //     {
-    //         AreaLightData light = VividLightingLoop::LoadAreaLight(lightLoop, localLightIndex);
-    //         if (!LightAffectsVolumetrics(light.affectVolumetric, light.volumetricDimmer))
-    //             continue;
-    //
-    //         float tOffset, weight;
-    //         ImportanceSampleHomogeneousMedium(rndVal, extinction, dt, tOffset, weight);
-    //
-    //         float sampleT = t0 + tOffset;
-    //         float3 sampleWS = ray.originWS + sampleT * ray.jitterDirWS;
-    //
-    //         float3 lightVector = light.positionWS - sampleWS;
-    //         float distanceSq = max(dot(lightVector, lightVector), 1e-4);
-    //         float distanceToLight = sqrt(distanceSq);
-    //
-    //         // Important:
-    //         // Ideally, all scattering calculations should use the jittered versions
-    //         // of the sample position and the ray direction. However, correct reprojection
-    //         // of asymmetrically scattered lighting (affected by an anisotropic phase
-    //         // function) is not possible. We work around this issue by reprojecting
-    //         // lighting not affected by the phase function. This basically removes
-    //         // the phase function from the temporal integration process. It is a hack.
-    //         // The downside is that anisotropy no longer benefits from temporal averaging,
-    //         // and any temporal instability of anisotropy causes causes visible jitter.
-    //         // In order to stabilize the image, we use the voxel center for all
-    //         // anisotropy-related calculations.
-    //         float3 centerToLight = light.positionWS - centerWS;
-    //         float cosTheta = dot(centerToLight, ray.centerDirWS) * rsqrt(dot(centerToLight, centerToLight));
-    //         float phaseVarying = CornetteShanksPhasePartVarying(g, cosTheta);
-    //
-    //         float rangeAttenuation = saturate(1.0 - distanceToLight / max(light.range, 1e-4));
-    //         rangeAttenuation *= rangeAttenuation;
-    //         float volumetricFade = EvaluateVolumetricLightFade(
-    //             GetVolumetricLightCameraDistance(light.positionWS),
-    //             light.volumetricFadeDistance);
-    //
-    //         float3 lightRadiance = max(light.color, 0.0) * light.volumetricDimmer * volumetricFade * rangeAttenuation / max(distanceSq, 1.0);
-    //
-    //         // Compute the amount of in-scattered radiance.
-    //         // Note: the 'weight' accounts for transmittance from 't0' to 't'.
-    //         lighting.radianceNoPhase += weight * lightRadiance;
-    //         lighting.radianceComplete += weight * lightRadiance * phaseVarying;
-    //     }
-    // }
+        [loop]
+        for (; lightOffset < lightCount; lightOffset++)
+        {
+            PunctualLightData light = VividLightingLoop::LoadBigTilePunctualLight(bigTileLoop, lightOffset);
+            if (!LightAffectsVolumetrics(light.affectVolumetric, light.volumetricDimmer))
+                continue;
+
+            bool sampleLight = true;
+
+            float tEntr = t0;
+            float tExit = t1;
+
+            // Perform ray-cone intersection for pyramid and spot lights.
+            if (light.lightType == VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
+            {
+                float coneEntry;
+                float coneExit;
+                sampleLight = IntersectRaySpotConeRange(ray.originWS, ray.jitterDirWS, light, t0, t1, coneEntry, coneExit);
+                tEntr = coneEntry;
+                tExit = coneExit;
+            }
+
+            if (!sampleLight || tEntr >= tExit)
+                continue;
+
+            // Is it worth evaluating the light?
+            float lightSqRadius = max(light.shapeRadiusSquared, 1e-4);
+
+            float t;
+            float sqDist;
+            float rcpPdf;
+            ImportanceSamplePunctualLight(
+                rndVal,
+                light.positionWS,
+                lightSqRadius,
+                ray.originWS,
+                ray.jitterDirWS,
+                tEntr,
+                tExit,
+                t,
+                sqDist,
+                rcpPdf);
+
+            float3 samplePosWS = ray.originWS + ray.jitterDirWS * t;
+            float3 lightRadiance = EvaluatePunctualLightRadiance(light, samplePosWS);
+            if (max(max(lightRadiance.x, lightRadiance.y), lightRadiance.z) <= 0.0)
+                continue;
+
+            // Important:
+            // Ideally, all scattering calculations should use the jittered versions
+            // of the sample position and the ray direction. However, correct reprojection
+            // of asymmetrically scattered lighting (affected by an anisotropic phase
+            // function) is not possible. We work around this issue by reprojecting
+            // lighting not affected by the phase function. This basically removes
+            // the phase function from the temporal integration process. It is a hack.
+            // The downside is that anisotropy no longer benefits from temporal averaging,
+            // and any temporal instability of anisotropy causes causes visible jitter.
+            // In order to stabilize the image, we use the voxel center for all
+            // anisotropy-related calculations.
+            float3 centerToLight = light.positionWS - centerWS;
+            float cosTheta = dot(centerToLight, ray.centerDirWS) * rsqrt(dot(centerToLight, centerToLight));
+            float phaseVarying = CornetteShanksPhasePartVarying(g, cosTheta);
+
+            // Compute transmittance from 't0' to 't'.
+            float weight = TransmittanceHomogeneousMedium(extinction, t - t0) * rcpPdf;
+
+            // Compute the amount of in-scattered radiance.
+            lighting.radianceNoPhase += weight * lightRadiance;
+            lighting.radianceComplete += weight * lightRadiance * phaseVarying;
+        }
+    }
+
+    // Area lights from cluster
+    {
+        float2 cameraPixel = (float2(vBufferPixel) + 0.5) * _VBufferCameraToVBufferScale;
+        VividLightingLoopContext lightLoop = VividLightingLoop::Create((uint2)cameraPixel, centerWS);
+        uint lightCount = min(min(VividLightingLoop::GetAreaLightCount(lightLoop), _AreaLightCount), VBUFFER_MAX_AREA_LIGHTS);
+
+        [loop]
+        for (uint localLightIndex = 0; localLightIndex < lightCount; localLightIndex++)
+        {
+            AreaLightData light = VividLightingLoop::LoadAreaLight(lightLoop, localLightIndex);
+            if (!LightAffectsVolumetrics(light.affectVolumetric, light.volumetricDimmer))
+                continue;
+
+            float tOffset, weight;
+            ImportanceSampleHomogeneousMedium(rndVal, extinction, dt, tOffset, weight);
+
+            float sampleT = t0 + tOffset;
+            float3 sampleWS = ray.originWS + sampleT * ray.jitterDirWS;
+
+            float3 lightVector = light.positionWS - sampleWS;
+            float distanceSq = max(dot(lightVector, lightVector), 1e-4);
+            float distanceToLight = sqrt(distanceSq);
+
+            // Important:
+            // Ideally, all scattering calculations should use the jittered versions
+            // of the sample position and the ray direction. However, correct reprojection
+            // of asymmetrically scattered lighting (affected by an anisotropic phase
+            // function) is not possible. We work around this issue by reprojecting
+            // lighting not affected by the phase function. This basically removes
+            // the phase function from the temporal integration process. It is a hack.
+            // The downside is that anisotropy no longer benefits from temporal averaging,
+            // and any temporal instability of anisotropy causes causes visible jitter.
+            // In order to stabilize the image, we use the voxel center for all
+            // anisotropy-related calculations.
+            float3 centerToLight = light.positionWS - centerWS;
+            float cosTheta = dot(centerToLight, ray.centerDirWS) * rsqrt(dot(centerToLight, centerToLight));
+            float phaseVarying = CornetteShanksPhasePartVarying(g, cosTheta);
+
+            float rangeAttenuation = saturate(1.0 - distanceToLight / max(light.range, 1e-4));
+            rangeAttenuation *= rangeAttenuation;
+            float volumetricFade = EvaluateVolumetricLightFade(
+                GetVolumetricLightCameraDistance(light.positionWS),
+                light.volumetricFadeDistance);
+
+            float3 lightRadiance = max(light.color, 0.0) * light.volumetricDimmer * volumetricFade * rangeAttenuation / max(distanceSq, 1.0);
+
+            // Compute the amount of in-scattered radiance.
+            // Note: the 'weight' accounts for transmittance from 't0' to 't'.
+            lighting.radianceNoPhase += weight * lightRadiance;
+            lighting.radianceComplete += weight * lightRadiance * phaseVarying;
+        }
+    }
 
     return lighting;
 }
@@ -649,7 +953,8 @@ void FillVolumetricLightingBuffer(uint2 vBufferPixel, JitteredRay ray, bool hasM
 
         float3 scattering = max(density.rgb, 0.0);
         float extinction = max(density.a, 0.0);
-        float anisotropy = _VBufferFogAnisotropy;
+        float anisotropyMoment = _VBufferAnisotropy.Load(int4(voxelCoord, 0));
+        float anisotropy = extinction > FLT_MIN ? anisotropyMoment / extinction : _VBufferFogAnisotropy;
         float voxelOpticalDepth = extinction * dt;
         float blendOpticalDepth = voxelOpticalDepth;
 

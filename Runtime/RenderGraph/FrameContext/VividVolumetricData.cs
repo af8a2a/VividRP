@@ -9,6 +9,7 @@ namespace VividRP.Runtime
         public ShaderVariablesVolumetric shaderVariables;
         public RenderGraphTexture VBufferMaxZ;
         public RenderGraphTexture VBufferDensity;
+        public RenderGraphTexture VBufferAnisotropy;
         public RenderGraphTexture VBufferLighting;
         public RenderGraphBuffer localVolumetricFogBuffer;
         public int localVolumetricFogCount;
@@ -21,6 +22,7 @@ namespace VividRP.Runtime
             shaderVariables = default;
             VBufferMaxZ = null;
             VBufferDensity = null;
+            VBufferAnisotropy = null;
             VBufferLighting = null;
             localVolumetricFogBuffer = null;
             localVolumetricFogCount = 0;

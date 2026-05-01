@@ -11,6 +11,7 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
         _FogVolumeBlendMode("Blend Mode", Float) = 1
         _FogVolumeSingleScatteringAlbedo("Single Scattering Albedo", Color) = (1, 1, 1, 1)
         _FogVolumeFogDistanceProperty("Fog Distance", Float) = 50
+        _FogVolumeAnisotropy("Anisotropy", Float) = 0
         [NoScaleOffset]_Mask("Mask", 3D) = "white" {}
         _ScrollSpeed("Scroll Speed", Vector) = (0, 0, 0, 0)
         _Tiling("Tiling", Vector) = (1, 1, 1, 0)
@@ -74,6 +75,7 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
 
             float4 _FogVolumeSingleScatteringAlbedo;
             float _FogVolumeFogDistanceProperty;
+            float _FogVolumeAnisotropy;
             float _FogVolumeBlendMode;
             float3 _ScrollSpeed;
             float3 _Tiling;
@@ -242,7 +244,7 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
                     multiplyBlendMode);
             }
 
-            void Frag(VertexToFragment input, out float4 outColor : SV_Target0)
+            void Frag(VertexToFragment input, out float4 outColor : SV_Target0, out float outAnisotropy : SV_Target1)
             {
                 float sliceDistance = VBufferDistanceToSliceIndex(input.depthSlice % (uint)_VBufferSliceCount);
                 // Match the VBuffer lighting ray path instead of reconstructing from raw camera near/far projection.
@@ -269,14 +271,17 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
                 albedo *= _FogVolumeSingleScatteringAlbedo.rgb;
                 float3 voxelCenterNDC = saturate(voxelCenterCS * 0.5 + 0.5);
                 float fade = ComputeFadeFactor(voxelCenterNDC, sliceDistance);
+                float anisotropy = clamp(_FogVolumeAnisotropy, -0.95, 0.95);
                 if ((uint)_FogVolumeBlendMode == LOCALVOLUMETRICFOGBLENDINGMODE_MULTIPLY)
                 {
                     outColor = max(0.0, lerp(float4(1.0, 1.0, 1.0, 1.0), float4(albedo * extinction, extinction), fade.xxxx));
+                    outAnisotropy = outColor.a;
                 }
                 else
                 {
                     extinction *= fade;
                     outColor = max(0.0, float4(saturate(albedo * extinction), extinction));
+                    outAnisotropy = extinction * anisotropy;
                 }
             }
             ENDHLSL

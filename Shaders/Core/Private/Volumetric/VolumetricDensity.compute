@@ -5,6 +5,7 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
 
 RWTexture3D<float4> _VBufferDensity;
+RWTexture3D<float> _VBufferAnisotropy;
 
 float ComputeHeightFogMultiplier(float height, float baseHeight, float rcpScaleHeight)
 {
@@ -27,6 +28,7 @@ void ClearVBufferDensity(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
 
     _VBufferDensity[dispatchThreadId] = 0.0;
+    _VBufferAnisotropy[dispatchThreadId] = 0.0;
 }
 
 [numthreads(8, 8, 1)]
@@ -44,7 +46,9 @@ void VoxelizeVBufferDensity(uint3 dispatchThreadId : SV_DispatchThreadID)
         float heightFog = EvaluateHeightFog(positionWS);
         float3 scattering = _VBufferFogScattering.rgb * heightFog;
         float extinction = _VBufferFogScattering.a * heightFog;
+        float safeExtinction = max(extinction, 0.0);
 
-        _VBufferDensity[voxelCoord3D] = float4(max(scattering, 0.0), max(extinction, 0.0));
+        _VBufferDensity[voxelCoord3D] = float4(max(scattering, 0.0), safeExtinction);
+        _VBufferAnisotropy[voxelCoord3D] = safeExtinction * clamp(_VBufferFogAnisotropy, -0.95, 0.95);
     }
 }

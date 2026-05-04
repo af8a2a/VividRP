@@ -536,21 +536,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        [TestCase(nameof(VividRPCoreResources.AutoExposureCompute), "Shaders/Core/Private/AutoExposure/Unreal/AutoExposure.compute")]
-        [TestCase(nameof(VividRPCoreResources.AutoExposureHDRPCompute), "Shaders/Core/Private/AutoExposure/HDRP/Exposure.compute")]
-        public void VividRPCoreResources_DeclaresAutoExposureComputePaths(string fieldName, string expectedPath)
-        {
-            var field = typeof(VividRPCoreResources).GetField(fieldName);
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo(expectedPath));
-        }
-
-        [Test]
         public void AutoExposureShader_DeclaresHistogramAndExposureKernels()
         {
             var autoExposureSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposure.cs"));

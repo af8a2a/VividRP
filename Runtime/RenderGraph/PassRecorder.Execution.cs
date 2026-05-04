@@ -69,6 +69,11 @@ namespace VividRP.Runtime
             public RenderGraphBuffer CurrentBuffer;
         }
 
+        private sealed class CodeManagedTextureHistoryRequest
+        {
+            public RenderGraphTexture CurrentTexture;
+        }
+
         private static readonly List<IRenderPass> s_RenderPasses = new();
         private static readonly ContextContainer s_FrameData = new();
         private static readonly Dictionary<IRenderPass, PassResource> s_PassResources = new();
@@ -80,6 +85,7 @@ namespace VividRP.Runtime
         private static readonly Dictionary<RenderGraphTexture, RTHandle> s_ImportedRTHandles = new();
         private static readonly Dictionary<IRenderPass, List<ImportedPassTexture>> s_PassImportedHandles = new();
         private static readonly Dictionary<string, TextureHistoryFrameBinding> s_TextureHistoryFrameBindings = new(16, StringComparer.Ordinal);
+        private static readonly Dictionary<string, CodeManagedTextureHistoryRequest> s_CodeManagedTextureHistoryRequests = new(StringComparer.Ordinal);
         private static readonly Dictionary<string, CodeManagedBufferHistoryRequest> s_CodeManagedBufferHistoryRequests = new(StringComparer.Ordinal);
         private static readonly HashSet<RenderGraphTexture> s_HistoryImportedTextures = new();
         private static readonly HashSet<RenderGraphBuffer> s_CodeManagedHistoryImportedBuffers = new();
@@ -119,6 +125,7 @@ namespace VividRP.Runtime
             RenderGraphData graphAsset)
         {
             ColorGradingSettingsResolver.ClearFrameCache(s_FrameData);
+            VividColorPyramidRuntimeUtility.ClearFrameCache(s_FrameData);
 
             var renderingData = s_FrameData.GetOrCreate<VividRenderingData>();
             var cameraData = s_FrameData.GetOrCreate<VividCameraData>();
@@ -450,6 +457,24 @@ namespace VividRP.Runtime
             return hasHistoryTextures && hasValidData;
         }
 
+        internal static void RegisterHistoryTextureWriteForPass(
+            IRenderPass pass,
+            string key,
+            RenderGraphTexture currentTexture)
+        {
+            if (currentTexture == null)
+                return;
+
+            var historyKey = BuildPassHistoryKey(pass, key);
+            if (string.IsNullOrEmpty(historyKey))
+                return;
+
+            s_CodeManagedTextureHistoryRequests[historyKey] = new CodeManagedTextureHistoryRequest
+            {
+                CurrentTexture = currentTexture
+            };
+        }
+
         internal static void CommitFrame(RenderGraphData graphAsset)
         {
             RestoreInjectedSourceOverrides();
@@ -732,6 +757,7 @@ namespace VividRP.Runtime
 
             s_HistoryImportedTextures.Clear();
             s_TextureHistoryFrameBindings.Clear();
+            s_CodeManagedTextureHistoryRequests.Clear();
         }
 
         private static void ClearCodeManagedHistoryFrameState()
@@ -1300,13 +1326,23 @@ namespace VividRP.Runtime
             foreach (var binding in s_TextureHistoryFrameBindings.Values)
             {
                 var currentTexture = binding.CurrentTexture;
-                if (currentTexture == null || !ShouldPersistHistoryTexture(currentTexture))
+                if (currentTexture == null
+                    || (!ShouldPersistHistoryTexture(currentTexture)
+                        && !ShouldPersistCodeManagedHistoryTexture(binding.Key, currentTexture)))
                 {
                     continue;
                 }
 
                 RenderGraphHistoryRegistry.CommitHistory(camera, graphAsset, binding.Key);
             }
+        }
+
+        private static bool ShouldPersistCodeManagedHistoryTexture(string historyKey, RenderGraphTexture currentTexture)
+        {
+            return !string.IsNullOrEmpty(historyKey)
+                && currentTexture != null
+                && s_CodeManagedTextureHistoryRequests.TryGetValue(historyKey, out var request)
+                && ReferenceEquals(request?.CurrentTexture, currentTexture);
         }
 
         private static bool ShouldPersistHistoryBuffer(RenderGraphBuffer buffer)

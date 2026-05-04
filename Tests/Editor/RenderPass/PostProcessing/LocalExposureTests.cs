@@ -269,19 +269,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VividRPCoreResources_DeclaresLocalExposureCompute()
-        {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.LocalExposureCompute));
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<VividRP.Runtime.ResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/LocalExposure/LocalExposure.compute"));
-        }
-
-        [Test]
         public void PipelineResourceUpdater_RecollectsLocalExposureComputeRegistration()
         {
             var container = ScriptableObject.CreateInstance<PipelineResourcesContainer>();

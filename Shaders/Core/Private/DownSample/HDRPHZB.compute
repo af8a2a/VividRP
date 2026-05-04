@@ -1,0 +1,59 @@
+#pragma use_dxc
+#pragma kernel KCopyDepthToAtlas
+#pragma kernel KDepthDownsample8DualUav KERNEL_SIZE=8
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+
+Texture2D<float> _InputDepth;
+RWTexture2D<float> _DepthMipChain;
+
+CBUFFER_START(cb)
+    int4 _SrcOffsetAndLimit;
+    int4 _DstOffsetAndSize;
+CBUFFER_END
+
+#if UNITY_REVERSED_Z
+#define SELECT_CLOSEST_DEPTH(l, r) max(l, r)
+#else
+#define SELECT_CLOSEST_DEPTH(l, r) min(l, r)
+#endif
+
+[numthreads(8, 8, 1)]
+void KCopyDepthToAtlas(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint width;
+    uint height;
+    _InputDepth.GetDimensions(width, height);
+
+    if (dispatchThreadId.x >= width || dispatchThreadId.y >= height)
+        return;
+
+    _DepthMipChain[dispatchThreadId.xy] = _InputDepth.Load(int3(dispatchThreadId.xy, 0));
+}
+
+[numthreads(KERNEL_SIZE, KERNEL_SIZE, 1)]
+void KDepthDownsample8DualUav(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 srcOffset = (uint2)_SrcOffsetAndLimit.xy;
+    uint2 srcLimit = (uint2)_SrcOffsetAndLimit.zw;
+    uint2 dstOffset = (uint2)_DstOffsetAndSize.xy;
+    uint2 dstSize = (uint2)_DstOffsetAndSize.zw;
+
+    if (dispatchThreadId.x >= dstSize.x || dispatchThreadId.y >= dstSize.y)
+        return;
+
+    uint2 srcPixelUL = srcOffset + (dispatchThreadId.xy << 1);
+
+    float p00 = _DepthMipChain[min(srcPixelUL + uint2(0u, 0u), srcLimit)];
+    float p10 = _DepthMipChain[min(srcPixelUL + uint2(1u, 0u), srcLimit)];
+    float p01 = _DepthMipChain[min(srcPixelUL + uint2(0u, 1u), srcLimit)];
+    float p11 = _DepthMipChain[min(srcPixelUL + uint2(1u, 1u), srcLimit)];
+
+    float closestDepth = SELECT_CLOSEST_DEPTH(
+        SELECT_CLOSEST_DEPTH(p00, p10),
+        SELECT_CLOSEST_DEPTH(p01, p11));
+
+    _DepthMipChain[dstOffset + dispatchThreadId.xy] = closestDepth;
+}
+
+#undef SELECT_CLOSEST_DEPTH

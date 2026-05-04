@@ -1,8 +1,5 @@
 using System.IO;
-using System.Reflection;
 using NUnit.Framework;
-using VividRP.Runtime;
-using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
 
 namespace VividRP.Editor.Tests
 {
@@ -40,19 +37,6 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("request.GetData<Vector4>()"));
             Assert.That(source, Does.Not.Contain("UploadProbe("));
             Assert.That(source, Does.Not.Contain("RenderSettings.ambientProbe"));
-        }
-
-        [Test]
-        public void VividRPCoreResources_DeclaresSkyAmbientProbeConvolutionCompute()
-        {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.SkyAmbientProbeConvolutionCompute));
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/Sky/AmbientProbeConvolution.compute"));
         }
 
         [Test]

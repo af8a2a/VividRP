@@ -188,19 +188,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VividRPCoreResources_DeclaresFinalBlitShader()
-        {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.FinalBlitShader));
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<VividRP.Runtime.ResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/FinalBlit"));
-        }
-
-        [Test]
         public void FinalBlitShader_ContainsColorGradingLogic_AndSharedBlitShaderDoesNot()
         {
             var finalBlitShaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "FinalBlit.shader"));

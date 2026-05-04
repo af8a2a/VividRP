@@ -1,9 +1,6 @@
 using System.IO;
-using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
-using VividRP.Runtime;
-using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
 {
@@ -65,19 +62,6 @@ namespace VividRP.Editor.Tests
             Assert.That(commonSource, Does.Contain("float _RayTracingRayBias;"));
             Assert.That(commonSource, Does.Contain("float _RayTracingDistantRayBias;"));
             Assert.That(commonSource, Does.Contain("float _RayTracingMinSolidAngle;"));
-        }
-
-        [Test]
-        public void VividRPCoreResources_DeclaresDirectionalRayTracedShadowCompute()
-        {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.DirectionalRayTracedShadowCompute));
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/DirectionalRayTracedShadow"));
         }
 
         private static string GetComputeShaderSourcePath()

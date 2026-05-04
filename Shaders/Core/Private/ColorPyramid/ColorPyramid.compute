@@ -1,0 +1,61 @@
+#pragma use_dxc
+#pragma kernel CopyMip0
+#pragma kernel DownsampleMip
+
+Texture2D<float4> _InputTexture;
+RWTexture2D<float4> _InputPyramidTexture;
+RWTexture2D<float4> _OutputPyramidTexture;
+
+float4 _OutputSize;
+
+bool IsOutside(uint2 pixelCoord)
+{
+    return pixelCoord.x >= (uint)_OutputSize.x || pixelCoord.y >= (uint)_OutputSize.y;
+}
+
+float4 LoadInputPixel(uint2 pixelCoord)
+{
+    uint width;
+    uint height;
+    _InputTexture.GetDimensions(width, height);
+
+    pixelCoord = min(pixelCoord, uint2(max(width, 1u) - 1u, max(height, 1u) - 1u));
+    return _InputTexture.Load(int3(pixelCoord, 0));
+}
+
+float4 LoadPyramidPixel(uint2 pixelCoord)
+{
+    uint width;
+    uint height;
+    _InputPyramidTexture.GetDimensions(width, height);
+
+    pixelCoord = min(pixelCoord, uint2(max(width, 1u) - 1u, max(height, 1u) - 1u));
+    return _InputPyramidTexture[pixelCoord];
+}
+
+[numthreads(8, 8, 1)]
+void CopyMip0(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    if (IsOutside(pixelCoord))
+        return;
+
+    _OutputPyramidTexture[pixelCoord] = LoadInputPixel(pixelCoord);
+}
+
+[numthreads(8, 8, 1)]
+void DownsampleMip(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    if (IsOutside(pixelCoord))
+        return;
+
+    uint2 sourceCoord = pixelCoord << 1;
+    float4 color =
+        LoadPyramidPixel(sourceCoord) +
+        LoadPyramidPixel(sourceCoord + uint2(1, 0)) +
+        LoadPyramidPixel(sourceCoord + uint2(0, 1)) +
+        LoadPyramidPixel(sourceCoord + uint2(1, 1));
+
+    _OutputPyramidTexture[pixelCoord] = color * 0.25;
+}

@@ -1,26 +1,11 @@
 using System.IO;
 using NUnit.Framework;
 using UnityEngine;
-using System.Reflection;
-using VividRP.Runtime;
-using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
 
 namespace VividRP.Editor.Tests
 {
     public class PhysicallyBasedSkyHdrpPortTests
     {
-        [TestCase(nameof(VividRPCoreResources.GroundIrradiancePrecomputationCompute), "Shaders/Core/Private/Sky/GroundIrradiancePrecomputation.compute")]
-        [TestCase(nameof(VividRPCoreResources.InScatteredRadiancePrecomputationCompute), "Shaders/Core/Private/Sky/InScatteredRadiancePrecomputation.compute")]
-        public void VividRPCoreResources_DeclaresLocalSkyPrecomputationShaders(string fieldName, string expectedPath)
-        {
-            var field = typeof(VividRPCoreResources).GetField(fieldName, BindingFlags.Instance | BindingFlags.Public);
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo(expectedPath));
-        }
-
         [Test]
         public void PhysicallyBasedSkyEntryShader_UsesHdrpStyleSplitIncludes()
         {

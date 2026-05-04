@@ -1,0 +1,363 @@
+#pragma use_dxc
+#pragma kernel ScreenSpaceReflection
+#pragma kernel CopyScreenSpaceReflection
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
+
+#define SSR_TRACE_EPS 1e-3
+
+Texture2D<float4> _InputColorTexture;
+RWTexture2D<float4> _OutputColorTexture;
+Texture2D<float> _DepthTexture;
+Texture2D<float> _HZBTexture;
+StructuredBuffer<int2> _DepthPyramidMipLevelOffsets;
+Texture2D<float4> _GBuffer0;
+Texture2D<float4> _GBuffer1;
+Texture2D<float4> _GBuffer2;
+Texture2D<float4> _PreviousColorPyramidTexture;
+
+CBUFFER_START(ShaderVariablesScreenSpaceReflection)
+    float4 _SsrTraceScreenSize;
+    float _SsrThicknessScale;
+    float _SsrThicknessBias;
+    int _SsrIterLimit;
+    int _SsrDepthPyramidMaxMip;
+    float _SsrRoughnessFadeEnd;
+    float _SsrRoughnessFadeRcpLength;
+    float _SsrRoughnessFadeEndTimesRcpLength;
+    float _SsrEdgeFadeRcpLength;
+    float _SsrIntensity;
+    int _SsrReflectsSky;
+    float2 _SsrPadding0;
+    float4 _SsrHistoryColorPyramidSize;
+    int _SsrUseHistoryColorPyramid;
+    int _SsrHistoryColorPyramidMaxMip;
+    float2 _SsrPadding1;
+CBUFFER_END
+
+float Min3Value(float x, float y, float z)
+{
+    return min(min(x, y), z);
+}
+
+bool IsOutsideScreen(uint2 pixelCoord)
+{
+    return pixelCoord.x >= (uint)_SsrTraceScreenSize.x || pixelCoord.y >= (uint)_SsrTraceScreenSize.y;
+}
+
+int2 ClampPixelCoord(int2 pixelCoord)
+{
+    int2 maxCoord = int2((int)_SsrTraceScreenSize.x - 1, (int)_SsrTraceScreenSize.y - 1);
+    return clamp(pixelCoord, int2(0, 0), maxCoord);
+}
+
+float3 LoadInputColor(int2 pixelCoord)
+{
+    return max(_InputColorTexture.Load(int3(ClampPixelCoord(pixelCoord), 0)).rgb, 0.0);
+}
+
+float3 SampleInputColorBilinear(float2 screenUV)
+{
+    float2 pixelCoord = screenUV * _SsrTraceScreenSize.xy - 0.5;
+    int2 baseCoord = (int2)floor(pixelCoord);
+    float2 factor = frac(pixelCoord);
+
+    float3 c00 = LoadInputColor(baseCoord);
+    float3 c10 = LoadInputColor(baseCoord + int2(1, 0));
+    float3 c01 = LoadInputColor(baseCoord + int2(0, 1));
+    float3 c11 = LoadInputColor(baseCoord + int2(1, 1));
+
+    float3 cx0 = lerp(c00, c10, factor.x);
+    float3 cx1 = lerp(c01, c11, factor.x);
+    return lerp(cx0, cx1, factor.y);
+}
+
+float3 LoadHistoryPyramidColor(int2 pixelCoord, int mipLevel)
+{
+    uint width;
+    uint height;
+    uint mipCount;
+    _PreviousColorPyramidTexture.GetDimensions((uint)mipLevel, width, height, mipCount);
+
+    int2 maxCoord = int2(max((int)width - 1, 0), max((int)height - 1, 0));
+    pixelCoord = clamp(pixelCoord, int2(0, 0), maxCoord);
+    return max(_PreviousColorPyramidTexture.Load(int3(pixelCoord, mipLevel)).rgb, 0.0);
+}
+
+float3 SampleHistoryPyramidBilinear(float2 screenUV, int mipLevel)
+{
+    uint width;
+    uint height;
+    uint mipCount;
+    _PreviousColorPyramidTexture.GetDimensions((uint)mipLevel, width, height, mipCount);
+
+    float2 mipSize = float2((float)max(width, 1u), (float)max(height, 1u));
+    float2 pixelCoord = screenUV * mipSize - 0.5;
+    int2 baseCoord = (int2)floor(pixelCoord);
+    float2 factor = frac(pixelCoord);
+
+    float3 c00 = LoadHistoryPyramidColor(baseCoord, mipLevel);
+    float3 c10 = LoadHistoryPyramidColor(baseCoord + int2(1, 0), mipLevel);
+    float3 c01 = LoadHistoryPyramidColor(baseCoord + int2(0, 1), mipLevel);
+    float3 c11 = LoadHistoryPyramidColor(baseCoord + int2(1, 1), mipLevel);
+
+    float3 cx0 = lerp(c00, c10, factor.x);
+    float3 cx1 = lerp(c01, c11, factor.x);
+    return lerp(cx0, cx1, factor.y);
+}
+
+float3 SampleReflectionColor(float2 screenUV, float perceptualRoughness)
+{
+    if (_SsrUseHistoryColorPyramid == 0)
+        return SampleInputColorBilinear(screenUV);
+
+    uint width;
+    uint height;
+    uint mipCount;
+    _PreviousColorPyramidTexture.GetDimensions((uint)0, width, height, mipCount);
+
+    int maxMip = min(max((int)mipCount - 1, 0), _SsrHistoryColorPyramidMaxMip);
+    float lod = saturate(perceptualRoughness) * (float)maxMip;
+    int mip0 = (int)floor(lod);
+    int mip1 = min(mip0 + 1, maxMip);
+    float factor = frac(lod);
+
+    float3 color0 = SampleHistoryPyramidBilinear(screenUV, mip0);
+    float3 color1 = SampleHistoryPyramidBilinear(screenUV, mip1);
+    return lerp(color0, color1, factor);
+}
+
+float LoadHZBDepth(int2 mipCoord, int mipLevel)
+{
+    mipLevel = clamp(mipLevel, 0, _SsrDepthPyramidMaxMip);
+
+    int mipDivisor = 1 << mipLevel;
+    int2 mipSize = max(
+        int2(1, 1),
+        (int2(_SsrTraceScreenSize.xy) + int2(mipDivisor - 1, mipDivisor - 1)) / mipDivisor);
+    mipCoord = clamp(mipCoord, int2(0, 0), mipSize - int2(1, 1));
+
+    uint width;
+    uint height;
+    _HZBTexture.GetDimensions(width, height);
+
+    int2 atlasCoord = _DepthPyramidMipLevelOffsets[mipLevel] + mipCoord;
+    int2 maxAtlasCoord = int2(max((int)width - 1, 0), max((int)height - 1, 0));
+    atlasCoord = clamp(atlasCoord, int2(0, 0), maxAtlasCoord);
+    return _HZBTexture.Load(int3(atlasCoord, 0));
+}
+
+float PerceptualRoughnessFade(float perceptualRoughness)
+{
+    float t = saturate(_SsrRoughnessFadeEndTimesRcpLength - perceptualRoughness * _SsrRoughnessFadeRcpLength);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+float EdgeOfScreenFade(float2 screenUV)
+{
+    float2 edgeDistance = min(screenUV, 1.0 - screenUV);
+    float fade = saturate(min(edgeDistance.x, edgeDistance.y) * _SsrEdgeFadeRcpLength);
+    return fade * fade * (3.0 - 2.0 * fade);
+}
+
+float3 FresnelSchlick(float3 f0, float cosTheta)
+{
+    float f = pow(1.0 - saturate(cosTheta), 5.0);
+    return f0 + (1.0 - f0) * f;
+}
+
+bool TraceScreenSpaceReflection(
+    uint2 coordSS,
+    float2 screenUV,
+    float deviceDepth,
+    float3 normalWS,
+    float3 viewDirWS,
+    out int2 hitCoordSS,
+    out float hitDeviceDepth)
+{
+    hitCoordSS = int2(0, 0);
+    hitDeviceDepth = deviceDepth;
+
+    float3 positionWS = ComputeWorldSpacePosition(screenUV, deviceDepth, UNITY_MATRIX_I_VP);
+    float3 reflectionDirWS = reflect(-viewDirWS, normalWS);
+
+    float3 cameraPositionWS = _WorldSpaceCameraPos;
+    positionWS = cameraPositionWS + (positionWS - cameraPositionWS) * (1.0 - 0.001 * rcp(max(dot(normalWS, viewDirWS), 1e-6)));
+    deviceDepth = ComputeNormalizedDeviceCoordinatesWithZ(positionWS, UNITY_MATRIX_VP).z;
+
+    float3 rayOrigin = float3((float2)coordSS + 0.5, deviceDepth);
+    float3 reflPosWS = positionWS + reflectionDirWS;
+    float3 reflPosNDC = ComputeNormalizedDeviceCoordinatesWithZ(reflPosWS, UNITY_MATRIX_VP);
+    float3 reflPosSS = float3(reflPosNDC.xy * _SsrTraceScreenSize.xy, reflPosNDC.z);
+    float3 rayDir = reflPosSS - rayOrigin;
+
+    float3 raySignFloat = float3(
+        rayDir.x >= 0.0 ? 1.0 : -1.0,
+        rayDir.y >= 0.0 ? 1.0 : -1.0,
+        rayDir.z >= 0.0 ? 1.0 : -1.0);
+    float3 rcpRayDir = raySignFloat / max(abs(rayDir), SSR_TRACE_EPS);
+    int2 rayStep = int2(rcpRayDir.x >= 0.0 ? 1 : 0, rcpRayDir.y >= 0.0 ? 1 : 0);
+    float3 raySign = float3(rcpRayDir.x >= 0.0 ? 1.0 : -1.0,
+                            rcpRayDir.y >= 0.0 ? 1.0 : -1.0,
+                            rcpRayDir.z >= 0.0 ? 1.0 : -1.0);
+    bool rayTowardsEye = rcpRayDir.z >= 0.0;
+
+    bool killRay = deviceDepth == UNITY_RAW_FAR_CLIP_VALUE;
+    killRay = killRay || (reflPosSS.z <= 0.0);
+    killRay = killRay || (dot(normalWS, viewDirWS) <= 0.0);
+    killRay = killRay || rayTowardsEye;
+    if (killRay)
+        return false;
+
+    float tMax;
+    {
+        const float halfTexel = 0.5;
+
+        float3 bounds;
+        bounds.x = (rcpRayDir.x >= 0.0) ? _SsrTraceScreenSize.x - halfTexel : halfTexel;
+        bounds.y = (rcpRayDir.y >= 0.0) ? _SsrTraceScreenSize.y - halfTexel : halfTexel;
+        float maxDepth = (_SsrReflectsSky != 0) ? -0.00000024 : 0.00000024;
+        bounds.z = (rcpRayDir.z >= 0.0) ? 1.0 : maxDepth;
+
+        float3 dist = bounds * rcpRayDir - (rayOrigin * rcpRayDir);
+        tMax = Min3Value(dist.x, dist.y, dist.z);
+    }
+
+    int maxMipLevel = min(_SsrDepthPyramidMaxMip, 14);
+
+    float2 startDistance = abs(0.5 * rcpRayDir.xy);
+    float t = min(startDistance.x, startDistance.y);
+
+    float3 rayPos = rayOrigin;
+    int mipLevel = 0;
+    int iterCount = 0;
+    bool hit = false;
+    bool miss = false;
+    bool belowMip0 = false;
+
+    while (!(hit || miss) && (t <= tMax) && (iterCount < _SsrIterLimit))
+    {
+        rayPos = rayOrigin + t * rayDir;
+
+        float2 sgnEdgeDist = round(rayPos.xy) - rayPos.xy;
+        float2 satEdgeDist = clamp(raySign.xy * sgnEdgeDist + SSR_TRACE_EPS, 0.0, SSR_TRACE_EPS);
+        rayPos.xy += raySign.xy * satEdgeDist;
+
+        int2 mipCoord = (int2)rayPos.xy >> mipLevel;
+
+        float4 bounds;
+        bounds.xy = (float2)((mipCoord + rayStep) << mipLevel);
+        bounds.z = LoadHZBDepth(mipCoord, mipLevel);
+        bounds.w = bounds.z * _SsrThicknessScale + _SsrThicknessBias;
+
+        float4 dist = bounds * rcpRayDir.xyzz - (rayOrigin.xyzz * rcpRayDir.xyzz);
+        float distWall = min(dist.x, dist.y);
+        float distFloor = dist.z;
+
+        bool belowFloor = rayPos.z < bounds.z;
+        bool aboveBase = rayPos.z >= bounds.w;
+        bool insideFloor = belowFloor && aboveBase;
+        bool hitFloor = (t <= distFloor) && (distFloor <= distWall);
+
+        miss = belowMip0;
+        hit = (mipLevel == 0) && (hitFloor || insideFloor);
+        belowMip0 = (mipLevel == 0) && belowFloor;
+
+        t = hitFloor ? distFloor : (((mipLevel != 0) && belowFloor) ? t : distWall);
+        rayPos.z = bounds.z;
+
+        mipLevel += (hitFloor || belowFloor || rayTowardsEye) ? -1 : 1;
+        mipLevel = clamp(mipLevel, 0, maxMipLevel);
+
+        iterCount++;
+    }
+
+    miss = miss || ((_SsrReflectsSky == 0) && (rayPos.z == UNITY_RAW_FAR_CLIP_VALUE));
+    hit = hit && !miss;
+
+    if (!hit)
+        return false;
+
+    hitCoordSS = ClampPixelCoord((int2)floor(rayPos.xy));
+    hitDeviceDepth = rayPos.z;
+    return true;
+}
+
+[numthreads(8, 8, 1)]
+void CopyScreenSpaceReflection(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coordSS = dispatchThreadId.xy;
+    if (IsOutsideScreen(coordSS))
+        return;
+
+    _OutputColorTexture[coordSS] = _InputColorTexture.Load(int3(coordSS, 0));
+}
+
+[numthreads(8, 8, 1)]
+void ScreenSpaceReflection(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coordSS = dispatchThreadId.xy;
+    if (IsOutsideScreen(coordSS))
+        return;
+
+    float4 sourceColor = _InputColorTexture.Load(int3(coordSS, 0));
+    float deviceDepth = _DepthTexture.Load(int3(coordSS, 0));
+    if (deviceDepth == UNITY_RAW_FAR_CLIP_VALUE)
+    {
+        _OutputColorTexture[coordSS] = sourceColor;
+        return;
+    }
+
+    float4 gbuffer0 = _GBuffer0.Load(int3(coordSS, 0));
+    float4 gbuffer1 = _GBuffer1.Load(int3(coordSS, 0));
+    float4 gbuffer2 = _GBuffer2.Load(int3(coordSS, 0));
+
+    float3 baseColor = saturate(gbuffer0.rgb);
+    float3 normalWS = normalize(DecodeVividNormalOct(gbuffer1.xy));
+    float perceptualRoughness = GetPerceptualRoughnessFromLinearRoughness(gbuffer1.z);
+    float metallic = saturate(gbuffer2.r);
+
+    if (perceptualRoughness >= _SsrRoughnessFadeEnd)
+    {
+        _OutputColorTexture[coordSS] = sourceColor;
+        return;
+    }
+
+    float roughnessFade = PerceptualRoughnessFade(perceptualRoughness);
+    if (roughnessFade <= 0.0001)
+    {
+        _OutputColorTexture[coordSS] = sourceColor;
+        return;
+    }
+
+    float2 screenUV = ((float2)coordSS + 0.5) * _SsrTraceScreenSize.zw;
+    float3 positionWS = ComputeWorldSpacePosition(screenUV, deviceDepth, UNITY_MATRIX_I_VP);
+    float3 viewDirWS = GetWorldSpaceNormalizeViewDir(positionWS);
+
+    int2 hitCoordSS;
+    float hitDeviceDepth;
+    bool hit = TraceScreenSpaceReflection(
+        coordSS,
+        screenUV,
+        deviceDepth,
+        normalWS,
+        viewDirWS,
+        hitCoordSS,
+        hitDeviceDepth);
+
+    if (!hit)
+    {
+        _OutputColorTexture[coordSS] = sourceColor;
+        return;
+    }
+
+    float2 hitScreenUV = ((float2)hitCoordSS + 0.5) * _SsrTraceScreenSize.zw;
+    float edgeFade = EdgeOfScreenFade(hitScreenUV);
+    float3 reflectedColor = SampleReflectionColor(hitScreenUV, perceptualRoughness);
+    float3 f0 = lerp(float3(0.04, 0.04, 0.04), baseColor, metallic);
+    float3 fresnel = FresnelSchlick(f0, dot(normalWS, viewDirWS));
+    float contribution = saturate(edgeFade * roughnessFade * _SsrIntensity);
+
+    float3 color = sourceColor.rgb + reflectedColor * fresnel * contribution;
+    _OutputColorTexture[coordSS] = float4(color, sourceColor.a);
+}

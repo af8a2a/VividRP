@@ -8,7 +8,6 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
-using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
 
 namespace VividRP.Editor.Tests
 {
@@ -27,19 +26,6 @@ namespace VividRP.Editor.Tests
             Assert.That(textureEntries.Single(entry => entry.Name == "Depth").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(textureEntries.Single(entry => entry.Name == "DirectionalShadowTexture").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(textureEntries.Single(entry => entry.Name == "SkyViewLUT").Access, Is.EqualTo(AccessFlags.Read));
-        }
-
-        [Test]
-        public void VividRPCoreResources_DeclaresPhysicallyBasedSkyShader()
-        {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.PhysicallyBasedSkyShader));
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/PhysicallyBasedSky"));
         }
 
         [Test]

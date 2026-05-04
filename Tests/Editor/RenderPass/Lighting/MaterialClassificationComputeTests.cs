@@ -1,8 +1,6 @@
 using System.IO;
-using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
-using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
 {
@@ -47,19 +45,6 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Not.Contain("StructuredBuffer<PunctualLightCullData> _PunctualLightCullData;"));
             Assert.That(source, Does.Not.Contain("BuildClusteredLightList"));
             Assert.That(source, Does.Not.Contain("SpotConeIntersectsCluster"));
-        }
-
-        [Test]
-        public void VividRPCoreResources_DeclaresMaterialClassificationCompute()
-        {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.MaterialClassificationCompute));
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Material/MaterialClassification"));
         }
 
         private static string GetComputeShaderSourcePath()

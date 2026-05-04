@@ -8,7 +8,6 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
-using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
 
 namespace VividRP.Editor.Tests
 {
@@ -87,19 +86,6 @@ namespace VividRP.Editor.Tests
         public void AtmosphericScatteringPass_InheritsFromUnsafePass()
         {
             Assert.That(typeof(UnsafePass).IsAssignableFrom(typeof(AtmosphericScatteringPass)), Is.True);
-        }
-
-        [Test]
-        public void VividRPCoreResources_DeclaresAerialPerspectiveShader()
-        {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.AerialPerspectiveShader));
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/AtmosphericScattering/OpaqueAtmosphericScattering"));
         }
 
         [Test]

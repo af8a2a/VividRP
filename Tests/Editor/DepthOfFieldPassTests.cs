@@ -8,7 +8,6 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
-using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
 
 namespace VividRP.Editor.Tests
 {
@@ -228,24 +227,6 @@ namespace VividRP.Editor.Tests
             {
                 GameObject.DestroyImmediate(gameObject);
             }
-        }
-
-        [Test]
-        public void VividRPCoreResources_DeclaresDepthOfFieldShader_AndCompute()
-        {
-            var shaderField = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.DepthOfFieldShader));
-            var computeField = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.DepthOfFieldCompute));
-
-            Assert.That(shaderField, Is.Not.Null);
-            Assert.That(computeField, Is.Not.Null);
-
-            var shaderResourcePath = shaderField.GetCustomAttribute<ResourcePathAttribute>();
-            var computeResourcePath = computeField.GetCustomAttribute<ResourcePathAttribute>();
-
-            Assert.That(shaderResourcePath, Is.Not.Null);
-            Assert.That(shaderResourcePath.Path, Is.EqualTo("Shaders/Core/Private/DepthOfField"));
-            Assert.That(computeResourcePath, Is.Not.Null);
-            Assert.That(computeResourcePath.Path, Is.EqualTo("Shaders/Core/Private/DepthOfField.compute"));
         }
 
         [Test]

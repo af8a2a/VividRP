@@ -1,8 +1,6 @@
 using System.IO;
-using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
-using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
 {
@@ -70,32 +68,6 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("uint punctualLightCount = VividLightingLoop::GetPunctualLightCount(lightLoop);"));
             Assert.That(source, Does.Contain("uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);"));
             Assert.That(source, Does.Not.Contain("_LightingTexture[dispatchThreadId.xy] = float4(0.0, 0.0, 0.0, 1.0);"));
-        }
-
-        [Test]
-        public void VividRPCoreResources_DeclaresDeferredLitCompute()
-        {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.DeferredLitCompute));
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Material/DeferredLit"));
-        }
-
-        [Test]
-        public void VividRPCoreResources_DeclaresGTAOCompute()
-        {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.GTAOCompute));
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/GTAO/GTAO.compute"));
         }
 
         private static string GetComputeShaderSourcePath()

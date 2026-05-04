@@ -286,7 +286,7 @@ namespace VividRP.Runtime
             return handle;
         }
 
-        private static BufferHandle GetOrCreateBufferHandle(
+        internal static BufferHandle GetOrCreateBufferHandle(
             RenderGraph renderGraph,
             RenderGraphBuffer buffer,
             Dictionary<RenderGraphBuffer, BufferHandle> bufferCache)

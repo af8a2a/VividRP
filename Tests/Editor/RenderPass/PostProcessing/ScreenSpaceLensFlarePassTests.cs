@@ -9,7 +9,6 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
-using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
 
 namespace VividRP.Editor.Tests
 {
@@ -85,17 +84,6 @@ namespace VividRP.Editor.Tests
             Assert.That(mipEntry.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(attr, Is.Not.Null);
             Assert.That(attr.BindingMode, Is.EqualTo(RenderGraphResourceBindingMode.PassOwnedOverrideable));
-        }
-
-        [Test]
-        public void VividRPCoreResources_DeclaresScreenSpaceLensFlareShader()
-        {
-            var shaderField = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.LensFlareScreenSpaceShader));
-
-            Assert.That(shaderField, Is.Not.Null);
-            Assert.That(
-                shaderField.GetCustomAttribute<ResourcePathAttribute>()?.Path,
-                Is.EqualTo("Shaders/Core/Private/PostProcessing/LensFlare/LensFlareScreenSpace"));
         }
 
         [Test]

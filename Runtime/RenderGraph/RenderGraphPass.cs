@@ -391,6 +391,14 @@ namespace VividRP.Runtime
             return PassRecorder.GetOrCreateTextureHandle(RenderGraph, texture, TextureCache);
         }
 
+        internal BufferHandle GetOrCreateBufferHandle(RenderGraphBuffer buffer)
+        {
+            if (RenderGraph == null || buffer == null)
+                return default;
+
+            return PassRecorder.GetOrCreateBufferHandle(RenderGraph, buffer, BufferCache);
+        }
+
         internal void RegisterTextureHandle(RenderGraphTexture texture, TextureHandle handle)
         {
             if (texture == null || !handle.IsValid())

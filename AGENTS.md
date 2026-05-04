@@ -66,6 +66,9 @@
 - Add focused EditMode tests with each fix or feature, especially around pass-port generation, descriptor drawers, preview metadata, registry generation, reflection-based pass/resource behavior, render-list/history resources, and custom editor utilities.
 - If a change introduces runtime-only behavior that cannot be validated meaningfully in current EditMode tests, add the appropriate `Tests/Runtime/` or PlayMode coverage in the same change.
 - Prefer self-contained tests that use dummy pass types or temporary ScriptableObjects over manual project setup.
+- Do not add or keep tests that only inspect implementation text, such as `File.ReadAllText(...)` with `Assert.That(source, Does.Contain(...))`, when the behavior can be validated through runtime/editor APIs.
+- Do not add or keep tests that only validate `[ResourcePath]` declarations or expected path strings, including `VividRPCoreResources_Declares*` reflection tests. Prefer resource recollection, pass initialization, or runtime binding coverage when the resource path matters.
+- For GPU-driven culling/debug counters, keep CPU mirror validation and GPU shader counting semantics in sync. If CPU/GPU counts diverge, fix the shared decision rules or counter increments rather than suppressing the mismatch.
 
 ## Commit & Pull Request Guidelines
 - Recent history is mixed, so prefer short imperative commit titles. Use scoped Conventional Commit prefixes such as `feat:`, `fix:`, `test:`, or `refactor:` when practical.

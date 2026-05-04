@@ -185,6 +185,12 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Material/DeferredLit")]
         public ComputeShader DeferredLitCompute;
 
+        [ResourcePath("Shaders/Core/Private/ColorPyramid/ColorPyramid.compute")]
+        public ComputeShader ColorPyramidCompute;
+
+        [ResourcePath("Shaders/Core/Private/ScreenSpaceReflection/ScreenSpaceReflection.compute")]
+        public ComputeShader ScreenSpaceReflectionCompute;
+
         [ResourcePath("Shaders/Core/Private/GTAO/GTAO.compute")]
         public ComputeShader GTAOCompute;
 
@@ -218,6 +224,9 @@ namespace VividRP.Runtime
 
         [ResourcePath("Shaders/Core/Private/DownSample/HZBGenerate")]
         public ComputeShader HZBGenerateCompute;
+
+        [ResourcePath("Shaders/Core/Private/DownSample/HDRPHZB.compute")]
+        public ComputeShader HDRPHZBCompute;
 
         [ResourcePath("Shaders/Core/Private/TemporalAA")]
         public ComputeShader TemporalAACompute;

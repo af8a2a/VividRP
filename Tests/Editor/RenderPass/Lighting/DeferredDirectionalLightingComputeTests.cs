@@ -20,6 +20,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("_DepthTexture"));
             Assert.That(source, Does.Contain("_DirectionalShadowTexture"));
             Assert.That(source, Does.Contain("_GTAOTexture"));
+            Assert.That(source, Does.Contain("_ScreenSpaceReflectionTexture"));
+            Assert.That(source, Does.Contain("_ScreenSpaceReflectionEnabled"));
             Assert.That(source, Does.Contain("_MaterialPixelIndices"));
             Assert.That(source, Does.Not.Contain("_MaterialDispatchArgs"));
             Assert.That(source, Does.Contain("_LightingTexture"));
@@ -58,6 +60,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("return CombineVividLightLoopOutput(lightLoopOutput);"));
             Assert.That(source, Does.Contain("ComputeWorldSpacePosition"));
             Assert.That(source, Does.Contain("surfaceData.ambientOcclusion *= saturate(SampleGTAO(pixelCoord));"));
+            Assert.That(source, Does.Contain("float3 screenSpaceReflection = LoadScreenSpaceReflection(pixelCoord);"));
+            Assert.That(source, Does.Contain("return max(reflection.rgb, 0.0) * saturate(reflection.a);"));
+            Assert.That(source, Does.Contain("currentLighting.rgb + lighting + screenSpaceReflection"));
             Assert.That(source, Does.Not.Contain("tileCount ="));
             Assert.That(source, Does.Contain("uint tileListIndex = groupId.x;"));
             Assert.That(source, Does.Contain("UnpackTileCoord"));

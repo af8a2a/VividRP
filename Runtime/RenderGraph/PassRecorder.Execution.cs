@@ -126,6 +126,7 @@ namespace VividRP.Runtime
         {
             ColorGradingSettingsResolver.ClearFrameCache(s_FrameData);
             VividColorPyramidRuntimeUtility.ClearFrameCache(s_FrameData);
+            VividScreenSpaceReflectionRuntimeUtility.ClearFrameCache(s_FrameData);
 
             var renderingData = s_FrameData.GetOrCreate<VividRenderingData>();
             var cameraData = s_FrameData.GetOrCreate<VividCameraData>();

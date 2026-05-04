@@ -1,13 +1,30 @@
 #pragma use_dxc
-#pragma kernel ScreenSpaceReflection
+#define UNITY_HW_SUPPORTS_WAVE
+#pragma kernel ScreenSpaceReflectionsClassifyTiles
+#pragma kernel ScreenSpaceReflectionsTracing
+#pragma kernel ScreenSpaceReflectionsResolve
+#pragma kernel ScreenSpaceReflectionsAccumulate
 #pragma kernel CopyScreenSpaceReflection
-
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 
 #define SSR_TRACE_EPS 1e-3
+#define SSR_THREAD_GROUP_SIZE 8u
+#define SSR_THREAD_COUNT 64
+#define SSR_TILE_COORD_MASK 0xffffu
 
-Texture2D<float4> _InputColorTexture;
+
+#if !defined(UNITY_HW_SUPPORTS_WAVE)
+    #error "ScreenSpaceReflectionsClassifyTiles requires DXC (#pragma use_dxc) for wave intrinsics."
+#endif
+
 RWTexture2D<float4> _OutputColorTexture;
+RWTexture2D<float4> _SSRTraceTexture;
+RWTexture2D<float4> _SSRResolveTexture;
+RWStructuredBuffer<uint> _SSRDispatchIndirectArgs;
+RWStructuredBuffer<uint> _SSRTileList;
 Texture2D<float> _DepthTexture;
 Texture2D<float> _HZBTexture;
 StructuredBuffer<int2> _DepthPyramidMipLevelOffsets;
@@ -15,6 +32,10 @@ Texture2D<float4> _GBuffer0;
 Texture2D<float4> _GBuffer1;
 Texture2D<float4> _GBuffer2;
 Texture2D<float4> _PreviousColorPyramidTexture;
+TEXTURECUBE(_SkyTexture);
+SAMPLER(sampler_SkyTexture);
+float4 _SkyTextureTint;
+float4 _SkyTextureParams;
 
 CBUFFER_START(ShaderVariablesScreenSpaceReflection)
     float4 _SsrTraceScreenSize;
@@ -27,13 +48,29 @@ CBUFFER_START(ShaderVariablesScreenSpaceReflection)
     float _SsrRoughnessFadeEndTimesRcpLength;
     float _SsrEdgeFadeRcpLength;
     float _SsrIntensity;
+    float _SsrIntensityClamp;
     int _SsrReflectsSky;
-    float2 _SsrPadding0;
+    float _SsrPadding0;
     float4 _SsrHistoryColorPyramidSize;
     int _SsrUseHistoryColorPyramid;
     int _SsrHistoryColorPyramidMaxMip;
     float2 _SsrPadding1;
 CBUFFER_END
+
+uint EncodeSSRTileIndex(uint2 tileCoord)
+{
+    return (tileCoord.x & SSR_TILE_COORD_MASK) | ((tileCoord.y & SSR_TILE_COORD_MASK) << 16);
+}
+
+uint2 DecodeSSRTileIndex(uint encodedTile)
+{
+    return uint2(encodedTile & SSR_TILE_COORD_MASK, (encodedTile >> 16) & SSR_TILE_COORD_MASK);
+}
+
+uint2 GetTilePixelCoord(uint groupIndex, uint2 groupThreadId)
+{
+    return DecodeSSRTileIndex(_SSRTileList[groupIndex]) * SSR_THREAD_GROUP_SIZE + groupThreadId;
+}
 
 float Min3Value(float x, float y, float z)
 {
@@ -49,27 +86,6 @@ int2 ClampPixelCoord(int2 pixelCoord)
 {
     int2 maxCoord = int2((int)_SsrTraceScreenSize.x - 1, (int)_SsrTraceScreenSize.y - 1);
     return clamp(pixelCoord, int2(0, 0), maxCoord);
-}
-
-float3 LoadInputColor(int2 pixelCoord)
-{
-    return max(_InputColorTexture.Load(int3(ClampPixelCoord(pixelCoord), 0)).rgb, 0.0);
-}
-
-float3 SampleInputColorBilinear(float2 screenUV)
-{
-    float2 pixelCoord = screenUV * _SsrTraceScreenSize.xy - 0.5;
-    int2 baseCoord = (int2)floor(pixelCoord);
-    float2 factor = frac(pixelCoord);
-
-    float3 c00 = LoadInputColor(baseCoord);
-    float3 c10 = LoadInputColor(baseCoord + int2(1, 0));
-    float3 c01 = LoadInputColor(baseCoord + int2(0, 1));
-    float3 c11 = LoadInputColor(baseCoord + int2(1, 1));
-
-    float3 cx0 = lerp(c00, c10, factor.x);
-    float3 cx1 = lerp(c01, c11, factor.x);
-    return lerp(cx0, cx1, factor.y);
 }
 
 float3 LoadHistoryPyramidColor(int2 pixelCoord, int mipLevel)
@@ -109,7 +125,7 @@ float3 SampleHistoryPyramidBilinear(float2 screenUV, int mipLevel)
 float3 SampleReflectionColor(float2 screenUV, float perceptualRoughness)
 {
     if (_SsrUseHistoryColorPyramid == 0)
-        return SampleInputColorBilinear(screenUV);
+        return 0.0;
 
     uint width;
     uint height;
@@ -153,6 +169,32 @@ float PerceptualRoughnessFade(float perceptualRoughness)
     return t * t * (3.0 - 2.0 * t);
 }
 
+float3 LoadNormalWS(uint2 coordSS)
+{
+    return normalize(DecodeVividNormalOct(_GBuffer1.Load(int3(coordSS, 0)).xy));
+}
+
+float LoadPerceptualRoughness(uint2 coordSS)
+{
+    return GetPerceptualRoughnessFromLinearRoughness(_GBuffer1.Load(int3(coordSS, 0)).z);
+}
+
+bool ShouldTracePixel(uint2 coordSS)
+{
+    if (IsOutsideScreen(coordSS))
+        return false;
+
+    float deviceDepth = _DepthTexture.Load(int3(coordSS, 0));
+    if (deviceDepth == UNITY_RAW_FAR_CLIP_VALUE)
+        return false;
+
+    float perceptualRoughness = LoadPerceptualRoughness(coordSS);
+    if (perceptualRoughness >= _SsrRoughnessFadeEnd)
+        return false;
+
+    return PerceptualRoughnessFade(perceptualRoughness) > 0.0001;
+}
+
 float EdgeOfScreenFade(float2 screenUV)
 {
     float2 edgeDistance = min(screenUV, 1.0 - screenUV);
@@ -164,6 +206,57 @@ float3 FresnelSchlick(float3 f0, float cosTheta)
 {
     float f = pow(1.0 - saturate(cosTheta), 5.0);
     return f0 + (1.0 - f0) * f;
+}
+
+bool HasSsrSkyTexture()
+{
+    return _SkyTextureParams.w > 0.5;
+}
+
+float3 RotateSsrSkyDirectionAroundYAxis(float3 directionWS, float rotationDegrees)
+{
+    float rotationRadians = radians(rotationDegrees);
+    float s = 0.0;
+    float c = 1.0;
+    sincos(rotationRadians, s, c);
+
+    return float3(
+        c * directionWS.x - s * directionWS.z,
+        directionWS.y,
+        s * directionWS.x + c * directionWS.z);
+}
+
+float3 SampleSsrSkyFallback(float3 directionWS, float perceptualRoughness)
+{
+    if (_SsrReflectsSky == 0 || !HasSsrSkyTexture())
+        return 0.0;
+
+    float skyMipLevel = saturate(perceptualRoughness) * max(_SkyTextureParams.z, 0.0);
+    float3 rotatedDirectionWS = RotateSsrSkyDirectionAroundYAxis(directionWS, _SkyTextureParams.y);
+    float3 skyRadiance = SAMPLE_TEXTURECUBE_LOD(_SkyTexture, sampler_SkyTexture, rotatedDirectionWS, skyMipLevel).rgb;
+    float3 exposedSkyRadiance = VividApplyPreExposure(max(skyRadiance * _SkyTextureTint.rgb * _SkyTextureParams.x, 0.0));
+    float3 exposedSkyHsv = RgbToHsv(exposedSkyRadiance);
+    exposedSkyHsv.z = clamp(exposedSkyHsv.z, 0.0, _SsrIntensityClamp);
+    return ClampToFloat16Max(HsvToRgb(exposedSkyHsv));
+}
+
+float4 BuildSsrSkyFallback(
+    float3 normalWS,
+    float3 viewDirWS,
+    float3 baseColor,
+    float metallic,
+    float perceptualRoughness,
+    float roughnessFade)
+{
+    float3 reflectionDirWS = reflect(-viewDirWS, normalWS);
+    float3 reflectedColor = SampleSsrSkyFallback(reflectionDirWS, perceptualRoughness);
+    if (all(reflectedColor <= 0.0))
+        return float4(0.0, 0.0, 0.0, 0.0);
+
+    float3 f0 = lerp(float3(0.04, 0.04, 0.04), baseColor, metallic);
+    float3 fresnel = FresnelSchlick(f0, dot(normalWS, viewDirWS));
+    float contribution = saturate(roughnessFade * _SsrIntensity);
+    return float4(reflectedColor * fresnel, contribution);
 }
 
 bool TraceScreenSpaceReflection(
@@ -283,6 +376,51 @@ bool TraceScreenSpaceReflection(
     return true;
 }
 
+groupshared uint g_SSRClassifiedTileWaves[SSR_THREAD_COUNT];
+
+[numthreads(8, 8, 1)]
+void ScreenSpaceReflectionsClassifyTiles(
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint3 groupThreadId : SV_GroupThreadID,
+    uint3 groupId : SV_GroupID)
+{
+    uint2 coordSS = dispatchThreadId.xy;
+    bool shouldTracePixel = false;
+    if (!IsOutsideScreen(coordSS))
+    {
+        _SSRTraceTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
+        _SSRResolveTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
+        _OutputColorTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
+
+        shouldTracePixel = ShouldTracePixel(coordSS);
+    }
+
+    uint linearThreadIndex = groupThreadId.y * SSR_THREAD_GROUP_SIZE + groupThreadId.x;
+    uint waveSize = WaveGetLaneCount();
+    uint waveIndex = linearThreadIndex / waveSize;
+    uint wavesPerGroup = (SSR_THREAD_COUNT + waveSize - 1u) / waveSize;
+    bool waveHasTracePixel = WaveActiveAnyTrue(shouldTracePixel);
+
+    if (WaveIsFirstLane())
+        g_SSRClassifiedTileWaves[waveIndex] = waveHasTracePixel ? 1u : 0u;
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (linearThreadIndex == 0u)
+    {
+        bool tileHasTracePixel = false;
+        for (uint wave = 0u; wave < wavesPerGroup; wave++)
+            tileHasTracePixel = tileHasTracePixel || g_SSRClassifiedTileWaves[wave] != 0u;
+
+        if (tileHasTracePixel)
+        {
+            uint tileOffset;
+            InterlockedAdd(_SSRDispatchIndirectArgs[0], 1u, tileOffset);
+            _SSRTileList[tileOffset] = EncodeSSRTileIndex(groupId.xy);
+        }
+    }
+}
+
 [numthreads(8, 8, 1)]
 void CopyScreenSpaceReflection(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -290,21 +428,22 @@ void CopyScreenSpaceReflection(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (IsOutsideScreen(coordSS))
         return;
 
-    _OutputColorTexture[coordSS] = _InputColorTexture.Load(int3(coordSS, 0));
+    _OutputColorTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
 }
 
 [numthreads(8, 8, 1)]
-void ScreenSpaceReflection(uint3 dispatchThreadId : SV_DispatchThreadID)
+void ScreenSpaceReflectionsTracing(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
 {
-    uint2 coordSS = dispatchThreadId.xy;
+    uint2 coordSS = GetTilePixelCoord(groupId.x, groupThreadId.xy);
     if (IsOutsideScreen(coordSS))
         return;
 
-    float4 sourceColor = _InputColorTexture.Load(int3(coordSS, 0));
     float deviceDepth = _DepthTexture.Load(int3(coordSS, 0));
     if (deviceDepth == UNITY_RAW_FAR_CLIP_VALUE)
     {
-        _OutputColorTexture[coordSS] = sourceColor;
+        _SSRTraceTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
         return;
     }
 
@@ -319,14 +458,14 @@ void ScreenSpaceReflection(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     if (perceptualRoughness >= _SsrRoughnessFadeEnd)
     {
-        _OutputColorTexture[coordSS] = sourceColor;
+        _SSRTraceTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
         return;
     }
 
     float roughnessFade = PerceptualRoughnessFade(perceptualRoughness);
     if (roughnessFade <= 0.0001)
     {
-        _OutputColorTexture[coordSS] = sourceColor;
+        _SSRTraceTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
         return;
     }
 
@@ -347,7 +486,13 @@ void ScreenSpaceReflection(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     if (!hit)
     {
-        _OutputColorTexture[coordSS] = sourceColor;
+        _SSRTraceTexture[coordSS] = BuildSsrSkyFallback(
+            normalWS,
+            viewDirWS,
+            baseColor,
+            metallic,
+            perceptualRoughness,
+            roughnessFade);
         return;
     }
 
@@ -358,6 +503,70 @@ void ScreenSpaceReflection(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 fresnel = FresnelSchlick(f0, dot(normalWS, viewDirWS));
     float contribution = saturate(edgeFade * roughnessFade * _SsrIntensity);
 
-    float3 color = sourceColor.rgb + reflectedColor * fresnel * contribution;
-    _OutputColorTexture[coordSS] = float4(color, sourceColor.a);
+    _SSRTraceTexture[coordSS] = float4(reflectedColor * fresnel, contribution);
+}
+
+[numthreads(8, 8, 1)]
+void ScreenSpaceReflectionsResolve(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint2 coordSS = GetTilePixelCoord(groupId.x, groupThreadId.xy);
+    if (IsOutsideScreen(coordSS))
+        return;
+
+    float4 centerReflection = _SSRTraceTexture[coordSS];
+    if (centerReflection.a <= 0.0001)
+    {
+        _SSRResolveTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
+        return;
+    }
+
+    float centerDepth = _DepthTexture.Load(int3(coordSS, 0));
+    float3 centerNormalWS = LoadNormalWS(coordSS);
+    float3 colorSum = centerReflection.rgb * centerReflection.a;
+    float alphaSum = centerReflection.a * centerReflection.a;
+    float weightSum = centerReflection.a;
+
+    [unroll]
+    for (int y = -1; y <= 1; y++)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; x++)
+        {
+            if (x == 0 && y == 0)
+                continue;
+
+            int2 sampleCoord = ClampPixelCoord((int2)coordSS + int2(x, y));
+            float4 sampleReflection = _SSRTraceTexture[sampleCoord];
+            if (sampleReflection.a <= 0.0001)
+                continue;
+
+            float sampleDepth = _DepthTexture.Load(int3(sampleCoord, 0));
+            float3 sampleNormalWS = LoadNormalWS((uint2)sampleCoord);
+            float normalWeight = pow(saturate(dot(centerNormalWS, sampleNormalWS)), 32.0);
+            float depthWeight = saturate(1.0 - abs(centerDepth - sampleDepth) * 256.0);
+            depthWeight *= depthWeight;
+
+            float weight = normalWeight * depthWeight * sampleReflection.a;
+            colorSum += sampleReflection.rgb * weight;
+            alphaSum += sampleReflection.a * weight;
+            weightSum += weight;
+        }
+    }
+
+    float rcpWeightSum = rcp(max(weightSum, 0.0001));
+    _SSRResolveTexture[coordSS] = float4(colorSum * rcpWeightSum, saturate(alphaSum * rcpWeightSum));
+}
+
+[numthreads(8, 8, 1)]
+void ScreenSpaceReflectionsAccumulate(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint2 coordSS = GetTilePixelCoord(groupId.x, groupThreadId.xy);
+    if (IsOutsideScreen(coordSS))
+        return;
+
+    _OutputColorTexture[coordSS] = _SSRResolveTexture[coordSS];
 }

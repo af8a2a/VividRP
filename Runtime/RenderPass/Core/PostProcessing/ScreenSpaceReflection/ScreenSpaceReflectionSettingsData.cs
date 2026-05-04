@@ -10,6 +10,7 @@ namespace VividRP.Runtime
         public float minSmoothness;
         public float smoothnessFadeStart;
         public bool reflectSky;
+        public float clampValue;
         public float depthBufferThickness;
         public float screenFadeDistance;
         public int rayMaxIterations;
@@ -23,6 +24,7 @@ namespace VividRP.Runtime
                 minSmoothness = 0.9f,
                 smoothnessFadeStart = 0.9f,
                 reflectSky = true,
+                clampValue = 100.0f,
                 depthBufferThickness = 0.01f,
                 screenFadeDistance = 0.1f,
                 rayMaxIterations = 32
@@ -48,6 +50,7 @@ namespace VividRP.Runtime
             settings.minSmoothness = Mathf.Clamp01(ssr.minSmoothness.value);
             settings.smoothnessFadeStart = Mathf.Clamp01(Mathf.Max(ssr.smoothnessFadeStart.value, settings.minSmoothness));
             settings.reflectSky = ssr.reflectSky.value;
+            settings.clampValue = Mathf.Max(ssr.clampValue.value, 0.001f);
             settings.depthBufferThickness = Mathf.Clamp(ssr.depthBufferThickness.value, 0.0001f, 1.0f);
             settings.screenFadeDistance = Mathf.Clamp(ssr.screenFadeDistance.value, 0.0001f, 1.0f);
             settings.rayMaxIterations = Mathf.Clamp(ssr.rayMaxIterations.value, 1, 128);

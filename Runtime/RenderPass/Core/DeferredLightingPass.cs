@@ -5,7 +5,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public class DeferredLightingPass : ComputePass
+    public class DeferredLightingPass : ComputePass, IStablePassResourceLayout
     {
         private const int ClearThreadGroupSizeX = 8;
         private const int ClearThreadGroupSizeY = 8;
@@ -20,6 +20,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
         private static readonly int DirectionalShadowTextureId = Shader.PropertyToID("_DirectionalShadowTexture");
         private static readonly int GTAOTextureId = Shader.PropertyToID("_GTAOTexture");
+        private static readonly int ScreenSpaceReflectionTextureId = Shader.PropertyToID("_ScreenSpaceReflectionTexture");
+        private static readonly int ScreenSpaceReflectionEnabledId = Shader.PropertyToID("_ScreenSpaceReflectionEnabled");
         private static readonly int LightingTextureId = Shader.PropertyToID("_LightingTexture");
         private static readonly int LightingWidthId = Shader.PropertyToID("_LightingWidth");
         private static readonly int LightingHeightId = Shader.PropertyToID("_LightingHeight");
@@ -79,6 +81,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(Name = "GTAOTexture", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GTAOTexture;
+
+        [RenderGraphResource(
+            Name = "ScreenSpaceReflectionOutput",
+            Access = AccessFlags.Read)]
+        private RenderGraphTexture m_ScreenSpaceReflectionTexture;
 
         [RenderGraphResource(Name = "Color", Access = AccessFlags.Write, AttachmentIndex = 0)]
         private RenderGraphTexture m_ColorTexture;
@@ -171,9 +178,11 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_SupportsClusteredPunctualLights;
         private bool m_SupportsClusteredAreaLights;
         private bool m_IsLogBaseBufferEnabled;
+        private bool m_IsPassResourceLayoutDirty;
         private readonly RenderGraphTexture m_LocalGBuffer4;
         private readonly RenderGraphTexture m_LocalDirectionalShadowTexture;
         private readonly RenderGraphTexture m_LocalGTAOTexture;
+        private readonly RenderGraphTexture m_LocalScreenSpaceReflectionTexture;
         private readonly RenderGraphBuffer m_LocalDirectionalLightBuffer;
         private readonly RenderGraphBuffer m_LocalPunctualLightBuffer;
         private readonly RenderGraphBuffer m_LocalAreaLightBuffer;
@@ -182,9 +191,12 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphBuffer m_LocalLogBaseBuffer;
         private readonly RenderGraphTexture m_LocalPreIntegratedFGDGGXDisneyDiffuseTexture;
         private readonly RenderGraphTexture m_LocalPreIntegratedFGDCharlieAndFabricTexture;
+        private RenderGraphTexture m_FrameContextScreenSpaceReflectionTexture;
         private VividPreIntegratedFGDTextures m_FallbackPreIntegratedFGDTextures;
         private Color m_SkyTextureTint = Color.white;
         private Vector4 m_SkyTextureParams;
+
+        public bool IsPassResourceLayoutDirty => m_IsPassResourceLayoutDirty;
 
         public DeferredLightingPass()
             : this(nameof(DeferredLightingPass))
@@ -214,6 +226,14 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LocalGTAOTexture.desc.FilterMode = FilterMode.Point;
             m_LocalGTAOTexture.desc.WrapMode = TextureWrapMode.Clamp;
             m_GTAOTexture = m_LocalGTAOTexture;
+            m_LocalScreenSpaceReflectionTexture = RenderGraphTexture.CreateColorTarget(
+                "ScreenSpaceReflectionOutput",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            m_LocalScreenSpaceReflectionTexture.desc.ClearBuffer = true;
+            m_LocalScreenSpaceReflectionTexture.desc.ClearColor = Color.clear;
+            m_LocalScreenSpaceReflectionTexture.desc.FilterMode = FilterMode.Point;
+            m_LocalScreenSpaceReflectionTexture.desc.WrapMode = TextureWrapMode.Clamp;
+            m_ScreenSpaceReflectionTexture = m_LocalScreenSpaceReflectionTexture;
             m_ColorTexture = RenderGraphTexture.CreateOutput("Color", GraphicsFormat.R16G16B16A16_SFloat);
             m_ColorTexture.desc.EnableRandomWrite = true;
             m_ColorTexture.desc.ClearBuffer = true;
@@ -275,6 +295,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ClearDispatchGroupCountX = Mathf.Max(1, (width + ClearThreadGroupSizeX - 1) / ClearThreadGroupSizeX);
             m_ClearDispatchGroupCountY = Mathf.Max(1, (height + ClearThreadGroupSizeY - 1) / ClearThreadGroupSizeY);
 
+            PrepareScreenSpaceReflectionResource(frameData);
+
             m_GBuffer0.Resize(width, height);
             m_GBuffer1.Resize(width, height);
             m_GBuffer2.Resize(width, height);
@@ -282,10 +304,16 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer4.Resize(width, height);
             m_DepthTexture.Resize(width, height);
             m_GTAOTexture.Resize(width, height);
+            m_ScreenSpaceReflectionTexture.Resize(width, height);
             m_ColorTexture.Resize(width, height);
             PrepareClusteredLightingParameters(frameData);
             PreparePreIntegratedFGDResources();
             PrepareSkyTextureState(frameData.GetOrCreate<VividSkyData>());
+        }
+
+        public void ClearPassResourceLayoutDirty()
+        {
+            m_IsPassResourceLayoutDirty = false;
         }
 
         public override void Record(ComputePassContext context)
@@ -322,6 +350,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DeferredLitCompute = null;
             m_ClearDeferredLitKernel = -1;
             m_DeferredLitKernel = -1;
+            m_ScreenSpaceReflectionTexture = m_LocalScreenSpaceReflectionTexture;
+            m_FrameContextScreenSpaceReflectionTexture = null;
+            m_IsPassResourceLayoutDirty = false;
             m_DirectionalLightCount = 0;
             m_PunctualLightCount = 0;
             m_AreaLightCount = 0;
@@ -419,6 +450,26 @@ namespace VividRP.Runtime.RenderPass.Core
             else
             {
                 cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, GTAOTextureId, m_GTAOTexture.innerHandle);
+            }
+            if (ReferenceEquals(m_ScreenSpaceReflectionTexture, m_LocalScreenSpaceReflectionTexture)
+                || m_ScreenSpaceReflectionTexture == null
+                || !m_ScreenSpaceReflectionTexture.innerHandle.IsValid())
+            {
+                cmd.SetComputeTextureParam(
+                    m_DeferredLitCompute,
+                    kernel,
+                    ScreenSpaceReflectionTextureId,
+                    rgDefaultResource.blackTexture);
+                cmd.SetComputeIntParam(m_DeferredLitCompute, ScreenSpaceReflectionEnabledId, 0);
+            }
+            else
+            {
+                cmd.SetComputeTextureParam(
+                    m_DeferredLitCompute,
+                    kernel,
+                    ScreenSpaceReflectionTextureId,
+                    m_ScreenSpaceReflectionTexture.innerHandle);
+                cmd.SetComputeIntParam(m_DeferredLitCompute, ScreenSpaceReflectionEnabledId, 1);
             }
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, LightingTextureId, m_ColorTexture.innerHandle);
             cmd.SetComputeIntParam(m_DeferredLitCompute, LightingWidthId, m_LightingWidth);
@@ -593,6 +644,32 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             cmd.SetComputeBufferParam(m_DeferredLitCompute, kernel, propertyId, buffer.innerHandle);
+        }
+
+        private void PrepareScreenSpaceReflectionResource(ContextContainer frameData)
+        {
+            if (!ReferenceEquals(m_ScreenSpaceReflectionTexture, m_LocalScreenSpaceReflectionTexture)
+                && !ReferenceEquals(m_ScreenSpaceReflectionTexture, m_FrameContextScreenSpaceReflectionTexture))
+            {
+                return;
+            }
+
+            var resolvedTexture = m_LocalScreenSpaceReflectionTexture;
+            if (frameData != null && frameData.Contains<VividScreenSpaceReflectionData>())
+            {
+                var ssrData = frameData.Get<VividScreenSpaceReflectionData>();
+                if (ssrData?.hasValidTexture == true && ssrData.reflectionTexture != null)
+                    resolvedTexture = ssrData.reflectionTexture;
+            }
+
+            if (ReferenceEquals(m_ScreenSpaceReflectionTexture, resolvedTexture))
+                return;
+
+            m_ScreenSpaceReflectionTexture = resolvedTexture;
+            m_FrameContextScreenSpaceReflectionTexture = ReferenceEquals(resolvedTexture, m_LocalScreenSpaceReflectionTexture)
+                ? null
+                : resolvedTexture;
+            m_IsPassResourceLayoutDirty = true;
         }
 
         private static RenderGraphTexture CreateSkyIBLCubemapTexture(string name)

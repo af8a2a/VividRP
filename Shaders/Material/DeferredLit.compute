@@ -20,12 +20,14 @@ Texture2D<float4> _GBuffer4;
 Texture2D<float> _DepthTexture;
 Texture2D<float> _DirectionalShadowTexture;
 Texture2D<float> _GTAOTexture;
+Texture2D<float4> _ScreenSpaceReflectionTexture;
 StructuredBuffer<uint> _MaterialPixelIndices;
 
 RWTexture2D<float4> _LightingTexture;
 
 uint _LightingWidth;
 uint _LightingHeight;
+uint _ScreenSpaceReflectionEnabled;
 
 bool IsSkyPixel(float deviceDepth)
 {
@@ -58,6 +60,15 @@ float SampleGTAO(uint2 pixelCoord)
 {
     float2 uv = (float2(pixelCoord) + 0.5) / float2(_LightingWidth, _LightingHeight);
     return _GTAOTexture.SampleLevel(sampler_PointClamp, uv, 0).x;
+}
+
+float3 LoadScreenSpaceReflection(uint2 pixelCoord)
+{
+    if (_ScreenSpaceReflectionEnabled == 0)
+        return 0.0;
+
+    float4 reflection = _ScreenSpaceReflectionTexture.Load(int3(pixelCoord, 0));
+    return max(reflection.rgb, 0.0) * saturate(reflection.a);
 }
 
 float EvaluateDeferredDirectionalShadowAttenuation(
@@ -186,6 +197,7 @@ void DeferredLit(
     float2 uv = (float2(pixelCoord) + 0.5) * _ScreenSize.zw;
     float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, UNITY_MATRIX_I_VP);
     float3 lighting = VividApplyPreExposure(EvaluateDeferredLitLighting(surfaceData, pixelCoord, positionWS));
+    float3 screenSpaceReflection = LoadScreenSpaceReflection(pixelCoord);
     float4 currentLighting = _LightingTexture[pixelCoord];
-    _LightingTexture[pixelCoord] = float4(currentLighting.rgb + lighting, currentLighting.a);
+    _LightingTexture[pixelCoord] = float4(currentLighting.rgb + lighting + screenSpaceReflection, currentLighting.a);
 }

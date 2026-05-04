@@ -1,6 +1,6 @@
 #pragma use_dxc
 #pragma kernel KCopyDepthToAtlas
-#pragma kernel KDepthDownsample8DualUav KERNEL_SIZE=8
+#pragma kernel KDepthDownsample8DualUav
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 
@@ -31,7 +31,7 @@ void KCopyDepthToAtlas(uint3 dispatchThreadId : SV_DispatchThreadID)
     _DepthMipChain[dispatchThreadId.xy] = _InputDepth.Load(int3(dispatchThreadId.xy, 0));
 }
 
-[numthreads(KERNEL_SIZE, KERNEL_SIZE, 1)]
+[numthreads(8, 8, 1)]
 void KDepthDownsample8DualUav(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 srcOffset = (uint2)_SrcOffsetAndLimit.xy;

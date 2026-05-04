@@ -23,6 +23,9 @@ namespace VividRP.Runtime
         [Tooltip("Allows screen-space rays to resolve against visible sky pixels.")]
         public BoolParameter reflectSky = new(true);
 
+        [Tooltip("Clamps exposed reflection intensity before deferred lighting accumulation.")]
+        public MinFloatParameter clampValue = new(100.0f, 0.001f);
+
         [Tooltip("Typical thickness of objects that reflection rays may pass behind.")]
         public ClampedFloatParameter depthBufferThickness = new(0.01f, 0.0001f, 1.0f);
 

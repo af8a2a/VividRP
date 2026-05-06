@@ -486,7 +486,7 @@ void ScreenSpaceReflectionsTracing(
 
     if (!hit)
     {
-        _SSRTraceTexture[coordSS] = BuildSsrSkyFallback(
+        _SSRTraceTexture[coordSS] =BuildSsrSkyFallback(
             normalWS,
             viewDirWS,
             baseColor,

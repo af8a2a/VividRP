@@ -304,7 +304,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     DispatchClassifyTiles(cmd);
 
                 using (new ProfilingScope(cmd, s_SSRTracingProfilingSampler))
-                    DispatchTrace(cmd);
+                    DispatchTrace(cmd,context);
 
                 using (new ProfilingScope(cmd, s_SSRResolveProfilingSampler))
                     DispatchResolve(cmd);
@@ -464,7 +464,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.DispatchCompute(m_ComputeShader, m_SSRClassifyTilesKernel, m_TileCountX, m_TileCountY, 1);
         }
 
-        private void DispatchTrace(ComputeCommandBuffer cmd)
+        private void DispatchTrace(ComputeCommandBuffer cmd,ComputePassContext computePassContext)
         {
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, SSRTraceTextureId, m_TraceTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, DepthTextureId, m_DepthTexture.innerHandle);
@@ -477,6 +477,8 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeBufferParam(m_ComputeShader, m_SSRTracingKernel, SSRTileListId, m_TileListBuffer.innerHandle);
             if (m_UseHistoryColorPyramid && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true)
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture.innerHandle);
+            else
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, PreviousColorPyramidTextureId, computePassContext.renderGraphContext.defaultResources.blackTexture);
 
             cmd.DispatchCompute(m_ComputeShader, m_SSRTracingKernel, m_DispatchIndirectArgsBuffer.innerHandle, 0);
         }

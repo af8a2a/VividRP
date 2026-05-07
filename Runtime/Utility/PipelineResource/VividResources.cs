@@ -261,9 +261,6 @@ namespace VividRP.Runtime
         [ResourcePath("Shaders/Core/Private/GPUDriven/FixupVisibleMeshletIndirectDrawArgs")]
         public ComputeShader FixupVisibleMeshletIndirectDrawArgsCompute;
 
-        [ResourcePath("Shaders/Core/Private/GPUDriven/GPUDrivenMeshletDebug")]
-        public Shader GPUDrivenMeshletDebugShader;
-
         // Film Grain preset textures
         [ResourcePath("Texture/FilmGrain/Thin01.png")]
         public Texture2D FilmGrainThin1;

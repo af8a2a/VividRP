@@ -21,7 +21,6 @@ namespace VividRP.Editor.RenderPipeline
         private static readonly GUIContent s_GpuDrivenDecalLabel = EditorGUIUtility.TrTextContent(
             "GPU Driven Decal",
             "Experimental. Requires GPU Driven rendering and bindless texture descriptors; silently disables itself when bindless is unavailable.");
-        private static readonly GUIContent s_GpuDrivenDebugOverlayLabel = EditorGUIUtility.TrTextContent("GPU Driven Debug Overlay");
         private static readonly GUIContent s_SrpBatcherLabel = EditorGUIUtility.TrTextContent("SRP Batcher");
         private static readonly GUIContent s_SupportProbeVolumeLabel = EditorGUIUtility.TrTextContent("Adaptive Probe Volumes");
         private static readonly GUIContent s_ProbeVolumeShBandsLabel = EditorGUIUtility.TrTextContent("APV SH Bands");
@@ -95,15 +94,6 @@ namespace VividRP.Editor.RenderPipeline
                 tooltip = s_GpuDrivenDecalLabel.tooltip,
             };
             root.Add(gpuDrivenDecalField);
-
-            var gpuDrivenDebugOverlayField = new PropertyField(
-                serializedObject.FindProperty("m_EnableGPUDrivenDebugOverlay"),
-                s_GpuDrivenDebugOverlayLabel.text
-            )
-            {
-                name = "vivid-rp-asset-gpu-driven-debug-overlay-field",
-            };
-            root.Add(gpuDrivenDebugOverlayField);
 
             var srpBatcherField = new PropertyField(serializedObject.FindProperty("m_EnableSRPBatcher"), s_SrpBatcherLabel.text)
             {

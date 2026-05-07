@@ -40,6 +40,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SkyTextureId = Shader.PropertyToID("_SkyTexture");
         private static readonly int SkyTextureTintId = Shader.PropertyToID("_SkyTextureTint");
         private static readonly int SkyTextureParamsId = Shader.PropertyToID("_SkyTextureParams");
+        private static readonly int SSRDebugTextureId = Shader.PropertyToID("_SSRDebugTexture");
 
         [StructLayout(LayoutKind.Sequential)]
         private struct ScreenSpaceReflectionConstantBufferData
@@ -101,6 +102,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphBuffer m_TileListBuffer;
         private readonly RenderGraphBuffer m_DispatchIndirectArgsBuffer;
         private readonly RenderGraphTexture m_SkyTexture;
+        private readonly RenderGraphTexture m_DebugTexture;
         private int m_SSRClassifyTilesKernel = -1;
         private int m_SSRTracingKernel = -1;
         private int m_SSRResolveKernel = -1;
@@ -143,10 +145,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 sizeof(uint),
                 GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
             m_SkyTexture = CreateSkyCubemapTexture("ScreenSpaceReflectionSkyTexture");
+            m_DebugTexture = CreateColorTexture("ScreenSpaceReflectionDebug", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
 
             ConfigureHZBDescriptor(m_HZBTexture);
             ConfigureInternalTextureDescriptor(m_TraceTexture, "ScreenSpaceReflectionTrace", 1, 1);
             ConfigureInternalTextureDescriptor(m_ResolveTexture, "ScreenSpaceReflectionResolve", 1, 1);
+            ConfigureInternalTextureDescriptor(m_DebugTexture, "ScreenSpaceReflectionDebug", 1, 1);
         }
 
         public void ClearPassResourceLayoutDirty()
@@ -235,6 +239,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var tileListHandle = context.GetOrCreateBufferHandle(m_TileListBuffer);
             var dispatchIndirectArgsHandle = context.GetOrCreateBufferHandle(m_DispatchIndirectArgsBuffer);
             var skyTextureHandle = context.GetOrCreateTextureHandle(m_SkyTexture);
+            var debugTextureHandle = context.GetOrCreateTextureHandle(m_DebugTexture);
 
             output.innerHandle = outputHandle;
             m_DepthTexture.innerHandle = depthHandle;
@@ -248,6 +253,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_TileListBuffer.innerHandle = tileListHandle;
             m_DispatchIndirectArgsBuffer.innerHandle = dispatchIndirectArgsHandle;
             m_SkyTexture.innerHandle = skyTextureHandle;
+            m_DebugTexture.innerHandle = debugTextureHandle;
 
             using var builder = context.RenderGraph.AddComputePass<GraphPassData>(
                 RenderSSRProfilerTag,
@@ -268,6 +274,7 @@ namespace VividRP.Runtime.RenderPass.Core
             builder.UseBuffer(tileListHandle, AccessFlags.ReadWrite);
             builder.UseBuffer(dispatchIndirectArgsHandle, AccessFlags.ReadWrite);
             builder.UseTexture(skyTextureHandle, AccessFlags.Read);
+            builder.UseTexture(debugTextureHandle, AccessFlags.ReadWrite);
 
             if (m_UseHistoryColorPyramid && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true)
                 builder.UseTexture(m_PreviousColorPyramidTexture.innerHandle, AccessFlags.Read);
@@ -285,6 +292,10 @@ namespace VividRP.Runtime.RenderPass.Core
             using (new ProfilingScope(cmd, profilingSampler))
             {
                 BindSkyParameters(cmd);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRDebugTextureId, m_DebugTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, SSRDebugTextureId, m_DebugTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, SSRDebugTextureId, m_DebugTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRAccumulateKernel, SSRDebugTextureId, m_DebugTexture.innerHandle);
 
                 if (!ShouldRecordEffect())
                 {
@@ -541,6 +552,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             ConfigureInternalTextureDescriptor(m_TraceTexture, "ScreenSpaceReflectionTrace", width, height);
             ConfigureInternalTextureDescriptor(m_ResolveTexture, "ScreenSpaceReflectionResolve", width, height);
+            ConfigureInternalTextureDescriptor(m_DebugTexture, "ScreenSpaceReflectionDebug", width, height);
             ConfigureTileListBuffer(m_TileListBuffer, maxTileCount);
             ConfigureIndirectArgsBuffer(m_DispatchIndirectArgsBuffer);
             m_DispatchIndirectArgsBuffer.SetData(s_InitialDispatchIndirectArgsData);

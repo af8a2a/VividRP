@@ -10,7 +10,9 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 
-#define SSR_TRACE_EPS 1e-3
+#define SSR_TRACE_BEHIND_OBJECTS
+#define SSR_TRACE_TOWARDS_EYE
+#define SSR_TRACE_EPS 0.000488281f
 #define SSR_THREAD_GROUP_SIZE 8u
 #define SSR_THREAD_COUNT 64
 #define SSR_TILE_COORD_MASK 0xffffu
@@ -23,6 +25,7 @@
 RWTexture2D<float4> _OutputColorTexture;
 RWTexture2D<float4> _SSRTraceTexture;
 RWTexture2D<float4> _SSRResolveTexture;
+RWTexture2D<float4> _SSRDebugTexture;
 RWStructuredBuffer<uint> _SSRDispatchIndirectArgs;
 RWStructuredBuffer<uint> _SSRTileList;
 Texture2D<float> _DepthTexture;
@@ -141,6 +144,35 @@ float3 SampleReflectionColor(float2 screenUV, float perceptualRoughness)
     float3 color0 = SampleHistoryPyramidBilinear(screenUV, mip0);
     float3 color1 = SampleHistoryPyramidBilinear(screenUV, mip1);
     return lerp(color0, color1, factor);
+}
+
+bool TryComputeHistoryPyramidUV(int2 coordSS, float deviceDepth, out float2 historyScreenUV)
+{
+    historyScreenUV = 0.0;
+
+    if (_SsrUseHistoryColorPyramid == 0)
+        return false;
+
+    if (deviceDepth == UNITY_RAW_FAR_CLIP_VALUE)
+        return false;
+
+    float2 screenUV = ((float2)coordSS + 0.5) * _SsrTraceScreenSize.zw;
+    float3 positionWS = ComputeWorldSpacePosition(screenUV, deviceDepth, UNITY_MATRIX_I_VP);
+    float3 previousNDC = ComputeNormalizedDeviceCoordinatesWithZ(positionWS, _PrevViewProjMatrix);
+
+    historyScreenUV = previousNDC.xy;
+    bool insideHistory = all(historyScreenUV >= 0.0) && all(historyScreenUV <= 1.0);
+    bool insideHistoryDepth = previousNDC.z >= 0.0 && previousNDC.z <= 1.0;
+    return insideHistory && insideHistoryDepth;
+}
+
+bool IsHitDepthConsistent(float tracedDeviceDepth, float sceneDeviceDepth)
+{
+    if (sceneDeviceDepth == UNITY_RAW_FAR_CLIP_VALUE)
+        return false;
+
+    float depthTolerance = max(0.00025f, abs(tracedDeviceDepth) * 0.001f);
+    return abs(sceneDeviceDepth - tracedDeviceDepth) <= depthTolerance;
 }
 
 float LoadHZBDepth(int2 mipCoord, int mipLevel)
@@ -298,7 +330,9 @@ bool TraceScreenSpaceReflection(
     bool killRay = deviceDepth == UNITY_RAW_FAR_CLIP_VALUE;
     killRay = killRay || (reflPosSS.z <= 0.0);
     killRay = killRay || (dot(normalWS, viewDirWS) <= 0.0);
+#ifndef SSR_TRACE_TOWARDS_EYE
     killRay = killRay || rayTowardsEye;
+#endif
     if (killRay)
         return false;
 
@@ -352,7 +386,11 @@ bool TraceScreenSpaceReflection(
         bool insideFloor = belowFloor && aboveBase;
         bool hitFloor = (t <= distFloor) && (distFloor <= distWall);
 
+#ifdef SSR_TRACE_BEHIND_OBJECTS
+        miss = belowMip0 && insideFloor;
+#else
         miss = belowMip0;
+#endif
         hit = (mipLevel == 0) && (hitFloor || insideFloor);
         belowMip0 = (mipLevel == 0) && belowFloor;
 
@@ -391,25 +429,26 @@ void ScreenSpaceReflectionsClassifyTiles(
         _SSRTraceTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
         _SSRResolveTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
         _OutputColorTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
+        _SSRDebugTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
 
         shouldTracePixel = ShouldTracePixel(coordSS);
     }
 
     uint linearThreadIndex = groupThreadId.y * SSR_THREAD_GROUP_SIZE + groupThreadId.x;
-    uint waveSize = WaveGetLaneCount();
-    uint waveIndex = linearThreadIndex / waveSize;
-    uint wavesPerGroup = (SSR_THREAD_COUNT + waveSize - 1u) / waveSize;
+    g_SSRClassifiedTileWaves[linearThreadIndex] = 0u;
+    GroupMemoryBarrierWithGroupSync();
+
     bool waveHasTracePixel = WaveActiveAnyTrue(shouldTracePixel);
 
     if (WaveIsFirstLane())
-        g_SSRClassifiedTileWaves[waveIndex] = waveHasTracePixel ? 1u : 0u;
+        g_SSRClassifiedTileWaves[linearThreadIndex] = waveHasTracePixel ? 1u : 0u;
 
     GroupMemoryBarrierWithGroupSync();
 
     if (linearThreadIndex == 0u)
     {
         bool tileHasTracePixel = false;
-        for (uint wave = 0u; wave < wavesPerGroup; wave++)
+        for (uint wave = 0u; wave < SSR_THREAD_COUNT; wave++)
             tileHasTracePixel = tileHasTracePixel || g_SSRClassifiedTileWaves[wave] != 0u;
 
         if (tileHasTracePixel)
@@ -486,7 +525,20 @@ void ScreenSpaceReflectionsTracing(
 
     if (!hit)
     {
-        _SSRTraceTexture[coordSS] =BuildSsrSkyFallback(
+        _SSRTraceTexture[coordSS] = BuildSsrSkyFallback(
+            normalWS,
+            viewDirWS,
+            baseColor,
+            metallic,
+            perceptualRoughness,
+            roughnessFade);
+        return;
+    }
+
+    float hitSceneDeviceDepth = _DepthTexture.Load(int3(hitCoordSS, 0));
+    if (!IsHitDepthConsistent(hitDeviceDepth, hitSceneDeviceDepth))
+    {
+        _SSRTraceTexture[coordSS] = BuildSsrSkyFallback(
             normalWS,
             viewDirWS,
             baseColor,
@@ -497,8 +549,15 @@ void ScreenSpaceReflectionsTracing(
     }
 
     float2 hitScreenUV = ((float2)hitCoordSS + 0.5) * _SsrTraceScreenSize.zw;
-    float edgeFade = EdgeOfScreenFade(hitScreenUV);
-    float3 reflectedColor = SampleReflectionColor(hitScreenUV, perceptualRoughness);
+    float2 historyScreenUV;
+    if (!TryComputeHistoryPyramidUV(hitCoordSS, hitSceneDeviceDepth, historyScreenUV))
+    {
+        _SSRTraceTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
+        return;
+    }
+
+    float edgeFade = min(EdgeOfScreenFade(hitScreenUV), EdgeOfScreenFade(historyScreenUV));
+    float3 reflectedColor = SampleReflectionColor(historyScreenUV, perceptualRoughness);
     float3 f0 = lerp(float3(0.04, 0.04, 0.04), baseColor, metallic);
     float3 fresnel = FresnelSchlick(f0, dot(normalWS, viewDirWS));
     float contribution = saturate(edgeFade * roughnessFade * _SsrIntensity);

@@ -68,11 +68,11 @@ Material:
     - _Cutoff: 0.5
     - _DstBlend: 0
     - _DstBlendAlpha: 0
-    - _Metallic: 0
+    - _Metallic: 1
     - _OcclusionStrength: 1
     - _QueueOffset: 0
     - _ReceiveShadows: 0
-    - _Smoothness: 0.5
+    - _Smoothness: 1
     - _SmoothnessTextureChannel: 0
     - _SrcBlend: 1
     - _SrcBlendAlpha: 1

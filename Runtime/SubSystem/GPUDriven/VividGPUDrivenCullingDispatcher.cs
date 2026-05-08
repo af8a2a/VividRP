@@ -37,16 +37,52 @@ namespace VividRP.Runtime.GPUDriven
             float meshLODErrorThreshold
         )
         {
+            if (camera == null)
+            {
+                throw new ArgumentNullException(nameof(camera));
+            }
+
+            VividGPUDrivenCullingContextUtility.Build(
+                camera,
+                passMask,
+                out VividGPUCullingContext cullingContext,
+                out VividGPULODSelectionContext lodSelectionContext
+            );
+
+            Dispatch(
+                cmd,
+                cullingContext,
+                lodSelectionContext,
+                sceneData,
+                sceneBuffers,
+                gpuInstanceCullingCompute,
+                meshletListBuildCompute,
+                gpuMeshletCullingCompute,
+                fixupVisibleMeshletIndirectDrawArgsCompute,
+                forcedMeshLODNodeDepth,
+                meshLODErrorThreshold
+            );
+        }
+
+        public void Dispatch(
+            CommandBuffer cmd,
+            in VividGPUCullingContext cullingContext,
+            in VividGPULODSelectionContext lodSelectionContext,
+            VividGPUDrivenSceneData sceneData,
+            VividGPUDrivenBufferSet sceneBuffers,
+            ComputeShader gpuInstanceCullingCompute,
+            ComputeShader meshletListBuildCompute,
+            ComputeShader gpuMeshletCullingCompute,
+            ComputeShader fixupVisibleMeshletIndirectDrawArgsCompute,
+            int forcedMeshLODNodeDepth,
+            float meshLODErrorThreshold
+        )
+        {
             ThrowIfDisposed();
 
             if (cmd == null)
             {
                 throw new ArgumentNullException(nameof(cmd));
-            }
-
-            if (camera == null)
-            {
-                throw new ArgumentNullException(nameof(camera));
             }
 
             if (sceneData == null)
@@ -80,13 +116,6 @@ namespace VividRP.Runtime.GPUDriven
                 meshletListBuildCompute,
                 gpuMeshletCullingCompute,
                 fixupVisibleMeshletIndirectDrawArgsCompute
-            );
-
-            VividGPUDrivenCullingContextUtility.Build(
-                camera,
-                passMask,
-                out VividGPUCullingContext cullingContext,
-                out VividGPULODSelectionContext lodSelectionContext
             );
 
             BufferSet.UploadContexts(cmd, cullingContext, lodSelectionContext);

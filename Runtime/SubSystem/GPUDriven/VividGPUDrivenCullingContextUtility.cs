@@ -21,24 +21,50 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentNullException(nameof(camera));
             }
 
-            Matrix4x4 viewMatrix = camera.worldToCameraMatrix;
-            Matrix4x4 projectionMatrix = camera.projectionMatrix;
+            Transform cameraTransform = camera.transform;
+            Build(
+                camera.worldToCameraMatrix,
+                camera.projectionMatrix,
+                cameraTransform.position,
+                cameraTransform.right,
+                cameraTransform.up,
+                new Vector2(
+                    Mathf.Max(1.0f, GetCameraPixelWidth(camera)),
+                    Mathf.Max(1.0f, GetCameraPixelHeight(camera))
+                ),
+                !camera.orthographic,
+                passMask,
+                out cullingContext,
+                out lodSelectionContext
+            );
+        }
+
+        public static void Build(
+            Matrix4x4 viewMatrix,
+            Matrix4x4 projectionMatrix,
+            Vector3 cameraPositionWS,
+            Vector3 cameraRightWS,
+            Vector3 cameraUpWS,
+            Vector2 pixelSize,
+            bool isPerspective,
+            VividInstancePassMask passMask,
+            out VividGPUCullingContext cullingContext,
+            out VividGPULODSelectionContext lodSelectionContext
+        )
+        {
             Matrix4x4 gpuProjectionMatrix = GL.GetGPUProjectionMatrix(projectionMatrix, true);
             Matrix4x4 gpuViewProjectionMatrix = gpuProjectionMatrix * viewMatrix;
             Matrix4x4 cullingViewProjectionMatrix = projectionMatrix * viewMatrix;
             Plane[] frustumPlanes = GeometryUtility.CalculateFrustumPlanes(cullingViewProjectionMatrix);
 
-            Transform cameraTransform = camera.transform;
-            Vector3 cameraPosition = cameraTransform.position;
-
             cullingContext = new VividGPUCullingContext
             {
                 ViewProjectionMatrix = ToFloat4x4(gpuViewProjectionMatrix),
                 ViewMatrix = ToFloat4x4(viewMatrix),
-                CameraPosition = new float4(cameraPosition.x, cameraPosition.y, cameraPosition.z, 1.0f),
+                CameraPosition = new float4(cameraPositionWS.x, cameraPositionWS.y, cameraPositionWS.z, 1.0f),
                 CullingSphereLS = float4.zero,
                 PassMask = (int) passMask,
-                CameraIsPerspective = camera.orthographic ? 0 : 1,
+                CameraIsPerspective = isPerspective ? 1 : 0,
                 BaseStartInstance = 0,
                 MeshletListBuildJobsOffset = 0,
                 MeshletRenderRequestsOffset = 0,
@@ -48,12 +74,12 @@ namespace VividRP.Runtime.GPUDriven
             lodSelectionContext = new VividGPULODSelectionContext
             {
                 ViewProjectionMatrix = ToFloat4x4(gpuViewProjectionMatrix),
-                CameraPosition = new float4(cameraPosition.x, cameraPosition.y, cameraPosition.z, 1.0f),
-                CameraUp = ToFloat4(cameraTransform.up, 0.0f),
-                CameraRight = ToFloat4(cameraTransform.right, 0.0f),
+                CameraPosition = new float4(cameraPositionWS.x, cameraPositionWS.y, cameraPositionWS.z, 1.0f),
+                CameraUp = ToFloat4(cameraUpWS, 0.0f),
+                CameraRight = ToFloat4(cameraRightWS, 0.0f),
                 ScreenSizePixels = new float2(
-                    Mathf.Max(1.0f, GetCameraPixelWidth(camera)),
-                    Mathf.Max(1.0f, GetCameraPixelHeight(camera))
+                    Mathf.Max(1.0f, pixelSize.x),
+                    Mathf.Max(1.0f, pixelSize.y)
                 ),
             };
         }

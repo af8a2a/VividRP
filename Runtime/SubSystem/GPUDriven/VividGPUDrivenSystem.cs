@@ -16,6 +16,7 @@ namespace VividRP.Runtime.GPUDriven
         private readonly VividGPUDrivenCullingDispatcher m_CullingDispatcher;
         private readonly VividGPUDrivenObjectTracker m_ObjectTracker;
         private readonly VividGPUDrivenSceneDataBuilder m_SceneDataBuilder;
+        private VividGPUDrivenCullingDispatcher[] m_ShadowCullingDispatchers;
         private bool m_IsDisposed;
 
         public VividGPUDrivenSystem()
@@ -103,6 +104,30 @@ namespace VividRP.Runtime.GPUDriven
         public GraphicsBuffer VisibleMeshletRenderRequestsBuffer => m_CullingDispatcher.BufferSet.VisibleMeshletRenderRequestsBuffer;
 
         public GraphicsBuffer VisibleMeshletIndirectDrawArgsBuffer => m_CullingDispatcher.BufferSet.VisibleMeshletIndirectDrawArgsBuffer;
+
+        public GraphicsBuffer GetShadowVisibleMeshletRenderRequestsBuffer(int cascadeIndex)
+        {
+            if (m_ShadowCullingDispatchers == null
+                || cascadeIndex < 0
+                || cascadeIndex >= m_ShadowCullingDispatchers.Length)
+            {
+                return null;
+            }
+
+            return m_ShadowCullingDispatchers[cascadeIndex]?.BufferSet.VisibleMeshletRenderRequestsBuffer;
+        }
+
+        public GraphicsBuffer GetShadowVisibleMeshletIndirectDrawArgsBuffer(int cascadeIndex)
+        {
+            if (m_ShadowCullingDispatchers == null
+                || cascadeIndex < 0
+                || cascadeIndex >= m_ShadowCullingDispatchers.Length)
+            {
+                return null;
+            }
+
+            return m_ShadowCullingDispatchers[cascadeIndex]?.BufferSet.VisibleMeshletIndirectDrawArgsBuffer;
+        }
 
         private static void RegisterFrameContextCallbacks()
         {
@@ -195,6 +220,57 @@ namespace VividRP.Runtime.GPUDriven
             ReportStats(camera, cameraName);
         }
 
+        public void CullShadowCascade(
+            int cascadeIndex,
+            CommandBuffer cmd,
+            in VividGPUCullingContext cullingContext,
+            in VividGPULODSelectionContext lodSelectionContext,
+            ComputeShader gpuInstanceCullingCompute,
+            ComputeShader meshletListBuildCompute,
+            ComputeShader gpuMeshletCullingCompute,
+            ComputeShader fixupVisibleMeshletIndirectDrawArgsCompute
+        )
+        {
+            ThrowIfDisposed();
+
+            if (cascadeIndex < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(cascadeIndex));
+            }
+
+            EnsureShadowDispatcherCapacity(cascadeIndex + 1);
+
+            var dispatcher = m_ShadowCullingDispatchers[cascadeIndex];
+            dispatcher.Dispatch(
+                cmd,
+                cullingContext,
+                lodSelectionContext,
+                SceneData,
+                m_BufferSet,
+                gpuInstanceCullingCompute,
+                meshletListBuildCompute,
+                gpuMeshletCullingCompute,
+                fixupVisibleMeshletIndirectDrawArgsCompute,
+                ForcedMeshLODNodeDepth,
+                MeshLODErrorThreshold
+            );
+        }
+
+        private void EnsureShadowDispatcherCapacity(int requiredCount)
+        {
+            if (m_ShadowCullingDispatchers != null && m_ShadowCullingDispatchers.Length >= requiredCount)
+            {
+                return;
+            }
+
+            int previousCount = m_ShadowCullingDispatchers?.Length ?? 0;
+            Array.Resize(ref m_ShadowCullingDispatchers, requiredCount);
+            for (int i = previousCount; i < requiredCount; i++)
+            {
+                m_ShadowCullingDispatchers[i] = new VividGPUDrivenCullingDispatcher();
+            }
+        }
+
         public void BindGlobals(CommandBuffer cmd)
         {
             ThrowIfDisposed();
@@ -220,6 +296,15 @@ namespace VividRP.Runtime.GPUDriven
             SceneData.Clear();
             m_BufferSet.Dispose();
             m_CullingDispatcher.Dispose();
+            if (m_ShadowCullingDispatchers != null)
+            {
+                for (int i = 0; i < m_ShadowCullingDispatchers.Length; i++)
+                {
+                    m_ShadowCullingDispatchers[i]?.Dispose();
+                    m_ShadowCullingDispatchers[i] = null;
+                }
+                m_ShadowCullingDispatchers = null;
+            }
             m_ObjectTracker.Dispose();
             BindlessTextureContainer.Dispose();
             m_IsDisposed = true;

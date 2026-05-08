@@ -7,7 +7,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
 {
-    public sealed class DepthOfFieldPass : UnsafePass, IPostProcessSourceOverridePass, IRenderGraphRecordingPass, IStablePassResourceLayout
+    public sealed class DepthOfFieldPass : UnsafePass, IPostProcessSourceOverridePass, IStablePassResourceLayout
     {
         private const int ThreadGroupSize = 8;
         private const int TileSize = 8;
@@ -330,27 +330,6 @@ namespace VividRP.Runtime
             }
         }
 
-        public void RecordGraph(RenderGraphRecordingContext context)
-        {
-            if (context?.RenderGraph == null || source == null)
-                return;
-
-            var sourceHandle = context.GetOrCreateTextureHandle(source);
-            if (sourceHandle.IsValid())
-                source.innerHandle = sourceHandle;
-
-            if (source?.innerHandle.IsValid() != true)
-                return;
-
-            if (!ShouldRecordPhysicalPath() && TryRegisterPassthrough(context, sourceHandle))
-                return;
-
-            context.RecordUnsafePass(
-                this,
-                ((IRenderPass)this).Initialize(),
-                context.PassDefinition);
-        }
-
         public override void Dispose()
         {
             m_ComputeShader = null;
@@ -401,31 +380,6 @@ namespace VividRP.Runtime
                 && m_ComputeSlowTilesKernel >= 0
                 && m_GatherFastTilesKernel >= 0
                 && m_CombineFastTilesKernel >= 0;
-        }
-
-        private bool TryRegisterPassthrough(RenderGraphRecordingContext context, TextureHandle sourceHandle)
-        {
-            if (!sourceHandle.IsValid() || !CanAliasPassthrough())
-                return false;
-
-            context.RegisterTextureHandle(output, sourceHandle);
-            return true;
-        }
-
-        private bool CanAliasPassthrough()
-        {
-            var sourceDesc = source?.desc;
-            var outputDesc = output?.desc;
-            if (sourceDesc == null || outputDesc == null)
-                return false;
-
-            return sourceDesc.Width == outputDesc.Width
-                && sourceDesc.Height == outputDesc.Height
-                && sourceDesc.Slices == outputDesc.Slices
-                && sourceDesc.Dimension == outputDesc.Dimension
-                && sourceDesc.ColorFormat == outputDesc.ColorFormat
-                && sourceDesc.DepthBufferBits == outputDesc.DepthBufferBits
-                && sourceDesc.MsaaSamples == outputDesc.MsaaSamples;
         }
 
         private bool ShouldReprojectCoC()

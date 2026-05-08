@@ -188,6 +188,12 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void DepthOfFieldPass_UsesStandardUnsafePassRecording()
+        {
+            Assert.That(typeof(IRenderGraphRecordingPass).IsAssignableFrom(typeof(DepthOfFieldPass)), Is.False);
+        }
+
+        [Test]
         public void Prepare_UsesEffectiveAntialiasingData_ForTemporalHistory()
         {
             var gameObject = new GameObject("DepthOfFieldPassTests_AAResolver");
@@ -249,9 +255,6 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("DispatchCoCMinMax"));
             Assert.That(passSource, Does.Contain("DispatchSlowTiles"));
             Assert.That(passSource, Does.Contain("DispatchCombine"));
-            Assert.That(passSource, Does.Contain("IRenderGraphRecordingPass"));
-            Assert.That(passSource, Does.Contain("TryRegisterPassthrough"));
-            Assert.That(passSource, Does.Contain("context.RegisterTextureHandle(output, sourceHandle)"));
             Assert.That(passSource, Does.Contain("m_ComputeSlowTilesKernel, InputLinearDepthId"));
             Assert.That(passSource, Does.Contain("m_GatherFastTilesKernel, InputLinearDepthId"));
             Assert.That(passSource, Does.Contain("ResolvePhysicalMaxCoC"));

@@ -192,29 +192,20 @@ namespace VividRP.Runtime
         private static void ExecuteComputePass(ComputePassData data, ComputeGraphContext ctx)
         {
             using var recordScope = data.Markers.Record.Auto();
-            using (new ProfilingScope(ctx.cmd, data.Markers.CommandSampler))
-            {
-                data.Pass.Record(new ComputePassContext(ctx, s_FrameData));
-            }
+            data.Pass.Record(new ComputePassContext(ctx, s_FrameData));
         }
 
         private static void ExecuteRasterPass(RasterPassData data, RasterGraphContext ctx)
         {
             using var recordScope = data.Markers.Record.Auto();
-            using (new ProfilingScope(ctx.cmd, data.Markers.CommandSampler))
-            {
-                data.Pass.Record(new RasterPassContext(ctx, s_FrameData));
-            }
+            data.Pass.Record(new RasterPassContext(ctx, s_FrameData));
         }
 
         private static void ExecuteUnsafePass(UnsafePassData data, UnsafeGraphContext ctx)
         {
             var passContext = new UnsafePassContext(ctx, s_FrameData);
             using var recordScope = data.Markers.Record.Auto();
-            using (new ProfilingScope(passContext.GetNativeCommandBuffer(), data.Markers.CommandSampler))
-            {
-                data.Pass.Record(passContext);
-            }
+            data.Pass.Record(passContext);
         }
 
         internal static bool ShouldEnableAsyncCompute(

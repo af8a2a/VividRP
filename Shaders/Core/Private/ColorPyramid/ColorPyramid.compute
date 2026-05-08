@@ -1,12 +1,57 @@
 #pragma use_dxc
+#pragma require Native16Bit
 #pragma kernel CopyMip0
-#pragma kernel DownsampleMip
+#pragma kernel KMain
+
+#define FFX_WAVE 1
+#define FFX_HALF
+
+#if defined(FFX_HALF)
+#define A_HALF 1
+#endif
+
+#define A_GPU 1
+#define A_HLSL 1
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.unity.render-pipelines.core/Runtime/PostProcessing/Shaders/ffx/ffx_a.hlsl"
+
+cbuffer spdConstants : register(b0)
+{
+    AU1 mips;
+    AU1 numWorkGroups;
+    AU2 workGroupOffset;
+}
 
 Texture2D<float4> _InputTexture;
-RWTexture2D<float4> _InputPyramidTexture;
-RWTexture2D<float4> _OutputPyramidTexture;
+RWTexture2D<float4> rw_spd_mip0;
+RWTexture2D<float4> rw_spd_mip1;
+RWTexture2D<float4> rw_spd_mip2;
+RWTexture2D<float4> rw_spd_mip3;
+RWTexture2D<float4> rw_spd_mip4;
+RWTexture2D<float4> rw_spd_mip5;
+globallycoherent RWTexture2D<float4> rw_spd_mip6;
+RWTexture2D<float4> rw_spd_mip7;
+RWTexture2D<float4> rw_spd_mip8;
+RWTexture2D<float4> rw_spd_mip9;
+RWTexture2D<float4> rw_spd_mip10;
+RWTexture2D<float4> rw_spd_mip11;
+RWTexture2D<float4> rw_spd_mip12;
 
 float4 _OutputSize;
+
+struct SpdGlobalAtomicBuffer
+{
+    uint counter[6];
+};
+
+globallycoherent RWStructuredBuffer<SpdGlobalAtomicBuffer> spdGlobalAtomic : register(u0);
+
+groupshared AU1 spdCounter;
+
+uint2 ClampToDimensions(uint2 pixelCoord, uint width, uint height)
+{
+    return min(pixelCoord, uint2(max(width, 1u) - 1u, max(height, 1u) - 1u));
+}
 
 bool IsOutside(uint2 pixelCoord)
 {
@@ -19,19 +64,221 @@ float4 LoadInputPixel(uint2 pixelCoord)
     uint height;
     _InputTexture.GetDimensions(width, height);
 
-    pixelCoord = min(pixelCoord, uint2(max(width, 1u) - 1u, max(height, 1u) - 1u));
+    pixelCoord = ClampToDimensions(pixelCoord, width, height);
     return _InputTexture.Load(int3(pixelCoord, 0));
 }
 
-float4 LoadPyramidPixel(uint2 pixelCoord)
+uint2 ClampToMip0(uint2 pixelCoord)
 {
     uint width;
     uint height;
-    _InputPyramidTexture.GetDimensions(width, height);
-
-    pixelCoord = min(pixelCoord, uint2(max(width, 1u) - 1u, max(height, 1u) - 1u));
-    return _InputPyramidTexture[pixelCoord];
+    rw_spd_mip0.GetDimensions(width, height);
+    return ClampToDimensions(pixelCoord, width, height);
 }
+
+uint2 ClampToMip6(uint2 pixelCoord)
+{
+    uint width;
+    uint height;
+    rw_spd_mip6.GetDimensions(width, height);
+    return ClampToDimensions(pixelCoord, width, height);
+}
+
+#define STORE_MIP(mipTexture, pixelCoord, value) \
+{ \
+    uint mipWidth; \
+    uint mipHeight; \
+    mipTexture.GetDimensions(mipWidth, mipHeight); \
+    if ((pixelCoord).x < mipWidth && (pixelCoord).y < mipHeight) \
+    { \
+        mipTexture[pixelCoord] = value; \
+    } \
+}
+
+#ifndef SPD_PACKED_ONLY
+groupshared AF1 spdIntermediateR[16][16];
+groupshared AF1 spdIntermediateG[16][16];
+groupshared AF1 spdIntermediateB[16][16];
+groupshared AF1 spdIntermediateA[16][16];
+
+AF4 SpdLoadSourceImage(AF2 tex)
+{
+    return rw_spd_mip0[ClampToMip0(uint2(tex))];
+}
+
+AF4 SpdLoad(ASU2 tex)
+{
+    return rw_spd_mip6[ClampToMip6(uint2(tex))];
+}
+
+void SpdStore(ASU2 pix, AF4 outValue, AU1 mipLevel = 0)
+{
+    mipLevel = mipLevel + 1;
+    switch (mipLevel)
+    {
+    case 0:
+        STORE_MIP(rw_spd_mip0, pix, outValue);
+        break;
+    case 1:
+        STORE_MIP(rw_spd_mip1, pix, outValue);
+        break;
+    case 2:
+        STORE_MIP(rw_spd_mip2, pix, outValue);
+        break;
+    case 3:
+        STORE_MIP(rw_spd_mip3, pix, outValue);
+        break;
+    case 4:
+        STORE_MIP(rw_spd_mip4, pix, outValue);
+        break;
+    case 5:
+        STORE_MIP(rw_spd_mip5, pix, outValue);
+        break;
+    case 6:
+        STORE_MIP(rw_spd_mip6, pix, outValue);
+        break;
+    case 7:
+        STORE_MIP(rw_spd_mip7, pix, outValue);
+        break;
+    case 8:
+        STORE_MIP(rw_spd_mip8, pix, outValue);
+        break;
+    case 9:
+        STORE_MIP(rw_spd_mip9, pix, outValue);
+        break;
+    case 10:
+        STORE_MIP(rw_spd_mip10, pix, outValue);
+        break;
+    case 11:
+        STORE_MIP(rw_spd_mip11, pix, outValue);
+        break;
+    case 12:
+        STORE_MIP(rw_spd_mip12, pix, outValue);
+        break;
+    default:
+        break;
+    }
+}
+
+void SpdIncreaseAtomicCounter(AU1 slice)
+{
+    InterlockedAdd(spdGlobalAtomic[0].counter[slice], 1, spdCounter);
+}
+
+AU1 SpdGetAtomicCounter()
+{
+    return spdCounter;
+}
+
+void SpdResetAtomicCounter(AU1 slice)
+{
+    spdGlobalAtomic[0].counter[slice] = 0;
+}
+
+AF4 SpdLoadIntermediate(AU1 x, AU1 y)
+{
+    return AF4(
+        spdIntermediateR[x][y],
+        spdIntermediateG[x][y],
+        spdIntermediateB[x][y],
+        spdIntermediateA[x][y]);
+}
+
+void SpdStoreIntermediate(AU1 x, AU1 y, AF4 value)
+{
+    spdIntermediateR[x][y] = value.x;
+    spdIntermediateG[x][y] = value.y;
+    spdIntermediateB[x][y] = value.z;
+    spdIntermediateA[x][y] = value.w;
+}
+
+AF4 SpdReduce4(AF4 v0, AF4 v1, AF4 v2, AF4 v3)
+{
+    return (v0 + v1 + v2 + v3) * 0.25;
+}
+#endif
+
+#ifdef A_HALF
+groupshared AH2 spdIntermediateRG[16][16];
+groupshared AH2 spdIntermediateBA[16][16];
+
+AH4 SpdLoadSourceImageH(AF2 tex)
+{
+    return AH4(rw_spd_mip0[ClampToMip0(uint2(tex))]);
+}
+
+AH4 SpdLoadH(ASU2 p)
+{
+    return AH4(rw_spd_mip6[ClampToMip6(uint2(p))]);
+}
+
+void SpdStoreH(ASU2 p, AH4 value, AU1 mip)
+{
+    switch (mip)
+    {
+    case 0:
+        STORE_MIP(rw_spd_mip1, p, value);
+        break;
+    case 1:
+        STORE_MIP(rw_spd_mip2, p, value);
+        break;
+    case 2:
+        STORE_MIP(rw_spd_mip3, p, value);
+        break;
+    case 3:
+        STORE_MIP(rw_spd_mip4, p, value);
+        break;
+    case 4:
+        STORE_MIP(rw_spd_mip5, p, value);
+        break;
+    case 5:
+        STORE_MIP(rw_spd_mip6, p, AF4(value));
+        break;
+    case 6:
+        STORE_MIP(rw_spd_mip7, p, value);
+        break;
+    case 7:
+        STORE_MIP(rw_spd_mip8, p, value);
+        break;
+    case 8:
+        STORE_MIP(rw_spd_mip9, p, value);
+        break;
+    case 9:
+        STORE_MIP(rw_spd_mip10, p, value);
+        break;
+    case 10:
+        STORE_MIP(rw_spd_mip11, p, value);
+        break;
+    case 11:
+        STORE_MIP(rw_spd_mip12, p, value);
+        break;
+    default:
+        break;
+    }
+}
+
+AH4 SpdLoadIntermediateH(AU1 x, AU1 y)
+{
+    return AH4(
+        spdIntermediateRG[x][y].x,
+        spdIntermediateRG[x][y].y,
+        spdIntermediateBA[x][y].x,
+        spdIntermediateBA[x][y].y);
+}
+
+void SpdStoreIntermediateH(AU1 x, AU1 y, AH4 value)
+{
+    spdIntermediateRG[x][y] = value.xy;
+    spdIntermediateBA[x][y] = value.zw;
+}
+
+AH4 SpdReduce4H(AH4 v0, AH4 v1, AH4 v2, AH4 v3)
+{
+    return (v0 + v1 + v2 + v3) * AH1(0.25);
+}
+#endif
+
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/FidelityFX/ffx_spd.hlsl"
 
 [numthreads(8, 8, 1)]
 void CopyMip0(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -40,22 +287,17 @@ void CopyMip0(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (IsOutside(pixelCoord))
         return;
 
-    _OutputPyramidTexture[pixelCoord] = LoadInputPixel(pixelCoord);
+    rw_spd_mip0[pixelCoord] = LoadInputPixel(pixelCoord);
 }
 
-[numthreads(8, 8, 1)]
-void DownsampleMip(uint3 dispatchThreadId : SV_DispatchThreadID)
+[numthreads(256, 1, 1)]
+void KMain(uint3 WorkGroupId : SV_GroupID, uint LocalThreadIndex : SV_GroupIndex)
 {
-    uint2 pixelCoord = dispatchThreadId.xy;
-    if (IsOutside(pixelCoord))
-        return;
-
-    uint2 sourceCoord = pixelCoord << 1;
-    float4 color =
-        LoadPyramidPixel(sourceCoord) +
-        LoadPyramidPixel(sourceCoord + uint2(1, 0)) +
-        LoadPyramidPixel(sourceCoord + uint2(0, 1)) +
-        LoadPyramidPixel(sourceCoord + uint2(1, 1));
-
-    _OutputPyramidTexture[pixelCoord] = color * 0.25;
+    SpdDownsampleH(
+        AU2(WorkGroupId.xy),
+        AU1(LocalThreadIndex),
+        AU1(mips),
+        AU1(numWorkGroups),
+        AU1(WorkGroupId.z),
+        AU2(workGroupOffset));
 }

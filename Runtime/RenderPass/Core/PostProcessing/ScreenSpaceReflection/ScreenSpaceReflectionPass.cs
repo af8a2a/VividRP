@@ -7,7 +7,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public sealed class ScreenSpaceReflectionPass : ComputePass, IStablePassResourceLayout
+    public sealed class ScreenSpaceReflectionPass : ComputePass, IStablePassResourceLayout, IRenderGraphPreparePass
     {
         private const int ThreadGroupSize = 8;
         private const int IndirectArgsElementCount = 4;
@@ -248,8 +248,12 @@ namespace VividRP.Runtime.RenderPass.Core
             UpdateTileResourcesDescriptor(m_Width, m_Height);
 
             m_ConstantBuffer = BuildConstantBuffer(camera, m_Width, m_Height, m_Settings);
-            ResolveColorPyramidHistory(frameData);
             PrepareFrameContextOutput(frameData);
+        }
+
+        public void PrepareRenderGraph(ContextContainer frameData)
+        {
+            ResolveColorPyramidHistory(frameData);
         }
 
         public override void Record(ComputePassContext context)
@@ -326,7 +330,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var colorPyramidData = frameData.Get<VividColorPyramidData>();
             if (colorPyramidData == null
-                || !colorPyramidData.hasValidHistory
                 || colorPyramidData.previousColorPyramid == null
                 || colorPyramidData.width <= 0
                 || colorPyramidData.height <= 0)
@@ -335,14 +338,18 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             SetPreviousColorPyramidTexture(colorPyramidData.previousColorPyramid);
-            m_UseHistoryColorPyramid = true;
-            m_ConstantBuffer.SsrUseHistoryColorPyramid = 1;
             m_ConstantBuffer.SsrHistoryColorPyramidMaxMip = Mathf.Max(0, colorPyramidData.mipCount - 1);
             m_ConstantBuffer.SsrHistoryColorPyramidSize = new Vector4(
                 colorPyramidData.width,
                 colorPyramidData.height,
                 1.0f / Mathf.Max(1, colorPyramidData.width),
                 1.0f / Mathf.Max(1, colorPyramidData.height));
+
+            if (!colorPyramidData.hasValidHistory)
+                return false;
+
+            m_UseHistoryColorPyramid = true;
+            m_ConstantBuffer.SsrUseHistoryColorPyramid = 1;
             return true;
         }
 
@@ -473,10 +480,15 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, GBuffer2Id, m_GBuffer2.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, SkyTextureId, m_SkyTexture.innerHandle);
             cmd.SetComputeBufferParam(m_ComputeShader, m_SSRTracingKernel, SSRTileListId, m_TileListBuffer.innerHandle);
-            if (m_UseHistoryColorPyramid && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true)
+            if (!ReferenceEquals(m_PreviousColorPyramidTexture, m_DefaultPreviousColorPyramidTexture)
+                && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true)
+            {
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture.innerHandle);
+            }
             else
+            {
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, PreviousColorPyramidTextureId, computePassContext.renderGraphContext.defaultResources.blackTexture);
+            }
 
             cmd.DispatchCompute(m_ComputeShader, m_SSRTracingKernel, m_DispatchIndirectArgsBuffer.innerHandle, 0);
         }

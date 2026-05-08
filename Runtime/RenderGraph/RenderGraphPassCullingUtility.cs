@@ -70,6 +70,9 @@ namespace VividRP.Runtime
             if (typeof(IAllowGlobalStateModificationPass).IsAssignableFrom(passType))
                 return true;
 
+            if (typeof(IRenderGraphSideEffectPass).IsAssignableFrom(passType))
+                return true;
+
             var hasWritableResource = false;
             var hasTransientWritableResource = false;
             foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))

@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Unity.Profiling;
-using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
@@ -25,7 +24,6 @@ namespace VividRP.Runtime
             RecordGraph = new ProfilerMarker($"{MarkerRoot}.RecordGraph/{displayName}");
             Record = new ProfilerMarker($"{MarkerRoot}.Record/{displayName}");
             Dispose = new ProfilerMarker($"{MarkerRoot}.Dispose/{displayName}");
-            CommandSampler = new ProfilingSampler($"{MarkerRoot}.Commands/{displayName}");
             GraphName = graphName;
         }
 
@@ -35,7 +33,6 @@ namespace VividRP.Runtime
         public ProfilerMarker RecordGraph { get; }
         public ProfilerMarker Record { get; }
         public ProfilerMarker Dispose { get; }
-        public ProfilingSampler CommandSampler { get; }
         public string GraphName { get; }
     }
 

@@ -248,6 +248,12 @@ namespace VividRP.Runtime
             }
         }
 
+        private static void PrepareRenderGraphPass(IRenderPass pass)
+        {
+            if (pass is IRenderGraphPreparePass preparePass)
+                preparePass.PrepareRenderGraph(s_FrameData);
+        }
+
         private static void DisposeRenderPass(IRenderPass pass, string displayName = null)
         {
             if (pass == null)
@@ -1534,6 +1540,8 @@ namespace VividRP.Runtime
             for (var passIndex = 0; passIndex < s_RenderPasses.Count; passIndex++)
             {
                 var pass = s_RenderPasses[passIndex];
+                PrepareRenderGraphPass(pass);
+
 #if UNITY_EDITOR
                 if (!recordedPreImageEffectGizmos && pass is IRenderGizmoPrePostProcessBoundaryPass)
                 {

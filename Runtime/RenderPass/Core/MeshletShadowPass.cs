@@ -14,6 +14,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int RendererListCount = (int)VividRendererListID.Count;
 
         private static readonly int s_CullId = Shader.PropertyToID("_Cull");
+        private static readonly int s_UnityIndirectDrawArgsId = Shader.PropertyToID("unity_IndirectDrawArgs");
+        private static readonly int s_UnityBaseCommandIdId = Shader.PropertyToID("unity_BaseCommandID");
+        private static readonly int ShadowBiasId = Shader.PropertyToID("_ShadowBias");
         private static readonly int s_VisibleMeshletRenderRequestsId = Shader.PropertyToID("_VisibleMeshletRenderRequests");
         private static readonly string s_AlphaTestKeyword = "_ALPHATEST_ON";
 
@@ -21,13 +24,16 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_CSMShadowAtlas;
 
         private readonly Material[] m_Materials = new Material[RendererListCount];
+        private readonly MaterialPropertyBlock m_DrawProperties = new MaterialPropertyBlock();
 
         private bool m_IsActive;
         private int m_CascadeCount;
         private int m_CascadeResolution;
         private float m_SlopeScaleDepthBias;
+        private Vector4 m_ShadowCasterState;
         private ShaderVariablesGlobal m_CameraShaderGlobals;
         private VividShadowData m_ShadowData;
+        private Camera m_LODCamera;
 
         public MeshletShadowPass()
         {
@@ -58,8 +64,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CascadeCount = 0;
             m_CascadeResolution = 0;
             m_SlopeScaleDepthBias = 0.0f;
+            m_ShadowCasterState = Vector4.zero;
             m_CameraShaderGlobals = default;
             m_ShadowData = null;
+            m_LODCamera = null;
 
             if (m_Materials[0] == null)
                 return;
@@ -83,11 +91,16 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
+            if (cameraData.camera == null)
+                return;
+
             m_CameraShaderGlobals = CSMShadowPass.ResolveCameraShaderGlobals(frameData, cameraData);
             m_SlopeScaleDepthBias = Mathf.Max(0.0f, additionalLightData.slopeBias);
+            m_ShadowCasterState = CSMShadowPass.BuildShadowCasterState(lightData.mainVisibleLight);
             m_CascadeCount = Mathf.Min(shadowData.cascadeCount, VividShadowData.MaxCascadeCount);
             m_CascadeResolution = shadowData.cascadeResolution;
             m_ShadowData = shadowData;
+            m_LODCamera = cameraData.camera;
             m_IsActive = true;
         }
 
@@ -116,11 +129,17 @@ namespace VividRP.Runtime.RenderPass.Core
             var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
             using (new ProfilingScope(nativeCmd, profilingSampler))
             {
+                // LOD selection must match the main camera so meshlets do not pop between frames as
+                // cascade orientation changes. Frustum culling still uses the cascade view-projection.
+                VividGPUDrivenCullingContextUtility.BuildLODSelectionContext(
+                    m_LODCamera,
+                    out var lodContext);
+
                 // Phase A: cull every cascade with no render target bound. Each cascade owns its own
                 // dispatcher so output buffers do not collide and do not overwrite the main-view buffers.
                 for (int cascadeIndex = 0; cascadeIndex < m_CascadeCount; cascadeIndex++)
                 {
-                    BuildShadowCullingContext(cascadeIndex, out var cullingContext, out var lodContext);
+                    BuildShadowCullingContext(cascadeIndex, out var cullingContext);
                     system.CullShadowCascade(
                         cascadeIndex,
                         nativeCmd,
@@ -161,6 +180,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     nativeCmd.EnableScissorRect(new Rect(offsetX, offsetY, m_CascadeResolution, m_CascadeResolution));
                     nativeCmd.SetViewProjectionMatrices(viewMatrix, projMatrix);
                     ConstantBuffer.PushGlobal(nativeCmd, cascadeShaderGlobals, ShaderVariablesGlobal.ConstantBufferShaderId);
+                    nativeCmd.SetGlobalVector(ShadowBiasId, m_ShadowCasterState);
 
                     for (int rendererListIndex = 0; rendererListIndex < m_Materials.Length; rendererListIndex++)
                     {
@@ -168,14 +188,18 @@ namespace VividRP.Runtime.RenderPass.Core
                         if (material == null)
                             continue;
 
-                        material.SetBuffer(s_VisibleMeshletRenderRequestsId, requestsBuffer);
+                        m_DrawProperties.Clear();
+                        m_DrawProperties.SetBuffer(s_VisibleMeshletRenderRequestsId, requestsBuffer);
+                        m_DrawProperties.SetBuffer(s_UnityIndirectDrawArgsId, argsBuffer);
+                        m_DrawProperties.SetInteger(s_UnityBaseCommandIdId, rendererListIndex);
                         nativeCmd.DrawProceduralIndirect(
                             Matrix4x4.identity,
                             material,
                             0,
                             MeshTopology.Triangles,
                             argsBuffer,
-                            rendererListIndex * IndirectDrawArgsByteStride);
+                            rendererListIndex * IndirectDrawArgsByteStride,
+                            m_DrawProperties);
                     }
                 }
 
@@ -201,32 +225,38 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_IsActive = false;
             m_ShadowData = null;
+            m_LODCamera = null;
+            m_ShadowCasterState = Vector4.zero;
         }
 
         private void BuildShadowCullingContext(
             int cascadeIndex,
-            out VividGPUCullingContext cullingContext,
-            out VividGPULODSelectionContext lodSelectionContext)
+            out VividGPUCullingContext cullingContext)
         {
             var viewMatrix = m_ShadowData.viewMatrices[cascadeIndex];
             var projMatrix = m_ShadowData.projMatrices[cascadeIndex];
             var invViewMatrix = viewMatrix.inverse;
-            var pixelSize = new Vector2(m_CascadeResolution, m_CascadeResolution);
             Vector4 col0 = invViewMatrix.GetColumn(0);
             Vector4 col1 = invViewMatrix.GetColumn(1);
             Vector4 col3 = invViewMatrix.GetColumn(3);
+            var cullingSphereWS = m_ShadowData.cascadeSpheres[cascadeIndex];
+            cullingSphereWS.w = Mathf.Sqrt(Mathf.Max(0.0f, cullingSphereWS.w));
 
+            // We pass the cascade matrices for frustum-plane derivation but discard the LOD
+            // selection context here. The caller supplies a camera-derived LOD context so meshlet
+            // LODs in the shadow atlas stay synchronized with the main view.
             VividGPUDrivenCullingContextUtility.Build(
                 viewMatrix,
                 projMatrix,
                 cameraPositionWS: new Vector3(col3.x, col3.y, col3.z),
                 cameraRightWS: new Vector3(col0.x, col0.y, col0.z),
                 cameraUpWS: new Vector3(col1.x, col1.y, col1.z),
-                pixelSize: pixelSize,
+                pixelSize: new Vector2(m_CascadeResolution, m_CascadeResolution),
                 isPerspective: false,
                 passMask: VividInstancePassMask.Shadows,
-                out cullingContext,
-                out lodSelectionContext);
+                cullingSphereWS: cullingSphereWS,
+                cullingContext: out cullingContext,
+                lodSelectionContext: out _);
         }
 
         private static void ConfigureMaterial(Material material, VividRendererListID rendererListID)

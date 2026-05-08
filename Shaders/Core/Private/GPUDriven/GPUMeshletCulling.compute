@@ -37,7 +37,8 @@ void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
     const VividMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
     const float4 boundingSphereWS = TransformSphere(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
 
-    if (!FrustumVsSphere(cullingContext, boundingSphereWS))
+    if (!FrustumVsSphere(cullingContext, boundingSphereWS) ||
+        !LightSphereCulling(cullingContext, boundingSphereWS))
     {
         return;
     }

@@ -341,7 +341,7 @@ namespace VividRP.Runtime.RenderPass.Core
             return textureScaleAndBias * worldToShadow;
         }
 
-        private static Vector4 BuildShadowCasterState(in VisibleLight shadowLight)
+        internal static Vector4 BuildShadowCasterState(in VisibleLight shadowLight)
         {
             // Match HDRP's directional shadow path: rely on raster slope-scale depth bias,
             // receiver normal bias, and a tiny fixed compare bias instead of caster vertex offsets.

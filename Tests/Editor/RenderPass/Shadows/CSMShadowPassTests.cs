@@ -43,7 +43,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("shadowData.viewProjMatrices[i] = BuildWorldToShadowMatrix(m_ProjMatrices[i], m_ViewMatrices[i]);"));
             Assert.That(source, Does.Contain("shadowData.cascadeWorldTexelSizes[i] = m_CascadeWorldTexelSizes[i];"));
             Assert.That(source, Does.Contain("shadowData.cascadeBorders[i] = m_CascadeBorders[i];"));
-            Assert.That(source, Does.Contain("private static Vector4 BuildShadowCasterState(in VisibleLight shadowLight)"));
+            Assert.That(source, Does.Contain("internal static Vector4 BuildShadowCasterState(in VisibleLight shadowLight)"));
             Assert.That(source, Does.Contain("return new Vector4("));
             Assert.That(source, Does.Contain("0.0f,"));
             Assert.That(source, Does.Contain("private static Matrix4x4 BuildWorldToShadowMatrix(Matrix4x4 projMatrix, Matrix4x4 viewMatrix)"));

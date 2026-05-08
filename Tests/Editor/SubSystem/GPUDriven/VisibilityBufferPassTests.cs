@@ -127,6 +127,12 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("ClearImportedBuffer("));
             Assert.That(passSource, Does.Contain("DrawProceduralIndirect("));
             Assert.That(passSource, Does.Contain("rendererListIndex * IndirectDrawArgsByteStride"));
+            Assert.That(passSource, Does.Contain("private readonly MaterialPropertyBlock m_DrawProperties = new MaterialPropertyBlock();"));
+            Assert.That(passSource, Does.Contain("m_DrawProperties.SetBuffer(s_VisibleMeshletRenderRequestsId, visibleMeshletRenderRequestsBuffer);"));
+            Assert.That(passSource, Does.Contain("m_DrawProperties.SetBuffer(s_UnityIndirectDrawArgsId, visibleMeshletIndirectArgsBuffer);"));
+            Assert.That(passSource, Does.Contain("m_DrawProperties.SetInteger(s_UnityBaseCommandIdId, rendererListIndex);"));
+            Assert.That(passSource, Does.Contain("m_DrawProperties);"));
+            Assert.That(passSource, Does.Not.Contain("material.SetBuffer(s_VisibleMeshletRenderRequestsId, visibleMeshletRenderRequestsBuffer);"));
             Assert.That(passSource, Does.Contain("CoreUtils.SetKeyword(material, s_AlphaTestKeyword"));
             Assert.That(passSource, Does.Contain("TryGetCurrentVisibleMeshletBuffers("));
         }
@@ -170,16 +176,7 @@ namespace VividRP.Editor.Tests
 
         private static string GetPassSourcePath()
         {
-            var passPath = Path.GetFullPath(Path.Combine(
-                Application.dataPath,
-                "..",
-                "Packages",
-                "VividRP",
-                "Runtime",
-                "RenderPass",
-                "Core",
-                "GPUDriven",
-                "VisibilityBufferPass.cs"));
+            var passPath = GetPackageFilePath("Runtime", "RenderPass", "Core", "GPUDriven", "VisibilityBufferPass.cs");
 
             Assert.That(File.Exists(passPath), Is.True, $"Expected pass source at '{passPath}'.");
             return passPath;
@@ -187,19 +184,30 @@ namespace VividRP.Editor.Tests
 
         private static string GetShaderSourcePath()
         {
-            var shaderPath = Path.GetFullPath(Path.Combine(
-                Application.dataPath,
-                "..",
-                "Packages",
-                "VividRP",
-                "Shaders",
-                "Core",
-                "Private",
-                "GPUDriven",
-                "VisibilityBufferPass.shader"));
+            var shaderPath = GetPackageFilePath("Shaders", "Core", "Private", "GPUDriven", "VisibilityBufferPass.shader");
 
             Assert.That(File.Exists(shaderPath), Is.True, $"Expected shader source at '{shaderPath}'.");
             return shaderPath;
+        }
+
+        private static string GetPackageFilePath(params string[] relativeParts)
+        {
+            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            string[] packageRoots =
+            {
+                Path.Combine(projectRoot, "Packages", "Custom_URP"),
+                Path.Combine(projectRoot, "Packages", "VividRP"),
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
+            };
+
+            foreach (var packageRoot in packageRoots)
+            {
+                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
+                if (File.Exists(fullPath))
+                    return fullPath;
+            }
+
+            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
         }
     }
 }

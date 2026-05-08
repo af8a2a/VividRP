@@ -230,6 +230,50 @@ bool FrustumVsSphere(const VividGPUCullingContext cullingContext, const float4 s
     return true;
 }
 
+bool DoLightSphereCulling(
+    const float4 receiverBoundingSphereLS,
+    const float4 casterBoundingSphereWS,
+    const float3x3 worldToLightSpaceRotation
+)
+{
+    const float3 casterCenterLS = mul(worldToLightSpaceRotation, casterBoundingSphereWS.xyz);
+    const float casterRadius = casterBoundingSphereWS.w;
+
+    const float3 receiverCenterLS = receiverBoundingSphereLS.xyz;
+    const float receiverRadius = receiverBoundingSphereLS.w;
+    const float3 receiverToCasterLS = casterCenterLS - receiverCenterLS;
+
+    const float intersectionMaxDistance = casterRadius + receiverRadius;
+    const float zSqAtSphereIntersection =
+        intersectionMaxDistance * intersectionMaxDistance - dot(receiverToCasterLS.xy, receiverToCasterLS.xy);
+
+    UNITY_FLATTEN
+    if (zSqAtSphereIntersection < 0.0f)
+    {
+        return false;
+    }
+
+    UNITY_FLATTEN
+    if (receiverToCasterLS.z < 0.0f && receiverToCasterLS.z * receiverToCasterLS.z > zSqAtSphereIntersection)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool LightSphereCulling(const VividGPUCullingContext cullingContext, const float4 casterBoundingSphereWS)
+{
+    UNITY_BRANCH
+    if (cullingContext.CullingSphereLS.w <= 0.0f)
+    {
+        return true;
+    }
+
+    const float3x3 worldToLightSpaceRotation = (float3x3) cullingContext.ViewMatrix;
+    return DoLightSphereCulling(cullingContext.CullingSphereLS, casterBoundingSphereWS, worldToLightSpaceRotation);
+}
+
 float2 GetNormalizedScreenCoordinates(const float4x4 viewProjectionMatrix, const float3 positionWS)
 {
     float4 clipPosition = mul(viewProjectionMatrix, float4(positionWS, 1.0f));
@@ -277,8 +321,11 @@ uint GetRendererListID(const VividInstanceData instanceData, const VividMaterial
 
 float3 GetViewForwardDir(const float4x4 viewMatrix)
 {
-    const float3x3 worldFromViewMatrix = UNITY_MATRIX_I_V;
-    return normalize(mul(worldFromViewMatrix, float3(0.0f, 0.0f, -1.0f)));
+    // View forward in view space is (0, 0, -1). Rotating it by the inverse rotation of the view
+    // matrix (i.e. transpose of the upper 3x3, since rotations are orthogonal) yields the world-
+    // space forward. In HLSL `mul(v, M3x3)` is equivalent to `mul(transpose(M3x3), v)`, so
+    // multiplying (0,0,-1) on the left by the upper 3x3 gives -row2.xyz.
+    return normalize(-float3(viewMatrix._m20, viewMatrix._m21, viewMatrix._m22));
 }
 
 bool ConeCulling(
@@ -288,7 +335,7 @@ bool ConeCulling(
 )
 {
     const float3 coneApexWS = TransformPosition(instanceData.ObjectToWorldMatrix, meshlet.ConeApexCutoff.xyz);
-    float3 coneAxisWS = mul((float3x3) instanceData.ObjectToWorldMatrix, meshlet.ConeAxis.xyz);
+    float3 coneAxisWS = mul(meshlet.ConeAxis.xyz, (float3x3) instanceData.WorldToObjectMatrix);
     const float axisLengthSq = LengthSq(coneAxisWS);
 
     if (axisLengthSq <= 1e-8f)

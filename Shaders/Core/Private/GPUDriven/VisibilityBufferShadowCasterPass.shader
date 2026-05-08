@@ -42,6 +42,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
             StructuredBuffer<VividMeshletRenderRequestPacked> _VisibleMeshletRenderRequests;
             StructuredBuffer<VividMeshletVertex> _SharedVertexBuffer;
             ByteAddressBuffer _SharedIndexBuffer;
+            float4 _ShadowBias;
 
             struct Attributes
             {
@@ -90,6 +91,18 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 return materialData.AlbedoColor * textureAlbedo;
             }
 
+            float4 ApplyVividShadowClamping(float4 positionCS)
+            {
+            #if UNITY_REVERSED_Z
+                float clampedZ = min(positionCS.z, positionCS.w * UNITY_NEAR_CLIP_VALUE);
+            #else
+                float clampedZ = max(positionCS.z, positionCS.w * UNITY_NEAR_CLIP_VALUE);
+            #endif
+
+                positionCS.z = lerp(positionCS.z, clampedZ, round(_ShadowBias.z) == 1.0 ? 1.0 : 0.0);
+                return positionCS;
+            }
+
             Varyings Vert(Attributes input)
             {
                 InitIndirectDrawArgs(0);
@@ -118,6 +131,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 const VividMeshletVertex vertex = PullVertex(meshlet, vertexIndex);
 
                 output.positionCS = TransformWorldToHClip(TransformPosition(instanceData.ObjectToWorldMatrix, vertex.Position.xyz));
+                output.positionCS = ApplyVividShadowClamping(output.positionCS);
 
                 #ifdef _ALPHATEST_ON
                 output.instanceIndex = renderRequest.InstanceID_LOD;

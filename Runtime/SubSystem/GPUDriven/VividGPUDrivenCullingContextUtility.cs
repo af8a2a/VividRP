@@ -52,6 +52,35 @@ namespace VividRP.Runtime.GPUDriven
             out VividGPULODSelectionContext lodSelectionContext
         )
         {
+            Build(
+                viewMatrix,
+                projectionMatrix,
+                cameraPositionWS,
+                cameraRightWS,
+                cameraUpWS,
+                pixelSize,
+                isPerspective,
+                passMask,
+                Vector4.zero,
+                out cullingContext,
+                out lodSelectionContext
+            );
+        }
+
+        public static void Build(
+            Matrix4x4 viewMatrix,
+            Matrix4x4 projectionMatrix,
+            Vector3 cameraPositionWS,
+            Vector3 cameraRightWS,
+            Vector3 cameraUpWS,
+            Vector2 pixelSize,
+            bool isPerspective,
+            VividInstancePassMask passMask,
+            Vector4 cullingSphereWS,
+            out VividGPUCullingContext cullingContext,
+            out VividGPULODSelectionContext lodSelectionContext
+        )
+        {
             Matrix4x4 gpuProjectionMatrix = GL.GetGPUProjectionMatrix(projectionMatrix, true);
             Matrix4x4 gpuViewProjectionMatrix = gpuProjectionMatrix * viewMatrix;
             Matrix4x4 cullingViewProjectionMatrix = projectionMatrix * viewMatrix;
@@ -62,7 +91,7 @@ namespace VividRP.Runtime.GPUDriven
                 ViewProjectionMatrix = ToFloat4x4(gpuViewProjectionMatrix),
                 ViewMatrix = ToFloat4x4(viewMatrix),
                 CameraPosition = new float4(cameraPositionWS.x, cameraPositionWS.y, cameraPositionWS.z, 1.0f),
-                CullingSphereLS = float4.zero,
+                CullingSphereLS = BuildCullingSphereLS(viewMatrix, cullingSphereWS),
                 PassMask = (int) passMask,
                 CameraIsPerspective = isPerspective ? 1 : 0,
                 BaseStartInstance = 0,
@@ -80,6 +109,33 @@ namespace VividRP.Runtime.GPUDriven
                 ScreenSizePixels = new float2(
                     Mathf.Max(1.0f, pixelSize.x),
                     Mathf.Max(1.0f, pixelSize.y)
+                ),
+            };
+        }
+
+        public static void BuildLODSelectionContext(
+            Camera camera,
+            out VividGPULODSelectionContext lodSelectionContext
+        )
+        {
+            if (camera == null)
+            {
+                throw new ArgumentNullException(nameof(camera));
+            }
+
+            Transform cameraTransform = camera.transform;
+            Matrix4x4 viewMatrix = camera.worldToCameraMatrix;
+            Matrix4x4 gpuViewProjectionMatrix = GL.GetGPUProjectionMatrix(camera.projectionMatrix, true) * viewMatrix;
+
+            lodSelectionContext = new VividGPULODSelectionContext
+            {
+                ViewProjectionMatrix = ToFloat4x4(gpuViewProjectionMatrix),
+                CameraPosition = ToFloat4(cameraTransform.position, 1.0f),
+                CameraUp = ToFloat4(cameraTransform.up, 0.0f),
+                CameraRight = ToFloat4(cameraTransform.right, 0.0f),
+                ScreenSizePixels = new float2(
+                    Mathf.Max(1.0f, GetCameraPixelWidth(camera)),
+                    Mathf.Max(1.0f, GetCameraPixelHeight(camera))
                 ),
             };
         }
@@ -157,6 +213,15 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             return camera.pixelRect.height;
+        }
+
+        private static float4 BuildCullingSphereLS(Matrix4x4 viewMatrix, Vector4 cullingSphereWS)
+        {
+            if (cullingSphereWS.w <= 0.0f)
+                return float4.zero;
+
+            Vector3 centerLS = viewMatrix.MultiplyPoint3x4(cullingSphereWS);
+            return new float4(centerLS.x, centerLS.y, centerLS.z, cullingSphereWS.w);
         }
 
         private static float4 ToFloat4(Vector3 value, float w)

@@ -53,6 +53,8 @@
 - Pass ordering is compiler-driven. When changing binding semantics or connection rules, verify `RenderGraphPassCompilationUtility` still derives the right dependencies and cycle fallback behavior.
 - If a pass changes its exposed resource layout dynamically, keep `IDynamicPassResourceLayout` behavior and the related editor/runtime tests in sync.
 - If a pass supports async compute or global state modification, express that through the existing marker interfaces instead of ad hoc flags.
+- Reserve `IRenderGraphRecordingPass` for the antialiasing pass only. New runtime passes should use the standard `ComputePass`, `UnsafePass`, or `RasterPass` recorder path instead of bypassing the recorder for post-processing, history, resource, or culling behavior.
+- For passes whose work must run even without same-frame resource consumers, implement `IRenderGraphSideEffectPass` so `RenderGraphPassCullingUtility` treats the pass as live. Use it for history updates, readbacks, imported-resource updates, or persistent side effects, and pair behavior changes with focused culling utility tests.
 - When adding a runtime pass type, verify the generated node registry, navigation helpers, compilation utility, and pass-node tests still reflect the new pass correctly.
 
 ## Resource Workflow

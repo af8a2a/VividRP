@@ -1538,7 +1538,9 @@ namespace VividRP.Runtime
                 if (!recordedPreImageEffectGizmos && pass is IRenderGizmoPrePostProcessBoundaryPass)
                 {
                     var boundaryResources = GetCurrentPassResources(pass);
-                    if (TryGetPreImageEffectGizmoTargets(
+                    var camera = s_FrameData.GetOrCreate<VividCameraData>().camera;
+                    if (VividRenderPipeline.ShouldRenderPreImageEffectGizmosInRenderGraph(camera)
+                        && TryGetPreImageEffectGizmoTargets(
                             passIndex,
                             boundaryResources,
                             out var gizmoColorTexture,

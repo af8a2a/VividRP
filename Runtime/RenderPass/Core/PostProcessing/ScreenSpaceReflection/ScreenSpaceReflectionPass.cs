@@ -7,7 +7,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public sealed class ScreenSpaceReflectionPass : ComputePass, IRenderGraphRecordingPass, IStablePassResourceLayout
+    public sealed class ScreenSpaceReflectionPass : ComputePass, IStablePassResourceLayout
     {
         private const int ThreadGroupSize = 8;
         private const int IndirectArgsElementCount = 4;
@@ -28,6 +28,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int OutputColorTextureId = Shader.PropertyToID("_OutputColorTexture");
         private static readonly int SSRTraceTextureId = Shader.PropertyToID("_SSRTraceTexture");
         private static readonly int SSRResolveTextureId = Shader.PropertyToID("_SSRResolveTexture");
+        private static readonly int SSRRayInfoTextureId = Shader.PropertyToID("_SSRRayInfoTexture");
         private static readonly int SSRTileListId = Shader.PropertyToID("_SSRTileList");
         private static readonly int SSRDispatchIndirectArgsId = Shader.PropertyToID("_SSRDispatchIndirectArgs");
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
@@ -64,12 +65,6 @@ namespace VividRP.Runtime.RenderPass.Core
             public Vector2 Padding1;
         }
 
-        private sealed class GraphPassData
-        {
-            public ScreenSpaceReflectionPass Pass;
-            public ContextContainer FrameData;
-        }
-
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
 
@@ -97,12 +92,43 @@ namespace VividRP.Runtime.RenderPass.Core
         private ComputeShader m_ComputeShader;
         private readonly RenderGraphTexture m_DefaultHZBTexture;
         private readonly RenderGraphBuffer m_DefaultHZBMipLevelOffsets;
+
+        [RenderGraphResource(
+            Name = "ScreenSpaceReflectionTrace",
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private readonly RenderGraphTexture m_TraceTexture;
+
+        [RenderGraphResource(
+            Name = "ScreenSpaceReflectionResolve",
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private readonly RenderGraphTexture m_ResolveTexture;
+
+        [RenderGraphResource(
+            Name = "ScreenSpaceReflectionRayInfo",
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_RayInfoTexture;
+
+        [RenderGraphResource(
+            Name = "SSRTileList",
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private readonly RenderGraphBuffer m_TileListBuffer;
+
+        [RenderGraphResource(
+            Name = "SSRDispatchIndirectArgs",
+            Access = AccessFlags.ReadWrite)]
         private readonly RenderGraphBuffer m_DispatchIndirectArgsBuffer;
         private readonly RenderGraphTexture m_SkyTexture;
+
+        [RenderGraphResource(
+            Name = "ScreenSpaceReflectionDebug",
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
         private readonly RenderGraphTexture m_DebugTexture;
+        private readonly RenderGraphTexture m_DefaultPreviousColorPyramidTexture;
         private int m_SSRClassifyTilesKernel = -1;
         private int m_SSRTracingKernel = -1;
         private int m_SSRResolveKernel = -1;
@@ -115,6 +141,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_ShouldApply;
         private bool m_IsPassResourceLayoutDirty;
         private bool m_UseHistoryColorPyramid;
+
+        [RenderGraphResource(Name = "PreviousColorPyramid", Access = AccessFlags.Read)]
         private RenderGraphTexture m_PreviousColorPyramidTexture;
         private Color m_SkyTextureTint = Color.white;
         private Vector4 m_SkyTextureParams;
@@ -138,6 +166,7 @@ namespace VividRP.Runtime.RenderPass.Core
             output = CreateColorTexture("ScreenSpaceReflectionOutput", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
             m_TraceTexture = CreateColorTexture("ScreenSpaceReflectionTrace", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
             m_ResolveTexture = CreateColorTexture("ScreenSpaceReflectionResolve", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
+            m_RayInfoTexture = CreateColorTexture("ScreenSpaceReflectionRayInfo", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
             m_TileListBuffer = RenderGraphBuffer.CreateStructured("SSRTileList", 1, sizeof(uint));
             m_DispatchIndirectArgsBuffer = RenderGraphBuffer.CreateStructured(
                 "SSRDispatchIndirectArgs",
@@ -146,10 +175,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
             m_SkyTexture = CreateSkyCubemapTexture("ScreenSpaceReflectionSkyTexture");
             m_DebugTexture = CreateColorTexture("ScreenSpaceReflectionDebug", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
+            m_DefaultPreviousColorPyramidTexture = RenderGraphTexture.CreateInput(
+                "PreviousColorPyramid",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            m_PreviousColorPyramidTexture = m_DefaultPreviousColorPyramidTexture;
 
             ConfigureHZBDescriptor(m_HZBTexture);
             ConfigureInternalTextureDescriptor(m_TraceTexture, "ScreenSpaceReflectionTrace", 1, 1);
             ConfigureInternalTextureDescriptor(m_ResolveTexture, "ScreenSpaceReflectionResolve", 1, 1);
+            ConfigureInternalTextureDescriptor(m_RayInfoTexture, "ScreenSpaceReflectionRayInfo", 1, 1);
             ConfigureInternalTextureDescriptor(m_DebugTexture, "ScreenSpaceReflectionDebug", 1, 1);
         }
 
@@ -214,80 +248,15 @@ namespace VividRP.Runtime.RenderPass.Core
             UpdateTileResourcesDescriptor(m_Width, m_Height);
 
             m_ConstantBuffer = BuildConstantBuffer(camera, m_Width, m_Height, m_Settings);
+            ResolveColorPyramidHistory(frameData);
             PrepareFrameContextOutput(frameData);
-        }
-
-        public void RecordGraph(RenderGraphRecordingContext context)
-        {
-            if (context?.RenderGraph == null)
-                return;
-
-            ResolveColorPyramidHistory(context);
-
-            if (!ShouldRecordEffect() && !CanRecordCopy())
-                return;
-
-            var outputHandle = context.GetOrCreateTextureHandle(output);
-            var depthHandle = context.GetOrCreateTextureHandle(m_DepthTexture);
-            var hzbHandle = context.GetOrCreateTextureHandle(m_HZBTexture);
-            var hzbMipLevelOffsetsHandle = context.GetOrCreateBufferHandle(m_HZBMipLevelOffsets);
-            var gbuffer0Handle = context.GetOrCreateTextureHandle(m_GBuffer0);
-            var gbuffer1Handle = context.GetOrCreateTextureHandle(m_GBuffer1);
-            var gbuffer2Handle = context.GetOrCreateTextureHandle(m_GBuffer2);
-            var traceHandle = context.GetOrCreateTextureHandle(m_TraceTexture);
-            var resolveHandle = context.GetOrCreateTextureHandle(m_ResolveTexture);
-            var tileListHandle = context.GetOrCreateBufferHandle(m_TileListBuffer);
-            var dispatchIndirectArgsHandle = context.GetOrCreateBufferHandle(m_DispatchIndirectArgsBuffer);
-            var skyTextureHandle = context.GetOrCreateTextureHandle(m_SkyTexture);
-            var debugTextureHandle = context.GetOrCreateTextureHandle(m_DebugTexture);
-
-            output.innerHandle = outputHandle;
-            m_DepthTexture.innerHandle = depthHandle;
-            m_HZBTexture.innerHandle = hzbHandle;
-            m_HZBMipLevelOffsets.innerHandle = hzbMipLevelOffsetsHandle;
-            m_GBuffer0.innerHandle = gbuffer0Handle;
-            m_GBuffer1.innerHandle = gbuffer1Handle;
-            m_GBuffer2.innerHandle = gbuffer2Handle;
-            m_TraceTexture.innerHandle = traceHandle;
-            m_ResolveTexture.innerHandle = resolveHandle;
-            m_TileListBuffer.innerHandle = tileListHandle;
-            m_DispatchIndirectArgsBuffer.innerHandle = dispatchIndirectArgsHandle;
-            m_SkyTexture.innerHandle = skyTextureHandle;
-            m_DebugTexture.innerHandle = debugTextureHandle;
-
-            using var builder = context.RenderGraph.AddComputePass<GraphPassData>(
-                RenderSSRProfilerTag,
-                out var passData);
-
-            passData.Pass = this;
-            passData.FrameData = context.FrameData;
-
-            builder.UseTexture(outputHandle, AccessFlags.Write);
-            builder.UseTexture(depthHandle, AccessFlags.Read);
-            builder.UseTexture(hzbHandle, AccessFlags.Read);
-            builder.UseBuffer(hzbMipLevelOffsetsHandle, AccessFlags.Read);
-            builder.UseTexture(gbuffer0Handle, AccessFlags.Read);
-            builder.UseTexture(gbuffer1Handle, AccessFlags.Read);
-            builder.UseTexture(gbuffer2Handle, AccessFlags.Read);
-            builder.UseTexture(traceHandle, AccessFlags.ReadWrite);
-            builder.UseTexture(resolveHandle, AccessFlags.ReadWrite);
-            builder.UseBuffer(tileListHandle, AccessFlags.ReadWrite);
-            builder.UseBuffer(dispatchIndirectArgsHandle, AccessFlags.ReadWrite);
-            builder.UseTexture(skyTextureHandle, AccessFlags.Read);
-            builder.UseTexture(debugTextureHandle, AccessFlags.ReadWrite);
-
-            if (m_UseHistoryColorPyramid && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true)
-                builder.UseTexture(m_PreviousColorPyramidTexture.innerHandle, AccessFlags.Read);
-
-            builder.AllowPassCulling(false);
-            builder.SetRenderFunc(static (GraphPassData data, ComputeGraphContext graphContext) =>
-            {
-                data.Pass.Record(new ComputePassContext(graphContext, data.FrameData));
-            });
         }
 
         public override void Record(ComputePassContext context)
         {
+            if (!ShouldRecordEffect() && !CanRecordCopy())
+                return;
+
             var cmd = context.cmd;
             using (new ProfilingScope(cmd, profilingSampler))
             {
@@ -310,12 +279,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
 
                 ConstantBuffer.Push(cmd, m_ConstantBuffer, m_ComputeShader, ConstantBufferId);
+                ResetDispatchIndirectArgs(cmd);
 
                 using (new ProfilingScope(cmd, s_SSRClassifyTilesProfilingSampler))
                     DispatchClassifyTiles(cmd);
 
                 using (new ProfilingScope(cmd, s_SSRTracingProfilingSampler))
-                    DispatchTrace(cmd,context);
+                    DispatchTrace(cmd, context);
 
                 using (new ProfilingScope(cmd, s_SSRResolveProfilingSampler))
                     DispatchResolve(cmd);
@@ -336,25 +306,25 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ShouldApply = false;
             m_IsPassResourceLayoutDirty = false;
             m_UseHistoryColorPyramid = false;
-            m_PreviousColorPyramidTexture = null;
+            m_PreviousColorPyramidTexture = m_DefaultPreviousColorPyramidTexture;
             m_SkyTextureTint = Color.white;
             m_SkyTextureParams = Vector4.zero;
             m_Settings = ScreenSpaceReflectionSettingsData.CreateDefault();
             m_ConstantBuffer = default;
         }
 
-        private bool ResolveColorPyramidHistory(RenderGraphRecordingContext context)
+        private bool ResolveColorPyramidHistory(ContextContainer frameData)
         {
             m_UseHistoryColorPyramid = false;
-            m_PreviousColorPyramidTexture = null;
+            SetPreviousColorPyramidTexture(m_DefaultPreviousColorPyramidTexture);
             m_ConstantBuffer.SsrUseHistoryColorPyramid = 0;
             m_ConstantBuffer.SsrHistoryColorPyramidMaxMip = 0;
             m_ConstantBuffer.SsrHistoryColorPyramidSize = Vector4.zero;
 
-            if (context?.FrameData == null || !context.FrameData.Contains<VividColorPyramidData>())
+            if (frameData == null || !frameData.Contains<VividColorPyramidData>())
                 return false;
 
-            var colorPyramidData = context.FrameData.Get<VividColorPyramidData>();
+            var colorPyramidData = frameData.Get<VividColorPyramidData>();
             if (colorPyramidData == null
                 || !colorPyramidData.hasValidHistory
                 || colorPyramidData.previousColorPyramid == null
@@ -364,12 +334,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 return false;
             }
 
-            var historyHandle = context.GetOrCreateTextureHandle(colorPyramidData.previousColorPyramid);
-            if (!historyHandle.IsValid())
-                return false;
-
-            colorPyramidData.previousColorPyramid.innerHandle = historyHandle;
-            m_PreviousColorPyramidTexture = colorPyramidData.previousColorPyramid;
+            SetPreviousColorPyramidTexture(colorPyramidData.previousColorPyramid);
             m_UseHistoryColorPyramid = true;
             m_ConstantBuffer.SsrUseHistoryColorPyramid = 1;
             m_ConstantBuffer.SsrHistoryColorPyramidMaxMip = Mathf.Max(0, colorPyramidData.mipCount - 1);
@@ -379,6 +344,16 @@ namespace VividRP.Runtime.RenderPass.Core
                 1.0f / Mathf.Max(1, colorPyramidData.width),
                 1.0f / Mathf.Max(1, colorPyramidData.height));
             return true;
+        }
+
+        private void SetPreviousColorPyramidTexture(RenderGraphTexture texture)
+        {
+            var resolvedTexture = texture ?? m_DefaultPreviousColorPyramidTexture;
+            if (ReferenceEquals(m_PreviousColorPyramidTexture, resolvedTexture))
+                return;
+
+            m_PreviousColorPyramidTexture = resolvedTexture;
+            m_IsPassResourceLayoutDirty = true;
         }
 
         private bool ShouldRecordEffect()
@@ -414,6 +389,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && output?.innerHandle.IsValid() == true
                 && m_TraceTexture?.innerHandle.IsValid() == true
                 && m_ResolveTexture?.innerHandle.IsValid() == true
+                && m_RayInfoTexture?.innerHandle.IsValid() == true
                 && m_TileListBuffer?.innerHandle.IsValid() == true
                 && m_DispatchIndirectArgsBuffer?.innerHandle.IsValid() == true
                 && m_SkyTexture?.innerHandle.IsValid() == true
@@ -464,6 +440,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, OutputColorTextureId, output.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRTraceTextureId, m_TraceTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRResolveTextureId, m_ResolveTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, DepthTextureId, m_DepthTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, GBuffer1Id, m_GBuffer1.innerHandle);
             cmd.SetComputeBufferParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRTileListId, m_TileListBuffer.innerHandle);
@@ -475,9 +452,19 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.DispatchCompute(m_ComputeShader, m_SSRClassifyTilesKernel, m_TileCountX, m_TileCountY, 1);
         }
 
-        private void DispatchTrace(ComputeCommandBuffer cmd,ComputePassContext computePassContext)
+        private void ResetDispatchIndirectArgs(ComputeCommandBuffer cmd)
+        {
+            var dispatchIndirectArgsBuffer = m_DispatchIndirectArgsBuffer?.ImportedGraphicsBuffer;
+            if (dispatchIndirectArgsBuffer == null)
+                return;
+
+            cmd.SetBufferData(dispatchIndirectArgsBuffer, s_InitialDispatchIndirectArgsData);
+        }
+
+        private void DispatchTrace(ComputeCommandBuffer cmd, ComputePassContext computePassContext)
         {
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, SSRTraceTextureId, m_TraceTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, DepthTextureId, m_DepthTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, HZBTextureId, m_HZBTexture.innerHandle);
             cmd.SetComputeBufferParam(m_ComputeShader, m_SSRTracingKernel, DepthPyramidMipLevelOffsetsId, m_HZBMipLevelOffsets.innerHandle);
@@ -498,6 +485,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, SSRResolveTextureId, m_ResolveTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, SSRTraceTextureId, m_TraceTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, DepthTextureId, m_DepthTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, GBuffer1Id, m_GBuffer1.innerHandle);
             cmd.SetComputeBufferParam(m_ComputeShader, m_SSRResolveKernel, SSRTileListId, m_TileListBuffer.innerHandle);
@@ -552,6 +540,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             ConfigureInternalTextureDescriptor(m_TraceTexture, "ScreenSpaceReflectionTrace", width, height);
             ConfigureInternalTextureDescriptor(m_ResolveTexture, "ScreenSpaceReflectionResolve", width, height);
+            ConfigureInternalTextureDescriptor(m_RayInfoTexture, "ScreenSpaceReflectionRayInfo", width, height);
             ConfigureInternalTextureDescriptor(m_DebugTexture, "ScreenSpaceReflectionDebug", width, height);
             ConfigureTileListBuffer(m_TileListBuffer, maxTileCount);
             ConfigureIndirectArgsBuffer(m_DispatchIndirectArgsBuffer);
@@ -608,7 +597,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static int CalculateMipCount(int width, int height)
         {
             int maxDimension = Mathf.Max(1, Mathf.Max(width, height));
-            return Mathf.FloorToInt(Mathf.Log(maxDimension, 2.0f)) + 1;
+            return Mathf.CeilToInt(Mathf.Log(maxDimension, 2.0f)) + 1;
         }
 
         private static void ResizeInputTexture(RenderGraphTexture texture, int width, int height)
@@ -692,10 +681,17 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void PrepareSkyTextureState(VividSkyData skyData)
         {
+            m_SkyTexture.ClearImportedHandle();
             var hasActiveSky = skyData != null && skyData.activeSkyType != SkyType.None;
             var skyMaxMip = hasActiveSky ? SkyManager.GetSpecularCubemapMaxMip(skyData) : 0;
 
-            SkyManager.ImportSpecularCubemap(m_SkyTexture, skyData);
+            if (PassRecorder.IsPassTextureImportActive)
+            {
+                SkyManager.ImportSpecularCubemap(m_SkyTexture, skyData);
+                var skyCubemap = SkyManager.GetSpecularCubemapHandle();
+                if (skyCubemap != null)
+                    m_SkyTexture.SetImportedHandle(Import(skyCubemap));
+            }
 
             m_SkyTextureTint = hasActiveSky ? skyData.tint : Color.white;
             var skyIntensityMultiplier = hasActiveSky ? skyData.exposure : 1.0f;

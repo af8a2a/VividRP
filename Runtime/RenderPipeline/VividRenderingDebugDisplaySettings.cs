@@ -94,6 +94,9 @@ namespace VividRP.Runtime
         private float m_VisibilityBufferDebugExposure;
 
         [SerializeField]
+        private bool m_ForceMeshletCullingFromMainCamera;
+
+        [SerializeField]
         private float m_Slider = 50f;
 
         [SerializeField]
@@ -210,6 +213,12 @@ namespace VividRP.Runtime
             set => m_VisibilityBufferDebugExposure = value;
         }
 
+        internal bool forceMeshletCullingFromMainCamera
+        {
+            get => m_ForceMeshletCullingFromMainCamera;
+            set => m_ForceMeshletCullingFromMainCamera = value;
+        }
+
         internal float slider
         {
             get => m_Slider;
@@ -247,6 +256,7 @@ namespace VividRP.Runtime
             || m_DepthMode != OverlayDebugDepthMode.Raw
             || m_VisibilityBufferDebugMode != VisibilityBufferDebugVisualizationMode.Cluster
             || !Mathf.Approximately(m_VisibilityBufferDebugExposure, 0f)
+            || m_ForceMeshletCullingFromMainCamera
             || !Mathf.Approximately(m_Slider, 50f)
             || m_VirtualTextureDebugMode != VirtualTextureDebugMode.None
             || m_VirtualTextureVisualizationMode != VirtualTextureVisualizationMode.UsePassSettings;
@@ -276,6 +286,7 @@ namespace VividRP.Runtime
             m_DepthMode = OverlayDebugDepthMode.Raw;
             m_VisibilityBufferDebugMode = VisibilityBufferDebugVisualizationMode.Cluster;
             m_VisibilityBufferDebugExposure = 0f;
+            m_ForceMeshletCullingFromMainCamera = false;
             m_Slider = 50f;
             m_VirtualTextureDebugMode = VirtualTextureDebugMode.None;
             m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.UsePassSettings;
@@ -410,6 +421,12 @@ namespace VividRP.Runtime
             {
                 name = "Exposure",
                 tooltip = "Exposure compensation applied to the visibility buffer debug view."
+            };
+
+            public static readonly NameAndTooltip ForceMeshletCullingFromMainCamera = new()
+            {
+                name = "Force Culling From Main Camera",
+                tooltip = "Use the scene MainCamera when building meshlet GPU culling parameters."
             };
 
             public static readonly NameAndTooltip Slider = new()
@@ -607,6 +624,12 @@ namespace VividRP.Runtime
                     setter = value => data.visibilityBufferDebugExposure = value,
                     min = () => -16f,
                     max = () => 16f,
+                });
+                foldout.children.Add(new DebugUI.BoolField
+                {
+                    nameAndTooltip = Strings.ForceMeshletCullingFromMainCamera,
+                    getter = () => data.forceMeshletCullingFromMainCamera,
+                    setter = value => data.forceMeshletCullingFromMainCamera = value,
                 });
                 return foldout;
             }

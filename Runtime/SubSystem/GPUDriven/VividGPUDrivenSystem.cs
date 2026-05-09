@@ -375,13 +375,15 @@ namespace VividRP.Runtime.GPUDriven
                 ApplyResolvedSettings(gpuDrivenSystem);
             }
 
+            Camera cullingCamera = ResolveCullingCameraForDebug(camera);
+
             VividRPCoreResources resources;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenResolveResourcesMarker.Auto())
             {
                 resources = PipelineResourceManager.Get<VividRPCoreResources>();
             }
             gpuDrivenSystem.Cull(
-                camera,
+                cullingCamera,
                 cmd,
                 resources.GPUInstanceCullingCompute,
                 resources.MeshletListBuildCompute,
@@ -429,6 +431,23 @@ namespace VividRP.Runtime.GPUDriven
                 GPUDrivenSettingsVolume.ResolveSettings(VividVolumeManagerUtility.GetGPUDrivenSettingsVolume());
             gpuDrivenSystem.ForcedMeshLODNodeDepth = settings.forcedMeshLODNodeDepth;
             gpuDrivenSystem.MeshLODErrorThreshold = settings.meshLODErrorThreshold;
+        }
+
+        internal static Camera ResolveCullingCameraForDebug(Camera renderingCamera)
+        {
+            if (!VividRenderingDebugDisplaySettings.Data.forceMeshletCullingFromMainCamera)
+            {
+                return renderingCamera;
+            }
+
+            Camera mainCamera = Camera.main;
+            if (mainCamera != null)
+            {
+                return mainCamera;
+            }
+
+            Camera fallbackCamera = UnityEngine.Object.FindFirstObjectByType<Camera>(FindObjectsInactive.Exclude);
+            return fallbackCamera != null ? fallbackCamera : renderingCamera;
         }
 
         private void ThrowIfDisposed()

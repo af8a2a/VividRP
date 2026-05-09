@@ -58,6 +58,7 @@ namespace VividRP.Editor.Tests
             VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugMode =
                 VisibilityBufferDebugVisualizationMode.ClusterLOD;
             VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugExposure = 3f;
+            VividRenderingDebugDisplaySettings.Data.forceMeshletCullingFromMainCamera = true;
 
             VividRenderingDebugDisplaySettings.Data.Reset();
 
@@ -65,6 +66,7 @@ namespace VividRP.Editor.Tests
                 VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugMode,
                 Is.EqualTo(VisibilityBufferDebugVisualizationMode.Cluster));
             Assert.That(VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugExposure, Is.EqualTo(0f));
+            Assert.That(VividRenderingDebugDisplaySettings.Data.forceMeshletCullingFromMainCamera, Is.False);
         }
 
         [Test]
@@ -79,6 +81,16 @@ namespace VividRP.Editor.Tests
 
             VividRenderingDebugDisplaySettings.Data.Reset();
             VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugExposure = 1f;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+        }
+
+        [Test]
+        public void AreAnySettingsActive_TracksMeshletCullingMainCameraLock()
+        {
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.False);
+
+            VividRenderingDebugDisplaySettings.Data.forceMeshletCullingFromMainCamera = true;
 
             Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
         }

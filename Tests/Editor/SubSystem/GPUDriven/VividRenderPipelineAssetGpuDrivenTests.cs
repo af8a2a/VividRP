@@ -215,6 +215,7 @@ namespace VividRP.Editor.Tests
             Assert.That(systemSource, Does.Contain("ReportStats(camera, cameraData.cameraName);"));
             Assert.That(systemSource, Does.Contain("cameraName: cameraData.cameraName"));
             Assert.That(systemSource, Does.Contain("camera != null ? cameraName : null"));
+            Assert.That(systemSource, Does.Contain("ResolveCullingCameraForDebug(camera)"));
             Assert.That(systemSource, Does.Not.Contain("camera.name"));
             Assert.That(systemSource, Does.Not.Contain("RenderDebugOverlay"));
             Assert.That(systemSource, Does.Not.Contain("VividGPUDrivenDebugOverlayRenderer"));

@@ -3,6 +3,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
+using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Bindless;
 
@@ -99,6 +100,72 @@ namespace VividRP.Editor.Tests
                 if (cameraObject != null)
                 {
                     Object.DestroyImmediate(cameraObject);
+                }
+            }
+        }
+
+        [Test]
+        public void ResolveCullingCameraForDebug_UsesRenderingCamera_WhenMainCameraLockIsDisabled()
+        {
+            GameObject renderingCameraObject = null;
+
+            try
+            {
+                VividRenderingDebugDisplaySettings.Data.Reset();
+                renderingCameraObject = new GameObject("Rendering Camera");
+                Camera renderingCamera = renderingCameraObject.AddComponent<Camera>();
+
+                Camera resolvedCamera = VividGPUDrivenSystem.ResolveCullingCameraForDebug(renderingCamera);
+
+                Assert.That(resolvedCamera, Is.SameAs(renderingCamera));
+            }
+            finally
+            {
+                VividRenderingDebugDisplaySettings.Data.Reset();
+
+                if (renderingCameraObject != null)
+                {
+                    Object.DestroyImmediate(renderingCameraObject);
+                }
+            }
+        }
+
+        [Test]
+        public void ResolveCullingCameraForDebug_UsesMainCamera_WhenMainCameraLockIsEnabled()
+        {
+            GameObject renderingCameraObject = null;
+            GameObject mainCameraObject = null;
+
+            try
+            {
+                VividRenderingDebugDisplaySettings.Data.Reset();
+                VividRenderingDebugDisplaySettings.Data.forceMeshletCullingFromMainCamera = true;
+
+                renderingCameraObject = new GameObject("Scene View Camera");
+                Camera renderingCamera = renderingCameraObject.AddComponent<Camera>();
+                mainCameraObject = new GameObject("GPUDriven Main Camera")
+                {
+                    tag = "MainCamera"
+                };
+                mainCameraObject.AddComponent<Camera>();
+
+                Camera resolvedCamera = VividGPUDrivenSystem.ResolveCullingCameraForDebug(renderingCamera);
+
+                Assert.That(Camera.main, Is.Not.Null);
+                Assert.That(resolvedCamera, Is.SameAs(Camera.main));
+            }
+            finally
+            {
+                VividRenderingDebugDisplaySettings.Data.Reset();
+
+                if (renderingCameraObject != null)
+                {
+                    Object.DestroyImmediate(renderingCameraObject);
+                }
+
+                if (mainCameraObject != null)
+                {
+                    Object.DestroyImmediate(mainCameraObject);
                 }
             }
         }

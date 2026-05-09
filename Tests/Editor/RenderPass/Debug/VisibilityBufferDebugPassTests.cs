@@ -75,6 +75,82 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ResolveSettings_UsesRenderingDebuggerValues()
+        {
+            var data = new VividRenderingDebugSettingsData
+            {
+                visibilityBufferDebugMode = VisibilityBufferDebugVisualizationMode.ClusterLOD,
+                visibilityBufferDebugExposure = 2.5f,
+            };
+
+            var settings = VisibilityBufferDebugPass.ResolveSettings(
+                data,
+                VisibilityBufferDebugVisualizationMode.Cluster,
+                0f);
+
+            Assert.That(settings.visualizationMode, Is.EqualTo(VisibilityBufferDebugVisualizationMode.ClusterLOD));
+            Assert.That(settings.exposure, Is.EqualTo(2.5f));
+        }
+
+        [Test]
+        public void ResolveSettings_ClampsExposure()
+        {
+            var settings = VisibilityBufferDebugPass.ResolveSettings(
+                new VividRenderingDebugSettingsData
+                {
+                    visibilityBufferDebugExposure = 32f,
+                },
+                VisibilityBufferDebugVisualizationMode.Cluster,
+                0f);
+
+            Assert.That(settings.exposure, Is.EqualTo(16f));
+        }
+
+        [Test]
+        public void ResolveSettings_UsesPassDefaults_WhenDebuggerDataIsMissing()
+        {
+            var settings = VisibilityBufferDebugPass.ResolveSettings(
+                null,
+                VisibilityBufferDebugVisualizationMode.Triangle,
+                1.5f);
+
+            Assert.That(settings.visualizationMode, Is.EqualTo(VisibilityBufferDebugVisualizationMode.Triangle));
+            Assert.That(settings.exposure, Is.EqualTo(1.5f));
+        }
+
+        [Test]
+        public void Prepare_UsesRenderingDebuggerModeAndExposure()
+        {
+            try
+            {
+                VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugMode =
+                    VisibilityBufferDebugVisualizationMode.ClusterLOD;
+                VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugExposure = 4f;
+
+                var pass = new VisibilityBufferDebugPass
+                {
+                    VisualizationMode = VisibilityBufferDebugVisualizationMode.Instance,
+                    Exposure = -2f,
+                };
+
+                var frameData = new ContextContainer();
+                frameData.GetOrCreate<VividCameraData>().actualWidth = 64;
+                frameData.GetOrCreate<VividCameraData>().actualHeight = 64;
+
+                pass.Prepare(frameData);
+
+                Assert.That(
+                    GetFieldValue<VisibilityBufferDebugVisualizationMode>(pass, "m_ResolvedVisualizationMode"),
+                    Is.EqualTo(VisibilityBufferDebugVisualizationMode.ClusterLOD));
+                Assert.That(GetFieldValue<float>(pass, "m_ResolvedExposure"), Is.EqualTo(4f));
+            }
+            finally
+            {
+                VividRenderingDebugDisplaySettings.Data.Reset();
+            }
+        }
+
+        [Test]
         public void VisibilityBufferDebugShader_SupportsClusterAndClusterLodModes()
         {
             var shaderSource = File.ReadAllText(GetShaderSourcePath());
@@ -112,6 +188,14 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
             return (RenderGraphTexture)field.GetValue(pass);
+        }
+
+        private static T GetFieldValue<T>(VisibilityBufferDebugPass pass, string fieldName)
+        {
+            var field = typeof(VisibilityBufferDebugPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(field, Is.Not.Null);
+            return (T)field.GetValue(pass);
         }
 
         private static string GetShaderSourcePath()

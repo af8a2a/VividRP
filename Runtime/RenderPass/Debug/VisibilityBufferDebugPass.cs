@@ -43,6 +43,20 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_ResolvedExposure;
         private bool m_ShouldSkipExecution;
 
+        internal readonly struct VisibilityBufferDebugSettingsData
+        {
+            public readonly VisibilityBufferDebugVisualizationMode visualizationMode;
+            public readonly float exposure;
+
+            public VisibilityBufferDebugSettingsData(
+                VisibilityBufferDebugVisualizationMode visualizationMode,
+                float exposure)
+            {
+                this.visualizationMode = visualizationMode;
+                this.exposure = exposure;
+            }
+        }
+
         public VisibilityBufferDebugVisualizationMode VisualizationMode
         {
             get => m_VisualizationMode;
@@ -86,8 +100,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
-            m_ResolvedVisualizationMode = m_VisualizationMode;
-            m_ResolvedExposure = Mathf.Clamp(m_Exposure, -16f, 16f);
+            var resolvedSettings = ResolveSettings(
+                VividRenderingDebugDisplaySettings.Data,
+                m_VisualizationMode,
+                m_Exposure);
+            m_ResolvedVisualizationMode = resolvedSettings.visualizationMode;
+            m_ResolvedExposure = resolvedSettings.exposure;
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
@@ -141,6 +159,23 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             m_ShouldSkipExecution = false;
+        }
+
+        internal static VisibilityBufferDebugSettingsData ResolveSettings(
+            VividRenderingDebugSettingsData data,
+            VisibilityBufferDebugVisualizationMode defaultVisualizationMode,
+            float defaultExposure)
+        {
+            if (data == null)
+            {
+                return new VisibilityBufferDebugSettingsData(
+                    defaultVisualizationMode,
+                    Mathf.Clamp(defaultExposure, -16f, 16f));
+            }
+
+            return new VisibilityBufferDebugSettingsData(
+                data.visibilityBufferDebugMode,
+                Mathf.Clamp(data.visibilityBufferDebugExposure, -16f, 16f));
         }
 
         private void ConfigureOutputTexture(int width, int height)

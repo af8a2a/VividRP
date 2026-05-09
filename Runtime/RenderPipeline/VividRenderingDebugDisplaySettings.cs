@@ -87,6 +87,13 @@ namespace VividRP.Runtime
         private OverlayDebugDepthMode m_DepthMode = OverlayDebugDepthMode.Raw;
 
         [SerializeField]
+        private VisibilityBufferDebugVisualizationMode m_VisibilityBufferDebugMode =
+            VisibilityBufferDebugVisualizationMode.Cluster;
+
+        [SerializeField]
+        private float m_VisibilityBufferDebugExposure;
+
+        [SerializeField]
         private float m_Slider = 50f;
 
         [SerializeField]
@@ -191,6 +198,18 @@ namespace VividRP.Runtime
             set => m_DepthMode = value;
         }
 
+        internal VisibilityBufferDebugVisualizationMode visibilityBufferDebugMode
+        {
+            get => m_VisibilityBufferDebugMode;
+            set => m_VisibilityBufferDebugMode = value;
+        }
+
+        internal float visibilityBufferDebugExposure
+        {
+            get => m_VisibilityBufferDebugExposure;
+            set => m_VisibilityBufferDebugExposure = value;
+        }
+
         internal float slider
         {
             get => m_Slider;
@@ -226,6 +245,8 @@ namespace VividRP.Runtime
             || !Mathf.Approximately(m_OverlayOpacity, 1f)
             || visualizationMode != OverlayDebugVisualizationMode.Auto
             || m_DepthMode != OverlayDebugDepthMode.Raw
+            || m_VisibilityBufferDebugMode != VisibilityBufferDebugVisualizationMode.Cluster
+            || !Mathf.Approximately(m_VisibilityBufferDebugExposure, 0f)
             || !Mathf.Approximately(m_Slider, 50f)
             || m_VirtualTextureDebugMode != VirtualTextureDebugMode.None
             || m_VirtualTextureVisualizationMode != VirtualTextureVisualizationMode.UsePassSettings;
@@ -253,6 +274,8 @@ namespace VividRP.Runtime
             m_OverlayOpacity = 1f;
             m_VisualizationMode = OverlayDebugVisualizationMode.Auto;
             m_DepthMode = OverlayDebugDepthMode.Raw;
+            m_VisibilityBufferDebugMode = VisibilityBufferDebugVisualizationMode.Cluster;
+            m_VisibilityBufferDebugExposure = 0f;
             m_Slider = 50f;
             m_VirtualTextureDebugMode = VirtualTextureDebugMode.None;
             m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.UsePassSettings;
@@ -277,6 +300,7 @@ namespace VividRP.Runtime
             public const string ClusterName = "Cluster";
             public const string ExposureName = "Exposure";
             public const string OverlayName = "Overlay";
+            public const string VisibilityBufferName = "Visibility Buffer";
             public const string SliderName = "Slider";
             public const string VirtualTextureName = "Virtual Texture";
 
@@ -376,6 +400,18 @@ namespace VividRP.Runtime
                 tooltip = "Select how depth textures are visualized in the overlay."
             };
 
+            public static readonly NameAndTooltip VisibilityBufferDebugMode = new()
+            {
+                name = "Mode",
+                tooltip = "Select how visibility buffer values are visualized."
+            };
+
+            public static readonly NameAndTooltip VisibilityBufferDebugExposure = new()
+            {
+                name = "Exposure",
+                tooltip = "Exposure compensation applied to the visibility buffer debug view."
+            };
+
             public static readonly NameAndTooltip Slider = new()
             {
                 name = "Slider",
@@ -416,6 +452,7 @@ namespace VividRP.Runtime
                 root.children.Add(CreateClusterFoldout(data));
                 root.children.Add(CreateExposureFoldout(data));
                 root.children.Add(CreateOverlayFoldout(data));
+                root.children.Add(CreateVisibilityBufferFoldout(data));
                 root.children.Add(CreateSliderFoldout(data));
                 root.children.Add(CreateVirtualTextureFoldout(data));
                 return root;
@@ -548,6 +585,29 @@ namespace VividRP.Runtime
                     Strings.DepthMode,
                     () => data.depthMode,
                     value => data.depthMode = value));
+                return foldout;
+            }
+
+            private static DebugUI.Foldout CreateVisibilityBufferFoldout(VividRenderingDebugSettingsData data)
+            {
+                var foldout = new DebugUI.Foldout
+                {
+                    displayName = Strings.VisibilityBufferName,
+                    opened = true,
+                };
+
+                foldout.children.Add(CreateEnumField(
+                    Strings.VisibilityBufferDebugMode,
+                    () => data.visibilityBufferDebugMode,
+                    value => data.visibilityBufferDebugMode = value));
+                foldout.children.Add(new DebugUI.FloatField
+                {
+                    nameAndTooltip = Strings.VisibilityBufferDebugExposure,
+                    getter = () => data.visibilityBufferDebugExposure,
+                    setter = value => data.visibilityBufferDebugExposure = value,
+                    min = () => -16f,
+                    max = () => 16f,
+                });
                 return foldout;
             }
 

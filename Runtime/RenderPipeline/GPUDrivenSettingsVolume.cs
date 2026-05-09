@@ -6,11 +6,11 @@ using VividRP.Runtime.GPUDriven;
 namespace VividRP.Runtime
 {
     [Serializable]
-    [VolumeComponentMenu("VividRP/GPU Driven/Settings")]
+    [VolumeComponentMenu("VividRP/GPU Driven Settings")]
     public sealed class GPUDrivenSettingsVolume : VolumeComponent
     {
-        public IntParameter forcedMeshLODNodeDepth =
-            new(VividGPUDrivenDefaults.ForcedMeshLODNodeDepth);
+        public ClampedIntParameter forcedMeshLODNodeDepth =
+            new(0,VividGPUDrivenDefaults.ForcedMeshLODNodeDepth,32);
 
         public MinFloatParameter meshLODErrorThreshold =
             new(VividGPUDrivenDefaults.MeshLODErrorThreshold, 0f);

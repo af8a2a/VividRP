@@ -10,7 +10,6 @@ using VividRP.Editor;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
-using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
 
 namespace VividRP.Editor.Tests
 {
@@ -1437,7 +1436,7 @@ namespace VividRP.Editor.Tests
         {
             return typeof(VividRPCoreResources)
                 .GetField(fieldName, BindingFlags.Public | BindingFlags.Instance)
-                ?.GetCustomAttribute<ResourcePathAttribute>()
+                ?.GetCustomAttribute<VividResourcePathAttribute>()
                 ?.Path;
         }
 

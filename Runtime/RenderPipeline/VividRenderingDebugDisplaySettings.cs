@@ -181,8 +181,8 @@ namespace VividRP.Runtime
 
         internal OverlayDebugVisualizationMode visualizationMode
         {
-            get => m_VisualizationMode;
-            set => m_VisualizationMode = value;
+            get => OverlayDebugPass.NormalizeVisualizationMode(m_VisualizationMode);
+            set => m_VisualizationMode = OverlayDebugPass.NormalizeVisualizationMode(value);
         }
 
         internal OverlayDebugDepthMode depthMode
@@ -224,7 +224,7 @@ namespace VividRP.Runtime
             || m_ArraySlice != 0
             || !Mathf.Approximately(m_OverlayExposure, 0f)
             || !Mathf.Approximately(m_OverlayOpacity, 1f)
-            || m_VisualizationMode != OverlayDebugVisualizationMode.Auto
+            || visualizationMode != OverlayDebugVisualizationMode.Auto
             || m_DepthMode != OverlayDebugDepthMode.Raw
             || !Mathf.Approximately(m_Slider, 50f)
             || m_VirtualTextureDebugMode != VirtualTextureDebugMode.None

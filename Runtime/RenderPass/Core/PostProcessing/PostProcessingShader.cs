@@ -6,7 +6,7 @@ namespace VividRP.Runtime
     [PipelineResource] 
     public class PostProcessingShader
     {
-        [ResourcePath("Shaders/Core/Private/LutBuilder3D.compute")]
+        [VividResourcePath("Shaders/Core/Private/LutBuilder3D.compute")]
         public ComputeShader colorGradingShader;
     }
 }

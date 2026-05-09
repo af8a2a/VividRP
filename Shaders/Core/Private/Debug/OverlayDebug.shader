@@ -17,13 +17,11 @@ Shader "Hidden/VividRP/OverlayDebug"
             #pragma fragment Frag
 
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl"
 
             #define VIVID_OVERLAY_VISUALIZATION_AUTO 0
             #define VIVID_OVERLAY_VISUALIZATION_COLOR 1
             #define VIVID_OVERLAY_VISUALIZATION_DEPTH 2
             #define VIVID_OVERLAY_VISUALIZATION_MOTION_VECTORS 3
-            #define VIVID_OVERLAY_VISUALIZATION_VISIBILITY_BUFFER 4
             #define VIVID_OVERLAY_DEPTHMODE_RAW 0
             #define VIVID_OVERLAY_DEPTHMODE_LINEAR01 1
             #define VIVID_OVERLAY_MOTION_VECTOR_ARROW_SPACING 28.0
@@ -37,7 +35,6 @@ Shader "Hidden/VividRP/OverlayDebug"
             SAMPLER(sampler_DebugTexture);
             TEXTURE2D_ARRAY(_DebugTextureArray);
             SAMPLER(sampler_DebugTextureArray);
-            TYPED_TEXTURE2D(float2, _DebugVisibilityTexture);
 
             float4 _SourceTextureScaleBias;
             float4 _DebugTextureScaleBias;
@@ -186,38 +183,8 @@ Shader "Hidden/VividRP/OverlayDebug"
                 return lerp(outlinedColor, float3(1.0, 1.0, 1.0), fillCoverage);
             }
 
-            float3 HashColor(uint seed)
-            {
-                float seedValue = (float)(seed + 1u);
-                float3 value = float3(seedValue, seedValue + 17.0, seedValue + 37.0);
-                value = frac(sin(value * float3(12.9898, 78.233, 39.425)) * 43758.5453);
-                return saturate(0.25 + value * 0.75);
-            }
-
-            float4 EvaluateVisibilityBufferColor(float2 uv)
-            {
-                float exposureMultiplier = exp2(_DebugExposure);
-                float2 debugUv = ApplyScaleBias(uv, _DebugTextureScaleBias);
-                uint2 packedValue = asuint(SAMPLE_TEXTURE2D_LOD(_DebugVisibilityTexture, sampler_PointClamp, debugUv, 0).xy);
-                if (!IsPackedVisibilityBufferValueValid(packedValue))
-                    return 0;
-
-                VividVisibilityBufferValue value = UnpackVisibilityBufferValue(packedValue);
-                uint triangleID = value.IndexID / 3u;
-
-                float3 instanceColor = HashColor(value.InstanceID);
-                float3 meshletColor = HashColor(value.MeshletID * 31u + 7u);
-                float3 triangleColor = HashColor(triangleID * 17u + 13u);
-                float3 color = lerp(instanceColor, meshletColor, 0.5);
-                color = lerp(color, triangleColor, 0.25);
-                return float4(color * exposureMultiplier, 1.0);
-            }
-
             float4 SampleDebugTexture(float2 uv)
             {
-                if (_VisualizationMode == VIVID_OVERLAY_VISUALIZATION_VISIBILITY_BUFFER)
-                    return EvaluateVisibilityBufferColor(uv);
-
                 float4 sampleColor = SampleDebugTextureRaw(uv);
 
                 if (_VisualizationMode == VIVID_OVERLAY_VISUALIZATION_MOTION_VECTORS)

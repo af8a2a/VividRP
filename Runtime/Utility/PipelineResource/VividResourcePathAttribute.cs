@@ -8,9 +8,9 @@ namespace VividRP.Runtime
     }
 
     [AttributeUsage(AttributeTargets.Field)]
-    public class ResourcePathAttribute : Attribute
+    public class VividResourcePathAttribute : Attribute
     {
         public string Path { get; }
-        public ResourcePathAttribute(string path) { Path = path; }
+        public VividResourcePathAttribute(string path) { Path = path; }
     }
 }

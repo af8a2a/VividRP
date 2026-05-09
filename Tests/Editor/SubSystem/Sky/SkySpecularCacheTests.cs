@@ -2,7 +2,6 @@ using System.IO;
 using System.Reflection;
 using NUnit.Framework;
 using VividRP.Runtime;
-using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
 
 namespace VividRP.Editor.Tests
 {
@@ -40,7 +39,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
 
-            var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
+            var resourcePath = field.GetCustomAttribute<VividResourcePathAttribute>();
 
             Assert.That(resourcePath, Is.Not.Null);
             Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/Sky/GGXConvolve"));

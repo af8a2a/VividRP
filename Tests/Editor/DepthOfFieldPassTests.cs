@@ -8,7 +8,6 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
-using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
 
 namespace VividRP.Editor.Tests
 {
@@ -239,8 +238,8 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderField, Is.Not.Null);
             Assert.That(computeField, Is.Not.Null);
 
-            var shaderResourcePath = shaderField.GetCustomAttribute<ResourcePathAttribute>();
-            var computeResourcePath = computeField.GetCustomAttribute<ResourcePathAttribute>();
+            var shaderResourcePath = shaderField.GetCustomAttribute<VividResourcePathAttribute>();
+            var computeResourcePath = computeField.GetCustomAttribute<VividResourcePathAttribute>();
 
             Assert.That(shaderResourcePath, Is.Not.Null);
             Assert.That(shaderResourcePath.Path, Is.EqualTo("Shaders/Core/Private/DepthOfField"));

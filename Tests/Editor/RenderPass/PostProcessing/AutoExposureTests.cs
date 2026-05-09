@@ -544,7 +544,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
 
-            var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
+            var resourcePath = field.GetCustomAttribute<VividResourcePathAttribute>();
 
             Assert.That(resourcePath, Is.Not.Null);
             Assert.That(resourcePath.Path, Is.EqualTo(expectedPath));

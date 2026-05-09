@@ -47,6 +47,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 4aee2e660114dc34381676fa542650e2, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/SliderDebug
     ResourceObject: {fileID: 4800000, guid: 985a5b1e96340614fb6346ff8c3108ad, type: 3}
+  - ResourceName: Shaders/Core/Private/Debug/VisibilityBufferDebug
+    ResourceObject: {fileID: 4800000, guid: 8fc0c26bc17f0c34199116c378c2318e, type: 3}
   - ResourceName: Shaders/Core/Private/DepthOfField
     ResourceObject: {fileID: 4800000, guid: d32a80051143f7f49a03a8a21aade1f6, type: 3}
   - ResourceName: Shaders/Core/Private/DepthOfField.compute

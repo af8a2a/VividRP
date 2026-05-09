@@ -8,7 +8,6 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
-using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
 
 namespace VividRP.Editor.Tests
 {
@@ -96,7 +95,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
 
-            var resourcePath = field.GetCustomAttribute<ResourcePathAttribute>();
+            var resourcePath = field.GetCustomAttribute<VividResourcePathAttribute>();
 
             Assert.That(resourcePath, Is.Not.Null);
             Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/AtmosphericScattering/OpaqueAtmosphericScattering"));

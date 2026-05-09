@@ -5,7 +5,6 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime;
-using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
 
 namespace VividRP.Editor
 {
@@ -111,7 +110,7 @@ namespace VividRP.Editor
                     var fields = type.GetFields(BindingFlags.Public | BindingFlags.Instance);
                     foreach (var field in fields)
                     {
-                        var attr = field.GetCustomAttribute<ResourcePathAttribute>();
+                        var attr = field.GetCustomAttribute<VividResourcePathAttribute>();
                         if (attr == null) continue;
 
                         var asset = ResolveAsset(attr.Path, field.FieldType);

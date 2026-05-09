@@ -68,10 +68,10 @@ namespace VividRP.Editor.Tests
             Assert.That(computeField, Is.Not.Null);
 
             Assert.That(
-                shaderField.GetCustomAttribute<VividRP.Runtime.ResourcePathAttribute>()?.Path,
+                shaderField.GetCustomAttribute<VividRP.Runtime.VividResourcePathAttribute>()?.Path,
                 Is.EqualTo("Shaders/Core/Private/PostProcessing/LensFlare/LensFlareDataDriven"));
             Assert.That(
-                computeField.GetCustomAttribute<VividRP.Runtime.ResourcePathAttribute>()?.Path,
+                computeField.GetCustomAttribute<VividRP.Runtime.VividResourcePathAttribute>()?.Path,
                 Is.EqualTo("Shaders/Core/Private/PostProcessing/LensFlare/LensFlareMergeOcclusionDataDriven.compute"));
         }
 

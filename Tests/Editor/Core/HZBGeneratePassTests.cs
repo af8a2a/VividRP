@@ -135,7 +135,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
 
-            var resourcePath = field.GetCustomAttribute<VividRP.Runtime.ResourcePathAttribute>();
+            var resourcePath = field.GetCustomAttribute<VividRP.Runtime.VividResourcePathAttribute>();
             Assert.That(resourcePath, Is.Not.Null);
             Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/DownSample/HZBGenerate"));
         }

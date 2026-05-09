@@ -7,76 +7,76 @@ namespace VividRP.Runtime
     [PipelineResource]
     public class VividRPCoreResources
     {
-        [ResourcePath("Shaders/Core/Private/Blit")]
+        [VividResourcePath("Shaders/Core/Private/Blit")]
         public Shader BlitShader;
 
-        [ResourcePath("Shaders/Core/Private/FinalBlit")]
+        [VividResourcePath("Shaders/Core/Private/FinalBlit")]
         public Shader FinalBlitShader;
 
-        [ResourcePath("Shaders/Core/Private/PostProcessing/Diffusion")]
+        [VividResourcePath("Shaders/Core/Private/PostProcessing/Diffusion")]
         public Shader DiffusionShader;
 
-        [ResourcePath("Shaders/Core/Private/PostProcessing/LensFlare/LensFlareDataDriven")]
+        [VividResourcePath("Shaders/Core/Private/PostProcessing/LensFlare/LensFlareDataDriven")]
         public Shader LensFlareDataDrivenShader;
 
-        [ResourcePath("Shaders/Core/Private/PostProcessing/LensFlare/LensFlareScreenSpace")]
+        [VividResourcePath("Shaders/Core/Private/PostProcessing/LensFlare/LensFlareScreenSpace")]
         public Shader LensFlareScreenSpaceShader;
 
-        [ResourcePath("Shaders/Core/Private/PostProcessing/LensFlare/LensFlareMergeOcclusionDataDriven.compute")]
+        [VividResourcePath("Shaders/Core/Private/PostProcessing/LensFlare/LensFlareMergeOcclusionDataDriven.compute")]
         public ComputeShader LensFlareMergeOcclusionDataDrivenCompute;
 
-        [ResourcePath("Shaders/Core/Private/DepthOfField")]
+        [VividResourcePath("Shaders/Core/Private/DepthOfField")]
         public Shader DepthOfFieldShader;
 
-        [ResourcePath("Shaders/Core/Private/DepthOfField.compute")]
+        [VividResourcePath("Shaders/Core/Private/DepthOfField.compute")]
         public ComputeShader DepthOfFieldCompute;
 
-        [ResourcePath("Shaders/Core/Private/FSR3/FSR3PrepareInputs.compute")]
+        [VividResourcePath("Shaders/Core/Private/FSR3/FSR3PrepareInputs.compute")]
         public ComputeShader FSR3PrepareInputsCompute;
 
-        [ResourcePath("Shaders/Core/Private/FSR3/FSR3LumaPyramid.compute")]
+        [VividResourcePath("Shaders/Core/Private/FSR3/FSR3LumaPyramid.compute")]
         public ComputeShader FSR3LumaPyramidCompute;
 
-        [ResourcePath("Shaders/Core/Private/FSR3/FSR3ShadingChangePyramid.compute")]
+        [VividResourcePath("Shaders/Core/Private/FSR3/FSR3ShadingChangePyramid.compute")]
         public ComputeShader FSR3ShadingChangePyramidCompute;
 
-        [ResourcePath("Shaders/Core/Private/FSR3/FSR3ShadingChange.compute")]
+        [VividResourcePath("Shaders/Core/Private/FSR3/FSR3ShadingChange.compute")]
         public ComputeShader FSR3ShadingChangeCompute;
 
-        [ResourcePath("Shaders/Core/Private/FSR3/FSR3PrepareReactivity.compute")]
+        [VividResourcePath("Shaders/Core/Private/FSR3/FSR3PrepareReactivity.compute")]
         public ComputeShader FSR3PrepareReactivityCompute;
 
-        [ResourcePath("Shaders/Core/Private/FSR3/FSR3LumaInstability.compute")]
+        [VividResourcePath("Shaders/Core/Private/FSR3/FSR3LumaInstability.compute")]
         public ComputeShader FSR3LumaInstabilityCompute;
 
-        [ResourcePath("Shaders/Core/Private/FSR3/FSR3Accumulate.compute")]
+        [VividResourcePath("Shaders/Core/Private/FSR3/FSR3Accumulate.compute")]
         public ComputeShader FSR3AccumulateCompute;
 
-        [ResourcePath("Shaders/Core/Private/FSR3/FSR3AccumulateSharpen.compute")]
+        [VividResourcePath("Shaders/Core/Private/FSR3/FSR3AccumulateSharpen.compute")]
         public ComputeShader FSR3AccumulateSharpenCompute;
 
-        [ResourcePath("Shaders/Core/Private/FSR3/FSR3RCAS.compute")]
+        [VividResourcePath("Shaders/Core/Private/FSR3/FSR3RCAS.compute")]
         public ComputeShader FSR3RCASCompute;
 
-        [ResourcePath("Shaders/Core/Private/TSR/TSRDilateVelocity.compute")]
+        [VividResourcePath("Shaders/Core/Private/TSR/TSRDilateVelocity.compute")]
         public ComputeShader TSRDilateVelocityCompute;
 
-        [ResourcePath("Shaders/Core/Private/TSR/TSRReprojectHistory.compute")]
+        [VividResourcePath("Shaders/Core/Private/TSR/TSRReprojectHistory.compute")]
         public ComputeShader TSRReprojectHistoryCompute;
 
-        [ResourcePath("Shaders/Core/Private/TSR/TSRRejectShading.compute")]
+        [VividResourcePath("Shaders/Core/Private/TSR/TSRRejectShading.compute")]
         public ComputeShader TSRRejectShadingCompute;
 
-        [ResourcePath("Shaders/Core/Private/TSR/TSRSpatialAntiAliasing.compute")]
+        [VividResourcePath("Shaders/Core/Private/TSR/TSRSpatialAntiAliasing.compute")]
         public ComputeShader TSRSpatialAntiAliasingCompute;
 
-        [ResourcePath("Shaders/Core/Private/TSR/TSRUpdateHistory.compute")]
+        [VividResourcePath("Shaders/Core/Private/TSR/TSRUpdateHistory.compute")]
         public ComputeShader TSRUpdateHistoryCompute;
 
-        [ResourcePath("Shaders/Core/Private/TSR/TSRResolveHistory.compute")]
+        [VividResourcePath("Shaders/Core/Private/TSR/TSRResolveHistory.compute")]
         public ComputeShader TSRResolveHistoryCompute;
 
-        [ResourcePath("Shaders/Core/Private/TSR/TSRSharpen.compute")]
+        [VividResourcePath("Shaders/Core/Private/TSR/TSRSharpen.compute")]
         public ComputeShader TSRSharpenCompute;
 
 #if DLSS_PLUGIN_INTEGRATE
@@ -87,209 +87,212 @@ namespace VividRP.Runtime
         public ComputeShader DLSSRRResourcePrepCompute;
 #endif
 
-        [ResourcePath("Shaders/Core/Private/AutoExposure/Unreal/AutoExposure.compute")]
+        [VividResourcePath("Shaders/Core/Private/AutoExposure/Unreal/AutoExposure.compute")]
         public ComputeShader AutoExposureCompute;
 
-        [ResourcePath("Shaders/Core/Private/AutoExposure/HDRP/Exposure.compute")]
+        [VividResourcePath("Shaders/Core/Private/AutoExposure/HDRP/Exposure.compute")]
         public ComputeShader AutoExposureHDRPCompute;
 
-        [ResourcePath("Shaders/Core/Private/LocalExposure/LocalExposure.compute")]
+        [VividResourcePath("Shaders/Core/Private/LocalExposure/LocalExposure.compute")]
         public ComputeShader LocalExposureCompute;
 
         
-        [ResourcePath("Shaders/Core/Private/CoreBlit")]
+        [VividResourcePath("Shaders/Core/Private/CoreBlit")]
         public Shader CoreBlitShader;
 
-        [ResourcePath("Shaders/Core/Private/CoreBlitColorAndDepth")]
+        [VividResourcePath("Shaders/Core/Private/CoreBlitColorAndDepth")]
         public Shader CoreBlitColorAndDepthShader;
 
-        [ResourcePath("Shaders/FullScreenUV")]
+        [VividResourcePath("Shaders/FullScreenUV")]
         public Shader FullScreenUVShader;
 
-        [ResourcePath("Shaders/Core/Private/Sky/HDRISky")]
+        [VividResourcePath("Shaders/Core/Private/Sky/HDRISky")]
         public Shader HDRISkyShader;
 
-        [ResourcePath("Shaders/Core/Private/Sky/PhysicallyBasedSky")]
+        [VividResourcePath("Shaders/Core/Private/Sky/PhysicallyBasedSky")]
         public Shader PhysicallyBasedSkyShader;
 
-        [ResourcePath("Shaders/Core/Private/Sky/SkyLUTGenerator.compute")]
+        [VividResourcePath("Shaders/Core/Private/Sky/SkyLUTGenerator.compute")]
         public ComputeShader AtmosphereLUTCompute;
 
-        [ResourcePath("Shaders/Core/Private/Sky/GroundIrradiancePrecomputation.compute")]
+        [VividResourcePath("Shaders/Core/Private/Sky/GroundIrradiancePrecomputation.compute")]
         public ComputeShader GroundIrradiancePrecomputationCompute;
 
-        [ResourcePath("Shaders/Core/Private/Sky/InScatteredRadiancePrecomputation.compute")]
+        [VividResourcePath("Shaders/Core/Private/Sky/InScatteredRadiancePrecomputation.compute")]
         public ComputeShader InScatteredRadiancePrecomputationCompute;
 
-        [ResourcePath("Shaders/Core/Private/AtmosphericScattering/OpaqueAtmosphericScattering")]
+        [VividResourcePath("Shaders/Core/Private/AtmosphericScattering/OpaqueAtmosphericScattering")]
         public Shader AerialPerspectiveShader;
 
-        [ResourcePath("Shaders/Core/Private/Volumetric/VolumetricDensity.compute")]
+        [VividResourcePath("Shaders/Core/Private/Volumetric/VolumetricDensity.compute")]
         public ComputeShader VolumetricDensityCompute;
 
-        [ResourcePath("Shaders/Core/Private/Volumetric/VolumetricMaxZ.compute")]
+        [VividResourcePath("Shaders/Core/Private/Volumetric/VolumetricMaxZ.compute")]
         public ComputeShader VolumetricMaxZCompute;
 
-        [ResourcePath("Shaders/Core/Private/Volumetric/VolumetricMaterial.compute")]
+        [VividResourcePath("Shaders/Core/Private/Volumetric/VolumetricMaterial.compute")]
         public ComputeShader VolumetricMaterialCompute;
 
-        [ResourcePath("Shaders/Core/Private/Volumetric/LocalVolumetricFogVoxelize")]
+        [VividResourcePath("Shaders/Core/Private/Volumetric/LocalVolumetricFogVoxelize")]
         public Shader LocalVolumetricFogVoxelizeShader;
 
-        [ResourcePath("Shaders/Core/Private/Volumetric/VolumetricLighting.compute")]
+        [VividResourcePath("Shaders/Core/Private/Volumetric/VolumetricLighting.compute")]
         public ComputeShader VolumetricLightingCompute;
 
-        [ResourcePath("Shaders/Core/Private/Sky/AmbientProbeConvolution.compute")]
+        [VividResourcePath("Shaders/Core/Private/Sky/AmbientProbeConvolution.compute")]
         public ComputeShader SkyAmbientProbeConvolutionCompute;
 
-        [ResourcePath("Shaders/Core/Private/Sky/GGXConvolve")]
+        [VividResourcePath("Shaders/Core/Private/Sky/GGXConvolve")]
         public Shader SkyGGXConvolutionShader;
 
-        [ResourcePath("Texture/Default/DefaultHDRISky.exr")]
+        [VividResourcePath("Texture/Default/DefaultHDRISky.exr")]
         public Cubemap DefaultHDRISkyCubemap;
 
-        [ResourcePath("Shaders/Core/Private/PreIntegratedFGD_GGXDisneyDiffuse")]
+        [VividResourcePath("Shaders/Core/Private/PreIntegratedFGD_GGXDisneyDiffuse")]
         public Shader PreIntegratedFGDGGXDisneyDiffuseShader;
 
-        [ResourcePath("Shaders/Core/Private/PreIntegratedFGD_CharlieFabricLambert")]
+        [VividResourcePath("Shaders/Core/Private/PreIntegratedFGD_CharlieFabricLambert")]
         public Shader PreIntegratedFGDCharlieFabricLambertShader;
 
-        [ResourcePath("Shaders/Core/Private/CopyDepth")]
+        [VividResourcePath("Shaders/Core/Private/CopyDepth")]
         public Shader CopyDepthShader;
 
-        [ResourcePath("Shaders/Core/Private/CameraMotionVectors")]
+        [VividResourcePath("Shaders/Core/Private/CameraMotionVectors")]
         public Shader CameraMotionVectorsShader;
 
-        [ResourcePath("Shaders/Core/Private/ObjectMotionVectorFallback")]
+        [VividResourcePath("Shaders/Core/Private/ObjectMotionVectorFallback")]
         public Shader ObjectMotionVectorFallbackShader;
 
-        [ResourcePath("Shaders/Material/MaterialClassification")]
+        [VividResourcePath("Shaders/Material/MaterialClassification")]
         public ComputeShader MaterialClassificationCompute;
 
 
-        [ResourcePath("Shaders/Core/Private/Lighting/scrbound")]
+        [VividResourcePath("Shaders/Core/Private/Lighting/scrbound")]
         public ComputeShader BuildScreenAABBCompute;
 
-        [ResourcePath("Shaders/Core/Private/Lighting/lightlistbuild-bigtile")]
+        [VividResourcePath("Shaders/Core/Private/Lighting/lightlistbuild-bigtile")]
         public ComputeShader BuildPerBigTileLightListCompute;
 
-        [ResourcePath("Shaders/Core/Private/Lighting/lightlistbuild-clustered")]
+        [VividResourcePath("Shaders/Core/Private/Lighting/lightlistbuild-clustered")]
         public ComputeShader BuildPerVoxelLightListCompute;
 
-        [ResourcePath("Shaders/Core/Private/Lighting/ClearLightLists")]
+        [VividResourcePath("Shaders/Core/Private/Lighting/ClearLightLists")]
         public ComputeShader ClearLightListsCompute;
 
-        [ResourcePath("Shaders/Core/Private/Lighting/lightlistbuild-clearatomic")]
+        [VividResourcePath("Shaders/Core/Private/Lighting/lightlistbuild-clearatomic")]
         public ComputeShader ClearClusterAtomicIndexCompute;
 
-        [ResourcePath("Shaders/Material/DeferredLit")]
+        [VividResourcePath("Shaders/Material/DeferredLit")]
         public ComputeShader DeferredLitCompute;
 
-        [ResourcePath("Shaders/Core/Private/GTAO/GTAO.compute")]
+        [VividResourcePath("Shaders/Core/Private/GTAO/GTAO.compute")]
         public ComputeShader GTAOCompute;
 
 
-        [ResourcePath("Shaders/Core/Private/Debug/ClusterDebug")]
+        [VividResourcePath("Shaders/Core/Private/Debug/ClusterDebug")]
         public Shader ClusterDebugShader;
 
-        [ResourcePath("Shaders/Core/Private/Debug/SliderDebug")]
+        [VividResourcePath("Shaders/Core/Private/Debug/SliderDebug")]
         public Shader SliderDebugShader;
 
-        [ResourcePath("Shaders/Core/Private/Debug/OverlayDebug")]
+        [VividResourcePath("Shaders/Core/Private/Debug/OverlayDebug")]
         public Shader OverlayDebugShader;
 
-        [ResourcePath("Shaders/Core/Private/Debug/ExposureDebug")]
+        [VividResourcePath("Shaders/Core/Private/Debug/VisibilityBufferDebug")]
+        public Shader VisibilityBufferDebugShader;
+
+        [VividResourcePath("Shaders/Core/Private/Debug/ExposureDebug")]
         public Shader ExposureDebugShader;
 
-        [ResourcePath("Shaders/Core/Private/Debug/RTASInstanceDebug")]
+        [VividResourcePath("Shaders/Core/Private/Debug/RTASInstanceDebug")]
         public ComputeShader RTASInstanceDebugCompute;
 
-        [ResourcePath("Shaders/Core/Private/DirectionalRayTracedShadow")]
+        [VividResourcePath("Shaders/Core/Private/DirectionalRayTracedShadow")]
         public ComputeShader DirectionalRayTracedShadowCompute;
 
-        [ResourcePath("Shaders/Core/Private/ShadowClassify")]
+        [VividResourcePath("Shaders/Core/Private/ShadowClassify")]
         public ComputeShader ShadowClassifyCompute;
 
-        [ResourcePath("Shaders/Core/Private/CSMShadowResolve")]
+        [VividResourcePath("Shaders/Core/Private/CSMShadowResolve")]
         public ComputeShader CSMShadowResolveCompute;
 
-        [ResourcePath("Shaders/Core/Private/GenerateViewZ")]
+        [VividResourcePath("Shaders/Core/Private/GenerateViewZ")]
         public ComputeShader GenerateViewZCompute;
 
-        [ResourcePath("Shaders/Core/Private/DownSample/HZBGenerate")]
+        [VividResourcePath("Shaders/Core/Private/DownSample/HZBGenerate")]
         public ComputeShader HZBGenerateCompute;
 
-        [ResourcePath("Shaders/Core/Private/TemporalAA")]
+        [VividResourcePath("Shaders/Core/Private/TemporalAA")]
         public ComputeShader TemporalAACompute;
 
-        [ResourcePath("Shaders/Core/Private/Bloom/BloomPrefilter.compute")]
+        [VividResourcePath("Shaders/Core/Private/Bloom/BloomPrefilter.compute")]
         public ComputeShader BloomPrefilterCompute;
 
-        [ResourcePath("Shaders/Core/Private/Bloom/BloomBlur.compute")]
+        [VividResourcePath("Shaders/Core/Private/Bloom/BloomBlur.compute")]
         public ComputeShader BloomBlurCompute;
 
-        [ResourcePath("Shaders/Core/Private/Bloom/BloomUpsample.compute")]
+        [VividResourcePath("Shaders/Core/Private/Bloom/BloomUpsample.compute")]
         public ComputeShader BloomUpsampleCompute;
 
-        [ResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_ClassifyTiles")]
+        [VividResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_ClassifyTiles")]
         public ComputeShader SIGMAClassifyTilesCompute;
 
-        [ResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_SmoothTiles")]
+        [VividResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_SmoothTiles")]
         public ComputeShader SIGMASmoothTilesCompute;
 
-        [ResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_Copy")]
+        [VividResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_Copy")]
         public ComputeShader SIGMAShadowCopyCompute;
 
-        [ResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_Blur")]
+        [VividResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_Blur")]
         public ComputeShader SIGMAShadowPreBlurCompute;
 
-        [ResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_PostBlur")]
+        [VividResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_PostBlur")]
         public ComputeShader SIGMAShadowPostBlurCompute;
 
-        [ResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_TemporalStabilization")]
+        [VividResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_TemporalStabilization")]
         public ComputeShader SIGMATemporalStabilizationCompute;
 
-        [ResourcePath("Shaders/Core/Private/GPUDriven/GPUInstanceCulling")]
+        [VividResourcePath("Shaders/Core/Private/GPUDriven/GPUInstanceCulling")]
         public ComputeShader GPUInstanceCullingCompute;
 
-        [ResourcePath("Shaders/Core/Private/GPUDriven/MeshletListBuild")]
+        [VividResourcePath("Shaders/Core/Private/GPUDriven/MeshletListBuild")]
         public ComputeShader MeshletListBuildCompute;
 
-        [ResourcePath("Shaders/Core/Private/GPUDriven/GPUMeshletCulling")]
+        [VividResourcePath("Shaders/Core/Private/GPUDriven/GPUMeshletCulling")]
         public ComputeShader GPUMeshletCullingCompute;
 
-        [ResourcePath("Shaders/Core/Private/GPUDriven/FixupVisibleMeshletIndirectDrawArgs")]
+        [VividResourcePath("Shaders/Core/Private/GPUDriven/FixupVisibleMeshletIndirectDrawArgs")]
         public ComputeShader FixupVisibleMeshletIndirectDrawArgsCompute;
 
         // Film Grain preset textures
-        [ResourcePath("Texture/FilmGrain/Thin01.png")]
+        [VividResourcePath("Texture/FilmGrain/Thin01.png")]
         public Texture2D FilmGrainThin1;
 
-        [ResourcePath("Texture/FilmGrain/Thin02.png")]
+        [VividResourcePath("Texture/FilmGrain/Thin02.png")]
         public Texture2D FilmGrainThin2;
 
-        [ResourcePath("Texture/FilmGrain/Medium01.png")]
+        [VividResourcePath("Texture/FilmGrain/Medium01.png")]
         public Texture2D FilmGrainMedium1;
 
-        [ResourcePath("Texture/FilmGrain/Medium02.png")]
+        [VividResourcePath("Texture/FilmGrain/Medium02.png")]
         public Texture2D FilmGrainMedium2;
 
-        [ResourcePath("Texture/FilmGrain/Medium03.png")]
+        [VividResourcePath("Texture/FilmGrain/Medium03.png")]
         public Texture2D FilmGrainMedium3;
 
-        [ResourcePath("Texture/FilmGrain/Medium04.png")]
+        [VividResourcePath("Texture/FilmGrain/Medium04.png")]
         public Texture2D FilmGrainMedium4;
 
-        [ResourcePath("Texture/FilmGrain/Medium05.png")]
+        [VividResourcePath("Texture/FilmGrain/Medium05.png")]
         public Texture2D FilmGrainMedium5;
 
-        [ResourcePath("Texture/FilmGrain/Medium06.png")]
+        [VividResourcePath("Texture/FilmGrain/Medium06.png")]
         public Texture2D FilmGrainMedium6;
 
-        [ResourcePath("Texture/FilmGrain/Large01.png")]
+        [VividResourcePath("Texture/FilmGrain/Large01.png")]
         public Texture2D FilmGrainLarge01;
 
-        [ResourcePath("Texture/FilmGrain/Large02.png")]
+        [VividResourcePath("Texture/FilmGrain/Large02.png")]
         public Texture2D FilmGrainLarge02;
 
         public ComputeShader ResolveAutoExposureCompute(VividRenderPipelineAsset pipelineAsset)

@@ -9,7 +9,6 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
-using ResourcePathAttribute = VividRP.Runtime.ResourcePathAttribute;
 
 namespace VividRP.Editor.Tests
 {
@@ -94,7 +93,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(shaderField, Is.Not.Null);
             Assert.That(
-                shaderField.GetCustomAttribute<ResourcePathAttribute>()?.Path,
+                shaderField.GetCustomAttribute<VividResourcePathAttribute>()?.Path,
                 Is.EqualTo("Shaders/Core/Private/PostProcessing/LensFlare/LensFlareScreenSpace"));
         }
 

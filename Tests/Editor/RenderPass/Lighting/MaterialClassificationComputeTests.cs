@@ -47,11 +47,31 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Not.Contain("SpotConeIntersectsCluster"));
         }
 
+        [Test]
+        public void TileClassificationHelpers_ExposeStructuredDispatchFinalize_ForRenderGraphIndirectArgs()
+        {
+            var source = File.ReadAllText(GetTileClassificationSourcePath());
+
+            Assert.That(source, Does.Contain("void FinalizeTileClassificationDispatch("));
+            Assert.That(source, Does.Contain("RWStructuredBuffer<uint> indirectArgs"));
+            Assert.That(source, Does.Contain("uint argsElementOffset"));
+            Assert.That(source, Does.Contain("InterlockedAdd(indirectArgs[argsElementOffset], 1, globalTileIndex);"));
+            Assert.That(source, Does.Contain("tileList[globalTileIndex] = PackTileCoord(tileCoord);"));
+        }
+
         private static string GetComputeShaderSourcePath()
         {
             var shaderPath = GetPackageFilePath("Shaders", "Material", "MaterialClassification.compute");
 
             Assert.That(File.Exists(shaderPath), Is.True, $"Expected compute shader source at '{shaderPath}'.");
+            return shaderPath;
+        }
+
+        private static string GetTileClassificationSourcePath()
+        {
+            var shaderPath = GetPackageFilePath("Shaders", "Core", "Public", "TileClassification.hlsl");
+
+            Assert.That(File.Exists(shaderPath), Is.True, $"Expected tile classification source at '{shaderPath}'.");
             return shaderPath;
         }
 

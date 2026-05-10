@@ -87,11 +87,13 @@ VividLightLoopOutput EvaluateDeferredLitLightLoop(
     VividGBufferSurfaceData surfaceData,
     uint2 pixelCoord,
     float3 positionWS,
-    out float3 indirectSpecularLighting)
+    out float3 indirectSpecularLighting,
+    out float3 screenSpaceReflectionFGD)
 {
     float3 viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(positionWS));
     VividLitBSDFData bsdfData = BuildVividHDRPLitBSDFData(surfaceData);
     VividPreLightData preLightData = GetVividPreLightData(viewDirectionWS, surfaceData, bsdfData);
+    screenSpaceReflectionFGD = preLightData.specularFGD;
     VividAggregateLighting aggregateLighting = (VividAggregateLighting)0;
 
     AccumulateIndirectLighting(
@@ -166,13 +168,15 @@ float3 EvaluateDeferredLitLighting(
     VividGBufferSurfaceData surfaceData,
     uint2 pixelCoord,
     float3 positionWS,
-    out float3 indirectSpecularLighting)
+    out float3 indirectSpecularLighting,
+    out float3 screenSpaceReflectionFGD)
 {
     VividLightLoopOutput lightLoopOutput = EvaluateDeferredLitLightLoop(
         surfaceData,
         pixelCoord,
         positionWS,
-        indirectSpecularLighting);
+        indirectSpecularLighting,
+        screenSpaceReflectionFGD);
     return CombineVividLightLoopOutput(lightLoopOutput);
 }
 
@@ -211,17 +215,19 @@ void DeferredLit(
     float2 uv = (float2(pixelCoord) + 0.5) * _ScreenSize.zw;
     float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, UNITY_MATRIX_I_VP);
     float3 indirectSpecularLighting;
+    float3 screenSpaceReflectionFGD;
     float3 lightingNoPreExposure = EvaluateDeferredLitLighting(
         surfaceData,
         pixelCoord,
         positionWS,
-        indirectSpecularLighting);
+        indirectSpecularLighting,
+        screenSpaceReflectionFGD);
     float3 lighting = VividApplyPreExposure(lightingNoPreExposure);
     float4 screenSpaceReflection = LoadScreenSpaceReflection(pixelCoord);
     float reflectionWeight = screenSpaceReflection.a;
     float3 preExposedIndirectSpecular = VividApplyPreExposure(max(indirectSpecularLighting, 0.0));
     lighting = max(lighting - preExposedIndirectSpecular * reflectionWeight, 0.0)
-        + screenSpaceReflection.rgb * reflectionWeight;
+        + screenSpaceReflection.rgb * screenSpaceReflectionFGD * reflectionWeight;
     float4 currentLighting = _LightingTexture[pixelCoord];
     _LightingTexture[pixelCoord] = float4(currentLighting.rgb + lighting, currentLighting.a);
 }

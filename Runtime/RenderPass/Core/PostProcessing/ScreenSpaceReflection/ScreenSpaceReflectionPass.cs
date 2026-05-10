@@ -61,6 +61,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SSRHDRPAccumTextureId = Shader.PropertyToID("_SSRHDRPAccumTexture");
         private static readonly int SSRHDRPOutputTextureId = Shader.PropertyToID("_SSRHDRPOutputTexture");
         private static readonly int SsrWriteHDRPToOutputId = Shader.PropertyToID("_SsrWriteHDRPToOutput");
+        private static readonly int SSRAccumTextureId = Shader.PropertyToID("_SSRAccumTexture");
+        private static readonly int SSRAvgRadianceTextureId = Shader.PropertyToID("_SSRAvgRadianceTexture");
         private static readonly int SsrAccumPrevId = Shader.PropertyToID("_SsrAccumPrev");
         private static readonly int SsrAccumTextureId = Shader.PropertyToID("_SsrAccumTexture");
         private static readonly int SSRPrevNumFramesAccumTextureId = Shader.PropertyToID("_SSRPrevNumFramesAccumTexture");
@@ -141,14 +143,27 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_RayInfoTexture;
 
         [RenderGraphResource(
-            Name = "SSRTileList",
+            Name = "ScreenSpaceReflectionResolveAccum",
             Access = AccessFlags.ReadWrite)]
         [TransientResource]
+        private readonly RenderGraphTexture m_ResolveAccumTexture;
+
+        [RenderGraphResource(
+            Name = "ScreenSpaceReflectionAvgRadiance",
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_AvgRadianceTexture;
+
+        [RenderGraphResource(
+            Name = "SSRTileList",
+            Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private readonly RenderGraphBuffer m_TileListBuffer;
 
         [RenderGraphResource(
             Name = "SSRDispatchIndirectArgs",
-            Access = AccessFlags.ReadWrite)]
+            Access = AccessFlags.ReadWrite,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private readonly RenderGraphBuffer m_DispatchIndirectArgsBuffer;
         private readonly RenderGraphTexture m_SkyTexture;
 
@@ -244,6 +259,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_TraceTexture = CreateColorTexture("ScreenSpaceReflectionTrace", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
             m_ResolveTexture = CreateColorTexture("ScreenSpaceReflectionResolve", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
             m_RayInfoTexture = CreateColorTexture("ScreenSpaceReflectionRayInfo", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
+            m_ResolveAccumTexture = CreateColorTexture("ScreenSpaceReflectionResolveAccum", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
+            m_AvgRadianceTexture = CreateColorTexture("ScreenSpaceReflectionAvgRadiance", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
             m_TileListBuffer = RenderGraphBuffer.CreateStructured("SSRTileList", 1, sizeof(uint));
             m_DispatchIndirectArgsBuffer = RenderGraphBuffer.CreateStructured(
                 "SSRDispatchIndirectArgs",
@@ -280,6 +297,8 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureInternalTextureDescriptor(m_TraceTexture, "ScreenSpaceReflectionTrace", 1, 1);
             ConfigureInternalTextureDescriptor(m_ResolveTexture, "ScreenSpaceReflectionResolve", 1, 1);
             ConfigureInternalTextureDescriptor(m_RayInfoTexture, "ScreenSpaceReflectionRayInfo", 1, 1);
+            ConfigureInternalTextureDescriptor(m_ResolveAccumTexture, "ScreenSpaceReflectionResolveAccum", 1, 1);
+            ConfigureAvgRadianceDescriptor(m_AvgRadianceTexture, 1, 1);
             ConfigureInternalTextureDescriptor(m_DebugTexture, "ScreenSpaceReflectionDebug", 1, 1);
             ConfigureInternalTextureDescriptor(m_HDRPHitPointTexture, "ScreenSpaceReflectionHDRPHitPoint", 1, 1);
             ConfigureInternalTextureDescriptor(m_HDRPAccumTexture, "ScreenSpaceReflectionHDRPAccum", 1, 1);
@@ -597,6 +616,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_TraceTexture?.innerHandle.IsValid() == true
                 && m_ResolveTexture?.innerHandle.IsValid() == true
                 && m_RayInfoTexture?.innerHandle.IsValid() == true
+                && m_ResolveAccumTexture?.innerHandle.IsValid() == true
+                && m_AvgRadianceTexture?.innerHandle.IsValid() == true
                 && m_AccumulationHistoryPrevious?.innerHandle.IsValid() == true
                 && m_AccumulationHistoryCurrent?.innerHandle.IsValid() == true
                 && m_NumFramesHistoryPrevious?.innerHandle.IsValid() == true
@@ -688,6 +709,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRTraceTextureId, m_TraceTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRResolveTextureId, m_ResolveTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRAccumTextureId, m_ResolveAccumTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SsrAccumTextureId, m_AccumulationHistoryCurrent.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRNumFramesAccumTextureId, m_NumFramesHistoryCurrent.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, DepthTextureId, m_DepthTexture.innerHandle);
@@ -738,6 +760,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private void DispatchResolve(ComputeCommandBuffer cmd)
         {
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, SSRResolveTextureId, m_ResolveTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, SSRAccumTextureId, m_ResolveAccumTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, SSRAvgRadianceTextureId, m_AvgRadianceTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, SSRTraceTextureId, m_TraceTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, DepthTextureId, m_DepthTexture.innerHandle);
@@ -751,6 +775,8 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRAccumulateKernel, OutputColorTextureId, output.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRAccumulateKernel, SSRResolveTextureId, m_ResolveTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRAccumulateKernel, SSRAccumTextureId, m_ResolveAccumTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRAccumulateKernel, SSRAvgRadianceTextureId, m_AvgRadianceTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRAccumulateKernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRAccumulateKernel, DepthTextureId, m_DepthTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRAccumulateKernel, GBuffer1Id, m_GBuffer1.innerHandle);
@@ -877,6 +903,8 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureInternalTextureDescriptor(m_TraceTexture, "ScreenSpaceReflectionTrace", width, height);
             ConfigureInternalTextureDescriptor(m_ResolveTexture, "ScreenSpaceReflectionResolve", width, height);
             ConfigureInternalTextureDescriptor(m_RayInfoTexture, "ScreenSpaceReflectionRayInfo", width, height);
+            ConfigureInternalTextureDescriptor(m_ResolveAccumTexture, "ScreenSpaceReflectionResolveAccum", width, height);
+            ConfigureAvgRadianceDescriptor(m_AvgRadianceTexture, m_TileCountX, m_TileCountY);
             ConfigureInternalTextureDescriptor(m_DebugTexture, "ScreenSpaceReflectionDebug", width, height);
             ConfigureInternalTextureDescriptor(m_HDRPHitPointTexture, "ScreenSpaceReflectionHDRPHitPoint", width, height);
             ConfigureInternalTextureDescriptor(m_HDRPAccumTexture, "ScreenSpaceReflectionHDRPAccum", width, height);
@@ -1077,6 +1105,15 @@ namespace VividRP.Runtime.RenderPass.Core
 
             texture.desc.ColorFormat = GraphicsFormat.R16_SFloat;
             texture.desc.FilterMode = FilterMode.Bilinear;
+        }
+
+        private static void ConfigureAvgRadianceDescriptor(RenderGraphTexture texture, int tileCountX, int tileCountY)
+        {
+            ConfigureInternalTextureDescriptor(
+                texture,
+                "ScreenSpaceReflectionAvgRadiance",
+                Mathf.Max(1, tileCountX),
+                Mathf.Max(1, tileCountY));
         }
 
         private void PrepareSkyTextureState(VividSkyData skyData)

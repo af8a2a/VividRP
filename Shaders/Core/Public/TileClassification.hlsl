@@ -87,6 +87,22 @@ namespace TileClassifaction
         }
     }
 
+    void FinalizeTileClassificationDispatch(
+        uint groupIndex,
+        uint2 tileCoord,
+        uint targetMask,
+        RWStructuredBuffer<uint> indirectArgs,
+        uint argsElementOffset,
+        RWStructuredBuffer<uint> tileList)
+    {
+        if (groupIndex == 0 && (gs_TileMask & targetMask) != 0)
+        {
+            uint globalTileIndex;
+            InterlockedAdd(indirectArgs[argsElementOffset], 1, globalTileIndex);
+            tileList[globalTileIndex] = PackTileCoord(tileCoord);
+        }
+    }
+
     /// 3b. 针对 Indirect Draw 的重载
     void FinalizeTileClassificationDraw(
         uint groupIndex,

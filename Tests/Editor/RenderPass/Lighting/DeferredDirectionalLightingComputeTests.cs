@@ -64,8 +64,11 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("return float4(max(reflection.rgb, 0.0), saturate(reflection.a));"));
             Assert.That(source, Does.Contain("indirectSpecularLighting = FinalizeVividSpecularLighting("));
             Assert.That(source, Does.Contain("float reflectionWeight = screenSpaceReflection.a;"));
+            Assert.That(source, Does.Contain("float3 screenSpaceReflectionFGD;"));
+            Assert.That(source, Does.Contain("screenSpaceReflectionFGD = preLightData.specularFGD;"));
             Assert.That(source, Does.Contain("lighting = max(lighting - preExposedIndirectSpecular * reflectionWeight, 0.0)"));
-            Assert.That(source, Does.Contain("+ screenSpaceReflection.rgb * reflectionWeight;"));
+            Assert.That(source, Does.Contain("+ screenSpaceReflection.rgb * screenSpaceReflectionFGD * reflectionWeight;"));
+            Assert.That(source, Does.Not.Contain("+ screenSpaceReflection.rgb * reflectionWeight;"));
             Assert.That(source, Does.Not.Contain("tileCount ="));
             Assert.That(source, Does.Contain("uint tileListIndex = groupId.x;"));
             Assert.That(source, Does.Contain("UnpackTileCoord"));

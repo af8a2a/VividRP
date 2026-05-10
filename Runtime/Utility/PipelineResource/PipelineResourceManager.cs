@@ -61,7 +61,7 @@ namespace VividRP.Runtime
 
             foreach (var field in fields)
             {
-                var attr = field.GetCustomAttribute<ResourcePathAttribute>();
+                var attr = field.GetCustomAttribute<VividResourcePathAttribute>();
                 if (attr == null)
                     continue;
 

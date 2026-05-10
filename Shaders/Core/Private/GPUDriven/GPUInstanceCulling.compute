@@ -32,7 +32,8 @@ void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
     }
 
     const float4 boundingSphereWS = ComputeInstanceBoundingSphereWS(instanceData);
-    if (!FrustumVsSphere(cullingContext, boundingSphereWS))
+    if (!FrustumVsSphere(cullingContext, boundingSphereWS) ||
+        !LightSphereCulling(cullingContext, boundingSphereWS))
     {
         return;
     }

@@ -228,17 +228,19 @@ namespace VividRP.Runtime.RenderPass.Core
         }
 
         // Shadow caster shaders read Vivid's redirected global matrices rather than Unity's transient view/projection state.
-        private ShaderVariablesGlobal BuildCascadeShaderGlobals(int cascadeIndex, Matrix4x4 gpuProjMatrix)
+        internal static ShaderVariablesGlobal BuildCascadeShaderGlobals(
+            in ShaderVariablesGlobal cameraShaderGlobals,
+            Matrix4x4 viewMatrix,
+            Matrix4x4 projMatrix,
+            Matrix4x4 gpuProjMatrix)
         {
-            var viewMatrix = m_ViewMatrices[cascadeIndex];
-            var projMatrix = m_ProjMatrices[cascadeIndex];
             var invViewMatrix = viewMatrix.inverse;
             var invProjMatrix = projMatrix.inverse;
             var gpuInvProjMatrix = gpuProjMatrix.inverse;
             var viewProjMatrix = gpuProjMatrix * viewMatrix;
             var invViewProjMatrix = viewProjMatrix.inverse;
 
-            var shadowGlobals = m_CameraShaderGlobals;
+            var shadowGlobals = cameraShaderGlobals;
             shadowGlobals._VividWorldSpaceCameraPos = invViewMatrix.GetColumn(3);
             shadowGlobals._VividCameraProjection = projMatrix;
             shadowGlobals._VividCameraInvProjection = invProjMatrix;
@@ -264,7 +266,16 @@ namespace VividRP.Runtime.RenderPass.Core
             return shadowGlobals;
         }
 
-        private static ShaderVariablesGlobal ResolveCameraShaderGlobals(
+        private ShaderVariablesGlobal BuildCascadeShaderGlobals(int cascadeIndex, Matrix4x4 gpuProjMatrix)
+        {
+            return BuildCascadeShaderGlobals(
+                m_CameraShaderGlobals,
+                m_ViewMatrices[cascadeIndex],
+                m_ProjMatrices[cascadeIndex],
+                gpuProjMatrix);
+        }
+
+        internal static ShaderVariablesGlobal ResolveCameraShaderGlobals(
             ContextContainer frameData,
             VividCameraData cameraData)
         {
@@ -280,7 +291,7 @@ namespace VividRP.Runtime.RenderPass.Core
             return ShaderVariablesGlobal.Create(cameraData.BuildShaderVariables(temporalData), temporalData, skyData);
         }
 
-        private static bool TryResolveVisibleMainDirectionalLight(
+        internal static bool TryResolveVisibleMainDirectionalLight(
             VividLightData lightData,
             out Light light,
             out VividAdditionalLightData additionalLightData)
@@ -330,7 +341,7 @@ namespace VividRP.Runtime.RenderPass.Core
             return textureScaleAndBias * worldToShadow;
         }
 
-        private static Vector4 BuildShadowCasterState(in VisibleLight shadowLight)
+        internal static Vector4 BuildShadowCasterState(in VisibleLight shadowLight)
         {
             // Match HDRP's directional shadow path: rely on raster slope-scale depth bias,
             // receiver normal bias, and a tiny fixed compare bias instead of caster vertex offsets.

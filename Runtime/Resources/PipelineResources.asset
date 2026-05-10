@@ -49,6 +49,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 4aee2e660114dc34381676fa542650e2, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/SliderDebug
     ResourceObject: {fileID: 4800000, guid: 985a5b1e96340614fb6346ff8c3108ad, type: 3}
+  - ResourceName: Shaders/Core/Private/Debug/VisibilityBufferDebug
+    ResourceObject: {fileID: 4800000, guid: 8fc0c26bc17f0c34199116c378c2318e, type: 3}
   - ResourceName: Shaders/Core/Private/DepthOfField
     ResourceObject: {fileID: 4800000, guid: d32a80051143f7f49a03a8a21aade1f6, type: 3}
   - ResourceName: Shaders/Core/Private/DepthOfField.compute
@@ -81,8 +83,6 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: 164ed41d2ffc5c042a908c9741e4b9c7, type: 3}
   - ResourceName: Shaders/Core/Private/GPUDriven/FixupVisibleMeshletIndirectDrawArgs
     ResourceObject: {fileID: 7200000, guid: 93ae7629a5b753742b1f9d6722e4c3c2, type: 3}
-  - ResourceName: Shaders/Core/Private/GPUDriven/GPUDrivenMeshletDebug
-    ResourceObject: {fileID: 4800000, guid: a1eadec2937792c4d80f16df80c1cc0d, type: 3}
   - ResourceName: Shaders/Core/Private/GPUDriven/GPUInstanceCulling
     ResourceObject: {fileID: 7200000, guid: d516b15c49ff807418f906def327fb32, type: 3}
   - ResourceName: Shaders/Core/Private/GPUDriven/GPUMeshletCulling

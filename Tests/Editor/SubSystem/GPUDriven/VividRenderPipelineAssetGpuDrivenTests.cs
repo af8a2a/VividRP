@@ -23,7 +23,6 @@ namespace VividRP.Editor.Tests
                 Assert.That(asset.ColorGradingSpace, Is.EqualTo(ColorGradingSpace.sRGB));
                 Assert.That(asset.AutoExposureImplementation, Is.EqualTo(AutoExposureImplementationPath.Unreal));
                 Assert.That(asset.EnableGPUDriven, Is.False);
-                Assert.That(asset.EnableGPUDrivenDebugOverlay, Is.False);
             }
             finally
             {
@@ -42,23 +41,37 @@ namespace VividRP.Editor.Tests
                 var colorGradingSpaceProperty = serializedObject.FindProperty("m_ColorGradingSpace");
                 var implementationProperty = serializedObject.FindProperty("m_AutoExposureImplementation");
                 var property = serializedObject.FindProperty("m_EnableGPUDriven");
-                var debugOverlayProperty = serializedObject.FindProperty("m_EnableGPUDrivenDebugOverlay");
 
                 Assert.That(colorGradingSpaceProperty, Is.Not.Null);
                 Assert.That(implementationProperty, Is.Not.Null);
                 Assert.That(property, Is.Not.Null);
-                Assert.That(debugOverlayProperty, Is.Not.Null);
 
                 colorGradingSpaceProperty.enumValueIndex = (int)ColorGradingSpace.AcesCg;
                 implementationProperty.enumValueIndex = (int)AutoExposureImplementationPath.HDRP;
                 property.boolValue = true;
-                debugOverlayProperty.boolValue = true;
                 serializedObject.ApplyModifiedPropertiesWithoutUndo();
 
                 Assert.That(asset.ColorGradingSpace, Is.EqualTo(ColorGradingSpace.AcesCg));
                 Assert.That(asset.AutoExposureImplementation, Is.EqualTo(AutoExposureImplementationPath.HDRP));
                 Assert.That(asset.EnableGPUDriven, Is.True);
-                Assert.That(asset.EnableGPUDrivenDebugOverlay, Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
+        public void Asset_DoesNotExposeLegacyGpuDrivenDebugOverlayToggle()
+        {
+            var asset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+
+            try
+            {
+                var serializedObject = new SerializedObject(asset);
+
+                Assert.That(serializedObject.FindProperty("m_EnableGPUDrivenDebugOverlay"), Is.Null);
+                Assert.That(typeof(VividRenderPipelineAsset).GetProperty("EnableGPUDrivenDebugOverlay"), Is.Null);
             }
             finally
             {
@@ -172,6 +185,18 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void FrameContextClear_DoesNotRegisterLegacyGpuDrivenDebugOverlayCallback_InEditor()
+        {
+            VividGPUDrivenSystem.Initialize();
+
+            FrameContextSystem.Clear();
+
+            Assert.That(
+                HasFrameContextSubscriber("SubsystemPostRender", typeof(VividGPUDrivenSystem), "RenderDebugOverlay"),
+                Is.False);
+        }
+
+        [Test]
         public void Update_UsesCachedCameraNameAndAvoidsCommandSamples_ForNoGcStats()
         {
             string systemSource = File.ReadAllText(
@@ -190,11 +215,30 @@ namespace VividRP.Editor.Tests
             Assert.That(systemSource, Does.Contain("ReportStats(camera, cameraData.cameraName);"));
             Assert.That(systemSource, Does.Contain("cameraName: cameraData.cameraName"));
             Assert.That(systemSource, Does.Contain("camera != null ? cameraName : null"));
+            Assert.That(systemSource, Does.Contain("ResolveCullingCameraForDebug(camera)"));
             Assert.That(systemSource, Does.Not.Contain("camera.name"));
+            Assert.That(systemSource, Does.Not.Contain("RenderDebugOverlay"));
+            Assert.That(systemSource, Does.Not.Contain("VividGPUDrivenDebugOverlayRenderer"));
+            Assert.That(systemSource, Does.Not.Contain("SubsystemPostRender"));
             Assert.That(systemSource, Does.Not.Contain("s_CullingSampler"));
             Assert.That(systemSource, Does.Not.Contain("new ProfilingScope(cmd, s_CullingSampler)"));
             Assert.That(systemSource, Does.Not.Contain("BeginSample(\"GPUDrivenCulling\")"));
             Assert.That(systemSource, Does.Not.Contain("EndSample(\"GPUDrivenCulling\")"));
+        }
+
+        [Test]
+        public void Resources_DoNotReferenceLegacyGpuDrivenDebugOverlayShader()
+        {
+            string resourcesSource = File.ReadAllText(
+                GetPackageFilePath("Runtime", "Utility", "PipelineResource", "VividResources.cs"));
+            string resourceAssetSource = File.ReadAllText(
+                GetPackageFilePath("Runtime", "Resources", "PipelineResources.asset"));
+
+            Assert.That(resourcesSource, Does.Not.Contain("GPUDrivenMeshletDebug"));
+            Assert.That(resourceAssetSource, Does.Not.Contain("GPUDrivenMeshletDebug"));
+            Assert.That(
+                File.Exists(GetPackageFilePath("Shaders", "Core", "Private", "GPUDriven", "GPUDrivenMeshletDebug.shader")),
+                Is.False);
         }
 
         private static bool HasFrameContextSubscriber(string eventName, Type declaringType, string methodName)

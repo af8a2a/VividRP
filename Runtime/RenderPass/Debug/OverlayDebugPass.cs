@@ -11,7 +11,6 @@ namespace VividRP.Runtime.RenderPass.Core
         Color = 1,
         Depth = 2,
         MotionVectors = 3,
-        VisibilityBuffer = 4,
     }
 
     public enum OverlayDebugDepthMode
@@ -28,7 +27,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SourceTextureId = Shader.PropertyToID("_SourceTexture");
         private static readonly int DebugTextureId = Shader.PropertyToID("_DebugTexture");
         private static readonly int DebugTextureArrayId = Shader.PropertyToID("_DebugTextureArray");
-        private static readonly int DebugVisibilityTextureId = Shader.PropertyToID("_DebugVisibilityTexture");
         private static readonly int SourceTextureScaleBiasId = Shader.PropertyToID("_SourceTextureScaleBias");
         private static readonly int DebugTextureScaleBiasId = Shader.PropertyToID("_DebugTextureScaleBias");
         private static readonly int OverlayRectId = Shader.PropertyToID("_OverlayRect");
@@ -137,7 +135,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public OverlayDebugVisualizationMode VisualizationMode
         {
             get => m_VisualizationMode;
-            set => m_VisualizationMode = value;
+            set => m_VisualizationMode = NormalizeVisualizationMode(value);
         }
 
         public OverlayDebugDepthMode DepthMode
@@ -262,8 +260,6 @@ namespace VividRP.Runtime.RenderPass.Core
             mpb.SetFloat(DebugExposureId, m_ResolvedExposure);
             mpb.SetFloat(DebugOpacityId, m_ResolvedOpacity);
             mpb.SetTexture(DebugTextureId, debugTexture != null && !isDebugTextureArray ? debugTexture : Texture2D.blackTexture);
-            mpb.SetTexture(DebugVisibilityTextureId, debugTexture != null && !isDebugTextureArray ? debugTexture : Texture2D.blackTexture);
-
             if (debugTexture != null && isDebugTextureArray)
                 mpb.SetTexture(DebugTextureArrayId, debugTexture);
 
@@ -301,7 +297,7 @@ namespace VividRP.Runtime.RenderPass.Core
             arraySlice = Mathf.Max(0, data.arraySlice);
             exposure = Mathf.Clamp(data.overlayExposure, -16f, 16f);
             opacity = Mathf.Clamp01(data.overlayOpacity);
-            visualizationMode = data.visualizationMode;
+            visualizationMode = NormalizeVisualizationMode(data.visualizationMode);
             depthMode = data.depthMode;
 
             return new OverlayDebugSettingsData(overlayAmount, arraySlice, exposure, opacity, visualizationMode, depthMode);
@@ -319,6 +315,8 @@ namespace VividRP.Runtime.RenderPass.Core
             RenderGraphTextureDesc descriptor,
             Texture texture)
         {
+            requestedMode = NormalizeVisualizationMode(requestedMode);
+
             if (requestedMode != OverlayDebugVisualizationMode.Auto)
                 return requestedMode;
 
@@ -333,7 +331,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 return OverlayDebugVisualizationMode.Depth;
 
             if (format == GraphicsFormat.R32G32_UInt)
-                return OverlayDebugVisualizationMode.VisibilityBuffer;
+                return OverlayDebugVisualizationMode.Color;
 
             var componentCount = GraphicsFormatUtility.GetComponentCount(format);
             if (componentCount <= 1)
@@ -343,6 +341,18 @@ namespace VividRP.Runtime.RenderPass.Core
                 return OverlayDebugVisualizationMode.MotionVectors;
 
             return OverlayDebugVisualizationMode.Color;
+        }
+
+        internal static OverlayDebugVisualizationMode NormalizeVisualizationMode(OverlayDebugVisualizationMode value)
+        {
+            return value switch
+            {
+                OverlayDebugVisualizationMode.Auto => OverlayDebugVisualizationMode.Auto,
+                OverlayDebugVisualizationMode.Color => OverlayDebugVisualizationMode.Color,
+                OverlayDebugVisualizationMode.Depth => OverlayDebugVisualizationMode.Depth,
+                OverlayDebugVisualizationMode.MotionVectors => OverlayDebugVisualizationMode.MotionVectors,
+                _ => OverlayDebugVisualizationMode.Auto,
+            };
         }
 
         internal static int ResolveSliceIndex(int requestedSlice, int sliceCount)

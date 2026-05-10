@@ -96,6 +96,9 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class LocalExposurePass : RenderPassNodeData { }
 
     [Serializable]
+    internal sealed class MeshletShadowPass : RenderPassNodeData { }
+
+    [Serializable]
     internal sealed class MotionVectorPass : RenderPassNodeData { }
 
     [Serializable]
@@ -145,6 +148,9 @@ namespace VividRP.Editor.RenderGraph.Generated
 
     [Serializable]
     internal sealed class VirtualTextureVisualizationPass : RenderPassNodeData { }
+
+    [Serializable]
+    internal sealed class VisibilityBufferDebugPass : RenderPassNodeData { }
 
     [Serializable]
     internal sealed class VisibilityBufferGBufferResolvePass : RenderPassNodeData { }

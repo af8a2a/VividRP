@@ -34,9 +34,6 @@ namespace VividRP.Runtime
         private bool m_EnableGPUDrivenDecal;
 
         [SerializeField]
-        private bool m_EnableGPUDrivenDebugOverlay;
-
-        [SerializeField]
         private bool m_EnableSRPBatcher = true;
 
         [SerializeField]
@@ -91,12 +88,6 @@ namespace VividRP.Runtime
         {
             get => m_EnableGPUDrivenDecal;
             set => m_EnableGPUDrivenDecal = value;
-        }
-
-        public bool EnableGPUDrivenDebugOverlay
-        {
-            get => m_EnableGPUDrivenDebugOverlay;
-            set => m_EnableGPUDrivenDebugOverlay = value;
         }
 
         public AutoExposureImplementationPath AutoExposureImplementation

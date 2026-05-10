@@ -1,6 +1,7 @@
 using NUnit.Framework;
 using UnityEngine.Rendering;
 using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
 {
@@ -32,6 +33,7 @@ namespace VividRP.Editor.Tests
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Cluster"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Exposure"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Overlay"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Visibility Buffer"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Slider"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture"), Is.Not.Null);
         }
@@ -48,6 +50,49 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationMode,
                 Is.EqualTo(VirtualTextureVisualizationMode.UsePassSettings));
+        }
+
+        [Test]
+        public void Reset_RestoresVisibilityBufferDebugDefaults()
+        {
+            VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugMode =
+                VisibilityBufferDebugVisualizationMode.ClusterLOD;
+            VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugExposure = 3f;
+            VividRenderingDebugDisplaySettings.Data.forceMeshletCullingFromMainCamera = true;
+
+            VividRenderingDebugDisplaySettings.Data.Reset();
+
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugMode,
+                Is.EqualTo(VisibilityBufferDebugVisualizationMode.Cluster));
+            Assert.That(VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugExposure, Is.EqualTo(0f));
+            Assert.That(VividRenderingDebugDisplaySettings.Data.forceMeshletCullingFromMainCamera, Is.False);
+        }
+
+        [Test]
+        public void AreAnySettingsActive_TracksVisibilityBufferDebugOverrides()
+        {
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.False);
+
+            VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugMode =
+                VisibilityBufferDebugVisualizationMode.Triangle;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+
+            VividRenderingDebugDisplaySettings.Data.Reset();
+            VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugExposure = 1f;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+        }
+
+        [Test]
+        public void AreAnySettingsActive_TracksMeshletCullingMainCameraLock()
+        {
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.False);
+
+            VividRenderingDebugDisplaySettings.Data.forceMeshletCullingFromMainCamera = true;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
         }
 
         [Test]

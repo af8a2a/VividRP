@@ -14,6 +14,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int IndirectDrawArgsByteStride = sizeof(uint) * 4;
 
         private static readonly int s_CullId = Shader.PropertyToID("_Cull");
+        private static readonly int s_UnityIndirectDrawArgsId = Shader.PropertyToID("unity_IndirectDrawArgs");
+        private static readonly int s_UnityBaseCommandIdId = Shader.PropertyToID("unity_BaseCommandID");
         private static readonly int s_VisibleMeshletRenderRequestsId = Shader.PropertyToID("_VisibleMeshletRenderRequests");
         private static readonly string s_AlphaTestKeyword = "_ALPHATEST_ON";
 
@@ -39,6 +41,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_DefaultVisibilityBuffer;
         private readonly RenderGraphTexture m_DefaultDepth;
         private readonly Material[] m_Materials = new Material[(int)VividRendererListID.Count];
+        private readonly MaterialPropertyBlock m_DrawProperties = new MaterialPropertyBlock();
 
         public VisibilityBufferPass()
         {
@@ -158,14 +161,18 @@ namespace VividRP.Runtime.RenderPass.Core
                     if (material == null)
                         continue;
 
-                    material.SetBuffer(s_VisibleMeshletRenderRequestsId, visibleMeshletRenderRequestsBuffer);
+                    m_DrawProperties.Clear();
+                    m_DrawProperties.SetBuffer(s_VisibleMeshletRenderRequestsId, visibleMeshletRenderRequestsBuffer);
+                    m_DrawProperties.SetBuffer(s_UnityIndirectDrawArgsId, visibleMeshletIndirectArgsBuffer);
+                    m_DrawProperties.SetInteger(s_UnityBaseCommandIdId, rendererListIndex);
                     context.cmd.DrawProceduralIndirect(
                         Matrix4x4.identity,
                         material,
                         0,
                         MeshTopology.Triangles,
                         visibleMeshletIndirectArgsBuffer,
-                        rendererListIndex * IndirectDrawArgsByteStride
+                        rendererListIndex * IndirectDrawArgsByteStride,
+                        m_DrawProperties
                     );
                 }
             }

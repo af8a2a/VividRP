@@ -39,6 +39,10 @@ RWTexture2D<float4> _SSRDebugTexture;
 RWTexture2D<float4> _SSRHDRPHitPointTexture;
 RWTexture2D<float4> _SSRHDRPAccumTexture;
 RWTexture2D<float4> _SSRHDRPOutputTexture;
+Texture2D<float4> _SsrAccumPrev;
+RWTexture2D<float4> _SsrAccumTexture;
+Texture2D<float> _SSRPrevNumFramesAccumTexture;
+RWTexture2D<float> _SSRNumFramesAccumTexture;
 RWStructuredBuffer<uint> _SSRDispatchIndirectArgs;
 RWStructuredBuffer<uint> _SSRTileList;
 Texture2D<float> _DepthTexture;
@@ -71,7 +75,9 @@ CBUFFER_START(ShaderVariablesScreenSpaceReflection)
     float4 _SsrHistoryColorPyramidSize;
     int _SsrUseHistoryColorPyramid;
     int _SsrHistoryColorPyramidMaxMip;
-    float2 _SsrPadding1;
+    int _SsrUseAccumulationHistory;
+    float _SsrAccumulationAmount;
+    float4 _SsrAccumulationHistorySize;
     float4 _SsrWorldSpaceCameraPos;
     float4x4 _SsrViewProjMatrix;
     float4x4 _SsrInvViewProjMatrix;
@@ -790,6 +796,8 @@ void ScreenSpaceReflectionsClassifyTiles(
         _SSRResolveTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
         _OutputColorTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
         _SSRDebugTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
+        _SsrAccumTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
+        _SSRNumFramesAccumTexture[coordSS] = 0.0;
 
         float debugDeviceDepth = _DepthTexture.Load(int3(coordSS, 0));
         if (!IsRawFarDepth(debugDeviceDepth))
@@ -1044,6 +1052,157 @@ void ScreenSpaceReflectionsResolve(
     _SSRResolveTexture[coordSS] = float4(colorSum * rcpWeightSum, saturate(alphaSum * rcpWeightSum));
 }
 
+#define SSR_MAX_ACCUMULATED_FRAMES 32.0
+
+struct SsrNeighborStatistics
+{
+    float3 mean;
+    float3 variance;
+    float3 stdDev;
+    float3 minVal;
+    float3 maxVal;
+};
+
+struct SsrHistorySample
+{
+    float3 color;
+    float normalizedFrameCount;
+    float validWeight;
+};
+
+void AccumulateSsrNeighborSample(
+    float3 sampleColor,
+    inout float sampleCount,
+    inout float3 mean,
+    inout float3 m2,
+    inout float3 minVal,
+    inout float3 maxVal)
+{
+    sampleColor = SanitizeSsrRadiance(sampleColor);
+    sampleCount += 1.0;
+    float3 delta = sampleColor - mean;
+    mean += delta / sampleCount;
+    m2 += delta * (sampleColor - mean);
+    minVal = min(minVal, sampleColor);
+    maxVal = max(maxVal, sampleColor);
+}
+
+SsrNeighborStatistics GetSsrNeighborStatistics(uint2 coordSS, float3 centerColor)
+{
+    SsrNeighborStatistics statistics;
+    statistics.mean = 0.0;
+    statistics.variance = 0.0;
+    statistics.stdDev = 0.0;
+    statistics.minVal = float3(_SsrIntensityClamp, _SsrIntensityClamp, _SsrIntensityClamp);
+    statistics.maxVal = 0.0;
+
+    float sampleCount = 0.0;
+    float3 m2 = 0.0;
+    AccumulateSsrNeighborSample(centerColor, sampleCount, statistics.mean, m2, statistics.minVal, statistics.maxVal);
+
+    [unroll]
+    for (int y = -1; y <= 1; y++)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; x++)
+        {
+            if (x == 0 && y == 0)
+                continue;
+
+            int2 sampleCoord = ClampPixelCoord((int2)coordSS + int2(x, y));
+            float4 sampleColor = _SSRResolveTexture[(uint2)sampleCoord];
+            if (sampleColor.a <= 0.0001)
+                continue;
+
+            AccumulateSsrNeighborSample(sampleColor.rgb, sampleCount, statistics.mean, m2, statistics.minVal, statistics.maxVal);
+        }
+    }
+
+    statistics.variance = max(m2 / max(sampleCount, 1.0), 0.0);
+    statistics.stdDev = sqrt(statistics.variance);
+    return statistics;
+}
+
+bool TryComputeSsrAccumulationHistoryUV(uint2 coordSS, float deviceDepth, out float2 historyScreenUV)
+{
+    historyScreenUV = 0.0;
+
+    if (_SsrUseAccumulationHistory == 0 || IsRawFarDepth(deviceDepth))
+        return false;
+
+    float2 screenUV = ((float2)coordSS + 0.5) * _SsrTraceScreenSize.zw;
+    float3 positionWS = ComputeSsrWorldSpacePosition(screenUV, deviceDepth);
+    float3 previousNDC = ComputeNormalizedDeviceCoordinatesWithZ(positionWS, _SsrPrevViewProjMatrix);
+
+    historyScreenUV = previousNDC.xy;
+    return all(historyScreenUV >= 0.0)
+        && all(historyScreenUV <= 1.0)
+        && previousNDC.z >= 0.0
+        && previousNDC.z <= 1.0;
+}
+
+float4 LoadSsrAccumulationHistory(int2 pixelCoord)
+{
+    int2 maxCoord = int2((int)_SsrAccumulationHistorySize.x - 1, (int)_SsrAccumulationHistorySize.y - 1);
+    pixelCoord = clamp(pixelCoord, int2(0, 0), maxCoord);
+    float4 history = _SsrAccumPrev.Load(int3(pixelCoord, 0));
+    history.rgb = SanitizeSsrRadiance(history.rgb);
+    history.a = saturate(history.a);
+    return history;
+}
+
+float LoadSsrNumFramesAccumHistory(int2 pixelCoord)
+{
+    int2 maxCoord = int2((int)_SsrAccumulationHistorySize.x - 1, (int)_SsrAccumulationHistorySize.y - 1);
+    pixelCoord = clamp(pixelCoord, int2(0, 0), maxCoord);
+    return saturate(_SSRPrevNumFramesAccumTexture.Load(int3(pixelCoord, 0)));
+}
+
+SsrHistorySample SampleSsrAccumulationHistory(float2 historyScreenUV)
+{
+    float2 pixelCoord = saturate(historyScreenUV) * _SsrAccumulationHistorySize.xy - 0.5;
+    int2 baseCoord = (int2)floor(pixelCoord);
+    float2 factor = frac(pixelCoord);
+
+    float4 history00 = LoadSsrAccumulationHistory(baseCoord);
+    float4 history10 = LoadSsrAccumulationHistory(baseCoord + int2(1, 0));
+    float4 history01 = LoadSsrAccumulationHistory(baseCoord + int2(0, 1));
+    float4 history11 = LoadSsrAccumulationHistory(baseCoord + int2(1, 1));
+
+    float4 weights = float4(
+        (1.0 - factor.x) * (1.0 - factor.y),
+        factor.x * (1.0 - factor.y),
+        (1.0 - factor.x) * factor.y,
+        factor.x * factor.y);
+    weights *= float4(
+        history00.a > 0.0001 ? 1.0 : 0.0,
+        history10.a > 0.0001 ? 1.0 : 0.0,
+        history01.a > 0.0001 ? 1.0 : 0.0,
+        history11.a > 0.0001 ? 1.0 : 0.0);
+
+    float weightSum = dot(weights, float4(1.0, 1.0, 1.0, 1.0));
+    SsrHistorySample sample;
+    sample.color = 0.0;
+    sample.normalizedFrameCount = 0.0;
+    sample.validWeight = weightSum;
+
+    if (weightSum <= 0.0001)
+        return sample;
+
+    float rcpWeightSum = rcp(weightSum);
+    sample.color = (history00.rgb * weights.x
+        + history10.rgb * weights.y
+        + history01.rgb * weights.z
+        + history11.rgb * weights.w) * rcpWeightSum;
+
+    float frames00 = LoadSsrNumFramesAccumHistory(baseCoord);
+    float frames10 = LoadSsrNumFramesAccumHistory(baseCoord + int2(1, 0));
+    float frames01 = LoadSsrNumFramesAccumHistory(baseCoord + int2(0, 1));
+    float frames11 = LoadSsrNumFramesAccumHistory(baseCoord + int2(1, 1));
+    sample.normalizedFrameCount = dot(float4(frames00, frames10, frames01, frames11), weights) * rcpWeightSum;
+    return sample;
+}
+
 [numthreads(8, 8, 1)]
 void ScreenSpaceReflectionsAccumulate(
     uint3 groupId : SV_GroupID,
@@ -1053,7 +1212,58 @@ void ScreenSpaceReflectionsAccumulate(
     if (IsOutsideScreen(coordSS))
         return;
 
-    _OutputColorTexture[coordSS] = _SSRResolveTexture[coordSS];
+    float4 currentReflection = _SSRResolveTexture[coordSS];
+    if (currentReflection.a <= 0.0001)
+    {
+        _OutputColorTexture[coordSS] = EmptySsrResult();
+        _SsrAccumTexture[coordSS] = EmptySsrResult();
+        _SSRNumFramesAccumTexture[coordSS] = 0.0;
+        return;
+    }
+
+    currentReflection.rgb = SanitizeSsrRadiance(currentReflection.rgb);
+    float3 accumulatedColor = currentReflection.rgb;
+    float perceptualRoughness = LoadPerceptualRoughness(coordSS);
+    float roughness = clamp(
+        PerceptualRoughnessToRoughness(perceptualRoughness),
+        SSR_MIN_GGX_ROUGHNESS,
+        SSR_MAX_GGX_ROUGHNESS);
+    float roughnessReductionFactor = 1.0 - exp(-roughness * 100.0);
+    float maxSamplesNum = max(8.0, SSR_MAX_ACCUMULATED_FRAMES * roughnessReductionFactor)
+        * max(_SsrAccumulationAmount, 0.0);
+    maxSamplesNum = max(maxSamplesNum, 1.0);
+    float normalizedFrameCount = 1.0 / maxSamplesNum;
+
+    float deviceDepth = _DepthTexture.Load(int3(coordSS, 0));
+    float2 historyScreenUV;
+    bool useHistory = TryComputeSsrAccumulationHistoryUV(coordSS, deviceDepth, historyScreenUV);
+
+    if (useHistory)
+    {
+        SsrHistorySample history = SampleSsrAccumulationHistory(historyScreenUV);
+        if (history.validWeight > 0.0001 && !any(isnan(history.color)) && !any(isinf(history.color)))
+        {
+            SsrNeighborStatistics neighborStatistics = GetSsrNeighborStatistics(coordSS, currentReflection.rgb);
+            float3 historyClampMin = max(
+                float3(0.0, 0.0, 0.0),
+                min(neighborStatistics.minVal, neighborStatistics.mean - neighborStatistics.stdDev));
+            float3 historyClampMax = min(
+                float3(_SsrIntensityClamp, _SsrIntensityClamp, _SsrIntensityClamp),
+                max(neighborStatistics.maxVal, neighborStatistics.mean + neighborStatistics.stdDev));
+            float3 historyColor = clamp(history.color, historyClampMin, historyClampMax);
+
+            float accumulatedFramesNum = min(history.normalizedFrameCount * maxSamplesNum + 1.0, maxSamplesNum);
+            float temporalWeight = rcp(max(accumulatedFramesNum, 1.0));
+            accumulatedColor = lerp(historyColor, currentReflection.rgb, temporalWeight);
+            normalizedFrameCount = accumulatedFramesNum / maxSamplesNum;
+        }
+    }
+
+    accumulatedColor = SanitizeSsrRadiance(accumulatedColor);
+    float validHistory = currentReflection.a > 0.0001 ? 1.0 : 0.0;
+    _OutputColorTexture[coordSS] = float4(accumulatedColor, currentReflection.a);
+    _SsrAccumTexture[coordSS] = float4(accumulatedColor, validHistory);
+    _SSRNumFramesAccumTexture[coordSS] = validHistory > 0.0 ? normalizedFrameCount : 0.0;
 }
 
 [numthreads(8, 8, 1)]

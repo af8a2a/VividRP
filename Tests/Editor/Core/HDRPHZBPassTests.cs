@@ -103,6 +103,10 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPOutput").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionDebug").IsTransient, Is.False);
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionDebug").Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionAccumPrev").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionAccumTexture").Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionPrevNumFramesAccum").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionNumFramesAccum").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(resources.Textures.Select(entry => entry.Name), Does.Contain("PreviousColorPyramid"));
             Assert.That(resources.Textures.Select(entry => entry.Name), Does.Not.Contain("ScreenSpaceReflectionSkyTexture"));
             Assert.That(resources.Buffers.Single(entry => entry.Name == "SSRTileList").IsTransient, Is.True);
@@ -355,6 +359,18 @@ namespace VividRP.Editor.Tests
                 Assert.That(rayInfoTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
                 Assert.That(rayInfoTexture.desc.EnableRandomWrite, Is.True);
 
+                var accumulationHistory = GetPrivateField<RenderGraphTexture>(pass, "m_AccumulationHistoryCurrent");
+                Assert.That(accumulationHistory.desc.Width, Is.EqualTo(1920));
+                Assert.That(accumulationHistory.desc.Height, Is.EqualTo(1080));
+                Assert.That(accumulationHistory.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+                Assert.That(accumulationHistory.desc.EnableRandomWrite, Is.True);
+
+                var frameCountHistory = GetPrivateField<RenderGraphTexture>(pass, "m_NumFramesHistoryCurrent");
+                Assert.That(frameCountHistory.desc.Width, Is.EqualTo(1920));
+                Assert.That(frameCountHistory.desc.Height, Is.EqualTo(1080));
+                Assert.That(frameCountHistory.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16_SFloat));
+                Assert.That(frameCountHistory.desc.EnableRandomWrite, Is.True);
+
                 var tileListBuffer = GetPrivateField<RenderGraphBuffer>(pass, "m_TileListBuffer");
                 Assert.That(tileListBuffer.desc.Name, Is.EqualTo("SSRTileList"));
                 Assert.That(tileListBuffer.desc.Count, Is.EqualTo(240 * 135));
@@ -408,6 +424,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRHDRPHitPointTexture;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRHDRPAccumTexture;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRHDRPOutputTexture;"));
+            Assert.That(source, Does.Contain("Texture2D<float4> _SsrAccumPrev;"));
+            Assert.That(source, Does.Contain("RWTexture2D<float4> _SsrAccumTexture;"));
+            Assert.That(source, Does.Contain("Texture2D<float> _SSRPrevNumFramesAccumTexture;"));
+            Assert.That(source, Does.Contain("RWTexture2D<float> _SSRNumFramesAccumTexture;"));
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl\""));
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/DebugUtil.hlsl\""));
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/BlueNoise.hlsl\""));
@@ -511,7 +531,17 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("miss = belowMip0 && insideFloor;"));
             Assert.That(source, Does.Contain("_SSRTraceTexture[coordSS] = float4(reflectedColor * fresnel, contribution);"));
             Assert.That(source, Does.Contain("_SSRResolveTexture[coordSS] = float4(colorSum * rcpWeightSum, saturate(alphaSum * rcpWeightSum));"));
-            Assert.That(source, Does.Contain("_OutputColorTexture[coordSS] = _SSRResolveTexture[coordSS];"));
+            Assert.That(source, Does.Contain("#define SSR_MAX_ACCUMULATED_FRAMES 32.0"));
+            Assert.That(source, Does.Contain("SsrNeighborStatistics GetSsrNeighborStatistics(uint2 coordSS, float3 centerColor)"));
+            Assert.That(source, Does.Contain("bool TryComputeSsrAccumulationHistoryUV(uint2 coordSS, float deviceDepth, out float2 historyScreenUV)"));
+            Assert.That(source, Does.Contain("SsrHistorySample SampleSsrAccumulationHistory(float2 historyScreenUV)"));
+            Assert.That(source, Does.Contain("float3 historyClampMin = max("));
+            Assert.That(source, Does.Contain("min(neighborStatistics.minVal, neighborStatistics.mean - neighborStatistics.stdDev));"));
+            Assert.That(source, Does.Contain("float maxSamplesNum = max(8.0, SSR_MAX_ACCUMULATED_FRAMES * roughnessReductionFactor)"));
+            Assert.That(source, Does.Contain("float temporalWeight = rcp(max(accumulatedFramesNum, 1.0));"));
+            Assert.That(source, Does.Contain("_OutputColorTexture[coordSS] = float4(accumulatedColor, currentReflection.a);"));
+            Assert.That(source, Does.Contain("_SsrAccumTexture[coordSS] = float4(accumulatedColor, validHistory);"));
+            Assert.That(source, Does.Contain("_SSRNumFramesAccumTexture[coordSS] = validHistory > 0.0 ? normalizedFrameCount : 0.0;"));
             Assert.That(source, Does.Contain("bool TraceScreenSpaceReflectionHDRP("));
             Assert.That(source, Does.Contain("void ScreenSpaceReflectionsHDRPTracing("));
             Assert.That(source, Does.Contain("void ScreenSpaceReflectionsHDRPReprojection("));
